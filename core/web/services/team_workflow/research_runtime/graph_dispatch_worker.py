@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from core.research.workflow.challenge_cup_runtime import (
@@ -27,11 +27,20 @@ from core.research.workflow.challenge_cup_runtime import (
 )
 from core.research.workflow.contracts import ExecutionReceipt
 from core.research.workflow.ledger import WorkflowLedgerStore, outbox as outbox_api
-from core.research.workflow.transitions import NodeAttemptStatus
+from core.research.workflow.transitions import (
+    NodeAttemptStatus,
+    can_transition_node_attempt,
+)
 
-from .block_projection import apply_node_run_block, sync_run_blocked
+from .block_projection import (
+    apply_node_run_block,
+    sync_run_blocked,
+    sync_run_succeeded,
+    terminal_facts_for_run,
+)
 from .blocked_reason import format_blocked_reason, problem_from_graph_error
 from .ids import new_id
+from .iteration_route import branch_decision_from_run, routed_successors
 
 
 class GraphDecisionError(RuntimeError):
@@ -81,7 +90,11 @@ class GraphDispatchWorker:
         )
         for action in leased:
             self._handle(action)
-        return len(leased)
+        repaired = self._repair_dispatching_without_adapter()
+        repaired += self._repair_starting_without_progress()
+        repaired += self._repair_stranded_iteration_route()
+        repaired += self._repair_stranded_terminal_package()
+        return len(leased) + repaired
 
     def _handle(self, action: Any) -> None:
         payload = json.loads(action.payload_json)
@@ -113,10 +126,33 @@ class GraphDispatchWorker:
             self._requeue_or_fail(action, str(exc))
             return
 
+        pending = result.pending_action
+        if (
+            dispatch.dispatch_kind == "start"
+            and pending is not None
+            and pending.node_id != dispatch.node_id
+        ):
+            self._mark_blocked(
+                action,
+                dispatch,
+                f"thread 中断于 {pending.node_id}，但 dispatch 目标是 {dispatch.node_id}",
+            )
+            return
+        if (
+            dispatch.dispatch_kind == "start"
+            and pending is None
+            and not result.completed
+        ):
+            self._mark_blocked(
+                action,
+                dispatch,
+                f"thread 中断于 {dispatch.node_id} 之外，graph_dispatch 没有 pending action",
+            )
+            return
+
         # T5.1-4: commit upstream success + Handoff accepted FIRST so successor
         # readiness observes accepted handoffs. Domain readiness stays outside
         # the writer transaction.
-        pending = result.pending_action
         needs_successor = False
         if pending is not None:
             latest = self._store.latest_attempt(dispatch.run_id, pending.node_id)
@@ -170,12 +206,31 @@ class GraphDispatchWorker:
         if handoff is None or str(handoff[8]) != "accepted":
             return False
         successors = successor_map().get(dispatch.node_id, ())
+        run = self._store.get_run(dispatch.run_id)
+        branch = branch_decision_from_run(run)
+        routed = routed_successors(dispatch.node_id, branch)
+        if routed:
+            successors = routed
+        elif dispatch.node_id in {"iteration_decision", "version_governance"}:
+            successors = ()
         if not successors:
-            # Terminal: just ack the outbox.
+            # Terminal node (result_package): ack and close the run.
             now_ms = self._now()
+            run = self._store.get_run(dispatch.run_id)
 
             def ack_only(uow):
                 uow.repository.ack_outbox(action.action_id, self._owner, now_ms)
+                if run is not None and dispatch.node_id == "result_package":
+                    completion_kind, terminal_reason = terminal_facts_for_run(run)
+                    sync_run_succeeded(
+                        uow,
+                        run_id=dispatch.run_id,
+                        now_ms=now_ms,
+                        completion_kind=completion_kind,
+                        terminal_reason=terminal_reason,
+                        node_id=dispatch.node_id,
+                        actor_id=self._owner,
+                    )
 
             self._submit(ack_only, force_flush=True).result(timeout=30)
             return True
@@ -297,6 +352,7 @@ class GraphDispatchWorker:
         readiness_hint: tuple[bool, list[Any]] | None,
         *,
         action: Any | None = None,
+        fallback_command_id: str | None = None,
     ) -> None:
         """Ack graph outbox + create successor attempt / adapter outbox."""
         now_ms = self._now()
@@ -310,21 +366,17 @@ class GraphDispatchWorker:
             if latest is not None and latest.attempt == pending.attempt:
                 # Already created (crash recovery idempotent path).
                 if latest.status == "dispatching":
-                    try:
-                        uow.repository.insert_outbox(
-                            _adapter_dispatch_record(
-                                pending=pending,
-                                run_id=dispatch.run_id,
-                                command_id=(
-                                    action.command_id
-                                    if action is not None
-                                    else dispatch.command_id
-                                ),
-                                now_ms=now_ms,
-                            )
-                        )
-                    except Exception:
-                        pass
+                    _ensure_adapter_dispatch(
+                        uow,
+                        pending=pending,
+                        run_id=dispatch.run_id,
+                        command_id=(
+                            (action.command_id if action is not None else None)
+                            or latest.command_id
+                        ),
+                        node_run_id=latest.node_run_id,
+                        now_ms=now_ms,
+                    )
                 return
             if readiness_hint is None:
                 ready, blockers = True, []
@@ -332,7 +384,8 @@ class GraphDispatchWorker:
                 ready, blockers = readiness_hint
             command_id = (
                 (action.command_id if action is not None else None)
-                or dispatch.command_id
+                or getattr(dispatch, "command_id", None)
+                or fallback_command_id
                 or "cmd-recovery"
             )
             if not ready:
@@ -393,24 +446,20 @@ class GraphDispatchWorker:
                         )
                     )
                 return
-            uow.repository.insert_attempt(
-                _attempt_for_pending(
-                    pending,
-                    command_id=command_id,
-                    now_ms=now_ms,
-                )
+            created = _attempt_for_pending(
+                pending,
+                command_id=command_id,
+                now_ms=now_ms,
             )
-            try:
-                uow.repository.insert_outbox(
-                    _adapter_dispatch_record(
-                        pending=pending,
-                        run_id=dispatch.run_id,
-                        command_id=command_id,
-                        now_ms=now_ms,
-                    )
-                )
-            except Exception:
-                pass
+            uow.repository.insert_attempt(created)
+            _ensure_adapter_dispatch(
+                uow,
+                pending=pending,
+                run_id=dispatch.run_id,
+                command_id=command_id,
+                node_run_id=created.node_run_id,
+                now_ms=now_ms,
+            )
             _ = result
 
         self._submit(mutate, force_flush=True).result(timeout=30)
@@ -496,8 +545,24 @@ class GraphDispatchWorker:
         if advanced is not None:
             return advanced
         if not next_node_ids:
+            has_live_thread = bool(
+                values.get("active_node_id")
+                or values.get("checkpoint_version")
+                or persisted_pending
+            )
+            if has_live_thread and dispatch.node_id != node_id:
+                from dataclasses import replace
+
+                run = self._store.get_run(dispatch.run_id)
+                branch = branch_decision_from_run(run)
+                extra = dict(dispatch.state_update or {})
+                if branch and not extra.get("branch_decision"):
+                    extra["branch_decision"] = branch
+                if extra:
+                    dispatch = replace(dispatch, state_update=extra)
+                return self._coordinator.enter_node(dispatch)
             if dispatch.attempt >= 2:
-                # 线程已完成（失败结束）：以新 attempt 重入节点。
+                # Thread already finished (failed end): re-enter the node.
                 return self._coordinator.retry_attempt(dispatch)
             return self._coordinator.start_attempt(dispatch)
         raise GraphDecisionError(
@@ -507,74 +572,45 @@ class GraphDispatchWorker:
     def _advance_lagging_checkpoint(
         self, dispatch: GraphDispatch, *, interrupt_node_id: str
     ) -> GraphDispatchResult | None:
-        """Resume a succeeded predecessor so retry can enter the target node."""
-        from dataclasses import replace
+        """Resume succeeded predecessors so retry can enter the target node.
 
-        successors = successor_map().get(interrupt_node_id, ())
-        if dispatch.node_id not in successors:
+        Ledger may already be many hops ahead of LangGraph (SCI-096: thread
+        still at ``source_finding`` while retrying ``controlled_run``). Walk
+        the unique linear path, resuming each succeeded + accepted hop.
+        """
+        path = _linear_successor_path(interrupt_node_id, dispatch.node_id)
+        if path is None or len(path) < 2:
             return None
-        predecessor = self._store.latest_attempt(dispatch.run_id, interrupt_node_id)
-        if predecessor is None or predecessor.status != NodeAttemptStatus.SUCCEEDED.value:
-            return None
-        handoff = self._submit(
-            lambda uow: uow.repository.get_handoff_by_from_node(
-                dispatch.run_id, predecessor.node_run_id
-            ),
-            force_flush=True,
-        ).result(timeout=10)
-        if handoff is None or str(handoff[8]) != "accepted":
-            return None
-        snapshot = self._coordinator.snapshot(dispatch.run_id)
-        values = dict(snapshot.get("values") or {})
-        pending = build_pending_action(values, interrupt_node_id)
-        receipts = self._submit(
-            lambda uow: uow.repository.list_receipts_for_node_run(predecessor.node_run_id),
-            force_flush=True,
-        ).result(timeout=10)
-        receipt = ExecutionReceipt(
-            action_id=pending.action_id or action_id_for(
-                dispatch.run_id, interrupt_node_id, predecessor.attempt
-            ),
-            node_run_id=pending.node_run_id or predecessor.node_run_id,
-            outcome="succeeded",
-            artifact_receipt_ids=tuple(str(row[0]) for row in receipts),
-            execution_anchor_id=predecessor.execution_anchor_id,
-            budget_receipt_id=None,
-            problem=None,
-            completed_at_ms=int(
-                predecessor.finished_at_ms or predecessor.updated_at_ms or 0
-            ),
-        )
-        node_attempts = dict(values.get("node_attempts") or {})
-        node_attempts[interrupt_node_id] = predecessor.attempt
-        node_attempts[dispatch.node_id] = dispatch.attempt
-        predecessor_dispatch = replace(
-            dispatch,
-            node_run_id=predecessor.node_run_id,
-            node_id=interrupt_node_id,
-            attempt=predecessor.attempt,
-            dispatch_kind="resume_action",
-            receipt=receipt,
-            binding_snapshot_id=predecessor.binding_snapshot_id,
-            state_update={"node_attempts": node_attempts},
-        )
-        try:
-            # Call the coordinator directly: worker._resume() overwrites
-            # node_attempts with successor latest+1, which skips the retry
-            # attempt already inserted by the command layer.
-            self._coordinator.resume_action(predecessor_dispatch)
-        except Exception:
-            return None
+        for predecessor_id, successor_id in zip(path[:-1], path[1:]):
+            snapshot = self._coordinator.snapshot(dispatch.run_id)
+            if _graph_at_node(snapshot, dispatch.node_id):
+                break
+            if not _graph_at_node(snapshot, predecessor_id):
+                return None
+            if not self._resume_lagging_predecessor(
+                dispatch, predecessor_node_id=predecessor_id
+            ):
+                return None
+            snapshot = self._coordinator.snapshot(dispatch.run_id)
+            if not (
+                _graph_at_node(snapshot, successor_id)
+                or _graph_at_node(snapshot, dispatch.node_id)
+            ):
+                return None
         snapshot = self._coordinator.snapshot(dispatch.run_id)
         if not _graph_at_node(snapshot, dispatch.node_id):
             return None
         values = dict(snapshot.get("values") or {})
-        pending_target = build_pending_action(values, dispatch.node_id)
+        interrupt = snapshot.get("pendingAction") or {}
+        if str(interrupt.get("nodeId") or "") == dispatch.node_id:
+            pending_target = PendingAction.from_dict(dict(interrupt))
+        else:
+            pending_target = build_pending_action(values, dispatch.node_id)
         if pending_target.attempt != dispatch.attempt:
-            # restart_attempt consumes the successor interrupt and can persist
-            # an empty next set. retry_attempt (Command.goto) re-enters the
-            # target node with the ledger attempt.
-            return self._coordinator.retry_attempt(dispatch)
+            # Re-enter the target interrupt with the ledger attempt. Never
+            # Command.goto a different node — that overwrites active_node_id
+            # while leaving the stale source_finding interrupt in place.
+            return self._coordinator.restart_attempt(dispatch)
         return GraphDispatchResult(
             dispatch_kind="start",
             pending_action=pending_target,
@@ -585,22 +621,174 @@ class GraphDispatchWorker:
             state=values,
         )
 
+    def _resume_lagging_predecessor(
+        self, dispatch: GraphDispatch, *, predecessor_node_id: str
+    ) -> bool:
+        """Consume the current interrupt so retry can walk toward the target.
+
+        SCI-096: Command.goto split ``values.active_node_id`` from the persisted
+        interrupt, then a later replay rebuilt that interrupt with an empty
+        ``runId`` (``nr--source_finding-a1``). Ledger may already be many hops
+        ahead, and compact snapshots can omit accepted handoffs, so this hop
+        does not wait on handoff rows. It still refuses to fake-succeed a
+        predecessor that is mid-flight unless the dispatch is a downstream
+        retry (attempt >= 2). Restore ``run_id`` in the same Command as a
+        Ledger-identity receipt — LangGraph applies ``update`` before matching
+        ``resume``, so the empty interrupt heals and the hop advances.
+        """
+        from dataclasses import replace
+
+        snapshot = self._coordinator.snapshot(dispatch.run_id)
+        if not _graph_at_node(snapshot, predecessor_node_id):
+            return False
+        predecessor = self._store.latest_attempt(dispatch.run_id, predecessor_node_id)
+        predecessor_done = (
+            predecessor is not None
+            and predecessor.status == NodeAttemptStatus.SUCCEEDED.value
+        )
+        downstream_retry = (
+            dispatch.node_id != predecessor_node_id and dispatch.attempt >= 2
+        )
+        if not predecessor_done and not downstream_retry:
+            return False
+        values = dict(snapshot.get("values") or {})
+        interrupt = snapshot.get("pendingAction") or {}
+        attempt = int(
+            interrupt.get("attempt")
+            or (predecessor.attempt if predecessor is not None else 0)
+            or 1
+        )
+        # After restoring run_id, build_pending_action uses this formula.
+        # Do not mix in a Ledger node_run_id that can disagree with the healed interrupt.
+        node_run_id = f"nr-{dispatch.run_id}-{predecessor_node_id}-a{attempt}"
+        receipts: list[Any] = []
+        if predecessor is not None:
+            receipts = self._submit(
+                lambda uow: uow.repository.list_receipts_for_node_run(
+                    predecessor.node_run_id
+                ),
+                force_flush=True,
+            ).result(timeout=10)
+        ledger_receipt = ExecutionReceipt(
+            action_id=action_id_for(dispatch.run_id, predecessor_node_id, attempt),
+            node_run_id=node_run_id,
+            outcome="succeeded",
+            artifact_receipt_ids=tuple(str(row[0]) for row in receipts),
+            execution_anchor_id=(
+                predecessor.execution_anchor_id if predecessor is not None else None
+            ),
+            budget_receipt_id=None,
+            problem=None,
+            completed_at_ms=int(
+                (
+                    predecessor.finished_at_ms
+                    or predecessor.updated_at_ms
+                    or 0
+                )
+                if predecessor is not None
+                else 0
+            ),
+        )
+        node_attempts = dict(values.get("node_attempts") or {})
+        node_attempts[predecessor_node_id] = attempt
+        node_attempts[dispatch.node_id] = dispatch.attempt
+        heal_update: dict[str, Any] = {
+            "run_id": dispatch.run_id,
+            "node_attempts": node_attempts,
+        }
+        if dispatch.team_id:
+            heal_update["team_id"] = dispatch.team_id
+        if dispatch.input_snapshot_hash:
+            heal_update["input_snapshot_hash"] = dispatch.input_snapshot_hash
+        heal_dispatch = replace(
+            dispatch,
+            action_id=action_id_for(dispatch.run_id, predecessor_node_id, attempt),
+            node_run_id=node_run_id,
+            node_id=predecessor_node_id,
+            attempt=attempt,
+            dispatch_kind="start",
+            receipt=None,
+            state_update=None,
+        )
+        try:
+            # Command.goto leaves pending writes that get_state.interrupts
+            # does not show. A bare Command(resume=receipt) then raises
+            # "multiple pending interrupts". Time-travel rebuilds one
+            # interrupt with the real run_id before we resume.
+            self._coordinator.restart_attempt(heal_dispatch)
+        except Exception:
+            pass
+        predecessor_dispatch = replace(
+            heal_dispatch,
+            dispatch_kind="resume_action",
+            receipt=ledger_receipt,
+            binding_snapshot_id=(
+                predecessor.binding_snapshot_id if predecessor is not None else None
+            ),
+            state_update=heal_update,
+        )
+        try:
+            # Call the coordinator directly: worker._resume() overwrites
+            # node_attempts with successor latest+1, which skips the retry
+            # attempt already inserted by the command layer.
+            self._coordinator.resume_action(predecessor_dispatch)
+            return True
+        except Exception as heal_exc:
+            interrupt_receipt = _receipt_for_interrupt_identity(
+                interrupt,
+                predecessor_node_id=predecessor_node_id,
+                attempt=attempt,
+                artifact_receipt_ids=ledger_receipt.artifact_receipt_ids,
+                execution_anchor_id=ledger_receipt.execution_anchor_id,
+                completed_at_ms=ledger_receipt.completed_at_ms,
+            )
+            fallback_dispatch = replace(
+                predecessor_dispatch,
+                action_id=interrupt_receipt.action_id,
+                node_run_id=interrupt_receipt.node_run_id,
+                receipt=interrupt_receipt,
+                state_update={"node_attempts": node_attempts},
+            )
+            try:
+                self._coordinator.resume_action(fallback_dispatch)
+            except Exception as fallback_exc:
+                raise GraphDecisionError(
+                    "thread 中断于 "
+                    f"{predecessor_node_id}，resume 失败: {fallback_exc} "
+                    f"(heal: {heal_exc})"
+                ) from fallback_exc
+            return True
+
     def _resume(self, dispatch: GraphDispatch) -> GraphDispatchResult:
         if dispatch.receipt is None:
             raise ValueError("resume dispatch requires an ExecutionReceipt")
-        if dispatch.state_update:
-            from dataclasses import replace
+        from dataclasses import replace
 
-            # 为可能的后继节点注入 Ledger 权威的 attempt（rerun 需要 attempt+1）。
+        run = self._store.get_run(dispatch.run_id)
+        branch = branch_decision_from_run(run)
+        merged = dict(dispatch.state_update or {})
+        if (
+            dispatch.node_id in {"iteration_decision", "version_governance"}
+            and branch
+            and not merged.get("branch_decision")
+        ):
+            merged["branch_decision"] = branch
+        branch_for_route = str(merged.get("branch_decision") or branch or "")
+        routed = routed_successors(dispatch.node_id, branch_for_route)
+        if routed:
+            successors = routed
+        elif dispatch.node_id in {"iteration_decision", "version_governance"}:
+            successors = ()
+        else:
             successors = successor_map().get(dispatch.node_id, ())
-            node_attempts: dict[str, int] = {}
-            for successor in successors:
-                latest = self._store.latest_attempt(dispatch.run_id, successor)
-                node_attempts[successor] = (latest.attempt + 1) if latest else 1
-            if node_attempts:
-                merged = dict(dispatch.state_update)
-                merged["node_attempts"] = node_attempts
-                dispatch = replace(dispatch, state_update=merged)
+        node_attempts: dict[str, int] = {}
+        for successor in successors:
+            latest = self._store.latest_attempt(dispatch.run_id, successor)
+            node_attempts[successor] = (latest.attempt + 1) if latest else 1
+        if node_attempts:
+            merged["node_attempts"] = node_attempts
+        if merged:
+            dispatch = replace(dispatch, state_update=merged)
         try:
             if dispatch.dispatch_kind == "resume_human":
                 return self._coordinator.resume_human(dispatch)
@@ -653,24 +841,34 @@ class GraphDispatchWorker:
                 latest = uow.repository.latest_attempt(dispatch.run_id, pending.node_id)
                 if latest is not None and latest.attempt == pending.attempt:
                     # 同一节点中断点恢复（命令层已通过 readiness）：直接 dispatching。
+                    # 已终态的 attempt 不得倒回 dispatching（SCI-096 泵曾把
+                    # source_finding succeeded → dispatching 打爆）。
+                    try:
+                        current_status = NodeAttemptStatus(latest.status)
+                    except ValueError:
+                        current_status = None
+                    if (
+                        current_status is not None
+                        and current_status != NodeAttemptStatus.DISPATCHING
+                        and not can_transition_node_attempt(
+                            current_status, NodeAttemptStatus.DISPATCHING
+                        )
+                    ):
+                        return
                     uow.repository.update_attempt_status(
                         latest.node_run_id,
                         NodeAttemptStatus.DISPATCHING.value,
                         now_ms,
                         pending_action_id=pending.action_id,
                     )
-                    try:
-                        uow.repository.insert_outbox(
-                            _adapter_dispatch_record(
-                                pending=pending,
-                                run_id=dispatch.run_id,
-                                command_id=action.command_id,
-                                now_ms=now_ms,
-                            )
-                        )
-                    except Exception:
-                        # adapter_dispatch 已存在（崩溃恢复的幂等重放）——合法。
-                        pass
+                    _ensure_adapter_dispatch(
+                        uow,
+                        pending=pending,
+                        run_id=dispatch.run_id,
+                        command_id=action.command_id or latest.command_id,
+                        node_run_id=latest.node_run_id,
+                        now_ms=now_ms,
+                    )
                 else:
                     # 自动推进的新节点：进入 adapter 前重新执行 NodeReadiness
                     # （spec 9.1/7.3）；不 ready 则不建 adapter outbox，attempt 标 blocked。
@@ -740,24 +938,20 @@ class GraphDispatchWorker:
                                 )
                             )
                     else:
-                        uow.repository.insert_attempt(
-                            _attempt_for_pending(
-                                pending,
-                                command_id=action.command_id or "cmd-recovery",
-                                now_ms=now_ms,
-                            )
+                        created = _attempt_for_pending(
+                            pending,
+                            command_id=action.command_id or "cmd-recovery",
+                            now_ms=now_ms,
                         )
-                        try:
-                            uow.repository.insert_outbox(
-                                _adapter_dispatch_record(
-                                    pending=pending,
-                                    run_id=dispatch.run_id,
-                                    command_id=action.command_id,
-                                    now_ms=now_ms,
-                                )
-                            )
-                        except Exception:
-                            pass
+                        uow.repository.insert_attempt(created)
+                        _ensure_adapter_dispatch(
+                            uow,
+                            pending=pending,
+                            run_id=dispatch.run_id,
+                            command_id=created.command_id,
+                            node_run_id=created.node_run_id,
+                            now_ms=now_ms,
+                        )
             if result.completed:
                 outcome = "succeeded"
                 if dispatch.receipt is not None:
@@ -774,8 +968,306 @@ class GraphDispatchWorker:
                     now_ms,
                     finished_at_ms=now_ms,
                 )
+                if (
+                    outcome == "succeeded"
+                    and result.pending_action is None
+                    and dispatch.node_id == "result_package"
+                ):
+                    closed = uow.repository.get_run(dispatch.run_id)
+                    if closed is not None:
+                        completion_kind, terminal_reason = terminal_facts_for_run(closed)
+                        sync_run_succeeded(
+                            uow,
+                            run_id=dispatch.run_id,
+                            now_ms=now_ms,
+                            completion_kind=completion_kind,
+                            terminal_reason=terminal_reason,
+                            node_id=dispatch.node_id,
+                            actor_id=self._owner,
+                        )
 
         self._submit(mutate, force_flush=True).result(timeout=30)
+
+    def _repair_dispatching_without_adapter(self) -> int:
+        """Re-insert adapter_dispatch after a swallowed graph/adapter commit gap."""
+        now_ms = self._now()
+
+        def mutate(uow):
+            rows = uow.repository.execute(
+                """
+                SELECT node_run_id, run_id, node_id, attempt, actor_kind,
+                       command_id, binding_snapshot_id, input_snapshot_hash,
+                       pending_action_id
+                FROM node_attempts
+                WHERE status = 'dispatching'
+                  AND pending_action_id IS NOT NULL
+                  AND pending_action_id != ''
+                """
+            ).fetchall()
+            repaired = 0
+            for row in rows:
+                pending = _pending_from_dispatching_row(row)
+                if pending is None:
+                    continue
+                if _ensure_adapter_dispatch(
+                    uow,
+                    pending=pending,
+                    run_id=str(row[1]),
+                    command_id=str(row[5] or ""),
+                    node_run_id=str(row[0]),
+                    now_ms=now_ms,
+                ):
+                    repaired += 1
+            return repaired
+
+        return int(self._submit(mutate, force_flush=True).result(timeout=30) or 0)
+
+    def _repair_starting_without_progress(self) -> int:
+        """Re-enqueue graph_dispatch when start was acked but attempt stayed starting."""
+        from .graph_dispatch_factory import build_graph_dispatch_record
+
+        now_ms = self._now()
+
+        def mutate(uow):
+            rows = uow.repository.execute(
+                """
+                SELECT node_run_id, run_id, command_id
+                FROM node_attempts
+                WHERE status = 'starting'
+                """
+            ).fetchall()
+            repaired = 0
+            for row in rows:
+                node_run_id = str(row[0] or "")
+                run_id = str(row[1] or "")
+                command_id = str(row[2] or "")
+                if not node_run_id or not run_id or not command_id:
+                    continue
+                inflight = uow.repository.execute(
+                    """
+                    SELECT 1 FROM outbox_actions
+                    WHERE node_run_id = ?
+                      AND action_kind = 'graph_dispatch'
+                      AND status IN ('pending', 'leased')
+                    LIMIT 1
+                    """,
+                    (node_run_id,),
+                ).fetchone()
+                if inflight is not None:
+                    continue
+                run = uow.repository.get_run(run_id)
+                attempt = uow.repository.get_attempt(node_run_id)
+                if run is None or attempt is None:
+                    continue
+                key = f"graph:repair:{node_run_id}"
+                existing = uow.repository.execute(
+                    "SELECT action_id, status FROM outbox_actions WHERE idempotency_key = ?",
+                    (key,),
+                ).fetchone()
+                if existing is not None:
+                    status = str(existing[1] or "")
+                    if status in {"pending", "leased"}:
+                        continue
+                    uow.repository.execute(
+                        """
+                        UPDATE outbox_actions
+                        SET status = 'pending',
+                            lease_owner = NULL,
+                            lease_expires_at_ms = NULL,
+                            available_at_ms = ?,
+                            updated_at_ms = ?,
+                            last_problem_json = NULL
+                        WHERE action_id = ?
+                        """,
+                        (now_ms, now_ms, existing[0]),
+                    )
+                    repaired += 1
+                    continue
+                uow.repository.insert_outbox(
+                    build_graph_dispatch_record(
+                        run=run,
+                        attempt=attempt,
+                        command_id=command_id,
+                        dispatch_kind="start",
+                        now_ms=now_ms,
+                        idempotency_key=key,
+                    )
+                )
+                repaired += 1
+            return repaired
+
+        return int(self._submit(mutate, force_flush=True).result(timeout=30) or 0)
+
+    def _repair_stranded_iteration_route(self) -> int:
+        """Advance STOP/promote/rollback after iteration_decision already succeeded.
+
+        Compact restore can leave the LangGraph interrupt on iteration_decision
+        while the Ledger attempt is already succeeded and the decision lives
+        only in the artifact store. Skipping whenever ``pendingAction`` exists
+        stranded those runs: resume then failed with an empty branch_decision
+        and never created version_governance.
+        """
+        rows = self._submit(
+            lambda uow: uow.repository.execute(
+                "SELECT run_id FROM workflow_runs WHERE status IN ('running', 'blocked')"
+            ).fetchall(),
+            force_flush=True,
+        ).result(timeout=10)
+        repaired = 0
+        for row in rows or ():
+            run_id = str(row[0] or "")
+            if not run_id:
+                continue
+            try:
+                snapshot = self._coordinator.snapshot(run_id)
+            except Exception:
+                continue
+            pending_payload = (
+                snapshot.get("pendingAction")
+                if isinstance(snapshot.get("pendingAction"), dict)
+                else None
+            )
+            pending_node = str((pending_payload or {}).get("nodeId") or "")
+            next_ids = [str(item) for item in (snapshot.get("nextNodeIds") or [])]
+            if pending_node and pending_node != "iteration_decision":
+                continue
+            if next_ids and pending_node != "iteration_decision":
+                continue
+            latest_iter = self._store.latest_attempt(run_id, "iteration_decision")
+            if (
+                latest_iter is None
+                or latest_iter.status != NodeAttemptStatus.SUCCEEDED.value
+            ):
+                continue
+            if self._store.latest_attempt(run_id, "version_governance") is not None:
+                continue
+            run = self._store.get_run(run_id)
+            branch = branch_decision_from_run(run)
+            if branch not in {"stop", "promote_candidate", "rollback_candidate"}:
+                continue
+            inflight = self._submit(
+                lambda uow, rid=run_id: uow.repository.execute(
+                    """
+                    SELECT 1 FROM outbox_actions
+                    WHERE run_id = ?
+                      AND action_kind = 'graph_dispatch'
+                      AND status IN ('pending', 'leased')
+                    LIMIT 1
+                    """,
+                    (rid,),
+                ).fetchone(),
+                force_flush=True,
+            ).result(timeout=10)
+            if inflight is not None:
+                continue
+            if pending_node == "iteration_decision":
+                action_id = str((pending_payload or {}).get("actionId") or "")
+                node_run_id = str(
+                    (pending_payload or {}).get("nodeRunId") or latest_iter.node_run_id
+                )
+                if not action_id:
+                    continue
+                dispatch = GraphDispatch(
+                    action_id=action_id,
+                    run_id=run_id,
+                    node_run_id=node_run_id,
+                    node_id="iteration_decision",
+                    attempt=int(
+                        (pending_payload or {}).get("attempt") or latest_iter.attempt
+                    ),
+                    dispatch_kind="resume_action",
+                    input_snapshot_hash=str(getattr(run, "input_snapshot_hash", "") or ""),
+                    workflow_version_id=str(getattr(run, "workflow_version_id", "") or ""),
+                    team_id=str(getattr(run, "team_id", "") or ""),
+                    receipt=ExecutionReceipt(
+                        action_id=action_id,
+                        node_run_id=node_run_id,
+                        outcome="succeeded",
+                        artifact_receipt_ids=(),
+                        execution_anchor_id=latest_iter.execution_anchor_id,
+                        budget_receipt_id=None,
+                        problem=None,
+                        completed_at_ms=int(latest_iter.finished_at_ms or self._now()),
+                    ),
+                    state_update={"branch_decision": branch},
+                )
+                try:
+                    result = self._resume(dispatch)
+                except Exception:
+                    continue
+            else:
+                dispatch = GraphDispatch(
+                    action_id=new_id("act"),
+                    run_id=run_id,
+                    node_run_id=f"nr-{run_id}-version_governance-a1",
+                    node_id="version_governance",
+                    attempt=1,
+                    dispatch_kind="start",
+                    input_snapshot_hash=str(getattr(run, "input_snapshot_hash", "") or ""),
+                    workflow_version_id=str(getattr(run, "workflow_version_id", "") or ""),
+                    team_id=str(getattr(run, "team_id", "") or ""),
+                    state_update={"branch_decision": branch},
+                )
+                try:
+                    result = self._coordinator.enter_node(dispatch)
+                except Exception:
+                    continue
+            pending = result.pending_action
+            if pending is None or pending.node_id != "version_governance":
+                continue
+            pending = self._pending_with_node_binding(pending)
+            readiness_hint = self._precheck_readiness(dispatch, pending)
+            self._commit_successor_dispatch(
+                dispatch,
+                result,
+                pending,
+                readiness_hint,
+                action=None,
+                fallback_command_id=str(latest_iter.command_id or ""),
+            )
+            repaired += 1
+        return repaired
+
+    def _repair_stranded_terminal_package(self) -> int:
+        """Close a run whose result_package already succeeded but the ledger stayed running.
+
+        Adapter used to skip graph resume when ``successors`` is empty, so STOP
+        packaging never wrote ``run.status=succeeded`` / ``terminalReason``.
+        """
+        rows = self._submit(
+            lambda uow: uow.repository.execute(
+                "SELECT run_id FROM workflow_runs WHERE status IN ('running', 'blocked')"
+            ).fetchall(),
+            force_flush=True,
+        ).result(timeout=10)
+        repaired = 0
+        now_ms = self._now()
+        for row in rows or ():
+            run_id = str(row[0] or "")
+            if not run_id:
+                continue
+            latest = self._store.latest_attempt(run_id, "result_package")
+            if latest is None or latest.status != NodeAttemptStatus.SUCCEEDED.value:
+                continue
+            run = self._store.get_run(run_id)
+            if run is None:
+                continue
+            completion_kind, terminal_reason = terminal_facts_for_run(run)
+
+            def mutate(uow, rid=run_id, kind=completion_kind, reason=terminal_reason):
+                return sync_run_succeeded(
+                    uow,
+                    run_id=rid,
+                    now_ms=now_ms,
+                    completion_kind=kind,
+                    terminal_reason=reason,
+                    node_id="result_package",
+                    actor_id=self._owner,
+                )
+
+            if self._submit(mutate, force_flush=True).result(timeout=30):
+                repaired += 1
+        return repaired
 
     def _mark_blocked(self, action: Any, dispatch: GraphDispatch, detail: str) -> None:
         now_ms = self._now()
@@ -785,6 +1277,26 @@ class GraphDispatchWorker:
             uow.repository.fail_outbox(
                 action.action_id, self._owner, now_ms, problem_json=json.dumps(problem)
             )
+            attempt = uow.repository.get_attempt(dispatch.node_run_id)
+            if attempt is not None:
+                try:
+                    current = NodeAttemptStatus(str(attempt.status))
+                except ValueError:
+                    current = None
+                if current in {
+                    NodeAttemptStatus.SUCCEEDED,
+                    NodeAttemptStatus.FAILED,
+                    NodeAttemptStatus.CANCELLED,
+                    NodeAttemptStatus.STALE,
+                } or (
+                    current is not None
+                    and not can_transition_node_attempt(
+                        current, NodeAttemptStatus.BLOCKED
+                    )
+                ):
+                    # Adapter already finished this attempt. Rewinding
+                    # succeeded → blocked is illegal and would strand STOP.
+                    return
             apply_node_run_block(
                 uow,
                 run_id=dispatch.run_id,
@@ -810,12 +1322,77 @@ class GraphDispatchWorker:
         )
 
 
+def _linear_successor_path(start_node_id: str, target_node_id: str) -> list[str] | None:
+    """Unique linear path from an interrupt node to a downstream retry target."""
+    start = str(start_node_id or "").strip()
+    target = str(target_node_id or "").strip()
+    if not start or not target:
+        return None
+    if start == target:
+        return [start]
+    path = [start]
+    current = start
+    seen = {start}
+    while current != target:
+        successors = successor_map().get(current, ())
+        if target in successors:
+            path.append(target)
+            return path
+        if len(successors) != 1:
+            return None
+        nxt = successors[0]
+        if nxt in seen:
+            return None
+        seen.add(nxt)
+        path.append(nxt)
+        current = nxt
+        if len(path) > 32:
+            return None
+    return path
+
+
+def _receipt_for_interrupt_identity(
+    interrupt: Mapping[str, Any] | dict[str, Any],
+    *,
+    predecessor_node_id: str,
+    attempt: int,
+    artifact_receipt_ids: tuple[str, ...],
+    execution_anchor_id: str | None,
+    completed_at_ms: int,
+) -> ExecutionReceipt:
+    """Build a succeeded receipt that matches the visible interrupt payload."""
+    run_id = str(interrupt.get("runId") or "")
+    action_id = str(interrupt.get("actionId") or "") or action_id_for(
+        run_id, predecessor_node_id, attempt
+    )
+    node_run_id = str(interrupt.get("nodeRunId") or "") or (
+        f"nr-{run_id}-{predecessor_node_id}-a{attempt}"
+    )
+    return ExecutionReceipt(
+        action_id=action_id,
+        node_run_id=node_run_id,
+        outcome="succeeded",
+        artifact_receipt_ids=artifact_receipt_ids,
+        execution_anchor_id=execution_anchor_id,
+        budget_receipt_id=None,
+        problem=None,
+        completed_at_ms=completed_at_ms,
+    )
+
+
 def _graph_at_node(snapshot: dict[str, Any], node_id: str) -> bool:
+    """True only when the thread is interrupted at ``node_id``.
+
+    ``values.active_node_id`` is not enough: Command.goto can write it while
+    the persisted interrupt stays on an upstream node.
+    """
+    wanted = str(node_id or "").strip()
+    if not wanted:
+        return False
     next_ids = [str(item) for item in (snapshot.get("nextNodeIds") or [])]
-    active = str((snapshot.get("values") or {}).get("active_node_id") or "")
     pending = snapshot.get("pendingAction") or {}
     interrupt_node = str(pending.get("nodeId") or "")
-    return node_id in next_ids or active == node_id or interrupt_node == node_id
+    return wanted in next_ids or interrupt_node == wanted
 
 
 def _attempt_for_pending(
@@ -875,14 +1452,21 @@ def _event_record_for(
     )
 
 
-def _adapter_dispatch_record(*, pending: Any, run_id: str, command_id: str | None, now_ms: int):
+def _adapter_dispatch_record(
+    *,
+    pending: Any,
+    run_id: str,
+    command_id: str | None,
+    now_ms: int,
+    node_run_id: str | None = None,
+):
     from core.research.workflow.ledger import OutboxRecord
 
     return OutboxRecord(
         action_id=new_id("act"),
         run_id=run_id,
         command_id=command_id,
-        node_run_id=pending.node_run_id,
+        node_run_id=str(node_run_id or pending.node_run_id),
         action_kind="adapter_dispatch",
         idempotency_key=f"adapter:{pending.action_id}",
         payload_json=json.dumps(pending.to_dict()),
@@ -894,4 +1478,84 @@ def _adapter_dispatch_record(*, pending: Any, run_id: str, command_id: str | Non
         last_problem_json=None,
         created_at_ms=now_ms,
         updated_at_ms=now_ms,
+    )
+
+
+def _ensure_adapter_dispatch(
+    uow: Any,
+    *,
+    pending: Any,
+    run_id: str,
+    command_id: str | None,
+    node_run_id: str,
+    now_ms: int,
+) -> bool:
+    """Insert or revive adapter_dispatch. True when a row was written/revived."""
+    resolved_command_id = str(command_id or "").strip()
+    if not resolved_command_id:
+        raise RuntimeError("adapter_dispatch requires command_id")
+    key = f"adapter:{pending.action_id}"
+    existing = uow.repository.execute(
+        "SELECT action_id, status FROM outbox_actions WHERE idempotency_key = ?",
+        (key,),
+    ).fetchone()
+    if existing is not None:
+        status = str(existing[1] or "")
+        if status in {"pending", "leased", "succeeded"}:
+            return False
+        uow.repository.execute(
+            """
+            UPDATE outbox_actions
+            SET status = 'pending',
+                lease_owner = NULL,
+                lease_expires_at_ms = NULL,
+                available_at_ms = ?,
+                updated_at_ms = ?,
+                last_problem_json = NULL,
+                command_id = ?,
+                node_run_id = ?
+            WHERE action_id = ?
+            """,
+            (now_ms, now_ms, resolved_command_id, node_run_id, existing[0]),
+        )
+        return True
+    uow.repository.insert_outbox(
+        _adapter_dispatch_record(
+            pending=pending,
+            run_id=run_id,
+            command_id=resolved_command_id,
+            now_ms=now_ms,
+            node_run_id=node_run_id,
+        )
+    )
+    return True
+
+
+def _pending_from_dispatching_row(row: Any) -> PendingAction | None:
+    from core.research.workflow.models import ActorKind
+
+    action_id = str(row[8] or "").strip()
+    node_id = str(row[2] or "").strip()
+    actor_kind_raw = str(row[4] or "").strip()
+    if not action_id or not node_id or not actor_kind_raw:
+        return None
+    actor_kind = ActorKind(actor_kind_raw)
+    if actor_kind is ActorKind.AGENT:
+        action_kind = "start_agent_task"
+    elif actor_kind is ActorKind.SYSTEM:
+        action_kind = f"system_action:{node_id}"
+    else:
+        action_kind = f"human_task:{node_id}"
+    return PendingAction(
+        action_id=action_id,
+        run_id=str(row[1]),
+        node_run_id=str(row[0]),
+        node_id=node_id,
+        attempt=int(row[3] or 0),
+        actor_kind=actor_kind,
+        action_kind=action_kind,
+        input_snapshot_hash=str(row[7] or ""),
+        input_artifact_refs=(),
+        binding_snapshot_id=row[6],
+        budget_policy_hash="",
     )

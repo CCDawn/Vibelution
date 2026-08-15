@@ -503,6 +503,7 @@ from core.web.services.team_workflow.source_collection.storage import (
     open_source_collection_storage_target,
 )
 from core.web.services.team_workflow.experiment import (
+    bind_frozen_protocol_to_experiment_plan,
     create_experiment_plan,
     complete_experiment_hypothesis_from_design,
     create_experiment_plan_revision_from_hypothesis,

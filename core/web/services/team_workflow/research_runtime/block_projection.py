@@ -102,3 +102,128 @@ def apply_node_run_block(
                 occurred_at_ms=now_ms,
             )
         )
+
+
+def terminal_facts_for_run(run: Any) -> tuple[str, str]:
+    """``(completionKind, terminalReason)`` from the STOP package / governance."""
+    snapshot: dict[str, Any] = {}
+    if getattr(run, "input_snapshot_json", None):
+        try:
+            loaded = json.loads(run.input_snapshot_json)
+        except (TypeError, ValueError):
+            loaded = {}
+        if isinstance(loaded, dict):
+            snapshot = loaded
+    team_id = str(snapshot.get("teamId") or getattr(run, "team_id", "") or "").strip()
+    run_id = str(getattr(run, "run_id", "") or "").strip()
+    authority = str(snapshot.get("sourceCollectionRunId") or run_id).strip()
+
+    def _body(kind: str) -> dict[str, Any]:
+        if not team_id or not run_id:
+            return {}
+        from .real_readiness_context import _readiness_artifact_envelope
+
+        envelope = _readiness_artifact_envelope(
+            kind,
+            team_id=team_id,
+            run_id=run_id,
+            authority_run_id=authority,
+        )
+        if not isinstance(envelope, dict) or not envelope:
+            from .artifact_readback_registry import load_scoped_artifact_payload
+
+            envelope = load_scoped_artifact_payload(
+                kind,
+                team_id=team_id,
+                authority_run_id=authority,
+                workflow_run_id=run_id,
+            )
+        if not isinstance(envelope, dict):
+            return {}
+        payload = envelope.get("payload")
+        return dict(payload) if isinstance(payload, dict) else dict(envelope)
+
+    package_body = _body("research_result_package")
+    package = (
+        package_body.get("package")
+        if isinstance(package_body.get("package"), dict)
+        else package_body
+    )
+    terminal = str(
+        package.get("terminalReason")
+        or package_body.get("terminalReason")
+        or ""
+    ).strip()
+    decision = str(package.get("decisionKind") or package.get("operation") or "").strip()
+    governance = _body("version_governance_record")
+    operation = str(
+        governance.get("operation")
+        or governance.get("decision_kind")
+        or decision
+        or ""
+    ).strip()
+    if not terminal:
+        terminal = str(governance.get("terminalReason") or "").strip()
+    if operation in {"rollback", "rollback_candidate"}:
+        return "rolled_back", terminal or "rollback"
+    return "stopped", terminal or "formal_runner_unavailable"
+
+
+def sync_run_succeeded(
+    uow: Any,
+    *,
+    run_id: str,
+    now_ms: int,
+    completion_kind: str,
+    terminal_reason: str,
+    node_id: str = "result_package",
+    actor_id: str = "graph-worker",
+) -> bool:
+    """Mark a STOP/rollback package as the run terminal. Idempotent."""
+    run = uow.repository.get_run(run_id)
+    if run is None or run.status in _TERMINAL_RUN:
+        return False
+    if run.status not in {
+        RunStatus.RUNNING.value,
+        RunStatus.BLOCKED.value,
+        RunStatus.WAITING_HUMAN.value,
+    }:
+        return False
+    uow.repository.update_run_status(
+        run_id,
+        run.team_id,
+        RunStatus.SUCCEEDED.value,
+        now_ms,
+        active_node_id="",
+        completion_kind=completion_kind,
+        terminal_reason=terminal_reason,
+        blocked_problem_json=None,
+    )
+    sequence = uow.repository.advance_last_sequence(run_id, 1, now_ms)
+    if sequence is None:
+        return True
+    uow.repository.insert_event(
+        EventRecord(
+            run_id=run_id,
+            sequence=sequence,
+            event_id=new_id("evt"),
+            run_version=run.run_version,
+            event_type="run_succeeded",
+            actor_json=json.dumps(
+                {"actorType": "system", "actorId": actor_id},
+                ensure_ascii=False,
+            ),
+            correlation_id=run_id,
+            causation_id=None,
+            payload_json=json.dumps(
+                {
+                    "nodeId": node_id,
+                    "completionKind": completion_kind,
+                    "terminalReason": terminal_reason,
+                },
+                ensure_ascii=False,
+            ),
+            occurred_at_ms=now_ms,
+        )
+    )
+    return True

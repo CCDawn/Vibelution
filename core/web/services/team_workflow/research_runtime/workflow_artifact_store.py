@@ -31,6 +31,8 @@ _SUPPORTED_KINDS = frozenset(
         "hypothesis_set",
         "protocol_draft",
         "protocol_review_report",
+        "iteration_decision",
+        "version_governance_record",
     }
 )
 
