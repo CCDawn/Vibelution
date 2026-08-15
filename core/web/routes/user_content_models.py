@@ -7,6 +7,8 @@ response_model_exclude_unset=True.
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -25,4 +27,14 @@ class UserContentMarkdownResponse(BaseModel):
 
     ok: bool = False
     schemaVersion: int = 0
+    userId: str = ""
+    spaces: list[dict[str, Any]] = Field(default_factory=list)
+    space: dict[str, Any] = Field(default_factory=dict)
+    pages: list[dict[str, Any]] = Field(default_factory=list)
+    page: dict[str, Any] = Field(default_factory=dict)
+    summary: dict[str, Any] = Field(default_factory=dict)
+    source: dict[str, Any] = Field(default_factory=dict)
+    ignoredFiles: list[dict[str, Any]] = Field(default_factory=list)
+    query: str = ""
+    results: list[dict[str, Any]] = Field(default_factory=list)
     updatedAt: str = ""
