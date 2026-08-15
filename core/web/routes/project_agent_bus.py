@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel, Field
 
+from core.web.routes.project_agent_bus_models import (
+    ProjectAgentBusEventResponse,
+    ProjectAgentBusListResponse,
+    ProjectAgentBusMessagePayload,
+    ProjectAgentBusRevokePayload,
+)
 from core.web.services.project_agent_bus_service import (
     ProjectAgentBusError,
     list_project_agent_bus_events,
@@ -18,26 +21,21 @@ from core.web.services.project_agent_bus_service import (
 router = APIRouter(tags=["project-agent-bus"])
 
 
-class ProjectAgentBusMessagePayload(BaseModel):
-    content: str = ""
-    targetScope: str = ""
-    targetAgentIds: list[str] = Field(default_factory=list)
-    interruptMode: str = "none"
-    wakeTarget: bool = True
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class ProjectAgentBusRevokePayload(BaseModel):
-    reason: str = ""
-    stopTargets: bool = True
-
-
-@router.get("/project-agent-bus")
+@router.get(
+    "/project-agent-bus",
+    response_model=ProjectAgentBusListResponse,
+    response_model_exclude_unset=True,
+)
 def project_agent_bus_list(limit: int = 80) -> dict:
     return list_project_agent_bus_events(limit=limit)
 
 
-@router.post("/project-agent-bus/messages", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/project-agent-bus/messages",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ProjectAgentBusEventResponse,
+    response_model_exclude_unset=True,
+)
 def project_agent_bus_message_create(payload: ProjectAgentBusMessagePayload) -> dict:
     try:
         return send_project_agent_bus_message(
@@ -53,7 +51,11 @@ def project_agent_bus_message_create(payload: ProjectAgentBusMessagePayload) -> 
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/project-agent-bus/messages/{event_id}/revoke")
+@router.post(
+    "/project-agent-bus/messages/{event_id}/revoke",
+    response_model=ProjectAgentBusEventResponse,
+    response_model_exclude_unset=True,
+)
 def project_agent_bus_message_revoke(event_id: str, payload: ProjectAgentBusRevokePayload) -> dict:
     try:
         return revoke_project_agent_bus_message(
