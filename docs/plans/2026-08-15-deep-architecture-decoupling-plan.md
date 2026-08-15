@@ -1,8 +1,8 @@
 # Vibelution 核心架构深度解耦实施计划
 
-> - **Status**：ACTIVE PLAN / Gate 2 已关闭（2-4 `DO_NOT_CREATE` 合入本地 `main@68d831f80`）
+> - **Status**：ACTIVE PLAN / Gate 2 已关闭；Gate 3 Chat Phase F 壳化已在本分支实施，合入后关闭
 > - **Plan mode**：TASK_GRAPH（多个 owner、热文件与独立验证契约）
-> - **更新时间**：2026-08-15
+> - **更新时间**：2026-08-16
 > - **基线快照**：计划重写时的本地 `main@6aee4045e4e893af6208b043492d35b6d8fa3ef4`（当时 `agent.py` **4,680** 行）。Gate 0 必须刷新为**当前** `HEAD`，禁止把本快照当作长期权威。
 > - **Gate 0 刷新**：本地 `main@296f740cae87aac1babbcc7f23e9958540881174`（领先 origin/main 64；领先快照 5 commit）
 > - **计划范围**：Agent 单轮编排、Chat Workbench 壳化、FastAPI 响应契约
@@ -33,7 +33,7 @@
 Gate 0 基线/所有权冻结
   ├─> Gate 1 收口当前 Agent 候选抽取
   │     └─> Gate 2 Agent 职责切片（严格串行）
-  ├─> Gate 3 Chat Phase F 壳化（claim 释放后）
+  ├─> Gate 3 Chat Phase F 壳化
   └─> Gate 4 API 契约分批收敛
 
 三个实施 lane 可在 scopes 完全不重叠且 integration owner 明确时并行，
@@ -356,7 +356,7 @@ Gate 2 的四个任务共享 `agent.py`，必须严格串行；每个任务单�
 
 ### Gate 3：Chat Workbench 沿 Phase F 壳化
 
-Gate 3 在覆盖 `ChatCodingRouteWorkbench.tsx` 的 active claim 释放或明确 handoff 前保持 BLOCKED；registry 中无此类 claim 时不因历史 id 假死。
+Gate 3 在覆盖 `ChatCodingRouteWorkbench.tsx` 的 active claim 释放或明确 handoff 前保持 BLOCKED；registry 中无此类 claim 时不因历史 id 假死。本轮用户明确授权完成 G3：审查者 `claim-bf845f98130d` 的 worktree 无未提交 WIP 且落后当前 `main`，实施落在 `.worktrees/chat-g3-phase-f`。
 
 #### Task G3-1：完成剩余状态 owner 下沉
 
@@ -643,4 +643,4 @@ route suite 很大时可以先按 `-k` 跑目标 family，但合入前必须运�
 - Launcher/runtime process model 改造；
 - 删除仍有真实调用者的 compatibility wrappers。
 
-**下一执行动作：Gate 3 仍被 `.worktrees/chat-workbench-panel-extract` 脏工作区阻塞；可开 Gate 4（FastAPI DTO 分批），先协调 ledger claim。**
+**下一执行动作：Gate 3 已按 G3-1 → G3-2 → G3-3 收口（G3-3 无新 render finding）。Gate 4 FastAPI 全量 ledger 清零仍为 Deferred。**

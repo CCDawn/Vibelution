@@ -32,7 +32,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type MouseEvent as ReactMouseEvent,
 } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
@@ -122,20 +121,16 @@ import {
   visibleDirectoryAgents,
 } from "../AgentConversationDirectory";
 import { markSessionActivitySnapshotsSeen } from "../sessionActivityIndicator";
-import type { AgentContextMenuState } from "../AgentContextMenu";
 import { ConversationIndexTree } from "../ConversationIndexTree";
 import { teamWorkspaceRoute } from "../teams/researchWorkspaceModel";
 import {
-  DEFAULT_COLLAPSED_CONVERSATION_GROUPS,
-  defaultConversationGroupCollapsed,
-  conversationGroupLabel,
   hasInvalidChildSessionLink,
   isRepresentedInAgentSessionTabs,
   isVisibleDirectSession,
   rootSessionIdFor,
   sessionToConversationSummary,
   useConversationIndexModel,
-  type ConversationIndexDynamicGroupKey,
+  conversationGroupLabel,
 } from "../conversationIndexModel";
 import {
   activeTurnTerminalRefreshKey,
@@ -215,12 +210,8 @@ import { useChatWorkspaceLifecycle } from "./useChatWorkspaceLifecycle";
 import { useChatSessionDetailMutations } from "./useChatSessionDetailMutations";
 import { useChatWorkspaceActions } from "./useChatWorkspaceActions";
 import { useDesktopConversationAttention } from "./useDesktopConversationAttention";
-import { eventInsideContextMenuSurface } from "./chatContextMenuDismiss";
 import { ChatCliAgentTerminalStack } from "./ChatCliAgentTerminalStack";
-import {
-  useChatSessionRenameMenu,
-  type SessionContextMenuState,
-} from "./useChatSessionRenameMenu";
+import { useChatSessionRenameMenu } from "./useChatSessionRenameMenu";
 import { useChatAgentDirectoryActions } from "./useChatAgentDirectoryActions";
 import { useChatCliAgentTerminal } from "./useChatCliAgentTerminal";
 import { buildChatCacheDetailViewModel } from "./chatCacheDetailModel";
@@ -228,6 +219,17 @@ import { buildComposerContextRingModel } from "./composerContextModel";
 import { useChatCacheDetailDialog } from "./useChatCacheDetailDialog";
 import { useAgentPermissionPresetMutation } from "./useAgentPermissionPresetMutation";
 import { useChatWorkbenchCatalogQueries } from "./useChatWorkbenchCatalogQueries";
+import {
+  useChatGroupDraftState,
+  useSyncChatGroupManageDrafts,
+} from "./useChatGroupDraftState";
+import { useChatWorkbenchContextMenus } from "./useChatWorkbenchContextMenus";
+import { useChatConversationIndexChrome } from "./useChatConversationIndexChrome";
+import {
+  buildChatGroupManageChanged,
+  buildChatGroupRoomActionDisabledFlags,
+  deriveChatGroupRoundState,
+} from "./chatGroupRoomActionModel";
 import {
   chatTurnSessionIdsFromRuntime,
   runtimeHasChatTurnForSession,
@@ -357,8 +359,6 @@ type SessionDetailWithActiveSkill = SessionDetail & {
 };
 
 type PetInteractionAction = "feed" | "talk" | "care";
-
-type RightIndexPanel = "conversations" | "members";
 
 /**
  * Stable session-detail placeholder for the active-session detail query.
@@ -611,8 +611,12 @@ export function ChatCodingRoute() {
   const suppressRenameBlurUntilRef = useRef(0);
   const [editingSessionTitle, setEditingSessionTitle] = useState("");
   const editingSessionTitleRef = useRef("");
-  const [sessionContextMenu, setSessionContextMenu] = useState<SessionContextMenuState | null>(null);
-  const [agentContextMenu, setAgentContextMenu] = useState<AgentContextMenuState | null>(null);
+  const {
+    sessionContextMenu,
+    setSessionContextMenu,
+    agentContextMenu,
+    setAgentContextMenu,
+  } = useChatWorkbenchContextMenus();
   const [activeTurnLayersBySession, setActiveTurnLayersBySession] = useState<Record<string, ActiveTurnLayerState>>({});
 
   useEffect(() => {
@@ -633,27 +637,37 @@ export function ChatCodingRoute() {
   const [featurePresetState, setFeaturePresetState] = useState<Record<FeaturePresetKey, boolean>>(
     DEFAULT_CHAT_FEATURE_PRESETS,
   );
-  const [groupComposerOpen, setGroupComposerOpen] = useState(false);
-  const [groupTitleDraft, setGroupTitleDraft] = useState("");
-  const [groupModeDraft, setGroupModeDraft] = useState("round_robin");
-  const [groupPurposeDraft, setGroupPurposeDraft] = useState("discussion");
-  const [groupSelectedAgentIds, setGroupSelectedAgentIds] = useState<string[]>([]);
-  const [collapsedConversationGroups, setCollapsedConversationGroups] = useState<Record<string, boolean>>(
-    DEFAULT_COLLAPSED_CONVERSATION_GROUPS,
-  );
-  const [rightIndexPanel, setRightIndexPanel] = useState<RightIndexPanel>("conversations");
-  const [agentCreateWizardOpen, setAgentCreateWizardOpen] = useState(false);
-  const agentCreateTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const {
+    groupComposerOpen,
+    setGroupComposerOpen,
+    groupTitleDraft,
+    setGroupTitleDraft,
+    groupModeDraft,
+    setGroupModeDraft,
+    groupPurposeDraft,
+    setGroupPurposeDraft,
+    groupSelectedAgentIds,
+    setGroupSelectedAgentIds,
+    groupTopicDraft,
+    setGroupTopicDraft,
+    projectBusDraft,
+    setProjectBusDraft,
+    projectBusInterruptTargets,
+    setProjectBusInterruptTargets,
+    groupRoomActionError,
+    setGroupRoomActionError,
+    groupManageTitleDraft,
+    setGroupManageTitleDraft,
+    groupManageSessionIds,
+    setGroupManageSessionIds,
+    groupManageModeDraft,
+    setGroupManageModeDraft,
+    groupManagePurposeDraft,
+    setGroupManagePurposeDraft,
+    groupManageSessionSet,
+  } = useChatGroupDraftState();
   const [expandedGroupAgentSessionIds, setExpandedGroupAgentSessionIds] = useState<string[]>([]);
   const [expandedGroupMessageIds, setExpandedGroupMessageIds] = useState<string[]>([]);
-  const [groupTopicDraft, setGroupTopicDraft] = useState("");
-  const [projectBusDraft, setProjectBusDraft] = useState("");
-  const [projectBusInterruptTargets, setProjectBusInterruptTargets] = useState(false);
-  const [groupRoomActionError, setGroupRoomActionError] = useState("");
-  const [groupManageTitleDraft, setGroupManageTitleDraft] = useState("");
-  const [groupManageSessionIds, setGroupManageSessionIds] = useState<string[]>([]);
-  const [groupManageModeDraft, setGroupManageModeDraft] = useState("round_robin");
-  const [groupManagePurposeDraft, setGroupManagePurposeDraft] = useState("discussion");
   const lastConversationStreamingFrameTelemetryAtRef = useRef<Record<string, number>>({});
   const lastAssistantDeltaAppliedAtRef = useRef<Record<string, number>>({});
   const activeTurnLayersBySessionRef = useRef<Record<string, ActiveTurnLayerState>>({});
@@ -793,6 +807,12 @@ export function ChatCodingRoute() {
   const groupPanelActive = Boolean(activeGroupRoomId);
   const standardGroupRoomActive = groupPanelActive && !projectBusActive;
   const {
+    collapsedConversationGroups,
+    rightIndexPanel,
+    setRightIndexPanel,
+    toggleConversationGroup,
+  } = useChatConversationIndexChrome({ standardGroupRoomActive });
+  const {
     layoutRef,
     dragState,
     responsiveLayout,
@@ -837,33 +857,6 @@ export function ChatCodingRoute() {
     }
   }, [chatRouteSelection.kind, setGroupRoomActionError, setRightIndexPanel, setRightPaneCollapsed]);
 
-  useEffect(() => {
-    if (!sessionContextMenu && !agentContextMenu) {
-      return;
-    }
-    function closeSessionContextMenu(event?: Event) {
-      // Radix portals the menu outside the React tree; a global pointerdown must
-      // not unmount it before item onSelect (rename/create) can run.
-      if (event && eventInsideContextMenuSurface(event.target)) {
-        return;
-      }
-      setSessionContextMenu(null);
-      setAgentContextMenu(null);
-    }
-    function handleKeyDown(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") {
-        closeSessionContextMenu();
-      }
-    }
-    window.addEventListener("pointerdown", closeSessionContextMenu);
-    window.addEventListener("scroll", closeSessionContextMenu, true);
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("pointerdown", closeSessionContextMenu);
-      window.removeEventListener("scroll", closeSessionContextMenu, true);
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [agentContextMenu, sessionContextMenu]);
   const sessionStreamRouteSettling = resolveSessionStreamRouteSettling({
     activeSessionId,
     groupPanelActive,
@@ -1004,11 +997,6 @@ export function ChatCodingRoute() {
     teamsPickerNeeded,
     projectBusActive,
   });
-  useEffect(() => {
-    if (!standardGroupRoomActive && rightIndexPanel === "members") {
-      setRightIndexPanel("conversations");
-    }
-  }, [standardGroupRoomActive, rightIndexPanel]);
 
   const {
     runtimeQuery,
@@ -1504,6 +1492,14 @@ export function ChatCodingRoute() {
   });
 
   const activeGroupRoom = activeGroupRoomQuery.data;
+  useSyncChatGroupManageDrafts({
+    activeGroupRoom,
+    sessions: sessionsQuery.data,
+    setGroupManageSessionIds,
+    setGroupManageTitleDraft,
+    setGroupManageModeDraft,
+    setGroupManagePurposeDraft,
+  });
   const teams = teamsQuery.data?.teams ?? [];
   const linkedTeamRoomIds = useMemo(() => {
     // Prefer explicit link fields; fall back to nested linkedChatRoom so valid team
@@ -1614,21 +1610,6 @@ export function ChatCodingRoute() {
       }
     };
   }, [activeSessionId, groupPanelActive, pageVisible, queryClient, secondaryChatDataEnabled, sessionsQuery.data]);
-
-  useEffect(() => {
-    if (!activeGroupRoom) {
-      return;
-    }
-    const existingSessionIds = new Set((sessionsQuery.data ?? []).map((session) => session.id));
-    setGroupManageSessionIds(
-      activeGroupRoom.participants
-        .map((participant) => participant.sessionId)
-        .filter((sessionId) => existingSessionIds.has(sessionId)),
-    );
-    setGroupManageTitleDraft(activeGroupRoom.title || "");
-    setGroupManageModeDraft(activeGroupRoom.mode || "round_robin");
-    setGroupManagePurposeDraft(activeGroupRoom.purpose || "discussion");
-  }, [activeGroupRoom, sessionsQuery.data]);
 
 
   const workspace = activeSessionId
@@ -1936,15 +1917,15 @@ export function ChatCodingRoute() {
   const projectBusTimeline = projectAgentBusQuery.data;
   const projectBusEvents = projectBusTimeline?.events ?? [];
   const activeGroupRound = latestChatRoomRound(activeGroupRoom);
-  const activeGroupRoomStatus = String(activeGroupRoom?.status ?? "").trim().toLowerCase();
-  const groupRoundRunning = activeGroupRoomStatus === "running";
-  const groupRoundStopping = activeGroupRoomStatus === "stopping";
-  const groupRoundActive = groupRoundRunning || groupRoundStopping;
+  const {
+    groupRoundRunning,
+    groupRoundStopping,
+    groupRoundActive,
+  } = deriveChatGroupRoundState(activeGroupRoom);
   const activeGroupParticipantById = useMemo(() => {
     const entries = (activeGroupRoom?.participants ?? []).map((participant) => [participant.participantId, participant] as const);
     return new Map(entries);
   }, [activeGroupRoom?.participants]);
-  const groupManageSessionSet = useMemo(() => new Set(groupManageSessionIds), [groupManageSessionIds]);
   const activeGroupParticipantSessionSet = useMemo(
     () => new Set(availableGroupParticipants.map((participant) => participant.sessionId)),
     [availableGroupParticipants],
@@ -1968,48 +1949,35 @@ export function ChatCodingRoute() {
       setExpandedGroupAgentSessionIds(nextExpanded);
     }
   }, [activeGroupParticipantSessionSet, expandedGroupAgentSessionIds, groupPanelActive]);
-  const groupManageChanged = Boolean(
-    standardGroupRoomActive
-    &&
-    activeGroupRoom
-    && (
-      groupManageTitleDraft.trim() !== (activeGroupRoom.title || "").trim()
-      || groupManageModeDraft !== (activeGroupRoom.mode || "round_robin")
-      || groupManagePurposeDraft !== (activeGroupRoom.purpose || "discussion")
-      || groupManageSessionIds.length !== activeGroupParticipantSessionSet.size
-      || groupManageSessionIds.some((sessionId) => !activeGroupParticipantSessionSet.has(sessionId))
-    ),
-  );
-  const groupManageDisabled =
-    !standardGroupRoomActive
-    ||
-    !activeGroupRoom
-    || activeGroupTeamOwned
-    || groupRoundActive
-    || updateGroupRoomMutation.isPending
-    || !groupManageTitleDraft.trim()
-    || groupManageSessionIds.length < 2
-    || !groupManageModeDraft
-    || !groupManagePurposeDraft;
-  const groupDeleteDisabled =
-    !standardGroupRoomActive
-    ||
-    !activeGroupRoom
-    || activeGroupTeamOwned
-    || groupRoundActive
-    || deleteGroupRoomMutation.isPending;
-  const groupResetDisabled =
-    !standardGroupRoomActive
-    ||
-    !activeGroupRoom
-    || groupRoundActive
-    || resetGroupRoomMutation.isPending
-    || (activeGroupRoom?.rounds ?? []).length < 1;
-  const groupStopDisabled =
-    !standardGroupRoomActive
-    || !activeGroupRoom
-    || !groupRoundRunning
-    || stopGroupRoundMutation.isPending;
+  const groupManageChanged = buildChatGroupManageChanged({
+    standardGroupRoomActive,
+    activeGroupRoom,
+    groupManageTitleDraft,
+    groupManageModeDraft,
+    groupManagePurposeDraft,
+    groupManageSessionIds,
+    activeGroupParticipantSessionIds: activeGroupParticipantSessionSet,
+  });
+  const {
+    groupManageDisabled,
+    groupDeleteDisabled,
+    groupResetDisabled,
+    groupStopDisabled,
+  } = buildChatGroupRoomActionDisabledFlags({
+    standardGroupRoomActive,
+    activeGroupRoom,
+    activeGroupTeamOwned,
+    groupRoundActive,
+    groupRoundRunning,
+    groupManageTitleDraft,
+    groupManageSessionIds,
+    groupManageModeDraft,
+    groupManagePurposeDraft,
+    updateGroupRoomPending: updateGroupRoomMutation.isPending,
+    deleteGroupRoomPending: deleteGroupRoomMutation.isPending,
+    resetGroupRoomPending: resetGroupRoomMutation.isPending,
+    stopGroupRoundPending: stopGroupRoundMutation.isPending,
+  });
   const sessionDetailErrorState = deriveSessionDetailQueryErrorState(detail, sessionDetailQuery.isError, {
     dataUpdatedAt: sessionDetailQuery.dataUpdatedAt,
     errorUpdatedAt: sessionDetailQuery.errorUpdatedAt,
@@ -2684,22 +2652,12 @@ export function ChatCodingRoute() {
       : numberFormatter.format(sessionIndexLoadedCount);
   const sessionIndexProgressVisible = sessionIndexHasMore || sessionIndexTotalEstimate > SESSION_INDEX_PAGE_SIZE;
 
-  function toggleConversationGroup(groupKey: ConversationIndexDynamicGroupKey) {
-    setCollapsedConversationGroups((current) => ({
-      ...current,
-      [groupKey]: !(current[groupKey] ?? defaultConversationGroupCollapsed(groupKey)),
-    }));
-  }
-
-  const handlePrefetchDirectSession = useCallback((sessionId: string) => {
-    void prefetchSessionDetailWindow(queryClient, sessionId);
-  }, [queryClient]);
-
   const {
     handlePetInteraction,
     handleCreateSession,
     handleOpenProjectAgentBus,
     handleOpenDirectSession,
+    handlePrefetchDirectSession,
     handleOpenAgent,
     handleOpenMentionTarget,
     handleOpenGroupRoom,
@@ -2812,6 +2770,9 @@ export function ChatCodingRoute() {
     setAgentRenameDraftName,
     cancelAgentRename,
     submitAgentRename,
+    agentCreateWizardOpen,
+    setAgentCreateWizardOpen,
+    agentCreateTriggerRef,
   } = useChatAgentDirectoryActions({
     lang,
     navigate,
@@ -2828,7 +2789,6 @@ export function ChatCodingRoute() {
     setAgentContextMenu,
     setSessionContextMenu,
     setSessionComposerErrors,
-    setAgentCreateWizardOpen,
     renameAgentEmptyMessage: t("renameAgentEmpty"),
   });
 

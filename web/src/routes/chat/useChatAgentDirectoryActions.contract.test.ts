@@ -33,6 +33,8 @@ describe("useChatAgentDirectoryActions contract", () => {
     expect(routeSource).toContain("AgentRenameDialog");
     expect(routeSource).toContain("agentRenameDraft");
     expect(routeSource).toContain("submitAgentRename");
+    expect(actionsSource).toContain("const [agentCreateWizardOpen, setAgentCreateWizardOpen]");
+    expect(actionsSource).toContain("agentCreateTriggerRef");
   });
 
   it("blocks only a duplicate archive for the same Agent", () => {

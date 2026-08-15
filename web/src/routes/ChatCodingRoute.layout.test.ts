@@ -20,6 +20,10 @@ import chatConversationIndexPanelContentSource from "./chat/ChatConversationInde
 import chatToolApprovalBridgeSource from "./chat/useChatToolApprovalBridge.ts?raw";
 import chatComposerBridgeStateSource from "./chat/useChatComposerBridgeState.ts?raw";
 import chatGroupRoomViewModelSource from "./chat/useChatGroupRoomViewModel.ts?raw";
+import chatGroupDraftStateSource from "./chat/useChatGroupDraftState.ts?raw";
+import chatGroupRoomActionModelSource from "./chat/chatGroupRoomActionModel.ts?raw";
+import chatWorkbenchContextMenusSource from "./chat/useChatWorkbenchContextMenus.ts?raw";
+import chatConversationIndexChromeSource from "./chat/useChatConversationIndexChrome.ts?raw";
 import chatSessionWorkbenchShellSource from "./chat/ChatSessionWorkbenchShell.tsx?raw";
 import chatWorkbenchCenterColumnSource from "./chat/ChatWorkbenchCenterColumn.tsx?raw";
 import chatWorkbenchFormatSource from "./chat/chatWorkbenchFormat.ts?raw";
@@ -56,13 +60,17 @@ import conversationIndexRailStyles from "./chat/ChatConversationIndexRail.styles
 import chatStatusRailStyles from "./chat/ChatStatusRail.styles";
 import tokenCoreStatusPanelStyles from "./chat/TokenCoreStatusPanel.styles";
 
-/** Workbench shell + catalog queries hook (R01c F1) + Phase F2 extract modules. */
+/** Workbench shell + catalog queries hook (R01c F1) + Phase F2/F3 extract modules. */
 const routeSource = [
   chatCodingRouteWorkbenchSource,
   chatWorkbenchCatalogQueriesSource,
   chatToolApprovalBridgeSource,
   chatComposerBridgeStateSource,
   chatGroupRoomViewModelSource,
+  chatGroupDraftStateSource,
+  chatGroupRoomActionModelSource,
+  chatWorkbenchContextMenusSource,
+  chatConversationIndexChromeSource,
 ].join("\n");
 
 /** Wave 8C/8D: layout contracts resolve class strings across route shell + panel/component maps. */
@@ -666,6 +674,21 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndLayoutSource).toContain("styles.layoutOverlay");
     expect(routeSource).toContain("useChatWorkbenchLayout");
     expect(routeSource).toContain("ChatSessionWorkbenchShell");
+  });
+
+  it("keeps Chat workbench as hook composition plus ChatSessionWorkbenchShell slots", () => {
+    expect(routeSource).toContain("useChatGroupDraftState");
+    expect(routeSource).toContain("useSyncChatGroupManageDrafts");
+    expect(routeSource).toContain("useChatWorkbenchContextMenus");
+    expect(routeSource).toContain("useChatConversationIndexChrome");
+    expect(routeSource).toContain("deriveChatGroupRoundState");
+    expect(routeSource).toContain("buildChatGroupRoomActionDisabledFlags");
+    expect(chatCodingRouteWorkbenchSource).not.toContain('from "./ChatConversationIndexPanel"');
+    expect(chatCodingRouteWorkbenchSource).toContain("lazy(() =>");
+    expect(chatCodingRouteWorkbenchSource).toContain('import("./ChatStatusRail")');
+    expect(chatCodingRouteWorkbenchSource).toContain('import("./CliAgentRunTerminalPanel")');
+    expect(chatSessionWorkbenchShellSource).toContain("WORKBENCH_LAYOUT_IDS.chat");
+    expect(chatSessionWorkbenchShellSource).toContain("VSessionWorkbenchPage");
   });
 
   it("places shared collapse-resize handles on the chat gutters", () => {
@@ -2592,7 +2615,7 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("moves direct session actions into a right-click context menu", () => {
-    expect(routeSource).toContain("type SessionContextMenuState");
+    expect(routeAndRenameMenuSource).toContain("type SessionContextMenuState");
     expect(routeSource).toContain("const [sessionContextMenu, setSessionContextMenu]");
     expect(routeSource).toContain("const contextMenuSessionId = sessionContextMenu?.sessionId ?? \"\"");
     expect(routeAndRenameMenuSource).toContain("const openSessionContextMenu = useCallback");

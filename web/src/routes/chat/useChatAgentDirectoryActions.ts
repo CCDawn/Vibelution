@@ -3,6 +3,7 @@
  */
 import {
   useCallback,
+  useRef,
   useState,
   type Dispatch,
   type MouseEvent as ReactMouseEvent,
@@ -35,7 +36,6 @@ export type UseChatAgentDirectoryActionsOptions = {
   setAgentContextMenu: Dispatch<SetStateAction<AgentContextMenuState | null>>;
   setSessionContextMenu: Dispatch<SetStateAction<SessionContextMenuState | null>>;
   setSessionComposerErrors: Dispatch<SetStateAction<Record<string, string>>>;
-  setAgentCreateWizardOpen: (open: boolean) => void;
   renameAgentEmptyMessage: string;
   /** Optional archive confirm (defaults to window.confirm). */
   confirmArchive?: (message: string) => boolean;
@@ -60,16 +60,17 @@ export function useChatAgentDirectoryActions(options: UseChatAgentDirectoryActio
     setAgentContextMenu,
     setSessionContextMenu,
     setSessionComposerErrors,
-    setAgentCreateWizardOpen,
     renameAgentEmptyMessage,
     confirmArchive = (message) => window.confirm(message),
   } = options;
 
   const [agentRenameDraft, setAgentRenameDraft] = useState<AgentRenameDraft | null>(null);
+  const [agentCreateWizardOpen, setAgentCreateWizardOpen] = useState(false);
+  const agentCreateTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const handleCreateAgent = useCallback(() => {
     setAgentCreateWizardOpen(true);
-  }, [setAgentCreateWizardOpen]);
+  }, []);
 
   const openAgentContextMenu = useCallback((
     event: ReactMouseEvent<HTMLElement>,
@@ -215,5 +216,8 @@ export function useChatAgentDirectoryActions(options: UseChatAgentDirectoryActio
     setAgentRenameDraftName,
     cancelAgentRename,
     submitAgentRename,
+    agentCreateWizardOpen,
+    setAgentCreateWizardOpen,
+    agentCreateTriggerRef,
   };
 }

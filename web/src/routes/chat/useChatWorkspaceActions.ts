@@ -98,6 +98,7 @@ export type UseChatWorkspaceActionsResult = {
   handleCreateSession: () => void;
   handleOpenProjectAgentBus: () => void;
   handleOpenDirectSession: (sessionId: string) => void;
+  handlePrefetchDirectSession: (sessionId: string) => void;
   handleOpenAgent: (agent: AgentInstance) => boolean;
   handleOpenMentionTarget: (target: ChatMentionTarget) => void;
   handleOpenGroupRoom: (roomId: string) => void;
@@ -210,6 +211,10 @@ export function useChatWorkspaceActions({
     setRightPaneCollapsed,
     setSessionContextMenu,
   ]);
+
+  const handlePrefetchDirectSession = useCallback((sessionId: string) => {
+    void prefetchSessionDetailWindow(queryClient, sessionId);
+  }, [queryClient]);
 
   const handleOpenDirectSession = useCallback((sessionId: string) => {
     const normalizedSessionId = String(sessionId || "").trim();
@@ -592,6 +597,7 @@ export function useChatWorkspaceActions({
     handleCreateSession,
     handleOpenProjectAgentBus,
     handleOpenDirectSession,
+    handlePrefetchDirectSession,
     handleOpenAgent,
     handleOpenMentionTarget,
     handleOpenGroupRoom,
