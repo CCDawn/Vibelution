@@ -13,6 +13,11 @@ import {
   openSourceCollectionStorage,
 } from "../../api/sourceCollection";
 import {
+  assessCandidateSourceQuality,
+  assessSourceQualityBatch,
+  planPaperNoteChunks,
+} from "../../api/teamResearchOps";
+import {
   buildCandidateGraph,
   completeKnowledgeCollection,
   extractSourceCollectionCandidates,
@@ -235,23 +240,20 @@ export function useTeamSourceCollectionMutations(options: UseTeamSourceCollectio
 
   const assessSourceQualityMutation = useMutation({
     mutationFn: (payload: { teamId: string; candidateId: string; decision: "approved" | "needs_revision" | "rejected" }) =>
-      fetchJson<TeamWorkflowSourceQualityAssessmentPayload>(
-        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/candidates/${encodeURIComponent(payload.candidateId)}/source-quality/assess`,
+      assessCandidateSourceQuality<TeamWorkflowSourceQualityAssessmentPayload>(
+        payload.teamId,
+        payload.candidateId,
         {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            assessedByAgent: options.sourceCollectionExtractorAgentId,
-            decision: payload.decision,
-            notes: payload.decision === "approved"
-              ? "Source Extractor Agent approved this source for downstream paper_note extraction."
-              : payload.decision === "rejected"
-                ? "Operator explicitly excluded this unverifiable source from the current run; source metadata and the assessment audit remain preserved."
-                : "Source Extractor Agent returned this source for repair before downstream extraction.",
-            requiredFixes: payload.decision === "needs_revision"
-              ? ["补充来源路径/权限/sha256/摘要/页码锚点或相关性说明后重新筛选。"]
-              : [],
-          }),
+          assessedByAgent: options.sourceCollectionExtractorAgentId,
+          decision: payload.decision,
+          notes: payload.decision === "approved"
+            ? "Source Extractor Agent approved this source for downstream paper_note extraction."
+            : payload.decision === "rejected"
+              ? "Operator explicitly excluded this unverifiable source from the current run; source metadata and the assessment audit remain preserved."
+              : "Source Extractor Agent returned this source for repair before downstream extraction.",
+          requiredFixes: payload.decision === "needs_revision"
+            ? ["补充来源路径/权限/sha256/摘要/页码锚点或相关性说明后重新筛选。"]
+            : [],
         },
       ),
     onSuccess: (payload, variables) => {
@@ -267,19 +269,12 @@ export function useTeamSourceCollectionMutations(options: UseTeamSourceCollectio
 
   const assessSourceQualityBatchMutation = useMutation({
     mutationFn: (payload: { teamId: string; assessedByAgent: string; maxCandidates?: number; force?: boolean; notes?: string }) =>
-      fetchJson<TeamWorkflowSourceQualityBatchAssessmentPayload>(
-        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/source-quality/assess-batch`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            assessedByAgent: payload.assessedByAgent,
-            maxCandidates: payload.maxCandidates ?? 100,
-            force: payload.force ?? false,
-            notes: payload.notes ?? "",
-          }),
-        },
-      ),
+      assessSourceQualityBatch<TeamWorkflowSourceQualityBatchAssessmentPayload>(payload.teamId, {
+        assessedByAgent: payload.assessedByAgent,
+        maxCandidates: payload.maxCandidates ?? 100,
+        force: payload.force ?? false,
+        notes: payload.notes ?? "",
+      }),
     onSuccess: (payload, variables) => {
       queryClient.setQueryData(queryKeys.teamWorkflow(variables.teamId), payload.workflow);
       queryClient.setQueryData(sourceQualityStatusQueryKey(variables.teamId), payload.sourceQualityStatus);
@@ -294,16 +289,13 @@ export function useTeamSourceCollectionMutations(options: UseTeamSourceCollectio
 
   const planPaperNoteChunksMutation = useMutation({
     mutationFn: (payload: { teamId: string; candidateId: string }) =>
-      fetchJson<TeamWorkflowPaperNoteChunkPlanPayload>(
-        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/candidates/${encodeURIComponent(payload.candidateId)}/paper-note-chunks/plan`,
+      planPaperNoteChunks<TeamWorkflowPaperNoteChunkPlanPayload>(
+        payload.teamId,
+        payload.candidateId,
         {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            createdByAgent: options.sourceCollectionOwnerAgentId,
-            maxPagesPerChunk: 4,
-            maxCharsPerChunk: 12000,
-          }),
+          createdByAgent: options.sourceCollectionOwnerAgentId,
+          maxPagesPerChunk: 4,
+          maxCharsPerChunk: 12000,
         },
       ),
     onSuccess: (payload, variables) => {
