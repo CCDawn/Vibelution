@@ -3005,6 +3005,7 @@ export function ChatCodingRoute() {
             sessionComposerErrors={sessionComposerErrors}
             sessionIdsNeedingApproval={sessionIdsNeedingApproval}
             sessionsById={sessionsById}
+            teams={teams}
             statusLabel={statusLabel}
             t={t}
             onCancelRename={cancelRenameSession}
@@ -3249,6 +3250,7 @@ export function ChatCodingRoute() {
                 renameSessionId={renameSessionMutation.variables?.sessionId ?? ""}
                 resolveModelLabel={resolveModelLabel}
                 sessions={agentSessionTabs}
+                teams={teams}
                 runtimeRunningSessionIds={runtimeRunningSessionIds}
                 sessionIdsNeedingApproval={sessionIdsNeedingApproval}
                 statusLabel={statusLabel}

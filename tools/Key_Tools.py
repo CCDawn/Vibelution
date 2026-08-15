@@ -806,7 +806,7 @@ def _build_key_tools() -> List[BaseTool]:
         当 operation=record_hypothesis_set 时，payload_json 须包含 portfolioId、maxCandidates、
         maxEvolutionRounds、currentEvolutionRound 和 candidates；runId 由当前正式任务绑定，Agent 不得猜测或填写。
         每个 candidate 须包含 candidateId、claim、
-        scores、counterEvidenceRefs、derivedFromCandidateIds、status、reviewRef。scores 必须同时包含 novelty、
+        scores、counterEvidenceRefs、derivedFromCandidateIds、status、reviewRef。scores 须同时包含 novelty、
         competitionFit、falsifiability、evidenceSupport、feasibility，且所有分数都在 0 到 1 之间；
         counterEvidenceRefs 只能引用上下文 allowedEvidenceRefs 中的真实值。
 
@@ -1805,10 +1805,12 @@ def _build_key_tools() -> List[BaseTool]:
         occurred_at: str = "",
     ) -> str:
         """
-        为当前 Agent 追加一条私有 episode（偏好、会话事实、私人笔记）。
+        为当前 Agent 追加一条跨会话私有记忆（偏好、会话事实、私人笔记）。
 
-        只写自己的 episodic_events.jsonl，不升公共目录，不写团队知识，也不拷规范/skill/代码。
-        热路径只追加，不作废历史行。当前会话会自动记入 refs。
+        先读本轮上下文 PersonalEpisodes，再决定是否写入。
+        不要用 glob、grep 或 cli_tool 查找或打开个人记忆落盘文件。
+        只写后续会话仍有用的内容；不拷规范、skill、代码或身份；不升公共目录，不写团队知识。
+        热路径只追加。当前会话会自动记入 refs。过期请用 supersede_episodic_memory_tool。
 
         Args:
             text: 记忆正文（必填）。
@@ -1833,9 +1835,10 @@ def _build_key_tools() -> List[BaseTool]:
         kind: str = "note",
     ) -> str:
         """
-        作废当前 Agent 的一条私有 episode；可选同时追加替换条目。
+        作废当前 Agent 的一条私有记忆；可选同时追加替换条目。
 
-        原 JSONL 行保留，只填 validUntil。用于过期偏好或被更新的事实。
+        episodeId 取自本轮上下文 PersonalEpisodes，不要用文件搜索去找。
+        原记录保留，只填 validUntil。用于过期偏好或被更新的事实。
         不升公共目录，不写团队知识。
 
         Args:
