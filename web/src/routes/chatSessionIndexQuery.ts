@@ -1,7 +1,7 @@
 import { useInfiniteQuery, type InfiniteData, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import { useMemo } from "react";
 
-import { fetchJson } from "../api/client";
+import { querySessions } from "../api/chat";
 import { queryKeys } from "../api/queryKeys";
 import type { AgentInstance, SessionDetail, SessionQueryResponse, SessionSummary } from "../api/types";
 import { mergeSessionDetailIntoSummaries } from "./chatSessionState";
@@ -23,17 +23,6 @@ type SessionQueryInfiniteData = InfiniteData<SessionQueryResponse, string>;
 export type SessionIndexCacheSnapshot = Array<[QueryKey, SessionQueryInfiniteData | undefined]>;
 export type AgentSessionCacheSnapshot = Array<[QueryKey, SessionQueryResponse | undefined]>;
 
-function sessionQueryUrl(queryText: string, cursor: string): string {
-  const params = new URLSearchParams();
-  params.set("limit", String(SESSION_INDEX_PAGE_SIZE));
-  if (cursor) {
-    params.set("cursor", cursor);
-  }
-  if (queryText) {
-    params.set("q", queryText);
-  }
-  return `/api/sessions/query?${params.toString()}`;
-}
 
 function mergeSessions(groups: Array<SessionSummary[] | undefined>): SessionSummary[] {
   const merged = new Map<string, SessionSummary>();
@@ -225,7 +214,11 @@ export function useSessionIndexQuery({
     initialPageParam: "",
     enabled,
     queryFn: async ({ pageParam }) => {
-      const payload = await fetchJson<SessionQueryResponse>(sessionQueryUrl(normalizedQueryText, String(pageParam || "")));
+      const payload = await querySessions({
+        limit: SESSION_INDEX_PAGE_SIZE,
+        cursor: String(pageParam || ""),
+        q: normalizedQueryText,
+      });
       const existing = queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions()) ?? [];
       const previousPages = queryClient.getQueryData<SessionQueryInfiniteData>(
         queryKeys.sessionQuery(normalizedQueryText, SESSION_INDEX_PAGE_SIZE),

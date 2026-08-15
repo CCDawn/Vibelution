@@ -48,17 +48,15 @@ const legacyRouteFetchJsonCallBudgets: Record<string, number> = {
   "routes/agent-create/AgentCreateWizardDialog.tsx": 5,
   "routes/agents/useAgentConfigDraftMutations.ts": 4,
   "routes/agents/useAgentWorkbenchMutations.ts": 15,
-  "routes/chat/ChatCodingRouteWorkbench.tsx": 6,
+  "routes/chat/ChatCodingRouteWorkbench.tsx": 5,
   "routes/chat/CliAgentRunTerminalPanel.tsx": 3,
   "routes/chat/chatComposerSubmitModel.ts": 1,
   "routes/chat/chatSessionDetailHelpers.ts": 1,
   "routes/chat/useChatCliAgentTerminal.ts": 1,
   "routes/chat/useChatComposerSubmit.ts": 4,
   "routes/chat/useChatSessionDetailMutations.ts": 3,
-  "routes/chat/useChatSessionSelection.ts": 1,
-  "routes/chat/useChatWorkbenchCatalogQueries.ts": 11,
-  "routes/chat/useChatWorkspaceLifecycle.ts": 11,
-  "routes/chatSessionIndexQuery.ts": 1,
+  "routes/chat/useChatWorkbenchCatalogQueries.ts": 10,
+  "routes/chat/useChatWorkspaceLifecycle.ts": 8,
   "routes/config/useConfigMigrationActions.ts": 1,
   "routes/config/useConfigProviderDraftActions.ts": 1,
   "routes/config/useConfigWorkspaceQueries.ts": 2,
@@ -83,7 +81,7 @@ const legacyRouteFetchJsonCallBudgets: Record<string, number> = {
   "routes/teams/useTeamsWorkbenchFoundation.tsx": 1,
 };
 // Task 9: ResearchFlowCanvasRoute.tsx + ResearchRoute.tsx fully removed (redirect-only shells deleted).
-const legacyRouteFetchJsonAggregateBudget = 270;
+const legacyRouteFetchJsonAggregateBudget = 263;
 
 function walkSourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((entry) => {

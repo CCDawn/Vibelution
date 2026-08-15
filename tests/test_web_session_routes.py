@@ -177,6 +177,86 @@ def test_session_bootstrap_route_delegates_to_one_service_boundary(monkeypatch):
     assert calls == [{"limit": 25, "cursor": "next", "q": "needle"}]
 
 
+def test_session_catalog_response_models_keep_unknown_fields(monkeypatch):
+    """Typed catalog envelopes must not strip extras the UI already consumes."""
+    from core.web.routes.session_catalog_models import SessionCatalogItem, SessionDeleteResponse
+
+    item = SessionCatalogItem.model_validate(
+        {
+            "id": "s1",
+            "title": "t",
+            "messages": [{"role": "user", "content": "hi"}],
+            "customFlag": True,
+        }
+    )
+    dumped = item.model_dump(exclude_unset=True)
+    assert dumped["messages"] == [{"role": "user", "content": "hi"}]
+    assert dumped["customFlag"] is True
+    assert "status" not in dumped
+
+    delete_payload = SessionDeleteResponse.model_validate(
+        {
+            "deleted": True,
+            "deletedSessionId": "s1",
+            "nextActiveSessionId": "s2",
+            "replacementDirectSessionId": "s3",
+        }
+    )
+    assert delete_payload.model_dump(exclude_unset=True)["replacementDirectSessionId"] == "s3"
+
+    monkeypatch.setattr(
+        session_routes,
+        "list_sessions",
+        lambda: [
+            {
+                "id": "s1",
+                "title": "t",
+                "agentId": "a1",
+                "hiddenFromIndex": True,
+                "customFlag": True,
+            }
+        ],
+    )
+    listed = client.get("/api/sessions")
+    assert listed.status_code == 200
+    listed_item = listed.json()[0]
+    assert listed_item["agentId"] == "a1"
+    assert listed_item["hiddenFromIndex"] is True
+    assert listed_item["customFlag"] is True
+    assert "status" not in listed_item
+
+    expected_select = {
+        "id": "session-active",
+        "title": "target",
+        "messages": [{"role": "user", "content": "hi"}],
+        "selectedLightweight": True,
+        "agentId": "agent-a",
+    }
+    monkeypatch.setattr(
+        session_routes,
+        "select_chat_session",
+        lambda *_args, **_kwargs: expected_select,
+    )
+    selected = client.post("/api/sessions/session-active/select")
+    assert selected.status_code == 200
+    assert selected.json() == expected_select
+
+    expected_delete = {
+        "deleted": True,
+        "deletedSessionId": "session-active",
+        "nextActiveSessionId": "session-next",
+        "replacementDirectSessionId": "session-replacement",
+    }
+    monkeypatch.setattr(
+        session_routes,
+        "delete_chat_session",
+        lambda *_args, **_kwargs: expected_delete,
+    )
+    deleted = client.delete("/api/sessions/session-active")
+    assert deleted.status_code == 200
+    assert deleted.json() == expected_delete
+
+
 def test_chat_workbench_bootstrap_reuses_agent_projection_for_session_query(monkeypatch):
     agents = [{"agentId": "agent-a", "displayName": "Agent A"}]
     captured: dict[str, object] = {}
