@@ -13,8 +13,7 @@ from typing import Any
 from core.research.workflow.challenge_cup_runtime import successor_map
 from core.research.workflow.iteration_decisions import (
     IterationDecisionError,
-    IterationDecisionKind,
-    parse_decision_kind,
+    route_target_after_governance,
     route_target_for_decision,
 )
 
@@ -35,17 +34,10 @@ def routed_successors(node_id: str, branch_decision: str | None) -> tuple[str, .
         if not raw:
             return ()
         try:
-            kind = parse_decision_kind(raw)
+            target = route_target_after_governance(raw)
         except IterationDecisionError:
             return ()
-        if kind is IterationDecisionKind.PROMOTE_CANDIDATE:
-            return ("candidate_promotion",)
-        if kind in {
-            IterationDecisionKind.STOP,
-            IterationDecisionKind.ROLLBACK_CANDIDATE,
-        }:
-            return ("result_package",)
-        return ()
+        return (target,)
     return successor_map().get(node_id, ())
 
 

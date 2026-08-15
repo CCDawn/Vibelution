@@ -44,6 +44,13 @@ ITERATION_ROUTE_TARGETS: dict[IterationDecisionKind, str | None] = {
     IterationDecisionKind.STOP: "version_governance",
 }
 
+# After version_governance: only promote/stop/rollback may continue in-run.
+GOVERNANCE_ROUTE_TARGETS: dict[IterationDecisionKind, str] = {
+    IterationDecisionKind.PROMOTE_CANDIDATE: "candidate_promotion",
+    IterationDecisionKind.ROLLBACK_CANDIDATE: "result_package",
+    IterationDecisionKind.STOP: "result_package",
+}
+
 # Definition edgeIds that must exist for runnable routes (not revise fork).
 ITERATION_DEFINITION_EDGE_IDS: dict[IterationDecisionKind, str | None] = {
     IterationDecisionKind.RERUN_SAME_PROTOCOL: "e_decision_rerun",
@@ -136,6 +143,17 @@ def parse_decision_kind(value: str | IterationDecisionKind | None) -> IterationD
 def route_target_for_decision(kind: IterationDecisionKind | str) -> str | None:
     k = parse_decision_kind(kind)
     return ITERATION_ROUTE_TARGETS[k]
+
+
+def route_target_after_governance(kind: IterationDecisionKind | str) -> str:
+    k = parse_decision_kind(kind)
+    target = GOVERNANCE_ROUTE_TARGETS.get(k)
+    if target is None:
+        raise IterationDecisionError(
+            f"illegal governed decision {k.value}",
+            code="illegal_governed_decision",
+        )
+    return target
 
 
 def validate_decision_payload(
