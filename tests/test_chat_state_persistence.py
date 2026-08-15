@@ -17,6 +17,7 @@ from core.ui.chat_state import (
     save_session_chat_state,
 )
 from core.web.services import session_service
+from core.web.services.session.live_output import SessionLiveOutputState
 
 
 @pytest.fixture(autouse=True)
@@ -474,6 +475,96 @@ def test_load_conversations_repair_writes_only_dirty_session_rows(tmp_path, monk
     assert by_id["session-a"]["lastTurnStatus"] == "ready"
     assert by_id["session-b"]["lastTurnStatus"] == "ready"
     assert by_id["session-b"]["title"] == "B"
+    assert load_session_chat_state(tmp_path, "session-a")["last_turn_status"] == "ready"
+    assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
+    assert load_session_chat_state(tmp_path, "session-b")["last_turn_status"] == "ready"
+
+
+def _seed_two_runtime_rows(tmp_path, *, status_a: str = "running") -> None:
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "conversations": [
+                {
+                    "conversation_id": "session-a",
+                    "title": "A",
+                    "last_turn_status": status_a,
+                },
+                {
+                    "conversation_id": "session-b",
+                    "title": "B",
+                    "last_turn_status": "ready",
+                },
+            ],
+        },
+    )
+
+
+def _spy_runtime_saves(monkeypatch) -> tuple[list[str], list[str]]:
+    full_saves: list[str] = []
+    original_save_chat_state = session_service.save_chat_state
+    monkeypatch.setattr(
+        session_service,
+        "save_chat_state",
+        lambda *args, **kwargs: full_saves.append("save") or original_save_chat_state(*args, **kwargs),
+    )
+    session_saves: list[str] = []
+    original_save_session = session_service.save_session_chat_state
+
+    def _spy_save_session(project_root, session_id, conversation, **kwargs):
+        session_saves.append(str(session_id))
+        return original_save_session(project_root, session_id, conversation, **kwargs)
+
+    monkeypatch.setattr(session_service, "save_session_chat_state", _spy_save_session)
+    return full_saves, session_saves
+
+
+def test_persist_interrupted_snapshot_writes_only_target_session_row(tmp_path, monkeypatch):
+    """Stop snapshot must upsert the stopped session instead of replacing the table."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_two_runtime_rows(tmp_path)
+    monkeypatch.setattr(session_service, "_snapshot_session_live_output", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_session_ledger_visible_messages", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(session_service, "_latest_assistant_message_is_stop", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(session_service, "_clear_session_live_output", lambda *_args, **_kwargs: None)
+    full_saves, session_saves = _spy_runtime_saves(monkeypatch)
+
+    session_service._persist_session_interrupted_snapshot(
+        "session-a",
+        {
+            "turnId": "turn-a",
+            "stopReason": "stop",
+            "stopRequestedAt": "2026-08-15T12:00:00",
+        },
+        lang="zh",
+    )
+
+    assert full_saves == []
+    assert session_saves == ["session-a"]
+    assert load_session_chat_state(tmp_path, "session-a")["last_turn_status"] == "ready"
+    assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
+    assert load_session_chat_state(tmp_path, "session-b")["last_turn_status"] == "ready"
+
+
+def test_persist_recovered_live_output_writes_only_target_session_row(tmp_path, monkeypatch):
+    """Recovered live output must upsert one session row instead of replacing the table."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_two_runtime_rows(tmp_path)
+    monkeypatch.setattr(session_service, "_session_ledger_visible_messages", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(session_service, "_find_turn_scoped_assistant_message", lambda *_args, **_kwargs: None)
+    full_saves, session_saves = _spy_runtime_saves(monkeypatch)
+
+    session_service._persist_recovered_live_output_to_chat_state(
+        "session-a",
+        "turn-a",
+        SessionLiveOutputState(session_id="session-a", turn_id="turn-a", content="partial"),
+    )
+
+    assert full_saves == []
+    assert session_saves == ["session-a"]
     assert load_session_chat_state(tmp_path, "session-a")["last_turn_status"] == "ready"
     assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
     assert load_session_chat_state(tmp_path, "session-b")["last_turn_status"] == "ready"
