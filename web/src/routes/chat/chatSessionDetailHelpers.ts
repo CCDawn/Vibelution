@@ -1,6 +1,7 @@
 import type { QueryClient } from "@tanstack/react-query";
 
-import { fetchSessionDetail } from "../../api/chat";
+import { fetchSessionDetail, isSessionNotFoundError } from "../../api/chat";
+import { evictUnopenableSessionFromCaches } from "../chatSessionIndexQuery";
 import { queryKeys } from "../../api/queryKeys";
 import type {
   ChatRoomDetail,
@@ -71,7 +72,19 @@ export function prefetchSessionDetailWindow(
       messageLimit: options.messageLimit,
     }),
     staleTime: SESSION_DETAIL_PREFETCH_STALE_MS,
-  }).then(() => queryClient.getQueryData<SessionDetail>(queryKeys.session(normalizedSessionId)));
+  }).then(() => {
+    const state = queryClient.getQueryState<SessionDetail>(queryKeys.session(normalizedSessionId));
+    if (state?.status === "error" && isSessionNotFoundError(state.error)) {
+      evictUnopenableSessionFromCaches(queryClient, normalizedSessionId);
+      return undefined;
+    }
+    return queryClient.getQueryData<SessionDetail>(queryKeys.session(normalizedSessionId));
+  }).catch((error: unknown) => {
+    if (isSessionNotFoundError(error)) {
+      evictUnopenableSessionFromCaches(queryClient, normalizedSessionId);
+    }
+    return undefined;
+  });
 }
 
 /** Prefer recently updated sessions other than the active one (list order as-is). */
@@ -100,10 +113,7 @@ export function resolveNeighborSessionIdsForPrefetch(input: {
 }
 
 
-export function isSessionNotFoundError(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error ?? "");
-  return /session not found|会话不存在|未找到会话/i.test(message);
-}
+export { isSessionNotFoundError } from "../../api/chat";
 
 /**
  * Minimal SessionDetail shell from list summary so session switches can paint

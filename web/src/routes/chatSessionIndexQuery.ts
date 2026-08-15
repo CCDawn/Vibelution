@@ -3,10 +3,16 @@ import { useMemo } from "react";
 
 import { querySessions } from "../api/chat";
 import { queryKeys } from "../api/queryKeys";
-import type { AgentInstance, SessionDetail, SessionQueryResponse, SessionSummary } from "../api/types";
+import type {
+  AgentInstance,
+  ConversationSummary,
+  SessionDetail,
+  SessionQueryResponse,
+  SessionSummary,
+} from "../api/types";
 import { mergeSessionDetailIntoSummaries } from "./chatSessionState";
-import { mergePreservedCreatedSessions } from "./sessionCreatePreserve";
-import { filterOutTombstonedSessions } from "./sessionDeleteTombstone";
+import { mergePreservedCreatedSessions, unpinSessionCreatePreserve } from "./sessionCreatePreserve";
+import { filterOutTombstonedSessions, markSessionDeleteTombstone } from "./sessionDeleteTombstone";
 
 export const SESSION_INDEX_PAGE_SIZE = 50;
 
@@ -140,6 +146,35 @@ export function updateSessionSummaryCaches(queryClient: QueryClient, updater: Se
   queryClient.setQueriesData<SessionQueryInfiniteData>({ queryKey: ["sessions", "query"] }, (data) =>
     data ? repartitionSessionPages(data, updater) : data,
   );
+}
+
+/**
+ * Drop an unopenable session from list caches without cancelling the active
+ * detail query, so an explicit URL can still settle on the unavailable surface.
+ */
+export function evictUnopenableSessionFromCaches(queryClient: QueryClient, sessionId: string) {
+  const normalizedSessionId = String(sessionId || "").trim();
+  if (!normalizedSessionId) {
+    return;
+  }
+  markSessionDeleteTombstone(normalizedSessionId);
+  unpinSessionCreatePreserve(normalizedSessionId);
+  updateSessionSummaryCaches(queryClient, (sessions) =>
+    sessions?.filter((session) => session.id !== normalizedSessionId),
+  );
+  removeSessionFromAgentSessionCaches(queryClient, normalizedSessionId);
+  queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations(), (conversations) => {
+    if (!conversations) {
+      return conversations;
+    }
+    return conversations.filter((conversation) => {
+      if (conversation.type !== "direct_agent") {
+        return true;
+      }
+      return conversation.directSessionId !== normalizedSessionId
+        && conversation.conversationId !== normalizedSessionId;
+    });
+  });
 }
 
 export function updateAgentSessionSummaryCaches(queryClient: QueryClient, updater: SessionSummaryUpdater) {

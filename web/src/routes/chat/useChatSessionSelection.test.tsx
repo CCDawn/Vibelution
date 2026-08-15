@@ -221,4 +221,20 @@ describe("useChatSessionSelection committed-route preference sync", () => {
     expect(setSessionComposerErrors).toHaveBeenCalled();
     expect(cacheLike.refreshSessionRuntime).toHaveBeenCalledWith("session-a");
   });
+
+  it("evicts Session not found from list caches without navigating or refreshing runtime", async () => {
+    fetchJsonMock.mockRejectedValue(new Error("Session not found"));
+    mount("session-a");
+    queryClient.setQueryData(queryKeys.sessions(), [
+      { id: "session-a", title: "A", status: "idle", taskSummary: "", lastActive: "", updatedAt: "", currentPhase: "ready" },
+      { id: "session-b", title: "B", status: "idle", taskSummary: "", lastActive: "", updatedAt: "", currentPhase: "ready" },
+    ]);
+    await flushDebounce();
+    expect(queryClient.getQueryData(queryKeys.sessions())).toEqual([
+      expect.objectContaining({ id: "session-b" }),
+    ]);
+    expect(setSessionComposerErrors).toHaveBeenCalled();
+    expect(cacheLike.refreshSessionRuntime).not.toHaveBeenCalled();
+    expect(syncSessionDetail).not.toHaveBeenCalled();
+  });
 });

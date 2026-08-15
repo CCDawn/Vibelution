@@ -3483,7 +3483,10 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("keeps explicit missing sessions on their URL with an unavailable surface instead of reconciling away", () => {
-    expect(routeAndHelpersSource).toContain("function isSessionNotFoundError");
+    expect(chatApiSource).toContain("function isSessionNotFoundError");
+    expect(routeAndHelpersSource).toContain("isSessionNotFoundError");
+    expect(chatSessionSelectionSource).toContain("evictUnopenableSessionFromCaches");
+    expect(chatSessionDetailHelpersSource).toContain("evictUnopenableSessionFromCaches");
     expect(routeSource).toContain("sessionDetailQuery.isError");
     expect(routeSource).toContain(
       "// Explicit missing/archived session keeps its URL and renders the blocking",

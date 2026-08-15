@@ -8,6 +8,7 @@ import {
   isSessionDetailHardLoading,
   isSessionNotFoundError,
   isStaleLedgerUpdate,
+  prefetchSessionDetailWindow,
   resolveNeighborSessionIdsForPrefetch,
   resolveSessionDetailPlaceholder,
   sessionDetailSnapshotKey,
@@ -15,13 +16,17 @@ import {
 } from "./chatSessionDetailHelpers";
 import type { SessionDetail, SessionSummary } from "../../api/types";
 import * as client from "../../api/client";
+import { QueryClient } from "@tanstack/react-query";
+import { queryKeys } from "../../api/queryKeys";
 import { vi } from "vitest";
 import { resolveAssistantTurnRenderSurface } from "../chatTurnProtocol";
+import { isSessionDeleteTombstoned, resetSessionDeleteTombstonesForTests } from "../sessionDeleteTombstone";
 
 describe("chatSessionDetailHelpers", () => {
   it("detects session-not-found errors across locales", () => {
     expect(isSessionNotFoundError(new Error("Session not found"))).toBe(true);
     expect(isSessionNotFoundError(new Error("会话不存在"))).toBe(true);
+    expect(isSessionNotFoundError(new Error("未找到当前会话"))).toBe(true);
     expect(isSessionNotFoundError(new Error("network down"))).toBe(false);
   });
 
@@ -161,5 +166,27 @@ describe("chatSessionDetailHelpers", () => {
         activeSessionId: "a",
       }),
     ).toEqual([]);
+  });
+
+  it("evicts neighbor 404s from list caches during prefetch without throwing", async () => {
+    resetSessionDeleteTombstonesForTests();
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    queryClient.setQueryData(queryKeys.sessions(), [{
+      id: "ghost",
+      title: "Ghost",
+      status: "idle",
+      taskSummary: "",
+      lastActive: "",
+      updatedAt: "",
+      currentPhase: "ready",
+    }]);
+    const spy = vi.spyOn(client, "fetchJson").mockRejectedValue(new Error("Session not found"));
+    await expect(prefetchSessionDetailWindow(queryClient, "ghost")).resolves.toBeUndefined();
+    expect(queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions())?.some((item) => item.id === "ghost")).toBe(false);
+    expect(isSessionDeleteTombstoned("ghost")).toBe(true);
+    spy.mockRestore();
+    resetSessionDeleteTombstonesForTests();
   });
 });
