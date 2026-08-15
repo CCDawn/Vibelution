@@ -23,11 +23,13 @@ def append_episodic_memory_tool(
     occurred_at: str = "",
 ) -> str:
     """
-    Append one private episode for the current Agent.
+    Append one private cross-session episode for the current Agent.
 
-    Use this for preferences, session facts, or private notes that should survive
-    later turns. Do not copy standards, skills, code, identity, or team/public
-    knowledge here. This does not promote anything to the public catalog.
+    Read PersonalEpisodes in the current turn context first. Do not use
+    glob, grep, or cli_tool to find or open private memory files.
+    Write only preferences, session facts, or private notes that should
+    survive later sessions. Do not copy standards, skills, code, identity,
+    or team/public knowledge. This does not promote to the public catalog.
 
     Args:
         text: Episode body (required).
@@ -95,9 +97,10 @@ def supersede_episodic_memory_tool(
     """
     Invalidate one current private episode for the current Agent.
 
-    Use this when a preference or fact is outdated. The original JSONL line
-    stays; only validUntil is filled. Optional successor_text appends a
-    replacement episode and links the old one to it.
+    Take episodeId from PersonalEpisodes in the current turn context; do
+    not search memory files. Use this when a preference or fact is outdated.
+    The original record stays; only validUntil is filled. Optional
+    successor_text appends a replacement episode and links the old one to it.
 
     Args:
         episode_id: Current episode to supersede (required).
