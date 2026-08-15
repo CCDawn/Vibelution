@@ -406,8 +406,9 @@ def save_session_chat_state(
     payload = dict(conversations[0]) if conversations and isinstance(conversations[0], dict) else dict(conversation)
     payload.setdefault("conversation_id", normalized)
     payload.setdefault("conversationId", normalized)
-    with _chat_state_repository(project_root) as repository:
-        result = repository.upsert_session_runtime_state(normalized, payload).result(timeout=5)
+    with chat_state_transaction(project_root):
+        with _chat_state_repository(project_root) as repository:
+            result = repository.upsert_session_runtime_state(normalized, payload).result(timeout=5)
     revision = int((result or {}).get("stateRevision") or 0)
     notify_session_catalog_dirty(
         project_root,
