@@ -109,3 +109,64 @@ def test_restart_after_worker_crash_resumes_same_thread(tmp_path: Path) -> None:
         assert payload["nodeId"] == "source_extraction"
     finally:
         harness.close()
+
+
+def test_repair_inserts_missing_adapter_dispatch_for_dispatching_attempt(
+    tmp_path: Path,
+) -> None:
+    from dataclasses import replace
+
+    from tests._support.workflow_ledger_helpers import (
+        build_attempt_record,
+        build_command_record,
+    )
+
+    harness = GraphHarness(tmp_path)
+    try:
+        harness.seed()
+
+        def mutate(uow):
+            uow.repository.insert_command(
+                build_command_record(
+                    command_id="cmd-orphan-1",
+                    run_id="run-test",
+                    node_id="controlled_run",
+                    command_kind="retry_node",
+                    idempotency_key="cmd:orphan-controlled",
+                )
+            )
+            uow.repository.insert_attempt(
+                replace(
+                    build_attempt_record(
+                        node_run_id="nr-run-test-controlled_run-a2",
+                        run_id="run-test",
+                        node_id="controlled_run",
+                        attempt=2,
+                        actor_kind="system",
+                        status="dispatching",
+                        command_id="cmd-orphan-1",
+                    ),
+                    pending_action_id="act-48c9c78e19b08b93",
+                )
+            )
+
+        harness.commands.store.submit(mutate, force_flush=True).result(timeout=10)
+        handled = harness.worker.run_once()
+        assert handled >= 1
+        pending = harness.latest_adapter_pending()
+        assert pending is not None
+        assert pending.action_kind == "adapter_dispatch"
+        payload = json.loads(pending.payload_json)
+        assert payload["actionId"] == "act-48c9c78e19b08b93"
+        assert payload["nodeId"] == "controlled_run"
+        assert payload["nodeRunId"] == "nr-run-test-controlled_run-a2"
+        again = harness.worker.run_once()
+        assert again == 0
+        rows = [
+            row
+            for row in harness.commands.store.list_pending_outbox("run-test")
+            if row.action_kind == "adapter_dispatch"
+        ]
+        assert len(rows) == 1
+    finally:
+        harness.close()

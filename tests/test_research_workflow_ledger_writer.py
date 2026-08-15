@@ -363,8 +363,9 @@ def test_close_wins_race_fails_future_before_commit() -> None:
 
 
 def test_commit_wins_race_commits_and_settles_success() -> None:
-    """commit-wins：writer 已进入 COMMIT 时 close 必须等待 → 事务提交且
-    Future 成功，不出现 committed-but-failed。"""
+    """commit-wins：writer 已进入 COMMIT 时 close 超时返回但不提前失败
+    in-flight Future；释放 COMMIT 后按真实提交结果 settle（不允许
+    committed-but-failed，也不允许 close 无界阻塞）。"""
     import threading
     import time
 
@@ -407,20 +408,16 @@ def test_commit_wins_race_commits_and_settles_success() -> None:
         future = writer.submit(mutate, force_flush=False)
         assert commit_started.wait(timeout=5), "writer 必须已进入 COMMIT"
 
-        close_results: list[bool] = []
+        start = time.monotonic()
+        writer.close(timeout=0.2)
+        elapsed = time.monotonic() - start
+        assert 0.15 <= elapsed < 3.0, f"close 必须按 timeout 有界返回，实际 {elapsed:.3f}s"
 
-        def do_close():
-            writer.close(timeout=0.2)
-            close_results.append(True)
-
-        closer = threading.Thread(target=do_close)
-        closer.start()
-        time.sleep(0.3)
-        assert not close_results, "close 必须等待在途 COMMIT 完成后再标记超时"
+        assert not future.done(), "COMMIT 阻塞中 close 不得把 in-flight Future 提前标成失败"
 
         allow_commit.set()
-        closer.join(timeout=10)
-        assert close_results, "close 未返回"
+        writer._thread.join(timeout=10)
+        assert not writer._thread.is_alive()
 
         assert future.result(timeout=1) == "ok", "committed-but-failed: Future 不得失败"
         assert published == ["committed"], "commit-wins: after_commit 必须执行"
@@ -432,6 +429,80 @@ def test_commit_wins_race_commits_and_settles_success() -> None:
             if sql == "COMMIT"
         ]
         assert commits == ["COMMIT"], "commit-wins: 事务必须提交且仅提交一次"
+    finally:
+        allow_commit.set()
+        writer._thread.join(timeout=10)
+        writer.close()
+
+
+def test_close_bounded_with_queued_envelope_during_blocked_commit() -> None:
+    """COMMIT 阻塞中 close 有界返回：在途 Future 保持 pending 并随后成功，
+    排队 envelope 立即失败且其 mutation 不得执行。"""
+    import threading
+    import time
+
+    from core.research.workflow.ledger import WorkflowLedgerClosedError
+
+    commit_started = threading.Event()
+    allow_commit = threading.Event()
+
+    class _BlockingCommitConnection:
+        def __init__(self) -> None:
+            self.executed: list[str] = []
+            self.closed = False
+
+        def execute(self, sql: str) -> None:
+            self.executed.append(sql)
+            if sql == "COMMIT":
+                commit_started.set()
+                allow_commit.wait(timeout=30)
+
+        def close(self) -> None:
+            self.closed = True
+
+    class _BlockingCommitDatabase:
+        def __init__(self) -> None:
+            self.connections: list[_BlockingCommitConnection] = []
+
+        def open_writer(self) -> _BlockingCommitConnection:
+            connection = _BlockingCommitConnection()
+            self.connections.append(connection)
+            return connection
+
+    database = _BlockingCommitDatabase()
+    writer = _build_writer(database, poll_interval_s=0.01)
+    writer.start()
+    try:
+        queued_mutation_calls: list[str] = []
+
+        def first(uow):
+            return "first-ok"
+
+        first_future = writer.submit(first, force_flush=False)
+        assert commit_started.wait(timeout=5), "writer 必须已进入 COMMIT"
+
+        def second(uow):
+            queued_mutation_calls.append("second-ran")
+            return "second-ok"
+
+        second_future = writer.submit(second, force_flush=False)
+
+        start = time.monotonic()
+        writer.close(timeout=0.2)
+        elapsed = time.monotonic() - start
+        assert 0.15 <= elapsed < 3.0, f"close 必须按 timeout 有界返回，实际 {elapsed:.3f}s"
+
+        assert not first_future.done(), "COMMIT 阻塞中在途 Future 必须保持 pending"
+        with pytest.raises(WorkflowLedgerClosedError):
+            second_future.result(timeout=1)
+        assert queued_mutation_calls == [], "排队 envelope 的 mutation 不得执行"
+
+        allow_commit.set()
+        writer._thread.join(timeout=10)
+        assert not writer._thread.is_alive()
+
+        assert first_future.result(timeout=1) == "first-ok", "释放 COMMIT 后在途 Future 必须成功"
+        assert queued_mutation_calls == [], "关闭失败的排队 mutation 不得在释放后执行"
     finally:
         allow_commit.set()
         writer._thread.join(timeout=10)
