@@ -164,6 +164,8 @@ def test_agent_unresolvable_reports_actor_readiness() -> None:
     result = _evaluate(service, context)
     assert result.actor.configured is True
     assert result.actor.resolvable is False
+    assert result.ready is False
+    assert any(b.code == "agent_not_configured" for b in result.blockers)
 
 
 def test_human_node_always_actor_ready() -> None:
