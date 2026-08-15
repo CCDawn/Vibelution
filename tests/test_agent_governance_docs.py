@@ -58,6 +58,27 @@ def test_main_is_reserved_for_fast_forward_integration() -> None:
     assert "FAST_PATCH may stay in the current workspace" not in standard
 
 
+def test_proactive_self_review_and_local_main_merge_is_required() -> None:
+    agents = (PROJECT_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    standard = (PROJECT_ROOT / "docs" / "standards" / "development-standard.md").read_text(
+        encoding="utf-8"
+    )
+    collaboration = (PROJECT_ROOT / "docs" / "agents" / "worktree-collaboration.md").read_text(
+        encoding="utf-8"
+    )
+    loop = (PROJECT_ROOT / "docs" / "guides" / "loop.md").read_text(encoding="utf-8")
+    playbook = (PROJECT_ROOT / "docs" / "guides" / "playbook.md").read_text(encoding="utf-8")
+
+    assert "主动自审当前任务 diff" in agents
+    assert "不得把「等用户再说审查/合入」当作完成态" in agents
+    assert "不得以未主动审查合入结束" in agents
+    assert "waiting for the user to request review or merge is not done" in standard
+    assert "without waiting for the user to request review" in collaboration
+    assert "不得等用户再下令审查/合入" in loop
+    assert "合入门已通过却未主动合入" in loop
+    assert "不得等用户再下令" in playbook
+
+
 def test_windows_no_console_red_line_is_normative():
     """Visible console popups are permanently forbidden for product runtime."""
 
