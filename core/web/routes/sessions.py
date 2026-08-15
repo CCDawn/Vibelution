@@ -19,6 +19,11 @@ from core.web.routes.session_catalog_models import (
     SessionDeleteResponse,
     SessionQueryResponse,
 )
+from core.web.routes.session_turn_models import (
+    SessionAttachmentResponse,
+    SessionLlmOptionsResponse,
+    SessionTurnCommandResponse,
+)
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 from core.web.services.session.tool_approvals import (
     ToolApprovalConflictError,
@@ -308,7 +313,11 @@ def session_detail(
     return detail
 
 
-@router.get("/sessions/{session_id}/llm-options")
+@router.get(
+    "/sessions/{session_id}/llm-options",
+    response_model=SessionLlmOptionsResponse,
+    response_model_exclude_unset=True,
+)
 def session_llm_options(session_id: str) -> dict:
     try:
         return get_session_llm_options(session_id)
@@ -316,7 +325,11 @@ def session_llm_options(session_id: str) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.patch("/sessions/{session_id}/reasoning-effort")
+@router.patch(
+    "/sessions/{session_id}/reasoning-effort",
+    response_model=SessionLlmOptionsResponse,
+    response_model_exclude_unset=True,
+)
 def session_reasoning_effort_update(session_id: str, payload: SessionReasoningEffortPayload) -> dict:
     try:
         return update_session_reasoning_effort(
@@ -455,7 +468,12 @@ def session_image_artifact(
     return FileResponse(path, media_type=content_type, filename=filename)
 
 
-@router.post("/sessions/{session_id}/attachments", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/sessions/{session_id}/attachments",
+    status_code=status.HTTP_201_CREATED,
+    response_model=SessionAttachmentResponse,
+    response_model_exclude_unset=True,
+)
 async def session_upload_attachment(session_id: str, request: Request) -> dict:
     content_type = str(request.headers.get("content-type") or "").strip()
     filename = str(request.headers.get("x-vibelution-filename") or "").strip()
@@ -473,7 +491,12 @@ async def session_upload_attachment(session_id: str, request: Request) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/sessions/{session_id}/messages", status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "/sessions/{session_id}/messages",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=SessionTurnCommandResponse,
+    response_model_exclude_unset=True,
+)
 def session_submit_message(session_id: str, payload: SessionMessagePayload, request: Request) -> dict:
     client_submission_id = str(payload.clientSubmissionId or "").strip() or _new_client_submission_id()
     try:
@@ -512,7 +535,12 @@ def session_submit_message(session_id: str, payload: SessionMessagePayload, requ
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/sessions/{session_id}/messages/edit-resubmit", status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "/sessions/{session_id}/messages/edit-resubmit",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=SessionCatalogItem,
+    response_model_exclude_unset=True,
+)
 def session_edit_resubmit_message(session_id: str, payload: SessionMessageEditPayload) -> dict:
     client_submission_id = str(payload.clientSubmissionId or "").strip() or _new_client_submission_id()
     try:
@@ -536,7 +564,12 @@ def session_edit_resubmit_message(session_id: str, payload: SessionMessageEditPa
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/sessions/{session_id}/stop", status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "/sessions/{session_id}/stop",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=SessionCatalogItem,
+    response_model_exclude_unset=True,
+)
 def session_stop_turn(session_id: str, payload: SessionStopPayload) -> dict:
     try:
         return request_stop_session_turn(session_id, expected_turn_id=payload.turnId)
@@ -577,7 +610,12 @@ def session_resolve_tool_approval(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/sessions/{session_id}/guidance", status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "/sessions/{session_id}/guidance",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=SessionCatalogItem,
+    response_model_exclude_unset=True,
+)
 def session_submit_guidance(session_id: str, payload: SessionGuidancePayload) -> dict:
     try:
         return submit_session_guidance(session_id, payload.content, mode=payload.mode)

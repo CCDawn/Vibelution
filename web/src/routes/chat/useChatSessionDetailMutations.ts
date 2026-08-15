@@ -3,6 +3,7 @@ import type { Dispatch, SetStateAction } from "react";
 
 import {
   resolveSessionToolApprovalDecision,
+  updateSessionReasoningEffort,
   type SessionToolApprovalDecision,
 } from "../../api/chat";
 import { fetchJson } from "../../api/client";
@@ -84,11 +85,7 @@ export function useChatSessionDetailMutations({
 }: UseChatSessionDetailMutationsOptions): UseChatSessionDetailMutationsResult {
   const sessionReasoningEffortMutation = useMutation({
     mutationFn: (variables: { sessionId: string; reasoningEffort: string }) =>
-      fetchJson<SessionLlmOptions>(`/api/sessions/${encodeURIComponent(variables.sessionId)}/reasoning-effort`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reasoningEffort: variables.reasoningEffort }),
-      }),
+      updateSessionReasoningEffort(variables.sessionId, variables.reasoningEffort),
     onMutate: (variables) => {
       setSessionComposerErrors((current) => ({ ...current, [variables.sessionId]: "" }));
     },

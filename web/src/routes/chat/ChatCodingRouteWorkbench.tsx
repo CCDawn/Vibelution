@@ -29,7 +29,7 @@ import {
 } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
-import { listPendingSessionToolApprovals, querySessions } from "../../api/chat";
+import { fetchSessionLlmOptions, listPendingSessionToolApprovals, querySessions } from "../../api/chat";
 import { fetchJson } from "../../api/client";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import type { AgentArchiveResponse } from "../agentWorkspaceCache";
@@ -1037,9 +1037,7 @@ export function ChatCodingRoute() {
   const sessionLlmOptionsQuery = useQuery({
     queryKey: queryKeys.sessionLlmOptions(activeSessionId ?? "none"),
     enabled: secondaryChatDataEnabled && Boolean(activeSessionId) && !isTempSessionId(activeSessionId),
-    queryFn: () => fetchJson<SessionLlmOptions>(
-      `/api/sessions/${encodeURIComponent(activeSessionId ?? "")}/llm-options`,
-    ),
+    queryFn: () => fetchSessionLlmOptions(activeSessionId ?? ""),
     staleTime: 30_000,
   });
   // Explicit missing/archived session keeps its URL and renders the blocking

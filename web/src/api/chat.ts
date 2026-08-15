@@ -1,12 +1,16 @@
 import { fetchJson } from "./client";
 import type {
   ChatWorkbenchBootstrap,
+  ConversationAttachment,
   SessionChatReviewCandidateResponse,
   SessionDeleteResponse,
   SessionDetail,
+  SessionGuidanceMode,
+  SessionLlmOptions,
   SessionQueryResponse,
   SessionSummary,
   SessionToolApprovalRequest,
+  SessionTurnAcceptedResponse,
 } from "./types";
 
 export type SessionToolApprovalDecision =
@@ -149,4 +153,117 @@ export function deleteChatSession(sessionId: string): Promise<SessionDeleteRespo
       Prefer: "respond-async",
     },
   });
+}
+
+export function fetchSessionLlmOptions(sessionId: string): Promise<SessionLlmOptions> {
+  return fetchJson<SessionLlmOptions>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/llm-options`,
+  );
+}
+
+export function updateSessionReasoningEffort(
+  sessionId: string,
+  reasoningEffort: string,
+): Promise<SessionLlmOptions> {
+  return fetchJson<SessionLlmOptions>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/reasoning-effort`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reasoningEffort }),
+    },
+  );
+}
+
+export function uploadSessionImageAttachment(
+  sessionId: string,
+  init: { contentType?: string; filename: string; body: Blob },
+): Promise<ConversationAttachment> {
+  return fetchJson<ConversationAttachment>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/attachments`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": init.contentType || "application/octet-stream",
+        "X-Vibelution-Filename": encodeURIComponent(init.filename),
+      },
+      body: init.body,
+    },
+  );
+}
+
+export function submitSessionMessage(
+  sessionId: string,
+  payload: {
+    content: string;
+    clientSubmissionId: string;
+    contentUtf8Base64: string;
+    attachmentIds: string[];
+    references: unknown[];
+    mentalModelEnabled?: boolean;
+    runtimeStatusEnabled?: boolean;
+    turnStatusTail?: unknown;
+  },
+): Promise<SessionTurnAcceptedResponse> {
+  return fetchJson<SessionTurnAcceptedResponse>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/messages`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Prefer: "respond-async",
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function editResubmitSessionMessage(
+  sessionId: string,
+  payload: {
+    messageId: string;
+    clientSubmissionId: string;
+    content: string;
+    contentUtf8Base64: string;
+    mentalModelEnabled?: boolean;
+    runtimeStatusEnabled?: boolean;
+    turnStatusTail?: unknown;
+  },
+): Promise<SessionDetail> {
+  return fetchJson<SessionDetail>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/messages/edit-resubmit`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function stopSessionTurn(sessionId: string, turnId: string): Promise<SessionDetail> {
+  return fetchJson<SessionDetail>(`/api/sessions/${encodeURIComponent(sessionId)}/stop`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ turnId }),
+  });
+}
+
+export function submitSessionGuidance(
+  sessionId: string,
+  payload: { content: string; mode: SessionGuidanceMode },
+): Promise<SessionDetail> {
+  return fetchJson<SessionDetail>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/guidance`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+  );
 }
