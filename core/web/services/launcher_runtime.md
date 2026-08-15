@@ -38,6 +38,7 @@ Electron main (TS) = Launcher 控制面（ADR 0009 已落地）
   → lifecycle / 分支实例 / settings / maintenance 由 main 编排，经无控制台 Python JSON CLI
     （vibelution_desktop_entry.py --action lifecycle|branch-instance|launcher-api|resolve-workbench）
   → Python 子进程：Runtime Manager + FastAPI 工作台（不再长期占用 :8765）
+  → 关闭桌面壳 / 重启 Launcher 必须先停掉 RM daemon 及其工作台/隔离实例进程树；重开必须用当前 checkout 的新 daemon
   → close transaction / desktop session 真相在 main；Python 侧只报告 backend 状态
   → 「工作台开着」= 后端健康 **且** Electron 工作台窗口 open。仅后端就绪（noBrowser）是 `partial` / `browser_missing`，不是 `open`
   → isolated worktree backends 仍在同一 desktop shell 开 `{shortName} 台`

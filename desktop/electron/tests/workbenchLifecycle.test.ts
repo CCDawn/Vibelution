@@ -80,6 +80,22 @@ describe("runWorkbenchLifecycle", () => {
     ).toBe("1");
   });
 
+  it("passes shutdown through the lifecycle bridge", async () => {
+    const spawnImpl = fakeSpawnWithOutput(
+      JSON.stringify({ schemaVersion: 1, accepted: true, operation: "shutdown" })
+    );
+    const result = await runWorkbenchLifecycle({
+      workspaceRoot: "C:/repo",
+      pythonPath: "python",
+      operatorConfigPath: "",
+      operation: "shutdown",
+      spawnImpl,
+    });
+    expect(result.operation).toBe("shutdown");
+    const [, args] = spawnImpl.mock.calls[0] as [string, string[]];
+    expect(args).toContain("shutdown");
+  });
+
   it("passes stop/restart/rebuild operations through the bridge", async () => {
     const spawnImpl = fakeSpawnWithOutput(
       JSON.stringify({ schemaVersion: 1, accepted: true, operation: "restart", commandId: "cmd-r" })

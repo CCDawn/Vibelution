@@ -1257,6 +1257,22 @@ async function stopOwnedPythonLauncherService(): Promise<LauncherServiceStopResu
   });
 }
 
+async function stopManagedRuntime(): Promise<void> {
+  const desktopEnv = desktopEnvironment();
+  const pythonPath = String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
+  if (!pythonPath) {
+    throw new Error("VIBELUTION_PYTHON_PATH or PYTHON is required to stop managed project processes");
+  }
+  const paths = createDesktopPathsForApp();
+  await runWorkbenchLifecycle({
+    workspaceRoot: paths.workspaceRoot,
+    pythonPath,
+    operatorConfigPath:
+      launcherBootstrap?.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
+    operation: "shutdown"
+  });
+}
+
 async function runSmokeAndQuit(paths: DesktopPaths): Promise<void> {
   const desktopEnv = desktopEnvironment();
   const bootstrap = await resolveSmokeBootstrap(paths, desktopEnv);
@@ -1276,6 +1292,7 @@ async function runSmokeAndQuit(paths: DesktopPaths): Promise<void> {
         }
       });
     },
+    stopManagedRuntime,
     stopPythonLauncher: stopOwnedPythonLauncherService,
     approveShutdown: () => {
       shutdownApproved = true;
@@ -1423,6 +1440,7 @@ async function requestDesktopShellExit(
                 }
               });
             },
+            stopManagedRuntime,
             stopPythonLauncher: stopOwnedPythonLauncherService,
             approveShutdown: () => {
               shutdownApproved = true;
@@ -1447,7 +1465,16 @@ async function requestDesktopShellExit(
         }).catch(() => undefined);
         shutdownApproved = true;
         pendingWorkbenchCloseAck = null;
-        // Best-effort stop owned Python before force quit so orphans are less likely.
+        // Best-effort stop managed runtime and owned Python before force quit so orphans are less likely.
+        try {
+          await withDesktopShellExitTimeout(
+            stopManagedRuntime(),
+            Math.min(3_000, DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS),
+            "stop managed runtime on exit budget fail-open"
+          );
+        } catch {
+          // Fail-open: stop must not block the forced Electron quit.
+        }
         try {
           await withDesktopShellExitTimeout(
             stopOwnedPythonLauncherService(),
@@ -1509,6 +1536,12 @@ async function resolveTrayControlContextOrLoopback(): Promise<{
 
 async function restartLauncherShell(): Promise<void> {
   notifyDesktopTray("Vibelution", "正在重启 Launcher，以加载最新本地代码…");
+  try {
+    await stopManagedRuntime();
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    notifyDesktopTray("Vibelution", `停止托管项目进程失败，仍将重启：${detail.slice(0, 220)}`, "warning");
+  }
   try {
     await stopOwnedPythonLauncherService();
   } catch (error: unknown) {

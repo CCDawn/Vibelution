@@ -100,6 +100,8 @@ describe("desktop CLI arguments", () => {
       },
       shutdown: {
         attempted: false,
+        stopManagedRuntime: false,
+        managedRuntimeError: "",
         stopPythonLauncher: false,
         stopStatus: "not_requested",
         stoppedPidCount: 0,

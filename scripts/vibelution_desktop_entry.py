@@ -1240,6 +1240,8 @@ def _run_lifecycle_bridge(args: argparse.Namespace) -> dict[str, object]:
             response = launcher_service.request_launcher_restart(
                 reason="electron_main_restart", source="electron_main"
             )
+        elif operation == "shutdown":
+            response = launcher_service.request_launcher_runtime_shutdown()
         else:
             response = launcher_service.request_launcher_rebuild_and_start()
     except launcher_service.LauncherActiveWorkBlocked as exc:
@@ -1265,7 +1267,7 @@ def _run_lifecycle_bridge(args: argparse.Namespace) -> dict[str, object]:
     return {"schemaVersion": 1, **response}
 
 
-_LIFECYCLE_OPERATIONS = {"start", "stop", "force-stop", "restart", "rebuild-and-start"}
+_LIFECYCLE_OPERATIONS = {"start", "stop", "force-stop", "restart", "rebuild-and-start", "shutdown"}
 
 
 def _run_branch_instance_bridge(args: argparse.Namespace) -> dict[str, object]:

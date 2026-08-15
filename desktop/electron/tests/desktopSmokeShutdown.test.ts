@@ -34,6 +34,9 @@ describe("prepareDesktopSmokeShutdown", () => {
       recordEvent: async (event) => {
         calls.push(`event:${event.eventCode}`);
       },
+      stopManagedRuntime: async () => {
+        calls.push("stop-managed-runtime");
+      },
       stopPythonLauncher: async () => {
         calls.push("stop-python-launcher");
         return {
@@ -55,6 +58,8 @@ describe("prepareDesktopSmokeShutdown", () => {
 
     expect(calls).toEqual([
       "close-session",
+      "event:electron.runtime.stop_requested",
+      "stop-managed-runtime",
       "event:electron.launcher_service.stop_requested",
       "stop-python-launcher",
       "event:electron.launcher_service.exited",
@@ -63,6 +68,8 @@ describe("prepareDesktopSmokeShutdown", () => {
     ]);
     expect(summary).toEqual({
       attempted: true,
+      stopManagedRuntime: true,
+      managedRuntimeError: "",
       stopPythonLauncher: true,
       stopStatus: "stopped",
       stoppedPidCount: 1,

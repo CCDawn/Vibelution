@@ -392,6 +392,11 @@ def test_lifecycle_bridge_dispatches_start(monkeypatch):
             calls.append("rebuild-and-start")
             return {"accepted": True, "operation": "rebuild-and-start", "commandId": "cmd-5"}
 
+        @staticmethod
+        def request_launcher_runtime_shutdown():
+            calls.append("shutdown")
+            return {"accepted": True, "operation": "shutdown", "commandId": ""}
+
     monkeypatch.setitem(sys.modules, "core.launcher", types.ModuleType("core.launcher"))
     launcher_module = types.ModuleType("core.launcher.service")
     launcher_module.LauncherActiveWorkBlocked = FakeService.LauncherActiveWorkBlocked
@@ -400,6 +405,7 @@ def test_lifecycle_bridge_dispatches_start(monkeypatch):
     launcher_module.request_launcher_force_stop = FakeService.request_launcher_force_stop
     launcher_module.request_launcher_restart = FakeService.request_launcher_restart
     launcher_module.request_launcher_rebuild_and_start = FakeService.request_launcher_rebuild_and_start
+    launcher_module.request_launcher_runtime_shutdown = FakeService.request_launcher_runtime_shutdown
     monkeypatch.setitem(sys.modules, "core.launcher.service", launcher_module)
 
     for operation, expected_call in [
@@ -408,6 +414,7 @@ def test_lifecycle_bridge_dispatches_start(monkeypatch):
         ("force-stop", "force-stop"),
         ("restart", "restart"),
         ("rebuild-and-start", "rebuild-and-start"),
+        ("shutdown", "shutdown"),
     ]:
         payload = entry._run_lifecycle_bridge(argparse.Namespace(lifecycle_operation=operation))
         assert payload["accepted"] is True

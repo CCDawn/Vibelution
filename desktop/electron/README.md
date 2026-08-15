@@ -30,6 +30,7 @@ Electron 主进程（TS）= Launcher 服务
   ├─ 工作台 renderer ── 加载工作台 origin（通常 :8000 的 dist）
   └─ 子进程：Python 工作台（FastAPI + Runtime Manager）
      以及必要的 git/worktree/maintenance CLI
+     关闭桌面壳时必须停掉这棵进程树；重开必须拉起当前 checkout 的新 daemon
 
 VibelutionLauncher.exe = 无控制台薄 shim
   → Electron 已在：转发 start|stop|restart

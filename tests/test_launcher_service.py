@@ -1890,6 +1890,11 @@ def test_launcher_force_stop_queues_command_with_active_work_details(tmp_path, m
     monkeypatch.setattr(launcher_service, "ensure_daemon_running", lambda: None)
     monkeypatch.setattr(
         launcher_service,
+        "_terminate_managed_launcher_subtree",
+        lambda **kwargs: {"processCleanup": {}, "forceStoppedWorkRuns": []},
+    )
+    monkeypatch.setattr(
+        launcher_service,
         "submit_command",
         lambda command_type, *, args=None, requested_by="unknown": commands.append((command_type, args, requested_by))
         or {"commandId": "cmd-force-close"},
@@ -2057,6 +2062,11 @@ def test_launcher_force_stop_uses_a_durable_confirmation_before_forcing_an_elect
     monkeypatch.setattr(launcher_service, "launcher_active_work_runs", lambda: active_work)
     monkeypatch.setattr(launcher_service, "_launcher_workbench_already_closed", lambda: False)
     monkeypatch.setattr(launcher_service, "ensure_runtime_manager_daemon_alive", lambda: {"ensured": True})
+    monkeypatch.setattr(
+        launcher_service,
+        "_terminate_managed_launcher_subtree",
+        lambda **kwargs: {"processCleanup": {}, "forceStoppedWorkRuns": []},
+    )
     monkeypatch.setattr(
         launcher_service,
         "submit_command",
@@ -2311,6 +2321,11 @@ def test_launcher_force_stop_skips_when_workbench_already_closed(monkeypatch):
     monkeypatch.setattr(launcher_service, "ensure_daemon_running", lambda: (_ for _ in ()).throw(AssertionError("must not queue")))
     monkeypatch.setattr(
         launcher_service,
+        "_terminate_managed_launcher_subtree",
+        lambda **kwargs: {"processCleanup": {}, "forceStoppedWorkRuns": []},
+    )
+    monkeypatch.setattr(
+        launcher_service,
         "submit_command",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not queue")),
     )
@@ -2350,6 +2365,11 @@ def test_launcher_force_stop_queues_when_already_closed_but_active_work_remains(
     monkeypatch.setattr(work_run_store, "WORK_RUNS_DIR", work_runs_dir)
     monkeypatch.setattr(launcher_service, "_launcher_workbench_already_closed", lambda: True)
     monkeypatch.setattr(launcher_service, "ensure_daemon_running", lambda: None)
+    monkeypatch.setattr(
+        launcher_service,
+        "_terminate_managed_launcher_subtree",
+        lambda **kwargs: {"processCleanup": {}, "forceStoppedWorkRuns": []},
+    )
     monkeypatch.setattr(
         launcher_service,
         "submit_command",
@@ -3615,10 +3635,10 @@ def test_launcher_supervisor_reattach_blocks_when_state_is_incomplete(tmp_path, 
     assert "launcher.supervisor.reattach.blocked" in [event[0] for event in events]
 
 
-def test_ensure_runtime_manager_daemon_alive_skips_when_daemon_running(monkeypatch):
+def test_ensure_runtime_manager_daemon_alive_reuses_current_source_daemon(monkeypatch):
     calls = []
     monkeypatch.setattr(launcher_service, "is_daemon_running", lambda: True)
-    monkeypatch.setattr(launcher_service, "ensure_daemon_running", lambda: calls.append("ensure") or True)
+    monkeypatch.setattr(launcher_service, "ensure_daemon_running", lambda: calls.append("ensure") or False)
     monkeypatch.setattr(launcher_service, "command_queue", None)
     monkeypatch.setattr(launcher_service, "_record_launcher_event", lambda *a, **k: None)
 
@@ -3626,7 +3646,60 @@ def test_ensure_runtime_manager_daemon_alive_skips_when_daemon_running(monkeypat
 
     assert result["action"] == "already_running"
     assert result["daemonRunning"] is True
-    assert calls == []
+    assert calls == ["ensure"]
+
+
+def test_ensure_runtime_manager_daemon_alive_recycles_stale_running_daemon(monkeypatch):
+    calls = []
+
+    class FakeQueue:
+        @staticmethod
+        def recover_processing_queue():
+            calls.append("recover")
+            return ["cmd-stale"]
+
+    monkeypatch.setattr(launcher_service, "is_daemon_running", lambda: True)
+    monkeypatch.setattr(launcher_service, "ensure_daemon_running", lambda: calls.append("ensure") or True)
+    monkeypatch.setattr(launcher_service, "command_queue", FakeQueue)
+    events = []
+    monkeypatch.setattr(
+        launcher_service,
+        "_record_launcher_event",
+        lambda event_code, **kwargs: events.append(event_code),
+    )
+
+    result = launcher_service.ensure_runtime_manager_daemon_alive()
+
+    assert result["action"] == "restarted"
+    assert result["ensured"] is True
+    assert calls == ["ensure", "recover"]
+    assert "launcher.daemon.watchdog.restarted" in events
+
+
+def test_request_launcher_runtime_shutdown_kills_runtime_manager(monkeypatch):
+    calls = []
+    events = []
+    monkeypatch.setattr(
+        launcher_service,
+        "_terminate_managed_launcher_subtree",
+        lambda **kwargs: calls.append(kwargs) or {
+            "processCleanup": {"terminated": [11, 22], "remaining": []},
+            "forceStoppedWorkRuns": [{"runId": "chat-1"}],
+        },
+    )
+    monkeypatch.setattr(
+        launcher_service,
+        "_record_launcher_event",
+        lambda event_code, **kwargs: events.append(event_code),
+    )
+
+    response = launcher_service.request_launcher_runtime_shutdown()
+
+    assert response["accepted"] is True
+    assert response["operation"] == "shutdown"
+    assert calls == [{"include_runtime_manager": True, "reason": "desktop_shell_quit"}]
+    assert "launcher.runtime.shutdown.requested" in events
+    assert "launcher.runtime.shutdown.completed" in events
 
 
 def test_ensure_runtime_manager_daemon_alive_recovers_queue_and_restarts(monkeypatch):

@@ -27,6 +27,8 @@ export type DesktopSmokeBootstrapSummary = {
 
 export type DesktopSmokeShutdownSummary = {
   attempted: boolean;
+  stopManagedRuntime: boolean;
+  managedRuntimeError: string;
   stopPythonLauncher: boolean;
   stopStatus: "stopped" | "skipped" | "failed" | "not_requested";
   stoppedPidCount: number;
@@ -70,6 +72,8 @@ export function emptyDesktopSmokeBootstrapSummary(): DesktopSmokeBootstrapSummar
 export function emptyDesktopSmokeShutdownSummary(): DesktopSmokeShutdownSummary {
   return {
     attempted: false,
+    stopManagedRuntime: false,
+    managedRuntimeError: "",
     stopPythonLauncher: false,
     stopStatus: "not_requested",
     stoppedPidCount: 0,

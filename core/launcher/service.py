@@ -35,7 +35,7 @@ from core.web.services.runtime_scene.record import (
     _append_scene_log_line,
     _resolve_current_runtime_scene_dir,
 )
-from core.runtime_manager.state_store import load_pid, load_state
+from core.runtime_manager.state_store import clear_pid, load_pid, load_state
 from core.runtime_manager import work_run_store
 from core.runtime_manager.work_run_store import WorkRunStore
 from core.runtime_manager.workbench_controller import _is_process_alive, observe_workbench
@@ -47,7 +47,7 @@ from .branch_instance_lifecycle import BranchInstanceLifecycleError
 from . import maintenance_reset as launcher_maintenance_reset
 
 
-LauncherOperation = Literal["start", "stop", "restart", "force-stop"]
+LauncherOperation = Literal["start", "stop", "restart", "force-stop", "shutdown"]
 LauncherSupervisorOperation = Literal["supervisor_reattach"]
 RuntimeProfile = Literal["safe_local", "safe_remote", "debug", "ci"]
 UiLanguage = Literal["zh", "en"]
@@ -987,34 +987,58 @@ def launcher_active_work_runs() -> list[dict[str, str]]:
     return items
 
 
-def ensure_runtime_manager_daemon_alive() -> dict[str, Any]:
-    """Watchdog: recover a dead runtime-manager daemon and its stuck commands.
+def _managed_process_exclude_pids() -> set[int]:
+    excluded = {os.getpid()}
+    parent_pid = os.getppid()
+    if parent_pid > 0:
+        excluded.add(parent_pid)
+    return excluded
 
-    Returns what was done so callers (e.g. a periodic control-plane loop) can
-    record evidence. Never kills a healthy daemon; only acts when the daemon
-    pid is missing or the tracked process is not a runtime-manager process.
+
+def _terminate_managed_launcher_subtree(*, include_runtime_manager: bool, reason: str) -> dict[str, Any]:
+    """Force-stop Launcher-owned project processes without going through the RM queue."""
+
+    from core.runtime_manager.daemon import _mark_persistent_active_work_runs_force_stopped
+    from core.runtime_manager.process_inventory import terminate_workbench_processes
+
+    cleanup = terminate_workbench_processes(
+        exclude_pids=_managed_process_exclude_pids(),
+        include_runtime_manager=include_runtime_manager,
+        timeout_seconds=5.0,
+    )
+    stopped_runs = _mark_persistent_active_work_runs_force_stopped(reason)
+    if include_runtime_manager:
+        clear_pid()
+    return {"processCleanup": cleanup, "forceStoppedWorkRuns": stopped_runs}
+
+
+def ensure_runtime_manager_daemon_alive() -> dict[str, Any]:
+    """Watchdog: keep the runtime-manager daemon alive on the current checkout.
+
+    A live daemon is reused only when ``ensure_daemon_running`` confirms its
+    source signature still matches disk. Stale source is recycled so the next
+    start/restart cannot attach to yesterday's pythonw.
     """
 
     started = time.monotonic()
-    if is_daemon_running():
-        return {"action": "already_running", "daemonRunning": True, "elapsedMs": _launcher_elapsed_ms(started)}
-
+    was_running = is_daemon_running()
     recovered_commands: list[str] = []
-    try:
-        recovered_commands = command_queue.recover_processing_queue()
-    except Exception as exc:  # pragma: no cover - defensive watchdog boundary
-        _record_launcher_event(
-            "launcher.daemon.watchdog.recovery_failed",
-            phase="runtime_manager",
-            message="Runtime-manager queue recovery failed before daemon restart.",
-            outcome="failed",
-            level="warning",
-            fields={"errorType": type(exc).__name__, "errorMessage": str(exc)},
-        )
+    if not was_running:
+        try:
+            recovered_commands = command_queue.recover_processing_queue()
+        except Exception as exc:  # pragma: no cover - defensive watchdog boundary
+            _record_launcher_event(
+                "launcher.daemon.watchdog.recovery_failed",
+                phase="runtime_manager",
+                message="Runtime-manager queue recovery failed before daemon restart.",
+                outcome="failed",
+                level="warning",
+                fields={"errorType": type(exc).__name__, "errorMessage": str(exc)},
+            )
 
     ensured = False
     try:
-        ensured = ensure_daemon_running()
+        ensured = bool(ensure_daemon_running())
     except Exception as exc:  # pragma: no cover - defensive watchdog boundary
         _record_launcher_event(
             "launcher.daemon.watchdog.restart_failed",
@@ -1024,6 +1048,29 @@ def ensure_runtime_manager_daemon_alive() -> dict[str, Any]:
             level="error",
             fields={"errorType": type(exc).__name__, "errorMessage": str(exc)},
         )
+        return {
+            "action": "restart_failed",
+            "daemonRunning": False,
+            "ensured": False,
+            "recoveredCommandCount": len(recovered_commands),
+            "elapsedMs": _launcher_elapsed_ms(started),
+        }
+
+    if was_running and not ensured:
+        return {"action": "already_running", "daemonRunning": True, "elapsedMs": _launcher_elapsed_ms(started)}
+
+    if was_running and ensured:
+        try:
+            recovered_commands = command_queue.recover_processing_queue()
+        except Exception as exc:  # pragma: no cover - defensive watchdog boundary
+            _record_launcher_event(
+                "launcher.daemon.watchdog.recovery_failed",
+                phase="runtime_manager",
+                message="Runtime-manager queue recovery failed after stale daemon recycle.",
+                outcome="failed",
+                level="warning",
+                fields={"errorType": type(exc).__name__, "errorMessage": str(exc)},
+            )
 
     action = "restarted" if ensured else "restart_failed"
     _record_launcher_event(
@@ -1039,6 +1086,7 @@ def ensure_runtime_manager_daemon_alive() -> dict[str, Any]:
             "recoveredCommandCount": len(recovered_commands),
             "recoveredCommands": recovered_commands[:8],
             "elapsedMs": _launcher_elapsed_ms(started),
+            "recycledStaleDaemon": bool(was_running and ensured),
         },
     )
     return {
@@ -1761,12 +1809,25 @@ def request_launcher_force_stop(request_audit: LauncherRequestAudit | None = Non
         message="Launcher project bundle force-stop requested.",
         fields=requested_fields,
     )
+    try:
+        _terminate_managed_launcher_subtree(
+            include_runtime_manager=False,
+            reason="launcher_force_stop_button",
+        )
+    except Exception as exc:
+        _record_launcher_event(
+            "launcher.bundle.force_stop.process_cleanup_failed",
+            phase="stop",
+            message="Launcher force-stop could not terminate managed project processes.",
+            outcome="failed",
+            level="warning",
+            fields={"errorType": type(exc).__name__, "errorMessage": str(exc)},
+        )
     already_closed_started = time.monotonic()
     already_closed = _launcher_workbench_already_closed()
     prequeue_timings_ms["alreadyClosedMs"] = _launcher_elapsed_ms(already_closed_started)
-    # Only skip when the workbench is already closed *and* no residual work-run
-    # snapshots still block stop/restart. Otherwise still queue force_close so
-    # the daemon can mark zombie active work as force-stopped.
+    # Only skip the RM queue when the workbench is already closed *and* no residual
+    # work-run snapshots still block stop/restart. Process trees are still killed above.
     if already_closed and not active_work_runs:
         prequeue_timings_ms["totalPrequeueMs"] = _launcher_elapsed_ms(prequeue_started)
         _record_launcher_prequeue_timing(
@@ -1918,6 +1979,46 @@ def request_launcher_force_stop(request_audit: LauncherRequestAudit | None = Non
         response["closeId"] = str(electron_transaction.get("closeId") or "")
         response["windowOwner"] = "electron"
     return response
+
+
+def request_launcher_runtime_shutdown() -> LauncherCommandResponse:
+    """Stop every Launcher-managed project process, including the runtime-manager daemon."""
+
+    started = time.monotonic()
+    _record_launcher_event(
+        "launcher.runtime.shutdown.requested",
+        phase="stop",
+        message="Launcher is shutting down every managed project process before the desktop shell exits.",
+        fields={"source": "electron_desktop_shell"},
+    )
+    cleanup = _terminate_managed_launcher_subtree(
+        include_runtime_manager=True,
+        reason="desktop_shell_quit",
+    )
+    elapsed_ms = _launcher_elapsed_ms(started)
+    process_cleanup = cleanup.get("processCleanup") if isinstance(cleanup.get("processCleanup"), dict) else {}
+    remaining = process_cleanup.get("remaining") if isinstance(process_cleanup, dict) else []
+    remaining_count = len(remaining) if isinstance(remaining, list) else 0
+    _record_launcher_event(
+        "launcher.runtime.shutdown.completed",
+        phase="stop",
+        message="Launcher finished shutting down managed project processes.",
+        outcome="succeeded" if remaining_count == 0 else "partial",
+        fields={
+            "elapsedMs": elapsed_ms,
+            "terminatedCount": len(process_cleanup.get("terminated") or []) if isinstance(process_cleanup, dict) else 0,
+            "remainingCount": remaining_count,
+            "forceStoppedWorkRunCount": len(cleanup.get("forceStoppedWorkRuns") or []),
+        },
+    )
+    return {
+        "accepted": True,
+        "mode": "runtime_manager",
+        "launcherMode": "standalone_control_plane",
+        "operation": "shutdown",
+        "commandId": "",
+        "message": "已关闭 Launcher 管理的全部项目进程。",
+    }
 
 
 def _launcher_workbench_already_closed() -> bool:

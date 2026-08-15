@@ -69,6 +69,10 @@ describe("decideShutdown", () => {
         recordEvent: async () => {
           sideEffects.push("record-event");
         },
+        stopManagedRuntime: async () => {
+          sideEffects.push("stop-managed-runtime");
+          throw new Error("must not stop");
+        },
         stopPythonLauncher: async () => {
           sideEffects.push("stop-python-launcher");
           throw new Error("must not stop");
