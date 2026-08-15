@@ -9648,7 +9648,10 @@ def test_persist_workbench_launcher_state_after_open_replaces_control_surface_sn
             "backendPid": 54856,
             "backendLaunchPid": 54856,
             "backendPort": 8000,
+            "backendObserved": True,
+            "backendHealthy": True,
             "browserManaged": True,
+            "browserWindowAlive": True,
             "browserLaunchPid": 59400,
             "browserWindowPid": 59400,
             "browserProfileDir": "workbench-profile",
@@ -9672,6 +9675,8 @@ def test_persist_workbench_launcher_state_after_open_replaces_control_surface_sn
     assert saved["launcherBrowserWindowPid"] == 3300
     assert saved["lastReason"] == "launcher_restart_button"
     assert saved["lastSource"] == "launcher_api"
+    assert saved["observedState"] == "open"
+    assert saved["lifecycleConsistency"] == "consistent"
     assert saved["statusLine"] == "Workbench is running."
     assert events[-1][0] == "launcher.state.workbench_open_persisted"
 
@@ -9710,7 +9715,68 @@ def test_persist_workbench_launcher_state_after_open_keeps_backend_only_as_parti
     assert result["updatedState"] is True
     assert saved["observedState"] == "partial"
     assert saved["browserWindowPid"] == 0
+    assert saved["lifecycleConsistency"] == "browser_missing"
     assert saved["statusLine"] == "Workbench window is closed; backend is still running."
+
+
+def test_persist_workbench_launcher_state_after_open_keeps_window_only_as_partial(tmp_path, monkeypatch):
+    state_path = tmp_path / "state.json"
+    state_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(workbench_controller, "LAUNCHER_STATE_PATH", state_path)
+    monkeypatch.setattr(
+        workbench_controller,
+        "append_runtime_manager_file_event",
+        lambda *_args, **_kwargs: None,
+    )
+
+    result = workbench_controller.persist_workbench_launcher_state_after_open(
+        {
+            "sessionId": "window-only",
+            "backendPid": 0,
+            "backendObserved": False,
+            "backendHealthy": False,
+            "browserManaged": True,
+            "browserWindowAlive": True,
+            "browserLaunchPid": 29100,
+            "browserWindowPid": 29100,
+            "url": "http://127.0.0.1:8003",
+        },
+        last_reason="electron_window_recovered",
+        last_source="runtime_manager",
+    )
+    saved = json.loads(state_path.read_text(encoding="utf-8"))
+
+    assert result["updatedState"] is True
+    assert saved["observedState"] == "partial"
+    assert saved["backendMissing"] is True
+    assert saved["frontendOrphaned"] is True
+    assert saved["lifecycleConsistency"] == "backend_missing"
+    assert saved["statusLine"] == "Workbench window is open; backend is unavailable."
+
+
+def test_persist_workbench_launcher_state_after_open_does_not_treat_pids_as_readiness(tmp_path, monkeypatch):
+    state_path = tmp_path / "state.json"
+    state_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(workbench_controller, "LAUNCHER_STATE_PATH", state_path)
+    monkeypatch.setattr(
+        workbench_controller,
+        "append_runtime_manager_file_event",
+        lambda *_args, **_kwargs: None,
+    )
+
+    result = workbench_controller.persist_workbench_launcher_state_after_open(
+        {
+            "sessionId": "stale-pids",
+            "backendPid": 30100,
+            "browserManaged": True,
+            "browserWindowPid": 30200,
+        }
+    )
+    saved = json.loads(state_path.read_text(encoding="utf-8"))
+
+    assert result["updatedState"] is True
+    assert saved["observedState"] == "closed"
+    assert saved["statusLine"] == "Workbench is unavailable."
 
 
 def test_handle_force_close_workbench_marks_work_runs_and_verifies_close(monkeypatch):

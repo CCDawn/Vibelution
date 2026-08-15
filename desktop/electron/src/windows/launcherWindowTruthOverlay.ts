@@ -60,6 +60,11 @@ function backendReadyFromBundle(bundle: Record<string, unknown>): boolean {
   return backend.alive === true && backend.healthy === true && backend.portListening === true && backend.portConflict !== true;
 }
 
+function backendLiveFromBundle(bundle: Record<string, unknown>): boolean {
+  const backend = isRecord(bundle.backend) ? bundle.backend : {};
+  return backend.alive === true || backend.portListening === true;
+}
+
 function overlayRetiredControlPort(payload: Record<string, unknown>): Record<string, unknown> {
   const launcher = isRecord(payload.launcher) ? { ...payload.launcher } : null;
   if (launcher) {
@@ -100,6 +105,8 @@ function overlayStatusWindowTruth(
     return payload;
   }
   const workbenchOpen = truth.workbench?.open === true;
+  const backendReady = backendReadyFromBundle(bundle);
+  const backendLive = backendLiveFromBundle(bundle);
   const browser = isRecord(bundle.browser) ? { ...bundle.browser } : {};
 
   if (workbenchOpen && truth.workbench) {
@@ -110,25 +117,29 @@ function overlayStatusWindowTruth(
     }
     const observed = String(bundle.observedState || "").toLowerCase();
     const consistency = String(bundle.lifecycleConsistency || "").toLowerCase();
-    if (observed === "closed") {
+    if (backendReady) {
       bundle.observedState = "open";
-    } else if (observed === "partial" && consistency === "browser_missing") {
-      bundle.observedState = "open";
-      bundle.lifecycleConsistency = "";
+      if (
+        observed === "closed"
+        || ["browser_missing", "backend_missing"].includes(consistency)
+      ) {
+        bundle.lifecycleConsistency = "";
+      }
+    } else {
+      bundle.observedState = "partial";
+      bundle.lifecycleConsistency = "backend_missing";
     }
   } else {
     browser.alive = false;
     browser.managed = false;
-    const observed = String(bundle.observedState || "").toLowerCase();
-    const backendReady = backendReadyFromBundle(bundle);
-    if (observed === "open" || (backendReady && observed !== "closed")) {
-      bundle.observedState = "partial";
-      if (!String(bundle.lifecycleConsistency || "").trim()) {
-        bundle.lifecycleConsistency = "browser_missing";
-      }
-    } else if (backendReady) {
+    if (backendReady || backendLive) {
       bundle.observedState = "partial";
       bundle.lifecycleConsistency = "browser_missing";
+    } else {
+      bundle.observedState = "closed";
+      if (["browser_missing", "backend_missing"].includes(String(bundle.lifecycleConsistency || "").toLowerCase())) {
+        bundle.lifecycleConsistency = "";
+      }
     }
     const phase = String(bundle.phase || "").toLowerCase();
     if ((phase === "opening" || phase === "starting") && backendReady) {
