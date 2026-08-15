@@ -43,7 +43,15 @@ def _require_formal_full_run_ready(plan: dict[str, Any]) -> tuple[str, dict[str,
     if not bool(validation.get("valid")):
         raise s.TeamWorkflowOrchestrationError("Experiment plan contract must be valid before formal full-run preparation.")
     if not bool(readiness.get("readyForFullRun")):
-        raise s.TeamWorkflowOrchestrationError("Record a passing smoke result before formal full-run preparation.")
+        evidence = _active_experiment_smoke_evidence(plan)
+        smoke_status = str((evidence or {}).get("status") or "").strip().lower()
+        # V1 CPU smoke records needs_review (human-gate vocabulary) after a
+        # real observation. Workflow smoke_release remains the human gate;
+        # blocking execute here forced controlled_run into bounded STOP.
+        if smoke_status not in {"passed", "needs_review"}:
+            raise s.TeamWorkflowOrchestrationError(
+                "Record a passing smoke result before formal full-run preparation."
+            )
     method_config = contract.get("methodConfig") if isinstance(contract.get("methodConfig"), dict) else {}
     return adapter_id, method_config
 

@@ -977,6 +977,8 @@ def _execute_controlled_run_or_bounded(
 ) -> dict[str, Any]:
     from core.web.services.team_workflow.experiment_api.full_run import (
         execute_experiment_full_run,
+        formal_execution_config_is_provisioned,
+        resolve_formal_execution_config,
     )
     from core.web.services.team_workflow.experiment_api.plan import (
         bind_frozen_protocol_to_experiment_plan,
@@ -999,9 +1001,16 @@ def _execute_controlled_run_or_bounded(
         except Exception:
             pass
 
+    plan_record = _load_experiment_plan_record(team_id, plan_id)
+    payload = dict(domain_payload)
+    execution_config = resolve_formal_execution_config(plan_record, payload)
+    if formal_execution_config_is_provisioned(execution_config):
+        payload["executionConfig"] = execution_config
     try:
-        return execute_experiment_full_run(team_id, plan_id, domain_payload)
+        return execute_experiment_full_run(team_id, plan_id, payload)
     except TeamWorkflowOrchestrationError as exc:
+        if formal_execution_config_is_provisioned(execution_config):
+            raise RuntimeError(f"formal_run_failed: {exc}") from exc
         return _bounded_controlled_run_after_smoke_release(
             action=action,
             snapshot=snapshot,
@@ -1010,6 +1019,17 @@ def _execute_controlled_run_or_bounded(
             campaign_raw=campaign_raw,
             formal_error=str(exc),
         )
+
+
+def _load_experiment_plan_record(team_id: str, plan_id: str) -> dict[str, Any]:
+    from core.web.services import team_workflow_orchestration_service as orch
+
+    if not team_id or not plan_id:
+        return {}
+    with orch._WORKFLOW_LOCK:
+        store = orch._load_experiment_plan_store(team_id)
+        plan = orch._find_experiment_plan(store, plan_id)
+    return dict(plan) if isinstance(plan, dict) else {}
 
 
 def _ledger_controlled_run(
