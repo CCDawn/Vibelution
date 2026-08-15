@@ -2,11 +2,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FolderKanban, Pencil, Plus, Save } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { fetchJson } from "../../../api/client";
+import {
+  activateTeamResearchProject,
+  createTeamResearchProject,
+  listTeamResearchProjects,
+  updateTeamResearchProject,
+} from "../../../api/researchProjectAgentTasks";
 import type {
   ExperimentMethodId,
   TeamResearchProject,
-  TeamResearchProjectListPayload,
 } from "../../../api/types";
 import {
   VButton,
@@ -74,10 +78,7 @@ export function ResearchProjectSwitcher({
   const lastAppliedProjectIdRef = useRef("");
   const projectsQuery = useQuery({
     queryKey: researchProjectQueryKey(teamId),
-    queryFn: () =>
-      fetchJson<TeamResearchProjectListPayload>(
-        `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/research-projects`,
-      ),
+    queryFn: () => listTeamResearchProjects(teamId),
     enabled: Boolean(teamId),
   });
   const activeProject = useMemo(
@@ -105,10 +106,7 @@ export function ResearchProjectSwitcher({
 
   const activateMutation = useMutation({
     mutationFn: (projectId: string) =>
-      fetchJson<TeamResearchProjectListPayload>(
-        `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/research-projects/${encodeURIComponent(projectId)}/activate`,
-        { method: "POST" },
-      ),
+      activateTeamResearchProject(teamId, projectId),
     onSuccess: async (payload) => {
       queryClient.setQueryData(researchProjectQueryKey(teamId), payload);
       if (payload.project) {
@@ -121,18 +119,11 @@ export function ResearchProjectSwitcher({
 
   const createMutation = useMutation({
     mutationFn: () =>
-      fetchJson<TeamResearchProjectListPayload>(
-        `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/research-projects`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: draft.name.trim(),
-            topic: draft.topic.trim(),
-            experimentMethod: currentExperimentMethod,
-          }),
-        },
-      ),
+      createTeamResearchProject(teamId, {
+        name: draft.name.trim(),
+        topic: draft.topic.trim(),
+        experimentMethod: currentExperimentMethod,
+      }),
     onSuccess: async (payload) => {
       queryClient.setQueryData(researchProjectQueryKey(teamId), payload);
       setDialogMode(null);
@@ -145,18 +136,11 @@ export function ResearchProjectSwitcher({
 
   const updateMutation = useMutation({
     mutationFn: () =>
-      fetchJson<TeamResearchProjectListPayload>(
-        `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/research-projects/${encodeURIComponent(activeProject?.projectId || "")}`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ...(activeProject?.nameLocked ? {} : { name: draft.name.trim() }),
-            topic: draft.topic.trim(),
-            experimentMethod: currentExperimentMethod,
-          }),
-        },
-      ),
+      updateTeamResearchProject(teamId, activeProject?.projectId || "", {
+        ...(activeProject?.nameLocked ? {} : { name: draft.name.trim() }),
+        topic: draft.topic.trim(),
+        experimentMethod: currentExperimentMethod,
+      }),
     onSuccess: (payload) => {
       queryClient.setQueryData(researchProjectQueryKey(teamId), payload);
       if (payload.project) {

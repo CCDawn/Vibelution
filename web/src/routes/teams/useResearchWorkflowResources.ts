@@ -4,11 +4,11 @@ import { resolvePollingInterval } from "../../app/pollingPolicy";
 import { fetchJson } from "../../api/client";
 import { queryKeys } from "../../api/queryKeys";
 import { fetchResearchStageRoundStatus } from "../../api/stageRounds";
+import { fetchTeamWorkflowOrchestration } from "../../api/teamWorkflow";
 import type {
   TeamWorkflowCandidateListPayload,
   TeamWorkflowCoordinationStatus,
   TeamWorkflowKnowledgeIngestionStatus,
-  TeamWorkflowOrchestration,
 } from "../../api/types";
 import {
   sourceCollectionStageCardsFromStatus,
@@ -305,10 +305,7 @@ export function useResearchWorkflowResources({
 }: ResearchWorkflowResourcesInput) {
   const workflow = useQuery({
     queryKey: queryKeys.teamWorkflow(teamId || "none"),
-    queryFn: ({ signal }) => fetchJson<TeamWorkflowOrchestration>(
-      `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration`,
-      { signal },
-    ),
+    queryFn: ({ signal }) => fetchTeamWorkflowOrchestration(teamId, { signal }),
     enabled: Boolean(teamId && demand.workflow),
   });
   const stageRound = useQuery({
