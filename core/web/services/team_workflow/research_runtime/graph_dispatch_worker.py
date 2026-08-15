@@ -32,6 +32,8 @@ from core.research.workflow.transitions import (
     can_transition_node_attempt,
 )
 
+from core.logging import debug
+
 from .block_projection import (
     apply_node_run_block,
     sync_run_blocked,
@@ -41,6 +43,12 @@ from .block_projection import (
 from .blocked_reason import format_blocked_reason, problem_from_graph_error
 from .ids import new_id
 from .iteration_route import branch_decision_from_run, routed_successors
+
+
+def _log_repair_skip(run_id: str, stage: str, exc: BaseException) -> None:
+    debug.warning(
+        f"graph repair skipped run={run_id} stage={stage} error={type(exc).__name__}"
+    )
 
 
 class GraphDecisionError(RuntimeError):
@@ -1120,7 +1128,8 @@ class GraphDispatchWorker:
                 continue
             try:
                 snapshot = self._coordinator.snapshot(run_id)
-            except Exception:
+            except Exception as exc:
+                _log_repair_skip(run_id, "snapshot", exc)
                 continue
             pending_payload = (
                 snapshot.get("pendingAction")
@@ -1193,7 +1202,8 @@ class GraphDispatchWorker:
                 )
                 try:
                     result = self._resume(dispatch)
-                except Exception:
+                except Exception as exc:
+                    _log_repair_skip(run_id, "resume_iteration", exc)
                     continue
             else:
                 dispatch = GraphDispatch(
@@ -1210,7 +1220,8 @@ class GraphDispatchWorker:
                 )
                 try:
                     result = self._coordinator.enter_node(dispatch)
-                except Exception:
+                except Exception as exc:
+                    _log_repair_skip(run_id, "enter_governance", exc)
                     continue
             pending = result.pending_action
             if pending is None or pending.node_id != "version_governance":
