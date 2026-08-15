@@ -96,6 +96,12 @@
 | `VStateRow` | [aesthetic/dense.md](./aesthetic/dense.md#vstaterow) |
 | `VStatusChip` | [aesthetic/dense.md](./aesthetic/dense.md#vstatuschip) |
 
+## Product — conversation
+
+| 组件 | 设计说明 |
+| --- | --- |
+| `ConversationFollowupQueueBar` | [product/conversation.md](./product/conversation.md#conversationfollowupqueuebar) |
+
 ## Product — agent-management
 
 | 组件 | 设计说明 |

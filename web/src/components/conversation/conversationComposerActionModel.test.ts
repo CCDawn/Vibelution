@@ -53,6 +53,14 @@ describe("conversationComposerActionModel", () => {
       composerDisabled: false,
       safeGuidancePending: false,
       interruptGuidancePending: false,
-    }).showSafeGuidanceAction).toBe(true);
+    }).showQueuePrimary).toBe(true);
+    expect(resolveComposerGuidanceUi({
+      runningGuidanceActionsEnabled: true,
+      composerValue: "",
+      composerDisabled: false,
+      safeGuidancePending: false,
+      interruptGuidancePending: false,
+      queueCount: 1,
+    }).queuePrimaryIsImmediate).toBe(true);
   });
 });

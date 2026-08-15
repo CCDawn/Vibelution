@@ -78,16 +78,23 @@ export function resolveComposerGuidanceUi(input: {
   composerDisabled: boolean;
   safeGuidancePending: boolean;
   interruptGuidancePending: boolean;
+  queueCount?: number;
 }) {
+  const queueCount = input.queueCount ?? 0;
   const guidanceDraftReady = Boolean(input.composerValue.trim());
+  const showQueuePrimary = input.runningGuidanceActionsEnabled && (
+    guidanceDraftReady || queueCount > 0
+  );
   const guidanceActionDisabled =
-    !guidanceDraftReady
+    !showQueuePrimary
     || input.composerDisabled
     || input.safeGuidancePending
     || input.interruptGuidancePending;
   return {
     guidanceDraftReady,
     guidanceActionDisabled,
-    showSafeGuidanceAction: input.runningGuidanceActionsEnabled && guidanceDraftReady,
+    showSafeGuidanceAction: showQueuePrimary,
+    showQueuePrimary,
+    queuePrimaryIsImmediate: input.runningGuidanceActionsEnabled && !guidanceDraftReady && queueCount > 0,
   };
 }

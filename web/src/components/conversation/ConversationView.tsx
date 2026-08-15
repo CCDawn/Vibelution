@@ -65,7 +65,9 @@ const AgentContextSectionsView = React.lazy(() =>
     default: module.AgentContextSectionsView,
   })),
 );
+import { ConversationFollowupQueueBar } from "./ConversationFollowupQueueBar";
 import { shouldSubmitComposerOnKeydown } from "./composerShortcuts";
+import { resolveComposerQueuePrimaryKind } from "./composerFollowupQueueModel";
 import {
   filterSlashCommandSuggestions,
   insertSlashCommandSuggestion,
@@ -402,6 +404,7 @@ export function ConversationView({
   composerInterruptGuidancePending = false,
   composerError,
   composerGuidance,
+  followupQueue = [],
   composerAttachments = [],
   composerReferences = [],
   slashCommandSuggestions = [],
@@ -438,10 +441,14 @@ export function ConversationView({
   onStop,
   onSafeGuidance,
   onInterruptGuidance,
+  onFollowupQueueUpdate,
+  onFollowupQueueRemove,
+  onFollowupQueueMove,
 }: ConversationViewProps) {
   void interruptGuidanceLabel;
   void interruptGuidancePendingLabel;
   void onInterruptGuidance;
+  void onSafeGuidance;
   const { lang, t, statusLabel } = useAppI18n({ domains: ["chat"] });
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const timelineContentRef = useRef<HTMLDivElement | null>(null);
@@ -524,27 +531,38 @@ export function ConversationView({
     editModeActive: composerEditModeActive,
   });
   const {
-    guidanceDraftReady,
     guidanceActionDisabled,
-    showSafeGuidanceAction,
+    showQueuePrimary,
+    queuePrimaryIsImmediate,
   } = resolveComposerGuidanceUi({
     runningGuidanceActionsEnabled,
     composerValue,
     composerDisabled,
     safeGuidancePending: composerSafeGuidancePending,
     interruptGuidancePending: composerInterruptGuidancePending,
+    queueCount: followupQueue.length,
   });
-  const primaryActionIsSteerSubmit = runningGuidanceActionsEnabled && showSafeGuidanceAction;
+  const queuePrimaryKind = resolveComposerQueuePrimaryKind({
+    sessionBusy: runningGuidanceActionsEnabled,
+    draft: composerValue,
+    queueCount: followupQueue.length,
+  });
+  const primaryActionIsQueueSubmit = runningGuidanceActionsEnabled && showQueuePrimary;
+  const resolvedQueueFollowupLabel = t("queueFollowup");
+  const resolvedImmediateSteerLabel = t("immediateSteer");
   const resolvedSafeGuidanceLabel = safeGuidanceLabel ?? t("safeGuidance");
   const resolvedSafeGuidancePendingLabel = safeGuidancePendingLabel ?? t("safeGuidancePending");
+  const resolvedBusyPrimaryLabel = queuePrimaryIsImmediate
+    ? resolvedImmediateSteerLabel
+    : resolvedQueueFollowupLabel;
   const resolvedComposerPlaceholder = composerPlaceholder.trim()
     ? composerPlaceholder
     : resolvedActionMode === "stop"
-      ? t("sessionBusyPlaceholder")
+      ? (followupQueue.length ? t("sessionBusyQueuedPlaceholder") : t("sessionBusyPlaceholder"))
       : composerPlaceholder;
-  // Edit/rerun and running-turn steer are labeled primary pills. Do not mix in
+  // Edit/rerun and running-turn queue/steer are labeled primary pills. Do not mix in
   // round icon-only geometry (composerRoundButtonPrimary forces a square slot).
-  const primaryActionClassName = primaryActionIsEditSubmit || primaryActionIsSteerSubmit
+  const primaryActionClassName = primaryActionIsEditSubmit || primaryActionIsQueueSubmit
     ? styles.composerEditSubmitButton
     : `${styles.sendButton} ${styles.composerRoundButton} ${styles.composerRoundButtonPrimary}`;
   const composerCanAcceptImageDrop = Boolean(onAddComposerAttachments) && !attachmentInputDisabled;
@@ -3651,13 +3669,13 @@ export function ConversationView({
 
   const composerActions = (
     <div className={styles.composerActionStack}>
-      {!runningGuidanceActionsEnabled || showSafeGuidanceAction ? (
+      {!runningGuidanceActionsEnabled || showQueuePrimary ? (
         <VButton
           className={primaryActionClassName}
-          isIconOnly={!primaryActionIsEditSubmit && !primaryActionIsSteerSubmit}
-          isDisabled={runningGuidanceActionsEnabled ? guidanceActionDisabled || !onSafeGuidance : resolvedActionDisabled}
+          isIconOnly={!primaryActionIsEditSubmit && !primaryActionIsQueueSubmit}
+          isDisabled={runningGuidanceActionsEnabled ? guidanceActionDisabled : resolvedActionDisabled}
           type="button"
-          onClick={runningGuidanceActionsEnabled ? onSafeGuidance : handlePrimaryAction}
+          onClick={runningGuidanceActionsEnabled ? onSubmit : handlePrimaryAction}
           icon={
             primaryActionIsEditSubmit
               ? (
@@ -3671,7 +3689,7 @@ export function ConversationView({
             runningGuidanceActionsEnabled
               ? composerSafeGuidancePending
                 ? resolvedSafeGuidancePendingLabel
-                : resolvedSafeGuidanceLabel
+                : resolvedBusyPrimaryLabel
               : composerPending
                 ? resolvedPendingLabel
                 : resolvedActionLabel
@@ -3680,7 +3698,7 @@ export function ConversationView({
             runningGuidanceActionsEnabled
               ? composerSafeGuidancePending
                 ? resolvedSafeGuidancePendingLabel
-                : resolvedSafeGuidanceLabel
+                : resolvedBusyPrimaryLabel
               : composerPending
                 ? resolvedPendingLabel
                 : resolvedActionLabel
@@ -3688,8 +3706,8 @@ export function ConversationView({
         >
           {primaryActionIsEditSubmit
             ? (composerPending || composerSafeGuidancePending ? resolvedPendingLabel : resolvedActionLabel)
-            : primaryActionIsSteerSubmit
-              ? (composerSafeGuidancePending ? resolvedSafeGuidancePendingLabel : resolvedSafeGuidanceLabel)
+            : primaryActionIsQueueSubmit
+              ? (composerSafeGuidancePending ? resolvedSafeGuidancePendingLabel : resolvedBusyPrimaryLabel)
             : (composerPending || composerSafeGuidancePending
               ? <LoaderCircle className={styles.statusSpinner} size={17} aria-hidden="true" />
               : <ArrowUp size={16} aria-hidden="true" />)}
@@ -4311,6 +4329,18 @@ export function ConversationView({
               <span>{composerGuidance}</span>
             </div>
           ) : null}
+          {followupQueue.length ? (
+            <ConversationFollowupQueueBar
+              items={followupQueue}
+              lang={lang}
+              queueLabel={t("followupQueueLabel")}
+              editLabel={t("editFollowupQueue")}
+              withdrawLabel={t("withdrawFollowupQueue")}
+              onUpdate={onFollowupQueueUpdate ?? (() => undefined)}
+              onRemove={onFollowupQueueRemove ?? (() => undefined)}
+              onMove={onFollowupQueueMove ?? (() => undefined)}
+            />
+          ) : null}
           {composerModeNotice ? (
             <div
               className={styles.composerEditModeBar}
@@ -4471,11 +4501,10 @@ export function ConversationView({
                 ) {
                   handleSendAndFollowLatest();
                 } else if (
-                  primaryActionIsSteerSubmit
-                  && onSafeGuidance
+                  (queuePrimaryKind === "queue" || queuePrimaryKind === "immediate")
                   && !guidanceActionDisabled
                 ) {
-                  onSafeGuidance();
+                  onSubmit();
                 }
               }
             }}
