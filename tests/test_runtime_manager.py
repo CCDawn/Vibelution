@@ -119,6 +119,30 @@ def test_open_request_ready_accepts_an_electron_managed_window():
     ) is False
 
 
+def test_open_request_ready_no_browser_accepts_backend_without_window():
+    observation = {
+        "observedState": "partial",
+        "backendHealthy": True,
+        "backendObserved": True,
+        "windowProvider": "electron",
+        "windowManaged": False,
+        "browserManaged": False,
+        "browserWindowAlive": False,
+    }
+
+    assert daemon._open_request_ready(observation, no_browser=True) is True
+    assert daemon._open_request_ready(observation, no_browser=False) is False
+
+
+def test_compose_observed_state_requires_backend_and_window_for_open():
+    from core.runtime_manager.window_provider_state import compose_observed_state
+
+    assert compose_observed_state(backend_ready=True, window_ready=True) == "open"
+    assert compose_observed_state(backend_ready=True, window_ready=False) == "partial"
+    assert compose_observed_state(backend_ready=False, window_ready=True) == "partial"
+    assert compose_observed_state(backend_ready=False, window_ready=False) == "closed"
+
+
 @pytest.fixture(autouse=True)
 def _block_real_process_termination(monkeypatch, tmp_path):
     events_path = tmp_path / "runtime-manager-events.jsonl"
@@ -9650,6 +9674,43 @@ def test_persist_workbench_launcher_state_after_open_replaces_control_surface_sn
     assert saved["lastSource"] == "launcher_api"
     assert saved["statusLine"] == "Workbench is running."
     assert events[-1][0] == "launcher.state.workbench_open_persisted"
+
+
+def test_persist_workbench_launcher_state_after_open_keeps_backend_only_as_partial(tmp_path, monkeypatch):
+    state_path = tmp_path / "state.json"
+    state_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(workbench_controller, "LAUNCHER_STATE_PATH", state_path)
+    monkeypatch.setattr(
+        workbench_controller,
+        "append_runtime_manager_file_event",
+        lambda *_args, **_kwargs: None,
+    )
+
+    result = workbench_controller.persist_workbench_launcher_state_after_open(
+        {
+            "sessionId": "backend-only",
+            "backendPid": 27700,
+            "backendLaunchPid": 27700,
+            "backendPort": 8002,
+            "backendObserved": True,
+            "backendAlive": True,
+            "backendHealthy": True,
+            "browserManaged": False,
+            "browserWindowAlive": False,
+            "browserLaunchPid": 0,
+            "browserWindowPid": 0,
+            "windowProvider": "electron",
+            "url": "http://127.0.0.1:8002",
+        },
+        last_reason="electron_main_restart",
+        last_source="runtime_manager",
+    )
+    saved = json.loads(state_path.read_text(encoding="utf-8"))
+
+    assert result["updatedState"] is True
+    assert saved["observedState"] == "partial"
+    assert saved["browserWindowPid"] == 0
+    assert saved["statusLine"] == "Workbench window is closed; backend is still running."
 
 
 def test_handle_force_close_workbench_marks_work_runs_and_verifies_close(monkeypatch):

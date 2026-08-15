@@ -555,12 +555,17 @@ def _unregistered_pool_dirs(layout: BranchWorkspaceLayout) -> list[Path]:
 
 
 def _worktree_is_dirty(path: Path) -> bool:
-    result = git_process.run_git(
-        ["status", "--porcelain=v1", "-z", "--untracked-files=no"],
-        cwd=str(path),
-        capture_output=True,
-        check=False,
-    )
+    try:
+        if not path.is_dir():
+            return False
+        result = git_process.run_git(
+            ["status", "--porcelain=v1", "-z", "--untracked-files=no"],
+            cwd=str(path),
+            capture_output=True,
+            check=False,
+        )
+    except OSError:
+        return False
     if result.returncode != 0:
         return True
     return bool(result.stdout)

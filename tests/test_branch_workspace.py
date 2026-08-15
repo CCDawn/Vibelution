@@ -257,3 +257,18 @@ def test_resolver_source_does_not_hardcode_user_or_desktop_paths():
     assert "Users\\" not in source
     assert "Users/" not in source
     assert "USERPROFILE" not in source
+
+
+def test_worktree_is_dirty_skips_invalid_cwd(tmp_path, monkeypatch):
+    missing = tmp_path / "not-a-dir"
+    file_path = tmp_path / "not-a-dir.txt"
+    file_path.write_text("x", encoding="utf-8")
+
+    def boom(*_args, **_kwargs):
+        raise NotADirectoryError(267, "目录名称无效")
+
+    monkeypatch.setattr(workspace.git_process, "run_git", boom)
+
+    assert workspace._worktree_is_dirty(missing) is False
+    assert workspace._worktree_is_dirty(file_path) is False
+    assert workspace._worktree_is_dirty(tmp_path) is False
