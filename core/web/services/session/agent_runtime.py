@@ -175,8 +175,7 @@ def _session_agent_id_snapshot(session_id: str) -> str:
     ):
         raise s.SessionNotFoundError(f"Session not found: {normalized_session_id}")
     with s._CHAT_STATE_LOCK:
-        payload = s.load_chat_state(s.PROJECT_ROOT)
-        conversation = s._find_conversation_entry(payload, normalized_session_id)
+        conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
         if conversation is None:
             raise s.SessionNotFoundError(f"Session not found: {normalized_session_id}")
         return str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
@@ -330,9 +329,8 @@ def _ensure_session_agent_prompt_snapshot(
             outcome="reused",
         )
         return dict(snapshot_hint)
-    with s._CHAT_STATE_LOCK, s.chat_state_transaction(s.PROJECT_ROOT):
-        payload = s.load_chat_state(s.PROJECT_ROOT)
-        conversation = s._find_conversation_entry(payload, normalized_session_id)
+    with s._CHAT_STATE_LOCK:
+        conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
         if conversation is None:
             return {}
         existing = conversation.get("agentPromptSnapshot")
@@ -368,8 +366,8 @@ def _ensure_session_agent_prompt_snapshot(
             )
             return dict(snapshot)
         conversation["agentPromptSnapshot"] = dict(snapshot)
-        payload["updated_at"] = s._now_timestamp()
-        s.save_chat_state(s.PROJECT_ROOT, payload)
+        conversation["updated_at"] = s._now_timestamp()
+        s.save_session_chat_state(s.PROJECT_ROOT, normalized_session_id, conversation)
         s._record_session_prompt_snapshot_event(
             normalized_session_id,
             agent_id=agent_id,

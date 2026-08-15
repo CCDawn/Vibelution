@@ -1406,9 +1406,10 @@ def _load_active_conversation_summary_target(
     s = _service()
 
     with s._CHAT_STATE_LOCK, s.chat_state_transaction(s.PROJECT_ROOT):
-        payload = s.load_chat_state(s.PROJECT_ROOT)
-        active_id = str(payload.get("active_conversation_id") or s.DEFAULT_CHAT_CONVERSATION_ID).strip()
-        raw_target = s._find_conversation_entry(payload, active_id)
+        active_id = str(
+            s.load_active_conversation_id(s.PROJECT_ROOT) or s.DEFAULT_CHAT_CONVERSATION_ID
+        ).strip()
+        raw_target = s.load_session_chat_state(s.PROJECT_ROOT, active_id)
         if raw_target is None:
             return active_id, None
         target = s._normalize_conversation(

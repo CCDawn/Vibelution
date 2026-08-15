@@ -363,6 +363,22 @@ def _install_chat_state(monkeypatch: pytest.MonkeyPatch, efforts: dict[str, str]
             None,
         ),
     )
+
+    def save_session(_project_root, session_id, conversation, **kwargs):
+        conversations = list(state.get("conversations") or [])
+        replaced = False
+        for index, item in enumerate(conversations):
+            if str(item.get("conversation_id") or "") == session_id:
+                conversations[index] = copy.deepcopy(conversation)
+                replaced = True
+                break
+        if not replaced:
+            conversations.append(copy.deepcopy(conversation))
+        state["conversations"] = conversations
+        if kwargs.get("activate"):
+            state["active_conversation_id"] = session_id
+
+    monkeypatch.setattr(session_service, "save_session_chat_state", save_session)
     monkeypatch.setattr(session_service, "record_runtime_scene_event", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         session_service,

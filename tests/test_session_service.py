@@ -2592,8 +2592,7 @@ def test_workbench_save_keeps_concurrent_conversation(tmp_path, monkeypatch):
     assert "session-concurrent" in ids
 
 
-def test_repair_conversation_index_records_replays_on_conflict(tmp_path, monkeypatch):
-    from core.chat.conversation_store import ChatStateRevisionConflictError
+def test_repair_conversation_index_records_does_not_drop_sibling_session_rows(tmp_path, monkeypatch):
     from core.web.services import team_service
 
     _seed_chat_state(
@@ -2607,6 +2606,10 @@ def test_repair_conversation_index_records_replays_on_conflict(tmp_path, monkeyp
                 "session_kind": "main",
                 "updated_at": "2026-05-18T12:00:00",
                 "messages": [],
+            },
+            {
+                "conversation_id": "session-concurrent",
+                "title": "并发会话",
             },
         ],
     )
@@ -2632,33 +2635,22 @@ def test_repair_conversation_index_records_replays_on_conflict(tmp_path, monkeyp
         }
     )
 
-    real_save = session_service.save_chat_state
-    calls = []
-
-    def conflicting_save(project_root, payload, **kwargs):
-        calls.append((project_root, kwargs))
-        if len(calls) == 1:
-            state = load_chat_state(tmp_path)
-            conversations = list(state.get("conversations") or [])
-            conversations.append(
-                {"conversation_id": "session-concurrent", "title": "并发会话"}
-            )
-            state["conversations"] = conversations
-            real_save(project_root, state)
-            raise ChatStateRevisionConflictError(expected=0, current=1)
-        real_save(project_root, payload, **kwargs)
-
-    monkeypatch.setattr(session_service, "save_chat_state", conflicting_save)
+    full_saves: list[str] = []
+    original_save = session_service.save_chat_state
+    monkeypatch.setattr(
+        session_service,
+        "save_chat_state",
+        lambda *args, **kwargs: full_saves.append("save") or original_save(*args, **kwargs),
+    )
 
     result = session_service.repair_conversation_index_records()
 
     assert result["changed"] is True
     assert result["conversationCount"] == 1
+    assert full_saves == []
     persisted = load_chat_state(tmp_path)
     by_id = {item["conversation_id"]: item for item in persisted["conversations"]}
     assert by_id["session-repaired"]["conversationIndexKind"] == (
         agent_directory_service.CONVERSATION_INDEX_KIND_PERSONAL_AGENT
     )
-    assert "session-concurrent" in by_id
-    assert len(calls) == 2
-    assert calls[1][1]["expected_state_revision"] == 2
+    assert by_id["session-concurrent"]["title"] == "并发会话"
