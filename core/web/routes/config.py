@@ -15,6 +15,10 @@ from config.provider_merge_migration import (
     ProviderMergeVerificationError,
 )
 
+from core.web.routes.config_draft_provider_models import (
+    ConfigProviderIdSuggestionResponse,
+    ConfigProviderRoutePreviewResponse,
+)
 from core.web.routes.config_workspace_models import (
     ConfigWorkspaceResponse,
     PublicConfigSummaryResponse,
@@ -481,7 +485,11 @@ def config_get_theme_background_image(filename: str) -> FileResponse:
     return FileResponse(path)
 
 
-@router.post("/config/draft/preview")
+@router.post(
+    "/config/draft/preview",
+    response_model=ConfigWorkspaceResponse,
+    response_model_exclude_unset=True,
+)
 def config_draft_preview(payload: ConfigDraftPayload) -> dict:
     try:
         return preview_config_workspace(payload.publicConfig, payload.draftMeta, payload.baseHash)
@@ -489,7 +497,11 @@ def config_draft_preview(payload: ConfigDraftPayload) -> dict:
         _raise_config_http_error(exc)
 
 
-@router.post("/config/draft/providers/id-suggestion")
+@router.post(
+    "/config/draft/providers/id-suggestion",
+    response_model=ConfigProviderIdSuggestionResponse,
+    response_model_exclude_unset=True,
+)
 def config_draft_provider_id_suggestion(
     payload: ConfigProviderSuggestionPayload,
 ) -> dict:
@@ -503,7 +515,11 @@ def config_draft_provider_id_suggestion(
         _raise_config_http_error(exc)
 
 
-@router.post("/config/draft/providers")
+@router.post(
+    "/config/draft/providers",
+    response_model=ConfigWorkspaceResponse,
+    response_model_exclude_unset=True,
+)
 def config_draft_add_provider(payload: ConfigProviderDraftPayload) -> dict:
     try:
         return provider_config_service.draft_add_provider(
@@ -518,7 +534,11 @@ def config_draft_add_provider(payload: ConfigProviderDraftPayload) -> dict:
         _raise_config_http_error(exc)
 
 
-@router.put("/config/draft/providers/{provider_id}")
+@router.put(
+    "/config/draft/providers/{provider_id}",
+    response_model=ConfigWorkspaceResponse,
+    response_model_exclude_unset=True,
+)
 def config_draft_update_provider(
     provider_id: str,
     payload: ConfigProviderDraftPayload,
@@ -537,7 +557,11 @@ def config_draft_update_provider(
         _raise_config_http_error(exc)
 
 
-@router.delete("/config/draft/providers/{provider_id}")
+@router.delete(
+    "/config/draft/providers/{provider_id}",
+    response_model=ConfigWorkspaceResponse,
+    response_model_exclude_unset=True,
+)
 def config_draft_delete_provider(
     provider_id: str,
     payload: ConfigProviderDraftPayload,
@@ -553,7 +577,11 @@ def config_draft_delete_provider(
         _raise_config_http_error(exc)
 
 
-@router.post("/config/draft/providers/{provider_id}/route-preview")
+@router.post(
+    "/config/draft/providers/{provider_id}/route-preview",
+    response_model=ConfigProviderRoutePreviewResponse,
+    response_model_exclude_unset=True,
+)
 def config_draft_preview_provider_route(
     provider_id: str,
     payload: ConfigProviderDraftPayload,
@@ -571,7 +599,11 @@ def config_draft_preview_provider_route(
         _raise_config_http_error(exc)
 
 
-@router.post("/config/draft/providers/{provider_id}/discover")
+@router.post(
+    "/config/draft/providers/{provider_id}/discover",
+    response_model=ConfigWorkspaceResponse,
+    response_model_exclude_unset=True,
+)
 def config_draft_discover_provider(
     provider_id: str,
     payload: ConfigProviderDiscoveryPayload,
@@ -588,7 +620,11 @@ def config_draft_discover_provider(
         _raise_config_http_error(exc)
 
 
-@router.post("/config/draft/providers/{provider_id}/models")
+@router.post(
+    "/config/draft/providers/{provider_id}/models",
+    response_model=ConfigWorkspaceResponse,
+    response_model_exclude_unset=True,
+)
 def config_draft_pin_provider_model(
     provider_id: str,
     payload: ConfigProviderModelPayload,
@@ -608,7 +644,11 @@ def config_draft_pin_provider_model(
         _raise_config_http_error(exc)
 
 
-@router.delete("/config/draft/providers/{provider_id}/models/{model_key}")
+@router.delete(
+    "/config/draft/providers/{provider_id}/models/{model_key}",
+    response_model=ConfigWorkspaceResponse,
+    response_model_exclude_unset=True,
+)
 def config_draft_unpin_provider_model(
     provider_id: str,
     model_key: str,

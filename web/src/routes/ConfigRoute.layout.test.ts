@@ -230,11 +230,11 @@ describe("ConfigRoute layout contract", () => {
   });
 
   it("synchronizes every Provider mutation from the full backend ConfigWorkspace response", () => {
-    expect(routeSource).toContain('requestJson<ConfigWorkspace>(\n        "/api/config/draft/providers"');
-    expect(routeSource).toContain("/discover`");
-    expect(routeSource).toContain("/models`");
-    expect(routeSource).toContain("/models/${encodeURIComponent(modelKey)}`");
-    expect(routeSource).toContain('buildProviderDraftRequest({ providerId, provider }),\n        "DELETE"');
+    expect(routeSource).toContain("addDraftProvider(");
+    expect(routeSource).toContain("discoverDraftProvider(");
+    expect(routeSource).toContain("pinDraftProviderModel(");
+    expect(routeSource).toContain("unpinDraftProviderModel(");
+    expect(routeSource).toContain("deleteDraftProvider(");
     expect(routeSource).toContain("routePreviewToken: routePreview.routePreviewToken");
     expect((routeSource.match(/syncWorkspace\(response, "success", \{ resetBase: false \}\);/g) ?? []).length).toBeGreaterThanOrEqual(6);
     expect(routeSource).not.toContain("syncProviderProjection");
@@ -265,10 +265,9 @@ describe("ConfigRoute layout contract", () => {
     expect(providerPanelSource).toContain("context_window");
     expect(providerPanelSource).toContain('type="password"');
     expect(providerPanelSource).toContain('provider.credentialState === "not_required"');
-    expect(routeSource).toContain('`/api/config/draft/providers/${encodeURIComponent(providerId)}`');
+    expect(routeSource).toContain("updateDraftProvider(");
     // Credential PUT body is owned by useConfigProviderDraftActions (param name: credentialValue).
     expect(routeSource).toContain("buildProviderDraftRequest({ providerId, provider, credentialValue })");
-    expect(routeSource).toContain('"PUT"');
     expect(routeSource).toContain("handleUpdateProviderContextWindow");
     expect(routeSource).toContain("if (structuredActionsDisabled || !providerCredentialValue.trim()) return;");
     expect(routeSource).toContain('credentialProvider.credentialState === "not_required"');

@@ -54,6 +54,7 @@ type ConversationIndexTreeProps = {
   sessionComposerErrors: Record<string, string>;
   sessionIdsNeedingApproval?: readonly string[];
   sessionsById: Map<string, SessionSummary>;
+  teams?: Team[];
   statusLabel: (status: string) => string;
   t: (key: TranslationKey) => string;
   onCancelRename: () => void;
@@ -105,6 +106,7 @@ export function ConversationIndexTree({
   sessionComposerErrors,
   sessionIdsNeedingApproval = [],
   sessionsById,
+  teams,
   statusLabel,
   t,
   onCancelRename,
@@ -176,6 +178,7 @@ export function ConversationIndexTree({
               sessionComposerErrors={sessionComposerErrors}
               sessionIdsNeedingApproval={sessionIdsNeedingApproval}
               sessionsById={sessionsById}
+              teams={teams ?? filteredTeams}
               statusLabel={statusLabel}
               t={t}
               onCancelRename={onCancelRename}

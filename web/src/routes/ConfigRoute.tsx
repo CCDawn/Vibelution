@@ -26,6 +26,7 @@ import {
 import { type BlockerFunction, useBlocker, useSearchParams } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
+import { previewConfigDraft } from "../api/config";
 import { queryKeys } from "../api/queryKeys";
 import {
   ConfigEditorMeta,
@@ -2633,7 +2634,6 @@ export function ConfigRoute() {
     setRouteEditProvider,
     setRoutePreview,
     dispatchProviderWizard,
-    requestJson,
   });
 
   const {
@@ -2792,7 +2792,7 @@ export function ConfigRoute() {
   async function previewDraft(nextConfig: PublicConfigShape, nextMeta: ConfigDraftMeta, pendingLabel: string) {
     setBusyAction(pendingLabel);
     try {
-      const response = await requestJson<ConfigWorkspace>("/api/config/draft/preview", {
+      const response = await previewConfigDraft({
         publicConfig: nextConfig,
         draftMeta: nextMeta,
         baseHash,
