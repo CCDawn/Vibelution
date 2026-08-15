@@ -1743,7 +1743,7 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("keeps the current session status bar keyed to the selected session", () => {
     expect(routeSource).toContain("const rawSessionDetail = resolveActiveSessionDetailForUi");
-    expect(routeSource).toContain("const detail = resolveStickySessionDetailPaint");
+    expect(routeSource).toContain("const detail = useStableSessionDetailPaint({");
     expect(routeSource).toContain("detail: rawSessionDetail");
     expect(routeSource).toContain("const activeTurnLayer = activeSessionId ? activeTurnLayersBySession[activeSessionId] : undefined");
     expect(routeSource).toContain("const activeTurnSettledByDetail = isActiveTurnSettledByDetail(activeTurnLayer, detail)");
