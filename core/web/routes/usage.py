@@ -3,24 +3,28 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
 from core.llm.usage_ledger import build_usage_summary
+from core.web.routes.usage_models import UsageSummaryResponse
 
 
 router = APIRouter(tags=["usage"])
 
 
-@router.get("/usage/summary")
+@router.get(
+    "/usage/summary",
+    response_model=UsageSummaryResponse,
+    response_model_exclude_unset=True,
+)
 def usage_summary(
     scope: str = Query("global", pattern="^(global|session|agent|model)$"),
     sessionId: str = "",
     agentId: str = "",
     provider: str = "",
     model: str = "",
-) -> dict[str, Any]:
+) -> dict:
     normalized_scope = str(scope or "global").strip().lower()
     session_id = str(sessionId or "").strip()
     agent_id = str(agentId or "").strip()
