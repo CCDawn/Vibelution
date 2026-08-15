@@ -556,7 +556,10 @@ export function useSessionToolApprovalsQuery(options: SessionToolApprovalsQueryO
  * the detail (and its `messages` array) reference strictly identical while both
  * inputs are unchanged, and recomputes only when `activeSessionId` or the
  * resolved raw detail actually changes, preserving the existing sticky
- * transcript semantics.
+ * transcript semantics. A query observer can still replay an equivalent raw
+ * detail with a new reference; `updateTokenSpeedTracker` treats an unchanged
+ * token count as a state no-op so that replay cannot feed another render back
+ * into this observer cycle.
  */
 export function useStableSessionDetailPaint(options: {
   activeSessionId: string | null | undefined;

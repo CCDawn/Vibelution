@@ -41,7 +41,30 @@ describe("chatTokenSpeed", () => {
     ];
 
     expect(tokenSpeedSampleFromMessages("session-1", queuedMessages, "queued", 1000)).toBeNull();
-  });  it("computes token speed from positive streaming deltas and resets on new messages", () => {
+  });
+
+  it("keeps the tracker reference when a query observer replays an unchanged token count", () => {
+    const first = updateTokenSpeedTracker(null, {
+      sessionId: "session-1",
+      messageId: "message-1",
+      tokenCount: 8,
+      timestampMs: 1000,
+    });
+
+    const replay = updateTokenSpeedTracker(first, {
+      sessionId: "session-1",
+      messageId: "message-1",
+      tokenCount: 8,
+      timestampMs: 3000,
+    });
+
+    // Replayed React Query snapshots have a new timestamp but no new output.
+    // Returning a new state object here schedules another render and can create
+    // the ChatCodingRouteWorkbench update-depth loop.
+    expect(replay).toBe(first);
+  });
+
+  it("computes token speed from positive streaming deltas and resets on new messages", () => {
     const first = updateTokenSpeedTracker(null, {
       sessionId: "session-1",
       messageId: "message-1",
