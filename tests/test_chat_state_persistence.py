@@ -2,6 +2,7 @@ import json
 import multiprocessing
 import os
 import threading
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -273,3 +274,143 @@ def test_cross_process_session_creates_do_not_overwrite_chat_index(tmp_path, mon
         if isinstance(item, dict)
     }
     assert created_ids <= indexed_ids
+
+
+def _wait_until(predicate, *, timeout: float = 1.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return False
+
+
+def test_stale_full_replace_cannot_clobber_parallel_session_row(tmp_path, monkeypatch):
+    """A long-held full replace must not overwrite a later session-row upsert."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "conversations": [
+                {
+                    "conversation_id": "session-a",
+                    "title": "A",
+                    "last_turn_status": "ready",
+                },
+                {
+                    "conversation_id": "session-b",
+                    "title": "B",
+                    "last_turn_status": "ready",
+                },
+            ],
+        },
+    )
+
+    persist_holds_lock = threading.Event()
+    persist_may_save = threading.Event()
+    persist_errors: list[BaseException] = []
+    submit_errors: list[BaseException] = []
+
+    def persist_stale_snapshot() -> None:
+        try:
+            with session_service._CHAT_STATE_LOCK:
+                stale = load_chat_state(tmp_path)
+                persist_holds_lock.set()
+                assert persist_may_save.wait(timeout=2.0)
+                save_chat_state(tmp_path, stale)
+        except BaseException as exc:  # pragma: no cover - surfaced below
+            persist_errors.append(exc)
+
+    def submit_running_row() -> None:
+        try:
+            assert persist_holds_lock.wait(timeout=2.0)
+            save_session_chat_state(
+                tmp_path,
+                "session-b",
+                {
+                    "conversation_id": "session-b",
+                    "title": "B",
+                    "last_turn_status": "running",
+                },
+            )
+        except BaseException as exc:  # pragma: no cover - surfaced below
+            submit_errors.append(exc)
+
+    persist_thread = threading.Thread(target=persist_stale_snapshot)
+    submit_thread = threading.Thread(target=submit_running_row)
+    persist_thread.start()
+    assert persist_holds_lock.wait(timeout=2.0)
+    submit_thread.start()
+    assert _wait_until(submit_thread.is_alive, timeout=1.0)
+    time.sleep(0.1)
+    persist_may_save.set()
+    persist_thread.join(timeout=3.0)
+    submit_thread.join(timeout=3.0)
+
+    assert persist_errors == []
+    assert submit_errors == []
+    assert not persist_thread.is_alive()
+    assert not submit_thread.is_alive()
+    assert load_session_chat_state(tmp_path, "session-b")["last_turn_status"] == "running"
+    assert load_session_chat_state(tmp_path, "session-a")["title"] == "A"
+
+
+def test_stale_full_replace_cannot_prune_parallel_new_session_row(tmp_path, monkeypatch):
+    """A stale replace snapshot must not delete a session row upserted while it held the lock."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "conversations": [
+                {"conversation_id": "session-a", "title": "A"},
+            ],
+        },
+    )
+
+    persist_holds_lock = threading.Event()
+    persist_may_save = threading.Event()
+    persist_errors: list[BaseException] = []
+    submit_errors: list[BaseException] = []
+
+    def persist_stale_snapshot() -> None:
+        try:
+            with session_service._CHAT_STATE_LOCK:
+                stale = load_chat_state(tmp_path)
+                persist_holds_lock.set()
+                assert persist_may_save.wait(timeout=2.0)
+                save_chat_state(tmp_path, stale)
+        except BaseException as exc:  # pragma: no cover - surfaced below
+            persist_errors.append(exc)
+
+    def create_session_c() -> None:
+        try:
+            assert persist_holds_lock.wait(timeout=2.0)
+            save_session_chat_state(
+                tmp_path,
+                "session-c",
+                {"conversation_id": "session-c", "title": "C"},
+            )
+        except BaseException as exc:  # pragma: no cover - surfaced below
+            submit_errors.append(exc)
+
+    persist_thread = threading.Thread(target=persist_stale_snapshot)
+    submit_thread = threading.Thread(target=create_session_c)
+    persist_thread.start()
+    assert persist_holds_lock.wait(timeout=2.0)
+    submit_thread.start()
+    assert _wait_until(submit_thread.is_alive, timeout=1.0)
+    time.sleep(0.1)
+    persist_may_save.set()
+    persist_thread.join(timeout=3.0)
+    submit_thread.join(timeout=3.0)
+
+    assert persist_errors == []
+    assert submit_errors == []
+    assert not persist_thread.is_alive()
+    assert not submit_thread.is_alive()
+    assert load_session_chat_state(tmp_path, "session-c")["title"] == "C"
+    assert load_session_chat_state(tmp_path, "session-a")["title"] == "A"
