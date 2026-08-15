@@ -107,10 +107,14 @@ class LegacyChatStateImporter:
         except OSError as exc:
             raise ChatStateImportError("Chat state backup could not be created.") from exc
         source_hash = hashlib.sha256(raw_source).hexdigest()
+        legacy_revision = document.get("state_revision")
         result = self._repository.replace_chat_state(
             cleaned,
             imported_source_sha256=source_hash,
             imported_at_ms=timestamp_ms,
+            imported_legacy_state_revision=(
+                int(legacy_revision) if str(legacy_revision or "").strip().isdigit() else None
+            ),
         ).result(timeout=timeout)
         return {
             "action": "imported",

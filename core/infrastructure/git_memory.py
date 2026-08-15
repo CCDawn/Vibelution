@@ -33,6 +33,18 @@ def _utcnow_iso() -> str:
     return datetime.now().isoformat()
 
 
+def _normalize_old_path(value: Any) -> str:
+    """Normalize old_path to '' instead of NULL so the UNIQUE constraint
+    stays effective (SQLite treats NULLs as distinct and would otherwise
+    let INSERT OR IGNORE duplicate ordinary add/modify rows)."""
+    return str(value or "").strip()
+
+
+def _read_old_path(value: Any) -> Optional[str]:
+    normalized = str(value or "").strip()
+    return normalized or None
+
+
 def _short_subject(subject: Optional[str]) -> Optional[str]:
     if not subject:
         return subject
@@ -191,7 +203,7 @@ class GitMemoryService:
                     commit_sha TEXT NOT NULL,
                     path TEXT NOT NULL,
                     change_type TEXT NOT NULL,
-                    old_path TEXT,
+                    old_path TEXT NOT NULL DEFAULT '',
                     is_worktree INTEGER NOT NULL DEFAULT 0,
                     summary TEXT,
                     created_at TEXT NOT NULL,
@@ -475,7 +487,7 @@ class GitMemoryService:
             for change in changes:
                 path = change["path"]
                 change_type = change["change_type"]
-                old_path = change.get("old_path")
+                old_path = _normalize_old_path(change.get("old_path"))
                 summary = f"{change_type}: {path}"
                 cursor.execute(
                     """
@@ -608,7 +620,7 @@ class GitMemoryService:
                     INSERT OR IGNORE INTO GitFileChange(commit_sha, path, change_type, old_path, is_worktree, summary, created_at)
                     VALUES (?, ?, ?, ?, 1, ?, ?)
                     """,
-                    (snapshot.snapshot_id, wf.path, change_type, wf.old_path, summary, now),
+                    (snapshot.snapshot_id, wf.path, change_type, _normalize_old_path(wf.old_path), summary, now),
                 )
                 for entity in self._entity_refs_for_path(wf.path):
                     cursor.execute(
@@ -855,7 +867,7 @@ class GitMemoryService:
                 summary=row["summary"] or f"{row['change_type']}: {row['path']}",
                 commit_sha=row["commit_sha"],
                 change_type=row["change_type"],
-                old_path=row["old_path"],
+                old_path=_read_old_path(row["old_path"]),
                 subject=row["subject"],
             )
             for row in rows

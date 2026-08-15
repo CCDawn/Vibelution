@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from core.ui.chat_state import load_chat_state, save_chat_state
+from core.ui.chat_state import load_chat_state, mutate_chat_state
 
 from . import agent_directory_service, session_service
 from . import agent_mode_binding_service
@@ -1022,11 +1022,20 @@ def _restore_active_session(project_root: Path, session_id: str) -> None:
     if not normalized:
         return
     try:
-        state = load_chat_state(project_root)
-        conversations = state.get("conversations") if isinstance(state.get("conversations"), list) else []
-        if any(str(item.get("conversation_id") or "").strip() == normalized for item in conversations if isinstance(item, dict)):
-            state["active_conversation_id"] = normalized
-            save_chat_state(project_root, state)
+        def restore(state: dict[str, Any]) -> None:
+            conversations = (
+                state.get("conversations")
+                if isinstance(state.get("conversations"), list)
+                else []
+            )
+            if any(
+                str(item.get("conversation_id") or "").strip() == normalized
+                for item in conversations
+                if isinstance(item, dict)
+            ):
+                state["active_conversation_id"] = normalized
+
+        mutate_chat_state(project_root, restore)
     except Exception:
         return
 

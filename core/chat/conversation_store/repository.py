@@ -48,6 +48,21 @@ class AgentConfigRevisionConflictError(RuntimeError):
     """A config update targeted a revision that is no longer current."""
 
 
+class ChatStateRevisionConflictError(RuntimeError):
+    """A chat state save targeted a stale ``state_revision``.
+
+    Callers must re-read the current document and replay a deterministic
+    mutation with a bounded retry budget instead of overwriting blindly.
+    """
+
+    def __init__(self, *, expected: int, current: int) -> None:
+        super().__init__(
+            f"chat state revision conflict: expected {expected}, current {current}"
+        )
+        self.expected = expected
+        self.current = current
+
+
 class AgentDao:
     def __init__(self, connection: sqlite3.Connection) -> None:
         self._connection = connection
@@ -891,6 +906,8 @@ class WorkspaceChatStateDao:
         *,
         imported_source_sha256: str = "",
         imported_at_ms: int | None = None,
+        expected_state_revision: int | None = None,
+        imported_legacy_state_revision: int | None = None,
     ) -> dict[str, Any]:
         frozen = dict(state)
         raw_conversations = frozen.get("conversations")
@@ -926,7 +943,24 @@ class WorkspaceChatStateDao:
             "SELECT state_revision, imported_source_sha256, imported_at_ms "
             "FROM workspace_chat_state WHERE id=1"
         ).fetchone()
-        revision = max(0, int(existing["state_revision"] if existing is not None else 0)) + 1
+        current_revision = max(
+            0, int(existing["state_revision"] if existing is not None else 0)
+        )
+        if (
+            expected_state_revision is not None
+            and int(expected_state_revision) != current_revision
+        ):
+            raise ChatStateRevisionConflictError(
+                expected=int(expected_state_revision),
+                current=current_revision,
+            )
+        if existing is None and imported_legacy_state_revision is not None:
+            # One-time import: continue the legacy document's revision
+            # sequence so CAS callers and catalog freshness stay coherent.
+            current_revision = max(
+                current_revision, max(0, int(imported_legacy_state_revision))
+            )
+        revision = current_revision + 1
         now_ms = _now_ms()
         extras = {key: value for key, value in frozen.items() if key not in _CHAT_STATE_ROOT_KEYS}
         source_hash = str(imported_source_sha256 or "").strip()
@@ -1277,6 +1311,8 @@ class ConversationRepository:
         *,
         imported_source_sha256: str = "",
         imported_at_ms: int | None = None,
+        expected_state_revision: int | None = None,
+        imported_legacy_state_revision: int | None = None,
     ) -> Future[dict[str, Any]]:
         frozen = dict(state)
         return self._writer.submit(
@@ -1284,9 +1320,76 @@ class ConversationRepository:
                 frozen,
                 imported_source_sha256=imported_source_sha256,
                 imported_at_ms=imported_at_ms,
+                expected_state_revision=expected_state_revision,
+                imported_legacy_state_revision=imported_legacy_state_revision,
             ),
             force_flush=True,
         )
+
+    def update_chat_state(
+        self,
+        mutate: Callable[[dict[str, Any]], Any],
+        *,
+        expected_state_revision: int | None = None,
+    ) -> Future[dict[str, Any]]:
+        """Atomic read-modify-write of the workspace chat state.
+
+        ``mutate`` runs on the writer thread inside the open transaction:
+        it receives the current document and its changes are committed
+        together with the replace. The mutator must be deterministic and
+        must not submit other store work or block for a long time.
+        """
+
+        def mutation(unit_of_work: ConversationUnitOfWork) -> dict[str, Any]:
+            current = unit_of_work.chat_state.get()
+            current_revision = max(0, int(current.get("state_revision") or 0))
+            if (
+                expected_state_revision is not None
+                and int(expected_state_revision) != current_revision
+            ):
+                raise ChatStateRevisionConflictError(
+                    expected=int(expected_state_revision),
+                    current=current_revision,
+                )
+            payload = dict(current)
+            mutate(payload)
+            return unit_of_work.chat_state.replace(payload)
+
+        return self._writer.submit(mutation, force_flush=True)
+
+    def archive_session_and_replace_chat_state(
+        self,
+        *,
+        session_id: str,
+        state: Mapping[str, Any],
+        imported_source_sha256: str = "",
+        imported_at_ms: int | None = None,
+        expected_state_revision: int | None = None,
+    ) -> Future[dict[str, Any]]:
+        """Delete one session in a single transaction.
+
+        Replaces the workspace chat state document and archives the matching
+        directory session row in the same commit. Either both effects land or
+        neither does; callers never observe a half-deleted session.
+        """
+
+        frozen = dict(state)
+        normalized_session_id = str(session_id or "").strip()
+
+        def mutation(unit_of_work: ConversationUnitOfWork) -> dict[str, Any]:
+            chat_state_result = unit_of_work.chat_state.replace(
+                frozen,
+                imported_source_sha256=imported_source_sha256,
+                imported_at_ms=imported_at_ms,
+                expected_state_revision=expected_state_revision,
+            )
+            archive_result = unit_of_work.sessions.archive(normalized_session_id)
+            return {
+                "archive": archive_result,
+                "chatState": chat_state_result,
+            }
+
+        return self._writer.submit(mutation, force_flush=True)
 
 
 def _canonical_json(value: Mapping[str, Any]) -> str:

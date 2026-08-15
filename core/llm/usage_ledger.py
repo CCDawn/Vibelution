@@ -6,6 +6,9 @@ from __future__ import annotations
 import json
 import secrets
 import sqlite3
+import threading
+import time
+from collections import OrderedDict
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -17,8 +20,13 @@ from core.infrastructure import developer_sandbox
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 USAGE_SCHEMA_VERSION = 2
 DEFAULT_LEDGER_TIMEOUT_SECONDS = 5.0
+MAX_LOCK_WAIT_SECONDS = 2.0
+MAX_WRITE_ATTEMPTS = 3
+_RETRY_BACKOFF_SECONDS = 0.02
+_INIT_CACHE_MAX_ENTRIES = 128
 UsageSource = Literal["provider_usage", "estimated", "missing", "not_called"]
 VALID_SOURCES = {"provider_usage", "estimated", "missing", "not_called"}
+_VALID_SOURCES_SQL = "('provider_usage','estimated','missing','not_called')"
 NUMERIC_EVENT_FIELDS = (
     "input_tokens",
     "cached_input_tokens",
@@ -31,6 +39,34 @@ NUMERIC_EVENT_FIELDS = (
     "context_window",
     "latency_ms",
 )
+
+# Per-path process state: schema init cache and writer locks stay bounded so
+# long-running backends and test sessions do not grow registries forever. A
+# writer lock is only evicted once it has no active user, so a second lock for
+# the same path can never be handed out while the first is held.
+_schema_ready: OrderedDict[str, None] = OrderedDict()
+_registry_guard = threading.Lock()
+
+
+class _WriteLockEntry:
+    __slots__ = ("lock", "users")
+
+    def __init__(self, lock: threading.Lock) -> None:
+        self.lock = lock
+        self.users = 0
+
+
+_write_locks: OrderedDict[str, _WriteLockEntry] = OrderedDict()
+
+_usage_stats: dict[str, Any] = {
+    "attempted": 0,
+    "persisted": 0,
+    "dropped": 0,
+    "waitingWriters": 0,
+    "maxWaitingWriters": 0,
+    "lastFailure": None,
+}
+_usage_stats_guard = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -175,52 +211,190 @@ def record_usage_event(
     timeout_seconds: float = DEFAULT_LEDGER_TIMEOUT_SECONDS,
 ) -> UsageLedgerEvent:
     normalized = _normalize_event(event)
-    with _connect(project_root, timeout_seconds=timeout_seconds) as conn:
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO usage_events (
-              event_id, recorded_at, source, scope_kind, session_id, conversation_id,
-              turn_id, agent_id, team_id, provider, model, profile_id, transport,
-              input_tokens, cached_input_tokens, cache_read_input_tokens,
-              cache_creation_input_tokens, uncached_input_tokens, output_tokens,
-              reasoning_output_tokens, total_tokens, context_window, latency_ms,
-              runtime_scene_id, provider_usage_keys_json, cache_usage_observed,
-              cache_usage_missing_reason, usage_schema_version
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                normalized.event_id,
-                normalized.recorded_at,
-                str(normalized.source or "missing"),
-                normalized.scope_kind,
-                normalized.session_id,
-                normalized.conversation_id,
-                normalized.turn_id,
-                normalized.agent_id,
-                normalized.team_id,
-                normalized.provider,
-                normalized.model,
-                normalized.profile_id,
-                normalized.transport,
-                normalized.input_tokens,
-                normalized.cached_input_tokens,
-                normalized.cache_read_input_tokens,
-                normalized.cache_creation_input_tokens,
-                normalized.uncached_input_tokens,
-                normalized.output_tokens,
-                normalized.reasoning_output_tokens,
-                normalized.total_tokens,
-                normalized.context_window,
-                normalized.latency_ms,
-                normalized.runtime_scene_id,
-                json.dumps(normalized.provider_usage_keys, ensure_ascii=False),
-                1 if normalized.cache_usage_observed else 0,
-                normalized.cache_usage_missing_reason,
-                USAGE_SCHEMA_VERSION,
+    path = usage_ledger_path(project_root)
+    _bump_usage_stat("attempted")
+    lock = _write_lock_for(path)
+    try:
+        with _usage_stats_guard:
+            _usage_stats["waitingWriters"] += 1
+            _usage_stats["maxWaitingWriters"] = max(
+                _usage_stats["maxWaitingWriters"], _usage_stats["waitingWriters"]
+            )
+        try:
+            acquired = lock.acquire(
+                timeout=min(MAX_LOCK_WAIT_SECONDS, max(0.0, timeout_seconds))
+            )
+        finally:
+            with _usage_stats_guard:
+                _usage_stats["waitingWriters"] = max(
+                    0, int(_usage_stats["waitingWriters"]) - 1
+                )
+        if not acquired:
+            error = sqlite3.OperationalError(
+                "usage ledger writer lock busy; write rejected"
+            )
+            _record_usage_drop(error)
+            raise error
+        try:
+            last_error: sqlite3.Error | None = None
+            for attempt in range(MAX_WRITE_ATTEMPTS):
+                connection: sqlite3.Connection | None = None
+                try:
+                    connection = _connect(path, timeout_seconds=timeout_seconds)
+                    _insert_usage_event(connection, normalized)
+                    connection.commit()
+                    _bump_usage_stat("persisted")
+                    return normalized
+                except sqlite3.Error as exc:
+                    last_error = exc
+                    time.sleep(_RETRY_BACKOFF_SECONDS * attempt)
+                finally:
+                    if connection is not None:
+                        connection.close()
+            error = last_error or sqlite3.OperationalError(
+                "usage ledger write failed without an error"
+            )
+            _record_usage_drop(error)
+            raise error
+        finally:
+            lock.release()
+    finally:
+        _write_lock_release(path)
+
+
+def usage_ledger_stats() -> dict[str, Any]:
+    """Observed terminal states: attempted/persisted/dropped writes, current
+    waiting writers, and the last drop failure reason. No silent undercount."""
+    with _usage_stats_guard:
+        snapshot = {
+            "attempted": int(_usage_stats["attempted"]),
+            "persisted": int(_usage_stats["persisted"]),
+            "dropped": int(_usage_stats["dropped"]),
+            "waitingWriters": int(_usage_stats["waitingWriters"]),
+            "maxWaitingWriters": int(_usage_stats["maxWaitingWriters"]),
+            "lastFailure": (
+                dict(_usage_stats["lastFailure"])
+                if isinstance(_usage_stats["lastFailure"], dict)
+                else None
             ),
-        )
-        conn.commit()
-    return normalized
+        }
+    return snapshot
+
+
+def _reset_usage_ledger_stats() -> None:
+    with _usage_stats_guard:
+        _usage_stats["attempted"] = 0
+        _usage_stats["persisted"] = 0
+        _usage_stats["dropped"] = 0
+        _usage_stats["waitingWriters"] = 0
+        _usage_stats["maxWaitingWriters"] = 0
+        _usage_stats["lastFailure"] = None
+
+
+def _bump_usage_stat(key: str) -> None:
+    with _usage_stats_guard:
+        _usage_stats[key] = int(_usage_stats.get(key) or 0) + 1
+
+
+def _record_usage_drop(error: BaseException) -> None:
+    with _usage_stats_guard:
+        _usage_stats["dropped"] = int(_usage_stats.get("dropped") or 0) + 1
+        _usage_stats["lastFailure"] = {
+            "reason": type(error).__name__,
+            "at": _utcnow(),
+        }
+
+
+def _write_lock_for(path: Path) -> threading.Lock:
+    key = _registry_key(path)
+    with _registry_guard:
+        entry = _write_locks.get(key)
+        if entry is None:
+            entry = _WriteLockEntry(threading.Lock())
+            _write_locks[key] = entry
+        entry.users += 1
+        _write_locks.move_to_end(key)
+        _prune_write_locks()
+        return entry.lock
+
+
+def _write_lock_release(path: Path) -> None:
+    key = _registry_key(path)
+    with _registry_guard:
+        entry = _write_locks.get(key)
+        if entry is not None:
+            entry.users = max(0, entry.users - 1)
+            if entry.users == 0:
+                _write_locks.move_to_end(key)
+        _prune_write_locks()
+
+
+def _prune_write_locks() -> None:
+    """Evict least-recently-used entries only while the registry is over its
+    capacity; a lock with an active user is never evicted so the same path can
+    only ever map to a single live lock."""
+    while len(_write_locks) > _INIT_CACHE_MAX_ENTRIES:
+        evicted = False
+        for key in tuple(_write_locks):
+            if _write_locks[key].users == 0:
+                del _write_locks[key]
+                evicted = True
+                break
+        if not evicted:
+            return
+
+
+def _registry_key(path: Path) -> str:
+    try:
+        return str(Path(path).expanduser().resolve())
+    except OSError:
+        return str(path)
+
+
+def _insert_usage_event(conn: sqlite3.Connection, normalized: UsageLedgerEvent) -> None:
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO usage_events (
+          event_id, recorded_at, source, scope_kind, session_id, conversation_id,
+          turn_id, agent_id, team_id, provider, model, profile_id, transport,
+          input_tokens, cached_input_tokens, cache_read_input_tokens,
+          cache_creation_input_tokens, uncached_input_tokens, output_tokens,
+          reasoning_output_tokens, total_tokens, context_window, latency_ms,
+          runtime_scene_id, provider_usage_keys_json, cache_usage_observed,
+          cache_usage_missing_reason, usage_schema_version
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            normalized.event_id,
+            normalized.recorded_at,
+            str(normalized.source or "missing"),
+            normalized.scope_kind,
+            normalized.session_id,
+            normalized.conversation_id,
+            normalized.turn_id,
+            normalized.agent_id,
+            normalized.team_id,
+            normalized.provider,
+            normalized.model,
+            normalized.profile_id,
+            normalized.transport,
+            normalized.input_tokens,
+            normalized.cached_input_tokens,
+            normalized.cache_read_input_tokens,
+            normalized.cache_creation_input_tokens,
+            normalized.uncached_input_tokens,
+            normalized.output_tokens,
+            normalized.reasoning_output_tokens,
+            normalized.total_tokens,
+            normalized.context_window,
+            normalized.latency_ms,
+            normalized.runtime_scene_id,
+            json.dumps(normalized.provider_usage_keys, ensure_ascii=False),
+            1 if normalized.cache_usage_observed else 0,
+            normalized.cache_usage_missing_reason,
+            USAGE_SCHEMA_VERSION,
+        ),
+    )
 
 
 def build_usage_summary(
@@ -231,7 +405,6 @@ def build_usage_summary(
     model: str = "",
     project_root: Path | None = None,
 ) -> dict[str, Any]:
-    rows = _read_rows(project_root)
     normalized_scope = str(scope or "global").strip().lower() or "global"
     filters = {
         "sessionId": str(session_id or "").strip(),
@@ -239,78 +412,336 @@ def build_usage_summary(
         "provider": str(provider or "").strip(),
         "model": str(model or "").strip(),
     }
-    scoped_rows = _filter_rows(
-        rows,
-        normalized_scope,
-        session_id=filters["sessionId"],
-        agent_id=filters["agentId"],
-        provider=filters["provider"],
-        model=filters["model"],
-    )
-    last_row = _last_valid_row(scoped_rows)
-    rollup_filters = _derive_rollup_filters(filters, last_row)
-    session_rows = (
-        _filter_rows(
-            rows,
-            "session",
-            session_id=rollup_filters["sessionId"],
+    path = usage_ledger_path(project_root)
+    connection = _connect(path)
+    try:
+        scoped_where, scoped_params = _scope_where(
+            normalized_scope,
+            session_id=filters["sessionId"],
+            agent_id=filters["agentId"],
             provider=filters["provider"],
             model=filters["model"],
         )
-        if rollup_filters["sessionId"]
-        else []
-    )
-    agent_rows = (
-        _filter_rows(
-            rows,
-            "agent",
-            agent_id=rollup_filters["agentId"],
+        last_row = _query_last_valid_row(connection, scoped_where, scoped_params)
+        rollup_filters = _derive_rollup_filters(filters, last_row)
+        session_rollup = (
+            _rollup_sql(
+                connection,
+                "session_id=?",
+                [rollup_filters["sessionId"]],
+                provider=filters["provider"],
+                model=filters["model"],
+            )[0]
+            if rollup_filters["sessionId"]
+            else UsageRollup()
+        )
+        agent_rollup = (
+            _rollup_sql(
+                connection,
+                "agent_id=?",
+                [rollup_filters["agentId"]],
+                provider=filters["provider"],
+                model=filters["model"],
+            )[0]
+            if rollup_filters["agentId"]
+            else UsageRollup()
+        )
+        global_rollup, skipped_record_count = _rollup_sql(
+            connection,
+            "",
+            [],
             provider=filters["provider"],
             model=filters["model"],
         )
-        if rollup_filters["agentId"]
-        else []
+        today_rollup, last7_days_rollup = _time_window_rollups_sql(
+            connection,
+            provider=filters["provider"],
+            model=filters["model"],
+        )
+        scoped_rollup = (
+            global_rollup
+            if _scoped_filter_equals_global(normalized_scope, filters)
+            else _rollup_sql(
+                connection,
+                scoped_where,
+                scoped_params,
+            )[0]
+        )
+        model_context_window = _latest_context_window_sql(
+            connection, scoped_where, scoped_params
+        ) or _latest_context_window_sql(connection, "", [], provider=filters["provider"], model=filters["model"])
+        summary = UsageSummary(
+            scope=normalized_scope,
+            filters=filters,
+            rollup_filters=rollup_filters,
+            last_token_usage=_row_to_last_usage(last_row),
+            session_token_usage=session_rollup,
+            agent_token_usage=agent_rollup,
+            today_token_usage=today_rollup,
+            last7_days_token_usage=last7_days_rollup,
+            global_token_usage=global_rollup,
+            ledger_path=path,
+            model_context_window=model_context_window,
+            skipped_record_count=skipped_record_count,
+        ).to_dict()
+        summary["scopeTokenUsage"] = scoped_rollup.to_dict()
+        return summary
+    finally:
+        connection.close()
+
+
+def _scope_where(
+    normalized_scope: str,
+    *,
+    session_id: str,
+    agent_id: str,
+    provider: str,
+    model: str,
+) -> tuple[str, list[str]]:
+    clauses: list[str] = []
+    parameters: list[str] = []
+    if provider:
+        clauses.append("provider=?")
+        parameters.append(provider)
+    if model:
+        clauses.append("model=?")
+        parameters.append(model)
+    if normalized_scope in {"session", "chat_session"} and session_id:
+        clauses.append("session_id=?")
+        parameters.append(session_id)
+    elif normalized_scope == "agent" and agent_id:
+        clauses.append("agent_id=?")
+        parameters.append(agent_id)
+    return " AND ".join(clauses), parameters
+
+
+def _scoped_filter_equals_global(normalized_scope: str, filters: dict[str, str]) -> bool:
+    """The scoped row set is identical to the global row set (provider/model
+    filters only), so the aggregate can be reused instead of rescanned."""
+    if normalized_scope == "global":
+        return True
+    if normalized_scope in {"session", "chat_session"}:
+        return not filters.get("sessionId")
+    if normalized_scope == "agent":
+        return not filters.get("agentId")
+    return False
+
+
+def _rollup_where(
+    base_clause: str,
+    base_params: list[str],
+    *,
+    provider: str,
+    model: str,
+) -> tuple[str, list[str]]:
+    clauses: list[str] = []
+    parameters: list[str] = []
+    if base_clause:
+        clauses.append(base_clause)
+        parameters.extend(base_params)
+    if provider:
+        clauses.append("provider=?")
+        parameters.append(provider)
+    if model:
+        clauses.append("model=?")
+        parameters.append(model)
+    where = " AND ".join(clauses)
+    return f"WHERE {where}" if where else "", parameters
+
+
+_ROLLUP_SQL = """
+SELECT
+  COALESCE(SUM(CASE WHEN source IN {valid} THEN 1 ELSE 0 END), 0) AS call_count,
+  COALESCE(SUM(CASE WHEN source='provider_usage' THEN 1 ELSE 0 END), 0) AS observed_call_count,
+  COALESCE(SUM(CASE WHEN source='estimated' THEN 1 ELSE 0 END), 0) AS estimated_call_count,
+  COALESCE(SUM(CASE WHEN source='missing' THEN 1 ELSE 0 END), 0) AS missing_call_count,
+  COALESCE(SUM(CASE WHEN source='not_called' THEN 1 ELSE 0 END), 0) AS not_called_count,
+  COALESCE(SUM(CASE WHEN source IN {valid} THEN MAX(0, input_tokens) ELSE 0 END), 0) AS input_tokens,
+  COALESCE(SUM(CASE WHEN source IN {valid} AND cache_usage_observed
+    THEN MAX(0, cached_input_tokens) ELSE 0 END), 0) AS cached_input_tokens,
+  COALESCE(SUM(CASE WHEN source IN {valid} AND cache_usage_observed
+    THEN CASE WHEN cache_read_input_tokens > 0 THEN MAX(0, cache_read_input_tokens)
+         ELSE MAX(0, cached_input_tokens) END ELSE 0 END), 0) AS cache_read_input_tokens,
+  COALESCE(SUM(CASE WHEN source IN {valid} AND cache_usage_observed
+    THEN MAX(0, cache_creation_input_tokens) ELSE 0 END), 0) AS cache_creation_input_tokens,
+  COALESCE(SUM(CASE WHEN source IN {valid} AND cache_usage_observed
+    THEN CASE WHEN uncached_input_tokens > 0 THEN MAX(0, uncached_input_tokens)
+         WHEN input_tokens > 0 THEN MAX(0, input_tokens - cached_input_tokens)
+         ELSE 0 END ELSE 0 END), 0) AS uncached_input_tokens,
+  COALESCE(SUM(CASE WHEN source IN {valid} THEN MAX(0, output_tokens) ELSE 0 END), 0) AS output_tokens,
+  COALESCE(SUM(CASE WHEN source IN {valid} THEN MAX(0, reasoning_output_tokens) ELSE 0 END), 0) AS reasoning_output_tokens,
+  COALESCE(SUM(CASE WHEN source IN {valid}
+    THEN CASE WHEN total_tokens > 0 THEN MAX(0, total_tokens)
+         ELSE MAX(0, input_tokens) + MAX(0, output_tokens) END
+    ELSE 0 END), 0) AS total_tokens,
+  COALESCE(SUM(CASE WHEN source IN {valid} THEN MAX(0, context_window) ELSE 0 END), 0) AS context_window,
+  COALESCE(SUM(CASE WHEN source IN {valid} THEN MAX(0, latency_ms) ELSE 0 END), 0) AS latency_ms,
+  COALESCE(SUM(CASE WHEN source='provider_usage' AND cache_usage_observed
+    THEN MAX(0, input_tokens) ELSE 0 END), 0) AS cache_observed_input_tokens,
+  COALESCE(SUM(CASE WHEN source='provider_usage' AND cache_usage_observed THEN 1 ELSE 0 END), 0) AS cache_observed_call_count,
+  COALESCE(SUM(CASE WHEN source='provider_usage' AND NOT cache_usage_observed THEN 1 ELSE 0 END), 0) AS cache_unobserved_call_count,
+  COALESCE(SUM(CASE WHEN source NOT IN {valid} THEN 1 ELSE 0 END), 0) AS skipped
+FROM usage_events
+"""
+
+
+def _rollup_sql(
+    connection: sqlite3.Connection,
+    base_clause: str,
+    base_params: list[str],
+    *,
+    provider: str = "",
+    model: str = "",
+) -> tuple[UsageRollup, int]:
+    where, parameters = _rollup_where(
+        base_clause, base_params, provider=provider, model=model
     )
-    global_rows = _filter_rows(rows, "global", provider=filters["provider"], model=filters["model"])
-    today_rows, last7_days_rows = _time_window_rows(global_rows)
-    global_rollup, skipped_record_count = _rollup_rows(global_rows)
-    today_rollup, _ = _rollup_rows(today_rows)
-    last7_days_rollup, _ = _rollup_rows(last7_days_rows)
-    session_rollup, _ = _rollup_rows(session_rows)
-    agent_rollup, _ = _rollup_rows(agent_rows)
-    scoped_rollup, _ = _rollup_rows(scoped_rows)
-    summary = UsageSummary(
-        scope=normalized_scope,
-        filters=filters,
-        rollup_filters=rollup_filters,
-        last_token_usage=_row_to_last_usage(last_row),
-        session_token_usage=session_rollup,
-        agent_token_usage=agent_rollup,
-        today_token_usage=today_rollup,
-        last7_days_token_usage=last7_days_rollup,
-        global_token_usage=global_rollup,
-        ledger_path=usage_ledger_path(project_root),
-        model_context_window=_latest_context_window(scoped_rows) or _latest_context_window(global_rows),
-        skipped_record_count=skipped_record_count,
-    ).to_dict()
-    summary["scopeTokenUsage"] = scoped_rollup.to_dict()
-    return summary
+    row = connection.execute(
+        _ROLLUP_SQL.format(valid=_VALID_SOURCES_SQL) + where,
+        parameters,
+    ).fetchone()
+    return _rollup_from_row(row)
+
+
+def _rollup_from_row(row: sqlite3.Row) -> tuple[UsageRollup, int]:
+    if row is None:
+        return UsageRollup(), 0
+    skipped = int(row["skipped"] or 0)
+    return (
+        UsageRollup(
+            input_tokens=int(row["input_tokens"] or 0),
+            cached_input_tokens=int(row["cached_input_tokens"] or 0),
+            cache_read_input_tokens=int(row["cache_read_input_tokens"] or 0),
+            cache_creation_input_tokens=int(row["cache_creation_input_tokens"] or 0),
+            uncached_input_tokens=int(row["uncached_input_tokens"] or 0),
+            output_tokens=int(row["output_tokens"] or 0),
+            reasoning_output_tokens=int(row["reasoning_output_tokens"] or 0),
+            total_tokens=int(row["total_tokens"] or 0),
+            call_count=int(row["call_count"] or 0),
+            observed_call_count=int(row["observed_call_count"] or 0),
+            estimated_call_count=int(row["estimated_call_count"] or 0),
+            missing_call_count=int(row["missing_call_count"] or 0),
+            not_called_count=int(row["not_called_count"] or 0),
+            latency_ms=int(row["latency_ms"] or 0),
+            cache_observed_input_tokens=int(row["cache_observed_input_tokens"] or 0),
+            cache_observed_call_count=int(row["cache_observed_call_count"] or 0),
+            cache_unobserved_call_count=int(row["cache_unobserved_call_count"] or 0),
+        ),
+        skipped,
+    )
+
+
+def _time_window_rollups_sql(
+    connection: sqlite3.Connection,
+    *,
+    provider: str,
+    model: str,
+) -> tuple[UsageRollup, UsageRollup]:
+    now = datetime.now(timezone.utc)
+    today_start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
+    tomorrow_start = today_start + timedelta(days=1)
+    last7_start = today_start - timedelta(days=6)
+    base = "julianday(replace(recorded_at, 'Z', '+00:00'))"
+    today_rollup, _skipped = _rollup_sql(
+        connection,
+        f"{base} >= julianday(?) AND {base} < julianday(?)",
+        [_z(today_start), _z(tomorrow_start)],
+        provider=provider,
+        model=model,
+    )
+    last7_rollup, _skipped = _rollup_sql(
+        connection,
+        f"{base} >= julianday(?) AND {base} < julianday(?)",
+        [_z(last7_start), _z(tomorrow_start)],
+        provider=provider,
+        model=model,
+    )
+    return today_rollup, last7_rollup
+
+
+def _z(value: datetime) -> str:
+    return value.isoformat().replace("+00:00", "Z")
+
+
+def _query_last_valid_row(
+    connection: sqlite3.Connection,
+    where: str,
+    parameters: list[str],
+) -> sqlite3.Row | None:
+    clauses: list[str] = []
+    if where:
+        clauses.append(where)
+    clauses.append(f"source IN {_VALID_SOURCES_SQL}")
+    combined = "WHERE " + " AND ".join(clauses)
+    return connection.execute(
+        "SELECT * FROM usage_events "
+        + combined
+        + " ORDER BY recorded_at DESC, rowid DESC LIMIT 1",
+        parameters,
+    ).fetchone()
+
+
+def _latest_context_window_sql(
+    connection: sqlite3.Connection,
+    where: str,
+    parameters: list[str],
+    *,
+    provider: str = "",
+    model: str = "",
+) -> int:
+    conditions: list[str] = []
+    params: list[str] = []
+    if where:
+        conditions.append(where)
+        params.extend(parameters)
+    if provider:
+        conditions.append("provider=?")
+        params.append(provider)
+    if model:
+        conditions.append("model=?")
+        params.append(model)
+    conditions.append(f"source IN {_VALID_SOURCES_SQL}")
+    conditions.append("context_window > 0")
+    sql = (
+        "SELECT context_window FROM usage_events WHERE "
+        + " AND ".join(conditions)
+    )
+    row = connection.execute(
+        sql + " ORDER BY recorded_at DESC, rowid DESC LIMIT 1",
+        params,
+    ).fetchone()
+    if row is None:
+        return 0
+    return _coerce_nonnegative_int(row["context_window"])
 
 
 def _connect(
-    project_root: Path | None = None,
+    path: Path,
     *,
     timeout_seconds: float = DEFAULT_LEDGER_TIMEOUT_SECONDS,
 ) -> sqlite3.Connection:
-    path = usage_ledger_path(project_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     timeout = _coerce_nonnegative_float(timeout_seconds, default=DEFAULT_LEDGER_TIMEOUT_SECONDS)
     conn = sqlite3.connect(str(path), timeout=timeout)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute(f"PRAGMA busy_timeout={int(timeout * 1000)}")
-    _ensure_schema(conn)
+    _ensure_schema_once(conn, path)
     return conn
+
+
+def _ensure_schema_once(conn: sqlite3.Connection, path: Path) -> None:
+    """Run schema DDL and the one-time history migration only once per
+    process per ledger path; the hot write/summary paths never re-run it."""
+    key = _registry_key(path)
+    with _registry_guard:
+        if key in _schema_ready:
+            return
+    _ensure_schema(conn)
+    with _registry_guard:
+        _schema_ready[key] = None
+        while len(_schema_ready) > _INIT_CACHE_MAX_ENTRIES:
+            _schema_ready.popitem(last=False)
 
 
 def _ensure_schema(conn: sqlite3.Connection) -> None:
@@ -347,20 +778,30 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
           usage_schema_version INTEGER NOT NULL DEFAULT 1
         );
         CREATE INDEX IF NOT EXISTS idx_usage_events_recorded_at ON usage_events(recorded_at);
-        CREATE INDEX IF NOT EXISTS idx_usage_events_session_id ON usage_events(session_id);
-        CREATE INDEX IF NOT EXISTS idx_usage_events_agent_id ON usage_events(agent_id);
+        CREATE INDEX IF NOT EXISTS idx_usage_events_session_provider_model ON usage_events(session_id, provider, model);
+        CREATE INDEX IF NOT EXISTS idx_usage_events_agent_provider_model ON usage_events(agent_id, provider, model);
         CREATE INDEX IF NOT EXISTS idx_usage_events_provider_model ON usage_events(provider, model);
+        CREATE INDEX IF NOT EXISTS idx_usage_events_provider_model_recorded ON usage_events(provider, model, recorded_at);
+        CREATE INDEX IF NOT EXISTS idx_usage_events_recorded_julianday ON usage_events(julianday(replace(recorded_at, 'Z', '+00:00')));
         """
     )
     columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(usage_events)")}
     if "cache_usage_observed" not in columns:
-        conn.execute(
-            "ALTER TABLE usage_events ADD COLUMN cache_usage_observed INTEGER NOT NULL DEFAULT 0"
-        )
+        try:
+            conn.execute(
+                "ALTER TABLE usage_events ADD COLUMN cache_usage_observed INTEGER NOT NULL DEFAULT 0"
+            )
+        except sqlite3.OperationalError as exc:
+            if "duplicate column name" not in str(exc).lower():
+                raise
     if "cache_usage_missing_reason" not in columns:
-        conn.execute(
-            "ALTER TABLE usage_events ADD COLUMN cache_usage_missing_reason TEXT NOT NULL DEFAULT ''"
-        )
+        try:
+            conn.execute(
+                "ALTER TABLE usage_events ADD COLUMN cache_usage_missing_reason TEXT NOT NULL DEFAULT ''"
+            )
+        except sqlite3.OperationalError as exc:
+            if "duplicate column name" not in str(exc).lower():
+                raise
     conn.execute(
         """
         UPDATE usage_events
@@ -374,12 +815,6 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         """
     )
     conn.commit()
-
-
-def _read_rows(project_root: Path | None = None) -> list[sqlite3.Row]:
-    with _connect(project_root) as conn:
-        cursor = conn.execute("SELECT rowid AS _rowid, * FROM usage_events ORDER BY recorded_at ASC, rowid ASC")
-        return list(cursor.fetchall())
 
 
 def _normalize_event(event: UsageLedgerEvent) -> UsageLedgerEvent:
@@ -424,111 +859,6 @@ def _normalize_event(event: UsageLedgerEvent) -> UsageLedgerEvent:
     return replace(event, **updates)
 
 
-def _rollup_rows(rows: list[sqlite3.Row]) -> tuple[UsageRollup, int]:
-    skipped = 0
-    totals = {field_name: 0 for field_name in NUMERIC_EVENT_FIELDS}
-    counts = {
-        "call_count": 0,
-        "observed_call_count": 0,
-        "estimated_call_count": 0,
-        "missing_call_count": 0,
-        "not_called_count": 0,
-        "cache_observed_call_count": 0,
-        "cache_unobserved_call_count": 0,
-    }
-    cache_observed_input_tokens = 0
-    for row in rows:
-        source = str(row["source"] or "")
-        if source not in VALID_SOURCES:
-            skipped += 1
-            continue
-        input_tokens = _coerce_nonnegative_int(row["input_tokens"])
-        output_tokens = _coerce_nonnegative_int(row["output_tokens"])
-        total_tokens = _coerce_nonnegative_int(row["total_tokens"]) or (input_tokens + output_tokens)
-        cache_usage_observed = bool(_coerce_nonnegative_int(row["cache_usage_observed"]))
-        cached_tokens = _coerce_nonnegative_int(row["cached_input_tokens"]) if cache_usage_observed else 0
-        cache_read_tokens = (
-            _coerce_nonnegative_int(row["cache_read_input_tokens"]) or cached_tokens
-        ) if cache_usage_observed else 0
-        uncached_tokens = _coerce_nonnegative_int(row["uncached_input_tokens"]) if cache_usage_observed else 0
-        if cache_usage_observed and input_tokens and not uncached_tokens:
-            uncached_tokens = max(0, input_tokens - cached_tokens)
-        totals["input_tokens"] += input_tokens
-        totals["cached_input_tokens"] += cached_tokens
-        totals["cache_read_input_tokens"] += cache_read_tokens
-        totals["cache_creation_input_tokens"] += (
-            _coerce_nonnegative_int(row["cache_creation_input_tokens"])
-            if cache_usage_observed
-            else 0
-        )
-        totals["uncached_input_tokens"] += uncached_tokens
-        totals["output_tokens"] += output_tokens
-        totals["reasoning_output_tokens"] += _coerce_nonnegative_int(row["reasoning_output_tokens"])
-        totals["total_tokens"] += total_tokens
-        totals["context_window"] += _coerce_nonnegative_int(row["context_window"])
-        totals["latency_ms"] += _coerce_nonnegative_int(row["latency_ms"])
-        counts["call_count"] += 1
-        if source == "provider_usage":
-            counts["observed_call_count"] += 1
-            if cache_usage_observed:
-                counts["cache_observed_call_count"] += 1
-                cache_observed_input_tokens += input_tokens
-            else:
-                counts["cache_unobserved_call_count"] += 1
-        elif source == "estimated":
-            counts["estimated_call_count"] += 1
-        elif source == "missing":
-            counts["missing_call_count"] += 1
-        elif source == "not_called":
-            counts["not_called_count"] += 1
-    return (
-        UsageRollup(
-            input_tokens=totals["input_tokens"],
-            cached_input_tokens=totals["cached_input_tokens"],
-            cache_read_input_tokens=totals["cache_read_input_tokens"],
-            cache_creation_input_tokens=totals["cache_creation_input_tokens"],
-            uncached_input_tokens=totals["uncached_input_tokens"],
-            output_tokens=totals["output_tokens"],
-            reasoning_output_tokens=totals["reasoning_output_tokens"],
-            total_tokens=totals["total_tokens"],
-            call_count=counts["call_count"],
-            observed_call_count=counts["observed_call_count"],
-            estimated_call_count=counts["estimated_call_count"],
-            missing_call_count=counts["missing_call_count"],
-            not_called_count=counts["not_called_count"],
-            latency_ms=totals["latency_ms"],
-            cache_observed_input_tokens=cache_observed_input_tokens,
-            cache_observed_call_count=counts["cache_observed_call_count"],
-            cache_unobserved_call_count=counts["cache_unobserved_call_count"],
-        ),
-        skipped,
-    )
-
-
-def _filter_rows(
-    rows: list[sqlite3.Row],
-    scope: str,
-    *,
-    session_id: str = "",
-    agent_id: str = "",
-    provider: str = "",
-    model: str = "",
-) -> list[sqlite3.Row]:
-    normalized_scope = str(scope or "global").strip().lower()
-    filtered: list[sqlite3.Row] = []
-    for row in rows:
-        if provider and str(row["provider"] or "") != provider:
-            continue
-        if model and str(row["model"] or "") != model:
-            continue
-        if normalized_scope in {"session", "chat_session"} and session_id and str(row["session_id"] or "") != session_id:
-            continue
-        if normalized_scope == "agent" and agent_id and str(row["agent_id"] or "") != agent_id:
-            continue
-        filtered.append(row)
-    return filtered
-
-
 def _derive_rollup_filters(filters: dict[str, str], last_row: sqlite3.Row | None) -> dict[str, str]:
     rollup_filters = {
         "sessionId": str(filters.get("sessionId") or "").strip(),
@@ -541,44 +871,6 @@ def _derive_rollup_filters(filters: dict[str, str], last_row: sqlite3.Row | None
     if not rollup_filters["agentId"]:
         rollup_filters["agentId"] = str(last_row["agent_id"] or "").strip()
     return rollup_filters
-
-
-def _time_window_rows(rows: list[sqlite3.Row]) -> tuple[list[sqlite3.Row], list[sqlite3.Row]]:
-    now = datetime.now(timezone.utc)
-    today_start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
-    tomorrow_start = today_start + timedelta(days=1)
-    last7_start = today_start - timedelta(days=6)
-    today_rows: list[sqlite3.Row] = []
-    last7_days_rows: list[sqlite3.Row] = []
-    for row in rows:
-        recorded_at = _parse_recorded_at(row["recorded_at"])
-        if recorded_at is None:
-            continue
-        if today_start <= recorded_at < tomorrow_start:
-            today_rows.append(row)
-        if last7_start <= recorded_at < tomorrow_start:
-            last7_days_rows.append(row)
-    return today_rows, last7_days_rows
-
-
-def _parse_recorded_at(value: Any) -> datetime | None:
-    text = str(value or "").strip()
-    if not text:
-        return None
-    try:
-        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
-
-
-def _last_valid_row(rows: list[sqlite3.Row]) -> sqlite3.Row | None:
-    for row in reversed(rows):
-        if str(row["source"] or "") in VALID_SOURCES:
-            return row
-    return None
 
 
 def _row_to_last_usage(row: sqlite3.Row | None) -> dict[str, Any]:
@@ -647,16 +939,6 @@ def _row_to_last_usage(row: sqlite3.Row | None) -> dict[str, Any]:
         if cache_usage_observed and input_tokens > 0
         else 0.0,
     }
-
-
-def _latest_context_window(rows: list[sqlite3.Row]) -> int:
-    for row in reversed(rows):
-        if str(row["source"] or "") not in VALID_SOURCES:
-            continue
-        context_window = _coerce_nonnegative_int(row["context_window"])
-        if context_window:
-            return context_window
-    return 0
 
 
 def _provider_usage_keys_from_row(row: sqlite3.Row) -> list[str]:
