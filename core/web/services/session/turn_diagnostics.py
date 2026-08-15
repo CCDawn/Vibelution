@@ -1095,17 +1095,30 @@ def list_active_session_work_runs(*, reconcile: bool = True) -> list[dict[str, A
         active_turn_ids = dict(s._SESSION_ACTIVE_TURN_IDS)
         active_leases = {key: list(value) for key, value in s._SESSION_ACTIVE_TURN_LEASES.items()}
     active_statuses = s._active_session_work_run_statuses(session_ids)
-    return [
-        {
-            "runId": active_turn_ids.get(session_id) or f"chat-turn-{session_id}",
+    items: list[dict[str, Any]] = []
+    for session_id in session_ids:
+        status = active_statuses.get(session_id) or "running"
+        run_id = active_turn_ids.get(session_id) or f"chat-turn-{session_id}"
+        item: dict[str, Any] = {
+            "runId": run_id,
             "runKind": "chat_turn",
             "sessionId": session_id,
-            "status": active_statuses.get(session_id) or "running",
-            "currentPhase": active_statuses.get(session_id) or "running",
+            "status": status,
+            "currentPhase": status,
             "leases": active_leases.get(session_id) or ["readonly_chat"],
         }
-        for session_id in session_ids
-    ]
+        snapshot = s._WORK_RUN_STORE.load_snapshot("chat_turn", run_id) or {}
+        user_message = str(snapshot.get("userMessage") or "").strip()
+        summary = str(snapshot.get("summary") or "").strip()
+        if user_message:
+            item["userMessage"] = user_message
+        if summary:
+            item["summary"] = summary
+        last_tool_error = snapshot.get("lastToolError")
+        if isinstance(last_tool_error, dict) and last_tool_error:
+            item["lastToolError"] = last_tool_error
+        items.append(item)
+    return items
 
 
 def _active_session_work_run_statuses(session_ids: list[str]) -> dict[str, str]:
