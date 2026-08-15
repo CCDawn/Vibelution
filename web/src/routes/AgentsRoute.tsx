@@ -14,6 +14,7 @@ import { lazy, Suspense, type MouseEvent, useEffect, useMemo, useRef, useState }
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import {
+  fetchAgentConfigChanges,
   fetchAgentConfigWorkspace,
   listAgentAvatarOptions,
   listAgentSummaries,
@@ -29,7 +30,6 @@ import {
   AgentRuntimeEvidenceMatch,
   AgentRunHistory,
   AgentConfigHealthIssue,
-  AgentConfigChanges,
   AgentModeBindings,
   AgentPersonaProfile,
   AgentPurgeResponse,
@@ -704,9 +704,7 @@ export function AgentsRoute() {
 
   const configChangesQuery = useQuery({
     queryKey: ["agents", "config-changes", selectedAgent?.agentId ?? ""],
-    queryFn: () => fetchJson<AgentConfigChanges>(
-      `/api/agents/${encodeURIComponent(selectedAgent?.agentId ?? "")}/config-changes`,
-    ),
+    queryFn: () => fetchAgentConfigChanges(selectedAgent?.agentId ?? ""),
     enabled: Boolean(selectedAgent?.agentId && (activePane === "changes" || activePane === "config")),
     staleTime: 8_000,
   });

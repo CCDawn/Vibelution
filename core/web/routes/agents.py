@@ -16,6 +16,12 @@ from core.web.routes.agent_catalog_models import (
     AgentDocumentResponse,
     AgentResetResponse,
 )
+from core.web.routes.agent_config_change_models import (
+    AgentConfigChangesResponse,
+    AgentConfigDraftDiscardResponse,
+    AgentConfigDraftResponse,
+    AgentModelPromotionResponse,
+)
 
 from config.operator_config_transaction import OperatorConfigTransactionError
 from core.agent_kernel import KernelAdapterError, KernelError, KernelValidationError, submit_agent_message_event
@@ -487,7 +493,11 @@ def agent_config_workspace(includeRuntime: bool = True) -> dict:
     return get_agent_config_workspace(use_cache=True, include_runtime=includeRuntime)
 
 
-@router.get("/agents/{agent_id}/config-changes")
+@router.get(
+    "/agents/{agent_id}/config-changes",
+    response_model=AgentConfigChangesResponse,
+    response_model_exclude_unset=True,
+)
 def agent_config_changes(agent_id: str, limit: int = 12) -> dict:
     try:
         return agent_config_change_service.list_agent_config_changes(agent_id, limit=limit)
@@ -495,7 +505,12 @@ def agent_config_changes(agent_id: str, limit: int = 12) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.post("/agents/{agent_id}/config-drafts", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/agents/{agent_id}/config-drafts",
+    status_code=status.HTTP_201_CREATED,
+    response_model=AgentConfigDraftResponse,
+    response_model_exclude_unset=True,
+)
 def agent_config_draft_create(agent_id: str, payload: AgentConfigDraftPayload) -> dict:
     try:
         return agent_config_change_service.save_agent_config_draft(
@@ -515,7 +530,11 @@ def agent_config_draft_create(agent_id: str, payload: AgentConfigDraftPayload) -
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.delete("/agents/{agent_id}/config-drafts/{draft_id}")
+@router.delete(
+    "/agents/{agent_id}/config-drafts/{draft_id}",
+    response_model=AgentConfigDraftDiscardResponse,
+    response_model_exclude_unset=True,
+)
 def agent_config_draft_discard(agent_id: str, draft_id: str) -> dict:
     try:
         return agent_config_change_service.discard_agent_config_draft(agent_id, draft_id)
@@ -530,7 +549,11 @@ def _with_agent_workspace_cache_invalidated(payload: dict[str, Any]) -> dict[str
     return payload
 
 
-@router.post("/agents/{agent_id}/llm-bindings/{slot}/promote")
+@router.post(
+    "/agents/{agent_id}/llm-bindings/{slot}/promote",
+    response_model=AgentModelPromotionResponse,
+    response_model_exclude_unset=True,
+)
 def agent_model_promote(
     agent_id: str,
     slot: str,
