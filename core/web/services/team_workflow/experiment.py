@@ -24,6 +24,7 @@ from core.web.services.team_workflow.experiment_api.knowledge import (
     request_experiment_result_knowledge_ingestion,
 )
 from core.web.services.team_workflow.experiment_api.plan import (
+    bind_frozen_protocol_to_experiment_plan,
     create_experiment_plan,
     create_experiment_plan_revision_from_hypothesis,
     create_experiment_plan_revision_from_iteration,
@@ -39,6 +40,7 @@ from core.web.services.team_workflow.experiment_api.smoke import (
 
 __all__ = [
     "complete_experiment_hypothesis_from_design",
+    "bind_frozen_protocol_to_experiment_plan",
     "create_experiment_plan",
     "create_experiment_plan_revision_from_hypothesis",
     "create_experiment_plan_revision_from_iteration",

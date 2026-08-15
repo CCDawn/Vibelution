@@ -23,6 +23,41 @@ TERMINAL_RUN_STATUSES = frozenset({"succeeded", "failed", "cancelled", "archived
 
 ACTIVE_ATTEMPT_STATUSES = frozenset({"starting", "dispatching", "running", "waiting_human"})
 
+BOUNDED_ITERATION_AGENT_NODES = frozenset(
+    {"result_evaluation", "iteration_decision", "version_governance"}
+)
+_BOUNDED_RUNNER_ID = "synthetic_classification_baseline_vs_variant"
+
+
+def is_bounded_controlled_run(run_state: Mapping[str, Any] | None) -> bool:
+    """True when the V1 CPU / synthetic classification observation is on disk.
+
+    FashionMNIST formal runner is not selected for SCI-096; result_evaluation,
+    iteration_decision, and version_governance then complete from this
+    observation without an LLM.
+    """
+    if not isinstance(run_state, Mapping):
+        return False
+    execution = run_state.get("execution") if isinstance(run_state.get("execution"), dict) else {}
+    runner = str(
+        execution.get("adapterId")
+        or execution.get("runnerId")
+        or run_state.get("adapterId")
+        or run_state.get("runnerId")
+        or ""
+    ).strip()
+    mode = str(execution.get("runnerMode") or run_state.get("runnerMode") or "").strip()
+    unavailable = str(
+        execution.get("formalRunnerUnavailable")
+        or run_state.get("formalRunnerUnavailable")
+        or ""
+    ).strip()
+    return bool(
+        unavailable
+        or mode == "v1_cpu_smoke"
+        or runner == _BOUNDED_RUNNER_ID
+    )
+
 
 @dataclass(frozen=True, slots=True)
 class RunSnapshot:
@@ -246,7 +281,23 @@ def evaluate_common(
     )
 
     actor = _evaluate_actor(run, node, context)
-    if (not actor.configured or not actor.resolvable) and node.actorKind == ActorKind.AGENT:
+    agent_blocked = node.actorKind == ActorKind.AGENT and (
+        not actor.configured or not actor.resolvable
+    )
+    if agent_blocked and node.nodeId in BOUNDED_ITERATION_AGENT_NODES:
+        try:
+            run_state = context.controlled_run(run.team_id, run.run_id)
+        except Exception:
+            run_state = None
+        if is_bounded_controlled_run(run_state):
+            agent_blocked = False
+            actor = ActorReadiness(
+                configured=True,
+                resolvable=True,
+                binding_snapshot_id=actor.binding_snapshot_id or "bounded-eval",
+                agent_id=actor.agent_id or "bounded-eval",
+            )
+    if agent_blocked:
         blockers.append(
             blocker(
                 "agent_not_configured",
