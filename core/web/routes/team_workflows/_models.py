@@ -126,8 +126,12 @@ class ResearchStageRoundStartPayload(BaseModel):
 class ResearchProjectListResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 
+    schemaVersion: int = 0
     teamId: str = ""
     activeProjectId: str = ""
+    projects: list[dict[str, Any]] = Field(default_factory=list)
+    updatedAt: str = ""
+    project: dict[str, Any] = Field(default_factory=dict)
 
 
 class ResearchProjectCreatePayload(BaseModel):
