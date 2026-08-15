@@ -806,7 +806,7 @@ def _build_key_tools() -> List[BaseTool]:
         当 operation=record_hypothesis_set 时，payload_json 须包含 portfolioId、maxCandidates、
         maxEvolutionRounds、currentEvolutionRound 和 candidates；runId 由当前正式任务绑定，Agent 不得猜测或填写。
         每个 candidate 须包含 candidateId、claim、
-        scores、counterEvidenceRefs、derivedFromCandidateIds、status、reviewRef。scores 必须同时包含 novelty、
+        scores、counterEvidenceRefs、derivedFromCandidateIds、status、reviewRef。scores 须同时包含 novelty、
         competitionFit、falsifiability、evidenceSupport、feasibility，且所有分数都在 0 到 1 之间；
         counterEvidenceRefs 只能引用上下文 allowedEvidenceRefs 中的真实值。
 
