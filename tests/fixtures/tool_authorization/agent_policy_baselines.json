@@ -30,7 +30,8 @@
         "get_recent_changes_tool",
         "explain_current_worktree_tool",
         "conversation_log_inspect_tool",
-        "append_episodic_memory_tool"
+        "append_episodic_memory_tool",
+        "supersede_episodic_memory_tool"
       ],
       "expected_preferred_tools": [
         "exec_command",
