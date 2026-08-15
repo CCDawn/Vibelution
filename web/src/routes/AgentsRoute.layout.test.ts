@@ -881,9 +881,7 @@ describe("AgentsRoute layout contract", () => {
     expect(agentCreateDialogSource).toContain("selectedModelId={selectedModelId}");
     expect(createPanelSource).toContain("value={selectedModelId}");
     expect(coreConfigPanelSource).toContain("<AgentModelPicker");
-    expect(configDraftMutationsSource).toContain(
-      "/llm-bindings/${encodeURIComponent(payload.slot.slot)}/promote",
-    );
+    expect(configDraftMutationsSource).toContain("promoteAgentModel<AgentModelPromotionResult>(");
     expect(configDraftMutationsSource).toContain("expectedBaseHash");
     expect(configDraftMutationsSource).toContain("expectedAgentUpdatedAt");
     expect(configDraftMutationsSource).toContain("confirmed: true");
@@ -1564,6 +1562,7 @@ describe("AgentsRoute layout contract", () => {
     expect(selectedDetailContentPanelSource).toContain("AgentConfigChangeHistoryPanel");
     expect(selectedDetailContentPanelSource).toContain('activePane === "changes"');
     expect(routeSource).toContain("config-changes");
+    expect(routeSource).toContain("fetchAgentConfigChanges(");
     expect(routeSource).toContain("copy.managementBriefTitle");
     expect(routeSource).toContain("copy.nextActionsTitle");
     expect(routeSource).not.toContain("className={styles.managementBriefPanel}");

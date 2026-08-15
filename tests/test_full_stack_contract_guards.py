@@ -28,7 +28,7 @@ HTTP_METHODS = {
 # Keys are paths relative to core/web/routes/ (posix). Package modules use
 # "team_workflows/<module>.py" after the monolith split of team_workflows.py.
 LEGACY_UNTYPED_ENDPOINT_BUDGETS: dict[str, int] = {
-    "agents.py": 37,
+    "agents.py": 33,
     "cli_agents.py": 6,
     "computer_use.py": 5,
     "config.py": 31,

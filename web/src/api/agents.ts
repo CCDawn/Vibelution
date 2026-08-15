@@ -1,6 +1,7 @@
 import { fetchJson } from "./client";
 import type {
   AgentAvatarOptionsPayload,
+  AgentConfigChanges,
   AgentConfigWorkspace,
   AgentConfigWorkspaceAgent,
   AgentInstance,
@@ -108,6 +109,59 @@ export function resetAgentDirectSession(
     resetMemoryPolicy: false,
     resetRuntimePolicy: false,
   });
+}
+
+export function fetchAgentConfigChanges<T = AgentConfigChanges>(
+  agentId: string,
+  options?: { signal?: AbortSignal },
+): Promise<T> {
+  return fetchJson<T>(
+    `/api/agents/${encodeURIComponent(agentId)}/config-changes`,
+    { signal: options?.signal },
+  );
+}
+
+export function saveAgentConfigDraft(
+  agentId: string,
+  payload: {
+    baseUpdatedAt: string;
+    snapshot: Record<string, unknown>;
+    summary: string;
+  },
+): Promise<NonNullable<AgentConfigChanges["activeDraft"]>> {
+  return fetchJson<NonNullable<AgentConfigChanges["activeDraft"]>>(
+    `/api/agents/${encodeURIComponent(agentId)}/config-drafts`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export function discardAgentConfigDraft(
+  agentId: string,
+  draftId: string,
+): Promise<{ draftId: string; status: string }> {
+  return fetchJson<{ draftId: string; status: string }>(
+    `/api/agents/${encodeURIComponent(agentId)}/config-drafts/${encodeURIComponent(draftId)}`,
+    { method: "DELETE" },
+  );
+}
+
+export function promoteAgentModel<T = { agent: AgentConfigWorkspaceAgent; modelRef: string }>(
+  agentId: string,
+  slot: string,
+  payload: object,
+): Promise<T> {
+  return fetchJson<T>(
+    `/api/agents/${encodeURIComponent(agentId)}/llm-bindings/${encodeURIComponent(slot)}/promote`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
 }
 
 export function resolveAgentToolGovernanceRequest(

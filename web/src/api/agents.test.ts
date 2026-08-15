@@ -40,4 +40,15 @@ describe("Agent permission preset API", () => {
     expect(apiSource).toContain("export function resetAgent");
     expect(apiSource).toContain("method: \"DELETE\"");
   });
+
+  it("owns config-changes, config-draft, and model-promotion transports", () => {
+    expect(apiSource).toContain("export function fetchAgentConfigChanges");
+    expect(apiSource).toContain("/config-changes");
+    expect(apiSource).toContain("export function saveAgentConfigDraft");
+    expect(apiSource).toContain("/config-drafts");
+    expect(apiSource).toContain("export function discardAgentConfigDraft");
+    expect(apiSource).toContain("export function promoteAgentModel");
+    expect(apiSource).toContain("/llm-bindings/");
+    expect(apiSource).toContain("/promote");
+  });
 });
