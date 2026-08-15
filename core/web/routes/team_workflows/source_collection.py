@@ -9,11 +9,21 @@ from ._router import router
 from .source_collection_catalog_models import SourceCollectionSummaryResponse
 from .source_collection_write_models import (
     SourceCollectionAgentSessionContextResponse,
+    SourceCollectionCandidateSourceResponse,
     SourceCollectionRunStartResponse,
+    SourceCollectionSearchExecuteResponse,
+    SourceCollectionSourceCandidateImportResponse,
     SourceCollectionStageSessionTaskResponse,
+    SourceCollectionStageWritebackResponse,
+    SourceCollectionStorageOpenResponse,
 )
 
-@router.post("/teams/{team_id}/workflow-orchestration/candidates/source", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/candidates/source",
+    status_code=status.HTTP_201_CREATED,
+    response_model=SourceCollectionCandidateSourceResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_candidate_source_create(team_id: str, payload: CandidateSourcePayload) -> dict:
     try:
         return register_candidate_source(team_id, payload.model_dump())
@@ -32,6 +42,8 @@ def team_workflow_candidate_source_create(team_id: str, payload: CandidateSource
 @router.post(
     "/teams/{team_id}/workflow-orchestration/data-processing/runs/{run_id}/records/{record_id}/source-candidate",
     status_code=status.HTTP_201_CREATED,
+    response_model=SourceCollectionSourceCandidateImportResponse,
+    response_model_exclude_unset=True,
 )
 def team_workflow_import_data_record_source_candidate(team_id: str, run_id: str, record_id: str, payload: DataRecordSourceImportPayload) -> dict:
     try:
@@ -75,7 +87,12 @@ def team_workflow_source_collection_run_start(team_id: str, payload: SourceColle
         )
 
 
-@router.post("/teams/{team_id}/workflow-orchestration/source-collection-runs/{run_id}/search/execute", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/source-collection-runs/{run_id}/search/execute",
+    status_code=status.HTTP_201_CREATED,
+    response_model=SourceCollectionSearchExecuteResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_source_collection_search_execute(team_id: str, run_id: str, payload: SourceCollectionSearchExecutePayload) -> dict:
     try:
         payload_dict = payload.model_dump()
@@ -154,7 +171,12 @@ def team_workflow_source_collection_stage_session_task_start(team_id: str, run_i
         )
 
 
-@router.post("/teams/{team_id}/workflow-orchestration/stage-session-tasks/{task_id}/writeback", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/stage-session-tasks/{task_id}/writeback",
+    status_code=status.HTTP_201_CREATED,
+    response_model=SourceCollectionStageWritebackResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_source_collection_stage_session_task_writeback(team_id: str, task_id: str, payload: SourceCollectionStageSessionTaskWritebackPayload) -> dict:
     try:
         return writeback_source_collection_stage_session_task(team_id, task_id, payload.model_dump())
@@ -202,7 +224,11 @@ def team_workflow_source_collection_summary(team_id: str, runId: str = "") -> di
         )
 
 
-@router.post("/teams/{team_id}/workflow-orchestration/source-collection-runs/{run_id}/storage/open")
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/source-collection-runs/{run_id}/storage/open",
+    response_model=SourceCollectionStorageOpenResponse,
+    response_model_exclude_unset=True,
+)
 def team_workflow_source_collection_storage_open(team_id: str, run_id: str, payload: SourceCollectionStorageOpenPayload) -> dict:
     try:
         return open_source_collection_storage_target(team_id, run_id, payload.model_dump())

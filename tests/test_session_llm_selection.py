@@ -186,6 +186,19 @@ def test_session_reasoning_effort_recovers_missing_chat_state_from_workspace(mon
 
     monkeypatch.setattr(session_service, "load_chat_state", lambda _project_root: copy.deepcopy(state))
     monkeypatch.setattr(session_service, "save_chat_state", save_state)
+
+    def save_session(_project_root, session_id, conversation, **_kwargs):
+        conversations = list(state.get("conversations") or [])
+        replaced = False
+        for index, item in enumerate(conversations):
+            if str(item.get("conversation_id") or "") == session_id:
+                conversations[index] = copy.deepcopy(conversation)
+                replaced = True
+                break
+        if not replaced:
+            conversations.append(copy.deepcopy(conversation))
+        state["conversations"] = conversations
+
     monkeypatch.setattr(
         session_service,
         "load_session_chat_state",
@@ -198,6 +211,7 @@ def test_session_reasoning_effort_recovers_missing_chat_state_from_workspace(mon
             None,
         ),
     )
+    monkeypatch.setattr(session_service, "save_session_chat_state", save_session)
     monkeypatch.setattr(session_service, "record_runtime_scene_event", lambda *_a, **_k: None)
     monkeypatch.setattr(session_service, "_invalidate_session_list_cache", lambda: None)
     monkeypatch.setattr(session_service, "_is_session_running", lambda _sid: False)

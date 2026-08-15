@@ -7,11 +7,15 @@ import type { Dispatch, SetStateAction } from "react";
 
 import { fetchJson } from "../../api/client";
 import { queryKeys } from "../../api/queryKeys";
+import {
+  executeSourceCollectionSearch,
+  importDataRecordAsSourceCandidate,
+  openSourceCollectionStorage,
+} from "../../api/sourceCollection";
 import type {
   DataProcessingCollectionAssignmentListPayload,
   DataProcessingCollectionOutputPayload,
   TeamWorkflowCandidateGraphBuildPayload,
-  TeamWorkflowDataRecordSourceCandidateImportPayload,
   TeamWorkflowKnowledgeCollectionIngestionPayload,
   TeamWorkflowSourceCollectionExtractionPayload,
 } from "../../api/types";
@@ -84,19 +88,17 @@ export function useTeamSourceCollectionMutations(options: UseTeamSourceCollectio
       );
       const imported = await Promise.all(
         output.createdRecords.map((record) =>
-          fetchJson<TeamWorkflowDataRecordSourceCandidateImportPayload>(
-            `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/data-processing/runs/${encodeURIComponent(payload.runId)}/records/${encodeURIComponent(record.recordId)}/source-candidate`,
+          importDataRecordAsSourceCandidate(
+            payload.teamId,
+            payload.runId,
+            record.recordId,
             {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                createdByAgent: options.sourceCollectionOwnerAgentId,
-                tags: ["source_collection", "manual_writeback"],
-                metadata: {
-                  sourceCollectionPanel: true,
-                  assignmentId: payload.draft.assignmentId,
-                },
-              }),
+              createdByAgent: options.sourceCollectionOwnerAgentId,
+              tags: ["source_collection", "manual_writeback"],
+              metadata: {
+                sourceCollectionPanel: true,
+                assignmentId: payload.draft.assignmentId,
+              },
             },
           ),
         ),
@@ -130,18 +132,15 @@ export function useTeamSourceCollectionMutations(options: UseTeamSourceCollectio
 
   const executeSourceCollectionSearchMutation = useMutation({
     mutationFn: (payload: { teamId: string; runId: string; assignmentId?: string; maxQueries?: number; maxResultsPerQuery?: number }) =>
-      fetchJson<TeamWorkflowSourceCollectionSearchExecutionPayload>(
-        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/source-collection-runs/${encodeURIComponent(payload.runId)}/search/execute`,
+      executeSourceCollectionSearch<TeamWorkflowSourceCollectionSearchExecutionPayload>(
+        payload.teamId,
+        payload.runId,
         {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            assignmentIds: payload.assignmentId ? [payload.assignmentId] : [],
-            maxQueries: payload.maxQueries ?? 4,
-            maxResultsPerQuery: payload.maxResultsPerQuery ?? 2,
-            provider: "crossref_rest_api",
-            backgroundExecution: true,
-          }),
+          assignmentIds: payload.assignmentId ? [payload.assignmentId] : [],
+          maxQueries: payload.maxQueries ?? 4,
+          maxResultsPerQuery: payload.maxResultsPerQuery ?? 2,
+          provider: "crossref_rest_api",
+          backgroundExecution: true,
         },
       ),
     onSuccess: (payload, variables) => {
@@ -231,13 +230,10 @@ export function useTeamSourceCollectionMutations(options: UseTeamSourceCollectio
 
   const openSourceCollectionStorageMutation = useMutation({
     mutationFn: (payload: { teamId: string; runId: string; target: SourceCollectionStorageOpenTarget }) =>
-      fetchJson<TeamWorkflowSourceCollectionStorageOpenPayload>(
-        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/source-collection-runs/${encodeURIComponent(payload.runId)}/storage/open`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ target: payload.target }),
-        },
+      openSourceCollectionStorage<TeamWorkflowSourceCollectionStorageOpenPayload>(
+        payload.teamId,
+        payload.runId,
+        { target: payload.target },
       ),
   });
 

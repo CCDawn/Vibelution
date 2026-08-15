@@ -1577,6 +1577,12 @@ def request_launcher_start() -> LauncherCommandResponse:
         fields={"source": "launcher_api"},
     )
     try:
+        reap_started = time.monotonic()
+        _terminate_managed_launcher_subtree(
+            include_runtime_manager=False,
+            reason="launcher_start_button",
+        )
+        prequeue_timings_ms["reapWorkbenchMs"] = _launcher_elapsed_ms(reap_started)
         ensure_started = time.monotonic()
         ensure_runtime_manager_daemon_alive()
         prequeue_timings_ms["ensureDaemonMs"] = _launcher_elapsed_ms(ensure_started)
@@ -2057,6 +2063,12 @@ def request_launcher_restart(
     _raise_if_active_work("restart")
     prequeue_timings_ms["activeWorkMs"] = _launcher_elapsed_ms(active_work_started)
     try:
+        reap_started = time.monotonic()
+        _terminate_managed_launcher_subtree(
+            include_runtime_manager=False,
+            reason=reason,
+        )
+        prequeue_timings_ms["reapWorkbenchMs"] = _launcher_elapsed_ms(reap_started)
         ensure_started = time.monotonic()
         ensure_runtime_manager_daemon_alive()
         prequeue_timings_ms["ensureDaemonMs"] = _launcher_elapsed_ms(ensure_started)
@@ -2157,6 +2169,12 @@ def request_launcher_rebuild_and_start() -> LauncherCommandResponse:
         return response
 
     try:
+        reap_started = time.monotonic()
+        _terminate_managed_launcher_subtree(
+            include_runtime_manager=False,
+            reason="tray_rebuild_and_start",
+        )
+        prequeue_timings_ms["reapWorkbenchMs"] = _launcher_elapsed_ms(reap_started)
         ensure_started = time.monotonic()
         ensure_runtime_manager_daemon_alive()
         prequeue_timings_ms["ensureDaemonMs"] = _launcher_elapsed_ms(ensure_started)

@@ -48,6 +48,47 @@ export async function withDesktopShellExitTimeout<T>(
   }
 }
 
+export type DesktopStartRuntimeReapInput = {
+  stopManagedRuntime: () => Promise<void>;
+  recordEvent: (event: RuntimeSceneElectronEvent) => Promise<void>;
+  stepTimeoutMs?: number;
+};
+
+export type DesktopStartRuntimeReapResult = {
+  stopManagedRuntime: boolean;
+  managedRuntimeError: string;
+};
+
+export async function reapManagedRuntimeOnDesktopStart(
+  input: DesktopStartRuntimeReapInput
+): Promise<DesktopStartRuntimeReapResult> {
+  const stepTimeoutMs = input.stepTimeoutMs ?? DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS;
+  let managedRuntimeError = "";
+  await input
+    .recordEvent({
+      eventCode: "electron.runtime.start_reap_requested",
+      message: "Previous managed project process tree stop requested before desktop shell start.",
+      fields: {}
+    })
+    .catch(() => undefined);
+  try {
+    await withDesktopShellExitTimeout(input.stopManagedRuntime(), stepTimeoutMs, "reap managed runtime");
+  } catch (error: unknown) {
+    managedRuntimeError = error instanceof Error ? error.message : String(error);
+    await input
+      .recordEvent({
+        eventCode: "electron.runtime.start_reap_failed",
+        message: "Previous managed project process tree stop failed before desktop shell start.",
+        fields: { error: managedRuntimeError.slice(0, 500) }
+      })
+      .catch(() => undefined);
+  }
+  return {
+    stopManagedRuntime: true,
+    managedRuntimeError
+  };
+}
+
 export async function executeApprovedDesktopShellShutdown(
   input: ApprovedDesktopShellShutdownInput
 ): Promise<ApprovedDesktopShellShutdownResult | null> {
