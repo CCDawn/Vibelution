@@ -22,7 +22,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { SessionDetail, SessionSummary } from "../../api/types";
-import { useStableSessionDetailPlaceholder } from "./ChatCodingRouteWorkbench";
+import {
+  sessionDetailStructuralSharing,
+  useStableSessionDetailPlaceholder,
+} from "./ChatCodingRouteWorkbench";
 
 type PlaceholderInput = {
   activeSessionId: string | null;
@@ -138,6 +141,71 @@ describe("ChatCodingRouteWorkbench update-depth regression", () => {
     const second = snapshots.at(-1)!.placeholder;
     expect(second).not.toBe(first);
     expect(second?.title).toBe("Session A renamed");
+  });
+
+  it("merges previous/next session detail windows through the stable structural-sharing function", () => {
+    const previous = {
+      id: "s1",
+      title: "Session A",
+      messages: [5, 6, 7, 8].map((index) => ({
+        id: `s1-message-${index}`,
+        role: index % 2 === 0 ? "assistant" : "user",
+        content: `message ${index}`,
+        timestamp: "2026-08-15T10:00:00Z",
+      })),
+      messageWindow: {
+        mode: "window",
+        totalMessages: 8,
+        returnedMessages: 4,
+        oldestMessageIndex: 5,
+        newestMessageIndex: 8,
+        hasEarlier: true,
+        hasLater: false,
+        nextBeforeMessageIndex: 5,
+        transcriptScope: "window",
+      },
+    } as unknown as SessionDetail;
+    const next = {
+      id: "s1",
+      title: "Session A",
+      messages: [3, 4].map((index) => ({
+        id: `s1-message-${index}`,
+        role: index % 2 === 0 ? "assistant" : "user",
+        content: `message ${index}`,
+        timestamp: "2026-08-15T09:00:00Z",
+      })),
+      messageWindow: {
+        mode: "window",
+        totalMessages: 8,
+        returnedMessages: 2,
+        oldestMessageIndex: 3,
+        newestMessageIndex: 4,
+        hasEarlier: true,
+        hasLater: true,
+        nextBeforeMessageIndex: 3,
+        transcriptScope: "window",
+      },
+    } as unknown as SessionDetail;
+
+    const merged = sessionDetailStructuralSharing(previous, next);
+
+    expect(merged.messages.map((message) => message.content)).toEqual([
+      "message 3",
+      "message 4",
+      "message 5",
+      "message 6",
+      "message 7",
+      "message 8",
+    ]);
+    expect(merged.messageWindow).toMatchObject({
+      totalMessages: 8,
+      returnedMessages: 6,
+      oldestMessageIndex: 3,
+      newestMessageIndex: 8,
+      hasEarlier: true,
+      hasLater: false,
+      nextBeforeMessageIndex: 3,
+    });
   });
 
   it("prefers the cached detail and keeps its reference stable", () => {

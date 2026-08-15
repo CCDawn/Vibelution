@@ -3331,7 +3331,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndHelpersSource).toContain("fetchSessionDetail(normalizedSessionId, {");
     expect(chatApiSource).toContain("search.set(\"messageLimit\", String(options.messageLimit))");
     expect(chatApiSource).toContain("search.set(\"transcriptScope\", options.transcriptScope)");
-    expect(routeSource).toContain("structuralSharing: (previous, next) =>");
+    expect(routeSource).toContain("structuralSharing: sessionDetailStructuralSharing");
+    expect(routeSource).toContain("export function sessionDetailStructuralSharing(");
     expect(routeAndDetailMutationsSource).toContain("mergeSessionDetailMessageWindow(current, page)");
     expect(routeSource).toContain("const nextDetail = mergeSessionDetailMessageWindow(previous, detail)");
     expect(routeSource).toContain("hasEarlierMessages: Boolean(detail.messageWindow?.hasEarlier)");
