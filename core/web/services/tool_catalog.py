@@ -565,6 +565,12 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "riskTags": ["memory_write"],
         "permissionTier": HIGH_PERMISSION_TIER,
     },
+    "append_episodic_memory_tool": {
+        "category": "memory_context",
+        "capabilityTags": ["memory_write", "private_episode"],
+        "riskTags": ["memory_write"],
+        "permissionTier": MEDIUM_PERMISSION_TIER,
+    },
     "search_memory_tool": {
         "category": "memory_context",
         "capabilityTags": ["memory_search", "read_only"],
@@ -725,13 +731,11 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {
         "bundleId": "core",
         "label": "会话 Agent 基础包",
-        "description": "适合会话 Agent 默认启用：读取项目上下文、查看任务目标、检查当前状态，风险较低。",
+        "description": "适合会话 Agent 默认启用：检索代码、查看任务和当前工作状态。世代交接脑留给自进化角色。",
         "category": "core",
         "toolNames": [
             "grep_search_tool",
             "glob_tool",
-            "get_core_context_tool",
-            "get_current_goal_tool",
             "task_list_tool",
             "get_git_status_summary_tool",
             "get_recent_changes_tool",
@@ -740,7 +744,6 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
         "preferredToolNames": [
             "grep_search_tool",
             "conversation_log_inspect_tool",
-            "get_core_context_tool",
         ],
     },
     {

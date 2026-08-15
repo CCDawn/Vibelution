@@ -75,6 +75,7 @@ from core.infrastructure.workspace_cleaner import (
 )
 from tools.agent_tools import spawn_agent as _spawn_agent_impl
 from tools.agent_message_tools import agent_message_tool as _agent_message_impl
+from tools.episodic_memory_tools import append_episodic_memory_tool as _append_episodic_memory_impl
 from tools.agent_tool_governance_tools import agent_tool_permission_request_tool as _agent_tool_permission_request_impl
 from tools.research_organization_tools import (
     research_agent_creation_proposal_tool as _research_agent_creation_proposal_impl,
@@ -1794,6 +1795,35 @@ def _build_key_tools() -> List[BaseTool]:
         )
 
     @tool
+    def append_episodic_memory_tool(
+        text: str,
+        kind: str = "note",
+        refs_json: str = "",
+        occurred_at: str = "",
+    ) -> str:
+        """
+        为当前 Agent 追加一条私有 episode（偏好、会话事实、私人笔记）。
+
+        只写自己的 episodic_events.jsonl，不升公共目录，不写团队知识，也不拷规范/skill/代码。
+        热路径只追加，不作废历史行。当前会话会自动记入 refs。
+
+        Args:
+            text: 记忆正文（必填）。
+            kind: note | preference | session_fact | private_note，默认 note。
+            refs_json: 可选 JSON 列表，元素为 {type, id}，type 为 session|path|card|item。
+            occurred_at: 可选 ISO 时间，表示事实发生时刻。
+
+        Returns:
+            JSON，含 ok、episodeId。
+        """
+        return _append_episodic_memory_impl(
+            text=text,
+            kind=kind,
+            refs_json=refs_json,
+            occurred_at=occurred_at,
+        )
+
+    @tool
     def session_reference_query_tool(
         reference_id: str = "",
         session_id: str = "",
@@ -2613,6 +2643,7 @@ def _build_key_tools() -> List[BaseTool]:
         get_session_files_tool,
         # Agent 间通信
         agent_message_tool,
+        append_episodic_memory_tool,
         agent_tool_permission_request_tool,
         research_agent_creation_proposal_tool,
         research_communication_edge_proposal_tool,

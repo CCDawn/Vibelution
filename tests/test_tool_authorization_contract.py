@@ -58,6 +58,15 @@ def test_default_session_fixture_matches_the_current_product_contract():
     assert case["expected_allowed_tools"] == list(agent_directory_service.DEFAULT_SESSION_AGENT_ALLOWED_TOOLS)
     assert case["expected_preferred_tools"] == list(agent_directory_service.DEFAULT_SESSION_AGENT_PREFERRED_TOOLS)
     assert case["migration_expectation"] == "preserve_exact_assignment"
+    assert set(agent_directory_service.GENERATION_HANDOFF_MEMORY_TOOLS).isdisjoint(case["expected_allowed_tools"])
+
+
+def test_self_evolution_fixture_keeps_generation_handoff_tools():
+    payload = _load_fixture("agent_policy_baselines.json")
+    case = next(item for item in payload["cases"] if item["case_id"] == "self_evolution_executor")
+    allowed = set(agent_directory_service.SELF_EVOLUTION_EXECUTABLE_AGENT_ALLOWED_TOOLS)
+    assert set(case["expected_required_tools"]).issubset(allowed)
+    assert set(agent_directory_service.GENERATION_HANDOFF_MEMORY_TOOLS).issubset(allowed)
 
 
 def test_fixed_role_fixtures_match_current_role_policy_sources():
