@@ -437,6 +437,7 @@ def terminate_workbench_processes(
     known_pids: Iterable[int] | None = None,
     timeout_seconds: float = 5.0,
     verify_remaining_with_inventory: bool = True,
+    include_runtime_manager: bool = False,
 ) -> dict[str, Any]:
     """Terminate repo-owned workbench backend/frontend processes and managed browser profile processes."""
 
@@ -461,6 +462,9 @@ def terminate_workbench_processes(
         }
 
     excluded = {int(pid) for pid in (exclude_pids or []) if int(pid) > 0}
+    kinds = {"managed_workbench_backend", "unmanaged_workbench", "unmanaged_frontend_dev_server"}
+    if include_runtime_manager:
+        kinds.add("runtime_manager_daemon")
     candidate_scan_started = time.perf_counter()
     known = {int(pid) for pid in (known_pids or []) if int(pid) > 0}
     if known:
@@ -469,12 +473,20 @@ def terminate_workbench_processes(
             project_root=project_root,
             excluded=excluded,
         )
+        if include_runtime_manager:
+            manager_candidates = [
+                item
+                for item in list_repo_runtime_processes(project_root=project_root, exclude_pids=excluded)
+                if item.kind == "runtime_manager_daemon" and item.pid not in excluded
+            ]
+            existing_pids = {item.pid for item in repo_candidates}
+            repo_candidates.extend(item for item in manager_candidates if item.pid not in existing_pids)
+            target_pids.update(_target_process_tree_pids(manager_candidates, excluded=excluded))
     else:
         repo_candidates = [
             item
             for item in list_repo_runtime_processes(project_root=project_root)
-            if item.kind in {"managed_workbench_backend", "unmanaged_workbench", "unmanaged_frontend_dev_server"}
-            and item.pid not in excluded
+            if item.kind in kinds and item.pid not in excluded
         ]
         target_pids = _target_process_tree_pids(repo_candidates, excluded=excluded)
 
@@ -542,8 +554,7 @@ def terminate_workbench_processes(
         remaining_repo = [
             item
             for item in list_repo_runtime_processes(project_root=project_root)
-            if item.kind in {"managed_workbench_backend", "unmanaged_workbench", "unmanaged_frontend_dev_server"}
-            and item.pid not in excluded
+            if item.kind in kinds and item.pid not in excluded
         ]
         remaining_browser: list[dict[str, Any]] = []
         if profile_text:

@@ -12,6 +12,7 @@ export type DesktopSmokeShutdownInput = {
   bootstrap: LauncherBootstrapResult | null;
   closeDesktopSession: () => Promise<void>;
   recordEvent: (event: RuntimeSceneElectronEvent) => Promise<void>;
+  stopManagedRuntime: () => Promise<void>;
   stopPythonLauncher: () => Promise<LauncherServiceStopResult>;
   approveShutdown: () => void;
   stopDesktopActionLoop: () => void;
@@ -30,6 +31,7 @@ export async function prepareDesktopSmokeShutdown(input: DesktopSmokeShutdownInp
     decision,
     closeDesktopSession: input.closeDesktopSession,
     recordEvent: input.recordEvent,
+    stopManagedRuntime: input.stopManagedRuntime,
     stopPythonLauncher: input.stopPythonLauncher,
     approveShutdown: input.approveShutdown,
     stopDesktopActionLoop: input.stopDesktopActionLoop,
@@ -48,6 +50,8 @@ function desktopSmokeShutdownSummaryFromResult(
   }
   return {
     attempted: true,
+    stopManagedRuntime: result.stopManagedRuntime,
+    managedRuntimeError: result.managedRuntimeError.slice(0, 500),
     stopPythonLauncher: result.stopPythonLauncher,
     stopStatus: result.stopStatus,
     stoppedPidCount: result.stoppedPidCount,

@@ -39,6 +39,7 @@ describe("Electron main tray integration", () => {
     expect(traySource).toContain("showStatus:");
     expect(traySource).toContain("requestDesktopShellExit()");
     expect(mainSource).toContain("restartLauncherShell");
+    expect(mainSource).toContain("stopManagedRuntime()");
     expect(mainSource).toContain("app.relaunch()");
     expect(mainSource).toContain("from \"./protocol/applyProjectSlot.js\"");
     expect(mainSource).toContain("applyPendingProjectSlot");
@@ -63,7 +64,10 @@ describe("Electron main tray integration", () => {
     expect(mainSource).toContain("pendingWorkbenchCloseAck = null");
     expect(mainSource).toContain("forcing Electron quit");
     expect(mainSource).toContain("stopOwnedPythonLauncherService()");
+    expect(mainSource).toContain("stopManagedRuntime()");
+    expect(mainSource).toContain('operation: "shutdown"');
     expect(mainSource).toContain("stop python launcher on exit budget fail-open");
+    expect(mainSource).toContain("stop managed runtime on exit budget fail-open");
     expect(mainSource).toContain('可先用托盘“停止全部”');
     expect(mainSource).toContain("WORKBENCH_CLOSE_AUTHORIZATION_MAX_WAIT_MS");
   });

@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 
 import { pythonBridgeEnv } from "./pythonBridgeEnv.js";
 
-export type WorkbenchLifecycleOperation = "start" | "stop" | "force-stop" | "restart" | "rebuild-and-start";
+export type WorkbenchLifecycleOperation = "start" | "stop" | "force-stop" | "restart" | "rebuild-and-start" | "shutdown";
 
 export type WorkbenchLifecycleResult = {
   schemaVersion: 1;

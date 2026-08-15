@@ -9,6 +9,7 @@ export type ApprovedDesktopShellShutdownInput = {
   decision: ShutdownDecision;
   closeDesktopSession: () => Promise<void>;
   recordEvent: (event: RuntimeSceneElectronEvent) => Promise<void>;
+  stopManagedRuntime: () => Promise<void>;
   stopPythonLauncher: () => Promise<LauncherServiceStopResult>;
   approveShutdown: () => void;
   stopDesktopActionLoop: () => void;
@@ -17,6 +18,8 @@ export type ApprovedDesktopShellShutdownInput = {
 };
 
 export type ApprovedDesktopShellShutdownResult = {
+  stopManagedRuntime: boolean;
+  managedRuntimeError: string;
   stopPythonLauncher: boolean;
   stopStatus: "stopped" | "skipped" | "failed" | "not_requested";
   stoppedPidCount: number;
@@ -61,6 +64,22 @@ export async function executeApprovedDesktopShellShutdown(
 
   let stopResult: LauncherServiceStopResult | null = null;
   let stopError = "";
+  let managedRuntimeError = "";
+  await input.recordEvent({
+    eventCode: "electron.runtime.stop_requested",
+    message: "Managed project process tree stop requested before desktop shell quit.",
+    fields: {}
+  }).catch(() => undefined);
+  try {
+    await withDesktopShellExitTimeout(input.stopManagedRuntime(), stepTimeoutMs, "stop managed runtime");
+  } catch (error: unknown) {
+    managedRuntimeError = error instanceof Error ? error.message : String(error);
+    await input.recordEvent({
+      eventCode: "electron.runtime.stop_failed",
+      message: "Managed project process tree stop failed before shell quit.",
+      fields: { error: managedRuntimeError.slice(0, 500) }
+    }).catch(() => undefined);
+  }
   if (input.decision.stopPythonLauncher) {
     await input.recordEvent({
       eventCode: "electron.launcher_service.stop_requested",
@@ -84,6 +103,8 @@ export async function executeApprovedDesktopShellShutdown(
   }
 
   const result: ApprovedDesktopShellShutdownResult = {
+    stopManagedRuntime: true,
+    managedRuntimeError,
     stopPythonLauncher: input.decision.stopPythonLauncher,
     stopStatus: stopResult?.status ?? (stopError ? "failed" : "not_requested"),
     stoppedPidCount: stopResult?.terminatedPids.length ?? 0,
@@ -94,6 +115,8 @@ export async function executeApprovedDesktopShellShutdown(
     eventCode: "electron.launcher_service.exited",
     message: "Electron desktop shell exit approved.",
     fields: {
+      stopManagedRuntime: result.stopManagedRuntime,
+      managedRuntimeError: result.managedRuntimeError.slice(0, 500),
       stopPythonLauncher: result.stopPythonLauncher,
       stopStatus: result.stopStatus,
       stoppedPidCount: result.stoppedPidCount

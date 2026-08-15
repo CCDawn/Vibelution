@@ -2717,8 +2717,7 @@ def test_launcher_start_queues_open_workbench_and_records_lifecycle(monkeypatch)
     scene_events: list[tuple[str, dict]] = []
 
     monkeypatch.setattr(standalone_launcher_service, "append_runtime_manager_file_event", lambda event_code, payload, **kwargs: scene_events.append((event_code, payload)))
-    # ensure_runtime_manager_daemon_alive 在 is_daemon_running() 为真时短路，
-    # 本机存在存活 runtime-manager 守护进程时 "ensure" 调用会被跳过；固定为 False 隔离环境。
+    # 固定 is_daemon_running=False，避免本机存活 daemon 走 source 回收分支。
     monkeypatch.setattr(standalone_launcher_service, "is_daemon_running", lambda: False)
     monkeypatch.setattr(standalone_launcher_service, "ensure_daemon_running", lambda: calls.append("ensure"))
     monkeypatch.setattr(

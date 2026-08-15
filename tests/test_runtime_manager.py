@@ -5952,6 +5952,60 @@ def test_terminate_workbench_processes_reports_cleanup_stage_timings(monkeypatch
     assert result["timingsMs"]["totalMs"] >= 0
 
 
+def test_terminate_workbench_processes_can_include_runtime_manager_daemon(monkeypatch, tmp_path):
+    class FakeProc:
+        def __init__(self, pid):
+            self.pid = pid
+
+        def parent(self):
+            return None
+
+        def terminate(self):
+            return None
+
+        def kill(self):
+            return None
+
+        def children(self, recursive=True):
+            return []
+
+    root = tmp_path / "repo"
+    workbench = process_inventory.RuntimeProcess(
+        pid=101,
+        parent_pid=1,
+        kind="managed_workbench_backend",
+        name="pythonw.exe",
+        command_line="pythonw scripts/web_workbench.py --managed-by-launcher --port 8000",
+        cwd=str(root),
+        port=8000,
+    )
+    daemon_proc = process_inventory.RuntimeProcess(
+        pid=202,
+        parent_pid=1,
+        kind="runtime_manager_daemon",
+        name="pythonw.exe",
+        command_line="pythonw -m core.runtime_manager.cli daemon",
+        cwd=str(root),
+        port=0,
+    )
+    live = {101: FakeProc(101), 202: FakeProc(202)}
+    monkeypatch.setattr(process_inventory, "list_repo_runtime_processes", lambda project_root=None, exclude_pids=None: [workbench, daemon_proc])
+    monkeypatch.setattr(process_inventory, "_live_processes", lambda pids: [live[pid] for pid in sorted(pids) if pid in live])
+    monkeypatch.setattr(process_inventory.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(process_inventory.psutil, "wait_procs", lambda processes, timeout: (list(processes), []))
+    monkeypatch.setattr(process_inventory.psutil, "Process", lambda pid: live[int(pid)])
+
+    kept = process_inventory.terminate_workbench_processes(project_root=root, timeout_seconds=0.1)
+    recycled = process_inventory.terminate_workbench_processes(
+        project_root=root,
+        timeout_seconds=0.1,
+        include_runtime_manager=True,
+    )
+
+    assert kept["requested"] == [101]
+    assert recycled["requested"] == [101, 202]
+
+
 def test_terminate_workbench_processes_uses_known_pids_without_inventory_scan(monkeypatch, tmp_path):
     class FakeChild:
         def __init__(self, pid):
