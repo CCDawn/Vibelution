@@ -573,8 +573,66 @@ class GraphDispatchWorker:
                 # Thread already finished (failed end): re-enter the node.
                 return self._coordinator.retry_attempt(dispatch)
             return self._coordinator.start_attempt(dispatch)
+        if (
+            node_id
+            and dispatch.node_id != node_id
+            and dispatch.attempt >= 2
+        ):
+            return self._pending_from_ledger_dispatch(dispatch, snapshot)
         raise GraphDecisionError(
             f"thread 中断于 {node_id}，但 dispatch 目标是 {dispatch.node_id}"
+        )
+
+    def _pending_from_ledger_dispatch(
+        self, dispatch: GraphDispatch, snapshot: dict[str, Any]
+    ) -> GraphDispatchResult:
+        """Lag-walk failed, but ledger already owns the retry target.
+
+        SCI-096: thread stays interrupted at ``source_finding`` (so
+        ``nextNodeIds`` is non-empty) while ``retry_node`` targets
+        ``controlled_run`` attempt >= 2. Synthesize pending from ledger
+        identity instead of raising ``checkpoint_node_mismatch``.
+        """
+        from dataclasses import replace
+
+        values = dict(snapshot.get("values") or {})
+        values["run_id"] = dispatch.run_id
+        values["active_node_id"] = dispatch.node_id
+        values["active_attempt"] = dispatch.attempt
+        node_attempts = dict(values.get("node_attempts") or {})
+        node_attempts[dispatch.node_id] = dispatch.attempt
+        values["node_attempts"] = node_attempts
+        if dispatch.input_snapshot_hash:
+            values["input_snapshot_hash"] = dispatch.input_snapshot_hash
+        if dispatch.budget_policy_hash:
+            values["budget_policy_hash"] = dispatch.budget_policy_hash
+        pending = build_pending_action(values, dispatch.node_id)
+        node_run_id = str(dispatch.node_run_id or "").strip() or pending.node_run_id
+        expected_action_id = action_id_for(
+            dispatch.run_id, dispatch.node_id, dispatch.attempt
+        )
+        if (
+            pending.run_id != dispatch.run_id
+            or pending.node_run_id != node_run_id
+            or pending.action_id != expected_action_id
+            or pending.attempt != dispatch.attempt
+        ):
+            pending = replace(
+                pending,
+                run_id=dispatch.run_id,
+                node_run_id=node_run_id,
+                action_id=expected_action_id,
+                attempt=dispatch.attempt,
+            )
+        return GraphDispatchResult(
+            dispatch_kind="start",
+            pending_action=pending,
+            next_node_ids=tuple(
+                str(item) for item in (snapshot.get("nextNodeIds") or [])
+            )
+            or (dispatch.node_id,),
+            checkpoint_id=str(snapshot.get("checkpointId") or ""),
+            state=values,
         )
 
     def _result_at_target(

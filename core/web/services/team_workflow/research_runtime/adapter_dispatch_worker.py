@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any
 
 from core.research.workflow.contracts import (
@@ -80,6 +81,7 @@ class AdapterDispatchWorker:
 
     def _handle(self, outbox: Any) -> None:
         action = PendingAction.from_dict(json.loads(outbox.payload_json))
+        action = _heal_pending_action_identity(outbox, action)
         adapter = self._registry.get(action.action_kind)
         if adapter is None:
             self._fail_unregistered(outbox, action)
@@ -686,6 +688,23 @@ class AdapterDispatchWorker:
             retry_at_ms=now_ms + 5_000,
             problem_json=json.dumps({"code": "transient", "detail": detail}),
         )
+
+
+def _heal_pending_action_identity(outbox: Any, action: PendingAction) -> PendingAction:
+    """Ledger outbox columns are authoritative when lag-walk payload omitted runId."""
+    column_run_id = str(getattr(outbox, "run_id", "") or "").strip()
+    column_node_run_id = str(getattr(outbox, "node_run_id", "") or "").strip()
+    payload_run_id = str(action.run_id or "").strip()
+    payload_node_run_id = str(action.node_run_id or "").strip()
+    run_id = payload_run_id or column_run_id
+    node_run_id = payload_node_run_id
+    if node_run_id.startswith("nr--") or not node_run_id:
+        node_run_id = column_node_run_id
+    if run_id and (node_run_id.startswith("nr--") or not node_run_id):
+        node_run_id = f"nr-{run_id}-{action.node_id}-a{action.attempt}"
+    if run_id == payload_run_id and node_run_id == payload_node_run_id:
+        return action
+    return replace(action, run_id=run_id, node_run_id=node_run_id)
 
 
 def _event(*, run_id: str, sequence: int, run_version: int, event_id: str, event_type: str, correlation_id: str, payload: dict, now_ms: int):
