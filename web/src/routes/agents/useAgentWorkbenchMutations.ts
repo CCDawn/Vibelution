@@ -5,6 +5,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 
+import { archiveAgent, resetAgent, updateAgent } from "../../api/agents";
 import { fetchJson } from "../../api/client";
 import { queryKeys } from "../../api/queryKeys";
 import type {
@@ -79,12 +80,8 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
 
   const updatePersonaMutation = useMutation({
     mutationFn: (payload: { agentId: string; draft: any }) =>
-      fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          personaProfile: options.personaProfileFromDraft(payload.draft),
-        }),
+      updateAgent(payload.agentId, {
+        personaProfile: options.personaProfileFromDraft(payload.draft),
       }),
     onSuccess: (agent) => {
       queryClient.setQueryData<AgentConfigWorkspace | undefined>(
@@ -103,12 +100,8 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
 
   const updateTaskMutation = useMutation({
     mutationFn: (payload: { agentId: string; draft: any }) =>
-      fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          taskProfile: options.taskProfileFromDraft(payload.draft),
-        }),
+      updateAgent(payload.agentId, {
+        taskProfile: options.taskProfileFromDraft(payload.draft),
       }),
     onSuccess: (agent) => {
       queryClient.setQueryData<AgentConfigWorkspace | undefined>(
@@ -127,9 +120,7 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
 
   const archiveAgentMutation = useMutation({
     mutationFn: (payload: { agentId: string }) =>
-      fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
-        method: "DELETE",
-      }),
+      archiveAgent(payload.agentId),
     onMutate: async (payload) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.agentConfigWorkspace() });
       const previousWorkspace = queryClient.getQueryData<AgentConfigWorkspace>(queryKeys.agentConfigWorkspace());
@@ -219,13 +210,9 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
 
   const resetAgentMutation = useMutation({
     mutationFn: (payload: { agentId: string; options: AgentResetOptions }) =>
-      fetchJson<{ agent: AgentConfigWorkspaceAgent; resetSummary: AgentResetSummary }>(
-        `/api/agents/${encodeURIComponent(payload.agentId)}/reset`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload.options),
-        },
+      resetAgent<{ agent: AgentConfigWorkspaceAgent; resetSummary: AgentResetSummary }>(
+        payload.agentId,
+        payload.options,
       ),
     onMutate: (payload) => {
       options.setResettingAgentIds((current) => {
@@ -343,20 +330,16 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
 
   const updateToolPolicyMutation = useMutation({
     mutationFn: (payload: { agentId: string; draft: any; basePolicy: ToolPolicy | undefined }) =>
-      fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          toolPolicy: {
-            ...options.defaultToolPolicy(payload.basePolicy?.policyId || "default"),
-            ...(payload.basePolicy ?? {}),
-            allowedTools: options.sortedIds(payload.draft.allowedTools),
-            preferredTools: options.sortedIds(payload.draft.preferredTools),
-            blockedTools: options.sortedIds(payload.draft.blockedTools),
-            readScopes: options.sortedIds(payload.draft.readScopes),
-            writeScopes: options.sortedIds(payload.draft.writeScopes),
-          },
-        }),
+      updateAgent(payload.agentId, {
+        toolPolicy: {
+          ...options.defaultToolPolicy(payload.basePolicy?.policyId || "default"),
+          ...(payload.basePolicy ?? {}),
+          allowedTools: options.sortedIds(payload.draft.allowedTools),
+          preferredTools: options.sortedIds(payload.draft.preferredTools),
+          blockedTools: options.sortedIds(payload.draft.blockedTools),
+          readScopes: options.sortedIds(payload.draft.readScopes),
+          writeScopes: options.sortedIds(payload.draft.writeScopes),
+        },
       }),
     onSuccess: (agent) => {
       queryClient.setQueryData<AgentConfigWorkspace | undefined>(
@@ -431,21 +414,17 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
 
   const updateMemoryPolicyMutation = useMutation({
     mutationFn: (payload: { agentId: string; draft: AgentMemoryPolicyDraft; basePolicy: MemoryPolicy | undefined }) =>
-      fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          memoryPolicy: {
-            ...options.defaultMemoryPolicy(payload.basePolicy?.policyId || ""),
-            ...(payload.basePolicy ?? {}),
-            readSharedGroups: options.sortedIds(payload.draft.readSharedGroups),
-            writeSharedGroups: options.sortedIds(payload.draft.writeSharedGroups),
-            readKnowledgeBaseIds: options.sortedIds(payload.draft.readKnowledgeBaseIds),
-            proposeKnowledgeBaseIds: options.sortedIds(payload.draft.proposeKnowledgeBaseIds),
-            reviewKnowledgeBaseIds: options.sortedIds(payload.draft.reviewKnowledgeBaseIds),
-            rateKnowledgeBaseIds: options.sortedIds(payload.draft.rateKnowledgeBaseIds),
-          },
-        }),
+      updateAgent(payload.agentId, {
+        memoryPolicy: {
+          ...options.defaultMemoryPolicy(payload.basePolicy?.policyId || ""),
+          ...(payload.basePolicy ?? {}),
+          readSharedGroups: options.sortedIds(payload.draft.readSharedGroups),
+          writeSharedGroups: options.sortedIds(payload.draft.writeSharedGroups),
+          readKnowledgeBaseIds: options.sortedIds(payload.draft.readKnowledgeBaseIds),
+          proposeKnowledgeBaseIds: options.sortedIds(payload.draft.proposeKnowledgeBaseIds),
+          reviewKnowledgeBaseIds: options.sortedIds(payload.draft.reviewKnowledgeBaseIds),
+          rateKnowledgeBaseIds: options.sortedIds(payload.draft.rateKnowledgeBaseIds),
+        },
       }),
     onSuccess: (agent) => {
       queryClient.setQueryData<AgentConfigWorkspace | undefined>(
@@ -469,24 +448,20 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
       delegationPolicy: AgentDelegationPolicy;
       supervisionPolicy: AgentSupervisionPolicy;
     }) =>
-      fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          delegationPolicy: {
-            allowSubagents: payload.delegationPolicy.allowSubagents,
-            maxConcurrent: payload.delegationPolicy.maxConcurrent,
-            maxDepth: payload.delegationPolicy.maxDepth,
-            allowWakeMessages: payload.delegationPolicy.allowWakeMessages,
-            allowedContextModes: options.sortedIds(payload.delegationPolicy.allowedContextModes),
-          },
-          supervisionPolicy: {
-            supervisionEnabled: payload.supervisionPolicy.supervisionEnabled,
-            requiresReview: payload.supervisionPolicy.requiresReview,
-            reviewMode: payload.supervisionPolicy.reviewMode,
-            evidenceLevel: payload.supervisionPolicy.evidenceLevel,
-          },
-        }),
+      updateAgent(payload.agentId, {
+        delegationPolicy: {
+          allowSubagents: payload.delegationPolicy.allowSubagents,
+          maxConcurrent: payload.delegationPolicy.maxConcurrent,
+          maxDepth: payload.delegationPolicy.maxDepth,
+          allowWakeMessages: payload.delegationPolicy.allowWakeMessages,
+          allowedContextModes: options.sortedIds(payload.delegationPolicy.allowedContextModes),
+        },
+        supervisionPolicy: {
+          supervisionEnabled: payload.supervisionPolicy.supervisionEnabled,
+          requiresReview: payload.supervisionPolicy.requiresReview,
+          reviewMode: payload.supervisionPolicy.reviewMode,
+          evidenceLevel: payload.supervisionPolicy.evidenceLevel,
+        },
       }),
     onSuccess: (agent) => {
       queryClient.setQueryData<AgentConfigWorkspace | undefined>(

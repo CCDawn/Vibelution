@@ -5,6 +5,7 @@ import { Archive, ArrowLeft, CheckCircle2, CheckSquare, FileText, RefreshCw, Rot
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
+import { listAgentSummaries } from "../api/agents";
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import { AgentInstance, PromptTemplate, PromptTemplateWorkspace } from "../api/types";
@@ -239,7 +240,7 @@ export function PromptTemplatesRoute() {
   });
   const agentsQuery = useQuery({
     queryKey: queryKeys.agents(),
-    queryFn: () => fetchJson<AgentInstance[]>("/api/agents?detail=summary"),
+    queryFn: () => listAgentSummaries(),
   });
   const templates = templatesQuery.data?.templates ?? [];
   const agents = agentsQuery.data ?? [];

@@ -4,6 +4,7 @@
  */
 import { useQuery } from "@tanstack/react-query";
 
+import { listAgentSummaries } from "../../api/agents";
 import { fetchJson } from "../../api/client";
 import { queryKeys } from "../../api/queryKeys";
 import type {
@@ -152,7 +153,7 @@ export function useMemoryCoreQueries(options: UseMemoryCoreQueriesOptions) {
   });
   const agentsQuery = useQuery({
     queryKey: queryKeys.agents(),
-    queryFn: ({ signal }) => fetchJson<AgentInstance[]>("/api/agents?detail=summary", { signal }),
+    queryFn: ({ signal }) => listAgentSummaries({ signal }),
     enabled: forcedView === "agents" || forcedView === "knowledge" || forcedView === "graph" || forcedView === "cleanup",
     refetchInterval: resolvePollingInterval(pageVisible, 60_000),
     refetchIntervalInBackground: false,

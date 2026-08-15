@@ -233,7 +233,7 @@ describe("ToolsRoute layout contract", () => {
   });
 
   it("hosts dedicated Agent ToolPolicy editing with return navigation", () => {
-    expect(routeSource).toContain("fetchJson<AgentInstance[]>(\"/api/agents?detail=summary\")");
+    expect(routeSource).toContain("listAgentSummaries()");
     expect(routeSource).toContain("const requestedAgentId = useMemo(");
     expect(routeSource).toContain("agentMatchesDeepLink(agent, requestedAgentId)");
     expect(routeSource).toContain("const requestedToolKey = useMemo(");

@@ -466,7 +466,7 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).toContain("AgentConfigWorkspace");
     expect(selfEvolutionSource).toContain("AgentConfigWorkspaceAgent");
     expect(selfEvolutionSource).toContain("queryKeys.agentConfigWorkspace()");
-    expect(selfEvolutionSource).toContain('fetchJson<AgentConfigWorkspace>("/api/agents/config-workspace?includeRuntime=false")');
+    expect(selfEvolutionSource).toContain("fetchAgentConfigWorkspace({ includeRuntime: false })");
     expect(selfEvolutionSource).toContain("SELF_EVOLUTION_AGENT_ROLE_ORDER");
     expect(selfEvolutionSource).toContain("renderSelfEvolutionAgentCards()");
     expect(selfEvolutionSource).toContain('returnLabel: "self_evolution"');

@@ -13,6 +13,11 @@ import {
 import { lazy, Suspense, type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
+import {
+  fetchAgentConfigWorkspace,
+  listAgentAvatarOptions,
+  listAgentSummaries,
+} from "../api/agents";
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import {
@@ -486,13 +491,13 @@ export function AgentsRoute() {
   const fullWorkspaceNeeded = Boolean(activePane === "effective" || activePane === "relations" || activePane === "config" || activePane === "activity" || requestedAgentId);
   const workspaceQuery = useQuery({
     queryKey: queryKeys.agentConfigWorkspace(),
-    queryFn: () => fetchJson<AgentConfigWorkspaceWithTeamIndexes>("/api/agents/config-workspace?includeRuntime=false"),
+    queryFn: () => fetchAgentConfigWorkspace<AgentConfigWorkspaceWithTeamIndexes>({ includeRuntime: false }),
     enabled: fullWorkspaceNeeded,
     staleTime: 10_000,
   });
   const agentSummaryQuery = useQuery({
     queryKey: queryKeys.agentSummary(true),
-    queryFn: () => fetchJson<AgentConfigWorkspaceAgent[]>("/api/agents?includeArchived=true&detail=summary"),
+    queryFn: () => listAgentSummaries<AgentConfigWorkspaceAgent>({ includeArchived: true }),
     staleTime: 10_000,
   });
 
@@ -508,7 +513,7 @@ export function AgentsRoute() {
 
   const avatarOptionsQuery = useQuery({
     queryKey: ["agent-avatar-options"],
-    queryFn: () => fetchJson<AgentAvatarOptionsPayload>("/api/agents/avatar-options"),
+    queryFn: () => listAgentAvatarOptions(),
     enabled: avatarEditorOpen,
     staleTime: 30_000,
   });

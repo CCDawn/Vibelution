@@ -5,6 +5,7 @@ import { ArrowLeft, CheckCircle2, CheckSquare, CircleSlash, FlaskConical, Power,
 import { type CSSProperties, type KeyboardEvent, type PointerEvent, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
+import { listAgentSummaries } from "../api/agents";
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import {
@@ -1006,7 +1007,7 @@ export function ToolsRoute() {
 
   const agentsQuery = useQuery({
     queryKey: queryKeys.agents(),
-    queryFn: () => fetchJson<AgentInstance[]>("/api/agents?detail=summary"),
+    queryFn: () => listAgentSummaries(),
     staleTime: 30_000,
     refetchInterval: false,
     refetchIntervalInBackground: false,

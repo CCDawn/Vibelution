@@ -5,6 +5,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 
+import { updateAgent } from "../../api/agents";
 import { fetchJson } from "../../api/client";
 import { queryKeys } from "../../api/queryKeys";
 import type {
@@ -117,10 +118,7 @@ export function useAgentConfigDraftMutations(options: UseAgentConfigDraftMutatio
       modelChoices: AgentModelChoice[];
       sourceDraftId: string;
     }) =>
-      fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify((() => {
+      updateAgent(payload.agentId, (() => {
           // Full-form save used to always send compression; inherit mode then failed even when
           // the user only changed unrelated fields. Only patch compression when the form differs.
           const body: Record<string, unknown> = {
@@ -146,7 +144,6 @@ export function useAgentConfigDraftMutations(options: UseAgentConfigDraftMutatio
           }
           return body;
         })()),
-      }),
     onSuccess: (agent, variables) => {
       queryClient.setQueryData<AgentConfigWorkspace | undefined>(
         queryKeys.agentConfigWorkspace(),

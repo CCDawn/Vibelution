@@ -522,7 +522,7 @@ describe("TeamsRoute layout contract", () => {
     expect(useTeamsSelectedTeamDetailSource).toContain("`/api/teams/${encodeURIComponent(effectiveTeamId)}?detail=${teamDetailLoadMode}`");
     expect(useTeamsSelectedTeamDetailSource).toContain("fetchJson<Team>(");
     expect(routeSource).toContain("queryKeys.agentSummary(false)");
-    expect(routeSource).toContain('fetchJson<AgentConfigWorkspaceAgent[]>("/api/agents?detail=summary", { signal })');
+    expect(routeSource).toContain("listAgentSummaries<AgentConfigWorkspaceAgent>({ signal })");
     expect(routeSource).not.toContain("includeArchived=true&detail=summary");
     expect(routeSource).not.toContain('fetchJson<AgentConfigWorkspace>("/api/agents/config-workspace")');
     // Wave 8Q: archive/delete team lives on useTeamShellMutations.

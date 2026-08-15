@@ -1,5 +1,7 @@
 import { fetchJson } from "./client";
 import type {
+  AgentAvatarOptionsPayload,
+  AgentConfigWorkspace,
   AgentConfigWorkspaceAgent,
   AgentInstance,
   AgentPermissionPreset,
@@ -15,31 +17,97 @@ export type AgentDirectSessionResetResponse = {
   };
 };
 
-export function listAgentSummaries(): Promise<AgentInstance[]> {
-  return fetchJson<AgentInstance[]>("/api/agents?detail=summary");
+export function listAgentSummaries<T = AgentInstance>(options?: {
+  includeArchived?: boolean;
+  signal?: AbortSignal;
+}): Promise<T[]> {
+  const search = new URLSearchParams();
+  search.set("detail", "summary");
+  if (options?.includeArchived) {
+    search.set("includeArchived", "true");
+  }
+  return fetchJson<T[]>(`/api/agents?${search.toString()}`, {
+    signal: options?.signal,
+  });
+}
+
+export function fetchAgentConfigWorkspace<T = AgentConfigWorkspace>(options?: {
+  includeRuntime?: boolean;
+  signal?: AbortSignal;
+}): Promise<T> {
+  const search = new URLSearchParams();
+  if (options?.includeRuntime === false) {
+    search.set("includeRuntime", "false");
+  }
+  const suffix = search.toString();
+  return fetchJson<T>(suffix ? `/api/agents/config-workspace?${suffix}` : "/api/agents/config-workspace", {
+    signal: options?.signal,
+  });
+}
+
+export function listAgentAvatarOptions(options?: {
+  modelId?: string;
+}): Promise<AgentAvatarOptionsPayload> {
+  const search = new URLSearchParams();
+  if (options?.modelId) {
+    search.set("modelId", options.modelId);
+  }
+  const suffix = search.toString();
+  return fetchJson<AgentAvatarOptionsPayload>(
+    suffix ? `/api/agents/avatar-options?${suffix}` : "/api/agents/avatar-options",
+  );
+}
+
+export function createAgent(payload: object): Promise<AgentConfigWorkspaceAgent> {
+  return fetchJson<AgentConfigWorkspaceAgent>("/api/agents", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateAgent(
+  agentId: string,
+  payload: Record<string, unknown>,
+): Promise<AgentConfigWorkspaceAgent> {
+  return fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(agentId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function archiveAgent(agentId: string): Promise<AgentConfigWorkspaceAgent> {
+  return fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(agentId)}`, {
+    method: "DELETE",
+  });
+}
+
+export function resetAgent<T = AgentDirectSessionResetResponse>(
+  agentId: string,
+  payload: object,
+): Promise<T> {
+  return fetchJson<T>(`/api/agents/${encodeURIComponent(agentId)}/reset`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
 }
 
 export function resetAgentDirectSession(
   agentId: string,
   sessionId: string,
 ): Promise<AgentDirectSessionResetResponse> {
-  return fetchJson<AgentDirectSessionResetResponse>(
-    `/api/agents/${encodeURIComponent(agentId)}/reset`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        clearRuntimeState: false,
-        resetDirectSession: true,
-        directSessionId: sessionId,
-        resetPersonaProfile: false,
-        resetTaskProfile: false,
-        resetToolPolicy: false,
-        resetMemoryPolicy: false,
-        resetRuntimePolicy: false,
-      }),
-    },
-  );
+  return resetAgent(agentId, {
+    clearRuntimeState: false,
+    resetDirectSession: true,
+    directSessionId: sessionId,
+    resetPersonaProfile: false,
+    resetTaskProfile: false,
+    resetToolPolicy: false,
+    resetMemoryPolicy: false,
+    resetRuntimePolicy: false,
+  });
 }
 
 export function resolveAgentToolGovernanceRequest(

@@ -10,6 +10,13 @@ from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.web.routes.agent_catalog_models import (
+    AgentAvatarOptionsResponse,
+    AgentConfigWorkspaceResponse,
+    AgentDocumentResponse,
+    AgentResetResponse,
+)
+
 from config.operator_config_transaction import OperatorConfigTransactionError
 from core.agent_kernel import KernelAdapterError, KernelError, KernelValidationError, submit_agent_message_event
 from core.orchestration.context_engine import list_agent_runs_for_agent
@@ -440,13 +447,17 @@ def _config_agent_instances_present() -> bool:
     return supervised_roles.issubset(present_supervised) and self_roles.issubset(present_self)
 
 
-@router.get("/agents")
+@router.get(
+    "/agents",
+    response_model=list[AgentDocumentResponse],
+    response_model_exclude_unset=True,
+)
 def agent_list(includeArchived: bool = False, detail: str = "full") -> list[dict]:
     _ensure_config_agent_instances()
     return list_agents(include_archived=includeArchived, detail=detail)
 
 
-@router.get("/agents/avatar-image/{filename}")
+@router.get("/agents/avatar-image/{filename}", response_class=FileResponse)
 def agent_avatar_image(filename: str) -> FileResponse:
     try:
         path = resolve_agent_avatar_file(filename)
@@ -457,12 +468,20 @@ def agent_avatar_image(filename: str) -> FileResponse:
     return FileResponse(path)
 
 
-@router.get("/agents/avatar-options")
+@router.get(
+    "/agents/avatar-options",
+    response_model=AgentAvatarOptionsResponse,
+    response_model_exclude_unset=True,
+)
 def agent_avatar_options(modelId: str = "") -> dict:
     return list_agent_avatar_options(model_id=modelId)
 
 
-@router.get("/agents/config-workspace")
+@router.get(
+    "/agents/config-workspace",
+    response_model=AgentConfigWorkspaceResponse,
+    response_model_exclude_unset=True,
+)
 def agent_config_workspace(includeRuntime: bool = True) -> dict:
     _ensure_config_agent_instances()
     return get_agent_config_workspace(use_cache=True, include_runtime=includeRuntime)
@@ -593,7 +612,12 @@ def agent_avatar_upload(agent_id: str, payload: AgentAvatarUploadPayload) -> dic
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/agents", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/agents",
+    status_code=status.HTTP_201_CREATED,
+    response_model=AgentDocumentResponse,
+    response_model_exclude_unset=True,
+)
 def agent_create(payload: AgentCreatePayload) -> dict:
     try:
         display_name = payload.displayName.strip()
@@ -690,7 +714,11 @@ def _validate_agent_create_payload(
         raise AgentDirectoryError("Agent 创建信息不完整，请补齐：" + "、".join(missing) + "。")
 
 
-@router.get("/agents/{agent_id}")
+@router.get(
+    "/agents/{agent_id}",
+    response_model=AgentDocumentResponse,
+    response_model_exclude_unset=True,
+)
 def agent_detail(agent_id: str) -> dict:
     agent = get_agent(agent_id)
     if not agent:
@@ -893,7 +921,11 @@ def agent_messages_consume_all(agent_id: str, payload: AgentMessageConsumePayloa
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.patch("/agents/{agent_id}")
+@router.patch(
+    "/agents/{agent_id}",
+    response_model=AgentDocumentResponse,
+    response_model_exclude_unset=True,
+)
 def agent_update(agent_id: str, payload: AgentUpdatePayload) -> dict:
     try:
         archive_summary: dict[str, Any] | None = None
@@ -1230,7 +1262,11 @@ def _record_agent_delete_route_event(
         return
 
 
-@router.post("/agents/{agent_id}/reset")
+@router.post(
+    "/agents/{agent_id}/reset",
+    response_model=AgentResetResponse,
+    response_model_exclude_unset=True,
+)
 def agent_reset(agent_id: str, payload: AgentResetPayload) -> dict:
     _record_agent_reset_route_event("agent.reset.requested", agent_id, payload, outcome="requested")
     try:
@@ -1292,7 +1328,11 @@ def agent_bulk_config(payload: AgentBulkConfigPayload) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.delete("/agents/{agent_id}")
+@router.delete(
+    "/agents/{agent_id}",
+    response_model=AgentDocumentResponse,
+    response_model_exclude_unset=True,
+)
 def agent_archive(agent_id: str) -> dict:
     timings: dict[str, float] = {}
     started_at = perf_counter()

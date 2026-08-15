@@ -6,6 +6,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 
+import { listAgentSummaries } from "../../api/agents";
 import { fetchJson } from "../../api/client";
 import {
   PROJECT_AGENT_BUS_TEAM_TIMELINE_LIMIT,
@@ -51,7 +52,7 @@ export function useTeamsCatalogQueries({
   });
   const agentSummaryQuery = useQuery({
     queryKey: queryKeys.agentSummary(false),
-    queryFn: ({ signal }) => fetchJson<AgentConfigWorkspaceAgent[]>("/api/agents?detail=summary", { signal }),
+    queryFn: ({ signal }) => listAgentSummaries<AgentConfigWorkspaceAgent>({ signal }),
     staleTime: 10_000,
   });
   const projectBusQuery = useQuery({
