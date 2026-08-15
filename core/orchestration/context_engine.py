@@ -366,6 +366,15 @@ def build_agent_context(
     else:
         timings["projectAgentRegistryContextMs"] = 0
         timings["projectAgentRegistryContextSkipped"] = True
+    public_structure_context_block = ""
+    if _agent_allows_public_structure_context(agent):
+        stage_started_at = _perf_counter()
+        public_structure_result = _build_public_structure_context_block(agent_directory_service.PROJECT_ROOT, agent_id=normalized_agent_id)
+        public_structure_context_block = public_structure_result["contextBlock"]
+        timings["publicStructureContextMs"] = _elapsed_ms(stage_started_at)
+    else:
+        timings["publicStructureContextMs"] = 0
+        timings["publicStructureContextSkipped"] = True
     context_segments = [
         segment
         for segment in (
@@ -387,6 +396,12 @@ def build_agent_context(
                 prompt_context_block,
                 placement="cache_prefix",
                 stability="agent_static",
+            ),
+            _context_segment(
+                "public_structure",
+                public_structure_context_block,
+                placement="cache_prefix",
+                stability="project_static",
             ),
             _context_segment(
                 "project_agent_registry",
@@ -460,6 +475,7 @@ def build_agent_context(
             "projectRulesContextIncluded": False,
             "projectRulesContextOwner": "prompt_manager_or_session_snapshot",
             "projectAgentRegistryContextIncluded": bool(project_agent_registry_context_block),
+            "publicStructureContextIncluded": bool(public_structure_context_block),
             "staticContextChars": timings["staticContextChars"],
             "dynamicContextChars": timings["dynamicContextChars"],
             "staticContextHash": timings["staticContextHash"],
@@ -570,6 +586,51 @@ def _agent_needs_research_organization_context(agent: dict[str, Any]) -> bool:
         return True
     research_role = str(metadata.get("researchOrgRole") or metadata.get("systemRole") or "").strip()
     return bool(research_role)
+
+
+def _agent_allows_public_structure_context(agent: dict[str, Any]) -> bool:
+    """Keep the curated public structure digest opt-in per Agent.
+
+    The digest is an independent segment (``public_structure``) with its own
+    exclusion set; it never re-injects AGENTS/COMMON/SOUL (PromptManager owns
+    those) and never includes agent_directory projections.
+    """
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    for key in (
+        "includePublicStructureContext",
+        "publicStructureContextEnabled",
+        "runtimePublicStructureContext",
+    ):
+        value = metadata.get(key)
+        if value is True:
+            return True
+        if str(value or "").strip().lower() in {"1", "true", "yes", "on"}:
+            return True
+    return False
+
+
+def _build_public_structure_context_block(project_root: Path, *, agent_id: str) -> dict[str, Any]:
+    """Return the bounded public structure digest, logging failures at the turn seam."""
+    try:
+        from core.web.services import team_knowledge_service
+
+        result = team_knowledge_service.build_startup_structure_block(agent_id=agent_id)
+        return {
+            "contextBlock": str(result.get("block") or ""),
+            "budget": dict(result.get("budget") or {}),
+        }
+    except Exception as exc:
+        _record_context_event(
+            "agent_runtime.public_structure_context_failed",
+            outcome="failed",
+            level="warning",
+            fields={
+                "agentId": str(agent_id or "").strip(),
+                "reason": type(exc).__name__,
+                "source": "ContextEngine",
+            },
+        )
+        return {"contextBlock": "", "budget": {}}
 
 
 def _agent_allows_project_agent_registry_context(agent: dict[str, Any]) -> bool:
