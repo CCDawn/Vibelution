@@ -107,6 +107,7 @@ export type ConversationViewProps = {
   composerInterruptGuidancePending?: boolean;
   composerError?: string;
   composerGuidance?: string;
+  followupQueue?: Array<{ id: string; text: string }>;
   composerAttachments?: ConversationComposerAttachment[];
   composerReferences?: SessionReferenceAttachment[];
   slashCommandSuggestions?: SkillLibraryItem[];
@@ -146,4 +147,7 @@ export type ConversationViewProps = {
   onStop?: () => void;
   onSafeGuidance?: () => void;
   onInterruptGuidance?: () => void;
+  onFollowupQueueUpdate?: (id: string, text: string) => void;
+  onFollowupQueueRemove?: (id: string) => void;
+  onFollowupQueueMove?: (fromIndex: number, toIndex: number) => void;
 };
