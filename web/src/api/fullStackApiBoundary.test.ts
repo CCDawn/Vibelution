@@ -28,7 +28,6 @@ const legacyRouteFetchJsonCallBudgets: Record<string, number> = {
   "routes/EvolutionRoute.tsx": 5,
   "routes/GitRoute.tsx": 8,
   "routes/LogsRoute.tsx": 5,
-  "routes/MemoryUserContentPanel.tsx": 6,
   "routes/PetRoute.tsx": 1,
   "routes/RuntimeScenesPane.tsx": 4,
   "routes/SelfEvolutionTrack.tsx": 2,
@@ -46,7 +45,7 @@ const legacyRouteFetchJsonCallBudgets: Record<string, number> = {
   "routes/evolution/useEvolutionRunMutations.ts": 8,
 };
 // Task 9: ResearchFlowCanvasRoute.tsx + ResearchRoute.tsx fully removed (redirect-only shells deleted).
-const legacyRouteFetchJsonAggregateBudget = 75;
+const legacyRouteFetchJsonAggregateBudget = 69;
 
 function walkSourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((entry) => {
