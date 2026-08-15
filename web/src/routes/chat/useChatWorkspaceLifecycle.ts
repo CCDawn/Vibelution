@@ -22,6 +22,7 @@ import type { TranslationKey } from "../../i18n/dictionary";
 import {
   captureAgentSessionCacheSnapshots,
   captureSessionIndexCacheSnapshots,
+  reconcileAgentSessionDetailCache,
   removeSessionFromAgentSessionCaches,
   restoreAgentSessionCacheSnapshots,
   restoreSessionIndexCacheSnapshots,
@@ -33,6 +34,7 @@ import {
   mergeSessionDetailMessageWindow,
   renameSessionDetail,
   renameSessionInSummaries,
+  sessionSummaryFromDetail,
 } from "../chatSessionState";
 import type { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import {
@@ -40,13 +42,17 @@ import {
   removeDeletedSessionFromConversations,
   renameSessionInConversations,
 } from "./chatSessionDetailHelpers";
+import {
+  pinSessionCreatePreserve,
+  unpinSessionCreatePreserve,
+} from "../sessionCreatePreserve";
 import { clearSessionDeleteTombstone, markSessionDeleteTombstone } from "../sessionDeleteTombstone";
 import { createTempSessionId } from "../sessionOptimisticIds";
 import {
   chatAgentSessionStorage,
   rememberAgentLastSession,
 } from "./chatAgentSessionMemory";
-import { defaultNewSessionTitle } from "./useChatSessionRenameMenu";
+import { defaultNewSessionTitle, isDefaultNewSessionTitle } from "./useChatSessionRenameMenu";
 import type { ChatRouteSelection } from "./chatSelectionProjection";
 
 type ChatWorkspaceCache = ReturnType<typeof createChatWorkspaceCache>;
@@ -126,6 +132,8 @@ export type UseChatWorkspaceLifecycleOptions = {
   setGroupManagePurposeDraft: Dispatch<SetStateAction<string>>;
   setProjectBusDraft: Dispatch<SetStateAction<string>>;
   editingSessionIdRef: MutableRefObject<string | null>;
+  /** Live rename draft while create remaps temp → real id. */
+  editingSessionTitleRef: MutableRefObject<string>;
   setEditingSessionId: Dispatch<SetStateAction<string | null>>;
   setEditingSessionTitle: Dispatch<SetStateAction<string>>;
   /** Ignore rename blur for a short window after optimistic create remounts the tab. */
@@ -238,6 +246,7 @@ export function useChatWorkspaceLifecycle({
   setGroupManagePurposeDraft,
   setProjectBusDraft,
   editingSessionIdRef,
+  editingSessionTitleRef,
   setEditingSessionId,
   setEditingSessionTitle,
   suppressRenameBlurUntilRef,
@@ -296,6 +305,13 @@ export function useChatWorkspaceLifecycle({
           transcriptScope: "window",
         },
       };
+      // Cancel in-flight index/bootstrap/agent list responses so stale pages cannot
+      // overwrite the optimistic tab while another session is still running.
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: ["sessions", "query"] }),
+        queryClient.cancelQueries({ queryKey: ["sessions", "agent"] }),
+        queryClient.cancelQueries({ queryKey: ["sessions", "active-bootstrap"] }),
+      ]);
       setSessionComposerErrors((current) => ({
         ...current,
         __sessions__: "",
@@ -307,6 +323,11 @@ export function useChatWorkspaceLifecycle({
       updateSessionSummaryCaches(queryClient, (sessions) =>
         mergeSessionDetailIntoSummaries(sessions, optimisticDetail),
       );
+      updateAgentSessionSummaryCaches(queryClient, (sessions) =>
+        mergeSessionDetailIntoSummaries(sessions, optimisticDetail),
+      );
+      reconcileAgentSessionDetailCache(queryClient, optimisticDetail);
+      pinSessionCreatePreserve(sessionSummaryFromDetail(optimisticDetail));
       // The temp id enters the URL immediately; the route is the single authority.
       chatRoute.openSession(tempSessionId);
       setSelectedAgentId(normalizedAgentId);
@@ -319,6 +340,7 @@ export function useChatWorkspaceLifecycle({
       }
       setSessionFilter("");
       editingSessionIdRef.current = tempSessionId;
+      editingSessionTitleRef.current = title;
       setEditingSessionId(tempSessionId);
       setEditingSessionTitle(title);
       syncSessionDetail(optimisticDetail);
@@ -340,7 +362,15 @@ export function useChatWorkspaceLifecycle({
           ?.displayName
         || "",
       ).trim();
-      const title = serverTitle || agentLabel || defaultNewSessionTitle(lang);
+      const fallbackTitle = serverTitle || agentLabel || defaultNewSessionTitle(lang);
+      // Keep the operator's in-progress rename draft across temp→real remount.
+      const liveDraft = String(editingSessionTitleRef.current || "").trim();
+      const keepDraft = Boolean(
+        liveDraft
+        && liveDraft !== fallbackTitle
+        && !isDefaultNewSessionTitle(liveDraft),
+      );
+      const title = keepDraft ? liveDraft : fallbackTitle;
       const seededDetail: SessionDetail = {
         ...nextDetail,
         id: nextId,
@@ -353,6 +383,11 @@ export function useChatWorkspaceLifecycle({
       updateSessionSummaryCaches(queryClient, (sessions) =>
         mergeSessionDetailIntoSummaries(sessions, seededDetail),
       );
+      updateAgentSessionSummaryCaches(queryClient, (sessions) =>
+        mergeSessionDetailIntoSummaries(sessions, seededDetail),
+      );
+      reconcileAgentSessionDetailCache(queryClient, seededDetail);
+      pinSessionCreatePreserve(sessionSummaryFromDetail(seededDetail));
       // Compare-and-swap: only replace temp → real when the user is still on the
       // temp route. A user who already left keeps their page; cache updates only.
       const stillOnTemp = tempSessionId
@@ -366,15 +401,21 @@ export function useChatWorkspaceLifecycle({
         // Extend blur suppress through remount so rename field stays open for typing.
         suppressRenameBlurUntilRef.current = Date.now() + 2500;
         editingSessionIdRef.current = nextId;
+        editingSessionTitleRef.current = title;
         setEditingSessionId(nextId);
         setEditingSessionTitle(title);
         syncSessionDetail(seededDetail);
       }
       // Drop temp shell after real id is active/cached.
       if (tempSessionId) {
+        unpinSessionCreatePreserve(tempSessionId);
         updateSessionSummaryCaches(queryClient, (sessions) =>
           (sessions ?? []).filter((session) => session.id !== tempSessionId),
         );
+        updateAgentSessionSummaryCaches(queryClient, (sessions) =>
+          (sessions ?? []).filter((session) => session.id !== tempSessionId),
+        );
+        removeSessionFromAgentSessionCaches(queryClient, tempSessionId);
         queryClient.removeQueries({ queryKey: queryKeys.session(tempSessionId), exact: true });
         removeSessionWorkspace(tempSessionId);
       }
@@ -389,11 +430,6 @@ export function useChatWorkspaceLifecycle({
         }
         return next;
       });
-      if (agentId) {
-        void queryClient.invalidateQueries({
-          queryKey: ["sessions", "agent", agentId],
-        });
-      }
       // Progressive hydrate: partial window first (no secondary lists), then full workspace cache refresh.
       void fetchSessionDetailWindow(nextId, {
         messageLimit: 40,
@@ -403,19 +439,70 @@ export function useChatWorkspaceLifecycle({
         if (!partial || String(partial.id || "").trim() !== nextId) {
           return;
         }
+        const hydrated = keepDraft
+          ? { ...partial, title }
+          : partial;
         queryClient.setQueryData<SessionDetail>(queryKeys.session(nextId), (previous) =>
-          mergeSessionDetailMessageWindow(previous, partial) ?? partial,
+          mergeSessionDetailMessageWindow(previous, hydrated) ?? hydrated,
         );
         updateSessionSummaryCaches(queryClient, (sessions) =>
-          mergeSessionDetailIntoSummaries(sessions, partial),
+          mergeSessionDetailIntoSummaries(sessions, hydrated),
         );
+        updateAgentSessionSummaryCaches(queryClient, (sessions) =>
+          mergeSessionDetailIntoSummaries(sessions, hydrated),
+        );
+        reconcileAgentSessionDetailCache(queryClient, {
+          ...hydrated,
+          messages: Array.isArray(hydrated.messages) ? hydrated.messages : [],
+        } as SessionDetail);
       }).catch(() => {
         // Keep lightweight create shell; user can still chat.
       });
-      void chatWorkspaceCache.afterSessionChanged({
-        sessionId: nextId,
-        agentId,
-      });
+      // Narrow refresh: avoid another sessions-prefix invalidate that re-fetches
+      // bootstrap/agent lists and races the seeded create tab. Conversations and
+      // agent directory still need a poke after create.
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.conversations() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() }),
+        ...(agentId
+          ? [
+              queryClient.invalidateQueries({ queryKey: queryKeys.agent(agentId) }),
+              queryClient.invalidateQueries({ queryKey: queryKeys.agentRuns(agentId) }),
+            ]
+          : []),
+      ]);
+      if (keepDraft && keepFocusOnCreated) {
+        // Persist the draft name once the real id exists (temp shells cannot PATCH).
+        void fetchJson<SessionDetail>(`/api/sessions/${encodeURIComponent(nextId)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title }),
+        }).then((renamed) => {
+          const confirmedTitle = String(renamed.title || title).trim() || title;
+          const confirmedDetail = {
+            ...seededDetail,
+            ...renamed,
+            id: nextId,
+            title: confirmedTitle,
+            agentId,
+          };
+          queryClient.setQueryData(queryKeys.session(nextId), confirmedDetail);
+          updateSessionSummaryCaches(queryClient, (sessions) =>
+            mergeSessionDetailIntoSummaries(sessions, confirmedDetail),
+          );
+          updateAgentSessionSummaryCaches(queryClient, (sessions) =>
+            mergeSessionDetailIntoSummaries(sessions, confirmedDetail),
+          );
+          reconcileAgentSessionDetailCache(queryClient, confirmedDetail);
+          pinSessionCreatePreserve(sessionSummaryFromDetail(confirmedDetail));
+          if (editingSessionIdRef.current === nextId) {
+            editingSessionTitleRef.current = confirmedTitle;
+            setEditingSessionTitle(confirmedTitle);
+          }
+        }).catch(() => {
+          // Keep local draft title; operator can retry rename from the tab.
+        });
+      }
     },
     onError: (error, _variables, context) => {
       const tempSessionId = String(context?.tempSessionId || "").trim();
@@ -434,7 +521,8 @@ export function useChatWorkspaceLifecycle({
           __sessions__: failureMessage,
         }));
       }
-      void chatWorkspaceCache.refreshConversationIndex();
+      // Do not broad-refresh the index on create failure — that would wipe the
+      // temp failure tab. Operator stays on the temp route to retry or leave.
     },
   });
 

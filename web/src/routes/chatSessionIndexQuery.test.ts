@@ -96,6 +96,35 @@ describe("chatSessionIndexQuery cache helpers", () => {
     expect(queryClient.getQueryData<SessionQueryResponse>(agentBKey)?.items[0]?.title).toBe("Beta");
   });
 
+  it("keeps a just-created session in paginated pages when a server refetch omits it", async () => {
+    const { pinSessionCreatePreserve, resetSessionCreatePreservesForTests } = await import("./sessionCreatePreserve");
+    resetSessionCreatePreservesForTests();
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(queryKeys.sessions(), [
+      session("session-new", "Fresh"),
+      session("session-old", "Old"),
+    ]);
+    queryClient.setQueryData(queryKeys.sessionQuery("", 50), {
+      pages: [page([session("session-new", "Fresh"), session("session-old", "Old")], "", 2)],
+      pageParams: [""],
+    });
+    pinSessionCreatePreserve({
+      ...session("session-new", "Fresh"),
+      agentId: "agent-a",
+    });
+
+    updateSessionSummaryCaches(queryClient, (sessions) =>
+      (sessions ?? []).filter((item) => item.id !== "session-gone"),
+    );
+    // Simulate what useSessionIndexQuery returns after a stale server page.
+    const { mergePreservedCreatedSessions } = await import("./sessionCreatePreserve");
+    const filteredItems = mergePreservedCreatedSessions(
+      [session("session-old", "Old")],
+      { localItems: [session("session-new", "Fresh"), session("session-old", "Old")] },
+    );
+    expect(filteredItems.map((item) => item.id)).toEqual(["session-new", "session-old"]);
+  });
+
   it("reconciles an authoritative detail only into its owning Agent session cache", () => {
     const queryClient = new QueryClient();
     const agentAKey = ["sessions", "agent", "agent-a"] as const;

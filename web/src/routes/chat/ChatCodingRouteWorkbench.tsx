@@ -82,6 +82,7 @@ import {
   updateSessionSummaryCaches,
 } from "../chatSessionIndexQuery";
 import { isTempSessionId } from "../sessionOptimisticIds";
+import { mergePreservedCreatedSessions } from "../sessionCreatePreserve";
 import {
   shouldShowConversationIndexLoading,
 } from "../chatSessionStartupGate";
@@ -439,6 +440,7 @@ export function ChatCodingRoute() {
   /** Suppress tab title blur-submit while create remaps temp id → server id. */
   const suppressRenameBlurUntilRef = useRef(0);
   const [editingSessionTitle, setEditingSessionTitle] = useState("");
+  const editingSessionTitleRef = useRef("");
   const [sessionContextMenu, setSessionContextMenu] = useState<SessionContextMenuState | null>(null);
   const [agentContextMenu, setAgentContextMenu] = useState<AgentContextMenuState | null>(null);
   const [activeTurnLayersBySession, setActiveTurnLayersBySession] = useState<Record<string, ActiveTurnLayerState>>({});
@@ -446,6 +448,9 @@ export function ChatCodingRoute() {
   useEffect(() => {
     editingSessionIdRef.current = editingSessionId;
   }, [editingSessionId]);
+  useEffect(() => {
+    editingSessionTitleRef.current = editingSessionTitle;
+  }, [editingSessionTitle]);
 
   const [tokenSpeedTracker, setTokenSpeedTracker] = useState<TokenSpeedTrackerState | null>(null);
   const [petActionFeedback, setPetActionFeedback] = useState("");
@@ -1178,6 +1183,7 @@ export function ChatCodingRoute() {
     setGroupManagePurposeDraft,
     setProjectBusDraft,
     editingSessionIdRef,
+    editingSessionTitleRef,
     setEditingSessionId,
     setEditingSessionTitle,
     suppressRenameBlurUntilRef,
@@ -2531,9 +2537,27 @@ export function ChatCodingRoute() {
   const selectedChatAgentId = selectedAgentId || activeSessionAgentId || visibleChatAgents[0]?.agentId || "";
   const selectedAgentSessionsQuery = useQuery({
     queryKey: ["sessions", "agent", selectedChatAgentId],
-    queryFn: () => fetchJson<SessionQueryResponse>(
-      `/api/sessions/query?agentId=${encodeURIComponent(selectedChatAgentId)}&limit=100`,
-    ),
+    queryFn: async () => {
+      const payload = await fetchJson<SessionQueryResponse>(
+        `/api/sessions/query?agentId=${encodeURIComponent(selectedChatAgentId)}&limit=100`,
+      );
+      const previous = queryClient.getQueryData<SessionQueryResponse>([
+        "sessions",
+        "agent",
+        selectedChatAgentId,
+      ]);
+      const items = mergePreservedCreatedSessions(payload.items ?? [], {
+        localItems: previous?.items ?? [],
+      }).filter((session) => String(session.agentId || "").trim() === selectedChatAgentId);
+      return {
+        ...payload,
+        items,
+        totalEstimate:
+          typeof payload.totalEstimate === "number"
+            ? Math.max(payload.totalEstimate, items.length)
+            : items.length,
+      };
+    },
     enabled: secondaryChatDataEnabled && Boolean(selectedChatAgentId),
     refetchInterval: chatLiveQueryPolicy.sessionsRefetchInterval,
     refetchIntervalInBackground: chatLiveQueryPolicy.directRefetchIntervalInBackground,
