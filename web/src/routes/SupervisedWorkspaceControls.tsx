@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { fetchJson } from "../api/client";
+import { fetchPublicConfig } from "../api/config";
 import { queryKeys } from "../api/queryKeys";
 import { ConfigSummary, EvolutionOverview } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
@@ -52,7 +53,7 @@ export function SupervisedWorkspaceControls({
 
   const configQuery = useQuery({
     queryKey: queryKeys.configPublic(),
-    queryFn: () => fetchJson<ConfigSummary>("/api/config/public"),
+    queryFn: () => fetchPublicConfig(),
     enabled: shouldFetchConfig,
   });
   const overviewQuery = useQuery({

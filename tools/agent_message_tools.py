@@ -195,6 +195,21 @@ def agent_message_tool(
             )
             if research_org_result is not None:
                 return _json_result(research_org_result)
+            same_team_result = _try_send_same_team_message(
+                source_agent=source_agent_payload,
+                target_agent=target_agent_payload,
+                source_agent_id=source_agent_id,
+                source_session_id=source_session_id,
+                target_agent_id=target_agent_id,
+                target_session_id=normalized_target_session,
+                content=message_body,
+                summary=summary,
+                wake_target=wake_target,
+                thread_id=thread_id,
+                metadata=metadata,
+            )
+            if same_team_result is not None:
+                return _json_result(same_team_result)
             return _json_result(
                 _cross_agent_policy_blocked_result(
                     source_agent_id=source_agent_id,
@@ -520,6 +535,101 @@ def _kernel_trace_fields(kernel_result: dict[str, Any]) -> dict[str, Any]:
         "adapterVersion": str(adapter.get("adapterVersion") or "").strip(),
         "idempotencyKey": str(event.get("idempotencyKey") or adapter.get("idempotencyKey") or "").strip(),
         "reused": bool(kernel_result.get("reused")),
+    }
+
+
+def _try_send_same_team_message(
+    *,
+    source_agent: dict[str, Any],
+    target_agent: dict[str, Any],
+    source_agent_id: str,
+    source_session_id: str,
+    target_agent_id: str,
+    target_session_id: str,
+    content: str,
+    summary: str,
+    wake_target: bool,
+    thread_id: str,
+    metadata: dict[str, Any],
+) -> dict[str, Any] | None:
+    from core.web.services import team_service
+
+    team = team_service.shared_active_team_for_agents(source_agent_id, target_agent_id)
+    if not team:
+        return None
+    team_id = str(team.get("teamId") or "").strip()
+    kernel_result = _send_direct_agent_message_via_kernel(
+        source_agent=source_agent,
+        target_agent=target_agent,
+        source_agent_id=source_agent_id,
+        source_session_id=source_session_id,
+        target_agent_id=target_agent_id,
+        target_session_id=target_session_id,
+        content=content,
+        summary=summary,
+        wake_target=wake_target,
+        thread_id=thread_id,
+        metadata={**metadata, "teamId": team_id, "route": "same_team"},
+    )
+    kernel_delivery = _first_kernel_delivery(kernel_result, target_agent_id=target_agent_id)
+    delivery = _flatten_kernel_delivery(
+        kernel_delivery,
+        target_agent_id=target_agent_id,
+        target_session_id=target_session_id,
+        wake_target=bool(wake_target),
+    )
+    sent = str(kernel_delivery.get("status") or "").strip() == "delivered"
+    wake_status = str(delivery.get("wakeStatus") or "").strip()
+    if sent and bool(wake_target) and wake_status in {"failed", "skipped_invalid_session"}:
+        status = "partial"
+        ok = True
+    else:
+        status = "sent" if sent else "blocked"
+        ok = sent
+    message_id = str(delivery.get("messageId") or delivery.get("inboxMessageId") or "").strip()
+    resolved_target_session = str(delivery.get("targetSessionId") or target_session_id).strip()
+    if sent:
+        team_service.record_team_member_message(
+            team_id,
+            message_id=message_id,
+            source_agent_id=source_agent_id,
+            source_agent_name=str(source_agent.get("displayName") or "").strip(),
+            target_agent_id=target_agent_id,
+            target_agent_name=str(target_agent.get("displayName") or "").strip(),
+            target_session_id=resolved_target_session,
+            summary=trim_lines(str(summary or content or ""), max_lines=4),
+        )
+    kernel_trace = _kernel_trace_fields(kernel_result)
+    _record_agent_message_tool_event(
+        {
+            "messageId": message_id,
+            "sourceAgentId": source_agent_id,
+            "sourceSessionId": source_session_id,
+            "targetAgentId": target_agent_id,
+            "targetSessionId": resolved_target_session,
+        },
+        delivery,
+        route="same_team",
+        outcome="sent" if ok else "blocked",
+        extra_fields={**kernel_trace, "teamId": team_id},
+    )
+    return {
+        "ok": ok,
+        "status": status,
+        "route": "same_team",
+        "teamId": team_id,
+        "messageId": message_id,
+        "sourceAgentId": source_agent_id,
+        "sourceSessionId": source_session_id,
+        "targetAgentId": target_agent_id,
+        "targetAgentCode": target_agent.get("agentCode") or "",
+        "targetSessionId": resolved_target_session,
+        "historyStatus": "appended" if sent and bool(wake_target) else ("recorded" if sent else "rejected"),
+        "inboxStatus": "recorded" if sent else "failed",
+        "wakeStatus": wake_status,
+        "reason": delivery.get("reason") or "",
+        "delivery": delivery,
+        "kernel": kernel_trace,
     }
 
 

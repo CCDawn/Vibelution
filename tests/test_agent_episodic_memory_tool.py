@@ -161,6 +161,25 @@ def test_key_tools_catalog_includes_personal_episode_tools():
     assert episodic_memory_tools.SUPERSEDE_EPISODIC_MEMORY_TOOL_NAME == "supersede_episodic_memory_tool"
 
 
+def test_personal_episode_tool_descriptions_prefer_dumped_context():
+    from core.web.services.tool_registry_service import MAX_DESCRIPTION_CHARS
+    from tools.Key_Tools import create_key_tools
+
+    tools = {getattr(item, "name", ""): item for item in create_key_tools()}
+    append_doc = str(tools["append_episodic_memory_tool"].description or "")
+    supersede_doc = str(tools["supersede_episodic_memory_tool"].description or "")
+
+    assert "PersonalEpisodes" in append_doc
+    assert "PersonalEpisodes" in supersede_doc
+    assert "只写自己的 episodic_events.jsonl" not in append_doc
+    assert "glob" in append_doc
+    assert "文件搜索" in supersede_doc
+    assert len(append_doc) <= MAX_DESCRIPTION_CHARS
+    assert len(supersede_doc) <= MAX_DESCRIPTION_CHARS
+    assert "PersonalEpisodes" in (append_episodic_memory_tool.__doc__ or "")
+    assert "PersonalEpisodes" in (supersede_episodic_memory_tool.__doc__ or "")
+
+
 def test_supersede_tool_replaces_current_episode(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(display_name="Episode Editor")

@@ -121,6 +121,7 @@ workspace/
 /挑战杯/
 /experiments/challenge_cup_*/
 !/experiments/challenge_cup_predictive_coding/
+/experiments/challenge_cup_predictive_coding/**
 !/experiments/challenge_cup_predictive_coding/fashion_mnist_smoke.py
 !/experiments/challenge_cup_predictive_coding/requirements-cpu.lock
 
