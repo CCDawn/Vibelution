@@ -45,7 +45,6 @@ import { queryKeys } from "../../api/queryKeys";
 import {
   AgentInstance,
   ChatRoomDetail,
-  ChatRoomParticipant,
   FileContent,
   MentalStateSnapshot,
   PetActionResponse,
@@ -53,7 +52,6 @@ import {
   SessionGuidanceMode,
   ConversationSummary,
   SessionDetail,
-  AgentToolGovernanceRequest,
   SessionRuntimeNotice,
   SessionToolApprovalRequest,
     SessionLlmOptions,
@@ -99,11 +97,6 @@ import {
 } from "../chatLiveQueryPolicy";
 import { resolveChatSecondaryPollPolicy } from "../chatSecondaryPollPolicy";
 import {
-  latestUserMessageId as deriveLatestUserMessageId,
-  resolveComposerDraftValue,
-  resolveLatestEditTarget,
-} from "../chatComposerState";
-import {
   resolveChatUserDisplayName,
 } from "../chatCompactPanel";
 import {
@@ -121,7 +114,6 @@ import {
 } from "../selfEvolutionHandoff";
 import {
   agentDisplayInfo,
-  participantAgentDisplayInfo,
   sessionAgentDisplayInfo,
 } from "../agentDisplay";
 import { AgentSessionTabStrip, type CliAgentRunTab } from "../AgentSessionTabStrip";
@@ -165,24 +157,21 @@ import {
   buildChatMentionTargets,
   type ChatMentionTarget,
 } from "../chatMentionTokens";
-import {
-  buildConversationComposerBridgeState,
-} from "./ChatConversationComposerBridge";
+import { useChatToolApprovalBridge } from "./useChatToolApprovalBridge";
+import { useChatComposerBridgeState } from "./useChatComposerBridgeState";
+import { useChatGroupRoomViewModel } from "./useChatGroupRoomViewModel";
 import { ChatSessionWorkspacePanel } from "./ChatSessionWorkspacePanel";
 import { ChatConversationIndexRail } from "./ChatConversationIndexRail";
 import {
   chatStreamPerformanceNowMs,
   describeChatRouteError as describeError,
   isBusyPhase,
-  isRunningPhase,
-  isStoppingPhase,
   MAX_LEFT_PANEL_WIDTH,
   MAX_RIGHT_PANEL_WIDTH,
   MIN_LEFT_PANEL_WIDTH,
   MIN_RIGHT_PANEL_WIDTH,
   formatChatRuntimeMismatchLine,
   runtimeMatchesSelectedChatSession,
-  shouldSuppressComposerErrorForTurnError,
 } from "./chatCodingRouteViewModel";
 import { ChatCenterSessionSurface } from "./ChatCenterSessionSurface";
 import { ChatCenterTabStrip } from "./ChatCenterTabStrip";
@@ -258,13 +247,9 @@ import {
   contextCompositionSegmentClass,
   contextCompositionSegmentLabel,
   cacheCompositionSegmentLabel,
-  formatAgentIdentityWithRole,
-  compactAgentRoleLabel,
   agentRoleClass,
   avatarInitials,
   avatarImageUrlFrom,
-  imageInputModelIdForAgent,
-  modelImageInputSupport,
   conversationMetadataText,
   renderAgentAvatar,
   isAvailableGroupParticipant,
@@ -274,7 +259,6 @@ import {
   SESSION_DETAIL_HISTORY_PAGE_SIZE,
   fetchSessionDetailWindow,
   isSessionDetailHardLoading,
-  latestVisibleTurnErrorMessage,
   prefetchSessionDetailWindow,
   removeDeletedSessionFromConversations,
   mergeSessionDetailIntoConversations,
@@ -303,15 +287,6 @@ import {
   chatFeaturePresetShortLabel,
   type FeaturePresetKey,
 } from "./chatFeaturePresets";
-import {
-  toolApprovalLabels,
-  toolApprovalRiskLabel,
-  toolApprovalScopeLabel,
-} from "./toolApprovalLabels";
-import {
-  toolApprovalActionPreview,
-  toolApprovalDisplayName,
-} from "./toolApprovalPreview";
 import { postSubmitTelemetry } from "./chatSubmitTelemetry";
 import {
   buildSessionReferencePayload,
@@ -2122,23 +2097,20 @@ export function ChatCodingRoute() {
     lastContextComposition?.limitTokens,
     lastContextComposition?.totalTokens,
   ]);
-  const pendingToolGovernanceApproval = useMemo(
-    () => (detail?.pendingToolGovernanceRequests ?? []).find((request) => request.status === "pending_review") ?? null,
-    [detail?.pendingToolGovernanceRequests],
-  );
-  const pendingSessionToolApproval = useMemo(
-    () => (sessionToolApprovalsQuery.data ?? []).find((request) => request.status === "pending") ?? null,
-    [sessionToolApprovalsQuery.data],
-  );
-  const sessionIdsNeedingApproval = useMemo(
-    () => (
-      activeSessionId
-      && (pendingSessionToolApproval || pendingToolGovernanceApproval)
-        ? [activeSessionId]
-        : []
-    ),
-    [activeSessionId, pendingSessionToolApproval, pendingToolGovernanceApproval],
-  );
+  const {
+    sessionIdsNeedingApproval,
+    toolApproval,
+    handleApproveToolApproval,
+    handleApproveToolForSession,
+    handleRejectToolApproval,
+  } = useChatToolApprovalBridge({
+    detail,
+    sessionToolApprovals: sessionToolApprovalsQuery.data,
+    activeSessionId,
+    lang,
+    resolveSessionToolApprovalMutation,
+    resolveToolApprovalMutation,
+  });
   const runtimeRunningSessionIds = useMemo(() => {
     const runningSessionIds = new Set(runtimeChatTurnSessionIds);
     Object.entries(activeTurnLayersBySession).forEach(([sessionId, layer]) => {
@@ -2148,75 +2120,47 @@ export function ChatCodingRoute() {
     });
     return [...runningSessionIds];
   }, [activeTurnLayersBySession, runtimeChatTurnSessionIds]);
-  const pendingToolApprovalLabels = useMemo(
-    () => pendingSessionToolApproval
-      ? [{
-        id: pendingSessionToolApproval.toolName,
-        label: toolApprovalDisplayName(pendingSessionToolApproval.toolName, lang),
-      }]
-      : toolApprovalLabels(pendingToolGovernanceApproval),
-    [lang, pendingSessionToolApproval, pendingToolGovernanceApproval],
-  );
-  const pendingToolApprovalRawTitle = pendingToolApprovalLabels.map((item) => item.id).join("、");
-  const pendingToolApprovalActionPreview = pendingSessionToolApproval
-    ? toolApprovalActionPreview(pendingSessionToolApproval.argumentSummary, pendingSessionToolApproval.toolName)
-    : pendingToolApprovalLabels.map((item) => item.label).join(" · ");
-  const pendingToolApprovalScope = pendingSessionToolApproval
-    ? (lang === "zh" ? "本次调用" : "this call")
-    : toolApprovalScopeLabel(pendingToolGovernanceApproval?.grantScope, lang);
-  const pendingToolApprovalRisk = toolApprovalRiskLabel(
-    pendingSessionToolApproval?.risk ?? pendingToolGovernanceApproval?.riskLevel,
+  const {
+    activeDraft,
+    activeFollowupQueue,
+    activeComposerError,
+    activeEditTarget,
+    resolvedEditTarget,
+    activeDraftEffective,
+    activeImageAttachments,
+    activeReferenceAttachments,
+    activeImageUploadPending,
+    activeSessionAgent,
+    activeImageInputModelId,
+    latestUserMessageId,
+    activeAgentImageInputSupported,
+    activeAgentImageInputUnsupported,
+    activeImageInputGuidance,
+    submitPending,
+    sessionStopping,
+    sessionBusy,
+    composerDisabled,
+    conversationComposer,
+  } = useChatComposerBridgeState({
+    activeSessionId,
+    sessionDrafts,
+    sessionFollowupQueues,
+    sessionComposerErrors,
+    sessionEditTargets,
+    sessionImageAttachments,
+    sessionReferenceAttachments,
+    sessionImageUploadPending,
+    detail,
+    agents: agentsQuery.data,
+    modelImageInputSupportById,
     lang,
-  );
-  const pendingToolApprovalPending = Boolean(
-    pendingSessionToolApproval
-      ? (
-        resolveSessionToolApprovalMutation.isPending
-        && resolveSessionToolApprovalMutation.variables?.request.requestId === pendingSessionToolApproval.requestId
-      )
-      : (
-        pendingToolGovernanceApproval
-        && resolveToolApprovalMutation.isPending
-        && resolveToolApprovalMutation.variables?.request.requestId === pendingToolGovernanceApproval.requestId
-      ),
-  );
-  const activeDraft = activeSessionId ? sessionDrafts[activeSessionId] ?? "" : "";
-  const activeFollowupQueue = activeSessionId ? sessionFollowupQueues[activeSessionId] ?? [] : [];
-  const activeComposerRawError = activeSessionId ? sessionComposerErrors[activeSessionId] ?? "" : "";
-  const activeLatestTurnErrorMessage = useMemo(
-    () => latestVisibleTurnErrorMessage(detail?.messages),
-    [detail?.messages],
-  );
-  const activeComposerError = shouldSuppressComposerErrorForTurnError(
-    activeComposerRawError,
-    activeLatestTurnErrorMessage,
-    detail?.lastTurnError,
-  )
-    ? ""
-    : activeComposerRawError;
-  const activeEditTarget = activeSessionId ? sessionEditTargets[activeSessionId] ?? null : null;
-  const activeImageAttachments = activeSessionId ? sessionImageAttachments[activeSessionId] ?? [] : [];
-  const activeReferenceAttachments = activeSessionId ? sessionReferenceAttachments[activeSessionId] ?? [] : [];
-  const activeImageUploadPending = activeSessionId ? Boolean(sessionImageUploadPending[activeSessionId]) : false;
-  const activeAgentId = detail?.agentId || "";
-  const activeSessionAgent = activeAgentId ? (agentsQuery.data ?? []).find((agent) => agent.agentId === activeAgentId) : undefined;
-  const activeImageInputModelId = imageInputModelIdForAgent(activeSessionAgent, detail?.dialogueModelId);
-  const activeAgentImageInputSupported = modelImageInputSupport(modelImageInputSupportById, activeImageInputModelId);
-  const activeAgentImageInputUnsupported = activeAgentImageInputSupported === false;
-  const activeImageInputModelLabel = activeImageInputModelId || (lang === "zh" ? "当前模型" : "the current model");
-  const activeImageInputGuidance = !activeImageAttachments.length
-    ? ""
-    : activeAgentImageInputSupported === true
-      ? (lang === "zh"
-        ? `图片将发送给已验证支持图像输入的 ${activeImageInputModelLabel}。`
-        : `The image will be sent to ${activeImageInputModelLabel}, which has verified image-input support.`)
-      : activeAgentImageInputSupported === false
-        ? (lang === "zh"
-          ? `${activeImageInputModelLabel} 明确不支持图像输入，无法发送图片。`
-          : `${activeImageInputModelLabel} explicitly does not support image input, so the image cannot be sent.`)
-        : (lang === "zh"
-          ? `${activeImageInputModelLabel} 的图像输入能力尚未验证；将尝试发送，失败时会保留诊断。`
-          : `${activeImageInputModelLabel}'s image-input capability is not verified yet. Vibelution will try the request and retain diagnostics if it fails.`);
+    t,
+    submitTurnMutation,
+    editResubmitMutation,
+    stopTurnMutation,
+    sessionGuidanceMutation,
+    activeTurnSettledByDetail,
+  });
   const activeAgentDisplay = detail
     ? sessionAgentDisplayInfo(detail, activeSessionAgent, lang, resolveModelLabel)
     : { name: pet?.name || "Agent", functionLabel: "", tone: "chat" as const, meta: "" };
@@ -2279,112 +2223,6 @@ export function ChatCodingRoute() {
       latestControlSignal.summary,
     ].filter(Boolean).join(" · ")
     : "";
-  const latestUserMessageId = useMemo(() => deriveLatestUserMessageId(detail?.messages), [detail?.messages]);
-  const resolvedEditTarget = resolveLatestEditTarget(activeEditTarget, latestUserMessageId);
-  const activeDraftEffective = resolveComposerDraftValue(activeDraft, activeEditTarget, resolvedEditTarget);
-  const submitMutationMatchesActiveSession =
-    submitTurnMutation.variables?.sessionId === activeSessionId;
-  const editResubmitMutationMatchesActiveSession =
-    editResubmitMutation.variables?.sessionId === activeSessionId;
-  const stopMutationMatchesActiveSession =
-    stopTurnMutation.variables?.sessionId === activeSessionId;
-  const guidanceMutationMatchesActiveSession =
-    sessionGuidanceMutation.variables?.sessionId === activeSessionId;
-  const submitPending =
-    (submitTurnMutation.isPending && submitMutationMatchesActiveSession)
-    || (editResubmitMutation.isPending && editResubmitMutationMatchesActiveSession)
-    || activeImageUploadPending;
-  const sessionRunning = isRunningPhase(detail?.currentPhase);
-  const sessionStopping = isStoppingPhase(detail?.currentPhase) || Boolean(detail?.stopRequested);
-  const lastTurnStatusNormalized = String(detail?.lastTurnStatus || "").trim().toLowerCase();
-  const terminalReasonNormalized = String(detail?.terminalReason || "").trim().toLowerCase();
-  const lastTurnTerminal = [
-    "ready",
-    "completed",
-    "failed",
-    "failed_runtime",
-    "failed_provider",
-    "needs_continue",
-    "paused_limit",
-    "stopped_by_user",
-    "superseded",
-    "cancelled",
-    // Canonical terminalReason values (mature-agent style explicit stop).
-    "success",
-    "aborted",
-  ].includes(lastTurnStatusNormalized)
-    || [
-      "success",
-      "failed_runtime",
-      "failed_provider",
-      "needs_continue",
-      "paused_limit",
-      "stopped_by_user",
-      "aborted",
-      "superseded",
-      "ready",
-    ].includes(terminalReasonNormalized);
-  const liveActiveTurnOpen = Boolean(detail?.activeTurnId)
-    && !activeTurnSettledByDetail;
-  // When the turn is already terminal and no live activeTurn remains, do not
-  // keep the stop button solely because phase/work-run lag behind.
-  const sessionBusy = isBusyPhase(detail?.currentPhase)
-    && !(lastTurnTerminal && !liveActiveTurnOpen && !sessionStopping);
-  const composerStopPending = (stopTurnMutation.isPending && stopMutationMatchesActiveSession) || sessionStopping;
-  const composerSafeGuidancePending =
-    sessionGuidanceMutation.isPending
-    && guidanceMutationMatchesActiveSession
-    && sessionGuidanceMutation.variables?.mode === "safe";
-  const composerInterruptGuidancePending =
-    sessionGuidanceMutation.isPending
-    && guidanceMutationMatchesActiveSession
-    && sessionGuidanceMutation.variables?.mode === "interrupt";
-  const conversationComposer = useMemo(
-    () => buildConversationComposerBridgeState({
-      editTargetMessageId: resolvedEditTarget?.messageId,
-      editTargetPreview: resolvedEditTarget?.original,
-      error: activeComposerError,
-      followupQueue: activeFollowupQueue,
-      guidance: activeImageInputGuidance,
-      imageAttachments: activeImageAttachments,
-      imageInputUnsupported: activeAgentImageInputUnsupported,
-      interruptGuidancePending: composerInterruptGuidancePending,
-      labels: {
-        editMessageModeNotice: t("editMessageModeNotice"),
-        editMessagePlaceholder: t("editMessagePlaceholder"),
-        loadingSession: t("loadingSession"),
-        messageInputPlaceholder: t("messageInputPlaceholder"),
-        saveAndRerunMessage: t("saveAndRerunMessage"),
-      },
-      references: activeReferenceAttachments,
-      safeGuidancePending: composerSafeGuidancePending,
-      sessionBusy,
-      sessionId: activeSessionId,
-      sessionStopping,
-      stopPending: composerStopPending,
-      submitPending,
-      value: activeDraftEffective,
-    }),
-    [
-      activeAgentImageInputUnsupported,
-      activeComposerError,
-      activeDraftEffective,
-      activeFollowupQueue,
-      activeImageAttachments,
-      activeReferenceAttachments,
-      activeSessionId,
-      resolvedEditTarget?.original,
-      resolvedEditTarget?.messageId,
-      composerInterruptGuidancePending,
-      composerSafeGuidancePending,
-      composerStopPending,
-      sessionBusy,
-      sessionStopping,
-      submitPending,
-      t,
-    ],
-  );
-  const composerDisabled = conversationComposer.disabled;
 
   const {
     handleSubmitTurn,
@@ -2791,78 +2629,22 @@ export function ChatCodingRoute() {
     }
   }, [activeSessionId, agentSessionTabs]);
 
-  const groupCandidateAgents = useMemo(() => {
-    return archiveVisibleAgents.filter((agent) => {
-      return (
-        String(agent.kind ?? "").trim() === "persistent"
-        && String(agent.status ?? "").trim() !== "archived"
-        && String(agent.directSessionId ?? "").trim()
-      );
-    });
-  }, [archiveVisibleAgents]);
-
-  const readyChatRoomModes = useMemo(() => {
-    const modes = (chatRoomModesQuery.data ?? []).filter((mode) => String(mode.status ?? "").trim() === "ready");
-    return modes.length ? modes : [{ id: "round_robin", label: "Round robin", status: "ready" }];
-  }, [chatRoomModesQuery.data]);
-  const availableChatRoomPurposes = useMemo(() => {
-    const purposes = chatRoomPurposesQuery.data ?? [];
-    return purposes.length
-      ? purposes
-      : [
-          { id: "chat", label: "Chat", description: "" },
-          { id: "discussion", label: "Discussion", description: "" },
-          { id: "meeting", label: "Meeting", description: "" },
-          { id: "medical_triage", label: "Medical triage", description: "" },
-        ];
-  }, [chatRoomPurposesQuery.data]);
-
-  const activeGroupTeamMemberByAgentId = useMemo(() => {
-    return new Map(
-      (activeGroupTeam?.members ?? [])
-        .map((member) => [String(member.agentId ?? "").trim(), member] as const)
-        .filter(([agentId]) => Boolean(agentId)),
-    );
-  }, [activeGroupTeam?.members]);
-  const groupParticipantIdentity = useCallback(
-    (
-      participant: ChatRoomParticipant | undefined,
-      fallback: { agentId?: string; agentCode?: string; title?: string; participantId?: string; agentAvatarImageUrl?: string } = {},
-    ) => {
-      const agentId = String(participant?.agentId || fallback.agentId || "").trim();
-      const participantLike = participant ?? {
-        participantId: String(fallback.participantId || agentId || "agent").trim(),
-        kind: "session_agent",
-        agentId,
-        agentCode: String(fallback.agentCode || "").trim(),
-        agentAvatarImageUrl: String(fallback.agentAvatarImageUrl || "").trim(),
-        sessionId: "",
-        title: String(fallback.title || fallback.participantId || agentId || "Agent").trim(),
-        enabled: true,
-        status: "",
-      };
-      const participantAgent = agentId ? agentsById.get(agentId) : undefined;
-      const display = participantAgentDisplayInfo(participantLike, participantAgent, lang, resolveModelLabel);
-      const member = agentId ? activeGroupTeamMemberByAgentId.get(agentId) : undefined;
-      const participantTeamRole = String(participant?.teamMemberPurpose || participant?.teamRole || "").trim();
-      const role = String(participantTeamRole || member?.purpose || member?.role || display.functionLabel || "").trim();
-      const name = String(display.name || fallback.title || fallback.participantId || "Agent").trim();
-      const compactRole = compactAgentRoleLabel(role || display.functionLabel);
-      return {
-        ...display,
-        name,
-        functionLabel: role || display.functionLabel,
-        compactRole,
-        avatarImageUrl: avatarImageUrlFrom(participantAgent, participantLike, fallback),
-        identityLabel: formatAgentIdentityWithRole(name, compactRole, fallback.participantId || "Agent"),
-        fullIdentityLabel: [
-          formatAgentIdentityWithRole(name, role || display.functionLabel, fallback.participantId || "Agent"),
-          display.modelLabel,
-        ].filter(Boolean).join(" · "),
-      };
-    },
-    [activeGroupTeamMemberByAgentId, agentsById, lang, resolveModelLabel],
-  );
+  const {
+    groupCandidateAgents,
+    readyChatRoomModes,
+    availableChatRoomPurposes,
+    activeGroupTeamMemberByAgentId,
+    groupParticipantIdentity,
+  } = useChatGroupRoomViewModel({
+    archiveVisibleAgents,
+    chatRoomModes: chatRoomModesQuery.data,
+    chatRoomPurposes: chatRoomPurposesQuery.data,
+    activeGroupTeam,
+    agentsById,
+    lang,
+    resolveModelLabel,
+    avatarImageUrlFrom,
+  });
   const {
     filteredConversations,
     filteredStandaloneGroupConversations,
@@ -3666,64 +3448,12 @@ export function ChatCodingRoute() {
               noSessionsLabel={t("noSessionsYet")}
               notices={activeRuntimeNotices}
               sessionsPending={sessionsQuery.isPending}
-              toolApproval={pendingSessionToolApproval || pendingToolGovernanceApproval ? {
-                requestId: pendingSessionToolApproval?.requestId
-                  || pendingToolGovernanceApproval?.requestId
-                  || "",
-                pending: pendingToolApprovalPending,
-                rawTitle: pendingToolApprovalRawTitle,
-                riskLabel: pendingToolApprovalRisk,
-                scopeLabel: pendingToolApprovalScope,
-                toolLabels: pendingToolApprovalLabels,
-                actionPreview: pendingToolApprovalActionPreview,
-                sessionGrantScope: pendingSessionToolApproval?.sessionGrantScope,
-                toolName: pendingSessionToolApproval?.toolName || pendingToolApprovalLabels[0]?.id,
-              } : null}
+              toolApproval={toolApproval}
               transientErrorMessage={sessionDetailErrorMessage}
               workspaceActiveTab={workspace.activeTab}
-              onApproveToolApproval={() => {
-                if (pendingSessionToolApproval) {
-                  resolveSessionToolApprovalMutation.mutate({
-                    request: pendingSessionToolApproval,
-                    decision: "accept",
-                  });
-                  return;
-                }
-                if (!pendingToolGovernanceApproval) {
-                  return;
-                }
-                resolveToolApprovalMutation.mutate({ request: pendingToolGovernanceApproval, decision: "approve" });
-              }}
-              onApproveToolForSession={
-                pendingSessionToolApproval
-                && pendingSessionToolApproval.approval !== "always"
-                && (
-                  pendingSessionToolApproval.availableDecisions.includes("acceptAlways")
-                  || pendingSessionToolApproval.availableDecisions.includes("acceptForSession")
-                )
-                ? () => {
-                  const decision = pendingSessionToolApproval.availableDecisions.includes("acceptAlways")
-                    ? "acceptAlways"
-                    : "acceptForSession";
-                  resolveSessionToolApprovalMutation.mutate({
-                    request: pendingSessionToolApproval,
-                    decision,
-                  });
-                }
-                : undefined}
-              onRejectToolApproval={() => {
-                if (pendingSessionToolApproval) {
-                  resolveSessionToolApprovalMutation.mutate({
-                    request: pendingSessionToolApproval,
-                    decision: "decline",
-                  });
-                  return;
-                }
-                if (!pendingToolGovernanceApproval) {
-                  return;
-                }
-                resolveToolApprovalMutation.mutate({ request: pendingToolGovernanceApproval, decision: "reject" });
-              }}
+              onApproveToolApproval={handleApproveToolApproval}
+              onApproveToolForSession={handleApproveToolForSession}
+              onRejectToolApproval={handleRejectToolApproval}
             />
             )}
           />
