@@ -221,6 +221,14 @@ def register_experiment_full_run_result(team_id: str, plan_id: str, payload: dic
         plan["status"] = "full_run_passed" if full_run_result["status"] == "passed" else f"full_run_{full_run_result['status']}"
         plan["updatedAt"] = full_run_result["recordedAt"]
         s._refresh_experiment_plan_readiness(plan)
+        from core.web.services.team_workflow.outcome_graph import merge_registered_result
+
+        merge_registered_result(
+            plan,
+            full_run_result,
+            extra=request_payload,
+            peer_plans=[item for item in list(plan_store.get("plans") or []) if isinstance(item, dict)],
+        )
         plan_store["activePlanId"] = plan["planId"]
         plan_store["updatedAt"] = full_run_result["recordedAt"]
         s._write_json(s._experiment_plan_store_path(normalized_team_id), plan_store)

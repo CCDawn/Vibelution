@@ -7,6 +7,13 @@ import json
 import re
 from typing import Any
 
+from core.web.services.team_workflow.outcome_graph import (
+    apply_graph_claim_flags,
+    claim_id_for_hypothesis,
+    plan_has_outcome_graph,
+    project_outcome_memory,
+)
+
 
 NEGATIVE_PLAN_STATUSES = {
     "smoke_failed",
@@ -47,7 +54,14 @@ def build_research_memory_context(
     loop_rows = [item for item in list(loops or []) if isinstance(item, dict)]
     knowledge_rows = [item for item in list(knowledge_results or []) if isinstance(item, dict)]
     best_plan = _best_validated_plan(plan_rows, loop_rows)
-    negative_experiments = [_negative_experiment_pack(plan, plan_rows) for plan in plan_rows if _is_negative_plan(plan)]
+    graph_memory = project_outcome_memory(plan_rows)
+    heuristic_plans = [plan for plan in plan_rows if not plan_has_outcome_graph(plan)]
+    negative_experiments = [
+        _negative_experiment_pack(plan, plan_rows)
+        for plan in heuristic_plans
+        if _is_negative_plan(plan)
+    ]
+    negative_experiments.extend(list(graph_memory.get("negativeExperiments") or []))
     negative_experiments = negative_experiments[-MAX_NEGATIVE_EXPERIMENTS:]
     successful_candidate_ids = {
         candidate_id
@@ -71,6 +85,33 @@ def build_research_memory_context(
         }
         for item in negative_experiments
     ]
+    seen_forbidden = {
+        (str(item.get("planId") or ""), str(item.get("experimentSignature") or ""))
+        for item in forbidden_duplicates
+    }
+    for item in list(graph_memory.get("forbiddenDuplicateExperiments") or []):
+        key = (str(item.get("planId") or ""), str(item.get("experimentSignature") or ""))
+        if key in seen_forbidden:
+            continue
+        candidate_ids = [
+            candidate_id
+            for candidate_id in list(item.get("candidateIds") or [])
+            if candidate_id not in successful_candidate_ids
+        ]
+        if not candidate_ids and not item.get("experimentSignature"):
+            continue
+        forbidden_duplicates.append(
+            {
+                "planId": item.get("planId") or "",
+                "experimentSignature": item.get("experimentSignature") or "",
+                "candidateIds": candidate_ids,
+                "reason": item.get("reason") or item.get("interpretation") or "",
+                "defaultAction": "exclude_from_suggestions",
+                "retestPolicy": item.get("retestPolicy") or "blocked_without_new_evidence_or_changed_assumption",
+                "evidenceRefs": item.get("evidenceRefs") or [],
+            }
+        )
+        seen_forbidden.add(key)
     forbidden_duplicates = [item for item in forbidden_duplicates if item["candidateIds"] or item["experimentSignature"]]
     formal_knowledge = [_formal_knowledge_ref(item) for item in knowledge_rows[:MAX_FORMAL_KNOWLEDGE]]
     reviewed_sources = [
@@ -83,7 +124,18 @@ def build_research_memory_context(
         )
     ][:MAX_REVIEWED_SOURCES]
     allowed_claims = _allowed_claims(formal_knowledge, candidate_rows)
-    prior_successful_runs = _successful_runs(plan_rows, loop_rows)
+    prior_successful_runs = _successful_runs(heuristic_plans, loop_rows)
+    seen_success = {
+        (str(item.get("planId") or ""), str(item.get("resultId") or ""))
+        for item in prior_successful_runs
+    }
+    for item in list(graph_memory.get("priorSuccessfulRuns") or []):
+        key = (str(item.get("planId") or ""), str(item.get("resultId") or ""))
+        if key in seen_success:
+            continue
+        prior_successful_runs.append(item)
+        seen_success.add(key)
+    prior_successful_runs = prior_successful_runs[-MAX_SUCCESSFUL_RUNS:]
     claim_map = _claim_map(plan_rows, candidate_rows)
     claim_status_counts = {
         status: sum(1 for item in claim_map if item["status"] == status)
@@ -409,7 +461,7 @@ def _claim_map(
         if not text:
             return None
         normalized = " ".join(text.lower().split())
-        claim_id = f"claim-{hashlib.sha256(normalized.encode('utf-8')).hexdigest()[:12]}"
+        claim_id = claim_id_for_hypothesis(text)
         return claims_by_key.setdefault(
             normalized,
             {
@@ -442,7 +494,17 @@ def _claim_map(
         result = _active_result(plan)
         evidence_refs = _result_evidence_refs(result)
         plan_status = str(plan.get("status") or "").lower()
-        if _is_successful_plan(plan):
+        if plan_has_outcome_graph(plan):
+            apply_graph_claim_flags(item, plan)
+            if plan_status in SUCCESS_PLAN_STATUSES or _knowledge_item_id(plan):
+                item["_qualified"] = True
+                item["supportEvidenceRefs"] = _merge_evidence_refs(
+                    item["supportEvidenceRefs"],
+                    _knowledge_evidence_refs(plan),
+                )
+            elif plan_status in {"rejected", "archived"}:
+                item["_explicitlyRejected"] = True
+        elif _is_successful_plan(plan):
             item["_qualified"] = True
             item["supportEvidenceRefs"] = _merge_evidence_refs(
                 item["supportEvidenceRefs"],

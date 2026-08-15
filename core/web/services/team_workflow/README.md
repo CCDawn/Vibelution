@@ -35,6 +35,7 @@ Historical structure/optimization notes (non-authoritative): `docs/archive/plans
 | Experiment plan/catalog/freeze/baseline | `experiment_api/plan.py` |
 | Experiment hypothesis materialize/complete | `experiment_api/hypothesis.py` |
 | Experiment smoke run/result | `experiment_api/smoke.py` |
+| Working-layer experiment outcome graph | `outcome_graph.py` |
 | Experiment full run prepare/execute/register | `experiment_api/full_run.py` |
 | Experiment result knowledge ingestion | `experiment_api/knowledge.py` |
 | Experiment private kernel | `experiment_kernel.py` |
@@ -63,6 +64,7 @@ Frontend claim alignment: `web/src/routes/teams/README.md` when present. Structu
 | SC projection / summary helpers | `source_collection_projection.py` | agent directory |
 | SC agent session context seeding | `source_collection_context.py` | LLM client internals |
 | Research memory context packing | `research_memory_context.py` | chat stream capture |
+| Working-layer outcomeGraph (tests/supports/falsifies) | `outcome_graph.py` | official graph sync; memory_graph_service |
 | Candidates register/import/extract/list | `source_collection/candidates.py` | pet system |
 | SC runs / search entry + summaries | `source_collection/runs.py` | session list cache |
 | Experiment plan/smoke/full-run APIs | `experiment.py` | session submit |
