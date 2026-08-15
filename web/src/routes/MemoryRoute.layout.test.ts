@@ -70,6 +70,7 @@ import userContentPanelStyles from "./MemoryUserContentPanel.styles";
 import queryKeysSource from "../api/queryKeys.ts?raw";
 import memoryApiSource from "../api/memory.ts?raw";
 import knowledgeApiSource from "../api/knowledge.ts?raw";
+import userContentApiSource from "../api/userContent.ts?raw";
 import memoryTypesSource from "../api/types/memory.ts?raw";
 import knowledgeItemRatingCardSource from "./MemoryKnowledgeItemRatingCard.tsx?raw";
 import knowledgeItemRatingCardStyles from "./MemoryKnowledgeItemRatingCard.styles";
@@ -185,8 +186,10 @@ describe("MemoryRoute layout contract", () => {
     );
 
     expect(routeSource).toContain("MemoryUserContentPanel");
-    expect(userContentPanelSource).toContain("/api/user-content/markdown-spaces/import-preview");
-    expect(userContentPanelSource).toContain("/api/user-content/markdown-spaces/import");
+    expect(userContentPanelSource).toContain("previewUserMarkdownSpaceImport<UserMarkdownSpaceImportPreviewPayload>({");
+    expect(userContentPanelSource).toContain("importUserMarkdownSpace<UserMarkdownSpaceImportPayload>({");
+    expect(userContentApiSource).toContain("/api/user-content/markdown-spaces/import-preview");
+    expect(userContentApiSource).toContain("/api/user-content/markdown-spaces/import");
     expect(userContentPanelSource).toContain("queryKeys.userMarkdownSpaces(userId)");
     expect(userContentPanelSource).toContain("queryKeys.userMarkdownSpacePages(userId, selectedSpaceId, searchQuery, tagFilter)");
     expect(userContentPanelSource).toContain("queryKeys.userMarkdownSpacePage(userId, selectedSpaceId, selectedPageId)");

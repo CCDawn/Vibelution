@@ -2,7 +2,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FileSearch, FolderCog, Import, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { fetchJson } from "../api/client";
+import {
+  fetchUserMarkdownSpacePage,
+  importUserMarkdownSpace,
+  listUserMarkdownSpacePages,
+  listUserMarkdownSpaces,
+  previewUserMarkdownSpaceImport,
+  searchUserMarkdownSpaces,
+} from "../api/userContent";
 import { queryKeys } from "../api/queryKeys";
 import type {
   UserMarkdownPageSummary,
@@ -29,17 +36,6 @@ type NormalizedSpaceSummary = UserMarkdownSpaceSummary & {
   sourceRef: Record<string, unknown>;
   counts: UserMarkdownSpaceCounts;
 };
-
-function endpointWithUserId(path: string, userId: string, extras?: Record<string, string | number>) {
-  const params = new URLSearchParams({ userId });
-  for (const [key, value] of Object.entries(extras ?? {})) {
-    const text = String(value ?? "").trim();
-    if (text) {
-      params.set(key, text);
-    }
-  }
-  return `${path}?${params.toString()}`;
-}
 
 function errorText(error: unknown) {
   if (error instanceof Error) {
@@ -111,7 +107,7 @@ export function MemoryUserContentPanel({ defaultUserId = "default" }: MemoryUser
 
   const spacesQuery = useQuery({
     queryKey: queryKeys.userMarkdownSpaces(userId),
-    queryFn: () => fetchJson<UserMarkdownSpaceListPayload>(endpointWithUserId("/api/user-content/markdown-spaces", userId)),
+    queryFn: () => listUserMarkdownSpaces<UserMarkdownSpaceListPayload>(userId),
   });
 
   const spaces = useMemo(
@@ -133,16 +129,11 @@ export function MemoryUserContentPanel({ defaultUserId = "default" }: MemoryUser
     enabled: Boolean(selectedSpaceId),
     queryKey: queryKeys.userMarkdownSpacePages(userId, selectedSpaceId, searchQuery, tagFilter),
     queryFn: () =>
-      fetchJson<UserMarkdownSpacePageListPayload>(
-        endpointWithUserId(
-          `/api/user-content/markdown-spaces/${encodeURIComponent(selectedSpaceId)}/pages`,
-          userId,
-          {
-            query: searchQuery,
-            tag: tagFilter,
-          },
-        ),
-      ),
+      listUserMarkdownSpacePages<UserMarkdownSpacePageListPayload>(selectedSpaceId, {
+        userId,
+        query: searchQuery,
+        tag: tagFilter,
+      }),
   });
 
   const pages = pagesQuery.data?.pages ?? [];
@@ -161,49 +152,37 @@ export function MemoryUserContentPanel({ defaultUserId = "default" }: MemoryUser
     enabled: Boolean(selectedSpaceId && selectedPageId),
     queryKey: queryKeys.userMarkdownSpacePage(userId, selectedSpaceId, selectedPageId),
     queryFn: () =>
-      fetchJson<UserMarkdownSpacePagePayload>(
-        endpointWithUserId(
-          `/api/user-content/markdown-spaces/${encodeURIComponent(selectedSpaceId)}/pages/${encodeURIComponent(selectedPageId)}`,
-          userId,
-        ),
-      ),
+      fetchUserMarkdownSpacePage<UserMarkdownSpacePagePayload>(selectedSpaceId, selectedPageId, {
+        userId,
+      }),
   });
 
   const searchResultsQuery = useQuery({
     enabled: Boolean(searchQuery.trim()),
     queryKey: queryKeys.userMarkdownSpaceSearch(userId, searchQuery, selectedSpaceId, 10),
     queryFn: () =>
-      fetchJson<UserMarkdownSpaceSearchPayload>(
-        endpointWithUserId("/api/user-content/markdown-spaces/search", userId, {
-          query: searchQuery,
-          spaceId: selectedSpaceId,
-          limit: 10,
-        }),
-      ),
+      searchUserMarkdownSpaces<UserMarkdownSpaceSearchPayload>({
+        userId,
+        query: searchQuery,
+        spaceId: selectedSpaceId,
+        limit: 10,
+      }),
   });
 
   const previewMutation = useMutation({
     mutationFn: () =>
-      fetchJson<UserMarkdownSpaceImportPreviewPayload>("/api/user-content/markdown-spaces/import-preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sourcePath,
-          userId,
-        }),
+      previewUserMarkdownSpaceImport<UserMarkdownSpaceImportPreviewPayload>({
+        sourcePath,
+        userId,
       }),
   });
 
   const importMutation = useMutation({
     mutationFn: () =>
-      fetchJson<UserMarkdownSpaceImportPayload>("/api/user-content/markdown-spaces/import", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sourcePath,
-          spaceName,
-          userId,
-        }),
+      importUserMarkdownSpace<UserMarkdownSpaceImportPayload>({
+        sourcePath,
+        spaceName,
+        userId,
       }),
     onSuccess: async (payload) => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.userMarkdownSpaces(userId) });
