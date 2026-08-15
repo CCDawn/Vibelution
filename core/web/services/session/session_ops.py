@@ -553,8 +553,7 @@ def _latest_unfinished_task_goal(session_id: str) -> str:
 def _latest_unfinished_task_goal_with_source(session_id: str) -> tuple[str, str]:
     s = _service()
     with s._CHAT_STATE_LOCK:
-        payload = s.load_chat_state(s.PROJECT_ROOT)
-        conversation = s._find_conversation_entry(payload, session_id)
+        conversation = s.load_session_chat_state(s.PROJECT_ROOT, session_id)
         if conversation is None:
             return "", ""
         active_task = s._normalize_session_active_task(

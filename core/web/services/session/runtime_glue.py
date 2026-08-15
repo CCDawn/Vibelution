@@ -1110,8 +1110,7 @@ def _initialized_session_reasoning_effort(session_id: str) -> tuple[bool, str]:
     ):
         raise s.SessionNotFoundError(f"Session not found: {normalized_session_id}")
     with s._CHAT_STATE_LOCK:
-        payload = s.load_chat_state(s.PROJECT_ROOT)
-        conversation = s._find_conversation_entry(payload, normalized_session_id)
+        conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
         if conversation is None:
             raise s.SessionNotFoundError(f"Session not found: {normalized_session_id}")
         if "reasoning_effort" not in conversation:

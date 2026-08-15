@@ -695,3 +695,165 @@ def test_load_conversation_detail_target_never_full_replaces_siblings(tmp_path, 
     assert full_saves == []
     assert session_saves == ["session-a"]
     assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
+
+
+def test_materialize_direct_session_writes_only_target_session_row(tmp_path, monkeypatch):
+    """Agent-directory materialize must upsert the new row instead of replacing the table."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_two_runtime_rows(tmp_path, status_a="ready")
+    monkeypatch.setattr(
+        "core.web.services.session.directory_runtime.is_legacy_discard_in_progress",
+        lambda: False,
+    )
+    monkeypatch.setattr(session_service, "_is_session_workspace_intentionally_deleted", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(
+        session_service,
+        "_agent_for_direct_session",
+        lambda session_id: {
+            "agentId": "agent-x",
+            "displayName": "X",
+            "updatedAt": "2026-08-16T00:00:00Z",
+        }
+        if session_id == "session-new"
+        else None,
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_agent_directory_conversation_record",
+        lambda agent, *, session_id: {
+            "conversation_id": session_id,
+            "agent_id": agent["agentId"],
+            "title": agent["displayName"],
+            "updated_at": "2026-08-16T00:00:00Z",
+        },
+    )
+    monkeypatch.setattr(session_service, "_agent_directory_stub_hidden_from_user_index", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(session_service, "_record_agent_directory_conversation_materialized_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_invalidate_session_list_cache", lambda: None)
+    monkeypatch.setattr(
+        "core.web.services.session.directory_bridge.sync_conversation_record",
+        lambda *_args, **_kwargs: None,
+    )
+    full_saves, session_saves = _spy_runtime_saves(monkeypatch)
+
+    changed = session_service._ensure_agent_directory_conversation_materialized(
+        "session-new",
+        source="test_chat_state_persistence",
+    )
+
+    assert changed is True
+    assert full_saves == []
+    assert session_saves == ["session-new"]
+    assert load_session_chat_state(tmp_path, "session-new")["title"] == "X"
+    assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
+
+
+def test_recover_missing_conversation_writes_only_target_session_row(tmp_path, monkeypatch):
+    """Workspace recovery must upsert the recovered session instead of replacing the table."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_two_runtime_rows(tmp_path, status_a="ready")
+    monkeypatch.setattr(
+        "core.web.services.session.directory_runtime.is_legacy_discard_in_progress",
+        lambda: False,
+    )
+    monkeypatch.setattr(session_service, "_ensure_agent_directory_conversation_materialized", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(session_service, "_is_session_workspace_intentionally_deleted", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(session_service, "_session_workspace_has_recoverable_activity", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(session_service, "_recover_stage_task_workspace_conversation", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "get_agent", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_recover_agent_id_from_session_journal", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr(
+        session_service,
+        "_make_empty_conversation",
+        lambda session_id, title="", timestamp="", **_kwargs: {
+            "conversation_id": session_id,
+            "title": title or session_id,
+            "updated_at": timestamp or "2026-08-16T00:00:00Z",
+        },
+    )
+    monkeypatch.setattr(session_service, "record_runtime_scene_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_service, "_invalidate_session_list_cache", lambda: None)
+    monkeypatch.setattr(
+        "core.web.services.session.directory_bridge.sync_conversation_record",
+        lambda *_args, **_kwargs: None,
+    )
+    full_saves, session_saves = _spy_runtime_saves(monkeypatch)
+
+    recovered = session_service._ensure_session_conversation_record(
+        "session-orphan",
+        source="test_chat_state_persistence",
+    )
+
+    assert recovered is True
+    assert full_saves == []
+    assert session_saves == ["session-orphan"]
+    assert load_session_chat_state(tmp_path, "session-orphan")["title"] == "session-orphan"
+    assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
+
+
+def test_initialized_session_reasoning_effort_loads_one_row(tmp_path, monkeypatch):
+    """Reasoning snapshot must read the target runtime row, not the compatibility document."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "conversations": [
+                {"conversation_id": "session-a", "title": "A", "reasoning_effort": "high"},
+                {"conversation_id": "session-b", "title": "B"},
+            ],
+        },
+    )
+    monkeypatch.setattr(session_service, "_ensure_session_conversation_record", lambda *_args, **_kwargs: True)
+    full_loads: list[str] = []
+    original_load = session_service.load_chat_state
+    monkeypatch.setattr(
+        session_service,
+        "load_chat_state",
+        lambda *args, **kwargs: full_loads.append("load") or original_load(*args, **kwargs),
+    )
+
+    initialized, effort = session_service._initialized_session_reasoning_effort("session-a")
+
+    assert initialized is True
+    assert effort == "high"
+    assert full_loads == []
+    assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
+
+
+def test_latest_unfinished_task_goal_loads_one_row(tmp_path, monkeypatch):
+    """Resume-goal lookup must read one runtime row instead of assembling the document."""
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_two_runtime_rows(tmp_path, status_a="ready")
+    save_session_chat_state(
+        tmp_path,
+        "session-a",
+        {
+            **load_session_chat_state(tmp_path, "session-a"),
+            "active_task": {"status": "running", "goal": "Finish the paper"},
+        },
+    )
+    monkeypatch.setattr(session_service, "_normalize_session_active_task", lambda task: task)
+    monkeypatch.setattr(session_service, "_is_task_tool_backed_active_task", lambda _task: True)
+    monkeypatch.setattr(session_service, "_session_ledger_visible_messages", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(session_service, "_is_effective_user_message", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(session_service, "_latest_effective_user_message_with_index", lambda *_args, **_kwargs: ("", -1))
+    monkeypatch.setattr(session_service, "_should_prefer_history_goal_over_active_task", lambda *_args, **_kwargs: False)
+    full_loads: list[str] = []
+    original_load = session_service.load_chat_state
+    monkeypatch.setattr(
+        session_service,
+        "load_chat_state",
+        lambda *args, **kwargs: full_loads.append("load") or original_load(*args, **kwargs),
+    )
+
+    goal, source = session_service._latest_unfinished_task_goal_with_source("session-a")
+
+    assert goal == "Finish the paper"
+    assert source == "active_task"
+    assert full_loads == []
+    assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
