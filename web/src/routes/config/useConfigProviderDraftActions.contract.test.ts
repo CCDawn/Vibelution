@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import configApiSource from "../../api/config.ts?raw";
 import routeSource from "../ConfigRoute.tsx?raw";
 import actionsSource from "./useConfigProviderDraftActions.ts?raw";
 
@@ -16,9 +17,17 @@ describe("useConfigProviderDraftActions contract", () => {
     expect(actionsSource).toContain("handleUpdateProviderContextWindow");
     expect(actionsSource).toContain("handlePreviewProviderRoute");
     expect(actionsSource).toContain("handleApplyProviderRoutePreview");
-    expect(actionsSource).toContain("/api/config/draft/providers");
+    expect(actionsSource).toContain("addDraftProvider(");
+    expect(actionsSource).toContain("discoverDraftProvider(");
+    expect(actionsSource).toContain("pinDraftProviderModel(");
+    expect(actionsSource).toContain("unpinDraftProviderModel(");
+    expect(actionsSource).toContain("deleteDraftProvider(");
+    expect(actionsSource).toContain("updateDraftProvider(");
+    expect(actionsSource).toContain("suggestDraftProviderId(");
+    expect(actionsSource).toContain("previewDraftProviderRoute(");
     expect(actionsSource).toContain("Do not adopt response.hash (draft)");
-    expect(actionsSource).toContain("route-preview");
+    expect(configApiSource).toContain("/api/config/draft/providers");
+    expect(configApiSource).toContain("/route-preview");
   });
 
   it("is wired from ConfigRoute without inline pin/discover/credential loops", () => {
