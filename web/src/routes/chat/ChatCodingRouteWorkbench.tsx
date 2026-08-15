@@ -173,6 +173,7 @@ import {
   MAX_RIGHT_PANEL_WIDTH,
   MIN_LEFT_PANEL_WIDTH,
   MIN_RIGHT_PANEL_WIDTH,
+  formatChatRuntimeMismatchLine,
   runtimeMatchesSelectedChatSession,
   shouldSuppressComposerErrorForTurnError,
 } from "./chatCodingRouteViewModel";
@@ -1740,15 +1741,16 @@ export function ChatCodingRoute() {
     activeWorkSessionIds: runtimeActiveChatTurnSessionIds,
   });
   const runtimeActiveChatTurnSessionId = runtimeChatTurnSessionIds[0] ?? "";
-  const runtimeActiveSessionLabel = runtimeActiveChatTurnSessionId
-    ? sessionsQuery.data?.find((session) => session.id === runtimeActiveChatTurnSessionId)?.title
-      || runtime?.sessionTitle
-      || runtimeActiveChatTurnSessionId
-    : "";
+  const otherRunningSessionIds = runtimeChatTurnSessionIds.filter(
+    (sessionId) => sessionId !== String(activeSessionId || "").trim(),
+  );
   const runtimeMismatchLine = runtimeActiveChatTurnSessionId && !runtimeMatchesSelectedSession
-    ? (lang === "zh"
-      ? `运行器正在处理：${runtimeActiveSessionLabel}`
-      : `Runtime is processing: ${runtimeActiveSessionLabel}`)
+    ? formatChatRuntimeMismatchLine({
+      otherRunningSessionIds,
+      resolveSessionLabel: (sessionId) =>
+        sessionsQuery.data?.find((session) => session.id === sessionId)?.title || sessionId,
+      lang,
+    })
     : "";
   const lastContextComposition = detail?.lastContextComposition ?? null;
   const lastCacheComposition = detail?.lastCacheComposition ?? null;
