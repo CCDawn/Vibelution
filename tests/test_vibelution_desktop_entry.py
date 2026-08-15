@@ -621,3 +621,29 @@ def test_launcher_api_bridge_surfaces_service_errors(monkeypatch):
     assert payload["ok"] is False
     assert payload["code"] == "launcher_api_bridge_failed"
     assert "active work blocks reset" in str(payload["message"])
+
+
+def test_desktop_shell_status_bridge_uses_workspace_root(monkeypatch, tmp_path):
+    entry = _load_desktop_entry_py()
+    monkeypatch.setattr(entry, "_append_log", lambda *a, **k: None)
+    seen = {}
+
+    def fake_inspect(root):
+        seen["root"] = Path(root)
+        return {"schemaVersion": 1, "stale": True, "reason": "provenance_mismatch"}
+
+    import core.launcher.desktop_shell as shell
+
+    monkeypatch.setattr(shell, "inspect_desktop_shell", fake_inspect)
+    payload = entry._desktop_shell_status_bridge(argparse.Namespace(workspace=str(tmp_path)))
+    assert payload["stale"] is True
+    assert seen["root"] == tmp_path.resolve()
+
+
+def test_parse_args_accepts_desktop_shell_refresh_flags():
+    args = desktop_entry.parse_args(
+        ["--action", "schedule-desktop-shell-refresh", "--wait-pid", "12", "--then-lifecycle", "start"]
+    )
+    assert args.action == "schedule-desktop-shell-refresh"
+    assert args.wait_pid == 12
+    assert args.then_lifecycle == "start"

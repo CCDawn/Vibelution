@@ -43,7 +43,7 @@ The Launcher should be an independent product whose **service and frontend stay 
 - Launcher UI origin will move off `:8765` (Electron protocol or packaged `web/dist`). `web/src/api/launcher.ts` transport becomes IPC when `window.vibelutionLauncher` is present.
 - `launcherControlClient.ts`, `desktopActionClient.ts`, `desktopSessionClient.ts`, `workbenchCloseTransactionClient.ts`, tray POSTs, and shutdown status fetches invert: they become in-process calls, then Python is a child for workbench spawn/git/worktree/maintenance only.
 - Tests move with ownership: Electron vitest becomes the control-plane suite; `tests/test_launcher_*.py` shrink to Python child/CLI contracts; C# shim tests must not assume `:8765` as the product control plane.
-- Packaged desktop still loads `dist/desktop/win-unpacked`. Electron main changes require `package:dir` after the live `Vibelution.exe` has **quit**, not after Python `stop` alone.
+- Packaged desktop still loads `dist/desktop/win-unpacked`. Electron main changes do not take effect until the live `Vibelution.exe` quits and the packaged `app.asar` is rebuilt; Launcher owns that refresh (detached no-console helper after the current shell exits). Python `stop` alone is not enough.
 - Dual-writer risk exists until `:8765` is retired. Each phase must have a single writer for window truth and for lifecycle commands. Feature-flag HTTP proxy is allowed only as an explicit strangler bridge inside main, never as a renderer fallback that paints an empty dashboard.
 
 ## Related

@@ -1,0 +1,120 @@
+import { resolve } from "node:path";
+import { describe, expect, it, vi } from "vitest";
+
+import {
+  decideLauncherShellRestart,
+  decidePackagedDesktopShellRefresh,
+  inspectDesktopShell,
+  parseDesktopShellStatus,
+  scheduleDesktopShellRefresh,
+  shouldRefreshBeforeLifecycle,
+  thenLifecycleFromDesktopCli
+} from "../src/process/desktopShellFreshness.js";
+
+type SpawnChild = {
+  kill(): void;
+  once(event: string, listener: (...args: unknown[]) => void): unknown;
+  stdout: { on(event: string, listener: (chunk: Buffer) => void): unknown };
+  stderr: { on(event: string, listener: () => void): unknown };
+};
+
+function fakeSpawnWithOutput(output: string, exitCode = 0): ReturnType<typeof vi.fn> {
+  return vi.fn().mockImplementation((_command: string, _args: string[], _options: unknown) => {
+    const child: SpawnChild = {
+      kill: () => undefined,
+      once: (event, listener) => {
+        if (event === "error") {
+          return undefined;
+        }
+        queueMicrotask(() => listener(exitCode));
+        return undefined;
+      },
+      stdout: {
+        on: (_event, listener) => {
+          queueMicrotask(() => listener(Buffer.from(output, "utf8")));
+          return undefined;
+        }
+      },
+      stderr: {
+        on: () => undefined
+      }
+    };
+    return child;
+  });
+}
+
+describe("desktop shell freshness", () => {
+  it("refreshes only a packaged stale shell outside smoke", () => {
+    expect(decidePackagedDesktopShellRefresh({ isPackaged: false, smoke: false, stale: true })).toBe("skip");
+    expect(decidePackagedDesktopShellRefresh({ isPackaged: true, smoke: true, stale: true })).toBe("skip");
+    expect(decidePackagedDesktopShellRefresh({ isPackaged: true, smoke: false, stale: false })).toBe("skip");
+    expect(decidePackagedDesktopShellRefresh({ isPackaged: true, smoke: false, stale: true })).toBe("refresh");
+  });
+
+  it("rebuilds a stale packaged launcher instead of relaunching the same asar", () => {
+    expect(decideLauncherShellRestart({ isPackaged: true, stale: true })).toBe("rebuild-and-exit");
+    expect(decideLauncherShellRestart({ isPackaged: true, stale: false })).toBe("relaunch");
+    expect(decideLauncherShellRestart({ isPackaged: false, stale: true })).toBe("relaunch");
+  });
+
+  it("keeps start/restart/rebuild-and-start on a stale packaged shell", () => {
+    expect(shouldRefreshBeforeLifecycle("start", { isPackaged: true, stale: true })).toBe(true);
+    expect(shouldRefreshBeforeLifecycle("stop", { isPackaged: true, stale: true })).toBe(false);
+    expect(shouldRefreshBeforeLifecycle("start", { isPackaged: false, stale: true })).toBe(false);
+  });
+
+  it("maps first-instance CLI into a post-refresh lifecycle token", () => {
+    expect(thenLifecycleFromDesktopCli({ lifecycleCommand: "start", openWorkbench: false })).toBe("start");
+    expect(thenLifecycleFromDesktopCli({ lifecycleCommand: "status", openWorkbench: true })).toBe("open");
+    expect(thenLifecycleFromDesktopCli({ lifecycleCommand: "toggle", openWorkbench: false })).toBe("");
+  });
+
+  it("inspects through the Python desktop-entry JSON bridge", async () => {
+    const spawnImpl = fakeSpawnWithOutput(
+      JSON.stringify({ schemaVersion: 1, stale: true, reason: "provenance_mismatch" })
+    );
+    const result = await inspectDesktopShell({
+      workspaceRoot: "C:/repo",
+      pythonPath: "C:/repo/.venv/Scripts/python.exe",
+      spawnImpl
+    });
+    expect(result.stale).toBe(true);
+    expect(result.reason).toBe("provenance_mismatch");
+    const [, args, options] = spawnImpl.mock.calls[0] as [string, string[], Record<string, unknown>];
+    expect(args).toEqual([
+      resolve("C:/repo", "scripts", "vibelution_desktop_entry.py"),
+      "--action",
+      "desktop-shell-status",
+      "--output",
+      "json",
+      "--workspace",
+      "C:/repo",
+      "--python-exe",
+      "C:/repo/.venv/Scripts/python.exe",
+      "--no-browser"
+    ]);
+    expect(options.windowsHide).toBe(true);
+  });
+
+  it("schedules a detached refresh helper with the live Electron pid", async () => {
+    const spawnImpl = fakeSpawnWithOutput(
+      JSON.stringify({ schemaVersion: 1, scheduled: true, helperPid: 88, waitPid: 12, thenLifecycle: "start" })
+    );
+    const result = await scheduleDesktopShellRefresh({
+      workspaceRoot: "C:/repo",
+      pythonPath: "C:/repo/.venv/Scripts/python.exe",
+      waitPid: 12,
+      thenLifecycle: "start",
+      spawnImpl
+    });
+    expect(result.helperPid).toBe(88);
+    const [, args] = spawnImpl.mock.calls[0] as [string, string[], Record<string, unknown>];
+    expect(args).toContain("schedule-desktop-shell-refresh");
+    expect(args[args.indexOf("--wait-pid") + 1]).toBe("12");
+    expect(args[args.indexOf("--then-lifecycle") + 1]).toBe("start");
+  });
+
+  it("rejects a status payload without schemaVersion", () => {
+    expect(() => parseDesktopShellStatus(JSON.stringify({ stale: true }))).toThrow("invalid desktop shell status");
+  });
+});
