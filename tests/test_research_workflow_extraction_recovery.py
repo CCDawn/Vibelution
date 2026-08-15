@@ -585,6 +585,112 @@ def test_empty_runid_interrupt_walks_to_controlled_run(tmp_path: Path) -> None:
         harness.close()
 
 
+def test_real_runid_finding_interrupt_walks_to_controlled_run(tmp_path: Path) -> None:
+    """SCI-096 live: finding interrupt already has real runId and formula actionId."""
+    harness = GraphHarness(tmp_path)
+    try:
+        harness.seed()
+        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
+        harness.worker.run_once()
+        first_pending = harness.latest_adapter_pending()
+        assert first_pending is not None
+        harness.consume_adapter(first_pending.action_id)
+        before = harness.coordinator.snapshot("run-test")
+        pending_before = before.get("pendingAction") or {}
+        assert pending_before.get("nodeId") == "source_finding"
+        assert pending_before.get("runId") == "run-test"
+        assert pending_before.get("nodeRunId") == "nr-run-test-source_finding-a1"
+        path = _linear_successor_path("source_finding", "controlled_run")
+        assert path is not None
+        _seed_succeeded_path(harness, path[:-1], with_handoffs=False)
+
+        harness.enqueue_graph_dispatch(
+            "run-test", "controlled_run", 3, command_id="cmd-retry-cr"
+        )
+        harness.worker.run_once()
+
+        after = harness.coordinator.snapshot("run-test")
+        pending_after = after.get("pendingAction") or {}
+        assert pending_after.get("nodeId") == "controlled_run"
+        assert pending_after.get("runId") == "run-test"
+        assert pending_after.get("nodeRunId") == "nr-run-test-controlled_run-a3"
+        controlled = harness.commands.store.latest_attempt(
+            "run-test", "controlled_run"
+        )
+        assert controlled is not None
+        assert controlled.status == "dispatching"
+        assert "checkpoint_node_mismatch" not in (controlled.problem_json or "")
+        adapter = harness.latest_adapter_pending()
+        assert adapter is not None
+        payload = json.loads(adapter.payload_json)
+        assert payload["nodeId"] == "controlled_run"
+        assert int(payload["attempt"]) == 3
+        assert payload["runId"] == "run-test"
+    finally:
+        harness.close()
+
+
+def _split_goto_controlled_run(harness: GraphHarness, run_id: str = "run-test") -> None:
+    """Reproduce SCI-096: Command.goto writes values.controlled_run, finding stays."""
+    from langgraph.types import Command
+
+    graph, stack = harness.coordinator._compile()
+    try:
+        graph.invoke(
+            Command(
+                goto="controlled_run",
+                update={
+                    "run_id": run_id,
+                    "active_node_id": "controlled_run",
+                    "active_attempt": 2,
+                },
+            ),
+            harness.coordinator._config(run_id),
+        )
+    finally:
+        stack.close()
+
+
+def test_goto_split_finding_interrupt_walks_to_controlled_run(tmp_path: Path) -> None:
+    """SCI-096 live shape: values at controlled_run, interrupt still source_finding."""
+    harness = GraphHarness(tmp_path)
+    try:
+        harness.seed()
+        harness.enqueue_graph_dispatch("run-test", "source_finding", 1)
+        harness.worker.run_once()
+        first_pending = harness.latest_adapter_pending()
+        assert first_pending is not None
+        harness.consume_adapter(first_pending.action_id)
+        _split_goto_controlled_run(harness)
+        before = harness.coordinator.snapshot("run-test")
+        pending_before = before.get("pendingAction") or {}
+        assert pending_before.get("nodeId") == "source_finding"
+        assert pending_before.get("runId") == "run-test"
+        assert (before.get("values") or {}).get("active_node_id") == "controlled_run"
+        path = _linear_successor_path("source_finding", "controlled_run")
+        assert path is not None
+        _seed_succeeded_path(harness, path[:-1], with_handoffs=False)
+
+        harness.enqueue_graph_dispatch(
+            "run-test", "controlled_run", 3, command_id="cmd-retry-cr-goto"
+        )
+        harness.worker.run_once()
+
+        after = harness.coordinator.snapshot("run-test")
+        pending_after = after.get("pendingAction") or {}
+        assert pending_after.get("nodeId") == "controlled_run"
+        assert pending_after.get("runId") == "run-test"
+        assert pending_after.get("nodeRunId") == "nr-run-test-controlled_run-a3"
+        controlled = harness.commands.store.latest_attempt(
+            "run-test", "controlled_run"
+        )
+        assert controlled is not None
+        assert controlled.status == "dispatching"
+        assert "checkpoint_node_mismatch" not in (controlled.problem_json or "")
+    finally:
+        harness.close()
+
+
 def test_pump_repairs_starting_attempt_missing_graph_dispatch(tmp_path: Path) -> None:
     harness = GraphHarness(tmp_path)
     try:
