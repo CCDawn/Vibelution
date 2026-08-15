@@ -39,11 +39,19 @@ describe("Electron main tray integration", () => {
     expect(traySource).toContain("showStatus:");
     expect(traySource).toContain("requestDesktopShellExit()");
     expect(mainSource).toContain("restartLauncherShell");
+    expect(mainSource).toContain("reapManagedRuntimeOnDesktopStart");
     expect(mainSource).toContain("stopManagedRuntime()");
     expect(mainSource).toContain("app.relaunch()");
     expect(mainSource).toContain("from \"./protocol/applyProjectSlot.js\"");
     expect(mainSource).toContain("applyPendingProjectSlot");
     expect(mainSource).toContain("pendingProjectRoot");
+    const whenReadyIndex = mainSource.indexOf("app.whenReady()");
+    const reapIndex = mainSource.indexOf("reapManagedRuntimeOnDesktopStart", whenReadyIndex);
+    const smokeIndex = mainSource.indexOf("if (desktopCliArgs.smoke)", whenReadyIndex);
+    const bootstrapIndex = mainSource.indexOf("launcherBootstrap = await bootstrapMainOwnedLauncher(paths)");
+    expect(reapIndex).toBeGreaterThan(whenReadyIndex);
+    expect(reapIndex).toBeLessThan(smokeIndex);
+    expect(reapIndex).toBeLessThan(bootstrapIndex);
   });
 
   it("destroys the tray only after shutdown is approved", () => {

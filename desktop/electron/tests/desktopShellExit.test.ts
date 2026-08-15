@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS,
   executeApprovedDesktopShellShutdown,
+  reapManagedRuntimeOnDesktopStart,
   withDesktopShellExitTimeout
 } from "../src/shutdown/desktopShellExit.js";
 
@@ -159,6 +160,54 @@ describe("executeApprovedDesktopShellShutdown", () => {
     ]);
     expect(result?.stopStatus).toBe("not_requested");
     vi.useRealTimers();
+  });
+});
+
+describe("reapManagedRuntimeOnDesktopStart", () => {
+  it("stops the previous managed process tree before the desktop shell continues starting", async () => {
+    const calls: string[] = [];
+
+    const result = await reapManagedRuntimeOnDesktopStart({
+      recordEvent: async (event) => {
+        calls.push(`event:${event.eventCode}`);
+      },
+      stopManagedRuntime: async () => {
+        calls.push("stop-managed-runtime");
+      }
+    });
+
+    expect(calls).toEqual([
+      "event:electron.runtime.start_reap_requested",
+      "stop-managed-runtime"
+    ]);
+    expect(result).toEqual({
+      stopManagedRuntime: true,
+      managedRuntimeError: ""
+    });
+  });
+
+  it("fails open when the previous managed process tree cannot be stopped", async () => {
+    const calls: string[] = [];
+
+    const result = await reapManagedRuntimeOnDesktopStart({
+      recordEvent: async (event) => {
+        calls.push(`event:${event.eventCode}`);
+      },
+      stopManagedRuntime: async () => {
+        calls.push("stop-managed-runtime");
+        throw new Error("python missing");
+      }
+    });
+
+    expect(calls).toEqual([
+      "event:electron.runtime.start_reap_requested",
+      "stop-managed-runtime",
+      "event:electron.runtime.start_reap_failed"
+    ]);
+    expect(result).toEqual({
+      stopManagedRuntime: true,
+      managedRuntimeError: "python missing"
+    });
   });
 });
 
