@@ -491,6 +491,9 @@ export function useSessionDetailStream({
     };
 
     function handleSessionDetail(event: MessageEvent<string>) {
+      if (disposed) {
+        return;
+      }
       const routed = routeSessionStreamEvent({
         activeSessionId: streamSessionId,
         expectedType: "session_detail",
@@ -505,6 +508,9 @@ export function useSessionDetailStream({
     }
 
     function handleSessionInitial(event: MessageEvent<string>) {
+      if (disposed) {
+        return;
+      }
       const routed = routeSessionStreamEvent({
         activeSessionId: streamSessionId,
         expectedType: "session_initial",
@@ -535,6 +541,9 @@ export function useSessionDetailStream({
     }
 
     function handleAssistantDelta(event: MessageEvent<string>) {
+      if (disposed) {
+        return;
+      }
       const routed = routeSessionStreamEvent({
         activeSessionId: streamSessionId,
         expectedType: "assistant_delta",
@@ -557,17 +566,13 @@ export function useSessionDetailStream({
     stream.addEventListener("assistant_delta", handleAssistantDelta as EventListener);
 
     return () => {
-      const readyStateBeforeClose = stream.readyState;
-      applyPendingAssistantDeltas("close");
-      applyPendingDetail("close");
+      // Route/session switch: dispose synchronously BEFORE touching the UI. Any
+      // pending payload from the old stream must be discarded, never applied to
+      // the React Query cache or the active-turn layer. Cleanup also cancels the
+      // coalesce timer and the assistant-delta animation frame so no expensive
+      // main-thread work outlives the old EventSource.
       disposed = true;
-      setSessionStreamConnected(false);
-      if (activeStreamRef.current?.stream === stream) {
-        activeStreamRef.current = null;
-      }
-      if (forceCloseStreamRef.current === forceCloseStream) {
-        forceCloseStreamRef.current = null;
-      }
+      const readyStateBeforeClose = stream.readyState;
       if (applyTimer) {
         window.clearTimeout(applyTimer);
         applyTimer = null;
@@ -575,6 +580,16 @@ export function useSessionDetailStream({
       if (assistantDeltaApplyFrame !== null) {
         window.cancelAnimationFrame(assistantDeltaApplyFrame);
         assistantDeltaApplyFrame = null;
+      }
+      pendingDetail = null;
+      pendingDetailTrace = null;
+      assistantDeltaScheduler.cancel();
+      setSessionStreamConnected(false);
+      if (activeStreamRef.current?.stream === stream) {
+        activeStreamRef.current = null;
+      }
+      if (forceCloseStreamRef.current === forceCloseStream) {
+        forceCloseStreamRef.current = null;
       }
       stream.removeEventListener("session_detail", handleSessionDetail as EventListener);
       stream.removeEventListener("session_initial", handleSessionInitial as EventListener);
