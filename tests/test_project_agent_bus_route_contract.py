@@ -11,7 +11,30 @@ from core.web.routes.project_agent_bus_models import (
 def test_project_agent_bus_models_publish_known_schema_fields() -> None:
     expected_properties = {
         ProjectAgentBusListResponse: {"events", "activeAgentCount", "updatedAt"},
-        ProjectAgentBusEventResponse: {"eventId"},
+        ProjectAgentBusEventResponse: {
+            "eventId",
+            "messageType",
+            "targetScope",
+            "targetAgentIds",
+            "targetAgentCodes",
+            "targetAgentNames",
+            "mentionedTokens",
+            "unresolvedMentions",
+            "content",
+            "summary",
+            "status",
+            "revokedAt",
+            "revokedBy",
+            "revokeReason",
+            "createdBy",
+            "createdAt",
+            "updatedAt",
+            "metadata",
+            "kernel",
+            "deliveries",
+            "interruptions",
+            "revocations",
+        },
     }
 
     for model, expected in expected_properties.items():
@@ -32,3 +55,19 @@ def test_project_agent_bus_event_keeps_unknown_fields() -> None:
 
     assert payload["deliveries"] == [{"status": "delivered"}]
     assert payload["kernel"] == {"enabled": True}
+
+
+def test_project_agent_bus_event_keeps_unknown_fields_without_injecting_defaults() -> None:
+    payload = ProjectAgentBusEventResponse.model_validate(
+        {
+            "eventId": "projectbus-2",
+            "content": "hello",
+            "futureHint": {"owner": "bus"},
+        }
+    ).model_dump(exclude_unset=True)
+
+    assert payload == {
+        "eventId": "projectbus-2",
+        "content": "hello",
+        "futureHint": {"owner": "bus"},
+    }

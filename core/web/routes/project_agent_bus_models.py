@@ -38,3 +38,24 @@ class ProjectAgentBusEventResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     eventId: str = ""
+    messageType: str = ""
+    targetScope: str = ""
+    targetAgentIds: list[str] = Field(default_factory=list)
+    targetAgentCodes: list[str] = Field(default_factory=list)
+    targetAgentNames: list[str] = Field(default_factory=list)
+    mentionedTokens: list[str] = Field(default_factory=list)
+    unresolvedMentions: list[str] = Field(default_factory=list)
+    content: str = ""
+    summary: str = ""
+    status: str = ""
+    revokedAt: str = ""
+    revokedBy: str = ""
+    revokeReason: str = ""
+    createdBy: str = ""
+    createdAt: str = ""
+    updatedAt: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    kernel: dict[str, Any] = Field(default_factory=dict)
+    deliveries: list[dict[str, Any]] = Field(default_factory=list)
+    interruptions: list[dict[str, Any]] = Field(default_factory=list)
+    revocations: list[dict[str, Any]] = Field(default_factory=list)
