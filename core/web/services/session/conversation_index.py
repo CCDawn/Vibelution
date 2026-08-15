@@ -1306,6 +1306,25 @@ def create_chat_session(
             if normalized_experiment_binding:
                 conversation["experiment_binding"] = normalized_experiment_binding
                 conversation["experimentBinding"] = normalized_experiment_binding
+        s._ensure_conversation_workspace_metadata(conversation)
+        if bound_agent is None:
+            s._sync_agent_directory_project_root()
+            agent = s.ensure_agent_for_session(
+                session_id,
+                display_name=normalized_title if not s._is_default_empty_session_title(normalized_title) else "",
+                llm_bindings=normalized_llm_bindings,
+                session_workspace_path=str(
+                    conversation.get("workspace_path") or s._session_workspace_relative_path(session_id)
+                ),
+                created_by=created_by,
+                conversation_index_kind=conversation_index_kind,
+            )
+            normalized_agent_id = str(agent.get("agentId") or "").strip()
+            if normalized_agent_id:
+                conversation["agent_id"] = normalized_agent_id
+                conversation["agentId"] = normalized_agent_id
+                conversation["session_role"] = "primary"
+                conversation["sessionRole"] = "primary"
         s.save_session_chat_state(
             s.PROJECT_ROOT,
             session_id,
@@ -1313,29 +1332,6 @@ def create_chat_session(
             activate=activate,
         )
         created_conversation = dict(conversation)
-    workspace_changed = s._ensure_conversation_workspace_metadata(created_conversation)
-    agent_changed = False
-    if bound_agent is None:
-        s._sync_agent_directory_project_root()
-        agent = s.ensure_agent_for_session(
-            session_id,
-            display_name=normalized_title if not s._is_default_empty_session_title(normalized_title) else "",
-            llm_bindings=normalized_llm_bindings,
-            session_workspace_path=str(
-                created_conversation.get("workspace_path") or s._session_workspace_relative_path(session_id)
-            ),
-            created_by=created_by,
-            conversation_index_kind=conversation_index_kind,
-        )
-        normalized_agent_id = str(agent.get("agentId") or "").strip()
-        if normalized_agent_id:
-            created_conversation["agent_id"] = normalized_agent_id
-            created_conversation["agentId"] = normalized_agent_id
-            created_conversation["session_role"] = "primary"
-            created_conversation["sessionRole"] = "primary"
-            agent_changed = True
-    if workspace_changed or agent_changed:
-        s.save_session_chat_state(s.PROJECT_ROOT, session_id, created_conversation)
     from . import directory_bridge
 
     directory_bridge.sync_conversation_record(created_conversation)
