@@ -166,7 +166,7 @@ def _split_agent_runtime_context_block(block: str) -> tuple[str, str]:
     if not text:
         return "", ""
     lines = text.splitlines()
-    dynamic_markers = ("PersonalEpisodes:", "GroupContextEvents:", "AgentInboxMessages:")
+    dynamic_markers = ("## 个人记忆", "PersonalEpisodes:", "GroupContextEvents:", "AgentInboxMessages:")
     dynamic_start: int | None = None
     for index, line in enumerate(lines):
         stripped = str(line or "").strip()

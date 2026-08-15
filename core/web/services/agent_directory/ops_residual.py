@@ -953,12 +953,14 @@ def _with_session_terminal_protocol_defaults(agent: dict[str, Any], policy: dict
     """Project untouched private chat defaults onto the current session protocol.
 
     Covers the pre-terminal legacy list, the protocol list from before the
-    personal episode tool, the episode-era default that still carried
-    generation-handoff memory tools, and the narrow-handoff default from
-    before supersede. Untouched defaults drop generation-handoff tools and
-    add the current personal-episode tools. User-customized policies are
-    never widened or narrowed. The projection is deterministic and
-    read-only, so persisted ToolPolicy remains the single writable source.
+    personal memory tool, the episode-era default that still carried
+    generation-handoff memory tools, the narrow-handoff default from
+    before supersede, and the episodic-named default from before the
+    personal-memory rename. Untouched defaults drop generation-handoff
+    tools and add the current personal-memory tools. User-customized
+    policies are never widened or narrowed. The projection is
+    deterministic and read-only, so persisted ToolPolicy remains the
+    single writable source.
     """
     s = _service()
 
@@ -987,8 +989,26 @@ def _with_session_terminal_protocol_defaults(agent: dict[str, Any], policy: dict
         allowed == list(s._NARROW_HANDOFF_SESSION_AGENT_ALLOWED_TOOLS)
         and preferred == list(s.DEFAULT_SESSION_AGENT_PREFERRED_TOOLS)
     )
-    if not (legacy_untouched or protocol_untouched or episode_era_untouched or narrow_handoff_untouched):
-        return policy
+    episodic_named_untouched = (
+        allowed == list(s._EPISODIC_NAMED_SESSION_AGENT_ALLOWED_TOOLS)
+        and preferred == list(s.DEFAULT_SESSION_AGENT_PREFERRED_TOOLS)
+    )
+    if not (
+        legacy_untouched
+        or protocol_untouched
+        or episode_era_untouched
+        or narrow_handoff_untouched
+        or episodic_named_untouched
+    ):
+        rewritten_allowed = s._rewrite_legacy_personal_memory_tool_names(allowed)
+        rewritten_preferred = s._rewrite_legacy_personal_memory_tool_names(preferred)
+        if rewritten_allowed == allowed and rewritten_preferred == preferred:
+            return policy
+        return {
+            **policy,
+            "allowedTools": rewritten_allowed,
+            "preferredTools": rewritten_preferred,
+        }
     return {
         **policy,
         "allowedTools": list(s.DEFAULT_SESSION_AGENT_ALLOWED_TOOLS),

@@ -3,7 +3,10 @@ import json
 from core.web.services import agent_directory_service
 from core.orchestration import context_engine
 from tools import episodic_memory_tools
-from tools.episodic_memory_tools import append_episodic_memory_tool, supersede_episodic_memory_tool
+from tools.episodic_memory_tools import (
+    append_personal_memory_tool,
+    supersede_personal_memory_tool,
+)
 
 
 def _use_tmp_project_root(tmp_path, monkeypatch):
@@ -21,7 +24,7 @@ def test_append_tool_writes_current_agent_episode(tmp_path, monkeypatch):
     )
 
     result = json.loads(
-        append_episodic_memory_tool(
+        append_personal_memory_tool(
             text="Prefer focused pytest.",
             kind="preference",
             refs_json='[{"type":"path","id":"tests/test_agent_episodic_memory_tool.py"}]',
@@ -42,7 +45,7 @@ def test_append_tool_writes_current_agent_episode(tmp_path, monkeypatch):
 
 def test_append_tool_requires_bound_runtime(monkeypatch):
     monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {})
-    result = json.loads(append_episodic_memory_tool(text="nope"))
+    result = json.loads(append_personal_memory_tool(text="nope"))
     assert result["ok"] is False
     assert result["error"] == "agent_runtime_missing"
 
@@ -50,21 +53,23 @@ def test_append_tool_requires_bound_runtime(monkeypatch):
 def test_append_tool_has_no_target_agent_parameter():
     import inspect
 
-    signature = inspect.signature(append_episodic_memory_tool)
+    signature = inspect.signature(append_personal_memory_tool)
     assert "agent_id" not in signature.parameters
     assert "target_agent" not in signature.parameters
 
 
-def test_default_session_policy_includes_personal_episode_tools():
-    assert agent_directory_service.PERSONAL_EPISODE_TOOL_NAME == "append_episodic_memory_tool"
-    assert agent_directory_service.PERSONAL_EPISODE_SUPERSEDE_TOOL_NAME == "supersede_episodic_memory_tool"
+def test_default_session_policy_includes_personal_memory_tools():
+    assert agent_directory_service.PERSONAL_MEMORY_APPEND_TOOL_NAME == "append_personal_memory_tool"
+    assert agent_directory_service.PERSONAL_MEMORY_SUPERSEDE_TOOL_NAME == "supersede_personal_memory_tool"
     for name in (
-        agent_directory_service.PERSONAL_EPISODE_TOOL_NAME,
-        agent_directory_service.PERSONAL_EPISODE_SUPERSEDE_TOOL_NAME,
+        agent_directory_service.PERSONAL_MEMORY_APPEND_TOOL_NAME,
+        agent_directory_service.PERSONAL_MEMORY_SUPERSEDE_TOOL_NAME,
     ):
         assert name in agent_directory_service.DEFAULT_SESSION_AGENT_ALLOWED_TOOLS
         assert name not in agent_directory_service.DEFAULT_SESSION_AGENT_PREFERRED_TOOLS
         assert name not in agent_directory_service.SESSION_PROTOCOL_ALLOWED_TOOLS
+    assert "append_episodic_memory_tool" not in agent_directory_service.DEFAULT_SESSION_AGENT_ALLOWED_TOOLS
+    assert "supersede_episodic_memory_tool" not in agent_directory_service.DEFAULT_SESSION_AGENT_ALLOWED_TOOLS
 
 
 def test_generation_handoff_tools_stay_off_default_session_policy():
@@ -88,7 +93,7 @@ def test_untouched_protocol_snapshot_projects_episode_tool():
         "preferredTools": list(agent_directory_service.SESSION_PROTOCOL_PREFERRED_TOOLS),
     }
     projected = agent_directory_service._with_session_terminal_protocol_defaults(agent, policy)
-    assert agent_directory_service.PERSONAL_EPISODE_TOOL_NAME in projected["allowedTools"]
+    assert agent_directory_service.PERSONAL_MEMORY_APPEND_TOOL_NAME in projected["allowedTools"]
     assert projected["allowedTools"] == list(agent_directory_service.DEFAULT_SESSION_AGENT_ALLOWED_TOOLS)
     assert projected["preferredTools"] == list(agent_directory_service.DEFAULT_SESSION_AGENT_PREFERRED_TOOLS)
     for name in agent_directory_service.GENERATION_HANDOFF_MEMORY_TOOLS:
@@ -142,42 +147,47 @@ def test_custom_session_policy_is_not_widened():
     }
     projected = agent_directory_service._with_session_terminal_protocol_defaults(agent, policy)
     assert projected["allowedTools"] == ["grep_search_tool", "cli_tool"]
-    assert agent_directory_service.PERSONAL_EPISODE_TOOL_NAME not in projected["allowedTools"]
+    assert agent_directory_service.PERSONAL_MEMORY_APPEND_TOOL_NAME not in projected["allowedTools"]
 
 
-def test_key_tools_catalog_includes_personal_episode_tools():
+def test_key_tools_catalog_includes_personal_memory_tools():
     from core.web.services import tool_catalog
     from tools.Key_Tools import create_key_tools
 
     names = {getattr(item, "name", "") for item in create_key_tools()}
-    for name in ("append_episodic_memory_tool", "supersede_episodic_memory_tool"):
+    for name in ("append_personal_memory_tool", "supersede_personal_memory_tool"):
         assert name in names
         assert name in tool_catalog.TOOL_CATALOG
         metadata = tool_catalog.metadata_for_tool(name)
         assert metadata["category"] == "memory_context"
         assert metadata["permissionTier"] == "medium"
         assert "memory_write" in metadata["riskTags"]
-    assert episodic_memory_tools.APPEND_EPISODIC_MEMORY_TOOL_NAME == "append_episodic_memory_tool"
-    assert episodic_memory_tools.SUPERSEDE_EPISODIC_MEMORY_TOOL_NAME == "supersede_episodic_memory_tool"
+    assert "append_episodic_memory_tool" not in names
+    assert "supersede_episodic_memory_tool" not in names
+    assert "append_episodic_memory_tool" in tool_catalog.TOOL_CATALOG
+    assert "supersede_episodic_memory_tool" in tool_catalog.TOOL_CATALOG
+    assert episodic_memory_tools.APPEND_PERSONAL_MEMORY_TOOL_NAME == "append_personal_memory_tool"
+    assert episodic_memory_tools.SUPERSEDE_PERSONAL_MEMORY_TOOL_NAME == "supersede_personal_memory_tool"
 
 
-def test_personal_episode_tool_descriptions_prefer_dumped_context():
+def test_personal_memory_tool_descriptions_prefer_dumped_context():
     from core.web.services.tool_registry_service import MAX_DESCRIPTION_CHARS
     from tools.Key_Tools import create_key_tools
 
     tools = {getattr(item, "name", ""): item for item in create_key_tools()}
-    append_doc = str(tools["append_episodic_memory_tool"].description or "")
-    supersede_doc = str(tools["supersede_episodic_memory_tool"].description or "")
+    append_doc = str(tools["append_personal_memory_tool"].description or "")
+    supersede_doc = str(tools["supersede_personal_memory_tool"].description or "")
 
-    assert "PersonalEpisodes" in append_doc
-    assert "PersonalEpisodes" in supersede_doc
+    assert "个人记忆" in append_doc
+    assert "个人记忆" in supersede_doc
+    assert "世代交接" in append_doc
     assert "只写自己的 episodic_events.jsonl" not in append_doc
     assert "glob" in append_doc
     assert "文件搜索" in supersede_doc
     assert len(append_doc) <= MAX_DESCRIPTION_CHARS
     assert len(supersede_doc) <= MAX_DESCRIPTION_CHARS
-    assert "PersonalEpisodes" in (append_episodic_memory_tool.__doc__ or "")
-    assert "PersonalEpisodes" in (supersede_episodic_memory_tool.__doc__ or "")
+    assert "个人记忆" in (append_personal_memory_tool.__doc__ or "")
+    assert "个人记忆" in (supersede_personal_memory_tool.__doc__ or "")
 
 
 def test_supersede_tool_replaces_current_episode(tmp_path, monkeypatch):
@@ -188,9 +198,9 @@ def test_supersede_tool_replaces_current_episode(tmp_path, monkeypatch):
         "current_agent_runtime",
         lambda: {"agentId": agent["agentId"], "sessionId": "session-edit"},
     )
-    first = json.loads(append_episodic_memory_tool(text="Prefer quiet mornings.", kind="preference"))
+    first = json.loads(append_personal_memory_tool(text="Prefer quiet mornings.", kind="preference"))
     result = json.loads(
-        supersede_episodic_memory_tool(
+        supersede_personal_memory_tool(
             episode_id=first["episodeId"],
             successor_text="Prefer focused afternoons.",
             kind="preference",
@@ -212,7 +222,7 @@ def test_new_session_context_includes_current_personal_episodes(tmp_path, monkey
         "current_agent_runtime",
         lambda: {"agentId": agent["agentId"], "sessionId": "session-write"},
     )
-    written = json.loads(append_episodic_memory_tool(text=f"User prefers {token}", kind="preference"))
+    written = json.loads(append_personal_memory_tool(text=f"User prefers {token}", kind="preference"))
     packet = context_engine.build_agent_context(
         agent["agentId"],
         session_id="session-read",
@@ -232,8 +242,8 @@ def test_superseded_episode_is_not_dumped_into_new_session_context(tmp_path, mon
         "current_agent_runtime",
         lambda: {"agentId": agent["agentId"], "sessionId": "session-drop"},
     )
-    first = json.loads(append_episodic_memory_tool(text="Old stale preference.", kind="preference"))
-    json.loads(supersede_episodic_memory_tool(episode_id=first["episodeId"]))
+    first = json.loads(append_personal_memory_tool(text="Old stale preference.", kind="preference"))
+    json.loads(supersede_personal_memory_tool(episode_id=first["episodeId"]))
     packet = context_engine.build_agent_context(
         agent["agentId"],
         session_id="session-after-drop",
@@ -241,7 +251,8 @@ def test_superseded_episode_is_not_dumped_into_new_session_context(tmp_path, mon
     )
     assert first["episodeId"] not in packet.dynamic_context_block
     assert "Old stale preference." not in packet.context_block
-    assert "PersonalEpisodes: none" in packet.dynamic_context_block
+    assert "## 个人记忆" in packet.dynamic_context_block
+    assert packet.dynamic_context_block.splitlines()[1].strip() == "无"
 
 
 def test_narrow_handoff_snapshot_projects_supersede_tool():
@@ -256,5 +267,38 @@ def test_narrow_handoff_snapshot_projects_supersede_tool():
         "preferredTools": list(agent_directory_service.DEFAULT_SESSION_AGENT_PREFERRED_TOOLS),
     }
     projected = agent_directory_service._with_session_terminal_protocol_defaults(agent, policy)
-    assert agent_directory_service.PERSONAL_EPISODE_SUPERSEDE_TOOL_NAME in projected["allowedTools"]
+    assert agent_directory_service.PERSONAL_MEMORY_SUPERSEDE_TOOL_NAME in projected["allowedTools"]
     assert projected["allowedTools"] == list(agent_directory_service.DEFAULT_SESSION_AGENT_ALLOWED_TOOLS)
+
+
+def test_episodic_named_snapshot_projects_renamed_personal_memory_tools():
+    agent = {
+        "agentId": "agent-episodic-named",
+        "toolPolicyId": "tool-agent-episodic-named",
+        "primaryMode": "chat",
+    }
+    policy = {
+        "policyId": "tool-agent-episodic-named",
+        "allowedTools": list(agent_directory_service._EPISODIC_NAMED_SESSION_AGENT_ALLOWED_TOOLS),
+        "preferredTools": list(agent_directory_service.DEFAULT_SESSION_AGENT_PREFERRED_TOOLS),
+    }
+    projected = agent_directory_service._with_session_terminal_protocol_defaults(agent, policy)
+    assert projected["allowedTools"] == list(agent_directory_service.DEFAULT_SESSION_AGENT_ALLOWED_TOOLS)
+    assert "append_episodic_memory_tool" not in projected["allowedTools"]
+    assert "append_personal_memory_tool" in projected["allowedTools"]
+
+
+def test_custom_policy_rewrites_legacy_personal_memory_tool_names():
+    agent = {
+        "agentId": "agent-custom-legacy-memory",
+        "toolPolicyId": "tool-agent-custom-legacy-memory",
+        "primaryMode": "chat",
+    }
+    policy = {
+        "policyId": "tool-agent-custom-legacy-memory",
+        "allowedTools": ["grep_search_tool", "append_episodic_memory_tool"],
+        "preferredTools": ["append_episodic_memory_tool"],
+    }
+    projected = agent_directory_service._with_session_terminal_protocol_defaults(agent, policy)
+    assert projected["allowedTools"] == ["grep_search_tool", "append_personal_memory_tool"]
+    assert projected["preferredTools"] == ["append_personal_memory_tool"]
