@@ -17,6 +17,7 @@ describe("launcher status window truth overlay", () => {
       projectBundle: {
         observedState: "closed",
         lifecycleConsistency: "",
+        backend: { alive: true, healthy: true, portListening: true, portConflict: false },
         browser: { managed: false, windowPid: 0, alive: false },
         components: [{ id: "browser", ok: false, state: "closed", pid: 0 }],
       },
@@ -37,6 +38,7 @@ describe("launcher status window truth overlay", () => {
       projectBundle: {
         observedState: "partial",
         lifecycleConsistency: "browser_missing",
+        backend: { alive: true, healthy: true, portListening: true, portConflict: false },
         browser: { managed: false, windowPid: 0, alive: false },
         components: [],
       },
@@ -56,6 +58,7 @@ describe("launcher status window truth overlay", () => {
       projectBundle: {
         observedState: "open",
         lifecycleConsistency: "",
+        backend: { alive: true, healthy: true, portListening: true, portConflict: false },
         browser: { managed: true, windowPid: 7070, alive: true },
         components: [{ id: "browser", ok: true, state: "alive", pid: 7070 }],
       },
@@ -66,6 +69,46 @@ describe("launcher status window truth overlay", () => {
     expect(bundle.lifecycleConsistency).toBe("browser_missing");
     expect(bundle.browser).toMatchObject({ alive: false, managed: false });
     expect(bundle.components).toEqual([{ id: "browser", ok: false, state: "closed", pid: 0 }]);
+  });
+
+  it("keeps a live BrowserWindow partial while the backend is unavailable", () => {
+    const payload = {
+      projectBundle: {
+        observedState: "closed",
+        lifecycleConsistency: "",
+        backend: { alive: false, healthy: false, portListening: false, portConflict: false },
+        browser: { managed: false, windowPid: 0, alive: false },
+        components: [{ id: "browser", ok: false, state: "closed", pid: 0 }],
+      },
+    };
+    const overlaid = overlayLauncherWindowTruth(
+      "status",
+      payload,
+      truth({ workbench: { open: true, rendererProcessId: 7070 } })
+    ) as Record<string, unknown>;
+    const bundle = overlaid.projectBundle as Record<string, unknown>;
+
+    expect(bundle.observedState).toBe("partial");
+    expect(bundle.lifecycleConsistency).toBe("backend_missing");
+    expect(bundle.browser).toMatchObject({ alive: true, managed: true, windowPid: 7070 });
+  });
+
+  it("clears a stale open state when neither backend nor BrowserWindow is live", () => {
+    const payload = {
+      projectBundle: {
+        observedState: "open",
+        lifecycleConsistency: "browser_missing",
+        backend: { alive: false, healthy: false, portListening: false, portConflict: false },
+        browser: { managed: true, windowPid: 7070, alive: true },
+        components: [{ id: "browser", ok: true, state: "alive", pid: 7070 }],
+      },
+    };
+    const overlaid = overlayLauncherWindowTruth("status", payload, truth()) as Record<string, unknown>;
+    const bundle = overlaid.projectBundle as Record<string, unknown>;
+
+    expect(bundle.observedState).toBe("closed");
+    expect(bundle.lifecycleConsistency).toBe("");
+    expect(bundle.browser).toMatchObject({ alive: false, managed: false });
   });
 
   it("leaves non-status payloads untouched", () => {

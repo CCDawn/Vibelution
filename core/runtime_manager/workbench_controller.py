@@ -530,23 +530,40 @@ def persist_workbench_launcher_state_after_open(
     browser_launch_pid = int(observed.get("browserLaunchPid") or browser_window_pid or 0)
     backend_launch_pid = int(observed.get("backendLaunchPid") or backend_pid or 0)
     backend_port = int(observed.get("backendPort") or configured_backend_port())
+    window_provider = str(observed.get("windowProvider") or "").strip().lower()
+    window_owned = bool(
+        observed.get("windowManaged")
+        if window_provider == "electron"
+        else observed.get("browserManaged")
+    )
     window_ready = bool(
         observed.get("browserWindowAlive")
-        or observed.get("windowManaged")
-        or browser_window_pid > 0
+        and window_owned
     )
     backend_ready = bool(
-        observed.get("backendObserved")
-        or observed.get("backendAlive")
-        or observed.get("backendHealthy")
-        or backend_pid > 0
+        not observed.get("backendPortConflict")
+        and observed.get("backendObserved")
+        and (
+            observed.get("backendHealthy")
+            or (
+                observed.get("backendPortListening")
+                and observed.get("backendPortOwnerTrusted")
+            )
+        )
     )
     observed_state = compose_observed_state(backend_ready=backend_ready, window_ready=window_ready)
-    status_line = (
-        "Workbench is running."
-        if observed_state == "open"
-        else "Workbench window is closed; backend is still running."
-    )
+    if observed_state == "open":
+        lifecycle_consistency = "consistent"
+        status_line = "Workbench is running."
+    elif backend_ready:
+        lifecycle_consistency = "browser_missing"
+        status_line = "Workbench window is closed; backend is still running."
+    elif window_ready:
+        lifecycle_consistency = "backend_missing"
+        status_line = "Workbench window is open; backend is unavailable."
+    else:
+        lifecycle_consistency = str(observed.get("lifecycleConsistency") or "backend_missing")
+        status_line = "Workbench is unavailable."
     workbench_profile_dir = str(
         observed.get("browserProfileDir")
         or previous_state.get("workbenchBrowserProfileDir")
@@ -578,6 +595,9 @@ def persist_workbench_launcher_state_after_open(
             "port": backend_port,
             "statusLine": status_line,
             "failureMessage": "",
+            "backendMissing": bool(window_ready and not backend_ready),
+            "frontendOrphaned": bool(window_ready and not backend_ready),
+            "lifecycleConsistency": lifecycle_consistency,
             "lastReason": str(last_reason or previous_state.get("lastReason") or "runtime_manager_open").strip(),
             "lastSource": str(last_source or previous_state.get("lastSource") or "runtime_manager").strip(),
             "updatedAt": datetime.now(timezone.utc).isoformat(),

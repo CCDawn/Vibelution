@@ -4,7 +4,7 @@ import { overlayLauncherWindowTruth } from "../src/windows/launcherWindowTruthOv
 import { createLocalLauncherStatusSnapshot } from "../src/protocol/launcherStatusSnapshot.js";
 
 describe("createLocalLauncherStatusSnapshot", () => {
-  it("is a closed workbench snapshot that overlay can mark open from Electron window truth", () => {
+  it("stays partial when Electron has a window but the local snapshot has no ready backend", () => {
     const snapshot = createLocalLauncherStatusSnapshot();
     expect(snapshot.launcher).toMatchObject({
       mode: "standalone_control_plane",
@@ -16,7 +16,8 @@ describe("createLocalLauncherStatusSnapshot", () => {
       { workbench: { open: true, rendererProcessId: 4242 }, instances: [] }
     ) as Record<string, unknown>;
     const bundle = overlaid.projectBundle as Record<string, unknown>;
-    expect(bundle.observedState).toBe("open");
+    expect(bundle.observedState).toBe("partial");
+    expect(bundle.lifecycleConsistency).toBe("backend_missing");
     expect(bundle.browser).toMatchObject({ alive: true, windowPid: 4242 });
   });
 });
