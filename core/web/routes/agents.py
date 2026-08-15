@@ -22,6 +22,22 @@ from core.web.routes.agent_activity_models import (
     AgentRuntimeEvidenceResponse,
 )
 from core.web.routes.agent_bulk_models import AgentBulkActionResponse
+from core.web.routes.agent_workbench_models import (
+    AgentAvatarUploadResponse,
+    AgentInboxConsumeAllResponse,
+    AgentModeMembershipResponse,
+    AgentPurgeResponse,
+    AgentToolGovernanceRequestResponse,
+)
+from core.web.routes.agent_support_models import (
+    AgentChatRoomMembershipResponse,
+    AgentMessageCreateResponse,
+    AgentProjectMemoryUpdateResponse,
+    AgentToolPolicyConfigurationListResponse,
+    AgentToolPolicyConfigurationResponse,
+    PromptTemplateResponse,
+    PromptTemplateWorkspaceResponse,
+)
 from core.web.routes.agent_config_change_models import (
     AgentConfigChangesResponse,
     AgentConfigDraftDiscardResponse,
@@ -602,17 +618,29 @@ def agent_model_promote(
     raise RuntimeError("Agent model promotion ended without a result.")
 
 
-@router.get("/agents/project-memory-updates")
+@router.get(
+    "/agents/project-memory-updates",
+    response_model=list[AgentProjectMemoryUpdateResponse],
+    response_model_exclude_unset=True,
+)
 def agent_project_memory_update_list(status: str = "pending", agentId: str = "", limit: int = 50) -> list[dict]:
     return list_project_memory_update_proposals(agent_id=agentId, status=status, limit=limit)
 
 
-@router.get("/agents/tool-governance-requests")
+@router.get(
+    "/agents/tool-governance-requests",
+    response_model=list[AgentToolGovernanceRequestResponse],
+    response_model_exclude_unset=True,
+)
 def agent_tool_governance_request_list(status: str = "pending_review", agentId: str = "", limit: int = 50) -> list[dict]:
     return agent_tool_governance_service.list_tool_governance_requests(agent_id=agentId, status=status, limit=limit)
 
 
-@router.patch("/agents/{agent_id}/avatar")
+@router.patch(
+    "/agents/{agent_id}/avatar",
+    response_model=AgentDocumentResponse,
+    response_model_exclude_unset=True,
+)
 def agent_avatar_update(agent_id: str, payload: AgentAvatarUpdatePayload) -> dict:
     try:
         return update_agent_avatar(
@@ -626,7 +654,11 @@ def agent_avatar_update(agent_id: str, payload: AgentAvatarUpdatePayload) -> dic
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/agents/{agent_id}/avatar-image")
+@router.post(
+    "/agents/{agent_id}/avatar-image",
+    response_model=AgentAvatarUploadResponse,
+    response_model_exclude_unset=True,
+)
 def agent_avatar_upload(agent_id: str, payload: AgentAvatarUploadPayload) -> dict:
     try:
         return store_agent_avatar_image(
@@ -755,12 +787,20 @@ def agent_detail(agent_id: str) -> dict:
     return agent
 
 
-@router.get("/agents/tool-policies/configurations")
+@router.get(
+    "/agents/tool-policies/configurations",
+    response_model=AgentToolPolicyConfigurationListResponse,
+    response_model_exclude_unset=True,
+)
 def agent_tool_policy_configuration_list() -> dict:
     return tool_policy_configuration_service.list_tool_policy_configurations()
 
 
-@router.get("/agents/{agent_id}/tool-policy")
+@router.get(
+    "/agents/{agent_id}/tool-policy",
+    response_model=AgentToolPolicyConfigurationResponse,
+    response_model_exclude_unset=True,
+)
 def agent_tool_policy_configuration_detail(agent_id: str) -> dict:
     try:
         return tool_policy_configuration_service.get_tool_policy_configuration(agent_id)
@@ -768,7 +808,11 @@ def agent_tool_policy_configuration_detail(agent_id: str) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.post("/agents/{agent_id}/tool-policy/validate")
+@router.post(
+    "/agents/{agent_id}/tool-policy/validate",
+    response_model=AgentToolPolicyConfigurationResponse,
+    response_model_exclude_unset=True,
+)
 def agent_tool_policy_configuration_validate(agent_id: str, payload: AgentToolPolicyValidatePayload) -> dict:
     try:
         return tool_policy_configuration_service.validate_tool_policy_configuration(agent_id, payload.toolPolicy)
@@ -776,7 +820,11 @@ def agent_tool_policy_configuration_validate(agent_id: str, payload: AgentToolPo
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.put("/agents/{agent_id}/tool-policy")
+@router.put(
+    "/agents/{agent_id}/tool-policy",
+    response_model=AgentToolPolicyConfigurationResponse,
+    response_model_exclude_unset=True,
+)
 def agent_tool_policy_configuration_update(agent_id: str, payload: AgentToolPolicyUpdatePayload) -> dict:
     try:
         result = tool_policy_configuration_service.update_tool_policy_configuration(
@@ -821,7 +869,12 @@ def agent_runtime_evidence(agent_id: str, sessionId: str = "", runId: str = "", 
     return list_runtime_scene_evidence_for_agent(agent_id, session_id=sessionId, run_id=runId, limit=limit)
 
 
-@router.post("/agents/{agent_id}/project-memory-updates", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/agents/{agent_id}/project-memory-updates",
+    status_code=status.HTTP_201_CREATED,
+    response_model=AgentProjectMemoryUpdateResponse,
+    response_model_exclude_unset=True,
+)
 def agent_project_memory_update_create(agent_id: str, payload: AgentProjectMemoryUpdatePayload) -> dict:
     try:
         return write_project_memory_update_proposal(
@@ -840,7 +893,11 @@ def agent_project_memory_update_create(agent_id: str, payload: AgentProjectMemor
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.patch("/agents/{agent_id}/project-memory-updates/{proposal_id}")
+@router.patch(
+    "/agents/{agent_id}/project-memory-updates/{proposal_id}",
+    response_model=AgentProjectMemoryUpdateResponse,
+    response_model_exclude_unset=True,
+)
 def agent_project_memory_update_resolve(
     agent_id: str,
     proposal_id: str,
@@ -860,7 +917,12 @@ def agent_project_memory_update_resolve(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/agents/{agent_id}/tool-governance-requests", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/agents/{agent_id}/tool-governance-requests",
+    status_code=status.HTTP_201_CREATED,
+    response_model=AgentToolGovernanceRequestResponse,
+    response_model_exclude_unset=True,
+)
 def agent_tool_governance_request_create(agent_id: str, payload: AgentToolGovernanceRequestPayload) -> dict:
     try:
         return agent_tool_governance_service.submit_tool_governance_request(
@@ -882,7 +944,11 @@ def agent_tool_governance_request_create(agent_id: str, payload: AgentToolGovern
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.patch("/agents/{agent_id}/tool-governance-requests/{request_id}")
+@router.patch(
+    "/agents/{agent_id}/tool-governance-requests/{request_id}",
+    response_model=AgentToolGovernanceRequestResponse,
+    response_model_exclude_unset=True,
+)
 def agent_tool_governance_request_resolve(
     agent_id: str,
     request_id: str,
@@ -913,7 +979,12 @@ def agent_message_list(agent_id: str, status: str = "pending", limit: int = 20) 
     return list_agent_inbox_messages_for_agent(agent_id, status=status, limit=limit)
 
 
-@router.post("/agents/{agent_id}/messages", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/agents/{agent_id}/messages",
+    status_code=status.HTTP_201_CREATED,
+    response_model=AgentMessageCreateResponse,
+    response_model_exclude_unset=True,
+)
 def agent_message_create(agent_id: str, payload: AgentMessagePayload) -> dict:
     try:
         target_agent = get_agent(agent_id, include_archived=False)
@@ -937,7 +1008,11 @@ def agent_message_create(agent_id: str, payload: AgentMessagePayload) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/agents/{agent_id}/messages/{message_id}/consume")
+@router.post(
+    "/agents/{agent_id}/messages/{message_id}/consume",
+    response_model=AgentInboxMessageResponse,
+    response_model_exclude_unset=True,
+)
 def agent_message_consume(agent_id: str, message_id: str, payload: AgentMessageConsumePayload) -> dict:
     try:
         return consume_agent_inbox_message(
@@ -950,7 +1025,11 @@ def agent_message_consume(agent_id: str, message_id: str, payload: AgentMessageC
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.post("/agents/{agent_id}/messages/consume-all")
+@router.post(
+    "/agents/{agent_id}/messages/consume-all",
+    response_model=AgentInboxConsumeAllResponse,
+    response_model_exclude_unset=True,
+)
 def agent_messages_consume_all(agent_id: str, payload: AgentMessageConsumePayload) -> dict:
     try:
         return consume_all_agent_inbox_messages(
@@ -1066,7 +1145,11 @@ def agent_update(agent_id: str, payload: AgentUpdatePayload) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.patch("/agents/{agent_id}/mode-membership")
+@router.patch(
+    "/agents/{agent_id}/mode-membership",
+    response_model=AgentModeMembershipResponse,
+    response_model_exclude_unset=True,
+)
 def agent_mode_membership_update(agent_id: str, payload: AgentModeMembershipUpdatePayload) -> dict:
     try:
         _ensure_config_agent_instances()
@@ -1082,7 +1165,11 @@ def agent_mode_membership_update(agent_id: str, payload: AgentModeMembershipUpda
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.patch("/agents/{agent_id}/chat-rooms")
+@router.patch(
+    "/agents/{agent_id}/chat-rooms",
+    response_model=AgentChatRoomMembershipResponse,
+    response_model_exclude_unset=True,
+)
 def agent_chat_room_membership_update(agent_id: str, payload: AgentChatRoomMembershipUpdatePayload) -> dict:
     try:
         _ensure_config_agent_instances()
@@ -1437,7 +1524,11 @@ def agent_archive(agent_id: str) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.delete("/agents/{agent_id}/purge")
+@router.delete(
+    "/agents/{agent_id}/purge",
+    response_model=AgentPurgeResponse,
+    response_model_exclude_unset=True,
+)
 @session_service.session_agent_lifecycle_serialized
 def agent_purge(agent_id: str) -> dict:
     timings: dict[str, float] = {}
@@ -1607,12 +1698,20 @@ def agent_purge(agent_id: str) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/prompt-templates")
+@router.get(
+    "/prompt-templates",
+    response_model=PromptTemplateWorkspaceResponse,
+    response_model_exclude_unset=True,
+)
 def prompt_template_list(includeInactive: bool = False) -> dict:
     return list_prompt_templates(include_inactive=includeInactive)
 
 
-@router.get("/prompt-templates/{template_id}")
+@router.get(
+    "/prompt-templates/{template_id}",
+    response_model=PromptTemplateResponse,
+    response_model_exclude_unset=True,
+)
 def prompt_template_detail(template_id: str) -> dict:
     try:
         template = get_prompt_template(template_id)
@@ -1623,7 +1722,11 @@ def prompt_template_detail(template_id: str) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.patch("/prompt-templates/{template_id}")
+@router.patch(
+    "/prompt-templates/{template_id}",
+    response_model=PromptTemplateResponse,
+    response_model_exclude_unset=True,
+)
 def prompt_template_update(template_id: str, payload: PromptTemplateUpdatePayload) -> dict:
     try:
         _ensure_prompt_template_status_update_allowed(template_id, payload.status)
@@ -1640,7 +1743,11 @@ def prompt_template_update(template_id: str, payload: PromptTemplateUpdatePayloa
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/prompt-templates/{template_id}/reset")
+@router.post(
+    "/prompt-templates/{template_id}/reset",
+    response_model=PromptTemplateResponse,
+    response_model_exclude_unset=True,
+)
 def prompt_template_reset(template_id: str) -> dict:
     try:
         return _with_agent_workspace_cache_invalidated(reset_prompt_template(template_id))
@@ -1669,13 +1776,21 @@ def _ensure_prompt_template_status_update_allowed(template_id: str, next_status:
     )
 
 
-@router.get("/agent-mode-bindings")
+@router.get(
+    "/agent-mode-bindings",
+    response_model=AgentModeMembershipResponse,
+    response_model_exclude_unset=True,
+)
 def mode_binding_detail() -> dict:
     _ensure_config_agent_instances()
     return get_mode_bindings_payload()
 
 
-@router.patch("/agent-mode-bindings/{mode}")
+@router.patch(
+    "/agent-mode-bindings/{mode}",
+    response_model=AgentModeMembershipResponse,
+    response_model_exclude_unset=True,
+)
 def mode_binding_update(mode: str, payload: ModeBindingUpdatePayload) -> dict:
     try:
         _ensure_config_agent_instances()
@@ -1691,7 +1806,11 @@ def mode_binding_update(mode: str, payload: ModeBindingUpdatePayload) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.patch("/agent-mode-bindings/{mode}/slots/{slot}")
+@router.patch(
+    "/agent-mode-bindings/{mode}/slots/{slot}",
+    response_model=AgentModeMembershipResponse,
+    response_model_exclude_unset=True,
+)
 def mode_binding_slot_update(mode: str, slot: str, payload: ModeBindingSlotUpdatePayload) -> dict:
     try:
         _ensure_config_agent_instances()
@@ -1703,7 +1822,11 @@ def mode_binding_slot_update(mode: str, slot: str, payload: ModeBindingSlotUpdat
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.patch("/agent-mode-bindings/{mode}/pool")
+@router.patch(
+    "/agent-mode-bindings/{mode}/pool",
+    response_model=AgentModeMembershipResponse,
+    response_model_exclude_unset=True,
+)
 def mode_binding_pool_update(mode: str, payload: ModeBindingPoolUpdatePayload) -> dict:
     try:
         _ensure_config_agent_instances()
