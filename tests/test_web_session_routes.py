@@ -257,6 +257,110 @@ def test_session_catalog_response_models_keep_unknown_fields(monkeypatch):
     assert deleted.json() == expected_delete
 
 
+def test_session_turn_response_models_keep_unknown_fields(monkeypatch):
+    """Typed turn envelopes must keep extras used by accept and detail payloads."""
+    from core.web.routes.session_turn_models import (
+        SessionAttachmentResponse,
+        SessionLlmOptionsResponse,
+        SessionTurnCommandResponse,
+    )
+
+    accepted = SessionTurnCommandResponse.model_validate(
+        {
+            "accepted": True,
+            "sessionId": "s1",
+            "turnId": "t1",
+            "clientSubmissionId": "c1",
+            "status": "running",
+            "acceptedAt": "now",
+            "startedTurnId": "t1",
+        }
+    )
+    accepted_dump = accepted.model_dump(exclude_unset=True)
+    assert accepted_dump["startedTurnId"] == "t1"
+    assert "id" not in accepted_dump
+
+    detail = SessionTurnCommandResponse.model_validate(
+        {
+            "id": "s1",
+            "title": "t",
+            "messages": [{"role": "user", "content": "hi"}],
+            "startedTurnId": "t1",
+        }
+    )
+    detail_dump = detail.model_dump(exclude_unset=True)
+    assert detail_dump["messages"] == [{"role": "user", "content": "hi"}]
+    assert detail_dump["startedTurnId"] == "t1"
+    assert "accepted" not in detail_dump
+
+    attachment = SessionAttachmentResponse.model_validate(
+        {"artifactId": "a1", "kind": "user_image", "path": "hidden-ok"}
+    )
+    assert attachment.model_dump(exclude_unset=True)["path"] == "hidden-ok"
+
+    options = SessionLlmOptionsResponse.model_validate(
+        {
+            "sessionId": "s1",
+            "currentModelId": "m1",
+            "currentReasoningEffort": "high",
+            "model": {"modelId": "m1", "extraFlag": True},
+        }
+    )
+    assert options.model_dump(exclude_unset=True)["model"]["extraFlag"] is True
+
+    expected_accept = {
+        "accepted": True,
+        "sessionId": "session-active",
+        "turnId": "turn-1",
+        "clientSubmissionId": "sub-1",
+        "status": "running",
+        "acceptedAt": "now",
+        "startedTurnId": "turn-1",
+    }
+    monkeypatch.setattr(
+        session_routes,
+        "submit_session_message_lightweight",
+        lambda *_args, **_kwargs: expected_accept,
+    )
+    accepted_response = client.post(
+        "/api/sessions/session-active/messages",
+        json={"content": "hi", "clientSubmissionId": "sub-1"},
+        headers={"Prefer": "respond-async"},
+    )
+    assert accepted_response.status_code == 202
+    assert accepted_response.json() == expected_accept
+
+    expected_stop = {
+        "id": "session-active",
+        "currentPhase": "stopping",
+        "messages": [{"role": "assistant", "content": "partial"}],
+        "stopRequested": True,
+    }
+    monkeypatch.setattr(
+        session_routes,
+        "request_stop_session_turn",
+        lambda *_args, **_kwargs: expected_stop,
+    )
+    stopped = client.post("/api/sessions/session-active/stop", json={"turnId": "turn-1"})
+    assert stopped.status_code == 202
+    assert stopped.json() == expected_stop
+
+    expected_options = {
+        "sessionId": "session-active",
+        "currentModelId": "m1",
+        "currentReasoningEffort": "high",
+        "model": {"modelId": "m1", "supportsReasoningEffort": True},
+    }
+    monkeypatch.setattr(
+        session_routes,
+        "get_session_llm_options",
+        lambda *_args, **_kwargs: expected_options,
+    )
+    options_response = client.get("/api/sessions/session-active/llm-options")
+    assert options_response.status_code == 200
+    assert options_response.json() == expected_options
+
+
 def test_chat_workbench_bootstrap_reuses_agent_projection_for_session_query(monkeypatch):
     agents = [{"agentId": "agent-a", "displayName": "Agent A"}]
     captured: dict[str, object] = {}

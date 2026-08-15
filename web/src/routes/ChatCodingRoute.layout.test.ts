@@ -3554,8 +3554,9 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("keeps the Agent model fixed while mutating only Session reasoning effort", () => {
     expect(routeAndDetailMutationsSource).toContain("const sessionReasoningEffortMutation = useMutation");
-    expect(routeAndDetailMutationsSource).toContain("/reasoning-effort");
-    expect(routeAndDetailMutationsSource).toContain("JSON.stringify({ reasoningEffort: variables.reasoningEffort })");
+    expect(routeAndDetailMutationsSource).toContain("updateSessionReasoningEffort(variables.sessionId, variables.reasoningEffort)");
+    expect(chatApiSource).toContain("/reasoning-effort");
+    expect(chatApiSource).toContain("JSON.stringify({ reasoningEffort })");
     expect(routeSource).toContain("model: sessionLlmOptions.model");
     expect(routeSource).toContain("onReasoningEffortChange");
     expect(routeSource).not.toContain("/llm-selection");

@@ -7,7 +7,12 @@ import {
   type SetStateAction,
 } from "react";
 
-import { fetchJson } from "../../api/client";
+import {
+  editResubmitSessionMessage,
+  stopSessionTurn,
+  submitSessionGuidance,
+  submitSessionMessage,
+} from "../../api/chat";
 import { queryKeys } from "../../api/queryKeys";
 import type {
   ConversationMessage,
@@ -59,10 +64,7 @@ import {
 } from "./chatComposerSubmitModel";
 import { loadTurnStatusTailConfig } from "./turnStatusTailModel";
 import { postSubmitTelemetry } from "./chatSubmitTelemetry";
-import {
-  resolveSessionStopTurnId,
-  sessionStopRequestBody,
-} from "./chatStopTurnModel";
+import { resolveSessionStopTurnId } from "./chatStopTurnModel";
 
 type ChatEditTarget = { messageId: string; original: string };
 type ChatWorkspaceCache = ReturnType<typeof createChatWorkspaceCache>;
@@ -160,22 +162,15 @@ export function useChatComposerTurnMutations({
           clientSubmissionId,
         },
       );
-      return fetchJson<SessionTurnAcceptedResponse>(`/api/sessions/${sessionId}/messages`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Prefer: "respond-async",
-        },
-        body: JSON.stringify({
-          content,
-          clientSubmissionId,
-          contentUtf8Base64: encodeUtf8Base64(content),
-          attachmentIds: attachmentIds ?? [],
-          references: references ?? [],
-          mentalModelEnabled,
-          runtimeStatusEnabled,
-          turnStatusTail: resolvedTail,
-        }),
+      return submitSessionMessage(sessionId, {
+        content,
+        clientSubmissionId,
+        contentUtf8Base64: encodeUtf8Base64(content),
+        attachmentIds: attachmentIds ?? [],
+        references: references ?? [],
+        mentalModelEnabled,
+        runtimeStatusEnabled,
+        turnStatusTail: resolvedTail,
       });
     },
     onMutate: async (variables) => {
@@ -321,20 +316,14 @@ export function useChatComposerTurnMutations({
         turnStatusTail,
       }: EditResubmitVariables,
     ) =>
-      fetchJson<SessionDetail>(`/api/sessions/${sessionId}/messages/edit-resubmit`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          messageId,
-          clientSubmissionId,
-          content,
-          contentUtf8Base64: encodeUtf8Base64(content),
-          mentalModelEnabled,
-          runtimeStatusEnabled,
-          turnStatusTail: turnStatusTail ?? loadTurnStatusTailConfig(sessionId),
-        }),
+      editResubmitSessionMessage(sessionId, {
+        messageId,
+        clientSubmissionId,
+        content,
+        contentUtf8Base64: encodeUtf8Base64(content),
+        mentalModelEnabled,
+        runtimeStatusEnabled,
+        turnStatusTail: turnStatusTail ?? loadTurnStatusTailConfig(sessionId),
       }),
     onMutate: async (variables) => {
       const sessionKey = queryKeys.session(variables.sessionId);
@@ -420,13 +409,7 @@ export function useChatComposerTurnMutations({
 
   const stopTurnMutation = useMutation({
     mutationFn: async ({ sessionId, turnId }: { sessionId: string; turnId: string }) =>
-      fetchJson<SessionDetail>(`/api/sessions/${sessionId}/stop`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: sessionStopRequestBody(turnId),
-      }),
+      stopSessionTurn(sessionId, turnId),
     onSuccess: (nextDetail, variables) => {
       setSessionComposerErrors((current) => ({
         ...current,
@@ -456,13 +439,7 @@ export function useChatComposerTurnMutations({
         mode: SessionGuidanceMode;
       },
     ) =>
-      fetchJson<SessionDetail>(`/api/sessions/${sessionId}/guidance`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ content, mode }),
-      }),
+      submitSessionGuidance(sessionId, { content, mode }),
     onSuccess: (nextDetail, variables) => {
       setSessionComposerErrors((current) => ({
         ...current,
