@@ -1750,19 +1750,26 @@ def _ensure_agent_directory_conversation_materialized(
     if directory_runtime.is_legacy_discard_in_progress():
         return False
     with s._CHAT_STATE_LOCK:
-        payload = s.load_chat_state(s.PROJECT_ROOT)
+        if s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id) is not None:
+            return False
+        payload = {"conversations": []}
         changed = s._materialize_agent_directory_conversation_locked(
             payload,
             normalized_session_id,
             source=source,
             activate=activate,
         )
+        snapshot = None
         if changed:
-            s.save_chat_state(s.PROJECT_ROOT, payload)
             materialized = s._find_conversation_entry(payload, normalized_session_id)
-            snapshot = dict(materialized) if isinstance(materialized, dict) else None
-        else:
-            snapshot = None
+            if isinstance(materialized, dict):
+                snapshot = dict(materialized)
+                s.save_session_chat_state(
+                    s.PROJECT_ROOT,
+                    normalized_session_id,
+                    snapshot,
+                    activate=activate,
+                )
     if snapshot is not None:
         from . import directory_bridge
 
@@ -1795,18 +1802,19 @@ def _ensure_session_conversation_record(
         source=source,
     )
     with s._CHAT_STATE_LOCK:
-        payload = s.load_chat_state(s.PROJECT_ROOT)
-        entry = s._find_conversation_entry(payload, normalized_session_id)
+        entry = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
         if entry is None:
+            payload = {"conversations": []}
             recovered = s._recover_missing_conversation_from_workspace_locked(
                 payload,
                 normalized_session_id,
                 source=source,
             )
             if recovered:
-                s.save_chat_state(s.PROJECT_ROOT, payload)
-                s._invalidate_session_list_cache()
                 entry = s._find_conversation_entry(payload, normalized_session_id)
+                if isinstance(entry, dict):
+                    s.save_session_chat_state(s.PROJECT_ROOT, normalized_session_id, entry)
+                    s._invalidate_session_list_cache()
         snapshot = dict(entry) if isinstance(entry, dict) else None
     if snapshot is not None:
         from . import directory_bridge
