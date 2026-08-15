@@ -17,6 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from core.chat.conversation_store import ChatStateRevisionConflictError
 from core.web.services import agent_directory_service
 
 
@@ -145,48 +146,71 @@ def repair_conversation_index_records() -> dict[str, Any]:
         state["agents"] = agents
         s.agent_directory_service.save_state(state)
 
-    payload = s.load_chat_state(s.PROJECT_ROOT)
-    conversations = payload.get("conversations")
-    repaired_conversations: list[dict[str, str]] = []
-    agent_by_id = {
-        str(agent.get("agentId") or "").strip(): agent
-        for agent in agents
-        if isinstance(agent, dict) and str(agent.get("agentId") or "").strip()
-    }
-    if isinstance(conversations, list):
-        for conversation in conversations:
-            if not isinstance(conversation, dict):
-                continue
-            raw_kind, normalized_raw_kind = s._conversation_index_kind_from_raw(conversation)
-            if raw_kind and not normalized_raw_kind:
-                continue
-            agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
-            agent = agent_by_id.get(agent_id)
-            if not isinstance(agent, dict):
-                continue
-            agent_classification = s.agent_directory_service.agent_conversation_index_classification(
-                agent,
-                hidden_team_member_agent_ids=hidden_team_member_agent_ids,
+    max_attempts = 8
+    last_conflict: ChatStateRevisionConflictError | None = None
+    for attempt in range(max_attempts):
+        payload = s.load_chat_state(s.PROJECT_ROOT)
+        conversations = payload.get("conversations")
+        repaired_conversations = []
+        agent_by_id = {
+            str(agent.get("agentId") or "").strip(): agent
+            for agent in agents
+            if isinstance(agent, dict) and str(agent.get("agentId") or "").strip()
+        }
+        sync_candidates = []
+        if isinstance(conversations, list):
+            for conversation in conversations:
+                if not isinstance(conversation, dict):
+                    continue
+                raw_kind, normalized_raw_kind = s._conversation_index_kind_from_raw(conversation)
+                if raw_kind and not normalized_raw_kind:
+                    continue
+                agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
+                agent = agent_by_id.get(agent_id)
+                if not isinstance(agent, dict):
+                    continue
+                agent_classification = s.agent_directory_service.agent_conversation_index_classification(
+                    agent,
+                    hidden_team_member_agent_ids=hidden_team_member_agent_ids,
+                )
+                agent_kind = str(agent_classification.get("kind") or "").strip()
+                if agent_kind not in {
+                    agent_directory_service.CONVERSATION_INDEX_KIND_PERSONAL_AGENT,
+                    s.agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT,
+                    s.agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN,
+                }:
+                    continue
+                if normalized_raw_kind == agent_kind and s._conversation_repair_flags_match_kind(conversation, agent_kind):
+                    continue
+                s._apply_conversation_index_repair_fields(conversation, agent_kind)
+                repaired_conversations.append(
+                    {
+                        "sessionId": str(conversation.get("conversation_id") or "").strip(),
+                        "agentId": agent_id,
+                        "kind": agent_kind,
+                    }
+                )
+                sync_candidates.append(conversation)
+        if not repaired_conversations:
+            break
+        try:
+            s.save_chat_state(
+                s.PROJECT_ROOT,
+                payload,
+                expected_state_revision=int(payload.get("state_revision") or 0),
             )
-            agent_kind = str(agent_classification.get("kind") or "").strip()
-            if agent_kind not in {
-                agent_directory_service.CONVERSATION_INDEX_KIND_PERSONAL_AGENT,
-                s.agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT,
-                s.agent_directory_service.CONVERSATION_INDEX_KIND_HIDDEN,
-            }:
-                continue
-            if normalized_raw_kind == agent_kind and s._conversation_repair_flags_match_kind(conversation, agent_kind):
-                continue
-            s._apply_conversation_index_repair_fields(conversation, agent_kind)
-            repaired_conversations.append(
-                {
-                    "sessionId": str(conversation.get("conversation_id") or "").strip(),
-                    "agentId": agent_id,
-                    "kind": agent_kind,
-                }
-            )
+        except ChatStateRevisionConflictError as exc:
+            # A concurrent writer changed the document; recompute the
+            # deterministic repair from the fresh snapshot.
+            last_conflict = exc
+            continue
+        break
+    else:
+        raise ChatStateRevisionConflictError(
+            expected=last_conflict.expected if last_conflict is not None else 0,
+            current=last_conflict.current if last_conflict is not None else 0,
+        ) from last_conflict
     if repaired_conversations:
-        s.save_chat_state(s.PROJECT_ROOT, payload)
         from . import directory_bridge
 
         repaired_ids = {
@@ -197,7 +221,7 @@ def repair_conversation_index_records() -> dict[str, Any]:
         directory_bridge.sync_conversation_records(
             [
                 item
-                for item in conversations
+                for item in sync_candidates
                 if isinstance(item, dict)
                 and str(item.get("conversation_id") or item.get("id") or "").strip()
                 in repaired_ids

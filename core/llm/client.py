@@ -1144,6 +1144,8 @@ def _record_usage_ledger_event(
     try:
         record_usage_event(event)
     except Exception as exc:
+        from .usage_ledger import usage_ledger_stats
+
         _record_llm_scene_event(
             "usage",
             "llm.usage_ledger.write_failed",
@@ -1155,6 +1157,7 @@ def _record_usage_ledger_event(
                 "profileId": str(profile_id or "").strip(),
                 "provider": str(provider or "").strip(),
                 "model": str(model or "").strip(),
+                "ledgerStats": usage_ledger_stats(),
             },
             lifecycle=False,
         )
