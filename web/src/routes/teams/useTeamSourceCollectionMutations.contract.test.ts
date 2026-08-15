@@ -64,7 +64,7 @@ describe("team source-collection mutations contract", () => {
   });
 
   it("preserves key write endpoints used by SC search/quality/graph/ingestion", () => {
-    expect(mutationsSource).toContain("/collection-assignments/${encodeURIComponent(payload.draft.assignmentId)}/outputs");
+    expect(mutationsSource).toContain("recordDataProcessingCollectionOutput<");
     expect(mutationsSource).toContain("importDataRecordAsSourceCandidate(");
     expect(mutationsSource).toContain("executeSourceCollectionSearch<");
     expect(mutationsSource).toContain("openSourceCollectionStorage<");
