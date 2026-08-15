@@ -597,6 +597,7 @@ from core.web.services.session.session_ops import (
     _load_conversation_detail_target,
     _make_chat_message,
     _make_local_runtime_error_chat_message,
+    _persist_dirty_session_runtime_rows,
     _pending_tool_governance_requests_for_session,
     _terminal_reason_for_turn,
     _terminal_reason_from_conversation,
