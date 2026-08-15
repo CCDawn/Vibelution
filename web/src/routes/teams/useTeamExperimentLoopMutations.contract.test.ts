@@ -89,11 +89,10 @@ describe("team experiment loop mutations contract", () => {
     expect(experimentApiSource).toContain("/smoke-result");
     expect(experimentApiSource).toContain("/full-run-result");
     expect(experimentApiSource).toContain("/knowledge-ingestion-request");
-    expect(mutationsSource).not.toContain("/workflow-orchestration/experiments/plan");
-    expect(mutationsSource).toContain("/workflow-orchestration/research-loop/loops");
-    expect(mutationsSource).toContain("/evidence");
-    expect(mutationsSource).toContain("/decision");
-    expect(mutationsSource).toContain("/design-draft");
+    expect(mutationsSource).toContain("createResearchLoop<");
+    expect(mutationsSource).toContain("recordResearchLoopEvidence<");
+    expect(mutationsSource).toContain("recordResearchLoopDecision<");
+    expect(mutationsSource).toContain("materializeResearchLoopIterationDesign<");
     expect(mutationsSource).toContain("allowedVariableChanges:");
     expect(mutationsSource).toContain("frozenControls:");
   });
