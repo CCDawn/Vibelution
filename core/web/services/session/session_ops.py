@@ -607,7 +607,9 @@ def _load_conversation_detail_target(
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
         return None
-    payload = payload if isinstance(payload, dict) else s.load_chat_state(s.PROJECT_ROOT)
+    if payload is None:
+        loaded = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
+        payload = {"conversations": [loaded] if loaded is not None else []}
     conversations = payload.get("conversations")
     if not isinstance(conversations, list):
         return None
@@ -635,10 +637,7 @@ def _load_conversation_detail_target(
         )
         if changed:
             payload["updated_at"] = s._now_timestamp()
-            if persist_session_row:
-                s.save_session_chat_state(s.PROJECT_ROOT, normalized_session_id, raw)
-            else:
-                s.save_chat_state(s.PROJECT_ROOT, payload)
+            s.save_session_chat_state(s.PROJECT_ROOT, normalized_session_id, raw)
         return conversation
     return None
 
@@ -1293,8 +1292,7 @@ def append_session_assistant_artifact_message(
         raise s.SessionValidationError("Session id is required for artifact messages.")
     status = str((metadata or {}).get("status") or "observed").strip() or "observed"
     with s._CHAT_STATE_LOCK:
-        payload = s.load_chat_state(s.PROJECT_ROOT)
-        conversation = s._find_conversation_entry(payload, normalized_session_id)
+        conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
         if conversation is None:
             raise s.SessionNotFoundError(f"Session not found: {normalized_session_id}")
         assistant_entry = s._make_chat_message(
@@ -1305,8 +1303,7 @@ def append_session_assistant_artifact_message(
         )
         conversation.pop("messages", None)
         conversation["updated_at"] = assistant_entry["timestamp"]
-        payload["updated_at"] = assistant_entry["timestamp"]
-        s.save_chat_state(s.PROJECT_ROOT, payload)
+        s.save_session_chat_state(s.PROJECT_ROOT, normalized_session_id, conversation)
     turn_id = str((metadata or {}).get("turnId") or (metadata or {}).get("turn_id") or f"artifact:{assistant_entry['timestamp']}").strip()
     s._append_session_conversation_event(
         normalized_session_id,
@@ -1419,8 +1416,7 @@ def update_chat_session(
             raise s.SessionValidationError(s.text_for(lang, zh=f"未找到会话 Agent：{normalized_agent_id}", en=f"Session Agent not found: {normalized_agent_id}"))
 
     with s._CHAT_STATE_LOCK:
-        payload = s.load_chat_state(s.PROJECT_ROOT)
-        conversation = s._find_conversation_entry(payload, conversation_id)
+        conversation = s.load_session_chat_state(s.PROJECT_ROOT, conversation_id)
         if conversation is None:
             raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
         s._ensure_session_mutable(conversation_id, conversation=conversation)
@@ -1441,8 +1437,8 @@ def update_chat_session(
             changed = True
         changed = s._ensure_conversation_agent_metadata(conversation) or changed
         if changed:
-            payload["updated_at"] = s._now_timestamp()
-            s.save_chat_state(s.PROJECT_ROOT, payload)
+            conversation["updated_at"] = s._now_timestamp()
+            s.save_session_chat_state(s.PROJECT_ROOT, conversation_id, conversation)
 
     if changed:
         from . import directory_bridge
@@ -1470,8 +1466,7 @@ def update_chat_session_title(session_id: str, title: str) -> dict:
 
     changed = False
     with s._CHAT_STATE_LOCK:
-        payload = s.load_chat_state(s.PROJECT_ROOT)
-        conversation = s._find_conversation_entry(payload, conversation_id)
+        conversation = s.load_session_chat_state(s.PROJECT_ROOT, conversation_id)
         if conversation is None:
             raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
         s._ensure_session_mutable(conversation_id, conversation=conversation)
@@ -1484,21 +1479,18 @@ def update_chat_session_title(session_id: str, title: str) -> dict:
                 conversation["taskTitle"] = normalized_title
                 conversation["title"] = normalized_title
                 conversation["updated_at"] = s._now_timestamp()
-                payload["updated_at"] = str(conversation.get("updated_at") or s._now_timestamp())
-                s.save_chat_state(s.PROJECT_ROOT, payload)
+                s.save_session_chat_state(s.PROJECT_ROOT, conversation_id, conversation)
                 changed = True
         elif agent_id:
             if str(conversation.get("title") or "").strip() != normalized_title:
                 conversation["title"] = normalized_title
                 conversation["updated_at"] = s._now_timestamp()
-                payload["updated_at"] = str(conversation.get("updated_at") or s._now_timestamp())
-                s.save_chat_state(s.PROJECT_ROOT, payload)
+                s.save_session_chat_state(s.PROJECT_ROOT, conversation_id, conversation)
                 changed = True
         elif str(conversation.get("title") or "").strip() != normalized_title:
             conversation["title"] = normalized_title
             conversation["updated_at"] = s._now_timestamp()
-            payload["updated_at"] = str(conversation.get("updated_at") or s._now_timestamp())
-            s.save_chat_state(s.PROJECT_ROOT, payload)
+            s.save_session_chat_state(s.PROJECT_ROOT, conversation_id, conversation)
             changed = True
 
     target = s._load_conversation_detail_target(
