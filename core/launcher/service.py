@@ -1001,14 +1001,15 @@ def _terminate_managed_launcher_subtree(*, include_runtime_manager: bool, reason
     from core.runtime_manager.daemon import _mark_persistent_active_work_runs_force_stopped
     from core.runtime_manager.process_inventory import terminate_workbench_processes
 
+    runtime_manager_pid = load_pid() if include_runtime_manager else 0
     cleanup = terminate_workbench_processes(
         exclude_pids=_managed_process_exclude_pids(),
         include_runtime_manager=include_runtime_manager,
         timeout_seconds=5.0,
     )
     stopped_runs = _mark_persistent_active_work_runs_force_stopped(reason)
-    if include_runtime_manager:
-        clear_pid()
+    if runtime_manager_pid > 0:
+        clear_pid(runtime_manager_pid)
     return {"processCleanup": cleanup, "forceStoppedWorkRuns": stopped_runs}
 
 
@@ -1059,18 +1060,9 @@ def ensure_runtime_manager_daemon_alive() -> dict[str, Any]:
     if was_running and not ensured:
         return {"action": "already_running", "daemonRunning": True, "elapsedMs": _launcher_elapsed_ms(started)}
 
-    if was_running and ensured:
-        try:
-            recovered_commands = command_queue.recover_processing_queue()
-        except Exception as exc:  # pragma: no cover - defensive watchdog boundary
-            _record_launcher_event(
-                "launcher.daemon.watchdog.recovery_failed",
-                phase="runtime_manager",
-                message="Runtime-manager queue recovery failed after stale daemon recycle.",
-                outcome="failed",
-                level="warning",
-                fields={"errorType": type(exc).__name__, "errorMessage": str(exc)},
-            )
+    # A replacement daemon recovers the processing queue before entering its
+    # command loop. Recovering here after it reports alive can race a fresh
+    # claim and move that active command back to the inbox.
 
     action = "restarted" if ensured else "restart_failed"
     _record_launcher_event(
