@@ -1819,10 +1819,6 @@ function memoryMutationEndpoint(sectionId: string, itemId: string, suffix = "") 
   return `/api/memory/items/${encodeURIComponent(sectionId)}/${encodeURIComponent(itemId)}${suffix}`;
 }
 
-function projectMemoryProposalResolveEndpoint(proposal: AgentProjectMemoryUpdateProposal) {
-  return `/api/agents/${encodeURIComponent(proposal.agentId)}/project-memory-updates/${encodeURIComponent(proposal.proposalId)}`;
-}
-
 function projectMemoryProposalAgentLabel(proposal: AgentProjectMemoryUpdateProposal) {
   return [proposal.agentName, proposal.agentCode, proposal.agentId].map((value) => String(value || "").trim()).find(Boolean) ?? "-";
 }
@@ -2295,7 +2291,6 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     fallbackKnowledgeActorAgentId,
     requestedTeamId,
     memoryMutationEndpoint,
-    projectMemoryProposalResolveEndpoint,
     invalidateMemoryQueries,
     invalidateKnowledgeDashboard,
   });
