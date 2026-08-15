@@ -57,3 +57,64 @@ export function listDataProcessingCollectionAssignments<T = DataProcessingCollec
     { signal: options?.signal },
   );
 }
+
+function writeJson<T>(url: string, body?: unknown): Promise<T> {
+  return fetchJson<T>(url, {
+    method: "POST",
+    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
+export function listDataProcessingProfiles<T>(options?: { signal?: AbortSignal }): Promise<T> {
+  return fetchJson<T>("/api/data-processing/profiles", { signal: options?.signal });
+}
+
+export function fetchDataProcessingProfile<T>(
+  profileId: string,
+  options?: { signal?: AbortSignal },
+): Promise<T> {
+  return fetchJson<T>(
+    `/api/data-processing/profiles/${encodeURIComponent(profileId)}`,
+    { signal: options?.signal },
+  );
+}
+
+export function createDataProcessingRun<T>(body: unknown): Promise<T> {
+  return writeJson<T>("/api/data-processing/runs", body);
+}
+
+export function fetchDataProcessingRun<T>(
+  runId: string,
+  options?: { signal?: AbortSignal },
+): Promise<T> {
+  return fetchJson<T>(
+    `/api/data-processing/runs/${encodeURIComponent(runId)}`,
+    { signal: options?.signal },
+  );
+}
+
+export function addDataProcessingRecord<T>(runId: string, body: unknown): Promise<T> {
+  return writeJson<T>(
+    `/api/data-processing/runs/${encodeURIComponent(runId)}/records`,
+    body,
+  );
+}
+
+export function createDataProcessingCollectionAssignment<T>(runId: string, body: unknown): Promise<T> {
+  return writeJson<T>(
+    `/api/data-processing/runs/${encodeURIComponent(runId)}/collection-assignments`,
+    body,
+  );
+}
+
+export function recordDataProcessingCollectionOutput<T>(
+  runId: string,
+  assignmentId: string,
+  body: unknown,
+): Promise<T> {
+  return writeJson<T>(
+    `/api/data-processing/runs/${encodeURIComponent(runId)}/collection-assignments/${encodeURIComponent(assignmentId)}/outputs`,
+    body,
+  );
+}

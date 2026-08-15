@@ -724,7 +724,8 @@ describe("TeamsRoute layout contract", () => {
     expect(dataProcessingApiSource).toContain("/api/data-processing/runs?");
     expect(useSourceCollectionWorkspaceSource).toContain("listDataProcessingRuns(");
     expect(useSourceCollectionWorkspaceSource).toContain("limit: SOURCE_COLLECTION_RUN_PREVIEW_LIMIT");
-    expect(teamSourceCollectionMutationsSource).toContain("/collection-assignments/${encodeURIComponent(payload.draft.assignmentId)}/outputs");
+    expect(dataProcessingApiSource).toContain("/collection-assignments/${encodeURIComponent(assignmentId)}/outputs");
+    expect(teamSourceCollectionMutationsSource).toContain("recordDataProcessingCollectionOutput<");
     expect(sourceCollectionApiSource).toContain("/source-candidate");
     expect(teamSourceCollectionMutationsSource).toContain("importDataRecordAsSourceCandidate(");
     expect(routeSource).toContain("sourceCollectionRunsForTeam");

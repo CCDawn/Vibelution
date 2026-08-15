@@ -5,8 +5,8 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Dispatch, SetStateAction } from "react";
 
-import { fetchJson } from "../../api/client";
 import { queryKeys } from "../../api/queryKeys";
+import { recordDataProcessingCollectionOutput } from "../../api/dataProcessing";
 import {
   executeSourceCollectionSearch,
   importDataRecordAsSourceCandidate,
@@ -65,33 +65,30 @@ export function useTeamSourceCollectionMutations(options: UseTeamSourceCollectio
 
   const recordSourceCollectionOutputMutation = useMutation({
     mutationFn: async (payload: { teamId: string; runId: string; draft: SourceCollectionOutputDraft }) => {
-      const output = await fetchJson<DataProcessingCollectionOutputPayload>(
-        `/api/data-processing/runs/${encodeURIComponent(payload.runId)}/collection-assignments/${encodeURIComponent(payload.draft.assignmentId)}/outputs`,
+      const output = await recordDataProcessingCollectionOutput<DataProcessingCollectionOutputPayload>(
+        payload.runId,
+        payload.draft.assignmentId,
         {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            status: "completed",
-            notes: payload.draft.notes.trim(),
-            records: [
-              {
-                sourceType: payload.draft.sourceType,
-                title: payload.draft.title.trim(),
-                sourceRef: payload.draft.sourceRef.trim(),
-                rawLocation: payload.draft.rawLocation.trim(),
-                summary: payload.draft.summary.trim(),
-                status: "collected",
-                metadata: {
-                  allowedForAnalysis: true,
-                  enteredFrom: "teams_research_source_collection_panel",
-                },
-                qualitySignals: {
-                  manualEntry: true,
-                  needsIntakeReview: true,
-                },
+          status: "completed",
+          notes: payload.draft.notes.trim(),
+          records: [
+            {
+              sourceType: payload.draft.sourceType,
+              title: payload.draft.title.trim(),
+              sourceRef: payload.draft.sourceRef.trim(),
+              rawLocation: payload.draft.rawLocation.trim(),
+              summary: payload.draft.summary.trim(),
+              status: "collected",
+              metadata: {
+                allowedForAnalysis: true,
+                enteredFrom: "teams_research_source_collection_panel",
               },
-            ],
-          }),
+              qualitySignals: {
+                manualEntry: true,
+                needsIntakeReview: true,
+              },
+            },
+          ],
         },
       );
       const imported = await Promise.all(
