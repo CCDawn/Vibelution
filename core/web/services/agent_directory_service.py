@@ -363,6 +363,13 @@ from .agent_directory.ops_residual import (
     write_group_context_event,
     write_project_memory_update_proposal,
 )
+from .agent_directory.episodic_memory import (
+    EPISODE_KINDS,
+    REF_TYPES,
+    append_episodic_event,
+    list_current_episodic_events,
+    supersede_episodic_event,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -731,6 +738,10 @@ class AgentMessageNotFoundError(AgentDirectoryError):
 
 class AgentMemoryProposalNotFoundError(AgentDirectoryError):
     """Raised when an Agent project-memory proposal does not exist."""
+
+
+class AgentEpisodicEventNotFoundError(AgentDirectoryError):
+    """Raised when an Agent episodic event does not exist."""
 
 
 def agent_session_lifecycle_serialized(
