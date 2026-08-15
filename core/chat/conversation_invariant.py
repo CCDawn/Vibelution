@@ -80,6 +80,34 @@ def canonical_conversation_messages_from_events(
     return conversation_layer_messages(conversation_model_messages_from_events(replayed))
 
 
+def live_conversation_messages_from_events(
+    events: Iterable[ConversationLedgerEvent],
+    *,
+    turn_id: str = "",
+) -> list[dict[str, Any]]:
+    """Rebuild conversation layer including the in-flight turn.
+
+    Unlike ``canonical_conversation_messages_from_events``, this does not drop
+    ``turn_id``. When ``turn_id`` is set, only that turn's reconstructed
+    conversation messages are returned so callers can splice them onto an
+    already assembled system/history prefix.
+    """
+
+    normalized_turn_id = str(turn_id or "").strip()
+    event_list = list(events or [])
+    if normalized_turn_id:
+        event_list = [
+            event
+            for event in event_list
+            if str(getattr(event, "turn_id", "") or "").strip() == normalized_turn_id
+        ]
+    replayed = apply_context_compression_checkpoints(
+        event_list,
+        current_turn_id=normalized_turn_id,
+    )
+    return conversation_layer_messages(conversation_model_messages_from_events(replayed))
+
+
 def is_system_layer_message(message: Any) -> bool:
     role = _message_role(message)
     if role in SYSTEM_LAYER_ROLES:
