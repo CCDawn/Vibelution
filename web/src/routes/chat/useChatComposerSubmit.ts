@@ -2,6 +2,7 @@ import { useMutation, type QueryClient, type UseMutationResult } from "@tanstack
 import {
   useCallback,
   useEffect,
+  useRef,
   type Dispatch,
   type MutableRefObject,
   type SetStateAction,
@@ -63,6 +64,14 @@ import {
   type ComposerImageAttachment,
 } from "./chatComposerSubmitModel";
 import { loadTurnStatusTailConfig } from "./turnStatusTailModel";
+import {
+  appendComposerQueueItem,
+  moveComposerQueueItem,
+  removeComposerQueueItem,
+  resolveComposerQueueEnter,
+  updateComposerQueueItem,
+  type ComposerQueueItem,
+} from "../../components/conversation/composerFollowupQueueModel";
 import { postSubmitTelemetry } from "./chatSubmitTelemetry";
 import { resolveSessionStopTurnId } from "./chatStopTurnModel";
 
@@ -474,6 +483,8 @@ export type UseChatComposerSubmitActionsOptions = ChatComposerTurnMutations & {
   lang: "zh" | "en";
   describeError: (error: unknown, fallback: string) => string;
   setSessionDrafts: Dispatch<SetStateAction<Record<string, string>>>;
+  sessionFollowupQueues: Record<string, ComposerQueueItem[]>;
+  setSessionFollowupQueues: Dispatch<SetStateAction<Record<string, ComposerQueueItem[]>>>;
   setSessionComposerErrors: Dispatch<SetStateAction<Record<string, string>>>;
   setSessionImageAttachments: Dispatch<SetStateAction<Record<string, ComposerImageAttachment[]>>>;
   setSessionReferenceAttachments: Dispatch<SetStateAction<Record<string, SessionReferenceAttachment[]>>>;
@@ -512,6 +523,9 @@ export type UseChatComposerSubmitActionsResult = {
   handleSubmitTurn: () => void;
   handleStopTurn: () => void;
   handleSubmitGuidance: (mode: SessionGuidanceMode) => void;
+  handleFollowupQueueUpdate: (id: string, text: string) => void;
+  handleFollowupQueueRemove: (id: string) => void;
+  handleFollowupQueueMove: (fromIndex: number, toIndex: number) => void;
   handleEditUserMessage: (message: ConversationMessage) => void;
   handleCancelEditMessage: () => void;
 };
@@ -528,6 +542,8 @@ export function useChatComposerSubmitActions({
   stopTurnMutation,
   sessionGuidanceMutation,
   setSessionDrafts,
+  sessionFollowupQueues,
+  setSessionFollowupQueues,
   setSessionComposerErrors,
   setSessionImageAttachments,
   setSessionReferenceAttachments,
@@ -554,6 +570,10 @@ export function useChatComposerSubmitActions({
   setMentalModelEnabledForNextTurn,
   setRuntimeStatusEnabledForNextTurn,
 }: UseChatComposerSubmitActionsOptions): UseChatComposerSubmitActionsResult {
+  const stoppedTurnAutoFlushRef = useRef<{ sessionId: string; turnId: string } | null>(null);
+  const previousBusyRef = useRef(sessionBusy);
+  const previousSessionRef = useRef(activeSessionId);
+
   const handleComposerChange = useCallback((value: string) => {
     if (!activeSessionId) {
       return;
@@ -580,6 +600,15 @@ export function useChatComposerSubmitActions({
 
   const handleAddComposerAttachments = useCallback((files: FileList | File[]) => {
     if (!activeSessionId) {
+      return;
+    }
+    if (sessionBusy) {
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [activeSessionId]: lang === "zh"
+          ? "运行中的排队消息暂不支持图片，请等待当前轮次结束后发送。"
+          : "Queued follow-ups do not support images while a turn is running. Send it after the turn ends.",
+      }));
       return;
     }
     if (activeAgentImageInputUnsupported) {
@@ -612,6 +641,7 @@ export function useChatComposerSubmitActions({
     activeAgentImageInputUnsupported,
     activeSessionId,
     lang,
+    sessionBusy,
     setSessionComposerErrors,
     setSessionImageAttachments,
   ]);
@@ -625,6 +655,15 @@ export function useChatComposerSubmitActions({
 
   const handleAddComposerReference = useCallback((reference: SessionReferenceAttachment) => {
     if (!activeSessionId) {
+      return;
+    }
+    if (sessionBusy) {
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [activeSessionId]: lang === "zh"
+          ? "运行中的排队消息暂不支持会话引用，请等待当前轮次结束后发送。"
+          : "Queued follow-ups do not support session references while a turn is running. Send it after the turn ends.",
+      }));
       return;
     }
     const referenceId = sessionReferenceId(reference);
@@ -649,7 +688,13 @@ export function useChatComposerSubmitActions({
       ...current,
       [activeSessionId]: "",
     }));
-  }, [activeSessionId, lang, setSessionComposerErrors, setSessionReferenceAttachments]);
+  }, [
+    activeSessionId,
+    lang,
+    sessionBusy,
+    setSessionComposerErrors,
+    setSessionReferenceAttachments,
+  ]);
 
   const handleRemoveComposerReference = useCallback((referenceId: string) => {
     if (!activeSessionId) {
@@ -824,6 +869,59 @@ export function useChatComposerSubmitActions({
       }));
       return;
     }
+    if (sessionBusy && !resolvedEditTarget) {
+      if (sessionStopping) {
+        return;
+      }
+      if (activeImageAttachments.length || activeReferenceAttachments.length) {
+        setSessionComposerErrors((current) => ({
+          ...current,
+          [activeSessionId]: lang === "zh"
+            ? "运行中的排队消息仅支持文本，请先移除图片和会话引用。"
+            : "Queued follow-ups are text-only while a turn is running. Remove images and session references first.",
+        }));
+        return;
+      }
+      const queue = sessionFollowupQueues[activeSessionId] ?? [];
+      const action = resolveComposerQueueEnter({
+        sessionBusy: true,
+        draft: activeDraftEffective,
+        queue,
+      });
+      if (action.type === "enqueue") {
+        setSessionFollowupQueues((current) => ({
+          ...current,
+          [activeSessionId]: appendComposerQueueItem(current[activeSessionId] ?? [], action.text),
+        }));
+        setSessionDrafts((current) => ({
+          ...current,
+          [activeSessionId]: "",
+        }));
+        return;
+      }
+      if (action.type === "immediate") {
+        void (async () => {
+          try {
+            for (const item of action.items) {
+              await sessionGuidanceMutation.mutateAsync({
+                sessionId: activeSessionId,
+                content: item.text,
+                mode: "safe",
+              });
+              setSessionFollowupQueues((current) => ({
+                ...current,
+                [activeSessionId]: removeComposerQueueItem(current[activeSessionId] ?? [], item.id),
+              }));
+            }
+          } catch {
+            // Successful items were removed one by one. The failed item, later
+            // snapshot items, and anything appended concurrently remain queued.
+          }
+        })();
+        return;
+      }
+      return;
+    }
     const content = activeDraftEffective.trim();
     const clientSubmissionId = createClientSubmissionId(activeSessionId);
     const telemetryActivePhase = activePhase ?? undefined;
@@ -948,7 +1046,12 @@ export function useChatComposerSubmitActions({
     runtimeStatusEnabledForNextTurn,
     resolvedEditTarget,
     sessionBusy,
+    sessionFollowupQueues,
+    sessionGuidanceMutation,
+    sessionStopping,
     setSessionComposerErrors,
+    setSessionDrafts,
+    setSessionFollowupQueues,
     submitTurnWithAttachments,
   ]);
 
@@ -1026,6 +1129,36 @@ export function useChatComposerSubmitActions({
     setSessionReferenceAttachments,
   ]);
 
+  const handleFollowupQueueUpdate = useCallback((id: string, text: string) => {
+    if (!activeSessionId) {
+      return;
+    }
+    setSessionFollowupQueues((current) => ({
+      ...current,
+      [activeSessionId]: updateComposerQueueItem(current[activeSessionId] ?? [], id, text),
+    }));
+  }, [activeSessionId, setSessionFollowupQueues]);
+
+  const handleFollowupQueueRemove = useCallback((id: string) => {
+    if (!activeSessionId) {
+      return;
+    }
+    setSessionFollowupQueues((current) => ({
+      ...current,
+      [activeSessionId]: removeComposerQueueItem(current[activeSessionId] ?? [], id),
+    }));
+  }, [activeSessionId, setSessionFollowupQueues]);
+
+  const handleFollowupQueueMove = useCallback((fromIndex: number, toIndex: number) => {
+    if (!activeSessionId) {
+      return;
+    }
+    setSessionFollowupQueues((current) => ({
+      ...current,
+      [activeSessionId]: moveComposerQueueItem(current[activeSessionId] ?? [], fromIndex, toIndex),
+    }));
+  }, [activeSessionId, setSessionFollowupQueues]);
+
   const handleStopTurn = useCallback(() => {
     if (!activeSessionId || !sessionBusy || sessionStopping) {
       return;
@@ -1042,6 +1175,7 @@ export function useChatComposerSubmitActions({
       void queryClient.invalidateQueries({ queryKey: queryKeys.session(activeSessionId) });
       return;
     }
+    stoppedTurnAutoFlushRef.current = { sessionId: activeSessionId, turnId };
     stopTurnMutation.mutate({
       sessionId: activeSessionId,
       turnId,
@@ -1074,6 +1208,65 @@ export function useChatComposerSubmitActions({
     });
   }, [activeDraftEffective, activeSessionId, sessionBusy, sessionGuidanceMutation, sessionStopping]);
 
+  useEffect(() => {
+    const wasBusy = previousBusyRef.current;
+    const previousSession = previousSessionRef.current;
+    previousBusyRef.current = sessionBusy;
+    previousSessionRef.current = activeSessionId;
+    const stoppedTurn = stoppedTurnAutoFlushRef.current;
+    if (
+      sessionBusy
+      && stoppedTurn
+      && stoppedTurn.sessionId === activeSessionId
+      && activeTurnId
+      && activeTurnId !== stoppedTurn.turnId
+    ) {
+      stoppedTurnAutoFlushRef.current = null;
+    }
+    if (!activeSessionId || previousSession !== activeSessionId) {
+      return;
+    }
+    if (!(wasBusy && !sessionBusy)) {
+      return;
+    }
+    if (stoppedTurn?.sessionId === activeSessionId) {
+      stoppedTurnAutoFlushRef.current = null;
+      if (!activeTurnId || activeTurnId === stoppedTurn.turnId) {
+        return;
+      }
+    }
+    if (sessionStopping) {
+      return;
+    }
+    const first = (sessionFollowupQueues[activeSessionId] ?? [])[0];
+    if (!first) {
+      return;
+    }
+    setSessionFollowupQueues((current) => ({
+      ...current,
+      [activeSessionId]: removeComposerQueueItem(current[activeSessionId] ?? [], first.id),
+    }));
+    void submitTurnWithAttachments(
+      activeSessionId,
+      first.text,
+      [],
+      [],
+      mentalModelEnabledForNextTurn,
+      runtimeStatusEnabledForNextTurn,
+      createClientSubmissionId(activeSessionId),
+    );
+  }, [
+    activeSessionId,
+    activeTurnId,
+    mentalModelEnabledForNextTurn,
+    runtimeStatusEnabledForNextTurn,
+    sessionBusy,
+    sessionFollowupQueues,
+    sessionStopping,
+    setSessionFollowupQueues,
+    submitTurnWithAttachments,
+  ]);
+
   return {
     handleComposerChange,
     handleMentalModelEnabledChange,
@@ -1085,6 +1278,9 @@ export function useChatComposerSubmitActions({
     handleSubmitTurn,
     handleStopTurn,
     handleSubmitGuidance,
+    handleFollowupQueueUpdate,
+    handleFollowupQueueRemove,
+    handleFollowupQueueMove,
     handleEditUserMessage,
     handleCancelEditMessage,
   };
