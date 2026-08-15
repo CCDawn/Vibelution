@@ -565,6 +565,18 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "riskTags": ["memory_write"],
         "permissionTier": HIGH_PERMISSION_TIER,
     },
+    "append_personal_memory_tool": {
+        "category": "memory_context",
+        "capabilityTags": ["memory_write", "private_episode"],
+        "riskTags": ["memory_write"],
+        "permissionTier": MEDIUM_PERMISSION_TIER,
+    },
+    "supersede_personal_memory_tool": {
+        "category": "memory_context",
+        "capabilityTags": ["memory_write", "private_episode"],
+        "riskTags": ["memory_write"],
+        "permissionTier": MEDIUM_PERMISSION_TIER,
+    },
     "append_episodic_memory_tool": {
         "category": "memory_context",
         "capabilityTags": ["memory_write", "private_episode"],

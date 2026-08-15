@@ -31,10 +31,10 @@ def _format_personal_episodes_context(episodes: list[dict[str, Any]]) -> list[st
     from . import episodic_memory as episodic_memory_mod
 
     if not episodes:
-        return ["PersonalEpisodes: none"]
+        return ["## 个人记忆", "无"]
     lines = [
-        "PersonalEpisodes: current private memories for this Agent, shared across its sessions.",
-        "- Use these facts in the current session. Supersede outdated ones; do not copy standards, skills, or code.",
+        "## 个人记忆",
+        "本轮必须使用。这是当前 Agent 的跨会话私有记忆，不是世代交接，也不是团队/公共知识。",
     ]
     for item in episodes[: episodic_memory_mod.PROMPT_LIST_LIMIT]:
         episode_id = str(item.get("episodeId") or item.get("eventId") or "").strip()

@@ -16,9 +16,9 @@ Prefer slice modules over growing `agent_directory_service.py` when possible.
 | Create/update agent / avatar | `mutations.py` |
 | Registry repair / load/save / shrink guard | `repair_store.py` |
 | Inbox / workspace write / ensure-session / profile defaults | `ops_residual.py` |
-| Personal lossless episode append / supersede | `episodic_memory.py` |
-| Agent-facing private episode write/supersede tools | `tools/episodic_memory_tools.py` |
-| Personal episode prompt dump | `projections.py` + `context_engine.py` |
+| Personal lossless memory append / supersede | `episodic_memory.py` |
+| Agent-facing private personal-memory write/supersede tools | `tools/episodic_memory_tools.py` |
+| Personal memory prompt dump | `projections.py` + `context_engine.py` |
 | Lifecycle serializers on facade | `../agent_directory_service.py` (wrappers only) |
 | Public import surface | `../agent_directory_service.py` (prefer re-export) |
 
@@ -35,7 +35,7 @@ Structure awareness (soft): `docs/standards/development-standard.md` §8.3.
 | Create/update + avatar mutations | `mutations.py` | lifecycle purge path |
 | Registry repair / load-save / normalize | `repair_store.py` | workflow orchestration |
 | Inbox / workspace / ensure-session residual | `ops_residual.py` | team membership graph |
-| Personal lossless episode jsonl | `episodic_memory.py` | `team_knowledge`, `outcomeGraph`, `memory_graph_service` |
+| Personal lossless memory jsonl | `episodic_memory.py` | `team_knowledge`, `outcomeGraph`, `memory_graph_service` |
 | Generation-handoff brain (`memory.json`) | self-evolution tool policy | default session `allowedTools` / `core` bundle |
 
 ## Sole-owner rules
@@ -45,7 +45,7 @@ Structure awareness (soft): `docs/standards/development-standard.md` §8.3.
 3. Lifecycle archive/purge/reset keep serializer wrappers on the facade (`__wrapped__` identity).
 4. Re-export public symbols from `agent_directory_service` for route stability.
 5. `get_core_context_tool` / `get_current_goal_tool` / `commit_compressed_memory_tool` belong to self-evolution generation handoff, not the default session pack.
-6. Current personal episodes are dumped into `build_agent_context` so every session of the same Agent can see them.
+6. Current personal memories are dumped into `build_agent_context` as `## 个人记忆` so every session of the same Agent can see them. This dump is not generation-handoff `MEMORY`.
 
 ## Extraction progress
 
