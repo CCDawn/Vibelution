@@ -33,6 +33,7 @@ export type ChatConversationComposerBridgeInput = {
   interruptGuidancePending: boolean;
   labels: ChatConversationComposerBridgeLabels;
   references: readonly SessionReferenceAttachment[];
+  followupQueue?: Array<{ id: string; text: string }>;
   safeGuidancePending: boolean;
   sessionBusy: boolean;
   sessionId?: string | null;
@@ -51,6 +52,7 @@ export type ChatConversationComposerBridgeState = {
   editUserMessageDisabled: boolean;
   editingMessageId?: string;
   error: string;
+  followupQueue: Array<{ id: string; text: string }>;
   guidance: string;
   interruptGuidancePending: boolean;
   modeNotice: string;
@@ -71,6 +73,7 @@ type BridgeManagedConversationProps =
   | "composerAttachments"
   | "composerDisabled"
   | "composerError"
+  | "followupQueue"
   | "composerGuidance"
   | "composerInterruptGuidancePending"
   | "composerModeNotice"
@@ -136,6 +139,7 @@ export function buildConversationComposerBridgeState(
     editUserMessageDisabled: input.submitPending,
     editingMessageId: input.editTargetMessageId,
     error: input.error ?? "",
+    followupQueue: [...(input.followupQueue ?? [])],
     guidance: input.guidance ?? "",
     interruptGuidancePending: input.interruptGuidancePending,
     modeNotice: isEditingMessage ? input.labels.editMessageModeNotice : "",
@@ -169,6 +173,7 @@ export function ChatConversationComposerBridge({
       composerSafeGuidancePending={composer.safeGuidancePending}
       composerInterruptGuidancePending={composer.interruptGuidancePending}
       composerError={composer.error}
+      followupQueue={composer.followupQueue}
       composerGuidance={composer.guidance}
       composerAttachments={composer.attachments}
       composerReferences={composer.references}
