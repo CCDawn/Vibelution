@@ -28,6 +28,7 @@ Agent 单轮编排的现有 SSOT。新逻辑优先扩这里的模块，不要在
 | `turn_diagnostics.py` | 重试广播、cache 诊断、invocation context、stall 报告 | `SelfEvolvingAgent` 对应 wrapper |
 | `tool_authorization_binding.py` | 运行时身份绑定、可见工具物化、隐藏工具文案、重启护栏 | `SelfEvolvingAgent` 对应 wrapper；policy 仍在 `core.authorization` |
 | `turn_message_assembly.py` | 单 Turn 消息排序：seed normalize/sanitize、static/volatile 插入 | `SelfEvolvingAgent` 对应 wrapper；Prompt 策略仍在 `prompt_manager` / `context_engine` |
+| `turn_llm_adapter.py` | Agent 主/备路由 attempt loop；UI/scene 由注入 observer 接收 | `SelfEvolvingAgent._invoke_llm` wrapper；调用/recovery/routing 仍在 `core.llm` |
 
 硬约束：
 
