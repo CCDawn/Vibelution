@@ -27,9 +27,10 @@
  */
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import type { Query } from "@tanstack/react-query";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { QueryClient, QueryClientProvider, type Query } from "@tanstack/react-query";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { queryKeys } from "../../api/queryKeys";
 import type { SessionDetail, SessionSummary, SessionToolApprovalRequest } from "../../api/types";
 import {
   clearSessionDetailPaintCacheForTests,
@@ -38,10 +39,27 @@ import {
 } from "./chatSessionPaintCache";
 import {
   sessionDetailStructuralSharing,
+  useSessionToolApprovalsQuery,
   useSessionToolApprovalsRefetchInterval,
   useStableSessionDetailPaint,
   useStableSessionDetailPlaceholder,
+  type SessionToolApprovalPollingInput,
+  type SessionToolApprovalsQueryOptions,
 } from "./ChatCodingRouteWorkbench";
+
+// happy-dom needs an explicit act environment; without it act() only warns.
+// Repo pattern: (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+// vi.mock factories are hoisted above imports; vi.hoisted guarantees the mock
+// binding exists before the factory is first invoked.
+const { fetchJsonMock } = vi.hoisted(() => ({
+  fetchJsonMock: vi.fn(),
+}));
+
+vi.mock("../../api/client", () => ({
+  fetchJson: (...args: unknown[]) => fetchJsonMock(...args),
+}));
 
 type PlaceholderInput = {
   activeSessionId: string | null;
@@ -67,6 +85,8 @@ type PaintInput = {
 let snapshots: Array<{ placeholder: SessionDetail | undefined }> = [];
 let intervalSnapshots: Array<{ refetchInterval: RefetchIntervalResolver }> = [];
 let paintSnapshots: Array<{ detail: SessionDetail | undefined }> = [];
+let approvalSnapshots: Array<ReturnType<typeof useSessionToolApprovalsQuery>> = [];
+let approvalQueryClient: QueryClient;
 
 function Host({ input }: { input: PlaceholderInput }) {
   const placeholder = useStableSessionDetailPlaceholder(input);
@@ -181,9 +201,108 @@ function intervalFor(
   } as unknown as Query<SessionToolApprovalRequest[]>);
 }
 
+const pendingApproval: SessionToolApprovalRequest = {
+  requestId: "r1",
+  sessionId: "s1",
+  turnId: "t1",
+  agentId: "agent-1",
+  callId: "c1",
+  toolName: "read",
+  approval: "required",
+  risk: "low",
+  argumentsHash: "h",
+  argumentSummary: {},
+  sessionGrantScope: {},
+  decisionFingerprint: "fp",
+  configRevision: 0,
+  configHash: "cfg",
+  permissionPreset: "default",
+  availableDecisions: ["accept", "decline"],
+  createdAt: "2026-08-15T10:00:00Z",
+  status: "pending",
+  decision: null,
+  resolvedAt: null,
+} as SessionToolApprovalRequest;
+
+const idlePollingInput: SessionToolApprovalPollingInput = {
+  directSessionPanelActive: true,
+  runtimeActive: false,
+  detailCurrentPhase: "ready",
+  summaryCurrentPhase: "ready",
+  summaryStatus: "idle",
+};
+
+function approvalsOptions(
+  sessionId: string | null | undefined,
+  overrides: Partial<SessionToolApprovalsQueryOptions> = {},
+): SessionToolApprovalsQueryOptions {
+  return {
+    sessionId,
+    enabled: Boolean(sessionId),
+    polling: idlePollingInput,
+    ...overrides,
+  };
+}
+
+function ApprovalHost({ options }: { options: SessionToolApprovalsQueryOptions }) {
+  approvalSnapshots.push(useSessionToolApprovalsQuery(options));
+  return null;
+}
+
+function mountApprovals(options: SessionToolApprovalsQueryOptions) {
+  container = document.createElement("div");
+  document.body.appendChild(container);
+  root = createRoot(container);
+  act(() => {
+    root!.render(
+      React.createElement(
+        QueryClientProvider,
+        { client: approvalQueryClient },
+        React.createElement(ApprovalHost, { options }),
+      ),
+    );
+  });
+}
+
+function rerenderApprovals(options: SessionToolApprovalsQueryOptions) {
+  act(() => {
+    root!.render(
+      React.createElement(
+        QueryClientProvider,
+        { client: approvalQueryClient },
+        React.createElement(ApprovalHost, { options }),
+      ),
+    );
+  });
+}
+
+async function flushApprovals() {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+    vi.advanceTimersByTime(0);
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
+async function advanceApprovals(ms: number) {
+  await act(async () => {
+    vi.advanceTimersByTime(ms);
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
 beforeEach(() => {
   clearSessionDetailPaintCacheForTests();
   paintSnapshots = [];
+  fetchJsonMock.mockReset();
+  approvalQueryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+    },
+  });
 });
 
 afterEach(() => {
@@ -195,6 +314,8 @@ afterEach(() => {
   snapshots = [];
   intervalSnapshots = [];
   paintSnapshots = [];
+  approvalSnapshots = [];
+  vi.useRealTimers();
 });
 
 describe("ChatCodingRouteWorkbench update-depth regression", () => {
@@ -351,28 +472,6 @@ describe("sessionToolApprovals refetchInterval stability", () => {
     summaryCurrentPhase: "ready",
     summaryStatus: "idle",
   };
-  const pendingApproval = {
-    requestId: "r1",
-    sessionId: "s1",
-    turnId: "t1",
-    agentId: "agent-1",
-    callId: "c1",
-    toolName: "read",
-    approval: "required",
-    risk: "low",
-    argumentsHash: "h",
-    argumentSummary: {},
-    sessionGrantScope: {},
-    decisionFingerprint: "fp",
-    configRevision: 0,
-    configHash: "cfg",
-    permissionPreset: "default",
-    availableDecisions: ["accept", "decline"],
-    createdAt: "2026-08-15T10:00:00Z",
-    status: "pending",
-    decision: null,
-    resolvedAt: null,
-  } as SessionToolApprovalRequest;
 
   it("keeps a stable refetchInterval across unrelated rerenders with exact false/750/2000/4000 timing", () => {
     mountInterval(idleInput);
@@ -469,5 +568,136 @@ describe("useStableSessionDetailPaint sticky-paint stability", () => {
     expect(second).not.toBe(first);
     expect(second?.id).toBe("s2");
     expect(second?.messages?.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("sessionToolApprovals real QueryClient observer seam", () => {
+  it("fetches the pending approvals endpoint exactly once for an empty first result", async () => {
+    vi.useFakeTimers();
+    fetchJsonMock.mockImplementation((url: string) => {
+      expect(url).toContain("/api/sessions/s1/tool-approvals?status=pending");
+      return Promise.resolve([]);
+    });
+
+    mountApprovals(approvalsOptions("s1"));
+    await flushApprovals();
+
+    expect(fetchJsonMock).toHaveBeenCalledTimes(1);
+    expect(approvalSnapshots.at(-1)?.data).toEqual([]);
+  });
+
+  it("does not refetch on no-op parent rerenders with identical sessionId and polling inputs", async () => {
+    vi.useFakeTimers();
+    fetchJsonMock.mockResolvedValue([]);
+    const options = approvalsOptions("s1");
+
+    mountApprovals(options);
+    await flushApprovals();
+    expect(fetchJsonMock).toHaveBeenCalledTimes(1);
+
+    // Same logical inputs behind fresh props objects: the no-op parent rerender
+    // that previously handed React Query a fresh queryFn/observer config must
+    // not trigger another fetch or an update loop.
+    rerenderApprovals({ ...options });
+    rerenderApprovals({ ...options });
+    rerenderApprovals({ ...options });
+    await flushApprovals();
+    expect(fetchJsonMock).toHaveBeenCalledTimes(1);
+    expect(approvalSnapshots.length).toBeGreaterThan(1);
+  });
+
+  it("polls idle empty data exactly once at 4000ms and not a moment sooner", async () => {
+    vi.useFakeTimers();
+    fetchJsonMock.mockResolvedValue([]);
+
+    mountApprovals(approvalsOptions("s1"));
+    await flushApprovals();
+    expect(fetchJsonMock).toHaveBeenCalledTimes(1);
+
+    // 3999ms: idle interval (4000ms) must not have fired yet.
+    await advanceApprovals(3999);
+    expect(fetchJsonMock).toHaveBeenCalledTimes(1);
+
+    // 4000ms total: exactly one more poll.
+    await advanceApprovals(1);
+    expect(fetchJsonMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("polls busy empty data every 2000ms", async () => {
+    vi.useFakeTimers();
+    fetchJsonMock.mockResolvedValue([]);
+
+    mountApprovals(
+      approvalsOptions("s1", {
+        polling: { ...idlePollingInput, runtimeActive: true },
+      }),
+    );
+    await flushApprovals();
+    expect(fetchJsonMock).toHaveBeenCalledTimes(1);
+
+    await advanceApprovals(1999);
+    expect(fetchJsonMock).toHaveBeenCalledTimes(1);
+
+    await advanceApprovals(1);
+    expect(fetchJsonMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("polls pending approvals every 750ms", async () => {
+    vi.useFakeTimers();
+    fetchJsonMock.mockResolvedValue([pendingApproval]);
+
+    mountApprovals(approvalsOptions("s1"));
+    await flushApprovals();
+    expect(fetchJsonMock).toHaveBeenCalledTimes(1);
+
+    await advanceApprovals(749);
+    expect(fetchJsonMock).toHaveBeenCalledTimes(1);
+
+    await advanceApprovals(1);
+    expect(fetchJsonMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("disables polling entirely when the direct session panel is inactive", async () => {
+    vi.useFakeTimers();
+    fetchJsonMock.mockResolvedValue([pendingApproval]);
+
+    mountApprovals(
+      approvalsOptions("s1", {
+        polling: { ...idlePollingInput, directSessionPanelActive: false },
+      }),
+    );
+    await flushApprovals();
+    expect(fetchJsonMock).toHaveBeenCalledTimes(1);
+
+    await advanceApprovals(100_000);
+    expect(fetchJsonMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("switching sessionId re-keys the observer and only fetches the new session", async () => {
+    vi.useFakeTimers();
+    fetchJsonMock.mockImplementation((url: string) => Promise.resolve([]));
+
+    mountApprovals(approvalsOptions("s1"));
+    await flushApprovals();
+    expect(fetchJsonMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchJsonMock.mock.calls[0][0])).toContain("/api/sessions/s1/tool-approvals");
+    expect(approvalQueryClient.getQueryData(queryKeys.sessionToolApprovals("s1"))).toEqual([]);
+
+    rerenderApprovals(approvalsOptions("s2"));
+    await flushApprovals();
+    expect(fetchJsonMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchJsonMock.mock.calls[1][0])).toContain("/api/sessions/s2/tool-approvals");
+    expect(approvalQueryClient.getQueryData(queryKeys.sessionToolApprovals("s2"))).toEqual([]);
+    expect(approvalSnapshots.at(-1)?.data).toEqual([]);
+
+    // The old session's observer is gone; every further poll targets s2 only.
+    await advanceApprovals(4000);
+    const afterSwitchCalls = fetchJsonMock.mock.calls
+      .slice(1)
+      .map((call) => String(call[0]));
+    expect(afterSwitchCalls.length).toBeGreaterThan(1);
+    expect(
+      afterSwitchCalls.every((url) => url.includes("/api/sessions/s2/tool-approvals")),
+    ).toBe(true);
   });
 });
