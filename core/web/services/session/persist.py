@@ -9,6 +9,7 @@ Bodies late-bind ``session_service`` so facade monkeypatches remain effective.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -279,17 +280,25 @@ def _commit_session_turn_runtime_state(
     session_id: str,
     conversation: dict[str, Any],
     *,
+    previous_conversation: dict[str, Any],
     turn_id: str = "",
 ) -> bool:
-    """Persist one session runtime row; do not rewrite sibling sessions."""
+    """Persist turn-owned row changes without clobbering concurrent metadata."""
 
     s = _service()
     with s._CHAT_STATE_LOCK:
         if turn_id and not s._is_session_turn_current(session_id, turn_id):
             return False
-        if s.load_session_chat_state(s.PROJECT_ROOT, session_id) is None:
+        current = s.load_session_chat_state(s.PROJECT_ROOT, session_id)
+        if current is None:
             return False
-        s.save_session_chat_state(s.PROJECT_ROOT, session_id, conversation)
+        merged = dict(current)
+        for key in previous_conversation.keys() - conversation.keys():
+            merged.pop(key, None)
+        for key, value in conversation.items():
+            if key not in previous_conversation or previous_conversation[key] != value:
+                merged[key] = value
+        s.save_session_chat_state(s.PROJECT_ROOT, session_id, merged)
         return True
 
 
@@ -315,6 +324,7 @@ def _persist_session_turn_result(
     conversation = s.load_session_chat_state(s.PROJECT_ROOT, session_id)
     if conversation is None:
         return
+    previous_conversation = deepcopy(conversation)
     if s._latest_assistant_message_is_stop(messages):
         s._persist_chat_turn_work_run(
             session_id=session_id,
@@ -407,7 +417,12 @@ def _persist_session_turn_result(
         )
         conversation["last_turn_error"] = turn_error
         conversation["updated_at"] = timestamp
-        if not _commit_session_turn_runtime_state(session_id, conversation, turn_id=turn_id):
+        if not _commit_session_turn_runtime_state(
+            session_id,
+            conversation,
+            previous_conversation=previous_conversation,
+            turn_id=turn_id,
+        ):
             return
         s._clear_session_live_output(session_id, turn_id=turn_id)
         s._persist_chat_turn_work_run(
@@ -705,7 +720,12 @@ def _persist_session_turn_result(
         stop_requested=stop_requested,
     )
     conversation["updated_at"] = assistant_entry["timestamp"]
-    if not _commit_session_turn_runtime_state(session_id, conversation, turn_id=turn_id):
+    if not _commit_session_turn_runtime_state(
+        session_id,
+        conversation,
+        previous_conversation=previous_conversation,
+        turn_id=turn_id,
+    ):
         return
     s._clear_session_live_output(session_id, turn_id=turn_id)
     tool_calls = s._normalize_message_tool_calls(s._extract_chat_tool_calls(result))
@@ -940,6 +960,7 @@ def _persist_session_turn_runtime_error(
     conversation = s.load_session_chat_state(s.PROJECT_ROOT, session_id)
     if conversation is None:
         return
+    previous_conversation = deepcopy(conversation)
     if turn_id and not s._is_session_turn_current(session_id, turn_id):
         return
     conversation.pop("messages", None)
@@ -947,7 +968,12 @@ def _persist_session_turn_runtime_error(
     conversation["last_turn_terminal_reason"] = s._terminal_reason_for_turn(normalized_status)
     conversation["last_turn_error"] = turn_error
     conversation["updated_at"] = timestamp
-    if not _commit_session_turn_runtime_state(session_id, conversation, turn_id=turn_id):
+    if not _commit_session_turn_runtime_state(
+        session_id,
+        conversation,
+        previous_conversation=previous_conversation,
+        turn_id=turn_id,
+    ):
         return
     from . import directory_bridge
 
@@ -1043,6 +1069,7 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
     conversation = s.load_session_chat_state(s.PROJECT_ROOT, session_id)
     if conversation is None:
         return
+    previous_conversation = deepcopy(conversation)
     if s._looks_like_provider_error_text(raw_error):
         turn_error = s._make_session_turn_error(
             raw_error,
@@ -1062,7 +1089,12 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
         conversation["last_turn_terminal_reason"] = s._terminal_reason_for_turn("failed_provider")
         conversation["last_turn_error"] = turn_error
         conversation["updated_at"] = timestamp
-        if not _commit_session_turn_runtime_state(session_id, conversation, turn_id=turn_id):
+        if not _commit_session_turn_runtime_state(
+            session_id,
+            conversation,
+            previous_conversation=previous_conversation,
+            turn_id=turn_id,
+        ):
             return
         s._clear_session_live_output(session_id, turn_id=turn_id)
         s._persist_chat_turn_work_run(
@@ -1163,7 +1195,12 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
     conversation["last_turn_status"] = "failed"
     conversation["last_turn_terminal_reason"] = s._terminal_reason_for_turn("failed_runtime")
     conversation["updated_at"] = timestamp
-    if not _commit_session_turn_runtime_state(session_id, conversation, turn_id=turn_id):
+    if not _commit_session_turn_runtime_state(
+        session_id,
+        conversation,
+        previous_conversation=previous_conversation,
+        turn_id=turn_id,
+    ):
         return
     s._clear_session_live_output(session_id, turn_id=turn_id)
     s._persist_chat_turn_work_run(
