@@ -4,7 +4,14 @@
  * Prefer editing modules under web/src/routes/chat/ over growing this file.
  */
 
-import { useMutation, useQuery, useQueryClient, type Query } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type Query,
+  type QueryFunctionContext,
+  type QueryKey,
+} from "@tanstack/react-query";
 import {
   Apple,
   ArrowUpRight,
@@ -421,6 +428,22 @@ export function sessionDetailStructuralSharing(
 }
 
 /**
+ * Polling inputs that drive the pending tool-approvals observer.
+ *
+ * Shared by `useSessionToolApprovalsRefetchInterval` (which maps them to a
+ * stable resolver reference) and `useSessionToolApprovalsQuery` (which owns the
+ * whole observer). Keeping the inputs as one stable shape means an unrelated
+ * parent rerender with identical inputs recomputes nothing.
+ */
+export type SessionToolApprovalPollingInput = {
+  directSessionPanelActive: boolean;
+  runtimeActive: boolean;
+  detailCurrentPhase: string | undefined;
+  summaryCurrentPhase: string | undefined;
+  summaryStatus: string | undefined;
+};
+
+/**
  * Stable refetchInterval resolver for the pending tool-approvals poll.
  *
  * React Query re-derives the `refetchInterval` option while a poll runs, and
@@ -432,13 +455,9 @@ export function sessionDetailStructuralSharing(
  * inputs (panel activity, busy inputs, detail/summary status) are unchanged,
  * and recomputes only when one of those inputs actually changes.
  */
-export function useSessionToolApprovalsRefetchInterval(options: {
-  directSessionPanelActive: boolean;
-  runtimeActive: boolean;
-  detailCurrentPhase: string | undefined;
-  summaryCurrentPhase: string | undefined;
-  summaryStatus: string | undefined;
-}): (query: Query<SessionToolApprovalRequest[]>) => number | false {
+export function useSessionToolApprovalsRefetchInterval(
+  options: SessionToolApprovalPollingInput,
+): (query: Query<SessionToolApprovalRequest[]>) => number | false {
   const {
     directSessionPanelActive,
     runtimeActive,
@@ -472,6 +491,55 @@ export function useSessionToolApprovalsRefetchInterval(options: {
       summaryStatus,
     ],
   );
+}
+
+/**
+ * Stable queryFn for the pending tool-approvals observer.
+ *
+ * Module scope: React Query re-derives the `queryFn` option on every parent
+ * render. The previous inline arrow rebuilt each time and handed the observer a
+ * fresh callback reference, so each no-op rerender re-triggered the same
+ * `forceStoreRerender` churn already fixed for the placeholder /
+ * structural-sharing / refetchInterval seams. Reading the sessionId from the
+ * queryKey keeps this a single stable reference while still routing to the
+ * active session; switching sessions re-keys the query so only the new session
+ * is ever fetched.
+ */
+export function sessionToolApprovalsQueryFn(
+  context: QueryFunctionContext<QueryKey>,
+): Promise<SessionToolApprovalRequest[]> {
+  return listPendingSessionToolApprovals(String(context.queryKey[1] ?? ""));
+}
+
+export type SessionToolApprovalsQueryOptions = {
+  sessionId: string | null | undefined;
+  enabled: boolean;
+  polling: SessionToolApprovalPollingInput;
+};
+
+/**
+ * Stable observer seam for the pending tool-approvals poll.
+ *
+ * Owns the queryKey/queryFn/refetchInterval configuration so an unrelated
+ * parent rerender with the same `sessionId` and polling inputs cannot hand the
+ * observer a fresh query identity, queryFn, or refetch callback and restart the
+ * poll timer / trigger extra fetches. The queryKey is memoized per `sessionId`
+ * so the observer's identity reference is stable, the queryFn is a module-scope
+ * function, and the refetch resolver is `useCallback`-stable. `inactive=false`,
+ * `pending=750`, `busy=2000` and `idle=4000` all come from
+ * `useSessionToolApprovalsRefetchInterval`.
+ */
+export function useSessionToolApprovalsQuery(options: SessionToolApprovalsQueryOptions) {
+  const { sessionId, enabled, polling } = options;
+  const refetchInterval = useSessionToolApprovalsRefetchInterval(polling);
+  const queryKey = useMemo(() => queryKeys.sessionToolApprovals(sessionId ?? "none"), [sessionId]);
+  return useQuery<SessionToolApprovalRequest[]>({
+    queryKey,
+    enabled,
+    queryFn: sessionToolApprovalsQueryFn,
+    refetchInterval,
+    refetchIntervalInBackground: false,
+  });
 }
 
 /**
@@ -1638,19 +1706,16 @@ export function ChatCodingRoute() {
     detail: rawSessionDetail,
   });
   const sessionToolApprovalRuntimeActive = runtimeHasChatTurnForSession(runtime, activeSessionId);
-  const sessionToolApprovalsRefetchInterval = useSessionToolApprovalsRefetchInterval({
-    directSessionPanelActive,
-    runtimeActive: sessionToolApprovalRuntimeActive,
-    detailCurrentPhase: detail?.currentPhase,
-    summaryCurrentPhase: directSessionActiveSummary?.currentPhase,
-    summaryStatus: directSessionActiveSummary?.status,
-  });
-  const sessionToolApprovalsQuery = useQuery<SessionToolApprovalRequest[]>({
-    queryKey: queryKeys.sessionToolApprovals(activeSessionId ?? "none"),
+  const sessionToolApprovalsQuery = useSessionToolApprovalsQuery({
+    sessionId: activeSessionId,
     enabled: Boolean(activeSessionId && directSessionPanelActive && !isTempSessionId(activeSessionId)),
-    queryFn: () => listPendingSessionToolApprovals(activeSessionId ?? ""),
-    refetchInterval: sessionToolApprovalsRefetchInterval,
-    refetchIntervalInBackground: false,
+    polling: {
+      directSessionPanelActive,
+      runtimeActive: sessionToolApprovalRuntimeActive,
+      detailCurrentPhase: detail?.currentPhase,
+      summaryCurrentPhase: directSessionActiveSummary?.currentPhase,
+      summaryStatus: directSessionActiveSummary?.status,
+    },
   });
   const handleLoadEarlierSessionMessages = useCallback(() => {
     const beforeMessageIndex = detail?.messageWindow?.nextBeforeMessageIndex ?? 0;
