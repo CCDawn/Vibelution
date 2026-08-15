@@ -1743,7 +1743,7 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("keeps the current session status bar keyed to the selected session", () => {
     expect(routeSource).toContain("const rawSessionDetail = resolveActiveSessionDetailForUi");
-    expect(routeSource).toContain("const detail = resolveStickySessionDetailPaint");
+    expect(routeSource).toContain("const detail = useStableSessionDetailPaint({");
     expect(routeSource).toContain("detail: rawSessionDetail");
     expect(routeSource).toContain("const activeTurnLayer = activeSessionId ? activeTurnLayersBySession[activeSessionId] : undefined");
     expect(routeSource).toContain("const activeTurnSettledByDetail = isActiveTurnSettledByDetail(activeTurnLayer, detail)");
@@ -3331,7 +3331,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndHelpersSource).toContain("fetchSessionDetail(normalizedSessionId, {");
     expect(chatApiSource).toContain("search.set(\"messageLimit\", String(options.messageLimit))");
     expect(chatApiSource).toContain("search.set(\"transcriptScope\", options.transcriptScope)");
-    expect(routeSource).toContain("structuralSharing: (previous, next) =>");
+    expect(routeSource).toContain("structuralSharing: sessionDetailStructuralSharing");
+    expect(routeSource).toContain("export function sessionDetailStructuralSharing(");
     expect(routeAndDetailMutationsSource).toContain("mergeSessionDetailMessageWindow(current, page)");
     expect(routeSource).toContain("const nextDetail = mergeSessionDetailMessageWindow(previous, detail)");
     expect(routeSource).toContain("hasEarlierMessages: Boolean(detail.messageWindow?.hasEarlier)");

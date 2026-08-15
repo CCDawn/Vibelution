@@ -1,5 +1,6 @@
 import json
 
+from core.web.routes.teams import TeamMemberMessageListResponse
 from core.web.services import (
     agent_directory_service,
     chat_room_service,
@@ -39,3 +40,4 @@ def test_member_message_index_stores_summary_not_body(tmp_path, monkeypatch):
     assert listed["messages"][0]["targetSessionId"] == "session-target"
     assert "content" not in listed["messages"][0]
     assert body not in json.dumps(listed)
+    assert TeamMemberMessageListResponse.model_validate(listed).model_dump() == listed

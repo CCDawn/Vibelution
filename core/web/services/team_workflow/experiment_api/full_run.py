@@ -41,14 +41,20 @@ def resolve_formal_execution_config(
     provision must still reach ``run_full_run`` without silently bounded-STOP.
     """
     request = payload if isinstance(payload, dict) else {}
-    for candidate in (
-        request.get("executionConfig"),
+    request_config = (
+        dict(request.get("executionConfig") or {})
+        if isinstance(request.get("executionConfig"), dict)
+        else {}
+    )
+    if formal_execution_config_is_provisioned(request_config):
+        return request_config
+    for fallback in (
         _execution_config_from_preparation(plan),
         _execution_config_from_env(),
     ):
-        if formal_execution_config_is_provisioned(candidate):
-            return dict(candidate)
-    return dict(request.get("executionConfig") or {}) if isinstance(request.get("executionConfig"), dict) else {}
+        if formal_execution_config_is_provisioned(fallback):
+            return {**fallback, **request_config}
+    return request_config
 
 
 def _execution_config_from_preparation(plan: dict[str, Any] | None) -> dict[str, Any]:
