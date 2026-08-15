@@ -593,7 +593,7 @@ export function useChatComposerSubmitActions({
   setMentalModelEnabledForNextTurn,
   setRuntimeStatusEnabledForNextTurn,
 }: UseChatComposerSubmitActionsOptions): UseChatComposerSubmitActionsResult {
-  const skipFollowupAutoFlushRef = useRef(false);
+  const stoppedTurnAutoFlushRef = useRef<{ sessionId: string; turnId: string } | null>(null);
   const previousBusyRef = useRef(sessionBusy);
   const previousSessionRef = useRef(activeSessionId);
 
@@ -623,6 +623,15 @@ export function useChatComposerSubmitActions({
 
   const handleAddComposerAttachments = useCallback((files: FileList | File[]) => {
     if (!activeSessionId) {
+      return;
+    }
+    if (sessionBusy) {
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [activeSessionId]: lang === "zh"
+          ? "运行中的排队消息暂不支持图片，请等待当前轮次结束后发送。"
+          : "Queued follow-ups do not support images while a turn is running. Send it after the turn ends.",
+      }));
       return;
     }
     if (activeAgentImageInputUnsupported) {
@@ -655,6 +664,7 @@ export function useChatComposerSubmitActions({
     activeAgentImageInputUnsupported,
     activeSessionId,
     lang,
+    sessionBusy,
     setSessionComposerErrors,
     setSessionImageAttachments,
   ]);
@@ -668,6 +678,15 @@ export function useChatComposerSubmitActions({
 
   const handleAddComposerReference = useCallback((reference: SessionReferenceAttachment) => {
     if (!activeSessionId) {
+      return;
+    }
+    if (sessionBusy) {
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [activeSessionId]: lang === "zh"
+          ? "运行中的排队消息暂不支持会话引用，请等待当前轮次结束后发送。"
+          : "Queued follow-ups do not support session references while a turn is running. Send it after the turn ends.",
+      }));
       return;
     }
     const referenceId = sessionReferenceId(reference);
@@ -692,7 +711,13 @@ export function useChatComposerSubmitActions({
       ...current,
       [activeSessionId]: "",
     }));
-  }, [activeSessionId, lang, setSessionComposerErrors, setSessionReferenceAttachments]);
+  }, [
+    activeSessionId,
+    lang,
+    sessionBusy,
+    setSessionComposerErrors,
+    setSessionReferenceAttachments,
+  ]);
 
   const handleRemoveComposerReference = useCallback((referenceId: string) => {
     if (!activeSessionId) {
@@ -871,6 +896,15 @@ export function useChatComposerSubmitActions({
       if (sessionStopping) {
         return;
       }
+      if (activeImageAttachments.length || activeReferenceAttachments.length) {
+        setSessionComposerErrors((current) => ({
+          ...current,
+          [activeSessionId]: lang === "zh"
+            ? "运行中的排队消息仅支持文本，请先移除图片和会话引用。"
+            : "Queued follow-ups are text-only while a turn is running. Remove images and session references first.",
+        }));
+        return;
+      }
       const queue = sessionFollowupQueues[activeSessionId] ?? [];
       const action = resolveComposerQueueEnter({
         sessionBusy: true,
@@ -890,7 +924,6 @@ export function useChatComposerSubmitActions({
       }
       if (action.type === "immediate") {
         void (async () => {
-          let sent = 0;
           try {
             for (const item of action.items) {
               await sessionGuidanceMutation.mutateAsync({
@@ -898,17 +931,14 @@ export function useChatComposerSubmitActions({
                 content: item.text,
                 mode: "safe",
               });
-              sent += 1;
               setSessionFollowupQueues((current) => ({
                 ...current,
                 [activeSessionId]: removeComposerQueueItem(current[activeSessionId] ?? [], item.id),
               }));
             }
           } catch {
-            setSessionFollowupQueues((current) => ({
-              ...current,
-              [activeSessionId]: action.items.slice(sent),
-            }));
+            // Successful items were removed one by one. The failed item, later
+            // snapshot items, and anything appended concurrently remain queued.
           }
         })();
         return;
@@ -1156,7 +1186,6 @@ export function useChatComposerSubmitActions({
     if (!activeSessionId || !sessionBusy || sessionStopping) {
       return;
     }
-    skipFollowupAutoFlushRef.current = true;
     const turnId = resolveSessionStopTurnId(detail, activeTurnId);
     if (!turnId) {
       setSessionComposerErrors((current) => ({
@@ -1169,6 +1198,7 @@ export function useChatComposerSubmitActions({
       void queryClient.invalidateQueries({ queryKey: queryKeys.session(activeSessionId) });
       return;
     }
+    stoppedTurnAutoFlushRef.current = { sessionId: activeSessionId, turnId };
     stopTurnMutation.mutate({
       sessionId: activeSessionId,
       turnId,
@@ -1206,15 +1236,27 @@ export function useChatComposerSubmitActions({
     const previousSession = previousSessionRef.current;
     previousBusyRef.current = sessionBusy;
     previousSessionRef.current = activeSessionId;
+    const stoppedTurn = stoppedTurnAutoFlushRef.current;
+    if (
+      sessionBusy
+      && stoppedTurn
+      && stoppedTurn.sessionId === activeSessionId
+      && activeTurnId
+      && activeTurnId !== stoppedTurn.turnId
+    ) {
+      stoppedTurnAutoFlushRef.current = null;
+    }
     if (!activeSessionId || previousSession !== activeSessionId) {
       return;
     }
     if (!(wasBusy && !sessionBusy)) {
       return;
     }
-    if (skipFollowupAutoFlushRef.current) {
-      skipFollowupAutoFlushRef.current = false;
-      return;
+    if (stoppedTurn?.sessionId === activeSessionId) {
+      stoppedTurnAutoFlushRef.current = null;
+      if (!activeTurnId || activeTurnId === stoppedTurn.turnId) {
+        return;
+      }
     }
     if (sessionStopping) {
       return;
@@ -1238,6 +1280,7 @@ export function useChatComposerSubmitActions({
     );
   }, [
     activeSessionId,
+    activeTurnId,
     mentalModelEnabledForNextTurn,
     runtimeStatusEnabledForNextTurn,
     sessionBusy,
