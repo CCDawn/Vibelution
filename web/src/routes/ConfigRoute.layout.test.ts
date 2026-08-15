@@ -211,7 +211,9 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("isConfigBaselineStaleErrorMessage");
     expect(routeSource).toContain("buildConfigApplyRequestPayload");
     expect(routeSource).toContain("baseConfig: null");
-    expect(routeSource).toContain('requestJson<ConfigWorkspace>("/api/config/apply"');
+    expect(routeSource).toContain("applyConfigWorkspace(payload)");
+    expect(routeSource).toContain("applyConfigWorkspace({");
+    expect(routeSource).not.toContain('"/api/config/apply"');
   });
 
   it("surfaces model test results into notice, row feedback, and workspace reload", () => {

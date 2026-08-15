@@ -222,3 +222,44 @@ export function rollbackProviderMerge(
     body,
   );
 }
+
+export type ConfigImageUploadResult = {
+  path: string;
+  url: string;
+  contentType: string;
+  sizeBytes: number;
+};
+
+export function applyConfigWorkspace(body: ConfigDraftEnvelope): Promise<ConfigWorkspace> {
+  return postConfigJson<ConfigWorkspace>("/api/config/apply", body, "PUT");
+}
+
+export function openConfigEnvironment(): Promise<{ opened: boolean }> {
+  return postConfigJson<{ opened: boolean }>("/api/config/open-environment", {});
+}
+
+export function uploadConfigAvatarImage(body: {
+  filename: string;
+  contentType: string;
+  dataBase64: string;
+}): Promise<ConfigImageUploadResult> {
+  return postConfigJson<ConfigImageUploadResult>("/api/config/avatar-image", body);
+}
+
+export function uploadConfigThemeBackgroundImage(body: {
+  filename: string;
+  contentType: string;
+  dataBase64: string;
+}): Promise<ConfigImageUploadResult> {
+  return postConfigJson<ConfigImageUploadResult>("/api/config/theme-background-image", body);
+}
+
+export function updateIntakeMode(
+  intakeMode: "manual_review" | "auto",
+): Promise<ConfigSummary> {
+  return postConfigJson<ConfigSummary>("/api/config/intake-mode", { intakeMode }, "PUT");
+}
+
+export function updateConfigLanguage(language: "zh" | "en"): Promise<ConfigSummary> {
+  return postConfigJson<ConfigSummary>("/api/config/language", { language }, "PUT");
+}
