@@ -1271,31 +1271,21 @@ def create_chat_session(
         bound_agent = s.get_agent(normalized_agent_id, include_archived=False)
         if not bound_agent:
             raise s.SessionValidationError(s._session_agent_unavailable_message("missing_agent", lang=lang))
+    fallback_title = s.text_for(lang, zh="新会话", en="New session")
+    if bound_agent is not None:
+        agent_name = str(
+            bound_agent.get("displayName")
+            or bound_agent.get("agentCode")
+            or bound_agent.get("name")
+            or ""
+        ).strip()
+        if agent_name:
+            fallback_title = s.trim_lines(agent_name, max_lines=1).strip()[:120] or fallback_title
+    normalized_title = s.trim_lines(title or "", max_lines=1).strip() or fallback_title
     with s._CHAT_STATE_LOCK:
-        payload = s.load_chat_state(s.PROJECT_ROOT)
-        conversations = payload.get("conversations")
-        if not isinstance(conversations, list):
-            conversations = []
-        existing_ids = {
-            str(item.get("conversation_id") or "").strip()
-            for item in conversations
-            if isinstance(item, dict)
-        }
+        existing_ids = set(s.list_session_runtime_ids(s.PROJECT_ROOT))
         now = s._now_timestamp()
         session_id = s._new_conversation_id(existing_ids)
-        # Prefer the bound Agent display name over the generic "新会话" placeholder so
-        # new tabs are immediately identifiable in multi-agent workspaces.
-        fallback_title = s.text_for(lang, zh="新会话", en="New session")
-        if bound_agent is not None:
-            agent_name = str(
-                bound_agent.get("displayName")
-                or bound_agent.get("agentCode")
-                or bound_agent.get("name")
-                or ""
-            ).strip()
-            if agent_name:
-                fallback_title = s.trim_lines(agent_name, max_lines=1).strip()[:120] or fallback_title
-        normalized_title = s.trim_lines(title or "", max_lines=1).strip() or fallback_title
         conversation = s._make_empty_conversation(
             session_id,
             title=normalized_title,
@@ -1304,7 +1294,6 @@ def create_chat_session(
         )
         if normalized_session_metadata:
             conversation["metadata"] = normalized_session_metadata
-        s._ensure_conversation_workspace_metadata(conversation)
         if bound_agent is not None:
             conversation.update(
                 {
@@ -1317,13 +1306,16 @@ def create_chat_session(
             if normalized_experiment_binding:
                 conversation["experiment_binding"] = normalized_experiment_binding
                 conversation["experimentBinding"] = normalized_experiment_binding
-        else:
+        s._ensure_conversation_workspace_metadata(conversation)
+        if bound_agent is None:
             s._sync_agent_directory_project_root()
             agent = s.ensure_agent_for_session(
                 session_id,
                 display_name=normalized_title if not s._is_default_empty_session_title(normalized_title) else "",
                 llm_bindings=normalized_llm_bindings,
-                session_workspace_path=str(conversation.get("workspace_path") or s._session_workspace_relative_path(session_id)),
+                session_workspace_path=str(
+                    conversation.get("workspace_path") or s._session_workspace_relative_path(session_id)
+                ),
                 created_by=created_by,
                 conversation_index_kind=conversation_index_kind,
             )
@@ -1333,13 +1325,12 @@ def create_chat_session(
                 conversation["agentId"] = normalized_agent_id
                 conversation["session_role"] = "primary"
                 conversation["sessionRole"] = "primary"
-        conversations.append(conversation)
-        payload["version"] = int(payload.get("version") or s.CHAT_STATE_VERSION)
-        if activate:
-            payload["active_conversation_id"] = session_id
-        payload["updated_at"] = now
-        payload["conversations"] = conversations
-        s.save_chat_state(s.PROJECT_ROOT, payload)
+        s.save_session_chat_state(
+            s.PROJECT_ROOT,
+            session_id,
+            conversation,
+            activate=activate,
+        )
         created_conversation = dict(conversation)
     from . import directory_bridge
 

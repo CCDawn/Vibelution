@@ -5,6 +5,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Dispatch, SetStateAction } from "react";
 
+import { startChatRoomRound } from "../../api/chat";
 import { fetchJson } from "../../api/client";
 import {
   revokeProjectAgentBusMessage,
@@ -126,18 +127,14 @@ export function useTeamShellMutations(options: UseTeamShellMutationsOptions) {
 
   const startTeamRoundMutation = useMutation({
     mutationFn: (payload: { roomId: string; teamId: string; topic: string; mode: string; purpose: string }) =>
-      fetchJson<ChatRoomDetail>(`/api/chat-rooms/${payload.roomId}/rounds`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          topic: payload.topic,
-          mode: payload.mode,
-          purpose: payload.purpose,
-          config: {
-            source: "team_workspace",
-            teamId: payload.teamId,
-          },
-        }),
+      startChatRoomRound(payload.roomId, {
+        topic: payload.topic,
+        mode: payload.mode,
+        purpose: payload.purpose,
+        config: {
+          source: "team_workspace",
+          teamId: payload.teamId,
+        },
       }),
     onSuccess: (room, variables) => {
       options.setTeamTaskTopic("");

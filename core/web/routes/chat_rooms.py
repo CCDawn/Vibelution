@@ -8,6 +8,12 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from starlette.responses import StreamingResponse
 
+from core.web.routes.chat_room_models import (
+    ChatRoomCatalogOption,
+    ChatRoomDeleteResponse,
+    ChatRoomDetailResponse,
+    ChatRoomRoundResponse,
+)
 from core.web.services.chat_room_service import (
     ChatRoomBusyError,
     ChatRoomNotFoundError,
@@ -53,22 +59,39 @@ class ChatRoomUpdatePayload(BaseModel):
     config: dict[str, Any] | None = None
 
 
-@router.get("/chat-rooms/modes")
+@router.get(
+    "/chat-rooms/modes",
+    response_model=list[ChatRoomCatalogOption],
+    response_model_exclude_unset=True,
+)
 def chat_room_modes() -> list[dict]:
     return list_chat_room_modes()
 
 
-@router.get("/chat-rooms/purposes")
+@router.get(
+    "/chat-rooms/purposes",
+    response_model=list[ChatRoomCatalogOption],
+    response_model_exclude_unset=True,
+)
 def chat_room_purposes() -> list[dict]:
     return list_chat_room_purposes()
 
 
-@router.get("/chat-rooms")
+@router.get(
+    "/chat-rooms",
+    response_model=list[ChatRoomDetailResponse],
+    response_model_exclude_unset=True,
+)
 def chat_room_list() -> list[dict]:
     return list_chat_rooms()
 
 
-@router.post("/chat-rooms", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/chat-rooms",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ChatRoomDetailResponse,
+    response_model_exclude_unset=True,
+)
 def chat_room_create(payload: ChatRoomCreatePayload) -> dict:
     try:
         return create_chat_room(
@@ -83,7 +106,11 @@ def chat_room_create(payload: ChatRoomCreatePayload) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/chat-rooms/{room_id}")
+@router.get(
+    "/chat-rooms/{room_id}",
+    response_model=ChatRoomDetailResponse,
+    response_model_exclude_unset=True,
+)
 def chat_room_detail(room_id: str) -> dict:
     detail = get_chat_room_detail(room_id)
     if detail is None:
@@ -91,7 +118,7 @@ def chat_room_detail(room_id: str) -> dict:
     return detail
 
 
-@router.get("/chat-rooms/{room_id}/events")
+@router.get("/chat-rooms/{room_id}/events", response_class=StreamingResponse)
 def chat_room_events(room_id: str) -> StreamingResponse:
     detail = get_chat_room_detail(room_id)
     if detail is None:
@@ -106,7 +133,11 @@ def chat_room_events(room_id: str) -> StreamingResponse:
     )
 
 
-@router.patch("/chat-rooms/{room_id}")
+@router.patch(
+    "/chat-rooms/{room_id}",
+    response_model=ChatRoomDetailResponse,
+    response_model_exclude_unset=True,
+)
 def chat_room_update(room_id: str, payload: ChatRoomUpdatePayload) -> dict:
     try:
         return update_chat_room(
@@ -125,7 +156,11 @@ def chat_room_update(room_id: str, payload: ChatRoomUpdatePayload) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.delete("/chat-rooms/{room_id}")
+@router.delete(
+    "/chat-rooms/{room_id}",
+    response_model=ChatRoomDeleteResponse,
+    response_model_exclude_unset=True,
+)
 def chat_room_delete(room_id: str) -> dict:
     try:
         return delete_chat_room(room_id)
@@ -135,7 +170,11 @@ def chat_room_delete(room_id: str) -> dict:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-@router.post("/chat-rooms/{room_id}/reset")
+@router.post(
+    "/chat-rooms/{room_id}/reset",
+    response_model=ChatRoomDetailResponse,
+    response_model_exclude_unset=True,
+)
 def chat_room_reset(room_id: str) -> dict:
     try:
         return reset_chat_room(room_id)
@@ -145,7 +184,12 @@ def chat_room_reset(room_id: str) -> dict:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-@router.post("/chat-rooms/{room_id}/rounds", status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "/chat-rooms/{room_id}/rounds",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=ChatRoomRoundResponse,
+    response_model_exclude_unset=True,
+)
 def chat_room_start_round(room_id: str, payload: ChatRoomRoundPayload, request: Request) -> dict:
     try:
         return start_chat_room_round(
@@ -165,7 +209,12 @@ def chat_room_start_round(room_id: str, payload: ChatRoomRoundPayload, request: 
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/chat-rooms/{room_id}/stop", status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "/chat-rooms/{room_id}/stop",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=ChatRoomDetailResponse,
+    response_model_exclude_unset=True,
+)
 def chat_room_stop_round(room_id: str) -> dict:
     try:
         return stop_chat_room_round(room_id)

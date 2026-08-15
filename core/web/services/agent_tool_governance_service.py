@@ -25,8 +25,6 @@ TOOL_GOVERNANCE_EVENT_FILE = "tool_governance_requests.jsonl"
 LOW_RISK_GRANT_TOOLS = {
     "grep_search_tool",
     "glob_tool",
-    "get_current_goal_tool",
-    "get_core_context_tool",
     "get_git_status_summary_tool",
     "get_recent_changes_tool",
     "get_entity_history_tool",
@@ -48,6 +46,9 @@ HIGH_RISK_GRANT_TOOLS = {
     "cli_tool",
     "close_evolution_transaction_tool",
     "commit_compressed_memory_tool",
+    "get_core_context_tool",
+    "get_current_goal_tool",
+    "supersede_episodic_memory_tool",
     "compress_context_tool",
     "image2_generate_tool",
     "knowledge_proposal_tool",

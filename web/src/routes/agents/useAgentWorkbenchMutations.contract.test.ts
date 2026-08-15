@@ -27,6 +27,8 @@ describe("agent workbench mutations contract", () => {
     owners.forEach((owner) => {
       expect(mutationsSource).toContain(`const ${owner} = useMutation({`);
     });
+    expect(mutationsSource).not.toContain("fetchJson");
+    expect(mutationsSource).not.toContain('from "../../api/client"');
   });
 
   it("is wired from AgentsRoute without inline definitions", () => {

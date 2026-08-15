@@ -2,7 +2,7 @@ import { AlertTriangle, Database, Image as ImageIcon, Pencil, RefreshCw, Route, 
 import { useEffect, useMemo, useState } from "react";
 
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
-import { fetchJson } from "../api/client";
+import { applyProviderMerge, previewProviderMerge, rollbackProviderMerge, testConfigLlm } from "../api/config";
 import {
   VActionGroup,
   VButton,
@@ -22,7 +22,6 @@ import {
 import type {
   ConfigCapabilityObservation,
   ConfigCatalogModel,
-  ConfigLlmTestResult,
   ConfigProviderMergePreview,
   ConfigProviderMergeResult,
 } from "../api/types";
@@ -946,11 +945,7 @@ export function ConfigProviderRegistryPanel({
       [modelRef]: { phase: "busy", values: [], message: "正在验证 low/high…" },
     }));
     try {
-      const result = await fetchJson<ConfigLlmTestResult>("/api/config/test-llm", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ modelId: modelRef, capability: "reasoning_effort" }),
-      });
+      const result = await testConfigLlm({ modelId: modelRef, capability: "reasoning_effort" });
       if (!result.ok || !result.reasoning_contract_persisted) {
         throw new Error(result.message || "推理能力验证失败");
       }
@@ -983,14 +978,10 @@ export function ConfigProviderRegistryPanel({
       const credentialDecisions = Object.fromEntries(
         mergeCandidate.duplicateProviderIds.map((providerId) => [providerId, "use_canonical"]),
       );
-      const preview = await fetchJson<ConfigProviderMergePreview>(
-        "/api/config/migration/providers/merge/preview",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...mergeCandidate, credentialDecisions }),
-        },
-      );
+      const preview = await previewProviderMerge({
+        ...mergeCandidate,
+        credentialDecisions,
+      });
       setMergePreview(preview);
       setMergeConfirmed(false);
     } catch (error) {
@@ -1005,18 +996,11 @@ export function ConfigProviderRegistryPanel({
     setMergeBusy(true);
     setMergeError("");
     try {
-      const result = await fetchJson<ConfigProviderMergeResult>(
-        "/api/config/migration/providers/merge/apply",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            previewId: mergePreview.previewId,
-            baseHash: mergePreview.baseHash,
-            confirmed: true,
-          }),
-        },
-      );
+      const result = await applyProviderMerge({
+        previewId: mergePreview.previewId,
+        baseHash: mergePreview.baseHash,
+        confirmed: true,
+      });
       setMergeResult(result);
     } catch (error) {
       setMergeError(error instanceof Error ? error.message : String(error));
@@ -1030,14 +1014,10 @@ export function ConfigProviderRegistryPanel({
     setMergeBusy(true);
     setMergeError("");
     try {
-      const result = await fetchJson<ConfigProviderMergeResult>(
-        `/api/config/migration/providers/merge/${encodeURIComponent(mergeResult.migrationId)}/rollback`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ migrationId: mergeResult.migrationId, baseHash: mergeResult.hash }),
-        },
-      );
+      const result = await rollbackProviderMerge(mergeResult.migrationId, {
+        migrationId: mergeResult.migrationId,
+        baseHash: mergeResult.hash,
+      });
       setMergeResult(result);
       setMergePreview(null);
       setMergeConfirmed(false);

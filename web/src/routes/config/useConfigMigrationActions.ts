@@ -5,7 +5,7 @@
 import { useCallback } from "react";
 import type { QueryClient, UseQueryResult } from "@tanstack/react-query";
 
-import { fetchJson } from "../../api/client";
+import { applyLlmV2Migration, previewLlmV2Migration } from "../../api/config";
 import { queryKeys } from "../../api/queryKeys";
 import type {
   ConfigMigrationArtifactResolution,
@@ -28,17 +28,8 @@ export type UseConfigMigrationActionsOptions = {
   syncWorkspace: (workspace: ConfigWorkspace, tone?: NoticeTone, options?: { resetBase?: boolean }) => void;
   markError: (error: unknown) => string;
   readableErrorMessage: (error: unknown) => string;
-  requestJson?: <T>(url: string, body?: unknown, method?: string) => Promise<T>;
   confirmApplyMigration?: (message: string) => boolean;
 };
-
-async function defaultRequestJson<T>(url: string, body?: unknown, method = "POST"): Promise<T> {
-  return fetchJson<T>(url, {
-    method,
-    headers: { "Content-Type": "application/json" },
-    body: body == null ? undefined : JSON.stringify(body),
-  });
-}
 
 export function useConfigMigrationActions(options: UseConfigMigrationActionsOptions) {
   const {
@@ -52,7 +43,6 @@ export function useConfigMigrationActions(options: UseConfigMigrationActionsOpti
     syncWorkspace,
     markError,
     readableErrorMessage,
-    requestJson = defaultRequestJson,
     confirmApplyMigration = (message: string) => typeof window === "undefined" || window.confirm(message),
   } = options;
 
@@ -62,10 +52,7 @@ export function useConfigMigrationActions(options: UseConfigMigrationActionsOpti
     setBusyAction("正在生成迁移预览…");
     try {
       const payload: ConfigMigrationPreviewRequest = { artifactResolutions };
-      const response = await requestJson<ConfigMigrationPreview>(
-        "/api/config/migration/llm-v2/preview",
-        payload,
-      );
+      const response = await previewLlmV2Migration(payload);
       setMigrationPreview(response);
     } catch (error) {
       setProviderActionError(readableErrorMessage(error).slice(0, 480));
@@ -73,7 +60,7 @@ export function useConfigMigrationActions(options: UseConfigMigrationActionsOpti
     } finally {
       setBusyAction("");
     }
-  }, [markError, readableErrorMessage, requestJson, setBusyAction, setMigrationPreview, setProviderActionError]);
+  }, [markError, readableErrorMessage, setBusyAction, setMigrationPreview, setProviderActionError]);
 
   const handleApplyMigration = useCallback(async (previewId: string, previewBaseHash: string) => {
     if (!migrationPreview || migrationPreview.previewId !== previewId || migrationPreview.baseHash !== previewBaseHash) {
@@ -86,10 +73,7 @@ export function useConfigMigrationActions(options: UseConfigMigrationActionsOpti
     if (!confirmed) return;
     setBusyAction("正在应用迁移…");
     try {
-      await requestJson<{ migrationId: string; updatedReferenceCount?: number }>(
-        "/api/config/migration/llm-v2/apply",
-        { previewId, baseHash: previewBaseHash },
-      );
+      await applyLlmV2Migration({ previewId, baseHash: previewBaseHash });
       const refreshed = await workspaceQuery.refetch();
       if (refreshed.data) {
         syncWorkspace(refreshed.data, "success");
@@ -114,7 +98,6 @@ export function useConfigMigrationActions(options: UseConfigMigrationActionsOpti
     migrationPreviewExpiredMessage,
     queryClient,
     readableErrorMessage,
-    requestJson,
     setBusyAction,
     setMigrationPreview,
     setProviderActionError,

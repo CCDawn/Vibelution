@@ -7,22 +7,23 @@
 import { useQueries, useQuery, type QueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
 
+import { listAgentSummaries } from "../../api/agents";
+import {
+  fetchChatRoomDetail,
+  fetchChatWorkbenchBootstrap,
+  listChatRoomModes,
+  listChatRoomPurposes,
+  listConversations,
+} from "../../api/chat";
+import { fetchPublicConfig } from "../../api/config";
+import { fetchPetSummary } from "../../api/pet";
 import { listProjectAgentBusTimeline } from "../../api/projectAgentBus";
-import { fetchJson } from "../../api/client";
+import { fetchRuntimeSummary } from "../../api/runtime";
+import { fetchSkillLibrary } from "../../api/skills";
+import { listTeams } from "../../api/teams";
 import { queryKeys } from "../../api/queryKeys";
 import type {
-  AgentInstance,
-  ChatWorkbenchBootstrap,
-  ChatRoomDetail,
-  ChatRoomMode,
-  ChatRoomPurpose,
-  ConfigSummary,
-  ConversationSummary,
-  PetSummary,
-  RuntimeSummary,
   SessionSummary,
-  SkillLibraryPayload,
-  TeamListPayload,
 } from "../../api/types";
 import { resolvePollingInterval } from "../../app/pollingPolicy";
 import { shareRuntimeSummaryIfOnlyVolatileChanged } from "../../app/runtimeSummaryQueryShare";
@@ -79,7 +80,7 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
 
   const runtimeQuery = useQuery({
     queryKey: queryKeys.runtimeSummary(),
-    queryFn: () => fetchJson<RuntimeSummary>("/api/runtime/summary"),
+    queryFn: () => fetchRuntimeSummary(),
     enabled: secondaryChatDataEnabled,
     refetchInterval: chatSecondaryPollPolicy.runtimeRefetchInterval,
     refetchIntervalInBackground: chatSecondaryPollPolicy.secondaryRefetchIntervalInBackground,
@@ -87,21 +88,21 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
   });
   const petQuery = useQuery({
     queryKey: queryKeys.petSummary(),
-    queryFn: () => fetchJson<PetSummary>("/api/pet/summary"),
+    queryFn: () => fetchPetSummary(),
     enabled: secondaryChatDataEnabled,
     refetchInterval: chatSecondaryPollPolicy.petRefetchInterval,
     refetchIntervalInBackground: chatSecondaryPollPolicy.secondaryRefetchIntervalInBackground,
   });
   const configSummaryQuery = useQuery({
     queryKey: queryKeys.configPublic(),
-    queryFn: () => fetchJson<ConfigSummary>("/api/config/public"),
+    queryFn: () => fetchPublicConfig(),
     staleTime: 30_000,
   });
   const [selectedAgentId, setSelectedAgentId] = useState("");
   const activeSessionBootstrapQuery = useQuery({
     queryKey: ["sessions", "active-bootstrap"],
     queryFn: async ({ signal }) => {
-      const payload = await fetchJson<ChatWorkbenchBootstrap>("/api/sessions/bootstrap?limit=50", { signal });
+      const payload = await fetchChatWorkbenchBootstrap({ signal });
       queryClient.setQueryData(queryKeys.agents(), payload.agents);
       queryClient.setQueryData(queryKeys.conversations(), payload.conversations);
       // Never hard-replace the session index page: create optimism / pins must
@@ -174,7 +175,7 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
   );
   const conversationsQueryRaw = useQuery({
     queryKey: queryKeys.conversations(),
-    queryFn: () => fetchJson<ConversationSummary[]>("/api/conversations"),
+    queryFn: () => listConversations(),
     enabled: secondaryChatDataEnabled && bootstrapSettled,
     staleTime: 5_000,
     refetchInterval: chatLiveQueryPolicy.conversationsRefetchInterval,
@@ -189,7 +190,7 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
   }, [conversationsQueryRaw]);
   const teamsQuery = useQuery({
     queryKey: queryKeys.teams(),
-    queryFn: () => fetchJson<TeamListPayload>("/api/teams"),
+    queryFn: () => listTeams(),
     // Must load whenever the left-rail agent directory is active — not only when the
     // group-room picker is open. With teams=[], research/evolution members all dump into
     // 「特殊 Agent」and team rooms fall into 未归属.
@@ -199,7 +200,7 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
   });
   const agentsQuery = useQuery({
     queryKey: queryKeys.agents(),
-    queryFn: () => fetchJson<AgentInstance[]>("/api/agents?detail=summary"),
+    queryFn: () => listAgentSummaries(),
     enabled:
       bootstrapSettled &&
       (secondaryChatDataEnabled || sessionIndexQueryEnabled || groupComposerOpen || standardGroupRoomActive),
@@ -207,24 +208,24 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
   });
   const skillsQuery = useQuery({
     queryKey: queryKeys.skills(),
-    queryFn: () => fetchJson<SkillLibraryPayload>("/api/skills"),
+    queryFn: () => fetchSkillLibrary(),
     enabled: secondaryChatDataEnabled && Boolean(activeSessionId),
     staleTime: 60_000,
   });
   const slashCommandSuggestions = skillsQuery.data?.skills ?? [];
   const chatRoomModesQuery = useQuery({
     queryKey: queryKeys.chatRoomModes(),
-    queryFn: () => fetchJson<ChatRoomMode[]>("/api/chat-rooms/modes"),
+    queryFn: () => listChatRoomModes(),
     enabled: groupComposerOpen || standardGroupRoomActive,
   });
   const chatRoomPurposesQuery = useQuery({
     queryKey: queryKeys.chatRoomPurposes(),
-    queryFn: () => fetchJson<ChatRoomPurpose[]>("/api/chat-rooms/purposes"),
+    queryFn: () => listChatRoomPurposes(),
     enabled: groupComposerOpen || standardGroupRoomActive,
   });
   const activeGroupRoomQuery = useQuery({
     queryKey: queryKeys.chatRoom(activeGroupRoomId || "none"),
-    queryFn: () => fetchJson<ChatRoomDetail>(`/api/chat-rooms/${activeGroupRoomId}`),
+    queryFn: () => fetchChatRoomDetail(activeGroupRoomId),
     enabled: standardGroupRoomActive,
     refetchInterval: standardGroupRoomActive
       ? resolvePollingInterval(

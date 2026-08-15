@@ -411,7 +411,7 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("LazyAppShellUtilityMenu");
     expect(shellSource).not.toContain("utilityMenuRef");
     expect(shellSource).not.toContain("queryKeys.gitStatus()");
-    expect(shellSource).toContain('queryFn: ({ signal }) => fetchJson<ConfigSummary>("/api/config/public", { signal })');
+    expect(shellSource).toContain("queryFn: ({ signal }) => fetchPublicConfig({ signal })");
     expect(shellSource).toContain('queryFn: ({ signal }) => fetchJson<RuntimeSummary>("/api/runtime/summary", { signal })');
     expect(shellSource).toContain('cache: "no-store",\n        signal,');
     expect(utilityMenuSource).toContain("queryKeys.gitStatusSummary()");

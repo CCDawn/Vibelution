@@ -65,8 +65,8 @@ Inside its own worktree, an Agent should:
 - stage only files that belong to the current task;
 - run the narrowest useful validation;
 - commit locally;
-- self-review the diff and merge readiness before handoff;
-- merge its own task branch into local `main` when the local merge gates pass, then immediately close its claim and clean only its task-owned resources without waiting for post-merge validation;
+- self-review the current-task diff and merge readiness without waiting for the user to request review;
+- merge its own task branch into local `main` when the local merge gates pass, then immediately close its claim and clean only its task-owned resources without waiting for post-merge validation; waiting for the user to request merge is not done;
 - hand off to the main integration session only for large conflicts, cross-lane conflicts, hot-file/active-claim conflicts, release-sensitive work, unclear semantic conflicts, or explicit user-designated integration;
 - never push to GitHub unless the user explicitly authorizes remote sync or publication;
 - report the worktree path, branch, local commit SHA, changed files, pre-merge validation result, Launcher refresh need, project-memory update proposal, whether it self-merged, and the resulting cleanup or exact `cleanup pending` residue.

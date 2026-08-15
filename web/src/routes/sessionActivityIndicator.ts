@@ -47,15 +47,17 @@ function readSeenMap(): SeenMap {
   }
 }
 
-function writeSeenMap(map: SeenMap) {
+function writeSeenMap(map: SeenMap): boolean {
   const storage = activityStorage();
   if (!storage) {
-    return;
+    return false;
   }
   try {
     storage.setItem(SEEN_STORAGE_KEY, JSON.stringify(map));
+    return true;
   } catch {
-    // ignore quota / private mode
+    // ignore quota / private mode; callers must not report a persisted mutation
+    return false;
   }
 }
 
@@ -111,8 +113,7 @@ export function markSessionActivitySeen(sessionId: string, stamp: string) {
     next.splice(0, next.length - MAX_SEEN_STAMPS_PER_SESSION);
   }
   map[id] = next;
-  writeSeenMap(map);
-  return true;
+  return writeSeenMap(map);
 }
 
 export function markSessionActivitySnapshotsSeen(

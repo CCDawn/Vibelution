@@ -25,13 +25,13 @@
         "cli_tool",
         "agent_message_tool",
         "agent_tool_permission_request_tool",
-        "get_core_context_tool",
-        "get_current_goal_tool",
         "task_list_tool",
         "get_git_status_summary_tool",
         "get_recent_changes_tool",
         "explain_current_worktree_tool",
-        "conversation_log_inspect_tool"
+        "conversation_log_inspect_tool",
+        "append_episodic_memory_tool",
+        "supersede_episodic_memory_tool"
       ],
       "expected_preferred_tools": [
         "exec_command",
@@ -41,7 +41,6 @@
         "apply_patch_tool",
         "run_test_for_tool",
         "cli_tool",
-        "get_core_context_tool",
         "conversation_log_inspect_tool"
       ],
       "expected_forbidden_tools": [],
@@ -135,7 +134,10 @@
         "code_symbol_tool",
         "apply_patch_tool",
         "run_test_for_tool",
-        "cli_tool"
+        "cli_tool",
+        "get_core_context_tool",
+        "get_current_goal_tool",
+        "commit_compressed_memory_tool"
       ],
       "expected_forbidden_tools": [
         "web_search_tool",

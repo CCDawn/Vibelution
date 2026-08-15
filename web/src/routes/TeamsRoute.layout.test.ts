@@ -522,7 +522,7 @@ describe("TeamsRoute layout contract", () => {
     expect(useTeamsSelectedTeamDetailSource).toContain("`/api/teams/${encodeURIComponent(effectiveTeamId)}?detail=${teamDetailLoadMode}`");
     expect(useTeamsSelectedTeamDetailSource).toContain("fetchJson<Team>(");
     expect(routeSource).toContain("queryKeys.agentSummary(false)");
-    expect(routeSource).toContain('fetchJson<AgentConfigWorkspaceAgent[]>("/api/agents?detail=summary", { signal })');
+    expect(routeSource).toContain("listAgentSummaries<AgentConfigWorkspaceAgent>({ signal })");
     expect(routeSource).not.toContain("includeArchived=true&detail=summary");
     expect(routeSource).not.toContain('fetchJson<AgentConfigWorkspace>("/api/agents/config-workspace")');
     // Wave 8Q: archive/delete team lives on useTeamShellMutations.
@@ -535,8 +535,8 @@ describe("TeamsRoute layout contract", () => {
     expect(teamShellMutationsSource).toContain("revokeProjectAgentBusMessage({");
     expect(teamShellMutationsSource).toContain("/api/teams/${encodeURIComponent(teamId)}/chat-room/sync");
     expect(routeSource).toContain("syncTeamChatRoomMutation");
-    expect(teamShellMutationsSource).toContain("fetchJson<ChatRoomDetail>(`/api/chat-rooms/${payload.roomId}/rounds`");
-    expect(routeSource).toContain("fetchJson<ChatRoomDetail>(`/api/chat-rooms/${encodeURIComponent(linkedChatRoomId)}`, { signal })");
+    expect(teamShellMutationsSource).toContain("startChatRoomRound(payload.roomId, {");
+    expect(routeSource).toContain("fetchChatRoomDetail(linkedChatRoomId, { signal })");
     expect(routeSource).toContain("enabled: linkedChatRoomQueryEnabled");
     expect(routeSource).toContain("linkedRoomRefetchInterval(pageVisible");
     expect(routeSource).toContain("latestChatRoomRound(linkedRoomDetail)");

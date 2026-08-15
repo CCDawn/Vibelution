@@ -70,3 +70,41 @@ def test_round_state_telemetry_integration():
     state.note_response_tools(1, visible_text="progress text", tool_names=["get_core_context_tool"])
     telemetry = state.runtime_telemetry()
     assert telemetry["consecutive_bookkeeping_tool_only_steps"] == 0
+
+
+def test_report_round_state_stall_signals_uses_runtime_telemetry():
+    from core.orchestration.round_state import RoundStateController
+    from core.orchestration.turn_diagnostics import report_round_state_stall_signals
+
+    state = RoundStateController(max_iterations=8)
+    for _ in range(3):
+        state.note_response_tools(1, visible_text="", tool_names=["task_list_tool"])
+
+    warnings: list[tuple[str, str]] = []
+
+    class _Log:
+        def warning(self, msg, tag=""):
+            warnings.append((str(msg), str(tag)))
+
+    reported = report_round_state_stall_signals(state, {}, debug_logger=_Log())
+    assert "consecutive_bookkeeping_tool_only_steps" in reported
+    assert warnings
+    assert warnings[0][1] == "STATE"
+
+
+def test_report_round_state_stall_signals_ignores_legacy_telemetry_snapshot():
+    from core.orchestration.turn_diagnostics import report_round_state_stall_signals
+
+    class _Legacy:
+        def telemetry_snapshot(self):
+            return {"consecutive_tool_only_steps": 9}
+
+    warnings: list[str] = []
+
+    class _Log:
+        def warning(self, msg, tag=""):
+            warnings.append(str(msg))
+
+    reported = report_round_state_stall_signals(_Legacy(), {}, debug_logger=_Log())
+    assert reported == {}
+    assert warnings == []

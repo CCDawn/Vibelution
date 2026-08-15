@@ -26,6 +26,26 @@ def _service():
     return agent_directory_service
 
 
+def _format_personal_episodes_context(episodes: list[dict[str, Any]]) -> list[str]:
+    s = _service()
+    from . import episodic_memory as episodic_memory_mod
+
+    if not episodes:
+        return ["PersonalEpisodes: none"]
+    lines = [
+        "PersonalEpisodes: current private memories for this Agent, shared across its sessions.",
+        "- Use these facts in the current session. Supersede outdated ones; do not copy standards, skills, or code.",
+    ]
+    for item in episodes[: episodic_memory_mod.PROMPT_LIST_LIMIT]:
+        episode_id = str(item.get("episodeId") or item.get("eventId") or "").strip()
+        kind = str(item.get("kind") or "note").strip() or "note"
+        text = s.trim_lines(str(item.get("text") or ""), max_lines=episodic_memory_mod.PROMPT_TEXT_LINES)
+        lines.append(f"- episodeId={episode_id} kind={kind}")
+        if text:
+            lines.append(f"  text: {text}")
+    return lines
+
+
 def build_agent_runtime_context_block(
     agent_id: str,
     *,
@@ -33,6 +53,7 @@ def build_agent_runtime_context_block(
     agent_snapshot: dict[str, Any] | None = None,
     group_events_snapshot: list[dict[str, Any]] | None = None,
     inbox_messages_snapshot: list[dict[str, Any]] | None = None,
+    episodic_events_snapshot: list[dict[str, Any]] | None = None,
     memory_policy_snapshot: dict[str, Any] | None = None,
 ) -> str:
     s = _service()
@@ -53,6 +74,13 @@ def build_agent_runtime_context_block(
             status="pending",
             prompt_eligible_only=True,
         )
+    )
+    from . import episodic_memory as episodic_memory_mod
+
+    episodes = (
+        list(episodic_events_snapshot)
+        if episodic_events_snapshot is not None
+        else s.list_current_episodic_events(agent_id, limit=episodic_memory_mod.PROMPT_LIST_LIMIT)
     )
     memory_policy = (
         dict(memory_policy_snapshot)
@@ -102,6 +130,7 @@ def build_agent_runtime_context_block(
     task_lines = s._format_task_profile_context(agent.get("taskProfile"))
     if task_lines:
         lines.extend(task_lines)
+    lines.extend(_format_personal_episodes_context(episodes))
     if events:
         lines.append("GroupContextEvents:")
         for event in events[-limit:]:
@@ -143,6 +172,9 @@ def build_agent_runtime_context_block(
                 )
     else:
         lines.append("AgentInboxMessages: none")
+    from core.web.services import team_service
+
+    lines.extend(team_service.build_team_roster_context_lines(str(agent.get("agentId") or agent_id or "").strip()))
     return "\n".join(line for line in lines if line is not None).strip()
 
 

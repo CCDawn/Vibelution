@@ -25,7 +25,19 @@ import {
 } from "react";
 import { type BlockerFunction, useBlocker, useSearchParams } from "react-router-dom";
 
-import { fetchJson } from "../api/client";
+import {
+  addDraftModel,
+  applyConfigWorkspace,
+  checkDraftModelCapabilities,
+  deleteDraftModel,
+  discoverConfigModels,
+  openConfigEnvironment,
+  previewConfigDraft,
+  testConfigLlm,
+  updateDraftModel,
+  uploadConfigAvatarImage,
+  uploadConfigThemeBackgroundImage,
+} from "../api/config";
 import { queryKeys } from "../api/queryKeys";
 import {
   ConfigEditorMeta,
@@ -34,7 +46,6 @@ import {
   ConfigDiscoveredModel,
   ConfigDraftMeta,
   ConfigLlmTestResult,
-  ConfigModelDiscoveryResult,
   ConfigModelOption,
   ConfigMigrationArtifactResolution,
   ConfigMigrationPreview,
@@ -2126,16 +2137,6 @@ function ConfigSectionEditor({
   );
 }
 
-async function requestJson<T>(url: string, body?: unknown, method = "POST"): Promise<T> {
-  return fetchJson<T>(url, {
-    method,
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: body == null ? undefined : JSON.stringify(body),
-  });
-}
-
 async function fileToBase64(file: File): Promise<string> {
   const bytes = new Uint8Array(await file.arrayBuffer());
   let binary = "";
@@ -2633,7 +2634,6 @@ export function ConfigRoute() {
     setRouteEditProvider,
     setRoutePreview,
     dispatchProviderWizard,
-    requestJson,
   });
 
   const {
@@ -2683,7 +2683,7 @@ export function ConfigRoute() {
       message: `正在真实调用测试 ${modelRef}…`,
     });
     try {
-      const result = await requestJson<ConfigLlmTestResult>("/api/config/test-llm", {
+      const result = await testConfigLlm({
         publicConfig: requireDraft(),
         draftMeta,
         baseHash,
@@ -2773,7 +2773,6 @@ export function ConfigRoute() {
     syncWorkspace,
     markError,
     readableErrorMessage,
-    requestJson,
   });
 
   function resolveDraftForSubmission(): PublicConfigShape {
@@ -2792,7 +2791,7 @@ export function ConfigRoute() {
   async function previewDraft(nextConfig: PublicConfigShape, nextMeta: ConfigDraftMeta, pendingLabel: string) {
     setBusyAction(pendingLabel);
     try {
-      const response = await requestJson<ConfigWorkspace>("/api/config/draft/preview", {
+      const response = await previewConfigDraft({
         publicConfig: nextConfig,
         draftMeta: nextMeta,
         baseHash,
@@ -2824,7 +2823,7 @@ export function ConfigRoute() {
   async function handleOpenEnvironment() {
     setBusyAction(copy.openEnvironmentPending);
     try {
-      await requestJson<{ opened: boolean }>("/api/config/open-environment", {});
+      await openConfigEnvironment();
       setNotice({ tone: "success", text: copy.openEnvironmentOpened });
     } catch (error) {
       markError(error);
@@ -2860,23 +2859,19 @@ export function ConfigRoute() {
 
       let response: ConfigWorkspace;
       try {
-        response = await requestJson<ConfigWorkspace>("/api/config/apply", payload, "PUT");
+        response = await applyConfigWorkspace(payload);
       } catch (error) {
         // Multi-pin draft loops can desync client baseConfig/baseHash. Retry once without
         // baseConfig so the server uses on-disk baseline + this draft body.
         if (!isConfigBaselineStaleErrorMessage(readableErrorMessage(error)) || payload.baseConfig == null) {
           throw error;
         }
-        response = await requestJson<ConfigWorkspace>(
-          "/api/config/apply",
-          {
-            publicConfig: payload.publicConfig,
-            draftMeta: payload.draftMeta,
-            baseHash: payload.baseHash,
-            baseConfig: null,
-          },
-          "PUT",
-        );
+        response = await applyConfigWorkspace({
+          publicConfig: payload.publicConfig,
+          draftMeta: payload.draftMeta,
+          baseHash: payload.baseHash,
+          baseConfig: null,
+        });
       }
       syncWorkspace(response, "success");
       publishConfigDraftPresence(false);
@@ -2959,7 +2954,7 @@ export function ConfigRoute() {
   async function handleAvatarImageUpload(file: File): Promise<AvatarImageUploadResponse | null> {
     setBusyAction(copy.avatarImageUploading);
     try {
-      return await requestJson<AvatarImageUploadResponse>("/api/config/avatar-image", {
+      return await uploadConfigAvatarImage({
         filename: file.name,
         contentType: file.type,
         dataBase64: await fileToBase64(file),
@@ -2976,7 +2971,7 @@ export function ConfigRoute() {
   async function handleThemeBackgroundImageUpload(file: File): Promise<AvatarImageUploadResponse | null> {
     setBusyAction(copy.themeBackgroundImageUploading);
     try {
-      return await requestJson<AvatarImageUploadResponse>("/api/config/theme-background-image", {
+      return await uploadConfigThemeBackgroundImage({
         filename: file.name,
         contentType: file.type,
         dataBase64: await fileToBase64(file),
@@ -3098,7 +3093,7 @@ export function ConfigRoute() {
           : modelEditor.model_id.trim() ||
             uniqueModelLibraryId(modelLibraryIdFromParts(modelEditor.label || modelEditor.model, modelEditor.model), modelOptions.map((option) => option.model_id));
       const discoveryApiKeyEnv = modelEditor.api_key_env.trim() || defaultModelApiKeyEnv(discoveryModelId);
-      const response = await requestJson<ConfigModelDiscoveryResult>("/api/config/discover-models", {
+      const response = await discoverConfigModels({
         publicConfig: requireDraft(),
         draftMeta,
         baseHash,
@@ -3132,14 +3127,13 @@ export function ConfigRoute() {
     setBusyAction(copy.modelSavePending);
     setModelEditorError("");
     try {
-      const endpoint = modelEditor.mode === "edit" ? "/api/config/draft/update-model" : "/api/config/draft/add-model";
       const resolvedModelId =
         modelEditor.mode === "edit"
           ? modelEditor.model_id
           : modelEditor.model_id.trim() ||
             uniqueModelLibraryId(modelLibraryIdFromParts(modelEditor.label || modelEditor.model, modelEditor.model), modelOptions.map((option) => option.model_id));
       const resolvedApiKeyEnv = modelEditor.api_key_env.trim() || defaultModelApiKeyEnv(resolvedModelId);
-      const response = await requestJson<ConfigWorkspace>(endpoint, {
+      const draftModelBody = {
         publicConfig: requireDraft(),
         draftMeta,
         baseHash,
@@ -3152,7 +3146,10 @@ export function ConfigRoute() {
         apiKeyEnv: resolvedApiKeyEnv,
         apiKey: modelEditor.api_key,
         clearApiKey: modelEditor.clear_api_key,
-      });
+      };
+      const response = modelEditor.mode === "edit"
+        ? await updateDraftModel(draftModelBody)
+        : await addDraftModel(draftModelBody);
       syncWorkspace(response, "success", { resetBase: false });
       setModelEditorExpanded(false);
     } catch (error) {
@@ -3172,7 +3169,7 @@ export function ConfigRoute() {
     }
     setBusyAction(copy.modelSavePending);
     try {
-      const response = await requestJson<ConfigWorkspace>("/api/config/draft/delete-model", {
+      const response = await deleteDraftModel({
         publicConfig: requireDraft(),
         draftMeta,
         baseHash,
@@ -3210,7 +3207,7 @@ export function ConfigRoute() {
     }
     setBusyAction(copy.testPending);
     try {
-      const result = await requestJson<ConfigLlmTestResult>("/api/config/test-llm", {
+      const result = await testConfigLlm({
         publicConfig: requireDraft(),
         draftMeta,
         baseHash,
@@ -3233,7 +3230,7 @@ export function ConfigRoute() {
     }
     setBusyAction(copy.imageCapabilityCheckPending);
     try {
-      const response = await requestJson<ConfigWorkspace>("/api/config/draft/check-model-capabilities", {
+      const response = await checkDraftModelCapabilities({
         publicConfig: requireDraft(),
         draftMeta,
         baseHash,

@@ -1,7 +1,7 @@
 import { useMutation, type QueryClient, type UseMutationResult } from "@tanstack/react-query";
 import { useEffect, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
 
-import { fetchJson } from "../../api/client";
+import { selectChatSession } from "../../api/chat";
 import type { SessionDetail } from "../../api/types";
 import type { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import { isTempSessionId } from "../sessionOptimisticIds";
@@ -60,13 +60,7 @@ export function useChatSessionSelection({
 }: UseChatSessionSelectionOptions): UseChatSessionSelectionResult {
   const selectDirectSessionMutation = useMutation({
     mutationFn: async ({ sessionId, generation }: DirectSessionSelectionVariables) => {
-      const detail = await fetchJson<SessionDetail>(
-        `/api/sessions/${encodeURIComponent(sessionId)}/select`,
-        {
-          method: "POST",
-          headers: { Prefer: "respond-async" },
-        },
-      );
+      const detail = await selectChatSession(sessionId);
       return { detail, generation, sessionId };
     },
     onSuccess: ({ detail: nextDetail, generation }) => {

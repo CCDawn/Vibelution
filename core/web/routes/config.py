@@ -15,6 +15,28 @@ from config.provider_merge_migration import (
     ProviderMergeVerificationError,
 )
 
+from core.web.routes.config_draft_model_models import (
+    ConfigLlmTestResponse,
+    ConfigModelDiscoveryResponse,
+)
+from core.web.routes.config_migration_models import (
+    ConfigMigrationApplyResponse,
+    ConfigMigrationPreviewResponse,
+    ConfigProviderMergePreviewResponse,
+    ConfigProviderMergeResultResponse,
+)
+from core.web.routes.config_draft_provider_models import (
+    ConfigProviderIdSuggestionResponse,
+    ConfigProviderRoutePreviewResponse,
+)
+from core.web.routes.config_apply_shell_models import (
+    ConfigImageUploadResponse,
+    ConfigOpenEnvironmentResponse,
+)
+from core.web.routes.config_workspace_models import (
+    ConfigWorkspaceResponse,
+    PublicConfigSummaryResponse,
+)
 from core.web.services.avatar_image_service import resolve_user_avatar_file, store_user_avatar_image
 from core.web.services.config_service import (
     ConfigConflictError,
@@ -310,17 +332,29 @@ def _raise_migration_http_error(exc: Exception) -> None:
     ) from exc
 
 
-@router.get("/config/public")
+@router.get(
+    "/config/public",
+    response_model=PublicConfigSummaryResponse,
+    response_model_exclude_unset=True,
+)
 def public_config_summary() -> dict:
     return get_config_summary()
 
 
-@router.get("/config/workspace")
+@router.get(
+    "/config/workspace",
+    response_model=ConfigWorkspaceResponse,
+    response_model_exclude_unset=True,
+)
 def config_workspace() -> dict:
     return get_config_workspace()
 
 
-@migration_router.post("/config/migration/llm-v2/preview")
+@migration_router.post(
+    "/config/migration/llm-v2/preview",
+    response_model=ConfigMigrationPreviewResponse,
+    response_model_exclude_unset=True,
+)
 def config_llm_v2_migration_preview(
     payload: ConfigMigrationPreviewPayload | None = None,
 ) -> dict:
@@ -344,7 +378,11 @@ def config_llm_v2_migration_preview(
         _raise_migration_http_error(exc)
 
 
-@migration_router.post("/config/migration/llm-v2/apply")
+@migration_router.post(
+    "/config/migration/llm-v2/apply",
+    response_model=ConfigMigrationApplyResponse,
+    response_model_exclude_unset=True,
+)
 def config_llm_v2_migration_apply(payload: ConfigMigrationApplyPayload) -> dict:
     try:
         return provider_config_service.apply_llm_v2_migration(
@@ -355,7 +393,11 @@ def config_llm_v2_migration_apply(payload: ConfigMigrationApplyPayload) -> dict:
         _raise_migration_http_error(exc)
 
 
-@migration_router.post("/config/migration/providers/merge/preview")
+@migration_router.post(
+    "/config/migration/providers/merge/preview",
+    response_model=ConfigProviderMergePreviewResponse,
+    response_model_exclude_unset=True,
+)
 def config_provider_merge_preview(payload: ProviderMergePreviewPayload) -> dict:
     try:
         return provider_config_service.preview_duplicate_provider_merge(
@@ -367,7 +409,11 @@ def config_provider_merge_preview(payload: ProviderMergePreviewPayload) -> dict:
         _raise_migration_http_error(exc)
 
 
-@migration_router.post("/config/migration/providers/merge/apply")
+@migration_router.post(
+    "/config/migration/providers/merge/apply",
+    response_model=ConfigProviderMergeResultResponse,
+    response_model_exclude_unset=True,
+)
 def config_provider_merge_apply(payload: ProviderMergeApplyPayload) -> dict:
     try:
         return provider_config_service.apply_duplicate_provider_merge(
@@ -380,7 +426,9 @@ def config_provider_merge_apply(payload: ProviderMergeApplyPayload) -> dict:
 
 
 @migration_router.post(
-    "/config/migration/providers/merge/{migration_id}/rollback"
+    "/config/migration/providers/merge/{migration_id}/rollback",
+    response_model=ConfigProviderMergeResultResponse,
+    response_model_exclude_unset=True,
 )
 def config_provider_merge_rollback(
     migration_id: str, payload: ProviderMergeRollbackPayload
@@ -399,7 +447,11 @@ def config_provider_merge_rollback(
 router.include_router(migration_router)
 
 
-@router.post("/config/migration/llm-v2/{migration_id}/rollback")
+@router.post(
+    "/config/migration/llm-v2/{migration_id}/rollback",
+    response_model=ConfigMigrationApplyResponse,
+    response_model_exclude_unset=True,
+)
 def config_llm_v2_migration_rollback(
     migration_id: str,
     payload: ConfigMigrationRollbackPayload,
@@ -415,7 +467,11 @@ def config_llm_v2_migration_rollback(
         _raise_migration_http_error(exc)
 
 
-@router.post("/config/open-environment")
+@router.post(
+    "/config/open-environment",
+    response_model=ConfigOpenEnvironmentResponse,
+    response_model_exclude_unset=True,
+)
 def config_open_environment() -> dict:
     try:
         return open_system_environment_settings()
@@ -423,7 +479,11 @@ def config_open_environment() -> dict:
         _raise_config_http_error(exc)
 
 
-@router.post("/config/avatar-image")
+@router.post(
+    "/config/avatar-image",
+    response_model=ConfigImageUploadResponse,
+    response_model_exclude_unset=True,
+)
 def config_upload_avatar_image(payload: ConfigAvatarImagePayload) -> dict:
     try:
         return store_user_avatar_image(
@@ -435,7 +495,7 @@ def config_upload_avatar_image(payload: ConfigAvatarImagePayload) -> dict:
         _raise_config_http_error(exc)
 
 
-@router.get("/config/avatar-image/{filename}")
+@router.get("/config/avatar-image/{filename}", response_class=FileResponse)
 def config_get_avatar_image(filename: str) -> FileResponse:
     try:
         path = resolve_user_avatar_file(filename)
@@ -446,7 +506,11 @@ def config_get_avatar_image(filename: str) -> FileResponse:
     return FileResponse(path)
 
 
-@router.post("/config/theme-background-image")
+@router.post(
+    "/config/theme-background-image",
+    response_model=ConfigImageUploadResponse,
+    response_model_exclude_unset=True,
+)
 def config_upload_theme_background_image(payload: ConfigThemeBackgroundImagePayload) -> dict:
     try:
         return store_theme_background_image(
@@ -458,7 +522,7 @@ def config_upload_theme_background_image(payload: ConfigThemeBackgroundImagePayl
         _raise_config_http_error(exc)
 
 
-@router.get("/config/theme-background-image/{filename}")
+@router.get("/config/theme-background-image/{filename}", response_class=FileResponse)
 def config_get_theme_background_image(filename: str) -> FileResponse:
     try:
         path = resolve_theme_background_file(filename)
@@ -469,7 +533,11 @@ def config_get_theme_background_image(filename: str) -> FileResponse:
     return FileResponse(path)
 
 
-@router.post("/config/draft/preview")
+@router.post(
+    "/config/draft/preview",
+    response_model=ConfigWorkspaceResponse,
+    response_model_exclude_unset=True,
+)
 def config_draft_preview(payload: ConfigDraftPayload) -> dict:
     try:
         return preview_config_workspace(payload.publicConfig, payload.draftMeta, payload.baseHash)
@@ -477,7 +545,11 @@ def config_draft_preview(payload: ConfigDraftPayload) -> dict:
         _raise_config_http_error(exc)
 
 
-@router.post("/config/draft/providers/id-suggestion")
+@router.post(
+    "/config/draft/providers/id-suggestion",
+    response_model=ConfigProviderIdSuggestionResponse,
+    response_model_exclude_unset=True,
+)
 def config_draft_provider_id_suggestion(
     payload: ConfigProviderSuggestionPayload,
 ) -> dict:
@@ -491,7 +563,11 @@ def config_draft_provider_id_suggestion(
         _raise_config_http_error(exc)
 
 
-@router.post("/config/draft/providers")
+@router.post(
+    "/config/draft/providers",
+    response_model=ConfigWorkspaceResponse,
+    response_model_exclude_unset=True,
+)
 def config_draft_add_provider(payload: ConfigProviderDraftPayload) -> dict:
     try:
         return provider_config_service.draft_add_provider(
@@ -506,7 +582,11 @@ def config_draft_add_provider(payload: ConfigProviderDraftPayload) -> dict:
         _raise_config_http_error(exc)
 
 
-@router.put("/config/draft/providers/{provider_id}")
+@router.put(
+    "/config/draft/providers/{provider_id}",
+    response_model=ConfigWorkspaceResponse,
+    response_model_exclude_unset=True,
+)
 def config_draft_update_provider(
     provider_id: str,
     payload: ConfigProviderDraftPayload,
@@ -525,7 +605,11 @@ def config_draft_update_provider(
         _raise_config_http_error(exc)
 
 
-@router.delete("/config/draft/providers/{provider_id}")
+@router.delete(
+    "/config/draft/providers/{provider_id}",
+    response_model=ConfigWorkspaceResponse,
+    response_model_exclude_unset=True,
+)
 def config_draft_delete_provider(
     provider_id: str,
     payload: ConfigProviderDraftPayload,
@@ -541,7 +625,11 @@ def config_draft_delete_provider(
         _raise_config_http_error(exc)
 
 
-@router.post("/config/draft/providers/{provider_id}/route-preview")
+@router.post(
+    "/config/draft/providers/{provider_id}/route-preview",
+    response_model=ConfigProviderRoutePreviewResponse,
+    response_model_exclude_unset=True,
+)
 def config_draft_preview_provider_route(
     provider_id: str,
     payload: ConfigProviderDraftPayload,
@@ -559,7 +647,11 @@ def config_draft_preview_provider_route(
         _raise_config_http_error(exc)
 
 
-@router.post("/config/draft/providers/{provider_id}/discover")
+@router.post(
+    "/config/draft/providers/{provider_id}/discover",
+    response_model=ConfigWorkspaceResponse,
+    response_model_exclude_unset=True,
+)
 def config_draft_discover_provider(
     provider_id: str,
     payload: ConfigProviderDiscoveryPayload,
@@ -576,7 +668,11 @@ def config_draft_discover_provider(
         _raise_config_http_error(exc)
 
 
-@router.post("/config/draft/providers/{provider_id}/models")
+@router.post(
+    "/config/draft/providers/{provider_id}/models",
+    response_model=ConfigWorkspaceResponse,
+    response_model_exclude_unset=True,
+)
 def config_draft_pin_provider_model(
     provider_id: str,
     payload: ConfigProviderModelPayload,
@@ -596,7 +692,11 @@ def config_draft_pin_provider_model(
         _raise_config_http_error(exc)
 
 
-@router.delete("/config/draft/providers/{provider_id}/models/{model_key}")
+@router.delete(
+    "/config/draft/providers/{provider_id}/models/{model_key}",
+    response_model=ConfigWorkspaceResponse,
+    response_model_exclude_unset=True,
+)
 def config_draft_unpin_provider_model(
     provider_id: str,
     model_key: str,
@@ -614,7 +714,11 @@ def config_draft_unpin_provider_model(
         _raise_config_http_error(exc)
 
 
-@router.post("/config/draft/add-model")
+@router.post(
+    "/config/draft/add-model",
+    response_model=ConfigWorkspaceResponse,
+    response_model_exclude_unset=True,
+)
 def config_draft_add_model(payload: ConfigDraftAddModelPayload) -> dict:
     try:
         return draft_add_model(
@@ -634,7 +738,11 @@ def config_draft_add_model(payload: ConfigDraftAddModelPayload) -> dict:
         _raise_config_http_error(exc)
 
 
-@router.post("/config/draft/update-model")
+@router.post(
+    "/config/draft/update-model",
+    response_model=ConfigWorkspaceResponse,
+    response_model_exclude_unset=True,
+)
 def config_draft_update_model(payload: ConfigDraftUpdateModelPayload) -> dict:
     try:
         return draft_update_model(
@@ -654,7 +762,11 @@ def config_draft_update_model(payload: ConfigDraftUpdateModelPayload) -> dict:
         _raise_config_http_error(exc)
 
 
-@router.post("/config/draft/delete-model")
+@router.post(
+    "/config/draft/delete-model",
+    response_model=ConfigWorkspaceResponse,
+    response_model_exclude_unset=True,
+)
 def config_draft_delete_model(payload: ConfigDraftDeleteModelPayload) -> dict:
     try:
         return draft_delete_model(
@@ -667,7 +779,11 @@ def config_draft_delete_model(payload: ConfigDraftDeleteModelPayload) -> dict:
         _raise_config_http_error(exc)
 
 
-@router.post("/config/test-llm")
+@router.post(
+    "/config/test-llm",
+    response_model=ConfigLlmTestResponse,
+    response_model_exclude_unset=True,
+)
 def config_test_llm(payload: ConfigDraftTestPayload) -> dict:
     try:
         return run_draft_llm_test(
@@ -681,7 +797,11 @@ def config_test_llm(payload: ConfigDraftTestPayload) -> dict:
         _raise_config_http_error(exc)
 
 
-@router.post("/config/draft/check-model-capabilities")
+@router.post(
+    "/config/draft/check-model-capabilities",
+    response_model=ConfigWorkspaceResponse,
+    response_model_exclude_unset=True,
+)
 def config_draft_check_model_capabilities(payload: ConfigDraftCapabilityPayload) -> dict:
     try:
         return draft_check_model_image_input_capabilities(
@@ -694,7 +814,11 @@ def config_draft_check_model_capabilities(payload: ConfigDraftCapabilityPayload)
         _raise_config_http_error(exc)
 
 
-@router.post("/config/discover-models")
+@router.post(
+    "/config/discover-models",
+    response_model=ConfigModelDiscoveryResponse,
+    response_model_exclude_unset=True,
+)
 def config_discover_models(payload: ConfigDiscoverModelsPayload) -> dict:
     try:
         return discover_config_models(
@@ -709,7 +833,11 @@ def config_discover_models(payload: ConfigDiscoverModelsPayload) -> dict:
         _raise_config_http_error(exc)
 
 
-@router.put("/config/apply")
+@router.put(
+    "/config/apply",
+    response_model=ConfigWorkspaceResponse,
+    response_model_exclude_unset=True,
+)
 def config_apply(payload: ConfigDraftPayload) -> dict:
     try:
         return apply_config_workspace(
@@ -722,11 +850,19 @@ def config_apply(payload: ConfigDraftPayload) -> dict:
         _raise_config_http_error(exc)
 
 
-@router.put("/config/intake-mode")
+@router.put(
+    "/config/intake-mode",
+    response_model=PublicConfigSummaryResponse,
+    response_model_exclude_unset=True,
+)
 def set_intake_mode(payload: IntakeModeUpdateRequest) -> dict:
     return update_intake_mode(payload.intakeMode)
 
 
-@router.put("/config/language")
+@router.put(
+    "/config/language",
+    response_model=PublicConfigSummaryResponse,
+    response_model_exclude_unset=True,
+)
 def set_language(payload: LanguageUpdateRequest) -> dict:
     return update_language(payload.language)

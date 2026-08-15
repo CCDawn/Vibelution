@@ -5,18 +5,25 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 
-import { fetchJson } from "../../api/client";
+import {
+  archiveAgent,
+  consumeAllAgentInboxMessages,
+  consumeAgentInboxMessage,
+  createAgentToolGovernanceRequest,
+  purgeArchivedAgent,
+  resetAgent,
+  resolveAgentCenterToolGovernanceRequest,
+  updateAgent,
+  updateAgentAvatar,
+  updateAgentModeMembership,
+  uploadAgentAvatarImage,
+} from "../../api/agents";
 import { queryKeys } from "../../api/queryKeys";
 import type {
-  AgentAvatarUploadResponse,
   AgentConfigWorkspace,
   AgentConfigWorkspaceAgent,
   AgentDelegationPolicy,
-  AgentInboxMessage,
-  AgentModeBindings,
-  AgentPurgeResponse,
   AgentSupervisionPolicy,
-  AgentToolGovernanceRequest,
   MemoryPolicy,
   ToolPolicy,
 } from "../../api/types";
@@ -79,12 +86,8 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
 
   const updatePersonaMutation = useMutation({
     mutationFn: (payload: { agentId: string; draft: any }) =>
-      fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          personaProfile: options.personaProfileFromDraft(payload.draft),
-        }),
+      updateAgent(payload.agentId, {
+        personaProfile: options.personaProfileFromDraft(payload.draft),
       }),
     onSuccess: (agent) => {
       queryClient.setQueryData<AgentConfigWorkspace | undefined>(
@@ -103,12 +106,8 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
 
   const updateTaskMutation = useMutation({
     mutationFn: (payload: { agentId: string; draft: any }) =>
-      fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          taskProfile: options.taskProfileFromDraft(payload.draft),
-        }),
+      updateAgent(payload.agentId, {
+        taskProfile: options.taskProfileFromDraft(payload.draft),
       }),
     onSuccess: (agent) => {
       queryClient.setQueryData<AgentConfigWorkspace | undefined>(
@@ -127,9 +126,7 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
 
   const archiveAgentMutation = useMutation({
     mutationFn: (payload: { agentId: string }) =>
-      fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
-        method: "DELETE",
-      }),
+      archiveAgent(payload.agentId),
     onMutate: async (payload) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.agentConfigWorkspace() });
       const previousWorkspace = queryClient.getQueryData<AgentConfigWorkspace>(queryKeys.agentConfigWorkspace());
@@ -172,10 +169,7 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
 
   const purgeAgentMutation = useMutation({
     mutationFn: (payload: { agentId: string }) =>
-      fetchJson<AgentPurgeResponse>(
-        `/api/agents/${encodeURIComponent(payload.agentId)}/purge`,
-        { method: "DELETE" },
-      ),
+      purgeArchivedAgent(payload.agentId),
     onMutate: async (payload) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.agentConfigWorkspace() });
       const previousWorkspace = queryClient.getQueryData<AgentConfigWorkspace>(queryKeys.agentConfigWorkspace());
@@ -219,13 +213,9 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
 
   const resetAgentMutation = useMutation({
     mutationFn: (payload: { agentId: string; options: AgentResetOptions }) =>
-      fetchJson<{ agent: AgentConfigWorkspaceAgent; resetSummary: AgentResetSummary }>(
-        `/api/agents/${encodeURIComponent(payload.agentId)}/reset`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload.options),
-        },
+      resetAgent<{ agent: AgentConfigWorkspaceAgent; resetSummary: AgentResetSummary }>(
+        payload.agentId,
+        payload.options,
       ),
     onMutate: (payload) => {
       options.setResettingAgentIds((current) => {
@@ -265,13 +255,9 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
 
   const updateAvatarMutation = useMutation({
     mutationFn: (payload: { agentId: string; avatarImagePath?: string; resetToDefault?: boolean }) =>
-      fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(payload.agentId)}/avatar`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          avatarImagePath: payload.avatarImagePath ?? "",
-          resetToDefault: Boolean(payload.resetToDefault),
-        }),
+      updateAgentAvatar(payload.agentId, {
+        avatarImagePath: payload.avatarImagePath,
+        resetToDefault: payload.resetToDefault,
       }),
     onSuccess: (agent) => {
       queryClient.setQueryData<AgentConfigWorkspace | undefined>(
@@ -288,14 +274,10 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
 
   const uploadAvatarMutation = useMutation({
     mutationFn: async (payload: { agentId: string; file: File }) =>
-      fetchJson<AgentAvatarUploadResponse>(`/api/agents/${encodeURIComponent(payload.agentId)}/avatar-image`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          filename: payload.file.name,
-          contentType: payload.file.type || "image/png",
-          dataBase64: options.encodeArrayBufferBase64(await payload.file.arrayBuffer()),
-        }),
+      uploadAgentAvatarImage(payload.agentId, {
+        filename: payload.file.name,
+        contentType: payload.file.type || "image/png",
+        dataBase64: options.encodeArrayBufferBase64(await payload.file.arrayBuffer()),
       }),
     onSuccess: (result) => {
       const agent = result.agent as AgentConfigWorkspaceAgent;
@@ -314,11 +296,7 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
 
   const updateMembershipMutation = useMutation({
     mutationFn: (payload: { agentId: string; draft: AgentModeMembershipDraft }) =>
-      fetchJson<AgentModeBindings>(`/api/agents/${encodeURIComponent(payload.agentId)}/mode-membership`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload.draft),
-      }),
+      updateAgentModeMembership(payload.agentId, { ...payload.draft }),
     onSuccess: (payload, variables) => {
       queryClient.setQueryData<AgentConfigWorkspace | undefined>(
         queryKeys.agentConfigWorkspace(),
@@ -343,20 +321,16 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
 
   const updateToolPolicyMutation = useMutation({
     mutationFn: (payload: { agentId: string; draft: any; basePolicy: ToolPolicy | undefined }) =>
-      fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          toolPolicy: {
-            ...options.defaultToolPolicy(payload.basePolicy?.policyId || "default"),
-            ...(payload.basePolicy ?? {}),
-            allowedTools: options.sortedIds(payload.draft.allowedTools),
-            preferredTools: options.sortedIds(payload.draft.preferredTools),
-            blockedTools: options.sortedIds(payload.draft.blockedTools),
-            readScopes: options.sortedIds(payload.draft.readScopes),
-            writeScopes: options.sortedIds(payload.draft.writeScopes),
-          },
-        }),
+      updateAgent(payload.agentId, {
+        toolPolicy: {
+          ...options.defaultToolPolicy(payload.basePolicy?.policyId || "default"),
+          ...(payload.basePolicy ?? {}),
+          allowedTools: options.sortedIds(payload.draft.allowedTools),
+          preferredTools: options.sortedIds(payload.draft.preferredTools),
+          blockedTools: options.sortedIds(payload.draft.blockedTools),
+          readScopes: options.sortedIds(payload.draft.readScopes),
+          writeScopes: options.sortedIds(payload.draft.writeScopes),
+        },
       }),
     onSuccess: (agent) => {
       queryClient.setQueryData<AgentConfigWorkspace | undefined>(
@@ -380,18 +354,14 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
       draft: any;
       delta: any;
     }) =>
-      fetchJson<AgentToolGovernanceRequest>(`/api/agents/${encodeURIComponent(payload.agentId)}/tool-governance-requests`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          proposedByAgentId: payload.draft.proposedByAgentId,
-          grantTools: options.sortedIds(payload.delta.grantTools),
-          revokeTools: options.sortedIds(payload.delta.revokeTools),
-          blockTools: options.sortedIds(payload.delta.blockTools),
-          unblockTools: options.sortedIds(payload.delta.unblockTools),
-          reason: payload.draft.reason,
-          applyMode: payload.draft.applyMode,
-        }),
+      createAgentToolGovernanceRequest(payload.agentId, {
+        proposedByAgentId: payload.draft.proposedByAgentId,
+        grantTools: options.sortedIds(payload.delta.grantTools),
+        revokeTools: options.sortedIds(payload.delta.revokeTools),
+        blockTools: options.sortedIds(payload.delta.blockTools),
+        unblockTools: options.sortedIds(payload.delta.unblockTools),
+        reason: payload.draft.reason,
+        applyMode: payload.draft.applyMode,
       }),
     onSuccess: (request) => {
       options.setNotice({
@@ -408,18 +378,7 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
 
   const resolveToolGovernanceMutation = useMutation({
     mutationFn: (payload: { agentId: string; requestId: string; decision: "approve" | "reject" }) =>
-      fetchJson<AgentToolGovernanceRequest>(
-        `/api/agents/${encodeURIComponent(payload.agentId)}/tool-governance-requests/${encodeURIComponent(payload.requestId)}`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            decision: payload.decision,
-            resolvedBy: "user",
-            resolutionNote: payload.decision,
-          }),
-        },
-      ),
+      resolveAgentCenterToolGovernanceRequest(payload.agentId, payload.requestId, payload.decision),
     onSuccess: () => {
       options.setNotice({ tone: "success", text: options.copy.toolGovernanceResolved });
       void options.chatWorkspaceCache.afterAgentWorkspaceChanged();
@@ -431,21 +390,17 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
 
   const updateMemoryPolicyMutation = useMutation({
     mutationFn: (payload: { agentId: string; draft: AgentMemoryPolicyDraft; basePolicy: MemoryPolicy | undefined }) =>
-      fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          memoryPolicy: {
-            ...options.defaultMemoryPolicy(payload.basePolicy?.policyId || ""),
-            ...(payload.basePolicy ?? {}),
-            readSharedGroups: options.sortedIds(payload.draft.readSharedGroups),
-            writeSharedGroups: options.sortedIds(payload.draft.writeSharedGroups),
-            readKnowledgeBaseIds: options.sortedIds(payload.draft.readKnowledgeBaseIds),
-            proposeKnowledgeBaseIds: options.sortedIds(payload.draft.proposeKnowledgeBaseIds),
-            reviewKnowledgeBaseIds: options.sortedIds(payload.draft.reviewKnowledgeBaseIds),
-            rateKnowledgeBaseIds: options.sortedIds(payload.draft.rateKnowledgeBaseIds),
-          },
-        }),
+      updateAgent(payload.agentId, {
+        memoryPolicy: {
+          ...options.defaultMemoryPolicy(payload.basePolicy?.policyId || ""),
+          ...(payload.basePolicy ?? {}),
+          readSharedGroups: options.sortedIds(payload.draft.readSharedGroups),
+          writeSharedGroups: options.sortedIds(payload.draft.writeSharedGroups),
+          readKnowledgeBaseIds: options.sortedIds(payload.draft.readKnowledgeBaseIds),
+          proposeKnowledgeBaseIds: options.sortedIds(payload.draft.proposeKnowledgeBaseIds),
+          reviewKnowledgeBaseIds: options.sortedIds(payload.draft.reviewKnowledgeBaseIds),
+          rateKnowledgeBaseIds: options.sortedIds(payload.draft.rateKnowledgeBaseIds),
+        },
       }),
     onSuccess: (agent) => {
       queryClient.setQueryData<AgentConfigWorkspace | undefined>(
@@ -469,24 +424,20 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
       delegationPolicy: AgentDelegationPolicy;
       supervisionPolicy: AgentSupervisionPolicy;
     }) =>
-      fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          delegationPolicy: {
-            allowSubagents: payload.delegationPolicy.allowSubagents,
-            maxConcurrent: payload.delegationPolicy.maxConcurrent,
-            maxDepth: payload.delegationPolicy.maxDepth,
-            allowWakeMessages: payload.delegationPolicy.allowWakeMessages,
-            allowedContextModes: options.sortedIds(payload.delegationPolicy.allowedContextModes),
-          },
-          supervisionPolicy: {
-            supervisionEnabled: payload.supervisionPolicy.supervisionEnabled,
-            requiresReview: payload.supervisionPolicy.requiresReview,
-            reviewMode: payload.supervisionPolicy.reviewMode,
-            evidenceLevel: payload.supervisionPolicy.evidenceLevel,
-          },
-        }),
+      updateAgent(payload.agentId, {
+        delegationPolicy: {
+          allowSubagents: payload.delegationPolicy.allowSubagents,
+          maxConcurrent: payload.delegationPolicy.maxConcurrent,
+          maxDepth: payload.delegationPolicy.maxDepth,
+          allowWakeMessages: payload.delegationPolicy.allowWakeMessages,
+          allowedContextModes: options.sortedIds(payload.delegationPolicy.allowedContextModes),
+        },
+        supervisionPolicy: {
+          supervisionEnabled: payload.supervisionPolicy.supervisionEnabled,
+          requiresReview: payload.supervisionPolicy.requiresReview,
+          reviewMode: payload.supervisionPolicy.reviewMode,
+          evidenceLevel: payload.supervisionPolicy.evidenceLevel,
+        },
       }),
     onSuccess: (agent) => {
       queryClient.setQueryData<AgentConfigWorkspace | undefined>(
@@ -507,17 +458,10 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
 
   const consumeMessageMutation = useMutation({
     mutationFn: (payload: { agentId: string; messageId: string; sessionId: string }) =>
-      fetchJson<AgentInboxMessage>(
-        `/api/agents/${encodeURIComponent(payload.agentId)}/messages/${encodeURIComponent(payload.messageId)}/consume`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            consumedBySessionId: payload.sessionId,
-            consumedByTurnId: "agent-center",
-          }),
-        },
-      ),
+      consumeAgentInboxMessage(payload.agentId, payload.messageId, {
+        consumedBySessionId: payload.sessionId,
+        consumedByTurnId: "agent-center",
+      }),
     onSuccess: (_message, variables) => {
       options.setNotice({
         tone: "success",
@@ -533,17 +477,15 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
 
   const consumeAllMessagesMutation = useMutation({
     mutationFn: (payload: { agentId: string; sessionId: string }) =>
-      fetchJson<{ agentId: string; consumed: boolean; consumedCount: number; remainingPendingCount: number }>(
-        `/api/agents/${encodeURIComponent(payload.agentId)}/messages/consume-all`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            consumedBySessionId: payload.sessionId,
-            consumedByTurnId: "agent-center",
-          }),
-        },
-      ),
+      consumeAllAgentInboxMessages<{
+        agentId: string;
+        consumed: boolean;
+        consumedCount: number;
+        remainingPendingCount: number;
+      }>(payload.agentId, {
+        consumedBySessionId: payload.sessionId,
+        consumedByTurnId: "agent-center",
+      }),
     onSuccess: (result, variables) => {
       options.setNotice({
         tone: "success",
