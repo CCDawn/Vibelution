@@ -6,10 +6,20 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Header, HTTPException, Request, status
-from pydantic import BaseModel, ConfigDict, Field
 
 from core.external_agent.contracts import API_PROTOCOL_VERSION, SERVER_VERSION
 from core.web.control import validate_control_request
+from core.web.routes.external_agent_models import (
+    CancelExternalAgentTaskPayload,
+    ExternalAgentAgentListResponse,
+    ExternalAgentApprovalResponse,
+    ExternalAgentConnectionShutdownResponse,
+    ExternalAgentHeartbeatPayload,
+    ExternalAgentInfoResponse,
+    ExternalAgentTaskResponse,
+    ResolveExternalAgentApprovalPayload,
+    StartExternalAgentTaskPayload,
+)
 from core.web.services.external_agent.service import (
     ExternalAgentAccessError,
     ExternalAgentConflictError,
@@ -25,36 +35,6 @@ router = APIRouter(tags=["external-agent"])
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 TASK_CAPABILITY_HEADER = "X-Vibelution-External-Agent-Task-Capability"
 ADAPTER_CONNECTION_HEADER = "X-Vibelution-External-Agent-Connection"
-
-
-class StartExternalAgentTaskPayload(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    agent_id: str = Field(..., min_length=1, max_length=200)
-    task: str = Field(..., min_length=1, max_length=64_000)
-    permission_profile: str = Field(default="read_only", max_length=40)
-    client_request_id: str = Field(default="", max_length=200)
-    title: str = Field(default="", max_length=160)
-
-
-class ResolveExternalAgentApprovalPayload(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    decision: str = Field(..., min_length=1, max_length=40)
-    expected_revision: str = Field(default="", max_length=200)
-    reason: str = Field(default="", max_length=500)
-
-
-class CancelExternalAgentTaskPayload(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    reason: str = Field(default="", max_length=200)
-
-
-class ExternalAgentHeartbeatPayload(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    lease_id: str = Field(..., min_length=1, max_length=200)
 
 
 _SERVICE: ExternalAgentTaskService | Any | None = None
@@ -132,7 +112,11 @@ def _handle_service_error(exc: Exception) -> HTTPException:
     )
 
 
-@router.get("/v1/external-agent/info")
+@router.get(
+    "/v1/external-agent/info",
+    response_model=ExternalAgentInfoResponse,
+    response_model_exclude_unset=True,
+)
 def external_agent_gateway_info(
     request: Request,
     adapter_connection_id: Annotated[str, Header(alias=ADAPTER_CONNECTION_HEADER)] = "",
@@ -153,7 +137,11 @@ def external_agent_gateway_info(
     }
 
 
-@router.post("/v1/external-agent/connections/shutdown")
+@router.post(
+    "/v1/external-agent/connections/shutdown",
+    response_model=ExternalAgentConnectionShutdownResponse,
+    response_model_exclude_unset=True,
+)
 def external_agent_connection_shutdown(
     request: Request,
     adapter_connection_id: Annotated[str, Header(alias=ADAPTER_CONNECTION_HEADER)] = "",
@@ -171,7 +159,11 @@ def external_agent_connection_shutdown(
     return {"status": "ok"}
 
 
-@router.get("/v1/external-agent/agents")
+@router.get(
+    "/v1/external-agent/agents",
+    response_model=ExternalAgentAgentListResponse,
+    response_model_exclude_unset=True,
+)
 def list_external_agents(request: Request, limit: int = 50) -> dict[str, Any]:
     _require_control(request)
     try:
@@ -180,7 +172,12 @@ def list_external_agents(request: Request, limit: int = 50) -> dict[str, Any]:
         raise _handle_service_error(exc) from exc
 
 
-@router.post("/v1/external-agent/tasks", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/v1/external-agent/tasks",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ExternalAgentTaskResponse,
+    response_model_exclude_unset=True,
+)
 def start_external_agent_task(
     request: Request,
     payload: StartExternalAgentTaskPayload,
@@ -209,7 +206,11 @@ def start_external_agent_task(
         raise _handle_service_error(exc) from exc
 
 
-@router.get("/v1/external-agent/tasks/{task_id}")
+@router.get(
+    "/v1/external-agent/tasks/{task_id}",
+    response_model=ExternalAgentTaskResponse,
+    response_model_exclude_unset=True,
+)
 def get_external_agent_task(
     task_id: str,
     request: Request,
@@ -223,7 +224,11 @@ def get_external_agent_task(
         raise _handle_service_error(exc) from exc
 
 
-@router.post("/v1/external-agent/tasks/{task_id}/approvals/{approval_id}/resolve")
+@router.post(
+    "/v1/external-agent/tasks/{task_id}/approvals/{approval_id}/resolve",
+    response_model=ExternalAgentApprovalResponse,
+    response_model_exclude_unset=True,
+)
 def resolve_external_agent_approval(
     task_id: str,
     approval_id: str,
@@ -247,7 +252,11 @@ def resolve_external_agent_approval(
         raise _handle_service_error(exc) from exc
 
 
-@router.post("/v1/external-agent/tasks/{task_id}/cancel")
+@router.post(
+    "/v1/external-agent/tasks/{task_id}/cancel",
+    response_model=ExternalAgentTaskResponse,
+    response_model_exclude_unset=True,
+)
 def cancel_external_agent_task(
     task_id: str,
     request: Request,
@@ -265,7 +274,11 @@ def cancel_external_agent_task(
         raise _handle_service_error(exc) from exc
 
 
-@router.post("/v1/external-agent/tasks/{task_id}/heartbeat")
+@router.post(
+    "/v1/external-agent/tasks/{task_id}/heartbeat",
+    response_model=ExternalAgentTaskResponse,
+    response_model_exclude_unset=True,
+)
 def heartbeat_external_agent_task(
     task_id: str,
     request: Request,
