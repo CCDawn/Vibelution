@@ -41,10 +41,22 @@ NUMERIC_EVENT_FIELDS = (
 )
 
 # Per-path process state: schema init cache and writer locks stay bounded so
-# long-running backends and test sessions do not grow registries forever.
+# long-running backends and test sessions do not grow registries forever. A
+# writer lock is only evicted once it has no active user, so a second lock for
+# the same path can never be handed out while the first is held.
 _schema_ready: OrderedDict[str, None] = OrderedDict()
-_write_locks: OrderedDict[str, threading.Lock] = OrderedDict()
 _registry_guard = threading.Lock()
+
+
+class _WriteLockEntry:
+    __slots__ = ("lock", "users")
+
+    def __init__(self, lock: threading.Lock) -> None:
+        self.lock = lock
+        self.users = 0
+
+
+_write_locks: OrderedDict[str, _WriteLockEntry] = OrderedDict()
 
 _usage_stats: dict[str, Any] = {
     "attempted": 0,
@@ -202,49 +214,52 @@ def record_usage_event(
     path = usage_ledger_path(project_root)
     _bump_usage_stat("attempted")
     lock = _write_lock_for(path)
-    with _usage_stats_guard:
-        _usage_stats["waitingWriters"] += 1
-        _usage_stats["maxWaitingWriters"] = max(
-            _usage_stats["maxWaitingWriters"], _usage_stats["waitingWriters"]
-        )
     try:
-        acquired = lock.acquire(
-            timeout=min(MAX_LOCK_WAIT_SECONDS, max(0.0, timeout_seconds))
-        )
-    finally:
         with _usage_stats_guard:
-            _usage_stats["waitingWriters"] = max(
-                0, int(_usage_stats["waitingWriters"]) - 1
+            _usage_stats["waitingWriters"] += 1
+            _usage_stats["maxWaitingWriters"] = max(
+                _usage_stats["maxWaitingWriters"], _usage_stats["waitingWriters"]
             )
-    if not acquired:
-        error = sqlite3.OperationalError(
-            "usage ledger writer lock busy; write rejected"
-        )
-        _record_usage_drop(error)
-        raise error
-    try:
-        last_error: sqlite3.Error | None = None
-        for attempt in range(MAX_WRITE_ATTEMPTS):
-            connection: sqlite3.Connection | None = None
-            try:
-                connection = _connect(path, timeout_seconds=timeout_seconds)
-                _insert_usage_event(connection, normalized)
-                connection.commit()
-                _bump_usage_stat("persisted")
-                return normalized
-            except sqlite3.Error as exc:
-                last_error = exc
-                time.sleep(_RETRY_BACKOFF_SECONDS * attempt)
-            finally:
-                if connection is not None:
-                    connection.close()
-        error = last_error or sqlite3.OperationalError(
-            "usage ledger write failed without an error"
-        )
-        _record_usage_drop(error)
-        raise error
+        try:
+            acquired = lock.acquire(
+                timeout=min(MAX_LOCK_WAIT_SECONDS, max(0.0, timeout_seconds))
+            )
+        finally:
+            with _usage_stats_guard:
+                _usage_stats["waitingWriters"] = max(
+                    0, int(_usage_stats["waitingWriters"]) - 1
+                )
+        if not acquired:
+            error = sqlite3.OperationalError(
+                "usage ledger writer lock busy; write rejected"
+            )
+            _record_usage_drop(error)
+            raise error
+        try:
+            last_error: sqlite3.Error | None = None
+            for attempt in range(MAX_WRITE_ATTEMPTS):
+                connection: sqlite3.Connection | None = None
+                try:
+                    connection = _connect(path, timeout_seconds=timeout_seconds)
+                    _insert_usage_event(connection, normalized)
+                    connection.commit()
+                    _bump_usage_stat("persisted")
+                    return normalized
+                except sqlite3.Error as exc:
+                    last_error = exc
+                    time.sleep(_RETRY_BACKOFF_SECONDS * attempt)
+                finally:
+                    if connection is not None:
+                        connection.close()
+            error = last_error or sqlite3.OperationalError(
+                "usage ledger write failed without an error"
+            )
+            _record_usage_drop(error)
+            raise error
+        finally:
+            lock.release()
     finally:
-        lock.release()
+        _write_lock_release(path)
 
 
 def usage_ledger_stats() -> dict[str, Any]:
@@ -293,13 +308,40 @@ def _record_usage_drop(error: BaseException) -> None:
 def _write_lock_for(path: Path) -> threading.Lock:
     key = _registry_key(path)
     with _registry_guard:
-        lock = _write_locks.get(key)
-        if lock is None:
-            lock = threading.Lock()
-            _write_locks[key] = lock
-            while len(_write_locks) > _INIT_CACHE_MAX_ENTRIES:
-                _write_locks.popitem(last=False)
-        return lock
+        entry = _write_locks.get(key)
+        if entry is None:
+            entry = _WriteLockEntry(threading.Lock())
+            _write_locks[key] = entry
+        entry.users += 1
+        _write_locks.move_to_end(key)
+        _prune_write_locks()
+        return entry.lock
+
+
+def _write_lock_release(path: Path) -> None:
+    key = _registry_key(path)
+    with _registry_guard:
+        entry = _write_locks.get(key)
+        if entry is not None:
+            entry.users = max(0, entry.users - 1)
+            if entry.users == 0:
+                _write_locks.move_to_end(key)
+        _prune_write_locks()
+
+
+def _prune_write_locks() -> None:
+    """Evict least-recently-used entries only while the registry is over its
+    capacity; a lock with an active user is never evicted so the same path can
+    only ever map to a single live lock."""
+    while len(_write_locks) > _INIT_CACHE_MAX_ENTRIES:
+        evicted = False
+        for key in tuple(_write_locks):
+            if _write_locks[key].users == 0:
+                del _write_locks[key]
+                evicted = True
+                break
+        if not evicted:
+            return
 
 
 def _registry_key(path: Path) -> str:

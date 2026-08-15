@@ -290,6 +290,10 @@ class WorkflowLedgerWriter:
                 uow = WorkflowLedgerUnitOfWork(connection)
                 try:
                     result = envelope.fn(uow)
+                    if self._abandoned.is_set():
+                        raise WorkflowLedgerClosedError(
+                            "workflow ledger writer closed before the mutation committed"
+                        )
                     connection.execute(f"RELEASE SAVEPOINT {savepoint}")
                     staged.append((envelope, result))
                     callbacks.extend(uow.take_after_commit())
@@ -297,6 +301,10 @@ class WorkflowLedgerWriter:
                     connection.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
                     connection.execute(f"RELEASE SAVEPOINT {savepoint}")
                     self._settle(envelope, error=exc)
+            if self._abandoned.is_set():
+                raise WorkflowLedgerClosedError(
+                    "workflow ledger writer closed before the mutation committed"
+                )
             connection.execute("COMMIT")
         except Exception as exc:
             try:

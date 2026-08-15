@@ -366,6 +366,38 @@ def test_32_concurrent_writes_all_persist(tmp_path, monkeypatch):
     assert summary["globalTokenUsage"]["allTime"]["inputTokens"] == sum(100 + i for i in range(32))
 
 
+def test_usage_ledger_preserves_held_path_lock_across_capacity(tmp_path, monkeypatch):
+    from core.llm import usage_ledger
+
+    monkeypatch.setattr("core.llm.usage_ledger.PROJECT_ROOT", tmp_path)
+    usage_ledger._write_locks.clear()
+    try:
+        target = tmp_path / "target-usage.sqlite3"
+        target_lock = usage_ledger._write_lock_for(target)
+        assert target_lock.acquire(timeout=1) is True
+        try:
+            for index in range(usage_ledger._INIT_CACHE_MAX_ENTRIES + 8):
+                other = tmp_path / f"other-{index}-usage.sqlite3"
+                other_lock = usage_ledger._write_lock_for(other)
+                assert other_lock.acquire(timeout=1) is True
+                other_lock.release()
+                usage_ledger._write_lock_release(other)
+
+            again = usage_ledger._write_lock_for(target)
+            assert again is target_lock, "持有中的锁不得被驱逐或替换"
+            assert again.acquire(timeout=0.2) is False, "同一路径必须阻塞在同一 live lock 上"
+            usage_ledger._write_lock_release(target)
+
+            assert (
+                len(usage_ledger._write_locks) <= usage_ledger._INIT_CACHE_MAX_ENTRIES
+            ), "锁注册表不得无界增长"
+        finally:
+            target_lock.release()
+            usage_ledger._write_lock_release(target)
+    finally:
+        usage_ledger._write_locks.clear()
+
+
 def test_schema_initialization_runs_once_per_process(tmp_path, monkeypatch):
     from core.llm import usage_ledger
 
