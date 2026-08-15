@@ -4,7 +4,7 @@
  * Prefer editing modules under web/src/routes/chat/ over growing this file.
  */
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type Query } from "@tanstack/react-query";
 import {
   Apple,
   ArrowUpRight,
@@ -420,6 +420,59 @@ export function sessionDetailStructuralSharing(
   return mergeSessionDetailMessageWindow(previous as SessionDetail | undefined, next as SessionDetail);
 }
 
+/**
+ * Stable refetchInterval resolver for the pending tool-approvals poll.
+ *
+ * React Query re-derives the `refetchInterval` option while a poll runs, and
+ * the previous inline closure rebuilt on every render, so each no-op parent
+ * rerender handed the observer a fresh callback and reset the 2s timer in
+ * lockstep — the same "Maximum update depth exceeded" `forceStoreRerender`
+ * churn seen with the placeholder and structural-sharing seams. Hoisting the
+ * resolver into `useCallback` keeps the reference identical while the polling
+ * inputs (panel activity, busy inputs, detail/summary status) are unchanged,
+ * and recomputes only when one of those inputs actually changes.
+ */
+export function useSessionToolApprovalsRefetchInterval(options: {
+  directSessionPanelActive: boolean;
+  runtimeActive: boolean;
+  detailCurrentPhase: string | undefined;
+  summaryCurrentPhase: string | undefined;
+  summaryStatus: string | undefined;
+}): (query: Query<SessionToolApprovalRequest[]>) => number | false {
+  const {
+    directSessionPanelActive,
+    runtimeActive,
+    detailCurrentPhase,
+    summaryCurrentPhase,
+    summaryStatus,
+  } = options;
+  return useCallback(
+    (query) => {
+      if (!directSessionPanelActive) {
+        return false;
+      }
+      const hasPending = (query.state.data?.length ?? 0) > 0;
+      // Avoid 250ms thrash while busy (queues behind heavy session-detail under load).
+      // Pending approvals still poll sub-second; busy-without-pending is lighter.
+      const busy = runtimeActive
+        || isBusyPhase(detailCurrentPhase || summaryCurrentPhase || summaryStatus);
+      if (hasPending) {
+        return 750;
+      }
+      if (busy) {
+        return 2_000;
+      }
+      return 4_000;
+    },
+    [
+      directSessionPanelActive,
+      runtimeActive,
+      detailCurrentPhase,
+      summaryCurrentPhase,
+      summaryStatus,
+    ],
+  );
+}
 
 export function ChatCodingRoute() {
   // pet + evolution: companion rail shows mental/pet labels (otherwise raw keys leak).
@@ -1556,27 +1609,18 @@ export function ChatCodingRoute() {
     detail: rawSessionDetail,
   });
   const sessionToolApprovalRuntimeActive = runtimeHasChatTurnForSession(runtime, activeSessionId);
+  const sessionToolApprovalsRefetchInterval = useSessionToolApprovalsRefetchInterval({
+    directSessionPanelActive,
+    runtimeActive: sessionToolApprovalRuntimeActive,
+    detailCurrentPhase: detail?.currentPhase,
+    summaryCurrentPhase: directSessionActiveSummary?.currentPhase,
+    summaryStatus: directSessionActiveSummary?.status,
+  });
   const sessionToolApprovalsQuery = useQuery<SessionToolApprovalRequest[]>({
     queryKey: queryKeys.sessionToolApprovals(activeSessionId ?? "none"),
     enabled: Boolean(activeSessionId && directSessionPanelActive && !isTempSessionId(activeSessionId)),
     queryFn: () => listPendingSessionToolApprovals(activeSessionId ?? ""),
-    // Avoid 250ms thrash while busy (queues behind heavy session-detail under load).
-    // Pending approvals still poll sub-second; busy-without-pending is lighter.
-    refetchInterval: (query) => {
-      if (!directSessionPanelActive) {
-        return false;
-      }
-      const hasPending = (query.state.data?.length ?? 0) > 0;
-      const busy = sessionToolApprovalRuntimeActive
-        || isBusyPhase(detail?.currentPhase || directSessionActiveSummary?.currentPhase || directSessionActiveSummary?.status);
-      if (hasPending) {
-        return 750;
-      }
-      if (busy) {
-        return 2_000;
-      }
-      return 4_000;
-    },
+    refetchInterval: sessionToolApprovalsRefetchInterval,
     refetchIntervalInBackground: false,
   });
   const handleLoadEarlierSessionMessages = useCallback(() => {
