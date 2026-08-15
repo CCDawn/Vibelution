@@ -131,6 +131,93 @@ def test_chat_state_roundtrip_preserves_order_and_separates_debug_snapshots(tmp_
     ]
 
 
+def test_session_runtime_row_upsert_does_not_rewrite_siblings(tmp_path: Path):
+    store = _open_store(tmp_path)
+    try:
+        store.repository.replace_chat_state(
+            {
+                "version": 1,
+                "conversations": [
+                    {"conversation_id": "session-a", "title": "A"},
+                    {"conversation_id": "session-b", "title": "B"},
+                ],
+            }
+        ).result(timeout=3)
+        db_path = tmp_path / "workspace" / "chat" / "conversations.sqlite3"
+        connection = sqlite3.connect(db_path)
+        try:
+            before_b = connection.execute(
+                "SELECT payload_json, updated_at_ms FROM session_runtime_state WHERE session_id=?",
+                ("session-b",),
+            ).fetchone()
+            first = store.repository.upsert_session_runtime_state(
+                "session-a",
+                {"conversation_id": "session-a", "title": "A-updated"},
+            ).result(timeout=3)
+            assert first["changed"] is True
+            after_b = connection.execute(
+                "SELECT payload_json, updated_at_ms FROM session_runtime_state WHERE session_id=?",
+                ("session-b",),
+            ).fetchone()
+            assert after_b == before_b
+            assert store.repository.get_session_runtime_state("session-a")["title"] == "A-updated"
+            assert store.repository.get_session_runtime_state("session-b")["title"] == "B"
+            second = store.repository.upsert_session_runtime_state(
+                "session-a",
+                {"conversation_id": "session-a", "title": "A-updated"},
+            ).result(timeout=3)
+            assert second["changed"] is False
+            assert second["stateRevision"] == first["stateRevision"]
+        finally:
+            connection.close()
+    finally:
+        store.close()
+
+
+def test_chat_state_replace_prunes_missing_ids_and_skips_identical_rows(tmp_path: Path):
+    store = _open_store(tmp_path)
+    try:
+        store.repository.replace_chat_state(
+            {
+                "version": 1,
+                "conversations": [
+                    {"conversation_id": "keep", "title": "Keep"},
+                    {"conversation_id": "drop", "title": "Drop"},
+                ],
+            }
+        ).result(timeout=3)
+        db_path = tmp_path / "workspace" / "chat" / "conversations.sqlite3"
+        connection = sqlite3.connect(db_path)
+        try:
+            before_keep = connection.execute(
+                "SELECT payload_json, updated_at_ms FROM session_runtime_state WHERE session_id=?",
+                ("keep",),
+            ).fetchone()
+            store.repository.replace_chat_state(
+                {
+                    "version": 1,
+                    "conversations": [{"conversation_id": "keep", "title": "Keep"}],
+                }
+            ).result(timeout=3)
+            after_keep = connection.execute(
+                "SELECT payload_json, updated_at_ms FROM session_runtime_state WHERE session_id=?",
+                ("keep",),
+            ).fetchone()
+            assert after_keep == before_keep
+            assert store.repository.get_session_runtime_state("drop") is None
+            remaining = [
+                str(row[0])
+                for row in connection.execute(
+                    "SELECT session_id FROM session_runtime_state ORDER BY position"
+                ).fetchall()
+            ]
+            assert remaining == ["keep"]
+        finally:
+            connection.close()
+    finally:
+        store.close()
+
+
 def test_chat_state_invalid_replace_rolls_back_to_previous_document(tmp_path: Path):
     store = _open_store(tmp_path)
     try:

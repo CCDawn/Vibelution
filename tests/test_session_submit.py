@@ -389,6 +389,93 @@ def test_parallel_session_submits_do_not_serialize_on_ledger_io(tmp_path: Path, 
         # Holding _CHAT_STATE_LOCK across that I/O would deadlock the barrier.
         assert held_during_ledger == [False, False, False]
         assert len(accepted_timings) == 3
+        assert all(int(item.get("chatStateLockWaitMs") or 0) == 0 for item in accepted_timings)
+        remaining_ids = {
+            str(item.get("conversation_id") or "")
+            for item in session_service.load_chat_state(tmp_path).get("conversations") or []
+            if isinstance(item, dict)
+        }
+        assert remaining_ids == set(session_ids)
+    finally:
+        for session_id in session_ids:
+            _reset_seeded_session_runtime(session_id)
+
+
+def test_submit_uses_session_row_io_and_keeps_siblings(tmp_path: Path, monkeypatch) -> None:
+    from core.web.services import agent_directory_service
+
+    session_ids = ["session-a", "session-b"]
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _seed_submittable_sessions(tmp_path, session_ids)
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
+
+    document_loads: list[str] = []
+    document_saves: list[int] = []
+    original_load = session_service.load_chat_state
+    original_save = session_service.save_chat_state
+
+    def spy_load(project_root):
+        document_loads.append("load")
+        return original_load(project_root)
+
+    def spy_save(project_root, state, **kwargs):
+        conversations = state.get("conversations") if isinstance(state, dict) else []
+        document_saves.append(len(conversations) if isinstance(conversations, list) else -1)
+        return original_save(project_root, state, **kwargs)
+
+    monkeypatch.setattr(session_service, "load_chat_state", spy_load)
+    monkeypatch.setattr(session_service, "save_chat_state", spy_save)
+    before_b = session_service.load_session_chat_state(tmp_path, "session-b")
+
+    try:
+        result = submit.submit_session_message_lightweight(
+            "session-a",
+            "row io",
+            mental_model_enabled=False,
+        )
+        after_b = session_service.load_session_chat_state(tmp_path, "session-b")
+        after_a = session_service.load_session_chat_state(tmp_path, "session-a")
+        assert result["accepted"] is True
+        assert document_loads == []
+        assert document_saves == []
+        assert after_b["title"] == before_b["title"]
+        assert after_b["updated_at"] == before_b["updated_at"]
+        assert after_a["last_turn_status"] == "running"
+    finally:
+        for session_id in session_ids:
+            _reset_seeded_session_runtime(session_id)
+
+
+def test_get_session_detail_does_not_assemble_full_document(tmp_path: Path, monkeypatch) -> None:
+    from core.web.services import agent_directory_service
+
+    session_ids = ["session-a", "session-b"]
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    _seed_submittable_sessions(tmp_path, session_ids)
+
+    document_loads: list[str] = []
+    original_load = session_service.load_chat_state
+
+    def spy_load(project_root):
+        document_loads.append("load")
+        return original_load(project_root)
+
+    monkeypatch.setattr(session_service, "load_chat_state", spy_load)
+    try:
+        detail = session_service.get_session_detail(
+            "session-a",
+            message_limit=0,
+            transcript_scope="none",
+            include_secondary=False,
+        )
+        assert detail is not None
+        assert str(detail.get("id") or detail.get("sessionId") or "") == "session-a"
+        assert document_loads == []
+        sibling = session_service.load_session_chat_state(tmp_path, "session-b")
+        assert sibling is not None
+        assert sibling["title"] == "session-b"
     finally:
         for session_id in session_ids:
             _reset_seeded_session_runtime(session_id)
