@@ -251,6 +251,10 @@ from core.orchestration.turn_message_assembly import (
     refresh_system_prefix_on_messages,
     sanitize_seeded_chat_content,
 )
+from core.orchestration.turn_llm_adapter import (
+    AgentLlmTurnHooks,
+    invoke_agent_llm_turn,
+)
 
 
 def _record_llm_route_success(*args, **kwargs):
@@ -2836,382 +2840,41 @@ class SelfEvolvingAgent:
             pass
 
     def _invoke_llm(self, messages: list, *, replay_state: Any = None) -> Optional[Any]:
-        """调用 LLM（带错误分类、自动重试）"""
-        ui = get_ui()
-        self._last_llm_error_category = None
-        self._last_llm_error_retryable = False
-        self._last_llm_recovery_action = None
-        self._last_llm_error_message = ""
-        self._last_llm_error_details = {}
-        self._last_llm_failure_attempts = 0
-        self._last_llm_failure_max_attempts = MAX_CONSECUTIVE_FAILURES
-        clean_messages = []
-        for msg in messages:
-            if isinstance(msg, AIMessage):
-                clean_messages.append(msg)
-            elif isinstance(msg, ToolMessage):
-                clean_messages.append(msg)
-            elif isinstance(msg, SystemMessage):
-                clean_messages.append(SystemMessage(content=msg.content or ""))
-            elif isinstance(msg, dict) and msg.get("role") == "system":
-                clean_messages.append(dict(msg))
-            else:
-                clean_messages.append(msg)
-
-        with ui.thinking("?? 思考中..."), llm_cancel_context(self._current_turn_stop_reason):
-            route_attempt = 0
-            fallback_client_for_retry = None
-            attempted_route_identities: set[tuple[str, ...]] = set()
-            while route_attempt < 2:
-                route_attempt += 1
-                invocation_context = None
-                trace_fields: Dict[str, Any] = {}
-                try:
-                    self._raise_if_turn_stop_requested()
-                    llm_for_turn = fallback_client_for_retry
-                    fallback_client_for_retry = None
-                    if llm_for_turn is None:
-                        llm_for_turn = self._get_llm_for_current_mode(
-                            disable_tools=bool(getattr(self, "_force_disable_tools_for_turn", False)),
-                            profile_id=None,
-                        )
-                    route_identity = _llm_effective_route_identity(llm_for_turn)
-                    route_id = _llm_effective_route_id(llm_for_turn)
-                    if route_identity in attempted_route_identities:
-                        _record_agent_scene_event(
-                            "llm_route",
-                            "llm_fallback_rejected",
-                            message="Duplicate effective LLM route rejected.",
-                            fields={
-                                **trace_fields,
-                                "routeAttempt": route_attempt,
-                                "routeId": route_id,
-                                "reasonCode": "duplicate_effective_route",
-                            },
-                            level="warning",
-                            outcome="rejected",
-                        )
-                        return None
-                    attempted_route_identities.add(route_identity)
-                    invocation_context = self._build_llm_invocation_context(
-                        prompt_purpose="main_reply",
-                        route_attempt=route_attempt,
-                    )
-                    route_started_at = time.monotonic()
-                    trace_fields = _llm_route_trace_fields(
-                        invocation_context,
-                        llm_for_turn,
-                        route_attempt=route_attempt,
-                        route_id=route_id,
-                    )
-                    _record_agent_scene_event(
-                        "llm_route",
-                        "llm_route_attempt_started",
-                        message="LLM effective route attempt started.",
-                        fields=trace_fields,
-                    )
-                    if (
-                        self._should_stream_llm_for_turn(llm_for_turn)
-                        and hasattr(llm_for_turn, "stream")
-                    ):
-                        def on_protocol_event(event: Any) -> None:
-                            self._raise_if_turn_stop_requested()
-                            if event.kind == "reasoning_delta" and event.text:
-                                ui.stream_thought(event.text, done=False)
-                            elif event.kind in {"commentary_delta", "answer_delta"} and event.text:
-                                stream_response = getattr(ui, "stream_response", None)
-                                if callable(stream_response):
-                                    stream_response(event.text, done=False)
-
-                        outcome = run_streaming_llm_outcome(
-                            llm_for_turn,
-                            clean_messages,
-                            context=invocation_context,
-                            on_event=on_protocol_event,
-                            replay_state=replay_state,
-                        )
-                        outcome = canonicalize_legacy_xml_outcome(outcome)
-                        if outcome.kind in {"tool_calls", "final_answer"}:
-                            _record_llm_route_success(
-                                trace_fields=trace_fields,
-                                duration_ms=int((time.monotonic() - route_started_at) * 1000),
-                                streamed=True,
-                            )
-                        return outcome, llm_for_turn.project_outcome_message(outcome)
-                    self._raise_if_turn_stop_requested()
-                    outcome = invoke_llm_outcome(
-                        llm_for_turn,
-                        clean_messages,
-                        context=invocation_context,
-                        replay_state=replay_state,
-                    )
-                    outcome = canonicalize_legacy_xml_outcome(outcome)
-                    if outcome.kind in {"tool_calls", "final_answer"}:
-                        _record_llm_route_success(
-                            trace_fields=trace_fields,
-                            duration_ms=int((time.monotonic() - route_started_at) * 1000),
-                            streamed=False,
-                        )
-                    return outcome, llm_for_turn.project_outcome_message(outcome)
-                except TurnStopRequested:
-                    raise
-                except KeyboardInterrupt:
-                    raise
-                except Exception as e:
-                    llm_error_details = dict(getattr(e, "details", {}) or {}) if isinstance(e, LLMError) else {}
-                    safe_projection_details = _safe_llm_error_diagnostic_details(llm_error_details)
-                    reported_attempt = int(llm_error_details.get("attempt") or 1)
-                    reported_max_attempts = int(
-                        llm_error_details.get("max_attempts") or reported_attempt or 1
-                    )
-                    recovery = plan_llm_recovery(
-                        e,
-                        attempt=reported_attempt,
-                        max_attempts=reported_max_attempts,
-                        config=getattr(self, "config", None),
-                        role="primary",
-                        current_profile_id=getattr(
-                            llm_for_turn if "llm_for_turn" in locals() else None,
-                            "profile_id",
-                            getattr(getattr(self, "_base_llm", None), "profile_id", None),
-                        ),
-                    )
-                    category = recovery.category
-                    is_retryable = recovery.retryable
-                    user_msg = recovery.user_message
-                    stop_reason = (
-                        self._current_turn_stop_reason()
-                        or str(llm_error_details.get("stop_reason") or "").strip()
-                    )
-                    if category == "cancelled" and stop_reason:
-                        _record_agent_scene_event(
-                            "llm_route",
-                            "llm_route_cancelled",
-                            message="LLM route cancelled by the active turn stop request.",
-                            fields={
-                                **trace_fields,
-                                "routeAttempt": route_attempt,
-                                "routeId": _llm_effective_route_id(
-                                    llm_for_turn if "llm_for_turn" in locals() else None
-                                ),
-                                "reasonCode": "turn_stop_requested",
-                            },
-                            level="info",
-                            outcome="cancelled",
-                        )
-                        raise TurnStopRequested(stop_reason)
-                    try:
-                        streaming_enabled_for_failed_attempt = bool(
-                            self._should_stream_llm_for_turn(
-                                llm_for_turn if "llm_for_turn" in locals() else None
-                            )
-                            and hasattr(llm_for_turn if "llm_for_turn" in locals() else None, "stream")
-                        )
-                    except Exception:
-                        streaming_enabled_for_failed_attempt = False
-                    provider_stream_retry_exhausted = bool(
-                        llm_error_details.get("retry_budget_exhausted")
-                    ) or reported_attempt >= reported_max_attempts
-                    self._last_llm_error_category = category
-                    self._last_llm_error_retryable = is_retryable
-                    self._last_llm_recovery_action = recovery.action
-                    self._last_llm_error_message = f"{category}: {user_msg}".strip(": ")
-                    self._last_llm_failure_attempts = reported_attempt
-                    self._last_llm_failure_max_attempts = reported_max_attempts
-                    exception_type = type(e).__name__
-                    exception_message = str(e)
-                    llm_error_traceback = traceback.format_exc()
-                    error_details = {
-                        **safe_projection_details,
-                        "exception_type": exception_type,
-                        "exception_message": exception_message[:4000],
-                        "retryable": is_retryable,
-                        "recovery_action": recovery.action,
-                        "stop_current_turn": recovery.stop_current_turn,
-                        "request_context_compression": recovery.request_context_compression,
-                        "fallback_profile_id": recovery.fallback_profile_id,
-                        "provider_stream_retry_exhausted": provider_stream_retry_exhausted,
-                        "attempt": reported_attempt,
-                        "max_attempts": reported_max_attempts,
-                        "route_attempt": route_attempt,
-                        "route_id": _llm_effective_route_id(
-                            llm_for_turn if "llm_for_turn" in locals() else None
-                        ),
-                        "invocation_id": str(
-                            getattr(invocation_context, "metadata", {}).get("invocationId")
-                            if "invocation_context" in locals()
-                            else ""
-                        ),
-                        "model": getattr(self.config.llm, "model_name", ""),
-                        "provider": getattr(self.config.llm, "provider", ""),
-                        "api_base": getattr(self.config.llm, "api_base", ""),
-                        "api_timeout": getattr(self.config.llm, "api_timeout", None),
-                        "streaming_enabled": streaming_enabled_for_failed_attempt,
-                        "message_count": len(clean_messages),
-                    }
-                    try:
-                        from tools.token_manager import estimate_messages_tokens
-
-                        error_details["estimated_input_tokens"] = max(
-                            0, int(estimate_messages_tokens(clean_messages) or 0)
-                        )
-                    except Exception:
-                        error_details["estimated_input_tokens"] = 0
-                    self._last_llm_error_details = dict(error_details)
-
-                    _debug_logger.error(
-                        f"LLM 路由调用失败 [{route_attempt}/2] "
-                        f"{category}: {user_msg} | action={recovery.action} | "
-                        f"fallback={recovery.fallback_profile_id or '-'} | "
-                        f"{exception_type}: {exception_message[:300]}",
-                        tag="LLM",
-                    )
-                    logger.log_error(
-                        "llm_error",
-                        f"{category}: {user_msg}",
-                        traceback=llm_error_traceback,
-                        details=error_details,
-                    )
-                    failed_route = llm_for_turn if "llm_for_turn" in locals() else None
-                    failed_route_id = _llm_effective_route_id(failed_route)
-                    failed_invocation_id = str(
-                        getattr(invocation_context, "metadata", {}).get("invocationId")
-                        if invocation_context is not None
-                        else ""
-                    )
-                    turn_trace_fields = {
-                        key: trace_fields[key]
-                        for key in ("sessionId", "turnId", "runId", "agentId")
-                        if trace_fields.get(key) not in (None, "")
-                    }
-                    _record_agent_scene_event(
-                        "llm_route",
-                        "llm_route_attempt_exhausted",
-                        message="LLM effective route attempt exhausted.",
-                        fields={
-                            **trace_fields,
-                            "routeAttempt": route_attempt,
-                            "routeId": failed_route_id,
-                            "invocationId": failed_invocation_id,
-                            "profileId": str(getattr(failed_route, "profile_id", "") or ""),
-                            "transportAttempt": reported_attempt,
-                            "maxTransportAttempts": reported_max_attempts,
-                            "errorCategory": category,
-                            "retryable": bool(is_retryable),
-                            **safe_projection_details,
-                        },
-                        level="warning" if is_retryable else "error",
-                        outcome="failed",
-                    )
-
-                    if recovery.request_context_compression:
-                        _record_agent_scene_event(
-                            "llm_route",
-                            "llm_turn_terminal",
-                            message="LLM turn stopped for context compression.",
-                            fields={
-                                **trace_fields,
-                                "routeAttempts": route_attempt,
-                                "routeId": failed_route_id,
-                                "errorCategory": category,
-                                "reasonCode": "context_compression_required",
-                            },
-                            level="warning",
-                            outcome="failed",
-                        )
-                        request_compression(
-                            f"LLM provider reported context limit: {category}"
-                        )
-                        return None
-
-                    fallback_profile_id = str(recovery.fallback_profile_id or "").strip()
-                    if route_attempt == 1 and is_retryable and fallback_profile_id:
-                        try:
-                            candidate = self._get_llm_for_current_mode(
-                                disable_tools=bool(getattr(self, "_force_disable_tools_for_turn", False)),
-                                profile_id=fallback_profile_id,
-                            )
-                        except Exception as fallback_error:
-                            _record_agent_scene_event(
-                                "llm_route",
-                                "llm_fallback_rejected",
-                                message="LLM fallback route resolution failed.",
-                                fields={
-                                    **turn_trace_fields,
-                                    "routeAttempt": 2,
-                                    "primaryRouteId": failed_route_id,
-                                    "reasonCode": "fallback_resolution_failed",
-                                    "errorType": type(fallback_error).__name__,
-                                },
-                                level="error",
-                                outcome="rejected",
-                            )
-                        else:
-                            candidate_identity = _llm_effective_route_identity(candidate)
-                            if candidate_identity not in attempted_route_identities:
-                                fallback_client_for_retry = candidate
-                                _record_agent_scene_event(
-                                    "llm_route",
-                                    "llm_fallback_selected",
-                                    message="Distinct LLM fallback route selected.",
-                                    fields={
-                                        **turn_trace_fields,
-                                        "routeAttempt": 2,
-                                        "primaryRouteId": failed_route_id,
-                                        "fallbackRouteId": _llm_effective_route_id(candidate),
-                                        "reasonCode": category,
-                                    },
-                                    level="warning",
-                                    outcome="fallback_selected",
-                                )
-                            else:
-                                _record_agent_scene_event(
-                                    "llm_route",
-                                    "llm_fallback_rejected",
-                                    message="Duplicate effective LLM fallback route rejected.",
-                                    fields={
-                                        **turn_trace_fields,
-                                        "routeAttempt": 2,
-                                        "primaryRouteId": failed_route_id,
-                                        "fallbackRouteId": _llm_effective_route_id(candidate),
-                                        "reasonCode": "duplicate_effective_route",
-                                    },
-                                    level="warning",
-                                    outcome="rejected",
-                                )
-
-                    if fallback_client_for_retry is not None:
-                        ui.add_log(
-                            f"LLM 主路由失败，切换到备用配置 `{fallback_profile_id}`。",
-                            "WARN",
-                        )
-                        continue
-
-                    _record_agent_scene_event(
-                        "llm_route",
-                        "llm_turn_terminal",
-                        message="LLM turn exhausted all permitted routes.",
-                        fields={
-                            **trace_fields,
-                            "routeAttempts": route_attempt,
-                            "routeId": failed_route_id,
-                            "errorCategory": category,
-                            "reasonCode": "no_distinct_fallback",
-                            **safe_projection_details,
-                        },
-                        level="error",
-                        outcome="failed",
-                    )
-                    return None
-
-            _debug_logger.error(
-                f"LLM 连续 {MAX_CONSECUTIVE_FAILURES} 次调用失败", tag="LLM"
-            )
-            ui.add_log(
-                f"LLM 连续 {MAX_CONSECUTIVE_FAILURES} 次调用失败，请检查网络和 API 配置。",
-                "ERROR",
-            )
-            return None
+        # Removal: keep while tests call SelfEvolvingAgent._invoke_llm and patch agent.* helpers.
+        result = invoke_agent_llm_turn(
+            messages=messages,
+            replay_state=replay_state,
+            hooks=AgentLlmTurnHooks(
+                get_ui=get_ui,
+                llm_cancel_context=llm_cancel_context,
+                raise_if_stop=self._raise_if_turn_stop_requested,
+                current_stop_reason=self._current_turn_stop_reason,
+                get_llm_for_mode=self._get_llm_for_current_mode,
+                should_stream=self._should_stream_llm_for_turn,
+                build_invocation_context=self._build_llm_invocation_context,
+                invoke_outcome=invoke_llm_outcome,
+                run_streaming_outcome=run_streaming_llm_outcome,
+                canonicalize=canonicalize_legacy_xml_outcome,
+                plan_recovery=plan_llm_recovery,
+                record_scene_event=_record_agent_scene_event,
+                record_route_success=_record_llm_route_success,
+                request_compression=request_compression,
+                debug_logger=_debug_logger,
+                error_logger=logger,
+                config=getattr(self, "config", None),
+                force_disable_tools=bool(getattr(self, "_force_disable_tools_for_turn", False)),
+                stop_error_cls=TurnStopRequested,
+                base_llm=getattr(self, "_base_llm", None),
+            ),
+        )
+        self._last_llm_error_category = result.last_error_category
+        self._last_llm_error_retryable = result.last_error_retryable
+        self._last_llm_recovery_action = result.last_recovery_action
+        self._last_llm_error_message = result.last_error_message
+        self._last_llm_error_details = dict(result.last_error_details)
+        self._last_llm_failure_attempts = result.last_failure_attempts
+        self._last_llm_failure_max_attempts = result.last_failure_max_attempts
+        return result.payload
 
     def _get_response_processor(self) -> ResponseProcessor:
         processor = getattr(self, "response_processor", None)
