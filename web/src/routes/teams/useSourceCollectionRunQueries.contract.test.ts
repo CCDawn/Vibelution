@@ -7,6 +7,7 @@ import routeShellPhaseSource from "./useTeamsWorkbenchShellPhase.tsx?raw";
 const routeModelSource = `${routeModelSourceThin}\n${routeFoundationSource}\n${routeShellPhaseSource}`;
 const routeSource = `${routeShellSource}\n${routeModelSource}\n${routeFoundationSource}\n${routeShellPhaseSource}`;
 import modelSource from "./sourceCollectionRunQueryModel.ts?raw";
+import apiSource from "../../api/sourceCollection.ts?raw";
 import queriesSource from "./useSourceCollectionRunQueries.ts?raw";
 import workspaceSource from "./useSourceCollectionWorkspace.ts?raw";
 
@@ -37,7 +38,8 @@ describe("source-collection run queries contract", () => {
   });
 
   it("preserves summary and data-processing detail endpoints", () => {
-    expect(queriesSource).toContain("/workflow-orchestration/source-collection/summary");
+    expect(apiSource).toContain("/workflow-orchestration/source-collection/summary");
+    expect(queriesSource).toContain("fetchSourceCollectionSummary");
     expect(queriesSource).toContain("/records");
     expect(queriesSource).toContain("/collection-assignments");
     expect(queriesSource).toContain("/status");
