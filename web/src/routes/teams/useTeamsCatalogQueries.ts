@@ -7,13 +7,13 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 
 import { listAgentSummaries } from "../../api/agents";
-import { fetchJson } from "../../api/client";
 import {
   PROJECT_AGENT_BUS_TEAM_TIMELINE_LIMIT,
   listProjectAgentBusTimeline,
 } from "../../api/projectAgentBus";
 import { queryKeys } from "../../api/queryKeys";
-import type { AgentConfigWorkspaceAgent, Team, TeamListPayload } from "../../api/types";
+import { listTeams } from "../../api/teams";
+import type { AgentConfigWorkspaceAgent, Team } from "../../api/types";
 import { resolvePollingInterval } from "../../app/pollingPolicy";
 import {
   RESEARCH_TEAM_ID,
@@ -42,7 +42,7 @@ export function useTeamsCatalogQueries({
 }: UseTeamsCatalogQueriesOptions) {
   const teamsQuery = useQuery({
     queryKey: queryKeys.teams(),
-    queryFn: ({ signal }) => fetchJson<TeamListPayload>("/api/teams", { signal }),
+    queryFn: ({ signal }) => listTeams({ signal }),
     refetchInterval: (query) =>
       TEAM_BOOTSTRAP_REFETCH_STATUSES.has(query.state.data?.systemTeamBootstrap?.status ?? "")
         ? resolvePollingInterval(pageVisible, TEAM_BOOTSTRAP_ACTIVE_REFETCH_MS, {

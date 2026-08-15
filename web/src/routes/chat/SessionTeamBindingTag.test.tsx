@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { SessionSummary } from "../../api/types";
-import { resolveSessionTeamBinding } from "./SessionTeamBindingTag";
+import { resolveSessionTeamBinding, sessionTeamBindingAriaLabel } from "./SessionTeamBindingTag";
 import { teamWorkspaceRoute } from "../teams/researchWorkspaceModel";
 
 function session(overrides: Partial<SessionSummary> = {}): SessionSummary {
@@ -84,5 +84,17 @@ describe("resolveSessionTeamBinding", () => {
   it("team workspace route matches open-team destination", () => {
     expect(teamWorkspaceRoute("team-a")).toContain("teamId=team-a");
     expect(teamWorkspaceRoute("team-a")).toContain("/teams?");
+  });
+
+  it("uses a non-navigating aria label when teamId is missing", () => {
+    expect(
+      sessionTeamBindingAriaLabel({ teamId: "", teamName: "Name Only" }, "zh"),
+    ).toBe("已绑定团队：Name Only");
+    expect(
+      sessionTeamBindingAriaLabel({ teamId: "", teamName: "Name Only" }, "en"),
+    ).toBe("Bound team: Name Only");
+    expect(
+      sessionTeamBindingAriaLabel({ teamId: "team-a", teamName: "Alpha Team" }, "zh"),
+    ).toBe("打开团队：Alpha Team");
   });
 });
