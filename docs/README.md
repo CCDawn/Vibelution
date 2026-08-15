@@ -58,6 +58,8 @@
 | 草案 | 说明 |
 | --- | --- |
 | [plans/2026-08-15-deep-architecture-decoupling-plan.md](plans/2026-08-15-deep-architecture-decoupling-plan.md) | ACTIVE：Agent / Chat / API 契约分 Gate 解耦 |
+| [plans/2026-08-14-llm-config-runtime-routing-optimization-plan.md](plans/2026-08-14-llm-config-runtime-routing-optimization-plan.md) | active-plan：模型配置与协议路由 |
+| [plans/2026-08-14-multi-agent-configuration-and-protocol-routing-research-design.md](plans/2026-08-14-multi-agent-configuration-and-protocol-routing-research-design.md) | user-approved：多 Agent 协议配置设计 |
 | [plans/2026-08-13-portable-branch-workspace.md](plans/2026-08-13-portable-branch-workspace.md) | 仓内 `.worktrees` + Launcher 全部分支清单 |
 | [plans/2026-08-11-multi-instance-branch-isolation.md](plans/2026-08-11-multi-instance-branch-isolation.md) | 多实例端口隔离与注册表 |
 
@@ -109,7 +111,7 @@
 | --- | --- |
 | [AGENTS.md](../AGENTS.md) | **现行** Agent 入口 |
 | [README.md](../README.md) | 产品/仓库说明 |
-| [INDEX.md](../INDEX.md) | 结构索引；细节冲突时以本文件与 AGENTS 为准 |
+| [INDEX.md](../INDEX.md) | 目录地图；流程与规范以本文件与 AGENTS 为准 |
 | [CHANGELOG.md](../CHANGELOG.md) | 变更日志 |
 | [PRODUCT.md](../PRODUCT.md) / [DESIGN.md](../DESIGN.md) | **入口桩** → `docs/product/`；全文在 `archive/product/` |
 | [THIRD_PARTY_COMPONENTS.md](../THIRD_PARTY_COMPONENTS.md) | 第三方组件 |

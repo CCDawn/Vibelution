@@ -525,14 +525,14 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("includeArchived=true&detail=summary");
     expect(routeSource).not.toContain('fetchJson<AgentConfigWorkspace>("/api/agents/config-workspace")');
     // Wave 8Q: archive/delete team lives on useTeamShellMutations.
-    expect(teamShellMutationsSource).toContain("fetchJson<Team>(`/api/teams/${encodeURIComponent(teamId)}`");
-    expect(teamShellMutationsSource).toContain('method: "DELETE"');
+    expect(teamShellMutationsSource).toContain("archiveTeam(teamId)");
+    expect(teamShellMutationsSource).toContain("saveTeamCanvas(");
     expect(teamShellMutationsSource).toContain("sendTeamProjectBusMessage(payload)");
     // Kernel deep-links live on TeamCommunicationPanel after discussion/broadcast extraction.
     expect(teamCommunicationPanelSource).toContain("kernelTaskCenterHref");
     expect(routeSource).toContain("queryFn: ({ signal }) => listProjectAgentBusTimeline(PROJECT_AGENT_BUS_TEAM_TIMELINE_LIMIT, { signal })");
     expect(teamShellMutationsSource).toContain("revokeProjectAgentBusMessage({");
-    expect(teamShellMutationsSource).toContain("/api/teams/${encodeURIComponent(teamId)}/chat-room/sync");
+    expect(teamShellMutationsSource).toContain("syncTeamChatRoom(teamId)");
     expect(routeSource).toContain("syncTeamChatRoomMutation");
     expect(teamShellMutationsSource).toContain("startChatRoomRound(payload.roomId, {");
     expect(routeSource).toContain("fetchChatRoomDetail(linkedChatRoomId, { signal })");
@@ -758,7 +758,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("AiSearchRunListPayload");
     expect(routeSource).toContain("queryKeys.teamAiSearchRuns");
     expect(routeSource).toContain("listTeamAiSearchRuns(effectiveTeamId, {");
-    expect(teamWorkflowStartMutationsSource).toContain("/api/teams/${encodeURIComponent(payload.teamId)}/ai-search-runs");
+    expect(teamWorkflowStartMutationsSource).toContain("startAiSearchRun(payload.teamId");
     expect(routeSource).toContain("startAiSearchRunMutation");
     expect(routeSource).toContain("aiSearchRunTopic");
     // Wave 8G: AI Search copy lives in TeamAiSearchWorkspacePanel.
@@ -770,7 +770,7 @@ describe("TeamsRoute layout contract", () => {
     expect(teamAiSearchWorkspacePanelSource).toContain("启动一键搜索");
     expect(teamAiSearchWorkspacePanelSource).toContain("最近搜索结果");
     expect(routeSource).toContain("latestAiSearchRun");
-    expect(teamShellMutationsSource).toContain("/api/teams/${encodeURIComponent(nextCanvas.teamId)}/canvas");
+    expect(teamShellMutationsSource).toContain("saveTeamCanvas(nextCanvas)");
     expect(routeSource).toContain("成员源");
     expect(routeSource).toContain("Member source");
     expect(routeSource).toContain("Agent Center");
@@ -1489,9 +1489,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain(": () => void startSourceCollectionStageSessionTask(\"ingestion\")");
     expect(routeSource).toContain("repairChallengeCupTeamAgentsMutation");
     // Wave 8Q: agent repair endpoints live on useTeamShellMutations.
-    expect(teamShellMutationsSource).toContain("/challenge-cup-agents/repair");
+    expect(teamShellMutationsSource).toContain("repairChallengeCupTeamAgents(");
     expect(routeSource).toContain("repairKnowledgeExpansionTeamAgentsMutation");
-    expect(teamShellMutationsSource).toContain("/knowledge-expansion-agents/repair");
+    expect(teamShellMutationsSource).toContain("repairKnowledgeExpansionTeamAgents(");
     // Wave 8M: repair/open-chat CTAs live on active-stage workspace (and recovery).
     expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("修复团队 Agent");
     expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("进入 Agent 私聊");

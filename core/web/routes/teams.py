@@ -13,6 +13,11 @@ from core.web.routes.teams_catalog_models import (
     TeamDetailResponse,
     TeamListResponse,
 )
+from core.web.routes.teams_write_models import (
+    TeamAiSearchRunResponse,
+    TeamMessageResponse,
+    TeamRepairResponse,
+)
 from core.web.services.team_service import (
     TeamNotFoundError,
     TeamServiceError,
@@ -112,7 +117,12 @@ def team_list(includeArchived: bool = False) -> dict:
     return payload
 
 
-@router.post("/teams", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/teams",
+    status_code=status.HTTP_201_CREATED,
+    response_model=TeamDetailResponse,
+    response_model_exclude_unset=True,
+)
 def team_create(payload: TeamCreatePayload) -> dict:
     try:
         return create_team(
@@ -144,7 +154,11 @@ def team_detail(team_id: str, detail: str = "full") -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.patch("/teams/{team_id}")
+@router.patch(
+    "/teams/{team_id}",
+    response_model=TeamDetailResponse,
+    response_model_exclude_unset=True,
+)
 def team_update(team_id: str, payload: TeamUpdatePayload) -> dict:
     try:
         members = None if payload.members is None else [item.model_dump() for item in payload.members]
@@ -162,7 +176,11 @@ def team_update(team_id: str, payload: TeamUpdatePayload) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.delete("/teams/{team_id}")
+@router.delete(
+    "/teams/{team_id}",
+    response_model=TeamDetailResponse,
+    response_model_exclude_unset=True,
+)
 def team_delete(team_id: str) -> dict:
     try:
         return archive_team(team_id)
@@ -186,7 +204,11 @@ def team_canvas(team_id: str) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.put("/teams/{team_id}/canvas")
+@router.put(
+    "/teams/{team_id}/canvas",
+    response_model=TeamCanvasResponse,
+    response_model_exclude_unset=True,
+)
 def team_canvas_update(team_id: str, payload: TeamCanvasPayload) -> dict:
     try:
         return save_team_canvas(team_id, payload.model_dump())
@@ -210,7 +232,12 @@ def team_ai_search_run_list(team_id: str, limit: int = 6) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/teams/{team_id}/ai-search-runs", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/teams/{team_id}/ai-search-runs",
+    status_code=status.HTTP_201_CREATED,
+    response_model=TeamAiSearchRunResponse,
+    response_model_exclude_unset=True,
+)
 def team_ai_search_run_start(team_id: str, payload: AiSearchRunStartPayload) -> dict:
     try:
         return start_ai_search_source_scope_run(
@@ -239,7 +266,12 @@ def team_member_message_list(team_id: str, limit: int = 40) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/teams/{team_id}/messages", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/teams/{team_id}/messages",
+    status_code=status.HTTP_201_CREATED,
+    response_model=TeamMessageResponse,
+    response_model_exclude_unset=True,
+)
 def team_message_create(team_id: str, payload: TeamMessagePayload) -> dict:
     try:
         return send_team_message(
@@ -256,7 +288,11 @@ def team_message_create(team_id: str, payload: TeamMessagePayload) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/teams/{team_id}/chat-room/sync")
+@router.post(
+    "/teams/{team_id}/chat-room/sync",
+    response_model=TeamDetailResponse,
+    response_model_exclude_unset=True,
+)
 def team_chat_room_sync(team_id: str) -> dict:
     try:
         return sync_team_chat_room(team_id)
@@ -266,7 +302,11 @@ def team_chat_room_sync(team_id: str) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/teams/{team_id}/challenge-cup-agents/repair")
+@router.post(
+    "/teams/{team_id}/challenge-cup-agents/repair",
+    response_model=TeamRepairResponse,
+    response_model_exclude_unset=True,
+)
 def team_challenge_cup_agents_repair(team_id: str) -> dict:
     if team_id != "research-team":
         raise HTTPException(status_code=404, detail="Challenge Cup research Team not found.")
@@ -276,7 +316,11 @@ def team_challenge_cup_agents_repair(team_id: str) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/teams/{team_id}/knowledge-expansion-agents/repair")
+@router.post(
+    "/teams/{team_id}/knowledge-expansion-agents/repair",
+    response_model=TeamRepairResponse,
+    response_model_exclude_unset=True,
+)
 def team_knowledge_expansion_agents_repair(team_id: str) -> dict:
     if team_id != "knowledge-expansion-team":
         raise HTTPException(status_code=404, detail="Knowledge expansion Team not found.")

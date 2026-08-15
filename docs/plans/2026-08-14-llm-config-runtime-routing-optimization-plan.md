@@ -8,7 +8,7 @@
 > **Worktree**: `.worktrees/document-llm-wire-compatibility`
 > **Scope**: 模型配置 schema、有效配置投影、Profile/Agent 绑定、协议解析、配置诊断投影、错误分类、恢复与 fallback；不在本方案阶段修改 operator config、Agent 数据或运行时。
 > **Related design**: 多 Agent 配置、A2A/MCP/AG-UI 适配和 Agent 协议绑定见 [`2026-08-14-multi-agent-configuration-and-protocol-routing-research-design.md`](2026-08-14-multi-agent-configuration-and-protocol-routing-research-design.md)。
-> **Supersedes**: 不覆盖现行 [`docs/ops/config/`](ops/config/INDEX.md)、[`core/llm/PROTOCOL.md`](../core/llm/PROTOCOL.md)、ADR 或开发标准；历史 LLM 方案仅作背景证据，不再作为实施权威。
+> **Supersedes**: 不覆盖现行 [`docs/ops/config/`](../ops/config/INDEX.md)、[`core/llm/PROTOCOL.md`](../../core/llm/PROTOCOL.md)、ADR 或开发标准；历史 LLM 方案仅作背景证据，不再作为实施权威。
 > **Implementation link**: `codex/runtime-protocol-routing-implementation`（本地任务分支；完成 closeout 后补充最终提交）。
 > **Validation**: 本文需通过链接、格式、Git diff 和计划契约检查；业务实现按第 11 节验证矩阵验收。
 > **Close condition**: Critical Path 全部实现、静态与授权后的运行时验收完成、持久规则已提升到 owning docs/ADR，本文状态改为 `implemented` 并移入 `docs/archive/`。

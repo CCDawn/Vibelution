@@ -85,7 +85,8 @@ describe("createLauncherIpcHost", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       const bundle = (result.payload as Record<string, unknown>).projectBundle as Record<string, unknown>;
-      expect(bundle.observedState).toBe("open");
+      expect(bundle.observedState).toBe("partial");
+      expect(bundle.lifecycleConsistency).toBe("backend_missing");
     }
     expect(refresh).toHaveBeenCalledTimes(1);
     expect(orchestrate).not.toHaveBeenCalled();
@@ -100,6 +101,7 @@ describe("createLauncherIpcHost", () => {
       projectBundle: {
         observedState: "closed",
         lifecycleConsistency: "",
+        backend: { alive: true, healthy: true, portListening: true, portConflict: false },
         browser: { managed: false, windowPid: 0, alive: false },
         components: [],
       },
@@ -226,6 +228,7 @@ describe("createLauncherIpcHost", () => {
         projectBundle: {
           observedState: "closed",
           lifecycleConsistency: "",
+          backend: { alive: true, healthy: true, portListening: true, portConflict: false },
           browser: { managed: false, windowPid: 0, alive: false },
           components: [],
         },

@@ -8,7 +8,7 @@
 > **Worktree**: `.worktrees/multi-agent-protocol-config-design`
 > **Scope**: 多 Agent 静态配置、协议适配器、Agent 与协议绑定、运行时路由解析、能力发现、权限准入、状态映射和兼容迁移；本轮只形成研究与实施设计，不修改 operator config、Agent 数据或运行时代码。
 > **Related plan**: [`2026-08-14-llm-config-runtime-routing-optimization-plan.md`](2026-08-14-llm-config-runtime-routing-optimization-plan.md)
-> **Supersedes**: 不替代 [`docs/agents/mcp-managed-agent-gateway.md`](agents/mcp-managed-agent-gateway.md)、[`docs/ops/config/`](ops/config/INDEX.md)、[`core/llm/PROTOCOL.md`](../core/llm/PROTOCOL.md) 或 ADR；实施后将稳定规则提升到各 owning docs。
+> **Supersedes**: 不替代 [`docs/agents/mcp-managed-agent-gateway.md`](../agents/mcp-managed-agent-gateway.md)、[`docs/ops/config/`](../ops/config/INDEX.md)、[`core/llm/PROTOCOL.md`](../../core/llm/PROTOCOL.md) 或 ADR；实施后将稳定规则提升到各 owning docs。
 > **Validation**: 链接、格式、Git diff、术语和项目权威边界检查；实现阶段按第 17 节验证矩阵验收。
 > **Close condition**: 目标配置模型、统一路由解析器和首个兼容适配器完成，经静态与授权后的真实运行时验证后，将本文状态改为 `implemented` 并归档。
 

@@ -69,9 +69,11 @@ Vibelution/
 ├── web/                        # React + Vite 前端工程
 ├── workspace/                  # 本地运行态产物、evaluation 数据和日志
 ├── tests/                      # Python 测试套件
-├── scripts/web_workbench.py    # 本地 Web workbench 启动脚本
-└── .docs/project-memory/       # 项目记忆与多页 HTML 状态面
+├── scripts/                    # launcher、install、migrate_project_storage 等
+└── .worktrees/                 # 任务 worktree 池（gitignored）
 ```
+
+项目记忆不在仓库树里当现行目录：先跑 `python scripts/migrate_project_storage.py inventory`，再读 `activePaths.memory`。`.docs/project-memory/` 仅迁移前只读兼容。
 
 ## 快速开始
 
@@ -387,7 +389,7 @@ CI 通常覆盖：
 | [docs/product/README.md](docs/product/README.md) | 产品定位 |
 | [docs/README.md](docs/README.md) | 文档地图 |
 | [docs/standards/README.md](docs/standards/README.md) | 开发规范入口 |
-| [INDEX.md](INDEX.md) | 项目索引 |
+| [INDEX.md](INDEX.md) | 目录地图（流程以 AGENTS / docs 为准） |
 | [docs/agents/domain.md](docs/agents/domain.md) | 领域词 |
 | [core/core_prompt/SOUL.md](core/core_prompt/SOUL.md) | 行为边界 |
 | [docs/standards/development-standard.md](docs/standards/development-standard.md) | 交付标准 |

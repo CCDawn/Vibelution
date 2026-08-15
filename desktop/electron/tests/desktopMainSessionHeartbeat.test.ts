@@ -21,9 +21,15 @@ describe("Electron main desktop session heartbeat", () => {
 
   it("keeps local and Python mirror revisions separate for register, window, and close", () => {
     const source = readFileSync(mainSourcePath, "utf8");
+    const registrationStart = source.indexOf("void desktopSessionMirror.register(");
+    const registrationEnd = source.indexOf("startDesktopSessionHeartbeatIfNeeded(", registrationStart);
+    const windowStart = source.indexOf('void desktopSessionMirror.mutate("window"');
+    const windowEnd = source.indexOf('if (state.role === "workbench"', windowStart);
 
-    expect(source).toContain("desktopSessionMirror.register(");
-    expect(source).toContain("desktopSessionMirror.mutate(\"window\"");
+    expect(registrationStart).toBeGreaterThan(-1);
+    expect(source.slice(registrationStart, registrationEnd)).toContain(".catch(() => undefined);");
+    expect(windowStart).toBeGreaterThan(-1);
+    expect(source.slice(windowStart, windowEnd)).toContain(".catch(() => undefined);");
     expect(source).toContain("desktopSessionMirror.mutate(\"close\"");
     expect(source).toContain("revision: mirrorRevision");
     expect(source).not.toContain("reportDesktopWindowState({\n        ...context,\n        role: state.role,\n        revision: desktopSessionRevision");
