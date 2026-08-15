@@ -168,6 +168,15 @@ def test_session_runtime_row_upsert_does_not_rewrite_siblings(tmp_path: Path):
             ).result(timeout=3)
             assert second["changed"] is False
             assert second["stateRevision"] == first["stateRevision"]
+            activated = store.repository.upsert_session_runtime_state(
+                "session-a",
+                {"conversation_id": "session-a", "title": "A-updated"},
+                activate=True,
+            ).result(timeout=3)
+            assert activated["changed"] is True
+            assert activated["activeSessionId"] == "session-a"
+            assert store.repository.list_session_runtime_ids() == ["session-a", "session-b"]
+            assert store.repository.get_session_runtime_state("session-b")["title"] == "B"
         finally:
             connection.close()
     finally:

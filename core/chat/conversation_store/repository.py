@@ -900,6 +900,12 @@ class WorkspaceChatStateDao:
         payload["conversations"] = conversations
         return payload
 
+    def list_session_ids(self) -> list[str]:
+        rows = self._connection.execute(
+            "SELECT session_id FROM session_runtime_state ORDER BY position ASC"
+        ).fetchall()
+        return [str(row["session_id"] or "").strip() for row in rows if str(row["session_id"] or "").strip()]
+
     def get_one(self, session_id: str) -> dict[str, Any] | None:
         normalized = str(session_id or "").strip()
         if not normalized:
@@ -921,7 +927,13 @@ class WorkspaceChatStateDao:
             )
         return decoded
 
-    def upsert_one(self, session_id: str, conversation: Mapping[str, Any]) -> dict[str, Any]:
+    def upsert_one(
+        self,
+        session_id: str,
+        conversation: Mapping[str, Any],
+        *,
+        activate: bool = False,
+    ) -> dict[str, Any]:
         normalized = str(session_id or "").strip()
         if not normalized:
             raise ValueError("Session runtime state requires a session id.")
@@ -954,10 +966,23 @@ class WorkspaceChatStateDao:
                 root = self._connection.execute(
                     "SELECT state_revision, active_session_id FROM workspace_chat_state WHERE id=1"
                 ).fetchone()
+                current_active = str(root["active_session_id"] or "") if root is not None else ""
+                if activate and current_active != normalized:
+                    revision = self._bump_workspace_revision(
+                        updated_at=str(payload.get("updated_at") or ""),
+                        active_session_id=normalized,
+                    )
+                    return {
+                        "stateRevision": revision,
+                        "conversationCount": 1,
+                        "activeSessionId": normalized,
+                        "sessionId": normalized,
+                        "changed": True,
+                    }
                 return {
                     "stateRevision": int(root["state_revision"] if root is not None else 0),
                     "conversationCount": 1,
-                    "activeSessionId": str(root["active_session_id"] or "") if root is not None else "",
+                    "activeSessionId": current_active,
                     "sessionId": normalized,
                     "changed": False,
                 }
@@ -968,6 +993,7 @@ class WorkspaceChatStateDao:
             position = int(position_row["max_pos"] if position_row is not None else -1) + 1
         revision = self._bump_workspace_revision(
             updated_at=str(payload.get("updated_at") or ""),
+            active_session_id=normalized if activate else None,
         )
         self._upsert_runtime_row(
             session_id=normalized,
@@ -1133,13 +1159,23 @@ class WorkspaceChatStateDao:
             "activeSessionId": str(frozen.get("active_conversation_id") or "").strip(),
         }
 
-    def _bump_workspace_revision(self, *, updated_at: str = "") -> int:
+    def _bump_workspace_revision(
+        self,
+        *,
+        updated_at: str = "",
+        active_session_id: str | None = None,
+    ) -> int:
         existing = self._connection.execute(
             "SELECT version, active_session_id, state_revision, extras_json, "
             "imported_source_sha256, imported_at_ms FROM workspace_chat_state WHERE id=1"
         ).fetchone()
         current_revision = max(0, int(existing["state_revision"] if existing is not None else 0))
         revision = current_revision + 1
+        next_active = (
+            str(active_session_id or "").strip()
+            if active_session_id is not None
+            else (str(existing["active_session_id"] or "") if existing is not None else "")
+        )
         self._connection.execute(
             """
             INSERT INTO workspace_chat_state(
@@ -1148,11 +1184,12 @@ class WorkspaceChatStateDao:
             ) VALUES (1, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
               state_revision=excluded.state_revision,
-              updated_at=excluded.updated_at
+              updated_at=excluded.updated_at,
+              active_session_id=excluded.active_session_id
             """,
             (
                 max(1, int(existing["version"] if existing is not None else 1)),
-                str(existing["active_session_id"] or "") if existing is not None else "",
+                next_active,
                 revision,
                 str(updated_at or ""),
                 str(existing["extras_json"] or "{}") if existing is not None else "{}",
@@ -1482,14 +1519,24 @@ class ConversationRepository:
         with self._database.reader() as connection:
             return WorkspaceChatStateDao(connection).get_one(session_id)
 
+    def list_session_runtime_ids(self) -> list[str]:
+        with self._database.reader() as connection:
+            return WorkspaceChatStateDao(connection).list_session_ids()
+
     def upsert_session_runtime_state(
         self,
         session_id: str,
         conversation: Mapping[str, Any],
+        *,
+        activate: bool = False,
     ) -> Future[dict[str, Any]]:
         frozen = dict(conversation)
         return self._writer.submit(
-            lambda unit_of_work: unit_of_work.chat_state.upsert_one(session_id, frozen),
+            lambda unit_of_work: unit_of_work.chat_state.upsert_one(
+                session_id,
+                frozen,
+                activate=activate,
+            ),
             force_flush=True,
         )
 
