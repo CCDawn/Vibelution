@@ -134,3 +134,33 @@ def test_invocation_context_carries_authorization_decision_fingerprint(monkeypat
 
     assert context.metadata["toolAuthorizationDecisionFingerprint"] == "decision-1"
     assert context.metadata["turnId"] == "turn-a"
+
+
+def test_bind_authorization_runtime_fills_empty_run_id_and_rejects_non_mapping():
+    runtime = bind_authorization_runtime(
+        current_runtime={"agentId": "agent-a", "runId": "", "mode": ""},
+        turn_runtime={"runId": "turn-b", "mode": "chat"},
+        agent_binding="not-a-mapping",
+    )
+    assert runtime["agentId"] == "agent-a"
+    assert runtime["turnId"] == "turn-b"
+    assert runtime["runId"] == "turn-b"
+    assert runtime["mode"] == "chat"
+
+    runtime = bind_authorization_runtime(
+        current_runtime="broken",
+        turn_runtime={"runId": "turn-c", "agentId": "agent-c", "mode": "agent"},
+        agent_binding=None,
+    )
+    assert runtime["agentId"] == "agent-c"
+    assert runtime["turnId"] == "turn-c"
+
+
+def test_visibility_treats_string_names_as_one_tool_not_characters():
+    assert is_tool_visible_to_agent("read_file_tool", "read_file_tool") is True
+    assert is_tool_visible_to_agent("read_file_tool", "write_file_tool") is False
+    report = SimpleNamespace(decision=SimpleNamespace(visible_tools="read_file_tool"))
+    tools = [_tool("read_file_tool"), _tool("write_file_tool")]
+    assert [tool.name for tool in materialize_authorized_tools(tools, report)] == ["read_file_tool"]
+    assert materialize_authorized_tools(7, report) == []
+    assert is_tool_visible_to_agent("read_file_tool", [_tool("read_file_tool")]) is True
