@@ -49,3 +49,12 @@ def test_delegation_governor_shares_lifecycle_detectors():
     assert DelegationGovernor.is_restart_focused_goal(goal) is is_restart_focused_goal(goal)
     assert DelegationGovernor.is_full_evolution_goal(goal) is is_full_evolution_goal(goal)
     assert DelegationGovernor.is_restart_focused_goal("检查未完成重启状态") is False
+
+
+def test_lifecycle_goals_accept_bytes_and_ignore_non_text():
+    assert is_restart_focused_goal(b"Restart Yourself after closeout") is True
+    assert is_restart_focused_goal(b"do not restart, just report") is False
+    assert is_full_evolution_goal(
+        b"call close_evolution_transaction_tool then trigger_self_restart_tool"
+    ) is True
+    assert is_restart_focused_goal(["not", "a", "goal"]) is False
