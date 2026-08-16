@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from core.infrastructure.runtime_input import (
     build_chat_user_message,
@@ -25,6 +25,35 @@ class AgentMode(str, Enum):
     CHAT = "chat"
     SELF_EVOLUTION = "self_evolution"
     SUPERVISED_EVOLUTION = "supervised_evolution"
+
+
+def _coerce_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return bool(value)
+    normalized = str(value).strip().lower()
+    if not normalized:
+        return default
+    if normalized in {"1", "true", "yes", "on", "enabled"}:
+        return True
+    if normalized in {"0", "false", "no", "off", "disabled"}:
+        return False
+    return default
+
+
+def _normalize_mode_text(value: Any, *, default: str) -> str:
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+    text = str(value if value is not None else default).strip().lower()
+    text = text.replace("-", "_").replace(" ", "_")
+    if text:
+        return text
+    fallback = str(default or AgentMode.SELF_EVOLUTION.value).strip().lower()
+    fallback = fallback.replace("-", "_").replace(" ", "_")
+    return fallback or AgentMode.SELF_EVOLUTION.value
 
 
 @dataclass(frozen=True)
@@ -44,7 +73,7 @@ class ModePolicy:
 def normalize_agent_mode(value: str | AgentMode | None, *, default: str = AgentMode.SELF_EVOLUTION.value) -> AgentMode:
     if isinstance(value, AgentMode):
         return value
-    text = str(value or default).strip().lower() or AgentMode.SELF_EVOLUTION.value
+    text = _normalize_mode_text(value, default=default)
     try:
         return AgentMode(text)
     except ValueError as exc:
@@ -55,14 +84,16 @@ def normalize_agent_mode(value: str | AgentMode | None, *, default: str = AgentM
 def is_mode_enabled(mode: AgentMode, config: "AppConfig") -> bool:
     modes_cfg = getattr(getattr(config, "agent", None), "modes", None)
     if mode == AgentMode.CHAT:
-        return bool(getattr(modes_cfg, "chat_enabled", True))
+        return _coerce_bool(getattr(modes_cfg, "chat_enabled", True), True)
     if mode == AgentMode.SUPERVISED_EVOLUTION:
-        return bool(getattr(modes_cfg, "supervised_evolution_enabled", True))
-    return bool(getattr(modes_cfg, "self_evolution_enabled", True))
+        return _coerce_bool(getattr(modes_cfg, "supervised_evolution_enabled", True), True)
+    return _coerce_bool(getattr(modes_cfg, "self_evolution_enabled", True), True)
 
 
 def resolve_mode_policy(mode: str | AgentMode | None, config: "AppConfig") -> ModePolicy:
-    normalized = normalize_agent_mode(mode, default=getattr(config.agent, "default_mode", AgentMode.SELF_EVOLUTION.value))
+    agent_cfg = getattr(config, "agent", None)
+    default_mode = getattr(agent_cfg, "default_mode", AgentMode.SELF_EVOLUTION.value)
+    normalized = normalize_agent_mode(mode, default=default_mode)
     if not is_mode_enabled(normalized, config):
         raise ValueError(f"Agent mode `{normalized.value}` 当前已在配置中禁用")
 
