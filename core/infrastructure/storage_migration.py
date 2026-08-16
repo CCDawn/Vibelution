@@ -6,22 +6,28 @@ import hashlib
 import json
 import os
 import shutil
+import sqlite3
 import tempfile
 import time
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 from vibelution_storage import (
     STORAGE_MIGRATION_SCHEMA_VERSION,
     ProjectStoragePaths,
     legacy_project_storage_paths,
     project_memory_migration_state_path,
+    resolve_project_memory_home,
     resolve_project_storage_paths,
     storage_migration_state_path,
 )
+
+CACHE_POLICY_COLD_REBUILD = "cold_rebuild"
+_ACTIVE_CLAIM_STATUSES = frozenset({"active", "claimed", "in_progress", "running"})
+_SQLITE_MAIN_SUFFIXES = (".sqlite", ".sqlite3", ".db")
 
 
 class StorageMigrationError(RuntimeError):
@@ -67,6 +73,240 @@ class StorageMigrationPlan:
         if include_entries:
             payload["entries"] = [asdict(entry) for entry in self.entries]
         return payload
+
+
+def assess_storage_migration_readiness(
+    project_root: str | os.PathLike[str],
+    *,
+    projects_home: str | os.PathLike[str] | None = None,
+    config_path: str | os.PathLike[str] | None = None,
+    action: str = "apply",
+) -> dict[str, object]:
+    """Fail-closed readiness gate for apply, reapply, and rollback."""
+
+    project = Path(project_root).expanduser().resolve()
+    plan = plan_storage_migration(
+        project,
+        projects_home=projects_home,
+        config_path=config_path,
+    )
+    target = resolve_project_storage_paths(project, projects_home=projects_home)
+    active_work = _probe_active_work(project)
+    runtime_writers = _probe_runtime_writers(project)
+    launcher_state = _probe_launcher_state(project)
+    destination_conflicts = _destination_conflicts(plan.entries)
+    sqlite_bundles = _discover_sqlite_bundles(plan)
+    sqlite_integrity = _verify_sqlite_integrity(sqlite_bundles, phase="source")
+    rollback_eligibility = assess_rollback_eligibility(
+        project,
+        projects_home=projects_home,
+    )
+    source_signature = {
+        "aggregateSha256": plan.aggregate_sha256,
+        "totalFiles": plan.total_files,
+        "totalBytes": plan.total_bytes,
+        "entryCount": len(plan.entries),
+    }
+    blockers: list[dict[str, object]] = []
+    if active_work.get("blocking"):
+        blockers.append(
+            {
+                "code": "active_work_present",
+                "claims": active_work.get("claims", [])[:8],
+            }
+        )
+    if runtime_writers.get("uncertain"):
+        blockers.append(
+            {
+                "code": "runtime_writer_state_uncertain",
+                "reasonCode": runtime_writers.get("reasonCode", "unknown"),
+            }
+        )
+    elif runtime_writers.get("blocking"):
+        blockers.append(
+            {
+                "code": "runtime_writers_active",
+                "writers": runtime_writers.get("writers", [])[:8],
+            }
+        )
+    if launcher_state.get("uncertain"):
+        blockers.append(
+            {
+                "code": "launcher_state_uncertain",
+                "reasonCode": launcher_state.get("reasonCode", "unknown"),
+            }
+        )
+    elif launcher_state.get("blocking"):
+        blockers.append(
+            {
+                "code": "launcher_runtime_active",
+                "observedState": launcher_state.get("observedState", ""),
+            }
+        )
+    if destination_conflicts:
+        blockers.append(
+            {
+                "code": "destination_conflict",
+                "conflicts": destination_conflicts[:8],
+            }
+        )
+    if not sqlite_integrity.get("ok"):
+        blockers.append(
+            {
+                "code": "sqlite_integrity_failed",
+                "failures": sqlite_integrity.get("failures", [])[:8],
+            }
+        )
+    normalized_action = str(action or "apply").strip().lower()
+    if normalized_action == "rollback":
+        if not rollback_eligibility.get("eligible"):
+            blockers.append(
+                {
+                    "code": str(rollback_eligibility.get("reasonCode") or "rollback_blocked"),
+                    "delta": rollback_eligibility.get("delta"),
+                }
+            )
+    ready = not blockers
+    payload: dict[str, object] = {
+        "ready": ready,
+        "blockers": blockers,
+        "activeWork": active_work,
+        "runtimeWriters": runtime_writers,
+        "launcherState": launcher_state,
+        "sourceSignature": source_signature,
+        "destinationConflicts": destination_conflicts,
+        "sqliteBundles": sqlite_bundles,
+        "sqliteIntegrity": sqlite_integrity,
+        "cachePolicy": CACHE_POLICY_COLD_REBUILD,
+        "rollbackEligibility": rollback_eligibility,
+    }
+    if not ready:
+        _log_readiness_blocked(project, payload, action=normalized_action)
+    return payload
+
+
+def assess_rollback_eligibility(
+    project_root: str | os.PathLike[str],
+    *,
+    projects_home: str | os.PathLike[str] | None = None,
+) -> dict[str, object]:
+    target = resolve_project_storage_paths(project_root, projects_home=projects_home)
+    marker_path = storage_migration_state_path(target)
+    if not marker_path.exists():
+        return {
+            "eligible": False,
+            "reasonCode": "completion_marker_missing",
+            "delta": None,
+        }
+    try:
+        marker = json.loads(marker_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {
+            "eligible": False,
+            "reasonCode": "completion_marker_unreadable",
+            "delta": {"error": type(exc).__name__},
+        }
+    if not isinstance(marker, dict):
+        return {
+            "eligible": False,
+            "reasonCode": "completion_marker_invalid",
+            "delta": None,
+        }
+    delta = assess_post_cutover_delta(target, marker)
+    if delta.get("detected"):
+        return {
+            "eligible": False,
+            "reasonCode": "reverse_delta_reconcile_required",
+            "delta": delta,
+        }
+    return {
+        "eligible": True,
+        "reasonCode": "rollback_allowed",
+        "delta": delta,
+    }
+
+
+def assess_post_cutover_delta(
+    target: ProjectStoragePaths,
+    marker: dict[str, object],
+) -> dict[str, object]:
+    manifest_path = Path(str(marker.get("manifestPath") or "")).expanduser()
+    if not manifest_path.is_file():
+        return {
+            "detected": True,
+            "reasonCode": "manifest_missing",
+            "changedCount": 0,
+            "extraCount": 0,
+        }
+    try:
+        entries = _read_manifest_entries(manifest_path)
+    except StorageMigrationError as exc:
+        return {
+            "detected": True,
+            "reasonCode": "manifest_unreadable",
+            "error": str(exc),
+        }
+    manifest_destinations = {
+        os.path.normcase(str(Path(entry.destination).resolve())) for entry in entries
+    }
+    changed: list[str] = []
+    for entry in entries:
+        destination = Path(entry.destination)
+        destination_io = _io_path(destination)
+        if not destination_io.is_file():
+            changed.append(entry.relative_path)
+            continue
+        if destination_io.stat().st_size != entry.size or _sha256_file(destination) != entry.sha256:
+            changed.append(entry.relative_path)
+    extra: list[str] = []
+    completed_at = _parse_iso_timestamp(marker.get("completedAt"))
+    for root in (target.data, target.runtime, target.logs):
+        if not root.exists():
+            continue
+        for path in _iter_source_files(root):
+            key = os.path.normcase(str(path))
+            if key in manifest_destinations:
+                continue
+            relative = _relative_under_root(path, root)
+            if _is_ephemeral_source_file(relative):
+                continue
+            if completed_at is not None:
+                modified = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+                if modified <= completed_at:
+                    continue
+            extra.append(relative.as_posix())
+    detected = bool(changed or extra)
+    return {
+        "detected": detected,
+        "reasonCode": "reverse_delta_reconcile_required" if detected else "none",
+        "changedCount": len(changed),
+        "extraCount": len(extra),
+        "changedSample": changed[:8],
+        "extraSample": extra[:8],
+    }
+
+
+def _require_readiness_for_apply(
+    project_root: str | os.PathLike[str],
+    *,
+    projects_home: str | os.PathLike[str] | None = None,
+    config_path: str | os.PathLike[str] | None = None,
+) -> dict[str, object]:
+    readiness = assess_storage_migration_readiness(
+        project_root,
+        projects_home=projects_home,
+        config_path=config_path,
+        action="apply",
+    )
+    if readiness.get("ready"):
+        return readiness
+    blockers = readiness.get("blockers")
+    first_code = "readiness_blocked"
+    if isinstance(blockers, list) and blockers:
+        first = blockers[0]
+        if isinstance(first, dict) and first.get("code"):
+            first_code = str(first["code"])
+    raise StorageMigrationError(f"storage migration readiness blocked: {first_code}")
 
 
 def plan_storage_migration(
@@ -174,6 +414,11 @@ def apply_storage_migration(
     the completion marker absent, so all current readers stay on legacy paths.
     """
 
+    _require_readiness_for_apply(
+        project_root,
+        projects_home=projects_home,
+        config_path=config_path,
+    )
     plan = plan_storage_migration(
         project_root,
         projects_home=projects_home,
@@ -229,6 +474,7 @@ def apply_storage_migration(
         "skippedEphemeralFiles": plan.skipped_ephemeral_files,
         "manifestPath": str(manifest_path),
         "legacyDeleteAllowed": False,
+        "cachePolicy": CACHE_POLICY_COLD_REBUILD,
     }
     _atomic_write_json(storage_migration_state_path(target), marker)
     return {**marker, "copiedFiles": copied, "reusedFiles": reused}
@@ -246,6 +492,12 @@ def rollback_storage_switch(
     memory_marker_path = project_memory_migration_state_path(target)
     if not marker_path.exists():
         return {"rolledBack": False, "reason": "completion_marker_missing", "markerPath": str(marker_path)}
+
+    eligibility = assess_rollback_eligibility(project_root, projects_home=projects_home)
+    if not eligibility.get("eligible"):
+        reason = str(eligibility.get("reasonCode") or "rollback_blocked")
+        raise StorageMigrationError(f"storage migration rollback blocked: {reason}")
+
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     archived = marker_path.with_name(f"storage-migration.rolled-back-{stamp}.json")
     archived_memory_marker: Path | None = None
@@ -293,14 +545,42 @@ def _copy_and_verify_entries(entries: Iterable[StorageMigrationEntry]) -> tuple[
     for entry in entries:
         source = Path(entry.source)
         destination = Path(entry.destination)
-        source_io = _io_path(source)
         destination_io = _io_path(destination)
         destination_io.parent.mkdir(parents=True, exist_ok=True)
+        if _is_sqlite_main(source):
+            ok, detail = _sqlite_quick_check(source)
+            if not ok:
+                raise StorageMigrationError(
+                    f"sqlite quick_check failed before copy: {source} ({detail})"
+                )
+            if destination_io.exists():
+                reused += 1
+            else:
+                for bundle_source in _sqlite_bundle_paths(source):
+                    bundle_source_io = _io_path(bundle_source)
+                    if not bundle_source_io.is_file():
+                        continue
+                    bundle_destination = destination.parent / bundle_source.name
+                    try:
+                        shutil.copy2(bundle_source_io, _io_path(bundle_destination))
+                    except OSError as exc:
+                        raise StorageMigrationError(
+                            "failed to copy legacy source during storage migration: "
+                            f"{source} -> {destination}"
+                        ) from exc
+                copied += 1
+            _verify_entry(entry)
+            ok, detail = _sqlite_quick_check(destination)
+            if not ok:
+                raise StorageMigrationError(
+                    f"sqlite quick_check failed after copy: {destination} ({detail})"
+                )
+            continue
         if destination_io.exists():
             reused += 1
         else:
             try:
-                shutil.copy2(source_io, destination_io)
+                shutil.copy2(_io_path(source), destination_io)
             except OSError as exc:
                 raise StorageMigrationError(
                     "failed to copy legacy source during storage migration: "
@@ -453,6 +733,8 @@ def _iter_source_files(root: Path) -> Iterable[Path]:
             candidate = current_path / file_name
             if candidate.is_symlink():
                 raise StorageMigrationError(f"symlinked file is not migrated: {candidate}")
+            if _is_sqlite_sidecar(candidate):
+                continue
             if candidate.is_file():
                 yield candidate.resolve()
 
@@ -575,11 +857,387 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _parse_iso_timestamp(value: object) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _relative_under_root(path: Path, root: Path) -> Path:
+    return path.resolve().relative_to(root.resolve())
+
+
+def _read_json_object(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _coordination_registry_paths(project_root: Path) -> list[Path]:
+    paths = [resolve_project_memory_home(project_root) / "agent-registry.json"]
+    try:
+        from core.infrastructure.branch_workspace import resolve_branch_workspace
+
+        layout = resolve_branch_workspace(project_root)
+        paths.append(layout.git_common_dir / "briefbound" / "coordination" / "registry.json")
+    except Exception:
+        pass
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for path in paths:
+        key = os.path.normcase(str(path))
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(path)
+    return unique
+
+
+def _load_active_claims(project_root: Path) -> tuple[list[dict[str, str]], bool]:
+    claims: list[dict[str, str]] = []
+    uncertain = False
+    for registry_path in _coordination_registry_paths(project_root):
+        if not registry_path.exists():
+            continue
+        try:
+            payload = json.loads(registry_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            uncertain = True
+            continue
+        raw_claims = payload.get("workClaims") or payload.get("claims") or {}
+        if not isinstance(raw_claims, dict):
+            uncertain = True
+            continue
+        for claim_id, raw in raw_claims.items():
+            if not isinstance(raw, dict):
+                continue
+            status = str(raw.get("status") or "").strip().lower()
+            if status not in _ACTIVE_CLAIM_STATUSES:
+                continue
+            claims.append(
+                {
+                    "claimId": str(claim_id),
+                    "status": status,
+                    "branch": str(raw.get("branch") or ""),
+                }
+            )
+    return claims, uncertain
+
+
+def _probe_active_work(project_root: Path) -> dict[str, object]:
+    claims, uncertain = _load_active_claims(project_root)
+    if uncertain:
+        return {
+            "blocking": True,
+            "uncertain": True,
+            "reasonCode": "active_work_registry_unreadable",
+            "claims": claims[:8],
+        }
+    return {
+        "blocking": bool(claims),
+        "uncertain": False,
+        "reasonCode": "active_work_present" if claims else "none",
+        "claims": claims[:8],
+        "claimCount": len(claims),
+    }
+
+
+def _probe_launcher_state(project_root: Path) -> dict[str, object]:
+    try:
+        from core.infrastructure.branch_workspace import _runtime_observation
+
+        observation = _runtime_observation(project_root)
+    except Exception:
+        return {
+            "blocking": False,
+            "uncertain": True,
+            "reasonCode": "launcher_observation_failed",
+        }
+    observed_state = str(observation.get("observedState") or "")
+    alive = bool(observation.get("alive"))
+    return {
+        "blocking": alive,
+        "uncertain": False,
+        "reasonCode": "launcher_runtime_active" if alive else "idle",
+        "observedState": observed_state,
+        "alive": alive,
+        "port": observation.get("port"),
+    }
+
+
+def _probe_runtime_writers(project_root: Path) -> dict[str, object]:
+    writers: list[dict[str, object]] = []
+    try:
+        runtime_root = resolve_project_storage_paths(project_root).runtime
+    except Exception:
+        return {
+            "blocking": False,
+            "uncertain": True,
+            "reasonCode": "runtime_root_unresolved",
+            "writers": [],
+        }
+    manager_state_path = runtime_root / "runtime-manager" / "state.json"
+    manager_state = _read_json_object(manager_state_path)
+    if manager_state_path.exists() and manager_state is None:
+        return {
+            "blocking": False,
+            "uncertain": True,
+            "reasonCode": "runtime_manager_state_unreadable",
+            "writers": [],
+        }
+    manager_pid = _positive_int(manager_state.get("managerPid") if manager_state else 0)
+    if manager_pid and _pid_is_alive(manager_pid):
+        writers.append({"kind": "runtime_manager", "pid": manager_pid})
+    daemon_lock = runtime_root / "runtime-manager" / "daemon.lock"
+    if daemon_lock.exists():
+        writers.append({"kind": "runtime_manager_lock", "path": "runtime-manager/daemon.lock"})
+    try:
+        from core.runtime_manager.work_run_store import (
+            WorkRunStore,
+            active_work_payload_blocks_lifecycle,
+        )
+
+        store = WorkRunStore(root=runtime_root / "runtime-manager" / "work_runs")
+        if store.root.exists():
+            for kind_dir in store.root.iterdir():
+                if not kind_dir.is_dir():
+                    continue
+                for snapshot in store.list_lifecycle_candidate_snapshots(kind_dir.name):
+                    if active_work_payload_blocks_lifecycle(snapshot):
+                        writers.append(
+                            {
+                                "kind": "work_run",
+                                "runKind": kind_dir.name,
+                                "runId": str(snapshot.get("runId") or ""),
+                                "status": str(snapshot.get("status") or ""),
+                            }
+                        )
+    except Exception:
+        return {
+            "blocking": False,
+            "uncertain": True,
+            "reasonCode": "work_run_store_unreadable",
+            "writers": writers[:8],
+        }
+    return {
+        "blocking": bool(writers),
+        "uncertain": False,
+        "reasonCode": "runtime_writers_active" if writers else "none",
+        "writers": writers[:8],
+        "writerCount": len(writers),
+    }
+
+
+def _discover_sqlite_bundles(plan: StorageMigrationPlan) -> list[dict[str, object]]:
+    bundles: list[dict[str, object]] = []
+    for entry in plan.entries:
+        source = Path(entry.source)
+        if not _is_sqlite_main(source):
+            continue
+        bundle_paths = _sqlite_bundle_paths(source)
+        bundles.append(
+            {
+                "mainPath": entry.relative_path,
+                "mainSource": entry.source,
+                "members": [
+                    {
+                        "name": path.name,
+                        "present": _io_path(path).is_file(),
+                        "size": path.stat().st_size if path.is_file() else 0,
+                    }
+                    for path in bundle_paths
+                ],
+            }
+        )
+    return bundles
+
+
+def _verify_sqlite_integrity(
+    bundles: list[dict[str, object]],
+    *,
+    phase: str,
+) -> dict[str, object]:
+    failures: list[dict[str, str]] = []
+    checks: list[dict[str, object]] = []
+    for bundle in bundles:
+        main_source = Path(str(bundle.get("mainSource") or ""))
+        if not main_source.is_file():
+            failures.append(
+                {
+                    "path": str(bundle.get("mainPath") or ""),
+                    "phase": phase,
+                    "detail": "missing_main",
+                }
+            )
+            continue
+        ok, detail = _sqlite_quick_check(main_source)
+        checks.append(
+            {
+                "path": str(bundle.get("mainPath") or ""),
+                "pragma": "quick_check",
+                "ok": ok,
+                "detail": detail,
+            }
+        )
+        if not ok:
+            failures.append(
+                {
+                    "path": str(bundle.get("mainPath") or ""),
+                    "phase": phase,
+                    "detail": detail,
+                }
+            )
+    return {"ok": not failures, "phase": phase, "checks": checks, "failures": failures}
+
+
+def _read_manifest_entries(path: Path) -> tuple[StorageMigrationEntry, ...]:
+    entries: list[StorageMigrationEntry] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        raw = json.loads(line)
+        if not isinstance(raw, dict):
+            raise StorageMigrationError(f"invalid manifest row: {path}")
+        entries.append(
+            StorageMigrationEntry(
+                source=str(raw.get("source") or ""),
+                destination=str(raw.get("destination") or ""),
+                category=str(raw.get("category") or ""),
+                relative_path=str(raw.get("relative_path") or ""),
+                size=int(raw.get("size") or 0),
+                sha256=str(raw.get("sha256") or ""),
+            )
+        )
+    return tuple(entries)
+
+
+def _log_readiness_blocked(
+    project_root: Path,
+    payload: dict[str, object],
+    *,
+    action: str,
+) -> None:
+    blockers = payload.get("blockers")
+    codes: list[str] = []
+    if isinstance(blockers, list):
+        for item in blockers:
+            if isinstance(item, dict) and item.get("code"):
+                codes.append(str(item["code"]))
+    try:
+        from core.runtime_manager.scene_logging import append_runtime_manager_file_event
+
+        append_runtime_manager_file_event(
+            "storage_migration.readiness_blocked",
+            {
+                "action": action,
+                "reasonCodes": codes[:8],
+                "blockerCount": len(codes),
+                "projectRoot": str(project_root),
+            },
+            suppress_io_errors=True,
+        )
+    except Exception:
+        return
+
+
+def _is_sqlite_sidecar(path: Path) -> bool:
+    name = path.name.lower()
+    return name.endswith("-wal") or name.endswith("-shm")
+
+
+def _is_sqlite_main(path: Path) -> bool:
+    if _is_sqlite_sidecar(path):
+        return False
+    lowered = path.name.lower()
+    return lowered.endswith(_SQLITE_MAIN_SUFFIXES)
+
+
+def _sqlite_bundle_paths(main: Path) -> tuple[Path, ...]:
+    return (
+        main,
+        main.with_name(main.name + "-wal"),
+        main.with_name(main.name + "-shm"),
+    )
+
+
+def _sqlite_quick_check(path: Path) -> tuple[bool, str]:
+    try:
+        connection = sqlite3.connect(
+            f"file:{path.resolve().as_posix()}?mode=ro",
+            uri=True,
+            timeout=1.0,
+        )
+    except sqlite3.Error as exc:
+        return False, str(exc)
+    try:
+        row = connection.execute("PRAGMA quick_check").fetchone()
+        detail = str(row[0]) if row else ""
+        return detail.lower() == "ok", detail
+    except sqlite3.Error as exc:
+        return False, str(exc)
+    finally:
+        connection.close()
+
+
+def _positive_int(value: object) -> int:
+    try:
+        parsed = int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    return parsed if parsed > 0 else 0
+
+
+def _pid_is_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        handle = None
+        for access in (0x1000, 0x0400):
+            handle = kernel32.OpenProcess(access, False, int(pid))
+            if handle:
+                break
+        if not handle:
+            return False
+        try:
+            exit_code = wintypes.DWORD()
+            if kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)) == 0:
+                return False
+            return int(exit_code.value) == 259
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
 __all__ = [
+    "CACHE_POLICY_COLD_REBUILD",
     "StorageMigrationEntry",
     "StorageMigrationError",
     "StorageMigrationPlan",
     "apply_storage_migration",
+    "assess_post_cutover_delta",
+    "assess_rollback_eligibility",
+    "assess_storage_migration_readiness",
     "plan_storage_migration",
     "rollback_storage_switch",
 ]
