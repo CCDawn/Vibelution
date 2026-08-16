@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Dict, Tuple
+from typing import Any, Dict, Tuple
 
 
 @dataclass(frozen=True)
@@ -76,14 +76,25 @@ _ROLE_SPECS: Dict[str, SubagentRoleSpec] = {
 ALLOWED_SUBAGENT_TASK_TYPES = frozenset(_ROLE_SPECS.keys())
 
 
+def _coerce_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
 def get_subagent_role_spec(task_type: str) -> SubagentRoleSpec:
-    normalized = (task_type or "").strip().lower() or "inspect"
+    normalized = _coerce_text(task_type).strip().lower().replace("-", "_").replace(" ", "_")
+    normalized = normalized or "inspect"
     return _ROLE_SPECS.get(normalized, _ROLE_SPECS["inspect"])
 
 
 def extract_subagent_primary_goal(prompt: str | None) -> str:
     """从子 agent 的瘦提示词中提取唯一目标，避免整段模板污染 current_goal。"""
-    text = (prompt or "").strip()
+    text = _coerce_text(prompt).strip()
     if not text:
         return ""
 
