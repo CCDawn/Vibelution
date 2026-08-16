@@ -27,8 +27,9 @@ import {
   useState,
 } from "react";
 import { fetchAgentConfigWorkspace } from "../api/agents";
-import { fetchJson } from "../api/client";
+import { fetchPetSummary } from "../api/pet";
 import { queryKeys } from "../api/queryKeys";
+import { fetchRuntimeSummary } from "../api/runtime";
 import {
   AgentConfigWorkspace,
   AgentConfigWorkspaceAgent,
@@ -791,13 +792,13 @@ export function SelfEvolutionTrack({
   const pageVisible = usePageVisibility();
   const petQuery = useQuery({
     queryKey: queryKeys.petSummary(),
-    queryFn: () => fetchJson<PetSummary>("/api/pet/summary"),
+    queryFn: () => fetchPetSummary(),
     refetchInterval: resolvePollingInterval(pageVisible, 10_000),
     refetchIntervalInBackground: false,
   });
   const runtimeQuery = useQuery({
     queryKey: queryKeys.runtimeSummary(),
-    queryFn: () => fetchJson<RuntimeSummary>("/api/runtime/summary"),
+    queryFn: () => fetchRuntimeSummary(),
     refetchInterval: resolvePollingInterval(pageVisible, 5_000),
     refetchIntervalInBackground: false,
   });

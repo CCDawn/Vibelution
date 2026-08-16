@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { fetchJson } from "../../api/client";
+import { stopCliAgentTerminalSession } from "../../api/cliAgents";
 import type { ConversationMessage } from "../../api/types";
 import {
   buildCliAgentRunViews,
@@ -162,9 +162,8 @@ export function useChatCliAgentTerminal({
     }
     if (shouldStopTerminal && terminalSessionId) {
       try {
-        await fetchJson<CliAgentTerminalSession>(
-          `/api/cli-agents/terminal-sessions/${encodeURIComponent(terminalSessionId)}/stop`,
-          { method: "POST" },
+        await stopCliAgentTerminalSession<CliAgentTerminalSession>(
+          terminalSessionId,
         );
         void refetchSessionDetail();
       } catch (error) {

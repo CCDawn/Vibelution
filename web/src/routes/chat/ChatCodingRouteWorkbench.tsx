@@ -35,8 +35,9 @@ import {
 } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
-import { fetchSessionLlmOptions, listPendingSessionToolApprovals, querySessions } from "../../api/chat";
-import { fetchJson } from "../../api/client";
+import { listSessionChildSessions, fetchSessionLlmOptions, listPendingSessionToolApprovals, querySessions } from "../../api/chat";
+import { archiveAgent, updateAgent } from "../../api/agents";
+import { fetchFileContent } from "../../api/files";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import type { AgentArchiveResponse } from "../agentWorkspaceCache";
 import { prefetchConversationView } from "../../components/conversation/prefetchConversationView";
@@ -1207,7 +1208,7 @@ export function ChatCodingRoute() {
   });
   const childSessionsQuery = useQuery({
     queryKey: queryKeys.sessionChildSessions(activeRootSessionId || "none"),
-    queryFn: () => fetchJson<SessionSummary[]>(`/api/sessions/${activeRootSessionId}/child-sessions`),
+    queryFn: () => listSessionChildSessions(activeRootSessionId),
     enabled: secondaryChatDataEnabled && Boolean(activeRootSessionId) && directSessionPanelActive,
     refetchInterval: childSessionLiveQueryPolicy.childSessionsRefetchInterval,
     refetchIntervalInBackground: childSessionLiveQueryPolicy.directRefetchIntervalInBackground,
@@ -1346,11 +1347,7 @@ export function ChatCodingRoute() {
 
   const renameAgentMutation = useMutation({
     mutationFn: (payload: { agentId: string; displayName: string }) =>
-      fetchJson<AgentInstance>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ displayName: payload.displayName }),
-      }),
+      updateAgent(payload.agentId, { displayName: payload.displayName }) as Promise<AgentInstance>,
     onMutate: async (payload) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.agents() });
       const previousAgents = queryClient.getQueryData<AgentInstance[]>(queryKeys.agents());
@@ -1397,10 +1394,7 @@ export function ChatCodingRoute() {
     isAgentArchivePending,
     pendingAgentIds: pendingArchiveAgentIds,
   } = useChatAgentArchiveQueue({
-    executeArchive: (agentId: string) =>
-      fetchJson<AgentArchiveResponse>(`/api/agents/${encodeURIComponent(agentId)}`, {
-        method: "DELETE",
-      }),
+    executeArchive: (agentId: string) => archiveAgent(agentId) as Promise<AgentArchiveResponse>,
     onOptimisticArchive: (agentId: string) => {
       void queryClient.cancelQueries({ queryKey: queryKeys.agents() });
       void queryClient.cancelQueries({ queryKey: queryKeys.sessions() });
@@ -1624,8 +1618,7 @@ export function ChatCodingRoute() {
   const fileContentQuery = useQuery({
     queryKey: queryKeys.fileContent(activeFilePath ?? ""),
     enabled: Boolean(activeFilePath),
-    queryFn: () =>
-      fetchJson<FileContent>(`/api/files/content?path=${encodeURIComponent(activeFilePath ?? "")}`),
+    queryFn: () => fetchFileContent(activeFilePath ?? ""),
   });
 
   const changedFiles = new Set(sessionDetailQuery.data?.changedFiles ?? []);
