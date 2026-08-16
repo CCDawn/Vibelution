@@ -1,5 +1,6 @@
 """Boundary tests for ResponseProcessor not covered by agent.py protocol tests."""
 
+import json
 from types import SimpleNamespace
 
 from langchain_core.messages import AIMessageChunk
@@ -14,6 +15,13 @@ def test_coerce_content_text_handles_none_dict_and_mixed_blocks():
     assert processor.coerce_content_text([{"text": "a"}, "b", None, {"type": "image"}]) == "ab"
 
 
+def test_coerce_content_text_decodes_bytes_and_mapping_content_key():
+    processor = ResponseProcessor()
+    assert processor.coerce_content_text(b"hello") == "hello"
+    assert processor.coerce_content_text({"content": b"world"}) == "world"
+    assert processor.coerce_content_text([{"text": b"a"}, b"b"]) == "ab"
+
+
 def test_standard_tool_calls_skip_xml_fallback_even_when_invoke_is_present():
     processor = ResponseProcessor()
     preview = processor.preview(
@@ -24,6 +32,38 @@ def test_standard_tool_calls_skip_xml_fallback_even_when_invoke_is_present():
     )
     assert preview.has_tool_calls is True
     assert preview.xml_tool_calls == []
+
+
+def test_preview_rejects_string_tool_calls_and_parses_json_or_mapping_payloads():
+    processor = ResponseProcessor()
+    invoke = '<invoke name="grep_search_tool"><parameter name="query">foo</parameter></invoke>'
+    split = processor.preview(SimpleNamespace(content=invoke, tool_calls="abc"))
+    assert split.has_tool_calls is False
+    assert split.tool_calls == []
+    assert len(split.xml_tool_calls) == 1
+    assert split.xml_tool_calls[0]["name"] == "grep_search_tool"
+
+    json_calls = processor.preview(
+        {
+            "content": b"visible",
+            "toolCalls": json.dumps(
+                [{"id": "c1", "name": "read_file_tool", "args": {"path": "a.py"}}]
+            ),
+        }
+    )
+    assert json_calls.has_tool_calls is True
+    assert json_calls.raw_content == "visible"
+    assert json_calls.tool_calls[0]["name"] == "read_file_tool"
+    assert json_calls.xml_tool_calls == []
+
+    single = processor.preview(
+        SimpleNamespace(
+            content="ok",
+            tool_calls={"id": "c2", "name": "cli_tool", "args": {"command": "pytest"}},
+        )
+    )
+    assert single.tool_call_count == 1
+    assert single.tool_calls[0]["id"] == "c2"
 
 
 def test_build_ai_message_parses_json_arguments_override_and_keeps_metadata():
@@ -57,6 +97,34 @@ def test_build_ai_message_parses_json_arguments_override_and_keeps_metadata():
     assert broken.tool_calls[0]["args"] == {}
 
 
+def test_build_ai_message_coerces_bytes_ids_function_shape_and_json_override():
+    processor = ResponseProcessor()
+    response = SimpleNamespace(content="done", tool_calls=[])
+    processed = processor.process(response)
+    message = processed.build_ai_message(
+        response,
+        tool_calls_override=[
+            {
+                "toolCallId": b"call-9",
+                "function": {
+                    "name": b"cli_tool",
+                    "arguments": b'{"command": "pytest"}',
+                },
+            }
+        ],
+    )
+    assert message.tool_calls[0]["id"] == "call-9"
+    assert message.tool_calls[0]["name"] == "cli_tool"
+    assert message.tool_calls[0]["args"] == {"command": "pytest"}
+    json_override = processed.build_ai_message(
+        response,
+        tool_calls_override='[{"id":"call-8","name":"cli_tool","args":{"command":"pytest"}}]',
+    )
+    assert json_override.tool_calls[0]["id"] == "call-8"
+    ignored = processed.build_ai_message(response, tool_calls_override="not-a-list")
+    assert ignored.tool_calls == []
+
+
 def test_merge_stream_chunk_compacts_repeated_provider_metadata():
     first = AIMessageChunk(content="你", response_metadata={"provider": "openai"})
     second = AIMessageChunk(content="好", response_metadata={"provider": "openai"})
@@ -73,3 +141,6 @@ def test_extract_active_components_dedupes_and_uppercases():
         "<active_components>spec, CODEBASE_MAP</active_components>"
     )
     assert components == ["SOUL", "SPEC", "CODEBASE_MAP"]
+    assert ResponseProcessor.extract_active_components(
+        b"<active_components>soul</active_components>"
+    ) == ["SOUL"]
