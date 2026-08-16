@@ -14,23 +14,10 @@ _NAMED_PROTOCOL_TAGS = (
     "parameter",
 )
 
-_TRAILING_PARTIAL_PREFIXES = (
-    "sta",
-    "state",
-    "/state",
-    "active",
-    "active_components",
-    "/active_components",
-    "inv",
-    "invoke",
-    "/invoke",
-    "par",
-    "param",
-    "parameter",
-    "/parameter",
-    "tool",
+_COMPLETE_PROTOCOL_TAG_NAMES = _NAMED_PROTOCOL_TAGS + (
     "tool_call",
-    "/tool_call",
+    "think",
+    "thinking",
 )
 
 _BRACKET_CONTROL_MARKER_RE = re.compile(
@@ -164,6 +151,16 @@ def sanitize_assistant_thought_delta_text(value: Any) -> str:
     return strip_llm_protocol_artifacts(text, trim=False)
 
 
+def _is_trailing_protocol_fragment(normalized: str, extra_names: tuple[str, ...] = ()) -> bool:
+    if "dsml" in normalized:
+        return True
+    token = normalized.split()[0].strip().lstrip("/").strip()
+    if not token:
+        return True
+    names = _COMPLETE_PROTOCOL_TAG_NAMES + tuple(extra_names or ())
+    return any(name.startswith(token) for name in names)
+
+
 def _strip_trailing_partial_protocol_tag(text: str, *, extra_prefixes: tuple[str, ...] = ()) -> str:
     cleaned = text or ""
     while True:
@@ -172,11 +169,7 @@ def _strip_trailing_partial_protocol_tag(text: str, *, extra_prefixes: tuple[str
             return cleaned
         fragment = match.group(0)
         normalized = fragment[1:].strip().lower()
-        if not normalized:
-            cleaned = cleaned[: match.start()]
-            continue
-        prefixes = _TRAILING_PARTIAL_PREFIXES + tuple(extra_prefixes or ())
-        if "dsml" in normalized or any(normalized.startswith(prefix) for prefix in prefixes):
+        if not normalized or _is_trailing_protocol_fragment(normalized, extra_prefixes):
             cleaned = cleaned[: match.start()]
             continue
         return cleaned
