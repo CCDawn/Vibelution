@@ -133,11 +133,25 @@ def test_singleton_reset_hint_skips_pure_test_files(tmp_path: Path):
     pure_test.write_text("def test_value():\n    assert 1 == 1\n", encoding="utf-8")
     singleton_test = tmp_path / "test_singleton.py"
     singleton_test.write_text("from core.infrastructure.state import get_state\n", encoding="utf-8")
+    string_only_test = tmp_path / "test_string_only.py"
+    string_only_test.write_text(
+        'def test_contract():\n    assert "session_service" in "core.web.services.session_service"\n',
+        encoding="utf-8",
+    )
+    team_support_test = tmp_path / "test_team_support.py"
+    team_support_test.write_text(
+        "from tests._support.team_workflow.cases_structure import *\n",
+        encoding="utf-8",
+    )
 
     test_conftest._test_file_needs_singleton_reset.cache_clear()
+    test_conftest._test_file_needs_runtime_manager_isolation.cache_clear()
 
     assert test_conftest._test_file_needs_singleton_reset(str(pure_test)) is False
     assert test_conftest._test_file_needs_singleton_reset(str(singleton_test)) is True
+    assert test_conftest._test_file_needs_singleton_reset(str(string_only_test)) is False
+    assert test_conftest._test_file_needs_runtime_manager_isolation(str(string_only_test)) is False
+    assert test_conftest._test_file_needs_runtime_manager_isolation(str(team_support_test)) is True
 
 
 def test_selector_matches_session_service_to_chat_validation_commands():
