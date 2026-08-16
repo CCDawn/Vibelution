@@ -1,10 +1,16 @@
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "./browserTelemetry";
+import {
+  popClientOperationContext,
+  pushClientOperationContext,
+  resetClientOperationContextForTests,
+} from "./clientOperationContext";
 
 export const USER_ACTION_SLOW_THRESHOLD_MS = 300;
 
 export type UserActionOutcome = "started" | "succeeded" | "failed" | "blocked" | "observed";
 
 export type UserActionTracker = {
+  clientOperationId: string;
   succeeded: (fields?: Record<string, unknown>) => void;
   failed: (error?: unknown, fields?: Record<string, unknown>) => void;
   blocked: (guardReason: string, fields?: Record<string, unknown>) => void;
@@ -136,6 +142,7 @@ export function startUserAction(
     ...fields,
   };
 
+  pushClientOperationContext(clientOperationId);
   postUserActionTelemetry(action, "started", baseFields, "info", { destructive });
 
   const finish = (
@@ -143,14 +150,19 @@ export function startUserAction(
     level: "info" | "warning" | "error",
     extraFields: Record<string, unknown>,
   ) => {
-    const durationMs = Math.round(nowMonotonicMs() - startedAtMs);
-    postUserActionTelemetry(action, phase, {
-      ...baseFields,
-      ...extraFields,
-    }, level, { destructive, durationMs });
+    try {
+      const durationMs = Math.round(nowMonotonicMs() - startedAtMs);
+      postUserActionTelemetry(action, phase, {
+        ...baseFields,
+        ...extraFields,
+      }, level, { destructive, durationMs });
+    } finally {
+      popClientOperationContext();
+    }
   };
 
   return {
+    clientOperationId,
     succeeded: (extra = {}) => finish("succeeded", "info", extra),
     failed: (error, extra = {}) => finish("failed", "error", { ...extractErrorFields(error), ...extra }),
     blocked: (guardReason, extra = {}) => finish(
@@ -178,4 +190,5 @@ export function postUserActionObservation(
 
 export function resetUserActionTelemetryForTests() {
   operationCounter = 0;
+  resetClientOperationContextForTests();
 }

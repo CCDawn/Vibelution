@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { postBrowserTelemetry } from "./browserTelemetry";
+import { currentClientOperationId } from "./clientOperationContext";
 import {
   isDestructiveUserAction,
   postUserActionObservation,
@@ -108,6 +109,14 @@ describe("user action telemetry", () => {
       errorName: "Error",
       errorMessage: "network down",
     });
+  });
+
+  it("binds client operation context until the tracker finishes", () => {
+    const tracker = startUserAction("session_create", { agentId: "agent-a" });
+    expect(tracker.clientOperationId).toMatch(/^session_create-/);
+    expect(currentClientOperationId()).toBe(tracker.clientOperationId);
+    tracker.succeeded({ sessionId: "session-b" });
+    expect(currentClientOperationId()).toBe("");
   });
 
   it("supports one-shot observations for route switches", () => {

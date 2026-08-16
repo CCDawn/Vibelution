@@ -73,11 +73,21 @@ export function useTeamShellMutations(options: UseTeamShellMutationsOptions) {
   const sendTeamMessageMutation = useMutation({
     mutationFn: (payload: { teamId: string; content: string; interruptMode: string }) =>
       sendTeamProjectBusMessage(payload),
-    onSuccess: (_payload, variables) => {
+    onMutate: (variables) => ({
+      telemetry: startUserAction("team_message_send", {
+        teamId: variables.teamId,
+        interruptMode: variables.interruptMode,
+      }),
+    }),
+    onSuccess: (_payload, variables, context) => {
+      context?.telemetry?.succeeded({ teamId: variables.teamId });
       if (variables.teamId === options.selectedTeamId) {
         options.setTeamMessage("");
       }
       void chatWorkspaceCache.afterTeamChanged(variables.teamId);
+    },
+    onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, { teamId: variables.teamId });
     },
   });
 
@@ -87,8 +97,21 @@ export function useTeamShellMutations(options: UseTeamShellMutationsOptions) {
         eventId: payload.eventId,
         reason: "Revoked from Agent Center team broadcast history.",
       }),
-    onSuccess: (_payload, variables) => {
+    onMutate: (variables) => ({
+      telemetry: startUserAction("team_message_revoke", {
+        teamId: variables.teamId,
+        eventId: variables.eventId,
+      }, { destructive: true }),
+    }),
+    onSuccess: (_payload, variables, context) => {
+      context?.telemetry?.succeeded({ teamId: variables.teamId, eventId: variables.eventId });
       void chatWorkspaceCache.afterTeamChanged(variables.teamId);
+    },
+    onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, {
+        teamId: variables.teamId,
+        eventId: variables.eventId,
+      });
     },
   });
 

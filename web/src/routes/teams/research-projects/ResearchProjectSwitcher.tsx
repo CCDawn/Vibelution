@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FolderKanban, Pencil, Plus, Save } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { startUserAction } from "../../../app/userActionTelemetry";
 import {
   activateTeamResearchProject,
   createTeamResearchProject,
@@ -107,7 +108,11 @@ export function ResearchProjectSwitcher({
   const activateMutation = useMutation({
     mutationFn: (projectId: string) =>
       activateTeamResearchProject(teamId, projectId),
-    onSuccess: async (payload) => {
+    onMutate: (projectId) => ({
+      telemetry: startUserAction("team_research_project_activate", { teamId, projectId }),
+    }),
+    onSuccess: async (payload, projectId, context) => {
+      context?.telemetry?.succeeded({ teamId, projectId });
       queryClient.setQueryData(researchProjectQueryKey(teamId), payload);
       if (payload.project) {
         onProjectActivated(payload.project);

@@ -2322,6 +2322,7 @@ def record_backend_api_event(payload: dict[str, Any]) -> dict[str, Any]:
             "operationalClientError": is_operational_client_error,
             "diagnosticProbe": is_diagnostic_probe,
             "testClientProbe": is_test_client_probe,
+            "clientOperationId": s._truncate_text(str(payload.get("client_operation_id") or ""), 120),
         }
     ), project_root=s.PROJECT_ROOT)
 
