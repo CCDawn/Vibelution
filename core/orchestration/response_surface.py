@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping
 from typing import Any, Callable, Dict, Sequence
 
 from core.mental_model_flags import is_mental_model_enabled
@@ -13,9 +15,65 @@ from core.llm.usage import (
 )
 
 
+def _coerce_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+def _coerce_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if not text:
+        return default
+    if text in {"1", "true", "yes", "on", "enabled"}:
+        return True
+    if text in {"0", "false", "no", "off", "disabled"}:
+        return False
+    return default
+
+
+def _as_mapping(value: Any) -> Dict[str, Any]:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return {}
+        try:
+            value = json.loads(text)
+        except json.JSONDecodeError:
+            return {}
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {}
+
+
+def _mapping_get(mapping: Mapping[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in mapping:
+            return mapping.get(key)
+    return None
+
+
 def _coerce_nonnegative_int(value: Any, *, default: int = 0) -> int:
+    if isinstance(value, bool) or value is None:
+        return max(0, int(default or 0))
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
     try:
-        return max(0, int(value or 0))
+        return max(0, int(value))
     except (TypeError, ValueError):
         try:
             return max(0, int(default or 0))
@@ -23,10 +81,21 @@ def _coerce_nonnegative_int(value: Any, *, default: int = 0) -> int:
             return 0
 
 
-def _resolve_mental_model_enabled(override: bool | None = None) -> bool:
-    if override is not None:
-        return bool(override)
-    return is_mental_model_enabled()
+def _coerce_item_list(value: Any) -> list:
+    if value is None or isinstance(value, (str, bytes, bytearray, memoryview)):
+        return []
+    if isinstance(value, Mapping):
+        return [dict(value)]
+    try:
+        return list(value)
+    except TypeError:
+        return []
+
+
+def _resolve_mental_model_enabled(override: Any = None) -> bool:
+    if override is None:
+        return is_mental_model_enabled()
+    return _coerce_bool(override, default=False)
 
 
 class TokenUsageObservation:
@@ -57,7 +126,7 @@ class TokenUsageObservation:
             value.uncached_input_tokens = max(0, value._input_tokens - cached_count)
         else:
             value.uncached_input_tokens = _coerce_nonnegative_int(uncached_input_tokens)
-        value.observed = bool(observed)
+        value.observed = _coerce_bool(observed, default=False)
         return value
 
     def __iter__(self):
@@ -124,20 +193,20 @@ class ResponseSurfaceController:
             return ""
         failures = _coerce_nonnegative_int(consecutive_failures)
         iteration_index = _coerce_nonnegative_int(iteration)
-        should_sense = bool(has_tool_calls) or failures >= 2 or iteration_index == 1
+        should_sense = _coerce_bool(has_tool_calls, default=False) or failures >= 2 or iteration_index == 1
         if not should_sense:
             return ""
         try:
-            recent_tools = list(getattr(mental_model, "_tool_history", []))[-5:]
+            recent_tools = _coerce_item_list(getattr(mental_model, "_tool_history", []))[-5:]
             tool_summary = "\n".join(
                 f"- {t.tool_name}({'✓' if t.success else '✗'}) {t.args_summary}"
                 for t in recent_tools
             ) or "尚无工具调用"
-            current_tokens = _coerce_nonnegative_int(self._estimate_tokens(messages))
+            current_tokens = _coerce_nonnegative_int(self._estimate_tokens(_coerce_item_list(messages)))
             limit = _coerce_nonnegative_int(effective_max_token_limit)
             token_ratio = current_tokens / limit if limit > 0 else 0.0
             return mental_model.sense_state(
-                think_content=str(raw_content or ""),
+                think_content=_coerce_text(raw_content),
                 tool_summary=tool_summary,
                 token_ratio=token_ratio,
                 iteration=iteration_index,
@@ -154,26 +223,32 @@ class ResponseSurfaceController:
         record_inference_activity: Callable[[str], None],
         mental_model_enabled: bool | None = None,
     ) -> Dict[str, str]:
-        raw_content_clean = str(getattr(processed, "raw_content_clean", "") or "")
+        raw_content_clean = _coerce_text(
+            getattr(processed, "raw_content_clean", None)
+            or getattr(processed, "rawContentClean", None)
+        )
         record_language_drift(raw_content_clean)
         record_inference_activity(raw_content_clean)
 
         if not _resolve_mental_model_enabled(mental_model_enabled):
             return {}
 
-        raw_state = getattr(processed, "state_info", None)
-        state_info = raw_state if isinstance(raw_state, dict) else {}
-        if state_info.get("mood"):
+        state_info = _as_mapping(
+            getattr(processed, "state_info", None) or getattr(processed, "stateInfo", None)
+        )
+        mood = _coerce_text(_mapping_get(state_info, "mood"))
+        if mood:
             ui = self._ui_getter()
+            feeling = _coerce_text(_mapping_get(state_info, "feeling"))
+            whisper = _coerce_text(_mapping_get(state_info, "whisper"))
             ui.set_pet_mental_state(
-                mood=state_info.get("mood", ""),
-                feeling=state_info.get("feeling", ""),
-                whisper=state_info.get("whisper", ""),
+                mood=mood,
+                feeling=feeling,
+                whisper=whisper,
             )
-            mood = state_info["mood"]
             if mood not in ("专注", "自信"):
                 self._debug_logger.info(
-                    f"[感知] {mood} | {state_info.get('feeling', '')} | {state_info.get('whisper', '')}",
+                    f"[感知] {mood} | {feeling} | {whisper}",
                     tag="STATE",
                 )
         return state_info
@@ -230,7 +305,7 @@ class ResponseSurfaceController:
         estimated = False
         observed_usage = bool(usage or usage_observation)
         if not input_tokens and messages is not None:
-            input_tokens = _coerce_nonnegative_int(self._estimate_tokens(messages))
+            input_tokens = _coerce_nonnegative_int(self._estimate_tokens(_coerce_item_list(messages)))
             estimated = input_tokens > 0
         if not output_tokens and raw_content and estimate_output_tokens is not None:
             output_tokens = _coerce_nonnegative_int(estimate_output_tokens(raw_content))
@@ -274,28 +349,31 @@ class ResponseSurfaceController:
 
     @staticmethod
     def _extract_usage_payload(response: Any) -> Dict[str, Any]:
-        for attr in ("usage_metadata", "usage"):
-            usage = getattr(response, attr, None)
-            if isinstance(usage, dict) and usage:
+        for attr in ("usage_metadata", "usage", "usageMetadata"):
+            usage = _as_mapping(getattr(response, attr, None))
+            if usage:
                 return usage
 
-        response_metadata = getattr(response, "response_metadata", None)
-        if isinstance(response_metadata, dict):
-            for key in ("token_usage", "usage", "usage_metadata"):
-                usage = response_metadata.get(key)
-                if isinstance(usage, dict) and usage:
-                    return usage
+        response_metadata = _as_mapping(
+            getattr(response, "response_metadata", None)
+            or getattr(response, "responseMetadata", None)
+        )
+        for key in ("token_usage", "tokenUsage", "usage", "usage_metadata", "usageMetadata"):
+            usage = _as_mapping(response_metadata.get(key))
+            if usage:
+                return usage
 
         return {}
 
     @staticmethod
     def _extract_usage_observation(response: Any) -> Dict[str, Any]:
-        response_metadata = getattr(response, "response_metadata", None)
-        if isinstance(response_metadata, dict):
-            usage_observation = response_metadata.get("usage_observation")
-            if isinstance(usage_observation, dict) and usage_observation:
-                return usage_observation
-        return {}
+        response_metadata = _as_mapping(
+            getattr(response, "response_metadata", None)
+            or getattr(response, "responseMetadata", None)
+        )
+        return _as_mapping(
+            _mapping_get(response_metadata, "usage_observation", "usageObservation")
+        )
 
     @staticmethod
     def _extract_usage_tokens(usage: Dict[str, Any] | Any) -> tuple[int, int]:
@@ -304,15 +382,23 @@ class ResponseSurfaceController:
 
     @staticmethod
     def _read_int_from_mapping(data: Dict[str, Any] | Any, *keys: str) -> int:
-        if not isinstance(data, dict):
+        mapping = _as_mapping(data)
+        if not mapping:
             return 0
         for key in keys:
-            value = data.get(key)
-            if value not in (None, ""):
-                try:
-                    return max(0, int(value))
-                except (TypeError, ValueError):
-                    continue
+            if key not in mapping:
+                continue
+            value = mapping.get(key)
+            if value in (None, ""):
+                continue
+            if isinstance(value, bool):
+                continue
+            if isinstance(value, (bytes, bytearray, memoryview)):
+                value = bytes(value).decode("utf-8", errors="replace")
+            try:
+                return max(0, int(value))
+            except (TypeError, ValueError):
+                continue
         return 0
 
     @classmethod
@@ -331,8 +417,10 @@ class ResponseSurfaceController:
         tool_call_count: int,
     ) -> Dict[str, Any]:
         count = _coerce_nonnegative_int(tool_call_count)
-        visible_text = str(getattr(processed, "visible_text", "") or "")
-        if not str(raw_content or "").strip():
+        visible_text = _coerce_text(
+            getattr(processed, "visible_text", None) or getattr(processed, "visibleText", None)
+        )
+        if not _coerce_text(raw_content).strip():
             return {
                 "last_visible_response_text": "",
                 "last_response_tool_calls": count,
