@@ -484,3 +484,65 @@ def test_handle_tool_result_decodes_bytes_call_id_alias():
     )
     assert isinstance(messages[0], ToolMessage)
     assert messages[0].tool_call_id == "call-bytes"
+
+
+def test_execute_tools_unwraps_envelopes_and_parses_json_function():
+    observed: dict[str, Any] = {}
+    calls: list[str] = []
+
+    def fake_execute(tool_name, tool_args, *, tool_call_id=""):
+        observed.update(name=tool_name, args=tool_args, call_id=tool_call_id)
+        calls.append(tool_name)
+        return ("ok", None)
+
+    bridge = ToolLifecycleBridge(tool_executor_execute=fake_execute)
+    result, action = bridge.execute_tool(
+        {
+            "id": "call-fn",
+            "function": '{"name": "read_file_tool", "arguments": {"path": "a.py"}}',
+        },
+        [],
+    )
+    assert result == "ok"
+    assert action is None
+    assert observed == {
+        "name": "read_file_tool",
+        "args": {"path": "a.py"},
+        "call_id": "call-fn",
+    }
+
+    messages: list[Any] = []
+    envelope_action = bridge.execute_tools(
+        {"toolCalls": [{"name": "grep_search_tool", "args": {}, "id": "call-env"}]},
+        messages,
+    )
+    assert envelope_action is None
+    assert calls[-1] == "grep_search_tool"
+    assert messages[-1].tool_call_id == "call-env"
+
+
+def test_max_parallel_readonly_true_uses_default_cap_not_one(monkeypatch):
+    seen_workers: list[int] = []
+    from concurrent.futures import ThreadPoolExecutor as RealPool
+    import core.orchestration.tool_lifecycle as lifecycle
+
+    def capturing_pool(*args, **kwargs):
+        seen_workers.append(int(kwargs.get("max_workers") or (args[0] if args else 0)))
+        return RealPool(*args, **kwargs)
+
+    monkeypatch.setattr(lifecycle, "ThreadPoolExecutor", capturing_pool)
+    bridge = ToolLifecycleBridge(tool_executor_execute=lambda *_args, **_kwargs: ("ok", None))
+    messages: list[Any] = []
+    action = bridge.execute_tools(
+        [
+            {"name": "read_file_tool", "args": {}, "id": "call-a"},
+            {"name": "grep_search_tool", "args": {}, "id": "call-b"},
+            {"name": "list_files_tool", "args": {}, "id": "call-c"},
+        ],
+        messages,
+        max_parallel_readonly=True,
+    )
+
+    assert action is None
+    assert seen_workers == [3]
+    assert [message.tool_call_id for message in messages] == ["call-a", "call-b", "call-c"]
