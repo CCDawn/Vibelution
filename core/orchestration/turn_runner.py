@@ -31,6 +31,19 @@ def _coerce_text(value: Any) -> str:
     return str(value)
 
 
+def _maybe_json(value: Any) -> Any:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith("{") or text.startswith("["):
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                return value
+    return value
+
+
 def _coerce_bool(value: Any, default: bool) -> bool:
     if isinstance(value, bool):
         return value
@@ -38,7 +51,7 @@ def _coerce_bool(value: Any, default: bool) -> bool:
         return default
     if isinstance(value, (bytes, bytearray, memoryview)):
         value = bytes(value).decode("utf-8", errors="replace")
-    if isinstance(value, (int, float)):
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
         return bool(value)
     text = str(value).strip().lower()
     if not text:
@@ -51,23 +64,30 @@ def _coerce_bool(value: Any, default: bool) -> bool:
 
 
 def _as_mapping(value: Any) -> dict[str, Any]:
-    if isinstance(value, (bytes, bytearray, memoryview)):
-        value = bytes(value).decode("utf-8", errors="replace")
-    if isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return {}
-        try:
-            value = json.loads(text)
-        except json.JSONDecodeError:
-            return {}
+    value = _maybe_json(value)
     if isinstance(value, Mapping):
         return dict(value)
     return {}
 
 
 def _coerce_item_list(value: Any) -> list:
-    if value is None or isinstance(value, (str, bytes, bytearray, memoryview, Mapping)):
+    value = _maybe_json(value)
+    if value is None or isinstance(value, (str, bytes, bytearray, memoryview)):
+        return []
+    if isinstance(value, Mapping):
+        nested = value.get("messages")
+        if nested is None:
+            nested = value.get("items")
+        if nested is None:
+            nested = value.get("history")
+        if nested is None:
+            nested = value.get("chat_history")
+        if nested is None:
+            nested = value.get("chatHistory")
+        if nested is not None:
+            return _coerce_item_list(nested)
+        if any(key in value for key in ("kind", "role", "content", "type", "tool_calls", "toolCalls")):
+            return [dict(value)]
         return []
     try:
         return list(value)

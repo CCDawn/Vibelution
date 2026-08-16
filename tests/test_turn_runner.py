@@ -727,3 +727,58 @@ def test_turn_runner_coerces_bytes_false_flags_and_mapping_request():
     assert mapped.result["status"] == "completed"
     assert captured["initial_prompt"] == "probe"
     assert captured["disable_tools"] is False
+
+
+def test_prepare_agent_turn_parses_json_chat_history_without_splitting_strings():
+    captured: dict[str, object] = {}
+
+    class FakeAgent:
+        def seed_chat_history(self, messages):
+            captured["history"] = messages
+
+        def record_turn_preparation_diagnostic(self, fields):
+            captured["diagnostic"] = fields
+
+    prepare_agent_turn(
+        FakeAgent(),
+        chat_history=b'[{"role": "user", "content": "hi"}]',
+    )
+    assert captured["history"] == [{"role": "user", "content": "hi"}]
+    assert captured["diagnostic"]["historyMessageCount"] == 1
+    assert captured["diagnostic"]["path"] == "history"
+
+    captured.clear()
+    prepare_agent_turn(
+        FakeAgent(),
+        chat_history='{"messages": [{"role": "assistant", "content": "ok"}]}',
+    )
+    assert captured["history"] == [{"role": "assistant", "content": "ok"}]
+    assert captured["diagnostic"]["historyMessageCount"] == 1
+
+    captured.clear()
+    prepare_agent_turn(FakeAgent(), chat_history="not-a-history")
+    assert "history" not in captured
+    assert captured["diagnostic"]["historyMessageCount"] == 0
+
+
+def test_run_existing_agent_single_turn_parses_json_attachments():
+    captured: dict[str, object] = {}
+
+    class FakeAgent:
+        def run_single_turn(self, initial_prompt=None, disable_tools=False, attachments=None):
+            captured["initial_prompt"] = initial_prompt
+            captured["disable_tools"] = disable_tools
+            captured["attachments"] = attachments
+            return {"status": "completed"}
+
+        def export_turn_carryover(self):
+            return {}
+
+    result = run_existing_agent_single_turn(
+        FakeAgent(),
+        initial_prompt="summarize",
+        attachments=b'[{"name": "note.md"}]',
+    )
+    assert result == {"status": "completed"}
+    assert captured["attachments"] == [{"name": "note.md"}]
+    assert captured["disable_tools"] is False
