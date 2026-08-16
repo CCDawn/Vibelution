@@ -265,25 +265,75 @@ def norm_path_key(path: str | Path) -> str:
     return str(Path(path).resolve(strict=False)).replace("\\", "/").casefold()
 
 
+def resolve_registry(root: Path, main_worktree: Path) -> Path:
+    result = run_git(root, "rev-parse", "--git-common-dir", check=True)
+    common_dir = result.stdout.strip()
+    if not common_dir:
+        raise RuntimeError("git rev-parse --git-common-dir returned an empty path.")
+    common_dir_path = Path(common_dir)
+    if not common_dir_path.is_absolute():
+        common_dir_path = (root / common_dir_path).resolve()
+    briefbound_registry = common_dir_path / "briefbound" / "coordination" / "registry.json"
+    if briefbound_registry.exists():
+        return briefbound_registry
+    ccdawn_registry = common_dir_path / "ccdawn" / "coordination" / "registry.json"
+    if ccdawn_registry.exists():
+        return ccdawn_registry
+    return resolve_project_memory_home(main_worktree) / "agent-registry.json"
+
+
+def claim_ref_from_claim(
+    claim_id: str,
+    raw: dict[str, Any],
+    agents_by_id: dict[str, dict[str, Any]],
+) -> ClaimRef:
+    agent = agents_by_id.get(str(raw.get("agentId") or raw.get("agent") or "").strip()) or {}
+    changed_files = raw.get("changedFiles") or raw.get("changed_files") or raw.get("scopes") or []
+    if not isinstance(changed_files, list):
+        changed_files = []
+    return ClaimRef(
+        claim_id=claim_id,
+        status=str(raw.get("status") or ""),
+        branch=str(raw.get("branch") or agent.get("branch") or ""),
+        worktree=str(
+            raw.get("worktree")
+            or raw.get("worktreePath")
+            or agent.get("worktree")
+            or agent.get("worktreePath")
+            or ""
+        ),
+        changed_files=[str(item) for item in changed_files],
+    )
+
+
 def load_registry(registry_path: Path) -> tuple[dict[str, ClaimRef], list[str]]:
     if not registry_path.exists():
         return {}, []
     data = json.loads(registry_path.read_text(encoding="utf-8"))
-    raw_claims = data.get("workClaims") or data.get("claims") or {}
+    agents_by_id: dict[str, dict[str, Any]] = {}
+    raw_agents = data.get("agents")
+    if isinstance(raw_agents, list):
+        for raw in raw_agents:
+            if not isinstance(raw, dict):
+                continue
+            agent_id = str(raw.get("id") or raw.get("agentId") or "").strip()
+            if agent_id:
+                agents_by_id[agent_id] = raw
     claims: dict[str, ClaimRef] = {}
-    for claim_id, raw in raw_claims.items():
-        if not isinstance(raw, dict):
-            continue
-        changed_files = raw.get("changedFiles") or raw.get("changed_files") or []
-        if not isinstance(changed_files, list):
-            changed_files = []
-        claims[claim_id] = ClaimRef(
-            claim_id=claim_id,
-            status=str(raw.get("status") or ""),
-            branch=str(raw.get("branch") or ""),
-            worktree=str(raw.get("worktree") or raw.get("worktreePath") or ""),
-            changed_files=[str(item) for item in changed_files],
-        )
+    raw_claims = data.get("workClaims") or data.get("claims")
+    if isinstance(raw_claims, dict):
+        for claim_id, raw in raw_claims.items():
+            if not isinstance(raw, dict):
+                continue
+            claims[claim_id] = claim_ref_from_claim(claim_id, raw, agents_by_id)
+    elif isinstance(raw_claims, list):
+        for raw in raw_claims:
+            if not isinstance(raw, dict):
+                continue
+            claim_id = str(raw.get("id") or raw.get("claimId") or "").strip()
+            if not claim_id:
+                continue
+            claims[claim_id] = claim_ref_from_claim(claim_id, raw, agents_by_id)
     queue = data.get("mergeQueue") or data.get("merge_queue") or []
     queue_ids: list[str] = []
     if isinstance(queue, list):
@@ -762,7 +812,7 @@ def build_report(
         ),
         root,
     ).resolve()
-    registry_path = registry_path or resolve_project_memory_home(main_worktree) / "agent-registry.json"
+    registry_path = registry_path or resolve_registry(root, main_worktree)
     claims, queue_claim_ids = load_registry(registry_path)
     claims_by_worktree, claims_by_branch = claim_maps(claims)
     items: list[WorktreeAuditItem] = []
