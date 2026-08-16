@@ -31,6 +31,8 @@ import chatWorkbenchPresentationSource from "./chat/useChatWorkbenchPresentation
 import conversationIndexRailSource from "./chat/ChatConversationIndexRail.tsx?raw";
 import sessionBulkOperationsPanelSource from "./chat/SessionBulkOperationsPanel.tsx?raw";
 import chatSessionBulkModelSource from "./chat/chatSessionBulkModel.ts?raw";
+import chatSessionBulkSelectionSource from "./chat/useChatSessionBulkSelection.ts?raw";
+import chatWorkbenchConfirmDialogSource from "./chat/useChatWorkbenchConfirmDialog.ts?raw";
 import agentDirectoryActionsSource from "./chat/useChatAgentDirectoryActions.ts?raw";
 import chatStatusRailSource from "./chat/ChatStatusRail.tsx?raw";
 import cliAgentRunModelSource from "./chat/cliAgentRunModel.ts?raw";
@@ -3396,8 +3398,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndActionsSource).not.toContain("window.confirm(groupConfirmMessage)");
     expect(chatCodingRouteWorkbenchSource).toContain("ChatDangerConfirmDialog");
     expect(chatCodingRouteWorkbenchSource).toContain("confirmPendingWorkbenchAction");
-    expect(chatCodingRouteWorkbenchSource).toContain("deleteSessionConfirm");
-    expect(chatCodingRouteWorkbenchSource).toContain("clearSessionHistoryConfirm");
+    expect(chatCodingRouteWorkbenchSource).toContain("useChatWorkbenchConfirmDialog");
+    expect(chatWorkbenchConfirmDialogSource).toContain("deleteSessionConfirm");
+    expect(chatWorkbenchConfirmDialogSource).toContain("clearSessionHistoryConfirm");
     expect(routeAndActionsSource).toContain("[session.id]: t(\"deleteSessionBusy\")");
     expect(routeAndActionsSource).toContain("alreadyDeletingThisSession");
     expect(routeAndActionsSource).toContain("deleteSessionMutation.variables?.sessionId === session.id");
@@ -3405,18 +3408,19 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain('deleteBusyLabel={t("deleteSessionBusy")}');
     expect(directSessionIndexListSource).toContain("deleteBusyLabel");
     expect(directSessionIndexItemSource).toContain("const deleteBusyReason = sessionBusy ? deleteBusyLabel : \"\"");
-    expect(chatCodingRouteWorkbenchSource.indexOf("confirmPendingWorkbenchAction")).toBeLessThan(
-      chatCodingRouteWorkbenchSource.indexOf("deleteSessionMutation.mutate({ sessionId"),
+    expect(chatWorkbenchConfirmDialogSource.indexOf("confirmPendingWorkbenchAction")).toBeLessThan(
+      chatWorkbenchConfirmDialogSource.indexOf("deleteSessionMutation.mutate({ sessionId"),
     );
   });
 
   it("supports bulk session selection and remove in the conversation index rail", () => {
     expect(chatCodingRouteWorkbenchSource).toContain("selectedBulkSessionIds");
     expect(chatCodingRouteWorkbenchSource).toContain("SessionBulkOperationsPanel");
-    expect(chatCodingRouteWorkbenchSource).toContain("bulkDeleteSessionsMutation");
+    expect(chatCodingRouteWorkbenchSource).toContain("useChatSessionBulkSelection");
     expect(chatCodingRouteWorkbenchSource).toContain("bulkRemoveSessions");
-    expect(chatCodingRouteWorkbenchSource).toContain('t("bulkRemoveSessionsConfirm")');
-    expect(chatCodingRouteWorkbenchSource).toContain('t("bulkSelectVisibleSessions")');
+    expect(chatSessionBulkSelectionSource).toContain("bulkDeleteSessionsMutation");
+    expect(chatSessionBulkSelectionSource).toContain('t("bulkRemoveSessionsConfirm")');
+    expect(chatSessionBulkSelectionSource).toContain('t("bulkSelectVisibleSessions")');
     expect(sessionBulkOperationsPanelSource).toContain("VConfirmDialog");
     expect(sessionBulkOperationsPanelSource).toContain("AgentBulkActionBar");
     expect(sessionBulkOperationsPanelSource).toContain("if (!hasSelection)");
@@ -3455,8 +3459,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(clearMutationSource).toContain("afterSessionDeleted");
     expect(clearMutationSource).toContain("chatWorkspaceCache.afterChatWorkspaceReset()");
     expect(routeAndActionsSource).toContain("openClearSessionHistoryConfirm(session)");
-    expect(chatCodingRouteWorkbenchSource).toContain("clearSessionHistoryMutation.mutate({ sessionId: session.id, agentId })");
-    expect(chatCodingRouteWorkbenchSource).toContain('const agentId = String(session.agentId || "").trim()');
+    expect(chatWorkbenchConfirmDialogSource).toContain("clearSessionHistoryMutation.mutate({ sessionId: session.id, agentId })");
+    expect(chatWorkbenchConfirmDialogSource).toContain('const agentId = String(session.agentId || "").trim()');
     expect(routeSource).toContain("contextMenuSession?.agentId");
     expect(routeSource).toContain("isAgentRootSession(contextMenuSession)");
   });
