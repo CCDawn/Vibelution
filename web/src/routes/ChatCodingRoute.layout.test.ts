@@ -33,6 +33,9 @@ import sessionBulkOperationsPanelSource from "./chat/SessionBulkOperationsPanel.
 import chatSessionBulkModelSource from "./chat/chatSessionBulkModel.ts?raw";
 import chatSessionBulkSelectionSource from "./chat/useChatSessionBulkSelection.ts?raw";
 import chatWorkbenchConfirmDialogSource from "./chat/useChatWorkbenchConfirmDialog.ts?raw";
+import chatVisibleSessionCatalogSource from "./chat/useChatVisibleSessionCatalog.ts?raw";
+import chatAgentSessionTabsSource from "./chat/useChatAgentSessionTabs.ts?raw";
+import chatSessionIndexRailModelSource from "./chat/useChatSessionIndexRailModel.ts?raw";
 import agentDirectoryActionsSource from "./chat/useChatAgentDirectoryActions.ts?raw";
 import chatStatusRailSource from "./chat/ChatStatusRail.tsx?raw";
 import cliAgentRunModelSource from "./chat/cliAgentRunModel.ts?raw";
@@ -75,6 +78,9 @@ const routeSource = [
   chatGroupRoomActionModelSource,
   chatWorkbenchContextMenusSource,
   chatConversationIndexChromeSource,
+  chatVisibleSessionCatalogSource,
+  chatAgentSessionTabsSource,
+  chatSessionIndexRailModelSource,
 ].join("\n");
 
 /** Wave 8C/8D: layout contracts resolve class strings across route shell + panel/component maps. */
@@ -2804,7 +2810,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(conversationIndexModelSource).toContain("export function hasInvalidChildSessionLink");
     expect(conversationIndexModelSource).toContain("export function mergeVisibleSessionsIntoConversations");
     expect(routeSource).toContain("queryKeys.sessionChildSessions(activeRootSessionId || \"none\")");
-    expect(routeSource).toContain("fetchJson<SessionSummary[]>(`/api/sessions/${activeRootSessionId}/child-sessions`)");
+    expect(routeSource).toContain("listSessionChildSessions(activeRootSessionId)");
     expect(routeSource).toContain("const activeRootSessionId = rootSessionIdFor(sessionDetailQuery.data ?? directSessionActiveSummary)");
     expect(routeSource).toContain("queryKeys.sessionChildSessions(detailRootSessionId)");
     expect(routeSource).toContain("const merged = [...(sessionsQuery.data ?? []), ...(childSessionsQuery.data ?? [])]");
@@ -3417,6 +3423,12 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatCodingRouteWorkbenchSource).toContain("selectedBulkSessionIds");
     expect(chatCodingRouteWorkbenchSource).toContain("SessionBulkOperationsPanel");
     expect(chatCodingRouteWorkbenchSource).toContain("useChatSessionBulkSelection");
+    expect(chatCodingRouteWorkbenchSource).toContain("useChatVisibleSessionCatalog");
+    expect(chatCodingRouteWorkbenchSource).toContain("useChatAgentSessionTabs");
+    expect(chatCodingRouteWorkbenchSource).toContain("useChatSessionIndexRailModel");
+    expect(chatVisibleSessionCatalogSource).toContain("isVisibleDirectSession");
+    expect(chatAgentSessionTabsSource).toContain("buildAgentSessionTabs");
+    expect(chatSessionIndexRailModelSource).toContain("加载更多会话");
     expect(chatCodingRouteWorkbenchSource).toContain("bulkRemoveSessions");
     expect(chatSessionBulkSelectionSource).toContain("bulkDeleteSessionsMutation");
     expect(chatSessionBulkSelectionSource).toContain('t("bulkRemoveSessionsConfirm")');
