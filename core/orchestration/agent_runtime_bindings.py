@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import re
+from collections.abc import Mapping
 from typing import Any, Dict, List, Optional, Tuple
 
 from langchain_core.messages import AIMessage
@@ -54,6 +55,69 @@ _ASSISTANT_GOAL_CONTEXT_KEYWORDS = (
 )
 
 
+def _coerce_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+def _as_mapping(value: Any) -> Dict[str, Any]:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return {}
+        try:
+            value = json.loads(text)
+        except json.JSONDecodeError:
+            return {}
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {}
+
+
+def _mapping_get(mapping: Mapping[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in mapping:
+            return mapping.get(key)
+    return None
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    if isinstance(value, bool) or value is None:
+        return default
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _coerce_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if not text:
+        return default
+    if text in {"1", "true", "yes", "on", "enabled"}:
+        return True
+    if text in {"0", "false", "no", "off", "disabled"}:
+        return False
+    return default
+
+
 def _normalize_goal_from_chat_history(
     user_prompt: str,
     goal_override: Optional[str],
@@ -61,10 +125,10 @@ def _normalize_goal_from_chat_history(
 ) -> str:
     """Keep the requirement context when the user only sends numbered confirmations."""
 
-    override = str(goal_override or "").strip()
+    override = _coerce_text(goal_override).strip()
     if override:
         return override
-    prompt = str(user_prompt or "").strip()
+    prompt = _coerce_text(user_prompt).strip()
     if not _looks_like_numbered_confirmation(prompt):
         return prompt
     context = _latest_assistant_goal_context(active_turn_messages)
@@ -74,7 +138,7 @@ def _normalize_goal_from_chat_history(
 
 
 def _looks_like_numbered_confirmation(text: str) -> bool:
-    prompt = str(text or "").strip()
+    prompt = _coerce_text(text).strip()
     if not prompt or len(prompt) > 280:
         return False
     parts = [part.strip() for part in _NUMBERED_CONFIRMATION_RE.findall(prompt) if part.strip()]
@@ -87,7 +151,14 @@ def _looks_like_numbered_confirmation(text: str) -> bool:
 
 
 def _latest_assistant_goal_context(messages: Optional[List[Any]]) -> str:
-    for message in reversed(list(messages or [])):
+    if isinstance(messages, (str, bytes, bytearray, memoryview)) or messages is None:
+        iterable: List[Any] = []
+    else:
+        try:
+            iterable = list(messages)
+        except TypeError:
+            iterable = []
+    for message in reversed(iterable):
         role = _message_role(message)
         if role not in {"assistant", "ai"}:
             continue
@@ -102,8 +173,8 @@ def _message_role(message: Any) -> str:
     if isinstance(message, AIMessage):
         return "assistant"
     if isinstance(message, dict):
-        return str(message.get("role") or message.get("kind") or "").strip().lower()
-    return str(getattr(message, "type", "") or "").strip().lower()
+        return _coerce_text(message.get("role") or message.get("kind")).strip().lower()
+    return _coerce_text(getattr(message, "type", "")).strip().lower()
 
 
 def _message_content(message: Any) -> str:
@@ -332,21 +403,21 @@ def _stall_signal_threshold_events(telemetry, reported) -> list:
       下次再跨越阈值会再次报告。
     """
     events = []
-    telemetry = dict(telemetry or {})
-    reported = dict(reported or {})
+    telemetry = _as_mapping(telemetry)
+    reported = _as_mapping(reported)
     for key, threshold in _STALL_SIGNAL_THRESHOLDS.items():
-        value = int(telemetry.get(key) or 0)
-        if value >= threshold and not bool(reported.get(key)):
+        value = _safe_int(telemetry.get(key), 0)
+        if value >= threshold and not _coerce_bool(reported.get(key), False):
             events.append(key)
     return events
 
 
 def _reset_stall_signal_reported(telemetry, reported) -> dict:
     """清除已归零信号的已报告标记（与 _stall_signal_threshold_events 配合）。"""
-    telemetry = dict(telemetry or {})
-    reported = dict(reported or {})
+    telemetry = _as_mapping(telemetry)
+    reported = dict(_as_mapping(reported))
     for key in list(reported):
-        if int(telemetry.get(key) or 0) == 0:
+        if _safe_int(telemetry.get(key), 0) == 0:
             reported.pop(key, None)
     return reported
 
@@ -502,7 +573,7 @@ def _record_agent_tool_surface_event(tool_names: List[str], *, recorder: Any = N
 
 
 def _context_compression_trigger_source(reason: str) -> str:
-    normalized = str(reason or "").strip().lower()
+    normalized = _coerce_text(reason).strip().lower()
     if not normalized:
         return "auto"
     if normalized.startswith("level:"):
@@ -513,23 +584,36 @@ def _context_compression_trigger_source(reason: str) -> str:
 
 
 def _coerce_nonnegative_int(value: Any) -> int:
-    try:
-        return max(0, int(value or 0))
-    except (TypeError, ValueError):
-        return 0
+    return max(0, _safe_int(value, 0))
 
 
 def _format_tool_result_replacement_summary(state: Dict[str, Any]) -> str:
-    replacements = [item for item in list((state or {}).get("replacements") or []) if isinstance(item, dict)]
+    payload = _as_mapping(state)
+    raw_replacements = payload.get("replacements")
+    if isinstance(raw_replacements, (bytes, bytearray, memoryview)):
+        raw_replacements = bytes(raw_replacements).decode("utf-8", errors="replace")
+    if isinstance(raw_replacements, str):
+        try:
+            raw_replacements = json.loads(raw_replacements)
+        except json.JSONDecodeError:
+            raw_replacements = []
+    if isinstance(raw_replacements, Mapping):
+        raw_items = [item for item in raw_replacements.values() if isinstance(item, Mapping)]
+    else:
+        try:
+            raw_items = list(raw_replacements or [])
+        except TypeError:
+            raw_items = []
+    replacements = [item for item in raw_items if isinstance(item, Mapping)]
     if not replacements:
         return ""
     lines = ["工具结果压缩引用:"]
     for item in replacements[:8]:
-        reference = str(item.get("reference") or "").strip()
-        tool_call_id = str(item.get("toolCallId") or "").strip()
-        tool_name = str(item.get("toolName") or "").strip() or "unknown"
-        original_chars = _coerce_nonnegative_int(item.get("originalChars"))
-        digest = str(item.get("sha256") or "").strip()[:16]
+        reference = _coerce_text(item.get("reference")).strip()
+        tool_call_id = _coerce_text(item.get("toolCallId") or item.get("tool_call_id")).strip()
+        tool_name = _coerce_text(item.get("toolName") or item.get("tool_name")).strip() or "unknown"
+        original_chars = _coerce_nonnegative_int(item.get("originalChars", item.get("original_chars")))
+        digest = _coerce_text(item.get("sha256")).strip()[:16]
         lines.append(
             f"- {tool_name} tool_call_id={tool_call_id} reference={reference} chars={original_chars} sha256={digest}"
         )
@@ -554,12 +638,23 @@ def _runtime_agent_binding_from_env(
         "supervisedRole": "VIBELUTION_SUPERVISED_ROLE",
     }
     if explicit_binding is not None:
-        runtime = {
-            target_key: value
-            for target_key in key_map
-            if (value := str(explicit_binding.get(target_key) or "").strip())
+        explicit = _as_mapping(explicit_binding)
+        aliases = {
+            "agentId": ("agentId", "agent_id"),
+            "profileId": ("profileId", "profile_id"),
+            "llmSlot": ("llmSlot", "llm_slot"),
+            "directSessionId": ("directSessionId", "direct_session_id"),
+            "workspacePath": ("workspacePath", "workspace_path"),
+            "supervisedRole": ("supervisedRole", "supervised_role"),
         }
-        llm_bindings = normalize_agent_llm_bindings(explicit_binding.get("llmBindings"))
+        runtime = {}
+        for target_key, names in aliases.items():
+            value = _coerce_text(_mapping_get(explicit, *names)).strip()
+            if value:
+                runtime[target_key] = value
+        llm_bindings = normalize_agent_llm_bindings(
+            _mapping_get(explicit, "llmBindings", "llm_bindings")
+        )
         if llm_bindings:
             runtime["llmBindings"] = llm_bindings
         return runtime
@@ -617,14 +712,27 @@ def _turn_runtime_from_env() -> Dict[str, str]:
 
 
 def _safe_turn_runtime_metadata(runtime: Dict[str, str]) -> Dict[str, Any]:
-    if not runtime:
+    values = _as_mapping(runtime)
+    if not values:
         return {}
-    metadata: Dict[str, Any] = {
-        key: value
-        for key in ("mode", "runKind", "runId", "sessionId", "agentId", "llmSlot", "modelId", "cacheScope")
-        if (value := str(runtime.get(key) or "").strip())
+    aliases = {
+        "mode": ("mode",),
+        "runKind": ("runKind", "run_kind"),
+        "runId": ("runId", "run_id"),
+        "sessionId": ("sessionId", "session_id"),
+        "agentId": ("agentId", "agent_id"),
+        "llmSlot": ("llmSlot", "llm_slot"),
+        "modelId": ("modelId", "model_id"),
+        "cacheScope": ("cacheScope", "cache_scope"),
     }
-    partition = str(runtime.get("promptCachePartition") or "").strip()
+    metadata: Dict[str, Any] = {}
+    for key, names in aliases.items():
+        value = _coerce_text(_mapping_get(values, *names)).strip()
+        if value:
+            metadata[key] = value
+    partition = _coerce_text(
+        _mapping_get(values, "promptCachePartition", "prompt_cache_partition")
+    ).strip()
     if partition:
         metadata["promptCachePartitionHash"] = hashlib.sha256(partition.encode("utf-8", errors="ignore")).hexdigest()[:12]
         metadata["promptCachePartitionChars"] = len(partition)

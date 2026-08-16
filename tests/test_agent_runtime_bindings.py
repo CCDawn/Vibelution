@@ -15,11 +15,13 @@ from core.orchestration.agent_runtime_bindings import (
     _format_tool_result_replacement_summary,
     _looks_like_numbered_confirmation,
     _normalize_goal_from_chat_history,
+    _reset_stall_signal_reported,
     _runtime_agent_binding_from_env,
     _runtime_agent_llm_bindings_from_env,
     _runtime_mental_model_override_from_env,
     _safe_llm_error_diagnostic_details,
     _safe_turn_runtime_metadata,
+    _stall_signal_threshold_events,
 )
 
 
@@ -141,3 +143,51 @@ def test_numbered_confirmation_requires_short_answers_and_keywords():
     assert goal.startswith("需求：实现入口")
     assert "用户确认" in goal
     assert _normalize_goal_from_chat_history("直接提问", "override-goal", []) == "override-goal"
+
+
+def test_runtime_bindings_coerce_bytes_json_and_invalid_ints():
+    metadata = _safe_turn_runtime_metadata(
+        {
+            "session_id": b"s1",
+            "run_id": b"t1",
+            "prompt_cache_partition": b"secret-partition-value",
+        }
+    )
+    assert metadata["sessionId"] == "s1"
+    assert metadata["runId"] == "t1"
+    assert metadata["promptCachePartitionChars"] == len("secret-partition-value")
+    assert "b's1'" not in json.dumps(metadata)
+    assert _safe_turn_runtime_metadata(["not-a-map"]) == {}
+    assert _safe_turn_runtime_metadata('{"sessionId": "s2", "runId": "t2"}')["sessionId"] == "s2"
+
+    binding = _runtime_agent_binding_from_env({"agent_id": b"agent-bytes", "llm_slot": "dialogue"})
+    assert binding["agentId"] == "agent-bytes"
+    assert binding["llmSlot"] == "dialogue"
+    assert _runtime_agent_binding_from_env(["not-a-map"]) == {}
+    json_binding = _runtime_agent_binding_from_env('{"agentId": "agent-json"}')
+    assert json_binding["agentId"] == "agent-json"
+
+    assert _stall_signal_threshold_events(["bad"], None) == []
+    assert _stall_signal_threshold_events({"no_new_evidence_steps": "bad"}, {}) == []
+    assert "no_new_evidence_steps" in _stall_signal_threshold_events(
+        {"no_new_evidence_steps": "3"},
+        {"no_new_evidence_steps": "false"},
+    )
+    assert _reset_stall_signal_reported(["bad"], {"no_new_evidence_steps": True}) == {}
+    assert _reset_stall_signal_reported({"no_new_evidence_steps": "3"}, {"no_new_evidence_steps": True}) == {
+        "no_new_evidence_steps": True
+    }
+
+    summary = _format_tool_result_replacement_summary(
+        {
+            "replacements": [
+                {"toolName": b"read_file_tool", "originalChars": b"12", "reference": b"ref-1"},
+            ]
+        }
+    )
+    assert "read_file_tool" in summary
+    assert "chars=12" in summary
+    assert _format_tool_result_replacement_summary(["not-a-map"]) == ""
+    assert _context_compression_trigger_source(b"context limit exceeded") == "provider_limit"
+    assert _looks_like_numbered_confirmation("1,确认,2,可以".encode("utf-8")) is True
+    assert _normalize_goal_from_chat_history("直接提问".encode("utf-8"), b"override-goal", "not-messages") == "override-goal"
