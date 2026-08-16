@@ -3,15 +3,31 @@
 
 from __future__ import annotations
 
+from typing import Any
+
+
+def _coerce_goal_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+    elif not isinstance(value, str):
+        value = str(value)
+    return value.strip().lower()
+
 
 def _contains_restart_marker(text: str, marker: str) -> bool:
+    haystack = _coerce_goal_text(text)
+    needle = _coerce_goal_text(marker)
+    if not haystack or not needle:
+        return False
     start = 0
     while True:
-        index = text.find(marker, start)
+        index = haystack.find(needle, start)
         if index < 0:
             return False
         # "未完成重启" contains "完成重启" but is a status check, not a restart order.
-        if marker == "完成重启" and index > 0 and text[index - 1] == "未":
+        if needle == "完成重启" and index > 0 and haystack[index - 1] == "未":
             start = index + 1
             continue
         return True
@@ -19,7 +35,7 @@ def _contains_restart_marker(text: str, marker: str) -> bool:
 
 def is_restart_focused_goal(goal: str) -> bool:
     """识别显式要求自我重启、且未被否定的目标。"""
-    text = (goal or "").strip().lower()
+    text = _coerce_goal_text(goal)
     if not text:
         return False
     negative_markers = (
@@ -56,7 +72,7 @@ def is_restart_focused_goal(goal: str) -> bool:
 
 def is_full_evolution_goal(goal: str) -> bool:
     """识别需要关账成功后继续触发自我重启的完整进化闭环目标。"""
-    text = (goal or "").strip().lower()
+    text = _coerce_goal_text(goal)
     if not text or not is_restart_focused_goal(text):
         return False
     close_markers = (
