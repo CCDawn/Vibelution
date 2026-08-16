@@ -13,6 +13,7 @@ import {
   VTabs,
   VToolbar,
 } from "../../../components/vui";
+import { ConversationFollowupQueueBar } from "../../../components/conversation/ConversationFollowupQueueBar";
 import { ConversationTranscriptLoadingState } from "../../../components/conversation/ConversationTranscriptLoadingState";
 import { VuiPreviewCard } from "../VuiPreviewCard";
 import { VuiPreviewSection } from "../VuiPreviewSection";
@@ -40,6 +41,23 @@ export function StructureCatalog() {
       </VuiPreviewCard>
       <VuiPreviewCard name="VStateSurface" className="min-h-0">
         <VStateSurface tone="loading" title="加载中" />
+      </VuiPreviewCard>
+      <VuiPreviewCard name="ConversationFollowupQueueBar" className="col-span-full min-h-0">
+        <div className="w-full rounded-[12px] border border-vui-border-subtle bg-vui-surface-panel p-3">
+          <ConversationFollowupQueueBar
+            items={[
+              { id: "queue-1", text: "继续整理 source collection 证据" },
+              { id: "queue-2", text: "补充实验对照组说明" },
+            ]}
+            lang="zh"
+            queueLabel="待发送"
+            editLabel="编辑"
+            withdrawLabel="撤回"
+            onUpdate={() => undefined}
+            onRemove={() => undefined}
+            onMove={() => undefined}
+          />
+        </div>
       </VuiPreviewCard>
       <VuiPreviewCard name="ConversationTranscriptLoadingState" className="col-span-full min-h-0">
         <div className="h-[360px] w-full overflow-hidden rounded-[12px] border border-vui-border-subtle bg-vui-surface-panel">

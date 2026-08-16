@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { DesktopPaths } from "../src/paths.js";
+import { resolveWorkspaceIconPath } from "../src/paths.js";
+import { instanceWindowTitle } from "../src/windows/instanceWindowTitle.js";
 
 const browserWindowOptions: Array<Record<string, unknown>> = [];
 const loadedUrls: string[] = [];
@@ -40,8 +42,8 @@ describe("Electron desktop window icons", () => {
     createLauncherWindow("http://127.0.0.1:8765/launcher", desktopPaths);
 
     expect(browserWindowOptions[0]).toMatchObject({
-      title: "主 控",
-      icon: "C:\\Users\\17533\\Desktop\\Vibelution\\assets\\icons\\vibelution.ico",
+      title: instanceWindowTitle("launcher"),
+      icon: resolveWorkspaceIconPath(desktopPaths),
       backgroundColor: "#f7fafc",
       titleBarStyle: "default",
       skipTaskbar: false,
@@ -55,8 +57,8 @@ describe("Electron desktop window icons", () => {
     createWorkbenchWindow("http://127.0.0.1:8000", desktopPaths);
 
     expect(browserWindowOptions[0]).toMatchObject({
-      title: "主 台",
-      icon: "C:\\Users\\17533\\Desktop\\Vibelution\\assets\\icons\\vibelution.ico",
+      title: instanceWindowTitle("workbench"),
+      icon: resolveWorkspaceIconPath(desktopPaths),
       backgroundColor: "#f7fafc",
       show: false,
       titleBarStyle: "default",
