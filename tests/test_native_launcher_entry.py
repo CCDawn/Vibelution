@@ -18,10 +18,32 @@ def test_native_launcher_default_action_runs_as_tray_app():
 
     assert "NotifyIcon" in source
     assert "ContextMenuStrip" in source
-    assert "Application.Run(new TrayApplicationContext(projectDir))" in source
+    assert "Application.Run(new TrayApplicationContext(projectDir, parsed.FromShortcut))" in source
     assert "Global\\\\Vibelution.Launcher.Tray" in source
+    assert "HandleSecondaryTrayLaunch(projectDir)" in source
+    assert "EnsureFreshLauncherBackend(projectDir)" in source
     assert "RunPythonBridge(projectDir, \"bootstrap\", true, true)" in source
     assert "RunPythonBridge(projectDir, \"launcher\", false, false)" in source
+
+
+def test_native_launcher_secondary_shortcut_launch_refreshes_stale_backend_and_opens_console():
+    source = _source()
+
+    assert "native_action.secondary_launch" in source
+    assert "/api/launcher/freshness" in source
+    assert "RunPythonBridge(projectDir, \"stop-launcher\", true, false)" in source
+    assert "--from-shortcut" in source
+    assert "parsed.FromShortcut" in source
+
+
+def test_launch_vibelution_shortcut_script_builds_content_addressed_entry():
+    source = (PROJECT_ROOT / "scripts" / "launch_vibelution_shortcut.ps1").read_text(encoding="utf-8")
+
+    assert "entry-cache" in source
+    assert "--from-shortcut" in source
+    assert "build_vibelution_launcher_entry.ps1" in source
+    assert "Start-Process" in source
+    assert "WindowStyle Hidden" in source
 
 
 def test_native_launcher_tray_menu_exposes_lifecycle_controls():
