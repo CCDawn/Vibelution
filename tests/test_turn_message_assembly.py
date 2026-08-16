@@ -14,6 +14,7 @@ from core.orchestration.turn_message_assembly import (
     langchain_messages_from_conversation_layer,
     normalize_seeded_tool_calls,
     refresh_system_prefix_on_messages,
+    replay_current_turn_messages,
     sanitize_seeded_chat_content,
 )
 from core.orchestration.turn_outcome import TurnOutcomeController
@@ -269,3 +270,50 @@ def test_assembly_coerces_bytes_json_calls_and_string_false_append():
     )
     assert assembled.resumed is False
     assert assembled.messages[-1]["role"] == "user" or assembled.messages[-1].type in {"human", "user"}
+
+
+def test_assembly_coerces_json_function_false_merge_and_string_events():
+    normalized = normalize_seeded_tool_calls(
+        [
+            {
+                "id": "call-fn",
+                "function": '{"name":"read_file_tool","arguments":{"path":"a.py"}}',
+            }
+        ]
+    )
+    assert normalized == [{"id": "call-fn", "name": "read_file_tool", "args": {"path": "a.py"}}]
+
+    original = [SystemMessage(content="system"), {"role": "user", "content": "hi"}]
+    replayed = replay_current_turn_messages(original, "not-events", turn_id=b"turn-1")
+    assert [_message_preview(item) for item in replayed] == [_message_preview(item) for item in original]
+
+    assembled = assemble_prepared_turn_messages(
+        system_prompt="plain system",
+        user_prompt=b"now",
+        effective_goal=b"now",
+        active_turn_messages="not-a-list",
+        active_turn_goal="",
+        build_system_message=lambda sp: SystemMessage(content=str(sp)),
+        build_external_request_message=lambda text: {"role": "user", "content": text},
+        allow_append_user_message=False,
+        static_context_blocks=["## Agent Static Context\nstable"],
+        runtime_context_blocks=[],
+        dynamic_system_context_message=None,
+        extend_cacheable_prefix_fn=lambda message, _blocks: (message, "false"),
+        insert_static_fn=lambda **kwargs: list(kwargs["messages"][:1])
+        + list(kwargs["context_messages"])
+        + list(kwargs["messages"][1:]),
+    )
+    assert assembled.cacheable_prefix_merged is False
+    assert assembled.static_context_inserted is True
+    assert assembled.messages[-1]["content"] == "now"
+    assert any(
+        isinstance(item, SystemMessage) and item.content == "## Agent Static Context\nstable"
+        for item in assembled.messages
+    )
+
+
+def _message_preview(item):
+    if isinstance(item, dict):
+        return ("dict", item.get("role"), item.get("content"))
+    return (type(item).__name__, getattr(item, "content", None))

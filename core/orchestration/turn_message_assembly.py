@@ -69,6 +69,13 @@ def _as_mapping(value: Any) -> Dict[str, Any]:
     return {}
 
 
+def _mapping_get(mapping: Mapping[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in mapping:
+            return mapping.get(key)
+    return None
+
+
 def _maybe_json(value: Any) -> Any:
     if isinstance(value, (bytes, bytearray, memoryview)):
         value = bytes(value).decode("utf-8", errors="replace")
@@ -142,18 +149,18 @@ def normalize_seeded_tool_calls(raw_calls: Any) -> List[Dict[str, Any]]:
     for raw_call in _seeded_call_items(raw_calls):
         if not isinstance(raw_call, Mapping):
             continue
-        function = raw_call.get("function") if isinstance(raw_call.get("function"), Mapping) else {}
+        function = _as_mapping(_mapping_get(raw_call, "function"))
         call_id = _coerce_text(
-            raw_call.get("id")
-            or raw_call.get("tool_call_id")
-            or raw_call.get("toolCallId")
+            _mapping_get(raw_call, "id", "tool_call_id", "toolCallId")
         ).strip()
         name = _coerce_text(
-            raw_call.get("name")
-            or raw_call.get("toolName")
-            or function.get("name")
+            _mapping_get(raw_call, "name", "toolName") or _mapping_get(function, "name")
         ).strip()
-        arguments = raw_call.get("args", raw_call.get("arguments", function.get("arguments", {})))
+        arguments = _mapping_get(raw_call, "args", "arguments")
+        if arguments is None:
+            arguments = _mapping_get(function, "arguments", "args")
+        if arguments is None:
+            arguments = {}
         if isinstance(arguments, (bytes, bytearray, memoryview, str)):
             parsed_arguments = _maybe_json(arguments)
             if parsed_arguments is arguments and isinstance(arguments, str):
@@ -253,10 +260,14 @@ def assemble_prepared_turn_messages(
     prepare = prepare_turn_messages_fn or _default_prepare_turn_messages()
     messages, resumed = prepare(
         system_prompt=system_prompt,
-        user_prompt=user_prompt,
-        effective_goal=effective_goal,
-        active_turn_messages=active_turn_messages,
-        active_turn_goal=active_turn_goal,
+        user_prompt=_coerce_text(user_prompt),
+        effective_goal=_coerce_text(effective_goal),
+        active_turn_messages=(
+            _coerce_message_list(active_turn_messages)
+            if active_turn_messages is not None
+            else None
+        ),
+        active_turn_goal=_coerce_text(active_turn_goal),
         build_system_message=build_system_message,
         build_external_request_message=build_external_request_message,
         allow_append_user_message=_coerce_bool(allow_append_user_message, False),
@@ -268,6 +279,7 @@ def assemble_prepared_turn_messages(
         extend = extend_cacheable_prefix_fn or _default_extend_cacheable_prefix()
         if messages:
             merged_message, cacheable_prefix_merged = extend(messages[0], pending_static)
+            cacheable_prefix_merged = _coerce_bool(cacheable_prefix_merged, False)
             if cacheable_prefix_merged:
                 messages[0] = merged_message
         if not cacheable_prefix_merged:
@@ -292,7 +304,7 @@ def assemble_prepared_turn_messages(
         messages=messages,
         resumed=_coerce_bool(resumed, False),
         static_context_inserted=static_context_inserted,
-        cacheable_prefix_merged=bool(cacheable_prefix_merged),
+        cacheable_prefix_merged=_coerce_bool(cacheable_prefix_merged, False),
         static_context_blocks=tuple(pending_static),
         pending_runtime_context_blocks=tuple(pending_runtime),
         dynamic_system_context_inserted=dynamic_system_context_message is not None,
@@ -328,14 +340,14 @@ def refresh_system_prefix_on_messages(
     if pending_static and updated:
         extend = extend_cacheable_prefix_fn or _default_extend_cacheable_prefix()
         merged_message, cacheable_prefix_merged = extend(updated[0], pending_static)
-        if cacheable_prefix_merged:
+        if _coerce_bool(cacheable_prefix_merged, False):
             updated[0] = merged_message
     return updated
 
 
 def _message_role_name(message: Any) -> str:
     if isinstance(message, Mapping):
-        role = _coerce_text(message.get("role") or message.get("type")).strip().lower()
+        role = _coerce_text(_mapping_get(message, "role", "type", "kind")).strip().lower()
     else:
         role = _coerce_text(getattr(message, "type", "") or getattr(message, "role", "")).strip().lower()
     if role in {"ai", "assistant"}:
@@ -355,11 +367,13 @@ def langchain_messages_from_conversation_layer(messages: Iterable[Any]) -> list:
             continue
         role = _message_role_name(item)
         assistant_tool_calls = (
-            normalize_seeded_tool_calls(item.get("tool_calls") or item.get("toolCalls") or [])
+            normalize_seeded_tool_calls(
+                _mapping_get(item, "tool_calls", "toolCalls") or []
+            )
             if role == "assistant"
             else []
         )
-        raw_content = item.get("content")
+        raw_content = _mapping_get(item, "content")
         content = raw_content if isinstance(raw_content, list) else _coerce_text(raw_content).strip()
         if isinstance(content, str):
             content = sanitize_seeded_chat_content(role, content)
@@ -372,7 +386,7 @@ def langchain_messages_from_conversation_layer(messages: Iterable[Any]) -> list:
         elif role == "assistant":
             restored.append(AIMessage(content=_coerce_text(content), tool_calls=assistant_tool_calls))
         elif role == "tool":
-            tool_call_id = _coerce_text(item.get("tool_call_id") or item.get("toolCallId")).strip()
+            tool_call_id = _coerce_text(_mapping_get(item, "tool_call_id", "toolCallId")).strip()
             if tool_call_id:
                 restored.append(ToolMessage(content=_coerce_text(content), tool_call_id=tool_call_id))
     return restored
@@ -422,7 +436,10 @@ class TurnJournalReplayError(RuntimeError):
 def current_turn_has_journal_conversation_layer(events: Iterable[Any], *, turn_id: str) -> bool:
     from core.chat.conversation_invariant import live_conversation_messages_from_events
 
-    layer = live_conversation_messages_from_events(events, turn_id=turn_id)
+    layer = live_conversation_messages_from_events(
+        _coerce_message_list(events),
+        turn_id=_coerce_text(turn_id).strip(),
+    )
     return any(_message_role_name(item) in {"assistant", "tool"} for item in layer)
 
 
@@ -458,7 +475,11 @@ def replay_current_turn_messages(
     )
 
     materialized = _coerce_message_list(messages)
-    layer = live_conversation_messages_from_events(events, turn_id=_coerce_text(turn_id).strip())
+    event_list = _coerce_message_list(events)
+    layer = live_conversation_messages_from_events(
+        event_list,
+        turn_id=_coerce_text(turn_id).strip(),
+    )
     if not any(_message_role_name(item) in {"assistant", "tool"} for item in layer):
         if _coerce_bool(require_layer, False) and _coerce_bool(strict, False):
             raise TurnJournalReplayError(
@@ -471,8 +492,8 @@ def replay_current_turn_messages(
     if not invariant.ok:
         if _coerce_bool(strict, False):
             raise TurnJournalReplayError(
-                error_type=str(invariant.error_type or "conversation_invariant_failed"),
-                message=str(invariant.message or "Current-turn journal replay failed invariant check."),
+                error_type=_coerce_text(invariant.error_type or "conversation_invariant_failed"),
+                message=_coerce_text(invariant.message or "Current-turn journal replay failed invariant check."),
                 details={
                     "turnId": _coerce_text(turn_id).strip(),
                     **_as_mapping(invariant.details),
