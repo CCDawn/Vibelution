@@ -126,6 +126,35 @@ export function useChatRouteSelection(): UseChatRouteSelectionResult {
     [location.search, navigateToSelection],
   );
 
+  const postRouteOpenObservation = useCallback(
+    (target: ChatRouteSelection, source: string) => {
+      const normalizedSource = String(source || "").trim() || "route_writer";
+      if (target.kind === "session") {
+        postUserActionObservation("session_open", {
+          sessionId: target.sessionId,
+          previousSessionId: "",
+          source: normalizedSource,
+        });
+        return;
+      }
+      if (target.kind === "room") {
+        postUserActionObservation("group_room_open", {
+          roomId: target.roomId,
+          previousRouteKind: "bare",
+          source: normalizedSource,
+        });
+        return;
+      }
+      if (target.kind === "project_bus") {
+        postUserActionObservation("project_bus_open", {
+          previousRouteKind: "bare",
+          source: normalizedSource,
+        });
+      }
+    },
+    [],
+  );
+
   const canonicalizeBareRoute = useCallback(
     (target: ChatRouteSelection) => {
       const current = parseChatRouteSelection(location.search);
@@ -139,9 +168,10 @@ export function useChatRouteSelection(): UseChatRouteSelectionResult {
         return;
       }
       canonicalizedBareLocationKeysRef.current.add(location.key);
+      postRouteOpenObservation(target, "bare_route_bootstrap");
       navigateToSelection(target, { replace: true });
     },
-    [location.key, location.search, navigateToSelection],
+    [location.key, location.search, navigateToSelection, postRouteOpenObservation],
   );
 
   const matchesSelection = useCallback(
@@ -157,6 +187,27 @@ export function useChatRouteSelection(): UseChatRouteSelectionResult {
       const current = parseChatRouteSelection(location.search);
       if (!chatRouteSelectionsEqual(current, expected)) {
         return false;
+      }
+      if (next.kind === "session") {
+        const previousSessionId = expected.kind === "session" ? expected.sessionId : "";
+        if (previousSessionId !== next.sessionId) {
+          postUserActionObservation("session_open", {
+            sessionId: next.sessionId,
+            previousSessionId,
+            source: "replace_if_still_viewing",
+          });
+        }
+      } else if (next.kind === "room") {
+        postUserActionObservation("group_room_open", {
+          roomId: next.roomId,
+          previousRouteKind: expected.kind,
+          source: "replace_if_still_viewing",
+        });
+      } else if (next.kind === "project_bus") {
+        postUserActionObservation("project_bus_open", {
+          previousRouteKind: expected.kind,
+          source: "replace_if_still_viewing",
+        });
       }
       const search = serializeChatRouteSelection(location.search, next);
       navigate({ pathname: "/chat", search }, { replace: true });
