@@ -69,6 +69,7 @@ import type { TurnAvatarResolution } from "../../components/conversation/convers
 import { isAgentInboxMessage } from "../../components/conversation/conversationMessagePredicates";
 import { VButton, VContextualHint, VInput, VNativeInput, VStateSurface, VTooltip, type VButtonProps } from "../../components/vui";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "../../app/browserTelemetry";
+import { startUserAction } from "../../app/userActionTelemetry";
 import { getPageInstanceId } from "../../app/pageInstance";
 import { usePageVisibility, useStartupWarmup } from "../../app/pollingPolicy";
 import type { TranslationKey } from "../../i18n/dictionary";
@@ -1355,6 +1356,7 @@ export function ChatCodingRoute() {
     mutationFn: (payload: { agentId: string; displayName: string }) =>
       updateAgent(payload.agentId, { displayName: payload.displayName }) as Promise<AgentInstance>,
     onMutate: async (payload) => {
+      const telemetry = startUserAction("agent_rename", { agentId: payload.agentId });
       await queryClient.cancelQueries({ queryKey: queryKeys.agents() });
       const previousAgents = queryClient.getQueryData<AgentInstance[]>(queryKeys.agents());
       queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (current) =>
@@ -1362,16 +1364,18 @@ export function ChatCodingRoute() {
           ? { ...agent, displayName: payload.displayName }
           : agent),
       );
-      return { previousAgents };
+      return { previousAgents, telemetry };
     },
-    onSuccess: (updatedAgent) => {
+    onSuccess: (updatedAgent, _variables, context) => {
+      context?.telemetry?.succeeded({ agentId: updatedAgent.agentId });
       queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (current) =>
         current?.map((agent) => agent.agentId === updatedAgent.agentId ? updatedAgent : agent),
       );
       setSessionComposerErrors((current) => ({ ...current, __sessions__: "" }));
       void chatWorkspaceCache.afterAgentWorkspaceChanged();
     },
-    onError: (error, _variables, context) => {
+    onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, { agentId: variables.agentId });
       if (context?.previousAgents) {
         queryClient.setQueryData(queryKeys.agents(), context.previousAgents);
       }
