@@ -185,7 +185,16 @@ def test_deserialize_coerces_bytes_ids_json_tool_calls_and_camel_metadata():
     assert ai.content == "assistant"
     assert ai.tool_calls[0]["name"] == "cli_tool"
     assert ai.additional_kwargs == {"cache_control": {"type": "ephemeral"}}
-    assert ai.response_metadata["finish_reason"] == b"stop"
+    assert ai.response_metadata["finish_reason"] == "stop"
     tool = restored[1]
     assert tool.tool_call_id == "c1"
     assert tool.content == "tool output"
+
+    wrapped = deserialize_turn_messages(
+        {"messages": [{"kind": "system", "content": b"wrapped system"}]}
+    )
+    assert isinstance(wrapped[0], SystemMessage)
+    assert wrapped[0].content == "wrapped system"
+    assert serialize_turn_messages({"history": [{"role": "user", "content": b"hi"}]}) == [
+        {"kind": "dict", "role": "user", "content": "hi"}
+    ]
