@@ -9,6 +9,7 @@ from core.orchestration.turn_status_bar import (
     TURN_STATUS_BAR_HEADER,
     build_turn_status_bar_message,
     collect_turn_status_snapshot,
+    collect_turn_status_tail_extras,
     format_turn_status_bar,
     is_turn_status_bar_message,
     strip_turn_status_bar_messages,
@@ -239,3 +240,66 @@ def test_collect_snapshot_coerces_invalid_auth_counters():
     assert snapshot.tools_used == 0
     assert snapshot.tools_max == 0
     assert snapshot.budget_status == "unlimited"
+
+
+def test_status_bar_coerces_false_flags_json_extras_and_rejects_character_split():
+    from types import SimpleNamespace
+
+    snapshot = collect_turn_status_snapshot(
+        iteration=b"3",
+        model=b"deepseek-chat",
+        tool_policy='{"maxCallsPerTurn":"8"}',
+        mental_enabled="false",
+        mental_model=SimpleNamespace(diagnose=lambda: SimpleNamespace(state="anxious", intervention="stop")),
+        authorization=SimpleNamespace(
+            max_calls_per_turn=b"8",
+            call_count=b"1",
+            budget_profile=b"deepseek",
+            turn_id=b"turn-1",
+            agent_id=b"agent-1",
+        ),
+    )
+    assert snapshot.iteration == 3
+    assert snapshot.model == "deepseek-chat"
+    assert snapshot.mental_enabled is False
+    assert snapshot.turn_id == "turn-1"
+    assert snapshot.tools_max == 8
+
+    extras = {
+        "git": {
+            "available": "true",
+            "dirty": "false",
+            "branch": b"main",
+            "upstream": {"ahead": "2", "behind": "bad"},
+        },
+        "runDigest": {"task": b"fix", "recentTools": "grep_search_tool"},
+        "identity": {"sessionId": b"session-1"},
+    }
+    text = format_turn_status_bar(
+        snapshot,
+        config={
+            "blocks": {
+                "budget": True,
+                "clock": False,
+                "git_brief": True,
+                "run_digest": True,
+                "identity": True,
+            }
+        },
+        extras=extras,
+    )
+    assert "dirty: no" in text
+    assert "ahead_behind: +2/-0" in text
+    assert "recent_tools: grep_search_tool" in text
+    assert "session: session-1" in text
+
+    assert strip_turn_status_bar_messages("not-a-list") == []
+    extras_payload = collect_turn_status_tail_extras(
+        session_id=b"s1",
+        recent_tools="cli_tool",
+        include_git="false",
+        cache_hint='{"cacheReadTokens": 12}',
+    )
+    assert extras_payload["runDigest"]["recentTools"] == ["cli_tool"]
+    assert extras_payload["cacheHint"]["cacheReadTokens"] == 12
+    assert "git" not in extras_payload

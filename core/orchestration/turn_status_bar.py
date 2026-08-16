@@ -12,6 +12,7 @@ never become cache hits — even when the agent loop only appends tool pages.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
@@ -41,14 +42,105 @@ class TurnStatusBarSnapshot:
     mental_intervention: str = ""
 
 
+def _coerce_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+def _coerce_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if not text:
+        return default
+    if text in {"1", "true", "yes", "on", "enabled"}:
+        return True
+    if text in {"0", "false", "no", "off", "disabled"}:
+        return False
+    return default
+
+
+def _as_mapping(value: Any) -> dict[str, Any]:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return {}
+        try:
+            value = json.loads(text)
+        except json.JSONDecodeError:
+            return {}
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {}
+
+
+def _mapping_get(mapping: Mapping[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in mapping:
+            return mapping.get(key)
+    return None
+
+
 def _coerce_nonnegative_int(value: Any, *, default: int = 0) -> int:
+    if isinstance(value, bool) or value is None:
+        return max(0, int(default or 0))
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
     try:
-        return max(0, int(value or 0))
+        return max(0, int(value))
     except (TypeError, ValueError):
         try:
             return max(0, int(default or 0))
         except (TypeError, ValueError):
             return 0
+
+
+def _coerce_message_list(value: Any) -> list:
+    if value is None or isinstance(value, (str, bytes, bytearray, memoryview)):
+        return []
+    if isinstance(value, Mapping):
+        return [dict(value)]
+    try:
+        return list(value)
+    except TypeError:
+        return []
+
+
+def _coerce_str_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        text = bytes(value).decode("utf-8", errors="replace").strip()
+        return [text] if text else []
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    if isinstance(value, Mapping):
+        return [_coerce_text(key).strip() for key in value if _coerce_text(key).strip()]
+    try:
+        iterator = list(value)
+    except TypeError:
+        text = _coerce_text(value).strip()
+        return [text] if text else []
+    names: list[str] = []
+    for item in iterator:
+        text = _coerce_text(item).strip()
+        if text and text not in names:
+            names.append(text)
+    return names
 
 
 def _reserve_for_verify(max_calls: int) -> int:
@@ -90,18 +182,18 @@ def collect_turn_status_snapshot(
         except Exception:
             auth = None
 
-    policy = tool_policy if isinstance(tool_policy, Mapping) else None
-    if policy is None and auth is not None:
+    policy = _as_mapping(tool_policy)
+    if not policy and auth is not None:
         # Fall back to installed max only.
         policy = {"maxCallsPerTurn": _coerce_nonnegative_int(getattr(auth, "max_calls_per_turn", 0))}
 
     max_from_auth = _coerce_nonnegative_int(getattr(auth, "max_calls_per_turn", 0)) if auth is not None else 0
     used = _coerce_nonnegative_int(getattr(auth, "call_count", 0)) if auth is not None else 0
     resolved_max, family = resolve_max_calls_per_turn(
-        policy,
-        model=model,
-        provider=provider,
-        profile_id=profile_id,
+        policy or None,
+        model=_coerce_text(model),
+        provider=_coerce_text(provider),
+        profile_id=_coerce_text(profile_id),
     )
     # Prefer the live authorization cap once installed (already model-resolved).
     tools_max = max_from_auth if auth is not None else resolved_max
@@ -111,16 +203,17 @@ def collect_turn_status_snapshot(
     reserve = _reserve_for_verify(tools_max)
     # Prefer family resolved from the current model/policy when available so a
     # leftover authorization context from another turn cannot mislabel the bar.
-    auth_profile = str(getattr(auth, "budget_profile", "") or "").strip() if auth is not None else ""
+    auth_profile = _coerce_text(getattr(auth, "budget_profile", "")).strip() if auth is not None else ""
     budget_profile = family or auth_profile
 
     mental_state = ""
     mental_intervention = ""
-    if mental_enabled and mental_model is not None:
+    mental_on = _coerce_bool(mental_enabled, default=False)
+    if mental_on and mental_model is not None:
         try:
             diagnosis = mental_model.diagnose()
-            mental_state = str(getattr(diagnosis, "state", "") or "").strip()
-            mental_intervention = str(getattr(diagnosis, "intervention", "") or "").strip()
+            mental_state = _coerce_text(getattr(diagnosis, "state", "")).strip()
+            mental_intervention = _coerce_text(getattr(diagnosis, "intervention", "")).strip()
             # Keep status bar compact: one-line intervention excerpt only.
             if mental_intervention:
                 mental_intervention = " ".join(mental_intervention.split())
@@ -139,19 +232,23 @@ def collect_turn_status_snapshot(
         tools_max=tools_max,
         tools_remaining=remaining,
         reserve_for_verify=reserve,
-        budget_profile=budget_profile or detect_model_family(model=model, provider=provider, profile_id=profile_id),
+        budget_profile=budget_profile or detect_model_family(
+            model=_coerce_text(model),
+            provider=_coerce_text(provider),
+            profile_id=_coerce_text(profile_id),
+        ),
         budget_status=_budget_status(
             used=used,
             max_calls=tools_max,
             remaining=remaining,
             reserve=reserve,
         ),
-        model=str(model or "").strip(),
-        provider=str(provider or "").strip(),
-        profile_id=str(profile_id or "").strip(),
-        turn_id=str(getattr(auth, "turn_id", "") or "").strip() if auth is not None else "",
-        agent_id=str(getattr(auth, "agent_id", "") or "").strip() if auth is not None else "",
-        mental_enabled=bool(mental_enabled),
+        model=_coerce_text(model).strip(),
+        provider=_coerce_text(provider).strip(),
+        profile_id=_coerce_text(profile_id).strip(),
+        turn_id=_coerce_text(getattr(auth, "turn_id", "")).strip() if auth is not None else "",
+        agent_id=_coerce_text(getattr(auth, "agent_id", "")).strip() if auth is not None else "",
+        mental_enabled=mental_on,
         mental_cognitive_state=mental_state,
         mental_intervention=mental_intervention,
     )
@@ -206,11 +303,12 @@ def _append_budget_section(lines: list[str], snapshot: TurnStatusBarSnapshot) ->
 def _append_clock_section(lines: list[str], extras: Mapping[str, Any] | None) -> None:
     from datetime import datetime, timezone
 
+    extras_map = _as_mapping(extras)
     clock = ""
     tz_name = ""
-    if isinstance(extras, Mapping):
-        clock = str(extras.get("clock") or extras.get("localTime") or "").strip()
-        tz_name = str(extras.get("timezone") or extras.get("timeZone") or "").strip()
+    if extras_map:
+        clock = _coerce_text(_mapping_get(extras_map, "clock", "localTime")).strip()
+        tz_name = _coerce_text(_mapping_get(extras_map, "timezone", "timeZone")).strip()
     if not clock:
         now = datetime.now().astimezone()
         clock = now.isoformat(timespec="seconds")
@@ -223,23 +321,23 @@ def _append_clock_section(lines: list[str], extras: Mapping[str, Any] | None) ->
 
 
 def _append_git_brief_section(lines: list[str], extras: Mapping[str, Any] | None) -> None:
-    git = extras.get("git") if isinstance(extras, Mapping) else None
-    if not isinstance(git, Mapping):
+    git = _as_mapping(_mapping_get(_as_mapping(extras), "git"))
+    if not git:
         return
     lines.append("### git_brief")
-    if not bool(git.get("available", True)):
+    if not _coerce_bool(_mapping_get(git, "available"), default=True):
         lines.append(f"- available: false")
-        error = str(git.get("error") or "").strip()
+        error = _coerce_text(_mapping_get(git, "error")).strip()
         if error:
             lines.append(f"- error: {error[:200]}")
         return
-    branch = str(git.get("branch") or "").strip() or "?"
-    dirty = bool(git.get("dirty"))
-    summary = str(git.get("summary") or "").strip()
-    head = str(git.get("headRevShort") or git.get("headRev") or "").strip()
-    upstream = git.get("upstream") if isinstance(git.get("upstream"), Mapping) else {}
-    ahead = int(upstream.get("ahead") or upstream.get("aheadCount") or 0)
-    behind = int(upstream.get("behind") or upstream.get("behindCount") or 0)
+    branch = _coerce_text(_mapping_get(git, "branch")).strip() or "?"
+    dirty = _coerce_bool(_mapping_get(git, "dirty"), default=False)
+    summary = _coerce_text(_mapping_get(git, "summary")).strip()
+    head = _coerce_text(_mapping_get(git, "headRevShort", "headRev")).strip()
+    upstream = _as_mapping(_mapping_get(git, "upstream"))
+    ahead = _coerce_nonnegative_int(_mapping_get(upstream, "ahead", "aheadCount"))
+    behind = _coerce_nonnegative_int(_mapping_get(upstream, "behind", "behindCount"))
     lines.append(f"- branch: {branch}")
     if head:
         lines.append(f"- head: {head}")
@@ -256,15 +354,23 @@ def _append_git_paths_section(
     *,
     max_paths: int,
 ) -> None:
-    git = extras.get("git") if isinstance(extras, Mapping) else None
-    if not isinstance(git, Mapping):
+    git = _as_mapping(_mapping_get(_as_mapping(extras), "git"))
+    if not git:
         return
-    files = git.get("files") if isinstance(git.get("files"), list) else []
+    files = _mapping_get(git, "files")
+    if isinstance(files, (bytes, bytearray, memoryview, str)):
+        text = _coerce_text(files).strip()
+        try:
+            files = json.loads(text) if text.startswith("[") else []
+        except json.JSONDecodeError:
+            files = []
+    if not isinstance(files, list):
+        files = []
     if not files:
         lines.append("### git_paths")
         lines.append("- paths: (none)")
         return
-    cap = max(1, int(max_paths or 12))
+    cap = max(1, _coerce_nonnegative_int(max_paths, default=12))
     lines.append("### git_paths")
     shown = 0
     for item in files:
@@ -272,13 +378,13 @@ def _append_git_paths_section(
             break
         if not isinstance(item, Mapping):
             continue
-        path = str(item.get("path") or item.get("file") or "").strip()
+        path = _coerce_text(_mapping_get(item, "path", "file")).strip()
         if not path:
             continue
-        status = str(item.get("status") or item.get("changeType") or item.get("xy") or "").strip()
+        status = _coerce_text(_mapping_get(item, "status", "changeType", "xy")).strip()
         lines.append(f"- {status or '?'} {path}")
         shown += 1
-    total = int(git.get("totalFiles") or len(files) or 0)
+    total = _coerce_nonnegative_int(_mapping_get(git, "totalFiles"), default=len(files))
     if total > shown:
         lines.append(f"- truncated: showing {shown}/{total}")
 
@@ -289,15 +395,14 @@ def _append_run_digest_section(
     *,
     max_tools: int,
 ) -> None:
-    digest = extras.get("runDigest") if isinstance(extras, Mapping) else None
-    if not isinstance(digest, Mapping):
-        digest = extras if isinstance(extras, Mapping) else {}
-    task = str(digest.get("task") or digest.get("goal") or "").strip()
-    tools = digest.get("recentTools") if isinstance(digest.get("recentTools"), list) else []
-    if not tools and isinstance(digest.get("tools"), list):
-        tools = digest.get("tools")  # type: ignore[assignment]
-    cap = max(1, int(max_tools or 8))
-    tool_names = [str(item or "").strip() for item in tools if str(item or "").strip()][:cap]
+    extras_map = _as_mapping(extras)
+    digest = _as_mapping(_mapping_get(extras_map, "runDigest", "run_digest"))
+    if not digest:
+        digest = extras_map
+    task = _coerce_text(_mapping_get(digest, "task", "goal")).strip()
+    tools = _mapping_get(digest, "recentTools", "recent_tools", "tools")
+    cap = max(1, _coerce_nonnegative_int(max_tools, default=8))
+    tool_names = _coerce_str_list(tools)[:cap]
     if not task and not tool_names:
         return
     lines.append("### run_digest")
@@ -308,14 +413,13 @@ def _append_run_digest_section(
 
 
 def _append_cache_hint_section(lines: list[str], extras: Mapping[str, Any] | None) -> None:
-    cache = extras.get("cacheHint") if isinstance(extras, Mapping) else None
-    if not isinstance(cache, Mapping):
-        cache = extras.get("promptCache") if isinstance(extras, Mapping) else None
-    if not isinstance(cache, Mapping):
+    extras_map = _as_mapping(extras)
+    cache = _as_mapping(_mapping_get(extras_map, "cacheHint", "cache_hint", "promptCache", "prompt_cache"))
+    if not cache:
         return
-    read_hits = cache.get("cacheReadTokens", cache.get("cache_read_tokens", cache.get("read")))
-    writes = cache.get("cacheWriteTokens", cache.get("cache_write_tokens", cache.get("write")))
-    uncached = cache.get("uncachedInputTokens", cache.get("uncached_input_tokens", cache.get("uncached")))
+    read_hits = _mapping_get(cache, "cacheReadTokens", "cache_read_tokens", "read")
+    writes = _mapping_get(cache, "cacheWriteTokens", "cache_write_tokens", "write")
+    uncached = _mapping_get(cache, "uncachedInputTokens", "uncached_input_tokens", "uncached")
     if read_hits is None and writes is None and uncached is None:
         return
     lines.append("### cache_hint")
@@ -328,14 +432,15 @@ def _append_cache_hint_section(lines: list[str], extras: Mapping[str, Any] | Non
 
 
 def _append_identity_section(lines: list[str], snapshot: TurnStatusBarSnapshot, extras: Mapping[str, Any] | None) -> None:
-    identity = extras.get("identity") if isinstance(extras, Mapping) else None
-    if not isinstance(identity, Mapping):
-        identity = extras if isinstance(extras, Mapping) else {}
-    session_id = str(identity.get("sessionId") or identity.get("session_id") or "").strip()
-    agent_id = str(
-        identity.get("agentId") or identity.get("agent_id") or snapshot.agent_id or ""
+    extras_map = _as_mapping(extras)
+    identity = _as_mapping(_mapping_get(extras_map, "identity"))
+    if not identity:
+        identity = extras_map
+    session_id = _coerce_text(_mapping_get(identity, "sessionId", "session_id")).strip()
+    agent_id = _coerce_text(
+        _mapping_get(identity, "agentId", "agent_id") or snapshot.agent_id
     ).strip()
-    worktree = str(identity.get("worktree") or identity.get("worktreePath") or "").strip()
+    worktree = _coerce_text(_mapping_get(identity, "worktree", "worktreePath")).strip()
     if not session_id and not agent_id and not worktree:
         return
     lines.append("### identity")
@@ -373,10 +478,10 @@ def format_turn_status_bar(
     )
 
     cfg = normalize_turn_status_tail_config(config)
-    limits = cfg.get("limits") if isinstance(cfg.get("limits"), Mapping) else {}
-    max_tail = int(limits.get("maxTailChars") or 2500)
-    max_paths = int(limits.get("gitPathsMax") or 12)
-    max_tools = int(limits.get("runDigestToolsMax") or 8)
+    limits = _as_mapping(_mapping_get(cfg, "limits"))
+    max_tail = _coerce_nonnegative_int(_mapping_get(limits, "maxTailChars"), default=2500)
+    max_paths = _coerce_nonnegative_int(_mapping_get(limits, "gitPathsMax"), default=12)
+    max_tools = _coerce_nonnegative_int(_mapping_get(limits, "runDigestToolsMax"), default=8)
 
     lines: list[str] = [
         TURN_STATUS_BAR_HEADER,
@@ -436,18 +541,19 @@ def collect_turn_status_tail_extras(
 
     extras: dict[str, Any] = {
         "identity": {
-            "sessionId": str(session_id or "").strip(),
-            "agentId": str(agent_id or "").strip(),
-            "worktree": str(worktree or "").strip(),
+            "sessionId": _coerce_text(session_id).strip(),
+            "agentId": _coerce_text(agent_id).strip(),
+            "worktree": _coerce_text(worktree).strip(),
         },
         "runDigest": {
-            "task": str(task or "").strip(),
-            "recentTools": [str(item).strip() for item in list(recent_tools or []) if str(item).strip()],
+            "task": _coerce_text(task).strip(),
+            "recentTools": _coerce_str_list(recent_tools),
         },
     }
-    if isinstance(cache_hint, Mapping):
-        extras["cacheHint"] = dict(cache_hint)
-    if include_git:
+    cache_map = _as_mapping(cache_hint)
+    if cache_map:
+        extras["cacheHint"] = cache_map
+    if _coerce_bool(include_git, default=False):
         try:
             from core.web.services.git_status_service import get_git_status
 
@@ -461,18 +567,18 @@ def is_turn_status_bar_message(message: Any) -> bool:
     content: Any = None
     if isinstance(message, SystemMessage):
         content = getattr(message, "content", None)
-    elif isinstance(message, dict):
-        role = str(message.get("role") or "").strip().lower()
+    elif isinstance(message, Mapping):
+        role = _coerce_text(_mapping_get(message, "role")).strip().lower()
         if role not in {"system", "user"}:
             return False
-        content = message.get("content")
+        content = _mapping_get(message, "content")
     else:
         return False
-    return str(content or "").strip().startswith(TURN_STATUS_BAR_HEADER)
+    return _coerce_text(content).strip().startswith(TURN_STATUS_BAR_HEADER)
 
 
 def strip_turn_status_bar_messages(messages: Sequence[Any] | None) -> list[Any]:
-    return [message for message in list(messages or []) if not is_turn_status_bar_message(message)]
+    return [message for message in _coerce_message_list(messages) if not is_turn_status_bar_message(message)]
 
 
 def upsert_turn_status_bar_message(
