@@ -10,9 +10,22 @@ from fastapi.testclient import TestClient
 
 from core.web.routes.team_workflows import research_runtime as research_runtime_module
 from core.web.routes.team_workflows.research_runtime_models import (
+    ResearchWorkflowBindingConfigResponse,
+    ResearchWorkflowBudgetResponse,
+    ResearchWorkflowCampaignListResponse,
     ResearchWorkflowCommandReceiptResponse,
     ResearchWorkflowCreateRunResponse,
     ResearchWorkflowDefinitionResponse,
+    ResearchWorkflowEffectiveBindingsResponse,
+    ResearchWorkflowEvaluationResponse,
+    ResearchWorkflowEventPageResponse,
+    ResearchWorkflowHandoffDetailResponse,
+    ResearchWorkflowHandoffListResponse,
+    ResearchWorkflowHypothesisListResponse,
+    ResearchWorkflowLaunchOptionsResponse,
+    ResearchWorkflowLedgerResponse,
+    ResearchWorkflowNodeDetailResponse,
+    ResearchWorkflowRunListResponse,
     ResearchWorkflowRunSnapshotResponse,
 )
 
@@ -107,6 +120,167 @@ def test_research_runtime_stream_declares_streaming_response_class() -> None:
     assert 'media_type="text/event-stream"' in source
     assert '"Cache-Control": "no-cache, no-transform"' in source
     assert '"X-Accel-Buffering": "no"' in source
+
+
+def test_research_runtime_models_publish_known_schema_fields() -> None:
+    expected_properties = {
+        ResearchWorkflowDefinitionResponse: {
+            "workflowId",
+            "workflowVersionId",
+            "definition",
+        },
+        ResearchWorkflowRunListResponse: {"workflowId", "runs"},
+        ResearchWorkflowLaunchOptionsResponse: {"workflowId", "teamId", "questions"},
+        ResearchWorkflowEffectiveBindingsResponse: {
+            "workflowId",
+            "workflowVersionId",
+            "teamId",
+            "bindings",
+        },
+        ResearchWorkflowBindingConfigResponse: {
+            "workflowId",
+            "teamId",
+            "workflowDefaults",
+            "stageOverrides",
+            "nodeOverrides",
+            "updatedAt",
+        },
+        ResearchWorkflowCreateRunResponse: {
+            "runId",
+            "workflowId",
+            "workflowVersionId",
+            "teamId",
+            "projectId",
+            "questionId",
+            "runVersion",
+            "status",
+        },
+        ResearchWorkflowRunSnapshotResponse: {
+            "run",
+            "definition",
+            "nodeAttempts",
+            "activeNodeIds",
+            "pendingHumanTasks",
+            "commandOffers",
+            "handoffSummary",
+            "agentBindingSummary",
+            "budgetSummary",
+            "latestEventSequence",
+            "generatedAt",
+        },
+        ResearchWorkflowNodeDetailResponse: {
+            "runId",
+            "teamId",
+            "nodeId",
+            "runVersion",
+            "actorKind",
+            "primaryRoleKey",
+            "label",
+            "runtimeCurrent",
+            "status",
+            "bindingSnapshotId",
+            "latestAttempt",
+            "attempts",
+            "commandOffers",
+            "latestEventSequence",
+            "generatedAt",
+            "agentId",
+            "displayName",
+            "resolvedFrom",
+            "sessionId",
+            "taskId",
+            "turnId",
+            "sessionAttempt",
+            "chatDeepLink",
+            "sessionAnchorDegraded",
+            "blockedReason",
+            "nodeAttempt",
+        },
+        ResearchWorkflowEventPageResponse: {
+            "runId",
+            "teamId",
+            "runVersion",
+            "latestEventSequence",
+            "afterSequence",
+            "lastReturnedSequence",
+            "hasMore",
+            "nextAfterSequence",
+            "events",
+        },
+        ResearchWorkflowHandoffListResponse: {
+            "runId",
+            "teamId",
+            "runVersion",
+            "handoffs",
+        },
+        ResearchWorkflowLedgerResponse: {
+            "runId",
+            "teamId",
+            "runVersion",
+            "projectId",
+            "claimEvidence",
+            "teamKnowledge",
+            "experimentPlanning",
+            "nodeRuns",
+            "handoffs",
+            "artifactManifests",
+            "resultPackage",
+            "summary",
+            "boundaries",
+            "graph",
+        },
+        ResearchWorkflowBudgetResponse: {
+            "runId",
+            "teamId",
+            "runVersion",
+            "budgetLedgers",
+            "budgetReservations",
+        },
+        ResearchWorkflowHypothesisListResponse: {
+            "runId",
+            "teamId",
+            "runVersion",
+            "hypothesisPortfolios",
+        },
+        ResearchWorkflowCampaignListResponse: {
+            "runId",
+            "teamId",
+            "runVersion",
+            "experimentCampaigns",
+        },
+        ResearchWorkflowEvaluationResponse: {
+            "runId",
+            "teamId",
+            "runVersion",
+            "competitionEvaluations",
+            "qualityGateEvaluations",
+        },
+        ResearchWorkflowHandoffDetailResponse: {
+            "runId",
+            "teamId",
+            "runVersion",
+            "handoff",
+            "fromNodeRun",
+            "toNodeRun",
+            "humanTask",
+            "artifactManifests",
+        },
+        ResearchWorkflowCommandReceiptResponse: {
+            "commandId",
+            "runId",
+            "status",
+            "acceptedRunVersion",
+            "idempotencyKey",
+            "latestEventSequence",
+            "problem",
+        },
+    }
+
+    for model, expected in expected_properties.items():
+        properties = set(model.model_json_schema().get("properties") or {})
+        assert expected <= properties, (
+            f"{model.__name__} is missing fields: {sorted(expected - properties)}"
+        )
 
 
 def test_research_runtime_response_models_keep_unknown_fields() -> None:
