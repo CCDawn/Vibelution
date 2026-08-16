@@ -74,6 +74,25 @@ export function decidePackagedDesktopShellRefresh(input: {
   return "refresh";
 }
 
+export function decidePeriodicDesktopShellRefresh(input: {
+  isPackaged: boolean;
+  smoke: boolean;
+  workbenchCloseCanary?: boolean;
+  stale: boolean;
+  refreshInFlight: boolean;
+  shutdownApproved: boolean;
+}): "skip" | "refresh" {
+  if (input.refreshInFlight || input.shutdownApproved) {
+    return "skip";
+  }
+  return decidePackagedDesktopShellRefresh({
+    isPackaged: input.isPackaged,
+    smoke: input.smoke,
+    workbenchCloseCanary: input.workbenchCloseCanary,
+    stale: input.stale
+  });
+}
+
 export function decideLauncherShellRestart(input: {
   isPackaged: boolean;
   stale: boolean;
