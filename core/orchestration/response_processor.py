@@ -32,22 +32,6 @@ def _coerce_text(value: Any) -> str:
     return str(value)
 
 
-def _as_mapping(value: Any) -> Dict[str, Any]:
-    if isinstance(value, (bytes, bytearray, memoryview)):
-        value = bytes(value).decode("utf-8", errors="replace")
-    if isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return {}
-        try:
-            value = json.loads(text)
-        except json.JSONDecodeError:
-            return {}
-    if isinstance(value, Mapping):
-        return dict(value)
-    return {}
-
-
 def _maybe_json(value: Any) -> Any:
     if isinstance(value, (bytes, bytearray, memoryview)):
         value = bytes(value).decode("utf-8", errors="replace")
@@ -61,11 +45,23 @@ def _maybe_json(value: Any) -> Any:
     return value
 
 
+def _as_mapping(value: Any) -> Dict[str, Any]:
+    value = _maybe_json(value)
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {}
+
+
 def _coerce_tool_call_list(value: Any) -> List[Dict[str, Any]]:
     value = _maybe_json(value)
     if value is None or isinstance(value, (str, bytes, bytearray, memoryview)):
         return []
     if isinstance(value, Mapping):
+        nested = value.get("tool_calls")
+        if nested is None:
+            nested = value.get("toolCalls")
+        if nested is not None:
+            return _coerce_tool_call_list(nested)
         return [dict(value)] if value else []
     try:
         items = list(value)
@@ -80,6 +76,7 @@ def _coerce_tool_call_list(value: Any) -> List[Dict[str, Any]]:
 
 
 def _response_field(response: Any, *names: str, default: Any = None) -> Any:
+    response = _maybe_json(response)
     if isinstance(response, Mapping):
         for name in names:
             if name in response:
@@ -91,8 +88,12 @@ def _response_field(response: Any, *names: str, default: Any = None) -> Any:
     return default
 
 
+def _tool_call_function(call: Mapping[str, Any]) -> Dict[str, Any]:
+    return _as_mapping(call.get("function"))
+
+
 def _tool_call_name(call: Mapping[str, Any]) -> str:
-    function = call.get("function") if isinstance(call.get("function"), Mapping) else {}
+    function = _tool_call_function(call)
     return _coerce_text(
         call.get("name") or call.get("toolName") or function.get("name")
     ).strip()
@@ -148,7 +149,7 @@ class ResponseProcessingResult:
         if raw in (None, ""):
             raw = call.get("arguments")
         if raw in (None, ""):
-            function = call.get("function") if isinstance(call.get("function"), Mapping) else {}
+            function = _tool_call_function(call)
             raw = function.get("arguments")
             if raw in (None, ""):
                 raw = function.get("args")
@@ -240,6 +241,7 @@ class ResponseProcessor:
         if isinstance(content, list):
             parts: List[str] = []
             for item in content:
+                item = _maybe_json(item)
                 if isinstance(item, Mapping):
                     text = item.get("text")
                     if text in (None, ""):
