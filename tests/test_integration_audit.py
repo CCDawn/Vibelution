@@ -41,6 +41,34 @@ def write_registry(root: Path, claims: dict, merge_queue: list) -> Path:
     return registry
 
 
+def write_live_registry(
+    root: Path,
+    *,
+    claims: list[dict],
+    agents: list[dict],
+    merge_queue: list[str] | None = None,
+    kind: str = "briefbound",
+) -> Path:
+    common_dir = git(root, "rev-parse", "--git-common-dir")
+    common_dir_path = Path(common_dir)
+    if not common_dir_path.is_absolute():
+        common_dir_path = (root / common_dir_path).resolve()
+    registry = common_dir_path / kind / "coordination" / "registry.json"
+    registry.parent.mkdir(parents=True, exist_ok=True)
+    registry.write_text(
+        json.dumps(
+            {
+                "claims": claims,
+                "agents": agents,
+                "mergeQueue": merge_queue or [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    return registry
+
+
 def add_worktree(root: Path, name: str, branch: str) -> Path:
     worktree = root.parent / name
     git(root, "worktree", "add", "-b", branch, str(worktree))
@@ -229,52 +257,156 @@ def test_external_operator_config_claim_path_is_config_sensitive(tmp_path: Path)
     assert item.merge_method == "manual_review"
 
 
-def test_report_uses_main_worktree_registry_when_started_from_task_worktree(tmp_path: Path) -> None:
+def test_report_from_main_and_worktree_checkouts_read_same_live_claim(tmp_path: Path) -> None:
     root = init_repo(tmp_path / "repo")
     worktree = add_worktree(root, "task-wt", "codex/task")
     commit_file(worktree, "task.txt", "task\n", "task")
-    registry = root / ".docs" / "project-memory" / "agent-registry.json"
-    registry.parent.mkdir(parents=True)
+    registry = write_live_registry(
+        root,
+        claims=[
+            {
+                "id": "claim-task",
+                "status": "ready_for_merge",
+                "scopes": ["task.txt"],
+                "agentId": "agent-task",
+            }
+        ],
+        agents=[
+            {
+                "id": "agent-task",
+                "branch": "codex/task",
+                "worktree": str(worktree),
+            }
+        ],
+        merge_queue=["claim-task"],
+    )
+
+    report_from_main = audit.build_report(root)
+    report_from_worktree = audit.build_report(worktree)
+
+    assert registry.exists()
+    assert audit.resolve_registry(root, root) == registry
+    assert audit.resolve_registry(worktree, worktree) == registry
+    assert report_from_main.root == report_from_worktree.root == str(root.resolve())
+    assert item_by_branch(report_from_main, "main").decision == "main"
+    for report in (report_from_main, report_from_worktree):
+        task_item = item_by_branch(report, "codex/task")
+        assert task_item.claim_ids == ["claim-task"]
+        assert task_item.branch == "codex/task"
+        assert task_item.worktree == str(worktree)
+        assert task_item.decision == "merge_ready"
+
+
+def test_default_registry_prefers_briefbound_over_ccdawn(tmp_path: Path) -> None:
+    root = init_repo(tmp_path / "repo")
+    briefbound_registry = write_live_registry(root, claims=[], agents=[], kind="briefbound")
+    ccdawn_registry = write_live_registry(root, claims=[], agents=[], kind="ccdawn")
+
+    assert briefbound_registry.exists()
+    assert ccdawn_registry.exists()
+    assert audit.resolve_registry(root, root) == briefbound_registry
+
+    report = audit.build_report(root)
+
+    assert report.root == str(root.resolve())
+    assert item_by_branch(report, "main").decision == "main"
+
+
+def test_defaults_to_ccdawn_live_registry_when_briefbound_missing(tmp_path: Path) -> None:
+    root = init_repo(tmp_path / "repo")
+    worktree = add_worktree(root, "ccdawn-wt", "codex/ccdawn")
+    commit_file(worktree, "ccdawn.txt", "ccdawn\n", "ccdawn")
+    registry = write_live_registry(
+        root,
+        claims=[
+            {
+                "id": "claim-ccdawn",
+                "status": "ready_for_merge",
+                "scopes": ["ccdawn.txt"],
+                "agentId": "agent-ccdawn",
+            }
+        ],
+        agents=[
+            {
+                "id": "agent-ccdawn",
+                "branch": "codex/ccdawn",
+                "worktree": str(worktree),
+            }
+        ],
+        merge_queue=["claim-ccdawn"],
+        kind="ccdawn",
+    )
+
+    assert audit.resolve_registry(root, root) == registry
+    report = audit.build_report(root)
+    item = item_by_branch(report, "codex/ccdawn")
+
+    assert item.claim_ids == ["claim-ccdawn"]
+    assert item.branch == "codex/ccdawn"
+    assert item.decision == "merge_ready"
+
+
+def test_defaults_to_project_memory_registry_when_no_live_registry(
+    tmp_path: Path, monkeypatch
+) -> None:
+    root = init_repo(tmp_path / "repo")
+    worktree = add_worktree(root, "fallback-wt", "codex/fallback")
+    commit_file(worktree, "fallback.txt", "fallback\n", "fallback")
+    memory_home = tmp_path / "memory"
+    monkeypatch.setattr(audit, "resolve_project_memory_home", lambda project_root: memory_home)
+    registry = memory_home / "agent-registry.json"
+    registry.parent.mkdir(parents=True, exist_ok=True)
     registry.write_text(
         json.dumps(
             {
                 "workClaims": {
-                    "claim-task": {
+                    "claim-fallback": {
                         "status": "ready_for_merge",
-                        "branch": "codex/task",
+                        "branch": "codex/fallback",
                         "worktree": str(worktree),
-                        "changedFiles": ["task.txt"],
+                        "changedFiles": ["fallback.txt"],
                     }
                 },
-                "mergeQueue": ["claim-task"],
+                "mergeQueue": ["claim-fallback"],
             },
             ensure_ascii=False,
         ),
         encoding="utf-8",
     )
 
-    report = audit.build_report(worktree)
-    main_item = item_by_branch(report, "main")
-    task_item = item_by_branch(report, "codex/task")
-
-    assert report.root == str(root.resolve())
-    assert main_item.decision == "main"
-    assert task_item.claim_ids == ["claim-task"]
-    assert task_item.decision == "merge_ready"
-
-
-def test_build_report_defaults_registry_to_resolved_project_memory(tmp_path: Path) -> None:
-    root = init_repo(tmp_path / "repo")
-    memory_root = root / ".docs" / "project-memory"
-    memory_root.mkdir(parents=True)
-    registry = memory_root / "agent-registry.json"
-    registry.write_text(json.dumps({"workClaims": {}, "mergeQueue": []}), encoding="utf-8")
-
+    assert audit.resolve_registry(root, root) == registry
     report = audit.build_report(root)
+    item = item_by_branch(report, "codex/fallback")
 
-    assert report.root == str(root.resolve())
-    assert registry.exists()
-    assert item_by_branch(report, "main").decision == "main"
+    assert item.claim_ids == ["claim-fallback"]
+    assert item.branch == "codex/fallback"
+    assert item.decision == "merge_ready"
+
+
+def test_explicit_registry_path_keeps_old_dict_schema_compat(tmp_path: Path) -> None:
+    root = init_repo(tmp_path / "repo")
+    worktree = add_worktree(root, "dict-wt", "codex/dict")
+    commit_file(worktree, "dict.txt", "dict\n", "dict")
+    registry = write_registry(
+        root,
+        {
+            "claim-dict": {
+                "status": "ready_for_merge",
+                "branch": "codex/dict",
+                "worktree": str(worktree),
+                "changedFiles": ["dict.txt"],
+            }
+        },
+        ["claim-dict"],
+    )
+
+    report = audit.build_report(root, registry_path=registry)
+    item = item_by_branch(report, "codex/dict")
+
+    assert item.claim_ids == ["claim-dict"]
+    assert item.branch == "codex/dict"
+    assert item.worktree == str(worktree)
+    assert item.decision == "merge_ready"
 
 
 def test_ready_branch_recommends_cherry_pick_when_main_advanced(tmp_path: Path) -> None:

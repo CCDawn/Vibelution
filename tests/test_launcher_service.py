@@ -3852,6 +3852,29 @@ def test_launcher_cleanup_proof_requires_a_live_observation():
     )
 
 
+def test_runtime_manager_cleanup_proof_requires_closed_steady_state():
+    proof = {
+        "schemaVersion": 1,
+        "projectRoot": str(launcher_service.PROJECT_ROOT.resolve()),
+        "valid": True,
+    }
+    runtime_state = {
+        "command": {"activeCommandId": ""},
+        "workbench": {"desiredState": "open", "phase": "opening"},
+    }
+    workbench = {
+        "_cleanupObservationAvailable": True,
+        "observedState": "closed",
+        "lifecycleConsistency": "consistent",
+    }
+
+    assert not launcher_service._runtime_manager_cleanup_proof_is_valid(
+        proof,
+        runtime_state=runtime_state,
+        workbench=workbench,
+    )
+
+
 def test_terminate_managed_launcher_subtree_uses_known_pids_without_inventory_scan(monkeypatch):
     from core.runtime_manager import daemon, process_inventory
 
@@ -3965,6 +3988,71 @@ def test_terminate_managed_launcher_subtree_uses_valid_clean_proof_without_inven
 
     assert result["processCleanup"]["candidateScan"] == "cleanup_proof"
     assert result["cleanupPhases"]["usedCleanProof"] is True
+    assert result["cleanupPhases"]["usedFallback"] is False
+
+
+def test_terminate_managed_launcher_subtree_uses_runtime_state_clean_proof_without_inventory_scan(monkeypatch):
+    from core.runtime_manager import daemon, process_inventory
+
+    cleanup_proof = {
+        "schemaVersion": 1,
+        "projectRoot": str(launcher_service.PROJECT_ROOT.resolve()),
+        "cleanupMode": "runtime_manager_fast_path",
+        "reason": "launcher_stop_button",
+        "verifiedAt": "2026-08-16T15:00:00+00:00",
+        "valid": True,
+    }
+    runtime_state = {
+        "managerPid": 5151,
+        "daemonRunning": True,
+        "stateVersion": 12,
+        "updatedAt": "2026-08-16T15:00:03+00:00",
+        "command": {"activeCommandId": ""},
+        "workbench": {
+            "desiredState": "closed",
+            "observedState": "closed",
+            "phase": "steady",
+            "cleanupProof": cleanup_proof,
+        },
+    }
+    observed = {
+        "launcherStatePresent": False,
+        "observedState": "closed",
+        "backendPid": 0,
+        "backendLaunchPid": 0,
+        "browserWindowPid": 0,
+        "browserLaunchPid": 0,
+        "backendPort": 8002,
+        "backendPortListening": False,
+        "backendPortOwnerResidual": False,
+        "backendPortConflict": False,
+        "browserWindowAlive": False,
+        "lifecycleConsistency": "consistent",
+    }
+    workbench = {**runtime_state["workbench"], **observed}
+
+    monkeypatch.setattr(launcher_service, "_runtime_manager_state", lambda: runtime_state)
+    monkeypatch.setattr(launcher_service, "_observed_workbench", lambda: observed)
+    monkeypatch.setattr(launcher_service, "_workbench_payload", lambda **_kwargs: workbench)
+    monkeypatch.setattr(launcher_service, "_collect_trusted_launcher_cleanup_pids", lambda **_kwargs: set())
+    monkeypatch.setattr(launcher_service, "_load_launcher_cleanup_proof", lambda: {})
+    monkeypatch.setattr(launcher_service, "_invalidate_launcher_cleanup_proof", lambda: True)
+    monkeypatch.setattr(
+        process_inventory,
+        "terminate_workbench_processes",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("runtime-state clean proof must skip inventory")),
+    )
+    monkeypatch.setattr(daemon, "_mark_persistent_active_work_runs_force_stopped", lambda _reason: [])
+    monkeypatch.setattr(launcher_service, "load_pid", lambda: 0)
+
+    result = launcher_service._terminate_managed_launcher_subtree(
+        include_runtime_manager=False,
+        reason="launcher_start_button",
+    )
+
+    assert result["processCleanup"]["candidateScan"] == "cleanup_proof"
+    assert result["cleanupPhases"]["usedCleanProof"] is True
+    assert result["cleanupPhases"]["cleanProofSource"] == "runtime_state"
     assert result["cleanupPhases"]["usedFallback"] is False
 
 
