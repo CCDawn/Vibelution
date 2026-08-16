@@ -128,9 +128,48 @@ def _bundle_snapshot_for_entry(entry: StorageMigrationEntry) -> _SqliteBundleSna
             )
         if members:
             return _SqliteBundleSnapshot(main_path=destination, members=tuple(members))
-    if _is_sqlite_main(destination):
-        return _SqliteBundleSnapshot.from_main(destination)
     return None
+
+
+def _manifest_expected_bundle_snapshot(entry: StorageMigrationEntry) -> _SqliteBundleSnapshot:
+    stored = _bundle_snapshot_for_entry(entry)
+    if stored is not None:
+        return stored
+    destination = Path(entry.destination)
+    return _SqliteBundleSnapshot(
+        main_path=destination,
+        members=(
+            _SqliteBundleMember(
+                role="main",
+                present=True,
+                size=entry.size,
+                sha256=entry.sha256,
+            ),
+            _SqliteBundleMember(role="wal", present=False, size=0, sha256=""),
+            _SqliteBundleMember(role="shm", present=False, size=0, sha256=""),
+        ),
+    )
+
+
+def _sqlite_bundle_member_paths(main: Path) -> tuple[Path, Path, Path]:
+    return (
+        main,
+        main.with_name(main.name + "-wal"),
+        main.with_name(main.name + "-shm"),
+    )
+
+
+def _sqlite_destination_has_any_member(main: Path) -> bool:
+    return any(_io_path(path).is_file() for path in _sqlite_bundle_member_paths(main))
+
+
+def _sqlite_destination_has_orphan_sidecars(main: Path) -> bool:
+    main_io = _io_path(main)
+    if main_io.is_file():
+        return False
+    wal_io = _io_path(main.with_name(main.name + "-wal"))
+    shm_io = _io_path(main.with_name(main.name + "-shm"))
+    return wal_io.is_file() or shm_io.is_file()
 
 
 def _expected_destination_bundle_fingerprint(entry: StorageMigrationEntry) -> str:
@@ -714,15 +753,21 @@ def _copy_sqlite_bundle_entry(entry: StorageMigrationEntry) -> tuple[int, int]:
                     f"sqlite quick_check failed after reuse: {destination} ({detail})"
                 )
             return 0, 1
-        _cleanup_sqlite_bundle_at(destination)
         raise StorageMigrationError(
             f"destination conflicts with sqlite bundle: {destination} "
+            f"({SQLITE_BUNDLE_DESTINATION_CONFLICT})"
+        )
+
+    if _sqlite_destination_has_orphan_sidecars(destination):
+        raise StorageMigrationError(
+            f"destination has orphan sqlite sidecars: {destination} "
             f"({SQLITE_BUNDLE_DESTINATION_CONFLICT})"
         )
 
     staging_dir = destination.parent / f".migration-staging-{os.getpid()}-{time.time_ns()}"
     staging_dir.mkdir(parents=True, exist_ok=False)
     staging_main = staging_dir / destination.name
+    promoted_members: tuple[Path, ...] = ()
     try:
         for bundle_source in _sqlite_bundle_paths(source):
             bundle_source_io = _io_path(bundle_source)
@@ -752,10 +797,10 @@ def _copy_sqlite_bundle_entry(entry: StorageMigrationEntry) -> tuple[int, int]:
             raise StorageMigrationError(
                 f"sqlite quick_check failed on staged bundle: {staging_main} ({detail})"
             )
-        _promote_sqlite_bundle(staging_dir, destination)
+        promoted_members = _promote_sqlite_bundle(staging_dir, destination)
         destination_bundle = _SqliteBundleSnapshot.from_main(destination)
         if destination_bundle.fingerprint() != expected_fingerprint:
-            _cleanup_sqlite_bundle_at(destination)
+            _cleanup_attempt_sqlite_members(promoted_members)
             raise StorageMigrationError(
                 f"destination sqlite bundle verification failed: {destination} "
                 f"({SQLITE_BUNDLE_CHANGED_DURING_COPY})"
@@ -763,35 +808,47 @@ def _copy_sqlite_bundle_entry(entry: StorageMigrationEntry) -> tuple[int, int]:
         _verify_sqlite_bundle_entry(entry, source_after, destination_bundle)
         ok, detail = _sqlite_quick_check(destination)
         if not ok:
-            _cleanup_sqlite_bundle_at(destination)
+            _cleanup_attempt_sqlite_members(promoted_members)
             raise StorageMigrationError(
                 f"sqlite quick_check failed after copy: {destination} ({detail})"
             )
         return 1, 0
     except Exception:
-        _cleanup_sqlite_bundle_at(destination)
+        _cleanup_attempt_sqlite_members(promoted_members)
         raise
     finally:
         shutil.rmtree(staging_dir, ignore_errors=True)
 
 
-def _promote_sqlite_bundle(staging_dir: Path, destination: Path) -> None:
-    for bundle_path in _sqlite_bundle_paths(staging_dir / destination.name):
-        staged = staging_dir / bundle_path.name
-        staged_io = _io_path(staged)
-        if not staged_io.is_file():
-            continue
-        final_path = destination.parent / bundle_path.name
-        final_io = _io_path(final_path)
-        final_io.parent.mkdir(parents=True, exist_ok=True)
-        os.replace(staged_io, final_io)
+def _promote_sqlite_bundle(staging_dir: Path, destination: Path) -> tuple[Path, ...]:
+    promoted: list[Path] = []
+    try:
+        for bundle_path in _sqlite_bundle_paths(staging_dir / destination.name):
+            staged = staging_dir / bundle_path.name
+            staged_io = _io_path(staged)
+            if not staged_io.is_file():
+                continue
+            final_path = destination.parent / bundle_path.name
+            final_io = _io_path(final_path)
+            if final_io.exists():
+                raise StorageMigrationError(
+                    f"destination sqlite bundle member already exists: {final_path} "
+                    f"({SQLITE_BUNDLE_DESTINATION_CONFLICT})"
+                )
+            final_io.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(staged_io, final_io)
+            promoted.append(final_path.resolve())
+        return tuple(promoted)
+    except Exception:
+        _cleanup_attempt_sqlite_members(promoted)
+        raise
 
 
-def _cleanup_sqlite_bundle_at(main: Path) -> None:
-    for bundle_path in _sqlite_bundle_paths(main):
-        bundle_io = _io_path(bundle_path)
-        if bundle_io.is_file():
-            bundle_io.unlink(missing_ok=True)
+def _cleanup_attempt_sqlite_members(members: Iterable[Path]) -> None:
+    for member in members:
+        member_io = _io_path(member)
+        if member_io.is_file():
+            member_io.unlink(missing_ok=True)
 
 
 def _verify_sqlite_bundle_entry(
@@ -988,32 +1045,14 @@ def _manifest_bundle_member_paths(
 
 def _manifest_entry_bundle_changed(entry: StorageMigrationEntry) -> bool:
     destination = Path(entry.destination)
-    destination_io = _io_path(destination)
-    if not destination_io.is_file():
-        return True
     if _is_sqlite_main(destination) or entry.bundle_fingerprint or entry.bundle_members:
         expected = _manifest_expected_bundle_snapshot(entry)
         actual = _SqliteBundleSnapshot.from_main(destination)
         return not _bundle_snapshots_equal(expected, actual)
+    destination_io = _io_path(destination)
+    if not destination_io.is_file():
+        return True
     return destination_io.stat().st_size != entry.size or _sha256_file(destination) != entry.sha256
-
-
-def _manifest_expected_bundle_snapshot(entry: StorageMigrationEntry) -> _SqliteBundleSnapshot:
-    stored = _bundle_snapshot_for_entry(entry)
-    if stored is not None:
-        return stored
-    destination = Path(entry.destination)
-    members: list[_SqliteBundleMember] = [
-        _SqliteBundleMember(
-            role="main",
-            present=True,
-            size=entry.size,
-            sha256=entry.sha256,
-        ),
-        _SqliteBundleMember(role="wal", present=False, size=0, sha256=""),
-        _SqliteBundleMember(role="shm", present=False, size=0, sha256=""),
-    ]
-    return _SqliteBundleSnapshot(main_path=destination, members=tuple(members))
 
 
 def _iter_source_files(root: Path) -> Iterable[Path]:
@@ -1043,18 +1082,25 @@ def _destination_conflicts(entries: Iterable[StorageMigrationEntry]) -> list[str
     for entry in entries:
         destination = Path(entry.destination)
         destination_io = _io_path(destination)
-        if not destination_io.exists():
-            continue
-        if not destination_io.is_file():
-            conflicts.append(f"not a file: {destination}")
-            continue
-        if _is_sqlite_main(destination) or entry.bundle_fingerprint:
+        if _is_sqlite_main(Path(entry.source)) or entry.bundle_fingerprint:
+            if _sqlite_destination_has_orphan_sidecars(destination):
+                conflicts.append(
+                    f"orphan sqlite sidecar: {destination} ({SQLITE_BUNDLE_DESTINATION_CONFLICT})"
+                )
+                continue
+            if not _sqlite_destination_has_any_member(destination):
+                continue
             expected = _expected_destination_bundle_fingerprint(entry)
             actual = _destination_bundle_fingerprint(entry)
             if actual != expected:
                 conflicts.append(
                     f"different sqlite bundle: {destination} ({SQLITE_BUNDLE_DESTINATION_CONFLICT})"
                 )
+            continue
+        if not destination_io.exists():
+            continue
+        if not destination_io.is_file():
+            conflicts.append(f"not a file: {destination}")
             continue
         if destination_io.stat().st_size != entry.size or _sha256_file(destination) != entry.sha256:
             conflicts.append(f"different content: {destination}")

@@ -12,6 +12,7 @@ from core.infrastructure.storage_migration import (
     StorageMigrationEntry,
     StorageMigrationError,
     apply_storage_migration,
+    assess_post_cutover_delta,
     assess_storage_migration_readiness,
     plan_storage_migration,
     rollback_storage_switch,
@@ -761,3 +762,188 @@ def test_readiness_blocked_log_excludes_absolute_paths(tmp_path, monkeypatch):
     assert "projectRoot" not in payload
     serialized = json.dumps(payload)
     assert str(project.resolve()) not in serialized
+
+
+def test_sqlite_destination_conflict_preserves_preexisting_bundle(tmp_path, monkeypatch):
+    project, _projects_home, data_home = _project(tmp_path, monkeypatch)
+    database = data_home / "workspace" / "state.sqlite"
+    database.parent.mkdir(parents=True)
+    connection = _sqlite_database(database)
+    connection.execute("CREATE TABLE t (value INTEGER)")
+    connection.execute("INSERT INTO t VALUES (1)")
+    connection.commit()
+    connection.execute("PRAGMA wal_checkpoint(FULL)")
+    connection.execute("INSERT INTO t VALUES (2)")
+    connection.commit()
+    connection.close()
+    target = resolve_project_storage_paths(project)
+    destination = target.data / "workspace" / "state.sqlite"
+    destination.parent.mkdir(parents=True)
+    shutil.copy2(database, destination)
+    destination_wal = destination.with_name(destination.name + "-wal")
+    if destination_wal.exists():
+        destination_wal.unlink()
+    before_main = destination.read_bytes()
+    before_wal = destination_wal.read_bytes() if destination_wal.exists() else b""
+
+    with pytest.raises(StorageMigrationError, match="destination_conflict"):
+        apply_storage_migration(project)
+
+    assert destination.read_bytes() == before_main
+    assert (
+        destination_wal.read_bytes() if destination_wal.exists() else b""
+    ) == before_wal
+    assert not storage_migration_state_path(target).exists()
+
+
+def test_readiness_blocks_orphan_sqlite_sidecars_without_main(tmp_path, monkeypatch):
+    project, _projects_home, data_home = _project(tmp_path, monkeypatch)
+    database = data_home / "workspace" / "state.sqlite"
+    database.parent.mkdir(parents=True)
+    connection = _sqlite_database(database)
+    connection.execute("CREATE TABLE t (value INTEGER)")
+    connection.execute("INSERT INTO t VALUES (1)")
+    connection.commit()
+    connection.close()
+    target = resolve_project_storage_paths(project)
+    orphan_wal = target.data / "workspace" / "state.sqlite-wal"
+    orphan_wal.parent.mkdir(parents=True)
+    orphan_wal.write_bytes(b"orphan-wal")
+
+    readiness = assess_storage_migration_readiness(project)
+
+    assert readiness["ready"] is False
+    assert any(blocker["code"] == "destination_conflict" for blocker in readiness["blockers"])
+
+
+def test_apply_blocks_orphan_sqlite_sidecars_without_main(tmp_path, monkeypatch):
+    project, _projects_home, data_home = _project(tmp_path, monkeypatch)
+    database = data_home / "workspace" / "state.sqlite"
+    database.parent.mkdir(parents=True)
+    connection = _sqlite_database(database)
+    connection.execute("CREATE TABLE t (value INTEGER)")
+    connection.execute("INSERT INTO t VALUES (1)")
+    connection.commit()
+    connection.close()
+    target = resolve_project_storage_paths(project)
+    orphan_wal = target.data / "workspace" / "state.sqlite-wal"
+    orphan_wal.parent.mkdir(parents=True)
+    orphan_wal.write_bytes(b"orphan-wal")
+
+    with pytest.raises(StorageMigrationError, match="destination_conflict"):
+        apply_storage_migration(project)
+
+    assert orphan_wal.read_bytes() == b"orphan-wal"
+    assert not storage_migration_state_path(target).exists()
+
+
+def test_sqlite_promote_is_no_clobber_when_destination_member_appears(tmp_path, monkeypatch):
+    project, _projects_home, data_home = _project(tmp_path, monkeypatch)
+    database = data_home / "workspace" / "state.sqlite"
+    database.parent.mkdir(parents=True)
+    connection = _sqlite_database(database)
+    connection.execute("CREATE TABLE t (value INTEGER)")
+    connection.execute("INSERT INTO t VALUES (1)")
+    connection.commit()
+    connection.close()
+    target = resolve_project_storage_paths(project)
+    destination = target.data / "workspace" / "state.sqlite"
+    destination_wal = destination.with_name(destination.name + "-wal")
+    original_promote = storage_migration_module._promote_sqlite_bundle
+
+    def promote_with_concurrent_destination_member(staging_dir, dest):
+        destination_wal.parent.mkdir(parents=True, exist_ok=True)
+        destination_wal.write_bytes(b"concurrent-wal")
+        return original_promote(staging_dir, dest)
+
+    monkeypatch.setattr(
+        storage_migration_module,
+        "_promote_sqlite_bundle",
+        promote_with_concurrent_destination_member,
+    )
+
+    with pytest.raises(
+        StorageMigrationError,
+        match=storage_migration_module.SQLITE_BUNDLE_DESTINATION_CONFLICT,
+    ):
+        apply_storage_migration(project)
+
+    assert destination_wal.read_bytes() == b"concurrent-wal"
+    assert not destination.exists()
+    assert not storage_migration_state_path(target).exists()
+
+
+def test_rollback_delta_old_manifest_expected_uses_manifest_main_only(tmp_path, monkeypatch):
+    project, _projects_home, data_home = _project(tmp_path, monkeypatch)
+    database = data_home / "workspace" / "state.sqlite"
+    database.parent.mkdir(parents=True)
+    connection = _sqlite_database(database)
+    connection.execute("CREATE TABLE t (value INTEGER)")
+    connection.execute("INSERT INTO t VALUES (1)")
+    connection.commit()
+    connection.close()
+    target = resolve_project_storage_paths(project)
+    apply_storage_migration(project)
+    marker = json.loads(storage_migration_state_path(target).read_text(encoding="utf-8"))
+    manifest_path = Path(str(marker["manifestPath"]))
+    rewritten: list[str] = []
+    for line in manifest_path.read_text(encoding="utf-8").splitlines():
+        row = json.loads(line)
+        if str(row.get("relative_path") or "").endswith("state.sqlite"):
+            row.pop("bundle_fingerprint", None)
+            row.pop("bundle_members", None)
+        rewritten.append(json.dumps(row, ensure_ascii=False, sort_keys=True))
+    manifest_path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
+    entries = storage_migration_module._read_manifest_entries(manifest_path)
+    sqlite_entry = next(entry for entry in entries if entry.relative_path.endswith("state.sqlite"))
+    expected = storage_migration_module._manifest_expected_bundle_snapshot(sqlite_entry)
+
+    assert expected.members[1].present is False
+    assert expected.members[2].present is False
+    delta = assess_post_cutover_delta(target, marker)
+
+    assert delta["detected"] is True
+    assert delta["reasonCode"] == "reverse_delta_reconcile_required"
+
+
+def test_sqlite_copy_failure_cleans_only_attempt_created_members(tmp_path, monkeypatch):
+    project, _projects_home, data_home = _project(tmp_path, monkeypatch)
+    database = data_home / "workspace" / "state.sqlite"
+    database.parent.mkdir(parents=True)
+    connection = _sqlite_database(database)
+    connection.execute("CREATE TABLE t (value INTEGER)")
+    connection.execute("INSERT INTO t VALUES (1)")
+    connection.commit()
+    connection.close()
+    target = resolve_project_storage_paths(project)
+    decoy = target.data / "workspace" / "decoy.sqlite"
+    decoy.parent.mkdir(parents=True)
+    decoy.write_bytes(b"decoy-main")
+    decoy_wal = decoy.with_name(decoy.name + "-wal")
+    decoy_wal.write_bytes(b"decoy-wal")
+    destination = target.data / "workspace" / "state.sqlite"
+    destination_wal = destination.with_name(destination.name + "-wal")
+    original_promote = storage_migration_module._promote_sqlite_bundle
+
+    def promote_with_wal_race(staging_dir, dest):
+        destination_wal.parent.mkdir(parents=True, exist_ok=True)
+        destination_wal.write_bytes(b"race-wal")
+        return original_promote(staging_dir, dest)
+
+    monkeypatch.setattr(
+        storage_migration_module,
+        "_promote_sqlite_bundle",
+        promote_with_wal_race,
+    )
+
+    with pytest.raises(
+        StorageMigrationError,
+        match=storage_migration_module.SQLITE_BUNDLE_DESTINATION_CONFLICT,
+    ):
+        apply_storage_migration(project)
+
+    assert decoy.read_bytes() == b"decoy-main"
+    assert decoy_wal.read_bytes() == b"decoy-wal"
+    assert not destination.exists()
+    assert destination_wal.read_bytes() == b"race-wal"
+    assert not storage_migration_state_path(target).exists()
