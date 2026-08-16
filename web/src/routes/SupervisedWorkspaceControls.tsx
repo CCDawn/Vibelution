@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { fetchJson } from "../api/client";
 import { fetchPublicConfig, updateIntakeMode } from "../api/config";
+import { fetchEvolutionOverview } from "../api/evolution";
 import { queryKeys } from "../api/queryKeys";
 import { EvolutionOverview } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
@@ -58,7 +58,7 @@ export function SupervisedWorkspaceControls({
   });
   const overviewQuery = useQuery({
     queryKey: queryKeys.evolutionOverview(),
-    queryFn: () => fetchJson<EvolutionOverview>("/api/evolution/overview"),
+    queryFn: () => fetchEvolutionOverview<EvolutionOverview>(),
     enabled: shouldFetchOverview,
     refetchInterval: resolvePollingInterval(pageVisible, 8_000),
     refetchIntervalInBackground: false,
