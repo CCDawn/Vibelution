@@ -1,11 +1,7 @@
-import pytest
 from fastapi.testclient import TestClient
 
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
-
-pytestmark = pytest.mark.serial
-
 
 client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
 
