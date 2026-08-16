@@ -26,6 +26,8 @@ from vibelution_storage import (
 )
 
 CACHE_POLICY_COLD_REBUILD = "cold_rebuild"
+SQLITE_BUNDLE_CHANGED_DURING_COPY = "sqlite_bundle_changed_during_copy"
+SQLITE_BUNDLE_DESTINATION_CONFLICT = "sqlite_bundle_destination_conflict"
 _ACTIVE_CLAIM_STATUSES = frozenset({"active", "claimed", "in_progress", "running"})
 _SQLITE_MAIN_SUFFIXES = (".sqlite", ".sqlite3", ".db")
 
@@ -42,6 +44,137 @@ class StorageMigrationEntry:
     relative_path: str
     size: int
     sha256: str
+    bundle_fingerprint: str = ""
+    bundle_members: tuple[dict[str, object], ...] = ()
+
+
+@dataclass(frozen=True)
+class _SqliteBundleMember:
+    role: str
+    present: bool
+    size: int
+    sha256: str
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "role": self.role,
+            "present": self.present,
+            "size": self.size,
+            "sha256": self.sha256,
+        }
+
+
+@dataclass(frozen=True)
+class _SqliteBundleSnapshot:
+    main_path: Path
+    members: tuple[_SqliteBundleMember, ...]
+
+    @classmethod
+    def from_main(cls, main: Path) -> "_SqliteBundleSnapshot":
+        members: list[_SqliteBundleMember] = []
+        for role, path in (
+            ("main", main),
+            ("wal", main.with_name(main.name + "-wal")),
+            ("shm", main.with_name(main.name + "-shm")),
+        ):
+            path_io = _io_path(path)
+            if path_io.is_file():
+                members.append(
+                    _SqliteBundleMember(
+                        role=role,
+                        present=True,
+                        size=int(path_io.stat().st_size),
+                        sha256=_sha256_file(path),
+                    )
+                )
+            else:
+                members.append(_SqliteBundleMember(role=role, present=False, size=0, sha256=""))
+        return cls(main_path=main, members=tuple(members))
+
+    def fingerprint(self) -> str:
+        digest = hashlib.sha256()
+        for member in self.members:
+            digest.update(member.role.encode("ascii"))
+            digest.update(b"\0")
+            digest.update(str(member.present).lower().encode("ascii"))
+            digest.update(b"\0")
+            digest.update(str(member.size).encode("ascii"))
+            digest.update(b"\0")
+            digest.update(member.sha256.encode("ascii"))
+            digest.update(b"\n")
+        return digest.hexdigest()
+
+    def member_dicts(self) -> tuple[dict[str, object], ...]:
+        return tuple(member.as_dict() for member in self.members)
+
+    def main_member(self) -> _SqliteBundleMember:
+        return self.members[0]
+
+
+def _bundle_snapshot_for_entry(entry: StorageMigrationEntry) -> _SqliteBundleSnapshot | None:
+    destination = Path(entry.destination)
+    if entry.bundle_members:
+        members: list[_SqliteBundleMember] = []
+        for raw in entry.bundle_members:
+            if not isinstance(raw, dict):
+                continue
+            members.append(
+                _SqliteBundleMember(
+                    role=str(raw.get("role") or ""),
+                    present=bool(raw.get("present")),
+                    size=int(raw.get("size") or 0),
+                    sha256=str(raw.get("sha256") or ""),
+                )
+            )
+        if members:
+            return _SqliteBundleSnapshot(main_path=destination, members=tuple(members))
+    if _is_sqlite_main(destination):
+        return _SqliteBundleSnapshot.from_main(destination)
+    return None
+
+
+def _expected_destination_bundle_fingerprint(entry: StorageMigrationEntry) -> str:
+    if entry.bundle_fingerprint:
+        return entry.bundle_fingerprint
+    return _SqliteBundleSnapshot.from_main(Path(entry.source)).fingerprint()
+
+
+def _destination_bundle_fingerprint(entry: StorageMigrationEntry) -> str:
+    return _SqliteBundleSnapshot.from_main(Path(entry.destination)).fingerprint()
+
+
+def _bundle_snapshots_equal(left: _SqliteBundleSnapshot, right: _SqliteBundleSnapshot) -> bool:
+    return left.fingerprint() == right.fingerprint()
+
+
+def _entry_from_source_path(
+    *,
+    source: Path,
+    destination: Path,
+    category: str,
+    relative_path: str,
+) -> StorageMigrationEntry:
+    if _is_sqlite_main(source):
+        bundle = _SqliteBundleSnapshot.from_main(source)
+        main = bundle.main_member()
+        return StorageMigrationEntry(
+            source=str(source.resolve()),
+            destination=str(destination),
+            category=category,
+            relative_path=relative_path,
+            size=main.size,
+            sha256=main.sha256,
+            bundle_fingerprint=bundle.fingerprint(),
+            bundle_members=bundle.member_dicts(),
+        )
+    return StorageMigrationEntry(
+        source=str(source.resolve()),
+        destination=str(destination),
+        category=category,
+        relative_path=relative_path,
+        size=_io_path(source).stat().st_size,
+        sha256=_sha256_file(source),
+    )
 
 
 @dataclass(frozen=True)
@@ -246,26 +379,19 @@ def assess_post_cutover_delta(
             "reasonCode": "manifest_unreadable",
             "error": str(exc),
         }
-    manifest_destinations = {
-        os.path.normcase(str(Path(entry.destination).resolve())) for entry in entries
-    }
+    manifest_paths = _manifest_tracked_paths(entries)
     changed: list[str] = []
     for entry in entries:
-        destination = Path(entry.destination)
-        destination_io = _io_path(destination)
-        if not destination_io.is_file():
-            changed.append(entry.relative_path)
-            continue
-        if destination_io.stat().st_size != entry.size or _sha256_file(destination) != entry.sha256:
+        if _manifest_entry_bundle_changed(entry):
             changed.append(entry.relative_path)
     extra: list[str] = []
     completed_at = _parse_iso_timestamp(marker.get("completedAt"))
-    for root in (target.data, target.runtime, target.logs):
+    for root in (target.data, target.runtime, target.logs, target.memory):
         if not root.exists():
             continue
-        for path in _iter_source_files(root):
+        for path in _iter_persistent_domain_files(root):
             key = os.path.normcase(str(path))
-            if key in manifest_destinations:
+            if key in manifest_paths:
                 continue
             relative = _relative_under_root(path, root)
             if _is_ephemeral_source_file(relative):
@@ -339,24 +465,22 @@ def plan_storage_migration(
                 continue
             destination = (destination_root / relative).resolve()
             try:
-                size = _io_path(source).stat().st_size
-                sha256 = _sha256_file(source)
+                entry = _entry_from_source_path(
+                    source=source,
+                    destination=destination,
+                    category=category,
+                    relative_path=relative.as_posix(),
+                )
             except OSError as exc:
                 raise StorageMigrationError(
                     f"cannot read legacy source during migration inventory: {source}"
                 ) from exc
-            entry = StorageMigrationEntry(
-                source=str(source.resolve()),
-                destination=str(destination),
-                category=category,
-                relative_path=relative.as_posix(),
-                size=size,
-                sha256=sha256,
-            )
             key = os.path.normcase(str(destination))
             existing = entries_by_destination.get(key)
             if existing is not None and (
-                existing.size != entry.size or existing.sha256 != entry.sha256
+                existing.size != entry.size
+                or existing.sha256 != entry.sha256
+                or existing.bundle_fingerprint != entry.bundle_fingerprint
             ):
                 if existing.category == "operator_data" and category == "project_workspace":
                     destination = (
@@ -366,13 +490,11 @@ def plan_storage_migration(
                         / "project_workspace"
                         / relative
                     ).resolve()
-                    entry = StorageMigrationEntry(
-                        source=entry.source,
-                        destination=str(destination),
+                    entry = _entry_from_source_path(
+                        source=source,
+                        destination=destination,
                         category="project_workspace_conflict_archive",
                         relative_path=entry.relative_path,
-                        size=entry.size,
-                        sha256=entry.sha256,
                     )
                     key = os.path.normcase(str(destination))
                     if key in entries_by_destination:
@@ -544,38 +666,14 @@ def _copy_and_verify_entries(entries: Iterable[StorageMigrationEntry]) -> tuple[
     reused = 0
     for entry in entries:
         source = Path(entry.source)
+        if _is_sqlite_main(source):
+            entry_copied, entry_reused = _copy_sqlite_bundle_entry(entry)
+            copied += entry_copied
+            reused += entry_reused
+            continue
         destination = Path(entry.destination)
         destination_io = _io_path(destination)
         destination_io.parent.mkdir(parents=True, exist_ok=True)
-        if _is_sqlite_main(source):
-            ok, detail = _sqlite_quick_check(source)
-            if not ok:
-                raise StorageMigrationError(
-                    f"sqlite quick_check failed before copy: {source} ({detail})"
-                )
-            if destination_io.exists():
-                reused += 1
-            else:
-                for bundle_source in _sqlite_bundle_paths(source):
-                    bundle_source_io = _io_path(bundle_source)
-                    if not bundle_source_io.is_file():
-                        continue
-                    bundle_destination = destination.parent / bundle_source.name
-                    try:
-                        shutil.copy2(bundle_source_io, _io_path(bundle_destination))
-                    except OSError as exc:
-                        raise StorageMigrationError(
-                            "failed to copy legacy source during storage migration: "
-                            f"{source} -> {destination}"
-                        ) from exc
-                copied += 1
-            _verify_entry(entry)
-            ok, detail = _sqlite_quick_check(destination)
-            if not ok:
-                raise StorageMigrationError(
-                    f"sqlite quick_check failed after copy: {destination} ({detail})"
-                )
-            continue
         if destination_io.exists():
             reused += 1
         else:
@@ -589,6 +687,128 @@ def _copy_and_verify_entries(entries: Iterable[StorageMigrationEntry]) -> tuple[
             copied += 1
         _verify_entry(entry)
     return copied, reused
+
+
+def _copy_sqlite_bundle_entry(entry: StorageMigrationEntry) -> tuple[int, int]:
+    source = Path(entry.source)
+    destination = Path(entry.destination)
+    destination_io = _io_path(destination)
+    destination_io.parent.mkdir(parents=True, exist_ok=True)
+    expected_fingerprint = _expected_destination_bundle_fingerprint(entry)
+    source_before = _SqliteBundleSnapshot.from_main(source)
+    if source_before.fingerprint() != expected_fingerprint:
+        raise StorageMigrationError(
+            f"legacy source changed during copy: {source} ({SQLITE_BUNDLE_CHANGED_DURING_COPY})"
+        )
+    ok, detail = _sqlite_quick_check(source)
+    if not ok:
+        raise StorageMigrationError(f"sqlite quick_check failed before copy: {source} ({detail})")
+
+    if destination_io.exists():
+        destination_bundle = _SqliteBundleSnapshot.from_main(destination)
+        if destination_bundle.fingerprint() == expected_fingerprint:
+            _verify_sqlite_bundle_entry(entry, source_before, destination_bundle)
+            ok, detail = _sqlite_quick_check(destination)
+            if not ok:
+                raise StorageMigrationError(
+                    f"sqlite quick_check failed after reuse: {destination} ({detail})"
+                )
+            return 0, 1
+        _cleanup_sqlite_bundle_at(destination)
+        raise StorageMigrationError(
+            f"destination conflicts with sqlite bundle: {destination} "
+            f"({SQLITE_BUNDLE_DESTINATION_CONFLICT})"
+        )
+
+    staging_dir = destination.parent / f".migration-staging-{os.getpid()}-{time.time_ns()}"
+    staging_dir.mkdir(parents=True, exist_ok=False)
+    staging_main = staging_dir / destination.name
+    try:
+        for bundle_source in _sqlite_bundle_paths(source):
+            bundle_source_io = _io_path(bundle_source)
+            if not bundle_source_io.is_file():
+                continue
+            try:
+                shutil.copy2(bundle_source_io, staging_dir / bundle_source.name)
+            except OSError as exc:
+                raise StorageMigrationError(
+                    "failed to copy legacy sqlite bundle during storage migration: "
+                    f"{source} -> {destination}"
+                ) from exc
+        staging_bundle = _SqliteBundleSnapshot.from_main(staging_main)
+        if staging_bundle.fingerprint() != source_before.fingerprint():
+            raise StorageMigrationError(
+                f"sqlite bundle changed during staging copy: {source} "
+                f"({SQLITE_BUNDLE_CHANGED_DURING_COPY})"
+            )
+        source_after = _SqliteBundleSnapshot.from_main(source)
+        if source_after.fingerprint() != source_before.fingerprint():
+            raise StorageMigrationError(
+                f"legacy sqlite bundle changed during copy: {source} "
+                f"({SQLITE_BUNDLE_CHANGED_DURING_COPY})"
+            )
+        ok, detail = _sqlite_quick_check(staging_main)
+        if not ok:
+            raise StorageMigrationError(
+                f"sqlite quick_check failed on staged bundle: {staging_main} ({detail})"
+            )
+        _promote_sqlite_bundle(staging_dir, destination)
+        destination_bundle = _SqliteBundleSnapshot.from_main(destination)
+        if destination_bundle.fingerprint() != expected_fingerprint:
+            _cleanup_sqlite_bundle_at(destination)
+            raise StorageMigrationError(
+                f"destination sqlite bundle verification failed: {destination} "
+                f"({SQLITE_BUNDLE_CHANGED_DURING_COPY})"
+            )
+        _verify_sqlite_bundle_entry(entry, source_after, destination_bundle)
+        ok, detail = _sqlite_quick_check(destination)
+        if not ok:
+            _cleanup_sqlite_bundle_at(destination)
+            raise StorageMigrationError(
+                f"sqlite quick_check failed after copy: {destination} ({detail})"
+            )
+        return 1, 0
+    except Exception:
+        _cleanup_sqlite_bundle_at(destination)
+        raise
+    finally:
+        shutil.rmtree(staging_dir, ignore_errors=True)
+
+
+def _promote_sqlite_bundle(staging_dir: Path, destination: Path) -> None:
+    for bundle_path in _sqlite_bundle_paths(staging_dir / destination.name):
+        staged = staging_dir / bundle_path.name
+        staged_io = _io_path(staged)
+        if not staged_io.is_file():
+            continue
+        final_path = destination.parent / bundle_path.name
+        final_io = _io_path(final_path)
+        final_io.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(staged_io, final_io)
+
+
+def _cleanup_sqlite_bundle_at(main: Path) -> None:
+    for bundle_path in _sqlite_bundle_paths(main):
+        bundle_io = _io_path(bundle_path)
+        if bundle_io.is_file():
+            bundle_io.unlink(missing_ok=True)
+
+
+def _verify_sqlite_bundle_entry(
+    entry: StorageMigrationEntry,
+    source_bundle: _SqliteBundleSnapshot,
+    destination_bundle: _SqliteBundleSnapshot,
+) -> None:
+    expected_fingerprint = _expected_destination_bundle_fingerprint(entry)
+    if source_bundle.fingerprint() != expected_fingerprint:
+        raise StorageMigrationError(
+            f"legacy source changed during copy: {entry.source} ({SQLITE_BUNDLE_CHANGED_DURING_COPY})"
+        )
+    if destination_bundle.fingerprint() != expected_fingerprint:
+        raise StorageMigrationError(
+            f"destination verification failed: {entry.destination} "
+            f"({SQLITE_BUNDLE_CHANGED_DURING_COPY})"
+        )
 
 
 def _register_project_memory_source(
@@ -721,6 +941,81 @@ def _unlock_handle(handle) -> None:
         pass
 
 
+def _iter_persistent_domain_files(root: Path) -> Iterable[Path]:
+    root = root.resolve()
+    for current, directory_names, file_names in os.walk(root, followlinks=False):
+        current_path = Path(current)
+        for directory_name in list(directory_names):
+            candidate = current_path / directory_name
+            if candidate.is_symlink():
+                raise StorageMigrationError(f"symlinked directory is not migrated: {candidate}")
+        for file_name in file_names:
+            candidate = current_path / file_name
+            if candidate.is_symlink():
+                raise StorageMigrationError(f"symlinked file is not migrated: {candidate}")
+            if candidate.is_file():
+                yield candidate.resolve()
+
+
+def _manifest_tracked_paths(entries: Iterable[StorageMigrationEntry]) -> set[str]:
+    tracked: set[str] = set()
+    for entry in entries:
+        destination = Path(entry.destination)
+        tracked.add(os.path.normcase(str(destination.resolve())))
+        if _is_sqlite_main(destination) or entry.bundle_members or entry.bundle_fingerprint:
+            for member in _manifest_bundle_member_paths(destination, entry):
+                tracked.add(os.path.normcase(str(member.resolve())))
+    return tracked
+
+
+def _manifest_bundle_member_paths(
+    destination: Path,
+    entry: StorageMigrationEntry,
+) -> tuple[Path, ...]:
+    if entry.bundle_members:
+        paths: list[Path] = [destination]
+        for raw in entry.bundle_members:
+            if not isinstance(raw, dict):
+                continue
+            role = str(raw.get("role") or "")
+            if role == "wal":
+                paths.append(destination.with_name(destination.name + "-wal"))
+            elif role == "shm":
+                paths.append(destination.with_name(destination.name + "-shm"))
+        return tuple(dict.fromkeys(paths))
+    return _sqlite_bundle_paths(destination)
+
+
+def _manifest_entry_bundle_changed(entry: StorageMigrationEntry) -> bool:
+    destination = Path(entry.destination)
+    destination_io = _io_path(destination)
+    if not destination_io.is_file():
+        return True
+    if _is_sqlite_main(destination) or entry.bundle_fingerprint or entry.bundle_members:
+        expected = _manifest_expected_bundle_snapshot(entry)
+        actual = _SqliteBundleSnapshot.from_main(destination)
+        return not _bundle_snapshots_equal(expected, actual)
+    return destination_io.stat().st_size != entry.size or _sha256_file(destination) != entry.sha256
+
+
+def _manifest_expected_bundle_snapshot(entry: StorageMigrationEntry) -> _SqliteBundleSnapshot:
+    stored = _bundle_snapshot_for_entry(entry)
+    if stored is not None:
+        return stored
+    destination = Path(entry.destination)
+    members: list[_SqliteBundleMember] = [
+        _SqliteBundleMember(
+            role="main",
+            present=True,
+            size=entry.size,
+            sha256=entry.sha256,
+        ),
+        _SqliteBundleMember(role="wal", present=False, size=0, sha256=""),
+        _SqliteBundleMember(role="shm", present=False, size=0, sha256=""),
+    ]
+    return _SqliteBundleSnapshot(main_path=destination, members=tuple(members))
+
+
 def _iter_source_files(root: Path) -> Iterable[Path]:
     root = root.resolve()
     for current, directory_names, file_names in os.walk(root, followlinks=False):
@@ -753,6 +1048,14 @@ def _destination_conflicts(entries: Iterable[StorageMigrationEntry]) -> list[str
         if not destination_io.is_file():
             conflicts.append(f"not a file: {destination}")
             continue
+        if _is_sqlite_main(destination) or entry.bundle_fingerprint:
+            expected = _expected_destination_bundle_fingerprint(entry)
+            actual = _destination_bundle_fingerprint(entry)
+            if actual != expected:
+                conflicts.append(
+                    f"different sqlite bundle: {destination} ({SQLITE_BUNDLE_DESTINATION_CONFLICT})"
+                )
+            continue
         if destination_io.stat().st_size != entry.size or _sha256_file(destination) != entry.sha256:
             conflicts.append(f"different content: {destination}")
     return conflicts
@@ -765,6 +1068,11 @@ def _verify_entry(entry: StorageMigrationEntry) -> None:
     destination_io = _io_path(destination)
     if not source_io.is_file() or not destination_io.is_file():
         raise StorageMigrationError(f"migration file disappeared: {entry.relative_path}")
+    if _is_sqlite_main(source) or entry.bundle_fingerprint:
+        source_bundle = _SqliteBundleSnapshot.from_main(source)
+        destination_bundle = _SqliteBundleSnapshot.from_main(destination)
+        _verify_sqlite_bundle_entry(entry, source_bundle, destination_bundle)
+        return
     if source_io.stat().st_size != entry.size or _sha256_file(source) != entry.sha256:
         raise StorageMigrationError(f"legacy source changed during copy: {source}")
     if destination_io.stat().st_size != entry.size or _sha256_file(destination) != entry.sha256:
@@ -835,13 +1143,15 @@ def _aggregate_digest(entries: Iterable[StorageMigrationEntry]) -> str:
         digest.update(str(entry.size).encode("ascii"))
         digest.update(b"\0")
         digest.update(entry.sha256.encode("ascii"))
+        digest.update(b"\0")
+        digest.update(entry.bundle_fingerprint.encode("ascii"))
         digest.update(b"\n")
     return digest.hexdigest()
 
 
-def _plan_signature(plan: StorageMigrationPlan) -> tuple[tuple[str, str, int, str], ...]:
+def _plan_signature(plan: StorageMigrationPlan) -> tuple[tuple[str, str, int, str, str], ...]:
     return tuple(
-        (entry.source, entry.destination, entry.size, entry.sha256)
+        (entry.source, entry.destination, entry.size, entry.sha256, entry.bundle_fingerprint)
         for entry in plan.entries
     )
 
@@ -1119,6 +1429,10 @@ def _read_manifest_entries(path: Path) -> tuple[StorageMigrationEntry, ...]:
                 relative_path=str(raw.get("relative_path") or ""),
                 size=int(raw.get("size") or 0),
                 sha256=str(raw.get("sha256") or ""),
+                bundle_fingerprint=str(raw.get("bundle_fingerprint") or ""),
+                bundle_members=tuple(
+                    item for item in (raw.get("bundle_members") or []) if isinstance(item, dict)
+                ),
             )
         )
     return tuple(entries)
@@ -1136,6 +1450,12 @@ def _log_readiness_blocked(
         for item in blockers:
             if isinstance(item, dict) and item.get("code"):
                 codes.append(str(item["code"]))
+    project_id = ""
+    try:
+        target = resolve_project_storage_paths(project_root)
+        project_id = target.project_id
+    except Exception:
+        project_id = ""
     try:
         from core.runtime_manager.scene_logging import append_runtime_manager_file_event
 
@@ -1145,7 +1465,7 @@ def _log_readiness_blocked(
                 "action": action,
                 "reasonCodes": codes[:8],
                 "blockerCount": len(codes),
-                "projectRoot": str(project_root),
+                "projectId": project_id,
             },
             suppress_io_errors=True,
         )
