@@ -583,7 +583,7 @@ export function LauncherBranchInstancesPanel({
           {labels.globalEmptyHint}
         </VEmptyState>
       ) : (
-        <>
+        <div className={styles.panelBody}>
           <VToolbar ariaLabel={labels.search} className={styles.filterBar}>
             <VNativeInput
               aria-label={labels.search}
@@ -633,7 +633,7 @@ export function LauncherBranchInstancesPanel({
               {labels.filteredEmptyHint}
             </VEmptyState>
           ) : (
-            <>
+            <div className={styles.tabBody}>
               <div className={styles.tabHeader}>
                 <p className={styles.tabHint}>{activeHint}</p>
                 <div className={styles.tabHeaderActions}>
@@ -690,7 +690,7 @@ export function LauncherBranchInstancesPanel({
                 })}
                 columns={primaryColumns}
               />
-            </>
+            </div>
           )}
 
           <details className={styles.maintenanceFold}>
@@ -826,7 +826,7 @@ export function LauncherBranchInstancesPanel({
               />
             </div>
           </details>
-        </>
+        </div>
       )}
 
       <VConfirmDialog

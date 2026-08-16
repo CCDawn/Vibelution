@@ -2343,7 +2343,8 @@ export function LauncherRoute() {
   return (
     <VDenseOpsPage
       className={styles.route}
-      fill={false}
+      bodyClassName={styles.routeBody}
+      fill
       hideHeader
       data-vui-domain-recipe="launcher-workbench"
       ariaLabel={copy.title}

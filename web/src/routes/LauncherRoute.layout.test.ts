@@ -392,7 +392,9 @@ describe("LauncherRoute layout contract", () => {
   });
 
   it("keeps the complete launcher surface reachable when the window is short", () => {
-    expect(routeStylesSource).toContain("content-start");
+    expect(routeSource).toContain("bodyClassName={styles.routeBody}");
+    expect(routeSource).toContain("fill");
+    expect(routeStylesSource).toContain("routeBody:");
     expect(routeStylesSource).toContain("overflow-y-auto");
     expect(routeStylesSource).toContain("overflow-x-hidden");
     expect(routeStylesSource).toContain("overscroll-contain");
@@ -706,6 +708,8 @@ describe("LauncherRoute layout contract", () => {
     expect(styles.primaryRail).toContain("minmax(250px,");
     expect(styles.primaryRail).toContain("max-[1024px]:grid-cols-[minmax(0,1fr)]");
     expect(styles.primaryColumn).toContain("min-w-0");
+    expect(styles.primaryColumn).toContain("flex-col");
+    expect(styles.primaryRail).toContain("flex-1");
     expect(styles.settingsRail).toContain("min-w-0");
     // Open settings details spans the full route grid row; closed stays the compact rail.
     expect(styles.settingsRail).toContain("[&:has([open])]:col-span-full");
