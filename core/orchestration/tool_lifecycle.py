@@ -54,7 +54,7 @@ def _coerce_bool(value: Any, default: bool) -> bool:
         return default
     if isinstance(value, (bytes, bytearray, memoryview)):
         value = bytes(value).decode("utf-8", errors="replace")
-    if isinstance(value, (int, float)):
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
         return bool(value)
     text = str(value).strip().lower()
     if not text:
@@ -64,22 +64,6 @@ def _coerce_bool(value: Any, default: bool) -> bool:
     if text in {"0", "false", "no", "off", "disabled"}:
         return False
     return default
-
-
-def _as_mapping(value: Any) -> Dict[str, Any]:
-    if isinstance(value, (bytes, bytearray, memoryview)):
-        value = bytes(value).decode("utf-8", errors="replace")
-    if isinstance(value, str):
-        text = value.lstrip("\ufeff").strip()
-        if not text:
-            return {}
-        try:
-            value = json.loads(text)
-        except json.JSONDecodeError:
-            return {}
-    if isinstance(value, Mapping):
-        return dict(value)
-    return {}
 
 
 def _maybe_json(value: Any) -> Any:
@@ -95,11 +79,23 @@ def _maybe_json(value: Any) -> Any:
     return value
 
 
+def _as_mapping(value: Any) -> Dict[str, Any]:
+    value = _maybe_json(value)
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {}
+
+
 def _coerce_tool_call_list(value: Any) -> List[Dict[str, Any]]:
     value = _maybe_json(value)
     if value is None or isinstance(value, (str, bytes, bytearray, memoryview)):
         return []
     if isinstance(value, Mapping):
+        nested = value.get("tool_calls")
+        if nested is None:
+            nested = value.get("toolCalls")
+        if nested is not None:
+            return _coerce_tool_call_list(nested)
         return [dict(value)] if value else []
     try:
         items = list(value)
@@ -113,8 +109,12 @@ def _coerce_tool_call_list(value: Any) -> List[Dict[str, Any]]:
     return calls
 
 
+def _tool_call_function(call: Mapping[str, Any]) -> Dict[str, Any]:
+    return _as_mapping(call.get("function"))
+
+
 def _tool_call_name(call: Mapping[str, Any]) -> str:
-    function = call.get("function") if isinstance(call.get("function"), Mapping) else {}
+    function = _tool_call_function(call)
     return _coerce_text(
         call.get("name") or call.get("toolName") or function.get("name") or "unknown"
     ).strip() or "unknown"
@@ -131,7 +131,7 @@ def _tool_call_args(call: Mapping[str, Any]) -> dict:
     if raw in (None, ""):
         raw = call.get("arguments")
     if raw in (None, ""):
-        function = call.get("function") if isinstance(call.get("function"), Mapping) else {}
+        function = _tool_call_function(call)
         raw = function.get("arguments")
         if raw in (None, ""):
             raw = function.get("args")
@@ -140,6 +140,18 @@ def _tool_call_args(call: Mapping[str, Any]) -> dict:
     elif isinstance(raw, Mapping):
         raw = dict(raw)
     return parse_tool_args(raw if raw not in (None, "") else {})
+
+
+def _coerce_positive_workers(value: Any, *, default: int) -> int:
+    if isinstance(value, bool) or value is None:
+        return max(1, int(default or 1))
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return max(1, int(default or 1))
+    return max(1, parsed)
 
 
 def _coerce_result_status(value: Any) -> str:
@@ -487,11 +499,10 @@ class ToolLifecycleBridge:
         if max_parallel_readonly is None:
             workers_cap = self.DEFAULT_PARALLEL_READONLY_WORKERS
         else:
-            try:
-                workers_cap = int(max_parallel_readonly)
-            except (TypeError, ValueError):
-                workers_cap = self.DEFAULT_PARALLEL_READONLY_WORKERS
-            workers_cap = max(1, workers_cap)
+            workers_cap = _coerce_positive_workers(
+                max_parallel_readonly,
+                default=self.DEFAULT_PARALLEL_READONLY_WORKERS,
+            )
         lifecycle_action: Optional[str] = None
         budget_stop_message = (
             "当前回合工具调用额度已用尽，本轮停止。"
