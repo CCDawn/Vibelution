@@ -291,3 +291,160 @@ def test_agent_wrapper_clears_stale_diagnostics_before_stop(monkeypatch):
     assert agent._last_llm_error_details == {}
     assert agent._last_llm_failure_attempts == 0
     assert agent._last_llm_failure_max_attempts == MAX_CONSECUTIVE_FAILURES
+
+
+def _recovery(**overrides):
+    payload = dict(
+        category="server_error",
+        retryable=False,
+        action="stop",
+        user_message="boom",
+        wait_seconds=0,
+        stop_current_turn=True,
+        disable_streaming=False,
+        disable_tools=False,
+        request_context_compression=False,
+        fallback_profile_id=None,
+    )
+    payload.update(overrides)
+    return SimpleNamespace(**payload)
+
+
+def _route_llm(profile_id: str, *, identity=None, route_id=None):
+    class RouteLLM:
+        def __init__(self):
+            self.profile_id = profile_id
+
+        def effective_route_identity(self):
+            return identity if identity is not None else (profile_id,)
+
+        def effective_route_id(self):
+            return route_id or f"{profile_id}-route"
+
+        def project_outcome_message(self, outcome):
+            return AIMessage(content=outcome.final_text)
+
+    return RouteLLM()
+
+
+def _adapter_hooks(**overrides):
+    defaults = dict(
+        get_ui=lambda: _DummyUI(),
+        llm_cancel_context=lambda _checker: _DummyContext(),
+        raise_if_stop=lambda: None,
+        current_stop_reason=lambda: "",
+        get_llm_for_mode=lambda **_kwargs: _route_llm("primary"),
+        should_stream=lambda *_args, **_kwargs: False,
+        build_invocation_context=lambda **_kwargs: SimpleNamespace(
+            to_metadata=lambda client=None: {"invocationId": "inv-1"}
+        ),
+        invoke_outcome=lambda *_args, **_kwargs: TurnOutcome.final_answer(identity=_identity(), text="ok"),
+        run_streaming_outcome=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("non-stream path must not stream")
+        ),
+        canonicalize=lambda outcome: outcome,
+        plan_recovery=lambda *_args, **_kwargs: _recovery(),
+        record_scene_event=lambda *_args, **_kwargs: None,
+        record_route_success=lambda **_kwargs: None,
+        request_compression=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("must not compress")
+        ),
+        debug_logger=SimpleNamespace(error=lambda *_args, **_kwargs: None),
+        error_logger=SimpleNamespace(log_error=lambda *_args, **_kwargs: None),
+        config=None,
+        force_disable_tools=False,
+        stop_error_cls=TurnStopRequested,
+    )
+    defaults.update(overrides)
+    return AgentLlmTurnHooks(**defaults)
+
+
+def test_adapter_coerces_invalid_error_attempt_counters_and_non_mapping_details():
+    def invoke_outcome(*_args, **_kwargs):
+        raise LLMError(
+            "server_error",
+            "boom",
+            retryable=False,
+            details={"attempt": "bad", "max_attempts": "nope"},
+        )
+
+    result = invoke_agent_llm_turn(
+        messages=[AIMessage(content="hello")],
+        hooks=_adapter_hooks(invoke_outcome=invoke_outcome),
+    )
+    assert result.payload is None
+    assert result.last_failure_attempts == 1
+    assert result.last_failure_max_attempts == 1
+
+    def invoke_non_mapping_details(*_args, **_kwargs):
+        raise LLMError("server_error", "boom", retryable=False, details="not-a-mapping")
+
+    result = invoke_agent_llm_turn(
+        messages=[AIMessage(content="hello")],
+        hooks=_adapter_hooks(invoke_outcome=invoke_non_mapping_details),
+    )
+    assert result.payload is None
+    assert result.last_failure_attempts == 1
+    assert result.last_error_details["exception_type"] == "LLMError"
+
+
+def test_adapter_stops_for_context_compression_without_fallback():
+    llm_calls = []
+    compress_calls = []
+
+    primary = _route_llm("primary", identity=("relay", "primary"))
+    fallback = _route_llm("fallback_backup", identity=("local", "fallback"))
+
+    def invoke_outcome(client, *_args, **_kwargs):
+        llm_calls.append(client.profile_id)
+        raise LLMError(
+            "context_length_error",
+            "too long",
+            retryable=True,
+            details={"attempt": 1, "max_attempts": 1},
+        )
+
+    def get_llm_for_mode(**kwargs):
+        if kwargs.get("profile_id") == "fallback_backup":
+            return fallback
+        return primary
+
+    result = invoke_agent_llm_turn(
+        messages=[AIMessage(content="hello")],
+        hooks=_adapter_hooks(
+            get_llm_for_mode=get_llm_for_mode,
+            invoke_outcome=invoke_outcome,
+            plan_recovery=lambda *_args, **_kwargs: _recovery(
+                category="context_length_error",
+                retryable=True,
+                action="compress_context",
+                user_message="too long",
+                request_context_compression=True,
+                fallback_profile_id="fallback_backup",
+            ),
+            request_compression=lambda reason: compress_calls.append(reason),
+        ),
+    )
+    assert result.payload is None
+    assert llm_calls == ["primary"]
+    assert compress_calls
+    assert result.last_error_category == "context_length_error"
+    assert result.last_recovery_action == "compress_context"
+
+
+def test_adapter_invokes_when_streaming_requested_but_client_has_no_stream():
+    calls = []
+
+    def invoke_outcome(client, messages, **_kwargs):
+        calls.append((client.profile_id, messages))
+        return TurnOutcome.final_answer(identity=_identity(), text="ok")
+
+    result = invoke_agent_llm_turn(
+        messages=[AIMessage(content="hello")],
+        hooks=_adapter_hooks(
+            should_stream=lambda *_args, **_kwargs: True,
+            invoke_outcome=invoke_outcome,
+        ),
+    )
+    assert result.payload[1].content == "ok"
+    assert calls and calls[0][0] == "primary"
