@@ -263,6 +263,20 @@ def test_report_uses_main_worktree_registry_when_started_from_task_worktree(tmp_
     assert task_item.decision == "merge_ready"
 
 
+def test_build_report_defaults_registry_to_resolved_project_memory(tmp_path: Path) -> None:
+    root = init_repo(tmp_path / "repo")
+    memory_root = root / ".docs" / "project-memory"
+    memory_root.mkdir(parents=True)
+    registry = memory_root / "agent-registry.json"
+    registry.write_text(json.dumps({"workClaims": {}, "mergeQueue": []}), encoding="utf-8")
+
+    report = audit.build_report(root)
+
+    assert report.root == str(root.resolve())
+    assert registry.exists()
+    assert item_by_branch(report, "main").decision == "main"
+
+
 def test_ready_branch_recommends_cherry_pick_when_main_advanced(tmp_path: Path) -> None:
     root = init_repo(tmp_path / "repo")
     worktree = add_worktree(root, "feature-wt", "codex/feature")
