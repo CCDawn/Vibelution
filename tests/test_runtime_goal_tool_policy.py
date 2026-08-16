@@ -86,3 +86,29 @@ def test_runtime_goal_packet_renders_max_calls_per_turn_budget():
     assert "maxCallsPerTurn" in rendered or "本回合最多 32 次" in rendered
     assert "用尽即停" in rendered or "重新计数" in rendered
     assert "code_symbol_tool" in rendered or "grep_search_tool" in rendered
+
+
+def test_string_allowed_tools_count_as_one_code_tool_not_characters():
+    packet = build_runtime_goal_packet(
+        _chat_policy(),
+        "审查当前代码结构",
+        agent_tool_policy={
+            "allowedTools": "grep_search_tool",
+            "writeScopes": "private",
+            "mutationAccess": "none",
+        },
+    )
+    assert packet.allow_code_context is True
+    assert "CODEBASE_MAP" in packet.allowed_components("SOUL,CODEBASE_MAP".split(","))
+    assert packet.allowed_components("SOUL") == {"SOUL"}
+
+
+def test_invalid_max_calls_renders_without_crashing():
+    packet = build_runtime_goal_packet(
+        _chat_policy(),
+        "继续",
+        agent_tool_policy={"maxCallsPerTurn": "nope", "allowedTools": ["web_search_tool"]},
+    )
+    assert packet.max_calls_per_turn == 0
+    rendered = packet.render()
+    assert "未从策略解析到上限" in rendered
