@@ -98,7 +98,7 @@ export type UseChatWorkspaceActionsResult = {
   handlePetInteraction: (action: PetInteractionAction) => void;
   handleCreateSession: () => void;
   handleOpenProjectAgentBus: () => void;
-  handleOpenDirectSession: (sessionId: string) => void;
+  handleOpenDirectSession: (sessionId: string, options?: { telemetrySource?: string }) => void;
   handlePrefetchDirectSession: (sessionId: string) => void;
   handleOpenAgent: (agent: AgentInstance) => boolean;
   handleOpenMentionTarget: (target: ChatMentionTarget) => void;
@@ -218,7 +218,7 @@ export function useChatWorkspaceActions({
     void prefetchSessionDetailWindow(queryClient, sessionId);
   }, [queryClient]);
 
-  const handleOpenDirectSession = useCallback((sessionId: string) => {
+  const handleOpenDirectSession = useCallback((sessionId: string, options?: { telemetrySource?: string }) => {
     const normalizedSessionId = String(sessionId || "").trim();
     if (!normalizedSessionId) {
       return;
@@ -246,7 +246,10 @@ export function useChatWorkspaceActions({
       __sessions__: "",
     }));
     // replace: true — Codex/ChatGPT thread switch does not push history per tab click.
-    chatRoute.openSession(normalizedSessionId);
+    chatRoute.openSession(normalizedSessionId, {
+      replace: true,
+      telemetrySource: options?.telemetrySource ?? "direct_session",
+    });
   }, [
     chatRoute,
     queryClient,
@@ -287,7 +290,7 @@ export function useChatWorkspaceActions({
     if (!targetSessionId) {
       return false;
     }
-    handleOpenDirectSession(targetSessionId);
+    handleOpenDirectSession(targetSessionId, { telemetrySource: "agent_directory" });
     return true;
   }, [handleOpenDirectSession, sessionsById, setSelectedAgentId]);
 
