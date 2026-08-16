@@ -45,9 +45,12 @@ function fakeSpawnWithOutput(output: string, exitCode = 0): ReturnType<typeof vi
 }
 
 describe("desktop shell freshness", () => {
-  it("refreshes only a packaged stale shell outside smoke", () => {
+  it("refreshes only a packaged stale shell outside smoke and canary", () => {
     expect(decidePackagedDesktopShellRefresh({ isPackaged: false, smoke: false, stale: true })).toBe("skip");
     expect(decidePackagedDesktopShellRefresh({ isPackaged: true, smoke: true, stale: true })).toBe("skip");
+    expect(decidePackagedDesktopShellRefresh({ isPackaged: true, smoke: false, workbenchCloseCanary: true, stale: true })).toBe(
+      "skip"
+    );
     expect(decidePackagedDesktopShellRefresh({ isPackaged: true, smoke: false, stale: false })).toBe("skip");
     expect(decidePackagedDesktopShellRefresh({ isPackaged: true, smoke: false, stale: true })).toBe("refresh");
   });

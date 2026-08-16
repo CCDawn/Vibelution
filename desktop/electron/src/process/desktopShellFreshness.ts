@@ -65,9 +65,10 @@ export function formatTrayLauncherFreshness(
 export function decidePackagedDesktopShellRefresh(input: {
   isPackaged: boolean;
   smoke: boolean;
+  workbenchCloseCanary?: boolean;
   stale: boolean;
 }): "skip" | "refresh" {
-  if (!input.isPackaged || input.smoke || !input.stale) {
+  if (!input.isPackaged || input.smoke || input.workbenchCloseCanary || !input.stale) {
     return "skip";
   }
   return "refresh";
