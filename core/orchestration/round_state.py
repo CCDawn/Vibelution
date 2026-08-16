@@ -4,7 +4,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import ClassVar, Dict, Iterable
+from typing import Any, ClassVar, Dict, Iterable
+
+
+def _coerce_nonnegative_int(value: Any, *, default: int = 0) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        try:
+            return max(0, int(default or 0))
+        except (TypeError, ValueError):
+            return 0
 
 
 @dataclass
@@ -64,7 +74,7 @@ class RoundStateController:
         self.reset_failures()
 
     def add_xml_tool_calls(self, count: int) -> None:
-        self.total_tool_calls += max(0, int(count or 0))
+        self.total_tool_calls += _coerce_nonnegative_int(count)
         self.turn_had_progress = True
         self.no_new_evidence_steps = 0
         self.reset_failures()
@@ -75,10 +85,11 @@ class RoundStateController:
         visible_text: str = "",
         tool_names: Iterable[str] | None = None,
     ) -> None:
-        self.last_response_tool_call_count = max(0, int(tool_call_count or 0))
+        count = _coerce_nonnegative_int(tool_call_count)
+        self.last_response_tool_call_count = count
         self.last_response_visible_text = str(visible_text or "")
-        if tool_call_count > 0:
-            substantive_count = self._substantive_tool_count(tool_call_count, tool_names)
+        if count > 0:
+            substantive_count = self._substantive_tool_count(count, tool_names)
             self.substantive_tool_calls += substantive_count
             if str(visible_text or "").strip():
                 self.consecutive_tool_only_steps = 0
@@ -104,22 +115,22 @@ class RoundStateController:
         self.lifecycle_completed = True
 
     def add_tool_calls(self, count: int) -> None:
-        self.total_tool_calls += max(0, int(count or 0))
+        self.total_tool_calls += _coerce_nonnegative_int(count)
 
     @classmethod
     def _substantive_tool_count(cls, tool_call_count: int, tool_names: Iterable[str] | None) -> int:
+        count = _coerce_nonnegative_int(tool_call_count)
         if tool_names is None:
-            return max(0, int(tool_call_count or 0))
-        count = 0
-        for name in tool_names:
-            normalized = str(name or "").strip()
-            if normalized and normalized not in cls.BOOKKEEPING_TOOL_NAMES:
-                count += 1
-        return count
+            return count
+        named = [str(name or "").strip() for name in tool_names]
+        named = [name for name in named if name]
+        if not named:
+            return count
+        return sum(1 for name in named if name not in cls.BOOKKEEPING_TOOL_NAMES)
 
     def add_token_usage(self, input_tokens: int, output_tokens: int) -> None:
-        self.total_input_tokens += max(0, int(input_tokens or 0))
-        self.total_output_tokens += max(0, int(output_tokens or 0))
+        self.total_input_tokens += _coerce_nonnegative_int(input_tokens)
+        self.total_output_tokens += _coerce_nonnegative_int(output_tokens)
 
     def thinking_status(self, goal: str = "") -> Dict[str, int | str]:
         return {
@@ -149,7 +160,7 @@ class RoundStateController:
     def acting_status(self, pending_tool_calls: int) -> Dict[str, int]:
         return {
             "iterations": self.iteration,
-            "tool_count": self.total_tool_calls + max(0, int(pending_tool_calls or 0)),
+            "tool_count": self.total_tool_calls + _coerce_nonnegative_int(pending_tool_calls),
             "input_tokens": self.total_input_tokens,
             "output_tokens": self.total_output_tokens,
         }
