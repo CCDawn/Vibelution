@@ -15,6 +15,7 @@ from core.orchestration.turn_status_tail_config import (
     BLOCK_CLOCK,
     BLOCK_GIT_BRIEF,
     BLOCK_GIT_PATHS,
+    block_enabled,
     default_turn_status_tail_config,
     normalize_turn_status_tail_config,
 )
@@ -45,6 +46,20 @@ def test_normalize_clamps_limits_and_bools():
     assert cfg["blocks"]["budget"] is False
     assert cfg["limits"]["gitPathsMax"] == 40
     assert cfg["limits"]["maxTailChars"] == 400
+
+
+def test_normalize_accepts_bytes_false_and_json_payload():
+    cfg = normalize_turn_status_tail_config({"enabled": b"false"})
+    assert cfg["enabled"] is False
+    cfg = normalize_turn_status_tail_config(
+        '{"enabled": false, "blocks": {"git_brief": true}, "limits": {"gitPathsMax": "8"}}'
+    )
+    assert cfg["enabled"] is False
+    assert cfg["blocks"]["git_brief"] is True
+    assert cfg["limits"]["gitPathsMax"] == 8
+    assert block_enabled({"enabled": True, "blocks": {"git_brief": True}}, b"git_brief") is True
+    assert block_enabled({"enabled": "off"}, "budget") is False
+
 
 
 def test_format_default_includes_budget_and_clock_not_git():
