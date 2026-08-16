@@ -113,7 +113,8 @@ export function buildConversationComposerBridgeState(
   const pending = actionMode === "stop"
     ? input.stopPending || input.sessionStopping
     : input.submitPending;
-  const disabled = !hasSession || input.submitPending;
+  const disabled = !hasSession
+    || (input.submitPending && (input.sessionBusy || input.sessionStopping));
   const hasDraftContent = Boolean(input.value.trim());
   const hasAttachments = input.imageAttachments.length > 0;
   const hasReferences = input.references.length > 0;

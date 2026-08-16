@@ -91,6 +91,7 @@ export type UseChatWorkspaceActionsOptions = {
   clearSessionHistoryMutation: MutateLike<{ sessionId: string; agentId: string }>;
   addSessionToReviewMutation: MutateLike<{ sessionId: string }>;
   petActionMutation: MutateLike<{ action: PetInteractionAction }>;
+  openDeleteSessionConfirm: (session: SessionSummary) => void;
 };
 
 export type UseChatWorkspaceActionsResult = {
@@ -175,6 +176,7 @@ export function useChatWorkspaceActions({
   clearSessionHistoryMutation,
   addSessionToReviewMutation,
   petActionMutation,
+  openDeleteSessionConfirm,
 }: UseChatWorkspaceActionsOptions): UseChatWorkspaceActionsResult {
   const handlePetInteraction = useCallback((action: PetInteractionAction) => {
     setPetActionFeedback("");
@@ -534,19 +536,8 @@ export function useChatWorkspaceActions({
       }));
       return;
     }
-    const sessionTitle = (session.agentDisplayName || session.title || session.id).trim();
-    const sessionConfirmMessage = t("deleteSessionConfirm").replace("{title}", sessionTitle || session.id);
-    if (!window.confirm(sessionConfirmMessage)) {
-      return;
-    }
-    setSessionComposerErrors((current) => ({
-      ...current,
-      [session.id]: "",
-      __sessions__: "",
-    }));
-    // Fire-and-forget: onMutate applies the route compare-and-swap; network continues in background.
-    deleteSessionMutation.mutate({ sessionId: session.id });
-  }, [deleteSessionMutation, setSessionComposerErrors, setSessionContextMenu, t]);
+    openDeleteSessionConfirm(session);
+  }, [deleteSessionMutation, openDeleteSessionConfirm, setSessionComposerErrors, setSessionContextMenu, t]);
 
   const handleClearSessionHistory = useCallback((session: SessionSummary) => {
     setSessionContextMenu(null);

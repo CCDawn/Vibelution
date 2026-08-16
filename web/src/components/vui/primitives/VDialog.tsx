@@ -23,6 +23,7 @@ export type VDialogProps = {
   contentClassName?: string;
   hideClose?: boolean;
   "aria-label"?: string;
+  onCloseAutoFocus?: (event: Event) => void;
 };
 
 /**
@@ -52,6 +53,7 @@ export type VConfirmDialogProps = {
   onCancel?: () => void;
   size?: VDialogSize;
   hideClose?: boolean;
+  onCloseAutoFocus?: (event: Event) => void;
 };
 
 /**
@@ -73,6 +75,7 @@ export function VConfirmDialog({
   onCancel,
   size = "sm",
   hideClose = false,
+  onCloseAutoFocus,
 }: VConfirmDialogProps) {
   const controlledOpen = open ?? isOpen;
   const close = () => onOpenChange?.(false);
@@ -113,6 +116,7 @@ export function VConfirmDialog({
       description={description}
       size={size}
       hideClose={hideClose}
+      onCloseAutoFocus={onCloseAutoFocus}
       footer={footer}
     >
       {children}

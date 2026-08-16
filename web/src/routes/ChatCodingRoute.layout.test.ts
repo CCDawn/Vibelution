@@ -3385,9 +3385,12 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("asks for confirmation before deleting conversations", () => {
-    expect(routeAndActionsSource).toContain("t(\"deleteSessionConfirm\").replace(\"{title}\"");
+    expect(routeAndActionsSource).toContain("openDeleteSessionConfirm(session)");
+    expect(routeAndActionsSource).not.toContain("window.confirm(sessionConfirmMessage)");
+    expect(chatCodingRouteWorkbenchSource).toContain("ChatSessionDeleteConfirmDialog");
+    expect(chatCodingRouteWorkbenchSource).toContain("confirmPendingDeleteSession");
+    expect(chatCodingRouteWorkbenchSource).toContain("deleteSessionConfirm");
     expect(routeAndActionsSource).toContain("t(\"deleteGroupConfirm\").replace(\"{title}\"");
-    expect(routeAndActionsSource).toContain("if (!window.confirm(sessionConfirmMessage))");
     expect(routeAndActionsSource).toContain("if (!window.confirm(groupConfirmMessage))");
     expect(routeAndActionsSource).toContain("[session.id]: t(\"deleteSessionBusy\")");
     expect(routeAndActionsSource).toContain("alreadyDeletingThisSession");
@@ -3396,8 +3399,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain('deleteBusyLabel={t("deleteSessionBusy")}');
     expect(directSessionIndexListSource).toContain("deleteBusyLabel");
     expect(directSessionIndexItemSource).toContain("const deleteBusyReason = sessionBusy ? deleteBusyLabel : \"\"");
-    expect(routeAndActionsSource.indexOf("window.confirm(sessionConfirmMessage)")).toBeLessThan(
-      routeAndActionsSource.indexOf("deleteSessionMutation.mutate({ sessionId: session.id })"),
+    expect(chatCodingRouteWorkbenchSource.indexOf("confirmPendingDeleteSession")).toBeLessThan(
+      chatCodingRouteWorkbenchSource.indexOf("deleteSessionMutation.mutate({ sessionId"),
     );
     expect(routeAndActionsSource.indexOf("window.confirm(groupConfirmMessage)")).toBeLessThan(
       routeAndActionsSource.indexOf("deleteGroupRoomMutation.mutate({ roomId: activeGroupRoom.roomId })"),
@@ -3466,8 +3469,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatCodingRouteWorkbenchSource).toContain("composerFocusRequest");
     expect(chatCodingRouteWorkbenchSource).toContain("composerFocusSignal:");
     expect(chatCodingRouteWorkbenchSource).toContain("onComposerFocusRequestSettled:");
-    expect(conversationViewSource).toContain("window.requestAnimationFrame");
-    expect(conversationViewSource).toContain("hasCompetingFocus");
+    expect(conversationViewSource).toContain("scheduleComposerFocusAttempts");
+    expect(conversationViewSource).not.toContain("onComposerFocusRequestSettled?.(focusSignal);\n        return;\n      }\n      if (!shouldApplyComposerFocusRequest");
   });
 
   it("keeps the active direct session selected when the list is temporarily stale", () => {
