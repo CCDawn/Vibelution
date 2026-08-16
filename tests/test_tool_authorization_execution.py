@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from core.authorization import tool_authorization_service
 from core.infrastructure import tool_executor as tool_executor_module
 from core.infrastructure.tool_executor import ToolExecutor
@@ -311,3 +313,78 @@ def test_delegation_constraint_is_enforced_by_canonical_authorization(monkeypatc
     assert "DelegationPolicy" in result
     assert "关闭子 agent 派发权限" in result
     assert calls == []
+
+
+def test_string_false_delegation_flag_still_blocks_subagents(monkeypatch):
+    for flag in ("false", "off", b"false"):
+        monkeypatch.setattr(
+            agent_directory_service,
+            "current_agent_runtime",
+            lambda current_flag=flag: {
+                "agentId": "agent-a",
+                "turnId": "turn-a",
+                "agentConfigSnapshot": {
+                    "agentId": "agent-a",
+                    "configRevision": 3,
+                    "configHash": "config-hash-a",
+                },
+                "permissionPreset": "request_approval",
+                "toolPolicy": {"allowedTools": ["spawn_agent_tool"]},
+                "delegationPolicy": {"allowSubagents": current_flag},
+            },
+        )
+        _install(tools=("spawn_agent_tool",))
+        executor = ToolExecutor()
+        calls = []
+        executor.register_tool("spawn_agent_tool", lambda **_kwargs: calls.append("called") or "unsafe")
+
+        result, _ = executor.execute("spawn_agent_tool", {"goal": "probe"}, tool_call_id="call-delegate")
+
+        assert "DelegationPolicy" in result, flag
+        assert calls == []
+
+
+def test_explicit_allow_subagents_still_authorizes(monkeypatch):
+    monkeypatch.setattr(
+        agent_directory_service,
+        "current_agent_runtime",
+        lambda: {
+            "agentId": "agent-a",
+            "turnId": "turn-a",
+            "agentConfigSnapshot": {
+                "agentId": "agent-a",
+                "configRevision": 3,
+                "configHash": "config-hash-a",
+            },
+            "permissionPreset": "request_approval",
+            "toolPolicy": {"allowedTools": ["spawn_agent_tool"]},
+            "delegationPolicy": {"allowSubagents": True},
+        },
+    )
+    _install(tools=("spawn_agent_tool",))
+
+    result = tool_authorization_service.authorize_tool_execution(
+        tool_name="spawn_agent_tool",
+        tool_call_id="call-delegate",
+        tool_args={"goal": "probe"},
+    )
+
+    assert result.allowed is True
+    assert result.code in {"allowed", "allowed_terminal_wait"}
+
+
+def test_invalid_config_revision_fails_closed_without_int_crash(monkeypatch):
+    _runtime(monkeypatch)
+    runtime = dict(agent_directory_service.current_agent_runtime())
+    runtime["agentConfigSnapshot"] = dict(runtime["agentConfigSnapshot"], configRevision="bad")
+    monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: runtime)
+
+    with pytest.raises(tool_authorization_service.ToolAuthorizationContextError):
+        _install()
+
+
+def test_non_mapping_runtime_install_fails_closed_without_dict_crash(monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: ["not-a-map"])
+
+    with pytest.raises(tool_authorization_service.ToolAuthorizationContextError):
+        _install()

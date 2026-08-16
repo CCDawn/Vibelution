@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from core.authorization.tool_authorization_service import resolve_enforced_authorization
-from core.authorization.tool_policy_models import ToolPolicyInvalidError
+from core.authorization.tool_authorization_service import (
+    _descriptors_from_registry,
+    resolve_enforced_authorization,
+)
+from core.authorization.tool_policy_models import ToolPolicyInvalidError, ToolRegistryMissingError
 from core.logging import tool_authorization_events
 
 
@@ -84,3 +87,70 @@ def test_authorization_decision_logging_is_bounded_and_has_no_legacy_fields(monk
     assert kwargs["fields"]["executableCount"] == 1
     assert "legacyVisibleCount" not in kwargs["fields"]
     assert "toolPolicy" not in kwargs["fields"]
+
+
+def test_string_capabilities_and_aliases_are_not_split_into_characters():
+    descriptors = _descriptors_from_registry(
+        {
+            "descriptors": [
+                {
+                    "name": "grep_search_tool",
+                    "enabled": True,
+                    "capabilities": "read",
+                    "risk": "read",
+                    "approval": "never",
+                    "aliases": "grep",
+                }
+            ]
+        }
+    )
+
+    assert descriptors[0].capabilities == ("read",)
+    assert descriptors[0].aliases == ("grep",)
+
+
+def test_string_false_hides_registry_tools_from_available_names():
+    payload = _registry_payload()
+    payload["descriptors"][0]["enabled"] = "false"
+    payload["tools"][0]["enabled"] = "false"
+    payload["tools"][0]["runtimeActive"] = "false"
+    payload["tools"][0]["llmVisible"] = "false"
+
+    report = resolve_enforced_authorization(
+        runtime=_runtime({"allowedTools": ["grep_search_tool"], "preferredTools": ["grep_search_tool"]}),
+        registry_payload=payload,
+        generated_at="2026-07-14T00:00:00Z",
+    )
+
+    assert "grep_search_tool" not in report.decision.visible_tools
+    assert "grep_search_tool" not in report.decision.executable_tools
+
+
+def test_snake_case_tool_policy_is_accepted():
+    runtime = {
+        "agentId": "agent-auth",
+        "turnId": "turn-auth",
+        "agent": {"agentId": "agent-auth", "primaryMode": "chat"},
+        "tool_policy": {
+            "policyId": "tool-agent-auth",
+            "allowedTools": ["grep_search_tool"],
+            "preferredTools": ["grep_search_tool"],
+        },
+    }
+
+    report = resolve_enforced_authorization(
+        runtime=runtime,
+        registry_payload=_registry_payload(),
+        generated_at="2026-07-14T00:00:00Z",
+    )
+
+    assert report.decision.visible_tools == ("grep_search_tool",)
+    assert report.decision.executable_tools == ("grep_search_tool",)
+
+
+def test_non_mapping_registry_payload_fails_closed_without_dict_crash():
+    with pytest.raises(ToolRegistryMissingError):
+        resolve_enforced_authorization(
+            runtime=_runtime({"allowedTools": ["grep_search_tool"], "preferredTools": []}),
+            registry_payload=["not-a-map"],
+        )
