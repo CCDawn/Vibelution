@@ -108,13 +108,13 @@
 
 ## 只读诊断命令
 
-用 `sessionId` 和可选 `turnId` 串起 journal、live checkpoint 和 runtime-scene 线索：
+统一入口：**`agent_log_context`**（CLI 与 `conversation_log_inspect_tool` 无 `log_path` 时相同）。细则：[agent-log-routing.md](../guides/agent-log-routing.md)。
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\diagnose_session_turn.py --project-root . --session-id <sessionId> --turn-id <turnId>
+.\.venv\Scripts\python.exe scripts\agent_log_context.py --project-root . --session-id <sessionId> --turn-id <turnId>
 ```
 
-报告里的 `journal` 显示事件顺序、最新 sequence、终态事件和 JSONL 解码问题；`liveOutput` 显示运行中 checkpoint 的 stage、turn 匹配和内容长度；`runtimeEvidence.matches` 显示匹配到的 runtime-scene JSONL 事件码、路径和裁剪字段。这个命令只读文件，不 import `session_service.py`，适合在热区重构或 active claim 存在时先做链路定位。
+`session` 字段含 journal、live checkpoint、runtime-scene 线索；只读，不 import `session_service.py`。
 
 需要一个不调用真实模型、不启动 Launcher 的证据链样本时，可以生成离线 runtime-scene probe：
 

@@ -48,12 +48,11 @@ npx tsc -b --pretty false
 .\.venv\Scripts\python.exe scripts\vibelution_desktop_entry.py --action resolve-workbench --output json
 # 只对返回的 workbenchUrl 探 /api/health。:8000 无监听只说明默认口空，不能当工作台未启动。
 # 实开口权威：env → .runtime/launcher/ports.json → config.toml backend_port（默认 8000）。
-# —— 诊断三件套（卡住 / 会话 / 环境）——
-# 1) 最新 runtime scene（按时间戳目录；先看 summary / package_index / raw log）
-Get-ChildItem .\logs\runtime_scenes -Directory | Sort-Object Name -Descending | Select-Object -First 5 Name
-# 2) 单轮会话诊断
-.\.venv\Scripts\python.exe scripts\diagnose_session_turn.py --project-root . --session-id ID --turn-id TID
-# 3) 本机环境医生（venv / hooks / 关键模块）
+# —— 日志诊断（统一入口；细则见 docs/guides/agent-log-routing.md）——
+# 1) 所有 Agent 第一步：路径 + 当前 scene + agent_brief（可选 session/turn）
+.\.venv\Scripts\python.exe scripts\agent_log_context.py --project "<ROOT>"
+.\.venv\Scripts\python.exe scripts\agent_log_context.py --project "<ROOT>" --session-id ID --turn-id TID
+# 2) 本机环境医生（venv / hooks / 关键模块）
 powershell -NoProfile -File .\scripts\doctor.ps1
 
 # Launcher

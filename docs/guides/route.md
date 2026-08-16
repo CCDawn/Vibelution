@@ -11,7 +11,7 @@
 | --- | --- | --- | --- | --- |
 | **任意开发（默认）** | `AGENTS.md`§3.0；本机 `ccdawn-brt/SKILL.md`；本 `route.md`；`ownership.md` | — | 按 BRT 分级选最小验证 | 不读 BRT 就广扫/写入；跳过路由叠 process 框架 |
 | **任意非平凡** | `AGENTS.md`；`ccdawn-brt`；本 `route.md`；`ownership.md` | — | `tests/select_tests.py --from-git main --commands-only` | 先广扫全仓 |
-| **Bug/回归/卡住** | storage inventory 的 `activePaths.logs/runtime_scenes/`；对应链路地图 | 根因位点；必要时补日志 | 复现相关 pytest/vitest | 无日志瞎猜；把 fallback 当修完 |
+| **Bug/回归/卡住** | [`agent-log-routing.md`](agent-log-routing.md)；`scripts/agent_log_context.py` | 根因位点；必要时补日志 | 复现相关 pytest/vitest | 无日志瞎猜；未跑 agent_log_context 就 grep |
 | **用户可见 UI** | `AGENTS.md`§2 前端；`development-standard`§9.1；`docs/guides/button-selection.md`；`web/src/components/vui/designs/INDEX.md` | `web/src/routes/<domain>/`；`components/vui`；**不**改 renderer 除非扩展交互 | `vuiShadcnRouteContract` + 触及 `*.layout.test` / route contract | `@heroui`；route→`renderers/shadcn`；未登记新 `V*`；通用裸 `<button>` |
 | **前端数据/API 调用** | [`web/src/api/README.md`](../../web/src/api/README.md)；`development-standard`§24；目标 `web/src/api/<domain>.ts` | `web/src/api/<domain>.ts` + `types/` + queryKeys | 相关 `<domain>.test.ts`；`fullStackApiBoundary` 预算保持 0 | Route 内新 `fetchJson`/硬编码 path |
 | **后端 API/行为** | `core/web/services/README.md` 定 facade；有 pack 再读 pack README；§24 | pack 优先 / 否则 facade → 薄 `routes/` | `test_*service*` + route/contract；`response_model` 预算不升 | route 内业务/直写 store/LLM |

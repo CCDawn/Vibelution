@@ -48,7 +48,7 @@
 2. 非平凡任务按 [Agent 开发路由](docs/guides/README.md)：`route.md` 定 READ/EDIT/TEST → `ownership.md` 定落点 → `loop.md` 验证与完成块；细则只下钻 [规范索引](docs/standards/README.md) 相关条。
 3. `STANDARD_TASK`、`HIGH_RISK`、续接或记忆敏感任务先运行 `python scripts/migrate_project_storage.py inventory` 解析 `activePaths.memory`，再读取其中 `INDEX.md` 与 `profile.json`；`.docs/project-memory/` 仅作迁移前只读兼容，禁止新增写入。
 4. 多会话写入先用项目 guard 执行 `status/check/preflight/claim`；完成后 `release`。
-5. Bug、回归、卡住、运行不一致或异常命令先从上述 inventory 的 `activePaths.logs/runtime_scenes/` 检查最新现场。
+5. Bug、回归、卡住、运行不一致或异常命令：先 [`agent-log-routing.md`](docs/guides/agent-log-routing.md) 的 **`agent_log_context`**，再按 `agentBrief.evidence_refs` 深读。
 6. 非平凡行为、状态、权限、迁移、Prompt、Agent 或运行时变更：BRT 对齐未闭合前不得实现。
 
 按任务读取：
