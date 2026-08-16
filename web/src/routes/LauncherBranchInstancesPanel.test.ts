@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { LauncherBranchInstance } from "../api/launcher";
 import panelSource from "./LauncherBranchInstancesPanel.tsx?raw";
+import panelStyles from "./LauncherBranchInstancesPanel.styles";
 import {
   BRANCH_INSTANCE_PAGE_SIZE,
   canStartInstance,
@@ -63,27 +64,32 @@ function instance(overrides: Partial<LauncherBranchInstance> = {}): LauncherBran
 }
 
 describe("LauncherBranchInstancesPanel contracts", () => {
-  it("keeps the two primary sections on VUI primitives", () => {
+  it("renders one primary VDenseTable at a time through VTabs for all/running/attention/startable", () => {
     expect(panelSource).toContain("from \"../components/vui\"");
+    expect(panelSource).toContain("<VTabs");
+    expect(panelSource).toContain('id: "all"');
+    expect(panelSource).toContain('id: "running"');
+    expect(panelSource).toContain('id: "attention"');
+    expect(panelSource).toContain('id: "startable"');
+    expect(panelSource).toContain("value={activeTab}");
+    expect(panelSource).toContain("rows={activeRows}");
+    expect(panelSource).toContain("grouped.running.length");
+    expect(panelSource).toContain("grouped.attention.length");
+    expect(panelSource).toContain("grouped.startable.length");
+    expect(panelSource).toContain("labels.allHint");
+    expect(panelSource).toContain("labels.runningHint");
+    expect(panelSource).toContain("labels.attentionHint");
+    expect(panelSource).toContain("labels.startableHint");
     expect(panelSource).toContain("LauncherBranchStatusHelp");
     expect(panelSource).toContain("正在运行");
     expect(panelSource).toContain("需要处理");
     expect(panelSource).toContain("可启动");
-    expect(panelSource).toContain("全部关闭");
     expect(panelSource).toContain("停止全部");
+    expect(panelSource).toContain("全部关闭");
     expect(panelSource).toContain("<VNativeInput");
     expect(panelSource).toContain("<VToolbar");
     expect(panelSource).toContain("Launcher 控制窗口");
     expect(panelSource).toContain("读取中");
-    expect(panelSource).toContain("Workbench 窗口");
-    expect(panelSource).toContain("启动工作台");
-    expect(panelSource).toContain("<details");
-    expect(panelSource).toContain("维护与清理");
-    expect(panelSource).toContain("<VButton");
-    expect(panelSource).toContain("<VCheckbox");
-    expect(panelSource).toContain("<VConfirmDialog");
-    expect(panelSource).toContain("<VDenseTable");
-    expect(panelSource.match(/<VStatusChip/g)?.length).toBeGreaterThanOrEqual(4);
     expect(panelSource).toContain('tone={launcherOnline ? "success" : launcherReading ? "neutral" : "warning"}');
     expect(panelSource).toContain("tone={runtimeTone(state)}");
     expect(panelSource).toContain('<VStatusChip tone="success">{labels.ready}</VStatusChip>');
@@ -94,6 +100,65 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).not.toMatch(/renderers\/shadcn/);
     expect(panelSource).not.toMatch(/<button\b/);
     expect(BRANCH_INSTANCE_PAGE_SIZE).toBe(8);
+  });
+
+  it("keeps a compact runtime presentation with backend/frontend/workbench/git/actions columns", () => {
+    expect(panelSource).toContain("header: copy.branchColumn");
+    expect(panelSource).toContain("header: copy.instanceState");
+    expect(panelSource).toContain("header: labels.backend");
+    expect(panelSource).toContain("header: labels.frontend");
+    expect(panelSource).toContain("header: labels.workbench");
+    expect(panelSource).toContain("header: labels.git");
+    expect(panelSource).toContain("header: labels.actions");
+    expect(panelSource).toContain("formatBackendStatus");
+    expect(panelSource).toContain("formatFrontendStatus");
+    expect(panelSource).toContain("formatWorkbenchStatus");
+    expect(panelSource).toContain("formatGitStatus");
+    expect(panelSource).toContain("formatAttentionReason");
+    expect(panelSource).toContain("instanceRuntimeStateLabel");
+    expect(panelSource).toContain("Workbench 窗口");
+    expect(panelSource).toContain("启动工作台");
+    expect(panelSource).toContain("styles.actionButtons");
+    // Compact columns still keep the path inside the branch tooltip, not a wide fill column.
+    expect(panelSource).toContain("path || item.displayPath || item.id");
+    // Narrow widths: the resizable table scrolls inside its own container so the
+    // actions column stays discoverable without page-level horizontal overflow.
+    expect(panelStyles.statusTable).toBeTypeOf("string");
+    expect(panelStyles.statusTable).toContain("w-full");
+    expect(panelStyles.panel).toContain("overflow-hidden");
+    expect(panelStyles.panel).toContain("min-w-0");
+  });
+
+  it("renders one global empty surface for zero items and a distinct recoverable filtered miss", () => {
+    expect(panelSource).toContain("<VEmptyState");
+    expect(panelSource).toContain("labels.globalEmptyTitle");
+    expect(panelSource).toContain("labels.globalEmptyHint");
+    expect(panelSource).toContain("const hasAnyItems = items.length > 0");
+    // Table, filters, pagination, and bulk actions are gated behind hasAnyItems.
+    expect(panelSource).toContain("{!hasAnyItems ? (");
+    expect(panelSource).toContain("labels.filteredEmptyTitle");
+    expect(panelSource).toContain("labels.filteredEmptyHint");
+    expect(panelSource).toContain("labels.clearSearch");
+    expect(panelSource).toContain("onPress={clearSearch}");
+    expect(panelSource).toContain('setQuery("")');
+    expect(panelSource).toContain("setFilters({})");
+    expect(panelSource).toContain("GitBranch");
+  });
+
+  it("keeps maintenance cleanup and batch stop/close surfaces intact", () => {
+    expect(panelSource).toContain("<details");
+    expect(panelSource).toContain("维护与清理");
+    expect(panelSource).toContain("<VCheckbox");
+    expect(panelSource).toContain("<VConfirmDialog");
+    expect(panelSource).toContain("askCleanup");
+    expect(panelSource).toContain("askBatchStop");
+    expect(panelSource).toContain("cleanupSelected");
+    expect(panelSource).toContain("requestBranchInstanceCleanup");
+    expect(panelSource).toContain("queryClient.invalidateQueries({ queryKey: queryKeys.launcherBranchInstances() })");
+    expect(panelSource).toContain("cleanupMutation");
+    expect(panelSource).toContain("pendingIds");
+    expect(panelSource).toContain("batchStopIds");
+    expect(panelSource).toContain("onStopMany");
   });
 
   it("keeps live instances running and failed zombies in attention", () => {

@@ -185,7 +185,7 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).not.toContain("restartDisabled={destructiveActionDisabled}");
     expect(branchInstancesPanelSource).toContain("onLifecycle");
     expect(branchInstancesPanelSource).toContain("onStopMany");
-    expect(branchInstancesPanelSource).toContain("labels.startWorkbench");
+    expect(branchInstancesPanelSource).toContain('onLifecycle?.(item.id, "start")');
   });
 
   it("renders a dense lifecycle console rather than a landing page", () => {
@@ -653,6 +653,62 @@ describe("LauncherRoute layout contract", () => {
     expect(launcherApiSource).toContain("controlPort: setting.launcher.controlPort");
     expect(launcherApiSource).toContain("windowSize: setting.workbench.windowSize");
     expect(routeSource).not.toContain("windowModeMutation");
+  });
+
+  it("collapses startup settings into an accessible summary that expands to the unchanged form", () => {
+    expect(startupSettingsPanelSource).toContain("<details");
+    expect(startupSettingsPanelSource).toContain("<summary");
+    expect(startupSettingsPanelSource).not.toContain("<details open");
+    expect(startupSettingsPanelSource).toContain("onToggle={(event) => setSettingsOpen(event.currentTarget.open)}");
+    expect(startupSettingsPanelSource).toContain("expandSettings");
+    expect(startupSettingsPanelSource).toContain("collapseSettings");
+    // The concise summary is built from current profile, ports, and effective window mode.
+    expect(startupSettingsPanelSource).toContain("runtimeProfileLabel(current.runtime.profile, uiLang)");
+    expect(startupSettingsPanelSource).toContain("effectiveWindowModeLabel");
+    expect(startupSettingsPanelSource).toContain("effectiveControlPort || current.launcher.controlPort");
+    expect(startupSettingsPanelSource).toContain("effectiveBackendPort || current.workbench.backendPort");
+    expect(startupSettingsPanelSource).toContain("effectiveFrontendPort || current.workbench.frontendPort");
+    // The editable form stays inside the fold body with save/validation/window-mode semantics intact.
+    expect(startupSettingsPanelSource).toContain("settingsBody");
+    expect(startupSettingsPanelSource).toContain("saveDraft");
+    expect(startupSettingsPanelSource).toContain("setValidationError(copy.invalidPort)");
+    expect(startupSettingsPanelSource).toContain("saveWindowMode({ windowMode: value })");
+    expect(startupSettingsPanelSource).toContain("controlsDisabled");
+    // The collapsed summary title must stay on one line inside the 250-380px rail.
+    expect(startupSettingsPanelStyles.settingsTitle).toContain("shrink-0");
+    expect(startupSettingsPanelStyles.settingsTitle).toContain("whitespace-nowrap");
+  });
+
+  it("keeps branch management and startup settings in a responsive primary-plus-rail layout", () => {
+    expect(routeSource).toContain("styles.primaryRail");
+    expect(routeSource).toContain("styles.primaryColumn");
+    expect(routeSource).toContain("styles.settingsRail");
+    expect(routeSource).toContain('data-vui-region="launcher-primary-rail"');
+    expect(routeSource).toContain('data-vui-region="launcher-primary"');
+    expect(routeSource).toContain('data-vui-region="launcher-settings-rail"');
+    // Both the branch panel and the settings Suspense/panel live inside the rail container.
+    const railStart = routeSource.indexOf("className={styles.primaryRail}");
+    const statusErrorIndex = routeSource.indexOf("{statusQuery.isError && !launcherControlPlaneStarting ? (");
+    expect(railStart).toBeGreaterThan(0);
+    expect(statusErrorIndex).toBeGreaterThan(railStart);
+    expect(routeSource.slice(railStart, statusErrorIndex)).toContain("<LauncherBranchInstancesPanel");
+    expect(routeSource.slice(railStart, statusErrorIndex)).toContain("<LauncherStartupSettingsPanel");
+    // Status notices and advanced maintenance/diagnostics stay below the primary layout.
+    const settingsIndex = routeSource.indexOf("<LauncherStartupSettingsPanel");
+    const workspaceIndex = routeSource.indexOf("className={styles.workspace}");
+    const advancedIndex = routeSource.indexOf("className={styles.advancedFold}");
+    expect(settingsIndex).toBeGreaterThan(routeSource.indexOf("<LauncherBranchInstancesPanel"));
+    expect(statusErrorIndex).toBeGreaterThan(settingsIndex);
+    expect(workspaceIndex).toBeGreaterThan(statusErrorIndex);
+    expect(advancedIndex).toBeGreaterThan(workspaceIndex);
+    // Responsive contract: 1fr primary + 250px-or-larger rail at lg, stacked below lg.
+    expect(styles.primaryRail).toContain("minmax(0,1fr)");
+    expect(styles.primaryRail).toContain("minmax(250px,");
+    expect(styles.primaryRail).toContain("max-[1024px]:grid-cols-[minmax(0,1fr)]");
+    expect(styles.primaryColumn).toContain("min-w-0");
+    expect(styles.settingsRail).toContain("min-w-0");
+    // Open settings details spans the full route grid row; closed stays the compact rail.
+    expect(styles.settingsRail).toContain("[&:has([open])]:col-span-full");
   });
 
   it("keeps developer mode launcher-owned with preview and plan-hash cleanup guards", () => {
