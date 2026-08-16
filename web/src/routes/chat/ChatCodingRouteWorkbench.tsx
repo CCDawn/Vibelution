@@ -35,7 +35,7 @@ import {
 } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
-import { listSessionChildSessions, fetchSessionLlmOptions, listPendingSessionToolApprovals, querySessions } from "../../api/chat";
+import { listSessionChildSessions, fetchSessionLlmOptions, listPendingSessionToolApprovals } from "../../api/chat";
 import { archiveAgent, updateAgent } from "../../api/agents";
 import { fetchFileContent } from "../../api/files";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
@@ -55,7 +55,6 @@ import {
   SessionRuntimeNotice,
   SessionToolApprovalRequest,
     SessionLlmOptions,
-    SessionQueryResponse,
     SessionSummary,
   SessionStreamEvent,
   SessionReferenceAttachment,
@@ -88,7 +87,6 @@ import {
   updateSessionSummaryCaches,
 } from "../chatSessionIndexQuery";
 import { isTempSessionId } from "../sessionOptimisticIds";
-import { mergePreservedCreatedSessions } from "../sessionCreatePreserve";
 import {
   shouldShowConversationIndexLoading,
 } from "../chatSessionStartupGate";
@@ -120,15 +118,11 @@ import {
 import { AgentSessionTabStrip, type CliAgentRunTab } from "../AgentSessionTabStrip";
 import {
   AgentConversationDirectory,
-  visibleDirectoryAgents,
 } from "../AgentConversationDirectory";
-import { markSessionActivitySnapshotsSeen } from "../sessionActivityIndicator";
 import { ConversationIndexTree } from "../ConversationIndexTree";
 import { teamWorkspaceRoute } from "../teams/researchWorkspaceModel";
 import {
   hasInvalidChildSessionLink,
-  isRepresentedInAgentSessionTabs,
-  isVisibleDirectSession,
   rootSessionIdFor,
   sessionToConversationSummary,
   useConversationIndexModel,
@@ -215,6 +209,9 @@ import { useChatWorkspaceActions } from "./useChatWorkspaceActions";
 import { ChatDangerConfirmDialog } from "./ChatDangerConfirmDialog";
 import { useChatSessionBulkSelection } from "./useChatSessionBulkSelection";
 import { useChatWorkbenchConfirmDialog } from "./useChatWorkbenchConfirmDialog";
+import { useChatVisibleSessionCatalog } from "./useChatVisibleSessionCatalog";
+import { useChatAgentSessionTabs } from "./useChatAgentSessionTabs";
+import { useChatSessionIndexRailModel } from "./useChatSessionIndexRailModel";
 import { useDesktopConversationAttention } from "./useDesktopConversationAttention";
 import { ChatCliAgentTerminalStack } from "./ChatCliAgentTerminalStack";
 import { useChatSessionRenameMenu } from "./useChatSessionRenameMenu";
@@ -242,7 +239,6 @@ import {
 } from "./chatRuntimeWorkRuns";
 import { buildChatTokenStatusViewModel } from "./chatTokenStatusModel";
 import {
-  buildAgentSessionTabs,
   buildChatActiveSkillViewModel,
   buildChatMentalStateViewModel,
   buildChatPetCompanionViewModel,
@@ -2482,54 +2478,22 @@ export function ChatCodingRoute() {
     return buildChatMentionTargets(archiveVisibleAgents);
   }, [archiveVisibleAgents]);
 
-  const allVisibleSessions = useMemo(() => {
-    const merged = [...(sessionsQuery.data ?? []), ...(childSessionsQuery.data ?? [])];
-    return merged
-      .filter(isVisibleDirectSession)
-      .filter((session) => !pendingArchiveAgentIds.has(String(session.agentId || "").trim()))
-      .filter((session, index, sessions) => sessions.findIndex((item) => item.id === session.id) === index);
-  }, [childSessionsQuery.data, pendingArchiveAgentIds, sessionsQuery.data]);
-
-  const sessionsById = useMemo(() => {
-    return new Map(allVisibleSessions.map((session) => [session.id, session]));
-  }, [allVisibleSessions]);
-
-  const [, setSessionActivitySeenEpoch] = useState(0);
-
-  // Mark completed/unread activity as seen when the operator opens the session.
-  // Blue dots clear after read; a later preview/turn identity can show them again.
-  useEffect(() => {
-    if (!activeSessionId) {
-      return;
-    }
-    const directorySession = sessionsById.get(activeSessionId);
-    const detailSession = detail?.id === activeSessionId ? detail : undefined;
-    const wrote = markSessionActivitySnapshotsSeen(activeSessionId, [
-      directorySession,
-      directSessionActiveSummary?.id === activeSessionId ? directSessionActiveSummary : undefined,
-      detailSession,
-    ]);
-    if (wrote) {
-      setSessionActivitySeenEpoch((current) => current + 1);
-    }
-  }, [
+  const {
+    allVisibleSessions,
+    sessionsById,
+    visibleChatAgents,
+    activeSessionAgentId,
+  } = useChatVisibleSessionCatalog({
+    sessions: sessionsQuery.data,
+    childSessions: childSessionsQuery.data,
+    pendingArchiveAgentIds,
+    archiveVisibleAgents,
     activeSessionId,
     detail,
     directSessionActiveSummary,
-    sessionsById,
-  ]);
+    sessionDetailAgentId: sessionDetailQuery.data?.agentId,
+  });
 
-  const visibleChatAgents = useMemo(() => {
-    return visibleDirectoryAgents(archiveVisibleAgents, allVisibleSessions);
-  }, [allVisibleSessions, archiveVisibleAgents]);
-  const activeSessionAgentId = useMemo(() => {
-    return String(
-      sessionDetailQuery.data?.agentId
-      || directSessionActiveSummary?.agentId
-      || sessionsById.get(activeSessionId || "")?.agentId
-      || "",
-    ).trim();
-  }, [activeSessionId, directSessionActiveSummary?.agentId, sessionDetailQuery.data?.agentId, sessionsById]);
   const { bareRouteBootstrapTarget } = useChatSelectionPersistence({
     selection: chatRouteSelection,
     serverSessionId: activeSessionBootstrapQuery.data?.activeSessionId,
@@ -2553,33 +2517,19 @@ export function ChatCodingRoute() {
     canonicalizeBareRoute(bareRouteBootstrapTarget);
   }, [bareRouteBootstrapTarget, canonicalizeBareRoute, chatRouteSelection.kind, sessionsQuery.data]);
   const selectedChatAgentId = selectedAgentId || activeSessionAgentId || visibleChatAgents[0]?.agentId || "";
-  const selectedAgentSessionsQuery = useQuery({
-    queryKey: ["sessions", "agent", selectedChatAgentId],
-    queryFn: async () => {
-      const payload = await querySessions({
-        agentId: selectedChatAgentId,
-        limit: 100,
-      });
-      const previous = queryClient.getQueryData<SessionQueryResponse>([
-        "sessions",
-        "agent",
-        selectedChatAgentId,
-      ]);
-      const items = mergePreservedCreatedSessions(payload.items ?? [], {
-        localItems: previous?.items ?? [],
-      }).filter((session) => String(session.agentId || "").trim() === selectedChatAgentId);
-      return {
-        ...payload,
-        items,
-        totalEstimate:
-          typeof payload.totalEstimate === "number"
-            ? Math.max(payload.totalEstimate, items.length)
-            : items.length,
-      };
-    },
-    enabled: secondaryChatDataEnabled && Boolean(selectedChatAgentId),
-    refetchInterval: chatLiveQueryPolicy.sessionsRefetchInterval,
-    refetchIntervalInBackground: chatLiveQueryPolicy.directRefetchIntervalInBackground,
+
+  const {
+    rightIndexSessions,
+    agentSessionTabs,
+  } = useChatAgentSessionTabs({
+    queryClient,
+    selectedChatAgentId,
+    agentsById,
+    allVisibleSessions,
+    activeSessionId,
+    secondaryChatDataEnabled,
+    sessionsRefetchInterval: chatLiveQueryPolicy.sessionsRefetchInterval,
+    directRefetchIntervalInBackground: chatLiveQueryPolicy.directRefetchIntervalInBackground,
   });
 
   const contextMenuSession = useMemo(() => {
@@ -2589,34 +2539,6 @@ export function ChatCodingRoute() {
     return sessionsById.get(sessionContextMenu.sessionId) ?? sessionContextMenu.session;
   }, [sessionContextMenu, sessionsById]);
   const contextMenuSessionId = sessionContextMenu?.sessionId ?? "";
-
-  const rightIndexSessions = useMemo(() => {
-    return allVisibleSessions.filter((session) => !isRepresentedInAgentSessionTabs(session));
-  }, [allVisibleSessions]);
-
-  const selectedAgentVisibleSessions = useMemo(() => {
-    return allVisibleSessions.filter(
-      (session) => String(session.agentId || "").trim() === selectedChatAgentId,
-    );
-  }, [allVisibleSessions, selectedChatAgentId]);
-
-  const agentSessionTabs = useMemo(
-    () => buildAgentSessionTabs({
-      sessions: [...(selectedAgentSessionsQuery.data?.items ?? []), ...selectedAgentVisibleSessions],
-      selectedChatAgentDirectSessionId: agentsById.get(selectedChatAgentId)?.directSessionId,
-    }),
-    [agentsById, selectedAgentSessionsQuery.data?.items, selectedAgentVisibleSessions, selectedChatAgentId],
-  );
-
-  useEffect(() => {
-    if (!activeSessionId) {
-      return;
-    }
-    const tabSession = agentSessionTabs.find((session) => session.id === activeSessionId);
-    if (markSessionActivitySnapshotsSeen(activeSessionId, [tabSession])) {
-      setSessionActivitySeenEpoch((current) => current + 1);
-    }
-  }, [activeSessionId, agentSessionTabs]);
 
   const {
     groupCandidateAgents,
@@ -2651,15 +2573,20 @@ export function ChatCodingRoute() {
     sessionsById,
     teams,
   });
-  const groupedGroupConversations = useMemo(() => {
-    return groupedConversations
-      .map((group) => ({ ...group, items: group.items.filter((conversation) => conversation.type === "group_room") }))
-      .filter((group) => group.items.length > 0);
-  }, [groupedConversations]);
-  const groupedGroupConversationCount = useMemo(
-    () => groupedGroupConversations.reduce((count, group) => count + group.items.length, 0),
-    [groupedGroupConversations],
-  );
+  const {
+    groupedGroupConversations,
+    groupedGroupConversationCount,
+    sessionIndexHasMore,
+    sessionIndexLoadMoreLabel,
+    sessionIndexFullyLoadedLabel,
+    sessionIndexProgressLabel,
+    sessionIndexProgressVisible,
+  } = useChatSessionIndexRailModel({
+    groupedConversations,
+    rawSessionsQuery,
+    lang,
+    numberFormatter,
+  });
   const {
     selectedBulkSessionIds,
     selectedBulkSessions,
@@ -2680,19 +2607,6 @@ export function ChatCodingRoute() {
     lang,
     t,
   });
-  const sessionIndexLoadedCount = rawSessionsQuery.loadedCount;
-  const sessionIndexTotalEstimate = rawSessionsQuery.totalEstimate;
-  const sessionIndexHasMore = rawSessionsQuery.hasMore;
-  const sessionIndexLoadMoreLabel = rawSessionsQuery.isLoadingMore
-    ? (lang === "zh" ? "加载中" : "Loading")
-    : (lang === "zh" ? "加载更多会话" : "Load more chats");
-  const sessionIndexFullyLoadedLabel = lang === "zh" ? "已加载全部会话" : "All chats loaded";
-  const sessionIndexProgressLabel =
-    sessionIndexTotalEstimate > sessionIndexLoadedCount
-      ? `${numberFormatter.format(sessionIndexLoadedCount)} / ${numberFormatter.format(sessionIndexTotalEstimate)}`
-      : numberFormatter.format(sessionIndexLoadedCount);
-  const sessionIndexProgressVisible = sessionIndexHasMore || sessionIndexTotalEstimate > SESSION_INDEX_PAGE_SIZE;
-
   const {
     handlePetInteraction,
     handleCreateSession,
