@@ -1007,7 +1007,12 @@ def test_delete_session_switches_to_latest_remaining_session(tmp_path, monkeypat
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["id"] == "session-newer"
+    assert payload == {
+        "deleted": True,
+        "deletedSessionId": "session-live",
+        "nextActiveSessionId": "session-newer",
+        "replacementDirectSessionId": "",
+    }
 
     state = load_chat_state(tmp_path)
     assert state["active_conversation_id"] == "session-newer"
@@ -1112,15 +1117,21 @@ def test_delete_last_session_creates_replacement(tmp_path, monkeypatch):
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["id"].startswith("session-")
-    assert payload["id"] != "session-live"
-    assert payload["title"] == "新会话"
-    assert payload["agentId"] == ""
-    assert payload["messages"] == []
+    assert payload["deleted"] is True
+    assert payload["deletedSessionId"] == "session-live"
+    next_active_session_id = str(payload["nextActiveSessionId"] or "").strip()
+    assert next_active_session_id.startswith("session-")
+    assert next_active_session_id != "session-live"
+
+    replacement = session_service.get_session_detail(next_active_session_id)
+    assert replacement is not None
+    assert replacement["title"] == "新会话"
+    assert replacement["agentId"] == ""
+    assert replacement["messages"] == []
 
     state = load_chat_state(tmp_path)
-    assert state["active_conversation_id"] == payload["id"]
-    assert [item["conversation_id"] for item in state["conversations"]] == [payload["id"]]
+    assert state["active_conversation_id"] == next_active_session_id
+    assert [item["conversation_id"] for item in state["conversations"]] == [next_active_session_id]
 
 
 def test_delete_session_prefer_async_returns_lightweight_handoff(tmp_path, monkeypatch):
