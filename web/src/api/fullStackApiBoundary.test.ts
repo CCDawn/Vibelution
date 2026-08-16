@@ -24,15 +24,12 @@ const routeTestPattern = /\.test\.(ts|tsx)$/;
 // Regenerated 2026-08 (R01 Chat workbench extract + current route client imports).
 // Counts may only stay equal or decrease from this snapshot without explicit review.
 const legacyRouteFetchJsonCallBudgets: Record<string, number> = {
-  "routes/AgentsRoute.tsx": 1,
   "routes/LogsRoute.tsx": 5,
   "routes/PetRoute.tsx": 1,
   "routes/RuntimeScenesPane.tsx": 4,
   "routes/SelfEvolutionTrack.tsx": 2,
   "routes/SkillsRoute.tsx": 2,
-  "routes/ToolsRoute.tsx": 9,
   "routes/UsageRoute.tsx": 1,
-  "routes/agent-create/AgentCreateWizardDialog.tsx": 1,
   "routes/chat/ChatCodingRouteWorkbench.tsx": 4,
   "routes/chat/CliAgentRunTerminalPanel.tsx": 3,
   "routes/chat/useChatCliAgentTerminal.ts": 1,
@@ -41,6 +38,7 @@ const legacyRouteFetchJsonCallBudgets: Record<string, number> = {
 // Task 9: ResearchFlowCanvasRoute.tsx + ResearchRoute.tsx fully removed (redirect-only shells deleted).
 // Evolution FE transports moved to web/src/api/evolution.ts.
 // Git FE transports moved to web/src/api/git.ts.
+// Tools FE transports moved to web/src/api/tools.ts.
 const legacyRouteFetchJsonAggregateBudget = 69;
 
 function walkSourceFiles(dir: string): string[] {
