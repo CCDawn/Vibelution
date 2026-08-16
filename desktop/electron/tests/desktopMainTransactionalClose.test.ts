@@ -59,7 +59,9 @@ describe("Electron main transactional Workbench close", () => {
     const source = readFileSync(mainSourcePath, "utf8");
 
     expect(source).toContain("desktopCliArgs.workbenchCloseCanary");
-    expect(source).toContain("await windowProvider.openOrFocusWorkbench()");
+    expect(source).toContain("async function openWorkbenchForCloseCanary(");
+    expect(source).toContain('operation: "start"');
+    expect(source).toContain("await openWorkbenchForCloseCanary(paths, launcherBootstrap, windowProvider);");
     expect(source).toContain("function writeWorkbenchCloseCanarySummary(");
     expect(source).toContain("desktopWorkbenchCloseCanarySummaryPath(paths.workspaceRoot)");
     expect(source).toContain("desktopWorkbenchCloseCanarySummary({");
@@ -70,7 +72,7 @@ describe("Electron main transactional Workbench close", () => {
 
     expect(source).toContain("startDesktopActionLoop stays");
     expect(source).not.toMatch(
-      /if \(desktopCliArgs\.workbenchCloseCanary\) \{\s*await windowProvider\.openOrFocusWorkbench\(\);\s*return;\s*\}\s*startDesktopActionLoop\(paths, launcherBootstrap, windowProvider\);/
+      /if \(desktopCliArgs\.workbenchCloseCanary\) \{\s*await openWorkbenchForCloseCanary\(paths, launcherBootstrap, windowProvider\);\s*return;\s*\}\s*startDesktopActionLoop\(paths, launcherBootstrap, windowProvider\);/
     );
   });
 
