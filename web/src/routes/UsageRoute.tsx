@@ -3,7 +3,7 @@ import "../design/route-css/workbench-secondary.tailwind.css";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Activity, Database, Gauge, RefreshCw } from "lucide-react";
 
-import { fetchJson } from "../api/client";
+import { fetchUsageSummary } from "../api/usage";
 import { queryKeys } from "../api/queryKeys";
 import type { TokenUsageBreakdownItem, TokenUsageRollup, UsageSource, UsageSummaryResponse } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
@@ -150,7 +150,7 @@ export function UsageRoute() {
   const pageVisible = usePageVisibility();
   const usageQuery = useQuery({
     queryKey: queryKeys.usageSummary("global"),
-    queryFn: () => fetchJson<UsageSummaryResponse>("/api/usage/summary"),
+    queryFn: () => fetchUsageSummary(),
     refetchInterval: resolvePollingInterval(pageVisible, 10_000, { backgroundMs: 60_000 }),
     refetchIntervalInBackground: false,
   });

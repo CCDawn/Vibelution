@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Ban, BookOpen, CheckSquare, Copy, FileText, RefreshCw, Search, Sparkles, Square } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { fetchJson } from "../api/client";
+import { fetchSkillLibrary, fetchSkillLibraryDetail } from "../api/skills";
 import { queryKeys } from "../api/queryKeys";
 import { SkillLibraryDetail, SkillLibraryItem, SkillLibraryPayload } from "../api/types";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
@@ -156,7 +156,7 @@ export function SkillsRoute() {
 
   const libraryQuery = useQuery({
     queryKey: queryKeys.skills(),
-    queryFn: () => fetchJson<SkillLibraryPayload>("/api/skills"),
+    queryFn: () => fetchSkillLibrary(),
   });
   const skills = libraryQuery.data?.skills ?? [];
   const filteredSkills = useMemo(() => {
@@ -191,7 +191,7 @@ export function SkillsRoute() {
 
   const detailQuery = useQuery({
     queryKey: queryKeys.skill(activeCommand),
-    queryFn: () => fetchJson<SkillLibraryDetail>(`/api/skills/${encodeURIComponent(normalizeCommand(activeCommand))}`),
+    queryFn: () => fetchSkillLibraryDetail(normalizeCommand(activeCommand)),
     enabled: Boolean(activeCommand),
   });
   const activeSkill = detailQuery.data ?? filteredSkills.find((skill) => skill.command === activeCommand) ?? null;

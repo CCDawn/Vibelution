@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import appShellSource from "../app/AppShell.tsx?raw";
 import routerSource from "../app/router.tsx?raw";
 import routeSource from "./SkillsRoute.tsx?raw";
+import skillsApiSource from "../api/skills.ts?raw";
 import styles from "./SkillsRoute.styles";
 import stylesSource from "./SkillsRoute.styles.ts?raw";
 
@@ -38,8 +39,10 @@ describe("SkillsRoute layout contract", () => {
   });
 
   it("uses read-only skill library APIs", () => {
-    expect(routeSource).toContain('fetchJson<SkillLibraryPayload>("/api/skills")');
-    expect(routeSource).toContain("fetchJson<SkillLibraryDetail>(`/api/skills/");
+    expect(routeSource).toContain("fetchSkillLibrary(");
+    expect(routeSource).toContain("fetchSkillLibraryDetail(");
+    expect(skillsApiSource).toContain('"/api/skills"');
+    expect(skillsApiSource).toContain("/api/skills/${encodeURIComponent(command)}");
     expect(routeSource).not.toContain('method: "POST"');
     expect(routeSource).not.toContain('method: "PUT"');
     expect(routeSource).not.toContain('method: "PATCH"');

@@ -76,6 +76,12 @@ export type SessionQueryParams = {
   sort?: string;
 };
 
+export function listSessionChildSessions(sessionId: string): Promise<SessionSummary[]> {
+  return fetchJson<SessionSummary[]>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/child-sessions`,
+  );
+}
+
 export function querySessions(params: SessionQueryParams = {}): Promise<SessionQueryResponse> {
   const search = new URLSearchParams();
   if (params.limit != null) {

@@ -11,7 +11,12 @@ import {
   type PointerEvent,
 } from "react";
 
-import { fetchJson } from "../api/client";
+import {
+  deleteRuntimeScenes,
+  fetchRuntimeSceneDetail,
+  fetchRuntimeSceneList,
+  fetchRuntimeSceneLogContent,
+} from "../api/logs";
 import { queryKeys } from "../api/queryKeys";
 import {
   LogDiagnostics,
@@ -894,7 +899,7 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel, initialSce
 
   const runtimeScenesQuery = useQuery({
     queryKey: queryKeys.runtimeScenes(),
-    queryFn: () => fetchJson<RuntimeSceneListItem[]>("/api/logs/runtime-scenes"),
+    queryFn: () => fetchRuntimeSceneList(),
     refetchInterval: resolvePollingInterval(pageVisible, 10_000),
     refetchIntervalInBackground: false,
   });
@@ -932,7 +937,7 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel, initialSce
   const sceneDetailQuery = useQuery({
     queryKey: queryKeys.runtimeScene(activeSceneId),
     enabled: Boolean(activeSceneId),
-    queryFn: () => fetchJson<RuntimeSceneDetail>(`/api/logs/runtime-scenes/${encodeURIComponent(activeSceneId)}`),
+    queryFn: () => fetchRuntimeSceneDetail(activeSceneId),
     refetchInterval: (query) => {
       const detail = query.state.data as RuntimeSceneDetail | undefined;
       return runtimeSceneIsLive(detail ?? activeSceneListItem) ? resolvePollingInterval(pageVisible, 5_000) : false;
@@ -966,22 +971,14 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel, initialSce
     queryKey: queryKeys.runtimeSceneContent(activeSceneId, activeRawLogPath),
     enabled: Boolean(activeSceneId && activeRawLogPath),
     queryFn: () =>
-      fetchJson<LogFileContent>(
-        `/api/logs/runtime-scenes/${encodeURIComponent(activeSceneId)}/content?path=${encodeURIComponent(activeRawLogPath)}`,
-      ),
+      fetchRuntimeSceneLogContent(activeSceneId, activeRawLogPath),
     refetchInterval: activeSceneLive ? resolvePollingInterval(pageVisible, 5_000) : false,
     refetchIntervalInBackground: false,
   });
 
   const deleteRuntimeScenesMutation = useMutation({
     mutationFn: async (sceneIds: string[]) =>
-      fetchJson<RuntimeSceneDeleteResponse>("/api/logs/runtime-scenes/delete", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ sceneIds }),
-      }),
+      deleteRuntimeScenes(sceneIds),
     onSuccess: (payload, sceneIds) => {
       const deletedIdSet = new Set(payload.deletedSceneIds);
       setSelectedSceneIds((current) => current.filter((id) => !deletedIdSet.has(id)));
