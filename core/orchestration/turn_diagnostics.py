@@ -24,6 +24,13 @@ from core.orchestration.cache_diagnostics import (
 )
 
 
+def _coerce_nonnegative_int(value: Any, *, default: int = 0) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return max(0, int(default or 0))
+
+
 def publish_llm_retry_status(
     *,
     attempt: int,
@@ -46,8 +53,8 @@ def publish_llm_retry_status(
             EventNames.LLM_STATUS,
             {
                 "status": "retrying",
-                "attempt": max(0, int(attempt or 0)),
-                "max_attempts": max(0, int(max_attempts or 0)),
+                "attempt": _coerce_nonnegative_int(attempt),
+                "max_attempts": _coerce_nonnegative_int(max_attempts),
                 "category": cat,
                 "recovery_action": act,
                 "source": "agent_outer_reconnect",
@@ -85,7 +92,7 @@ def record_turn_cache_diagnostics(
         runtime_metadata=runtime_metadata,
     )
     prompt_cache_partition = str(llm_usage.get("promptCachePartition") or "").strip()
-    context_limit = int(context_window_limit or 0)
+    context_limit = _coerce_nonnegative_int(context_window_limit)
     context_composition = build_runtime_context_composition(
         list(messages or []),
         turn_id=str(current_turn or ""),
@@ -174,7 +181,7 @@ def build_llm_invocation_context(
             "agentMode": mode_str,
             "orchestratorKind": orch_kind,
             "invocationId": uuid4().hex,
-            "routeAttempt": max(1, int(route_attempt)),
+            "routeAttempt": max(1, _coerce_nonnegative_int(route_attempt, default=1)),
             "toolAuthorizationDecisionFingerprint": str(tool_authorization_fingerprint or "").strip(),
             "ledgerConversationFingerprint": str(ledger_conversation_fingerprint or "").strip(),
             "turnId": str(
