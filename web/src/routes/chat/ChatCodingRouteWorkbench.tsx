@@ -173,6 +173,13 @@ import {
 import { ChatCenterSessionSurface } from "./ChatCenterSessionSurface";
 import { ChatCenterTabStrip } from "./ChatCenterTabStrip";
 import { ChatConversationIndexPanelContent } from "./ChatConversationIndexPanelContent";
+import { SessionBulkOperationsPanel } from "./SessionBulkOperationsPanel";
+import {
+  collectDirectSessionIdsFromConversations,
+  sessionBulkActionItemNote,
+  sessionBulkActionSummary,
+  sessionBulkDeletable,
+} from "./chatSessionBulkModel";
 import { ChatSessionWorkbenchShell } from "./ChatSessionWorkbenchShell";
 import { ChatWorkbenchCenterColumn } from "./ChatWorkbenchCenterColumn";
 import { useChatWorkbenchLayout } from "./useChatWorkbenchLayout";
@@ -1309,6 +1316,7 @@ export function ChatCodingRoute() {
     deleteGroupRoomMutation,
     resetGroupRoomMutation,
     deleteSessionMutation,
+    bulkDeleteSessionsMutation,
     clearSessionHistoryMutation,
     renameSessionMutation,
     addSessionToReviewMutation,
@@ -2642,6 +2650,128 @@ export function ChatCodingRoute() {
     () => groupedGroupConversations.reduce((count, group) => count + group.items.length, 0),
     [groupedGroupConversations],
   );
+  const [selectedBulkSessionIds, setSelectedBulkSessionIds] = useState<Set<string>>(() => new Set());
+  const [bulkSessionSelectionAnchorId, setBulkSessionSelectionAnchorId] = useState("");
+  const [sessionBulkNotice, setSessionBulkNotice] = useState<{ tone: "error" | "success"; text: string } | null>(null);
+  const visibleDirectSessionIds = useMemo(
+    () => collectDirectSessionIdsFromConversations(filteredConversations, sessionsById),
+    [filteredConversations, sessionsById],
+  );
+  const selectedBulkSessions = useMemo(
+    () => visibleDirectSessionIds.filter((sessionId) => selectedBulkSessionIds.has(sessionId)),
+    [selectedBulkSessionIds, visibleDirectSessionIds],
+  );
+  const allVisibleSessionsSelected = visibleDirectSessionIds.length > 0
+    && selectedBulkSessions.length === visibleDirectSessionIds.length;
+  const bulkSessionPending = bulkDeleteSessionsMutation.isPending;
+  const sessionBulkCopy = useMemo(() => ({
+    bulkSelected: t("bulkSelectedSessions"),
+    bulkClear: t("bulkClearSessionSelection"),
+    bulkSelectVisible: t("bulkSelectVisibleSessions"),
+    bulkRemove: t("bulkRemoveSessions"),
+    bulkWorking: t("bulkSessionWorking"),
+    bulkRemoveConfirm: t("bulkRemoveSessionsConfirm"),
+    cancelCreate: lang === "zh" ? "取消" : "Cancel",
+  }), [lang, t]);
+  const clearBulkSessions = useCallback(() => {
+    setSelectedBulkSessionIds(new Set());
+    setBulkSessionSelectionAnchorId("");
+  }, []);
+  const selectVisibleBulkSessions = useCallback(() => {
+    setSelectedBulkSessionIds(new Set(visibleDirectSessionIds));
+    setBulkSessionSelectionAnchorId(visibleDirectSessionIds[0] ?? "");
+  }, [visibleDirectSessionIds]);
+  const toggleBulkSession = useCallback((
+    sessionId: string,
+    selected: boolean,
+    extendRange = false,
+  ) => {
+    setSelectedBulkSessionIds((current) => {
+      const next = new Set(current);
+      if (extendRange && bulkSessionSelectionAnchorId) {
+        const anchorIndex = visibleDirectSessionIds.indexOf(bulkSessionSelectionAnchorId);
+        const targetIndex = visibleDirectSessionIds.indexOf(sessionId);
+        if (anchorIndex >= 0 && targetIndex >= 0) {
+          const [start, end] = anchorIndex < targetIndex
+            ? [anchorIndex, targetIndex]
+            : [targetIndex, anchorIndex];
+          visibleDirectSessionIds.slice(start, end + 1).forEach((id) => next.add(id));
+          return next;
+        }
+      }
+      if (selected) {
+        next.add(sessionId);
+      } else {
+        next.delete(sessionId);
+      }
+      return next;
+    });
+    setBulkSessionSelectionAnchorId(sessionId);
+  }, [bulkSessionSelectionAnchorId, visibleDirectSessionIds]);
+  const bulkRemoveSessions = useCallback(async () => {
+    if (bulkSessionPending) {
+      return;
+    }
+    if (!selectedBulkSessions.length) {
+      setSessionBulkNotice({ tone: "error", text: t("bulkNoSessionSelection") });
+      return;
+    }
+    const busySessions = selectedBulkSessions.filter((sessionId) => {
+      const session = sessionsById.get(sessionId);
+      return session ? !sessionBulkDeletable(session, isBusyPhase) : false;
+    });
+    const removableSessions = selectedBulkSessions.filter((sessionId) => {
+      const session = sessionsById.get(sessionId);
+      return session ? sessionBulkDeletable(session, isBusyPhase) : true;
+    });
+    const notes: string[] = [];
+    busySessions.forEach((sessionId) => {
+      const session = sessionsById.get(sessionId);
+      const title = String(session?.title || session?.agentDisplayName || sessionId).trim();
+      notes.push(`${title}: ${t("deleteSessionBusy")}`);
+    });
+    let success = 0;
+    let skipped = busySessions.length;
+    let failed = 0;
+    if (removableSessions.length) {
+      try {
+        const response = await bulkDeleteSessionsMutation.mutateAsync({ sessionIds: removableSessions });
+        response.skipped.forEach((item) => {
+          notes.push(sessionBulkActionItemNote(item, sessionsById, t("deleteSessionBusy")));
+        });
+        response.failed.forEach((item) => {
+          notes.push(sessionBulkActionItemNote(item, sessionsById, ""));
+        });
+        success += response.summary.successCount;
+        skipped += response.summary.skippedCount;
+        failed += response.summary.failedCount;
+      } catch (error) {
+        failed += removableSessions.length;
+        notes.push(error instanceof Error ? error.message : String(error));
+      }
+    }
+    setSessionBulkNotice({
+      tone: failed > 0 ? "error" : "success",
+      text: sessionBulkActionSummary(
+        t("bulkRemoveSessionsResult"),
+        success,
+        skipped,
+        failed,
+        notes,
+        lang,
+      ),
+    });
+    clearBulkSessions();
+  }, [
+    bulkDeleteSessionsMutation,
+    bulkSessionPending,
+    clearBulkSessions,
+    isBusyPhase,
+    lang,
+    selectedBulkSessions,
+    sessionsById,
+    t,
+  ]);
   const sessionIndexLoadedCount = rawSessionsQuery.loadedCount;
   const sessionIndexTotalEstimate = rawSessionsQuery.totalEstimate;
   const sessionIndexHasMore = rawSessionsQuery.hasMore;
@@ -3040,6 +3170,19 @@ export function ChatCodingRoute() {
               />
             </Suspense>
           ) : null}
+          {sessionBulkNotice ? (
+            <div className={styles.panelNotice} role="status">{sessionBulkNotice.text}</div>
+          ) : null}
+          <SessionBulkOperationsPanel
+            copy={sessionBulkCopy}
+            selectedCount={selectedBulkSessions.length}
+            visibleCount={visibleDirectSessionIds.length}
+            allVisibleSelected={allVisibleSessionsSelected}
+            pending={bulkSessionPending}
+            onSelectVisible={selectVisibleBulkSessions}
+            onClearSelection={clearBulkSessions}
+            onRemove={() => { void bulkRemoveSessions(); }}
+          />
           <ConversationIndexTree
             activeGroupRoomId={activeGroupRoomId}
             activeSessionId={activeSessionId}
@@ -3082,6 +3225,10 @@ export function ChatCodingRoute() {
             onRenameTitleChange={setEditingSessionTitle}
             onSubmitRename={submitRenameSession}
             onToggleConversationGroup={toggleConversationGroup}
+            bulkSelectionEnabled
+            selectedBulkSessionIds={selectedBulkSessionIds}
+            bulkSelectLabel={lang === "zh" ? "选择会话" : "Select session"}
+            onToggleBulk={toggleBulkSession}
           />
           {sessionIndexHasMore ? (
             <VButton
@@ -3628,6 +3775,10 @@ export function ChatCodingRoute() {
         latestMentalSnapshot={latestMentalSnapshot}
         chatRoomModeLabel={chatRoomModeLabel}
         chatRoomPurposeLabel={chatRoomPurposeLabel}
+        sessionBulkSelectVisibleVisible={selectedBulkSessions.length === 0 && visibleDirectSessionIds.length > 0}
+        sessionBulkSelectVisibleLabel={t("bulkSelectVisibleSessions")}
+        onSessionBulkSelectVisible={selectVisibleBulkSessions}
+        sessionBulkSelectVisibleDisabled={bulkSessionPending || conversationIndexLoading}
       />
       )}
     >

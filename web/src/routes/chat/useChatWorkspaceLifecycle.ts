@@ -11,6 +11,7 @@ import {
   createSessionChatReviewCandidate,
   deleteChatRoom,
   deleteChatSession,
+  bulkDeleteChatSessions,
   fetchSessionDetail,
   resetChatRoom,
   startChatRoomRound,
@@ -31,6 +32,7 @@ import type {
   ConversationSummary,
   SessionChatReviewCandidateResponse,
   SessionDeleteResponse,
+  SessionBulkDeleteResponse,
   SessionDetail,
   SessionSummary,
 } from "../../api/types";
@@ -194,6 +196,22 @@ export type UseChatWorkspaceLifecycleResult = {
       previousAgentSessionCaches: ReturnType<typeof captureAgentSessionCacheSnapshots>;
       previousConversations: ConversationSummary[] | undefined;
       previousAgents: AgentInstance[] | undefined;
+    }
+  >;
+  bulkDeleteSessionsMutation: UseMutationResult<
+    SessionBulkDeleteResponse,
+    Error,
+    { sessionIds: string[] },
+    {
+      previousSessions: SessionSummary[] | undefined;
+      previousSessionIndexCaches: ReturnType<typeof captureSessionIndexCacheSnapshots>;
+      previousAgentSessionCaches: ReturnType<typeof captureAgentSessionCacheSnapshots>;
+      previousConversations: ConversationSummary[] | undefined;
+      previousAgents: AgentInstance[] | undefined;
+      previousRouteSessionId: string;
+      deletedSessionIds: string[];
+      optimisticNextActiveSessionId: string;
+      telemetry: ReturnType<typeof startUserAction>;
     }
   >;
   clearSessionHistoryMutation: UseMutationResult<
@@ -937,6 +955,173 @@ export function useChatWorkspaceLifecycle({
     },
   });
 
+  const bulkDeleteSessionsMutation = useMutation({
+    mutationFn: async ({ sessionIds }: { sessionIds: string[] }) =>
+      bulkDeleteChatSessions(sessionIds),
+    onMutate: async (variables) => {
+      const deletedSessionIds = [...new Set(
+        variables.sessionIds.map((sessionId) => String(sessionId || "").trim()).filter(Boolean),
+      )];
+      const telemetry = startUserAction(
+        "session_delete",
+        { sessionIds: deletedSessionIds.join(",") },
+        { destructive: true },
+      );
+      deletedSessionIds.forEach((sessionId) => markSessionDeleteTombstone(sessionId));
+      void queryClient.cancelQueries({ queryKey: queryKeys.sessions() });
+      void queryClient.cancelQueries({ queryKey: queryKeys.conversations() });
+      void queryClient.cancelQueries({ queryKey: queryKeys.agents() });
+      deletedSessionIds.forEach((sessionId) => {
+        void queryClient.cancelQueries({ queryKey: queryKeys.session(sessionId) });
+      });
+
+      const previousSessions = queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions());
+      const previousSessionIndexCaches = captureSessionIndexCacheSnapshots(queryClient);
+      const previousAgentSessionCaches = captureAgentSessionCacheSnapshots(queryClient);
+      const previousConversations = queryClient.getQueryData<ConversationSummary[]>(queryKeys.conversations());
+      const previousAgents = queryClient.getQueryData<AgentInstance[]>(queryKeys.agents());
+      const previousRouteSessionId = routeSelectionRef.current.kind === "session"
+        ? routeSelectionRef.current.sessionId
+        : "";
+      const deletedSessionIdSet = new Set(deletedSessionIds);
+
+      updateSessionSummaryCaches(queryClient, (sessions) =>
+        sessions?.filter((session) => !deletedSessionIdSet.has(session.id)),
+      );
+      deletedSessionIds.forEach((sessionId) => {
+        removeSessionFromAgentSessionCaches(queryClient, sessionId);
+      });
+      queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations(), (conversations) =>
+        (conversations ?? []).filter((conversation) => {
+          const sessionId = String(conversation.directSessionId || conversation.conversationId || "").trim();
+          return !deletedSessionIdSet.has(sessionId);
+        }),
+      );
+      queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (agents) =>
+        agents?.map((agent) => (
+          agent.directSessionId && deletedSessionIdSet.has(agent.directSessionId)
+            ? { ...agent, directSessionId: "" }
+            : agent
+        )),
+      );
+
+      const remainingSessions = queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions());
+      const routeDeletedSessionId = deletedSessionIdSet.has(previousRouteSessionId)
+        ? previousRouteSessionId
+        : "";
+      const deletedAgentId = routeDeletedSessionId
+        ? String(
+          (previousSessions ?? []).find((session) => session.id === routeDeletedSessionId)?.agentId || "",
+        ).trim()
+        : "";
+      const optimisticNextActiveSessionId = routeDeletedSessionId
+        ? pickOptimisticNextActiveSessionId(
+          remainingSessions,
+          routeDeletedSessionId,
+          previousRouteSessionId,
+          deletedAgentId,
+        )
+        : "";
+
+      deletedSessionIds.forEach((sessionId) => {
+        clearSessionTransientUiState(sessionId);
+        removeSessionWorkspace(sessionId);
+      });
+      if (routeDeletedSessionId) {
+        const routeReplaced = chatRoute.replaceIfStillViewing(
+          { kind: "session", sessionId: routeDeletedSessionId },
+          optimisticNextActiveSessionId
+            ? { kind: "session", sessionId: optimisticNextActiveSessionId }
+            : { kind: "bare" },
+        );
+        if (optimisticNextActiveSessionId && routeReplaced) {
+          requestSessionComposerFocus(optimisticNextActiveSessionId);
+        }
+      }
+
+      setGroupManageSessionIds((current) => current.filter((sessionId) => !deletedSessionIdSet.has(sessionId)));
+
+      return {
+        previousSessions,
+        previousSessionIndexCaches,
+        previousAgentSessionCaches,
+        previousConversations,
+        previousAgents,
+        previousRouteSessionId,
+        deletedSessionIds,
+        optimisticNextActiveSessionId,
+        telemetry,
+      };
+    },
+    onSuccess: (deleteResult, _variables, context) => {
+      const serverNextActiveSessionId = String(deleteResult.nextActiveSessionId || "").trim();
+      const optimisticNextActiveSessionId = String(context?.optimisticNextActiveSessionId || "").trim();
+      const nextActiveSessionId = serverNextActiveSessionId || optimisticNextActiveSessionId;
+      const deletedSessionIds = context?.deletedSessionIds ?? [];
+      const previousRouteSessionId = String(context?.previousRouteSessionId || "").trim();
+      let routeReplaced = false;
+
+      if (
+        nextActiveSessionId
+        && previousRouteSessionId
+        && deletedSessionIds.includes(previousRouteSessionId)
+        && nextActiveSessionId !== previousRouteSessionId
+      ) {
+        routeReplaced = chatRoute.replaceIfStillViewing(
+          { kind: "session", sessionId: previousRouteSessionId },
+          { kind: "session", sessionId: nextActiveSessionId },
+        );
+        if (routeReplaced) {
+          requestSessionComposerFocus(nextActiveSessionId);
+        }
+      }
+
+      context?.telemetry?.succeeded({
+        deletedCount: deleteResult.summary?.successCount ?? deletedSessionIds.length,
+        skippedCount: deleteResult.summary?.skippedCount ?? 0,
+        failedCount: deleteResult.summary?.failedCount ?? 0,
+        previousRouteSessionId,
+        optimisticNextActiveSessionId,
+        serverNextActiveSessionId,
+        nextActiveSessionId,
+        routeReplaced,
+      });
+
+      deletedSessionIds.forEach((sessionId) => {
+        void chatWorkspaceCache.afterSessionDeleted({
+          deletedSessionId: sessionId,
+          roomId: routeSelectionRef.current.kind === "room" ? routeSelectionRef.current.roomId : "",
+        });
+      });
+    },
+    onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, {
+        sessionIds: variables.sessionIds.join(","),
+      });
+      (context?.deletedSessionIds ?? variables.sessionIds).forEach((sessionId) => {
+        clearSessionDeleteTombstone(sessionId);
+      });
+      if (context?.previousSessions) {
+        queryClient.setQueryData(queryKeys.sessions(), context.previousSessions);
+      }
+      restoreSessionIndexCacheSnapshots(queryClient, context?.previousSessionIndexCaches);
+      restoreAgentSessionCacheSnapshots(queryClient, context?.previousAgentSessionCaches);
+      if (context?.previousConversations) {
+        queryClient.setQueryData(queryKeys.conversations(), context.previousConversations);
+      }
+      if (context?.previousAgents !== undefined) {
+        queryClient.setQueryData(queryKeys.agents(), context.previousAgents);
+      }
+      setSessionComposerErrors((current) => ({
+        ...current,
+        __sessions__: describeError(error, t("deleteSessionFailed")),
+      }));
+      (context?.deletedSessionIds ?? variables.sessionIds).forEach((sessionId) => {
+        void chatWorkspaceCache.refreshSessionRuntime(sessionId);
+      });
+    },
+  });
+
   const clearSessionHistoryMutation = useMutation({
     mutationFn: async ({ sessionId, agentId }: { sessionId: string; agentId: string }) =>
       resetAgentDirectSession(agentId, sessionId),
@@ -1152,6 +1337,7 @@ export function useChatWorkspaceLifecycle({
     deleteGroupRoomMutation,
     resetGroupRoomMutation,
     deleteSessionMutation,
+    bulkDeleteSessionsMutation,
     clearSessionHistoryMutation,
     renameSessionMutation,
     addSessionToReviewMutation,

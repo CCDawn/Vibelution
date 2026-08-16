@@ -335,6 +335,10 @@ from core.web.services.session.agent_sessions import (
     _record_agent_inbox_idle_drain_event,
     _record_agent_inbox_startup_recovery_event,
 )
+from core.web.services.session.session_bulk_delete import (
+    MAX_BULK_SESSION_IDS,
+    bulk_delete_chat_sessions,
+)
 from core.web.services.session.conversation_index import (
     _ensure_conversation_workspace_metadata,
     _conversation_index_kind_from_raw,

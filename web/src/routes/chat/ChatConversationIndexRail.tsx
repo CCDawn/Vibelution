@@ -1,5 +1,6 @@
 import {
   BellRing,
+  CheckSquare,
   ChevronRight,
   MessageCircleHeart,
   Plus,
@@ -117,6 +118,10 @@ export type ChatConversationIndexRailProps = {
   standardGroupRoomActive: boolean;
   t: (key: TranslationKey) => string;
   currentSessionLabel: string;
+  sessionBulkSelectVisibleVisible?: boolean;
+  sessionBulkSelectVisibleLabel?: string;
+  onSessionBulkSelectVisible?: () => void;
+  sessionBulkSelectVisibleDisabled?: boolean;
 };
 
 export function ChatConversationIndexRail(props: ChatConversationIndexRailProps) {
@@ -178,6 +183,10 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
     standardGroupRoomActive,
     t,
     currentSessionLabel,
+    sessionBulkSelectVisibleVisible = false,
+    sessionBulkSelectVisibleLabel = "",
+    onSessionBulkSelectVisible,
+    sessionBulkSelectVisibleDisabled = false,
   } = props;
 
   return (
@@ -243,6 +252,18 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
               placeholder={t("searchSessionsPlaceholder")}
               aria-label={t("searchSessionsPlaceholder")}
             />
+            {sessionBulkSelectVisibleVisible && onSessionBulkSelectVisible ? (
+              <VButton
+                type="button"
+                variant="secondary"
+                className={styles.panelSearchBulkSelect}
+                icon={<CheckSquare size={14} />}
+                isDisabled={sessionBulkSelectVisibleDisabled}
+                onPress={onSessionBulkSelectVisible}
+              >
+                {sessionBulkSelectVisibleLabel}
+              </VButton>
+            ) : null}
           </div>
         )}
 

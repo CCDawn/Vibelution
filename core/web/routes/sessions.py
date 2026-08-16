@@ -15,6 +15,8 @@ from starlette.responses import StreamingResponse
 from core.web.routes.session_catalog_models import (
     ChatWorkbenchBootstrapResponse,
     SessionActiveResponse,
+    SessionBulkDeletePayload,
+    SessionBulkDeleteResponse,
     SessionCatalogItem,
     SessionDeleteResponse,
     SessionQueryResponse,
@@ -47,7 +49,9 @@ from core.web.services.session_service import (
     create_chat_review_candidate_from_session,
     create_chat_session,
     create_child_session,
+    bulk_delete_chat_sessions,
     delete_chat_session,
+    MAX_BULK_SESSION_IDS,
     edit_and_resubmit_session_message,
     get_active_session_summary,
     get_session_detail,
@@ -440,6 +444,23 @@ def session_delete(session_id: str) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except SessionBusyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SessionValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post(
+    "/sessions/bulk-delete",
+    response_model=SessionBulkDeleteResponse,
+    response_model_exclude_unset=True,
+)
+def sessions_bulk_delete(payload: SessionBulkDeletePayload) -> dict:
+    if len(payload.sessionIds) > MAX_BULK_SESSION_IDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Bulk session remove accepts at most {MAX_BULK_SESSION_IDS} session ids.",
+        )
+    try:
+        return bulk_delete_chat_sessions(payload.sessionIds)
     except SessionValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
