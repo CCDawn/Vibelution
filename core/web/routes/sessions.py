@@ -48,7 +48,6 @@ from core.web.services.session_service import (
     create_chat_session,
     create_child_session,
     delete_chat_session,
-    delete_chat_session_lightweight,
     edit_and_resubmit_session_message,
     get_active_session_summary,
     get_session_detail,
@@ -434,10 +433,8 @@ def session_update(session_id: str, payload: SessionUpdatePayload) -> dict:
     response_model=SessionDeleteResponse,
     response_model_exclude_unset=True,
 )
-def session_delete(session_id: str, request: Request) -> dict:
+def session_delete(session_id: str) -> dict:
     try:
-        if "respond-async" in str(request.headers.get("prefer") or "").lower():
-            return delete_chat_session_lightweight(session_id)
         return delete_chat_session(session_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

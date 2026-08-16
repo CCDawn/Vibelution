@@ -1317,14 +1317,9 @@ def create_supervised_agent_session(
     return s.get_session_detail(session_id) or {}
 
 
-def delete_chat_session(session_id: str) -> dict:
-    """Delete one chat session and return the next active session detail."""
-    s = _service()
-
-    delete_result = s._delete_chat_session_state(session_id)
-    next_active_id = str(delete_result.get("nextActiveSessionId") or "").strip()
-    target = s._load_conversation_detail_target(next_active_id, repair=False, agent_by_id={})
-    return s._build_lightweight_session_detail(target) if target is not None else {}
+def delete_chat_session(session_id: str) -> dict[str, Any]:
+    """Delete one chat session and return a lightweight UI handoff payload."""
+    return delete_chat_session_lightweight(session_id)
 
 
 def delete_chat_session_lightweight(session_id: str, *, activate_replacement: bool = False) -> dict[str, Any]:
