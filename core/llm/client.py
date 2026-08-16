@@ -314,9 +314,11 @@ def _record_llm_scene_event(
     lifecycle: bool = False,
 ) -> None:
     try:
-        from core.web.services.runtime_scene_service import record_runtime_scene_event
+        from core.web.services.runtime_scene_service import (
+            record_runtime_scene_event_quietly,
+        )
 
-        record_runtime_scene_event(
+        record_runtime_scene_event_quietly(
             "llm",
             phase,
             event_code,
@@ -326,8 +328,14 @@ def _record_llm_scene_event(
             fields=fields or {},
             lifecycle=lifecycle,
         )
-    except Exception:
-        return
+    except Exception as exc:  # noqa: BLE001 - diagnostics must never fail LLM invoke
+        from core.logging import debug as _debug_logger
+
+        _debug_logger.warning(
+            f"runtime scene event record failed (llm/{phase}/{event_code}): "
+            f"{type(exc).__name__}: {exc}",
+            tag="SCENE",
+        )
 
 
 def _record_stream_http_headers_event(timings: Any, *, identity: Dict[str, Any]) -> None:

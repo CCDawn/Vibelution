@@ -147,6 +147,7 @@ from .runtime_scene.record import (
     record_research_scene_event,
     record_runtime_scene_conversation_event,
     record_runtime_scene_event,
+    record_runtime_scene_event_quietly,
 )
 from .runtime_scene.query import (
     _analyze_runtime_scene_content,

@@ -86,7 +86,7 @@ from .model_reference_service import (
     assert_model_delete_safe,
     scan_model_alias_usage,
 )
-from .runtime_scene_service import record_runtime_scene_event
+from .runtime_scene_service import record_runtime_scene_event_quietly as record_runtime_scene_event
 from .theme_background_service import DEFAULT_THEME_BACKGROUND_PATH, theme_background_image_url
 from .workbench_contract_service import get_workbench_contract
 
@@ -206,19 +206,16 @@ def _record_config_scene_event(
     fields: dict[str, Any] | None = None,
     lifecycle: bool = False,
 ) -> None:
-    try:
-        record_runtime_scene_event(
-            "config",
-            phase,
-            event_code,
-            message=message or event_code,
-            level=level,
-            outcome=outcome,
-            fields=fields or {},
-            lifecycle=lifecycle,
-        )
-    except Exception:
-        return
+    record_runtime_scene_event(
+        "config",
+        phase,
+        event_code,
+        message=message or event_code,
+        level=level,
+        outcome=outcome,
+        fields=fields or {},
+        lifecycle=lifecycle,
+    )
 
 
 def _normalize_llm_test_capability(capability: str | None) -> str:

@@ -7,6 +7,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from core.logging import debug as _debug_logger
+
 from .constants import EVENTS_PATH, ensure_runtime_manager_dirs
 
 SAFE_COMMAND_ARG_KEYS = {
@@ -81,7 +83,7 @@ def safe_command_args(args: dict[str, Any]) -> dict[str, Any]:
             }
         else:
             safe[key] = truncate_event_text(str(value), limit=160)
-    extra_keys = sorted(str(key) for key in args.keys() if str(key) not in SAFE_COMMAND_ARG_KEYS)
+    extra_keys = sorted(str(key) for key in args if str(key) not in SAFE_COMMAND_ARG_KEYS)
     if extra_keys:
         safe["argKeys"] = extra_keys
     return safe
@@ -125,8 +127,34 @@ def record_runtime_manager_scene_event(
         )
         accepted = bool(isinstance(response, dict) and response.get("accepted"))
         return accepted
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 - diagnostics must never fail launcher lifecycle
+        _log_runtime_scene_bridge_failure(event_type, exc, phase=phase)
         return False
+
+
+def _log_runtime_scene_bridge_failure(
+    event_type: str,
+    exc: BaseException,
+    *,
+    phase: str = "",
+) -> None:
+    event = str(event_type or "").strip() or "runtime_manager.unknown"
+    exception_type = type(exc).__name__
+    exception_message = truncate_event_text(str(exc), limit=240)
+    _debug_logger.warning(
+        f"runtime scene bridge failed ({event}): {exception_type}: {exception_message}",
+        tag="SCENE",
+    )
+    append_runtime_manager_file_event(
+        "runtime_scene.bridge_failed",
+        {
+            "eventType": event,
+            "phase": str(phase or runtime_manager_event_phase(event)),
+            "exceptionType": exception_type,
+            "exceptionMessage": exception_message,
+        },
+        suppress_io_errors=True,
+    )
 
 
 def runtime_manager_event_phase(event_type: str) -> str:

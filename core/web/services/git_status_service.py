@@ -12,9 +12,10 @@ from typing import Any
 
 from config.public_config import build_effective_config, load_public_config, save_public_config
 from core.infrastructure.git_memory import WorkingTreeSnapshot, get_git_memory_service
+from core.infrastructure.git_process import safe_git_args_for_log
 from core.llm import LLMInvocationContext, get_llm_client, invoke_llm
 from core.web.services.file_service import LANGUAGE_BY_SUFFIX
-from core.web.services.runtime_scene_service import record_runtime_scene_event
+from core.web.services.runtime_scene_service import record_runtime_scene_event_quietly
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -68,19 +69,16 @@ def _record_git_scene_event(
     fields: dict[str, Any] | None = None,
     lifecycle: bool = False,
 ) -> None:
-    try:
-        record_runtime_scene_event(
-            "git",
-            phase,
-            event_code,
-            message=message or event_code,
-            level=level,
-            outcome=outcome,
-            fields=fields or {},
-            lifecycle=lifecycle,
-        )
-    except Exception:
-        return
+    record_runtime_scene_event_quietly(
+        "git",
+        phase,
+        event_code,
+        message=message or event_code,
+        level=level,
+        outcome=outcome,
+        fields=fields or {},
+        lifecycle=lifecycle,
+    )
 
 
 def _monotonic() -> float:
@@ -1092,7 +1090,7 @@ def _run_git_or_raise(service: Any, args: list[str], fallback: str) -> Any:
             level="error",
             outcome="failed",
             fields={
-                "args": _safe_git_args_for_log(args),
+                "args": safe_git_args_for_log(args),
                 "fallback": fallback,
             },
             lifecycle=True,
@@ -1107,7 +1105,7 @@ def _run_git_or_raise(service: Any, args: list[str], fallback: str) -> Any:
             level="error",
             outcome="failed",
             fields={
-                "args": _safe_git_args_for_log(args),
+                "args": safe_git_args_for_log(args),
                 "fallback": fallback,
                 "returnCode": int(result.returncode or 0),
                 "error": error,
@@ -1116,21 +1114,6 @@ def _run_git_or_raise(service: Any, args: list[str], fallback: str) -> Any:
         )
         raise ValueError(error)
     return result
-
-
-def _safe_git_args_for_log(args: list[str]) -> list[str]:
-    safe_args: list[str] = []
-    redact_next = False
-    for arg in args:
-        text = str(arg or "")
-        if redact_next:
-            safe_args.append("[redacted]")
-            redact_next = False
-            continue
-        safe_args.append(text)
-        if text in {"-m", "--message", "-F", "--file"}:
-            redact_next = True
-    return safe_args
 
 
 def _git_error(result: Any | None) -> str:
