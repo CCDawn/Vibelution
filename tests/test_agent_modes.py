@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import agent as agent_module
 from agent import SelfEvolvingAgent
 from core.mental_model_flags import is_mental_model_enabled, mental_model_enabled_override
-from core.orchestration.agent_modes import AgentMode, resolve_mode_policy
+from core.orchestration.agent_modes import AgentMode, is_mode_enabled, normalize_agent_mode, resolve_mode_policy
 
 
 def _make_config():
@@ -36,6 +36,34 @@ def test_resolve_mode_policy_keeps_mode_logic_in_core():
     assert supervised.orchestrator_kind == "evolution"
     assert supervised.reset_context_between_cases is True
     assert supervised.allow_direct_supervised_payload is True
+
+
+def test_normalize_agent_mode_accepts_aliases_bytes_and_whitespace_default():
+    assert normalize_agent_mode("self-evolution") == AgentMode.SELF_EVOLUTION
+    assert normalize_agent_mode(b"chat") == AgentMode.CHAT
+    assert normalize_agent_mode("  ", default="chat") == AgentMode.CHAT
+
+
+def test_string_false_mode_flags_disable_chat():
+    config = SimpleNamespace(
+        agent=SimpleNamespace(
+            default_mode="self_evolution",
+            modes=SimpleNamespace(
+                chat_enabled="false",
+                self_evolution_enabled=True,
+                supervised_evolution_enabled="off",
+            ),
+        )
+    )
+    assert is_mode_enabled(AgentMode.CHAT, config) is False
+    assert is_mode_enabled(AgentMode.SUPERVISED_EVOLUTION, config) is False
+    assert is_mode_enabled(AgentMode.SELF_EVOLUTION, config) is True
+
+
+def test_resolve_mode_policy_survives_missing_agent_config():
+    policy = resolve_mode_policy("self_evolution", SimpleNamespace())
+    assert policy.mode == AgentMode.SELF_EVOLUTION
+    assert policy.allow_auto_loop is True
 
 
 def test_chat_mode_does_not_keyword_route_evolution_mentions():
