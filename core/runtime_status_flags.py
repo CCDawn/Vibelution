@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -19,11 +20,29 @@ _RUNTIME_STATUS_ENABLED_OVERRIDE: ContextVar[bool | None] = ContextVar(
 _DEFAULT_RUNTIME_STATUS_ENABLED = True
 
 
+def _as_mapping(value: Any) -> dict[str, Any]:
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return {}
+        try:
+            value = json.loads(text)
+        except json.JSONDecodeError:
+            return {}
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {}
+
+
 def _coerce_bool(value: Any, default: bool) -> bool:
     if isinstance(value, bool):
         return value
     if value is None:
         return default
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
     if isinstance(value, (int, float)):
         return bool(value)
     normalized = str(value).strip().lower()
@@ -43,11 +62,15 @@ def _agent_runtime_status_policy(agent: Mapping[str, Any] | None) -> dict[str, b
             "inject_into_model": True,
             "show_in_status_rail": True,
         }
-    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), Mapping) else {}
-    raw = metadata.get("runtimeStatus") if isinstance(metadata, Mapping) else None
-    if not isinstance(raw, Mapping):
-        raw = agent.get("runtimeStatus") if isinstance(agent.get("runtimeStatus"), Mapping) else {}
-    raw = raw if isinstance(raw, Mapping) else {}
+    metadata = _as_mapping(agent.get("metadata"))
+    raw = metadata.get("runtimeStatus")
+    if raw is None:
+        raw = metadata.get("runtime_status")
+    if raw is None:
+        raw = agent.get("runtimeStatus")
+    if raw is None:
+        raw = agent.get("runtime_status")
+    raw = _as_mapping(raw)
     return {
         "enabled": _coerce_bool(raw.get("enabled"), True),
         "inject_into_model": _coerce_bool(raw.get("injectIntoModel", raw.get("inject_into_model")), True),
@@ -74,6 +97,8 @@ def is_runtime_status_enabled(
     override = _RUNTIME_STATUS_ENABLED_OVERRIDE.get()
     if requested is None:
         requested = override
+    if requested is not None:
+        requested = _coerce_bool(requested, True)
 
     decision = resolve_feature_decision(
         "runtime_status",
@@ -115,7 +140,7 @@ def runtime_status_enabled_override(enabled: bool | None):
     if enabled is None:
         yield
         return
-    token = _RUNTIME_STATUS_ENABLED_OVERRIDE.set(bool(enabled))
+    token = _RUNTIME_STATUS_ENABLED_OVERRIDE.set(_coerce_bool(enabled, False))
     try:
         yield
     finally:

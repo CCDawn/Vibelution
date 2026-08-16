@@ -16,7 +16,10 @@ from core.orchestration.turn_status_bar import (
 )
 from core.runtime_status_flags import (
     default_agent_runtime_status_policy,
+    is_runtime_status_enabled,
     is_runtime_status_inject_enabled,
+    is_runtime_status_rail_enabled,
+    runtime_status_enabled_override,
 )
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -136,6 +139,35 @@ def test_runtime_status_default_enabled_with_agent_metadata_off():
     }
     assert is_runtime_status_inject_enabled(agent=agent, requested=True) is False
     assert is_runtime_status_inject_enabled(agent=None, requested=False) is False
+
+
+def test_runtime_status_coerces_bytes_false_json_and_snake_case():
+    empty = {}
+    assert is_runtime_status_inject_enabled(
+        public_config=empty,
+        agent={"metadata": {"runtimeStatus": {"enabled": b"false"}}},
+    ) is False
+    assert is_runtime_status_enabled(
+        public_config=empty,
+        agent={"metadata": {"runtime_status": {"enabled": "off"}}},
+    ) is False
+    agent = {
+        "runtimeStatus": '{"enabled": true, "injectIntoModel": "false", "showInStatusRail": true}',
+    }
+    assert is_runtime_status_enabled(public_config=empty, agent=agent) is True
+    assert is_runtime_status_inject_enabled(public_config=empty, agent=agent) is False
+    assert is_runtime_status_rail_enabled(public_config=empty, agent=agent) is True
+    assert is_runtime_status_inject_enabled(public_config=empty, requested="false") is False
+    assert is_runtime_status_inject_enabled(public_config=empty, requested=b"off") is False
+    with runtime_status_enabled_override("false"):
+        assert is_runtime_status_inject_enabled(public_config=empty) is False
+    with runtime_status_enabled_override(b"false"):
+        assert is_runtime_status_inject_enabled(public_config=empty) is False
+    assert is_runtime_status_enabled(
+        public_config=empty,
+        agent={"metadata": '{"runtimeStatus": {"enabled": false}}'},
+    ) is False
+
 
 
 def test_collect_snapshot_prefers_live_auth_cap_and_current_model_family():
