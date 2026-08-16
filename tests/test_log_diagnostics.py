@@ -10,6 +10,9 @@ def test_log_roots_include_user_and_agent_summaries(tmp_path, monkeypatch):
     runtime_log = tmp_path / "logs" / "agent_realtime.log"
     runtime_log.parent.mkdir(parents=True, exist_ok=True)
     runtime_log.write_text("runtime line\n", encoding="utf-8")
+    launcher_log = tmp_path / ".runtime" / "launcher" / "backend.stdout.log"
+    launcher_log.parent.mkdir(parents=True, exist_ok=True)
+    launcher_log.write_text("uvicorn started\n", encoding="utf-8")
     runtime_scene_log = tmp_path / "logs" / "runtime_scenes" / "scene-a" / "raw" / "backend.log"
     runtime_scene_log.parent.mkdir(parents=True, exist_ok=True)
     runtime_scene_log.write_text("ignored from runtime root summary\n", encoding="utf-8")
@@ -25,8 +28,12 @@ def test_log_roots_include_user_and_agent_summaries(tmp_path, monkeypatch):
     runtime_root = next(item for item in roots if item["id"] == "runtime_logs")
     assert runtime_root["summary"]["fileCount"] == 1
     assert runtime_root["summary"]["latestPath"] == "agent_realtime.log"
-    assert "后端" in runtime_root["summary"]["userGuide"]
-    assert "runtime_scenes" in runtime_root["summary"]["agentGuide"]
+    assert "普通运行日志" in runtime_root["summary"]["userGuide"]
+    assert "launcher_runtime" in runtime_root["summary"]["agentGuide"]
+
+    launcher_root = next(item for item in roots if item["id"] == "launcher_runtime")
+    assert launcher_root["exists"] is True
+    assert "backend.stdout.log" in launcher_root["summary"]["agentGuide"]
 
     conversation_root = next(item for item in roots if item["id"] == "conversation_logs")
     assert conversation_root["summary"]["fileCount"] == 1
@@ -43,6 +50,7 @@ def test_health_diagnostics_groups_log_helpers_and_reset_hints(tmp_path, monkeyp
     conversation_log = tmp_path / "logs" / "conversations" / "conversation_debug.jsonl"
     conversation_log.parent.mkdir(parents=True, exist_ok=True)
     conversation_log.write_text('{"type":"external_request"}\n', encoding="utf-8")
+    (tmp_path / ".runtime" / "launcher").mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setattr(log_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
@@ -83,7 +91,13 @@ def test_health_diagnostics_groups_log_helpers_and_reset_hints(tmp_path, monkeyp
     assert session_helpers["chat_sessions"]["route"] == "/chat?session=session-live"
     assert session_helpers["chat_sessions"]["protected"] is True
     helpers = {item["id"]: item for item in payload["logHelpers"]}
-    assert set(helpers) == {"runtime_scenes", "runtime_logs", "workspace_logs", "conversation_logs"}
+    assert set(helpers) == {
+        "runtime_scenes",
+        "launcher_runtime",
+        "runtime_logs",
+        "workspace_logs",
+        "conversation_logs",
+    }
     assert helpers["runtime_scenes"]["status"] == "blocked"
     assert helpers["runtime_scenes"]["protected"] is True
     assert helpers["runtime_scenes"]["resetItemId"] == "stopped_runtime_scenes"
@@ -93,7 +107,7 @@ def test_health_diagnostics_groups_log_helpers_and_reset_hints(tmp_path, monkeyp
     assert helpers["workspace_logs"]["status"] == "warning"
     assert helpers["workspace_logs"]["protected"] is True
     assert helpers["conversation_logs"]["resetItemId"] == "conversation_logs"
-    assert payload["counts"] == {"ok": 3, "warning": 1, "blocked": 1}
+    assert payload["counts"] == {"ok": 4, "warning": 1, "blocked": 1}
     finding_ids = [item["id"] for item in payload["findings"]]
     assert finding_ids[:1] == ["runtime_scene_failed"]
     assert "workspace_logs_missing" in finding_ids

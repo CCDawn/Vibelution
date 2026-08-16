@@ -32,6 +32,13 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from vibelution_storage import resolve_active_project_storage_paths
 
+from core.logging.log_rotation import (
+    DEFAULT_LOG_BACKUP_COUNT,
+    DEFAULT_LOG_MAX_BYTES,
+    rotate_log_file,
+    write_log_tail_copy,
+)
+
 PROJECT_STORAGE = resolve_active_project_storage_paths(PROJECT_ROOT)
 RUNTIME_DIR = PROJECT_STORAGE.runtime / "launcher"
 STATE_PATH = RUNTIME_DIR / "state.json"
@@ -62,6 +69,13 @@ FRONTEND_PACKAGE_MANAGER_ENV = "VIBELUTION_FRONTEND_PM"
 INTERNAL_LAUNCHER_ENV = "VIBELUTION_RUNTIME_MANAGER_INTERNAL_LAUNCHER"
 INTERNAL_ACTIONS = {"internal-start", "internal-focus", "internal-stop", "internal-restart"}
 RUNTIME_SAFE_UNTRACKED_PREFIXES = ("scripts/_tmp_stash_p3_manifest/",)
+
+LAUNCHER_SCENE_RAW_MAP = (
+    ("backend.stdout.log", "raw/backend.stdout.log"),
+    ("backend.stderr.log", "raw/backend.stderr.log"),
+    ("launcher-control.log", "raw/launcher-control.log"),
+    ("frontend-build.log", "raw/frontend.build.log"),
+)
 
 
 def _now_iso() -> str:
@@ -131,6 +145,23 @@ def _start_runtime_scene(trigger: str) -> dict[str, str]:
     tmp_path.write_text(json.dumps(reference, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp_path.replace(ACTIVE_RUNTIME_SCENE_PATH)
     return reference
+
+
+def _rotate_launcher_process_logs_before_start() -> None:
+    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    for name, _scene_relative in LAUNCHER_SCENE_RAW_MAP:
+        rotate_log_file(
+            RUNTIME_DIR / name,
+            max_bytes=DEFAULT_LOG_MAX_BYTES,
+            backup_count=DEFAULT_LOG_BACKUP_COUNT,
+        )
+
+
+def _sync_launcher_logs_to_scene_raw(scene_dir: Path) -> None:
+    if not scene_dir.is_dir():
+        return
+    for launcher_name, scene_relative in LAUNCHER_SCENE_RAW_MAP:
+        write_log_tail_copy(RUNTIME_DIR / launcher_name, scene_dir / scene_relative)
 
 
 def _pid_probe(pid: int) -> str:
@@ -2051,6 +2082,8 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
     # Mid-flight checks only need commit/tree drift detection (full porcelain already done).
     _assert_runtime_source_identity(source_identity, light=True)
     runtime_scene = _start_runtime_scene("python_launcher_fresh_start")
+    _rotate_launcher_process_logs_before_start()
+    _sync_launcher_logs_to_scene_raw(Path(str(runtime_scene.get("runtimeSceneDir") or "")))
     stdout = BACKEND_STDOUT_PATH.open("ab")
     stderr = BACKEND_STDERR_PATH.open("ab")
     python_started = time.monotonic()
