@@ -7,6 +7,7 @@ to explore with more tools). Policy may still set an explicit base
 
 from __future__ import annotations
 
+import json
 from typing import Any, Mapping
 
 # Built-in defaults when policy has no per-family map entry.
@@ -23,6 +24,23 @@ DEFAULT_MAX_CALLS_BY_MODEL_FAMILY: dict[str, int] = {
 }
 
 
+def _coerce_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+def _first_present(*values: Any) -> Any:
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
 def detect_model_family(
     *,
     model: str = "",
@@ -32,9 +50,10 @@ def detect_model_family(
     """Best-effort vendor/family key from model id, provider, or profile id."""
 
     haystack = " ".join(
-        str(part or "").strip().lower()
+        text
         for part in (model, provider, profile_id)
-        if str(part or "").strip()
+        for text in [_coerce_text(part).strip().lower()]
+        if text
     )
     if not haystack:
         return "default"
@@ -54,10 +73,17 @@ def detect_model_family(
 
 
 def _positive_int(value: Any, *, default: int = 0) -> int:
+    if isinstance(value, bool) or value is None:
+        value = default
+    if isinstance(value, bool) or value is None:
+        return 0
     try:
         parsed = int(value)
     except (TypeError, ValueError):
-        return max(0, int(default or 0))
+        try:
+            parsed = int(default)
+        except (TypeError, ValueError):
+            return 0
     return max(0, parsed)
 
 
@@ -81,13 +107,21 @@ def resolve_max_calls_per_turn(
     """
 
     policy = tool_policy if isinstance(tool_policy, Mapping) else {}
-    base = _positive_int(policy.get("maxCallsPerTurn"), default=0)
+    base = _positive_int(
+        _first_present(policy.get("maxCallsPerTurn"), policy.get("max_calls_per_turn")),
+        default=0,
+    )
     family = detect_model_family(model=model, provider=provider, profile_id=profile_id)
     if base <= 0:
         return 0, family
 
-    overrides = policy.get("maxCallsPerTurnByModelFamily")
-    if isinstance(overrides, Mapping) and overrides:
+    overrides = normalize_max_calls_by_model_family(
+        _first_present(
+            policy.get("maxCallsPerTurnByModelFamily"),
+            policy.get("max_calls_per_turn_by_model_family"),
+        )
+    )
+    if overrides:
         if family in overrides:
             return _positive_int(overrides.get(family), default=base), family
         if "default" in overrides:
@@ -109,11 +143,21 @@ def default_max_calls_by_model_family_payload() -> dict[str, int]:
 
 
 def normalize_max_calls_by_model_family(value: Any) -> dict[str, int]:
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return {}
+        try:
+            value = json.loads(text)
+        except json.JSONDecodeError:
+            return {}
     if not isinstance(value, Mapping):
         return {}
     normalized: dict[str, int] = {}
     for raw_key, raw_budget in value.items():
-        key = str(raw_key or "").strip().lower()
+        key = _coerce_text(raw_key).strip().lower()
         if not key:
             continue
         normalized[key] = _positive_int(raw_budget, default=0)
