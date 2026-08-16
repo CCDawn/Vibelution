@@ -31,6 +31,8 @@ SQLITE_BUNDLE_CHANGED_DURING_COPY = "sqlite_bundle_changed_during_copy"
 SQLITE_BUNDLE_DESTINATION_CONFLICT = "sqlite_bundle_destination_conflict"
 _ACTIVE_CLAIM_STATUSES = frozenset({"active", "claimed", "in_progress", "running"})
 _SQLITE_MAIN_SUFFIXES = (".sqlite", ".sqlite3", ".db")
+_SQLITE_INTEGRITY_EVIDENCE_BOUND = 240
+_DEFAULT_QUIESCENCE_WINDOW_SECONDS = 0.05
 
 
 class StorageMigrationError(RuntimeError):
@@ -263,6 +265,7 @@ def assess_storage_migration_readiness(
     projects_home: str | os.PathLike[str] | None = None,
     config_path: str | os.PathLike[str] | None = None,
     action: str = "apply",
+    quiescence_window_seconds: float = _DEFAULT_QUIESCENCE_WINDOW_SECONDS,
 ) -> dict[str, object]:
     """Fail-closed readiness gate for apply, reapply, and rollback."""
 
@@ -289,6 +292,13 @@ def assess_storage_migration_readiness(
         "totalBytes": plan.total_bytes,
         "entryCount": len(plan.entries),
     }
+    quiescence = _observe_source_quiescence(
+        project,
+        _plan_signature(plan),
+        projects_home=projects_home,
+        config_path=config_path,
+        window_seconds=quiescence_window_seconds,
+    )
     blockers: list[dict[str, object]] = []
     if active_work.get("blocking"):
         blockers.append(
@@ -339,6 +349,13 @@ def assess_storage_migration_readiness(
                 "failures": sqlite_integrity.get("failures", [])[:8],
             }
         )
+    if not quiescence.get("ok"):
+        blockers.append(
+            {
+                "code": "source_changed_during_quiescence_window",
+                "windowSeconds": quiescence.get("windowSeconds"),
+            }
+        )
     normalized_action = str(action or "apply").strip().lower()
     if normalized_action == "rollback":
         if not rollback_eligibility.get("eligible"):
@@ -359,6 +376,7 @@ def assess_storage_migration_readiness(
         "destinationConflicts": destination_conflicts,
         "sqliteBundles": sqlite_bundles,
         "sqliteIntegrity": sqlite_integrity,
+        "quiescence": quiescence,
         "cachePolicy": CACHE_POLICY_COLD_REBUILD,
         "rollbackEligibility": rollback_eligibility,
     }
@@ -466,12 +484,14 @@ def _require_readiness_for_apply(
     *,
     projects_home: str | os.PathLike[str] | None = None,
     config_path: str | os.PathLike[str] | None = None,
+    quiescence_window_seconds: float = _DEFAULT_QUIESCENCE_WINDOW_SECONDS,
 ) -> dict[str, object]:
     readiness = assess_storage_migration_readiness(
         project_root,
         projects_home=projects_home,
         config_path=config_path,
         action="apply",
+        quiescence_window_seconds=quiescence_window_seconds,
     )
     if readiness.get("ready"):
         return readiness
@@ -578,6 +598,7 @@ def apply_storage_migration(
     *,
     projects_home: str | os.PathLike[str] | None = None,
     config_path: str | os.PathLike[str] | None = None,
+    quiescence_window_seconds: float = _DEFAULT_QUIESCENCE_WINDOW_SECONDS,
 ) -> dict[str, object]:
     """Copy, verify, then atomically activate external storage.
 
@@ -589,6 +610,7 @@ def apply_storage_migration(
         project_root,
         projects_home=projects_home,
         config_path=config_path,
+        quiescence_window_seconds=quiescence_window_seconds,
     )
     plan = plan_storage_migration(
         project_root,
@@ -749,18 +771,18 @@ def _copy_sqlite_bundle_entry(entry: StorageMigrationEntry) -> tuple[int, int]:
         raise StorageMigrationError(
             f"legacy source changed during copy: {source} ({SQLITE_BUNDLE_CHANGED_DURING_COPY})"
         )
-    ok, detail = _sqlite_quick_check(source)
+    ok, detail = _sqlite_full_integrity(source)
     if not ok:
-        raise StorageMigrationError(f"sqlite quick_check failed before copy: {source} ({detail})")
+        raise StorageMigrationError(f"sqlite integrity check failed before copy: {source} ({detail})")
 
     if destination_io.exists():
         destination_bundle = _SqliteBundleSnapshot.from_main(destination)
         if destination_bundle.fingerprint() == expected_fingerprint:
             _verify_sqlite_bundle_entry(entry, source_before, destination_bundle)
-            ok, detail = _sqlite_quick_check(destination)
+            ok, detail = _sqlite_full_integrity(destination)
             if not ok:
                 raise StorageMigrationError(
-                    f"sqlite quick_check failed after reuse: {destination} ({detail})"
+                    f"sqlite integrity check failed after reuse: {destination} ({detail})"
                 )
             return 0, 1
         raise StorageMigrationError(
@@ -802,10 +824,10 @@ def _copy_sqlite_bundle_entry(entry: StorageMigrationEntry) -> tuple[int, int]:
                 f"legacy sqlite bundle changed during copy: {source} "
                 f"({SQLITE_BUNDLE_CHANGED_DURING_COPY})"
             )
-        ok, detail = _sqlite_quick_check(staging_main)
+        ok, detail = _sqlite_full_integrity(staging_main)
         if not ok:
             raise StorageMigrationError(
-                f"sqlite quick_check failed on staged bundle: {staging_main} ({detail})"
+                f"sqlite integrity check failed on staged bundle: {staging_main} ({detail})"
             )
         promoted_members = _promote_sqlite_bundle(staging_dir, destination)
         destination_bundle = _SqliteBundleSnapshot.from_main(destination)
@@ -816,11 +838,11 @@ def _copy_sqlite_bundle_entry(entry: StorageMigrationEntry) -> tuple[int, int]:
                 f"({SQLITE_BUNDLE_CHANGED_DURING_COPY})"
             )
         _verify_sqlite_bundle_entry(entry, source_after, destination_bundle)
-        ok, detail = _sqlite_quick_check(destination)
+        ok, detail = _sqlite_full_integrity(destination)
         if not ok:
             _cleanup_attempt_sqlite_members(promoted_members)
             raise StorageMigrationError(
-                f"sqlite quick_check failed after copy: {destination} ({detail})"
+                f"sqlite integrity check failed after copy: {destination} ({detail})"
             )
         return 1, 0
     except Exception:
@@ -1269,6 +1291,49 @@ def _plan_signature(plan: StorageMigrationPlan) -> tuple[tuple[str, str, int, st
     )
 
 
+def _quiescence_sleep(seconds: float) -> None:
+    time.sleep(max(0.0, seconds))
+
+
+def _observe_source_quiescence(
+    project_root: Path,
+    before_signature: tuple[tuple[str, str, int, str, str], ...],
+    *,
+    projects_home: str | os.PathLike[str] | None,
+    config_path: str | os.PathLike[str] | None,
+    window_seconds: float,
+) -> dict[str, object]:
+    """Machine-verifiable source quiescence decision across the readiness window.
+
+    A source write or state change anywhere in the legacy tree is detected by
+    comparing the pre-window and post-window plan signatures, so the decision
+    never depends on wall-clock performance assertions.
+    """
+    window = max(0.0, window_seconds)
+    if window <= 0.0:
+        return {
+            "ok": True,
+            "stable": True,
+            "reasonCode": "quiescence_window_disabled",
+            "windowSeconds": 0.0,
+            "sampleCount": 1,
+        }
+    _quiescence_sleep(window)
+    after = plan_storage_migration(
+        project_root,
+        projects_home=projects_home,
+        config_path=config_path,
+    )
+    stable = before_signature == _plan_signature(after)
+    return {
+        "ok": stable,
+        "stable": stable,
+        "reasonCode": "source_changed_during_quiescence_window" if not stable else "none",
+        "windowSeconds": window,
+        "sampleCount": 2,
+    }
+
+
 def _same_path(left: Path, right: Path) -> bool:
     try:
         return os.path.normcase(str(left.resolve())) == os.path.normcase(str(right.resolve()))
@@ -1497,30 +1562,68 @@ def _verify_sqlite_integrity(
     checks: list[dict[str, object]] = []
     for bundle in bundles:
         main_source = Path(str(bundle.get("mainSource") or ""))
+        main_path = str(bundle.get("mainPath") or "")
         if not main_source.is_file():
             failures.append(
                 {
-                    "path": str(bundle.get("mainPath") or ""),
+                    "path": main_path,
                     "phase": phase,
                     "detail": "missing_main",
                 }
             )
             continue
-        ok, detail = _sqlite_quick_check(main_source)
+        integrity = _sqlite_bundle_integrity_check(main_source)
+        quick_ok = bool(integrity["quickOk"])
+        quick_detail = str(integrity["quickDetail"])
         checks.append(
             {
-                "path": str(bundle.get("mainPath") or ""),
+                "path": main_path,
                 "pragma": "quick_check",
-                "ok": ok,
-                "detail": detail,
+                "ok": quick_ok,
+                "detail": quick_detail,
             }
         )
-        if not ok:
+        integrity_ok = bool(integrity["integrityOk"])
+        integrity_detail = str(integrity["integrityDetail"])
+        checks.append(
+            {
+                "path": main_path,
+                "pragma": "integrity_check",
+                "ok": integrity_ok,
+                "detail": integrity_detail,
+            }
+        )
+        bundle_stable = bool(integrity["bundleStable"])
+        checks.append(
+            {
+                "path": main_path,
+                "pragma": "bundle_stable",
+                "ok": bundle_stable,
+                "detail": "ok" if bundle_stable else "bundle_changed_during_check",
+            }
+        )
+        if not quick_ok:
             failures.append(
                 {
-                    "path": str(bundle.get("mainPath") or ""),
+                    "path": main_path,
                     "phase": phase,
-                    "detail": detail,
+                    "detail": f"quick_check: {quick_detail}",
+                }
+            )
+        if not integrity_ok:
+            failures.append(
+                {
+                    "path": main_path,
+                    "phase": phase,
+                    "detail": f"integrity_check: {integrity_detail}",
+                }
+            )
+        if not bundle_stable:
+            failures.append(
+                {
+                    "path": main_path,
+                    "phase": phase,
+                    "detail": "bundle_changed_during_check",
                 }
             )
     return {"ok": not failures, "phase": phase, "checks": checks, "failures": failures}
@@ -1623,6 +1726,94 @@ def _sqlite_quick_check(path: Path) -> tuple[bool, str]:
         return False, str(exc)
     finally:
         connection.close()
+
+
+def _bounded_sqlite_detail(rows: Iterable[str]) -> str:
+    preview = " | ".join(
+        str(row).strip() for row in tuple(rows)[:5] if str(row).strip()
+    )
+    return preview[:_SQLITE_INTEGRITY_EVIDENCE_BOUND] or "sqlite_check_failed"
+
+
+def _sqlite_integrity_check(path: Path) -> tuple[bool, str]:
+    try:
+        connection = sqlite3.connect(
+            f"file:{path.resolve().as_posix()}?mode=ro",
+            uri=True,
+            timeout=1.0,
+        )
+    except sqlite3.Error as exc:
+        return False, _bounded_sqlite_detail((str(exc),))
+    try:
+        rows = connection.execute("PRAGMA integrity_check").fetchall()
+    except sqlite3.Error as exc:
+        return False, _bounded_sqlite_detail((str(exc),))
+    finally:
+        connection.close()
+    if rows and str(rows[0][0]).strip().lower() == "ok":
+        return True, "ok"
+    return False, _bounded_sqlite_detail(tuple(str(row[0]) for row in rows))
+
+
+def _sqlite_bundle_integrity_check(path: Path) -> dict[str, object]:
+    """Run SQLite checks on a private bundle snapshot without touching the source."""
+
+    source_before = _SqliteBundleSnapshot.from_main(path)
+    if not source_before.main_member().present:
+        return {
+            "quickOk": False,
+            "quickDetail": "missing_main",
+            "integrityOk": False,
+            "integrityDetail": "missing_main",
+            "bundleStable": False,
+        }
+    quick_ok = False
+    quick_detail = "snapshot_not_checked"
+    integrity_ok = False
+    integrity_detail = "snapshot_not_checked"
+    snapshot_matches = False
+    try:
+        with tempfile.TemporaryDirectory(prefix="vibelution-sqlite-integrity-") as temp_dir:
+            snapshot_main = Path(temp_dir) / path.name
+            for source_member in _sqlite_bundle_paths(path):
+                source_member_io = _io_path(source_member)
+                if source_member_io.is_file():
+                    shutil.copy2(source_member_io, snapshot_main.parent / source_member.name)
+            source_after_copy = _SqliteBundleSnapshot.from_main(path)
+            snapshot = _SqliteBundleSnapshot.from_main(snapshot_main)
+            snapshot_matches = _bundle_snapshots_equal(source_before, source_after_copy) and (
+                _bundle_snapshots_equal(source_before, snapshot)
+            )
+            if snapshot_matches:
+                quick_ok, quick_detail = _sqlite_quick_check(snapshot_main)
+                integrity_ok, integrity_detail = _sqlite_integrity_check(snapshot_main)
+    except OSError as exc:
+        detail = _bounded_sqlite_detail((str(exc),))
+        quick_detail = detail
+        integrity_detail = detail
+    source_after = _SqliteBundleSnapshot.from_main(path)
+    bundle_stable = snapshot_matches and _bundle_snapshots_equal(source_before, source_after)
+    if not bundle_stable and quick_detail == "snapshot_not_checked":
+        quick_detail = "bundle_changed_during_snapshot"
+        integrity_detail = "bundle_changed_during_snapshot"
+    return {
+        "quickOk": quick_ok,
+        "quickDetail": quick_detail,
+        "integrityOk": integrity_ok,
+        "integrityDetail": integrity_detail,
+        "bundleStable": bundle_stable,
+    }
+
+
+def _sqlite_full_integrity(path: Path) -> tuple[bool, str]:
+    integrity = _sqlite_bundle_integrity_check(path)
+    if not integrity["bundleStable"]:
+        return False, "bundle_stable: bundle_changed_during_check"
+    if not integrity["quickOk"]:
+        return False, f"quick_check: {integrity['quickDetail']}"
+    if not integrity["integrityOk"]:
+        return False, f"integrity_check: {integrity['integrityDetail']}"
+    return True, "ok"
 
 
 def _positive_int(value: object) -> int:
