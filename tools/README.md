@@ -53,7 +53,6 @@ Model 可见性
 | `research_knowledge_tools.py` | `research_knowledge_query_tool` | `test_research_knowledge_tools.py` |
 | `research_organization_tools.py` | `research_agent_creation_proposal_tool` · `research_communication_edge_proposal_tool` · `research_proposal_apply_tool` | `test_research_organization_tools.py` |
 | `agent_message_tools.py` | `agent_message_tool` | `test_agent_tool_contracts.py` |
-| `agent_tools.py` | `spawn_agent_tool`（Key_Tools 包装） | `test_agent_protocol.py` |
 | `agent_tool_governance_tools.py` | `agent_tool_permission_request_tool` | `test_tool_authorization_execution.py` |
 | `cli_agent_tools.py` | `cli_agent_run_tool` | `test_agent_protocol.py` |
 | `session_child_tools.py` | `create_child_session_tool` · `list_child_sessions_tool` | `test_agent_protocol.py` |
@@ -78,6 +77,7 @@ Model 可见性
 | `compression_quality.py` · `compression_strategy.py` | 上下文压缩策略 |
 | `research_search_backends.py` · `research_search_quality.py` | 搜索后端/质量 |
 | `key_info_extractor.py` | 键信息抽取 helper |
+| `agent_tools.py` | `spawn_agent` 子进程实现；`spawn_agent_tool` 包装在 `Key_Tools.py` 内，是否进入 `create_key_tools()` 以运行时返回列表为准 |
 | `__init__.py` | 包标记；不 re-export 工具 |
 
 ---
