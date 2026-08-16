@@ -53,6 +53,8 @@ Both layers remain useful: the lifecycle layer binds semantic call identity, whi
 
 The machine-readable inventory is `tests/fixtures/tool_authorization/runtime_entrypoints.json`.
 
+**Tool 实现索引（文件名 / 主测）：** [`tools/README.md`](../../tools/README.md)
+
 ## Known bypass risks to eliminate
 
 1. Permission lookup exceptions can return an unfiltered tool list.
