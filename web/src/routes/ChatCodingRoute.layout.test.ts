@@ -11,6 +11,9 @@ import routeErrorBoundarySource from "../app/RouteErrorBoundary.tsx?raw";
 import routerSource from "../app/router.tsx?raw";
 import shellStoreSource from "../store/shellStore.ts?raw";
 import chatApiSource from "../api/chat.ts?raw";
+import agentsApiSource from "../api/agents.ts?raw";
+import filesApiSource from "../api/files.ts?raw";
+import cliAgentsApiSource from "../api/cliAgents.ts?raw";
 import agentSessionTabStripSource from "./AgentSessionTabStrip.tsx?raw";
 import chatCodingRouteWorkbenchSource from "./chat/ChatCodingRouteWorkbench.tsx?raw";
 import chatWorkbenchCatalogQueriesSource from "./chat/useChatWorkbenchCatalogQueries.ts?raw";
@@ -37,6 +40,11 @@ import chatVisibleSessionCatalogSource from "./chat/useChatVisibleSessionCatalog
 import chatAgentSessionTabsSource from "./chat/useChatAgentSessionTabs.ts?raw";
 import chatSessionIndexRailModelSource from "./chat/useChatSessionIndexRailModel.ts?raw";
 import chatGroupRoomChromeModelSource from "./chat/useChatGroupRoomChromeModel.ts?raw";
+import chatVisibleSessionCatalogModelSource from "./chat/chatVisibleSessionCatalogModel.ts?raw";
+import chatSessionIndexRailPresentationSource from "./chat/chatSessionIndexRailPresentation.ts?raw";
+import chatAgentDirectoryMapsSource from "./chat/chatAgentDirectoryMaps.ts?raw";
+import chatAgentDirectoryMapsHookSource from "./chat/useChatAgentDirectoryMaps.ts?raw";
+import chatIndexDerivedStateSource from "./chat/useChatIndexDerivedState.ts?raw";
 import agentDirectoryActionsSource from "./chat/useChatAgentDirectoryActions.ts?raw";
 import chatStatusRailSource from "./chat/ChatStatusRail.tsx?raw";
 import cliAgentRunModelSource from "./chat/cliAgentRunModel.ts?raw";
@@ -83,6 +91,11 @@ const routeSource = [
   chatAgentSessionTabsSource,
   chatSessionIndexRailModelSource,
   chatGroupRoomChromeModelSource,
+  chatVisibleSessionCatalogModelSource,
+  chatSessionIndexRailPresentationSource,
+  chatAgentDirectoryMapsSource,
+  chatAgentDirectoryMapsHookSource,
+  chatIndexDerivedStateSource,
 ].join("\n");
 
 /** Wave 8C/8D: layout contracts resolve class strings across route shell + panel/component maps. */
@@ -655,7 +668,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatApiSource).toContain("`/api/sessions/${encodeURIComponent(sessionId)}/select`");
     expect(routeAndSelectionSource).toContain("selectChatSession(sessionId)");
     // The committed route is the only select input; clicks delegate to openSession.
-    expect(routeAndActionsSource).toContain("chatRoute.openSession(normalizedSessionId)");
+    expect(routeAndActionsSource).toContain("chatRoute.openSession(normalizedSessionId, {");
     expect(routeAndSelectionSource).toContain("routeSessionId");
     // Select is generation-guarded and short-debounced so rapid tab thrash collapses to one POST.
     expect(routeAndSelectionSource).toContain("selectDirectSessionMutation.mutate({ sessionId: latestSessionId, generation })");
@@ -1221,8 +1234,8 @@ describe("ChatCodingRoute layout contract", () => {
 
     const submitMutationStart = routeAndComposerSource.indexOf("const submitTurnMutation = useMutation");
     const submitMutateStart = routeAndComposerSource.indexOf("onMutate: async (variables)", submitMutationStart);
-    const submitSuccessStart = routeAndComposerSource.indexOf("onSuccess: (acceptedTurn, variables)", submitMutateStart);
-    const submitErrorStart = routeAndComposerSource.indexOf("onError: (error, variables)", submitSuccessStart);
+    const submitSuccessStart = routeAndComposerSource.indexOf("onSuccess: (acceptedTurn, variables, context)", submitMutateStart);
+    const submitErrorStart = routeAndComposerSource.indexOf("onError: (error, variables, context)", submitSuccessStart);
     const submitMutateBlock = routeAndComposerSource.slice(submitMutateStart, submitSuccessStart);
     const submitSuccessBlock = routeAndComposerSource.slice(submitSuccessStart, submitErrorStart);
     const submitErrorBlock = routeAndComposerSource.slice(submitErrorStart, routeAndComposerSource.indexOf("const editResubmitMutation", submitErrorStart));
@@ -1237,7 +1250,7 @@ describe("ChatCodingRoute layout contract", () => {
 
     const editMutationStart = routeAndComposerSource.indexOf("const editResubmitMutation = useMutation");
     const editMutateStart = routeAndComposerSource.indexOf("onMutate: async (variables)", editMutationStart);
-    const editSuccessStart = routeAndComposerSource.indexOf("onSuccess: (nextDetail, variables)", editMutateStart);
+    const editSuccessStart = routeAndComposerSource.indexOf("onSuccess: (nextDetail, variables, context)", editMutateStart);
     const editErrorStart = routeAndComposerSource.indexOf("onError: (error, variables, context)", editSuccessStart);
     const editMutateBlock = routeAndComposerSource.slice(editMutateStart, editSuccessStart);
     const editSuccessBlock = routeAndComposerSource.slice(editSuccessStart, editErrorStart);
@@ -1907,8 +1920,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndComposerSource).toContain("clientSubmissionId,");
 
     const submitMutationStart = routeAndComposerSource.indexOf("const submitTurnMutation = useMutation");
-    const submitSuccessStart = routeAndComposerSource.indexOf("onSuccess: (acceptedTurn, variables)", submitMutationStart);
-    const submitErrorStart = routeAndComposerSource.indexOf("onError: (error, variables)", submitSuccessStart);
+    const submitSuccessStart = routeAndComposerSource.indexOf("onSuccess: (acceptedTurn, variables, context)", submitMutationStart);
+    const submitErrorStart = routeAndComposerSource.indexOf("onError: (error, variables, context)", submitSuccessStart);
     const submitSuccessBlock = routeAndComposerSource.slice(submitSuccessStart, submitErrorStart);
     const submitErrorBlock = routeAndComposerSource.slice(submitErrorStart, routeAndComposerSource.indexOf("const editResubmitMutation", submitErrorStart));
     expect(submitSuccessBlock).not.toContain("setSessionDrafts");
@@ -2399,8 +2412,8 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("does not refetch chat indexes or detail immediately after an accepted direct turn", () => {
     const submitMutationStart = routeAndComposerSource.indexOf("const submitTurnMutation = useMutation");
-    const submitSuccessStart = routeAndComposerSource.indexOf("onSuccess: (acceptedTurn, variables)", submitMutationStart);
-    const submitErrorStart = routeAndComposerSource.indexOf("onError: (error, variables)", submitSuccessStart);
+    const submitSuccessStart = routeAndComposerSource.indexOf("onSuccess: (acceptedTurn, variables, context)", submitMutationStart);
+    const submitErrorStart = routeAndComposerSource.indexOf("onError: (error, variables, context)", submitSuccessStart);
     const submitSuccessBlock = routeAndComposerSource.slice(submitSuccessStart, submitErrorStart);
 
     expect(submitSuccessBlock).toContain("markOptimisticUserMessageAccepted");
@@ -2469,12 +2482,12 @@ describe("ChatCodingRoute layout contract", () => {
     );
 
     expect(openDirectSessionSource).toContain("prefetchSessionDetailWindow(queryClient, normalizedSessionId)");
-    expect(openDirectSessionSource).toContain("chatRoute.openSession(normalizedSessionId)");
+    expect(openDirectSessionSource).toContain("chatRoute.openSession(normalizedSessionId, {");
     expect(openDirectSessionSource).not.toContain("setActiveSession");
     expect(openDirectSessionSource).not.toContain("navigate(`/chat?session=");
     // Prefetch happens before the route transition.
     expect(openDirectSessionSource.indexOf("prefetchSessionDetailWindow(queryClient, normalizedSessionId)"))
-      .toBeLessThan(openDirectSessionSource.indexOf("chatRoute.openSession(normalizedSessionId)"));
+      .toBeLessThan(openDirectSessionSource.indexOf("chatRoute.openSession(normalizedSessionId, {"));
     expect(routeSource).toContain("resolveStickySessionDetailPaint");
     expect(routeSource).toContain("shouldShowStickyTranscriptPending");
   });
@@ -2531,7 +2544,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(groupSessionIndexItemsSource).toContain("styles.conversationAvatarGroup");
     expect(directSessionIndexItemSource).toContain("styles.directSessionItem");
     expect(groupSessionIndexItemsSource).toContain("styles.groupSessionItem");
-    expect(routeAndActionsSource).toContain("chatRoute.openSession(normalizedSessionId)");
+    expect(routeAndActionsSource).toContain("chatRoute.openSession(normalizedSessionId, {");
     expect(directSessionIndexItemSource).not.toContain("styles.conversationKindBadgeDirect");
     expect(directSessionIndexItemSource).toContain("styles.conversationKindBadgeChild");
     expect(groupSessionIndexItemsStyles.conversationKindBadgeGroup).toBeTypeOf("string");
@@ -2706,7 +2719,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("useChatAgentArchiveQueue");
     expect(routeSource).toContain("enqueueArchive: enqueueAgentArchive");
     expect(routeSource).toContain("pendingAgentIds: pendingArchiveAgentIds");
-    expect(routeSource).toContain('method: "DELETE"');
+    expect(agentsApiSource).toContain('method: "DELETE"');
     expect(routeSource).toContain("void queryClient.cancelQueries({ queryKey: queryKeys.agents() })");
     expect(routeSource).toContain("queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), remainingAgents)");
     expect(routeSource).toContain("useChatArchivedAgentRetirement");
@@ -2795,7 +2808,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(conversationIndexModelSource).toContain("const rawSessionsById = new Map");
     expect(conversationIndexModelSource).toContain("if (!isVisibleConversation(conversation, rawSessionsById))");
     expect(conversationIndexModelSource).toContain("if (rawSession && !session)");
-    expect(routeSource).toContain("const allVisibleSessions = useMemo");
+    expect(routeSource).toContain("mergeAllVisibleSessions");
     expect(routeSource).toContain("const rightIndexSessions = useMemo");
     expect(conversationIndexModelSource).toContain("mergeVisibleSessionsIntoConversations(conversations, rightIndexSessions)");
     expect(conversationIndexModelSource).toContain("conversation.type !== \"group_room\"");
@@ -2815,9 +2828,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("listSessionChildSessions(activeRootSessionId)");
     expect(routeSource).toContain("const activeRootSessionId = rootSessionIdFor(sessionDetailQuery.data ?? directSessionActiveSummary)");
     expect(routeSource).toContain("queryKeys.sessionChildSessions(detailRootSessionId)");
-    expect(routeSource).toContain("const merged = [...(sessionsQuery.data ?? []), ...(childSessionsQuery.data ?? [])]");
+    expect(routeSource).toContain("const merged = [...(sessions ?? []), ...(childSessions ?? [])]");
     expect(routeSource).toContain("const rightIndexSessions = useMemo");
-    expect(routeSource).toContain("return allVisibleSessions.filter((session) => !isRepresentedInAgentSessionTabs(session))");
+    expect(routeSource).toContain("allVisibleSessions.filter((session) => !isRepresentedInAgentSessionTabs(session))");
     expect(routeSource).toContain("const selectedAgentVisibleSessions = useMemo");
     expect(routeSource).toContain("const agentSessionTabs = useMemo");
     expect(routeSource).toContain("sessions: [...(selectedAgentSessionsQuery.data?.items ?? []), ...selectedAgentVisibleSessions]");
@@ -2916,7 +2929,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain('const activeFilePath = workspace.activeTab !== "agent" && !activeCliAgentRunId ? workspace.activeTab : null;');
     expect(routeSource).toContain("const fileContentQuery = useQuery({");
     expect(routeSource).toContain("queryKeys.fileContent(activeFilePath ?? \"\")");
-    expect(routeSource).toContain("fetchJson<FileContent>(`/api/files/content?path=${encodeURIComponent(activeFilePath ?? \"\")}`)");
+    expect(routeSource).toContain("fetchFileContent(activeFilePath ?? \"\")");
+    expect(filesApiSource).toContain("export function fetchFileContent");
     expect(routeSource).toContain("<ChatFileWorkspaceTabs");
     expect(routeSource).toContain("openTabs={workspace.openTabs}");
     expect(routeSource).toContain("activeTab={workspace.activeTab}");
@@ -3009,7 +3023,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain('from "./useChatCliAgentTerminal"');
     expect(routeSource).toContain('from "./useDesktopConversationAttention"');
     expect(routeAndCliTerminalSource).toContain("closeCliAgentRun");
-    expect(routeAndCliTerminalSource).toContain("/api/cli-agents/terminal-sessions/");
+    expect(routeAndCliTerminalSource).toContain("stopCliAgentTerminalSession");
+    expect(cliAgentsApiSource).toContain("/api/cli-agents/terminal-sessions/");
     expect(routeAndCliTerminalSource).toContain("const [closedCliAgentRunTokensBySession");
     expect(routeAndCliTerminalSource).toContain("const [cliAgentTerminalSessions");
     expect(routeAndCliTerminalSource).toContain("const [mountedCliAgentRunIdsBySession");
@@ -3021,7 +3036,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("setActiveTab(activeSessionId, cliAgentRunTabId(runId));");
     expect(routeAndCliTerminalSource).toContain("window.confirm(");
     expect(routeAndCliTerminalSource).toContain("const terminalSessionId = String(terminalSession?.terminalSessionId || run.terminalSessionId || run.result?.terminalSessionId || \"\").trim()");
-    expect(routeAndCliTerminalSource).toContain("`/api/cli-agents/terminal-sessions/${encodeURIComponent(terminalSessionId)}/stop`");
+    expect(routeAndCliTerminalSource).toContain("stopCliAgentTerminalSession<CliAgentTerminalSession>");
     expect(routeSource).toContain("const CliAgentRunTerminalPanel = lazy(() =>");
     expect(routeSource).toContain('import("./CliAgentRunTerminalPanel")');
     expect(routeSource).toContain("<ChatCliAgentTerminalStack");
@@ -3042,7 +3057,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain('import "@xterm/xterm/css/xterm.css"');
     expect(terminalPanelSource).toContain('import { Terminal } from "@xterm/xterm"');
     expect(terminalPanelSource).toContain('import "@xterm/xterm/css/xterm.css"');
-    expect(terminalPanelSource).toContain('"/api/cli-agents/terminal-sessions/ensure"');
+    expect(cliAgentsApiSource).toContain('"/api/cli-agents/terminal-sessions/ensure"');
+    expect(terminalPanelSource).toContain("ensureCliAgentTerminalSession");
     expect(terminalPanelSource).toContain('intent,');
     expect(terminalPanelSource).toContain('fetchTerminalSession("view", controller.signal)');
     expect(terminalPanelSource).toContain('requestTerminalSession(terminalCanResume ? "resume" : "start")');
@@ -3068,7 +3084,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(terminalPanelSource).toContain("const replayTerminalSnapshot");
     expect(terminalPanelSource).toContain("历史 TUI 画面无法安全重放");
     expect(terminalPanelSource).toContain("type CliAgentTerminalAck");
-    expect(terminalPanelSource).toContain("fetchJson<CliAgentTerminalAck>");
+    expect(terminalPanelSource).toContain("sendCliAgentTerminalInput<CliAgentTerminalAck>");
+    expect(cliAgentsApiSource).toContain("/input");
     expect(terminalPanelSource).toContain("CLI_AGENT_TASK_LOCKED");
     expect(terminalPanelSource).toContain("指令未发送：当前 CLI Agent 终端已有任务在运行。");
     expect(terminalPanelSource).not.toContain(".then((session) => setTerminalSession(session))");
@@ -3082,8 +3099,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain("terminalInput");
     expect(routeSource).not.toContain("输入命令或回复");
     expect(routeSource).not.toContain("Type input");
-    expect(terminalPanelSource).toContain("/input`");
-    expect(routeAndCliTerminalSource).toContain("/stop`");
+    expect(cliAgentsApiSource).toContain("/input");
+    expect(cliAgentsApiSource).toContain("/stop");
     expect(routeSource).not.toContain("const [activeCliAgentRunId, setActiveCliAgentRunId] = useState");
     expect(routeStyles.cliAgentRunPanel).toBeTypeOf("string");
     expect(routeStyles.cliAgentRunPanelHidden).toContain("hidden");
@@ -3229,8 +3246,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("bootstrapIsError: activeSessionBootstrapQuery.isError");
     expect(routeSource).toContain("bootstrapFetchStatus: activeSessionBootstrapQuery.fetchStatus");
     expect(routeSource).toContain("sessionIndexHasMore");
-    expect(routeSource).toContain("加载更多会话");
-    expect(routeSource).toContain("已加载全部会话");
+    expect(chatSessionIndexRailPresentationSource).toContain("加载更多会话");
+    expect(chatSessionIndexRailPresentationSource).toContain("已加载全部会话");
     expect(routeSource).toContain("sessionIndexProgressVisible");
     expect(routeSource).toContain("rawSessionsQuery.loadMore()");
     expect(routeSource).toContain("styles.sessionLoadMoreButton");
@@ -3428,12 +3445,15 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatCodingRouteWorkbenchSource).toContain("useChatVisibleSessionCatalog");
     expect(chatCodingRouteWorkbenchSource).toContain("useChatAgentSessionTabs");
     expect(chatCodingRouteWorkbenchSource).toContain("useChatSessionIndexRailModel");
+    expect(chatCodingRouteWorkbenchSource).toContain("useChatAgentDirectoryMaps");
+    expect(chatCodingRouteWorkbenchSource).toContain("useChatIndexDerivedState");
     expect(chatGroupRoomChromeModelSource).toContain("linkedTeamRoomIds");
     expect(chatGroupRoomChromeModelSource).toContain("activeGroupTeamOwned");
     expect(chatGroupRoomChromeModelSource).toContain("buildChatGroupRoomActionDisabledFlags");
-    expect(chatVisibleSessionCatalogSource).toContain("isVisibleDirectSession");
+    expect(chatVisibleSessionCatalogSource).toContain("mergeAllVisibleSessions");
+    expect(chatVisibleSessionCatalogModelSource).toContain("isVisibleDirectSession");
     expect(chatAgentSessionTabsSource).toContain("buildAgentSessionTabs");
-    expect(chatSessionIndexRailModelSource).toContain("加载更多会话");
+    expect(chatSessionIndexRailPresentationSource).toContain("加载更多会话");
     expect(chatCodingRouteWorkbenchSource).toContain("bulkRemoveSessions");
     expect(chatSessionBulkSelectionSource).toContain("bulkDeleteSessionsMutation");
     expect(chatSessionBulkSelectionSource).toContain('t("bulkRemoveSessionsConfirm")');

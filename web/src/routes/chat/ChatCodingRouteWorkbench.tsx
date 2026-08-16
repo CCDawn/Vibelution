@@ -64,8 +64,6 @@ import {
 } from "../../api/types";
 import type { ConversationStreamingFramePaintMetrics } from "../../components/conversation/conversationStreamingMetrics";
 import { shouldShowNextStateSignalInConversation } from "../../components/conversation/conversationNextStateSignal";
-import type { TurnAvatarResolution } from "../../components/conversation/conversationTurnAvatar";
-import { isAgentInboxMessage } from "../../components/conversation/conversationMessagePredicates";
 import { VButton, VContextualHint, VInput, VNativeInput, VStateSurface, VTooltip, type VButtonProps } from "../../components/vui";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "../../app/browserTelemetry";
 import { startUserAction } from "../../app/userActionTelemetry";
@@ -87,9 +85,6 @@ import {
   updateSessionSummaryCaches,
 } from "../chatSessionIndexQuery";
 import { isTempSessionId } from "../sessionOptimisticIds";
-import {
-  shouldShowConversationIndexLoading,
-} from "../chatSessionStartupGate";
 import {
   ACTIVE_INDEX_POLL_MS,
   resolveChatLiveQueryPolicy,
@@ -141,13 +136,8 @@ import {
 } from "../chatActiveTurnLayer";
 import {
   isChildSession,
-  isAgentRootSession,
 } from "../DirectSessionIndexItem";
 import { agentCenterConfigRoute } from "../agentCenterRoutes";
-import {
-  buildChatMentionTargets,
-  type ChatMentionTarget,
-} from "../chatMentionTokens";
 import { useChatToolApprovalBridge } from "./useChatToolApprovalBridge";
 import { useChatComposerBridgeState } from "./useChatComposerBridgeState";
 import { useChatGroupRoomViewModel } from "./useChatGroupRoomViewModel";
@@ -213,6 +203,8 @@ import { useChatVisibleSessionCatalog } from "./useChatVisibleSessionCatalog";
 import { useChatAgentSessionTabs } from "./useChatAgentSessionTabs";
 import { toSessionIndexProgressQuerySlice, useChatSessionIndexRailModel } from "./useChatSessionIndexRailModel";
 import { useChatGroupRoomChromeModel } from "./useChatGroupRoomChromeModel";
+import { useChatAgentDirectoryMaps } from "./useChatAgentDirectoryMaps";
+import { useChatIndexDerivedState } from "./useChatIndexDerivedState";
 import { useDesktopConversationAttention } from "./useDesktopConversationAttention";
 import { ChatCliAgentTerminalStack } from "./ChatCliAgentTerminalStack";
 import { useChatSessionRenameMenu } from "./useChatSessionRenameMenu";
@@ -250,7 +242,6 @@ import {
   agentRoleClass,
   avatarInitials,
   avatarImageUrlFrom,
-  conversationMetadataText,
   renderAgentAvatar,
 } from "./chatRoutePresentation";
 import {
@@ -2378,45 +2369,15 @@ export function ChatCodingRoute() {
     locale,
   });
 
-  const agentsById = useMemo(() => {
-    return new Map((agentsQuery.data ?? []).map((agent) => [agent.agentId, agent]));
-  }, [agentsQuery.data]);
-
-  const agentsByCode = useMemo(() => {
-    const map = new Map<string, AgentInstance>();
-    for (const agent of agentsQuery.data ?? []) {
-      const code = String(agent.agentCode ?? "").trim();
-      if (code) {
-        map.set(code, agent);
-      }
-    }
-    return map;
-  }, [agentsQuery.data]);
-
-  const archiveVisibleAgents = useMemo(() => {
-    return (agentsQuery.data ?? []).filter((agent) => !pendingArchiveAgentIds.has(agent.agentId));
-  }, [agentsQuery.data, pendingArchiveAgentIds]);
-
-  const resolveConversationTurnAvatar = useCallback((message: ConversationMessage): TurnAvatarResolution | undefined => {
-    if (!isAgentInboxMessage(message)) {
-      return undefined;
-    }
-    const metadata = message.metadata;
-    const sourceAgentId = conversationMetadataText(metadata, "sourceAgentId");
-    const sourceAgentCode = conversationMetadataText(metadata, "sourceAgentCode");
-    const sourceAgentName = conversationMetadataText(metadata, "sourceAgentName");
-    const agent =
-      (sourceAgentId ? agentsById.get(sourceAgentId) : undefined)
-      ?? (sourceAgentCode ? agentsByCode.get(sourceAgentCode) : undefined);
-    return {
-      imageUrl: avatarImageUrlFrom(agent),
-      fallback: avatarInitials(sourceAgentCode, sourceAgentName),
-    };
-  }, [agentsByCode, agentsById]);
-
-  const chatMentionTargets = useMemo(() => {
-    return buildChatMentionTargets(archiveVisibleAgents);
-  }, [archiveVisibleAgents]);
+  const {
+    agentsById,
+    archiveVisibleAgents,
+    chatMentionTargets,
+    resolveConversationTurnAvatar,
+  } = useChatAgentDirectoryMaps({
+    agents: agentsQuery.data,
+    pendingArchiveAgentIds,
+  });
 
   const {
     allVisibleSessions,
@@ -2471,14 +2432,6 @@ export function ChatCodingRoute() {
     sessionsRefetchInterval: chatLiveQueryPolicy.sessionsRefetchInterval,
     directRefetchIntervalInBackground: chatLiveQueryPolicy.directRefetchIntervalInBackground,
   });
-
-  const contextMenuSession = useMemo(() => {
-    if (!sessionContextMenu) {
-      return undefined;
-    }
-    return sessionsById.get(sessionContextMenu.sessionId) ?? sessionContextMenu.session;
-  }, [sessionContextMenu, sessionsById]);
-  const contextMenuSessionId = sessionContextMenu?.sessionId ?? "";
 
   const {
     groupCandidateAgents,
@@ -2698,29 +2651,26 @@ export function ChatCodingRoute() {
     }));
   }, []);
 
-  const contextMenuSessionIsBusy = contextMenuSession
-    ? isBusyPhase(contextMenuSession.currentPhase || contextMenuSession.status)
-    : false;
-  const contextMenuDeletePending = Boolean(
-    contextMenuSession
-    && deleteSessionMutation.isPending
-    && deleteSessionMutation.variables?.sessionId === contextMenuSession.id,
-  );
-  const contextMenuAddToReviewPending = Boolean(
-    contextMenuSession
-    && addSessionToReviewMutation.isPending
-    && addSessionToReviewMutation.variables?.sessionId === contextMenuSession.id,
-  );
-  const contextMenuClearHistoryPending = Boolean(
-    contextMenuSession
-    && clearSessionHistoryMutation.isPending
-    && clearSessionHistoryMutation.variables?.sessionId === contextMenuSession.id
-  );
-  const contextMenuClearHistoryVisible = Boolean(
-    contextMenuSession?.agentId
-    && isAgentRootSession(contextMenuSession)
-  );
-  const conversationIndexLoading = shouldShowConversationIndexLoading({
+  const {
+    contextMenuSession,
+    contextMenuSessionId,
+    contextMenuDeletePending,
+    contextMenuAddToReviewPending,
+    contextMenuClearHistoryPending,
+    contextMenuClearHistoryVisible,
+    contextMenuAgentArchivePending,
+    contextMenuDeleteDisabled,
+    contextMenuAddToReviewDisabled,
+    contextMenuClearHistoryDisabled,
+    conversationIndexLoading,
+  } = useChatIndexDerivedState({
+    sessionContextMenu,
+    sessionsById,
+    deleteSessionMutation,
+    addSessionToReviewMutation,
+    clearSessionHistoryMutation,
+    agentContextMenu,
+    isAgentArchivePending,
     bootstrapIsLoading: activeSessionBootstrapQuery.isLoading,
     conversationsHasData: Boolean(conversationsQuery.data),
     conversationsIsLoading: conversationsQuery.isLoading,
@@ -2730,13 +2680,6 @@ export function ChatCodingRoute() {
     agentsIsLoading: agentsQuery.isLoading,
     visibleSessionCount: allVisibleSessions.length,
   });
-  const contextMenuAgentArchivePending = Boolean(
-    agentContextMenu
-    && isAgentArchivePending(agentContextMenu.agent.agentId)
-  );
-  const contextMenuDeleteDisabled = contextMenuDeletePending || contextMenuSessionIsBusy;
-  const contextMenuAddToReviewDisabled = contextMenuAddToReviewPending || contextMenuSessionIsBusy;
-  const contextMenuClearHistoryDisabled = contextMenuClearHistoryPending || contextMenuSessionIsBusy;
   const conversationIndexPanel = (
     <ChatConversationIndexPanelContent
       styles={styles}

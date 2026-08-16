@@ -59,6 +59,8 @@ Chat surface. Rules:
 | Session select / URL / bootstrap | `useChatSessionSelection.ts` (committed-route preference sync) | EventSource ownership || Session detail window / ledger / conversation merge | `chatSessionDetailHelpers.ts` | stream EventSource |
 | Labels / avatar / group message presentation | `chatRoutePresentation.tsx` | mutations / stream |
 | Session catalog / tabs | `useChatVisibleSessionCatalog.ts` · `chatVisibleSessionCatalogModel.ts` · `useChatAgentSessionTabs.ts` | stream, confirm |
+| Agent directory maps / @mention avatars | `useChatAgentDirectoryMaps.ts` · `chatAgentDirectoryMaps.ts` | stream, confirm |
+| Index loading + session context-menu flags | `useChatIndexDerivedState.ts` | stream, mutations |
 | Group room chrome / team linkage | `useChatGroupRoomChromeModel.ts` · `chatGroupTeamLinkageModel.ts` | stream, route writes |
 | Session index rail chrome | `useChatSessionIndexRailModel.ts` · `chatSessionIndexRailPresentation.ts` | stream apply |
 | Session bulk select / remove | `useChatSessionBulkSelection.ts` | stream, confirm dialog |
@@ -118,6 +120,7 @@ Historical plan (archived): `docs/archive/superpowers/plans/2026-07-19-chat-codi
 - **F4b (Wave 1-A cont.):** `useChatVisibleSessionCatalog` owns visible session merge/map + activity seen; `useChatAgentSessionTabs` owns per-agent tab query; `useChatSessionIndexRailModel` owns group-only index groups + load-more progress labels.
 - **F4c (Wave 1-A cont.):** `useChatGroupRoomChromeModel` owns team↔room linkage, group participant maps, expanded-agent detail sync, and group manage/delete/reset/stop disabled flags; pure linkage in `chatGroupTeamLinkageModel.ts`.
 - **F4d (Wave 1-A alignment):** catalog/index pure boundaries — `chatVisibleSessionCatalogModel.ts`, `chatSessionIndexRailPresentation.ts`, explicit `toSessionIndexProgressQuerySlice`; hook exports trimmed to workbench-used fields.
+- **F4e (Wave 1-A cont.):** `useChatAgentDirectoryMaps` owns Agent maps / mention targets / turn avatars; `useChatIndexDerivedState` owns conversation-index loading and session context-menu derived flags.
 
 ## Bundle note (secondary lazy)
 
