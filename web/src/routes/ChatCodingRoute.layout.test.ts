@@ -3387,11 +3387,15 @@ describe("ChatCodingRoute layout contract", () => {
   it("asks for confirmation before deleting conversations", () => {
     expect(routeAndActionsSource).toContain("openDeleteSessionConfirm(session)");
     expect(routeAndActionsSource).not.toContain("window.confirm(sessionConfirmMessage)");
-    expect(chatCodingRouteWorkbenchSource).toContain("ChatSessionDeleteConfirmDialog");
-    expect(chatCodingRouteWorkbenchSource).toContain("confirmPendingDeleteSession");
+    expect(routeAndActionsSource).toContain("openClearSessionHistoryConfirm(session)");
+    expect(routeAndActionsSource).not.toContain("window.confirm(confirmMessage)");
+    expect(routeAndActionsSource).toContain("openDeleteGroupConfirm()");
+    expect(routeAndActionsSource).toContain("openResetGroupConfirm()");
+    expect(routeAndActionsSource).not.toContain("window.confirm(groupConfirmMessage)");
+    expect(chatCodingRouteWorkbenchSource).toContain("ChatDangerConfirmDialog");
+    expect(chatCodingRouteWorkbenchSource).toContain("confirmPendingWorkbenchAction");
     expect(chatCodingRouteWorkbenchSource).toContain("deleteSessionConfirm");
-    expect(routeAndActionsSource).toContain("t(\"deleteGroupConfirm\").replace(\"{title}\"");
-    expect(routeAndActionsSource).toContain("if (!window.confirm(groupConfirmMessage))");
+    expect(chatCodingRouteWorkbenchSource).toContain("clearSessionHistoryConfirm");
     expect(routeAndActionsSource).toContain("[session.id]: t(\"deleteSessionBusy\")");
     expect(routeAndActionsSource).toContain("alreadyDeletingThisSession");
     expect(routeAndActionsSource).toContain("deleteSessionMutation.variables?.sessionId === session.id");
@@ -3399,11 +3403,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain('deleteBusyLabel={t("deleteSessionBusy")}');
     expect(directSessionIndexListSource).toContain("deleteBusyLabel");
     expect(directSessionIndexItemSource).toContain("const deleteBusyReason = sessionBusy ? deleteBusyLabel : \"\"");
-    expect(chatCodingRouteWorkbenchSource.indexOf("confirmPendingDeleteSession")).toBeLessThan(
+    expect(chatCodingRouteWorkbenchSource.indexOf("confirmPendingWorkbenchAction")).toBeLessThan(
       chatCodingRouteWorkbenchSource.indexOf("deleteSessionMutation.mutate({ sessionId"),
-    );
-    expect(routeAndActionsSource.indexOf("window.confirm(groupConfirmMessage)")).toBeLessThan(
-      routeAndActionsSource.indexOf("deleteGroupRoomMutation.mutate({ roomId: activeGroupRoom.roomId })"),
     );
   });
 
@@ -3422,8 +3423,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(clearMutationSource).toContain("queryKeys.sessionLlmOptions(previousDirectSessionId)");
     expect(clearMutationSource).toContain("afterSessionDeleted");
     expect(clearMutationSource).toContain("chatWorkspaceCache.afterChatWorkspaceReset()");
-    expect(routeAndActionsSource).toContain("t(\"clearSessionHistoryConfirm\").replace(\"{title}\"");
-    expect(routeAndActionsSource).toContain("clearSessionHistoryMutation.mutate({ sessionId: session.id, agentId: session.agentId })");
+    expect(routeAndActionsSource).toContain("openClearSessionHistoryConfirm(session)");
+    expect(chatCodingRouteWorkbenchSource).toContain("clearSessionHistoryMutation.mutate({ sessionId: session.id, agentId })");
+    expect(chatCodingRouteWorkbenchSource).toContain('const agentId = String(session.agentId || "").trim()');
     expect(routeSource).toContain("contextMenuSession?.agentId");
     expect(routeSource).toContain("isAgentRootSession(contextMenuSession)");
   });

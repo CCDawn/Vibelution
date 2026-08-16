@@ -92,6 +92,9 @@ export type UseChatWorkspaceActionsOptions = {
   addSessionToReviewMutation: MutateLike<{ sessionId: string }>;
   petActionMutation: MutateLike<{ action: PetInteractionAction }>;
   openDeleteSessionConfirm: (session: SessionSummary) => void;
+  openClearSessionHistoryConfirm: (session: SessionSummary) => void;
+  openDeleteGroupConfirm: () => void;
+  openResetGroupConfirm: () => void;
 };
 
 export type UseChatWorkspaceActionsResult = {
@@ -177,6 +180,9 @@ export function useChatWorkspaceActions({
   addSessionToReviewMutation,
   petActionMutation,
   openDeleteSessionConfirm,
+  openClearSessionHistoryConfirm,
+  openDeleteGroupConfirm,
+  openResetGroupConfirm,
 }: UseChatWorkspaceActionsOptions): UseChatWorkspaceActionsResult {
   const handlePetInteraction = useCallback((action: PetInteractionAction) => {
     setPetActionFeedback("");
@@ -490,39 +496,25 @@ export function useChatWorkspaceActions({
     if (!standardGroupRoomActive || activeGroupTeamOwned || !activeGroupRoom?.roomId || groupDeleteDisabled) {
       return;
     }
-    const roomTitle = (activeGroupRoom?.title || activeGroupRoom.roomId).trim();
-    const groupConfirmMessage = t("deleteGroupConfirm").replace("{title}", roomTitle || activeGroupRoom.roomId);
-    if (!window.confirm(groupConfirmMessage)) {
-      return;
-    }
-    deleteGroupRoomMutation.mutate({ roomId: activeGroupRoom.roomId });
+    openDeleteGroupConfirm();
   }, [
     activeGroupRoom?.roomId,
-    activeGroupRoom?.title,
     activeGroupTeamOwned,
-    deleteGroupRoomMutation,
     groupDeleteDisabled,
+    openDeleteGroupConfirm,
     standardGroupRoomActive,
-    t,
   ]);
 
   const handleResetActiveGroupRoom = useCallback(() => {
     if (!standardGroupRoomActive || !activeGroupRoom?.roomId || groupResetDisabled) {
       return;
     }
-    const roomTitle = (activeGroupRoom?.title || activeGroupRoom.roomId).trim();
-    const groupConfirmMessage = t("resetGroupConfirm").replace("{title}", roomTitle || activeGroupRoom.roomId);
-    if (!window.confirm(groupConfirmMessage)) {
-      return;
-    }
-    resetGroupRoomMutation.mutate({ roomId: activeGroupRoom.roomId });
+    openResetGroupConfirm();
   }, [
     activeGroupRoom?.roomId,
-    activeGroupRoom?.title,
     groupResetDisabled,
-    resetGroupRoomMutation,
+    openResetGroupConfirm,
     standardGroupRoomActive,
-    t,
   ]);
 
   const handleDeleteSession = useCallback((session: SessionSummary) => {
@@ -555,18 +547,8 @@ export function useChatWorkspaceActions({
       }));
       return;
     }
-    const sessionTitle = (session.agentDisplayName || session.title || session.id).trim();
-    const confirmMessage = t("clearSessionHistoryConfirm").replace("{title}", sessionTitle || session.id);
-    if (!window.confirm(confirmMessage)) {
-      return;
-    }
-    setSessionComposerErrors((current) => ({
-      ...current,
-      [session.id]: "",
-      __sessions__: "",
-    }));
-    clearSessionHistoryMutation.mutate({ sessionId: session.id, agentId: session.agentId });
-  }, [clearSessionHistoryMutation, setSessionComposerErrors, setSessionContextMenu, t]);
+    openClearSessionHistoryConfirm(session);
+  }, [openClearSessionHistoryConfirm, setSessionComposerErrors, setSessionContextMenu, t]);
 
   const handleAddSessionToReview = useCallback((session: SessionSummary) => {
     setSessionContextMenu(null);

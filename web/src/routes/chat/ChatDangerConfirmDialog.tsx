@@ -1,39 +1,39 @@
-import type { SessionSummary } from "../../api/types";
-import { VConfirmDialog } from "../../components/vui";
+import { VConfirmDialog, type VConfirmDialogTone } from "../../components/vui";
 
-type ChatSessionDeleteConfirmDialogProps = {
+type ChatDangerConfirmDialogProps = {
   cancelLabel: string;
   confirmLabel: string;
   confirmPending?: boolean;
-  session: SessionSummary | null;
+  open: boolean;
   title: string;
+  tone?: VConfirmDialogTone;
   onCancel: () => void;
   onConfirm: () => void;
   onOpenChange: (open: boolean) => void;
 };
 
-export function ChatSessionDeleteConfirmDialog({
+export function ChatDangerConfirmDialog({
   cancelLabel,
   confirmLabel,
   confirmPending = false,
-  session,
+  open,
   title,
+  tone = "danger",
   onCancel,
   onConfirm,
   onOpenChange,
-}: ChatSessionDeleteConfirmDialogProps) {
+}: ChatDangerConfirmDialogProps) {
   return (
     <VConfirmDialog
-      open={Boolean(session)}
+      open={open}
       onOpenChange={onOpenChange}
       title={title}
-      tone="danger"
+      tone={tone}
       confirmLabel={confirmLabel}
       cancelLabel={cancelLabel}
       confirmPending={confirmPending}
       hideClose
       onCloseAutoFocus={(event) => {
-        // Keep focus off the tab/context-menu trigger; composer handoff owns restore.
         event.preventDefault();
       }}
       onCancel={onCancel}
