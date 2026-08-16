@@ -381,3 +381,81 @@ def replay_current_turn_messages(
         materialized,
         langchain_messages_from_conversation_layer(layer),
     )
+
+
+def reconcile_chat_messages_with_ledger(
+    messages: Sequence[Any] | None,
+    events: Iterable[Any],
+    *,
+    turn_id: str,
+    strict: bool = True,
+) -> list:
+    """Align chat turn payload with ConversationLedger before model send.
+
+    When the current turn already has assistant/tool journal events, replay the
+    in-flight suffix. Otherwise verify seeded history matches ledger replay.
+    """
+
+    from core.chat.conversation_invariant import (
+        canonical_conversation_messages_from_events,
+        conversation_layer_fingerprint,
+        conversation_layer_messages,
+    )
+
+    materialized = list(messages or [])
+    event_list = list(events or [])
+    normalized_turn_id = str(turn_id or "").strip()
+    if current_turn_has_journal_conversation_layer(event_list, turn_id=normalized_turn_id):
+        return replay_current_turn_messages(
+            materialized,
+            event_list,
+            turn_id=normalized_turn_id,
+            strict=strict,
+            require_layer=True,
+        )
+
+    if not strict:
+        return materialized
+
+    historical = canonical_conversation_messages_from_events(
+        event_list,
+        current_turn_id=normalized_turn_id,
+    )
+    layer = conversation_layer_messages(materialized)
+    history_layer = layer[:-1] if layer and _message_role_name(layer[-1]) == "user" else layer
+    from core.infrastructure.runtime_input import build_chat_user_message
+
+    def _chat_seeded_history_fingerprint(items: Sequence[Any]) -> str:
+        projected: list[Any] = []
+        for item in items:
+            if isinstance(item, dict):
+                role = str(item.get("role") or "").strip().lower()
+                if role == "user":
+                    content = item.get("content")
+                    if isinstance(content, list):
+                        projected.append({"role": "user", "content": content})
+                    else:
+                        projected.append(build_chat_user_message(str(content or "")))
+                    continue
+                projected.append(dict(item))
+                continue
+            role = _message_role_name(item)
+            if role == "user":
+                projected.append(build_chat_user_message(str(getattr(item, "content", "") or "")))
+            else:
+                projected.append(item)
+        return conversation_layer_fingerprint(projected)
+
+    expected_fingerprint = _chat_seeded_history_fingerprint(historical)
+    actual_fingerprint = conversation_layer_fingerprint(history_layer)
+    if expected_fingerprint != actual_fingerprint:
+        raise TurnJournalReplayError(
+            error_type="ledger_history_mismatch",
+            message="Seeded chat history does not match ConversationLedger reconstruction.",
+            details={
+                "turnId": normalized_turn_id,
+                "expectedFingerprint": expected_fingerprint,
+                "actualFingerprint": actual_fingerprint,
+            },
+        )
+    return materialized

@@ -672,15 +672,18 @@ class TestToolMessageFlow:
                 {
                     "role": "assistant",
                     "content": "运行相关测试验证修改：",
-                    "toolCalls": [
+                    "tool_calls": [
                         {
+                            "id": "call_cli",
                             "name": "cli_tool",
-                            "arguments": {"command": "python -m pytest"},
-                            "status": "failed",
-                            "result": long_result,
-                            "resultPreview": "Windows detected Unix shell fragment.",
+                            "args": {"command": "python -m pytest"},
                         }
                     ],
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_cli",
+                    "content": long_result,
                 },
             ]
         )
@@ -694,7 +697,7 @@ class TestToolMessageFlow:
         ]
 
         assert len(tool_messages) == 1
-        assert tool_messages[0].tool_call_id == "history_tool_1_1"
+        assert tool_messages[0].tool_call_id == "call_cli"
         assert "完整工具结果" in tool_messages[0].content
         assert "failure-line\n" * 120 in tool_messages[0].content
         assert "Windows detected Unix shell fragment" not in tool_messages[0].content

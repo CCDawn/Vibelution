@@ -251,6 +251,7 @@ from core.orchestration.turn_message_assembly import (
     insert_pending_volatile_context_messages,
     ledger_conversation_fingerprint_for_messages,
     normalize_seeded_tool_calls,
+    reconcile_chat_messages_with_ledger,
     refresh_system_prefix_on_messages,
     replay_current_turn_messages,
     sanitize_seeded_chat_content,
@@ -1334,7 +1335,39 @@ class SelfEvolvingAgent:
         # ``previous_response_id`` is valid only for tool continuations inside
         # one turn; carrying it across this boundary can replay stale tools.
         self._chat_provider_replay_state = None
-        canonical_messages = normalize_model_messages(list(messages or []))
+        from core.chat.conversation_invariant import (
+            ConversationSeedInvariantError,
+            check_conversation_payload_invariant,
+        )
+        from core.chat.model_messages import ProviderMessageChain
+
+        seeded_input: list[Any] = []
+        for item in list(messages or []):
+            if not isinstance(item, dict):
+                continue
+            message = dict(item)
+            if "toolCalls" in message:
+                message["tool_calls"] = self._normalize_seeded_tool_calls(message.pop("toolCalls"))
+            seeded_input.append(message)
+        provider_chain = ProviderMessageChain.from_messages(seeded_input)
+        if provider_chain.repaired:
+            raise ConversationSeedInvariantError(
+                error_type="silent_provider_tool_chain_repair",
+                message=(
+                    "Silent provider tool-chain repair is not allowed while seeding chat history. "
+                    "Build history from ConversationLedger ModelProjection first."
+                ),
+                details={"providerChainRepaired": True},
+            )
+        seeded_messages = provider_chain.to_provider_payload()
+        invariant = check_conversation_payload_invariant(seeded_messages)
+        if not invariant.ok:
+            raise ConversationSeedInvariantError(
+                error_type=str(invariant.error_type or "conversation_seed_invariant_failed"),
+                message=str(invariant.message or "Seeded chat history failed conversation invariant."),
+                details=dict(invariant.details or {}),
+            )
+        canonical_messages = seeded_messages
         if self.is_mental_model_enabled_for_turn():
             mental_seed = getattr(getattr(self, "mental_model", None), "seed_conversation_context", None)
             if callable(mental_seed):
@@ -1475,6 +1508,44 @@ class SelfEvolvingAgent:
             "当前轮对话层无法从 ConversationLedger 重建，已停止继续调用模型。",
             "ERROR",
         )
+
+    def _reconcile_chat_conversation_before_llm(self, messages: list) -> tuple[list, bool]:
+        identity = self._chat_ledger_identity()
+        if identity is None:
+            exc = TurnJournalReplayError(
+                error_type="ledger_identity_missing",
+                message="Chat turn ledger reconciliation requires session and turn identity.",
+            )
+            self._handle_turn_journal_replay_failure(exc)
+            return messages, False
+        project_root, session_id, turn_id = identity
+        try:
+            from core.chat.conversation_ledger import load_conversation_events
+
+            events = load_conversation_events(project_root, session_id)
+            reconciled = reconcile_chat_messages_with_ledger(
+                messages,
+                events,
+                turn_id=turn_id,
+                strict=True,
+            )
+            if reconciled != messages:
+                _record_agent_scene_event(
+                    "chat",
+                    "agent.turn_journal_replay.applied",
+                    message="Rebuilt chat conversation layer from ConversationLedger before LLM send.",
+                    fields={
+                        "sessionId": session_id,
+                        "turnId": turn_id,
+                        "beforeCount": len(messages),
+                        "afterCount": len(reconciled),
+                    },
+                )
+            self._ledger_conversation_fingerprint = ledger_conversation_fingerprint_for_messages(reconciled)
+            return reconciled, True
+        except TurnJournalReplayError as exc:
+            self._handle_turn_journal_replay_failure(exc)
+            return messages, False
 
     def _apply_chat_journal_replay(
         self,
@@ -2249,10 +2320,6 @@ class SelfEvolvingAgent:
                             f"由于上下文超过最大承受能力，现在强制进行了一次压缩"
                             f"（{current_tokens} → {after_tokens} tokens）。"
                         ))
-                    if policy.mode == AgentMode.CHAT and self._ledger_conversation_fingerprint:
-                        messages, replay_ok = self._apply_chat_journal_replay(messages)
-                        if not replay_ok:
-                            break
                 self._raise_if_turn_stop_requested()
                 _record_agent_scene_event(
                     "llm",
@@ -2273,6 +2340,10 @@ class SelfEvolvingAgent:
                         "totalPreflightMs": max(0, int((time.perf_counter() - pre_llm_started) * 1000)),
                     },
                 )
+                if policy.mode == AgentMode.CHAT:
+                    messages, reconcile_ok = self._reconcile_chat_conversation_before_llm(messages)
+                    if not reconcile_ok:
+                        break
                 invocation_result = self._invoke_llm(messages, replay_state=provider_replay_state)
                 if (
                     invocation_result is None
@@ -2595,13 +2666,6 @@ class SelfEvolvingAgent:
                 # Tools (and tool blockers / validation notes) may change runtime state memory.
                 if executable_tool_calls or tool_calls:
                     self._mark_runtime_state_memory_dirty()
-                if policy.mode == AgentMode.CHAT and (executable_tool_calls or tool_calls):
-                    messages, replay_ok = self._apply_chat_journal_replay(
-                        messages,
-                        require_layer=bool(executable_tool_calls or tool_calls),
-                    )
-                    if not replay_ok:
-                        break
                 self._raise_if_turn_stop_requested()
                 if lifecycle_action == "turn_complete":
                     round_state.note_lifecycle_completion()
@@ -2635,10 +2699,6 @@ class SelfEvolvingAgent:
                     _debug_logger.info(f"[压缩] 感知层请求压缩: {reason}", tag="STATE")
                     messages, _ = self._compress_messages(messages, iteration, reason=reason)
                     self._mark_runtime_state_memory_dirty()
-                    if policy.mode == AgentMode.CHAT and self._ledger_conversation_fingerprint:
-                        messages, replay_ok = self._apply_chat_journal_replay(messages)
-                        if not replay_ok:
-                            break
                     self._raise_if_turn_stop_requested()
 
         except TurnStopRequested as stop_request:

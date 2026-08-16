@@ -9,6 +9,7 @@ from core.chat.conversation_invariant import (
     LEDGER_REWRITE_EXCEPTION_OWNERS,
     SILENT_PROVIDER_REPAIR_ERROR,
     ConversationPayloadInvariantResult,
+    ConversationSeedInvariantError,
     canonical_conversation_messages_from_events,
     check_conversation_payload_invariant,
     conversation_layer_fingerprint,
@@ -22,9 +23,11 @@ from core.chat.conversation_ledger import (
     append_conversation_event,
     load_conversation_events,
 )
+from core.infrastructure.runtime_input import build_chat_user_message
 from core.orchestration.turn_message_assembly import (
     TurnJournalReplayError,
     ledger_conversation_fingerprint_for_messages,
+    reconcile_chat_messages_with_ledger,
     replay_current_turn_messages,
 )
 from core.orchestration.turn_diagnostics import build_llm_invocation_context
@@ -405,6 +408,96 @@ def test_build_llm_invocation_context_passes_ledger_fingerprint():
     )
     metadata = context.to_metadata()
     assert metadata["ledgerConversationFingerprint"] == "abc123"
+
+
+def test_assemble_conversation_context_rejects_invariant_failure(tmp_path, monkeypatch):
+    append_conversation_event(
+        tmp_path,
+        "session-seed-repair",
+        "turn-1",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "历史请求"},
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-seed-repair",
+        "turn-1",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={"content": "历史回复"},
+    )
+    events = load_conversation_events(tmp_path, "session-seed-repair")
+    monkeypatch.setattr(
+        "core.chat.context_assembler.check_conversation_payload_invariant",
+        lambda *_args, **_kwargs: ConversationPayloadInvariantResult(
+            ok=False,
+            error_type=SILENT_PROVIDER_REPAIR_ERROR,
+            message="forced seed invariant failure",
+        ),
+    )
+
+    with pytest.raises(ConversationSeedInvariantError) as exc_info:
+        assemble_conversation_context(
+            [],
+            session_id="session-seed-repair",
+            current_turn_id="turn-2",
+            recent_message_limit=None,
+            ledger_events=events,
+        )
+
+    assert exc_info.value.error_type == SILENT_PROVIDER_REPAIR_ERROR
+
+
+def test_reconcile_chat_messages_with_ledger_matches_seeded_history(tmp_path):
+    append_conversation_event(
+        tmp_path,
+        "session-reconcile",
+        "turn-1",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "历史请求"},
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-reconcile",
+        "turn-1",
+        EVENT_ASSISTANT_MESSAGE,
+        status="completed",
+        payload={"content": "历史回复"},
+    )
+    append_conversation_event(
+        tmp_path,
+        "session-reconcile",
+        "turn-2",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "当前请求"},
+    )
+    events = load_conversation_events(tmp_path, "session-reconcile")
+    assembled = assemble_conversation_context(
+        [],
+        session_id="session-reconcile",
+        current_turn_id="turn-2",
+        recent_message_limit=None,
+        ledger_events=events,
+    )
+    messages = [
+        SystemMessage(content="prefix"),
+        build_chat_user_message("历史请求"),
+        AIMessage(content="历史回复"),
+        build_chat_user_message("当前请求"),
+    ]
+
+    reconciled = reconcile_chat_messages_with_ledger(
+        messages,
+        events,
+        turn_id="turn-2",
+        strict=True,
+    )
+
+    assert reconciled == messages
+    assert ledger_conversation_fingerprint_for_messages(reconciled)
 
 
 def conversation_layer_messages_from_last_assistant(messages):

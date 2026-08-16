@@ -25,7 +25,12 @@ from .conversation_ledger import (
     conversation_model_messages_from_events,
     latest_context_compression_checkpoint,
 )
-from .model_messages import ProviderMessageChain
+from .conversation_invariant import (
+    ConversationSeedInvariantError,
+    canonical_conversation_messages_from_events,
+    check_conversation_payload_invariant,
+    conversation_layer_fingerprint,
+)
 
 
 DEFAULT_RECENT_MESSAGE_LIMIT = 8
@@ -103,6 +108,7 @@ def assemble_conversation_context(
     replace_large_tool_results_for_compression: bool = False,
     tool_result_replacement_char_limit: int = 12_000,
     history_seed_profile: str = "full",
+    enforce_conversation_invariant: bool = True,
 ) -> ContextAssemblyResult:
     """Return the ledger history view used to seed an agent turn.
 
@@ -120,7 +126,28 @@ def assemble_conversation_context(
         current_turn_id=current_turn_id,
     )
     ledger_messages = conversation_model_messages_from_events(ledger_replay_events)
-    normalized_messages = ProviderMessageChain.from_messages(ledger_messages).to_provider_payload()
+    if enforce_conversation_invariant:
+        invariant = check_conversation_payload_invariant(ledger_messages)
+        if not invariant.ok:
+            raise ConversationSeedInvariantError(
+                error_type=str(invariant.error_type or "conversation_seed_invariant_failed"),
+                message=str(invariant.message or "Ledger history seed failed conversation invariant."),
+                details=dict(invariant.details or {}),
+            )
+        canonical_history = canonical_conversation_messages_from_events(
+            list(ledger_events or []),
+            current_turn_id=current_turn_id,
+        )
+        if conversation_layer_fingerprint(canonical_history) != conversation_layer_fingerprint(ledger_messages):
+            raise ConversationSeedInvariantError(
+                error_type="ledger_history_projection_mismatch",
+                message="Ledger history seed projection does not match canonical ConversationLedger replay.",
+                details={
+                    "expectedFingerprint": conversation_layer_fingerprint(canonical_history),
+                    "actualFingerprint": conversation_layer_fingerprint(ledger_messages),
+                },
+            )
+    normalized_messages = list(ledger_messages)
     events = build_history_events(normalized_messages, session_id=session_id)
     if recent_message_limit is None:
         recent_start_index = 0
