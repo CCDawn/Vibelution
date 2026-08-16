@@ -29,7 +29,7 @@
 
 1. **`agent_log_context`** — 解析 `activePaths`、当前 scene、`agentBrief`
 2. **`summary.json`** — 已在 (1) 摘要；需要细节再打开
-3. **`agentBrief.evidence_refs` / `diagnosticEntrypoint.recommended_order`**
+3. **`resolvedEvidenceRefs.absolutePath`** — 优先于手工拼接 `evidence_refs`
 4. **有 session/turn 时** — (1) 内 `session` 字段（journal + runtime 证据）
 5. **仅当仍不够** — `log_path` 深读；禁止未做 (1) 就 grep 全仓或大 stdout
 

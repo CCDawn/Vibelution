@@ -8,14 +8,22 @@ from typing import Any
 from core.diagnostics.session_turn_diagnosis import build_session_turn_diagnosis
 from vibelution_storage import resolve_active_project_storage_paths
 
-AGENT_LOG_CONTEXT_SCHEMA_VERSION = 1
+AGENT_LOG_CONTEXT_SCHEMA_VERSION = 2
 LARGE_LOG_BYTES = 8 * 1024 * 1024
 ACTIVE_RUNTIME_SCENE_NAME = "active-runtime-scene.json"
 SUMMARY_FILE_NAME = "summary.json"
+LAUNCHER_LOG_NAMES = frozenset(
+    {
+        "backend.stdout.log",
+        "backend.stderr.log",
+        "launcher-control.log",
+        "frontend-build.log",
+    }
+)
 
 USAGE_GUIDANCE = [
     "Always start with agent_log_context before grep, read_file, or raw log expansion.",
-    "Read summary.json agent_brief and follow evidence_refs before opening timeline or stdout logs.",
+    "Read summary.json agent_brief and follow resolvedEvidenceRefs.absolutePath before opening timeline or stdout logs.",
     "Use conversation_log_inspect_tool or agent_log_context with log_path only for a narrow deep read.",
     "Resolve paths from activePaths; never assume logs live under the git checkout root after migration.",
 ]
@@ -63,6 +71,14 @@ def build_agent_log_context(
             turn_id,
             max_runtime_matches=max_runtime_matches,
         )
+    resolved_evidence_refs = _resolve_evidence_refs(
+        root,
+        storage,
+        scene_dir=scene_dir,
+        launcher_dir=launcher_dir,
+        agent_brief=agent_brief,
+        diagnostic_entrypoint=diagnostic_entrypoint,
+    )
 
     return {
         "status": "ok",
@@ -81,6 +97,7 @@ def build_agent_log_context(
         ),
         "agentBrief": agent_brief,
         "diagnosticEntrypoint": diagnostic_entrypoint,
+        "resolvedEvidenceRefs": resolved_evidence_refs,
         "recentScenes": recent_scenes,
         "launcherRuntime": _launcher_runtime_hints(launcher_dir),
         "session": session_payload,
@@ -295,3 +312,123 @@ def _display_path(path: Path, project_root: Path) -> str:
         return str(path.resolve().relative_to(project_root.resolve()))
     except ValueError:
         return str(path)
+
+
+def _append_unique_ref(refs: list[str], value: str) -> None:
+    normalized = str(value or "").strip()
+    if not normalized or normalized in refs:
+        return
+    refs.append(normalized)
+
+
+def _collect_evidence_ref_strings(
+    agent_brief: dict[str, Any],
+    diagnostic_entrypoint: dict[str, Any],
+) -> list[str]:
+    refs: list[str] = []
+    for item in agent_brief.get("evidence_refs") if isinstance(agent_brief.get("evidence_refs"), list) else []:
+        _append_unique_ref(refs, str(item or ""))
+    for item in (
+        diagnostic_entrypoint.get("evidence_paths")
+        if isinstance(diagnostic_entrypoint.get("evidence_paths"), list)
+        else []
+    ):
+        _append_unique_ref(refs, str(item or ""))
+    for item in (
+        diagnostic_entrypoint.get("recommended_order")
+        if isinstance(diagnostic_entrypoint.get("recommended_order"), list)
+        else []
+    ):
+        _append_unique_ref(refs, str(item or ""))
+    return refs
+
+
+def _resolve_evidence_refs(
+    project_root: Path,
+    storage: Any,
+    *,
+    scene_dir: Path | None,
+    launcher_dir: Path,
+    agent_brief: dict[str, Any],
+    diagnostic_entrypoint: dict[str, Any],
+) -> list[dict[str, Any]]:
+    refs = _collect_evidence_ref_strings(agent_brief, diagnostic_entrypoint)
+    return [
+        _resolve_single_evidence_ref(
+            ref,
+            project_root=project_root,
+            storage=storage,
+            scene_dir=scene_dir,
+            launcher_dir=launcher_dir,
+        )
+        for ref in refs
+    ]
+
+
+def _resolve_single_evidence_ref(
+    ref: str,
+    *,
+    project_root: Path,
+    storage: Any,
+    scene_dir: Path | None,
+    launcher_dir: Path,
+) -> dict[str, Any]:
+    normalized = str(ref or "").strip().replace("\\", "/")
+    if not normalized:
+        return {
+            "ref": ref,
+            "absolutePath": "",
+            "displayPath": "",
+            "exists": False,
+        }
+
+    candidates: list[Path] = []
+    absolute_candidate = Path(normalized)
+    if absolute_candidate.is_absolute():
+        candidates.append(absolute_candidate)
+
+    if normalized.startswith("logs/"):
+        candidates.append(project_root / normalized)
+        logs_relative = normalized.removeprefix("logs/").lstrip("/")
+        if logs_relative:
+            candidates.append(storage.logs / logs_relative)
+
+    if scene_dir is not None:
+        candidates.append(scene_dir / Path(normalized))
+
+    launcher_name = Path(normalized).name
+    if launcher_name in LAUNCHER_LOG_NAMES:
+        candidates.append(launcher_dir / launcher_name)
+
+    resolved: Path | None = None
+    for candidate in candidates:
+        try:
+            resolved_candidate = candidate.resolve()
+        except OSError:
+            continue
+        if resolved_candidate.is_file():
+            resolved = resolved_candidate
+            break
+
+    if resolved is None and candidates:
+        try:
+            resolved = candidates[0].resolve()
+        except OSError:
+            resolved = candidates[0]
+
+    entry: dict[str, Any] = {
+        "ref": ref,
+        "absolutePath": str(resolved) if resolved is not None else "",
+        "displayPath": _display_path(resolved, project_root) if resolved is not None else normalized,
+        "exists": bool(resolved is not None and resolved.is_file()),
+    }
+    if entry["exists"] and resolved is not None:
+        try:
+            size_bytes = resolved.stat().st_size
+        except OSError:
+            size_bytes = None
+        if size_bytes is not None:
+            entry["sizeBytes"] = size_bytes
+            if size_bytes >= LARGE_LOG_BYTES:
+                entry["warning"] = "do_not_read_full_file_use_scene_raw_or_tail"
+    return entry
