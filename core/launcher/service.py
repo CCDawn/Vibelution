@@ -87,6 +87,8 @@ _WORKBENCH_WINDOW_MODE_DETAILS = {
     },
 }
 _RUNTIME_MANAGER_STATUS_FAST_PATH_MAX_AGE_SECONDS = 15.0
+_FAST_LAUNCHER_REAP_TIMEOUT_SECONDS = 1.0
+_LAUNCHER_REAP_FALLBACK_TIMEOUT_SECONDS = 5.0
 
 
 def _launcher_elapsed_ms(started_at: float) -> float:
@@ -995,22 +997,198 @@ def _managed_process_exclude_pids() -> set[int]:
     return excluded
 
 
+def _trusted_repo_runtime_pid(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        from core.runtime_manager.process_inventory import repo_runtime_process_for_pid
+
+        return repo_runtime_process_for_pid(pid, project_root=PROJECT_ROOT) is not None
+    except Exception:
+        return False
+
+
+def _trusted_managed_browser_pid(pid: int, *, profile_dir: str) -> bool:
+    if pid <= 0 or not str(profile_dir or "").strip():
+        return False
+    try:
+        from core.runtime_manager.process_inventory import managed_browser_pid_matches_profile
+
+        return managed_browser_pid_matches_profile(pid, profile_dir=profile_dir)
+    except Exception:
+        return False
+
+
+def _launcher_workbench_browser_profile_dir(workbench: dict[str, Any]) -> str:
+    external_window_owner = str(workbench.get("externalWindowOwner") or "").strip().lower()
+    if external_window_owner == "electron":
+        return ""
+    return str(workbench.get("browserProfileDir") or "").strip()
+
+
+def _collect_trusted_launcher_cleanup_pids(
+    *,
+    include_runtime_manager: bool,
+    runtime_state: dict[str, Any],
+    workbench: dict[str, Any],
+) -> set[int]:
+    excluded = _managed_process_exclude_pids()
+    known: set[int] = set()
+    browser_profile_dir = _launcher_workbench_browser_profile_dir(workbench)
+    external_window_owner = str(workbench.get("externalWindowOwner") or "").strip().lower() == "electron"
+
+    for key in ("backendPid", "backendLaunchPid"):
+        pid = _positive_pid(workbench.get(key))
+        if pid and pid not in excluded and _trusted_repo_runtime_pid(pid):
+            known.add(pid)
+
+    if include_runtime_manager:
+        manager_pid = _positive_pid(runtime_state.get("managerPid"))
+        if manager_pid <= 0:
+            try:
+                manager_pid = _positive_pid(load_pid())
+            except Exception:
+                manager_pid = 0
+        if manager_pid and manager_pid not in excluded and is_runtime_manager_process(manager_pid):
+            known.add(manager_pid)
+
+    if not external_window_owner and bool(workbench.get("browserManaged", True)):
+        for key in ("browserWindowPid", "browserLaunchPid"):
+            pid = _positive_pid(workbench.get(key))
+            if pid <= 0 or pid in excluded:
+                continue
+            if _trusted_repo_runtime_pid(pid) or (
+                browser_profile_dir and _trusted_managed_browser_pid(pid, profile_dir=browser_profile_dir)
+            ):
+                known.add(pid)
+
+    return known
+
+
+def _launcher_backend_port_still_listening(workbench: dict[str, Any]) -> bool:
+    try:
+        port = int(workbench.get("backendPort") or 0)
+    except (TypeError, ValueError):
+        port = 0
+    if port > 0:
+        try:
+            from core.runtime_manager.workbench_controller import _port_is_listening_socket
+
+            return _port_is_listening_socket(port)
+        except Exception:
+            pass
+    return bool(workbench.get("backendPortListening"))
+
+
+def _launcher_cleanup_needs_inventory_fallback(
+    *,
+    cleanup: dict[str, Any],
+    workbench: dict[str, Any],
+    include_runtime_manager: bool,
+    runtime_manager_pid: int,
+) -> tuple[bool, str]:
+    remaining = cleanup.get("remaining") if isinstance(cleanup.get("remaining"), list) else []
+    if remaining:
+        return True, "remaining_processes_after_known_pid_cleanup"
+    if _launcher_backend_port_still_listening(workbench):
+        return True, "backend_port_still_listening"
+    if include_runtime_manager and runtime_manager_pid > 0 and _is_process_alive(runtime_manager_pid):
+        return True, "runtime_manager_still_alive"
+    return False, ""
+
+
 def _terminate_managed_launcher_subtree(*, include_runtime_manager: bool, reason: str) -> dict[str, Any]:
     """Force-stop Launcher-owned project processes without going through the RM queue."""
 
     from core.runtime_manager.daemon import _mark_persistent_active_work_runs_force_stopped
     from core.runtime_manager.process_inventory import terminate_workbench_processes
 
-    runtime_manager_pid = load_pid() if include_runtime_manager else 0
-    cleanup = terminate_workbench_processes(
-        exclude_pids=_managed_process_exclude_pids(),
+    total_started = time.monotonic()
+    cleanup_timings_ms: dict[str, Any] = {}
+    cleanup_phases: dict[str, Any] = {
+        "fastPathAttempted": False,
+        "usedFallback": False,
+        "fallbackReason": "",
+        "knownPidCount": 0,
+    }
+
+    collect_started = time.monotonic()
+    runtime_state = _runtime_manager_state()
+    observed_workbench = _observed_workbench()
+    workbench = _workbench_payload(runtime_state=runtime_state, observed_workbench=observed_workbench)
+    known_pids = _collect_trusted_launcher_cleanup_pids(
         include_runtime_manager=include_runtime_manager,
-        timeout_seconds=5.0,
+        runtime_state=runtime_state,
+        workbench=workbench,
     )
+    cleanup_timings_ms["collectKnownPidsMs"] = _launcher_elapsed_ms(collect_started)
+    cleanup_phases["knownPidCount"] = len(known_pids)
+
+    excluded = _managed_process_exclude_pids()
+    runtime_manager_pid = load_pid() if include_runtime_manager else 0
+    browser_profile_dir = _launcher_workbench_browser_profile_dir(workbench)
+    external_window_owner = str(workbench.get("externalWindowOwner") or "").strip().lower() == "electron"
+    has_known_browser_pids = any(
+        _positive_pid(workbench.get(key)) in known_pids for key in ("browserWindowPid", "browserLaunchPid")
+    )
+    fast_browser_profile_dir = "" if external_window_owner or has_known_browser_pids else browser_profile_dir
+
+    process_cleanup: dict[str, Any]
+    if known_pids:
+        cleanup_phases["fastPathAttempted"] = True
+        fast_started = time.monotonic()
+        fast_cleanup = terminate_workbench_processes(
+            exclude_pids=excluded,
+            known_pids=sorted(known_pids),
+            browser_profile_dir=fast_browser_profile_dir,
+            include_runtime_manager=include_runtime_manager,
+            timeout_seconds=_FAST_LAUNCHER_REAP_TIMEOUT_SECONDS,
+            verify_remaining_with_inventory=False,
+        )
+        cleanup_timings_ms["knownPidCleanupMs"] = _launcher_elapsed_ms(fast_started)
+        needs_fallback, fallback_reason = _launcher_cleanup_needs_inventory_fallback(
+            cleanup=fast_cleanup,
+            workbench=workbench,
+            include_runtime_manager=include_runtime_manager,
+            runtime_manager_pid=int(runtime_manager_pid or 0),
+        )
+        if needs_fallback:
+            cleanup_phases["usedFallback"] = True
+            cleanup_phases["fallbackReason"] = fallback_reason
+            fallback_started = time.monotonic()
+            process_cleanup = terminate_workbench_processes(
+                exclude_pids=excluded,
+                include_runtime_manager=include_runtime_manager,
+                browser_profile_dir="" if external_window_owner else browser_profile_dir,
+                timeout_seconds=_LAUNCHER_REAP_FALLBACK_TIMEOUT_SECONDS,
+                verify_remaining_with_inventory=True,
+            )
+            cleanup_timings_ms["fallbackInventoryCleanupMs"] = _launcher_elapsed_ms(fallback_started)
+        else:
+            process_cleanup = fast_cleanup
+    else:
+        cleanup_phases["usedFallback"] = True
+        cleanup_phases["fallbackReason"] = "no_trusted_known_pids"
+        fallback_started = time.monotonic()
+        process_cleanup = terminate_workbench_processes(
+            exclude_pids=excluded,
+            include_runtime_manager=include_runtime_manager,
+            browser_profile_dir="" if external_window_owner else browser_profile_dir,
+            timeout_seconds=_LAUNCHER_REAP_FALLBACK_TIMEOUT_SECONDS,
+            verify_remaining_with_inventory=True,
+        )
+        cleanup_timings_ms["fallbackInventoryCleanupMs"] = _launcher_elapsed_ms(fallback_started)
+
+    cleanup_timings_ms["totalMs"] = _launcher_elapsed_ms(total_started)
     stopped_runs = _mark_persistent_active_work_runs_force_stopped(reason)
     if runtime_manager_pid > 0:
         clear_pid(runtime_manager_pid)
-    return {"processCleanup": cleanup, "forceStoppedWorkRuns": stopped_runs}
+    return {
+        "processCleanup": process_cleanup,
+        "forceStoppedWorkRuns": stopped_runs,
+        "cleanupTimingsMs": cleanup_timings_ms,
+        "cleanupPhases": cleanup_phases,
+    }
 
 
 def ensure_runtime_manager_daemon_alive() -> dict[str, Any]:
@@ -2010,6 +2188,8 @@ def request_launcher_runtime_shutdown() -> LauncherCommandResponse:
     )
     elapsed_ms = _launcher_elapsed_ms(started)
     process_cleanup = cleanup.get("processCleanup") if isinstance(cleanup.get("processCleanup"), dict) else {}
+    cleanup_timings_ms = cleanup.get("cleanupTimingsMs") if isinstance(cleanup.get("cleanupTimingsMs"), dict) else {}
+    cleanup_phases = cleanup.get("cleanupPhases") if isinstance(cleanup.get("cleanupPhases"), dict) else {}
     remaining = process_cleanup.get("remaining") if isinstance(process_cleanup, dict) else []
     remaining_count = len(remaining) if isinstance(remaining, list) else 0
     _record_launcher_event(
@@ -2022,6 +2202,10 @@ def request_launcher_runtime_shutdown() -> LauncherCommandResponse:
             "terminatedCount": len(process_cleanup.get("terminated") or []) if isinstance(process_cleanup, dict) else 0,
             "remainingCount": remaining_count,
             "forceStoppedWorkRunCount": len(cleanup.get("forceStoppedWorkRuns") or []),
+            "cleanupTimingsMs": dict(cleanup_timings_ms),
+            "cleanupPhases": dict(cleanup_phases),
+            "usedFallback": bool(cleanup_phases.get("usedFallback")),
+            "fallbackReason": str(cleanup_phases.get("fallbackReason") or ""),
         },
     )
     return {

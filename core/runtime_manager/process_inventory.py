@@ -226,6 +226,28 @@ def managed_browser_process_payload(
     }
 
 
+def managed_browser_pid_matches_profile(
+    pid: int,
+    *,
+    profile_dir: Path | str,
+) -> bool:
+    """Return True when one live browser PID belongs to the managed profile."""
+
+    if psutil is None or int(pid or 0) <= 0:
+        return False
+    profile_marker = _profile_marker_text(profile_dir)
+    if not profile_marker:
+        return False
+    try:
+        info = dict(psutil.Process(int(pid)).as_dict(["pid", "name", "cmdline"]))
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return False
+    if not _looks_like_edge_process(info):
+        return False
+    command_line = _command_line_text(info.get("cmdline"))
+    return _command_line_has_profile_marker(command_line, profile_marker)
+
+
 def _expand_excluded_process_tree(processes: list[dict[str, Any]], excluded: set[int]) -> set[int]:
     expanded = set(excluded)
     children_by_parent: dict[int, list[int]] = {}
@@ -467,7 +489,9 @@ def terminate_workbench_processes(
         kinds.add("runtime_manager_daemon")
     candidate_scan_started = time.perf_counter()
     known = {int(pid) for pid in (known_pids or []) if int(pid) > 0}
+    candidate_scan = "inventory"
     if known:
+        candidate_scan = "known_pids"
         repo_candidates, target_pids = _expand_known_workbench_pids(
             known,
             project_root=project_root,
@@ -475,10 +499,23 @@ def terminate_workbench_processes(
         )
         if include_runtime_manager:
             manager_candidates = [
-                item
-                for item in list_repo_runtime_processes(project_root=project_root, exclude_pids=excluded)
-                if item.kind == "runtime_manager_daemon" and item.pid not in excluded
+                item for item in repo_candidates if item.kind == "runtime_manager_daemon" and item.pid not in excluded
             ]
+            if not manager_candidates:
+                for pid in sorted(known):
+                    if pid in excluded:
+                        continue
+                    classified = repo_runtime_process_for_pid(pid, project_root=project_root)
+                    if classified is not None and classified.kind == "runtime_manager_daemon":
+                        manager_candidates.append(classified)
+                        break
+            if not manager_candidates:
+                candidate_scan = "inventory"
+                manager_candidates = [
+                    item
+                    for item in list_repo_runtime_processes(project_root=project_root, exclude_pids=excluded)
+                    if item.kind == "runtime_manager_daemon" and item.pid not in excluded
+                ]
             existing_pids = {item.pid for item in repo_candidates}
             repo_candidates.extend(item for item in manager_candidates if item.pid not in existing_pids)
             target_pids.update(_target_process_tree_pids(manager_candidates, excluded=excluded))
@@ -511,6 +548,7 @@ def terminate_workbench_processes(
             "remaining": [],
             "repoCandidates": [item.to_dict() for item in repo_candidates],
             "browserCandidates": browser_candidates,
+            "candidateScan": candidate_scan,
             "timingsMs": timings_ms,
             "processCounts": {
                 "repoCandidates": len(repo_candidates),
@@ -608,6 +646,7 @@ def terminate_workbench_processes(
         "repoCandidates": [item.to_dict() for item in repo_candidates],
         "browserCandidates": browser_candidates,
         "browserProfileDir": profile_text,
+        "candidateScan": candidate_scan,
         "remainingCheck": "inventory" if verify_remaining_with_inventory else "target_processes",
         "timingsMs": timings_ms,
         "processCounts": {

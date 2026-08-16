@@ -1,4 +1,5 @@
 import json
+import os
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -3681,12 +3682,22 @@ def test_terminate_managed_launcher_subtree_only_clears_the_terminated_daemon_pi
     from core.runtime_manager import daemon, process_inventory
 
     cleared = []
+    terminate_calls: list[dict[str, object]] = []
+
+    def fake_terminate(**kwargs):
+        terminate_calls.append(dict(kwargs))
+        return {"terminated": [202], "remaining": [], "remainingCheck": "target_processes"}
+
     monkeypatch.setattr(launcher_service, "load_pid", lambda: 202)
+    monkeypatch.setattr(launcher_service, "_runtime_manager_state", lambda: {"managerPid": 202, "daemonRunning": True})
+    monkeypatch.setattr(launcher_service, "_observed_workbench", lambda: {})
     monkeypatch.setattr(
-        process_inventory,
-        "terminate_workbench_processes",
-        lambda **_kwargs: {"terminated": [202], "remaining": []},
+        launcher_service,
+        "_workbench_payload",
+        lambda **_kwargs: {"backendPid": 0, "browserManaged": True},
     )
+    monkeypatch.setattr(launcher_service, "_collect_trusted_launcher_cleanup_pids", lambda **_kwargs: set())
+    monkeypatch.setattr(process_inventory, "terminate_workbench_processes", fake_terminate)
     monkeypatch.setattr(
         daemon,
         "_mark_persistent_active_work_runs_force_stopped",
@@ -3694,12 +3705,291 @@ def test_terminate_managed_launcher_subtree_only_clears_the_terminated_daemon_pi
     )
     monkeypatch.setattr(launcher_service, "clear_pid", lambda expected_pid=None: cleared.append(expected_pid))
 
-    launcher_service._terminate_managed_launcher_subtree(
+    result = launcher_service._terminate_managed_launcher_subtree(
         include_runtime_manager=True,
         reason="desktop_shell_quit",
     )
 
     assert cleared == [202]
+    assert terminate_calls
+    assert terminate_calls[0]["verify_remaining_with_inventory"] is True
+    assert result["cleanupPhases"]["usedFallback"] is True
+
+
+def _launcher_fast_cleanup_state(*, backend_pid: int = 4242, manager_pid: int = 0) -> tuple[dict, dict]:
+    runtime_state = {"managerPid": manager_pid, "daemonRunning": bool(manager_pid)}
+    workbench = {
+        "backendPid": backend_pid,
+        "backendLaunchPid": backend_pid,
+        "backendPort": 8002,
+        "backendPortListening": False,
+        "browserManaged": True,
+        "browserProfileDir": "",
+    }
+    return runtime_state, workbench
+
+
+def test_terminate_managed_launcher_subtree_uses_known_pids_without_inventory_scan(monkeypatch):
+    from core.runtime_manager import daemon, process_inventory
+
+    inventory_calls = {"count": 0}
+    terminate_calls: list[dict[str, object]] = []
+
+    def fail_inventory(**kwargs):
+        inventory_calls["count"] += 1
+        raise AssertionError("fast launcher cleanup must not scan every process")
+
+    def fake_terminate(**kwargs):
+        terminate_calls.append(dict(kwargs))
+        if kwargs.get("known_pids"):
+            return {
+                "terminated": list(kwargs["known_pids"]),
+                "remaining": [],
+                "remainingCheck": "target_processes",
+                "candidateScan": "known_pids",
+            }
+        raise AssertionError("unexpected inventory terminate call")
+
+    runtime_state, workbench = _launcher_fast_cleanup_state()
+    monkeypatch.setattr(launcher_service, "_runtime_manager_state", lambda: runtime_state)
+    monkeypatch.setattr(launcher_service, "_observed_workbench", lambda: workbench)
+    monkeypatch.setattr(launcher_service, "_workbench_payload", lambda **_kwargs: workbench)
+    monkeypatch.setattr(launcher_service, "_collect_trusted_launcher_cleanup_pids", lambda **_kwargs: {4242})
+    monkeypatch.setattr(process_inventory, "list_repo_runtime_processes", fail_inventory)
+    monkeypatch.setattr(process_inventory, "terminate_workbench_processes", fake_terminate)
+    monkeypatch.setattr(
+        daemon,
+        "_mark_persistent_active_work_runs_force_stopped",
+        lambda _reason: [],
+    )
+    monkeypatch.setattr(launcher_service, "load_pid", lambda: 0)
+    monkeypatch.setattr(launcher_service, "clear_pid", lambda expected_pid=None: None)
+
+    result = launcher_service._terminate_managed_launcher_subtree(
+        include_runtime_manager=False,
+        reason="launcher_start_button",
+    )
+
+    assert inventory_calls["count"] == 0
+    assert terminate_calls == [
+        {
+            "exclude_pids": launcher_service._managed_process_exclude_pids(),
+            "known_pids": [4242],
+            "browser_profile_dir": "",
+            "include_runtime_manager": False,
+            "timeout_seconds": launcher_service._FAST_LAUNCHER_REAP_TIMEOUT_SECONDS,
+            "verify_remaining_with_inventory": False,
+        }
+    ]
+    assert result["cleanupPhases"]["fastPathAttempted"] is True
+    assert result["cleanupPhases"]["usedFallback"] is False
+
+
+def test_terminate_managed_launcher_subtree_falls_back_when_no_known_pids(monkeypatch):
+    from core.runtime_manager import daemon, process_inventory
+
+    terminate_calls: list[dict[str, object]] = []
+
+    def fake_terminate(**kwargs):
+        terminate_calls.append(dict(kwargs))
+        return {"terminated": [101], "remaining": [], "remainingCheck": "inventory", "candidateScan": "inventory"}
+
+    monkeypatch.setattr(launcher_service, "_runtime_manager_state", lambda: {"managerPid": 0, "daemonRunning": False})
+    monkeypatch.setattr(launcher_service, "_observed_workbench", lambda: {})
+    monkeypatch.setattr(launcher_service, "_workbench_payload", lambda **_kwargs: {"browserManaged": True})
+    monkeypatch.setattr(launcher_service, "_collect_trusted_launcher_cleanup_pids", lambda **_kwargs: set())
+    monkeypatch.setattr(process_inventory, "terminate_workbench_processes", fake_terminate)
+    monkeypatch.setattr(
+        daemon,
+        "_mark_persistent_active_work_runs_force_stopped",
+        lambda _reason: [],
+    )
+    monkeypatch.setattr(launcher_service, "load_pid", lambda: 0)
+
+    result = launcher_service._terminate_managed_launcher_subtree(
+        include_runtime_manager=False,
+        reason="launcher_start_button",
+    )
+
+    assert len(terminate_calls) == 1
+    assert terminate_calls[0]["verify_remaining_with_inventory"] is True
+    assert "known_pids" not in terminate_calls[0]
+    assert result["cleanupPhases"]["usedFallback"] is True
+    assert result["cleanupPhases"]["fallbackReason"] == "no_trusted_known_pids"
+
+
+def test_terminate_managed_launcher_subtree_falls_back_when_fast_cleanup_leaves_remaining(monkeypatch):
+    from core.runtime_manager import daemon, process_inventory
+
+    terminate_calls: list[dict[str, object]] = []
+
+    def fake_terminate(**kwargs):
+        terminate_calls.append(dict(kwargs))
+        if kwargs.get("known_pids"):
+            return {"terminated": [], "remaining": [{"pid": 4242}], "remainingCheck": "target_processes"}
+        return {"terminated": [4242], "remaining": [], "remainingCheck": "inventory"}
+
+    runtime_state, workbench = _launcher_fast_cleanup_state()
+    monkeypatch.setattr(launcher_service, "_runtime_manager_state", lambda: runtime_state)
+    monkeypatch.setattr(launcher_service, "_observed_workbench", lambda: workbench)
+    monkeypatch.setattr(launcher_service, "_workbench_payload", lambda **_kwargs: workbench)
+    monkeypatch.setattr(launcher_service, "_collect_trusted_launcher_cleanup_pids", lambda **_kwargs: {4242})
+    monkeypatch.setattr(process_inventory, "terminate_workbench_processes", fake_terminate)
+    monkeypatch.setattr(
+        daemon,
+        "_mark_persistent_active_work_runs_force_stopped",
+        lambda _reason: [],
+    )
+    monkeypatch.setattr(launcher_service, "load_pid", lambda: 0)
+
+    result = launcher_service._terminate_managed_launcher_subtree(
+        include_runtime_manager=False,
+        reason="launcher_start_button",
+    )
+
+    assert len(terminate_calls) == 2
+    assert terminate_calls[0]["verify_remaining_with_inventory"] is False
+    assert terminate_calls[1]["verify_remaining_with_inventory"] is True
+    assert result["cleanupPhases"]["usedFallback"] is True
+    assert result["cleanupPhases"]["fallbackReason"] == "remaining_processes_after_known_pid_cleanup"
+
+
+def test_terminate_managed_launcher_subtree_falls_back_when_backend_port_still_listening(monkeypatch):
+    from core.runtime_manager import daemon, process_inventory
+
+    terminate_calls: list[dict[str, object]] = []
+
+    def fake_terminate(**kwargs):
+        terminate_calls.append(dict(kwargs))
+        if kwargs.get("known_pids"):
+            return {"terminated": [4242], "remaining": [], "remainingCheck": "target_processes"}
+        return {"terminated": [4242], "remaining": [], "remainingCheck": "inventory"}
+
+    runtime_state, workbench = _launcher_fast_cleanup_state()
+    workbench["backendPortListening"] = True
+    monkeypatch.setattr(launcher_service, "_runtime_manager_state", lambda: runtime_state)
+    monkeypatch.setattr(launcher_service, "_observed_workbench", lambda: workbench)
+    monkeypatch.setattr(launcher_service, "_workbench_payload", lambda **_kwargs: workbench)
+    monkeypatch.setattr(launcher_service, "_collect_trusted_launcher_cleanup_pids", lambda **_kwargs: {4242})
+    monkeypatch.setattr(launcher_service, "_launcher_backend_port_still_listening", lambda _workbench: True)
+    monkeypatch.setattr(process_inventory, "terminate_workbench_processes", fake_terminate)
+    monkeypatch.setattr(
+        daemon,
+        "_mark_persistent_active_work_runs_force_stopped",
+        lambda _reason: [],
+    )
+    monkeypatch.setattr(launcher_service, "load_pid", lambda: 0)
+
+    result = launcher_service._terminate_managed_launcher_subtree(
+        include_runtime_manager=False,
+        reason="launcher_start_button",
+    )
+
+    assert len(terminate_calls) == 2
+    assert result["cleanupPhases"]["fallbackReason"] == "backend_port_still_listening"
+
+
+def test_collect_trusted_launcher_cleanup_pids_excludes_current_and_foreign_pids(monkeypatch):
+    from core.runtime_manager import process_inventory
+
+    current_pid = os.getpid()
+    monkeypatch.setattr(
+        process_inventory,
+        "repo_runtime_process_for_pid",
+        lambda pid, project_root=None: process_inventory.RuntimeProcess(
+            pid=int(pid),
+            parent_pid=1,
+            kind="managed_workbench_backend",
+            name="pythonw.exe",
+            command_line="pythonw scripts/web_workbench.py --managed-by-launcher",
+            cwd=str(process_inventory.PROJECT_ROOT),
+            port=8002,
+        )
+        if int(pid) == 9001
+        else None,
+    )
+    monkeypatch.setattr(launcher_service, "is_runtime_manager_process", lambda pid: int(pid) == 7001)
+
+    known = launcher_service._collect_trusted_launcher_cleanup_pids(
+        include_runtime_manager=True,
+        runtime_state={"managerPid": current_pid},
+        workbench={
+            "backendPid": current_pid,
+            "backendLaunchPid": 9001,
+            "browserWindowPid": 8001,
+            "browserManaged": True,
+            "browserProfileDir": "/tmp/profile",
+        },
+    )
+
+    assert current_pid not in known
+    assert 9001 in known
+    assert 8001 not in known
+    assert 7001 not in known
+
+
+def test_request_launcher_start_uses_fast_cleanup_path(monkeypatch):
+    cleanup_calls: list[dict[str, object]] = []
+
+    def fake_cleanup(**kwargs):
+        cleanup_calls.append(dict(kwargs))
+        return {
+            "processCleanup": {"terminated": [4242], "remaining": []},
+            "cleanupPhases": {"usedFallback": False, "fastPathAttempted": True},
+        }
+
+    monkeypatch.setattr(launcher_service, "_terminate_managed_launcher_subtree", fake_cleanup)
+    monkeypatch.setattr(launcher_service, "ensure_runtime_manager_daemon_alive", lambda: {"ensured": True})
+    monkeypatch.setattr(
+        launcher_service,
+        "submit_command",
+        lambda command_type, args=None, requested_by="": {"commandId": "cmd-fast-start"},
+    )
+    monkeypatch.setattr(launcher_service, "_record_launcher_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(launcher_service, "_record_launcher_prequeue_timing", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(launcher_service, "_electron_main_orchestrates_windows", lambda: True)
+
+    response = launcher_service.request_launcher_start()
+
+    assert response["commandId"] == "cmd-fast-start"
+    assert cleanup_calls == [{"include_runtime_manager": False, "reason": "launcher_start_button"}]
+
+
+def test_request_launcher_runtime_shutdown_records_cleanup_timing_fields(monkeypatch):
+    events: list[tuple[str, dict]] = []
+
+    monkeypatch.setattr(
+        launcher_service,
+        "_terminate_managed_launcher_subtree",
+        lambda **kwargs: {
+            "processCleanup": {"terminated": [11, 22], "remaining": []},
+            "forceStoppedWorkRuns": [],
+            "cleanupTimingsMs": {
+                "collectKnownPidsMs": 1.2,
+                "knownPidCleanupMs": 3.4,
+                "totalMs": 4.6,
+            },
+            "cleanupPhases": {
+                "fastPathAttempted": True,
+                "usedFallback": False,
+                "fallbackReason": "",
+                "knownPidCount": 2,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        launcher_service,
+        "_record_launcher_event",
+        lambda event_code, **kwargs: events.append((event_code, kwargs)),
+    )
+
+    response = launcher_service.request_launcher_runtime_shutdown()
+
+    assert response["accepted"] is True
+    completed = next(fields for code, fields in events if code == "launcher.runtime.shutdown.completed")
+    assert completed["fields"]["cleanupTimingsMs"]["knownPidCleanupMs"] == 3.4
+    assert completed["fields"]["cleanupPhases"]["knownPidCount"] == 2
+    assert completed["fields"]["usedFallback"] is False
 
 
 def test_request_launcher_runtime_shutdown_kills_runtime_manager(monkeypatch):

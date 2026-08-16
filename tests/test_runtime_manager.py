@@ -6075,6 +6075,80 @@ def test_terminate_workbench_processes_uses_known_pids_without_inventory_scan(mo
     assert result["requested"] == [4242, 4243]
     assert result["terminated"] == [4242, 4243]
     assert result["processCounts"]["targetProcesses"] == 2
+    assert result["candidateScan"] == "known_pids"
+
+
+def test_terminate_workbench_processes_known_pids_include_runtime_manager_without_inventory_scan(monkeypatch, tmp_path):
+    class FakeProc:
+        def __init__(self, pid, children=()):
+            self.pid = pid
+            self._children = list(children)
+            self.terminated = False
+
+        def children(self, recursive=True):
+            return list(self._children)
+
+        def parent(self):
+            return None
+
+        def terminate(self):
+            self.terminated = True
+
+        def kill(self):
+            return None
+
+        def name(self):
+            return f"proc-{self.pid}"
+
+    root = tmp_path / "repo"
+    live = {4242: FakeProc(4242), 5151: FakeProc(5151)}
+    inventory_calls = {"count": 0}
+
+    def fail_inventory(**kwargs):
+        inventory_calls["count"] += 1
+        raise AssertionError("known runtime-manager pid must not trigger full inventory scan")
+
+    def classify_pid(pid, project_root=None):
+        if int(pid) == 4242:
+            return process_inventory.RuntimeProcess(
+                pid=4242,
+                parent_pid=1,
+                kind="managed_workbench_backend",
+                name="pythonw.exe",
+                command_line="pythonw scripts/web_workbench.py --managed-by-launcher",
+                cwd=str(root),
+                port=8002,
+            )
+        if int(pid) == 5151:
+            return process_inventory.RuntimeProcess(
+                pid=5151,
+                parent_pid=1,
+                kind="runtime_manager_daemon",
+                name="pythonw.exe",
+                command_line="pythonw -m core.runtime_manager.cli daemon",
+                cwd=str(root),
+                port=0,
+            )
+        return None
+
+    monkeypatch.setattr(process_inventory, "list_repo_runtime_processes", fail_inventory)
+    monkeypatch.setattr(process_inventory, "repo_runtime_process_for_pid", classify_pid)
+    monkeypatch.setattr(process_inventory.psutil, "Process", lambda pid: live[int(pid)])
+    monkeypatch.setattr(process_inventory, "_live_processes", lambda pids: [live[pid] for pid in sorted(pids) if pid in live])
+    monkeypatch.setattr(process_inventory.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(process_inventory.psutil, "wait_procs", lambda processes, timeout: (list(processes), []))
+
+    result = process_inventory.terminate_workbench_processes(
+        project_root=root,
+        known_pids=[4242, 5151],
+        include_runtime_manager=True,
+        timeout_seconds=0.1,
+        verify_remaining_with_inventory=False,
+    )
+
+    assert inventory_calls["count"] == 0
+    assert result["candidateScan"] == "known_pids"
+    assert result["requested"] == [4242, 5151]
 
 
 @pytest.fixture
