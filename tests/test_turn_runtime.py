@@ -49,3 +49,35 @@ def test_whitespace_only_cache_scope_is_omitted_from_partition_and_env():
     )
     assert "VIBELUTION_TURN_CACHE_SCOPE" not in env
     assert env["VIBELUTION_TURN_SESSION_ID"] == "session-a"
+
+
+def test_prepare_accepts_mapping_json_and_non_mapping_without_crash():
+    runtime = prepare_agent_turn_runtime(
+        {
+            "mode": b"chat",
+            "runKind": "chat_turn",
+            "runId": "turn-json",
+            "sessionId": "session-b",
+            "agentId": "agent-b",
+        }
+    )
+    assert runtime.mode == "chat"
+    assert runtime.run_kind == "chat_turn"
+    assert runtime.run_id == "turn-json"
+    assert runtime.session_id == "session-b"
+    assert runtime.agent_id == "agent-b"
+
+    from_json = prepare_agent_turn_runtime(
+        '{"mode": "chat", "run_kind": "chat_turn", "session_id": "session-c"}'
+    )
+    assert from_json.mode == "chat"
+    assert from_json.run_kind == "chat_turn"
+    assert from_json.session_id == "session-c"
+
+    from_bytes = prepare_agent_turn_runtime(bytearray(b'{"mode": "chat", "runKind": "chat_turn"}'))
+    assert from_bytes.mode == "chat"
+    assert prepare_agent_turn_runtime(["not-a-map"]).mode == "self_evolution"
+    env = runtime_metadata_env({"mode": "chat", "run_kind": "chat_turn", "session_id": "session-d"})
+    assert env["VIBELUTION_TURN_MODE"] == "chat"
+    assert env["VIBELUTION_TURN_SESSION_ID"] == "session-d"
+    assert runtime_metadata_env(None) == {}
