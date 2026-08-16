@@ -170,6 +170,8 @@
 
 ## Config / Provider / Model / Theme
 
+**30 秒路由（operator config / provider 草稿 / 模型引用 / 主测）：** [`config_services.md`](config_services.md)
+
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
 | `avatar_image_service.py` | User avatar image storage helpers for the web workbench. | — | `config.py` | `test_web_config_routes.py` |
