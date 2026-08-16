@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass
 from typing import Any, Mapping
 
@@ -36,8 +37,8 @@ class AgentTurnRuntime:
 
 
 def _clean(value: Any, *, fallback: str = "") -> str:
-    if isinstance(value, bytes):
-        value = value.decode("utf-8", errors="replace")
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
     if isinstance(value, Mapping) or isinstance(value, (list, tuple, set)):
         return fallback
     if isinstance(value, bool) or value is None:
@@ -48,10 +49,47 @@ def _clean(value: Any, *, fallback: str = "") -> str:
     return text or fallback
 
 
-def _short_hash(value: str) -> str:
-    if not value:
+def _short_hash(value: Any) -> str:
+    text = _clean(value)
+    if not text:
         return ""
-    return hashlib.sha256(value.encode("utf-8", errors="ignore")).hexdigest()[:12]
+    return hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()[:12]
+
+
+def _as_request(request: Any) -> AgentTurnRuntimeRequest:
+    if isinstance(request, AgentTurnRuntimeRequest):
+        return request
+    if isinstance(request, (bytes, bytearray, memoryview)):
+        request = bytes(request).decode("utf-8", errors="replace")
+    if isinstance(request, str):
+        text = request.strip()
+        if not text:
+            request = {}
+        else:
+            try:
+                request = json.loads(text)
+            except json.JSONDecodeError:
+                request = {}
+    if not isinstance(request, Mapping):
+        request = {}
+
+    def pick(*keys: str) -> Any:
+        for key in keys:
+            if key in request:
+                return request.get(key)
+        return ""
+
+    return AgentTurnRuntimeRequest(
+        mode=pick("mode"),
+        run_kind=pick("run_kind", "runKind"),
+        run_id=pick("run_id", "runId"),
+        session_id=pick("session_id", "sessionId"),
+        agent_id=pick("agent_id", "agentId"),
+        llm_slot=pick("llm_slot", "llmSlot"),
+        model_id=pick("model_id", "modelId"),
+        cache_scope=pick("cache_scope", "cacheScope"),
+        workspace_path=pick("workspace_path", "workspacePath"),
+    )
 
 
 def build_prompt_cache_partition(
@@ -85,7 +123,8 @@ def build_prompt_cache_partition(
     return "|".join(parts)
 
 
-def prepare_agent_turn_runtime(request: AgentTurnRuntimeRequest) -> AgentTurnRuntime:
+def prepare_agent_turn_runtime(request: AgentTurnRuntimeRequest | Mapping[str, Any] | str | bytes | None) -> AgentTurnRuntime:
+    request = _as_request(request)
     mode = _clean(request.mode, fallback="self_evolution")
     run_kind = _clean(request.run_kind, fallback=mode)
     run_id = _clean(request.run_id)
@@ -132,7 +171,11 @@ def prepare_agent_turn_runtime(request: AgentTurnRuntimeRequest) -> AgentTurnRun
     )
 
 
-def runtime_metadata_env(runtime: AgentTurnRuntime) -> dict[str, str]:
+def runtime_metadata_env(runtime: AgentTurnRuntime | Mapping[str, Any] | None) -> dict[str, str]:
+    if runtime is None:
+        return {}
+    if not isinstance(runtime, AgentTurnRuntime):
+        runtime = prepare_agent_turn_runtime(runtime)
     env = {
         "VIBELUTION_TURN_MODE": runtime.mode,
         "VIBELUTION_TURN_RUN_KIND": runtime.run_kind,
