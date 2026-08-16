@@ -17,6 +17,7 @@ import {
   type AgentInstance,
   type ToolRegistryPayload,
 } from "../../api/types";
+import { startUserAction } from "../../app/userActionTelemetry";
 import { VButton, VDialog } from "../../components/vui";
 import { useShellI18n } from "../../i18n/useShellI18n";
 import { AgentCreatePanel, type AgentCreatePanelCopy } from "../AgentCreatePanel";
@@ -227,7 +228,11 @@ export function AgentCreateWizardDialog({
 
   const createMutation = useMutation({
     mutationFn: (nextDraft: AgentCreateDraft) => createAgent(createAgentPayload(nextDraft, toolBundles)),
-    onSuccess: (agent) => {
+    onMutate: () => ({
+      telemetry: startUserAction("agent_create", {}),
+    }),
+    onSuccess: (agent, _variables, context) => {
+      context?.telemetry?.succeeded({ agentId: agent.agentId });
       setCreatedAgent(agent);
       setStartConversationError("");
       queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (current) => [
@@ -240,6 +245,9 @@ export function AgentCreateWizardDialog({
         queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() }),
       ]);
       void chatWorkspaceCache.afterAgentWorkspaceChanged();
+    },
+    onError: (error, _variables, context) => {
+      context?.telemetry?.failed(error);
     },
   });
 
