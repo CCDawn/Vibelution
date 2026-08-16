@@ -39,7 +39,7 @@ def _coerce_bool(value: Any, default: bool) -> bool:
         return default
     if isinstance(value, (bytes, bytearray, memoryview)):
         value = bytes(value).decode("utf-8", errors="replace")
-    if isinstance(value, (int, float)):
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
         return bool(value)
     text = str(value).strip().lower()
     if not text:
@@ -49,22 +49,6 @@ def _coerce_bool(value: Any, default: bool) -> bool:
     if text in {"0", "false", "no", "off", "disabled"}:
         return False
     return default
-
-
-def _as_mapping(value: Any) -> Dict[str, Any]:
-    if isinstance(value, (bytes, bytearray, memoryview)):
-        value = bytes(value).decode("utf-8", errors="replace")
-    if isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return {}
-        try:
-            value = json.loads(text)
-        except json.JSONDecodeError:
-            return {}
-    if isinstance(value, Mapping):
-        return dict(value)
-    return {}
 
 
 def _maybe_json(value: Any) -> Any:
@@ -80,12 +64,45 @@ def _maybe_json(value: Any) -> Any:
     return value
 
 
+def _as_mapping(value: Any) -> Dict[str, Any]:
+    value = _maybe_json(value)
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {}
+
+
+def _mapping_get(mapping: Mapping[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in mapping:
+            return mapping.get(key)
+    return None
+
+
+def _object_field(value: Any, *names: str) -> Any:
+    mapped = _as_mapping(value)
+    if mapped:
+        for name in names:
+            if name in mapped:
+                return mapped.get(name)
+    for name in names:
+        if hasattr(value, name):
+            return getattr(value, name)
+    return None
+
+
 def _coerce_message_list(value: Any) -> list:
     value = _maybe_json(value)
     if value is None or isinstance(value, (str, bytes, bytearray, memoryview)):
         return []
     if isinstance(value, Mapping):
-        return [dict(value)]
+        nested = value.get("messages")
+        if nested is None:
+            nested = value.get("items")
+        if nested is None:
+            nested = value.get("history")
+        if nested is not None:
+            return _coerce_message_list(nested)
+        return [dict(value)] if value else []
     try:
         return list(value)
     except TypeError:
@@ -93,7 +110,9 @@ def _coerce_message_list(value: Any) -> list:
 
 
 def _coerce_positive_int(value: Any, *, default: int = 1) -> int:
-    if isinstance(value, bool) or value is None:
+    if isinstance(value, bool):
+        return 0
+    if value is None:
         parsed = 0
     else:
         if isinstance(value, (bytes, bytearray, memoryview)):
@@ -121,7 +140,7 @@ def _llm_error_details(error: BaseException) -> Dict[str, Any]:
 def _invocation_metadata(invocation_context: Any) -> Dict[str, Any]:
     if invocation_context is None:
         return {}
-    return _as_mapping(getattr(invocation_context, "metadata", None))
+    return _as_mapping(_object_field(invocation_context, "metadata"))
 
 
 GetUiFn = Callable[[], Any]
@@ -311,9 +330,12 @@ def invoke_agent_llm_turn(
             except Exception as e:
                 llm_error_details = _llm_error_details(e)
                 safe_projection_details = _safe_llm_error_diagnostic_details(llm_error_details)
-                reported_attempt = _coerce_positive_int(llm_error_details.get("attempt"), default=1)
+                reported_attempt = _coerce_positive_int(
+                    _mapping_get(llm_error_details, "attempt", "attemptIndex"),
+                    default=1,
+                )
                 reported_max_attempts = _coerce_positive_int(
-                    llm_error_details.get("max_attempts"),
+                    _mapping_get(llm_error_details, "max_attempts", "maxAttempts"),
                     default=reported_attempt,
                 )
                 recovery = hooks.plan_recovery(
@@ -333,7 +355,9 @@ def invoke_agent_llm_turn(
                 user_msg = _coerce_text(recovery.user_message)
                 stop_reason = (
                     hooks.current_stop_reason()
-                    or _coerce_text(llm_error_details.get("stop_reason")).strip()
+                    or _coerce_text(
+                        _mapping_get(llm_error_details, "stop_reason", "stopReason")
+                    ).strip()
                 )
                 if category == "cancelled" and stop_reason:
                     hooks.record_scene_event(
@@ -358,9 +382,13 @@ def invoke_agent_llm_turn(
                 except Exception:
                     streaming_enabled_for_failed_attempt = False
                 provider_stream_retry_exhausted = _coerce_bool(
-                    llm_error_details.get("retry_budget_exhausted"),
+                    _mapping_get(
+                        llm_error_details, "retry_budget_exhausted", "retryBudgetExhausted"
+                    ),
                     False,
-                ) or reported_attempt >= reported_max_attempts
+                ) or (
+                    reported_attempt > 0 and reported_attempt >= reported_max_attempts
+                )
                 result.last_error_category = category
                 result.last_error_retryable = is_retryable
                 result.last_recovery_action = recovery.action
@@ -387,7 +415,11 @@ def invoke_agent_llm_turn(
                     "route_attempt": route_attempt,
                     "route_id": _llm_effective_route_id(llm_for_turn),
                     "invocation_id": _coerce_text(
-                        _invocation_metadata(invocation_context).get("invocationId")
+                        _mapping_get(
+                            _invocation_metadata(invocation_context),
+                            "invocationId",
+                            "invocation_id",
+                        )
                     ),
                     "model": getattr(getattr(hooks.config, "llm", None), "model_name", ""),
                     "provider": getattr(getattr(hooks.config, "llm", None), "provider", ""),
@@ -422,7 +454,11 @@ def invoke_agent_llm_turn(
                 failed_route = llm_for_turn
                 failed_route_id = _llm_effective_route_id(failed_route)
                 failed_invocation_id = _coerce_text(
-                    _invocation_metadata(invocation_context).get("invocationId")
+                    _mapping_get(
+                        _invocation_metadata(invocation_context),
+                        "invocationId",
+                        "invocation_id",
+                    )
                 )
                 turn_trace_fields = {
                     key: trace_fields[key]

@@ -538,3 +538,52 @@ def test_adapter_does_not_fallback_when_retryable_is_false_string():
     assert llm_calls == ["primary"]
     assert result.payload is None
     assert result.last_error_retryable is False
+
+
+def test_sanitize_llm_turn_messages_unwraps_history_envelope():
+    cleaned = sanitize_llm_turn_messages(
+        b'{"messages": [{"role": "system", "content": "stable"}]}'
+    )
+    assert cleaned[0]["role"] == "system"
+    assert cleaned[0]["content"] == "stable"
+    assert sanitize_llm_turn_messages("not-a-history") == []
+
+
+def test_adapter_parses_camelcase_error_details_without_treating_true_as_attempt_one():
+    def invoke_camel(*_args, **_kwargs):
+        raise LLMError(
+            "server_error",
+            "boom",
+            retryable=False,
+            details='{"attempt": 2, "maxAttempts": 5, "retryBudgetExhausted": "false"}',
+        )
+
+    camel = invoke_agent_llm_turn(
+        messages=[AIMessage(content="hello")],
+        hooks=_adapter_hooks(
+            invoke_outcome=invoke_camel,
+            build_invocation_context=lambda **_kwargs: SimpleNamespace(
+                metadata=b'{"invocationId": "inv-json"}',
+                to_metadata=lambda client=None: {"invocationId": "other"},
+            ),
+        ),
+    )
+    assert camel.last_failure_attempts == 2
+    assert camel.last_failure_max_attempts == 5
+    assert camel.last_error_details["provider_stream_retry_exhausted"] is False
+    assert camel.last_error_details["invocation_id"] == "inv-json"
+
+    def invoke_true_attempt(*_args, **_kwargs):
+        raise LLMError(
+            "server_error",
+            "boom",
+            retryable=False,
+            details={"attempt": True, "max_attempts": 5},
+        )
+
+    truthy = invoke_agent_llm_turn(
+        messages=[AIMessage(content="hello")],
+        hooks=_adapter_hooks(invoke_outcome=invoke_true_attempt),
+    )
+    assert truthy.last_failure_attempts == 0
+    assert truthy.last_error_details["provider_stream_retry_exhausted"] is False
