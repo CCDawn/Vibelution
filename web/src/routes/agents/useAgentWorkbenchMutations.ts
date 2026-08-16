@@ -129,6 +129,7 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
     mutationFn: (payload: { agentId: string }) =>
       archiveAgent(payload.agentId),
     onMutate: async (payload) => {
+      const telemetry = startUserAction("agent_archive", { agentId: payload.agentId }, { destructive: true });
       await queryClient.cancelQueries({ queryKey: queryKeys.agentConfigWorkspace() });
       const previousWorkspace = queryClient.getQueryData<AgentConfigWorkspace>(queryKeys.agentConfigWorkspace());
       const previousSelectedAgentId = options.getSelectedAgentId();
@@ -142,9 +143,10 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
       }
       options.setSelectedAgentId("");
       options.setActivePane("overview");
-      return { previousWorkspace, previousSelectedAgentId, previousActivePane };
+      return { previousWorkspace, previousSelectedAgentId, previousActivePane, telemetry };
     },
-    onSuccess: (agent) => {
+    onSuccess: (agent, _variables, context) => {
+      context?.telemetry?.succeeded({ agentId: agent.agentId });
       queryClient.setQueryData<AgentConfigWorkspace | undefined>(
         queryKeys.agentConfigWorkspace(),
         (current) => options.archivedWorkspaceCache(current, agent),
@@ -157,7 +159,8 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
       });
       void options.chatWorkspaceCache.afterAgentArchived();
     },
-    onError: (error, _variables, context) => {
+    onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, { agentId: variables.agentId });
       if (context?.previousWorkspace) {
         queryClient.setQueryData(queryKeys.agentConfigWorkspace(), context.previousWorkspace);
       }
@@ -172,6 +175,7 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
     mutationFn: (payload: { agentId: string }) =>
       purgeArchivedAgent(payload.agentId),
     onMutate: async (payload) => {
+      const telemetry = startUserAction("agent_purge", { agentId: payload.agentId }, { destructive: true });
       await queryClient.cancelQueries({ queryKey: queryKeys.agentConfigWorkspace() });
       const previousWorkspace = queryClient.getQueryData<AgentConfigWorkspace>(queryKeys.agentConfigWorkspace());
       const previousSelectedAgentId = options.getSelectedAgentId();
@@ -182,9 +186,10 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
       );
       options.setSelectedAgentId("");
       options.setActivePane("overview");
-      return { previousWorkspace, previousSelectedAgentId, previousActivePane };
+      return { previousWorkspace, previousSelectedAgentId, previousActivePane, telemetry };
     },
-    onSuccess: (result) => {
+    onSuccess: (result, _variables, context) => {
+      context?.telemetry?.succeeded({ agentId: result.agentId });
       queryClient.setQueryData<AgentConfigWorkspace | undefined>(
         queryKeys.agentConfigWorkspace(),
         (current) => options.purgedWorkspaceCache(current, result.agentId),
@@ -201,7 +206,8 @@ export function useAgentWorkbenchMutations(options: UseAgentWorkbenchMutationsOp
       });
       void options.chatWorkspaceCache.afterAgentArchived();
     },
-    onError: (error, _variables, context) => {
+    onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, { agentId: variables.agentId });
       if (context?.previousWorkspace) {
         queryClient.setQueryData(queryKeys.agentConfigWorkspace(), context.previousWorkspace);
       }

@@ -14,6 +14,7 @@ import {
   restoreMemoryItem,
   updateMemoryItem,
 } from "../../api/memory";
+import { startUserAction } from "../../app/userActionTelemetry";
 import { queryKeys } from "../../api/queryKeys";
 import type {
   AgentProjectMemoryUpdateProposal,
@@ -72,14 +73,31 @@ export function useMemoryItemMutations(options: UseMemoryItemMutationsOptions) {
         content: draft.content,
       });
     },
-    onSuccess: (payload) => {
+    onMutate: (draft) => ({
+      telemetry: startUserAction(
+        draft.mode === "create" ? "memory_item_create" : "memory_item_update",
+        {
+          sectionId: draft.sectionId,
+          itemId: draft.itemId,
+        },
+      ),
+    }),
+    onSuccess: (payload, _variables, context) => {
+      context?.telemetry?.succeeded({
+        sectionId: payload.sectionId,
+        itemId: payload.itemId,
+      });
       options.setEditDraft(null);
       options.setActiveSectionId(payload.sectionId);
       options.setActiveItemId(payload.itemId);
       options.setMutationFeedback({ tone: "success", text: options.copy.mutationDone });
       options.invalidateMemoryQueries(queryClient);
     },
-    onError: (error) => {
+    onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, {
+        sectionId: variables.sectionId,
+        itemId: variables.itemId,
+      });
       options.setMutationFeedback({
         tone: "error",
         text: `${options.copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}`,
@@ -90,13 +108,27 @@ export function useMemoryItemMutations(options: UseMemoryItemMutationsOptions) {
   const deleteMemoryMutation = useMutation({
     mutationFn: async ({ sectionId, itemId }: { sectionId: string; itemId: string }) =>
       deleteMemoryItem<{ sectionId: string; itemId: string }>(sectionId, itemId),
-    onSuccess: (payload) => {
+    onMutate: (variables) => ({
+      telemetry: startUserAction("memory_item_delete", {
+        sectionId: variables.sectionId,
+        itemId: variables.itemId,
+      }, { destructive: true }),
+    }),
+    onSuccess: (payload, _variables, context) => {
+      context?.telemetry?.succeeded({
+        sectionId: payload.sectionId,
+        itemId: payload.itemId,
+      });
       options.setActiveSectionId(payload.sectionId === "user-managed-memory" ? "" : payload.sectionId);
       options.setActiveItemId(payload.sectionId === "user-managed-memory" ? "" : payload.itemId);
       options.setMutationFeedback({ tone: "success", text: options.copy.mutationDone });
       options.invalidateMemoryQueries(queryClient);
     },
-    onError: (error) => {
+    onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, {
+        sectionId: variables.sectionId,
+        itemId: variables.itemId,
+      });
       options.setMutationFeedback({
         tone: "error",
         text: `${options.copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}`,
@@ -107,13 +139,27 @@ export function useMemoryItemMutations(options: UseMemoryItemMutationsOptions) {
   const restoreMemoryMutation = useMutation({
     mutationFn: async ({ sectionId, itemId }: { sectionId: string; itemId: string }) =>
       restoreMemoryItem<{ sectionId: string; itemId: string }>(sectionId, itemId),
-    onSuccess: (payload) => {
+    onMutate: (variables) => ({
+      telemetry: startUserAction("memory_item_restore", {
+        sectionId: variables.sectionId,
+        itemId: variables.itemId,
+      }),
+    }),
+    onSuccess: (payload, _variables, context) => {
+      context?.telemetry?.succeeded({
+        sectionId: payload.sectionId,
+        itemId: payload.itemId,
+      });
       options.setActiveSectionId(payload.sectionId);
       options.setActiveItemId(payload.itemId);
       options.setMutationFeedback({ tone: "success", text: options.copy.mutationDone });
       options.invalidateMemoryQueries(queryClient);
     },
-    onError: (error) => {
+    onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, {
+        sectionId: variables.sectionId,
+        itemId: variables.itemId,
+      });
       options.setMutationFeedback({
         tone: "error",
         text: `${options.copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}`,
@@ -186,8 +232,24 @@ export function useMemoryItemMutations(options: UseMemoryItemMutationsOptions) {
         confirmationPhrase,
         previewToken,
       }),
-    onSuccess: (payload) => {
+    onMutate: (variables) => ({
+      telemetry: startUserAction("memory_cleanup_execute", {
+        targetCount: variables.targets.length,
+      }, { destructive: true }),
+    }),
+    onSuccess: (payload, variables, context) => {
       const succeeded = isMemoryCleanupExecutionSuccessful(payload);
+      if (succeeded) {
+        context?.telemetry?.succeeded({
+          targetCount: variables.targets.length,
+          outcome: payload.outcome,
+        });
+      } else {
+        context?.telemetry?.failed(payload.outcome, {
+          targetCount: variables.targets.length,
+          outcome: payload.outcome,
+        });
+      }
       options.setCleanupPreview(null);
       options.setCleanupExecution(payload);
       options.setCleanupConfirmationText("");
@@ -209,7 +271,8 @@ export function useMemoryItemMutations(options: UseMemoryItemMutationsOptions) {
       });
       void queryClient.invalidateQueries({ queryKey: ["knowledge"] });
     },
-    onError: (error) => {
+    onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, { targetCount: variables.targets.length });
       options.setCleanupFeedback({
         tone: "error",
         text: `${options.copy.cleanupFailed}: ${error instanceof Error ? error.message : String(error)}`,
