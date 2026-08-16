@@ -11,6 +11,7 @@
 | Surface | 入口 / 落点 | README |
 | --- | --- | --- |
 | App shell | `web/src/app/` | — |
+| 路由索引（非 Chat/Teams） | [`web/src/routes/README.md`](../../web/src/routes/README.md) | — |
 | Chat/Coding | 薄入口 `ChatCodingRoute.tsx` → `chat/ChatCodingRouteWorkbench.tsx`；模块在 `web/src/routes/chat/` | `web/src/routes/chat/README.md` · 按钮 [button-selection.md](button-selection.md) |
 | Agents | `AgentsRoute.tsx` + `AgentWorkspaceLayoutPanel`（`VListDetailPage`） | `data-vui-recipe=agents-management-workbench` |
 | Teams | `web/src/routes/teams/`；`TeamsRoute.tsx`→workbench | `web/src/routes/teams/README.md` |
