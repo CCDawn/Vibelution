@@ -57,7 +57,7 @@
 
 | ID | 项 | Impact | Effort | ROI | 范围 | DoD | 验证 | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| **R20** | **guides 加载 token 预算注释** | 2 | 1 | 2.0 | `docs/guides/README.md` | 每文件标注「约 N 行 / 何时跳过」 | 人工扫 | todo |
+| **R20** | **guides 加载 token 预算注释** | 2 | 1 | 2.0 | `docs/guides/README.md` | 每文件标注「约 N 行 / 何时跳过」 | 人工扫 | **done** (`docs/guides/README.md` 加载序+子文档 budget 列) |
 | **R21** | **development-standard 章节跳转卡** | 3 | 2 | 1.5 | `docs/standards/README.md` 或 standards 头 | Agent 只开 § 索引即可定位，不必全文 | 任务类型→§ 表完整 | todo |
 | **R22** | **route.md 与 services 索引交叉链** | 2 | 1 | 2.0 | `docs/guides/route.md` | 后端行显式链 `services/README` domain 锚点（若可） | 链接有效 | todo |
 | **R23** | **诊断命令卡片集中** | 3 | 1 | 3.0 | `docs/guides/loop.md` 或 `playbook.md` | runtime_scenes / diagnose_session / doctor 三行可复制 | 命令存在 | **done** (`loop.md` §3 诊断三件套) |
