@@ -36,11 +36,16 @@ RESTART_FOCUS_GUARD_MESSAGE = (
 )
 
 
+def _decode_binary(value: Any) -> Any:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).decode("utf-8", errors="replace")
+    return value
+
+
 def _coerce_text(value: Any) -> str:
     if value is None:
         return ""
-    if isinstance(value, bytes):
-        return value.decode("utf-8", errors="replace")
+    value = _decode_binary(value)
     if isinstance(value, str):
         return value
     return str(value)
@@ -51,9 +56,8 @@ def _coerce_bool(value: Any, default: bool) -> bool:
         return value
     if value is None:
         return default
-    if isinstance(value, bytes):
-        value = value.decode("utf-8", errors="replace")
-    if isinstance(value, (int, float)):
+    value = _decode_binary(value)
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
         return bool(value)
     text = str(value).strip().lower()
     if not text:
@@ -66,8 +70,7 @@ def _coerce_bool(value: Any, default: bool) -> bool:
 
 
 def _coerce_mapping(value: Any) -> Dict[str, Any]:
-    if isinstance(value, bytes):
-        value = value.decode("utf-8", errors="replace")
+    value = _decode_binary(value)
     if isinstance(value, str):
         text = value.strip()
         if not text:
@@ -85,8 +88,7 @@ def _tool_name_set(items: Iterable[Any] | None) -> set[str]:
     names: set[str] = set()
     if items is None:
         return names
-    if isinstance(items, bytes):
-        items = items.decode("utf-8", errors="replace")
+    items = _decode_binary(items)
     if isinstance(items, str):
         text = items.strip()
         if text.startswith("[") or text.startswith("{"):
@@ -223,6 +225,8 @@ def materialize_authorized_tools(
     decision = getattr(authorization_report, "decision", None)
     visible_names = _tool_name_set(getattr(decision, "visible_tools", ()) or ())
     if not visible_names:
+        return []
+    if isinstance(registered_tools, (str, bytes, bytearray, memoryview)):
         return []
     try:
         tools = list(registered_tools or [])
