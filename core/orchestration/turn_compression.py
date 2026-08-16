@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -12,14 +14,55 @@ from core.infrastructure.feature_gate import resolve_feature_decision
 from core.infrastructure.state import AgentState, get_state_manager
 from core.orchestration.agent_modes import AgentMode
 from core.orchestration.agent_runtime_bindings import (
+    _as_mapping,
+    _coerce_text,
     _context_compression_trigger_source,
     _format_tool_result_replacement_summary,
+    _mapping_get,
     _record_agent_scene_event,
     _turn_runtime_from_env,
 )
 from core.ui.cli_ui import get_ui
 from tools.compression_strategy import CompressionLevel, get_compression_strategy
 from tools.token_manager import estimate_messages_tokens
+
+
+def _coerce_nonnegative_int(value: Any, *, default: int = 0) -> int:
+    if isinstance(value, bool) or value is None:
+        return max(0, int(default or 0))
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return max(0, int(default or 0))
+
+
+def _maybe_json(value: Any) -> Any:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith("{") or text.startswith("["):
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                return value
+    return value
+
+
+def _coerce_message_list(value: Any) -> list:
+    value = _maybe_json(value)
+    if value is None or isinstance(value, (str, bytes, bytearray, memoryview)):
+        return []
+    if isinstance(value, Mapping):
+        if any(key in value for key in ("role", "content", "type", "kind")):
+            return [dict(value)]
+        return []
+    try:
+        return list(value)
+    except TypeError:
+        return []
 
 
 def compress_turn_messages(
@@ -54,18 +97,28 @@ def compress_turn_messages(
     ui_getter = get_ui_fn or get_ui
     ui = ui_getter()
     estimator = estimate_tokens_fn or estimate_messages_tokens
+    messages = _coerce_message_list(messages)
+    iteration = _coerce_nonnegative_int(iteration)
+    last_compression_iteration = _coerce_nonnegative_int(last_compression_iteration)
+    compression_min_iteration_gap = _coerce_nonnegative_int(
+        compression_min_iteration_gap, default=3
+    )
+    compression_count_this_turn = _coerce_nonnegative_int(compression_count_this_turn)
+    threshold_tokens = _coerce_nonnegative_int(threshold_tokens)
+    reason = _coerce_text(reason)
+    mode_text = _coerce_text(getattr(mode, "value", mode)).strip().lower()
     current_tokens = estimator(messages)
-    budget = max(1, int(effective_max_token_limit))
-    runtime_binding = dict(runtime_agent_binding or {})
+    budget = max(1, _coerce_nonnegative_int(effective_max_token_limit, default=1))
+    runtime_binding = _as_mapping(runtime_agent_binding)
     runtime_getter = turn_runtime_fn or _turn_runtime_from_env
-    turn_runtime = runtime_getter()
-    session_id = str(
-        turn_runtime.get("sessionId")
-        or runtime_binding.get("directSessionId")
-        or ""
+    turn_runtime = _as_mapping(runtime_getter())
+    session_id = _coerce_text(
+        _mapping_get(turn_runtime, "sessionId", "session_id")
+        or _mapping_get(runtime_binding, "directSessionId", "direct_session_id")
     ).strip()
-    turn_id = str(turn_runtime.get("runId") or "").strip()
+    turn_id = _coerce_text(_mapping_get(turn_runtime, "runId", "run_id")).strip()
     recorder = scene_recorder_fn or _record_agent_scene_event
+    agent_id = _coerce_text(_mapping_get(runtime_binding, "agentId", "agent_id")).strip()
 
     def record_preflight(*, eligible: bool, guard_reason: str = "") -> None:
         recorder(
@@ -74,7 +127,7 @@ def compress_turn_messages(
             message="Agent context compression preflight evaluated.",
             outcome="eligible" if eligible else "skipped",
             fields={
-                "agentId": str(runtime_binding.get("agentId") or "").strip(),
+                "agentId": agent_id,
                 "sessionId": session_id,
                 "turnId": turn_id,
                 "iteration": iteration,
@@ -102,7 +155,10 @@ def compress_turn_messages(
             return messages, False, False, compression_count_this_turn, last_compression_iteration
 
     # Guard: 超过最大压缩次数
-    max_comp = getattr(config.context_compression, "max_compressions_per_session", 3)
+    max_comp = _coerce_nonnegative_int(
+        getattr(config.context_compression, "max_compressions_per_session", 3),
+        default=3,
+    )
     if compression_count_this_turn >= max_comp:
         record_preflight(eligible=False, guard_reason="max_compressions")
         return messages, False, False, compression_count_this_turn, last_compression_iteration
@@ -126,8 +182,13 @@ def compress_turn_messages(
     try:
         from core.chat.tool_result_replacement import replace_large_tool_results_for_compression
 
-        tool_session_id = str(runtime_binding.get("directSessionId") or session_id or "").strip()
-        replacement_limit = max(4_000, int(comp_config.summary_max_chars or 1_000) * 4)
+        tool_session_id = _coerce_text(
+            _mapping_get(runtime_binding, "directSessionId", "direct_session_id") or session_id
+        ).strip()
+        replacement_limit = max(
+            4_000,
+            _coerce_nonnegative_int(comp_config.summary_max_chars, default=1_000) * 4,
+        )
         messages_for_compression, tool_result_replacement_state = replace_large_tool_results_for_compression(
             messages,
             char_limit=replacement_limit,
@@ -143,7 +204,7 @@ def compress_turn_messages(
         if isinstance(message, AIMessage) or getattr(message, "type", "") == "ai"
     )
     keep_ai_messages = min(
-        max(0, int(comp_config.keep_ai_messages or 0)),
+        max(0, _coerce_nonnegative_int(comp_config.keep_ai_messages)),
         max(0, ai_message_count - 1),
     )
     compressed, summary = token_compressor.compress(
@@ -169,7 +230,7 @@ def compress_turn_messages(
             message="Context compression had no safely compressible history.",
             outcome="skipped",
             fields={
-                "agentId": str(runtime_binding.get("agentId") or "").strip(),
+                "agentId": agent_id,
                 "sessionId": session_id,
                 "turnId": turn_id,
                 "iteration": iteration,
@@ -208,11 +269,15 @@ def compress_turn_messages(
             from core.web.services import agent_directory_service
 
             current_runtime = agent_directory_service.current_agent_runtime()
-            session_id = str(session_id or current_runtime.get("sessionId") or "").strip()
-            turn_id = str(turn_id or current_runtime.get("turnId") or "").strip()
+            session_id = _coerce_text(
+                session_id or _mapping_get(_as_mapping(current_runtime), "sessionId", "session_id")
+            ).strip()
+            turn_id = _coerce_text(
+                turn_id or _mapping_get(_as_mapping(current_runtime), "turnId", "turn_id")
+            ).strip()
         except Exception:
             pass
-        if session_id and mode == AgentMode.CHAT and project_root:
+        if session_id and mode_text == AgentMode.CHAT and project_root:
             try:
                 from core.chat.conversation_ledger import (
                     append_context_compression_attempt,
@@ -327,7 +392,7 @@ def compress_turn_messages(
 
     # 提前结束判断
     should_break = False
-    if level == CompressionLevel.EMERGENCY and mode != AgentMode.CHAT:
+    if level == CompressionLevel.EMERGENCY and mode_text != AgentMode.CHAT:
         should_break = True
         ui.add_log("紧急压缩触发，提前结束当前轮次", "WARN")
     elif iteration > 30:

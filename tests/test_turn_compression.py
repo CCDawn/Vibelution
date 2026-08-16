@@ -254,3 +254,72 @@ def test_iteration_over_thirty_breaks_even_in_chat():
     assert result[1] is True
     assert result[3] == 1
     assert result[4] == 31
+
+
+def test_compress_coerces_iteration_gap_json_binding_and_rejects_character_split():
+    original = [AIMessage(content="keep")]
+    compressor = _FakeCompressor([AIMessage(content="x")])
+    extras = {}
+
+    gap = _run(
+        messages=original,
+        compressor=compressor,
+        config=_feature_config(),
+        extra=extras,
+        iteration="5",
+        last_compression_iteration="4",
+        compression_min_iteration_gap="3",
+        compression_count_this_turn="1",
+    )
+    assert gap == (original, False, False, 1, 4)
+    assert extras["events"][0]["kwargs"]["fields"]["guardReason"] == "iteration_gap"
+    assert extras["events"][0]["kwargs"]["fields"]["iteration"] == 5
+
+    split_compressor = _FakeCompressor([], summary="ok")
+    extras = {}
+    events: list[dict] = []
+    ui = _FakeUi()
+    result = compress_turn_messages(
+        messages="abc",
+        iteration=4,
+        reason=b"test",
+        token_compressor=split_compressor,
+        config=_feature_config(),
+        effective_max_token_limit="bad",
+        threshold_tokens="800",
+        runtime_agent_binding='{"agent_id":"a9","direct_session_id":"s9"}',
+        project_root="",
+        mode=b"chat",
+        last_compression_iteration=0,
+        compression_min_iteration_gap=3,
+        compression_count_this_turn=0,
+        compression_strategy=_FakeStrategy(),
+        prompt_manager=None,
+        turn_runtime_fn=lambda: {"session_id": "s9", "run_id": "t9"},
+        estimate_tokens_fn=_estimate,
+        get_ui_fn=lambda: ui,
+        get_state_manager_fn=lambda: SimpleNamespace(set_state=lambda *a, **k: None),
+        scene_recorder_fn=lambda *a, **k: events.append({"args": a, "kwargs": k}),
+    )
+    assert result[0] == []
+    assert split_compressor.calls[0]["messages"] == []
+    assert events[0]["kwargs"]["fields"]["agentId"] == "a9"
+    assert events[0]["kwargs"]["fields"]["sessionId"] == "s9"
+    assert events[0]["kwargs"]["fields"]["turnId"] == "t9"
+    assert events[0]["kwargs"]["fields"]["effectiveLimit"] == 1
+
+
+def test_emergency_bytes_chat_mode_does_not_break():
+    original = [AIMessage(content="long-context-message")]
+    compressed = [AIMessage(content="x")]
+    result = _run(
+        messages=original,
+        compressor=_FakeCompressor(compressed),
+        config=_feature_config(),
+        extra={},
+        mode=b"chat",
+        compression_strategy=_FakeStrategy(CompressionLevel.EMERGENCY),
+        iteration=2,
+    )
+    assert result[1] is False
+    assert result[2] is True
