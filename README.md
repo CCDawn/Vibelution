@@ -1,26 +1,23 @@
 # Vibelution
 
+![Vibelution](docs/assets/readme/vibelution-github-hero.png)
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.11%2B-green.svg)](https://www.python.org/)
 [![React](https://img.shields.io/badge/Frontend-React%20%2B%20Vite-61dafb.svg)](web/)
+[![本地优先](https://img.shields.io/badge/Local--First-%E6%9C%AC%E5%9C%B0%E4%BC%98%E5%85%88-brightgreen.svg)](#隐私与安全)
 
-本地优先的 AI Agent 工作台。把编码对话、Agent 管理、Git、Teams 科研流程、自进化、监督评测和运行日志收在同一套 **本机** runtime 里（Python / FastAPI + React 界面 + launcher）。
-
-不是托管聊天壳，也不打算把你的仓库默认送上云端。配置和密钥放在用户目录的外部 `config.toml`，不进这个 git 仓库。
+本地优先的 AI Agent 工作台：把编码会话、科研团队、Git 证据、监督评测与运行态证据收进同一个**本机控制室**；仓库、配置与密钥默认只留在你自己的机器上。
 
 当前版本 **1.1.2**（见 [VERSION](VERSION) · [CHANGELOG.md](CHANGELOG.md)）。
 
-文档入口：[快速开始](#快速开始) · [Windows 安装（最终用户）](docs/guides/install-windows.md) · [当前能力](#当前能力) · [CONTRIBUTING.md](CONTRIBUTING.md) · [docs/product](docs/product/README.md) · [LICENSE](LICENSE)
+[快速开始](#快速开始) · [当前能力](#当前能力) · [Windows 安装](docs/guides/install-windows.md) · [Agent 开发](#agent-开发) · [LICENSE](LICENSE)
 
-## 界面预览
+## 为什么 Vibelution
 
-![Agent 管理](docs/assets/readme/web-workbench-chat.png)
-
-![团队科研流程](docs/assets/readme/web-workbench-teams.png)
-
-![Git](docs/assets/readme/web-workbench-git.png)
-
-![监督进化](docs/assets/readme/web-workbench-supervised.png)
+- **一个本地控制室**：编码会话、科研团队、Git 证据、监督评测与运行态证据都收进同一套本机工作台，不必在多工具间来回切换。
+- **证据驱动的工作流**：会话、评测与运行都留下可审计的日志与证据，改进有据可查。
+- **本地所有权与控制**：仓库、配置与密钥默认只留本机；外部 `config.toml` 里的密钥不进 git 仓库。
 
 ## 当前能力
 
