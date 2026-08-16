@@ -398,3 +398,89 @@ def test_max_parallel_readonly_zero_uses_serial_pool_not_default(monkeypatch):
     assert action is None
     assert seen_workers == [1]
     assert [message.tool_call_id for message in messages] == ["call-a", "call-b", "call-c"]
+
+
+def test_is_readonly_and_execute_tool_decode_bytes_and_function_shape():
+    observed: dict[str, Any] = {}
+
+    def fake_execute(tool_name, tool_args, *, tool_call_id=""):
+        observed.update(name=tool_name, args=tool_args, call_id=tool_call_id)
+        return ("ok", None)
+
+    assert ToolLifecycleBridge.is_readonly_tool(b"read_file_tool") is True
+    bridge = ToolLifecycleBridge(tool_executor_execute=fake_execute, self_modified="false")
+    assert bridge._self_modified is False
+    result, action = bridge.execute_tool(
+        {
+            "toolCallId": b"call-fn",
+            "function": {
+                "name": b"read_file_tool",
+                "arguments": b'{"path": "a.py"}',
+            },
+        },
+        [],
+    )
+    assert result == "ok"
+    assert action is None
+    assert observed == {
+        "name": "read_file_tool",
+        "args": {"path": "a.py"},
+        "call_id": "call-fn",
+    }
+
+
+def test_execute_tools_rejects_string_split_and_accepts_json_payload():
+    calls: list[str] = []
+    bridge = ToolLifecycleBridge(
+        tool_executor_execute=lambda name, _args, *, tool_call_id="": (
+            calls.append(name) or (f"ran:{name}", None)
+        )
+    )
+    messages: list[Any] = []
+    assert bridge.execute_tools("abc", messages) is None
+    assert calls == []
+    assert messages == []
+
+    action = bridge.execute_tools(
+        '[{"name":"read_file_tool","args":{},"id":"call-json"}]',
+        messages,
+    )
+    assert action is None
+    assert calls == ["read_file_tool"]
+    assert messages[0].tool_call_id == "call-json"
+
+
+def test_derive_lifecycle_action_coerces_false_string_bytes_name_and_camel_status():
+    assert (
+        ToolLifecycleBridge.derive_lifecycle_action(
+            b"close_evolution_transaction_tool",
+            {"status": b"success", "transactionStatus": "ok", "txn_id": "demo"},
+            post_close_action_pending="false",
+        )
+        == "turn_complete"
+    )
+    bridge = ToolLifecycleBridge(
+        tool_executor_execute=lambda *_args, **_kwargs: (
+            {"status": "success", "transaction_status": "success"},
+            None,
+        ),
+        post_close_action_pending=lambda: "false",
+    )
+    result, action = bridge.execute_tool(
+        {"name": "close_evolution_transaction_tool", "args": {}, "id": "call-close"},
+        [],
+    )
+    assert result == {"status": "success", "transaction_status": "success"}
+    assert action == "turn_complete"
+
+
+def test_handle_tool_result_decodes_bytes_call_id_alias():
+    messages: list[Any] = []
+    ToolLifecycleBridge.handle_tool_result(
+        {"toolName": b"read_file_tool", "toolCallId": b"call-bytes"},
+        "ok",
+        None,
+        messages,
+    )
+    assert isinstance(messages[0], ToolMessage)
+    assert messages[0].tool_call_id == "call-bytes"
