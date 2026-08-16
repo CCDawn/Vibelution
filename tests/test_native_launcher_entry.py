@@ -31,28 +31,18 @@ def test_native_launcher_tray_menu_exposes_lifecycle_controls():
         "打开控制台",
         "启动",
         "停止",
-        "重启当前 main",
-        "重建并启动（最新）",
-        "状态",
+        "重启 Launcher",
         "退出 Launcher",
         "停止全部",
     ]:
         assert label in source
 
     assert "\"/api/launcher/branch-instances/\" + operation" in source
-    assert "\"/api/launcher/restart\"" in source
-    assert "\"/api/launcher/rebuild-and-start\"" in source
     assert "\"/api/launcher/force-stop\"" in source
-    assert "QueueRebuildAndStart" in source
-    # Rebuild flow: one accept toast + one outcome toast (no double accept balloons).
-    assert "重建并启动已受理，正在后台构建/拉起…" in source
-    assert "正在排队：强制重建前端并启动/重启工作台…" not in source
-    assert "重建并启动请求已发送。正在后台构建并拉起工作台…" not in source
-    # Outcome poll must not treat a pre-existing open workbench as rebuild success.
-    assert "sawVersionAdvance" in source
-    assert "lastErrorMessage" in source
-    assert "stateVersion" in source
-    assert "Never treat a pre-existing open session as rebuild success" in source
+    assert "PostLauncher(\"/api/launcher/force-stop\")" in source
+    assert "重启当前 main" not in source
+    assert "重建并启动（最新）" not in source
+    assert 'menu.Items.Add(MenuItem("状态"' not in source
     assert "RunPythonBridge(projectDir, \"stop-launcher\", true, false)" in source
 
 
@@ -63,7 +53,7 @@ def test_native_launcher_non_default_actions_use_console_free_control_api():
     assert "RunPythonBridge(projectDir, \"bootstrap\", true, true)" in source
     assert '"/api/launcher/status"' in source
     assert '"/api/launcher/" + effectiveAction' in source
-    assert '"/api/launcher/restart"' in source
+    assert '"/api/launcher/force-stop"' in source
     assert "vibelution_desktop_entry.vbs" not in source
     assert "wscript.exe" not in source
     assert "RunLegacyScriptAction" not in source
