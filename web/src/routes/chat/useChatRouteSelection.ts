@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
+import { postUserActionObservation } from "../../app/userActionTelemetry";
 import {
   chatRouteSelectionKey,
   chatRouteSelectionsEqual,
@@ -12,6 +13,8 @@ import {
 export type ChatRouteNavigateOptions = {
   /** Replace the current history entry instead of pushing a new one. */
   replace?: boolean;
+  /** Optional UI entry point for user-action telemetry. */
+  telemetrySource?: string;
 };
 
 export type UseChatRouteSelectionResult = {
@@ -74,12 +77,21 @@ export function useChatRouteSelection(): UseChatRouteSelectionResult {
       if (!normalizedSessionId) {
         return;
       }
+      const current = parseChatRouteSelection(location.search);
+      const previousSessionId = current.kind === "session" ? current.sessionId : "";
+      if (previousSessionId !== normalizedSessionId) {
+        postUserActionObservation("session_open", {
+          sessionId: normalizedSessionId,
+          previousSessionId,
+          source: String(options?.telemetrySource || "route_writer").trim() || "route_writer",
+        });
+      }
       navigateToSelection(
         { kind: "session", sessionId: normalizedSessionId },
         { replace: options?.replace ?? true },
       );
     },
-    [navigateToSelection],
+    [location.search, navigateToSelection],
   );
 
   const openRoom = useCallback(
@@ -88,19 +100,30 @@ export function useChatRouteSelection(): UseChatRouteSelectionResult {
       if (!normalizedRoomId) {
         return;
       }
+      const current = parseChatRouteSelection(location.search);
+      postUserActionObservation("group_room_open", {
+        roomId: normalizedRoomId,
+        previousRouteKind: current.kind,
+        source: String(options?.telemetrySource || "route_writer").trim() || "route_writer",
+      });
       navigateToSelection(
         { kind: "room", roomId: normalizedRoomId },
         { replace: options?.replace ?? false },
       );
     },
-    [navigateToSelection],
+    [location.search, navigateToSelection],
   );
 
   const openProjectBus = useCallback(
     (options?: ChatRouteNavigateOptions) => {
+      const current = parseChatRouteSelection(location.search);
+      postUserActionObservation("project_bus_open", {
+        previousRouteKind: current.kind,
+        source: String(options?.telemetrySource || "route_writer").trim() || "route_writer",
+      });
       navigateToSelection({ kind: "project_bus" }, { replace: options?.replace ?? false });
     },
-    [navigateToSelection],
+    [location.search, navigateToSelection],
   );
 
   const canonicalizeBareRoute = useCallback(

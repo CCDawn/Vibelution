@@ -23,6 +23,7 @@ import {
   sendProjectAgentBusMessage,
 } from "../../api/projectAgentBus";
 import { queryKeys } from "../../api/queryKeys";
+import { startUserAction } from "../../app/userActionTelemetry";
 import type {
   AgentInstance,
   ChatRoomDetail,
@@ -263,10 +264,11 @@ export function useChatWorkspaceLifecycle({
     mutationFn: async ({ agentId }: { agentId: string }) =>
       createChatSession({ agentId }),
     onMutate: async ({ agentId }) => {
+      const normalizedAgentId = String(agentId || "").trim();
+      const telemetry = startUserAction("session_create", { agentId: normalizedAgentId });
       // T0: mint a local temp tab + empty transcript immediately (ChatGPT-style).
       // Real id arrives on success; UI must stay interactive while POST is in flight.
       const tempSessionId = createTempSessionId();
-      const normalizedAgentId = String(agentId || "").trim();
       const nowIso = new Date().toISOString();
       const agents = queryClient.getQueryData<AgentInstance[]>(queryKeys.agents()) ?? [];
       const agentRow = agents.find((item) => String(item.agentId || "").trim() === normalizedAgentId);
@@ -343,12 +345,14 @@ export function useChatWorkspaceLifecycle({
       setEditingSessionId(tempSessionId);
       setEditingSessionTitle(title);
       syncSessionDetail(optimisticDetail);
-      return { tempSessionId, agentId: normalizedAgentId };
+      return { tempSessionId, agentId: normalizedAgentId, telemetry };
     },
     onSuccess: (nextDetail, variables, context) => {
+      const telemetry = context?.telemetry;
       const nextId = String(nextDetail.id || "").trim();
       const tempSessionId = String(context?.tempSessionId || "").trim();
       if (!nextId) {
+        telemetry?.failed(undefined, { reason: "missing_session_id" });
         return;
       }
       const agentId = String(nextDetail.agentId || variables.agentId || context?.agentId || "").trim();
@@ -498,8 +502,20 @@ export function useChatWorkspaceLifecycle({
           // Keep local draft title; operator can retry rename from the tab.
         });
       }
+      telemetry?.succeeded({
+        sessionId: nextId,
+        tempSessionId,
+        agentId,
+        routeReplacedFromTemp: stillOnTemp,
+        keepFocusOnCreated,
+        keepDraft,
+      });
     },
     onError: (error, _variables, context) => {
+      context?.telemetry?.failed(error, {
+        tempSessionId: String(context?.tempSessionId || "").trim(),
+        agentId: String(context?.agentId || "").trim(),
+      });
       const tempSessionId = String(context?.tempSessionId || "").trim();
       const failureMessage = describeError(error, t("createSessionFailed"));
       if (tempSessionId) {
@@ -526,10 +542,21 @@ export function useChatWorkspaceLifecycle({
       { title, agentIds, mode, purpose }: { title: string; agentIds: string[]; mode: string; purpose: string },
     ) =>
       createChatRoom({ title, agentIds, mode, purpose }),
-    onMutate: () => ({
-      routeSelectionAtRequest: routeSelectionRef.current,
-    }),
+    onMutate: (variables) => {
+      const telemetry = startUserAction("group_room_create", {
+        agentCount: variables.agentIds.length,
+        mode: variables.mode,
+      });
+      return {
+        routeSelectionAtRequest: routeSelectionRef.current,
+        telemetry,
+      };
+    },
     onSuccess: (room, _variables, context) => {
+      context?.telemetry?.succeeded({
+        roomId: room.roomId,
+        participantCount: room.participants?.length ?? 0,
+      });
       setGroupComposerOpen(false);
       setGroupTitleDraft("");
       setGroupModeDraft("round_robin");
@@ -549,7 +576,8 @@ export function useChatWorkspaceLifecycle({
       );
       void chatWorkspaceCache.afterChatRoomChanged(room.roomId);
     },
-    onError: (error) => {
+    onError: (error, _variables, context) => {
+      context?.telemetry?.failed(error);
       setSessionComposerErrors((current) => ({
         ...current,
         __sessions__: describeError(
@@ -565,13 +593,26 @@ export function useChatWorkspaceLifecycle({
       { roomId, topic, mode, purpose }: { roomId: string; topic: string; mode: string; purpose: string },
     ) =>
       startChatRoomRound(roomId, { topic, mode, purpose }, { preferAsync: true }),
-    onSuccess: (accepted) => {
+    onMutate: (variables) => ({
+      telemetry: startUserAction("group_round_start", {
+        roomId: variables.roomId,
+        topicLength: variables.topic.length,
+        mode: variables.mode,
+      }),
+    }),
+    onSuccess: (accepted, _variables, context) => {
+      context?.telemetry?.succeeded({
+        roomId: accepted.roomId,
+        roundId: accepted.roundId,
+        asyncAccepted: true,
+      });
       setRightIndexPanel("members");
       setGroupTopicDraft("");
       setGroupRoomActionError("");
       void chatWorkspaceCache.afterGroupRoundStarted(accepted.roomId);
     },
-    onError: (error) => {
+    onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, { roomId: variables.roomId });
       setGroupRoomActionError(describeError(error, lang === "zh" ? "启动群聊讨论失败" : "Run group discussion failed"));
       void chatWorkspaceCache.afterChatRoomChanged(routeSelectionRef.current.kind === "room" ? routeSelectionRef.current.roomId : "");
     },
@@ -580,13 +621,18 @@ export function useChatWorkspaceLifecycle({
   const stopGroupRoundMutation = useMutation({
     mutationFn: async ({ roomId }: { roomId: string }) =>
       stopChatRoomRound(roomId),
-    onSuccess: (room) => {
+    onMutate: (variables) => ({
+      telemetry: startUserAction("group_round_stop", { roomId: variables.roomId }),
+    }),
+    onSuccess: (room, _variables, context) => {
+      context?.telemetry?.succeeded({ roomId: room.roomId });
       setRightIndexPanel("members");
       setGroupRoomActionError("");
       syncChatRoomDetail(room);
       void chatWorkspaceCache.afterGroupRoundStopped(room.roomId);
     },
-    onError: (error, variables) => {
+    onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, { roomId: variables.roomId });
       setGroupRoomActionError(describeError(error, lang === "zh" ? "停止群聊讨论失败" : "Stop group discussion failed"));
       void chatWorkspaceCache.afterGroupRoundStopped(variables.roomId);
     },
@@ -603,12 +649,20 @@ export function useChatWorkspaceLifecycle({
       },
     ) =>
       sendProjectAgentBusMessage({ content, interruptTargets }),
-    onSuccess: () => {
+    onMutate: (variables) => ({
+      telemetry: startUserAction("project_bus_send", {
+        contentLength: variables.content.length,
+        interruptTargets: variables.interruptTargets,
+      }),
+    }),
+    onSuccess: (_payload, _variables, context) => {
+      context?.telemetry?.succeeded();
       setProjectBusDraft("");
       setGroupRoomActionError("");
       void chatWorkspaceCache.afterProjectBusChanged();
     },
-    onError: (error) => {
+    onError: (error, _variables, context) => {
+      context?.telemetry?.failed(error);
       setGroupRoomActionError(describeError(error, lang === "zh" ? "发送总群引导失败" : "Send project bus guidance failed"));
       void chatWorkspaceCache.afterProjectBusFailed();
     },
@@ -620,11 +674,16 @@ export function useChatWorkspaceLifecycle({
         eventId,
         reason: "user_recalled_project_bus_message",
       }),
-    onSuccess: () => {
+    onMutate: (variables) => ({
+      telemetry: startUserAction("project_bus_revoke", { eventId: variables.eventId }, { destructive: true }),
+    }),
+    onSuccess: (_payload, _variables, context) => {
+      context?.telemetry?.succeeded();
       setGroupRoomActionError("");
       void chatWorkspaceCache.afterProjectBusChanged();
     },
-    onError: (error) => {
+    onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, { eventId: variables.eventId });
       setGroupRoomActionError(describeError(error, lang === "zh" ? "撤回总群消息失败" : "Recall project bus message failed"));
       void chatWorkspaceCache.afterProjectBusFailed();
     },
@@ -646,7 +705,18 @@ export function useChatWorkspaceLifecycle({
         mode,
         purpose,
       }),
-    onSuccess: (room) => {
+    onMutate: (variables) => ({
+      telemetry: startUserAction("group_room_update", {
+        roomId: variables.roomId,
+        participantCount: variables.sessionIds.length,
+        mode: variables.mode,
+      }),
+    }),
+    onSuccess: (room, _variables, context) => {
+      context?.telemetry?.succeeded({
+        roomId: room.roomId,
+        participantCount: room.participants.length,
+      });
       setRightIndexPanel("members");
       setGroupManageTitleDraft(room.title || "");
       setGroupManageSessionIds(room.participants.map((participant) => participant.sessionId));
@@ -656,7 +726,8 @@ export function useChatWorkspaceLifecycle({
       queryClient.setQueryData(queryKeys.chatRoom(room.roomId), room);
       void chatWorkspaceCache.afterChatRoomChanged(room.roomId);
     },
-    onError: (error) => {
+    onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, { roomId: variables.roomId });
       setGroupRoomActionError(describeError(error, lang === "zh" ? "更新群聊失败" : "Update group failed"));
       if (routeSelectionRef.current.kind === "room") {
         void chatWorkspaceCache.afterChatRoomChanged(routeSelectionRef.current.roomId);
@@ -667,7 +738,18 @@ export function useChatWorkspaceLifecycle({
   const deleteGroupRoomMutation = useMutation({
     mutationFn: async ({ roomId }: { roomId: string }) =>
       deleteChatRoom(roomId),
-    onSuccess: (_payload, variables) => {
+    onMutate: (variables) => ({
+      telemetry: startUserAction("group_room_delete", { roomId: variables.roomId }, { destructive: true }),
+    }),
+    onSuccess: (_payload, variables, context) => {
+      const routeReplaced = chatRoute.replaceIfStillViewing(
+        { kind: "room", roomId: variables.roomId },
+        { kind: "bare" },
+      );
+      context?.telemetry?.succeeded({
+        roomId: variables.roomId,
+        routeReplaced,
+      });
       setRightIndexPanel("conversations");
       setGroupTopicDraft("");
       setGroupRoomActionError("");
@@ -676,13 +758,10 @@ export function useChatWorkspaceLifecycle({
       setGroupManageModeDraft("round_robin");
       queryClient.removeQueries({ queryKey: queryKeys.chatRoom(variables.roomId), exact: true });
       // Only leave the deleted room while the user is still on its route.
-      chatRoute.replaceIfStillViewing(
-        { kind: "room", roomId: variables.roomId },
-        { kind: "bare" },
-      );
       void chatWorkspaceCache.afterChatRoomChanged(variables.roomId);
     },
-    onError: (error) => {
+    onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, { roomId: variables.roomId });
       setGroupRoomActionError(describeError(error, lang === "zh" ? "删除群聊失败" : "Delete group failed"));
     },
   });
@@ -690,13 +769,18 @@ export function useChatWorkspaceLifecycle({
   const resetGroupRoomMutation = useMutation({
     mutationFn: async ({ roomId }: { roomId: string }) =>
       resetChatRoom(roomId),
-    onSuccess: (room) => {
+    onMutate: (variables) => ({
+      telemetry: startUserAction("group_room_reset", { roomId: variables.roomId }, { destructive: true }),
+    }),
+    onSuccess: (room, _variables, context) => {
+      context?.telemetry?.succeeded({ roomId: room.roomId });
       setRightIndexPanel("members");
       setGroupRoomActionError("");
       syncChatRoomDetail(room);
       void chatWorkspaceCache.afterChatRoomChanged(room.roomId);
     },
-    onError: (error) => {
+    onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, { roomId: variables.roomId });
       setGroupRoomActionError(describeError(error, lang === "zh" ? "重置群聊失败" : "Reset group failed"));
       if (routeSelectionRef.current.kind === "room") {
         void chatWorkspaceCache.afterChatRoomChanged(routeSelectionRef.current.roomId);
@@ -708,6 +792,7 @@ export function useChatWorkspaceLifecycle({
     mutationFn: async ({ sessionId }: { sessionId: string }) =>
       deleteChatSession(sessionId),
     onMutate: async (variables) => {
+      const telemetry = startUserAction("session_delete", { sessionId: variables.sessionId }, { destructive: true });
       // Do not await cancelQueries — waiting freezes tab switching while list
       // queries settle. Optimistic UI must apply immediately.
       markSessionDeleteTombstone(variables.sessionId);
@@ -791,17 +876,19 @@ export function useChatWorkspaceLifecycle({
         previousAgents,
         previousRouteSessionId,
         optimisticNextActiveSessionId,
+        telemetry,
       };
     },
     onSuccess: (deleteResult, variables, context) => {
       const serverNextActiveSessionId = String(deleteResult.nextActiveSessionId || "").trim();
       const optimisticNextActiveSessionId = String(context?.optimisticNextActiveSessionId || "").trim();
       const nextActiveSessionId = serverNextActiveSessionId || optimisticNextActiveSessionId;
+      let routeReplaced = false;
 
       // Keep the user's post-delete selection if they already switched tabs.
       // Only apply server next-active while the route still sits on the deleted id.
       if (nextActiveSessionId && nextActiveSessionId !== variables.sessionId) {
-        const routeReplaced = chatRoute.replaceIfStillViewing(
+        routeReplaced = chatRoute.replaceIfStillViewing(
           { kind: "session", sessionId: variables.sessionId },
           { kind: "session", sessionId: nextActiveSessionId },
         );
@@ -813,12 +900,21 @@ export function useChatWorkspaceLifecycle({
           [nextActiveSessionId]: "",
         }));
       }
+      context?.telemetry?.succeeded({
+        sessionId: variables.sessionId,
+        previousRouteSessionId: String(context?.previousRouteSessionId || "").trim(),
+        optimisticNextActiveSessionId,
+        serverNextActiveSessionId,
+        nextActiveSessionId,
+        routeReplaced,
+      });
       void chatWorkspaceCache.afterSessionDeleted({
         deletedSessionId: variables.sessionId,
         roomId: routeSelectionRef.current.kind === "room" ? routeSelectionRef.current.roomId : "",
       });
     },
     onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, { sessionId: variables.sessionId });
       // Allow the row back into lists after a failed delete.
       clearSessionDeleteTombstone(variables.sessionId);
       if (context?.previousSessions) {
@@ -844,12 +940,23 @@ export function useChatWorkspaceLifecycle({
   const clearSessionHistoryMutation = useMutation({
     mutationFn: async ({ sessionId, agentId }: { sessionId: string; agentId: string }) =>
       resetAgentDirectSession(agentId, sessionId),
-    onSuccess: (result, variables) => {
+    onMutate: (variables) => ({
+      telemetry: startUserAction("session_clear_history", {
+        sessionId: variables.sessionId,
+        agentId: variables.agentId,
+      }, { destructive: true }),
+    }),
+    onSuccess: (result, variables, context) => {
       const previousDirectSessionId = String(
         result.resetSummary.previousDirectSessionId || variables.sessionId,
       ).trim();
       const replacementDirectSessionId = String(result.resetSummary.replacementDirectSessionId || "").trim();
       if (!result.resetSummary.resetDirectSession || !replacementDirectSessionId) {
+        context?.telemetry?.failed(undefined, {
+          sessionId: variables.sessionId,
+          agentId: variables.agentId,
+          reason: "reset_not_applied",
+        });
         setSessionComposerErrors((current) => ({
           ...current,
           [variables.sessionId]: t("clearSessionHistoryFailed"),
@@ -878,10 +985,17 @@ export function useChatWorkspaceLifecycle({
         agents?.map((agent) => (agent.agentId === result.agent.agentId ? result.agent : agent)),
       );
       // Compare-and-swap: old id → replacement only while the user still views it.
-      chatRoute.replaceIfStillViewing(
+      const routeReplaced = chatRoute.replaceIfStillViewing(
         { kind: "session", sessionId: previousDirectSessionId },
         { kind: "session", sessionId: replacementDirectSessionId },
       );
+      context?.telemetry?.succeeded({
+        sessionId: variables.sessionId,
+        agentId: variables.agentId,
+        previousDirectSessionId,
+        replacementDirectSessionId,
+        routeReplaced,
+      });
       setSessionComposerErrors((current) => ({
         ...current,
         [variables.sessionId]: "",
@@ -893,7 +1007,11 @@ export function useChatWorkspaceLifecycle({
         deletedSessionId: previousDirectSessionId || variables.sessionId,
       });
     },
-    onError: (error, variables) => {
+    onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, {
+        sessionId: variables.sessionId,
+        agentId: variables.agentId,
+      });
       setSessionComposerErrors((current) => ({
         ...current,
         [variables.sessionId]: describeError(error, t("clearSessionHistoryFailed")),
@@ -906,6 +1024,10 @@ export function useChatWorkspaceLifecycle({
     mutationFn: async ({ sessionId, title }: { sessionId: string; title: string }) =>
       updateChatSession(sessionId, { title }),
     onMutate: (variables) => {
+      const telemetry = startUserAction("session_rename", {
+        sessionId: variables.sessionId,
+        titleLength: variables.title.length,
+      });
       const updatedAt = new Date().toISOString();
       const previousSessions = queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions());
       const previousSessionIndexCaches = captureSessionIndexCacheSnapshots(queryClient);
@@ -937,9 +1059,14 @@ export function useChatWorkspaceLifecycle({
         previousAgentSessionCaches,
         previousConversations,
         previousDetail,
+        telemetry,
       };
     },
-    onSuccess: (nextDetail, variables) => {
+    onSuccess: (nextDetail, variables, context) => {
+      context?.telemetry?.succeeded({
+        sessionId: variables.sessionId,
+        titleLength: String(nextDetail.title || variables.title).trim().length,
+      });
       setSessionComposerErrors((current) => ({
         ...current,
         [variables.sessionId]: "",
@@ -962,6 +1089,7 @@ export function useChatWorkspaceLifecycle({
       }));
     },
     onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, { sessionId: variables.sessionId });
       if (context?.previousSessions) {
         queryClient.setQueryData(queryKeys.sessions(), context.previousSessions);
       }
@@ -988,7 +1116,11 @@ export function useChatWorkspaceLifecycle({
   const addSessionToReviewMutation = useMutation({
     mutationFn: async ({ sessionId }: { sessionId: string }) =>
       createSessionChatReviewCandidate(sessionId),
-    onSuccess: (payload, variables) => {
+    onMutate: (variables) => ({
+      telemetry: startUserAction("session_add_to_review", { sessionId: variables.sessionId }),
+    }),
+    onSuccess: (payload, variables, context) => {
+      context?.telemetry?.succeeded({ sessionId: variables.sessionId });
       const detail = payload.summary
         ? `${t("addSessionToReviewSucceeded")} ${payload.summary}`
         : t("addSessionToReviewSucceeded");
@@ -999,7 +1131,8 @@ export function useChatWorkspaceLifecycle({
       }));
       void queryClient.invalidateQueries({ queryKey: queryKeys.evolutionChatReview() });
     },
-    onError: (error, variables) => {
+    onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, { sessionId: variables.sessionId });
       setSessionComposerErrors((current) => ({
         ...current,
         [variables.sessionId]: describeError(error, t("addSessionToReviewFailed")),
