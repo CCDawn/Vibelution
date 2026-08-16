@@ -666,3 +666,64 @@ def test_prepare_agent_turn_ignores_string_chat_history():
     assert "history" not in captured
     assert captured["diagnostic"]["path"] == "fresh"
     assert captured["diagnostic"]["historyMessageCount"] == 0
+
+
+def test_turn_runner_coerces_bytes_false_flags_and_mapping_request():
+    captured: dict[str, object] = {}
+
+    class FakeAgent:
+        def set_turn_identity(self, turn_identity):
+            captured["turn_identity"] = turn_identity
+
+        def seed_static_runtime_context(self, context):
+            captured["static_context"] = context
+
+        def set_turn_interrupt_checker(self, checker):
+            captured["interrupt"] = checker
+
+        def run_single_turn(self, initial_prompt=None, disable_tools=False, attachments=None):
+            captured["initial_prompt"] = initial_prompt
+            captured["disable_tools"] = disable_tools
+            captured["attachments"] = attachments
+            return {"status": "completed"}
+
+        def export_turn_carryover(self):
+            return {"next": "ok"}
+
+    prepare_agent_turn(
+        FakeAgent(),
+        turn_identity=b"turn-1",
+        static_runtime_context=b"static-context",
+        interrupt_checker="false",
+        chat_history=b'[{"role": "user"}]',
+    )
+    assert captured["turn_identity"] == "turn-1"
+    assert captured["static_context"] == "static-context"
+    assert "interrupt" not in captured
+
+    captured.clear()
+    result = run_existing_agent_single_turn(
+        FakeAgent(),
+        initial_prompt=b"summarize",
+        disable_tools="false",
+        attachments="not-attachments",
+        prompt_cache_partition=b"",
+    )
+    assert result == {"status": "completed"}
+    assert captured["initial_prompt"] == "summarize"
+    assert captured["disable_tools"] is False
+    assert captured["attachments"] is None
+
+    captured.clear()
+    mapped = run_agent_single_turn(
+        {
+            "mode": b"self_evolution",
+            "initial_prompt": b"probe",
+            "disable_tools": "false",
+            "turn_identity": b"turn-map",
+        },
+        agent_factory=lambda **_kwargs: FakeAgent(),
+    )
+    assert mapped.result["status"] == "completed"
+    assert captured["initial_prompt"] == "probe"
+    assert captured["disable_tools"] is False
