@@ -18,6 +18,10 @@ from core.infrastructure.runtime_input import (
     build_delegation_failure_message,
 )
 from core.logging import debug as _debug_logger
+from core.orchestration.evolution_lifecycle import (
+    is_full_evolution_goal as _is_full_evolution_goal,
+    is_restart_focused_goal as _is_restart_focused_goal,
+)
 from core.orchestration.subagent_roles import (
     ALLOWED_SUBAGENT_TASK_TYPES,
     SubagentRoleNeed,
@@ -244,56 +248,12 @@ class DelegationGovernor:
 
     @staticmethod
     def is_restart_focused_goal(goal: str) -> bool:
-        text = (goal or "").strip().lower()
-        if not text:
-            return False
-        negative_markers = [
-            "不要调用 trigger_self_restart_tool",
-            "不调用 trigger_self_restart_tool",
-            "禁止调用 trigger_self_restart_tool",
-            "不要触发重启",
-            "不触发重启",
-            "禁止重启",
-            "不要重启",
-            "不重启",
-            "do not call trigger_self_restart_tool",
-            "don't call trigger_self_restart_tool",
-            "do not restart",
-            "don't restart",
-            "without restart",
-            "non-restart",
-        ]
-        if any(marker in text for marker in negative_markers):
-            return False
-        restart_markers = [
-            "trigger_self_restart_tool",
-            "重启你自己",
-            "重启自己",
-            "完成重启",
-            "触发重启",
-            "执行重启",
-            "restart yourself",
-            "self restart",
-            "self-restart",
-        ]
-        return any(marker in text for marker in restart_markers)
+        return _is_restart_focused_goal(goal)
 
     @staticmethod
     def is_full_evolution_goal(goal: str) -> bool:
         """识别需要先关账、再触发自我重启的完整进化闭环目标。"""
-        text = (goal or "").strip().lower()
-        if not text:
-            return False
-        if not DelegationGovernor.is_restart_focused_goal(text):
-            return False
-        close_markers = [
-            "close_evolution_transaction_tool",
-            "关账",
-            "关闭演化事务",
-            "close transaction",
-            "close evolution transaction",
-        ]
-        return any(marker in text for marker in close_markers)
+        return _is_full_evolution_goal(goal)
 
     @staticmethod
     def is_harness_probe_goal(goal: str) -> bool:

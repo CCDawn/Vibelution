@@ -4,6 +4,19 @@
 from __future__ import annotations
 
 
+def _contains_restart_marker(text: str, marker: str) -> bool:
+    start = 0
+    while True:
+        index = text.find(marker, start)
+        if index < 0:
+            return False
+        # "未完成重启" contains "完成重启" but is a status check, not a restart order.
+        if marker == "完成重启" and index > 0 and text[index - 1] == "未":
+            start = index + 1
+            continue
+        return True
+
+
 def is_restart_focused_goal(goal: str) -> bool:
     """识别显式要求自我重启、且未被否定的目标。"""
     text = (goal or "").strip().lower()
@@ -38,7 +51,7 @@ def is_restart_focused_goal(goal: str) -> bool:
         "self restart",
         "self-restart",
     )
-    return any(marker in text for marker in restart_markers)
+    return any(_contains_restart_marker(text, marker) for marker in restart_markers)
 
 
 def is_full_evolution_goal(goal: str) -> bool:
