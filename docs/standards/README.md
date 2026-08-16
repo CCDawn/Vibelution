@@ -24,6 +24,7 @@
 | 领域词汇 | [../agents/domain.md](../agents/domain.md) |
 | 工具授权入口 | [../agents/tool-authorization-entrypoints.md](../agents/tool-authorization-entrypoints.md) |
 | 前端 UI / VUI / shadcn（**强制**，根 `AGENTS.md` §2 红线） | [development-standard.md §9.1](development-standard.md) + [../../web/src/components/vui/README.md](../../web/src/components/vui/README.md) + [组件设计索引](../../web/src/components/vui/designs/INDEX.md) + 按钮选型 [../guides/button-selection.md](../guides/button-selection.md) + 门禁 `vuiShadcnRouteContract.test.ts` / `vuiComponentDesignContract` |
+| 前端 JSON API / domain transport（**强制**，根 `AGENTS.md` §2 + §24） | [development-standard.md §24](development-standard.md) + [../../web/src/api/README.md](../../web/src/api/README.md) + 门禁 `fullStackApiBoundary.test.ts` / `test_full_stack_contract_guards.py` |
 | 测试入口 | [../../tests/README.md](../../tests/README.md) |
 | 运行日志实现地图 | [../../core/logging/README.md](../../core/logging/README.md) |
 | Operator 配置（config.toml / LLM / 缓存 / 厂商菜谱） | [../ops/config/INDEX.md](../ops/config/INDEX.md) |

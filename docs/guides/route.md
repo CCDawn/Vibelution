@@ -13,7 +13,7 @@
 | **任意非平凡** | `AGENTS.md`；`ccdawn-brt`；本 `route.md`；`ownership.md` | — | `tests/select_tests.py --from-git main --commands-only` | 先广扫全仓 |
 | **Bug/回归/卡住** | storage inventory 的 `activePaths.logs/runtime_scenes/`；对应链路地图 | 根因位点；必要时补日志 | 复现相关 pytest/vitest | 无日志瞎猜；把 fallback 当修完 |
 | **用户可见 UI** | `AGENTS.md`§2 前端；`development-standard`§9.1；`docs/guides/button-selection.md`；`web/src/components/vui/designs/INDEX.md` | `web/src/routes/<domain>/`；`components/vui`；**不**改 renderer 除非扩展交互 | `vuiShadcnRouteContract` + 触及 `*.layout.test` / route contract | `@heroui`；route→`renderers/shadcn`；未登记新 `V*`；通用裸 `<button>` |
-| **前端数据/API 调用** | `web/src/api/` 现有 domain | `web/src/api/<domain>.ts` + `types/` + queryKeys | 相关 vitest；`fullStackApiBoundary` 预算不升 | Route 内新 `fetchJson`/硬编码 path |
+| **前端数据/API 调用** | [`web/src/api/README.md`](../../web/src/api/README.md)；`development-standard`§24；目标 `web/src/api/<domain>.ts` | `web/src/api/<domain>.ts` + `types/` + queryKeys | 相关 `<domain>.test.ts`；`fullStackApiBoundary` 预算保持 0 | Route 内新 `fetchJson`/硬编码 path |
 | **后端 API/行为** | `core/web/services/README.md` 定 facade；有 pack 再读 pack README；§24 | pack 优先 / 否则 facade → 薄 `routes/` | `test_*service*` + route/contract；`response_model` 预算不升 | route 内业务/直写 store/LLM |
 | **Chat 链路/投影** | `docs/agents/conversation-flow-map.md`；`session/README.md` | `session/{submit,worker,stream_capture,persist,projection,publish}.py`；FE active-turn / ConversationView | session 相关 pytest + chat contract | 客户端乱合成 `turnItems`；delta 当 SSOT |
 | **LLM/协议/缓存** | `core/llm/PROTOCOL.md`；`docs/ops/config/04`+`05` | `core/llm/{protocols,payload_builder,client,wire/*}`；**Documents** config | `test_llm_*`；`test_turn_status_bar*` 等 | 仓库根 config 当生效；可变块插 prefix 中段 |

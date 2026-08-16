@@ -63,5 +63,6 @@
 | LLM 协议 | `core/llm/PROTOCOL.md` |
 | 测试 | `tests/README.md` |
 | VUI | `web/src/components/vui/README.md` |
+| **前端 domain API** | `web/src/api/README.md` |
 | Chat 链路 | `docs/agents/conversation-flow-map.md` |
 | Worktree | `docs/agents/worktree-collaboration.md` |
