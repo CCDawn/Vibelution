@@ -11,7 +11,7 @@ import copy
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, Mapping
 
 from vibelution_storage import resolve_project_memory_home
 
@@ -129,7 +129,7 @@ def _join_context_segments(segments: list[dict[str, Any]], placement: str) -> st
     normalized_placement = str(placement or "").strip()
     return "\n\n".join(
         str(segment.get("block") or "").strip()
-        for segment in list(segments or [])
+        for segment in _mapping_items(segments)
         if str(segment.get("placement") or "").strip() == normalized_placement
         and str(segment.get("block") or "").strip()
     ).strip()
@@ -139,7 +139,7 @@ def _resolve_context_segments(
     segments: list[dict[str, Any]],
     assembly_context: PromptAssemblyContext,
 ) -> list[dict[str, Any]]:
-    raw_segments = list(segments)
+    raw_segments = _mapping_items(segments)
     resolution = PromptSectionResolver().resolve(
         (
             PromptSegment.from_internal_dict(segment)
@@ -252,6 +252,7 @@ def build_agent_context(
     context_started_at = _perf_counter()
     timings: dict[str, Any] = {}
     normalized_agent_id = str(agent_id or "").strip()
+    bounded_limit = _bounded_limit(limit, default=6)
     stage_started_at = _perf_counter()
     supplied_agent = dict(agent_snapshot) if isinstance(agent_snapshot, dict) else None
     if supplied_agent and str(supplied_agent.get("agentId") or "").strip() != normalized_agent_id:
@@ -300,14 +301,14 @@ def build_agent_context(
     stage_started_at = _perf_counter()
     group_events = agent_directory_service.list_group_context_events_for_agent(
         normalized_agent_id,
-        limit=limit,
+        limit=bounded_limit,
         prompt_eligible_only=True,
     )
     timings["groupContextEventsMs"] = _elapsed_ms(stage_started_at)
     stage_started_at = _perf_counter()
     inbox_messages = agent_directory_service.list_agent_inbox_messages_for_agent(
         normalized_agent_id,
-        limit=limit,
+        limit=bounded_limit,
         status="pending",
         prompt_eligible_only=True,
     )
@@ -318,7 +319,7 @@ def build_agent_context(
     stage_started_at = _perf_counter()
     raw_runtime_context_block = agent_directory_service.build_agent_runtime_context_block(
         normalized_agent_id,
-        limit=limit,
+        limit=bounded_limit,
         agent_snapshot=agent,
         group_events_snapshot=group_events,
         inbox_messages_snapshot=inbox_messages,
@@ -332,7 +333,7 @@ def build_agent_context(
         stage_started_at = _perf_counter()
         research_org_result = _build_research_organization_context_block(
             normalized_agent_id,
-            limit=limit,
+            limit=bounded_limit,
         )
         research_org_context_block = research_org_result["contextBlock"]
         timings["researchOrgContextMs"] = _elapsed_ms(stage_started_at)
@@ -501,7 +502,7 @@ def _build_research_organization_context_block(agent_id: str, *, limit: int = 6)
     """Return the research organization context block, logging service failures at the turn seam."""
 
     normalized_agent_id = str(agent_id or "").strip()
-    bounded_limit = max(1, int(limit or 1))
+    bounded_limit = _bounded_limit(limit, default=6)
     try:
         from core.web.services import agent_directory_service, research_organization_service
 
@@ -668,6 +669,8 @@ def prepare_subagent_spawn(
 ) -> SubAgentContextPacket:
     """Prepare an isolated or explicit fork context for a temporary sub-agent."""
 
+    if isinstance(context_mode, bytes):
+        context_mode = context_mode.decode("utf-8", errors="replace")
     normalized_mode = str(context_mode or "isolated").strip().lower()
     if normalized_mode not in {"isolated", "fork"}:
         raise ValueError("Sub-agent context_mode must be isolated or fork.")
@@ -737,7 +740,9 @@ def record_agent_turn_result(
     source_run_id = str(run_id or result_payload.get("runId") or result_payload.get("turnId") or "").strip()
     status = agent_run_store.result_status(result_payload)
     summary = agent_run_store.result_summary(result_payload)
-    tool_call_count = _safe_int(result_payload.get("tool_call_count") or result_payload.get("toolCallCount"))
+    tool_call_count = _safe_int(
+        _first_present(result_payload.get("tool_call_count"), result_payload.get("toolCallCount"))
+    )
     created_at = _now()
     payload = {
         "eventId": event_id,
@@ -800,7 +805,9 @@ def record_subagent_result(parent_run_id: str, sub_run_id: str, result: dict[str
         sub_run_id=payload["subRunId"],
         status=status,
         summary=summary,
-        tool_call_count=_safe_int(result_payload.get("tool_call_count") or result_payload.get("toolCallCount")),
+        tool_call_count=_safe_int(
+            _first_present(result_payload.get("tool_call_count"), result_payload.get("toolCallCount"))
+        ),
         timestamp=created_at,
         result=result_payload,
     )
@@ -820,13 +827,19 @@ def record_subagent_result(parent_run_id: str, sub_run_id: str, result: dict[str
 def list_agent_runs_for_agent(agent_id: str, *, limit: int = 20) -> dict[str, Any]:
     """Return recent bounded AgentRun/SubAgentRun snapshots for one persistent Agent."""
 
-    return agent_run_store.list_agent_runs_for_agent(agent_id, limit=limit)
+    return agent_run_store.list_agent_runs_for_agent(
+        agent_id,
+        limit=_bounded_limit(limit, default=20),
+    )
 
 
 def list_agent_runs_for_agents(agent_ids: list[str], *, limit: int = 20) -> dict[str, Any]:
     """Return recent bounded AgentRun/SubAgentRun snapshots for many persistent Agents."""
 
-    return agent_run_store.list_agent_runs_for_agents(agent_ids, limit=limit)
+    return agent_run_store.list_agent_runs_for_agents(
+        _coerce_str_list(agent_ids),
+        limit=_bounded_limit(limit, default=20),
+    )
 
 
 def _append_agent_event(project_root: Path, workspace_path: str, filename: str, payload: dict[str, Any]) -> None:
@@ -1171,9 +1184,8 @@ def _project_agent_lane_related_files(lane: dict[str, Any]) -> list[str]:
     for module in list(lane.get("modules") or [])[:8]:
         if not isinstance(module, dict):
             continue
-        for item in list(module.get("relatedFiles") or []):
-            value = str(item or "").strip()
-            if value and value not in files:
+        for value in _coerce_str_list(module.get("relatedFiles")):
+            if value not in files:
                 files.append(value)
             if len(files) >= 8:
                 return files
@@ -1327,27 +1339,16 @@ def _project_agent_registry_entry_from_sources(
         "responsibilityLane": responsibility_lane,
         "managementScope": {
             "summary": str(management_scope.get("summary") or "").strip(),
-            "files": [
-                str(item or "").strip()
-                for item in list(management_scope.get("files") or [])[:8]
-                if str(item or "").strip()
-            ],
-            "taskTypes": [
-                str(item or "").strip()
-                for item in list(management_scope.get("taskTypes") or [])[:8]
-                if str(item or "").strip()
-            ],
+            "files": _coerce_str_list(management_scope.get("files"), limit=8),
+            "taskTypes": _coerce_str_list(management_scope.get("taskTypes"), limit=8),
         },
-        "handoffTargets": [
-            str(item or "").strip()
-            for item in list(
-                explicit.get("handoffTargets")
-                or metadata.get("handoffTargets")
-                or lane_default.get("handoffTargets")
-                or []
-            )[:8]
-            if str(item or "").strip()
-        ],
+        "handoffTargets": _coerce_str_list(
+            explicit.get("handoffTargets")
+            or metadata.get("handoffTargets")
+            or lane_default.get("handoffTargets")
+            or [],
+            limit=8,
+        ),
         "outOfScopePolicy": str(
             explicit.get("outOfScopePolicy")
             or metadata.get("outOfScopePolicy")
@@ -1392,12 +1393,9 @@ def _project_agent_handoff_entries(
     *,
     limit: int,
 ) -> list[dict[str, Any]]:
+    bounded_limit = _bounded_limit(limit, default=8)
     current_agent_id = str(current_entry.get("agentId") or "").strip()
-    targets = [
-        str(item or "").strip()
-        for item in list(current_entry.get("handoffTargets") or [])
-        if str(item or "").strip()
-    ]
+    targets = _coerce_str_list(current_entry.get("handoffTargets"))
     active_entries = [
         item
         for item in entries
@@ -1413,8 +1411,8 @@ def _project_agent_handoff_entries(
             or str(item.get("responsibilityLane") or "").strip() in targets
         ]
         if matched:
-            return matched[:limit]
-    return active_entries[:limit]
+            return matched[:bounded_limit]
+    return active_entries[:bounded_limit]
 
 
 def _format_project_agent_registry_entry(
@@ -1434,10 +1432,8 @@ def _format_project_agent_registry_entry(
     ]
     if include_scope:
         summary = str(scope.get("summary") or "").strip()
-        files = ", ".join(str(item or "").strip() for item in list(scope.get("files") or [])[:4] if str(item or "").strip())
-        task_types = ", ".join(
-            str(item or "").strip() for item in list(scope.get("taskTypes") or [])[:4] if str(item or "").strip()
-        )
+        files = ", ".join(_coerce_str_list(scope.get("files"), limit=4))
+        task_types = ", ".join(_coerce_str_list(scope.get("taskTypes"), limit=4))
         if summary:
             parts.append(f"scope={summary}")
         if files:
@@ -1480,11 +1476,67 @@ def _record_context_event(event_code: str, *, outcome: str, fields: dict[str, An
         return
 
 
-def _safe_int(value: Any) -> int:
+def _mapping_items(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, Mapping):
+        return [dict(value)]
+    if isinstance(value, (str, bytes)) or value is None:
+        return []
     try:
-        return int(value or 0)
+        iterator = list(value)
+    except TypeError:
+        return []
+    return [dict(item) for item in iterator if isinstance(item, Mapping)]
+
+
+def _first_present(*values: Any) -> Any:
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
+def _coerce_str_list(value: Any, *, limit: int | None = None) -> list[str]:
+    if value is None:
+        names: list[str] = []
+    elif isinstance(value, bytes):
+        text = value.decode("utf-8", errors="replace").strip()
+        names = [text] if text else []
+    elif isinstance(value, str):
+        text = value.strip()
+        names = [text] if text else []
+    elif isinstance(value, Mapping):
+        names = [str(key or "").strip() for key in value if str(key or "").strip()]
+    else:
+        try:
+            iterator = list(value)
+        except TypeError:
+            text = str(value or "").strip()
+            names = [text] if text else []
+        else:
+            names = []
+            for item in iterator:
+                text = str(item or "").strip()
+                if text and text not in names:
+                    names.append(text)
+    if limit is None:
+        return names
+    return names[: _bounded_limit(limit, default=len(names), minimum=0)]
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    if value is None:
+        return default
+    try:
+        return int(value)
     except (TypeError, ValueError):
-        return 0
+        return default
+
+
+def _bounded_limit(value: Any, *, default: int, minimum: int = 1) -> int:
+    parsed = _safe_int(value, default)
+    if parsed < minimum:
+        return minimum
+    return parsed
 
 
 def _now() -> str:
