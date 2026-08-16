@@ -13,6 +13,10 @@ export type DesktopShellStatus = {
   currentElectronTree?: string;
   packagedExe?: string;
   sourceNewerThanAsar?: boolean;
+  refreshBlocked?: boolean;
+  refreshBlockedReason?: string;
+  refreshBlockedDetail?: string;
+  refreshBlockedAt?: string;
 };
 
 export type DesktopShellRefreshSchedule = {
@@ -21,6 +25,7 @@ export type DesktopShellRefreshSchedule = {
   helperPid: number;
   waitPid: number;
   thenLifecycle: string;
+  reason?: string;
 };
 
 export type TrayLauncherFreshness = {
@@ -67,8 +72,9 @@ export function decidePackagedDesktopShellRefresh(input: {
   smoke: boolean;
   workbenchCloseCanary?: boolean;
   stale: boolean;
+  refreshBlocked?: boolean;
 }): "skip" | "refresh" {
-  if (!input.isPackaged || input.smoke || input.workbenchCloseCanary || !input.stale) {
+  if (!input.isPackaged || input.smoke || input.workbenchCloseCanary || !input.stale || input.refreshBlocked) {
     return "skip";
   }
   return "refresh";
@@ -81,15 +87,17 @@ export function decidePeriodicDesktopShellRefresh(input: {
   stale: boolean;
   refreshInFlight: boolean;
   shutdownApproved: boolean;
+  refreshBlocked?: boolean;
 }): "skip" | "refresh" {
-  if (input.refreshInFlight || input.shutdownApproved) {
+  if (input.refreshInFlight || input.shutdownApproved || input.refreshBlocked) {
     return "skip";
   }
   return decidePackagedDesktopShellRefresh({
     isPackaged: input.isPackaged,
     smoke: input.smoke,
     workbenchCloseCanary: input.workbenchCloseCanary,
-    stale: input.stale
+    stale: input.stale,
+    refreshBlocked: input.refreshBlocked
   });
 }
 
@@ -136,21 +144,26 @@ export function parseDesktopShellStatus(raw: string): DesktopShellStatus {
     ...(typeof parsed.packagedElectronTree === "string" ? { packagedElectronTree: parsed.packagedElectronTree } : {}),
     ...(typeof parsed.currentElectronTree === "string" ? { currentElectronTree: parsed.currentElectronTree } : {}),
     ...(typeof parsed.packagedExe === "string" ? { packagedExe: parsed.packagedExe } : {}),
-    ...(typeof parsed.sourceNewerThanAsar === "boolean" ? { sourceNewerThanAsar: parsed.sourceNewerThanAsar } : {})
+    ...(typeof parsed.sourceNewerThanAsar === "boolean" ? { sourceNewerThanAsar: parsed.sourceNewerThanAsar } : {}),
+    ...(typeof parsed.refreshBlocked === "boolean" ? { refreshBlocked: parsed.refreshBlocked } : {}),
+    ...(typeof parsed.refreshBlockedReason === "string" ? { refreshBlockedReason: parsed.refreshBlockedReason } : {}),
+    ...(typeof parsed.refreshBlockedDetail === "string" ? { refreshBlockedDetail: parsed.refreshBlockedDetail } : {}),
+    ...(typeof parsed.refreshBlockedAt === "string" ? { refreshBlockedAt: parsed.refreshBlockedAt } : {})
   };
 }
 
 export function parseDesktopShellRefreshSchedule(raw: string): DesktopShellRefreshSchedule {
   const parsed = JSON.parse(raw) as DesktopShellRefreshSchedule;
-  if (!parsed || parsed.schemaVersion !== 1 || parsed.scheduled !== true) {
+  if (!parsed || parsed.schemaVersion !== 1 || typeof parsed.scheduled !== "boolean") {
     throw new Error("invalid desktop shell refresh schedule");
   }
   return {
     schemaVersion: 1,
-    scheduled: true,
+    scheduled: Boolean(parsed.scheduled),
     helperPid: Number(parsed.helperPid || 0),
     waitPid: Number(parsed.waitPid || 0),
-    thenLifecycle: String(parsed.thenLifecycle || "")
+    thenLifecycle: String(parsed.thenLifecycle || ""),
+    ...(typeof parsed.reason === "string" && parsed.reason ? { reason: parsed.reason } : {})
   };
 }
 

@@ -54,6 +54,19 @@ describe("desktop shell freshness", () => {
     );
     expect(decidePackagedDesktopShellRefresh({ isPackaged: true, smoke: false, stale: false })).toBe("skip");
     expect(decidePackagedDesktopShellRefresh({ isPackaged: true, smoke: false, stale: true })).toBe("refresh");
+    expect(
+      decidePackagedDesktopShellRefresh({ isPackaged: true, smoke: false, stale: true, refreshBlocked: true })
+    ).toBe("skip");
+    expect(
+      decidePeriodicDesktopShellRefresh({
+        isPackaged: true,
+        smoke: false,
+        stale: true,
+        refreshInFlight: false,
+        shutdownApproved: false,
+        refreshBlocked: true
+      })
+    ).toBe("skip");
   });
 
   it("skips periodic refresh while another shell refresh is in flight or shutdown is approved", () => {

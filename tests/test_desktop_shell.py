@@ -97,6 +97,33 @@ def test_schedule_desktop_shell_refresh_spawns_pythonw_helper(tmp_path, monkeypa
     assert result["scheduled"] is True
 
 
+def test_schedule_desktop_shell_refresh_skips_during_recent_failure(tmp_path, monkeypatch):
+    desktop_shell.record_desktop_shell_refresh_failure(
+        tmp_path,
+        reason="rebuild_failed",
+        detail="EBUSY",
+    )
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("refresh helper should not spawn during cooldown")
+
+    monkeypatch.setattr(desktop_shell.subprocess, "Popen", fail_if_called)
+    result = desktop_shell.schedule_desktop_shell_refresh(wait_pid=44, project_root=tmp_path)
+    assert result["scheduled"] is False
+    assert result["reason"] == "refresh_cooldown"
+
+
+def test_recent_desktop_shell_refresh_failure_blocks_inspect(tmp_path):
+    desktop_shell.record_desktop_shell_refresh_failure(
+        tmp_path,
+        reason="rebuild_failed",
+        detail="EBUSY",
+    )
+    status = desktop_shell.inspect_desktop_shell(tmp_path)
+    assert status["refreshBlocked"] is True
+    assert status["refreshBlockedReason"] == "rebuild_failed"
+
+
 def test_launch_packaged_desktop_shell_does_not_hide_gui(tmp_path, monkeypatch):
     exe = desktop_shell.packaged_desktop_exe(tmp_path)
     exe.parent.mkdir(parents=True)

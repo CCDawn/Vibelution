@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,9 @@ PROVENANCE_RELATIVE = (
 ASAR_RELATIVE = Path("dist") / "desktop" / "win-unpacked" / "resources" / "app.asar"
 ELECTRON_SRC_RELATIVE = Path("desktop") / "electron" / "src"
 ELECTRON_PACKAGE_DIR = Path("desktop") / "electron"
+REFRESH_FAILURE_RELATIVE = Path(".runtime") / "launcher" / "desktop-shell-refresh-failure.json"
+REFRESH_LOCK_RELATIVE = Path(".runtime") / "launcher" / "desktop-shell-refresh.lock"
+REFRESH_COOLDOWN_SECONDS = 900.0
 
 CREATE_NEW_PROCESS_GROUP = int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200))
 CREATE_BREAKAWAY_FROM_JOB = 0x01000000
@@ -44,6 +48,91 @@ def packaged_provenance_path(project_root: Path | str = PROJECT_ROOT) -> Path:
 
 def packaged_asar_path(project_root: Path | str = PROJECT_ROOT) -> Path:
     return Path(project_root) / ASAR_RELATIVE
+
+
+def _refresh_failure_path(project_root: Path | str) -> Path:
+    return Path(project_root) / REFRESH_FAILURE_RELATIVE
+
+
+def _refresh_lock_path(project_root: Path | str) -> Path:
+    return Path(project_root) / REFRESH_LOCK_RELATIVE
+
+
+def record_desktop_shell_refresh_failure(
+    project_root: Path | str,
+    *,
+    reason: str,
+    detail: str,
+) -> None:
+    path = _refresh_failure_path(project_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schemaVersion": 1,
+        "failedAt": datetime.now(timezone.utc).isoformat(),
+        "reason": str(reason or "refresh_failed"),
+        "detail": str(detail or "")[:800],
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def clear_desktop_shell_refresh_failure(project_root: Path | str) -> None:
+    path = _refresh_failure_path(project_root)
+    if not path.is_file():
+        return
+    try:
+        path.unlink()
+    except OSError:
+        return
+
+
+def recent_desktop_shell_refresh_failure(
+    project_root: Path | str,
+    *,
+    cooldown_seconds: float = REFRESH_COOLDOWN_SECONDS,
+) -> dict[str, Any] | None:
+    path = _refresh_failure_path(project_root)
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict) or payload.get("schemaVersion") != 1:
+        return None
+    failed_at = str(payload.get("failedAt") or "").strip()
+    if not failed_at:
+        return payload
+    try:
+        failed_time = datetime.fromisoformat(failed_at.replace("Z", "+00:00"))
+        age_seconds = (datetime.now(timezone.utc) - failed_time.astimezone(timezone.utc)).total_seconds()
+    except ValueError:
+        return payload
+    if age_seconds > max(1.0, float(cooldown_seconds)):
+        return None
+    return payload
+
+
+def _acquire_desktop_shell_refresh_lock(project_root: Path | str) -> bool:
+    path = _refresh_lock_path(project_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with path.open("x", encoding="utf-8") as handle:
+            handle.write(json.dumps({"pid": os.getpid(), "startedAt": datetime.now(timezone.utc).isoformat()}))
+        return True
+    except FileExistsError:
+        return False
+    except OSError:
+        return False
+
+
+def _release_desktop_shell_refresh_lock(project_root: Path | str) -> None:
+    path = _refresh_lock_path(project_root)
+    if not path.is_file():
+        return
+    try:
+        path.unlink()
+    except OSError:
+        return
 
 
 def inspect_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> dict[str, Any]:
@@ -71,7 +160,8 @@ def inspect_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> dict[str, 
     else:
         reason = "current"
         stale = False
-    return {
+    refresh_block = recent_desktop_shell_refresh_failure(root)
+    payload: dict[str, Any] = {
         "schemaVersion": 1,
         "stale": stale,
         "reason": reason,
@@ -79,7 +169,17 @@ def inspect_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> dict[str, 
         "currentElectronTree": current_tree,
         "packagedExe": str(exe_path),
         "sourceNewerThanAsar": source_newer,
+        "refreshBlocked": refresh_block is not None,
     }
+    if refresh_block is not None:
+        payload.update(
+            {
+                "refreshBlockedReason": str(refresh_block.get("reason") or ""),
+                "refreshBlockedDetail": str(refresh_block.get("detail") or "")[:220],
+                "refreshBlockedAt": str(refresh_block.get("failedAt") or ""),
+            }
+        )
+    return payload
 
 
 def schedule_desktop_shell_refresh(
@@ -92,6 +192,24 @@ def schedule_desktop_shell_refresh(
     """Start a detached helper that rebuilds the shell after ``wait_pid`` exits."""
 
     root = Path(project_root)
+    if recent_desktop_shell_refresh_failure(root) is not None:
+        return {
+            "schemaVersion": 1,
+            "scheduled": False,
+            "helperPid": 0,
+            "waitPid": int(wait_pid),
+            "thenLifecycle": str(then_lifecycle or "").strip().lower(),
+            "reason": "refresh_cooldown",
+        }
+    if not _acquire_desktop_shell_refresh_lock(root):
+        return {
+            "schemaVersion": 1,
+            "scheduled": False,
+            "helperPid": 0,
+            "waitPid": int(wait_pid),
+            "thenLifecycle": str(then_lifecycle or "").strip().lower(),
+            "reason": "refresh_in_progress",
+        }
     helper_python = _pythonw(python_executable or sys.executable)
     entry = root / "scripts" / "vibelution_desktop_entry.py"
     args = [
@@ -111,15 +229,19 @@ def schedule_desktop_shell_refresh(
         args.extend(["--then-lifecycle", lifecycle])
     flags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB
     kwargs = no_window_subprocess_kwargs(creationflags=flags)
-    process = subprocess.Popen(
-        args,
-        cwd=str(root),
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        close_fds=True,
-        **kwargs,
-    )
+    try:
+        process = subprocess.Popen(
+            args,
+            cwd=str(root),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            **kwargs,
+        )
+    except OSError as exc:
+        _release_desktop_shell_refresh_lock(root)
+        raise RuntimeError(f"desktop shell refresh helper did not start: {exc}") from exc
     return {
         "schemaVersion": 1,
         "scheduled": True,
@@ -139,23 +261,50 @@ def run_desktop_shell_refresh(
     """Wait for the old shell to exit, rebuild from checkout, then relaunch."""
 
     root = Path(project_root)
-    _append_refresh_log(root, "refresh.started", wait_pid=int(wait_pid), then_lifecycle=str(then_lifecycle or ""))
-    if int(wait_pid) > 0:
-        _wait_for_pid_exit(int(wait_pid), timeout_seconds=wait_timeout_seconds)
-    rebuilt = rebuild_desktop_shell(project_root=root)
-    launched = launch_packaged_desktop_shell(project_root=root, then_lifecycle=then_lifecycle)
-    _append_refresh_log(
-        root,
-        "refresh.finished",
-        wait_pid=int(wait_pid),
-        helper_launch_pid=int(launched.get("pid") or 0),
-    )
-    return {
-        "schemaVersion": 1,
-        "refreshed": True,
-        "rebuild": rebuilt,
-        "launch": launched,
-    }
+    try:
+        _append_refresh_log(root, "refresh.started", wait_pid=int(wait_pid), then_lifecycle=str(then_lifecycle or ""))
+        if int(wait_pid) > 0:
+            _wait_for_pid_exit(int(wait_pid), timeout_seconds=wait_timeout_seconds)
+        try:
+            rebuilt = rebuild_desktop_shell(project_root=root)
+        except Exception as exc:
+            detail = str(exc)
+            record_desktop_shell_refresh_failure(root, reason="rebuild_failed", detail=detail)
+            _append_refresh_log(root, "refresh.aborted", wait_pid=int(wait_pid), detail=detail[-800:])
+            return {
+                "schemaVersion": 1,
+                "refreshed": False,
+                "reason": "rebuild_failed",
+                "message": detail[-800:],
+            }
+        try:
+            launched = launch_packaged_desktop_shell(project_root=root, then_lifecycle=then_lifecycle)
+        except Exception as exc:
+            detail = str(exc)
+            record_desktop_shell_refresh_failure(root, reason="launch_failed", detail=detail)
+            _append_refresh_log(root, "refresh.aborted", wait_pid=int(wait_pid), detail=detail[-800:])
+            return {
+                "schemaVersion": 1,
+                "refreshed": False,
+                "reason": "launch_failed",
+                "message": detail[-800:],
+                "rebuild": rebuilt,
+            }
+        clear_desktop_shell_refresh_failure(root)
+        _append_refresh_log(
+            root,
+            "refresh.finished",
+            wait_pid=int(wait_pid),
+            helper_launch_pid=int(launched.get("pid") or 0),
+        )
+        return {
+            "schemaVersion": 1,
+            "refreshed": True,
+            "rebuild": rebuilt,
+            "launch": launched,
+        }
+    finally:
+        _release_desktop_shell_refresh_lock(root)
 
 
 def rebuild_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> dict[str, Any]:
