@@ -37,7 +37,11 @@ import { fetchLauncherControlToken, runDesktopActionOnce } from "./protocol/desk
 import { applyProjectSlot } from "./protocol/applyProjectSlot.js";
 import {
   fetchLauncherBranchInstances,
-  fetchLauncherStatusSummary
+  fetchLauncherFreshness,
+  fetchLauncherStatusSummary,
+  formatLauncherStatusSummary,
+  postLauncherControl,
+  type LauncherControlPostPath
 } from "./protocol/launcherControlClient.js";
 import {
   createLauncherIpcHost,
@@ -111,7 +115,7 @@ import {
   desktopWorkbenchCloseCanarySummaryPath
 } from "./smoke/workbenchCloseCanary.js";
 import { prepareDesktopSmokeShutdown } from "./smoke/desktopSmokeShutdown.js";
-import { createDesktopTray } from "./tray/desktopTray.js";
+import { createDesktopTray, DESKTOP_TRAY_MENU_LABELS } from "./tray/desktopTray.js";
 import {
   captureRunningInstanceIds,
   clearTrayRestartAllPending,
@@ -2025,6 +2029,61 @@ function startPeriodicShellFreshnessWatch(): void {
   void periodicShellFreshnessTimer;
 }
 
+async function runTrayLauncherPost(
+  path: LauncherControlPostPath,
+  label: string,
+  trigger?: string,
+  body?: Record<string, unknown>
+): Promise<void> {
+  try {
+    const context = await resolveTrayLauncherControlContext();
+    await postLauncherControl({
+      launcherOrigin: context.launcherOrigin,
+      controlToken: context.controlToken,
+      path,
+      trigger,
+      body
+    });
+    notifyDesktopTray("Vibelution", `${label}请求已发送。`);
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    notifyDesktopTray("Vibelution", `${label}失败：${detail.slice(0, 300)}`, "warning");
+  }
+}
+
+async function runTrayLauncherStatus(): Promise<void> {
+  try {
+    const context = await resolveTrayLauncherControlContext();
+    const summary = await fetchLauncherStatusSummary(context);
+    notifyDesktopTray("Vibelution", formatLauncherStatusSummary(summary));
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    notifyDesktopTray("Vibelution", `获取状态失败：${detail.slice(0, 300)}`, "warning");
+  }
+}
+
+async function runTrayStopAll(): Promise<void> {
+  try {
+    const context = await resolveTrayLauncherControlContext();
+    await postLauncherControl({
+      launcherOrigin: context.launcherOrigin,
+      controlToken: context.controlToken,
+      path: "/api/launcher/force-stop",
+      trigger: "electron_tray_stop_all"
+    });
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    notifyDesktopTray("Vibelution", `停止全部失败：${detail.slice(0, 300)}`, "warning");
+    return;
+  }
+  try {
+    await requestDesktopShellExit();
+  } catch (error: unknown) {
+    console.warn(error instanceof Error ? error.message : String(error));
+  }
+}
+
 async function runTrayLifecycle(operation: WorkbenchLifecycleOperation, label: string): Promise<void> {
   try {
     await orchestrateLauncherLifecycle(operation, { schemaVersion: 1, path: operation });
@@ -2484,11 +2543,53 @@ app.whenReady()
           console.warn(error instanceof Error ? error.message : String(error));
         });
       },
-      restartAll: () => {
-        void runTrayRestartAll();
+      listInstances: async () => {
+        return fetchLauncherBranchInstances({
+          ...(await resolveTrayControlContextOrLoopback()),
+          requestTimeoutMs: 20_000
+        });
       },
-      quitAll: () => {
-        void runTrayQuitAll();
+      getFreshness: async () => {
+        return fetchLauncherFreshness({
+          ...(await resolveTrayControlContextOrLoopback()),
+          requestTimeoutMs: 20_000
+        });
+      },
+      restartLauncher: () => {
+        void restartLauncherShell();
+      },
+      startInstance: (instanceId, label) => {
+        void runTrayLauncherPost(
+          "/api/launcher/branch-instances/start",
+          `启动 ${label}`,
+          "electron_tray_start_instance",
+          { instanceId }
+        );
+      },
+      stopInstance: (instanceId, label) => {
+        void runTrayLauncherPost(
+          "/api/launcher/branch-instances/stop",
+          `停止 ${label}`,
+          "electron_tray_stop_instance",
+          { instanceId }
+        );
+      },
+      restartProject: () => {
+        void runTrayLauncherPost("/api/launcher/restart", DESKTOP_TRAY_MENU_LABELS.restartProject);
+      },
+      rebuildAndStart: () => {
+        void runTrayLauncherPost("/api/launcher/rebuild-and-start", DESKTOP_TRAY_MENU_LABELS.rebuildAndStart);
+      },
+      showStatus: () => {
+        void runTrayLauncherStatus();
+      },
+      quit: () => {
+        void requestDesktopShellExit().catch((error: unknown) => {
+          console.warn(error instanceof Error ? error.message : String(error));
+        });
+      },
+      stopAll: () => {
+        void runTrayStopAll();
       }
     });
     startPeriodicShellFreshnessWatch();
