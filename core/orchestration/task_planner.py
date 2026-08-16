@@ -21,18 +21,56 @@ from core.prompt_manager.task_analyzer import TaskStatus
 _TASK_STORAGE_OVERRIDE: ContextVar[str] = ContextVar("vibelution_task_storage_override", default="")
 
 
+def _coerce_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
 def _as_mapping(value: Any) -> Dict[str, Any]:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return {}
+        try:
+            value = json.loads(text)
+        except json.JSONDecodeError:
+            return {}
     if isinstance(value, Mapping):
         return dict(value)
     return {}
 
 
+def _mapping_get(mapping: Mapping[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in mapping:
+            return mapping.get(key)
+    return None
+
+
 def _mapping_items(value: Any) -> List[Dict[str, Any]]:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith("{") or text.startswith("["):
+            try:
+                value = json.loads(text)
+            except json.JSONDecodeError:
+                return []
+        else:
+            return []
     if isinstance(value, Mapping):
-        if any(key in value for key in ("description", "name", "status", "is_completed", "id")):
+        if any(key in value for key in ("description", "name", "status", "is_completed", "isCompleted", "id")):
             return [dict(value)]
         return [dict(item) for item in value.values() if isinstance(item, Mapping)]
-    if isinstance(value, (str, bytes)) or value is None:
+    if value is None:
         return []
     try:
         iterator = list(value)
@@ -51,23 +89,25 @@ def _coerce_str_list(value: Any) -> List[str]:
         text = value.strip()
         return [text] if text else []
     if isinstance(value, Mapping):
-        return [str(key or "").strip() for key in value if str(key or "").strip()]
+        return [_coerce_text(key).strip() for key in value if _coerce_text(key).strip()]
     try:
         iterator = list(value)
     except TypeError:
-        text = str(value or "").strip()
+        text = _coerce_text(value).strip()
         return [text] if text else []
     names: List[str] = []
     for item in iterator:
-        text = str(item or "").strip()
+        text = _coerce_text(item).strip()
         if text and text not in names:
             names.append(text)
     return names
 
 
 def _safe_int(value: Any, default: int | None = 0) -> int | None:
-    if value is None:
+    if isinstance(value, bool) or value is None:
         return default
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
     try:
         return int(value)
     except (TypeError, ValueError):
@@ -75,8 +115,10 @@ def _safe_int(value: Any, default: int | None = 0) -> int | None:
 
 
 def _safe_float(value: Any, default: float) -> float:
-    if value is None:
+    if isinstance(value, bool) or value is None:
         return default
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
     try:
         return float(value)
     except (TypeError, ValueError):
@@ -88,6 +130,8 @@ def _coerce_bool(value: Any, default: bool) -> bool:
         return value
     if value is None:
         return default
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
     if isinstance(value, (int, float)):
         return bool(value)
     normalized = str(value).strip().lower()
@@ -126,11 +170,17 @@ def _coerce_int_list(value: Any) -> List[int]:
 def _coerce_substeps(value: Any) -> List[Dict[str, Any]]:
     if value is None:
         return []
-    if isinstance(value, bytes):
-        value = value.decode("utf-8", errors="replace")
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
     if isinstance(value, str):
         text = value.strip()
-        return [{"description": text}] if text else []
+        if text.startswith("{") or text.startswith("["):
+            try:
+                value = json.loads(text)
+            except json.JSONDecodeError:
+                return [{"description": text}] if text else []
+        else:
+            return [{"description": text}] if text else []
     if isinstance(value, Mapping):
         return [dict(value)]
     try:
@@ -142,7 +192,7 @@ def _coerce_substeps(value: Any) -> List[Dict[str, Any]]:
         if isinstance(item, Mapping):
             steps.append(dict(item))
             continue
-        text = str(item or "").strip()
+        text = _coerce_text(item).strip()
         if text:
             steps.append({"description": text})
     return steps
@@ -289,9 +339,11 @@ class TaskManager:
         try:
             with open(fpath, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            self._goal = data.get("goal", data.get("generation_goal", ""))
-            self._created_at = data.get("created_at", "")
-            raw = data.get("tasks", data.get("subtasks", []))
+            self._goal = _coerce_text(
+                _mapping_get(_as_mapping(data), "goal", "generation_goal")
+            )
+            self._created_at = _coerce_text(_mapping_get(_as_mapping(data), "created_at", "createdAt"))
+            raw = _mapping_get(_as_mapping(data), "tasks", "subtasks") or []
             self._light_tasks = [self._normalize_light_task(task) for task in _mapping_items(raw)]
             self._next_light_id = max([t["id"] for t in self._light_tasks], default=0) + 1
         except (json.JSONDecodeError, OSError, TypeError, ValueError):
@@ -321,30 +373,32 @@ class TaskManager:
 
     def _normalize_light_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
         data = _as_mapping(task)
-        task_id = _safe_int(data.get("id"), self._next_light_id)
+        task_id = _safe_int(_mapping_get(data, "id"), self._next_light_id)
         if task_id is None:
             task_id = self._next_light_id
-        is_completed = _coerce_bool(data.get("is_completed"), False)
-        status = data.get("status") or ("completed" if is_completed else "pending")
-        description = data.get("description") or data.get("name") or ""
-        created_at = data.get("created_at") or datetime.now().isoformat()
+        is_completed = _coerce_bool(_mapping_get(data, "is_completed", "isCompleted"), False)
+        status = _mapping_get(data, "status") or ("completed" if is_completed else "pending")
+        description = _coerce_text(
+            _mapping_get(data, "description", "name") or ""
+        )
+        created_at = _mapping_get(data, "created_at", "createdAt") or datetime.now().isoformat()
         return {
             "id": task_id,
-            "name": data.get("name") or description,
+            "name": _coerce_text(_mapping_get(data, "name") or description),
             "description": description,
             "status": status,
             "is_completed": str(status) == TaskStatus.COMPLETED.value or is_completed,
-            "result_summary": data.get("result_summary", ""),
-            "substeps": _coerce_substeps(data.get("substeps")),
+            "result_summary": _coerce_text(_mapping_get(data, "result_summary", "resultSummary")),
+            "substeps": _coerce_substeps(_mapping_get(data, "substeps")),
             "created_at": created_at,
-            "started_at": data.get("started_at"),
-            "completed_at": data.get("completed_at"),
-            "priority": data.get("priority", TaskPriority.MEDIUM.value),
-            "estimated_hours": _safe_float(data.get("estimated_hours"), 1.0),
-            "actual_hours": _safe_float(data.get("actual_hours"), 0.0),
-            "dependencies": _coerce_str_list(data.get("dependencies")),
-            "tags": _coerce_str_list(data.get("tags")),
-            "metadata": _as_mapping(data.get("metadata")),
+            "started_at": _mapping_get(data, "started_at", "startedAt"),
+            "completed_at": _mapping_get(data, "completed_at", "completedAt"),
+            "priority": _mapping_get(data, "priority") or TaskPriority.MEDIUM.value,
+            "estimated_hours": _safe_float(_mapping_get(data, "estimated_hours", "estimatedHours"), 1.0),
+            "actual_hours": _safe_float(_mapping_get(data, "actual_hours", "actualHours"), 0.0),
+            "dependencies": _coerce_str_list(_mapping_get(data, "dependencies")),
+            "tags": _coerce_str_list(_mapping_get(data, "tags")),
+            "metadata": _as_mapping(_mapping_get(data, "metadata")),
         }
 
     def _find_light_task(self, task_id: str | int) -> Optional[Dict[str, Any]]:
@@ -366,21 +420,25 @@ class TaskManager:
     def _priority_from_raw(self, raw: Any) -> TaskPriority:
         if isinstance(raw, TaskPriority):
             return raw
+        if isinstance(raw, bool) or raw is None:
+            return TaskPriority.MEDIUM
+        if isinstance(raw, (bytes, bytearray, memoryview)):
+            raw = bytes(raw).decode("utf-8", errors="replace")
         try:
             return TaskPriority(int(raw))
         except (TypeError, ValueError):
             try:
-                return TaskPriority[str(raw).upper()]
+                return TaskPriority[_coerce_text(raw).upper()]
             except (KeyError, TypeError):
                 return TaskPriority.MEDIUM
 
     def _status_from_raw(self, raw: Any, is_completed: bool = False) -> TaskStatus:
         if isinstance(raw, TaskStatus):
             return raw
-        if is_completed:
+        if _coerce_bool(is_completed, False):
             return TaskStatus.COMPLETED
         try:
-            return TaskStatus(str(raw))
+            return TaskStatus(_coerce_text(raw))
         except ValueError:
             return TaskStatus.PENDING
 
@@ -502,7 +560,7 @@ class TaskManager:
         task.status = TaskStatus.COMPLETED
         task.completed_at = datetime.now()
         task.started_at = task.started_at or task.completed_at
-        task.result_summary = result_summary
+        task.result_summary = _coerce_text(result_summary)
         task.actual_hours = (task.completed_at - task.started_at).total_seconds() / 3600
         self._stats["tasks_completed"] += 1
         self._apply_task_to_light(task)
@@ -516,7 +574,7 @@ class TaskManager:
             return False
         task.status = TaskStatus.FAILED
         task.completed_at = datetime.now()
-        task.result_summary = reason
+        task.result_summary = _coerce_text(reason)
         self._stats["tasks_failed"] += 1
         self._apply_task_to_light(task)
         self._save_tasks()
@@ -610,23 +668,26 @@ class TaskManager:
 
     def task_create(self, tasks: List[Dict[str, Any]], goal: str = "") -> str:
         """创建任务清单（清空旧清单），返回摘要。"""
-        self._goal = goal
+        self._goal = _coerce_text(goal)
         self._light_tasks = []
         self._next_light_id = 1
         self._created_at = datetime.now().isoformat()
         for task in _mapping_items(tasks):
-            description = str(task.get("description") or task.get("name") or "").strip()
+            description = _coerce_text(_mapping_get(task, "description", "name")).strip()
+            estimated_hours = _mapping_get(task, "estimated_hours", "estimatedHours")
             light = self._normalize_light_task(
                 {
                     "id": self._next_light_id,
                     "description": description,
-                    "name": task.get("name") or description,
-                    "substeps": task.get("substeps", []),
-                    "priority": task.get("priority", TaskPriority.MEDIUM.value),
-                    "estimated_hours": task.get("estimated_hours", 1.0),
-                    "dependencies": task.get("dependencies", []),
-                    "tags": task.get("tags", []),
-                    "metadata": task.get("metadata", {}),
+                    "name": _coerce_text(_mapping_get(task, "name") or description),
+                    "substeps": _mapping_get(task, "substeps") or [],
+                    "priority": _mapping_get(task, "priority") or TaskPriority.MEDIUM.value,
+                    "estimated_hours": 1.0 if estimated_hours is None else estimated_hours,
+                    "dependencies": _mapping_get(task, "dependencies") or [],
+                    "tags": _mapping_get(task, "tags") or [],
+                    "metadata": _mapping_get(task, "metadata") or {},
+                    "is_completed": _mapping_get(task, "is_completed", "isCompleted"),
+                    "result_summary": _mapping_get(task, "result_summary", "resultSummary"),
                     "created_at": datetime.now().isoformat(),
                 }
             )
@@ -654,10 +715,11 @@ class TaskManager:
             task["status"] = TaskStatus.COMPLETED.value if completed else TaskStatus.PENDING.value
             task["completed_at"] = datetime.now().isoformat() if completed else None
         if result_summary is not None:
-            task["result_summary"] = result_summary
+            task["result_summary"] = _coerce_text(result_summary)
         if description is not None:
-            task["description"] = description
-            task["name"] = description
+            text = _coerce_text(description)
+            task["description"] = text
+            task["name"] = text
         self._save_tasks()
         status_label = "完成" if task["is_completed"] else "未完成"
         return f"任务 {task_id} 已更新: {status_label}"
