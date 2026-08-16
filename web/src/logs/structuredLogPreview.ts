@@ -1,6 +1,7 @@
 import { classifyLogText, type LogSeverity, type LogSeverityFilter, matchesSeverityFilter } from "./logSeverity";
+import { isUserActionStructuredLogRecord } from "./runtimeSceneEventFilters";
 
-export type StructuredLogCategory = "dialogue" | "thinking" | "tool" | "system" | "problem";
+export type StructuredLogCategory = "dialogue" | "thinking" | "tool" | "system" | "problem" | "user_action";
 export type StructuredLogCategoryFilter = "all" | StructuredLogCategory;
 
 export type StructuredLogEntry = {
@@ -159,6 +160,9 @@ function collectFields(record: Record<string, unknown>, payloadFields?: Record<s
 }
 
 function classifyCategory(record: Record<string, unknown>, message: string, level: LogSeverity): StructuredLogCategory {
+  if (isUserActionStructuredLogRecord(record)) {
+    return "user_action";
+  }
   if (level === "error" || level === "warning") {
     return "problem";
   }

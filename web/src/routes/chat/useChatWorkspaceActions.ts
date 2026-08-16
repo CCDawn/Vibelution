@@ -13,6 +13,7 @@ import type { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import { isTempSessionId } from "../sessionOptimisticIds";
 import { prefetchSessionDetailWindow } from "./chatSessionDetailHelpers";
 import { isBusyPhase } from "./chatCodingRouteViewModel";
+import { startUserAction } from "../../app/userActionTelemetry";
 import type { UseChatRouteSelectionResult } from "./useChatRouteSelection";
 import {
   chatAgentSessionStorage,
@@ -523,7 +524,21 @@ export function useChatWorkspaceActions({
       deleteSessionMutation.isPending
       && deleteSessionMutation.variables?.sessionId === session.id,
     );
-    if (alreadyDeletingThisSession || isBusyPhase(session.currentPhase || session.status)) {
+    if (alreadyDeletingThisSession) {
+      startUserAction("session_delete", { sessionId: session.id }, { destructive: true })
+        .blocked("delete_already_in_flight");
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [session.id]: t("deleteSessionBusy"),
+        __sessions__: "",
+      }));
+      return;
+    }
+    if (isBusyPhase(session.currentPhase || session.status)) {
+      startUserAction("session_delete", { sessionId: session.id }, { destructive: true })
+        .blocked("session_busy", {
+          phase: String(session.currentPhase || session.status || "").trim(),
+        });
       setSessionComposerErrors((current) => ({
         ...current,
         [session.id]: t("deleteSessionBusy"),
@@ -539,7 +554,31 @@ export function useChatWorkspaceActions({
     if (!session.agentId || !isAgentRootSession(session)) {
       return;
     }
+    const alreadyClearingThisSession = Boolean(
+      clearSessionHistoryMutation.isPending
+      && clearSessionHistoryMutation.variables?.sessionId === session.id,
+    );
+    if (alreadyClearingThisSession) {
+      startUserAction("session_clear_history", {
+        sessionId: session.id,
+        agentId: session.agentId,
+      }, { destructive: true })
+        .blocked("clear_already_in_flight");
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [session.id]: t("clearSessionHistoryBusy"),
+        __sessions__: "",
+      }));
+      return;
+    }
     if (isBusyPhase(session.currentPhase || session.status)) {
+      startUserAction("session_clear_history", {
+        sessionId: session.id,
+        agentId: session.agentId,
+      }, { destructive: true })
+        .blocked("session_busy", {
+          phase: String(session.currentPhase || session.status || "").trim(),
+        });
       setSessionComposerErrors((current) => ({
         ...current,
         [session.id]: t("clearSessionHistoryBusy"),
@@ -548,7 +587,7 @@ export function useChatWorkspaceActions({
       return;
     }
     openClearSessionHistoryConfirm(session);
-  }, [openClearSessionHistoryConfirm, setSessionComposerErrors, setSessionContextMenu, t]);
+  }, [clearSessionHistoryMutation, openClearSessionHistoryConfirm, setSessionComposerErrors, setSessionContextMenu, t]);
 
   const handleAddSessionToReview = useCallback((session: SessionSummary) => {
     setSessionContextMenu(null);
