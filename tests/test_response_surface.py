@@ -89,3 +89,104 @@ def test_record_token_usage_coerces_invalid_estimates():
     )
     assert usage == (0, 0)
     assert round_state.total_input_tokens == 0
+
+
+def test_response_surface_coerces_false_flags_json_usage_and_bytes_text():
+    usage = TokenUsageObservation(True, b"8", cached_input_tokens=b"2", observed="false")
+    assert usage.input_tokens == 0
+    assert usage.output_tokens == 8
+    assert usage.cached_input_tokens == 2
+    assert usage.observed is False
+
+    round_state = RoundStateController(max_iterations=3)
+    recorded = _controller().record_token_usage(
+        response=SimpleNamespace(usage_metadata='{"input_tokens": 9, "output_tokens": 4}'),
+        round_state=round_state,
+        current_turn="1",
+    )
+    assert recorded == (9, 4)
+    assert recorded.observed is True
+
+    observed = _controller().record_token_usage(
+        response=SimpleNamespace(
+            usage_metadata={"input_tokens": 12, "output_tokens": 1},
+            responseMetadata={"usageObservation": {"cachedInputTokens": "5"}},
+        ),
+        round_state=RoundStateController(max_iterations=3),
+        current_turn=1,
+    )
+    assert observed.cached_input_tokens == 5
+
+    sensed = []
+    mental = SimpleNamespace(
+        _tool_history="not-a-list",
+        sense_state=lambda **kwargs: sensed.append(kwargs) or "block",
+    )
+    surface = _controller()
+    assert (
+        surface.build_state_block(
+            raw_content=b"think",
+            has_tool_calls="false",
+            consecutive_failures="0",
+            iteration="3",
+            messages="abc",
+            mental_model=mental,
+            effective_max_token_limit="8000",
+            mental_model_enabled="true",
+        )
+        == ""
+    )
+    assert (
+        surface.build_state_block(
+            raw_content=b"think",
+            has_tool_calls=True,
+            consecutive_failures=0,
+            iteration=1,
+            messages=[],
+            mental_model=mental,
+            effective_max_token_limit=100,
+            mental_model_enabled="false",
+        )
+        == ""
+    )
+    assert (
+        surface.build_state_block(
+            raw_content=b"think",
+            has_tool_calls="true",
+            consecutive_failures=0,
+            iteration=2,
+            messages="abc",
+            mental_model=mental,
+            effective_max_token_limit="8000",
+            mental_model_enabled="true",
+        )
+        == "block"
+    )
+    assert sensed[0]["think_content"] == "think"
+    assert "尚无工具调用" in sensed[0]["tool_summary"]
+
+    pets = []
+    ui = SimpleNamespace(
+        note_token_usage=lambda *args, **kwargs: None,
+        stream_thought=lambda *_args, **_kwargs: None,
+        add_content=lambda *_args, **_kwargs: None,
+        set_pet_mental_state=lambda **kwargs: pets.append(kwargs),
+    )
+    feedback = _controller(ui=ui).apply_state_feedback(
+        processed=SimpleNamespace(
+            raw_content_clean=b"ok",
+            state_info='{"mood":"专注","feeling":"稳"}',
+        ),
+        record_language_drift=lambda _text: None,
+        record_inference_activity=lambda _text: None,
+        mental_model_enabled="true",
+    )
+    assert feedback["mood"] == "专注"
+    assert pets[0]["mood"] == "专注"
+
+    emitted = _controller(ui=ui).emit_visible_response(
+        raw_content="继续".encode("utf-8"),
+        processed=SimpleNamespace(visibleText="可见回答"),
+        tool_call_count="0",
+    )
+    assert emitted["last_visible_response_text"] == "可见回答"
