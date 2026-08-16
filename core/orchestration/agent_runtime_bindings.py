@@ -512,8 +512,15 @@ def _context_compression_trigger_source(reason: str) -> str:
     return "manual"
 
 
+def _coerce_nonnegative_int(value: Any) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _format_tool_result_replacement_summary(state: Dict[str, Any]) -> str:
-    replacements = list((state or {}).get("replacements") or [])
+    replacements = [item for item in list((state or {}).get("replacements") or []) if isinstance(item, dict)]
     if not replacements:
         return ""
     lines = ["工具结果压缩引用:"]
@@ -521,7 +528,7 @@ def _format_tool_result_replacement_summary(state: Dict[str, Any]) -> str:
         reference = str(item.get("reference") or "").strip()
         tool_call_id = str(item.get("toolCallId") or "").strip()
         tool_name = str(item.get("toolName") or "").strip() or "unknown"
-        original_chars = int(item.get("originalChars") or 0)
+        original_chars = _coerce_nonnegative_int(item.get("originalChars"))
         digest = str(item.get("sha256") or "").strip()[:16]
         lines.append(
             f"- {tool_name} tool_call_id={tool_call_id} reference={reference} chars={original_chars} sha256={digest}"
