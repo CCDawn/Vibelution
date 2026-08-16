@@ -8,6 +8,7 @@ from core.orchestration.turn_diagnostics import (
     build_llm_invocation_context,
     publish_llm_retry_status,
     record_turn_cache_diagnostics,
+    report_round_state_stall_signals,
 )
 
 
@@ -155,3 +156,80 @@ def test_record_turn_cache_diagnostics_notes_usage_and_survives_ui_errors():
     assert usage["source"] == "provider_usage"
     assert metadata["context_composition"]["limitTokens"] == 0
     assert failing_ui.notes == []
+
+
+def test_publish_and_invocation_context_decode_bytes_json_and_snake_runtime():
+    bus = _Bus()
+    publish_llm_retry_status(
+        attempt=b"3",
+        max_attempts="4",
+        category=b"network_error",
+        action=b"retry_with_backoff",
+        event_bus_getter=lambda: bus,
+    )
+    assert bus.events[0][1]["category"] == "network_error"
+    assert bus.events[0][1]["attempt"] == 3
+    assert bus.events[0][1]["max_attempts"] == 4
+
+    context = build_llm_invocation_context(
+        runtime_binding='{"agentId":"agent-json","direct_session_id":"session-json"}',
+        mode_value=b"chat",
+        orchestrator_kind="chat",
+        route_attempt="2",
+        turn_runtime_fn=lambda: {"run_kind": "supervised_case", "run_id": b"run-snake"},
+        status_context_fn=lambda: '{"turnId":"turn-json"}',
+    )
+    assert context.surface == "chat_turn"
+    assert context.session_id == "session-json"
+    assert context.agent_id == "agent-json"
+    assert context.run_kind == "supervised_case"
+    assert context.run_id == "run-snake"
+    assert context.metadata["routeAttempt"] == 2
+    assert context.metadata["turnId"] == "turn-json"
+
+
+def test_record_cache_diagnostics_rejects_string_split_and_parses_json_metadata():
+    token_usage = SimpleNamespace(
+        observed=True,
+        input_tokens=10,
+        output_tokens=1,
+        total_tokens=11,
+        cached_input_tokens=0,
+        cache_creation_input_tokens=0,
+        uncached_input_tokens=10,
+    )
+    ui = _Ui()
+    llm_usage, metadata = record_turn_cache_diagnostics(
+        token_usage=token_usage,
+        response={"responseMetadata": '{"provider":"openai","model":"gpt-test"}'},
+        messages="abc",
+        current_turn=b"9",
+        context_window_limit=True,
+        get_ui_fn=lambda: ui,
+        turn_runtime_fn=lambda: {"prompt_cache_partition": "part-snake"},
+    )
+    assert metadata["context_composition"]["turnId"] == "9"
+    assert metadata["context_composition"]["limitTokens"] == 0
+    assert metadata["context_composition"]["segments"] == []
+    assert llm_usage["promptCachePartition"] == "part-snake"
+
+
+def test_report_stall_signals_coerces_json_telemetry_and_false_reported():
+    class _State:
+        def runtime_telemetry(self):
+            return '{"consecutive_bookkeeping_tool_only_steps": 3}'
+
+    warnings: list[tuple[str, str]] = []
+
+    class _Log:
+        def warning(self, msg, tag=""):
+            warnings.append((str(msg), str(tag)))
+
+    reported = report_round_state_stall_signals(
+        _State(),
+        '{"consecutive_bookkeeping_tool_only_steps":"false"}',
+        debug_logger=_Log(),
+    )
+    assert reported.get("consecutive_bookkeeping_tool_only_steps") is True
+    assert warnings
+    assert warnings[0][1] == "STATE"
