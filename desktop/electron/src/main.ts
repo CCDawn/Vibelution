@@ -25,6 +25,7 @@ import {
 import { DesktopSessionMirrorQueue } from "./lifecycle/desktopSessionMirrorQueue.js";
 import { isWorkbenchCloseControlFetchFailure } from "./lifecycle/workbenchCloseFailOpen.js";
 import { waitForWorkbenchBackendSettledForWindowClose } from "./lifecycle/workbenchBackendCloseReadiness.js";
+import { readRuntimeManagerLauncherStatusSummary } from "./lifecycle/runtimeManagerStatusSnapshot.js";
 import {
   createConversationNotificationService,
   type ConversationNotificationService,
@@ -961,7 +962,13 @@ async function requestTransactionalWorkbenchClose(
     });
     await stopWorkbenchBackend(paths, bootstrap);
     const backendStopped = await waitForWorkbenchBackendSettledForWindowClose({
-      readStatus: () => fetchLauncherStatusSummary(context),
+      readStatus: async () => {
+        try {
+          return await fetchLauncherStatusSummary(context);
+        } catch {
+          return readRuntimeManagerLauncherStatusSummary(paths.workspaceRoot);
+        }
+      },
       timeoutMs: WORKBENCH_CLOSE_BACKEND_WAIT_MS
     });
     if (!backendStopped) {
