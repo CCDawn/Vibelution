@@ -79,6 +79,8 @@ describe("Chat session tool approval API", () => {
   it("owns conversation and child-session list transport", () => {
     expect(apiSource).toContain("/api/conversations");
     expect(apiSource).toContain("/child-sessions");
+    expect(apiSource).toContain("export function listSessionChildSessions");
+    expect(apiSource).not.toContain("export function listChildSessions");
     expect(lifecycleSource).not.toContain("/api/conversations");
   });
 
