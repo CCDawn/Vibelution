@@ -210,7 +210,11 @@ import { useChatSelectionPersistence } from "./useChatSelectionPersistence";
 import { useChatWorkspaceLifecycle } from "./useChatWorkspaceLifecycle";
 import { useChatSessionDetailMutations } from "./useChatSessionDetailMutations";
 import { useChatWorkspaceActions } from "./useChatWorkspaceActions";
-import { ChatSessionDeleteConfirmDialog } from "./ChatSessionDeleteConfirmDialog";
+import { ChatDangerConfirmDialog } from "./ChatDangerConfirmDialog";
+import {
+  type ChatWorkbenchConfirmRequest,
+  sessionConfirmTitle,
+} from "./chatWorkbenchConfirmModel";
 import { useDesktopConversationAttention } from "./useDesktopConversationAttention";
 import { ChatCliAgentTerminalStack } from "./ChatCliAgentTerminalStack";
 import { useChatSessionRenameMenu } from "./useChatSessionRenameMenu";
@@ -607,7 +611,7 @@ export function ChatCodingRoute() {
   const [sessionReferenceAttachments, setSessionReferenceAttachments] = useState<Record<string, SessionReferenceAttachment[]>>({});
   const [sessionImageUploadPending, setSessionImageUploadPending] = useState<Record<string, boolean>>({});
   const [sessionEditTargets, setSessionEditTargets] = useState<Record<string, { messageId: string; original: string }>>({});
-  const [pendingDeleteSession, setPendingDeleteSession] = useState<SessionSummary | null>(null);
+  const [pendingConfirm, setPendingConfirm] = useState<ChatWorkbenchConfirmRequest | null>(null);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const editingSessionIdRef = useRef<string | null>(null);
   /** Suppress tab title blur-submit while create remaps temp id → server id. */
@@ -2648,22 +2652,129 @@ export function ChatCodingRoute() {
   const sessionIndexProgressVisible = sessionIndexHasMore || sessionIndexTotalEstimate > SESSION_INDEX_PAGE_SIZE;
 
   const openDeleteSessionConfirm = useCallback((session: SessionSummary) => {
-    setPendingDeleteSession(session);
+    setPendingConfirm({ kind: "delete-session", session });
   }, []);
 
-  const confirmPendingDeleteSession = useCallback(() => {
-    if (!pendingDeleteSession) {
+  const openClearSessionHistoryConfirm = useCallback((session: SessionSummary) => {
+    setPendingConfirm({ kind: "clear-history", session });
+  }, []);
+
+  const openDeleteGroupConfirm = useCallback(() => {
+    setPendingConfirm({ kind: "delete-group" });
+  }, []);
+
+  const openResetGroupConfirm = useCallback(() => {
+    setPendingConfirm({ kind: "reset-group" });
+  }, []);
+
+  const confirmPendingWorkbenchAction = useCallback(() => {
+    if (!pendingConfirm) {
       return;
     }
-    const sessionId = pendingDeleteSession.id;
-    setSessionComposerErrors((current) => ({
-      ...current,
-      [sessionId]: "",
-      __sessions__: "",
-    }));
-    setPendingDeleteSession(null);
-    deleteSessionMutation.mutate({ sessionId });
-  }, [deleteSessionMutation, pendingDeleteSession, setSessionComposerErrors]);
+    if (pendingConfirm.kind === "delete-session") {
+      const sessionId = pendingConfirm.session.id;
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [sessionId]: "",
+        __sessions__: "",
+      }));
+      setPendingConfirm(null);
+      deleteSessionMutation.mutate({ sessionId });
+      return;
+    }
+    if (pendingConfirm.kind === "clear-history") {
+      const { session } = pendingConfirm;
+      const agentId = String(session.agentId || "").trim();
+      if (!agentId) {
+        setPendingConfirm(null);
+        return;
+      }
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [session.id]: "",
+        __sessions__: "",
+      }));
+      setPendingConfirm(null);
+      clearSessionHistoryMutation.mutate({ sessionId: session.id, agentId });
+      return;
+    }
+    if (pendingConfirm.kind === "delete-group") {
+      const roomId = activeGroupRoom?.roomId;
+      setPendingConfirm(null);
+      if (roomId) {
+        deleteGroupRoomMutation.mutate({ roomId });
+      }
+      return;
+    }
+    if (pendingConfirm.kind === "reset-group") {
+      const roomId = activeGroupRoom?.roomId;
+      setPendingConfirm(null);
+      if (roomId) {
+        resetGroupRoomMutation.mutate({ roomId });
+      }
+    }
+  }, [
+    activeGroupRoom?.roomId,
+    clearSessionHistoryMutation,
+    deleteGroupRoomMutation,
+    deleteSessionMutation,
+    pendingConfirm,
+    resetGroupRoomMutation,
+    setSessionComposerErrors,
+  ]);
+
+  const pendingConfirmPresentation = useMemo(() => {
+    if (!pendingConfirm) {
+      return null;
+    }
+    if (pendingConfirm.kind === "delete-session") {
+      const title = sessionConfirmTitle(pendingConfirm.session);
+      return {
+        confirmLabel: t("deleteSession"),
+        confirmPending: deleteSessionMutation.isPending
+          && deleteSessionMutation.variables?.sessionId === pendingConfirm.session.id,
+        title: t("deleteSessionConfirm").replace("{title}", title),
+      };
+    }
+    if (pendingConfirm.kind === "clear-history") {
+      const title = sessionConfirmTitle(pendingConfirm.session);
+      return {
+        confirmLabel: t("clearSessionHistory"),
+        confirmPending: clearSessionHistoryMutation.isPending
+          && clearSessionHistoryMutation.variables?.sessionId === pendingConfirm.session.id,
+        title: t("clearSessionHistoryConfirm").replace("{title}", title),
+      };
+    }
+    const roomTitle = (activeGroupRoom?.title || activeGroupRoom?.roomId || "").trim();
+    if (pendingConfirm.kind === "delete-group") {
+      return {
+        confirmLabel: lang === "zh" ? "删除群聊" : "Delete group",
+        confirmPending: deleteGroupRoomMutation.isPending
+          && deleteGroupRoomMutation.variables?.roomId === activeGroupRoom?.roomId,
+        title: t("deleteGroupConfirm").replace("{title}", roomTitle || activeGroupRoom?.roomId || ""),
+      };
+    }
+    return {
+      confirmLabel: lang === "zh" ? "重置群聊" : "Reset group",
+      confirmPending: resetGroupRoomMutation.isPending
+        && resetGroupRoomMutation.variables?.roomId === activeGroupRoom?.roomId,
+      title: t("resetGroupConfirm").replace("{title}", roomTitle || activeGroupRoom?.roomId || ""),
+    };
+  }, [
+    activeGroupRoom?.roomId,
+    activeGroupRoom?.title,
+    clearSessionHistoryMutation.isPending,
+    clearSessionHistoryMutation.variables?.sessionId,
+    deleteGroupRoomMutation.isPending,
+    deleteGroupRoomMutation.variables?.roomId,
+    deleteSessionMutation.isPending,
+    deleteSessionMutation.variables?.sessionId,
+    lang,
+    pendingConfirm,
+    resetGroupRoomMutation.isPending,
+    resetGroupRoomMutation.variables?.roomId,
+    t,
+  ]);
 
   const {
     handlePetInteraction,
@@ -2745,6 +2856,9 @@ export function ChatCodingRoute() {
     addSessionToReviewMutation,
     petActionMutation,
     openDeleteSessionConfirm,
+    openClearSessionHistoryConfirm,
+    openDeleteGroupConfirm,
+    openResetGroupConfirm,
   });
 
   useDesktopConversationAttention({
@@ -3567,30 +3681,19 @@ export function ChatCodingRoute() {
           />
         </Suspense>
       ) : null}
-      <ChatSessionDeleteConfirmDialog
-        session={pendingDeleteSession}
-        title={
-          pendingDeleteSession
-            ? t("deleteSessionConfirm").replace(
-              "{title}",
-              (pendingDeleteSession.agentDisplayName || pendingDeleteSession.title || pendingDeleteSession.id).trim()
-                || pendingDeleteSession.id,
-            )
-            : ""
-        }
-        confirmLabel={t("deleteSession")}
+      <ChatDangerConfirmDialog
+        open={Boolean(pendingConfirm)}
+        title={pendingConfirmPresentation?.title ?? ""}
+        confirmLabel={pendingConfirmPresentation?.confirmLabel ?? ""}
         cancelLabel={lang === "zh" ? "取消" : "Cancel"}
-        confirmPending={
-          deleteSessionMutation.isPending
-          && deleteSessionMutation.variables?.sessionId === pendingDeleteSession?.id
-        }
+        confirmPending={pendingConfirmPresentation?.confirmPending ?? false}
         onOpenChange={(open) => {
           if (!open) {
-            setPendingDeleteSession(null);
+            setPendingConfirm(null);
           }
         }}
-        onCancel={() => setPendingDeleteSession(null)}
-        onConfirm={confirmPendingDeleteSession}
+        onCancel={() => setPendingConfirm(null)}
+        onConfirm={confirmPendingWorkbenchAction}
       />
     </ChatSessionWorkbenchShell>
   );
