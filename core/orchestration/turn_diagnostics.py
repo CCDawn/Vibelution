@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import json
 import os
+from collections.abc import Mapping
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
@@ -12,6 +14,9 @@ from core.llm.client import current_llm_status_context
 from core.llm.invocation import LLMInvocationContext
 from core.logging.logger import debug as _debug_logger
 from core.orchestration.agent_runtime_bindings import (
+    _as_mapping,
+    _coerce_text,
+    _mapping_get,
     _reset_stall_signal_reported,
     _safe_turn_runtime_metadata,
     _stall_signal_threshold_events,
@@ -25,10 +30,45 @@ from core.orchestration.cache_diagnostics import (
 
 
 def _coerce_nonnegative_int(value: Any, *, default: int = 0) -> int:
+    if isinstance(value, bool) or value is None:
+        return max(0, int(default or 0))
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
     try:
-        return max(0, int(value or 0))
+        return max(0, int(value))
     except (TypeError, ValueError):
         return max(0, int(default or 0))
+
+
+def _maybe_json(value: Any) -> Any:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith("{") or text.startswith("["):
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                return value
+    return value
+
+
+def _coerce_message_list(value: Any) -> list:
+    value = _maybe_json(value)
+    if value is None or isinstance(value, (str, bytes, bytearray, memoryview)):
+        return []
+    if isinstance(value, Mapping):
+        return [dict(value)]
+    try:
+        return list(value)
+    except TypeError:
+        return []
+
+
+def _response_metadata(response: Any) -> Dict[str, Any]:
+    if isinstance(response, Mapping):
+        return _as_mapping(response.get("response_metadata") or response.get("responseMetadata"))
+    return _as_mapping(getattr(response, "response_metadata", None))
 
 
 def publish_llm_retry_status(
@@ -40,8 +80,8 @@ def publish_llm_retry_status(
     event_bus_getter: Any = None,
 ) -> None:
     """Surface outer Agent reconnect attempts for live session feedback."""
-    cat = str(category or "").strip()
-    act = str(action or "").strip()
+    cat = _coerce_text(category).strip()
+    act = _coerce_text(action).strip()
     if not cat and not act:
         return
     try:
@@ -76,26 +116,26 @@ def record_turn_cache_diagnostics(
     turn_runtime_fn: Any = None,
 ) -> tuple[Dict[str, Any], Dict[str, Any]]:
     """Record turn cache diagnostics and return (llm_usage, metadata_update)."""
-    response_metadata = getattr(response, "response_metadata", None)
-    if not isinstance(response_metadata, dict):
-        response_metadata = {}
-    runtime = (turn_runtime_fn or _turn_runtime_from_env)()
+    response_metadata = _response_metadata(response)
+    runtime = _as_mapping((turn_runtime_fn or _turn_runtime_from_env)())
+    partition = _coerce_text(
+        _mapping_get(runtime, "promptCachePartition", "prompt_cache_partition")
+    ).strip()
     runtime_metadata = {
         **_safe_turn_runtime_metadata(runtime),
-        **({
-            "promptCachePartition": str(runtime.get("promptCachePartition") or "").strip(),
-        } if str(runtime.get("promptCachePartition") or "").strip() else {}),
+        **({"promptCachePartition": partition} if partition else {}),
     }
     llm_usage = build_llm_usage_from_observation(
         token_usage,
         response_metadata=response_metadata,
         runtime_metadata=runtime_metadata,
     )
-    prompt_cache_partition = str(llm_usage.get("promptCachePartition") or "").strip()
+    prompt_cache_partition = _coerce_text(llm_usage.get("promptCachePartition")).strip()
     context_limit = _coerce_nonnegative_int(context_window_limit)
+    turn_id = _coerce_text(current_turn).strip()
     context_composition = build_runtime_context_composition(
-        list(messages or []),
-        turn_id=str(current_turn or ""),
+        _coerce_message_list(messages),
+        turn_id=turn_id,
         prompt_cache_partition=prompt_cache_partition,
         context_limit=context_limit,
     )
@@ -109,7 +149,7 @@ def record_turn_cache_diagnostics(
         except Exception:
             average_cache = {}
     cache_composition = build_runtime_cache_composition(
-        turn_id=str(current_turn or ""),
+        turn_id=turn_id,
         llm_usage=llm_usage,
         context_composition=context_composition,
         average_cache=average_cache,
@@ -148,47 +188,56 @@ def build_llm_invocation_context(
     turn_runtime_fn: Any = None,
     status_context_fn: Any = None,
 ) -> LLMInvocationContext:
-    runtime = (turn_runtime_fn or _turn_runtime_from_env)()
+    runtime = _as_mapping((turn_runtime_fn or _turn_runtime_from_env)())
     status_getter = status_context_fn or current_llm_status_context
-    status_context = status_getter() or {}
-    binding = dict(runtime_binding or {})
-    mode_str = str(mode_value or "").strip()
-    orch_kind = str(orchestrator_kind or "").strip()
+    status_context = _as_mapping(status_getter())
+    binding = _as_mapping(runtime_binding)
+    mode_str = _coerce_text(mode_value).strip()
+    orch_kind = _coerce_text(orchestrator_kind).strip()
     surface = "chat_turn" if orch_kind == "chat" or mode_str == "chat" else "agent_turn"
     run_kind = (
-        str(runtime.get("runKind") or "").strip()
+        _coerce_text(_mapping_get(runtime, "runKind", "run_kind")).strip()
         or ("chat_turn" if surface == "chat_turn" else mode_str or "agent_turn")
     )
     return LLMInvocationContext(
         surface=surface,
         run_kind=run_kind,
-        run_id=str(runtime.get("runId") or pending_supervised_case_id or "").strip(),
-        session_id=str(
-            runtime.get("sessionId")
-            or status_context.get("session_id")
-            or status_context.get("sessionId")
-            or binding.get("directSessionId")
-            or ""
+        run_id=_coerce_text(
+            _mapping_get(runtime, "runId", "run_id") or pending_supervised_case_id
         ).strip(),
-        agent_id=str(runtime.get("agentId") or binding.get("agentId") or "").strip(),
-        llm_slot=str(runtime.get("llmSlot") or binding.get("llmSlot") or "dialogue").strip() or "dialogue",
-        model_id=str(runtime.get("modelId") or os.environ.get("VIBELUTION_AGENT_LLM_MODEL_ID") or "").strip(),
-        cache_scope=str(runtime.get("cacheScope") or "").strip(),
-        cache_partition=str(runtime.get("promptCachePartition") or "").strip(),
-        prompt_purpose=prompt_purpose,
+        session_id=_coerce_text(
+            _mapping_get(runtime, "sessionId", "session_id")
+            or _mapping_get(status_context, "session_id", "sessionId")
+            or _mapping_get(binding, "directSessionId", "direct_session_id")
+        ).strip(),
+        agent_id=_coerce_text(
+            _mapping_get(runtime, "agentId", "agent_id") or _mapping_get(binding, "agentId", "agent_id")
+        ).strip(),
+        llm_slot=_coerce_text(
+            _mapping_get(runtime, "llmSlot", "llm_slot")
+            or _mapping_get(binding, "llmSlot", "llm_slot")
+            or "dialogue"
+        ).strip()
+        or "dialogue",
+        model_id=_coerce_text(
+            _mapping_get(runtime, "modelId", "model_id") or os.environ.get("VIBELUTION_AGENT_LLM_MODEL_ID")
+        ).strip(),
+        cache_scope=_coerce_text(_mapping_get(runtime, "cacheScope", "cache_scope")).strip(),
+        cache_partition=_coerce_text(
+            _mapping_get(runtime, "promptCachePartition", "prompt_cache_partition")
+        ).strip(),
+        prompt_purpose=_coerce_text(prompt_purpose).strip() or "main_reply",
         conversation_bound=surface == "chat_turn",
         metadata={
             "agentMode": mode_str,
             "orchestratorKind": orch_kind,
             "invocationId": uuid4().hex,
             "routeAttempt": max(1, _coerce_nonnegative_int(route_attempt, default=1)),
-            "toolAuthorizationDecisionFingerprint": str(tool_authorization_fingerprint or "").strip(),
-            "ledgerConversationFingerprint": str(ledger_conversation_fingerprint or "").strip(),
-            "turnId": str(
-                status_context.get("turn_id")
-                or status_context.get("turnId")
-                or runtime.get("runId")
-                or ""
+            "toolAuthorizationDecisionFingerprint": _coerce_text(tool_authorization_fingerprint).strip(),
+            "ledgerConversationFingerprint": _coerce_text(ledger_conversation_fingerprint).strip(),
+            "turnId": _coerce_text(
+                _mapping_get(status_context, "turn_id", "turnId")
+                or _mapping_get(runtime, "runId", "run_id")
             ).strip(),
         },
     )
@@ -206,17 +255,17 @@ def report_round_state_stall_signals(
     `telemetry_snapshot` attribute is ignored so stall events cannot fire
     against the wrong shape and go silent.
     """
-    reported = dict(reported_signals or {})
+    reported = _as_mapping(reported_signals)
     if round_state is None:
         return reported
     telemetry_fn = getattr(round_state, "runtime_telemetry", None)
     if not callable(telemetry_fn):
         return reported
-    telemetry = dict(telemetry_fn() or {})
+    telemetry = _as_mapping(telemetry_fn())
     events = _stall_signal_threshold_events(telemetry, reported)
     if events:
         details = ", ".join(
-            f"{key}={int(telemetry.get(key) or 0)}" for key in sorted(events)
+            f"{key}={_coerce_nonnegative_int(telemetry.get(key))}" for key in sorted(events)
         )
         logger = debug_logger if debug_logger is not None else _debug_logger
         logger.warning(f"[循环卡住信号] {details}", tag="STATE")
