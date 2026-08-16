@@ -43,7 +43,7 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | **R10** | **迷你 README 批 1：config 族** | 3 | 2 | 1.5 | `config_service` / `provider_config` / `model_reference` 等 | 1 个 `config_services.md` 或目录 README：**编辑表 + 禁止 + 主测** | Agent 不读源码能答「改 provider 挂哪」 | **done** (`core/web/services/config_services.md`) |
 | **R11** | **迷你 README 批 2：evolution 族** | 3 | 2 | 1.5 | self/supervised/evolution facades | 同上：控制面 vs payload vs worktree 边界 | 聚焦 evolution 测试路径写进表 | **done** (`core/web/services/evolution_services.md`) |
-| **R12** | **迷你 README 批 3：memory/RAG** | 3 | 2 | 1.5 | memory_* / rag_* / unified_knowledge | SSOT：谁写删除/索引；只读边界 | memory/rag 相关 pytest 列名 | todo |
+| **R12** | **迷你 README 批 3：memory/RAG** | 3 | 2 | 1.5 | memory_* / rag_* / unified_knowledge | SSOT：谁写删除/索引；只读边界 | memory/rag 相关 pytest 列名 | **done** (`core/web/services/memory_rag_services.md`) |
 | **R13** | **迷你 README 批 4：launcher/runtime** | 4 | 2 | 2.0 | launcher / runtime / runtime_manager_control / reset | 生命周期 + **无控制台** 检查点 + 禁止 taskkill | launcher/runtime 测试名 | **done** (`core/web/services/launcher_runtime.md`) |
 | **R14** | **tools 全量索引（仿 services）** | 3 | 2 | 1.5 | `tools/*_tools.py` | `tools/README.md`：工具名 → 文件 → 授权入口 → 主测 | 与 tool-authorization 文档互链 | todo |
 | **R15** | **session facade 再瘦到 re-export only** | 4 | 3 | 1.3 | `session_service.py` | facade **无新业务函数体**（仅 re-export/常量）；逻辑全在 `session/` | session 测试全绿；facade LOC 显著下降 | **done** (2026-08-12 探针：顶层业务函数体≈0，仅 lock/control + re-export) |
