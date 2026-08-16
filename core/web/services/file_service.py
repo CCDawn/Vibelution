@@ -7,7 +7,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from threading import Lock
 from typing import Any
 
-from core.web.services.runtime_scene_service import record_runtime_scene_event
+from core.web.services.runtime_scene_service import record_runtime_scene_event_quietly
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -202,25 +202,22 @@ def _record_file_tree_event(event_code: str, stats: dict[str, Any], *, elapsed_m
     should_record = bool(stats.get("truncated")) or elapsed_ms >= TREE_SLOW_THRESHOLD_MS
     if event_code == "file.tree.cache_hit" and not should_record:
         return
-    try:
-        record_runtime_scene_event(
-            "file_service",
-            "files",
-            event_code,
-            message="Project file tree loaded.",
-            level="warning" if elapsed_ms >= TREE_SLOW_THRESHOLD_MS or stats.get("truncated") else "info",
-            outcome="truncated" if stats.get("truncated") else "loaded",
-            fields={
-                "elapsedMs": round(elapsed_ms, 2),
-                "nodeCount": int(stats.get("nodeCount") or 0),
-                "directoryCount": int(stats.get("directoryCount") or 0),
-                "fileCount": int(stats.get("fileCount") or 0),
-                "skippedDirectoryCount": int(stats.get("skippedDirectoryCount") or 0),
-                "truncated": bool(stats.get("truncated")),
-                "cacheHit": bool(stats.get("cacheHit")),
-                "maxTreeDepth": MAX_TREE_DEPTH,
-                "maxTreeNodes": MAX_TREE_NODES,
-            },
-        )
-    except Exception:
-        return
+    record_runtime_scene_event_quietly(
+        "file_service",
+        "files",
+        event_code,
+        message="Project file tree loaded.",
+        level="warning" if elapsed_ms >= TREE_SLOW_THRESHOLD_MS or stats.get("truncated") else "info",
+        outcome="truncated" if stats.get("truncated") else "loaded",
+        fields={
+            "elapsedMs": round(elapsed_ms, 2),
+            "nodeCount": int(stats.get("nodeCount") or 0),
+            "directoryCount": int(stats.get("directoryCount") or 0),
+            "fileCount": int(stats.get("fileCount") or 0),
+            "skippedDirectoryCount": int(stats.get("skippedDirectoryCount") or 0),
+            "truncated": bool(stats.get("truncated")),
+            "cacheHit": bool(stats.get("cacheHit")),
+            "maxTreeDepth": MAX_TREE_DEPTH,
+            "maxTreeNodes": MAX_TREE_NODES,
+        },
+    )

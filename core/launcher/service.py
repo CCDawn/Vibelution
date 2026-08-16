@@ -868,9 +868,54 @@ def _ensure_config_section(public_config: dict[str, Any], section: str) -> dict[
 def _load_launcher_public_config() -> dict[str, Any]:
     try:
         public_config = load_public_config(CONFIG_PATH)
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 - invalid operator config must not crash launcher
+        _record_launcher_config_load_failed(
+            exception_type=type(exc).__name__,
+            exception_message=str(exc),
+            config_type="",
+        )
         return {}
-    return public_config if isinstance(public_config, dict) else {}
+    if isinstance(public_config, dict):
+        return public_config
+    _record_launcher_config_load_failed(
+        exception_type="TypeError",
+        exception_message="Public config is not a dict.",
+        config_type=type(public_config).__name__,
+    )
+    return {}
+
+
+def _record_launcher_config_load_failed(
+    *,
+    exception_type: str,
+    exception_message: str,
+    config_type: str,
+) -> None:
+    message = f"Launcher public config load failed: {exception_type}"
+    _debug_logger.warning(message, tag="LAUNCHER")
+    payload = {
+        "phase": "config",
+        "message": message[:240],
+        "outcome": "failed",
+        "level": "warning",
+        "exceptionType": exception_type,
+        "exceptionMessage": str(exception_message or "")[:240],
+        "configType": config_type,
+    }
+    try:
+        event_at = append_runtime_manager_file_event(
+            "launcher.config.load_failed",
+            payload,
+            suppress_io_errors=True,
+        )
+        record_runtime_manager_scene_event(
+            "launcher.config.load_failed",
+            payload,
+            phase="config",
+            occurred_at=event_at,
+        )
+    except Exception as exc:  # noqa: BLE001 - diagnostics must never fail launcher startup
+        _debug_logger.warning(f"Failed to record launcher config load failure: {exc}")
 
 
 def _read_port_env_override(env_names: tuple[str, ...]) -> int | None:
