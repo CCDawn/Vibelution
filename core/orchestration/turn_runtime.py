@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Mapping
 
 
 @dataclass(frozen=True)
@@ -36,7 +36,15 @@ class AgentTurnRuntime:
 
 
 def _clean(value: Any, *, fallback: str = "") -> str:
-    text = str(value or "").strip()
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+    if isinstance(value, Mapping) or isinstance(value, (list, tuple, set)):
+        return fallback
+    if isinstance(value, bool) or value is None:
+        text = ""
+    else:
+        text = str(value)
+    text = " ".join(text.split())
     return text or fallback
 
 
