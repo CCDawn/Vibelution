@@ -101,7 +101,7 @@ internal static class VibelutionLauncher
             var freshnessItem = DisabledMenuItem("Launcher 版本未知");
             menu.Items.Add(freshnessItem);
             menu.Items.Add(MenuItem("重启 Launcher", delegate { QueueRestartLauncher(); }));
-            menu.Opening += delegate { RefreshFreshnessItem(freshnessItem); };
+            menu.Opening += delegate { QueueRefreshFreshnessItem(freshnessItem); };
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(BranchActionMenu("启动", "start"));
             menu.Items.Add(BranchActionMenu("停止", "stop"));
@@ -114,40 +114,80 @@ internal static class VibelutionLauncher
         private ToolStripMenuItem BranchActionMenu(string label, string operation)
         {
             var item = new ToolStripMenuItem(label);
-            item.DropDownOpening += delegate { PopulateBranchActionMenu(item, operation); };
+            item.DropDownOpening += delegate { QueuePopulateBranchActionMenu(item, operation); };
             item.DropDownItems.Add(DisabledMenuItem(operation == "stop" ? "没有正在运行的实例" : "没有可启动的实例"));
             return item;
         }
 
-        private void PopulateBranchActionMenu(ToolStripMenuItem item, string operation)
+        private void QueuePopulateBranchActionMenu(ToolStripMenuItem item, string operation)
         {
             item.DropDownItems.Clear();
-            try
-            {
-                EnsureLauncherBackend();
-                var instances = ParseBranchInstances(GetLauncher("/api/launcher/branch-instances"));
-                foreach (var inst in instances)
+            item.DropDownItems.Add(DisabledMenuItem("正在读取…"));
+            ThreadPool.QueueUserWorkItem(
+                delegate
                 {
-                    bool include = operation == "stop" ? inst.Alive : inst.Startable;
-                    if (!include)
+                    List<BranchInstanceItem> matched = null;
+                    string placeholder = null;
+                    try
                     {
-                        continue;
+                        if (!LauncherBackendHealthy(projectDir))
+                        {
+                            placeholder = "Launcher 后端未就绪";
+                        }
+                        else
+                        {
+                            matched = new List<BranchInstanceItem>();
+                            foreach (var inst in ParseBranchInstances(
+                                RequestLauncherStatic(projectDir, "/api/launcher/branch-instances", "GET")
+                            ))
+                            {
+                                bool include = operation == "stop" ? inst.Alive : inst.Startable;
+                                if (include)
+                                {
+                                    matched.Add(inst);
+                                }
+                            }
+                            if (matched.Count == 0)
+                            {
+                                placeholder = operation == "stop" ? "没有正在运行的实例" : "没有可启动的实例";
+                                matched = null;
+                            }
+                        }
                     }
-                    var child = new ToolStripMenuItem(inst.Label);
-                    string instanceId = inst.Id;
-                    string instanceLabel = inst.Label;
-                    child.Click += delegate { QueueInstanceLifecycle(operation, instanceId, instanceLabel); };
-                    item.DropDownItems.Add(child);
+                    catch
+                    {
+                        placeholder = "无法读取分支列表";
+                        matched = null;
+                    }
+
+                    uiContext.Post(
+                        delegate
+                        {
+                            try
+                            {
+                                item.DropDownItems.Clear();
+                                if (!string.IsNullOrEmpty(placeholder))
+                                {
+                                    item.DropDownItems.Add(DisabledMenuItem(placeholder));
+                                    return;
+                                }
+                                foreach (var inst in matched)
+                                {
+                                    var child = new ToolStripMenuItem(inst.Label);
+                                    string instanceId = inst.Id;
+                                    string instanceLabel = inst.Label;
+                                    child.Click += delegate { QueueInstanceLifecycle(operation, instanceId, instanceLabel); };
+                                    item.DropDownItems.Add(child);
+                                }
+                            }
+                            catch
+                            {
+                            }
+                        },
+                        null
+                    );
                 }
-                if (item.DropDownItems.Count == 0)
-                {
-                    item.DropDownItems.Add(DisabledMenuItem(operation == "stop" ? "没有正在运行的实例" : "没有可启动的实例"));
-                }
-            }
-            catch
-            {
-                item.DropDownItems.Add(DisabledMenuItem("无法读取分支列表"));
-            }
+            );
         }
 
         private void QueueInstanceLifecycle(string operation, string instanceId, string label)
@@ -290,19 +330,43 @@ internal static class VibelutionLauncher
             );
         }
 
-        private void RefreshFreshnessItem(ToolStripMenuItem item)
+        private void QueueRefreshFreshnessItem(ToolStripMenuItem item)
         {
-            try
-            {
-                EnsureLauncherBackend();
-                string body = GetLauncher("/api/launcher/freshness");
-                string label = ExtractJsonString(body, "label");
-                item.Text = string.IsNullOrWhiteSpace(label) ? "Launcher 版本未知" : label;
-            }
-            catch
-            {
-                item.Text = "Launcher 版本未知";
-            }
+            ThreadPool.QueueUserWorkItem(
+                delegate
+                {
+                    string nextLabel = "Launcher 版本未知";
+                    try
+                    {
+                        if (LauncherBackendHealthy(projectDir))
+                        {
+                            string body = RequestLauncherStatic(projectDir, "/api/launcher/freshness", "GET");
+                            string label = ExtractJsonString(body, "label");
+                            if (!string.IsNullOrWhiteSpace(label))
+                            {
+                                nextLabel = label;
+                            }
+                        }
+                    }
+                    catch
+                    {
+                    }
+
+                    uiContext.Post(
+                        delegate
+                        {
+                            try
+                            {
+                                item.Text = nextLabel;
+                            }
+                            catch
+                            {
+                            }
+                        },
+                        null
+                    );
+                }
+            );
         }
 
         private void QueueRestartLauncher()
@@ -588,6 +652,8 @@ internal static class VibelutionLauncher
         {
             var request = (HttpWebRequest)WebRequest.Create(launcherUrl + path);
             request.Method = "GET";
+            request.Timeout = 15000;
+            request.ReadWriteTimeout = 15000;
             using (var response = (HttpWebResponse)request.GetResponse())
             using (var stream = response.GetResponseStream())
             using (var reader = new StreamReader(stream))

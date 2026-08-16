@@ -68,6 +68,28 @@ def test_native_launcher_tray_menu_exposes_lifecycle_controls():
     assert "RunPythonBridge(projectDir, \"stop-launcher\", true, false)" in source
 
 
+def test_native_launcher_tray_menu_refreshes_without_blocking_ui():
+    source = _source()
+
+    assert "QueueRefreshFreshnessItem" in source
+    assert "QueuePopulateBranchActionMenu" in source
+    refresh_block = source.split("private void QueueRefreshFreshnessItem", 1)[1].split(
+        "private void QueueRestartLauncher", 1
+    )[0]
+    populate_block = source.split("private void QueuePopulateBranchActionMenu", 1)[1].split(
+        "private void QueueInstanceLifecycle", 1
+    )[0]
+    assert "ThreadPool.QueueUserWorkItem" in refresh_block
+    assert "ThreadPool.QueueUserWorkItem" in populate_block
+    assert "EnsureLauncherBackend" not in refresh_block
+    assert "EnsureFreshLauncherBackend" not in refresh_block
+    assert "EnsureLauncherBackend" not in populate_block
+    assert "EnsureFreshLauncherBackend" not in populate_block
+    assert "uiContext.Post" in refresh_block
+    assert "uiContext.Post" in populate_block
+    assert "正在读取" in populate_block
+
+
 def test_native_launcher_non_default_actions_use_console_free_control_api():
     source = _source()
 
