@@ -13,6 +13,16 @@ from core.llm.usage import (
 )
 
 
+def _coerce_nonnegative_int(value: Any, *, default: int = 0) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        try:
+            return max(0, int(default or 0))
+        except (TypeError, ValueError):
+            return 0
+
+
 def _resolve_mental_model_enabled(override: bool | None = None) -> bool:
     if override is not None:
         return bool(override)
@@ -33,20 +43,20 @@ class TokenUsageObservation:
         observed: bool = False,
     ) -> "TokenUsageObservation":
         value = super().__new__(cls)
-        value._input_tokens = max(0, int(input_tokens or 0))
-        value._output_tokens = max(0, int(output_tokens or 0))
-        cached_count = max(0, int(cached_input_tokens or 0))
+        value._input_tokens = _coerce_nonnegative_int(input_tokens)
+        value._output_tokens = _coerce_nonnegative_int(output_tokens)
+        cached_count = _coerce_nonnegative_int(cached_input_tokens)
         if value._input_tokens:
             cached_count = min(cached_count, value._input_tokens)
         value.cached_input_tokens = cached_count
-        cache_creation_count = max(0, int(cache_creation_input_tokens or 0))
+        cache_creation_count = _coerce_nonnegative_int(cache_creation_input_tokens)
         if value._input_tokens:
             cache_creation_count = min(cache_creation_count, value._input_tokens)
         value.cache_creation_input_tokens = cache_creation_count
         if uncached_input_tokens is None:
             value.uncached_input_tokens = max(0, value._input_tokens - cached_count)
         else:
-            value.uncached_input_tokens = max(0, int(uncached_input_tokens or 0))
+            value.uncached_input_tokens = _coerce_nonnegative_int(uncached_input_tokens)
         value.observed = bool(observed)
         return value
 
@@ -112,7 +122,9 @@ class ResponseSurfaceController:
     ) -> str:
         if not _resolve_mental_model_enabled(mental_model_enabled):
             return ""
-        should_sense = has_tool_calls or consecutive_failures >= 2 or iteration == 1
+        failures = _coerce_nonnegative_int(consecutive_failures)
+        iteration_index = _coerce_nonnegative_int(iteration)
+        should_sense = bool(has_tool_calls) or failures >= 2 or iteration_index == 1
         if not should_sense:
             return ""
         try:
@@ -121,17 +133,14 @@ class ResponseSurfaceController:
                 f"- {t.tool_name}({'✓' if t.success else '✗'}) {t.args_summary}"
                 for t in recent_tools
             ) or "尚无工具调用"
-            current_tokens = self._estimate_tokens(messages)
-            token_ratio = (
-                current_tokens / effective_max_token_limit
-                if effective_max_token_limit > 0
-                else 0.0
-            )
+            current_tokens = _coerce_nonnegative_int(self._estimate_tokens(messages))
+            limit = _coerce_nonnegative_int(effective_max_token_limit)
+            token_ratio = current_tokens / limit if limit > 0 else 0.0
             return mental_model.sense_state(
-                think_content=raw_content,
+                think_content=str(raw_content or ""),
                 tool_summary=tool_summary,
                 token_ratio=token_ratio,
-                iteration=iteration,
+                iteration=iteration_index,
             )
         except Exception as exc:
             self._debug_logger.warning(f"[响应感知] 构建工具感知 block 失败: {type(exc).__name__}: {exc}")
@@ -145,14 +154,15 @@ class ResponseSurfaceController:
         record_inference_activity: Callable[[str], None],
         mental_model_enabled: bool | None = None,
     ) -> Dict[str, str]:
-        raw_content_clean = processed.raw_content_clean
+        raw_content_clean = str(getattr(processed, "raw_content_clean", "") or "")
         record_language_drift(raw_content_clean)
         record_inference_activity(raw_content_clean)
 
         if not _resolve_mental_model_enabled(mental_model_enabled):
             return {}
 
-        state_info = processed.state_info or {}
+        raw_state = getattr(processed, "state_info", None)
+        state_info = raw_state if isinstance(raw_state, dict) else {}
         if state_info.get("mood"):
             ui = self._ui_getter()
             ui.set_pet_mental_state(
@@ -220,10 +230,10 @@ class ResponseSurfaceController:
         estimated = False
         observed_usage = bool(usage or usage_observation)
         if not input_tokens and messages is not None:
-            input_tokens = max(0, int(self._estimate_tokens(messages) or 0))
+            input_tokens = _coerce_nonnegative_int(self._estimate_tokens(messages))
             estimated = input_tokens > 0
         if not output_tokens and raw_content and estimate_output_tokens is not None:
-            output_tokens = max(0, int(estimate_output_tokens(raw_content) or 0))
+            output_tokens = _coerce_nonnegative_int(estimate_output_tokens(raw_content))
             estimated = estimated or output_tokens > 0
 
         if estimated:
@@ -320,23 +330,25 @@ class ResponseSurfaceController:
         processed: Any,
         tool_call_count: int,
     ) -> Dict[str, Any]:
-        if not raw_content.strip():
+        count = _coerce_nonnegative_int(tool_call_count)
+        visible_text = str(getattr(processed, "visible_text", "") or "")
+        if not str(raw_content or "").strip():
             return {
                 "last_visible_response_text": "",
-                "last_response_tool_calls": 0,
+                "last_response_tool_calls": count,
             }
 
         ui = self._ui_getter()
         stream_response = getattr(ui, "stream_response", None)
         if callable(stream_response):
-            stream_response(processed.visible_text, done=True)
+            stream_response(visible_text, done=True)
         else:
-            ui.stream_thought(processed.visible_text, done=True)
-        if not tool_call_count:
-            for chunk in processed.visible_text.splitlines():
+            ui.stream_thought(visible_text, done=True)
+        if not count:
+            for chunk in visible_text.splitlines():
                 if chunk.strip():
                     ui.add_content(chunk)
         return {
-            "last_visible_response_text": processed.visible_text,
-            "last_response_tool_calls": tool_call_count,
+            "last_visible_response_text": visible_text,
+            "last_response_tool_calls": count,
         }
