@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional
 
@@ -35,7 +36,46 @@ RESTART_FOCUS_GUARD_MESSAGE = (
 )
 
 
+def _coerce_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+def _coerce_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if not text:
+        return default
+    if text in {"1", "true", "yes", "on", "enabled"}:
+        return True
+    if text in {"0", "false", "no", "off", "disabled"}:
+        return False
+    return default
+
+
 def _coerce_mapping(value: Any) -> Dict[str, Any]:
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return {}
+        try:
+            value = json.loads(text)
+        except json.JSONDecodeError:
+            return {}
     if isinstance(value, Mapping):
         return dict(value)
     return {}
@@ -48,23 +88,31 @@ def _tool_name_set(items: Iterable[Any] | None) -> set[str]:
     if isinstance(items, bytes):
         items = items.decode("utf-8", errors="replace")
     if isinstance(items, str):
-        name = items.strip()
-        if name:
-            names.add(name)
+        text = items.strip()
+        if text.startswith("[") or text.startswith("{"):
+            try:
+                return _tool_name_set(json.loads(text))
+            except json.JSONDecodeError:
+                pass
+        if text:
+            names.add(text)
         return names
     if isinstance(items, Mapping):
-        for key in items:
-            name = str(key or "").strip()
-            if name:
+        if "name" in items and not any(key in items for key in ("enabled", "visible", "allowed")):
+            name = _coerce_text(items.get("name")).strip()
+            return {name} if name else set()
+        for key, enabled in items.items():
+            name = _coerce_text(key).strip()
+            if name and _coerce_bool(enabled, True):
                 names.add(name)
         return names
     try:
         iterator = list(items)
     except TypeError:
-        name = str(getattr(items, "name", items) or "").strip()
+        name = _coerce_text(getattr(items, "name", items)).strip()
         return {name} if name else set()
     for item in iterator:
-        name = str(getattr(item, "name", item) or "").strip()
+        name = _coerce_text(getattr(item, "name", item)).strip()
         if name:
             names.add(name)
     return names
@@ -80,24 +128,48 @@ def bind_authorization_runtime(
     runtime = _coerce_mapping(current_runtime)
     turn = _coerce_mapping(turn_runtime)
     binding = _coerce_mapping(agent_binding)
-    agent_id = str(
-        runtime.get("agentId")
-        or turn.get("agentId")
-        or binding.get("agentId")
-        or ""
-    ).strip()
-    if not str(runtime.get("agentId") or "").strip():
+
+    def _first(*values: Any) -> str:
+        for value in values:
+            text = _coerce_text(value).strip()
+            if text:
+                return text
+        return ""
+
+    agent_id = _first(
+        runtime.get("agentId"),
+        runtime.get("agent_id"),
+        turn.get("agentId"),
+        turn.get("agent_id"),
+        binding.get("agentId"),
+        binding.get("agent_id"),
+    )
+    turn_id = _first(
+        runtime.get("turnId"),
+        runtime.get("turn_id"),
+        turn.get("turnId"),
+        turn.get("turn_id"),
+        turn.get("runId"),
+        turn.get("run_id"),
+        binding.get("directSessionId"),
+        binding.get("direct_session_id"),
+        f"agent-bootstrap:{agent_id}" if agent_id else "",
+    )
+    run_id = _first(
+        runtime.get("runId"),
+        runtime.get("run_id"),
+        turn.get("runId"),
+        turn.get("run_id"),
+    )
+    mode = _first(runtime.get("mode"), turn.get("mode"))
+    if agent_id:
         runtime["agentId"] = agent_id
-    if not str(runtime.get("turnId") or "").strip():
-        runtime["turnId"] = str(
-            turn.get("runId")
-            or binding.get("directSessionId")
-            or (f"agent-bootstrap:{agent_id}" if agent_id else "")
-        ).strip()
-    if not str(runtime.get("runId") or "").strip():
-        runtime["runId"] = str(turn.get("runId") or "").strip()
-    if not str(runtime.get("mode") or "").strip():
-        runtime["mode"] = str(turn.get("mode") or "").strip()
+    if turn_id:
+        runtime["turnId"] = turn_id
+    if run_id:
+        runtime["runId"] = run_id
+    if mode:
+        runtime["mode"] = mode
     return runtime
 
 
@@ -159,17 +231,17 @@ def materialize_authorized_tools(
     return [
         tool
         for tool in tools
-        if str(getattr(tool, "name", "") or "").strip() in visible_names
+        if _coerce_text(getattr(tool, "name", "")).strip() in visible_names
     ]
 
 
 def is_tool_visible_to_agent(tool_name: str, visible_tool_names: Iterable[Any] | None) -> bool:
-    name = str(tool_name or "").strip()
+    name = _coerce_text(tool_name).strip()
     return bool(name and name in _tool_name_set(visible_tool_names))
 
 
 def hidden_tool_call_message(tool_name: str) -> str:
-    name = str(tool_name or "").strip() or "[unknown_tool]"
+    name = _coerce_text(tool_name).strip() or "[unknown_tool]"
     return HIDDEN_TOOL_CALL_MESSAGE.format(name=name)
 
 
@@ -178,8 +250,8 @@ def restart_allowed_tool_names() -> tuple[str, ...]:
 
 
 def guard_restart_focus_tool(tool_name: str, *, restart_focus: bool) -> Optional[str]:
-    if not restart_focus:
+    if not _coerce_bool(restart_focus, False):
         return None
-    if str(tool_name or "").strip() in RESTART_ALLOWED_TOOL_NAMES:
+    if _coerce_text(tool_name).strip() in RESTART_ALLOWED_TOOL_NAMES:
         return None
     return RESTART_FOCUS_GUARD_MESSAGE
