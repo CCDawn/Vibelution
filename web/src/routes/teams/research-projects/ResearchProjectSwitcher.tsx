@@ -120,6 +120,9 @@ export function ResearchProjectSwitcher({
       await refreshWorkflowQueries();
       setMessage(lang === "zh" ? "已切换项目，三阶段数据已隔离刷新。" : "Project switched; stage data refreshed.");
     },
+    onError: (error, projectId, context) => {
+      context?.telemetry?.failed(error, { teamId, projectId });
+    },
   });
 
   const createMutation = useMutation({
@@ -129,13 +132,26 @@ export function ResearchProjectSwitcher({
         topic: draft.topic.trim(),
         experimentMethod: currentExperimentMethod,
       }),
-    onSuccess: async (payload) => {
+    onMutate: () => ({
+      telemetry: startUserAction("team_research_project_create", {
+        teamId,
+        experimentMethod: currentExperimentMethod,
+      }),
+    }),
+    onSuccess: async (payload, _variables, context) => {
+      context?.telemetry?.succeeded({
+        teamId,
+        projectId: payload.project?.projectId ?? "",
+      });
       queryClient.setQueryData(researchProjectQueryKey(teamId), payload);
       setDialogMode(null);
       setDraft(EMPTY_DRAFT);
       if (payload.project) {
         await activateMutation.mutateAsync(payload.project.projectId);
       }
+    },
+    onError: (error, _variables, context) => {
+      context?.telemetry?.failed(error, { teamId });
     },
   });
 
@@ -146,13 +162,29 @@ export function ResearchProjectSwitcher({
         topic: draft.topic.trim(),
         experimentMethod: currentExperimentMethod,
       }),
-    onSuccess: (payload) => {
+    onMutate: () => ({
+      telemetry: startUserAction("team_research_project_update", {
+        teamId,
+        projectId: activeProject?.projectId || "",
+      }),
+    }),
+    onSuccess: (payload, _variables, context) => {
+      context?.telemetry?.succeeded({
+        teamId,
+        projectId: payload.project?.projectId ?? activeProject?.projectId ?? "",
+      });
       queryClient.setQueryData(researchProjectQueryKey(teamId), payload);
       if (payload.project) {
         onProjectActivated(payload.project);
       }
       setDialogMode(null);
       setMessage(lang === "zh" ? "项目设置已保存。" : "Project settings saved.");
+    },
+    onError: (error, _variables, context) => {
+      context?.telemetry?.failed(error, {
+        teamId,
+        projectId: activeProject?.projectId || "",
+      });
     },
   });
 

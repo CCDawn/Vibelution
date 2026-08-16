@@ -10,6 +10,8 @@ const agentConfigSource = readFileSync(join(here, "agents/useAgentConfigDraftMut
 const agentWorkbenchSource = readFileSync(join(here, "agents/useAgentWorkbenchMutations.ts"), "utf8");
 const memoryItemSource = readFileSync(join(here, "memory/useMemoryItemMutations.ts"), "utf8");
 const teamShellSource = readFileSync(join(here, "teams/useTeamShellMutations.ts"), "utf8");
+const memoryKnowledgeSource = readFileSync(join(here, "memory/useMemoryKnowledgeMutations.ts"), "utf8");
+const researchProjectSource = readFileSync(join(here, "teams/research-projects/ResearchProjectSwitcher.tsx"), "utf8");
 const chatWorkbenchSource = readFileSync(join(here, "chat/ChatCodingRouteWorkbench.tsx"), "utf8");
 const chatArchiveQueueSource = readFileSync(join(here, "chat/useChatAgentArchiveQueue.ts"), "utf8");
 
@@ -34,5 +36,15 @@ describe("domain user-action telemetry contract", () => {
   it("tracks team shell mutations", () => {
     expect(teamShellSource).toContain('startUserAction("team_archive"');
     expect(teamShellSource).toContain('startUserAction("team_canvas_save"');
+    expect(teamShellSource).toContain('startUserAction("team_message_send"');
+    expect(teamShellSource).toContain('startUserAction("team_message_revoke"');
+  });
+
+  it("tracks tier-2 knowledge and research project mutations", () => {
+    expect(memoryKnowledgeSource).toContain('startUserAction("memory_knowledge_proposal_create"');
+    expect(memoryKnowledgeSource).toContain('startUserAction("memory_knowledge_proposal_review"');
+    expect(researchProjectSource).toContain('startUserAction("team_research_project_create"');
+    expect(researchProjectSource).toContain('startUserAction("team_research_project_update"');
+    expect(researchProjectSource).toContain('startUserAction("team_research_project_activate"');
   });
 });
