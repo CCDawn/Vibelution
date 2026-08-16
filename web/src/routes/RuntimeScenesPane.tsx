@@ -1,7 +1,7 @@
 import "../design/route-css/workbench-secondary.tailwind.css";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CircleAlert, Check, CheckSquare, Copy, ListFilter, Square, Trash2, TriangleAlert, X } from "lucide-react";
+import { CircleAlert, Check, CheckSquare, Copy, Hand, ListFilter, Square, Trash2, TriangleAlert, X } from "lucide-react";
 import {
   useEffect,
   useMemo,
@@ -40,6 +40,11 @@ import { VButton, VIconButton, VNativeInput, VTabs } from "../components/vui";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { TranslationKey } from "../i18n/dictionary";
 import { classifyRuntimeSceneEvent, type LogSeverityFilter, matchesSeverityFilter } from "../logs/logSeverity";
+import {
+  isUserActionRuntimeSceneEvent,
+  matchesRuntimeSceneEventFocusFilter,
+  type RuntimeSceneEventFocusFilter,
+} from "../logs/runtimeSceneEventFilters";
 import styles from "./RuntimeScenesPane.styles";
 import { runtimeScenePackageFiles, runtimeScenePackageSections } from "./runtimeScenePackageSections";
 
@@ -874,6 +879,7 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel, initialSce
   const [selectedSceneIds, setSelectedSceneIds] = useState<string[]>([]);
   const [activeSceneId, setActiveSceneId] = useState(initialSceneId);
   const [severityFilter, setSeverityFilter] = useState<LogSeverityFilter>("all");
+  const [eventFocusFilter, setEventFocusFilter] = useState<RuntimeSceneEventFocusFilter>("all");
   const [openRawLogByScene, setOpenRawLogByScene] = useState<Record<string, string>>(() =>
     initialSceneId && initialPath ? { [initialSceneId]: initialPath } : {},
   );
@@ -1074,6 +1080,47 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel, initialSce
       })}
     />
   );
+  const eventFocusFilterOptions: Array<{
+    value: RuntimeSceneEventFocusFilter;
+    label: string;
+    icon: typeof ListFilter;
+  }> = [
+    { value: "all", label: lang === "zh" ? "全部事件" : "All events", icon: ListFilter },
+    { value: "user_action", label: lang === "zh" ? "用户操作" : "User actions", icon: Hand },
+  ];
+  const eventFocusFilterControl = (
+    <VTabs
+      density="compact"
+      className={styles.filterTabs}
+      listClassName={styles.filterTabsList}
+      triggerClassName={styles.filterTabsTrigger}
+      aria-label={lang === "zh" ? "事件范围筛选" : "Event scope filter"}
+      value={eventFocusFilter}
+      onValueChange={(value) => {
+        if (eventFocusFilterOptions.some((option) => option.value === value)) {
+          setEventFocusFilter(value as RuntimeSceneEventFocusFilter);
+        }
+      }}
+      items={eventFocusFilterOptions.map((option) => {
+        const Icon = option.icon;
+        return {
+          id: option.value,
+          label: (
+            <span className={styles.filterTabLabel}>
+              <Icon size={14} aria-hidden="true" />
+              <span>{option.label}</span>
+            </span>
+          ),
+        };
+      })}
+    />
+  );
+  const timelineFilterControls = (
+    <div className={styles.timelineFilterStack}>
+      {severityFilterControl}
+      {eventFocusFilterControl}
+    </div>
+  );
 
   function handleToggleSelection(sceneId: string) {
     setSelectedSceneIds((current) => {
@@ -1162,7 +1209,8 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel, initialSce
   function renderSceneDetail(scene: RuntimeSceneDetail) {
     const signal = runtimeSceneSignal(scene, lang);
     const filteredTimeline = scene.timeline.filter((event) =>
-      matchesSeverityFilter(classifyRuntimeSceneEvent(event), severityFilter),
+      matchesSeverityFilter(classifyRuntimeSceneEvent(event), severityFilter)
+      && matchesRuntimeSceneEventFocusFilter(event, eventFocusFilter),
     );
     const packageSections = runtimeScenePackageSections(scene);
     return (
@@ -1231,22 +1279,31 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel, initialSce
           <article className={styles.sceneInfoCard}>
             <div className={styles.sceneCardHeaderRow}>
               <h3>{t("runtimeSceneTimeline")}</h3>
-              {severityFilterControl}
+              {timelineFilterControls}
             </div>
             <div className={styles.timelineList}>
               {scene.timeline.length === 0 ? (
                 <div className={styles.panelState}>{t("runtimeSceneNoTimeline")}</div>
               ) : filteredTimeline.length === 0 ? (
-                <div className={styles.panelState}>{t("logSeverityEmpty")}</div>
+                <div className={styles.panelState}>
+                  {eventFocusFilter === "user_action"
+                    ? (lang === "zh"
+                      ? "当前时间线没有用户操作事件；可在下方 Structured Events / Browser telemetry 中查看完整 browser.user_action.* 记录。"
+                      : "No user-action events in the merged timeline. Open Structured Events or Browser telemetry below for full browser.user_action.* records.")
+                    : t("logSeverityEmpty")}
+                </div>
               ) : (
                 filteredTimeline.map((event) => {
                   const severity = classifyRuntimeSceneEvent(event);
+                  const userActionEvent = isUserActionRuntimeSceneEvent(event);
                   const timelineItemClassName =
                     severity === "error"
                       ? `${styles.timelineItem} ${styles.timelineItemError}`
                       : severity === "warning"
                         ? `${styles.timelineItem} ${styles.timelineItemWarning}`
-                        : styles.timelineItem;
+                        : userActionEvent
+                          ? `${styles.timelineItem} ${styles.timelineItemUserAction}`
+                          : styles.timelineItem;
                   return (
                     <div key={`${event.component}-${event.seq}-${event.timestamp}`} className={timelineItemClassName}>
                       <div className={styles.timelineHeader}>

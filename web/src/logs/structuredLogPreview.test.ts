@@ -68,4 +68,18 @@ describe("structuredLogPreview", () => {
     expect(filterStructuredLogEntries(model?.entries ?? [], "dialogue", "all")).toHaveLength(1);
     expect(filterStructuredLogEntries(model?.entries ?? [], "all", "warning")).toHaveLength(1);
   });
+
+  it("classifies browser.user_action telemetry as user_action category", () => {
+    const model = parseStructuredLogPreview(
+      JSON.stringify({
+        eventCode: "browser.user_action.session_delete_started",
+        phase: "user_action",
+        message: "session delete started",
+      }),
+    );
+
+    expect(model?.entries[0]?.category).toBe("user_action");
+    expect(filterStructuredLogEntries(model?.entries ?? [], "user_action", "all")).toHaveLength(1);
+    expect(filterStructuredLogEntries(model?.entries ?? [], "dialogue", "all")).toHaveLength(0);
+  });
 });

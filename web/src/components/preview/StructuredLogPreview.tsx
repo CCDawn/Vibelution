@@ -1,4 +1,4 @@
-import { AlertTriangle, Bot, Brain, MessageSquareText, MonitorCog, Rows3, Wrench } from "lucide-react";
+import { AlertTriangle, Bot, Brain, Hand, MessageSquareText, MonitorCog, Rows3, Wrench } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { VButton } from "../vui";
@@ -27,6 +27,7 @@ const categoryOptions: Array<{
   { value: "thinking", icon: Brain, zh: "思考", en: "Thinking" },
   { value: "tool", icon: Wrench, zh: "工具", en: "Tools" },
   { value: "system", icon: MonitorCog, zh: "系统", en: "System" },
+  { value: "user_action", icon: Hand, zh: "用户操作", en: "User actions" },
   { value: "problem", icon: AlertTriangle, zh: "问题", en: "Issues" },
 ];
 
@@ -60,6 +61,7 @@ export function StructuredLogPreview({ model, severityFilter }: StructuredLogPre
       thinking: 0,
       tool: 0,
       system: 0,
+      user_action: 0,
       problem: 0,
     };
     for (const entry of model.entries) {

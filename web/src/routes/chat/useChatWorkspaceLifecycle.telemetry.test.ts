@@ -49,4 +49,12 @@ describe("chat workspace user-action telemetry contract", () => {
     expect(actionsSource).toContain('telemetrySource: options?.telemetrySource ?? "direct_session"');
     expect(actionsSource).toContain('telemetrySource: "agent_directory"');
   });
+
+  it("records blocked session delete and clear-history guards", () => {
+    expect(actionsSource).toContain('startUserAction("session_delete"');
+    expect(actionsSource).toContain('.blocked("delete_already_in_flight")');
+    expect(actionsSource).toContain('.blocked("session_busy"');
+    expect(actionsSource).toContain('startUserAction("session_clear_history"');
+    expect(actionsSource).toContain('.blocked("clear_already_in_flight")');
+  });
 });
