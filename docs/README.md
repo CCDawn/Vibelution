@@ -57,6 +57,7 @@
 
 | 草案 | 说明 |
 | --- | --- |
+| [plans/2026-08-16-compat-ssot-closeout-plan.md](plans/2026-08-16-compat-ssot-closeout-plan.md) | active-plan：兼容层收敛与 SSOT 优化（存储 / Launcher / FE / 工具） |
 | [plans/2026-08-15-deep-architecture-decoupling-plan.md](plans/2026-08-15-deep-architecture-decoupling-plan.md) | ACTIVE：Agent / Chat / API 契约分 Gate 解耦 |
 | [plans/2026-08-14-llm-config-runtime-routing-optimization-plan.md](plans/2026-08-14-llm-config-runtime-routing-optimization-plan.md) | active-plan：模型配置与协议路由 |
 | [plans/2026-08-14-multi-agent-configuration-and-protocol-routing-research-design.md](plans/2026-08-14-multi-agent-configuration-and-protocol-routing-research-design.md) | user-approved：多 Agent 协议配置设计 |
