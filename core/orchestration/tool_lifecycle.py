@@ -388,7 +388,14 @@ class ToolLifecycleBridge:
         if not tool_calls:
             return None
 
-        workers_cap = int(max_parallel_readonly or self.DEFAULT_PARALLEL_READONLY_WORKERS)
+        if max_parallel_readonly is None:
+            workers_cap = self.DEFAULT_PARALLEL_READONLY_WORKERS
+        else:
+            try:
+                workers_cap = int(max_parallel_readonly)
+            except (TypeError, ValueError):
+                workers_cap = self.DEFAULT_PARALLEL_READONLY_WORKERS
+            workers_cap = max(1, workers_cap)
         lifecycle_action: Optional[str] = None
         budget_stop_message = (
             "当前回合工具调用额度已用尽，本轮停止。"
