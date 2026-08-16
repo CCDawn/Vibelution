@@ -154,6 +154,18 @@ def test_singleton_reset_hint_skips_pure_test_files(tmp_path: Path):
     assert test_conftest._test_file_needs_runtime_manager_isolation(str(team_support_test)) is True
 
 
+def test_parallel_safe_web_helpers_are_not_module_serial():
+    project_root = Path(__file__).resolve().parents[1]
+    parallel_safe = (
+        project_root / "tests" / "test_runtime_manager_control_service.py",
+        project_root / "tests" / "test_web_misc_routes.py",
+    )
+    for path in parallel_safe:
+        source = path.read_text(encoding="utf-8")
+        assert "pytestmark = pytest.mark.serial" not in source
+        assert "pytest.mark.serial" not in source.split("pytestmark", 1)[0]
+
+
 def test_selector_matches_session_service_to_chat_validation_commands():
     result = select_tests.select_tests(
         ["core\\web\\services\\session_service.py"],

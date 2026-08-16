@@ -40,7 +40,7 @@ def isolated_memory_index():
                 os.environ["VIBELUTION_MEMORY_INDEX_PATH"] = old_path
 
 
-def test_1_cli_error_detection():
+def scenario_1_cli_error_detection():
     """测试1: CLI 命令错误检测"""
     print("\n" + "=" * 60)
     print("测试1: CLI 命令错误检测")
@@ -66,7 +66,7 @@ def test_1_cli_error_detection():
     return has_failure_marker
 
 
-def test_2_memory_save():
+def scenario_2_memory_save():
     """测试2: 记忆保存功能"""
     print("\n" + "=" * 60)
     print("测试2: 记忆保存功能")
@@ -100,7 +100,7 @@ def test_2_memory_save():
         return wisdom_ok and goal_ok
 
 
-def test_3_restart_snapshot():
+def scenario_3_restart_snapshot():
     """测试3: 重启前的强制快照"""
     print("\n" + "=" * 60)
     print("测试3: 重启前的强制快照")
@@ -137,7 +137,7 @@ def test_3_restart_snapshot():
         return False
 
 
-def test_4_workspace_structure():
+def scenario_4_workspace_structure():
     """测试4: 工作区与提示词控制面完整性"""
     print("\n" + "=" * 60)
     print("测试4: 工作区与提示词控制面完整性")
@@ -185,7 +185,7 @@ def test_4_workspace_structure():
     return all_ok
 
 
-def test_5_restart_bootstrap_path():
+def scenario_5_restart_bootstrap_path():
     """测试5: 重启后启动路径应绕开工作台，直接回到 agent 主线"""
     print("\n" + "=" * 60)
     print("测试5: 重启后启动路径")
@@ -225,31 +225,31 @@ def main():
     results = []
 
     try:
-        results.append(("CLI错误检测", test_1_cli_error_detection()))
+        results.append(("CLI错误检测", scenario_1_cli_error_detection()))
     except Exception as e:
         print(f"  [ERROR] {e}")
         results.append(("CLI错误检测", False))
 
     try:
-        results.append(("记忆保存", test_2_memory_save()))
+        results.append(("记忆保存", scenario_2_memory_save()))
     except Exception as e:
         print(f"  [ERROR] {e}")
         results.append(("记忆保存", False))
 
     try:
-        results.append(("重启快照", test_3_restart_snapshot()))
+        results.append(("重启快照", scenario_3_restart_snapshot()))
     except Exception as e:
         print(f"  [ERROR] {e}")
         results.append(("重启快照", False))
 
     try:
-        results.append(("workspace结构", test_4_workspace_structure()))
+        results.append(("workspace结构", scenario_4_workspace_structure()))
     except Exception as e:
         print(f"  [ERROR] {e}")
         results.append(("workspace结构", False))
 
     try:
-        results.append(("重启启动路径", test_5_restart_bootstrap_path()))
+        results.append(("重启启动路径", scenario_5_restart_bootstrap_path()))
     except Exception as e:
         print(f"  [ERROR] {e}")
         results.append(("重启启动路径", False))

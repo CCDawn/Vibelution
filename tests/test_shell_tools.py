@@ -996,10 +996,8 @@ class TestShellToolsIntegration:
         """测试执行前语法检查"""
         # 先检查语法
         syntax_result = check_python_syntax(file_path=sample_py_file)
+        # 语法已校验通过；此处不实际执行 run_python，流程覆盖到此为止。
         assert "正确" in syntax_result or "OK" in syntax_result
-        
-        # 只有语法正确才执行（这里不实际执行，只是演示流程）
-        assert True
 
     def test_backup_and_cleanup_workflow(self):
         """测试备份和清理流程"""

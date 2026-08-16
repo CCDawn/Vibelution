@@ -43,7 +43,7 @@ def _run(cmd: str, cwd: Path) -> None:
     subprocess.run(cmd, cwd=str(cwd), shell=True, check=True, capture_output=True, text=True)
 
 
-def test_run_git_hides_console_windows_on_windows(monkeypatch, tmp_path):
+def test_git_memory_service_run_git_hides_console_windows_on_windows(monkeypatch, tmp_path):
     import subprocess
 
     from core.infrastructure import no_console_git as ncg

@@ -311,7 +311,7 @@ def test_build_agent_command_for_test_mode():
     assert "agent.py" in cmd
 
 
-def test_run_git_hides_console_windows_on_windows(monkeypatch, tmp_path: Path):
+def test_evolution_harness_run_git_hides_console_windows_on_windows(monkeypatch, tmp_path: Path):
     calls = []
     resolved_git = str(tmp_path / "Git" / "mingw64" / "bin" / "git.exe")
 

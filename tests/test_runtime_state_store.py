@@ -32,7 +32,7 @@ def test_save_state_suppresses_persistent_windows_lock(tmp_path, monkeypatch, ca
     assert "state write skipped after retries" in capsys.readouterr().err
 
 
-def test_atomic_write_text_falls_back_when_tempfile_creation_fails(tmp_path, monkeypatch):
+def test_state_store_atomic_write_text_falls_back_when_tempfile_creation_fails(tmp_path, monkeypatch):
     target_path = tmp_path / "state.json"
     monkeypatch.setattr(state_store, "ensure_runtime_manager_dirs", lambda: None)
     monkeypatch.setattr(state_store.tempfile, "mkstemp", lambda **kwargs: (_ for _ in ()).throw(OSError("No space left on device")))
