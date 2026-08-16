@@ -37,12 +37,12 @@ describe("source-collection run queries contract", () => {
     expect(routeSource).not.toContain("type DataProcessingRecordListPayload =");
   });
 
-  it("preserves summary and data-processing detail endpoints", () => {
+  it("preserves summary and data-processing detail API helpers", () => {
     expect(apiSource).toContain("/workflow-orchestration/source-collection/summary");
     expect(queriesSource).toContain("fetchSourceCollectionSummary");
-    expect(queriesSource).toContain("/records");
-    expect(queriesSource).toContain("/collection-assignments");
-    expect(queriesSource).toContain("/status");
+    expect(queriesSource).toContain("listDataProcessingRunRecords");
+    expect(queriesSource).toContain("listDataProcessingCollectionAssignments");
+    expect(queriesSource).toContain("fetchDataProcessingRunStatus");
   });
 
   it("reuses a recent selected-run summary across workspace remounts", () => {
