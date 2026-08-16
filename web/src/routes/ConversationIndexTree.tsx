@@ -66,6 +66,10 @@ type ConversationIndexTreeProps = {
   onRenameTitleChange: (title: string) => void;
   onSubmitRename: (session: SessionSummary) => void;
   onToggleConversationGroup: (groupKey: ConversationIndexDynamicGroupKey) => void;
+  bulkSelectionEnabled?: boolean;
+  selectedBulkSessionIds?: ReadonlySet<string>;
+  bulkSelectLabel?: string;
+  onToggleBulk?: (sessionId: string, selected: boolean, shiftKey?: boolean) => void;
 };
 
 function roomIdFromConversation(conversation: ConversationSummary) {
@@ -118,6 +122,10 @@ export function ConversationIndexTree({
   onRenameTitleChange,
   onSubmitRename,
   onToggleConversationGroup,
+  bulkSelectionEnabled = false,
+  selectedBulkSessionIds,
+  bulkSelectLabel = "",
+  onToggleBulk,
 }: ConversationIndexTreeProps) {
   // Configured teams (with members) live under AgentConversationDirectory team blocks
   // so each team nests team chat + member agents. This tree only keeps setup / unlinked rooms.
@@ -188,6 +196,10 @@ export function ConversationIndexTree({
               onPrefetch={onPrefetchDirectSession}
               onRenameTitleChange={onRenameTitleChange}
               onSubmitRename={onSubmitRename}
+              bulkSelectionEnabled={bulkSelectionEnabled}
+              selectedBulkSessionIds={selectedBulkSessionIds}
+              bulkSelectLabel={bulkSelectLabel}
+              onToggleBulk={onToggleBulk}
             />
           </ConversationIndexSection>
         );

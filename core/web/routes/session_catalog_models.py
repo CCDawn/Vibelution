@@ -67,3 +67,22 @@ class SessionDeleteResponse(BaseModel):
     deleted: bool
     deletedSessionId: str = ""
     nextActiveSessionId: str = ""
+
+
+class SessionBulkDeletePayload(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    sessionIds: list[str] = Field(default_factory=list)
+
+
+class SessionBulkDeleteResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    status: str = ""
+    requestedSessionIds: list[str] = Field(default_factory=list)
+    success: list[dict[str, Any]] = Field(default_factory=list)
+    skipped: list[dict[str, Any]] = Field(default_factory=list)
+    failed: list[dict[str, Any]] = Field(default_factory=list)
+    summary: dict[str, Any] = Field(default_factory=dict)
+    nextActiveSessionId: str = ""
+    durationMs: float | None = None

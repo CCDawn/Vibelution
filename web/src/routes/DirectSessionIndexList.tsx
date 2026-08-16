@@ -44,6 +44,10 @@ type DirectSessionIndexListProps = {
   onPrefetch?: (sessionId: string) => void;
   onRenameTitleChange: (title: string) => void;
   onSubmitRename: (session: SessionSummary) => void;
+  bulkSelectionEnabled?: boolean;
+  selectedBulkSessionIds?: ReadonlySet<string>;
+  bulkSelectLabel?: string;
+  onToggleBulk?: (sessionId: string, selected: boolean, shiftKey?: boolean) => void;
 };
 
 export function conversationToSessionSummary(
@@ -167,6 +171,10 @@ export function DirectSessionIndexList({
   onPrefetch,
   onRenameTitleChange,
   onSubmitRename,
+  bulkSelectionEnabled = false,
+  selectedBulkSessionIds,
+  bulkSelectLabel = "",
+  onToggleBulk,
 }: DirectSessionIndexListProps) {
   const approvalSessionIds = new Set(
     sessionIdsNeedingApproval.map((id) => String(id || "").trim()).filter(Boolean),
@@ -233,6 +241,10 @@ export function DirectSessionIndexList({
             onPrefetch={onPrefetch}
             onRenameTitleChange={onRenameTitleChange}
             onSubmitRename={onSubmitRename}
+            bulkSelectionEnabled={bulkSelectionEnabled}
+            bulkSelected={Boolean(selectedBulkSessionIds?.has(session.id))}
+            bulkSelectLabel={bulkSelectLabel}
+            onToggleBulk={onToggleBulk}
           />
         );
       })}

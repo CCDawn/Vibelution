@@ -662,6 +662,27 @@ export type SessionDeleteResponse = {
   nextActiveSessionId: string;
 };
 
+export type SessionBulkDeleteResponse = {
+  status: string;
+  requestedSessionIds: string[];
+  success: Array<{
+    sessionId: string;
+    deleted?: boolean;
+    nextActiveSessionId?: string;
+    replacementDirectSessionId?: string;
+  }>;
+  skipped: Array<{ sessionId: string; reason?: string; message?: string }>;
+  failed: Array<{ sessionId: string; reason?: string; message?: string }>;
+  summary: {
+    requestedCount: number;
+    successCount: number;
+    skippedCount: number;
+    failedCount: number;
+  };
+  nextActiveSessionId?: string;
+  durationMs?: number;
+};
+
 export type SessionTurnError = {
   message: string;
   errorType: string;

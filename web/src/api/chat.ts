@@ -9,6 +9,7 @@ import type {
   ConversationSummary,
   SessionChatReviewCandidateResponse,
   SessionDeleteResponse,
+  SessionBulkDeleteResponse,
   SessionDetail,
   SessionGuidanceMode,
   SessionLlmOptions,
@@ -216,6 +217,14 @@ export async function deleteChatSession(sessionId: string): Promise<SessionDelet
     }
     throw error;
   }
+}
+
+export function bulkDeleteChatSessions(sessionIds: string[]): Promise<SessionBulkDeleteResponse> {
+  return fetchJson<SessionBulkDeleteResponse>("/api/sessions/bulk-delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sessionIds }),
+  });
 }
 
 export function fetchSessionLlmOptions(sessionId: string): Promise<SessionLlmOptions> {
