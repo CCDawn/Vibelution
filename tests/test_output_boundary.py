@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from core.orchestration.output_boundary import (
     sanitize_assistant_thought_delta_text,
     sanitize_assistant_thought_text,
@@ -100,3 +102,17 @@ def test_strip_llm_protocol_artifacts_keeps_non_protocol_trailing_angle_brackets
 def test_sanitize_assistant_visible_text_hides_unclosed_think_blocks():
     assert sanitize_assistant_visible_text("<think>内部推理") == ""
     assert sanitize_assistant_visible_text("<think>内部推理</think>可见") == "可见"
+
+
+def test_sanitize_coerces_bytes_mapping_chunks_and_false_trim():
+    raw = "<think>内部推理</think>可见回答。\n<state>{}</state>\n[outcome=done]"
+    assert sanitize_assistant_visible_text(raw.encode("utf-8")) == "可见回答。"
+    assert sanitize_assistant_visible_text({"content": raw}) == "可见回答。"
+    assert sanitize_assistant_visible_text({"visibleText": "可见回答。\n<state>{}</state>"}) == "可见回答。"
+    assert sanitize_assistant_visible_text(SimpleNamespace(content=raw)) == "可见回答。"
+    assert sanitize_assistant_visible_text(["可见", "<state>leak</state>", "回答"]) == "可见回答"
+    assert "b'" not in sanitize_assistant_visible_text(b"visible")
+    assert strip_llm_protocol_artifacts({"role": "assistant"}) == ""
+    assert strip_llm_protocol_artifacts(" 下一步 ", trim="false") == " 下一步 "
+    assert strip_llm_protocol_artifacts(" 下一步 ", trim=b"false") == " 下一步 "
+    assert strip_llm_protocol_artifacts(" 下一步 ", trim="true") == "下一步"

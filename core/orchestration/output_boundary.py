@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from typing import Any
 
 
@@ -32,7 +33,71 @@ _EMPTY_CONTENT_SANITISED_RE = re.compile(
 
 
 def _coerce_text(value: Any) -> str:
-    return str(value or "")
+    if value is None:
+        return ""
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        return value
+    if isinstance(value, Mapping):
+        for key in (
+            "content",
+            "text",
+            "delta",
+            "visible",
+            "thought",
+            "visibleText",
+            "thoughtText",
+        ):
+            nested = value.get(key)
+            if nested is not None and nested is not value:
+                return _coerce_text(nested)
+        return ""
+    if isinstance(value, (list, tuple)):
+        return "".join(_coerce_text(item) for item in value)
+    content = getattr(value, "content", None)
+    if content is not None and content is not value:
+        return _coerce_text(content)
+    return str(value)
+
+
+def _coerce_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if not text:
+        return default
+    if text in {"1", "true", "yes", "on", "enabled"}:
+        return True
+    if text in {"0", "false", "no", "off", "disabled"}:
+        return False
+    return default
+
+
+def _coerce_name_tuple(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        text = value.strip()
+        return (text,) if text else ()
+    if isinstance(value, Mapping):
+        return ()
+    try:
+        names = tuple(
+            text for text in (_coerce_text(item).strip() for item in value) if text
+        )
+        return names
+    except TypeError:
+        text = _coerce_text(value).strip()
+        return (text,) if text else ()
 
 
 def _strip_think_blocks(text: str) -> str:
@@ -120,7 +185,7 @@ def strip_llm_protocol_artifacts(value: Any, *, trim: bool = True) -> str:
 
     text = _strip_trailing_partial_protocol_tag(text)
     text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip() if trim else text
+    return text.strip() if _coerce_bool(trim, default=True) else text
 
 
 def sanitize_assistant_visible_text(value: Any) -> str:
@@ -157,11 +222,12 @@ def _is_trailing_protocol_fragment(normalized: str, extra_names: tuple[str, ...]
     token = normalized.split()[0].strip().lstrip("/").strip()
     if not token:
         return True
-    names = _COMPLETE_PROTOCOL_TAG_NAMES + tuple(extra_names or ())
+    names = _COMPLETE_PROTOCOL_TAG_NAMES + _coerce_name_tuple(extra_names)
     return any(name.startswith(token) for name in names)
 
 
 def _strip_trailing_partial_protocol_tag(text: str, *, extra_prefixes: tuple[str, ...] = ()) -> str:
+    extra_prefixes = _coerce_name_tuple(extra_prefixes)
     cleaned = text or ""
     while True:
         match = re.search(r"<[^<>\n]*$", cleaned)
