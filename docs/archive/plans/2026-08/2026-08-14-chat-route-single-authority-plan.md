@@ -1,7 +1,7 @@
 # Chat 路由单一权威实施规划
 
 > 日期：2026-08-14
-> 状态：方向已确认，待实施
+> 状态：**ARCHIVED / IMPLEMENTED**（2026-08-14 关闭；长期权威见 [ADR 0010](../../adr/0010-chat-route-is-window-local-authority.md)）
 > 模式：`COMPACT_PLAN`（一个主 owner，按可独立验收的阶段连续实施）
 > 规划基线：local `main` `a52a903626`
 > 适用范围：Workbench 全局路由与 Chat 会话、群聊、Project Agent Bus 选择

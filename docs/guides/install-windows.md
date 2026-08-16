@@ -60,8 +60,8 @@ powershell -ExecutionPolicy Bypass -File scripts/install_windows.ps1 -SkipFronte
 powershell -ExecutionPolicy Bypass -File scripts/vibelution_launcher.ps1 -Action start
 ```
 
-控制面默认：`http://127.0.0.1:8765`
-工作台默认由 Launcher 打开（常见 `http://127.0.0.1:8002`，以界面/日志为准）。
+控制面为 **Electron Launcher 控制窗口**（IPC，非浏览器 URL）；Python `:8765` 控制面已退役（[ADR 0009](../adr/0009-launcher-control-plane-lives-in-electron-main.md)）。
+工作台由 Launcher 打开（常见 `http://127.0.0.1:8000` 或 `:8002`，以界面/日志为准）。
 
 ## 配置模型密钥（首次对话前）
 
