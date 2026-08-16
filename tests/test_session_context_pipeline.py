@@ -16,6 +16,7 @@ from core.chat.history_ledger import (
 from core.chat.conversation_ledger import (
     EVENT_ASSISTANT_MESSAGE,
     EVENT_ASSISTANT_PARTIAL,
+    EVENT_TOOL_CALL_STARTED,
     EVENT_TOOL_RESULT,
     EVENT_TURN_FAILED,
     EVENT_TURN_INTERRUPTED,
@@ -81,6 +82,21 @@ def _ledger_events_from_messages(tmp_path, session_id: str, messages: list[dict]
                     tmp_path,
                     session_id,
                     turn_id,
+                    EVENT_TOOL_CALL_STARTED,
+                    status="running",
+                    payload={
+                        "toolCall": {
+                            **call,
+                            "id": tool_call_id,
+                            "name": tool_name,
+                        }
+                    },
+                    tool_call_id=tool_call_id,
+                )
+                append_conversation_event(
+                    tmp_path,
+                    session_id,
+                    turn_id,
                     EVENT_TOOL_RESULT,
                     status=str(call.get("status") or "done").strip() or "done",
                     payload={
@@ -88,6 +104,7 @@ def _ledger_events_from_messages(tmp_path, session_id: str, messages: list[dict]
                             **call,
                             "id": tool_call_id,
                             "name": tool_name,
+                            "result": call.get("result") or "",
                         }
                     },
                     tool_call_id=tool_call_id,
@@ -384,10 +401,10 @@ def test_context_hash_tracks_canonical_tool_call_identity(tmp_path):
                     "id": "call_a",
                     "type": "function",
                     "function": {"name": "read_file_tool", "arguments": "{\"path\":\"agent.py\"}"},
+                    "result": "same result",
                 }
             ],
         },
-        {"role": "tool", "tool_call_id": "call_a", "content": "same result"},
     ]
     changed_messages = [
         {
@@ -398,10 +415,10 @@ def test_context_hash_tracks_canonical_tool_call_identity(tmp_path):
                     "id": "call_b",
                     "type": "function",
                     "function": {"name": "read_file_tool", "arguments": "{\"path\":\"agent.py\"}"},
+                    "result": "same result",
                 }
             ],
         },
-        {"role": "tool", "tool_call_id": "call_b", "content": "same result"},
     ]
 
     base = assemble_conversation_context(
@@ -431,14 +448,10 @@ def test_context_assembler_replaces_large_tool_results_only_for_compression(tmp_
                     "id": "call_large",
                     "type": "function",
                     "function": {"name": "cli_tool", "arguments": "{\"command\":\"pytest -q\"}"},
+                    "result": large_result,
+                    "status": "failed",
                 }
             ],
-        },
-        {
-            "role": "tool",
-            "tool_call_id": "call_large",
-            "content": large_result,
-            "metadata": {"toolName": "cli_tool", "toolStatus": "failed"},
         },
     ]
 

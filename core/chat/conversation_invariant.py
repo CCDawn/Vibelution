@@ -42,6 +42,22 @@ class ConversationPayloadInvariantResult:
     details: dict[str, Any] = field(default_factory=dict)
 
 
+class ConversationSeedInvariantError(RuntimeError):
+    """Raised when ledger-derived history seed would silently repair model history."""
+
+    def __init__(
+        self,
+        *,
+        error_type: str,
+        message: str,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.error_type = str(error_type or "").strip() or "conversation_seed_invariant_failed"
+        self.message = str(message or "").strip() or "Conversation history seed failed invariant check."
+        self.details = dict(details or {})
+
+
 def historical_conversation_events(
     events: Iterable[ConversationLedgerEvent],
     *,
