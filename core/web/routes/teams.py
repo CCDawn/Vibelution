@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Union
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
@@ -10,7 +10,8 @@ from pydantic import BaseModel, Field
 from core.web.routes.teams_catalog_models import (
     TeamAiSearchRunListResponse,
     TeamCanvasResponse,
-    TeamDetailResponse,
+    TeamDetailFullResponse,
+    TeamDetailLightResponse,
     TeamListResponse,
 )
 from core.web.routes.teams_write_models import (
@@ -120,7 +121,7 @@ def team_list(includeArchived: bool = False) -> dict:
 @router.post(
     "/teams",
     status_code=status.HTTP_201_CREATED,
-    response_model=TeamDetailResponse,
+    response_model=TeamDetailFullResponse,
     response_model_exclude_unset=True,
 )
 def team_create(payload: TeamCreatePayload) -> dict:
@@ -137,7 +138,7 @@ def team_create(payload: TeamCreatePayload) -> dict:
 
 @router.get(
     "/teams/{team_id}",
-    response_model=TeamDetailResponse,
+    response_model=Union[TeamDetailLightResponse, TeamDetailFullResponse],
     response_model_exclude_unset=True,
 )
 def team_detail(team_id: str, detail: str = "full") -> dict:
@@ -156,7 +157,7 @@ def team_detail(team_id: str, detail: str = "full") -> dict:
 
 @router.patch(
     "/teams/{team_id}",
-    response_model=TeamDetailResponse,
+    response_model=TeamDetailFullResponse,
     response_model_exclude_unset=True,
 )
 def team_update(team_id: str, payload: TeamUpdatePayload) -> dict:
@@ -178,7 +179,7 @@ def team_update(team_id: str, payload: TeamUpdatePayload) -> dict:
 
 @router.delete(
     "/teams/{team_id}",
-    response_model=TeamDetailResponse,
+    response_model=TeamDetailFullResponse,
     response_model_exclude_unset=True,
 )
 def team_delete(team_id: str) -> dict:
@@ -290,7 +291,7 @@ def team_message_create(team_id: str, payload: TeamMessagePayload) -> dict:
 
 @router.post(
     "/teams/{team_id}/chat-room/sync",
-    response_model=TeamDetailResponse,
+    response_model=TeamDetailFullResponse,
     response_model_exclude_unset=True,
 )
 def team_chat_room_sync(team_id: str) -> dict:
