@@ -41,6 +41,8 @@ describe("chat workspace user-action telemetry contract", () => {
     expect(routeSelectionSource).toContain('postUserActionObservation("group_room_open"');
     expect(routeSelectionSource).toContain('postUserActionObservation("project_bus_open"');
     expect(routeSelectionSource).toContain("telemetrySource");
+    expect(routeSelectionSource).toContain('"bare_route_bootstrap"');
+    expect(routeSelectionSource).toContain('"replace_if_still_viewing"');
   });
 
   it("passes telemetrySource from direct session open actions", () => {

@@ -73,6 +73,7 @@ import {
   type ComposerQueueItem,
 } from "../../components/conversation/composerFollowupQueueModel";
 import { postSubmitTelemetry } from "./chatSubmitTelemetry";
+import { startUserAction } from "../../app/userActionTelemetry";
 import { resolveSessionStopTurnId } from "./chatStopTurnModel";
 
 type ChatEditTarget = { messageId: string; original: string };
@@ -183,6 +184,12 @@ export function useChatComposerTurnMutations({
       });
     },
     onMutate: async (variables) => {
+      const telemetry = startUserAction("session_message_submit", {
+        sessionId: variables.sessionId,
+        clientSubmissionId: variables.clientSubmissionId,
+        attachmentCount: variables.attachmentIds?.length ?? 0,
+        referenceCount: variables.references?.length ?? 0,
+      });
       postSubmitTelemetry(
         "browser.chat_submit.mutate_called",
         "Direct chat submit mutation started.",
@@ -232,8 +239,15 @@ export function useChatComposerTurnMutations({
           );
         });
       }
+      return { telemetry };
     },
-    onSuccess: (acceptedTurn, variables) => {
+    onSuccess: (acceptedTurn, variables, context) => {
+      context?.telemetry?.succeeded({
+        sessionId: variables.sessionId,
+        clientSubmissionId: variables.clientSubmissionId,
+        turnId: acceptedTurn.turnId,
+        durationMs: Math.max(0, Math.round(chatStreamPerformanceNowMs() - variables.requestStartedAtMs)),
+      });
       postSubmitTelemetry(
         "browser.chat_submit.accepted",
         "Direct chat submit was accepted by the backend.",
@@ -282,7 +296,12 @@ export function useChatComposerTurnMutations({
       // SSE owns authoritative reconciliation when available; the existing polling
       // fallback does the same without competing with the first model request.
     },
-    onError: (error, variables) => {
+    onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, {
+        sessionId: variables.sessionId,
+        clientSubmissionId: variables.clientSubmissionId,
+        durationMs: Math.max(0, Math.round(chatStreamPerformanceNowMs() - variables.requestStartedAtMs)),
+      });
       postSubmitTelemetry(
         "browser.chat_submit.request_failed",
         "Direct chat submit request failed before the backend accepted the turn.",
@@ -335,6 +354,12 @@ export function useChatComposerTurnMutations({
         turnStatusTail: turnStatusTail ?? loadTurnStatusTailConfig(sessionId),
       }),
     onMutate: async (variables) => {
+      const telemetry = startUserAction("session_edit_resubmit", {
+        sessionId: variables.sessionId,
+        messageId: variables.messageId,
+        clientSubmissionId: variables.clientSubmissionId,
+        contentLength: variables.content.length,
+      });
       const sessionKey = queryKeys.session(variables.sessionId);
       await queryClient.cancelQueries({ queryKey: sessionKey, exact: true });
       const previousDetail = queryClient.getQueryData<SessionDetail>(sessionKey);
@@ -362,9 +387,14 @@ export function useChatComposerTurnMutations({
       updateSessionSummaryCaches(queryClient, (sessions) =>
         markSessionSummaryRunning(sessions, variables.sessionId),
       );
-      return { previousDetail };
+      return { previousDetail, telemetry };
     },
-    onSuccess: (nextDetail, variables) => {
+    onSuccess: (nextDetail, variables, context) => {
+      context?.telemetry?.succeeded({
+        sessionId: variables.sessionId,
+        messageId: variables.messageId,
+        turnId: latestUserTurnId(nextDetail),
+      });
       setSessionComposerErrors((current) => ({
         ...current,
         [variables.sessionId]: "",
@@ -397,6 +427,10 @@ export function useChatComposerTurnMutations({
       void chatWorkspaceCache.afterSessionChanged();
     },
     onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, {
+        sessionId: variables.sessionId,
+        messageId: variables.messageId,
+      });
       const previousDetail = context && typeof context === "object" && "previousDetail" in context
         ? (context as { previousDetail?: SessionDetail }).previousDetail
         : undefined;
@@ -419,7 +453,17 @@ export function useChatComposerTurnMutations({
   const stopTurnMutation = useMutation({
     mutationFn: async ({ sessionId, turnId }: { sessionId: string; turnId: string }) =>
       stopSessionTurn(sessionId, turnId),
-    onSuccess: (nextDetail, variables) => {
+    onMutate: (variables) => ({
+      telemetry: startUserAction("session_turn_stop", {
+        sessionId: variables.sessionId,
+        turnId: variables.turnId,
+      }),
+    }),
+    onSuccess: (nextDetail, variables, context) => {
+      context?.telemetry?.succeeded({
+        sessionId: variables.sessionId,
+        turnId: variables.turnId,
+      });
       setSessionComposerErrors((current) => ({
         ...current,
         [variables.sessionId]: "",
@@ -427,7 +471,11 @@ export function useChatComposerTurnMutations({
       syncSessionDetail(nextDetail);
       void chatWorkspaceCache.afterSessionChanged();
     },
-    onError: (error, variables) => {
+    onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, {
+        sessionId: variables.sessionId,
+        turnId: variables.turnId,
+      });
       setSessionComposerErrors((current) => ({
         ...current,
         [variables.sessionId]: describeError(error, t("stopFailed")),
@@ -449,7 +497,18 @@ export function useChatComposerTurnMutations({
       },
     ) =>
       submitSessionGuidance(sessionId, { content, mode }),
-    onSuccess: (nextDetail, variables) => {
+    onMutate: (variables) => ({
+      telemetry: startUserAction("session_guidance_submit", {
+        sessionId: variables.sessionId,
+        mode: variables.mode,
+        contentLength: variables.content.length,
+      }),
+    }),
+    onSuccess: (nextDetail, variables, context) => {
+      context?.telemetry?.succeeded({
+        sessionId: variables.sessionId,
+        mode: variables.mode,
+      });
       setSessionComposerErrors((current) => ({
         ...current,
         [variables.sessionId]: "",
@@ -461,7 +520,11 @@ export function useChatComposerTurnMutations({
       syncSessionDetail(nextDetail);
       void chatWorkspaceCache.afterSessionChanged({ sessionId: variables.sessionId });
     },
-    onError: (error, variables) => {
+    onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, {
+        sessionId: variables.sessionId,
+        mode: variables.mode,
+      });
       setSessionComposerErrors((current) => ({
         ...current,
         [variables.sessionId]: describeError(error, t("guidanceFailed")),
@@ -942,6 +1005,13 @@ export function useChatComposerSubmitActions({
       },
     );
     if (activeImageAttachments.length && activeAgentImageInputUnsupported) {
+      startUserAction("session_message_submit", {
+        sessionId: activeSessionId,
+        clientSubmissionId,
+        attachmentCount: activeImageAttachments.length,
+      }).blocked("image_input_unsupported", {
+        imageInputModelId: activeImageInputModelId,
+      });
       postSubmitTelemetry(
         "browser.chat_submit.blocked",
         "Direct chat submit image upload was blocked because the active Agent model does not support image input.",
@@ -974,6 +1044,16 @@ export function useChatComposerSubmitActions({
       referenceAttachmentCount: activeReferenceAttachments.length,
     });
     if (guardReason) {
+      startUserAction("session_message_submit", {
+        sessionId: activeSessionId,
+        clientSubmissionId,
+        attachmentCount: activeImageAttachments.length,
+        referenceCount: activeReferenceAttachments.length,
+      }).blocked(guardReason, {
+        composerDisabled,
+        sessionBusy,
+        activePhase: telemetryActivePhase,
+      });
       postSubmitTelemetry(
         "browser.chat_submit.blocked",
         "Direct chat submit was blocked by the composer guard.",
