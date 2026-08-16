@@ -1081,6 +1081,35 @@ def _launcher_cleanup_proof_is_valid(
     return _launcher_cleanup_observation_is_clean(workbench)
 
 
+def _runtime_manager_cleanup_proof_is_valid(
+    proof: dict[str, Any],
+    *,
+    runtime_state: dict[str, Any],
+    workbench: dict[str, Any],
+) -> bool:
+    if not isinstance(proof, dict) or not bool(proof.get("valid")):
+        return False
+    if int(proof.get("schemaVersion") or 0) != _LAUNCHER_CLEANUP_PROOF_SCHEMA_VERSION:
+        return False
+    expected_root = os.path.normcase(os.path.abspath(str(PROJECT_ROOT.resolve())))
+    proof_root_text = str(proof.get("projectRoot") or "").strip()
+    if not proof_root_text:
+        return False
+    if os.path.normcase(os.path.abspath(proof_root_text)) != expected_root:
+        return False
+    if not bool(workbench.get("_cleanupObservationAvailable")):
+        return False
+    command = runtime_state.get("command") if isinstance(runtime_state.get("command"), dict) else {}
+    if str(command.get("activeCommandId") or "").strip():
+        return False
+    state_workbench = runtime_state.get("workbench") if isinstance(runtime_state.get("workbench"), dict) else {}
+    if str(state_workbench.get("desiredState") or "").strip().lower() != "closed":
+        return False
+    if str(state_workbench.get("phase") or "").strip().lower() != "steady":
+        return False
+    return _launcher_cleanup_observation_is_clean(workbench)
+
+
 def _launcher_cleanup_observation_is_clean(workbench: dict[str, Any]) -> bool:
     if str(workbench.get("observedState") or "closed").strip().lower() != "closed":
         return False
@@ -1268,6 +1297,7 @@ def _terminate_managed_launcher_subtree(*, include_runtime_manager: bool, reason
         "fastPathAttempted": False,
         "usedFallback": False,
         "usedCleanProof": False,
+        "cleanProofSource": "",
         "fallbackReason": "",
         "knownPidCount": 0,
         "cleanupStateTrusted": False,
@@ -1307,13 +1337,27 @@ def _terminate_managed_launcher_subtree(*, include_runtime_manager: bool, reason
         include_runtime_manager=include_runtime_manager,
     )
     cleanup_phases["cleanupStateTrusted"] = cleanup_state_trusted
-    clean_proof = _load_launcher_cleanup_proof()
-    clean_proof_valid = not known_pids and _launcher_cleanup_proof_is_valid(
-        clean_proof,
+    file_clean_proof = _load_launcher_cleanup_proof()
+    file_clean_proof_valid = not known_pids and _launcher_cleanup_proof_is_valid(
+        file_clean_proof,
         runtime_state=runtime_state,
         workbench=cleanup_workbench,
     )
-    if not clean_proof_valid:
+    state_workbench = runtime_state.get("workbench") if isinstance(runtime_state.get("workbench"), dict) else {}
+    runtime_clean_proof = (
+        state_workbench.get("cleanupProof") if isinstance(state_workbench.get("cleanupProof"), dict) else {}
+    )
+    runtime_clean_proof_valid = not known_pids and _runtime_manager_cleanup_proof_is_valid(
+        runtime_clean_proof,
+        runtime_state=runtime_state,
+        workbench=cleanup_workbench,
+    )
+    clean_proof_valid = file_clean_proof_valid or runtime_clean_proof_valid
+    if file_clean_proof_valid:
+        cleanup_phases["cleanProofSource"] = "file"
+    elif runtime_clean_proof_valid:
+        cleanup_phases["cleanProofSource"] = "runtime_state"
+    if not file_clean_proof_valid:
         cleanup_phases["cleanProofInvalidated"] = _invalidate_launcher_cleanup_proof()
 
     process_cleanup: dict[str, Any]

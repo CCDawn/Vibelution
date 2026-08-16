@@ -114,6 +114,7 @@ _OPEN_VERIFICATION_POLL_INTERVAL_SECONDS = 0.4
 _CLOSE_VERIFICATION_TIMEOUT_SECONDS = 8.0
 _CLOSE_VERIFICATION_POLL_INTERVAL_SECONDS = 0.4
 _FAST_CLOSE_PROCESS_TERMINATE_TIMEOUT_SECONDS = 1.0
+_WORKBENCH_CLEANUP_PROOF_SCHEMA_VERSION = 1
 _DEFERRED_RESTART_ACTIVE_WORK_POLL_SECONDS = 10.0
 _STARTUP_COMMAND_GRACE_SECONDS = 1.0
 _STARTUP_COMMAND_GRACE_POLL_SECONDS = 0.05
@@ -1361,6 +1362,32 @@ def _closed_observation_has_residual_evidence(observation: dict[str, Any]) -> bo
     return bool(observation.get("backendPortOwnerResidual")) or str(observation.get("lifecycleConsistency") or "") in {
         "residual_backend",
         "orphaned_browser",
+    }
+
+
+def _build_workbench_cleanup_proof(
+    observation: dict[str, Any],
+    *,
+    cleanup_result: dict[str, Any],
+    cleanup_mode: str,
+    reason: str,
+) -> dict[str, Any]:
+    remaining = cleanup_result.get("remaining") if isinstance(cleanup_result.get("remaining"), list) else []
+    if not bool(cleanup_result.get("supported", True)) or remaining:
+        return {}
+    if not _close_request_already_satisfied(observation) or _closed_observation_has_residual_evidence(observation):
+        return {}
+    if bool(observation.get("backendPortConflict")):
+        return {}
+    if str(observation.get("lifecycleConsistency") or "consistent").strip().lower() != "consistent":
+        return {}
+    return {
+        "schemaVersion": _WORKBENCH_CLEANUP_PROOF_SCHEMA_VERSION,
+        "valid": True,
+        "projectRoot": str(PROJECT_ROOT.resolve()),
+        "cleanupMode": str(cleanup_mode or "").strip(),
+        "reason": str(reason or "").strip(),
+        "verifiedAt": now_iso(),
     }
 
 
@@ -3088,6 +3115,7 @@ class RuntimeManagerDaemon:
         reconcile: bool = True,
         reconcile_observation: dict[str, Any] | None = None,
         reconcile_residual_processes: dict[str, Any] | None = None,
+        workbench_updates: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         state = load_state()
         state.setdefault("command", {}).update(
@@ -3111,6 +3139,8 @@ class RuntimeManagerDaemon:
             if _command_affects_workbench_lifecycle(error_scope):
                 state.setdefault("workbench", {})["phase"] = "failed"
                 state["workbench"]["failureMessage"] = failure_message or message
+        if isinstance(workbench_updates, dict):
+            state.setdefault("workbench", {}).update(workbench_updates)
         if reconcile:
             state = self._reconcile_observation(
                 state,
@@ -3700,6 +3730,7 @@ class RuntimeManagerDaemon:
                     "lastSource": str(workbench.get("lastSource") or args.get("source") or "runtime_manager"),
                     "lastRequestAudit": request_audit,
                     "failureMessage": "",
+                    "cleanupProof": {},
                 }
             )
             save_state(self._reconcile_observation(state))
@@ -3767,6 +3798,7 @@ class RuntimeManagerDaemon:
                 "lastTransitionAt": now_iso(),
                 "lastRequestAudit": request_audit,
                 "failureMessage": "",
+                "cleanupProof": {},
             }
         )
         state["runtimeState"] = "running"
@@ -4458,10 +4490,16 @@ class RuntimeManagerDaemon:
                     "failureMessage": "",
                 }
             )
-            save_state(self._reconcile_observation(state, observation=observation))
+            save_state(state)
             cleanup_result = {"supported": True, "requested": [], "terminated": [], "remaining": [], "skipped": "already_closed_no_residual"}
             if bool(args.get("stopManager")) or _closed_observation_has_residual_evidence(observation):
                 cleanup_result = self._cleanup_residual_workbench_processes()
+            cleanup_proof = _build_workbench_cleanup_proof(
+                observation,
+                cleanup_result=cleanup_result,
+                cleanup_mode=str(cleanup_result.get("candidateScan") or cleanup_result.get("skipped") or "already_closed"),
+                reason=reason,
+            )
             launcher_state_cleanup = _clear_launcher_state_after_verified_close(
                 observation,
                 command_id=command_id,
@@ -4491,6 +4529,11 @@ class RuntimeManagerDaemon:
                     "closeRequest": request_fields,
                 },
                 reconcile_observation=observation,
+                reconcile_residual_processes={
+                    "count": len(cleanup_result.get("remaining") or []),
+                    "items": list(cleanup_result.get("remaining") or []),
+                },
+                workbench_updates={"cleanupProof": cleanup_proof},
             )
 
         closed_runs = _close_active_evolution_runs_for_shutdown()
@@ -4505,7 +4548,7 @@ class RuntimeManagerDaemon:
                 "failureMessage": "",
             }
         )
-        save_state(self._reconcile_observation(state, observation=observation))
+        save_state(state)
         close_outcome = self._close_workbench_with_fast_path(
             command_id=command_id,
             initial_observation=observation,
@@ -4561,6 +4604,12 @@ class RuntimeManagerDaemon:
                 event_type="workbench.close.launcher_state_cleanup",
             )
         reopen_intent = _claim_workbench_reopen_intent() if bool(args.get("stopManager")) else None
+        cleanup_proof = _build_workbench_cleanup_proof(
+            verification,
+            cleanup_result=cleanup_result,
+            cleanup_mode=close_strategy,
+            reason=reason,
+        )
         final_result = self._finish_command(
             command_id,
             ok=True,
@@ -4577,6 +4626,11 @@ class RuntimeManagerDaemon:
                 "closeRequest": request_fields,
             },
             reconcile_observation=verification,
+            reconcile_residual_processes={
+                "count": len(cleanup_result.get("remaining") or []),
+                "items": list(cleanup_result.get("remaining") or []),
+            },
+            workbench_updates={"cleanupProof": cleanup_proof},
         )
         if bool(args.get("stopManager")):
             if reopen_intent:

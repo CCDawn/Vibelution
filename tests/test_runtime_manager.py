@@ -7181,6 +7181,7 @@ def test_handle_open_workbench_skips_initial_observation_when_cached_closed(monk
             "observedState": "closed",
             "phase": "steady",
             "lastRequestAudit": {"operation": "stop", "trigger": "stale_close"},
+            "cleanupProof": {"schemaVersion": 1, "valid": True},
         },
     }
     events: list[tuple[str, dict]] = []
@@ -7227,6 +7228,7 @@ def test_handle_open_workbench_skips_initial_observation_when_cached_closed(monk
     assert result["ok"] is True
     assert observe_calls == 1
     assert saved_states[0]["workbench"]["lastRequestAudit"] == {}
+    assert saved_states[0]["workbench"]["cleanupProof"] == {}
     assert _event_payload(events, "workbench.open.fast_path_started")["prelaunchProbeSkipped"] is True
 
 
@@ -9576,7 +9578,13 @@ def test_handle_close_workbench_uses_light_observation_and_reuses_it(monkeypatch
     monkeypatch.setattr(daemon, "_runtime_manager_active_work_runs", lambda: [])
     monkeypatch.setattr(daemon, "_close_active_evolution_runs_for_shutdown", lambda: [])
     monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: None)
-    monkeypatch.setattr(daemon, "residual_process_payload", lambda **kwargs: {"count": 0, "items": []})
+    monkeypatch.setattr(
+        daemon,
+        "residual_process_payload",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("fast close must reuse bounded residual evidence")
+        ),
+    )
     monkeypatch.setattr(daemon, "_backend_port_is_closed_for_fast_close", lambda port: True)
     monkeypatch.setattr(
         daemon,
@@ -9599,6 +9607,14 @@ def test_handle_close_workbench_uses_light_observation_and_reuses_it(monkeypatch
     assert result["ok"] is True
     assert result["closeStrategy"] == "runtime_manager_fast_path"
     assert observation_calls == [{"recover_browser_window_for_backend_observed": False}]
+    assert state["workbench"]["cleanupProof"] == {
+        "schemaVersion": 1,
+        "valid": True,
+        "projectRoot": str(daemon.PROJECT_ROOT.resolve()),
+        "cleanupMode": "runtime_manager_fast_path",
+        "reason": "web_close_button",
+        "verifiedAt": "2026-06-12T10:40:00+00:00",
+    }
 
 
 def test_handle_close_workbench_falls_back_to_launcher_when_fast_path_is_unavailable(monkeypatch):
@@ -11175,6 +11191,13 @@ def test_handle_close_workbench_skips_residual_cleanup_for_plain_close_when_alre
     monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
     monkeypatch.setattr(
         daemon,
+        "residual_process_payload",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("already-closed clean path must reuse bounded residual evidence")
+        ),
+    )
+    monkeypatch.setattr(
+        daemon,
         "close_workbench",
         lambda: close_calls.append("close") or subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
     )
@@ -11199,6 +11222,7 @@ def test_handle_close_workbench_skips_residual_cleanup_for_plain_close_when_alre
     assert result["stopDaemon"] is False
     assert result["residualCleanup"]["skipped"] == "already_closed_no_residual"
     assert result["launcherStateCleanup"]["reason"] == "launcher_control_process_alive"
+    assert state["workbench"]["cleanupProof"]["valid"] is True
     assert state_cleanup_calls == ["cleanup"]
     assert close_calls == []
 
