@@ -6,7 +6,12 @@ from core.web.services.team_workflow_orchestration_service import *
 from ._errors import _raise_team_workflow_route_error
 from ._models import *
 from ._router import router
-from .research_ops_models import ResearchOpsRouteResponse
+from .research_ops_models import (
+    OfficialModelEvidenceStatusResponse,
+    PaperNoteChunkStatusResponse,
+    ResearchOpsRouteResponse,
+    SourceQualityStatusResponse,
+)
 
 @router.post(
     "/teams/{team_id}/workflow-orchestration/research/mechanisms/extract", status_code=status.HTTP_201_CREATED,
@@ -213,7 +218,7 @@ def team_workflow_knowledge_graph_rollback(team_id: str, sync_id: str, payload: 
 
 @router.get(
     "/teams/{team_id}/workflow-orchestration/paper-note-chunks/status",
-    response_model=ResearchOpsRouteResponse,
+    response_model=PaperNoteChunkStatusResponse,
     response_model_exclude_unset=True,
 )
 def team_workflow_paper_note_chunk_status(team_id: str) -> dict:
@@ -227,7 +232,7 @@ def team_workflow_paper_note_chunk_status(team_id: str) -> dict:
 
 @router.get(
     "/teams/{team_id}/workflow-orchestration/source-quality/status",
-    response_model=ResearchOpsRouteResponse,
+    response_model=SourceQualityStatusResponse,
     response_model_exclude_unset=True,
 )
 def team_workflow_source_quality_status(team_id: str) -> dict:
@@ -506,7 +511,7 @@ def team_workflow_local_research_model_invoke(team_id: str, payload: LocalResear
 
 @router.get(
     "/teams/{team_id}/workflow-orchestration/official-model-evidence/status",
-    response_model=ResearchOpsRouteResponse,
+    response_model=OfficialModelEvidenceStatusResponse,
     response_model_exclude_unset=True,
 )
 def team_workflow_official_model_evidence_status(team_id: str) -> dict:
