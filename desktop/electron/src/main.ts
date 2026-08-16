@@ -2246,6 +2246,9 @@ app.whenReady()
       await windowProvider.openLauncher();
     }
     if (desktopCliArgs.workbenchCloseCanary) {
+      if (launcherBootstrap === null) {
+        throw new Error("Launcher bootstrap is unavailable for workbench close canary.");
+      }
       await openWorkbenchForCloseCanary(paths, launcherBootstrap, windowProvider);
       return;
     }
