@@ -3,10 +3,12 @@
 
 from __future__ import annotations
 
+import json
 import time
 import traceback
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Mapping, Optional
+from typing import Any, Callable, Dict, Optional
 
 from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 
@@ -20,13 +22,90 @@ from core.orchestration.agent_runtime_bindings import (
 )
 
 
-def _coerce_positive_int(value: Any, *, default: int = 1) -> int:
+def _coerce_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+def _coerce_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if not text:
+        return default
+    if text in {"1", "true", "yes", "on", "enabled"}:
+        return True
+    if text in {"0", "false", "no", "off", "disabled"}:
+        return False
+    return default
+
+
+def _as_mapping(value: Any) -> Dict[str, Any]:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return {}
+        try:
+            value = json.loads(text)
+        except json.JSONDecodeError:
+            return {}
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {}
+
+
+def _maybe_json(value: Any) -> Any:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith("{") or text.startswith("["):
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                return value
+    return value
+
+
+def _coerce_message_list(value: Any) -> list:
+    value = _maybe_json(value)
+    if value is None or isinstance(value, (str, bytes, bytearray, memoryview)):
+        return []
+    if isinstance(value, Mapping):
+        return [dict(value)]
     try:
-        parsed = int(value)
-    except (TypeError, ValueError):
+        return list(value)
+    except TypeError:
+        return []
+
+
+def _coerce_positive_int(value: Any, *, default: int = 1) -> int:
+    if isinstance(value, bool) or value is None:
         parsed = 0
+    else:
+        if isinstance(value, (bytes, bytearray, memoryview)):
+            value = bytes(value).decode("utf-8", errors="replace")
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            parsed = 0
     if parsed > 0:
         return parsed
+    if isinstance(default, bool) or default is None:
+        return 1
     try:
         fallback = int(default)
     except (TypeError, ValueError):
@@ -36,9 +115,13 @@ def _coerce_positive_int(value: Any, *, default: int = 1) -> int:
 
 def _llm_error_details(error: BaseException) -> Dict[str, Any]:
     raw = getattr(error, "details", None) if isinstance(error, LLMError) else None
-    if isinstance(raw, Mapping):
-        return dict(raw)
-    return {}
+    return _as_mapping(raw)
+
+
+def _invocation_metadata(invocation_context: Any) -> Dict[str, Any]:
+    if invocation_context is None:
+        return {}
+    return _as_mapping(getattr(invocation_context, "metadata", None))
 
 
 GetUiFn = Callable[[], Any]
@@ -96,14 +179,14 @@ class AgentLlmAttemptResult:
 def sanitize_llm_turn_messages(messages: list) -> list:
     """Keep tool/AI identity and structured system cache-control blocks intact."""
     clean_messages = []
-    for msg in messages:
+    for msg in _coerce_message_list(messages):
         if isinstance(msg, AIMessage):
             clean_messages.append(msg)
         elif isinstance(msg, ToolMessage):
             clean_messages.append(msg)
         elif isinstance(msg, SystemMessage):
-            clean_messages.append(SystemMessage(content=msg.content or ""))
-        elif isinstance(msg, dict) and msg.get("role") == "system":
+            clean_messages.append(SystemMessage(content=_coerce_text(msg.content)))
+        elif isinstance(msg, Mapping) and _coerce_text(msg.get("role")).strip().lower() == "system":
             clean_messages.append(dict(msg))
         else:
             clean_messages.append(msg)
@@ -141,7 +224,7 @@ def invoke_agent_llm_turn(
                 fallback_client_for_retry = None
                 if llm_for_turn is None:
                     llm_for_turn = hooks.get_llm_for_mode(
-                        disable_tools=bool(hooks.force_disable_tools),
+                        disable_tools=_coerce_bool(hooks.force_disable_tools, False),
                         profile_id=None,
                     )
                 route_identity = _llm_effective_route_identity(llm_for_turn)
@@ -245,12 +328,12 @@ def invoke_agent_llm_turn(
                         getattr(hooks.base_llm, "profile_id", None),
                     ),
                 )
-                category = recovery.category
-                is_retryable = recovery.retryable
-                user_msg = recovery.user_message
+                category = _coerce_text(recovery.category).strip()
+                is_retryable = _coerce_bool(recovery.retryable, False)
+                user_msg = _coerce_text(recovery.user_message)
                 stop_reason = (
                     hooks.current_stop_reason()
-                    or str(llm_error_details.get("stop_reason") or "").strip()
+                    or _coerce_text(llm_error_details.get("stop_reason")).strip()
                 )
                 if category == "cancelled" and stop_reason:
                     hooks.record_scene_event(
@@ -274,8 +357,9 @@ def invoke_agent_llm_turn(
                     )
                 except Exception:
                     streaming_enabled_for_failed_attempt = False
-                provider_stream_retry_exhausted = bool(
-                    llm_error_details.get("retry_budget_exhausted")
+                provider_stream_retry_exhausted = _coerce_bool(
+                    llm_error_details.get("retry_budget_exhausted"),
+                    False,
                 ) or reported_attempt >= reported_max_attempts
                 result.last_error_category = category
                 result.last_error_retryable = is_retryable
@@ -292,18 +376,18 @@ def invoke_agent_llm_turn(
                     "exception_message": exception_message[:4000],
                     "retryable": is_retryable,
                     "recovery_action": recovery.action,
-                    "stop_current_turn": recovery.stop_current_turn,
-                    "request_context_compression": recovery.request_context_compression,
-                    "fallback_profile_id": recovery.fallback_profile_id,
+                    "stop_current_turn": _coerce_bool(recovery.stop_current_turn, False),
+                    "request_context_compression": _coerce_bool(
+                        recovery.request_context_compression, False
+                    ),
+                    "fallback_profile_id": _coerce_text(recovery.fallback_profile_id).strip(),
                     "provider_stream_retry_exhausted": provider_stream_retry_exhausted,
                     "attempt": reported_attempt,
                     "max_attempts": reported_max_attempts,
                     "route_attempt": route_attempt,
                     "route_id": _llm_effective_route_id(llm_for_turn),
-                    "invocation_id": str(
-                        getattr(invocation_context, "metadata", {}).get("invocationId")
-                        if invocation_context is not None
-                        else ""
+                    "invocation_id": _coerce_text(
+                        _invocation_metadata(invocation_context).get("invocationId")
                     ),
                     "model": getattr(getattr(hooks.config, "llm", None), "model_name", ""),
                     "provider": getattr(getattr(hooks.config, "llm", None), "provider", ""),
@@ -337,10 +421,8 @@ def invoke_agent_llm_turn(
                 )
                 failed_route = llm_for_turn
                 failed_route_id = _llm_effective_route_id(failed_route)
-                failed_invocation_id = str(
-                    getattr(invocation_context, "metadata", {}).get("invocationId")
-                    if invocation_context is not None
-                    else ""
+                failed_invocation_id = _coerce_text(
+                    _invocation_metadata(invocation_context).get("invocationId")
                 )
                 turn_trace_fields = {
                     key: trace_fields[key]
@@ -356,18 +438,18 @@ def invoke_agent_llm_turn(
                         "routeAttempt": route_attempt,
                         "routeId": failed_route_id,
                         "invocationId": failed_invocation_id,
-                        "profileId": str(getattr(failed_route, "profile_id", "") or ""),
+                        "profileId": _coerce_text(getattr(failed_route, "profile_id", "")).strip(),
                         "transportAttempt": reported_attempt,
                         "maxTransportAttempts": reported_max_attempts,
                         "errorCategory": category,
-                        "retryable": bool(is_retryable),
+                        "retryable": is_retryable,
                         **safe_projection_details,
                     },
                     level="warning" if is_retryable else "error",
                     outcome="failed",
                 )
 
-                if recovery.request_context_compression:
+                if _coerce_bool(recovery.request_context_compression, False):
                     hooks.record_scene_event(
                         "llm_route",
                         "llm_turn_terminal",
@@ -387,11 +469,11 @@ def invoke_agent_llm_turn(
                     )
                     return result
 
-                fallback_profile_id = str(recovery.fallback_profile_id or "").strip()
+                fallback_profile_id = _coerce_text(recovery.fallback_profile_id).strip()
                 if route_attempt == 1 and is_retryable and fallback_profile_id:
                     try:
                         candidate = hooks.get_llm_for_mode(
-                            disable_tools=bool(hooks.force_disable_tools),
+                            disable_tools=_coerce_bool(hooks.force_disable_tools, False),
                             profile_id=fallback_profile_id,
                         )
                     except Exception as fallback_error:
