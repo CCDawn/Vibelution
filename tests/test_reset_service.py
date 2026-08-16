@@ -85,14 +85,19 @@ def test_reset_path_guard_allows_only_governed_external_roots(
     external_root = reset_project.parent / f"{reset_project.name}-external-storage"
     log_root = external_root / "logs"
     runtime_root = external_root / "runtime"
+    memory_root = external_root / "memory"
     monkeypatch.setattr(reset_service, "resolve_project_logs_home", lambda _root: log_root)
     monkeypatch.setattr(reset_service, "resolve_project_runtime_home", lambda _root: runtime_root)
+    monkeypatch.setattr(reset_service, "resolve_project_memory_home", lambda _root: memory_root)
 
     assert reset_service._resolve_project_path(log_root / "conversations" / "case.jsonl") == (
         log_root / "conversations" / "case.jsonl"
     ).resolve()
     assert reset_service._resolve_project_path(runtime_root / "launcher" / "state.json") == (
         runtime_root / "launcher" / "state.json"
+    ).resolve()
+    assert reset_service._resolve_project_path(memory_root / "agent-registry.json") == (
+        memory_root / "agent-registry.json"
     ).resolve()
 
     with pytest.raises(ValueError, match="governed Vibelution storage roots"):

@@ -20,7 +20,11 @@ from core.infrastructure import developer_sandbox
 from core.runtime_manager.scene_logging import append_runtime_manager_file_event
 from core.ui.chat_state import build_chat_state, chat_state_path, save_chat_state
 from core.web.services.i18n import get_web_language, text_for
-from vibelution_storage import resolve_project_logs_home, resolve_project_runtime_home
+from vibelution_storage import (
+    resolve_project_logs_home,
+    resolve_project_memory_home,
+    resolve_project_runtime_home,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -71,6 +75,18 @@ def _project_runtime_root() -> Path:
 
 def _project_log_root() -> Path:
     return resolve_project_logs_home(PROJECT_ROOT).resolve()
+
+
+def _project_memory_root() -> Path:
+    return resolve_project_memory_home(PROJECT_ROOT).resolve()
+
+
+def _governed_storage_path_label(path: Path) -> str:
+    resolved = path.resolve()
+    try:
+        return resolved.relative_to(PROJECT_ROOT.resolve()).as_posix()
+    except ValueError:
+        return str(resolved)
 
 
 def _maintenance_plan_dir() -> Path:
@@ -220,13 +236,17 @@ def get_reset_summary() -> dict:
         {
             "id": "project-memory",
             "label": text_for(lang, zh="项目记忆", en="Project memory"),
-            "paths": [".docs/project-memory/"],
+            "paths": [f"{_governed_storage_path_label(_project_memory_root())}/"],
             "reason": text_for(lang, zh="项目记忆是开发定义完成的一部分。", en="Project memory is part of the development record."),
         },
         {
             "id": "active-runtime",
             "label": text_for(lang, zh="当前运行现场与活跃浏览器 profile", en="Active runtime scene and browser profile"),
-            "paths": ["logs/runtime_scenes/<current>", ".runtime/launcher/state.json", ".runtime/launcher/edge-app-profile/"],
+            "paths": [
+                f"{_governed_storage_path_label(_project_log_root())}/runtime_scenes/<current>",
+                f"{_governed_storage_path_label(_project_runtime_root())}/launcher/state.json",
+                f"{_governed_storage_path_label(_project_runtime_root())}/launcher/edge-app-profile/",
+            ],
             "reason": text_for(lang, zh="运行中内容只跳过，不强删。", en="Live runtime state is skipped, not force-deleted."),
         },
     ]
@@ -1567,6 +1587,7 @@ def _resolve_project_path(path: Path) -> Path:
         workspace_root,
         _project_runtime_root(),
         _project_log_root(),
+        _project_memory_root(),
     )
     for allowed_root in allowed_roots:
         try:

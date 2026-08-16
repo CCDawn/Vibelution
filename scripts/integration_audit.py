@@ -8,6 +8,12 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from vibelution_storage import resolve_project_memory_home  # noqa: E402
+
 try:
     from scripts.windowless_subprocess import no_window_subprocess_kwargs
 except ModuleNotFoundError:  # Direct execution sets sys.path[0] to scripts/.
@@ -112,15 +118,31 @@ MERGED_STATUSES = {
     "done",
 }
 
+LEGACY_PROJECT_MEMORY_FRAGMENTS = (
+    ".docs/project-memory/",
+    ".docs/project-memory\\",
+)
+
 HOT_FILE_FRAGMENTS = (
     "AGENTS.md",
     "docs/standards/",
     "docs\\standards\\",
-    ".docs/project-memory/",
-    ".docs/project-memory\\",
+    *LEGACY_PROJECT_MEMORY_FRAGMENTS,
     "PROJECT_MEMORY.html",
     "tests/test_web_app.py",
 )
+
+
+def hot_file_fragments_for(project_root: Path) -> tuple[str, ...]:
+    fragments = list(HOT_FILE_FRAGMENTS)
+    memory_home = resolve_project_memory_home(project_root).resolve()
+    try:
+        relative = memory_home.relative_to(project_root.resolve()).as_posix()
+        fragments.append(f"{relative}/")
+        fragments.append(f"{relative}\\")
+    except ValueError:
+        fragments.append(str(memory_home))
+    return tuple(dict.fromkeys(fragments))
 
 EXPECTED_UNTRACKED_STASH_ARTIFACTS = {
     "tests/harness_safe_modify_probe.py",
@@ -469,20 +491,22 @@ def stash_absorption_state(root: Path, ref: str, paths: list[str], *, kind: str)
     return "absorbed_by_main" if completed.returncode == 0 else "not_absorbed"
 
 
-def path_is_hot_file(path: str) -> bool:
+def path_is_hot_file(path: str, *, project_root: Path | None = None) -> bool:
     normalized = normalize_repo_path(path)
-    return any(fragment.casefold() in normalized for fragment in HOT_FILE_FRAGMENTS)
+    fragments = hot_file_fragments_for(project_root) if project_root is not None else HOT_FILE_FRAGMENTS
+    return any(fragment.casefold() in normalized for fragment in fragments)
 
 
 def classify_stash_item(
     paths: list[str],
     *,
+    project_root: Path,
     untracked_paths: list[str],
     absorption_state: str,
 ) -> tuple[str, str, list[str], bool, bool]:
     file_count = len(paths)
     touches_protected = any(path_is_config_sensitive(path, Path("__operator_config_unused__")) for path in paths)
-    touches_hot = any(path_is_hot_file(path) for path in paths)
+    touches_hot = any(path_is_hot_file(path, project_root=project_root) for path in paths)
     tests_only = file_count > 0 and all(normalize_repo_path(path).startswith("tests/") for path in paths)
     reasons: list[str] = []
     if file_count == 0:
@@ -738,7 +762,7 @@ def build_report(
         ),
         root,
     ).resolve()
-    registry_path = registry_path or main_worktree / ".docs" / "project-memory" / "agent-registry.json"
+    registry_path = registry_path or resolve_project_memory_home(main_worktree) / "agent-registry.json"
     claims, queue_claim_ids = load_registry(registry_path)
     claims_by_worktree, claims_by_branch = claim_maps(claims)
     items: list[WorktreeAuditItem] = []
@@ -893,6 +917,7 @@ def build_stash_report(root: Path, limit: int | None = None) -> StashAuditReport
             absorption_state = stash_absorption_state(root, ref, paths, kind=preliminary_kind)
         kind, suggested_action, reasons, touches_protected, touches_hot = classify_stash_item(
             paths,
+            project_root=root,
             untracked_paths=untracked_paths,
             absorption_state=absorption_state,
         )
