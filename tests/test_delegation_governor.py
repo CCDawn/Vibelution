@@ -86,3 +86,41 @@ def test_build_request_survives_string_snapshot_lists():
     )
     assert request is not None
     assert request["task_type"] == "diagnose"
+
+
+def test_delegation_governor_parses_json_snapshot_and_rejects_true_iteration():
+    assert DelegationGovernor.has_delegation_reading_load(
+        '{"modified_paths":["core/a.py","core/b.py"]}'
+    ) is True
+    assert DelegationGovernor.has_delegation_reading_load(
+        {"modified_paths": '["core/a.py","core/b.py"]'}
+    ) is True
+    assert DelegationGovernor.is_success_validation_summary("", b"false") is False
+    assert DelegationGovernor.is_success_validation_summary("", memoryview(b"true")) is True
+    assert DelegationGovernor.contains_any("read the log", '["log"]') is True
+
+    governor = _governor()
+    need = governor.infer_role_need(
+        goal="检查当前配置 config.toml",
+        snapshot={"modified_paths": [], "recent_blockers": []},
+        iteration=True,
+        total_tool_calls=True,
+        readonly_diagnostic_goal=False,
+        readonly_summary_goal=False,
+        explicit_inspect_goal=True,
+        summary_goal_requested=False,
+        summary_evidence_ready=False,
+        reading_load_ready=True,
+        last_validation_summary="",
+    )
+    assert need is None
+
+    assert DelegationGovernor.should_cooldown_delegation(
+        {
+            "delegation_history": [
+                {"task_type": b"diagnose", "status": b"completed"},
+                {"task_type": "diagnose", "status": "failed"},
+            ]
+        },
+        b"diagnose",
+    ) is True
