@@ -45,6 +45,9 @@ describe("Chat session tool approval API", () => {
     expect(lifecycleSource).toContain("updateChatSession");
     expect(apiSource).toContain("isSessionNotFoundError(error)");
     expect(apiSource).toContain("export async function deleteChatSession");
+    expect(apiSource).toContain("export function bulkDeleteChatSessions");
+    expect(apiSource).toContain("/api/sessions/bulk-delete");
+    expect(lifecycleSource).toContain("bulkDeleteChatSessions");
     expect(lifecycleSource).not.toContain('fetchJson<SessionDetail>("/api/sessions"');
     expect(lifecycleSource).not.toContain('fetchJson<SessionDeleteResponse>(`/api/sessions/${sessionId}`');
   });

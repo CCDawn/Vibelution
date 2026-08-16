@@ -29,6 +29,8 @@ import chatWorkbenchCenterColumnSource from "./chat/ChatWorkbenchCenterColumn.ts
 import chatWorkbenchFormatSource from "./chat/chatWorkbenchFormat.ts?raw";
 import chatWorkbenchPresentationSource from "./chat/useChatWorkbenchPresentation.ts?raw";
 import conversationIndexRailSource from "./chat/ChatConversationIndexRail.tsx?raw";
+import sessionBulkOperationsPanelSource from "./chat/SessionBulkOperationsPanel.tsx?raw";
+import chatSessionBulkModelSource from "./chat/chatSessionBulkModel.ts?raw";
 import agentDirectoryActionsSource from "./chat/useChatAgentDirectoryActions.ts?raw";
 import chatStatusRailSource from "./chat/ChatStatusRail.tsx?raw";
 import cliAgentRunModelSource from "./chat/cliAgentRunModel.ts?raw";
@@ -3406,6 +3408,35 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatCodingRouteWorkbenchSource.indexOf("confirmPendingWorkbenchAction")).toBeLessThan(
       chatCodingRouteWorkbenchSource.indexOf("deleteSessionMutation.mutate({ sessionId"),
     );
+  });
+
+  it("supports bulk session selection and remove in the conversation index rail", () => {
+    expect(chatCodingRouteWorkbenchSource).toContain("selectedBulkSessionIds");
+    expect(chatCodingRouteWorkbenchSource).toContain("SessionBulkOperationsPanel");
+    expect(chatCodingRouteWorkbenchSource).toContain("bulkDeleteSessionsMutation");
+    expect(chatCodingRouteWorkbenchSource).toContain("bulkRemoveSessions");
+    expect(chatCodingRouteWorkbenchSource).toContain('t("bulkRemoveSessionsConfirm")');
+    expect(chatCodingRouteWorkbenchSource).toContain('t("bulkSelectVisibleSessions")');
+    expect(sessionBulkOperationsPanelSource).toContain("VConfirmDialog");
+    expect(sessionBulkOperationsPanelSource).toContain("AgentBulkActionBar");
+    expect(sessionBulkOperationsPanelSource).toContain("if (!hasSelection)");
+    expect(sessionBulkOperationsPanelSource).toContain("return null");
+    expect(sessionBulkOperationsPanelSource).not.toContain("window.confirm");
+    expect(conversationIndexRailSource).toContain("sessionBulkSelectVisibleVisible");
+    expect(conversationIndexRailSource).toContain("onSessionBulkSelectVisible");
+    expect(conversationIndexRailSource).toContain("panelSearchBulkSelect");
+    expect(directSessionIndexItemSource).toContain("bulkSelectionEnabled");
+    expect(directSessionIndexItemSource).toContain("onToggleBulk");
+    expect(conversationIndexTreeSource).toContain("selectedBulkSessionIds");
+    expect(chatSessionBulkModelSource).toContain("sessionBulkDeletable");
+    expect(chatApiSource).toContain("bulkDeleteChatSessions");
+    expect(chatApiSource).toContain("/api/sessions/bulk-delete");
+    const bulkDeleteMutationSource = routeAndLifecycleSource.slice(
+      routeAndLifecycleSource.indexOf("const bulkDeleteSessionsMutation"),
+    );
+    expect(bulkDeleteMutationSource).toContain("bulkDeleteChatSessions");
+    expect(bulkDeleteMutationSource).toContain("onMutate: async (variables)");
+    expect(bulkDeleteMutationSource).toContain("removeDeletedSessionFromConversations");
   });
 
   it("reuses the Agent direct-session reset contract for quick history clearing", () => {

@@ -11,6 +11,12 @@ describe("agentsRouteCopy", () => {
     expect(en.title).toMatch(/Agent/i);
     expect(zh.bulkArchive).toBeTruthy();
     expect(en.bulkArchive).toBeTruthy();
+    expect(zh.bulkSelectVisible).toBe("选择可见");
+    expect(en.bulkSelectVisible).toBe("Select visible");
+    expect(zh.bulkClear).toBe("清除选择");
+    expect(en.bulkClear).toBe("Clear selection");
+    expect(zh.bulkArchiveConfirm).toContain("不会批量删除会话记录");
+    expect(en.bulkArchiveConfirm).toMatch(/does not bulk-delete session records/i);
     expect(zh.filterSections.status).toBe("状态");
     expect(en.filterSections.status.toLowerCase()).toContain("status");
     expect(zh.overviewPane).toBeTruthy();
