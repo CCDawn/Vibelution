@@ -5,6 +5,8 @@ classification, lifecycle hard-stops, and retry-budget edge cases that
 can leave a turn spinning or resuming the wrong identity.
 """
 
+import json
+
 from core.llm.types import CanonicalItemIdentity, TurnOutcome
 from core.orchestration.turn_outcome import TurnOutcomeController
 
@@ -126,3 +128,144 @@ def test_decide_llm_iteration_empty_tool_calls_does_not_execute_or_finish():
     assert decision.should_execute_tools is False
     assert decision.should_finish is False
     assert decision.should_stop_unsuccessfully is False
+
+
+def test_classify_turn_carryover_coerces_json_bytes_false_and_string_messages():
+    valid_messages = [{"role": "user", "content": "hi"}]
+    assert (
+        TurnOutcomeController.classify_turn_carryover(
+            {
+                "terminal": "false",
+                "turnIdentity": "t1",
+                "goal": "keep going",
+                "messages": valid_messages,
+            },
+            expected_turn_identity="t1",
+        )
+        == "accepted"
+    )
+    assert (
+        TurnOutcomeController.classify_turn_carryover(
+            {
+                "turnIdentity": b"t1",
+                "goal": "keep going",
+                "messages": valid_messages,
+            },
+            expected_turn_identity=b"t1",
+        )
+        == "accepted"
+    )
+    assert (
+        TurnOutcomeController.classify_turn_carryover(
+            {
+                "turn_identity": "t1",
+                "goal": "keep going",
+                "messages": valid_messages,
+            },
+            expected_turn_identity="t1",
+        )
+        == "accepted"
+    )
+    json_payload = json.dumps(
+        {
+            "turnIdentity": "t1",
+            "goal": "keep going",
+            "messages": valid_messages,
+            "terminal": False,
+        }
+    )
+    assert (
+        TurnOutcomeController.classify_turn_carryover(
+            json_payload,
+            expected_turn_identity="t1",
+        )
+        == "accepted"
+    )
+    assert (
+        TurnOutcomeController.classify_turn_carryover(
+            {
+                "turnIdentity": "t1",
+                "goal": "keep going",
+                "messages": "abc",
+            },
+            expected_turn_identity="t1",
+        )
+        == "invalid"
+    )
+
+
+def test_should_stop_after_llm_failure_treats_false_string_as_non_retryable():
+    controller = _controller()
+    stop = controller.should_stop_after_llm_failure(
+        category="timeout",
+        retryable="false",
+        consecutive_failures=0,
+        iteration=1,
+    )
+    assert stop and "不可重试" in stop
+
+
+def test_prepare_turn_messages_false_string_does_not_append_or_resume_string_history():
+    def build_system(prompt):
+        return {"role": "system", "content": prompt}
+
+    def build_user(prompt):
+        return {"role": "user", "content": prompt}
+
+    messages, resumed = TurnOutcomeController.prepare_turn_messages(
+        system_prompt="sys",
+        user_prompt="new user",
+        effective_goal="new goal",
+        active_turn_messages=[{"role": "user", "content": "old"}],
+        active_turn_goal="old goal",
+        build_system_message=build_system,
+        build_external_request_message=build_user,
+        allow_append_user_message="false",
+    )
+    assert resumed is False
+    assert messages == [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "new user"},
+    ]
+    assert (
+        TurnOutcomeController.can_resume_turn_messages(
+            active_turn_messages="not-a-list",
+            active_turn_goal="g",
+            effective_goal="g",
+            user_prompt="g",
+        )
+        is False
+    )
+
+
+def test_single_turn_and_insert_reject_false_string_and_character_split():
+    assert (
+        TurnOutcomeController.should_finish_single_turn_after_direct_response(
+            single_turn_mode_active="false",
+            tool_calls=[],
+            visible_text="hello",
+        )
+        is False
+    )
+    inserted = TurnOutcomeController.insert_volatile_context_before_current_user(
+        messages="abc",
+        context_messages=[{"role": "system", "content": "ctx"}],
+    )
+    assert inserted == [{"role": "system", "content": "ctx"}]
+    unchanged = TurnOutcomeController.insert_volatile_context_before_current_user(
+        messages=[{"role": "user", "content": "hi"}],
+        context_messages="abc",
+    )
+    assert unchanged == [{"role": "user", "content": "hi"}]
+    before_user = TurnOutcomeController.insert_volatile_context_before_current_user(
+        messages=[
+            {"role": "system", "content": "s"},
+            {"role": b"user", "content": "hi"},
+        ],
+        context_messages=[{"role": "system", "content": "ctx"}],
+    )
+    assert before_user == [
+        {"role": "system", "content": "s"},
+        {"role": "system", "content": "ctx"},
+        {"role": b"user", "content": "hi"},
+    ]
