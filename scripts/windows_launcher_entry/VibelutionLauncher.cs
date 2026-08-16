@@ -99,9 +99,6 @@ internal static class VibelutionLauncher
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(BranchActionMenu("启动", "start"));
             menu.Items.Add(BranchActionMenu("停止", "stop"));
-            menu.Items.Add(MenuItem("重启当前 main", delegate { QueuePost("/api/launcher/restart", "重启当前 main"); }));
-            menu.Items.Add(MenuItem("重建并启动（最新）", delegate { QueueRebuildAndStart(); }));
-            menu.Items.Add(MenuItem("状态", delegate { QueueStatus(); }));
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(MenuItem("退出 Launcher", delegate { QueueExitLauncher(false); }));
             menu.Items.Add(MenuItem("停止全部", delegate { QueueExitLauncher(true); }));
@@ -299,7 +296,10 @@ internal static class VibelutionLauncher
                 {
                     try
                     {
-                        ShowInfo("正在重启 Launcher，以加载最新本地代码…");
+                        EnsureLauncherBackend();
+                        ShowInfo("正在停止全部托管进程并重启 Launcher…");
+                        PostLauncher("/api/launcher/force-stop");
+                        Thread.Sleep(1500);
                         string exe = Application.ExecutablePath;
                         string args = "--action launcher --project " + Quote(projectDir);
                         var start = new ProcessStartInfo();

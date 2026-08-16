@@ -115,7 +115,7 @@ import {
   desktopWorkbenchCloseCanarySummaryPath
 } from "./smoke/workbenchCloseCanary.js";
 import { prepareDesktopSmokeShutdown } from "./smoke/desktopSmokeShutdown.js";
-import { createDesktopTray, DESKTOP_TRAY_MENU_LABELS } from "./tray/desktopTray.js";
+import { createDesktopTray } from "./tray/desktopTray.js";
 import {
   captureRunningInstanceIds,
   clearTrayRestartAllPending,
@@ -209,6 +209,7 @@ let electronStartupSummaryRecorded = false;
 let workbenchOpenRequestedAtMs: number | null = null;
 let trayRestartAllInFlight = false;
 let trayQuitAllInFlight = false;
+let trayRestartLauncherInFlight = false;
 let shellRefreshInFlight = false;
 let periodicShellFreshnessTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -1682,8 +1683,37 @@ async function recordTrayForceInterruptEvidence(eventCode: string, message: stri
   }).catch(() => undefined);
 }
 
-async function restartLauncherShell(): Promise<void> {
-  notifyDesktopTray("Vibelution", "正在重启 Launcher，以加载最新本地代码…");
+async function stopAllManagedRuntimeTrees(): Promise<void> {
+  try {
+    await orchestrateLauncherLifecycle("force-stop", { schemaVersion: 1, path: "force-stop" });
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    notifyDesktopTray("Vibelution", `停止托管运行时失败，仍将重启 Launcher：${detail.slice(0, 220)}`, "warning");
+  }
+  try {
+    await stopManagedRuntime();
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    notifyDesktopTray("Vibelution", `停止托管项目进程失败，仍将重启 Launcher：${detail.slice(0, 220)}`, "warning");
+  }
+  try {
+    await stopOwnedPythonLauncherService();
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    notifyDesktopTray("Vibelution", `停止 Launcher 后端失败，仍将重启：${detail.slice(0, 220)}`, "warning");
+  }
+  const provider = windowProvider;
+  if (provider !== null) {
+    try {
+      await provider.approveWorkbenchCloseOnce();
+    } catch (error: unknown) {
+      console.warn(error instanceof Error ? error.message : String(error));
+    }
+  }
+}
+
+async function exitAndRelaunchLauncherShell(options: { forceShellRefresh?: boolean } = {}): Promise<void> {
   let stale = false;
   if (app.isPackaged) {
     try {
@@ -1692,26 +1722,14 @@ async function restartLauncherShell(): Promise<void> {
       stale = false;
     }
   }
-  try {
-    await stopManagedRuntime();
-  } catch (error: unknown) {
-    const detail = error instanceof Error ? error.message : String(error);
-    notifyDesktopTray("Vibelution", `停止托管项目进程失败，仍将重启：${detail.slice(0, 220)}`, "warning");
-  }
-  try {
-    await stopOwnedPythonLauncherService();
-  } catch (error: unknown) {
-    const detail = error instanceof Error ? error.message : String(error);
-    notifyDesktopTray("Vibelution", `停止旧 Launcher 服务失败，仍将重启：${detail.slice(0, 220)}`, "warning");
-  }
   if (decideLauncherShellRestart({ isPackaged: app.isPackaged, stale }) === "rebuild-and-exit") {
     shellRefreshInFlight = true;
     try {
-      await scheduleCurrentDesktopShellRefresh("");
+      await scheduleCurrentDesktopShellRefresh("", { force: options.forceShellRefresh === true });
     } catch (error: unknown) {
       shellRefreshInFlight = false;
       const detail = error instanceof Error ? error.message : String(error);
-      notifyDesktopTray("Vibelution", `无法安排桌面壳更新，继续使用当前壳：${detail.slice(0, 220)}`, "warning");
+      notifyDesktopTray("Vibelution", `无法安排桌面壳更新，继续使用当前壳重启：${detail.slice(0, 220)}`, "warning");
       app.relaunch();
       shutdownApproved = true;
       app.exit(0);
@@ -1724,6 +1742,31 @@ async function restartLauncherShell(): Promise<void> {
   app.relaunch();
   shutdownApproved = true;
   app.exit(0);
+}
+
+async function runTrayRestartLauncher(): Promise<void> {
+  if (trayRestartLauncherInFlight || trayRestartAllInFlight || trayQuitAllInFlight || shellRefreshInFlight) {
+    notifyDesktopTray("Vibelution", "已有托盘操作进行中，请稍候。", "warning");
+    return;
+  }
+  trayRestartLauncherInFlight = true;
+  const paths = createDesktopPathsForApp();
+  try {
+    const interruptedActiveWorkCount = ACTIVE_WORK_POLICY_FORCE_INTERRUPT
+      ? await resolveInterruptedActiveWorkCount()
+      : 0;
+    if (interruptedActiveWorkCount > 0) {
+      await recordTrayForceInterruptEvidence("electron.tray.restart_launcher.force_interrupt", "Tray restart-launcher proceeding while active work was present.", {
+        interruptedActiveWorkCount
+      });
+    }
+    clearTrayRestartAllPending(paths.workspaceRoot);
+    notifyDesktopTray("Vibelution", "正在停止全部托管进程并重启 Launcher…");
+    await stopAllManagedRuntimeTrees();
+    await exitAndRelaunchLauncherShell({ forceShellRefresh: true });
+  } finally {
+    trayRestartLauncherInFlight = false;
+  }
 }
 
 async function restoreTrayRestartAllPending(workspaceRoot: string): Promise<TrayRestartAllRestoreResult> {
@@ -1826,7 +1869,7 @@ async function maybeRestoreTrayRestartAllPending(): Promise<void> {
 }
 
 async function runTrayRestartAll(): Promise<void> {
-  if (trayRestartAllInFlight || trayQuitAllInFlight || shellRefreshInFlight) {
+  if (trayRestartAllInFlight || trayQuitAllInFlight || trayRestartLauncherInFlight || shellRefreshInFlight) {
     notifyDesktopTray("Vibelution", "已有托盘操作进行中，请稍候。", "warning");
     return;
   }
@@ -1869,13 +1912,7 @@ async function runTrayRestartAll(): Promise<void> {
       shellRefreshScheduled: false
     });
     notifyDesktopTray("Vibelution", "正在全部重启…");
-    try {
-      await orchestrateLauncherLifecycle("force-stop", { schemaVersion: 1, path: "force-stop" });
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-    } catch (error: unknown) {
-      const detail = error instanceof Error ? error.message : String(error);
-      notifyDesktopTray("Vibelution", `停止托管运行时失败：${detail.slice(0, 220)}`, "warning");
-    }
+    await stopAllManagedRuntimeTrees();
     if (app.isPackaged && stale) {
       shellRefreshInFlight = true;
       writeTrayRestartAllPending(paths.workspaceRoot, {
@@ -1892,16 +1929,11 @@ async function runTrayRestartAll(): Promise<void> {
         clearTrayRestartAllPending(paths.workspaceRoot);
         return;
       }
-      try {
-        await stopManagedRuntime();
-      } catch {
-        // Exit for refresh even if stop fails.
-      }
       shutdownApproved = true;
       app.exit(0);
       return;
     }
-    await restartLauncherShell();
+    await exitAndRelaunchLauncherShell({ forceShellRefresh: true });
   } finally {
     trayRestartAllInFlight = false;
   }
@@ -1910,7 +1942,7 @@ async function runTrayRestartAll(): Promise<void> {
 async function requestForcedDesktopShellExit(
   closeReason: DesktopCloseReason = "desktop_shell_quit"
 ): Promise<void> {
-  if (trayQuitAllInFlight || trayRestartAllInFlight) {
+  if (trayQuitAllInFlight || trayRestartAllInFlight || trayRestartLauncherInFlight) {
     notifyDesktopTray("Vibelution", "已有托盘操作进行中，请稍候。", "warning");
     return;
   }
@@ -1990,7 +2022,7 @@ function startPeriodicShellFreshnessWatch(): void {
           smoke: desktopCliArgs.smoke,
           workbenchCloseCanary: desktopCliArgs.workbenchCloseCanary,
           stale: false,
-          refreshInFlight: shellRefreshInFlight || trayRestartAllInFlight || trayQuitAllInFlight,
+          refreshInFlight: shellRefreshInFlight || trayRestartAllInFlight || trayQuitAllInFlight || trayRestartLauncherInFlight,
           shutdownApproved
         }) !== "refresh"
       ) {
@@ -2008,7 +2040,7 @@ function startPeriodicShellFreshnessWatch(): void {
           smoke: desktopCliArgs.smoke,
           workbenchCloseCanary: desktopCliArgs.workbenchCloseCanary,
           stale: status.stale,
-          refreshInFlight: shellRefreshInFlight || trayRestartAllInFlight || trayQuitAllInFlight,
+          refreshInFlight: shellRefreshInFlight || trayRestartAllInFlight || trayQuitAllInFlight || trayRestartLauncherInFlight,
           shutdownApproved,
           refreshBlocked: status.refreshBlocked
         }) !== "refresh"
@@ -2048,17 +2080,6 @@ async function runTrayLauncherPost(
   } catch (error: unknown) {
     const detail = error instanceof Error ? error.message : String(error);
     notifyDesktopTray("Vibelution", `${label}失败：${detail.slice(0, 300)}`, "warning");
-  }
-}
-
-async function runTrayLauncherStatus(): Promise<void> {
-  try {
-    const context = await resolveTrayLauncherControlContext();
-    const summary = await fetchLauncherStatusSummary(context);
-    notifyDesktopTray("Vibelution", formatLauncherStatusSummary(summary));
-  } catch (error: unknown) {
-    const detail = error instanceof Error ? error.message : String(error);
-    notifyDesktopTray("Vibelution", `获取状态失败：${detail.slice(0, 300)}`, "warning");
   }
 }
 
@@ -2556,7 +2577,7 @@ app.whenReady()
         });
       },
       restartLauncher: () => {
-        void restartLauncherShell();
+        void runTrayRestartLauncher();
       },
       startInstance: (instanceId, label) => {
         void runTrayLauncherPost(
@@ -2573,15 +2594,6 @@ app.whenReady()
           "electron_tray_stop_instance",
           { instanceId }
         );
-      },
-      restartProject: () => {
-        void runTrayLauncherPost("/api/launcher/restart", DESKTOP_TRAY_MENU_LABELS.restartProject);
-      },
-      rebuildAndStart: () => {
-        void runTrayLauncherPost("/api/launcher/rebuild-and-start", DESKTOP_TRAY_MENU_LABELS.rebuildAndStart);
-      },
-      showStatus: () => {
-        void runTrayLauncherStatus();
       },
       quit: () => {
         void requestDesktopShellExit().catch((error: unknown) => {

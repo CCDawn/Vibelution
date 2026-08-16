@@ -5,39 +5,23 @@ import { describe, expect, it } from "vitest";
 const mainSource = readFileSync(fileURLToPath(new URL("../src/main.ts", import.meta.url)), "utf8");
 
 describe("Electron main tray integration", () => {
-  it("keeps one tray alive and routes full tray actions through launcher control", () => {
+  it("routes tray actions through launcher control without direct main-workbench restart menu paths", () => {
     expect(mainSource).toContain('from "./tray/desktopTray.js"');
-    expect(mainSource).toContain("let desktopTray:");
     expect(mainSource).toContain("desktopTray = createDesktopTray(paths,");
-    expect(mainSource).toContain("windowProvider?.openLauncher()");
     expect(mainSource).toContain("listInstances:");
-    expect(mainSource).toContain("getFreshness:");
     expect(mainSource).toContain("restartLauncher:");
-    expect(mainSource).toContain("startInstance:");
-    expect(mainSource).toContain("stopInstance:");
-    expect(mainSource).toContain("restartProject:");
-    expect(mainSource).toContain("rebuildAndStart:");
-    expect(mainSource).toContain("showStatus:");
-    expect(mainSource).toContain("stopAll:");
+    expect(mainSource).toContain("runTrayRestartLauncher");
+    expect(mainSource).toContain("stopAllManagedRuntimeTrees");
+    expect(mainSource).toContain("exitAndRelaunchLauncherShell");
     expect(mainSource).toContain("runTrayLauncherPost");
     expect(mainSource).toContain("runTrayStopAll");
-    expect(mainSource).toContain("runTrayLauncherStatus");
-    expect(mainSource).toContain("maybeRestoreTrayRestartAllPending");
-    expect(mainSource).toContain("startPeriodicShellFreshnessWatch");
-    expect(mainSource).toContain("electronStartupStage = \"tray_ready\"");
-    expect(mainSource).toContain("Keep the lightweight tray app running");
-
-    const trayStart = mainSource.indexOf("desktopTray = createDesktopTray(paths,");
-    const trayEnd = mainSource.indexOf("startPeriodicShellFreshnessWatch()", trayStart);
-    const traySource = mainSource.slice(trayStart, trayEnd);
-    expect(traySource).toContain("openLauncher:");
-    expect(traySource).toContain("listInstances:");
-    expect(traySource).toContain("stopAll:");
+    expect(mainSource).not.toContain("restartProject:");
+    expect(mainSource).not.toContain("rebuildAndStart:");
+    expect(mainSource).not.toContain("showStatus:");
+    expect(mainSource).not.toContain("runTrayLauncherStatus");
+    expect(mainSource).toContain('orchestrateLauncherLifecycle("force-stop"');
     expect(mainSource).toContain("refreshPackagedDesktopShellIfStale");
-    expect(mainSource).toContain("scheduleDesktopShellRefresh");
-    expect(mainSource).toContain("decidePeriodicDesktopShellRefresh");
-    expect(mainSource).toContain("reapManagedRuntimeOnDesktopStart");
-    expect(mainSource).toContain("handleSecondInstanceLifecycleCommand(firstLifecycle)");
+    expect(mainSource).toContain("startPeriodicShellFreshnessWatch");
   });
 
   it("destroys the tray only after shutdown is approved", () => {
@@ -47,7 +31,6 @@ describe("Electron main tray integration", () => {
 
     expect(beforeQuitSource).toContain("if (shutdownApproved)");
     expect(mainSource).toContain("claimElectronDesktopShellOwner(paths.workspaceRoot)");
-    expect(mainSource).toContain("releaseElectronDesktopShellOwner");
   });
 
   it("records tray force-interrupt evidence when restart-all runs under FORCE_INTERRUPT", () => {
