@@ -301,16 +301,53 @@ def splice_current_turn_conversation(
     return stripped[: last_user + 1] + continuation
 
 
+class TurnJournalReplayError(RuntimeError):
+    """Raised when chat turn conversation layer cannot be rebuilt from the ledger."""
+
+    def __init__(
+        self,
+        *,
+        error_type: str,
+        message: str,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.error_type = str(error_type or "").strip() or "turn_journal_replay_failed"
+        self.message = str(message or "").strip() or "Current-turn journal replay failed."
+        self.details = dict(details or {})
+
+
+def current_turn_has_journal_conversation_layer(events: Iterable[Any], *, turn_id: str) -> bool:
+    from core.chat.conversation_invariant import live_conversation_messages_from_events
+
+    layer = live_conversation_messages_from_events(events, turn_id=turn_id)
+    return any(_message_role_name(item) in {"assistant", "tool"} for item in layer)
+
+
+def ledger_conversation_fingerprint_for_messages(messages: Sequence[Any] | None) -> str:
+    """Fingerprint for send-time ledger reconciliation (matches LLMClient invariant)."""
+
+    from core.chat.conversation_invariant import conversation_layer_fingerprint
+    from core.chat.model_messages import ProviderMessageChain
+
+    provider_messages = ProviderMessageChain.from_messages(list(messages or [])).to_provider_payload()
+    return conversation_layer_fingerprint(provider_messages)
+
+
 def replay_current_turn_messages(
     messages: Sequence[Any] | None,
     events: Iterable[Any],
     *,
     turn_id: str,
+    strict: bool = False,
+    require_layer: bool = False,
 ) -> list:
     """Rebuild the in-flight turn's assistant/tool chain from ledger events.
 
-    No-op when the current turn has no model-visible assistant/tool events, or
-    when the reconstructed layer would fail the send-time conversation invariant.
+    No-op when the current turn has no model-visible assistant/tool events unless
+    ``require_layer`` is true. When ``strict`` is true and the reconstructed
+    layer fails the send-time conversation invariant, raise
+    ``TurnJournalReplayError`` instead of silently keeping the in-memory chain.
     """
 
     from core.chat.conversation_invariant import (
@@ -321,9 +358,24 @@ def replay_current_turn_messages(
     materialized = list(messages or [])
     layer = live_conversation_messages_from_events(events, turn_id=turn_id)
     if not any(_message_role_name(item) in {"assistant", "tool"} for item in layer):
+        if require_layer and strict:
+            raise TurnJournalReplayError(
+                error_type="journal_layer_missing",
+                message="Current turn has no reconstructable assistant/tool layer in ConversationLedger.",
+                details={"turnId": str(turn_id or "").strip()},
+            )
         return materialized
     invariant = check_conversation_payload_invariant(layer)
     if not invariant.ok:
+        if strict:
+            raise TurnJournalReplayError(
+                error_type=str(invariant.error_type or "conversation_invariant_failed"),
+                message=str(invariant.message or "Current-turn journal replay failed invariant check."),
+                details={
+                    "turnId": str(turn_id or "").strip(),
+                    **dict(invariant.details or {}),
+                },
+            )
         return materialized
     return splice_current_turn_conversation(
         materialized,
