@@ -5,7 +5,7 @@ orchestration split (R03). Pure roundtrip and edge-case guards prevent
 silent data loss across turn boundaries.
 """
 
-from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from core.orchestration.turn_carryover import (
     deserialize_turn_messages,
@@ -148,3 +148,44 @@ def test_deserialize_dict_kind_strips_kind_field():
     restored = deserialize_turn_messages([{"kind": "dict", "content": "x", "extra": 1}])
 
     assert restored == [{"content": "x", "extra": 1}]
+
+
+def test_serialize_human_message_as_user_dict_not_system():
+    payload = serialize_turn_message(HumanMessage(content=b"hello"))
+    assert payload == {"kind": "dict", "role": "user", "content": "hello"}
+
+
+def test_serialize_and_deserialize_reject_character_split_and_parse_json():
+    assert serialize_turn_messages("abc") == []
+    restored = deserialize_turn_messages(
+        '[{"kind":"tool","toolCallId":"call-9","content":"ok"},'
+        '{"role":"user","content":"hi"}]'
+    )
+    assert isinstance(restored[0], ToolMessage)
+    assert restored[0].tool_call_id == "call-9"
+    assert restored[0].content == "ok"
+    assert restored[1] == {"role": "user", "content": "hi"}
+
+
+def test_deserialize_coerces_bytes_ids_json_tool_calls_and_camel_metadata():
+    restored = deserialize_turn_messages(
+        [
+            {
+                "kind": b"ai",
+                "content": b"assistant",
+                "toolCalls": '[{"id":"c1","name":"cli_tool","args":{"command":"pytest"}}]',
+                "additionalKwargs": '{"cache_control":{"type":"ephemeral"}}',
+                "responseMetadata": {"finish_reason": b"stop"},
+            },
+            {"kind": "tool", "content": b"tool output", "tool_call_id": b"c1"},
+        ]
+    )
+    ai = restored[0]
+    assert isinstance(ai, AIMessage)
+    assert ai.content == "assistant"
+    assert ai.tool_calls[0]["name"] == "cli_tool"
+    assert ai.additional_kwargs == {"cache_control": {"type": "ephemeral"}}
+    assert ai.response_metadata["finish_reason"] == b"stop"
+    tool = restored[1]
+    assert tool.tool_call_id == "c1"
+    assert tool.content == "tool output"
