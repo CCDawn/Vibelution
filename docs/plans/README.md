@@ -7,6 +7,7 @@
 
 | 文件 | Status | 说明 |
 | --- | --- | --- |
+| [2026-08-16-compat-ssot-closeout-plan.md](2026-08-16-compat-ssot-closeout-plan.md) | active-plan | 兼容层收敛与单一事实源（存储 / Launcher / FE 域 / 工具路径） |
 | [2026-08-15-deep-architecture-decoupling-plan.md](2026-08-15-deep-architecture-decoupling-plan.md) | ACTIVE PLAN | Agent / Chat / API 契约分 Gate；全部 Gate 关闭后归档 |
 | [2026-08-14-llm-config-runtime-routing-optimization-plan.md](2026-08-14-llm-config-runtime-routing-optimization-plan.md) | active-plan | 模型配置与运行时协议路由 |
 | [2026-08-14-multi-agent-configuration-and-protocol-routing-research-design.md](2026-08-14-multi-agent-configuration-and-protocol-routing-research-design.md) | user-approved | 多 Agent 配置与协议路由设计 |
