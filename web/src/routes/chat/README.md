@@ -58,9 +58,9 @@ Chat surface. Rules:
 | Catalog / secondary queries (runtime·pet·index·teams·skills·rooms) | `useChatWorkbenchCatalogQueries.ts` | session detail SSE, composer submit |
 | Session select / URL / bootstrap | `useChatSessionSelection.ts` (committed-route preference sync) | EventSource ownership || Session detail window / ledger / conversation merge | `chatSessionDetailHelpers.ts` | stream EventSource |
 | Labels / avatar / group message presentation | `chatRoutePresentation.tsx` | mutations / stream |
-| Session catalog / tabs | `useChatVisibleSessionCatalog.ts` · `useChatAgentSessionTabs.ts` | stream, confirm |
-| Group room chrome / team linkage | `useChatGroupRoomChromeModel.ts` | stream, route writes |
-| Session index rail chrome | `useChatSessionIndexRailModel.ts` | stream apply |
+| Session catalog / tabs | `useChatVisibleSessionCatalog.ts` · `chatVisibleSessionCatalogModel.ts` · `useChatAgentSessionTabs.ts` | stream, confirm |
+| Group room chrome / team linkage | `useChatGroupRoomChromeModel.ts` · `chatGroupTeamLinkageModel.ts` | stream, route writes |
+| Session index rail chrome | `useChatSessionIndexRailModel.ts` · `chatSessionIndexRailPresentation.ts` | stream apply |
 | Session bulk select / remove | `useChatSessionBulkSelection.ts` | stream, confirm dialog |
 | Danger confirm dialogs | `useChatWorkbenchConfirmDialog.ts` | mutation implementations |
 | Session detail mutations (reasoning/history/tool/pet) | `useChatSessionDetailMutations.ts` | EventSource, lifecycle |
@@ -116,7 +116,8 @@ Historical plan (archived): `docs/archive/superpowers/plans/2026-07-19-chat-codi
 - **F3 done (Gate 3):** `useChatGroupDraftState` + `chatGroupRoomActionModel` own group composer/manage drafts and action flags; `useChatWorkbenchContextMenus` owns session/agent menu chrome; `useChatConversationIndexChrome` owns collapsed groups / members tab; Agent create wizard open state lives in `useChatAgentDirectoryActions`; direct-session prefetch is wired through `useChatWorkspaceActions`. Shell remains `ChatSessionWorkbenchShell` → `VSessionWorkbenchPage` (`WORKBENCH_LAYOUT_IDS.chat`) with lazy secondary panels. **G3-3 closed without extra memoization** — no new render/interaction finding; `ChatCodingRouteWorkbench.updateDepth.test.tsx` remains the update-depth guard.
 - **F4 (Wave 1-A):** `useChatSessionBulkSelection` owns session-list bulk select/remove; `useChatWorkbenchConfirmDialog` owns danger confirm state + presentation (delete session/history, delete/reset group).
 - **F4b (Wave 1-A cont.):** `useChatVisibleSessionCatalog` owns visible session merge/map + activity seen; `useChatAgentSessionTabs` owns per-agent tab query; `useChatSessionIndexRailModel` owns group-only index groups + load-more progress labels.
-- **F4c (Wave 1-A cont.):** `useChatGroupRoomChromeModel` owns team↔room linkage, group participant maps, expanded-agent detail sync, and group manage/delete/reset/stop disabled flags.
+- **F4c (Wave 1-A cont.):** `useChatGroupRoomChromeModel` owns team↔room linkage, group participant maps, expanded-agent detail sync, and group manage/delete/reset/stop disabled flags; pure linkage in `chatGroupTeamLinkageModel.ts`.
+- **F4d (Wave 1-A alignment):** catalog/index pure boundaries — `chatVisibleSessionCatalogModel.ts`, `chatSessionIndexRailPresentation.ts`, explicit `toSessionIndexProgressQuerySlice`; hook exports trimmed to workbench-used fields.
 
 ## Bundle note (secondary lazy)
 

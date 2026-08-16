@@ -2,8 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 
 import type { AgentInstance, SessionDetail, SessionSummary } from "../../api/types";
 import { visibleDirectoryAgents } from "../AgentConversationDirectory";
-import { isVisibleDirectSession } from "../conversationIndexModel";
 import { markSessionActivitySnapshotsSeen } from "../sessionActivityIndicator";
+import {
+  buildSessionsById,
+  mergeAllVisibleSessions,
+  resolveActiveSessionAgentId,
+  resolveActivitySeenSessionSources,
+} from "./chatVisibleSessionCatalogModel";
 
 export type UseChatVisibleSessionCatalogInput = {
   sessions: SessionSummary[] | undefined;
@@ -35,16 +40,13 @@ export function useChatVisibleSessionCatalog({
 }: UseChatVisibleSessionCatalogInput): UseChatVisibleSessionCatalogResult {
   const [, setSessionActivitySeenEpoch] = useState(0);
 
-  const allVisibleSessions = useMemo(() => {
-    const merged = [...(sessions ?? []), ...(childSessions ?? [])];
-    return merged
-      .filter(isVisibleDirectSession)
-      .filter((session) => !pendingArchiveAgentIds.has(String(session.agentId || "").trim()))
-      .filter((session, index, items) => items.findIndex((item) => item.id === session.id) === index);
-  }, [childSessions, pendingArchiveAgentIds, sessions]);
+  const allVisibleSessions = useMemo(
+    () => mergeAllVisibleSessions(sessions, childSessions, pendingArchiveAgentIds),
+    [childSessions, pendingArchiveAgentIds, sessions],
+  );
 
   const sessionsById = useMemo(
-    () => new Map(allVisibleSessions.map((session) => [session.id, session])),
+    () => buildSessionsById(allVisibleSessions),
     [allVisibleSessions],
   );
 
@@ -52,13 +54,15 @@ export function useChatVisibleSessionCatalog({
     if (!activeSessionId) {
       return;
     }
-    const directorySession = sessionsById.get(activeSessionId);
-    const detailSession = detail?.id === activeSessionId ? detail : undefined;
-    const wrote = markSessionActivitySnapshotsSeen(activeSessionId, [
-      directorySession,
-      directSessionActiveSummary?.id === activeSessionId ? directSessionActiveSummary : undefined,
-      detailSession,
-    ]);
+    const wrote = markSessionActivitySnapshotsSeen(
+      activeSessionId,
+      resolveActivitySeenSessionSources(
+        activeSessionId,
+        sessionsById,
+        detail,
+        directSessionActiveSummary,
+      ),
+    );
     if (wrote) {
       setSessionActivitySeenEpoch((current) => current + 1);
     }
@@ -75,13 +79,13 @@ export function useChatVisibleSessionCatalog({
   );
 
   const activeSessionAgentId = useMemo(
-    () => String(
-      sessionDetailAgentId
-      || directSessionActiveSummary?.agentId
-      || sessionsById.get(activeSessionId || "")?.agentId
-      || "",
-    ).trim(),
-    [activeSessionId, directSessionActiveSummary?.agentId, sessionDetailAgentId, sessionsById],
+    () => resolveActiveSessionAgentId({
+      sessionDetailAgentId,
+      directSessionActiveSummary,
+      activeSessionId,
+      sessionsById,
+    }),
+    [activeSessionId, directSessionActiveSummary, sessionDetailAgentId, sessionsById],
   );
 
   return {

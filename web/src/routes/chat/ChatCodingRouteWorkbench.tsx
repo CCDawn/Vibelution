@@ -211,7 +211,7 @@ import { useChatSessionBulkSelection } from "./useChatSessionBulkSelection";
 import { useChatWorkbenchConfirmDialog } from "./useChatWorkbenchConfirmDialog";
 import { useChatVisibleSessionCatalog } from "./useChatVisibleSessionCatalog";
 import { useChatAgentSessionTabs } from "./useChatAgentSessionTabs";
-import { useChatSessionIndexRailModel } from "./useChatSessionIndexRailModel";
+import { toSessionIndexProgressQuerySlice, useChatSessionIndexRailModel } from "./useChatSessionIndexRailModel";
 import { useChatGroupRoomChromeModel } from "./useChatGroupRoomChromeModel";
 import { useDesktopConversationAttention } from "./useDesktopConversationAttention";
 import { ChatCliAgentTerminalStack } from "./ChatCliAgentTerminalStack";
@@ -2523,7 +2523,7 @@ export function ChatCodingRoute() {
     sessionIndexProgressVisible,
   } = useChatSessionIndexRailModel({
     groupedConversations,
-    rawSessionsQuery,
+    rawSessionsQuery: toSessionIndexProgressQuerySlice(rawSessionsQuery),
     lang,
     numberFormatter,
   });
