@@ -6,7 +6,7 @@ from __future__ import annotations
 import time
 import traceback
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Mapping, Optional
 
 from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 
@@ -18,6 +18,27 @@ from core.orchestration.agent_runtime_bindings import (
     _llm_route_trace_fields,
     _safe_llm_error_diagnostic_details,
 )
+
+
+def _coerce_positive_int(value: Any, *, default: int = 1) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = 0
+    if parsed > 0:
+        return parsed
+    try:
+        fallback = int(default)
+    except (TypeError, ValueError):
+        fallback = 1
+    return fallback if fallback > 0 else 1
+
+
+def _llm_error_details(error: BaseException) -> Dict[str, Any]:
+    raw = getattr(error, "details", None) if isinstance(error, LLMError) else None
+    if isinstance(raw, Mapping):
+        return dict(raw)
+    return {}
 
 
 GetUiFn = Callable[[], Any]
@@ -205,11 +226,12 @@ def invoke_agent_llm_turn(
             except KeyboardInterrupt:
                 raise
             except Exception as e:
-                llm_error_details = dict(getattr(e, "details", {}) or {}) if isinstance(e, LLMError) else {}
+                llm_error_details = _llm_error_details(e)
                 safe_projection_details = _safe_llm_error_diagnostic_details(llm_error_details)
-                reported_attempt = int(llm_error_details.get("attempt") or 1)
-                reported_max_attempts = int(
-                    llm_error_details.get("max_attempts") or reported_attempt or 1
+                reported_attempt = _coerce_positive_int(llm_error_details.get("attempt"), default=1)
+                reported_max_attempts = _coerce_positive_int(
+                    llm_error_details.get("max_attempts"),
+                    default=reported_attempt,
                 )
                 recovery = hooks.plan_recovery(
                     e,
