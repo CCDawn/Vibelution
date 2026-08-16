@@ -25,6 +25,8 @@ DEFAULT_EVENT_CODES = (
     "browser.user_action.session_delete_started",
     "browser.user_action.session_delete_succeeded",
 )
+CONTROL_TOKEN_HEADER_FALLBACK = "X-Vibelution-Control-Token"
+CLIENT_OPERATION_ID_HEADER = "X-Vibelution-Client-Operation-Id"
 
 
 def _request_json(
@@ -63,6 +65,64 @@ def _wait_for_health(base_url: str, *, timeout_s: float) -> None:
     raise RuntimeError(f"Backend health check failed: {last_error}")
 
 
+def _fetch_control_token(base_url: str) -> tuple[str, str]:
+    payload = _request_json("GET", base_url, "/api/control-token")
+    header = str(payload.get("header") or CONTROL_TOKEN_HEADER_FALLBACK).strip()
+    token = str(payload.get("controlToken") or "").strip()
+    if not token:
+        raise RuntimeError("Control token endpoint returned an empty token")
+    return header, token
+
+
+def _control_token_headers(base_url: str) -> dict[str, str]:
+    header, token = _fetch_control_token(base_url)
+    return {header: token}
+
+
+def _find_backend_client_operation_hits(scene_dir: Path, client_operation_id: str) -> list[dict[str, Any]]:
+    backend_events_path = scene_dir / "events" / "backend.jsonl"
+    if not backend_events_path.exists():
+        return []
+    hits: list[dict[str, Any]] = []
+    for line in backend_events_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        fields = payload.get("fields") if isinstance(payload.get("fields"), dict) else {}
+        if str(fields.get("clientOperationId") or "").strip() != client_operation_id:
+            continue
+        hits.append(
+            {
+                "path": str(fields.get("pathTemplate") or fields.get("path") or "").strip(),
+                "statusCode": fields.get("statusCode"),
+            }
+        )
+    return hits
+
+
+def _probe_backend_client_operation(base_url: str, *, client_operation_id: str, auth_headers: dict[str, str]) -> int:
+    request = urllib.request.Request(
+        f"{base_url.rstrip('/')}/api/sessions/probe-session-404/select",
+        data=b"{}",
+        method="POST",
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            CLIENT_OPERATION_ID_HEADER: client_operation_id,
+            **auth_headers,
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            return int(response.status)
+    except urllib.error.HTTPError as exc:
+        return int(exc.code)
+
+
 def _find_scene_dir(project_root: Path) -> Path | None:
     logs_home = resolve_project_logs_home(project_root)
     candidates = sorted(
@@ -95,7 +155,12 @@ def _scan_scene_for_codes(scene_dir: Path, event_codes: tuple[str, ...]) -> dict
     return found
 
 
-def _post_probe_user_actions(base_url: str, *, client_operation_id: str) -> list[dict[str, Any]]:
+def _post_probe_user_actions(
+    base_url: str,
+    *,
+    client_operation_id: str,
+    auth_headers: dict[str, str],
+) -> list[dict[str, Any]]:
     events = [
         {
             "phase": "user_action",
@@ -152,7 +217,13 @@ def _post_probe_user_actions(base_url: str, *, client_operation_id: str) -> list
     ]
     results: list[dict[str, Any]] = []
     for event in events:
-        result = _request_json("POST", base_url, "/api/runtime/browser-telemetry", event)
+        result = _request_json(
+            "POST",
+            base_url,
+            "/api/runtime/browser-telemetry",
+            event,
+            headers=auth_headers,
+        )
         results.append(result)
     return results
 
@@ -163,10 +234,23 @@ def run_probe(
     project_root: Path,
     health_timeout_s: float = 20.0,
     settle_s: float = 0.4,
+    verify_backend_client_operation: bool = True,
 ) -> dict[str, Any]:
     _wait_for_health(base_url, timeout_s=health_timeout_s)
+    auth_headers = _control_token_headers(base_url)
     client_operation_id = f"probe-user-action-{int(time.time() * 1000)}"
-    post_results = _post_probe_user_actions(base_url, client_operation_id=client_operation_id)
+    post_results = _post_probe_user_actions(
+        base_url,
+        client_operation_id=client_operation_id,
+        auth_headers=auth_headers,
+    )
+    backend_probe_status: int | None = None
+    if verify_backend_client_operation:
+        backend_probe_status = _probe_backend_client_operation(
+            base_url,
+            client_operation_id=client_operation_id,
+            auth_headers=auth_headers,
+        )
     time.sleep(settle_s)
     scene_dir = _find_scene_dir(project_root)
     if scene_dir is None:
@@ -175,12 +259,20 @@ def run_probe(
     missing = [code for code, present in found.items() if not present]
     if missing:
         raise RuntimeError(f"Missing browser user-action events in scene: {', '.join(missing)}")
+    backend_hits = _find_backend_client_operation_hits(scene_dir, client_operation_id)
+    if verify_backend_client_operation and not backend_hits:
+        raise RuntimeError(
+            "Missing backend runtime event for client operation id "
+            f"{client_operation_id}; probe POST status={backend_probe_status}"
+        )
     return {
         "accepted": all(bool(item.get("accepted", True)) for item in post_results),
         "clientOperationId": client_operation_id,
         "sceneDir": str(scene_dir),
         "eventCodes": list(DEFAULT_EVENT_CODES),
         "postResults": post_results,
+        "backendProbeStatus": backend_probe_status,
+        "backendClientOperationHits": backend_hits,
     }
 
 
@@ -190,12 +282,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--project-root", default=str(REPO_ROOT))
     parser.add_argument("--health-timeout-s", type=float, default=20.0)
     parser.add_argument("--settle-s", type=float, default=0.4)
+    parser.add_argument(
+        "--skip-backend-client-operation-check",
+        action="store_true",
+        help="Only verify browser telemetry persistence; skip mutating API clientOperationId correlation.",
+    )
     args = parser.parse_args(argv)
     report = run_probe(
         base_url=args.base_url,
         project_root=Path(args.project_root).resolve(),
         health_timeout_s=args.health_timeout_s,
         settle_s=args.settle_s,
+        verify_backend_client_operation=not args.skip_backend_client_operation_check,
     )
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0
@@ -204,6 +302,9 @@ def main(argv: list[str] | None = None) -> int:
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
+    except urllib.error.HTTPError as exc:
+        print(json.dumps({"error": str(exc)}, ensure_ascii=False), file=sys.stderr)
+        raise SystemExit(1) from exc
     except urllib.error.URLError as exc:
         print(json.dumps({"error": str(exc)}, ensure_ascii=False), file=sys.stderr)
         raise SystemExit(1) from exc
