@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Iterable
+from typing import Any, Iterable, Mapping
 
 from core.orchestration.agent_modes import AgentMode, ModePolicy
 
@@ -20,6 +20,37 @@ _CODE_CONTEXT_TOOL_NAMES = {
     "run_test_for_tool",
     "cli_tool",
 }
+
+
+def _coerce_nonnegative_int(value: Any, *, default: int = 0) -> int:
+    try:
+        parsed = int(value or 0)
+    except (TypeError, ValueError):
+        parsed = 0
+    if parsed > 0:
+        return parsed
+    try:
+        fallback = int(default or 0)
+    except (TypeError, ValueError):
+        fallback = 0
+    return fallback if fallback > 0 else 0
+
+
+def _coerce_name_set(items: Any) -> set[str]:
+    if items is None:
+        return set()
+    if isinstance(items, bytes):
+        items = items.decode("utf-8", errors="replace")
+    if isinstance(items, str):
+        name = items.strip()
+        return {name} if name else set()
+    if isinstance(items, Mapping):
+        return {str(key or "").strip() for key in items if str(key or "").strip()}
+    try:
+        return {str(item or "").strip() for item in items if str(item or "").strip()}
+    except TypeError:
+        name = str(items or "").strip()
+        return {name} if name else set()
 
 
 @dataclass(frozen=True)
@@ -58,7 +89,7 @@ class RuntimeGoalPacket:
     def allowed_components(self, registered_components: Iterable[str]) -> set[str]:
         """返回当前目标包允许激活的提示词组件。"""
 
-        allowed = {str(item).strip().upper() for item in registered_components if str(item).strip()}
+        allowed = {name.upper() for name in _coerce_name_set(registered_components)}
         if not self.code_context_allowed():
             allowed.discard("CODEBASE_MAP")
         if not self.allow_git_commit and not self.allow_evolution_transaction:
@@ -168,16 +199,11 @@ def build_runtime_goal_packet(
 def _max_calls_per_turn(agent_tool_policy: dict | None) -> int:
     if not isinstance(agent_tool_policy, dict):
         return 0
-    raw = agent_tool_policy.get("maxCallsPerTurn")
-    try:
-        value = int(raw or 0)
-    except (TypeError, ValueError):
-        return 0
-    return value if value > 0 else 0
+    return _coerce_nonnegative_int(agent_tool_policy.get("maxCallsPerTurn"))
 
 
 def _tool_budget_lines(max_calls_per_turn: int) -> list[str]:
-    budget = max(0, int(max_calls_per_turn or 0))
+    budget = _coerce_nonnegative_int(max_calls_per_turn)
     if budget <= 0:
         return [
             "- 工具调用预算: 未从策略解析到上限；仍按「失败 1 次换路」执行。",
@@ -195,18 +221,13 @@ def _allow_code_context_for_turn(allow_file_writes: bool, agent_tool_policy: dic
     if not isinstance(agent_tool_policy, dict):
         return bool(allow_file_writes)
     mutation_access = str(agent_tool_policy.get("mutationAccess") or "").strip().lower()
-    write_scopes = agent_tool_policy.get("writeScopes")
-    allowed_tools = {
-        str(item or "").strip()
-        for item in (agent_tool_policy.get("allowedTools") or [])
-        if str(item or "").strip()
-    }
+    allowed_tools = _coerce_name_set(agent_tool_policy.get("allowedTools"))
     has_code_tool = bool(allowed_tools & _CODE_CONTEXT_TOOL_NAMES)
     if has_code_tool:
         return True
     if not allow_file_writes:
         return False
-    has_write_scope = bool(write_scopes) if isinstance(write_scopes, list) else False
+    has_write_scope = bool(_coerce_name_set(agent_tool_policy.get("writeScopes")))
     if mutation_access == "none" and not has_write_scope and not has_code_tool:
         return False
     return has_code_tool or has_write_scope or mutation_access not in {"", "none"}
