@@ -242,6 +242,8 @@ type LauncherCopy = {
   windowModeRestartRequired: string;
   windowModeEnvOverride: string;
   startupSettings: string;
+  expandSettings: string;
+  collapseSettings: string;
   startupSettingsSaved: string;
   runtimeProfile: string;
   preflightDoctor: string;
@@ -1105,6 +1107,8 @@ export function LauncherRoute() {
         windowModeRestartRequired: "下次启动或重启工作台生效",
         windowModeEnvOverride: "环境变量正在覆盖配置",
         startupSettings: "启动设置",
+        expandSettings: "展开编辑",
+        collapseSettings: "收起设置",
         startupSettingsSaved: "启动设置已保存",
         runtimeProfile: "运行档位",
         preflightDoctor: "启动前自检",
@@ -1367,6 +1371,8 @@ export function LauncherRoute() {
         windowModeRestartRequired: "Takes effect on next workbench start or restart",
         windowModeEnvOverride: "Environment override is active",
         startupSettings: "Startup Settings",
+        expandSettings: "Expand to edit",
+        collapseSettings: "Collapse",
         startupSettingsSaved: "Startup settings saved",
         runtimeProfile: "Runtime mode",
         preflightDoctor: "Preflight doctor",
@@ -2342,46 +2348,59 @@ export function LauncherRoute() {
       data-vui-domain-recipe="launcher-workbench"
       ariaLabel={copy.title}
     >
-      <LauncherBranchInstancesPanel
-        copy={copy}
-        items={branchItems}
-        selectedId={selectedBranchId}
-        onSelect={setSelectedInstanceId}
-        launcherTitle={branchInstancesQuery.data?.currentLauncherTitle}
-        launcherOnline={Boolean(status && !launcherStatusDisconnected && !launcherControlLimited)}
-        launcherReading={Boolean(
-          !status && (statusQuery.isPending || launcherControlPlaneStarting)
-        )}
-        pendingOperation={pendingBranchOperation}
-        lifecyclePending={controlMutation.isPending}
-        onLifecycle={(instanceId, operation) => {
-          setSelectedInstanceId(instanceId);
-          controlMutation.mutate({ operation, instanceId });
-        }}
-        onStopMany={(instanceIds) => {
-          if (instanceIds[0]) {
-            setSelectedInstanceId(instanceIds[0]);
-          }
-          controlMutation.mutate({ operation: "stop", instanceIds });
-        }}
-      />
-      <Suspense fallback={<VStateSurface className={styles.notice} tone="loading" title={copy.loading} skeletonLines={2} />}>
-        <LauncherStartupSettingsPanel
-          copy={copy}
-          uiLang={uiLang}
-          setting={startupSettings}
-          configuredWindowMode={configuredWindowMode}
-          effectiveWindowModeLabel={workbenchWindowModeLabel(effectiveWindowMode, copy)}
-          windowModeDetail={windowModeDetail}
-          controlPortOverride={controlPortOverride}
-          backendPortOverride={backendPortOverride}
-          frontendPortOverride={frontendPortOverride}
-          pending={startupSettingsMutation.isPending || workbenchWindowSaveMutation.isPending}
-          pendingWindowMode={pendingWindowMode}
-          onSave={(nextSetting) => startupSettingsMutation.mutate(nextSetting)}
-          onWindowModeChange={(request) => workbenchWindowSaveMutation.mutate(request)}
-        />
-      </Suspense>
+      <div
+        className={styles.primaryRail}
+        data-vui-region="launcher-primary-rail"
+      >
+        <div className={styles.primaryColumn} data-vui-region="launcher-primary">
+          <LauncherBranchInstancesPanel
+            copy={copy}
+            items={branchItems}
+            selectedId={selectedBranchId}
+            onSelect={setSelectedInstanceId}
+            launcherTitle={branchInstancesQuery.data?.currentLauncherTitle}
+            launcherOnline={Boolean(status && !launcherStatusDisconnected && !launcherControlLimited)}
+            launcherReading={Boolean(
+              !status && (statusQuery.isPending || launcherControlPlaneStarting)
+            )}
+            pendingOperation={pendingBranchOperation}
+            lifecyclePending={controlMutation.isPending}
+            onLifecycle={(instanceId, operation) => {
+              setSelectedInstanceId(instanceId);
+              controlMutation.mutate({ operation, instanceId });
+            }}
+            onStopMany={(instanceIds) => {
+              if (instanceIds[0]) {
+                setSelectedInstanceId(instanceIds[0]);
+              }
+              controlMutation.mutate({ operation: "stop", instanceIds });
+            }}
+          />
+        </div>
+        <aside
+          className={styles.settingsRail}
+          data-vui-region="launcher-settings-rail"
+          aria-label={copy.startupSettings}
+        >
+          <Suspense fallback={<VStateSurface className={styles.notice} tone="loading" title={copy.loading} skeletonLines={2} />}>
+            <LauncherStartupSettingsPanel
+              copy={copy}
+              uiLang={uiLang}
+              setting={startupSettings}
+              configuredWindowMode={configuredWindowMode}
+              effectiveWindowModeLabel={workbenchWindowModeLabel(effectiveWindowMode, copy)}
+              windowModeDetail={windowModeDetail}
+              controlPortOverride={controlPortOverride}
+              backendPortOverride={backendPortOverride}
+              frontendPortOverride={frontendPortOverride}
+              pending={startupSettingsMutation.isPending || workbenchWindowSaveMutation.isPending}
+              pendingWindowMode={pendingWindowMode}
+              onSave={(nextSetting) => startupSettingsMutation.mutate(nextSetting)}
+              onWindowModeChange={(request) => workbenchWindowSaveMutation.mutate(request)}
+            />
+          </Suspense>
+        </aside>
+      </div>
 
       {statusQuery.isError && !launcherControlPlaneStarting ? (
         <VStateSurface
