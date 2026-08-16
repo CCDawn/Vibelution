@@ -41,6 +41,10 @@ def test_role_spec_accepts_bytes_and_hyphen_aliases():
     assert get_subagent_role_spec(b"diagnose").task_type == "diagnose"
     assert get_subagent_role_spec("Summarize").task_type == "summarize"
     assert get_subagent_role_spec("  ").task_type == "inspect"
+    assert get_subagent_role_spec(memoryview(b"diagnose")).task_type == "diagnose"
+    assert get_subagent_role_spec({"taskType": "diagnose"}).task_type == "diagnose"
+    assert get_subagent_role_spec('{"task_type":"summarize"}').task_type == "summarize"
+    assert get_subagent_role_spec(["inspect"]).task_type == "inspect"
 
 
 def test_extract_primary_goal_accepts_bytes_and_survives_non_text():
@@ -52,3 +56,5 @@ def test_extract_primary_goal_accepts_bytes_and_survives_non_text():
     assert extract_subagent_primary_goal(prompt.encode("utf-8")) == "分析最近验证失败的根因"
     assert extract_subagent_primary_goal(None) == ""
     assert isinstance(extract_subagent_primary_goal(["not", "a", "prompt"]), str)
+    assert extract_subagent_primary_goal({"prompt": prompt}) == "分析最近验证失败的根因"
+    assert extract_subagent_primary_goal(["- 当前唯一目标: 分析最近验证失败的根因"]) == "分析最近验证失败的根因"

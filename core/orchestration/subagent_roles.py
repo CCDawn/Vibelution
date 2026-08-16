@@ -6,7 +6,9 @@
 
 from __future__ import annotations
 
+import json
 import re
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Dict, Tuple
 
@@ -76,25 +78,76 @@ _ROLE_SPECS: Dict[str, SubagentRoleSpec] = {
 ALLOWED_SUBAGENT_TASK_TYPES = frozenset(_ROLE_SPECS.keys())
 
 
+def _decode_binary(value: Any) -> Any:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).decode("utf-8", errors="replace")
+    return value
+
+
+def _maybe_json(value: Any) -> Any:
+    value = _decode_binary(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith("{") or text.startswith("["):
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                return value
+    return value
+
+
+def _mapping_get(mapping: Mapping[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in mapping:
+            return mapping.get(key)
+    return None
+
+
 def _coerce_text(value: Any) -> str:
     if value is None:
         return ""
-    if isinstance(value, bytes):
-        return value.decode("utf-8", errors="replace")
+    value = _decode_binary(value)
     if isinstance(value, str):
         return value
     return str(value)
 
 
+def _coerce_task_type(value: Any) -> str:
+    value = _maybe_json(value)
+    if isinstance(value, Mapping):
+        extracted = _mapping_get(value, "task_type", "taskType", "type", "role")
+        if extracted is None:
+            return ""
+        return _coerce_task_type(extracted)
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray, memoryview)):
+        if len(value) == 1:
+            return _coerce_task_type(value[0])
+        return ""
+    return _coerce_text(value)
+
+
+def _coerce_prompt(value: Any) -> str:
+    value = _maybe_json(value)
+    if isinstance(value, Mapping):
+        extracted = _mapping_get(value, "prompt", "text", "goal", "content", "message")
+        if extracted is None:
+            return ""
+        return _coerce_prompt(extracted)
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray, memoryview)):
+        parts = [_coerce_prompt(item) for item in value]
+        return "\n".join(part for part in parts if part)
+    return _coerce_text(value)
+
+
 def get_subagent_role_spec(task_type: str) -> SubagentRoleSpec:
-    normalized = _coerce_text(task_type).strip().lower().replace("-", "_").replace(" ", "_")
+    normalized = _coerce_task_type(task_type).strip().lower().replace("-", "_").replace(" ", "_")
     normalized = normalized or "inspect"
     return _ROLE_SPECS.get(normalized, _ROLE_SPECS["inspect"])
 
 
 def extract_subagent_primary_goal(prompt: str | None) -> str:
     """从子 agent 的瘦提示词中提取唯一目标，避免整段模板污染 current_goal。"""
-    text = _coerce_text(prompt).strip()
+    text = _coerce_prompt(prompt).strip()
     if not text:
         return ""
 
