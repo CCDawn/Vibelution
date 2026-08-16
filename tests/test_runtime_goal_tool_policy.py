@@ -112,3 +112,30 @@ def test_invalid_max_calls_renders_without_crashing():
     assert packet.max_calls_per_turn == 0
     rendered = packet.render()
     assert "未从策略解析到上限" in rendered
+
+
+def test_runtime_goal_coerces_json_policy_bytes_goal_and_false_budget():
+    packet = build_runtime_goal_packet(
+        _chat_policy(),
+        b"do not modify files; keep this read-only",
+        agent_tool_policy='{"allowed_tools":["web_search_tool"],"write_scopes":[],"mutation_access":"none","max_calls_per_turn":"24"}',
+    )
+    assert packet.allow_file_writes is False
+    assert packet.allow_code_context is False
+    assert packet.max_calls_per_turn == 24
+    assert packet.goal.startswith("do not modify files")
+
+    bool_budget = build_runtime_goal_packet(
+        _chat_policy(),
+        "继续",
+        agent_tool_policy={"maxCallsPerTurn": True},
+    )
+    assert bool_budget.max_calls_per_turn == 0
+
+    parsed_list = build_runtime_goal_packet(
+        _chat_policy(),
+        "审查当前代码结构",
+        agent_tool_policy={"allowedTools": '["grep_search_tool"]', "mutationAccess": "none"},
+    )
+    assert parsed_list.allow_code_context is True
+    assert "CODEBASE_MAP" in parsed_list.allowed_components(["SOUL", "CODEBASE_MAP"])
