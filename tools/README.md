@@ -123,6 +123,7 @@ Model 可见性
 | 文档 | 用途 |
 | --- | --- |
 | [`docs/agents/tool-authorization-entrypoints.md`](../docs/agents/tool-authorization-entrypoints.md) | 可见性/执行入口 inventory |
+| [`docs/agents/project-operation-catalog.md`](../docs/agents/project-operation-catalog.md) | 项目操作目录：Agent/Session 操作面、访问类与生命周期 |
 | [`core/web/services/memory_rag_services.md`](../core/web/services/memory_rag_services.md) | unified_memory / knowledge 工具落 service 侧 |
 | [`docs/guides/agent-dev-roi-backlog.md`](../docs/guides/agent-dev-roi-backlog.md) | R14 DoD |
 | [`core/web/services/README.md`](../core/web/services/README.md) | backend facade 索引（仿本表结构） |

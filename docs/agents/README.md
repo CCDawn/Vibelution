@@ -8,6 +8,7 @@
 | [worktree-collaboration.md](worktree-collaboration.md) | Worktree / claim / 多 Agent 合并 |
 | [tool-authorization-entrypoints.md](tool-authorization-entrypoints.md) | 工具授权入口 |
 | [mcp-managed-agent-gateway.md](mcp-managed-agent-gateway.md) | 外部 Agent MCP 部署、自动发现、显式审批与调用操作指南 |
+| [project-operation-catalog.md](project-operation-catalog.md) | 项目操作目录：后端 API 盘点、访问类、检索卡片与安全生命周期语义 |
 | [conversation-flow-map.md](conversation-flow-map.md) | Chat/Coding 对话主链路地图 |
 | [issue-tracker.md](issue-tracker.md) | GitHub Issues 作为 issue 真源 |
 | [triage-labels.md](triage-labels.md) | Issue triage 标签语义 |

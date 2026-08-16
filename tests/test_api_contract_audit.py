@@ -3,10 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from scripts.api_contract_audit import (
+    build_inventory_report,
     build_type_report,
     build_report,
     find_backend_routes,
     find_frontend_calls,
+    inventory_report_to_json,
+    inventory_report_to_text,
     normalize_api_path,
     report_to_text,
     type_report_to_text,
@@ -333,3 +336,193 @@ fetchJson<AnotherTestOnlyType>("/api/agents");
     assert report.conflict_count == 0
     assert report.typed_call_count == 0
     assert len(report.dynamic_frontend_calls) == 1
+
+
+def test_contract_audit_recursively_discovers_nested_route_modules(tmp_path):
+    write_text(tmp_path / "core" / "web" / "app.py", "")
+    write_text(
+        tmp_path / "core" / "web" / "routes" / "team_workflows" / "research_projects.py",
+        """
+from fastapi import APIRouter
+router = APIRouter()
+
+@router.get("/teams/{team_id}/workflow-orchestration/research-projects")
+def list_projects(team_id: str):
+    return {}
+
+@router.post("/teams/{team_id}/workflow-orchestration/research-projects")
+def create_project(team_id: str):
+    return {}
+""",
+    )
+    write_text(tmp_path / "web" / "src" / "empty.ts", "")
+
+    backend = find_backend_routes(tmp_path)
+
+    assert len(backend) == 2
+    assert {item.path for item in backend} == {
+        "/api/teams/{param}/workflow-orchestration/research-projects"
+    }
+    assert {item.method for item in backend} == {"GET", "POST"}
+    assert {item.file for item in backend} == {
+        "core/web/routes/team_workflows/research_projects.py"
+    }
+
+
+def test_inventory_report_lists_every_endpoint_and_deterministic_counts(tmp_path):
+    write_text(
+        tmp_path / "core" / "web" / "app.py",
+        """
+from fastapi import FastAPI
+app = FastAPI()
+
+@app.get("/api/health")
+def health():
+    return {}
+""",
+    )
+    write_text(
+        tmp_path / "core" / "web" / "routes" / "sessions.py",
+        """
+from fastapi import APIRouter
+router = APIRouter()
+
+@router.get("/sessions/{session_id}")
+def get_session(session_id: str):
+    return {}
+
+@router.post("/sessions")
+def create_session():
+    return {}
+
+@router.post("/sessions/{session_id}/events")
+def events(session_id: str):
+    return {}
+""",
+    )
+    write_text(
+        tmp_path / "core" / "web" / "routes" / "team_workflows" / "orchestration.py",
+        """
+from fastapi import APIRouter
+router = APIRouter()
+
+@router.put("/teams/{team_id}/workflow-orchestration/state")
+def set_state(team_id: str):
+    return {}
+""",
+    )
+
+    report = build_inventory_report(tmp_path)
+
+    assert report.route_count == 5
+    assert report.route_module_count == 3
+    assert report.prefix_count == 3
+    assert [(item.method, item.path) for item in report.endpoints] == [
+        ("GET", "/api/health"),
+        ("GET", "/api/sessions/{param}"),
+        ("POST", "/api/sessions"),
+        ("POST", "/api/sessions/{param}/events"),
+        ("PUT", "/api/teams/{param}/workflow-orchestration/state"),
+    ]
+    assert report.method_counts == {"GET": 2, "POST": 2, "PUT": 1}
+    assert report.route_module_counts == {
+        "core/web/routes/sessions.py": 3,
+        "core/web/app.py": 1,
+        "core/web/routes/team_workflows/orchestration.py": 1,
+    }
+    assert report.prefix_counts == {"sessions": 3, "health": 1, "teams": 1}
+
+
+def test_inventory_report_is_deterministic_across_runs(tmp_path):
+    write_text(
+        tmp_path / "core" / "web" / "app.py",
+        """
+from fastapi import FastAPI
+app = FastAPI()
+
+@app.get("/api/health")
+def health():
+    return {}
+""",
+    )
+    write_text(
+        tmp_path / "core" / "web" / "routes" / "team_workflows" / "experiment.py",
+        """
+from fastapi import APIRouter
+router = APIRouter()
+
+@router.post("/teams/{team_id}/workflow-orchestration/experiments/{experiment_id}/complete")
+def complete(team_id: str, experiment_id: str):
+    return {}
+""",
+    )
+
+    first = build_inventory_report(tmp_path)
+    second = build_inventory_report(tmp_path)
+
+    assert first == second
+    assert inventory_report_to_json(first) == inventory_report_to_json(second)
+
+
+def test_inventory_report_text_output_contains_all_counts(tmp_path):
+    write_text(
+        tmp_path / "core" / "web" / "app.py",
+        """
+from fastapi import FastAPI
+app = FastAPI()
+
+@app.get("/api/health")
+def health():
+    return {}
+""",
+    )
+    write_text(
+        tmp_path / "core" / "web" / "routes" / "team_workflows" / "research_ops.py",
+        """
+from fastapi import APIRouter
+router = APIRouter()
+
+@router.post("/teams/{team_id}/workflow-orchestration/research-ops/scan")
+def scan(team_id: str):
+    return {}
+""",
+    )
+
+    text = inventory_report_to_text(build_inventory_report(tmp_path))
+
+    assert "Backend API Inventory" in text
+    assert "- backend endpoints: 2" in text
+    assert "- GET /api/health" in text
+    assert "POST /api/teams/{param}/workflow-orchestration/research-ops/scan" in text
+    assert "Counts by method:" in text
+    assert "Counts by route module:" in text
+    assert "Counts by API prefix:" in text
+    assert "core/web/routes/team_workflows/research_ops.py: 1" in text
+
+
+def test_contract_audit_preserves_drift_semantics_with_recursive_discovery(tmp_path):
+    write_text(tmp_path / "core" / "web" / "app.py", "")
+    write_text(
+        tmp_path / "core" / "web" / "routes" / "team_workflows" / "stage_rounds.py",
+        """
+from fastapi import APIRouter
+router = APIRouter()
+
+@router.post("/teams/{team_id}/workflow-orchestration/stage-rounds/{round_id}/complete")
+def complete(team_id: str, round_id: str):
+    return {}
+""",
+    )
+    write_text(
+        tmp_path / "web" / "src" / "Route.tsx",
+        'fetchJson<Missing>("/api/unknown");',
+    )
+
+    report = build_report(tmp_path)
+
+    assert report.backend_route_count == 1
+    assert {item.path for item in report.backend_without_frontend} == {
+        "/api/teams/{param}/workflow-orchestration/stage-rounds/{param}/complete"
+    }
+    assert {item.path for item in report.frontend_without_backend} == {"/api/unknown"}
+    assert report.potential_drift_count == 2
