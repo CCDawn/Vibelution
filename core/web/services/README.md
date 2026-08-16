@@ -109,6 +109,8 @@
 
 ## Knowledge / RAG
 
+**30 秒路由（KB 写入 / RAG 检索 / 索引 / 只读搜索 / 主测）：** [`memory_rag_services.md`](memory_rag_services.md)
+
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
 | `rag_retrieval_service.py` | Governed RAG retrieval helpers for Team Knowledge. | — | `knowledge.py` | `test_rag_retrieval_service.py` |
@@ -117,6 +119,8 @@
 | `unified_knowledge_search_service.py` | Unified read-only search boundary for governed memory and formal knowledge. | — | — | `test_unified_knowledge_search_user_content.py` |
 
 ## Memory
+
+**30 秒路由（overview / 硬删除 / 只读 graph / 主测）：** [`memory_rag_services.md`](memory_rag_services.md)
 
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
