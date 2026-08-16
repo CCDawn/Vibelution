@@ -365,6 +365,18 @@ def test_selector_matches_current_evolution_service_layout():
     assert any("tests/test_evolution_harness.py" in command for command in result["commands"])
 
 
+def test_selector_matches_desktop_electron_to_vitest_commands():
+    result = select_tests.select_tests(
+        ["desktop/electron/src/tray/desktopTray.ts"],
+        select_tests.load_matrix(),
+    )
+
+    assert result["matchedRules"][0]["id"] == "desktop-electron-shell"
+    assert "desktop/electron/src/tray/desktopTray.ts" in result["matchedRules"][0]["matchedFiles"]
+    assert any("npm --prefix desktop/electron test" in command for command in result["commands"])
+    assert "local-serial" in result["validationLayers"]
+
+
 def test_selector_matches_real_runtime_route_to_runtime_validation_commands():
     result = select_tests.select_tests(
         ["core/web/routes/runtime.py"],

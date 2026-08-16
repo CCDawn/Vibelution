@@ -16,6 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from core.infrastructure.storage_migration import (
     StorageMigrationError,
     apply_storage_migration,
+    assess_storage_migration_readiness,
     plan_storage_migration,
     rollback_storage_switch,
 )
@@ -24,7 +25,7 @@ from vibelution_storage import resolve_active_project_storage_paths, resolve_pro
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("inventory", "apply", "rollback"))
+    parser.add_argument("action", choices=("inventory", "readiness", "apply", "rollback"))
     parser.add_argument("--project", default=str(PROJECT_ROOT))
     parser.add_argument("--projects-home", default="")
     parser.add_argument("--config-path", default="")
@@ -49,6 +50,15 @@ def main(argv: list[str] | None = None) -> int:
                 projects_home=projects_home,
                 config_path=config_path,
             ).as_dict()
+        elif args.action == "readiness":
+            payload = assess_storage_migration_readiness(
+                project,
+                projects_home=projects_home,
+                config_path=config_path,
+                action="apply",
+            )
+            print(json.dumps({"ok": bool(payload.get("ready")), **payload}, ensure_ascii=False, indent=2))
+            return 0 if payload.get("ready") else 1
         elif args.action == "apply":
             payload = apply_storage_migration(
                 project,
