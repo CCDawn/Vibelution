@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from core.orchestration.tool_budget_profiles import (
     detect_model_family,
+    normalize_max_calls_by_model_family,
     resolve_max_calls_per_turn,
 )
 from core.orchestration.turn_status_bar import (
@@ -42,6 +43,27 @@ def test_resolve_max_calls_prefers_family_map():
 def test_resolve_max_calls_unlimited_stays_zero():
     max_calls, _ = resolve_max_calls_per_turn({"maxCallsPerTurn": 0}, model="deepseek-chat")
     assert max_calls == 0
+
+
+def test_budget_profiles_coerce_bytes_case_and_snake_case():
+    assert detect_model_family(model=b"deepseek-chat") == "deepseek"
+    max_calls, family = resolve_max_calls_per_turn(
+        {
+            "maxCallsPerTurn": "32",
+            "maxCallsPerTurnByModelFamily": {"DeepSeek": 80},
+        },
+        model=b"deepseek-v3",
+    )
+    assert family == "deepseek"
+    assert max_calls == 80
+    snake_calls, _ = resolve_max_calls_per_turn(
+        {"max_calls_per_turn": "16"},
+        model="gpt-4.1",
+    )
+    assert snake_calls == 16
+    assert normalize_max_calls_by_model_family('{"Claude": "40"}') == {"claude": 40}
+    bool_calls, _ = resolve_max_calls_per_turn({"maxCallsPerTurn": True}, model="gpt-4.1")
+    assert bool_calls == 0
 
 
 def test_turn_status_bar_message_and_upsert():
