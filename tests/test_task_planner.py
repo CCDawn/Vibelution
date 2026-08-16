@@ -143,3 +143,24 @@ def test_task_create_survives_non_list_payload(isolated_task_manager):
     result = isolated_task_manager.task_create("not-a-list", goal="Bad payload")
     assert "已创建 0 个任务" in result
     assert isolated_task_manager.task_list() == []
+
+
+def test_task_create_parses_json_payload_camelcase_and_bytes(isolated_task_manager):
+    result = isolated_task_manager.task_create(
+        '[{"description":"Inspect config","isCompleted":"false","estimatedHours":"2","metadata":{"k":"v"}}]',
+        goal=b"JSON goal",
+    )
+    assert "已创建 1 个任务" in result
+    task = isolated_task_manager.task_list()[0]
+    assert task["description"] == "Inspect config"
+    assert task["is_completed"] is False
+    assert task["estimated_hours"] == 2.0
+    assert task["metadata"] == {"k": "v"}
+    assert isolated_task_manager.get_current_plan().goal == "JSON goal"
+    assert isolated_task_manager.get_task(b"1") is not None
+    isolated_task_manager.task_update(1, is_completed=b"false", result_summary=b"still pending")
+    assert isolated_task_manager.task_list()[0]["is_completed"] is False
+    assert isolated_task_manager.task_list()[0]["result_summary"] == "still pending"
+    assert task_planner._safe_int(True, 0) == 0
+    assert task_planner._safe_int(b"1") == 1
+    assert task_planner._coerce_bool(b"false", default=True) is False
