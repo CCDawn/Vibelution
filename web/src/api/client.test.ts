@@ -7,12 +7,17 @@ import {
   resetControlTokenForTests,
   setFetchJsonFailureReporter,
 } from "./client";
+import {
+  pushClientOperationContext,
+  resetClientOperationContextForTests,
+} from "../app/clientOperationContext";
 
 describe("fetchJson control token", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     resetControlTokenForTests();
+    resetClientOperationContextForTests();
     setFetchJsonFailureReporter(null);
   });
 
@@ -261,5 +266,28 @@ describe("fetchJson control token", () => {
     await expect(fetchJson("https://example.invalid/api/probe")).rejects.toThrow("external failed");
 
     expect(reports).toEqual([]);
+  });
+
+  it("adds the active client operation id header to mutating requests", async () => {
+    pushClientOperationContext("session_delete-probe-1");
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          header: "X-Vibelution-Control-Token",
+          controlToken: "test-token",
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ ok: true }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchJson<{ ok: boolean }>("/api/sessions/session-a", { method: "DELETE" });
+
+    const requestInit = fetchMock.mock.calls[1][1] as RequestInit;
+    const headers = requestInit.headers as Headers;
+    expect(headers.get("X-Vibelution-Client-Operation-Id")).toBe("session_delete-probe-1");
   });
 });

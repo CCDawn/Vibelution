@@ -33,6 +33,7 @@ API_RUNTIME_EXCLUDED_PATHS = frozenset(
     }
 )
 API_RUNTIME_ALWAYS_RECORD_REFERER_PATHS = frozenset({"/teams", "/agents/teams"})
+CLIENT_OPERATION_ID_HEADER = "X-Vibelution-Client-Operation-Id"
 
 
 class RuntimeSceneApiEventMiddleware(BaseHTTPMiddleware):
@@ -114,6 +115,7 @@ def record_api_runtime_event(
                 "user_agent_family": _user_agent_family(request),
                 "exception_type": type(exception).__name__ if exception else "",
                 "exception_message": str(exception or ""),
+                "client_operation_id": _client_operation_id(request),
             }
         )
     except Exception:  # noqa: BLE001,S110 - diagnostics must never fail the API response
@@ -225,6 +227,11 @@ def _request_origin_summary(request: Request) -> str:
     if parsed_referer.scheme and parsed_referer.netloc:
         return f"{parsed_referer.scheme}://{parsed_referer.netloc}"[:160]
     return ""
+
+
+def _client_operation_id(request: Request) -> str:
+    raw = str(request.headers.get(CLIENT_OPERATION_ID_HEADER) or "").strip()
+    return raw[:120]
 
 
 def _user_agent_family(request: Request) -> str:

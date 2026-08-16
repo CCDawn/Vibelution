@@ -14,6 +14,7 @@ import {
   reviewKnowledgeRefinementProposal,
   reviewKnowledgeSourceInbox,
 } from "../../api/knowledge";
+import { startUserAction } from "../../app/userActionTelemetry";
 import { queryKeys } from "../../api/queryKeys";
 import type {
   KnowledgeItem,
@@ -68,13 +69,21 @@ export function useMemoryKnowledgeMutations(options: UseMemoryKnowledgeMutations
         content: draft.content,
         tags: options.commaList(draft.tags),
       }),
-    onSuccess: () => {
+    onMutate: ({ knowledgeBaseId, draft }) => ({
+      telemetry: startUserAction("memory_knowledge_proposal_create", {
+        knowledgeBaseId,
+        proposedByAgentId: draft.proposedByAgentId,
+      }),
+    }),
+    onSuccess: (_payload, variables, context) => {
+      context?.telemetry?.succeeded({ knowledgeBaseId: variables.knowledgeBaseId });
       options.setProposalDraft(options.newProposalDraft());
       options.setKnowledgeFeedback({ tone: "success", text: options.copy.mutationDone });
       options.invalidateKnowledgeDashboard(queryClient, options.getActiveKnowledgeActorAgentId());
       options.invalidateMemoryQueries(queryClient);
     },
-    onError: (error) => {
+    onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, { knowledgeBaseId: variables.knowledgeBaseId });
       options.setKnowledgeFeedback({
         tone: "error",
         text: `${options.copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}`,
@@ -96,7 +105,19 @@ export function useMemoryKnowledgeMutations(options: UseMemoryKnowledgeMutations
         status,
         reviewedByAgentId: options.getActiveKnowledgeActorAgentId(),
       }),
-    onSuccess: (payload) => {
+    onMutate: (variables) => ({
+      telemetry: startUserAction("memory_knowledge_proposal_review", {
+        knowledgeBaseId: variables.knowledgeBaseId,
+        proposalId: variables.proposalId,
+        status: variables.status,
+      }),
+    }),
+    onSuccess: (payload, variables, context) => {
+      context?.telemetry?.succeeded({
+        knowledgeBaseId: variables.knowledgeBaseId,
+        proposalId: variables.proposalId,
+        status: variables.status,
+      });
       options.setKnowledgeFeedback({
         tone: "success",
         text: payload.item ? `${options.copy.mutationDone} · ${payload.item.title}` : options.copy.mutationDone,
@@ -111,7 +132,11 @@ export function useMemoryKnowledgeMutations(options: UseMemoryKnowledgeMutations
       });
       options.invalidateMemoryQueries(queryClient);
     },
-    onError: (error) => {
+    onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, {
+        knowledgeBaseId: variables.knowledgeBaseId,
+        proposalId: variables.proposalId,
+      });
       options.setKnowledgeFeedback({
         tone: "error",
         text: `${options.copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}`,

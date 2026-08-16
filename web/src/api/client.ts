@@ -1,3 +1,8 @@
+import {
+  CLIENT_OPERATION_ID_HEADER,
+  currentClientOperationId,
+} from "../app/clientOperationContext";
+
 const CONTROL_TOKEN_ENDPOINT = "/api/control-token";
 const CONTROL_TOKEN_HEADER_FALLBACK = "X-Vibelution-Control-Token";
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
@@ -162,6 +167,10 @@ export async function fetchJson<T>(input: string, init?: RequestInit): Promise<T
   if (controlOrigin !== null) {
     const control = await getControlToken(controlOrigin);
     headers.set(control.header, control.token);
+  }
+  const clientOperationId = currentClientOperationId();
+  if (clientOperationId) {
+    headers.set(CLIENT_OPERATION_ID_HEADER, clientOperationId);
   }
 
   let response: Response;
