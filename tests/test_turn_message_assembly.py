@@ -313,6 +313,29 @@ def test_assembly_coerces_json_function_false_merge_and_string_events():
     )
 
 
+def test_assembly_unwraps_message_and_tool_call_envelopes():
+    restored = langchain_messages_from_conversation_layer(
+        b'{"messages": [{"role": "tool", "content": "ok", "toolCallId": "call-1"}]}'
+    )
+    assert len(restored) == 1
+    assert restored[0].tool_call_id == "call-1"
+    assert restored[0].content == "ok"
+    assert langchain_messages_from_conversation_layer("not-a-layer") == []
+
+    normalized = normalize_seeded_tool_calls(
+        {"toolCalls": [{"id": "call-env", "name": "read_file_tool", "args": {"path": "a.py"}}]}
+    )
+    assert normalized == [{"id": "call-env", "name": "read_file_tool", "args": {"path": "a.py"}}]
+
+    original = [SystemMessage(content="system"), {"role": "user", "content": "hi"}]
+    replayed = replay_current_turn_messages(
+        original,
+        '{"items": []}',
+        turn_id="turn-1",
+    )
+    assert [_message_preview(item) for item in replayed] == [_message_preview(item) for item in original]
+
+
 def _message_preview(item):
     if isinstance(item, dict):
         return ("dict", item.get("role"), item.get("content"))

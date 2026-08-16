@@ -41,7 +41,7 @@ def _coerce_bool(value: Any, default: bool) -> bool:
         return default
     if isinstance(value, (bytes, bytearray, memoryview)):
         value = bytes(value).decode("utf-8", errors="replace")
-    if isinstance(value, (int, float)):
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
         return bool(value)
     text = str(value).strip().lower()
     if not text:
@@ -51,29 +51,6 @@ def _coerce_bool(value: Any, default: bool) -> bool:
     if text in {"0", "false", "no", "off", "disabled"}:
         return False
     return default
-
-
-def _as_mapping(value: Any) -> Dict[str, Any]:
-    if isinstance(value, (bytes, bytearray, memoryview)):
-        value = bytes(value).decode("utf-8", errors="replace")
-    if isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return {}
-        try:
-            value = json.loads(text)
-        except json.JSONDecodeError:
-            return {}
-    if isinstance(value, Mapping):
-        return dict(value)
-    return {}
-
-
-def _mapping_get(mapping: Mapping[str, Any], *keys: str) -> Any:
-    for key in keys:
-        if key in mapping:
-            return mapping.get(key)
-    return None
 
 
 def _maybe_json(value: Any) -> Any:
@@ -89,11 +66,32 @@ def _maybe_json(value: Any) -> Any:
     return value
 
 
+def _as_mapping(value: Any) -> Dict[str, Any]:
+    value = _maybe_json(value)
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {}
+
+
+def _mapping_get(mapping: Mapping[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in mapping:
+            return mapping.get(key)
+    return None
+
+
 def _coerce_message_list(value: Any) -> list:
     value = _maybe_json(value)
     if value is None or isinstance(value, (str, bytes, bytearray, memoryview)):
         return []
     if isinstance(value, Mapping):
+        nested = value.get("messages")
+        if nested is None:
+            nested = value.get("items")
+        if nested is None:
+            nested = value.get("history")
+        if nested is not None:
+            return _coerce_message_list(nested)
         if any(key in value for key in ("role", "content", "type", "tool_calls", "toolCalls")):
             return [dict(value)]
         return []
@@ -123,10 +121,15 @@ def _coerce_text_blocks(value: Any) -> list[str]:
 
 def _seeded_call_items(raw_calls: Any) -> list:
     raw_calls = _maybe_json(raw_calls)
-    if isinstance(raw_calls, Mapping):
-        return [dict(raw_calls)]
-    if isinstance(raw_calls, (str, bytes, bytearray, memoryview)) or raw_calls in (None, ""):
+    if raw_calls is None or isinstance(raw_calls, (str, bytes, bytearray, memoryview)):
         return []
+    if isinstance(raw_calls, Mapping):
+        nested = raw_calls.get("tool_calls")
+        if nested is None:
+            nested = raw_calls.get("toolCalls")
+        if nested is not None:
+            return _seeded_call_items(nested)
+        return [dict(raw_calls)] if raw_calls else []
     try:
         return list(raw_calls)
     except TypeError:
