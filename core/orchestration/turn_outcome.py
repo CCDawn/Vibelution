@@ -31,7 +31,7 @@ def _coerce_bool(value: Any, default: bool) -> bool:
         return default
     if isinstance(value, (bytes, bytearray, memoryview)):
         value = bytes(value).decode("utf-8", errors="replace")
-    if isinstance(value, (int, float)):
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
         return bool(value)
     text = str(value).strip().lower()
     if not text:
@@ -41,22 +41,6 @@ def _coerce_bool(value: Any, default: bool) -> bool:
     if text in {"0", "false", "no", "off", "disabled"}:
         return False
     return default
-
-
-def _as_mapping(value: Any) -> Dict[str, Any]:
-    if isinstance(value, (bytes, bytearray, memoryview)):
-        value = bytes(value).decode("utf-8", errors="replace")
-    if isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return {}
-        try:
-            value = json.loads(text)
-        except json.JSONDecodeError:
-            return {}
-    if isinstance(value, Mapping):
-        return dict(value)
-    return {}
 
 
 def _maybe_json(value: Any) -> Any:
@@ -72,11 +56,25 @@ def _maybe_json(value: Any) -> Any:
     return value
 
 
+def _as_mapping(value: Any) -> Dict[str, Any]:
+    value = _maybe_json(value)
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {}
+
+
 def _coerce_message_list(value: Any) -> list:
     value = _maybe_json(value)
     if value is None or isinstance(value, (str, bytes, bytearray, memoryview)):
         return []
     if isinstance(value, Mapping):
+        nested = value.get("messages")
+        if nested is None:
+            nested = value.get("items")
+        if nested is None:
+            nested = value.get("history")
+        if nested is not None:
+            return _coerce_message_list(nested)
         if any(key in value for key in ("role", "content", "type", "tool_calls", "toolCalls")):
             return [dict(value)]
         return []
@@ -91,6 +89,13 @@ def _coerce_item_list(value: Any) -> list:
     if value is None or isinstance(value, (str, bytes, bytearray, memoryview)):
         return []
     if isinstance(value, Mapping):
+        nested = value.get("tool_calls")
+        if nested is None:
+            nested = value.get("toolCalls")
+        if nested is None:
+            nested = value.get("items")
+        if nested is not None:
+            return _coerce_item_list(nested)
         return [dict(value)] if value else []
     try:
         return list(value)
@@ -201,11 +206,11 @@ class TurnOutcomeController:
             effective_max_attempts > 0
             and max(effective_attempts, consecutive) >= effective_max_attempts
         )
-        if category in {"server_error", "rate_limit"} and retry_budget_exhausted:
-            return f"模型 provider 暂时不可用（`{category}`），本轮已用尽重试预算，直接失败收口。"
-        if category == "network_error" and retry_budget_exhausted:
+        if category_text in {"server_error", "rate_limit"} and retry_budget_exhausted:
+            return f"模型 provider 暂时不可用（`{category_text}`），本轮已用尽重试预算，直接失败收口。"
+        if category_text == "network_error" and retry_budget_exhausted:
             return "网络失败已连续出现且重连预算已耗尽，当前轮次提前结束。"
-        if category == "timeout" and retry_budget_exhausted:
+        if category_text == "timeout" and retry_budget_exhausted:
             return "连续超时且重试预算已耗尽，当前轮次提前结束。"
         stop_limit = effective_max_attempts or self.max_consecutive_failures
         if consecutive >= stop_limit:
@@ -215,8 +220,8 @@ class TurnOutcomeController:
     @staticmethod
     def is_readonly_platform_judgment_complete(goal: str, visible_text: str) -> bool:
         """识别只读平台兼容性判断已给出明确结论，可直接收束。"""
-        goal_text = (goal or "").strip().lower()
-        answer_text = (visible_text or "").strip().lower()
+        goal_text = _coerce_text(goal).strip().lower()
+        answer_text = _coerce_text(visible_text).strip().lower()
         if not goal_text or not answer_text:
             return False
         readonly_markers = [
@@ -665,7 +670,7 @@ def _message_content_text(message: Any) -> str:
 def _tool_call_name(item: Any) -> str:
     if not isinstance(item, Mapping):
         return "unknown_tool"
-    function = item.get("function") if isinstance(item.get("function"), Mapping) else {}
+    function = _as_mapping(item.get("function"))
     return _coerce_text(
         item.get("name") or item.get("toolName") or function.get("name") or "unknown_tool"
     ).strip()

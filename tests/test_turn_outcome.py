@@ -269,3 +269,60 @@ def test_single_turn_and_insert_reject_false_string_and_character_split():
         {"role": "system", "content": "ctx"},
         {"role": b"user", "content": "hi"},
     ]
+
+
+def test_turn_outcome_unwraps_envelopes_and_decodes_category_bytes():
+    valid_messages = [{"role": "user", "content": "hi"}]
+    assert (
+        TurnOutcomeController.classify_turn_carryover(
+            {
+                "turnIdentity": "t1",
+                "goal": "keep going",
+                "messages": {"messages": valid_messages},
+            },
+            expected_turn_identity="t1",
+        )
+        == "accepted"
+    )
+    assert (
+        TurnOutcomeController.should_finish_single_turn_after_direct_response(
+            single_turn_mode_active=True,
+            tool_calls={"toolCalls": []},
+            visible_text="hello",
+        )
+        is True
+    )
+    assert (
+        TurnOutcomeController.should_finish_single_turn_after_direct_response(
+            single_turn_mode_active=True,
+            tool_calls={"toolCalls": [{"id": "c1", "name": "read_file_tool"}]},
+            visible_text="hello",
+        )
+        is False
+    )
+    inserted = TurnOutcomeController.insert_volatile_context_before_current_user(
+        messages=b'{"messages": [{"role": "user", "content": "hi"}]}',
+        context_messages='{"items": [{"role": "system", "content": "ctx"}]}',
+    )
+    assert inserted == [
+        {"role": "system", "content": "ctx"},
+        {"role": "user", "content": "hi"},
+    ]
+    controller = _controller(max_consecutive_failures=3)
+    stop = controller.should_stop_after_llm_failure(
+        category=b"server_error",
+        retryable=True,
+        consecutive_failures=1,
+        iteration=True,
+        attempts=5,
+        max_attempts=5,
+    )
+    assert stop and "server_error" in stop
+    assert controller.should_stop_after_llm_failure(
+        category="timeout",
+        retryable=True,
+        consecutive_failures=0,
+        iteration=True,
+        attempts=True,
+        max_attempts=5,
+    ) is None
