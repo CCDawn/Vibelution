@@ -159,11 +159,13 @@ def test_parallel_safe_web_helpers_are_not_module_serial():
     parallel_safe = (
         project_root / "tests" / "test_runtime_manager_control_service.py",
         project_root / "tests" / "test_web_misc_routes.py",
+        project_root / "tests" / "test_launcher_scripts_contract.py",
     )
     for path in parallel_safe:
         source = path.read_text(encoding="utf-8")
         assert "pytestmark = pytest.mark.serial" not in source
         assert "pytest.mark.serial" not in source.split("pytestmark", 1)[0]
+        assert "pytestmark = pytest.mark.slow" not in source
 
 
 def test_selector_matches_session_service_to_chat_validation_commands():

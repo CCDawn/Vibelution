@@ -143,11 +143,12 @@ rules:
       - "scripts/vibelution_launcher.py"
       - "tests/test_runtime_manager.py"
       - "tests/test_launcher_scripts.py"
+      - "tests/test_launcher_scripts_contract.py"
       - "tests/test_launcher_service.py"
       - "tests/test_web_runtime_routes.py"
       - "tests/helpers/web_runtime_scene.py"
     commands:
-      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_runtime_manager.py tests/test_launcher_scripts.py tests/test_launcher_service.py tests/test_web_runtime_routes.py -q"
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_launcher_scripts_contract.py tests/test_runtime_manager.py tests/test_launcher_service.py tests/test_web_runtime_routes.py -q"
     notes:
       - "Runtime lifecycle changes need an explicit Launcher refresh decision after automated validation."
 
