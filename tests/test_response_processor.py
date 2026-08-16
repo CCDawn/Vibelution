@@ -144,3 +144,57 @@ def test_extract_active_components_dedupes_and_uppercases():
     assert ResponseProcessor.extract_active_components(
         b"<active_components>soul</active_components>"
     ) == ["SOUL"]
+
+
+def test_preview_unwraps_tool_call_envelopes_and_json_responses():
+    processor = ResponseProcessor()
+    enveloped = processor.preview(
+        SimpleNamespace(
+            content="visible",
+            tool_calls={
+                "toolCalls": [{"id": "c1", "name": "read_file_tool", "args": {"path": "a.py"}}],
+            },
+        )
+    )
+    assert enveloped.has_tool_calls is True
+    assert enveloped.tool_calls[0]["name"] == "read_file_tool"
+    assert enveloped.xml_tool_calls == []
+
+    json_response = processor.preview(
+        b'{"content": "visible", "tool_calls": [{"id": "c2", "name": "cli_tool"}]}'
+    )
+    assert json_response.raw_content == "visible"
+    assert json_response.tool_calls[0]["id"] == "c2"
+    assert json_response.tool_calls[0]["name"] == "cli_tool"
+
+
+def test_build_ai_message_parses_json_function_and_metadata_payloads():
+    processor = ResponseProcessor()
+    response = SimpleNamespace(
+        content="done",
+        tool_calls=[],
+        additional_kwargs='{"foo": 1}',
+        response_metadata=b'{"model": "test-model"}',
+    )
+    processed = processor.process(response)
+    message = processed.build_ai_message(
+        response,
+        tool_calls_override=[
+            {
+                "id": "call-7",
+                "function": '{"name": "cli_tool", "arguments": {"command": "pytest"}}',
+            }
+        ],
+    )
+    assert message.tool_calls[0]["id"] == "call-7"
+    assert message.tool_calls[0]["name"] == "cli_tool"
+    assert message.tool_calls[0]["args"] == {"command": "pytest"}
+    assert message.additional_kwargs == {"foo": 1}
+    assert message.response_metadata == {"model": "test-model"}
+
+
+def test_coerce_content_text_parses_json_content_blocks_without_splitting_strings():
+    processor = ResponseProcessor()
+    assert processor.coerce_content_text(['{"text": "a"}', {"text": "b"}]) == "ab"
+    assert processor.coerce_content_text("not-json") == "not-json"
+    assert processor.coerce_content_text('{"text": "hello"}') == '{"text": "hello"}'
