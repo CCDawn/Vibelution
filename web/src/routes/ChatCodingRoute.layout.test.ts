@@ -36,6 +36,7 @@ import chatWorkbenchConfirmDialogSource from "./chat/useChatWorkbenchConfirmDial
 import chatVisibleSessionCatalogSource from "./chat/useChatVisibleSessionCatalog.ts?raw";
 import chatAgentSessionTabsSource from "./chat/useChatAgentSessionTabs.ts?raw";
 import chatSessionIndexRailModelSource from "./chat/useChatSessionIndexRailModel.ts?raw";
+import chatGroupRoomChromeModelSource from "./chat/useChatGroupRoomChromeModel.ts?raw";
 import agentDirectoryActionsSource from "./chat/useChatAgentDirectoryActions.ts?raw";
 import chatStatusRailSource from "./chat/ChatStatusRail.tsx?raw";
 import cliAgentRunModelSource from "./chat/cliAgentRunModel.ts?raw";
@@ -81,6 +82,7 @@ const routeSource = [
   chatVisibleSessionCatalogSource,
   chatAgentSessionTabsSource,
   chatSessionIndexRailModelSource,
+  chatGroupRoomChromeModelSource,
 ].join("\n");
 
 /** Wave 8C/8D: layout contracts resolve class strings across route shell + panel/component maps. */
@@ -3426,6 +3428,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(chatCodingRouteWorkbenchSource).toContain("useChatVisibleSessionCatalog");
     expect(chatCodingRouteWorkbenchSource).toContain("useChatAgentSessionTabs");
     expect(chatCodingRouteWorkbenchSource).toContain("useChatSessionIndexRailModel");
+    expect(chatGroupRoomChromeModelSource).toContain("linkedTeamRoomIds");
+    expect(chatGroupRoomChromeModelSource).toContain("activeGroupTeamOwned");
+    expect(chatGroupRoomChromeModelSource).toContain("buildChatGroupRoomActionDisabledFlags");
     expect(chatVisibleSessionCatalogSource).toContain("isVisibleDirectSession");
     expect(chatAgentSessionTabsSource).toContain("buildAgentSessionTabs");
     expect(chatSessionIndexRailModelSource).toContain("加载更多会话");
