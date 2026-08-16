@@ -6,11 +6,18 @@ from core.web.services.team_workflow_orchestration_service import *
 from ._errors import _raise_team_workflow_route_error
 from ._models import *
 from ._router import router
-from .experiment_models import ExperimentRouteResponse
+from .experiment_models import (
+    CandidateStoreListResponse,
+    CandidateStoreValidationResponse,
+    ChallengeQuestionRunStatusResponse,
+    ExperimentMethodCatalogResponse,
+    ExperimentPlanningStatusResponse,
+    ExperimentRouteResponse,
+)
 
 @router.get(
     "/teams/{team_id}/workflow-orchestration/experiments/status",
-    response_model=ExperimentRouteResponse,
+    response_model=ExperimentPlanningStatusResponse,
     response_model_exclude_unset=True,
 )
 def team_workflow_experiment_planning_status(team_id: str) -> dict:
@@ -24,7 +31,7 @@ def team_workflow_experiment_planning_status(team_id: str) -> dict:
 
 @router.get(
     "/teams/{team_id}/workflow-orchestration/challenge-program/question-runs/status",
-    response_model=ExperimentRouteResponse,
+    response_model=ChallengeQuestionRunStatusResponse,
     response_model_exclude_unset=True,
 )
 def team_workflow_challenge_question_run_status(team_id: str) -> dict:
@@ -134,7 +141,7 @@ def team_workflow_challenge_question_run_review(
 
 @router.get(
     "/teams/{team_id}/workflow-orchestration/experiments/methods",
-    response_model=ExperimentRouteResponse,
+    response_model=ExperimentMethodCatalogResponse,
     response_model_exclude_unset=True,
 )
 def team_workflow_experiment_method_catalog(team_id: str) -> dict:
@@ -543,7 +550,7 @@ def team_workflow_research_stage_round_memory_retry(team_id: str, stage_round_id
 
 @router.get(
     "/teams/{team_id}/workflow-orchestration/candidates",
-    response_model=ExperimentRouteResponse,
+    response_model=CandidateStoreListResponse,
     response_model_exclude_unset=True,
 )
 def team_workflow_candidate_list(
@@ -573,7 +580,7 @@ def team_workflow_candidate_list(
 
 @router.get(
     "/teams/{team_id}/workflow-orchestration/candidates/validation",
-    response_model=ExperimentRouteResponse,
+    response_model=CandidateStoreValidationResponse,
     response_model_exclude_unset=True,
 )
 def team_workflow_candidate_validation(team_id: str) -> dict:
