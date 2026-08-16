@@ -3729,6 +3729,7 @@ class RuntimeManagerDaemon:
         request_audit = _safe_lifecycle_request_audit(args)
         no_browser = bool(args.get("noBrowser"))
         force_frontend_rebuild = bool(args.get("forceFrontendRebuild"))
+        allow_dirty_launch = force_frontend_rebuild or bool(args.get("allowDirty"))
         if force_frontend_rebuild:
             # Rebuild before any already-open short-circuit so tray "rebuild and start"
             # always refreshes static assets even when the workbench is already healthy.
@@ -3858,7 +3859,7 @@ class RuntimeManagerDaemon:
                 extra_result_data={"lifecycleTimingsMs": lifecycle_timings_ms},
             )
         launcher_started = time.monotonic()
-        if force_frontend_rebuild:
+        if allow_dirty_launch:
             result = open_workbench(
                 no_browser=no_browser,
                 cancel_check=cancel_check,
@@ -3979,7 +3980,7 @@ class RuntimeManagerDaemon:
                     | {"attempts": verification_attempts},
                 )
                 retry_launcher_started = time.monotonic()
-                if force_frontend_rebuild:
+                if allow_dirty_launch:
                     retry_result = open_workbench(
                         no_browser=no_browser,
                         cancel_check=cancel_check,

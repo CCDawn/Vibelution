@@ -1565,6 +1565,14 @@ def _electron_main_orchestrates_windows() -> bool:
     return str(os.environ.get("VIBELUTION_ELECTRON_MAIN_ORCHESTRATES_WINDOWS", "")).strip() == "1"
 
 
+def _allow_dirty_launch_from_env() -> bool:
+    return str(os.environ.get("VIBELUTION_ALLOW_DIRTY_LAUNCH") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
 def request_launcher_start() -> LauncherCommandResponse:
     """Request the managed project bundle to start."""
 
@@ -1587,9 +1595,16 @@ def request_launcher_start() -> LauncherCommandResponse:
         ensure_runtime_manager_daemon_alive()
         prequeue_timings_ms["ensureDaemonMs"] = _launcher_elapsed_ms(ensure_started)
         submit_started = time.monotonic()
+        start_args: dict[str, Any] = {
+            "reason": "launcher_start_button",
+            "source": "launcher_api",
+            "noBrowser": _electron_main_orchestrates_windows(),
+        }
+        if _allow_dirty_launch_from_env():
+            start_args["allowDirty"] = True
         command = submit_command(
             "open_workbench",
-            args={"reason": "launcher_start_button", "source": "launcher_api", "noBrowser": _electron_main_orchestrates_windows()},
+            args=start_args,
             requested_by="launcher_api",
         )
         prequeue_timings_ms["submitCommandMs"] = _launcher_elapsed_ms(submit_started)

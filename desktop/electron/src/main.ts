@@ -1860,6 +1860,39 @@ function closeOrchestratedWorkbenchWindow(instanceId: string): void {
   });
 }
 
+async function openWorkbenchForCloseCanary(
+  paths: DesktopPaths,
+  bootstrap: LauncherBootstrapResult,
+  provider: ElectronWindowProvider
+): Promise<void> {
+  electronStartupStage = "workbench_window_ready";
+  markWorkbenchOpenRequested();
+  const desktopEnv = desktopEnvironment();
+  const pythonPath = String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
+  if (!pythonPath) {
+    await provider.openOrFocusWorkbench();
+    return;
+  }
+  const startResult = await runWorkbenchLifecycle({
+    workspaceRoot: paths.workspaceRoot,
+    pythonPath,
+    operatorConfigPath:
+      bootstrap.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
+    operation: "start"
+  });
+  if (startResult.accepted) {
+    await openWorkbenchAfterLifecycleReady(
+      paths,
+      bootstrap,
+      provider,
+      startResult.commandId ?? "",
+      WORKBENCH_START_READY_WAIT_MS
+    );
+    return;
+  }
+  await provider.openOrFocusWorkbench();
+}
+
 async function openWorkbenchAfterLifecycleReady(
   paths: DesktopPaths,
   bootstrap: LauncherBootstrapResult,
@@ -2213,7 +2246,7 @@ app.whenReady()
       await windowProvider.openLauncher();
     }
     if (desktopCliArgs.workbenchCloseCanary) {
-      await windowProvider.openOrFocusWorkbench();
+      await openWorkbenchForCloseCanary(paths, launcherBootstrap, windowProvider);
       return;
     }
     const firstLifecycle = String(desktopCliArgs.lifecycleCommand || "").trim().toLowerCase();
