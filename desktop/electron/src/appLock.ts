@@ -26,8 +26,11 @@ export function singleInstanceDecision(hasLock: boolean): SingleInstanceDecision
   return hasLock ? { action: "continue_as_primary" } : { action: "focus_existing", reason: "secondary_launch" };
 }
 
-export function shouldPinSharedDesktopShellUserData(options: { smoke: boolean }): boolean {
-  return !options.smoke;
+export function shouldPinSharedDesktopShellUserData(options: {
+  smoke: boolean;
+  workbenchCloseCanary?: boolean;
+}): boolean {
+  return !options.smoke && !options.workbenchCloseCanary;
 }
 
 export function resolveDesktopShellUserDataRoot(env: NodeJS.ProcessEnv = process.env): string {
@@ -42,9 +45,9 @@ export function resolveDesktopShellUserDataRoot(env: NodeJS.ProcessEnv = process
 
 export function pinSharedDesktopShellUserData(
   appLike: DesktopAppPathSetter,
-  input: { smoke: boolean; env?: NodeJS.ProcessEnv }
+  input: { smoke: boolean; workbenchCloseCanary?: boolean; env?: NodeJS.ProcessEnv }
 ): PinSharedDesktopShellUserDataResult {
-  if (!shouldPinSharedDesktopShellUserData({ smoke: input.smoke })) {
+  if (!shouldPinSharedDesktopShellUserData({ smoke: input.smoke, workbenchCloseCanary: input.workbenchCloseCanary })) {
     return { pinned: false, userDataRoot: "" };
   }
   const userDataRoot = resolveDesktopShellUserDataRoot(input.env ?? process.env);

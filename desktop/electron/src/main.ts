@@ -216,10 +216,14 @@ type PendingPublicDeepLink = {
 };
 
 const pendingPublicDeepLinks: PendingPublicDeepLink[] = [];
-pinSharedDesktopShellUserData(app, { smoke: desktopCliArgs.smoke, env: process.env });
+pinSharedDesktopShellUserData(app, {
+  smoke: desktopCliArgs.smoke,
+  workbenchCloseCanary: desktopCliArgs.workbenchCloseCanary,
+  env: process.env
+});
 const lockDecision = singleInstanceDecision(app.requestSingleInstanceLock());
 nativeTheme.themeSource = "light";
-if (!desktopCliArgs.smoke && lockDecision.action === "focus_existing") {
+if (!desktopCliArgs.smoke && !desktopCliArgs.workbenchCloseCanary && lockDecision.action === "focus_existing") {
   app.quit();
 }
 
@@ -1309,7 +1313,14 @@ async function scheduleCurrentDesktopShellRefresh(thenLifecycle: string): Promis
 }
 
 async function refreshPackagedDesktopShellIfStale(thenLifecycle: string): Promise<boolean> {
-  if (decidePackagedDesktopShellRefresh({ isPackaged: app.isPackaged, smoke: desktopCliArgs.smoke, stale: true }) !== "refresh") {
+  if (
+    decidePackagedDesktopShellRefresh({
+      isPackaged: app.isPackaged,
+      smoke: desktopCliArgs.smoke,
+      workbenchCloseCanary: desktopCliArgs.workbenchCloseCanary,
+      stale: true
+    }) !== "refresh"
+  ) {
     return false;
   }
   let stale = false;
@@ -1320,7 +1331,14 @@ async function refreshPackagedDesktopShellIfStale(thenLifecycle: string): Promis
     notifyDesktopTray("Vibelution", `检查桌面壳版本失败，继续使用当前壳：${detail.slice(0, 220)}`, "warning");
     return false;
   }
-  if (decidePackagedDesktopShellRefresh({ isPackaged: app.isPackaged, smoke: desktopCliArgs.smoke, stale }) !== "refresh") {
+  if (
+    decidePackagedDesktopShellRefresh({
+      isPackaged: app.isPackaged,
+      smoke: desktopCliArgs.smoke,
+      workbenchCloseCanary: desktopCliArgs.workbenchCloseCanary,
+      stale
+    }) !== "refresh"
+  ) {
     return false;
   }
   notifyDesktopTray("Vibelution", "桌面壳不是当前代码，Launcher 正在自行更新…");
