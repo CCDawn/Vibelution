@@ -42,13 +42,16 @@ internal static class VibelutionLauncher
                 }
                 if (!created || ElectronOwnsDesktopTray(projectDir))
                 {
-                    // Already running as a tray app; do not open the full Launcher window.
+                    if (!created && !waitForRestart && !ElectronOwnsDesktopTray(projectDir) && parsed.FromShortcut)
+                    {
+                        return HandleSecondaryTrayLaunch(projectDir);
+                    }
                     return 0;
                 }
 
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
-                Application.Run(new TrayApplicationContext(projectDir));
+                Application.Run(new TrayApplicationContext(projectDir, parsed.FromShortcut));
             }
             return 0;
         }
@@ -63,19 +66,22 @@ internal static class VibelutionLauncher
     {
         public string ProjectDir;
         public List<string> ForwardedArgs;
+        public bool FromShortcut;
     }
 
     private sealed class TrayApplicationContext : ApplicationContext
     {
         private readonly string projectDir;
+        private readonly bool fromShortcut;
         private readonly string launcherUrl;
         private readonly NotifyIcon notifyIcon;
         private readonly SynchronizationContext uiContext;
         private readonly FileSystemWatcher ownerWatcher;
 
-        public TrayApplicationContext(string projectDir)
+        public TrayApplicationContext(string projectDir, bool fromShortcut)
         {
             this.projectDir = projectDir;
+            this.fromShortcut = fromShortcut;
             this.launcherUrl = "http://127.0.0.1:" + LauncherControlPort(projectDir).ToString();
             this.uiContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
             this.notifyIcon = new NotifyIcon();
@@ -248,12 +254,22 @@ internal static class VibelutionLauncher
         {
             try
             {
-                RunPythonBridge(projectDir, "bootstrap", true, true);
-                ShowInfo("Launcher 已在托盘后台运行。");
+                EnsureFreshLauncherBackend(projectDir);
+                if (!fromShortcut)
+                {
+                    ShowInfo("Launcher 已在托盘后台运行。");
+                }
             }
             catch (Exception ex)
             {
-                ShowWarning("Launcher 后台启动失败：" + ShortMessage(ex.Message));
+                if (!fromShortcut)
+                {
+                    ShowWarning("Launcher 后台启动失败：" + ShortMessage(ex.Message));
+                }
+                else
+                {
+                    WriteNativeEntryLog(projectDir, "native_action.bootstrap_failed", ShortStaticMessage(ex.Message));
+                }
             }
         }
 
@@ -528,24 +544,12 @@ internal static class VibelutionLauncher
 
         private void EnsureLauncherBackend()
         {
-            if (LauncherHealthy())
-            {
-                return;
-            }
-            RunPythonBridge(projectDir, "bootstrap", true, true);
+            EnsureFreshLauncherBackend(projectDir);
         }
 
         private bool LauncherHealthy()
         {
-            try
-            {
-                GetLauncher("/api/health");
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
+            return LauncherBackendHealthy(projectDir);
         }
 
         private void PostLauncher(string path)
@@ -710,16 +714,124 @@ internal static class VibelutionLauncher
         }
     }
 
+    private static int HandleSecondaryTrayLaunch(string projectDir)
+    {
+        try
+        {
+            EnsureFreshLauncherBackend(projectDir);
+            RunPythonBridge(projectDir, "launcher", false, false);
+            WriteNativeEntryLog(projectDir, "native_action.secondary_launch", "action=open_console");
+        }
+        catch (Exception ex)
+        {
+            WriteFailure(projectDir, ex.ToString());
+            return 1;
+        }
+        return 0;
+    }
+
+    private static void EnsureFreshLauncherBackend(string projectDir)
+    {
+        bool healthy = LauncherBackendHealthy(projectDir);
+        bool fresh = healthy && LauncherBackendFresh(projectDir);
+        if (fresh)
+        {
+            return;
+        }
+        if (healthy)
+        {
+            try
+            {
+                RunPythonBridge(projectDir, "stop-launcher", true, false);
+                Thread.Sleep(500);
+            }
+            catch
+            {
+            }
+        }
+        RunPythonBridge(projectDir, "bootstrap", true, true);
+    }
+
+    private static bool LauncherBackendHealthy(string projectDir)
+    {
+        try
+        {
+            RequestLauncherStatic(projectDir, "/api/health", "GET");
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool LauncherBackendFresh(string projectDir)
+    {
+        try
+        {
+            string body = RequestLauncherStatic(projectDir, "/api/launcher/freshness", "GET");
+            if (body.IndexOf("\"current\":true", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+            if (body.IndexOf("\"current\":false", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return false;
+            }
+            return false;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string RequestLauncherStatic(string projectDir, string path, string method)
+    {
+        string url = "http://127.0.0.1:" + LauncherControlPort(projectDir).ToString() + path;
+        var request = (HttpWebRequest)WebRequest.Create(url);
+        request.Method = method;
+        request.Timeout = 15000;
+        request.ReadWriteTimeout = 15000;
+        request.Headers["X-Vibelution-Launcher-Trigger"] = "native_entry";
+        if (method == "POST")
+        {
+            request.ContentLength = 0;
+        }
+        using (var response = (HttpWebResponse)request.GetResponse())
+        using (var stream = response.GetResponseStream())
+        using (var reader = new StreamReader(stream))
+        {
+            return reader.ReadToEnd();
+        }
+    }
+
+    private static string ShortStaticMessage(string message)
+    {
+        string text = (message ?? "").Trim();
+        if (text.Length <= 180)
+        {
+            return text;
+        }
+        return text.Substring(0, 177) + "...";
+    }
+
     private static ParsedArgs ParseArgs(string[] args)
     {
         var forwardedArgs = new List<string>();
         string projectDir = "";
+        bool fromShortcut = false;
         for (int index = 0; index < args.Length; index++)
         {
             string arg = args[index] ?? "";
             if (arg.Equals("--project", StringComparison.OrdinalIgnoreCase) && index + 1 < args.Length)
             {
                 projectDir = args[++index];
+                continue;
+            }
+            if (arg.Equals("--from-shortcut", StringComparison.OrdinalIgnoreCase))
+            {
+                fromShortcut = true;
                 continue;
             }
             forwardedArgs.Add(arg);
@@ -732,7 +844,8 @@ internal static class VibelutionLauncher
         return new ParsedArgs
         {
             ProjectDir = Path.GetFullPath(projectDir),
-            ForwardedArgs = forwardedArgs
+            ForwardedArgs = forwardedArgs,
+            FromShortcut = fromShortcut
         };
     }
 

@@ -19,6 +19,7 @@ def test_launcher_script_repairs_start_menu_shortcut_entry():
     assert "function Repair-LauncherShortcut" in source
     assert "function Resolve-PackagedElectronDesktopEntryPath" in source
     assert "function Set-LauncherShellShortcut" in source
+    assert "launch_vibelution_shortcut.ps1" in source
     assert "Vibelution.lnk" in source
     assert "Vibelution Launcher.lnk" in source
     assert "scripts\\desktop_entry_catalog.ps1" in source
@@ -29,14 +30,16 @@ def test_launcher_script_repairs_start_menu_shortcut_entry():
     assert "$shortcut.TargetPath = $TargetPath" in source
     assert '$shortcutArguments = (\'--workspace "{0}"\' -f $projectDir)' in source
     assert '$shortcutMode = "electron_package"' in source
+    assert '$shortcutMode = "native_shortcut_bootstrap"' in source
     assert "$shortcut.IconLocation" in source
 
     repair_start = source.index("function Repair-LauncherShortcut")
     repair_end = source.index("function Repair-StaleLauncherControlState")
     repair_source = source[repair_start:repair_end]
     assert "Resolve-PackagedElectronDesktopEntryPath" in repair_source
+    assert "launch_vibelution_shortcut.ps1" in repair_source
+    assert "native_shortcut_bootstrap" in repair_source
     assert "Ensure-NativeLauncherEntryExecutable" not in repair_source
-    assert "VibelutionLauncher.exe" not in repair_source
     assert "vibelution_desktop_entry.vbs" not in repair_source
 
     launcher_action_start = source.rindex('        "launcher" {')

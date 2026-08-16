@@ -2282,9 +2282,19 @@ function Repair-LauncherShortcut {
         throw "Vibelution icon file is missing: $launcherIconPath"
     }
 
-    $shortcutTargetPath = Resolve-PackagedElectronDesktopEntryPath
-    $shortcutArguments = ('--workspace "{0}"' -f $projectDir)
     $shortcutMode = "electron_package"
+    try {
+        $shortcutTargetPath = Resolve-PackagedElectronDesktopEntryPath
+        $shortcutArguments = ('--workspace "{0}"' -f $projectDir)
+    } catch {
+        $wrapperScript = Join-Path $projectDir "scripts\launch_vibelution_shortcut.ps1"
+        if (-not (Test-Path -LiteralPath $wrapperScript)) {
+            throw
+        }
+        $shortcutTargetPath = Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe"
+        $shortcutArguments = ('-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}" -ProjectDir "{1}"' -f $wrapperScript, $projectDir)
+        $shortcutMode = "native_shortcut_bootstrap"
+    }
 
     $shortcutPath = Join-Path $programsDir $launcherShortcutName
     $shell = New-Object -ComObject WScript.Shell
