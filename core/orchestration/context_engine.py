@@ -45,6 +45,58 @@ _ACTIVE_AGENT_DIRECTORY_CACHE_LOCK = threading.Lock()
 _ACTIVE_AGENT_DIRECTORY_CACHE: dict[tuple[str, int, int], list[dict[str, Any]]] = {}
 
 
+def _coerce_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+def _coerce_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if not text:
+        return default
+    if text in {"1", "true", "yes", "on", "enabled"}:
+        return True
+    if text in {"0", "false", "no", "off", "disabled"}:
+        return False
+    return default
+
+
+def _as_mapping(value: Any) -> dict[str, Any]:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return {}
+        try:
+            value = json.loads(text)
+        except json.JSONDecodeError:
+            return {}
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {}
+
+
+def _mapping_get(mapping: Mapping[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in mapping:
+            return mapping.get(key)
+    return None
+
+
 def _perf_counter() -> float:
     return time.perf_counter()
 
@@ -62,7 +114,7 @@ def _file_signature(path: Path) -> tuple[str, int, int] | None:
 
 
 def _context_hash(value: str) -> str:
-    text = str(value or "")
+    text = _coerce_text(value)
     if not text:
         return ""
     return hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()[:16]
@@ -76,12 +128,12 @@ def _context_segment(
     stability: str,
     cache_hit: bool | None = None,
 ) -> dict[str, Any] | None:
-    text = str(block or "").strip()
+    text = _coerce_text(block).strip()
     if not text:
         return None
-    normalized_key = str(key or "").strip()
-    normalized_placement = str(placement or "").strip()
-    normalized_stability = str(stability or "").strip()
+    normalized_key = _coerce_text(key).strip()
+    normalized_placement = _coerce_text(placement).strip()
+    normalized_stability = _coerce_text(stability).strip()
     is_cache_prefix = normalized_placement == "cache_prefix"
     if normalized_stability == "project_static":
         prompt_stability = PromptStability.PROJECT_STATIC
@@ -195,7 +247,7 @@ def _context_segment_log_summary(segments: list[dict[str, Any]]) -> list[dict[st
             "decisionReason": str(segment.get("decision_reason") or "").strip(),
         }
         if segment.get("cache_hit") is not None:
-            summary["cacheHit"] = bool(segment.get("cache_hit"))
+            summary["cacheHit"] = _coerce_bool(segment.get("cache_hit"), default=False)
         summaries.append(summary)
     return summaries
 
@@ -251,12 +303,16 @@ def build_agent_context(
 
     context_started_at = _perf_counter()
     timings: dict[str, Any] = {}
-    normalized_agent_id = str(agent_id or "").strip()
+    normalized_agent_id = _coerce_text(agent_id).strip()
     bounded_limit = _bounded_limit(limit, default=6)
+    session_id = _coerce_text(session_id).strip()
+    run_id = _coerce_text(run_id).strip()
+    include_prompt_template_context = _coerce_bool(include_prompt_template_context, default=True)
     stage_started_at = _perf_counter()
-    supplied_agent = dict(agent_snapshot) if isinstance(agent_snapshot, dict) else None
-    if supplied_agent and str(supplied_agent.get("agentId") or "").strip() != normalized_agent_id:
-        supplied_agent = None
+    supplied_agent = _as_mapping(agent_snapshot)
+    snapshot_agent_id = _coerce_text(_mapping_get(supplied_agent, "agentId", "agent_id")).strip()
+    if supplied_agent and snapshot_agent_id != normalized_agent_id:
+        supplied_agent = {}
     agent = supplied_agent or agent_directory_service.get_agent(normalized_agent_id, include_archived=False)
     historical_agent = (
         None
@@ -273,8 +329,8 @@ def build_agent_context(
             level="error",
             fields={
                 "agentId": normalized_agent_id,
-                "sessionId": str(session_id or "").strip(),
-                "runId": str(run_id or "").strip(),
+                "sessionId": session_id,
+                "runId": run_id,
                 "reason": reason,
                 "agentStatus": status,
                 "source": "ContextEngine",
@@ -342,7 +398,9 @@ def build_agent_context(
     else:
         timings["researchOrgContextMs"] = 0
         timings["researchOrgContextSkipped"] = True
-    prompt_template_id = str(agent.get("promptTemplateId") or "").strip()
+    prompt_template_id = _coerce_text(
+        _mapping_get(agent, "promptTemplateId", "prompt_template_id")
+    ).strip()
     prompt_context_block = ""
     if include_prompt_template_context:
         stage_started_at = _perf_counter()
@@ -350,9 +408,12 @@ def build_agent_context(
             prompt_template_id,
             project_root=agent_directory_service.PROJECT_ROOT,
             agent_id=normalized_agent_id,
-            session_id=str(session_id or "").strip(),
-            run_id=str(run_id or "").strip(),
-            include_chat_base=str(agent.get("primaryMode") or "").strip().lower() == "chat",
+            session_id=session_id,
+            run_id=run_id,
+            include_chat_base=_coerce_text(
+                _mapping_get(agent, "primaryMode", "primary_mode")
+            ).strip().lower()
+            == "chat",
         )
         timings["promptTemplateContextMs"] = _elapsed_ms(stage_started_at)
     else:
@@ -446,14 +507,14 @@ def build_agent_context(
     timings["totalDurationMs"] = _elapsed_ms(context_started_at)
     packet = AgentContextPacket(
         agent_id=normalized_agent_id,
-        agent_code=str(agent.get("agentCode") or "").strip(),
-        display_name=str(agent.get("displayName") or "").strip(),
-        session_id=str(session_id or "").strip(),
-        run_id=str(run_id or "").strip(),
-        workspace_path=str(agent.get("workspacePath") or "").strip(),
+        agent_code=_coerce_text(_mapping_get(agent, "agentCode", "agent_code")).strip(),
+        display_name=_coerce_text(_mapping_get(agent, "displayName", "display_name")).strip(),
+        session_id=session_id,
+        run_id=run_id,
+        workspace_path=_coerce_text(_mapping_get(agent, "workspacePath", "workspace_path")).strip(),
         dialogue_model_id=agent_directory_service.agent_dialogue_model_id(agent),
         prompt_template_id=prompt_template_id,
-        role_key=str(agent.get("roleKey") or "").strip(),
+        role_key=_coerce_text(_mapping_get(agent, "roleKey", "role_key")).strip(),
         memory_policy=memory_policy,
         tool_policy=tool_policy,
         group_context_events=group_events,
@@ -584,17 +645,29 @@ def _file_signature(path: Path) -> tuple[str, int, str]:
 def _agent_needs_research_organization_context(agent: dict[str, Any]) -> bool:
     """Return true only for Agents that can reasonably belong to the research org graph."""
 
-    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
-    primary_mode = str(agent.get("primaryMode") or metadata.get("primaryMode") or "").strip().lower()
+    agent_payload = _as_mapping(agent)
+    metadata = _as_mapping(_mapping_get(agent_payload, "metadata"))
+    primary_mode = _coerce_text(
+        _mapping_get(agent_payload, "primaryMode", "primary_mode")
+        or _mapping_get(metadata, "primaryMode", "primary_mode")
+    ).strip().lower()
     if primary_mode == "research":
         return True
-    role_key = str(agent.get("roleKey") or metadata.get("roleKey") or "").strip().lower()
+    role_key = _coerce_text(
+        _mapping_get(agent_payload, "roleKey", "role_key")
+        or _mapping_get(metadata, "roleKey", "role_key")
+    ).strip().lower()
     if role_key.startswith("research_") or role_key in {"ceo", "organization_advisor", "capability_steward"}:
         return True
-    prompt_template_id = str(agent.get("promptTemplateId") or metadata.get("promptTemplateId") or "").strip().lower()
+    prompt_template_id = _coerce_text(
+        _mapping_get(agent_payload, "promptTemplateId", "prompt_template_id")
+        or _mapping_get(metadata, "promptTemplateId", "prompt_template_id")
+    ).strip().lower()
     if prompt_template_id.startswith("prompt-research"):
         return True
-    research_role = str(metadata.get("researchOrgRole") or metadata.get("systemRole") or "").strip()
+    research_role = _coerce_text(
+        _mapping_get(metadata, "researchOrgRole", "research_org_role", "systemRole", "system_role")
+    ).strip()
     return bool(research_role)
 
 
@@ -605,16 +678,13 @@ def _agent_allows_public_structure_context(agent: dict[str, Any]) -> bool:
     exclusion set; it never re-injects AGENTS/COMMON/SOUL (PromptManager owns
     those) and never includes agent_directory projections.
     """
-    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    metadata = _as_mapping(_mapping_get(_as_mapping(agent), "metadata"))
     for key in (
         "includePublicStructureContext",
         "publicStructureContextEnabled",
         "runtimePublicStructureContext",
     ):
-        value = metadata.get(key)
-        if value is True:
-            return True
-        if str(value or "").strip().lower() in {"1", "true", "yes", "on"}:
+        if _coerce_bool(metadata.get(key), default=False):
             return True
     return False
 
@@ -646,16 +716,13 @@ def _build_public_structure_context_block(project_root: Path, *, agent_id: str) 
 def _agent_allows_project_agent_registry_context(agent: dict[str, Any]) -> bool:
     """Keep development-lane registry context out of product Agent prompts unless explicitly enabled."""
 
-    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    metadata = _as_mapping(_mapping_get(_as_mapping(agent), "metadata"))
     for key in (
         "includeProjectAgentRegistryContext",
         "projectAgentRegistryContextEnabled",
         "runtimeProjectRegistryContext",
     ):
-        value = metadata.get(key)
-        if value is True:
-            return True
-        if str(value or "").strip().lower() in {"1", "true", "yes", "on"}:
+        if _coerce_bool(metadata.get(key), default=False):
             return True
     return False
 
@@ -669,9 +736,7 @@ def prepare_subagent_spawn(
 ) -> SubAgentContextPacket:
     """Prepare an isolated or explicit fork context for a temporary sub-agent."""
 
-    if isinstance(context_mode, bytes):
-        context_mode = context_mode.decode("utf-8", errors="replace")
-    normalized_mode = str(context_mode or "isolated").strip().lower()
+    normalized_mode = _coerce_text(context_mode or "isolated").strip().lower()
     if normalized_mode not in {"isolated", "fork"}:
         raise ValueError("Sub-agent context_mode must be isolated or fork.")
     from core.web.services import agent_directory_service
@@ -731,34 +796,44 @@ def record_agent_turn_result(
 
     from core.web.services import agent_directory_service
 
-    normalized_agent_id = str(agent_id or "").strip()
+    normalized_agent_id = _coerce_text(agent_id).strip()
     agent = agent_directory_service.get_agent(normalized_agent_id)
     if not agent:
         return None
-    result_payload = result if isinstance(result, dict) else {}
+    result_payload = _as_mapping(result)
     event_id = f"turn-{_now_compact()}"
-    source_run_id = str(run_id or result_payload.get("runId") or result_payload.get("turnId") or "").strip()
+    source_run_id = _coerce_text(
+        run_id
+        or _mapping_get(result_payload, "runId", "run_id", "turnId", "turn_id")
+    ).strip()
     status = agent_run_store.result_status(result_payload)
     summary = agent_run_store.result_summary(result_payload)
     tool_call_count = _safe_int(
-        _first_present(result_payload.get("tool_call_count"), result_payload.get("toolCallCount"))
+        _first_present(
+            _mapping_get(result_payload, "tool_call_count", "toolCallCount"),
+        )
     )
     created_at = _now()
     payload = {
         "eventId": event_id,
         "runId": source_run_id,
         "agentId": normalized_agent_id,
-        "sessionId": str(session_id or "").strip(),
+        "sessionId": _coerce_text(session_id).strip(),
         "status": status,
         "summary": summary,
         "toolCallCount": tool_call_count,
         "createdAt": created_at,
     }
-    _append_agent_event(agent_directory_service.PROJECT_ROOT, str(agent.get("workspacePath") or ""), "agent_turn_results.jsonl", payload)
+    _append_agent_event(
+        agent_directory_service.PROJECT_ROOT,
+        _coerce_text(_mapping_get(agent, "workspacePath", "workspace_path")),
+        "agent_turn_results.jsonl",
+        payload,
+    )
     snapshot = agent_run_store.persist_agent_run_snapshot(
         agent,
         source_run_id=source_run_id or event_id,
-        session_id=str(session_id or "").strip(),
+        session_id=payload["sessionId"],
         status=status,
         summary=summary,
         tool_call_count=tool_call_count,
@@ -785,13 +860,13 @@ def record_subagent_result(parent_run_id: str, sub_run_id: str, result: dict[str
 
     from core.web.services import agent_directory_service
 
-    result_payload = result if isinstance(result, dict) else {}
+    result_payload = _as_mapping(result)
     status = agent_run_store.result_status(result_payload)
     summary = agent_run_store.result_summary(result_payload)
     created_at = _now()
     payload = {
-        "parentRunId": str(parent_run_id or "").strip(),
-        "subRunId": str(sub_run_id or "").strip(),
+        "parentRunId": _coerce_text(parent_run_id).strip(),
+        "subRunId": _coerce_text(sub_run_id).strip(),
         "status": status,
         "summary": summary,
         "createdAt": created_at,
@@ -806,7 +881,9 @@ def record_subagent_result(parent_run_id: str, sub_run_id: str, result: dict[str
         status=status,
         summary=summary,
         tool_call_count=_safe_int(
-            _first_present(result_payload.get("tool_call_count"), result_payload.get("toolCallCount"))
+            _first_present(
+                _mapping_get(result_payload, "tool_call_count", "toolCallCount"),
+            )
         ),
         timestamp=created_at,
         result=result_payload,
@@ -1479,7 +1556,7 @@ def _record_context_event(event_code: str, *, outcome: str, fields: dict[str, An
 def _mapping_items(value: Any) -> list[dict[str, Any]]:
     if isinstance(value, Mapping):
         return [dict(value)]
-    if isinstance(value, (str, bytes)) or value is None:
+    if isinstance(value, (str, bytes, bytearray, memoryview)) or value is None:
         return []
     try:
         iterator = list(value)
@@ -1515,7 +1592,7 @@ def _coerce_str_list(value: Any, *, limit: int | None = None) -> list[str]:
         else:
             names = []
             for item in iterator:
-                text = str(item or "").strip()
+                text = _coerce_text(item).strip()
                 if text and text not in names:
                     names.append(text)
     if limit is None:
@@ -1524,8 +1601,10 @@ def _coerce_str_list(value: Any, *, limit: int | None = None) -> list[str]:
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
-    if value is None:
+    if isinstance(value, bool) or value is None:
         return default
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
     try:
         return int(value)
     except (TypeError, ValueError):

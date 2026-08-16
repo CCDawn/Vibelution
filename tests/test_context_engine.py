@@ -1205,6 +1205,16 @@ def test_string_registry_names_are_kept_as_one_item():
     assert context_engine._bounded_limit("bad", default=6) == 6
     assert context_engine._safe_int(0) == 0
     assert context_engine._safe_int("bad") == 0
+    assert context_engine._safe_int(True) == 0
+    assert context_engine._safe_int(b"6") == 6
+    assert context_engine._coerce_bool("false", default=True) is False
+    assert context_engine._context_hash(b"static-block") == context_engine._context_hash("static-block")
+    assert context_engine._agent_allows_project_agent_registry_context(
+        {"metadata": '{"includeProjectAgentRegistryContext":"false"}'}
+    ) is False
+    assert context_engine._agent_allows_project_agent_registry_context(
+        {"metadata": '{"includeProjectAgentRegistryContext":"true"}'}
+    ) is True
 
 
 def test_list_agent_runs_for_agents_treats_string_id_as_one_agent(monkeypatch):
@@ -1277,3 +1287,71 @@ def test_prepare_subagent_spawn_accepts_bytes_context_mode(tmp_path, monkeypatch
     )
     assert isolated.context_mode == "isolated"
     assert isolated.parent_context is None
+
+
+def test_build_agent_context_coerces_json_snapshot_and_false_prompt_flag(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="JSON 快照 Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+        primary_mode="chat",
+        direct_session_id="session-json-snapshot",
+    )
+    original_get_agent = agent_directory_service.get_agent
+
+    def reject_duplicate_agent_lookup(agent_id, *, include_archived=False):
+        if agent_id == agent["agentId"] and not include_archived:
+            raise AssertionError("JSON Agent snapshot should avoid duplicate get_agent")
+        return original_get_agent(agent_id, include_archived=include_archived)
+
+    monkeypatch.setattr(agent_directory_service, "get_agent", reject_duplicate_agent_lookup)
+    monkeypatch.setattr(
+        context_engine,
+        "_build_prompt_template_context_block",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("string false should skip prompt template context")
+        ),
+    )
+
+    snapshot = dict(agent)
+    snapshot["agent_id"] = snapshot.pop("agentId")
+    packet = context_engine.build_agent_context(
+        agent["agentId"].encode("utf-8"),
+        session_id=b"session-json-snapshot",
+        run_id=b"turn-1",
+        agent_snapshot=json.dumps(snapshot),
+        include_prompt_template_context="false",
+    )
+
+    assert packet.agent_id == agent["agentId"]
+    assert packet.display_name == agent["displayName"]
+    assert packet.session_id == "session-json-snapshot"
+    assert packet.timings["promptTemplateContextSkipped"] is True
+    assert all(segment["key"] != "prompt_template" for segment in packet.context_segments)
+
+
+def test_record_agent_turn_result_parses_json_payload(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="JSON 结果 Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+        primary_mode="chat",
+        direct_session_id="session-json-result",
+    )
+
+    context_engine.record_agent_turn_result(
+        agent["agentId"],
+        b"session-json-result",
+        '{"status":"completed","summary":"ok","toolCallCount":"3","runId":"session-json-result-turn-1"}',
+    )
+
+    event_path = tmp_path / agent["workspacePath"] / "events" / "agent_turn_results.jsonl"
+    records = [
+        json.loads(line)
+        for line in event_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert records[0]["sessionId"] == "session-json-result"
+    assert records[0]["toolCallCount"] == 3
+    assert records[0]["runId"] == "session-json-result-turn-1"
+    assert records[0]["status"] == "completed"
