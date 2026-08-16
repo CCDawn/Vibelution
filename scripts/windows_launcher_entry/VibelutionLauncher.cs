@@ -91,37 +91,21 @@ internal static class VibelutionLauncher
         private ContextMenuStrip BuildMenu()
         {
             var menu = new ContextMenuStrip();
-            menu.Items.Add(MenuItem("全部重启", delegate { QueueRestartAll(); }));
-            menu.Items.Add(MenuItem("全部退出", delegate { QueueExitLauncher(true); }));
+            menu.Items.Add(MenuItem("打开控制台", delegate { QueueOpenConsole(); }));
+            var freshnessItem = DisabledMenuItem("Launcher 版本未知");
+            menu.Items.Add(freshnessItem);
+            menu.Items.Add(MenuItem("重启 Launcher", delegate { QueueRestartLauncher(); }));
+            menu.Opening += delegate { RefreshFreshnessItem(freshnessItem); };
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(BranchActionMenu("启动", "start"));
+            menu.Items.Add(BranchActionMenu("停止", "stop"));
+            menu.Items.Add(MenuItem("重启当前 main", delegate { QueuePost("/api/launcher/restart", "重启当前 main"); }));
+            menu.Items.Add(MenuItem("重建并启动（最新）", delegate { QueueRebuildAndStart(); }));
+            menu.Items.Add(MenuItem("状态", delegate { QueueStatus(); }));
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(MenuItem("退出 Launcher", delegate { QueueExitLauncher(false); }));
+            menu.Items.Add(MenuItem("停止全部", delegate { QueueExitLauncher(true); }));
             return menu;
-        }
-
-        private void QueueRestartAll()
-        {
-            ThreadPool.QueueUserWorkItem(
-                delegate
-                {
-                    try
-                    {
-                        EnsureLauncherBackend();
-                        ShowInfo("正在全部重启…");
-                        PostLauncher("/api/launcher/force-stop");
-                        Thread.Sleep(1500);
-                        if (ForwardOrLaunchElectron(projectDir, "restart", new List<string>()))
-                        {
-                            ShowInfo("全部重启请求已转发到 Electron 桌面壳。");
-                            RequestExit();
-                            return;
-                        }
-                        PostLauncher("/api/launcher/restart");
-                        ShowInfo("全部重启请求已发送。");
-                    }
-                    catch (Exception ex)
-                    {
-                        ShowWarning("全部重启失败：" + ShortMessage(ex.Message));
-                    }
-                }
-            );
         }
 
         private ToolStripMenuItem BranchActionMenu(string label, string operation)
