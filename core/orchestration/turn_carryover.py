@@ -20,19 +20,20 @@ def _coerce_text(value: Any) -> str:
     return str(value)
 
 
-def _as_mapping(value: Any) -> Dict[str, Any]:
+def _coerce_jsonish(value: Any) -> Any:
     if isinstance(value, (bytes, bytearray, memoryview)):
         value = bytes(value).decode("utf-8", errors="replace")
-    if isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return {}
-        try:
-            value = json.loads(text)
-        except json.JSONDecodeError:
-            return {}
     if isinstance(value, Mapping):
-        return dict(value)
+        return {key: _coerce_jsonish(val) for key, val in value.items()}
+    if isinstance(value, list):
+        return [_coerce_jsonish(item) for item in value]
+    return value
+
+
+def _as_mapping(value: Any) -> Dict[str, Any]:
+    value = _maybe_json(value)
+    if isinstance(value, Mapping):
+        return {key: _coerce_jsonish(val) for key, val in value.items()}
     return {}
 
 
@@ -54,6 +55,13 @@ def _coerce_message_list(value: Any) -> list:
     if value is None or isinstance(value, (str, bytes, bytearray, memoryview)):
         return []
     if isinstance(value, Mapping):
+        nested = value.get("messages")
+        if nested is None:
+            nested = value.get("items")
+        if nested is None:
+            nested = value.get("history")
+        if nested is not None:
+            return _coerce_message_list(nested)
         if any(key in value for key in ("kind", "role", "content", "type", "tool_calls", "toolCalls")):
             return [dict(value)]
         return []
@@ -68,23 +76,26 @@ def _coerce_tool_call_list(value: Any) -> List[Dict[str, Any]]:
     if value is None or isinstance(value, (str, bytes, bytearray, memoryview)):
         return []
     if isinstance(value, Mapping):
-        return [dict(value)] if value else []
+        nested = value.get("tool_calls")
+        if nested is None:
+            nested = value.get("toolCalls")
+        if nested is not None:
+            return _coerce_tool_call_list(nested)
+        return [_as_mapping(value)] if value else []
     try:
         items = list(value)
     except TypeError:
         return []
     calls: List[Dict[str, Any]] = []
     for item in items:
-        item = _maybe_json(item)
-        if isinstance(item, Mapping):
-            calls.append(dict(item))
+        mapped = _as_mapping(item)
+        if mapped:
+            calls.append(mapped)
     return calls
 
 
 def _coerce_content(value: Any) -> Any:
-    if isinstance(value, (bytes, bytearray, memoryview)):
-        return bytes(value).decode("utf-8", errors="replace")
-    return value
+    return _coerce_jsonish(value)
 
 
 def _message_kind(item: Mapping[str, Any]) -> str:
@@ -104,6 +115,7 @@ def _message_kind(item: Mapping[str, Any]) -> str:
 
 
 def serialize_turn_message(message: Any) -> Dict[str, Any]:
+    message = _maybe_json(message)
     if isinstance(message, AIMessage):
         payload: Dict[str, Any] = {
             "kind": "ai",
@@ -135,7 +147,7 @@ def serialize_turn_message(message: Any) -> Dict[str, Any]:
             "content": _coerce_content(message.content),
         }
     if isinstance(message, Mapping):
-        payload = dict(message)
+        payload = _as_mapping(message)
         payload["kind"] = "dict"
         if "content" in payload:
             payload["content"] = _coerce_content(payload.get("content"))
@@ -161,7 +173,7 @@ def serialize_turn_messages(messages: Optional[List[Any]]) -> List[Dict[str, Any
 def deserialize_turn_messages(messages: List[Dict[str, Any]]) -> List[Any]:
     restored: List[Any] = []
     for raw in _coerce_message_list(messages):
-        item = _as_mapping(raw) if not isinstance(raw, Mapping) else dict(raw)
+        item = _as_mapping(raw)
         if not item:
             continue
         kind = _message_kind(item)
