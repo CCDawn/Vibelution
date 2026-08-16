@@ -8,13 +8,14 @@
 ## 1. 运行时拓扑
 
 ```text
-当前: Electron 壳 → Python Launcher :8765 → Runtime Manager → FastAPI 工作台 + agent.py turn
-目标 (ADR 0009): Electron main (TS 控制面 + IPC) → 子进程 Python 工作台（RM + FastAPI）
-Workbench UI: React (web/)；Launcher UI 与控制面同进程，禁止空仪表盘+未连接
+当前 (ADR 0009): Electron main (TS 控制面 + IPC) → Python 子进程（Runtime Manager + FastAPI 工作台 + agent.py turn）
+Launcher UI: Electron 控制窗口（vibelution-launcher://）；renderer 只走 IPC，禁止 fetch :8765
+Workbench UI: React (web/)；常见 HTTP :8000（以 status/日志为准）
 Config: Documents\Vibelution\config\config.toml   (ADR0003)
 State: %LOCALAPPDATA%\Vibelution\projects\<projectId>\instances\<instanceId>\
 Evidence: <active-state>\logs\runtime_scenes\
 Turn SSOT: turn_journal.jsonl → SessionTurnItem 投影
+Chat route: committed Router URL 为窗口内会话/群聊权威 (ADR0010)
 ```
 
 Chat 地图：`docs/agents/conversation-flow-map.md`

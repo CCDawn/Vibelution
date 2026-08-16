@@ -75,6 +75,7 @@
 | `docs/superpowers/*` | `archive/superpowers/` |
 | 一次性 testing 报告 / Electron 迁移 ledger | `archive/testing/` |
 | `docs/ai-knowledge-search-dashboard.html` | `archive/` |
+| `docs/previews/*` | `archive/previews/` |
 | 根 `PRODUCT.md` / `DESIGN.md` 全文 | `archive/product/`（根文件改为入口桩） |
 
 新计划若需要：带 Status 元数据，**完成后尽快迁入 `docs/archive/`**，勿长期堆在现行树。权威策略见 [ADR 0005](adr/0005-docs-authority-and-archive-policy.md)。

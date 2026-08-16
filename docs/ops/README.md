@@ -7,6 +7,7 @@
 | [config/INDEX.md](config/INDEX.md) | **Operator config.toml 总索引**（LLM/协议/缓存/厂商） |
 | [linux-bootstrap.md](linux-bootstrap.md) | Linux 部署与验收边界 |
 | [local-model-monitor.md](local-model-monitor.md) | 本地模型监控 |
+| [rust-partial-replacement-pilot.md](rust-partial-replacement-pilot.md) | Rust sidecar 硬化试验（usage / path containment） |
 
 相关但不在本目录：
 
