@@ -1182,3 +1182,98 @@ def test_list_agent_runs_returns_bounded_safe_snapshots(tmp_path, monkeypatch):
     assert payload["subAgentRuns"][0]["runKind"] == "sub_agent_run"
     assert payload["subAgentRuns"][0]["parentRunId"] == "session-runs-turn-1"
     assert payload["subAgentRuns"][0]["parentAgentId"] == agent["agentId"]
+
+
+def test_string_registry_names_are_kept_as_one_item():
+    entry = context_engine._project_agent_registry_entry_from_sources(
+        {},
+        {
+            "agentId": "agent-1",
+            "handoffTargets": "quality-and-operations",
+            "managementScope": {
+                "summary": "runtime",
+                "files": "core/orchestration/**",
+                "taskTypes": "runtime-context",
+            },
+        },
+        lane_defaults={},
+    )
+    assert entry["handoffTargets"] == ["quality-and-operations"]
+    assert entry["managementScope"]["files"] == ["core/orchestration/**"]
+    assert entry["managementScope"]["taskTypes"] == ["runtime-context"]
+    assert context_engine._join_context_segments("not-a-segment-list", "cache_prefix") == ""
+    assert context_engine._bounded_limit("bad", default=6) == 6
+    assert context_engine._safe_int(0) == 0
+    assert context_engine._safe_int("bad") == 0
+
+
+def test_list_agent_runs_for_agents_treats_string_id_as_one_agent(monkeypatch):
+    seen: dict[str, object] = {}
+
+    def fake_list(agent_ids, *, limit=20):
+        seen["ids"] = list(agent_ids)
+        seen["limit"] = limit
+        return {"agentIds": list(agent_ids), "limit": limit, "agents": {}}
+
+    monkeypatch.setattr(context_engine.agent_run_store, "list_agent_runs_for_agents", fake_list)
+    payload = context_engine.list_agent_runs_for_agents("agent-xyz", limit="5")
+    assert seen["ids"] == ["agent-xyz"]
+    assert seen["limit"] == 5
+    assert payload["agentIds"] == ["agent-xyz"]
+
+
+def test_record_agent_turn_result_keeps_explicit_zero_tool_calls(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="零工具调用 Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+        primary_mode="chat",
+        direct_session_id="session-zero-tools",
+    )
+
+    context_engine.record_agent_turn_result(
+        agent["agentId"],
+        "session-zero-tools",
+        {
+            "status": "completed",
+            "summary": "no tools",
+            "tool_call_count": 0,
+            "toolCallCount": 9,
+        },
+        run_id="session-zero-tools-turn-1",
+    )
+
+    event_path = tmp_path / agent["workspacePath"] / "events" / "agent_turn_results.jsonl"
+    records = [
+        json.loads(line)
+        for line in event_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert records[0]["toolCallCount"] == 0
+
+
+def test_prepare_subagent_spawn_accepts_bytes_context_mode(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    parent = agent_directory_service.create_agent_instance(
+        display_name="字节模式父 Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+        primary_mode="chat",
+        direct_session_id="session-bytes-parent",
+        metadata={
+            "delegationPolicy": {
+                "allowSubagents": True,
+                "maxDepth": 1,
+                "maxConcurrent": 1,
+                "allowWakeMessages": True,
+                "allowedContextModes": ["isolated", "fork"],
+            }
+        },
+    )
+
+    isolated = context_engine.prepare_subagent_spawn(
+        parent["agentId"],
+        "session-bytes-parent",
+        context_mode=b"isolated",
+    )
+    assert isolated.context_mode == "isolated"
+    assert isolated.parent_context is None
