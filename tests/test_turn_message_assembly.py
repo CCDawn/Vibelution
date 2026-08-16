@@ -229,3 +229,43 @@ def test_langchain_layer_projects_ai_role_and_drops_tool_without_id():
     assert restored[0].tool_calls[0]["id"] == "call-1"
     assert len(restored) == 2
     assert restored[1].tool_call_id == "call-1"
+
+
+def test_assembly_coerces_bytes_json_calls_and_string_false_append():
+    normalized = normalize_seeded_tool_calls(
+        '[{"id": "call-json", "name": "read_file_tool", "args": {"path": "a.py"}}]'
+    )
+    assert normalized == [{"id": "call-json", "name": "read_file_tool", "args": {"path": "a.py"}}]
+    bytes_calls = normalize_seeded_tool_calls(
+        [{"id": b"call-b", "name": b"cli_tool", "arguments": b'{"command": "pytest"}'}]
+    )
+    assert bytes_calls == [{"id": "call-b", "name": "cli_tool", "args": {"command": "pytest"}}]
+    assert sanitize_seeded_chat_content(b"assistant", b"Tool failed: spawn_agent_tool") == ""
+    updated, inserted = insert_pending_volatile_context_messages(
+        [SystemMessage(content="system"), build_chat_user_message("现在")],
+        [b"## Slash Skill Context\nCommand: /brt"],
+    )
+    assert inserted == ["## Slash Skill Context\nCommand: /brt"]
+    assert isinstance(updated[-2], SystemMessage)
+    restored = langchain_messages_from_conversation_layer(
+        [
+            {"role": b"tool", "content": b"ok", "toolCallId": b"call-1"},
+        ]
+    )
+    assert restored[0].tool_call_id == "call-1"
+    assert langchain_messages_from_conversation_layer("not-a-layer") == []
+    assembled = assemble_prepared_turn_messages(
+        system_prompt="plain system",
+        user_prompt="现在",
+        effective_goal="现在",
+        active_turn_messages=None,
+        active_turn_goal="",
+        build_system_message=lambda sp: SystemMessage(content=str(sp)),
+        build_external_request_message=build_chat_user_message,
+        allow_append_user_message="false",
+        static_context_blocks=[],
+        runtime_context_blocks=[],
+        dynamic_system_context_message=None,
+    )
+    assert assembled.resumed is False
+    assert assembled.messages[-1]["role"] == "user" or assembled.messages[-1].type in {"human", "user"}
