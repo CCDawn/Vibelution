@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 from core.infrastructure.agent_session import get_session_state
 from core.infrastructure.runtime_input import (
@@ -38,6 +38,80 @@ SessionGetterFn = Callable[[], Any]
 TurnStopCheckerFn = Callable[[], str]
 
 
+def _as_mapping(value: Any) -> Dict[str, Any]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {}
+
+
+def _mapping_items(value: Any) -> List[Dict[str, Any]]:
+    if isinstance(value, Mapping):
+        return [dict(value)]
+    if isinstance(value, (str, bytes)) or value is None:
+        return []
+    try:
+        iterator = list(value)
+    except TypeError:
+        return []
+    return [dict(item) for item in iterator if isinstance(item, Mapping)]
+
+
+def _coerce_str_list(value: Any) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, bytes):
+        text = value.decode("utf-8", errors="replace").strip()
+        return [text] if text else []
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    if isinstance(value, Mapping):
+        return [str(key or "").strip() for key in value if str(key or "").strip()]
+    try:
+        iterator = list(value)
+    except TypeError:
+        text = str(value or "").strip()
+        return [text] if text else []
+    names: List[str] = []
+    for item in iterator:
+        text = str(item or "").strip()
+        if text and text not in names:
+            names.append(text)
+    return names
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _coerce_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return bool(value)
+    normalized = str(value).strip().lower()
+    if not normalized:
+        return default
+    if normalized in {"1", "true", "yes", "on", "enabled"}:
+        return True
+    if normalized in {"0", "false", "no", "off", "disabled"}:
+        return False
+    return default
+
+
+def _coerce_text(value: Any) -> str:
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+    return str(value or "")
+
+
 class DelegationGovernor:
     """负责委派请求构建、子 agent 派发与结果回收。"""
 
@@ -60,8 +134,8 @@ class DelegationGovernor:
 
     @staticmethod
     def contains_any(text: str, keywords: List[str]) -> bool:
-        lowered = (text or "").lower()
-        return any(keyword.lower() in lowered for keyword in keywords)
+        lowered = _coerce_text(text).lower()
+        return any(keyword.lower() in lowered for keyword in _coerce_str_list(keywords))
 
     @classmethod
     def should_stop_after_useful_delegation(
@@ -70,7 +144,7 @@ class DelegationGovernor:
         task_type: str,
         goal: str,
     ) -> bool:
-        normalized_goal = (goal or "").strip().lower()
+        normalized_goal = _coerce_text(goal).strip().lower()
         if task_type not in {"inspect", "diagnose", "verify", "summarize"}:
             return False
         readonly_markers = [
@@ -105,7 +179,7 @@ class DelegationGovernor:
 
     @classmethod
     def is_readonly_diagnostic_goal(cls, goal: str) -> bool:
-        normalized_goal = (goal or "").strip().lower()
+        normalized_goal = _coerce_text(goal).strip().lower()
         if not normalized_goal:
             return False
         diagnostic_markers = [
@@ -125,7 +199,7 @@ class DelegationGovernor:
 
     @classmethod
     def is_readonly_summary_goal(cls, goal: str) -> bool:
-        normalized_goal = (goal or "").strip().lower()
+        normalized_goal = _coerce_text(goal).strip().lower()
         if not normalized_goal:
             return False
         summary_markers = [
@@ -146,7 +220,7 @@ class DelegationGovernor:
 
     @classmethod
     def is_explicit_inspect_goal(cls, goal: str) -> bool:
-        normalized_goal = (goal or "").strip().lower()
+        normalized_goal = _coerce_text(goal).strip().lower()
         if not normalized_goal:
             return False
         inspect_markers = [
@@ -180,8 +254,9 @@ class DelegationGovernor:
 
     @staticmethod
     def has_delegation_reading_load(snapshot: Dict[str, Any]) -> bool:
-        modified_paths = snapshot.get("modified_paths", []) or []
-        recent_blockers = snapshot.get("recent_blockers", []) or []
+        data = _as_mapping(snapshot)
+        modified_paths = _coerce_str_list(data.get("modified_paths"))
+        recent_blockers = _mapping_items(data.get("recent_blockers"))
         blocker_with_anchor = sum(
             1
             for item in recent_blockers
@@ -195,14 +270,15 @@ class DelegationGovernor:
 
     @staticmethod
     def is_unhelpful_terminal_delegation(entry: Dict[str, Any]) -> bool:
-        status = str(entry.get("status") or "").strip().lower()
+        data = _as_mapping(entry)
+        status = str(data.get("status") or "").strip().lower()
         if status == "failed":
             return True
         if status != "completed":
             return False
-        confidence = str(entry.get("confidence") or "").strip().lower()
-        findings = entry.get("findings") or []
-        summary = str(entry.get("summary") or "").strip()
+        confidence = str(data.get("confidence") or "").strip().lower()
+        findings = _coerce_str_list(data.get("findings"))
+        summary = str(data.get("summary") or "").strip()
         if confidence == "low" and not findings:
             return True
         return not summary and not findings
@@ -215,8 +291,8 @@ class DelegationGovernor:
     ) -> bool:
         terminal_entries = [
             item
-            for item in (snapshot.get("delegation_history", []) or [])
-            if str(item.get("task_type") or "") == (task_type or "")
+            for item in _mapping_items(_as_mapping(snapshot).get("delegation_history"))
+            if str(item.get("task_type") or "") == _coerce_text(task_type)
             and str(item.get("status") or "").strip().lower() in {"completed", "failed"}
         ]
         if len(terminal_entries) < 2:
@@ -230,7 +306,7 @@ class DelegationGovernor:
 
     @staticmethod
     def is_broad_autonomous_goal(goal: str) -> bool:
-        text = (goal or "").strip().lower()
+        text = _coerce_text(goal).strip().lower()
         if not text:
             return False
         broad_markers = [
@@ -257,7 +333,7 @@ class DelegationGovernor:
 
     @staticmethod
     def is_harness_probe_goal(goal: str) -> bool:
-        text = (goal or "").strip().lower()
+        text = _coerce_text(goal).strip().lower()
         if not text:
             return False
         probe_markers = [
@@ -297,10 +373,11 @@ class DelegationGovernor:
 
     @staticmethod
     def is_success_validation_summary(summary: str, passed: bool) -> bool:
-        text = (summary or "").strip().lower()
+        text = _coerce_text(summary).strip().lower()
+        passed_flag = _coerce_bool(passed, False)
         if not text:
-            return bool(passed)
-        if passed:
+            return passed_flag
+        if passed_flag:
             return True
         success_markers = (
             "pytest 通过",
@@ -320,7 +397,8 @@ class DelegationGovernor:
         *,
         allow_modified_paths: bool = True,
     ) -> str:
-        blockers = snapshot.get("recent_blockers", []) or []
+        data = _as_mapping(snapshot)
+        blockers = _mapping_items(data.get("recent_blockers"))
         for item in reversed(blockers):
             kind = str(item.get("kind") or "")
             summary = str(item.get("summary") or "").strip()
@@ -331,14 +409,14 @@ class DelegationGovernor:
             ):
                 return f"分析当前轮为什么出现：{summary}"
 
-        validation_summary = str(snapshot.get("last_validation_summary") or "").strip()
+        validation_summary = str(data.get("last_validation_summary") or "").strip()
         if validation_summary and not cls.is_success_validation_summary(
             validation_summary,
-            bool(snapshot.get("last_validation_passed")),
+            data.get("last_validation_passed"),
         ):
             return f"分析最近验证失败的根因：{validation_summary}"
 
-        modified_paths = snapshot.get("modified_paths", []) or []
+        modified_paths = _coerce_str_list(data.get("modified_paths"))
         if allow_modified_paths and modified_paths:
             target = str(modified_paths[-1]).strip()
             if target:
@@ -347,18 +425,19 @@ class DelegationGovernor:
 
     @classmethod
     def has_concrete_delegation_anchor(cls, goal: str, snapshot: Dict[str, Any]) -> bool:
-        text = (goal or "").strip()
+        text = _coerce_text(goal).strip()
         if cls.has_textual_delegation_anchor(text):
             return True
 
-        validation_summary = str(snapshot.get("last_validation_summary") or "").strip()
+        data = _as_mapping(snapshot)
+        validation_summary = str(data.get("last_validation_summary") or "").strip()
         if validation_summary and not cls.is_success_validation_summary(
             validation_summary,
-            bool(snapshot.get("last_validation_passed")),
+            data.get("last_validation_passed"),
         ):
             return True
 
-        for item in snapshot.get("recent_blockers", []) or []:
+        for item in _mapping_items(data.get("recent_blockers")):
             summary = str(item.get("summary") or "").strip()
             if cls.has_textual_delegation_anchor(summary):
                 return True
@@ -371,10 +450,10 @@ class DelegationGovernor:
         goal: str,
         failed_item: Dict[str, Any],
     ) -> bool:
-        if str(failed_item.get("task_type") or "") != (task_type or ""):
+        normalized_goal = _coerce_text(goal).strip()
+        failed_goal = str(failed_item.get("goal") or "").strip() if isinstance(failed_item, Mapping) else ""
+        if str(_as_mapping(failed_item).get("task_type") or "") != _coerce_text(task_type):
             return False
-        normalized_goal = (goal or "").strip()
-        failed_goal = str(failed_item.get("goal") or "").strip()
         if not normalized_goal or not failed_goal:
             return False
 
@@ -389,21 +468,23 @@ class DelegationGovernor:
 
     def build_delegation_context_pack(self, goal: str) -> str:
         session = self._session_getter()
-        snapshot = session.get_attention_snapshot()
+        snapshot = _as_mapping(session.get_attention_snapshot())
         parts: List[str] = []
+        recent_blockers = _mapping_items(snapshot.get("recent_blockers"))
+        modified_paths = _coerce_str_list(snapshot.get("modified_paths"))
 
         if goal:
             parts.append(f"- 当前问题摘要: {goal}")
-        if snapshot.get("recent_blockers"):
+        if recent_blockers:
             parts.append("- 最近阻塞:")
-            for item in snapshot["recent_blockers"][-3:]:
+            for item in recent_blockers[-3:]:
                 parts.append(f"  - {item.get('kind', 'blocker')}: {item.get('summary', '')}")
         if snapshot.get("last_validation_summary"):
-            verdict = "通过" if snapshot.get("last_validation_passed") else "失败"
+            verdict = "通过" if _coerce_bool(snapshot.get("last_validation_passed"), False) else "失败"
             parts.append(f"- 最近验证: {verdict} | {snapshot.get('last_validation_summary')}")
-        if snapshot.get("modified_paths"):
+        if modified_paths:
             parts.append("- 最近修改路径:")
-            for path in snapshot["modified_paths"][-4:]:
+            for path in modified_paths[-4:]:
                 parts.append(f"  - {path}")
         if snapshot.get("delegation_evidence_digest"):
             parts.append("- 既有委派证据摘要:")
@@ -436,10 +517,14 @@ class DelegationGovernor:
         reading_load_ready: bool,
         last_validation_summary: str,
     ) -> Optional[SubagentRoleNeed]:
-        normalized_goal = (goal or "").strip()
+        snapshot = _as_mapping(snapshot)
+        iteration = _safe_int(iteration, 0)
+        total_tool_calls = _safe_int(total_tool_calls, 0)
+        normalized_goal = _coerce_text(goal).strip()
         lowered_goal = normalized_goal.lower()
         analyze_keywords = ["日志", "log", "配置", "config", "prompt", "测试", "循环", "重复", "归因", "诊断"]
         mutate_keywords = ["修改", "实现", "重构", "提交", "写入", "落地", "修复代码"]
+        recent_blockers = _mapping_items(snapshot.get("recent_blockers"))
 
         if (
             iteration == 1
@@ -458,9 +543,9 @@ class DelegationGovernor:
                 trigger_reason="evidence_compression_needed",
                 why_now="现场已有足够证据，当前更缺的是低熵压缩而不是继续探查。",
             )
-        if snapshot.get("diagnostic_drift") or any(
+        if _coerce_bool(snapshot.get("diagnostic_drift"), False) or any(
             item.get("kind") in {"duplicate_search", "duplicate_read", "duplicate_read_guard", "diagnostic_drift"}
-            for item in (snapshot.get("recent_blockers", []) or [])
+            for item in recent_blockers
         ):
             return SubagentRoleNeed(
                 task_type="diagnose",
@@ -470,12 +555,12 @@ class DelegationGovernor:
         if (
             explicit_inspect_goal
             and not readonly_diagnostic_goal
-            and not snapshot.get("diagnostic_drift")
+            and not _coerce_bool(snapshot.get("diagnostic_drift"), False)
             and not last_validation_summary
             and reading_load_ready
             and (
                 self.has_concrete_delegation_anchor(normalized_goal, snapshot)
-                or bool(snapshot.get("modified_paths"))
+                or bool(_coerce_str_list(snapshot.get("modified_paths")))
             )
             and (total_tool_calls >= 2 or iteration >= 2)
         ):
@@ -496,20 +581,24 @@ class DelegationGovernor:
         if self.is_readonly_subagent_process():
             return None
         session = self._session_getter()
-        snapshot = session.get_attention_snapshot()
-        normalized_goal = (goal or "").strip()
+        snapshot = _as_mapping(session.get_attention_snapshot())
+        iteration = _safe_int(iteration, 0)
+        total_tool_calls = _safe_int(total_tool_calls, 0)
+        normalized_goal = _coerce_text(goal).strip()
         lowered_goal = normalized_goal.lower()
         readonly_diagnostic_goal = self.is_readonly_diagnostic_goal(normalized_goal)
         readonly_summary_goal = self.is_readonly_summary_goal(normalized_goal)
         broad_autonomous_goal = self.is_broad_autonomous_goal(normalized_goal)
         last_validation_summary = str(snapshot.get("last_validation_summary") or "").strip()
-        last_validation_passed = bool(snapshot.get("last_validation_passed"))
+        last_validation_passed = _coerce_bool(snapshot.get("last_validation_passed"), False)
         validation_success = self.is_success_validation_summary(
             last_validation_summary,
             last_validation_passed,
         )
-        recent_blockers = snapshot.get("recent_blockers", []) or []
-        modified_paths = snapshot.get("modified_paths", []) or []
+        recent_blockers = _mapping_items(snapshot.get("recent_blockers"))
+        modified_paths = _coerce_str_list(snapshot.get("modified_paths"))
+        delegation_failures = _mapping_items(snapshot.get("delegation_failures"))
+        delegation_history = _mapping_items(snapshot.get("delegation_history"))
         delegation_evidence_digest = str(snapshot.get("delegation_evidence_digest") or "").strip()
         if not normalized_goal:
             return None
@@ -520,9 +609,9 @@ class DelegationGovernor:
         if snapshot.get("active_evolution_txn_id") and not readonly_diagnostic_goal and not readonly_summary_goal:
             return None
         if readonly_diagnostic_goal:
-            if snapshot.get("delegation_history") or snapshot.get("delegation_failures"):
+            if delegation_history or delegation_failures:
                 return None
-        if readonly_summary_goal and snapshot.get("delegation_history"):
+        if readonly_summary_goal and delegation_history:
             return None
 
         readonly_constraints = {
@@ -596,7 +685,7 @@ class DelegationGovernor:
         elif role_need.trigger_reason == "failure_attribution_needed":
             if broad_autonomous_goal and any(
                 str(item.get("task_type") or "") == "diagnose"
-                for item in snapshot.get("delegation_failures", []) or []
+                for item in delegation_failures
             ):
                 return None
             scope = {
@@ -634,14 +723,14 @@ class DelegationGovernor:
             return None
         if session.has_recent_delegation(task_type, delegation_goal, scope):
             return None
-        for item in snapshot.get("delegation_failures", []):
+        for item in delegation_failures:
             if self.is_same_delegation_failure_class(
                 task_type=task_type,
                 goal=delegation_goal,
                 failed_item=item,
             ):
                 return None
-        for item in snapshot.get("delegation_history", []):
+        for item in delegation_history:
             if (
                 item.get("task_type") == task_type
                 and item.get("goal") == delegation_goal
@@ -675,13 +764,14 @@ class DelegationGovernor:
     ) -> Dict[str, Any]:
         ui = self._ui_getter()
         session = self._session_getter()
+        payload = _as_mapping(payload)
         try:
-            result = json.loads(result_text or "{}")
+            parsed = json.loads(result_text or "{}")
         except Exception as exc:
             _debug_logger.warning(f"[委派治理] 子 agent 结果 JSON 解析失败: {type(exc).__name__}: {exc}")
             fallback_text = str(result_text or "").strip()
             if fallback_text.startswith("[超时]"):
-                result = {
+                parsed = {
                     "status": "timeout",
                     "summary": fallback_text,
                     "recommended_next_action": "主 agent 接管",
@@ -690,7 +780,7 @@ class DelegationGovernor:
                     "process_output": fallback_text[:2000],
                 }
             else:
-                result = {
+                parsed = {
                     "status": "failed",
                     "summary": "子 agent 返回了不可解析结果",
                     "recommended_next_action": "主 agent 接管",
@@ -698,17 +788,19 @@ class DelegationGovernor:
                     "raw_output": fallback_text[:2000],
                     "process_output": fallback_text[:2000],
                 }
+        result = parsed if isinstance(parsed, dict) else {
+            "status": "failed",
+            "summary": "子 agent 返回了不可解析结果",
+            "recommended_next_action": "主 agent 接管",
+            "confidence": "low",
+        }
 
         summary = str(result.get("summary") or "").strip()
-        findings = result.get("findings") or []
-        if not isinstance(findings, list):
-            findings = [str(findings)]
+        findings = _coerce_str_list(result.get("findings"))
         recommended_next = str(result.get("recommended_next_action") or "").strip()
         confidence = str(result.get("confidence") or "").strip()
         status = str(result.get("status") or "").strip().lower()
-        evidence = result.get("evidence") or []
-        if not isinstance(evidence, list):
-            evidence = [str(evidence)]
+        evidence = _coerce_str_list(result.get("evidence"))
         process_output = str(result.get("process_output") or "").strip()
         raw_output = str(result.get("raw_output") or "").strip()
         fast_path = str(result.get("fast_path") or "").strip()
@@ -858,7 +950,7 @@ class DelegationGovernor:
             f"task_type={payload.get('task_type', 'inspect')} | "
             f"goal={payload.get('goal', '')} | "
             f"scope={json.dumps(payload.get('scope'), ensure_ascii=False)} | "
-            f"timeout={payload.get('timeout', 120)}",
+            f"timeout={_safe_int(payload.get('timeout'), 120)}",
             tag="AGENT",
         )
         ui.start_subagent_activity(
@@ -910,7 +1002,7 @@ class DelegationGovernor:
                 "constraints": json.dumps(payload.get("constraints"), ensure_ascii=False),
                 "deliverables": json.dumps(payload.get("deliverables"), ensure_ascii=False),
                 "context_pack": payload.get("context_pack", ""),
-                "timeout": payload.get("timeout", 120),
+                "timeout": _safe_int(payload.get("timeout"), 120),
                 "_internal_delegate": True,
             }
             if callable(self._turn_stop_checker):
