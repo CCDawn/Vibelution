@@ -58,3 +58,21 @@ def test_lifecycle_goals_accept_bytes_and_ignore_non_text():
         b"call close_evolution_transaction_tool then trigger_self_restart_tool"
     ) is True
     assert is_restart_focused_goal(["not", "a", "goal"]) is False
+
+
+def test_lifecycle_goals_parse_json_mapping_without_false_restart():
+    assert is_restart_focused_goal(
+        {"note": "self-restart schema", "goal": "just report"}
+    ) is False
+    assert is_restart_focused_goal('{"note": "self-restart schema", "goal": "just report"}') is False
+    assert is_restart_focused_goal({"goalText": "Restart Yourself after closeout"}) is True
+    assert is_restart_focused_goal(memoryview(b"Restart Yourself after closeout")) is True
+    assert is_restart_focused_goal(["do not restart", "just report"]) is False
+    assert is_full_evolution_goal(
+        {
+            "goal": (
+                "调用 close_evolution_transaction_tool 关账，"
+                "关账成功后立即调用 trigger_self_restart_tool 完成重启。"
+            )
+        }
+    ) is True

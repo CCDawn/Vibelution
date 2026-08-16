@@ -3,17 +3,54 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping, Sequence
 from typing import Any
+
+
+_GOAL_KEYS = ("goal", "text", "message", "content", "goalText", "goal_text")
+
+
+def _decode_binary(value: Any) -> Any:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).decode("utf-8", errors="replace")
+    return value
+
+
+def _maybe_json(value: Any) -> Any:
+    value = _decode_binary(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith("{") or text.startswith("["):
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                return value
+    return value
+
+
+def _mapping_get(mapping: Mapping[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in mapping:
+            return mapping.get(key)
+    return None
 
 
 def _coerce_goal_text(value: Any) -> str:
     if value is None:
         return ""
-    if isinstance(value, bytes):
-        value = value.decode("utf-8", errors="replace")
-    elif not isinstance(value, str):
-        value = str(value)
-    return value.strip().lower()
+    value = _maybe_json(_decode_binary(value))
+    if isinstance(value, Mapping):
+        extracted = _mapping_get(value, *_GOAL_KEYS)
+        if extracted is None:
+            return ""
+        return _coerce_goal_text(extracted)
+    if isinstance(value, str):
+        return value.strip().lower()
+    if isinstance(value, Sequence):
+        parts = [_coerce_goal_text(item) for item in value]
+        return " ".join(part for part in parts if part)
+    return str(value).strip().lower()
 
 
 def _contains_restart_marker(text: str, marker: str) -> bool:
