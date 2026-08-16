@@ -45,7 +45,9 @@ describe("Electron main transactional Workbench close", () => {
     expect(source).toContain("stopWorkbenchBackend(paths, bootstrap)");
     expect(source).toContain("runWorkbenchLifecycle({");
     expect(source).toContain('operation: "stop"');
-    expect(source).toContain("waitForWorkbenchBackendClosed(context, WORKBENCH_CLOSE_BACKEND_WAIT_MS)");
+    expect(source).toContain('from "./lifecycle/workbenchBackendCloseReadiness.js"');
+    expect(source).toContain("waitForWorkbenchBackendSettledForWindowClose({");
+    expect(source).toContain("timeoutMs: WORKBENCH_CLOSE_BACKEND_WAIT_MS");
     expect(source).toContain("mainWorkbenchCloseStore.fail(");
     expect(source).toContain('"backend_stop_timeout"');
     expect(source).toContain("onWorkbenchClosed: () =>");
