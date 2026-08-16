@@ -609,3 +609,60 @@ def test_run_existing_agent_single_turn_omits_unsupported_optional_kwargs():
 
     assert result == {"status": "completed"}
     assert captured == {"initial_prompt": "probe"}
+
+
+def test_create_agent_runtime_ignores_unsupported_runtime_binding():
+    captured: dict[str, object] = {}
+
+    def factory(*, mode=None, workspace_path=None, config=None):
+        captured.update({"mode": mode, "workspace_path": workspace_path, "config": config})
+        return object()
+
+    created = create_agent_runtime(
+        mode="chat",
+        workspace_path="workspace/session",
+        config="config",
+        runtime_agent_binding={"agentId": "agent-a"},
+        agent_factory=factory,
+    )
+
+    assert created is not None
+    assert captured == {
+        "mode": "chat",
+        "workspace_path": "workspace/session",
+        "config": "config",
+    }
+
+
+def test_disable_tools_forwards_through_var_kwargs_runner():
+    captured: dict[str, object] = {}
+
+    class FakeAgent:
+        def run_single_turn(self, initial_prompt=None, **kwargs):
+            captured["initial_prompt"] = initial_prompt
+            captured["disable_tools"] = kwargs.get("disable_tools")
+            return {"status": "completed"}
+
+    result = run_existing_agent_single_turn(
+        FakeAgent(),
+        initial_prompt="summarize",
+        disable_tools=True,
+    )
+    assert result == {"status": "completed"}
+    assert captured == {"initial_prompt": "summarize", "disable_tools": True}
+
+
+def test_prepare_agent_turn_ignores_string_chat_history():
+    captured: dict[str, object] = {}
+
+    class FakeAgent:
+        def seed_chat_history(self, messages):
+            captured["history"] = messages
+
+        def record_turn_preparation_diagnostic(self, fields):
+            captured["diagnostic"] = fields
+
+    prepare_agent_turn(FakeAgent(), chat_history="not-a-history")
+    assert "history" not in captured
+    assert captured["diagnostic"]["path"] == "fresh"
+    assert captured["diagnostic"]["historyMessageCount"] == 0

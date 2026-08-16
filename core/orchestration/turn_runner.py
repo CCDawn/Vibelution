@@ -9,7 +9,7 @@ from __future__ import annotations
 import inspect
 from contextlib import nullcontext
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from core.llm.payload_builder import prompt_cache_partition_scope
 from core.orchestration.turn_outcome import TurnOutcomeController
@@ -81,7 +81,7 @@ def create_agent_runtime(
     }
     if runtime_agent_binding is not None:
         factory_kwargs["runtime_agent_binding"] = runtime_agent_binding
-    return agent_factory(**factory_kwargs)
+    return call_agent_factory_with_supported_kwargs(agent_factory, **factory_kwargs)
 
 
 def call_agent_factory_with_supported_kwargs(factory: Callable[..., Any], **kwargs: Any) -> Any:
@@ -103,6 +103,15 @@ def call_agent_factory_with_supported_kwargs(factory: Callable[..., Any], **kwar
     return factory()
 
 
+def _coerce_chat_history(value: Any) -> list:
+    if value is None or isinstance(value, (str, bytes, Mapping)):
+        return []
+    try:
+        return list(value)
+    except TypeError:
+        return []
+
+
 def prepare_agent_turn(
     agent: Any,
     *,
@@ -117,6 +126,7 @@ def prepare_agent_turn(
     """Own preparation of history or same-turn recovery before execution."""
 
     normalized_turn_identity = str(turn_identity or "").strip()
+    history_items = _coerce_chat_history(chat_history)
     set_turn_identity = getattr(agent, "set_turn_identity", None)
     if callable(set_turn_identity) and (normalized_turn_identity or carryover):
         set_turn_identity(normalized_turn_identity)
@@ -133,8 +143,8 @@ def prepare_agent_turn(
         if carryover_status != "absent" and callable(clear_active_state):
             clear_active_state()
         restore_chat_history = getattr(agent, "seed_chat_history", None)
-        if callable(restore_chat_history) and chat_history:
-            restore_chat_history(chat_history)
+        if callable(restore_chat_history) and history_items:
+            restore_chat_history(history_items)
 
     host_seeded_runtime_context = False
     static_context_text = str(static_runtime_context or "").strip()
@@ -166,11 +176,11 @@ def prepare_agent_turn(
                     "carryover"
                     if carryover_status == "accepted"
                     else "history"
-                    if chat_history
+                    if history_items
                     else "fresh"
                 ),
                 "carryoverStatus": carryover_status,
-                "historyMessageCount": len(list(chat_history or [])),
+                "historyMessageCount": len(history_items),
                 "hasTurnIdentity": bool(normalized_turn_identity),
                 "staticContextChars": len(static_context_text),
                 "dynamicContextChars": len(str(dynamic_runtime_context or "").strip()),
@@ -204,7 +214,9 @@ def _execute_existing_agent_single_turn(
         "attachments" in signature.parameters or supports_var_kwargs
     ):
         kwargs["attachments"] = normalized_attachments
-    if disable_tools and signature is not None and "disable_tools" in signature.parameters:
+    if disable_tools and signature is not None and (
+        "disable_tools" in signature.parameters or supports_var_kwargs
+    ):
         kwargs["disable_tools"] = True
     partition = str(prompt_cache_partition or "").strip()
     scope = prompt_cache_partition_scope(partition) if partition else nullcontext()
