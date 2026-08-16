@@ -114,3 +114,74 @@ def test_runtime_status_default_enabled_with_agent_metadata_off():
     }
     assert is_runtime_status_inject_enabled(agent=agent, requested=True) is False
     assert is_runtime_status_inject_enabled(agent=None, requested=False) is False
+
+
+def test_collect_snapshot_prefers_live_auth_cap_and_current_model_family():
+    from types import SimpleNamespace
+
+    auth = SimpleNamespace(
+        max_calls_per_turn=8,
+        call_count=6,
+        budget_profile="openai",
+        turn_id="turn-live",
+        agent_id="agent-live",
+    )
+    snapshot = collect_turn_status_snapshot(
+        iteration=3,
+        model="deepseek-chat",
+        tool_policy={"maxCallsPerTurn": 64, "maxCallsPerTurnByModelFamily": {"deepseek": 64}},
+        authorization=auth,
+    )
+    assert snapshot.tools_max == 8
+    assert snapshot.tools_used == 6
+    assert snapshot.tools_remaining == 2
+    assert snapshot.budget_profile == "deepseek"
+    assert snapshot.budget_status == "tight"
+    assert snapshot.turn_id == "turn-live"
+    text = format_turn_status_bar(snapshot)
+    assert "budget_status: tight" in text
+    assert "budget tight" in text
+
+
+def test_collect_snapshot_marks_exhausted_and_unlimited():
+    from types import SimpleNamespace
+
+    exhausted = collect_turn_status_snapshot(
+        model="gpt-4.1",
+        authorization=SimpleNamespace(max_calls_per_turn=4, call_count=4, budget_profile="openai"),
+    )
+    assert exhausted.budget_status == "exhausted"
+    assert "budget exhausted" in format_turn_status_bar(exhausted)
+
+    unlimited = collect_turn_status_snapshot(
+        model="gpt-4.1",
+        tool_policy={"maxCallsPerTurn": 0},
+        authorization=None,
+    )
+    assert unlimited.tools_max == 0
+    assert unlimited.budget_status == "unlimited"
+
+    ok = collect_turn_status_snapshot(
+        model="gpt-4.1",
+        authorization=SimpleNamespace(max_calls_per_turn=32, call_count=1, budget_profile="openai"),
+    )
+    assert ok.budget_status == "ok"
+    assert "prefer structured tools" in format_turn_status_bar(ok)
+
+
+def test_collect_snapshot_coerces_invalid_auth_counters():
+    from types import SimpleNamespace
+
+    snapshot = collect_turn_status_snapshot(
+        iteration="nope",
+        model="deepseek-chat",
+        authorization=SimpleNamespace(
+            max_calls_per_turn="bad",
+            call_count="also-bad",
+            budget_profile="deepseek",
+        ),
+    )
+    assert snapshot.iteration == 0
+    assert snapshot.tools_used == 0
+    assert snapshot.tools_max == 0
+    assert snapshot.budget_status == "unlimited"

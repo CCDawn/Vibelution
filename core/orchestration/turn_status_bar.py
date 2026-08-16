@@ -41,8 +41,18 @@ class TurnStatusBarSnapshot:
     mental_intervention: str = ""
 
 
+def _coerce_nonnegative_int(value: Any, *, default: int = 0) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        try:
+            return max(0, int(default or 0))
+        except (TypeError, ValueError):
+            return 0
+
+
 def _reserve_for_verify(max_calls: int) -> int:
-    budget = max(0, int(max_calls or 0))
+    budget = _coerce_nonnegative_int(max_calls)
     if budget <= 0:
         return 0
     return max(2, min(3, budget // 8 or 2))
@@ -83,10 +93,10 @@ def collect_turn_status_snapshot(
     policy = tool_policy if isinstance(tool_policy, Mapping) else None
     if policy is None and auth is not None:
         # Fall back to installed max only.
-        policy = {"maxCallsPerTurn": int(getattr(auth, "max_calls_per_turn", 0) or 0)}
+        policy = {"maxCallsPerTurn": _coerce_nonnegative_int(getattr(auth, "max_calls_per_turn", 0))}
 
-    max_from_auth = int(getattr(auth, "max_calls_per_turn", 0) or 0) if auth is not None else 0
-    used = int(getattr(auth, "call_count", 0) or 0) if auth is not None else 0
+    max_from_auth = _coerce_nonnegative_int(getattr(auth, "max_calls_per_turn", 0)) if auth is not None else 0
+    used = _coerce_nonnegative_int(getattr(auth, "call_count", 0)) if auth is not None else 0
     resolved_max, family = resolve_max_calls_per_turn(
         policy,
         model=model,
@@ -124,7 +134,7 @@ def collect_turn_status_snapshot(
             mental_intervention = ""
 
     return TurnStatusBarSnapshot(
-        iteration=max(0, int(iteration or 0)),
+        iteration=_coerce_nonnegative_int(iteration),
         tools_used=max(0, used),
         tools_max=tools_max,
         tools_remaining=remaining,
