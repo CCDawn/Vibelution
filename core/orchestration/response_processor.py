@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from typing import Any, Dict, List
@@ -51,6 +52,21 @@ class ResponseProcessingResult:
     def visible_text(self) -> str:
         return self.raw_content_clean
 
+    @staticmethod
+    def _tool_call_args(call: Dict[str, Any]) -> Dict[str, Any]:
+        raw = call.get("args")
+        if raw in (None, ""):
+            raw = call.get("arguments")
+        if isinstance(raw, dict):
+            return dict(raw)
+        if isinstance(raw, str) and raw.strip():
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError:
+                return {}
+            return dict(parsed) if isinstance(parsed, dict) else {}
+        return {}
+
     def build_ai_message(
         self,
         response: Any,
@@ -63,7 +79,7 @@ class ResponseProcessingResult:
                 {
                     "id": str(call.get("id") or ""),
                     "name": str(call.get("name") or ""),
-                    "args": dict(call.get("args") or call.get("arguments") or {}),
+                    "args": self._tool_call_args(call),
                 }
                 for call in tool_calls_override
             ]
