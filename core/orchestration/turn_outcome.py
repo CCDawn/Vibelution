@@ -13,6 +13,13 @@ from langchain_core.messages import AIMessage
 from core.llm.types import TurnOutcome as LLMTurnOutcome
 
 
+def _coerce_nonnegative_int(value: Any, *, default: int = 0) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return max(0, int(default or 0))
+
+
 @dataclass
 class LifecycleDecision:
     continue_main_loop: bool = True
@@ -96,11 +103,12 @@ class TurnOutcomeController:
     ) -> Optional[str]:
         if category and not retryable:
             return f"遇到不可重试错误 `{category}`，当前轮次直接结束。"
-        effective_max_attempts = max(0, int(max_attempts or 0))
-        effective_attempts = max(0, int(attempts or 0))
+        effective_max_attempts = _coerce_nonnegative_int(max_attempts)
+        effective_attempts = _coerce_nonnegative_int(attempts)
+        consecutive = _coerce_nonnegative_int(consecutive_failures)
         retry_budget_exhausted = (
             effective_max_attempts > 0
-            and max(effective_attempts, max(0, int(consecutive_failures or 0))) >= effective_max_attempts
+            and max(effective_attempts, consecutive) >= effective_max_attempts
         )
         if category in {"server_error", "rate_limit"} and retry_budget_exhausted:
             return f"模型 provider 暂时不可用（`{category}`），本轮已用尽重试预算，直接失败收口。"
@@ -109,7 +117,7 @@ class TurnOutcomeController:
         if category == "timeout" and retry_budget_exhausted:
             return "连续超时且重试预算已耗尽，当前轮次提前结束。"
         stop_limit = effective_max_attempts or self.max_consecutive_failures
-        if consecutive_failures >= stop_limit:
+        if consecutive >= stop_limit:
             return f"LLM 连续失败达到 {stop_limit} 次，当前轮次结束。"
         return None
 
