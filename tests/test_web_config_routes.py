@@ -1276,7 +1276,13 @@ def test_health_diagnostics_endpoint_returns_log_helpers(tmp_path, monkeypatch):
     assert session_helpers["chat_sessions"]["route"] == "/chat?session=session-live"
     assert session_helpers["chat_sessions"]["protected"] is True
     helpers = {item["id"]: item for item in payload["logHelpers"]}
-    assert set(helpers) == {"runtime_scenes", "runtime_logs", "workspace_logs", "conversation_logs"}
+    assert set(helpers) == {
+        "runtime_scenes",
+        "launcher_runtime",
+        "runtime_logs",
+        "workspace_logs",
+        "conversation_logs",
+    }
     assert helpers["runtime_scenes"]["route"] == "/logs?root=runtime_scenes"
     assert helpers["runtime_scenes"]["resetItemId"] == "stopped_runtime_scenes"
     assert helpers["runtime_scenes"]["protected"] is True

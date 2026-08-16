@@ -40,11 +40,19 @@
 | 项 | 权威 |
 | --- | --- |
 | 活跃 logs/runtime | `agent_log_context.activePaths`（来自 `vibelution_storage`） |
-| 当前运行现场 | `.runtime/launcher/active-runtime-scene.json` → `currentScene` |
+| 当前运行现场 | `{activePaths.runtime}/launcher/active-runtime-scene.json` → `currentScene` |
 | 诊断首读 | `<scene>/summary.json` → `agent_brief` |
-| Launcher 原始 stdout/stderr | `{activePaths.runtime}/launcher/`；大文件看 `launcherRuntime.largeLogs` 警告 |
+| Launcher 原始 stdout/stderr | `{activePaths.runtime}/launcher/`（工作台 `launcher_runtime` 日志根）；`resolvedEvidenceRefs.source=launcher_runtime` 表示 live 文件 |
+| Scene raw 尾段 | `resolvedEvidenceRefs.source=runtime_scene_raw` — Python Launcher 启动时会写入 bounded tail（≤512KB） |
+| 大文件 | `launcherRuntime.largeLogs` 与 `resolvedEvidenceRefs.warning`；禁止全量读 live stdout |
 
-不要使用 `logs/runtime_scenes/latest`（不存在）。不要硬编码 `<repo>/logs`。
+`activePaths.migrated=false` 时 runtime/logs 可能在 checkout 内；`migrated=true` 时在外部 instance 树。一律以 `agent_log_context.activePaths` 为准，迁移前可跑：
+
+```powershell
+python scripts/migrate_project_storage.py inventory --project "<ROOT>"
+```
+
+**不要**在未授权时执行 `apply`；迁移是 HIGH_RISK 操作。
 
 ---
 

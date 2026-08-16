@@ -20,6 +20,12 @@ LAUNCHER_LOG_NAMES = frozenset(
         "frontend-build.log",
     }
 )
+SCENE_RAW_TO_LAUNCHER = {
+    "raw/backend.stdout.log": "backend.stdout.log",
+    "raw/backend.stderr.log": "backend.stderr.log",
+    "raw/launcher-control.log": "launcher-control.log",
+    "raw/frontend.build.log": "frontend-build.log",
+}
 
 USAGE_GUIDANCE = [
     "Always start with agent_log_context before grep, read_file, or raw log expansion.",
@@ -396,19 +402,48 @@ def _resolve_single_evidence_ref(
     if scene_dir is not None:
         candidates.append(scene_dir / Path(normalized))
 
+    mapped_launcher_name = SCENE_RAW_TO_LAUNCHER.get(normalized)
+    if mapped_launcher_name:
+        candidates.append(launcher_dir / mapped_launcher_name)
+
     launcher_name = Path(normalized).name
     if launcher_name in LAUNCHER_LOG_NAMES:
         candidates.append(launcher_dir / launcher_name)
 
+    scene_candidate = scene_dir / Path(normalized) if scene_dir is not None else None
+    launcher_candidate: Path | None = None
+    if mapped_launcher_name:
+        launcher_candidate = launcher_dir / mapped_launcher_name
+    elif launcher_name in LAUNCHER_LOG_NAMES:
+        launcher_candidate = launcher_dir / launcher_name
+
     resolved: Path | None = None
-    for candidate in candidates:
+    source = ""
+    if scene_candidate is not None:
         try:
-            resolved_candidate = candidate.resolve()
+            scene_resolved = scene_candidate.resolve()
+            if scene_resolved.is_file() and scene_resolved.stat().st_size > 0:
+                resolved = scene_resolved
+                source = "runtime_scene_raw"
         except OSError:
-            continue
-        if resolved_candidate.is_file():
-            resolved = resolved_candidate
-            break
+            pass
+    if resolved is None and launcher_candidate is not None:
+        try:
+            launcher_resolved = launcher_candidate.resolve()
+            if launcher_resolved.is_file():
+                resolved = launcher_resolved
+                source = "launcher_runtime"
+        except OSError:
+            pass
+    if resolved is None:
+        for candidate in candidates:
+            try:
+                resolved_candidate = candidate.resolve()
+            except OSError:
+                continue
+            if resolved_candidate.is_file():
+                resolved = resolved_candidate
+                break
 
     if resolved is None and candidates:
         try:
@@ -422,6 +457,8 @@ def _resolve_single_evidence_ref(
         "displayPath": _display_path(resolved, project_root) if resolved is not None else normalized,
         "exists": bool(resolved is not None and resolved.is_file()),
     }
+    if source:
+        entry["source"] = source
     if entry["exists"] and resolved is not None:
         try:
             size_bytes = resolved.stat().st_size

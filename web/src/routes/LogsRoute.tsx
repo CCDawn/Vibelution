@@ -62,6 +62,7 @@ import styles from "./LogsRoute.styles";
 
 const ROOT_LABEL_KEYS = {
   runtime_scenes: "logsRootRuntimeScenes",
+  launcher_runtime: "logsRootLauncherRuntime",
   runtime_logs: "logsRootRuntime",
   workspace_logs: "logsRootWorkspace",
   conversation_logs: "logsRootConversation",
