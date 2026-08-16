@@ -42,6 +42,10 @@ def test_normalize_agent_mode_accepts_aliases_bytes_and_whitespace_default():
     assert normalize_agent_mode("self-evolution") == AgentMode.SELF_EVOLUTION
     assert normalize_agent_mode(b"chat") == AgentMode.CHAT
     assert normalize_agent_mode("  ", default="chat") == AgentMode.CHAT
+    assert normalize_agent_mode(memoryview(b"chat")) == AgentMode.CHAT
+    assert normalize_agent_mode({"mode": "self-evolution"}) == AgentMode.SELF_EVOLUTION
+    assert normalize_agent_mode('{"agentMode":"chat"}') == AgentMode.CHAT
+    assert normalize_agent_mode(["supervised_evolution"]) == AgentMode.SUPERVISED_EVOLUTION
 
 
 def test_string_false_mode_flags_disable_chat():
@@ -58,6 +62,18 @@ def test_string_false_mode_flags_disable_chat():
     assert is_mode_enabled(AgentMode.CHAT, config) is False
     assert is_mode_enabled(AgentMode.SUPERVISED_EVOLUTION, config) is False
     assert is_mode_enabled(AgentMode.SELF_EVOLUTION, config) is True
+    bytes_config = SimpleNamespace(
+        agent=SimpleNamespace(
+            default_mode="self_evolution",
+            modes=SimpleNamespace(
+                chat_enabled=b"false",
+                self_evolution_enabled=True,
+                supervised_evolution_enabled=True,
+            ),
+        )
+    )
+    assert is_mode_enabled(b"chat", bytes_config) is False
+    assert is_mode_enabled('{"mode":"chat"}', bytes_config) is False
 
 
 def test_resolve_mode_policy_survives_missing_agent_config():

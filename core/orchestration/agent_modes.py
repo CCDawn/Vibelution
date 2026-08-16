@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable
@@ -27,26 +29,67 @@ class AgentMode(str, Enum):
     SUPERVISED_EVOLUTION = "supervised_evolution"
 
 
+def _decode_binary(value: Any) -> Any:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).decode("utf-8", errors="replace")
+    return value
+
+
+def _maybe_json(value: Any) -> Any:
+    value = _decode_binary(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith("{") or text.startswith("["):
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                return value
+    return value
+
+
+def _mapping_get(mapping: Mapping[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in mapping:
+            return mapping.get(key)
+    return None
+
+
 def _coerce_bool(value: Any, default: bool) -> bool:
     if isinstance(value, bool):
         return value
     if value is None:
         return default
-    if isinstance(value, (int, float)):
+    value = _decode_binary(value)
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
         return bool(value)
-    normalized = str(value).strip().lower()
-    if not normalized:
+    text = str(value).strip().lower()
+    if not text:
         return default
-    if normalized in {"1", "true", "yes", "on", "enabled"}:
+    if text in {"1", "true", "yes", "on", "enabled"}:
         return True
-    if normalized in {"0", "false", "no", "off", "disabled"}:
+    if text in {"0", "false", "no", "off", "disabled"}:
         return False
     return default
 
 
 def _normalize_mode_text(value: Any, *, default: str) -> str:
-    if isinstance(value, bytes):
-        value = value.decode("utf-8", errors="replace")
+    value = _maybe_json(value)
+    if isinstance(value, AgentMode):
+        value = value.value
+    if isinstance(value, Mapping):
+        extracted = _mapping_get(
+            value, "mode", "value", "text", "name", "agentMode", "agent_mode"
+        )
+        if extracted is None:
+            value = default
+        else:
+            return _normalize_mode_text(extracted, default=default)
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray, memoryview)):
+        if len(value) == 1:
+            return _normalize_mode_text(value[0], default=default)
+        value = default
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
     text = str(value if value is not None else default).strip().lower()
     text = text.replace("-", "_").replace(" ", "_")
     if text:
@@ -83,9 +126,10 @@ def normalize_agent_mode(value: str | AgentMode | None, *, default: str = AgentM
 
 def is_mode_enabled(mode: AgentMode, config: "AppConfig") -> bool:
     modes_cfg = getattr(getattr(config, "agent", None), "modes", None)
-    if mode == AgentMode.CHAT:
+    text = _normalize_mode_text(getattr(mode, "value", mode), default="")
+    if text == AgentMode.CHAT:
         return _coerce_bool(getattr(modes_cfg, "chat_enabled", True), True)
-    if mode == AgentMode.SUPERVISED_EVOLUTION:
+    if text == AgentMode.SUPERVISED_EVOLUTION:
         return _coerce_bool(getattr(modes_cfg, "supervised_evolution_enabled", True), True)
     return _coerce_bool(getattr(modes_cfg, "self_evolution_enabled", True), True)
 
