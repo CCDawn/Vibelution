@@ -65,6 +65,19 @@ def _coerce_text(value: Any) -> str:
     return str(value)
 
 
+def _maybe_json(value: Any) -> Any:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith("{") or text.startswith("["):
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                return value
+    return value
+
+
 def _as_mapping(value: Any) -> Dict[str, Any]:
     if isinstance(value, (bytes, bytearray, memoryview)):
         value = bytes(value).decode("utf-8", errors="replace")
@@ -106,7 +119,7 @@ def _coerce_bool(value: Any, default: bool) -> bool:
         return default
     if isinstance(value, (bytes, bytearray, memoryview)):
         value = bytes(value).decode("utf-8", errors="replace")
-    if isinstance(value, (int, float)):
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
         return bool(value)
     text = str(value).strip().lower()
     if not text:
@@ -150,14 +163,22 @@ def _looks_like_numbered_confirmation(text: str) -> bool:
     return any(keyword in prompt for keyword in _CONFIRMATION_KEYWORDS)
 
 
+def _coerce_message_list(messages: Any) -> List[Any]:
+    messages = _maybe_json(messages)
+    if messages is None:
+        return []
+    if isinstance(messages, Mapping):
+        return [dict(messages)]
+    if isinstance(messages, (str, bytes, bytearray, memoryview)):
+        return []
+    try:
+        return list(messages)
+    except TypeError:
+        return []
+
+
 def _latest_assistant_goal_context(messages: Optional[List[Any]]) -> str:
-    if isinstance(messages, (str, bytes, bytearray, memoryview)) or messages is None:
-        iterable: List[Any] = []
-    else:
-        try:
-            iterable = list(messages)
-        except TypeError:
-            iterable = []
+    iterable = _coerce_message_list(messages)
     for message in reversed(iterable):
         role = _message_role(message)
         if role not in {"assistant", "ai"}:
@@ -170,6 +191,7 @@ def _latest_assistant_goal_context(messages: Optional[List[Any]]) -> str:
 
 
 def _message_role(message: Any) -> str:
+    message = _maybe_json(message)
     if isinstance(message, AIMessage):
         return "assistant"
     if isinstance(message, dict):
@@ -178,24 +200,27 @@ def _message_role(message: Any) -> str:
 
 
 def _message_content(message: Any) -> str:
+    message = _maybe_json(message)
     if isinstance(message, dict):
         content = message.get("content", "")
     else:
         content = getattr(message, "content", "")
+    content = _maybe_json(content)
     if isinstance(content, list):
         parts = []
         for item in content:
+            item = _maybe_json(item)
             if isinstance(item, dict):
-                parts.append(str(item.get("text") or item.get("content") or ""))
+                parts.append(_coerce_text(item.get("text") or item.get("content") or ""))
             else:
-                parts.append(str(item or ""))
+                parts.append(_coerce_text(item))
         return "\n".join(part for part in parts if part.strip())
-    return str(content or "").strip()
+    return _coerce_text(content).strip()
 
 
 def _compact_goal_context(text: str, limit: int = 240) -> str:
     lines = []
-    for raw_line in str(text or "").splitlines():
+    for raw_line in _coerce_text(text).splitlines():
         line = raw_line.strip(" \t-•*")
         if line:
             lines.append(line)
@@ -209,7 +234,7 @@ def _compact_goal_context(text: str, limit: int = 240) -> str:
 
 
 def _compact_one_line(text: str, limit: int) -> str:
-    compact = re.sub(r"\s+", " ", str(text or "")).strip()
+    compact = re.sub(r"\s+", " ", _coerce_text(text)).strip()
     if len(compact) <= limit:
         return compact
     return compact[: max(0, limit - 3)].rstrip() + "..."
@@ -227,16 +252,17 @@ _SAFE_LLM_ERROR_DIAGNOSTIC_DETAIL_KEYS = (
 
 def _safe_llm_error_diagnostic_details(details: Any) -> Dict[str, Any]:
     """Keep only prompt-free scalar projection diagnostics from an LLM error."""
-    if not isinstance(details, dict):
-        return {}
+    details = _as_mapping(details)
     safe: Dict[str, Any] = {}
     for key in _SAFE_LLM_ERROR_DIAGNOSTIC_DETAIL_KEYS:
         value = details.get(key)
-        if isinstance(value, str):
-            compact = _compact_one_line(value, 160)
+        if isinstance(value, (bytes, bytearray, memoryview, str)):
+            compact = _compact_one_line(_coerce_text(value), 160)
             if compact:
                 safe[key] = compact
-        elif isinstance(value, (bool, int, float)):
+        elif isinstance(value, bool):
+            safe[key] = value
+        elif isinstance(value, (int, float)):
             safe[key] = value
     return safe
 
@@ -382,9 +408,8 @@ def _can_reuse_system_prompt(
     Git is tool-driven and is not part of this decision. Prompt rebuild is only
     needed when runtime state memory actually changes (typically after tools).
     """
-    return bool(
-        has_cached_prompt
-        and prompt_built_with_runtime_key == current_runtime_state_memory_key
+    return _coerce_bool(has_cached_prompt, False) and (
+        _coerce_text(prompt_built_with_runtime_key) == _coerce_text(current_runtime_state_memory_key)
     )
 
 
@@ -433,20 +458,22 @@ def _can_reuse_initial_prompt(
     has_cached_prompt: bool = True,
     prompt_built_with_runtime_key: str = "",
 ) -> bool:
+    pending_flag = _coerce_bool(pending, True)
+    cached_flag = _coerce_bool(has_cached_prompt, True)
     del initial_git_state, current_git_state
     # Prefer the modern signature when callers pass explicit build-key fields.
-    if prompt_built_with_runtime_key or not pending:
+    if prompt_built_with_runtime_key or not pending_flag:
         return _can_reuse_system_prompt(
-            has_cached_prompt=has_cached_prompt if prompt_built_with_runtime_key else bool(pending),
+            has_cached_prompt=cached_flag if prompt_built_with_runtime_key else pending_flag,
             prompt_built_with_runtime_key=(
                 prompt_built_with_runtime_key or initial_runtime_state_memory_key
             ),
             current_runtime_state_memory_key=current_runtime_state_memory_key,
         )
-    return bool(
-        pending
-        and has_cached_prompt
-        and current_runtime_state_memory_key == initial_runtime_state_memory_key
+    return (
+        pending_flag
+        and cached_flag
+        and _coerce_text(current_runtime_state_memory_key) == _coerce_text(initial_runtime_state_memory_key)
     )
 
 
@@ -511,8 +538,8 @@ def _llm_route_trace_fields(
         "runId": str(metadata.get("llmRunId") or "").strip(),
         "agentId": str(metadata.get("agentId") or "").strip(),
         "invocationId": str(metadata.get("invocationId") or "").strip(),
-        "routeAttempt": max(1, int(route_attempt)),
-        "routeId": str(route_id or "").strip(),
+        "routeAttempt": max(1, _coerce_nonnegative_int(route_attempt) or 1),
+        "routeId": _coerce_text(route_id).strip(),
         "profileId": str(getattr(client, "profile_id", "") or "").strip(),
         "provider": str(getattr(provider, "kind", "") or "").strip(),
         "model": str(getattr(profile, "model", "") or "").strip(),
@@ -539,8 +566,8 @@ def _record_llm_route_success(
         message="LLM effective route attempt succeeded.",
         fields={
             **dict(trace_fields or {}),
-            "durationMs": max(0, int(duration_ms or 0)),
-            "streamed": bool(streamed),
+            "durationMs": _coerce_nonnegative_int(duration_ms),
+            "streamed": _coerce_bool(streamed, False),
         },
         outcome="succeeded",
     )
@@ -548,7 +575,17 @@ def _record_llm_route_success(
 
 def _record_agent_tool_surface_event(tool_names: List[str], *, recorder: Any = None) -> None:
     fn = recorder or _record_agent_scene_event
-    names = [str(name or "").strip() for name in tool_names if str(name or "").strip()]
+    parsed_names = _maybe_json(tool_names)
+    if isinstance(parsed_names, Mapping):
+        parsed_names = list(parsed_names)
+    elif isinstance(parsed_names, (str, bytes, bytearray, memoryview)):
+        name = _coerce_text(parsed_names).strip()
+        parsed_names = [name] if name else []
+    try:
+        items = list(parsed_names or [])
+    except TypeError:
+        items = []
+    names = [_coerce_text(name).strip() for name in items if _coerce_text(name).strip()]
     group_counts: Dict[str, int] = {}
     for name in names:
         group = _TOOL_SURFACE_GROUPS.get(name, "other")

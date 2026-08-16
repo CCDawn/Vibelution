@@ -11,10 +11,13 @@ from langchain_core.messages import AIMessage
 
 from core.llm.agent_runtime import AgentLlmResolutionError
 from core.orchestration.agent_runtime_bindings import (
+    _can_reuse_initial_prompt,
+    _can_reuse_system_prompt,
     _context_compression_trigger_source,
     _format_tool_result_replacement_summary,
     _looks_like_numbered_confirmation,
     _normalize_goal_from_chat_history,
+    _record_agent_tool_surface_event,
     _reset_stall_signal_reported,
     _runtime_agent_binding_from_env,
     _runtime_agent_llm_bindings_from_env,
@@ -191,3 +194,36 @@ def test_runtime_bindings_coerce_bytes_json_and_invalid_ints():
     assert _context_compression_trigger_source(b"context limit exceeded") == "provider_limit"
     assert _looks_like_numbered_confirmation("1,确认,2,可以".encode("utf-8")) is True
     assert _normalize_goal_from_chat_history("直接提问".encode("utf-8"), b"override-goal", "not-messages") == "override-goal"
+    json_goal = _normalize_goal_from_chat_history(
+        "1,确认,2,可以",
+        None,
+        '[{"role":"assistant","content":"需求：实现入口"}]',
+    )
+    assert json_goal.startswith("需求：实现入口")
+    bytes_goal = _normalize_goal_from_chat_history(
+        "1,确认,2,可以",
+        None,
+        [{"role": "assistant", "content": "需求：实现入口".encode("utf-8")}],
+    )
+    assert bytes_goal.startswith("需求：实现入口")
+    assert _can_reuse_system_prompt(
+        has_cached_prompt="false",
+        prompt_built_with_runtime_key="k1",
+        current_runtime_state_memory_key="k1",
+    ) is False
+    assert _can_reuse_initial_prompt(
+        pending=True,
+        has_cached_prompt="false",
+        initial_runtime_state_memory_key="k1",
+        current_runtime_state_memory_key="k1",
+    ) is False
+    assert _safe_llm_error_diagnostic_details(
+        '{"messageIndex": 3, "payloadValidationErrorType": "shape", "prompt": "do not leak this"}'
+    ) == {"messageIndex": 3, "payloadValidationErrorType": "shape"}
+    captured = {}
+    _record_agent_tool_surface_event(
+        "read_file_tool",
+        recorder=lambda *args, **kwargs: captured.setdefault("fields", kwargs.get("fields")),
+    )
+    assert captured["fields"]["toolCount"] == 1
+    assert captured["fields"]["coreChatToolsPresent"] == ["read_file_tool"]
