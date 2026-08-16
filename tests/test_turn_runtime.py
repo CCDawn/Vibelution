@@ -81,3 +81,22 @@ def test_prepare_accepts_mapping_json_and_non_mapping_without_crash():
     assert env["VIBELUTION_TURN_MODE"] == "chat"
     assert env["VIBELUTION_TURN_SESSION_ID"] == "session-d"
     assert runtime_metadata_env(None) == {}
+
+    from_json_fields = prepare_agent_turn_runtime(
+        {
+            "mode": "chat",
+            "runKind": "chat_turn",
+            "sessionId": '{"id":"session-leak"}',
+            "agentId": '["agent-a"]',
+        }
+    )
+    assert from_json_fields.session_id == ""
+    assert from_json_fields.agent_id == ""
+    assert "session-leak" not in from_json_fields.prompt_cache_partition
+    assert "agent:direct" in from_json_fields.prompt_cache_partition
+
+    from_view = prepare_agent_turn_runtime(
+        memoryview(b'{"mode":"chat","runKind":"chat_turn","sessionId":"session-e"}')
+    )
+    assert from_view.mode == "chat"
+    assert from_view.session_id == "session-e"

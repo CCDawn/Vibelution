@@ -36,9 +36,21 @@ class AgentTurnRuntime:
     metadata: dict[str, Any]
 
 
+def _maybe_json(value: Any) -> Any:
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith("{") or text.startswith("["):
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                return value
+    return value
+
+
 def _clean(value: Any, *, fallback: str = "") -> str:
     if isinstance(value, (bytes, bytearray, memoryview)):
         value = bytes(value).decode("utf-8", errors="replace")
+    value = _maybe_json(value)
     if isinstance(value, Mapping) or isinstance(value, (list, tuple, set)):
         return fallback
     if isinstance(value, bool) or value is None:
