@@ -18,6 +18,7 @@ import {
   updateAgentModeMembership,
   uploadAgentAvatarImage,
 } from "../../api/agents";
+import { startUserAction } from "../../app/userActionTelemetry";
 import { queryKeys } from "../../api/queryKeys";
 import type {
   AgentConfigWorkspace,

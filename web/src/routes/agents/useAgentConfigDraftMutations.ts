@@ -11,6 +11,7 @@ import {
   saveAgentConfigDraft,
   updateAgent,
 } from "../../api/agents";
+import { startUserAction } from "../../app/userActionTelemetry";
 import { queryKeys } from "../../api/queryKeys";
 import type {
   AgentConfigWorkspace,
@@ -137,7 +138,11 @@ export function useAgentConfigDraftMutations(options: UseAgentConfigDraftMutatio
           }
           return body;
         })()),
-    onSuccess: (agent, variables) => {
+    onMutate: (variables) => ({
+      telemetry: startUserAction("agent_update", { agentId: variables.agentId }),
+    }),
+    onSuccess: (agent, variables, context) => {
+      context?.telemetry?.succeeded({ agentId: agent.agentId });
       queryClient.setQueryData<AgentConfigWorkspace | undefined>(
         queryKeys.agentConfigWorkspace(),
         (current) => options.updatedAgentWorkspaceCache(current, agent),
@@ -152,7 +157,8 @@ export function useAgentConfigDraftMutations(options: UseAgentConfigDraftMutatio
       // Config PATCH already setQueryData'd the workspace agent — do not thrash chat sessions.
       void options.chatWorkspaceCache.afterAgentConfigSaved(variables.agentId);
     },
-    onError: (error) => {
+    onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, { agentId: variables.agentId });
       const message = error instanceof Error ? error.message : String(error);
       options.setNotice({
         tone: "error",
