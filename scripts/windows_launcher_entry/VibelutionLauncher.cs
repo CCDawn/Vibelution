@@ -42,19 +42,16 @@ internal static class VibelutionLauncher
                 }
                 if (!created || ElectronOwnsDesktopTray(projectDir))
                 {
-                    if (!created && !waitForRestart && !ElectronOwnsDesktopTray(projectDir))
+                    if (!created && !waitForRestart && !ElectronOwnsDesktopTray(projectDir) && parsed.FromShortcut)
                     {
                         return HandleSecondaryTrayLaunch(projectDir);
                     }
-                    // Already running as a tray app; do not open the full Launcher window.
                     return 0;
                 }
 
-                TryRebuildNativeEntryIfSourceNewer(projectDir);
-
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
-                Application.Run(new TrayApplicationContext(projectDir));
+                Application.Run(new TrayApplicationContext(projectDir, parsed.FromShortcut));
             }
             return 0;
         }
@@ -69,19 +66,22 @@ internal static class VibelutionLauncher
     {
         public string ProjectDir;
         public List<string> ForwardedArgs;
+        public bool FromShortcut;
     }
 
     private sealed class TrayApplicationContext : ApplicationContext
     {
         private readonly string projectDir;
+        private readonly bool fromShortcut;
         private readonly string launcherUrl;
         private readonly NotifyIcon notifyIcon;
         private readonly SynchronizationContext uiContext;
         private readonly FileSystemWatcher ownerWatcher;
 
-        public TrayApplicationContext(string projectDir)
+        public TrayApplicationContext(string projectDir, bool fromShortcut)
         {
             this.projectDir = projectDir;
+            this.fromShortcut = fromShortcut;
             this.launcherUrl = "http://127.0.0.1:" + LauncherControlPort(projectDir).ToString();
             this.uiContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
             this.notifyIcon = new NotifyIcon();
@@ -255,11 +255,21 @@ internal static class VibelutionLauncher
             try
             {
                 EnsureFreshLauncherBackend(projectDir);
-                ShowInfo("Launcher 已在托盘后台运行。");
+                if (!fromShortcut)
+                {
+                    ShowInfo("Launcher 已在托盘后台运行。");
+                }
             }
             catch (Exception ex)
             {
-                ShowWarning("Launcher 后台启动失败：" + ShortMessage(ex.Message));
+                if (!fromShortcut)
+                {
+                    ShowWarning("Launcher 后台启动失败：" + ShortMessage(ex.Message));
+                }
+                else
+                {
+                    WriteNativeEntryLog(projectDir, "native_action.bootstrap_failed", ShortStaticMessage(ex.Message));
+                }
             }
         }
 
@@ -776,47 +786,6 @@ internal static class VibelutionLauncher
         }
     }
 
-    private static void TryRebuildNativeEntryIfSourceNewer(string projectDir)
-    {
-        try
-        {
-            string buildScript = Path.Combine(projectDir, "scripts", "windows_launcher_entry", "build_vibelution_launcher_entry.ps1");
-            string sourcePath = Path.Combine(projectDir, "scripts", "windows_launcher_entry", "VibelutionLauncher.cs");
-            string outputPath = Process.GetCurrentProcess().MainModule.FileName;
-            if (!File.Exists(buildScript) || !File.Exists(sourcePath) || string.IsNullOrWhiteSpace(outputPath))
-            {
-                return;
-            }
-            DateTime sourceTime = File.GetLastWriteTimeUtc(sourcePath);
-            DateTime outputTime = File.GetLastWriteTimeUtc(outputPath);
-            if (sourceTime <= outputTime)
-            {
-                return;
-            }
-            var startInfo = new ProcessStartInfo
-            {
-                FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
-                Arguments = "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File " + Quote(buildScript) + " -ProjectDir " + Quote(projectDir) + " -OutputPath " + Quote(outputPath),
-                WorkingDirectory = projectDir,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                WindowStyle = ProcessWindowStyle.Hidden,
-            };
-            using (Process process = Process.Start(startInfo))
-            {
-                if (process != null)
-                {
-                    process.WaitForExit(120000);
-                }
-            }
-            WriteNativeEntryLog(projectDir, "native_entry.rebuilt", "output=" + outputPath);
-        }
-        catch (Exception ex)
-        {
-            WriteNativeEntryLog(projectDir, "native_entry.rebuild_skipped", ShortStaticMessage(ex.Message));
-        }
-    }
-
     private static string RequestLauncherStatic(string projectDir, string path, string method)
     {
         string url = "http://127.0.0.1:" + LauncherControlPort(projectDir).ToString() + path;
@@ -851,12 +820,18 @@ internal static class VibelutionLauncher
     {
         var forwardedArgs = new List<string>();
         string projectDir = "";
+        bool fromShortcut = false;
         for (int index = 0; index < args.Length; index++)
         {
             string arg = args[index] ?? "";
             if (arg.Equals("--project", StringComparison.OrdinalIgnoreCase) && index + 1 < args.Length)
             {
                 projectDir = args[++index];
+                continue;
+            }
+            if (arg.Equals("--from-shortcut", StringComparison.OrdinalIgnoreCase))
+            {
+                fromShortcut = true;
                 continue;
             }
             forwardedArgs.Add(arg);
@@ -869,7 +844,8 @@ internal static class VibelutionLauncher
         return new ParsedArgs
         {
             ProjectDir = Path.GetFullPath(projectDir),
-            ForwardedArgs = forwardedArgs
+            ForwardedArgs = forwardedArgs,
+            FromShortcut = fromShortcut
         };
     }
 
