@@ -136,6 +136,8 @@
 
 ## Self / Supervised evolution
 
+**30 秒路由（控制面 / payload / worktree / 主测）：** [`evolution_services.md`](evolution_services.md)
+
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
 | `chat_review_service.py` | Web payloads for reviewed chat-dataset candidates. | — | `evolution.py` | `test_web_app.py`, `test_web_evolution_routes.py` |
