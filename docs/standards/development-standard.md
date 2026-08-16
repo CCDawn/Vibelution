@@ -1265,7 +1265,7 @@ For backend-only or frontend-only work, explicitly state why the other half is n
 ### 24.3 Hard Boundaries
 
 - Product UI must not call browser `fetch` directly. Shared transport remains `fetchJson`; exceptional telemetry, streaming, download, or browser-native flows must stay in a named adapter with bounded error handling.
-- New route and product-component files must not import or call `fetchJson` directly. Put domain endpoint functions in `web/src/api/<domain>.ts`. Existing direct route calls are migration debt governed by `web/src/api/fullStackApiBoundary.test.ts`.
+- New route and product-component files must not import or call `fetchJson` directly. Put domain endpoint functions in `web/src/api/<domain>.ts`. Route-layer JSON transport migration is complete; `web/src/api/fullStackApiBoundary.test.ts` keeps the budget at zero.
 - Route entry modules should remain composition roots. When a touched route already owns endpoint strings, multiple mutations, cache repair, and view code, extract the touched API or model slice instead of adding another parallel block.
 - Public JSON endpoints must declare an explicit Pydantic response contract. Returning an untyped `dict` from a service is allowed internally only when the route validates or projects it into the public response model.
 - Frontend TypeScript DTOs describe API data, not component display state. Display-only unions, selected-row state, draft form state, and view models stay in their route-domain module.
@@ -1274,18 +1274,33 @@ For backend-only or frontend-only work, explicitly state why the other half is n
 - Cross-domain changes must name one source owner and projection consumers. A projection may cache or render facts; it must not silently become a second writer.
 - API changes must preserve or intentionally migrate developer/formal mode parity, permissions, redaction, delete/archive semantics, and runtime evidence.
 
-### 24.4 Incremental Migration And Guard Budgets
+### 24.4 Migration Guards (Closed Ledger)
 
-This contract applies immediately to new code and to the slice materially touched by a task. It does not authorize a big-bang rewrite of existing routes, DTOs, services, or tests.
+Route-layer JSON transport migration finished in 2026-08: the frontend ledger is empty and the aggregate budget is `0`. This section now describes **permanent guards**, not an in-flight debt burn-down.
 
-The first structural guards are debt budgets:
+**Frontend — `web/src/api/fullStackApiBoundary.test.ts`**
 
-- `web/src/api/fullStackApiBoundary.test.ts` records existing route-layer `fetchJson` call counts. New files and count increases fail; an intentional extraction must lower the recorded budget in the same change.
-- `tests/test_full_stack_contract_guards.py` records existing FastAPI endpoints without explicit `response_model`. New untyped endpoints and count increases fail; adding response contracts must lower the matching budget.
+- `web/src/routes/**` must contain **zero** `fetchJson(` calls and **zero** imports of `api/client`.
+- The recorded per-file budget map is `{}`; any new route-layer call or `api/client` import fails CI.
+- New JSON endpoints belong in `web/src/api/<domain>.ts` as named exports. See [`web/src/api/README.md`](../../web/src/api/README.md) for module ownership and contract-test conventions.
+- **Allowed route-layer exceptions (non-`fetchJson`):** SSE/`EventSource` streams (for example evolution active-run events, CLI terminal session events), bounded browser telemetry/download adapters named in code review, and other flows explicitly listed in the domain API README. Do not re-introduce JSON transport in routes “because it is only one call”.
 
-Guard budgets are not exemptions for new work. Raising a budget requires a documented compatibility or emergency reason, owner, removal trigger, and review evidence. Normal feature development must keep budgets equal or lower.
+**Backend — `tests/test_full_stack_contract_guards.py`**
 
-Do not move files solely to satisfy a count. Migrate one behavior slice with its API function, DTO, cache contract, service owner, and tests. Existing compatibility barrels and service facades may remain while imports converge.
+- FastAPI route modules must declare explicit `response_model` or `response_class` on JSON endpoints. Per-module untyped-endpoint budgets are `0`.
+- New handlers without a public response contract fail CI. Adding contracts keeps budgets at zero.
+
+Guard budgets are not exemptions for new work. Raising a budget requires a documented compatibility or emergency reason, owner, removal trigger, and review evidence in this section or an ADR. Normal feature development keeps both guards at zero.
+
+When extracting legacy behavior, migrate one slice with its API function, DTO, cache contract, service owner, and tests. Do not move files solely to satisfy a guard.
+
+**Verification (touching `web/src/api/` or route transports):**
+
+```text
+pytest tests/test_full_stack_contract_guards.py -q
+npx vitest run src/api/fullStackApiBoundary.test.ts --fileParallelism=false
+npx tsc -b --pretty false   # in web/ when types or DTOs change
+```
 
 ### 24.5 Cross-Layer Definition Of Done
 

@@ -13,18 +13,16 @@ const routeSourcePattern = /\.(ts|tsx)$/;
 const routeTestPattern = /\.test\.(ts|tsx)$/;
 
 /**
- * Transitional debt ledger. Counts may only stay equal or decrease.
- * New domain requests belong in web/src/api/<domain>.ts.
+ * Permanent frontend API boundary guard.
  *
- * The 2026-07-26 route-pack extraction redistributed existing calls without
- * increasing the aggregate debt. Keep the exact per-file ledger so future
- * moves remain reviewable, and keep the aggregate ceiling until these hooks
- * migrate to domain API modules.
+ * Route-layer JSON transport migration completed 2026-08; the ledger is empty
+ * and the aggregate budget is 0. Any new `fetchJson(` call or `api/client`
+ * import under web/src/routes/ fails this test.
+ *
+ * New JSON endpoints belong in web/src/api/<domain>.ts — see web/src/api/README.md
+ * and docs/standards/development-standard.md §24.4.
  */
-// Regenerated 2026-08 (R01 Chat workbench extract + current route client imports).
-// Counts may only stay equal or decrease from this snapshot without explicit review.
 const legacyRouteFetchJsonCallBudgets: Record<string, number> = {};
-// Route-layer fetchJson debt cleared; domain transports live under web/src/api/<domain>.ts.
 const legacyRouteFetchJsonAggregateBudget = 0;
 
 function walkSourceFiles(dir: string): string[] {
@@ -70,7 +68,7 @@ describe("full-stack frontend API boundary", () => {
     expect(countFetchJsonCalls('fetchJson<Foo>("/api/foo");\nfetchJson("/api/bar");')).toBe(2);
   });
 
-  it("keeps legacy route-layer transport debt explicit and non-growing", () => {
+  it("keeps route-layer fetchJson absent from the recorded budget map", () => {
     const currentCounts = currentRouteCallCounts();
     const paths = new Set([
       ...Object.keys(legacyRouteFetchJsonCallBudgets),
@@ -87,25 +85,25 @@ describe("full-stack frontend API boundary", () => {
     expect(drift).toEqual([]);
   });
 
-  it("keeps direct API client imports inside the same legacy ledger", () => {
+  it("keeps route files from importing api/client directly", () => {
     expect(currentRouteClientImports()).toEqual(
       Object.keys(legacyRouteFetchJsonCallBudgets).sort(),
     );
   });
 
-  it("keeps route-layer transport debt at or below the pre-extraction aggregate ceiling", () => {
+  it("keeps the route-layer fetchJson aggregate budget at zero", () => {
     const aggregateBudget = Object.values(legacyRouteFetchJsonCallBudgets)
       .reduce((total, count) => total + count, 0);
     expect(aggregateBudget).toBeLessThanOrEqual(legacyRouteFetchJsonAggregateBudget);
   });
 
-  it("keeps legacy fetchJson calls visible instead of hiding them behind aliases", () => {
+  it("rejects fetchJson import aliases in route files", () => {
     const offenders = currentRouteClientImports()
       .filter((path) => /\bfetchJson\s+as\s+/.test(readFileSync(join(sourceRoot, path), "utf-8")));
     expect(offenders).toEqual([]);
   });
 
-  it("keeps the debt ledger explicit and reviewable", () => {
+  it("keeps the empty budget map aligned with existing route files", () => {
     const missing = Object.keys(legacyRouteFetchJsonCallBudgets)
       .filter((path) => !existsSync(join(sourceRoot, path)));
     expect(missing).toEqual([]);
