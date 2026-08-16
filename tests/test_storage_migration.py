@@ -849,18 +849,16 @@ def test_sqlite_promote_is_no_clobber_when_destination_member_appears(tmp_path, 
     target = resolve_project_storage_paths(project)
     destination = target.data / "workspace" / "state.sqlite"
     destination_wal = destination.with_name(destination.name + "-wal")
-    original_promote = storage_migration_module._promote_sqlite_bundle
+    original_link = os.link
 
-    def promote_with_concurrent_destination_member(staging_dir, dest):
-        destination_wal.parent.mkdir(parents=True, exist_ok=True)
-        destination_wal.write_bytes(b"concurrent-wal")
-        return original_promote(staging_dir, dest)
+    def link_with_concurrent_wal_at_atomic_promote(src, dst):
+        dst_path = Path(dst)
+        if dst_path.name.endswith("-wal"):
+            dst_path.parent.mkdir(parents=True, exist_ok=True)
+            dst_path.write_bytes(b"concurrent-wal")
+        return original_link(src, dst)
 
-    monkeypatch.setattr(
-        storage_migration_module,
-        "_promote_sqlite_bundle",
-        promote_with_concurrent_destination_member,
-    )
+    monkeypatch.setattr(os, "link", link_with_concurrent_wal_at_atomic_promote)
 
     with pytest.raises(
         StorageMigrationError,
@@ -870,6 +868,89 @@ def test_sqlite_promote_is_no_clobber_when_destination_member_appears(tmp_path, 
 
     assert destination_wal.read_bytes() == b"concurrent-wal"
     assert not destination.exists()
+    assert not storage_migration_state_path(target).exists()
+
+
+def test_sqlite_promote_atomic_no_clobber_preserves_concurrent_target_at_link_race(
+    tmp_path, monkeypatch
+):
+    project, _projects_home, data_home = _project(tmp_path, monkeypatch)
+    database = data_home / "workspace" / "state.sqlite"
+    database.parent.mkdir(parents=True)
+    connection = _sqlite_database(database)
+    connection.execute("CREATE TABLE t (value INTEGER)")
+    connection.execute("INSERT INTO t VALUES (1)")
+    connection.commit()
+    connection.close()
+    target = resolve_project_storage_paths(project)
+    destination = target.data / "workspace" / "state.sqlite"
+    original_link = os.link
+
+    def link_with_concurrent_main_at_atomic_promote(src, dst):
+        dst_path = Path(dst)
+        if dst_path.name == "state.sqlite":
+            dst_io = storage_migration_module._io_path(dst_path)
+            dst_io.parent.mkdir(parents=True, exist_ok=True)
+            dst_io.write_bytes(b"concurrent-main")
+        return original_link(src, dst)
+
+    monkeypatch.setattr(os, "link", link_with_concurrent_main_at_atomic_promote)
+
+    with pytest.raises(
+        StorageMigrationError,
+        match=storage_migration_module.SQLITE_BUNDLE_DESTINATION_CONFLICT,
+    ):
+        apply_storage_migration(project)
+
+    assert storage_migration_module._io_path(destination).read_bytes() == b"concurrent-main"
+    assert not storage_migration_state_path(target).exists()
+
+
+def test_sqlite_promote_cleanup_skips_concurrently_replaced_members(tmp_path, monkeypatch):
+    project, _projects_home, data_home = _project(tmp_path, monkeypatch)
+    database = data_home / "workspace" / "state.sqlite"
+    database.parent.mkdir(parents=True)
+    connection = _sqlite_database(database)
+    connection.execute("CREATE TABLE t (value INTEGER)")
+    connection.execute("INSERT INTO t VALUES (1)")
+    connection.commit()
+    connection.close()
+    target = resolve_project_storage_paths(project)
+    destination = target.data / "workspace" / "state.sqlite"
+    destination_wal = destination.with_name(destination.name + "-wal")
+    original_atomic = storage_migration_module._atomic_promote_staged_member
+    original_link = os.link
+
+    def atomic_replace_main_after_promote(staged_io, final_io):
+        promoted = original_atomic(staged_io, final_io)
+        if Path(final_io).name == "state.sqlite":
+            storage_migration_module._io_path(final_io).unlink()
+            storage_migration_module._io_path(final_io).write_bytes(b"replaced-main")
+        return promoted
+
+    def link_with_concurrent_wal_at_atomic_promote(src, dst):
+        dst_path = Path(dst)
+        if dst_path.name.endswith("-wal"):
+            dst_io = storage_migration_module._io_path(dst_path)
+            dst_io.parent.mkdir(parents=True, exist_ok=True)
+            dst_io.write_bytes(b"concurrent-wal")
+        return original_link(src, dst)
+
+    monkeypatch.setattr(
+        storage_migration_module,
+        "_atomic_promote_staged_member",
+        atomic_replace_main_after_promote,
+    )
+    monkeypatch.setattr(os, "link", link_with_concurrent_wal_at_atomic_promote)
+
+    with pytest.raises(
+        StorageMigrationError,
+        match=storage_migration_module.SQLITE_BUNDLE_DESTINATION_CONFLICT,
+    ):
+        apply_storage_migration(project)
+
+    assert storage_migration_module._io_path(destination).read_bytes() == b"replaced-main"
+    assert storage_migration_module._io_path(destination_wal).read_bytes() == b"concurrent-wal"
     assert not storage_migration_state_path(target).exists()
 
 
@@ -923,18 +1004,16 @@ def test_sqlite_copy_failure_cleans_only_attempt_created_members(tmp_path, monke
     decoy_wal.write_bytes(b"decoy-wal")
     destination = target.data / "workspace" / "state.sqlite"
     destination_wal = destination.with_name(destination.name + "-wal")
-    original_promote = storage_migration_module._promote_sqlite_bundle
+    original_link = os.link
 
-    def promote_with_wal_race(staging_dir, dest):
-        destination_wal.parent.mkdir(parents=True, exist_ok=True)
-        destination_wal.write_bytes(b"race-wal")
-        return original_promote(staging_dir, dest)
+    def link_with_wal_race_at_atomic_promote(src, dst):
+        dst_path = Path(dst)
+        if dst_path.name.endswith("-wal"):
+            dst_path.parent.mkdir(parents=True, exist_ok=True)
+            dst_path.write_bytes(b"race-wal")
+        return original_link(src, dst)
 
-    monkeypatch.setattr(
-        storage_migration_module,
-        "_promote_sqlite_bundle",
-        promote_with_wal_race,
-    )
+    monkeypatch.setattr(os, "link", link_with_wal_race_at_atomic_promote)
 
     with pytest.raises(
         StorageMigrationError,

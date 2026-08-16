@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -46,6 +47,15 @@ class StorageMigrationEntry:
     sha256: str
     bundle_fingerprint: str = ""
     bundle_members: tuple[dict[str, object], ...] = ()
+
+
+@dataclass(frozen=True)
+class _PromotedSqliteMember:
+    path: str
+    device: int
+    inode: int
+    size: int
+    sha256: str
 
 
 @dataclass(frozen=True)
@@ -767,7 +777,7 @@ def _copy_sqlite_bundle_entry(entry: StorageMigrationEntry) -> tuple[int, int]:
     staging_dir = destination.parent / f".migration-staging-{os.getpid()}-{time.time_ns()}"
     staging_dir.mkdir(parents=True, exist_ok=False)
     staging_main = staging_dir / destination.name
-    promoted_members: tuple[Path, ...] = ()
+    promoted_members: tuple[_PromotedSqliteMember, ...] = ()
     try:
         for bundle_source in _sqlite_bundle_paths(source):
             bundle_source_io = _io_path(bundle_source)
@@ -820,8 +830,11 @@ def _copy_sqlite_bundle_entry(entry: StorageMigrationEntry) -> tuple[int, int]:
         shutil.rmtree(staging_dir, ignore_errors=True)
 
 
-def _promote_sqlite_bundle(staging_dir: Path, destination: Path) -> tuple[Path, ...]:
-    promoted: list[Path] = []
+def _promote_sqlite_bundle(
+    staging_dir: Path,
+    destination: Path,
+) -> tuple[_PromotedSqliteMember, ...]:
+    promoted: list[_PromotedSqliteMember] = []
     try:
         for bundle_path in _sqlite_bundle_paths(staging_dir / destination.name):
             staged = staging_dir / bundle_path.name
@@ -830,25 +843,79 @@ def _promote_sqlite_bundle(staging_dir: Path, destination: Path) -> tuple[Path, 
                 continue
             final_path = destination.parent / bundle_path.name
             final_io = _io_path(final_path)
-            if final_io.exists():
-                raise StorageMigrationError(
-                    f"destination sqlite bundle member already exists: {final_path} "
-                    f"({SQLITE_BUNDLE_DESTINATION_CONFLICT})"
-                )
-            final_io.parent.mkdir(parents=True, exist_ok=True)
-            os.replace(staged_io, final_io)
-            promoted.append(final_path.resolve())
+            promoted.append(_atomic_promote_staged_member(staged_io, final_io))
         return tuple(promoted)
     except Exception:
         _cleanup_attempt_sqlite_members(promoted)
         raise
 
 
-def _cleanup_attempt_sqlite_members(members: Iterable[Path]) -> None:
+def _atomic_promote_staged_member(staged_io: Path, final_io: Path) -> _PromotedSqliteMember:
+    final_io.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.link(staged_io, final_io)
+    except FileExistsError as exc:
+        raise _sqlite_destination_member_conflict(final_io) from exc
+    except OSError as exc:
+        if exc.errno in (errno.EEXIST, getattr(errno, "EALREADY", None)):
+            raise _sqlite_destination_member_conflict(final_io) from exc
+        raise StorageMigrationError(
+            f"failed to promote staged sqlite bundle member: {final_io}"
+        ) from exc
+    try:
+        staged_io.unlink()
+    except OSError as exc:
+        _rollback_linked_promotion(staged_io, final_io)
+        raise StorageMigrationError(
+            f"failed to finalize staged sqlite bundle member: {final_io}"
+        ) from exc
+    stat = final_io.stat()
+    return _PromotedSqliteMember(
+        path=str(final_io.resolve()),
+        device=int(stat.st_dev),
+        inode=int(stat.st_ino),
+        size=int(stat.st_size),
+        sha256=_sha256_file(final_io),
+    )
+
+
+def _sqlite_destination_member_conflict(final_io: Path) -> StorageMigrationError:
+    return StorageMigrationError(
+        f"destination sqlite bundle member already exists: {final_io} "
+        f"({SQLITE_BUNDLE_DESTINATION_CONFLICT})"
+    )
+
+
+def _rollback_linked_promotion(staged_io: Path, final_io: Path) -> None:
+    try:
+        if final_io.exists() and staged_io.exists():
+            final_stat = final_io.stat()
+            staged_stat = staged_io.stat()
+            if final_stat.st_dev == staged_stat.st_dev and final_stat.st_ino == staged_stat.st_ino:
+                final_io.unlink()
+                return
+        if final_io.exists():
+            final_io.unlink()
+    except OSError:
+        return
+
+
+def _cleanup_attempt_sqlite_members(members: Iterable[_PromotedSqliteMember]) -> None:
     for member in members:
-        member_io = _io_path(member)
-        if member_io.is_file():
-            member_io.unlink(missing_ok=True)
+        member_io = _io_path(Path(member.path))
+        if not member_io.is_file():
+            continue
+        try:
+            stat = member_io.stat()
+        except OSError:
+            continue
+        if int(stat.st_dev) != member.device or int(stat.st_ino) != member.inode:
+            continue
+        if int(stat.st_size) != member.size:
+            continue
+        if _sha256_file(member_io) != member.sha256:
+            continue
+        member_io.unlink(missing_ok=True)
 
 
 def _verify_sqlite_bundle_entry(
