@@ -25,6 +25,19 @@ def _coerce_text(value: Any) -> str:
     return str(value)
 
 
+def _maybe_json(value: Any) -> Any:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith("{") or text.startswith("["):
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                return value
+    return value
+
+
 def _coerce_bool(value: Any, default: bool) -> bool:
     if isinstance(value, bool):
         return value
@@ -32,7 +45,7 @@ def _coerce_bool(value: Any, default: bool) -> bool:
         return default
     if isinstance(value, (bytes, bytearray, memoryview)):
         value = bytes(value).decode("utf-8", errors="replace")
-    if isinstance(value, (int, float)):
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
         return bool(value)
     text = str(value).strip().lower()
     if not text:
@@ -45,16 +58,7 @@ def _coerce_bool(value: Any, default: bool) -> bool:
 
 
 def _as_mapping(value: Any) -> Dict[str, Any]:
-    if isinstance(value, (bytes, bytearray, memoryview)):
-        value = bytes(value).decode("utf-8", errors="replace")
-    if isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return {}
-        try:
-            value = json.loads(text)
-        except json.JSONDecodeError:
-            return {}
+    value = _maybe_json(value)
     if isinstance(value, Mapping):
         return dict(value)
     return {}
@@ -64,6 +68,18 @@ def _mapping_get(mapping: Mapping[str, Any], *keys: str) -> Any:
     for key in keys:
         if key in mapping:
             return mapping.get(key)
+    return None
+
+
+def _object_field(value: Any, *names: str) -> Any:
+    mapped = _as_mapping(value)
+    if mapped:
+        for name in names:
+            if name in mapped:
+                return mapped.get(name)
+    for name in names:
+        if hasattr(value, name):
+            return getattr(value, name)
     return None
 
 
@@ -82,10 +98,22 @@ def _coerce_nonnegative_int(value: Any, *, default: int = 0) -> int:
 
 
 def _coerce_item_list(value: Any) -> list:
+    value = _maybe_json(value)
     if value is None or isinstance(value, (str, bytes, bytearray, memoryview)):
         return []
     if isinstance(value, Mapping):
-        return [dict(value)]
+        nested = value.get("messages")
+        if nested is None:
+            nested = value.get("items")
+        if nested is None:
+            nested = value.get("history")
+        if nested is None:
+            nested = value.get("tool_history")
+        if nested is None:
+            nested = value.get("toolHistory")
+        if nested is not None:
+            return _coerce_item_list(nested)
+        return [dict(value)] if value else []
     try:
         return list(value)
     except TypeError:
@@ -224,8 +252,7 @@ class ResponseSurfaceController:
         mental_model_enabled: bool | None = None,
     ) -> Dict[str, str]:
         raw_content_clean = _coerce_text(
-            getattr(processed, "raw_content_clean", None)
-            or getattr(processed, "rawContentClean", None)
+            _object_field(processed, "raw_content_clean", "rawContentClean")
         )
         record_language_drift(raw_content_clean)
         record_inference_activity(raw_content_clean)
@@ -234,7 +261,7 @@ class ResponseSurfaceController:
             return {}
 
         state_info = _as_mapping(
-            getattr(processed, "state_info", None) or getattr(processed, "stateInfo", None)
+            _object_field(processed, "state_info", "stateInfo")
         )
         mood = _coerce_text(_mapping_get(state_info, "mood"))
         if mood:
@@ -350,26 +377,40 @@ class ResponseSurfaceController:
     @staticmethod
     def _extract_usage_payload(response: Any) -> Dict[str, Any]:
         for attr in ("usage_metadata", "usage", "usageMetadata"):
-            usage = _as_mapping(getattr(response, attr, None))
+            usage = _as_mapping(_object_field(response, attr))
             if usage:
                 return usage
 
         response_metadata = _as_mapping(
-            getattr(response, "response_metadata", None)
-            or getattr(response, "responseMetadata", None)
+            _object_field(response, "response_metadata", "responseMetadata")
         )
         for key in ("token_usage", "tokenUsage", "usage", "usage_metadata", "usageMetadata"):
             usage = _as_mapping(response_metadata.get(key))
             if usage:
                 return usage
 
+        mapped = _as_mapping(response)
+        if mapped and any(
+            key in mapped
+            for key in (
+                "input_tokens",
+                "inputTokens",
+                "prompt_tokens",
+                "promptTokens",
+                "output_tokens",
+                "outputTokens",
+                "completion_tokens",
+                "completionTokens",
+            )
+        ):
+            return mapped
+
         return {}
 
     @staticmethod
     def _extract_usage_observation(response: Any) -> Dict[str, Any]:
         response_metadata = _as_mapping(
-            getattr(response, "response_metadata", None)
-            or getattr(response, "responseMetadata", None)
+            _object_field(response, "response_metadata", "responseMetadata")
         )
         return _as_mapping(
             _mapping_get(response_metadata, "usage_observation", "usageObservation")
@@ -418,7 +459,7 @@ class ResponseSurfaceController:
     ) -> Dict[str, Any]:
         count = _coerce_nonnegative_int(tool_call_count)
         visible_text = _coerce_text(
-            getattr(processed, "visible_text", None) or getattr(processed, "visibleText", None)
+            _object_field(processed, "visible_text", "visibleText")
         )
         if not _coerce_text(raw_content).strip():
             return {
