@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 // @ts-expect-error Vitest runs this contract in Node; the web project intentionally omits global Node types.
 import { readFileSync } from "node:fs";
 import selfEvolutionApiSource from "../api/selfEvolution.ts?raw";
+import evolutionApiSource from "../api/evolution.ts?raw";
 import routeSource from "./EvolutionRoute.tsx?raw";
 import runMutationsSource from "./evolution/useEvolutionRunMutations.ts?raw";
 import activeRunMonitorPanelSource from "./EvolutionActiveRunMonitorPanel.tsx?raw";
@@ -147,7 +148,8 @@ describe("EvolutionRoute library user flow contract", () => {
 
   it("keeps candidate worktree review out of the live left rail", () => {
     expect(routeSource).toContain("startWorktreeRunMutation");
-    expect(runMutationsSource).toContain('"/api/evolution/worktree-runs"');
+    expect(runMutationsSource).toContain("createEvolutionWorktreeRun<");
+    expect(evolutionApiSource).toContain('"/api/evolution/worktree-runs"');
     expect(routeSource).not.toContain("SupervisedWorktreeReviewPanel");
     expect(routeSource).not.toContain("worktreeActionMutation");
     expect(routeSource).not.toContain("triggerWorktreeReviewApproval");
@@ -164,7 +166,8 @@ describe("EvolutionRoute library user flow contract", () => {
     );
 
     expect(routeSource).toContain("startWorktreeRunMutation");
-    expect(runMutationsSource).toContain('"/api/evolution/worktree-runs"');
+    expect(runMutationsSource).toContain("createEvolutionWorktreeRun<");
+    expect(evolutionApiSource).toContain('"/api/evolution/worktree-runs"');
     expect(routeSource).toContain("approvalWorktreeActionMutation");
     expect(terminateHandler).toContain("if (supervisedWorktreeLiveRun)");
     expect(terminateHandler).toContain('action: "terminate"');
@@ -188,7 +191,8 @@ describe("EvolutionRoute library user flow contract", () => {
   it("merges supervised datasets and bundles into one source picker", () => {
     expect(routeSource).toContain("workbenchCatalogQuery");
     expect(routeSource).toContain("queryKeys.evolutionWorkbench()");
-    expect(routeSource).toContain('"/api/evolution/workbench"');
+    expect(routeSource).toContain("fetchEvolutionWorkbench<");
+    expect(evolutionApiSource).toContain('"/api/evolution/workbench"');
     expect(routeSource).toContain("const workbenchControl = workbenchCatalogQuery.data");
     expect(routeSource).not.toContain("workbenchCatalogQuery.data ?? workspaceSnapshot?.workbench");
     expect(routeSource).toContain("workbenchCatalogLoading");
@@ -345,7 +349,8 @@ describe("EvolutionRoute library user flow contract", () => {
 
   it("keeps the latest finished supervised run out of the live monitor and into the closed-loop ledger", () => {
     expect(routeSource).toContain("queryKeys.evolutionWorkspaceSnapshot()");
-    expect(routeSource).toContain('"/api/evolution/workspace-snapshot"');
+    expect(routeSource).toContain("fetchEvolutionWorkspaceSnapshot<");
+    expect(evolutionApiSource).toContain('"/api/evolution/workspace-snapshot"');
     expect(routeSource).toContain("latestSupervisedRunSnapshot");
     expect(routeSource).toContain("const monitoredRun = effectiveActiveRunSnapshot");
     expect(routeSource).toContain("?? visibleLiveRunSnapshot;");
@@ -372,7 +377,8 @@ describe("EvolutionRoute library user flow contract", () => {
 
   it("loads self-evolution first paint from its compact self-only snapshot", () => {
     expect(routeSource).toContain("queryKeys.evolutionSelfWorkspaceSnapshot()");
-    expect(routeSource).toContain('"/api/evolution/self/workspace-snapshot"');
+    expect(routeSource).toContain("fetchSelfEvolutionWorkspaceSnapshot<");
+    expect(evolutionApiSource).toContain('"/api/evolution/self/workspace-snapshot"');
     expect(routeSource).not.toContain("queryKeys.evolutionSelfOverview()");
     expect(routeSource).not.toContain('"/api/evolution/self/overview"');
     expect(routeSource).not.toContain("queryKeys.evolutionSelfTransactions()");
@@ -397,7 +403,8 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("selectedSelfObservationRunId");
     expect(runMutationsSource).toContain("options.setSelectedSelfObservationRunId(snapshot.runId)");
     expect(routeSource).toContain("queryKeys.evolutionSelfObservationRun(selectedSelfObservationRunId || \"__none__\")");
-    expect(routeSource).toContain("`/api/evolution/self/observation-runs/${encodeURIComponent(selectedSelfObservationRunId)}`");
+    expect(routeSource).toContain("fetchSelfObservationRun<");
+    expect(evolutionApiSource).toContain("/api/evolution/self/observation-runs/${encodeURIComponent(runId)}");
     expect(routeSource).toContain("const selfObservationRun = selfWorkspaceSnapshot?.observationActiveRun");
     expect(routeSource).toContain("?? selectedSelfObservationRunQuery.data");
     expect(routeSource).toContain("observationRun={selfObservationRun ?? null}");

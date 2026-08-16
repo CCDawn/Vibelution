@@ -4,7 +4,11 @@
 import { useMutation } from "@tanstack/react-query";
 import type { Dispatch, SetStateAction } from "react";
 
-import { fetchJson } from "../../api/client";
+import {
+  bulkDeleteEvolutionProposals,
+  deleteEvolutionProposal,
+  updateEvolutionProposal,
+} from "../../api/evolution";
 import type {
   EvolutionProposalBulkDeleteResponse,
   EvolutionProposalDeleteResponse,
@@ -46,11 +50,7 @@ export function useEvolutionProposalMutations(options: UseEvolutionProposalMutat
 
   const updateProposalMutation = useMutation({
     mutationFn: ({ sessionId, draft }: { sessionId: string; draft: Record<string, unknown> }) =>
-      fetchJson<EvolutionProposalUpdateResponse>(`/api/evolution/proposals/${sessionId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(draft),
-      }),
+      updateEvolutionProposal<EvolutionProposalUpdateResponse>(sessionId, draft),
     onSuccess: async (payload) => {
       options.setProposalEditFeedback(payload.summary);
       options.setProposalEditDraft(options.proposalEditDraftFromDetail(payload.proposal));
@@ -63,9 +63,7 @@ export function useEvolutionProposalMutations(options: UseEvolutionProposalMutat
 
   const deleteProposalMutation = useMutation({
     mutationFn: (sessionId: string) =>
-      fetchJson<EvolutionProposalDeleteResponse>(`/api/evolution/proposals/${sessionId}`, {
-        method: "DELETE",
-      }),
+      deleteEvolutionProposal<EvolutionProposalDeleteResponse>(sessionId),
     onSuccess: async (payload) => {
       options.setLibraryFeedback(payload.summary);
       options.setSelectedProposalRunIds((current) => current.filter((item) => item !== payload.sessionId));
@@ -76,11 +74,7 @@ export function useEvolutionProposalMutations(options: UseEvolutionProposalMutat
 
   const bulkDeleteMutation = useMutation({
     mutationFn: (sessionIds: string[]) =>
-      fetchJson<EvolutionProposalBulkDeleteResponse>("/api/evolution/proposals/delete", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionIds }),
-      }),
+      bulkDeleteEvolutionProposals<EvolutionProposalBulkDeleteResponse>(sessionIds),
     onSuccess: async (payload) => {
       options.setLibraryFeedback(payload.summary);
       options.setSelectedProposalRunIds([]);
@@ -102,9 +96,7 @@ export function useEvolutionProposalMutations(options: UseEvolutionProposalMutat
 
   const deleteRunRecordMutation = useMutation({
     mutationFn: (sessionId: string) =>
-      fetchJson<EvolutionProposalDeleteResponse>(`/api/evolution/proposals/${sessionId}`, {
-        method: "DELETE",
-      }),
+      deleteEvolutionProposal<EvolutionProposalDeleteResponse>(sessionId),
     onSuccess: async (payload) => {
       options.setRunRecordsFeedback(payload.summary);
       options.setSelectedRunIds((current) => current.filter((item) => item !== payload.sessionId));
@@ -116,11 +108,7 @@ export function useEvolutionProposalMutations(options: UseEvolutionProposalMutat
 
   const bulkDeleteRunRecordsMutation = useMutation({
     mutationFn: (sessionIds: string[]) =>
-      fetchJson<EvolutionProposalBulkDeleteResponse>("/api/evolution/proposals/delete", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionIds }),
-      }),
+      bulkDeleteEvolutionProposals<EvolutionProposalBulkDeleteResponse>(sessionIds),
     onSuccess: async (payload) => {
       const deletedIds = new Set(
         payload.results.filter((item) => item.status === "deleted").map((item) => item.sessionId),

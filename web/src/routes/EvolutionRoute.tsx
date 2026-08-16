@@ -4,8 +4,14 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, type CSSProperties, type KeyboardEvent, type PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
-import { fetchJson } from "../api/client";
 import { fetchPublicConfig } from "../api/config";
+import {
+  fetchEvolutionProposalDetail,
+  fetchEvolutionWorkbench,
+  fetchEvolutionWorkspaceSnapshot,
+  fetchSelfEvolutionWorkspaceSnapshot,
+  fetchSelfObservationRun,
+} from "../api/evolution";
 import { queryKeys } from "../api/queryKeys";
 import {
   EvolutionActiveRun,
@@ -383,7 +389,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
 
   const workspaceSnapshotQuery = useQuery({
     queryKey: queryKeys.evolutionWorkspaceSnapshot(),
-    queryFn: () => fetchJson<EvolutionWorkspaceSnapshot>("/api/evolution/workspace-snapshot"),
+    queryFn: () => fetchEvolutionWorkspaceSnapshot<EvolutionWorkspaceSnapshot>(),
     // R3: idle workspace — slower poll; fast only when an active run is present (see below after data).
     refetchInterval: (query) => {
       const snapshot = query.state.data as EvolutionWorkspaceSnapshot | undefined;
@@ -398,14 +404,14 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   });
   const workbenchCatalogQuery = useQuery({
     queryKey: queryKeys.evolutionWorkbench(),
-    queryFn: () => fetchJson<EvolutionWorkbench>("/api/evolution/workbench"),
+    queryFn: () => fetchEvolutionWorkbench<EvolutionWorkbench>(),
     refetchInterval: resolvePollingInterval(pageVisible, 15_000),
     refetchIntervalInBackground: false,
     enabled: supervisedTrackQueriesEnabled,
   });
   const selfWorkspaceSnapshotQuery = useQuery({
     queryKey: queryKeys.evolutionSelfWorkspaceSnapshot(),
-    queryFn: () => fetchJson<SelfEvolutionWorkspaceSnapshot>("/api/evolution/self/workspace-snapshot"),
+    queryFn: () => fetchSelfEvolutionWorkspaceSnapshot<SelfEvolutionWorkspaceSnapshot>(),
     refetchInterval: (query) => {
       const snapshot = query.state.data as SelfEvolutionWorkspaceSnapshot | undefined;
       const hasActiveRun = Boolean(
@@ -421,7 +427,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const selectedSelfObservationRunQuery = useQuery({
     queryKey: queryKeys.evolutionSelfObservationRun(selectedSelfObservationRunId || "__none__"),
     queryFn: () =>
-      fetchJson<SelfObservationRun>(`/api/evolution/self/observation-runs/${encodeURIComponent(selectedSelfObservationRunId)}`),
+      fetchSelfObservationRun<SelfObservationRun>(selectedSelfObservationRunId),
     // R3: 2s only while the selected observation run is still active/in-flight.
     refetchInterval: (query) => {
       const run = query.state.data as SelfObservationRun | undefined;
@@ -1327,7 +1333,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const proposalDetailQuery = useQuery({
     queryKey: queryKeys.evolutionProposal(selectedProposalRunId ?? "__none__"),
     queryFn: () =>
-      fetchJson<EvolutionProposalDetail>(`/api/evolution/proposals/${selectedProposalRunId}`),
+      fetchEvolutionProposalDetail<EvolutionProposalDetail>(selectedProposalRunId ?? ""),
     enabled:
       activeTrack === "supervised"
       && evolutionView === "library"

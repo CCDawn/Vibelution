@@ -33,3 +33,17 @@ export function executeSelfEvolutionAutonomousLoopAction(
     },
   );
 }
+
+export function fetchSelfEvolutionAutonomousActiveRun<T>(): Promise<T> {
+  return fetchJson<T>("/api/evolution/self/autonomous-runs/active");
+}
+
+export function fetchSelfEvolutionAutonomousLatestRun<T>(): Promise<T> {
+  return fetchJson<T>("/api/evolution/self/autonomous-runs/latest");
+}
+
+export function fetchSelfEvolutionAutonomousRun<T>(runId: string): Promise<T> {
+  return fetchJson<T>(
+    `/api/evolution/self/autonomous-runs/${encodeURIComponent(runId)}`,
+  );
+}

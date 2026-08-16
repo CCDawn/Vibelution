@@ -5,7 +5,15 @@ import { ArrowUpRight, CheckCircle2, LibraryBig, LoaderCircle, Search, Square, S
 import { useEffect, useMemo, useState } from "react";
 
 
-import { fetchJson } from "../api/client";
+import {
+  bulkDeleteEvolutionChatReview,
+  decideEvolutionChatReview,
+  fetchEvolutionChatReviewCandidate,
+  fetchEvolutionChatReviewQueue,
+  fetchEvolutionWorkbench,
+  fetchEvolutionWorkspaceSnapshot,
+  postEvolutionWorktreeRunAction,
+} from "../api/evolution";
 import { queryKeys } from "../api/queryKeys";
 import {
   EvolutionChatReviewBulkDeleteResponse,
@@ -75,19 +83,19 @@ export function SupervisedReviewRoute() {
 
   const reviewQuery = useQuery({
     queryKey: queryKeys.evolutionChatReview(),
-    queryFn: () => fetchJson<EvolutionChatReviewQueue>("/api/evolution/chat-review"),
+    queryFn: () => fetchEvolutionChatReviewQueue<EvolutionChatReviewQueue>(),
     refetchInterval: resolvePollingInterval(pageVisible, 8_000),
     refetchIntervalInBackground: false,
   });
   const workbenchQuery = useQuery({
     queryKey: queryKeys.evolutionWorkbench(),
-    queryFn: () => fetchJson<EvolutionWorkbench>("/api/evolution/workbench"),
+    queryFn: () => fetchEvolutionWorkbench<EvolutionWorkbench>(),
     refetchInterval: resolvePollingInterval(pageVisible, 8_000),
     refetchIntervalInBackground: false,
   });
   const workspaceSnapshotQuery = useQuery({
     queryKey: queryKeys.evolutionWorkspaceSnapshot(),
-    queryFn: () => fetchJson<EvolutionWorkspaceSnapshot>("/api/evolution/workspace-snapshot"),
+    queryFn: () => fetchEvolutionWorkspaceSnapshot<EvolutionWorkspaceSnapshot>(),
     refetchInterval: resolvePollingInterval(pageVisible, 8_000),
     refetchIntervalInBackground: false,
   });
@@ -97,21 +105,15 @@ export function SupervisedReviewRoute() {
       if (!selectedCandidate) {
         throw new Error(lang === "zh" ? "当前没有选中的样本。" : "There is no selected sample.");
       }
-      return fetchJson<EvolutionChatReviewDecisionResponse>(
-        `/api/evolution/chat-review/${selectedCandidate.candidateId}/decision`,
+      return decideEvolutionChatReview<EvolutionChatReviewDecisionResponse>(
+        selectedCandidate.candidateId,
         {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            decision: draftDecision,
-            reviewerNote,
-            reasonCode,
-            errorType,
-            correctPrinciple,
-            idealBehavior,
-          }),
+          decision: draftDecision,
+          reviewerNote,
+          reasonCode,
+          errorType,
+          correctPrinciple,
+          idealBehavior,
         },
       );
     },
@@ -130,15 +132,9 @@ export function SupervisedReviewRoute() {
 
   const bulkDeleteMutation = useMutation({
     mutationFn: () => {
-      return fetchJson<EvolutionChatReviewBulkDeleteResponse>("/api/evolution/chat-review/delete", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          candidateIds: selectedCandidateIds,
-          reviewerNote: "bulk discard from review workspace",
-        }),
+      return bulkDeleteEvolutionChatReview<EvolutionChatReviewBulkDeleteResponse>({
+        candidateIds: selectedCandidateIds,
+        reviewerNote: "bulk discard from review workspace",
       });
     },
     onMutate: () => {
@@ -156,15 +152,9 @@ export function SupervisedReviewRoute() {
   });
   const worktreeActionMutation = useMutation({
     mutationFn: (variables: { runId: string; action: string; reviewerNote?: string }) =>
-      fetchJson<SupervisedWorktreeRun>(`/api/evolution/worktree-runs/${variables.runId}/actions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          action: variables.action,
-          reviewerNote: variables.reviewerNote ?? "",
-        }),
+      postEvolutionWorktreeRunAction<SupervisedWorktreeRun>(variables.runId, {
+        action: variables.action,
+        reviewerNote: variables.reviewerNote,
       }),
     onSuccess: async () => {
       await evolutionWorkspaceCache.afterWorktreeRunChanged();
@@ -209,8 +199,8 @@ export function SupervisedReviewRoute() {
     ?? null;
   const candidateDetailQuery = useQuery({
     queryKey: queryKeys.evolutionChatReviewCandidate(selectedCandidate?.candidateId ?? ""),
-    queryFn: () => fetchJson<EvolutionChatReviewCandidate>(
-      `/api/evolution/chat-review/${encodeURIComponent(selectedCandidate?.candidateId ?? "")}`,
+    queryFn: () => fetchEvolutionChatReviewCandidate<EvolutionChatReviewCandidate>(
+      selectedCandidate?.candidateId ?? "",
     ),
     enabled: Boolean(selectedCandidate?.candidateId),
     refetchInterval: false,

@@ -25,15 +25,12 @@ const routeTestPattern = /\.test\.(ts|tsx)$/;
 // Counts may only stay equal or decrease from this snapshot without explicit review.
 const legacyRouteFetchJsonCallBudgets: Record<string, number> = {
   "routes/AgentsRoute.tsx": 1,
-  "routes/EvolutionRoute.tsx": 5,
   "routes/GitRoute.tsx": 8,
   "routes/LogsRoute.tsx": 5,
   "routes/PetRoute.tsx": 1,
   "routes/RuntimeScenesPane.tsx": 4,
   "routes/SelfEvolutionTrack.tsx": 2,
   "routes/SkillsRoute.tsx": 2,
-  "routes/SupervisedReviewRoute.tsx": 7,
-  "routes/SupervisedWorkspaceControls.tsx": 1,
   "routes/ToolsRoute.tsx": 9,
   "routes/UsageRoute.tsx": 1,
   "routes/agent-create/AgentCreateWizardDialog.tsx": 1,
@@ -41,10 +38,9 @@ const legacyRouteFetchJsonCallBudgets: Record<string, number> = {
   "routes/chat/CliAgentRunTerminalPanel.tsx": 3,
   "routes/chat/useChatCliAgentTerminal.ts": 1,
   "routes/config/useConfigWorkspaceQueries.ts": 1,
-  "routes/evolution/useEvolutionProposalMutations.ts": 5,
-  "routes/evolution/useEvolutionRunMutations.ts": 8,
 };
 // Task 9: ResearchFlowCanvasRoute.tsx + ResearchRoute.tsx fully removed (redirect-only shells deleted).
+// Evolution FE transports moved to web/src/api/evolution.ts.
 const legacyRouteFetchJsonAggregateBudget = 69;
 
 function walkSourceFiles(dir: string): string[] {
