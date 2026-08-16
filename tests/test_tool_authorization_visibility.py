@@ -195,3 +195,24 @@ def test_binding_coerces_bytes_json_and_string_false_restart_focus():
     assert guard_restart_focus_tool("apply_diff_edit_tool", restart_focus=b"off") is None
     assert guard_restart_focus_tool(b"trigger_self_restart_tool", restart_focus="true") is None
     assert guard_restart_focus_tool("apply_diff_edit_tool", restart_focus="true")
+    runtime = bind_authorization_runtime(
+        current_runtime=memoryview(b'{"agent_id":"agent-view"}'),
+        turn_runtime=bytearray(b'{"run_id":"turn-view","mode":"chat"}'),
+        agent_binding=None,
+    )
+    assert runtime["agentId"] == "agent-view"
+    assert runtime["runId"] == "turn-view"
+    assert is_tool_visible_to_agent(
+        memoryview(b"read_file_tool"),
+        bytearray(b'["read_file_tool"]'),
+    ) is True
+    assert is_tool_visible_to_agent(
+        "read_file_tool",
+        {"read_file_tool": bytearray(b"false"), "write_file_tool": "true"},
+    ) is False
+    assert is_tool_visible_to_agent(
+        "write_file_tool",
+        {"read_file_tool": bytearray(b"false"), "write_file_tool": "true"},
+    ) is True
+    assert guard_restart_focus_tool("apply_diff_edit_tool", restart_focus=bytearray(b"false")) is None
+    assert materialize_authorized_tools("read_file_tool", report) == []
