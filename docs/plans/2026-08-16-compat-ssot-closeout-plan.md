@@ -137,7 +137,7 @@ flowchart TB
 
 ### Phase 1 — 存储 SSOT 切换（最高风险门）
 
-**Task T1: 存储 migration apply + authoritative 切换**
+**Task T1: 存储 migration apply + authoritative 切换** — **done**（2026-08-16）
 
 | 项 | 内容 |
 | --- | --- |
@@ -149,7 +149,7 @@ flowchart TB
 | **Rollback** | `rollback` 子命令（归档 marker，保留双份数据） |
 | **验证** | storage pytest；新 runtime scene 落外部 `logs/`；`activePaths.memory` 指向 external |
 
-**Task T2: 删除/收缩 legacy 存储读分支**
+**Task T2: 删除/收缩 legacy 存储读分支** — **blocked**（门控至 2026-08-18；T1 稳定 ≥48h）
 
 | 项 | 内容 |
 | --- | --- |
@@ -158,7 +158,7 @@ flowchart TB
 | **交付** | marker 存在时不再 fallback 到 repo 内路径；删除 `core/infrastructure/storage_paths.py` re-export（codemod → `vibelution_storage`） |
 | **Tier** | `HIGH_RISK` |
 
-**Task T3: 工具与 audit 路径对齐**
+**Task T3: 工具与 audit 路径对齐** — **done**（2026-08-16；commit `62dbba053`）
 
 | 项 | 内容 |
 | --- | --- |
@@ -197,7 +197,7 @@ flowchart TB
 
 ### Phase 3 — 前端域收敛
 
-**Task H1: 前端 hygiene（可与 T0 并行）**
+**Task H1: 前端 hygiene（可与 T0 并行）** — **done**（2026-08-16；`ead810014` · `1b7dbd92d`）
 
 | 项 | 内容 |
 | --- | --- |
@@ -236,11 +236,12 @@ flowchart TB
 | **交付** | 移除零流量 `Legacy*Redirect` |
 | **Tier** | `STANDARD_TASK` |
 
-**Task D1: 文档与引用治理（全程并行）**
+**Task D1: 文档与引用治理（全程并行）** — **in progress**
 
 | 项 | 内容 |
 | --- | --- |
 | **交付** | living doc 清 legacy 误引；closed plans → archive；可选在 development-standard 增「兼容退役 checklist」链到本文 |
+| **Done slice** | 本 plan 任务状态与 Sprint 表；[01-authority-and-paths](../ops/config/01-authority-and-paths.md) 迁移后路径表述 |
 | **Tier** | `FAST_PATCH` ~ `STANDARD_TASK` |
 
 **Task H2: Worktree / 分支卫生**
@@ -338,7 +339,7 @@ HeroUI prop 别名 · route re-export barrels · Vitest shims · archive 正文 
 
 | Sprint | 任务 | 产出 |
 | --- | --- | --- |
-| **S1** | T0 + H1 + H2 + D1（部分） | 基线账本、FE hygiene、worktree 干净 |
+| **S1** | T0 + ~~H1~~ + H2 + D1（部分） | 基线账本；**H1 done**；worktree 卫生仍待 H2 |
 | **S2** | ~~**T1 + T3**~~（**T1 done 2026-08-16**；T3 audit/reset done） | 存储 authoritative；工具路径对齐 |
 | **S3** | T2 + T5 + T4a | legacy 读分支删除、Launcher 收尾、LLM shim 首批 |
 | **S4+** | T6 · T7 · T8 · T4b–d · T9 | 域合并与物理清理 |

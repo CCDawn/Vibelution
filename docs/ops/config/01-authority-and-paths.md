@@ -12,9 +12,11 @@
 | Runtime / logs / cache | `…\instances\<instanceId>\{runtime,logs,cache}` |
 | Project memory | `…\memory`（跨实例共享，不是运行时事实源） |
 
-旧版 `%USERPROFILE%\Documents\Vibelution\data` 与项目根
-`workspace/.runtime/logs/.docs/project-memory` 只在迁移完成前保持活跃。
-迁移规则见 [ADR 0008](../../adr/0008-project-mutable-state-lives-outside-source-tree.md)。
+旧版 `%USERPROFILE%\Documents\Vibelution\data` 与项目根内的
+`logs/`、`.runtime/`、`.cache/`、`.docs/project-memory/` 在
+`activePaths.migrated=true` 后**仅作只读 rollback 保留**，不再是 active 读路径。
+迁移规则见 [ADR 0008](../../adr/0008-project-mutable-state-lives-outside-source-tree.md)；
+收敛任务见 [compat SSOT closeout plan](../../plans/2026-08-16-compat-ssot-closeout-plan.md)。
 
 ## 环境变量
 

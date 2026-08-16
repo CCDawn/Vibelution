@@ -105,7 +105,7 @@ For non-trivial state, config, lifecycle, cache, registry, memory, or generated-
 
 If the table cannot be filled in, the design is not ready for implementation.
 
-Dual writes, compatibility aliases, copied defaults, duplicated lifecycle status, and parallel registries are temporary migration scaffolding only. They require an explicit owner, expiry or removal trigger, validation evidence, and cleanup plan before stable merge.
+Dual writes, compatibility aliases, copied defaults, duplicated lifecycle status, and parallel registries are temporary migration scaffolding only. They require an explicit owner, expiry or removal trigger, validation evidence, and cleanup plan before stable merge. Active cross-domain compat retirement is tracked in [compat SSOT closeout plan](../plans/2026-08-16-compat-ssot-closeout-plan.md).
 
 Validation anchor: changes must prove that writes go to the canonical source, derived views refresh from it, stale derived data cannot override it, and old sources cannot silently become active again.
 
