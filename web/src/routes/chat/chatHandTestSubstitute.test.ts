@@ -278,8 +278,7 @@ describe("chat hand-test substitute: CLI terminal lifecycle", () => {
       { alive: true, status: "running", terminalSessionId: "term-7" } as never,
     )).toBe(true);
     expect(cliTerminalHookSource).toContain("window.confirm(");
-    expect(cliTerminalHookSource).toContain("/api/cli-agents/terminal-sessions/");
-    expect(cliTerminalHookSource).toContain("/stop");
+    expect(cliTerminalHookSource).toContain("stopCliAgentTerminalSession");
     expect(routeSource).toContain("useChatCliAgentTerminal");
     expect(routeSource).toContain("<ChatCliAgentTerminalStack");
   });
