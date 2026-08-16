@@ -34,6 +34,8 @@
 | [button-selection.md](button-selection.md) | **按钮选型** V / VNative / 禁止裸 button | ~50 | 不改按钮/表单提交控件 |
 | [install-windows.md](install-windows.md) | Windows 最终用户安装（人类） | ~55 | **Agent 开发一律跳过** |
 
+**FE 路由索引：** [`web/src/routes/README.md`](../../web/src/routes/README.md)（非 Chat/Teams 30 秒表；~80 行）
+
 ## 权威（冲突时）
 
 ```text

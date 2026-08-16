@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,7 @@ from core.infrastructure.storage_migration import (
     StorageMigrationEntry,
     StorageMigrationError,
     apply_storage_migration,
+    assess_storage_migration_readiness,
     plan_storage_migration,
     rollback_storage_switch,
 )
@@ -327,7 +329,7 @@ def test_independent_clone_memory_conflict_keeps_unregistered_clone_on_legacy(
 
     assert resolve_project_memory_home(clone_a) == target.memory
     assert resolve_project_memory_home(clone_b) == memory_b
-    with pytest.raises(StorageMigrationError, match="destination conflicts"):
+    with pytest.raises(StorageMigrationError, match="destination_conflict"):
         apply_storage_migration(clone_b)
 
     assert resolve_project_memory_home(clone_b) == memory_b
@@ -345,12 +347,209 @@ def test_conflict_fails_without_switching_or_overwriting(tmp_path, monkeypatch):
     destination.parent.mkdir(parents=True)
     destination.write_text("newer\n", encoding="utf-8")
 
-    with pytest.raises(StorageMigrationError, match="destination conflicts"):
+    with pytest.raises(StorageMigrationError, match="destination_conflict"):
         apply_storage_migration(project)
 
     assert destination.read_text(encoding="utf-8") == "newer\n"
     assert not storage_migration_state_path(target).exists()
     assert resolve_active_project_storage_paths(project).migrated is False
+
+
+def test_readiness_blocks_active_claim_and_apply(tmp_path, monkeypatch):
+    project, _projects_home, data_home = _project(tmp_path, monkeypatch)
+    source = data_home / "workspace" / "agent.json"
+    source.parent.mkdir(parents=True)
+    source.write_text("data\n", encoding="utf-8")
+    registry = project / ".docs" / "project-memory" / "agent-registry.json"
+    registry.parent.mkdir(parents=True)
+    registry.write_text(
+        json.dumps(
+            {
+                "workClaims": {
+                    "claim-1": {
+                        "status": "active",
+                        "branch": "codex/test",
+                        "worktree": str(project),
+                    }
+                }
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    readiness = assess_storage_migration_readiness(project)
+
+    assert readiness["ready"] is False
+    assert readiness["cachePolicy"] == "cold_rebuild"
+    assert any(blocker["code"] == "active_work_present" for blocker in readiness["blockers"])
+    with pytest.raises(StorageMigrationError, match="readiness blocked"):
+        apply_storage_migration(project)
+
+
+def test_readiness_fail_closed_when_runtime_manager_state_unreadable(tmp_path, monkeypatch):
+    project, _projects_home, data_home = _project(tmp_path, monkeypatch)
+    source = data_home / "workspace" / "agent.json"
+    source.parent.mkdir(parents=True)
+    source.write_text("data\n", encoding="utf-8")
+    target = resolve_project_storage_paths(project)
+    manager_dir = target.runtime / "runtime-manager"
+    manager_dir.mkdir(parents=True)
+    (manager_dir / "state.json").write_text("{not-json", encoding="utf-8")
+
+    readiness = assess_storage_migration_readiness(project)
+
+    assert readiness["ready"] is False
+    assert any(
+        blocker["code"] == "runtime_writer_state_uncertain" for blocker in readiness["blockers"]
+    )
+
+
+def test_readiness_blocks_destination_conflict_without_apply(tmp_path, monkeypatch):
+    project, _projects_home, data_home = _project(tmp_path, monkeypatch)
+    source = data_home / "workspace" / "agent.json"
+    source.parent.mkdir(parents=True)
+    source.write_text("legacy\n", encoding="utf-8")
+    target = resolve_project_storage_paths(project)
+    destination = target.data / "workspace" / "agent.json"
+    destination.parent.mkdir(parents=True)
+    destination.write_text("newer\n", encoding="utf-8")
+
+    readiness = assess_storage_migration_readiness(project)
+
+    assert readiness["ready"] is False
+    assert readiness["destinationConflicts"]
+    assert any(blocker["code"] == "destination_conflict" for blocker in readiness["blockers"])
+
+
+def test_apply_aborts_when_source_changes_without_marker(tmp_path, monkeypatch):
+    project, _projects_home, data_home = _project(tmp_path, monkeypatch)
+    source = data_home / "workspace" / "agent.json"
+    source.parent.mkdir(parents=True)
+    source.write_text("legacy\n", encoding="utf-8")
+    target = resolve_project_storage_paths(project)
+    original_plan = plan_storage_migration(project)
+
+    original_copy = storage_migration_module._copy_and_verify_entries
+
+    def mutate_then_copy(*args, **kwargs):
+        source.write_text("changed\n", encoding="utf-8")
+        return original_copy(*args, **kwargs)
+
+    monkeypatch.setattr(storage_migration_module, "_copy_and_verify_entries", mutate_then_copy)
+
+    with pytest.raises(StorageMigrationError, match="legacy source changed during copy"):
+        apply_storage_migration(project)
+
+    assert not storage_migration_state_path(target).exists()
+    assert _plan_signature(plan_storage_migration(project)) != _plan_signature(original_plan)
+
+
+def test_sqlite_bundle_is_discovered_copied_and_sidecars_are_not_plan_entries(
+    tmp_path, monkeypatch
+):
+    project, _projects_home, data_home = _project(tmp_path, monkeypatch)
+    database = data_home / "workspace" / "state.sqlite"
+    database.parent.mkdir(parents=True)
+    connection = sqlite3.connect(database)
+    connection.execute("CREATE TABLE t (value INTEGER)")
+    connection.execute("PRAGMA journal_mode=WAL")
+    connection.execute("INSERT INTO t VALUES (1)")
+    connection.commit()
+    connection.close()
+    target = resolve_project_storage_paths(project)
+
+    plan = plan_storage_migration(project)
+    bundles = storage_migration_module._discover_sqlite_bundles(plan)
+
+    assert bundles
+    assert all(not entry.relative_path.endswith("-wal") for entry in plan.entries)
+    apply_storage_migration(project)
+    copied = target.data / "workspace" / "state.sqlite"
+    assert copied.exists()
+    ok, detail = storage_migration_module._sqlite_quick_check(copied)
+    assert ok, detail
+
+
+def test_corrupt_sqlite_blocks_readiness_and_apply(tmp_path, monkeypatch):
+    project, _projects_home, data_home = _project(tmp_path, monkeypatch)
+    database = data_home / "workspace" / "broken.sqlite"
+    database.parent.mkdir(parents=True)
+    database.write_bytes(b"not-a-database")
+    target = resolve_project_storage_paths(project)
+
+    readiness = assess_storage_migration_readiness(project)
+
+    assert readiness["ready"] is False
+    assert any(blocker["code"] == "sqlite_integrity_failed" for blocker in readiness["blockers"])
+    with pytest.raises(StorageMigrationError, match="readiness blocked"):
+        apply_storage_migration(project)
+    assert not storage_migration_state_path(target).exists()
+
+
+def test_legacy_cache_is_not_migrated_and_readiness_reports_cold_rebuild(tmp_path, monkeypatch):
+    project, _projects_home, data_home = _project(tmp_path, monkeypatch)
+    source = data_home / "workspace" / "agent.json"
+    source.parent.mkdir(parents=True)
+    source.write_text("data\n", encoding="utf-8")
+    cache_file = project / ".cache" / "stale.bin"
+    cache_file.parent.mkdir(parents=True)
+    cache_file.write_bytes(b"stale")
+
+    plan = plan_storage_migration(project)
+    readiness = assess_storage_migration_readiness(project)
+
+    assert all(
+        str(resolve_project_storage_paths(project).cache).lower()
+        not in entry.destination.lower()
+        for entry in plan.entries
+    )
+    assert readiness["cachePolicy"] == "cold_rebuild"
+    assert readiness["ready"] is True
+
+
+def test_apply_re_runs_readiness_gate(tmp_path, monkeypatch):
+    project, _projects_home, data_home = _project(tmp_path, monkeypatch)
+    source = data_home / "workspace" / "agent.json"
+    source.parent.mkdir(parents=True)
+    source.write_text("data\n", encoding="utf-8")
+    calls = {"count": 0}
+    original = storage_migration_module.assess_storage_migration_readiness
+
+    def counting_readiness(*args, **kwargs):
+        calls["count"] += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(
+        storage_migration_module,
+        "assess_storage_migration_readiness",
+        counting_readiness,
+    )
+
+    apply_storage_migration(project)
+
+    assert calls["count"] >= 1
+
+
+def test_rollback_rejects_post_cutover_delta_and_keeps_marker(tmp_path, monkeypatch):
+    project, _projects_home, data_home = _project(tmp_path, monkeypatch)
+    source = data_home / "workspace" / "agent.json"
+    source.parent.mkdir(parents=True)
+    source.write_text("data\n", encoding="utf-8")
+    target = resolve_project_storage_paths(project)
+    apply_storage_migration(project)
+    target.runtime.mkdir(parents=True, exist_ok=True)
+    (target.runtime / "post-cutover.txt").write_text("new write\n", encoding="utf-8")
+
+    with pytest.raises(StorageMigrationError, match="reverse_delta_reconcile_required"):
+        rollback_storage_switch(project)
+
+    assert storage_migration_state_path(target).exists()
+    assert resolve_active_project_storage_paths(project).migrated is True
+
+
+def _plan_signature(plan):
+    return storage_migration_module._plan_signature(plan)
 
 
 def test_rollback_archives_marker_without_deleting_copied_or_legacy_data(tmp_path, monkeypatch):
