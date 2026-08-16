@@ -245,8 +245,11 @@ from core.orchestration.tool_authorization_binding import (
     restart_allowed_tool_names,
 )
 from core.orchestration.turn_message_assembly import (
+    TurnJournalReplayError,
     assemble_prepared_turn_messages,
+    current_turn_has_journal_conversation_layer,
     insert_pending_volatile_context_messages,
+    ledger_conversation_fingerprint_for_messages,
     normalize_seeded_tool_calls,
     refresh_system_prefix_on_messages,
     replay_current_turn_messages,
@@ -447,6 +450,7 @@ class SelfEvolvingAgent:
         self._runtime_context_seeded_by_host: bool = False
         self._core_prompt_snapshot_seeded_by_host: bool = False
         self._chat_provider_replay_state = None
+        self._ledger_conversation_fingerprint: str = ""
         self._single_turn_mode_active: bool = False
         self._last_turn_metadata: Dict[str, Any] = {}
         self._turn_interrupt_checker = None
@@ -1396,28 +1400,32 @@ class SelfEvolvingAgent:
             return None
         return Path(project_root_raw), session_id, turn_id
 
-    def _replay_current_turn_conversation_from_ledger(self, messages: list) -> list:
+    def _replay_current_turn_conversation_from_ledger(
+        self,
+        messages: list,
+        *,
+        strict: bool = True,
+        require_layer: bool = False,
+    ) -> list:
         identity = self._chat_ledger_identity()
         if identity is None:
+            if strict and require_layer:
+                raise TurnJournalReplayError(
+                    error_type="ledger_identity_missing",
+                    message="Chat turn journal replay requires session and turn identity.",
+                )
             return messages
         project_root, session_id, turn_id = identity
-        try:
-            from core.chat.conversation_ledger import load_conversation_events
+        from core.chat.conversation_ledger import load_conversation_events
 
-            events = load_conversation_events(project_root, session_id)
-            replayed = replay_current_turn_messages(messages, events, turn_id=turn_id)
-        except Exception as exc:
-            _record_agent_scene_event(
-                "chat",
-                "agent.turn_journal_replay.skipped",
-                message="Current-turn journal replay failed; keeping in-memory conversation chain.",
-                fields={
-                    "sessionId": session_id,
-                    "turnId": turn_id,
-                    "errorType": type(exc).__name__,
-                },
-            )
-            return messages
+        events = load_conversation_events(project_root, session_id)
+        replayed = replay_current_turn_messages(
+            messages,
+            events,
+            turn_id=turn_id,
+            strict=strict,
+            require_layer=require_layer,
+        )
         if replayed != messages:
             _record_agent_scene_event(
                 "chat",
@@ -1430,7 +1438,62 @@ class SelfEvolvingAgent:
                     "afterCount": len(replayed),
                 },
             )
+        if strict and current_turn_has_journal_conversation_layer(events, turn_id=turn_id):
+            self._ledger_conversation_fingerprint = ledger_conversation_fingerprint_for_messages(replayed)
         return replayed
+
+    def _handle_turn_journal_replay_failure(self, exc: TurnJournalReplayError) -> None:
+        identity = self._chat_ledger_identity() or (None, "", "")
+        _, session_id, turn_id = identity
+        _record_agent_scene_event(
+            "chat",
+            "agent.turn_journal_replay.blocked",
+            message="Current-turn journal replay failed; blocking further LLM calls this turn.",
+            fields={
+                "sessionId": session_id,
+                "turnId": turn_id,
+                "errorType": exc.error_type,
+                **dict(exc.details or {}),
+            },
+            level="error",
+            outcome="blocked",
+        )
+        self._ledger_conversation_fingerprint = ""
+        self._record_turn_failure_diagnostic(
+            category="protocol_error",
+            reason_code="turn_journal_replay_failed",
+            reason_summary="当前轮对话层无法从 journal 重建",
+            reason_detail=str(exc.message or "turn journal replay failed"),
+            chain_stage="agent_turn_journal_replay",
+            event_code="agent.turn_journal_replay.blocked",
+            fields={
+                "errorType": exc.error_type,
+                **dict(exc.details or {}),
+            },
+        )
+        get_ui().add_log(
+            "当前轮对话层无法从 ConversationLedger 重建，已停止继续调用模型。",
+            "ERROR",
+        )
+
+    def _apply_chat_journal_replay(
+        self,
+        messages: list,
+        *,
+        require_layer: bool = False,
+    ) -> tuple[list, bool]:
+        try:
+            return (
+                self._replay_current_turn_conversation_from_ledger(
+                    messages,
+                    strict=True,
+                    require_layer=require_layer,
+                ),
+                True,
+            )
+        except TurnJournalReplayError as exc:
+            self._handle_turn_journal_replay_failure(exc)
+            return messages, False
 
     @staticmethod
     def _normalize_seeded_tool_calls(raw_calls: Any) -> List[Dict[str, Any]]:
@@ -1871,6 +1934,7 @@ class SelfEvolvingAgent:
         )
         self._active_goal = effective_goal
         self._last_turn_metadata = {}
+        self._ledger_conversation_fingerprint = ""
         self._last_llm_failure_attempts = 0
         self._last_llm_failure_max_attempts = 0
         stable_session_prompt = (
@@ -2185,6 +2249,10 @@ class SelfEvolvingAgent:
                             f"由于上下文超过最大承受能力，现在强制进行了一次压缩"
                             f"（{current_tokens} → {after_tokens} tokens）。"
                         ))
+                    if policy.mode == AgentMode.CHAT and self._ledger_conversation_fingerprint:
+                        messages, replay_ok = self._apply_chat_journal_replay(messages)
+                        if not replay_ok:
+                            break
                 self._raise_if_turn_stop_requested()
                 _record_agent_scene_event(
                     "llm",
@@ -2527,8 +2595,13 @@ class SelfEvolvingAgent:
                 # Tools (and tool blockers / validation notes) may change runtime state memory.
                 if executable_tool_calls or tool_calls:
                     self._mark_runtime_state_memory_dirty()
-                if policy.mode == AgentMode.CHAT:
-                    messages = self._replay_current_turn_conversation_from_ledger(messages)
+                if policy.mode == AgentMode.CHAT and (executable_tool_calls or tool_calls):
+                    messages, replay_ok = self._apply_chat_journal_replay(
+                        messages,
+                        require_layer=bool(executable_tool_calls or tool_calls),
+                    )
+                    if not replay_ok:
+                        break
                 self._raise_if_turn_stop_requested()
                 if lifecycle_action == "turn_complete":
                     round_state.note_lifecycle_completion()
@@ -2562,6 +2635,10 @@ class SelfEvolvingAgent:
                     _debug_logger.info(f"[压缩] 感知层请求压缩: {reason}", tag="STATE")
                     messages, _ = self._compress_messages(messages, iteration, reason=reason)
                     self._mark_runtime_state_memory_dirty()
+                    if policy.mode == AgentMode.CHAT and self._ledger_conversation_fingerprint:
+                        messages, replay_ok = self._apply_chat_journal_replay(messages)
+                        if not replay_ok:
+                            break
                     self._raise_if_turn_stop_requested()
 
         except TurnStopRequested as stop_request:
@@ -2736,6 +2813,7 @@ class SelfEvolvingAgent:
             orchestrator_kind=orchestrator_kind,
             pending_supervised_case_id=str(getattr(self, "_pending_supervised_case_id", "") or ""),
             tool_authorization_fingerprint=str(getattr(self, "_tool_authorization_decision_fingerprint", "") or ""),
+            ledger_conversation_fingerprint=str(getattr(self, "_ledger_conversation_fingerprint", "") or ""),
             prompt_purpose=prompt_purpose,
             route_attempt=route_attempt,
             turn_runtime_fn=_turn_runtime_from_env,

@@ -135,6 +135,7 @@ def build_llm_invocation_context(
     orchestrator_kind: str = "",
     pending_supervised_case_id: str = "",
     tool_authorization_fingerprint: str = "",
+    ledger_conversation_fingerprint: str = "",
     prompt_purpose: str = "main_reply",
     route_attempt: int = 1,
     turn_runtime_fn: Any = None,
@@ -175,6 +176,7 @@ def build_llm_invocation_context(
             "invocationId": uuid4().hex,
             "routeAttempt": max(1, int(route_attempt)),
             "toolAuthorizationDecisionFingerprint": str(tool_authorization_fingerprint or "").strip(),
+            "ledgerConversationFingerprint": str(ledger_conversation_fingerprint or "").strip(),
             "turnId": str(
                 status_context.get("turn_id")
                 or status_context.get("turnId")

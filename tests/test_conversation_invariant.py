@@ -8,6 +8,7 @@ from core.chat.conversation_invariant import (
     FORBIDDEN_UI_TOOL_CALLS_ERROR,
     LEDGER_REWRITE_EXCEPTION_OWNERS,
     SILENT_PROVIDER_REPAIR_ERROR,
+    ConversationPayloadInvariantResult,
     canonical_conversation_messages_from_events,
     check_conversation_payload_invariant,
     conversation_layer_fingerprint,
@@ -21,7 +22,12 @@ from core.chat.conversation_ledger import (
     append_conversation_event,
     load_conversation_events,
 )
-from core.orchestration.turn_message_assembly import replay_current_turn_messages
+from core.orchestration.turn_message_assembly import (
+    TurnJournalReplayError,
+    ledger_conversation_fingerprint_for_messages,
+    replay_current_turn_messages,
+)
+from core.orchestration.turn_diagnostics import build_llm_invocation_context
 from core.llm.client import LLMClient
 from core.llm.types import LLMError
 from tests.helpers.isolated_config import isolated_settings_config
@@ -303,6 +309,102 @@ def test_replay_is_noop_when_current_turn_has_only_user(tmp_path):
     ]
     replayed = replay_current_turn_messages(original, events, turn_id="turn-live")
     assert replayed == original
+
+
+def test_replay_strict_raises_when_required_layer_missing(tmp_path):
+    append_conversation_event(
+        tmp_path,
+        "session-missing-layer",
+        "turn-live",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "只有用户消息"},
+    )
+    events = load_conversation_events(tmp_path, "session-missing-layer")
+    original = [{"role": "user", "content": "只有用户消息"}]
+
+    with pytest.raises(TurnJournalReplayError) as exc_info:
+        replay_current_turn_messages(
+            original,
+            events,
+            turn_id="turn-live",
+            strict=True,
+            require_layer=True,
+        )
+
+    assert exc_info.value.error_type == "journal_layer_missing"
+
+
+def test_replay_strict_raises_when_layer_fails_invariant(tmp_path, monkeypatch):
+    _append_current_turn_tool_journal(
+        tmp_path,
+        session_id="session-bad-layer",
+        turn_id="turn-live",
+        result="journal-tool-result",
+    )
+    events = load_conversation_events(tmp_path, "session-bad-layer")
+    original = [{"role": "user", "content": "请读取文件"}]
+
+    monkeypatch.setattr(
+        "core.chat.conversation_invariant.check_conversation_payload_invariant",
+        lambda *_args, **_kwargs: ConversationPayloadInvariantResult(
+            ok=False,
+            error_type=SILENT_PROVIDER_REPAIR_ERROR,
+            message="forced invariant failure for replay strict test",
+            details={"messageIndex": 1},
+        ),
+    )
+
+    with pytest.raises(TurnJournalReplayError) as exc_info:
+        replay_current_turn_messages(
+            original,
+            events,
+            turn_id="turn-live",
+            strict=True,
+            require_layer=True,
+        )
+
+    assert exc_info.value.error_type == SILENT_PROVIDER_REPAIR_ERROR
+
+
+def test_ledger_conversation_fingerprint_matches_replayed_messages(tmp_path):
+    _append_current_turn_tool_journal(
+        tmp_path,
+        session_id="session-fingerprint",
+        turn_id="turn-live",
+        result="journal-tool-result",
+    )
+    events = load_conversation_events(tmp_path, "session-fingerprint")
+    messages = [
+        SystemMessage(content="prefix"),
+        {"role": "user", "content": "## Chat User Message\n请读取文件"},
+        AIMessage(content="", tool_calls=[{"id": "call_live", "name": "read_file_tool", "args": {}}]),
+        ToolMessage(content="memory-only-result", tool_call_id="call_live"),
+    ]
+    replayed = replay_current_turn_messages(
+        messages,
+        events,
+        turn_id="turn-live",
+        strict=True,
+        require_layer=True,
+    )
+    fingerprint = ledger_conversation_fingerprint_for_messages(replayed)
+    invariant = check_conversation_payload_invariant(
+        replayed,
+        expected_fingerprint=fingerprint,
+    )
+    assert invariant.ok is True
+    assert fingerprint
+
+
+def test_build_llm_invocation_context_passes_ledger_fingerprint():
+    context = build_llm_invocation_context(
+        mode_value="chat",
+        orchestrator_kind="chat",
+        ledger_conversation_fingerprint="abc123",
+    )
+    metadata = context.to_metadata()
+    assert metadata["ledgerConversationFingerprint"] == "abc123"
 
 
 def conversation_layer_messages_from_last_assistant(messages):
