@@ -308,3 +308,93 @@ def test_handle_tool_result_uses_business_failure_semantics_for_canonical_status
     assert canonical_result.status == "failed"
     assert canonical_result.is_error is True
     assert messages[0].additional_kwargs["canonical_tool_result"] is canonical_result
+
+
+def test_execute_tool_parses_json_arguments_alias():
+    observed: dict[str, Any] = {}
+
+    def fake_execute(tool_name, tool_args, *, tool_call_id=""):
+        observed.update(name=tool_name, args=tool_args, call_id=tool_call_id)
+        return ("ok", None)
+
+    bridge = ToolLifecycleBridge(tool_executor_execute=fake_execute)
+    result, action = bridge.execute_tool(
+        {"name": "read_file_tool", "arguments": '{"path": "a.py"}', "id": "call-json"},
+        [],
+    )
+
+    assert result == "ok"
+    assert action is None
+    assert observed == {
+        "name": "read_file_tool",
+        "args": {"path": "a.py"},
+        "call_id": "call-json",
+    }
+
+
+def test_tool_result_observer_exception_does_not_fail_execute_tool():
+    bridge = ToolLifecycleBridge(
+        tool_executor_execute=lambda *_args, **_kwargs: ("ok", None),
+        tool_result_observer=lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("observer")),
+    )
+    result, action = bridge.execute_tool(
+        {"name": "read_file_tool", "args": {"path": "a.py"}, "id": "call-obs"},
+        [],
+    )
+    assert result == "ok"
+    assert action is None
+
+
+def test_budget_exhausted_binds_remaining_declared_calls_without_executing_them():
+    calls: list[str] = []
+
+    def fake_execute(tool_name, _tool_args, *, tool_call_id=""):
+        calls.append(tool_name)
+        if tool_name == "write_file_tool":
+            return ("quota used", "tool_budget_exhausted")
+        return (f"ran:{tool_name}", None)
+
+    messages: list[Any] = []
+    bridge = ToolLifecycleBridge(tool_executor_execute=fake_execute)
+    action = bridge.execute_tools(
+        [
+            {"name": "write_file_tool", "args": {}, "id": "call-write"},
+            {"name": "read_file_tool", "args": {}, "id": "call-read"},
+            {"name": "grep_search_tool", "args": {}, "id": "call-grep"},
+        ],
+        messages,
+    )
+
+    assert action == "tool_budget_exhausted"
+    assert calls == ["write_file_tool"]
+    assert [message.tool_call_id for message in messages] == ["call-write", "call-read", "call-grep"]
+    assert "额度已用尽" in messages[1].content
+    assert "额度已用尽" in messages[2].content
+    assert "ran:read_file_tool" not in messages[1].content
+
+
+def test_max_parallel_readonly_zero_uses_serial_pool_not_default(monkeypatch):
+    seen_workers: list[int] = []
+    from concurrent.futures import ThreadPoolExecutor as RealPool
+    import core.orchestration.tool_lifecycle as lifecycle
+
+    def capturing_pool(*args, **kwargs):
+        seen_workers.append(int(kwargs.get("max_workers") or (args[0] if args else 0)))
+        return RealPool(*args, **kwargs)
+
+    monkeypatch.setattr(lifecycle, "ThreadPoolExecutor", capturing_pool)
+    bridge = ToolLifecycleBridge(tool_executor_execute=lambda *_args, **_kwargs: ("ok", None))
+    messages: list[Any] = []
+    action = bridge.execute_tools(
+        [
+            {"name": "read_file_tool", "args": {}, "id": "call-a"},
+            {"name": "grep_search_tool", "args": {}, "id": "call-b"},
+            {"name": "list_files_tool", "args": {}, "id": "call-c"},
+        ],
+        messages,
+        max_parallel_readonly=0,
+    )
+
+    assert action is None
+    assert seen_workers == [1]
+    assert [message.tool_call_id for message in messages] == ["call-a", "call-b", "call-c"]
