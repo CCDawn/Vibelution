@@ -174,12 +174,6 @@ import { ChatCenterSessionSurface } from "./ChatCenterSessionSurface";
 import { ChatCenterTabStrip } from "./ChatCenterTabStrip";
 import { ChatConversationIndexPanelContent } from "./ChatConversationIndexPanelContent";
 import { SessionBulkOperationsPanel } from "./SessionBulkOperationsPanel";
-import {
-  collectDirectSessionIdsFromConversations,
-  sessionBulkActionItemNote,
-  sessionBulkActionSummary,
-  sessionBulkDeletable,
-} from "./chatSessionBulkModel";
 import { ChatSessionWorkbenchShell } from "./ChatSessionWorkbenchShell";
 import { ChatWorkbenchCenterColumn } from "./ChatWorkbenchCenterColumn";
 import { useChatWorkbenchLayout } from "./useChatWorkbenchLayout";
@@ -219,10 +213,8 @@ import { useChatWorkspaceLifecycle } from "./useChatWorkspaceLifecycle";
 import { useChatSessionDetailMutations } from "./useChatSessionDetailMutations";
 import { useChatWorkspaceActions } from "./useChatWorkspaceActions";
 import { ChatDangerConfirmDialog } from "./ChatDangerConfirmDialog";
-import {
-  type ChatWorkbenchConfirmRequest,
-  sessionConfirmTitle,
-} from "./chatWorkbenchConfirmModel";
+import { useChatSessionBulkSelection } from "./useChatSessionBulkSelection";
+import { useChatWorkbenchConfirmDialog } from "./useChatWorkbenchConfirmDialog";
 import { useDesktopConversationAttention } from "./useDesktopConversationAttention";
 import { ChatCliAgentTerminalStack } from "./ChatCliAgentTerminalStack";
 import { useChatSessionRenameMenu } from "./useChatSessionRenameMenu";
@@ -619,7 +611,6 @@ export function ChatCodingRoute() {
   const [sessionReferenceAttachments, setSessionReferenceAttachments] = useState<Record<string, SessionReferenceAttachment[]>>({});
   const [sessionImageUploadPending, setSessionImageUploadPending] = useState<Record<string, boolean>>({});
   const [sessionEditTargets, setSessionEditTargets] = useState<Record<string, { messageId: string; original: string }>>({});
-  const [pendingConfirm, setPendingConfirm] = useState<ChatWorkbenchConfirmRequest | null>(null);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const editingSessionIdRef = useRef<string | null>(null);
   /** Suppress tab title blur-submit while create remaps temp id → server id. */
@@ -1511,6 +1502,25 @@ export function ChatCodingRoute() {
     setGroupManageTitleDraft,
     setGroupManageModeDraft,
     setGroupManagePurposeDraft,
+  });
+  const {
+    pendingConfirm,
+    pendingConfirmPresentation,
+    openDeleteSessionConfirm,
+    openClearSessionHistoryConfirm,
+    openDeleteGroupConfirm,
+    openResetGroupConfirm,
+    confirmPendingWorkbenchAction,
+    dismissPendingConfirm,
+  } = useChatWorkbenchConfirmDialog({
+    activeGroupRoom,
+    deleteSessionMutation,
+    clearSessionHistoryMutation,
+    deleteGroupRoomMutation,
+    resetGroupRoomMutation,
+    setSessionComposerErrors,
+    lang,
+    t,
   });
   const teams = teamsQuery.data?.teams ?? [];
   const linkedTeamRoomIds = useMemo(() => {
@@ -2650,128 +2660,26 @@ export function ChatCodingRoute() {
     () => groupedGroupConversations.reduce((count, group) => count + group.items.length, 0),
     [groupedGroupConversations],
   );
-  const [selectedBulkSessionIds, setSelectedBulkSessionIds] = useState<Set<string>>(() => new Set());
-  const [bulkSessionSelectionAnchorId, setBulkSessionSelectionAnchorId] = useState("");
-  const [sessionBulkNotice, setSessionBulkNotice] = useState<{ tone: "error" | "success"; text: string } | null>(null);
-  const visibleDirectSessionIds = useMemo(
-    () => collectDirectSessionIdsFromConversations(filteredConversations, sessionsById),
-    [filteredConversations, sessionsById],
-  );
-  const selectedBulkSessions = useMemo(
-    () => visibleDirectSessionIds.filter((sessionId) => selectedBulkSessionIds.has(sessionId)),
-    [selectedBulkSessionIds, visibleDirectSessionIds],
-  );
-  const allVisibleSessionsSelected = visibleDirectSessionIds.length > 0
-    && selectedBulkSessions.length === visibleDirectSessionIds.length;
-  const bulkSessionPending = bulkDeleteSessionsMutation.isPending;
-  const sessionBulkCopy = useMemo(() => ({
-    bulkSelected: t("bulkSelectedSessions"),
-    bulkClear: t("bulkClearSessionSelection"),
-    bulkSelectVisible: t("bulkSelectVisibleSessions"),
-    bulkRemove: t("bulkRemoveSessions"),
-    bulkWorking: t("bulkSessionWorking"),
-    bulkRemoveConfirm: t("bulkRemoveSessionsConfirm"),
-    cancelCreate: lang === "zh" ? "取消" : "Cancel",
-  }), [lang, t]);
-  const clearBulkSessions = useCallback(() => {
-    setSelectedBulkSessionIds(new Set());
-    setBulkSessionSelectionAnchorId("");
-  }, []);
-  const selectVisibleBulkSessions = useCallback(() => {
-    setSelectedBulkSessionIds(new Set(visibleDirectSessionIds));
-    setBulkSessionSelectionAnchorId(visibleDirectSessionIds[0] ?? "");
-  }, [visibleDirectSessionIds]);
-  const toggleBulkSession = useCallback((
-    sessionId: string,
-    selected: boolean,
-    extendRange = false,
-  ) => {
-    setSelectedBulkSessionIds((current) => {
-      const next = new Set(current);
-      if (extendRange && bulkSessionSelectionAnchorId) {
-        const anchorIndex = visibleDirectSessionIds.indexOf(bulkSessionSelectionAnchorId);
-        const targetIndex = visibleDirectSessionIds.indexOf(sessionId);
-        if (anchorIndex >= 0 && targetIndex >= 0) {
-          const [start, end] = anchorIndex < targetIndex
-            ? [anchorIndex, targetIndex]
-            : [targetIndex, anchorIndex];
-          visibleDirectSessionIds.slice(start, end + 1).forEach((id) => next.add(id));
-          return next;
-        }
-      }
-      if (selected) {
-        next.add(sessionId);
-      } else {
-        next.delete(sessionId);
-      }
-      return next;
-    });
-    setBulkSessionSelectionAnchorId(sessionId);
-  }, [bulkSessionSelectionAnchorId, visibleDirectSessionIds]);
-  const bulkRemoveSessions = useCallback(async () => {
-    if (bulkSessionPending) {
-      return;
-    }
-    if (!selectedBulkSessions.length) {
-      setSessionBulkNotice({ tone: "error", text: t("bulkNoSessionSelection") });
-      return;
-    }
-    const busySessions = selectedBulkSessions.filter((sessionId) => {
-      const session = sessionsById.get(sessionId);
-      return session ? !sessionBulkDeletable(session, isBusyPhase) : false;
-    });
-    const removableSessions = selectedBulkSessions.filter((sessionId) => {
-      const session = sessionsById.get(sessionId);
-      return session ? sessionBulkDeletable(session, isBusyPhase) : true;
-    });
-    const notes: string[] = [];
-    busySessions.forEach((sessionId) => {
-      const session = sessionsById.get(sessionId);
-      const title = String(session?.title || session?.agentDisplayName || sessionId).trim();
-      notes.push(`${title}: ${t("deleteSessionBusy")}`);
-    });
-    let success = 0;
-    let skipped = busySessions.length;
-    let failed = 0;
-    if (removableSessions.length) {
-      try {
-        const response = await bulkDeleteSessionsMutation.mutateAsync({ sessionIds: removableSessions });
-        response.skipped.forEach((item) => {
-          notes.push(sessionBulkActionItemNote(item, sessionsById, t("deleteSessionBusy")));
-        });
-        response.failed.forEach((item) => {
-          notes.push(sessionBulkActionItemNote(item, sessionsById, ""));
-        });
-        success += response.summary.successCount;
-        skipped += response.summary.skippedCount;
-        failed += response.summary.failedCount;
-      } catch (error) {
-        failed += removableSessions.length;
-        notes.push(error instanceof Error ? error.message : String(error));
-      }
-    }
-    setSessionBulkNotice({
-      tone: failed > 0 ? "error" : "success",
-      text: sessionBulkActionSummary(
-        t("bulkRemoveSessionsResult"),
-        success,
-        skipped,
-        failed,
-        notes,
-        lang,
-      ),
-    });
-    clearBulkSessions();
-  }, [
-    bulkDeleteSessionsMutation,
+  const {
+    selectedBulkSessionIds,
+    selectedBulkSessions,
+    allVisibleSessionsSelected,
     bulkSessionPending,
+    sessionBulkNotice,
+    sessionBulkCopy,
     clearBulkSessions,
+    selectVisibleBulkSessions,
+    toggleBulkSession,
+    bulkRemoveSessions,
+    visibleDirectSessionIds,
+  } = useChatSessionBulkSelection({
+    filteredConversations,
+    sessionsById,
+    bulkDeleteSessionsMutation,
     isBusyPhase,
     lang,
-    selectedBulkSessions,
-    sessionsById,
     t,
-  ]);
+  });
   const sessionIndexLoadedCount = rawSessionsQuery.loadedCount;
   const sessionIndexTotalEstimate = rawSessionsQuery.totalEstimate;
   const sessionIndexHasMore = rawSessionsQuery.hasMore;
@@ -2784,131 +2692,6 @@ export function ChatCodingRoute() {
       ? `${numberFormatter.format(sessionIndexLoadedCount)} / ${numberFormatter.format(sessionIndexTotalEstimate)}`
       : numberFormatter.format(sessionIndexLoadedCount);
   const sessionIndexProgressVisible = sessionIndexHasMore || sessionIndexTotalEstimate > SESSION_INDEX_PAGE_SIZE;
-
-  const openDeleteSessionConfirm = useCallback((session: SessionSummary) => {
-    setPendingConfirm({ kind: "delete-session", session });
-  }, []);
-
-  const openClearSessionHistoryConfirm = useCallback((session: SessionSummary) => {
-    setPendingConfirm({ kind: "clear-history", session });
-  }, []);
-
-  const openDeleteGroupConfirm = useCallback(() => {
-    setPendingConfirm({ kind: "delete-group" });
-  }, []);
-
-  const openResetGroupConfirm = useCallback(() => {
-    setPendingConfirm({ kind: "reset-group" });
-  }, []);
-
-  const confirmPendingWorkbenchAction = useCallback(() => {
-    if (!pendingConfirm) {
-      return;
-    }
-    if (pendingConfirm.kind === "delete-session") {
-      const sessionId = pendingConfirm.session.id;
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [sessionId]: "",
-        __sessions__: "",
-      }));
-      setPendingConfirm(null);
-      deleteSessionMutation.mutate({ sessionId });
-      return;
-    }
-    if (pendingConfirm.kind === "clear-history") {
-      const { session } = pendingConfirm;
-      const agentId = String(session.agentId || "").trim();
-      if (!agentId) {
-        setPendingConfirm(null);
-        return;
-      }
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [session.id]: "",
-        __sessions__: "",
-      }));
-      setPendingConfirm(null);
-      clearSessionHistoryMutation.mutate({ sessionId: session.id, agentId });
-      return;
-    }
-    if (pendingConfirm.kind === "delete-group") {
-      const roomId = activeGroupRoom?.roomId;
-      setPendingConfirm(null);
-      if (roomId) {
-        deleteGroupRoomMutation.mutate({ roomId });
-      }
-      return;
-    }
-    if (pendingConfirm.kind === "reset-group") {
-      const roomId = activeGroupRoom?.roomId;
-      setPendingConfirm(null);
-      if (roomId) {
-        resetGroupRoomMutation.mutate({ roomId });
-      }
-    }
-  }, [
-    activeGroupRoom?.roomId,
-    clearSessionHistoryMutation,
-    deleteGroupRoomMutation,
-    deleteSessionMutation,
-    pendingConfirm,
-    resetGroupRoomMutation,
-    setSessionComposerErrors,
-  ]);
-
-  const pendingConfirmPresentation = useMemo(() => {
-    if (!pendingConfirm) {
-      return null;
-    }
-    if (pendingConfirm.kind === "delete-session") {
-      const title = sessionConfirmTitle(pendingConfirm.session);
-      return {
-        confirmLabel: t("deleteSession"),
-        confirmPending: deleteSessionMutation.isPending
-          && deleteSessionMutation.variables?.sessionId === pendingConfirm.session.id,
-        title: t("deleteSessionConfirm").replace("{title}", title),
-      };
-    }
-    if (pendingConfirm.kind === "clear-history") {
-      const title = sessionConfirmTitle(pendingConfirm.session);
-      return {
-        confirmLabel: t("clearSessionHistory"),
-        confirmPending: clearSessionHistoryMutation.isPending
-          && clearSessionHistoryMutation.variables?.sessionId === pendingConfirm.session.id,
-        title: t("clearSessionHistoryConfirm").replace("{title}", title),
-      };
-    }
-    const roomTitle = (activeGroupRoom?.title || activeGroupRoom?.roomId || "").trim();
-    if (pendingConfirm.kind === "delete-group") {
-      return {
-        confirmLabel: lang === "zh" ? "删除群聊" : "Delete group",
-        confirmPending: deleteGroupRoomMutation.isPending
-          && deleteGroupRoomMutation.variables?.roomId === activeGroupRoom?.roomId,
-        title: t("deleteGroupConfirm").replace("{title}", roomTitle || activeGroupRoom?.roomId || ""),
-      };
-    }
-    return {
-      confirmLabel: lang === "zh" ? "重置群聊" : "Reset group",
-      confirmPending: resetGroupRoomMutation.isPending
-        && resetGroupRoomMutation.variables?.roomId === activeGroupRoom?.roomId,
-      title: t("resetGroupConfirm").replace("{title}", roomTitle || activeGroupRoom?.roomId || ""),
-    };
-  }, [
-    activeGroupRoom?.roomId,
-    activeGroupRoom?.title,
-    clearSessionHistoryMutation.isPending,
-    clearSessionHistoryMutation.variables?.sessionId,
-    deleteGroupRoomMutation.isPending,
-    deleteGroupRoomMutation.variables?.roomId,
-    deleteSessionMutation.isPending,
-    deleteSessionMutation.variables?.sessionId,
-    lang,
-    pendingConfirm,
-    resetGroupRoomMutation.isPending,
-    resetGroupRoomMutation.variables?.roomId,
-    t,
-  ]);
 
   const {
     handlePetInteraction,
@@ -3844,10 +3627,10 @@ export function ChatCodingRoute() {
         confirmPending={pendingConfirmPresentation?.confirmPending ?? false}
         onOpenChange={(open) => {
           if (!open) {
-            setPendingConfirm(null);
+            dismissPendingConfirm();
           }
         }}
-        onCancel={() => setPendingConfirm(null)}
+        onCancel={dismissPendingConfirm}
         onConfirm={confirmPendingWorkbenchAction}
       />
     </ChatSessionWorkbenchShell>

@@ -59,6 +59,8 @@ Chat surface. Rules:
 | Session select / URL / bootstrap | `useChatSessionSelection.ts` (committed-route preference sync) | EventSource ownership || Session detail window / ledger / conversation merge | `chatSessionDetailHelpers.ts` | stream EventSource |
 | Labels / avatar / group message presentation | `chatRoutePresentation.tsx` | mutations / stream |
 | Session/group lifecycle mutations | `useChatWorkspaceLifecycle.ts` | EventSource, composer submit |
+| Session bulk select / remove | `useChatSessionBulkSelection.ts` | stream, confirm dialog |
+| Danger confirm dialogs | `useChatWorkbenchConfirmDialog.ts` | mutation implementations |
 | Session detail mutations (reasoning/history/tool/pet) | `useChatSessionDetailMutations.ts` | EventSource, lifecycle |
 | Workspace UI action handlers | `useChatWorkspaceActions.ts` | EventSource, JSX render |
 | Group message / @mention presentation | `ChatGroupMessagePresentation.tsx` | mutations |
@@ -110,6 +112,7 @@ Historical plan (archived): `docs/archive/superpowers/plans/2026-07-19-chat-codi
 - **F1 done:** `useChatWorkbenchCatalogQueries.ts` — runtime/pet/config/session-index/conversations/teams/agents/skills/chat-room catalog + expanded agent detail queries
 - **F2 done:** `useChatToolApprovalBridge.ts` (governance & session tool approval), `useChatComposerBridgeState.ts` (composer draft, follow-up queue & bridge state), `useChatGroupRoomViewModel.ts` (group room identity, candidate agents & modes). Index tree JSX stays in the workbench until a typed owner can take it without a fat prop dump.
 - **F3 done (Gate 3):** `useChatGroupDraftState` + `chatGroupRoomActionModel` own group composer/manage drafts and action flags; `useChatWorkbenchContextMenus` owns session/agent menu chrome; `useChatConversationIndexChrome` owns collapsed groups / members tab; Agent create wizard open state lives in `useChatAgentDirectoryActions`; direct-session prefetch is wired through `useChatWorkspaceActions`. Shell remains `ChatSessionWorkbenchShell` → `VSessionWorkbenchPage` (`WORKBENCH_LAYOUT_IDS.chat`) with lazy secondary panels. **G3-3 closed without extra memoization** — no new render/interaction finding; `ChatCodingRouteWorkbench.updateDepth.test.tsx` remains the update-depth guard.
+- **F4 (Wave 1-A):** `useChatSessionBulkSelection` owns session-list bulk select/remove; `useChatWorkbenchConfirmDialog` owns danger confirm state + presentation (delete session/history, delete/reset group).
 
 ## Bundle note (secondary lazy)
 
