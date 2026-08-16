@@ -210,6 +210,7 @@ import { useChatSelectionPersistence } from "./useChatSelectionPersistence";
 import { useChatWorkspaceLifecycle } from "./useChatWorkspaceLifecycle";
 import { useChatSessionDetailMutations } from "./useChatSessionDetailMutations";
 import { useChatWorkspaceActions } from "./useChatWorkspaceActions";
+import { ChatSessionDeleteConfirmDialog } from "./ChatSessionDeleteConfirmDialog";
 import { useDesktopConversationAttention } from "./useDesktopConversationAttention";
 import { ChatCliAgentTerminalStack } from "./ChatCliAgentTerminalStack";
 import { useChatSessionRenameMenu } from "./useChatSessionRenameMenu";
@@ -606,6 +607,7 @@ export function ChatCodingRoute() {
   const [sessionReferenceAttachments, setSessionReferenceAttachments] = useState<Record<string, SessionReferenceAttachment[]>>({});
   const [sessionImageUploadPending, setSessionImageUploadPending] = useState<Record<string, boolean>>({});
   const [sessionEditTargets, setSessionEditTargets] = useState<Record<string, { messageId: string; original: string }>>({});
+  const [pendingDeleteSession, setPendingDeleteSession] = useState<SessionSummary | null>(null);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const editingSessionIdRef = useRef<string | null>(null);
   /** Suppress tab title blur-submit while create remaps temp id → server id. */
@@ -2645,6 +2647,24 @@ export function ChatCodingRoute() {
       : numberFormatter.format(sessionIndexLoadedCount);
   const sessionIndexProgressVisible = sessionIndexHasMore || sessionIndexTotalEstimate > SESSION_INDEX_PAGE_SIZE;
 
+  const openDeleteSessionConfirm = useCallback((session: SessionSummary) => {
+    setPendingDeleteSession(session);
+  }, []);
+
+  const confirmPendingDeleteSession = useCallback(() => {
+    if (!pendingDeleteSession) {
+      return;
+    }
+    const sessionId = pendingDeleteSession.id;
+    setSessionComposerErrors((current) => ({
+      ...current,
+      [sessionId]: "",
+      __sessions__: "",
+    }));
+    setPendingDeleteSession(null);
+    deleteSessionMutation.mutate({ sessionId });
+  }, [deleteSessionMutation, pendingDeleteSession, setSessionComposerErrors]);
+
   const {
     handlePetInteraction,
     handleCreateSession,
@@ -2724,6 +2744,7 @@ export function ChatCodingRoute() {
     clearSessionHistoryMutation,
     addSessionToReviewMutation,
     petActionMutation,
+    openDeleteSessionConfirm,
   });
 
   useDesktopConversationAttention({
@@ -3546,6 +3567,31 @@ export function ChatCodingRoute() {
           />
         </Suspense>
       ) : null}
+      <ChatSessionDeleteConfirmDialog
+        session={pendingDeleteSession}
+        title={
+          pendingDeleteSession
+            ? t("deleteSessionConfirm").replace(
+              "{title}",
+              (pendingDeleteSession.agentDisplayName || pendingDeleteSession.title || pendingDeleteSession.id).trim()
+                || pendingDeleteSession.id,
+            )
+            : ""
+        }
+        confirmLabel={t("deleteSession")}
+        cancelLabel={lang === "zh" ? "取消" : "Cancel"}
+        confirmPending={
+          deleteSessionMutation.isPending
+          && deleteSessionMutation.variables?.sessionId === pendingDeleteSession?.id
+        }
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingDeleteSession(null);
+          }
+        }}
+        onCancel={() => setPendingDeleteSession(null)}
+        onConfirm={confirmPendingDeleteSession}
+      />
     </ChatSessionWorkbenchShell>
   );
 }

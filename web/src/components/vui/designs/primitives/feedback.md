@@ -184,6 +184,7 @@ import { VConfirmDialog } from "@/components/vui";
 | --- | --- | --- |
 | title / confirm / cancel | 文案 | 危险操作用 danger 确认 |
 | `onConfirm` | 确认回调 | pending 时禁用重复点 |
+| `onCloseAutoFocus` | Radix 关闭后焦点回调 | 删除等等待 composer 接管的场景可 `preventDefault` |
 
 ### 非职责
 - 不做复杂多步表单。

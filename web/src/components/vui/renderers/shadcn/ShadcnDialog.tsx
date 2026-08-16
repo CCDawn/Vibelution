@@ -22,6 +22,7 @@ export type ShadcnDialogProps = {
   hideClose?: boolean;
   /** Accessible label when title is not plain text. */
   "aria-label"?: string;
+  onCloseAutoFocus?: (event: Event) => void;
 };
 
 const sizeClassName: Record<ShadcnDialogSize, string> = {
@@ -49,6 +50,7 @@ export function ShadcnDialog({
   contentClassName,
   hideClose = false,
   "aria-label": ariaLabel,
+  onCloseAutoFocus,
 }: ShadcnDialogProps) {
   const controlledOpen = open ?? isOpen;
 
@@ -73,6 +75,7 @@ export function ShadcnDialog({
           data-vui="dialog-content"
           data-renderer="radix"
           aria-label={ariaLabel}
+          onCloseAutoFocus={onCloseAutoFocus}
           className={cn(
             "fixed left-1/2 top-1/2 z-[91] max-h-[min(88dvh,52rem)] -translate-x-1/2 -translate-y-1/2",
             "grid min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden",

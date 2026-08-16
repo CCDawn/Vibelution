@@ -119,6 +119,32 @@ describe("ChatConversationComposerBridge", () => {
     expect(dictionary.en.messageInputPlaceholder).not.toContain("current session");
   });
 
+  it("keeps the composer enabled while submit is pending but the session is idle", () => {
+    const state = buildConversationComposerBridgeState({
+      ...emptyStateInput(),
+      submitPending: true,
+      sessionBusy: false,
+      sessionStopping: false,
+      value: "",
+    });
+
+    expect(state.disabled).toBe(false);
+    expect(state.actionDisabled).toBe(true);
+    expect(state.placeholder).toBe("message");
+  });
+
+  it("disables the composer while submit is pending during a busy session", () => {
+    const state = buildConversationComposerBridgeState({
+      ...emptyStateInput(),
+      submitPending: true,
+      sessionBusy: true,
+      value: "queued",
+    });
+
+    expect(state.disabled).toBe(true);
+    expect(state.actionMode).toBe("stop");
+  });
+
   it("marks the primary Chat composer as the Codex variant", () => {
     expect(bridgeSource).toContain('composerVariant="codex"');
   });
