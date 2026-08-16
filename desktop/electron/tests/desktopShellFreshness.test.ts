@@ -162,6 +162,21 @@ describe("desktop shell freshness", () => {
     expect(args[args.indexOf("--then-lifecycle") + 1]).toBe("start");
   });
 
+  it("passes force refresh when the tray restart-all path retries after a failure", async () => {
+    const spawnImpl = fakeSpawnWithOutput(
+      JSON.stringify({ schemaVersion: 1, scheduled: true, helperPid: 99, waitPid: 12, thenLifecycle: "" })
+    );
+    await scheduleDesktopShellRefresh({
+      workspaceRoot: "C:/repo",
+      pythonPath: "C:/repo/.venv/Scripts/python.exe",
+      waitPid: 12,
+      force: true,
+      spawnImpl
+    });
+    const [, args] = spawnImpl.mock.calls[0] as [string, string[], Record<string, unknown>];
+    expect(args).toContain("--force-refresh");
+  });
+
   it("rejects a status payload without schemaVersion", () => {
     expect(() => parseDesktopShellStatus(JSON.stringify({ stale: true }))).toThrow("invalid desktop shell status");
   });

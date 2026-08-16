@@ -187,12 +187,16 @@ export async function scheduleDesktopShellRefresh(input: {
   pythonPath: string;
   waitPid: number;
   thenLifecycle?: string;
+  force?: boolean;
   spawnImpl?: PythonJsonBridgeSpawn;
 }): Promise<DesktopShellRefreshSchedule> {
   const extra = ["--wait-pid", String(Math.max(0, Math.round(input.waitPid)))];
   const lifecycle = String(input.thenLifecycle || "").trim().toLowerCase();
   if (lifecycle) {
     extra.push("--then-lifecycle", lifecycle);
+  }
+  if (input.force) {
+    extra.push("--force-refresh");
   }
   const raw = await runPythonJsonBridge({
     pythonPath: input.pythonPath,
