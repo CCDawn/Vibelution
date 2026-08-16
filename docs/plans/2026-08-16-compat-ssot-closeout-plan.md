@@ -5,7 +5,7 @@
 | **Status** | `active-plan` |
 | **Created** | 2026-08-16 |
 | **Reviewed** | 2026-08-16（仓库审查结论重放至最新 main） |
-| **Implementation status** | T1 apply 已执行（2026-08-16）；T1G / T2 / T3b **未完成**；本次修订**仅文档**，未执行 apply / reapply / rollback / delete |
+| **Implementation status** | T1 apply 已执行（2026-08-16）；**T1G 代码门已落地**（readiness / SQLite bundle / quiescence / integrity_check / rollback delta）；T2 / T3b **未完成**；未执行真实 apply / reapply / rollback / delete |
 | **Tier** | `HIGH_RISK`（整体）；子任务按 `FAST_PATCH` / `STANDARD_TASK` / `HIGH_RISK` 分级 |
 | **Related ADR** | [0002](../adr/0002-agent-collaboration-session-addressing.md) · [0003](../adr/0003-operator-config-lives-outside-repo.md) · [0004](../adr/0004-product-ui-uses-vui-shadcn-only.md) · [0005](../adr/0005-docs-authority-and-archive-policy.md) · [0008](../adr/0008-project-mutable-state-lives-outside-source-tree.md) · [0009](../adr/0009-launcher-control-plane-lives-in-electron-main.md) |
 | **Related docs** | [development-standard §24](../standards/development-standard.md) · [web/src/api/README.md](../../web/src/api/README.md) · [worktree-collaboration](../agents/worktree-collaboration.md) |
@@ -161,16 +161,16 @@ flowchart TB
 | **Rollback 现状** | post-cutover 总量已增长，**直接 marker rollback 明确 blocked**；回退只能停写、reverse delta、显式 reconcile 且用户独立确认。当前 `rollback` 实现只撤 marker/registration 并保留复制数据，**不回灌新写** |
 | **验证** | storage pytest；新 runtime scene 落外部 `logs/`；`activePaths.memory` 指向 external |
 
-**Task T1G: 迁移后完整性补证 + future apply/reapply 强制门** — **open**（未完成；T2 前置）
+**Task T1G: 迁移后完整性补证 + future apply/reapply 强制门** — **done**（代码门 2026-08-17；T2 仍须稳定门）
 
 | 项 | 内容 |
 | --- | --- |
 | **Owner** | `scripts/migrate_project_storage.py` · `vibelution_storage.py` · `core/infrastructure/storage_migration.py` · ADR 0008 |
 | **Tier** | `HIGH_RISK` |
 | **位置** | T1 之后、T2 之前 |
-| **交付** | ① 机器化静止：active-work / Launcher / Runtime Manager / writer 全部静止；② destination conflict 检测；③ SQLite DB + WAL + SHM quick / integrity 检查；④ source-write / quiescence / SQLite bundle / rollback 测试；⑤ cache cold rebuild；⑥ 任何 future apply / reapply 自身重验 |
-| **门语义** | **T1G 未落地前，任何 future apply / reapply 一律 blocked**；T1G 落地后仍须每次 apply 自身重验，且用户独立确认 |
-| **验证** | storage pytest + 上述机器化门报告 |
+| **已落地** | ① 机器化静止：active-work / Launcher / Runtime Manager / writer 全部静止；② destination conflict（含 orphan WAL/SHM）；③ SQLite bundle fingerprint + staging/atomic no-clobber promote + `quick_check`/`integrity_check`（私有快照，不改源）；④ source-write / quiescence window / bundle / rollback delta（含 `target.memory` 与 sidecar）测试；⑤ cache `cold_rebuild`；⑥ apply / reapply 强制重跑 readiness，窗口内源变化 fail-closed |
+| **门语义** | T1G 落地后，**每次** apply / reapply 仍须自身重验，且用户独立确认；禁止真实 checkout 上未经确认的 apply / rollback |
+| **验证** | `tests/test_storage_migration.py` |
 
 **Task T2: 删除/收缩 legacy 存储读分支** — **blocked**（至少至 2026-08-18，且满足稳定门）
 
@@ -399,7 +399,7 @@ HeroUI prop 别名 · route re-export barrels · Vitest shims · archive 正文 
 - Windows 无控制台：后台仍走 `pythonw` / launcher helper。
 - 触及 `web/`：slice 结束前 `npx tsc -b --pretty false`。
 - Project memory 决策：T1 后写入 **external memory**，不向 `.docs/project-memory/` 新增。
-- 任何 future apply / reapply：T1G 未落地前 blocked；落地后仍须 apply 自身重验并用户独立确认。
+- 任何 future apply / reapply：T1G 已落地，仍须 apply 自身重验并用户独立确认。
 
 ---
 
@@ -436,13 +436,13 @@ git mv docs/plans/2026-08-16-compat-ssot-closeout-plan.md docs/archive/plans/202
 
 ## 14. 附录：关键命令与基线语义
 
-> **基线语义：** §3 inventory 仅为 **基线**（post-cutover 约 7,807 files / 1,604,130,267 bytes），完整 manifest **不入 Git**；pre-cutover 7,318 / 1,195,524,004 仅作历史对照。future apply / reapply 在 **T1G 未落地前 blocked**；落地后仍须 apply 自身重验并用户独立确认。
+> **基线语义：** §3 inventory 仅为 **基线**（post-cutover 约 7,807 files / 1,604,130,267 bytes），完整 manifest **不入 Git**；pre-cutover 7,318 / 1,195,524,004 仅作历史对照。future apply / reapply 在 T1G 落地后仍须 apply 自身重验并用户独立确认。
 
 ```powershell
 # Phase 0 / 持续验证
 python scripts/migrate_project_storage.py inventory --project "<project-root>"
 
-# Phase 1 apply（HIGH_RISK — 停 Launcher 后；future apply 需 T1G 落地 + 用户确认）
+# Phase 1 apply（HIGH_RISK — 停 Launcher 后；future apply 需 readiness 全绿 + 用户确认）
 python scripts/migrate_project_storage.py apply --project "<project-root>"
 
 # 测试选取
