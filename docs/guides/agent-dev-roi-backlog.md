@@ -59,10 +59,11 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | **R20** | **guides 加载 token 预算注释** | 2 | 1 | 2.0 | `docs/guides/README.md` | 每文件标注「约 N 行 / 何时跳过」 | 人工扫 | **done** (`docs/guides/README.md` 加载序+子文档 budget 列) |
 | **R21** | **development-standard 章节跳转卡** | 3 | 2 | 1.5 | `docs/standards/README.md` 或 standards 头 | Agent 只开 § 索引即可定位，不必全文 | 任务类型→§ 表完整 | **done** (`docs/standards/README.md` 跳转卡) |
-| **R22** | **route.md 与 services 索引交叉链** | 2 | 1 | 2.0 | `docs/guides/route.md` | 后端行显式链 `services/README` domain 锚点（若可） | 链接有效 | todo |
+| **R22** | **route.md 与 services 索引交叉链** | 2 | 1 | 2.0 | `docs/guides/route.md` | 后端行显式链 `services/README` domain 锚点（若可） | 链接有效 | **done** |
 | **R23** | **诊断命令卡片集中** | 3 | 1 | 3.0 | `docs/guides/loop.md` 或 `playbook.md` | runtime_scenes / diagnose_session / doctor 三行可复制 | 命令存在 | **done** (`loop.md` §3 诊断三件套) |
-| **R24** | **FE 非 chat/teams 路由迷你表** | 3 | 2 | 1.5 | `web/src/routes/` | `routes/README.md`：Route 文件 → 域 → api 模块 | 新 Agent 能指到 Config/Git/Logs | todo |
-| **R25** | **VUI 新建失败模式速查** | 2 | 1 | 2.0 | vui README 或 guides | 5 条「错 import / 未登记 designs」→ 修法 | contract 名列出 | todo |
+| **R24** | **FE 非 chat/teams 路由迷你表** | 3 | 2 | 1.5 | `web/src/routes/` | `routes/README.md`：Route 文件 → 域 → api 模块 | 新 Agent 能指到 Config/Git/Logs | **done** (`web/src/routes/README.md`) |
+| **R25** | **VUI 新建失败模式速查** | 2 | 1 | 2.0 | vui README 或 guides | 5 条「错 import / 未登记 designs」→ 修法 | contract 名列出 | **done** (`vui/README.md` §失败模式速查) |
+| **R26** | **matrix electron rule** | 2 | 1 | 2.0 | `tests/test_matrix.yaml` | 改 `desktop/electron/**` 时 selector 出 vitest 命令 | `test_select_tests` 绿 | **done** |
 
 ---
 
@@ -101,7 +102,7 @@
 | **M2 前端可导航** | R01 + R01c + R02 + R24 | Chat 入口薄并继续削 workbench；SC 可类型检查；非主路由可查表 |
 | **M3 热后端** | R15 + R16 +（可选 R03 一段） | facade 薄；pack README 仍准 |
 | **M4 冷域覆盖** | R10–R14（R13 done） | config/evolution/memory/launcher/tools 可 30 秒定位 |
-| **M5 文档 UX** | R20–R22 + R25 | guides/standards 打开成本下降 |
+| **M5 文档 UX** | R20–R22 + R24–R26 | guides/standards/routes/vui 打开成本下降 |
 
 ---
 

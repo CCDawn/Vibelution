@@ -152,6 +152,19 @@ rules:
     notes:
       - "Runtime lifecycle changes need an explicit Launcher refresh decision after automated validation."
 
+  - id: desktop-electron-shell
+    description: "Electron desktop shell, tray, IPC, and packaged Launcher control plane (ADR 0009)."
+    executionLayers:
+      - "focused"
+      - "local-serial"
+    paths:
+      - "desktop/electron/**"
+    commands:
+      - "npm --prefix desktop/electron test"
+    notes:
+      - "Product control plane lives in Electron main; legacy Python launcher HTTP is not the packaged path."
+      - "Tray/restart/workbench lifecycle changes need Launcher refresh decision after vitest."
+
   - id: web-evolution
     description: "Supervised/self evolution web routes, harness, and control-plane services."
     executionLayers:

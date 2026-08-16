@@ -142,6 +142,25 @@ Use these channels in order of authority:
 
 Inbox/thread messages are not authoritative for code state or final decisions. They should not replace commits, diffs, validation evidence, registry state, or runtime logs.
 
+## Disk vs Git worktree hygiene
+
+Periodically reconcile **registered** worktrees with **disk** directories under `.worktrees/`:
+
+```powershell
+cd <project-root>
+git worktree list
+Get-ChildItem .worktrees -Directory | Select-Object -ExpandProperty Name
+```
+
+| 信号 | 含义 | 动作 |
+| --- | --- | --- |
+| 目录存在，`git worktree list` 无对应项 | 磁盘 orphan（常见：分支已删、merge 后未清目录） | **只读**标记；不删 dirty / 未验证内容 |
+| `git worktree list` 有项，磁盘无目录 | 注册 stale | `git worktree prune`（安全） |
+| orphan + 无 `codex/*` 分支 + 无 claim | 候选清理 | 确认目录内无未提交 WIP → 删目录 |
+| orphan + 未知 WIP | 阻塞 | 保留；报告精确路径，等 owner handoff |
+
+**2026-08-17 盘点（示例）：** 注册 4（含本任务）· 磁盘 15 · orphan 11（如 `session-list-bulk-remove`、`tray-restart-launcher-unified` 等，均无对应 `codex/*` 分支）→ **全部保留**，待 owner 确认无 WIP 后再清。
+
 ## Handoff Report
 
 Every worker completion report should include:
