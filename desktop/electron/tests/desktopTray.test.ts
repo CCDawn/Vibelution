@@ -70,19 +70,8 @@ const desktopPaths: DesktopPaths = {
 function createActions() {
   return {
     openLauncher: vi.fn(),
-    listInstances: vi.fn().mockResolvedValue([
-      { id: "main", label: "主", startable: false, stoppable: true },
-      { id: "worktree:task", label: "task", startable: true, stoppable: false }
-    ]),
-    getFreshness: vi.fn().mockResolvedValue({ current: false, label: "Launcher 落后本地 main · aaa111 → bbb222" }),
-    startInstance: vi.fn(),
-    stopInstance: vi.fn(),
-    restartProject: vi.fn(),
-    rebuildAndStart: vi.fn(),
-    restartLauncher: vi.fn(),
-    showStatus: vi.fn(),
-    quit: vi.fn(),
-    stopAll: vi.fn()
+    restartAll: vi.fn(),
+    quitAll: vi.fn()
   };
 }
 
@@ -106,113 +95,32 @@ describe("Electron desktop tray", () => {
     expect(trayInstances[0].tooltip).toBe("Vibelution");
   });
 
-  it("uses labels that name the target and outcome of each tray action", () => {
+  it("uses only restart-all and quit-all tray labels", () => {
     expect(DESKTOP_TRAY_MENU_LABELS).toEqual({
-      openLauncher: "打开 Launcher 控制窗口",
-      startProject: "启动工作区…",
-      stopProject: "停止工作区…",
-      restartProject: "重启 main 工作台",
-      rebuildAndStart: "重建前端并重新打开 main 工作台",
-      restartLauncher: "重启 Launcher 桌面程序",
-      freshnessUnknown: "Launcher 代码版本：未知",
-      freshnessLoading: "正在读取 Launcher 代码版本…",
-      showStatus: "弹出 main 工作台运行状态",
-      quit: "退出桌面程序（不强停任务）",
-      stopAll: "强制停止 main 工作台并退出…",
-      noStartable: "没有可启动的工作区",
-      noRunning: "没有正在运行的工作区",
-      listFailed: "无法读取工作区列表",
-      listLoading: "正在读取工作区列表…"
+      restartAll: "全部重启",
+      quitAll: "全部退出"
     });
   });
 
-  it("exposes start/stop as instance submenus and keeps the other tray actions", async () => {
+  it("builds a two-item context menu and opens Launcher on left click", () => {
     const actions = createActions();
     const tray = createDesktopTray(desktopPaths, actions) as unknown as InstanceType<typeof FakeTray>;
 
     expect(topLabels(menuTemplates[0])).toEqual([
-      DESKTOP_TRAY_MENU_LABELS.openLauncher,
-      DESKTOP_TRAY_MENU_LABELS.freshnessLoading,
-      DESKTOP_TRAY_MENU_LABELS.restartLauncher,
-      "separator",
-      DESKTOP_TRAY_MENU_LABELS.startProject,
-      DESKTOP_TRAY_MENU_LABELS.stopProject,
-      DESKTOP_TRAY_MENU_LABELS.restartProject,
-      DESKTOP_TRAY_MENU_LABELS.rebuildAndStart,
-      DESKTOP_TRAY_MENU_LABELS.showStatus,
-      "separator",
-      DESKTOP_TRAY_MENU_LABELS.quit,
-      DESKTOP_TRAY_MENU_LABELS.stopAll
+      DESKTOP_TRAY_MENU_LABELS.restartAll,
+      DESKTOP_TRAY_MENU_LABELS.quitAll
     ]);
 
-    await vi.waitFor(() => {
-      expect(menuTemplates.length).toBeGreaterThan(1);
-    });
     tray.emit("click");
-    await vi.waitFor(() => {
-      expect(menuTemplates.length).toBeGreaterThan(2);
-    });
-
-    const refreshed = menuTemplates[menuTemplates.length - 1];
-    expect(topLabels(refreshed).slice(1, 3)).toEqual([
-      "Launcher 落后本地 main · aaa111 → bbb222",
-      DESKTOP_TRAY_MENU_LABELS.restartLauncher
-    ]);
-    const startMenu = refreshed[4]?.submenu as Array<Record<string, unknown>>;
-    const stopMenu = refreshed[5]?.submenu as Array<Record<string, unknown>>;
-    expect(startMenu.map((item) => item.label)).toEqual(["启动「task」工作区"]);
-    expect(stopMenu.map((item) => item.label)).toEqual(["停止「主」工作区"]);
-
-    (startMenu[0].click as () => void)();
-    (stopMenu[0].click as () => void)();
-    (refreshed[0].click as () => void)();
-    (refreshed[2].click as () => void)();
-    (refreshed[6].click as () => void)();
-    (refreshed[7].click as () => void)();
-    (refreshed[8].click as () => void)();
-    (refreshed[10].click as () => void)();
-    (refreshed[11].click as () => void)();
-
-    expect(actions.startInstance).toHaveBeenCalledWith("worktree:task", "task");
-    expect(actions.stopInstance).toHaveBeenCalledWith("main", "主");
-    expect(actions.openLauncher).toHaveBeenCalledTimes(1);
-    expect(actions.restartLauncher).toHaveBeenCalledTimes(1);
-    expect(actions.restartProject).toHaveBeenCalledTimes(1);
-    expect(actions.rebuildAndStart).toHaveBeenCalledTimes(1);
-    expect(actions.showStatus).toHaveBeenCalledTimes(1);
-    expect(actions.quit).toHaveBeenCalledTimes(1);
-    expect(actions.stopAll).toHaveBeenCalledTimes(1);
-  });
-
-  it("keeps the last readable list and marks a fetch failure instead of an empty menu", async () => {
-    const actions = createActions();
-    actions.listInstances
-      .mockResolvedValueOnce([
-        { id: "main", label: "main", startable: false, stoppable: true }
-      ])
-      .mockRejectedValueOnce(new Error("launcher backend is not available"));
-    actions.getFreshness
-      .mockResolvedValueOnce({ current: true, label: "Launcher 已是最新 · abc123" })
-      .mockRejectedValueOnce(new Error("launcher backend is not available"));
-
-    createDesktopTray(desktopPaths, actions);
-    await vi.waitFor(() => {
-      expect(menuTemplates.length).toBeGreaterThan(1);
-    });
-    const firstLive = menuTemplates[menuTemplates.length - 1];
-    expect((firstLive[5]?.submenu as Array<Record<string, unknown>>).map((item) => item.label)).toEqual([
-      "停止「main」工作区"
-    ]);
-
-    const tray = trayInstances[0];
+    tray.emit("double-click");
     tray.emit("right-click");
-    await vi.waitFor(() => {
-      expect(menuTemplates.length).toBeGreaterThan(2);
-    });
-    const failed = menuTemplates[menuTemplates.length - 1];
-    expect(failed[1]?.label).toBe("Launcher 已是最新 · abc123");
-    expect((failed[5]?.submenu as Array<Record<string, unknown>>).map((item) => item.label)).toEqual([
-      "停止「main」工作区"
-    ]);
+
+    expect(actions.openLauncher).toHaveBeenCalledTimes(2);
+    expect(tray.poppedMenus).toHaveLength(1);
+
+    (menuTemplates[0][0].click as () => void)();
+    (menuTemplates[0][1].click as () => void)();
+    expect(actions.restartAll).toHaveBeenCalledTimes(1);
+    expect(actions.quitAll).toHaveBeenCalledTimes(1);
   });
 });

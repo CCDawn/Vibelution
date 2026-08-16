@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   decideLauncherShellRestart,
   decidePackagedDesktopShellRefresh,
+  decidePeriodicDesktopShellRefresh,
   formatTrayLauncherFreshness,
   inspectDesktopShell,
   parseDesktopShellStatus,
@@ -53,6 +54,36 @@ describe("desktop shell freshness", () => {
     );
     expect(decidePackagedDesktopShellRefresh({ isPackaged: true, smoke: false, stale: false })).toBe("skip");
     expect(decidePackagedDesktopShellRefresh({ isPackaged: true, smoke: false, stale: true })).toBe("refresh");
+  });
+
+  it("skips periodic refresh while another shell refresh is in flight or shutdown is approved", () => {
+    expect(
+      decidePeriodicDesktopShellRefresh({
+        isPackaged: true,
+        smoke: false,
+        stale: true,
+        refreshInFlight: true,
+        shutdownApproved: false
+      })
+    ).toBe("skip");
+    expect(
+      decidePeriodicDesktopShellRefresh({
+        isPackaged: true,
+        smoke: false,
+        stale: true,
+        refreshInFlight: false,
+        shutdownApproved: true
+      })
+    ).toBe("skip");
+    expect(
+      decidePeriodicDesktopShellRefresh({
+        isPackaged: true,
+        smoke: false,
+        stale: true,
+        refreshInFlight: false,
+        shutdownApproved: false
+      })
+    ).toBe("refresh");
   });
 
   it("rebuilds a stale packaged launcher instead of relaunching the same asar", () => {
