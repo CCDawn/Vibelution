@@ -188,10 +188,13 @@ def schedule_desktop_shell_refresh(
     then_lifecycle: str = "",
     project_root: Path | str = PROJECT_ROOT,
     python_executable: str | None = None,
+    force: bool = False,
 ) -> dict[str, Any]:
     """Start a detached helper that rebuilds the shell after ``wait_pid`` exits."""
 
     root = Path(project_root)
+    if force:
+        clear_desktop_shell_refresh_failure(root)
     if recent_desktop_shell_refresh_failure(root) is not None:
         return {
             "schemaVersion": 1,

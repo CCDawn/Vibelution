@@ -1445,6 +1445,7 @@ def _schedule_desktop_shell_refresh_bridge(args: argparse.Namespace) -> dict[str
         then_lifecycle=str(args.then_lifecycle or ""),
         project_root=_workspace_root(args),
         python_executable=str(args.python_exe or sys.executable),
+        force=bool(getattr(args, "force_refresh", False)),
     )
     _append_log(
         "desktop_entry_python.desktop_shell.refresh_scheduled",
@@ -1490,6 +1491,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--launcher-api-body", default="")
     parser.add_argument("--wait-pid", type=int, default=0)
     parser.add_argument("--then-lifecycle", default="")
+    parser.add_argument(
+        "--force-refresh",
+        action="store_true",
+        help="Clear recent desktop shell refresh failure cooldown before scheduling.",
+    )
     return parser.parse_args(argv)
 
 

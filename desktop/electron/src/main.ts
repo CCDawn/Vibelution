@@ -1306,7 +1306,10 @@ async function inspectCurrentDesktopShell(): Promise<DesktopShellStatus> {
   });
 }
 
-async function scheduleCurrentDesktopShellRefresh(thenLifecycle: string): Promise<void> {
+async function scheduleCurrentDesktopShellRefresh(
+  thenLifecycle: string,
+  options: { force?: boolean } = {}
+): Promise<void> {
   const pythonPath = desktopPythonPath();
   if (!pythonPath) {
     throw new Error("VIBELUTION_PYTHON_PATH or PYTHON is required to refresh the desktop shell");
@@ -1316,7 +1319,8 @@ async function scheduleCurrentDesktopShellRefresh(thenLifecycle: string): Promis
     workspaceRoot: paths.workspaceRoot,
     pythonPath,
     waitPid: process.pid,
-    thenLifecycle
+    thenLifecycle,
+    force: options.force === true
   });
   if (!scheduled.scheduled || scheduled.helperPid <= 0) {
     const reason = scheduled.reason ? ` (${scheduled.reason})` : "";
@@ -1345,8 +1349,12 @@ async function refreshPackagedDesktopShellIfStale(thenLifecycle: string): Promis
     return false;
   }
   if (status.refreshBlocked) {
-    const detail = String(status.refreshBlockedDetail || status.refreshBlockedReason || "recent refresh failure").slice(0, 220);
-    notifyDesktopTray("Vibelution", `桌面壳自动更新已暂停，继续使用当前壳：${detail}`, "warning");
+    const detail = String(status.refreshBlockedDetail || status.refreshBlockedReason || "recent refresh failure").slice(0, 180);
+    notifyDesktopTray(
+      "Vibelution",
+      `桌面壳自动更新已暂停，继续使用当前壳：${detail}。可在托盘使用「全部重启」重试。`,
+      "warning"
+    );
     return false;
   }
   if (
@@ -1872,7 +1880,7 @@ async function runTrayRestartAll(): Promise<void> {
         shellRefreshScheduled: true
       });
       try {
-        await scheduleCurrentDesktopShellRefresh("");
+        await scheduleCurrentDesktopShellRefresh("", { force: true });
       } catch (error: unknown) {
         shellRefreshInFlight = false;
         const detail = error instanceof Error ? error.message : String(error);

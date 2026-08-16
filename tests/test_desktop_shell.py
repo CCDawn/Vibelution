@@ -113,6 +113,24 @@ def test_schedule_desktop_shell_refresh_skips_during_recent_failure(tmp_path, mo
     assert result["reason"] == "refresh_cooldown"
 
 
+def test_schedule_desktop_shell_refresh_force_bypasses_recent_failure(tmp_path, monkeypatch):
+    desktop_shell.record_desktop_shell_refresh_failure(
+        tmp_path,
+        reason="rebuild_failed",
+        detail="EBUSY",
+    )
+
+    class FakePopen:
+        def __init__(self, args, **kwargs):
+            self.pid = 654
+
+    monkeypatch.setattr(desktop_shell.subprocess, "Popen", FakePopen)
+    result = desktop_shell.schedule_desktop_shell_refresh(wait_pid=44, project_root=tmp_path, force=True)
+    assert result["scheduled"] is True
+    assert result["helperPid"] == 654
+    assert desktop_shell.recent_desktop_shell_refresh_failure(tmp_path) is None
+
+
 def test_recent_desktop_shell_refresh_failure_blocks_inspect(tmp_path):
     desktop_shell.record_desktop_shell_refresh_failure(
         tmp_path,
