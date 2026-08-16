@@ -7,6 +7,7 @@ operator default: global config is the default when the turn does not say.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 import hashlib
 import json
@@ -41,10 +42,61 @@ class FeatureDecision:
         }
 
 
+def _coerce_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if not text:
+        return default
+    if text in {"1", "true", "yes", "on", "enabled"}:
+        return True
+    if text in {"0", "false", "no", "off", "disabled"}:
+        return False
+    return default
+
+
+def _coerce_optional_bool(value: Any) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on", "enabled"}:
+        return True
+    if text in {"0", "false", "no", "off", "disabled"}:
+        return False
+    return None
+
+
+def _as_config(config: Any) -> Any:
+    if isinstance(config, bytes):
+        config = config.decode("utf-8", errors="replace")
+    if isinstance(config, str):
+        text = config.strip()
+        if not text:
+            return {}
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return {}
+        return parsed
+    return {} if config is None else config
+
+
 def _value(source: Any, path: str, default: bool = False) -> bool:
     current = source
     for part in path.split("."):
-        if isinstance(current, dict):
+        if isinstance(current, Mapping):
             if part not in current:
                 return default
             current = current.get(part)
@@ -54,10 +106,11 @@ def _value(source: Any, path: str, default: bool = False) -> bool:
             current = getattr(current, part, None)
         if current is None:
             return default
-    return bool(current)
+    return _coerce_bool(current, default)
 
 
 def _feature_values(config: Any) -> dict[str, bool]:
+    config = _as_config(config)
     return {
         "mental_model": _value(config, "mental_model.enabled"),
         # Default-on turn runtime status (budget/progress inject + rail).
@@ -97,6 +150,8 @@ def resolve_feature_decision(
         from config.settings import get_config
 
         config = get_config()
+    requested = _coerce_optional_bool(requested)
+    managed_denied = _coerce_bool(managed_denied, False)
     values = _feature_values(config)
     if feature not in values:
         raise ValueError(f"Unknown trusted feature: {feature}")
