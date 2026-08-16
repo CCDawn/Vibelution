@@ -75,6 +75,17 @@ class FrontendTypeContractReport:
         return self.conflict_count
 
 
+@dataclass(frozen=True)
+class BackendInventoryReport:
+    route_count: int
+    route_module_count: int
+    prefix_count: int
+    endpoints: list[ApiEndpoint]
+    method_counts: dict[str, int]
+    route_module_counts: dict[str, int]
+    prefix_counts: dict[str, int]
+
+
 def normalize_api_path(raw_path: str) -> str:
     path = str(raw_path or "").strip()
     path = INTERPOLATION_RE.sub("{param}", path)
@@ -102,7 +113,7 @@ def iter_python_route_files(project_root: Path) -> Iterable[Path]:
     yield project_root / "core" / "web" / "app.py"
     routes_dir = project_root / "core" / "web" / "routes"
     if routes_dir.exists():
-        yield from sorted(routes_dir.glob("*.py"))
+        yield from sorted(routes_dir.rglob("*.py"))
 
 
 def iter_frontend_source_files(project_root: Path) -> Iterable[Path]:
@@ -388,12 +399,70 @@ def build_type_report(project_root: Path) -> FrontendTypeContractReport:
     )
 
 
+def _sorted_counts(counter: dict[str, int]) -> dict[str, int]:
+    return dict(sorted(counter.items(), key=lambda item: (-item[1], item[0])))
+
+
+def build_inventory_report(project_root: Path) -> BackendInventoryReport:
+    """Enumerate every discovered backend route definition with deterministic counts.
+
+    This is a static route-definition inventory: it scans decorators in
+    core/web/app.py plus core/web/routes/**/*.py and performs no frontend drift
+    or type matching. Static definitions are not proof a route is registered
+    (router_registry) or callable at runtime; reconcile executability against
+    router registration / runtime OpenAPI.
+    """
+    ordered = sorted(
+        find_backend_routes(project_root),
+        key=lambda item: (item.file, item.line, item.method, item.path),
+    )
+    method_counts: dict[str, int] = {}
+    route_module_counts: dict[str, int] = {}
+    for endpoint in ordered:
+        method_counts[endpoint.method] = method_counts.get(endpoint.method, 0) + 1
+        route_module_counts[endpoint.file] = route_module_counts.get(endpoint.file, 0) + 1
+    endpoint_prefix_counts = prefix_counts(ordered)
+    return BackendInventoryReport(
+        route_count=len(ordered),
+        route_module_count=len(route_module_counts),
+        prefix_count=len(endpoint_prefix_counts),
+        endpoints=ordered,
+        method_counts=_sorted_counts(method_counts),
+        route_module_counts=_sorted_counts(route_module_counts),
+        prefix_counts=endpoint_prefix_counts,
+    )
+
+
 def report_to_json(report: ApiContractReport) -> str:
     return json.dumps(asdict(report), ensure_ascii=False, indent=2)
 
 
 def type_report_to_json(report: FrontendTypeContractReport) -> str:
     return json.dumps(asdict(report), ensure_ascii=False, indent=2)
+
+
+def inventory_report_to_json(report: BackendInventoryReport) -> str:
+    return json.dumps(asdict(report), ensure_ascii=False, indent=2)
+
+
+def inventory_report_to_text(report: BackendInventoryReport) -> str:
+    lines = [
+        "Backend API Inventory",
+        f"- backend endpoints: {report.route_count}",
+        f"- route modules: {report.route_module_count}",
+        f"- API prefixes: {report.prefix_count}",
+    ]
+    lines.append("\nEndpoints:")
+    lines.extend(
+        f"- {item.method} {item.path} ({item.file}:{item.line})" for item in report.endpoints
+    )
+    lines.append("\nCounts by method:")
+    lines.extend(f"- {method}: {count}" for method, count in report.method_counts.items())
+    lines.append("\nCounts by route module:")
+    lines.extend(f"- {module}: {count}" for module, count in report.route_module_counts.items())
+    lines.append("\nCounts by API prefix:")
+    lines.extend(f"- {prefix}: {count}" for prefix, count in report.prefix_counts.items())
+    return "\n".join(lines)
 
 
 def report_to_text(report: ApiContractReport) -> str:
@@ -443,10 +512,27 @@ def type_report_to_text(report: FrontendTypeContractReport) -> str:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Scan advisory frontend/backend API contract drift.")
+    parser = argparse.ArgumentParser(
+        description="Scan advisory frontend/backend API contract drift and backend endpoint inventory."
+    )
     parser.add_argument("--project-root", default=str(PROJECT_ROOT), help="Project root to scan.")
     parser.add_argument("--json", action="store_true", help="Emit JSON instead of text.")
+    parser.add_argument(
+        "--format",
+        choices=("text", "json"),
+        default="text",
+        help="Output format: text or json (default text; --json is equivalent to --format json).",
+    )
     parser.add_argument("--types", action="store_true", help="Scan frontend generic type consistency by method+path.")
+    parser.add_argument(
+        "--inventory",
+        action="store_true",
+        help=(
+            "Emit a static route-definition backend inventory (every decorator found in core/web/routes/**/*.py "
+            "plus core/web/app.py). Static definitions are not proof a route is registered or callable at runtime; "
+            "reconcile executability against router registration / runtime OpenAPI."
+        ),
+    )
     parser.add_argument(
         "--fail-on-drift",
         action="store_true",
@@ -457,12 +543,18 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    project_root = Path(args.project_root).resolve()
+    as_json = args.json or args.format == "json"
     if args.types:
-        report = build_type_report(Path(args.project_root).resolve())
-        print(type_report_to_json(report) if args.json else type_report_to_text(report))
+        report = build_type_report(project_root)
+        print(type_report_to_json(report) if as_json else type_report_to_text(report))
         return 1 if args.fail_on_drift and report.potential_drift_count else 0
-    report = build_report(Path(args.project_root).resolve())
-    print(report_to_json(report) if args.json else report_to_text(report))
+    if args.inventory:
+        report = build_inventory_report(project_root)
+        print(inventory_report_to_json(report) if as_json else inventory_report_to_text(report))
+        return 0
+    report = build_report(project_root)
+    print(report_to_json(report) if as_json else report_to_text(report))
     return 1 if args.fail_on_drift and report.potential_drift_count else 0
 
 
