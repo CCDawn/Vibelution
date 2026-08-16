@@ -12,6 +12,8 @@ from core.web.routes import launcher as web_launcher_routes
 from core.runtime_manager import work_run_store
 from core.runtime_manager.work_run_store import WorkRunStore
 
+_REAL_RESIDUAL_PROCESSES_PAYLOAD = launcher_service._residual_processes_payload
+
 pytestmark = pytest.mark.serial
 
 
@@ -1704,6 +1706,62 @@ def test_lifecycle_proof_projects_residual_process_inventory(monkeypatch):
     assert proof["residualProcesses"]["count"] == 1
     assert proof["residualProcesses"]["items"][0]["pid"] == 44100
     assert proof["residualProcesses"]["items"][0]["kind"] == "unmanaged_workbench"
+
+
+def test_status_residual_inventory_defers_full_scan_when_control_surface_is_closed(monkeypatch):
+    monkeypatch.setattr(launcher_service, "_residual_processes_payload", _REAL_RESIDUAL_PROCESSES_PAYLOAD)
+
+    def fail_if_scanned(**_kwargs):
+        raise AssertionError("status poll should not run a full residual inventory scan when closed")
+
+    monkeypatch.setattr(
+        "core.runtime_manager.process_inventory.residual_process_payload",
+        fail_if_scanned,
+    )
+
+    payload = launcher_service._residual_processes_payload(
+        runtime_manager={"running": False, "managerPid": 0},
+        workbench={
+            "desiredState": "closed",
+            "observedState": "closed",
+            "phase": "steady",
+        },
+        runtime_state={},
+    )
+
+    assert payload["count"] == 0
+    assert payload["items"] == []
+    assert payload["mode"] == "deferred_for_status_poll"
+
+
+def test_status_residual_inventory_reuses_runtime_state_cache(monkeypatch):
+    monkeypatch.setattr(launcher_service, "_residual_processes_payload", _REAL_RESIDUAL_PROCESSES_PAYLOAD)
+
+    def fail_if_scanned(**_kwargs):
+        raise AssertionError("cached runtime residual inventory should satisfy status poll")
+
+    monkeypatch.setattr(
+        "core.runtime_manager.process_inventory.residual_process_payload",
+        fail_if_scanned,
+    )
+
+    payload = launcher_service._residual_processes_payload(
+        runtime_manager={"running": True, "managerPid": 200},
+        workbench={
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "steady",
+        },
+        runtime_state={
+            "residualProcesses": {
+                "count": 1,
+                "items": [{"pid": 44100, "kind": "unmanaged_workbench"}],
+            }
+        },
+    )
+
+    assert payload["count"] == 1
+    assert payload["items"][0]["pid"] == 44100
 
 
 def test_launcher_startup_settings_rejects_invalid_workbench_window_size(tmp_path, monkeypatch):

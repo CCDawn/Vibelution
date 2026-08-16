@@ -277,6 +277,7 @@ def get_launcher_status() -> dict[str, Any]:
         runtime_manager=runtime_manager,
         workbench=workbench,
         active_work_runs=active_work_runs,
+        runtime_state=runtime_state,
     )
     last_error = runtime_state.get("lastError") if isinstance(runtime_state.get("lastError"), dict) else {}
     last_error_message = str(last_error.get("message") or "").strip()
@@ -3128,6 +3129,65 @@ def _positive_pid(value: object) -> int:
     return pid if pid > 0 else 0
 
 
+_DEFERRED_RESIDUAL_PROCESSES_PAYLOAD: dict[str, Any] = {
+    "count": 0,
+    "items": [],
+    "mode": "deferred_for_status_poll",
+}
+
+
+def _normalize_residual_processes_payload(payload: object) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {"count": 0, "items": []}
+    items = [item for item in payload.get("items", []) if isinstance(item, dict)]
+    try:
+        reported = int(payload.get("count") or 0)
+    except (TypeError, ValueError):
+        reported = 0
+    normalized = {
+        "count": max(reported, len(items)),
+        "items": items[:16],
+    }
+    mode = str(payload.get("mode") or "").strip()
+    if mode:
+        normalized["mode"] = mode
+    return normalized
+
+
+def _residual_processes_from_runtime_state(runtime_state: dict[str, Any]) -> dict[str, Any] | None:
+    cached = runtime_state.get("residualProcesses")
+    if not isinstance(cached, dict) or "items" not in cached:
+        return None
+    return _normalize_residual_processes_payload(cached)
+
+
+def _should_defer_residual_inventory_for_status(
+    *,
+    workbench: dict[str, Any],
+    runtime_manager: dict[str, Any],
+) -> bool:
+    desired_state = str(workbench.get("desiredState") or "closed").strip().lower()
+    observed_state = str(workbench.get("observedState") or "closed").strip().lower()
+    phase = str(workbench.get("phase") or "steady").strip().lower()
+    if desired_state == "closed" and observed_state == "closed" and phase in {"steady", ""}:
+        return True
+    if not bool(runtime_manager.get("running")) and observed_state == "closed":
+        return True
+    return False
+
+
+def _should_refresh_residual_inventory_for_status(
+    *,
+    workbench: dict[str, Any],
+) -> bool:
+    desired_state = str(workbench.get("desiredState") or "closed").strip().lower()
+    observed_state = str(workbench.get("observedState") or "closed").strip().lower()
+    phase = str(workbench.get("phase") or "steady").strip().lower()
+    if desired_state != observed_state:
+        return True
+    return phase in {"closing", "failed"}
+
+
 def _residual_excluded_pids(*, runtime_manager: dict[str, Any], workbench: dict[str, Any]) -> set[int]:
     excluded = {os.getpid()}
     trusted_port_owner = workbench.get("backendPortOwnerPid") if workbench.get("backendPortOwnerTrusted") else 0
@@ -3145,7 +3205,18 @@ def _residual_excluded_pids(*, runtime_manager: dict[str, Any], workbench: dict[
     return excluded
 
 
-def _residual_processes_payload(*, runtime_manager: dict[str, Any], workbench: dict[str, Any]) -> dict[str, Any]:
+def _residual_processes_payload(
+    *,
+    runtime_manager: dict[str, Any],
+    workbench: dict[str, Any],
+    runtime_state: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    runtime_state = runtime_state if isinstance(runtime_state, dict) else {}
+    cached = _residual_processes_from_runtime_state(runtime_state)
+    if cached is not None and not _should_refresh_residual_inventory_for_status(workbench=workbench):
+        return cached
+    if _should_defer_residual_inventory_for_status(workbench=workbench, runtime_manager=runtime_manager):
+        return dict(_DEFERRED_RESIDUAL_PROCESSES_PAYLOAD)
     try:
         from core.runtime_manager.process_inventory import residual_process_payload
 
@@ -3155,17 +3226,7 @@ def _residual_processes_payload(*, runtime_manager: dict[str, Any], workbench: d
         )
     except Exception:
         return {"count": 0, "items": []}
-    if not isinstance(payload, dict):
-        return {"count": 0, "items": []}
-    items = [item for item in payload.get("items", []) if isinstance(item, dict)]
-    try:
-        reported = int(payload.get("count") or 0)
-    except (TypeError, ValueError):
-        reported = 0
-    return {
-        "count": max(reported, len(items)),
-        "items": items[:16],
-    }
+    return _normalize_residual_processes_payload(payload)
 
 
 def _lifecycle_proof(
@@ -3173,6 +3234,7 @@ def _lifecycle_proof(
     runtime_manager: dict[str, Any],
     workbench: dict[str, Any],
     active_work_runs: list[dict[str, str]],
+    runtime_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     verified_at = datetime.now(timezone.utc).isoformat()
     desired_state = str(workbench.get("desiredState") or "closed")
@@ -3272,6 +3334,7 @@ def _lifecycle_proof(
         "residualProcesses": _residual_processes_payload(
             runtime_manager=runtime_manager,
             workbench=workbench,
+            runtime_state=runtime_state,
         ),
     }
 
