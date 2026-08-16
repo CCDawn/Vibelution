@@ -2286,6 +2286,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("copy.bulkSkippedProtected");
     expect(agentsRouteCopySource).toContain("bulkPurgeConfirm:");
     expect(agentsRouteCopySource).toContain("bulkArchiveConfirm:");
+    expect(agentsRouteCopySource).toContain("不会批量删除会话记录");
     expect(routeSource).toContain("copy.bulkPurgeResult");
     expect(bulkOperationsPanelSource).toContain("copy.bulkPurgeConfirm");
     expect(bulkOperationsPanelSource).toContain("copy.bulkArchiveConfirm");
