@@ -79,3 +79,20 @@ def test_round_state_coerces_false_flags_bytes_outcome_and_string_max_iterations
     stalled = RoundStateController(max_iterations=1)
     stalled.note_response_tools(True, "")
     assert stalled.last_response_tool_call_count == 0
+
+    flagged = RoundStateController(max_iterations=b"5")
+    flagged.note_response_tools(
+        2,
+        "",
+        tool_names={"read_file_tool": True, "task_list_tool": bytearray(b"false")},
+    )
+    assert flagged.substantive_tool_calls == 1
+    assert flagged.consecutive_tool_only_steps == 1
+    json_map = RoundStateController(max_iterations=5)
+    json_map.note_response_tools(
+        1,
+        "",
+        tool_names='{"task_list_tool":"true","read_file_tool":"false"}',
+    )
+    assert json_map.substantive_tool_calls == 0
+    assert json_map.consecutive_bookkeeping_tool_only_steps == 1

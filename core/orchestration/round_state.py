@@ -26,7 +26,7 @@ def _coerce_bool(value: Any, default: bool) -> bool:
         return default
     if isinstance(value, (bytes, bytearray, memoryview)):
         value = bytes(value).decode("utf-8", errors="replace")
-    if isinstance(value, (int, float)):
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
         return bool(value)
     text = str(value).strip().lower()
     if not text:
@@ -52,17 +52,21 @@ def _maybe_json(value: Any) -> Any:
 
 
 def _coerce_nonnegative_int(value: Any, *, default: int = 0) -> int:
+    if isinstance(default, bool) or default is None:
+        fallback = 0
+    else:
+        try:
+            fallback = max(0, int(default))
+        except (TypeError, ValueError):
+            fallback = 0
     if isinstance(value, bool) or value is None:
-        return max(0, int(default or 0))
+        return fallback
     if isinstance(value, (bytes, bytearray, memoryview)):
         value = bytes(value).decode("utf-8", errors="replace")
     try:
         return max(0, int(value))
     except (TypeError, ValueError):
-        try:
-            return max(0, int(default or 0))
-        except (TypeError, ValueError):
-            return 0
+        return fallback
 
 
 def _coerce_name_list(value: Any) -> list[str] | None:
@@ -77,8 +81,15 @@ def _coerce_name_list(value: Any) -> list[str] | None:
         text = value.strip()
         return [text] if text else []
     if isinstance(value, Mapping):
-        name = _coerce_text(value.get("name") or value.get("toolName")).strip()
-        return [name] if name else []
+        if "name" in value or "toolName" in value:
+            name = _coerce_text(value.get("name") or value.get("toolName")).strip()
+            return [name] if name else []
+        names: list[str] = []
+        for key, enabled in value.items():
+            name = _coerce_text(key).strip()
+            if name and _coerce_bool(enabled, True):
+                names.append(name)
+        return names
     try:
         items = list(value)
     except TypeError:
