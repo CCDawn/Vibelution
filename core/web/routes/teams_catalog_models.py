@@ -1,9 +1,9 @@
 """Public contracts for Team catalog read routes.
 
-List, canvas, and AI-search run payloads publish stable envelopes. Detail is
-dual-shape (light vs full). Only identifiers that exist on every successful
-shape are required there. Routes must use response_model_exclude_unset=True so
-missing optional fields stay absent instead of being filled with defaults.
+List, canvas, and AI-search run payloads publish stable envelopes. Team detail
+splits light first-paint and full hydration shapes. Write routes return the
+full shape. Routes must use response_model_exclude_unset=True so missing
+optional fields stay absent instead of being filled with defaults.
 """
 
 from __future__ import annotations
@@ -24,10 +24,32 @@ class TeamListResponse(BaseModel):
     systemTeamBootstrap: dict[str, Any] = Field(default_factory=dict)
 
 
-class TeamDetailResponse(BaseModel):
+class TeamDetailLightResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     teamId: str = ""
+    name: str = ""
+    description: str = ""
+    purpose: str = ""
+    status: str = ""
+    teamKind: str = ""
+    teamCategory: str = ""
+    teamSource: str = ""
+    teamTemplateId: str = ""
+    sourceScopePath: str = ""
+    members: list[dict[str, Any]] = Field(default_factory=list)
+    memberCount: int = 0
+    linkedChatRoomId: str = ""
+    linkedChatRoom: dict[str, Any] | None = None
+    canvasPath: str = ""
+    createdAt: str = ""
+    updatedAt: str = ""
+    canvas: dict[str, Any] = Field(default_factory=dict)
+
+
+class TeamDetailFullResponse(TeamDetailLightResponse):
+    sourceScope: dict[str, Any] = Field(default_factory=dict)
+    conversation: dict[str, Any] = Field(default_factory=dict)
 
 
 class TeamCanvasResponse(BaseModel):
