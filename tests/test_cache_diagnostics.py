@@ -193,3 +193,33 @@ def test_build_runtime_cache_composition_calibrates_remainder_as_computed_hit():
     assert composition["calibrationStatus"] == "provider_lower_than_computed"
     assert composition["computedOverestimatedInputTokens"] == 20
     assert composition["calibratedCachedInputTokens"] == cacheable + 10
+
+
+def test_cache_diagnostics_parse_json_payloads_and_reject_true_as_one_token():
+    usage = normalize_runtime_llm_usage(
+        '{"inputTokens":"80","outputTokens":"10","cacheUsageObserved":"false"}'
+    )
+    assert usage is not None
+    assert usage["inputTokens"] == 80
+    assert usage["cacheUsageObserved"] is False
+    assert normalize_runtime_llm_usage({"inputTokens": True})["inputTokens"] == 0
+
+    missing = build_llm_usage_from_observation(
+        SimpleNamespace(observed="false", input_tokens=99, output_tokens=3, total_tokens=102)
+    )
+    assert missing["source"] == "missing"
+    assert missing["inputTokens"] == 0
+
+    composition = build_runtime_context_composition(
+        '{"role":"user","content":"hello from json"}',
+        turn_id=b"turn-json",
+        prompt_cache_partition=memoryview(b"part-json"),
+        context_limit=b"8000",
+    )
+    assert composition["turnId"] == "turn-json"
+    assert composition["promptCachePartition"] == "part-json"
+    assert composition["limitTokens"] == 8000
+    assert composition["segments"][0]["contentPreview"] == "hello from json"
+
+    char_split = build_runtime_context_composition("hello")
+    assert char_split["segments"] == []

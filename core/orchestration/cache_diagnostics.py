@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any
 
@@ -11,19 +13,82 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from core.context.volatility import is_volatile_context_text
 
 
+def _decode_binary(value: Any) -> Any:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).decode("utf-8", errors="replace")
+    return value
+
+
+def _maybe_json(value: Any) -> Any:
+    value = _decode_binary(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith("{") or text.startswith("["):
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                return value
+    return value
+
+
+def _as_mapping(value: Any) -> dict[str, Any]:
+    value = _maybe_json(value)
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {}
+
+
+def _coerce_text(value: Any) -> str:
+    if value is None:
+        return ""
+    value = _decode_binary(value)
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+def _coerce_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    value = _decode_binary(value)
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return bool(value)
+    text = str(value).strip().lower()
+    if not text:
+        return default
+    if text in {"1", "true", "yes", "on", "enabled"}:
+        return True
+    if text in {"0", "false", "no", "off", "disabled"}:
+        return False
+    return default
+
+
 def _coerce_nonnegative_int(value: Any) -> int:
+    if isinstance(value, bool) or value is None:
+        return 0
+    value = _decode_binary(value)
     try:
-        return max(0, int(value or 0))
+        parsed = int(value)
     except (TypeError, ValueError):
         return 0
+    return max(0, parsed)
 
 
 def _coerce_optional_bool(value: Any) -> bool | None:
     if isinstance(value, bool):
         return value
-    if isinstance(value, (int, float)) and value in {0, 1}:
-        return bool(value)
-    text = str(value or "").strip().lower()
+    if value is None:
+        return None
+    value = _decode_binary(value)
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if value in {0, 1}:
+            return bool(value)
+        return None
+    text = str(value).strip().lower()
+    if not text:
+        return None
     if text in {"true", "yes", "on", "1"}:
         return True
     if text in {"false", "no", "off", "0"}:
@@ -31,19 +96,44 @@ def _coerce_optional_bool(value: Any) -> bool | None:
     return None
 
 
+def _coerce_message_list(value: Any) -> list[Any]:
+    value = _maybe_json(value)
+    if value is None:
+        return []
+    if isinstance(value, Mapping):
+        return [dict(value)]
+    if isinstance(value, (str, bytes, bytearray, memoryview)):
+        return []
+    if isinstance(value, Sequence):
+        return list(value)
+    try:
+        return list(value)
+    except TypeError:
+        return []
+
+
+def _usage_get(token_usage: Any, *names: str, default: Any = 0) -> Any:
+    for name in names:
+        if isinstance(token_usage, Mapping) and name in token_usage:
+            return token_usage.get(name)
+        if hasattr(token_usage, name):
+            return getattr(token_usage, name)
+    return default
+
+
 def _now_timestamp() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
 def _preview(text: Any, *, limit: int = 180) -> str:
-    value = " ".join(str(text or "").split())
+    value = " ".join(_coerce_text(text).split())
     if len(value) <= limit:
         return value
     return value[: max(0, limit - 1)].rstrip() + "..."
 
 
 def compact_repeated_metadata_text(value: Any, *, max_chars: int = 300) -> str:
-    text = str(value or "").strip()
+    text = _coerce_text(value).strip()
     if not text:
         return ""
     compacted = text
@@ -66,8 +156,9 @@ def estimate_segment_tokens(chars: int, item_count: int = 0) -> int:
 
 
 def _message_role(message: Any) -> str:
+    message = _maybe_json(message)
     if isinstance(message, dict):
-        return str(message.get("role") or "").strip().lower()
+        return _coerce_text(message.get("role")).strip().lower()
     if isinstance(message, SystemMessage):
         return "system"
     if isinstance(message, HumanMessage):
@@ -80,31 +171,37 @@ def _message_role(message: Any) -> str:
 
 
 def _content_text(content: Any) -> str:
+    content = _maybe_json(content)
+    if isinstance(content, (bytes, bytearray, memoryview)):
+        return _coerce_text(content)
     if isinstance(content, str):
         return content
     if isinstance(content, list):
         parts: list[str] = []
         for block in content:
+            block = _maybe_json(block)
             if isinstance(block, dict):
-                block_type = str(block.get("type") or "text").strip().lower()
+                block_type = _coerce_text(block.get("type") or "text").strip().lower()
                 if block_type in {"", "text", "input_text"}:
-                    parts.append(str(block.get("text") or block.get("content") or ""))
-            elif isinstance(block, str):
-                parts.append(block)
+                    parts.append(_coerce_text(block.get("text") or block.get("content") or ""))
+            elif isinstance(block, (str, bytes, bytearray, memoryview)):
+                parts.append(_coerce_text(block))
         return "\n\n".join(part for part in parts if part)
-    return str(content or "")
+    return _coerce_text(content)
 
 
 def _message_text(message: Any) -> str:
+    message = _maybe_json(message)
     if isinstance(message, dict):
         return _content_text(message.get("content"))
     return _content_text(getattr(message, "content", ""))
 
 
 def _system_cache_control_text(message: Any) -> tuple[str, str]:
+    message = _maybe_json(message)
     if not isinstance(message, dict):
         return "", _message_text(message)
-    if str(message.get("role") or "").strip().lower() != "system":
+    if _coerce_text(message.get("role")).strip().lower() != "system":
         return "", _message_text(message)
     content = message.get("content")
     if not isinstance(content, list):
@@ -141,7 +238,7 @@ def _segment(
         "label": label,
         "chars": chars,
         "tokens": estimate_segment_tokens(chars, item_count),
-        "itemCount": max(0, int(item_count or 0)),
+        "itemCount": _coerce_nonnegative_int(item_count),
         "status": "included",
         "source": source,
         "description": description,
@@ -165,7 +262,7 @@ def build_runtime_context_composition(
 ) -> dict[str, Any]:
     """Build a bounded context manifest for non-session Agent turns."""
 
-    normalized = list(messages or [])
+    normalized = _coerce_message_list(messages)
     last_user_index = -1
     for index, message in enumerate(normalized):
         if _message_role(message) in {"user", "human"}:
@@ -325,13 +422,13 @@ def build_runtime_context_composition(
     return {
         "schemaVersion": 1,
         "source": "agent_runtime",
-        "turnId": str(turn_id or "").strip(),
-        "promptCachePartition": str(prompt_cache_partition or "").strip(),
+        "turnId": _coerce_text(turn_id).strip(),
+        "promptCachePartition": _coerce_text(prompt_cache_partition).strip(),
         "segments": segments,
         "modelInputOrdering": ordering,
         "totalChars": total_chars,
         "totalTokens": total_tokens,
-        "limitTokens": max(0, int(context_limit or 0)),
+        "limitTokens": _coerce_nonnegative_int(context_limit),
         "cache": {
             "cacheableSegmentCount": len(
                 [item for item in segments if item.get("cachePolicy") in {"prefix_candidate", "cacheable"}]
@@ -351,25 +448,28 @@ def build_llm_usage_from_observation(
     runtime_metadata: dict[str, Any] | None = None,
     recorded_at: str = "",
 ) -> dict[str, Any]:
-    response_metadata = response_metadata if isinstance(response_metadata, dict) else {}
-    runtime_metadata = runtime_metadata if isinstance(runtime_metadata, dict) else {}
-    observed = bool(getattr(token_usage, "observed", False))
-    input_tokens = _coerce_nonnegative_int(getattr(token_usage, "input_tokens", 0)) if observed else 0
-    output_tokens = _coerce_nonnegative_int(getattr(token_usage, "output_tokens", 0)) if observed else 0
-    cached_tokens = min(_coerce_nonnegative_int(getattr(token_usage, "cached_input_tokens", 0)), input_tokens) if input_tokens else 0
+    token_usage = _maybe_json(token_usage)
+    response_metadata = _as_mapping(response_metadata)
+    runtime_metadata = _as_mapping(runtime_metadata)
+    observed = _coerce_bool(_usage_get(token_usage, "observed", default=False), default=False)
+    input_tokens = _coerce_nonnegative_int(_usage_get(token_usage, "input_tokens", "inputTokens")) if observed else 0
+    output_tokens = _coerce_nonnegative_int(_usage_get(token_usage, "output_tokens", "outputTokens")) if observed else 0
+    cached_tokens = min(_coerce_nonnegative_int(_usage_get(token_usage, "cached_input_tokens", "cachedInputTokens")), input_tokens) if input_tokens else 0
     cache_creation_tokens = (
-        min(_coerce_nonnegative_int(getattr(token_usage, "cache_creation_input_tokens", 0)), input_tokens)
+        min(_coerce_nonnegative_int(_usage_get(token_usage, "cache_creation_input_tokens", "cacheCreationInputTokens")), input_tokens)
         if input_tokens
         else 0
     )
-    uncached_tokens = _coerce_nonnegative_int(getattr(token_usage, "uncached_input_tokens", 0))
+    uncached_tokens = _coerce_nonnegative_int(_usage_get(token_usage, "uncached_input_tokens", "uncachedInputTokens"))
     if input_tokens and not uncached_tokens:
         uncached_tokens = max(0, input_tokens - cached_tokens)
     return {
         "source": "provider_usage" if observed else "missing",
         "inputTokens": input_tokens,
         "outputTokens": output_tokens,
-        "totalTokens": _coerce_nonnegative_int(getattr(token_usage, "total_tokens", input_tokens + output_tokens))
+        "totalTokens": _coerce_nonnegative_int(
+            _usage_get(token_usage, "total_tokens", "totalTokens", default=input_tokens + output_tokens)
+        )
         if observed
         else 0,
         "cachedInputTokens": cached_tokens,
@@ -379,31 +479,33 @@ def build_llm_usage_from_observation(
         "cacheHitRate": (cached_tokens / input_tokens) if observed and input_tokens > 0 else 0.0,
         "provider": compact_repeated_metadata_text(response_metadata.get("provider") or runtime_metadata.get("provider") or ""),
         "model": compact_repeated_metadata_text(response_metadata.get("model") or runtime_metadata.get("model") or ""),
-        "llmModelId": str(
+        "llmModelId": _coerce_text(
             response_metadata.get("llmModelId")
             or response_metadata.get("modelId")
             or runtime_metadata.get("llmModelId")
             or runtime_metadata.get("modelId")
             or ""
         ).strip(),
-        "promptCacheScope": str(
+        "promptCacheScope": _coerce_text(
             response_metadata.get("promptCacheScope")
             or runtime_metadata.get("cacheScope")
             or runtime_metadata.get("promptCacheScope")
             or ""
         ).strip(),
-        "promptCachePartition": str(
+        "promptCachePartition": _coerce_text(
             response_metadata.get("promptCachePartition")
             or runtime_metadata.get("promptCachePartition")
             or ""
         ).strip(),
-        "recordedAt": str(recorded_at or _now_timestamp()).strip(),
+        "recordedAt": _coerce_text(recorded_at or _now_timestamp()).strip(),
     }
 
 
 def normalize_runtime_llm_usage(value: Any) -> dict[str, Any] | None:
-    if not isinstance(value, dict):
+    value = _maybe_json(value)
+    if not isinstance(value, Mapping):
         return None
+    value = dict(value)
     input_tokens = _coerce_nonnegative_int(value.get("inputTokens") or value.get("input_tokens") or 0)
     cached_tokens = min(
         _coerce_nonnegative_int(
@@ -470,10 +572,21 @@ def _computed_segments(
     input_tokens: int,
     context_composition: dict[str, Any] | None,
 ) -> tuple[list[dict[str, Any]], int, int]:
-    context = context_composition if isinstance(context_composition, dict) else {}
+    context = _as_mapping(context_composition)
     segments: list[dict[str, Any]] = []
-    raw_segments = [item for item in list(context.get("segments") or []) if isinstance(item, dict)]
-    order = list(context.get("modelInputOrdering") or [])
+    raw_segments_value = _maybe_json(context.get("segments") or [])
+    if isinstance(raw_segments_value, Mapping):
+        raw_items = [dict(raw_segments_value)]
+    elif isinstance(raw_segments_value, Sequence) and not isinstance(raw_segments_value, (str, bytes, bytearray, memoryview)):
+        raw_items = list(raw_segments_value)
+    else:
+        raw_items = []
+    raw_segments = [item for item in raw_items if isinstance(item, dict)]
+    order_value = _maybe_json(context.get("modelInputOrdering") or [])
+    if isinstance(order_value, Sequence) and not isinstance(order_value, (str, bytes, bytearray, memoryview)):
+        order = [_coerce_text(key) for key in order_value]
+    else:
+        order = []
     if order:
         by_key = {str(item.get("key") or ""): item for item in raw_segments}
         raw_segments = [by_key[key] for key in order if key in by_key]
@@ -508,7 +621,7 @@ def _computed_segments(
                 "contentPreview": str(item.get("contentPreview") or "").strip(),
                 "promptCategory": str(item.get("promptCategory") or item.get("prompt_category") or "").strip(),
                 "segmentKind": str(item.get("segmentKind") or item.get("segment_kind") or "prompt_source").strip(),
-                "estimated": bool(item.get("estimated", True)),
+                "estimated": _coerce_bool(item.get("estimated", True), True),
             }
         )
     mapped_tokens = computed_cached + computed_uncached
@@ -548,7 +661,7 @@ def build_runtime_cache_composition(
         or not bool(usage.get("cacheUsageObserved"))
     ):
         return {
-            "turnId": str(turn_id or "").strip(),
+            "turnId": _coerce_text(turn_id).strip(),
             "recordedAt": _now_timestamp(),
             "source": "missing",
             "inputTokens": 0,
@@ -620,7 +733,7 @@ def build_runtime_cache_composition(
             }
         )
 
-    average_cache = average_cache if isinstance(average_cache, dict) else {}
+    average_cache = _as_mapping(average_cache)
     average_input = _coerce_nonnegative_int(average_cache.get("inputTokens") or average_cache.get("totalInputTokens") or 0)
     average_cached = min(
         _coerce_nonnegative_int(average_cache.get("cachedInputTokens") or average_cache.get("totalCachedInputTokens") or 0),
@@ -639,7 +752,7 @@ def build_runtime_cache_composition(
     computed_input_total = max(input_tokens, computed_cached + computed_uncached)
     computed_cache_hit_rate = (computed_cached / computed_input_total) if computed_input_total > 0 else 0.0
     return {
-        "turnId": str(turn_id or "").strip(),
+        "turnId": _coerce_text(turn_id).strip(),
         "recordedAt": usage.get("recordedAt") or _now_timestamp(),
         "source": "provider_usage",
         "provider": usage.get("provider") or "",
