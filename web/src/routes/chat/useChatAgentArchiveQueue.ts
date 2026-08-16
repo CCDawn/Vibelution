@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { startUserAction } from "../../app/userActionTelemetry";
+
 type MaybePromise<T> = T | Promise<T>;
 
 type ChatAgentArchiveQueueOptions<TContext, TResult> = {
@@ -87,10 +89,13 @@ export function createChatAgentArchiveQueue<TContext, TResult>(
           if (!item) {
             break;
           }
+          const telemetry = startUserAction("agent_archive", { agentId: item.agentId }, { destructive: true });
           try {
             const result = await options.executeArchive(item.agentId);
+            telemetry.succeeded({ agentId: item.agentId, source: "chat_archive_queue" });
             await options.onArchiveSuccess(item.agentId, result, item.context);
           } catch (error) {
+            telemetry.failed(error, { agentId: item.agentId, source: "chat_archive_queue" });
             await options.onArchiveFailure(item.agentId, error, item.context);
           } finally {
             pendingAgentIds.delete(item.agentId);

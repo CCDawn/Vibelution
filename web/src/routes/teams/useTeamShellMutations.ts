@@ -10,6 +10,7 @@ import {
   revokeProjectAgentBusMessage,
   sendTeamProjectBusMessage,
 } from "../../api/projectAgentBus";
+import { startUserAction } from "../../app/userActionTelemetry";
 import { queryKeys } from "../../api/queryKeys";
 import {
   archiveTeam,
@@ -39,19 +40,33 @@ export function useTeamShellMutations(options: UseTeamShellMutationsOptions) {
 
   const archiveTeamMutation = useMutation({
     mutationFn: (teamId: string) => archiveTeam(teamId),
-    onSuccess: (team, teamId) => {
+    onMutate: (teamId) => ({
+      telemetry: startUserAction("team_archive", { teamId }, { destructive: true }),
+    }),
+    onSuccess: (team, teamId, context) => {
+      context?.telemetry?.succeeded({ teamId });
       options.setSelectedTeamId("");
       options.setSelectedNodeId("");
       options.clearTeamSearchParams();
       void chatWorkspaceCache.afterTeamArchived(teamId, team.linkedChatRoomId || team.linkedChatRoom?.roomId);
     },
+    onError: (error, teamId, context) => {
+      context?.telemetry?.failed(error, { teamId });
+    },
   });
 
   const saveCanvasMutation = useMutation({
     mutationFn: (nextCanvas: TeamOrganizationCanvas) => saveTeamCanvas(nextCanvas),
-    onSuccess: (canvas, variables) => {
+    onMutate: (variables) => ({
+      telemetry: startUserAction("team_canvas_save", { teamId: variables.teamId }),
+    }),
+    onSuccess: (canvas, variables, context) => {
+      context?.telemetry?.succeeded({ teamId: variables.teamId });
       queryClient.setQueryData(queryKeys.teamCanvas(variables.teamId), canvas);
       void chatWorkspaceCache.afterTeamChanged(variables.teamId);
+    },
+    onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, { teamId: variables.teamId });
     },
   });
 
