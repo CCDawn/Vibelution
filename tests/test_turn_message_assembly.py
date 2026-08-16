@@ -11,6 +11,7 @@ from core.infrastructure.runtime_input import build_chat_user_message
 from core.orchestration.turn_message_assembly import (
     assemble_prepared_turn_messages,
     insert_pending_volatile_context_messages,
+    langchain_messages_from_conversation_layer,
     normalize_seeded_tool_calls,
     refresh_system_prefix_on_messages,
     sanitize_seeded_chat_content,
@@ -185,3 +186,46 @@ def test_refresh_system_prefix_replaces_dynamic_suffix_and_remerges_static():
     assert all(item is not stale_dynamic for item in refreshed)
     assert any(is_dynamic_system_context_message(item) for item in refreshed[2:-1])
     assert refreshed[-1] == messages[-1]
+
+
+def test_sanitize_seeded_chat_content_accepts_ai_role_and_missing_role():
+    leaked = "内部 spawn_agent_tool 痕迹"
+    assert sanitize_seeded_chat_content("ai", leaked) == ""
+    assert sanitize_seeded_chat_content(None, leaked) == leaked
+    assert sanitize_seeded_chat_content("user", leaked) == leaked
+
+
+def test_normalize_seeded_tool_calls_accepts_single_mapping_and_rejects_scalars():
+    normalized = normalize_seeded_tool_calls(
+        {"id": "call-9", "name": "read_file_tool", "args": {"path": "a.py"}}
+    )
+    assert normalized == [{"id": "call-9", "name": "read_file_tool", "args": {"path": "a.py"}}]
+    assert normalize_seeded_tool_calls(7) == []
+    assert normalize_seeded_tool_calls("not-a-call") == []
+
+
+def test_insert_pending_volatile_treats_string_as_one_block():
+    messages = [SystemMessage(content="system"), build_chat_user_message("现在")]
+    updated, inserted = insert_pending_volatile_context_messages(
+        messages,
+        "## Slash Skill Context\nCommand: /brt",
+    )
+    assert inserted == ["## Slash Skill Context\nCommand: /brt"]
+    assert isinstance(updated[-2], SystemMessage)
+    assert updated[-2].content.startswith("## Slash Skill Context")
+    assert updated[-1] == messages[-1]
+
+
+def test_langchain_layer_projects_ai_role_and_drops_tool_without_id():
+    restored = langchain_messages_from_conversation_layer(
+        [
+            {"role": "ai", "content": "继续", "tool_calls": [{"id": "call-1", "name": "read_file_tool", "args": {}}]},
+            {"role": "tool", "content": "missing-id"},
+            {"role": "tool", "content": "ok", "tool_call_id": "call-1"},
+        ]
+    )
+    assert isinstance(restored[0], AIMessage)
+    assert restored[0].content == "继续"
+    assert restored[0].tool_calls[0]["id"] == "call-1"
+    assert len(restored) == 2
+    assert restored[1].tool_call_id == "call-1"

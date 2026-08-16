@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence
 
 from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 
@@ -24,6 +24,32 @@ IsDynamicContextFn = Callable[[Any], bool]
 SEEDED_TOOL_POLICY_OMISSION = "[工具策略提示] 历史中有一次未授权工具调用已被省略。"
 
 
+def _coerce_text_blocks(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, Mapping):
+        return []
+    try:
+        return [str(block) for block in list(value)]
+    except TypeError:
+        return [str(value)]
+
+
+def _seeded_call_items(raw_calls: Any) -> list:
+    if isinstance(raw_calls, Mapping):
+        return [dict(raw_calls)]
+    if isinstance(raw_calls, (str, bytes)) or raw_calls in (None, ""):
+        return []
+    try:
+        return list(raw_calls)
+    except TypeError:
+        return []
+
+
 @dataclass(frozen=True)
 class AssembledTurnMessages:
     messages: list
@@ -37,7 +63,7 @@ class AssembledTurnMessages:
 
 def normalize_seeded_tool_calls(raw_calls: Any) -> List[Dict[str, Any]]:
     normalized: List[Dict[str, Any]] = []
-    for raw_call in list(raw_calls or []):
+    for raw_call in _seeded_call_items(raw_calls):
         if not isinstance(raw_call, dict):
             continue
         function = raw_call.get("function") if isinstance(raw_call.get("function"), dict) else {}
@@ -69,7 +95,8 @@ def normalize_seeded_tool_calls(raw_calls: Any) -> List[Dict[str, Any]]:
 
 def sanitize_seeded_chat_content(role: str, content: str) -> str:
     text = str(content or "")
-    if role.strip().lower() != "assistant":
+    normalized_role = str(role or "").strip().lower()
+    if normalized_role not in {"assistant", "ai"}:
         return text
     for marker in _INTERNAL_TOOL_PROTOCOL_MARKERS:
         if marker in text:
@@ -110,7 +137,7 @@ def insert_pending_volatile_context_messages(
     *,
     insert_volatile_fn: InsertContextFn | None = None,
 ) -> tuple[list, list[str]]:
-    pending_volatile_context_blocks = [str(block) for block in list(pending_blocks or [])]
+    pending_volatile_context_blocks = _coerce_text_blocks(pending_blocks)
     if not pending_volatile_context_blocks:
         return list(messages or []), []
     context_messages = [
@@ -159,7 +186,7 @@ def assemble_prepared_turn_messages(
         build_external_request_message=build_external_request_message,
         allow_append_user_message=allow_append_user_message,
     )
-    pending_static = [str(block) for block in list(static_context_blocks or [])]
+    pending_static = _coerce_text_blocks(static_context_blocks)
     cacheable_prefix_merged = False
     static_context_inserted = bool(pending_static)
     if pending_static:
@@ -174,7 +201,7 @@ def assemble_prepared_turn_messages(
                 messages=messages,
                 context_messages=[SystemMessage(content=block) for block in pending_static],
             )
-    pending_runtime = [str(block) for block in list(runtime_context_blocks or [])]
+    pending_runtime = _coerce_text_blocks(runtime_context_blocks)
     volatile_context_messages = []
     if dynamic_system_context_message is not None:
         volatile_context_messages.append(dynamic_system_context_message)
@@ -222,7 +249,7 @@ def refresh_system_prefix_on_messages(
             messages=updated,
             context_messages=[current_dynamic],
         )
-    pending_static = [str(block) for block in list(static_context_blocks or [])]
+    pending_static = _coerce_text_blocks(static_context_blocks)
     if pending_static and updated:
         extend = extend_cacheable_prefix_fn or _default_extend_cacheable_prefix()
         merged_message, cacheable_prefix_merged = extend(updated[0], pending_static)
@@ -251,7 +278,7 @@ def langchain_messages_from_conversation_layer(messages: Iterable[Any]) -> list:
         if not isinstance(item, dict):
             restored.append(item)
             continue
-        role = str(item.get("role") or "").strip().lower()
+        role = _message_role_name(item)
         assistant_tool_calls = (
             normalize_seeded_tool_calls(item.get("tool_calls") or item.get("toolCalls") or [])
             if role == "assistant"
