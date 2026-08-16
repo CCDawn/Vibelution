@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Callable, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional
 
 from core.orchestration.agent_runtime_bindings import _turn_runtime_from_env
 
@@ -35,6 +35,41 @@ RESTART_FOCUS_GUARD_MESSAGE = (
 )
 
 
+def _coerce_mapping(value: Any) -> Dict[str, Any]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {}
+
+
+def _tool_name_set(items: Iterable[Any] | None) -> set[str]:
+    names: set[str] = set()
+    if items is None:
+        return names
+    if isinstance(items, bytes):
+        items = items.decode("utf-8", errors="replace")
+    if isinstance(items, str):
+        name = items.strip()
+        if name:
+            names.add(name)
+        return names
+    if isinstance(items, Mapping):
+        for key in items:
+            name = str(key or "").strip()
+            if name:
+                names.add(name)
+        return names
+    try:
+        iterator = list(items)
+    except TypeError:
+        name = str(getattr(items, "name", items) or "").strip()
+        return {name} if name else set()
+    for item in iterator:
+        name = str(getattr(item, "name", item) or "").strip()
+        if name:
+            names.add(name)
+    return names
+
+
 def bind_authorization_runtime(
     *,
     current_runtime: Dict[str, Any] | None,
@@ -42,9 +77,9 @@ def bind_authorization_runtime(
     agent_binding: Dict[str, Any] | None,
 ) -> Dict[str, Any]:
     """Fill identity fields for the canonical authorization service. No policy."""
-    runtime = dict(current_runtime or {})
-    turn = dict(turn_runtime or {})
-    binding = dict(agent_binding or {})
+    runtime = _coerce_mapping(current_runtime)
+    turn = _coerce_mapping(turn_runtime)
+    binding = _coerce_mapping(agent_binding)
     agent_id = str(
         runtime.get("agentId")
         or turn.get("agentId")
@@ -59,8 +94,10 @@ def bind_authorization_runtime(
             or binding.get("directSessionId")
             or (f"agent-bootstrap:{agent_id}" if agent_id else "")
         ).strip()
-    runtime.setdefault("runId", str(turn.get("runId") or "").strip())
-    runtime.setdefault("mode", str(turn.get("mode") or "").strip())
+    if not str(runtime.get("runId") or "").strip():
+        runtime["runId"] = str(turn.get("runId") or "").strip()
+    if not str(runtime.get("mode") or "").strip():
+        runtime["mode"] = str(turn.get("mode") or "").strip()
     return runtime
 
 
@@ -83,8 +120,8 @@ def resolve_turn_authorization(
 
         runtime_getter = current_runtime_fn or current_agent_runtime
         runtime = bind_authorization_runtime(
-            current_runtime=dict(runtime_getter() or {}),
-            turn_runtime=(turn_runtime_fn or _turn_runtime_from_env)(),
+            current_runtime=_coerce_mapping(runtime_getter()),
+            turn_runtime=_coerce_mapping((turn_runtime_fn or _turn_runtime_from_env)()),
             agent_binding=runtime_agent_binding,
         )
         report = resolve_enforced_authorization(runtime=runtime)
@@ -112,28 +149,23 @@ def materialize_authorized_tools(
     authorization_report: Any,
 ) -> List[Any]:
     decision = getattr(authorization_report, "decision", None)
-    visible_names = {
-        str(name or "").strip()
-        for name in getattr(decision, "visible_tools", ()) or ()
-        if str(name or "").strip()
-    }
+    visible_names = _tool_name_set(getattr(decision, "visible_tools", ()) or ())
     if not visible_names:
+        return []
+    try:
+        tools = list(registered_tools or [])
+    except TypeError:
         return []
     return [
         tool
-        for tool in registered_tools or []
+        for tool in tools
         if str(getattr(tool, "name", "") or "").strip() in visible_names
     ]
 
 
 def is_tool_visible_to_agent(tool_name: str, visible_tool_names: Iterable[Any] | None) -> bool:
     name = str(tool_name or "").strip()
-    visible = {
-        str(item or "").strip()
-        for item in (visible_tool_names or [])
-        if str(item or "").strip()
-    }
-    return bool(name and name in visible)
+    return bool(name and name in _tool_name_set(visible_tool_names))
 
 
 def hidden_tool_call_message(tool_name: str) -> str:
