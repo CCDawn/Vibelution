@@ -26,7 +26,7 @@ import {
   listAgentAvatarOptions,
   listAgentSummaries,
 } from "../api/agents";
-import { fetchJson } from "../api/client";
+import { fetchToolRegistry } from "../api/tools";
 import { queryKeys } from "../api/queryKeys";
 import {
   AgentDelegationPolicy,
@@ -509,7 +509,7 @@ export function AgentsRoute() {
   const toolsWorkspaceNeeded = activePane === "config";
   const toolsQuery = useQuery({
     queryKey: queryKeys.tools(),
-    queryFn: () => fetchJson<ToolRegistryPayload>("/api/tools"),
+    queryFn: () => fetchToolRegistry(),
     enabled: toolsWorkspaceNeeded,
     refetchInterval: toolsWorkspaceNeeded ? resolvePollingInterval(pageVisible, 15_000) : false,
     refetchIntervalInBackground: false,

@@ -7,8 +7,8 @@ import {
   fetchAgentConfigWorkspace,
   listAgentAvatarOptions,
 } from "../../api/agents";
-import { fetchJson } from "../../api/client";
 import { testConfigLlm } from "../../api/config";
+import { fetchToolRegistry } from "../../api/tools";
 import { queryKeys } from "../../api/queryKeys";
 import {
   type AgentAvatarOptionsPayload,
@@ -145,7 +145,7 @@ export function AgentCreateWizardDialog({
   });
   const toolsQuery = useQuery({
     queryKey: queryKeys.tools(),
-    queryFn: () => fetchJson<ToolRegistryPayload>("/api/tools"),
+    queryFn: () => fetchToolRegistry(),
     enabled: open,
     staleTime: 10_000,
   });

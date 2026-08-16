@@ -5,6 +5,7 @@ import agentScopeStyles from "./ToolsRouteAgentScopePanel.styles";
 import stylesModuleSource from "./ToolsRoute.styles.ts?raw";
 import agentScopeStylesModuleSource from "./ToolsRouteAgentScopePanel.styles.ts?raw";
 import routeSource from "./ToolsRoute.tsx?raw";
+import toolsApiSource from "../api/tools.ts?raw";
 import agentScopePanelSource from "./ToolsRouteAgentScopePanel.tsx?raw";
 import routerSource from "../app/router.tsx?raw";
 
@@ -161,7 +162,7 @@ describe("ToolsRoute layout contract", () => {
   });
 
   it("keeps manual generated-tool creation out of the page", () => {
-    expect(routeSource).not.toContain('fetchJson<ToolRegistryItem>("/api/tools/generated"');
+    expect(routeSource).not.toContain("/api/tools/generated");
     expect(routeSource).not.toContain("toolsAddGenerated");
     expect(routeSource).not.toContain("createMutation");
   });
@@ -228,7 +229,8 @@ describe("ToolsRoute layout contract", () => {
     expect(agentScopeStyles.agentScopeBar).toContain("grid-cols-[minmax(0,1fr)_clamp(160px,16vw,220px)");
     expect(agentScopeStyles.agentScopeBar).toContain("max-[880px]:grid-cols-[minmax(0,1fr)_clamp(160px,22vw,220px)]");
     expect(routeSource).toContain("scopeStateForTool(tool, activeAgentScopeId)");
-    expect(routeSource).toContain("JSON.stringify({ args: {}, agentScope: payload.agentScopeId, agentId: payload.agentId })");
+    expect(routeSource).toContain("testTool(");
+    expect(toolsApiSource).toContain("agentScope: payload.agentScopeId");
     expect(routeSource).toContain("agentId: activePolicyAgent.agentId");
   });
 
@@ -305,7 +307,7 @@ describe("ToolsRoute layout contract", () => {
   });
 
   it("avoids fixed registry and Agent polling on the Tools workspace", () => {
-    expect(routeSource).toContain("fetchJson<ToolRegistryPayload>(\"/api/tools\")");
+    expect(routeSource).toContain("fetchToolRegistry(");
     expect(routeSource).toContain("void queryClient.invalidateQueries({ queryKey: queryKeys.agents() })");
     expect(routeSource).toContain("activeIsWebSearchTool ? resolvePollingInterval(pageVisible, 15_000) : false");
     expect(routeSource).not.toContain("resolvePollingInterval(pageVisible, 8_000)");
@@ -337,8 +339,10 @@ describe("ToolsRoute layout contract", () => {
 
   it("lets the image2 tool choose a configured model without exposing provider secrets", () => {
     expect(routeSource).toContain("IMAGE2_TOOL_NAME = \"image2_generate_tool\"");
-    expect(routeSource).toContain("fetchJson<ToolImage2ModelConfig>(\"/api/tools/image2/models\")");
-    expect(routeSource).toContain("fetchJson<ToolImage2ModelConfig>(\"/api/tools/image2/default-model\"");
+    expect(routeSource).toContain("fetchToolImage2Models(");
+    expect(routeSource).toContain("setToolImage2DefaultModel(");
+    expect(toolsApiSource).toContain('"/api/tools/image2/models"');
+    expect(toolsApiSource).toContain('"/api/tools/image2/default-model"');
     expect(routeSource).toContain("activeIsImage2Tool ? (");
     expect(routeSource).toContain("styles.image2ModelPanel");
     expect(routeSource).toContain("模型名会在调用前按远端 /v1/models 发现结果解析");
@@ -351,12 +355,13 @@ describe("ToolsRoute layout contract", () => {
   it("shows web search dependency health only for the selected search tool", () => {
     expect(routeSource).toContain("WEB_SEARCH_TOOL_NAME = \"web_search_tool\"");
     expect(routeSource).toContain("activeIsWebSearchTool");
-    expect(routeSource).toContain("fetchJson<ToolDependencyHealth>(\"/api/tools/web-search/health\")");
+    expect(routeSource).toContain("fetchWebSearchToolHealth(");
+    expect(toolsApiSource).toContain('"/api/tools/web-search/health"');
     expect(routeSource).toContain("enabled: activeIsWebSearchTool");
     expect(routeSource).toContain("styles.dependencyHealthPanel");
     expect(routeSource).toContain("AUTOGLM_TOKEN_URL");
     expect(routeSource).toContain("Token 服务不可用，搜索请求不会发送至外网 API");
-    expect(routeSource).not.toContain("fetchJson<ToolRegistryPayload>(\"/api/tools/web-search/health\")");
+    expect(routeSource).not.toContain("/api/tools/web-search/health");
   });
 
   it("keeps test controls and result panels in normal document flow", () => {
@@ -395,14 +400,14 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).not.toContain("window.confirm(bulkCopy.deleteConfirm)");
     const bulkDeleteSection = routeSource.slice(routeSource.indexOf("async function bulkDeleteTools"));
     expect(bulkDeleteSection.indexOf("setBulkToolPending(true)")).toBeLessThan(
-      bulkDeleteSection.indexOf('fetchJson<ToolBulkMutationResponse>("/api/tools/bulk-delete"'),
+      bulkDeleteSection.indexOf("bulkDeleteToolRegistry("),
     );
     expect(routeSource).toContain("bulkSelectionAnchorToolId");
     expect(routeSource).toContain("event.ctrlKey || event.metaKey || event.shiftKey");
     expect(routeSource).toContain("canBulkToggleTool(tool)");
     expect(routeSource).toContain("tool.deleteAllowed");
-    expect(routeSource).toContain('fetchJson<ToolBulkMutationResponse>("/api/tools/generated/bulk-enabled"');
-    expect(routeSource).toContain('fetchJson<ToolBulkMutationResponse>("/api/tools/bulk-delete"');
+    expect(routeSource).toContain("bulkSetGeneratedToolsEnabled(");
+    expect(routeSource).toContain("bulkDeleteToolRegistry(");
     expect(routeSource).toContain("styles.bulkActionBar");
     expect(routeSource).toContain("styles.selectableToolRow");
   });
