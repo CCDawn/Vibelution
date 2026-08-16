@@ -63,16 +63,17 @@ python scripts/migrate_project_storage.py inventory --project "<project-root>"
 | 项 | 值 |
 | --- | --- |
 | `targetPaths.migrated` | `true` |
-| `activePaths.migrated` | `false` |
-| `activePaths.runtime` | `<repo>/.runtime` |
-| `activePaths.logs` | `<repo>/logs` |
-| `activePaths.memory` | `<repo>/.docs/project-memory` |
-| `activePaths.data` | `Documents/Vibelution/data` |
+| `activePaths.migrated` | **`true`**（T1 完成，2026-08-16） |
+| `activePaths.runtime` | `%LOCALAPPDATA%\Vibelution\projects\ccdawn-vibelution\instances\bcabd5ca\runtime` |
+| `activePaths.logs` | `...\instances\bcabd5ca\logs` |
+| `activePaths.memory` | `...\ccdawn-vibelution\memory` |
+| `activePaths.data` | `...\instances\bcabd5ca\data` |
 | 外部 target | `%LOCALAPPDATA%\Vibelution\projects\ccdawn-vibelution\...` |
-| `.worktrees` 磁盘目录 | 20（Git 注册约 6） |
+| `.worktrees` 磁盘目录 | 3（Git 注册 3；2026-08-16 复扫） |
 | `Vibelution-worktrees` 兄弟目录 | 不存在 |
+| T1 apply 备份 | `instances\bcabd5ca.pre-legacy-apply-backup-20260816` |
 
-**结论：** 迁移 **数据侧已就绪**，**路由侧未 authoritative** — 这是当前最大双 SSOT 根因。
+**结论：** 存储 **authoritative 切换已完成**；legacy 目录仍只读保留。T2 门控：T1 稳定 ≥48h 且无 rollback 后再删 legacy 读分支。
 
 ---
 
@@ -338,7 +339,7 @@ HeroUI prop 别名 · route re-export barrels · Vitest shims · archive 正文 
 | Sprint | 任务 | 产出 |
 | --- | --- | --- |
 | **S1** | T0 + H1 + H2 + D1（部分） | 基线账本、FE hygiene、worktree 干净 |
-| **S2** | **T1 + T3**（用户授权窗口） | 存储 authoritative；工具路径对齐 |
+| **S2** | ~~**T1 + T3**~~（**T1 done 2026-08-16**；T3 audit/reset done） | 存储 authoritative；工具路径对齐 |
 | **S3** | T2 + T5 + T4a | legacy 读分支删除、Launcher 收尾、LLM shim 首批 |
 | **S4+** | T6 · T7 · T8 · T4b–d · T9 | 域合并与物理清理 |
 

@@ -131,12 +131,6 @@ export function listConversations(): Promise<ConversationSummary[]> {
   return fetchJson<ConversationSummary[]>("/api/conversations");
 }
 
-export function listChildSessions(sessionId: string): Promise<SessionSummary[]> {
-  return fetchJson<SessionSummary[]>(
-    `/api/sessions/${encodeURIComponent(sessionId)}/child-sessions`,
-  );
-}
-
 export type SessionDetailQueryOptions = {
   messageLimit?: number;
   beforeMessageIndex?: number;

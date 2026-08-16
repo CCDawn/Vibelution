@@ -128,7 +128,7 @@ team_workflows/research_runtime.py: current 18, budget 23
 
 - **HEAD**：`296f740cae87aac1babbcc7f23e9958540881174`。
 - **根 `main` dirty**：`agent.py`（工作区 **3,743** 行）、`tools/Key_Tools.py`、`docs/guides/agent-dev-roi-backlog.md`；未跟踪 `core/orchestration/{agent_runtime_bindings,turn_carryover,turn_compression,turn_diagnostics,README}.py|md` 与本计划。
-- **inventory**：`projectId=ccdawn-vibelution`，`instanceId=bcabd5ca`。`targetPaths.memory` 在 `%LOCALAPPDATA%\Vibelution\projects\ccdawn-vibelution\memory`；当前 `activePaths.memory` 仍指向仓库内 `.docs/project-memory`（`migrated=false`）。本计划不向 `.docs/project-memory` 新增写入。
+- **inventory**：`projectId=ccdawn-vibelution`，`instanceId=bcabd5ca`。`activePaths.migrated=true`（2026-08-16 T1 apply）；memory/runtime/logs/data 已切至 `%LOCALAPPDATA%\Vibelution\projects\ccdawn-vibelution\...`。legacy 仓库内 `.runtime/`、`logs/`、`.docs/project-memory/` 仍只读保留。
 - **active claims（4）**：
   - `claim-7d6aaf7b43f9`（`agents` / A4 bulk HTTP）：含 `tests/test_full_stack_contract_guards.py`，**Gate 4 改 ledger 前必须协调或避开**。
   - `claim-6adab87c134b`（本计划文件）：仅 `docs/plans/2026-08-15-deep-architecture-decoupling-plan.md`。
