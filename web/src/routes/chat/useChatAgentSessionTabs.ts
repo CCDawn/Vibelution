@@ -22,7 +22,6 @@ export type UseChatAgentSessionTabsInput = {
 export type UseChatAgentSessionTabsResult = {
   rightIndexSessions: SessionSummary[];
   agentSessionTabs: SessionSummary[];
-  selectedAgentSessionsQuery: ReturnType<typeof useQuery<SessionQueryResponse>>;
 };
 
 export function useChatAgentSessionTabs({
@@ -99,6 +98,5 @@ export function useChatAgentSessionTabs({
   return {
     rightIndexSessions,
     agentSessionTabs,
-    selectedAgentSessionsQuery,
   };
 }

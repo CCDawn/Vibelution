@@ -8,6 +8,7 @@ import {
   buildChatGroupRoomActionDisabledFlags,
   deriveChatGroupRoundState,
 } from "./chatGroupRoomActionModel";
+import { buildLinkedTeamRoomIds, resolveActiveGroupTeam } from "./chatGroupTeamLinkageModel";
 import { latestChatRoomRound } from "./chatSessionDetailHelpers";
 
 export type UseChatGroupRoomChromeModelInput = {
@@ -40,7 +41,6 @@ export type UseChatGroupRoomChromeModelResult = {
   groupRoundStopping: boolean;
   groupRoundActive: boolean;
   activeGroupParticipantById: Map<string, ChatRoomParticipant>;
-  activeGroupParticipantSessionSet: Set<string>;
   expandedGroupAgentDetailsBySessionId: Map<string, UseQueryResult<SessionDetail | undefined>>;
   groupManageChanged: boolean;
   groupManageDisabled: boolean;
@@ -67,28 +67,15 @@ export function useChatGroupRoomChromeModel({
   resetGroupRoomPending,
   stopGroupRoundPending,
 }: UseChatGroupRoomChromeModelInput): UseChatGroupRoomChromeModelResult {
-  const linkedTeamRoomIds = useMemo(() => {
-    // Prefer explicit link fields; fall back to nested linkedChatRoom so valid team
-    // rooms never land in 未归属群聊 when the flat id is briefly empty.
-    const ids = new Set<string>();
-    for (const team of teams) {
-      const roomId = String(team.linkedChatRoomId || team.linkedChatRoom?.roomId || "").trim();
-      if (roomId) {
-        ids.add(roomId);
-      }
-    }
-    return ids;
-  }, [teams]);
+  const linkedTeamRoomIds = useMemo(
+    () => buildLinkedTeamRoomIds(teams),
+    [teams],
+  );
 
-  const activeGroupTeam = useMemo(() => {
-    const roomId = String(activeGroupRoom?.roomId || activeGroupRoomId || "").trim();
-    const configTeamId = String((activeGroupRoom?.config ?? {}).teamId ?? "").trim();
-    return teams.find((team) => {
-      const teamId = String(team.teamId ?? "").trim();
-      const linkedRoomId = String(team.linkedChatRoomId ?? team.linkedChatRoom?.roomId ?? "").trim();
-      return (configTeamId && teamId === configTeamId) || (roomId && linkedRoomId === roomId);
-    }) ?? null;
-  }, [activeGroupRoom?.config, activeGroupRoom?.roomId, activeGroupRoomId, teams]);
+  const activeGroupTeam = useMemo(
+    () => resolveActiveGroupTeam(teams, activeGroupRoom, activeGroupRoomId),
+    [activeGroupRoom, activeGroupRoomId, teams],
+  );
 
   const activeGroupTeamOwned = Boolean(activeGroupTeam);
 
@@ -189,7 +176,6 @@ export function useChatGroupRoomChromeModel({
     groupRoundStopping,
     groupRoundActive,
     activeGroupParticipantById,
-    activeGroupParticipantSessionSet,
     expandedGroupAgentDetailsBySessionId,
     groupManageChanged,
     groupManageDisabled,
