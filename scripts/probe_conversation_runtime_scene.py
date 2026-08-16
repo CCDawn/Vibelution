@@ -23,7 +23,7 @@ from core.chat.turn_journal import (  # noqa: E402
     append_turn_event,
     turn_journal_path,
 )
-from diagnose_session_turn import build_session_turn_diagnosis  # noqa: E402
+from core.diagnostics.session_turn_diagnosis import build_session_turn_diagnosis  # noqa: E402
 from vibelution_storage import resolve_project_logs_home  # noqa: E402
 
 

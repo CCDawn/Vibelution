@@ -13,6 +13,8 @@ from typing import Any
 
 from vibelution_storage import resolve_project_logs_home
 
+from core.diagnostics.agent_log_context import build_agent_log_context
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 LOG_INFO_DIR = resolve_project_logs_home(PROJECT_ROOT) / "conversations"
@@ -85,6 +87,13 @@ def inspect_conversation_logs(
     invocation_id: str = "",
     submission_id: str = "",
 ) -> dict[str, Any]:
+    if not str(log_path or "").strip():
+        return build_agent_log_context(
+            PROJECT_ROOT,
+            session_id=session_id,
+            turn_id=turn_id,
+        )
+
     normalized_limit = _bounded_int(limit, default=5, minimum=1, maximum=20)
     normalized_max_events = _bounded_int(max_events, default=8000, minimum=200, maximum=50000)
     identity_filters = {

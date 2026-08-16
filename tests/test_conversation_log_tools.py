@@ -76,8 +76,13 @@ def test_conversation_log_inspect_query_selects_matching_recent_log(tmp_path, mo
     _write_jsonl(first, [{"type": "session_start", "metadata": {"conversation_topic": "alpha"}}])
     _write_jsonl(second, [{"type": "session_start", "metadata": {"conversation_topic": "程听澜"}}])
 
-    result = conversation_log_tools.inspect_conversation_logs(query="程听澜", limit=1)
+    result = conversation_log_tools.inspect_conversation_logs(
+        log_path=str(second),
+        query="程听澜",
+        limit=1,
+    )
 
+    assert result["tool"] == "conversation_log_inspect_tool"
     assert result["candidateCount"] == 1
     assert result["candidates"][0]["path"] == "log_info/conversation_20260604_120100__chat__beta.jsonl"
 
@@ -259,46 +264,52 @@ def test_event_identities_prefers_live_session_and_keeps_legacy_aliases():
     )["sessionId"] == "session-legacy"
 
 
-def test_conversation_log_inspect_query_miss_does_not_fall_back_to_latest(tmp_path, monkeypatch):
+def test_conversation_log_inspect_default_returns_agent_log_context(tmp_path, monkeypatch):
     monkeypatch.setattr(conversation_log_tools, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(conversation_log_tools, "LOG_INFO_DIR", tmp_path / "log_info")
-    log_dir = tmp_path / "log_info"
-    log_dir.mkdir()
-    _write_jsonl(
-        log_dir / "conversation_20260714_120000__chat__latest.jsonl",
-        [{"type": "session_start", "metadata": {"conversation_topic": "latest"}}],
+    monkeypatch.setattr(
+        "core.diagnostics.agent_log_context.resolve_active_project_storage_paths",
+        lambda _root: _storage_paths_for_tool_tests(tmp_path),
     )
+    (tmp_path / "logs" / "runtime_scenes").mkdir(parents=True)
+    (tmp_path / ".runtime" / "launcher").mkdir(parents=True)
+
+    result = conversation_log_tools.inspect_conversation_logs()
+
+    assert result["tool"] == "agent_log_context"
+    assert result["mode"] == "context"
+    assert result["selectionStatus"] == "no_active_scene"
+
+
+def test_conversation_log_inspect_query_without_log_path_uses_context_not_candidate_search(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(conversation_log_tools, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        "core.diagnostics.agent_log_context.resolve_active_project_storage_paths",
+        lambda _root: _storage_paths_for_tool_tests(tmp_path),
+    )
+    (tmp_path / "logs" / "runtime_scenes").mkdir(parents=True)
+    (tmp_path / ".runtime" / "launcher").mkdir(parents=True)
 
     result = conversation_log_tools.inspect_conversation_logs(query="missing conversation")
 
-    assert result["candidateCount"] == 0
-    assert result["candidates"] == []
-    assert result["inspections"] == []
-    assert result["selectionStatus"] == "not_found"
-    assert result["fallbackUsed"] is False
+    assert result["tool"] == "agent_log_context"
+    assert "inspections" not in result
 
 
-def test_conversation_log_inspect_identity_miss_does_not_return_latest(tmp_path, monkeypatch):
+def test_conversation_log_inspect_identity_without_log_path_returns_context(tmp_path, monkeypatch):
     monkeypatch.setattr(conversation_log_tools, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(conversation_log_tools, "LOG_INFO_DIR", tmp_path / "log_info")
-    log_dir = tmp_path / "log_info"
-    log_dir.mkdir()
-    _write_jsonl(
-        log_dir / "conversation_20260714_120000__chat__latest.jsonl",
-        [
-            {
-                "event_code": "conversation.turn.started",
-                "fields": {"sessionId": "session-other", "turnId": "turn-other"},
-            }
-        ],
+    monkeypatch.setattr(
+        "core.diagnostics.agent_log_context.resolve_active_project_storage_paths",
+        lambda _root: _storage_paths_for_tool_tests(tmp_path),
     )
+    (tmp_path / "logs" / "runtime_scenes").mkdir(parents=True)
+    (tmp_path / ".runtime" / "launcher").mkdir(parents=True)
 
     result = conversation_log_tools.inspect_conversation_logs(session_id="session-missing")
 
-    assert result["candidateCount"] == 0
-    assert result["inspections"] == []
-    assert result["selectionStatus"] == "not_found"
-    assert result["fallbackUsed"] is False
+    assert result["tool"] == "agent_log_context"
+    assert result["session"]["sessionId"] == "session-missing"
 
 
 def test_conversation_log_inspect_reports_session_match_without_boundary(tmp_path, monkeypatch):
@@ -318,11 +329,14 @@ def test_conversation_log_inspect_reports_session_match_without_boundary(tmp_pat
         ],
     )
 
-    result = conversation_log_tools.inspect_conversation_logs(session_id="session-live")
+    result = conversation_log_tools.inspect_conversation_logs(
+        log_path=str(log_path),
+        session_id="session-live",
+    )
     correlation = result["inspections"][0]["correlation"]
 
     assert result["candidateCount"] == 1
-    assert result["selectionStatus"] == "matched"
+    assert result["selectionStatus"] == "explicit"
     assert result["fallbackUsed"] is False
     assert correlation["boundaryCount"] == 0
     assert correlation["matchStatus"] == "identity_match_without_boundary"
@@ -333,3 +347,18 @@ def test_conversation_log_inspect_reports_session_match_without_boundary(tmp_pat
             "message": "Identity matched log records, but no turn, invocation, or submission boundary was found.",
         }
     ]
+
+
+def _storage_paths_for_tool_tests(tmp_path):
+    class _Storage:
+        runtime = tmp_path / ".runtime"
+        logs = tmp_path / "logs"
+
+        def as_dict(self):
+            return {
+                "runtime": str(self.runtime),
+                "logs": str(self.logs),
+                "migrated": "false",
+            }
+
+    return _Storage()

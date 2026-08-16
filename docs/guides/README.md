@@ -26,6 +26,7 @@
 | [route.md](route.md) | 任务类型 → READ / EDIT / TEST / 禁止 |
 | [ownership.md](ownership.md) | 路径 ownership |
 | [loop.md](loop.md) | 分级、命令、完成报告模板 |
+| [agent-log-routing.md](agent-log-routing.md) | **统一日志入口** `agent_log_context`（所有 Agent） |
 | [playbook.md](playbook.md) | 系统边界 + 红线速查 + SSOT |
 | [agent-dev-roi-backlog.md](agent-dev-roi-backlog.md) | **便利度 ROI 改造清单**（P0–P3，可认领） |
 | [button-selection.md](button-selection.md) | **按钮选型** V / VNative / 禁止裸 button |
