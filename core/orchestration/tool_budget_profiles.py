@@ -27,11 +27,27 @@ DEFAULT_MAX_CALLS_BY_MODEL_FAMILY: dict[str, int] = {
 def _coerce_text(value: Any) -> str:
     if value is None:
         return ""
-    if isinstance(value, bytes):
-        return value.decode("utf-8", errors="replace")
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).decode("utf-8", errors="replace")
     if isinstance(value, str):
         return value
     return str(value)
+
+
+def _as_mapping(value: Any) -> dict[str, Any]:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return {}
+        try:
+            value = json.loads(text)
+        except json.JSONDecodeError:
+            return {}
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {}
 
 
 def _first_present(*values: Any) -> Any:
@@ -75,6 +91,8 @@ def detect_model_family(
 def _positive_int(value: Any, *, default: int = 0) -> int:
     if isinstance(value, bool) or value is None:
         value = default
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
     if isinstance(value, bool) or value is None:
         return 0
     try:
@@ -106,7 +124,7 @@ def resolve_max_calls_per_turn(
        ``...["default"]``, then built-in family defaults, then base.
     """
 
-    policy = tool_policy if isinstance(tool_policy, Mapping) else {}
+    policy = _as_mapping(tool_policy)
     base = _positive_int(
         _first_present(policy.get("maxCallsPerTurn"), policy.get("max_calls_per_turn")),
         default=0,
@@ -143,8 +161,8 @@ def default_max_calls_by_model_family_payload() -> dict[str, int]:
 
 
 def normalize_max_calls_by_model_family(value: Any) -> dict[str, int]:
-    if isinstance(value, bytes):
-        value = value.decode("utf-8", errors="replace")
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
     if isinstance(value, str):
         text = value.strip()
         if not text:

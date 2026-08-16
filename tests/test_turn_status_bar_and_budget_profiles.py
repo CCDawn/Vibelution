@@ -68,6 +68,17 @@ def test_budget_profiles_coerce_bytes_case_and_snake_case():
     assert normalize_max_calls_by_model_family('{"Claude": "40"}') == {"claude": 40}
     bool_calls, _ = resolve_max_calls_per_turn({"maxCallsPerTurn": True}, model="gpt-4.1")
     assert bool_calls == 0
+    json_calls, json_family = resolve_max_calls_per_turn(
+        '{"maxCallsPerTurn":"32","max_calls_per_turn_by_model_family":{"deepseek":"64"}}',
+        model=memoryview(b"deepseek-v3"),
+    )
+    assert json_family == "deepseek"
+    assert json_calls == 64
+    bytes_calls, _ = resolve_max_calls_per_turn(
+        {"maxCallsPerTurn": b"16"},
+        model="gpt-4.1",
+    )
+    assert bytes_calls == 16
 
 
 def test_turn_status_bar_message_and_upsert():
