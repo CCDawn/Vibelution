@@ -44,6 +44,32 @@ def _project(tmp_path: Path, monkeypatch) -> tuple[Path, Path, Path]:
     return project, projects_home, data_home
 
 
+def test_sqlite_readiness_does_not_create_source_sidecars(tmp_path, monkeypatch):
+    project, _projects_home, data_home = _project(tmp_path, monkeypatch)
+    database = data_home / "workspace" / "state.sqlite"
+    database.parent.mkdir(parents=True)
+    connection = sqlite3.connect(database)
+    connection.execute("CREATE TABLE t (value INTEGER)")
+    connection.execute("PRAGMA journal_mode=WAL")
+    connection.execute("INSERT INTO t VALUES (1)")
+    connection.commit()
+    connection.close()
+    source_members = storage_migration_module._sqlite_bundle_paths(database)
+    before = {
+        path.name: path.read_bytes() if path.is_file() else None for path in source_members
+    }
+
+    readiness = assess_storage_migration_readiness(project)
+
+    after = {
+        path.name: path.read_bytes() if path.is_file() else None for path in source_members
+    }
+    assert readiness["ready"] is True
+    assert readiness["sqliteIntegrity"]["ok"] is True
+    assert readiness["quiescence"]["stable"] is True
+    assert after == before
+
+
 def test_plan_maps_all_legacy_categories_without_writing(tmp_path, monkeypatch):
     project, _projects_home, data_home = _project(tmp_path, monkeypatch)
     (data_home / "workspace").mkdir(parents=True)
@@ -648,7 +674,9 @@ def test_apply_fails_closed_when_wal_changes_during_copy(tmp_path, monkeypatch):
 
     def copy2_then_commit(src, dst, *args, **kwargs):
         result = original_copy2(src, dst, *args, **kwargs)
-        if str(src).endswith("-wal"):
+        if str(src).endswith("-wal") and Path(dst).parent.name.startswith(
+            ".migration-staging-"
+        ):
             connection.execute("INSERT INTO t VALUES (2)")
             connection.commit()
         return result
@@ -677,19 +705,30 @@ def test_sqlite_bundle_copies_all_members_with_matching_rows(tmp_path, monkeypat
     connection.execute("INSERT INTO t VALUES (2)")
     connection.commit()
     source_rows = connection.execute("SELECT COUNT(*) FROM t").fetchone()[0]
-    connection.close()
+    source_members = storage_migration_module._sqlite_bundle_paths(database)
+    source_before = {
+        path.name: path.read_bytes() if path.is_file() else None for path in source_members
+    }
+    assert source_before[database.name + "-wal"] is not None
+    assert source_before[database.name + "-shm"] is not None
     target = resolve_project_storage_paths(project)
 
     apply_storage_migration(project)
 
+    source_after = {
+        path.name: path.read_bytes() if path.is_file() else None for path in source_members
+    }
     copied = target.data / "workspace" / "state.sqlite"
     copied_wal = copied.with_name(copied.name + "-wal")
     assert copied.exists()
     assert copied_wal.exists()
     ok, detail = storage_migration_module._sqlite_quick_check(copied)
     assert ok, detail
-    destination_rows = sqlite3.connect(copied).execute("SELECT COUNT(*) FROM t").fetchone()[0]
+    with sqlite3.connect(copied) as copied_connection:
+        destination_rows = copied_connection.execute("SELECT COUNT(*) FROM t").fetchone()[0]
+    assert source_after == source_before
     assert destination_rows == source_rows == 2
+    connection.close()
 
 
 def test_rollback_delta_detects_new_file_in_target_memory(tmp_path, monkeypatch):
@@ -715,7 +754,6 @@ def test_rollback_delta_detects_wal_shm_change(tmp_path, monkeypatch):
     connection.execute("CREATE TABLE t (value INTEGER)")
     connection.execute("INSERT INTO t VALUES (1)")
     connection.commit()
-    connection.close()
     target = resolve_project_storage_paths(project)
     apply_storage_migration(project)
     copied = target.data / "workspace" / "state.sqlite"
@@ -773,13 +811,12 @@ def test_sqlite_destination_conflict_preserves_preexisting_bundle(tmp_path, monk
     connection.execute("INSERT INTO t VALUES (1)")
     connection.commit()
     connection.execute("PRAGMA wal_checkpoint(FULL)")
-    connection.execute("INSERT INTO t VALUES (2)")
-    connection.commit()
-    connection.close()
     target = resolve_project_storage_paths(project)
     destination = target.data / "workspace" / "state.sqlite"
     destination.parent.mkdir(parents=True)
     shutil.copy2(database, destination)
+    connection.execute("INSERT INTO t VALUES (2)")
+    connection.commit()
     destination_wal = destination.with_name(destination.name + "-wal")
     if destination_wal.exists():
         destination_wal.unlink()
@@ -794,6 +831,7 @@ def test_sqlite_destination_conflict_preserves_preexisting_bundle(tmp_path, monk
         destination_wal.read_bytes() if destination_wal.exists() else b""
     ) == before_wal
     assert not storage_migration_state_path(target).exists()
+    connection.close()
 
 
 def test_readiness_blocks_orphan_sqlite_sidecars_without_main(tmp_path, monkeypatch):
@@ -845,7 +883,6 @@ def test_sqlite_promote_is_no_clobber_when_destination_member_appears(tmp_path, 
     connection.execute("CREATE TABLE t (value INTEGER)")
     connection.execute("INSERT INTO t VALUES (1)")
     connection.commit()
-    connection.close()
     target = resolve_project_storage_paths(project)
     destination = target.data / "workspace" / "state.sqlite"
     destination_wal = destination.with_name(destination.name + "-wal")
@@ -869,6 +906,7 @@ def test_sqlite_promote_is_no_clobber_when_destination_member_appears(tmp_path, 
     assert destination_wal.read_bytes() == b"concurrent-wal"
     assert not destination.exists()
     assert not storage_migration_state_path(target).exists()
+    connection.close()
 
 
 def test_sqlite_promote_atomic_no_clobber_preserves_concurrent_target_at_link_race(
@@ -881,7 +919,6 @@ def test_sqlite_promote_atomic_no_clobber_preserves_concurrent_target_at_link_ra
     connection.execute("CREATE TABLE t (value INTEGER)")
     connection.execute("INSERT INTO t VALUES (1)")
     connection.commit()
-    connection.close()
     target = resolve_project_storage_paths(project)
     destination = target.data / "workspace" / "state.sqlite"
     original_link = os.link
@@ -904,6 +941,7 @@ def test_sqlite_promote_atomic_no_clobber_preserves_concurrent_target_at_link_ra
 
     assert storage_migration_module._io_path(destination).read_bytes() == b"concurrent-main"
     assert not storage_migration_state_path(target).exists()
+    connection.close()
 
 
 def test_sqlite_promote_cleanup_skips_concurrently_replaced_members(tmp_path, monkeypatch):
@@ -914,7 +952,6 @@ def test_sqlite_promote_cleanup_skips_concurrently_replaced_members(tmp_path, mo
     connection.execute("CREATE TABLE t (value INTEGER)")
     connection.execute("INSERT INTO t VALUES (1)")
     connection.commit()
-    connection.close()
     target = resolve_project_storage_paths(project)
     destination = target.data / "workspace" / "state.sqlite"
     destination_wal = destination.with_name(destination.name + "-wal")
@@ -952,6 +989,7 @@ def test_sqlite_promote_cleanup_skips_concurrently_replaced_members(tmp_path, mo
     assert storage_migration_module._io_path(destination).read_bytes() == b"replaced-main"
     assert storage_migration_module._io_path(destination_wal).read_bytes() == b"concurrent-wal"
     assert not storage_migration_state_path(target).exists()
+    connection.close()
 
 
 def test_rollback_delta_old_manifest_expected_uses_manifest_main_only(tmp_path, monkeypatch):
@@ -962,9 +1000,9 @@ def test_rollback_delta_old_manifest_expected_uses_manifest_main_only(tmp_path, 
     connection.execute("CREATE TABLE t (value INTEGER)")
     connection.execute("INSERT INTO t VALUES (1)")
     connection.commit()
-    connection.close()
     target = resolve_project_storage_paths(project)
     apply_storage_migration(project)
+    connection.close()
     marker = json.loads(storage_migration_state_path(target).read_text(encoding="utf-8"))
     manifest_path = Path(str(marker["manifestPath"]))
     rewritten: list[str] = []
@@ -995,7 +1033,6 @@ def test_sqlite_copy_failure_cleans_only_attempt_created_members(tmp_path, monke
     connection.execute("CREATE TABLE t (value INTEGER)")
     connection.execute("INSERT INTO t VALUES (1)")
     connection.commit()
-    connection.close()
     target = resolve_project_storage_paths(project)
     decoy = target.data / "workspace" / "decoy.sqlite"
     decoy.parent.mkdir(parents=True)
@@ -1026,3 +1063,192 @@ def test_sqlite_copy_failure_cleans_only_attempt_created_members(tmp_path, monke
     assert not destination.exists()
     assert destination_wal.read_bytes() == b"race-wal"
     assert not storage_migration_state_path(target).exists()
+    connection.close()
+
+
+def test_readiness_and_apply_fail_closed_when_source_changes_during_quiescence_window(
+    tmp_path, monkeypatch
+):
+    project, _projects_home, data_home = _project(tmp_path, monkeypatch)
+    source = data_home / "workspace" / "agent.json"
+    source.parent.mkdir(parents=True)
+    source.write_text("data\n", encoding="utf-8")
+    target = resolve_project_storage_paths(project)
+    original_sleep = storage_migration_module._quiescence_sleep
+    counter = {"n": 0}
+
+    def write_during_window(seconds):
+        counter["n"] += 1
+        source.write_text(f"change {counter['n']}\n", encoding="utf-8")
+        return original_sleep(seconds)
+
+    monkeypatch.setattr(storage_migration_module, "_quiescence_sleep", write_during_window)
+
+    readiness = assess_storage_migration_readiness(project)
+
+    assert readiness["ready"] is False
+    assert readiness["quiescence"]["stable"] is False
+    assert readiness["quiescence"]["sampleCount"] >= 2
+    assert readiness["quiescence"]["reasonCode"] == "source_changed_during_quiescence_window"
+    assert any(
+        blocker["code"] == "source_changed_during_quiescence_window"
+        for blocker in readiness["blockers"]
+    )
+    with pytest.raises(StorageMigrationError, match="readiness blocked"):
+        apply_storage_migration(project)
+    assert not storage_migration_state_path(target).exists()
+
+
+def test_reapply_invokes_readiness_gate_and_blocks_on_non_quiescent_window(
+    tmp_path, monkeypatch
+):
+    project, _projects_home, data_home = _project(tmp_path, monkeypatch)
+    source = data_home / "workspace" / "agent.json"
+    source.parent.mkdir(parents=True)
+    source.write_text("data\n", encoding="utf-8")
+    target = resolve_project_storage_paths(project)
+    calls = {"count": 0}
+    original_readiness = storage_migration_module.assess_storage_migration_readiness
+
+    def counting_readiness(*args, **kwargs):
+        calls["count"] += 1
+        return original_readiness(*args, **kwargs)
+
+    monkeypatch.setattr(
+        storage_migration_module,
+        "assess_storage_migration_readiness",
+        counting_readiness,
+    )
+    first = apply_storage_migration(project)
+
+    assert first["status"] == "completed"
+    assert calls["count"] >= 1
+
+    original_sleep = storage_migration_module._quiescence_sleep
+    counter = {"n": 0}
+
+    def write_during_window(seconds):
+        counter["n"] += 1
+        source.write_text(f"reapply change {counter['n']}\n", encoding="utf-8")
+        return original_sleep(seconds)
+
+    monkeypatch.setattr(storage_migration_module, "_quiescence_sleep", write_during_window)
+
+    with pytest.raises(StorageMigrationError, match="readiness blocked"):
+        apply_storage_migration(project)
+
+    assert calls["count"] >= 2
+    assert storage_migration_state_path(target).exists()
+    assert resolve_active_project_storage_paths(project) == target
+
+
+def test_sqlite_readiness_runs_quick_check_and_integrity_check(tmp_path, monkeypatch):
+    project, _projects_home, data_home = _project(tmp_path, monkeypatch)
+    database = data_home / "workspace" / "state.sqlite"
+    database.parent.mkdir(parents=True)
+    connection = _sqlite_database(database)
+    connection.execute("CREATE TABLE t (value INTEGER)")
+    connection.execute("INSERT INTO t VALUES (1)")
+    connection.commit()
+    connection.close()
+
+    readiness = assess_storage_migration_readiness(project)
+
+    assert readiness["ready"] is True
+    assert readiness["quiescence"]["stable"] is True
+    checks = readiness["sqliteIntegrity"]["checks"]
+    sqlite_checks = [
+        check
+        for check in checks
+        if str(check.get("path") or "").endswith("state.sqlite")
+    ]
+    assert {"quick_check", "integrity_check", "bundle_stable"} <= {
+        check["pragma"] for check in sqlite_checks
+    }
+
+
+def test_sqlite_integrity_check_failure_blocks_readiness_and_apply(tmp_path, monkeypatch):
+    project, _projects_home, data_home = _project(tmp_path, monkeypatch)
+    database = data_home / "workspace" / "state.sqlite"
+    database.parent.mkdir(parents=True)
+    connection = _sqlite_database(database)
+    connection.execute("CREATE TABLE t (value INTEGER)")
+    connection.execute("INSERT INTO t VALUES (1)")
+    connection.commit()
+    connection.close()
+    target = resolve_project_storage_paths(project)
+    original_integrity = storage_migration_module._sqlite_integrity_check
+
+    def failing_integrity(path):
+        if str(path).endswith("state.sqlite"):
+            return False, "integrity mismatch"
+        return original_integrity(path)
+
+    monkeypatch.setattr(
+        storage_migration_module,
+        "_sqlite_integrity_check",
+        failing_integrity,
+    )
+
+    readiness = assess_storage_migration_readiness(project)
+
+    assert readiness["ready"] is False
+    assert any(
+        blocker["code"] == "sqlite_integrity_failed" for blocker in readiness["blockers"]
+    )
+    with pytest.raises(StorageMigrationError, match="readiness blocked"):
+        apply_storage_migration(project)
+    assert not storage_migration_state_path(target).exists()
+
+
+def test_copy_verification_fails_closed_on_destination_integrity_mismatch(
+    tmp_path, monkeypatch
+):
+    project, _projects_home, data_home = _project(tmp_path, monkeypatch)
+    database = data_home / "workspace" / "state.sqlite"
+    database.parent.mkdir(parents=True)
+    connection = _sqlite_database(database)
+    connection.execute("CREATE TABLE t (value INTEGER)")
+    connection.execute("INSERT INTO t VALUES (1)")
+    connection.commit()
+    connection.close()
+    target = resolve_project_storage_paths(project)
+    destination = target.data / "workspace" / "state.sqlite"
+    original_full = storage_migration_module._sqlite_full_integrity
+
+    def fail_destination_integrity(path):
+        ok, detail = original_full(path)
+        if ok and storage_migration_module._same_path(Path(path), destination):
+            return False, "integrity mismatch"
+        return ok, detail
+
+    monkeypatch.setattr(
+        storage_migration_module,
+        "_sqlite_full_integrity",
+        fail_destination_integrity,
+    )
+
+    with pytest.raises(StorageMigrationError, match="integrity"):
+        apply_storage_migration(project)
+
+    assert not storage_migration_state_path(target).exists()
+    assert not destination.exists()
+    assert not destination.with_name(destination.name + "-wal").exists()
+    assert not destination.with_name(destination.name + "-shm").exists()
+
+
+def test_sqlite_integrity_failure_evidence_is_bounded(tmp_path, monkeypatch):
+    project, _projects_home, data_home = _project(tmp_path, monkeypatch)
+    database = data_home / "workspace" / "broken.sqlite"
+    database.parent.mkdir(parents=True)
+    database.write_bytes(b"not-a-database")
+
+    readiness = assess_storage_migration_readiness(project)
+
+    assert readiness["ready"] is False
+    assert any(
+        blocker["code"] == "sqlite_integrity_failed" for blocker in readiness["blockers"]
+    )
+    bound = storage_migration_module._SQLITE_INTEGRITY_EVIDENCE_BOUND
+    for failure in readiness["sqliteIntegrity"]["failures"]:
+        assert len(str(failure.get("detail") or "")) <= bound + 64
