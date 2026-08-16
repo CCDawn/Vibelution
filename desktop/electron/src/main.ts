@@ -1319,7 +1319,8 @@ async function scheduleCurrentDesktopShellRefresh(thenLifecycle: string): Promis
     thenLifecycle
   });
   if (!scheduled.scheduled || scheduled.helperPid <= 0) {
-    throw new Error("desktop shell refresh helper did not start");
+    const reason = scheduled.reason ? ` (${scheduled.reason})` : "";
+    throw new Error(`desktop shell refresh helper did not start${reason}`);
   }
 }
 
@@ -1329,17 +1330,23 @@ async function refreshPackagedDesktopShellIfStale(thenLifecycle: string): Promis
       isPackaged: app.isPackaged,
       smoke: desktopCliArgs.smoke,
       workbenchCloseCanary: desktopCliArgs.workbenchCloseCanary,
-      stale: true
+      stale: true,
+      refreshBlocked: false
     }) !== "refresh"
   ) {
     return false;
   }
-  let stale = false;
+  let status: DesktopShellStatus;
   try {
-    stale = (await inspectCurrentDesktopShell()).stale;
+    status = await inspectCurrentDesktopShell();
   } catch (error: unknown) {
     const detail = error instanceof Error ? error.message : String(error);
     notifyDesktopTray("Vibelution", `检查桌面壳版本失败，继续使用当前壳：${detail.slice(0, 220)}`, "warning");
+    return false;
+  }
+  if (status.refreshBlocked) {
+    const detail = String(status.refreshBlockedDetail || status.refreshBlockedReason || "recent refresh failure").slice(0, 220);
+    notifyDesktopTray("Vibelution", `桌面壳自动更新已暂停，继续使用当前壳：${detail}`, "warning");
     return false;
   }
   if (
@@ -1347,7 +1354,8 @@ async function refreshPackagedDesktopShellIfStale(thenLifecycle: string): Promis
       isPackaged: app.isPackaged,
       smoke: desktopCliArgs.smoke,
       workbenchCloseCanary: desktopCliArgs.workbenchCloseCanary,
-      stale
+      stale: status.stale,
+      refreshBlocked: status.refreshBlocked
     }) !== "refresh"
   ) {
     return false;
@@ -1976,9 +1984,9 @@ function startPeriodicShellFreshnessWatch(): void {
       ) {
         return;
       }
-      let stale = false;
+      let status: DesktopShellStatus | null = null;
       try {
-        stale = (await inspectCurrentDesktopShell()).stale;
+        status = await inspectCurrentDesktopShell();
       } catch {
         return;
       }
@@ -1987,9 +1995,10 @@ function startPeriodicShellFreshnessWatch(): void {
           isPackaged: app.isPackaged,
           smoke: desktopCliArgs.smoke,
           workbenchCloseCanary: desktopCliArgs.workbenchCloseCanary,
-          stale,
+          stale: status.stale,
           refreshInFlight: shellRefreshInFlight || trayRestartAllInFlight || trayQuitAllInFlight,
-          shutdownApproved
+          shutdownApproved,
+          refreshBlocked: status.refreshBlocked
         }) !== "refresh"
       ) {
         return;
