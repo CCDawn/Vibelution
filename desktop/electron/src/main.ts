@@ -24,6 +24,7 @@ import {
 } from "./lifecycle/desktopLifecycleCoordinator.js";
 import { DesktopSessionMirrorQueue } from "./lifecycle/desktopSessionMirrorQueue.js";
 import { isWorkbenchCloseControlFetchFailure } from "./lifecycle/workbenchCloseFailOpen.js";
+import { waitForWorkbenchBackendSettledForWindowClose } from "./lifecycle/workbenchBackendCloseReadiness.js";
 import {
   createConversationNotificationService,
   type ConversationNotificationService,
@@ -959,7 +960,10 @@ async function requestTransactionalWorkbenchClose(
       fields: { closeId: transaction.closeId, desktopSessionId: context.desktopSessionId }
     });
     await stopWorkbenchBackend(paths, bootstrap);
-    const backendStopped = await waitForWorkbenchBackendClosed(context, WORKBENCH_CLOSE_BACKEND_WAIT_MS);
+    const backendStopped = await waitForWorkbenchBackendSettledForWindowClose({
+      readStatus: () => fetchLauncherStatusSummary(context),
+      timeoutMs: WORKBENCH_CLOSE_BACKEND_WAIT_MS
+    });
     if (!backendStopped) {
       mainWorkbenchCloseStore.fail(
         transaction.closeId,
@@ -998,25 +1002,6 @@ async function stopWorkbenchBackend(
       bootstrap.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
     operation: "stop"
   });
-}
-
-async function waitForWorkbenchBackendClosed(
-  context: DesktopActionLoopContext,
-  timeoutMs: number
-): Promise<boolean> {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
-    try {
-      const summary = await fetchLauncherStatusSummary(context);
-      if (String(summary.observedState || "").trim().toLowerCase() === "closed") {
-        return true;
-      }
-    } catch {
-      // Treat control-plane read failures as not-yet-closed; the next poll retries.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-  }
-  return false;
 }
 
 function isRecoverableDesktopControlError(error: unknown): boolean {
