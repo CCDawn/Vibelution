@@ -38,55 +38,94 @@ SessionGetterFn = Callable[[], Any]
 TurnStopCheckerFn = Callable[[], str]
 
 
+def _decode_binary(value: Any) -> Any:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).decode("utf-8", errors="replace")
+    return value
+
+
+def _maybe_json(value: Any) -> Any:
+    value = _decode_binary(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith("{") or text.startswith("["):
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                return value
+    return value
+
+
 def _as_mapping(value: Any) -> Dict[str, Any]:
+    value = _maybe_json(value)
     if isinstance(value, Mapping):
         return dict(value)
     return {}
 
 
 def _mapping_items(value: Any) -> List[Dict[str, Any]]:
+    value = _maybe_json(value)
     if isinstance(value, Mapping):
+        nested = value.get("items")
+        if nested is None:
+            nested = value.get("entries")
+        if nested is None:
+            nested = value.get("history")
+        if nested is not None:
+            return _mapping_items(nested)
         return [dict(value)]
-    if isinstance(value, (str, bytes)) or value is None:
+    if isinstance(value, (str, bytes, bytearray, memoryview)) or value is None:
         return []
     try:
         iterator = list(value)
     except TypeError:
         return []
-    return [dict(item) for item in iterator if isinstance(item, Mapping)]
+    items: List[Dict[str, Any]] = []
+    for item in iterator:
+        mapped = _as_mapping(item)
+        if mapped:
+            items.append(mapped)
+    return items
 
 
 def _coerce_str_list(value: Any) -> List[str]:
     if value is None:
         return []
-    if isinstance(value, bytes):
-        text = value.decode("utf-8", errors="replace").strip()
-        return [text] if text else []
-    if isinstance(value, str):
-        text = value.strip()
-        return [text] if text else []
+    value = _maybe_json(value)
     if isinstance(value, Mapping):
-        return [str(key or "").strip() for key in value if str(key or "").strip()]
+        names: List[str] = []
+        for key, enabled in value.items():
+            text = _coerce_text(key).strip()
+            if text and _coerce_bool(enabled, True) and text not in names:
+                names.append(text)
+        return names
+    if isinstance(value, (str, bytes, bytearray, memoryview)):
+        text = _coerce_text(value).strip()
+        return [text] if text else []
     try:
         iterator = list(value)
     except TypeError:
-        text = str(value or "").strip()
+        text = _coerce_text(value).strip()
         return [text] if text else []
-    names: List[str] = []
+    names = []
     for item in iterator:
-        text = str(item or "").strip()
+        text = _coerce_text(item).strip()
         if text and text not in names:
             names.append(text)
     return names
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
-    if value is None:
-        return default
+    if isinstance(value, bool) or value is None:
+        return default if not isinstance(default, bool) else 0
+    value = _decode_binary(value)
     try:
         return int(value)
     except (TypeError, ValueError):
-        return default
+        try:
+            return int(default)
+        except (TypeError, ValueError):
+            return 0
 
 
 def _coerce_bool(value: Any, default: bool) -> bool:
@@ -94,7 +133,8 @@ def _coerce_bool(value: Any, default: bool) -> bool:
         return value
     if value is None:
         return default
-    if isinstance(value, (int, float)):
+    value = _decode_binary(value)
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
         return bool(value)
     normalized = str(value).strip().lower()
     if not normalized:
@@ -107,9 +147,12 @@ def _coerce_bool(value: Any, default: bool) -> bool:
 
 
 def _coerce_text(value: Any) -> str:
-    if isinstance(value, bytes):
-        value = value.decode("utf-8", errors="replace")
-    return str(value or "")
+    if value is None:
+        return ""
+    value = _decode_binary(value)
+    if isinstance(value, str):
+        return value
+    return str(value)
 
 
 class DelegationGovernor:
@@ -271,14 +314,14 @@ class DelegationGovernor:
     @staticmethod
     def is_unhelpful_terminal_delegation(entry: Dict[str, Any]) -> bool:
         data = _as_mapping(entry)
-        status = str(data.get("status") or "").strip().lower()
+        status = _coerce_text(data.get("status")).strip().lower()
         if status == "failed":
             return True
         if status != "completed":
             return False
-        confidence = str(data.get("confidence") or "").strip().lower()
+        confidence = _coerce_text(data.get("confidence")).strip().lower()
         findings = _coerce_str_list(data.get("findings"))
-        summary = str(data.get("summary") or "").strip()
+        summary = _coerce_text(data.get("summary")).strip()
         if confidence == "low" and not findings:
             return True
         return not summary and not findings
@@ -292,8 +335,8 @@ class DelegationGovernor:
         terminal_entries = [
             item
             for item in _mapping_items(_as_mapping(snapshot).get("delegation_history"))
-            if str(item.get("task_type") or "") == _coerce_text(task_type)
-            and str(item.get("status") or "").strip().lower() in {"completed", "failed"}
+            if _coerce_text(item.get("task_type")).strip() == _coerce_text(task_type).strip()
+            and _coerce_text(item.get("status")).strip().lower() in {"completed", "failed"}
         ]
         if len(terminal_entries) < 2:
             return False
