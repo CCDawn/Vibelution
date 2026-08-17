@@ -5,7 +5,7 @@
 | **Status** | `active-plan` |
 | **Created** | 2026-08-16 |
 | **Reviewed** | 2026-08-16（仓库审查结论重放至最新 main） |
-| **Implementation status** | T1 apply 已执行（2026-08-16）；**T1G 代码门已落地**（readiness / SQLite bundle / quiescence / integrity_check / rollback delta）；T2 / T3b **未完成**；未执行真实 apply / reapply / rollback / delete |
+| **Implementation status** | T1 apply 已执行（2026-08-16）；**T1G 代码门已落地**（readiness / SQLite bundle / quiescence / integrity_check / rollback delta）；**T3b done**（2026-08-17）；T2 **blocked**（未完成）；未执行真实 apply / reapply / rollback / delete |
 | **Tier** | `HIGH_RISK`（整体）；子任务按 `FAST_PATCH` / `STANDARD_TASK` / `HIGH_RISK` 分级 |
 | **Related ADR** | [0002](../adr/0002-agent-collaboration-session-addressing.md) · [0003](../adr/0003-operator-config-lives-outside-repo.md) · [0004](../adr/0004-product-ui-uses-vui-shadcn-only.md) · [0005](../adr/0005-docs-authority-and-archive-policy.md) · [0008](../adr/0008-project-mutable-state-lives-outside-source-tree.md) · [0009](../adr/0009-launcher-control-plane-lives-in-electron-main.md) |
 | **Related docs** | [development-standard §24](../standards/development-standard.md) · [web/src/api/README.md](../../web/src/api/README.md) · [worktree-collaboration](../agents/worktree-collaboration.md) |
@@ -21,7 +21,7 @@
 
 - **存储双轨（T1 前）**：`targetPaths.migrated=true` 而 `activePaths.migrated=false` 时，外部目标树已有数据，运行时仍读仓库内 `.runtime/`、`logs/`、`.docs/project-memory/` 等 legacy 路径。T1 apply 后 `activePaths.migrated=true`，legacy 读分支与双轨代码仍需按 T2 退役。
 - **域双轨：** 前端 Memory/Knowledge 双 API 模块、Chat 布局三写、Launcher HTTP/IPC + stale runtime shim、后端 LLM v1 / capability cache / chat_state JSON 等。
-- **协作双轨：** audit、reset、quality gate 曾硬编码 `.docs/project-memory`（T3a 已用 resolved API）；agent live registry 仍取 memory 侧 `agent-registry.json`（T3b 未完成）；磁盘 `.worktrees` 孤儿目录与 Git 注册不一致。
+- **协作双轨：** audit、reset、quality gate 曾硬编码 `.docs/project-memory`（T3a 已用 resolved API）；agent live registry 已改走 Git common-dir（**T3b done** 2026-08-17）；磁盘 `.worktrees` 孤儿目录与 Git 注册不一致。
 
 **目标：** 每个域保留 **一个 authoritative SSOT**；兼容层仅保留 **有 ADR 或明确 removal trigger 的只读 recover**，其余删除或冻结新增。
 
@@ -193,14 +193,14 @@ flowchart TB
 | **Tier** | `STANDARD_TASK` |
 | **Worktree** | `codex/storage-tool-path-align` |
 
-**T3b: agent registry 对齐（live registry）** — **open**（未完成）
+**T3b: agent registry 对齐（live registry）** — **done**（2026-08-17；commit `5586c1d1f`）
 
 | 项 | 内容 |
 | --- | --- |
 | **Owner** | `integration_audit.py`（agent live registry，归本任务；T3a 只覆盖其 resolved-storage slice） |
 | **Dependency** | T1（可与 T2 并行） |
-| **现状** | `integration_audit` 仍从 `resolve_project_memory_home(...)/agent-registry.json` 取 **live registry** |
-| **目标** | 切 **Git common-dir live registry**；旧 memory `agent-registry.json` 仅限时只读兼容并设 **removal trigger** |
+| **已落地** | `integration_audit` 经 `git rev-parse --git-common-dir` 解析 **live registry**；优先 `briefbound/coordination/registry.json`，兼容接受 `ccdawn/coordination/registry.json` |
+| **验证** | 主仓库与 linked worktree、registry 优先级、兼容路径；**24 tests passed** |
 | **Tier** | `STANDARD_TASK` |
 
 ---
@@ -330,7 +330,7 @@ flowchart TB
 | 8 | Dead query keys / duplicate API exports | H1 |
 | 9 | `storage_paths.py` re-export | T2 |
 | 10 | orphan `.worktrees` | H2 |
-| 11 | audit/reset 硬编码 memory 路径 | T3a；agent registry → T3b |
+| 11 | audit/reset 硬编码 memory 路径 | T3a done；agent registry — **T3b done**（2026-08-17） |
 
 ### 7.3 P2 — 需迁移门后再删
 
@@ -386,7 +386,7 @@ HeroUI prop 别名 · route re-export barrels · Vitest shims · archive 正文 
 | Sprint | 任务 | 产出 |
 | --- | --- | --- |
 | **S1** | T0 + ~~H1~~ + H2（只读盘点）+ D1（部分） | 基线账本；**H1 done**；worktree 只读盘点 + 残留报告 |
-| **S2** | ~~**T1 + T3a**~~（**T1 applied 2026-08-16**；T3a done `62dbba053`）+ **T1G** + T3b | 存储 authoritative；完整性补证；agent registry 对齐 |
+| **S2** | ~~**T1 + T3a + T3b**~~（**T1 applied 2026-08-16**；T3a done `62dbba053`；**T3b done** 2026-08-17 `5586c1d1f`）+ **T1G** | 存储 authoritative；完整性补证；agent registry 对齐 |
 | **S3** | T2 + T4a–T4c + T5（独立残留审计） | legacy 读分支删除、后端 shim 批次、Launcher 收尾 |
 | **S4+** | T6 · T7 · T8 · D1 收尾 · T4d（Deferred）· T9（optional） | 域收敛与关闭 |
 
