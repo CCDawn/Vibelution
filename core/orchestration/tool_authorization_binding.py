@@ -42,6 +42,19 @@ def _decode_binary(value: Any) -> Any:
     return value
 
 
+def _maybe_json(value: Any) -> Any:
+    value = _decode_binary(value)
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if not text or text[0] not in "{[":
+        return value
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return value
+
+
 def _coerce_text(value: Any) -> str:
     if value is None:
         return ""
@@ -69,43 +82,82 @@ def _coerce_bool(value: Any, default: bool) -> bool:
     return default
 
 
-def _coerce_mapping(value: Any) -> Dict[str, Any]:
-    value = _decode_binary(value)
-    if isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return {}
-        try:
-            value = json.loads(text)
-        except json.JSONDecodeError:
-            return {}
+def _flag_enabled(value: Any, default: bool = True) -> bool:
+    value = _maybe_json(value)
     if isinstance(value, Mapping):
-        return dict(value)
-    return {}
+        nested = value.get("enabled")
+        if nested is None:
+            nested = value.get("visible")
+        if nested is None:
+            nested = value.get("allowed")
+        return _coerce_bool(nested, default)
+    return _coerce_bool(value, default)
+
+
+_IDENTITY_KEYS = (
+    "agentId",
+    "agent_id",
+    "turnId",
+    "turn_id",
+    "runId",
+    "run_id",
+    "mode",
+    "directSessionId",
+    "direct_session_id",
+)
+_RUNTIME_ENVELOPES = ("runtime", "payload", "config", "binding", "current")
+_TOOL_LIST_KEYS = ("tools", "visible_tools", "visibleTools", "items", "names")
+
+
+def _coerce_mapping(value: Any) -> Dict[str, Any]:
+    value = _maybe_json(value)
+    if not isinstance(value, Mapping):
+        return {}
+    mapping = dict(value)
+    if any(key in mapping for key in _IDENTITY_KEYS):
+        return mapping
+    for envelope in _RUNTIME_ENVELOPES:
+        if envelope not in mapping:
+            continue
+        nested = _coerce_mapping(mapping.get(envelope))
+        if nested:
+            return nested
+    return mapping
 
 
 def _tool_name_set(items: Iterable[Any] | None) -> set[str]:
     names: set[str] = set()
+    items = _maybe_json(items)
     if items is None:
         return names
-    items = _decode_binary(items)
-    if isinstance(items, str):
-        text = items.strip()
-        if text.startswith("[") or text.startswith("{"):
-            try:
-                return _tool_name_set(json.loads(text))
-            except json.JSONDecodeError:
-                pass
-        if text:
-            names.add(text)
+    if isinstance(items, (str, bytes, bytearray, memoryview)):
+        text = _coerce_text(items).strip()
+        if not text:
+            return names
+        parsed = _maybe_json(text)
+        if parsed is not text and not isinstance(parsed, (str, bytes, bytearray, memoryview)):
+            return _tool_name_set(parsed)
+        names.add(text)
         return names
     if isinstance(items, Mapping):
-        if "name" in items and not any(key in items for key in ("enabled", "visible", "allowed")):
-            name = _coerce_text(items.get("name")).strip()
+        for key in _TOOL_LIST_KEYS:
+            if key not in items:
+                continue
+            nested = items.get(key)
+            if nested is None or isinstance(nested, (bool, int, float)):
+                continue
+            return _tool_name_set(nested)
+        tool_name = items.get("name")
+        if tool_name is None:
+            tool_name = items.get("id")
+        if tool_name is not None and not any(key in items for key in _TOOL_LIST_KEYS):
+            if not _flag_enabled(items, True):
+                return set()
+            name = _coerce_text(tool_name).strip()
             return {name} if name else set()
         for key, enabled in items.items():
             name = _coerce_text(key).strip()
-            if name and _coerce_bool(enabled, True):
+            if name and _flag_enabled(enabled, True):
                 names.add(name)
         return names
     try:
@@ -114,6 +166,10 @@ def _tool_name_set(items: Iterable[Any] | None) -> set[str]:
         name = _coerce_text(getattr(items, "name", items)).strip()
         return {name} if name else set()
     for item in iterator:
+        item = _maybe_json(item)
+        if isinstance(item, Mapping):
+            names.update(_tool_name_set(item))
+            continue
         name = _coerce_text(getattr(item, "name", item)).strip()
         if name:
             names.add(name)
@@ -254,7 +310,7 @@ def restart_allowed_tool_names() -> tuple[str, ...]:
 
 
 def guard_restart_focus_tool(tool_name: str, *, restart_focus: bool) -> Optional[str]:
-    if not _coerce_bool(restart_focus, False):
+    if not _flag_enabled(restart_focus, False):
         return None
     if _coerce_text(tool_name).strip() in RESTART_ALLOWED_TOOL_NAMES:
         return None
