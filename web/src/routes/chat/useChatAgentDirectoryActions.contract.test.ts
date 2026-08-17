@@ -25,6 +25,11 @@ describe("useChatAgentDirectoryActions contract", () => {
     expect(actionsSource).toContain("renameAgent({ agentId: agentRenameDraft.agentId, displayName: title })");
   });
 
+  it("does not treat Agent rename as a structural workspace invalidation", () => {
+    expect(routeSource).toContain("afterAgentRenamed(updatedAgent.agentId)");
+    expect(routeSource).not.toContain("afterAgentWorkspaceChanged()");
+  });
+
   it("is wired from ChatCodingRoute", () => {
     expect(routeSource).toContain("useChatAgentDirectoryActions(");
     expect(routeSource).not.toContain("function handleCreateAgent()");

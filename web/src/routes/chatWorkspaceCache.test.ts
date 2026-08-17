@@ -120,6 +120,20 @@ describe("createChatWorkspaceCache", () => {
     expect(queryKeysFromCalls()).not.toContain(queryKeys.conversations());
   });
 
+  it("refreshes Agent config after rename without reshuffling the agents list cache", async () => {
+    const { cache, queryKeysFromCalls } = makeCache();
+
+    await cache.afterAgentRenamed("agent-1");
+
+    expect(queryKeysFromCalls()).toEqual([
+      queryKeys.agentConfigWorkspace(),
+      queryKeys.agent("agent-1"),
+    ]);
+    expect(queryKeysFromCalls()).not.toContain(queryKeys.agents());
+    expect(queryKeysFromCalls()).not.toContain(queryKeys.sessions());
+    expect(queryKeysFromCalls()).not.toContain(queryKeys.conversations());
+  });
+
   it("refreshes Agent chat-room membership without a route-level recipe", async () => {
     const { cache, queryKeysFromCalls } = makeCache();
 

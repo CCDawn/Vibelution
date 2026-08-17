@@ -1352,7 +1352,7 @@ export function ChatCodingRoute() {
         current?.map((agent) => agent.agentId === updatedAgent.agentId ? updatedAgent : agent),
       );
       setSessionComposerErrors((current) => ({ ...current, __sessions__: "" }));
-      void chatWorkspaceCache.afterAgentWorkspaceChanged();
+      void chatWorkspaceCache.afterAgentRenamed(updatedAgent.agentId);
     },
     onError: (error, variables, context) => {
       context?.telemetry?.failed(error, { agentId: variables.agentId });
