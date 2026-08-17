@@ -119,6 +119,23 @@ def test_open_request_ready_accepts_an_electron_managed_window():
     ) is False
 
 
+def test_open_request_ready_rejects_edge_app_as_product_window():
+    observation = {
+        "observedState": "open",
+        "backendHealthy": True,
+        "backendObserved": True,
+        "windowProvider": "edge_app",
+        "windowManaged": True,
+        "browserManaged": True,
+        "browserWindowAlive": True,
+        "launcherStatePresent": True,
+    }
+
+    assert daemon._open_window_ready(observation) is False
+    assert daemon._open_request_ready(observation, no_browser=False) is False
+    assert daemon._open_request_already_satisfied(observation, no_browser=False) is False
+
+
 def test_open_request_ready_no_browser_accepts_backend_without_window():
     observation = {
         "observedState": "partial",
@@ -1315,6 +1332,8 @@ def test_load_runtime_snapshot_clears_stale_failed_close_after_successful_reopen
             "backendPortOwnerTrusted": True,
             "backendPortConflict": False,
             "browserWindowAlive": True,
+            "windowProvider": "electron",
+            "windowManaged": True,
             "sessionId": "managed-session",
             "url": "http://127.0.0.1:8000",
         },
@@ -1371,6 +1390,8 @@ def test_load_runtime_snapshot_keeps_lifecycle_restart_failure_while_still_open(
             "backendPortOwnerTrusted": True,
             "backendPortConflict": False,
             "browserWindowAlive": True,
+            "windowProvider": "electron",
+            "windowManaged": True,
             "sessionId": "managed-session",
             "url": "http://127.0.0.1:8002",
         },
@@ -2396,6 +2417,8 @@ def test_reconcile_observation_clears_stale_failed_close_after_successful_reopen
             "backendPortOwnerTrusted": True,
             "backendPortConflict": False,
             "browserWindowAlive": True,
+            "windowProvider": "electron",
+            "windowManaged": True,
             "browserManaged": True,
             "sessionId": "managed-session",
             "url": "http://127.0.0.1:8000",
@@ -2448,6 +2471,8 @@ def test_reconcile_observation_cleans_up_orphaned_browser(monkeypatch):
                 "backendPortOwnerTrusted": False,
                 "backendPortConflict": False,
                 "browserWindowAlive": True,
+                "windowProvider": "electron",
+                "windowManaged": True,
                 "browserManaged": True,
                 "backendMissing": True,
                 "frontendOrphaned": True,
@@ -2530,6 +2555,8 @@ def test_reconcile_observation_does_not_fail_opening_orphaned_browser(monkeypatc
             "backendPortOwnerTrusted": False,
             "backendPortConflict": False,
             "browserWindowAlive": True,
+            "windowProvider": "electron",
+            "windowManaged": True,
             "browserManaged": True,
             "backendMissing": True,
             "frontendOrphaned": True,
@@ -2585,6 +2612,8 @@ def test_reconcile_observation_gives_up_orphaned_cleanup_after_max_attempts(monk
         "backendPortOwnerTrusted": False,
         "backendPortConflict": False,
         "browserWindowAlive": True,
+        "windowProvider": "electron",
+        "windowManaged": True,
         "browserManaged": True,
         "backendMissing": True,
         "frontendOrphaned": True,
@@ -2635,6 +2664,8 @@ def test_reconcile_observation_resets_orphaned_cleanup_attempts_on_success(monke
         "backendPortOwnerTrusted": False,
         "backendPortConflict": False,
         "browserWindowAlive": True,
+        "windowProvider": "electron",
+        "windowManaged": True,
         "browserManaged": True,
         "backendMissing": True,
         "frontendOrphaned": True,
@@ -2846,6 +2877,8 @@ def test_reconcile_observation_clears_completed_active_command(monkeypatch):
             "backendPortOwnerResidual": False,
             "backendPortConflict": False,
             "browserWindowAlive": True,
+            "windowProvider": "electron",
+            "windowManaged": True,
             "browserManaged": True,
             "backendMissing": False,
             "frontendOrphaned": False,
@@ -6155,6 +6188,8 @@ def test_terminate_workbench_processes_known_pids_include_runtime_manager_withou
 def no_active_electron_desktop_session(monkeypatch):
     monkeypatch.setattr(workbench_controller, "_latest_active_electron_desktop_session", lambda: None)
     monkeypatch.setattr(workbench_controller, "_packaged_electron_desktop_executable", lambda: None)
+    monkeypatch.setattr(workbench_controller, "_live_electron_owner_pid", lambda: 0)
+    monkeypatch.setattr(workbench_controller, "_electron_main_orchestrates_windows", lambda: False)
 
 
 def test_packaged_electron_launch_requests_workbench_from_primary_instance(monkeypatch, tmp_path):
@@ -6386,7 +6421,7 @@ def test_run_launcher_action_passes_configured_port_to_launcher_env(monkeypatch,
         lambda event_type, payload, **_kwargs: events.append((event_type, payload)),
     )
 
-    result = workbench_controller.run_launcher_action("internal-start")
+    result = workbench_controller.run_launcher_action("internal-start", no_browser=True)
 
     assert result.returncode == 0
     assert captured["kwargs"]["env"]["VIBELUTION_PORT"] == "9101"
@@ -6422,7 +6457,7 @@ def test_run_launcher_action_emits_final_summary_when_control_plane_bootstrap_fa
     )
 
     with pytest.raises(RuntimeError, match="bootstrap failed"):
-        workbench_controller.run_launcher_action("internal-start")
+        workbench_controller.run_launcher_action("internal-start", no_browser=True)
 
     summary = _event_payload(events, "launcher.action.startup_summary")
     assert summary["outcome"] == "failed"
@@ -6519,7 +6554,7 @@ def test_run_launcher_action_preserves_explicit_port_env_override(monkeypatch, n
         lambda event_type, payload, **_kwargs: events.append((event_type, payload)),
     )
 
-    result = workbench_controller.run_launcher_action("internal-start")
+    result = workbench_controller.run_launcher_action("internal-start", no_browser=True)
 
     assert result.returncode == 0
     assert captured["kwargs"]["env"]["VIBELUTION_PORT"] == "9123"
@@ -6550,7 +6585,7 @@ def test_run_launcher_action_falls_back_to_configured_port_when_explicit_env_inv
         lambda event_type, payload, **_kwargs: None,
     )
 
-    result = workbench_controller.run_launcher_action("internal-start")
+    result = workbench_controller.run_launcher_action("internal-start", no_browser=True)
 
     assert result.returncode == 0
     assert captured["kwargs"]["env"]["VIBELUTION_PORT"] == "9101"
@@ -6585,7 +6620,7 @@ def test_run_launcher_action_uses_python_adapter_without_detached_process(
     monkeypatch.setattr(workbench_controller.subprocess, "STARTUPINFO", DummyStartupInfo, raising=False)
     monkeypatch.setattr(workbench_controller.subprocess, "Popen", FakeProcess)
 
-    result = workbench_controller.run_launcher_action("internal-start")
+    result = workbench_controller.run_launcher_action("internal-start", no_browser=True)
 
     assert result.returncode == 0
     assert captured["wait_called"] is True
@@ -6620,7 +6655,7 @@ def test_run_launcher_action_events_report_hidden_waitable_launch(monkeypatch, n
         lambda event_type, payload, **_kwargs: events.append((event_type, payload)),
     )
 
-    result = workbench_controller.run_launcher_action("internal-start")
+    result = workbench_controller.run_launcher_action("internal-start", no_browser=True)
 
     assert result.returncode == 0
     requested = _event_payload(events, "launcher.action.requested")
@@ -6674,7 +6709,7 @@ def test_run_launcher_action_cancelable_path_remains_waitable_on_windows(
     monkeypatch.setattr(workbench_controller.subprocess, "Popen", FakeProcess)
     monkeypatch.setattr(workbench_controller.time, "sleep", lambda _seconds: None)
 
-    result = workbench_controller.run_launcher_action("internal-start", cancel_check=lambda: False)
+    result = workbench_controller.run_launcher_action("internal-start", no_browser=True, cancel_check=lambda: False)
 
     assert result.returncode == 0
     assert result.stdout == "ready\n"
@@ -6750,6 +6785,8 @@ def test_handle_open_workbench_restarts_headless_session(monkeypatch):
                 "launcherStatePresent": True,
                 "browserManaged": True,
                 "browserWindowAlive": True,
+                "windowProvider": "electron",
+                "windowManaged": True,
                 "backendPid": 28888,
                 "browserLaunchPid": 4500,
                 "browserWindowPid": 4500,
@@ -6767,6 +6804,8 @@ def test_handle_open_workbench_restarts_headless_session(monkeypatch):
                 "launcherStatePresent": True,
                 "browserManaged": True,
                 "browserWindowAlive": True,
+                "windowProvider": "electron",
+                "windowManaged": True,
                 "backendPid": 28888,
                 "browserLaunchPid": 4500,
                 "browserWindowPid": 4500,
@@ -7193,6 +7232,8 @@ def test_handle_open_workbench_skips_initial_observation_when_cached_closed(monk
         "launcherStatePresent": True,
         "browserManaged": True,
         "browserWindowAlive": True,
+        "windowProvider": "electron",
+        "windowManaged": True,
         "backendPid": 28888,
         "browserLaunchPid": 4500,
         "browserWindowPid": 4500,
@@ -7325,6 +7366,8 @@ def test_handle_open_workbench_retries_stale_browser_only_session(monkeypatch):
                 "launcherStatePresent": True,
                 "browserManaged": True,
                 "browserWindowAlive": True,
+                "windowProvider": "electron",
+                "windowManaged": True,
                 "backendPid": 0,
                 "browserLaunchPid": 38028,
                 "browserWindowPid": 38028,
@@ -7344,6 +7387,8 @@ def test_handle_open_workbench_retries_stale_browser_only_session(monkeypatch):
                 "launcherStatePresent": True,
                 "browserManaged": True,
                 "browserWindowAlive": True,
+                "windowProvider": "electron",
+                "windowManaged": True,
                 "backendPid": 49972,
                 "browserLaunchPid": 33676,
                 "browserWindowPid": 33676,
@@ -7439,6 +7484,8 @@ def test_handle_open_workbench_restarts_browser_missing_session(monkeypatch):
                 "launcherStatePresent": True,
                 "browserManaged": True,
                 "browserWindowAlive": True,
+                "windowProvider": "electron",
+                "windowManaged": True,
                 "backendPid": 28888,
                 "browserLaunchPid": 4500,
                 "browserWindowPid": 4500,
@@ -7546,6 +7593,8 @@ def test_handle_open_workbench_accepts_trusted_backend_when_health_probe_lags(mo
                 "launcherStatePresent": True,
                 "browserManaged": True,
                 "browserWindowAlive": True,
+                "windowProvider": "electron",
+                "windowManaged": True,
                 "backendPid": 31216,
                 "browserLaunchPid": 36760,
                 "browserWindowPid": 36760,
@@ -7818,6 +7867,8 @@ def test_handle_open_workbench_restarts_healthy_headless_session_when_browser_re
                     "launcherStatePresent": True,
                     "browserManaged": True,
                     "browserWindowAlive": True,
+                    "windowProvider": "electron",
+                    "windowManaged": True,
                     "backendPid": 28888,
                     "browserLaunchPid": 4500,
                     "browserWindowPid": 4500,
@@ -7941,6 +7992,8 @@ def test_handle_open_workbench_refocuses_existing_browser_session(monkeypatch):
             "launcherStatePresent": True,
             "browserManaged": True,
             "browserWindowAlive": True,
+            "windowProvider": "electron",
+            "windowManaged": True,
             "backendPid": 28888,
             "browserLaunchPid": 4500,
             "browserWindowPid": 4500,
@@ -8018,6 +8071,8 @@ def test_handle_open_workbench_logs_focus_failure_for_existing_browser_session(m
         "launcherStatePresent": True,
         "browserManaged": True,
         "browserWindowAlive": True,
+        "windowProvider": "electron",
+        "windowManaged": True,
         "backendPid": 28888,
         "browserLaunchPid": 4500,
         "browserWindowPid": 4500,
@@ -8184,6 +8239,8 @@ def test_handle_restart_workbench_surfaces_launcher_error(monkeypatch):
                     "launcherStatePresent": True,
                     "browserManaged": True,
                     "browserWindowAlive": True,
+                    "windowProvider": "electron",
+                    "windowManaged": True,
                     "backendPid": 28888,
                     "browserLaunchPid": 29999,
                     "browserWindowPid": 29999,
@@ -8423,6 +8480,8 @@ def test_handle_restart_workbench_build_preflight_fails_before_close(monkeypatch
             "phase": "steady",
             "backendAlive": True,
             "browserWindowAlive": True,
+            "windowProvider": "electron",
+            "windowManaged": True,
             "browserManaged": True,
             "browserWindowPid": 4567,
         },
@@ -9136,6 +9195,8 @@ def test_handle_restart_workbench_preserves_visible_browser_when_no_browser_was_
             "launcherStatePresent": True,
             "browserManaged": True,
             "browserWindowAlive": True,
+            "windowProvider": "electron",
+            "windowManaged": True,
             "backendPid": 28888,
             "browserLaunchPid": 29999,
             "browserWindowPid": 29999,
@@ -9265,6 +9326,8 @@ def test_handle_restart_workbench_accepts_trusted_backend_when_health_probe_lags
         "launcherStatePresent": True,
         "browserManaged": True,
         "browserWindowAlive": True,
+        "windowProvider": "electron",
+        "windowManaged": True,
         "backendPid": 31216,
         "browserLaunchPid": 36760,
         "browserWindowPid": 36760,
@@ -9362,6 +9425,8 @@ def test_handle_close_workbench_records_shutdown_source(monkeypatch):
                     "launcherStatePresent": True,
                     "browserManaged": True,
                     "browserWindowAlive": True,
+                    "windowProvider": "electron",
+                    "windowManaged": True,
                     "backendPid": 28888,
                     "browserLaunchPid": 29999,
                     "browserWindowPid": 29999,
@@ -9455,6 +9520,8 @@ def test_handle_close_workbench_uses_runtime_manager_fast_path(monkeypatch):
         "launcherStatePresent": True,
         "browserManaged": True,
         "browserWindowAlive": True,
+        "windowProvider": "electron",
+        "windowManaged": True,
         "backendPid": 28888,
         "backendLaunchPid": 28888,
         "backendAlive": True,
@@ -9697,6 +9764,8 @@ def test_handle_close_workbench_falls_back_to_launcher_when_fast_path_is_unavail
         "launcherStatePresent": True,
         "browserManaged": True,
         "browserWindowAlive": True,
+        "windowProvider": "electron",
+        "windowManaged": True,
         "backendPid": 28888,
         "backendAlive": True,
         "backendHealthy": True,
@@ -9860,6 +9929,8 @@ def test_persist_workbench_launcher_state_after_open_replaces_control_surface_sn
             "backendHealthy": True,
             "browserManaged": True,
             "browserWindowAlive": True,
+            "windowProvider": "electron",
+            "windowManaged": True,
             "browserLaunchPid": 59400,
             "browserWindowPid": 59400,
             "browserProfileDir": "workbench-profile",
@@ -9945,6 +10016,8 @@ def test_persist_workbench_launcher_state_after_open_keeps_window_only_as_partia
             "backendHealthy": False,
             "browserManaged": True,
             "browserWindowAlive": True,
+            "windowProvider": "electron",
+            "windowManaged": True,
             "browserLaunchPid": 29100,
             "browserWindowPid": 29100,
             "url": "http://127.0.0.1:8003",
@@ -10008,6 +10081,8 @@ def test_handle_force_close_workbench_marks_work_runs_and_verifies_close(monkeyp
         "launcherStatePresent": True,
         "browserManaged": True,
         "browserWindowAlive": True,
+        "windowProvider": "electron",
+        "windowManaged": True,
         "backendPid": 28888,
         "browserLaunchPid": 29999,
         "browserWindowPid": 29999,
@@ -10136,6 +10211,8 @@ def test_handle_force_close_workbench_uses_cleanup_result_as_verification(monkey
         "launcherStatePresent": True,
         "browserManaged": True,
         "browserWindowAlive": True,
+        "windowProvider": "electron",
+        "windowManaged": True,
         "backendPid": 28888,
         "browserLaunchPid": 29999,
         "browserWindowPid": 29999,
@@ -10450,6 +10527,8 @@ def test_handle_close_workbench_closes_active_evolution_runs(monkeypatch):
                     "launcherStatePresent": True,
                     "browserManaged": True,
                     "browserWindowAlive": True,
+                    "windowProvider": "electron",
+                    "windowManaged": True,
                     "backendPid": 28888,
                     "browserLaunchPid": 29999,
                     "browserWindowPid": 29999,
@@ -10538,6 +10617,8 @@ def test_handle_close_workbench_claims_deferred_reopen_intent(monkeypatch):
                     "launcherStatePresent": True,
                     "browserManaged": True,
                     "browserWindowAlive": True,
+                    "windowProvider": "electron",
+                    "windowManaged": True,
                     "backendPid": 28888,
                     "browserLaunchPid": 29999,
                     "browserWindowPid": 29999,
@@ -10613,6 +10694,8 @@ def test_handle_restart_self_evolution_run_creates_restart_intent(monkeypatch):
             "backendPortOwnerPid": 28888,
             "browserManaged": True,
             "browserWindowAlive": True,
+            "windowProvider": "electron",
+            "windowManaged": True,
             "browserWindowPid": 29999,
         },
     )
@@ -10923,6 +11006,8 @@ def test_handle_close_workbench_fails_when_post_close_verification_still_sees_br
                 "launcherStatePresent": True,
                 "browserManaged": True,
                 "browserWindowAlive": True,
+                "windowProvider": "electron",
+                "windowManaged": True,
                 "backendPid": 6544,
                 "backendLaunchPid": 6544,
                 "backendAlive": True,
@@ -10943,6 +11028,8 @@ def test_handle_close_workbench_fails_when_post_close_verification_still_sees_br
                 "launcherStatePresent": True,
                 "browserManaged": True,
                 "browserWindowAlive": True,
+                "windowProvider": "electron",
+                "windowManaged": True,
                 "backendPid": 0,
                 "backendLaunchPid": 6544,
                 "backendAlive": False,
@@ -11024,6 +11111,8 @@ def test_electron_owned_normal_close_stops_backend_without_terminating_window_ow
         "browserLaunchPid": 52001,
         "browserWindowPid": 52002,
         "browserWindowAlive": True,
+        "windowProvider": "electron",
+        "windowManaged": True,
         "sessionId": "desktop-session-1",
     }
     cleanup_calls: list[dict] = []
@@ -11092,6 +11181,8 @@ def test_electron_owned_force_close_preserves_window_owner_and_records_force_sto
         "browserLaunchPid": 53001,
         "browserWindowPid": 53002,
         "browserWindowAlive": True,
+        "windowProvider": "electron",
+        "windowManaged": True,
     }
     cleanup_calls: list[dict] = []
 
@@ -11150,6 +11241,8 @@ def test_runtime_snapshot_keeps_electron_owned_backend_close_pending_until_windo
         "browserManaged": True,
         "browserWindowPid": 62002,
         "browserWindowAlive": True,
+        "windowProvider": "electron",
+        "windowManaged": True,
         "lifecycleConsistency": "orphaned_browser",
     }
 

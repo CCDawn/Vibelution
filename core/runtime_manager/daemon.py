@@ -1003,9 +1003,9 @@ def _open_backend_ready_source(observation: dict[str, Any], *, launcher_confirme
 
 def _open_window_ready(observation: dict[str, Any]) -> bool:
     provider = str(observation.get("windowProvider") or "").strip().lower()
-    if provider == "electron":
-        return bool(observation.get("windowManaged")) and bool(observation.get("browserWindowAlive"))
-    return bool(observation.get("browserManaged")) and bool(observation.get("browserWindowAlive"))
+    if provider != "electron":
+        return False
+    return bool(observation.get("windowManaged")) and bool(observation.get("browserWindowAlive"))
 
 
 def _open_request_ready(observation: dict[str, Any], *, no_browser: bool, launcher_confirmed: bool = False) -> bool:
