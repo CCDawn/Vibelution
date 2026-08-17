@@ -145,6 +145,7 @@ EXPLICIT_ALLOW_TOOLS = {
     "knowledge_steward_recommendations_tool",
     "knowledge_steward_workbench_tool",
     "knowledge_rating_suggestion_tool",
+    "research_knowledge_collection_tool",
 }
 
 
@@ -328,6 +329,12 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
     "challenge_cup_versioning_writeback_tool": {
         "category": "media_research",
         "capabilityTags": ["challenge_cup", "candidate_versioning", "structured_result"],
+        "riskTags": ["team_workflow_state_write"],
+        "permissionTier": HIGH_PERMISSION_TIER,
+    },
+    "research_knowledge_collection_tool": {
+        "category": "media_research",
+        "capabilityTags": ["challenge_cup", "knowledge_collection_facade", "source_collection", "scope_envelope", "structured_result", "no_quota_api"],
         "riskTags": ["team_workflow_state_write"],
         "permissionTier": HIGH_PERMISSION_TIER,
     },
