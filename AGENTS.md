@@ -50,6 +50,7 @@
 4. 多会话写入先用项目 guard 执行 `status/check/preflight/claim`；完成后 `release`。
 5. Bug、回归、卡住、运行不一致或异常命令：先 [`agent-log-routing.md`](docs/guides/agent-log-routing.md) 的 **`agent_log_context`**，再按 `agentBrief.evidence_refs` 深读。
 6. 非平凡行为、状态、权限、迁移、Prompt、Agent 或运行时变更：BRT 对齐未闭合前不得实现。
+7. 执行 Agent、Session、Inbox 或 Knowledge ACL 操作前，必须先读 [docs/agents/project-operation-catalog.md](docs/agents/project-operation-catalog.md)，并优先使用其中登记的标准受管工具，不得自造工具名，也不得通过裸存储写入绕过生命周期或 ACL。
 
 按任务读取：
 
@@ -60,6 +61,7 @@
 | 开发分级、架构、前后端、测试、Git、Launcher、发布、完成条件 | [开发标准](docs/standards/development-standard.md) |
 | Windows 无控制台弹窗（cmd/powershell/WT/OpenConsole）红线 | [开发标准 §8.0](docs/standards/development-standard.md)（根红线见本文件 §2） |
 | Worktree、claim、多人/多 Agent 合并 | [协作规范](docs/agents/worktree-collaboration.md) |
+| **Agent / Session / Inbox / Knowledge ACL 操作（必读）** | [项目操作目录](docs/agents/project-operation-catalog.md) |
 | 工具权限与入口 | [工具授权](docs/agents/tool-authorization-entrypoints.md) |
 | 外部 Agent MCP 部署、自动发现与调用 | [MCP 受管 Agent 网关指南](docs/agents/mcp-managed-agent-gateway.md) |
 | 领域词汇 | [领域文档](docs/agents/domain.md) |
