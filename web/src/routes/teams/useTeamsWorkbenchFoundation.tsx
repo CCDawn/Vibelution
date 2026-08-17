@@ -356,7 +356,9 @@ export function useTeamsWorkbenchFoundation({
     dragFrameRef,
   });
   const {
+    processCanvasHome,
     sourceCollectionNeedsCandidateList,
+    teamWorkflowOrchestrationEnabled,
     teamWorkflowCandidateListEnabled,
     teamWorkflowGraphEnabled,
     teamWorkflowKnowledgeIngestionEnabled,
@@ -368,6 +370,7 @@ export function useTeamsWorkbenchFoundation({
     researchWorkspaceView,
     sourceCollectionWorkspaceSelected,
     selectedSourceCollectionStageId,
+    challengeCupResearchTeamSelected,
   });
 
   // Research workspace view URL sync lives in useTeamsShellCanvasWorkspace.
@@ -384,15 +387,25 @@ export function useTeamsWorkbenchFoundation({
   } = useResearchWorkflowResources({
     teamId: effectiveTeamId,
     demand: {
-      workflow: Boolean(effectiveTeamId && researchWorkflowTeamSelected),
+      workflow: teamWorkflowOrchestrationEnabled,
       stageRound: researchStageRoundStatusEnabled,
       candidates: teamWorkflowCandidateListEnabled,
       candidateGraph: teamWorkflowGraphEnabled,
       coordination: Boolean(effectiveTeamId && researchWorkflowTeamSelected && researchWorkspaceView === "coordination"),
       knowledgeIngestion: teamWorkflowKnowledgeIngestionEnabled,
-      modelEvidence: Boolean(effectiveTeamId && researchWorkflowTeamSelected && researchWorkspaceView === "overview"),
+      modelEvidence: Boolean(
+        effectiveTeamId
+        && researchWorkflowTeamSelected
+        && researchWorkspaceView === "overview"
+        && !processCanvasHome
+      ),
       sourceQuality: teamWorkflowSourceQualityEnabled,
-      paperNoteChunks: Boolean(effectiveTeamId && researchWorkflowTeamSelected && researchWorkspaceView === "overview"),
+      paperNoteChunks: Boolean(
+        effectiveTeamId
+        && researchWorkflowTeamSelected
+        && researchWorkspaceView === "overview"
+        && !processCanvasHome
+      ),
     },
     pageVisible,
     stageWritebackSync: {

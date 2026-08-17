@@ -210,6 +210,22 @@ def _agent_reference_maps() -> dict[str, dict[str, dict[str, Any]]]:
     return s._agent_reference_maps_from_agents(agents)
 
 
+def lookup_agent_display_name_map() -> dict[str, str]:
+    """Map agentId → displayName from lightweight Agent identity fields.
+
+    Avoids Agent directory repair and full `_agent_to_api` hydration.
+    """
+    s = _service()
+    names: dict[str, str] = {}
+    for agent_id, agent in (s._agent_reference_maps().get("by_id") or {}).items():
+        if not isinstance(agent, dict):
+            continue
+        name = str(agent.get("displayName") or "").strip()
+        if agent_id and name:
+            names[str(agent_id)] = name
+    return names
+
+
 def _load_lightweight_agent_references() -> list[dict[str, Any]]:
     """Read Agent identity fields without running Agent repair or API hydration."""
 

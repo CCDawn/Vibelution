@@ -60,4 +60,43 @@ describe("resolveTeamWorkflowResourceDemand", () => {
       selectedSourceCollectionStageId: "ingestion",
     }).researchStageRoundStatusEnabled).toBe(false);
   });
+
+  it("keeps legacy orchestration off the process-flow canvas home", () => {
+    const workflowHome = resolveTeamWorkflowResourceDemand({
+      effectiveTeamId: "research-team",
+      researchWorkflowTeamSelected: true,
+      researchWorkspaceView: "workflow",
+      sourceCollectionWorkspaceSelected: false,
+      selectedSourceCollectionStageId: null,
+      challengeCupResearchTeamSelected: true,
+    });
+    expect(workflowHome.processCanvasHome).toBe(true);
+    expect(workflowHome.teamWorkflowOrchestrationEnabled).toBe(false);
+    expect(workflowHome.researchStageRoundStatusEnabled).toBe(false);
+    expect(workflowHome.teamWorkflowCandidateListEnabled).toBe(false);
+
+    const challengeOverview = resolveTeamWorkflowResourceDemand({
+      effectiveTeamId: "research-team",
+      researchWorkflowTeamSelected: true,
+      researchWorkspaceView: "overview",
+      sourceCollectionWorkspaceSelected: false,
+      selectedSourceCollectionStageId: null,
+      challengeCupResearchTeamSelected: true,
+    });
+    expect(challengeOverview.processCanvasHome).toBe(true);
+    expect(challengeOverview.teamWorkflowOrchestrationEnabled).toBe(false);
+    expect(challengeOverview.researchStageRoundStatusEnabled).toBe(false);
+
+    const genericOverview = resolveTeamWorkflowResourceDemand({
+      effectiveTeamId: "research-team",
+      researchWorkflowTeamSelected: true,
+      researchWorkspaceView: "overview",
+      sourceCollectionWorkspaceSelected: false,
+      selectedSourceCollectionStageId: null,
+    });
+    expect(genericOverview.processCanvasHome).toBe(false);
+    expect(genericOverview.teamWorkflowOrchestrationEnabled).toBe(true);
+    expect(genericOverview.researchStageRoundStatusEnabled).toBe(true);
+    expect(genericOverview.teamWorkflowCandidateListEnabled).toBe(true);
+  });
 });

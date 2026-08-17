@@ -41,33 +41,27 @@ def resolve_team_role_bindings(team_id: str) -> dict[str, str]:
     if not str(team_id or "").strip():
         return {}
     try:
-        from core.web.services.team_service import get_team, get_team_canvas
-    except Exception:  # pragma: no cover - defensive import boundary
+        from core.web.services.team_service import list_team_role_binding_sources
+
+        sources = list_team_role_binding_sources(team_id)
+    except Exception:
         return {}
 
     bindings: dict[str, str] = {}
-    try:
-        canvas = get_team_canvas(team_id)
-        for node in (canvas or {}).get("nodes") or []:
-            role = _role_of(node)
-            agent_id = _agent_id_of(node)
-            if role and agent_id and role not in bindings:
-                bindings[role] = agent_id
-    except Exception:
-        # Team or canvas unavailable: keep going with members; if both fail
-        # the result stays empty and every role is unbound.
-        pass
-
-    try:
-        team = get_team(team_id)
-        for member in (team or {}).get("members") or []:
-            role = _role_of(member)
-            agent_id = _agent_id_of(member)
-            if role and agent_id and role not in bindings:
-                bindings[role] = agent_id
-    except Exception:
-        pass
-
+    for node in list(sources.get("canvas_nodes") or []):
+        if not isinstance(node, dict):
+            continue
+        role = _role_of(node)
+        agent_id = _agent_id_of(node)
+        if role and agent_id and role not in bindings:
+            bindings[role] = agent_id
+    for member in list(sources.get("members") or []):
+        if not isinstance(member, dict):
+            continue
+        role = _role_of(member)
+        agent_id = _agent_id_of(member)
+        if role and agent_id and role not in bindings:
+            bindings[role] = agent_id
     return bindings
 
 

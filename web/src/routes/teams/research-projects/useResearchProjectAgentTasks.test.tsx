@@ -99,6 +99,8 @@ describe("useResearchProjectAgentTasks", () => {
     expect(selectedTeamDetailSource).toContain("!sourceCollectionStandalone");
     expect(selectedTeamDetailSource).toContain('researchWorkspaceView !== "source_collection"');
     expect(selectedTeamDetailSource).toContain('researchWorkspaceView !== "knowledge_collection"');
+    expect(selectedTeamDetailSource).toContain('researchWorkspaceView !== "workflow"');
+    expect(selectedTeamDetailSource).toContain('researchWorkspaceView !== "overview"');
   });
 
   it("refreshes stage and experiment projections when an Agent task settles", () => {
