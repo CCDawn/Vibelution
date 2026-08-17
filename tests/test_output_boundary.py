@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 from core.orchestration.output_boundary import (
@@ -116,3 +117,19 @@ def test_sanitize_coerces_bytes_mapping_chunks_and_false_trim():
     assert strip_llm_protocol_artifacts(" 下一步 ", trim="false") == " 下一步 "
     assert strip_llm_protocol_artifacts(" 下一步 ", trim=b"false") == " 下一步 "
     assert strip_llm_protocol_artifacts(" 下一步 ", trim="true") == "下一步"
+
+
+def test_sanitize_unwraps_json_message_envelopes_and_keeps_literal_json():
+    raw = "可见回答。\n<state>{}</state>\n[outcome=done]"
+    assert sanitize_assistant_visible_text('{"content": %s}' % json.dumps(raw)) == "可见回答。"
+    assert sanitize_assistant_visible_text(
+        {"messages": [{"content": raw}, {"content": "<state>leak</state>"}]}
+    ) == "可见回答。"
+    assert sanitize_assistant_visible_text(
+        {"parts": [{"text": "可见"}, {"text": "<state>leak</state>回答"}]}
+    ) == "可见回答"
+    assert sanitize_assistant_visible_text(
+        bytearray(('["可见", "<state>leak</state>", "回答"]').encode("utf-8"))
+    ) == "可见回答"
+    assert sanitize_assistant_visible_text('{"ok": true}') == '{"ok": true}'
+    assert strip_llm_protocol_artifacts(" 下一步 ", trim=True) == "下一步"

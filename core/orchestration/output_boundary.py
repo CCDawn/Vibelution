@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Mapping
 from typing import Any
@@ -32,26 +33,77 @@ _EMPTY_CONTENT_SANITISED_RE = re.compile(
 )
 
 
+_TEXT_KEYS = (
+    "content",
+    "text",
+    "delta",
+    "visible",
+    "thought",
+    "visibleText",
+    "thoughtText",
+)
+_ENVELOPE_KEYS = (
+    "message",
+    "payload",
+    "messages",
+    "items",
+    "history",
+    "parts",
+    "chunks",
+)
+
+
+def _decode_binary(value: Any) -> Any:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).decode("utf-8", errors="replace")
+    return value
+
+
+def _maybe_json(value: Any) -> Any:
+    value = _decode_binary(value)
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if not text or text[0] not in "{[":
+        return value
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return value
+
+
+def _is_text_payload(value: Any) -> bool:
+    if isinstance(value, Mapping):
+        return any(key in value for key in _TEXT_KEYS + _ENVELOPE_KEYS)
+    if isinstance(value, (list, tuple)):
+        return bool(value) and all(
+            isinstance(item, (str, bytes, bytearray, memoryview, Mapping))
+            or getattr(item, "content", None) is not None
+            for item in value
+        )
+    return False
+
+
 def _coerce_text(value: Any) -> str:
     if value is None:
         return ""
-    if isinstance(value, (bytes, bytearray, memoryview)):
-        return bytes(value).decode("utf-8", errors="replace")
+    value = _decode_binary(value)
     if isinstance(value, str):
+        parsed = _maybe_json(value)
+        if parsed is not value and _is_text_payload(parsed):
+            return _coerce_text(parsed)
         return value
     if isinstance(value, Mapping):
-        for key in (
-            "content",
-            "text",
-            "delta",
-            "visible",
-            "thought",
-            "visibleText",
-            "thoughtText",
-        ):
+        for key in _TEXT_KEYS:
             nested = value.get(key)
             if nested is not None and nested is not value:
                 return _coerce_text(nested)
+        for key in _ENVELOPE_KEYS:
+            nested = value.get(key)
+            if nested is not None and nested is not value:
+                text = _coerce_text(nested)
+                if text:
+                    return text
         return ""
     if isinstance(value, (list, tuple)):
         return "".join(_coerce_text(item) for item in value)
@@ -66,9 +118,8 @@ def _coerce_bool(value: Any, default: bool) -> bool:
         return value
     if value is None:
         return default
-    if isinstance(value, (bytes, bytearray, memoryview)):
-        value = bytes(value).decode("utf-8", errors="replace")
-    if isinstance(value, (int, float)):
+    value = _decode_binary(value)
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
         return bool(value)
     text = str(value).strip().lower()
     if not text:
@@ -81,15 +132,30 @@ def _coerce_bool(value: Any, default: bool) -> bool:
 
 
 def _coerce_name_tuple(value: Any) -> tuple[str, ...]:
+    value = _maybe_json(value)
     if value is None:
         return ()
-    if isinstance(value, (bytes, bytearray, memoryview)):
-        value = bytes(value).decode("utf-8", errors="replace")
-    if isinstance(value, str):
-        text = value.strip()
+    if isinstance(value, (str, bytes, bytearray, memoryview)):
+        text = _coerce_text(value).strip()
         return (text,) if text else ()
     if isinstance(value, Mapping):
-        return ()
+        names: list[str] = []
+        for key, item in value.items():
+            text = _coerce_text(key).strip()
+            if not text:
+                continue
+            enabled = item
+            if isinstance(item, Mapping):
+                enabled = item.get("enabled", True)
+            if isinstance(enabled, bool):
+                if not enabled:
+                    continue
+            else:
+                flag = _coerce_bool(enabled, True)
+                if not flag:
+                    continue
+            names.append(text)
+        return tuple(names)
     try:
         names = tuple(
             text for text in (_coerce_text(item).strip() for item in value) if text
