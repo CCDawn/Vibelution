@@ -83,6 +83,45 @@ def test_budget_profiles_coerce_bytes_case_and_snake_case():
     assert bytes_calls == 16
 
 
+def test_budget_profiles_unwrap_policy_envelopes_and_skip_disabled_families():
+    assert detect_model_family(model={"id": "deepseek-v3"}) == "deepseek"
+    assert detect_model_family(model='{"model":"claude-sonnet"}') == "claude"
+
+    max_calls, family = resolve_max_calls_per_turn(
+        {
+            "policy": {
+                "maxCallsPerTurn": 32,
+                "maxCallsPerTurnByModelFamily": {
+                    "deepseek": {"maxCalls": 80, "enabled": True},
+                    "claude": {"enabled": False, "maxCalls": 99},
+                },
+            }
+        },
+        model={"id": "deepseek-v3"},
+    )
+    assert family == "deepseek"
+    assert max_calls == 80
+
+    skipped, skipped_family = resolve_max_calls_per_turn(
+        {
+            "maxCallsPerTurn": 32,
+            "maxCallsPerTurnByModelFamily": {"deepseek": {"enabled": False, "maxCalls": 8}},
+        },
+        model="deepseek-chat",
+    )
+    assert skipped_family == "deepseek"
+    assert skipped == 64
+
+    assert normalize_max_calls_by_model_family(
+        '{"items":[{"family":"DeepSeek","maxCalls":"80"},{"name":"claude","enabled":false}]}'
+    ) == {"deepseek": 80}
+    bool_override, _ = resolve_max_calls_per_turn(
+        {"maxCallsPerTurn": 32, "maxCallsPerTurnByModelFamily": {"openai": True}},
+        model="gpt-4.1",
+    )
+    assert bool_override == 32
+
+
 def test_turn_status_bar_message_and_upsert():
     snapshot = collect_turn_status_snapshot(
         iteration=2,
