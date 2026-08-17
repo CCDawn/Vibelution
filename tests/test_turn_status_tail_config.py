@@ -61,6 +61,41 @@ def test_normalize_accepts_bytes_false_and_json_payload():
     assert block_enabled({"enabled": "off"}, "budget") is False
 
 
+def test_normalize_unwraps_envelopes_and_json_block_lists():
+    cfg = normalize_turn_status_tail_config(
+        {"config": {"enabled": False, "blocks": ["git_brief", "git_paths"]}}
+    )
+    assert cfg["enabled"] is False
+    assert cfg["blocks"]["git_brief"] is True
+    assert cfg["blocks"]["git_paths"] is True
+    assert cfg["blocks"]["budget"] is True
+
+    cfg = normalize_turn_status_tail_config(
+        {
+            "enabled": bytearray(b"false"),
+            "blocks": '{"items":[{"id":"gitBrief","enabled":true},{"name":"identity","enabled":false}]}',
+            "limits": '{"gitPathsMax": true, "runDigestToolsMax": "6"}',
+        }
+    )
+    assert cfg["enabled"] is False
+    assert cfg["blocks"]["git_brief"] is True
+    assert cfg["blocks"]["identity"] is False
+    assert cfg["limits"]["gitPathsMax"] == 12
+    assert cfg["limits"]["runDigestToolsMax"] == 6
+
+    cfg = normalize_turn_status_tail_config(
+        {
+            "blocks": {"gitBrief": {"enabled": "false"}, "run_digest": {"enabled": True}},
+            "limits": {"git_paths_max": memoryview(b"9")},
+        }
+    )
+    assert cfg["blocks"]["git_brief"] is False
+    assert cfg["blocks"]["run_digest"] is True
+    assert cfg["limits"]["gitPathsMax"] == 9
+    assert block_enabled(cfg, bytearray(b"run-digest")) is True
+    assert block_enabled({"enabled": True, "blocks": '["cache_hint"]'}, "cache_hint") is True
+
+
 
 def test_format_default_includes_budget_and_clock_not_git():
     snapshot = collect_turn_status_snapshot(
