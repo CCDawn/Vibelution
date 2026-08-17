@@ -9,4 +9,13 @@
 @source "../../routes/TeamsRoute.styles.ts";
 @source "../../routes/Team*.tsx";
 @source "../../routes/Team*.styles.ts";
-@source "../../routes/teams/challenge-cup/ChallengeQuestionDetailPanel.styles.ts";
+/*
+ * Whole teams/ submodule tree (research-workflow / source-collection /
+ * challenge-cup / research-projects). Without this glob, classes that exist
+ * only in those files are never generated — the route renders with missing
+ * borders, grid columns and sizing. Test files are excluded so a class name
+ * quoted only in a test cannot mask a missing production source.
+ * Guarded by teamsTailwindSource.contract.test.ts.
+ */
+@source "../../routes/teams/**/*.{ts,tsx}";
+@source not "../../routes/teams/**/*.test.{ts,tsx}";
