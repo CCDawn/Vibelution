@@ -269,7 +269,13 @@ type Copy = {
   noIssues: string;
   noRuntimeMemory: string;
   managedMemory: string;
+  managedMemoryHint: string;
   disabledOrOverridden: string;
+  disabledOrOverriddenHint: string;
+  sectionCountHint: string;
+  itemCountHint: string;
+  agentVisibleHint: string;
+  runtimeInjectedHint: string;
   effectiveByChannel: string;
   manageAllMemory: string;
   manageConfigPanel: string;
@@ -646,8 +652,8 @@ const COPY: Record<"zh" | "en", Copy> = {
     refreshFailed: "记忆概览刷新失败",
     sections: "来源分区",
     items: "记忆条目",
-    agentVisible: "agent 可感知",
-    runtimeInjected: "运行时注入",
+    agentVisible: "能读到",
+    runtimeInjected: "正在用",
     sourcePath: "路径",
     sourceApi: "接口",
     visibility: "可见性",
@@ -662,16 +668,16 @@ const COPY: Record<"zh" | "en", Copy> = {
     noMatches: "无匹配记忆",
     yes: "是",
     no: "否",
-    inPrompt: "进 prompt",
-    notInPrompt: "不默认注入",
-    canUse: "可使用",
-    manualOnly: "显式读取",
-    missing: "缺失",
-    truncated: "已截断",
+    inPrompt: "会自动用上",
+    notInPrompt: "不会自动用",
+    canUse: "能读到",
+    manualOnly: "要手动去读",
+    missing: "找不到了",
+    truncated: "只显示开头",
     warnings: "诊断提醒",
     generatedAt: "生成时间",
-    sectionCount: "分区",
-    itemCount: "条目",
+    sectionCount: "来源",
+    itemCount: "记忆",
     perceptionMatrix: "感知矩阵",
     whereMemoryWorks: "记忆在哪里起作用",
     matrixItems: "条目",
@@ -688,10 +694,10 @@ const COPY: Record<"zh" | "en", Copy> = {
     explicitReadMemoryHint: "工具、页面或日志读取后才进入 agent 视野。",
     filters: "快速筛选",
     filterAll: "全部",
-    filterPrompt: "进入 prompt",
-    filterVisible: "agent 可感知",
-    filterManual: "显式读取",
-    filterMissing: "缺失/截断",
+    filterPrompt: "会自动用上",
+    filterVisible: "能读到",
+    filterManual: "要手动去读",
+    filterMissing: "找不到/只显示开头",
     manageFilters: "配置任务",
     manageFilterAll: "全部",
     manageFilterPrompt: "进 prompt",
@@ -738,7 +744,7 @@ const COPY: Record<"zh" | "en", Copy> = {
     manageView: "来源管理",
     sourcesView: "来源审计",
     knowledgeView: "团队知识库",
-    overviewSubtitle: "先看记忆健康、运行影响和需要检查的内容；复杂证据放到子页里。",
+    overviewSubtitle: "先看 Agent 正在用哪些记忆，再处理需要你确认的条目。",
     effectiveSubtitle: "按对话、自进化、监督进化和显式读取说明哪些记忆会被 agent 感知。",
     agentMemorySubtitle: "逐个查看 Agent 私有 workspace 记忆文件与正式私有知识库，点击文件读取内容。",
     manageSubtitle: "集中管理可覆盖、可禁用和用户手动新增的来源，不代表单个 Agent 的私有记忆。",
@@ -755,13 +761,19 @@ const COPY: Record<"zh" | "en", Copy> = {
     agentMemoryNoFileSelected: "选择一个私有记忆文件查看内容",
     agentMemorySelectPrompt: "选择一个 Agent 查看私有记忆",
     agentMemoryFormalBases: "正式知识库",
-    healthOverview: "记忆健康概览",
-    affectedRuntimeMemory: "会影响运行的记忆",
-    needsReview: "需要检查",
-    noIssues: "无待检查",
-    noRuntimeMemory: "无运行记忆",
-    managedMemory: "用户管理状态",
-    disabledOrOverridden: "已禁用/覆盖",
+    healthOverview: "现在的记忆",
+    affectedRuntimeMemory: "Agent 正在用",
+    needsReview: "需要你处理",
+    noIssues: "没有需要你处理的记忆",
+    noRuntimeMemory: "现在没有自动使用的记忆",
+    managedMemory: "你改过",
+    managedMemoryHint: "你手动加过、改过或关过的条数。",
+    disabledOrOverridden: "已关闭",
+    disabledOrOverriddenHint: "你关掉或覆盖后不再使用的条数。",
+    sectionCountHint: "记忆分别来自多少个目录或文件。",
+    itemCountHint: "当前一共有多少条记忆。",
+    agentVisibleHint: "Agent 可以看到这些内容。",
+    runtimeInjectedHint: "对话或任务里会自动用上。",
     effectiveByChannel: "按作用位置查看",
     manageAllMemory: "全部可管理记忆",
     manageConfigPanel: "配置面板",
@@ -770,34 +782,34 @@ const COPY: Record<"zh" | "en", Copy> = {
     selectedMemory: "选中记忆",
     selectedKnowledgeDetail: "选中知识 / 证据",
     sourceAudit: "来源审计",
-    reviewQueue: "优先检查队列",
-    reviewQueueHint: "按风险和运行影响排序，先看会改变 agent 行为或证据不完整的记忆。",
-    projectMemoryQueue: "项目记忆合并队列",
-    projectMemoryQueueHint: "并行会话只提交提案；这里记录人工确认后的处理结果，避免直接改写共享项目记忆。",
-    projectMemoryQueuePendingOnly: "仅待处理",
-    projectMemoryQueueAll: "全部记录",
+    reviewQueue: "先看这些",
+    reviewQueueHint: "内容不完整、文件找不到，或被你关掉的记忆。",
+    projectMemoryQueue: "项目记忆更新",
+    projectMemoryQueueHint: "Agent 想改共享项目记忆时，会先放在这里等你确认。",
+    projectMemoryQueuePendingOnly: "待确认",
+    projectMemoryQueueAll: "全部",
     projectMemoryQueueAgent: "Agent",
-    projectMemoryQueueLane: "记忆车道",
+    projectMemoryQueueLane: "来源分线",
     projectMemoryQueueFiles: "相关文件",
     projectMemoryQueueCreated: "提交",
     projectMemoryQueueResolved: "处理",
     projectMemoryQueueResolutionNote: "处理说明",
-    projectMemoryQueueEmptyPending: "无待处理提案",
-    projectMemoryQueueEmptyAll: "无提案记录",
+    projectMemoryQueueEmptyPending: "没有需要你确认的更新",
+    projectMemoryQueueEmptyAll: "没有更新记录",
     projectMemoryQueueApply: "标记已合入",
     projectMemoryQueueReject: "拒绝",
     projectMemoryQueueConflict: "标记冲突",
     projectMemoryQueueSupersede: "标记被替代",
     reviewReason: "检查原因",
-    auditMemory: "去审计",
-    manageMemoryAction: "去管理",
-    reasonDisabled: "已被用户禁用",
-    reasonOverridden: "已被用户覆盖",
-    reasonMissing: "来源缺失",
-    reasonTruncated: "内容已截断",
-    reasonInPrompt: "会进入 prompt",
-    reasonAgentVisible: "agent 可感知",
-    reasonUserManaged: "用户手动记忆",
+    auditMemory: "看来源",
+    manageMemoryAction: "去处理",
+    reasonDisabled: "你已关掉",
+    reasonOverridden: "你已改过",
+    reasonMissing: "文件找不到了",
+    reasonTruncated: "只显示了开头",
+    reasonInPrompt: "会自动用上",
+    reasonAgentVisible: "能读到",
+    reasonUserManaged: "你加的",
     selectMemory: "选择记忆",
     selectedCount: "已选择",
     selectAllVisible: "选择可见项",
@@ -811,7 +823,7 @@ const COPY: Record<"zh" | "en", Copy> = {
     noDraftChanges: "还没有修改。",
     teamKnowledge: "团队知识",
     knowledgeBases: "知识库",
-    pendingProposals: "待审提案",
+    pendingProposals: "待你确认",
     sourceArtifacts: "来源登记",
     formalKnowledge: "正式知识",
     sourceGovernance: "来源治理",
@@ -1034,8 +1046,8 @@ const COPY: Record<"zh" | "en", Copy> = {
     refreshFailed: "Memory overview refresh failed",
     sections: "Sources",
     items: "Memory Items",
-    agentVisible: "agent visible",
-    runtimeInjected: "runtime injected",
+    agentVisible: "Readable",
+    runtimeInjected: "In use",
     sourcePath: "Path",
     sourceApi: "API",
     visibility: "Visibility",
@@ -1050,16 +1062,16 @@ const COPY: Record<"zh" | "en", Copy> = {
     noMatches: "No matches",
     yes: "Yes",
     no: "No",
-    inPrompt: "In prompt",
-    notInPrompt: "Not injected",
-    canUse: "Usable",
-    manualOnly: "Explicit read",
-    missing: "Missing",
-    truncated: "Truncated",
+    inPrompt: "Used automatically",
+    notInPrompt: "Not used automatically",
+    canUse: "Readable",
+    manualOnly: "Read when asked",
+    missing: "File missing",
+    truncated: "Only the start is shown",
     warnings: "Warnings",
     generatedAt: "Generated",
-    sectionCount: "Sections",
-    itemCount: "Items",
+    sectionCount: "Sources",
+    itemCount: "Memories",
     perceptionMatrix: "Perception matrix",
     whereMemoryWorks: "Where memory takes effect",
     matrixItems: "items",
@@ -1076,10 +1088,10 @@ const COPY: Record<"zh" | "en", Copy> = {
     explicitReadMemoryHint: "Visible only after a tool, page, or log read.",
     filters: "Quick filters",
     filterAll: "All",
-    filterPrompt: "In prompt",
-    filterVisible: "Agent visible",
-    filterManual: "Explicit read",
-    filterMissing: "Missing/truncated",
+    filterPrompt: "Used automatically",
+    filterVisible: "Readable",
+    filterManual: "Read when asked",
+    filterMissing: "Missing / truncated",
     manageFilters: "Config tasks",
     manageFilterAll: "All",
     manageFilterPrompt: "In prompt",
@@ -1126,7 +1138,7 @@ const COPY: Record<"zh" | "en", Copy> = {
     manageView: "Source management",
     sourcesView: "Source audit",
     knowledgeView: "Team knowledge",
-    overviewSubtitle: "Start with memory health, runtime impact, and items that need review. Detailed evidence stays in subpages.",
+    overviewSubtitle: "See which memories the Agent is using, then handle anything that needs your confirmation.",
     effectiveSubtitle: "Shows how conversation, self-evolution, supervised evolution, and explicit-read memory can be perceived.",
     agentMemorySubtitle: "Inspect each Agent private workspace memory file and formal private knowledge base, then open files to read their content.",
     manageSubtitle: "Manage overridable, disable-able, and user-created source records. This is not a single Agent private memory view.",
@@ -1143,13 +1155,19 @@ const COPY: Record<"zh" | "en", Copy> = {
     agentMemoryNoFileSelected: "Select a private memory file to inspect its content",
     agentMemorySelectPrompt: "Select an Agent to inspect private memory",
     agentMemoryFormalBases: "Formal knowledge bases",
-    healthOverview: "Memory health",
-    affectedRuntimeMemory: "Runtime-affecting memory",
-    needsReview: "Needs review",
-    noIssues: "No review items",
-    noRuntimeMemory: "No runtime memory",
-    managedMemory: "User-managed state",
-    disabledOrOverridden: "Disabled/overridden",
+    healthOverview: "Current memory",
+    affectedRuntimeMemory: "In use by Agent",
+    needsReview: "Needs your attention",
+    noIssues: "Nothing needs your attention",
+    noRuntimeMemory: "Nothing is used automatically right now",
+    managedMemory: "You changed",
+    managedMemoryHint: "How many items you added, edited, or turned off.",
+    disabledOrOverridden: "Turned off",
+    disabledOrOverriddenHint: "Items you turned off or replaced so they are no longer used.",
+    sectionCountHint: "How many directories or files these memories come from.",
+    itemCountHint: "How many memory items exist right now.",
+    agentVisibleHint: "The Agent can see this content.",
+    runtimeInjectedHint: "Used automatically in chats or tasks.",
     effectiveByChannel: "By effective scope",
     manageAllMemory: "All manageable memory",
     manageConfigPanel: "Configuration panel",
@@ -1158,34 +1176,34 @@ const COPY: Record<"zh" | "en", Copy> = {
     selectedMemory: "Selected memory",
     selectedKnowledgeDetail: "Selected knowledge / evidence",
     sourceAudit: "Source audit",
-    reviewQueue: "Priority review queue",
-    reviewQueueHint: "Sorted by risk and runtime impact so behavior-changing or incomplete evidence appears first.",
-    projectMemoryQueue: "Project memory merge queue",
-    projectMemoryQueueHint: "Parallel sessions submit proposals only; this queue records human-confirmed outcomes so shared project memory is not overwritten directly.",
-    projectMemoryQueuePendingOnly: "Pending only",
-    projectMemoryQueueAll: "All records",
+    reviewQueue: "Look here first",
+    reviewQueueHint: "Incomplete content, missing files, or memories you turned off.",
+    projectMemoryQueue: "Project memory updates",
+    projectMemoryQueueHint: "When an Agent wants to change shared project memory, it waits here for you to confirm.",
+    projectMemoryQueuePendingOnly: "Needs confirmation",
+    projectMemoryQueueAll: "All",
     projectMemoryQueueAgent: "Agent",
-    projectMemoryQueueLane: "Lane",
+    projectMemoryQueueLane: "Source line",
     projectMemoryQueueFiles: "Files",
     projectMemoryQueueCreated: "Created",
     projectMemoryQueueResolved: "Resolved",
     projectMemoryQueueResolutionNote: "Resolution note",
-    projectMemoryQueueEmptyPending: "No pending proposals",
-    projectMemoryQueueEmptyAll: "No proposal records",
+    projectMemoryQueueEmptyPending: "Nothing waiting for your confirmation",
+    projectMemoryQueueEmptyAll: "No update records",
     projectMemoryQueueApply: "Mark applied",
     projectMemoryQueueReject: "Reject",
     projectMemoryQueueConflict: "Mark conflict",
     projectMemoryQueueSupersede: "Supersede",
     reviewReason: "Review reason",
-    auditMemory: "Audit",
-    manageMemoryAction: "Manage",
-    reasonDisabled: "Disabled by user",
-    reasonOverridden: "Overridden by user",
-    reasonMissing: "Source missing",
-    reasonTruncated: "Content truncated",
-    reasonInPrompt: "Injected into prompt",
-    reasonAgentVisible: "Agent-visible",
-    reasonUserManaged: "User-managed memory",
+    auditMemory: "View source",
+    manageMemoryAction: "Handle",
+    reasonDisabled: "You turned this off",
+    reasonOverridden: "You replaced this",
+    reasonMissing: "File is missing",
+    reasonTruncated: "Only the start is shown",
+    reasonInPrompt: "Used automatically",
+    reasonAgentVisible: "Readable",
+    reasonUserManaged: "You added this",
     selectMemory: "Select memory",
     selectedCount: "Selected",
     selectAllVisible: "Select visible",
@@ -1199,7 +1217,7 @@ const COPY: Record<"zh" | "en", Copy> = {
     noDraftChanges: "No changes yet.",
     teamKnowledge: "Team knowledge",
     knowledgeBases: "Knowledge bases",
-    pendingProposals: "Pending proposals",
+    pendingProposals: "waiting for you",
     sourceArtifacts: "Source artifacts",
     formalKnowledge: "Formal knowledge",
     sourceGovernance: "Source governance",
@@ -2008,14 +2026,6 @@ function reviewReasonLabels(copy: Copy, item: MemoryItem) {
   if (item.contentTruncated) {
     reasons.push(copy.reasonTruncated);
   }
-  if (item.inPrompt) {
-    reasons.push(copy.reasonInPrompt);
-  } else if (item.agentVisible) {
-    reasons.push(copy.reasonAgentVisible);
-  }
-  if (item.managedState?.userManaged) {
-    reasons.push(copy.reasonUserManaged);
-  }
   return reasons;
 }
 
@@ -2637,21 +2647,6 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
         .sort((left, right) => memoryPairPriority(left) - memoryPairPriority(right))
         .slice(0, 10),
     [allPairs, copy],
-  );
-  const reviewPairs = useMemo(
-    () =>
-      allPairs
-        .filter(
-          ({ item }) =>
-            item.managedState?.disabled
-            || item.managedState?.overridden
-            || item.managedState?.userManaged
-            || !item.exists
-            || item.contentTruncated,
-        )
-        .sort((left, right) => memoryPairPriority(left) - memoryPairPriority(right))
-        .slice(0, 8),
-    [allPairs],
   );
   const manageablePairs = useMemo(
     () => allPairs.filter(({ item }) => itemIsManageable(item)),
@@ -4057,12 +4052,10 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               disabledOrOverriddenCount={disabledOrOverriddenCount}
               priorityReviewCount={priorityReviewPairs.length}
               runtimeMemoryCount={runtimePairs.length}
-              reviewMemoryCount={reviewPairs.length}
               warningStrip={createWarningStrip()}
               reviewQueue={reviewQueuePanel}
               projectMemoryQueue={projectMemoryQueuePanel}
               runtimeMemoryList={renderMemoryList(runtimePairs, copy.noRuntimeMemory, true, false, true)}
-              reviewMemoryList={renderMemoryList(reviewPairs, copy.noIssues, true, false, true)}
             />
           )
           : (
