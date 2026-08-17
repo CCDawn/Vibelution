@@ -44,6 +44,15 @@ def _project(tmp_path: Path, monkeypatch) -> tuple[Path, Path, Path]:
     return project, projects_home, data_home
 
 
+def _sqlite_quarantine_dirs(parent: Path) -> list[Path]:
+    return [
+        path
+        for path in parent.iterdir()
+        if path.is_dir()
+        and path.name.startswith(storage_migration_module._SQLITE_QUARANTINE_DIR_PREFIX)
+    ]
+
+
 def test_sqlite_readiness_does_not_create_source_sidecars(tmp_path, monkeypatch):
     project, _projects_home, data_home = _project(tmp_path, monkeypatch)
     database = data_home / "workspace" / "state.sqlite"
@@ -990,6 +999,182 @@ def test_sqlite_promote_cleanup_skips_concurrently_replaced_members(tmp_path, mo
     assert storage_migration_module._io_path(destination_wal).read_bytes() == b"concurrent-wal"
     assert not storage_migration_state_path(target).exists()
     connection.close()
+
+
+def test_rollback_linked_promotion_preserves_concurrent_final_replacement(tmp_path):
+    staged = tmp_path / "staged.sqlite"
+    final = tmp_path / "final.sqlite"
+    staged.write_bytes(b"promoted-content")
+    os.link(staged, final)
+    final.unlink()
+    final.write_bytes(b"replacement-bytes")
+
+    storage_migration_module._rollback_linked_promotion(
+        storage_migration_module._io_path(staged),
+        storage_migration_module._io_path(final),
+    )
+
+    assert final.read_bytes() == b"replacement-bytes"
+
+
+def test_rollback_linked_promotion_removes_attempt_linked_final(tmp_path):
+    staged = tmp_path / "staged.sqlite"
+    final = tmp_path / "final.sqlite"
+    staged.write_bytes(b"promoted-content")
+    os.link(staged, final)
+
+    storage_migration_module._rollback_linked_promotion(
+        storage_migration_module._io_path(staged),
+        storage_migration_module._io_path(final),
+    )
+
+    assert not final.exists()
+    assert staged.exists()
+
+
+def test_rollback_linked_promotion_preserves_replacement_at_delete_boundary(
+    tmp_path, monkeypatch
+):
+    staged = tmp_path / "staged.sqlite"
+    final = tmp_path / "final.sqlite"
+    staged.write_bytes(b"promoted-content")
+    os.link(staged, final)
+    original_unlink = Path.unlink
+    injected = {"done": False}
+
+    def unlink_inject_replacement(self, missing_ok=False):
+        if (
+            not injected["done"]
+            and self.name == storage_migration_module._SQLITE_QUARANTINE_MEMBER_NAME
+        ):
+            injected["done"] = True
+            final.write_bytes(b"replacement-at-boundary")
+        return original_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", unlink_inject_replacement)
+
+    storage_migration_module._rollback_linked_promotion(
+        storage_migration_module._io_path(staged),
+        storage_migration_module._io_path(final),
+    )
+
+    assert final.read_bytes() == b"replacement-at-boundary"
+    assert staged.read_bytes() == b"promoted-content"
+    assert _sqlite_quarantine_dirs(tmp_path) == []
+
+
+def test_restore_claimed_sqlite_member_preserves_concurrent_destination_at_restore_boundary(
+    tmp_path, monkeypatch
+):
+    member_path = tmp_path / "state.sqlite"
+    quarantine = tmp_path / ".vibelution-storage-migration-cleanup-test-claim"
+    quarantine.write_bytes(b"quarantined-foreign")
+    original_link = os.link
+
+    def link_inject_destination(src, dst):
+        dst_path = Path(dst)
+        if dst_path.name == member_path.name:
+            member_path.write_bytes(b"concurrent-destination")
+        return original_link(src, dst)
+
+    monkeypatch.setattr(os, "link", link_inject_destination)
+
+    storage_migration_module._restore_claimed_sqlite_member(
+        storage_migration_module._io_path(member_path),
+        storage_migration_module._io_path(quarantine),
+    )
+
+    assert member_path.read_bytes() == b"concurrent-destination"
+    assert quarantine.read_bytes() == b"quarantined-foreign"
+
+
+def test_cleanup_attempt_sqlite_members_preserves_replacement_at_delete_boundary(
+    tmp_path, monkeypatch
+):
+    member_path = tmp_path / "state.sqlite"
+    member_path.write_bytes(b"attempt-bytes")
+    stat = member_path.stat()
+    sha256 = storage_migration_module._sha256_file(member_path)
+    member = storage_migration_module._PromotedSqliteMember(
+        path=str(member_path.resolve()),
+        device=int(stat.st_dev),
+        inode=int(stat.st_ino),
+        size=int(stat.st_size),
+        sha256=sha256,
+    )
+    original_replace = os.replace
+
+    def replace_then_inject_replacement(src, dst):
+        original_replace(src, dst)
+        if Path(str(src)) == storage_migration_module._io_path(member_path):
+            member_path.write_bytes(b"replacement-at-boundary")
+
+    monkeypatch.setattr(os, "replace", replace_then_inject_replacement)
+
+    storage_migration_module._cleanup_attempt_sqlite_members([member])
+
+    assert member_path.read_bytes() == b"replacement-at-boundary"
+    assert _sqlite_quarantine_dirs(tmp_path) == []
+
+
+def test_cleanup_foreign_quarantine_is_under_member_parent_and_remains_recoverable(
+    tmp_path, monkeypatch
+):
+    member_dir = tmp_path / "workspace"
+    member_dir.mkdir()
+    member_path = member_dir / "state.sqlite"
+    member_path.write_bytes(b"foreign-on-disk")
+    attempt_source = member_dir / "attempt-source.sqlite"
+    attempt_source.write_bytes(b"attempt-bytes")
+    attempt_stat = attempt_source.stat()
+    member = storage_migration_module._PromotedSqliteMember(
+        path=str(member_path.resolve()),
+        device=int(attempt_stat.st_dev),
+        inode=int(attempt_stat.st_ino),
+        size=int(attempt_stat.st_size),
+        sha256=storage_migration_module._sha256_file(attempt_source),
+    )
+    original_link = os.link
+    target_dst = storage_migration_module._io_path(member_path)
+
+    def link_inject_concurrent_destination(src, dst):
+        if Path(str(dst)) == target_dst:
+            member_path.write_bytes(b"concurrent-destination")
+        return original_link(src, dst)
+
+    monkeypatch.setattr(os, "link", link_inject_concurrent_destination)
+
+    storage_migration_module._cleanup_attempt_sqlite_members([member])
+
+    assert member_path.read_bytes() == b"concurrent-destination"
+    assert _sqlite_quarantine_dirs(tmp_path) == []
+    quarantine_dirs = _sqlite_quarantine_dirs(member_dir)
+    assert len(quarantine_dirs) == 1
+    assert (
+        quarantine_dirs[0]
+        / storage_migration_module._SQLITE_QUARANTINE_MEMBER_NAME
+    ).read_bytes() == b"foreign-on-disk"
+
+
+def test_cleanup_attempt_sqlite_members_removes_attempt_owned_members(tmp_path):
+    member_dir = tmp_path / "workspace"
+    member_dir.mkdir()
+    member_path = member_dir / "state.sqlite"
+    member_path.write_bytes(b"attempt-bytes")
+    stat = member_path.stat()
+    member = storage_migration_module._PromotedSqliteMember(
+        path=str(member_path.resolve()),
+        device=int(stat.st_dev),
+        inode=int(stat.st_ino),
+        size=int(stat.st_size),
+        sha256=storage_migration_module._sha256_file(member_path),
+    )
+
+    storage_migration_module._cleanup_attempt_sqlite_members([member])
+
+    assert not member_path.exists()
+    assert _sqlite_quarantine_dirs(member_dir) == []
+    assert _sqlite_quarantine_dirs(tmp_path) == []
 
 
 def test_rollback_delta_old_manifest_expected_uses_manifest_main_only(tmp_path, monkeypatch):
