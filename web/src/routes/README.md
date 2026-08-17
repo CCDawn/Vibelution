@@ -44,9 +44,6 @@
 | 文件 | 说明 |
 | --- | --- |
 | `HomeRedirect.tsx` | `/` → 默认 workbench |
-| `LegacyEvolutionRedirect.tsx` | `/evolution` → 新 evolution 路径 |
-| `LegacyTeamsRedirect.tsx` | `/agents/teams` → `/teams` |
-| `LegacyMemoryRedirect.tsx` | `/agents/memory/*` → `/memory/*` |
 | `WorkbenchDomainRoute.tsx` · `WorkbenchModeRoute.tsx` | Chat / evolution mode 包装 |
 
 ## 禁止

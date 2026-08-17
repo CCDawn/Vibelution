@@ -750,8 +750,8 @@ describe("MemoryRoute layout contract", () => {
     expect(graphCanvasStyles.graphNodeBadge).toContain("data-[node-type=knowledge_base]");
     expect(routerSource).toContain('path: "memory/graph"');
     expect(routerSource).toContain('<MemoryRoute forcedView="graph" />');
-    expect(routerSource).toContain('path: "agents/memory/graph"');
-    expect(routerSource).toContain('<LegacyMemoryRedirect to="/memory/graph" />');
+    expect(routerSource).not.toContain('path: "agents/memory/graph"');
+    expect(routerSource).not.toContain("LegacyMemoryRedirect");
   });
 
   it("wires the hard-delete memory cleanup console behind preview and confirmation APIs", () => {
@@ -809,8 +809,7 @@ describe("MemoryRoute layout contract", () => {
     expect(cleanupPanelStyles.cleanupPathList).toContain("[&_span]:truncate");
     expect(routerSource).toContain('path: "memory/cleanup"');
     expect(routerSource).toContain('<MemoryRoute forcedView="cleanup" />');
-    expect(routerSource).toContain('path: "agents/memory/cleanup"');
-    expect(routerSource).toContain('<LegacyMemoryRedirect to="/memory/cleanup" />');
+    expect(routerSource).not.toContain('path: "agents/memory/cleanup"');
   });
 
   it("wires the team knowledge platform to a dashboard snapshot plus scoped action APIs", () => {
@@ -1403,20 +1402,8 @@ describe("MemoryRoute layout contract", () => {
     expect(routerSource).toContain('<MemoryRoute forcedView="knowledge" />');
     expect(routerSource).toContain('path: "memory/cleanup"');
     expect(routerSource).toContain('<MemoryRoute forcedView="cleanup" />');
-    expect(routerSource).toContain('path: "agents/memory"');
-    expect(routerSource).toContain('<LegacyMemoryRedirect to="/memory" />');
-    expect(routerSource).toContain('path: "agents/memory/effective"');
-    expect(routerSource).toContain('<LegacyMemoryRedirect to="/memory/effective" />');
-    expect(routerSource).toContain('path: "agents/memory/agents"');
-    expect(routerSource).toContain('<LegacyMemoryRedirect to="/memory/agents" />');
-    expect(routerSource).toContain('path: "agents/memory/manage"');
-    expect(routerSource).toContain('<LegacyMemoryRedirect to="/memory/manage" />');
-    expect(routerSource).toContain('path: "agents/memory/sources"');
-    expect(routerSource).toContain('<LegacyMemoryRedirect to="/memory/sources" />');
-    expect(routerSource).toContain('path: "agents/memory/knowledge"');
-    expect(routerSource).toContain('<LegacyMemoryRedirect to="/memory/knowledge" />');
-    expect(routerSource).toContain('path: "agents/memory/cleanup"');
-    expect(routerSource).toContain('<LegacyMemoryRedirect to="/memory/cleanup" />');
+    expect(routerSource).not.toContain('path: "agents/memory"');
+    expect(routerSource).not.toContain("LegacyMemoryRedirect");
     expect(routeSource).toContain('{ key: "overview", href: "/memory" }');
     expect(routeSource).toContain("auditHref: `/memory/sources?section=");
     expect(routeSource).toContain("manageHref: memoryPairActionTarget(pair) === \"manage\" ? `/memory/manage?section=");

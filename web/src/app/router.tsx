@@ -5,11 +5,7 @@ import { AppShell } from "./AppShell";
 import { LauncherShell } from "./LauncherShell";
 import { RouteLoadingShell, type RouteLoadingLayout } from "./RouteLoadingShell";
 import { RouteErrorBoundary, type RouteErrorSurface } from "./RouteErrorBoundary";
-import { LegacyChatRoomsRedirect } from "../routes/LegacyChatRoomsRedirect";
-import { LegacyTeamsRedirect } from "../routes/LegacyTeamsRedirect";
-import { LegacyMemoryRedirect } from "../routes/LegacyMemoryRedirect";
 import { HomeRedirect } from "../routes/HomeRedirect";
-import { LegacyEvolutionRedirect } from "../routes/LegacyEvolutionRedirect";
 import { WorkbenchDomainRoute } from "../routes/WorkbenchDomainRoute";
 import { WorkbenchModeRoute } from "../routes/WorkbenchModeRoute";
 import { postBrowserTelemetry } from "./browserTelemetry";
@@ -134,10 +130,6 @@ export const router = createBrowserRouter([
         ),
       },
       {
-        path: "chat-rooms",
-        element: <LegacyChatRoomsRedirect />,
-      },
-      {
         path: "supervised-evolution",
         ...guardedLazyElement(
           <WorkbenchModeRoute mode="supervised_evolution">
@@ -177,20 +169,10 @@ export const router = createBrowserRouter([
           </WorkbenchModeRoute>,
         ),
       },
-      { path: "evolution", element: <LegacyEvolutionRedirect /> },
       { path: "agents", ...guardedLazyElement(<AgentsRoute />) },
-      { path: "agents/teams", element: <LegacyTeamsRedirect /> },
       { path: "agents/prompts", ...guardedLazyElement(<PromptTemplatesRoute />) },
       { path: "agents/tools", ...guardedLazyElement(<ToolsRoute />) },
       { path: "agents/skills", ...guardedLazyElement(<SkillsRoute />) },
-      { path: "agents/memory", element: <LegacyMemoryRedirect to="/memory" /> },
-      { path: "agents/memory/effective", element: <LegacyMemoryRedirect to="/memory/effective" /> },
-      { path: "agents/memory/agents", element: <LegacyMemoryRedirect to="/memory/agents" /> },
-      { path: "agents/memory/manage", element: <LegacyMemoryRedirect to="/memory/manage" /> },
-      { path: "agents/memory/sources", element: <LegacyMemoryRedirect to="/memory/sources" /> },
-      { path: "agents/memory/knowledge", element: <LegacyMemoryRedirect to="/memory/knowledge" /> },
-      { path: "agents/memory/graph", element: <LegacyMemoryRedirect to="/memory/graph" /> },
-      { path: "agents/memory/cleanup", element: <LegacyMemoryRedirect to="/memory/cleanup" /> },
       { path: "memory", ...guardedLazyElement(<MemoryRoute forcedView="overview" />) },
       { path: "memory/effective", ...guardedLazyElement(<MemoryRoute forcedView="effective" />) },
       { path: "memory/agents", ...guardedLazyElement(<MemoryRoute forcedView="agents" />) },

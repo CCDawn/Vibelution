@@ -8,7 +8,7 @@ import teamKnowledgeApiSource from "../api/teamKnowledge.ts?raw";
 import teamExperimentApiSource from "../api/teamExperiment.ts?raw";
 import teamResearchOpsApiSource from "../api/teamResearchOps.ts?raw";
 import researchLoopApiSource from "../api/researchLoop.ts?raw";
-import { resolveLegacyTeamsRedirect } from "./LegacyTeamsRedirect";
+import { teamWorkspaceRoute } from "./teams/researchWorkspaceModel";
 import canvasDataSource from "./TeamsRoute.canvasData.ts?raw";
 import routeSourceRawThin from "./teams/useTeamsWorkbenchModel.tsx?raw";
 import routeSourceRawFoundation from "./teams/useTeamsWorkbenchFoundation.tsx?raw";
@@ -484,10 +484,10 @@ describe("TeamsRoute layout contract", () => {
   it("is mounted as the top-level Team workspace without retired research routes", () => {
     expect(routerSource).toContain('path: "teams"');
     expect(routerSource).toContain('guardedLazyElement(<TeamsRoute />, "workbench", "teams")');
-    expect(routerSource).toContain('path: "agents/teams"');
+    expect(routerSource).not.toContain('path: "agents/teams"');
     expect(routerSource).not.toContain('path: "research"');
     expect(routerSource).not.toContain('path: "research/flow-canvas"');
-    expect(routerSource).toContain("<LegacyTeamsRedirect />");
+    expect(routerSource).not.toContain("LegacyTeamsRedirect");
     expect(routeSource).not.toContain("AgentManagementNav");
     expect(routeSource).toContain("团队工作台");
     expect(routeSource).toContain("Team workbench");
@@ -508,12 +508,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain('title={lang === "zh" ? "到 AgentDirectory 源配置修改"');
   });
 
-  it("preserves selected Team deep links with canonical teamId", () => {
-    expect(resolveLegacyTeamsRedirect("")).toBe("/teams");
-    expect(resolveLegacyTeamsRedirect("?teamId=research-core")).toBe(
+  it("keeps selected Team deep links on canonical /teams teamId routes", () => {
+    expect(teamWorkspaceRoute("research-core")).toBe(
       "/teams?teamId=research-core&researchView=workflow&workflowId=challenge-cup-research",
     );
-    expect(resolveLegacyTeamsRedirect("?team=research-core")).toBe("/teams");
   });
 
   it("uses Team APIs and Agent Center as the binding source", () => {
