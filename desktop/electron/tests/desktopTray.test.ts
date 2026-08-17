@@ -78,7 +78,6 @@ function createActions() {
     startInstance: vi.fn(),
     stopInstance: vi.fn(),
     restartLauncher: vi.fn(),
-    quit: vi.fn(),
     stopAll: vi.fn()
   };
 }
@@ -108,11 +107,10 @@ describe("Electron desktop tray", () => {
       openLauncher: "打开 Launcher 控制窗口",
       startProject: "启动工作区…",
       stopProject: "停止工作区…",
-      restartLauncher: "重启 Launcher 桌面程序",
+      restartLauncher: "全部停止并启动最新 Launcher",
       freshnessUnknown: "Launcher 代码版本：未知",
       freshnessLoading: "正在读取 Launcher 代码版本…",
-      quit: "退出桌面程序（不强停任务）",
-      stopAll: "停止全部托管进程并退出…",
+      stopAll: "退出壳并停止全部任务",
       noStartable: "没有可启动的工作区",
       noRunning: "没有正在运行的工作区",
       listFailed: "无法读取工作区列表",
@@ -127,13 +125,12 @@ describe("Electron desktop tray", () => {
     expect(topLabels(menuTemplates[0])).toEqual([
       DESKTOP_TRAY_MENU_LABELS.openLauncher,
       DESKTOP_TRAY_MENU_LABELS.freshnessLoading,
-      DESKTOP_TRAY_MENU_LABELS.restartLauncher,
       "separator",
       DESKTOP_TRAY_MENU_LABELS.startProject,
       DESKTOP_TRAY_MENU_LABELS.stopProject,
       "separator",
-      DESKTOP_TRAY_MENU_LABELS.quit,
-      DESKTOP_TRAY_MENU_LABELS.stopAll
+      DESKTOP_TRAY_MENU_LABELS.stopAll,
+      DESKTOP_TRAY_MENU_LABELS.restartLauncher
     ]);
 
     await vi.waitFor(() => {
@@ -145,28 +142,24 @@ describe("Electron desktop tray", () => {
     });
 
     const refreshed = menuTemplates[menuTemplates.length - 1];
-    expect(topLabels(refreshed).slice(1, 3)).toEqual([
-      "Launcher 落后本地 main · aaa111 → bbb222",
-      DESKTOP_TRAY_MENU_LABELS.restartLauncher
-    ]);
-    const startMenu = refreshed[4]?.submenu as Array<Record<string, unknown>>;
-    const stopMenu = refreshed[5]?.submenu as Array<Record<string, unknown>>;
+    expect(refreshed[1]?.label).toBe("Launcher 落后本地 main · aaa111 → bbb222");
+    expect(refreshed[1]?.enabled).toBe(false);
+    const startMenu = refreshed[3]?.submenu as Array<Record<string, unknown>>;
+    const stopMenu = refreshed[4]?.submenu as Array<Record<string, unknown>>;
     expect(startMenu.map((item) => item.label)).toEqual(["启动「task」工作区"]);
     expect(stopMenu.map((item) => item.label)).toEqual(["停止「主」工作区"]);
 
     (startMenu[0].click as () => void)();
     (stopMenu[0].click as () => void)();
     (refreshed[0].click as () => void)();
-    (refreshed[2].click as () => void)();
+    (refreshed[6].click as () => void)();
     (refreshed[7].click as () => void)();
-    (refreshed[8].click as () => void)();
 
     expect(actions.startInstance).toHaveBeenCalledWith("worktree:task", "task");
     expect(actions.stopInstance).toHaveBeenCalledWith("main", "主");
     expect(actions.openLauncher).toHaveBeenCalledTimes(1);
-    expect(actions.restartLauncher).toHaveBeenCalledTimes(1);
-    expect(actions.quit).toHaveBeenCalledTimes(1);
     expect(actions.stopAll).toHaveBeenCalledTimes(1);
+    expect(actions.restartLauncher).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the last readable list and marks a fetch failure instead of an empty menu", async () => {
@@ -185,7 +178,7 @@ describe("Electron desktop tray", () => {
       expect(menuTemplates.length).toBeGreaterThan(1);
     });
     const firstLive = menuTemplates[menuTemplates.length - 1];
-    expect((firstLive[5]?.submenu as Array<Record<string, unknown>>).map((item) => item.label)).toEqual([
+    expect((firstLive[4]?.submenu as Array<Record<string, unknown>>).map((item) => item.label)).toEqual([
       "停止「main」工作区"
     ]);
 
@@ -196,7 +189,7 @@ describe("Electron desktop tray", () => {
     });
     const failed = menuTemplates[menuTemplates.length - 1];
     expect(failed[1]?.label).toBe("Launcher 已是最新 · abc123");
-    expect((failed[5]?.submenu as Array<Record<string, unknown>>).map((item) => item.label)).toEqual([
+    expect((failed[4]?.submenu as Array<Record<string, unknown>>).map((item) => item.label)).toEqual([
       "停止「main」工作区"
     ]);
   });

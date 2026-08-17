@@ -15,6 +15,12 @@ describe("Electron main tray integration", () => {
     expect(mainSource).toContain("exitAndRelaunchLauncherShell");
     expect(mainSource).toContain("runTrayLauncherPost");
     expect(mainSource).toContain("runTrayStopAll");
+    const trayStart = mainSource.indexOf("desktopTray = createDesktopTray(paths,");
+    const trayEnd = mainSource.indexOf("startPeriodicShellFreshnessWatch", trayStart);
+    const traySource = mainSource.slice(trayStart, trayEnd);
+    expect(traySource).toContain("stopAll:");
+    expect(traySource).not.toContain("quit:");
+    expect(traySource).not.toContain("requestDesktopShellExit");
     expect(mainSource).not.toContain("restartProject:");
     expect(mainSource).not.toContain("rebuildAndStart:");
     expect(mainSource).not.toContain("showStatus:");
@@ -31,6 +37,7 @@ describe("Electron main tray integration", () => {
     expect(quitSource).toContain("resolveQuitActiveWorkStatus");
     expect(quitSource).toContain("forceControlTokenRefresh");
     expect(quitSource).toContain("QUIT_ACTIVE_WORK_STATUS_TIMEOUT_MS");
+    expect(quitSource).toContain("退出壳并停止全部任务");
     expect(mainSource).toContain("const QUIT_ACTIVE_WORK_STATUS_TIMEOUT_MS = 20_000");
   });
 

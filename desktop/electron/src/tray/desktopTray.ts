@@ -20,7 +20,6 @@ export type DesktopTrayActions = {
   startInstance: (instanceId: string, label: string) => void;
   stopInstance: (instanceId: string, label: string) => void;
   restartLauncher: () => void;
-  quit: () => void;
   stopAll: () => void;
 };
 
@@ -28,11 +27,10 @@ export const DESKTOP_TRAY_MENU_LABELS = {
   openLauncher: "打开 Launcher 控制窗口",
   startProject: "启动工作区…",
   stopProject: "停止工作区…",
-  restartLauncher: "重启 Launcher 桌面程序",
+  restartLauncher: "全部停止并启动最新 Launcher",
   freshnessUnknown: "Launcher 代码版本：未知",
   freshnessLoading: "正在读取 Launcher 代码版本…",
-  quit: "退出桌面程序（不强停任务）",
-  stopAll: "停止全部托管进程并退出…",
+  stopAll: "退出壳并停止全部任务",
   noStartable: "没有可启动的工作区",
   noRunning: "没有正在运行的工作区",
   listFailed: "无法读取工作区列表",
@@ -65,7 +63,6 @@ export function buildDesktopTrayTemplate(
   return [
     { label: DESKTOP_TRAY_MENU_LABELS.openLauncher, click: actions.openLauncher },
     { label: freshness.label || DESKTOP_TRAY_MENU_LABELS.freshnessUnknown, enabled: false },
-    { label: DESKTOP_TRAY_MENU_LABELS.restartLauncher, click: actions.restartLauncher },
     { type: "separator" },
     {
       label: DESKTOP_TRAY_MENU_LABELS.startProject,
@@ -86,8 +83,8 @@ export function buildDesktopTrayTemplate(
         : [{ label: emptyStopLabel, enabled: false }]
     },
     { type: "separator" },
-    { label: DESKTOP_TRAY_MENU_LABELS.quit, click: actions.quit },
-    { label: DESKTOP_TRAY_MENU_LABELS.stopAll, click: actions.stopAll }
+    { label: DESKTOP_TRAY_MENU_LABELS.stopAll, click: actions.stopAll },
+    { label: DESKTOP_TRAY_MENU_LABELS.restartLauncher, click: actions.restartLauncher }
   ];
 }
 
