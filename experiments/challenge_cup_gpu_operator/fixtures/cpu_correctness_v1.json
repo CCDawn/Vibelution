@@ -1,0 +1,14 @@
+{
+  "fixtureId": "gpu-operator-cpu-correctness-v1",
+  "adapterId": "gpu_operator_benchmark",
+  "questionId": "SCI-091",
+  "themeId": "cc-gpu-operator-001",
+  "campaignId": "cc-campaign-gpu-operator-001",
+  "device": "cpu_fixture",
+  "performanceClaimed": false,
+  "families": [
+    "elementwise_fusion",
+    "reduction_softmax_or_layernorm",
+    "matmul_epilogue_fusion"
+  ]
+}

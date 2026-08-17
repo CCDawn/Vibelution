@@ -1,0 +1,14 @@
+{
+  "fixtureId": "neural-spike-dev-fixture-v1",
+  "adapterId": "neural_spike_coding",
+  "questionId": "SCI-096",
+  "themeId": "cc-neural-information-001",
+  "campaignId": "cc-campaign-neural-spike-001",
+  "scientificClaim": false,
+  "dandiDownloaded": false,
+  "hypothesisFamilies": [
+    "rate_coding",
+    "precise_temporal_coding",
+    "population_coding"
+  ]
+}

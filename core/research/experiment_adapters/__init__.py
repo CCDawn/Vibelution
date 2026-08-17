@@ -1,10 +1,9 @@
-"""Core ExperimentAdapter protocol, dispatcher and offline fake adapter (D06).
+"""Core ExperimentAdapter protocol, dispatcher and Challenge Cup DEV adapters.
 
 Unified lifecycle: ``prepare -> validate -> execute -> collect -> evaluate
--> emit_receipt``, bound to the immutable ``ResearchScopeEnvelope``, an explicit
-``ExperimentContract`` and a fail-closed ``ControlledLocator``.  The dispatcher
-is the only execution entry point; only the deterministic offline fake adapter
-is shipped in this batch.
+-> emit_receipt``.  The default dispatcher still ships only the offline fake
+adapter; ``challenge_cup_dispatcher()`` registers FashionMNIST, GPU operator
+and neural spike DEV fixtures without starting real experiments.
 """
 
 from .dispatcher import (
@@ -17,6 +16,10 @@ from .dispatcher import (
     idempotency_key,
     scan_for_executable_fields,
 )
+from .fashion_mnist import FashionMnistFixtureAdapter
+from .gpu_operator import GpuOperatorFixtureAdapter
+from .neural_spike import NeuralSpikeFixtureAdapter
+from .registry import challenge_cup_adapters, challenge_cup_dispatcher
 from .protocol import (
     ALLOWED_LOCATOR_KINDS,
     AdapterContractError,
@@ -48,6 +51,11 @@ __all__ = [
     "DEFAULT_MAX_LOG_BYTES",
     "DEFAULT_MAX_RECEIPT_ITEMS",
     "DispatcherError",
+    "FashionMnistFixtureAdapter",
+    "GpuOperatorFixtureAdapter",
+    "NeuralSpikeFixtureAdapter",
+    "challenge_cup_adapters",
+    "challenge_cup_dispatcher",
     "ExperimentAdapter",
     "ExperimentContract",
     "ExperimentDispatcher",
