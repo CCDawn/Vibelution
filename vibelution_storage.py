@@ -7,11 +7,13 @@ configuration or infrastructure graph.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 
@@ -24,6 +26,7 @@ PROJECT_MEMORY_MIGRATION_STATE_NAME = "project-memory-migration.json"
 _PROJECT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{2,63}$")
 _FNV32_OFFSET = 2166136261
 _FNV32_PRIME = 16777619
+_CONFIG_PATHS_MODULE: ModuleType | None = None
 
 
 class ProjectIdentityError(ValueError):
@@ -196,6 +199,27 @@ def storage_migration_complete(paths: ProjectStoragePaths) -> bool:
     )
 
 
+def _load_config_paths_stdlib() -> ModuleType:
+    """Load config/paths.py without executing config/__init__.py.
+
+    Launcher bootstrap on a fresh clone has no project venv yet. Importing the
+    ``config`` package pulls pydantic models and crashes before ``.venv`` can
+    be created.
+    """
+
+    global _CONFIG_PATHS_MODULE
+    if _CONFIG_PATHS_MODULE is not None:
+        return _CONFIG_PATHS_MODULE
+    paths_file = Path(__file__).resolve().parent / "config" / "paths.py"
+    spec = importlib.util.spec_from_file_location("_vibelution_storage_config_paths", paths_file)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"unable to load stdlib config paths from {paths_file}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    _CONFIG_PATHS_MODULE = module
+    return module
+
+
 def legacy_project_storage_paths(
     project_root: str | os.PathLike[str],
     *,
@@ -206,7 +230,7 @@ def legacy_project_storage_paths(
 
     root = _resolve_project_root(project_root)
     target_paths = target or resolve_project_storage_paths(root)
-    from config.paths import resolve_data_home
+    resolve_data_home = _load_config_paths_stdlib().resolve_data_home
 
     return ProjectStoragePaths(
         project_root=root,
@@ -281,12 +305,11 @@ def resolve_project_data_home(
     except ProjectIdentityError:
         return root
 
-    from config.paths import DATA_HOME_ENV, resolve_configured_data_home, resolve_data_home
-
-    if str(os.environ.get(DATA_HOME_ENV) or "").strip():
-        return resolve_data_home(config_path=config_path)
-    if resolve_configured_data_home(config_path=config_path) is not None:
-        return resolve_data_home(config_path=config_path)
+    paths_mod = _load_config_paths_stdlib()
+    if str(os.environ.get(paths_mod.DATA_HOME_ENV) or "").strip():
+        return paths_mod.resolve_data_home(config_path=config_path)
+    if paths_mod.resolve_configured_data_home(config_path=config_path) is not None:
+        return paths_mod.resolve_data_home(config_path=config_path)
     return resolve_active_project_storage_paths(
         root,
         projects_home=projects_home,

@@ -70,22 +70,35 @@ def resolve_primary_model_name(config: AppConfig) -> str:
     return "unknown-model"
 
 
+def project_venv_python(root: Path) -> Path:
+    """Return the project-local venv interpreter for the current OS."""
+
+    if sys.platform == "win32":
+        return root / ".venv" / "Scripts" / "python.exe"
+    return root / ".venv" / "bin" / "python"
+
+
 def run_preflight_doctor(config: AppConfig, *, project_root: Path | None = None) -> None:
     """执行启动前环境自检，确保当前运行基线稳定。"""
     if not getattr(config.runtime, "preflight_doctor", True):
         return
 
     root = project_root or Path(__file__).resolve().parents[2]
-    doctor_script = root / "scripts" / "doctor.ps1"
-    if not doctor_script.exists():
-        raise RuntimeError(f"缺少环境自检脚本: {doctor_script}")
-
-    expected_python = root / ".venv" / "Scripts" / "python.exe"
+    expected_python = project_venv_python(root)
     if config.runtime.require_venv and Path(sys.executable).resolve() != expected_python.resolve():
         raise RuntimeError(
             f"当前解释器不是项目 .venv: {sys.executable}\n"
             f"请使用: {expected_python}"
         )
+
+    if sys.platform != "win32":
+        # doctor.ps1 is the Windows environment probe. POSIX clone startup only
+        # needs the venv interpreter check above.
+        return
+
+    doctor_script = root / "scripts" / "doctor.ps1"
+    if not doctor_script.exists():
+        raise RuntimeError(f"缺少环境自检脚本: {doctor_script}")
 
     result = subprocess.run(
         [
