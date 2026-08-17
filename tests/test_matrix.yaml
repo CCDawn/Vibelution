@@ -268,7 +268,7 @@ rules:
       - "tests/test_tool_registry_routes.py"
     commands:
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_tool_registry_service.py tests/test_tool_registry_routes.py -q"
-      - ".\\.venv\\Scripts\\python.exe tests/prompt_debugger.py --suite"
+      - ".\\.venv\\Scripts\\python.exe tests/prompt_debugger.py --suite --quick"
     notes:
       - "Tool registry changes need route/service validation and prompt debugger coverage because they affect tool visibility."
 

@@ -85,6 +85,7 @@
 | --- | --- | --- | --- | --- |
 | `agent_bulk_delete_service.py` | Bulk Agent delete/archive orchestration helpers. | — | `agents.py` | `test_agent_archive_session_lifecycle.py`, `test_agent_bulk_delete_service.py`, `test_agent_bulk_edit_service.py` |
 | `agent_bulk_edit_service.py` | Bulk Agent edit orchestration helpers. | — | `agents.py` | `test_agent_bulk_edit_service.py` |
+| `agent_operation_service.py` | Shared Agent create semantics for routes and governed lifecycle tools. | — | `agents.py`, `tools/project_operation_tools.py` | `test_project_operation_tools.py`, `test_agent_lifecycle_create_delete.py` |
 | `agent_config_change_service.py` | Append-only private drafts and revision evidence for Agent configuration. | — | `agents.py` | `test_agent_config_change_service.py` |
 | `agent_config_workspace_service.py` | Read-only Agent configuration workspace aggregation. | — | `agents.py` | `test_agent_archive_session_lifecycle.py`, `test_agent_config_change_service.py`, `test_agent_config_workspace_routes.py` |
 | `agent_directory_service.py` | Persistent AgentInstance registry for chat-facing agents. | `agent_directory/` | `agents.py` | `test_agent_archive_session_lifecycle.py`, `test_agent_avatar_model_repair.py`, `test_agent_avatar_role_defaults.py` |

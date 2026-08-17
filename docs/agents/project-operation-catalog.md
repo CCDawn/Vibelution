@@ -107,10 +107,10 @@
 | --- | --- | --- | --- |
 | List sessions | `GET /api/sessions` | `AUTO_READ` | safe |
 | Session detail | `GET /api/sessions/{id}` | `AUTO_READ` | safe |
-| Create session | `POST /api/sessions` | `GOVERNED_WRITE` | safe（HTTP-only） |
+| Create session | `POST /api/sessions` | `GOVERNED_WRITE` | safe（`session_create_tool`） |
 | Update session | `PATCH /api/sessions/{id}` | `GOVERNED_WRITE` | safe（HTTP-only） |
-| Stop turn | `POST /api/sessions/{id}/stop`（202 异步受理） | `GOVERNED_WRITE` | safe（HTTP-only） |
-| Delete session | `DELETE /api/sessions/{id}` | `APPROVAL_REQUIRED` | delete（HTTP-only） |
+| Stop turn | `POST /api/sessions/{id}/stop`（202 异步受理） | `GOVERNED_WRITE` | safe（`session_stop_tool`） |
+| Delete session | `DELETE /api/sessions/{id}` | `APPROVAL_REQUIRED` | delete（`session_delete_tool`） |
 | List child sessions | `GET /api/sessions/{id}/child-sessions` | `AUTO_READ` | safe（已有 `list_child_sessions_tool`） |
 | Create child session | `POST /api/sessions/{id}/child-sessions` | `GOVERNED_WRITE` | safe（已有 `create_child_session_tool`） |
 | List agents | `GET /api/agents` | `AUTO_READ` | safe |
@@ -119,25 +119,36 @@
 | Send message | `POST /api/agents/{id}/messages` | `GOVERNED_WRITE` | safe（已有 `agent_message_tool` 语义能力，仅覆盖 send） |
 | Consume message | `POST /api/agents/{id}/messages/{message_id}/consume` | `GOVERNED_WRITE` | safe（HTTP-only；`agent_message_tool` 不覆盖 GET/consume） |
 | Consume all messages | `POST /api/agents/{id}/messages/consume-all` | `GOVERNED_WRITE` | safe（HTTP-only；`agent_message_tool` 不覆盖） |
-| Create agent | `POST /api/agents` | `APPROVAL_REQUIRED` | safe（HTTP-only） |
+| Create agent | `POST /api/agents` | `APPROVAL_REQUIRED` | safe（`agent_create_tool`） |
 | Update agent | `PATCH /api/agents/{id}` | `APPROVAL_REQUIRED` | safe（HTTP-only） |
-| Archive agent | `DELETE /api/agents/{id}` | `APPROVAL_REQUIRED` | archive（HTTP-only） |
-| Reset agent | `POST /api/agents/{id}/reset` | `APPROVAL_REQUIRED` | reset（HTTP-only） |
+| Archive agent | `DELETE /api/agents/{id}` | `APPROVAL_REQUIRED` | archive（`agent_archive_tool`） |
+| Reset agent | `POST /api/agents/{id}/reset` | `APPROVAL_REQUIRED` | reset（`agent_reset_tool`） |
 | Purge agent | `DELETE /api/agents/{id}/purge` | `OPERATOR_ONLY` | purge（HTTP-only） |
 
 ## 6. 已知治理缺口（Missing Governed Tools）
 
-以下操作有后端 HTTP 端点，但 **canonical governed tool 不存在**（`tools/Key_Tools.py` 无对应名）。这是 Phase 1 已登记、**尚未实现**的缺口：
+Phase 2 已实现以下 canonical governed tools（`tools/project_operation_tools.py`）：
 
-1. **Agent create / update / archive / reset 无 governed tool** — 均 HTTP-only；Agent 无法在工具面内执行这些治理操作。
-2. **Root Session create / update / stop / delete 无 governed tool** — 均 HTTP-only。
-3. **Agent inbox list（GET）、consume、consume-all 无 governed tool** — 均 HTTP-only。
+| 工具 | 语义 | 治理类 |
+| --- | --- | --- |
+| `agent_create_tool` | 创建 Agent（与 `POST /api/agents` 同服务语义） | `APPROVAL_REQUIRED` / write · on_request |
+| `agent_archive_tool` | 归档 Agent（完整 archive lifecycle） | `APPROVAL_REQUIRED` / destructive · always |
+| `agent_reset_tool` | 重置 Agent（`reset_agent_instance`） | `APPROVAL_REQUIRED` / destructive · always |
+| `session_create_tool` | 为已有 Agent 创建根 Session（不隐式创建 Agent） | `GOVERNED_WRITE` / write · on_request |
+| `session_stop_tool` | 停止 Session turn（必须带 `turn_id`） | `GOVERNED_WRITE` / write · on_request |
+| `session_delete_tool` | 删除 Session（`delete_chat_session`） | `APPROVAL_REQUIRED` / destructive · always |
+
+以下操作仍有后端 HTTP 端点，但 **canonical governed tool 不存在**：
+
+1. **Agent update 无 governed tool** — HTTP-only。
+2. **Root Session update 无 governed tool** — HTTP-only。
+3. **Agent inbox list（GET）、consume、consume-all 无 governed tool** — HTTP-only。
 4. **无 pause/resume、无通用 restore、无单 Session archive/restore 工具** — 这些能力不存在或为内部服务，**不要发明**对应工具名。
 
 例外与既有面：
 - `create_child_session_tool` / `list_child_sessions_tool`（`tools/session_child_tools.py`）**已存在**。
 - `agent_message_tool`（`tools/agent_message_tools.py`）**已存在**，仅提供 **send** 语义能力，**不覆盖 inbox list（GET）或 consume**。
-- Purge 是**有意 OPERATOR_ONLY**，不是缺失的普通工具，不应补成 governed tool。
+- **Purge 是有意 `OPERATOR_ONLY`**，不是缺失的普通工具，**不得**补成 `agent_purge_tool` 或任何 governed tool。
 
 ## 7. 上线顺序（Rollout Order）
 
@@ -160,7 +171,7 @@
 .\.venv\Scripts\python.exe scripts\api_contract_audit.py --project-root <root> --types
 
 # 聚焦测试
-.\.venv\Scripts\python.exe -m pytest tests\test_api_contract_audit.py -q
+.\.venv\Scripts\python.exe -m pytest tests\test_project_operation_tools.py tests\test_api_contract_audit.py -q
 ```
 
 > **SSOT 重申：** 后端 API 面的唯一事实来源是 `core/web/router_registry.py` + 路由模块；Agent 工具面的唯一事实来源是 `tools/Key_Tools.py` + `tool_catalog.py`。`--inventory` 与本指南均为派生投影，任何不一致以代码/注册表为准并修正投影；Phase 1 只登记治理访问类与缺口，**不声称其已由机器执行**。
