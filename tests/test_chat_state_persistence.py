@@ -1148,6 +1148,33 @@ def test_turn_completion_snapshot_does_not_assemble_compat_document(tmp_path, mo
     assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
 
 
+def test_turn_completion_snapshot_ignores_tool_result_compatibility_shell(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_two_runtime_rows(tmp_path, status_a="ready")
+    monkeypatch.setattr(session_service, "reconcile_stale_chat_turn_work_runs", lambda **_kwargs: [])
+    monkeypatch.setattr(session_service, "_repair_stale_running_conversation", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(session_service, "_session_ledger_visible_messages", lambda *_args, **_kwargs: [])
+    tool_shell = {
+        "role": "assistant",
+        "content": "batch_web_search_tool",
+        "toolCalls": [
+            {"name": "batch_web_search_tool", "id": "call-1", "status": "failed"},
+        ],
+        "metadata": {"kind": "tool_result", "turnId": "turn-tool-error"},
+    }
+    monkeypatch.setattr(
+        session_service,
+        "_find_turn_scoped_assistant_message",
+        lambda *_args, **_kwargs: tool_shell,
+    )
+
+    snapshot = session_service.get_session_turn_completion_snapshot("session-a", "turn-tool-error")
+
+    assert snapshot["assistantText"] == ""
+    assert snapshot["assistantMessageFound"] is False
+    assert snapshot["assistantTurnId"] == ""
+
+
 def test_settle_stale_chat_turn_writes_only_target_session_row(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     _seed_two_runtime_rows(tmp_path)

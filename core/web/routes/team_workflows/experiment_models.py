@@ -37,7 +37,7 @@ class ExperimentPlanningStatusResponse(BaseModel):
     readiness: dict[str, Any] = Field(default_factory=dict)
     boundaries: dict[str, Any] = Field(default_factory=dict)
     storagePath: str = ""
-    nextActions: list[dict[str, Any]] = Field(default_factory=list)
+    nextActions: list[str] = Field(default_factory=list)
     updatedAt: str = ""
 
 
