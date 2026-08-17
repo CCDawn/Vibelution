@@ -1550,7 +1550,7 @@ async function requestDesktopShellExit(
         }
       }),
       onDenied: (decision) => {
-        notifyDesktopTray("Vibelution", decision.message || "有进行中的任务，暂时无法退出。可先用托盘“停止全部”。", "warning");
+        notifyDesktopTray("Vibelution", decision.message || "有进行中的任务，暂时无法退出。可先用托盘“退出壳并停止全部任务”。", "warning");
       },
       runApproved: async (decision) => {
         pendingWorkbenchCloseAck = null;
@@ -1768,7 +1768,7 @@ async function runTrayRestartLauncher(): Promise<void> {
       });
     }
     clearTrayRestartAllPending(paths.workspaceRoot);
-    notifyDesktopTray("Vibelution", "正在停止全部托管进程并重启 Launcher…");
+    notifyDesktopTray("Vibelution", "正在全部停止并启动最新 Launcher…");
     await stopAllManagedRuntimeTrees();
     await exitAndRelaunchLauncherShell({ forceShellRefresh: true });
   } finally {
@@ -2637,11 +2637,6 @@ app.whenReady()
           "electron_tray_stop_instance",
           { instanceId }
         );
-      },
-      quit: () => {
-        void requestDesktopShellExit().catch((error: unknown) => {
-          console.warn(error instanceof Error ? error.message : String(error));
-        });
       },
       stopAll: () => {
         void runTrayStopAll();
