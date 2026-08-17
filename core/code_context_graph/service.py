@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from config.paths import resolve_workspace_home
+from vibelution_storage import resolve_project_workspace_home
 
 SCHEMA_VERSION = 2
 INDEX_REL_PATH = Path("code_context_graph") / "index.json"
@@ -120,7 +121,7 @@ def index_path(root: Path | None = None) -> Path:
     base = Path(root).resolve()
     if base == project_root():
         return resolve_workspace_home() / INDEX_REL_PATH
-    workspace_root = base if base.name.lower() == "workspace" else base / "workspace"
+    workspace_root = base if base.name.lower() == "workspace" else resolve_project_workspace_home(base)
     return workspace_root / INDEX_REL_PATH
 
 

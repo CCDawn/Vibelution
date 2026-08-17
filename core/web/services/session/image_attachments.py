@@ -134,9 +134,13 @@ def _remember_session_uploaded_attachment(session_id: str, attachment: dict[str,
     if not normalized_session_id:
         return
     with s._CHAT_STATE_LOCK:
-        payload = s.load_chat_state(s.PROJECT_ROOT)
-        s._materialize_agent_directory_conversation_locked(payload, normalized_session_id, source="s.store_session_user_image_attachment")
-        conversation = s._find_conversation_entry(payload, normalized_session_id)
+        conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
+        if conversation is None:
+            if s._ensure_agent_directory_conversation_materialized(
+                normalized_session_id,
+                source="s.store_session_user_image_attachment",
+            ):
+                conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
         if conversation is None:
             raise s.SessionNotFoundError(f"Session not found: {normalized_session_id}")
         uploaded = list(conversation.get("uploaded_attachments") or [])
@@ -148,8 +152,7 @@ def _remember_session_uploaded_attachment(session_id: str, attachment: dict[str,
         uploaded.append({key: value for key, value in attachment.items() if key != "path"})
         conversation["uploaded_attachments"] = uploaded[-24:]
         conversation["updated_at"] = s._now_timestamp()
-        payload["updated_at"] = conversation["updated_at"]
-        s.save_chat_state(s.PROJECT_ROOT, payload)
+        s.save_session_chat_state(s.PROJECT_ROOT, normalized_session_id, conversation)
         snapshot = dict(conversation)
     from . import directory_bridge
 

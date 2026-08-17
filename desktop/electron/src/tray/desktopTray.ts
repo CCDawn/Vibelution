@@ -19,30 +19,24 @@ export type DesktopTrayActions = {
   getFreshness: () => Promise<TrayFreshness>;
   startInstance: (instanceId: string, label: string) => void;
   stopInstance: (instanceId: string, label: string) => void;
-  restartProject: () => void;
-  rebuildAndStart: () => void;
   restartLauncher: () => void;
-  showStatus: () => void;
   quit: () => void;
   stopAll: () => void;
 };
 
 export const DESKTOP_TRAY_MENU_LABELS = {
-  openLauncher: "打开 Vibelution Launcher",
-  startProject: "启动",
-  stopProject: "停止",
-  restartProject: "重启当前 main",
-  rebuildAndStart: "重建并启动（最新）",
-  restartLauncher: "重启 Launcher",
-  freshnessUnknown: "Launcher 版本未知",
-  freshnessLoading: "正在读取 Launcher 状态…",
-  showStatus: "状态",
-  quit: "退出 Vibelution",
-  stopAll: "停止全部",
-  noStartable: "没有可启动的实例",
-  noRunning: "没有正在运行的实例",
-  listFailed: "无法读取分支列表",
-  listLoading: "正在读取分支列表…"
+  openLauncher: "打开 Launcher 控制窗口",
+  startProject: "启动工作区…",
+  stopProject: "停止工作区…",
+  restartLauncher: "重启 Launcher 桌面程序",
+  freshnessUnknown: "Launcher 代码版本：未知",
+  freshnessLoading: "正在读取 Launcher 代码版本…",
+  quit: "退出桌面程序（不强停任务）",
+  stopAll: "停止全部托管进程并退出…",
+  noStartable: "没有可启动的工作区",
+  noRunning: "没有正在运行的工作区",
+  listFailed: "无法读取工作区列表",
+  listLoading: "正在读取工作区列表…"
 } as const;
 
 export type DesktopTrayTemplateOptions = {
@@ -77,7 +71,7 @@ export function buildDesktopTrayTemplate(
       label: DESKTOP_TRAY_MENU_LABELS.startProject,
       submenu: startable.length
         ? startable.map((item) => ({
-            label: item.label,
+            label: `启动「${item.label}」工作区`,
             click: () => actions.startInstance(item.id, item.label)
           }))
         : [{ label: emptyStartLabel, enabled: false }]
@@ -86,14 +80,11 @@ export function buildDesktopTrayTemplate(
       label: DESKTOP_TRAY_MENU_LABELS.stopProject,
       submenu: stoppable.length
         ? stoppable.map((item) => ({
-            label: item.label,
+            label: `停止「${item.label}」工作区`,
             click: () => actions.stopInstance(item.id, item.label)
           }))
         : [{ label: emptyStopLabel, enabled: false }]
     },
-    { label: DESKTOP_TRAY_MENU_LABELS.restartProject, click: actions.restartProject },
-    { label: DESKTOP_TRAY_MENU_LABELS.rebuildAndStart, click: actions.rebuildAndStart },
-    { label: DESKTOP_TRAY_MENU_LABELS.showStatus, click: actions.showStatus },
     { type: "separator" },
     { label: DESKTOP_TRAY_MENU_LABELS.quit, click: actions.quit },
     { label: DESKTOP_TRAY_MENU_LABELS.stopAll, click: actions.stopAll }

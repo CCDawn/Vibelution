@@ -100,7 +100,7 @@ import { VContextualHint } from "@/components/vui";
 
 | Prop | 说明 | 设计注意 |
 | --- | --- | --- |
-| 触发器 + 内容 | 与 header 配对 | 文案可稍长于 tooltip |
+| 触发器 + 内容 | 与 header 配对 | 文案可稍长于 tooltip；触发器只用轻描边问号，不加第二层圆框 |
 
 ### 非职责
 - 不做通用 tooltip 替代一切 hover。
@@ -184,6 +184,7 @@ import { VConfirmDialog } from "@/components/vui";
 | --- | --- | --- |
 | title / confirm / cancel | 文案 | 危险操作用 danger 确认 |
 | `onConfirm` | 确认回调 | pending 时禁用重复点 |
+| `onCloseAutoFocus` | Radix 关闭后焦点回调 | 删除等等待 composer 接管的场景可 `preventDefault` |
 
 ### 非职责
 - 不做复杂多步表单。

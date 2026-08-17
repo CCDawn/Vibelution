@@ -42,12 +42,8 @@ describe("canonical workbench host", () => {
     expect(metaElements[0]?.setAttribute).toHaveBeenCalledWith("content", "no-referrer");
   });
 
-  it("redirects workbench routes away from the launcher control port", () => {
-    expect(canonicalWorkbenchHref("http://127.0.0.1:8765/self-evolution")).toBe(
-      "http://127.0.0.1:8000/self-evolution",
-    );
-    expect(canonicalWorkbenchHref("http://localhost:8765/memory/graph?tab=1")).toBe(
-      "http://127.0.0.1:8000/memory/graph?tab=1",
-    );
+  it("no longer rewrites launcher control port URLs after the :8765 retirement", () => {
+    expect(canonicalWorkbenchHref("http://127.0.0.1:8765/self-evolution")).toBe("");
+    expect(canonicalWorkbenchHref("http://localhost:8765/memory/graph?tab=1")).toBe("");
   });
 });

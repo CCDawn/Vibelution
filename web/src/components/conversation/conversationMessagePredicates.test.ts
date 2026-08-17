@@ -9,6 +9,7 @@ import {
   isProviderFailureSummaryText,
   isRuntimeNoticeMessage,
   isRuntimeStatusContent,
+  isSteerGuidanceMessage,
   isTurnErrorMessage,
   researchOrgMessageChips,
 } from "./conversationMessagePredicates";
@@ -23,7 +24,21 @@ function message(overrides: Partial<ConversationMessage>): ConversationMessage {
   };
 }
 
-describe("conversationMessagePredicates", () => {it("classifies CLI Agent lifecycle messages from metadata", () => {
+describe("conversationMessagePredicates", () => {
+  it("classifies running-turn steer records from metadata", () => {
+    expect(isSteerGuidanceMessage(message({
+      role: "user",
+      content: "先不要改代码",
+      metadata: { kind: "user_guidance" },
+    }))).toBe(true);
+    expect(isSteerGuidanceMessage(message({
+      role: "user",
+      content: "普通用户消息",
+      metadata: { kind: "journal_user_message" },
+    }))).toBe(false);
+  });
+
+  it("classifies CLI Agent lifecycle messages from metadata", () => {
     expect(isCliAgentLifecycleMessage(message({
       role: "assistant",
       content: "terminal closed",

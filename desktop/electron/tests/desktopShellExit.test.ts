@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS,
   executeApprovedDesktopShellShutdown,
+  reapManagedRuntimeOnDesktopStart,
   withDesktopShellExitTimeout
 } from "../src/shutdown/desktopShellExit.js";
 
@@ -17,6 +18,9 @@ describe("executeApprovedDesktopShellShutdown", () => {
       recordEvent: async (event) => {
         calls.push(`event:${event.eventCode}`);
       },
+      stopManagedRuntime: async () => {
+        calls.push("stop-managed-runtime");
+      },
       stopPythonLauncher: async () => {
         calls.push("stop-python-launcher");
         return {
@@ -41,6 +45,8 @@ describe("executeApprovedDesktopShellShutdown", () => {
 
     expect(calls).toEqual([
       "close-session",
+      "event:electron.runtime.stop_requested",
+      "stop-managed-runtime",
       "event:electron.launcher_service.stop_requested",
       "stop-python-launcher",
       "event:electron.launcher_service.exited",
@@ -49,6 +55,8 @@ describe("executeApprovedDesktopShellShutdown", () => {
       "quit-app"
     ]);
     expect(result).toEqual({
+      stopManagedRuntime: true,
+      managedRuntimeError: "",
       stopPythonLauncher: true,
       stopStatus: "stopped",
       stoppedPidCount: 1,
@@ -56,7 +64,7 @@ describe("executeApprovedDesktopShellShutdown", () => {
     });
   });
 
-  it("detaches without stopping Python when the Launcher was attached", async () => {
+  it("stops managed project processes even when the Launcher was attached", async () => {
     const calls: string[] = [];
 
     const result = await executeApprovedDesktopShellShutdown({
@@ -67,6 +75,9 @@ describe("executeApprovedDesktopShellShutdown", () => {
       recordEvent: async (event) => {
         calls.push(`event:${event.eventCode}`);
       },
+      stopManagedRuntime: async () => {
+        calls.push("stop-managed-runtime");
+      },
       stopPythonLauncher: async () => {
         calls.push("stop-python-launcher");
         return {
@@ -91,12 +102,16 @@ describe("executeApprovedDesktopShellShutdown", () => {
 
     expect(calls).toEqual([
       "close-session",
+      "event:electron.runtime.stop_requested",
+      "stop-managed-runtime",
       "event:electron.launcher_service.exited",
       "approve-shutdown",
       "stop-action-loop",
       "quit-app"
     ]);
     expect(result).toEqual({
+      stopManagedRuntime: true,
+      managedRuntimeError: "",
       stopPythonLauncher: false,
       stopStatus: "not_requested",
       stoppedPidCount: 0,
@@ -114,6 +129,9 @@ describe("executeApprovedDesktopShellShutdown", () => {
       },
       recordEvent: async (event) => {
         calls.push(`event:${event.eventCode}`);
+      },
+      stopManagedRuntime: async () => {
+        calls.push("stop-managed-runtime");
       },
       stopPythonLauncher: async () => {
         throw new Error("should not stop");
@@ -133,6 +151,8 @@ describe("executeApprovedDesktopShellShutdown", () => {
     await vi.advanceTimersByTimeAsync(30);
     const result = await pending;
     expect(calls).toEqual([
+      "event:electron.runtime.stop_requested",
+      "stop-managed-runtime",
       "event:electron.launcher_service.exited",
       "approve-shutdown",
       "stop-action-loop",
@@ -140,6 +160,54 @@ describe("executeApprovedDesktopShellShutdown", () => {
     ]);
     expect(result?.stopStatus).toBe("not_requested");
     vi.useRealTimers();
+  });
+});
+
+describe("reapManagedRuntimeOnDesktopStart", () => {
+  it("stops the previous managed process tree before the desktop shell continues starting", async () => {
+    const calls: string[] = [];
+
+    const result = await reapManagedRuntimeOnDesktopStart({
+      recordEvent: async (event) => {
+        calls.push(`event:${event.eventCode}`);
+      },
+      stopManagedRuntime: async () => {
+        calls.push("stop-managed-runtime");
+      }
+    });
+
+    expect(calls).toEqual([
+      "event:electron.runtime.start_reap_requested",
+      "stop-managed-runtime"
+    ]);
+    expect(result).toEqual({
+      stopManagedRuntime: true,
+      managedRuntimeError: ""
+    });
+  });
+
+  it("fails open when the previous managed process tree cannot be stopped", async () => {
+    const calls: string[] = [];
+
+    const result = await reapManagedRuntimeOnDesktopStart({
+      recordEvent: async (event) => {
+        calls.push(`event:${event.eventCode}`);
+      },
+      stopManagedRuntime: async () => {
+        calls.push("stop-managed-runtime");
+        throw new Error("python missing");
+      }
+    });
+
+    expect(calls).toEqual([
+      "event:electron.runtime.start_reap_requested",
+      "stop-managed-runtime",
+      "event:electron.runtime.start_reap_failed"
+    ]);
+    expect(result).toEqual({
+      stopManagedRuntime: true,
+      managedRuntimeError: "python missing"
+    });
   });
 });
 

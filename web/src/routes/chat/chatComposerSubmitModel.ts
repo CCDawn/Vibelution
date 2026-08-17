@@ -1,8 +1,7 @@
 import type { DragEvent } from "react";
 
-import { fetchJson } from "../../api/client";
+import { uploadSessionImageAttachment as postSessionImageAttachment } from "../../api/chat";
 import type {
-  ConversationAttachment,
   SessionReferenceAttachment,
   SessionSummary,
 } from "../../api/types";
@@ -130,12 +129,9 @@ export function removeSessionImageAttachment(
 }
 
 export async function uploadSessionImageAttachment(sessionId: string, attachment: ComposerImageAttachment) {
-  return fetchJson<ConversationAttachment>(`/api/sessions/${sessionId}/attachments`, {
-    method: "POST",
-    headers: {
-      "Content-Type": attachment.contentType || "application/octet-stream",
-      "X-Vibelution-Filename": encodeURIComponent(attachment.filename),
-    },
+  return postSessionImageAttachment(sessionId, {
+    contentType: attachment.contentType,
+    filename: attachment.filename,
     body: attachment.file,
   });
 }

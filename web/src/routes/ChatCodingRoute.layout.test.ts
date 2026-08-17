@@ -11,17 +11,40 @@ import routeErrorBoundarySource from "../app/RouteErrorBoundary.tsx?raw";
 import routerSource from "../app/router.tsx?raw";
 import shellStoreSource from "../store/shellStore.ts?raw";
 import chatApiSource from "../api/chat.ts?raw";
+import agentsApiSource from "../api/agents.ts?raw";
+import filesApiSource from "../api/files.ts?raw";
+import cliAgentsApiSource from "../api/cliAgents.ts?raw";
 import agentSessionTabStripSource from "./AgentSessionTabStrip.tsx?raw";
 import chatCodingRouteWorkbenchSource from "./chat/ChatCodingRouteWorkbench.tsx?raw";
 import chatWorkbenchCatalogQueriesSource from "./chat/useChatWorkbenchCatalogQueries.ts?raw";
 import chatCenterTabStripSource from "./chat/ChatCenterTabStrip.tsx?raw";
 import chatCenterSessionSurfaceSource from "./chat/ChatCenterSessionSurface.tsx?raw";
 import chatConversationIndexPanelContentSource from "./chat/ChatConversationIndexPanelContent.tsx?raw";
+import chatToolApprovalBridgeSource from "./chat/useChatToolApprovalBridge.ts?raw";
+import chatComposerBridgeStateSource from "./chat/useChatComposerBridgeState.ts?raw";
+import chatGroupRoomViewModelSource from "./chat/useChatGroupRoomViewModel.ts?raw";
+import chatGroupDraftStateSource from "./chat/useChatGroupDraftState.ts?raw";
+import chatGroupRoomActionModelSource from "./chat/chatGroupRoomActionModel.ts?raw";
+import chatWorkbenchContextMenusSource from "./chat/useChatWorkbenchContextMenus.ts?raw";
+import chatConversationIndexChromeSource from "./chat/useChatConversationIndexChrome.ts?raw";
 import chatSessionWorkbenchShellSource from "./chat/ChatSessionWorkbenchShell.tsx?raw";
 import chatWorkbenchCenterColumnSource from "./chat/ChatWorkbenchCenterColumn.tsx?raw";
 import chatWorkbenchFormatSource from "./chat/chatWorkbenchFormat.ts?raw";
 import chatWorkbenchPresentationSource from "./chat/useChatWorkbenchPresentation.ts?raw";
 import conversationIndexRailSource from "./chat/ChatConversationIndexRail.tsx?raw";
+import sessionBulkOperationsPanelSource from "./chat/SessionBulkOperationsPanel.tsx?raw";
+import chatSessionBulkModelSource from "./chat/chatSessionBulkModel.ts?raw";
+import chatSessionBulkSelectionSource from "./chat/useChatSessionBulkSelection.ts?raw";
+import chatWorkbenchConfirmDialogSource from "./chat/useChatWorkbenchConfirmDialog.ts?raw";
+import chatVisibleSessionCatalogSource from "./chat/useChatVisibleSessionCatalog.ts?raw";
+import chatAgentSessionTabsSource from "./chat/useChatAgentSessionTabs.ts?raw";
+import chatSessionIndexRailModelSource from "./chat/useChatSessionIndexRailModel.ts?raw";
+import chatGroupRoomChromeModelSource from "./chat/useChatGroupRoomChromeModel.ts?raw";
+import chatVisibleSessionCatalogModelSource from "./chat/chatVisibleSessionCatalogModel.ts?raw";
+import chatSessionIndexRailPresentationSource from "./chat/chatSessionIndexRailPresentation.ts?raw";
+import chatAgentDirectoryMapsSource from "./chat/chatAgentDirectoryMaps.ts?raw";
+import chatAgentDirectoryMapsHookSource from "./chat/useChatAgentDirectoryMaps.ts?raw";
+import chatIndexDerivedStateSource from "./chat/useChatIndexDerivedState.ts?raw";
 import agentDirectoryActionsSource from "./chat/useChatAgentDirectoryActions.ts?raw";
 import chatStatusRailSource from "./chat/ChatStatusRail.tsx?raw";
 import cliAgentRunModelSource from "./chat/cliAgentRunModel.ts?raw";
@@ -53,8 +76,27 @@ import conversationIndexRailStyles from "./chat/ChatConversationIndexRail.styles
 import chatStatusRailStyles from "./chat/ChatStatusRail.styles";
 import tokenCoreStatusPanelStyles from "./chat/TokenCoreStatusPanel.styles";
 
-/** Workbench shell + catalog queries hook (R01c F1). */
-const routeSource = `${chatCodingRouteWorkbenchSource}\n${chatWorkbenchCatalogQueriesSource}`;
+/** Workbench shell + catalog queries hook (R01c F1) + Phase F2/F3 extract modules. */
+const routeSource = [
+  chatCodingRouteWorkbenchSource,
+  chatWorkbenchCatalogQueriesSource,
+  chatToolApprovalBridgeSource,
+  chatComposerBridgeStateSource,
+  chatGroupRoomViewModelSource,
+  chatGroupDraftStateSource,
+  chatGroupRoomActionModelSource,
+  chatWorkbenchContextMenusSource,
+  chatConversationIndexChromeSource,
+  chatVisibleSessionCatalogSource,
+  chatAgentSessionTabsSource,
+  chatSessionIndexRailModelSource,
+  chatGroupRoomChromeModelSource,
+  chatVisibleSessionCatalogModelSource,
+  chatSessionIndexRailPresentationSource,
+  chatAgentDirectoryMapsSource,
+  chatAgentDirectoryMapsHookSource,
+  chatIndexDerivedStateSource,
+].join("\n");
 
 /** Wave 8C/8D: layout contracts resolve class strings across route shell + panel/component maps. */
 const routeStyles = {
@@ -402,18 +444,18 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("queryKeys.sessionToolApprovals");
     expect(routeSource).toContain("listPendingSessionToolApprovals");
     expect(chatApiSource).toContain("/tool-approvals?status=pending");
-    expect(routeSource).toContain("runtime?.workRuns?.active?.chat_turn?.sessionId === activeSessionId");
+    expect(routeSource).toContain("runtimeHasChatTurnForSession(runtime, activeSessionId)");
     expect(routeSource).toContain("sessionToolApprovalRuntimeActive");
     expect(routeSource).toContain("resolveToolApprovalMutation");
     expect(routeAndDetailMutationsSource).toContain("resolveSessionToolApprovalDecision");
     expect(chatApiSource).toContain("/tool-approvals/");
     expect(routeAndDetailMutationsSource).toContain('"acceptForSession"');
     expect(routeSource).toContain('"acceptAlways"');
-    expect(routeAndDetailMutationsSource).toContain("/tool-governance-requests/");
-    expect(routeSource).toContain("onApproveToolApproval={() => {");
+    expect(routeAndDetailMutationsSource).toContain("resolveAgentToolGovernanceRequest");
+    expect(routeSource).toContain("onApproveToolApproval={handleApproveToolApproval}");
     expect(routeSource).toContain("if (!pendingToolGovernanceApproval) {");
     expect(routeSource).toContain("resolveToolApprovalMutation.mutate({ request: pendingToolGovernanceApproval, decision: \"approve\" })");
-    expect(routeSource).toContain("onRejectToolApproval={() => {");
+    expect(routeSource).toContain("onRejectToolApproval={handleRejectToolApproval}");
     expect(routeSource).toContain("resolveToolApprovalMutation.mutate({ request: pendingToolGovernanceApproval, decision: \"reject\" })");
     expect(chatSessionWorkspacePanelSource).toContain("<ChatToolApprovalDialog");
     expect(chatSessionWorkspacePanelSource).toContain("variant=\"banner\"");
@@ -593,11 +635,6 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("queryClient.cancelQueries({ queryKey: queryKeys.session(normalizedSessionId), exact: true })");
     expect(routeSource).toContain("queryClient.removeQueries({ queryKey: queryKeys.session(normalizedSessionId), exact: true })");
 
-    const staleCleanupIndex = routeSource.indexOf("clearSessionTransientUiState(activeSessionId");
-    const staleRemoveIndex = routeSource.indexOf("removeSessionWorkspace(activeSessionId");
-    expect(staleCleanupIndex).toBeGreaterThan(0);
-    expect(staleCleanupIndex).toBeLessThan(staleRemoveIndex);
-
     const deleteCleanupIndex = routeAndLifecycleSource.indexOf("clearSessionTransientUiState(variables.sessionId");
     const deleteRemoveIndex = routeAndLifecycleSource.indexOf("removeSessionWorkspace(variables.sessionId");
     expect(deleteCleanupIndex).toBeGreaterThan(0);
@@ -627,10 +664,12 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("latestDirectSessionSelectionRef");
     expect(routeSource).toContain("selectDirectSessionMutation");
     expect(routeSource).toContain("useChatSessionSelection");
-    expect(routeAndSelectionSource).toContain("`/api/sessions/${encodeURIComponent(sessionId)}/select`");
-    expect(routeAndActionsSource).toContain("latestDirectSessionSelectionRef.current = normalizedSessionId");
-    expect(routeAndActionsSource).toContain("reselectDirectSessionRef.current(normalizedSessionId)");
-    expect(routeAndActionsSource).toContain("String(activeSessionId || \"\").trim() !== normalizedSessionId");
+    expect(routeSource).toContain("useChatRouteSelection");
+    expect(chatApiSource).toContain("`/api/sessions/${encodeURIComponent(sessionId)}/select`");
+    expect(routeAndSelectionSource).toContain("selectChatSession(sessionId)");
+    // The committed route is the only select input; clicks delegate to openSession.
+    expect(routeAndActionsSource).toContain("chatRoute.openSession(normalizedSessionId, {");
+    expect(routeAndSelectionSource).toContain("routeSessionId");
     // Select is generation-guarded and short-debounced so rapid tab thrash collapses to one POST.
     expect(routeAndSelectionSource).toContain("selectDirectSessionMutation.mutate({ sessionId: latestSessionId, generation })");
     expect(routeAndSelectionSource).toContain("setTimeout");
@@ -639,13 +678,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("resolveStickySessionDetailPaint");
     expect(routeSource).toContain("transcriptPending: sessionTranscriptPending");
     expect(routeSource).not.toContain("isForeignSessionDetailQueryKey(query.queryKey, activeId)");
-    expect(routeAndSelectionSource).toContain("if (latestSessionId && latestSessionId !== nextDetail.id)");
     expect(routeAndSelectionSource).toContain("syncSessionDetail(nextDetail)");
     expect(routeAndSelectionSource).toContain("chatWorkspaceCache.afterSessionSelected()");
     expect(routeAndSelectionSource).not.toContain("afterSessionChanged({\n        sessionId: nextDetail.id");
-    expect(routeAndActionsSource.indexOf("reselectDirectSessionRef.current(normalizedSessionId)")).toBeLessThan(
-      routeAndActionsSource.indexOf("navigate(`/chat?session=${encodeURIComponent(normalizedSessionId)}`"),
-    );
+    // Late /select responses must never chase a newer pointer back.
+    expect(routeAndSelectionSource).toContain("// Late response for a session the user already left: cache only, never navigate.");
   });
 
   it("derives responsive layout from the workbench ResizeObserver without overwriting pane preferences", () => {
@@ -662,6 +699,21 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndLayoutSource).toContain("styles.layoutOverlay");
     expect(routeSource).toContain("useChatWorkbenchLayout");
     expect(routeSource).toContain("ChatSessionWorkbenchShell");
+  });
+
+  it("keeps Chat workbench as hook composition plus ChatSessionWorkbenchShell slots", () => {
+    expect(routeSource).toContain("useChatGroupDraftState");
+    expect(routeSource).toContain("useSyncChatGroupManageDrafts");
+    expect(routeSource).toContain("useChatWorkbenchContextMenus");
+    expect(routeSource).toContain("useChatConversationIndexChrome");
+    expect(routeSource).toContain("deriveChatGroupRoundState");
+    expect(routeSource).toContain("buildChatGroupRoomActionDisabledFlags");
+    expect(chatCodingRouteWorkbenchSource).not.toContain('from "./ChatConversationIndexPanel"');
+    expect(chatCodingRouteWorkbenchSource).toContain("lazy(() =>");
+    expect(chatCodingRouteWorkbenchSource).toContain('import("./ChatStatusRail")');
+    expect(chatCodingRouteWorkbenchSource).toContain('import("./CliAgentRunTerminalPanel")');
+    expect(chatSessionWorkbenchShellSource).toContain("WORKBENCH_LAYOUT_IDS.chat");
+    expect(chatSessionWorkbenchShellSource).toContain("VSessionWorkbenchPage");
   });
 
   it("places shared collapse-resize handles on the chat gutters", () => {
@@ -1182,8 +1234,8 @@ describe("ChatCodingRoute layout contract", () => {
 
     const submitMutationStart = routeAndComposerSource.indexOf("const submitTurnMutation = useMutation");
     const submitMutateStart = routeAndComposerSource.indexOf("onMutate: async (variables)", submitMutationStart);
-    const submitSuccessStart = routeAndComposerSource.indexOf("onSuccess: (acceptedTurn, variables)", submitMutateStart);
-    const submitErrorStart = routeAndComposerSource.indexOf("onError: (error, variables)", submitSuccessStart);
+    const submitSuccessStart = routeAndComposerSource.indexOf("onSuccess: (acceptedTurn, variables, context)", submitMutateStart);
+    const submitErrorStart = routeAndComposerSource.indexOf("onError: (error, variables, context)", submitSuccessStart);
     const submitMutateBlock = routeAndComposerSource.slice(submitMutateStart, submitSuccessStart);
     const submitSuccessBlock = routeAndComposerSource.slice(submitSuccessStart, submitErrorStart);
     const submitErrorBlock = routeAndComposerSource.slice(submitErrorStart, routeAndComposerSource.indexOf("const editResubmitMutation", submitErrorStart));
@@ -1198,7 +1250,7 @@ describe("ChatCodingRoute layout contract", () => {
 
     const editMutationStart = routeAndComposerSource.indexOf("const editResubmitMutation = useMutation");
     const editMutateStart = routeAndComposerSource.indexOf("onMutate: async (variables)", editMutationStart);
-    const editSuccessStart = routeAndComposerSource.indexOf("onSuccess: (nextDetail, variables)", editMutateStart);
+    const editSuccessStart = routeAndComposerSource.indexOf("onSuccess: (nextDetail, variables, context)", editMutateStart);
     const editErrorStart = routeAndComposerSource.indexOf("onError: (error, variables, context)", editSuccessStart);
     const editMutateBlock = routeAndComposerSource.slice(editMutateStart, editSuccessStart);
     const editSuccessBlock = routeAndComposerSource.slice(editSuccessStart, editErrorStart);
@@ -1748,7 +1800,7 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("keeps the current session status bar keyed to the selected session", () => {
     expect(routeSource).toContain("const rawSessionDetail = resolveActiveSessionDetailForUi");
-    expect(routeSource).toContain("const detail = resolveStickySessionDetailPaint");
+    expect(routeSource).toContain("const detail = useStableSessionDetailPaint({");
     expect(routeSource).toContain("detail: rawSessionDetail");
     expect(routeSource).toContain("const activeTurnLayer = activeSessionId ? activeTurnLayersBySession[activeSessionId] : undefined");
     expect(routeSource).toContain("const activeTurnSettledByDetail = isActiveTurnSettledByDetail(activeTurnLayer, detail)");
@@ -1868,8 +1920,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndComposerSource).toContain("clientSubmissionId,");
 
     const submitMutationStart = routeAndComposerSource.indexOf("const submitTurnMutation = useMutation");
-    const submitSuccessStart = routeAndComposerSource.indexOf("onSuccess: (acceptedTurn, variables)", submitMutationStart);
-    const submitErrorStart = routeAndComposerSource.indexOf("onError: (error, variables)", submitSuccessStart);
+    const submitSuccessStart = routeAndComposerSource.indexOf("onSuccess: (acceptedTurn, variables, context)", submitMutationStart);
+    const submitErrorStart = routeAndComposerSource.indexOf("onError: (error, variables, context)", submitSuccessStart);
     const submitSuccessBlock = routeAndComposerSource.slice(submitSuccessStart, submitErrorStart);
     const submitErrorBlock = routeAndComposerSource.slice(submitErrorStart, routeAndComposerSource.indexOf("const editResubmitMutation", submitErrorStart));
     expect(submitSuccessBlock).not.toContain("setSessionDrafts");
@@ -1890,8 +1942,9 @@ describe("ChatCodingRoute layout contract", () => {
   it("exposes dynamic group creation from the unified conversation list", () => {
     expect(routeSource).toContain("handleToggleGroupComposer");
     expect(routeSource).toContain("handleCreateGroupRoom");
-    expect(routeSource).toContain("fetchJson<AgentInstance[]>(\"/api/agents?detail=summary\")");
-    expect(routeAndLifecycleSource).toContain("body: JSON.stringify({ title, agentIds, mode, purpose })");
+    expect(routeSource).toContain("listAgentSummaries()");
+    expect(chatApiSource).toContain("body: JSON.stringify({ title, agentIds, mode, purpose })");
+    expect(routeAndLifecycleSource).toContain("createChatRoom({ title, agentIds, mode, purpose })");
     expect(routeAndIndexRailSource).toContain("styles.groupComposerPanel");
     expect(routeAndIndexRailSource).toContain("styles.groupAgentPicker");
     expect(routeAndIndexRailSource).toContain("styles.createGroupButton");
@@ -1917,16 +1970,28 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("keeps Agent rebinding out of chat while allowing new sessions for the selected Agent", () => {
     expect(routeAndLifecycleSource).toContain("const createSessionMutation");
-    expect(routeAndLifecycleSource).toContain('fetchJson<SessionDetail>("/api/sessions"');
-    expect(routeAndLifecycleSource).toContain('Prefer: "respond-async"');
+    expect(chatApiSource).toContain('fetchJson<SessionDetail>("/api/sessions"');
+    expect(chatApiSource).toContain('Prefer: "respond-async"');
+    expect(routeAndLifecycleSource).toContain("createChatSession({ agentId })");
     expect(routeAndLifecycleSource).toContain("mergeSessionDetailIntoSummaries");
+    expect(routeAndLifecycleSource).toContain("updateAgentSessionSummaryCaches");
+    expect(routeAndLifecycleSource).toContain("pinSessionCreatePreserve");
     expect(routeAndLifecycleSource).toContain("createTempSessionId()");
-    expect(routeAndLifecycleSource).toContain("Seed real id cache BEFORE switching active id");
+    expect(routeAndLifecycleSource).toContain("Seed real id cache BEFORE the route swaps");
     expect(routeAndLifecycleSource).toContain("fetchSessionDetailWindow(nextId");
     expect(routeAndLifecycleSource).toContain("includeSecondary: false");
+    // Create must not broad-invalidate ["sessions"] (bootstrap/index race wipes the new tab).
+    expect(routeAndLifecycleSource).not.toContain("void chatWorkspaceCache.afterSessionChanged({\n        sessionId: nextId");
     expect(routeSource).toContain("resolveActiveSessionDetailForUi");
     expect(routeSource).toContain("isSessionDetailHardLoading");
+    expect(routeSource).toContain("mergePreservedCreatedSessions");
     expect(routeAndActionsSource).toContain("createSessionMutation.mutate({ agentId: selectedChatAgentId })");
+    const createMutationSource = routeAndLifecycleSource.slice(
+      routeAndLifecycleSource.indexOf("const createSessionMutation"),
+      routeAndLifecycleSource.indexOf("const createGroupRoomMutation"),
+    );
+    expect(createMutationSource).toContain("void queryClient.cancelQueries({ queryKey: [\"sessions\", \"query\"] })");
+    expect(createMutationSource).not.toContain("await Promise.all([\n        queryClient.cancelQueries({ queryKey: [\"sessions\", \"query\"] })");
     expect(routeSource).not.toContain("updateSessionAgentMutation");
     expect(routeSource).not.toContain("sessionAgentOptions");
     expect(routeSource).not.toContain("handleAgentTemplateChange");
@@ -1945,13 +2010,14 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("activeGroupRoomId");
     expect(routeSource).toContain("handleOpenGroupRoom");
     expect(routeSource).toContain('new URLSearchParams(location.search).get("room")');
-    expect(routeAndSelectionSource).toContain("requestedRoomId && activeGroupRoomId !== requestedRoomId");
-    expect(routeAndActionsSource).toContain("navigate(`/chat?room=${encodeURIComponent(roomId)}`, { replace: false })");
+    expect(routeSource).toContain("chatRouteSelection.kind === \"room\" || chatRouteSelection.kind === \"project_bus\"");
+    expect(routeAndActionsSource).toContain("chatRoute.openRoom(roomId)");
     expect(routeAndSelectionSource).toContain("setRightPaneCollapsed(false)");
     expect(routeAndIndexRailSource).toContain("chatRoomModeLabel(mode, lang)");
     expect(routeAndIndexRailSource).toContain("chatRoomPurposeLabel(purpose, lang)");
     expect(routeSource).toContain("queryKeys.chatRoomPurposes()");
-    expect(routeSource).toContain("fetchJson<ChatRoomPurpose[]>(\"/api/chat-rooms/purposes\")");
+    expect(routeSource).toContain("listChatRoomPurposes()");
+    expect(chatApiSource).toContain("/api/chat-rooms/purposes");
     expect(routeAndHelpersSource).toContain("抢占式讨论");
     expect(routeAndHelpersSource).toContain("协同问诊会诊");
     expect(routeAndHelpersSource).toContain("医疗分诊建议");
@@ -1961,17 +2027,19 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndActionsSource).toContain("purpose: groupPurposeDraft || \"discussion\"");
     expect(routeAndActionsSource).toContain("purpose: activeGroupRoom?.purpose || \"discussion\"");
     expect(routeAndActionsSource).toContain("purpose: groupManagePurposeDraft || \"discussion\"");
-    expect(routeSource).toContain("fetchJson<ChatRoomDetail>(`/api/chat-rooms/${activeGroupRoomId}`)");
+    expect(routeSource).toContain("fetchChatRoomDetail(activeGroupRoomId)");
+    expect(chatApiSource).toContain("`/api/chat-rooms/${encodeURIComponent(roomId)}`");
     expect(routeAndStreamSource).toContain("new EventSource(`/api/chat-rooms/${streamRoomId}/events`)");
     expect(routeAndStreamSource).toContain("syncChatRoomDetail(payload.detail)");
     expect(routeAndStreamSource).toContain("browser.chat_room_stream.closed");
     expect(routeSource).toContain("useGroupRoomStream");
     expect(routeSource).toContain("handleStartGroupRound");
-    expect(routeAndLifecycleSource).toContain("fetchJson<ChatRoomRoundAcceptedResponse>(`/api/chat-rooms/${roomId}/rounds`");
-    expect(routeAndLifecycleSource).toContain("Prefer: \"respond-async\"");
+    expect(routeAndLifecycleSource).toContain("startChatRoomRound(roomId, { topic, mode, purpose }, { preferAsync: true })");
+    expect(chatApiSource).toContain("headers.Prefer = \"respond-async\"");
     expect(routeAndLifecycleSource).toContain("chatWorkspaceCache.afterGroupRoundStarted(accepted.roomId)");
     expect(routeSource).toContain("stopGroupRoundMutation");
-    expect(routeAndLifecycleSource).toContain("fetchJson<ChatRoomDetail>(`/api/chat-rooms/${roomId}/stop`");
+    expect(routeAndLifecycleSource).toContain("stopChatRoomRound(roomId)");
+    expect(chatApiSource).toContain("`/api/chat-rooms/${encodeURIComponent(roomId)}/stop`");
     expect(routeSource).toContain("handleStopGroupRound");
     expect(routeSource).toContain("groupRoundStopping");
     expect(routeSource).toContain("groupRoundActive");
@@ -2122,7 +2190,8 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("uses the group surface as a project Agent bus observation and @ guidance entry", () => {
     expect(routeSource).toContain("handleOpenProjectAgentBus");
-    expect(routeAndActionsSource).toContain("setActiveGroupRoomId(\"__project_agent_bus__\")");
+    expect(routeAndActionsSource).toContain("chatRoute.openProjectBus()");
+    expect(routeAndActionsSource).not.toContain("setActiveGroupRoomId");
     expect(routeSource).toContain("queryKeys.projectAgentBus()");
     expect(routeSource).toContain("queryFn: ({ signal }) => listProjectAgentBusTimeline(undefined, { signal })");
     expect(routeAndLifecycleSource).toContain("sendProjectAgentBusMessage({ content, interruptTargets })");
@@ -2262,6 +2331,8 @@ describe("ChatCodingRoute layout contract", () => {
       "expectedType: \"assistant_delta\"",
       "if (!routed.accepted) {",
       "desktopConversationNotifierRef.current.handleAssistantDelta(routed.payload, {",
+      "sessionTitle: sessionTitleForNotificationsRef.current || streamSessionId",
+      "viewedSessionId: viewedSessionIdRef.current",
       "queueAssistantDelta(routed.payload, routed.trace);",
     ]);
 
@@ -2273,7 +2344,11 @@ describe("ChatCodingRoute layout contract", () => {
     expectOrderedFragments(applyPendingDetailSection, [
       "syncSessionDetail(detail);",
       "desktopConversationNotifierRef.current.handleSessionDetail(detail, {",
+      "viewedSessionId: viewedSessionIdRef.current",
     ]);
+    expect(routeSource).toContain("useDesktopConversationAttention({");
+    expect(routeSource).toContain("sessions: allVisibleSessions");
+    expect(routeSource).toContain("onOpenSession: handleOpenDirectSession");
   });
 
   it("records stream render-frame telemetry after ConversationView commits live text", () => {
@@ -2337,8 +2412,8 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("does not refetch chat indexes or detail immediately after an accepted direct turn", () => {
     const submitMutationStart = routeAndComposerSource.indexOf("const submitTurnMutation = useMutation");
-    const submitSuccessStart = routeAndComposerSource.indexOf("onSuccess: (acceptedTurn, variables)", submitMutationStart);
-    const submitErrorStart = routeAndComposerSource.indexOf("onError: (error, variables)", submitSuccessStart);
+    const submitSuccessStart = routeAndComposerSource.indexOf("onSuccess: (acceptedTurn, variables, context)", submitMutationStart);
+    const submitErrorStart = routeAndComposerSource.indexOf("onError: (error, variables, context)", submitSuccessStart);
     const submitSuccessBlock = routeAndComposerSource.slice(submitSuccessStart, submitErrorStart);
 
     expect(submitSuccessBlock).toContain("markOptimisticUserMessageAccepted");
@@ -2400,17 +2475,19 @@ describe("ChatCodingRoute layout contract", () => {
     );
   });
 
-  it("updates active direct session before pushing the route", () => {
+  it("opens direct sessions through the sole route controller with prefetch first", () => {
     const openDirectSessionSource = routeAndActionsSource.slice(
       routeAndActionsSource.indexOf("const handleOpenDirectSession = useCallback"),
       routeAndActionsSource.indexOf("const handleOpenAgent = useCallback"),
     );
 
-    expect(openDirectSessionSource).toContain("setActiveSession(normalizedSessionId)");
-    expect(openDirectSessionSource).toContain("navigate(`/chat?session=${encodeURIComponent(normalizedSessionId)}`, { replace: true })");
-    expect(openDirectSessionSource.indexOf("setActiveSession(normalizedSessionId)")).toBeLessThan(
-      openDirectSessionSource.indexOf("navigate(`/chat?session=${encodeURIComponent(normalizedSessionId)}`, { replace: true })"),
-    );
+    expect(openDirectSessionSource).toContain("prefetchSessionDetailWindow(queryClient, normalizedSessionId)");
+    expect(openDirectSessionSource).toContain("chatRoute.openSession(normalizedSessionId, {");
+    expect(openDirectSessionSource).not.toContain("setActiveSession");
+    expect(openDirectSessionSource).not.toContain("navigate(`/chat?session=");
+    // Prefetch happens before the route transition.
+    expect(openDirectSessionSource.indexOf("prefetchSessionDetailWindow(queryClient, normalizedSessionId)"))
+      .toBeLessThan(openDirectSessionSource.indexOf("chatRoute.openSession(normalizedSessionId, {"));
     expect(routeSource).toContain("resolveStickySessionDetailPaint");
     expect(routeSource).toContain("shouldShowStickyTranscriptPending");
   });
@@ -2437,6 +2514,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("chatRouteLongTaskCountRef.current >= 8");
     expect(routeSource).toContain("runtimeReady: Boolean(runtimeQuery.data)");
     expect(routeSource).toContain("sessionDetailReady: Boolean(activeSessionId ? sessionDetailQuery.data : true)");
+    expect(chatWorkbenchCatalogQueriesSource).toContain("shareRuntimeSummaryIfOnlyVolatileChanged");
+    expect(chatWorkbenchCatalogQueriesSource).toContain("structuralSharing: shareRuntimeSummaryIfOnlyVolatileChanged");
   });
 
   it("does not block chat startup readiness on secondary dashboard data", () => {
@@ -2465,7 +2544,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(groupSessionIndexItemsSource).toContain("styles.conversationAvatarGroup");
     expect(directSessionIndexItemSource).toContain("styles.directSessionItem");
     expect(groupSessionIndexItemsSource).toContain("styles.groupSessionItem");
-    expect(routeAndActionsSource).toContain("navigate(`/chat?session=${encodeURIComponent(normalizedSessionId)}`, { replace: true })");
+    expect(routeAndActionsSource).toContain("chatRoute.openSession(normalizedSessionId, {");
     expect(directSessionIndexItemSource).not.toContain("styles.conversationKindBadgeDirect");
     expect(directSessionIndexItemSource).toContain("styles.conversationKindBadgeChild");
     expect(groupSessionIndexItemsStyles.conversationKindBadgeGroup).toBeTypeOf("string");
@@ -2567,7 +2646,7 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("moves direct session actions into a right-click context menu", () => {
-    expect(routeSource).toContain("type SessionContextMenuState");
+    expect(routeAndRenameMenuSource).toContain("type SessionContextMenuState");
     expect(routeSource).toContain("const [sessionContextMenu, setSessionContextMenu]");
     expect(routeSource).toContain("const contextMenuSessionId = sessionContextMenu?.sessionId ?? \"\"");
     expect(routeAndRenameMenuSource).toContain("const openSessionContextMenu = useCallback");
@@ -2640,18 +2719,18 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("useChatAgentArchiveQueue");
     expect(routeSource).toContain("enqueueArchive: enqueueAgentArchive");
     expect(routeSource).toContain("pendingAgentIds: pendingArchiveAgentIds");
-    expect(routeSource).toContain('method: "DELETE"');
+    expect(agentsApiSource).toContain('method: "DELETE"');
     expect(routeSource).toContain("void queryClient.cancelQueries({ queryKey: queryKeys.agents() })");
     expect(routeSource).toContain("queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), remainingAgents)");
     expect(routeSource).toContain("useChatArchivedAgentRetirement");
     expect(routeSource).toContain("resolveAuthoritativeArchivedSessionIds");
     expect(routeSource).toContain("archiveSummary: agent.archiveSummary");
     expect(chatArchivedAgentRetirementSource).toContain("Removes an archived Agent's sessions from the normal Chat selection surface");
-    expect(chatArchivedAgentRetirementSource).toContain("useChatWorkbenchStore.getState().activeSessionId");
+    expect(chatArchivedAgentRetirementSource).toContain("replaceIfStillViewing");
     expect(chatArchivedAgentRetirementSource).not.toContain("if (!archivedSessionIds.length)");
     expect(routeSource).toContain("retiredDirectSessionIdsRef");
     expect(routeSource).toContain("updateSessionSummaryCaches(queryClient");
-    expect(routeSource).toContain("navigate(`${location.pathname}${nextSearch ? `?${nextSearch}` : \"\"}`, { replace: true })");
+    expect(chatArchivedAgentRetirementSource).toContain("resolveArchivedSessionRouteTransition");
     expect(routeSource).not.toContain("previousActiveSessionId");
     expect(routeSource).not.toContain("previousSelectedAgentId");
     expect(routeSource).toContain("onQueueDrained: async () => {");
@@ -2685,7 +2764,7 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("shows each visible agent with a functional role label, not only a person name", () => {
-    expect(routeSource).toContain("fetchJson<ConfigSummary>(\"/api/config/public\")");
+    expect(routeSource).toContain("fetchPublicConfig()");
     expect(routeSource).toContain("queryKeys.configPublic()");
     expect(routeSource).toContain("const modelLabelsById = useMemo");
     expect(routeSource).toContain("const resolveModelLabel = useCallback");
@@ -2729,7 +2808,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(conversationIndexModelSource).toContain("const rawSessionsById = new Map");
     expect(conversationIndexModelSource).toContain("if (!isVisibleConversation(conversation, rawSessionsById))");
     expect(conversationIndexModelSource).toContain("if (rawSession && !session)");
-    expect(routeSource).toContain("const allVisibleSessions = useMemo");
+    expect(routeSource).toContain("mergeAllVisibleSessions");
     expect(routeSource).toContain("const rightIndexSessions = useMemo");
     expect(conversationIndexModelSource).toContain("mergeVisibleSessionsIntoConversations(conversations, rightIndexSessions)");
     expect(conversationIndexModelSource).toContain("conversation.type !== \"group_room\"");
@@ -2746,17 +2825,18 @@ describe("ChatCodingRoute layout contract", () => {
     expect(conversationIndexModelSource).toContain("export function hasInvalidChildSessionLink");
     expect(conversationIndexModelSource).toContain("export function mergeVisibleSessionsIntoConversations");
     expect(routeSource).toContain("queryKeys.sessionChildSessions(activeRootSessionId || \"none\")");
-    expect(routeSource).toContain("fetchJson<SessionSummary[]>(`/api/sessions/${activeRootSessionId}/child-sessions`)");
+    expect(routeSource).toContain("listSessionChildSessions(activeRootSessionId)");
     expect(routeSource).toContain("const activeRootSessionId = rootSessionIdFor(sessionDetailQuery.data ?? directSessionActiveSummary)");
     expect(routeSource).toContain("queryKeys.sessionChildSessions(detailRootSessionId)");
-    expect(routeSource).toContain("const merged = [...(sessionsQuery.data ?? []), ...(childSessionsQuery.data ?? [])]");
+    expect(routeSource).toContain("const merged = [...(sessions ?? []), ...(childSessions ?? [])]");
     expect(routeSource).toContain("const rightIndexSessions = useMemo");
-    expect(routeSource).toContain("return allVisibleSessions.filter((session) => !isRepresentedInAgentSessionTabs(session))");
+    expect(routeSource).toContain("allVisibleSessions.filter((session) => !isRepresentedInAgentSessionTabs(session))");
     expect(routeSource).toContain("const selectedAgentVisibleSessions = useMemo");
     expect(routeSource).toContain("const agentSessionTabs = useMemo");
     expect(routeSource).toContain("sessions: [...(selectedAgentSessionsQuery.data?.items ?? []), ...selectedAgentVisibleSessions]");
-    expect(routeAndSessionSurfaceSource).toContain('String(right.updatedAt || right.lastActive || "")');
-    expect(routeAndSessionSurfaceSource).toContain(".localeCompare(String(left.updatedAt || left.lastActive || \"\"))");
+    expect(routeAndSessionSurfaceSource).toContain("compareAgentSessionTabOrder");
+    expect(routeAndSessionSurfaceSource).toContain("leftCreated.localeCompare(rightCreated)");
+    expect(routeAndSessionSurfaceSource).not.toContain('String(right.updatedAt || right.lastActive || "")');
     expect(routeAndSessionSurfaceSource).not.toContain("isChildSession(left) ? 2 : 1");
     expect(routeSource).toContain("buildAgentSessionTabs");
     expect(conversationIndexModelSource).toContain("mergeVisibleSessionsIntoConversations(conversations, rightIndexSessions)");
@@ -2849,7 +2929,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain('const activeFilePath = workspace.activeTab !== "agent" && !activeCliAgentRunId ? workspace.activeTab : null;');
     expect(routeSource).toContain("const fileContentQuery = useQuery({");
     expect(routeSource).toContain("queryKeys.fileContent(activeFilePath ?? \"\")");
-    expect(routeSource).toContain("fetchJson<FileContent>(`/api/files/content?path=${encodeURIComponent(activeFilePath ?? \"\")}`)");
+    expect(routeSource).toContain("fetchFileContent(activeFilePath ?? \"\")");
+    expect(filesApiSource).toContain("export function fetchFileContent");
     expect(routeSource).toContain("<ChatFileWorkspaceTabs");
     expect(routeSource).toContain("openTabs={workspace.openTabs}");
     expect(routeSource).toContain("activeTab={workspace.activeTab}");
@@ -2940,8 +3021,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(cliAgentRunModelSource).toContain("function isCliAgentRunActiveForClose");
     expect(routeAndCliTerminalSource).toContain('from "./cliAgentRunModel"');
     expect(routeSource).toContain('from "./useChatCliAgentTerminal"');
+    expect(routeSource).toContain('from "./useDesktopConversationAttention"');
     expect(routeAndCliTerminalSource).toContain("closeCliAgentRun");
-    expect(routeAndCliTerminalSource).toContain("/api/cli-agents/terminal-sessions/");
+    expect(routeAndCliTerminalSource).toContain("stopCliAgentTerminalSession");
+    expect(cliAgentsApiSource).toContain("/api/cli-agents/terminal-sessions/");
     expect(routeAndCliTerminalSource).toContain("const [closedCliAgentRunTokensBySession");
     expect(routeAndCliTerminalSource).toContain("const [cliAgentTerminalSessions");
     expect(routeAndCliTerminalSource).toContain("const [mountedCliAgentRunIdsBySession");
@@ -2953,7 +3036,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("setActiveTab(activeSessionId, cliAgentRunTabId(runId));");
     expect(routeAndCliTerminalSource).toContain("window.confirm(");
     expect(routeAndCliTerminalSource).toContain("const terminalSessionId = String(terminalSession?.terminalSessionId || run.terminalSessionId || run.result?.terminalSessionId || \"\").trim()");
-    expect(routeAndCliTerminalSource).toContain("`/api/cli-agents/terminal-sessions/${encodeURIComponent(terminalSessionId)}/stop`");
+    expect(routeAndCliTerminalSource).toContain("stopCliAgentTerminalSession<CliAgentTerminalSession>");
     expect(routeSource).toContain("const CliAgentRunTerminalPanel = lazy(() =>");
     expect(routeSource).toContain('import("./CliAgentRunTerminalPanel")');
     expect(routeSource).toContain("<ChatCliAgentTerminalStack");
@@ -2974,7 +3057,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain('import "@xterm/xterm/css/xterm.css"');
     expect(terminalPanelSource).toContain('import { Terminal } from "@xterm/xterm"');
     expect(terminalPanelSource).toContain('import "@xterm/xterm/css/xterm.css"');
-    expect(terminalPanelSource).toContain('"/api/cli-agents/terminal-sessions/ensure"');
+    expect(cliAgentsApiSource).toContain('"/api/cli-agents/terminal-sessions/ensure"');
+    expect(terminalPanelSource).toContain("ensureCliAgentTerminalSession");
     expect(terminalPanelSource).toContain('intent,');
     expect(terminalPanelSource).toContain('fetchTerminalSession("view", controller.signal)');
     expect(terminalPanelSource).toContain('requestTerminalSession(terminalCanResume ? "resume" : "start")');
@@ -3000,7 +3084,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(terminalPanelSource).toContain("const replayTerminalSnapshot");
     expect(terminalPanelSource).toContain("历史 TUI 画面无法安全重放");
     expect(terminalPanelSource).toContain("type CliAgentTerminalAck");
-    expect(terminalPanelSource).toContain("fetchJson<CliAgentTerminalAck>");
+    expect(terminalPanelSource).toContain("sendCliAgentTerminalInput<CliAgentTerminalAck>");
+    expect(cliAgentsApiSource).toContain("/input");
     expect(terminalPanelSource).toContain("CLI_AGENT_TASK_LOCKED");
     expect(terminalPanelSource).toContain("指令未发送：当前 CLI Agent 终端已有任务在运行。");
     expect(terminalPanelSource).not.toContain(".then((session) => setTerminalSession(session))");
@@ -3014,8 +3099,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).not.toContain("terminalInput");
     expect(routeSource).not.toContain("输入命令或回复");
     expect(routeSource).not.toContain("Type input");
-    expect(terminalPanelSource).toContain("/input`");
-    expect(routeAndCliTerminalSource).toContain("/stop`");
+    expect(cliAgentsApiSource).toContain("/input");
+    expect(cliAgentsApiSource).toContain("/stop");
     expect(routeSource).not.toContain("const [activeCliAgentRunId, setActiveCliAgentRunId] = useState");
     expect(routeStyles.cliAgentRunPanel).toBeTypeOf("string");
     expect(routeStyles.cliAgentRunPanelHidden).toContain("hidden");
@@ -3042,7 +3127,7 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("renders a compact QQ-style tree with direct sessions separate from Team-owned rooms", () => {
-    expect(routeSource).toContain("fetchJson<TeamListPayload>(\"/api/teams\")");
+    expect(routeSource).toContain("listTeams()");
     expect(routeSource).toContain("queryKeys.teams()");
     // Directory partition needs teams without opening the group picker.
     expect(routeSource).toContain("Must load whenever the left-rail agent directory is active");
@@ -3161,8 +3246,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("bootstrapIsError: activeSessionBootstrapQuery.isError");
     expect(routeSource).toContain("bootstrapFetchStatus: activeSessionBootstrapQuery.fetchStatus");
     expect(routeSource).toContain("sessionIndexHasMore");
-    expect(routeSource).toContain("加载更多会话");
-    expect(routeSource).toContain("已加载全部会话");
+    expect(chatSessionIndexRailPresentationSource).toContain("加载更多会话");
+    expect(chatSessionIndexRailPresentationSource).toContain("已加载全部会话");
     expect(routeSource).toContain("sessionIndexProgressVisible");
     expect(routeSource).toContain("rawSessionsQuery.loadMore()");
     expect(routeSource).toContain("styles.sessionLoadMoreButton");
@@ -3261,28 +3346,25 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("selects requested direct sessions without waiting for the session index", () => {
-    const requestedSessionBranchStart = routeAndSelectionSource.indexOf("requestedSessionId\n      && !requestedRoomId");
-    expect(requestedSessionBranchStart).toBeGreaterThan(0);
-    const requestedSessionBranch = routeAndSelectionSource.slice(
-      requestedSessionBranchStart,
-      routeAndSelectionSource.indexOf("if (!activeSessionId && sessions", requestedSessionBranchStart),
-    );
-    expect(requestedSessionBranch).toContain("activeSessionId !== requestedSessionId");
-    expect(requestedSessionBranch).toContain("setActiveGroupRoomId(\"\")");
-    expect(requestedSessionBranch).toContain("setActiveSession(requestedSessionId)");
-    expect(requestedSessionBranch).not.toContain("sessionsQuery.data?.some");
+    expect(routeSource).toContain("activeSessionIdFromRouteSelection(chatRouteSelection)");
     expect(routeSource).toContain("queryFn: ({ signal }) => fetchSessionDetailWindow(activeSessionId, {");
     expect(routeSource).toContain("enabled: Boolean(activeSessionId) && !isTempSessionId(activeSessionId)");
+    // The explicit URL target drives detail loading immediately; no list data is required.
+    expect(routeSource).not.toContain("setActiveSession(requestedSessionId)");
+    expect(routeSource).not.toContain("useChatWorkbenchStore((state) => state.activeSessionId)");
   });
 
   it("bootstraps the first-paint catalog once before fallback catalog queries", () => {
     expect(routeSource).toContain('queryKey: ["sessions", "active-bootstrap"]');
-    expect(routeSource).toContain(
-      'fetchJson<ChatWorkbenchBootstrap>("/api/sessions/bootstrap?limit=50", { signal })',
-    );
+    expect(chatApiSource).toContain('fetchJson<ChatWorkbenchBootstrap>("/api/sessions/bootstrap?limit=50"');
+    expect(routeSource).toContain("fetchChatWorkbenchBootstrap({ signal })");
     expect(routeSource).toContain("queryClient.setQueryData(queryKeys.agents(), payload.agents)");
     expect(routeSource).toContain("queryClient.setQueryData(queryKeys.conversations(), payload.conversations)");
     expect(routeSource).toContain('queryKeys.sessionQuery("", 50)');
+    expect(routeSource).toContain("mergePreservedCreatedSessions");
+    expect(routeSource).toContain("Never hard-replace the session index page");
+    expect(routeSource).toContain("mergePreservedCreatedSessions");
+    expect(routeSource).toContain("Never hard-replace the session index page");
     expect(routeSource).toContain(
       "const bootstrapSettled = activeSessionBootstrapQuery.isFetched || activeSessionBootstrapQuery.isError",
     );
@@ -3296,26 +3378,28 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("shouldEnableSessionIndexQuery");
     expect(routeSource).toContain("bootstrapFetchStatus: activeSessionBootstrapQuery.fetchStatus");
     expect(routeSource).toContain("enabled: sessionIndexQueryEnabled");
-    const bootstrapEffectStart = routeAndSelectionSource.indexOf(
-      "const bootstrapSessionId = String(bootstrapActiveSessionId ?? \"\").trim()",
+    // Bare route canonicalization is one-shot, gated on the authoritative directory.
+    const canonicalizeEffectStart = routeSource.indexOf(
+      "// Bare `/chat` canonicalizes once per location key",
     );
-    expect(bootstrapEffectStart).toBeGreaterThan(0);
-    const bootstrapEffect = routeAndSelectionSource.slice(
-      routeAndSelectionSource.lastIndexOf("useEffect(() => {", bootstrapEffectStart),
-      routeAndSelectionSource.indexOf("useEffect(() => {", bootstrapEffectStart + 1),
+    expect(canonicalizeEffectStart).toBeGreaterThan(0);
+    const canonicalizeEffect = routeSource.slice(
+      canonicalizeEffectStart,
+      routeSource.indexOf("}, [bareRouteBootstrapTarget, canonicalizeBareRoute", canonicalizeEffectStart) + 80,
     );
-    expect(bootstrapEffect).toContain("requestedSessionId || requestedRoomId || activeSessionId");
-    expect(bootstrapEffect).toContain('setActiveGroupRoomId("")');
-    expect(bootstrapEffect).toContain("setActiveSession(bootstrapSessionId)");
-    expect(bootstrapEffect).not.toContain("sessionsQuery.data");
+    expect(canonicalizeEffect).toContain("chatRouteSelection.kind !== \"bare\"");
+    expect(canonicalizeEffect).toContain("canonicalizeBareRoute(bareRouteBootstrapTarget)");
+    expect(canonicalizeEffect).toContain("if (!sessionsQuery.data)");
   });
 
   it("loads direct session details as a window and wires top-edge history paging", () => {
     expect(routeAndHelpersSource).toContain("const SESSION_DETAIL_INITIAL_MESSAGE_LIMIT = 40");
     expect(routeAndHelpersSource).toContain("function fetchSessionDetailWindow(");
-    expect(routeAndHelpersSource).toContain("params.set(\"messageLimit\", String(options.messageLimit ?? SESSION_DETAIL_INITIAL_MESSAGE_LIMIT))");
-    expect(routeAndHelpersSource).toContain("params.set(\"transcriptScope\", options.transcriptScope ?? \"window\")");
-    expect(routeSource).toContain("structuralSharing: (previous, next) =>");
+    expect(routeAndHelpersSource).toContain("fetchSessionDetail(normalizedSessionId, {");
+    expect(chatApiSource).toContain("search.set(\"messageLimit\", String(options.messageLimit))");
+    expect(chatApiSource).toContain("search.set(\"transcriptScope\", options.transcriptScope)");
+    expect(routeSource).toContain("structuralSharing: sessionDetailStructuralSharing");
+    expect(routeSource).toContain("export function sessionDetailStructuralSharing(");
     expect(routeAndDetailMutationsSource).toContain("mergeSessionDetailMessageWindow(current, page)");
     expect(routeSource).toContain("const nextDetail = mergeSessionDetailMessageWindow(previous, detail)");
     expect(routeSource).toContain("hasEarlierMessages: Boolean(detail.messageWindow?.hasEarlier)");
@@ -3330,10 +3414,18 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("asks for confirmation before deleting conversations", () => {
-    expect(routeAndActionsSource).toContain("t(\"deleteSessionConfirm\").replace(\"{title}\"");
-    expect(routeAndActionsSource).toContain("t(\"deleteGroupConfirm\").replace(\"{title}\"");
-    expect(routeAndActionsSource).toContain("if (!window.confirm(sessionConfirmMessage))");
-    expect(routeAndActionsSource).toContain("if (!window.confirm(groupConfirmMessage))");
+    expect(routeAndActionsSource).toContain("openDeleteSessionConfirm(session)");
+    expect(routeAndActionsSource).not.toContain("window.confirm(sessionConfirmMessage)");
+    expect(routeAndActionsSource).toContain("openClearSessionHistoryConfirm(session)");
+    expect(routeAndActionsSource).not.toContain("window.confirm(confirmMessage)");
+    expect(routeAndActionsSource).toContain("openDeleteGroupConfirm()");
+    expect(routeAndActionsSource).toContain("openResetGroupConfirm()");
+    expect(routeAndActionsSource).not.toContain("window.confirm(groupConfirmMessage)");
+    expect(chatCodingRouteWorkbenchSource).toContain("ChatDangerConfirmDialog");
+    expect(chatCodingRouteWorkbenchSource).toContain("confirmPendingWorkbenchAction");
+    expect(chatCodingRouteWorkbenchSource).toContain("useChatWorkbenchConfirmDialog");
+    expect(chatWorkbenchConfirmDialogSource).toContain("deleteSessionConfirm");
+    expect(chatWorkbenchConfirmDialogSource).toContain("clearSessionHistoryConfirm");
     expect(routeAndActionsSource).toContain("[session.id]: t(\"deleteSessionBusy\")");
     expect(routeAndActionsSource).toContain("alreadyDeletingThisSession");
     expect(routeAndActionsSource).toContain("deleteSessionMutation.variables?.sessionId === session.id");
@@ -3341,12 +3433,51 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain('deleteBusyLabel={t("deleteSessionBusy")}');
     expect(directSessionIndexListSource).toContain("deleteBusyLabel");
     expect(directSessionIndexItemSource).toContain("const deleteBusyReason = sessionBusy ? deleteBusyLabel : \"\"");
-    expect(routeAndActionsSource.indexOf("window.confirm(sessionConfirmMessage)")).toBeLessThan(
-      routeAndActionsSource.indexOf("deleteSessionMutation.mutate({ sessionId: session.id })"),
+    expect(chatWorkbenchConfirmDialogSource.indexOf("confirmPendingWorkbenchAction")).toBeLessThan(
+      chatWorkbenchConfirmDialogSource.indexOf("deleteSessionMutation.mutate({ sessionId"),
     );
-    expect(routeAndActionsSource.indexOf("window.confirm(groupConfirmMessage)")).toBeLessThan(
-      routeAndActionsSource.indexOf("deleteGroupRoomMutation.mutate({ roomId: activeGroupRoomId })"),
+  });
+
+  it("supports bulk session selection and remove in the conversation index rail", () => {
+    expect(chatCodingRouteWorkbenchSource).toContain("selectedBulkSessionIds");
+    expect(chatCodingRouteWorkbenchSource).toContain("SessionBulkOperationsPanel");
+    expect(chatCodingRouteWorkbenchSource).toContain("useChatSessionBulkSelection");
+    expect(chatCodingRouteWorkbenchSource).toContain("useChatVisibleSessionCatalog");
+    expect(chatCodingRouteWorkbenchSource).toContain("useChatAgentSessionTabs");
+    expect(chatCodingRouteWorkbenchSource).toContain("useChatSessionIndexRailModel");
+    expect(chatCodingRouteWorkbenchSource).toContain("useChatAgentDirectoryMaps");
+    expect(chatCodingRouteWorkbenchSource).toContain("useChatIndexDerivedState");
+    expect(chatGroupRoomChromeModelSource).toContain("linkedTeamRoomIds");
+    expect(chatGroupRoomChromeModelSource).toContain("activeGroupTeamOwned");
+    expect(chatGroupRoomChromeModelSource).toContain("buildChatGroupRoomActionDisabledFlags");
+    expect(chatVisibleSessionCatalogSource).toContain("mergeAllVisibleSessions");
+    expect(chatVisibleSessionCatalogModelSource).toContain("isVisibleDirectSession");
+    expect(chatAgentSessionTabsSource).toContain("buildAgentSessionTabs");
+    expect(chatSessionIndexRailPresentationSource).toContain("加载更多会话");
+    expect(chatCodingRouteWorkbenchSource).toContain("bulkRemoveSessions");
+    expect(chatSessionBulkSelectionSource).toContain("bulkDeleteSessionsMutation");
+    expect(chatSessionBulkSelectionSource).toContain('t("bulkRemoveSessionsConfirm")');
+    expect(chatSessionBulkSelectionSource).toContain('t("bulkSelectVisibleSessions")');
+    expect(sessionBulkOperationsPanelSource).toContain("VConfirmDialog");
+    expect(sessionBulkOperationsPanelSource).toContain("AgentBulkActionBar");
+    expect(sessionBulkOperationsPanelSource).toContain("if (!hasSelection)");
+    expect(sessionBulkOperationsPanelSource).toContain("return null");
+    expect(sessionBulkOperationsPanelSource).not.toContain("window.confirm");
+    expect(conversationIndexRailSource).toContain("sessionBulkSelectVisibleVisible");
+    expect(conversationIndexRailSource).toContain("onSessionBulkSelectVisible");
+    expect(conversationIndexRailSource).toContain("panelSearchBulkSelect");
+    expect(directSessionIndexItemSource).toContain("bulkSelectionEnabled");
+    expect(directSessionIndexItemSource).toContain("onToggleBulk");
+    expect(conversationIndexTreeSource).toContain("selectedBulkSessionIds");
+    expect(chatSessionBulkModelSource).toContain("sessionBulkDeletable");
+    expect(chatApiSource).toContain("bulkDeleteChatSessions");
+    expect(chatApiSource).toContain("/api/sessions/bulk-delete");
+    const bulkDeleteMutationSource = routeAndLifecycleSource.slice(
+      routeAndLifecycleSource.indexOf("const bulkDeleteSessionsMutation"),
     );
+    expect(bulkDeleteMutationSource).toContain("bulkDeleteChatSessions");
+    expect(bulkDeleteMutationSource).toContain("onMutate: async (variables)");
+    expect(bulkDeleteMutationSource).toContain("removeDeletedSessionFromConversations");
   });
 
   it("reuses the Agent direct-session reset contract for quick history clearing", () => {
@@ -3354,23 +3485,19 @@ describe("ChatCodingRoute layout contract", () => {
       routeAndLifecycleSource.indexOf("const clearSessionHistoryMutation"),
       routeAndLifecycleSource.indexOf("const renameSessionMutation"),
     );
-    expect(clearMutationSource).toContain("/api/agents/${encodeURIComponent(agentId)}/reset");
-    expect(clearMutationSource).toContain("clearRuntimeState: false");
-    expect(clearMutationSource).toContain("resetDirectSession: true");
-    expect(clearMutationSource).toContain("directSessionId: sessionId");
-    expect(clearMutationSource).toContain("resetPersonaProfile: false");
-    expect(clearMutationSource).toContain("resetTaskProfile: false");
-    expect(clearMutationSource).toContain("resetToolPolicy: false");
-    expect(clearMutationSource).toContain("resetMemoryPolicy: false");
-    expect(clearMutationSource).toContain("resetRuntimePolicy: false");
-    expect(clearMutationSource).toContain("removeSessionWorkspace(previousDirectSessionId, replacementDirectSessionId)");
-    expect(clearMutationSource).toContain("setActiveSession(replacementDirectSessionId)");
+    expect(clearMutationSource).toContain("resetAgentDirectSession(agentId, sessionId)");
+    expect(clearMutationSource).toContain("removeSessionWorkspace(previousDirectSessionId)");
+    expect(clearMutationSource).toContain("replaceIfStillViewing(");
+    expect(clearMutationSource).toContain("previousDirectSessionId");
+    expect(clearMutationSource).toContain("replacementDirectSessionId");
+    expect(clearMutationSource).not.toContain("setActiveSession");
     expect(clearMutationSource).toContain("cancelQueries({ queryKey: queryKeys.session(previousDirectSessionId) })");
     expect(clearMutationSource).toContain("queryKeys.sessionLlmOptions(previousDirectSessionId)");
     expect(clearMutationSource).toContain("afterSessionDeleted");
     expect(clearMutationSource).toContain("chatWorkspaceCache.afterChatWorkspaceReset()");
-    expect(routeAndActionsSource).toContain("t(\"clearSessionHistoryConfirm\").replace(\"{title}\"");
-    expect(routeAndActionsSource).toContain("clearSessionHistoryMutation.mutate({ sessionId: session.id, agentId: session.agentId })");
+    expect(routeAndActionsSource).toContain("openClearSessionHistoryConfirm(session)");
+    expect(chatWorkbenchConfirmDialogSource).toContain("clearSessionHistoryMutation.mutate({ sessionId: session.id, agentId })");
+    expect(chatWorkbenchConfirmDialogSource).toContain('const agentId = String(session.agentId || "").trim()');
     expect(routeSource).toContain("contextMenuSession?.agentId");
     expect(routeSource).toContain("isAgentRootSession(contextMenuSession)");
   });
@@ -3390,13 +3517,19 @@ describe("ChatCodingRoute layout contract", () => {
     expect(deleteMutationSource.indexOf("queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations()")).toBeLessThan(
       deleteMutationSource.indexOf("void chatWorkspaceCache.afterSessionDeleted({"),
     );
-    expect(deleteMutationSource).toContain("Prefer: \"respond-async\"");
+    expect(deleteMutationSource).toContain("deleteChatSession(sessionId)");
+    expect(chatApiSource).toContain('method: "DELETE"');
+    expect(chatApiSource).toContain('Prefer: "respond-async"');
     expect(deleteMutationSource).toContain("onMutate: async (variables)");
     // cancelQueries must not be awaited — that froze tab switching during delete.
     expect(deleteMutationSource).toContain("void queryClient.cancelQueries({ queryKey: queryKeys.sessions() })");
     expect(deleteMutationSource).not.toContain("await Promise.all([\n        queryClient.cancelQueries({ queryKey: queryKeys.sessions() })");
     expect(deleteMutationSource).toContain("optimisticNextActiveSessionId");
-    expect(deleteMutationSource).toContain("setActiveSession(optimisticNextActiveSessionId)");
+    expect(deleteMutationSource).toContain("replaceIfStillViewing(");
+    expect(deleteMutationSource).toContain("requestSessionComposerFocus(optimisticNextActiveSessionId)");
+    expect(deleteMutationSource).toContain("requestSessionComposerFocus(nextActiveSessionId)");
+    expect(deleteMutationSource).toContain("previousRouteSessionId === variables.sessionId");
+    expect(deleteMutationSource).not.toContain("setActiveSession");
     expect(deleteMutationSource).toContain("captureSessionIndexCacheSnapshots(queryClient)");
     expect(deleteMutationSource).toContain("previousConversations");
     expect(deleteMutationSource).toContain("previousAgents");
@@ -3407,29 +3540,40 @@ describe("ChatCodingRoute layout contract", () => {
     expect(deleteMutationSource).toContain("chatWorkspaceCache.afterSessionDeleted({");
     expect(deleteMutationSource).not.toContain("void chatWorkspaceCache.afterChatRoomsChanged()");
     expect(deleteMutationSource).not.toContain("void chatWorkspaceCache.afterSessionChanged()");
+    expect(chatCodingRouteWorkbenchSource).toContain("composerFocusRequest");
+    expect(chatCodingRouteWorkbenchSource).toContain("composerFocusSignal:");
+    expect(chatCodingRouteWorkbenchSource).toContain("onComposerFocusRequestSettled:");
+    expect(conversationViewSource).toContain("scheduleComposerFocusAttempts");
+    expect(conversationViewSource).not.toContain("onComposerFocusRequestSettled?.(focusSignal);\n        return;\n      }\n      if (!shouldApplyComposerFocusRequest");
   });
 
   it("keeps the active direct session selected when the list is temporarily stale", () => {
     const selectionEffectSource = routeAndSelectionSource.slice(
-      routeAndSelectionSource.indexOf("if (requestedRoomId && activeGroupRoomId !== requestedRoomId)"),
+      routeAndSelectionSource.indexOf("const normalizedSessionId = String(routeSessionId || \"\").trim()"),
       routeAndSelectionSource.length,
     );
-    expect(selectionEffectSource).toContain("if (!activeSessionId && sessions && sessions.length > 0)");
+    expect(selectionEffectSource).toContain("if (!normalizedSessionId || isTempSessionId(normalizedSessionId))");
+    expect(selectionEffectSource).toContain("latestDirectSessionSelectionRef.current = normalizedSessionId");
+    expect(selectionEffectSource).not.toContain("setActiveSession(");
     expect(selectionEffectSource).not.toContain("!sessionsQuery.data.some((session) => session.id === activeSessionId)");
     expect(selectionEffectSource).not.toContain("!sessions.some((session) => session.id === activeSessionId)");
   });
 
-  it("reconciles stale active sessions when reset removes their backend record", () => {
-    expect(routeAndHelpersSource).toContain("function isSessionNotFoundError");
+  it("keeps explicit missing sessions on their URL with an unavailable surface instead of reconciling away", () => {
+    expect(chatApiSource).toContain("function isSessionNotFoundError");
+    expect(routeAndHelpersSource).toContain("isSessionNotFoundError");
+    expect(chatSessionSelectionSource).toContain("evictUnopenableSessionFromCaches");
+    expect(chatSessionDetailHelpersSource).toContain("evictUnopenableSessionFromCaches");
     expect(routeSource).toContain("sessionDetailQuery.isError");
-    expect(routeSource).toContain("isSessionNotFoundError(sessionDetailQuery.error)");
-    expect(routeSource).toContain("removeSessionWorkspace(activeSessionId, nextActiveSessionId || null)");
-    expect(routeSource).toContain("clearSessionTransientUiState(activeSessionId)");
-    expect(routeSource).toContain("sessions?.filter((session) => session.id !== activeSessionId)");
-    expect(routeSource).toContain("removeDeletedSessionFromConversations(conversations, activeSessionId)");
-    expect(routeSource).toContain("requestedSessionId === activeSessionId");
-    expect(routeSource).toContain("navigate(`${location.pathname}${nextSearch ? `?${nextSearch}` : \"\"}`, { replace: true })");
-    expect(routeSource).toContain("chatWorkspaceCache.refreshConversationIndex()");
+    expect(routeSource).toContain(
+      "// Explicit missing/archived session keeps its URL and renders the blocking",
+    );
+    expect(routeSource).toContain("unavailable surface");
+    expect(routeSource).not.toContain("isSessionNotFoundError(sessionDetailQuery.error)");
+    expect(routeSource).not.toContain("removeSessionWorkspace(activeSessionId, nextActiveSessionId || null)");
+    expect(routeSource).not.toContain("setActiveSession(nextActiveSessionId)");
+    expect(routeSource).not.toContain("navigate(`${location.pathname}${nextSearch ? `?${nextSearch}` : \"\"}`, { replace: true })");
+    expect(routeSource).toContain("hasBlockingError={sessionDetailErrorState.blockingError}");
   });
 
   it("keeps renamed direct session titles visible before conversation refetch finishes", () => {
@@ -3526,8 +3670,9 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("keeps the Agent model fixed while mutating only Session reasoning effort", () => {
     expect(routeAndDetailMutationsSource).toContain("const sessionReasoningEffortMutation = useMutation");
-    expect(routeAndDetailMutationsSource).toContain("/reasoning-effort");
-    expect(routeAndDetailMutationsSource).toContain("JSON.stringify({ reasoningEffort: variables.reasoningEffort })");
+    expect(routeAndDetailMutationsSource).toContain("updateSessionReasoningEffort(variables.sessionId, variables.reasoningEffort)");
+    expect(chatApiSource).toContain("/reasoning-effort");
+    expect(chatApiSource).toContain("JSON.stringify({ reasoningEffort })");
     expect(routeSource).toContain("model: sessionLlmOptions.model");
     expect(routeSource).toContain("onReasoningEffortChange");
     expect(routeSource).not.toContain("/llm-selection");

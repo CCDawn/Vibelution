@@ -2,11 +2,23 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Union
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
+from core.web.routes.teams_catalog_models import (
+    TeamAiSearchRunListResponse,
+    TeamCanvasResponse,
+    TeamDetailFullResponse,
+    TeamDetailLightResponse,
+    TeamListResponse,
+)
+from core.web.routes.teams_write_models import (
+    TeamAiSearchRunResponse,
+    TeamMessageResponse,
+    TeamRepairResponse,
+)
 from core.web.services.team_service import (
     TeamNotFoundError,
     TeamServiceError,
@@ -21,6 +33,7 @@ from core.web.services.team_service import (
     list_teams_compact,
     request_system_team_bootstrap,
     save_team_canvas,
+    list_team_member_messages,
     send_team_message,
     start_ai_search_source_scope_run,
     sync_team_chat_room,
@@ -69,6 +82,24 @@ class TeamMessagePayload(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class TeamMemberMessageResponse(BaseModel):
+    messageId: str
+    teamId: str
+    sourceAgentId: str
+    sourceAgentName: str
+    targetAgentId: str
+    targetAgentName: str
+    targetSessionId: str
+    summary: str
+    createdAt: str
+
+
+class TeamMemberMessageListResponse(BaseModel):
+    teamId: str
+    teamName: str
+    messages: list[TeamMemberMessageResponse]
+
+
 class AiSearchRunStartPayload(BaseModel):
     topic: str = Field("", max_length=240)
     sourceLimit: int = Field(8, ge=1, le=12)
@@ -76,14 +107,23 @@ class AiSearchRunStartPayload(BaseModel):
     includeSignals: bool = False
 
 
-@router.get("/teams")
+@router.get(
+    "/teams",
+    response_model=TeamListResponse,
+    response_model_exclude_unset=True,
+)
 def team_list(includeArchived: bool = False) -> dict:
     payload = list_teams_compact(include_archived=includeArchived)
     payload["systemTeamBootstrap"] = request_system_team_bootstrap(reason="team_list", allow_sync_check=False)
     return payload
 
 
-@router.post("/teams", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/teams",
+    status_code=status.HTTP_201_CREATED,
+    response_model=TeamDetailFullResponse,
+    response_model_exclude_unset=True,
+)
 def team_create(payload: TeamCreatePayload) -> dict:
     try:
         return create_team(
@@ -96,7 +136,11 @@ def team_create(payload: TeamCreatePayload) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/teams/{team_id}")
+@router.get(
+    "/teams/{team_id}",
+    response_model=Union[TeamDetailLightResponse, TeamDetailFullResponse],
+    response_model_exclude_unset=True,
+)
 def team_detail(team_id: str, detail: str = "full") -> dict:
     try:
         detail_mode = str(detail or "full").strip().lower()
@@ -111,7 +155,11 @@ def team_detail(team_id: str, detail: str = "full") -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.patch("/teams/{team_id}")
+@router.patch(
+    "/teams/{team_id}",
+    response_model=TeamDetailFullResponse,
+    response_model_exclude_unset=True,
+)
 def team_update(team_id: str, payload: TeamUpdatePayload) -> dict:
     try:
         members = None if payload.members is None else [item.model_dump() for item in payload.members]
@@ -129,7 +177,11 @@ def team_update(team_id: str, payload: TeamUpdatePayload) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.delete("/teams/{team_id}")
+@router.delete(
+    "/teams/{team_id}",
+    response_model=TeamDetailFullResponse,
+    response_model_exclude_unset=True,
+)
 def team_delete(team_id: str) -> dict:
     try:
         return archive_team(team_id)
@@ -139,7 +191,11 @@ def team_delete(team_id: str) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/teams/{team_id}/canvas")
+@router.get(
+    "/teams/{team_id}/canvas",
+    response_model=TeamCanvasResponse,
+    response_model_exclude_unset=True,
+)
 def team_canvas(team_id: str) -> dict:
     try:
         return get_team_canvas(team_id)
@@ -149,7 +205,11 @@ def team_canvas(team_id: str) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.put("/teams/{team_id}/canvas")
+@router.put(
+    "/teams/{team_id}/canvas",
+    response_model=TeamCanvasResponse,
+    response_model_exclude_unset=True,
+)
 def team_canvas_update(team_id: str, payload: TeamCanvasPayload) -> dict:
     try:
         return save_team_canvas(team_id, payload.model_dump())
@@ -159,7 +219,11 @@ def team_canvas_update(team_id: str, payload: TeamCanvasPayload) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/teams/{team_id}/ai-search-runs")
+@router.get(
+    "/teams/{team_id}/ai-search-runs",
+    response_model=TeamAiSearchRunListResponse,
+    response_model_exclude_unset=True,
+)
 def team_ai_search_run_list(team_id: str, limit: int = 6) -> dict:
     try:
         return list_ai_search_source_scope_runs(team_id, limit=limit)
@@ -169,7 +233,12 @@ def team_ai_search_run_list(team_id: str, limit: int = 6) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/teams/{team_id}/ai-search-runs", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/teams/{team_id}/ai-search-runs",
+    status_code=status.HTTP_201_CREATED,
+    response_model=TeamAiSearchRunResponse,
+    response_model_exclude_unset=True,
+)
 def team_ai_search_run_start(team_id: str, payload: AiSearchRunStartPayload) -> dict:
     try:
         return start_ai_search_source_scope_run(
@@ -185,7 +254,25 @@ def team_ai_search_run_start(team_id: str, payload: AiSearchRunStartPayload) -> 
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/teams/{team_id}/messages", status_code=status.HTTP_201_CREATED)
+@router.get(
+    "/teams/{team_id}/member-messages",
+    response_model=TeamMemberMessageListResponse,
+)
+def team_member_message_list(team_id: str, limit: int = 40) -> dict:
+    try:
+        return list_team_member_messages(team_id, limit=limit)
+    except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except TeamServiceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post(
+    "/teams/{team_id}/messages",
+    status_code=status.HTTP_201_CREATED,
+    response_model=TeamMessageResponse,
+    response_model_exclude_unset=True,
+)
 def team_message_create(team_id: str, payload: TeamMessagePayload) -> dict:
     try:
         return send_team_message(
@@ -202,7 +289,11 @@ def team_message_create(team_id: str, payload: TeamMessagePayload) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/teams/{team_id}/chat-room/sync")
+@router.post(
+    "/teams/{team_id}/chat-room/sync",
+    response_model=TeamDetailFullResponse,
+    response_model_exclude_unset=True,
+)
 def team_chat_room_sync(team_id: str) -> dict:
     try:
         return sync_team_chat_room(team_id)
@@ -212,7 +303,11 @@ def team_chat_room_sync(team_id: str) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/teams/{team_id}/challenge-cup-agents/repair")
+@router.post(
+    "/teams/{team_id}/challenge-cup-agents/repair",
+    response_model=TeamRepairResponse,
+    response_model_exclude_unset=True,
+)
 def team_challenge_cup_agents_repair(team_id: str) -> dict:
     if team_id != "research-team":
         raise HTTPException(status_code=404, detail="Challenge Cup research Team not found.")
@@ -222,7 +317,11 @@ def team_challenge_cup_agents_repair(team_id: str) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/teams/{team_id}/knowledge-expansion-agents/repair")
+@router.post(
+    "/teams/{team_id}/knowledge-expansion-agents/repair",
+    response_model=TeamRepairResponse,
+    response_model_exclude_unset=True,
+)
 def team_knowledge_expansion_agents_repair(team_id: str) -> dict:
     if team_id != "knowledge-expansion-team":
         raise HTTPException(status_code=404, detail="Knowledge expansion Team not found.")

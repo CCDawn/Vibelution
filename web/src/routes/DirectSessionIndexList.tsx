@@ -1,6 +1,6 @@
 import type { DragEvent, MouseEvent } from "react";
 
-import type { AgentInstance, ConversationSummary, SessionReferenceAttachment, SessionSummary } from "../api/types";
+import type { AgentInstance, ConversationSummary, SessionReferenceAttachment, SessionSummary, Team } from "../api/types";
 import type { TranslationKey } from "../i18n/dictionary";
 import type { ModelLabelResolver } from "./agentDisplay";
 import { DirectSessionIndexItem, buildDirectSessionIndexViewModel } from "./DirectSessionIndexItem";
@@ -24,6 +24,7 @@ type DirectSessionIndexListProps = {
   /** Session ids waiting on tool/permission approval. */
   sessionIdsNeedingApproval?: readonly string[];
   sessionsById: Map<string, SessionSummary>;
+  teams?: Team[];
   statusLabel: (status: string) => string;
   formatTime: (value: string) => string;
   t: (key: TranslationKey) => string;
@@ -43,6 +44,10 @@ type DirectSessionIndexListProps = {
   onPrefetch?: (sessionId: string) => void;
   onRenameTitleChange: (title: string) => void;
   onSubmitRename: (session: SessionSummary) => void;
+  bulkSelectionEnabled?: boolean;
+  selectedBulkSessionIds?: ReadonlySet<string>;
+  bulkSelectLabel?: string;
+  onToggleBulk?: (sessionId: string, selected: boolean, shiftKey?: boolean) => void;
 };
 
 export function conversationToSessionSummary(
@@ -88,6 +93,16 @@ export function conversationToSessionSummary(
     if (existingSession.conversationIndexErrors === undefined && conversation.conversationIndexErrors !== undefined) {
       patchExistingSession({ conversationIndexErrors: conversation.conversationIndexErrors });
     }
+    const conversationTeam = conversation as ConversationSummary & { teamId?: string; teamName?: string };
+    if (!String(existingSession.teamId || "").trim() && String(conversationTeam.teamId || "").trim()) {
+      patchExistingSession({
+        teamId: conversationTeam.teamId,
+        teamName: conversationTeam.teamName || existingSession.teamName,
+      });
+    }
+    if (!String(existingSession.teamName || "").trim() && String(conversationTeam.teamName || "").trim()) {
+      patchExistingSession({ teamName: conversationTeam.teamName });
+    }
     return nextSession;
   }
   return {
@@ -118,6 +133,8 @@ export function conversationToSessionSummary(
     conversationIndexVisibility: conversation.conversationIndexVisibility,
     conversationIndexKind: conversation.conversationIndexKind,
     conversationIndexErrors: conversation.conversationIndexErrors,
+    teamId: (conversation as ConversationSummary & { teamId?: string }).teamId,
+    teamName: (conversation as ConversationSummary & { teamName?: string }).teamName,
   };
 }
 
@@ -138,6 +155,7 @@ export function DirectSessionIndexList({
   sessionComposerErrors,
   sessionIdsNeedingApproval = [],
   sessionsById,
+  teams = [],
   statusLabel,
   formatTime,
   t,
@@ -153,6 +171,10 @@ export function DirectSessionIndexList({
   onPrefetch,
   onRenameTitleChange,
   onSubmitRename,
+  bulkSelectionEnabled = false,
+  selectedBulkSessionIds,
+  bulkSelectLabel = "",
+  onToggleBulk,
 }: DirectSessionIndexListProps) {
   const approvalSessionIds = new Set(
     sessionIdsNeedingApproval.map((id) => String(id || "").trim()).filter(Boolean),
@@ -199,6 +221,7 @@ export function DirectSessionIndexList({
             sessionDisplay={sessionView.sessionDisplay}
             sessionSummary={sessionView.sessionSummary}
             sessionTitle={sessionView.sessionTitle}
+            teams={teams}
             lang={lang}
             statusLabel={statusLabel}
             formatTime={formatTime}
@@ -218,6 +241,10 @@ export function DirectSessionIndexList({
             onPrefetch={onPrefetch}
             onRenameTitleChange={onRenameTitleChange}
             onSubmitRename={onSubmitRename}
+            bulkSelectionEnabled={bulkSelectionEnabled}
+            bulkSelected={Boolean(selectedBulkSessionIds?.has(session.id))}
+            bulkSelectLabel={bulkSelectLabel}
+            onToggleBulk={onToggleBulk}
           />
         );
       })}

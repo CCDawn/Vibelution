@@ -32,6 +32,18 @@ export type LauncherStatusSummary = {
   overallState: string;
   observedState: string;
   lifecycleConsistency: string;
+  phase: string;
+  stateVersion: number;
+  backendHealthy: boolean;
+  backendPortListening: boolean;
+  lifecycleResults: LauncherLifecycleResultSummary[];
+};
+
+export type LauncherLifecycleResultSummary = {
+  commandId: string;
+  completed: boolean;
+  ok: boolean;
+  message?: string;
 };
 
 function launcherOriginBase(launcherOrigin: string): string {
@@ -51,6 +63,40 @@ function readNestedString(payload: Record<string, unknown>, keys: string[]): str
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readNestedValue(payload: Record<string, unknown>, keys: string[]): unknown {
+  let current: unknown = payload;
+  for (const key of keys) {
+    if (!isRecord(current)) {
+      return undefined;
+    }
+    current = current[key];
+  }
+  return current;
+}
+
+function readLifecycleResults(payload: Record<string, unknown>): LauncherLifecycleResultSummary[] {
+  const recent = readNestedValue(payload, ["controlPlaneEvidence", "results", "recent"]);
+  if (!Array.isArray(recent)) {
+    return [];
+  }
+  return recent.slice(0, 10).flatMap((item) => {
+    if (!isRecord(item)) {
+      return [];
+    }
+    const commandId = typeof item.commandId === "string" ? item.commandId.trim() : "";
+    if (!commandId) {
+      return [];
+    }
+    const message = typeof item.message === "string" && item.message.trim() ? item.message.trim() : "";
+    return [{
+      commandId,
+      completed: item.completed === true,
+      ok: item.ok === true,
+      ...(message ? { message } : {})
+    }];
+  });
 }
 
 async function readFailureDetail(response: Response): Promise<string> {
@@ -143,7 +189,22 @@ export async function fetchLauncherStatusSummary(input: {
     readNestedString(payload, ["lifecycleConsistency"]) ||
     readNestedString(payload, ["workbench", "lifecycleConsistency"]) ||
     "unknown";
-  return { overallState, observedState, lifecycleConsistency };
+  const phase = readNestedString(payload, ["phase"]) || readNestedString(payload, ["workbench", "phase"]);
+  const stateVersionValue = Number(readNestedValue(payload, ["stateVersion"]) ?? 0);
+  return {
+    overallState,
+    observedState,
+    lifecycleConsistency,
+    phase,
+    stateVersion: Number.isFinite(stateVersionValue) ? stateVersionValue : 0,
+    backendHealthy:
+      readNestedValue(payload, ["projectBundle", "backend", "healthy"]) === true
+      || readNestedValue(payload, ["workbench", "backendHealthy"]) === true,
+    backendPortListening:
+      readNestedValue(payload, ["projectBundle", "backend", "portListening"]) === true
+      || readNestedValue(payload, ["workbench", "backendPortListening"]) === true,
+    lifecycleResults: readLifecycleResults(payload)
+  };
 }
 
 export function classifyTrayBranchInstances(payload: unknown): TrayBranchInstance[] {
@@ -164,12 +225,24 @@ export function classifyTrayBranchInstances(payload: unknown): TrayBranchInstanc
     const kind = typeof raw.kind === "string" ? raw.kind.trim() : "";
     const checkedOut = raw.checkedOut === true;
     const alive = raw.alive === true;
-    const startable = checkedOut && !alive && kind !== "retired" && kind !== "local_branch";
+    const operable = checkedOut && kind !== "retired" && kind !== "local_branch";
+    const runtime = isRecord(raw.runtime) ? raw.runtime : null;
+    const lifecycleState = typeof runtime?.lifecycleState === "string" ? runtime.lifecycleState.trim() : "";
+    const backend = isRecord(runtime?.backend) ? runtime.backend : null;
+    const windowInfo = isRecord(runtime?.window) ? runtime.window : null;
+    const live = alive
+      || backend?.alive === true
+      || backend?.listening === true
+      || windowInfo?.open === true;
+    const attention = lifecycleState === "error" || (lifecycleState === "partial" && !live);
+    const transitional = lifecycleState === "starting" || lifecycleState === "stopping" || lifecycleState === "restarting";
+    const stoppable = operable && !transitional && (live || attention);
+    const startable = operable && !live && !attention && lifecycleState !== "starting";
     items.push({
       id,
       label: shortName || branch || id,
       startable,
-      stoppable: alive
+      stoppable
     });
   }
   return items;

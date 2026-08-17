@@ -237,6 +237,129 @@ def test_owner_inbox_promotes_source_to_central_registry_and_formal_artifact(kno
     assert applied["item"]["centralSourceIds"] == [central_source["centralSourceId"]]
 
 
+def test_inbox_local_file_copies_promote_to_central_source_and_trace(knowledge_env, tmp_path):
+    paper = tmp_path / "papers" / "challenge-note.pdf"
+    paper.parent.mkdir()
+    paper.write_bytes(b"%PDF-1.4\nchallenge local paper body\n")
+    missing = tmp_path / "papers" / "missing.pdf"
+
+    inbox_source = team_knowledge_service.collect_source_to_inbox(
+        "team",
+        knowledge_env["team"]["teamId"],
+        source_type="pdf_refinement",
+        source_ref={"filePath": str(paper), "agentId": knowledge_env["member"]["agentId"]},
+        original_content="Steward pack snapshot for a local PDF.",
+        original_filename="steward-pack-cand.json",
+        title="Local PDF steward pack",
+        summary="Pack plus a copyable local paper.",
+        actor_agent_id=knowledge_env["member"]["agentId"],
+        local_file_paths=[
+            {"candidateId": "cand-paper-1", "path": str(paper), "title": "Challenge paper"},
+            {"candidateId": "cand-missing", "path": str(missing), "title": "Missing paper"},
+            {"candidateId": "cand-url", "path": "https://doi.org/10.0000/remote-only", "title": "Remote DOI"},
+        ],
+    )
+
+    assert len(inbox_source["localCopies"]) == 1
+    inbox_copy = tmp_path / inbox_source["localCopies"][0]["inboxPath"]
+    assert inbox_copy.exists()
+    assert inbox_copy.read_bytes().startswith(b"%PDF-1.4")
+    assert inbox_source["localCopies"][0]["candidateId"] == "cand-paper-1"
+
+    reviewed = team_knowledge_service.review_owner_inbox_source(
+        "team",
+        knowledge_env["team"]["teamId"],
+        inbox_source["inboxSourceId"],
+        decision="accepted",
+        reviewed_by_agent_id=knowledge_env["lead"]["agentId"],
+        resolution_note="Keep the local paper copy in the central source store.",
+    )
+    central_source = reviewed["centralSource"]
+    central_copies = list(central_source.get("localCopies") or [])
+    assert len(central_copies) == 1
+    central_copy = tmp_path / central_copies[0]["centralPath"]
+    assert central_copy.exists()
+    assert central_copy.read_bytes() == paper.read_bytes()
+    assert str(central_copies[0]["centralPath"]).startswith("workspace/")
+
+    source_artifact = team_knowledge_service.create_source_artifact_from_central_source(
+        knowledge_env["base"]["knowledgeBaseId"],
+        central_source["centralSourceId"],
+        actor_agent_id=knowledge_env["member"]["agentId"],
+        title="Local PDF steward pack",
+    )
+    artifact_copies = list((source_artifact.get("sourceRef") or {}).get("localCopies") or [])
+    assert artifact_copies
+    assert artifact_copies[0]["sha256"] == central_copies[0]["sha256"]
+
+    proposal = team_knowledge_service.create_refinement_proposal(
+        knowledge_env["base"]["knowledgeBaseId"],
+        source_artifact_ids=[source_artifact["sourceArtifactId"]],
+        proposed_by_agent_id=knowledge_env["member"]["agentId"],
+        title="Traceable local paper knowledge",
+        content="Agents should follow localCopies.centralPath to the copied PDF.",
+    )
+    applied = team_knowledge_service.review_refinement_proposal(
+        knowledge_env["base"]["knowledgeBaseId"],
+        proposal["proposalId"],
+        status="approved",
+        reviewed_by_agent_id=knowledge_env["lead"]["agentId"],
+    )
+    trace = team_knowledge_service.get_knowledge_trace(
+        knowledge_env["base"]["knowledgeBaseId"],
+        applied["item"]["knowledgeItemId"],
+        agent_id=knowledge_env["member"]["agentId"],
+    )
+    file_copies = [item for item in trace["localCopies"] if item.get("kind") == "local_file"]
+    pack_copies = [item for item in trace["localCopies"] if item.get("kind") == "source_pack"]
+    assert trace["summary"]["localCopyCount"] >= 2
+    assert file_copies and (tmp_path / file_copies[0]["centralPath"]).exists()
+    assert pack_copies and (tmp_path / pack_copies[0]["centralPath"]).exists()
+
+    search = team_knowledge_service.search_knowledge_items(
+        agent_id=knowledge_env["member"]["agentId"],
+        knowledge_base_id=knowledge_env["base"]["knowledgeBaseId"],
+        query="Traceable local paper",
+        search_mode="exact",
+    )
+    assert search["summary"]["resultCount"] == 1
+    assert any(item.get("kind") == "local_file" for item in search["results"][0]["localCopies"])
+
+
+def test_steward_pack_collects_existing_candidate_source_paths(tmp_path, monkeypatch):
+    from core.web.services.team_workflow import knowledge as knowledge_mod
+
+    paper = tmp_path / "paper.pdf"
+    paper.write_bytes(b"%PDF-1.4\n")
+
+    class _FakeService:
+        team_knowledge_service = type("T", (), {"MAX_LOCAL_SOURCE_COPIES": 16})()
+
+        def _normalize_text_list(self, value, max_items=32, max_length=160):
+            return [str(item)[:max_length] for item in list(value or [])[:max_items] if str(item or "").strip()]
+
+        def _load_candidate_store(self, team_id):
+            return {
+                "candidates": [
+                    {"candidateId": "cand-1", "title": "Paper", "sourcePath": str(paper)},
+                    {"candidateId": "cand-2", "title": "Missing", "sourcePath": str(tmp_path / "gone.pdf")},
+                ]
+            }
+
+        def _source_manifest_path(self, item):
+            return str(item.get("sourcePath") or "")
+
+        def _source_manifest_label(self, item):
+            return str(item.get("title") or "source")
+
+    monkeypatch.setattr(knowledge_mod, "_service", lambda: _FakeService())
+    paths = knowledge_mod._steward_pack_local_file_paths("team-1", {"candidateIds": ["cand-1", "cand-2"]})
+    assert paths == [
+        {"candidateId": "cand-1", "path": str(paper), "title": "Paper"},
+        {"candidateId": "cand-2", "path": str(tmp_path / "gone.pdf"), "title": "Missing"},
+    ]
+
+
 def test_owner_source_review_directly_ingests_accepted_source_into_formal_knowledge(knowledge_env):
     inbox_source = team_knowledge_service.collect_source_to_inbox(
         "team",
@@ -1726,3 +1849,296 @@ def test_governance_plan_is_read_only_and_links_tools(knowledge_env):
     assert plan["actions"]
     assert plan["actions"][0]["mutatesFormalKnowledge"] is False
     assert plan["actions"][0]["recommendedTool"] == "knowledge_governance_tasks_tool"
+
+
+# ---------------------------------------------------------------------------
+# Public structure curation catalog (workspace/knowledge/public) — plan A.8
+# ---------------------------------------------------------------------------
+
+
+def _public_project_root(team_knowledge_service):
+    import pathlib
+
+    return pathlib.Path(str(team_knowledge_service.PROJECT_ROOT))
+
+
+def _write_project_file(project_root, relative, text):
+    path = project_root / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _make_pin_card(card_id, *, locator, summary, title="Pin card", when_to_use="Use when needed", partition="standards", source_type="git_path", steward_weight=0, freshness_policy="steward_review", kind="pin"):
+    return {
+        "cardId": card_id,
+        "kind": kind,
+        "partition": partition,
+        "title": title,
+        "whenToUse": when_to_use,
+        "summary": summary,
+        "stewardWeight": steward_weight,
+        "visibility": "agent_visible",
+        "source": {"type": source_type, "locator": locator},
+        "freshnessPolicy": freshness_policy,
+    }
+
+
+def test_public_catalog_steward_pin_becomes_stale_hidden_after_source_change(knowledge_env):
+    project_root = _public_project_root(team_knowledge_service)
+    steward_id = agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
+    _write_project_file(project_root, "docs/pin-source.md", "original bytes v1")
+    card = team_knowledge_service.upsert_public_card(
+        _make_pin_card("pin-docs-1", locator="docs/pin-source.md", summary="Stable pin summary."),
+        actor_agent_id=steward_id,
+    )
+    assert card["visibility"] == "agent_visible"
+    assert card["freshness"]["status"] == "current"
+
+    _write_project_file(project_root, "docs/pin-source.md", "changed bytes v2")
+    refreshed = team_knowledge_service.refresh_public_catalog_freshness(actor_agent_id=steward_id)
+    assert "pin-docs-1" in refreshed["staleCardIds"]
+
+    catalog = team_knowledge_service.get_public_catalog(agent_id=knowledge_env["member"]["agentId"], internal=True)
+    stored = next(item for item in catalog["cards"] if item["cardId"] == "pin-docs-1")
+    assert stored["visibility"] == "hidden"
+    assert stored["freshness"]["status"] == "stale"
+
+    hits = team_knowledge_service.search_public_catalog(query="Stable pin summary", agent_id=knowledge_env["member"]["agentId"])
+    assert all(result["cardId"] != "pin-docs-1" for result in hits["results"])
+
+
+def test_public_proposal_acceptance_does_not_append_item_bodies(knowledge_env):
+    project_root = _public_project_root(team_knowledge_service)
+    items_path = project_root / "workspace" / "teams" / knowledge_env["team"]["teamId"] / "knowledge" / "items.jsonl"
+    items_path.parent.mkdir(parents=True, exist_ok=True)
+    items_path.write_text("", encoding="utf-8")
+    steward_id = agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
+
+    proposal = team_knowledge_service.submit_public_proposal(
+        {
+            "partition": "experience",
+            "title": "Experience proposal",
+            "summary": "Proposed experience summary.",
+            "originRef": {"layer": "team", "ownerId": knowledge_env["team"]["teamId"], "itemId": "team-item-1"},
+        },
+        proposed_by_agent_id=knowledge_env["member"]["agentId"],
+    )
+    resolved = team_knowledge_service.resolve_public_proposal(
+        proposal["proposalId"],
+        status="accepted",
+        actor_agent_id=steward_id,
+    )
+    proposals = team_knowledge_service.list_public_proposals(internal=True)
+
+    assert resolved["status"] == "accepted"
+    assert proposals["summary"]["pendingProposalCount"] == 0
+    assert items_path.read_text(encoding="utf-8") == ""
+    team_items = team_knowledge_service.list_knowledge_items(
+        knowledge_env["base"]["knowledgeBaseId"],
+        agent_id=knowledge_env["member"]["agentId"],
+    )
+    assert team_items["summary"]["itemCount"] == 0
+
+
+def test_startup_structure_block_respects_card_and_char_budget(knowledge_env):
+    project_root = _public_project_root(team_knowledge_service)
+    steward_id = agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
+    for index in range(30):
+        _write_project_file(project_root, f"docs/card-{index}.md", f"card body {index}")
+        team_knowledge_service.upsert_public_card(
+            _make_pin_card(
+                f"pin-budget-{index}",
+                locator=f"docs/card-{index}.md",
+                summary=f"Budget card {index} summary.",
+                title=f"Budget Card {index}",
+                steward_weight=index,
+            ),
+            actor_agent_id=steward_id,
+        )
+
+    result = team_knowledge_service.build_startup_structure_block(agent_id=knowledge_env["member"]["agentId"])
+
+    assert len(result["cards"]) <= team_knowledge_service.STARTUP_STRUCTURE_MAX_CARDS
+    assert len(result["block"]) <= team_knowledge_service.STARTUP_STRUCTURE_MAX_CHARS
+    assert result["budget"]["included"] == len(result["cards"])
+    assert result["budget"]["omitted"] >= 0
+    assert "excludedStartup" in result["budget"]
+    assert f"included={result['budget']['included']}" in result["block"]
+
+
+def test_public_catalog_hit_dto_has_no_content_and_open_fails_without_summary_fallback(knowledge_env):
+    project_root = _public_project_root(team_knowledge_service)
+    steward_id = agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
+    _write_project_file(project_root, "docs/hit-source.md", "Hit source body")
+    team_knowledge_service.upsert_public_card(
+        _make_pin_card("pin-hit-1", locator="docs/hit-source.md", summary="Hit summary text", title="Hit Card"),
+        actor_agent_id=steward_id,
+    )
+
+    hits = team_knowledge_service.search_public_catalog(query="Hit summary text", agent_id=knowledge_env["member"]["agentId"])
+    assert hits["results"]
+    hit = hits["results"][0]
+    assert hit["resultType"] == "public_catalog_card"
+    assert "content" not in hit
+    assert "excerpt" not in hit
+    assert hit["openRequired"] is True
+
+    opened = team_knowledge_service.open_public_card("pin-hit-1", agent_id=knowledge_env["member"]["agentId"])
+    assert opened["ok"] is True
+    assert opened["content"] == "Hit source body"
+
+    team_knowledge_service.upsert_public_card(
+        _make_pin_card("pin-escape-1", locator="../outside.md", summary="Escape summary", title="Escape Card"),
+        actor_agent_id=steward_id,
+    )
+    with pytest.raises(team_knowledge_service.PublicCatalogSourceUnavailableError) as exc_info:
+        team_knowledge_service.open_public_card("pin-escape-1", agent_id=knowledge_env["member"]["agentId"])
+    assert exc_info.value.reason == "forbidden"
+    assert "Escape summary" not in str(exc_info.value)
+
+
+def test_archived_public_card_stays_in_structure_and_has_no_delete_api(knowledge_env):
+    project_root = _public_project_root(team_knowledge_service)
+    steward_id = agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
+    _write_project_file(project_root, "docs/archive-me.md", "archive body")
+    team_knowledge_service.upsert_public_card(
+        _make_pin_card("pin-archive-1", locator="docs/archive-me.md", summary="To archive", title="Archive Me"),
+        actor_agent_id=steward_id,
+    )
+
+    archived = team_knowledge_service.archive_public_card("pin-archive-1", reason="superseded", actor_agent_id=steward_id)
+
+    assert archived["visibility"] == "archived"
+    assert archived["archivedAt"]
+    assert archived["archivedReason"] == "superseded"
+    catalog = team_knowledge_service.get_public_catalog(agent_id=knowledge_env["member"]["agentId"], internal=True)
+    assert any(item["cardId"] == "pin-archive-1" for item in catalog["cards"])
+    assert not hasattr(team_knowledge_service, "delete_public_card")
+    assert not hasattr(team_knowledge_service, "remove_public_card")
+    agent_view = team_knowledge_service.get_public_catalog(agent_id=knowledge_env["member"]["agentId"])
+    assert all(item["cardId"] != "pin-archive-1" for item in agent_view["cards"])
+
+
+def test_duplicate_locator_conflict_hides_both_pins_until_resolved(knowledge_env):
+    project_root = _public_project_root(team_knowledge_service)
+    steward_id = agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
+    _write_project_file(project_root, "docs/conflict-source.md", "conflict body")
+    team_knowledge_service.upsert_public_card(
+        _make_pin_card("pin-conflict-a", locator="docs/conflict-source.md", summary="Summary A", title="Conflict A"),
+        actor_agent_id=steward_id,
+    )
+    team_knowledge_service.upsert_public_card(
+        _make_pin_card("pin-conflict-b", locator="docs/conflict-source.md", summary="Summary B differs", title="Conflict B"),
+        actor_agent_id=steward_id,
+    )
+
+    refreshed = team_knowledge_service.refresh_public_catalog_freshness(actor_agent_id=steward_id)
+    assert refreshed["conflictEventCount"] >= 1
+
+    events = team_knowledge_service.list_catalog_queue_events(status="open")
+    conflicts = [event for event in events["events"] if event["queueKind"] == "conflict"]
+    assert conflicts
+    assert "pin-conflict-a" in conflicts[0]["cardIds"]
+    assert "pin-conflict-b" in conflicts[0]["cardIds"]
+
+    hits = team_knowledge_service.search_public_catalog(query="Summary A", agent_id=knowledge_env["member"]["agentId"])
+    assert all(result["cardId"] not in {"pin-conflict-a", "pin-conflict-b"} for result in hits["results"])
+    block = team_knowledge_service.build_startup_structure_block(agent_id=knowledge_env["member"]["agentId"])
+    assert all(card["cardId"] not in {"pin-conflict-a", "pin-conflict-b"} for card in block["cards"])
+
+    resolved = team_knowledge_service.resolve_catalog_queue_event(
+        conflicts[0]["queueEventId"],
+        resolution="keep_a",
+        actor_agent_id=steward_id,
+    )
+    assert resolved["status"] == "resolved"
+    catalog = team_knowledge_service.get_public_catalog(agent_id=knowledge_env["member"]["agentId"], internal=True)
+    keeper = next(item for item in catalog["cards"] if item["cardId"] == "pin-conflict-a")
+    other = next(item for item in catalog["cards"] if item["cardId"] == "pin-conflict-b")
+    assert keeper["visibility"] == "agent_visible"
+    assert other["visibility"] == "hidden"
+
+
+def test_startup_block_excludes_prompt_manager_and_agent_directory_sources(knowledge_env):
+    project_root = _public_project_root(team_knowledge_service)
+    steward_id = agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
+    _write_project_file(project_root, "AGENTS.md", "Project rules body")
+    _write_project_file(project_root, "core/core_prompt/COMMON.md", "Common discipline body")
+    _write_project_file(project_root, "docs/keep-source.md", "keep body")
+    team_knowledge_service.upsert_public_card(
+        _make_pin_card("pin-agents-1", locator="AGENTS.md", summary="AGENTS card", title="AGENTS Rules Card"),
+        actor_agent_id=steward_id,
+    )
+    team_knowledge_service.upsert_public_card(
+        _make_pin_card("pin-common-1", locator="core/core_prompt/COMMON.md", summary="COMMON card", title="COMMON Card"),
+        actor_agent_id=steward_id,
+    )
+    team_knowledge_service.upsert_public_card(
+        _make_pin_card(
+            "pin-directory-1",
+            locator=knowledge_env["member"]["agentId"],
+            summary="Directory card",
+            title="Directory Card",
+            source_type="agent_directory",
+            partition="agents",
+        ),
+        actor_agent_id=steward_id,
+    )
+    team_knowledge_service.upsert_public_card(
+        _make_pin_card("pin-keep-1", locator="docs/keep-source.md", summary="Keep card", title="Keep Card"),
+        actor_agent_id=steward_id,
+    )
+
+    block = team_knowledge_service.build_startup_structure_block(agent_id=knowledge_env["member"]["agentId"])
+    card_locs = [card["locator"] for card in block["cards"]]
+    locator_text = " ".join(card_locs)
+
+    assert "AGENTS.md" not in locator_text
+    assert "core/core_prompt" not in locator_text
+    assert knowledge_env["member"]["agentId"] not in locator_text
+    assert block["budget"]["excludedStartup"] >= 3
+    assert "docs/keep-source.md" in locator_text
+
+    hits = team_knowledge_service.search_public_catalog(query="AGENTS Rules Card", agent_id=knowledge_env["member"]["agentId"])
+    assert any(result["cardId"] == "pin-agents-1" for result in hits["results"])
+
+
+def test_catalog_haystack_is_card_fields_only_not_source_bodies(knowledge_env):
+    project_root = _public_project_root(team_knowledge_service)
+    steward_id = agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
+    _write_project_file(project_root, "AGENTS.md", "PROJECT-ONLY-MARKER_XYZZY phrase inside AGENTS body")
+    team_knowledge_service.upsert_public_card(
+        _make_pin_card("pin-agents-body-1", locator="AGENTS.md", summary="Rules pointer", title="Project Rules"),
+        actor_agent_id=steward_id,
+    )
+
+    hits = team_knowledge_service.search_public_catalog(query="PROJECT-ONLY-MARKER_XYZZY", agent_id=knowledge_env["member"]["agentId"])
+    assert hits["summary"]["resultCount"] == 0
+    hits_by_title = team_knowledge_service.search_public_catalog(query="Project Rules", agent_id=knowledge_env["member"]["agentId"])
+    assert any(result["cardId"] == "pin-agents-body-1" for result in hits_by_title["results"])
+
+
+def test_escaping_locator_is_forbidden_and_freshness_task_appears_in_governance(knowledge_env):
+    project_root = _public_project_root(team_knowledge_service)
+    steward_id = agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
+    team_knowledge_service.upsert_public_card(
+        _make_pin_card("pin-escape-2", locator="../secret.md", summary="Escape summary", title="Escape Card"),
+        actor_agent_id=steward_id,
+    )
+    team_knowledge_service.upsert_public_card(
+        _make_pin_card("pin-abs-1", locator="/etc/passwd", summary="Absolute summary", title="Absolute Card"),
+        actor_agent_id=steward_id,
+    )
+
+    with pytest.raises(team_knowledge_service.PublicCatalogSourceUnavailableError) as exc_info:
+        team_knowledge_service.open_public_card("pin-escape-2", agent_id=knowledge_env["member"]["agentId"])
+    assert exc_info.value.reason == "forbidden"
+
+    refreshed = team_knowledge_service.refresh_public_catalog_freshness(actor_agent_id=steward_id)
+    assert "pin-escape-2" in refreshed["missingCardIds"]
+    assert "pin-abs-1" in refreshed["missingCardIds"]
+
+    tasks = team_knowledge_service.list_knowledge_governance_tasks(agent_id=steward_id)
+    freshness_tasks = [task for task in tasks["tasks"] if task["taskType"] == "catalog_freshness" and task["status"] == "open"]
+    assert freshness_tasks
+    assert tasks["summary"]["catalogFreshnessCount"] >= 2

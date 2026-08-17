@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import routeSource from "./chat/ChatCodingRouteWorkbench.tsx?raw";
+import visibleSessionCatalogSource from "./chat/useChatVisibleSessionCatalog.ts?raw";
+import agentSessionTabsSource from "./chat/useChatAgentSessionTabs.ts?raw";
 import tabStripSource from "./AgentSessionTabStrip.tsx?raw";
 import lifecycleSource from "./chat/useChatWorkspaceLifecycle.ts?raw";
 import agentDirectoryActionsSource from "./chat/useChatAgentDirectoryActions.ts?raw";
@@ -8,10 +10,15 @@ import agentDirectoryActionsSource from "./chat/useChatAgentDirectoryActions.ts?
 describe("ChatCodingRoute Agent-session hierarchy", () => {
   it("uses Agent navigation on the left and queries tabs by the selected Agent", () => {
     expect(routeSource).toContain("AgentConversationDirectory,");
-    expect(routeSource).toContain("visibleDirectoryAgents,");
     expect(routeSource).toContain('from "../AgentConversationDirectory"');
-    expect(routeSource).toContain('queryKey: ["sessions", "agent", selectedChatAgentId]');
-    expect(routeSource).toContain('`/api/sessions/query?agentId=${encodeURIComponent(selectedChatAgentId)}&limit=100`');
+    expect(routeSource).toContain("useChatVisibleSessionCatalog");
+    expect(routeSource).toContain("useChatAgentSessionTabs");
+    expect(visibleSessionCatalogSource).toContain("visibleDirectoryAgents");
+    expect(visibleSessionCatalogSource).toContain('from "../AgentConversationDirectory"');
+    expect(agentSessionTabsSource).toContain('queryKey: ["sessions", "agent", selectedChatAgentId]');
+    expect(agentSessionTabsSource).toContain("querySessions({");
+    expect(agentSessionTabsSource).toContain("agentId: selectedChatAgentId");
+    expect(agentSessionTabsSource).toContain("limit: 100");
     expect(routeSource).toContain("<AgentConversationDirectory");
     expect(routeSource).toContain('import("../agent-create/AgentCreateWizardDialog")');
     // Open wizard lives in directory actions hook (not inline in workbench).
@@ -22,8 +29,8 @@ describe("ChatCodingRoute Agent-session hierarchy", () => {
     expect(routeSource).toContain("createAgentButtonRef={agentCreateTriggerRef}");
     expect(routeSource).toContain("if (!agent.directSessionId) return false");
     expect(routeSource).toContain("handleOpenAgent(agent)");
-    expect(routeSource).toContain("handleOpenDirectSession(latestSession.id)");
-    expect(routeSource).toContain("onOpenAgent={(agent, latestSession) => {");
+    expect(routeSource).not.toContain("handleOpenDirectSession(latestSession.id)");
+    expect(routeSource).toContain("onOpenAgent={(agent) => {");
     expect(routeSource).not.toContain("await createSessionMutation.mutateAsync({ agentId: agent.agentId })");
     expect(routeSource).not.toContain('createSessionMutation.mutate({ agentId: "" })');
     expect(tabStripSource).toContain("在当前 Agent 下新建会话");

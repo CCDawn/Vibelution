@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+
+from core.web.routes.reset_models import (
+    ResetExecutePayload,
+    ResetMigratedResponse,
+    ResetSelectionPayload,
+)
 
 
 router = APIRouter(tags=["reset"])
@@ -14,24 +19,28 @@ RESET_MIGRATED_DETAIL = {
 }
 
 
-class ResetSelectionPayload(BaseModel):
-    itemIds: list[str] = Field(default_factory=list)
-
-
-class ResetExecutePayload(ResetSelectionPayload):
-    confirmed: bool = False
-
-
-@router.get("/reset/summary")
+@router.get(
+    "/reset/summary",
+    response_model=ResetMigratedResponse,
+    response_model_exclude_unset=True,
+)
 def reset_summary() -> dict:
     raise HTTPException(status_code=410, detail=RESET_MIGRATED_DETAIL)
 
 
-@router.post("/reset/preview")
+@router.post(
+    "/reset/preview",
+    response_model=ResetMigratedResponse,
+    response_model_exclude_unset=True,
+)
 def reset_preview(payload: ResetSelectionPayload) -> dict:
     raise HTTPException(status_code=410, detail=RESET_MIGRATED_DETAIL)
 
 
-@router.post("/reset/execute")
+@router.post(
+    "/reset/execute",
+    response_model=ResetMigratedResponse,
+    response_model_exclude_unset=True,
+)
 def reset_execute(payload: ResetExecutePayload) -> dict:
     raise HTTPException(status_code=410, detail=RESET_MIGRATED_DETAIL)

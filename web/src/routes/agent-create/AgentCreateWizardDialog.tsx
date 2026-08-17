@@ -2,16 +2,22 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, MessageSquare, Settings2 } from "lucide-react";
 import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
 
-import { fetchJson } from "../../api/client";
+import {
+  createAgent,
+  fetchAgentConfigWorkspace,
+  listAgentAvatarOptions,
+} from "../../api/agents";
+import { testConfigLlm } from "../../api/config";
+import { fetchToolRegistry } from "../../api/tools";
 import { queryKeys } from "../../api/queryKeys";
 import {
   type AgentAvatarOptionsPayload,
   type AgentConfigWorkspace,
   type AgentConfigWorkspaceAgent,
   type AgentInstance,
-  type ConfigLlmTestResult,
   type ToolRegistryPayload,
 } from "../../api/types";
+import { startUserAction } from "../../app/userActionTelemetry";
 import { VButton, VDialog } from "../../components/vui";
 import { useShellI18n } from "../../i18n/useShellI18n";
 import { AgentCreatePanel, type AgentCreatePanelCopy } from "../AgentCreatePanel";
@@ -134,19 +140,19 @@ export function AgentCreateWizardDialog({
 
   const workspaceQuery = useQuery({
     queryKey: queryKeys.agentConfigWorkspace(),
-    queryFn: () => fetchJson<AgentConfigWorkspace>("/api/agents/config-workspace?includeRuntime=false"),
+    queryFn: () => fetchAgentConfigWorkspace({ includeRuntime: false }),
     enabled: open,
     staleTime: 10_000,
   });
   const toolsQuery = useQuery({
     queryKey: queryKeys.tools(),
-    queryFn: () => fetchJson<ToolRegistryPayload>("/api/tools"),
+    queryFn: () => fetchToolRegistry(),
     enabled: open,
     staleTime: 10_000,
   });
   const avatarOptionsQuery = useQuery({
     queryKey: ["agent-avatar-options", selectedModelId],
-    queryFn: () => fetchJson<AgentAvatarOptionsPayload>(`/api/agents/avatar-options?modelId=${encodeURIComponent(selectedModelId)}`),
+    queryFn: () => listAgentAvatarOptions({ modelId: selectedModelId }),
     enabled: open,
     staleTime: 30_000,
   });
@@ -221,12 +227,12 @@ export function AgentCreateWizardDialog({
   }, [draftDirty, lang, open, toolBundles, workspaceQuery.data]);
 
   const createMutation = useMutation({
-    mutationFn: (nextDraft: AgentCreateDraft) => fetchJson<AgentConfigWorkspaceAgent>("/api/agents", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(createAgentPayload(nextDraft, toolBundles)),
+    mutationFn: (nextDraft: AgentCreateDraft) => createAgent(createAgentPayload(nextDraft, toolBundles)),
+    onMutate: () => ({
+      telemetry: startUserAction("agent_create", {}),
     }),
-    onSuccess: (agent) => {
+    onSuccess: (agent, _variables, context) => {
+      context?.telemetry?.succeeded({ agentId: agent.agentId });
       setCreatedAgent(agent);
       setStartConversationError("");
       queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (current) => [
@@ -239,6 +245,9 @@ export function AgentCreateWizardDialog({
         queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() }),
       ]);
       void chatWorkspaceCache.afterAgentWorkspaceChanged();
+    },
+    onError: (error, _variables, context) => {
+      context?.telemetry?.failed(error);
     },
   });
 
@@ -306,14 +315,10 @@ export function AgentCreateWizardDialog({
         cursor += 1;
         const modelId = targets[index];
         try {
-          const result = await fetchJson<ConfigLlmTestResult>("/api/config/test-llm", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              publicConfig: {},
-              modelId,
-              capability: "text",
-            }),
+          const result = await testConfigLlm({
+            publicConfig: {},
+            modelId,
+            capability: "text",
           });
           if (result.ok) {
             okCount += 1;

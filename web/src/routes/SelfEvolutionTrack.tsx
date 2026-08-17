@@ -26,8 +26,10 @@ import {
   useMemo,
   useState,
 } from "react";
-import { fetchJson } from "../api/client";
+import { fetchAgentConfigWorkspace } from "../api/agents";
+import { fetchPetSummary } from "../api/pet";
 import { queryKeys } from "../api/queryKeys";
+import { fetchRuntimeSummary } from "../api/runtime";
 import {
   AgentConfigWorkspace,
   AgentConfigWorkspaceAgent,
@@ -790,19 +792,19 @@ export function SelfEvolutionTrack({
   const pageVisible = usePageVisibility();
   const petQuery = useQuery({
     queryKey: queryKeys.petSummary(),
-    queryFn: () => fetchJson<PetSummary>("/api/pet/summary"),
+    queryFn: () => fetchPetSummary(),
     refetchInterval: resolvePollingInterval(pageVisible, 10_000),
     refetchIntervalInBackground: false,
   });
   const runtimeQuery = useQuery({
     queryKey: queryKeys.runtimeSummary(),
-    queryFn: () => fetchJson<RuntimeSummary>("/api/runtime/summary"),
+    queryFn: () => fetchRuntimeSummary(),
     refetchInterval: resolvePollingInterval(pageVisible, 5_000),
     refetchIntervalInBackground: false,
   });
   const agentConfigWorkspaceQuery = useQuery({
     queryKey: queryKeys.agentConfigWorkspace(),
-    queryFn: () => fetchJson<AgentConfigWorkspace>("/api/agents/config-workspace?includeRuntime=false"),
+    queryFn: () => fetchAgentConfigWorkspace({ includeRuntime: false }),
     refetchInterval: resolvePollingInterval(pageVisible, 30_000),
     refetchIntervalInBackground: false,
   });

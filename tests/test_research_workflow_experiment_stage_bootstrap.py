@@ -200,7 +200,13 @@ def test_real_agent_task_bootstraps_stage_before_starting_hypothesis_agent(
         order.append("agent")
         assert team_id == "research-team"
         assert project_id == "challenge-sci-096"
-        assert payload["taskKind"] == "experiment_design"
+        assert payload["taskKind"] == "hypothesis_design"
+        assert payload["workflowRunId"] == "run-sci-096"
+        assert payload["workflowNodeId"] == "hypothesis_design"
+        assert payload["sourceCollectionRunId"] == "dprun-sci-096"
+        assert payload["targetRef"] == (
+            "node-run:nr-run-sci-096-hypothesis_design-a3"
+        )
         return {
             "sessionId": "session-hypothesis",
             "taskId": "task-hypothesis",
@@ -231,6 +237,7 @@ def test_real_agent_task_bootstraps_stage_before_starting_hypothesis_agent(
         {
             "teamId": "research-team",
             "projectId": "challenge-sci-096",
+            "sourceCollectionRunId": "dprun-sci-096",
             "researchObjectiveContract": {"question": "研究问题"},
         },
         adapter_spec=spec,

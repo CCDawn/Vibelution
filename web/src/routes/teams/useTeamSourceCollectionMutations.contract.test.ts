@@ -64,16 +64,16 @@ describe("team source-collection mutations contract", () => {
   });
 
   it("preserves key write endpoints used by SC search/quality/graph/ingestion", () => {
-    expect(mutationsSource).toContain("/collection-assignments/${encodeURIComponent(payload.draft.assignmentId)}/outputs");
-    expect(mutationsSource).toContain("/source-candidate");
-    expect(mutationsSource).toContain("/search/execute");
-    expect(mutationsSource).toContain("/storage/open");
-    expect(mutationsSource).toContain("/source-quality/assess");
-    expect(mutationsSource).toContain("source-quality/assess-batch");
-    expect(mutationsSource).toContain("/paper-note-chunks/plan");
-    expect(mutationsSource).toContain("/workflow-orchestration/candidate-graph");
-    expect(mutationsSource).toContain("knowledge-ingestion/precheck");
-    expect(mutationsSource).toContain("/workflow-orchestration/knowledge-collection/complete");
-    expect(mutationsSource).toContain("/knowledge-collection/extract");
+    expect(mutationsSource).toContain("recordDataProcessingCollectionOutput<");
+    expect(mutationsSource).toContain("importDataRecordAsSourceCandidate(");
+    expect(mutationsSource).toContain("executeSourceCollectionSearch<");
+    expect(mutationsSource).toContain("openSourceCollectionStorage<");
+    expect(mutationsSource).toContain("assessCandidateSourceQuality<");
+    expect(mutationsSource).toContain("assessSourceQualityBatch<");
+    expect(mutationsSource).toContain("planPaperNoteChunks<");
+    expect(mutationsSource).toContain("buildCandidateGraph(");
+    expect(mutationsSource).toContain("runKnowledgeIngestionPrecheck<");
+    expect(mutationsSource).toContain("completeKnowledgeCollection(");
+    expect(mutationsSource).toContain("extractSourceCollectionCandidates(");
   });
 });

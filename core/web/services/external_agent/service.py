@@ -27,6 +27,7 @@ from .store import (
     ExternalAgentTaskNotFoundError,
     ExternalAgentTaskStore,
 )
+from vibelution_storage import resolve_project_runtime_home
 
 
 class ExternalAgentTaskError(RuntimeError):
@@ -1191,7 +1192,7 @@ def build_default_service(project_root: Path) -> ExternalAgentTaskService:
     gateway = get_config().external_agent_gateway
     return ExternalAgentTaskService(
         ExternalAgentTaskStore(
-            Path(project_root).resolve() / ".runtime" / "external_agents"
+            resolve_project_runtime_home(project_root) / "external_agents"
         ),
         operator_permission_ceiling=gateway.permission_ceiling,
         runtime_permission_ceiling=gateway.runtime_permission_ceiling,

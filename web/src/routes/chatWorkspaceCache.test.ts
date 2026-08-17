@@ -91,7 +91,6 @@ describe("createChatWorkspaceCache", () => {
 
     await cache.afterSessionDeleted({
       deletedSessionId: "session-a",
-      nextSessionId: "session-b",
       roomId: "room-a",
     });
 
@@ -99,11 +98,11 @@ describe("createChatWorkspaceCache", () => {
       queryKeys.sessions(),
       queryKeys.conversations(),
       queryKeys.agents(),
-      queryKeys.runtimeSummary(),
-      queryKeys.session("session-b"),
       queryKeys.chatRooms(),
       queryKeys.chatRoom("room-a"),
     ]);
+    expect(queryKeysFromCalls()).not.toContain(queryKeys.runtimeSummary());
+    expect(queryKeysFromCalls()).not.toContain(queryKeys.session("session-b"));
   });
 
   it("refreshes Agent directory and config surfaces after a model-backed config save", async () => {
@@ -117,6 +116,20 @@ describe("createChatWorkspaceCache", () => {
       queryKeys.agents(),
       queryKeys.agent("agent-1"),
     ]);
+    expect(queryKeysFromCalls()).not.toContain(queryKeys.sessions());
+    expect(queryKeysFromCalls()).not.toContain(queryKeys.conversations());
+  });
+
+  it("refreshes Agent config after rename without reshuffling the agents list cache", async () => {
+    const { cache, queryKeysFromCalls } = makeCache();
+
+    await cache.afterAgentRenamed("agent-1");
+
+    expect(queryKeysFromCalls()).toEqual([
+      queryKeys.agentConfigWorkspace(),
+      queryKeys.agent("agent-1"),
+    ]);
+    expect(queryKeysFromCalls()).not.toContain(queryKeys.agents());
     expect(queryKeysFromCalls()).not.toContain(queryKeys.sessions());
     expect(queryKeysFromCalls()).not.toContain(queryKeys.conversations());
   });

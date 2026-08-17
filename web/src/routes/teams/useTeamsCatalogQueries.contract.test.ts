@@ -7,7 +7,8 @@ const hookSource = readFileSync(new URL("./useTeamsCatalogQueries.ts", import.me
 describe("useTeamsCatalogQueries R2-d contract", () => {
   it("owns teams list, agent summary, project bus, and picker derivation", () => {
     expect(hookSource).toContain("export function useTeamsCatalogQueries");
-    expect(hookSource).toContain('fetchJson<TeamListPayload>("/api/teams"');
+    expect(hookSource).toContain("listTeams({ signal })");
+    expect(hookSource).toContain("listAgentSummaries<AgentConfigWorkspaceAgent>({ signal })");
     expect(hookSource).toContain("queryKeys.agentSummary(false)");
     expect(hookSource).toContain("listProjectAgentBusTimeline");
     expect(hookSource).toContain("TEAM_PICKER_TEAM_IDS");

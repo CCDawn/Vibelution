@@ -5,10 +5,10 @@ import { describe, expect, it } from "vitest";
 const mainSourcePath = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 
 describe("Electron main deep-link startup registration", () => {
-  it("uses the shared deep-link registration helper before bootstrapping Launcher", () => {
+  it("uses the shared deep-link registration helper before resolving the main-owned control plane", () => {
     const source = readFileSync(mainSourcePath, "utf8");
     const registrationIndex = source.indexOf("registerPackagedDeepLinks(paths)");
-    const bootstrapIndex = source.indexOf("launcherBootstrap = await bootstrapLauncherIfEnabled(paths)");
+    const bootstrapIndex = source.indexOf("launcherBootstrap = await bootstrapMainOwnedLauncher(paths)");
 
     expect(source).toContain("registerPackagedDeepLinks(paths)");
     expect(source).toContain("registerDeepLinkProtocolIfAllowed");

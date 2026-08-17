@@ -146,6 +146,8 @@ describe("ConfigProviderRegistryPanel", () => {
 
     expect(renderModels([pinned])).toContain("测试调用");
     expect(renderModels([pinned])).toContain("取消固定");
+    expect(observedMarkup).not.toContain("发现 1 个可固定模型");
+    expect(observedMarkup).not.toContain("「发现」不等于已入库");
   });
 
   it("exposes a per-model image input capability probe with current-state copy", () => {
@@ -187,7 +189,7 @@ describe("ConfigProviderRegistryPanel", () => {
 
     expect(markup).toContain("推理 low / high 已验证");
     expect(markup).not.toContain("验证推理 low / high");
-    expect(panelSource).toContain('"/api/config/test-llm"');
+    expect(panelSource).toContain("testConfigLlm(");
     expect(panelSource).toContain('capability: "reasoning_effort"');
     expect(panelSource).toContain("一期探测仅验证 low/high");
   });
@@ -253,6 +255,20 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(panelSource).not.toContain("mobileActionGroup");
   });
 
+  it("keeps selected provider cards readable and parks help copy on hover", () => {
+    expect(panelSource).not.toContain('variant={selected ? "primary" : "ghost"}');
+    expect(panelSource).toContain('variant="ghost"');
+    expect(panelStyles.providerRow).toContain("!bg-[color-mix(in_srgb,var(--accent-cool)_14%,var(--vui-surface-row))]");
+    expect(panelStyles.providerRow).toContain("data-[active=true]:[&_.providerLabel]:!text-vui-fg-primary");
+    expect(panelSource).toContain("左栏默认只显示可用服务");
+    expect(panelSource).toContain('tooltip="左栏默认只显示可用服务');
+    expect(panelSource).not.toContain("styles.workspaceLead");
+    expect(panelSource).not.toContain("styles.connectionLead");
+    expect(panelSource).not.toContain("styles.pinBannerCopy");
+    expect(panelSource).not.toContain("styles.modelFilterHint");
+    expect(panelSource).toContain("「发现」不等于已入库");
+  });
+
   it("resets local model tools from the actual rendered Provider identity", () => {
     expect(panelSource).toContain("}, [provider?.providerId]);");
     expect(panelSource).not.toContain("}, [selectedProviderId]);");
@@ -261,8 +277,8 @@ describe("ConfigProviderRegistryPanel", () => {
   it("offers a preview-first merge only for an exact-contract duplicate", () => {
     expect(panelSource).toContain("合并重复 Provider（高级）");
     expect(panelSource).toContain("日常中转站不需要");
-    expect(panelSource).toContain("/api/config/migration/providers/merge/preview");
-    expect(panelSource).toContain("/api/config/migration/providers/merge/apply");
+    expect(panelSource).toContain("previewProviderMerge(");
+    expect(panelSource).toContain("applyProviderMerge(");
     expect(panelSource).toContain("confirmed: true");
   });
 
@@ -270,7 +286,7 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(panelSource).toContain("一个中转站 / Provider = 一把 API Key");
     expect(panelSource).toContain("2 · 上下文窗口");
     expect(panelSource).toContain("context_window");
-    expect(panelSource).toContain("保存上下文窗口到草稿");
+    expect(panelSource).toContain("保存上下文窗口");
     expect(panelSource).toContain("config-asset-inspector");
     const markup = renderToStaticMarkup(
       <ConfigProviderRegistryPanel {...panelProps([])} />,
@@ -310,7 +326,7 @@ describe("ConfigProviderRegistryPanel", () => {
     expect(dirty).toContain("保存到外部配置");
     expect(dirty).toContain("有未保存修改");
     // savePrompt must not steal the 1fr row from the workspace when present
-    expect(panelStyles.sectionSurface).toContain("[&:has(>_.savePrompt)]:[grid-template-rows:auto_auto_auto_minmax(0,1fr)]");
+    expect(panelStyles.sectionSurface).toContain("[&:has(>_.savePrompt)]:[grid-template-rows:auto_auto_minmax(0,1fr)]");
     expect(panelStyles.savePrompt).toContain("shrink-0");
   });
 

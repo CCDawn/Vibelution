@@ -52,6 +52,76 @@ def test_result_evaluation_ready() -> None:
     assert result.ready is True
 
 
+def test_result_evaluation_ready_for_bounded_run_without_agent() -> None:
+    context = FakeDomainContext()
+    context.bindings["result_evaluation"] = None
+    context.resolvable_agents = set()
+    context._controlled_run = {
+        "terminal": True,
+        "logs": "adapter=synthetic_classification_baseline_vs_variant",
+        "metrics": {"baseline": {"accuracy": 1.0}, "variant": {"accuracy": 1.0}},
+        "artifact_hash": "a" * 64,
+        "execution": {
+            "status": "completed",
+            "adapterId": "synthetic_classification_baseline_vs_variant",
+            "runnerMode": "v1_cpu_smoke",
+            "formalRunnerUnavailable": (
+                "Experiment plan does not select the formal FashionMNIST multi-seed adapter."
+            ),
+        },
+    }
+    result = _evaluate(context, "result_evaluation")
+    assert result.ready is True
+    assert result.actor.configured is True
+
+
+def test_result_evaluation_ready_for_fashion_mnist_formal_without_agent() -> None:
+    context = FakeDomainContext()
+    context.bindings["result_evaluation"] = None
+    context.resolvable_agents = set()
+    context._controlled_run = {
+        "terminal": True,
+        "execution": {
+            "status": "completed",
+            "adapterId": "fashion_mnist_predictive_coding_multi_seed",
+            "automaticPromotion": False,
+            "result": {
+                "status": "completed",
+                "aggregate": {"meanAccuracy": 0.42},
+                "logRef": "/tmp/sci096-canvas/out/formal-run-log.json",
+                "boundaries": [
+                    "does_not_validate_neural_realism",
+                    "not_an_official_competition_submission",
+                ],
+                "automaticPromotion": False,
+            },
+        },
+    }
+    result = _evaluate(context, "result_evaluation")
+    assert result.ready is True
+    assert result.actor.configured is True
+
+
+def test_result_evaluation_blocks_fashion_mnist_without_claim_boundary() -> None:
+    context = FakeDomainContext()
+    context.bindings["result_evaluation"] = None
+    context.resolvable_agents = set()
+    context._controlled_run = {
+        "terminal": True,
+        "logs": True,
+        "metrics": True,
+        "artifact_hash": True,
+        "execution": {
+            "status": "completed",
+            "adapterId": "fashion_mnist_predictive_coding_multi_seed",
+            "result": {"status": "completed", "aggregate": {"meanAccuracy": 0.42}},
+        },
+    }
+    result = _evaluate(context, "result_evaluation")
+    assert result.ready is False
+    assert any(b.code == "agent_not_configured" for b in result.blockers)
+
+
 def test_iteration_decision_blocks_without_report() -> None:
     context = FakeDomainContext()
     context._evaluation_report = None
@@ -101,6 +171,31 @@ def test_candidate_promotion_ready() -> None:
 def test_result_package_blocks_when_incomplete() -> None:
     context = FakeDomainContext()
     context._result_package = None
+    result = _evaluate(context, "result_package")
+    assert result.ready is False
+    assert any(b.code == "result_package_incomplete" for b in result.blockers)
+
+
+def test_result_package_ready_to_start_after_stop_governance() -> None:
+    context = FakeDomainContext()
+    context._result_package = None
+    context._version_governance = {
+        "decision_kind": "stop",
+        "operation": "stop",
+        "terminalReason": "formal_runner_unavailable",
+        "candidate_hash": "h" * 64,
+    }
+    result = _evaluate(context, "result_package")
+    assert result.ready is True
+
+
+def test_result_package_blocks_stop_governance_without_terminal_reason() -> None:
+    context = FakeDomainContext()
+    context._result_package = None
+    context._version_governance = {
+        "decision_kind": "stop",
+        "operation": "stop",
+    }
     result = _evaluate(context, "result_package")
     assert result.ready is False
     assert any(b.code == "result_package_incomplete" for b in result.blockers)

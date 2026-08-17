@@ -85,6 +85,7 @@
 | --- | --- | --- | --- | --- |
 | `agent_bulk_delete_service.py` | Bulk Agent delete/archive orchestration helpers. | — | `agents.py` | `test_agent_archive_session_lifecycle.py`, `test_agent_bulk_delete_service.py`, `test_agent_bulk_edit_service.py` |
 | `agent_bulk_edit_service.py` | Bulk Agent edit orchestration helpers. | — | `agents.py` | `test_agent_bulk_edit_service.py` |
+| `agent_operation_service.py` | Shared Agent create semantics for routes and governed lifecycle tools. | — | `agents.py`, `tools/project_operation_tools.py` | `test_project_operation_tools.py`, `test_agent_lifecycle_create_delete.py` |
 | `agent_config_change_service.py` | Append-only private drafts and revision evidence for Agent configuration. | — | `agents.py` | `test_agent_config_change_service.py` |
 | `agent_config_workspace_service.py` | Read-only Agent configuration workspace aggregation. | — | `agents.py` | `test_agent_archive_session_lifecycle.py`, `test_agent_config_change_service.py`, `test_agent_config_workspace_routes.py` |
 | `agent_directory_service.py` | Persistent AgentInstance registry for chat-facing agents. | `agent_directory/` | `agents.py` | `test_agent_archive_session_lifecycle.py`, `test_agent_avatar_model_repair.py`, `test_agent_avatar_role_defaults.py` |
@@ -109,6 +110,8 @@
 
 ## Knowledge / RAG
 
+**30 秒路由（KB 写入 / RAG 检索 / 索引 / 只读搜索 / 主测）：** [`memory_rag_services.md`](memory_rag_services.md)
+
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
 | `rag_retrieval_service.py` | Governed RAG retrieval helpers for Team Knowledge. | — | `knowledge.py` | `test_rag_retrieval_service.py` |
@@ -117,6 +120,8 @@
 | `unified_knowledge_search_service.py` | Unified read-only search boundary for governed memory and formal knowledge. | — | — | `test_unified_knowledge_search_user_content.py` |
 
 ## Memory
+
+**30 秒路由（overview / 硬删除 / 只读 graph / 主测）：** [`memory_rag_services.md`](memory_rag_services.md)
 
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
@@ -135,6 +140,8 @@
 | `research_service.py` | Web service facade for Research theme discovery. | — | `research.py` | `test_research_theme_discovery.py` |
 
 ## Self / Supervised evolution
+
+**30 秒路由（控制面 / payload / worktree / 主测）：** [`evolution_services.md`](evolution_services.md)
 
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |
@@ -169,6 +176,8 @@
 | `reset_service.py` | Compatibility alias for Launcher-owned reset maintenance. | — | — | `test_developer_sandbox_path_routing.py`, `test_reset_service.py`, `test_web_misc_routes.py` |
 
 ## Config / Provider / Model / Theme
+
+**30 秒路由（operator config / provider 草稿 / 模型引用 / 主测）：** [`config_services.md`](config_services.md)
 
 | Facade | 职责（docstring） | Pack | Routes（主） | Tests（启发式） |
 | --- | --- | --- | --- | --- |

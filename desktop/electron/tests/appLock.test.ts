@@ -40,6 +40,7 @@ describe("shared desktop-shell userData lock", () => {
     ).toBe("C:/Users/17533/AppData/Local/Vibelution/DesktopShell");
     expect(shouldPinSharedDesktopShellUserData({ smoke: false })).toBe(true);
     expect(shouldPinSharedDesktopShellUserData({ smoke: true })).toBe(false);
+    expect(shouldPinSharedDesktopShellUserData({ smoke: false, workbenchCloseCanary: true })).toBe(false);
   });
 
   it("falls back to USERPROFILE when LOCALAPPDATA is missing", () => {

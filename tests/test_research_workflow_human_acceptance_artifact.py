@@ -9,7 +9,6 @@ from pathlib import Path
 import pytest
 
 from core.research.workflow.contracts import WorkflowCommandKind
-from core.research.workflow.ledger import NodeAttemptRecord
 from core.web.services.team_workflow.research_runtime.command_service import (
     WorkflowCommandError,
 )
@@ -22,10 +21,10 @@ from core.web.services.team_workflow.research_runtime.human_gate_artifacts impor
 from core.web.services.team_workflow.research_runtime.knowledge_artifact_authority import (
     load_knowledge_package_payload,
 )
-from tests._support.command_helpers import CommandHarness
 from core.web.services.team_workflow.research_runtime.readiness.common import (
     HandoffSnapshot,
 )
+from tests._support.command_helpers import CommandHarness
 from tests._support.workflow_ledger_helpers import (
     FIXED_NOW_MS,
     build_attempt_record,

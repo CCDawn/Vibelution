@@ -20,11 +20,17 @@ const panelHeaderText =
 
 export const launcherRouteStyles = {
   route:
-    `grid h-full min-h-full max-w-full content-start overflow-y-auto overflow-x-hidden overscroll-contain pb-[max(12px,env(safe-area-inset-bottom))] text-vui-fg-primary [scrollbar-gutter:stable] [--accent-primary:var(--accent-warm)] [--danger:var(--state-error)] [&_[data-vui=button]]:w-fit [&_[data-vui=button]]:[max-width:100%] [&_[data-vui=button]]:[white-space:nowrap] ${vuiWorkspaceFillClass}`,
+    `max-w-full text-vui-fg-primary [--accent-primary:var(--accent-warm)] [--danger:var(--state-error)] [&_[data-vui=button]]:w-fit [&_[data-vui=button]]:[max-width:100%] [&_[data-vui=button]]:[white-space:nowrap] ${vuiWorkspaceFillClass}`,
+  routeBody:
+    "min-h-0 gap-1.5 !overflow-y-auto overflow-x-hidden overscroll-contain pb-[max(12px,env(safe-area-inset-bottom))] [scrollbar-gutter:stable]",
   header:
     "mx-2 mt-2 min-w-0 border-[var(--vui-border-subtle)] !bg-transparent !shadow-none !backdrop-blur-none",
   opsToolbarStack: "grid min-w-0 shrink-0 gap-0",
   panelEyebrow: "m-0 [font-size:var(--vui-font-xs)] uppercase tracking-[0.08em] text-vui-fg-tertiary",
+  primaryRail:
+    "mx-0 grid min-h-0 min-w-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] items-stretch gap-1.5 px-0",
+  primaryColumn: "flex min-h-0 min-w-0 flex-col row-start-2",
+  settingsRail: "min-w-0 min-h-0 row-start-1",
   statusBar:
     "grid w-full max-w-none min-w-0 grid-cols-[minmax(0,1fr)_max-content] items-center gap-2 max-[1200px]:grid-cols-[minmax(0,1fr)] max-[1200px]:justify-items-stretch",
   statusBarReason:
@@ -79,7 +85,7 @@ export const launcherRouteStyles = {
   notice:
     `mx-2 mt-1.5 grid gap-0.5 ${panelSurface} px-2 py-1.5 [font-size:var(--vui-font-xs)] text-vui-fg-secondary data-[tone=success]:border-[color-mix(in_srgb,var(--state-success)_34%,transparent)] data-[tone=success]:text-[var(--state-success)] data-[tone=warning]:border-[color-mix(in_srgb,var(--state-warning)_34%,transparent)] data-[tone=warning]:text-[var(--state-warning)] data-[tone=error]:border-[color-mix(in_srgb,var(--state-error)_34%,transparent)] data-[tone=error]:text-[var(--state-error)] [&_span]:min-w-0 [&_span]:truncate [&_span]:[font-size:var(--vui-font-xs)] [&_span]:text-vui-fg-tertiary`,
   workspace:
-    `grid min-h-0 grid-cols-[minmax(0,1fr)] auto-rows-min gap-1.5 overflow-visible px-2 pb-[max(14px,env(safe-area-inset-bottom))] pt-1.5 ${vuiWorkspaceFillClass}`,
+    `grid shrink-0 grid-cols-[minmax(0,1fr)] auto-rows-min gap-1.5 overflow-visible px-2 pb-[max(14px,env(safe-area-inset-bottom))] pt-1.5 ${vuiWorkspaceFillClass}`,
   advancedFold:
     `col-auto block min-h-0 overflow-hidden ${panelSurface} p-0 [&_summary]:flex [&_summary]:min-w-0 [&_summary]:cursor-pointer [&_summary]:items-baseline [&_summary]:justify-between [&_summary]:gap-2.5 [&_summary]:px-2.5 [&_summary]:py-2 [&_summary]:text-[var(--fg-secondary)] [&_summary_span]:[font-size:var(--vui-font-xs)] [&_summary_span]:uppercase [&_summary_span]:tracking-[0.08em] [&_summary_span]:text-[var(--fg-tertiary)] [&_summary_strong]:text-[var(--fg-primary)]`,
   advancedFoldBody: "grid min-w-0 gap-1.5 px-0 pb-2",

@@ -901,6 +901,52 @@ describe("systemStatus", () => {
     expect(indicator?.detail).not.toContain("资料搜集阶段任务");
   });
 
+  it("does not reuse the global runtime task summary across parallel chat turns", () => {
+    const indicator = deriveActiveWorkIndicator(
+      runtimeWithActiveWork(
+        {
+          chat_turn: {
+            runId: "chat-compat",
+            runKind: "chat_turn",
+            status: "running",
+          },
+        },
+        {
+          taskSummary: "修复完成并已合入本地 main",
+          sessionTitle: "OpenCode DeepSeek Pro",
+          activeItems: {
+            chat_turn: [
+              {
+                runId: "chat-alpha",
+                runKind: "chat_turn",
+                status: "running",
+                sessionId: "session-alpha",
+              },
+              {
+                runId: "chat-beta",
+                runKind: "chat_turn",
+                status: "running",
+                sessionId: "session-beta",
+              },
+            ],
+          },
+        },
+      ),
+    );
+
+    expect(indicator).toMatchObject({
+      kind: "chat",
+      count: 2,
+      summary: "对话正在运行",
+    });
+    expect(indicator?.items.map((item) => item.summary)).toEqual([
+      "对话正在运行",
+      "对话正在运行",
+    ]);
+    expect(indicator?.detail).not.toContain("修复完成并已合入本地 main");
+    expect(indicator?.detail).not.toContain("OpenCode DeepSeek Pro");
+  });
+
   it("uses activeItems to show multiple parallel chat turns", () => {
     const indicator = deriveActiveWorkIndicator(
       runtimeWithActiveWork(

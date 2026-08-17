@@ -69,7 +69,7 @@ describe("conversation slash command suggestions", () => {
   });
 
   it("wires skill library data from the route into the conversation composer", () => {
-    expect(chatCatalogQueriesSource).toContain('fetchJson<SkillLibraryPayload>("/api/skills")');
+    expect(chatCatalogQueriesSource).toContain("fetchSkillLibrary");
     expect(chatCatalogQueriesSource).toContain("const slashCommandSuggestions = skillsQuery.data?.skills ?? []");
     expect(chatRouteSource).toContain("useChatWorkbenchCatalogQueries");
     expect(chatRouteSource).toContain("slashCommandSuggestions,");

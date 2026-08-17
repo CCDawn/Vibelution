@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextvars import copy_context
 from typing import Any, Callable, ClassVar, Dict, List, Optional, Tuple
@@ -36,8 +37,125 @@ ToolResultObserverFn = Callable[[Dict[str, Any], Any, Optional[str]], None]
 ToolRuntimeMetadataObserverFn = Callable[[Dict[str, Any], RuntimeToolMetadata], None]
 
 
+def _coerce_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+def _coerce_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return bool(value)
+    text = str(value).strip().lower()
+    if not text:
+        return default
+    if text in {"1", "true", "yes", "on", "enabled"}:
+        return True
+    if text in {"0", "false", "no", "off", "disabled"}:
+        return False
+    return default
+
+
+def _maybe_json(value: Any) -> Any:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        text = value.lstrip("\ufeff").strip()
+        if text.startswith("{") or text.startswith("["):
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                return value
+    return value
+
+
+def _as_mapping(value: Any) -> Dict[str, Any]:
+    value = _maybe_json(value)
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {}
+
+
+def _coerce_tool_call_list(value: Any) -> List[Dict[str, Any]]:
+    value = _maybe_json(value)
+    if value is None or isinstance(value, (str, bytes, bytearray, memoryview)):
+        return []
+    if isinstance(value, Mapping):
+        nested = value.get("tool_calls")
+        if nested is None:
+            nested = value.get("toolCalls")
+        if nested is not None:
+            return _coerce_tool_call_list(nested)
+        return [dict(value)] if value else []
+    try:
+        items = list(value)
+    except TypeError:
+        return []
+    calls: List[Dict[str, Any]] = []
+    for item in items:
+        item = _maybe_json(item)
+        if isinstance(item, Mapping):
+            calls.append(dict(item))
+    return calls
+
+
+def _tool_call_function(call: Mapping[str, Any]) -> Dict[str, Any]:
+    return _as_mapping(call.get("function"))
+
+
+def _tool_call_name(call: Mapping[str, Any]) -> str:
+    function = _tool_call_function(call)
+    return _coerce_text(
+        call.get("name") or call.get("toolName") or function.get("name") or "unknown"
+    ).strip() or "unknown"
+
+
+def _tool_call_id(call: Mapping[str, Any]) -> str:
+    return _coerce_text(
+        call.get("id") or call.get("toolCallId") or call.get("tool_call_id")
+    ).strip()
+
+
+def _tool_call_args(call: Mapping[str, Any]) -> dict:
+    raw = call.get("args")
+    if raw in (None, ""):
+        raw = call.get("arguments")
+    if raw in (None, ""):
+        function = _tool_call_function(call)
+        raw = function.get("arguments")
+        if raw in (None, ""):
+            raw = function.get("args")
+    if isinstance(raw, (bytes, bytearray, memoryview)):
+        raw = bytes(raw).decode("utf-8", errors="replace")
+    elif isinstance(raw, Mapping):
+        raw = dict(raw)
+    return parse_tool_args(raw if raw not in (None, "") else {})
+
+
+def _coerce_positive_workers(value: Any, *, default: int) -> int:
+    if isinstance(value, bool) or value is None:
+        return max(1, int(default or 1))
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return max(1, int(default or 1))
+    return max(1, parsed)
+
+
 def _coerce_result_status(value: Any) -> str:
-    return str(value or "").lstrip("\ufeff").strip().lower()
+    return _coerce_text(value).lstrip("\ufeff").strip().lower()
 
 
 class ToolLifecycleBridge:
@@ -76,7 +194,7 @@ class ToolLifecycleBridge:
 
     @classmethod
     def is_readonly_tool(cls, tool_name: Any) -> bool:
-        return str(tool_name or "").strip() in cls.READONLY_TOOL_NAMES
+        return _coerce_text(tool_name).strip() in cls.READONLY_TOOL_NAMES
 
     def __init__(
         self,
@@ -93,16 +211,15 @@ class ToolLifecycleBridge:
         self._tool_result_observer = tool_result_observer
         self._runtime_metadata_observer = runtime_metadata_observer
         self._post_close_action_pending = post_close_action_pending
-        self._self_modified = self_modified
+        self._self_modified = _coerce_bool(self_modified, False)
 
     def execute_tool(self, tool_call: Dict[str, Any], messages: list) -> tuple:
         """执行单个工具调用。"""
         ui = get_ui()
-        tool_name = tool_call.get("name", "unknown")
-        tool_args = parse_tool_args(
-            tool_call.get("args") or tool_call.get("arguments") or {}
-        )
-        tool_call_id = tool_call.get("id", None)
+        call = _as_mapping(tool_call)
+        tool_name = _tool_call_name(call)
+        tool_args = _tool_call_args(call)
+        tool_call_id = _tool_call_id(call) or None
 
         _debug_logger.tool_start(tool_name, tool_args)
 
@@ -118,7 +235,7 @@ class ToolLifecycleBridge:
                     tool_call_id=tool_call_id,
                 )
                 _debug_logger.warning(f"[工具护栏] {tool_name} 被短路: {blocked_reason}", tag="TOOL")
-                self._observe_tool_result(tool_call, blocked_reason, None)
+                self._observe_tool_result(call, blocked_reason, None)
                 return (blocked_reason, None)
 
         if tool_name == "trigger_self_restart_tool":
@@ -126,7 +243,7 @@ class ToolLifecycleBridge:
 
             authorization = authorize_tool_execution(
                 tool_name=tool_name,
-                tool_call_id=str(tool_call_id or "").strip(),
+                tool_call_id=_coerce_text(tool_call_id).strip(),
             )
             if authorization.enforced and not authorization.allowed:
                 blocked_reason = authorization.message
@@ -142,7 +259,7 @@ class ToolLifecycleBridge:
                     f"[工具授权] {tool_name} 被 canonical execution authorization 拦截: {authorization.code}",
                     tag="TOOL",
                 )
-                self._observe_tool_result(tool_call, blocked_reason, None)
+                self._observe_tool_result(call, blocked_reason, None)
                 return (blocked_reason, None)
             ui.update_status("ACTING")
             result, action = handle_restart_request(
@@ -157,14 +274,14 @@ class ToolLifecycleBridge:
                 status="success",
                 tool_call_id=tool_call_id,
             )
-            self._observe_tool_result(tool_call, result, action)
+            self._observe_tool_result(call, result, action)
             return (result, action)
 
         ui.update_status("ACTING")
         result, tool_action = self._tool_executor_execute(
             tool_name,
             tool_args,
-            tool_call_id=str(tool_call_id or "").strip(),
+            tool_call_id=_coerce_text(tool_call_id).strip(),
         )
         action = tool_action or self.derive_lifecycle_action(
             tool_name,
@@ -196,7 +313,7 @@ class ToolLifecycleBridge:
             )
             _debug_logger.warning(f"[警告] {tool_name} 返回 None", tag="TOOL")
 
-        self._observe_tool_result(tool_call, result, action)
+        self._observe_tool_result(call, result, action)
         return (result, action)
 
     def _observe_tool_result(self, tool_call: Dict[str, Any], result: Any, action: Optional[str]) -> None:
@@ -210,7 +327,7 @@ class ToolLifecycleBridge:
             try:
                 runtime_metadata = project_runtime_tool_metadata(
                     result,
-                    tool_name=str(tool_call.get("name") or "").strip(),
+                    tool_name=_tool_call_name(_as_mapping(tool_call)),
                 )
                 self._runtime_metadata_observer(tool_call, runtime_metadata)
             except Exception as exc:
@@ -220,7 +337,7 @@ class ToolLifecycleBridge:
         if self._post_close_action_pending is None:
             return False
         try:
-            return bool(self._post_close_action_pending())
+            return _coerce_bool(self._post_close_action_pending(), False)
         except Exception as exc:
             _debug_logger.warning(f"[工具生命周期] 查询后续关闭动作失败，按无待处理动作继续: {type(exc).__name__}: {exc}", tag="TOOL")
             return False
@@ -233,32 +350,20 @@ class ToolLifecycleBridge:
         post_close_action_pending: bool = False,
     ) -> Optional[str]:
         """根据工具结果推导生命周期动作。"""
-        if tool_name != "close_evolution_transaction_tool":
+        if _coerce_text(tool_name).strip() != "close_evolution_transaction_tool":
             return None
-        payload: dict[str, Any] | None
-        if isinstance(result, dict):
-            payload = result
-        elif isinstance(result, (bytes, bytearray)):
-            try:
-                payload = json.loads(result.decode("utf-8", errors="replace").lstrip("\ufeff").strip())
-            except Exception as exc:
-                _debug_logger.warning(f"[工具生命周期] 关闭事务结果解析失败: {type(exc).__name__}: {exc}")
-                return None
-        else:
-            try:
-                payload = json.loads(str(result or "").lstrip("\ufeff").strip())
-            except Exception as exc:
-                _debug_logger.warning(f"[工具生命周期] 关闭事务结果解析失败: {type(exc).__name__}: {exc}")
-                return None
-        if not isinstance(payload, dict):
+        payload = _as_mapping(result)
+        if not payload:
             return None
         status = _coerce_result_status(payload.get("status"))
-        transaction_status = _coerce_result_status(payload.get("transaction_status"))
+        transaction_status = _coerce_result_status(
+            payload.get("transaction_status") or payload.get("transactionStatus")
+        )
         if status not in {"success", "ok"}:
             return None
         if transaction_status not in {"success", "ok"}:
             return None
-        if post_close_action_pending:
+        if _coerce_bool(post_close_action_pending, False):
             _debug_logger.info(
                 "[生命周期] 事务已成功关账，但当前目标仍有后续动作，继续主循环。",
                 tag="TOOL",
@@ -274,16 +379,18 @@ class ToolLifecycleBridge:
         messages: list,
     ) -> Optional[CanonicalToolResult]:
         """将工具结果回写到消息历史。"""
+        call = _as_mapping(tool_call)
+        tool_name = _tool_call_name(call)
         facts = package_tool_result_facts(
             result,
-            tool_name=str(tool_call.get("name") or "").strip(),
+            tool_name=tool_name,
             action=action,
         )
         result_str = render_tool_result_for_model(facts)
         if action in ("restart", "skip", "hibernated"):
-            logger.log_action(action, {"tool": tool_call["name"]})
-        tool_call_id = tool_call.get("id")
-        canonical_call = tool_call.get("canonical_tool_call")
+            logger.log_action(action, {"tool": tool_name})
+        tool_call_id = _tool_call_id(call)
+        canonical_call = call.get("canonical_tool_call") or call.get("canonicalToolCall")
         canonical_result: Optional[CanonicalToolResult] = None
         if isinstance(canonical_call, CanonicalToolCall):
             is_error = not infer_tool_execution_success(result) or action == "skip"
@@ -311,14 +418,14 @@ class ToolLifecycleBridge:
         else:
             messages.append(AIMessage(content=result_str))
         ToolLifecycleBridge._record_tool_result_binding(
-            tool_call=tool_call,
+            tool_call=call,
             canonical_call=canonical_call,
             canonical_result=canonical_result,
             action=action,
             model_message_written=bool(tool_call_id),
         )
         if facts.truncated:
-            _debug_logger.warning(f"[工具] {tool_call['name']} 结果过长，已截断", tag="TOOL")
+            _debug_logger.warning(f"[工具] {tool_name} 结果过长，已截断", tag="TOOL")
         return canonical_result
 
     @staticmethod
@@ -336,23 +443,23 @@ class ToolLifecycleBridge:
 
             identity = getattr(canonical_result, "identity", None) or getattr(canonical_call, "identity", None)
             fields: dict[str, Any] = {
-                "toolCallId": str(tool_call.get("id") or "").strip(),
-                "toolName": str(tool_call.get("name") or "").strip(),
+                "toolCallId": _tool_call_id(tool_call if isinstance(tool_call, Mapping) else {}),
+                "toolName": _tool_call_name(tool_call if isinstance(tool_call, Mapping) else {}),
                 "resultBound": bool(model_message_written),
                 "canonicalResult": canonical_result is not None,
-                "semanticStatus": str(
+                "semanticStatus": _coerce_text(
                     getattr(canonical_result, "status", "")
                     or ("completed" if model_message_written else "missing_call_id")
                 ).strip(),
             }
             if action:
-                fields["action"] = str(action).strip()
+                fields["action"] = _coerce_text(action).strip()
             for source_name, field_name in (
                 ("session_id", "sessionId"),
                 ("turn_id", "turnId"),
                 ("invocation_id", "invocationId"),
             ):
-                value = str(getattr(identity, source_name, "") or "").strip()
+                value = _coerce_text(getattr(identity, source_name, "")).strip()
                 if value:
                     fields[field_name] = value
             record_runtime_scene_event(
@@ -385,16 +492,23 @@ class ToolLifecycleBridge:
         只在已确认 read-only 的段内提升并发，避免误判副作用。
         """
 
-        if not tool_calls:
+        calls = _coerce_tool_call_list(tool_calls)
+        if not calls:
             return None
 
-        workers_cap = int(max_parallel_readonly or self.DEFAULT_PARALLEL_READONLY_WORKERS)
+        if max_parallel_readonly is None:
+            workers_cap = self.DEFAULT_PARALLEL_READONLY_WORKERS
+        else:
+            workers_cap = _coerce_positive_workers(
+                max_parallel_readonly,
+                default=self.DEFAULT_PARALLEL_READONLY_WORKERS,
+            )
         lifecycle_action: Optional[str] = None
         budget_stop_message = (
             "当前回合工具调用额度已用尽，本轮停止。"
             "下一用户消息将重新统计额度；不要继续调用工具或额外探查。"
         )
-        remaining_batches = self._partition_tool_calls(tool_calls)
+        remaining_batches = self._partition_tool_calls(calls)
         for batch_index, batch in enumerate(remaining_batches):
             if lifecycle_action == "tool_budget_exhausted":
                 # Protocol safety: bind short denials for already-declared tool_calls,
@@ -437,7 +551,7 @@ class ToolLifecycleBridge:
         batches: List[List[Dict[str, Any]]] = []
         readonly_buf: List[Dict[str, Any]] = []
         for tc in tool_calls:
-            if self.is_readonly_tool(tc.get("name")):
+            if self.is_readonly_tool(_tool_call_name(tc) if isinstance(tc, Mapping) else tc):
                 readonly_buf.append(tc)
                 continue
             if readonly_buf:
@@ -480,7 +594,7 @@ class ToolLifecycleBridge:
                     results[index] = (self._readonly_batch_error_result(tool_call, exc), None)
                     _debug_logger.warning(
                         f"[工具生命周期] read-only batch 工具失败但不终止整批: "
-                        f"{tool_call.get('name', 'unknown')} {type(exc).__name__}: {exc}",
+                        f"{_tool_call_name(tool_call if isinstance(tool_call, Mapping) else {})} {type(exc).__name__}: {exc}",
                         tag="TOOL",
                     )
         return [
@@ -498,5 +612,5 @@ class ToolLifecycleBridge:
 
     @staticmethod
     def _readonly_batch_error_result(tool_call: Dict[str, Any], exc: Exception) -> str:
-        tool_name = str(tool_call.get("name") or "unknown")
+        tool_name = _tool_call_name(tool_call if isinstance(tool_call, Mapping) else {})
         return f"[错误] read-only 工具 {tool_name} 执行失败: {type(exc).__name__}: {exc}"

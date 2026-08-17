@@ -23,7 +23,6 @@ from .adapters import get_provider_adapter
 from .discovery import discover_model
 from .errors import classify_exception
 from .message_projector import message_to_openai_dict as project_message_to_openai_dict
-from .message_projector import normalize_messages_for_provider
 from .payload_builder import PayloadBuildInput, compose_runtime_wire_payload
 from .payload_trace import build_llm_payload_trace
 from .payload_validator import payload_protocol_summary
@@ -35,6 +34,11 @@ from .responses_websocket import (
     ResponsesWebSocketBackend,
 )
 from .schema import sanitize_tool_schema
+from .stream_http_timing import (
+    capture_stream_http_timings,
+    classify_raw_stream_event,
+    current_stream_http_timings,
+)
 from .streaming import ResponsesStreamNormalizer, extract_message_tool_calls, extract_text_content
 from .semantic_messages import SemanticGenerationSettings
 from .semantic_projector import SemanticProjectionError, SemanticProjectionInput, project_semantic_request
@@ -45,6 +49,17 @@ from .wire.registry import build_default_wire_adapter_registry
 from .wire.chat_completions import STREAM_EXHAUSTED_WITHOUT_FINISH_REASON
 from .wire.responses import STREAM_EXHAUSTED_WITHOUT_TERMINAL
 
+
+_LITELLM_LOCAL_MODEL_COST_MAP_ENV = "LITELLM_LOCAL_MODEL_COST_MAP"
+
+
+def _configure_litellm_import_environment() -> None:
+    """Keep LiteLLM import off the provider request network path by default."""
+
+    os.environ.setdefault(_LITELLM_LOCAL_MODEL_COST_MAP_ENV, "True")
+
+
+_configure_litellm_import_environment()
 
 _LLM_STATUS_CONTEXT: ContextVar[Dict[str, str]] = ContextVar(
     "vibelution_llm_status_context",
@@ -299,9 +314,11 @@ def _record_llm_scene_event(
     lifecycle: bool = False,
 ) -> None:
     try:
-        from core.web.services.runtime_scene_service import record_runtime_scene_event
+        from core.web.services.runtime_scene_service import (
+            record_runtime_scene_event_quietly,
+        )
 
-        record_runtime_scene_event(
+        record_runtime_scene_event_quietly(
             "llm",
             phase,
             event_code,
@@ -311,8 +328,39 @@ def _record_llm_scene_event(
             fields=fields or {},
             lifecycle=lifecycle,
         )
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 - diagnostics must never fail LLM invoke
+        from core.logging import debug as _debug_logger
+
+        _debug_logger.warning(
+            f"runtime scene event record failed (llm/{phase}/{event_code}): "
+            f"{type(exc).__name__}: {exc}",
+            tag="SCENE",
+        )
+
+
+def _record_stream_http_headers_event(timings: Any, *, identity: Dict[str, Any]) -> None:
+    _record_llm_scene_event(
+        "stream",
+        "llm.stream.http_headers",
+        message="LLM stream received HTTP response headers.",
+        outcome="observed",
+        fields={**identity, **timings.headers_scene_fields()},
+        lifecycle=False,
+    )
+
+
+def _record_stream_http_timing_summary(timings: Any, *, identity: Dict[str, Any]) -> None:
+    if timings is None or getattr(timings, "summary_emitted", False):
         return
+    timings.summary_emitted = True
+    _record_llm_scene_event(
+        "stream",
+        "llm.stream.http_timing",
+        message="LLM stream HTTP timing summary.",
+        outcome="observed",
+        fields={**identity, **timings.summary_scene_fields()},
+        lifecycle=False,
+    )
 
 
 @contextmanager
@@ -1103,6 +1151,8 @@ def _record_usage_ledger_event(
     try:
         record_usage_event(event)
     except Exception as exc:
+        from .usage_ledger import usage_ledger_stats
+
         _record_llm_scene_event(
             "usage",
             "llm.usage_ledger.write_failed",
@@ -1114,6 +1164,7 @@ def _record_usage_ledger_event(
                 "profileId": str(profile_id or "").strip(),
                 "provider": str(provider or "").strip(),
                 "model": str(model or "").strip(),
+                "ledgerStats": usage_ledger_stats(),
             },
             lifecycle=False,
         )
@@ -1463,6 +1514,92 @@ def _default_responses_backend(payload: Dict[str, Any]) -> Any:
     return responses(**request_payload)
 
 
+def _default_anthropic_native_backend(payload: Dict[str, Any]) -> Any:
+    """Call an explicit Anthropic Messages endpoint without LiteLLM shape conversion."""
+
+    _raise_if_llm_cancelled()
+    try:
+        import httpx
+    except Exception as exc:  # pragma: no cover
+        raise LLMError(
+            "configuration_error",
+            "httpx 未安装，无法执行 Anthropic Messages native 请求",
+            retryable=False,
+        ) from exc
+    request_payload = dict(payload)
+    endpoint = str(request_payload.pop("base_url", "") or "").strip()
+    api_key = str(request_payload.pop("api_key", "") or "").strip()
+    timeout = request_payload.pop("timeout", None)
+    ssl_verify = request_payload.pop("ssl_verify", True)
+    extra_headers = request_payload.pop("extra_headers", {})
+    if not endpoint or not api_key:
+        raise LLMError(
+            "configuration_error",
+            "Anthropic Messages native route requires endpoint and credential",
+            retryable=False,
+        )
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    }
+    if isinstance(extra_headers, dict):
+        headers.update({str(key): str(value) for key, value in extra_headers.items()})
+
+    def check_response(response: Any) -> None:
+        if int(getattr(response, "status_code", 0) or 0) < 400:
+            return
+        status = int(response.status_code)
+        category = {
+            400: "invalid_request_error",
+            401: "authentication_error",
+            403: "permission_error",
+            404: "not_found_error",
+            429: "rate_limit_error",
+            529: "overloaded_error",
+        }.get(status, "provider_error")
+        raise LLMError(
+            category,
+            f"Anthropic Messages request failed with HTTP {status}",
+            retryable=status == 429 or status >= 500,
+            provider="anthropic",
+            details={"statusCode": status, "errorSource": "anthropic_messages_native"},
+        )
+
+    if not bool(request_payload.get("stream")):
+        with httpx.Client(timeout=timeout, verify=ssl_verify, follow_redirects=False) as client:
+            response = client.post(endpoint, headers=headers, json=request_payload)
+            check_response(response)
+            return response.json()
+
+    def iter_sse():
+        with httpx.Client(timeout=timeout, verify=ssl_verify, follow_redirects=False) as client:
+            with client.stream("POST", endpoint, headers=headers, json=request_payload) as response:
+                check_response(response)
+                for line in response.iter_lines():
+                    _raise_if_llm_cancelled()
+                    normalized = str(line or "").strip()
+                    if not normalized.startswith("data:"):
+                        continue
+                    data = normalized.removeprefix("data:").strip()
+                    if not data or data == "[DONE]":
+                        continue
+                    try:
+                        event = json.loads(data)
+                    except json.JSONDecodeError as exc:
+                        raise LLMError(
+                            "protocol_error",
+                            "Anthropic Messages SSE contains invalid JSON",
+                            retryable=False,
+                            provider="anthropic",
+                            details={"errorSource": "anthropic_messages_native"},
+                        ) from exc
+                    if isinstance(event, dict):
+                        yield event
+
+    return iter_sse()
+
+
 _default_responses_backend._vibelution_default_responses_backend = True
 
 
@@ -1637,6 +1774,7 @@ class LLMClient:
         bound_tools: Optional[List[Any]] = None,
         backend: Any = None,
         responses_backend: Any = None,
+        anthropic_backend: Any = None,
     ) -> None:
         self.config = config or get_config()
         self.role = role
@@ -1646,6 +1784,7 @@ class LLMClient:
         self.bound_tools = list(bound_tools or [])
         self._backend = backend or _default_completion_backend
         self._responses_backend = responses_backend or backend or _default_responses_backend
+        self._anthropic_backend = anthropic_backend or backend or _default_anthropic_native_backend
         self._cancellable_responses_http_handler: Any = None
         self._cancellable_responses_http_handler_lock = threading.Lock()
         self._cancellable_responses_stream_lock = threading.Lock()
@@ -1906,6 +2045,9 @@ class LLMClient:
         selected_tools = list(self.bound_tools)
         if tools is not None:
             selected_tools = list(tools or [])
+        from core.chat.conversation_invariant import check_conversation_payload_invariant
+        from core.chat.model_messages import ProviderMessageChain
+
         ui_tool_calls_index = _find_ui_tool_calls_message_index(list(messages or []))
         if ui_tool_calls_index >= 0:
             raise LLMError(
@@ -1921,7 +2063,28 @@ class LLMClient:
                 },
             )
         projection_messages = list(messages or [])
-        provider_messages = normalize_messages_for_provider(projection_messages)
+        provider_chain = ProviderMessageChain.from_messages(projection_messages)
+        provider_messages = provider_chain.to_provider_payload()
+        invariant = check_conversation_payload_invariant(
+            provider_messages,
+            expected_fingerprint=str(
+                (metadata or {}).get("ledgerConversationFingerprint") or ""
+            ).strip(),
+        )
+        if not invariant.ok:
+            raise LLMError(
+                "payload_protocol_error",
+                invariant.message,
+                retryable=False,
+                provider=self.provider.kind,
+                model=self.profile.model,
+                details={
+                    "requiredSource": "conversation_ledger_model_projection",
+                    "payloadValidationResult": "blocked_before_provider",
+                    "payloadValidationErrorType": invariant.error_type,
+                    **invariant.details,
+                },
+            )
         if self.protocol_route.wire_protocol == WireProtocol.RESPONSES:
             strict_blank_messages = _strict_blank_responses_messages(
                 projection_messages,
@@ -2577,6 +2740,8 @@ class LLMClient:
             return self._backend_for_payload(payload)(payload)
 
     def _backend_for_payload(self, payload: Dict[str, Any]):
+        if self.protocol_route.adapter_id == "anthropic_messages_native":
+            return self._anthropic_backend
         if _payload_uses_responses(payload) and self._responses_websocket_backend is not None:
             return self._responses_websocket_backend
         return self._responses_backend if _payload_uses_responses(payload) else self._backend
@@ -2742,6 +2907,7 @@ class LLMClient:
         metadata: Optional[Dict[str, Any]] = None,
         invocation_scope: Any = None,
         protocol_event_sink: Optional[Callable[[LLMProtocolEvent], None]] = None,
+        scene_identity: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Iterator[StreamChunk], Callable[[], bool], Callable[[], Optional[TurnOutcome]]]:
         _raise_if_llm_cancelled()
         emitted = False
@@ -2775,6 +2941,25 @@ class LLMClient:
                         nonlocal provider_usage
                         for raw_event in iterator:
                             raw_dict = self._provider_object_to_dict(raw_event) or {}
+                            http_timings = current_stream_http_timings()
+                            if http_timings is not None and http_timings.first_raw_event_ms is None:
+                                event_kind = classify_raw_stream_event(raw_dict)
+                                http_timings.mark_first_raw_event(event_kind)
+                                _record_llm_scene_event(
+                                    "stream",
+                                    "llm.stream.first_raw_event",
+                                    message="LLM stream received its first provider wire event.",
+                                    outcome="observed",
+                                    fields={
+                                        **dict(scene_identity or {}),
+                                        "elapsedMs": http_timings.first_raw_event_ms,
+                                        "eventKind": event_kind,
+                                        "httpHeadersMs": http_timings.http_headers_ms,
+                                        "requestBodySentMs": http_timings.request_body_sent_ms,
+                                        "connectMs": http_timings.connect_ms,
+                                    },
+                                    lifecycle=False,
+                                )
                             response_dict = self._provider_object_to_dict(raw_dict.get("response")) or {}
                             raw_usage = raw_dict.get("usage") or response_dict.get("usage")
                             if raw_usage is not None:
@@ -2876,7 +3061,23 @@ class LLMClient:
                         close()
                     raise
 
-        return events(), lambda: emitted, lambda: turn_outcome
+        def timed_events() -> Iterator[StreamChunk]:
+            identity = dict(scene_identity or {})
+            origin_host = urlparse(str(payload.get("base_url") or "")).hostname or ""
+
+            def on_http_headers(http_timings: Any) -> None:
+                _record_stream_http_headers_event(http_timings, identity=identity)
+
+            with capture_stream_http_timings(
+                on_http_headers=on_http_headers,
+                origin_host=origin_host,
+            ) as timings:
+                try:
+                    yield from events()
+                finally:
+                    _record_stream_http_timing_summary(timings, identity=identity)
+
+        return timed_events(), lambda: emitted, lambda: turn_outcome
 
     def stream_events(
         self,
@@ -3042,6 +3243,16 @@ class LLMClient:
                         metadata=metadata,
                         invocation_scope=invocation_scope,
                         protocol_event_sink=protocol_event_sink,
+                        scene_identity={
+                            "role": self.role,
+                            "profileId": self.profile_id,
+                            "provider": self.provider.kind,
+                            "model": self.profile.model,
+                            "sessionId": event_metadata.get("sessionId", ""),
+                            "turnId": event_metadata.get("turnId", ""),
+                            "invocationId": event_metadata.get("invocationId", ""),
+                            "attempt": attempt,
+                        },
                     )
                     for event in events:
                         _raise_if_llm_cancelled()
@@ -3049,6 +3260,9 @@ class LLMClient:
                         elapsed_ms = int((now - start) * 1000)
                         if first_chunk_ms is None:
                             first_chunk_ms = elapsed_ms
+                            http_timings = current_stream_http_timings()
+                            if http_timings is not None:
+                                http_timings.mark_first_projected_chunk()
                             _record_llm_scene_event(
                                 "stream",
                                 "llm.stream.first_chunk",
@@ -3066,6 +3280,11 @@ class LLMClient:
                                     "elapsedMs": elapsed_ms,
                                     "chunkType": event.type,
                                     "attempt": attempt,
+                                    **(
+                                        http_timings.first_chunk_scene_fields()
+                                        if http_timings is not None
+                                        else {}
+                                    ),
                                 },
                                 lifecycle=False,
                             )

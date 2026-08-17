@@ -1069,6 +1069,11 @@ export type LauncherMaintenanceApplyResponse = {
 };
 
 export type LauncherStartupSettings = {
+  launcher?: {
+    controlPort: number;
+    effectiveControlPort: number;
+    controlPortEnvOverride: number;
+  };
   runtime: {
     profile: string;
     preflightDoctor: boolean;
@@ -1180,6 +1185,17 @@ export type LauncherStatus = {
     workbenchWindow?: WorkbenchWindowModeSetting;
     developerMode?: LauncherDeveloperModeSetting;
   };
+  controlPlaneEvidence?: Record<string, unknown>;
+  guardianAdapter?: Record<string, unknown>;
+  overallState?: string;
+  observedState?: string;
+  phase?: string;
+  lifecycleConsistency?: string;
+  failureMessage?: string;
+  lastErrorMessage?: string;
+  lastErrorScope?: string;
+  lastErrorAt?: string;
+  stateVersion?: string;
 };
 
 export type LauncherControlResponse = RuntimeControlResponse & {

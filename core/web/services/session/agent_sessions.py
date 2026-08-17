@@ -959,7 +959,19 @@ def archive_agent_sessions(
                 restore_token["createdReplacementSessionId"] = replacement_id
         payload["version"] = int(payload.get("version") or s.CHAT_STATE_VERSION)
         payload["updated_at"] = timestamp
-        s.save_chat_state(s.PROJECT_ROOT, payload)
+        dirty_rows = [
+            dict(raw)
+            for raw in conversations
+            if isinstance(raw, dict)
+            and str(raw.get("conversation_id") or "").strip() in selected
+        ]
+        activate_id = ""
+        if active_id in selected:
+            activate_id = str(payload.get("active_conversation_id") or "").strip()
+            found = s._find_conversation_entry(payload, activate_id)
+            if isinstance(found, dict) and activate_id not in selected:
+                dirty_rows.append(dict(found))
+        s._persist_dirty_session_runtime_rows(dirty_rows, activate_session_id=activate_id)
         archived_rows = [
             dict(raw)
             for raw in conversations
@@ -1027,7 +1039,7 @@ def create_child_session(
     constraints: list[str] | None = None,
     excluded_context_summary: str = "",
     auto_start: bool = True,
-    switch_to_child: bool = True,
+    switch_to_child: bool = False,
     source: str = "agent_auto_split",
 ) -> dict[str, Any]:
     s = _service()
@@ -1039,13 +1051,13 @@ def create_child_session(
     if not request_text:
         raise s.SessionValidationError(s.text_for(lang, zh="请输入子对话要处理的事项。", en="Enter the child session task."))
     with s._CHAT_STATE_LOCK:
-        payload = s.load_chat_state(s.PROJECT_ROOT)
-        s._materialize_agent_directory_conversation_locked(payload, parent_id, source="s.create_child_session")
-        conversations = payload.get("conversations")
-        if not isinstance(conversations, list):
-            conversations = []
-            payload["conversations"] = conversations
-        source_parent = s._find_conversation_entry(payload, parent_id)
+        source_parent = s.load_session_chat_state(s.PROJECT_ROOT, parent_id)
+        if source_parent is None:
+            if s._ensure_agent_directory_conversation_materialized(
+                parent_id,
+                source="s.create_child_session",
+            ):
+                source_parent = s.load_session_chat_state(s.PROJECT_ROOT, parent_id)
         if source_parent is None:
             raise s.SessionNotFoundError(s.text_for(lang, zh="未找到父会话。", en="Parent session not found."))
         s._ensure_session_mutable(parent_id, conversation=source_parent)
@@ -1055,14 +1067,12 @@ def create_child_session(
         root_id = str((normalized_parent or {}).get("rootSessionId") or parent_id).strip() or parent_id
         if str((normalized_parent or {}).get("sessionKind") or "main") == "child":
             root_id = str((normalized_parent or {}).get("rootSessionId") or (normalized_parent or {}).get("parentSessionId") or parent_id).strip() or parent_id
-        parent = s._find_conversation_entry(payload, root_id) or source_parent
+        parent = source_parent
+        if root_id != parent_id:
+            parent = s.load_session_chat_state(s.PROJECT_ROOT, root_id) or source_parent
         s._ensure_conversation_workspace_metadata(parent)
         s._ensure_conversation_agent_metadata(parent)
-        existing_ids = {
-            str(item.get("conversation_id") or "").strip()
-            for item in conversations
-            if isinstance(item, dict)
-        }
+        existing_ids = set(s.list_session_runtime_ids(s.PROJECT_ROOT))
         now = s._now_timestamp()
         child_id = s._new_conversation_id(existing_ids)
         title = s.trim_lines(task_title or request_text, max_lines=1).strip() or s.text_for(lang, zh="子对话", en="Child session")
@@ -1106,13 +1116,14 @@ def create_child_session(
         parent["active_child_session_id"] = child_id
         parent.pop("messages", None)
         parent["updated_at"] = now
-        conversations.append(child)
-        payload["version"] = int(payload.get("version") or s.CHAT_STATE_VERSION)
-        if switch_to_child:
-            payload["active_conversation_id"] = child_id
-        payload["updated_at"] = now
-        payload["conversations"] = conversations
-        s.save_chat_state(s.PROJECT_ROOT, payload)
+        dirty_rows = [parent, child]
+        parent_session_id = str(parent.get("conversation_id") or root_id).strip() or root_id
+        if parent_session_id != parent_id:
+            dirty_rows.append(source_parent)
+        s._persist_dirty_session_runtime_rows(
+            dirty_rows,
+            activate_session_id=child_id if switch_to_child else "",
+        )
         parent_snapshot = dict(parent)
         child_snapshot = dict(child)
     from . import directory_bridge
@@ -1270,16 +1281,7 @@ def create_supervised_agent_session(
     if not agent:
         raise s.SessionValidationError(s._session_agent_unavailable_message("missing_agent", lang=lang))
     with s._CHAT_STATE_LOCK:
-        payload = s.load_chat_state(s.PROJECT_ROOT)
-        conversations = payload.get("conversations")
-        if not isinstance(conversations, list):
-            conversations = []
-            payload["conversations"] = conversations
-        existing_ids = {
-            str(item.get("conversation_id") or "").strip()
-            for item in conversations
-            if isinstance(item, dict)
-        }
+        existing_ids = set(s.list_session_runtime_ids(s.PROJECT_ROOT))
         now = s._now_timestamp()
         session_id = s._new_conversation_id(existing_ids)
         display_title = (
@@ -1306,11 +1308,7 @@ def create_supervised_agent_session(
             }
         )
         s._ensure_conversation_workspace_metadata(conversation)
-        conversations.append(conversation)
-        payload["version"] = int(payload.get("version") or s.CHAT_STATE_VERSION)
-        payload["updated_at"] = now
-        payload["conversations"] = conversations
-        s.save_chat_state(s.PROJECT_ROOT, payload)
+        s.save_session_chat_state(s.PROJECT_ROOT, session_id, conversation)
         created_supervised = dict(conversation)
     from . import directory_bridge
 
@@ -1319,14 +1317,9 @@ def create_supervised_agent_session(
     return s.get_session_detail(session_id) or {}
 
 
-def delete_chat_session(session_id: str) -> dict:
-    """Delete one chat session and return the next active session detail."""
-    s = _service()
-
-    delete_result = s._delete_chat_session_state(session_id)
-    next_active_id = str(delete_result.get("nextActiveSessionId") or "").strip()
-    target = s._load_conversation_detail_target(next_active_id, repair=False, agent_by_id={})
-    return s._build_lightweight_session_detail(target) if target is not None else {}
+def delete_chat_session(session_id: str) -> dict[str, Any]:
+    """Delete one chat session and return a lightweight UI handoff payload."""
+    return delete_chat_session_lightweight(session_id)
 
 
 def delete_chat_session_lightweight(session_id: str, *, activate_replacement: bool = False) -> dict[str, Any]:
@@ -1380,20 +1373,15 @@ def reset_agent_direct_session_lightweight(
     normalized_title = s.trim_lines(title or "", max_lines=1).strip() or fallback_title
     try:
         with s._CHAT_STATE_LOCK:
-            payload = s.load_chat_state(s.PROJECT_ROOT)
-            conversations = payload.get("conversations")
-            if not isinstance(conversations, list):
-                conversations = []
-                payload["conversations"] = conversations
-            s._materialize_agent_directory_conversation_locked(payload, old_session_id, source="agent_reset_direct_session")
-            payload = s._repair_stale_running_conversations(payload)
-            conversations = payload.get("conversations")
-            if not isinstance(conversations, list):
-                conversations = []
-                payload["conversations"] = conversations
-            old_conversation = s._find_conversation_entry(payload, old_session_id)
+            s._ensure_agent_directory_conversation_materialized(
+                old_session_id,
+                source="agent_reset_direct_session",
+            )
+            old_conversation = s.load_session_chat_state(s.PROJECT_ROOT, old_session_id)
             if old_conversation is None:
                 raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
+            if s._repair_stale_running_conversation(old_conversation):
+                s.save_session_chat_state(s.PROJECT_ROOT, old_session_id, old_conversation)
             normalized_old = s._normalize_conversation(old_conversation) or {}
             old_phase = s._conversation_phase(old_session_id, normalized_old)
             s._record_session_delete_event(
@@ -1410,11 +1398,7 @@ def reset_agent_direct_session_lightweight(
                         en="This session is still running or stopping. Wait for the current turn to close before resetting the Agent.",
                     )
                 )
-            existing_ids = {
-                str(item.get("conversation_id") or "").strip()
-                for item in conversations
-                if isinstance(item, dict)
-            }
+            existing_ids = set(s.list_session_runtime_ids(s.PROJECT_ROOT))
             replacement_session_id = s._new_conversation_id(existing_ids | {old_session_id})
             replacement_conversation = s._make_empty_conversation(
                 replacement_session_id,
@@ -1424,12 +1408,12 @@ def reset_agent_direct_session_lightweight(
             s._ensure_conversation_workspace_metadata(replacement_conversation)
             replacement_conversation["agent_id"] = normalized_agent_id
             replacement_conversation["agentId"] = normalized_agent_id
-            conversations.append(replacement_conversation)
-            payload["version"] = int(payload.get("version") or s.CHAT_STATE_VERSION)
-            payload["active_conversation_id"] = replacement_session_id
-            payload["updated_at"] = created_at
-            payload["conversations"] = conversations
-            s.save_chat_state(s.PROJECT_ROOT, payload)
+            s.save_session_chat_state(
+                s.PROJECT_ROOT,
+                replacement_session_id,
+                replacement_conversation,
+                activate=True,
+            )
             replacement_snapshot = dict(replacement_conversation)
         s._invalidate_session_list_cache()
         from . import directory_bridge
@@ -1514,30 +1498,22 @@ def mark_direct_session_agent_deleted(
     now = s._now_timestamp()
     try:
         with s._CHAT_STATE_LOCK:
-            payload = s.load_chat_state(s.PROJECT_ROOT)
-            conversations = payload.get("conversations")
-            if not isinstance(conversations, list):
-                conversations = []
-                payload["conversations"] = conversations
+            conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
             if include_restore_token:
                 restore_token = {
                     "sessionId": normalized_session_id,
                     "agentId": normalized_agent_id,
                     "previousConversation": None,
-                    "previousActiveConversationId": str(payload.get("active_conversation_id") or "").strip(),
-                    "previousUpdatedAt": str(payload.get("updated_at") or "").strip(),
-                    "previousVersion": payload.get("version"),
+                    "previousActiveConversationId": s.load_active_conversation_id(s.PROJECT_ROOT),
+                    "previousUpdatedAt": "",
+                    "previousVersion": None,
                 }
-            for raw in conversations:
-                if not isinstance(raw, dict):
-                    continue
-                if str(raw.get("conversation_id") or s.DEFAULT_CHAT_CONVERSATION_ID).strip() != normalized_session_id:
-                    continue
+            if conversation is not None:
                 found = True
                 if restore_token is not None:
-                    restore_token["previousConversation"] = s.copy.deepcopy(raw)
+                    restore_token["previousConversation"] = s.copy.deepcopy(conversation)
                 changed = s._mark_conversation_agent_deleted(
-                    raw,
+                    conversation,
                     session_id=normalized_session_id,
                     agent_id=normalized_agent_id,
                     agent_display_name=agent_display_name,
@@ -1545,8 +1521,7 @@ def mark_direct_session_agent_deleted(
                     hide_from_index=hide_from_index,
                     timestamp=now,
                 ) or changed
-                break
-            if not found:
+            else:
                 conversation = s._make_empty_conversation(
                     normalized_session_id,
                     title=agent_display_name or normalized_session_id,
@@ -1562,12 +1537,9 @@ def mark_direct_session_agent_deleted(
                     hide_from_index=hide_from_index,
                     timestamp=now,
                 )
-                conversations.append(conversation)
                 changed = True
-            if changed:
-                payload["version"] = int(payload.get("version") or s.CHAT_STATE_VERSION)
-                payload["updated_at"] = now
-                s.save_chat_state(s.PROJECT_ROOT, payload)
+            if changed and conversation is not None:
+                s.save_session_chat_state(s.PROJECT_ROOT, normalized_session_id, conversation)
     except Exception as exc:
         result = {
             "changed": False,
@@ -2007,8 +1979,7 @@ def append_cli_agent_lifecycle_event(
         "folded": True,
     }
     with s._CHAT_STATE_LOCK:
-        payload = s.load_chat_state(s.PROJECT_ROOT)
-        conversation = s._find_conversation_entry(payload, normalized_session_id)
+        conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
         if conversation is None:
             return None
         existing = s._find_cli_agent_lifecycle_message(
@@ -2021,8 +1992,7 @@ def append_cli_agent_lifecycle_event(
         event_entry = s._make_chat_message("assistant", content, metadata=metadata)
         conversation.pop("messages", None)
         conversation["updated_at"] = event_entry["timestamp"]
-        payload["updated_at"] = event_entry["timestamp"]
-        s.save_chat_state(s.PROJECT_ROOT, payload)
+        s.save_session_chat_state(s.PROJECT_ROOT, normalized_session_id, conversation)
     s._append_session_conversation_event(
         normalized_session_id,
         str(terminal.get("sourceTurnId") or terminal.get("turnId") or f"cli-lifecycle:{lifecycle_subject}"),
@@ -2094,8 +2064,7 @@ def append_cli_agent_task_result_event(
         "folded": True,
     }
     with s._CHAT_STATE_LOCK:
-        payload = s.load_chat_state(s.PROJECT_ROOT)
-        conversation = s._find_conversation_entry(payload, normalized_session_id)
+        conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
         if conversation is None:
             return None
         existing = s._find_cli_agent_task_result_message(
@@ -2108,8 +2077,7 @@ def append_cli_agent_task_result_event(
             result_entry = s._make_chat_message("assistant", content, metadata=metadata)
             conversation.pop("messages", None)
             conversation["updated_at"] = result_entry["timestamp"]
-            payload["updated_at"] = result_entry["timestamp"]
-            s.save_chat_state(s.PROJECT_ROOT, payload)
+            s.save_session_chat_state(s.PROJECT_ROOT, normalized_session_id, conversation)
     journal_turn_id = str(
         task_result.get("sourceTurnId")
         or task_result.get("turnId")
@@ -2181,6 +2149,58 @@ def append_cli_agent_task_result_event(
     return result_entry
 
 
+def _conversation_row_id(raw: dict[str, Any]) -> str:
+    return str(raw.get("conversation_id") or raw.get("conversationId") or raw.get("id") or "").strip()
+
+
+def _conversation_row_updated_at(raw: dict[str, Any]) -> str:
+    return str(raw.get("updated_at") or raw.get("updatedAt") or "").strip()
+
+
+def _delete_session_control_phase(session_id: str, conversation: dict[str, Any]) -> str:
+    """Return running/stopping/queued without replaying turn journals."""
+    s = _service()
+    if s._is_session_stop_requested(session_id):
+        return "stopping"
+    last_status = str(
+        conversation.get("last_turn_status") or conversation.get("lastTurnStatus") or ""
+    ).strip().lower()
+    if s._is_session_running(session_id):
+        if last_status == "queued":
+            return "queued"
+        return "running"
+    return last_status or "ready"
+
+
+def _next_active_session_id_from_remaining(
+    remaining: list[dict[str, Any]],
+    *,
+    current_active_id: str,
+    deleted_session_id: str,
+) -> str:
+    s = _service()
+    remaining_ids = [
+        session_id
+        for session_id in (_conversation_row_id(item) for item in remaining)
+        if session_id
+    ]
+    normalized_active = str(current_active_id or "").strip()
+    if (
+        normalized_active
+        and normalized_active != deleted_session_id
+        and normalized_active in remaining_ids
+    ):
+        return normalized_active
+    dated = [item for item in remaining if _conversation_row_id(item)]
+    if not dated:
+        return ""
+    latest = max(
+        dated,
+        key=lambda item: s._timestamp_sort_key(_conversation_row_updated_at(item)),
+    )
+    return _conversation_row_id(latest)
+
+
 def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = False) -> dict[str, str]:
     """Delete one chat session and return ids needed by UI and Agent rebind callers."""
     s = _service()
@@ -2199,6 +2219,34 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
     conversation_id = str(session_id or "").strip()
     if not conversation_id:
         raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
+
+    if not s._session_has_openable_body(conversation_id):
+        s._retire_unopenable_directory_session(
+            conversation_id,
+            source="s.delete_chat_session",
+        )
+        if (
+            s._session_workspace_dir_if_present(conversation_id) is not None
+            and not s._is_session_workspace_intentionally_deleted(conversation_id)
+        ):
+            s._mark_session_workspace_intentionally_deleted(
+                conversation_id,
+                reason="deleted",
+            )
+        s._record_session_delete_event(
+            "already_deleted",
+            session_id=conversation_id,
+            outcome="already_deleted",
+            fields={
+                "phase": "deleted",
+                "agentId": "",
+                "messageCount": 0,
+            },
+        )
+        return {
+            "nextActiveSessionId": str(s.load_active_conversation_id(s.PROJECT_ROOT) or "").strip(),
+            "replacementDirectSessionId": "",
+        }
 
     next_active_id = ""
     replacement_snapshot: dict[str, Any] | None = None
@@ -2247,14 +2295,17 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
             conversation=target_conversation,
         )
         s._ensure_conversation_workspace_metadata(target_conversation)
-        s._ensure_conversation_agent_metadata(target_conversation)
         target_agent_id = str(target_conversation.get("agent_id") or target_conversation.get("agentId") or "").strip()
         target_agent = s.get_agent(target_agent_id, include_archived=False) if target_agent_id else None
         target_agent_direct_session_id = str((target_agent or {}).get("directSessionId") or "").strip()
 
-        normalized_target = s._normalize_conversation(target_conversation) or {}
-        target_phase = s._conversation_phase(conversation_id, normalized_target)
-        target_message_count = len(s._session_ledger_visible_messages(conversation_id))
+        # Keep this critical section off the journal replay path. The live
+        # delete stall was resolve_target scanning turn_journal.jsonl (and
+        # then normalizing every remaining conversation) while holding
+        # _CHAT_STATE_LOCK, which blocked sibling GET detail / select.
+        target_phase = _delete_session_control_phase(conversation_id, target_conversation)
+        raw_messages = target_conversation.get("messages")
+        target_message_count = len(raw_messages) if isinstance(raw_messages, list) else 0
         timings["resolve_target"] = s._elapsed_ms(resolve_started_at)
         s._record_session_delete_event(
             "requested",
@@ -2291,11 +2342,6 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
             for index, item in enumerate(conversations)
             if index != target_index and isinstance(item, dict)
         ]
-        normalized_remaining = [
-            item
-            for item in (s._normalize_conversation(raw) for raw in remaining)
-            if item is not None
-        ]
         replacement_direct_session_id = ""
         agent_unbound = False
         if target_agent and target_agent_direct_session_id == conversation_id:
@@ -2311,15 +2357,12 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
             timings["unbind_agent"] = 0
 
         current_active_id = str(payload.get("active_conversation_id") or "").strip()
-        if any(item["id"] == current_active_id for item in normalized_remaining) and current_active_id != conversation_id:
-            next_active_id = current_active_id
-        elif normalized_remaining:
-            latest = max(
-                normalized_remaining,
-                key=lambda item: s._timestamp_sort_key(item.get("updatedAt") or ""),
-            )
-            next_active_id = latest["id"]
-        else:
+        next_active_id = _next_active_session_id_from_remaining(
+            remaining,
+            current_active_id=current_active_id,
+            deleted_session_id=conversation_id,
+        )
+        if not next_active_id:
             now = s._now_timestamp()
             next_active_id = s._new_conversation_id({conversation_id})
             replacement_conversation = s._make_empty_conversation(
@@ -2338,7 +2381,14 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
         payload["updated_at"] = now
         payload["conversations"] = remaining
         try:
-            timed("save_state", lambda: s.save_chat_state(s.PROJECT_ROOT, payload))
+            timed(
+                "save_state_and_archive",
+                lambda: s.save_chat_state(
+                    s.PROJECT_ROOT,
+                    payload,
+                    archive_session_id=conversation_id,
+                ),
+            )
         except Exception as exc:
             if agent_unbound:
                 try:
@@ -2375,7 +2425,16 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
 
     from . import directory_bridge
 
-    directory_bridge.archive_directory_session_safe(conversation_id)
+    timings["directory_archive_dispatch"] = 0
+    s._record_session_delete_event(
+        "directory_archived",
+        session_id=conversation_id,
+        outcome="archived",
+        fields={
+            "durationMs": timings.get("save_state_and_archive", 0),
+            "transactional": True,
+        },
+    )
     if replacement_snapshot is not None:
         directory_bridge.sync_conversation_record(replacement_snapshot)
     s._invalidate_session_list_cache()
@@ -2994,8 +3053,7 @@ def _wake_agent_for_cli_agent_task_result(
     if not lease_decision.allowed:
         return "wake_blocked_by_lease"
     with s._CHAT_STATE_LOCK:
-        payload = s.load_chat_state(s.PROJECT_ROOT)
-        conversation = s._find_conversation_entry(payload, session_id)
+        conversation = s.load_session_chat_state(s.PROJECT_ROOT, session_id)
         if conversation is None:
             return "wake_session_missing"
         if s._is_session_running(session_id):
@@ -3010,9 +3068,7 @@ def _wake_agent_for_cli_agent_task_result(
         turn_control = s._create_session_turn_control(session_id)
         conversation["last_turn_status"] = "running"
         conversation["updated_at"] = s._now_timestamp()
-        payload["active_conversation_id"] = session_id
-        payload["updated_at"] = conversation["updated_at"]
-        s.save_chat_state(s.PROJECT_ROOT, payload)
+        s.save_session_chat_state(s.PROJECT_ROOT, session_id, conversation)
         s._set_session_running(session_id, True, turn_id=turn_control.turn_id, leases=requested_leases)
         s._persist_chat_turn_work_run(
             session_id=session_id,

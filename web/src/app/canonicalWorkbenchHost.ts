@@ -1,30 +1,6 @@
 const CANONICAL_WORKBENCH_HOSTNAME = "127.0.0.1";
 const LEGACY_LOCALHOST = "localhost";
-const LAUNCHER_CONTROL_PORT = "8765";
 const WORKBENCH_PORT = "8000";
-const WORKBENCH_ONLY_PATHS = new Set([
-  "/",
-  "/chat",
-  "/supervised-evolution",
-  "/supervised-evolution/runs",
-  "/supervised-evolution/library",
-  "/supervised-evolution/review",
-  "/self-evolution",
-  "/teams",
-  "/kernel",
-  "/memory",
-  "/agents",
-  "/git",
-  "/usage",
-  "/logs",
-  "/pet",
-  "/reset",
-  "/config",
-]);
-
-function isWorkbenchOnlyPath(pathname: string): boolean {
-  return WORKBENCH_ONLY_PATHS.has(pathname) || pathname.startsWith("/memory/") || pathname.startsWith("/agents/");
-}
 
 function suppressNextNavigationReferrer(targetDocument: Document | undefined): void {
   const head = targetDocument?.head;
@@ -51,15 +27,6 @@ export function canonicalWorkbenchHref(value: string): string {
     }
     if (url.hostname === LEGACY_LOCALHOST && url.port === WORKBENCH_PORT) {
       url.hostname = CANONICAL_WORKBENCH_HOSTNAME;
-      return url.toString();
-    }
-    if (
-      (url.hostname === LEGACY_LOCALHOST || url.hostname === CANONICAL_WORKBENCH_HOSTNAME)
-      && url.port === LAUNCHER_CONTROL_PORT
-      && isWorkbenchOnlyPath(url.pathname)
-    ) {
-      url.hostname = CANONICAL_WORKBENCH_HOSTNAME;
-      url.port = WORKBENCH_PORT;
       return url.toString();
     }
     return "";

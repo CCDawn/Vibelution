@@ -1,11 +1,18 @@
 import { useInfiniteQuery, type InfiniteData, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import { useMemo } from "react";
 
-import { fetchJson } from "../api/client";
+import { querySessions } from "../api/chat";
 import { queryKeys } from "../api/queryKeys";
-import type { AgentInstance, SessionDetail, SessionQueryResponse, SessionSummary } from "../api/types";
+import type {
+  AgentInstance,
+  ConversationSummary,
+  SessionDetail,
+  SessionQueryResponse,
+  SessionSummary,
+} from "../api/types";
 import { mergeSessionDetailIntoSummaries } from "./chatSessionState";
-import { filterOutTombstonedSessions } from "./sessionDeleteTombstone";
+import { mergePreservedCreatedSessions, unpinSessionCreatePreserve } from "./sessionCreatePreserve";
+import { filterOutTombstonedSessions, markSessionDeleteTombstone } from "./sessionDeleteTombstone";
 
 export const SESSION_INDEX_PAGE_SIZE = 50;
 
@@ -22,17 +29,6 @@ type SessionQueryInfiniteData = InfiniteData<SessionQueryResponse, string>;
 export type SessionIndexCacheSnapshot = Array<[QueryKey, SessionQueryInfiniteData | undefined]>;
 export type AgentSessionCacheSnapshot = Array<[QueryKey, SessionQueryResponse | undefined]>;
 
-function sessionQueryUrl(queryText: string, cursor: string): string {
-  const params = new URLSearchParams();
-  params.set("limit", String(SESSION_INDEX_PAGE_SIZE));
-  if (cursor) {
-    params.set("cursor", cursor);
-  }
-  if (queryText) {
-    params.set("q", queryText);
-  }
-  return `/api/sessions/query?${params.toString()}`;
-}
 
 function mergeSessions(groups: Array<SessionSummary[] | undefined>): SessionSummary[] {
   const merged = new Map<string, SessionSummary>();
@@ -152,6 +148,35 @@ export function updateSessionSummaryCaches(queryClient: QueryClient, updater: Se
   );
 }
 
+/**
+ * Drop an unopenable session from list caches without cancelling the active
+ * detail query, so an explicit URL can still settle on the unavailable surface.
+ */
+export function evictUnopenableSessionFromCaches(queryClient: QueryClient, sessionId: string) {
+  const normalizedSessionId = String(sessionId || "").trim();
+  if (!normalizedSessionId) {
+    return;
+  }
+  markSessionDeleteTombstone(normalizedSessionId);
+  unpinSessionCreatePreserve(normalizedSessionId);
+  updateSessionSummaryCaches(queryClient, (sessions) =>
+    sessions?.filter((session) => session.id !== normalizedSessionId),
+  );
+  removeSessionFromAgentSessionCaches(queryClient, normalizedSessionId);
+  queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations(), (conversations) => {
+    if (!conversations) {
+      return conversations;
+    }
+    return conversations.filter((conversation) => {
+      if (conversation.type !== "direct_agent") {
+        return true;
+      }
+      return conversation.directSessionId !== normalizedSessionId
+        && conversation.conversationId !== normalizedSessionId;
+    });
+  });
+}
+
 export function updateAgentSessionSummaryCaches(queryClient: QueryClient, updater: SessionSummaryUpdater) {
   queryClient.setQueriesData<SessionQueryResponse>({ queryKey: ["sessions", "agent"] }, (data) => {
     if (!data) {
@@ -224,11 +249,27 @@ export function useSessionIndexQuery({
     initialPageParam: "",
     enabled,
     queryFn: async ({ pageParam }) => {
-      const payload = await fetchJson<SessionQueryResponse>(sessionQueryUrl(normalizedQueryText, String(pageParam || "")));
+      const payload = await querySessions({
+        limit: SESSION_INDEX_PAGE_SIZE,
+        cursor: String(pageParam || ""),
+        q: normalizedQueryText,
+      });
       const existing = queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions()) ?? [];
-      const merged = filterOutTombstonedSessions(mergeSessions([existing, payload.items])) ?? [];
-      // Drop tombstoned rows from the page payload so infinite pages stay clean.
-      const filteredItems = filterOutTombstonedSessions(payload.items) ?? [];
+      const previousPages = queryClient.getQueryData<SessionQueryInfiniteData>(
+        queryKeys.sessionQuery(normalizedQueryText, SESSION_INDEX_PAGE_SIZE),
+      );
+      const previousPageItems = previousPages ? mergeSessionPages(previousPages.pages) : [];
+      // Drop tombstoned rows, then re-attach optimistic / just-created tabs that a
+      // racing bootstrap or index refetch can briefly omit after create.
+      const filteredItems = mergePreservedCreatedSessions(
+        filterOutTombstonedSessions(payload.items) ?? [],
+        { localItems: previousPageItems },
+      );
+      const merged = filterOutTombstonedSessions(
+        mergePreservedCreatedSessions(mergeSessions([existing, filteredItems]), {
+          localItems: previousPageItems,
+        }),
+      ) ?? [];
       queryClient.setQueryData<SessionSummary[]>(queryKeys.sessions(), merged);
       return {
         ...payload,

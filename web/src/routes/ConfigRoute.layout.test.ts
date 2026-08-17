@@ -143,18 +143,18 @@ describe("ConfigRoute layout contract", () => {
     expect(wizardSource).toContain("canAdvanceProviderWizard");
   });
 
-  it("defaults Provider workspace to model assets home, with quick setup as add-connection mode", () => {
+  it("defaults Provider workspace to model assets home, with quick setup as add-connection entry", () => {
     expect(routeSource).toContain("ConfigQuickSetupPanel");
-    expect(routeSource).toContain('type ProviderWorkspaceMode = "quick" | "manage" | "advanced"');
-    expect(routeSource).toContain('useState<ProviderWorkspaceMode>("manage")');
+    expect(routeSource).toContain("useState(false)");
+    expect(routeSource).toContain("providerConnecting");
+    expect(routeSource).toContain("providerShowMore");
     expect(routeSource).toContain("handlePrepareProviderQuickSetup");
     expect(routeSource).toContain("handleConfirmProviderQuickSetup");
     expect(routeSource).toContain("recommendProviderModel");
-    expect(routeSource).toContain('providerWorkspaceMode === "quick"');
-    expect(routeSource).toContain('providerWorkspaceMode === "manage"');
-    expect(routeSource).toContain('providerWorkspaceMode === "advanced"');
-    expect(routeSource).toContain("① 模型资产");
-    expect(routeSource).toContain("② 添加连接");
+    expect(routeSource).toContain("添加连接");
+    expect(routeSource).toContain("返回已配置服务");
+    expect(routeSource).not.toContain("① 模型资产");
+    expect(routeSource).not.toContain("② 添加连接");
     expect(quickSetupSource).toContain("检测连接");
     expect(quickSetupSource).toContain("保存并完成");
     expect(quickSetupStyles.workspace).toContain("max-w-none");
@@ -163,7 +163,7 @@ describe("ConfigRoute layout contract", () => {
     expect(quickSetupStylesSource).not.toContain("min-h-[28rem]");
     expect(quickSetupStylesSource).not.toContain("minmax(22rem,0.9fr)_minmax(28rem,1.1fr)");
     expect(routeSource).toContain('workspace.schemaVersion === 2 && isSectionVisible("models")');
-    expect(routeSource).toContain('providerWorkspaceMode === "advanced" ? (\n                  <>');
+    expect(routeSource).toContain("providerShowMore ? (\n                  <>");
     expect(routeSource).toContain('isSectionVisible("models")');
   });
 
@@ -211,7 +211,9 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("isConfigBaselineStaleErrorMessage");
     expect(routeSource).toContain("buildConfigApplyRequestPayload");
     expect(routeSource).toContain("baseConfig: null");
-    expect(routeSource).toContain('requestJson<ConfigWorkspace>("/api/config/apply"');
+    expect(routeSource).toContain("applyConfigWorkspace(payload)");
+    expect(routeSource).toContain("applyConfigWorkspace({");
+    expect(routeSource).not.toContain('"/api/config/apply"');
   });
 
   it("surfaces model test results into notice, row feedback, and workspace reload", () => {
@@ -230,11 +232,11 @@ describe("ConfigRoute layout contract", () => {
   });
 
   it("synchronizes every Provider mutation from the full backend ConfigWorkspace response", () => {
-    expect(routeSource).toContain('requestJson<ConfigWorkspace>(\n        "/api/config/draft/providers"');
-    expect(routeSource).toContain("/discover`");
-    expect(routeSource).toContain("/models`");
-    expect(routeSource).toContain("/models/${encodeURIComponent(modelKey)}`");
-    expect(routeSource).toContain('buildProviderDraftRequest({ providerId, provider }),\n        "DELETE"');
+    expect(routeSource).toContain("addDraftProvider(");
+    expect(routeSource).toContain("discoverDraftProvider(");
+    expect(routeSource).toContain("pinDraftProviderModel(");
+    expect(routeSource).toContain("unpinDraftProviderModel(");
+    expect(routeSource).toContain("deleteDraftProvider(");
     expect(routeSource).toContain("routePreviewToken: routePreview.routePreviewToken");
     expect((routeSource.match(/syncWorkspace\(response, "success", \{ resetBase: false \}\);/g) ?? []).length).toBeGreaterThanOrEqual(6);
     expect(routeSource).not.toContain("syncProviderProjection");
@@ -265,10 +267,9 @@ describe("ConfigRoute layout contract", () => {
     expect(providerPanelSource).toContain("context_window");
     expect(providerPanelSource).toContain('type="password"');
     expect(providerPanelSource).toContain('provider.credentialState === "not_required"');
-    expect(routeSource).toContain('`/api/config/draft/providers/${encodeURIComponent(providerId)}`');
+    expect(routeSource).toContain("updateDraftProvider(");
     // Credential PUT body is owned by useConfigProviderDraftActions (param name: credentialValue).
     expect(routeSource).toContain("buildProviderDraftRequest({ providerId, provider, credentialValue })");
-    expect(routeSource).toContain('"PUT"');
     expect(routeSource).toContain("handleUpdateProviderContextWindow");
     expect(routeSource).toContain("if (structuredActionsDisabled || !providerCredentialValue.trim()) return;");
     expect(routeSource).toContain('credentialProvider.credentialState === "not_required"');
@@ -377,9 +378,9 @@ describe("ConfigRoute layout contract", () => {
     expect(quickSetupStyles.field).toContain("[&_[data-vui=select-trigger]]:!min-h-10");
     expect(quickSetupStyles.primaryAction).toContain("min-h-10");
     expect(styles.providerModeButton).toContain("min-h-10");
-    expect(routeSource).toContain('aria-pressed={providerWorkspaceMode === "quick"}');
-    expect(routeSource).toContain('aria-pressed={providerWorkspaceMode === "manage"}');
-    expect(routeSource).toContain('aria-pressed={providerWorkspaceMode === "advanced"}');
+    expect(routeSource).toContain("aria-pressed={providerConnecting}");
+    expect(routeSource).toContain("aria-pressed={providerShowMore}");
+    expect(routeSource).not.toContain('aria-pressed={providerWorkspaceMode === "quick"}');
     expect(quickSetupStyles.resultRegion).not.toContain("min-h-");
     expect(quickSetupStylesSource).not.toContain("position:fixed");
     expect(quickSetupStylesSource).not.toContain("bottom-0");
@@ -613,7 +614,7 @@ describe("ConfigRoute layout contract", () => {
     expect(routeSource).toContain("onRepairProvider={handleRepairProviderCredential}");
     expect(routeSource).toContain('setActiveGroupId("models-profiles")');
     expect(routeSource).toContain('setActivePageId("model-connection")');
-    expect(routeSource).toContain('setProviderWorkspaceMode("manage")');
+    expect(routeSource).toContain("setProviderConnecting(false)");
     expect(routeSource).toContain('setSelectedProviderTab("connection")');
     expect(routeSource).not.toContain("workspace.diagnosis.blocking_issues.map");
     expect(diagnosisPanelSource).toContain("groupConfigDiagnosisIssues");

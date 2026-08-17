@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
+import sourceCollectionApiSource from "../api/sourceCollection.ts?raw";
+import dataProcessingApiSource from "../api/dataProcessing.ts?raw";
+import stageRoundsApiSource from "../api/stageRounds.ts?raw";
+import teamWorkflowApiSource from "../api/teamWorkflow.ts?raw";
+import teamKnowledgeApiSource from "../api/teamKnowledge.ts?raw";
 import teamExperimentApiSource from "../api/teamExperiment.ts?raw";
+import teamResearchOpsApiSource from "../api/teamResearchOps.ts?raw";
+import researchLoopApiSource from "../api/researchLoop.ts?raw";
 import { resolveLegacyTeamsRedirect } from "./LegacyTeamsRedirect";
 import canvasDataSource from "./TeamsRoute.canvasData.ts?raw";
 import routeSourceRawThin from "./teams/useTeamsWorkbenchModel.tsx?raw";
@@ -510,7 +517,7 @@ describe("TeamsRoute layout contract", () => {
   });
 
   it("uses Team APIs and Agent Center as the binding source", () => {
-    expect(routeSource).toContain('fetchJson<TeamListPayload>("/api/teams", { signal })');
+    expect(routeSource).toContain("listTeams({ signal })");
     expect(routeSource).toContain("TEAM_BOOTSTRAP_REFETCH_STATUSES");
     expect(routeSource).toContain("query.state.data?.systemTeamBootstrap?.status");
     expect(routeSource).toContain("TEAM_BOOTSTRAP_ACTIVE_REFETCH_MS");
@@ -519,70 +526,80 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("instantiateTeamTemplateMutation");
     expect(routeSource).toContain("TEAM_PICKER_TEAM_IDS");
     expect(canvasDataSource).toContain("const TEAM_PICKER_TEAM_IDS = [RESEARCH_TEAM_ID, AI_SEARCH_TEAM_ID, KNOWLEDGE_EXPANSION_TEAM_ID] as const");
-    expect(useTeamsSelectedTeamDetailSource).toContain("`/api/teams/${encodeURIComponent(effectiveTeamId)}?detail=${teamDetailLoadMode}`");
-    expect(useTeamsSelectedTeamDetailSource).toContain("fetchJson<Team>(");
+    expect(useTeamsSelectedTeamDetailSource).toContain("fetchTeam(effectiveTeamId, { signal, detail: teamDetailLoadMode })");
     expect(routeSource).toContain("queryKeys.agentSummary(false)");
-    expect(routeSource).toContain('fetchJson<AgentConfigWorkspaceAgent[]>("/api/agents?detail=summary", { signal })');
+    expect(routeSource).toContain("listAgentSummaries<AgentConfigWorkspaceAgent>({ signal })");
     expect(routeSource).not.toContain("includeArchived=true&detail=summary");
     expect(routeSource).not.toContain('fetchJson<AgentConfigWorkspace>("/api/agents/config-workspace")');
     // Wave 8Q: archive/delete team lives on useTeamShellMutations.
-    expect(teamShellMutationsSource).toContain("fetchJson<Team>(`/api/teams/${encodeURIComponent(teamId)}`");
-    expect(teamShellMutationsSource).toContain('method: "DELETE"');
+    expect(teamShellMutationsSource).toContain("archiveTeam(teamId)");
+    expect(teamShellMutationsSource).toContain("saveTeamCanvas(");
     expect(teamShellMutationsSource).toContain("sendTeamProjectBusMessage(payload)");
     // Kernel deep-links live on TeamCommunicationPanel after discussion/broadcast extraction.
     expect(teamCommunicationPanelSource).toContain("kernelTaskCenterHref");
     expect(routeSource).toContain("queryFn: ({ signal }) => listProjectAgentBusTimeline(PROJECT_AGENT_BUS_TEAM_TIMELINE_LIMIT, { signal })");
     expect(teamShellMutationsSource).toContain("revokeProjectAgentBusMessage({");
-    expect(teamShellMutationsSource).toContain("/api/teams/${encodeURIComponent(teamId)}/chat-room/sync");
+    expect(teamShellMutationsSource).toContain("syncTeamChatRoom(teamId)");
     expect(routeSource).toContain("syncTeamChatRoomMutation");
-    expect(teamShellMutationsSource).toContain("fetchJson<ChatRoomDetail>(`/api/chat-rooms/${payload.roomId}/rounds`");
-    expect(routeSource).toContain("fetchJson<ChatRoomDetail>(`/api/chat-rooms/${encodeURIComponent(linkedChatRoomId)}`, { signal })");
+    expect(teamShellMutationsSource).toContain("startChatRoomRound(payload.roomId, {");
+    expect(routeSource).toContain("fetchChatRoomDetail(linkedChatRoomId, { signal })");
     expect(routeSource).toContain("enabled: linkedChatRoomQueryEnabled");
     expect(routeSource).toContain("linkedRoomRefetchInterval(pageVisible");
     expect(routeSource).toContain("latestChatRoomRound(linkedRoomDetail)");
-    expect(researchWorkflowResourcesSource).toContain("fetchJson<TeamWorkflowOrchestration>");
-    expect(researchWorkflowResourcesSource).toContain("/workflow-orchestration`");
-    expect(researchWorkflowResourcesSource).toContain("fetchJson<TeamWorkflowCandidateListPayload>");
+    expect(researchWorkflowResourcesSource).toContain("fetchTeamWorkflowOrchestration(");
+    expect(teamWorkflowApiSource).toContain("/workflow-orchestration");
+    expect(researchWorkflowResourcesSource).toContain("fetchTeamWorkflowCandidates<");
+    expect(teamExperimentApiSource).toContain("/workflow-orchestration/candidates");
     // Wave 8P: candidate-graph build fetch lives on useTeamSourceCollectionMutations.
-    expect(teamSourceCollectionMutationsSource).toContain("fetchJson<TeamWorkflowCandidateGraphBuildPayload>");
-    expect(researchWorkflowResourcesSource).toContain("fetchJson<TeamWorkflowKnowledgeIngestionStatus>");
-    expect(researchWorkflowResourcesSource).toContain("fetchJson<TeamWorkflowOfficialModelEvidenceStatus>");
+    expect(teamSourceCollectionMutationsSource).toContain("buildCandidateGraph(");
+    expect(researchWorkflowResourcesSource).toContain("fetchKnowledgeIngestionStatus(");
+    expect(teamKnowledgeApiSource).toContain("/workflow-orchestration/knowledge-ingestion/status");
+    expect(researchWorkflowResourcesSource).toContain("fetchOfficialModelEvidenceStatus<");
     expect(researchWorkflowResourcesSource).toContain("TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT");
     expect(researchWorkflowResourcesSource).toContain("TEAM_WORKFLOW_CANDIDATE_GRAPH_LIMIT");
     expect(routeSource).toContain("isResearchWorkflowTeam(selectedTeam)");
     expect(routeSource).toContain("researchWorkflowTeamSelected");
     expect(routeSource).toContain("teamWorkflowKnowledgeIngestionStatusQuery");
-    expect(researchWorkflowResourcesSource).toContain("/workflow-orchestration/knowledge-ingestion/status");
+    expect(teamKnowledgeApiSource).toContain("/workflow-orchestration/knowledge-ingestion/status");
     expect(routeSource).toContain("teamWorkflowOfficialModelEvidenceStatusQuery");
-    expect(researchWorkflowResourcesSource).toContain("/workflow-orchestration/official-model-evidence/status");
+    expect(teamResearchOpsApiSource).toContain("/workflow-orchestration/official-model-evidence/status");
+    expect(researchWorkflowResourcesSource).toContain("fetchOfficialModelEvidenceStatus<");
     expect(researchWorkflowResourcesSource).toContain("TeamWorkflowSourceQualityStatus");
     expect(routeSource).toContain("teamWorkflowSourceQualityStatusQuery");
-    expect(researchWorkflowResourcesSource).toContain("/workflow-orchestration/source-quality/status");
+    expect(teamResearchOpsApiSource).toContain("/workflow-orchestration/source-quality/status");
+    expect(researchWorkflowResourcesSource).toContain("fetchSourceQualityStatus<");
     // Wave 8P: SC quality/plan write endpoints live on useTeamSourceCollectionMutations.
-    expect(teamSourceCollectionMutationsSource).toContain("/source-quality/assess");
+    expect(teamResearchOpsApiSource).toContain("/source-quality/assess");
+    expect(teamSourceCollectionMutationsSource).toContain("assessCandidateSourceQuality<");
     expect(routeSource).toContain("assessSourceQualityMutation");
     expect(routeSource).toContain("useTeamSourceCollectionMutations");
     expect(routeSource).toContain("candidateSourceQualityAssessmentSummary");
     expect(researchWorkflowResourcesSource).toContain("TeamWorkflowPaperNoteChunkStatus");
     expect(routeSource).toContain("teamWorkflowPaperNoteChunkStatusQuery");
-    expect(researchWorkflowResourcesSource).toContain("/workflow-orchestration/paper-note-chunks/status");
-    expect(teamSourceCollectionMutationsSource).toContain("/paper-note-chunks/plan");
+    expect(teamResearchOpsApiSource).toContain("/workflow-orchestration/paper-note-chunks/status");
+    expect(researchWorkflowResourcesSource).toContain("fetchPaperNoteChunkStatus<");
+    expect(teamResearchOpsApiSource).toContain("/paper-note-chunks/plan");
+    expect(teamSourceCollectionMutationsSource).toContain("planPaperNoteChunks<");
     expect(routeSource).toContain("planPaperNoteChunksMutation");
     expect(routeSource).toContain("sourceCandidateHasCompletedExtraction");
     expect(routeSource).toContain("candidatePaperNoteChunkPlanSummary");
     // Owned by research workflow resources + stageProjection type, not inlined in workbench.
     expect(researchWorkflowResourcesSource).toContain("ResearchStageRoundStatusPayload");
     expect(routeSource).toContain("researchStageRoundStatusQuery");
-    expect(researchWorkflowResourcesSource).toContain("/workflow-orchestration/stage-rounds/status");
-    expect(teamWorkflowStartMutationsSource).toContain("/workflow-orchestration/stage-rounds/start");
+    expect(stageRoundsApiSource).toContain("/workflow-orchestration/stage-rounds/status");
+    expect(researchWorkflowResourcesSource).toContain("fetchResearchStageRoundStatus<");
+    expect(stageRoundsApiSource).toContain("/workflow-orchestration/stage-rounds/start");
+    expect(teamWorkflowStartMutationsSource).toContain("startResearchStageRound<");
     expect(routeSource).toContain("startResearchStageRoundMutation");
     expect(routeSource).toContain("seedSourceCollectionAgentSessionContextMutation");
-    expect(teamWorkflowStartMutationsSource).toContain("/source-collection-runs/${encodeURIComponent(payload.runId)}/agent-session-context");
+    expect(teamWorkflowStartMutationsSource).toContain("seedSourceCollectionAgentSessionContext(");
+    expect(sourceCollectionApiSource).toContain("/source-collection-runs/${encodeURIComponent(runId)}/agent-session-context");
     expect(createSourceCollectionStageAgentHelpersSource).toContain("await seedSourceCollectionAgentSessionContextMutation.mutateAsync");
     // Payload type owned by workflow-start mutations module after import cleanup.
-    expect(teamWorkflowStartMutationsSource).toContain("TeamWorkflowSourceCollectionStageSessionTaskPayload");
+    expect(sourceCollectionApiSource).toContain("TeamWorkflowSourceCollectionStageSessionTaskPayload");
     expect(routeSource).toContain("startSourceCollectionStageSessionTaskMutation");
-    expect(teamWorkflowStartMutationsSource).toContain("/source-collection-runs/${encodeURIComponent(payload.runId)}/stage-session-tasks");
+    expect(teamWorkflowStartMutationsSource).toContain("startSourceCollectionStageSessionTask(");
+    expect(sourceCollectionApiSource).toContain("/source-collection-runs/${encodeURIComponent(runId)}/stage-session-tasks");
     expect(routeSource).toContain("createSourceCollectionStageAdvance");
     expect(sourceCollectionControllerSource).toContain("options: { formalRetry?: boolean }");
     expect(sourceCollectionControllerSource).toContain("resetResearchProjectSourceCollectionMutation.isPending");
@@ -597,8 +614,10 @@ describe("TeamsRoute layout contract", () => {
     expect(experimentLoopModelSource).toContain("ExperimentFullRunResultRegisterPayload");
     expect(experimentLoopModelSource).toContain("ExperimentResultKnowledgeIngestionPayload");
     // Wave 8O: experiment write endpoints live on useTeamExperimentLoopMutations.
-    expect(teamExperimentLoopMutationsSource).toContain("/workflow-orchestration/experiments/plans/${encodeURIComponent(payload.plan.planId)}/full-run-result");
-    expect(teamExperimentLoopMutationsSource).toContain("/workflow-orchestration/experiments/plans/${encodeURIComponent(payload.plan.planId)}/knowledge-ingestion-request");
+    expect(teamExperimentApiSource).toContain("/workflow-orchestration/experiments/plans/${encodeURIComponent(planId)}/full-run-result");
+    expect(teamExperimentApiSource).toContain("/workflow-orchestration/experiments/plans/${encodeURIComponent(planId)}/knowledge-ingestion-request");
+    expect(teamExperimentLoopMutationsSource).toContain("registerTeamExperimentFullRunResult<");
+    expect(teamExperimentLoopMutationsSource).toContain("requestTeamExperimentKnowledgeIngestion<");
     expect(routeSource).toContain("registerExperimentFullRunResultMutation");
     expect(routeSource).toContain("useTeamExperimentLoopMutations");
     expect(routeSource).toContain("requestExperimentKnowledgeIngestionMutation");
@@ -615,11 +634,16 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("researchLoopTemplatesQuery");
     expect(routeSource).toContain("researchLoopStatusQuery");
     // Wave 8S: research-loop status/templates live on useTeamResearchSecondaryQueries.
-    expect(teamResearchSecondaryQueriesSource).toContain("/workflow-orchestration/research-loop/templates");
-    expect(teamResearchSecondaryQueriesSource).toContain("/workflow-orchestration/research-loop/status");
-    expect(teamExperimentLoopMutationsSource).toContain("/workflow-orchestration/research-loop/loops");
-    expect(teamExperimentLoopMutationsSource).toContain("/workflow-orchestration/research-loop/loops/${encodeURIComponent(payload.loop.loopId)}/evidence");
-    expect(teamExperimentLoopMutationsSource).toContain("/workflow-orchestration/research-loop/loops/${encodeURIComponent(payload.loop.loopId)}/decision");
+    expect(researchLoopApiSource).toContain("/workflow-orchestration/research-loop/templates");
+    expect(researchLoopApiSource).toContain("/workflow-orchestration/research-loop/status");
+    expect(teamResearchSecondaryQueriesSource).toContain("fetchResearchLoopTemplates<");
+    expect(teamResearchSecondaryQueriesSource).toContain("fetchResearchLoopStatus<");
+    expect(researchLoopApiSource).toContain("/workflow-orchestration/research-loop/loops");
+    expect(researchLoopApiSource).toContain("/evidence");
+    expect(researchLoopApiSource).toContain("/decision");
+    expect(teamExperimentLoopMutationsSource).toContain("createResearchLoop<");
+    expect(teamExperimentLoopMutationsSource).toContain("recordResearchLoopEvidence<");
+    expect(teamExperimentLoopMutationsSource).toContain("recordResearchLoopDecision<");
     expect(routeSource).toContain("createResearchLoopMutation");
     expect(routeSource).toContain("recordResearchLoopEvidenceMutation");
     expect(routeSource).toContain("recordResearchLoopDecisionMutation");
@@ -635,7 +659,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toMatch(/researchLoopStatusQuery\?\.refetch|researchLoopStatusQuery\.refetch/);
     expect(routeSource).toMatch(/createExperimentPlanMutation\?\.reset|createExperimentPlanMutation\.reset/);
     expect(routeSource).toContain("freezeExperimentDesignMutation");
-    expect(teamExperimentLoopMutationsSource).toContain("/freeze`");
+    expect(teamExperimentApiSource).toContain("/freeze");
+    expect(teamExperimentLoopMutationsSource).toContain("freezeTeamExperimentDesign<");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("冻结设计");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("designExecutionAllowed");
     expect(routeSource).toContain("materializeResearchLoopIterationDesignMutation");
@@ -692,11 +717,17 @@ describe("TeamsRoute layout contract", () => {
       teamSourceCollectionMutationsSource.indexOf("const extractSourceCollectionCandidatesMutation"),
     );
     expect(executeSearchMutationSource).toContain("researchStageRoundStatusQueryKey(variables.teamId)");
-    expect(teamWorkflowStartMutationsSource).toContain("/workflow-orchestration/source-collection-runs");
-    expect(teamSourceCollectionMutationsSource).toContain("/search/execute");
-    expect(routeSource).toContain("/api/data-processing/runs?limit=${SOURCE_COLLECTION_RUN_PREVIEW_LIMIT}");
-    expect(teamSourceCollectionMutationsSource).toContain("/collection-assignments/${encodeURIComponent(payload.draft.assignmentId)}/outputs");
-    expect(teamSourceCollectionMutationsSource).toContain("/source-candidate");
+    expect(sourceCollectionApiSource).toContain("/workflow-orchestration/source-collection-runs");
+    expect(teamWorkflowStartMutationsSource).toContain("startSourceCollectionRun(");
+    expect(sourceCollectionApiSource).toContain("/search/execute");
+    expect(teamSourceCollectionMutationsSource).toContain("executeSourceCollectionSearch<");
+    expect(dataProcessingApiSource).toContain("/api/data-processing/runs?");
+    expect(useSourceCollectionWorkspaceSource).toContain("listDataProcessingRuns(");
+    expect(useSourceCollectionWorkspaceSource).toContain("limit: SOURCE_COLLECTION_RUN_PREVIEW_LIMIT");
+    expect(dataProcessingApiSource).toContain("/collection-assignments/${encodeURIComponent(assignmentId)}/outputs");
+    expect(teamSourceCollectionMutationsSource).toContain("recordDataProcessingCollectionOutput<");
+    expect(sourceCollectionApiSource).toContain("/source-candidate");
+    expect(teamSourceCollectionMutationsSource).toContain("importDataRecordAsSourceCandidate(");
     expect(routeSource).toContain("sourceCollectionRunsForTeam");
     expect(routeSource).toContain("sourceCollectionRunHasUsableRecords");
     expect(routeSource).toContain("selectDefaultSourceCollectionRun");
@@ -738,9 +769,12 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionStorageActionsPanelSource).toContain("本轮产物");
     expect(teamSourceCollectionStorageActionsPanelSource).toContain("更多证据文件");
     expect(routeSource).toContain("SOURCE_COLLECTION_DEFAULT_ROLES");
-    expect(researchWorkflowResourcesSource).toContain("candidateType=candidate_graph");
+    expect(researchWorkflowResourcesSource).toContain('candidateType: "candidate_graph"');
+    expect(researchWorkflowResourcesSource).toContain("fetchTeamWorkflowCandidates<");
+    expect(teamExperimentApiSource).toContain("/workflow-orchestration/candidates");
     // Wave 8P: candidate-graph write endpoint lives on useTeamSourceCollectionMutations.
-    expect(teamSourceCollectionMutationsSource).toContain("/workflow-orchestration/candidate-graph");
+    expect(teamKnowledgeApiSource).toContain("/workflow-orchestration/candidate-graph");
+    expect(teamSourceCollectionMutationsSource).toContain("buildCandidateGraph(");
     expect(routeSource).toContain("buildCandidateGraphMutation");
     expect(teamShellMutationsSource).toContain('source: "team_workspace"');
     // Wave 8Q: team round + room membership cache live on shell mutations / remaining route selects.
@@ -758,8 +792,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("selectedTeam?.sourceScope");
     expect(routeSource).toContain("AiSearchRunListPayload");
     expect(routeSource).toContain("queryKeys.teamAiSearchRuns");
-    expect(routeSource).toContain("/api/teams/${encodeURIComponent(effectiveTeamId)}/ai-search-runs?limit=${AI_SEARCH_RUN_PREVIEW_LIMIT}");
-    expect(teamWorkflowStartMutationsSource).toContain("/api/teams/${encodeURIComponent(payload.teamId)}/ai-search-runs");
+    expect(routeSource).toContain("listTeamAiSearchRuns(effectiveTeamId, {");
+    expect(teamWorkflowStartMutationsSource).toContain("startAiSearchRun(payload.teamId");
     expect(routeSource).toContain("startAiSearchRunMutation");
     expect(routeSource).toContain("aiSearchRunTopic");
     // Wave 8G: AI Search copy lives in TeamAiSearchWorkspacePanel.
@@ -771,7 +805,7 @@ describe("TeamsRoute layout contract", () => {
     expect(teamAiSearchWorkspacePanelSource).toContain("启动一键搜索");
     expect(teamAiSearchWorkspacePanelSource).toContain("最近搜索结果");
     expect(routeSource).toContain("latestAiSearchRun");
-    expect(teamShellMutationsSource).toContain("/api/teams/${encodeURIComponent(nextCanvas.teamId)}/canvas");
+    expect(teamShellMutationsSource).toContain("saveTeamCanvas(nextCanvas)");
     expect(routeSource).toContain("成员源");
     expect(routeSource).toContain("Member source");
     expect(routeSource).toContain("Agent Center");
@@ -1217,7 +1251,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionRunPendingScreeningCount");
     expect(routeSource).toContain("sourceCollectionPendingCandidateImportCount");
     // Wave 8S: selected-run records live on useSourceCollectionRunQueries.
-    expect(sourceCollectionRunQueriesSource).toContain("/api/data-processing/runs/${encodeURIComponent(options.selectedSourceCollectionRunEffectiveId)}/records");
+    expect(dataProcessingApiSource).toContain("/api/data-processing/runs/${encodeURIComponent(runId)}/records");
+    expect(sourceCollectionRunQueriesSource).toContain("listDataProcessingRunRecords<");
     expect(teamSourceCollectionConversationPanelSource).toContain("还有 ${pendingCandidateImportCount} 条原始记录尚未进入候选库");
     expect(evidenceModelSource).toContain('label: "DOI"');
     expect(evidenceModelSource).toContain("https://doi.org/");
@@ -1249,7 +1284,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("assessSourceQualityBatchMutation");
     expect(routeSource).toContain("sourceCollectionExtractorAgentId");
     // Wave 8P: batch assess endpoint lives on useTeamSourceCollectionMutations.
-    expect(teamSourceCollectionMutationsSource).toContain("source-quality/assess-batch");
+    expect(teamResearchOpsApiSource).toContain("source-quality/assess-batch");
+    expect(teamSourceCollectionMutationsSource).toContain("assessSourceQualityBatch<");
     expect(runModelSource).toContain("执行资料提炼复核");
     expect(routeSource).toContain("质量审查中");
     expect(routeSource).toContain("sourceCollectionExpandedPanelId");
@@ -1490,9 +1526,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain(": () => void startSourceCollectionStageSessionTask(\"ingestion\")");
     expect(routeSource).toContain("repairChallengeCupTeamAgentsMutation");
     // Wave 8Q: agent repair endpoints live on useTeamShellMutations.
-    expect(teamShellMutationsSource).toContain("/challenge-cup-agents/repair");
+    expect(teamShellMutationsSource).toContain("repairChallengeCupTeamAgents(");
     expect(routeSource).toContain("repairKnowledgeExpansionTeamAgentsMutation");
-    expect(teamShellMutationsSource).toContain("/knowledge-expansion-agents/repair");
+    expect(teamShellMutationsSource).toContain("repairKnowledgeExpansionTeamAgents(");
     // Wave 8M: repair/open-chat CTAs live on active-stage workspace (and recovery).
     expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("修复团队 Agent");
     expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain("进入 Agent 私聊");
@@ -1604,12 +1640,14 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionIngestorAgentId");
     expect(routeSource).toContain("runKnowledgeIngestionPrecheckMutation");
     // Wave 8P: ingestion precheck/complete write endpoints live on useTeamSourceCollectionMutations.
-    expect(teamSourceCollectionMutationsSource).toContain("knowledge-ingestion/precheck");
+    expect(teamKnowledgeApiSource).toContain("knowledge-ingestion/precheck");
+    expect(teamSourceCollectionMutationsSource).toContain("runKnowledgeIngestionPrecheck<");
     expect(routeSource).toContain("runSourceCollectionGraphAction");
     expect(routeSource).not.toContain("runSourceCollectionMemoryPrecheckAction");
     expect(routeSource).toContain("runKnowledgeCollectionLoopAction");
     expect(routeSource).toContain("runKnowledgeCollectionCompletionMutation");
-    expect(teamSourceCollectionMutationsSource).toContain("/workflow-orchestration/knowledge-collection/complete");
+    expect(teamKnowledgeApiSource).toContain("/workflow-orchestration/knowledge-collection/complete");
+    expect(teamSourceCollectionMutationsSource).toContain("completeKnowledgeCollection(");
     expect(routeSource).toContain("sourceCollectionActionRunId");
     // R2-o: summary runId projection lives in deriveSourceCollectionSummaryProjection.
     expect(deriveSourceCollectionSummaryProjectionSource).toContain("sourceCollectionSummary?.runId");
@@ -1664,7 +1702,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("通知资料入库 Agent");
     expect(routeSource).not.toContain("待继续搜索");
     // Wave 8P: storage open write endpoint lives on useTeamSourceCollectionMutations.
-    expect(teamSourceCollectionMutationsSource).toContain("/storage/open");
+    expect(sourceCollectionApiSource).toContain("/storage/open");
+    expect(teamSourceCollectionMutationsSource).toContain("openSourceCollectionStorage<");
     expect(teamSourceCollectionStorageActionsPanelSource).toContain("本轮产物");
     expect(routeAndPureSource).toContain("打开批次目录");
     expect(teamSourceCollectionStorageActionsPanelSource).toContain("更多证据文件");
@@ -1888,7 +1927,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("resolveTeamCanvasQueryEnabled");
     expect(routeSource).toContain("resolveSourceCollectionRunsQueryEnabled");
     expect(routeSource).toContain("queryKeys.team(effectiveTeamId, teamDetailLoadMode)");
-    expect(routeSource).toContain("detail=${teamDetailLoadMode}");
+    expect(routeSource).toContain("detail: teamDetailLoadMode");
     expect(routeSource).toContain("enabled: teamCanvasQueryEnabled");
     expect(routeSource).toContain("sourceCollectionAgentIdsFromTeam(selectedTeam, canvas)");
     expect(routeSource).toContain("sourceCollectionOwnerAgentIdFromTeam(selectedTeam, canvas)");
@@ -1955,10 +1994,12 @@ describe("TeamsRoute layout contract", () => {
     expect(sourceQualityStatusQuerySource).toContain("stageWritebackSync.active");
     expect(routeSource).toContain("SourceCollectionSummaryPayload");
     expect(routeSource).toContain("sourceCollectionSummaryQueryKey");
-    // Wave 8S: SC summary endpoint lives on useSourceCollectionRunQueries.
-    expect(sourceCollectionRunQueriesSource).toContain("/workflow-orchestration/source-collection/summary");
+    // Wave 8S: SC summary query lives on useSourceCollectionRunQueries; path lives in sourceCollection.ts.
+    expect(sourceCollectionRunQueriesSource).toContain("fetchSourceCollectionSummary");
+    expect(sourceCollectionApiSource).toContain("/workflow-orchestration/source-collection/summary");
     expect(routeSource).toContain("sourceCollectionSummaryQueryPrefix");
-    expect(researchWorkflowResourcesSource).toContain("includeValidation=false&includeStore=false");
+    expect(researchWorkflowResourcesSource).toContain("includeValidation: false");
+    expect(researchWorkflowResourcesSource).toContain("includeStore: false");
     expect(researchWorkflowResourcesSource).toContain("const TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT = 80;");
     expect(researchWorkflowResourcesSource).not.toContain("const TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT = 500;");
     expect(routeSource).toContain("sourceCollectionWorkspaceSelected");
@@ -2036,7 +2077,7 @@ describe("TeamsRoute layout contract", () => {
 
     // R2-d: teams list / agent summary / bus bootstrap live in useTeamsCatalogQueries.
     expect(useTeamsCatalogQueriesSource).toContain("export function useTeamsCatalogQueries");
-    expect(useTeamsCatalogQueriesSource).toContain("queryFn: ({ signal }) => fetchJson<TeamListPayload>(\"/api/teams\", { signal })");
+    expect(useTeamsCatalogQueriesSource).toContain("queryFn: ({ signal }) => listTeams({ signal })");
     expect(useTeamsCatalogQueriesSource).toContain("TEAM_BOOTSTRAP_REFETCH_STATUSES");
     expect(useTeamsCatalogQueriesSource).toContain("listProjectAgentBusTimeline(PROJECT_AGENT_BUS_TEAM_TIMELINE_LIMIT, { signal })");
     expect(routeSourceRaw).toContain("useTeamsCatalogQueries({");
@@ -2044,15 +2085,14 @@ describe("TeamsRoute layout contract", () => {
     // R2-e: team detail + kind flags live in useTeamsSelectedTeamDetail.
     expect(useTeamsSelectedTeamDetailSource).toContain("export function useTeamsSelectedTeamDetail");
     expect(useTeamsSelectedTeamDetailSource).toContain(
-      "fetchJson<Team>(\n        `/api/teams/${encodeURIComponent(effectiveTeamId)}?detail=${teamDetailLoadMode}`,",
+      "fetchTeam(effectiveTeamId, { signal, detail: teamDetailLoadMode })",
     );
     expect(routeSourceRaw).toContain("useTeamsSelectedTeamDetail({");
     expect(routeSourceRaw).not.toContain("const teamDetailQuery = useQuery<Team>({");
     expect(useTeamsSelectedTeamDetailSource).not.toContain("fetchJson<TeamOrganizationCanvas>");
     expect(useTeamsSelectedTeamDetailSource).not.toContain("queryKey: researchProjectQueryKey");
     // Phase 3: organization canvas query lives in useTeamsCanvasProjection.
-    expect(useTeamsShellCanvasWorkspaceSource).toContain("fetchJson<TeamOrganizationCanvas>(");
-    expect(useTeamsShellCanvasWorkspaceSource).toContain("`/api/teams/${encodeURIComponent(effectiveTeamId)}/canvas`");
+    expect(useTeamsShellCanvasWorkspaceSource).toContain("fetchTeamCanvas(effectiveTeamId, { signal })");
     // Phase 1 state-machine: project/run list queries live in useSourceCollectionWorkspace.
     expect(useSourceCollectionWorkspaceSource).toContain("queryKey: researchProjectQueryKey(effectiveTeamId || \"none\")");
     expect(useSourceCollectionWorkspaceSource).toContain("activeSourceCollectionResearchProjectId");
@@ -2171,7 +2211,8 @@ describe("TeamsRoute layout contract", () => {
     expect(teamResearchStageLauncherPanelSource).toContain("<VStringSelect");
     expect(routeSource).toContain("preferredExperimentMethod=");
     // Wave 8S / Phase 2: methods endpoint on secondary queries; route consumes via experiment workspace.
-    expect(teamResearchSecondaryQueriesSource).toContain("/workflow-orchestration/experiments/methods");
+    expect(teamExperimentApiSource).toContain("/workflow-orchestration/experiments/methods");
+    expect(teamResearchSecondaryQueriesSource).toContain("fetchExperimentMethodCatalog<");
     expect(routeSourceRaw).toContain("useResearchExperimentWorkspace");
     expect(routeSourceRaw).not.toContain("useTeamResearchSecondaryQueries({");
     // SC run detail queries composed inside useSourceCollectionWorkspace (Phase 1).
@@ -2190,7 +2231,8 @@ describe("TeamsRoute layout contract", () => {
     // Single-column form — no empty half / forced min-height.
     expect(teamExperimentMethodPanelStyles.form).toContain("grid-cols-1");
     expect(teamExperimentMethodPanelStyles.form).not.toContain("min-h-[18rem]");
-    expect(teamExperimentLoopMutationsSource).toContain("baseline-artifact");
+    expect(teamExperimentApiSource).toContain("baseline-artifact");
+    expect(teamExperimentLoopMutationsSource).toContain("registerTeamExperimentBaselineArtifact<");
     expect(teamExperimentPlanningLedgerPanelSource).toContain("登记基线工件");
     expect(teamExperimentPlanningLedgerPanelSource).toMatch(
       /const canRegisterBaselineArtifact[\s\S]*?&& designExecutionAllowed[\s\S]*?&& !activePlan\.baselineSelection\.activeBaselineReady/,
@@ -2213,7 +2255,8 @@ describe("TeamsRoute layout contract", () => {
     expect(teamExperimentPlanningLedgerPanelSource).toMatch(
       /const activePlan =\s*statusPayload\?\.activePlan\s*\?\? latestFreezePayload\?\.plan/,
     );
-    expect(teamExperimentLoopMutationsSource).toContain("smoke-result");
+    expect(teamExperimentApiSource).toContain("smoke-result");
+    expect(teamExperimentLoopMutationsSource).toContain("registerTeamExperimentSmokeResult<");
     expect(routeAndPureSource).toContain("ExperimentSmokeResultRecord");
     expect(routeAndPureSource).toContain("activeSmokeResult");
     expect(routeAndPureSource).toContain("gateDecision");

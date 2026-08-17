@@ -5,7 +5,14 @@ import json
 import pytest
 
 import config.settings as config_settings
-from config.model_config_migration import apply_v1_to_v2, preview_v1_to_v2, rollback_v1_to_v2
+from config.model_config_migration import (
+    apply_v1_to_v2,
+    apply_v2_canonical_repair,
+    preview_v1_to_v2,
+    preview_v2_canonical_repair,
+    rollback_v1_to_v2,
+    rollback_v2_canonical_repair,
+)
 from config.public_config import load_public_config, public_config_hash
 from config.toml_writer import dumps_public_config
 
@@ -47,6 +54,161 @@ def write_migration_fixture(tmp_path) -> tuple:
     )
     config_path.write_text(dumps_public_config(legacy), encoding="utf-8")
     return config_path, project_root, legacy
+
+
+def canonical_v2_config_with_misplaced_contract() -> dict:
+    return {
+        "llm": {
+            "schema_version": 2,
+            "providers": {
+                "official": {
+                    "provider_id": "official",
+                    "kind": "openai",
+                    "service_class": "official_api",
+                    "vendor": "openai",
+                    "driver": "openai",
+                    "auth_kind": "api_key",
+                    "requires_credential": True,
+                    "credential_ref": "env:OPENAI_API_KEY",
+                    "base_url": "https://api.openai.com/v1",
+                    "protocols": {
+                        "default": "chat_completions",
+                        "allowed": ["chat_completions"],
+                    },
+                    "models": {
+                        "model-a": {
+                            "upstream_id": "model-a",
+                            "wire_protocol": "chat_completions",
+                            "interaction_contract": "tool_chat",
+                            "model_protocol": "tool_chat",
+                        }
+                    },
+                }
+            },
+            "profiles": {
+                "primary": {
+                    "profile_id": "primary",
+                    "provider_id": "official",
+                    "model_ref": "official/model-a",
+                    "model": "model-a",
+                    "transport": "chat_completions",
+                    "contract": "tool_chat",
+                }
+            },
+            "model_aliases": {},
+        }
+    }
+
+
+def test_preview_v2_canonical_repair_moves_contract_and_plans_live_reference_rewrite(tmp_path) -> None:
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    agent_path = project_root / "workspace" / "agents" / "agents.json"
+    agent_path.parent.mkdir(parents=True)
+    agent_path.write_text(
+        json.dumps(
+            {
+                "agents": [
+                    {
+                        "agentId": "agent-a",
+                        "llmBindings": {"dialogue": {"modelId": "legacy-model-a"}},
+                    }
+                ]
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    source = canonical_v2_config_with_misplaced_contract()
+
+    preview = preview_v2_canonical_repair(
+        source,
+        project_root=project_root,
+        model_ref_map={"legacy-model-a": "official/model-a"},
+    )
+
+    repaired = preview.proposed_public_config["llm"]["providers"]["official"]["models"]["model-a"]
+    assert preview.status == "READY"
+    assert repaired["interaction_contract"] == "tool_chat"
+    assert repaired["model_protocol"] == ""
+    assert preview.reference_impact["liveReferenceCount"] == 1
+    assert preview.migration_summary["protocolFieldRepairCount"] == 1
+    assert preview.migration_summary["referenceRewriteCount"] == 1
+
+
+def test_preview_v2_canonical_repair_blocks_ambiguous_contract_or_missing_target(tmp_path) -> None:
+    source = canonical_v2_config_with_misplaced_contract()
+    model = source["llm"]["providers"]["official"]["models"]["model-a"]
+    model["interaction_contract"] = "reasoning_chat"
+
+    preview = preview_v2_canonical_repair(
+        source,
+        project_root=tmp_path,
+        model_ref_map={"legacy-model-a": "official/missing"},
+    )
+
+    assert preview.status == "NEEDS_REVIEW"
+    assert {item["code"] for item in preview.conflicts} == {
+        "interaction_contract_conflict",
+        "model_ref_target_not_found",
+    }
+
+
+def test_apply_and_rollback_v2_canonical_repair_are_transactional(tmp_path, monkeypatch) -> None:
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    config_path = tmp_path / "operator" / "config.toml"
+    config_path.parent.mkdir()
+    source = canonical_v2_config_with_misplaced_contract()
+    config_path.write_text(dumps_public_config(source), encoding="utf-8")
+    agent_path = project_root / "workspace" / "agents" / "agents.json"
+    agent_path.parent.mkdir(parents=True)
+    agent_path.write_text(
+        json.dumps(
+            {
+                "agents": [
+                    {
+                        "agentId": "agent-a",
+                        "llmBindings": {"dialogue": {"modelId": "legacy-model-a"}},
+                    }
+                ]
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    before_config = config_path.read_bytes()
+    before_agent = agent_path.read_bytes()
+    monkeypatch.setattr("config.model_config_migration.reload_config", lambda path: object())
+
+    preview = preview_v2_canonical_repair(
+        source,
+        project_root=project_root,
+        model_ref_map={"legacy-model-a": "official/model-a"},
+    )
+    applied = apply_v2_canonical_repair(
+        preview.preview_id,
+        expected_base_hash=public_config_hash(source),
+        config_path=config_path,
+        project_root=project_root,
+    )
+
+    persisted = load_public_config(config_path)
+    model = persisted["llm"]["providers"]["official"]["models"]["model-a"]
+    assert model["interaction_contract"] == "tool_chat"
+    assert model["model_protocol"] == ""
+    assert "legacy-model-a" not in agent_path.read_text(encoding="utf-8")
+    assert applied["updatedReferenceCount"] == 1
+
+    rolled_back = rollback_v2_canonical_repair(
+        applied["migrationId"],
+        config_path=config_path,
+        project_root=project_root,
+        expected_current_hash=applied["hash"],
+    )
+    assert rolled_back["status"] == "rolled_back"
+    assert config_path.read_bytes() == before_config
+    assert agent_path.read_bytes() == before_agent
 
 
 def test_preview_groups_same_endpoint_and_credential_without_writing(tmp_path) -> None:
@@ -632,6 +794,38 @@ def test_preview_moves_profile_fields_to_overrides(tmp_path) -> None:
     profile = preview.proposed_public_config["llm"]["profiles"]["primary"]
     assert profile["overrides"]["temperature"] == 0.2
     assert "temperature" not in profile
+
+
+def test_preview_moves_tool_chat_from_model_protocol_to_interaction_contract(tmp_path) -> None:
+    legacy = legacy_config_with_models(
+        ("relay_a", "https://relay.example/v1", "RELAY_KEY", "gpt-a")
+    )
+    legacy_model = legacy["llm"]["model_library"]["relay_a"]
+    legacy_model["protocol"] = "tool_chat"
+    legacy_model["contract"] = "basic_chat"
+
+    preview = preview_v1_to_v2(legacy, project_root=tmp_path)
+    provider = next(iter(preview.proposed_public_config["llm"]["providers"].values()))
+    model = next(iter(provider["models"].values()))
+
+    assert model["interaction_contract"] == "tool_chat"
+    assert model["model_protocol"] == ""
+    assert preview.migration_summary["before"]["models"] == 1
+    assert preview.migration_summary["after"]["models"] == 1
+    assert preview.rollback_plan_id.startswith("rollback-plan-")
+
+
+def test_preview_reports_known_legacy_typo_with_path_without_writing(tmp_path) -> None:
+    legacy = legacy_config_with_models(
+        ("relay_a", "https://relay.example/v1", "RELAY_KEY", "gpt-a")
+    )
+    legacy["llm"]["model_library"]["relay_a"]["wire_protcol"] = "responses"
+
+    preview = preview_v1_to_v2(legacy, project_root=tmp_path)
+
+    issue = next(item for item in preview.conflicts if item["code"] == "unknown_legacy_field")
+    assert issue["path"] == "llm.model_library.relay_a.wire_protcol"
+    assert preview.status == "NEEDS_REVIEW"
 
 
 def test_preview_reports_behavioral_defaults_conflict_without_values(tmp_path) -> None:

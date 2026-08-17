@@ -33,6 +33,7 @@ import { WorkflowCanvasControls } from "./WorkflowCanvasControls";
 import { WorkflowCanvasLegend } from "./WorkflowCanvasLegend";
 import { WorkflowDecisionNode } from "./WorkflowDecisionNode";
 import { WorkflowHumanGateNode } from "./WorkflowHumanGateNode";
+import { WorkflowNodeInteractionBoundary } from "./WorkflowNodeInteractionBoundary";
 import { WorkflowSemanticEdge } from "./WorkflowSemanticEdge";
 import { WorkflowStageRegionNode } from "./WorkflowStageRegionNode";
 import { WorkflowStartEndNode } from "./WorkflowStartEndNode";
@@ -122,6 +123,23 @@ export function wrapNodeForMeasurement(
   };
 }
 
+function wrapInteractiveNodeForMeasurement(
+  Base: (props: NodeProps) => ReactElement,
+  onMeasure: (id: string, size: WorkflowNodeSize) => void,
+  onActivate?: (id: string) => void,
+): (props: NodeProps) => ReactElement {
+  const MeasuredNode = wrapNodeForMeasurement(Base, onMeasure);
+  return function InteractiveMeasuredNode(props: NodeProps) {
+    return (
+      <WorkflowNodeInteractionBoundary
+        onActivate={onActivate ? () => onActivate(props.id) : undefined}
+      >
+        <MeasuredNode {...props} />
+      </WorkflowNodeInteractionBoundary>
+    );
+  };
+}
+
 const edgeTypes: EdgeTypes = {
   workflowSemantic: WorkflowSemanticEdge,
 };
@@ -168,13 +186,13 @@ function WorkflowCanvasInner({
   const measuredNodeTypes: NodeTypes = useMemo(
     () => ({
       stageRegion: wrapNodeForMeasurement(WorkflowStageRegionNode, layout.reportMeasuredSize),
-      agentTask: wrapNodeForMeasurement(WorkflowAgentTaskNode, layout.reportMeasuredSize),
-      humanGate: wrapNodeForMeasurement(WorkflowHumanGateNode, layout.reportMeasuredSize),
-      systemTask: wrapNodeForMeasurement(WorkflowSystemTaskNode, layout.reportMeasuredSize),
-      decision: wrapNodeForMeasurement(WorkflowDecisionNode, layout.reportMeasuredSize),
-      startEnd: wrapNodeForMeasurement(WorkflowStartEndNode, layout.reportMeasuredSize),
+      agentTask: wrapInteractiveNodeForMeasurement(WorkflowAgentTaskNode, layout.reportMeasuredSize, onSelectNode),
+      humanGate: wrapInteractiveNodeForMeasurement(WorkflowHumanGateNode, layout.reportMeasuredSize, onSelectNode),
+      systemTask: wrapInteractiveNodeForMeasurement(WorkflowSystemTaskNode, layout.reportMeasuredSize, onSelectNode),
+      decision: wrapInteractiveNodeForMeasurement(WorkflowDecisionNode, layout.reportMeasuredSize, onSelectNode),
+      startEnd: wrapInteractiveNodeForMeasurement(WorkflowStartEndNode, layout.reportMeasuredSize, onSelectNode),
     }),
-    [layout.reportMeasuredSize],
+    [layout.reportMeasuredSize, onSelectNode],
   );
 
   // Fit protocol: fit exactly once when the first layout commits AND the committed

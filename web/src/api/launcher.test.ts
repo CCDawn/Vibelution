@@ -9,10 +9,10 @@ import {
   requestBranchInstanceLifecycle,
   getLauncherStatus,
   getRuntimeSummary,
+  isLauncherControlPlaneNotReady,
   launcherEndpoint,
-  launcherRestartEndpoint,
+  LauncherControlPlaneNotReadyError,
   reattachLauncherSupervisor,
-  resetLauncherControlOriginForTests,
   restartLauncherBundle,
   requestWorkbenchWindowCloseOnPageHide,
   saveLauncherWorkbenchWindowMode,
@@ -21,12 +21,21 @@ import {
   updateLauncherStartupSettings,
 } from "./launcher";
 
+type LauncherIpcInvokeResult =
+  | { ok: true; payload: unknown }
+  | { ok: false; error: { code: string; message: string } };
+
+function stubLauncherIpcBridge(invoke: (payload: unknown) => Promise<LauncherIpcInvokeResult>) {
+  vi.stubGlobal("vibelutionLauncher", {
+    launcherInvoke: invoke,
+  });
+}
+
 describe("launcher api helpers", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     resetControlTokenForTests();
-    resetLauncherControlOriginForTests();
   });
 
   it("builds canonical launcher restart endpoints", () => {
@@ -36,8 +45,8 @@ describe("launcher api helpers", () => {
       },
     });
 
-    expect(launcherEndpoint("status")).toBe("http://127.0.0.1:8765/api/launcher/status");
-    expect(launcherRestartEndpoint()).toBe("http://127.0.0.1:8765/api/launcher/restart");
+    expect(launcherEndpoint("status")).toBe("/api/launcher/status");
+    expect(launcherEndpoint("restart")).toBe("/api/launcher/restart");
   });
 
   it("keeps launcher endpoints relative on the Launcher control origin", () => {
@@ -47,7 +56,7 @@ describe("launcher api helpers", () => {
       },
     });
 
-    expect(launcherRestartEndpoint()).toBe("/api/launcher/restart");
+    expect(launcherEndpoint("restart")).toBe("/api/launcher/restart");
   });
 
   it("fetches launcher status as a read-only request", async () => {
@@ -67,7 +76,36 @@ describe("launcher api helpers", () => {
 
     expect(payload.launcher.mode).toBe("standalone_control_plane");
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0][0]).toBe("http://127.0.0.1:8765/api/launcher/status");
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/launcher/status");
+  });
+
+  it("keeps published launcher status extras used by tray and control-plane UI", async () => {
+    vi.stubGlobal("window", {
+      location: {
+        href: "http://127.0.0.1:8000/chat",
+        origin: "http://127.0.0.1:8000",
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        launcher: { mode: "standalone_control_plane" },
+        overallState: "open",
+        observedState: "open",
+        controlPlaneEvidence: { customEvidence: true },
+        guardianAdapter: { adapterCount: 1, customGuardian: true },
+        customTrayField: "keep-me",
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const payload = await getLauncherStatus();
+
+    expect(payload.overallState).toBe("open");
+    expect(payload.observedState).toBe("open");
+    expect(payload.controlPlaneEvidence?.customEvidence).toBe(true);
+    expect(payload.guardianAdapter?.customGuardian).toBe(true);
+    expect((payload as { customTrayField?: string }).customTrayField).toBe("keep-me");
   });
 
   it("fetches launcher branch instances as a read-only request", async () => {
@@ -86,7 +124,51 @@ describe("launcher api helpers", () => {
     const payload = await getLauncherBranchInstances();
 
     expect(payload.schemaVersion).toBe(1);
-    expect(fetchMock.mock.calls[0][0]).toBe("http://127.0.0.1:8765/api/launcher/branch-instances");
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/launcher/branch-instances");
+  });
+
+  it("normalizes stale flat branch-instance payloads before the Launcher renders them", async () => {
+    vi.stubGlobal("window", {
+      location: {
+        href: "http://127.0.0.1:8765/launcher",
+        origin: "http://127.0.0.1:8765",
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        schemaVersion: 1,
+        currentId: "main",
+        items: [{
+          id: "main",
+          kind: "main",
+          branch: "main",
+          path: "C:/repo",
+          displayPath: ".",
+          head: "abc123",
+          current: true,
+          legacy: false,
+          dirty: false,
+          checkedOut: true,
+          alive: true,
+          observedState: "open",
+          port: 8002,
+          pids: { backend: 1200, window: 0, manager: 1300 },
+          promotable: false,
+          workbenchTitle: "main 台",
+        }],
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const payload = await getLauncherBranchInstances();
+    const item = payload.items[0];
+
+    expect(item.runtime.lifecycleState).toBe("partial");
+    expect(item.runtime.backend).toMatchObject({ alive: true, healthy: false, listening: false, port: 8002, pid: 1200 });
+    expect(item.runtime.window).toMatchObject({ open: false, pid: 0, title: "main 台" });
+    expect(item.startable).toBe(false);
+    expect(item.startBlockReason).toBe("launcher_refresh_required");
   });
 
   it("starts a selected branch instance through the guarded launcher endpoint", async () => {
@@ -113,7 +195,7 @@ describe("launcher api helpers", () => {
     const payload = await requestBranchInstanceLifecycle("worktree:task", "start");
 
     expect(payload.instanceId).toBe("worktree:task");
-    expect(fetchMock.mock.calls[1][0]).toBe("http://127.0.0.1:8765/api/launcher/branch-instances/start");
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/launcher/branch-instances/start");
     const requestInit = fetchMock.mock.calls[1][1] as RequestInit;
     expect(requestInit.method).toBe("POST");
     expect(requestInit.body).toBe(JSON.stringify({ instanceId: "worktree:task" }));
@@ -148,7 +230,7 @@ describe("launcher api helpers", () => {
     const payload = await requestBranchInstanceCleanup(["branch:codex/task"], true);
 
     expect(payload.ok).toBe(true);
-    expect(fetchMock.mock.calls[1][0]).toBe("http://127.0.0.1:8765/api/launcher/branch-instances/cleanup");
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/launcher/branch-instances/cleanup");
     const requestInit = fetchMock.mock.calls[1][1] as RequestInit;
     expect(requestInit.method).toBe("POST");
     expect(requestInit.body).toBe(JSON.stringify({ instanceIds: ["branch:codex/task"], confirm: true }));
@@ -205,9 +287,9 @@ describe("launcher api helpers", () => {
 
     expect(payload.commandId).toBe("cmd-custom-port");
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
-      "http://127.0.0.1:8765/api/launcher/status",
-      "http://127.0.0.1:8899/api/control-token",
-      "http://127.0.0.1:8899/api/launcher/restart",
+      "/api/launcher/status",
+      "/api/control-token",
+      "/api/launcher/restart",
     ]);
   });
 
@@ -236,11 +318,11 @@ describe("launcher api helpers", () => {
 
     expect(payload.operation).toBe("start");
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[0][0]).toBe("http://127.0.0.1:8765/api/control-token");
-    expect(fetchMock.mock.calls[1][0]).toBe("http://127.0.0.1:8765/api/launcher/start");
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/control-token");
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/launcher/start");
     const requestInit = fetchMock.mock.calls[1][1] as RequestInit;
     expect(requestInit.method).toBe("POST");
-    expect(requestInit.credentials).toBe("include");
+    expect(requestInit.credentials).toBe("same-origin");
     expect((requestInit.headers as Headers).get("X-Vibelution-Control-Token")).toBe("test-token");
   });
 
@@ -268,7 +350,7 @@ describe("launcher api helpers", () => {
     const payload = await restartLauncherBundle();
 
     expect(payload.commandId).toBe("cmd-1");
-    expect(fetchMock.mock.calls[1][0]).toBe("http://127.0.0.1:8765/api/launcher/restart");
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/launcher/restart");
   });
 
   it("force closes the bundle through the guarded launcher endpoint", async () => {
@@ -296,7 +378,7 @@ describe("launcher api helpers", () => {
 
     expect(payload.operation).toBe("force-stop");
     expect(payload.commandId).toBe("cmd-force");
-    expect(fetchMock.mock.calls[1][0]).toBe("http://127.0.0.1:8765/api/launcher/force-stop");
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/launcher/force-stop");
     const requestInit = fetchMock.mock.calls[1][1] as RequestInit;
     expect(requestInit.method).toBe("POST");
     expect((requestInit.headers as Headers).get("X-Vibelution-Launcher-Trigger")).toBe("launcher_route_force_stop_button");
@@ -326,7 +408,7 @@ describe("launcher api helpers", () => {
     const payload = await stopLauncherBundle("app_shell_shutdown_button");
 
     expect(payload.operation).toBe("stop");
-    expect(fetchMock.mock.calls[1][0]).toBe("http://127.0.0.1:8765/api/launcher/stop");
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/launcher/stop");
     const requestInit = fetchMock.mock.calls[1][1] as RequestInit;
     expect(requestInit.method).toBe("POST");
     expect((requestInit.headers as Headers).get("X-Vibelution-Launcher-Trigger")).toBe("app_shell_shutdown_button");
@@ -360,7 +442,7 @@ describe("launcher api helpers", () => {
       .toBe("app_shell_window_close_confirmed_active_work");
   });
 
-  it("falls back to the workbench launcher adapter when direct launcher control is unreachable", async () => {
+  it("uses the same-origin workbench adapter when no preload bridge is present", async () => {
     vi.stubGlobal("window", {
       location: {
         href: "http://127.0.0.1:8000/chat",
@@ -372,29 +454,19 @@ describe("launcher api helpers", () => {
         ok: true,
         json: async () => ({
           header: "X-Vibelution-Control-Token",
-          controlToken: "launcher-token",
-        }),
-      })
-      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          header: "X-Vibelution-Control-Token",
           controlToken: "workbench-token",
         }),
       })
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ accepted: true, operation: "restart", commandId: "cmd-fallback" }),
+        json: async () => ({ accepted: true, operation: "restart", commandId: "cmd-same-origin" }),
       });
     vi.stubGlobal("fetch", fetchMock);
 
     const payload = await restartLauncherBundle();
 
-    expect(payload.commandId).toBe("cmd-fallback");
+    expect(payload.commandId).toBe("cmd-same-origin");
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
-      "http://127.0.0.1:8765/api/control-token",
-      "http://127.0.0.1:8765/api/launcher/restart",
       "/api/control-token",
       "/api/launcher/restart",
     ]);
@@ -425,7 +497,7 @@ describe("launcher api helpers", () => {
 
     expect(payload.operation).toBe("supervisor_reattach");
     expect(payload.commandId).toBe("cmd-supervisor");
-    expect(fetchMock.mock.calls[1][0]).toBe("http://127.0.0.1:8765/api/launcher/supervisor/reattach");
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/launcher/supervisor/reattach");
     const requestInit = fetchMock.mock.calls[1][1] as RequestInit;
     expect(requestInit.method).toBe("POST");
   });
@@ -608,5 +680,127 @@ describe("launcher api helpers", () => {
       operation: "restart",
       source: "app_shell",
     });
+  });
+});
+
+describe("launcher api IPC transport", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    resetControlTokenForTests();
+  });
+
+  it("reads launcher status over the preload bridge without touching HTTP", async () => {
+    vi.stubGlobal("window", {
+      location: {
+        href: "http://127.0.0.1:8765/launcher",
+        origin: "http://127.0.0.1:8765",
+      },
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const invoke = vi.fn().mockResolvedValue({
+      ok: true,
+      payload: { launcher: { mode: "standalone_control_plane" } },
+    });
+    stubLauncherIpcBridge(invoke);
+
+    const payload = await getLauncherStatus();
+
+    expect(payload.launcher.mode).toBe("standalone_control_plane");
+    expect(invoke).toHaveBeenCalledTimes(1);
+    const request = invoke.mock.calls[0][0] as { schemaVersion: number; path: string };
+    expect(request.schemaVersion).toBe(1);
+    expect(request.path).toBe("status");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("sends lifecycle commands over the preload bridge with headers and body", async () => {
+    vi.stubGlobal("window", {
+      location: {
+        href: "http://127.0.0.1:8765/launcher",
+        origin: "http://127.0.0.1:8765",
+      },
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const invoke = vi.fn().mockResolvedValue({
+      ok: true,
+      payload: { accepted: true, operation: "start", commandId: "cmd-ipc" },
+    });
+    stubLauncherIpcBridge(invoke);
+
+    const payload = await requestBranchInstanceLifecycle("worktree:task", "start", "launcher_route_panel");
+
+    expect(payload.commandId).toBe("cmd-ipc");
+    const request = invoke.mock.calls[0][0] as {
+      schemaVersion: number;
+      path: string;
+      init: { method: string; headers: Record<string, string>; body: unknown };
+    };
+    expect(request.path).toBe("branch-instances/start");
+    expect(request.init.method).toBe("POST");
+    expect(request.init.headers["x-vibelution-launcher-trigger"]).toBe("launcher_route_panel");
+    expect(request.init.body).toEqual({ instanceId: "worktree:task" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("surfaces host-not-ready as a control plane starting error, not a disconnect", async () => {
+    vi.stubGlobal("window", {
+      location: {
+        href: "http://127.0.0.1:8765/launcher",
+        origin: "http://127.0.0.1:8765",
+      },
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const invoke = vi.fn().mockResolvedValue({
+      ok: false,
+      error: { code: "LAUNCHER_IPC_HOST_NOT_READY", message: "Launcher IPC control plane host is not ready." },
+    });
+    stubLauncherIpcBridge(invoke);
+
+    await expect(getLauncherStatus()).rejects.toBeInstanceOf(LauncherControlPlaneNotReadyError);
+    const error = await getLauncherStatus().catch((caught: unknown) => caught);
+    expect(isLauncherControlPlaneNotReady(error)).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("surfaces launcher proxy rejections from the bridge", async () => {
+    vi.stubGlobal("window", {
+      location: {
+        href: "http://127.0.0.1:8765/launcher",
+        origin: "http://127.0.0.1:8765",
+      },
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const invoke = vi.fn().mockResolvedValue({
+      ok: false,
+      error: { code: "LAUNCHER_IPC_HTTP_409", message: "active work blocks restart" },
+    });
+    stubLauncherIpcBridge(invoke);
+
+    await expect(restartLauncherBundle()).rejects.toThrow("active work blocks restart");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps the HTTP path when the preload bridge is absent", async () => {
+    vi.stubGlobal("window", {
+      location: {
+        href: "http://127.0.0.1:8000/chat",
+        origin: "http://127.0.0.1:8000",
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ launcher: { mode: "workbench_adapter" } }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const payload = await getLauncherStatus();
+
+    expect(payload.launcher.mode).toBe("workbench_adapter");
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/launcher/status");
   });
 });

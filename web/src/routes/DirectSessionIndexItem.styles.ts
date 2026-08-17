@@ -69,7 +69,17 @@ const styles = {
     "vui-routes-chatcodingroute sessionActionStack min-w-0 flex flex-wrap items-center gap-1.5",
   sessionIconButton:
     `vui-routes-chatcodingroute sessionIconButton min-w-0 ${vuiControlIconSmClass} place-items-center border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] p-0 text-[var(--fg-secondary)] hover:border-[var(--vui-control-hover-border)] hover:bg-[var(--vui-control-hover-bg)] hover:text-[var(--vui-control-hover-fg)] text-[var(--fg-tertiary)]`,
+  sessionTeamBindingSlot:
+    "vui-routes-chatcodingroute sessionTeamBindingSlot absolute right-2 top-2 z-10",
   sessionItem: `vui-routes-chatcodingroute sessionItem relative grid min-w-0 grid-cols-[minmax(0,1fr)] gap-0 overflow-hidden ${vuiDenseRowClass} text-left shadow-none transition-[border-color,background-color,box-shadow] focus-within:border-[color-mix(in_srgb,var(--accent-cool)_42%,var(--vui-border-subtle))] focus-within:${vuiStateSelectedRowFillClass}`,
+  sessionItemWithBulkSelect:
+    "vui-routes-chatcodingroute sessionItemWithBulkSelect grid-cols-[28px_minmax(0,1fr)] items-center",
+  sessionItemBulkSelected:
+    "vui-routes-chatcodingroute sessionItemBulkSelected border-[color-mix(in_srgb,var(--fg-primary)_22%,var(--vui-border-hairline))] bg-[var(--vui-control-muted)]",
+  sessionBulkSelectControl:
+    "vui-routes-chatcodingroute sessionBulkSelectControl relative grid place-items-center self-stretch text-[var(--fg-secondary)] cursor-pointer hover:text-[var(--accent-warm-2)]",
+  sessionBulkSelectInput:
+    "vui-routes-chatcodingroute sessionBulkSelectInput absolute !w-px !h-px opacity-0 pointer-events-none",
   sessionItemActive:
     `vui-routes-chatcodingroute sessionItemActive ${vuiStateSelectedOpaqueRowClass}`,
   sessionItemContextTarget:

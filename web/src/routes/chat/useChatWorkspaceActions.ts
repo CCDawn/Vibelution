@@ -1,6 +1,5 @@
-import { useCallback, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
+import { useCallback, type Dispatch, type SetStateAction } from "react";
 import type { QueryClient } from "@tanstack/react-query";
-import type { NavigateFunction } from "react-router-dom";
 
 import type {
   AgentInstance,
@@ -14,6 +13,15 @@ import type { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import { isTempSessionId } from "../sessionOptimisticIds";
 import { prefetchSessionDetailWindow } from "./chatSessionDetailHelpers";
 import { isBusyPhase } from "./chatCodingRouteViewModel";
+import { startUserAction } from "../../app/userActionTelemetry";
+import type { UseChatRouteSelectionResult } from "./useChatRouteSelection";
+import {
+  chatAgentSessionStorage,
+  lastSessionForAgent,
+  readAgentLastSessionMap,
+  rememberAgentLastSession,
+  resolveAgentOpenSessionId,
+} from "./chatAgentSessionMemory";
 
 type ChatWorkspaceCache = ReturnType<typeof createChatWorkspaceCache>;
 type RightIndexPanel = "conversations" | "members";
@@ -25,19 +33,17 @@ type MutateLike<TVariables> = {
   variables?: TVariables;
 };
 
+type ChatRouteActions = Pick<
+  UseChatRouteSelectionResult,
+  "openSession" | "openRoom" | "openProjectBus"
+>;
+
 export type UseChatWorkspaceActionsOptions = {
   lang: "zh" | "en";
   t: (key: TranslationKey) => string;
-  navigate: NavigateFunction;
+  chatRoute: ChatRouteActions;
   queryClient: QueryClient;
   chatWorkspaceCache: ChatWorkspaceCache;
-  latestDirectSessionSelectionRef: MutableRefObject<string>;
-  latestDirectSessionSelectionAtRef: MutableRefObject<number>;
-  reselectDirectSessionRef: MutableRefObject<(sessionId: string) => void>;
-  activeSessionId?: string | null;
-  setActiveSession: (sessionId: string) => void;
-  activeGroupRoomId: string;
-  setActiveGroupRoomId: Dispatch<SetStateAction<string>>;
   setRightIndexPanel: Dispatch<SetStateAction<RightIndexPanel>>;
   setRightPaneCollapsed: Dispatch<SetStateAction<boolean>>;
   setSelectedAgentId: Dispatch<SetStateAction<string>>;
@@ -61,6 +67,7 @@ export type UseChatWorkspaceActionsOptions = {
   groupManageModeDraft: string;
   groupManagePurposeDraft: string;
   selectedChatAgentId: string;
+  sessionsById?: ReadonlyMap<string, Pick<SessionSummary, "id" | "agentId">>;
   standardGroupRoomActive: boolean;
   activeGroupTeamOwned: boolean;
   groupRoundActive: boolean;
@@ -85,14 +92,19 @@ export type UseChatWorkspaceActionsOptions = {
   clearSessionHistoryMutation: MutateLike<{ sessionId: string; agentId: string }>;
   addSessionToReviewMutation: MutateLike<{ sessionId: string }>;
   petActionMutation: MutateLike<{ action: PetInteractionAction }>;
+  openDeleteSessionConfirm: (session: SessionSummary) => void;
+  openClearSessionHistoryConfirm: (session: SessionSummary) => void;
+  openDeleteGroupConfirm: () => void;
+  openResetGroupConfirm: () => void;
 };
 
 export type UseChatWorkspaceActionsResult = {
   handlePetInteraction: (action: PetInteractionAction) => void;
   handleCreateSession: () => void;
   handleOpenProjectAgentBus: () => void;
-  handleOpenDirectSession: (sessionId: string) => void;
-  handleOpenAgent: (agent: AgentInstance) => void;
+  handleOpenDirectSession: (sessionId: string, options?: { telemetrySource?: string }) => void;
+  handlePrefetchDirectSession: (sessionId: string) => void;
+  handleOpenAgent: (agent: AgentInstance) => boolean;
   handleOpenMentionTarget: (target: ChatMentionTarget) => void;
   handleOpenGroupRoom: (roomId: string) => void;
   handleToggleGroupManageSession: (sessionId: string) => void;
@@ -113,21 +125,15 @@ export type UseChatWorkspaceActionsResult = {
 
 /**
  * UI action handlers for session/group workspace navigation and lifecycle.
- * Mutations are injected; this module does not open EventSources.
+ * All Chat route writes go through the route controller; this module does not
+ * open EventSources and does not build selection URLs itself.
  */
 export function useChatWorkspaceActions({
   lang,
   t,
-  navigate,
+  chatRoute,
   queryClient,
   chatWorkspaceCache,
-  latestDirectSessionSelectionRef,
-  latestDirectSessionSelectionAtRef,
-  reselectDirectSessionRef,
-  activeSessionId = null,
-  setActiveSession,
-  activeGroupRoomId,
-  setActiveGroupRoomId,
   setRightIndexPanel,
   setRightPaneCollapsed,
   setSelectedAgentId,
@@ -151,6 +157,7 @@ export function useChatWorkspaceActions({
   groupManageModeDraft,
   groupManagePurposeDraft,
   selectedChatAgentId,
+  sessionsById,
   standardGroupRoomActive,
   activeGroupTeamOwned,
   groupRoundActive,
@@ -173,6 +180,10 @@ export function useChatWorkspaceActions({
   clearSessionHistoryMutation,
   addSessionToReviewMutation,
   petActionMutation,
+  openDeleteSessionConfirm,
+  openClearSessionHistoryConfirm,
+  openDeleteGroupConfirm,
+  openResetGroupConfirm,
 }: UseChatWorkspaceActionsOptions): UseChatWorkspaceActionsResult {
   const handlePetInteraction = useCallback((action: PetInteractionAction) => {
     setPetActionFeedback("");
@@ -180,7 +191,6 @@ export function useChatWorkspaceActions({
   }, [petActionMutation, setPetActionFeedback]);
 
   const handleCreateSession = useCallback(() => {
-    setActiveGroupRoomId("");
     setRightIndexPanel("conversations");
     setSessionComposerErrors((current) => ({
       ...current,
@@ -190,47 +200,51 @@ export function useChatWorkspaceActions({
   }, [
     createSessionMutation,
     selectedChatAgentId,
-    setActiveGroupRoomId,
     setRightIndexPanel,
     setSessionComposerErrors,
   ]);
 
   const handleOpenProjectAgentBus = useCallback(() => {
     setSessionContextMenu(null);
-    navigate("/chat", { replace: false });
-    setActiveGroupRoomId("__project_agent_bus__");
+    // Explicit project bus route — the URL is the single authority.
+    chatRoute.openProjectBus();
     setRightIndexPanel("conversations");
     setRightPaneCollapsed(false);
     setGroupRoomActionError("");
     void chatWorkspaceCache.afterProjectBusFailed();
   }, [
+    chatRoute,
     chatWorkspaceCache,
-    navigate,
-    setActiveGroupRoomId,
     setGroupRoomActionError,
     setRightIndexPanel,
     setRightPaneCollapsed,
     setSessionContextMenu,
   ]);
 
-  const handleOpenDirectSession = useCallback((sessionId: string) => {
+  const handlePrefetchDirectSession = useCallback((sessionId: string) => {
+    void prefetchSessionDetailWindow(queryClient, sessionId);
+  }, [queryClient]);
+
+  const handleOpenDirectSession = useCallback((sessionId: string, options?: { telemetrySource?: string }) => {
     const normalizedSessionId = String(sessionId || "").trim();
     if (!normalizedSessionId) {
       return;
     }
     setSessionContextMenu(null);
-    // Instant active switch (T0). Network select is generation-guarded (T1).
-    // Stamp intent before setActiveSession so the URL-sync effect does not
-    // immediately revert to the previous ?session= while navigate is in flight.
-    latestDirectSessionSelectionRef.current = normalizedSessionId;
-    latestDirectSessionSelectionAtRef.current = Date.now();
     // Temp create shells are local-only — never select/prefetch against the API.
     const tempLocal = isTempSessionId(normalizedSessionId);
     if (!tempLocal) {
       void prefetchSessionDetailWindow(queryClient, normalizedSessionId);
     }
-    setActiveSession(normalizedSessionId);
-    setActiveGroupRoomId("");
+    const sessionAgentId = String(sessionsById?.get(normalizedSessionId)?.agentId || "").trim();
+    if (sessionAgentId) {
+      setSelectedAgentId(sessionAgentId);
+      rememberAgentLastSession(
+        sessionAgentId,
+        normalizedSessionId,
+        chatAgentSessionStorage(),
+      );
+    }
     setRightIndexPanel("conversations");
     setGroupRoomActionError("");
     setSessionComposerErrors((current) => ({
@@ -238,45 +252,60 @@ export function useChatWorkspaceActions({
       [normalizedSessionId]: "",
       __sessions__: "",
     }));
-    // Re-selecting the already-active session still updates server active pointer,
-    // but skip the network when the operator is just re-clicking the current tab.
-    if (!tempLocal && String(activeSessionId || "").trim() !== normalizedSessionId) {
-      reselectDirectSessionRef.current(normalizedSessionId);
-    }
-    if (!tempLocal) {
-      // replace: true — Codex/ChatGPT thread switch does not push history per tab click.
-      navigate(`/chat?session=${encodeURIComponent(normalizedSessionId)}`, { replace: true });
-    }
+    // replace: true — Codex/ChatGPT thread switch does not push history per tab click.
+    chatRoute.openSession(normalizedSessionId, {
+      replace: true,
+      telemetrySource: options?.telemetrySource ?? "direct_session",
+    });
   }, [
-    activeSessionId,
-    latestDirectSessionSelectionAtRef,
-    latestDirectSessionSelectionRef,
-    navigate,
+    chatRoute,
     queryClient,
-    reselectDirectSessionRef,
-    setActiveGroupRoomId,
-    setActiveSession,
+    sessionsById,
     setGroupRoomActionError,
     setRightIndexPanel,
+    setSelectedAgentId,
     setSessionComposerErrors,
     setSessionContextMenu,
   ]);
 
   const handleOpenAgent = useCallback((agent: AgentInstance) => {
     const agentId = String(agent.agentId || "").trim();
-    const primarySessionId = String(agent.directSessionId || "").trim();
-    if (!agentId || !primarySessionId) {
-      return;
+    if (!agentId) {
+      return false;
     }
     setSelectedAgentId(agentId);
-    handleOpenDirectSession(primarySessionId);
-  }, [handleOpenDirectSession, setSelectedAgentId]);
+    const knownSessionIds: string[] = [];
+    if (sessionsById) {
+      for (const session of sessionsById.values()) {
+        if (String(session.agentId || "").trim() === agentId) {
+          const sessionId = String(session.id || "").trim();
+          if (sessionId) {
+            knownSessionIds.push(sessionId);
+          }
+        }
+      }
+    }
+    const targetSessionId = resolveAgentOpenSessionId({
+      lastSessionId: lastSessionForAgent(
+        agentId,
+        readAgentLastSessionMap(chatAgentSessionStorage()),
+      ),
+      knownSessionIds,
+      latestSessionId: "",
+      directSessionId: agent.directSessionId,
+    });
+    if (!targetSessionId) {
+      return false;
+    }
+    handleOpenDirectSession(targetSessionId, { telemetrySource: "agent_directory" });
+    return true;
+  }, [handleOpenDirectSession, sessionsById, setSelectedAgentId]);
 
   const handleOpenMentionTarget = useCallback((target: ChatMentionTarget) => {
     setRightPaneCollapsed(false);
     setGroupRoomActionError("");
     if (target.kind === "all") {
-      setActiveGroupRoomId("__project_agent_bus__");
+      chatRoute.openProjectBus();
       setRightIndexPanel("conversations");
       setSessionFilter("");
       void chatWorkspaceCache.afterProjectBusFailed();
@@ -289,14 +318,13 @@ export function useChatWorkspaceActions({
     }
     const fallbackFilter = target.agentCode || target.displayName || target.agentId || "";
     if (fallbackFilter) {
-      setActiveGroupRoomId("");
       setRightIndexPanel("conversations");
       setSessionFilter(fallbackFilter);
     }
   }, [
+    chatRoute,
     chatWorkspaceCache,
     handleOpenDirectSession,
-    setActiveGroupRoomId,
     setGroupRoomActionError,
     setRightIndexPanel,
     setRightPaneCollapsed,
@@ -307,16 +335,15 @@ export function useChatWorkspaceActions({
     if (!roomId) {
       return;
     }
-    navigate(`/chat?room=${encodeURIComponent(roomId)}`, { replace: false });
-    setActiveGroupRoomId(roomId);
+    // Group room entry pushes history (product semantics).
+    chatRoute.openRoom(roomId);
     setRightIndexPanel("members");
     setRightPaneCollapsed(false);
     setGroupRoomActionError("");
     void chatWorkspaceCache.afterChatRoomChanged(roomId);
   }, [
+    chatRoute,
     chatWorkspaceCache,
-    navigate,
-    setActiveGroupRoomId,
     setGroupRoomActionError,
     setRightIndexPanel,
     setRightPaneCollapsed,
@@ -392,11 +419,11 @@ export function useChatWorkspaceActions({
 
   const handleStartGroupRound = useCallback(() => {
     const topic = groupTopicDraft.trim();
-    if (!standardGroupRoomActive || !activeGroupRoomId || !topic || startGroupRoundMutation.isPending || groupRoundActive) {
+    if (!standardGroupRoomActive || !activeGroupRoom?.roomId || !topic || startGroupRoundMutation.isPending || groupRoundActive) {
       return;
     }
     startGroupRoundMutation.mutate({
-      roomId: activeGroupRoomId,
+      roomId: activeGroupRoom.roomId,
       topic,
       mode: activeGroupRoom?.mode || "round_robin",
       purpose: activeGroupRoom?.purpose || "discussion",
@@ -404,7 +431,7 @@ export function useChatWorkspaceActions({
   }, [
     activeGroupRoom?.mode,
     activeGroupRoom?.purpose,
-    activeGroupRoomId,
+    activeGroupRoom?.roomId,
     groupRoundActive,
     groupTopicDraft,
     standardGroupRoomActive,
@@ -412,14 +439,14 @@ export function useChatWorkspaceActions({
   ]);
 
   const handleStopGroupRound = useCallback(() => {
-    if (!standardGroupRoomActive || !activeGroupRoomId || !groupRoundRunning || stopGroupRoundMutation.isPending) {
+    if (!standardGroupRoomActive || !activeGroupRoom?.roomId || !groupRoundRunning || stopGroupRoundMutation.isPending) {
       return;
     }
     stopGroupRoundMutation.mutate({
-      roomId: activeGroupRoomId,
+      roomId: activeGroupRoom.roomId,
     });
   }, [
-    activeGroupRoomId,
+    activeGroupRoom?.roomId,
     groupRoundRunning,
     standardGroupRoomActive,
     stopGroupRoundMutation,
@@ -444,18 +471,18 @@ export function useChatWorkspaceActions({
   }, [revokeProjectBusMessageMutation]);
 
   const handleApplyGroupRoomManagement = useCallback(() => {
-    if (!standardGroupRoomActive || activeGroupTeamOwned || !activeGroupRoomId || groupManageDisabled) {
+    if (!standardGroupRoomActive || activeGroupTeamOwned || !activeGroupRoom?.roomId || groupManageDisabled) {
       return;
     }
     updateGroupRoomMutation.mutate({
-      roomId: activeGroupRoomId,
+      roomId: activeGroupRoom.roomId,
       title: groupManageTitleDraft.trim(),
       sessionIds: groupManageSessionIds,
       mode: groupManageModeDraft || "round_robin",
       purpose: groupManagePurposeDraft || "discussion",
     });
   }, [
-    activeGroupRoomId,
+    activeGroupRoom?.roomId,
     activeGroupTeamOwned,
     groupManageDisabled,
     groupManageModeDraft,
@@ -467,42 +494,28 @@ export function useChatWorkspaceActions({
   ]);
 
   const handleDeleteActiveGroupRoom = useCallback(() => {
-    if (!standardGroupRoomActive || activeGroupTeamOwned || !activeGroupRoomId || groupDeleteDisabled) {
+    if (!standardGroupRoomActive || activeGroupTeamOwned || !activeGroupRoom?.roomId || groupDeleteDisabled) {
       return;
     }
-    const roomTitle = (activeGroupRoom?.title || activeGroupRoomId).trim();
-    const groupConfirmMessage = t("deleteGroupConfirm").replace("{title}", roomTitle || activeGroupRoomId);
-    if (!window.confirm(groupConfirmMessage)) {
-      return;
-    }
-    deleteGroupRoomMutation.mutate({ roomId: activeGroupRoomId });
+    openDeleteGroupConfirm();
   }, [
-    activeGroupRoom?.title,
-    activeGroupRoomId,
+    activeGroupRoom?.roomId,
     activeGroupTeamOwned,
-    deleteGroupRoomMutation,
     groupDeleteDisabled,
+    openDeleteGroupConfirm,
     standardGroupRoomActive,
-    t,
   ]);
 
   const handleResetActiveGroupRoom = useCallback(() => {
-    if (!standardGroupRoomActive || !activeGroupRoomId || groupResetDisabled) {
+    if (!standardGroupRoomActive || !activeGroupRoom?.roomId || groupResetDisabled) {
       return;
     }
-    const roomTitle = (activeGroupRoom?.title || activeGroupRoomId).trim();
-    const groupConfirmMessage = t("resetGroupConfirm").replace("{title}", roomTitle || activeGroupRoomId);
-    if (!window.confirm(groupConfirmMessage)) {
-      return;
-    }
-    resetGroupRoomMutation.mutate({ roomId: activeGroupRoomId });
+    openResetGroupConfirm();
   }, [
-    activeGroupRoom?.title,
-    activeGroupRoomId,
+    activeGroupRoom?.roomId,
     groupResetDisabled,
-    resetGroupRoomMutation,
+    openResetGroupConfirm,
     standardGroupRoomActive,
-    t,
   ]);
 
   const handleDeleteSession = useCallback((session: SessionSummary) => {
@@ -511,7 +524,9 @@ export function useChatWorkspaceActions({
       deleteSessionMutation.isPending
       && deleteSessionMutation.variables?.sessionId === session.id,
     );
-    if (alreadyDeletingThisSession || isBusyPhase(session.currentPhase || session.status)) {
+    if (alreadyDeletingThisSession) {
+      startUserAction("session_delete", { sessionId: session.id }, { destructive: true })
+        .blocked("delete_already_in_flight");
       setSessionComposerErrors((current) => ({
         ...current,
         [session.id]: t("deleteSessionBusy"),
@@ -519,26 +534,36 @@ export function useChatWorkspaceActions({
       }));
       return;
     }
-    const sessionTitle = (session.agentDisplayName || session.title || session.id).trim();
-    const sessionConfirmMessage = t("deleteSessionConfirm").replace("{title}", sessionTitle || session.id);
-    if (!window.confirm(sessionConfirmMessage)) {
+    if (isBusyPhase(session.currentPhase || session.status)) {
+      startUserAction("session_delete", { sessionId: session.id }, { destructive: true })
+        .blocked("session_busy", {
+          phase: String(session.currentPhase || session.status || "").trim(),
+        });
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [session.id]: t("deleteSessionBusy"),
+        __sessions__: "",
+      }));
       return;
     }
-    setSessionComposerErrors((current) => ({
-      ...current,
-      [session.id]: "",
-      __sessions__: "",
-    }));
-    // Fire-and-forget: onMutate switches tabs immediately; network continues in background.
-    deleteSessionMutation.mutate({ sessionId: session.id });
-  }, [deleteSessionMutation, setSessionComposerErrors, setSessionContextMenu, t]);
+    openDeleteSessionConfirm(session);
+  }, [deleteSessionMutation, openDeleteSessionConfirm, setSessionComposerErrors, setSessionContextMenu, t]);
 
   const handleClearSessionHistory = useCallback((session: SessionSummary) => {
     setSessionContextMenu(null);
     if (!session.agentId || !isAgentRootSession(session)) {
       return;
     }
-    if (isBusyPhase(session.currentPhase || session.status)) {
+    const alreadyClearingThisSession = Boolean(
+      clearSessionHistoryMutation.isPending
+      && clearSessionHistoryMutation.variables?.sessionId === session.id,
+    );
+    if (alreadyClearingThisSession) {
+      startUserAction("session_clear_history", {
+        sessionId: session.id,
+        agentId: session.agentId,
+      }, { destructive: true })
+        .blocked("clear_already_in_flight");
       setSessionComposerErrors((current) => ({
         ...current,
         [session.id]: t("clearSessionHistoryBusy"),
@@ -546,18 +571,23 @@ export function useChatWorkspaceActions({
       }));
       return;
     }
-    const sessionTitle = (session.agentDisplayName || session.title || session.id).trim();
-    const confirmMessage = t("clearSessionHistoryConfirm").replace("{title}", sessionTitle || session.id);
-    if (!window.confirm(confirmMessage)) {
+    if (isBusyPhase(session.currentPhase || session.status)) {
+      startUserAction("session_clear_history", {
+        sessionId: session.id,
+        agentId: session.agentId,
+      }, { destructive: true })
+        .blocked("session_busy", {
+          phase: String(session.currentPhase || session.status || "").trim(),
+        });
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [session.id]: t("clearSessionHistoryBusy"),
+        __sessions__: "",
+      }));
       return;
     }
-    setSessionComposerErrors((current) => ({
-      ...current,
-      [session.id]: "",
-      __sessions__: "",
-    }));
-    clearSessionHistoryMutation.mutate({ sessionId: session.id, agentId: session.agentId });
-  }, [clearSessionHistoryMutation, setSessionComposerErrors, setSessionContextMenu, t]);
+    openClearSessionHistoryConfirm(session);
+  }, [clearSessionHistoryMutation, openClearSessionHistoryConfirm, setSessionComposerErrors, setSessionContextMenu, t]);
 
   const handleAddSessionToReview = useCallback((session: SessionSummary) => {
     setSessionContextMenu(null);
@@ -582,6 +612,7 @@ export function useChatWorkspaceActions({
     handleCreateSession,
     handleOpenProjectAgentBus,
     handleOpenDirectSession,
+    handlePrefetchDirectSession,
     handleOpenAgent,
     handleOpenMentionTarget,
     handleOpenGroupRoom,

@@ -278,8 +278,7 @@ describe("chat hand-test substitute: CLI terminal lifecycle", () => {
       { alive: true, status: "running", terminalSessionId: "term-7" } as never,
     )).toBe(true);
     expect(cliTerminalHookSource).toContain("window.confirm(");
-    expect(cliTerminalHookSource).toContain("/api/cli-agents/terminal-sessions/");
-    expect(cliTerminalHookSource).toContain("/stop");
+    expect(cliTerminalHookSource).toContain("stopCliAgentTerminalSession");
     expect(routeSource).toContain("useChatCliAgentTerminal");
     expect(routeSource).toContain("<ChatCliAgentTerminalStack");
   });
@@ -388,16 +387,16 @@ describe("chat hand-test substitute: group/project-bus wiring", () => {
 });
 
 describe("chat hand-test substitute: agent tabs + skill chip", () => {
-  it("sorts flat Agent sessions by recent activity for the top strip", () => {
+  it("keeps flat Agent session tabs in create order for the top strip", () => {
     const tabs = buildAgentSessionTabs({
       sessions: [
-        { id: "other", sessionKind: "direct", updatedAt: "2026-07-20T03:00:00Z" } as never,
-        { id: "child", sessionKind: "child", updatedAt: "2026-07-20T02:00:00Z" } as never,
-        { id: "primary", sessionKind: "direct", updatedAt: "2026-07-20T01:00:00Z" } as never,
+        { id: "other", sessionKind: "direct", createdAt: "2026-07-20T03:00:00Z", updatedAt: "2026-07-20T05:00:00Z" } as never,
+        { id: "child", sessionKind: "child", createdAt: "2026-07-20T02:00:00Z", updatedAt: "2026-07-20T06:00:00Z" } as never,
+        { id: "primary", sessionKind: "direct", createdAt: "2026-07-20T01:00:00Z", updatedAt: "2026-07-20T04:00:00Z" } as never,
       ],
       selectedChatAgentDirectSessionId: "primary",
     });
-    expect(tabs.map((item) => item.id)).toEqual(["other", "child", "primary"]);
+    expect(tabs.map((item) => item.id)).toEqual(["primary", "child", "other"]);
   });
 
   it("builds stale skill chip labels for status rail", () => {

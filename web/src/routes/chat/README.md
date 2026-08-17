@@ -13,6 +13,31 @@ Agent-oriented map for Chat workbench development. Prefer editing a **module** o
 ChatCodingRoute.tsx → re-export ChatCodingRouteWorkbench
 ```
 
+## Route selection authority (ADR 0009)
+
+The committed React Router URL is the **single authority** for the current
+Chat surface. Rules:
+
+- Only `useChatRouteSelection.ts` writes Chat routes:
+  `openSession` / `openRoom` / `openProjectBus` / `canonicalizeBareRoute` /
+  `replaceIfStillViewing`. No other module may build `/chat?session=` or
+  `/chat?room=` navigation, call `window.history.pushState/replaceState`, or
+  store an active session in Zustand/local state.
+- `chatSelectionProjection.ts` owns the `ChatRouteSelection` discriminated
+  union (`session` / `room` / `project_bus` / `bare` / `invalid`) and the pure
+  serialize/compare helpers; `activeSessionId` / `activeGroupRoomId` are
+  derived locally from the route only.
+- Async lifecycle results (create temp→real, delete, archive, clear history,
+  group create/delete, late `/select`) must compare-and-swap via
+  `replaceIfStillViewing`; a user who already navigated away keeps their page
+  and only caches are updated.
+- Explicit missing/archived session URLs stay put and render the unavailable
+  surface; bare `/chat` canonicalizes once per `location.key` from
+  localStorage → server pointer → first visible session.
+- `chatWorkbenchStore` keeps per-session workspaces only (tabs, draft). Machine
+  gates: `chatRouteWriteBoundary.test.ts`, `useChatRouteSelection.test.tsx`,
+  `useChatSessionSelection.test.tsx`, `AppShellNavigationTelemetry.test.ts`.
+
 ## Ownership map (claim scopes)
 
 | Task type | Prefer these files | Avoid |
@@ -24,15 +49,22 @@ ChatCodingRoute.tsx → re-export ChatCodingRouteWorkbench
 | Tool approval copy | `toolApprovalLabels.ts`, `ChatToolApprovalDialog.tsx` | left rail JSX |
 | Submit telemetry fields | `chatSubmitTelemetry.ts` | layout resize |
 | Composer draft/attachments/submit pure helpers | `chatComposerSubmitModel.ts` | stream apply, dual EventSource |
+| Running-turn follow-up queue | `../components/conversation/composerFollowupQueueModel.ts` + `ConversationFollowupQueueBar.tsx` | edit-resubmit, stream apply |
 | Composer turn mutations + submit actions | `useChatComposerSubmit.ts` | session EventSource ownership |
 | Session stream connect/grace pure helpers | `chatSessionStreamConnect.ts` | opening EventSource |
 | Direct session detail SSE (sole EventSource) | `useSessionDetailStream.ts` | second session EventSource, group stream |
+| Desktop conversation completion notifications | `../chatDesktopNotifications.ts` + `useDesktopConversationAttention.ts` | second EventSource, backend Windows APIs |
 | Group room SSE (sole EventSource) | `useGroupRoomStream.ts` | second group EventSource, session stream |
 | Catalog / secondary queries (runtime·pet·index·teams·skills·rooms) | `useChatWorkbenchCatalogQueries.ts` | session detail SSE, composer submit |
-| Session select / URL / bootstrap | `useChatSessionSelection.ts` | EventSource ownership |
-| Session detail window / ledger / conversation merge | `chatSessionDetailHelpers.ts` | stream EventSource |
+| Session select / URL / bootstrap | `useChatSessionSelection.ts` (committed-route preference sync) | EventSource ownership || Session detail window / ledger / conversation merge | `chatSessionDetailHelpers.ts` | stream EventSource |
 | Labels / avatar / group message presentation | `chatRoutePresentation.tsx` | mutations / stream |
-| Session/group lifecycle mutations | `useChatWorkspaceLifecycle.ts` | EventSource, composer submit |
+| Session catalog / tabs | `useChatVisibleSessionCatalog.ts` · `chatVisibleSessionCatalogModel.ts` · `useChatAgentSessionTabs.ts` | stream, confirm |
+| Agent directory maps / @mention avatars | `useChatAgentDirectoryMaps.ts` · `chatAgentDirectoryMaps.ts` | stream, confirm |
+| Index loading + session context-menu flags | `useChatIndexDerivedState.ts` | stream, mutations |
+| Group room chrome / team linkage | `useChatGroupRoomChromeModel.ts` · `chatGroupTeamLinkageModel.ts` | stream, route writes |
+| Session index rail chrome | `useChatSessionIndexRailModel.ts` · `chatSessionIndexRailPresentation.ts` | stream apply |
+| Session bulk select / remove | `useChatSessionBulkSelection.ts` | stream, confirm dialog |
+| Danger confirm dialogs | `useChatWorkbenchConfirmDialog.ts` | mutation implementations |
 | Session detail mutations (reasoning/history/tool/pet) | `useChatSessionDetailMutations.ts` | EventSource, lifecycle |
 | Workspace UI action handlers | `useChatWorkspaceActions.ts` | EventSource, JSX render |
 | Group message / @mention presentation | `ChatGroupMessagePresentation.tsx` | mutations |
@@ -79,10 +111,16 @@ Historical plan (archived): `docs/archive/superpowers/plans/2026-07-19-chat-codi
 - **E1–E4i done:** stream selection split, workspace hooks, surface models, center surfaces
 - **D2 (ROI queue):** `conversationFeedbackStatusPresentation.ts` — feedback status placeholder pure boundary for `ConversationView` (projection vs shell)
 
-## Phase F (R01c — in progress)
+## Phase F (R01c — Gate 3 done)
 
 - **F1 done:** `useChatWorkbenchCatalogQueries.ts` — runtime/pet/config/session-index/conversations/teams/agents/skills/chat-room catalog + expanded agent detail queries
-- **Next:** group draft state / dialog chrome / remaining shell wiring until workbench net −300 LOC vs pre-R01c baseline
+- **F2 done:** `useChatToolApprovalBridge.ts` (governance & session tool approval), `useChatComposerBridgeState.ts` (composer draft, follow-up queue & bridge state), `useChatGroupRoomViewModel.ts` (group room identity, candidate agents & modes). Index tree JSX stays in the workbench until a typed owner can take it without a fat prop dump.
+- **F3 done (Gate 3):** `useChatGroupDraftState` + `chatGroupRoomActionModel` own group composer/manage drafts and action flags; `useChatWorkbenchContextMenus` owns session/agent menu chrome; `useChatConversationIndexChrome` owns collapsed groups / members tab; Agent create wizard open state lives in `useChatAgentDirectoryActions`; direct-session prefetch is wired through `useChatWorkspaceActions`. Shell remains `ChatSessionWorkbenchShell` → `VSessionWorkbenchPage` (`WORKBENCH_LAYOUT_IDS.chat`) with lazy secondary panels. **G3-3 closed without extra memoization** — no new render/interaction finding; `ChatCodingRouteWorkbench.updateDepth.test.tsx` remains the update-depth guard.
+- **F4 (Wave 1-A):** `useChatSessionBulkSelection` owns session-list bulk select/remove; `useChatWorkbenchConfirmDialog` owns danger confirm state + presentation (delete session/history, delete/reset group).
+- **F4b (Wave 1-A cont.):** `useChatVisibleSessionCatalog` owns visible session merge/map + activity seen; `useChatAgentSessionTabs` owns per-agent tab query; `useChatSessionIndexRailModel` owns group-only index groups + load-more progress labels.
+- **F4c (Wave 1-A cont.):** `useChatGroupRoomChromeModel` owns team↔room linkage, group participant maps, expanded-agent detail sync, and group manage/delete/reset/stop disabled flags; pure linkage in `chatGroupTeamLinkageModel.ts`.
+- **F4d (Wave 1-A alignment):** catalog/index pure boundaries — `chatVisibleSessionCatalogModel.ts`, `chatSessionIndexRailPresentation.ts`, explicit `toSessionIndexProgressQuerySlice`; hook exports trimmed to workbench-used fields.
+- **F4e (Wave 1-A cont.):** `useChatAgentDirectoryMaps` owns Agent maps / mention targets / turn avatars; `useChatIndexDerivedState` owns conversation-index loading and session context-menu derived flags.
 
 ## Bundle note (secondary lazy)
 
@@ -135,7 +173,7 @@ See `PERF_BASELINE.md` for F0 numbers and gaps.
 
 ## Next (planned)
 
-- Prefer chunk wins over further pure LOC grind on `ChatCodingRoute` (already hook/panel split)
+- Prefer chunk wins over further pure LOC grind on `ChatCodingRoute` (already hook/panel split; Gate 3 closed)
 - ConversationView block map is documented (M6); further pure extracts only when claimability requires it
 - Target `ChatCodingRoute` toward ~800–1500 LOC only when a concrete claim needs it
 - Agents structure M1–M3 and Teams/Evolution M4–M5 are on local main; see lane READMEs
@@ -145,7 +183,7 @@ See `PERF_BASELINE.md` for F0 numbers and gaps.
 Prefer automated substitutes over manual click smoke when validating Chat split work:
 
 ```bash
-npm --prefix web test -- --run src/routes/chat/chatHandTestSubstitute.test.ts src/routes/chat/ChatGroupCenterSurface.test.tsx src/routes/chat/cliAgentRunModel.test.ts
+npm --prefix web test -- --run src/routes/chat/chatHandTestSubstitute.test.ts src/routes/chat/ChatGroupCenterSurface.test.tsx src/routes/chat/cliAgentRunModel.test.ts src/routes/chat/chatGroupRoomActionModel.test.ts
 ```
 
 - `chatHandTestSubstitute.test.ts` — maps hand checklist to pure models, stream ownership, wiring contracts, and optional live `/api`+SSE probe when workbench is up

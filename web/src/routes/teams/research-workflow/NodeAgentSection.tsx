@@ -15,7 +15,7 @@ export function NodeAgentSection({ detail }: { detail: ResearchWorkflowNodeDetai
   });
   return (
     <section data-vui="node-agent-section">
-      <TeamSourceCollectionStageAgentsPanel lang="zh" agents={[card]} />
+      <TeamSourceCollectionStageAgentsPanel lang="zh" agents={[card]} layout="stacked" />
     </section>
   );
 }

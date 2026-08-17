@@ -219,6 +219,242 @@ def test_agent_message_tool_blocks_cross_agent_without_authorized_research_route
     assert kernel_calls == []
 
 
+def test_agent_message_tool_allows_same_active_team(monkeypatch) -> None:
+    import core.web.services.agent_directory_service as ads
+    from core.web.services import session_service, team_service
+
+    monkeypatch.setattr(ads, "current_agent_runtime", lambda: {"agentId": "agent-source", "sessionId": "session-source"})
+    monkeypatch.setattr(
+        session_service,
+        "get_session_detail",
+        lambda *args, **kwargs: {"id": "session-target", "agentId": "agent-target"},
+    )
+    monkeypatch.setattr(
+        ads,
+        "list_agents",
+        lambda include_archived=False: [
+            {"agentId": "agent-source", "agentCode": "A001", "displayName": "Source", "directSessionId": "session-source"},
+            {"agentId": "agent-target", "agentCode": "A002", "displayName": "Target", "directSessionId": "session-target"},
+        ],
+    )
+    monkeypatch.setattr(
+        ads,
+        "get_agent",
+        lambda agent_id, include_archived=False: {
+            "agentId": agent_id,
+            "agentCode": "A002" if agent_id == "agent-target" else "A001",
+            "displayName": "Target" if agent_id == "agent-target" else "Source",
+            "directSessionId": "session-target" if agent_id == "agent-target" else "session-source",
+            "metadata": {},
+        },
+    )
+    recorded: list[dict] = []
+    monkeypatch.setattr(
+        team_service,
+        "shared_active_team_for_agents",
+        lambda source_agent_id, target_agent_id: {"teamId": "team-alpha", "name": "Alpha"},
+    )
+    monkeypatch.setattr(
+        team_service,
+        "record_team_member_message",
+        lambda team_id, **kwargs: recorded.append({"teamId": team_id, **kwargs}) or {"teamId": team_id, **kwargs},
+    )
+    captured: dict = {}
+
+    def fake_submit(**kwargs):
+        captured.update(kwargs)
+        return {
+            "outcome": {
+                "deliveries": [
+                    {
+                        "targetAgentId": "agent-target",
+                        "status": "delivered",
+                        "inboxMessageId": "agentmsg-team-1",
+                        "targetSessionId": "session-target",
+                        "wake": {
+                            "wakeRequested": True,
+                            "wakeStatus": "started",
+                            "messageId": "agentmsg-team-1",
+                            "targetSessionId": "session-target",
+                            "turnId": "turn-1",
+                            "reason": "",
+                        },
+                    }
+                ]
+            },
+            "event": {"eventId": "evt-team-1", "idempotencyKey": "k-team"},
+            "task": {"taskId": "task-team-1"},
+            "execution": {"workRunId": "run-team-1"},
+            "adapter": {"adapterVersion": "1", "eventId": "evt-team-1", "idempotencyKey": "k-team"},
+            "reused": False,
+        }
+
+    monkeypatch.setattr("core.agent_kernel.adapters.submit_agent_message_event", fake_submit)
+    monkeypatch.setattr(agent_message_tools, "_try_send_research_org_message", lambda **kwargs: None)
+    monkeypatch.setattr(agent_message_tools, "_record_agent_message_tool_event", lambda *a, **k: None)
+
+    result = json.loads(
+        agent_message_tools.agent_message_tool(
+            content="full body must stay in session",
+            target_session="session-target",
+            summary="handoff note",
+        )
+    )
+    assert result["ok"] is True
+    assert result["route"] == "same_team"
+    assert result["teamId"] == "team-alpha"
+    assert result["targetSessionId"] == "session-target"
+    assert captured["metadata"]["targetSessionId"] == "session-target"
+    assert captured["wake_target"] is True
+    assert recorded and recorded[0]["teamId"] == "team-alpha"
+    assert recorded[0]["summary"] == "handoff note"
+    assert "content" not in recorded[0]
+    assert "full body must stay in session" not in json.dumps(recorded)
+
+
+def _patch_cross_agent_same_team_runtime(monkeypatch, *, agent_metadata: dict):
+    import core.web.services.agent_directory_service as ads
+    from core.web.services import session_service, team_service
+
+    monkeypatch.setattr(ads, "current_agent_runtime", lambda: {"agentId": "agent-source", "sessionId": "session-source"})
+    monkeypatch.setattr(
+        session_service,
+        "get_session_detail",
+        lambda *args, **kwargs: {"id": "session-target", "agentId": "agent-target"},
+    )
+    monkeypatch.setattr(
+        ads,
+        "list_agents",
+        lambda include_archived=False: [
+            {"agentId": "agent-source", "agentCode": "A001", "displayName": "Source", "directSessionId": "session-source"},
+            {"agentId": "agent-target", "agentCode": "A002", "displayName": "Target", "directSessionId": "session-target"},
+        ],
+    )
+    monkeypatch.setattr(
+        ads,
+        "get_agent",
+        lambda agent_id, include_archived=False: {
+            "agentId": agent_id,
+            "agentCode": "A002" if agent_id == "agent-target" else "A001",
+            "displayName": "Target" if agent_id == "agent-target" else "Source",
+            "directSessionId": "session-target" if agent_id == "agent-target" else "session-source",
+            "metadata": dict(agent_metadata),
+        },
+    )
+    recorded: list[dict] = []
+    monkeypatch.setattr(
+        team_service,
+        "shared_active_team_for_agents",
+        lambda source_agent_id, target_agent_id: {"teamId": "team-alpha", "name": "Alpha"},
+    )
+    monkeypatch.setattr(
+        team_service,
+        "record_team_member_message",
+        lambda team_id, **kwargs: recorded.append({"teamId": team_id, **kwargs}) or {"teamId": team_id, **kwargs},
+    )
+    captured: dict = {}
+
+    def fake_submit(**kwargs):
+        captured.update(kwargs)
+        return {
+            "outcome": {
+                "deliveries": [
+                    {
+                        "targetAgentId": "agent-target",
+                        "status": "delivered",
+                        "inboxMessageId": "agentmsg-team-org-1",
+                        "targetSessionId": "session-target",
+                        "wake": {
+                            "wakeRequested": False,
+                            "wakeStatus": "not_requested",
+                            "messageId": "agentmsg-team-org-1",
+                            "targetSessionId": "session-target",
+                            "turnId": "",
+                            "reason": "",
+                        },
+                    }
+                ]
+            },
+            "event": {"eventId": "evt-team-org-1", "idempotencyKey": "k-team-org"},
+            "task": {"taskId": "task-team-org-1"},
+            "execution": {"workRunId": "run-team-org-1"},
+            "adapter": {"adapterVersion": "1", "eventId": "evt-team-org-1", "idempotencyKey": "k-team-org"},
+            "reused": False,
+        }
+
+    monkeypatch.setattr("core.agent_kernel.adapters.submit_agent_message_event", fake_submit)
+    monkeypatch.setattr(agent_message_tools, "_record_agent_message_tool_event", lambda *a, **k: None)
+    return captured, recorded
+
+
+def test_plain_same_team_send_ignores_missing_research_org_intent(monkeypatch) -> None:
+    from core.web.services import research_organization_service
+
+    captured, recorded = _patch_cross_agent_same_team_runtime(
+        monkeypatch,
+        agent_metadata={"researchOrgRole": "member"},
+    )
+    monkeypatch.setattr(
+        research_organization_service,
+        "get_research_organization",
+        lambda: {"agents": [{"agentId": "agent-source"}, {"agentId": "agent-target"}]},
+    )
+    monkeypatch.setattr(
+        research_organization_service,
+        "send_research_org_message",
+        lambda payload: (_ for _ in ()).throw(AssertionError("research org send should not run")),
+    )
+
+    result = json.loads(
+        agent_message_tools.agent_message_tool(
+            content="peer handoff without org metadata",
+            target_session="session-target",
+            summary="peer note",
+            wake_target=False,
+        )
+    )
+    assert result["ok"] is True
+    assert result["route"] == "same_team"
+    assert result["teamId"] == "team-alpha"
+    assert captured["wake_target"] is False
+    assert recorded and recorded[0]["summary"] == "peer note"
+
+
+def test_research_org_typed_message_without_intent_still_blocked_on_same_team(monkeypatch) -> None:
+    from core.web.services import research_organization_service
+
+    captured, recorded = _patch_cross_agent_same_team_runtime(
+        monkeypatch,
+        agent_metadata={"researchOrgRole": "member"},
+    )
+    monkeypatch.setattr(
+        research_organization_service,
+        "get_research_organization",
+        lambda: {"agents": [{"agentId": "agent-source"}, {"agentId": "agent-target"}]},
+    )
+    org_sends: list[dict] = []
+    monkeypatch.setattr(
+        research_organization_service,
+        "send_research_org_message",
+        lambda payload: org_sends.append(payload) or payload,
+    )
+
+    result = json.loads(
+        agent_message_tools.agent_message_tool(
+            content="please review",
+            target_session="session-target",
+            summary="org task",
+            metadata_json=json.dumps({"researchOrgMessageType": "task"}),
+        )
+    )
+    assert result["ok"] is False
+    assert result["route"] == "research_org"
+    assert result["reason"] == "research_org_intent_required"
+    assert captured == {}
+    assert recorded == []
+    assert org_sends == []
+
+
 def test_write_agent_inbox_message_respects_explicit_target_session(tmp_path, monkeypatch) -> None:
     from core.web.services.agent_directory import ops_residual
 

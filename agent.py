@@ -185,619 +185,95 @@ from core.pet_system import get_pet_system
 # 进化测试提示
 EVOLUTION_TEST_PROMPT = "制定重启任务，然后对重启任务打勾，然后运行 `trigger_self_restart_tool` 重启你自己。"
 
-_INTERNAL_TOOL_PROTOCOL_MARKERS = (
-    "spawn_agent_tool",
-    "_internal_delegate",
+from core.orchestration.agent_runtime_bindings import (
+    SUBAGENT_RESULT_MARKER,
+    _ASSISTANT_GOAL_CONTEXT_KEYWORDS,
+    _CONFIRMATION_KEYWORDS,
+    _CORE_CHAT_TOOL_NAMES,
+    _NUMBERED_CONFIRMATION_RE,
+    _SAFE_LLM_ERROR_DIAGNOSTIC_DETAIL_KEYS,
+    _SESSION_CHAT_PROMPT_GOAL,
+    _STALL_SIGNAL_THRESHOLDS,
+    _TOOL_SURFACE_GROUPS,
+    _agent_api_key_diagnostic,
+    _can_reuse_initial_prompt,
+    _can_reuse_system_prompt,
+    _compact_goal_context,
+    _compact_one_line,
+    _context_compression_trigger_source,
+    _format_missing_api_key_error,
+    _format_tool_result_replacement_summary,
+    _latest_assistant_goal_context,
+    _llm_effective_route_id,
+    _llm_effective_route_identity,
+    _llm_route_trace_fields,
+    _looks_like_numbered_confirmation,
+    _message_content,
+    _message_role,
+    _normalize_goal_from_chat_history,
+    _provider_rejected_responses_continuation,
+    _record_agent_scene_event,
+    _record_agent_tool_surface_event as _record_agent_tool_surface_event_core,
+    _record_llm_route_success as _record_llm_route_success_core,
+    _reset_stall_signal_reported,
+    _runtime_agent_binding_from_env,
+    _runtime_agent_llm_bindings_from_env,
+    _runtime_mental_model_override_from_env,
+    _safe_llm_error_diagnostic_details,
+    _safe_turn_runtime_metadata,
+    _stall_signal_threshold_events,
+    _turn_runtime_from_env,
 )
-_SESSION_CHAT_PROMPT_GOAL = "处理当前会话中的用户请求"
-_TOOL_POLICY_FAILURE_RE = re.compile(
-    r"\[工具策略提示\]\s*`[^`]+`\s*不在该 Agent 的可见工具策略中。?",
+from core.orchestration.turn_carryover import (
+    deserialize_turn_messages,
+    serialize_turn_message,
+    serialize_turn_messages,
 )
-_NUMBERED_CONFIRMATION_RE = re.compile(
-    r"(?:^|[,\n;；])\s*\d+\s*[,，、.．:：]\s*([^,\n;；]+)"
+from core.orchestration.turn_compression import compress_turn_messages
+from core.orchestration.turn_diagnostics import (
+    build_llm_invocation_context,
+    publish_llm_retry_status,
+    record_turn_cache_diagnostics,
+    report_round_state_stall_signals,
 )
-_CONFIRMATION_KEYWORDS = (
-    "确认",
-    "同意",
-    "可以",
-    "允许",
-    "就用",
-    "采用",
-    "使用",
-    "要求",
-    "先不",
-    "不考虑",
+from core.orchestration.tool_authorization_binding import (
+    guard_restart_focus_tool,
+    hidden_tool_call_message,
+    is_tool_visible_to_agent,
+    materialize_authorized_tools,
+    resolve_turn_authorization,
+    restart_allowed_tool_names,
 )
-_ASSISTANT_GOAL_CONTEXT_KEYWORDS = (
-    "需求",
-    "目标",
-    "方案",
-    "确认",
-    "问题",
-    "规划",
-    "实现",
+from core.orchestration.turn_message_assembly import (
+    TurnJournalReplayError,
+    assemble_prepared_turn_messages,
+    current_turn_has_journal_conversation_layer,
+    insert_pending_volatile_context_messages,
+    ledger_conversation_fingerprint_for_messages,
+    normalize_seeded_tool_calls,
+    reconcile_chat_messages_with_ledger,
+    refresh_system_prefix_on_messages,
+    replay_current_turn_messages,
+    sanitize_seeded_chat_content,
 )
-
-
-def _normalize_goal_from_chat_history(
-    user_prompt: str,
-    goal_override: Optional[str],
-    active_turn_messages: Optional[List[Any]],
-) -> str:
-    """Keep the requirement context when the user only sends numbered confirmations."""
-
-    override = str(goal_override or "").strip()
-    if override:
-        return override
-    prompt = str(user_prompt or "").strip()
-    if not _looks_like_numbered_confirmation(prompt):
-        return prompt
-    context = _latest_assistant_goal_context(active_turn_messages)
-    if not context:
-        return prompt
-    return f"{context}\n用户确认：{_compact_one_line(prompt, 180)}"
-
-
-def _looks_like_numbered_confirmation(text: str) -> bool:
-    prompt = str(text or "").strip()
-    if not prompt or len(prompt) > 280:
-        return False
-    parts = [part.strip() for part in _NUMBERED_CONFIRMATION_RE.findall(prompt) if part.strip()]
-    if len(parts) < 2:
-        return False
-    short_answers = sum(1 for part in parts if len(part) <= 24)
-    if short_answers < max(2, len(parts) - 1):
-        return False
-    return any(keyword in prompt for keyword in _CONFIRMATION_KEYWORDS)
-
-
-def _latest_assistant_goal_context(messages: Optional[List[Any]]) -> str:
-    for message in reversed(list(messages or [])):
-        role = _message_role(message)
-        if role not in {"assistant", "ai"}:
-            continue
-        content = _message_content(message)
-        if not content:
-            continue
-        return _compact_goal_context(content)
-    return ""
-
-
-def _message_role(message: Any) -> str:
-    if isinstance(message, AIMessage):
-        return "assistant"
-    if isinstance(message, dict):
-        return str(message.get("role") or message.get("kind") or "").strip().lower()
-    return str(getattr(message, "type", "") or "").strip().lower()
-
-
-def _message_content(message: Any) -> str:
-    if isinstance(message, dict):
-        content = message.get("content", "")
-    else:
-        content = getattr(message, "content", "")
-    if isinstance(content, list):
-        parts = []
-        for item in content:
-            if isinstance(item, dict):
-                parts.append(str(item.get("text") or item.get("content") or ""))
-            else:
-                parts.append(str(item or ""))
-        return "\n".join(part for part in parts if part.strip())
-    return str(content or "").strip()
-
-
-def _compact_goal_context(text: str, limit: int = 240) -> str:
-    lines = []
-    for raw_line in str(text or "").splitlines():
-        line = raw_line.strip(" \t-•*")
-        if line:
-            lines.append(line)
-    preferred = [
-        line
-        for line in lines
-        if any(keyword in line for keyword in _ASSISTANT_GOAL_CONTEXT_KEYWORDS)
-    ]
-    source = " ".join((preferred or lines)[:4])
-    return _compact_one_line(source, limit)
-
-
-def _compact_one_line(text: str, limit: int) -> str:
-    compact = re.sub(r"\s+", " ", str(text or "")).strip()
-    if len(compact) <= limit:
-        return compact
-    return compact[: max(0, limit - 3)].rstrip() + "..."
-
-
-_SAFE_LLM_ERROR_DIAGNOSTIC_DETAIL_KEYS = (
-    "messageIndex",
-    "payloadValidationErrorType",
-    "payloadValidationResult",
-    "payloadMessageAssistantToolCallCount",
-    "payloadMessageToolResultCount",
-    "payloadMessageShapeHash",
+from core.orchestration.turn_llm_adapter import (
+    AgentLlmTurnHooks,
+    invoke_agent_llm_turn,
 )
 
 
-def _safe_llm_error_diagnostic_details(details: Any) -> Dict[str, Any]:
-    """Keep only prompt-free scalar projection diagnostics from an LLM error."""
-    if not isinstance(details, dict):
-        return {}
-    safe: Dict[str, Any] = {}
-    for key in _SAFE_LLM_ERROR_DIAGNOSTIC_DETAIL_KEYS:
-        value = details.get(key)
-        if isinstance(value, str):
-            compact = _compact_one_line(value, 160)
-            if compact:
-                safe[key] = compact
-        elif isinstance(value, (bool, int, float)):
-            safe[key] = value
-    return safe
+def _record_llm_route_success(*args, **kwargs):
+    # Removal: drop when tests stop patching agent._record_agent_scene_event.
+    if "recorder" not in kwargs:
+        kwargs["recorder"] = _record_agent_scene_event
+    return _record_llm_route_success_core(*args, **kwargs)
 
 
-def _provider_rejected_responses_continuation(
-    *,
-    category: Any,
-    message: Any,
-    details: Any,
-) -> bool:
-    diagnostic_text = " ".join(
-        [
-            str(category or ""),
-            str(message or ""),
-            str(dict(details or {}) if isinstance(details, dict) else details or ""),
-        ]
-    ).lower()
-    return "previous_response_id" in diagnostic_text and any(
-        marker in diagnostic_text
-        for marker in ("unsupported", "unknown", "invalid", "not found", "not_found")
-    )
-
-
-_TOOL_SURFACE_GROUPS: Dict[str, str] = {
-    "grep_search_tool": "locate",
-    "glob_tool": "locate",
-    "code_symbol_tool": "inspect",
-    "read_file_tool": "read",
-    "apply_patch_tool": "edit",
-    "apply_diff_edit_tool": "edit",
-    "write_file_tool": "edit",
-    "cli_tool": "execute",
-    "python_lint_tool": "verify",
-    "run_test_for_tool": "verify",
-    "web_search_tool": "web",
-    "web_fetch_tool": "web",
-    "image2_generate_tool": "media",
-    "conversation_log_inspect_tool": "diagnostics",
-    "get_core_context_tool": "memory",
-    "get_current_goal_tool": "memory",
-    "search_memory_tool": "memory",
-    "search_error_archive_tool": "memory",
-    "record_learning_tool": "memory",
-    "compress_context_tool": "memory",
-}
-_CORE_CHAT_TOOL_NAMES = {
-    "grep_search_tool",
-    "code_symbol_tool",
-    "read_file_tool",
-    "cli_tool",
-    "python_lint_tool",
-    "run_test_for_tool",
-    "search_memory_tool",
-    "record_learning_tool",
-}
-
-
-def _agent_api_key_diagnostic(config: AppConfig) -> Dict[str, Any]:
-    primary = config.llm.get_profile(role="primary")
-    provider = config.llm.get_provider(primary.provider_id)
-    model_id, model_entry = config.llm.get_model_library_entry_for_profile(primary)
-    if not isinstance(model_entry, dict):
-        profile_model = str(getattr(primary, "model", "") or "").strip()
-        profile_key_env = str(getattr(primary, "api_key_env", "") or "").strip()
-        for candidate_id, item in (getattr(config.llm, "model_library", {}) or {}).items():
-            if not isinstance(item, dict):
-                continue
-            item_model = str(item.get("model") or "").strip()
-            item_key_env = str(item.get("api_key_env") or "").strip()
-            if item_model == profile_model and (not profile_key_env or item_key_env == profile_key_env):
-                model_id = str(candidate_id or "").strip()
-                model_entry = item
-                break
-    model_key_env = str(getattr(primary, "api_key_env", "") or "").strip()
-    if isinstance(model_entry, dict):
-        model_key_env = model_key_env or str(model_entry.get("api_key_env") or "").strip()
-    provider_key_env = str(provider.api_key_env or "").strip()
-    try:
-        api_key_source = config.get_api_key_source_label()
-    except Exception:
-        api_key_source = "unknown"
-    return {
-        "profileId": primary.profile_id,
-        "model": primary.model,
-        "modelId": str(model_id or "").strip(),
-        "providerId": provider.provider_id,
-        "providerKind": provider.kind,
-        "requiresApiKey": bool(provider.requires_api_key),
-        "apiKeySource": api_key_source,
-        "modelApiKeyEnv": model_key_env,
-        "providerApiKeyEnv": provider_key_env,
-    }
-
-
-def _format_missing_api_key_error(diagnostic: Dict[str, Any]) -> str:
-    model_env = str(diagnostic.get("modelApiKeyEnv") or "").strip()
-    provider_env = str(diagnostic.get("providerApiKeyEnv") or "").strip()
-    candidates = [item for item in (model_env, provider_env) if item]
-    candidate_text = "、".join(candidates) if candidates else "当前 provider 对应的环境变量"
-    model_id = str(diagnostic.get("modelId") or "").strip() or "未匹配到模型库 ID"
-    return (
-        "未设置 API Key。\n"
-        f"当前会话模型: {diagnostic.get('model') or 'unknown'} "
-        f"(modelId={model_id}, provider={diagnostic.get('providerId') or 'unknown'}, "
-        f"profile={diagnostic.get('profileId') or 'primary'})。\n"
-        f"请设置环境变量 {candidate_text}，或在当前模型/provider 配置中写入 api_key。"
-    )
-
-
-def _record_agent_scene_event(
-    phase: str,
-    event_code: str,
-    *,
-    message: str,
-    fields: Dict[str, Any] | None = None,
-    level: str = "info",
-    outcome: str = "observed",
-) -> None:
-    try:
-        from core.web.services.runtime_scene_service import record_runtime_scene_event
-
-        record_runtime_scene_event(
-            "agent",
-            phase,
-            event_code,
-            message=message,
-            level=level,
-            outcome=outcome,
-            fields=fields or {},
-        )
-    except Exception as exc:
-        _debug_logger.warning(f"Failed to record agent scene event ({phase}/{event_code}): {exc}")
-
-
-def _can_reuse_system_prompt(
-    *,
-    has_cached_prompt: bool,
-    prompt_built_with_runtime_key: str,
-    current_runtime_state_memory_key: str,
-) -> bool:
-    """Reuse the built system prompt while runtime state-memory key is unchanged.
-
-    Git is tool-driven and is not part of this decision. Prompt rebuild is only
-    needed when runtime state memory actually changes (typically after tools).
-    """
-    return bool(
-        has_cached_prompt
-        and prompt_built_with_runtime_key == current_runtime_state_memory_key
-    )
-
-
-_STALL_SIGNAL_THRESHOLDS = {
-    "no_new_evidence_steps": 3,
-    "consecutive_tool_only_steps": 3,
-    "consecutive_bookkeeping_tool_only_steps": 3,
-    "delegation_failures": 3,
-}
-
-
-def _stall_signal_threshold_events(telemetry, reported) -> list:
-    """返回本次跨越阈值（且未报告过）的卡住信号名列表。
-
-    - reported: {key: True} 已报告集合；值归零后（重置）清除已报告标记，
-      下次再跨越阈值会再次报告。
-    """
-    events = []
-    telemetry = dict(telemetry or {})
-    reported = dict(reported or {})
-    for key, threshold in _STALL_SIGNAL_THRESHOLDS.items():
-        value = int(telemetry.get(key) or 0)
-        if value >= threshold and not bool(reported.get(key)):
-            events.append(key)
-    return events
-
-
-def _reset_stall_signal_reported(telemetry, reported) -> dict:
-    """清除已归零信号的已报告标记（与 _stall_signal_threshold_events 配合）。"""
-    telemetry = dict(telemetry or {})
-    reported = dict(reported or {})
-    for key in list(reported):
-        if int(telemetry.get(key) or 0) == 0:
-            reported.pop(key, None)
-    return reported
-
-
-def _can_reuse_initial_prompt(
-    *,
-    pending: bool = True,
-    initial_runtime_state_memory_key: str = "",
-    current_runtime_state_memory_key: str = "",
-    # Legacy kwargs kept for call-site compatibility.
-    initial_git_state: Any = None,
-    current_git_state: Any = None,
-    has_cached_prompt: bool = True,
-    prompt_built_with_runtime_key: str = "",
-) -> bool:
-    del initial_git_state, current_git_state
-    # Prefer the modern signature when callers pass explicit build-key fields.
-    if prompt_built_with_runtime_key or not pending:
-        return _can_reuse_system_prompt(
-            has_cached_prompt=has_cached_prompt if prompt_built_with_runtime_key else bool(pending),
-            prompt_built_with_runtime_key=(
-                prompt_built_with_runtime_key or initial_runtime_state_memory_key
-            ),
-            current_runtime_state_memory_key=current_runtime_state_memory_key,
-        )
-    return bool(
-        pending
-        and has_cached_prompt
-        and current_runtime_state_memory_key == initial_runtime_state_memory_key
-    )
-
-
-def _llm_effective_route_identity(client: Any) -> tuple[str, ...]:
-    identity_builder = getattr(client, "effective_route_identity", None)
-    if callable(identity_builder):
-        try:
-            identity = identity_builder()
-            if isinstance(identity, (list, tuple)):
-                return tuple(str(part or "").strip() for part in identity)
-            if identity not in (None, ""):
-                return (str(identity).strip(),)
-        except Exception:
-            pass
-    profile = getattr(client, "profile", None)
-    provider = getattr(client, "provider", None)
-    route = getattr(client, "protocol_route", None)
-    wire_protocol = str(
-        getattr(getattr(route, "wire_protocol", None), "value", "")
-        or getattr(route, "protocol", "")
-        or ""
-    ).strip()
-    return (
-        str(getattr(profile, "provider_id", "") or "").strip(),
-        str(getattr(provider, "kind", "") or "").strip(),
-        str(getattr(provider, "base_url", "") or "").strip().rstrip("/").lower(),
-        str(getattr(client, "profile_id", "") or "").strip(),
-        str(getattr(profile, "model", "") or "").strip(),
-        wire_protocol,
-        str(getattr(route, "adapter_id", "") or "").strip(),
-    )
-
-
-def _llm_effective_route_id(client: Any) -> str:
-    route_id_builder = getattr(client, "effective_route_id", None)
-    if callable(route_id_builder):
-        try:
-            route_id = str(route_id_builder() or "").strip()
-            if route_id:
-                return route_id
-        except Exception:
-            pass
-    material = "\x1f".join(_llm_effective_route_identity(client)).encode("utf-8")
-    return hashlib.sha256(material).hexdigest()[:16]
-
-
-def _llm_route_trace_fields(
-    invocation_context: LLMInvocationContext,
-    client: Any,
-    *,
-    route_attempt: int,
-    route_id: str,
-) -> Dict[str, Any]:
-    """Build bounded correlation fields shared by route lifecycle events."""
-    metadata = invocation_context.to_metadata(client=client)
-    route = getattr(client, "protocol_route", None)
-    profile = getattr(client, "profile", None)
-    provider = getattr(client, "provider", None)
-    return {
-        "sessionId": str(metadata.get("sessionId") or "").strip(),
-        "turnId": str(metadata.get("turnId") or metadata.get("llmRunId") or "").strip(),
-        "runId": str(metadata.get("llmRunId") or "").strip(),
-        "agentId": str(metadata.get("agentId") or "").strip(),
-        "invocationId": str(metadata.get("invocationId") or "").strip(),
-        "routeAttempt": max(1, int(route_attempt)),
-        "routeId": str(route_id or "").strip(),
-        "profileId": str(getattr(client, "profile_id", "") or "").strip(),
-        "provider": str(getattr(provider, "kind", "") or "").strip(),
-        "model": str(getattr(profile, "model", "") or "").strip(),
-        "protocol": str(
-            getattr(getattr(route, "wire_protocol", None), "value", "")
-            or getattr(route, "protocol", "")
-            or ""
-        ).strip(),
-    }
-
-
-def _record_llm_route_success(
-    *,
-    trace_fields: Dict[str, Any],
-    duration_ms: int,
-    streamed: bool,
-) -> None:
-    """Close one successful provider route without claiming the whole turn ended."""
-    _record_agent_scene_event(
-        "llm_route",
-        "llm_route_attempt_succeeded",
-        message="LLM effective route attempt succeeded.",
-        fields={
-            **dict(trace_fields or {}),
-            "durationMs": max(0, int(duration_ms or 0)),
-            "streamed": bool(streamed),
-        },
-        outcome="succeeded",
-    )
-
-
-def _record_agent_tool_surface_event(tool_names: List[str]) -> None:
-    names = [str(name or "").strip() for name in tool_names if str(name or "").strip()]
-    group_counts: Dict[str, int] = {}
-    for name in names:
-        group = _TOOL_SURFACE_GROUPS.get(name, "other")
-        group_counts[group] = group_counts.get(group, 0) + 1
-    _record_agent_scene_event(
-        "tool_surface",
-        "agent.tool_surface.visible",
-        message="Agent visible tool surface prepared.",
-        fields={
-            "toolCount": len(names),
-            "groups": group_counts,
-            "coreChatToolsPresent": sorted(name for name in _CORE_CHAT_TOOL_NAMES if name in set(names)),
-            "restrictedSpecialToolsPresent": sorted(
-                name
-                for name in names
-                if name.startswith("knowledge_")
-                or name.startswith("research_")
-                or name in {"computer_use_task_tool"}
-            ),
-        },
-    )
-
-
-def _context_compression_trigger_source(reason: str) -> str:
-    normalized = str(reason or "").strip().lower()
-    if not normalized:
-        return "auto"
-    if normalized.startswith("level:"):
-        return "auto"
-    if "context limit" in normalized or "context_length" in normalized or "超出最大上下文" in normalized:
-        return "provider_limit"
-    return "manual"
-
-
-def _format_tool_result_replacement_summary(state: Dict[str, Any]) -> str:
-    replacements = list((state or {}).get("replacements") or [])
-    if not replacements:
-        return ""
-    lines = ["工具结果压缩引用:"]
-    for item in replacements[:8]:
-        reference = str(item.get("reference") or "").strip()
-        tool_call_id = str(item.get("toolCallId") or "").strip()
-        tool_name = str(item.get("toolName") or "").strip() or "unknown"
-        original_chars = int(item.get("originalChars") or 0)
-        digest = str(item.get("sha256") or "").strip()[:16]
-        lines.append(
-            f"- {tool_name} tool_call_id={tool_call_id} reference={reference} chars={original_chars} sha256={digest}"
-        )
-    if len(replacements) > 8:
-        lines.append(f"- 其余 {len(replacements) - 8} 个工具结果也已按同一规则替换。")
-    lines.append("说明: 这些替换只发生在上下文压缩输入中，原始工具结果仍以会话历史或 turn journal 为事实源。")
-    return "\n".join(lines)
-
-
-SUBAGENT_RESULT_MARKER = "__VIBELUTION_SUBAGENT_RESULT__"
-
-
-def _runtime_agent_binding_from_env(
-    explicit_binding: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    key_map = {
-        "agentId": "VIBELUTION_AGENT_ID",
-        "profileId": "VIBELUTION_AGENT_PROFILE_ID",
-        "llmSlot": "VIBELUTION_AGENT_LLM_SLOT",
-        "directSessionId": "VIBELUTION_AGENT_DIRECT_SESSION_ID",
-        "workspacePath": "VIBELUTION_AGENT_WORKSPACE_PATH",
-        "supervisedRole": "VIBELUTION_SUPERVISED_ROLE",
-    }
-    if explicit_binding is not None:
-        runtime = {
-            target_key: value
-            for target_key in key_map
-            if (value := str(explicit_binding.get(target_key) or "").strip())
-        }
-        llm_bindings = normalize_agent_llm_bindings(explicit_binding.get("llmBindings"))
-        if llm_bindings:
-            runtime["llmBindings"] = llm_bindings
-        return runtime
-    runtime: Dict[str, Any] = {
-        target_key: value
-        for target_key, env_key in key_map.items()
-        if (value := str(os.environ.get(env_key) or "").strip())
-    }
-    llm_bindings = _runtime_agent_llm_bindings_from_env(str(runtime.get("llmSlot") or "dialogue"))
-    if llm_bindings:
-        runtime["llmBindings"] = llm_bindings
-    return runtime
-
-
-def _runtime_agent_llm_bindings_from_env(default_slot: str) -> Dict[str, Dict[str, str]]:
-    bindings: Dict[str, Dict[str, str]] = {}
-    raw_bindings = str(os.environ.get("VIBELUTION_AGENT_LLM_BINDINGS_JSON") or "").strip()
-    if raw_bindings:
-        try:
-            payload = json.loads(raw_bindings)
-        except json.JSONDecodeError as exc:
-            raise AgentLlmResolutionError("Runtime Agent LLM bindings env is not valid JSON.") from exc
-        bindings = normalize_agent_llm_bindings(payload)
-        if not bindings:
-            raise AgentLlmResolutionError("Runtime Agent LLM bindings env did not contain any safe modelId.")
-    model_id = str(os.environ.get("VIBELUTION_AGENT_LLM_MODEL_ID") or "").strip()
-    if model_id:
-        slot = str(default_slot or "dialogue").strip() or "dialogue"
-        current_model_id = str((bindings.get(slot) or {}).get("modelId") or "").strip()
-        if current_model_id and current_model_id != model_id:
-            raise AgentLlmResolutionError(
-                f"Runtime Agent LLM model id conflicts with bindings JSON for slot {slot}."
-            )
-        bindings[slot] = {"modelId": model_id}
-    return bindings
-
-
-def _turn_runtime_from_env() -> Dict[str, str]:
-    key_map = {
-        "mode": "VIBELUTION_TURN_MODE",
-        "runKind": "VIBELUTION_TURN_RUN_KIND",
-        "runId": "VIBELUTION_TURN_RUN_ID",
-        "sessionId": "VIBELUTION_TURN_SESSION_ID",
-        "agentId": "VIBELUTION_TURN_AGENT_ID",
-        "llmSlot": "VIBELUTION_TURN_LLM_SLOT",
-        "modelId": "VIBELUTION_TURN_MODEL_ID",
-        "cacheScope": "VIBELUTION_TURN_CACHE_SCOPE",
-        "promptCachePartition": "VIBELUTION_TURN_PROMPT_CACHE_PARTITION",
-    }
-    return {
-        target_key: value
-        for target_key, env_key in key_map.items()
-        if (value := str(os.environ.get(env_key) or "").strip())
-    }
-
-
-def _safe_turn_runtime_metadata(runtime: Dict[str, str]) -> Dict[str, Any]:
-    if not runtime:
-        return {}
-    metadata: Dict[str, Any] = {
-        key: value
-        for key in ("mode", "runKind", "runId", "sessionId", "agentId", "llmSlot", "modelId", "cacheScope")
-        if (value := str(runtime.get(key) or "").strip())
-    }
-    partition = str(runtime.get("promptCachePartition") or "").strip()
-    if partition:
-        metadata["promptCachePartitionHash"] = hashlib.sha256(partition.encode("utf-8", errors="ignore")).hexdigest()[:12]
-        metadata["promptCachePartitionChars"] = len(partition)
-    return metadata
-
-
-def _runtime_mental_model_override_from_env() -> Optional[bool]:
-    raw = str(os.environ.get("VIBELUTION_SUPERVISED_MENTAL_MODEL_ENABLED") or "").strip().lower()
-    if raw in {"1", "true", "yes", "on", "enabled"}:
-        return True
-    if raw in {"0", "false", "no", "off", "disabled"}:
-        return False
-    mode = str(os.environ.get("VIBELUTION_SUPERVISED_MENTAL_MODEL_MODE") or "").strip().lower()
-    if mode == "enabled":
-        return True
-    if mode == "disabled":
-        return False
-    return None
+def _record_agent_tool_surface_event(*args, **kwargs):
+    # Removal: drop when tests stop patching agent._record_agent_scene_event.
+    if "recorder" not in kwargs:
+        kwargs["recorder"] = _record_agent_scene_event
+    return _record_agent_tool_surface_event_core(*args, **kwargs)
 
 
 class TurnStopRequested(Exception):
@@ -975,6 +451,7 @@ class SelfEvolvingAgent:
         self._runtime_context_seeded_by_host: bool = False
         self._core_prompt_snapshot_seeded_by_host: bool = False
         self._chat_provider_replay_state = None
+        self._ledger_conversation_fingerprint: str = ""
         self._single_turn_mode_active: bool = False
         self._last_turn_metadata: Dict[str, Any] = {}
         self._turn_interrupt_checker = None
@@ -1443,97 +920,29 @@ class SelfEvolvingAgent:
         self._bound_llm_cache = {"default": self.llm_with_tools}
 
     def _resolve_tool_authorization(self, registered_tools: List[Any]) -> Any:
+        # Removal: keep while tests construct SelfEvolvingAgent and patch this method.
         del registered_tools
-        started = time.perf_counter()
-        runtime: Dict[str, Any] = {}
-        try:
-            from core.authorization.tool_authorization_service import (
-                install_execution_authorization,
-                resolve_enforced_authorization,
-            )
-            from core.logging.tool_authorization_events import record_authorization_decision
-            from core.web.services.agent_directory_service import current_agent_runtime
-
-            runtime = dict(current_agent_runtime() or {})
-            turn_runtime = _turn_runtime_from_env()
-            binding = dict(getattr(self, "runtime_agent_binding", {}) or {})
-            agent_id = str(
-                runtime.get("agentId")
-                or turn_runtime.get("agentId")
-                or binding.get("agentId")
-                or ""
-            ).strip()
-            if not str(runtime.get("agentId") or "").strip():
-                runtime["agentId"] = agent_id
-            if not str(runtime.get("turnId") or "").strip():
-                runtime["turnId"] = str(
-                    turn_runtime.get("runId")
-                    or binding.get("directSessionId")
-                    or (f"agent-bootstrap:{agent_id}" if agent_id else "")
-                ).strip()
-            runtime.setdefault("runId", str(turn_runtime.get("runId") or "").strip())
-            runtime.setdefault("mode", str(turn_runtime.get("mode") or "").strip())
-            report = resolve_enforced_authorization(
-                runtime=runtime,
-            )
-            install_execution_authorization(report)
-            record_authorization_decision(report)
-            return report
-        except Exception as exc:
-            try:
-                from core.authorization.tool_authorization_service import clear_execution_authorization
-                from core.logging.tool_authorization_events import record_authorization_failure
-
-                clear_execution_authorization()
-                record_authorization_failure(
-                    runtime=runtime,
-                    error=exc,
-                    duration_ms=max(0, int((time.perf_counter() - started) * 1000)),
-                )
-            except Exception:
-                pass
-            return None
+        return resolve_turn_authorization(
+            runtime_agent_binding=getattr(self, "runtime_agent_binding", {}) or {},
+            turn_runtime_fn=_turn_runtime_from_env,
+        )
 
     @staticmethod
     def _materialize_authorized_tools(registered_tools: List[Any], authorization_report: Any) -> List[Any]:
-        decision = getattr(authorization_report, "decision", None)
-        visible_names = {
-            str(name or "").strip()
-            for name in getattr(decision, "visible_tools", ()) or ()
-            if str(name or "").strip()
-        }
-        if not visible_names:
-            return []
-        return [
-            tool
-            for tool in registered_tools or []
-            if str(getattr(tool, "name", "") or "").strip() in visible_names
-        ]
+        # Removal: keep while tests call SelfEvolvingAgent._materialize_authorized_tools.
+        return materialize_authorized_tools(registered_tools, authorization_report)
 
     def _is_tool_visible_to_current_agent(self, tool_name: str) -> bool:
-        name = str(tool_name or "").strip()
-        return bool(name and name in getattr(self, "key_tool_maps", set()))
+        # Removal: keep while tests patch this method on the agent instance.
+        return is_tool_visible_to_agent(tool_name, getattr(self, "key_tool_maps", set()))
 
     def _hidden_tool_call_message(self, tool_name: str) -> str:
-        name = str(tool_name or "").strip() or "[unknown_tool]"
-        return (
-            f"[工具可见性提示] `{name}` 未暴露给当前 Agent。"
-            "请只使用当前工具 schema 或工具索引中列出的工具；"
-            "如果确实需要该能力，请让用户或能力管家调整该 Agent 的 ToolPolicy。"
-        )
+        # Removal: keep while tests patch this method on the agent instance.
+        return hidden_tool_call_message(tool_name)
 
     @staticmethod
     def _restart_allowed_tool_names() -> tuple[str, ...]:
-        return (
-            "task_create_tool",
-            "task_update_tool",
-            "task_list_tool",
-            "get_current_goal_tool",
-            "get_core_context_tool",
-            "get_memory_summary_tool",
-            "trigger_self_restart_tool",
-            "close_evolution_transaction_tool",
-        )
+        return restart_allowed_tool_names()
 
     def _get_llm_for_current_mode(
         self,
@@ -1845,288 +1254,35 @@ class SelfEvolvingAgent:
 
     def _compress_messages(self, messages: list, iteration: int, reason: str = ""):
         """执行消息压缩。返回 (messages, should_break)。"""
-        ui = get_ui()
-        self._last_context_compression_applied = False
-        current_tokens = estimate_messages_tokens(messages)
-        budget = max(1, int(self._effective_max_token_limit))
-        threshold_tokens = self._automatic_context_compression_threshold_tokens()
-        runtime_binding = getattr(self, "runtime_agent_binding", {}) or {}
-        turn_runtime = _turn_runtime_from_env()
-        session_id = str(
-            turn_runtime.get("sessionId")
-            or runtime_binding.get("directSessionId")
-            or ""
-        ).strip()
-        turn_id = str(turn_runtime.get("runId") or "").strip()
-
-        def record_preflight(*, eligible: bool, guard_reason: str = "") -> None:
-            _record_agent_scene_event(
-                "runtime",
-                "agent.context_compression.preflight",
-                message="Agent context compression preflight evaluated.",
-                outcome="eligible" if eligible else "skipped",
-                fields={
-                    "agentId": str(runtime_binding.get("agentId") or "").strip(),
-                    "sessionId": session_id,
-                    "turnId": turn_id,
-                    "iteration": iteration,
-                    "estimatedTokens": current_tokens,
-                    "effectiveLimit": budget,
-                    "thresholdTokens": threshold_tokens,
-                    "messageCount": len(messages),
-                    "eligible": eligible,
-                    "guardReason": guard_reason,
-                },
-            )
-
-        # Guard: 压缩未启用
-        if self.token_compressor is None or not resolve_feature_decision(
-            "context_compression",
+        (
+            compressed,
+            should_break,
+            applied,
+            self._compression_count_this_turn,
+            self._last_compression_iteration,
+        ) = compress_turn_messages(
+            messages=messages,
+            iteration=iteration,
+            reason=reason,
+            token_compressor=self.token_compressor,
             config=self.config,
-        ).effective_enabled:
-            record_preflight(eligible=False, guard_reason="disabled")
-            return messages, False
-
-        # Guard: 速率限制
-        if self._last_compression_iteration > 0:
-            if iteration - self._last_compression_iteration < self._compression_min_iteration_gap:
-                record_preflight(eligible=False, guard_reason="iteration_gap")
-                return messages, False
-
-        # Guard: 超过最大压缩次数
-        max_comp = getattr(self.config.context_compression, "max_compressions_per_session", 3)
-        if self._compression_count_this_turn >= max_comp:
-            record_preflight(eligible=False, guard_reason="max_compressions")
-            return messages, False
-
-        record_preflight(eligible=True)
-
-        # 确定压缩级别
-        strategy = getattr(self, "_compression_strategy", None) or get_compression_strategy()
-        level = strategy.determine_level_with_iteration(
-            current_tokens, budget, iteration, self._compression_count_this_turn
+            effective_max_token_limit=self._effective_max_token_limit,
+            threshold_tokens=self._automatic_context_compression_threshold_tokens(),
+            runtime_agent_binding=getattr(self, "runtime_agent_binding", {}) or {},
+            project_root=str(getattr(self, "project_root", "") or ""),
+            mode=self._get_mode_policy().mode,
+            last_compression_iteration=self._last_compression_iteration,
+            compression_min_iteration_gap=self._compression_min_iteration_gap,
+            compression_count_this_turn=self._compression_count_this_turn,
+            compression_strategy=getattr(self, "_compression_strategy", None),
+            prompt_manager=getattr(self, "prompt_manager", None),
+            turn_runtime_fn=_turn_runtime_from_env,
+            estimate_tokens_fn=estimate_messages_tokens,
+            get_ui_fn=get_ui,
+            get_state_manager_fn=get_state_manager,
+            scene_recorder_fn=_record_agent_scene_event,
         )
-
-        # 获取级别配置
-        comp_config = strategy.get_config(level, current_tokens, budget)
-
-        # 执行压缩
-        combined_reason = reason or f"Level: {level.value}"
-        use_llm = level in (CompressionLevel.DEEP, CompressionLevel.EMERGENCY)
-        messages_for_compression = messages
-        tool_result_replacement_state: Dict[str, Any] = {"replacements": []}
-        try:
-            from core.chat.tool_result_replacement import replace_large_tool_results_for_compression
-
-            runtime_binding = getattr(self, "runtime_agent_binding", {}) or {}
-            session_id = str(runtime_binding.get("directSessionId") or "").strip()
-            replacement_limit = max(4_000, int(comp_config.summary_max_chars or 1_000) * 4)
-            messages_for_compression, tool_result_replacement_state = replace_large_tool_results_for_compression(
-                messages,
-                char_limit=replacement_limit,
-                session_id=session_id,
-            )
-        except Exception:
-            messages_for_compression = messages
-            tool_result_replacement_state = {"replacements": []}
-        ai_message_count = sum(
-            1
-            for message in messages_for_compression
-            if isinstance(message, AIMessage) or getattr(message, "type", "") == "ai"
-        )
-        keep_ai_messages = min(
-            max(0, int(comp_config.keep_ai_messages or 0)),
-            max(0, ai_message_count - 1),
-        )
-        compressed, summary = self.token_compressor.compress(
-            messages_for_compression,
-            max_chars=comp_config.summary_max_chars,
-            reason=combined_reason,
-            keep_count=keep_ai_messages,
-            preserve_errors=comp_config.preserve_errors,
-            use_llm_summary=use_llm,
-        )
-        replacement_summary = _format_tool_result_replacement_summary(tool_result_replacement_state)
-        if replacement_summary:
-            summary = f"{summary}\n\n{replacement_summary}".strip() if summary else replacement_summary
-
-        # 日志
-        after_tokens = estimate_messages_tokens(compressed)
-        token_saved = current_tokens - after_tokens
-        self._last_context_compression_applied = token_saved > 0
-        if not summary and token_saved <= 0:
-            _record_agent_scene_event(
-                "runtime",
-                "agent.context_compression.skipped",
-                message="Context compression had no safely compressible history.",
-                outcome="skipped",
-                fields={
-                    "agentId": str(runtime_binding.get("agentId") or "").strip(),
-                    "sessionId": session_id,
-                    "turnId": turn_id,
-                    "iteration": iteration,
-                    "estimatedTokens": current_tokens,
-                    "effectiveLimit": budget,
-                    "thresholdTokens": threshold_tokens,
-                    "messageCount": len(messages),
-                    "guardReason": "no_compressible_history",
-                },
-            )
-        try:
-            effectiveness_threshold = float(
-                getattr(self.config.context_compression, "effectiveness_threshold", 0.0) or 0.0
-            )
-        except Exception:
-            effectiveness_threshold = 0.0
-        effectiveness_ratio = (max(0, token_saved) / current_tokens) if current_tokens > 0 else 0.0
-        compression_effective = bool(token_saved > 0 and (effectiveness_threshold <= 0 or effectiveness_ratio >= effectiveness_threshold))
-        ui.add_log(
-            f"[压缩] {level.value.upper()} | {token_saved:+d} tokens "
-            f"({current_tokens} -> {after_tokens}) | {combined_reason[:60]}",
-            "INFO",
-        )
-        if not compression_effective:
-            ui.add_log(
-                f"[压缩] 收益不足 | saved={effectiveness_ratio:.1%} "
-                f"threshold={effectiveness_threshold:.1%}",
-                "WARN",
-            )
-
-        # 写入 COMPRESS_SUMMARY.md
-        summary_written = False
-        ledger_checkpoint_written = False
-        if summary:
-            runtime_binding = getattr(self, "runtime_agent_binding", {}) or {}
-            turn_runtime = _turn_runtime_from_env()
-            session_id = str(turn_runtime.get("sessionId") or runtime_binding.get("directSessionId") or "").strip()
-            turn_id = str(turn_runtime.get("runId") or "").strip()
-            try:
-                from core.web.services import agent_directory_service
-
-                current_runtime = agent_directory_service.current_agent_runtime()
-                session_id = str(session_id or current_runtime.get("sessionId") or "").strip()
-                turn_id = str(turn_id or current_runtime.get("turnId") or "").strip()
-            except Exception:
-                pass
-            if session_id and self._get_mode_policy().mode == AgentMode.CHAT:
-                try:
-                    from core.chat.conversation_ledger import (
-                        append_context_compression_attempt,
-                        append_context_compression_checkpoint,
-                    )
-
-                    if compression_effective:
-                        event = append_context_compression_checkpoint(
-                            Path(self.project_root),
-                            session_id,
-                            turn_id=turn_id or "context-compression",
-                            current_turn_id=turn_id,
-                            summary=summary,
-                            level=level.value,
-                            reason=combined_reason,
-                            before_tokens=current_tokens,
-                            after_tokens=after_tokens,
-                            iteration=iteration,
-                            trigger_source=_context_compression_trigger_source(combined_reason),
-                            effectiveness_threshold=effectiveness_threshold,
-                            effectiveness_ratio=effectiveness_ratio,
-                            effective=True,
-                            source_message_count=len(messages),
-                            tool_result_replacement_state=tool_result_replacement_state,
-                        )
-                    else:
-                        event = append_context_compression_attempt(
-                            Path(self.project_root),
-                            session_id,
-                            turn_id=turn_id or "context-compression-attempt",
-                            status="skipped_low_savings",
-                            summary=summary,
-                            level=level.value,
-                            reason=combined_reason,
-                            before_tokens=current_tokens,
-                            after_tokens=after_tokens,
-                            trigger_source=_context_compression_trigger_source(combined_reason),
-                            effectiveness_threshold=effectiveness_threshold,
-                            effectiveness_ratio=effectiveness_ratio,
-                        )
-                    ledger_checkpoint_written = event is not None
-                    summary_written = ledger_checkpoint_written
-                except Exception as exc:
-                    _record_agent_scene_event(
-                        "runtime",
-                        "agent.context_compression_checkpoint_failed",
-                        message="Failed to append context compression checkpoint to conversation ledger.",
-                        level="warning",
-                        fields={
-                            "sessionId": session_id,
-                            "turnId": turn_id,
-                            "errorType": type(exc).__name__,
-                        },
-                    )
-                    try:
-                        from core.chat.conversation_ledger import append_context_compression_attempt
-
-                        event = append_context_compression_attempt(
-                            Path(self.project_root),
-                            session_id,
-                            turn_id=turn_id or "context-compression-attempt",
-                            status="failed_preserved",
-                            summary="",
-                            level=level.value,
-                            reason=combined_reason,
-                            before_tokens=current_tokens,
-                            after_tokens=current_tokens,
-                            trigger_source=_context_compression_trigger_source(combined_reason),
-                            effectiveness_threshold=effectiveness_threshold,
-                            effectiveness_ratio=effectiveness_ratio,
-                            error_type=type(exc).__name__,
-                        )
-                        ledger_checkpoint_written = event is not None
-                        summary_written = ledger_checkpoint_written
-                    except Exception:
-                        pass
-            try:
-                if not ledger_checkpoint_written:
-                    self.prompt_manager.update_state_memory(
-                        f"[上下文检查点 | iter={iteration} | {level.value}]\n{summary}"
-                    )
-                    summary_written = True
-            except Exception:
-                pass
-
-        try:
-            ui.note_context_compression_event(
-                level=level.value,
-                reason=combined_reason,
-                before_tokens=current_tokens,
-                after_tokens=after_tokens,
-                saved_tokens=token_saved,
-                iteration=iteration,
-                summary_written=summary_written,
-                trigger_source=_context_compression_trigger_source(combined_reason),
-            )
-        except Exception:
-            pass
-
-        # 更新状态
-        try:
-            get_state_manager().set_state(AgentState.COMPRESSING,
-                action=f"压缩 {level.value} (iter={iteration})")
-        except Exception:
-            pass
-
-        self._compression_count_this_turn += 1
-        self._last_compression_iteration = iteration
-
-        # 提前结束判断
-        should_break = False
-        if level == CompressionLevel.EMERGENCY and self._get_mode_policy().mode != AgentMode.CHAT:
-            should_break = True
-            ui.add_log("紧急压缩触发，提前结束当前轮次", "WARN")
-        elif iteration > 30:
-            should_break = True
-            ui.add_log(f"迭代次数过多 ({iteration})，提前结束当前轮次", "WARN")
-
+        self._last_context_compression_applied = applied
         return compressed, should_break
 
     @staticmethod
@@ -2179,7 +1335,39 @@ class SelfEvolvingAgent:
         # ``previous_response_id`` is valid only for tool continuations inside
         # one turn; carrying it across this boundary can replay stale tools.
         self._chat_provider_replay_state = None
-        canonical_messages = normalize_model_messages(list(messages or []))
+        from core.chat.conversation_invariant import (
+            ConversationSeedInvariantError,
+            check_conversation_payload_invariant,
+        )
+        from core.chat.model_messages import ProviderMessageChain
+
+        seeded_input: list[Any] = []
+        for item in list(messages or []):
+            if not isinstance(item, dict):
+                continue
+            message = dict(item)
+            if "toolCalls" in message:
+                message["tool_calls"] = self._normalize_seeded_tool_calls(message.pop("toolCalls"))
+            seeded_input.append(message)
+        provider_chain = ProviderMessageChain.from_messages(seeded_input)
+        if provider_chain.repaired:
+            raise ConversationSeedInvariantError(
+                error_type="silent_provider_tool_chain_repair",
+                message=(
+                    "Silent provider tool-chain repair is not allowed while seeding chat history. "
+                    "Build history from ConversationLedger ModelProjection first."
+                ),
+                details={"providerChainRepaired": True},
+            )
+        seeded_messages = provider_chain.to_provider_payload()
+        invariant = check_conversation_payload_invariant(seeded_messages)
+        if not invariant.ok:
+            raise ConversationSeedInvariantError(
+                error_type=str(invariant.error_type or "conversation_seed_invariant_failed"),
+                message=str(invariant.message or "Seeded chat history failed conversation invariant."),
+                details=dict(invariant.details or {}),
+            )
+        canonical_messages = seeded_messages
         if self.is_mental_model_enabled_for_turn():
             mental_seed = getattr(getattr(self, "mental_model", None), "seed_conversation_context", None)
             if callable(mental_seed):
@@ -2224,53 +1412,169 @@ class SelfEvolvingAgent:
         self._active_turn_messages = restored
         self._active_turn_goal = "__chat_session__"
 
+    def _chat_ledger_identity(self) -> Optional[tuple[Path, str, str]]:
+        runtime: Dict[str, Any] = {}
+        try:
+            from core.web.services.agent_directory_service import current_agent_runtime
+
+            loaded = current_agent_runtime() or {}
+            if isinstance(loaded, dict):
+                runtime = loaded
+        except Exception:
+            runtime = {}
+        session_id = str(runtime.get("sessionId") or "").strip()
+        turn_id = str(runtime.get("turnId") or "").strip()
+        if not session_id:
+            tail = getattr(self, "_turn_status_tail_context", None)
+            if isinstance(tail, dict):
+                session_id = str(tail.get("session_id") or "").strip()
+        project_root_raw = str(getattr(self, "project_root", "") or "").strip()
+        if not session_id or not turn_id or not project_root_raw:
+            return None
+        return Path(project_root_raw), session_id, turn_id
+
+    def _replay_current_turn_conversation_from_ledger(
+        self,
+        messages: list,
+        *,
+        strict: bool = True,
+        require_layer: bool = False,
+    ) -> list:
+        identity = self._chat_ledger_identity()
+        if identity is None:
+            if strict and require_layer:
+                raise TurnJournalReplayError(
+                    error_type="ledger_identity_missing",
+                    message="Chat turn journal replay requires session and turn identity.",
+                )
+            return messages
+        project_root, session_id, turn_id = identity
+        from core.chat.conversation_ledger import load_conversation_events
+
+        events = load_conversation_events(project_root, session_id)
+        replayed = replay_current_turn_messages(
+            messages,
+            events,
+            turn_id=turn_id,
+            strict=strict,
+            require_layer=require_layer,
+        )
+        if replayed != messages:
+            _record_agent_scene_event(
+                "chat",
+                "agent.turn_journal_replay.applied",
+                message="Rebuilt current-turn conversation layer from ConversationLedger.",
+                fields={
+                    "sessionId": session_id,
+                    "turnId": turn_id,
+                    "beforeCount": len(messages),
+                    "afterCount": len(replayed),
+                },
+            )
+        if strict and current_turn_has_journal_conversation_layer(events, turn_id=turn_id):
+            self._ledger_conversation_fingerprint = ledger_conversation_fingerprint_for_messages(replayed)
+        return replayed
+
+    def _handle_turn_journal_replay_failure(self, exc: TurnJournalReplayError) -> None:
+        identity = self._chat_ledger_identity() or (None, "", "")
+        _, session_id, turn_id = identity
+        _record_agent_scene_event(
+            "chat",
+            "agent.turn_journal_replay.blocked",
+            message="Current-turn journal replay failed; blocking further LLM calls this turn.",
+            fields={
+                "sessionId": session_id,
+                "turnId": turn_id,
+                "errorType": exc.error_type,
+                **dict(exc.details or {}),
+            },
+            level="error",
+            outcome="blocked",
+        )
+        self._ledger_conversation_fingerprint = ""
+        self._record_turn_failure_diagnostic(
+            category="protocol_error",
+            reason_code="turn_journal_replay_failed",
+            reason_summary="当前轮对话层无法从 journal 重建",
+            reason_detail=str(exc.message or "turn journal replay failed"),
+            chain_stage="agent_turn_journal_replay",
+            event_code="agent.turn_journal_replay.blocked",
+            fields={
+                "errorType": exc.error_type,
+                **dict(exc.details or {}),
+            },
+        )
+        get_ui().add_log(
+            "当前轮对话层无法从 ConversationLedger 重建，已停止继续调用模型。",
+            "ERROR",
+        )
+
+    def _reconcile_chat_conversation_before_llm(self, messages: list) -> tuple[list, bool]:
+        identity = self._chat_ledger_identity()
+        if identity is None:
+            exc = TurnJournalReplayError(
+                error_type="ledger_identity_missing",
+                message="Chat turn ledger reconciliation requires session and turn identity.",
+            )
+            self._handle_turn_journal_replay_failure(exc)
+            return messages, False
+        project_root, session_id, turn_id = identity
+        try:
+            from core.chat.conversation_ledger import load_conversation_events
+
+            events = load_conversation_events(project_root, session_id)
+            reconciled = reconcile_chat_messages_with_ledger(
+                messages,
+                events,
+                turn_id=turn_id,
+                strict=True,
+            )
+            if reconciled != messages:
+                _record_agent_scene_event(
+                    "chat",
+                    "agent.turn_journal_replay.applied",
+                    message="Rebuilt chat conversation layer from ConversationLedger before LLM send.",
+                    fields={
+                        "sessionId": session_id,
+                        "turnId": turn_id,
+                        "beforeCount": len(messages),
+                        "afterCount": len(reconciled),
+                    },
+                )
+            self._ledger_conversation_fingerprint = ledger_conversation_fingerprint_for_messages(reconciled)
+            return reconciled, True
+        except TurnJournalReplayError as exc:
+            self._handle_turn_journal_replay_failure(exc)
+            return messages, False
+
+    def _apply_chat_journal_replay(
+        self,
+        messages: list,
+        *,
+        require_layer: bool = False,
+    ) -> tuple[list, bool]:
+        try:
+            return (
+                self._replay_current_turn_conversation_from_ledger(
+                    messages,
+                    strict=True,
+                    require_layer=require_layer,
+                ),
+                True,
+            )
+        except TurnJournalReplayError as exc:
+            self._handle_turn_journal_replay_failure(exc)
+            return messages, False
+
     @staticmethod
     def _normalize_seeded_tool_calls(raw_calls: Any) -> List[Dict[str, Any]]:
-        normalized: List[Dict[str, Any]] = []
-        for raw_call in list(raw_calls or []):
-            if not isinstance(raw_call, dict):
-                continue
-            function = raw_call.get("function") if isinstance(raw_call.get("function"), dict) else {}
-            call_id = str(
-                raw_call.get("id")
-                or raw_call.get("tool_call_id")
-                or raw_call.get("toolCallId")
-                or ""
-            ).strip()
-            name = str(
-                raw_call.get("name")
-                or raw_call.get("toolName")
-                or function.get("name")
-                or ""
-            ).strip()
-            arguments = raw_call.get("args", raw_call.get("arguments", function.get("arguments", {})))
-            if isinstance(arguments, str):
-                try:
-                    parsed_arguments = json.loads(arguments)
-                except (TypeError, ValueError, json.JSONDecodeError):
-                    parsed_arguments = {"raw": arguments}
-                arguments = parsed_arguments if isinstance(parsed_arguments, dict) else {"value": parsed_arguments}
-            if not isinstance(arguments, dict):
-                arguments = {}
-            if call_id and name:
-                normalized.append({"id": call_id, "name": name, "args": arguments})
-        return normalized
+        # Removal: keep while seed_chat_history and tests call this method.
+        return normalize_seeded_tool_calls(raw_calls)
 
     @staticmethod
     def _sanitize_seeded_chat_content(role: str, content: str) -> str:
-        text = str(content or "")
-        if role.strip().lower() != "assistant":
-            return text
-        for marker in _INTERNAL_TOOL_PROTOCOL_MARKERS:
-            if marker in text:
-                return ""
-        cleaned = _TOOL_POLICY_FAILURE_RE.sub(
-            "[工具策略提示] 历史中有一次未授权工具调用已被省略。",
-            text,
-        )
-        if "Tool failed: spawn_agent_tool" in cleaned:
-            return ""
-        return cleaned.strip()
+        # Removal: keep while seed_chat_history and tests call this method.
+        return sanitize_seeded_chat_content(role, content)
 
     def seed_runtime_context(self, content: str) -> None:
         """Add non-chat runtime context without making it a user/assistant message."""
@@ -2303,23 +1607,13 @@ class SelfEvolvingAgent:
         pending.append(text)
 
     def _insert_pending_volatile_context_messages(self, messages: List[Any]) -> tuple[List[Any], List[str]]:
+        # Removal: keep while tests call this method on the agent instance.
         pending_volatile_context_blocks = list(getattr(self, "_pending_volatile_context_blocks", []) or [])
         self._pending_volatile_context_blocks = []
-        if not pending_volatile_context_blocks:
-            return list(messages or []), []
-        context_messages = [
-            SystemMessage(content=block)
-            for block in pending_volatile_context_blocks
-            if str(block or "").strip()
-        ]
-        if not context_messages:
-            return list(messages or []), []
-        return (
-            TurnOutcomeController.insert_volatile_context_before_current_user(
-                messages=list(messages or []),
-                context_messages=context_messages,
-            ),
+        return insert_pending_volatile_context_messages(
+            messages,
             pending_volatile_context_blocks,
+            insert_volatile_fn=TurnOutcomeController.insert_volatile_context_before_current_user,
         )
 
     def mark_runtime_context_seeded_by_host(self) -> None:
@@ -2562,82 +1856,13 @@ class SelfEvolvingAgent:
         self._active_turn_terminal = False
 
     def _serialize_turn_messages(self, messages: Optional[List[Any]]) -> List[Dict[str, Any]]:
-        serialized: List[Dict[str, Any]] = []
-        for item in list(messages or []):
-            payload = self._serialize_turn_message(item)
-            if payload:
-                serialized.append(payload)
-        return serialized
+        return serialize_turn_messages(messages)
 
     def _serialize_turn_message(self, message: Any) -> Dict[str, Any]:
-        if isinstance(message, AIMessage):
-            payload: Dict[str, Any] = {
-                "kind": "ai",
-                "content": message.content,
-                "tool_calls": list(getattr(message, "tool_calls", []) or []),
-            }
-            additional_kwargs = getattr(message, "additional_kwargs", None) or {}
-            if additional_kwargs:
-                payload["additional_kwargs"] = dict(additional_kwargs)
-            response_metadata = getattr(message, "response_metadata", None) or {}
-            if response_metadata:
-                payload["response_metadata"] = dict(response_metadata)
-            return payload
-        if isinstance(message, ToolMessage):
-            return {
-                "kind": "tool",
-                "content": message.content,
-                "tool_call_id": str(getattr(message, "tool_call_id", "") or ""),
-            }
-        if isinstance(message, SystemMessage):
-            return {
-                "kind": "system",
-                "content": message.content,
-            }
-        if isinstance(message, dict):
-            payload = dict(message)
-            payload["kind"] = "dict"
-            return payload
-        content = getattr(message, "content", None)
-        if content not in (None, ""):
-            return {
-                "kind": "system",
-                "content": content,
-            }
-        return {}
+        return serialize_turn_message(message)
 
     def _deserialize_turn_messages(self, messages: List[Dict[str, Any]]) -> List[Any]:
-        restored: List[Any] = []
-        for item in list(messages or []):
-            if not isinstance(item, dict):
-                continue
-            kind = str(item.get("kind") or "").strip().lower()
-            if kind == "ai":
-                restored.append(
-                    AIMessage(
-                        content=item.get("content", ""),
-                        tool_calls=list(item.get("tool_calls") or []),
-                        additional_kwargs=dict(item.get("additional_kwargs") or {}),
-                        response_metadata=dict(item.get("response_metadata") or {}),
-                    )
-                )
-                continue
-            if kind == "tool":
-                restored.append(
-                    ToolMessage(
-                        content=item.get("content", ""),
-                        tool_call_id=str(item.get("tool_call_id") or ""),
-                    )
-                )
-                continue
-            if kind == "system":
-                restored.append(SystemMessage(content=item.get("content", "")))
-                continue
-            if kind == "dict":
-                payload = dict(item)
-                payload.pop("kind", None)
-                restored.append(payload)
-        return restored
+        return deserialize_turn_messages(messages)
 
     def _reset_mode_context_for_supervised_case(self, case_id: Optional[str] = None) -> None:
         self._active_turn_messages = None
@@ -2780,6 +2005,7 @@ class SelfEvolvingAgent:
         )
         self._active_goal = effective_goal
         self._last_turn_metadata = {}
+        self._ledger_conversation_fingerprint = ""
         self._last_llm_failure_attempts = 0
         self._last_llm_failure_max_attempts = 0
         stable_session_prompt = (
@@ -2896,7 +2122,12 @@ class SelfEvolvingAgent:
                 content,
                 attachments,
             )
-        messages, resumed_messages = TurnOutcomeController.prepare_turn_messages(
+        pending_static_context_blocks = list(getattr(self, "_pending_static_context_blocks", []) or [])
+        turn_static_context_blocks = list(pending_static_context_blocks)
+        self._pending_static_context_blocks = []
+        pending_runtime_context_blocks = list(getattr(self, "_pending_runtime_context_blocks", []) or [])
+        self._pending_runtime_context_blocks = []
+        assembled_turn_messages = assemble_prepared_turn_messages(
             system_prompt=sp,
             user_prompt=user_prompt,
             effective_goal=effective_goal,
@@ -2905,25 +2136,18 @@ class SelfEvolvingAgent:
             build_system_message=build_cacheable_system_prefix_message,
             build_external_request_message=runtime_input_builder_for_turn,
             allow_append_user_message=policy.mode == AgentMode.CHAT and policy.keep_multi_turn_context,
+            static_context_blocks=pending_static_context_blocks,
+            runtime_context_blocks=pending_runtime_context_blocks,
+            dynamic_system_context_message=dynamic_system_context_message,
+            prepare_turn_messages_fn=TurnOutcomeController.prepare_turn_messages,
+            insert_static_fn=TurnOutcomeController.insert_static_context_after_system,
+            insert_volatile_fn=TurnOutcomeController.insert_volatile_context_before_current_user,
+            extend_cacheable_prefix_fn=extend_system_message_cacheable_prefix,
         )
-        pending_static_context_blocks = list(getattr(self, "_pending_static_context_blocks", []) or [])
-        turn_static_context_blocks = list(pending_static_context_blocks)
-        self._pending_static_context_blocks = []
-        if pending_static_context_blocks:
-            cacheable_prefix_merged = False
-            if messages:
-                merged_message, cacheable_prefix_merged = extend_system_message_cacheable_prefix(
-                    messages[0],
-                    pending_static_context_blocks,
-                )
-                if cacheable_prefix_merged:
-                    messages[0] = merged_message
-            if not cacheable_prefix_merged:
-                context_messages = [SystemMessage(content=block) for block in pending_static_context_blocks]
-                messages = TurnOutcomeController.insert_static_context_after_system(
-                    messages=messages,
-                    context_messages=context_messages,
-                )
+        messages = assembled_turn_messages.messages
+        resumed_messages = assembled_turn_messages.resumed
+        cacheable_prefix_merged = assembled_turn_messages.cacheable_prefix_merged
+        if assembled_turn_messages.static_context_inserted:
             _record_agent_scene_event(
                 "prompt",
                 "agent.static_runtime_context_inserted_as_system",
@@ -2942,20 +2166,8 @@ class SelfEvolvingAgent:
                     "cacheableSystemPrefixMerged": cacheable_prefix_merged,
                 },
             )
-        volatile_context_messages = []
-        if dynamic_system_context_message is not None:
-            volatile_context_messages.append(dynamic_system_context_message)
-        pending_runtime_context_blocks = list(getattr(self, "_pending_runtime_context_blocks", []) or [])
-        self._pending_runtime_context_blocks = []
-        if pending_runtime_context_blocks:
-            volatile_context_messages.extend(SystemMessage(content=block) for block in pending_runtime_context_blocks)
-        if volatile_context_messages:
-            messages = TurnOutcomeController.insert_volatile_context_before_current_user(
-                messages=messages,
-                context_messages=volatile_context_messages,
-            )
         messages = self._apply_turn_status_bar(messages, iteration=0)
-        if dynamic_system_context_message is not None:
+        if assembled_turn_messages.dynamic_system_context_inserted:
             _record_agent_scene_event(
                 "prompt",
                 "agent.dynamic_system_context_inserted_before_current_user",
@@ -3056,24 +2268,16 @@ class SelfEvolvingAgent:
                     prompt_built_with_runtime_key = self._last_runtime_state_memory_key
                 current_prompt = to_string(current_sp)
                 if current_prompt != self._cached_system_prompt:
-                    messages[0] = build_cacheable_system_prefix_message(current_sp)
-                    messages = [
-                        message for message in messages
-                        if not is_dynamic_system_context_message(message)
-                    ]
-                    current_dynamic_system_context = build_dynamic_system_context_message(current_sp)
-                    if current_dynamic_system_context is not None:
-                        messages = TurnOutcomeController.insert_volatile_context_before_current_user(
-                            messages=messages,
-                            context_messages=[current_dynamic_system_context],
-                        )
-                    if turn_static_context_blocks:
-                        merged_message, cacheable_prefix_merged = extend_system_message_cacheable_prefix(
-                            messages[0],
-                            turn_static_context_blocks,
-                        )
-                        if cacheable_prefix_merged:
-                            messages[0] = merged_message
+                    messages = refresh_system_prefix_on_messages(
+                        messages=messages,
+                        system_prompt=current_sp,
+                        static_context_blocks=turn_static_context_blocks,
+                        build_cacheable_prefix_fn=build_cacheable_system_prefix_message,
+                        is_dynamic_system_context_fn=is_dynamic_system_context_message,
+                        build_dynamic_system_context_fn=build_dynamic_system_context_message,
+                        extend_cacheable_prefix_fn=extend_system_message_cacheable_prefix,
+                        insert_volatile_fn=TurnOutcomeController.insert_volatile_context_before_current_user,
+                    )
                     self._cached_system_prompt = current_prompt
                 # Live runtime status (budget/progress/mental) — every iteration.
                 messages = self._apply_turn_status_bar(messages, iteration=iteration)
@@ -3136,6 +2340,10 @@ class SelfEvolvingAgent:
                         "totalPreflightMs": max(0, int((time.perf_counter() - pre_llm_started) * 1000)),
                     },
                 )
+                if policy.mode == AgentMode.CHAT:
+                    messages, reconcile_ok = self._reconcile_chat_conversation_before_llm(messages)
+                    if not reconcile_ok:
+                        break
                 invocation_result = self._invoke_llm(messages, replay_state=provider_replay_state)
                 if (
                     invocation_result is None
@@ -3608,28 +2816,13 @@ class SelfEvolvingAgent:
 
     def _publish_llm_retry_status(self, *, attempt: int, max_attempts: int) -> None:
         """Surface outer Agent reconnect attempts for live session feedback."""
-
-        category = str(getattr(self, "_last_llm_error_category", "") or "").strip()
-        action = str(getattr(self, "_last_llm_recovery_action", "") or "").strip()
-        if not category and not action:
-            return
-        try:
-            from core.infrastructure.event_bus import EventNames
-
-            get_event_bus().publish(
-                EventNames.LLM_STATUS,
-                {
-                    "status": "retrying",
-                    "attempt": max(0, int(attempt or 0)),
-                    "max_attempts": max(0, int(max_attempts or 0)),
-                    "category": category,
-                    "recovery_action": action,
-                    "source": "agent_outer_reconnect",
-                },
-                source="SelfEvolvingAgent",
-            )
-        except Exception:
-            return
+        publish_llm_retry_status(
+            attempt=attempt,
+            max_attempts=max_attempts,
+            category=str(getattr(self, "_last_llm_error_category", "") or ""),
+            action=str(getattr(self, "_last_llm_recovery_action", "") or ""),
+            event_bus_getter=get_event_bus,
+        )
 
     def _record_turn_cache_diagnostics(
         self,
@@ -3639,69 +2832,26 @@ class SelfEvolvingAgent:
         messages: List[Any],
         current_turn: int,
     ) -> Dict[str, Any]:
-        response_metadata = getattr(response, "response_metadata", None)
-        if not isinstance(response_metadata, dict):
-            response_metadata = {}
-        runtime = _turn_runtime_from_env()
-        runtime_metadata = {
-            **_safe_turn_runtime_metadata(runtime),
-            **({
-                "promptCachePartition": str(runtime.get("promptCachePartition") or "").strip(),
-            } if str(runtime.get("promptCachePartition") or "").strip() else {}),
-        }
-        llm_usage = build_llm_usage_from_observation(
-            token_usage,
-            response_metadata=response_metadata,
-            runtime_metadata=runtime_metadata,
-        )
-        prompt_cache_partition = str(llm_usage.get("promptCachePartition") or "").strip()
-        context_limit = int(
-            getattr(
-                self,
-                "_context_window_limit",
-                getattr(self, "_effective_max_token_limit", 0),
-            )
-            or 0
-        )
-        context_composition = build_runtime_context_composition(
-            list(messages or []),
-            turn_id=str(current_turn or ""),
-            prompt_cache_partition=prompt_cache_partition,
-            context_limit=context_limit,
-        )
-        ui = get_ui()
-        average_cache = {}
-        snapshot = getattr(ui, "cache_average_snapshot", None)
-        if callable(snapshot):
-            try:
-                average_cache = snapshot()
-            except Exception:
-                average_cache = {}
-        cache_composition = build_runtime_cache_composition(
-            turn_id=str(current_turn or ""),
-            llm_usage=llm_usage,
-            context_composition=context_composition,
-            average_cache=average_cache,
+        llm_usage, metadata_update = record_turn_cache_diagnostics(
+            token_usage=token_usage,
+            response=response,
+            messages=messages,
+            current_turn=current_turn,
+            context_window_limit=int(
+                getattr(
+                    self,
+                    "_context_window_limit",
+                    getattr(self, "_effective_max_token_limit", 0),
+                )
+                or 0
+            ),
+            get_ui_fn=get_ui,
+            turn_runtime_fn=_turn_runtime_from_env,
         )
         self._last_turn_metadata = {
             **dict(getattr(self, "_last_turn_metadata", {}) or {}),
-            "llm_usage": llm_usage,
-            "context_composition": context_composition,
-            "cache_composition": cache_composition,
+            **metadata_update,
         }
-        note_cache_diagnostics = getattr(ui, "note_cache_diagnostics", None)
-        if callable(note_cache_diagnostics):
-            try:
-                note_cache_diagnostics(
-                    llm_usage=llm_usage,
-                    context_composition=context_composition,
-                    cache_composition=cache_composition,
-                )
-            except Exception as exc:
-                _debug_logger.warning(
-                    f"[TOKEN] runtime cache diagnostics persist failed: {type(exc).__name__}: {exc}",
-                    tag="TOKEN",
-                )
         return llm_usage
 
     def _build_llm_invocation_context(
@@ -3710,9 +2860,6 @@ class SelfEvolvingAgent:
         prompt_purpose: str = "main_reply",
         route_attempt: int = 1,
     ) -> LLMInvocationContext:
-        runtime = _turn_runtime_from_env()
-        status_context = current_llm_status_context()
-        binding = getattr(self, "runtime_agent_binding", {}) or {}
         try:
             policy = self._get_mode_policy()
             mode_value = str(getattr(policy.mode, "value", policy.mode) or "").strip()
@@ -3720,44 +2867,17 @@ class SelfEvolvingAgent:
         except Exception:
             mode_value = ""
             orchestrator_kind = ""
-        surface = "chat_turn" if orchestrator_kind == "chat" or mode_value == "chat" else "agent_turn"
-        run_kind = (
-            str(runtime.get("runKind") or "").strip()
-            or ("chat_turn" if surface == "chat_turn" else mode_value or "agent_turn")
-        )
-        return LLMInvocationContext(
-            surface=surface,
-            run_kind=run_kind,
-            run_id=str(runtime.get("runId") or getattr(self, "_pending_supervised_case_id", "") or "").strip(),
-            session_id=str(
-                runtime.get("sessionId")
-                or status_context.get("session_id")
-                or status_context.get("sessionId")
-                or binding.get("directSessionId")
-                or ""
-            ).strip(),
-            agent_id=str(runtime.get("agentId") or binding.get("agentId") or "").strip(),
-            llm_slot=str(runtime.get("llmSlot") or binding.get("llmSlot") or "dialogue").strip() or "dialogue",
-            model_id=str(runtime.get("modelId") or os.environ.get("VIBELUTION_AGENT_LLM_MODEL_ID") or "").strip(),
-            cache_scope=str(runtime.get("cacheScope") or "").strip(),
-            cache_partition=str(runtime.get("promptCachePartition") or "").strip(),
+        return build_llm_invocation_context(
+            runtime_binding=getattr(self, "runtime_agent_binding", {}) or {},
+            mode_value=mode_value,
+            orchestrator_kind=orchestrator_kind,
+            pending_supervised_case_id=str(getattr(self, "_pending_supervised_case_id", "") or ""),
+            tool_authorization_fingerprint=str(getattr(self, "_tool_authorization_decision_fingerprint", "") or ""),
+            ledger_conversation_fingerprint=str(getattr(self, "_ledger_conversation_fingerprint", "") or ""),
             prompt_purpose=prompt_purpose,
-            conversation_bound=surface == "chat_turn",
-            metadata={
-                "agentMode": mode_value,
-                "orchestratorKind": orchestrator_kind,
-                "invocationId": uuid4().hex,
-                "routeAttempt": max(1, int(route_attempt)),
-                "toolAuthorizationDecisionFingerprint": str(
-                    getattr(self, "_tool_authorization_decision_fingerprint", "") or ""
-                ).strip(),
-                "turnId": str(
-                    status_context.get("turn_id")
-                    or status_context.get("turnId")
-                    or runtime.get("runId")
-                    or ""
-                ).strip(),
-            },
+            route_attempt=route_attempt,
+            turn_runtime_fn=_turn_runtime_from_env,
+            status_context_fn=current_llm_status_context,
         )
 
     def _report_round_state_stall_signals(self, round_state) -> None:
@@ -3765,18 +2885,14 @@ class SelfEvolvingAgent:
 
         信号归零（进展恢复）后清除已报告标记，再次跨越阈值可重复报告。
         任何失败静默降级，绝不干扰主循环。
+        Removal: keep while tests/monkeypatch still target this agent method.
         """
         try:
-            telemetry = round_state.runtime_telemetry()
-            reported = dict(getattr(self, "_last_reported_stall_signals", {}) or {})
-            events = _stall_signal_threshold_events(telemetry, reported)
-            if events:
-                details = ", ".join(
-                    f"{key}={int(telemetry.get(key) or 0)}" for key in sorted(events)
-                )
-                _debug_logger.warning(f"[循环卡住信号] {details}", tag="STATE")
-                reported.update({key: True for key in events})
-            self._last_reported_stall_signals = _reset_stall_signal_reported(telemetry, reported)
+            self._last_reported_stall_signals = report_round_state_stall_signals(
+                round_state,
+                dict(getattr(self, "_last_reported_stall_signals", {}) or {}),
+                debug_logger=_debug_logger,
+            )
         except Exception:
             pass
 
@@ -3922,8 +3038,9 @@ class SelfEvolvingAgent:
             pass
 
     def _invoke_llm(self, messages: list, *, replay_state: Any = None) -> Optional[Any]:
-        """调用 LLM（带错误分类、自动重试）"""
-        ui = get_ui()
+        # Removal: keep while tests call SelfEvolvingAgent._invoke_llm and patch agent.* helpers.
+        # Reset before delegation so a stop/interrupt cannot leave diagnostics
+        # from an earlier invocation attached to the active turn.
         self._last_llm_error_category = None
         self._last_llm_error_retryable = False
         self._last_llm_recovery_action = None
@@ -3931,373 +3048,40 @@ class SelfEvolvingAgent:
         self._last_llm_error_details = {}
         self._last_llm_failure_attempts = 0
         self._last_llm_failure_max_attempts = MAX_CONSECUTIVE_FAILURES
-        clean_messages = []
-        for msg in messages:
-            if isinstance(msg, AIMessage):
-                clean_messages.append(msg)
-            elif isinstance(msg, ToolMessage):
-                clean_messages.append(msg)
-            elif isinstance(msg, SystemMessage):
-                clean_messages.append(SystemMessage(content=msg.content or ""))
-            elif isinstance(msg, dict) and msg.get("role") == "system":
-                clean_messages.append(dict(msg))
-            else:
-                clean_messages.append(msg)
-
-        with ui.thinking("?? 思考中..."), llm_cancel_context(self._current_turn_stop_reason):
-            route_attempt = 0
-            fallback_client_for_retry = None
-            attempted_route_identities: set[tuple[str, ...]] = set()
-            while route_attempt < 2:
-                route_attempt += 1
-                invocation_context = None
-                trace_fields: Dict[str, Any] = {}
-                try:
-                    self._raise_if_turn_stop_requested()
-                    llm_for_turn = fallback_client_for_retry
-                    fallback_client_for_retry = None
-                    if llm_for_turn is None:
-                        llm_for_turn = self._get_llm_for_current_mode(
-                            disable_tools=bool(getattr(self, "_force_disable_tools_for_turn", False)),
-                            profile_id=None,
-                        )
-                    route_identity = _llm_effective_route_identity(llm_for_turn)
-                    route_id = _llm_effective_route_id(llm_for_turn)
-                    if route_identity in attempted_route_identities:
-                        _record_agent_scene_event(
-                            "llm_route",
-                            "llm_fallback_rejected",
-                            message="Duplicate effective LLM route rejected.",
-                            fields={
-                                **trace_fields,
-                                "routeAttempt": route_attempt,
-                                "routeId": route_id,
-                                "reasonCode": "duplicate_effective_route",
-                            },
-                            level="warning",
-                            outcome="rejected",
-                        )
-                        return None
-                    attempted_route_identities.add(route_identity)
-                    invocation_context = self._build_llm_invocation_context(
-                        prompt_purpose="main_reply",
-                        route_attempt=route_attempt,
-                    )
-                    route_started_at = time.monotonic()
-                    trace_fields = _llm_route_trace_fields(
-                        invocation_context,
-                        llm_for_turn,
-                        route_attempt=route_attempt,
-                        route_id=route_id,
-                    )
-                    _record_agent_scene_event(
-                        "llm_route",
-                        "llm_route_attempt_started",
-                        message="LLM effective route attempt started.",
-                        fields=trace_fields,
-                    )
-                    if (
-                        self._should_stream_llm_for_turn(llm_for_turn)
-                        and hasattr(llm_for_turn, "stream")
-                    ):
-                        def on_protocol_event(event: Any) -> None:
-                            self._raise_if_turn_stop_requested()
-                            if event.kind == "reasoning_delta" and event.text:
-                                ui.stream_thought(event.text, done=False)
-                            elif event.kind in {"commentary_delta", "answer_delta"} and event.text:
-                                stream_response = getattr(ui, "stream_response", None)
-                                if callable(stream_response):
-                                    stream_response(event.text, done=False)
-
-                        outcome = run_streaming_llm_outcome(
-                            llm_for_turn,
-                            clean_messages,
-                            context=invocation_context,
-                            on_event=on_protocol_event,
-                            replay_state=replay_state,
-                        )
-                        outcome = canonicalize_legacy_xml_outcome(outcome)
-                        if outcome.kind in {"tool_calls", "final_answer"}:
-                            _record_llm_route_success(
-                                trace_fields=trace_fields,
-                                duration_ms=int((time.monotonic() - route_started_at) * 1000),
-                                streamed=True,
-                            )
-                        return outcome, llm_for_turn.project_outcome_message(outcome)
-                    self._raise_if_turn_stop_requested()
-                    outcome = invoke_llm_outcome(
-                        llm_for_turn,
-                        clean_messages,
-                        context=invocation_context,
-                        replay_state=replay_state,
-                    )
-                    outcome = canonicalize_legacy_xml_outcome(outcome)
-                    if outcome.kind in {"tool_calls", "final_answer"}:
-                        _record_llm_route_success(
-                            trace_fields=trace_fields,
-                            duration_ms=int((time.monotonic() - route_started_at) * 1000),
-                            streamed=False,
-                        )
-                    return outcome, llm_for_turn.project_outcome_message(outcome)
-                except TurnStopRequested:
-                    raise
-                except KeyboardInterrupt:
-                    raise
-                except Exception as e:
-                    llm_error_details = dict(getattr(e, "details", {}) or {}) if isinstance(e, LLMError) else {}
-                    safe_projection_details = _safe_llm_error_diagnostic_details(llm_error_details)
-                    reported_attempt = int(llm_error_details.get("attempt") or 1)
-                    reported_max_attempts = int(
-                        llm_error_details.get("max_attempts") or reported_attempt or 1
-                    )
-                    recovery = plan_llm_recovery(
-                        e,
-                        attempt=reported_attempt,
-                        max_attempts=reported_max_attempts,
-                        config=getattr(self, "config", None),
-                        role="primary",
-                        current_profile_id=getattr(
-                            llm_for_turn if "llm_for_turn" in locals() else None,
-                            "profile_id",
-                            getattr(getattr(self, "_base_llm", None), "profile_id", None),
-                        ),
-                    )
-                    category = recovery.category
-                    is_retryable = recovery.retryable
-                    user_msg = recovery.user_message
-                    stop_reason = (
-                        self._current_turn_stop_reason()
-                        or str(llm_error_details.get("stop_reason") or "").strip()
-                    )
-                    if category == "cancelled" and stop_reason:
-                        _record_agent_scene_event(
-                            "llm_route",
-                            "llm_route_cancelled",
-                            message="LLM route cancelled by the active turn stop request.",
-                            fields={
-                                **trace_fields,
-                                "routeAttempt": route_attempt,
-                                "routeId": _llm_effective_route_id(
-                                    llm_for_turn if "llm_for_turn" in locals() else None
-                                ),
-                                "reasonCode": "turn_stop_requested",
-                            },
-                            level="info",
-                            outcome="cancelled",
-                        )
-                        raise TurnStopRequested(stop_reason)
-                    try:
-                        streaming_enabled_for_failed_attempt = bool(
-                            self._should_stream_llm_for_turn(
-                                llm_for_turn if "llm_for_turn" in locals() else None
-                            )
-                            and hasattr(llm_for_turn if "llm_for_turn" in locals() else None, "stream")
-                        )
-                    except Exception:
-                        streaming_enabled_for_failed_attempt = False
-                    provider_stream_retry_exhausted = bool(
-                        llm_error_details.get("retry_budget_exhausted")
-                    ) or reported_attempt >= reported_max_attempts
-                    self._last_llm_error_category = category
-                    self._last_llm_error_retryable = is_retryable
-                    self._last_llm_recovery_action = recovery.action
-                    self._last_llm_error_message = f"{category}: {user_msg}".strip(": ")
-                    self._last_llm_failure_attempts = reported_attempt
-                    self._last_llm_failure_max_attempts = reported_max_attempts
-                    exception_type = type(e).__name__
-                    exception_message = str(e)
-                    llm_error_traceback = traceback.format_exc()
-                    error_details = {
-                        **safe_projection_details,
-                        "exception_type": exception_type,
-                        "exception_message": exception_message[:4000],
-                        "retryable": is_retryable,
-                        "recovery_action": recovery.action,
-                        "stop_current_turn": recovery.stop_current_turn,
-                        "request_context_compression": recovery.request_context_compression,
-                        "fallback_profile_id": recovery.fallback_profile_id,
-                        "provider_stream_retry_exhausted": provider_stream_retry_exhausted,
-                        "attempt": reported_attempt,
-                        "max_attempts": reported_max_attempts,
-                        "route_attempt": route_attempt,
-                        "route_id": _llm_effective_route_id(
-                            llm_for_turn if "llm_for_turn" in locals() else None
-                        ),
-                        "invocation_id": str(
-                            getattr(invocation_context, "metadata", {}).get("invocationId")
-                            if "invocation_context" in locals()
-                            else ""
-                        ),
-                        "model": getattr(self.config.llm, "model_name", ""),
-                        "provider": getattr(self.config.llm, "provider", ""),
-                        "api_base": getattr(self.config.llm, "api_base", ""),
-                        "api_timeout": getattr(self.config.llm, "api_timeout", None),
-                        "streaming_enabled": streaming_enabled_for_failed_attempt,
-                        "message_count": len(clean_messages),
-                    }
-                    try:
-                        from tools.token_manager import estimate_messages_tokens
-
-                        error_details["estimated_input_tokens"] = max(
-                            0, int(estimate_messages_tokens(clean_messages) or 0)
-                        )
-                    except Exception:
-                        error_details["estimated_input_tokens"] = 0
-                    self._last_llm_error_details = dict(error_details)
-
-                    _debug_logger.error(
-                        f"LLM 路由调用失败 [{route_attempt}/2] "
-                        f"{category}: {user_msg} | action={recovery.action} | "
-                        f"fallback={recovery.fallback_profile_id or '-'} | "
-                        f"{exception_type}: {exception_message[:300]}",
-                        tag="LLM",
-                    )
-                    logger.log_error(
-                        "llm_error",
-                        f"{category}: {user_msg}",
-                        traceback=llm_error_traceback,
-                        details=error_details,
-                    )
-                    failed_route = llm_for_turn if "llm_for_turn" in locals() else None
-                    failed_route_id = _llm_effective_route_id(failed_route)
-                    failed_invocation_id = str(
-                        getattr(invocation_context, "metadata", {}).get("invocationId")
-                        if invocation_context is not None
-                        else ""
-                    )
-                    turn_trace_fields = {
-                        key: trace_fields[key]
-                        for key in ("sessionId", "turnId", "runId", "agentId")
-                        if trace_fields.get(key) not in (None, "")
-                    }
-                    _record_agent_scene_event(
-                        "llm_route",
-                        "llm_route_attempt_exhausted",
-                        message="LLM effective route attempt exhausted.",
-                        fields={
-                            **trace_fields,
-                            "routeAttempt": route_attempt,
-                            "routeId": failed_route_id,
-                            "invocationId": failed_invocation_id,
-                            "profileId": str(getattr(failed_route, "profile_id", "") or ""),
-                            "transportAttempt": reported_attempt,
-                            "maxTransportAttempts": reported_max_attempts,
-                            "errorCategory": category,
-                            "retryable": bool(is_retryable),
-                            **safe_projection_details,
-                        },
-                        level="warning" if is_retryable else "error",
-                        outcome="failed",
-                    )
-
-                    if recovery.request_context_compression:
-                        _record_agent_scene_event(
-                            "llm_route",
-                            "llm_turn_terminal",
-                            message="LLM turn stopped for context compression.",
-                            fields={
-                                **trace_fields,
-                                "routeAttempts": route_attempt,
-                                "routeId": failed_route_id,
-                                "errorCategory": category,
-                                "reasonCode": "context_compression_required",
-                            },
-                            level="warning",
-                            outcome="failed",
-                        )
-                        request_compression(
-                            f"LLM provider reported context limit: {category}"
-                        )
-                        return None
-
-                    fallback_profile_id = str(recovery.fallback_profile_id or "").strip()
-                    if route_attempt == 1 and is_retryable and fallback_profile_id:
-                        try:
-                            candidate = self._get_llm_for_current_mode(
-                                disable_tools=bool(getattr(self, "_force_disable_tools_for_turn", False)),
-                                profile_id=fallback_profile_id,
-                            )
-                        except Exception as fallback_error:
-                            _record_agent_scene_event(
-                                "llm_route",
-                                "llm_fallback_rejected",
-                                message="LLM fallback route resolution failed.",
-                                fields={
-                                    **turn_trace_fields,
-                                    "routeAttempt": 2,
-                                    "primaryRouteId": failed_route_id,
-                                    "reasonCode": "fallback_resolution_failed",
-                                    "errorType": type(fallback_error).__name__,
-                                },
-                                level="error",
-                                outcome="rejected",
-                            )
-                        else:
-                            candidate_identity = _llm_effective_route_identity(candidate)
-                            if candidate_identity not in attempted_route_identities:
-                                fallback_client_for_retry = candidate
-                                _record_agent_scene_event(
-                                    "llm_route",
-                                    "llm_fallback_selected",
-                                    message="Distinct LLM fallback route selected.",
-                                    fields={
-                                        **turn_trace_fields,
-                                        "routeAttempt": 2,
-                                        "primaryRouteId": failed_route_id,
-                                        "fallbackRouteId": _llm_effective_route_id(candidate),
-                                        "reasonCode": category,
-                                    },
-                                    level="warning",
-                                    outcome="fallback_selected",
-                                )
-                            else:
-                                _record_agent_scene_event(
-                                    "llm_route",
-                                    "llm_fallback_rejected",
-                                    message="Duplicate effective LLM fallback route rejected.",
-                                    fields={
-                                        **turn_trace_fields,
-                                        "routeAttempt": 2,
-                                        "primaryRouteId": failed_route_id,
-                                        "fallbackRouteId": _llm_effective_route_id(candidate),
-                                        "reasonCode": "duplicate_effective_route",
-                                    },
-                                    level="warning",
-                                    outcome="rejected",
-                                )
-
-                    if fallback_client_for_retry is not None:
-                        ui.add_log(
-                            f"LLM 主路由失败，切换到备用配置 `{fallback_profile_id}`。",
-                            "WARN",
-                        )
-                        continue
-
-                    _record_agent_scene_event(
-                        "llm_route",
-                        "llm_turn_terminal",
-                        message="LLM turn exhausted all permitted routes.",
-                        fields={
-                            **trace_fields,
-                            "routeAttempts": route_attempt,
-                            "routeId": failed_route_id,
-                            "errorCategory": category,
-                            "reasonCode": "no_distinct_fallback",
-                            **safe_projection_details,
-                        },
-                        level="error",
-                        outcome="failed",
-                    )
-                    return None
-
-            _debug_logger.error(
-                f"LLM 连续 {MAX_CONSECUTIVE_FAILURES} 次调用失败", tag="LLM"
-            )
-            ui.add_log(
-                f"LLM 连续 {MAX_CONSECUTIVE_FAILURES} 次调用失败，请检查网络和 API 配置。",
-                "ERROR",
-            )
-            return None
+        result = invoke_agent_llm_turn(
+            messages=messages,
+            replay_state=replay_state,
+            hooks=AgentLlmTurnHooks(
+                get_ui=get_ui,
+                llm_cancel_context=llm_cancel_context,
+                raise_if_stop=self._raise_if_turn_stop_requested,
+                current_stop_reason=self._current_turn_stop_reason,
+                get_llm_for_mode=self._get_llm_for_current_mode,
+                should_stream=self._should_stream_llm_for_turn,
+                build_invocation_context=self._build_llm_invocation_context,
+                invoke_outcome=invoke_llm_outcome,
+                run_streaming_outcome=run_streaming_llm_outcome,
+                canonicalize=canonicalize_legacy_xml_outcome,
+                plan_recovery=plan_llm_recovery,
+                record_scene_event=_record_agent_scene_event,
+                record_route_success=_record_llm_route_success,
+                request_compression=request_compression,
+                debug_logger=_debug_logger,
+                error_logger=logger,
+                config=getattr(self, "config", None),
+                force_disable_tools=bool(getattr(self, "_force_disable_tools_for_turn", False)),
+                stop_error_cls=TurnStopRequested,
+                base_llm=getattr(self, "_base_llm", None),
+            ),
+        )
+        self._last_llm_error_category = result.last_error_category
+        self._last_llm_error_retryable = result.last_error_retryable
+        self._last_llm_recovery_action = result.last_recovery_action
+        self._last_llm_error_message = result.last_error_message
+        self._last_llm_error_details = dict(result.last_error_details)
+        self._last_llm_failure_attempts = result.last_failure_attempts
+        self._last_llm_failure_max_attempts = result.last_failure_max_attempts
+        return result.payload
 
     def _get_response_processor(self) -> ResponseProcessor:
         processor = getattr(self, "response_processor", None)
@@ -4345,16 +3129,11 @@ class SelfEvolvingAgent:
         return is_restart_focused_goal(getattr(self, "_active_goal", ""))
 
     def _guard_tool_execution(self, tool_name: str, tool_args: Dict[str, Any]) -> Optional[str]:
-        if not self._is_restart_focus_mode():
-            return None
-
-        allowed_tools = set(self._restart_allowed_tool_names())
-        if tool_name in allowed_tools:
-            return None
-
-        return (
-            "[短路] 当前处于重启测试模式，只允许任务管理与重启闭环工具。"
-            "请优先：创建任务 -> 勾选任务 -> 调用 trigger_self_restart_tool。"
+        # Removal: keep while ToolLifecycleBridge is constructed with this bound method.
+        del tool_args
+        return guard_restart_focus_tool(
+            tool_name,
+            restart_focus=self._is_restart_focus_mode(),
         )
 
     def set_turn_interrupt_checker(self, checker=None) -> None:

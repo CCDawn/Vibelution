@@ -104,3 +104,89 @@ def test_task_breakdown_is_persisted_on_task(isolated_task_manager):
     assert isolated_task_manager.task_list()[0]["substeps"] == substeps
     persisted = json.loads(isolated_task_manager._tasks_path.read_text(encoding="utf-8"))
     assert persisted["tasks"][0]["substeps"] == substeps
+
+
+def test_string_task_fields_are_kept_as_one_item(isolated_task_manager):
+    isolated_task_manager.task_create(
+        [
+            {
+                "description": "Ship it",
+                "dependencies": "task-setup",
+                "tags": "runtime",
+                "substeps": "rewrite planner",
+                "metadata": "not-a-map",
+            }
+        ],
+        goal="Coerce",
+    )
+    task = isolated_task_manager.task_list()[0]
+    assert task["dependencies"] == ["task-setup"]
+    assert task["tags"] == ["runtime"]
+    assert task["substeps"] == [{"description": "rewrite planner"}]
+    assert task["metadata"] == {}
+    assert isolated_task_manager.task_prioritize("31") is None
+    assert isolated_task_manager.get_task("bad") is None
+
+
+def test_string_false_completion_flag_stays_pending(isolated_task_manager):
+    isolated_task_manager.task_create([{"description": "Keep pending"}], goal="Flags")
+    isolated_task_manager.task_update(1, is_completed="false")
+    task = isolated_task_manager.task_list()[0]
+    assert task["is_completed"] is False
+    assert isolated_task_manager.get_completion_stats()["completed"] == 0
+    markdown = isolated_task_manager.get_active_tasks()
+    assert "⏳ 进行中" in markdown
+    assert "✅ 完成" not in markdown
+
+
+def test_task_create_survives_non_list_payload(isolated_task_manager):
+    result = isolated_task_manager.task_create("not-a-list", goal="Bad payload")
+    assert "已创建 0 个任务" in result
+    assert isolated_task_manager.task_list() == []
+
+
+def test_task_create_parses_json_payload_camelcase_and_bytes(isolated_task_manager):
+    result = isolated_task_manager.task_create(
+        '[{"description":"Inspect config","isCompleted":"false","estimatedHours":"2","metadata":{"k":"v"}}]',
+        goal=b"JSON goal",
+    )
+    assert "已创建 1 个任务" in result
+    task = isolated_task_manager.task_list()[0]
+    assert task["description"] == "Inspect config"
+    assert task["is_completed"] is False
+    assert task["estimated_hours"] == 2.0
+    assert task["metadata"] == {"k": "v"}
+    assert isolated_task_manager.get_current_plan().goal == "JSON goal"
+    assert isolated_task_manager.get_task(b"1") is not None
+    isolated_task_manager.task_update(1, is_completed=b"false", result_summary=b"still pending")
+    assert isolated_task_manager.task_list()[0]["is_completed"] is False
+    assert isolated_task_manager.task_list()[0]["result_summary"] == "still pending"
+    assert task_planner._safe_int(True, 0) == 0
+    assert task_planner._safe_int(b"1") == 1
+    assert task_planner._coerce_bool(b"false", default=True) is False
+
+
+def test_task_create_unwraps_envelopes_and_json_lists(isolated_task_manager):
+    result = isolated_task_manager.task_create(
+        {
+            "tasks": [
+                {
+                    "description": "Inspect config",
+                    "tags": '["runtime", "planner"]',
+                    "dependencies": {"setup": {"enabled": False}, "gate": {"enabled": True}},
+                    "substeps": {"items": [{"description": "read file"}]},
+                },
+                {"description": "Ship it"},
+            ]
+        },
+        goal="Envelope",
+    )
+    assert "已创建 2 个任务" in result
+    first, second = isolated_task_manager.task_list()
+    assert first["description"] == "Inspect config"
+    assert first["tags"] == ["runtime", "planner"]
+    assert first["dependencies"] == ["gate"]
+    assert first["substeps"] == [{"description": "read file"}]
+    assert second["description"] == "Ship it"
+    assert isolated_task_manager.task_prioritize("[2, 1]") == [2, 1]
+    assert [task["id"] for task in isolated_task_manager.task_list()] == [2, 1]

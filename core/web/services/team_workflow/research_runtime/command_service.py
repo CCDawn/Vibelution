@@ -49,12 +49,20 @@ from core.web.services.team_workflow.research_runtime.readiness.common import (
     DomainReadinessContext,
 )
 
-from .ids import new_id
 from .human_acceptance_artifact import (
     KnowledgeAcceptanceArtifactError,
     PreparedHumanAcceptanceArtifact,
     persist_prepared_human_acceptance_artifact,
     prepare_command_human_acceptance_artifact,
+)
+from .ids import new_id
+
+_ARTIFACT_HUMAN_GATES = frozenset(
+    {
+        "gate:knowledge_handoff",
+        "gate:protocol_freeze",
+        "gate:smoke_gate",
+    }
 )
 
 
@@ -169,6 +177,18 @@ class WorkflowCommandService:
                 f"command {request.command.value} 尚未接入"
             )
 
+        # Recovery artifacts are materialized before a fresh readiness read so
+        # the same visible retry command can repair an old accepted handoff and
+        # immediately evaluate the successor against the canonical authority.
+        try:
+            prepared_artifact = prepare_command_human_acceptance_artifact(
+                store=self._store,
+                run=run,
+                request=request,
+            )
+        except KnowledgeAcceptanceArtifactError as exc:
+            raise WorkflowCommandError(str(exc)) from exc
+
         if request.command in _ATTEMPT_CREATING_COMMANDS:
             if not request.node_id:
                 raise WorkflowCommandError(f"{request.command.value} 需要 nodeId")
@@ -181,15 +201,6 @@ class WorkflowCommandService:
             )
             if not readiness.ready:
                 raise NodeNotReadyError(readiness, run.run_version)
-
-        try:
-            prepared_artifact = prepare_command_human_acceptance_artifact(
-                store=self._store,
-                run=run,
-                request=request,
-            )
-        except KnowledgeAcceptanceArtifactError as exc:
-            raise WorkflowCommandError(str(exc)) from exc
         if request.command is WorkflowCommandKind.RESOLVE_HUMAN_TASK:
             future = self._store.submit(
                 lambda uow: self._handle_resolve_human_task(
@@ -203,6 +214,16 @@ class WorkflowCommandService:
         elif request.command is WorkflowCommandKind.RETRY_NODE:
             future = self._store.submit(
                 lambda uow: self._handle_retry_node(
+                    uow,
+                    request,
+                    request_hash,
+                    prepared_artifact,
+                ),
+                force_flush=True,
+            )
+        elif request.command is WorkflowCommandKind.RECONCILE_RUN:
+            future = self._store.submit(
+                lambda uow: self._handle_reconcile_run(
                     uow,
                     request,
                     request_hash,
@@ -533,6 +554,7 @@ class WorkflowCommandService:
         # 人工决策后通过正式 graph resume 推进（T5 契约：Human 节点可恢复）。
         attempt = uow.repository.get_attempt(str(row[2]))
         pending_action_id = attempt.pending_action_id if attempt else None
+        task_kind = str(row[4] or "")
         if decision == "revise":
             # revise：不把决策压成 failed receipt，而是 fork 新 Run
             # （spec 8.4 revision fork；父 Run 保持 lineage）。
@@ -554,7 +576,7 @@ class WorkflowCommandService:
                 command_id=command_id,
                 now_ms=now_ms,
             )
-        elif pending_action_id:
+        else:
             from core.research.workflow.contracts import ExecutionReceipt
 
             run = uow.repository.get_run(request.run_id)
@@ -566,19 +588,30 @@ class WorkflowCommandService:
                 prepared=prepared_artifact,
                 now_ms=now_ms,
             )
-            receipt = ExecutionReceipt(
-                action_id=pending_action_id,
-                node_run_id=str(row[2]),
-                outcome="succeeded" if decision == "accept" else "failed",
-                artifact_receipt_ids=artifact_receipt_ids,
-                execution_anchor_id=None,
-                budget_receipt_id=None,
-                problem=None,
-                completed_at_ms=now_ms,
-            )
-            uow.repository.insert_outbox(
-                _human_resume_dispatch(uow, request, str(row[2]), receipt, command_id, now_ms)
-            )
+            if (
+                decision == "accept"
+                and task_kind in _ARTIFACT_HUMAN_GATES
+                and not artifact_receipt_ids
+            ):
+                raise WorkflowCommandError(
+                    f"{task_kind} accept requires a materialized artifact receipt"
+                )
+            if pending_action_id:
+                receipt = ExecutionReceipt(
+                    action_id=pending_action_id,
+                    node_run_id=str(row[2]),
+                    outcome="succeeded" if decision == "accept" else "failed",
+                    artifact_receipt_ids=artifact_receipt_ids,
+                    execution_anchor_id=None,
+                    budget_receipt_id=None,
+                    problem=None,
+                    completed_at_ms=now_ms,
+                )
+                uow.repository.insert_outbox(
+                    _human_resume_dispatch(
+                        uow, request, str(row[2]), receipt, command_id, now_ms
+                    )
+                )
         uow.repository.insert_event(
             _event_record(
                 run_id=request.run_id,
@@ -631,7 +664,13 @@ class WorkflowCommandService:
         )
         return _receipt(uow, request, command_id, accepted_version, sequence, now_ms)
 
-    def _handle_reconcile_run(self, uow, request: CommandRequest, request_hash: str) -> CommandReceipt:
+    def _handle_reconcile_run(
+        self,
+        uow,
+        request: CommandRequest,
+        request_hash: str,
+        prepared_artifact: PreparedHumanAcceptanceArtifact | None = None,
+    ) -> CommandReceipt:
         now_ms = self._clock()
         run = uow.repository.get_run(request.run_id)
         require_run_transition(RunStatus(run.status), RunStatus.RUNNING)
@@ -647,6 +686,12 @@ class WorkflowCommandService:
                 now_ms=now_ms,
             )
         )
+        artifact_receipt_ids = persist_prepared_human_acceptance_artifact(
+            uow,
+            run=run,
+            prepared=prepared_artifact,
+            now_ms=now_ms,
+        )
         uow.repository.update_run_status(request.run_id, request.team_id, RunStatus.RUNNING.value, now_ms)
         uow.repository.insert_event(
             _event_record(
@@ -656,7 +701,10 @@ class WorkflowCommandService:
                 run_version=accepted_version,
                 event_type="run_blocked",
                 correlation_id=request.idempotency_key,
-                payload={"reconciled": True},
+                payload={
+                    "reconciled": True,
+                    "artifactReceiptIds": list(artifact_receipt_ids),
+                },
                 now_ms=now_ms,
             )
         )
@@ -986,6 +1034,15 @@ def _command_record(
     )
 
 
+def _actor_kind_for_node(node_id: str) -> str:
+    from core.research.workflow.definition import build_challenge_cup_workflow_definition
+
+    for node in build_challenge_cup_workflow_definition().nodes:
+        if node.nodeId == node_id:
+            return node.actorKind.value
+    raise WorkflowCommandError(f"unknown node {node_id}")
+
+
 def _attempt_record(
     *,
     node_run_id: str,
@@ -998,6 +1055,7 @@ def _attempt_record(
     started_at_ms: int,
     retry_of_node_run_id: str | None = None,
     binding_snapshot_id: str | None = None,
+    actor_kind: str | None = None,
 ) -> Any:
     from core.research.workflow.ledger import NodeAttemptRecord
 
@@ -1006,7 +1064,7 @@ def _attempt_record(
         run_id=run_id,
         node_id=node_id,
         attempt=attempt,
-        actor_kind="agent",
+        actor_kind=actor_kind or _actor_kind_for_node(node_id),
         status=status,
         command_id=command_id,
         binding_snapshot_id=binding_snapshot_id,
@@ -1036,7 +1094,7 @@ def _node_attempt_for_dispatch(
         run_id=run_id,
         node_id=node_id,
         attempt=attempt,
-        actor_kind="agent",
+        actor_kind=_actor_kind_for_node(node_id),
         status="starting",
         command_id="",
         binding_snapshot_id=binding_snapshot_id,

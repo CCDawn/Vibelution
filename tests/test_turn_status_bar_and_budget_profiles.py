@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import json
+
 from core.orchestration.tool_budget_profiles import (
     detect_model_family,
+    normalize_max_calls_by_model_family,
     resolve_max_calls_per_turn,
 )
 from core.orchestration.turn_status_bar import (
     TURN_STATUS_BAR_HEADER,
     build_turn_status_bar_message,
     collect_turn_status_snapshot,
+    collect_turn_status_tail_extras,
     format_turn_status_bar,
     is_turn_status_bar_message,
     strip_turn_status_bar_messages,
@@ -15,7 +19,10 @@ from core.orchestration.turn_status_bar import (
 )
 from core.runtime_status_flags import (
     default_agent_runtime_status_policy,
+    is_runtime_status_enabled,
     is_runtime_status_inject_enabled,
+    is_runtime_status_rail_enabled,
+    runtime_status_enabled_override,
 )
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -42,6 +49,77 @@ def test_resolve_max_calls_prefers_family_map():
 def test_resolve_max_calls_unlimited_stays_zero():
     max_calls, _ = resolve_max_calls_per_turn({"maxCallsPerTurn": 0}, model="deepseek-chat")
     assert max_calls == 0
+
+
+def test_budget_profiles_coerce_bytes_case_and_snake_case():
+    assert detect_model_family(model=b"deepseek-chat") == "deepseek"
+    max_calls, family = resolve_max_calls_per_turn(
+        {
+            "maxCallsPerTurn": "32",
+            "maxCallsPerTurnByModelFamily": {"DeepSeek": 80},
+        },
+        model=b"deepseek-v3",
+    )
+    assert family == "deepseek"
+    assert max_calls == 80
+    snake_calls, _ = resolve_max_calls_per_turn(
+        {"max_calls_per_turn": "16"},
+        model="gpt-4.1",
+    )
+    assert snake_calls == 16
+    assert normalize_max_calls_by_model_family('{"Claude": "40"}') == {"claude": 40}
+    bool_calls, _ = resolve_max_calls_per_turn({"maxCallsPerTurn": True}, model="gpt-4.1")
+    assert bool_calls == 0
+    json_calls, json_family = resolve_max_calls_per_turn(
+        '{"maxCallsPerTurn":"32","max_calls_per_turn_by_model_family":{"deepseek":"64"}}',
+        model=memoryview(b"deepseek-v3"),
+    )
+    assert json_family == "deepseek"
+    assert json_calls == 64
+    bytes_calls, _ = resolve_max_calls_per_turn(
+        {"maxCallsPerTurn": b"16"},
+        model="gpt-4.1",
+    )
+    assert bytes_calls == 16
+
+
+def test_budget_profiles_unwrap_policy_envelopes_and_skip_disabled_families():
+    assert detect_model_family(model={"id": "deepseek-v3"}) == "deepseek"
+    assert detect_model_family(model='{"model":"claude-sonnet"}') == "claude"
+
+    max_calls, family = resolve_max_calls_per_turn(
+        {
+            "policy": {
+                "maxCallsPerTurn": 32,
+                "maxCallsPerTurnByModelFamily": {
+                    "deepseek": {"maxCalls": 80, "enabled": True},
+                    "claude": {"enabled": False, "maxCalls": 99},
+                },
+            }
+        },
+        model={"id": "deepseek-v3"},
+    )
+    assert family == "deepseek"
+    assert max_calls == 80
+
+    skipped, skipped_family = resolve_max_calls_per_turn(
+        {
+            "maxCallsPerTurn": 32,
+            "maxCallsPerTurnByModelFamily": {"deepseek": {"enabled": False, "maxCalls": 8}},
+        },
+        model="deepseek-chat",
+    )
+    assert skipped_family == "deepseek"
+    assert skipped == 64
+
+    assert normalize_max_calls_by_model_family(
+        '{"items":[{"family":"DeepSeek","maxCalls":"80"},{"name":"claude","enabled":false}]}'
+    ) == {"deepseek": 80}
+    bool_override, _ = resolve_max_calls_per_turn(
+        {"maxCallsPerTurn": 32, "maxCallsPerTurnByModelFamily": {"openai": True}},
+        model="gpt-4.1",
+    )
+    assert bool_override == 32
 
 
 def test_turn_status_bar_message_and_upsert():
@@ -114,3 +192,238 @@ def test_runtime_status_default_enabled_with_agent_metadata_off():
     }
     assert is_runtime_status_inject_enabled(agent=agent, requested=True) is False
     assert is_runtime_status_inject_enabled(agent=None, requested=False) is False
+
+
+def test_runtime_status_coerces_bytes_false_json_and_snake_case():
+    empty = {}
+    assert is_runtime_status_inject_enabled(
+        public_config=empty,
+        agent={"metadata": {"runtimeStatus": {"enabled": b"false"}}},
+    ) is False
+    assert is_runtime_status_enabled(
+        public_config=empty,
+        agent={"metadata": {"runtime_status": {"enabled": "off"}}},
+    ) is False
+    agent = {
+        "runtimeStatus": '{"enabled": true, "injectIntoModel": "false", "showInStatusRail": true}',
+    }
+    assert is_runtime_status_enabled(public_config=empty, agent=agent) is True
+    assert is_runtime_status_inject_enabled(public_config=empty, agent=agent) is False
+    assert is_runtime_status_rail_enabled(public_config=empty, agent=agent) is True
+    assert is_runtime_status_inject_enabled(public_config=empty, requested="false") is False
+    assert is_runtime_status_inject_enabled(public_config=empty, requested=b"off") is False
+    with runtime_status_enabled_override("false"):
+        assert is_runtime_status_inject_enabled(public_config=empty) is False
+    with runtime_status_enabled_override(b"false"):
+        assert is_runtime_status_inject_enabled(public_config=empty) is False
+    assert is_runtime_status_enabled(
+        public_config=empty,
+        agent={"metadata": '{"runtimeStatus": {"enabled": false}}'},
+    ) is False
+
+
+
+def test_collect_snapshot_prefers_live_auth_cap_and_current_model_family():
+    from types import SimpleNamespace
+
+    auth = SimpleNamespace(
+        max_calls_per_turn=8,
+        call_count=6,
+        budget_profile="openai",
+        turn_id="turn-live",
+        agent_id="agent-live",
+    )
+    snapshot = collect_turn_status_snapshot(
+        iteration=3,
+        model="deepseek-chat",
+        tool_policy={"maxCallsPerTurn": 64, "maxCallsPerTurnByModelFamily": {"deepseek": 64}},
+        authorization=auth,
+    )
+    assert snapshot.tools_max == 8
+    assert snapshot.tools_used == 6
+    assert snapshot.tools_remaining == 2
+    assert snapshot.budget_profile == "deepseek"
+    assert snapshot.budget_status == "tight"
+    assert snapshot.turn_id == "turn-live"
+    text = format_turn_status_bar(snapshot)
+    assert "budget_status: tight" in text
+    assert "budget tight" in text
+
+
+def test_collect_snapshot_marks_exhausted_and_unlimited():
+    from types import SimpleNamespace
+
+    exhausted = collect_turn_status_snapshot(
+        model="gpt-4.1",
+        authorization=SimpleNamespace(max_calls_per_turn=4, call_count=4, budget_profile="openai"),
+    )
+    assert exhausted.budget_status == "exhausted"
+    assert "budget exhausted" in format_turn_status_bar(exhausted)
+
+    unlimited = collect_turn_status_snapshot(
+        model="gpt-4.1",
+        tool_policy={"maxCallsPerTurn": 0},
+        authorization=None,
+    )
+    assert unlimited.tools_max == 0
+    assert unlimited.budget_status == "unlimited"
+
+    ok = collect_turn_status_snapshot(
+        model="gpt-4.1",
+        authorization=SimpleNamespace(max_calls_per_turn=32, call_count=1, budget_profile="openai"),
+    )
+    assert ok.budget_status == "ok"
+    assert "prefer structured tools" in format_turn_status_bar(ok)
+
+
+def test_collect_snapshot_coerces_invalid_auth_counters():
+    from types import SimpleNamespace
+
+    snapshot = collect_turn_status_snapshot(
+        iteration="nope",
+        model="deepseek-chat",
+        authorization=SimpleNamespace(
+            max_calls_per_turn="bad",
+            call_count="also-bad",
+            budget_profile="deepseek",
+        ),
+    )
+    assert snapshot.iteration == 0
+    assert snapshot.tools_used == 0
+    assert snapshot.tools_max == 0
+    assert snapshot.budget_status == "unlimited"
+
+
+def test_status_bar_coerces_false_flags_json_extras_and_rejects_character_split():
+    from types import SimpleNamespace
+
+    snapshot = collect_turn_status_snapshot(
+        iteration=b"3",
+        model=b"deepseek-chat",
+        tool_policy='{"maxCallsPerTurn":"8"}',
+        mental_enabled="false",
+        mental_model=SimpleNamespace(diagnose=lambda: SimpleNamespace(state="anxious", intervention="stop")),
+        authorization=SimpleNamespace(
+            max_calls_per_turn=b"8",
+            call_count=b"1",
+            budget_profile=b"deepseek",
+            turn_id=b"turn-1",
+            agent_id=b"agent-1",
+        ),
+    )
+    assert snapshot.iteration == 3
+    assert snapshot.model == "deepseek-chat"
+    assert snapshot.mental_enabled is False
+    assert snapshot.turn_id == "turn-1"
+    assert snapshot.tools_max == 8
+
+    extras = {
+        "git": {
+            "available": "true",
+            "dirty": "false",
+            "branch": b"main",
+            "upstream": {"ahead": "2", "behind": "bad"},
+        },
+        "runDigest": {"task": b"fix", "recentTools": "grep_search_tool"},
+        "identity": {"sessionId": b"session-1"},
+    }
+    text = format_turn_status_bar(
+        snapshot,
+        config={
+            "blocks": {
+                "budget": True,
+                "clock": False,
+                "git_brief": True,
+                "run_digest": True,
+                "identity": True,
+            }
+        },
+        extras=extras,
+    )
+    assert "dirty: no" in text
+    assert "ahead_behind: +2/-0" in text
+    assert "recent_tools: grep_search_tool" in text
+    assert "session: session-1" in text
+
+    assert strip_turn_status_bar_messages("not-a-list") == []
+    extras_payload = collect_turn_status_tail_extras(
+        session_id=b"s1",
+        recent_tools="cli_tool",
+        include_git="false",
+        cache_hint='{"cacheReadTokens": 12}',
+    )
+    assert extras_payload["runDigest"]["recentTools"] == ["cli_tool"]
+    assert extras_payload["cacheHint"]["cacheReadTokens"] == 12
+    assert "git" not in extras_payload
+
+
+def test_status_bar_unwraps_message_envelopes_and_json_tool_lists():
+    from types import SimpleNamespace
+
+    snapshot = collect_turn_status_snapshot(
+        iteration=True,
+        model="deepseek-chat",
+        authorization=SimpleNamespace(max_calls_per_turn=8, call_count=1),
+    )
+    assert snapshot.iteration == 0
+    text = format_turn_status_bar(snapshot)
+    assert "- iteration:" not in text
+
+    extras = {
+        "git": {
+            "available": True,
+            "branch": "main",
+            "files": '{"items":[{"path":"a.py","status":"M"},{"path":"b.py","status":"A"}]}',
+        },
+        "runDigest": {
+            "task": "fix",
+            "recentTools": '["grep_search_tool","cli_tool"]',
+        },
+    }
+    text = format_turn_status_bar(
+        snapshot,
+        config={
+            "blocks": {
+                "budget": True,
+                "clock": False,
+                "git_paths": True,
+                "run_digest": True,
+            }
+        },
+        extras=extras,
+    )
+    assert "M a.py" in text
+    assert "A b.py" in text
+    assert "recent_tools: grep_search_tool, cli_tool" in text
+
+    extras_payload = collect_turn_status_tail_extras(
+        recent_tools=bytearray(b'["grep_search_tool","read_file"]'),
+        cache_hint=None,
+    )
+    assert extras_payload["runDigest"]["recentTools"] == ["grep_search_tool", "read_file"]
+
+    extras_payload = collect_turn_status_tail_extras(
+        recent_tools={"grep_search_tool": True, "shell": {"enabled": False}},
+    )
+    assert extras_payload["runDigest"]["recentTools"] == ["grep_search_tool"]
+
+    header = f"{TURN_STATUS_BAR_HEADER}\n- purpose: live"
+    messages = {
+        "messages": [
+            {"role": "user", "content": "hi"},
+            {"role": "system", "content": header},
+        ]
+    }
+    cleaned = strip_turn_status_bar_messages(messages)
+    assert len(cleaned) == 1
+    assert cleaned[0]["content"] == "hi"
+
+    json_messages = json.dumps(
+        [
+            {"role": "user", "content": "keep"},
+            {"role": "system", "content": header},
+        ]
+    )
+    cleaned = strip_turn_status_bar_messages(json_messages)
+    assert len(cleaned) == 1
+    assert cleaned[0]["content"] == "keep"

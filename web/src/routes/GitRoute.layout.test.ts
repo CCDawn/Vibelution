@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { dictionary } from "../i18n/dictionary";
 import routeSource from "./GitRoute.tsx?raw";
+import gitApiSource from "../api/git.ts?raw";
 import { GitRecentCommitsState, GitStatusSummaryState } from "./GitRoute";
 import stylesSource from "./GitRoute.styles.ts?raw";
 import { gitRouteStyles } from "./GitRoute.styles";
@@ -188,11 +189,12 @@ describe("GitRoute layout contract", () => {
   });
 
   it("reserves loading surfaces for the Git workspace panes", () => {
-    expect(routeSource).toContain('queryFn: ({ signal }) => fetchJson<GitStatusSummary>("/api/git/status?limit=500", { signal })');
-    expect(routeSource).toContain('queryFn: ({ signal }) => fetchJson<GitCommitsResponse>("/api/git/commits?limit=20", { signal })');
-    expect(routeSource).toContain('queryFn: ({ signal }) => fetchJson<ConfigWorkspace>("/api/config/workspace", { signal })');
-    expect(routeSource).toContain('fetchJson<GitFileDiff>(`/api/git/diff?path=${encodeURIComponent(activePath ?? "")}`, { signal })');
-    expect(routeSource).toContain('fetchJson<GitObjectDetail>(`/api/git/object-detail?${params.toString()}`, { signal })');
+    expect(routeSource).toContain("queryFn: ({ signal }) => fetchGitStatus({ limit: 500, signal })");
+    expect(routeSource).toContain("queryFn: ({ signal }) => fetchGitCommits({ limit: 20, signal })");
+    expect(routeSource).toContain("queryFn: ({ signal }) => fetchConfigWorkspace({ signal })");
+    expect(routeSource).toContain("queryFn: ({ signal }) => fetchGitFileDiff(activePath ?? \"\", { signal })");
+    expect(routeSource).toContain("fetchGitObjectDetail(");
+    expect(gitApiSource).toContain("/api/git/object-detail?");
     expect(routeSource).toContain("invalidateQueries({ queryKey: queryKeys.gitStatusSummary() })");
     expect(routeSource).toContain("ProgressiveRegionSkeleton");
     expect(routeSource).toContain("gitStatusLoading");
@@ -347,7 +349,8 @@ describe("GitRoute layout contract", () => {
   it("keeps clean Git branch and worktree detail previews reachable from the overview", () => {
     expect(routeSource).toContain("type GitObjectSelection");
     expect(routeSource).toContain("setActiveObject(selection)");
-    expect(routeSource).toContain("/api/git/object-detail?");
+    expect(routeSource).toContain("fetchGitObjectDetail(");
+    expect(gitApiSource).toContain("/api/git/object-detail?");
     expect(routeSource).toContain("selectCurrentBranch");
     expect(routeSource).toContain("selectWorktree");
     expect(routeSource).toContain("selectWorktree(item)");

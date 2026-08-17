@@ -18,9 +18,17 @@ LOG_HELPER_DEFINITIONS = {
         "protected": True,
         "protectedReason": "运行中和当前现场由 Reset 固定保护；已停止现场可从 Reset 单独清理。",
     },
+    "launcher_runtime": {
+        "title": "Launcher 运行日志",
+        "description": "Launcher 目录下的 backend stdout/stderr、启动控制与构建日志。",
+        "route": "/logs?root=launcher_runtime",
+        "resetItemId": "",
+        "protected": True,
+        "protectedReason": "与当前 Launcher 进程绑定，第一版只读入口，不建议自动清理。",
+    },
     "runtime_logs": {
         "title": "运行日志",
-        "description": "后端、launcher 和运行器的即时输出。",
+        "description": "logs/ 根目录下的普通运行日志（不含 runtime_scenes 与 conversations）。",
         "route": "/logs?root=runtime_logs",
         "resetItemId": "runtime_logs",
         "protected": False,

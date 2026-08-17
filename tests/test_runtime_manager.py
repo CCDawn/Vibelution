@@ -119,6 +119,30 @@ def test_open_request_ready_accepts_an_electron_managed_window():
     ) is False
 
 
+def test_open_request_ready_no_browser_accepts_backend_without_window():
+    observation = {
+        "observedState": "partial",
+        "backendHealthy": True,
+        "backendObserved": True,
+        "windowProvider": "electron",
+        "windowManaged": False,
+        "browserManaged": False,
+        "browserWindowAlive": False,
+    }
+
+    assert daemon._open_request_ready(observation, no_browser=True) is True
+    assert daemon._open_request_ready(observation, no_browser=False) is False
+
+
+def test_compose_observed_state_requires_backend_and_window_for_open():
+    from core.runtime_manager.window_provider_state import compose_observed_state
+
+    assert compose_observed_state(backend_ready=True, window_ready=True) == "open"
+    assert compose_observed_state(backend_ready=True, window_ready=False) == "partial"
+    assert compose_observed_state(backend_ready=False, window_ready=True) == "partial"
+    assert compose_observed_state(backend_ready=False, window_ready=False) == "closed"
+
+
 @pytest.fixture(autouse=True)
 def _block_real_process_termination(monkeypatch, tmp_path):
     events_path = tmp_path / "runtime-manager-events.jsonl"
@@ -778,7 +802,7 @@ def test_python_launcher_frontend_build_defaults_to_direct_node_build(monkeypatc
     launcher._ensure_frontend_build(source_identity)
 
     assert calls == [
-        ([r"C:\node\node.exe", r"C:\node\node_modules\npm\bin\npm-cli.js", "install"], "node npm-cli.js install"),
+        ([r"C:\node\node.exe", r"C:\node\node_modules\npm\bin\npm-cli.js", "ci"], "node npm-cli.js ci"),
         ([r"C:\node\node.exe", str(web_dir / "node_modules" / "typescript" / "bin" / "tsc"), "-b"], "node tsc -b"),
         ([r"C:\node\node.exe", str(web_dir / "node_modules" / "vite" / "bin" / "vite.js"), "build"], "node vite build"),
     ]
@@ -3852,6 +3876,49 @@ def test_submit_command_joins_active_open_workbench(tmp_path, monkeypatch):
     assert event["payload"]["commandId"] == "cmd-active-open"
 
 
+def test_submit_open_joins_active_restart_workbench(tmp_path, monkeypatch):
+    inbox_dir = tmp_path / "inbox"
+    processing_dir = tmp_path / "processing"
+    results_dir = tmp_path / "results"
+    events_path = tmp_path / "events.jsonl"
+    for path in (inbox_dir, processing_dir, results_dir):
+        path.mkdir(parents=True)
+
+    monkeypatch.setattr(command_queue, "INBOX_DIR", inbox_dir)
+    monkeypatch.setattr(command_queue, "PROCESSING_DIR", processing_dir)
+    monkeypatch.setattr(command_queue, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(command_queue, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(command_queue, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(command_queue, "load_pid", lambda: 9912)
+    monkeypatch.setattr(command_queue, "_process_is_alive", lambda pid: True)
+    monkeypatch.setattr(
+        command_queue,
+        "load_state",
+        lambda: {
+            "stateVersion": 51,
+            "runtimeState": "running",
+            "managerPid": 9912,
+            "command": {
+                "activeCommandId": "cmd-active-restart",
+                "activeType": "restart_workbench",
+                "noBrowser": False,
+            },
+        },
+    )
+
+    command = command_queue.submit_command(
+        "open_workbench",
+        args={"reason": "launcher_start", "noBrowser": False},
+        requested_by="launcher_api",
+    )
+
+    assert command["commandId"] == "cmd-active-restart"
+    assert list(inbox_dir.glob("*.json")) == []
+    event = json.loads(events_path.read_text(encoding="utf-8").splitlines()[-1])
+    assert event["type"] == "command_queue.open_joined"
+    assert event["payload"]["joinedCommandType"] == "restart_workbench"
+
+
 def test_submit_command_joins_pending_open_workbench(tmp_path, monkeypatch):
     inbox_dir = tmp_path / "inbox"
     processing_dir = tmp_path / "processing"
@@ -4024,6 +4091,56 @@ def test_submit_command_joins_pending_restart_workbench(tmp_path, monkeypatch):
     assert list(results_dir.glob("*.json")) == []
     event = json.loads(events_path.read_text(encoding="utf-8").splitlines()[-1])
     assert event["type"] == "command_queue.restart_joined"
+
+
+def test_submit_open_joins_pending_restart_workbench(tmp_path, monkeypatch):
+    inbox_dir = tmp_path / "inbox"
+    processing_dir = tmp_path / "processing"
+    results_dir = tmp_path / "results"
+    events_path = tmp_path / "events.jsonl"
+    for path in (inbox_dir, processing_dir, results_dir):
+        path.mkdir(parents=True)
+    (inbox_dir / "cmd-pending-restart.json").write_text(
+        json.dumps(
+            {
+                "commandId": "cmd-pending-restart",
+                "type": "restart_workbench",
+                "requestedBy": "launcher_api",
+                "args": {"reason": "launcher_restart", "noBrowser": False},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(command_queue, "INBOX_DIR", inbox_dir)
+    monkeypatch.setattr(command_queue, "PROCESSING_DIR", processing_dir)
+    monkeypatch.setattr(command_queue, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(command_queue, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(command_queue, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(command_queue, "load_pid", lambda: 9912)
+    monkeypatch.setattr(command_queue, "_process_is_alive", lambda pid: True)
+    monkeypatch.setattr(
+        command_queue,
+        "load_state",
+        lambda: {
+            "stateVersion": 55,
+            "runtimeState": "running",
+            "managerPid": 9912,
+            "command": {"activeCommandId": "", "activeType": ""},
+        },
+    )
+
+    command = command_queue.submit_command(
+        "open_workbench",
+        args={"reason": "launcher_start", "noBrowser": False},
+        requested_by="launcher_api",
+    )
+
+    assert command["commandId"] == "cmd-pending-restart"
+    assert [path.name for path in inbox_dir.glob("*.json")] == ["cmd-pending-restart.json"]
+    event = json.loads(events_path.read_text(encoding="utf-8").splitlines()[-1])
+    assert event["type"] == "command_queue.open_joined"
+    assert event["payload"]["joinedCommandType"] == "restart_workbench"
 
 
 def test_close_workbench_supersedes_pending_open_workbench(tmp_path, monkeypatch):
@@ -5835,6 +5952,60 @@ def test_terminate_workbench_processes_reports_cleanup_stage_timings(monkeypatch
     assert result["timingsMs"]["totalMs"] >= 0
 
 
+def test_terminate_workbench_processes_can_include_runtime_manager_daemon(monkeypatch, tmp_path):
+    class FakeProc:
+        def __init__(self, pid):
+            self.pid = pid
+
+        def parent(self):
+            return None
+
+        def terminate(self):
+            return None
+
+        def kill(self):
+            return None
+
+        def children(self, recursive=True):
+            return []
+
+    root = tmp_path / "repo"
+    workbench = process_inventory.RuntimeProcess(
+        pid=101,
+        parent_pid=1,
+        kind="managed_workbench_backend",
+        name="pythonw.exe",
+        command_line="pythonw scripts/web_workbench.py --managed-by-launcher --port 8000",
+        cwd=str(root),
+        port=8000,
+    )
+    daemon_proc = process_inventory.RuntimeProcess(
+        pid=202,
+        parent_pid=1,
+        kind="runtime_manager_daemon",
+        name="pythonw.exe",
+        command_line="pythonw -m core.runtime_manager.cli daemon",
+        cwd=str(root),
+        port=0,
+    )
+    live = {101: FakeProc(101), 202: FakeProc(202)}
+    monkeypatch.setattr(process_inventory, "list_repo_runtime_processes", lambda project_root=None, exclude_pids=None: [workbench, daemon_proc])
+    monkeypatch.setattr(process_inventory, "_live_processes", lambda pids: [live[pid] for pid in sorted(pids) if pid in live])
+    monkeypatch.setattr(process_inventory.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(process_inventory.psutil, "wait_procs", lambda processes, timeout: (list(processes), []))
+    monkeypatch.setattr(process_inventory.psutil, "Process", lambda pid: live[int(pid)])
+
+    kept = process_inventory.terminate_workbench_processes(project_root=root, timeout_seconds=0.1)
+    recycled = process_inventory.terminate_workbench_processes(
+        project_root=root,
+        timeout_seconds=0.1,
+        include_runtime_manager=True,
+    )
+
+    assert kept["requested"] == [101]
+    assert recycled["requested"] == [101, 202]
+
+
 def test_terminate_workbench_processes_uses_known_pids_without_inventory_scan(monkeypatch, tmp_path):
     class FakeChild:
         def __init__(self, pid):
@@ -5904,6 +6075,80 @@ def test_terminate_workbench_processes_uses_known_pids_without_inventory_scan(mo
     assert result["requested"] == [4242, 4243]
     assert result["terminated"] == [4242, 4243]
     assert result["processCounts"]["targetProcesses"] == 2
+    assert result["candidateScan"] == "known_pids"
+
+
+def test_terminate_workbench_processes_known_pids_include_runtime_manager_without_inventory_scan(monkeypatch, tmp_path):
+    class FakeProc:
+        def __init__(self, pid, children=()):
+            self.pid = pid
+            self._children = list(children)
+            self.terminated = False
+
+        def children(self, recursive=True):
+            return list(self._children)
+
+        def parent(self):
+            return None
+
+        def terminate(self):
+            self.terminated = True
+
+        def kill(self):
+            return None
+
+        def name(self):
+            return f"proc-{self.pid}"
+
+    root = tmp_path / "repo"
+    live = {4242: FakeProc(4242), 5151: FakeProc(5151)}
+    inventory_calls = {"count": 0}
+
+    def fail_inventory(**kwargs):
+        inventory_calls["count"] += 1
+        raise AssertionError("known runtime-manager pid must not trigger full inventory scan")
+
+    def classify_pid(pid, project_root=None):
+        if int(pid) == 4242:
+            return process_inventory.RuntimeProcess(
+                pid=4242,
+                parent_pid=1,
+                kind="managed_workbench_backend",
+                name="pythonw.exe",
+                command_line="pythonw scripts/web_workbench.py --managed-by-launcher",
+                cwd=str(root),
+                port=8002,
+            )
+        if int(pid) == 5151:
+            return process_inventory.RuntimeProcess(
+                pid=5151,
+                parent_pid=1,
+                kind="runtime_manager_daemon",
+                name="pythonw.exe",
+                command_line="pythonw -m core.runtime_manager.cli daemon",
+                cwd=str(root),
+                port=0,
+            )
+        return None
+
+    monkeypatch.setattr(process_inventory, "list_repo_runtime_processes", fail_inventory)
+    monkeypatch.setattr(process_inventory, "repo_runtime_process_for_pid", classify_pid)
+    monkeypatch.setattr(process_inventory.psutil, "Process", lambda pid: live[int(pid)])
+    monkeypatch.setattr(process_inventory, "_live_processes", lambda pids: [live[pid] for pid in sorted(pids) if pid in live])
+    monkeypatch.setattr(process_inventory.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(process_inventory.psutil, "wait_procs", lambda processes, timeout: (list(processes), []))
+
+    result = process_inventory.terminate_workbench_processes(
+        project_root=root,
+        known_pids=[4242, 5151],
+        include_runtime_manager=True,
+        timeout_seconds=0.1,
+        verify_remaining_with_inventory=False,
+    )
+
+    assert inventory_calls["count"] == 0
+    assert result["candidateScan"] == "known_pids"
+    assert result["requested"] == [4242, 5151]
 
 
 @pytest.fixture
@@ -6936,6 +7181,7 @@ def test_handle_open_workbench_skips_initial_observation_when_cached_closed(monk
             "observedState": "closed",
             "phase": "steady",
             "lastRequestAudit": {"operation": "stop", "trigger": "stale_close"},
+            "cleanupProof": {"schemaVersion": 1, "valid": True},
         },
     }
     events: list[tuple[str, dict]] = []
@@ -6982,6 +7228,7 @@ def test_handle_open_workbench_skips_initial_observation_when_cached_closed(monk
     assert result["ok"] is True
     assert observe_calls == 1
     assert saved_states[0]["workbench"]["lastRequestAudit"] == {}
+    assert saved_states[0]["workbench"]["cleanupProof"] == {}
     assert _event_payload(events, "workbench.open.fast_path_started")["prelaunchProbeSkipped"] is True
 
 
@@ -8632,6 +8879,8 @@ def test_restart_build_preflight_uses_hidden_node_entrypoints_on_windows(monkeyp
     for call in calls:
         kwargs = call["kwargs"]
         startupinfo = kwargs["startupinfo"]
+        assert kwargs["encoding"] == "utf-8"
+        assert kwargs["errors"] == "replace"
         # Waitable builds must use CREATE_NO_WINDOW without DETACHED_PROCESS
         # (MSDN: CREATE_NO_WINDOW is ignored when combined with DETACHED).
         assert not (kwargs["creationflags"] & 0x00000008)
@@ -9283,6 +9532,70 @@ def test_handle_close_workbench_uses_runtime_manager_fast_path(monkeypatch):
     assert succeeded["closeStrategy"] == "runtime_manager_fast_path"
 
 
+def test_force_cleanup_uses_trusted_browser_pid_without_profile_inventory(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    cleanup_calls: list[dict[str, object]] = []
+    profile_checks: list[tuple[int, str]] = []
+
+    def fake_profile_match(pid, *, profile_dir):
+        profile_checks.append((int(pid), str(profile_dir)))
+        return int(pid) == 29999
+
+    monkeypatch.setattr(daemon, "managed_browser_pid_matches_profile", fake_profile_match, raising=False)
+    monkeypatch.setattr(
+        daemon,
+        "terminate_workbench_processes",
+        lambda **kwargs: cleanup_calls.append(dict(kwargs))
+        or {"supported": True, "requested": sorted(kwargs["known_pids"]), "terminated": [], "remaining": []},
+    )
+
+    result = runtime_daemon._force_cleanup_workbench_processes(
+        {
+            "backendPid": 28888,
+            "backendLaunchPid": 27777,
+            "browserWindowPid": 29999,
+            "browserLaunchPid": 26666,
+            "browserProfileDir": "C:/tmp/vibelution-workbench-profile",
+        }
+    )
+
+    assert result["supported"] is True
+    assert profile_checks == [
+        (26666, "C:/tmp/vibelution-workbench-profile"),
+        (29999, "C:/tmp/vibelution-workbench-profile"),
+    ]
+    assert cleanup_calls[0]["known_pids"] == {27777, 28888, 29999}
+    assert cleanup_calls[0]["browser_profile_dir"] == ""
+
+
+def test_force_cleanup_keeps_profile_inventory_fallback_for_untrusted_browser_pids(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    cleanup_calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        daemon,
+        "managed_browser_pid_matches_profile",
+        lambda _pid, *, profile_dir: False,
+    )
+    monkeypatch.setattr(
+        daemon,
+        "terminate_workbench_processes",
+        lambda **kwargs: cleanup_calls.append(dict(kwargs))
+        or {"supported": True, "requested": [], "terminated": [], "remaining": []},
+    )
+
+    runtime_daemon._force_cleanup_workbench_processes(
+        {
+            "backendPid": 28888,
+            "browserWindowPid": 29999,
+            "browserProfileDir": "C:/tmp/vibelution-workbench-profile",
+        }
+    )
+
+    assert cleanup_calls[0]["known_pids"] == {28888}
+    assert cleanup_calls[0]["browser_profile_dir"] == "C:/tmp/vibelution-workbench-profile"
+
+
 def test_handle_close_workbench_uses_light_observation_and_reuses_it(monkeypatch):
     runtime_daemon = daemon.RuntimeManagerDaemon()
     state = {
@@ -9329,7 +9642,13 @@ def test_handle_close_workbench_uses_light_observation_and_reuses_it(monkeypatch
     monkeypatch.setattr(daemon, "_runtime_manager_active_work_runs", lambda: [])
     monkeypatch.setattr(daemon, "_close_active_evolution_runs_for_shutdown", lambda: [])
     monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: None)
-    monkeypatch.setattr(daemon, "residual_process_payload", lambda **kwargs: {"count": 0, "items": []})
+    monkeypatch.setattr(
+        daemon,
+        "residual_process_payload",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("fast close must reuse bounded residual evidence")
+        ),
+    )
     monkeypatch.setattr(daemon, "_backend_port_is_closed_for_fast_close", lambda port: True)
     monkeypatch.setattr(
         daemon,
@@ -9352,6 +9671,14 @@ def test_handle_close_workbench_uses_light_observation_and_reuses_it(monkeypatch
     assert result["ok"] is True
     assert result["closeStrategy"] == "runtime_manager_fast_path"
     assert observation_calls == [{"recover_browser_window_for_backend_observed": False}]
+    assert state["workbench"]["cleanupProof"] == {
+        "schemaVersion": 1,
+        "valid": True,
+        "projectRoot": str(daemon.PROJECT_ROOT.resolve()),
+        "cleanupMode": "runtime_manager_fast_path",
+        "reason": "web_close_button",
+        "verifiedAt": "2026-06-12T10:40:00+00:00",
+    }
 
 
 def test_handle_close_workbench_falls_back_to_launcher_when_fast_path_is_unavailable(monkeypatch):
@@ -9529,7 +9856,10 @@ def test_persist_workbench_launcher_state_after_open_replaces_control_surface_sn
             "backendPid": 54856,
             "backendLaunchPid": 54856,
             "backendPort": 8000,
+            "backendObserved": True,
+            "backendHealthy": True,
             "browserManaged": True,
+            "browserWindowAlive": True,
             "browserLaunchPid": 59400,
             "browserWindowPid": 59400,
             "browserProfileDir": "workbench-profile",
@@ -9553,8 +9883,108 @@ def test_persist_workbench_launcher_state_after_open_replaces_control_surface_sn
     assert saved["launcherBrowserWindowPid"] == 3300
     assert saved["lastReason"] == "launcher_restart_button"
     assert saved["lastSource"] == "launcher_api"
+    assert saved["observedState"] == "open"
+    assert saved["lifecycleConsistency"] == "consistent"
     assert saved["statusLine"] == "Workbench is running."
     assert events[-1][0] == "launcher.state.workbench_open_persisted"
+
+
+def test_persist_workbench_launcher_state_after_open_keeps_backend_only_as_partial(tmp_path, monkeypatch):
+    state_path = tmp_path / "state.json"
+    state_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(workbench_controller, "LAUNCHER_STATE_PATH", state_path)
+    monkeypatch.setattr(
+        workbench_controller,
+        "append_runtime_manager_file_event",
+        lambda *_args, **_kwargs: None,
+    )
+
+    result = workbench_controller.persist_workbench_launcher_state_after_open(
+        {
+            "sessionId": "backend-only",
+            "backendPid": 27700,
+            "backendLaunchPid": 27700,
+            "backendPort": 8002,
+            "backendObserved": True,
+            "backendAlive": True,
+            "backendHealthy": True,
+            "browserManaged": False,
+            "browserWindowAlive": False,
+            "browserLaunchPid": 0,
+            "browserWindowPid": 0,
+            "windowProvider": "electron",
+            "url": "http://127.0.0.1:8002",
+        },
+        last_reason="electron_main_restart",
+        last_source="runtime_manager",
+    )
+    saved = json.loads(state_path.read_text(encoding="utf-8"))
+
+    assert result["updatedState"] is True
+    assert saved["observedState"] == "partial"
+    assert saved["browserWindowPid"] == 0
+    assert saved["lifecycleConsistency"] == "browser_missing"
+    assert saved["statusLine"] == "Workbench window is closed; backend is still running."
+
+
+def test_persist_workbench_launcher_state_after_open_keeps_window_only_as_partial(tmp_path, monkeypatch):
+    state_path = tmp_path / "state.json"
+    state_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(workbench_controller, "LAUNCHER_STATE_PATH", state_path)
+    monkeypatch.setattr(
+        workbench_controller,
+        "append_runtime_manager_file_event",
+        lambda *_args, **_kwargs: None,
+    )
+
+    result = workbench_controller.persist_workbench_launcher_state_after_open(
+        {
+            "sessionId": "window-only",
+            "backendPid": 0,
+            "backendObserved": False,
+            "backendHealthy": False,
+            "browserManaged": True,
+            "browserWindowAlive": True,
+            "browserLaunchPid": 29100,
+            "browserWindowPid": 29100,
+            "url": "http://127.0.0.1:8003",
+        },
+        last_reason="electron_window_recovered",
+        last_source="runtime_manager",
+    )
+    saved = json.loads(state_path.read_text(encoding="utf-8"))
+
+    assert result["updatedState"] is True
+    assert saved["observedState"] == "partial"
+    assert saved["backendMissing"] is True
+    assert saved["frontendOrphaned"] is True
+    assert saved["lifecycleConsistency"] == "backend_missing"
+    assert saved["statusLine"] == "Workbench window is open; backend is unavailable."
+
+
+def test_persist_workbench_launcher_state_after_open_does_not_treat_pids_as_readiness(tmp_path, monkeypatch):
+    state_path = tmp_path / "state.json"
+    state_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(workbench_controller, "LAUNCHER_STATE_PATH", state_path)
+    monkeypatch.setattr(
+        workbench_controller,
+        "append_runtime_manager_file_event",
+        lambda *_args, **_kwargs: None,
+    )
+
+    result = workbench_controller.persist_workbench_launcher_state_after_open(
+        {
+            "sessionId": "stale-pids",
+            "backendPid": 30100,
+            "browserManaged": True,
+            "browserWindowPid": 30200,
+        }
+    )
+    saved = json.loads(state_path.read_text(encoding="utf-8"))
+
+    assert result["updatedState"] is True
+    assert saved["observedState"] == "closed"
+    assert saved["statusLine"] == "Workbench is unavailable."
 
 
 def test_handle_force_close_workbench_marks_work_runs_and_verifies_close(monkeypatch):
@@ -10825,6 +11255,13 @@ def test_handle_close_workbench_skips_residual_cleanup_for_plain_close_when_alre
     monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
     monkeypatch.setattr(
         daemon,
+        "residual_process_payload",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("already-closed clean path must reuse bounded residual evidence")
+        ),
+    )
+    monkeypatch.setattr(
+        daemon,
         "close_workbench",
         lambda: close_calls.append("close") or subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
     )
@@ -10849,6 +11286,7 @@ def test_handle_close_workbench_skips_residual_cleanup_for_plain_close_when_alre
     assert result["stopDaemon"] is False
     assert result["residualCleanup"]["skipped"] == "already_closed_no_residual"
     assert result["launcherStateCleanup"]["reason"] == "launcher_control_process_alive"
+    assert state["workbench"]["cleanupProof"]["valid"] is True
     assert state_cleanup_calls == ["cleanup"]
     assert close_calls == []
 

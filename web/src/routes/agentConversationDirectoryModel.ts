@@ -146,6 +146,22 @@ export function buildAgentPrimaryTeamIdMap(teams: ConversationIndexTeam[]): Map<
   return map;
 }
 
+/**
+ * Left-rail conversation/special order is independent of rename and other
+ * display-name PATCH bumps to `updatedAt`. Newest created Agent stays first.
+ */
+export function compareAgentDirectoryStableOrder(
+  left: AgentInstance,
+  right: AgentInstance,
+): number {
+  const leftCreated = String(left.createdAt || "").trim();
+  const rightCreated = String(right.createdAt || "").trim();
+  if (leftCreated !== rightCreated) {
+    return rightCreated.localeCompare(leftCreated);
+  }
+  return String(left.agentId || "").localeCompare(String(right.agentId || ""));
+}
+
 /** Room ids owned by any directory team (used to keep 未归属 empty when links are valid). */
 export function directoryLinkedRoomIds(teams: readonly Team[] | ConversationIndexTeam[]): Set<string> {
   const ids = new Set<string>();
@@ -266,6 +282,9 @@ export function buildAgentDirectoryPartition(options: {
       specialAgents.push(agent);
     }
   }
+
+  conversationAgents.sort(compareAgentDirectoryStableOrder);
+  specialAgents.sort(compareAgentDirectoryStableOrder);
 
   const listedAgentIds = [
     ...conversationAgents.map((agent) => String(agent.agentId || "").trim()),

@@ -3,9 +3,8 @@ import "../design/route-css/workbench-secondary.tailwind.css";
 import { useQuery } from "@tanstack/react-query";
 import type { CSSProperties } from "react";
 
-import { fetchJson } from "../api/client";
+import { fetchPetSummary } from "../api/pet";
 import { queryKeys } from "../api/queryKeys";
-import { PetSummary } from "../api/types";
 import { VDenseOpsPage } from "../components/vui";
 import { petAvatarPresetLabel } from "../i18n/petLabels";
 import { useAppI18n } from "../i18n/useAppI18n";
@@ -24,7 +23,7 @@ export function PetRoute() {
   const { t } = useAppI18n({ domains: ["pet"] });
   const petQuery = useQuery({
     queryKey: queryKeys.petSummary(),
-    queryFn: () => fetchJson<PetSummary>("/api/pet/summary"),
+    queryFn: () => fetchPetSummary(),
   });
 
   const pet = petQuery.data;

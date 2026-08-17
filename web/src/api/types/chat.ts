@@ -31,6 +31,8 @@ export type SessionSummary = {
   taskSummary: string;
   lastActive: string;
   updatedAt: string;
+  /** Stable create timestamp for tab order; must not change with running activity. */
+  createdAt?: string;
   currentPhase: string;
   /** Session is retained in storage but intentionally absent from normal chat navigation. */
   hiddenFromIndex?: boolean;
@@ -67,6 +69,8 @@ export type SessionSummary = {
   conversationIndexVisibility?: ConversationIndexVisibility;
   conversationIndexKind?: ConversationIndexKind;
   conversationIndexErrors?: string[];
+  teamId?: string;
+  teamName?: string;
 };
 
 export type SessionExperimentBinding = {
@@ -656,6 +660,27 @@ export type SessionDeleteResponse = {
   deleted: boolean;
   deletedSessionId: string;
   nextActiveSessionId: string;
+};
+
+export type SessionBulkDeleteResponse = {
+  status: string;
+  requestedSessionIds: string[];
+  success: Array<{
+    sessionId: string;
+    deleted?: boolean;
+    nextActiveSessionId?: string;
+    replacementDirectSessionId?: string;
+  }>;
+  skipped: Array<{ sessionId: string; reason?: string; message?: string }>;
+  failed: Array<{ sessionId: string; reason?: string; message?: string }>;
+  summary: {
+    requestedCount: number;
+    successCount: number;
+    skippedCount: number;
+    failedCount: number;
+  };
+  nextActiveSessionId?: string;
+  durationMs?: number;
 };
 
 export type SessionTurnError = {

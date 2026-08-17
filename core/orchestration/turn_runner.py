@@ -7,9 +7,10 @@ running one Agent Turn without importing the top-level ``agent.py`` entrypoint.
 from __future__ import annotations
 
 import inspect
+import json
 from contextlib import nullcontext
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from core.llm.payload_builder import prompt_cache_partition_scope
 from core.orchestration.turn_outcome import TurnOutcomeController
@@ -18,6 +19,111 @@ from core.orchestration.turn_runtime import AgentTurnRuntime, AgentTurnRuntimeRe
 
 AgentFactory = Callable[..., Any]
 InterruptChecker = Callable[[], str]
+
+
+def _coerce_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+def _maybe_json(value: Any) -> Any:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith("{") or text.startswith("["):
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                return value
+    return value
+
+
+def _coerce_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return bool(value)
+    text = str(value).strip().lower()
+    if not text:
+        return default
+    if text in {"1", "true", "yes", "on", "enabled"}:
+        return True
+    if text in {"0", "false", "no", "off", "disabled"}:
+        return False
+    return default
+
+
+def _as_mapping(value: Any) -> dict[str, Any]:
+    value = _maybe_json(value)
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {}
+
+
+def _coerce_item_list(value: Any) -> list:
+    value = _maybe_json(value)
+    if value is None or isinstance(value, (str, bytes, bytearray, memoryview)):
+        return []
+    if isinstance(value, Mapping):
+        nested = value.get("messages")
+        if nested is None:
+            nested = value.get("items")
+        if nested is None:
+            nested = value.get("history")
+        if nested is None:
+            nested = value.get("chat_history")
+        if nested is None:
+            nested = value.get("chatHistory")
+        if nested is not None:
+            return _coerce_item_list(nested)
+        if any(key in value for key in ("kind", "role", "content", "type", "tool_calls", "toolCalls")):
+            return [dict(value)]
+        return []
+    try:
+        return list(value)
+    except TypeError:
+        return []
+
+
+def _as_single_turn_request(request: Any) -> AgentSingleTurnRequest:
+    if isinstance(request, AgentSingleTurnRequest):
+        return request
+    values = _as_mapping(request)
+    runtime = values.get("runtime")
+    if runtime is None:
+        runtime = values.get("turn_runtime")
+    return AgentSingleTurnRequest(
+        mode=_coerce_text(values.get("mode")).strip(),
+        initial_prompt=_coerce_text(values.get("initial_prompt") or values.get("initialPrompt")),
+        workspace_path=_coerce_text(values.get("workspace_path") or values.get("workspacePath")).strip() or None,
+        config=values.get("config"),
+        disable_tools=_coerce_bool(values.get("disable_tools", values.get("disableTools")), False),
+        carryover=_as_mapping(values.get("carryover")) or None,
+        chat_history=_coerce_item_list(values.get("chat_history") or values.get("chatHistory")) or None,
+        turn_identity=_coerce_text(values.get("turn_identity") or values.get("turnIdentity")).strip(),
+        runtime_context=_coerce_text(values.get("runtime_context") or values.get("runtimeContext")),
+        static_runtime_context=_coerce_text(
+            values.get("static_runtime_context") or values.get("staticRuntimeContext")
+        ),
+        dynamic_runtime_context=_coerce_text(
+            values.get("dynamic_runtime_context") or values.get("dynamicRuntimeContext")
+        ),
+        interrupt_checker=values.get("interrupt_checker") or values.get("interruptChecker"),
+        runtime=runtime,
+        prompt_cache_partition=_coerce_text(
+            values.get("prompt_cache_partition") or values.get("promptCachePartition")
+        ).strip(),
+    )
 
 
 @dataclass(frozen=True)
@@ -81,7 +187,7 @@ def create_agent_runtime(
     }
     if runtime_agent_binding is not None:
         factory_kwargs["runtime_agent_binding"] = runtime_agent_binding
-    return agent_factory(**factory_kwargs)
+    return call_agent_factory_with_supported_kwargs(agent_factory, **factory_kwargs)
 
 
 def call_agent_factory_with_supported_kwargs(factory: Callable[..., Any], **kwargs: Any) -> Any:
@@ -103,6 +209,10 @@ def call_agent_factory_with_supported_kwargs(factory: Callable[..., Any], **kwar
     return factory()
 
 
+def _coerce_chat_history(value: Any) -> list:
+    return _coerce_item_list(value)
+
+
 def prepare_agent_turn(
     agent: Any,
     *,
@@ -116,7 +226,8 @@ def prepare_agent_turn(
 ) -> None:
     """Own preparation of history or same-turn recovery before execution."""
 
-    normalized_turn_identity = str(turn_identity or "").strip()
+    normalized_turn_identity = _coerce_text(turn_identity).strip()
+    history_items = _coerce_chat_history(chat_history)
     set_turn_identity = getattr(agent, "set_turn_identity", None)
     if callable(set_turn_identity) and (normalized_turn_identity or carryover):
         set_turn_identity(normalized_turn_identity)
@@ -133,11 +244,11 @@ def prepare_agent_turn(
         if carryover_status != "absent" and callable(clear_active_state):
             clear_active_state()
         restore_chat_history = getattr(agent, "seed_chat_history", None)
-        if callable(restore_chat_history) and chat_history:
-            restore_chat_history(chat_history)
+        if callable(restore_chat_history) and history_items:
+            restore_chat_history(history_items)
 
     host_seeded_runtime_context = False
-    static_context_text = str(static_runtime_context or "").strip()
+    static_context_text = _coerce_text(static_runtime_context).strip()
     seed_static_runtime_context = getattr(agent, "seed_static_runtime_context", None)
     seed_runtime_context = getattr(agent, "seed_runtime_context", None)
     if static_context_text:
@@ -155,7 +266,7 @@ def prepare_agent_turn(
         host_context_marker()
 
     stop_configurer = getattr(agent, "set_turn_interrupt_checker", None)
-    if callable(stop_configurer) and interrupt_checker:
+    if callable(stop_configurer) and callable(interrupt_checker):
         stop_configurer(interrupt_checker)
 
     record_diagnostic = getattr(agent, "record_turn_preparation_diagnostic", None)
@@ -166,14 +277,14 @@ def prepare_agent_turn(
                     "carryover"
                     if carryover_status == "accepted"
                     else "history"
-                    if chat_history
+                    if history_items
                     else "fresh"
                 ),
                 "carryoverStatus": carryover_status,
-                "historyMessageCount": len(list(chat_history or [])),
+                "historyMessageCount": len(history_items),
                 "hasTurnIdentity": bool(normalized_turn_identity),
                 "staticContextChars": len(static_context_text),
-                "dynamicContextChars": len(str(dynamic_runtime_context or "").strip()),
+                "dynamicContextChars": len(_coerce_text(dynamic_runtime_context).strip()),
             }
         )
 
@@ -189,7 +300,7 @@ def _execute_existing_agent_single_turn(
     """Execute one already-prepared Agent Turn."""
 
     runner = getattr(agent, "run_single_turn")
-    kwargs: dict[str, Any] = {"initial_prompt": initial_prompt}
+    kwargs: dict[str, Any] = {"initial_prompt": _coerce_text(initial_prompt)}
     try:
         signature = inspect.signature(runner)
     except (TypeError, ValueError):
@@ -199,14 +310,16 @@ def _execute_existing_agent_single_turn(
         signature is not None
         and any(param.kind == inspect.Parameter.VAR_KEYWORD for param in signature.parameters.values())
     )
-    normalized_attachments = list(attachments or [])
+    normalized_attachments = _coerce_item_list(attachments)
     if normalized_attachments and signature is not None and (
         "attachments" in signature.parameters or supports_var_kwargs
     ):
         kwargs["attachments"] = normalized_attachments
-    if disable_tools and signature is not None and "disable_tools" in signature.parameters:
+    if _coerce_bool(disable_tools, False) and signature is not None and (
+        "disable_tools" in signature.parameters or supports_var_kwargs
+    ):
         kwargs["disable_tools"] = True
-    partition = str(prompt_cache_partition or "").strip()
+    partition = _coerce_text(prompt_cache_partition).strip()
     scope = prompt_cache_partition_scope(partition) if partition else nullcontext()
     with scope:
         return runner(**kwargs)
@@ -255,11 +368,12 @@ def run_agent_single_turn(
 ) -> AgentSingleTurnResult:
     """Run one Agent Turn and return the visible result plus next carryover."""
 
+    request = _as_single_turn_request(request)
     runtime = prepare_agent_turn_runtime(request.runtime) if request.runtime is not None else None
     prompt_cache_partition = (
         runtime.prompt_cache_partition
         if runtime is not None
-        else str(request.prompt_cache_partition or "").strip()
+        else _coerce_text(request.prompt_cache_partition).strip()
     )
     runtime_agent_binding = None
     if runtime is not None and runtime.agent_id:
@@ -276,8 +390,8 @@ def run_agent_single_turn(
                 }
             }
     agent = create_agent_runtime(
-        mode=request.mode,
-        workspace_path=request.workspace_path,
+        mode=_coerce_text(request.mode).strip(),
+        workspace_path=_coerce_text(request.workspace_path).strip() or None,
         config=request.config,
         runtime_agent_binding=runtime_agent_binding,
         agent_factory=agent_factory,
@@ -287,9 +401,9 @@ def run_agent_single_turn(
         carryover=request.carryover,
         chat_history=request.chat_history,
         turn_identity=(
-            str(getattr(runtime, "run_id", "") or "").strip()
+            _coerce_text(getattr(runtime, "run_id", "")).strip()
             if runtime is not None
-            else str(request.turn_identity or "").strip()
+            else _coerce_text(request.turn_identity).strip()
         ),
         runtime_context=request.runtime_context,
         static_runtime_context=request.static_runtime_context,
@@ -299,11 +413,12 @@ def run_agent_single_turn(
 
     raw_result = _execute_existing_agent_single_turn(
         agent,
-        initial_prompt=request.initial_prompt,
-        disable_tools=request.disable_tools,
+        initial_prompt=_coerce_text(request.initial_prompt),
+        disable_tools=_coerce_bool(request.disable_tools, False),
         prompt_cache_partition=prompt_cache_partition,
     )
-    result = raw_result if isinstance(raw_result, dict) else {}
+    result = raw_result if isinstance(raw_result, Mapping) else {}
+    result = dict(result)
     if runtime is not None:
         result = {**result, "turn_runtime": dict(runtime.metadata)}
 
@@ -311,8 +426,8 @@ def run_agent_single_turn(
     export_turn_carryover = getattr(agent, "export_turn_carryover", None)
     if callable(export_turn_carryover):
         exported = export_turn_carryover()
-        if isinstance(exported, dict):
-            carryover_payload = exported
+        if isinstance(exported, Mapping):
+            carryover_payload = dict(exported)
 
     return AgentSingleTurnResult(result=result, carryover=carryover_payload, runtime=runtime)
 

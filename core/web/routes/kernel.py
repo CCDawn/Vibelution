@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, status
-from pydantic import BaseModel, Field
 
 from core.agent_kernel import (
     KernelAdapterError,
@@ -21,52 +20,29 @@ from core.agent_kernel import (
     list_kernel_tasks,
     submit_agent_message_event,
 )
+from core.web.routes.kernel_models import (
+    KernelAgentMessageAdapterPayload,
+    KernelEventDetailResponse,
+    KernelEventLoopResponse,
+    KernelEventPayload,
+    KernelInboxAckPayload,
+    KernelInboxAckResponse,
+    KernelInboxResponse,
+    KernelTaskDetailResponse,
+    KernelTaskListResponse,
+    KernelTaskTimelineResponse,
+)
 
 
 router = APIRouter(tags=["agent-kernel"])
 
 
-class KernelEventPayload(BaseModel):
-    eventId: str = ""
-    sender: dict[str, Any] = Field(default_factory=dict)
-    senderAgentId: str = ""
-    recipients: list[Any] = Field(default_factory=list)
-    recipientAgentIds: list[str] = Field(default_factory=list)
-    targetAgentIds: list[str] = Field(default_factory=list)
-    recipientAgentId: str = ""
-    semanticType: str = ""
-    semanticPayload: dict[str, Any] = Field(default_factory=dict)
-    payload: dict[str, Any] = Field(default_factory=dict)
-    content: str = ""
-    idempotencyKey: str = ""
-    correlationId: str = ""
-    causationId: str = ""
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    wakeTarget: bool | None = None
-    traceOnly: bool | None = None
-    deliveryPolicy: dict[str, Any] = Field(default_factory=dict)
-
-
-class KernelInboxAckPayload(BaseModel):
-    consumedBySessionId: str = ""
-    consumedByTurnId: str = ""
-
-
-class KernelAgentMessageAdapterPayload(BaseModel):
-    source: str = "manual_api"
-    sender: dict[str, Any] = Field(default_factory=dict)
-    recipientAgentIds: list[str] = Field(default_factory=list)
-    content: str = ""
-    correlationId: str = ""
-    causationId: str = ""
-    wakeTarget: bool = True
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    sourceId: str = ""
-    idempotencyKey: str = ""
-    eventId: str = ""
-
-
-@router.post("/kernel/adapter/agent-message", status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "/kernel/adapter/agent-message",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=KernelEventLoopResponse,
+    response_model_exclude_unset=True,
+)
 def kernel_agent_message_adapter_create(payload: KernelAgentMessageAdapterPayload) -> dict:
     try:
         return submit_agent_message_event(
@@ -93,7 +69,12 @@ def kernel_agent_message_adapter_create(payload: KernelAgentMessageAdapterPayloa
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/kernel/events", status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "/kernel/events",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=KernelEventLoopResponse,
+    response_model_exclude_unset=True,
+)
 def kernel_event_create(payload: KernelEventPayload) -> dict:
     try:
         raw_payload = payload.model_dump() if hasattr(payload, "model_dump") else payload.dict()
@@ -107,7 +88,11 @@ def kernel_event_create(payload: KernelEventPayload) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/kernel/events/{event_id}")
+@router.get(
+    "/kernel/events/{event_id}",
+    response_model=KernelEventDetailResponse,
+    response_model_exclude_unset=True,
+)
 def kernel_event_detail(event_id: str) -> dict:
     try:
         return get_kernel_event(event_id)
@@ -115,12 +100,20 @@ def kernel_event_detail(event_id: str) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.get("/kernel/tasks")
+@router.get(
+    "/kernel/tasks",
+    response_model=KernelTaskListResponse,
+    response_model_exclude_unset=True,
+)
 def kernel_task_list(status: str = "", limit: int = Query(default=50, ge=1, le=300)) -> dict:
     return list_kernel_tasks(status=status, limit=limit)
 
 
-@router.get("/kernel/tasks/{task_id}/timeline")
+@router.get(
+    "/kernel/tasks/{task_id}/timeline",
+    response_model=KernelTaskTimelineResponse,
+    response_model_exclude_unset=True,
+)
 def kernel_task_timeline(task_id: str) -> dict:
     try:
         return get_kernel_task_timeline(task_id)
@@ -130,7 +123,11 @@ def kernel_task_timeline(task_id: str) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.get("/kernel/tasks/{task_id}")
+@router.get(
+    "/kernel/tasks/{task_id}",
+    response_model=KernelTaskDetailResponse,
+    response_model_exclude_unset=True,
+)
 def kernel_task_detail(task_id: str) -> dict:
     try:
         return get_kernel_task(task_id)
@@ -138,7 +135,11 @@ def kernel_task_detail(task_id: str) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.get("/agents/{agent_id}/inbox")
+@router.get(
+    "/agents/{agent_id}/inbox",
+    response_model=KernelInboxResponse,
+    response_model_exclude_unset=True,
+)
 def kernel_agent_inbox(agent_id: str, status: str = "pending", limit: int = Query(default=20, ge=1, le=100)) -> dict:
     try:
         return list_agent_inbox(agent_id, status=status, limit=limit)
@@ -146,7 +147,11 @@ def kernel_agent_inbox(agent_id: str, status: str = "pending", limit: int = Quer
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.post("/agents/{agent_id}/inbox/{event_id}/ack")
+@router.post(
+    "/agents/{agent_id}/inbox/{event_id}/ack",
+    response_model=KernelInboxAckResponse,
+    response_model_exclude_unset=True,
+)
 def kernel_agent_inbox_ack(agent_id: str, event_id: str, payload: KernelInboxAckPayload) -> dict:
     try:
         return ack_agent_inbox_message(

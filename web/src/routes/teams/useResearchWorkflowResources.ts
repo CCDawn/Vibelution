@@ -1,13 +1,22 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { resolvePollingInterval } from "../../app/pollingPolicy";
-import { fetchJson } from "../../api/client";
 import { queryKeys } from "../../api/queryKeys";
+import { fetchResearchStageRoundStatus } from "../../api/stageRounds";
+import {
+  fetchKnowledgeIngestionStatus,
+  fetchTeamWorkflowCoordinationStatus,
+} from "../../api/teamKnowledge";
+import {
+  fetchOfficialModelEvidenceStatus,
+  fetchPaperNoteChunkStatus,
+  fetchSourceQualityStatus,
+} from "../../api/teamResearchOps";
+import { fetchTeamWorkflowCandidates } from "../../api/teamExperiment";
+import { fetchTeamWorkflowOrchestration } from "../../api/teamWorkflow";
 import type {
   TeamWorkflowCandidateListPayload,
-  TeamWorkflowCoordinationStatus,
   TeamWorkflowKnowledgeIngestionStatus,
-  TeamWorkflowOrchestration,
 } from "../../api/types";
 import {
   sourceCollectionStageCardsFromStatus,
@@ -304,16 +313,13 @@ export function useResearchWorkflowResources({
 }: ResearchWorkflowResourcesInput) {
   const workflow = useQuery({
     queryKey: queryKeys.teamWorkflow(teamId || "none"),
-    queryFn: ({ signal }) => fetchJson<TeamWorkflowOrchestration>(
-      `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration`,
-      { signal },
-    ),
+    queryFn: ({ signal }) => fetchTeamWorkflowOrchestration(teamId, { signal }),
     enabled: Boolean(teamId && demand.workflow),
   });
   const stageRound = useQuery({
     queryKey: researchStageRoundStatusQueryKey(teamId || "none"),
-    queryFn: ({ signal }) => fetchJson<ResearchStageRoundStatusPayload>(
-      `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/stage-rounds/status`,
+    queryFn: ({ signal }) => fetchResearchStageRoundStatus<ResearchStageRoundStatusPayload>(
+      teamId,
       { signal },
     ),
     enabled: Boolean(teamId && demand.stageRound),
@@ -326,9 +332,14 @@ export function useResearchWorkflowResources({
   });
   const candidates = useQuery({
     queryKey: queryKeys.teamWorkflowCandidates(teamId || "none", TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT),
-    queryFn: ({ signal }) => fetchJson<TeamWorkflowCandidateListPayload>(
-      `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/candidates?limit=${TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT}&includeValidation=false&includeStore=false`,
-      { signal },
+    queryFn: ({ signal }) => fetchTeamWorkflowCandidates<TeamWorkflowCandidateListPayload>(
+      teamId,
+      {
+        limit: TEAM_WORKFLOW_CANDIDATE_PREVIEW_LIMIT,
+        includeValidation: false,
+        includeStore: false,
+        signal,
+      },
     ),
     enabled: Boolean(teamId && demand.candidates),
     refetchInterval: () => sourceCollectionStageWritebackRefetchInterval(
@@ -340,26 +351,25 @@ export function useResearchWorkflowResources({
   });
   const candidateGraph = useQuery({
     queryKey: queryKeys.teamWorkflowCandidateGraph(teamId || "none"),
-    queryFn: ({ signal }) => fetchJson<TeamWorkflowCandidateListPayload>(
-      `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/candidates?candidateType=candidate_graph&limit=${TEAM_WORKFLOW_CANDIDATE_GRAPH_LIMIT}&includeStore=false`,
-      { signal },
+    queryFn: ({ signal }) => fetchTeamWorkflowCandidates<TeamWorkflowCandidateListPayload>(
+      teamId,
+      {
+        candidateType: "candidate_graph",
+        limit: TEAM_WORKFLOW_CANDIDATE_GRAPH_LIMIT,
+        includeStore: false,
+        signal,
+      },
     ),
     enabled: Boolean(teamId && demand.candidateGraph),
   });
   const coordination = useQuery({
     queryKey: queryKeys.teamWorkflowCoordinationStatus(teamId || "none"),
-    queryFn: ({ signal }) => fetchJson<TeamWorkflowCoordinationStatus>(
-      `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/coordination/status`,
-      { signal },
-    ),
+    queryFn: ({ signal }) => fetchTeamWorkflowCoordinationStatus(teamId, { signal }),
     enabled: Boolean(teamId && demand.coordination),
   });
   const knowledgeIngestion = useQuery({
     queryKey: queryKeys.teamWorkflowKnowledgeIngestionStatus(teamId || "none"),
-    queryFn: ({ signal }) => fetchJson<TeamWorkflowKnowledgeIngestionStatus>(
-      `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/knowledge-ingestion/status`,
-      { signal },
-    ),
+    queryFn: ({ signal }) => fetchKnowledgeIngestionStatus(teamId, { signal }),
     enabled: Boolean(teamId && demand.knowledgeIngestion),
     refetchInterval: (query) => {
       const data = query.state.data as TeamWorkflowKnowledgeIngestionStatus | undefined;
@@ -368,16 +378,16 @@ export function useResearchWorkflowResources({
   });
   const modelEvidence = useQuery({
     queryKey: officialModelEvidenceStatusQueryKey(teamId || "none"),
-    queryFn: ({ signal }) => fetchJson<TeamWorkflowOfficialModelEvidenceStatus>(
-      `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/official-model-evidence/status`,
+    queryFn: ({ signal }) => fetchOfficialModelEvidenceStatus<TeamWorkflowOfficialModelEvidenceStatus>(
+      teamId,
       { signal },
     ),
     enabled: Boolean(teamId && demand.modelEvidence),
   });
   const sourceQuality = useQuery({
     queryKey: sourceQualityStatusQueryKey(teamId || "none"),
-    queryFn: ({ signal }) => fetchJson<TeamWorkflowSourceQualityStatus>(
-      `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/source-quality/status`,
+    queryFn: ({ signal }) => fetchSourceQualityStatus<TeamWorkflowSourceQualityStatus>(
+      teamId,
       { signal },
     ),
     enabled: Boolean(teamId && demand.sourceQuality),
@@ -390,8 +400,8 @@ export function useResearchWorkflowResources({
   });
   const paperNoteChunks = useQuery({
     queryKey: paperNoteChunkStatusQueryKey(teamId || "none"),
-    queryFn: ({ signal }) => fetchJson<TeamWorkflowPaperNoteChunkStatus>(
-      `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/paper-note-chunks/status`,
+    queryFn: ({ signal }) => fetchPaperNoteChunkStatus<TeamWorkflowPaperNoteChunkStatus>(
+      teamId,
       { signal },
     ),
     enabled: Boolean(teamId && demand.paperNoteChunks),

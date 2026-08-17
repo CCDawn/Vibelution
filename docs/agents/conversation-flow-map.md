@@ -51,10 +51,15 @@
 
 | 事实 | canonical source | 派生面 |
 | --- | --- | --- |
-| session 目录/索引（创建、标题、归档、父子、recency、status、kind/visibility、有界 preview） | `workspace/chat/conversations.sqlite3`，通过 `ConversationStore` + `session/directory_runtime.py` | session list/`query_sessions`、taskSummary、lastActive。列表禁止扫描 `turn_journal.jsonl`。 |
+| session 目录/索引（创建、标题、归档、父子、recency、status、kind/visibility、有界 preview） | `workspace/chat/conversations.sqlite3`，通过 `ConversationStore` + `session/directory_runtime.py` | session list/`query_sessions`、taskSummary、lastActive、`createdAt`。列表禁止扫描 `turn_journal.jsonl`。列表按 recency 排序，**不得把 `active_conversation_id` pin 到第一位**。 |
+| 操作者上次查看偏好（last-viewed preference，非窗口实时页面权威） | `active_conversation_id`；只由 `POST /api/sessions/{id}/select`、用户创建并激活（`activate=true`）、删除后的 fallback 写入 | submit / edit-resubmit / CLI wake / `ensure_agent_direct_session` 修复 / 子会话默认 `switch_to_child=false` **不得**改写。前端**不再**以该 pointer 恢复选中态：当前页面/会话/群聊的实时权威是窗口内 committed React Router URL（`?session=` / `?room=`，含 `?room=__project_agent_bus__`），见 ADR 0009。pointer 仅作裸 `/chat` 的一次性 last-viewed 候选（localStorage 优先），canonical URL 建立后只被被动写入，不再驱动导航；`/select` 晚到响应只能更新对应 session cache。 |
+| 窗口内当前页面/直接会话/群聊/Project Agent Bus（window-local authority） | committed React Router URL（`location.search`），唯一写入口 `useChatRouteSelection` | `activeSessionId`/`activeGroupRoomId` 仅作局部派生变量；Zustand 不保存 active session；`window.location` recovery、localStorage、后端 pointer、后台 SSE/轮询/任务完成/焦点恢复都不得导航；异步 create/delete/archive/reset/select 结果走 compare-and-swap。 |
+| Agent 顶栏 Tab 顺序 | 会话 `createdAt` 升序，缺省再 `id`（前端 `compareAgentSessionTabOrder`） | `updatedAt` / `lastActive` 只表示活动/绿圈，不决定 Tab 顺序。 |
 | session 控制态与热路径薄壳（submit/detail 仍读 compatibility document） | `workspace/chat/conversations.sqlite3` 的 `workspace_chat_state` / `session_runtime_state`；大诊断快照单独存于 `session_debug_snapshots`，通过 `core/ui/chat_state.py` 兼容 API 访问 | running/error 壳、active session、submit 定位与 experiment binding overlay。正常运行不再读写 `chat_state.json`。 |
-| turn transcript/replay 事实 | `turn_journal.jsonl`，通过 `core/chat/turn_journal.py` | model-visible messages、`SessionDetail.messages`、native transcript/timeline 投影。 |
+| turn transcript/replay 事实 | `turn_journal.jsonl`，通过 `core/chat/turn_journal.py` | model-visible messages、`SessionDetail.messages`、native transcript/timeline 投影。发给模型的 **对话层**（user/assistant/tool）必须能从该 JSONL 重建；运行时检查见 `core/chat/conversation_invariant.py`。 |
+| journal 物理 rewrite（显式例外） | `rewrite_turn_events`：编辑重提截断、群聊 transcript 清理 | 不是第二写入权威。rewrite 后仍按新 JSONL 重建；默认路径保持仅追加。 |
 | 运行中 assistant text/thought/tools | `SessionLiveOutputState` 和可选 live-output checkpoint | `assistant_delta` SSE、live overlay message、active-turn layer。 |
+| 多会话 live work-run | 内存 `_RUNNING_SESSION_IDS` → `workRuns.activeItems.chat_turn`（顺序稳定） | 绿圈 / tool-approval busy。`workRuns.active.chat_turn` 是单槽遗留，不得当选中态或唯一 running。runtime summary 轮询不得为 live status 抢 `chat_state` 锁。 |
 | 最终 assistant 回复 | `turn_journal.jsonl` 里的 `assistant_item_committed` / final answer | 持久 `SessionDetail.messages.turnItems`；`content` 为兼容镜像；`codexTranscript` 由 items 单向派生。 |
 | transport 顺序保护 | session ledger sequence 生成的 `ledgerSeq` | 前端 stale-event rejection 与 active-turn settlement。 |
 | runtime 调试证据 | `logs/runtime_scenes/**`、`log_info/**`、work-run records | 诊断包；不能替代 journal。 |
@@ -67,6 +72,8 @@
 经验规则：
 
 - `turn_journal.jsonl` 是 durable turn record。
+- 发给模型的对话层不得靠 payload 入口静默修补孤儿/未完成 tool chain；系统层（runtime context、Turn Status Bar、skill）不算 transcript。
+- 同一轮内后续 `_invoke_llm`：当前 turn 的 assistant/tool 对话层从 `turn_journal.jsonl` 重建并拼回已组装的 system/history/current user；Turn Status Bar 仍每轮重写，不进 transcript。历史 seed 仍排除当前 turn。journal 不完整或 replay invariant 失败时 **fail-closed**，不再静默回退内存链；**每次 chat LLM 前**与 ledger 对账并携带 `ledgerConversationFingerprint`；history seed 与 `seed_chat_history` 禁止 silent repair。
 - **`SessionTurnItem[]`（`message.turnItems`）是 UI 主包 / 单一投影源。**
 - `assistant_delta` 是 transport，不是事实源；流式时按 item 身份更新 active-turn 草稿包。
 - `codexTranscript` 是 cells 渲染适配层，由 `turnItems` 单向派生，不得成为第二写入者。
@@ -101,13 +108,13 @@
 
 ## 只读诊断命令
 
-用 `sessionId` 和可选 `turnId` 串起 journal、live checkpoint 和 runtime-scene 线索：
+统一入口：**`agent_log_context`**（CLI 与 `conversation_log_inspect_tool` 无 `log_path` 时相同）。细则：[agent-log-routing.md](../guides/agent-log-routing.md)。
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\diagnose_session_turn.py --project-root . --session-id <sessionId> --turn-id <turnId>
+.\.venv\Scripts\python.exe scripts\agent_log_context.py --project-root . --session-id <sessionId> --turn-id <turnId>
 ```
 
-报告里的 `journal` 显示事件顺序、最新 sequence、终态事件和 JSONL 解码问题；`liveOutput` 显示运行中 checkpoint 的 stage、turn 匹配和内容长度；`runtimeEvidence.matches` 显示匹配到的 runtime-scene JSONL 事件码、路径和裁剪字段。这个命令只读文件，不 import `session_service.py`，适合在热区重构或 active claim 存在时先做链路定位。
+`session` 字段含 journal、live checkpoint、runtime-scene 线索；只读，不 import `session_service.py`。
 
 需要一个不调用真实模型、不启动 Launcher 的证据链样本时，可以生成离线 runtime-scene probe：
 

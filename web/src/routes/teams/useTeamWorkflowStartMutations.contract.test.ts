@@ -9,6 +9,8 @@ import mutationBundleSource from "./useTeamsMutationBundle.ts?raw";
 const routeSource = `${routeShellSource}\n${routeModelSource}\n${routeFoundationSource}\n${routeShellPhaseSource}\n${mutationBundleSource}`;
 import modelSource from "./workflowStartMutationModel.ts?raw";
 import mutationsSource from "./useTeamWorkflowStartMutations.ts?raw";
+import apiSource from "../../api/sourceCollection.ts?raw";
+import stageRoundsApiSource from "../../api/stageRounds.ts?raw";
 
 const mutationOwners = [
   "seedSourceCollectionAgentSessionContextMutation",
@@ -53,12 +55,16 @@ describe("team workflow start mutations contract", () => {
   });
 
   it("preserves key start/session write endpoints", () => {
-    expect(mutationsSource).toContain("/agent-session-context");
-    expect(mutationsSource).toContain("/stage-session-tasks");
-    expect(mutationsSource).toContain("/ai-search-runs");
-    expect(mutationsSource).toContain("/workflow-orchestration/source-collection-runs");
+    expect(apiSource).toContain("/agent-session-context");
+    expect(apiSource).toContain("/stage-session-tasks");
+    expect(mutationsSource).toContain("seedSourceCollectionAgentSessionContext(");
+    expect(mutationsSource).toContain("startSourceCollectionStageSessionTask(");
+    expect(mutationsSource).toContain("startAiSearchRun(");
+    expect(apiSource).toContain("/workflow-orchestration/source-collection-runs");
+    expect(mutationsSource).toContain("startSourceCollectionRun(");
     expect(mutationsSource).toContain("resetTeamResearchProjectSourceCollection(");
-    expect(mutationsSource).toContain("/workflow-orchestration/stage-rounds/start");
+    expect(stageRoundsApiSource).toContain("/workflow-orchestration/stage-rounds/start");
+    expect(mutationsSource).toContain("startResearchStageRound<");
     expect(mutationsSource).toContain("idempotencyKey: payload.idempotencyKey");
   });
 

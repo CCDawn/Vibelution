@@ -45,6 +45,7 @@ from .team import team_crud as _team_crud
 from .team import team_repair as _team_repair
 from .team import team_projection as _team_projection
 from .team import team_membership as _team_membership
+from .team import team_member_messages as _team_member_messages
 from .team import team_logging as _team_logging
 from .team import team_store as _team_store
 from .team import team_constants as _team_constants
@@ -243,6 +244,8 @@ remove_agents_from_teams = _team_crud.remove_agents_from_teams
 restore_removed_agents_to_teams = _team_crud.restore_removed_agents_to_teams
 archive_team = _team_crud.archive_team
 _archive_team_in_state = _team_crud._archive_team_in_state
+_finalize_archived_team_in_state = _team_crud._finalize_archived_team_in_state
+_reject_system_or_unsupported_team_archive = _team_crud._reject_system_or_unsupported_team_archive
 send_team_message = _team_crud.send_team_message
 list_agent_team_references = _team_crud.list_agent_team_references
 _find_reusable_empty_team = _team_crud._find_reusable_empty_team
@@ -251,6 +254,7 @@ _normalized_team_dedupe_key = _team_crud._normalized_team_dedupe_key
 _summary = _team_crud._summary
 
 _ensure_team_member_agents_can_archive = _team_repair._ensure_team_member_agents_can_archive
+_cascade_archive_member_agents_unlocked = _team_repair._cascade_archive_member_agents_unlocked
 _archive_team_member_agents = _team_repair._archive_team_member_agents
 _repair_archived_team_member_agents = _team_repair._repair_archived_team_member_agents
 _repair_archived_team_member_agents_for_team = _team_repair._repair_archived_team_member_agents_for_team
@@ -282,7 +286,13 @@ _find_active_team_for_agent_in_state = _team_membership._find_active_team_for_ag
 _unique_active_member_agent_ids = _team_membership._unique_active_member_agent_ids
 _active_member_agent_ids = _team_membership._active_member_agent_ids
 _active_member_session_ids = _team_membership._active_member_session_ids
+_member_direct_session_kind = _team_membership._member_direct_session_kind
+_ensure_active_member_direct_sessions = _team_membership._ensure_active_member_direct_sessions
+build_team_roster_context_lines = _team_membership.build_team_roster_context_lines
 _apply_team_contract = _team_membership._apply_team_contract
+list_team_member_messages = _team_member_messages.list_team_member_messages
+record_team_member_message = _team_member_messages.record_team_member_message
+shared_active_team_for_agents = _team_member_messages.shared_active_team_for_agents
 
 _record_team_event = _team_logging._record_team_event
 _team_detail_log_fields = _team_logging._team_detail_log_fields

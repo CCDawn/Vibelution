@@ -19,6 +19,7 @@ from .team_knowledge import search_ranking as _tk_search_ranking
 from .team_knowledge import store as _tk_store
 from .team_knowledge import permissions as _tk_permissions
 from .team_knowledge import source_inbox as _tk_source_inbox
+from .team_knowledge import public_catalog as _tk_public_catalog
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -36,6 +37,8 @@ SOURCE_INBOX_STATUSES = _tk_constants.SOURCE_INBOX_STATUSES
 SOURCE_REVIEW_DECISIONS = _tk_constants.SOURCE_REVIEW_DECISIONS
 CENTRAL_SOURCE_STATUSES = _tk_constants.CENTRAL_SOURCE_STATUSES
 KNOWLEDGE_SEARCH_MODES = _tk_constants.KNOWLEDGE_SEARCH_MODES
+MAX_LOCAL_SOURCE_COPIES = _tk_constants.MAX_LOCAL_SOURCE_COPIES
+MAX_LOCAL_SOURCE_COPY_BYTES = _tk_constants.MAX_LOCAL_SOURCE_COPY_BYTES
 BM25_K1 = _tk_constants.BM25_K1
 BM25_B = _tk_constants.BM25_B
 _SAFE_ID_FRAGMENT = _tk_constants._SAFE_ID_FRAGMENT
@@ -461,6 +464,14 @@ def create_source_artifact(
     if normalized_type not in SOURCE_TYPES:
         raise TeamKnowledgeError(f"Unsupported source type: {source_type}")
     now = utc_now_iso()
+    bounded_ref = _bounded_dict(normalized_ref)
+    local_copies = [
+        item
+        for item in list(normalized_ref.get("localCopies") or (central_source or {}).get("localCopies") or [])
+        if isinstance(item, dict)
+    ][:MAX_LOCAL_SOURCE_COPIES]
+    if local_copies:
+        bounded_ref["localCopies"] = local_copies
     artifact = {
         "sourceArtifactId": _new_event_id("src"),
         "ownerType": owner["ownerType"],
@@ -469,7 +480,7 @@ def create_source_artifact(
         "agentId": owner["ownerId"] if owner["ownerType"] == "agent" else "",
         "knowledgeBaseId": base["knowledgeBaseId"],
         "sourceType": normalized_type,
-        "sourceRef": _bounded_dict(normalized_ref),
+        "sourceRef": bounded_ref,
         "capturedAt": now,
         "sourceCreatedAt": trim_lines(source_created_at or "", max_lines=1).strip(),
         "capturedBy": trim_lines(captured_by or actor_agent_id or "user", max_lines=1).strip(),
@@ -864,6 +875,7 @@ def list_knowledge_governance_tasks(*, agent_id: str = "", status: str = "open",
                             source_artifact_ids=[source_id],
                         )
                     )
+    tasks.extend(_catalog_governance_tasks(status=normalized_status))
     tasks.sort(key=lambda item: (_priority_rank(str(item.get("priority") or "")), str(item.get("updatedAt") or item.get("createdAt") or "")), reverse=True)
     return {
         "schemaVersion": SCHEMA_VERSION,
@@ -875,6 +887,9 @@ def list_knowledge_governance_tasks(*, agent_id: str = "", status: str = "open",
             "proposalReviewCount": sum(1 for task in tasks if task.get("taskType") == "proposal_review"),
             "ratingReviewCount": sum(1 for task in tasks if task.get("taskType") == "rating_review"),
             "sourceNeedsProposalCount": sum(1 for task in tasks if task.get("taskType") == "source_needs_proposal"),
+            "catalogFreshnessCount": sum(1 for task in tasks if task.get("taskType") == "catalog_freshness"),
+            "catalogConflictCount": sum(1 for task in tasks if task.get("taskType") == "catalog_conflict"),
+            "catalogProposalCount": sum(1 for task in tasks if task.get("taskType") == "catalog_proposal"),
         },
         "updatedAt": utc_now_iso(),
     }
@@ -1165,6 +1180,7 @@ def get_knowledge_trace(knowledge_base_id: str, target_id: str, *, agent_id: str
         "items": [item for item in items if str(item.get("knowledgeItemId") or "") in item_ids],
         "ratingSuggestions": [item for item in suggestions if str(item.get("suggestionId") or "") in suggestion_ids],
     }
+    local_copies = _local_copies_from_source_artifacts(nodes["sourceArtifacts"])
     return {
         "schemaVersion": SCHEMA_VERSION,
         "ownerType": owner["ownerType"],
@@ -1175,7 +1191,11 @@ def get_knowledge_trace(knowledge_base_id: str, target_id: str, *, agent_id: str
         "targetId": normalized_target_id,
         "targetType": target_type,
         "nodes": nodes,
-        "summary": {key: len(value) for key, value in nodes.items()},
+        "localCopies": local_copies,
+        "summary": {
+            **{key: len(value) for key, value in nodes.items()},
+            "localCopyCount": len(local_copies),
+        },
         "updatedAt": utc_now_iso(),
     }
 
@@ -2495,6 +2515,7 @@ _find_central_source_by_id_locked = _tk_store._find_central_source_by_id_locked
 _rewrite_owner_source_review_queue_locked = _tk_store._rewrite_owner_source_review_queue_locked
 _source_inbox_summary = _tk_store._source_inbox_summary
 _safe_source_filename = _tk_store._safe_source_filename
+_extended_fs_path = _tk_store._extended_fs_path
 _project_relative_path = _tk_store._project_relative_path
 _project_path_from_relative = _tk_store._project_path_from_relative
 _read_jsonl = _tk_store._read_jsonl
@@ -2574,6 +2595,96 @@ _append_owner_ref_for_central_source_locked = _tk_source_inbox._append_owner_ref
 _copy_or_write_central_source_file = _tk_source_inbox._copy_or_write_central_source_file
 _require_central_source_for_owner = _tk_source_inbox._require_central_source_for_owner
 _central_owner_ref_visible = _tk_source_inbox._central_owner_ref_visible
+_stage_local_source_copies = _tk_source_inbox._stage_local_source_copies
+_relocate_local_copies_to_central = _tk_source_inbox._relocate_local_copies_to_central
+_resolve_copyable_local_file = _tk_source_inbox._resolve_copyable_local_file
+_sha256_local_file = _tk_source_inbox._sha256_local_file
+
+# --- public structure curation catalog (workspace/knowledge/public) ---
+PUBLIC_STRUCTURE_SCHEMA_VERSION = _tk_public_catalog.PUBLIC_STRUCTURE_SCHEMA_VERSION
+STARTUP_STRUCTURE_MAX_CARDS = _tk_public_catalog.STARTUP_STRUCTURE_MAX_CARDS
+STARTUP_STRUCTURE_MAX_CHARS = _tk_public_catalog.STARTUP_STRUCTURE_MAX_CHARS
+STARTUP_CARD_WHEN_TO_USE_CHARS = _tk_public_catalog.STARTUP_CARD_WHEN_TO_USE_CHARS
+STARTUP_CARD_SUMMARY_CHARS = _tk_public_catalog.STARTUP_CARD_SUMMARY_CHARS
+DEFAULT_PARTITION_QUOTAS = _tk_public_catalog.DEFAULT_PARTITION_QUOTAS
+PUBLIC_PARTITIONS = _tk_public_catalog.PUBLIC_PARTITIONS
+PUBLIC_CARD_KINDS = _tk_public_catalog.PUBLIC_CARD_KINDS
+PUBLIC_VISIBILITIES = _tk_public_catalog.PUBLIC_VISIBILITIES
+PUBLIC_FRESHNESS_POLICIES = _tk_public_catalog.PUBLIC_FRESHNESS_POLICIES
+PUBLIC_FRESHNESS_STATUSES = _tk_public_catalog.PUBLIC_FRESHNESS_STATUSES
+PUBLIC_SOURCE_TYPES = _tk_public_catalog.PUBLIC_SOURCE_TYPES
+PUBLIC_QUEUE_KINDS = _tk_public_catalog.PUBLIC_QUEUE_KINDS
+PUBLIC_QUEUE_STATUSES = _tk_public_catalog.PUBLIC_QUEUE_STATUSES
+PUBLIC_QUEUE_REASONS = _tk_public_catalog.PUBLIC_QUEUE_REASONS
+PUBLIC_QUEUE_RESOLUTIONS = _tk_public_catalog.PUBLIC_QUEUE_RESOLUTIONS
+PUBLIC_MAX_EXPERIENCE_BYTES = _tk_public_catalog.PUBLIC_MAX_EXPERIENCE_BYTES
+PublicCatalogError = _tk_public_catalog.PublicCatalogError
+PublicCatalogPermissionError = _tk_public_catalog.PublicCatalogPermissionError
+PublicCatalogNotFoundError = _tk_public_catalog.PublicCatalogNotFoundError
+PublicCatalogSourceUnavailableError = _tk_public_catalog.PublicCatalogSourceUnavailableError
+PublicCatalogConflictError = _tk_public_catalog.PublicCatalogConflictError
+get_public_catalog = _tk_public_catalog.get_public_catalog
+save_public_structure = _tk_public_catalog.save_public_structure
+upsert_public_card = _tk_public_catalog.upsert_public_card
+archive_public_card = _tk_public_catalog.archive_public_card
+refresh_public_catalog_freshness = _tk_public_catalog.refresh_public_catalog_freshness
+search_public_catalog = _tk_public_catalog.search_public_catalog
+resolve_public_locator = _tk_public_catalog.resolve_public_locator
+open_public_card = _tk_public_catalog.open_public_card
+build_startup_structure_block = _tk_public_catalog.build_startup_structure_block
+submit_public_proposal = _tk_public_catalog.submit_public_proposal
+list_public_proposals = _tk_public_catalog.list_public_proposals
+resolve_public_proposal = _tk_public_catalog.resolve_public_proposal
+list_catalog_queue_events = _tk_public_catalog.list_catalog_queue_events
+resolve_catalog_queue_event = _tk_public_catalog.resolve_catalog_queue_event
+_catalog_governance_tasks = _tk_public_catalog._catalog_governance_tasks
+
+
+def _local_copies_from_source_artifacts(source_artifacts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    copies: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for source in source_artifacts:
+        if not isinstance(source, dict):
+            continue
+        ref = source.get("sourceRef") if isinstance(source.get("sourceRef"), dict) else {}
+        pack_path = str(ref.get("centralPath") or "").strip()
+        if pack_path and pack_path not in seen:
+            seen.add(pack_path)
+            copies.append(
+                {
+                    "candidateId": "",
+                    "title": trim_lines(str(source.get("title") or "source"), max_lines=1).strip(),
+                    "filename": Path(pack_path).name,
+                    "sha256": str(source.get("sourceHash") or ref.get("sourceHash") or ""),
+                    "byteSize": 0,
+                    "centralPath": pack_path,
+                    "originalPath": str(ref.get("originalPath") or ""),
+                    "kind": "source_pack",
+                }
+            )
+        for item in list(ref.get("localCopies") or []):
+            if not isinstance(item, dict):
+                continue
+            key = str(item.get("sha256") or item.get("centralPath") or item.get("filename") or "").strip()
+            if key and key in seen:
+                continue
+            if key:
+                seen.add(key)
+            copies.append(
+                {
+                    "candidateId": str(item.get("candidateId") or "")[:160],
+                    "title": trim_lines(str(item.get("title") or ""), max_lines=1).strip(),
+                    "filename": str(item.get("filename") or "")[:180],
+                    "sha256": str(item.get("sha256") or "")[:128],
+                    "byteSize": int(item.get("byteSize") or 0),
+                    "centralPath": str(item.get("centralPath") or "")[:500],
+                    "originalPath": str(item.get("originalPath") or "")[:500],
+                    "kind": str(item.get("kind") or "local_file"),
+                }
+            )
+            if len(copies) >= MAX_LOCAL_SOURCE_COPIES:
+                return copies
+    return copies[:MAX_LOCAL_SOURCE_COPIES]
 
 
 def _search_item_view(
@@ -2590,6 +2701,7 @@ def _search_item_view(
         for source_id in [str(value or "") for value in list(item.get("sourceArtifactIds") or [])]
         if source_id in artifacts_by_id
     ]
+    local_copies = _local_copies_from_source_artifacts(source_artifacts)
     return {
         "knowledgeItemId": str(item.get("knowledgeItemId") or ""),
         "knowledgeBaseId": str(base.get("knowledgeBaseId") or ""),
@@ -2604,6 +2716,7 @@ def _search_item_view(
         "sourceArtifactIds": [str(value) for value in list(item.get("sourceArtifactIds") or [])[:12] if str(value or "").strip()],
         "centralSourceIds": [str(value) for value in list(item.get("centralSourceIds") or [])[:12] if str(value or "").strip()],
         "sourceTypes": sorted({str(source.get("sourceType") or "") for source in source_artifacts if str(source.get("sourceType") or "")}),
+        "localCopies": local_copies,
         "sourceSummaries": [
             {
                 "sourceArtifactId": str(source.get("sourceArtifactId") or ""),
@@ -2612,6 +2725,22 @@ def _search_item_view(
                 "capturedAt": str(source.get("capturedAt") or ""),
                 "title": trim_lines(str(source.get("title") or ""), max_lines=1),
                 "summary": trim_lines(str(source.get("summary") or ""), max_lines=2),
+                "centralPath": str(
+                    (source.get("sourceRef") if isinstance(source.get("sourceRef"), dict) else {}).get("centralPath")
+                    or ""
+                ),
+                "localCopyCount": len(
+                    [
+                        item
+                        for item in list(
+                            (source.get("sourceRef") if isinstance(source.get("sourceRef"), dict) else {}).get(
+                                "localCopies"
+                            )
+                            or []
+                        )
+                        if isinstance(item, dict)
+                    ]
+                ),
             }
             for source in source_artifacts[:6]
         ],

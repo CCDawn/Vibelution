@@ -4,10 +4,14 @@
  */
 import { useQuery } from "@tanstack/react-query";
 
-import { fetchJson } from "../../api/client";
+import {
+  fetchDataProcessingRunStatus,
+  listDataProcessingCollectionAssignments,
+  listDataProcessingRunRecords,
+} from "../../api/dataProcessing";
 import { queryKeys } from "../../api/queryKeys";
+import { fetchSourceCollectionSummary } from "../../api/sourceCollection";
 import type {
-  DataProcessingCollectionAssignmentListPayload,
   DataProcessingStatus,
 } from "../../api/types";
 import { resolvePollingInterval } from "../../app/pollingPolicy";
@@ -38,15 +42,14 @@ export function useSourceCollectionRunQueries(options: UseSourceCollectionRunQue
       options.effectiveTeamId || "none",
       options.selectedSourceCollectionRunEffectiveId || "latest",
     ),
-    queryFn: ({ signal }) => {
-      const params = options.selectedSourceCollectionRunEffectiveId
-        ? `?runId=${encodeURIComponent(options.selectedSourceCollectionRunEffectiveId)}`
-        : "";
-      return fetchJson<SourceCollectionSummaryPayload>(
-        `/api/teams/${encodeURIComponent(options.effectiveTeamId)}/workflow-orchestration/source-collection/summary${params}`,
-        { signal },
-      );
-    },
+    queryFn: ({ signal }) =>
+      fetchSourceCollectionSummary<SourceCollectionSummaryPayload>(
+        options.effectiveTeamId,
+        {
+          signal,
+          runId: options.selectedSourceCollectionRunEffectiveId || undefined,
+        },
+      ),
     enabled: Boolean(
       options.effectiveTeamId
       && options.sourceCollectionWorkspaceSelected
@@ -74,8 +77,8 @@ export function useSourceCollectionRunQueries(options: UseSourceCollectionRunQue
   const sourceCollectionRunStatusQuery = useQuery({
     queryKey: queryKeys.dataProcessingRunStatus(options.selectedSourceCollectionRunEffectiveId || "none"),
     queryFn: ({ signal }) =>
-      fetchJson<DataProcessingStatus>(
-        `/api/data-processing/runs/${encodeURIComponent(options.selectedSourceCollectionRunEffectiveId)}/status`,
+      fetchDataProcessingRunStatus(
+        options.selectedSourceCollectionRunEffectiveId,
         { signal },
       ),
     enabled: sourceCollectionRunStatusQueryEnabled,
@@ -94,8 +97,8 @@ export function useSourceCollectionRunQueries(options: UseSourceCollectionRunQue
   const sourceCollectionRecordsQuery = useQuery({
     queryKey: sourceCollectionRunRecordsQueryKey(options.selectedSourceCollectionRunEffectiveId || "none"),
     queryFn: ({ signal }) =>
-      fetchJson<DataProcessingRecordListPayload>(
-        `/api/data-processing/runs/${encodeURIComponent(options.selectedSourceCollectionRunEffectiveId)}/records`,
+      listDataProcessingRunRecords<DataProcessingRecordListPayload>(
+        options.selectedSourceCollectionRunEffectiveId,
         { signal },
       ),
     enabled: sourceCollectionRecordsQueryEnabled,
@@ -105,8 +108,8 @@ export function useSourceCollectionRunQueries(options: UseSourceCollectionRunQue
   const sourceCollectionAssignmentsQuery = useQuery({
     queryKey: queryKeys.dataProcessingCollectionAssignments(options.selectedSourceCollectionRunEffectiveId || "none"),
     queryFn: ({ signal }) =>
-      fetchJson<DataProcessingCollectionAssignmentListPayload>(
-        `/api/data-processing/runs/${encodeURIComponent(options.selectedSourceCollectionRunEffectiveId)}/collection-assignments`,
+      listDataProcessingCollectionAssignments(
+        options.selectedSourceCollectionRunEffectiveId,
         { signal },
       ),
     enabled: sourceCollectionAssignmentsQueryEnabled,

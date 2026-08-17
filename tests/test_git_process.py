@@ -1,5 +1,7 @@
-from pathlib import Path
+from __future__ import annotations
+
 import subprocess
+from pathlib import Path
 
 from core.infrastructure import git_process
 from core.infrastructure import no_console_git as ncg
@@ -91,7 +93,7 @@ def test_run_git_uses_resolved_executable_and_no_console(monkeypatch, tmp_path):
 def test_run_git_check_true_raises_called_process_error(monkeypatch, tmp_path):
     resolved_git = str(tmp_path / "git.exe")
     monkeypatch.setattr(git_process, "resolve_git_executable", lambda: resolved_git)
-    monkeypatch.setattr(git_process, "no_console_subprocess_kwargs", lambda: {})
+    monkeypatch.setattr(git_process, "no_console_subprocess_kwargs", dict)
 
     def fake_run(args, **kwargs):
         return subprocess.CompletedProcess(args=args, returncode=128, stdout="out", stderr="fatal")
@@ -113,7 +115,7 @@ def test_run_git_retries_index_lock_contention(monkeypatch, tmp_path):
     calls = []
     resolved_git = str(tmp_path / "git.exe")
     monkeypatch.setattr(git_process, "resolve_git_executable", lambda: resolved_git)
-    monkeypatch.setattr(git_process, "no_console_subprocess_kwargs", lambda: {})
+    monkeypatch.setattr(git_process, "no_console_subprocess_kwargs", dict)
     monkeypatch.setattr(git_process.time, "sleep", lambda _seconds: None)
 
     def fake_run(args, **kwargs):
@@ -134,7 +136,7 @@ def test_run_git_does_not_retry_non_lock_failure(monkeypatch, tmp_path):
     calls = []
     resolved_git = str(tmp_path / "git.exe")
     monkeypatch.setattr(git_process, "resolve_git_executable", lambda: resolved_git)
-    monkeypatch.setattr(git_process, "no_console_subprocess_kwargs", lambda: {})
+    monkeypatch.setattr(git_process, "no_console_subprocess_kwargs", dict)
 
     def fake_run(args, **kwargs):
         calls.append((args, kwargs))
@@ -152,7 +154,7 @@ def test_run_git_passes_custom_timeout_and_propagates_timeout(monkeypatch, tmp_p
     calls = []
     resolved_git = str(tmp_path / "git.exe")
     monkeypatch.setattr(git_process, "resolve_git_executable", lambda: resolved_git)
-    monkeypatch.setattr(git_process, "no_console_subprocess_kwargs", lambda: {})
+    monkeypatch.setattr(git_process, "no_console_subprocess_kwargs", dict)
 
     def fake_run(args, **kwargs):
         calls.append((args, kwargs))
@@ -169,3 +171,90 @@ def test_run_git_passes_custom_timeout_and_propagates_timeout(monkeypatch, tmp_p
 
     assert calls[0][1]["timeout"] == 1.5
     assert len(calls) == 1
+
+
+def test_safe_git_args_for_log_redacts_commit_message_and_credential_url() -> None:
+    assert git_process.safe_git_args_for_log(
+        ["commit", "-m", "secret message", "https://user:token@github.com/org/repo.git"]
+    ) == ["commit", "-m", "[redacted]", "[redacted-url]"]
+
+
+def test_run_git_records_failed_command_without_secrets(monkeypatch, tmp_path):
+    events = []
+    resolved_git = str(tmp_path / "git.exe")
+    monkeypatch.setattr(git_process, "resolve_git_executable", lambda: resolved_git)
+    monkeypatch.setattr(git_process, "no_console_subprocess_kwargs", dict)
+    monkeypatch.setattr(git_process, "_record_git_process_scene_event", lambda *args, **kwargs: events.append((args, kwargs)))
+    monkeypatch.setattr(
+        git_process.subprocess,
+        "run",
+        lambda args, **kwargs: subprocess.CompletedProcess(
+            args=args,
+            returncode=1,
+            stdout="",
+            stderr="fatal: Authentication failed for 'https://user:token@example.com/repo.git'",
+        ),
+    )
+
+    result = git_process.run_git(
+        ["push", "https://user:token@example.com/repo.git"],
+        cwd=tmp_path,
+        retries=0,
+    )
+
+    assert result.returncode == 1
+    assert events
+    _args, kwargs = events[0]
+    assert _args[1] == "git_process.command.failed"
+    assert kwargs["fields"]["args"] == ["push", "[redacted-url]"]
+    assert "token" not in kwargs["fields"]["stderr"]
+    assert kwargs["fields"]["returnCode"] == 1
+
+
+def test_run_git_records_lock_retry_then_success(monkeypatch, tmp_path):
+    events = []
+    calls = []
+    resolved_git = str(tmp_path / "git.exe")
+    monkeypatch.setattr(git_process, "resolve_git_executable", lambda: resolved_git)
+    monkeypatch.setattr(git_process, "no_console_subprocess_kwargs", dict)
+    monkeypatch.setattr(git_process.time, "sleep", lambda _seconds: None)
+
+    def capture(phase, event_code, **kwargs):
+        events.append({"phase": phase, "event": event_code, **kwargs})
+
+    monkeypatch.setattr(git_process, "_record_git_process_scene_event", capture)
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        if len(calls) == 1:
+            return subprocess.CompletedProcess(args=args, returncode=128, stdout="", stderr="fatal: Unable to create '.git/index.lock'")
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(git_process.subprocess, "run", fake_run)
+
+    result = git_process.run_git(["status"], cwd=tmp_path, retries=2)
+
+    assert result.returncode == 0
+    assert [event["event"] for event in events] == ["git_process.lock_retry"]
+
+
+def test_run_git_records_timeout_before_raising(monkeypatch, tmp_path):
+    events = []
+    resolved_git = str(tmp_path / "git.exe")
+    monkeypatch.setattr(git_process, "resolve_git_executable", lambda: resolved_git)
+    monkeypatch.setattr(git_process, "no_console_subprocess_kwargs", dict)
+    monkeypatch.setattr(git_process, "_record_git_process_scene_event", lambda *args, **kwargs: events.append((args, kwargs)))
+
+    def fake_run(args, **kwargs):
+        raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+
+    monkeypatch.setattr(git_process.subprocess, "run", fake_run)
+
+    try:
+        git_process.run_git(["fetch"], cwd=tmp_path, timeout=1.5, retries=0)
+    except subprocess.TimeoutExpired:
+        pass
+    else:
+        raise AssertionError("run_git should propagate subprocess.TimeoutExpired")
+
+    assert events[0][0][1] == "git_process.command.timeout"

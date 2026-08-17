@@ -32,10 +32,14 @@ describe("team research secondary queries contract", () => {
   });
 
   it("preserves key status endpoints", () => {
-    expect(queriesSource).toContain("/workflow-orchestration/experiments/status");
-    expect(queriesSource).toContain("/workflow-orchestration/experiments/methods");
-    expect(queriesSource).toContain("/workflow-orchestration/research-loop/templates");
-    expect(queriesSource).toContain("/workflow-orchestration/research-loop/status");
+    expect(queriesSource).toContain("fetchExperimentPlanningStatus<");
+    expect(queriesSource).toContain("fetchExperimentMethodCatalog<");
+    expect(queriesSource).not.toContain("/workflow-orchestration/experiments/status");
+    expect(queriesSource).not.toContain("/workflow-orchestration/experiments/methods");
+    expect(queriesSource).not.toContain("/workflow-orchestration/research-loop/templates");
+    expect(queriesSource).not.toContain("/workflow-orchestration/research-loop/status");
+    expect(queriesSource).toContain("fetchResearchLoopTemplates<");
+    expect(queriesSource).toContain("fetchResearchLoopStatus<");
   });
 
   it("keeps the method catalog independent from live status projections", () => {

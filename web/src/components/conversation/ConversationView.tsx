@@ -65,7 +65,9 @@ const AgentContextSectionsView = React.lazy(() =>
     default: module.AgentContextSectionsView,
   })),
 );
+import { ConversationFollowupQueueBar } from "./ConversationFollowupQueueBar";
 import { shouldSubmitComposerOnKeydown } from "./composerShortcuts";
+import { resolveComposerQueuePrimaryKind } from "./composerFollowupQueueModel";
 import {
   filterSlashCommandSuggestions,
   insertSlashCommandSuggestion,
@@ -172,6 +174,7 @@ import {
   isAgentInboxMessage,
   isCliAgentLifecycleMessage,
   isGroupRoomTranscriptMessage,
+  isSteerGuidanceMessage,
   isTurnErrorMessage,
   researchOrgMessageChips,
 } from "./conversationMessagePredicates";
@@ -255,6 +258,8 @@ import {
 } from "./conversationSpecialMessagePresentation";
 import { projectedConversationMessageIds } from "./conversationMessageIdentity";
 import { shouldCompactConversationTurnHeader } from "./conversationTurnHeaderCompaction";
+import { shouldApplyComposerFocusRequest } from "./conversationComposerFocus";
+import { scheduleComposerFocusAttempts } from "./conversationComposerFocusSchedule";
 import {
   resolveMessageTurnAvatar,
   userAvatarSymbol,
@@ -391,6 +396,8 @@ export function ConversationView({
   composerValue,
   composerPlaceholder,
   composerDisabled,
+  composerFocusSignal = "",
+  onComposerFocusRequestSettled,
   composerActionDisabled,
   composerActionMode,
   composerPending,
@@ -398,6 +405,7 @@ export function ConversationView({
   composerInterruptGuidancePending = false,
   composerError,
   composerGuidance,
+  followupQueue = [],
   composerAttachments = [],
   composerReferences = [],
   slashCommandSuggestions = [],
@@ -434,10 +442,14 @@ export function ConversationView({
   onStop,
   onSafeGuidance,
   onInterruptGuidance,
+  onFollowupQueueUpdate,
+  onFollowupQueueRemove,
+  onFollowupQueueMove,
 }: ConversationViewProps) {
   void interruptGuidanceLabel;
   void interruptGuidancePendingLabel;
   void onInterruptGuidance;
+  void onSafeGuidance;
   const { lang, t, statusLabel } = useAppI18n({ domains: ["chat"] });
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const timelineContentRef = useRef<HTMLDivElement | null>(null);
@@ -456,6 +468,9 @@ export function ConversationView({
   const autoScrollToLatestRef = useRef(autoScrollToLatest);
   autoScrollToLatestRef.current = autoScrollToLatest;
   const lastComposerFocusSignalRef = useRef("");
+  const lastComposerRestoreSignalRef = useRef("");
+  const composerDisabledRef = useRef(composerDisabled);
+  composerDisabledRef.current = composerDisabled;
   const defaultExpansionRef = useRef<Record<string, Record<string, boolean>>>({});
   const responseSegmentCacheRef = useRef<Map<string, ResponseSegment[]>>(new Map());
   const [sectionExpansion, setSectionExpansion] = useState<Record<string, Record<string, boolean>>>({});
@@ -518,22 +533,41 @@ export function ConversationView({
     actionMode: resolvedActionMode,
     editModeActive: composerEditModeActive,
   });
-  // Edit/rerun is a labeled primary pill. Do not mix in round icon-only geometry
-  // (composerRoundButtonPrimary forces fixed square size + icon-only slots).
-  const primaryActionClassName = primaryActionIsEditSubmit
-    ? styles.composerEditSubmitButton
-    : `${styles.sendButton} ${styles.composerRoundButton} ${styles.composerRoundButtonPrimary}`;
   const {
-    guidanceDraftReady,
     guidanceActionDisabled,
-    showSafeGuidanceAction,
+    showQueuePrimary,
+    queuePrimaryIsImmediate,
   } = resolveComposerGuidanceUi({
     runningGuidanceActionsEnabled,
     composerValue,
     composerDisabled,
     safeGuidancePending: composerSafeGuidancePending,
     interruptGuidancePending: composerInterruptGuidancePending,
+    queueCount: followupQueue.length,
   });
+  const queuePrimaryKind = resolveComposerQueuePrimaryKind({
+    sessionBusy: runningGuidanceActionsEnabled,
+    draft: composerValue,
+    queueCount: followupQueue.length,
+  });
+  const primaryActionIsQueueSubmit = runningGuidanceActionsEnabled && showQueuePrimary;
+  const resolvedQueueFollowupLabel = t("queueFollowup");
+  const resolvedImmediateSteerLabel = t("immediateSteer");
+  const resolvedSafeGuidanceLabel = safeGuidanceLabel ?? t("safeGuidance");
+  const resolvedSafeGuidancePendingLabel = safeGuidancePendingLabel ?? t("safeGuidancePending");
+  const resolvedBusyPrimaryLabel = queuePrimaryIsImmediate
+    ? resolvedImmediateSteerLabel
+    : resolvedQueueFollowupLabel;
+  const resolvedComposerPlaceholder = composerPlaceholder.trim()
+    ? composerPlaceholder
+    : resolvedActionMode === "stop"
+      ? (followupQueue.length ? t("sessionBusyQueuedPlaceholder") : t("sessionBusyPlaceholder"))
+      : composerPlaceholder;
+  // Edit/rerun and running-turn queue/steer are labeled primary pills. Do not mix in
+  // round icon-only geometry (composerRoundButtonPrimary forces a square slot).
+  const primaryActionClassName = primaryActionIsEditSubmit || primaryActionIsQueueSubmit
+    ? styles.composerEditSubmitButton
+    : `${styles.sendButton} ${styles.composerRoundButton} ${styles.composerRoundButtonPrimary}`;
   const composerCanAcceptImageDrop = Boolean(onAddComposerAttachments) && !attachmentInputDisabled;
   const composerCanAcceptReferenceDrop = Boolean(onAddComposerReference) && !composerDisabled;
   const slashSuggestions = useMemo(
@@ -619,20 +653,32 @@ export function ConversationView({
     onAddComposerAttachments(files);
   }
 
-  const latestUserMessage = useMemo(
-    () =>
-      [...messages]
-        .reverse()
-        .find((message) => message.role === "user")?.content ?? "",
-    [messages],
-  );
-  const latestUserMessageId = useMemo(
-    () =>
-      [...messages]
-        .reverse()
-        .find((message) => message.role === "user")?.id ?? "",
-    [messages],
-  );
+  const latestUserMessage = useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (message.role !== "user") {
+        continue;
+      }
+      if (isAgentInboxMessage(message) || isSteerGuidanceMessage(message)) {
+        continue;
+      }
+      return message.content;
+    }
+    return "";
+  }, [messages]);
+  const latestUserMessageId = useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (message.role !== "user") {
+        continue;
+      }
+      if (isAgentInboxMessage(message) || isSteerGuidanceMessage(message)) {
+        continue;
+      }
+      return message.id;
+    }
+    return "";
+  }, [messages]);
   const lastMessageTimestamp = useMemo(
     () => [...messages].reverse().find((message) => message.timestamp)?.timestamp ?? "",
     [messages],
@@ -1354,6 +1400,34 @@ export function ConversationView({
     const cursorPosition = input.value.length;
     input.setSelectionRange(cursorPosition, cursorPosition);
   }, [composerDisabled, editingMessageId]);
+
+  useEffect(() => {
+    const focusSignal = String(composerFocusSignal || "").trim();
+    if (!focusSignal) {
+      return;
+    }
+    if (!shouldApplyComposerFocusRequest({
+      composerDisabled,
+      focusSignal,
+      hasCompetingFocus: false,
+      lastAppliedFocusSignal: lastComposerRestoreSignalRef.current,
+    })) {
+      return;
+    }
+
+    const settleFocusRequest = () => {
+      lastComposerRestoreSignalRef.current = focusSignal;
+      onComposerFocusRequestSettled?.(focusSignal);
+    };
+
+    return scheduleComposerFocusAttempts({
+      getInput: () => composerInputRef.current,
+      isDisabled: () => composerDisabledRef.current,
+      shouldAbort: () => false,
+      onSuccess: settleFocusRequest,
+      onGiveUp: settleFocusRequest,
+    });
+  }, [composerDisabled, composerFocusSignal, onComposerFocusRequestSettled]);
 
   useEffect(() => {
     setVisibleMessageLimit(INITIAL_VISIBLE_MESSAGE_COUNT);
@@ -3586,13 +3660,13 @@ export function ConversationView({
 
   const composerActions = (
     <div className={styles.composerActionStack}>
-      {!runningGuidanceActionsEnabled || showSafeGuidanceAction ? (
+      {!runningGuidanceActionsEnabled || showQueuePrimary ? (
         <VButton
           className={primaryActionClassName}
-          isIconOnly={!primaryActionIsEditSubmit}
-          isDisabled={runningGuidanceActionsEnabled ? guidanceActionDisabled || !onSafeGuidance : resolvedActionDisabled}
+          isIconOnly={!primaryActionIsEditSubmit && !primaryActionIsQueueSubmit}
+          isDisabled={runningGuidanceActionsEnabled ? guidanceActionDisabled : resolvedActionDisabled}
           type="button"
-          onClick={runningGuidanceActionsEnabled ? onSafeGuidance : handlePrimaryAction}
+          onClick={runningGuidanceActionsEnabled ? onSubmit : handlePrimaryAction}
           icon={
             primaryActionIsEditSubmit
               ? (
@@ -3605,8 +3679,8 @@ export function ConversationView({
           title={
             runningGuidanceActionsEnabled
               ? composerSafeGuidancePending
-                ? (safeGuidancePendingLabel ?? t("safeGuidancePending"))
-                : (safeGuidanceLabel ?? t("safeGuidance"))
+                ? resolvedSafeGuidancePendingLabel
+                : resolvedBusyPrimaryLabel
               : composerPending
                 ? resolvedPendingLabel
                 : resolvedActionLabel
@@ -3614,8 +3688,8 @@ export function ConversationView({
           aria-label={
             runningGuidanceActionsEnabled
               ? composerSafeGuidancePending
-                ? (safeGuidancePendingLabel ?? t("safeGuidancePending"))
-                : (safeGuidanceLabel ?? t("safeGuidance"))
+                ? resolvedSafeGuidancePendingLabel
+                : resolvedBusyPrimaryLabel
               : composerPending
                 ? resolvedPendingLabel
                 : resolvedActionLabel
@@ -3623,6 +3697,8 @@ export function ConversationView({
         >
           {primaryActionIsEditSubmit
             ? (composerPending || composerSafeGuidancePending ? resolvedPendingLabel : resolvedActionLabel)
+            : primaryActionIsQueueSubmit
+              ? (composerSafeGuidancePending ? resolvedSafeGuidancePendingLabel : resolvedBusyPrimaryLabel)
             : (composerPending || composerSafeGuidancePending
               ? <LoaderCircle className={styles.statusSpinner} size={17} aria-hidden="true" />
               : <ArrowUp size={16} aria-hidden="true" />)}
@@ -3883,6 +3959,7 @@ export function ConversationView({
             });
             const timelineRendersAssistantText = false;
             const showUserContent = agentSections.hasUserContent;
+            const steerGuidanceMessage = isSteerGuidanceMessage(message);
             const userAuthoredMessage = message.role === "user" && !agentInboxMessage;
             const isStreamingStatusPlaceholder = assistantTurnIsStreaming(message)
               && showResponseBlock
@@ -4036,12 +4113,16 @@ export function ConversationView({
                 }
                 speakerLabel={speakerLabel}
                 identityAccessory={
-                  isEditingMessage ? <span className={styles.turnEditBadge}>{t("editMessage")}</span> : null
+                  isEditingMessage
+                    ? <span className={styles.turnEditBadge}>{t("editMessage")}</span>
+                    : steerGuidanceMessage
+                      ? <span className={styles.turnEditBadge}>{resolvedSafeGuidanceLabel}</span>
+                      : null
                 }
                 metaActions={
                   <>
                     {message.timestamp ? <span>{formatTimestamp(message.timestamp)}</span> : null}
-                    {userAuthoredMessage && message.id === latestUserMessageId && onEditUserMessage ? (
+                    {userAuthoredMessage && !steerGuidanceMessage && message.id === latestUserMessageId && onEditUserMessage ? (
                       <VButton
                         type="button"
                         className={
@@ -4239,6 +4320,18 @@ export function ConversationView({
               <span>{composerGuidance}</span>
             </div>
           ) : null}
+          {followupQueue.length ? (
+            <ConversationFollowupQueueBar
+              items={followupQueue}
+              lang={lang}
+              queueLabel={t("followupQueueLabel")}
+              editLabel={t("editFollowupQueue")}
+              withdrawLabel={t("withdrawFollowupQueue")}
+              onUpdate={onFollowupQueueUpdate ?? (() => undefined)}
+              onRemove={onFollowupQueueRemove ?? (() => undefined)}
+              onMove={onFollowupQueueMove ?? (() => undefined)}
+            />
+          ) : null}
           {composerModeNotice ? (
             <div
               className={styles.composerEditModeBar}
@@ -4363,7 +4456,7 @@ export function ConversationView({
             className={composerVariant === "codex" ? styles.inputCodex : styles.input}
             value={composerValue}
             disabled={composerDisabled && resolvedActionMode !== "stop"}
-            placeholder={composerPlaceholder}
+            placeholder={resolvedComposerPlaceholder}
             aria-label={lang === "zh" ? "发送消息" : "Message"}
             aria-controls={showSlashSuggestions ? slashSuggestionListId : undefined}
             aria-expanded={showSlashSuggestions ? true : undefined}
@@ -4398,6 +4491,11 @@ export function ConversationView({
                   && (composerValue.trim() || hasComposerAttachments || hasComposerReferences)
                 ) {
                   handleSendAndFollowLatest();
+                } else if (
+                  (queuePrimaryKind === "queue" || queuePrimaryKind === "immediate")
+                  && !guidanceActionDisabled
+                ) {
+                  onSubmit();
                 }
               }
             }}

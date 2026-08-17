@@ -43,43 +43,6 @@ function hitShare(segments: ComposerContextSegment[]) {
   return { hit, miss, never };
 }
 
-function ContourArcs({ segments }: { segments: ComposerContextSegment[] }) {
-  const gap = 0.8;
-  let cursor = 0;
-  return (
-    <>
-      {segments.map((segment) => {
-        const len = Math.max(0, segment.pct - gap);
-        const start = cursor;
-        cursor += segment.pct;
-        const stroke = segment.hit === "hit"
-          ? "var(--accent-cool)"
-          : segment.hit === "miss"
-            ? "var(--accent-warm)"
-            : "color-mix(in srgb, var(--fg-tertiary) 55%, transparent)";
-        // Always keep trailing as a gap slot: `0 start len trailing`
-        // (never uses muted solid here; dashed never is shown on the hit-edge bar).
-        const trailing = Math.max(0, 100 - start - len);
-        return (
-          <circle
-            key={`contour-${segment.key}-${start}`}
-            cx="16"
-            cy="16"
-            r="12.2"
-            fill="none"
-            stroke={stroke}
-            strokeWidth="1.8"
-            pathLength={100}
-            strokeDasharray={`0 ${start} ${len} ${trailing}`}
-            transform="rotate(-90 16 16)"
-            opacity={segment.hit === "never" ? 0.85 : 1}
-          />
-        );
-      })}
-    </>
-  );
-}
-
 export function ComposerContextRing({
   model,
   lang,
@@ -124,25 +87,24 @@ export function ComposerContextRing({
               <circle
                 cx="16"
                 cy="16"
-                r="9.6"
+                r="10.4"
                 fill="none"
-                stroke="color-mix(in srgb, var(--vui-border-subtle) 90%, transparent)"
-                strokeWidth="2.8"
+                stroke="color-mix(in srgb, var(--accent-cool) 18%, transparent)"
+                strokeWidth="2.4"
               />
               <circle
                 cx="16"
                 cy="16"
-                r="9.6"
+                r="10.4"
                 fill="none"
                 stroke="var(--accent-cool)"
-                strokeWidth="2.8"
+                strokeWidth="2.4"
                 strokeLinecap="round"
                 pathLength={100}
                 strokeDasharray={`${usageDash} 100`}
                 transform="rotate(-90 16 16)"
                 opacity={model.empty ? 0.35 : 1}
               />
-              {!model.empty ? <ContourArcs segments={model.segments} /> : null}
               <text
                 x="16"
                 y="16.5"

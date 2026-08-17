@@ -28,8 +28,8 @@
 | **R01** | **ChatCodingRoute 继续削入口** | 5 | 3 | 1.7 | `web/src/routes/ChatCodingRoute.tsx` + chat/* | 入口文件 **≤800 行**（或 re-export + 明确 shell）；逻辑在 `chat/` 模块；README 30 秒表更新 | chat contract / layout tests 绿 | **done** (thin re-export; body → `ChatCodingRouteWorkbench.tsx`) |
 | **R01b** | **FE 统一门禁：按钮+壳标记** | 4 | 2 | 2.0 | `vuiShadcnRouteContract` + guides | Teams 薄入口对齐；routes 禁裸 button；Chat/Agents recipe 标记；button-selection 文档 | `vuiShadcnRouteContract` 全绿 | **done** |
 | **R02** | **SC presentation 去 `@ts-nocheck`** | 5 | 3 | 1.7 | `useSourceCollectionPresentationCore.ts` 等 | 去掉 nocheck；关键 bag **显式类型**；不扩大 any 逃逸 | teams contract + `tsc -b` | **done** |
-| **R03** | **agent.py 再抽一层 orchestration 边界** | 5 | 4 | 1.3 | `agent.py` → `core/orchestration` / 现有 core | 入口 **净减少 ≥20% 行** 或职责表写清「禁止新业务进 agent.py」且新逻辑 0 新增业务 | 相关 agent/turn pytest；无行为回归 | todo |
-| **R01c** | **ChatCodingRouteWorkbench 继续削体** | 4 | 3 | 1.3 | `chat/ChatCodingRouteWorkbench.tsx` + hooks | 再抽出独立 hook/模块，入口壳 **净减 ≥300 行**；README Phase 更新 | chat layout/contract + `tsc -b` | **doing** (F1 catalog queries 已抽；workbench ≈3566，距 −300 仍差一轮) |
+| **R03** | **agent.py 再抽一层 orchestration 边界** | 5 | 4 | 1.3 | `agent.py` → `core/orchestration` / 现有 core | 入口 **净减少 ≥20% 行** 或职责表写清「禁止新业务进 agent.py」且新逻辑 0 新增业务 | 相关 agent/turn pytest；无行为回归 | **done** (抽离 runtime_bindings / carryover / compression / diagnostics 至 `core/orchestration/`，agent.py 净减 >820 行，225+ 单测全绿) |
+| **R01c** | **ChatCodingRouteWorkbench 继续削体** | 4 | 3 | 1.3 | `chat/ChatCodingRouteWorkbench.tsx` + hooks | 再抽出独立 hook/模块，入口壳 **净减 ≥300 行**；README Phase 更新 | chat layout/contract + `tsc -b` | **done** (F2 抽取 4 大独立 hook/子组件，净减 358 行，tsc 与门禁全绿) |
 | **R04** | **services 索引防腐门禁** | 4 | 1 | 4.0 | `scripts/_gen_services_readme.py` + test | CI/pytest：**磁盘 `*_service.py` 集合 ⊆ README 表**；缺行 fail | `tests/test_service_structure_guards.py::test_services_readme_indexes_every_facade` | **done** |
 | **R05** | **select_tests / matrix 对齐热路径** | 4 | 2 | 2.0 | `tests/test_matrix.yaml` + `select_tests.py` | 至少覆盖：`session/*`、`team_workflow/*`、`core/llm/*`、`ChatCoding*`、`agent.py` 的 focused 命令可复制且跑得动 | `select_tests --changed-file … --commands-only` 抽样 5 条 | **done** |
 
@@ -41,11 +41,11 @@
 
 | ID | 项 | Impact | Effort | ROI | 范围 | DoD | 验证 | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| **R10** | **迷你 README 批 1：config 族** | 3 | 2 | 1.5 | `config_service` / `provider_config` / `model_reference` 等 | 1 个 `config_services.md` 或目录 README：**编辑表 + 禁止 + 主测** | Agent 不读源码能答「改 provider 挂哪」 | todo |
-| **R11** | **迷你 README 批 2：evolution 族** | 3 | 2 | 1.5 | self/supervised/evolution facades | 同上：控制面 vs payload vs worktree 边界 | 聚焦 evolution 测试路径写进表 | todo |
-| **R12** | **迷你 README 批 3：memory/RAG** | 3 | 2 | 1.5 | memory_* / rag_* / unified_knowledge | SSOT：谁写删除/索引；只读边界 | memory/rag 相关 pytest 列名 | todo |
+| **R10** | **迷你 README 批 1：config 族** | 3 | 2 | 1.5 | `config_service` / `provider_config` / `model_reference` 等 | 1 个 `config_services.md` 或目录 README：**编辑表 + 禁止 + 主测** | Agent 不读源码能答「改 provider 挂哪」 | **done** (`core/web/services/config_services.md`) |
+| **R11** | **迷你 README 批 2：evolution 族** | 3 | 2 | 1.5 | self/supervised/evolution facades | 同上：控制面 vs payload vs worktree 边界 | 聚焦 evolution 测试路径写进表 | **done** (`core/web/services/evolution_services.md`) |
+| **R12** | **迷你 README 批 3：memory/RAG** | 3 | 2 | 1.5 | memory_* / rag_* / unified_knowledge | SSOT：谁写删除/索引；只读边界 | memory/rag 相关 pytest 列名 | **done** (`core/web/services/memory_rag_services.md`) |
 | **R13** | **迷你 README 批 4：launcher/runtime** | 4 | 2 | 2.0 | launcher / runtime / runtime_manager_control / reset | 生命周期 + **无控制台** 检查点 + 禁止 taskkill | launcher/runtime 测试名 | **done** (`core/web/services/launcher_runtime.md`) |
-| **R14** | **tools 全量索引（仿 services）** | 3 | 2 | 1.5 | `tools/*_tools.py` | `tools/README.md`：工具名 → 文件 → 授权入口 → 主测 | 与 tool-authorization 文档互链 | todo |
+| **R14** | **tools 全量索引（仿 services）** | 3 | 2 | 1.5 | `tools/*_tools.py` | `tools/README.md`：工具名 → 文件 → 授权入口 → 主测 | 与 tool-authorization 文档互链 | **done** (`tools/README.md`) |
 | **R15** | **session facade 再瘦到 re-export only** | 4 | 3 | 1.3 | `session_service.py` | facade **无新业务函数体**（仅 re-export/常量）；逻辑全在 `session/` | session 测试全绿；facade LOC 显著下降 | **done** (2026-08-12 探针：顶层业务函数体≈0，仅 lock/control + re-export) |
 | **R16** | **team_workflow facade 再瘦** | 4 | 3 | 1.3 | `team_workflow_orchestration_service.py` | 同上 | team_workflow 合同 + 域测试 | **done** (2026-08-12 探针：顶层函数体 0，re-export shell) |
 
@@ -57,12 +57,13 @@
 
 | ID | 项 | Impact | Effort | ROI | 范围 | DoD | 验证 | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| **R20** | **guides 加载 token 预算注释** | 2 | 1 | 2.0 | `docs/guides/README.md` | 每文件标注「约 N 行 / 何时跳过」 | 人工扫 | todo |
-| **R21** | **development-standard 章节跳转卡** | 3 | 2 | 1.5 | `docs/standards/README.md` 或 standards 头 | Agent 只开 § 索引即可定位，不必全文 | 任务类型→§ 表完整 | todo |
-| **R22** | **route.md 与 services 索引交叉链** | 2 | 1 | 2.0 | `docs/guides/route.md` | 后端行显式链 `services/README` domain 锚点（若可） | 链接有效 | todo |
+| **R20** | **guides 加载 token 预算注释** | 2 | 1 | 2.0 | `docs/guides/README.md` | 每文件标注「约 N 行 / 何时跳过」 | 人工扫 | **done** (`docs/guides/README.md` 加载序+子文档 budget 列) |
+| **R21** | **development-standard 章节跳转卡** | 3 | 2 | 1.5 | `docs/standards/README.md` 或 standards 头 | Agent 只开 § 索引即可定位，不必全文 | 任务类型→§ 表完整 | **done** (`docs/standards/README.md` 跳转卡) |
+| **R22** | **route.md 与 services 索引交叉链** | 2 | 1 | 2.0 | `docs/guides/route.md` | 后端行显式链 `services/README` domain 锚点（若可） | 链接有效 | **done** |
 | **R23** | **诊断命令卡片集中** | 3 | 1 | 3.0 | `docs/guides/loop.md` 或 `playbook.md` | runtime_scenes / diagnose_session / doctor 三行可复制 | 命令存在 | **done** (`loop.md` §3 诊断三件套) |
-| **R24** | **FE 非 chat/teams 路由迷你表** | 3 | 2 | 1.5 | `web/src/routes/` | `routes/README.md`：Route 文件 → 域 → api 模块 | 新 Agent 能指到 Config/Git/Logs | todo |
-| **R25** | **VUI 新建失败模式速查** | 2 | 1 | 2.0 | vui README 或 guides | 5 条「错 import / 未登记 designs」→ 修法 | contract 名列出 | todo |
+| **R24** | **FE 非 chat/teams 路由迷你表** | 3 | 2 | 1.5 | `web/src/routes/` | `routes/README.md`：Route 文件 → 域 → api 模块 | 新 Agent 能指到 Config/Git/Logs | **done** (`web/src/routes/README.md`) |
+| **R25** | **VUI 新建失败模式速查** | 2 | 1 | 2.0 | vui README 或 guides | 5 条「错 import / 未登记 designs」→ 修法 | contract 名列出 | **done** (`vui/README.md` §失败模式速查) |
+| **R26** | **matrix electron rule** | 2 | 1 | 2.0 | `tests/test_matrix.yaml` | 改 `desktop/electron/**` 时 selector 出 vitest 命令 | `test_select_tests` 绿 | **done** |
 
 ---
 
@@ -101,7 +102,7 @@
 | **M2 前端可导航** | R01 + R01c + R02 + R24 | Chat 入口薄并继续削 workbench；SC 可类型检查；非主路由可查表 |
 | **M3 热后端** | R15 + R16 +（可选 R03 一段） | facade 薄；pack README 仍准 |
 | **M4 冷域覆盖** | R10–R14（R13 done） | config/evolution/memory/launcher/tools 可 30 秒定位 |
-| **M5 文档 UX** | R20–R22 + R25 | guides/standards 打开成本下降 |
+| **M5 文档 UX** | R20–R22 + R24–R26 | guides/standards/routes/vui 打开成本下降 |
 
 ---
 

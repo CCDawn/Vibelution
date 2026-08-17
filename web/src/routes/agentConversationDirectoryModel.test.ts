@@ -4,6 +4,7 @@ import type { AgentInstance, Team, TeamMember } from "../api/types";
 import {
   agentDirectoryBucket,
   buildAgentDirectoryPartition,
+  compareAgentDirectoryStableOrder,
   isConversationDirectoryAgent,
 } from "./agentConversationDirectoryModel";
 
@@ -277,5 +278,30 @@ describe("agentConversationDirectoryModel", () => {
     expect(partition.teamBlocks[0]?.roomId).toBe("room-self-evo");
     expect(partition.teamBlocks[0]?.agents.map((item) => item.agentId)).toEqual(["agent-self-obs"]);
     expect(partition.specialAgents).toEqual([]);
+  });
+
+  it("keeps conversation order by createdAt when a later rename bumps updatedAt", () => {
+    const older = agent({
+      agentId: "agent-older",
+      displayName: "OpenCode Flash",
+      createdAt: "2026-08-01T00:00:00Z",
+      updatedAt: "2026-08-17T04:00:00Z",
+    });
+    const newer = agent({
+      agentId: "agent-newer",
+      displayName: "gpt-pix",
+      createdAt: "2026-08-10T00:00:00Z",
+      updatedAt: "2026-08-10T00:00:00Z",
+    });
+    const partition = buildAgentDirectoryPartition({
+      agents: [older, newer],
+      teams: [],
+    });
+
+    expect(compareAgentDirectoryStableOrder(older, newer)).toBeGreaterThan(0);
+    expect(partition.conversationAgents.map((item) => item.agentId)).toEqual([
+      "agent-newer",
+      "agent-older",
+    ]);
   });
 });

@@ -281,8 +281,10 @@ def test_project_agent_task_uses_frozen_agent_and_rejects_mismatch(
 
     def fake_start_project_task(team_id: str, project_id: str, payload: dict) -> dict:
         calls.append({"teamId": team_id, "projectId": project_id, "payload": payload})
-        assert payload["taskKind"] == "experiment_design"
+        assert payload["taskKind"] == "hypothesis_design"
         assert payload["agentId"] == planner_id
+        assert payload["workflowRunId"] == run["runId"]
+        assert payload["workflowNodeId"] == "hypothesis_design"
         assert "teamId=team-agent-execution" in payload["returnTo"]
         return {
             "task": {
@@ -526,7 +528,7 @@ def test_partial_agent_start_replays_persisted_key_and_budget(
     ("node_id", "role_key", "task_kind"),
     (
         ("protocol_design", "experiment_planner", "experiment_design"),
-        ("protocol_review", "experiment_ledger", "experiment_evidence_review"),
+        ("protocol_review", "experiment_ledger", "protocol_review"),
         ("result_evaluation", "experiment_ledger", "experiment_evidence_review"),
         ("iteration_decision", "iteration_planner", "iteration_decision"),
         ("version_governance", "iteration_versioning", "version_governance"),

@@ -15,12 +15,13 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from .runtime_scene_service import record_runtime_scene_event
+from vibelution_storage import resolve_project_runtime_home
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 USER_CLI_AGENT_CONFIG_PATH = Path.home() / "Documents" / "Vibelution" / "config" / "cli_agents.json"
 CLI_AGENT_REGISTRY_PATH = USER_CLI_AGENT_CONFIG_PATH
-RUN_RECORD_DIR = PROJECT_ROOT / ".runtime" / "cli_agents" / "runs"
+RUN_RECORD_DIR = resolve_project_runtime_home(PROJECT_ROOT) / "cli_agents" / "runs"
 DEFAULT_TIMEOUT_SECONDS = 600
 MAX_TIMEOUT_SECONDS = 1800
 DEFAULT_OUTPUT_LIMIT = 12000
@@ -887,7 +888,7 @@ def _clip(value: str, limit: int) -> str:
 
 
 def _find_reusable_terminal_session(*, agent_type: str, cwd: str) -> dict[str, Any]:
-    state_dir = Path(PROJECT_ROOT) / ".runtime" / "cli_agents" / "sessions"
+    state_dir = resolve_project_runtime_home(PROJECT_ROOT) / "cli_agents" / "sessions"
     if not state_dir.exists():
         return {}
     normalized_agent_type = _normalize_id(agent_type)

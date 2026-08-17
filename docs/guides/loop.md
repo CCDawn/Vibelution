@@ -21,9 +21,11 @@
 2 LOCATE    ownership.md → 模块 README → 现有 test
 3 ISOLATE   worktree if STANDARD+|ISOLATION_REQUIRED；claim if multi-agent
 4 IMPLEMENT 只改 owner；SSOT 表 if 状态/API
-5 VERIFY    select_tests → focused → UI contract if FE
-6 EVIDENCE  logging decision；runtime_scenes if 运行时
-7 CLOSE     完成块（§4）；release claim；refresh 三选一
+5 VERIFY    select_tests → focused → UI contract if FE；所有验证在 merge 前完成
+6 EVIDENCE  logging decision；runtime_scenes if 运行时；closeout/验收证据在 merge 前闭合
+7 INTEGRATE 合入门全绿后必须主动 `git merge --ff-only`；不得等用户再下令审查/合入
+8 CLEAN     merge 成功即清理本任务临时内容/进程、claim、junction、worktree、本地分支；不等待 post-merge validation
+9 CLOSE     完成块（§4）；refresh 三选一
 ```
 
 ---
@@ -41,12 +43,16 @@
 npm test -- --run PATTERN
 npx tsc -b --pretty false
 
-# —— 诊断三件套（卡住 / 无响应 / 环境先扫这里）——
-# 1) 最新 runtime scene（按时间戳目录；先看 summary / package_index / raw log）
-Get-ChildItem .\logs\runtime_scenes -Directory | Sort-Object Name -Descending | Select-Object -First 5 Name
-# 2) 单轮会话诊断
-.\.venv\Scripts\python.exe scripts\diagnose_session_turn.py --project-root . --session-id ID --turn-id TID
-# 3) 本机环境医生（venv / hooks / 关键模块）
+# 连不上 / 无响应：先解析本机工作台实开 URL，再进下面三件套。不要默认打 :8000。
+# 必须在 Launcher 打开的那个 checkout 根目录跑（通常是本地 main），不要在任务 worktree 里跑。
+.\.venv\Scripts\python.exe scripts\vibelution_desktop_entry.py --action resolve-workbench --output json
+# 只对返回的 workbenchUrl 探 /api/health。:8000 无监听只说明默认口空，不能当工作台未启动。
+# 实开口权威：env → .runtime/launcher/ports.json → config.toml backend_port（默认 8000）。
+# —— 日志诊断（统一入口；细则见 docs/guides/agent-log-routing.md）——
+# 1) 所有 Agent 第一步：路径 + 当前 scene + agent_brief（可选 session/turn）
+.\.venv\Scripts\python.exe scripts\agent_log_context.py --project "<ROOT>"
+.\.venv\Scripts\python.exe scripts\agent_log_context.py --project "<ROOT>" --session-id ID --turn-id TID
+# 2) 本机环境医生（venv / hooks / 关键模块）
 powershell -NoProfile -File .\scripts\doctor.ps1
 
 # Launcher
@@ -105,6 +111,9 @@ active-work 挡 restart → 固定句（`AGENTS.md`§4），禁止强杀。
 
 ## 协作
 - worktree/branch/claim: …
+- review: pass | blocker=…
+- merge: merged | not merged + 精确原因
+- cleanup: removed=… | cleanup pending=精确残留与原因 | not merged（仅当有精确 blocker）
 - project-memory: not affected | 更新点=…
 - version impact: none | …
 
@@ -121,8 +130,9 @@ active-work 挡 restart → 固定句（`AGENTS.md`§4），禁止强杀。
 | 条件 | 动作 |
 | --- | --- |
 | 与他人 diff/claim 重叠 | 停；查 claim；不覆盖 |
+| 合入门已通过却未主动合入 | 未完成；立即 ff-only 或写精确 blocker |
 | 需 remote push/PR/force | 停；要用户授权 |
-| 需破坏性删/重置 | 停；要确认 |
+| 需 force、远端删除、或归属不明的删/重置 | 停；要确认；已合入本任务的安全本地清理不重复询问 |
 | SSOT 表填不出 | 停；不实现 |
 | 仅 archive 有「规定」 | 提炼到现行或标 historical；不直接执行 archive |
 

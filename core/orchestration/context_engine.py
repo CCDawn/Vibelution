@@ -11,7 +11,9 @@ import copy
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, Mapping
+
+from vibelution_storage import resolve_project_memory_home
 
 from core.infrastructure import developer_sandbox
 from core.prompt_manager.assembly_contract import (
@@ -43,6 +45,62 @@ _ACTIVE_AGENT_DIRECTORY_CACHE_LOCK = threading.Lock()
 _ACTIVE_AGENT_DIRECTORY_CACHE: dict[tuple[str, int, int], list[dict[str, Any]]] = {}
 
 
+def _coerce_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+def _coerce_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return bool(value)
+    text = str(value).strip().lower()
+    if not text:
+        return default
+    if text in {"1", "true", "yes", "on", "enabled"}:
+        return True
+    if text in {"0", "false", "no", "off", "disabled"}:
+        return False
+    return default
+
+
+def _maybe_json(value: Any) -> Any:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith("{") or text.startswith("["):
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                return value
+    return value
+
+
+def _as_mapping(value: Any) -> dict[str, Any]:
+    value = _maybe_json(value)
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {}
+
+
+def _mapping_get(mapping: Mapping[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in mapping:
+            return mapping.get(key)
+    return None
+
+
 def _perf_counter() -> float:
     return time.perf_counter()
 
@@ -60,7 +118,7 @@ def _file_signature(path: Path) -> tuple[str, int, int] | None:
 
 
 def _context_hash(value: str) -> str:
-    text = str(value or "")
+    text = _coerce_text(value)
     if not text:
         return ""
     return hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()[:16]
@@ -74,12 +132,12 @@ def _context_segment(
     stability: str,
     cache_hit: bool | None = None,
 ) -> dict[str, Any] | None:
-    text = str(block or "").strip()
+    text = _coerce_text(block).strip()
     if not text:
         return None
-    normalized_key = str(key or "").strip()
-    normalized_placement = str(placement or "").strip()
-    normalized_stability = str(stability or "").strip()
+    normalized_key = _coerce_text(key).strip()
+    normalized_placement = _coerce_text(placement).strip()
+    normalized_stability = _coerce_text(stability).strip()
     is_cache_prefix = normalized_placement == "cache_prefix"
     if normalized_stability == "project_static":
         prompt_stability = PromptStability.PROJECT_STATIC
@@ -124,12 +182,12 @@ def _context_segment(
 
 
 def _join_context_segments(segments: list[dict[str, Any]], placement: str) -> str:
-    normalized_placement = str(placement or "").strip()
+    normalized_placement = _coerce_text(placement).strip()
     return "\n\n".join(
-        str(segment.get("block") or "").strip()
-        for segment in list(segments or [])
-        if str(segment.get("placement") or "").strip() == normalized_placement
-        and str(segment.get("block") or "").strip()
+        _coerce_text(segment.get("block")).strip()
+        for segment in _mapping_items(segments)
+        if _coerce_text(segment.get("placement")).strip() == normalized_placement
+        and _coerce_text(segment.get("block")).strip()
     ).strip()
 
 
@@ -137,7 +195,7 @@ def _resolve_context_segments(
     segments: list[dict[str, Any]],
     assembly_context: PromptAssemblyContext,
 ) -> list[dict[str, Any]]:
-    raw_segments = list(segments)
+    raw_segments = _mapping_items(segments)
     resolution = PromptSectionResolver().resolve(
         (
             PromptSegment.from_internal_dict(segment)
@@ -164,7 +222,7 @@ def _split_agent_runtime_context_block(block: str) -> tuple[str, str]:
     if not text:
         return "", ""
     lines = text.splitlines()
-    dynamic_markers = ("GroupContextEvents:", "AgentInboxMessages:")
+    dynamic_markers = ("## 个人记忆", "PersonalEpisodes:", "GroupContextEvents:", "AgentInboxMessages:")
     dynamic_start: int | None = None
     for index, line in enumerate(lines):
         stripped = str(line or "").strip()
@@ -193,7 +251,7 @@ def _context_segment_log_summary(segments: list[dict[str, Any]]) -> list[dict[st
             "decisionReason": str(segment.get("decision_reason") or "").strip(),
         }
         if segment.get("cache_hit") is not None:
-            summary["cacheHit"] = bool(segment.get("cache_hit"))
+            summary["cacheHit"] = _coerce_bool(segment.get("cache_hit"), default=False)
         summaries.append(summary)
     return summaries
 
@@ -213,6 +271,7 @@ class AgentContextPacket:
     tool_policy: dict[str, Any] = field(default_factory=dict)
     group_context_events: list[dict[str, Any]] = field(default_factory=list)
     inbox_messages: list[dict[str, Any]] = field(default_factory=list)
+    episodic_events: list[dict[str, Any]] = field(default_factory=list)
     static_context_block: str = ""
     dynamic_context_block: str = ""
     context_segments: list[dict[str, Any]] = field(default_factory=list)
@@ -248,11 +307,16 @@ def build_agent_context(
 
     context_started_at = _perf_counter()
     timings: dict[str, Any] = {}
-    normalized_agent_id = str(agent_id or "").strip()
+    normalized_agent_id = _coerce_text(agent_id).strip()
+    bounded_limit = _bounded_limit(limit, default=6)
+    session_id = _coerce_text(session_id).strip()
+    run_id = _coerce_text(run_id).strip()
+    include_prompt_template_context = _coerce_bool(include_prompt_template_context, default=True)
     stage_started_at = _perf_counter()
-    supplied_agent = dict(agent_snapshot) if isinstance(agent_snapshot, dict) else None
-    if supplied_agent and str(supplied_agent.get("agentId") or "").strip() != normalized_agent_id:
-        supplied_agent = None
+    supplied_agent = _as_mapping(agent_snapshot)
+    snapshot_agent_id = _coerce_text(_mapping_get(supplied_agent, "agentId", "agent_id")).strip()
+    if supplied_agent and snapshot_agent_id != normalized_agent_id:
+        supplied_agent = {}
     agent = supplied_agent or agent_directory_service.get_agent(normalized_agent_id, include_archived=False)
     historical_agent = (
         None
@@ -269,8 +333,8 @@ def build_agent_context(
             level="error",
             fields={
                 "agentId": normalized_agent_id,
-                "sessionId": str(session_id or "").strip(),
-                "runId": str(run_id or "").strip(),
+                "sessionId": session_id,
+                "runId": run_id,
                 "reason": reason,
                 "agentStatus": status,
                 "source": "ContextEngine",
@@ -289,16 +353,22 @@ def build_agent_context(
         )
 
     stage_started_at = _perf_counter()
+    episodic_events = agent_directory_service.list_current_episodic_events(
+        normalized_agent_id,
+        limit=agent_directory_service.PROMPT_LIST_LIMIT,
+    )
+    timings["episodicEventsMs"] = _elapsed_ms(stage_started_at)
+    stage_started_at = _perf_counter()
     group_events = agent_directory_service.list_group_context_events_for_agent(
         normalized_agent_id,
-        limit=limit,
+        limit=bounded_limit,
         prompt_eligible_only=True,
     )
     timings["groupContextEventsMs"] = _elapsed_ms(stage_started_at)
     stage_started_at = _perf_counter()
     inbox_messages = agent_directory_service.list_agent_inbox_messages_for_agent(
         normalized_agent_id,
-        limit=limit,
+        limit=bounded_limit,
         status="pending",
         prompt_eligible_only=True,
     )
@@ -309,10 +379,11 @@ def build_agent_context(
     stage_started_at = _perf_counter()
     raw_runtime_context_block = agent_directory_service.build_agent_runtime_context_block(
         normalized_agent_id,
-        limit=limit,
+        limit=bounded_limit,
         agent_snapshot=agent,
         group_events_snapshot=group_events,
         inbox_messages_snapshot=inbox_messages,
+        episodic_events_snapshot=episodic_events,
         memory_policy_snapshot=memory_policy,
     )
     timings["runtimeContextBlockMs"] = _elapsed_ms(stage_started_at)
@@ -322,7 +393,7 @@ def build_agent_context(
         stage_started_at = _perf_counter()
         research_org_result = _build_research_organization_context_block(
             normalized_agent_id,
-            limit=limit,
+            limit=bounded_limit,
         )
         research_org_context_block = research_org_result["contextBlock"]
         timings["researchOrgContextMs"] = _elapsed_ms(stage_started_at)
@@ -331,7 +402,9 @@ def build_agent_context(
     else:
         timings["researchOrgContextMs"] = 0
         timings["researchOrgContextSkipped"] = True
-    prompt_template_id = str(agent.get("promptTemplateId") or "").strip()
+    prompt_template_id = _coerce_text(
+        _mapping_get(agent, "promptTemplateId", "prompt_template_id")
+    ).strip()
     prompt_context_block = ""
     if include_prompt_template_context:
         stage_started_at = _perf_counter()
@@ -339,9 +412,12 @@ def build_agent_context(
             prompt_template_id,
             project_root=agent_directory_service.PROJECT_ROOT,
             agent_id=normalized_agent_id,
-            session_id=str(session_id or "").strip(),
-            run_id=str(run_id or "").strip(),
-            include_chat_base=str(agent.get("primaryMode") or "").strip().lower() == "chat",
+            session_id=session_id,
+            run_id=run_id,
+            include_chat_base=_coerce_text(
+                _mapping_get(agent, "primaryMode", "primary_mode")
+            ).strip().lower()
+            == "chat",
         )
         timings["promptTemplateContextMs"] = _elapsed_ms(stage_started_at)
     else:
@@ -364,6 +440,15 @@ def build_agent_context(
     else:
         timings["projectAgentRegistryContextMs"] = 0
         timings["projectAgentRegistryContextSkipped"] = True
+    public_structure_context_block = ""
+    if _agent_allows_public_structure_context(agent):
+        stage_started_at = _perf_counter()
+        public_structure_result = _build_public_structure_context_block(agent_directory_service.PROJECT_ROOT, agent_id=normalized_agent_id)
+        public_structure_context_block = public_structure_result["contextBlock"]
+        timings["publicStructureContextMs"] = _elapsed_ms(stage_started_at)
+    else:
+        timings["publicStructureContextMs"] = 0
+        timings["publicStructureContextSkipped"] = True
     context_segments = [
         segment
         for segment in (
@@ -385,6 +470,12 @@ def build_agent_context(
                 prompt_context_block,
                 placement="cache_prefix",
                 stability="agent_static",
+            ),
+            _context_segment(
+                "public_structure",
+                public_structure_context_block,
+                placement="cache_prefix",
+                stability="project_static",
             ),
             _context_segment(
                 "project_agent_registry",
@@ -420,18 +511,19 @@ def build_agent_context(
     timings["totalDurationMs"] = _elapsed_ms(context_started_at)
     packet = AgentContextPacket(
         agent_id=normalized_agent_id,
-        agent_code=str(agent.get("agentCode") or "").strip(),
-        display_name=str(agent.get("displayName") or "").strip(),
-        session_id=str(session_id or "").strip(),
-        run_id=str(run_id or "").strip(),
-        workspace_path=str(agent.get("workspacePath") or "").strip(),
+        agent_code=_coerce_text(_mapping_get(agent, "agentCode", "agent_code")).strip(),
+        display_name=_coerce_text(_mapping_get(agent, "displayName", "display_name")).strip(),
+        session_id=session_id,
+        run_id=run_id,
+        workspace_path=_coerce_text(_mapping_get(agent, "workspacePath", "workspace_path")).strip(),
         dialogue_model_id=agent_directory_service.agent_dialogue_model_id(agent),
         prompt_template_id=prompt_template_id,
-        role_key=str(agent.get("roleKey") or "").strip(),
+        role_key=_coerce_text(_mapping_get(agent, "roleKey", "role_key")).strip(),
         memory_policy=memory_policy,
         tool_policy=tool_policy,
         group_context_events=group_events,
         inbox_messages=inbox_messages,
+        episodic_events=episodic_events,
         static_context_block=static_context_block,
         dynamic_context_block=dynamic_context_block,
         context_segments=context_segments,
@@ -458,6 +550,7 @@ def build_agent_context(
             "projectRulesContextIncluded": False,
             "projectRulesContextOwner": "prompt_manager_or_session_snapshot",
             "projectAgentRegistryContextIncluded": bool(project_agent_registry_context_block),
+            "publicStructureContextIncluded": bool(public_structure_context_block),
             "staticContextChars": timings["staticContextChars"],
             "dynamicContextChars": timings["dynamicContextChars"],
             "staticContextHash": timings["staticContextHash"],
@@ -474,7 +567,7 @@ def _build_research_organization_context_block(agent_id: str, *, limit: int = 6)
     """Return the research organization context block, logging service failures at the turn seam."""
 
     normalized_agent_id = str(agent_id or "").strip()
-    bounded_limit = max(1, int(limit or 1))
+    bounded_limit = _bounded_limit(limit, default=6)
     try:
         from core.web.services import agent_directory_service, research_organization_service
 
@@ -556,33 +649,84 @@ def _file_signature(path: Path) -> tuple[str, int, str]:
 def _agent_needs_research_organization_context(agent: dict[str, Any]) -> bool:
     """Return true only for Agents that can reasonably belong to the research org graph."""
 
-    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
-    primary_mode = str(agent.get("primaryMode") or metadata.get("primaryMode") or "").strip().lower()
+    agent_payload = _as_mapping(agent)
+    metadata = _as_mapping(_mapping_get(agent_payload, "metadata"))
+    primary_mode = _coerce_text(
+        _mapping_get(agent_payload, "primaryMode", "primary_mode")
+        or _mapping_get(metadata, "primaryMode", "primary_mode")
+    ).strip().lower()
     if primary_mode == "research":
         return True
-    role_key = str(agent.get("roleKey") or metadata.get("roleKey") or "").strip().lower()
+    role_key = _coerce_text(
+        _mapping_get(agent_payload, "roleKey", "role_key")
+        or _mapping_get(metadata, "roleKey", "role_key")
+    ).strip().lower()
     if role_key.startswith("research_") or role_key in {"ceo", "organization_advisor", "capability_steward"}:
         return True
-    prompt_template_id = str(agent.get("promptTemplateId") or metadata.get("promptTemplateId") or "").strip().lower()
+    prompt_template_id = _coerce_text(
+        _mapping_get(agent_payload, "promptTemplateId", "prompt_template_id")
+        or _mapping_get(metadata, "promptTemplateId", "prompt_template_id")
+    ).strip().lower()
     if prompt_template_id.startswith("prompt-research"):
         return True
-    research_role = str(metadata.get("researchOrgRole") or metadata.get("systemRole") or "").strip()
+    research_role = _coerce_text(
+        _mapping_get(metadata, "researchOrgRole", "research_org_role", "systemRole", "system_role")
+    ).strip()
     return bool(research_role)
+
+
+def _agent_allows_public_structure_context(agent: dict[str, Any]) -> bool:
+    """Keep the curated public structure digest opt-in per Agent.
+
+    The digest is an independent segment (``public_structure``) with its own
+    exclusion set; it never re-injects AGENTS/COMMON/SOUL (PromptManager owns
+    those) and never includes agent_directory projections.
+    """
+    metadata = _as_mapping(_mapping_get(_as_mapping(agent), "metadata"))
+    for key in (
+        "includePublicStructureContext",
+        "publicStructureContextEnabled",
+        "runtimePublicStructureContext",
+    ):
+        if _coerce_bool(metadata.get(key), default=False):
+            return True
+    return False
+
+
+def _build_public_structure_context_block(project_root: Path, *, agent_id: str) -> dict[str, Any]:
+    """Return the bounded public structure digest, logging failures at the turn seam."""
+    try:
+        from core.web.services import team_knowledge_service
+
+        result = team_knowledge_service.build_startup_structure_block(agent_id=agent_id)
+        return {
+            "contextBlock": str(result.get("block") or ""),
+            "budget": dict(result.get("budget") or {}),
+        }
+    except Exception as exc:
+        _record_context_event(
+            "agent_runtime.public_structure_context_failed",
+            outcome="failed",
+            level="warning",
+            fields={
+                "agentId": str(agent_id or "").strip(),
+                "reason": type(exc).__name__,
+                "source": "ContextEngine",
+            },
+        )
+        return {"contextBlock": "", "budget": {}}
 
 
 def _agent_allows_project_agent_registry_context(agent: dict[str, Any]) -> bool:
     """Keep development-lane registry context out of product Agent prompts unless explicitly enabled."""
 
-    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    metadata = _as_mapping(_mapping_get(_as_mapping(agent), "metadata"))
     for key in (
         "includeProjectAgentRegistryContext",
         "projectAgentRegistryContextEnabled",
         "runtimeProjectRegistryContext",
     ):
-        value = metadata.get(key)
-        if value is True:
-            return True
-        if str(value or "").strip().lower() in {"1", "true", "yes", "on"}:
+        if _coerce_bool(metadata.get(key), default=False):
             return True
     return False
 
@@ -596,7 +740,7 @@ def prepare_subagent_spawn(
 ) -> SubAgentContextPacket:
     """Prepare an isolated or explicit fork context for a temporary sub-agent."""
 
-    normalized_mode = str(context_mode or "isolated").strip().lower()
+    normalized_mode = _coerce_text(context_mode or "isolated").strip().lower()
     if normalized_mode not in {"isolated", "fork"}:
         raise ValueError("Sub-agent context_mode must be isolated or fork.")
     from core.web.services import agent_directory_service
@@ -656,32 +800,44 @@ def record_agent_turn_result(
 
     from core.web.services import agent_directory_service
 
-    normalized_agent_id = str(agent_id or "").strip()
+    normalized_agent_id = _coerce_text(agent_id).strip()
     agent = agent_directory_service.get_agent(normalized_agent_id)
     if not agent:
         return None
-    result_payload = result if isinstance(result, dict) else {}
+    result_payload = _as_mapping(result)
     event_id = f"turn-{_now_compact()}"
-    source_run_id = str(run_id or result_payload.get("runId") or result_payload.get("turnId") or "").strip()
+    source_run_id = _coerce_text(
+        run_id
+        or _mapping_get(result_payload, "runId", "run_id", "turnId", "turn_id")
+    ).strip()
     status = agent_run_store.result_status(result_payload)
     summary = agent_run_store.result_summary(result_payload)
-    tool_call_count = _safe_int(result_payload.get("tool_call_count") or result_payload.get("toolCallCount"))
+    tool_call_count = _safe_int(
+        _first_present(
+            _mapping_get(result_payload, "tool_call_count", "toolCallCount"),
+        )
+    )
     created_at = _now()
     payload = {
         "eventId": event_id,
         "runId": source_run_id,
         "agentId": normalized_agent_id,
-        "sessionId": str(session_id or "").strip(),
+        "sessionId": _coerce_text(session_id).strip(),
         "status": status,
         "summary": summary,
         "toolCallCount": tool_call_count,
         "createdAt": created_at,
     }
-    _append_agent_event(agent_directory_service.PROJECT_ROOT, str(agent.get("workspacePath") or ""), "agent_turn_results.jsonl", payload)
+    _append_agent_event(
+        agent_directory_service.PROJECT_ROOT,
+        _coerce_text(_mapping_get(agent, "workspacePath", "workspace_path")),
+        "agent_turn_results.jsonl",
+        payload,
+    )
     snapshot = agent_run_store.persist_agent_run_snapshot(
         agent,
         source_run_id=source_run_id or event_id,
-        session_id=str(session_id or "").strip(),
+        session_id=payload["sessionId"],
         status=status,
         summary=summary,
         tool_call_count=tool_call_count,
@@ -708,13 +864,13 @@ def record_subagent_result(parent_run_id: str, sub_run_id: str, result: dict[str
 
     from core.web.services import agent_directory_service
 
-    result_payload = result if isinstance(result, dict) else {}
+    result_payload = _as_mapping(result)
     status = agent_run_store.result_status(result_payload)
     summary = agent_run_store.result_summary(result_payload)
     created_at = _now()
     payload = {
-        "parentRunId": str(parent_run_id or "").strip(),
-        "subRunId": str(sub_run_id or "").strip(),
+        "parentRunId": _coerce_text(parent_run_id).strip(),
+        "subRunId": _coerce_text(sub_run_id).strip(),
         "status": status,
         "summary": summary,
         "createdAt": created_at,
@@ -728,7 +884,11 @@ def record_subagent_result(parent_run_id: str, sub_run_id: str, result: dict[str
         sub_run_id=payload["subRunId"],
         status=status,
         summary=summary,
-        tool_call_count=_safe_int(result_payload.get("tool_call_count") or result_payload.get("toolCallCount")),
+        tool_call_count=_safe_int(
+            _first_present(
+                _mapping_get(result_payload, "tool_call_count", "toolCallCount"),
+            )
+        ),
         timestamp=created_at,
         result=result_payload,
     )
@@ -748,13 +908,19 @@ def record_subagent_result(parent_run_id: str, sub_run_id: str, result: dict[str
 def list_agent_runs_for_agent(agent_id: str, *, limit: int = 20) -> dict[str, Any]:
     """Return recent bounded AgentRun/SubAgentRun snapshots for one persistent Agent."""
 
-    return agent_run_store.list_agent_runs_for_agent(agent_id, limit=limit)
+    return agent_run_store.list_agent_runs_for_agent(
+        agent_id,
+        limit=_bounded_limit(limit, default=20),
+    )
 
 
 def list_agent_runs_for_agents(agent_ids: list[str], *, limit: int = 20) -> dict[str, Any]:
     """Return recent bounded AgentRun/SubAgentRun snapshots for many persistent Agents."""
 
-    return agent_run_store.list_agent_runs_for_agents(agent_ids, limit=limit)
+    return agent_run_store.list_agent_runs_for_agents(
+        _coerce_str_list(agent_ids),
+        limit=_bounded_limit(limit, default=20),
+    )
 
 
 def _append_agent_event(project_root: Path, workspace_path: str, filename: str, payload: dict[str, Any]) -> None:
@@ -852,7 +1018,7 @@ def _build_project_agent_registry_context_block(
         return ""
     from core.web.services import agent_directory_service
 
-    registry_path = Path(project_root) / ".docs" / "project-memory" / "agent-registry.json"
+    registry_path = resolve_project_memory_home(project_root) / "agent-registry.json"
     registry = _ensure_project_agent_registry(
         registry_path,
         agent_id=agent_id,
@@ -871,7 +1037,7 @@ def _build_project_agent_registry_context_block(
     handoff_entries = _project_agent_handoff_entries(current_entry, entries, limit=8)
     lines = [
         "## Project Agent Territory Registry",
-        "Source: .docs/project-memory/agent-registry.json + active AgentDirectory",
+        "Source: active external project memory/agent-registry.json + active AgentDirectory",
         "Contract:",
         "- You are bound to the sessionId and management territory listed below.",
         (
@@ -1041,7 +1207,7 @@ def _default_project_agent_registry(
         "updatedAt": datetime.now(timezone.utc).isoformat(),
         "sourceOfTruth": {
             "identityBinding": "AgentDirectory",
-            "territoryDefaults": ".docs/project-memory/agent-registry.json",
+            "territoryDefaults": "<active-project-memory>/agent-registry.json",
             "runtimeInjection": "core/orchestration/context_engine.py",
         },
         "policy": {
@@ -1099,9 +1265,8 @@ def _project_agent_lane_related_files(lane: dict[str, Any]) -> list[str]:
     for module in list(lane.get("modules") or [])[:8]:
         if not isinstance(module, dict):
             continue
-        for item in list(module.get("relatedFiles") or []):
-            value = str(item or "").strip()
-            if value and value not in files:
+        for value in _coerce_str_list(module.get("relatedFiles")):
+            if value not in files:
                 files.append(value)
             if len(files) >= 8:
                 return files
@@ -1169,7 +1334,7 @@ def _fallback_project_agent_lane_territories() -> dict[str, dict[str, Any]]:
         "quality-and-operations": {
             "managementScope": {
                 "summary": "负责测试、日志、诊断、发布收口和工作树卫生。",
-                "files": ["tests/**", "logs/runtime_scenes/**", ".docs/project-memory/**"],
+                "files": ["tests/**", "<active-project-logs>/runtime_scenes/**", "<active-project-memory>/**"],
                 "taskTypes": [
                     "testing",
                     "logging",
@@ -1255,27 +1420,16 @@ def _project_agent_registry_entry_from_sources(
         "responsibilityLane": responsibility_lane,
         "managementScope": {
             "summary": str(management_scope.get("summary") or "").strip(),
-            "files": [
-                str(item or "").strip()
-                for item in list(management_scope.get("files") or [])[:8]
-                if str(item or "").strip()
-            ],
-            "taskTypes": [
-                str(item or "").strip()
-                for item in list(management_scope.get("taskTypes") or [])[:8]
-                if str(item or "").strip()
-            ],
+            "files": _coerce_str_list(management_scope.get("files"), limit=8),
+            "taskTypes": _coerce_str_list(management_scope.get("taskTypes"), limit=8),
         },
-        "handoffTargets": [
-            str(item or "").strip()
-            for item in list(
-                explicit.get("handoffTargets")
-                or metadata.get("handoffTargets")
-                or lane_default.get("handoffTargets")
-                or []
-            )[:8]
-            if str(item or "").strip()
-        ],
+        "handoffTargets": _coerce_str_list(
+            explicit.get("handoffTargets")
+            or metadata.get("handoffTargets")
+            or lane_default.get("handoffTargets")
+            or [],
+            limit=8,
+        ),
         "outOfScopePolicy": str(
             explicit.get("outOfScopePolicy")
             or metadata.get("outOfScopePolicy")
@@ -1320,12 +1474,9 @@ def _project_agent_handoff_entries(
     *,
     limit: int,
 ) -> list[dict[str, Any]]:
+    bounded_limit = _bounded_limit(limit, default=8)
     current_agent_id = str(current_entry.get("agentId") or "").strip()
-    targets = [
-        str(item or "").strip()
-        for item in list(current_entry.get("handoffTargets") or [])
-        if str(item or "").strip()
-    ]
+    targets = _coerce_str_list(current_entry.get("handoffTargets"))
     active_entries = [
         item
         for item in entries
@@ -1341,8 +1492,8 @@ def _project_agent_handoff_entries(
             or str(item.get("responsibilityLane") or "").strip() in targets
         ]
         if matched:
-            return matched[:limit]
-    return active_entries[:limit]
+            return matched[:bounded_limit]
+    return active_entries[:bounded_limit]
 
 
 def _format_project_agent_registry_entry(
@@ -1362,10 +1513,8 @@ def _format_project_agent_registry_entry(
     ]
     if include_scope:
         summary = str(scope.get("summary") or "").strip()
-        files = ", ".join(str(item or "").strip() for item in list(scope.get("files") or [])[:4] if str(item or "").strip())
-        task_types = ", ".join(
-            str(item or "").strip() for item in list(scope.get("taskTypes") or [])[:4] if str(item or "").strip()
-        )
+        files = ", ".join(_coerce_str_list(scope.get("files"), limit=4))
+        task_types = ", ".join(_coerce_str_list(scope.get("taskTypes"), limit=4))
         if summary:
             parts.append(f"scope={summary}")
         if files:
@@ -1408,11 +1557,100 @@ def _record_context_event(event_code: str, *, outcome: str, fields: dict[str, An
         return
 
 
-def _safe_int(value: Any) -> int:
+def _mapping_items(value: Any) -> list[dict[str, Any]]:
+    value = _maybe_json(value)
+    if value is None or isinstance(value, (str, bytes, bytearray, memoryview)):
+        return []
+    if isinstance(value, Mapping):
+        nested = value.get("items")
+        if nested is None:
+            nested = value.get("segments")
+        if nested is None:
+            nested = value.get("entries")
+        if nested is not None:
+            return _mapping_items(nested)
+        return [dict(value)] if value else []
     try:
-        return int(value or 0)
+        iterator = list(value)
+    except TypeError:
+        return []
+    items: list[dict[str, Any]] = []
+    for item in iterator:
+        item = _maybe_json(item)
+        if isinstance(item, Mapping):
+            items.append(dict(item))
+    return items
+
+
+def _first_present(*values: Any) -> Any:
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
+def _coerce_str_list(value: Any, *, limit: int | None = None) -> list[str]:
+    value = _maybe_json(value)
+    if value is None:
+        names: list[str] = []
+    elif isinstance(value, (bytes, bytearray, memoryview)):
+        text = bytes(value).decode("utf-8", errors="replace").strip()
+        names = [text] if text else []
+    elif isinstance(value, str):
+        text = value.strip()
+        names = [text] if text else []
+    elif isinstance(value, Mapping):
+        nested = value.get("items")
+        if nested is None:
+            nested = value.get("names")
+        if nested is None:
+            nested = value.get("agentIds")
+        if nested is None:
+            nested = value.get("agent_ids")
+        if nested is not None:
+            return _coerce_str_list(nested, limit=limit)
+        names = []
+        for key, item in value.items():
+            if isinstance(item, Mapping) and not _coerce_bool(
+                item.get("enabled", item.get("enable")), True
+            ):
+                continue
+            text = _coerce_text(key).strip()
+            if text and text not in names:
+                names.append(text)
+    else:
+        try:
+            iterator = list(value)
+        except TypeError:
+            text = _coerce_text(value).strip()
+            names = [text] if text else []
+        else:
+            names = []
+            for item in iterator:
+                text = _coerce_text(item).strip()
+                if text and text not in names:
+                    names.append(text)
+    if limit is None:
+        return names
+    return names[: _bounded_limit(limit, default=len(names), minimum=0)]
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    if isinstance(value, bool) or value is None:
+        return default
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
+    try:
+        return int(value)
     except (TypeError, ValueError):
-        return 0
+        return default
+
+
+def _bounded_limit(value: Any, *, default: int, minimum: int = 1) -> int:
+    parsed = _safe_int(value, default)
+    if parsed < minimum:
+        return minimum
+    return parsed
 
 
 def _now() -> str:

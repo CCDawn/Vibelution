@@ -3,8 +3,9 @@
 **读者：coding Agent。**
 **目标：30 秒内定位生命周期、无控制台红线与主测；不要在 Web facade 里堆进程逻辑。**
 
-权威细则：`docs/standards/development-standard.md` §8.0 · 根 `AGENTS.md` §2。
+权威细则：`docs/standards/development-standard.md` §8.0 · 根 `AGENTS.md` §2 · [ADR 0009](../../../docs/adr/0009-launcher-control-plane-lives-in-electron-main.md)。
 Runtime scene pack：[`runtime_scene/README.md`](runtime_scene/README.md)。
+Electron 壳：[`desktop/electron/README.md`](../../../desktop/electron/README.md)。已归档迁移账本：[`docs/archive/plans/2026-08/CONTROL_PLANE_MIGRATION.md`](../../../docs/archive/plans/2026-08/CONTROL_PLANE_MIGRATION.md)。
 
 ---
 
@@ -12,40 +13,44 @@ Runtime scene pack：[`runtime_scene/README.md`](runtime_scene/README.md)。
 
 | 你在改… | 先打开 | 禁止 |
 | --- | --- | --- |
-| start / stop / restart / active-work 拦截 | `core/launcher/service.py` | 在 `runtime_service.py` 再写一套 lifecycle |
+| start / stop / restart / active-work 拦截 | Electron main（`desktop/electron/src/main.ts` `orchestrateLauncherLifecycle`）→ Python `core/launcher/service.py`（RM 队列） | 在 `runtime_service.py` 再写一套 lifecycle；renderer 直连 :8765 |
+| Launcher 窗口真相 / leftover adopt | `desktop/electron/src/windows/electronWindowProvider.ts` | Python overlay 把 live window 标成 closed |
+| Launcher UI 传输 | `web/src/api/launcher.ts`（preload IPC 门面） | 可操作仪表盘在 API 未就绪时画空表 + `未连接` |
 | Web 路由 import 稳定面 | `launcher_service.py`（re-export only） | 往 facade 加业务体 |
-| Force-stop / close transaction / desktop session | `core/launcher/`（`lifecycle_*` · `desktop_session_store` · `window_provider_dispatcher`） | 裸 `taskkill.exe`、直接杀 PID 当常态 |
-| Reset / maintenance | `core/launcher/maintenance_reset.py`（`reset_service.py` 仅 alias） | 平行 reset 实现 |
+| close transaction / desktop session | Electron main（`workbenchCloseTransactionStore.ts` · `desktopSessionStore.ts`）；Python session 只作兼容副本 | 裸 `taskkill.exe`、直接杀 PID 当常态 |
+| Reset / maintenance / settings / developer-mode | `core/launcher/maintenance_reset.py`（`reset_service.py` 仅 alias）经 `vibelution_desktop_entry.py --action launcher-api` CLI | 把 reset 逻辑抄进 TS；平行 reset 实现 |
 | Runtime Manager daemon / work-run / 预检 | `core/runtime_manager/` | 用 PowerShell lifecycle 制造可见控制台 |
 | 轻量 RM 存活检查 | `runtime_manager_control_service.py` | 在此扩展完整 lifecycle |
 | Workbench runtime summary 投影 | `runtime_service.py` | 当成第二写入者改 store |
 | Scene 证据包读写 / 诊断 | `runtime_scene/*` · facade `runtime_scene_service.py` | 手写无界 log dump 进 Prompt |
-| 托盘 / 脚本入口 | `scripts/vibelution_launcher.py` · `scripts/vibelution_desktop_entry.py` | 后台路径弹 `cmd`/`powershell`/WT |
+| 托盘 / 脚本入口 | `scripts/vibelution_launcher.py` · `scripts/vibelution_desktop_entry.py`（JSON CLI bridge） | 后台路径弹 `cmd`/`powershell`/WT |
 | 产品托盘 owner | Electron `desktopTray.ts` + `desktopShellOwner.ts` | 与 WinForms 同时显示 NotifyIcon |
+| 托盘 Launcher 代码版本 | `desktopShellFreshness.ts` `formatTrayLauncherFreshness` ← `desktop-shell-status` | 向工作台 HTTP `/api/launcher/freshness` 问「Launcher 版本」 |
 
 ---
 
-## 生命周期（谁拥有什么）
+## 生命周期（谁拥有什么，现行）
 
 ```text
-Electron (product tray owner, globally unique desktop shell)
-  → pin userData to %LOCALAPPDATA%\\Vibelution\\DesktopShell before requestSingleInstanceLock
-  → second launch without --project/--open-workbench/deep-link focuses the existing Launcher window
-  → claim .runtime/launcher/desktop_shell_owner.json
-  → Python launcher service (vibelution_desktop_entry.py bootstrap)
-  → Runtime Manager → FastAPI + Workbench
-  → isolated worktree backends stay allowed; they do not spawn a second desktop shell
-  → isolated start opens a named Workbench window (`{shortName} 台`) inside that existing Electron shell
+Electron main (TS) = Launcher 控制面（ADR 0009 已落地）
+  → pin userData to %LOCALAPPDATA%\Vibelution\DesktopShell before requestSingleInstanceLock
+  → 控制窗口 renderer 只走 IPC（launcher:invoke）；不 fetch :8765
+  → 工作台 renderer 加载工作台 origin（通常 :8000）
+  → lifecycle / 分支实例 / settings / maintenance 由 main 编排，经无控制台 Python JSON CLI
+    （vibelution_desktop_entry.py --action lifecycle|branch-instance|launcher-api|resolve-workbench）
+  → Python 子进程：Runtime Manager + FastAPI 工作台（不再长期占用 :8765）
+  → 关闭桌面壳 / 重启 Launcher 必须先停掉 RM daemon 及其工作台/隔离实例进程树
+  → 打开桌面壳时必须先清掉上一轮托管进程树，不能 attach 到已无父进程的 RM/工作台；点启动/重启也会先杀掉遗留工作台再拉当前 checkout
+  → close transaction / desktop session 真相在 main；Python 侧只报告 backend 状态
+  → 「工作台开着」= 后端健康 **且** Electron 工作台窗口 open。仅后端就绪（noBrowser）是 `partial` / `browser_missing`，不是 `open`
+  → isolated worktree backends 仍在同一 desktop shell 开 `{shortName} 台`
 
-VibelutionLauncher.exe --project <root> launcher
-  → if Electron owner pid is alive: no NotifyIcon (thin shim / open console)
-  → else native WinForms tray
-  → core/launcher (control plane)
+VibelutionLauncher.exe = thin no-console shim
+  → packaged Vibelution.exe 存在：转发 start|stop|restart|rebuild-and-start 给 Electron（second-instance）
+  → 无 packaged Electron（开发 checkout）：legacy Python 路径 + WinForms NotifyIcon
 ```
 
-Web: core/web/routes/launcher.py · runtime.py · logs.py
-  → launcher_service / runtime_service / runtime_scene_service（薄委托）
-```
+Web: `core/web/routes/launcher.py` · `runtime.py` · `logs.py` → `launcher_service` / `runtime_service` / `runtime_scene_service`（薄委托）。
 
 - Operator config 真源：`%USERPROFILE%\Documents\Vibelution\config\config.toml`（ADR0003）。
 - active-work 挡 refresh：报告固定句（`AGENTS.md` §4），禁止强杀绕过。
@@ -63,7 +68,7 @@ Web: core/web/routes/launcher.py · runtime.py · logs.py
 4. 禁止用裸 `git` cmd wrapper、`npm`/`cmd` 脚本壳当后台路径。
 5. 用户明确打开的 CLI 终端面板除外。
 
-证据：相关 launcher/runtime 测试 + 说明 helper/`pythonw`/`CREATE_NO_WINDOW`/`windowsHide` 落点。
+证据：相关 launcher/runtime 测试 + 说明 helper/`pythonw`/`CREATE_NO_WINDOW`/`windowsHide` 落点。Electron 侧所有 JSON CLI spawn 均断言 `windowsHide: true`。
 
 ---
 
@@ -90,14 +95,14 @@ Web: core/web/routes/launcher.py · runtime.py · logs.py
 ## 窄冒烟包（tray / quit / workbenchUrl 交接，合入前子集）
 
 ```powershell
-# Python: live URL / ports.json handoff
+# Python: live URL / ports.json handoff / JSON CLI bridge
 .\.venv\Scripts\python.exe -m pytest tests\test_vibelution_desktop_entry.py tests\test_runtime_manager_electron_window_handoff.py -q
 
-# Electron: tray menu, quit/lifecycle, workbench URL
-node desktop\electron\node_modules\vitest\vitest.mjs run tests/windowProvider.test.ts tests/desktopTray.test.ts tests/desktopLifecycleCoordinator.test.ts tests/desktopMainTransactionalClose.test.ts tests/desktopMainTrayIntegration.test.ts tests/desktopActionClient.test.ts tests/desktopSmokeShutdown.test.ts
+# Electron: tray menu, quit/lifecycle, workbench URL, close store, IPC host
+node desktop\electron\node_modules\vitest\vitest.mjs run tests/windowProvider.test.ts tests/desktopTray.test.ts tests/desktopLifecycleCoordinator.test.ts tests/desktopMainTransactionalClose.test.ts tests/desktopMainTrayIntegration.test.ts tests/desktopActionClient.test.ts tests/desktopSmokeShutdown.test.ts tests/launcherIpcHost.test.ts tests/workbenchCloseTransactionStore.test.ts
 ```
 
-选择器：`desktop-electron-smoke`（`tests/test_matrix.yaml`）。这不是双壳重写；改完源码后若用户跑的是 `dist\desktop\win-unpacked\Vibelution.exe`，需要重新 package 才看得到 tray/quit/handoff。
+选择器：`desktop-electron-smoke`（`tests/test_matrix.yaml`）。这不是双壳重写。packaged `Vibelution.exe` 由 Launcher 对照 provenance 自刷新 `app.asar`；不要让用户手跑 `package:dir`。
 
 影响面选择器：`tests\select_tests.py --changed-file <path> --commands-only`。
 
@@ -109,5 +114,8 @@ node desktop\electron\node_modules\vitest\vitest.mjs run tests/windowProvider.te
 | --- | --- |
 | [`README.md`](README.md) | 全量 facade 表 |
 | [`runtime_scene/README.md`](runtime_scene/README.md) | scene pack 路由 |
+| [`docs/adr/0009-launcher-control-plane-lives-in-electron-main.md`](../../../docs/adr/0009-launcher-control-plane-lives-in-electron-main.md) | Launcher 控制面落 Electron main |
+| [`desktop/electron/README.md`](../../../desktop/electron/README.md) | 桌面壳 30 秒表 |
+| [`docs/archive/plans/2026-08/CONTROL_PLANE_MIGRATION.md`](../../../docs/archive/plans/2026-08/CONTROL_PLANE_MIGRATION.md) | 已归档迁移账本 |
 | [`docs/guides/loop.md`](../../../docs/guides/loop.md) | 诊断三件套 + Launcher 命令 |
 | [`docs/ops/config/07-launcher-runtime-workbench.md`](../../../docs/ops/config/07-launcher-runtime-workbench.md) | 运维配置 |

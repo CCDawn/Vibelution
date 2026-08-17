@@ -9,6 +9,8 @@ import styles from "./LauncherStartupSettingsPanel.styles";
 type LauncherStartupSettingsCopy = {
   invalidPort: string;
   startupSettings: string;
+  expandSettings: string;
+  collapseSettings: string;
   runtimeProfile: string;
   launcherControlPort: string;
   launcherControlPortHint: string;
@@ -51,8 +53,8 @@ type LauncherStartupSettingsPanelProps = {
 function defaultStartupSettings(windowMode: WorkbenchWindowMode = "fullscreen"): LauncherStartupSettings {
   return {
     launcher: {
-      controlPort: 8765,
-      effectiveControlPort: 8765,
+      controlPort: 0,
+      effectiveControlPort: 0,
       controlPortEnvOverride: 0,
     },
     runtime: {
@@ -100,6 +102,10 @@ function runtimeProfileLabel(profile: string, lang: "zh" | "en") {
     safe_remote: { zh: "安全远程", en: "Safe remote" },
   };
   return labels[profile]?.[lang] ?? profile;
+}
+
+function summaryPort(value: number): string {
+  return value > 0 ? String(value) : "-";
 }
 
 function parsePortDraft(value: string) {
@@ -168,6 +174,7 @@ export function LauncherStartupSettingsPanel({
         setting.interface.language,
       ].join("|")
     : `fallback:${configuredWindowMode}`;
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [draft, setDraft] = useState<LauncherStartupSettings>(() => current);
   const [controlPortText, setControlPortText] = useState(() => String(current.launcher.controlPort));
   const [backendPortText, setBackendPortText] = useState(() => String(current.workbench.backendPort));
@@ -181,6 +188,14 @@ export function LauncherStartupSettingsPanel({
     setFrontendPortText(String(current.workbench.frontendPort));
     setValidationError("");
   }, [currentSignature]);
+
+  const settingsSummary = [
+    runtimeProfileLabel(current.runtime.profile, uiLang),
+    effectiveWindowModeLabel,
+    `${copy.launcherControlPort} ${summaryPort(current.launcher.effectiveControlPort || current.launcher.controlPort)}`,
+    `${copy.backendPort} ${summaryPort(current.workbench.effectiveBackendPort || current.workbench.backendPort)}`,
+    `${copy.frontendPort} ${summaryPort(current.workbench.effectiveFrontendPort || current.workbench.frontendPort)}`,
+  ].join(" · ");
 
   function patchDraft(next: Partial<LauncherStartupSettings>) {
     setDraft((prev) => ({
@@ -231,169 +246,182 @@ export function LauncherStartupSettingsPanel({
 
   return (
     <div className={styles.settingsStrip} aria-label={copy.startupSettings}>
-      <p className={styles.settingsTitle}>{copy.startupSettings}</p>
-      <div className={styles.settingsPrimary}>
-        <label className={styles.settingField}>
-          <span>{copy.runtimeProfile}</span>
-          <VStringSelect
-            ariaLabel={copy.runtimeProfile}
-            value={draft.runtime.profile}
-            isDisabled={controlsDisabled}
-            onValueChange={(profile) => patchDraft({ runtime: { ...draft.runtime, profile } })}
-            options={draft.runtime.profileOptions.map((profile) => ({
-              value: profile,
-              label: runtimeProfileLabel(profile, uiLang),
-            }))}
-          />
-        </label>
-        <label className={styles.settingField}>
-          <VTooltip content={copy.launcherControlPortHint} width="wide">
-            <span tabIndex={0}>{copy.launcherControlPort}</span>
-          </VTooltip>
-          <VNativeInput
-            type="number"
-            min={1}
-            max={65535}
-            value={controlPortText}
-            disabled={controlsDisabled}
-            onChange={(event) => setControlPortText(event.target.value)}
-          />
-          {controlOverride ? <small>{copy.effectiveValue}: {controlOverride}</small> : null}
-        </label>
-        <label className={styles.settingField}>
-          <VTooltip content={copy.backendPortHint} width="wide">
-            <span tabIndex={0}>{copy.backendPort}</span>
-          </VTooltip>
-          <VNativeInput
-            type="number"
-            min={1}
-            max={65535}
-            value={backendPortText}
-            disabled={controlsDisabled}
-            onChange={(event) => setBackendPortText(event.target.value)}
-          />
-          {backendOverride ? <small>{copy.effectiveValue}: {backendOverride}</small> : null}
-        </label>
-        <label className={styles.settingField}>
-          <VTooltip content={copy.frontendPortHint} width="wide">
-            <span tabIndex={0}>{copy.frontendPort}</span>
-          </VTooltip>
-          <VNativeInput
-            type="number"
-            min={1}
-            max={65535}
-            value={frontendPortText}
-            disabled={controlsDisabled}
-            onChange={(event) => setFrontendPortText(event.target.value)}
-          />
-          {frontendOverride ? <small>{copy.effectiveValue}: {frontendOverride}</small> : null}
-        </label>
-      </div>
-      <div className={styles.settingsWindow}>
-        <div className={styles.settingField}>
-          <VTooltip content={`${effectiveWindowModeLabel} · ${windowModeDetail}`} width="wide">
-            <span tabIndex={0}>{copy.windowMode}</span>
-          </VTooltip>
-          <VTabs
-            density="compact"
-            className={styles.windowModeTabs}
-            listClassName={styles.windowModeTabsList}
-            triggerClassName={styles.windowModeTabsTrigger}
-            aria-label={copy.windowMode}
-            value={draft.workbench.windowMode === "windowed" ? "windowed" : "fullscreen"}
-            onValueChange={(value) => {
-              if (controlsDisabled) {
-                return;
-              }
-              if (value === "fullscreen" || value === "windowed") {
-                saveWindowMode({ windowMode: value });
-              }
-            }}
-            items={[
-              {
-                id: "fullscreen",
-                label: (
-                  <span className={styles.windowModeTabLabel}>
-                    {pendingWindowMode === "fullscreen" ? <LoaderCircle size={14} className={styles.spin} aria-hidden="true" /> : <Maximize2 size={14} aria-hidden="true" />}
-                    <span>{copy.windowModeFullscreen}</span>
-                  </span>
-                ),
-                title: copy.windowModeFullscreen,
-                disabled: controlsDisabled,
-              },
-              {
-                id: "windowed",
-                label: (
-                  <span className={styles.windowModeTabLabel}>
-                    {pendingWindowMode === "windowed" ? <LoaderCircle size={14} className={styles.spin} aria-hidden="true" /> : <Minimize2 size={14} aria-hidden="true" />}
-                    <span>{copy.windowModeWindowed}</span>
-                  </span>
-                ),
-                title: copy.windowModeWindowed,
-                disabled: controlsDisabled,
-              },
-            ]}
-          />
+      <details
+        className={styles.settingsFold}
+        onToggle={(event) => setSettingsOpen(event.currentTarget.open)}
+      >
+        <summary className={styles.settingsSummary}>
+          <span className={styles.settingsTitle}>{copy.startupSettings}</span>
+          <strong className={styles.settingsSummaryValue}>{settingsSummary}</strong>
+          <small className={styles.settingsSummaryHint}>
+            {settingsOpen ? copy.collapseSettings : copy.expandSettings}
+          </small>
+        </summary>
+        <div className={styles.settingsBody}>
+          <div className={styles.settingsPrimary}>
+            <label className={styles.settingField}>
+              <span>{copy.runtimeProfile}</span>
+              <VStringSelect
+                ariaLabel={copy.runtimeProfile}
+                value={draft.runtime.profile}
+                isDisabled={controlsDisabled}
+                onValueChange={(profile) => patchDraft({ runtime: { ...draft.runtime, profile } })}
+                options={draft.runtime.profileOptions.map((profile) => ({
+                  value: profile,
+                  label: runtimeProfileLabel(profile, uiLang),
+                }))}
+              />
+            </label>
+            <label className={styles.settingField}>
+              <VTooltip content={copy.launcherControlPortHint} width="wide">
+                <span tabIndex={0}>{copy.launcherControlPort}</span>
+              </VTooltip>
+              <VNativeInput
+                type="number"
+                min={1}
+                max={65535}
+                value={controlPortText}
+                disabled={controlsDisabled}
+                onChange={(event) => setControlPortText(event.target.value)}
+              />
+              {controlOverride ? <small>{copy.effectiveValue}: {controlOverride}</small> : null}
+            </label>
+            <label className={styles.settingField}>
+              <VTooltip content={copy.backendPortHint} width="wide">
+                <span tabIndex={0}>{copy.backendPort}</span>
+              </VTooltip>
+              <VNativeInput
+                type="number"
+                min={1}
+                max={65535}
+                value={backendPortText}
+                disabled={controlsDisabled}
+                onChange={(event) => setBackendPortText(event.target.value)}
+              />
+              {backendOverride ? <small>{copy.effectiveValue}: {backendOverride}</small> : null}
+            </label>
+            <label className={styles.settingField}>
+              <VTooltip content={copy.frontendPortHint} width="wide">
+                <span tabIndex={0}>{copy.frontendPort}</span>
+              </VTooltip>
+              <VNativeInput
+                type="number"
+                min={1}
+                max={65535}
+                value={frontendPortText}
+                disabled={controlsDisabled}
+                onChange={(event) => setFrontendPortText(event.target.value)}
+              />
+              {frontendOverride ? <small>{copy.effectiveValue}: {frontendOverride}</small> : null}
+            </label>
+          </div>
+          <div className={styles.settingsWindow}>
+            <div className={styles.settingField}>
+              <VTooltip content={`${effectiveWindowModeLabel} · ${windowModeDetail}`} width="wide">
+                <span tabIndex={0}>{copy.windowMode}</span>
+              </VTooltip>
+              <VTabs
+                density="compact"
+                className={styles.windowModeTabs}
+                listClassName={styles.windowModeTabsList}
+                triggerClassName={styles.windowModeTabsTrigger}
+                aria-label={copy.windowMode}
+                value={draft.workbench.windowMode === "windowed" ? "windowed" : "fullscreen"}
+                onValueChange={(value) => {
+                  if (controlsDisabled) {
+                    return;
+                  }
+                  if (value === "fullscreen" || value === "windowed") {
+                    saveWindowMode({ windowMode: value });
+                  }
+                }}
+                items={[
+                  {
+                    id: "fullscreen",
+                    label: (
+                      <span className={styles.windowModeTabLabel}>
+                        {pendingWindowMode === "fullscreen" ? <LoaderCircle size={14} className={styles.spin} aria-hidden="true" /> : <Maximize2 size={14} aria-hidden="true" />}
+                        <span>{copy.windowModeFullscreen}</span>
+                      </span>
+                    ),
+                    title: copy.windowModeFullscreen,
+                    disabled: controlsDisabled,
+                  },
+                  {
+                    id: "windowed",
+                    label: (
+                      <span className={styles.windowModeTabLabel}>
+                        {pendingWindowMode === "windowed" ? <LoaderCircle size={14} className={styles.spin} aria-hidden="true" /> : <Minimize2 size={14} aria-hidden="true" />}
+                        <span>{copy.windowModeWindowed}</span>
+                      </span>
+                    ),
+                    title: copy.windowModeWindowed,
+                    disabled: controlsDisabled,
+                  },
+                ]}
+              />
+            </div>
+            <label className={styles.settingField}>
+              <span>{copy.windowSize}</span>
+              <VStringSelect
+                ariaLabel={copy.windowSize}
+                value={draft.workbench.windowSize}
+                isDisabled={controlsDisabled}
+                onValueChange={(windowSize) => patchDraft({ workbench: { ...draft.workbench, windowSize } })}
+                options={windowSizeOptions(draft, copy).map((option) => ({
+                  value: option.size,
+                  label: option.label[uiLang] ?? option.size,
+                }))}
+              />
+              {windowSizeOverride ? <small>{copy.effectiveValue}: {current.workbench.effectiveWindowSize}</small> : null}
+            </label>
+            <VButton
+              type="button"
+              variant="secondary"
+              className={styles.settingsSaveButton}
+              isDisabled={controlsDisabled}
+              onPress={saveDraft}
+              icon={pending ? <LoaderCircle size={14} className={styles.spin} /> : <RefreshCw size={14} />}
+            >
+              <span>{copy.saveStartupSettings}</span>
+            </VButton>
+          </div>
+          <div className={styles.settingsSecondary}>
+            <label className={styles.settingField}>
+              <span>{copy.interfaceLanguage}</span>
+              <VStringSelect
+                ariaLabel={copy.interfaceLanguage}
+                value={draft.interface.language}
+                isDisabled={controlsDisabled}
+                onValueChange={(language) => patchDraft({ interface: { ...draft.interface, language } })}
+                options={[
+                  { value: "zh", label: copy.languageZh },
+                  { value: "en", label: copy.languageEn },
+                ]}
+              />
+            </label>
+            <label className={styles.settingToggle}>
+              <VNativeInput
+                type="checkbox"
+                checked={draft.runtime.preflightDoctor}
+                disabled={controlsDisabled}
+                onChange={(event) => patchDraft({ runtime: { ...draft.runtime, preflightDoctor: event.target.checked } })}
+              />
+              <span>{copy.preflightDoctor}</span>
+            </label>
+            <label className={styles.settingToggle}>
+              <VNativeInput
+                type="checkbox"
+                checked={draft.runtime.requireVenv}
+                disabled={controlsDisabled}
+                onChange={(event) => patchDraft({ runtime: { ...draft.runtime, requireVenv: event.target.checked } })}
+              />
+              <span>{copy.requireVenv}</span>
+            </label>
+          </div>
+          {validationError ? <small className={styles.settingError} role="alert">{validationError}</small> : null}
         </div>
-        <label className={styles.settingField}>
-          <span>{copy.windowSize}</span>
-          <VStringSelect
-            ariaLabel={copy.windowSize}
-            value={draft.workbench.windowSize}
-            isDisabled={controlsDisabled}
-            onValueChange={(windowSize) => patchDraft({ workbench: { ...draft.workbench, windowSize } })}
-            options={windowSizeOptions(draft, copy).map((option) => ({
-              value: option.size,
-              label: option.label[uiLang] ?? option.size,
-            }))}
-          />
-          {windowSizeOverride ? <small>{copy.effectiveValue}: {current.workbench.effectiveWindowSize}</small> : null}
-        </label>
-        <VButton
-          type="button"
-          variant="secondary"
-          className={styles.settingsSaveButton}
-          isDisabled={controlsDisabled}
-          onPress={saveDraft}
-          icon={pending ? <LoaderCircle size={14} className={styles.spin} /> : <RefreshCw size={14} />}
-        >
-          <span>{copy.saveStartupSettings}</span>
-        </VButton>
-      </div>
-      <div className={styles.settingsSecondary}>
-        <label className={styles.settingField}>
-          <span>{copy.interfaceLanguage}</span>
-          <VStringSelect
-            ariaLabel={copy.interfaceLanguage}
-            value={draft.interface.language}
-            isDisabled={controlsDisabled}
-            onValueChange={(language) => patchDraft({ interface: { ...draft.interface, language } })}
-            options={[
-              { value: "zh", label: copy.languageZh },
-              { value: "en", label: copy.languageEn },
-            ]}
-          />
-        </label>
-        <label className={styles.settingToggle}>
-          <VNativeInput
-            type="checkbox"
-            checked={draft.runtime.preflightDoctor}
-            disabled={controlsDisabled}
-            onChange={(event) => patchDraft({ runtime: { ...draft.runtime, preflightDoctor: event.target.checked } })}
-          />
-          <span>{copy.preflightDoctor}</span>
-        </label>
-        <label className={styles.settingToggle}>
-          <VNativeInput
-            type="checkbox"
-            checked={draft.runtime.requireVenv}
-            disabled={controlsDisabled}
-            onChange={(event) => patchDraft({ runtime: { ...draft.runtime, requireVenv: event.target.checked } })}
-          />
-          <span>{copy.requireVenv}</span>
-        </label>
-      </div>
-      {validationError ? <small className={styles.settingError} role="alert">{validationError}</small> : null}
+      </details>
     </div>
   );
 }

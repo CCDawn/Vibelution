@@ -12,6 +12,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterable
 
+from vibelution_storage import resolve_project_workspace_home
+
 
 _LOCK = threading.RLock()
 _REQUIRED_PERSPECTIVES = (
@@ -90,7 +92,13 @@ class ResearchQuestionTreeStore:
             return _read_json(self._path(team))
 
     def _path(self, team_id: str) -> Path:
-        return self.project_root / "workspace" / "teams" / team_id / "research_question_trees" / "index.json"
+        return (
+            resolve_project_workspace_home(self.project_root)
+            / "teams"
+            / team_id
+            / "research_question_trees"
+            / "index.json"
+        )
 
 
 def _perspectives(question: str, custom: Iterable[dict[str, Any]]) -> list[dict[str, str]]:

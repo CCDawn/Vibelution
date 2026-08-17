@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import json
 import re
+from collections.abc import Mapping
 from typing import Any
 
 
@@ -14,23 +16,10 @@ _NAMED_PROTOCOL_TAGS = (
     "parameter",
 )
 
-_TRAILING_PARTIAL_PREFIXES = (
-    "sta",
-    "state",
-    "/state",
-    "active",
-    "active_components",
-    "/active_components",
-    "inv",
-    "invoke",
-    "/invoke",
-    "par",
-    "param",
-    "parameter",
-    "/parameter",
-    "tool",
+_COMPLETE_PROTOCOL_TAG_NAMES = _NAMED_PROTOCOL_TAGS + (
     "tool_call",
-    "/tool_call",
+    "think",
+    "thinking",
 )
 
 _BRACKET_CONTROL_MARKER_RE = re.compile(
@@ -44,8 +33,137 @@ _EMPTY_CONTENT_SANITISED_RE = re.compile(
 )
 
 
+_TEXT_KEYS = (
+    "content",
+    "text",
+    "delta",
+    "visible",
+    "thought",
+    "visibleText",
+    "thoughtText",
+)
+_ENVELOPE_KEYS = (
+    "message",
+    "payload",
+    "messages",
+    "items",
+    "history",
+    "parts",
+    "chunks",
+)
+
+
+def _decode_binary(value: Any) -> Any:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).decode("utf-8", errors="replace")
+    return value
+
+
+def _maybe_json(value: Any) -> Any:
+    value = _decode_binary(value)
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if not text or text[0] not in "{[":
+        return value
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return value
+
+
+def _is_text_payload(value: Any) -> bool:
+    if isinstance(value, Mapping):
+        return any(key in value for key in _TEXT_KEYS + _ENVELOPE_KEYS)
+    if isinstance(value, (list, tuple)):
+        return bool(value) and all(
+            isinstance(item, (str, bytes, bytearray, memoryview, Mapping))
+            or getattr(item, "content", None) is not None
+            for item in value
+        )
+    return False
+
+
 def _coerce_text(value: Any) -> str:
-    return str(value or "")
+    if value is None:
+        return ""
+    value = _decode_binary(value)
+    if isinstance(value, str):
+        parsed = _maybe_json(value)
+        if parsed is not value and _is_text_payload(parsed):
+            return _coerce_text(parsed)
+        return value
+    if isinstance(value, Mapping):
+        for key in _TEXT_KEYS:
+            nested = value.get(key)
+            if nested is not None and nested is not value:
+                return _coerce_text(nested)
+        for key in _ENVELOPE_KEYS:
+            nested = value.get(key)
+            if nested is not None and nested is not value:
+                text = _coerce_text(nested)
+                if text:
+                    return text
+        return ""
+    if isinstance(value, (list, tuple)):
+        return "".join(_coerce_text(item) for item in value)
+    content = getattr(value, "content", None)
+    if content is not None and content is not value:
+        return _coerce_text(content)
+    return str(value)
+
+
+def _coerce_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    value = _decode_binary(value)
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return bool(value)
+    text = str(value).strip().lower()
+    if not text:
+        return default
+    if text in {"1", "true", "yes", "on", "enabled"}:
+        return True
+    if text in {"0", "false", "no", "off", "disabled"}:
+        return False
+    return default
+
+
+def _coerce_name_tuple(value: Any) -> tuple[str, ...]:
+    value = _maybe_json(value)
+    if value is None:
+        return ()
+    if isinstance(value, (str, bytes, bytearray, memoryview)):
+        text = _coerce_text(value).strip()
+        return (text,) if text else ()
+    if isinstance(value, Mapping):
+        names: list[str] = []
+        for key, item in value.items():
+            text = _coerce_text(key).strip()
+            if not text:
+                continue
+            enabled = item
+            if isinstance(item, Mapping):
+                enabled = item.get("enabled", True)
+            if isinstance(enabled, bool):
+                if not enabled:
+                    continue
+            else:
+                flag = _coerce_bool(enabled, True)
+                if not flag:
+                    continue
+            names.append(text)
+        return tuple(names)
+    try:
+        names = tuple(
+            text for text in (_coerce_text(item).strip() for item in value) if text
+        )
+        return names
+    except TypeError:
+        text = _coerce_text(value).strip()
+        return (text,) if text else ()
 
 
 def _strip_think_blocks(text: str) -> str:
@@ -133,7 +251,7 @@ def strip_llm_protocol_artifacts(value: Any, *, trim: bool = True) -> str:
 
     text = _strip_trailing_partial_protocol_tag(text)
     text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip() if trim else text
+    return text.strip() if _coerce_bool(trim, default=True) else text
 
 
 def sanitize_assistant_visible_text(value: Any) -> str:
@@ -164,7 +282,18 @@ def sanitize_assistant_thought_delta_text(value: Any) -> str:
     return strip_llm_protocol_artifacts(text, trim=False)
 
 
+def _is_trailing_protocol_fragment(normalized: str, extra_names: tuple[str, ...] = ()) -> bool:
+    if "dsml" in normalized:
+        return True
+    token = normalized.split()[0].strip().lstrip("/").strip()
+    if not token:
+        return True
+    names = _COMPLETE_PROTOCOL_TAG_NAMES + _coerce_name_tuple(extra_names)
+    return any(name.startswith(token) for name in names)
+
+
 def _strip_trailing_partial_protocol_tag(text: str, *, extra_prefixes: tuple[str, ...] = ()) -> str:
+    extra_prefixes = _coerce_name_tuple(extra_prefixes)
     cleaned = text or ""
     while True:
         match = re.search(r"<[^<>\n]*$", cleaned)
@@ -172,11 +301,7 @@ def _strip_trailing_partial_protocol_tag(text: str, *, extra_prefixes: tuple[str
             return cleaned
         fragment = match.group(0)
         normalized = fragment[1:].strip().lower()
-        if not normalized:
-            cleaned = cleaned[: match.start()]
-            continue
-        prefixes = _TRAILING_PARTIAL_PREFIXES + tuple(extra_prefixes or ())
-        if "dsml" in normalized or any(normalized.startswith(prefix) for prefix in prefixes):
+        if not normalized or _is_trailing_protocol_fragment(normalized, extra_prefixes):
             cleaned = cleaned[: match.start()]
             continue
         return cleaned

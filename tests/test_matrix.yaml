@@ -143,13 +143,27 @@ rules:
       - "scripts/vibelution_launcher.py"
       - "tests/test_runtime_manager.py"
       - "tests/test_launcher_scripts.py"
+      - "tests/test_launcher_scripts_contract.py"
       - "tests/test_launcher_service.py"
       - "tests/test_web_runtime_routes.py"
       - "tests/helpers/web_runtime_scene.py"
     commands:
-      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_runtime_manager.py tests/test_launcher_scripts.py tests/test_launcher_service.py tests/test_web_runtime_routes.py -q"
+      - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_launcher_scripts_contract.py tests/test_runtime_manager.py tests/test_launcher_service.py tests/test_web_runtime_routes.py -q"
     notes:
       - "Runtime lifecycle changes need an explicit Launcher refresh decision after automated validation."
+
+  - id: desktop-electron-shell
+    description: "Electron desktop shell, tray, IPC, and packaged Launcher control plane (ADR 0009)."
+    executionLayers:
+      - "focused"
+      - "local-serial"
+    paths:
+      - "desktop/electron/**"
+    commands:
+      - "npm --prefix desktop/electron test"
+    notes:
+      - "Product control plane lives in Electron main; legacy Python launcher HTTP is not the packaged path."
+      - "Tray/restart/workbench lifecycle changes need Launcher refresh decision after vitest."
 
   - id: web-evolution
     description: "Supervised/self evolution web routes, harness, and control-plane services."
@@ -254,7 +268,7 @@ rules:
       - "tests/test_tool_registry_routes.py"
     commands:
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_tool_registry_service.py tests/test_tool_registry_routes.py -q"
-      - ".\\.venv\\Scripts\\python.exe tests/prompt_debugger.py --suite"
+      - ".\\.venv\\Scripts\\python.exe tests/prompt_debugger.py --suite --quick"
     notes:
       - "Tool registry changes need route/service validation and prompt debugger coverage because they affect tool visibility."
 

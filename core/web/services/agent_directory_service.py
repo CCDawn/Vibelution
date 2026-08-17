@@ -363,6 +363,14 @@ from .agent_directory.ops_residual import (
     write_group_context_event,
     write_project_memory_update_proposal,
 )
+from .agent_directory.episodic_memory import (
+    EPISODE_KINDS,
+    PROMPT_LIST_LIMIT,
+    REF_TYPES,
+    append_episodic_event,
+    list_current_episodic_events,
+    supersede_episodic_event,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -402,20 +410,86 @@ _LEGACY_SESSION_AGENT_PREFERRED_TOOLS = (
     "get_core_context_tool",
     "conversation_log_inspect_tool",
 )
-DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = (
+SESSION_PROTOCOL_ALLOWED_TOOLS = (
     *_LEGACY_SESSION_AGENT_ALLOWED_TOOLS[:8],
     "exec_command",
     "write_stdin",
     *_LEGACY_SESSION_AGENT_ALLOWED_TOOLS[8:],
 )
-DEFAULT_SESSION_AGENT_PREFERRED_TOOLS = (
+SESSION_PROTOCOL_PREFERRED_TOOLS = (
     "exec_command",
     "write_stdin",
     *_LEGACY_SESSION_AGENT_PREFERRED_TOOLS,
 )
+PERSONAL_MEMORY_APPEND_TOOL_NAME = "append_personal_memory_tool"
+PERSONAL_MEMORY_SUPERSEDE_TOOL_NAME = "supersede_personal_memory_tool"
+PERSONAL_EPISODE_TOOL_NAME = PERSONAL_MEMORY_APPEND_TOOL_NAME
+PERSONAL_EPISODE_SUPERSEDE_TOOL_NAME = PERSONAL_MEMORY_SUPERSEDE_TOOL_NAME
+LEGACY_PERSONAL_MEMORY_TOOL_RENAMES = {
+    "append_episodic_memory_tool": PERSONAL_MEMORY_APPEND_TOOL_NAME,
+    "supersede_episodic_memory_tool": PERSONAL_MEMORY_SUPERSEDE_TOOL_NAME,
+}
+GENERATION_HANDOFF_MEMORY_TOOLS = (
+    "get_core_context_tool",
+    "get_current_goal_tool",
+    "commit_compressed_memory_tool",
+)
+# Historical persisted defaults keep the old episodic tool names as literals.
+_EPISODE_ERA_SESSION_AGENT_ALLOWED_TOOLS = (
+    *SESSION_PROTOCOL_ALLOWED_TOOLS,
+    "append_episodic_memory_tool",
+)
+_NARROW_HANDOFF_SESSION_AGENT_ALLOWED_TOOLS = tuple(
+    name
+    for name in _EPISODE_ERA_SESSION_AGENT_ALLOWED_TOOLS
+    if name not in GENERATION_HANDOFF_MEMORY_TOOLS
+)
+_EPISODIC_NAMED_SESSION_AGENT_ALLOWED_TOOLS = (
+    *_NARROW_HANDOFF_SESSION_AGENT_ALLOWED_TOOLS,
+    "supersede_episodic_memory_tool",
+)
+PROJECT_OPERATION_TOOL_NAMES = (
+    "agent_create_tool",
+    "agent_archive_tool",
+    "agent_reset_tool",
+    "session_create_tool",
+    "session_stop_tool",
+    "session_delete_tool",
+)
+DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = tuple(
+    [
+        *[
+            name
+            for name in _NARROW_HANDOFF_SESSION_AGENT_ALLOWED_TOOLS
+            if name not in LEGACY_PERSONAL_MEMORY_TOOL_RENAMES
+        ],
+        PERSONAL_MEMORY_APPEND_TOOL_NAME,
+        PERSONAL_MEMORY_SUPERSEDE_TOOL_NAME,
+        *PROJECT_OPERATION_TOOL_NAMES,
+    ]
+)
+DEFAULT_SESSION_AGENT_PREFERRED_TOOLS = tuple(
+    name for name in SESSION_PROTOCOL_PREFERRED_TOOLS if name not in GENERATION_HANDOFF_MEMORY_TOOLS
+)
+
+
+def _rewrite_legacy_personal_memory_tool_names(names: list[str]) -> list[str]:
+    rewritten: list[str] = []
+    seen: set[str] = set()
+    for name in names:
+        mapped = LEGACY_PERSONAL_MEMORY_TOOL_RENAMES.get(name, name)
+        if mapped in seen:
+            continue
+        seen.add(mapped)
+        rewritten.append(mapped)
+    return rewritten
+
+
 # The persistent stdin protocol belongs to ordinary conversation Agents.  Keep
 # self-evolution role policy unchanged until its own execution contract opts in.
-SELF_EVOLUTION_EXECUTABLE_AGENT_ALLOWED_TOOLS = tuple(_LEGACY_SESSION_AGENT_ALLOWED_TOOLS)
+SELF_EVOLUTION_EXECUTABLE_AGENT_ALLOWED_TOOLS = tuple(
+    dict.fromkeys((*_LEGACY_SESSION_AGENT_ALLOWED_TOOLS, *GENERATION_HANDOFF_MEMORY_TOOLS))
+)
 SELF_EVOLUTION_EXECUTABLE_AGENT_PREFERRED_TOOLS = tuple(_LEGACY_SESSION_AGENT_PREFERRED_TOOLS)
 SELF_EVOLUTION_EXECUTABLE_ROLES = {"executor", "reviewer"}
 SELF_EVOLUTION_OBSERVER_ROLES = {"observer"}
@@ -731,6 +805,10 @@ class AgentMessageNotFoundError(AgentDirectoryError):
 
 class AgentMemoryProposalNotFoundError(AgentDirectoryError):
     """Raised when an Agent project-memory proposal does not exist."""
+
+
+class AgentEpisodicEventNotFoundError(AgentDirectoryError):
+    """Raised when an Agent episodic event does not exist."""
 
 
 def agent_session_lifecycle_serialized(

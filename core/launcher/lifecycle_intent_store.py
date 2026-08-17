@@ -2,16 +2,18 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 import time
+from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from core.runtime_manager.constants import PROJECT_ROOT
+from core.runtime_manager.constants import RUNTIME_ROOT
 
 
-LIFECYCLE_DB_PATH = PROJECT_ROOT / ".runtime" / "launcher" / "lifecycle.sqlite3"
+LIFECYCLE_DB_PATH = RUNTIME_ROOT / "launcher" / "lifecycle.sqlite3"
 DESKTOP_ACTIONS = {
     "open_workbench",
     "focus_workbench",
@@ -23,6 +25,10 @@ RUNTIME_EFFECT_ACTIONS = {"restart_after_apply", "resume_self_evolution", "recov
 ALLOWED_ACTIONS = DESKTOP_ACTIONS | RUNTIME_EFFECT_ACTIONS
 TERMINAL_INTENT_STATUSES = {"succeeded", "failed", "superseded"}
 WORKBENCH_CLOSE_MODES = {"normal", "force"}
+
+_INIT_CACHE_MAX_ENTRIES = 128
+_schema_ready: OrderedDict[str, None] = OrderedDict()
+_schema_guard = threading.Lock()
 
 
 class WorkbenchCloseTransactionConflict(ValueError):
@@ -44,14 +50,40 @@ def _connect() -> sqlite3.Connection:
     LIFECYCLE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(LIFECYCLE_DB_PATH), timeout=5.0, isolation_level=None)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=5000")
-    _init_schema(conn)
+    conn.execute("PRAGMA foreign_keys = ON")
+    if int(conn.execute("PRAGMA foreign_keys").fetchone()[0]) != 1:
+        conn.close()
+        raise RuntimeError("lifecycle intent store could not enable foreign_keys")
+    _ensure_schema_once(conn)
     return conn
 
 
+def _ensure_schema_once(conn: sqlite3.Connection) -> None:
+    """Run schema DDL in one startup transaction, once per process per path;
+    runtime connections never execute DDL again."""
+    key = str(LIFECYCLE_DB_PATH)
+    with _schema_guard:
+        if key in _schema_ready:
+            return
+        # WAL is a persistent file mode; set it once under the guard so
+        # concurrent first connects cannot race the exclusive lock switch.
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            _init_schema(conn)
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+        _schema_ready[key] = None
+        while len(_schema_ready) > _INIT_CACHE_MAX_ENTRIES:
+            _schema_ready.popitem(last=False)
+
+
 def _init_schema(conn: sqlite3.Connection) -> None:
-    conn.executescript(
+    _run_script(
+        conn,
         """
         CREATE TABLE IF NOT EXISTS lifecycle_intents (
           intent_id TEXT PRIMARY KEY,
@@ -119,7 +151,7 @@ def _init_schema(conn: sqlite3.Connection) -> None:
           ON workbench_close_transactions(phase, updated_at);
         CREATE INDEX IF NOT EXISTS idx_workbench_close_transactions_session
           ON workbench_close_transactions(desktop_session_id, created_at);
-        """
+        """,
     )
     _ensure_column(conn, "lifecycle_intents", "result_json", "TEXT NOT NULL DEFAULT '{}'")
     _ensure_column(conn, "lifecycle_intents", "completed_at", "TEXT NOT NULL DEFAULT ''")
@@ -130,6 +162,14 @@ def _init_schema(conn: sqlite3.Connection) -> None:
         ON desktop_actions(target_desktop_session_id, status, lease_expires_at, created_at)
         """
     )
+
+
+def _run_script(conn: sqlite3.Connection, script: str) -> None:
+    """Execute a DDL script statement-by-statement inside the caller's
+    transaction (``executescript`` would implicitly commit it)."""
+    for statement in script.split(";"):
+        if statement.strip():
+            conn.execute(statement)
 
 
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:

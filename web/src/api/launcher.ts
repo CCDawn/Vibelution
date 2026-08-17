@@ -26,7 +26,99 @@ import type {
 } from "./types";
 
 export const LAUNCHER_ENDPOINT = "/api/launcher";
-export const DEFAULT_LAUNCHER_CONTROL_PORT = 8765;
+export const LAUNCHER_IPC_HOST_NOT_READY = "LAUNCHER_IPC_HOST_NOT_READY";
+
+export class LauncherControlPlaneNotReadyError extends Error {
+  readonly code = LAUNCHER_IPC_HOST_NOT_READY;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "LauncherControlPlaneNotReadyError";
+  }
+}
+
+export function isLauncherControlPlaneNotReady(error: unknown) {
+  return error instanceof LauncherControlPlaneNotReadyError;
+}
+
+type LauncherIpcInvokeResult =
+  | { ok: true; payload: unknown }
+  | { ok: false; error: { code: string; message: string } };
+
+type LauncherIpcInvokePayload = {
+  schemaVersion: 1;
+  path: string;
+  init?: {
+    method?: "GET" | "POST" | "PUT" | "DELETE";
+    headers?: Record<string, string>;
+    body?: unknown;
+  };
+};
+
+type LauncherIpcBridge = {
+  launcherInvoke: (payload: LauncherIpcInvokePayload) => Promise<LauncherIpcInvokeResult>;
+};
+
+function launcherIpcBridge(): LauncherIpcBridge | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  const globalLike = globalThis as { vibelutionLauncher?: unknown };
+  const bridge = globalLike.vibelutionLauncher;
+  if (typeof bridge !== "object" || bridge === null) {
+    return null;
+  }
+  const launcherInvoke = (bridge as Partial<LauncherIpcBridge>).launcherInvoke;
+  if (typeof launcherInvoke !== "function") {
+    return null;
+  }
+  return { launcherInvoke };
+}
+
+export function hasLauncherIpcBridge() {
+  return launcherIpcBridge() !== null;
+}
+
+function ipcInitForRequest(init?: RequestInit): LauncherIpcInvokePayload["init"] | undefined {
+  if (!init) {
+    return undefined;
+  }
+  const method = String(init.method ?? "GET").toUpperCase() as "GET" | "POST" | "PUT" | "DELETE";
+  if (!["GET", "POST", "PUT", "DELETE"].includes(method)) {
+    return undefined;
+  }
+  const headers: Record<string, string> = {};
+  if (init.headers) {
+    const source = new Headers(init.headers);
+    source.forEach((value, key) => {
+      headers[key] = value;
+    });
+  }
+  return {
+    method,
+    ...(Object.keys(headers).length > 0 ? { headers } : {}),
+    ...(init.body !== undefined && init.body !== null ? { body: JSON.parse(String(init.body)) } : {}),
+  };
+}
+
+async function invokeLauncherJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const bridge = launcherIpcBridge();
+  if (bridge === null) {
+    throw new Error("Launcher IPC bridge is not available.");
+  }
+  const result = await bridge.launcherInvoke({
+    schemaVersion: 1,
+    path,
+    ...(ipcInitForRequest(init) ? { init: ipcInitForRequest(init) } : {}),
+  });
+  if (result.ok) {
+    return result.payload as T;
+  }
+  if (result.error.code === LAUNCHER_IPC_HOST_NOT_READY) {
+    throw new LauncherControlPlaneNotReadyError(result.error.message);
+  }
+  throw new Error(result.error.message || `Launcher IPC request failed: ${result.error.code}`);
+}
 
 type WorkbenchWindowSizeOption = {
   size: string;
@@ -158,43 +250,98 @@ export type LauncherBranchInstances = {
   items: LauncherBranchInstance[];
 };
 
+type LauncherBranchInstancePayload = Omit<LauncherBranchInstance, "runtime" | "startable"> & {
+  runtime?: LauncherBranchInstanceRuntime;
+  startable?: boolean;
+};
+
+type LauncherBranchInstancesPayload = Omit<LauncherBranchInstances, "items"> & {
+  items: LauncherBranchInstancePayload[];
+};
+
 export type LauncherStartupSettingsUpdateResponse = {
   ok: boolean;
   setting: LauncherStartupSettings;
   message: string;
 };
 
-let cachedLauncherControlOrigin = "";
+function legacyBranchInstanceRuntime(item: LauncherBranchInstancePayload): LauncherBranchInstanceRuntime {
+  const observedState = String(item.observedState || "closed").trim().toLowerCase();
+  const backendPid = Math.max(0, Number(item.pids?.backend || 0));
+  const windowPid = Math.max(0, Number(item.pids?.window || 0));
+  const backendAlive = Boolean(item.alive || backendPid > 0);
+  const windowOpen = windowPid > 0;
+  let lifecycleState: LauncherBranchInstanceRuntime["lifecycleState"] = "closed";
+  if (["opening", "starting"].includes(observedState)) {
+    lifecycleState = "starting";
+  } else if (["restarting", "restart"].includes(observedState)) {
+    lifecycleState = "restarting";
+  } else if (["closing", "stopping", "force_stopping"].includes(observedState)) {
+    lifecycleState = "stopping";
+  } else if (["failed", "error"].includes(observedState)) {
+    lifecycleState = "error";
+  } else if (backendAlive || windowOpen || ["open", "running", "healthy", "partial"].includes(observedState)) {
+    // The flat contract cannot prove health, listening, or frontend readiness.
+    lifecycleState = "partial";
+  }
 
-function isLoopbackHost(hostname: string) {
-  const host = String(hostname || "").trim().toLowerCase();
-  return host === "localhost" || host === "127.0.0.1" || host === "::1";
+  const runtime: LauncherBranchInstanceRuntime = {
+    lifecycleState,
+    desiredState: lifecycleState === "closed" ? "closed" : "open",
+    observedState,
+    phase: "steady",
+    backend: {
+      alive: backendAlive,
+      healthy: false,
+      listening: false,
+      port: Math.max(0, Number(item.port || 0)),
+      portReserved: Number(item.port || 0) > 0 && !backendAlive,
+      portConflict: false,
+      pid: backendPid,
+    },
+    frontend: {
+      mode: "bundled_static_dist",
+      ready: false,
+    },
+    window: {
+      open: windowOpen,
+      pid: windowPid,
+      title: String(item.workbenchTitle || item.shortName || item.branch || item.id || ""),
+      titleObserved: false,
+    },
+  };
+  if (lifecycleState === "error") {
+    runtime.error = {
+      code: "legacy_runtime_error",
+      message: "The stale Launcher runtime reported a failed branch instance.",
+    };
+  }
+  return runtime;
 }
 
-function launcherControlOrigin() {
-  if (typeof window === "undefined") {
-    return "";
-  }
-  try {
-    const current = new URL(window.location.href);
-    if (!isLoopbackHost(current.hostname)) {
-      return "";
-    }
-    const currentPort = current.port || (current.protocol === "https:" ? "443" : "80");
-    if (currentPort === String(DEFAULT_LAUNCHER_CONTROL_PORT)) {
-      return "";
-    }
-    if (cachedLauncherControlOrigin && cachedLauncherControlOrigin !== current.origin) {
-      return cachedLauncherControlOrigin;
-    }
-    return `${current.protocol}//127.0.0.1:${DEFAULT_LAUNCHER_CONTROL_PORT}`;
-  } catch {
-    return "";
-  }
+function normalizeLauncherBranchInstances(payload: LauncherBranchInstancesPayload): LauncherBranchInstances {
+  return {
+    ...payload,
+    items: (payload.items || []).map((item) => {
+      if (item.runtime) {
+        return {
+          ...item,
+          runtime: item.runtime,
+          startable: Boolean(item.startable),
+        };
+      }
+      return {
+        ...item,
+        runtime: legacyBranchInstanceRuntime(item),
+        startable: false,
+        startBlockReason: "launcher_refresh_required",
+      };
+    }),
+  };
 }
 
 export function launcherEndpoint(path = "") {
-  return `${launcherControlOrigin()}${relativeLauncherEndpoint(path)}`;
+  return relativeLauncherEndpoint(path);
 }
 
 function relativeLauncherEndpoint(path = "") {
@@ -203,19 +350,10 @@ function relativeLauncherEndpoint(path = "") {
 }
 
 async function fetchLauncherJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const endpoint = launcherEndpoint(path);
-  try {
-    const payload = await fetchJson<T>(endpoint, init);
-    rememberLauncherControlOrigin(payload);
-    return payload;
-  } catch (error) {
-    if (!endpoint.startsWith("http") || !isLauncherControlConnectionError(error)) {
-      throw error;
-    }
-    const payload = await fetchJson<T>(relativeLauncherEndpoint(path), init);
-    rememberLauncherControlOrigin(payload);
-    return payload;
+  if (launcherIpcBridge() !== null) {
+    return invokeLauncherJson<T>(path, init);
   }
+  return fetchJson<T>(relativeLauncherEndpoint(path), init);
 }
 
 function isLauncherControlConnectionError(error: unknown) {
@@ -226,43 +364,18 @@ function isLauncherControlConnectionError(error: unknown) {
   return /failed to fetch|networkerror|load failed|cors/i.test(message);
 }
 
-function rememberLauncherControlOrigin(payload: unknown) {
-  if (!payload || typeof payload !== "object") {
-    return;
-  }
-  const status = payload as LauncherStatus;
-  const url = status.launcher?.controlPlane?.url;
-  if (typeof url !== "string" || !url.trim()) {
-    return;
-  }
-  try {
-    const parsed = new URL(url);
-    if (isLoopbackHost(parsed.hostname)) {
-      cachedLauncherControlOrigin = parsed.origin;
-    }
-  } catch {
-    return;
-  }
-}
-
-export function resetLauncherControlOriginForTests() {
-  cachedLauncherControlOrigin = "";
-}
-
-export function launcherRestartEndpoint() {
-  return launcherEndpoint("restart");
-}
-
 export function getLauncherStatus() {
   return fetchLauncherJson<LauncherStatus>("status");
 }
 
 export function getLauncherBranchInstances() {
-  return fetchLauncherJson<LauncherBranchInstances>("branch-instances");
+  return fetchLauncherJson<LauncherBranchInstancesPayload>("branch-instances")
+    .then(normalizeLauncherBranchInstances);
 }
 
 export function getLocalBranchInstances() {
-  return fetchJson<LauncherBranchInstances>("/api/launcher/branch-instances");
+  return fetchJson<LauncherBranchInstancesPayload>("/api/launcher/branch-instances")
+    .then(normalizeLauncherBranchInstances);
 }
 
 export function requestBranchInstanceLifecycle(

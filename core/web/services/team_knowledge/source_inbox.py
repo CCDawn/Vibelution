@@ -7,8 +7,8 @@ Late-binds ``team_knowledge_service`` for store, permissions, and remaining faca
 
 from __future__ import annotations
 
+import hashlib
 import json
-import os
 import shutil
 from pathlib import Path
 from typing import Any
@@ -75,6 +75,7 @@ def collect_source_to_inbox(
     title: str = "",
     summary: str = "",
     actor_agent_id: str = "",
+    local_file_paths: list[Any] | None = None,
 ) -> dict[str, Any]:
     """Stage raw source material inside the owning Team/Agent workspace."""
 
@@ -86,7 +87,7 @@ def collect_source_to_inbox(
     normalized_type = str(source_type or "").strip()
     if normalized_type not in s.SOURCE_TYPES:
         raise s.TeamKnowledgeError(f"Unsupported source type: {source_type}")
-    normalized_ref = source_ref if isinstance(source_ref, dict) else {}
+    normalized_ref = s._bounded_dict(source_ref if isinstance(source_ref, dict) else {})
     if normalized_type == "team_chat_refinement":
         if str(owner.get("ownerType") or "") != "team":
             raise s.TeamKnowledgeError("team_chat_refinement sources require a Team owner.")
@@ -96,10 +97,6 @@ def collect_source_to_inbox(
     safe_title = trim_lines(title or normalized_type, max_lines=1).strip()
     safe_summary = trim_lines(summary or "", max_lines=16).strip()
     safe_content = str(original_content or "")
-    normalized_hash = trim_lines(
-        source_hash or s._source_hash_with_content(normalized_ref, safe_title, safe_summary, safe_content),
-        max_lines=1,
-    ).strip()
     original_path = s._write_owner_inbox_source_file(
         owner,
         inbox_source_id,
@@ -109,6 +106,17 @@ def collect_source_to_inbox(
         title=safe_title,
         summary=safe_summary,
     )
+    local_copies = s._stage_local_source_copies(
+        owner,
+        inbox_source_id,
+        local_file_paths or [],
+    )
+    if local_copies:
+        normalized_ref["localCopies"] = local_copies
+    normalized_hash = trim_lines(
+        source_hash or s._source_hash_with_content(normalized_ref, safe_title, safe_summary, safe_content),
+        max_lines=1,
+    ).strip()
     source = {
         "schemaVersion": s.SCHEMA_VERSION,
         "inboxSourceId": inbox_source_id,
@@ -117,7 +125,7 @@ def collect_source_to_inbox(
         "teamId": owner["ownerId"] if owner["ownerType"] == "team" else "",
         "agentId": owner["ownerId"] if owner["ownerType"] == "agent" else "",
         "sourceType": normalized_type,
-        "sourceRef": s._bounded_dict(normalized_ref),
+        "sourceRef": normalized_ref,
         "sourceCreatedAt": trim_lines(source_created_at or "", max_lines=1).strip(),
         "capturedBy": trim_lines(captured_by or actor_id or "user", max_lines=1).strip(),
         "capturedAt": now,
@@ -127,6 +135,7 @@ def collect_source_to_inbox(
         "summary": safe_summary,
         "originalFilename": s._safe_source_filename(original_filename, default=f"{normalized_type}.txt"),
         "originalPath": s._project_relative_path(original_path),
+        "localCopies": local_copies,
         "status": "pending",
         "curationStatus": "owner_inbox",
         "centralSourceId": "",
@@ -147,7 +156,11 @@ def collect_source_to_inbox(
         owner,
         "",
         actor_agent_id=actor_id,
-        fields={"inboxSourceId": inbox_source_id, "sourceType": normalized_type},
+        fields={
+            "inboxSourceId": inbox_source_id,
+            "sourceType": normalized_type,
+            "localCopyCount": len(local_copies),
+        },
     )
     return source
 
@@ -333,6 +346,13 @@ def create_source_artifact_from_central_source(
         "originalOwnerId": owner_ref.get("ownerId") or central_source.get("originOwnerId") or "",
         "originalPath": owner_ref.get("originalPath") or central_source.get("originOriginalPath") or "",
     })
+    local_copies = [
+        item
+        for item in list(central_source.get("localCopies") or source_ref.get("localCopies") or [])
+        if isinstance(item, dict)
+    ][: s.MAX_LOCAL_SOURCE_COPIES]
+    if local_copies:
+        source_ref["localCopies"] = local_copies
     return s.create_source_artifact(
         knowledge_base_id,
         source_type=str(central_source.get("sourceType") or "manual_user_entry"),
@@ -538,15 +558,7 @@ def _write_owner_inbox_source_file(
     source_dir = s._owner_inbox_source_dir(owner, inbox_source_id)
     path = source_dir / filename
     path.parent.mkdir(parents=True, exist_ok=True)
-    write_path = path
-    if os.name == "nt":
-        resolved_path = str(path.resolve())
-        if not resolved_path.startswith("\\\\?\\"):
-            if resolved_path.startswith("\\\\"):
-                resolved_path = f"\\\\?\\UNC\\{resolved_path[2:]}"
-            else:
-                resolved_path = f"\\\\?\\{resolved_path}"
-        write_path = Path(resolved_path)
+    write_path = s._extended_fs_path(path)
     if str(original_content or ""):
         write_path.write_text(str(original_content), encoding="utf-8")
     else:
@@ -590,17 +602,26 @@ def _promote_owner_source_to_central_locked(
         now = s.utc_now_iso()
         central_source_id = s._new_event_id("csrc")
         central_path = s._copy_or_write_central_source_file(owner, source, central_source_id)
+        source_dir = central_path.parent
+        local_copies = s._relocate_local_copies_to_central(
+            list(source.get("localCopies") or []),
+            source_dir,
+        )
+        source_ref = s._bounded_dict(source.get("sourceRef") if isinstance(source.get("sourceRef"), dict) else {})
+        if local_copies:
+            source_ref["localCopies"] = local_copies
         central_source = {
             "schemaVersion": s.SCHEMA_VERSION,
             "centralSourceId": central_source_id,
             "status": "active",
             "sourceHash": source_hash,
             "sourceType": str(source.get("sourceType") or ""),
-            "sourceRef": s._bounded_dict(source.get("sourceRef") if isinstance(source.get("sourceRef"), dict) else {}),
+            "sourceRef": source_ref,
             "sourceCreatedAt": str(source.get("sourceCreatedAt") or ""),
             "title": trim_lines(str(source.get("title") or ""), max_lines=1).strip(),
             "summary": trim_lines(str(source.get("summary") or ""), max_lines=16).strip(),
             "centralPath": s._project_relative_path(central_path),
+            "localCopies": local_copies,
             "originOwnerType": owner["ownerType"],
             "originOwnerId": owner["ownerId"],
             "originInboxSourceId": str(source.get("inboxSourceId") or ""),
@@ -717,9 +738,18 @@ def _copy_or_write_central_source_file(owner_value: Any, source: dict[str, Any],
     original_path = s._project_path_from_relative(str(source.get("originalPath") or ""))
     filename = s._safe_source_filename(str(source.get("originalFilename") or ""), default="source.txt")
     target_path = source_dir / filename
+    copied_original = False
     if original_path and original_path.exists() and original_path.is_file():
-        shutil.copy2(original_path, target_path)
-    else:
+        shutil.copy2(s._extended_fs_path(original_path), s._extended_fs_path(target_path))
+        copied_original = True
+        attachments_src = original_path.parent / "attachments"
+        if attachments_src.is_dir():
+            shutil.copytree(
+                s._extended_fs_path(attachments_src),
+                s._extended_fs_path(source_dir / "attachments"),
+                dirs_exist_ok=True,
+            )
+    if not copied_original:
         target_path.write_text(
             json.dumps(
                 {
@@ -781,3 +811,114 @@ def _central_owner_ref_visible(ref: dict[str, Any], agent_id: str, *, internal: 
         return True
     owner = s._owner_context(str(ref.get("ownerType") or ""), str(ref.get("ownerId") or ""))
     return s._can_read_owner_source_inbox(owner, normalized_agent_id)
+
+
+def _stage_local_source_copies(
+    owner_value: Any,
+    inbox_source_id: str,
+    local_file_paths: list[Any],
+) -> list[dict[str, Any]]:
+    """Copy obtainable local files into the inbox source attachments directory."""
+
+    s = _service()
+    copies: list[dict[str, Any]] = []
+    seen_hashes: set[str] = set()
+    attachments_dir = s._owner_inbox_source_dir(owner_value, inbox_source_id) / "attachments"
+    for raw_item in list(local_file_paths or [])[: s.MAX_LOCAL_SOURCE_COPIES]:
+        spec = raw_item if isinstance(raw_item, dict) else {"path": raw_item}
+        resolved = s._resolve_copyable_local_file(spec.get("path") or spec.get("sourcePath") or spec.get("filePath"))
+        if resolved is None:
+            continue
+        digest = s._sha256_local_file(resolved)
+        if not digest or digest in seen_hashes:
+            continue
+        candidate_id = s._safe_token(spec.get("candidateId") or spec.get("sourceId") or "", default="", max_length=96)
+        filename = s._safe_source_filename(resolved.name, default="source.bin")
+        dest_name = f"{candidate_id}-{filename}" if candidate_id else filename
+        dest_path = attachments_dir / dest_name
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(s._extended_fs_path(resolved), s._extended_fs_path(dest_path))
+        seen_hashes.add(digest)
+        copies.append(
+            {
+                "candidateId": candidate_id,
+                "title": trim_lines(str(spec.get("title") or resolved.name), max_lines=1).strip(),
+                "filename": dest_name,
+                "originalPath": s._project_relative_path(resolved),
+                "inboxPath": s._project_relative_path(dest_path),
+                "sha256": digest,
+                "byteSize": int(resolved.stat().st_size),
+                "kind": "local_file",
+            }
+        )
+        if len(copies) >= s.MAX_LOCAL_SOURCE_COPIES:
+            break
+    return copies
+
+
+def _relocate_local_copies_to_central(
+    copies: list[Any],
+    source_dir: Path,
+) -> list[dict[str, Any]]:
+    s = _service()
+    relocated: list[dict[str, Any]] = []
+    for item in list(copies or [])[: s.MAX_LOCAL_SOURCE_COPIES]:
+        if not isinstance(item, dict):
+            continue
+        payload = dict(item)
+        filename = str(item.get("filename") or "").strip()
+        dest = source_dir / "attachments" / filename if filename else Path()
+        if dest.exists() and dest.is_file():
+            payload["centralPath"] = s._project_relative_path(dest)
+        relocated.append(payload)
+    return relocated
+
+
+def _is_copyable_local_path_text(value: Any) -> bool:
+    """Reject URLs and UNC/network paths before any filesystem probe."""
+
+    text = str(value or "").strip()
+    if not text:
+        return False
+    lowered = text.lower()
+    if lowered.startswith(("http://", "https://", "ftp://", "file://")):
+        return False
+    if text.startswith(("\\\\", "//")):
+        return False
+    return True
+
+
+def _resolve_copyable_local_file(value: Any) -> Path | None:
+    s = _service()
+    text = str(value or "").strip()
+    if not _is_copyable_local_path_text(text):
+        return None
+    candidate = Path(text)
+    if not candidate.is_absolute():
+        mapped = s._project_path_from_relative(text)
+        candidate = mapped if mapped and str(mapped) else s._project_root() / text
+    try:
+        resolved = candidate.resolve()
+    except (OSError, RuntimeError):
+        return None
+    if not resolved.is_file():
+        return None
+    try:
+        size = resolved.stat().st_size
+    except OSError:
+        return None
+    if size <= 0 or size > s.MAX_LOCAL_SOURCE_COPY_BYTES:
+        return None
+    return resolved
+
+
+def _sha256_local_file(path: Path) -> str:
+    s = _service()
+    digest = hashlib.sha256()
+    try:
+        with s._extended_fs_path(path).open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError:
+        return ""
+    return digest.hexdigest()

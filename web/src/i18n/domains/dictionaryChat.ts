@@ -1,4 +1,4 @@
-/** Route/domain dictionary slice: chat (72 keys). */
+/** Route/domain dictionary slice: chat (78 keys). */
 export const dictionaryChat = {
   zh: {
     navChat: "对话",
@@ -61,7 +61,13 @@ export const dictionaryChat = {
     chatFeatureDisabled: "关闭",
     chatFeaturePanelHint: "心智与运行：心智/状态为下轮真开关（心智优先于全局默认）；尾部现场默认折叠。历史快照与上轮遥测不受此区改写。",
     messageInputPlaceholder: "描述下一步要做什么...",
-    sessionBusyPlaceholder: "",
+    sessionBusyPlaceholder: "输入后排队，当前轮结束后自动发出",
+    sessionBusyQueuedPlaceholder: "再输入则追加；空输入再 Enter 立刻引导",
+    queueFollowup: "排队",
+    immediateSteer: "立刻引导",
+    followupQueueLabel: "排队",
+    editFollowupQueue: "修改这条排队",
+    withdrawFollowupQueue: "撤回这条排队",
     sessionBusyComposerGuidance: "",
     sessionStoppingPlaceholder: "",
     editMessagePlaceholder: "修改最新用户消息后发送即可重跑",
@@ -142,7 +148,13 @@ export const dictionaryChat = {
     chatFeatureDisabled: "Off",
     chatFeaturePanelHint: "Mental & runtime: mental/status are next-turn real toggles (mental outranks global default); tail context stays collapsed. Historical snapshots and last-turn telemetry are not rewritten here.",
     messageInputPlaceholder: "Describe the next step...",
-    sessionBusyPlaceholder: "",
+    sessionBusyPlaceholder: "Type to queue; it sends after this turn",
+    sessionBusyQueuedPlaceholder: "Type to append; empty Enter steers now",
+    queueFollowup: "Queue",
+    immediateSteer: "Steer now",
+    followupQueueLabel: "Queued",
+    editFollowupQueue: "Edit this queued follow-up",
+    withdrawFollowupQueue: "Withdraw this queued follow-up",
     sessionBusyComposerGuidance: "",
     sessionStoppingPlaceholder: "",
     editMessagePlaceholder: "Edit the latest user message, then send to rerun",

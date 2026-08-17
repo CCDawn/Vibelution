@@ -78,6 +78,32 @@ def test_reset_summary_includes_memory_as_optional_item(reset_project: Path):
     assert "配置与模型绑定" not in protected_labels
 
 
+def test_reset_path_guard_allows_only_governed_external_roots(
+    reset_project: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    external_root = reset_project.parent / f"{reset_project.name}-external-storage"
+    log_root = external_root / "logs"
+    runtime_root = external_root / "runtime"
+    memory_root = external_root / "memory"
+    monkeypatch.setattr(reset_service, "resolve_project_logs_home", lambda _root: log_root)
+    monkeypatch.setattr(reset_service, "resolve_project_runtime_home", lambda _root: runtime_root)
+    monkeypatch.setattr(reset_service, "resolve_project_memory_home", lambda _root: memory_root)
+
+    assert reset_service._resolve_project_path(log_root / "conversations" / "case.jsonl") == (
+        log_root / "conversations" / "case.jsonl"
+    ).resolve()
+    assert reset_service._resolve_project_path(runtime_root / "launcher" / "state.json") == (
+        runtime_root / "launcher" / "state.json"
+    ).resolve()
+    assert reset_service._resolve_project_path(memory_root / "agent-registry.json") == (
+        memory_root / "agent-registry.json"
+    ).resolve()
+
+    with pytest.raises(ValueError, match="governed Vibelution storage roots"):
+        reset_service._resolve_project_path(external_root / "sibling" / "unowned.txt")
+
+
 def test_reset_summary_records_timing_event(reset_project: Path, monkeypatch: pytest.MonkeyPatch):
     events: list[dict] = []
 
@@ -183,7 +209,19 @@ def test_execute_selected_items_deletes_only_allow_list_targets(reset_project: P
 
 
 def test_execute_chat_history_recreates_empty_default_session(reset_project: Path):
-    save_chat_state(reset_project, {"version": 1, "conversations": [{"messages": [{"role": "user", "content": "old"}]}]})
+    save_chat_state(
+        reset_project,
+        {
+            "version": 1,
+            "active_conversation_id": "default",
+            "conversations": [
+                {
+                    "conversation_id": "default",
+                    "messages": [{"role": "user", "content": "old"}],
+                }
+            ],
+        },
+    )
 
     result = reset_service.execute_reset(["chat_history"], confirmed=True)
     state = load_chat_state(reset_project)
@@ -278,9 +316,12 @@ def test_chat_history_is_available_even_before_state_file_exists(reset_project: 
     assert preview["items"][0]["deleteCandidates"][0]["action"] == "reset"
 
     result = reset_service.execute_reset(["chat_history"], confirmed=True)
+    state = load_chat_state(reset_project)
 
     assert result["totals"]["deletedCount"] == 1
-    assert (reset_project / "workspace" / "chat" / "chat_state.json").exists()
+    assert state["active_conversation_id"] == "default"
+    assert state["conversations"][0]["conversation_id"] == "default"
+    assert not (reset_project / "workspace" / "chat" / "chat_state.json").exists()
 
 
 def test_runtime_scene_cleanup_skips_running_and_current_scene(reset_project: Path):

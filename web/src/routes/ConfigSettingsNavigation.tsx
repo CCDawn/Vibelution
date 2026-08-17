@@ -1,8 +1,13 @@
-import type { ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 
 import type { ConfigSummary } from "../api/types";
-import { VButton, VPanelHeader } from "../components/vui";
+import { VButton, VNativeInput, VPanelHeader } from "../components/vui";
 import styles from "./ConfigSettingsNavigation.styles";
+import {
+  searchConfigSettings,
+  type ConfigSettingsSearchDocument,
+  type ConfigSettingsSearchHit,
+} from "./configSettingsSearch";
 
 export type ConfigSettingsLanguage = "zh" | "en";
 
@@ -13,6 +18,8 @@ export type ConfigSettingsGroupId =
   | "models-profiles"
   | "runtime-context"
   | "tooling-diagnostics";
+
+export const DEFAULT_CONFIG_SETTINGS_GROUP_ID: ConfigSettingsGroupId = "models-profiles";
 
 export type ConfigSettingsPage = {
   id: string;
@@ -38,12 +45,12 @@ type PageDefinition = {
 };
 
 const GROUP_ORDER: ConfigSettingsGroupId[] = [
-  "overview-apply",
+  "models-profiles",
   "workbench-interface",
   "avatar-pet",
-  "models-profiles",
   "runtime-context",
   "tooling-diagnostics",
+  "overview-apply",
 ];
 
 const PAGE_DEFINITIONS: Record<ConfigSettingsGroupId, readonly PageDefinition[]> = {
@@ -103,7 +110,10 @@ export function resolveConfigSettingsSelection(
   requestedGroupId: string,
   requestedPageId: string,
 ): { group: ConfigSettingsGroup | null; page: ConfigSettingsPage | null } {
-  const group = groups.find((candidate) => candidate.id === requestedGroupId) ?? groups[0] ?? null;
+  const group = groups.find((candidate) => candidate.id === requestedGroupId)
+    ?? groups.find((candidate) => candidate.id === DEFAULT_CONFIG_SETTINGS_GROUP_ID)
+    ?? groups[0]
+    ?? null;
   const page = group?.pages.find((candidate) => candidate.id === requestedPageId) ?? group?.pages[0] ?? null;
   return { group, page };
 }
@@ -117,6 +127,8 @@ type ConfigSettingsSidebarProps = {
   groups: ConfigSettingsGroup[];
   activeGroupId: string;
   onSelectGroup: (groupId: ConfigSettingsGroupId) => void;
+  onNavigate?: (groupId: ConfigSettingsGroupId, pageId: string) => void;
+  searchDocuments?: ConfigSettingsSearchDocument[];
   headerAction?: ReactNode;
 };
 
@@ -129,9 +141,25 @@ export function ConfigSettingsSidebar({
   groups,
   activeGroupId,
   onSelectGroup,
+  onNavigate,
+  searchDocuments = [],
   headerAction,
 }: ConfigSettingsSidebarProps) {
   const sidebarHelp = subtitleHint || subtitle;
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchHits = useMemo(
+    () => searchConfigSettings(searchDocuments, searchQuery),
+    [searchDocuments, searchQuery],
+  );
+
+  function selectHit(hit: ConfigSettingsSearchHit) {
+    if (onNavigate) {
+      onNavigate(hit.groupId, hit.pageId);
+    } else {
+      onSelectGroup(hit.groupId);
+    }
+  }
+
   return (
     <aside className={styles.sidebar} data-vui-region="config-settings-nav">
       <VPanelHeader
@@ -143,6 +171,34 @@ export function ConfigSettingsSidebar({
         tooltipLabel={language === "zh" ? "设置工作台说明" : "Settings workspace details"}
         actions={headerAction}
       />
+      <div className={styles.searchStack}>
+        <label className={styles.searchField}>
+          <span className={styles.searchLabel}>{language === "zh" ? "搜索设置" : "Search settings"}</span>
+          <VNativeInput
+            type="search"
+            value={searchQuery}
+            placeholder={language === "zh" ? "主题、API Key、压缩…" : "Theme, API key, compression…"}
+            aria-label={language === "zh" ? "搜索设置" : "Search settings"}
+            onChange={(event) => setSearchQuery(event.target.value)}
+          />
+        </label>
+        {searchHits.length > 0 ? (
+          <nav className={styles.searchResults} aria-label={language === "zh" ? "搜索结果" : "Search results"}>
+            {searchHits.map((hit) => (
+              <VButton
+                key={`${hit.groupId}:${hit.pageId}:${hit.sectionId ?? ""}:${hit.title}`}
+                className={styles.searchHit}
+                contentLayout="plain"
+                variant="ghost"
+                onPress={() => selectHit(hit)}
+              >
+                <span>{hit.title}</span>
+                <small>{hit.detail}</small>
+              </VButton>
+            ))}
+          </nav>
+        ) : null}
+      </div>
       <div className={styles.status} role="status">
         <span>{language === "zh" ? "配置状态" : "Config status"}</span>
         <strong className={styles.statusValue}>{statusLabel}</strong>

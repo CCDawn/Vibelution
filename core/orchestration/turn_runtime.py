@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Mapping
 
 
 @dataclass(frozen=True)
@@ -35,15 +36,105 @@ class AgentTurnRuntime:
     metadata: dict[str, Any]
 
 
+def _decode_binary(value: Any) -> Any:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).decode("utf-8", errors="replace")
+    return value
+
+
+def _maybe_json(value: Any) -> Any:
+    value = _decode_binary(value)
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if not text or text[0] not in "{[":
+        return value
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return value
+
+
+_REQUEST_KEYS = (
+    "mode",
+    "run_kind",
+    "runKind",
+    "run_id",
+    "runId",
+    "session_id",
+    "sessionId",
+    "agent_id",
+    "agentId",
+    "llm_slot",
+    "llmSlot",
+    "model_id",
+    "modelId",
+    "cache_scope",
+    "cacheScope",
+    "workspace_path",
+    "workspacePath",
+)
+_REQUEST_ENVELOPES = ("runtime", "payload", "request", "config", "binding", "current", "turn")
+
+
+def _as_mapping(value: Any) -> dict[str, Any]:
+    value = _maybe_json(value)
+    if not isinstance(value, Mapping):
+        return {}
+    mapping = dict(value)
+    if any(key in mapping for key in _REQUEST_KEYS):
+        return mapping
+    for envelope in _REQUEST_ENVELOPES:
+        if envelope not in mapping:
+            continue
+        nested = _as_mapping(mapping.get(envelope))
+        if nested:
+            return nested
+    return mapping
+
+
 def _clean(value: Any, *, fallback: str = "") -> str:
-    text = str(value or "").strip()
+    value = _decode_binary(value)
+    value = _maybe_json(value)
+    if isinstance(value, Mapping) or isinstance(value, (list, tuple, set)):
+        return fallback
+    if isinstance(value, bool) or value is None:
+        text = ""
+    else:
+        text = str(value)
+    text = " ".join(text.split())
     return text or fallback
 
 
-def _short_hash(value: str) -> str:
-    if not value:
+def _short_hash(value: Any) -> str:
+    text = _clean(value)
+    if not text:
         return ""
-    return hashlib.sha256(value.encode("utf-8", errors="ignore")).hexdigest()[:12]
+    return hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()[:12]
+
+
+def _as_request(request: Any) -> AgentTurnRuntimeRequest:
+    if isinstance(request, AgentTurnRuntimeRequest):
+        return request
+    mapping = _as_mapping(request)
+
+    def pick(*keys: str) -> Any:
+        for key in keys:
+            if key in mapping:
+                return mapping.get(key)
+        return ""
+
+    return AgentTurnRuntimeRequest(
+        mode=pick("mode"),
+        run_kind=pick("run_kind", "runKind"),
+        run_id=pick("run_id", "runId"),
+        session_id=pick("session_id", "sessionId"),
+        agent_id=pick("agent_id", "agentId"),
+        llm_slot=pick("llm_slot", "llmSlot"),
+        model_id=pick("model_id", "modelId"),
+        cache_scope=pick("cache_scope", "cacheScope"),
+        workspace_path=pick("workspace_path", "workspacePath"),
+    )
 
 
 def build_prompt_cache_partition(
@@ -77,7 +168,8 @@ def build_prompt_cache_partition(
     return "|".join(parts)
 
 
-def prepare_agent_turn_runtime(request: AgentTurnRuntimeRequest) -> AgentTurnRuntime:
+def prepare_agent_turn_runtime(request: AgentTurnRuntimeRequest | Mapping[str, Any] | str | bytes | None) -> AgentTurnRuntime:
+    request = _as_request(request)
     mode = _clean(request.mode, fallback="self_evolution")
     run_kind = _clean(request.run_kind, fallback=mode)
     run_id = _clean(request.run_id)
@@ -124,7 +216,11 @@ def prepare_agent_turn_runtime(request: AgentTurnRuntimeRequest) -> AgentTurnRun
     )
 
 
-def runtime_metadata_env(runtime: AgentTurnRuntime) -> dict[str, str]:
+def runtime_metadata_env(runtime: AgentTurnRuntime | Mapping[str, Any] | None) -> dict[str, str]:
+    if runtime is None:
+        return {}
+    if not isinstance(runtime, AgentTurnRuntime):
+        runtime = prepare_agent_turn_runtime(runtime)
     env = {
         "VIBELUTION_TURN_MODE": runtime.mode,
         "VIBELUTION_TURN_RUN_KIND": runtime.run_kind,

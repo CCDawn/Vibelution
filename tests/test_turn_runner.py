@@ -609,3 +609,176 @@ def test_run_existing_agent_single_turn_omits_unsupported_optional_kwargs():
 
     assert result == {"status": "completed"}
     assert captured == {"initial_prompt": "probe"}
+
+
+def test_create_agent_runtime_ignores_unsupported_runtime_binding():
+    captured: dict[str, object] = {}
+
+    def factory(*, mode=None, workspace_path=None, config=None):
+        captured.update({"mode": mode, "workspace_path": workspace_path, "config": config})
+        return object()
+
+    created = create_agent_runtime(
+        mode="chat",
+        workspace_path="workspace/session",
+        config="config",
+        runtime_agent_binding={"agentId": "agent-a"},
+        agent_factory=factory,
+    )
+
+    assert created is not None
+    assert captured == {
+        "mode": "chat",
+        "workspace_path": "workspace/session",
+        "config": "config",
+    }
+
+
+def test_disable_tools_forwards_through_var_kwargs_runner():
+    captured: dict[str, object] = {}
+
+    class FakeAgent:
+        def run_single_turn(self, initial_prompt=None, **kwargs):
+            captured["initial_prompt"] = initial_prompt
+            captured["disable_tools"] = kwargs.get("disable_tools")
+            return {"status": "completed"}
+
+    result = run_existing_agent_single_turn(
+        FakeAgent(),
+        initial_prompt="summarize",
+        disable_tools=True,
+    )
+    assert result == {"status": "completed"}
+    assert captured == {"initial_prompt": "summarize", "disable_tools": True}
+
+
+def test_prepare_agent_turn_ignores_string_chat_history():
+    captured: dict[str, object] = {}
+
+    class FakeAgent:
+        def seed_chat_history(self, messages):
+            captured["history"] = messages
+
+        def record_turn_preparation_diagnostic(self, fields):
+            captured["diagnostic"] = fields
+
+    prepare_agent_turn(FakeAgent(), chat_history="not-a-history")
+    assert "history" not in captured
+    assert captured["diagnostic"]["path"] == "fresh"
+    assert captured["diagnostic"]["historyMessageCount"] == 0
+
+
+def test_turn_runner_coerces_bytes_false_flags_and_mapping_request():
+    captured: dict[str, object] = {}
+
+    class FakeAgent:
+        def set_turn_identity(self, turn_identity):
+            captured["turn_identity"] = turn_identity
+
+        def seed_static_runtime_context(self, context):
+            captured["static_context"] = context
+
+        def set_turn_interrupt_checker(self, checker):
+            captured["interrupt"] = checker
+
+        def run_single_turn(self, initial_prompt=None, disable_tools=False, attachments=None):
+            captured["initial_prompt"] = initial_prompt
+            captured["disable_tools"] = disable_tools
+            captured["attachments"] = attachments
+            return {"status": "completed"}
+
+        def export_turn_carryover(self):
+            return {"next": "ok"}
+
+    prepare_agent_turn(
+        FakeAgent(),
+        turn_identity=b"turn-1",
+        static_runtime_context=b"static-context",
+        interrupt_checker="false",
+        chat_history=b'[{"role": "user"}]',
+    )
+    assert captured["turn_identity"] == "turn-1"
+    assert captured["static_context"] == "static-context"
+    assert "interrupt" not in captured
+
+    captured.clear()
+    result = run_existing_agent_single_turn(
+        FakeAgent(),
+        initial_prompt=b"summarize",
+        disable_tools="false",
+        attachments="not-attachments",
+        prompt_cache_partition=b"",
+    )
+    assert result == {"status": "completed"}
+    assert captured["initial_prompt"] == "summarize"
+    assert captured["disable_tools"] is False
+    assert captured["attachments"] is None
+
+    captured.clear()
+    mapped = run_agent_single_turn(
+        {
+            "mode": b"self_evolution",
+            "initial_prompt": b"probe",
+            "disable_tools": "false",
+            "turn_identity": b"turn-map",
+        },
+        agent_factory=lambda **_kwargs: FakeAgent(),
+    )
+    assert mapped.result["status"] == "completed"
+    assert captured["initial_prompt"] == "probe"
+    assert captured["disable_tools"] is False
+
+
+def test_prepare_agent_turn_parses_json_chat_history_without_splitting_strings():
+    captured: dict[str, object] = {}
+
+    class FakeAgent:
+        def seed_chat_history(self, messages):
+            captured["history"] = messages
+
+        def record_turn_preparation_diagnostic(self, fields):
+            captured["diagnostic"] = fields
+
+    prepare_agent_turn(
+        FakeAgent(),
+        chat_history=b'[{"role": "user", "content": "hi"}]',
+    )
+    assert captured["history"] == [{"role": "user", "content": "hi"}]
+    assert captured["diagnostic"]["historyMessageCount"] == 1
+    assert captured["diagnostic"]["path"] == "history"
+
+    captured.clear()
+    prepare_agent_turn(
+        FakeAgent(),
+        chat_history='{"messages": [{"role": "assistant", "content": "ok"}]}',
+    )
+    assert captured["history"] == [{"role": "assistant", "content": "ok"}]
+    assert captured["diagnostic"]["historyMessageCount"] == 1
+
+    captured.clear()
+    prepare_agent_turn(FakeAgent(), chat_history="not-a-history")
+    assert "history" not in captured
+    assert captured["diagnostic"]["historyMessageCount"] == 0
+
+
+def test_run_existing_agent_single_turn_parses_json_attachments():
+    captured: dict[str, object] = {}
+
+    class FakeAgent:
+        def run_single_turn(self, initial_prompt=None, disable_tools=False, attachments=None):
+            captured["initial_prompt"] = initial_prompt
+            captured["disable_tools"] = disable_tools
+            captured["attachments"] = attachments
+            return {"status": "completed"}
+
+        def export_turn_carryover(self):
+            return {}
+
+    result = run_existing_agent_single_turn(
+        FakeAgent(),
+        initial_prompt="summarize",
+        attachments=b'[{"name": "note.md"}]',
+    )
+    assert result == {"status": "completed"}
+    assert captured["attachments"] == [{"name": "note.md"}]
+    assert captured["disable_tools"] is False

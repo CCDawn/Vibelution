@@ -64,9 +64,13 @@ def test_load_cleanup_advances_state_revision(tmp_path):
 
     cleaned = load_chat_state(tmp_path)
 
+    # The SQLite import continues the legacy revision sequence (4 -> 5) so
+    # CAS and catalog freshness stay coherent with the pre-migration state.
     assert cleaned["state_revision"] == 5
     assert "messages" not in cleaned["conversations"][0]
-    assert json.loads(path.read_text(encoding="utf-8"))["state_revision"] == 5
+    # The legacy JSON file stays untouched migration input; the SQLite store
+    # is the single canonical source after import.
+    assert json.loads(path.read_text(encoding="utf-8"))["state_revision"] == 4
 
 
 def test_chat_state_write_notifies_catalog_global_dirty_observer(tmp_path):

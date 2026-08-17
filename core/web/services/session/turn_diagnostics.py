@@ -151,9 +151,13 @@ def get_session_turn_completion_snapshot(session_id: str, turn_id: str = "") -> 
     turn_current = bool(is_running and (not normalized_turn_id or active_turn_id == normalized_turn_id))
 
     with s._CHAT_STATE_LOCK:
-        payload = s.load_chat_state(s.PROJECT_ROOT)
-        payload = s._repair_stale_running_conversations(payload)
-        conversation = s._find_conversation_entry(payload, normalized_session_id)
+        try:
+            s.reconcile_stale_chat_turn_work_runs()
+        except Exception:
+            pass
+        conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
+        if conversation is not None and s._repair_stale_running_conversation(conversation):
+            s.save_session_chat_state(s.PROJECT_ROOT, normalized_session_id, conversation)
         if conversation is None:
             return {
                 "sessionId": normalized_session_id,
@@ -174,6 +178,10 @@ def get_session_turn_completion_snapshot(session_id: str, turn_id: str = "") -> 
 
     assistant_message = s._find_turn_scoped_assistant_message(messages, normalized_turn_id)
     assistant_text = str((assistant_message or {}).get("content") or "").strip()
+    if not assistant_text and assistant_message:
+        from core.web.services.session.session_ops import _turn_items_visible_text
+
+        assistant_text = _turn_items_visible_text(assistant_message).strip()
     assistant_turn_id = s._message_turn_id(assistant_message)
     marker_present = s._supervised_completion_marker_present(assistant_text)
     terminal_statuses = {
@@ -752,32 +760,24 @@ def _settle_stale_chat_turn_work_run(
         pass
     try:
         with s._CHAT_STATE_LOCK:
-            state = s.load_chat_state(s.PROJECT_ROOT)
-            conversations = state.get("conversations") if isinstance(state, dict) else None
-            if isinstance(conversations, list):
-                for conversation in conversations:
-                    if not isinstance(conversation, dict):
-                        continue
-                    if str(conversation.get("conversation_id") or "").strip() != session_id:
-                        continue
-                    conversation["last_turn_status"] = status
-                    conversation["updated_at"] = finished_at
-                    conversation["runtime_notices"] = s._append_session_runtime_notice(
-                        conversation.get("runtime_notices") or conversation.get("runtimeNotices") or [],
-                        {
-                            "kind": "turn_recovered",
-                            "level": "warning",
-                            "message": summary,
-                            "timestamp": finished_at,
-                            "source": "conversation.turn_recovered",
-                            "turnId": run_id,
-                            "previousStatus": previous_status,
-                            "reason": reason,
-                        },
-                    )
-                    state["updated_at"] = finished_at
-                    s.save_chat_state(s.PROJECT_ROOT, state)
-                    break
+            conversation = s.load_session_chat_state(s.PROJECT_ROOT, session_id)
+            if conversation is not None:
+                conversation["last_turn_status"] = status
+                conversation["updated_at"] = finished_at
+                conversation["runtime_notices"] = s._append_session_runtime_notice(
+                    conversation.get("runtime_notices") or conversation.get("runtimeNotices") or [],
+                    {
+                        "kind": "turn_recovered",
+                        "level": "warning",
+                        "message": summary,
+                        "timestamp": finished_at,
+                        "source": "conversation.turn_recovered",
+                        "turnId": run_id,
+                        "previousStatus": previous_status,
+                        "reason": reason,
+                    },
+                )
+                s.save_session_chat_state(s.PROJECT_ROOT, session_id, conversation)
     except Exception:
         pass
     try:
@@ -1095,43 +1095,44 @@ def list_active_session_work_runs(*, reconcile: bool = True) -> list[dict[str, A
         active_turn_ids = dict(s._SESSION_ACTIVE_TURN_IDS)
         active_leases = {key: list(value) for key, value in s._SESSION_ACTIVE_TURN_LEASES.items()}
     active_statuses = s._active_session_work_run_statuses(session_ids)
-    return [
-        {
-            "runId": active_turn_ids.get(session_id) or f"chat-turn-{session_id}",
+    items: list[dict[str, Any]] = []
+    for session_id in session_ids:
+        status = active_statuses.get(session_id) or "running"
+        run_id = active_turn_ids.get(session_id) or f"chat-turn-{session_id}"
+        item: dict[str, Any] = {
+            "runId": run_id,
             "runKind": "chat_turn",
             "sessionId": session_id,
-            "status": active_statuses.get(session_id) or "running",
-            "currentPhase": active_statuses.get(session_id) or "running",
+            "status": status,
+            "currentPhase": status,
             "leases": active_leases.get(session_id) or ["readonly_chat"],
         }
-        for session_id in session_ids
-    ]
+        snapshot = s._WORK_RUN_STORE.load_snapshot("chat_turn", run_id) or {}
+        user_message = str(snapshot.get("userMessage") or "").strip()
+        summary = str(snapshot.get("summary") or "").strip()
+        if user_message:
+            item["userMessage"] = user_message
+        if summary:
+            item["summary"] = summary
+        last_tool_error = snapshot.get("lastToolError")
+        if isinstance(last_tool_error, dict) and last_tool_error:
+            item["lastToolError"] = last_tool_error
+        items.append(item)
+    return items
 
 
 def _active_session_work_run_statuses(session_ids: list[str]) -> dict[str, str]:
-    s = _service()
-    if not session_ids:
-        return {}
-    session_id_set = set(session_ids)
-    statuses: dict[str, str] = {}
-    try:
-        with s._CHAT_STATE_LOCK:
-            payload = s.load_chat_state(s.PROJECT_ROOT)
-            conversations = payload.get("conversations") if isinstance(payload, dict) else []
-            for conversation in conversations if isinstance(conversations, list) else []:
-                if not isinstance(conversation, dict):
-                    continue
-                session_id = str(conversation.get("conversation_id") or "").strip()
-                if session_id not in session_id_set:
-                    continue
-                status = str(
-                    conversation.get("last_turn_status") or conversation.get("lastTurnStatus") or ""
-                ).strip().lower()
-                if status in {"queued", "running", "stopping"}:
-                    statuses[session_id] = status
-    except Exception:
-        return {}
-    return statuses
+    """Map live session ids to a work-run status without touching chat_state.
+
+    Runtime summary polls this on the hot path while submit/select hold
+    ``_CHAT_STATE_LOCK``. The in-memory running set already selected
+    ``session_ids``; queued/stopping can stay ``running`` for lease/UI dots.
+    """
+    return {
+        session_id: "running"
+        for session_id in session_ids
+        if str(session_id or "").strip()
+    }
 
 
 def load_chat_turn_work_run_summary() -> dict[str, Any]:

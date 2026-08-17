@@ -4,7 +4,7 @@ This document defines the default collaboration protocol for multiple Agents wor
 
 ## Work Surfaces
 
-- `<project-root>` is the durable local `main` integration workspace. Keep this path checked out on branch `main`; use it only for local syncing, fast-forward merging, final validation, and publishing after the user explicitly authorizes a GitHub sync/release. Direct development writes and commits on `main` are forbidden.
+- `<project-root>` is the durable local `main` integration workspace. Keep this path checked out on branch `main`; use it only for local syncing, fast-forward merging, merge-result inspection, and publishing after the user explicitly authorizes a GitHub sync/release. All validation must finish before merge. Direct development writes and commits on `main` are forbidden.
 - If `<project-root>` is found on a non-main branch, preserve or migrate that work into `<project-root>\.worktrees\<task-slug>` or a named stash, then restore the root path to `main` before continuing normal development or integration.
 - Development Agents use task-specific worktrees under `<project-root>\.worktrees\`. Resolve the pool with `core.infrastructure.branch_workspace`; do not hardcode a username, Desktop, or sibling folder.
 - The old sibling folder `<project-root-parent>\Vibelution-worktrees\` is read-only compatibility. Do not create new checkouts there. Live trees can move with `migrate_legacy_branch_workspaces`.
@@ -65,11 +65,11 @@ Inside its own worktree, an Agent should:
 - stage only files that belong to the current task;
 - run the narrowest useful validation;
 - commit locally;
-- self-review the diff and merge readiness before handoff;
-- merge its own task branch into local `main` when the local merge gates pass, then run targeted post-merge validation and close its claim;
+- self-review the current-task diff and merge readiness without waiting for the user to request review;
+- merge its own task branch into local `main` when the local merge gates pass, then immediately close its claim and clean only its task-owned resources without waiting for post-merge validation; waiting for the user to request merge is not done;
 - hand off to the main integration session only for large conflicts, cross-lane conflicts, hot-file/active-claim conflicts, release-sensitive work, unclear semantic conflicts, or explicit user-designated integration;
 - never push to GitHub unless the user explicitly authorizes remote sync or publication;
-- report the worktree path, branch, local commit SHA, changed files, validation result, Launcher refresh need, project-memory update proposal, and whether it self-merged or why it could not.
+- report the worktree path, branch, local commit SHA, changed files, pre-merge validation result, Launcher refresh need, project-memory update proposal, whether it self-merged, and the resulting cleanup or exact `cleanup pending` residue.
 
 ## Main Integration Responsibilities
 
@@ -80,11 +80,11 @@ The session currently closing work into `main` should:
 - refuse to merge any claim that is not in `ready_for_merge` unless it is doing an explicit mainline repair or user-designated integration pass;
 - abort and restore `main` immediately if a blocked branch is accidentally merged and produces conflicts;
 - merge one task branch at a time;
-- run targeted validation after each merge;
+- confirm each fast-forward merge succeeded and the target contains the merged task tip, then immediately clean that task's local resources;
 - handle semantic conflicts instead of letting Agents resolve them blindly;
-- keep successful merges on local `main`; do not push `main` after validation unless the user explicitly asks to sync GitHub or publish;
+- keep successful merges on local `main`; do not push `main` after merge-result inspection unless the user explicitly asks to sync GitHub or publish;
 - serialize project-memory updates after code merges;
-- clean merged task worktrees.
+- clean every successfully merged task's claim, temporary content, junction, worktree, and local branch immediately.
 
 When a branch cannot merge cleanly, leave the task in its own worktree and mark the claim `blocked` with the conflicting files and next action. Do not keep conflict markers, staged partial resolutions, or an in-progress merge in the main integration workspace. The owning Agent should rebase/merge against the current local `main` or create a new conflict-resolved commit, then re-enter the queue as a fresh `ready_for_merge` claim. Use `origin/main` only when the user explicitly asks to align with GitHub.
 
@@ -92,7 +92,9 @@ Small conflicts contained entirely inside the owning Agent's claimed files shoul
 
 ## Cleanup
 
-After a task has been merged into local `main`, validated, and confirmed to have no uncommitted work, clean it up:
+All review, testing, quality gates, mergeability checks, and acceptance evidence belong before merge. The moment `git merge --ff-only <task-branch>` succeeds, the task is absorbed by local `main` and cleanup must start immediately; do not retain task resources while waiting for post-merge validation.
+
+First remove only disposable files/directories, debug output, scratch artifacts, and background processes/listeners that are provably owned by the merged task. Use exact paths and exact process ownership; do not scan broadly or infer ownership. Then release only the task's claim, remove its junction when present, and remove its clean worktree and merged local branch:
 
 ```powershell
 cd <project-root>
@@ -101,13 +103,15 @@ git branch -d codex/<task-slug>
 git worktree prune
 ```
 
+After cleanup, inspect Git/worktree/registry state only to prove the merge was absorbed and the task resources are gone; this inspection is not product validation. If any safe local cleanup fails, report `cleanup pending` with the exact residue and reason. Do not force deletion or reinterpret the successfully completed merge as unmerged.
+
 Delete remote task branches only after the user explicitly authorizes GitHub cleanup:
 
 ```powershell
 git push origin --delete codex/<task-slug>
 ```
 
-Do not auto-delete a worktree that is unmerged, dirty, failing validation, conflicted, or possibly still used by an active Agent. If a dirty worktree must be discarded, first save status, unstaged diff, staged diff, and untracked files as a backup.
+Do not auto-delete a worktree that is unmerged, dirty, conflicted, possibly still used by an active Agent, or contains content whose ownership is unclear. If a dirty worktree must be discarded, first save status, unstaged diff, staged diff, and untracked files as a backup.
 
 Do not retry a blocked merge directly from `main`. If a blocked worktree needs another integration attempt, first confirm its claim has been updated back to `ready_for_merge` with a new commit or explicit conflict-resolution note based on the current local `main`. Use `origin/main` only when the user explicitly asks to align with GitHub.
 
@@ -122,10 +126,10 @@ Avoid concurrent edits to shared hot files unless the current main integration s
 - `web/src/api/types.ts`
 - `web/src/i18n/dictionary.ts`
 - `tests/test_web_app.py`
-- `.docs/project-memory/*`
-- `PROJECT_MEMORY.html`
+- inventory `activePaths.memory/**`
+- Git common-dir coordination registry
 
-Project memory is single-writer state. Parallel Agents should write append-only memory proposals or report lane/update payloads; the current memory-sync step applies them after code merges.
+Project memory is external single-writer state. Parallel Agents should write append-only memory proposals or report lane/update payloads; the current memory-sync step applies them after code merges. Live claim and territory ownership stays in the Git common-dir registry, not project memory.
 
 ## Communication Channels
 
@@ -137,6 +141,25 @@ Use these channels in order of authority:
 4. Agent inbox, thread message, or runtime private message for notifications only.
 
 Inbox/thread messages are not authoritative for code state or final decisions. They should not replace commits, diffs, validation evidence, registry state, or runtime logs.
+
+## Disk vs Git worktree hygiene
+
+Periodically reconcile **registered** worktrees with **disk** directories under `.worktrees/`:
+
+```powershell
+cd <project-root>
+git worktree list
+Get-ChildItem .worktrees -Directory | Select-Object -ExpandProperty Name
+```
+
+| 信号 | 含义 | 动作 |
+| --- | --- | --- |
+| 目录存在，`git worktree list` 无对应项 | 磁盘 orphan（常见：分支已删、merge 后未清目录） | **只读**标记；不删 dirty / 未验证内容 |
+| `git worktree list` 有项，磁盘无目录 | 注册 stale | `git worktree prune`（安全） |
+| orphan + 无 `codex/*` 分支 + 无 claim | 候选清理 | 确认目录内无未提交 WIP → 删目录 |
+| orphan + 未知 WIP | 阻塞 | 保留；报告精确路径，等 owner handoff |
+
+**2026-08-17 盘点（示例）：** 注册 4（含本任务）· 磁盘 15 · orphan 11（如 `session-list-bulk-remove`、`tray-restart-launcher-unified` 等，均无对应 `codex/*` 分支）→ **全部保留**，待 owner 确认无 WIP 后再清。
 
 ## Handoff Report
 

@@ -133,11 +133,39 @@ def test_singleton_reset_hint_skips_pure_test_files(tmp_path: Path):
     pure_test.write_text("def test_value():\n    assert 1 == 1\n", encoding="utf-8")
     singleton_test = tmp_path / "test_singleton.py"
     singleton_test.write_text("from core.infrastructure.state import get_state\n", encoding="utf-8")
+    string_only_test = tmp_path / "test_string_only.py"
+    string_only_test.write_text(
+        'def test_contract():\n    assert "session_service" in "core.web.services.session_service"\n',
+        encoding="utf-8",
+    )
+    team_support_test = tmp_path / "test_team_support.py"
+    team_support_test.write_text(
+        "from tests._support.team_workflow.cases_structure import *\n",
+        encoding="utf-8",
+    )
 
     test_conftest._test_file_needs_singleton_reset.cache_clear()
+    test_conftest._test_file_needs_runtime_manager_isolation.cache_clear()
 
     assert test_conftest._test_file_needs_singleton_reset(str(pure_test)) is False
     assert test_conftest._test_file_needs_singleton_reset(str(singleton_test)) is True
+    assert test_conftest._test_file_needs_singleton_reset(str(string_only_test)) is False
+    assert test_conftest._test_file_needs_runtime_manager_isolation(str(string_only_test)) is False
+    assert test_conftest._test_file_needs_runtime_manager_isolation(str(team_support_test)) is True
+
+
+def test_parallel_safe_web_helpers_are_not_module_serial():
+    project_root = Path(__file__).resolve().parents[1]
+    parallel_safe = (
+        project_root / "tests" / "test_runtime_manager_control_service.py",
+        project_root / "tests" / "test_web_misc_routes.py",
+        project_root / "tests" / "test_launcher_scripts_contract.py",
+    )
+    for path in parallel_safe:
+        source = path.read_text(encoding="utf-8")
+        assert "pytestmark = pytest.mark.serial" not in source
+        assert "pytest.mark.serial" not in source.split("pytestmark", 1)[0]
+        assert "pytestmark = pytest.mark.slow" not in source
 
 
 def test_selector_matches_session_service_to_chat_validation_commands():
@@ -304,6 +332,12 @@ def test_selector_matches_memory_cleanup_and_tool_registry_services():
     assert rule_ids == {"memory-cleanup", "tool-registry"}
     assert any("tests/test_memory_cleanup_service.py" in command for command in result["commands"])
     assert any("tests/test_tool_registry_service.py" in command for command in result["commands"])
+    assert any(
+        "tests/prompt_debugger.py" in command
+        and "--suite" in command
+        and "--quick" in command
+        for command in result["commands"]
+    )
     assert len(result["commands"]) == len(set(result["commands"]))
 
 
@@ -335,6 +369,18 @@ def test_selector_matches_current_evolution_service_layout():
     assert {rule["id"] for rule in result["matchedRules"]} == {"web-evolution"}
     assert any("tests/test_web_evolution_routes.py" in command for command in result["commands"])
     assert any("tests/test_evolution_harness.py" in command for command in result["commands"])
+
+
+def test_selector_matches_desktop_electron_to_vitest_commands():
+    result = select_tests.select_tests(
+        ["desktop/electron/src/tray/desktopTray.ts"],
+        select_tests.load_matrix(),
+    )
+
+    assert result["matchedRules"][0]["id"] == "desktop-electron-shell"
+    assert "desktop/electron/src/tray/desktopTray.ts" in result["matchedRules"][0]["matchedFiles"]
+    assert any("npm --prefix desktop/electron test" in command for command in result["commands"])
+    assert "local-serial" in result["validationLayers"]
 
 
 def test_selector_matches_real_runtime_route_to_runtime_validation_commands():

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { fetchJson } from "../../api/client";
+import { stopCliAgentTerminalSession } from "../../api/cliAgents";
 import type { ConversationMessage } from "../../api/types";
 import {
   buildCliAgentRunViews,
@@ -9,6 +9,9 @@ import {
   type CliAgentRunView,
   type CliAgentTerminalSession,
 } from "./cliAgentRunModel";
+
+const EMPTY_CLI_AGENT_RUN_TOKENS: string[] = [];
+const EMPTY_MOUNTED_CLI_AGENT_RUN_IDS: string[] = [];
 
 export type UseChatCliAgentTerminalOptions = {
   activeSessionId: string | null | undefined;
@@ -48,7 +51,9 @@ export function useChatCliAgentTerminal({
   const [cliAgentTerminalSessions, setCliAgentTerminalSessions] = useState<Record<string, CliAgentTerminalSession>>({});
   const [mountedCliAgentRunIdsBySession, setMountedCliAgentRunIdsBySession] = useState<Record<string, string[]>>({});
 
-  const closedCliAgentRunTokens = activeSessionId ? (closedCliAgentRunTokensBySession[activeSessionId] ?? []) : [];
+  const closedCliAgentRunTokens = activeSessionId
+    ? (closedCliAgentRunTokensBySession[activeSessionId] ?? EMPTY_CLI_AGENT_RUN_TOKENS)
+    : EMPTY_CLI_AGENT_RUN_TOKENS;
   const closedCliAgentRunTokenSet = useMemo(() => new Set(closedCliAgentRunTokens), [closedCliAgentRunTokens]);
   const cliAgentRunTabs = useMemo(
     () => buildCliAgentRunViews(detailMessages ?? [], activeSessionId ?? "").filter((run) => !closedCliAgentRunTokenSet.has(cliAgentRunCloseToken(run))),
@@ -58,7 +63,9 @@ export function useChatCliAgentTerminal({
     () => activeCliAgentRunId ? cliAgentRunTabs.find((run) => run.id === activeCliAgentRunId) : undefined,
     [activeCliAgentRunId, cliAgentRunTabs],
   );
-  const mountedCliAgentRunIds = activeSessionId ? (mountedCliAgentRunIdsBySession[activeSessionId] ?? []) : [];
+  const mountedCliAgentRunIds = activeSessionId
+    ? (mountedCliAgentRunIdsBySession[activeSessionId] ?? EMPTY_MOUNTED_CLI_AGENT_RUN_IDS)
+    : EMPTY_MOUNTED_CLI_AGENT_RUN_IDS;
   const mountedCliAgentRunIdSet = useMemo(() => {
     const ids = new Set(mountedCliAgentRunIds);
     if (activeCliAgentRun && !groupPanelActive) {
@@ -155,9 +162,8 @@ export function useChatCliAgentTerminal({
     }
     if (shouldStopTerminal && terminalSessionId) {
       try {
-        await fetchJson<CliAgentTerminalSession>(
-          `/api/cli-agents/terminal-sessions/${encodeURIComponent(terminalSessionId)}/stop`,
-          { method: "POST" },
+        await stopCliAgentTerminalSession<CliAgentTerminalSession>(
+          terminalSessionId,
         );
         void refetchSessionDetail();
       } catch (error) {

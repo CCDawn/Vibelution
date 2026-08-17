@@ -5,19 +5,21 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Dispatch, SetStateAction } from "react";
 
-import { fetchJson } from "../../api/client";
 import { queryKeys } from "../../api/queryKeys";
 import {
   resetTeamResearchProjectProgress,
   resetTeamResearchProjectSourceCollection,
 } from "../../api/researchProjectAgentTasks";
+import {
+  seedSourceCollectionAgentSessionContext,
+  startSourceCollectionRun,
+  startSourceCollectionStageSessionTask,
+} from "../../api/sourceCollection";
+import { startResearchStageRound } from "../../api/stageRounds";
+import { startAiSearchRun } from "../../api/teams";
 import type {
-  AiSearchRun,
   DataProcessingRunListPayload,
   Team,
-  TeamWorkflowSourceCollectionAgentSessionContextPayload,
-  TeamWorkflowSourceCollectionRunStartPayload,
-  TeamWorkflowSourceCollectionStageSessionTaskPayload,
 } from "../../api/types";
 import { AI_SEARCH_RUN_PREVIEW_LIMIT } from "./aiSearchPresentation";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
@@ -151,18 +153,11 @@ export function useTeamWorkflowStartMutations(options: UseTeamWorkflowStartMutat
       agentId: string;
       agentRole: string;
     }) =>
-      fetchJson<TeamWorkflowSourceCollectionAgentSessionContextPayload>(
-        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/source-collection-runs/${encodeURIComponent(payload.runId)}/agent-session-context`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            stageId: payload.stageId,
-            agentId: payload.agentId,
-            agentRole: payload.agentRole,
-          }),
-        },
-      ),
+      seedSourceCollectionAgentSessionContext(payload.teamId, payload.runId, {
+        stageId: payload.stageId,
+        agentId: payload.agentId,
+        agentRole: payload.agentRole,
+      }),
   });
 
   const startSourceCollectionStageSessionTaskMutation = useMutation({
@@ -178,23 +173,16 @@ export function useTeamWorkflowStartMutations(options: UseTeamWorkflowStartMutat
       idempotencyKey: string;
       formalRetry?: boolean;
     }) =>
-      fetchJson<TeamWorkflowSourceCollectionStageSessionTaskPayload>(
-        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/source-collection-runs/${encodeURIComponent(payload.runId)}/stage-session-tasks`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            stageId: payload.stageId,
-            agentId: payload.agentId,
-            agentRole: payload.agentRole,
-            returnTo: payload.returnTo,
-            returnLabel: payload.returnLabel,
-            requestedByAgent: payload.requestedByAgent,
-            idempotencyKey: payload.idempotencyKey,
-            formalRetry: payload.formalRetry === true,
-          }),
-        },
-      ),
+      startSourceCollectionStageSessionTask(payload.teamId, payload.runId, {
+        stageId: payload.stageId,
+        agentId: payload.agentId,
+        agentRole: payload.agentRole,
+        returnTo: payload.returnTo,
+        returnLabel: payload.returnLabel,
+        requestedByAgent: payload.requestedByAgent,
+        idempotencyKey: payload.idempotencyKey,
+        formalRetry: payload.formalRetry === true,
+      }),
     onSuccess: (payload, variables) => {
       options.setSelectedSourceCollectionRunId(payload.runId);
       options.setSourceCollectionStageSyncUntilMs(Date.now() + SOURCE_COLLECTION_STAGE_WRITEBACK_SYNC_GRACE_MS);
@@ -224,15 +212,11 @@ export function useTeamWorkflowStartMutations(options: UseTeamWorkflowStartMutat
 
   const startAiSearchRunMutation = useMutation({
     mutationFn: (payload: { teamId: string; topic: string }) =>
-      fetchJson<AiSearchRun>(`/api/teams/${encodeURIComponent(payload.teamId)}/ai-search-runs`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          topic: payload.topic.trim() || "AI 最新动态",
-          sourceLimit: 8,
-          maxResultsPerQuery: 3,
-          includeSignals: false,
-        }),
+      startAiSearchRun(payload.teamId, {
+        topic: payload.topic.trim() || "AI 最新动态",
+        sourceLimit: 8,
+        maxResultsPerQuery: 3,
+        includeSignals: false,
       }),
     onSuccess: (_run, variables) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.teamAiSearchRuns(variables.teamId, AI_SEARCH_RUN_PREVIEW_LIMIT) });
@@ -245,49 +229,42 @@ export function useTeamWorkflowStartMutations(options: UseTeamWorkflowStartMutat
       const workflowKind = sourceCollectionWorkflowKindForTeam(options.selectedTeam);
       const workflowPurpose = sourceCollectionWorkflowPurposeForTeam(options.selectedTeam);
       const collectionMode = sourceCollectionModeForTeam(options.selectedTeam, payload.draft);
-      return fetchJson<TeamWorkflowSourceCollectionRunStartPayload>(
-        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/source-collection-runs`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            title:
-              payload.draft.title.trim()
-              || (options.knowledgeExpansionWorkflowTeamSelected
-                ? "Knowledge expansion source intake"
-                : "Challenge Cup source collection"),
-            topic: payload.draft.topic.trim(),
-            goal: payload.draft.goal.trim(),
-            researchProjectId: options.activeSourceCollectionResearchProjectId,
-            ownerAgentId: options.sourceCollectionOwnerAgentId,
-            requestedByAgent: options.sourceCollectionOwnerAgentId,
-            workflowPurpose,
-            workflowKind,
-            collectionMode,
-            agentRoles: sourceCollectionAgentRolesForTeam(options.selectedTeam),
-            agentIds: options.sourceCollectionAgentIds,
-            inputRefs: splitDraftList(payload.draft.inputRefs, 24),
-            querySeeds,
-            searchLanguages: splitDraftList(payload.draft.searchLanguages, 8),
-            sourceTypes: splitDraftList(payload.draft.sourceTypes, 12),
-            maxResultsPerQuery: payload.draft.maxResultsPerQuery,
-            localScanScope: sourceCollectionLocalScanScopeForDraft(collectionMode, payload.draft),
-            promptCachePolicy: SOURCE_COLLECTION_PROMPT_CACHE_POLICY,
-            scope: {
-              domain: options.knowledgeExpansionWorkflowTeamSelected
-                ? "team knowledge expansion"
-                : (payload.draft.topic.trim() || "research source collection"),
-              workflowStage: "knowledge_collection",
-              workflowKind,
-              workflowPurpose,
-              collectionMode,
-              uiEntry: options.knowledgeExpansionWorkflowTeamSelected
-                ? "teams_knowledge_expansion_source_collection_panel"
-                : "teams_research_source_collection_panel",
-            },
-          }),
+      return startSourceCollectionRun(payload.teamId, {
+        title:
+          payload.draft.title.trim()
+          || (options.knowledgeExpansionWorkflowTeamSelected
+            ? "Knowledge expansion source intake"
+            : "Challenge Cup source collection"),
+        topic: payload.draft.topic.trim(),
+        goal: payload.draft.goal.trim(),
+        researchProjectId: options.activeSourceCollectionResearchProjectId,
+        ownerAgentId: options.sourceCollectionOwnerAgentId,
+        requestedByAgent: options.sourceCollectionOwnerAgentId,
+        workflowPurpose,
+        workflowKind,
+        collectionMode,
+        agentRoles: sourceCollectionAgentRolesForTeam(options.selectedTeam),
+        agentIds: options.sourceCollectionAgentIds,
+        inputRefs: splitDraftList(payload.draft.inputRefs, 24),
+        querySeeds,
+        searchLanguages: splitDraftList(payload.draft.searchLanguages, 8),
+        sourceTypes: splitDraftList(payload.draft.sourceTypes, 12),
+        maxResultsPerQuery: payload.draft.maxResultsPerQuery,
+        localScanScope: sourceCollectionLocalScanScopeForDraft(collectionMode, payload.draft),
+        promptCachePolicy: SOURCE_COLLECTION_PROMPT_CACHE_POLICY,
+        scope: {
+          domain: options.knowledgeExpansionWorkflowTeamSelected
+            ? "team knowledge expansion"
+            : (payload.draft.topic.trim() || "research source collection"),
+          workflowStage: "knowledge_collection",
+          workflowKind,
+          workflowPurpose,
+          collectionMode,
+          uiEntry: options.knowledgeExpansionWorkflowTeamSelected
+            ? "teams_knowledge_expansion_source_collection_panel"
+            : "teams_research_source_collection_panel",
         },
-      );
+      });
     },
     onSuccess: (payload, variables) => {
       options.setSelectedSourceCollectionRunId(payload.run.runId);
@@ -318,36 +295,32 @@ export function useTeamWorkflowStartMutations(options: UseTeamWorkflowStartMutat
       draft: SourceCollectionDraft;
     }) => {
       const querySeeds = compactSourceCollectionQuerySeeds(payload.draft.topic, payload.draft.querySeeds);
-      return fetchJson<ResearchStageRoundStartPayload>(
-        `/api/teams/${encodeURIComponent(payload.teamId)}/workflow-orchestration/stage-rounds/start`,
+      return startResearchStageRound<ResearchStageRoundStartPayload>(
+        payload.teamId,
         {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            stageType: payload.stageType,
-            mode: payload.mode || "continue_or_start",
-            title: payload.draft.title.trim() || "",
-            topic: payload.draft.topic.trim(),
-            goal: payload.draft.goal.trim(),
-            ownerAgentId: options.sourceCollectionOwnerAgentId,
-            requestedByAgent: options.sourceCollectionOwnerAgentId,
-            agentRoles: SOURCE_COLLECTION_DEFAULT_ROLES,
-            agentIds: options.sourceCollectionAgentIds,
-            inputRefs: splitDraftList(payload.draft.inputRefs, 24),
-            querySeeds,
-            searchLanguages: splitDraftList(payload.draft.searchLanguages, 8),
-            sourceTypes: splitDraftList(payload.draft.sourceTypes, 12),
-            maxResultsPerQuery: payload.draft.maxResultsPerQuery,
-            promptCachePolicy: SOURCE_COLLECTION_PROMPT_CACHE_POLICY,
-            scope: {
-              // The source plan also expands scope.domain into query seeds.
-              // Keep it aligned with the active research project instead of
-              // carrying an old predictive-coding demo subject into every run.
-              domain: payload.draft.topic.trim(),
-              workflowStage: payload.stageType,
-              uiEntry: "teams_research_stage_launcher",
-            },
-          }),
+          stageType: payload.stageType,
+          mode: payload.mode || "continue_or_start",
+          title: payload.draft.title.trim() || "",
+          topic: payload.draft.topic.trim(),
+          goal: payload.draft.goal.trim(),
+          ownerAgentId: options.sourceCollectionOwnerAgentId,
+          requestedByAgent: options.sourceCollectionOwnerAgentId,
+          agentRoles: SOURCE_COLLECTION_DEFAULT_ROLES,
+          agentIds: options.sourceCollectionAgentIds,
+          inputRefs: splitDraftList(payload.draft.inputRefs, 24),
+          querySeeds,
+          searchLanguages: splitDraftList(payload.draft.searchLanguages, 8),
+          sourceTypes: splitDraftList(payload.draft.sourceTypes, 12),
+          maxResultsPerQuery: payload.draft.maxResultsPerQuery,
+          promptCachePolicy: SOURCE_COLLECTION_PROMPT_CACHE_POLICY,
+          scope: {
+            // The source plan also expands scope.domain into query seeds.
+            // Keep it aligned with the active research project instead of
+            // carrying an old predictive-coding demo subject into every run.
+            domain: payload.draft.topic.trim(),
+            workflowStage: payload.stageType,
+            uiEntry: "teams_research_stage_launcher",
+          },
         },
       );
     },

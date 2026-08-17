@@ -30,6 +30,7 @@ export type MemoryCleanupPanelCopy = {
   cleanupConfirmPhrase: string;
   cleanupConfirmPlaceholder: string;
   cleanupExecuteDone: string;
+  cleanupFailed: string;
 };
 
 type MemoryCleanupFeedback = {
@@ -238,9 +239,13 @@ export function MemoryCleanupPanel({
             <p className={styles.cleanupFeedback} data-tone={feedback.tone}>{feedback.text}</p>
           ) : null}
           {execution ? (
-            <div className={styles.cleanupExecutionSummary}>
-              <CheckCircle2 size={18} />
-              <span>{copy.cleanupExecuteDone}</span>
+            <div className={styles.cleanupExecutionSummary} data-outcome={execution.outcome}>
+              {execution.outcome === "succeeded" ? <CheckCircle2 size={18} /> : <TriangleAlert size={18} />}
+              <span>
+                {execution.outcome === "succeeded"
+                  ? copy.cleanupExecuteDone
+                  : `${copy.cleanupFailed}: ${execution.outcome}`}
+              </span>
               <strong>{execution.totals.targetCount}</strong>
             </div>
           ) : null}

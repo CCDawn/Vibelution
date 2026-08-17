@@ -1115,7 +1115,11 @@ def compose_runtime_wire_payload(
                 marker_limit=4,
             )
         payload["messages"] = normalized_messages
-    payload["model"] = adapter.litellm_model_name()
+    payload["model"] = (
+        route.effective_model
+        if str(getattr(route, "adapter_id", "") or "") == "anthropic_messages_native"
+        else adapter.litellm_model_name()
+    )
     payload["timeout"] = _provider_timeout(profile)
     payload["api_key"] = build_input.api_key
     payload["base_url"] = wire_payload.endpoint or route.runtime_endpoint

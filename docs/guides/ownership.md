@@ -11,6 +11,7 @@
 | Surface | 入口 / 落点 | README |
 | --- | --- | --- |
 | App shell | `web/src/app/` | — |
+| 路由索引（非 Chat/Teams） | [`web/src/routes/README.md`](../../web/src/routes/README.md) | — |
 | Chat/Coding | 薄入口 `ChatCodingRoute.tsx` → `chat/ChatCodingRouteWorkbench.tsx`；模块在 `web/src/routes/chat/` | `web/src/routes/chat/README.md` · 按钮 [button-selection.md](button-selection.md) |
 | Agents | `AgentsRoute.tsx` + `AgentWorkspaceLayoutPanel`（`VListDetailPage`） | `data-vui-recipe=agents-management-workbench` |
 | Teams | `web/src/routes/teams/`；`TeamsRoute.tsx`→workbench | `web/src/routes/teams/README.md` |
@@ -66,6 +67,7 @@
 | 组件 | 路径 |
 | --- | --- |
 | Launcher scripts | `scripts/vibelution_launcher.*` |
+| **Launcher 控制面 / 桌面壳** | `desktop/electron/`（目标 writer，[ADR 0009](../adr/0009-launcher-control-plane-lives-in-electron-main.md) · [迁移账本](../../desktop/electron/CONTROL_PLANE_MIGRATION.md)）；当前 HTTP 仍在 `core/launcher/` |
 | Runtime manager | `core/runtime_manager/` |
 | Workbench build | `web/`；open_workbench 含 `tsc -b` |
 

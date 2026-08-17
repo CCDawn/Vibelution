@@ -4,7 +4,14 @@
  * Prefer editing modules under web/src/routes/chat/ over growing this file.
  */
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type Query,
+  type QueryFunctionContext,
+  type QueryKey,
+} from "@tanstack/react-query";
 import {
   Apple,
   ArrowUpRight,
@@ -25,12 +32,12 @@ import {
   useMemo,
   useRef,
   useState,
-  type MouseEvent as ReactMouseEvent,
 } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
-import { listPendingSessionToolApprovals } from "../../api/chat";
-import { fetchJson } from "../../api/client";
+import { listSessionChildSessions, fetchSessionLlmOptions, listPendingSessionToolApprovals } from "../../api/chat";
+import { archiveAgent, updateAgent } from "../../api/agents";
+import { fetchFileContent } from "../../api/files";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
 import type { AgentArchiveResponse } from "../agentWorkspaceCache";
 import { prefetchConversationView } from "../../components/conversation/prefetchConversationView";
@@ -38,7 +45,6 @@ import { queryKeys } from "../../api/queryKeys";
 import {
   AgentInstance,
   ChatRoomDetail,
-  ChatRoomParticipant,
   FileContent,
   MentalStateSnapshot,
   PetActionResponse,
@@ -46,11 +52,9 @@ import {
   SessionGuidanceMode,
   ConversationSummary,
   SessionDetail,
-  AgentToolGovernanceRequest,
   SessionRuntimeNotice,
   SessionToolApprovalRequest,
     SessionLlmOptions,
-    SessionQueryResponse,
     SessionSummary,
   SessionStreamEvent,
   SessionReferenceAttachment,
@@ -60,10 +64,9 @@ import {
 } from "../../api/types";
 import type { ConversationStreamingFramePaintMetrics } from "../../components/conversation/conversationStreamingMetrics";
 import { shouldShowNextStateSignalInConversation } from "../../components/conversation/conversationNextStateSignal";
-import type { TurnAvatarResolution } from "../../components/conversation/conversationTurnAvatar";
-import { isAgentInboxMessage } from "../../components/conversation/conversationMessagePredicates";
 import { VButton, VContextualHint, VInput, VNativeInput, VStateSurface, VTooltip, type VButtonProps } from "../../components/vui";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "../../app/browserTelemetry";
+import { startUserAction } from "../../app/userActionTelemetry";
 import { getPageInstanceId } from "../../app/pageInstance";
 import { usePageVisibility, useStartupWarmup } from "../../app/pollingPolicy";
 import type { TranslationKey } from "../../i18n/dictionary";
@@ -83,18 +86,10 @@ import {
 } from "../chatSessionIndexQuery";
 import { isTempSessionId } from "../sessionOptimisticIds";
 import {
-  shouldShowConversationIndexLoading,
-} from "../chatSessionStartupGate";
-import {
   ACTIVE_INDEX_POLL_MS,
   resolveChatLiveQueryPolicy,
 } from "../chatLiveQueryPolicy";
 import { resolveChatSecondaryPollPolicy } from "../chatSecondaryPollPolicy";
-import {
-  latestUserMessageId as deriveLatestUserMessageId,
-  resolveComposerDraftValue,
-  resolveLatestEditTarget,
-} from "../chatComposerState";
 import {
   resolveChatUserDisplayName,
 } from "../chatCompactPanel";
@@ -113,32 +108,20 @@ import {
 } from "../selfEvolutionHandoff";
 import {
   agentDisplayInfo,
-  participantAgentDisplayInfo,
   sessionAgentDisplayInfo,
 } from "../agentDisplay";
 import { AgentSessionTabStrip, type CliAgentRunTab } from "../AgentSessionTabStrip";
 import {
   AgentConversationDirectory,
-  visibleDirectoryAgents,
 } from "../AgentConversationDirectory";
-import {
-  markSessionActivitySeen,
-  sessionActivityStamp,
-} from "../sessionActivityIndicator";
-import type { AgentContextMenuState } from "../AgentContextMenu";
 import { ConversationIndexTree } from "../ConversationIndexTree";
 import { teamWorkspaceRoute } from "../teams/researchWorkspaceModel";
 import {
-  DEFAULT_COLLAPSED_CONVERSATION_GROUPS,
-  defaultConversationGroupCollapsed,
-  conversationGroupLabel,
   hasInvalidChildSessionLink,
-  isRepresentedInAgentSessionTabs,
-  isVisibleDirectSession,
   rootSessionIdFor,
   sessionToConversationSummary,
   useConversationIndexModel,
-  type ConversationIndexDynamicGroupKey,
+  conversationGroupLabel,
 } from "../conversationIndexModel";
 import {
   activeTurnTerminalRefreshKey,
@@ -153,34 +136,28 @@ import {
 } from "../chatActiveTurnLayer";
 import {
   isChildSession,
-  isAgentRootSession,
 } from "../DirectSessionIndexItem";
 import { agentCenterConfigRoute } from "../agentCenterRoutes";
-import {
-  buildChatMentionTargets,
-  type ChatMentionTarget,
-} from "../chatMentionTokens";
-import {
-  buildConversationComposerBridgeState,
-} from "./ChatConversationComposerBridge";
+import { useChatToolApprovalBridge } from "./useChatToolApprovalBridge";
+import { useChatComposerBridgeState } from "./useChatComposerBridgeState";
+import { useChatGroupRoomViewModel } from "./useChatGroupRoomViewModel";
 import { ChatSessionWorkspacePanel } from "./ChatSessionWorkspacePanel";
 import { ChatConversationIndexRail } from "./ChatConversationIndexRail";
 import {
   chatStreamPerformanceNowMs,
   describeChatRouteError as describeError,
   isBusyPhase,
-  isRunningPhase,
-  isStoppingPhase,
   MAX_LEFT_PANEL_WIDTH,
   MAX_RIGHT_PANEL_WIDTH,
   MIN_LEFT_PANEL_WIDTH,
   MIN_RIGHT_PANEL_WIDTH,
+  formatChatRuntimeMismatchLine,
   runtimeMatchesSelectedChatSession,
-  shouldSuppressComposerErrorForTurnError,
 } from "./chatCodingRouteViewModel";
 import { ChatCenterSessionSurface } from "./ChatCenterSessionSurface";
 import { ChatCenterTabStrip } from "./ChatCenterTabStrip";
 import { ChatConversationIndexPanelContent } from "./ChatConversationIndexPanelContent";
+import { SessionBulkOperationsPanel } from "./SessionBulkOperationsPanel";
 import { ChatSessionWorkbenchShell } from "./ChatSessionWorkbenchShell";
 import { ChatWorkbenchCenterColumn } from "./ChatWorkbenchCenterColumn";
 import { useChatWorkbenchLayout } from "./useChatWorkbenchLayout";
@@ -203,10 +180,12 @@ import {
 import { useSessionDetailStream } from "./useSessionDetailStream";
 import { useGroupRoomStream } from "./useGroupRoomStream";
 import { useChatSessionSelection } from "./useChatSessionSelection";
+import { useChatRouteSelection } from "./useChatRouteSelection";
 import {
-  resolveAuthoritativeArchivedSessionIds,
-  shouldKeepExplicitSessionRouteOnNotFound,
-} from "./chatSessionRouteSync";
+  activeGroupRoomIdFromRouteSelection,
+  activeSessionIdFromRouteSelection,
+} from "./chatSelectionProjection";
+import { resolveAuthoritativeArchivedSessionIds } from "./chatSessionRouteSync";
 import {
   remainingAgentsAfterConfirmedArchive,
   restoreOptimisticallyArchivedAgent,
@@ -217,12 +196,18 @@ import { useChatSelectionPersistence } from "./useChatSelectionPersistence";
 import { useChatWorkspaceLifecycle } from "./useChatWorkspaceLifecycle";
 import { useChatSessionDetailMutations } from "./useChatSessionDetailMutations";
 import { useChatWorkspaceActions } from "./useChatWorkspaceActions";
-import { eventInsideContextMenuSurface } from "./chatContextMenuDismiss";
+import { ChatDangerConfirmDialog } from "./ChatDangerConfirmDialog";
+import { useChatSessionBulkSelection } from "./useChatSessionBulkSelection";
+import { useChatWorkbenchConfirmDialog } from "./useChatWorkbenchConfirmDialog";
+import { useChatVisibleSessionCatalog } from "./useChatVisibleSessionCatalog";
+import { useChatAgentSessionTabs } from "./useChatAgentSessionTabs";
+import { toSessionIndexProgressQuerySlice, useChatSessionIndexRailModel } from "./useChatSessionIndexRailModel";
+import { useChatGroupRoomChromeModel } from "./useChatGroupRoomChromeModel";
+import { useChatAgentDirectoryMaps } from "./useChatAgentDirectoryMaps";
+import { useChatIndexDerivedState } from "./useChatIndexDerivedState";
+import { useDesktopConversationAttention } from "./useDesktopConversationAttention";
 import { ChatCliAgentTerminalStack } from "./ChatCliAgentTerminalStack";
-import {
-  useChatSessionRenameMenu,
-  type SessionContextMenuState,
-} from "./useChatSessionRenameMenu";
+import { useChatSessionRenameMenu } from "./useChatSessionRenameMenu";
 import { useChatAgentDirectoryActions } from "./useChatAgentDirectoryActions";
 import { useChatCliAgentTerminal } from "./useChatCliAgentTerminal";
 import { buildChatCacheDetailViewModel } from "./chatCacheDetailModel";
@@ -230,9 +215,18 @@ import { buildComposerContextRingModel } from "./composerContextModel";
 import { useChatCacheDetailDialog } from "./useChatCacheDetailDialog";
 import { useAgentPermissionPresetMutation } from "./useAgentPermissionPresetMutation";
 import { useChatWorkbenchCatalogQueries } from "./useChatWorkbenchCatalogQueries";
+import {
+  useChatGroupDraftState,
+  useSyncChatGroupManageDrafts,
+} from "./useChatGroupDraftState";
+import { useChatWorkbenchContextMenus } from "./useChatWorkbenchContextMenus";
+import { useChatConversationIndexChrome } from "./useChatConversationIndexChrome";
+import {
+  chatTurnSessionIdsFromRuntime,
+  runtimeHasChatTurnForSession,
+} from "./chatRuntimeWorkRuns";
 import { buildChatTokenStatusViewModel } from "./chatTokenStatusModel";
 import {
-  buildAgentSessionTabs,
   buildChatActiveSkillViewModel,
   buildChatMentalStateViewModel,
   buildChatPetCompanionViewModel,
@@ -245,24 +239,16 @@ import {
   contextCompositionSegmentClass,
   contextCompositionSegmentLabel,
   cacheCompositionSegmentLabel,
-  formatAgentIdentityWithRole,
-  compactAgentRoleLabel,
   agentRoleClass,
   avatarInitials,
   avatarImageUrlFrom,
-  imageInputModelIdForAgent,
-  modelImageInputSupport,
-  conversationMetadataText,
   renderAgentAvatar,
-  isAvailableGroupParticipant,
 } from "./chatRoutePresentation";
 import {
   SESSION_DETAIL_INITIAL_MESSAGE_LIMIT,
   SESSION_DETAIL_HISTORY_PAGE_SIZE,
   fetchSessionDetailWindow,
-  isSessionNotFoundError,
   isSessionDetailHardLoading,
-  latestVisibleTurnErrorMessage,
   prefetchSessionDetailWindow,
   removeDeletedSessionFromConversations,
   mergeSessionDetailIntoConversations,
@@ -272,7 +258,6 @@ import {
   sessionDetailSnapshotKey,
   isStaleLedgerUpdate,
   latestMentalSnapshot,
-  latestChatRoomRound,
 } from "./chatSessionDetailHelpers";
 import {
   forgetSessionDetailPaint,
@@ -291,15 +276,6 @@ import {
   chatFeaturePresetShortLabel,
   type FeaturePresetKey,
 } from "./chatFeaturePresets";
-import {
-  toolApprovalLabels,
-  toolApprovalRiskLabel,
-  toolApprovalScopeLabel,
-} from "./toolApprovalLabels";
-import {
-  toolApprovalActionPreview,
-  toolApprovalDisplayName,
-} from "./toolApprovalPreview";
 import { postSubmitTelemetry } from "./chatSubmitTelemetry";
 import {
   buildSessionReferencePayload,
@@ -371,8 +347,192 @@ type SessionDetailWithActiveSkill = SessionDetail & {
 
 type PetInteractionAction = "feed" | "talk" | "care";
 
-type RightIndexPanel = "conversations" | "members";
+/**
+ * Stable session-detail placeholder for the active-session detail query.
+ *
+ * React Query re-derives `placeholderData` while a detail fetch is pending
+ * (`state.data === undefined`). The previous inline callback rebuilt
+ * `resolveSessionDetailPlaceholder` output on every render, so each no-op
+ * parent rerender handed the query observer a fresh placeholder reference
+ * and session switches spiraled into "Maximum update depth exceeded" inside
+ * React Query's `forceStoreRerender`. Memoizing keeps the placeholder
+ * reference identical while `activeSessionId`, the cached detail, and the
+ * list summary are unchanged, and recomputes only when one of those inputs
+ * actually changes.
+ */
+export function useStableSessionDetailPlaceholder(options: {
+  activeSessionId: string | null | undefined;
+  cachedDetail: SessionDetail | undefined;
+  summary: SessionSummary | null | undefined;
+}): SessionDetail | undefined {
+  const { activeSessionId, cachedDetail, summary } = options;
+  return useMemo(
+    () => resolveSessionDetailPlaceholder({ activeSessionId, cachedDetail, summary }),
+    [activeSessionId, cachedDetail, summary],
+  );
+}
 
+/**
+ * Stable structural-sharing merge for the active session-detail query.
+ *
+ * React Query keeps the `structuralSharing` option reference across renders;
+ * an inline arrow rebuilt on every render handed the observer a fresh callback
+ * each time and drove `forceStoreRerender` into the "Maximum update depth
+ * exceeded" loop. Hoisting the merge to module scope fixes the identity while
+ * preserving the exact `mergeSessionDetailMessageWindow` previous/next merge
+ * semantics.
+ */
+export function sessionDetailStructuralSharing(
+  previous: unknown,
+  next: unknown,
+): SessionDetail {
+  return mergeSessionDetailMessageWindow(previous as SessionDetail | undefined, next as SessionDetail);
+}
+
+/**
+ * Polling inputs that drive the pending tool-approvals observer.
+ *
+ * Shared by `useSessionToolApprovalsRefetchInterval` (which maps them to a
+ * stable resolver reference) and `useSessionToolApprovalsQuery` (which owns the
+ * whole observer). Keeping the inputs as one stable shape means an unrelated
+ * parent rerender with identical inputs recomputes nothing.
+ */
+export type SessionToolApprovalPollingInput = {
+  directSessionPanelActive: boolean;
+  runtimeActive: boolean;
+  detailCurrentPhase: string | undefined;
+  summaryCurrentPhase: string | undefined;
+  summaryStatus: string | undefined;
+};
+
+/**
+ * Stable refetchInterval resolver for the pending tool-approvals poll.
+ *
+ * React Query re-derives the `refetchInterval` option while a poll runs, and
+ * the previous inline closure rebuilt on every render, so each no-op parent
+ * rerender handed the observer a fresh callback and reset the 2s timer in
+ * lockstep — the same "Maximum update depth exceeded" `forceStoreRerender`
+ * churn seen with the placeholder and structural-sharing seams. Hoisting the
+ * resolver into `useCallback` keeps the reference identical while the polling
+ * inputs (panel activity, busy inputs, detail/summary status) are unchanged,
+ * and recomputes only when one of those inputs actually changes.
+ */
+export function useSessionToolApprovalsRefetchInterval(
+  options: SessionToolApprovalPollingInput,
+): (query: Query<SessionToolApprovalRequest[]>) => number | false {
+  const {
+    directSessionPanelActive,
+    runtimeActive,
+    detailCurrentPhase,
+    summaryCurrentPhase,
+    summaryStatus,
+  } = options;
+  return useCallback(
+    (query) => {
+      if (!directSessionPanelActive) {
+        return false;
+      }
+      const hasPending = (query.state.data?.length ?? 0) > 0;
+      // Avoid 250ms thrash while busy (queues behind heavy session-detail under load).
+      // Pending approvals still poll sub-second; busy-without-pending is lighter.
+      const busy = runtimeActive
+        || isBusyPhase(detailCurrentPhase || summaryCurrentPhase || summaryStatus);
+      if (hasPending) {
+        return 750;
+      }
+      if (busy) {
+        return 2_000;
+      }
+      return 4_000;
+    },
+    [
+      directSessionPanelActive,
+      runtimeActive,
+      detailCurrentPhase,
+      summaryCurrentPhase,
+      summaryStatus,
+    ],
+  );
+}
+
+/**
+ * Stable queryFn for the pending tool-approvals observer.
+ *
+ * Module scope: React Query re-derives the `queryFn` option on every parent
+ * render. The previous inline arrow rebuilt each time and handed the observer a
+ * fresh callback reference, so each no-op rerender re-triggered the same
+ * `forceStoreRerender` churn already fixed for the placeholder /
+ * structural-sharing / refetchInterval seams. Reading the sessionId from the
+ * queryKey keeps this a single stable reference while still routing to the
+ * active session; switching sessions re-keys the query so only the new session
+ * is ever fetched.
+ */
+export function sessionToolApprovalsQueryFn(
+  context: QueryFunctionContext<QueryKey>,
+): Promise<SessionToolApprovalRequest[]> {
+  return listPendingSessionToolApprovals(String(context.queryKey[1] ?? ""));
+}
+
+export type SessionToolApprovalsQueryOptions = {
+  sessionId: string | null | undefined;
+  enabled: boolean;
+  polling: SessionToolApprovalPollingInput;
+};
+
+/**
+ * Stable observer seam for the pending tool-approvals poll.
+ *
+ * Owns the queryKey/queryFn/refetchInterval configuration so an unrelated
+ * parent rerender with the same `sessionId` and polling inputs cannot hand the
+ * observer a fresh query identity, queryFn, or refetch callback and restart the
+ * poll timer / trigger extra fetches. The queryKey is memoized per `sessionId`
+ * so the observer's identity reference is stable, the queryFn is a module-scope
+ * function, and the refetch resolver is `useCallback`-stable. `inactive=false`,
+ * `pending=750`, `busy=2000` and `idle=4000` all come from
+ * `useSessionToolApprovalsRefetchInterval`.
+ */
+export function useSessionToolApprovalsQuery(options: SessionToolApprovalsQueryOptions) {
+  const { sessionId, enabled, polling } = options;
+  const refetchInterval = useSessionToolApprovalsRefetchInterval(polling);
+  const queryKey = useMemo(() => queryKeys.sessionToolApprovals(sessionId ?? "none"), [sessionId]);
+  return useQuery<SessionToolApprovalRequest[]>({
+    queryKey,
+    enabled,
+    queryFn: sessionToolApprovalsQueryFn,
+    refetchInterval,
+    refetchIntervalInBackground: false,
+  });
+}
+
+/**
+ * Stable sticky session-detail paint for the active session.
+ *
+ * `resolveStickySessionDetailPaint` rebuilds the merged sticky+live detail
+ * (including a brand-new `messages` array) on every call. Called inline during
+ * render, an unrelated parent rerender with the same `activeSessionId` and the
+ * same `rawSessionDetail` reference handed downstream effects a fresh
+ * detail/messages reference each time; the token-speed effect depended on
+ * `detail.messages` and called `setTokenSpeedTracker`, and a single React Query
+ * observer notification restarted the whole cycle until React bailed out with
+ * "Maximum update depth exceeded" inside `forceStoreRerender`. Memoizing keeps
+ * the detail (and its `messages` array) reference strictly identical while both
+ * inputs are unchanged, and recomputes only when `activeSessionId` or the
+ * resolved raw detail actually changes, preserving the existing sticky
+ * transcript semantics. A query observer can still replay an equivalent raw
+ * detail with a new reference; `updateTokenSpeedTracker` treats an unchanged
+ * token count as a state no-op so that replay cannot feed another render back
+ * into this observer cycle.
+ */
+export function useStableSessionDetailPaint(options: {
+  activeSessionId: string | null | undefined;
+  detail: SessionDetail | undefined;
+}): SessionDetail | undefined {
+  const { activeSessionId, detail: rawSessionDetail } = options;
+  return useMemo(
+    () => resolveStickySessionDetailPaint({ activeSessionId, detail: rawSessionDetail }),
+    [activeSessionId, rawSessionDetail],
+  );
+}
 
 export function ChatCodingRoute() {
   // pet + evolution: companion rail shows mental/pet labels (otherwise raw keys leak).
@@ -381,9 +541,20 @@ export function ChatCodingRoute() {
   const chatWorkspaceCache = useMemo(() => createChatWorkspaceCache(queryClient), [queryClient]);
   const navigate = useNavigate();
   const location = useLocation();
-  const activeSessionId = useChatWorkbenchStore((state) => state.activeSessionId);
+  // Committed React Router URL is the single authority for the current Chat selection.
+  const {
+    selection: chatRouteSelection,
+    openSession,
+    openRoom,
+    openProjectBus,
+    canonicalizeBareRoute,
+    replaceIfStillViewing,
+  } = useChatRouteSelection();
+  const activeSessionId = activeSessionIdFromRouteSelection(chatRouteSelection) || null;
+  const activeGroupRoomId = activeGroupRoomIdFromRouteSelection(chatRouteSelection);
+  const routeSelectionRef = useRef(chatRouteSelection);
+  routeSelectionRef.current = chatRouteSelection;
   const sessionWorkspaces = useChatWorkbenchStore((state) => state.sessionWorkspaces);
-  const setActiveSession = useChatWorkbenchStore((state) => state.setActiveSession);
   const hydrateSession = useChatWorkbenchStore((state) => state.hydrateSession);
   const removeSessionWorkspace = useChatWorkbenchStore((state) => state.removeSession);
   const closePreviewTab = useChatWorkbenchStore((state) => state.closePreviewTab);
@@ -391,12 +562,32 @@ export function ChatCodingRoute() {
   const latestDirectSessionSelectionAtRef = useRef(0);
   const directSessionSelectionGenerationRef = useRef(0);
   const retiredDirectSessionIdsRef = useRef<ReadonlySet<string>>(new Set());
-  const reselectDirectSessionRef = useRef<(sessionId: string) => void>(() => undefined);
   const setActiveTab = useChatWorkbenchStore((state) => state.setActiveTab);
   const [sessionFilter, setSessionFilter] = useState("");
   const imageUploadInFlightRef = useRef<Record<string, boolean>>({});
   const [sessionDrafts, setSessionDrafts] = useState<Record<string, string>>({});
+  const [sessionFollowupQueues, setSessionFollowupQueues] = useState<Record<string, Array<{ id: string; text: string }>>>({});
   const [sessionComposerErrors, setSessionComposerErrors] = useState<Record<string, string>>({});
+  const composerFocusSequenceRef = useRef(0);
+  const [composerFocusRequest, setComposerFocusRequest] = useState({ sessionId: "", signal: "" });
+  const requestSessionComposerFocus = useCallback((sessionId: string) => {
+    const normalizedSessionId = String(sessionId || "").trim();
+    if (!normalizedSessionId) {
+      return;
+    }
+    composerFocusSequenceRef.current += 1;
+    setComposerFocusRequest({
+      sessionId: normalizedSessionId,
+      signal: `delete:${normalizedSessionId}:${composerFocusSequenceRef.current}`,
+    });
+  }, []);
+  const settleSessionComposerFocusRequest = useCallback((focusSignal: string) => {
+    setComposerFocusRequest((current) => (
+      current.signal === focusSignal
+        ? { sessionId: "", signal: "" }
+        : current
+    ));
+  }, []);
   const [sessionImageAttachments, setSessionImageAttachments] = useState<Record<string, ComposerImageAttachment[]>>({});
   const [sessionReferenceAttachments, setSessionReferenceAttachments] = useState<Record<string, SessionReferenceAttachment[]>>({});
   const [sessionImageUploadPending, setSessionImageUploadPending] = useState<Record<string, boolean>>({});
@@ -406,13 +597,21 @@ export function ChatCodingRoute() {
   /** Suppress tab title blur-submit while create remaps temp id → server id. */
   const suppressRenameBlurUntilRef = useRef(0);
   const [editingSessionTitle, setEditingSessionTitle] = useState("");
-  const [sessionContextMenu, setSessionContextMenu] = useState<SessionContextMenuState | null>(null);
-  const [agentContextMenu, setAgentContextMenu] = useState<AgentContextMenuState | null>(null);
+  const editingSessionTitleRef = useRef("");
+  const {
+    sessionContextMenu,
+    setSessionContextMenu,
+    agentContextMenu,
+    setAgentContextMenu,
+  } = useChatWorkbenchContextMenus();
   const [activeTurnLayersBySession, setActiveTurnLayersBySession] = useState<Record<string, ActiveTurnLayerState>>({});
 
   useEffect(() => {
     editingSessionIdRef.current = editingSessionId;
   }, [editingSessionId]);
+  useEffect(() => {
+    editingSessionTitleRef.current = editingSessionTitle;
+  }, [editingSessionTitle]);
 
   const [tokenSpeedTracker, setTokenSpeedTracker] = useState<TokenSpeedTrackerState | null>(null);
   const [petActionFeedback, setPetActionFeedback] = useState("");
@@ -425,28 +624,37 @@ export function ChatCodingRoute() {
   const [featurePresetState, setFeaturePresetState] = useState<Record<FeaturePresetKey, boolean>>(
     DEFAULT_CHAT_FEATURE_PRESETS,
   );
-  const [groupComposerOpen, setGroupComposerOpen] = useState(false);
-  const [groupTitleDraft, setGroupTitleDraft] = useState("");
-  const [groupModeDraft, setGroupModeDraft] = useState("round_robin");
-  const [groupPurposeDraft, setGroupPurposeDraft] = useState("discussion");
-  const [groupSelectedAgentIds, setGroupSelectedAgentIds] = useState<string[]>([]);
-  const [collapsedConversationGroups, setCollapsedConversationGroups] = useState<Record<string, boolean>>(
-    DEFAULT_COLLAPSED_CONVERSATION_GROUPS,
-  );
-  const [rightIndexPanel, setRightIndexPanel] = useState<RightIndexPanel>("conversations");
-  const [agentCreateWizardOpen, setAgentCreateWizardOpen] = useState(false);
-  const agentCreateTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const [activeGroupRoomId, setActiveGroupRoomId] = useState("");
+  const {
+    groupComposerOpen,
+    setGroupComposerOpen,
+    groupTitleDraft,
+    setGroupTitleDraft,
+    groupModeDraft,
+    setGroupModeDraft,
+    groupPurposeDraft,
+    setGroupPurposeDraft,
+    groupSelectedAgentIds,
+    setGroupSelectedAgentIds,
+    groupTopicDraft,
+    setGroupTopicDraft,
+    projectBusDraft,
+    setProjectBusDraft,
+    projectBusInterruptTargets,
+    setProjectBusInterruptTargets,
+    groupRoomActionError,
+    setGroupRoomActionError,
+    groupManageTitleDraft,
+    setGroupManageTitleDraft,
+    groupManageSessionIds,
+    setGroupManageSessionIds,
+    groupManageModeDraft,
+    setGroupManageModeDraft,
+    groupManagePurposeDraft,
+    setGroupManagePurposeDraft,
+    groupManageSessionSet,
+  } = useChatGroupDraftState();
   const [expandedGroupAgentSessionIds, setExpandedGroupAgentSessionIds] = useState<string[]>([]);
   const [expandedGroupMessageIds, setExpandedGroupMessageIds] = useState<string[]>([]);
-  const [groupTopicDraft, setGroupTopicDraft] = useState("");
-  const [projectBusDraft, setProjectBusDraft] = useState("");
-  const [projectBusInterruptTargets, setProjectBusInterruptTargets] = useState(false);
-  const [groupRoomActionError, setGroupRoomActionError] = useState("");
-  const [groupManageTitleDraft, setGroupManageTitleDraft] = useState("");
-  const [groupManageSessionIds, setGroupManageSessionIds] = useState<string[]>([]);
-  const [groupManageModeDraft, setGroupManageModeDraft] = useState("round_robin");
-  const [groupManagePurposeDraft, setGroupManagePurposeDraft] = useState("discussion");
   const lastConversationStreamingFrameTelemetryAtRef = useRef<Record<string, number>>({});
   const lastAssistantDeltaAppliedAtRef = useRef<Record<string, number>>({});
   const activeTurnLayersBySessionRef = useRef<Record<string, ActiveTurnLayerState>>({});
@@ -582,9 +790,15 @@ export function ChatCodingRoute() {
   const [startupDetailSettledSessionId, setStartupDetailSettledSessionId] = useState("");
   const chatStartupWarmupActive = useStartupWarmup(chatStartupDataReady);
   const chatPollingVisible = pageVisible || chatStartupWarmupActive;
-  const projectBusActive = activeGroupRoomId === "__project_agent_bus__";
+  const projectBusActive = chatRouteSelection.kind === "project_bus";
   const groupPanelActive = Boolean(activeGroupRoomId);
   const standardGroupRoomActive = groupPanelActive && !projectBusActive;
+  const {
+    collapsedConversationGroups,
+    rightIndexPanel,
+    setRightIndexPanel,
+    toggleConversationGroup,
+  } = useChatConversationIndexChrome({ standardGroupRoomActive });
   const {
     layoutRef,
     dragState,
@@ -621,33 +835,15 @@ export function ChatCodingRoute() {
     requestedSessionId,
   });
 
+  // Room / project-bus route commits sync panel chrome only (never navigation).
   useEffect(() => {
-    if (!sessionContextMenu && !agentContextMenu) {
-      return;
+    if (chatRouteSelection.kind === "room" || chatRouteSelection.kind === "project_bus") {
+      setRightIndexPanel("members");
+      setRightPaneCollapsed(false);
+      setGroupRoomActionError("");
     }
-    function closeSessionContextMenu(event?: Event) {
-      // Radix portals the menu outside the React tree; a global pointerdown must
-      // not unmount it before item onSelect (rename/create) can run.
-      if (event && eventInsideContextMenuSurface(event.target)) {
-        return;
-      }
-      setSessionContextMenu(null);
-      setAgentContextMenu(null);
-    }
-    function handleKeyDown(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") {
-        closeSessionContextMenu();
-      }
-    }
-    window.addEventListener("pointerdown", closeSessionContextMenu);
-    window.addEventListener("scroll", closeSessionContextMenu, true);
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("pointerdown", closeSessionContextMenu);
-      window.removeEventListener("scroll", closeSessionContextMenu, true);
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [agentContextMenu, sessionContextMenu]);
+  }, [chatRouteSelection.kind, setGroupRoomActionError, setRightIndexPanel, setRightPaneCollapsed]);
+
   const sessionStreamRouteSettling = resolveSessionStreamRouteSettling({
     activeSessionId,
     groupPanelActive,
@@ -742,8 +938,10 @@ export function ChatCodingRoute() {
     [queryClient],
   );
   const sessionStreamAvailable = typeof EventSource !== "undefined";
+  const activeSessionDetail = queryClient.getQueryData<SessionDetail>(queryKeys.session(activeSessionId || "none"));
   const sessionTitleForNotifications = (
-    queryClient.getQueryData<SessionDetail>(queryKeys.session(activeSessionId || "none"))?.title
+    activeSessionDetail?.title
+    || activeSessionDetail?.agentDisplayName
     || activeSessionId
     || ""
   );
@@ -758,6 +956,7 @@ export function ChatCodingRoute() {
     sessionStreamDecisionSnapshotRef,
     desktopConversationNotifierRef,
     sessionTitleForNotifications,
+    viewedSessionId: activeSessionId || "",
   });
   const chatLiveQueryPolicyInput = {
     chatPollingVisible,
@@ -785,11 +984,6 @@ export function ChatCodingRoute() {
     teamsPickerNeeded,
     projectBusActive,
   });
-  useEffect(() => {
-    if (!standardGroupRoomActive && rightIndexPanel === "members") {
-      setRightIndexPanel("conversations");
-    }
-  }, [standardGroupRoomActive, rightIndexPanel]);
 
   const {
     runtimeQuery,
@@ -886,22 +1080,10 @@ export function ChatCodingRoute() {
     describeError,
     syncSessionDetail,
     setSessionComposerErrors,
+    routeSessionId: activeSessionIdFromRouteSelection(chatRouteSelection),
     latestDirectSessionSelectionRef,
     latestDirectSessionSelectionAtRef,
     directSessionSelectionGenerationRef,
-    retiredDirectSessionIdsRef,
-    reselectDirectSessionRef,
-    activeSessionId,
-    setActiveSession,
-    activeGroupRoomId,
-    setActiveGroupRoomId,
-    requestedSessionId,
-    requestedRoomId,
-    bootstrapActiveSessionId: activeSessionBootstrapQuery.data?.activeSessionId,
-    sessions: sessionsQuery.data,
-    setRightIndexPanel,
-    setRightPaneCollapsed,
-    setGroupRoomActionError,
   });
   const directSessionActiveSummary = useMemo(
     () => (activeSessionId ? sessionsQuery.data?.find((session) => session.id === activeSessionId) : undefined),
@@ -914,18 +1096,20 @@ export function ChatCodingRoute() {
     ));
   }, [activeGroupRoomQuery.data?.status, standardGroupRoomActive]);
 
+  // Pending self-evolution handoff payloads only fill a draft for the explicit
+  // route target; they never select matchedSession || active || first.
   useEffect(() => {
     const pendingHandoff = loadPendingSelfEvolutionHandoff();
     if (!pendingHandoff || !sessionsQuery.data || sessionsQuery.data.length === 0) {
       return;
     }
     const matchedSession = sessionsQuery.data.find((item) => item.id === pendingHandoff.sessionId);
-    const targetSessionId = matchedSession?.id || activeSessionId || sessionsQuery.data[0]?.id || "";
+    const targetSessionId = matchedSession?.id || "";
     if (!targetSessionId) {
       return;
     }
     if (activeSessionId !== targetSessionId) {
-      setActiveSession(targetSessionId);
+      return;
     }
     setSessionDrafts((current) => ({
       ...current,
@@ -936,7 +1120,7 @@ export function ChatCodingRoute() {
       [targetSessionId]: "",
     }));
     clearPendingSelfEvolutionHandoff();
-  }, [activeSessionId, sessionsQuery.data, setActiveSession]);
+  }, [activeSessionId, sessionsQuery.data]);
 
   // Do not cancel foreign session detail queries on switch — that aborts in-flight
   // loads for recently visited tabs and forces empty provisional shells on return.
@@ -953,6 +1137,13 @@ export function ChatCodingRoute() {
       return { ...current, [activeId]: "" };
     });
   }, [activeSessionId]);
+  const sessionDetailPlaceholder = useStableSessionDetailPlaceholder({
+    activeSessionId,
+    cachedDetail: queryClient.getQueryData<SessionDetail>(queryKeys.session(activeSessionId ?? "none")),
+    summary: activeSessionId
+      ? sessionsQuery.data?.find((session) => session.id === activeSessionId)
+      : undefined,
+  });
   const sessionDetailQuery = useQuery<SessionDetail>({
     queryKey: queryKeys.session(activeSessionId ?? "none"),
     // Temp create shells are local-only; never GET/stream them until rebased.
@@ -966,16 +1157,8 @@ export function ChatCodingRoute() {
     // Select + GET often race on switch; brief freshness avoids immediate double rebuild
     // when /select already wrote a windowed detail into the same query key.
     staleTime: 1_500,
-    structuralSharing: (previous, next) =>
-      mergeSessionDetailMessageWindow(previous as SessionDetail | undefined, next as SessionDetail),
-    placeholderData: () =>
-      resolveSessionDetailPlaceholder({
-        activeSessionId,
-        cachedDetail: queryClient.getQueryData<SessionDetail>(queryKeys.session(activeSessionId ?? "none")),
-        summary: activeSessionId
-          ? sessionsQuery.data?.find((session) => session.id === activeSessionId)
-          : undefined,
-      }),
+    structuralSharing: sessionDetailStructuralSharing,
+    placeholderData: sessionDetailPlaceholder,
     refetchInterval: startupDetailSettledSessionId === activeSessionId
       ? chatLiveQueryPolicy.sessionDetailRefetchInterval
       : false,
@@ -998,79 +1181,12 @@ export function ChatCodingRoute() {
   const sessionLlmOptionsQuery = useQuery({
     queryKey: queryKeys.sessionLlmOptions(activeSessionId ?? "none"),
     enabled: secondaryChatDataEnabled && Boolean(activeSessionId) && !isTempSessionId(activeSessionId),
-    queryFn: () => fetchJson<SessionLlmOptions>(
-      `/api/sessions/${encodeURIComponent(activeSessionId ?? "")}/llm-options`,
-    ),
+    queryFn: () => fetchSessionLlmOptions(activeSessionId ?? ""),
     staleTime: 30_000,
   });
-  useEffect(() => {
-    if (
-      !activeSessionId
-      || !sessionsQuery.data
-      || !sessionDetailQuery.isError
-      || !isSessionNotFoundError(sessionDetailQuery.error)
-    ) {
-      return;
-    }
-    if (shouldKeepExplicitSessionRouteOnNotFound({
-      requestedSessionId,
-      activeSessionId,
-    })) {
-      // A workflow handoff is an exact audit anchor. Preserve its URL and the
-      // existing blocking error rather than making the user inspect another
-      // session after an authority failure.
-      return;
-    }
-    const nextActiveSessionId = sessionsQuery.data.find((session) => session.id !== activeSessionId)?.id || "";
-    clearSessionTransientUiState(activeSessionId);
-    forgetSessionDetailPaint(activeSessionId);
-    removeSessionWorkspace(activeSessionId, nextActiveSessionId || null);
-    if (nextActiveSessionId) {
-      setActiveSession(nextActiveSessionId);
-    }
-    if (nextActiveSessionId) {
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [nextActiveSessionId]: "",
-      }));
-    }
-    updateSessionSummaryCaches(queryClient, (sessions) =>
-      sessions?.filter((session) => session.id !== activeSessionId),
-    );
-    queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations(), (conversations) =>
-      removeDeletedSessionFromConversations(conversations, activeSessionId),
-    );
-    setGroupManageSessionIds((current) => current.filter((sessionId) => sessionId !== activeSessionId));
-    if (requestedSessionId === activeSessionId) {
-      const nextSearchParams = new URLSearchParams(location.search);
-      if (nextActiveSessionId) {
-        nextSearchParams.set("session", nextActiveSessionId);
-      } else {
-        nextSearchParams.delete("session");
-      }
-      const nextSearch = nextSearchParams.toString();
-      navigate(`${location.pathname}${nextSearch ? `?${nextSearch}` : ""}`, { replace: true });
-    }
-    if (nextActiveSessionId) {
-      void chatWorkspaceCache.refreshSessionRuntime(nextActiveSessionId);
-    } else {
-      void chatWorkspaceCache.refreshConversationIndex();
-    }
-  }, [
-    activeSessionId,
-    chatWorkspaceCache,
-    clearSessionTransientUiState,
-    queryClient,
-    location.pathname,
-    location.search,
-    navigate,
-    removeSessionWorkspace,
-    requestedSessionId,
-    sessionDetailQuery.error,
-    sessionDetailQuery.isError,
-    sessionsQuery.data,
-    setActiveSession,
-  ]);
+  // Explicit missing/archived session keeps its URL and renders the blocking
+  // unavailable surface. Background misses must never fall back to another
+  // session and must never navigate.
   const activeRootSessionId = rootSessionIdFor(sessionDetailQuery.data ?? directSessionActiveSummary);
   const childSessionLiveQueryPolicy = resolveChatLiveQueryPolicy({
     ...chatLiveQueryPolicyInput,
@@ -1078,7 +1194,7 @@ export function ChatCodingRoute() {
   });
   const childSessionsQuery = useQuery({
     queryKey: queryKeys.sessionChildSessions(activeRootSessionId || "none"),
-    queryFn: () => fetchJson<SessionSummary[]>(`/api/sessions/${activeRootSessionId}/child-sessions`),
+    queryFn: () => listSessionChildSessions(activeRootSessionId),
     enabled: secondaryChatDataEnabled && Boolean(activeRootSessionId) && directSessionPanelActive,
     refetchInterval: childSessionLiveQueryPolicy.childSessionsRefetchInterval,
     refetchIntervalInBackground: childSessionLiveQueryPolicy.directRefetchIntervalInBackground,
@@ -1172,6 +1288,7 @@ export function ChatCodingRoute() {
     deleteGroupRoomMutation,
     resetGroupRoomMutation,
     deleteSessionMutation,
+    bulkDeleteSessionsMutation,
     clearSessionHistoryMutation,
     renameSessionMutation,
     addSessionToReviewMutation,
@@ -1185,9 +1302,13 @@ export function ChatCodingRoute() {
     syncChatRoomDetail,
     clearSessionTransientUiState,
     removeSessionWorkspace,
-    setActiveSession,
-    activeGroupRoomId,
-    setActiveGroupRoomId,
+    requestSessionComposerFocus,
+    routeSelectionRef,
+    chatRoute: {
+      openSession,
+      openRoom,
+      replaceIfStillViewing,
+    },
     setRightIndexPanel,
     setSelectedAgentId,
     setSessionFilter,
@@ -1205,6 +1326,7 @@ export function ChatCodingRoute() {
     setGroupManagePurposeDraft,
     setProjectBusDraft,
     editingSessionIdRef,
+    editingSessionTitleRef,
     setEditingSessionId,
     setEditingSessionTitle,
     suppressRenameBlurUntilRef,
@@ -1212,12 +1334,9 @@ export function ChatCodingRoute() {
 
   const renameAgentMutation = useMutation({
     mutationFn: (payload: { agentId: string; displayName: string }) =>
-      fetchJson<AgentInstance>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ displayName: payload.displayName }),
-      }),
+      updateAgent(payload.agentId, { displayName: payload.displayName }) as Promise<AgentInstance>,
     onMutate: async (payload) => {
+      const telemetry = startUserAction("agent_rename", { agentId: payload.agentId });
       await queryClient.cancelQueries({ queryKey: queryKeys.agents() });
       const previousAgents = queryClient.getQueryData<AgentInstance[]>(queryKeys.agents());
       queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (current) =>
@@ -1225,16 +1344,18 @@ export function ChatCodingRoute() {
           ? { ...agent, displayName: payload.displayName }
           : agent),
       );
-      return { previousAgents };
+      return { previousAgents, telemetry };
     },
-    onSuccess: (updatedAgent) => {
+    onSuccess: (updatedAgent, _variables, context) => {
+      context?.telemetry?.succeeded({ agentId: updatedAgent.agentId });
       queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (current) =>
         current?.map((agent) => agent.agentId === updatedAgent.agentId ? updatedAgent : agent),
       );
       setSessionComposerErrors((current) => ({ ...current, __sessions__: "" }));
-      void chatWorkspaceCache.afterAgentWorkspaceChanged();
+      void chatWorkspaceCache.afterAgentRenamed(updatedAgent.agentId);
     },
-    onError: (error, _variables, context) => {
+    onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, { agentId: variables.agentId });
       if (context?.previousAgents) {
         queryClient.setQueryData(queryKeys.agents(), context.previousAgents);
       }
@@ -1246,22 +1367,16 @@ export function ChatCodingRoute() {
   });
 
   const retireArchivedAgentSessions = useChatArchivedAgentRetirement({
-    activeSessionId,
     clearSessionTransientUiState,
     directSessionSelectionGenerationRef,
     forgetSessionDetailPaint,
-    latestDirectSessionSelectionAtRef,
-    latestDirectSessionSelectionRef,
-    pathname: location.pathname,
-    navigate,
     queryClient,
     removeSessionWorkspace,
     requestedSessionId,
     retiredDirectSessionIdsRef,
-    setActiveSession,
     setSelectedAgentId,
     setSessionComposerErrors,
-    search: location.search,
+    chatRoute: { replaceIfStillViewing },
   });
 
   const {
@@ -1269,10 +1384,7 @@ export function ChatCodingRoute() {
     isAgentArchivePending,
     pendingAgentIds: pendingArchiveAgentIds,
   } = useChatAgentArchiveQueue({
-    executeArchive: (agentId: string) =>
-      fetchJson<AgentArchiveResponse>(`/api/agents/${encodeURIComponent(agentId)}`, {
-        method: "DELETE",
-      }),
+    executeArchive: (agentId: string) => archiveAgent(agentId) as Promise<AgentArchiveResponse>,
     onOptimisticArchive: (agentId: string) => {
       void queryClient.cancelQueries({ queryKey: queryKeys.agents() });
       void queryClient.cancelQueries({ queryKey: queryKeys.sessions() });
@@ -1364,34 +1476,69 @@ export function ChatCodingRoute() {
   });
 
   const activeGroupRoom = activeGroupRoomQuery.data;
+  useSyncChatGroupManageDrafts({
+    activeGroupRoom,
+    sessions: sessionsQuery.data,
+    setGroupManageSessionIds,
+    setGroupManageTitleDraft,
+    setGroupManageModeDraft,
+    setGroupManagePurposeDraft,
+  });
+  const {
+    pendingConfirm,
+    pendingConfirmPresentation,
+    openDeleteSessionConfirm,
+    openClearSessionHistoryConfirm,
+    openDeleteGroupConfirm,
+    openResetGroupConfirm,
+    confirmPendingWorkbenchAction,
+    dismissPendingConfirm,
+  } = useChatWorkbenchConfirmDialog({
+    activeGroupRoom,
+    deleteSessionMutation,
+    clearSessionHistoryMutation,
+    deleteGroupRoomMutation,
+    resetGroupRoomMutation,
+    setSessionComposerErrors,
+    lang,
+    t,
+  });
   const teams = teamsQuery.data?.teams ?? [];
-  const linkedTeamRoomIds = useMemo(() => {
-    // Prefer explicit link fields; fall back to nested linkedChatRoom so valid team
-    // rooms never land in 未归属群聊 when the flat id is briefly empty.
-    const ids = new Set<string>();
-    for (const team of teams) {
-      const roomId = String(team.linkedChatRoomId || team.linkedChatRoom?.roomId || "").trim();
-      if (roomId) {
-        ids.add(roomId);
-      }
-    }
-    return ids;
-  }, [teams]);
-  const activeGroupTeam = useMemo(() => {
-    const roomId = String(activeGroupRoom?.roomId || activeGroupRoomId || "").trim();
-    const configTeamId = String((activeGroupRoom?.config ?? {}).teamId ?? "").trim();
-    return teams.find((team) => {
-      const teamId = String(team.teamId ?? "").trim();
-      const linkedRoomId = String(team.linkedChatRoomId ?? team.linkedChatRoom?.roomId ?? "").trim();
-      return (configTeamId && teamId === configTeamId) || (roomId && linkedRoomId === roomId);
-    }) ?? null;
-  }, [activeGroupRoom?.config, activeGroupRoom?.roomId, activeGroupRoomId, teams]);
-  const activeGroupTeamOwned = Boolean(activeGroupTeam);
-  const availableGroupParticipants = useMemo(
-    () => (activeGroupRoom?.participants ?? []).filter(isAvailableGroupParticipant),
-    [activeGroupRoom?.participants],
-  );
-  const availableGroupParticipantCount = availableGroupParticipants.length;
+  const {
+    linkedTeamRoomIds,
+    activeGroupTeam,
+    activeGroupTeamOwned,
+    availableGroupParticipants,
+    availableGroupParticipantCount,
+    activeGroupRound,
+    groupRoundRunning,
+    groupRoundStopping,
+    groupRoundActive,
+    activeGroupParticipantById,
+    expandedGroupAgentDetailsBySessionId,
+    groupManageChanged,
+    groupManageDisabled,
+    groupDeleteDisabled,
+    groupResetDisabled,
+    groupStopDisabled,
+  } = useChatGroupRoomChromeModel({
+    teams,
+    activeGroupRoom,
+    activeGroupRoomId,
+    groupPanelActive,
+    standardGroupRoomActive,
+    expandedGroupAgentSessionIds,
+    setExpandedGroupAgentSessionIds,
+    expandedGroupAgentDetailQueries,
+    groupManageTitleDraft,
+    groupManageModeDraft,
+    groupManagePurposeDraft,
+    groupManageSessionIds,
+    updateGroupRoomPending: updateGroupRoomMutation.isPending,
+    deleteGroupRoomPending: deleteGroupRoomMutation.isPending,
+    resetGroupRoomPending: resetGroupRoomMutation.isPending,
+    stopGroupRoundPending: stopGroupRoundMutation.isPending,
+  });
 
   useEffect(() => {
     if (activeSessionId && sessionDetailQuery.data?.id === activeSessionId) {
@@ -1475,21 +1622,6 @@ export function ChatCodingRoute() {
     };
   }, [activeSessionId, groupPanelActive, pageVisible, queryClient, secondaryChatDataEnabled, sessionsQuery.data]);
 
-  useEffect(() => {
-    if (!activeGroupRoom) {
-      return;
-    }
-    const existingSessionIds = new Set((sessionsQuery.data ?? []).map((session) => session.id));
-    setGroupManageSessionIds(
-      activeGroupRoom.participants
-        .map((participant) => participant.sessionId)
-        .filter((sessionId) => existingSessionIds.has(sessionId)),
-    );
-    setGroupManageTitleDraft(activeGroupRoom.title || "");
-    setGroupManageModeDraft(activeGroupRoom.mode || "round_robin");
-    setGroupManagePurposeDraft(activeGroupRoom.purpose || "discussion");
-  }, [activeGroupRoom, sessionsQuery.data]);
-
 
   const workspace = activeSessionId
     ? sessionWorkspaces[activeSessionId] ?? {
@@ -1503,8 +1635,7 @@ export function ChatCodingRoute() {
   const fileContentQuery = useQuery({
     queryKey: queryKeys.fileContent(activeFilePath ?? ""),
     enabled: Boolean(activeFilePath),
-    queryFn: () =>
-      fetchJson<FileContent>(`/api/files/content?path=${encodeURIComponent(activeFilePath ?? "")}`),
+    queryFn: () => fetchFileContent(activeFilePath ?? ""),
   });
 
   const changedFiles = new Set(sessionDetailQuery.data?.changedFiles ?? []);
@@ -1518,6 +1649,14 @@ export function ChatCodingRoute() {
   } = useChatLocaleFormatters(lang);
 
   const runtime = runtimeQuery.data;
+  const runtimeChatTurnSessionIds = useMemo(
+    () => chatTurnSessionIdsFromRuntime(runtime),
+    [runtime],
+  );
+  const runtimeActiveChatTurnSessionIds = useMemo(
+    () => new Set(runtimeChatTurnSessionIds),
+    [runtimeChatTurnSessionIds],
+  );
   const pet = petQuery.data;
   // Prefer live query data, but always re-read RQ cache for optimistic temp shells
   // (disabled queries often omit data even after setQueryData).
@@ -1530,36 +1669,23 @@ export function ChatCodingRoute() {
       : undefined,
   });
   // Codex/ChatGPT: paint sticky last-good transcript while provisional shell hydrates.
-  const detail = resolveStickySessionDetailPaint({
+  // Memoized seam: identical activeSessionId/rawSessionDetail must yield the same
+  // detail/messages reference across unrelated parent rerenders.
+  const detail = useStableSessionDetailPaint({
     activeSessionId,
     detail: rawSessionDetail,
   });
-  const sessionToolApprovalRuntimeActive = Boolean(
-    activeSessionId
-    && runtime?.workRuns?.active?.chat_turn?.sessionId === activeSessionId,
-  );
-  const sessionToolApprovalsQuery = useQuery<SessionToolApprovalRequest[]>({
-    queryKey: queryKeys.sessionToolApprovals(activeSessionId ?? "none"),
+  const sessionToolApprovalRuntimeActive = runtimeHasChatTurnForSession(runtime, activeSessionId);
+  const sessionToolApprovalsQuery = useSessionToolApprovalsQuery({
+    sessionId: activeSessionId,
     enabled: Boolean(activeSessionId && directSessionPanelActive && !isTempSessionId(activeSessionId)),
-    queryFn: () => listPendingSessionToolApprovals(activeSessionId ?? ""),
-    // Avoid 250ms thrash while busy (queues behind heavy session-detail under load).
-    // Pending approvals still poll sub-second; busy-without-pending is lighter.
-    refetchInterval: (query) => {
-      if (!directSessionPanelActive) {
-        return false;
-      }
-      const hasPending = (query.state.data?.length ?? 0) > 0;
-      const busy = sessionToolApprovalRuntimeActive
-        || isBusyPhase(detail?.currentPhase || directSessionActiveSummary?.currentPhase || directSessionActiveSummary?.status);
-      if (hasPending) {
-        return 750;
-      }
-      if (busy) {
-        return 2_000;
-      }
-      return 4_000;
+    polling: {
+      directSessionPanelActive,
+      runtimeActive: sessionToolApprovalRuntimeActive,
+      detailCurrentPhase: detail?.currentPhase,
+      summaryCurrentPhase: directSessionActiveSummary?.currentPhase,
+      summaryStatus: directSessionActiveSummary?.status,
     },
-    refetchIntervalInBackground: false,
   });
   const handleLoadEarlierSessionMessages = useCallback(() => {
     const beforeMessageIndex = detail?.messageWindow?.nextBeforeMessageIndex ?? 0;
@@ -1758,29 +1884,22 @@ export function ChatCodingRoute() {
     isFetching: sessionDetailQuery.isFetching,
     isTempSession: isTempSessionId(activeSessionId),
   });
-  const runtimeActiveChatTurnSessionIds = new Set(
-    [
-      ...(runtime?.workRuns?.activeItems?.chat_turn ?? []),
-      runtime?.workRuns?.active?.chat_turn,
-    ]
-      .map((run) => String(run?.sessionId ?? "").trim())
-      .filter(Boolean),
-  );
   const runtimeMatchesSelectedSession = runtimeMatchesSelectedChatSession({
     selectedSessionId: activeSessionId,
     activeRuntimeSessionId: activeSessionBootstrapQuery.data?.activeSessionId,
     activeWorkSessionIds: runtimeActiveChatTurnSessionIds,
   });
-  const runtimeActiveChatTurnSessionId = runtimeActiveChatTurnSessionIds.values().next().value ?? "";
-  const runtimeActiveSessionLabel = runtimeActiveChatTurnSessionId
-    ? sessionsQuery.data?.find((session) => session.id === runtimeActiveChatTurnSessionId)?.title
-      || runtime?.sessionTitle
-      || runtimeActiveChatTurnSessionId
-    : "";
+  const runtimeActiveChatTurnSessionId = runtimeChatTurnSessionIds[0] ?? "";
+  const otherRunningSessionIds = runtimeChatTurnSessionIds.filter(
+    (sessionId) => sessionId !== String(activeSessionId || "").trim(),
+  );
   const runtimeMismatchLine = runtimeActiveChatTurnSessionId && !runtimeMatchesSelectedSession
-    ? (lang === "zh"
-      ? `运行器正在处理：${runtimeActiveSessionLabel}`
-      : `Runtime is processing: ${runtimeActiveSessionLabel}`)
+    ? formatChatRuntimeMismatchLine({
+      otherRunningSessionIds,
+      resolveSessionLabel: (sessionId) =>
+        sessionsQuery.data?.find((session) => session.id === sessionId)?.title || sessionId,
+      lang,
+    })
     : "";
   const lastContextComposition = detail?.lastContextComposition ?? null;
   const lastCacheComposition = detail?.lastCacheComposition ?? null;
@@ -1807,81 +1926,6 @@ export function ChatCodingRoute() {
       : styles.activeSkillStatus_active;
   const projectBusTimeline = projectAgentBusQuery.data;
   const projectBusEvents = projectBusTimeline?.events ?? [];
-  const activeGroupRound = latestChatRoomRound(activeGroupRoom);
-  const activeGroupRoomStatus = String(activeGroupRoom?.status ?? "").trim().toLowerCase();
-  const groupRoundRunning = activeGroupRoomStatus === "running";
-  const groupRoundStopping = activeGroupRoomStatus === "stopping";
-  const groupRoundActive = groupRoundRunning || groupRoundStopping;
-  const activeGroupParticipantById = useMemo(() => {
-    const entries = (activeGroupRoom?.participants ?? []).map((participant) => [participant.participantId, participant] as const);
-    return new Map(entries);
-  }, [activeGroupRoom?.participants]);
-  const groupManageSessionSet = useMemo(() => new Set(groupManageSessionIds), [groupManageSessionIds]);
-  const activeGroupParticipantSessionSet = useMemo(
-    () => new Set(availableGroupParticipants.map((participant) => participant.sessionId)),
-    [availableGroupParticipants],
-  );
-  const expandedGroupAgentDetailsBySessionId = useMemo(() => {
-    const entries = expandedGroupAgentSessionIds.map((sessionId, index) => {
-      const query = expandedGroupAgentDetailQueries[index];
-      return [sessionId, query] as const;
-    });
-    return new Map(entries);
-  }, [expandedGroupAgentDetailQueries, expandedGroupAgentSessionIds]);
-  useEffect(() => {
-    if (!groupPanelActive) {
-      if (expandedGroupAgentSessionIds.length) {
-        setExpandedGroupAgentSessionIds([]);
-      }
-      return;
-    }
-    const nextExpanded = expandedGroupAgentSessionIds.filter((sessionId) => activeGroupParticipantSessionSet.has(sessionId));
-    if (nextExpanded.length !== expandedGroupAgentSessionIds.length) {
-      setExpandedGroupAgentSessionIds(nextExpanded);
-    }
-  }, [activeGroupParticipantSessionSet, expandedGroupAgentSessionIds, groupPanelActive]);
-  const groupManageChanged = Boolean(
-    standardGroupRoomActive
-    &&
-    activeGroupRoom
-    && (
-      groupManageTitleDraft.trim() !== (activeGroupRoom.title || "").trim()
-      || groupManageModeDraft !== (activeGroupRoom.mode || "round_robin")
-      || groupManagePurposeDraft !== (activeGroupRoom.purpose || "discussion")
-      || groupManageSessionIds.length !== activeGroupParticipantSessionSet.size
-      || groupManageSessionIds.some((sessionId) => !activeGroupParticipantSessionSet.has(sessionId))
-    ),
-  );
-  const groupManageDisabled =
-    !standardGroupRoomActive
-    ||
-    !activeGroupRoom
-    || activeGroupTeamOwned
-    || groupRoundActive
-    || updateGroupRoomMutation.isPending
-    || !groupManageTitleDraft.trim()
-    || groupManageSessionIds.length < 2
-    || !groupManageModeDraft
-    || !groupManagePurposeDraft;
-  const groupDeleteDisabled =
-    !standardGroupRoomActive
-    ||
-    !activeGroupRoom
-    || activeGroupTeamOwned
-    || groupRoundActive
-    || deleteGroupRoomMutation.isPending;
-  const groupResetDisabled =
-    !standardGroupRoomActive
-    ||
-    !activeGroupRoom
-    || groupRoundActive
-    || resetGroupRoomMutation.isPending
-    || (activeGroupRoom?.rounds ?? []).length < 1;
-  const groupStopDisabled =
-    !standardGroupRoomActive
-    || !activeGroupRoom
-    || !groupRoundRunning
-    || stopGroupRoundMutation.isPending;
   const sessionDetailErrorState = deriveSessionDetailQueryErrorState(detail, sessionDetailQuery.isError, {
     dataUpdatedAt: sessionDetailQuery.dataUpdatedAt,
     errorUpdatedAt: sessionDetailQuery.errorUpdatedAt,
@@ -1969,105 +2013,70 @@ export function ChatCodingRoute() {
     lastContextComposition?.limitTokens,
     lastContextComposition?.totalTokens,
   ]);
-  const pendingToolGovernanceApproval = useMemo(
-    () => (detail?.pendingToolGovernanceRequests ?? []).find((request) => request.status === "pending_review") ?? null,
-    [detail?.pendingToolGovernanceRequests],
-  );
-  const pendingSessionToolApproval = useMemo(
-    () => (sessionToolApprovalsQuery.data ?? []).find((request) => request.status === "pending") ?? null,
-    [sessionToolApprovalsQuery.data],
-  );
-  const sessionIdsNeedingApproval = useMemo(
-    () => (
-      activeSessionId
-      && (pendingSessionToolApproval || pendingToolGovernanceApproval)
-        ? [activeSessionId]
-        : []
-    ),
-    [activeSessionId, pendingSessionToolApproval, pendingToolGovernanceApproval],
-  );
+  const {
+    sessionIdsNeedingApproval,
+    toolApproval,
+    handleApproveToolApproval,
+    handleApproveToolForSession,
+    handleRejectToolApproval,
+  } = useChatToolApprovalBridge({
+    detail,
+    sessionToolApprovals: sessionToolApprovalsQuery.data,
+    activeSessionId,
+    lang,
+    resolveSessionToolApprovalMutation,
+    resolveToolApprovalMutation,
+  });
   const runtimeRunningSessionIds = useMemo(() => {
-    const runningSessionIds = new Set([
-      ...(runtime?.workRuns?.activeItems?.chat_turn ?? []),
-      runtime?.workRuns?.active?.chat_turn,
-    ]
-      .map((run) => String(run?.sessionId ?? "").trim())
-      .filter(Boolean));
+    const runningSessionIds = new Set(runtimeChatTurnSessionIds);
     Object.entries(activeTurnLayersBySession).forEach(([sessionId, layer]) => {
       if (layer.status === "pending" || layer.status === "running") {
         runningSessionIds.add(sessionId);
       }
     });
     return [...runningSessionIds];
-  }, [activeTurnLayersBySession, runtime?.workRuns?.active?.chat_turn, runtime?.workRuns?.activeItems?.chat_turn]);
-  const pendingToolApprovalLabels = useMemo(
-    () => pendingSessionToolApproval
-      ? [{
-        id: pendingSessionToolApproval.toolName,
-        label: toolApprovalDisplayName(pendingSessionToolApproval.toolName, lang),
-      }]
-      : toolApprovalLabels(pendingToolGovernanceApproval),
-    [lang, pendingSessionToolApproval, pendingToolGovernanceApproval],
-  );
-  const pendingToolApprovalRawTitle = pendingToolApprovalLabels.map((item) => item.id).join("、");
-  const pendingToolApprovalActionPreview = pendingSessionToolApproval
-    ? toolApprovalActionPreview(pendingSessionToolApproval.argumentSummary, pendingSessionToolApproval.toolName)
-    : pendingToolApprovalLabels.map((item) => item.label).join(" · ");
-  const pendingToolApprovalScope = pendingSessionToolApproval
-    ? (lang === "zh" ? "本次调用" : "this call")
-    : toolApprovalScopeLabel(pendingToolGovernanceApproval?.grantScope, lang);
-  const pendingToolApprovalRisk = toolApprovalRiskLabel(
-    pendingSessionToolApproval?.risk ?? pendingToolGovernanceApproval?.riskLevel,
+  }, [activeTurnLayersBySession, runtimeChatTurnSessionIds]);
+  const {
+    activeDraft,
+    activeFollowupQueue,
+    activeComposerError,
+    activeEditTarget,
+    resolvedEditTarget,
+    activeDraftEffective,
+    activeImageAttachments,
+    activeReferenceAttachments,
+    activeImageUploadPending,
+    activeSessionAgent,
+    activeImageInputModelId,
+    latestUserMessageId,
+    activeAgentImageInputSupported,
+    activeAgentImageInputUnsupported,
+    activeImageInputGuidance,
+    submitPending,
+    sessionStopping,
+    sessionBusy,
+    composerDisabled,
+    conversationComposer,
+  } = useChatComposerBridgeState({
+    activeSessionId,
+    sessionDrafts,
+    sessionFollowupQueues,
+    sessionComposerErrors,
+    sessionEditTargets,
+    sessionImageAttachments,
+    sessionReferenceAttachments,
+    sessionImageUploadPending,
+    detail,
+    agents: agentsQuery.data,
+    modelImageInputSupportById,
     lang,
-  );
-  const pendingToolApprovalPending = Boolean(
-    pendingSessionToolApproval
-      ? (
-        resolveSessionToolApprovalMutation.isPending
-        && resolveSessionToolApprovalMutation.variables?.request.requestId === pendingSessionToolApproval.requestId
-      )
-      : (
-        pendingToolGovernanceApproval
-        && resolveToolApprovalMutation.isPending
-        && resolveToolApprovalMutation.variables?.request.requestId === pendingToolGovernanceApproval.requestId
-      ),
-  );
-  const activeDraft = activeSessionId ? sessionDrafts[activeSessionId] ?? "" : "";
-  const activeComposerRawError = activeSessionId ? sessionComposerErrors[activeSessionId] ?? "" : "";
-  const activeLatestTurnErrorMessage = useMemo(
-    () => latestVisibleTurnErrorMessage(detail?.messages),
-    [detail?.messages],
-  );
-  const activeComposerError = shouldSuppressComposerErrorForTurnError(
-    activeComposerRawError,
-    activeLatestTurnErrorMessage,
-    detail?.lastTurnError,
-  )
-    ? ""
-    : activeComposerRawError;
-  const activeEditTarget = activeSessionId ? sessionEditTargets[activeSessionId] ?? null : null;
-  const activeImageAttachments = activeSessionId ? sessionImageAttachments[activeSessionId] ?? [] : [];
-  const activeReferenceAttachments = activeSessionId ? sessionReferenceAttachments[activeSessionId] ?? [] : [];
-  const activeImageUploadPending = activeSessionId ? Boolean(sessionImageUploadPending[activeSessionId]) : false;
-  const activeAgentId = detail?.agentId || "";
-  const activeSessionAgent = activeAgentId ? (agentsQuery.data ?? []).find((agent) => agent.agentId === activeAgentId) : undefined;
-  const activeImageInputModelId = imageInputModelIdForAgent(activeSessionAgent, detail?.dialogueModelId);
-  const activeAgentImageInputSupported = modelImageInputSupport(modelImageInputSupportById, activeImageInputModelId);
-  const activeAgentImageInputUnsupported = activeAgentImageInputSupported === false;
-  const activeImageInputModelLabel = activeImageInputModelId || (lang === "zh" ? "当前模型" : "the current model");
-  const activeImageInputGuidance = !activeImageAttachments.length
-    ? ""
-    : activeAgentImageInputSupported === true
-      ? (lang === "zh"
-        ? `图片将发送给已验证支持图像输入的 ${activeImageInputModelLabel}。`
-        : `The image will be sent to ${activeImageInputModelLabel}, which has verified image-input support.`)
-      : activeAgentImageInputSupported === false
-        ? (lang === "zh"
-          ? `${activeImageInputModelLabel} 明确不支持图像输入，无法发送图片。`
-          : `${activeImageInputModelLabel} explicitly does not support image input, so the image cannot be sent.`)
-        : (lang === "zh"
-          ? `${activeImageInputModelLabel} 的图像输入能力尚未验证；将尝试发送，失败时会保留诊断。`
-          : `${activeImageInputModelLabel}'s image-input capability is not verified yet. Vibelution will try the request and retain diagnostics if it fails.`);
+    t,
+    submitTurnMutation,
+    editResubmitMutation,
+    stopTurnMutation,
+    sessionGuidanceMutation,
+    activeTurnSettledByDetail,
+  });
   const activeAgentDisplay = detail
     ? sessionAgentDisplayInfo(detail, activeSessionAgent, lang, resolveModelLabel)
     : { name: pet?.name || "Agent", functionLabel: "", tone: "chat" as const, meta: "" };
@@ -2130,115 +2139,14 @@ export function ChatCodingRoute() {
       latestControlSignal.summary,
     ].filter(Boolean).join(" · ")
     : "";
-  const latestUserMessageId = useMemo(() => deriveLatestUserMessageId(detail?.messages), [detail?.messages]);
-  const resolvedEditTarget = resolveLatestEditTarget(activeEditTarget, latestUserMessageId);
-  const activeDraftEffective = resolveComposerDraftValue(activeDraft, activeEditTarget, resolvedEditTarget);
-  const submitMutationMatchesActiveSession =
-    submitTurnMutation.variables?.sessionId === activeSessionId;
-  const editResubmitMutationMatchesActiveSession =
-    editResubmitMutation.variables?.sessionId === activeSessionId;
-  const stopMutationMatchesActiveSession =
-    stopTurnMutation.variables?.sessionId === activeSessionId;
-  const guidanceMutationMatchesActiveSession =
-    sessionGuidanceMutation.variables?.sessionId === activeSessionId;
-  const submitPending =
-    (submitTurnMutation.isPending && submitMutationMatchesActiveSession)
-    || (editResubmitMutation.isPending && editResubmitMutationMatchesActiveSession)
-    || activeImageUploadPending;
-  const sessionRunning = isRunningPhase(detail?.currentPhase);
-  const sessionStopping = isStoppingPhase(detail?.currentPhase) || Boolean(detail?.stopRequested);
-  const lastTurnStatusNormalized = String(detail?.lastTurnStatus || "").trim().toLowerCase();
-  const terminalReasonNormalized = String(detail?.terminalReason || "").trim().toLowerCase();
-  const lastTurnTerminal = [
-    "ready",
-    "completed",
-    "failed",
-    "failed_runtime",
-    "failed_provider",
-    "needs_continue",
-    "paused_limit",
-    "stopped_by_user",
-    "superseded",
-    "cancelled",
-    // Canonical terminalReason values (mature-agent style explicit stop).
-    "success",
-    "aborted",
-  ].includes(lastTurnStatusNormalized)
-    || [
-      "success",
-      "failed_runtime",
-      "failed_provider",
-      "needs_continue",
-      "paused_limit",
-      "stopped_by_user",
-      "aborted",
-      "superseded",
-      "ready",
-    ].includes(terminalReasonNormalized);
-  const liveActiveTurnOpen = Boolean(detail?.activeTurnId)
-    && !activeTurnSettledByDetail;
-  // When the turn is already terminal and no live activeTurn remains, do not
-  // keep the stop button solely because phase/work-run lag behind.
-  const sessionBusy = isBusyPhase(detail?.currentPhase)
-    && !(lastTurnTerminal && !liveActiveTurnOpen && !sessionStopping);
-  const composerStopPending = (stopTurnMutation.isPending && stopMutationMatchesActiveSession) || sessionStopping;
-  const composerSafeGuidancePending =
-    sessionGuidanceMutation.isPending
-    && guidanceMutationMatchesActiveSession
-    && sessionGuidanceMutation.variables?.mode === "safe";
-  const composerInterruptGuidancePending =
-    sessionGuidanceMutation.isPending
-    && guidanceMutationMatchesActiveSession
-    && sessionGuidanceMutation.variables?.mode === "interrupt";
-  const conversationComposer = useMemo(
-    () => buildConversationComposerBridgeState({
-      editTargetMessageId: resolvedEditTarget?.messageId,
-      editTargetPreview: resolvedEditTarget?.original,
-      error: activeComposerError,
-      guidance: activeImageInputGuidance,
-      imageAttachments: activeImageAttachments,
-      imageInputUnsupported: activeAgentImageInputUnsupported,
-      interruptGuidancePending: composerInterruptGuidancePending,
-      labels: {
-        editMessageModeNotice: t("editMessageModeNotice"),
-        editMessagePlaceholder: t("editMessagePlaceholder"),
-        loadingSession: t("loadingSession"),
-        messageInputPlaceholder: t("messageInputPlaceholder"),
-        saveAndRerunMessage: t("saveAndRerunMessage"),
-      },
-      references: activeReferenceAttachments,
-      safeGuidancePending: composerSafeGuidancePending,
-      sessionBusy,
-      sessionId: activeSessionId,
-      sessionStopping,
-      stopPending: composerStopPending,
-      submitPending,
-      value: activeDraftEffective,
-    }),
-    [
-      activeAgentImageInputUnsupported,
-      activeComposerError,
-      activeDraftEffective,
-      activeImageAttachments,
-      activeReferenceAttachments,
-      activeSessionId,
-      resolvedEditTarget?.original,
-      resolvedEditTarget?.messageId,
-      composerInterruptGuidancePending,
-      composerSafeGuidancePending,
-      composerStopPending,
-      sessionBusy,
-      sessionStopping,
-      submitPending,
-      t,
-    ],
-  );
-  const composerDisabled = conversationComposer.disabled;
 
   const {
     handleSubmitTurn,
     handleStopTurn,
     handleSubmitGuidance,
+    handleFollowupQueueUpdate,
+    handleFollowupQueueRemove,
+    handleFollowupQueueMove,
     handleEditUserMessage,
     handleCancelEditMessage,
     handleComposerChange,
@@ -2257,6 +2165,8 @@ export function ChatCodingRoute() {
     stopTurnMutation,
     sessionGuidanceMutation,
     setSessionDrafts,
+    sessionFollowupQueues,
+    setSessionFollowupQueues,
     setSessionComposerErrors,
     setSessionImageAttachments,
     setSessionReferenceAttachments,
@@ -2459,227 +2369,86 @@ export function ChatCodingRoute() {
     locale,
   });
 
-  const agentsById = useMemo(() => {
-    return new Map((agentsQuery.data ?? []).map((agent) => [agent.agentId, agent]));
-  }, [agentsQuery.data]);
+  const {
+    agentsById,
+    archiveVisibleAgents,
+    chatMentionTargets,
+    resolveConversationTurnAvatar,
+  } = useChatAgentDirectoryMaps({
+    agents: agentsQuery.data,
+    pendingArchiveAgentIds,
+  });
 
-  const agentsByCode = useMemo(() => {
-    const map = new Map<string, AgentInstance>();
-    for (const agent of agentsQuery.data ?? []) {
-      const code = String(agent.agentCode ?? "").trim();
-      if (code) {
-        map.set(code, agent);
-      }
-    }
-    return map;
-  }, [agentsQuery.data]);
-
-  const archiveVisibleAgents = useMemo(() => {
-    return (agentsQuery.data ?? []).filter((agent) => !pendingArchiveAgentIds.has(agent.agentId));
-  }, [agentsQuery.data, pendingArchiveAgentIds]);
-
-  const resolveConversationTurnAvatar = useCallback((message: ConversationMessage): TurnAvatarResolution | undefined => {
-    if (!isAgentInboxMessage(message)) {
-      return undefined;
-    }
-    const metadata = message.metadata;
-    const sourceAgentId = conversationMetadataText(metadata, "sourceAgentId");
-    const sourceAgentCode = conversationMetadataText(metadata, "sourceAgentCode");
-    const sourceAgentName = conversationMetadataText(metadata, "sourceAgentName");
-    const agent =
-      (sourceAgentId ? agentsById.get(sourceAgentId) : undefined)
-      ?? (sourceAgentCode ? agentsByCode.get(sourceAgentCode) : undefined);
-    return {
-      imageUrl: avatarImageUrlFrom(agent),
-      fallback: avatarInitials(sourceAgentCode, sourceAgentName),
-    };
-  }, [agentsByCode, agentsById]);
-
-  const chatMentionTargets = useMemo(() => {
-    return buildChatMentionTargets(archiveVisibleAgents);
-  }, [archiveVisibleAgents]);
-
-  const allVisibleSessions = useMemo(() => {
-    const merged = [...(sessionsQuery.data ?? []), ...(childSessionsQuery.data ?? [])];
-    return merged
-      .filter(isVisibleDirectSession)
-      .filter((session) => !pendingArchiveAgentIds.has(String(session.agentId || "").trim()))
-      .filter((session, index, sessions) => sessions.findIndex((item) => item.id === session.id) === index);
-  }, [childSessionsQuery.data, pendingArchiveAgentIds, sessionsQuery.data]);
-
-  const sessionsById = useMemo(() => {
-    return new Map(allVisibleSessions.map((session) => [session.id, session]));
-  }, [allVisibleSessions]);
-
-  // Mark completed/unread activity as seen when the operator opens the session.
-  // Blue dots clear after read; a later stamp (new turn) can show them again.
-  useEffect(() => {
-    if (!activeSessionId) {
-      return;
-    }
-    const session =
-      sessionsById.get(activeSessionId)
-      || directSessionActiveSummary
-      || (detail?.id === activeSessionId ? detail : undefined);
-    if (!session) {
-      return;
-    }
-    const stamp = sessionActivityStamp({
-      id: activeSessionId,
-      updatedAt: session.updatedAt,
-      lastActive: session.lastActive,
-      lastTurnStatus: session.lastTurnStatus,
-    });
-    if (!stamp) {
-      return;
-    }
-    markSessionActivitySeen(activeSessionId, stamp);
-  }, [
+  const {
+    allVisibleSessions,
+    sessionsById,
+    visibleChatAgents,
+    activeSessionAgentId,
+  } = useChatVisibleSessionCatalog({
+    sessions: sessionsQuery.data,
+    childSessions: childSessionsQuery.data,
+    pendingArchiveAgentIds,
+    archiveVisibleAgents,
     activeSessionId,
     detail,
     directSessionActiveSummary,
-    sessionsById,
-  ]);
+    sessionDetailAgentId: sessionDetailQuery.data?.agentId,
+  });
 
-  const visibleChatAgents = useMemo(() => {
-    return visibleDirectoryAgents(archiveVisibleAgents, allVisibleSessions);
-  }, [allVisibleSessions, archiveVisibleAgents]);
-  const activeSessionAgentId = useMemo(() => {
-    return String(
-      sessionDetailQuery.data?.agentId
-      || directSessionActiveSummary?.agentId
-      || sessionsById.get(activeSessionId || "")?.agentId
-      || "",
-    ).trim();
-  }, [activeSessionId, directSessionActiveSummary?.agentId, sessionDetailQuery.data?.agentId, sessionsById]);
-  useEffect(() => {
-    if (!activeSessionAgentId) {
-      return;
-    }
-    setSelectedAgentId((current) => (
-      current === activeSessionAgentId ? current : activeSessionAgentId
-    ));
-  }, [activeSessionAgentId]);
-  useChatSelectionPersistence({
-    requestedSessionId,
-    requestedRoomId,
-    activeSessionId,
+  const { bareRouteBootstrapTarget } = useChatSelectionPersistence({
+    selection: chatRouteSelection,
+    serverSessionId: activeSessionBootstrapQuery.data?.activeSessionId,
     activeSessionAgentId,
     selectedAgentId,
     sessions: sessionsQuery.data,
-    setActiveSession,
-    setSelectedAgentId,
-    reselectDirectSession: (sessionId) => reselectDirectSessionRef.current(sessionId),
-  });
-  const selectedChatAgentId = selectedAgentId || activeSessionAgentId || visibleChatAgents[0]?.agentId || "";
-  const selectedAgentSessionsQuery = useQuery({
-    queryKey: ["sessions", "agent", selectedChatAgentId],
-    queryFn: () => fetchJson<SessionQueryResponse>(
-      `/api/sessions/query?agentId=${encodeURIComponent(selectedChatAgentId)}&limit=100`,
-    ),
-    enabled: secondaryChatDataEnabled && Boolean(selectedChatAgentId),
-    refetchInterval: chatLiveQueryPolicy.sessionsRefetchInterval,
-    refetchIntervalInBackground: chatLiveQueryPolicy.directRefetchIntervalInBackground,
   });
 
-  const contextMenuSession = useMemo(() => {
-    if (!sessionContextMenu) {
-      return undefined;
+  // Bare `/chat` canonicalizes once per location key, only after the session
+  // directory is authoritative. Explicit routes always skip bootstrap.
+  useEffect(() => {
+    if (!sessionsQuery.data) {
+      return;
     }
-    return sessionsById.get(sessionContextMenu.sessionId) ?? sessionContextMenu.session;
-  }, [sessionContextMenu, sessionsById]);
-  const contextMenuSessionId = sessionContextMenu?.sessionId ?? "";
+    if (chatRouteSelection.kind !== "bare") {
+      return;
+    }
+    if (!bareRouteBootstrapTarget) {
+      return;
+    }
+    canonicalizeBareRoute(bareRouteBootstrapTarget);
+  }, [bareRouteBootstrapTarget, canonicalizeBareRoute, chatRouteSelection.kind, sessionsQuery.data]);
+  const selectedChatAgentId = selectedAgentId || activeSessionAgentId || visibleChatAgents[0]?.agentId || "";
 
-  const rightIndexSessions = useMemo(() => {
-    return allVisibleSessions.filter((session) => !isRepresentedInAgentSessionTabs(session));
-  }, [allVisibleSessions]);
+  const {
+    rightIndexSessions,
+    agentSessionTabs,
+  } = useChatAgentSessionTabs({
+    queryClient,
+    selectedChatAgentId,
+    agentsById,
+    allVisibleSessions,
+    activeSessionId,
+    secondaryChatDataEnabled,
+    sessionsRefetchInterval: chatLiveQueryPolicy.sessionsRefetchInterval,
+    directRefetchIntervalInBackground: chatLiveQueryPolicy.directRefetchIntervalInBackground,
+  });
 
-  const selectedAgentVisibleSessions = useMemo(() => {
-    return allVisibleSessions.filter(
-      (session) => String(session.agentId || "").trim() === selectedChatAgentId,
-    );
-  }, [allVisibleSessions, selectedChatAgentId]);
-
-  const agentSessionTabs = useMemo(
-    () => buildAgentSessionTabs({
-      sessions: [...(selectedAgentSessionsQuery.data?.items ?? []), ...selectedAgentVisibleSessions],
-      selectedChatAgentDirectSessionId: agentsById.get(selectedChatAgentId)?.directSessionId,
-    }),
-    [agentsById, selectedAgentSessionsQuery.data?.items, selectedAgentVisibleSessions, selectedChatAgentId],
-  );
-
-  const groupCandidateAgents = useMemo(() => {
-    return archiveVisibleAgents.filter((agent) => {
-      return (
-        String(agent.kind ?? "").trim() === "persistent"
-        && String(agent.status ?? "").trim() !== "archived"
-        && String(agent.directSessionId ?? "").trim()
-      );
-    });
-  }, [archiveVisibleAgents]);
-
-  const readyChatRoomModes = useMemo(() => {
-    const modes = (chatRoomModesQuery.data ?? []).filter((mode) => String(mode.status ?? "").trim() === "ready");
-    return modes.length ? modes : [{ id: "round_robin", label: "Round robin", status: "ready" }];
-  }, [chatRoomModesQuery.data]);
-  const availableChatRoomPurposes = useMemo(() => {
-    const purposes = chatRoomPurposesQuery.data ?? [];
-    return purposes.length
-      ? purposes
-      : [
-          { id: "chat", label: "Chat", description: "" },
-          { id: "discussion", label: "Discussion", description: "" },
-          { id: "meeting", label: "Meeting", description: "" },
-          { id: "medical_triage", label: "Medical triage", description: "" },
-        ];
-  }, [chatRoomPurposesQuery.data]);
-
-  const activeGroupTeamMemberByAgentId = useMemo(() => {
-    return new Map(
-      (activeGroupTeam?.members ?? [])
-        .map((member) => [String(member.agentId ?? "").trim(), member] as const)
-        .filter(([agentId]) => Boolean(agentId)),
-    );
-  }, [activeGroupTeam?.members]);
-  const groupParticipantIdentity = useCallback(
-    (
-      participant: ChatRoomParticipant | undefined,
-      fallback: { agentId?: string; agentCode?: string; title?: string; participantId?: string; agentAvatarImageUrl?: string } = {},
-    ) => {
-      const agentId = String(participant?.agentId || fallback.agentId || "").trim();
-      const participantLike = participant ?? {
-        participantId: String(fallback.participantId || agentId || "agent").trim(),
-        kind: "session_agent",
-        agentId,
-        agentCode: String(fallback.agentCode || "").trim(),
-        agentAvatarImageUrl: String(fallback.agentAvatarImageUrl || "").trim(),
-        sessionId: "",
-        title: String(fallback.title || fallback.participantId || agentId || "Agent").trim(),
-        enabled: true,
-        status: "",
-      };
-      const participantAgent = agentId ? agentsById.get(agentId) : undefined;
-      const display = participantAgentDisplayInfo(participantLike, participantAgent, lang, resolveModelLabel);
-      const member = agentId ? activeGroupTeamMemberByAgentId.get(agentId) : undefined;
-      const participantTeamRole = String(participant?.teamMemberPurpose || participant?.teamRole || "").trim();
-      const role = String(participantTeamRole || member?.purpose || member?.role || display.functionLabel || "").trim();
-      const name = String(display.name || fallback.title || fallback.participantId || "Agent").trim();
-      const compactRole = compactAgentRoleLabel(role || display.functionLabel);
-      return {
-        ...display,
-        name,
-        functionLabel: role || display.functionLabel,
-        compactRole,
-        avatarImageUrl: avatarImageUrlFrom(participantAgent, participantLike, fallback),
-        identityLabel: formatAgentIdentityWithRole(name, compactRole, fallback.participantId || "Agent"),
-        fullIdentityLabel: [
-          formatAgentIdentityWithRole(name, role || display.functionLabel, fallback.participantId || "Agent"),
-          display.modelLabel,
-        ].filter(Boolean).join(" · "),
-      };
-    },
-    [activeGroupTeamMemberByAgentId, agentsById, lang, resolveModelLabel],
-  );
+  const {
+    groupCandidateAgents,
+    readyChatRoomModes,
+    availableChatRoomPurposes,
+    activeGroupTeamMemberByAgentId,
+    groupParticipantIdentity,
+  } = useChatGroupRoomViewModel({
+    archiveVisibleAgents,
+    chatRoomModes: chatRoomModesQuery.data,
+    chatRoomPurposes: chatRoomPurposesQuery.data,
+    activeGroupTeam,
+    agentsById,
+    lang,
+    resolveModelLabel,
+    avatarImageUrlFrom,
+  });
   const {
     filteredConversations,
     filteredStandaloneGroupConversations,
@@ -2697,44 +2466,46 @@ export function ChatCodingRoute() {
     sessionsById,
     teams,
   });
-  const groupedGroupConversations = useMemo(() => {
-    return groupedConversations
-      .map((group) => ({ ...group, items: group.items.filter((conversation) => conversation.type === "group_room") }))
-      .filter((group) => group.items.length > 0);
-  }, [groupedConversations]);
-  const groupedGroupConversationCount = useMemo(
-    () => groupedGroupConversations.reduce((count, group) => count + group.items.length, 0),
-    [groupedGroupConversations],
-  );
-  const sessionIndexLoadedCount = rawSessionsQuery.loadedCount;
-  const sessionIndexTotalEstimate = rawSessionsQuery.totalEstimate;
-  const sessionIndexHasMore = rawSessionsQuery.hasMore;
-  const sessionIndexLoadMoreLabel = rawSessionsQuery.isLoadingMore
-    ? (lang === "zh" ? "加载中" : "Loading")
-    : (lang === "zh" ? "加载更多会话" : "Load more chats");
-  const sessionIndexFullyLoadedLabel = lang === "zh" ? "已加载全部会话" : "All chats loaded";
-  const sessionIndexProgressLabel =
-    sessionIndexTotalEstimate > sessionIndexLoadedCount
-      ? `${numberFormatter.format(sessionIndexLoadedCount)} / ${numberFormatter.format(sessionIndexTotalEstimate)}`
-      : numberFormatter.format(sessionIndexLoadedCount);
-  const sessionIndexProgressVisible = sessionIndexHasMore || sessionIndexTotalEstimate > SESSION_INDEX_PAGE_SIZE;
-
-  function toggleConversationGroup(groupKey: ConversationIndexDynamicGroupKey) {
-    setCollapsedConversationGroups((current) => ({
-      ...current,
-      [groupKey]: !(current[groupKey] ?? defaultConversationGroupCollapsed(groupKey)),
-    }));
-  }
-
-  const handlePrefetchDirectSession = useCallback((sessionId: string) => {
-    void prefetchSessionDetailWindow(queryClient, sessionId);
-  }, [queryClient]);
-
+  const {
+    groupedGroupConversations,
+    groupedGroupConversationCount,
+    sessionIndexHasMore,
+    sessionIndexLoadMoreLabel,
+    sessionIndexFullyLoadedLabel,
+    sessionIndexProgressLabel,
+    sessionIndexProgressVisible,
+  } = useChatSessionIndexRailModel({
+    groupedConversations,
+    rawSessionsQuery: toSessionIndexProgressQuerySlice(rawSessionsQuery),
+    lang,
+    numberFormatter,
+  });
+  const {
+    selectedBulkSessionIds,
+    selectedBulkSessions,
+    allVisibleSessionsSelected,
+    bulkSessionPending,
+    sessionBulkNotice,
+    sessionBulkCopy,
+    clearBulkSessions,
+    selectVisibleBulkSessions,
+    toggleBulkSession,
+    bulkRemoveSessions,
+    visibleDirectSessionIds,
+  } = useChatSessionBulkSelection({
+    filteredConversations,
+    sessionsById,
+    bulkDeleteSessionsMutation,
+    isBusyPhase,
+    lang,
+    t,
+  });
   const {
     handlePetInteraction,
     handleCreateSession,
     handleOpenProjectAgentBus,
     handleOpenDirectSession,
+    handlePrefetchDirectSession,
     handleOpenAgent,
     handleOpenMentionTarget,
     handleOpenGroupRoom,
@@ -2755,16 +2526,13 @@ export function ChatCodingRoute() {
   } = useChatWorkspaceActions({
     lang,
     t,
-    navigate,
+    chatRoute: {
+      openSession,
+      openRoom,
+      openProjectBus,
+    },
     queryClient,
     chatWorkspaceCache,
-    latestDirectSessionSelectionRef,
-    latestDirectSessionSelectionAtRef,
-    reselectDirectSessionRef,
-    activeSessionId,
-    setActiveSession,
-    activeGroupRoomId,
-    setActiveGroupRoomId,
     setRightIndexPanel,
     setRightPaneCollapsed,
     setSelectedAgentId,
@@ -2788,6 +2556,7 @@ export function ChatCodingRoute() {
     groupManageModeDraft,
     groupManagePurposeDraft,
     selectedChatAgentId,
+    sessionsById,
     standardGroupRoomActive,
     activeGroupTeamOwned,
     groupRoundActive,
@@ -2810,6 +2579,17 @@ export function ChatCodingRoute() {
     clearSessionHistoryMutation,
     addSessionToReviewMutation,
     petActionMutation,
+    openDeleteSessionConfirm,
+    openClearSessionHistoryConfirm,
+    openDeleteGroupConfirm,
+    openResetGroupConfirm,
+  });
+
+  useDesktopConversationAttention({
+    sessions: allVisibleSessions,
+    viewedSessionId: activeSessionId || "",
+    notifierRef: desktopConversationNotifierRef,
+    onOpenSession: handleOpenDirectSession,
   });
 
   const {
@@ -2842,6 +2622,9 @@ export function ChatCodingRoute() {
     setAgentRenameDraftName,
     cancelAgentRename,
     submitAgentRename,
+    agentCreateWizardOpen,
+    setAgentCreateWizardOpen,
+    agentCreateTriggerRef,
   } = useChatAgentDirectoryActions({
     lang,
     navigate,
@@ -2858,7 +2641,6 @@ export function ChatCodingRoute() {
     setAgentContextMenu,
     setSessionContextMenu,
     setSessionComposerErrors,
-    setAgentCreateWizardOpen,
     renameAgentEmptyMessage: t("renameAgentEmpty"),
   });
 
@@ -2869,29 +2651,26 @@ export function ChatCodingRoute() {
     }));
   }, []);
 
-  const contextMenuSessionIsBusy = contextMenuSession
-    ? isBusyPhase(contextMenuSession.currentPhase || contextMenuSession.status)
-    : false;
-  const contextMenuDeletePending = Boolean(
-    contextMenuSession
-    && deleteSessionMutation.isPending
-    && deleteSessionMutation.variables?.sessionId === contextMenuSession.id,
-  );
-  const contextMenuAddToReviewPending = Boolean(
-    contextMenuSession
-    && addSessionToReviewMutation.isPending
-    && addSessionToReviewMutation.variables?.sessionId === contextMenuSession.id,
-  );
-  const contextMenuClearHistoryPending = Boolean(
-    contextMenuSession
-    && clearSessionHistoryMutation.isPending
-    && clearSessionHistoryMutation.variables?.sessionId === contextMenuSession.id
-  );
-  const contextMenuClearHistoryVisible = Boolean(
-    contextMenuSession?.agentId
-    && isAgentRootSession(contextMenuSession)
-  );
-  const conversationIndexLoading = shouldShowConversationIndexLoading({
+  const {
+    contextMenuSession,
+    contextMenuSessionId,
+    contextMenuDeletePending,
+    contextMenuAddToReviewPending,
+    contextMenuClearHistoryPending,
+    contextMenuClearHistoryVisible,
+    contextMenuAgentArchivePending,
+    contextMenuDeleteDisabled,
+    contextMenuAddToReviewDisabled,
+    contextMenuClearHistoryDisabled,
+    conversationIndexLoading,
+  } = useChatIndexDerivedState({
+    sessionContextMenu,
+    sessionsById,
+    deleteSessionMutation,
+    addSessionToReviewMutation,
+    clearSessionHistoryMutation,
+    agentContextMenu,
+    isAgentArchivePending,
     bootstrapIsLoading: activeSessionBootstrapQuery.isLoading,
     conversationsHasData: Boolean(conversationsQuery.data),
     conversationsIsLoading: conversationsQuery.isLoading,
@@ -2901,13 +2680,6 @@ export function ChatCodingRoute() {
     agentsIsLoading: agentsQuery.isLoading,
     visibleSessionCount: allVisibleSessions.length,
   });
-  const contextMenuAgentArchivePending = Boolean(
-    agentContextMenu
-    && isAgentArchivePending(agentContextMenu.agent.agentId)
-  );
-  const contextMenuDeleteDisabled = contextMenuDeletePending || contextMenuSessionIsBusy;
-  const contextMenuAddToReviewDisabled = contextMenuAddToReviewPending || contextMenuSessionIsBusy;
-  const contextMenuClearHistoryDisabled = contextMenuClearHistoryPending || contextMenuSessionIsBusy;
   const conversationIndexPanel = (
     <ChatConversationIndexPanelContent
       styles={styles}
@@ -2942,20 +2714,10 @@ export function ChatCodingRoute() {
             statusLabel={statusLabel}
             teams={teams}
             onContextMenu={openAgentContextMenu}
-            onOpenAgent={(agent, latestSession) => {
-              const agentId = String(agent.agentId || "").trim();
-              if (agentId) {
-                setSelectedAgentId(agentId);
+            onOpenAgent={(agent) => {
+              if (!handleOpenAgent(agent)) {
+                handleCreateAgentSession(agent);
               }
-              if (latestSession?.id) {
-                handleOpenDirectSession(latestSession.id);
-                return;
-              }
-              if (agent.directSessionId) {
-                handleOpenAgent(agent);
-                return;
-              }
-              handleCreateAgentSession(agent);
             }}
             onOpenGroupRoom={handleOpenGroupRoom}
           />
@@ -2988,6 +2750,19 @@ export function ChatCodingRoute() {
               />
             </Suspense>
           ) : null}
+          {sessionBulkNotice ? (
+            <div className={styles.panelNotice} role="status">{sessionBulkNotice.text}</div>
+          ) : null}
+          <SessionBulkOperationsPanel
+            copy={sessionBulkCopy}
+            selectedCount={selectedBulkSessions.length}
+            visibleCount={visibleDirectSessionIds.length}
+            allVisibleSelected={allVisibleSessionsSelected}
+            pending={bulkSessionPending}
+            onSelectVisible={selectVisibleBulkSessions}
+            onClearSelection={clearBulkSessions}
+            onRemove={() => { void bulkRemoveSessions(); }}
+          />
           <ConversationIndexTree
             activeGroupRoomId={activeGroupRoomId}
             activeSessionId={activeSessionId}
@@ -3018,6 +2793,7 @@ export function ChatCodingRoute() {
             sessionComposerErrors={sessionComposerErrors}
             sessionIdsNeedingApproval={sessionIdsNeedingApproval}
             sessionsById={sessionsById}
+            teams={teams}
             statusLabel={statusLabel}
             t={t}
             onCancelRename={cancelRenameSession}
@@ -3029,6 +2805,10 @@ export function ChatCodingRoute() {
             onRenameTitleChange={setEditingSessionTitle}
             onSubmitRename={submitRenameSession}
             onToggleConversationGroup={toggleConversationGroup}
+            bulkSelectionEnabled
+            selectedBulkSessionIds={selectedBulkSessionIds}
+            bulkSelectLabel={lang === "zh" ? "选择会话" : "Select session"}
+            onToggleBulk={toggleBulkSession}
           />
           {sessionIndexHasMore ? (
             <VButton
@@ -3262,6 +3042,7 @@ export function ChatCodingRoute() {
                 renameSessionId={renameSessionMutation.variables?.sessionId ?? ""}
                 resolveModelLabel={resolveModelLabel}
                 sessions={agentSessionTabs}
+                teams={teams}
                 runtimeRunningSessionIds={runtimeRunningSessionIds}
                 sessionIdsNeedingApproval={sessionIdsNeedingApproval}
                 statusLabel={statusLabel}
@@ -3404,6 +3185,11 @@ export function ChatCodingRoute() {
                 showSessionOverview: false,
                 // Historical mental snapshots are conversation evidence; next-turn toggle only affects submit.
                 showMentalSnapshots: true,
+                composerFocusSignal:
+                  composerFocusRequest.sessionId === activeSessionId
+                    ? composerFocusRequest.signal
+                    : "",
+                onComposerFocusRequestSettled: settleSessionComposerFocusRequest,
                 composer: conversationComposer,
                 permissionControl: activeSessionAgent ? {
                   value: activeSessionAgent.permissionPreset || "request_approval",
@@ -3461,6 +3247,9 @@ export function ChatCodingRoute() {
                 onStop: handleStopTurn,
                 onSafeGuidance: () => handleSubmitGuidance("safe"),
                 onInterruptGuidance: () => handleSubmitGuidance("interrupt"),
+                onFollowupQueueUpdate: handleFollowupQueueUpdate,
+                onFollowupQueueRemove: handleFollowupQueueRemove,
+                onFollowupQueueMove: handleFollowupQueueMove,
               } : null}
               conversationFocused={statusRailCollapsed}
               filePreview={{
@@ -3478,64 +3267,12 @@ export function ChatCodingRoute() {
               noSessionsLabel={t("noSessionsYet")}
               notices={activeRuntimeNotices}
               sessionsPending={sessionsQuery.isPending}
-              toolApproval={pendingSessionToolApproval || pendingToolGovernanceApproval ? {
-                requestId: pendingSessionToolApproval?.requestId
-                  || pendingToolGovernanceApproval?.requestId
-                  || "",
-                pending: pendingToolApprovalPending,
-                rawTitle: pendingToolApprovalRawTitle,
-                riskLabel: pendingToolApprovalRisk,
-                scopeLabel: pendingToolApprovalScope,
-                toolLabels: pendingToolApprovalLabels,
-                actionPreview: pendingToolApprovalActionPreview,
-                sessionGrantScope: pendingSessionToolApproval?.sessionGrantScope,
-                toolName: pendingSessionToolApproval?.toolName || pendingToolApprovalLabels[0]?.id,
-              } : null}
+              toolApproval={toolApproval}
               transientErrorMessage={sessionDetailErrorMessage}
               workspaceActiveTab={workspace.activeTab}
-              onApproveToolApproval={() => {
-                if (pendingSessionToolApproval) {
-                  resolveSessionToolApprovalMutation.mutate({
-                    request: pendingSessionToolApproval,
-                    decision: "accept",
-                  });
-                  return;
-                }
-                if (!pendingToolGovernanceApproval) {
-                  return;
-                }
-                resolveToolApprovalMutation.mutate({ request: pendingToolGovernanceApproval, decision: "approve" });
-              }}
-              onApproveToolForSession={
-                pendingSessionToolApproval
-                && pendingSessionToolApproval.approval !== "always"
-                && (
-                  pendingSessionToolApproval.availableDecisions.includes("acceptAlways")
-                  || pendingSessionToolApproval.availableDecisions.includes("acceptForSession")
-                )
-                ? () => {
-                  const decision = pendingSessionToolApproval.availableDecisions.includes("acceptAlways")
-                    ? "acceptAlways"
-                    : "acceptForSession";
-                  resolveSessionToolApprovalMutation.mutate({
-                    request: pendingSessionToolApproval,
-                    decision,
-                  });
-                }
-                : undefined}
-              onRejectToolApproval={() => {
-                if (pendingSessionToolApproval) {
-                  resolveSessionToolApprovalMutation.mutate({
-                    request: pendingSessionToolApproval,
-                    decision: "decline",
-                  });
-                  return;
-                }
-                if (!pendingToolGovernanceApproval) {
-                  return;
-                }
-                resolveToolApprovalMutation.mutate({ request: pendingToolGovernanceApproval, decision: "reject" });
-              }}
+              onApproveToolApproval={handleApproveToolApproval}
+              onApproveToolForSession={handleApproveToolForSession}
+              onRejectToolApproval={handleRejectToolApproval}
             />
             )}
           />
@@ -3618,6 +3355,10 @@ export function ChatCodingRoute() {
         latestMentalSnapshot={latestMentalSnapshot}
         chatRoomModeLabel={chatRoomModeLabel}
         chatRoomPurposeLabel={chatRoomPurposeLabel}
+        sessionBulkSelectVisibleVisible={selectedBulkSessions.length === 0 && visibleDirectSessionIds.length > 0}
+        sessionBulkSelectVisibleLabel={t("bulkSelectVisibleSessions")}
+        onSessionBulkSelectVisible={selectVisibleBulkSessions}
+        sessionBulkSelectVisibleDisabled={bulkSessionPending || conversationIndexLoading}
       />
       )}
     >
@@ -3675,6 +3416,20 @@ export function ChatCodingRoute() {
           />
         </Suspense>
       ) : null}
+      <ChatDangerConfirmDialog
+        open={Boolean(pendingConfirm)}
+        title={pendingConfirmPresentation?.title ?? ""}
+        confirmLabel={pendingConfirmPresentation?.confirmLabel ?? ""}
+        cancelLabel={lang === "zh" ? "取消" : "Cancel"}
+        confirmPending={pendingConfirmPresentation?.confirmPending ?? false}
+        onOpenChange={(open) => {
+          if (!open) {
+            dismissPendingConfirm();
+          }
+        }}
+        onCancel={dismissPendingConfirm}
+        onConfirm={confirmPendingWorkbenchAction}
+      />
     </ChatSessionWorkbenchShell>
   );
 }

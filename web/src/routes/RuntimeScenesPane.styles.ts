@@ -66,6 +66,7 @@ const styles = {
     "data-[state=active]:bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-row))] " +
     "data-[state=active]:text-[var(--accent-cool)]",
   filterTabLabel: "inline-flex min-w-0 items-center gap-1.5",
+  timelineFilterStack: "timelineFilterStack min-w-0 grid content-start gap-1.5 justify-items-end",
   // Legacy aliases for style geometry contracts.
   filterButton:
     `filterButton min-w-0 ${buttonBase}`,
@@ -270,6 +271,8 @@ const styles = {
     `timelineItemError min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto ${rowSurface} ${errorTone}`,
   timelineItemWarning:
     `timelineItemWarning min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto ${rowSurface} ${warningTone}`,
+  timelineItemUserAction:
+    `timelineItemUserAction min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto ${rowSurface} ${vuiStateCoolInfoClass}`,
   timelineList:
     "timelineList min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto",
   timelineMessage:

@@ -4,6 +4,7 @@
 > **活跃配置路径**：`%USERPROFILE%\Documents\Vibelution\config\config.toml`（权威）。
 > 仓库根 `config.toml` / `config.example.toml` 仅为 legacy/template，**不得**当运行时真源。
 > 决策：[ADR 0003](../../adr/0003-operator-config-lives-outside-repo.md)。
+> 项目可变状态根与迁移：[ADR 0008](../../adr/0008-project-mutable-state-lives-outside-source-tree.md)。
 
 ## 怎么用
 
@@ -32,7 +33,9 @@
 | 主题 | 代码 / 模块文档 |
 | --- | --- |
 | 配置模型与校验 | `config/models.py` |
-| 路径解析 | `config/paths.py` |
+| Operator 配置路径 | `config/paths.py` |
+| Project identity / data / runtime / logs / memory / cache | `vibelution_storage.py` |
+| 旧路径迁移 | `core/infrastructure/storage_migration.py`、`scripts/migrate_project_storage.py` |
 | Provider 注册合并 | `config/llm_provider_registry.py`、`config/providers.py` |
 | 协议解析 | `core/llm/protocol_resolver.py`、`core/llm/protocols.py` |
 | 协议运行时权威 | [core/llm/PROTOCOL.md](../../../core/llm/PROTOCOL.md) |

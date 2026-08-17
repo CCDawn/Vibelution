@@ -43,7 +43,7 @@ def _run(cmd: str, cwd: Path) -> None:
     subprocess.run(cmd, cwd=str(cwd), shell=True, check=True, capture_output=True, text=True)
 
 
-def test_run_git_hides_console_windows_on_windows(monkeypatch, tmp_path):
+def test_git_memory_service_run_git_hides_console_windows_on_windows(monkeypatch, tmp_path):
     import subprocess
 
     from core.infrastructure import no_console_git as ncg
@@ -723,3 +723,48 @@ class TestGitMemoryService:
 
         assert row is not None
         assert row["count"] == 0
+
+
+class TestGitFileChangeDeduplication:
+    def test_repeated_refresh_does_not_duplicate_commit_file_changes(self, tmp_path, monkeypatch):
+        repo = _init_git_repo(tmp_path)
+        db_path = tmp_path / "brain.db"
+        fake_workspace = FakeWorkspace(repo, db_path)
+
+        class FakeBus:
+            def publish(self, name, data=None, source=None):
+                return None
+
+            def subscribe(self, name, handler, priority=0):
+                return True
+
+        monkeypatch.setattr("core.infrastructure.git_memory.get_workspace", lambda: fake_workspace)
+        monkeypatch.setattr("core.infrastructure.git_memory.get_event_bus", lambda: FakeBus())
+
+        service = GitMemoryService()
+        first = service.index_recent_changes(base_rev="")
+        assert first["indexed_commits"]
+        first_count = self._file_change_count(db_path)
+
+        # A stale/unusable base makes the fallback re-list recent commits,
+        # which previously re-inserted duplicate GitFileChange rows because
+        # the UNIQUE constraint cannot deduplicate NULL old_path values.
+        stale_base = "0" * 40
+        second = service.index_recent_changes(base_rev=stale_base)
+        assert second["indexed_commits"]
+        second_count = self._file_change_count(db_path)
+
+        assert first_count > 0
+        assert second_count == first_count
+
+    @staticmethod
+    def _file_change_count(db_path: Path) -> int:
+        conn = sqlite3.connect(str(db_path))
+        try:
+            return int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM GitFileChange WHERE is_worktree = 0"
+                ).fetchone()[0]
+            )
+        finally:
+            conn.close()

@@ -33,6 +33,10 @@ API_RUNTIME_EXCLUDED_PATHS = frozenset(
     }
 )
 API_RUNTIME_ALWAYS_RECORD_REFERER_PATHS = frozenset({"/teams", "/agents/teams"})
+CLIENT_OPERATION_ID_HEADER = "X-Vibelution-Client-Operation-Id"
+_API_RUNTIME_RECORD_FAILURES = 0
+_API_RUNTIME_RECORD_FAILURE_LOG_LIMIT = 3
+_API_RUNTIME_RECORD_FAILURE_LOG_EVERY = 50
 
 
 class RuntimeSceneApiEventMiddleware(BaseHTTPMiddleware):
@@ -114,10 +118,38 @@ def record_api_runtime_event(
                 "user_agent_family": _user_agent_family(request),
                 "exception_type": type(exception).__name__ if exception else "",
                 "exception_message": str(exception or ""),
+                "client_operation_id": _client_operation_id(request),
             }
         )
-    except Exception:  # noqa: BLE001,S110 - diagnostics must never fail the API response
-        pass
+    except Exception as exc:  # noqa: BLE001 - diagnostics must never fail the API response
+        _note_api_runtime_record_failure(exc)
+
+
+def api_runtime_record_failure_count() -> int:
+    return _API_RUNTIME_RECORD_FAILURES
+
+
+def reset_api_runtime_record_failure_count_for_tests() -> None:
+    global _API_RUNTIME_RECORD_FAILURES
+    _API_RUNTIME_RECORD_FAILURES = 0
+
+
+def _note_api_runtime_record_failure(exc: BaseException) -> None:
+    global _API_RUNTIME_RECORD_FAILURES
+    _API_RUNTIME_RECORD_FAILURES += 1
+    count = _API_RUNTIME_RECORD_FAILURES
+    if count > _API_RUNTIME_RECORD_FAILURE_LOG_LIMIT and count % _API_RUNTIME_RECORD_FAILURE_LOG_EVERY != 0:
+        return
+    try:
+        from core.logging import debug as _debug_logger
+
+        _debug_logger.warning(
+            "runtime scene api event record failed "
+            f"(count={count}, errorType={type(exc).__name__})",
+            tag="SCENE",
+        )
+    except Exception:
+        return
 
 
 def _api_runtime_perf_counter() -> float:
@@ -225,6 +257,11 @@ def _request_origin_summary(request: Request) -> str:
     if parsed_referer.scheme and parsed_referer.netloc:
         return f"{parsed_referer.scheme}://{parsed_referer.netloc}"[:160]
     return ""
+
+
+def _client_operation_id(request: Request) -> str:
+    raw = str(request.headers.get(CLIENT_OPERATION_ID_HEADER) or "").strip()
+    return raw[:120]
 
 
 def _user_agent_family(request: Request) -> str:

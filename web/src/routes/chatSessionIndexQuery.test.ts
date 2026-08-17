@@ -2,10 +2,11 @@ import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 
 import { queryKeys } from "../api/queryKeys";
-import type { AgentInstance, SessionDetail, SessionQueryResponse, SessionSummary } from "../api/types";
+import type { AgentInstance, ConversationSummary, SessionDetail, SessionQueryResponse, SessionSummary } from "../api/types";
 import {
   captureAgentSessionCacheSnapshots,
   captureSessionIndexCacheSnapshots,
+  evictUnopenableSessionFromCaches,
   reconcileAgentSessionDetailCache,
   removeSessionFromAgentSessionCaches,
   renameAgentDirectoryEntries,
@@ -15,6 +16,8 @@ import {
   updateSessionSummaryCaches,
 } from "./chatSessionIndexQuery";
 import { renameSessionInSummaries } from "./chatSessionState";
+import { pinSessionCreatePreserve, isSessionCreatePreserved, resetSessionCreatePreservesForTests } from "./sessionCreatePreserve";
+import { isSessionDeleteTombstoned, resetSessionDeleteTombstonesForTests } from "./sessionDeleteTombstone";
 
 function session(id: string, title: string): SessionSummary {
   return {
@@ -94,6 +97,35 @@ describe("chatSessionIndexQuery cache helpers", () => {
 
     expect(queryClient.getQueryData<SessionQueryResponse>(agentAKey)?.items[0]?.title).toBe("Renamed Alpha");
     expect(queryClient.getQueryData<SessionQueryResponse>(agentBKey)?.items[0]?.title).toBe("Beta");
+  });
+
+  it("keeps a just-created session in paginated pages when a server refetch omits it", async () => {
+    const { pinSessionCreatePreserve, resetSessionCreatePreservesForTests } = await import("./sessionCreatePreserve");
+    resetSessionCreatePreservesForTests();
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(queryKeys.sessions(), [
+      session("session-new", "Fresh"),
+      session("session-old", "Old"),
+    ]);
+    queryClient.setQueryData(queryKeys.sessionQuery("", 50), {
+      pages: [page([session("session-new", "Fresh"), session("session-old", "Old")], "", 2)],
+      pageParams: [""],
+    });
+    pinSessionCreatePreserve({
+      ...session("session-new", "Fresh"),
+      agentId: "agent-a",
+    });
+
+    updateSessionSummaryCaches(queryClient, (sessions) =>
+      (sessions ?? []).filter((item) => item.id !== "session-gone"),
+    );
+    // Simulate what useSessionIndexQuery returns after a stale server page.
+    const { mergePreservedCreatedSessions } = await import("./sessionCreatePreserve");
+    const filteredItems = mergePreservedCreatedSessions(
+      [session("session-old", "Old")],
+      { localItems: [session("session-new", "Fresh"), session("session-old", "Old")] },
+    );
+    expect(filteredItems.map((item) => item.id)).toEqual(["session-new", "session-old"]);
   });
 
   it("reconciles an authoritative detail only into its owning Agent session cache", () => {
@@ -187,5 +219,56 @@ describe("chatSessionIndexQuery cache helpers", () => {
     expect(queryClient.getQueryData<SessionQueryResponse>(agentAKey)?.items.map((item) => item.id))
       .toEqual(["session-delete", "session-keep"]);
     expect(queryClient.getQueryData<SessionQueryResponse>(agentAKey)?.totalEstimate).toBe(2);
+  });
+
+  it("evicts an unopenable session from list caches without dropping the detail query", () => {
+    resetSessionDeleteTombstonesForTests();
+    resetSessionCreatePreservesForTests();
+    const queryClient = new QueryClient();
+    const ghost = session("session-ghost", "Ghost");
+    const keep = session("session-keep", "Keep");
+    queryClient.setQueryData(queryKeys.sessions(), [ghost, keep]);
+    queryClient.setQueryData(queryKeys.sessionQuery("", 50), {
+      pages: [page([ghost, keep], "", 2)],
+      pageParams: [""],
+    });
+    queryClient.setQueryData(["sessions", "agent", "agent-a"], page([ghost, keep], "", 2));
+    queryClient.setQueryData(queryKeys.conversations(), [
+      {
+        conversationId: "session-ghost",
+        type: "direct_agent",
+        title: "Ghost",
+        directSessionId: "session-ghost",
+        status: "ready",
+        summary: "",
+        updatedAt: "2026-06-09T08:00:00",
+        workspacePath: "",
+      },
+      {
+        conversationId: "room-1",
+        type: "group_room",
+        title: "Room",
+        status: "ready",
+        summary: "",
+        updatedAt: "2026-06-09T08:00:00",
+        workspacePath: "",
+      },
+    ] satisfies ConversationSummary[]);
+    queryClient.setQueryData(queryKeys.session("session-ghost"), detail({ id: "session-ghost" }));
+    pinSessionCreatePreserve(ghost);
+
+    evictUnopenableSessionFromCaches(queryClient, "session-ghost");
+
+    expect(queryClient.getQueryData<SessionSummary[]>(queryKeys.sessions())?.map((item) => item.id))
+      .toEqual(["session-keep"]);
+    expect(queryClient.getQueryData<SessionQueryResponse>(["sessions", "agent", "agent-a"])?.items.map((item) => item.id))
+      .toEqual(["session-keep"]);
+    expect(queryClient.getQueryData<ConversationSummary[]>(queryKeys.conversations())?.map((item) => item.conversationId))
+      .toEqual(["room-1"]);
+    expect(queryClient.getQueryData(queryKeys.session("session-ghost"))).toEqual(detail({ id: "session-ghost" }));
+    expect(isSessionDeleteTombstoned("session-ghost")).toBe(true);
+    expect(isSessionCreatePreserved("session-ghost")).toBe(false);
+    resetSessionDeleteTombstonesForTests();
+    resetSessionCreatePreservesForTests();
   });
 });

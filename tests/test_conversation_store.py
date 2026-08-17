@@ -131,6 +131,102 @@ def test_chat_state_roundtrip_preserves_order_and_separates_debug_snapshots(tmp_
     ]
 
 
+def test_session_runtime_row_upsert_does_not_rewrite_siblings(tmp_path: Path):
+    store = _open_store(tmp_path)
+    try:
+        store.repository.replace_chat_state(
+            {
+                "version": 1,
+                "conversations": [
+                    {"conversation_id": "session-a", "title": "A"},
+                    {"conversation_id": "session-b", "title": "B"},
+                ],
+            }
+        ).result(timeout=3)
+        db_path = tmp_path / "workspace" / "chat" / "conversations.sqlite3"
+        connection = sqlite3.connect(db_path)
+        try:
+            before_b = connection.execute(
+                "SELECT payload_json, updated_at_ms FROM session_runtime_state WHERE session_id=?",
+                ("session-b",),
+            ).fetchone()
+            first = store.repository.upsert_session_runtime_state(
+                "session-a",
+                {"conversation_id": "session-a", "title": "A-updated"},
+            ).result(timeout=3)
+            assert first["changed"] is True
+            after_b = connection.execute(
+                "SELECT payload_json, updated_at_ms FROM session_runtime_state WHERE session_id=?",
+                ("session-b",),
+            ).fetchone()
+            assert after_b == before_b
+            assert store.repository.get_session_runtime_state("session-a")["title"] == "A-updated"
+            assert store.repository.get_session_runtime_state("session-b")["title"] == "B"
+            second = store.repository.upsert_session_runtime_state(
+                "session-a",
+                {"conversation_id": "session-a", "title": "A-updated"},
+            ).result(timeout=3)
+            assert second["changed"] is False
+            assert second["stateRevision"] == first["stateRevision"]
+            activated = store.repository.upsert_session_runtime_state(
+                "session-a",
+                {"conversation_id": "session-a", "title": "A-updated"},
+                activate=True,
+            ).result(timeout=3)
+            assert activated["changed"] is True
+            assert activated["activeSessionId"] == "session-a"
+            assert store.repository.list_session_runtime_ids() == ["session-a", "session-b"]
+            assert store.repository.get_session_runtime_state("session-b")["title"] == "B"
+        finally:
+            connection.close()
+    finally:
+        store.close()
+
+
+def test_chat_state_replace_prunes_missing_ids_and_skips_identical_rows(tmp_path: Path):
+    store = _open_store(tmp_path)
+    try:
+        store.repository.replace_chat_state(
+            {
+                "version": 1,
+                "conversations": [
+                    {"conversation_id": "keep", "title": "Keep"},
+                    {"conversation_id": "drop", "title": "Drop"},
+                ],
+            }
+        ).result(timeout=3)
+        db_path = tmp_path / "workspace" / "chat" / "conversations.sqlite3"
+        connection = sqlite3.connect(db_path)
+        try:
+            before_keep = connection.execute(
+                "SELECT payload_json, updated_at_ms FROM session_runtime_state WHERE session_id=?",
+                ("keep",),
+            ).fetchone()
+            store.repository.replace_chat_state(
+                {
+                    "version": 1,
+                    "conversations": [{"conversation_id": "keep", "title": "Keep"}],
+                }
+            ).result(timeout=3)
+            after_keep = connection.execute(
+                "SELECT payload_json, updated_at_ms FROM session_runtime_state WHERE session_id=?",
+                ("keep",),
+            ).fetchone()
+            assert after_keep == before_keep
+            assert store.repository.get_session_runtime_state("drop") is None
+            remaining = [
+                str(row[0])
+                for row in connection.execute(
+                    "SELECT session_id FROM session_runtime_state ORDER BY position"
+                ).fetchall()
+            ]
+            assert remaining == ["keep"]
+        finally:
+            connection.close()
+    finally:
+        store.close()
+
+
 def test_chat_state_invalid_replace_rolls_back_to_previous_document(tmp_path: Path):
     store = _open_store(tmp_path)
     try:
@@ -986,5 +1082,348 @@ def test_directory_list_uses_keyset_cursor_not_offset(
         assert first_ids.isdisjoint(second_ids)
         assert len(first_ids | second_ids) == 3
         assert second["nextCursor"] == ""
+    finally:
+        store.close()
+
+# ---------------------------------------------------------------------------
+# 会话删除单事务：archive_session_and_replace_chat_state
+
+
+def test_archive_session_and_replace_chat_state_commits_atomically(tmp_path: Path):
+    store = _open_store(tmp_path)
+    try:
+        revision = _create_agent(store, agent_id="agent-a")
+        store.repository.upsert_directory_session(
+            session_id="session-deleted",
+            agent_id="agent-a",
+            agent_config_revision_id=revision,
+            title="Will be deleted",
+        ).result(timeout=3)
+        store.repository.upsert_directory_session(
+            session_id="session-kept",
+            agent_id="agent-a",
+            agent_config_revision_id=revision,
+            title="Kept",
+        ).result(timeout=3)
+        store.repository.replace_chat_state(
+            {
+                "version": 1,
+                "active_conversation_id": "session-kept",
+                "updated_at": "2026-08-14T01:02:03Z",
+                "conversations": [
+                    {"conversation_id": "session-deleted", "title": "Will be deleted"},
+                    {"conversation_id": "session-kept", "title": "Kept"},
+                ],
+            }
+        ).result(timeout=3)
+
+        result = store.repository.archive_session_and_replace_chat_state(
+            session_id="session-deleted",
+            state={
+                "version": 1,
+                "active_conversation_id": "session-kept",
+                "updated_at": "2026-08-14T01:05:00Z",
+                "conversations": [{"conversation_id": "session-kept", "title": "Kept"}],
+            },
+        ).result(timeout=3)
+
+        assert result["archive"]["sessionId"] == "session-deleted"
+        assert result["chatState"]["stateRevision"] >= 2
+        restored = store.repository.get_chat_state()
+        assert [item["conversation_id"] for item in restored["conversations"]] == [
+            "session-kept"
+        ]
+        page = store.repository.list_directory_page(limit=50)
+        assert [item["sessionId"] for item in page["rows"]] == ["session-kept"]
+    finally:
+        store.close()
+    connection = sqlite3.connect(
+        tmp_path / "workspace" / "chat" / "conversations.sqlite3"
+    )
+    try:
+        archived = connection.execute(
+            "SELECT archived_at_ms FROM sessions WHERE session_id='session-deleted'"
+        ).fetchone()
+        assert archived is not None
+        assert archived[0] is not None
+    finally:
+        connection.close()
+
+
+def test_archive_failure_rolls_back_chat_state_in_same_transaction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from core.chat.conversation_store.repository import SessionDao
+
+    store = _open_store(tmp_path)
+    try:
+        revision = _create_agent(store, agent_id="agent-a")
+        store.repository.upsert_directory_session(
+            session_id="session-deleted",
+            agent_id="agent-a",
+            agent_config_revision_id=revision,
+            title="Will be deleted",
+        ).result(timeout=3)
+        store.repository.upsert_directory_session(
+            session_id="session-kept",
+            agent_id="agent-a",
+            agent_config_revision_id=revision,
+            title="Kept",
+        ).result(timeout=3)
+        store.repository.replace_chat_state(
+            {
+                "version": 1,
+                "active_conversation_id": "session-kept",
+                "updated_at": "2026-08-14T01:02:03Z",
+                "conversations": [
+                    {"conversation_id": "session-deleted", "title": "Will be deleted"},
+                    {"conversation_id": "session-kept", "title": "Kept"},
+                ],
+            }
+        ).result(timeout=3)
+        original = store.repository.get_chat_state()
+        original_revision = int(original["state_revision"])
+
+        def fail_archive(self, session_id):
+            raise RuntimeError("simulated directory archive failure")
+
+        monkeypatch.setattr(SessionDao, "archive", fail_archive)
+
+        future = store.repository.archive_session_and_replace_chat_state(
+            session_id="session-deleted",
+            state={
+                "version": 1,
+                "active_conversation_id": "session-kept",
+                "updated_at": "2026-08-14T01:05:00Z",
+                "conversations": [{"conversation_id": "session-kept", "title": "Kept"}],
+            },
+        )
+        with pytest.raises(RuntimeError, match="simulated directory archive failure"):
+            future.result(timeout=3)
+
+        restored = store.repository.get_chat_state()
+        assert {
+            item["conversation_id"] for item in restored["conversations"]
+        } == {"session-deleted", "session-kept"}
+        assert int(restored["state_revision"]) == original_revision
+        page = store.repository.list_directory_page(limit=50)
+        assert {item["sessionId"] for item in page["rows"]} == {
+            "session-deleted",
+            "session-kept",
+        }
+    finally:
+        store.close()
+
+
+def test_archive_session_and_replace_chat_state_uses_one_writer_batch(tmp_path: Path):
+    store = _open_store(tmp_path, max_batch_size=32)
+    try:
+        revision = _create_agent(store, agent_id="agent-a")
+        store.repository.upsert_directory_session(
+            session_id="session-deleted",
+            agent_id="agent-a",
+            agent_config_revision_id=revision,
+            title="Will be deleted",
+        ).result(timeout=3)
+        store.writer.flush(timeout=5)
+        before = int(store.writer.metrics()["batchCount"])
+        store.repository.archive_session_and_replace_chat_state(
+            session_id="session-deleted",
+            state={
+                "version": 1,
+                "active_conversation_id": "",
+                "updated_at": "2026-08-14T01:05:00Z",
+                "conversations": [],
+            },
+        ).result(timeout=3)
+        after = int(store.writer.metrics()["batchCount"])
+        assert after == before + 1
+    finally:
+        store.close()
+
+
+def test_archive_session_and_replace_chat_state_is_idempotent(tmp_path: Path):
+    store = _open_store(tmp_path)
+    try:
+        revision = _create_agent(store, agent_id="agent-a")
+        store.repository.upsert_directory_session(
+            session_id="session-deleted",
+            agent_id="agent-a",
+            agent_config_revision_id=revision,
+            title="Will be deleted",
+        ).result(timeout=3)
+        payload = {
+            "version": 1,
+            "active_conversation_id": "session-kept",
+            "updated_at": "2026-08-14T01:05:00Z",
+            "conversations": [{"conversation_id": "session-kept", "title": "Kept"}],
+        }
+        first = store.repository.archive_session_and_replace_chat_state(
+            session_id="session-deleted",
+            state=payload,
+        ).result(timeout=3)
+        second = store.repository.archive_session_and_replace_chat_state(
+            session_id="session-deleted",
+            state=payload,
+        ).result(timeout=3)
+
+        assert first["archive"]["action"] == "archived"
+        assert second["archive"] is None
+        restored = store.repository.get_chat_state()
+        assert [item["conversation_id"] for item in restored["conversations"]] == [
+            "session-kept"
+        ]
+    finally:
+        store.close()
+    connection = sqlite3.connect(
+        tmp_path / "workspace" / "chat" / "conversations.sqlite3"
+    )
+    try:
+        rows = connection.execute(
+            "SELECT COUNT(*) FROM session_runtime_state"
+        ).fetchone()[0]
+        assert rows == 1
+    finally:
+        connection.close()
+
+# ---------------------------------------------------------------------------
+# Chat state revision CAS
+
+
+def _seed_state_payload(conversation_id: str) -> dict:
+    return {
+        "version": 1,
+        "active_conversation_id": conversation_id,
+        "updated_at": "2026-08-14T01:02:03Z",
+        "conversations": [{"conversation_id": conversation_id, "title": conversation_id}],
+    }
+
+
+def test_replace_chat_state_cas_rejects_stale_revision(tmp_path: Path):
+    from core.chat.conversation_store.repository import ChatStateRevisionConflictError
+
+    store = _open_store(tmp_path)
+    try:
+        first = store.repository.replace_chat_state(
+            _seed_state_payload("session-a")
+        ).result(timeout=3)
+        assert first["stateRevision"] == 1
+
+        winner = store.repository.replace_chat_state(
+            _seed_state_payload("session-b"),
+            expected_state_revision=1,
+        ).result(timeout=3)
+        assert winner["stateRevision"] == 2
+
+        with pytest.raises(ChatStateRevisionConflictError):
+            store.repository.replace_chat_state(
+                _seed_state_payload("session-c"),
+                expected_state_revision=1,
+            ).result(timeout=3)
+
+        restored = store.repository.get_chat_state()
+        assert restored["active_conversation_id"] == "session-b"
+        assert int(restored["state_revision"]) == 2
+    finally:
+        store.close()
+
+
+def test_cas_conflict_across_two_store_instances(tmp_path: Path):
+    from core.chat.conversation_store.repository import ChatStateRevisionConflictError
+
+    database_path = tmp_path / "workspace" / "chat" / "conversations.sqlite3"
+    store_a = ConversationStore(database_path)
+    store_b = ConversationStore(database_path)
+    store_a.open()
+    store_b.open()
+    try:
+        store_a.repository.replace_chat_state(
+            _seed_state_payload("session-a")
+        ).result(timeout=3)
+        assert int(store_b.repository.get_chat_state()["state_revision"]) == 1
+
+        store_a.repository.replace_chat_state(
+            _seed_state_payload("session-b"),
+            expected_state_revision=1,
+        ).result(timeout=3)
+
+        with pytest.raises(ChatStateRevisionConflictError):
+            store_b.repository.replace_chat_state(
+                _seed_state_payload("session-c"),
+                expected_state_revision=1,
+            ).result(timeout=3)
+
+        assert store_b.repository.get_chat_state()["active_conversation_id"] == "session-b"
+    finally:
+        store_a.close()
+        store_b.close()
+
+
+def test_update_chat_state_applies_mutation_atomically(tmp_path: Path):
+    store = _open_store(tmp_path)
+    try:
+        store.repository.replace_chat_state(
+            _seed_state_payload("session-a")
+        ).result(timeout=3)
+
+        def add_session(state):
+            conversations = list(state.get("conversations") or [])
+            conversations.append({"conversation_id": "session-added", "title": "added"})
+            state["conversations"] = conversations
+            state["active_conversation_id"] = "session-added"
+
+        result = store.repository.update_chat_state(add_session).result(timeout=3)
+        assert result["stateRevision"] == 2
+        restored = store.repository.get_chat_state()
+        assert [item["conversation_id"] for item in restored["conversations"]] == [
+            "session-a",
+            "session-added",
+        ]
+    finally:
+        store.close()
+
+
+def test_update_chat_state_preserves_concurrent_mutations(tmp_path: Path):
+    store = _open_store(tmp_path)
+    try:
+        store.repository.replace_chat_state(
+            _seed_state_payload("session-seed")
+        ).result(timeout=3)
+
+        def add_session(session_id: str):
+            def mutate(state):
+                conversations = list(state.get("conversations") or [])
+                conversations.append(
+                    {"conversation_id": session_id, "title": session_id}
+                )
+                state["conversations"] = conversations
+
+            return mutate
+
+        errors: list[BaseException] = []
+
+        def worker(prefix: str) -> None:
+            try:
+                for index in range(10):
+                    store.repository.update_chat_state(
+                        add_session(f"{prefix}-{index}")
+                    ).result(timeout=5)
+            except BaseException as exc:  # noqa: BLE001 - test collects all failures
+                errors.append(exc)
+
+        threads = [
+            threading.Thread(target=worker, args=(prefix,))
+            for prefix in ("a", "b", "c")
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=30)
+
+        assert errors == []
+        restored = store.repository.get_chat_state()
+        ids = [item["conversation_id"] for item in restored["conversations"]]
+        assert len(ids) == 31
+        assert len(set(ids)) == 31
     finally:
         store.close()

@@ -115,6 +115,18 @@ New list-detail pages should start from a page recipe + registry `layoutId`. Dom
 
 Gate: `components/layout/workbenchLayoutGate.test.ts` blocks new ad-hoc width/height keys under `routes/`.
 
+## 新建 / 改 VUI 失败模式速查（R25）
+
+| 症状 / CI 失败 | 原因 | 修法 |
+| --- | --- | --- |
+| `vuiShadcnRouteContract`: HeroUI 或 `renderers/shadcn` | Route 绕过了 VUI 产品 API | 只从 `components/vui` import `V*`；renderer 变更放 `renderers/shadcn/` |
+| `vuiComponentDesignContract`: missing design spec | 新 `V*` 未登记 | 在 `designs/` 写专节 + 更新 [`designs/INDEX.md`](./designs/INDEX.md) |
+| `routeAestheticContract` / layout test: 裸 `<button>` | 未用 `VButton` / `VNativeButton` | 见 [`docs/guides/button-selection.md`](../../../docs/guides/button-selection.md) |
+| `workbenchLayoutGate`: 新 ad-hoc width key | 布局记忆未走 registry | 用 `WORKBENCH_LAYOUT_IDS.*` + `usePersistedPaneResize` / page recipe |
+| `tsc`: 样式 module key 不存在 | `*.styles.ts` 与 TS 用法不同步 | 先补 styles key，再引用；合入前跑 `npx tsc -b` |
+
+**门禁文件：** `vuiShadcnRouteContract.test.ts` · `vuiComponentDesignContract.test.ts` · `workbenchLayoutGate.test.ts`
+
 ## Wave 6A style-map compression
 
 | Prefer | Avoid |

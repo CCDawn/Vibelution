@@ -16,7 +16,6 @@ from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-
 from core.web.services import agent_directory_service
 
 
@@ -147,12 +146,13 @@ def repair_conversation_index_records() -> dict[str, Any]:
 
     payload = s.load_chat_state(s.PROJECT_ROOT)
     conversations = payload.get("conversations")
-    repaired_conversations: list[dict[str, str]] = []
+    repaired_conversations = []
     agent_by_id = {
         str(agent.get("agentId") or "").strip(): agent
         for agent in agents
         if isinstance(agent, dict) and str(agent.get("agentId") or "").strip()
     }
+    sync_candidates = []
     if isinstance(conversations, list):
         for conversation in conversations:
             if not isinstance(conversation, dict):
@@ -185,8 +185,10 @@ def repair_conversation_index_records() -> dict[str, Any]:
                     "kind": agent_kind,
                 }
             )
+            sync_candidates.append(conversation)
     if repaired_conversations:
-        s.save_chat_state(s.PROJECT_ROOT, payload)
+        s._persist_dirty_session_runtime_rows(sync_candidates)
+    if repaired_conversations:
         from . import directory_bridge
 
         repaired_ids = {
@@ -197,7 +199,7 @@ def repair_conversation_index_records() -> dict[str, Any]:
         directory_bridge.sync_conversation_records(
             [
                 item
-                for item in conversations
+                for item in sync_candidates
                 if isinstance(item, dict)
                 and str(item.get("conversation_id") or item.get("id") or "").strip()
                 in repaired_ids
@@ -816,8 +818,7 @@ def _agent_direct_session_query_summary(*, agent_id: str) -> dict[str, Any] | No
     if not direct_session_id:
         return None
 
-    payload = s.load_chat_state(s.PROJECT_ROOT)
-    raw = s._find_conversation_entry(payload, direct_session_id)
+    raw = s.load_session_chat_state(s.PROJECT_ROOT, direct_session_id)
     if not isinstance(raw, dict):
         return None
     conversation = s._normalize_conversation(
@@ -1097,6 +1098,55 @@ def query_sessions(
     return payload
 
 
+def _session_has_openable_body(session_id: str) -> bool:
+    """True when select/delete can open this id without inventing a ghost row.
+
+    Runs without ``_CHAT_STATE_LOCK`` so a directory-only miss can 404 quickly
+    instead of queuing behind an unrelated turn/delete.
+    """
+    s = _service()
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return False
+    if s._is_session_workspace_intentionally_deleted(normalized_session_id):
+        return False
+    if s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id) is not None:
+        return True
+    if s._session_workspace_has_recoverable_activity(normalized_session_id):
+        return True
+    if s._agent_for_direct_session(normalized_session_id):
+        return True
+    return False
+
+
+def _retire_unopenable_directory_session(session_id: str, *, source: str) -> None:
+    """Drop a directory row that can no longer be opened so the tab list matches."""
+    s = _service()
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return
+    from . import directory_bridge
+
+    directory_bridge.archive_directory_session_safe(normalized_session_id, wait=True)
+    s._invalidate_session_list_cache()
+    try:
+        s.record_runtime_scene_event(
+            "conversation",
+            "chat_state",
+            "conversation.directory_ghost_retired",
+            level="info",
+            outcome="retired",
+            message="Retired an unopenable session from the directory index.",
+            fields={
+                "sessionId": normalized_session_id,
+                "source": str(source or "").strip()[:64],
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        pass
+
+
 def select_chat_session(session_id: str, *, lightweight: bool = False) -> dict:
     """Make an existing or AgentDirectory direct session the active chat session.
 
@@ -1108,39 +1158,48 @@ def select_chat_session(session_id: str, *, lightweight: bool = False) -> dict:
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id:
         raise s.SessionNotFoundError("Session not found")
+    if not s._session_has_openable_body(normalized_session_id):
+        s._retire_unopenable_directory_session(
+            normalized_session_id,
+            source="s.select_chat_session",
+        )
+        raise s.SessionNotFoundError("Session not found")
     s._sync_agent_directory_project_root()
     agent_by_id = s._agent_lookup_for_conversations()
+    if s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id) is None:
+        s._ensure_session_conversation_record(
+            normalized_session_id,
+            source="s.select_chat_session",
+        )
+    missing_after_lock = False
+    selected_conversation: dict[str, Any] | None = None
     with s._CHAT_STATE_LOCK:
-        payload = s.load_chat_state(s.PROJECT_ROOT)
-        conversations = payload.get("conversations")
-        if not isinstance(conversations, list):
-            conversations = []
-            payload["conversations"] = conversations
+        conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
         changed = False
-        conversation = s._find_conversation_entry(payload, normalized_session_id)
         if conversation is None:
-            changed = s._materialize_agent_directory_conversation_locked(
-                payload,
-                normalized_session_id,
-                source="s.select_chat_session",
-                activate=True,
-            )
-            if not changed:
-                raise s.SessionNotFoundError("Session not found")
-            conversation = s._find_conversation_entry(payload, normalized_session_id)
-        if conversation is None:
-            raise s.SessionNotFoundError("Session not found")
-        s._ensure_session_mutable(normalized_session_id, conversation=conversation)
-        changed = s._ensure_conversation_workspace_metadata(conversation) or changed
-        changed = s._ensure_conversation_agent_metadata(conversation, agent_by_id=agent_by_id) or changed
-        previous_active_id = str(payload.get("active_conversation_id") or "").strip()
-        if previous_active_id != normalized_session_id:
-            payload["active_conversation_id"] = normalized_session_id
-            changed = True
-        if changed:
-            payload["updated_at"] = str(conversation.get("updated_at") or s._now_timestamp())
-            s.save_chat_state(s.PROJECT_ROOT, payload)
-        selected_conversation = dict(conversation)
+            missing_after_lock = True
+        else:
+            s._ensure_session_mutable(normalized_session_id, conversation=conversation)
+            changed = s._ensure_conversation_workspace_metadata(conversation) or changed
+            changed = s._ensure_conversation_agent_metadata(conversation, agent_by_id=agent_by_id) or changed
+            previous_active_id = s.load_active_conversation_id(s.PROJECT_ROOT)
+            need_activate = previous_active_id != normalized_session_id
+            if changed or need_activate:
+                if changed:
+                    conversation["updated_at"] = str(conversation.get("updated_at") or s._now_timestamp())
+                s.save_session_chat_state(
+                    s.PROJECT_ROOT,
+                    normalized_session_id,
+                    conversation,
+                    activate=need_activate,
+                )
+            selected_conversation = dict(conversation)
+    if missing_after_lock or selected_conversation is None:
+        s._retire_unopenable_directory_session(
+            normalized_session_id,
+            source="s.select_chat_session",
+        )
+        raise s.SessionNotFoundError("Session not found")
     from . import directory_bridge
 
     directory_bridge.sync_conversation_record(selected_conversation)
@@ -1228,6 +1287,16 @@ def create_chat_session(
         "createdFromTaskId": str(raw_experiment_binding.get("createdFromTaskId") or "").strip()[:160],
         "createdAt": str(raw_experiment_binding.get("createdAt") or "").strip()[:120],
     } if raw_experiment_binding else {}
+    if normalized_experiment_binding:
+        workflow_run_id = str(raw_experiment_binding.get("workflowRunId") or "").strip()[:160]
+        workflow_node_id = str(raw_experiment_binding.get("workflowNodeId") or "").strip()[:80]
+        if bool(workflow_run_id) != bool(workflow_node_id):
+            raise s.SessionValidationError(
+                "Experiment binding workflow scope requires both workflowRunId and workflowNodeId."
+            )
+        if workflow_run_id and workflow_node_id:
+            normalized_experiment_binding["workflowRunId"] = workflow_run_id
+            normalized_experiment_binding["workflowNodeId"] = workflow_node_id
     binding_agent_id = str(normalized_experiment_binding.get("agentId") or "").strip()
     if binding_agent_id and binding_agent_id != normalized_agent_id:
         raise s.SessionValidationError("Experiment binding Agent id does not match the bound Agent.")
@@ -1237,31 +1306,21 @@ def create_chat_session(
         bound_agent = s.get_agent(normalized_agent_id, include_archived=False)
         if not bound_agent:
             raise s.SessionValidationError(s._session_agent_unavailable_message("missing_agent", lang=lang))
+    fallback_title = s.text_for(lang, zh="新会话", en="New session")
+    if bound_agent is not None:
+        agent_name = str(
+            bound_agent.get("displayName")
+            or bound_agent.get("agentCode")
+            or bound_agent.get("name")
+            or ""
+        ).strip()
+        if agent_name:
+            fallback_title = s.trim_lines(agent_name, max_lines=1).strip()[:120] or fallback_title
+    normalized_title = s.trim_lines(title or "", max_lines=1).strip() or fallback_title
     with s._CHAT_STATE_LOCK:
-        payload = s.load_chat_state(s.PROJECT_ROOT)
-        conversations = payload.get("conversations")
-        if not isinstance(conversations, list):
-            conversations = []
-        existing_ids = {
-            str(item.get("conversation_id") or "").strip()
-            for item in conversations
-            if isinstance(item, dict)
-        }
+        existing_ids = set(s.list_session_runtime_ids(s.PROJECT_ROOT))
         now = s._now_timestamp()
         session_id = s._new_conversation_id(existing_ids)
-        # Prefer the bound Agent display name over the generic "新会话" placeholder so
-        # new tabs are immediately identifiable in multi-agent workspaces.
-        fallback_title = s.text_for(lang, zh="新会话", en="New session")
-        if bound_agent is not None:
-            agent_name = str(
-                bound_agent.get("displayName")
-                or bound_agent.get("agentCode")
-                or bound_agent.get("name")
-                or ""
-            ).strip()
-            if agent_name:
-                fallback_title = s.trim_lines(agent_name, max_lines=1).strip()[:120] or fallback_title
-        normalized_title = s.trim_lines(title or "", max_lines=1).strip() or fallback_title
         conversation = s._make_empty_conversation(
             session_id,
             title=normalized_title,
@@ -1270,7 +1329,6 @@ def create_chat_session(
         )
         if normalized_session_metadata:
             conversation["metadata"] = normalized_session_metadata
-        s._ensure_conversation_workspace_metadata(conversation)
         if bound_agent is not None:
             conversation.update(
                 {
@@ -1283,13 +1341,16 @@ def create_chat_session(
             if normalized_experiment_binding:
                 conversation["experiment_binding"] = normalized_experiment_binding
                 conversation["experimentBinding"] = normalized_experiment_binding
-        else:
+        s._ensure_conversation_workspace_metadata(conversation)
+        if bound_agent is None:
             s._sync_agent_directory_project_root()
             agent = s.ensure_agent_for_session(
                 session_id,
                 display_name=normalized_title if not s._is_default_empty_session_title(normalized_title) else "",
                 llm_bindings=normalized_llm_bindings,
-                session_workspace_path=str(conversation.get("workspace_path") or s._session_workspace_relative_path(session_id)),
+                session_workspace_path=str(
+                    conversation.get("workspace_path") or s._session_workspace_relative_path(session_id)
+                ),
                 created_by=created_by,
                 conversation_index_kind=conversation_index_kind,
             )
@@ -1299,13 +1360,12 @@ def create_chat_session(
                 conversation["agentId"] = normalized_agent_id
                 conversation["session_role"] = "primary"
                 conversation["sessionRole"] = "primary"
-        conversations.append(conversation)
-        payload["version"] = int(payload.get("version") or s.CHAT_STATE_VERSION)
-        if activate:
-            payload["active_conversation_id"] = session_id
-        payload["updated_at"] = now
-        payload["conversations"] = conversations
-        s.save_chat_state(s.PROJECT_ROOT, payload)
+        s.save_session_chat_state(
+            s.PROJECT_ROOT,
+            session_id,
+            conversation,
+            activate=activate,
+        )
         created_conversation = dict(conversation)
     from . import directory_bridge
 
@@ -1397,16 +1457,7 @@ def ensure_agent_direct_session(
         }
     lang = s.get_web_language()
     with s._CHAT_STATE_LOCK:
-        payload = s.load_chat_state(s.PROJECT_ROOT)
-        conversations = payload.get("conversations")
-        if not isinstance(conversations, list):
-            conversations = []
-            payload["conversations"] = conversations
-        existing_ids = {
-            str(item.get("conversation_id") or "").strip()
-            for item in conversations
-            if isinstance(item, dict)
-        }
+        existing_ids = set(s.list_session_runtime_ids(s.PROJECT_ROOT))
         now = s._now_timestamp()
         session_id = s._new_conversation_id(existing_ids)
         display_title = (
@@ -1430,12 +1481,7 @@ def ensure_agent_direct_session(
             source="s.ensure_agent_direct_session",
             conversation_index_kind=conversation_index_kind,
         )
-        conversations.append(conversation)
-        payload["version"] = int(payload.get("version") or s.CHAT_STATE_VERSION)
-        payload["active_conversation_id"] = session_id
-        payload["updated_at"] = now
-        payload["conversations"] = conversations
-        s.save_chat_state(s.PROJECT_ROOT, payload)
+        s.save_session_chat_state(s.PROJECT_ROOT, session_id, conversation)
     from . import directory_bridge
 
     directory_bridge.sync_conversation_record(conversation)
@@ -1592,13 +1638,20 @@ def _repair_agent_direct_session_collisions(
                 synced_rows.append(dict(conversation))
         if not repaired:
             return False
-        payload["version"] = int(payload.get("version") or s.CHAT_STATE_VERSION)
-        payload["updated_at"] = now
-        if str(payload.get("active_conversation_id") or "").strip() not in existing_session_ids:
-            payload["active_conversation_id"] = str(conversations[0].get("conversation_id") or "").strip() if conversations else ""
+        dirty_rows = list(synced_rows)
+        owner_rows = [
+            conversations_by_id[session_id]
+            for session_id in preserved_session_ids
+            if isinstance(conversations_by_id.get(session_id), dict)
+        ]
+        dirty_rows.extend(owner_rows)
+        activate_id = ""
+        current_active = str(payload.get("active_conversation_id") or "").strip()
+        if current_active not in existing_session_ids:
+            activate_id = str(conversations[0].get("conversation_id") or "").strip() if conversations else ""
         state["agents"] = raw_agents
         s.agent_directory_service.save_state(state)
-        s.save_chat_state(s.PROJECT_ROOT, payload)
+        s._persist_dirty_session_runtime_rows(dirty_rows, activate_session_id=activate_id)
         collision_snapshots = list(synced_rows)
     from . import directory_bridge
 
@@ -1726,19 +1779,26 @@ def _ensure_agent_directory_conversation_materialized(
     if directory_runtime.is_legacy_discard_in_progress():
         return False
     with s._CHAT_STATE_LOCK:
-        payload = s.load_chat_state(s.PROJECT_ROOT)
+        if s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id) is not None:
+            return False
+        payload = {"conversations": []}
         changed = s._materialize_agent_directory_conversation_locked(
             payload,
             normalized_session_id,
             source=source,
             activate=activate,
         )
+        snapshot = None
         if changed:
-            s.save_chat_state(s.PROJECT_ROOT, payload)
             materialized = s._find_conversation_entry(payload, normalized_session_id)
-            snapshot = dict(materialized) if isinstance(materialized, dict) else None
-        else:
-            snapshot = None
+            if isinstance(materialized, dict):
+                snapshot = dict(materialized)
+                s.save_session_chat_state(
+                    s.PROJECT_ROOT,
+                    normalized_session_id,
+                    snapshot,
+                    activate=activate,
+                )
     if snapshot is not None:
         from . import directory_bridge
 
@@ -1766,23 +1826,30 @@ def _ensure_session_conversation_record(
 
     if directory_runtime.is_legacy_discard_in_progress():
         return False
+    if not s._session_has_openable_body(normalized_session_id):
+        s._retire_unopenable_directory_session(
+            normalized_session_id,
+            source=source,
+        )
+        return False
     s._ensure_agent_directory_conversation_materialized(
         normalized_session_id,
         source=source,
     )
     with s._CHAT_STATE_LOCK:
-        payload = s.load_chat_state(s.PROJECT_ROOT)
-        entry = s._find_conversation_entry(payload, normalized_session_id)
+        entry = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
         if entry is None:
+            payload = {"conversations": []}
             recovered = s._recover_missing_conversation_from_workspace_locked(
                 payload,
                 normalized_session_id,
                 source=source,
             )
             if recovered:
-                s.save_chat_state(s.PROJECT_ROOT, payload)
-                s._invalidate_session_list_cache()
                 entry = s._find_conversation_entry(payload, normalized_session_id)
+                if isinstance(entry, dict):
+                    s.save_session_chat_state(s.PROJECT_ROOT, normalized_session_id, entry)
+                    s._invalidate_session_list_cache()
         snapshot = dict(entry) if isinstance(entry, dict) else None
     if snapshot is not None:
         from . import directory_bridge

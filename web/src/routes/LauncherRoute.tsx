@@ -11,6 +11,7 @@ import {
   getLauncherMaintenanceSummary,
   applyLauncherDeveloperCleanup,
   applyLauncherMaintenancePlan,
+  isLauncherControlPlaneNotReady,
   previewLauncherDeveloperCleanup,
   previewLauncherMaintenancePlan,
   reattachLauncherSupervisor,
@@ -241,6 +242,8 @@ type LauncherCopy = {
   windowModeRestartRequired: string;
   windowModeEnvOverride: string;
   startupSettings: string;
+  expandSettings: string;
+  collapseSettings: string;
   startupSettingsSaved: string;
   runtimeProfile: string;
   preflightDoctor: string;
@@ -661,8 +664,16 @@ function summarizeLauncherMessage(value: string | undefined, copy: LauncherCopy,
 function resolveLifecycleDisplay(
   status: LauncherStatusWithGuardian | undefined,
   copy: LauncherCopy,
-  options: { disconnected: boolean; controlLimited: boolean },
+  options: { disconnected: boolean; controlLimited: boolean; starting: boolean },
 ): LifecycleDisplay {
+  if (options.starting) {
+    return {
+      state: "starting",
+      label: copy.lifecycleStarting,
+      detail: copy.lifecycleStartingDetail,
+      tone: "warning",
+    };
+  }
   if (options.disconnected) {
     return {
       state: "closed",
@@ -1096,6 +1107,8 @@ export function LauncherRoute() {
         windowModeRestartRequired: "下次启动或重启工作台生效",
         windowModeEnvOverride: "环境变量正在覆盖配置",
         startupSettings: "启动设置",
+        expandSettings: "展开编辑",
+        collapseSettings: "收起设置",
         startupSettingsSaved: "启动设置已保存",
         runtimeProfile: "运行档位",
         preflightDoctor: "启动前自检",
@@ -1358,6 +1371,8 @@ export function LauncherRoute() {
         windowModeRestartRequired: "Takes effect on next workbench start or restart",
         windowModeEnvOverride: "Environment override is active",
         startupSettings: "Startup Settings",
+        expandSettings: "Expand to edit",
+        collapseSettings: "Collapse",
         startupSettingsSaved: "Startup settings saved",
         runtimeProfile: "Runtime mode",
         preflightDoctor: "Preflight doctor",
@@ -1512,16 +1527,37 @@ export function LauncherRoute() {
     }
     return requestLifecycle(operation);
   };
-  const resolveControlRequest = (input: LauncherOperation | { operation: LauncherOperation; instanceId?: string }) => {
+  type LauncherControlRequest = LauncherOperation | {
+    operation: LauncherOperation;
+    instanceId?: string;
+    instanceIds?: string[];
+  };
+  const resolveControlRequest = (input: LauncherControlRequest) => {
     if (typeof input === "string") {
-      return { operation: input, instanceId: selectedBranchId };
+      return { operation: input, instanceId: selectedBranchId, instanceIds: undefined as string[] | undefined };
     }
-    return { operation: input.operation, instanceId: input.instanceId || selectedBranchId };
+    const instanceIds = (input.instanceIds || []).map((id) => String(id || "").trim()).filter(Boolean);
+    return {
+      operation: input.operation,
+      instanceId: input.instanceId || instanceIds[0] || selectedBranchId,
+      instanceIds: instanceIds.length > 0 ? instanceIds : undefined,
+    };
   };
   const controlMutation = useMutation({
-    mutationFn: async (input: LauncherOperation | { operation: LauncherOperation; instanceId?: string }) => {
+    mutationFn: async (input: LauncherControlRequest) => {
       const request = resolveControlRequest(input);
-      return runInstanceLifecycle(request.instanceId, request.operation);
+      const ids = request.instanceIds && request.instanceIds.length > 0
+        ? request.instanceIds
+        : [request.instanceId];
+      const firstId = ids[0];
+      if (!firstId) {
+        throw new Error("missing instance id");
+      }
+      let last = await runInstanceLifecycle(firstId, request.operation);
+      for (const instanceId of ids.slice(1)) {
+        last = await runInstanceLifecycle(instanceId, request.operation);
+      }
+      return last;
     },
     onMutate: (input) => {
       const operation = resolveControlRequest(input).operation;
@@ -1757,18 +1793,24 @@ export function LauncherRoute() {
   const uiLang = lang === "zh" ? "zh" : "en";
   const bundleDesired = String(bundle?.desiredState || "").toLowerCase();
   const bundleObserved = String(bundle?.observedState || "").toLowerCase();
-  const launcherStatusDisconnected = statusQuery.isError && isLauncherStatusNetworkDisconnect(statusQuery.error);
-  const launcherControlLimited = statusQuery.isError && isControlTokenError(statusQuery.error);
+  const launcherControlPlaneStarting = statusQuery.isError && isLauncherControlPlaneNotReady(statusQuery.error);
+  const launcherStatusDisconnected = statusQuery.isError
+    && !launcherControlPlaneStarting
+    && isLauncherStatusNetworkDisconnect(statusQuery.error);
+  const launcherControlLimited = statusQuery.isError
+    && !launcherControlPlaneStarting
+    && isControlTokenError(statusQuery.error);
   const pendingBranchOperation = controlMutation.isPending && controlMutation.variables
     ? (() => {
         const request = resolveControlRequest(controlMutation.variables);
         return {
           instanceId: request.instanceId,
+          instanceIds: request.instanceIds,
           operation: request.operation === "force-stop" ? "stop" : request.operation,
         } as const;
       })()
     : undefined;
-  const lifecycleDisplay = resolveLifecycleDisplay(status, copy, { disconnected: launcherStatusDisconnected, controlLimited: launcherControlLimited });
+  const lifecycleDisplay = resolveLifecycleDisplay(status, copy, { disconnected: launcherStatusDisconnected, controlLimited: launcherControlLimited, starting: launcherControlPlaneStarting });
   const projectIsOpen = lifecycleDisplay.state === "running";
   const projectIsPartial = lifecycleDisplay.state === "partial";
   const projectIsClosed = lifecycleDisplay.state === "closed";
@@ -1778,11 +1820,13 @@ export function LauncherRoute() {
   const controlBusy = controlMutation.isPending && !(controlPlaneIdle && lifecycleSettled);
   const busy = controlBusy || supervisorMutation.isPending;
   const startDisabled = selectedIsCurrent
-    ? launcherStatusDisconnected || busy || !controlPlaneIdle || projectIsOpen || projectIsChanging
-    : launcherStatusDisconnected || controlMutation.isPending || !selectedStartable || selectedAlive;
-  const startDisabledReason = launcherStatusDisconnected
-    ? copy.loadFailed
-    : selectedIsCurrent
+    ? launcherControlPlaneStarting || launcherStatusDisconnected || busy || !controlPlaneIdle || projectIsOpen || projectIsChanging
+    : launcherControlPlaneStarting || launcherStatusDisconnected || controlMutation.isPending || !selectedStartable || selectedAlive;
+  const startDisabledReason = launcherControlPlaneStarting
+    ? copy.lifecycleStartingDetail
+    : launcherStatusDisconnected
+      ? copy.loadFailed
+      : selectedIsCurrent
       ? busy || !controlPlaneIdle
         ? copy.startDisabledBusy
         : projectIsOpen
@@ -1801,7 +1845,7 @@ export function LauncherRoute() {
       ? copy.lifecycleRunning
       : copy.lifecycleClosed;
   const launcherSummary = !status
-    ? copy.launcherOffline
+    ? launcherControlPlaneStarting || statusQuery.isPending ? copy.launcherMaintaining : copy.launcherOffline
     : copy.launcherMaintaining;
   const controlSummary = launcherControlLimited ? copy.controlLimited : copy.controlReady;
   const controlDetail = launcherControlLimited ? copy.controlLimitedDetail : copy.controlReadyDetail;
@@ -2193,7 +2237,7 @@ export function LauncherRoute() {
     { label: copy.stdout, value: guardian?.supervisor?.stdoutPath || "-" },
     { label: copy.stderr, value: guardian?.supervisor?.stderrPath || "-" },
   ];
-  const expectedStopDisconnect = statusQuery.isError && (lastControlOperation === "stop" || lastControlOperation === "force-stop" || launcherStatusDisconnected);
+  const expectedStopDisconnect = statusQuery.isError && !launcherControlPlaneStarting && (lastControlOperation === "stop" || lastControlOperation === "force-stop" || launcherStatusDisconnected);
   const trackedResult = trackedCommand
     ? (evidence?.results.recent ?? []).find((item) => item.commandId === trackedCommand.commandId)
     : undefined;
@@ -2299,48 +2343,82 @@ export function LauncherRoute() {
   return (
     <VDenseOpsPage
       className={styles.route}
-      fill={false}
+      bodyClassName={styles.routeBody}
+      fill
       hideHeader
       data-vui-domain-recipe="launcher-workbench"
       ariaLabel={copy.title}
     >
-      <LauncherBranchInstancesPanel
-        copy={copy}
-        items={branchItems}
-        selectedId={selectedBranchId}
-        onSelect={setSelectedInstanceId}
-        launcherTitle={branchInstancesQuery.data?.currentLauncherTitle}
-        launcherOnline={Boolean(status && !launcherStatusDisconnected && !launcherControlLimited)}
-        pendingOperation={pendingBranchOperation}
-        lifecyclePending={controlMutation.isPending}
-        onLifecycle={(instanceId, operation) => {
-          setSelectedInstanceId(instanceId);
-          controlMutation.mutate({ operation, instanceId });
-        }}
-      />
-      <Suspense fallback={<VStateSurface className={styles.notice} tone="loading" title={copy.loading} skeletonLines={2} />}>
-        <LauncherStartupSettingsPanel
-          copy={copy}
-          uiLang={uiLang}
-          setting={startupSettings}
-          configuredWindowMode={configuredWindowMode}
-          effectiveWindowModeLabel={workbenchWindowModeLabel(effectiveWindowMode, copy)}
-          windowModeDetail={windowModeDetail}
-          controlPortOverride={controlPortOverride}
-          backendPortOverride={backendPortOverride}
-          frontendPortOverride={frontendPortOverride}
-          pending={startupSettingsMutation.isPending || workbenchWindowSaveMutation.isPending}
-          pendingWindowMode={pendingWindowMode}
-          onSave={(nextSetting) => startupSettingsMutation.mutate(nextSetting)}
-          onWindowModeChange={(request) => workbenchWindowSaveMutation.mutate(request)}
-        />
-      </Suspense>
+      <div
+        className={styles.primaryRail}
+        data-vui-region="launcher-primary-rail"
+      >
+        <div className={styles.primaryColumn} data-vui-region="launcher-primary">
+          <LauncherBranchInstancesPanel
+            copy={copy}
+            items={branchItems}
+            selectedId={selectedBranchId}
+            onSelect={setSelectedInstanceId}
+            launcherTitle={branchInstancesQuery.data?.currentLauncherTitle}
+            launcherOnline={Boolean(status && !launcherStatusDisconnected && !launcherControlLimited)}
+            launcherReading={Boolean(
+              !status && (statusQuery.isPending || launcherControlPlaneStarting)
+            )}
+            listLoading={Boolean(
+              branchInstancesQuery.isPending || (branchInstancesQuery.isFetching && !branchInstancesQuery.data)
+            )}
+            pendingOperation={pendingBranchOperation}
+            lifecyclePending={controlMutation.isPending}
+            onLifecycle={(instanceId, operation) => {
+              setSelectedInstanceId(instanceId);
+              controlMutation.mutate({ operation, instanceId });
+            }}
+            onStopMany={(instanceIds) => {
+              if (instanceIds[0]) {
+                setSelectedInstanceId(instanceIds[0]);
+              }
+              controlMutation.mutate({ operation: "stop", instanceIds });
+            }}
+          />
+        </div>
+        <aside
+          className={styles.settingsRail}
+          data-vui-region="launcher-settings-rail"
+          aria-label={copy.startupSettings}
+        >
+          <Suspense fallback={<VStateSurface className={styles.notice} tone="loading" title={copy.loading} skeletonLines={2} />}>
+            <LauncherStartupSettingsPanel
+              copy={copy}
+              uiLang={uiLang}
+              setting={startupSettings}
+              configuredWindowMode={configuredWindowMode}
+              effectiveWindowModeLabel={workbenchWindowModeLabel(effectiveWindowMode, copy)}
+              windowModeDetail={windowModeDetail}
+              controlPortOverride={controlPortOverride}
+              backendPortOverride={backendPortOverride}
+              frontendPortOverride={frontendPortOverride}
+              pending={startupSettingsMutation.isPending || workbenchWindowSaveMutation.isPending}
+              pendingWindowMode={pendingWindowMode}
+              onSave={(nextSetting) => startupSettingsMutation.mutate(nextSetting)}
+              onWindowModeChange={(request) => workbenchWindowSaveMutation.mutate(request)}
+            />
+          </Suspense>
+        </aside>
+      </div>
 
-      {statusQuery.isError ? (
+      {statusQuery.isError && !launcherControlPlaneStarting ? (
         <VStateSurface
           className={styles.notice}
           tone={expectedStopDisconnect ? "info" : launcherControlLimited ? "unavailable" : "error"}
           title={expectedStopDisconnect ? copy.stoppedStatusUnavailable : launcherControlLimited ? copy.controlLimitedDetail : copy.loadFailed}
+        />
+      ) : null}
+      {launcherControlPlaneStarting ? (
+        <VStateSurface
+          className={styles.notice}
+          tone="loading"
+          title={copy.lifecycleStarting}
+          skeletonLines={2}
         />
       ) : null}
       {notice.text ? (

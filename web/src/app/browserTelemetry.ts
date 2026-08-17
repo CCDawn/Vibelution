@@ -11,6 +11,12 @@ export type BrowserTelemetryEventInput = {
 
 const TELEMETRY_ENDPOINT = "/api/runtime/browser-telemetry";
 const BYTES_PER_MEBIBYTE = 1024 * 1024;
+const MAX_FAILED_TELEMETRY_BODIES = 20;
+
+type ControlToken = { header: string; token: string };
+
+const failedTelemetryBodies: string[] = [];
+let flushingFailedTelemetry = false;
 
 type BrowserPerformanceWithMemory = Performance & {
   memory?: {
@@ -121,6 +127,74 @@ export function collectBrowserMemorySnapshot(): Record<string, unknown> {
   };
 }
 
+function warnTelemetryDeliveryFailure(error: unknown): void {
+  // Never post another telemetry event here: delivery failure must not recurse.
+  if (typeof console !== "undefined" && typeof console.warn === "function") {
+    console.warn("browser telemetry delivery failed", compactText(summarizeUnknown(error, 180), 200));
+  }
+}
+
+function rememberFailedTelemetryBody(body: string, error: unknown): void {
+  warnTelemetryDeliveryFailure(error);
+  failedTelemetryBodies.push(body);
+  while (failedTelemetryBodies.length > MAX_FAILED_TELEMETRY_BODIES) {
+    failedTelemetryBodies.shift();
+  }
+}
+
+function postTelemetryBody(control: ControlToken, body: string): Promise<Response> {
+  return fetch(TELEMETRY_ENDPOINT, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      [control.header]: control.token,
+    },
+    body,
+    credentials: "same-origin",
+    keepalive: true,
+  });
+}
+
+async function flushFailedTelemetryBodies(control: ControlToken): Promise<void> {
+  if (flushingFailedTelemetry || failedTelemetryBodies.length === 0) {
+    return;
+  }
+  flushingFailedTelemetry = true;
+  try {
+    while (failedTelemetryBodies.length > 0) {
+      const pending = failedTelemetryBodies[0];
+      let response: Response;
+      try {
+        response = await postTelemetryBody(control, pending);
+      } catch (error) {
+        warnTelemetryDeliveryFailure(error);
+        return;
+      }
+      if (response.status === 403) {
+        clearControlToken();
+        return;
+      }
+      if (!response.ok) {
+        warnTelemetryDeliveryFailure(`HTTP ${response.status}`);
+        return;
+      }
+      failedTelemetryBodies.shift();
+    }
+  } finally {
+    flushingFailedTelemetry = false;
+  }
+}
+
+export function peekBrowserTelemetryDeliveryBufferForTests(): readonly string[] {
+  return failedTelemetryBodies.slice();
+}
+
+export function resetBrowserTelemetryDeliveryBufferForTests(): void {
+  failedTelemetryBodies.length = 0;
+  flushingFailedTelemetry = false;
+}
+
 export function postBrowserTelemetry(
   payload: BrowserTelemetryEventInput,
   _options?: { preferBeacon?: boolean },
@@ -142,25 +216,21 @@ export function postBrowserTelemetry(
     },
   });
   void getControlToken()
-    .then((control) =>
-      fetch(TELEMETRY_ENDPOINT, {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-          [control.header]: control.token,
-        },
-        body,
-        credentials: "same-origin",
-        keepalive: true,
-      }),
-    )
-    .then((response) => {
+    .then(async (control) => {
+      const response = await postTelemetryBody(control, body);
       if (response.status === 403) {
         clearControlToken();
+        return;
       }
+      if (!response.ok) {
+        rememberFailedTelemetryBody(body, `HTTP ${response.status}`);
+        return;
+      }
+      await flushFailedTelemetryBodies(control);
     })
-    .catch(() => {});
+    .catch((error: unknown) => {
+      rememberFailedTelemetryBody(body, error);
+    });
 }
 
 function finiteNumber(value: unknown): number {

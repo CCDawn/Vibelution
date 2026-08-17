@@ -16,6 +16,7 @@ from typing import Any
 
 from core.infrastructure import developer_sandbox, git_process
 from core.logging import debug as _debug_logger
+from vibelution_storage import resolve_project_logs_home, resolve_project_memory_home
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 CONTENT_LIMIT = 8000
@@ -92,7 +93,7 @@ def _dir_signature(path: Path) -> str:
 def _memory_overview_section_signature(root: Path, section_id: str) -> str | None:
     normalized = str(section_id or "").strip()
     if normalized == "project-memory":
-        memory_dir = root / ".docs" / "project-memory"
+        memory_dir = resolve_project_memory_home(root)
         lanes_dir = memory_dir / "lanes"
         return "|".join(
             [
@@ -141,7 +142,7 @@ def _memory_overview_section_signature(root: Path, section_id: str) -> str | Non
             ]
         )
     if normalized == "runtime-scene-evidence":
-        return _dir_signature(root / "logs" / "runtime_scenes")
+        return _dir_signature(resolve_project_logs_home(root) / "runtime_scenes")
     return None
 
 
@@ -854,7 +855,7 @@ def _load_base_memory_section(root: Path, section_id: str, warnings: list[str]) 
 
 
 def _project_memory_section(root: Path, warnings: list[str]) -> dict[str, Any]:
-    project_memory_dir = root / ".docs" / "project-memory"
+    project_memory_dir = resolve_project_memory_home(root)
     memory_json_path = project_memory_dir / "memory.json"
     memory_payload = _load_json(memory_json_path, fallback={})
     lane_payloads = []
@@ -876,7 +877,7 @@ def _project_memory_section(root: Path, warnings: list[str]) -> dict[str, Any]:
     raw_summary_payload = memory_payload.get("summary") if isinstance(memory_payload, dict) else {}
     summary_payload = raw_summary_payload if isinstance(raw_summary_payload, dict) else {}
     summary = (
-        f"仓库级项目记忆，当前焦点：{summary_payload.get('focus') or '未记录'}。"
+        f"项目级外部记忆，当前焦点：{summary_payload.get('focus') or '未记录'}。"
         "它服务于开发交接和页面展示，显式读取后 agent 可使用，但不会默认进入运行 prompt。"
     )
     items: list[dict[str, Any]] = []
@@ -899,7 +900,7 @@ def _project_memory_section(root: Path, warnings: list[str]) -> dict[str, Any]:
         (index_path, "INDEX.md", "project_memory_index"),
         (project_memory_dir / "profile.json", "profile.json", "project_memory_profile"),
         (project_memory_dir / "inbox.json", "inbox.json", "project_memory_inbox"),
-        (root / "PROJECT_MEMORY.html", "PROJECT_MEMORY.html", "project_memory_html"),
+        (project_memory_dir / "PROJECT_MEMORY.html", "PROJECT_MEMORY.html", "project_memory_html"),
     ]:
         items.append(
             _file_item(
@@ -1616,7 +1617,7 @@ def _supervised_evolution_memory_section(root: Path, sub_timings: list[dict[str,
 
 
 def _runtime_scene_memory_section(root: Path, sub_timings: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    scene_root = root / "logs" / "runtime_scenes"
+    scene_root = resolve_project_logs_home(root) / "runtime_scenes"
     scene_dirs = []
     if scene_root.exists():
         scene_dirs = _time_memory_overview_step(

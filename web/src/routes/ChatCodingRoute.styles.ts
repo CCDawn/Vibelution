@@ -270,6 +270,8 @@ const styles: Record<string, string> = {
     `vui-routes-chatcodingroute sessionLoadMoreButton min-w-0 ${vuiControlQuietClass}`,
   sessionLoadMoreStatus:
     "vui-routes-chatcodingroute sessionLoadMoreStatus min-w-0",
+  sessionBulkBar:
+    "vui-routes-chatcodingroute sessionBulkBar mx-2 mb-2 min-w-0",
   tab:
     `vui-routes-chatcodingroute tab min-w-0 ${vuiControlQuietClass}`,
   tabActive:

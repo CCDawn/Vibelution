@@ -481,6 +481,11 @@ def load_scoped_artifact_payload(
         "smoke_release",
         "frozen_protocol",
         "evaluation_report",
+        "hypothesis_set",
+        "protocol_draft",
+        "protocol_review_report",
+        "iteration_decision",
+        "version_governance_record",
     }:
         from .workflow_artifact_store import load_workflow_artifact_payload
 

@@ -11,6 +11,7 @@
     "check:elk-worker-handshake": "node scripts/checkElkWorkerHandshake.mjs",
     "preview": "vite preview --host 127.0.0.1 --port 4173",
     "test": "vitest run",
+    "test:changed": "vitest run --changed",
     "test:parallel": "vitest run --maxWorkers=50%",
     "bun:dev": "vite",
     "bun:build": "tsc -b && vite build",

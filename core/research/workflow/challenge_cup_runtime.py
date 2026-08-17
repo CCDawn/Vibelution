@@ -23,6 +23,11 @@ from langgraph.types import Command, interrupt
 
 from core.research.workflow.contracts import ExecutionReceipt, PendingAction
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.research.workflow.iteration_decisions import (
+    IterationDecisionError,
+    route_target_after_governance,
+    route_target_for_decision,
+)
 from core.research.workflow.models import ActorKind
 
 
@@ -233,13 +238,13 @@ def route_after_iteration_decision(
     if state.get("blocked_outcome"):
         return END  # type: ignore[return-value]
     decision = str(state.get("branch_decision") or "")
-    if decision == "rerun_same_protocol":
-        return "controlled_run"
-    if decision == "revise_protocol":
+    try:
+        target = route_target_for_decision(decision)
+    except IterationDecisionError as exc:
+        raise ValueError(f"unknown iteration decision {decision!r}") from exc
+    if target is None:
         return END  # type: ignore[return-value]
-    if decision in ("promote_candidate", "rollback_candidate", "stop"):
-        return "version_governance"
-    raise ValueError(f"unknown iteration decision {decision!r}")
+    return target  # type: ignore[return-value]
 
 
 def route_after_version_governance(
@@ -248,11 +253,10 @@ def route_after_version_governance(
     if state.get("blocked_outcome"):
         return END  # type: ignore[return-value]
     decision = str(state.get("branch_decision") or "")
-    if decision == "promote_candidate":
-        return "candidate_promotion"
-    if decision in ("stop", "rollback_candidate"):
-        return "result_package"
-    raise ValueError(f"unknown governed decision {decision!r}")
+    try:
+        return route_target_after_governance(decision)  # type: ignore[return-value]
+    except IterationDecisionError as exc:
+        raise ValueError(f"unknown governed decision {decision!r}") from exc
 
 
 def _route_after_linear(source: str, target: str):
@@ -327,6 +331,59 @@ def build_formal_graph() -> StateGraph:
     return builder
 
 
+def _is_concurrent_update_error(exc: BaseException) -> bool:
+    text = str(exc)
+    return (
+        type(exc).__name__ == "InvalidUpdateError"
+        or "Can receive only one value per step" in text
+        or "INVALID_CONCURRENT_GRAPH_UPDATE" in text
+    )
+
+
+def _retry_update(dispatch: GraphDispatch) -> dict[str, Any]:
+    """Command.update for retry while an interrupt is still on the thread.
+
+    The current interrupt keeps the destination node from running in the
+    same superstep, so last-value keys here only split ``active_node_id``
+    from the persisted interrupt (SCI-096). Do not reuse this for
+    ``enter_node``: an empty next queue would run the destination node
+    and raise INVALID_CONCURRENT_GRAPH_UPDATE.
+    """
+    update: dict[str, Any] = {
+        "run_id": dispatch.run_id,
+        "active_node_id": dispatch.node_id,
+        "active_attempt": dispatch.attempt,
+        "node_attempts": {dispatch.node_id: dispatch.attempt},
+    }
+    if dispatch.team_id:
+        update["team_id"] = dispatch.team_id
+    if dispatch.input_snapshot_hash:
+        update["input_snapshot_hash"] = dispatch.input_snapshot_hash
+    if dispatch.state_update:
+        update.update(dict(dispatch.state_update))
+    return update
+
+
+def _enter_update(dispatch: GraphDispatch) -> dict[str, Any]:
+    """Values for a prior ``update_state`` superstep before Command.goto.
+
+    ``run_id`` is last-value and already on the thread. Putting it in the
+    same superstep as the destination node's ``return {**state}`` raises
+    INVALID_CONCURRENT_GRAPH_UPDATE.
+    """
+    update: dict[str, Any] = {
+        "active_node_id": dispatch.node_id,
+        "active_attempt": dispatch.attempt,
+        "node_attempts": {dispatch.node_id: dispatch.attempt},
+    }
+    if dispatch.state_update:
+        for key, value in dict(dispatch.state_update).items():
+            if key in {"run_id", "team_id", "input_snapshot_hash"}:
+                continue
+            update[key] = value
+    return update
+
+
 class ChallengeCupGraphCoordinator:
     """Owns the checkpointer and compiles the formal graph per invocation."""
 
@@ -374,6 +431,69 @@ class ChallengeCupGraphCoordinator:
         result = graph.invoke(state, self._config(dispatch.run_id))
         return self._dispatch_result(dispatch, result, graph)
 
+    def _ensure_readable(self, graph: Any, run_id: str) -> None:
+        """Drop colliding pending writes so ``get_state`` can read the thread.
+
+        A failed Command.goto leaves NULL_TASK_ID writes plus the destination
+        node's channel writes on the same checkpoint. ``get_state`` applies
+        both and raises INVALID_CONCURRENT_GRAPH_UPDATE. Cloning the
+        checkpoint (``as_node='__copy__'``) is LangGraph's fork path; it does
+        not apply those writes. Not business advancement.
+        """
+        thread = self._config(run_id)
+        try:
+            graph.get_state(thread)
+        except Exception as exc:
+            if not _is_concurrent_update_error(exc):
+                raise
+            graph.update_state(thread, None, as_node="__copy__")
+
+    def _read_state(
+        self, graph: Any, config: dict[str, Any], *, heal: bool = False
+    ) -> Any:
+        run_id = str((config.get("configurable") or {}).get("thread_id") or "")
+        thread = self._config(run_id) if run_id else config
+        try:
+            return graph.get_state(thread)
+        except Exception as exc:
+            if not heal or not _is_concurrent_update_error(exc):
+                raise
+            self._ensure_readable(graph, run_id)
+            return graph.get_state(thread)
+
+    def _goto_node(self, graph: Any, dispatch: GraphDispatch) -> GraphDispatchResult:
+        """Re-enter a node without writing last-value keys in the goto step.
+
+        Sequence: copy-away colliding writes, clear leftover tasks with
+        ``as_node=END`` (checkpoint hygiene, not a workflow node), write
+        routing fields in their own superstep, then invoke with thread_id
+        only. Command.goto must not share a superstep with ``run_id``.
+        """
+        thread = self._config(dispatch.run_id)
+        self._ensure_readable(graph, dispatch.run_id)
+        try:
+            graph.update_state(thread, None, as_node=END)
+        except Exception as exc:
+            if not _is_concurrent_update_error(exc):
+                raise
+            graph.update_state(thread, None, as_node="__copy__")
+            graph.update_state(thread, None, as_node=END)
+        values = _enter_update(dispatch)
+        try:
+            graph.update_state(thread, values)
+        except Exception:
+            pass
+        state = graph.get_state(thread)
+        next_ids = {str(node_id) for node_id in (state.next or ())}
+        pending = _pending_from_state(state)
+        if dispatch.node_id in next_ids or (
+            pending is not None and pending.node_id == dispatch.node_id
+        ):
+            result = graph.invoke(None, thread)
+        else:
+            result = graph.invoke(Command(goto=dispatch.node_id), thread)
+        return self._dispatch_result(dispatch, result, graph)
+
     def retry_attempt(self, dispatch: GraphDispatch) -> GraphDispatchResult:
         """Retry: re-enter the target node via input Command(goto=...) with a
         new frozen attempt (never update_state(as_node))."""
@@ -382,15 +502,19 @@ class ChallengeCupGraphCoordinator:
             result = graph.invoke(
                 Command(
                     goto=dispatch.node_id,
-                    update={
-                        "active_node_id": dispatch.node_id,
-                        "active_attempt": dispatch.attempt,
-                        "node_attempts": {dispatch.node_id: dispatch.attempt},
-                    },
+                    update=_retry_update(dispatch),
                 ),
                 self._config(dispatch.run_id),
             )
             return self._dispatch_result(dispatch, result, graph)
+        finally:
+            stack.close()
+
+    def enter_node(self, dispatch: GraphDispatch) -> GraphDispatchResult:
+        """Re-enter a node after the thread has no interrupt (routed to END)."""
+        graph, stack = self._compile()
+        try:
+            return self._goto_node(graph, dispatch)
         finally:
             stack.close()
 
@@ -399,13 +523,20 @@ class ChallengeCupGraphCoordinator:
             raise ValueError("resume_action requires an ExecutionReceipt")
         graph, stack = self._compile()
         try:
-            command = Command(resume=dispatch.receipt.to_dict())
+            config = self._config(dispatch.run_id)
+            receipt_payload = dispatch.receipt.to_dict()
+            resume_value: Any = _resume_value_for_state(
+                self._read_state(graph, config, heal=True),
+                node_id=dispatch.node_id,
+                receipt_payload=receipt_payload,
+            )
+            command = Command(resume=resume_value)
             if dispatch.state_update:
                 command = Command(
-                    resume=dispatch.receipt.to_dict(),
+                    resume=resume_value,
                     update=dict(dispatch.state_update),
                 )
-            result = graph.invoke(command, self._config(dispatch.run_id))
+            result = graph.invoke(command, config)
             return self._dispatch_result(dispatch, result, graph)
         finally:
             stack.close()
@@ -431,25 +562,40 @@ class ChallengeCupGraphCoordinator:
         graph, stack = self._compile()
         try:
             config = self._config(dispatch.run_id)
-            state = graph.get_state(config)
+            state = self._read_state(graph, config, heal=True)
             interrupted_nodes = {
                 str(item.value.get("nodeId") or "")
                 for task in state.tasks
                 for item in task.interrupts
                 if isinstance(item.value, Mapping)
             }
+            if not interrupted_nodes:
+                for item in getattr(state, "interrupts", None) or ():
+                    value = getattr(item, "value", None)
+                    if isinstance(value, Mapping) and value.get("nodeId"):
+                        interrupted_nodes.add(str(value.get("nodeId") or ""))
+            if not interrupted_nodes:
+                interrupted_nodes = {
+                    str(node_id) for node_id in (state.next or ())
+                }
             if dispatch.node_id not in interrupted_nodes:
                 raise RuntimeError(
                     "checkpoint cannot be replayed for requested node: "
                     f"expected {dispatch.node_id}, found {sorted(interrupted_nodes)}"
                 )
+            replay_values: dict[str, Any] = {
+                "run_id": dispatch.run_id,
+                "active_node_id": dispatch.node_id,
+                "active_attempt": dispatch.attempt,
+                "node_attempts": {dispatch.node_id: dispatch.attempt},
+            }
+            if dispatch.team_id:
+                replay_values["team_id"] = dispatch.team_id
+            if dispatch.input_snapshot_hash:
+                replay_values["input_snapshot_hash"] = dispatch.input_snapshot_hash
             replay_config = graph.update_state(
                 state.config,
-                {
-                    "active_node_id": dispatch.node_id,
-                    "active_attempt": dispatch.attempt,
-                    "node_attempts": {dispatch.node_id: dispatch.attempt},
-                },
+                replay_values,
             )
             result = graph.invoke(None, replay_config)
             return self._dispatch_result(dispatch, result, graph)
@@ -459,13 +605,8 @@ class ChallengeCupGraphCoordinator:
     def snapshot(self, run_id: str) -> Mapping[str, Any]:
         graph, stack = self._compile()
         try:
-            state = graph.get_state(self._config(run_id))
-            interrupts = getattr(state, "interrupts", None) or ()
-            pending_action = None
-            if interrupts:
-                pending_action = PendingAction.from_dict(
-                    dict(interrupts[-1].value or {})
-                ).to_dict()
+            state = self._read_state(graph, self._config(run_id), heal=True)
+            pending = _pending_from_state(state)
             return {
                 "checkpointId": _checkpoint_id_of(state),
                 "nextNodeIds": [str(node) for node in state.next or ()],
@@ -474,7 +615,7 @@ class ChallengeCupGraphCoordinator:
                 # recompile can expose an empty ``state.next`` while retaining
                 # the interrupt, so callers must not infer the active node from
                 # the task queue alone.
-                "pendingAction": pending_action,
+                "pendingAction": pending.to_dict() if pending is not None else None,
             }
         finally:
             stack.close()
@@ -544,24 +685,81 @@ class ChallengeCupGraphCoordinator:
         invoke_result: Mapping[str, Any] | None,
         graph: Any,
     ) -> GraphDispatchResult:
-        state = graph.get_state(self._config(dispatch.run_id))
+        state = self._read_state(graph, self._config(dispatch.run_id))
         values = dict(state.values or {})
         next_node_ids = tuple(str(node_id) for node_id in state.next or ())
-        pending = None
-        interrupts = getattr(state, "interrupts", None) or ()
-        if interrupts:
-            # checkpoint 中的 interrupt payload 是权威 PendingAction。
-            # restart/retry 会先消费旧 interrupt 再写入新 attempt 的 interrupt；
-            # 取最后一个（最新写入）作为权威 pending。
-            pending = PendingAction.from_dict(dict(interrupts[-1].value or {}))
+        pending = _pending_from_state(state)
         return GraphDispatchResult(
             dispatch_kind=dispatch.dispatch_kind,
             pending_action=pending,
             next_node_ids=next_node_ids,
             checkpoint_id=str(_checkpoint_id_of(state) or ""),
             state=values,
-            completed=not next_node_ids and not interrupts,
+            completed=not next_node_ids and pending is None,
         )
+
+
+def _resume_value_for_state(
+    state: Any, *, node_id: str, receipt_payload: Mapping[str, Any]
+) -> Any:
+    """Use an interrupt-id map when LangGraph has more than one pending interrupt."""
+    interrupts = [
+        item
+        for item in (getattr(state, "interrupts", None) or ())
+        if getattr(item, "id", None)
+    ]
+    if len(interrupts) <= 1:
+        return receipt_payload
+    matched: dict[str, Any] = {}
+    for item in interrupts:
+        value = item.value if isinstance(getattr(item, "value", None), Mapping) else {}
+        if str(value.get("nodeId") or "") == node_id:
+            matched[str(item.id)] = receipt_payload
+    if len(matched) == 1:
+        return matched
+    raise RuntimeError(
+        f"cannot resume {node_id}: {len(interrupts)} interrupts, matched {len(matched)}"
+    )
+
+
+def _interrupt_payloads(state: Any) -> list[dict[str, Any]]:
+    payloads: list[dict[str, Any]] = []
+    for task in getattr(state, "tasks", None) or ():
+        for item in getattr(task, "interrupts", None) or ():
+            value = getattr(item, "value", None)
+            if isinstance(value, Mapping) and value.get("nodeId"):
+                payloads.append(dict(value))
+    if payloads:
+        return payloads
+    for item in getattr(state, "interrupts", None) or ():
+        value = getattr(item, "value", None)
+        if isinstance(value, Mapping) and value.get("nodeId"):
+            payloads.append(dict(value))
+    return payloads
+
+
+def _pending_from_state(state: Any) -> PendingAction | None:
+    """Prefer task interrupts with a real runId; ``state.interrupts[-1]`` can
+    be a Command.goto leftover that still shows ``source_finding`` with an
+    empty runId while ``values.active_node_id`` was overwritten."""
+    payloads = _interrupt_payloads(state)
+    if not payloads:
+        return None
+    next_ids = {str(node_id) for node_id in (getattr(state, "next", None) or ())}
+
+    def rank(payload: Mapping[str, Any]) -> tuple[int, int, int]:
+        node_id = str(payload.get("nodeId") or "")
+        return (
+            0 if node_id in next_ids else 1,
+            0 if str(payload.get("runId") or "").strip() else 1,
+            0 if str(payload.get("actionId") or "").strip() else 1,
+        )
+
+    payloads.sort(key=rank)
+    try:
+        return PendingAction.from_dict(payloads[0])
+    except (TypeError, ValueError, KeyError):
+        return None
 
 
 def _checkpoint_id_of(state: Any) -> str | None:

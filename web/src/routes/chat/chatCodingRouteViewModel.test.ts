@@ -6,6 +6,7 @@ import {
   getResizeBounds,
   isBusyPhase,
   normalizePanelWidths,
+  formatChatRuntimeMismatchLine,
   runtimeMatchesSelectedChatSession,
   shouldSuppressComposerErrorForTurnError,
 } from "./chatCodingRouteViewModel";
@@ -33,6 +34,24 @@ describe("chat coding route view model", () => {
     expect(formatTokenSpeedValue(0.4)).toBe("<1 t/s");
     expect(formatTokenSpeedValue(3.6)).toBe("4 t/s");
     expect(formatTokenSpeedValue(0)).toBe("");
+  });
+
+  it("describes other running sessions without using a sorted first id", () => {
+    expect(formatChatRuntimeMismatchLine({
+      otherRunningSessionIds: ["session-flash"],
+      resolveSessionLabel: () => "[stress] fl1",
+      lang: "zh",
+    })).toBe("运行器正在处理：[stress] fl1");
+    expect(formatChatRuntimeMismatchLine({
+      otherRunningSessionIds: ["session-ds", "session-flash"],
+      resolveSessionLabel: () => "OpenCode DeepSeek Pro",
+      lang: "zh",
+    })).toBe("另有 2 个会话在运行");
+    expect(formatChatRuntimeMismatchLine({
+      otherRunningSessionIds: [],
+      resolveSessionLabel: () => "ignored",
+      lang: "en",
+    })).toBe("");
   });
 
   it("keeps idle active-session runtime telemetry attached to the selected session", () => {

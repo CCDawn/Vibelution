@@ -15,12 +15,29 @@ from core.launcher.api_contract import (
     DeveloperCleanupApplyPayload,
     DeveloperCleanupPreviewPayload,
     DeveloperModePayload,
+    LauncherAcceptedCommandResponse,
+    LauncherBranchInstanceListResponse,
+    LauncherCleanupPlanResponse,
+    LauncherDesktopActionResponse,
+    LauncherDesktopSessionResponse,
+    LauncherDeveloperModeSettingResponse,
+    LauncherDeveloperModeUpdateResponse,
+    LauncherDeveloperNoiseOverviewResponse,
+    LauncherFreshnessResponse,
+    LauncherLifecycleIntentResponse,
     LauncherRuntimeSceneEventPayload,
+    LauncherRuntimeSceneEventResponse,
     LauncherStartupSettingsPayload,
+    LauncherStartupSettingsResponse,
+    LauncherStartupSettingsUpdateResponse,
+    LauncherStatusResponse,
+    LauncherWorkbenchCloseResponse,
     LifecycleIntentPayload,
     WorkbenchCloseTransactionPayload,
     WorkbenchCloseWindowClosedPayload,
     WorkbenchWindowModePayload,
+    WorkbenchWindowModeSettingResponse,
+    WorkbenchWindowModeUpdateResponse,
 )
 from core.launcher import service as launcher_service
 from core.launcher.desktop_session_store import DesktopSessionClosed, DesktopSessionRevisionConflict
@@ -75,17 +92,29 @@ def _workbench_close_transaction_response(operation):
         ) from exc
 
 
-@router.get("/launcher/status")
+@router.get(
+    "/launcher/status",
+    response_model=LauncherStatusResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_status() -> dict:
     return launcher_service.get_launcher_status()
 
 
-@router.get("/launcher/freshness")
+@router.get(
+    "/launcher/freshness",
+    response_model=LauncherFreshnessResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_freshness() -> dict:
     return launcher_service.get_launcher_freshness()
 
 
-@router.get("/launcher/branch-instances")
+@router.get(
+    "/launcher/branch-instances",
+    response_model=LauncherBranchInstanceListResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_branch_instances() -> dict:
     return launcher_service.list_launcher_branch_instances()
 
@@ -115,27 +144,51 @@ def _branch_instance_lifecycle_response(payload: BranchInstanceLifecyclePayload,
         ) from exc
 
 
-@router.post("/launcher/branch-instances/start", status_code=202)
+@router.post(
+    "/launcher/branch-instances/start",
+    status_code=202,
+    response_model=LauncherAcceptedCommandResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_branch_instance_start(payload: BranchInstanceLifecyclePayload, request: Request) -> dict:
     return _branch_instance_lifecycle_response(payload, "start", request)
 
 
-@router.post("/launcher/branch-instances/stop", status_code=202)
+@router.post(
+    "/launcher/branch-instances/stop",
+    status_code=202,
+    response_model=LauncherAcceptedCommandResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_branch_instance_stop(payload: BranchInstanceLifecyclePayload, request: Request) -> dict:
     return _branch_instance_lifecycle_response(payload, "stop", request)
 
 
-@router.post("/launcher/branch-instances/force-stop", status_code=202)
+@router.post(
+    "/launcher/branch-instances/force-stop",
+    status_code=202,
+    response_model=LauncherAcceptedCommandResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_branch_instance_force_stop(payload: BranchInstanceLifecyclePayload, request: Request) -> dict:
     return _branch_instance_lifecycle_response(payload, "force-stop", request)
 
 
-@router.post("/launcher/branch-instances/restart", status_code=202)
+@router.post(
+    "/launcher/branch-instances/restart",
+    status_code=202,
+    response_model=LauncherAcceptedCommandResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_branch_instance_restart(payload: BranchInstanceLifecyclePayload, request: Request) -> dict:
     return _branch_instance_lifecycle_response(payload, "restart", request)
 
 
-@router.post("/launcher/branch-instances/cleanup")
+@router.post(
+    "/launcher/branch-instances/cleanup",
+    response_model=LauncherCleanupPlanResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_branch_instances_cleanup(payload: BranchInstanceCleanupPayload) -> dict:
     try:
         return launcher_service.cleanup_launcher_branch_instances(
@@ -149,17 +202,29 @@ def launcher_branch_instances_cleanup(payload: BranchInstanceCleanupPayload) -> 
         ) from exc
 
 
-@router.get("/launcher/settings/workbench-window")
+@router.get(
+    "/launcher/settings/workbench-window",
+    response_model=WorkbenchWindowModeSettingResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_workbench_window_setting() -> dict:
     return launcher_service.get_workbench_window_mode_setting()
 
 
-@router.get("/launcher/settings/startup")
+@router.get(
+    "/launcher/settings/startup",
+    response_model=LauncherStartupSettingsResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_startup_settings() -> dict:
     return launcher_service.get_launcher_startup_settings()
 
 
-@router.put("/launcher/settings/startup")
+@router.put(
+    "/launcher/settings/startup",
+    response_model=LauncherStartupSettingsUpdateResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_update_startup_settings(payload: LauncherStartupSettingsPayload) -> dict:
     try:
         return launcher_service.update_launcher_startup_settings(payload.model_dump())
@@ -169,7 +234,11 @@ def launcher_update_startup_settings(payload: LauncherStartupSettingsPayload) ->
         raise HTTPException(status_code=400, detail={"code": "invalid_launcher_startup_settings", "message": str(exc)}) from exc
 
 
-@router.put("/launcher/settings/workbench-window")
+@router.put(
+    "/launcher/settings/workbench-window",
+    response_model=WorkbenchWindowModeUpdateResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_update_workbench_window_setting(payload: WorkbenchWindowModePayload) -> dict:
     try:
         return launcher_service.update_workbench_window_mode(payload.mode, base_hash=payload.baseHash)
@@ -179,12 +248,20 @@ def launcher_update_workbench_window_setting(payload: WorkbenchWindowModePayload
         raise HTTPException(status_code=400, detail={"code": "invalid_workbench_window_mode", "message": str(exc)}) from exc
 
 
-@router.get("/launcher/developer-mode")
+@router.get(
+    "/launcher/developer-mode",
+    response_model=LauncherDeveloperModeSettingResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_developer_mode_setting() -> dict:
     return launcher_service.get_launcher_developer_mode_setting()
 
 
-@router.put("/launcher/developer-mode")
+@router.put(
+    "/launcher/developer-mode",
+    response_model=LauncherDeveloperModeUpdateResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_update_developer_mode(payload: DeveloperModePayload) -> dict:
     try:
         return launcher_service.update_launcher_developer_mode(payload.enabled, base_hash=payload.baseHash)
@@ -194,12 +271,20 @@ def launcher_update_developer_mode(payload: DeveloperModePayload) -> dict:
         raise HTTPException(status_code=400, detail={"code": "invalid_developer_mode", "message": str(exc)}) from exc
 
 
-@router.get("/launcher/developer-mode/noise-overview")
+@router.get(
+    "/launcher/developer-mode/noise-overview",
+    response_model=LauncherDeveloperNoiseOverviewResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_developer_mode_noise_overview() -> dict:
     return launcher_service.get_launcher_developer_noise_overview()
 
 
-@router.post("/launcher/developer-mode/cleanup/preview")
+@router.post(
+    "/launcher/developer-mode/cleanup/preview",
+    response_model=LauncherCleanupPlanResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_preview_developer_cleanup(payload: DeveloperCleanupPreviewPayload) -> dict:
     try:
         return launcher_service.preview_launcher_developer_cleanup(payload.action)
@@ -209,7 +294,11 @@ def launcher_preview_developer_cleanup(payload: DeveloperCleanupPreviewPayload) 
         raise HTTPException(status_code=400, detail={"code": "invalid_developer_cleanup_action", "message": str(exc)}) from exc
 
 
-@router.post("/launcher/developer-mode/cleanup/apply")
+@router.post(
+    "/launcher/developer-mode/cleanup/apply",
+    response_model=LauncherCleanupPlanResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_apply_developer_cleanup(payload: DeveloperCleanupApplyPayload) -> dict:
     try:
         return launcher_service.apply_launcher_developer_cleanup(payload.model_dump())
@@ -221,12 +310,22 @@ def launcher_apply_developer_cleanup(payload: DeveloperCleanupApplyPayload) -> d
         raise HTTPException(status_code=400, detail={"code": "invalid_developer_cleanup_apply", "message": str(exc)}) from exc
 
 
-@router.post("/launcher/start", status_code=202)
+@router.post(
+    "/launcher/start",
+    status_code=202,
+    response_model=LauncherAcceptedCommandResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_start() -> dict:
     return launcher_service.request_launcher_start()
 
 
-@router.post("/launcher/stop", status_code=202)
+@router.post(
+    "/launcher/stop",
+    status_code=202,
+    response_model=LauncherAcceptedCommandResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_stop(request: Request) -> dict:
     try:
         return launcher_service.request_launcher_stop(_request_audit(request, operation="stop"))
@@ -241,12 +340,22 @@ def launcher_stop(request: Request) -> dict:
         ) from exc
 
 
-@router.post("/launcher/force-stop", status_code=202)
+@router.post(
+    "/launcher/force-stop",
+    status_code=202,
+    response_model=LauncherAcceptedCommandResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_force_stop(request: Request) -> dict:
     return launcher_service.request_launcher_force_stop(_request_audit(request, operation="force-stop"))
 
 
-@router.post("/launcher/restart", status_code=202)
+@router.post(
+    "/launcher/restart",
+    status_code=202,
+    response_model=LauncherAcceptedCommandResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_restart() -> dict:
     try:
         return launcher_service.request_launcher_restart()
@@ -261,7 +370,12 @@ def launcher_restart() -> dict:
         ) from exc
 
 
-@router.post("/launcher/rebuild-and-start", status_code=202)
+@router.post(
+    "/launcher/rebuild-and-start",
+    status_code=202,
+    response_model=LauncherAcceptedCommandResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_rebuild_and_start() -> dict:
     try:
         return launcher_service.request_launcher_rebuild_and_start()
@@ -275,7 +389,13 @@ def launcher_rebuild_and_start() -> dict:
             },
         ) from exc
 
-@router.post("/launcher/lifecycle-intents", status_code=202)
+
+@router.post(
+    "/launcher/lifecycle-intents",
+    status_code=202,
+    response_model=LauncherLifecycleIntentResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_submit_lifecycle_intent(payload: LifecycleIntentPayload) -> dict:
     try:
         return launcher_service.submit_lifecycle_intent(payload.model_dump())
@@ -286,7 +406,11 @@ def launcher_submit_lifecycle_intent(payload: LifecycleIntentPayload) -> dict:
         ) from exc
 
 
-@router.get("/launcher/lifecycle-intents/{intent_id}")
+@router.get(
+    "/launcher/lifecycle-intents/{intent_id}",
+    response_model=LauncherLifecycleIntentResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_get_lifecycle_intent(intent_id: str) -> dict:
     result = launcher_service.get_lifecycle_intent(intent_id)
     if not result:
@@ -294,14 +418,23 @@ def launcher_get_lifecycle_intent(intent_id: str) -> dict:
     return result
 
 
-@router.post("/launcher/workbench-close-transactions", status_code=202)
+@router.post(
+    "/launcher/workbench-close-transactions",
+    status_code=202,
+    response_model=LauncherWorkbenchCloseResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_submit_workbench_close_transaction(payload: WorkbenchCloseTransactionPayload) -> dict:
     return _workbench_close_transaction_response(
         lambda: launcher_service.submit_workbench_close_transaction(payload.model_dump())
     )
 
 
-@router.get("/launcher/workbench-close-transactions/{close_id}")
+@router.get(
+    "/launcher/workbench-close-transactions/{close_id}",
+    response_model=LauncherWorkbenchCloseResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_get_workbench_close_transaction(close_id: str) -> dict:
     result = launcher_service.get_workbench_close_transaction(close_id)
     if not result:
@@ -309,7 +442,12 @@ def launcher_get_workbench_close_transaction(close_id: str) -> dict:
     return result
 
 
-@router.post("/launcher/workbench-close-transactions/{close_id}/window-closed", status_code=202)
+@router.post(
+    "/launcher/workbench-close-transactions/{close_id}/window-closed",
+    status_code=202,
+    response_model=LauncherWorkbenchCloseResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_ack_workbench_close_transaction_window_closed(
     close_id: str, payload: WorkbenchCloseWindowClosedPayload
 ) -> dict:
@@ -318,7 +456,11 @@ def launcher_ack_workbench_close_transaction_window_closed(
     )
 
 
-@router.post("/launcher/desktop-actions/claim")
+@router.post(
+    "/launcher/desktop-actions/claim",
+    response_model=LauncherDesktopActionResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_claim_desktop_action(payload: DesktopActionClaimPayload) -> dict:
     return launcher_service.claim_desktop_action(
         payload.desktopSessionId,
@@ -327,22 +469,41 @@ def launcher_claim_desktop_action(payload: DesktopActionClaimPayload) -> dict:
     )
 
 
-@router.post("/launcher/desktop-actions/{action_id}/ack", status_code=202)
+@router.post(
+    "/launcher/desktop-actions/{action_id}/ack",
+    status_code=202,
+    response_model=LauncherDesktopActionResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_ack_desktop_action(action_id: str, payload: DesktopActionResultPayload) -> dict:
     return launcher_service.ack_desktop_action(action_id, payload.desktopSessionId, payload.result)
 
 
-@router.post("/launcher/desktop-actions/{action_id}/fail", status_code=202)
+@router.post(
+    "/launcher/desktop-actions/{action_id}/fail",
+    status_code=202,
+    response_model=LauncherDesktopActionResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_fail_desktop_action(action_id: str, payload: DesktopActionResultPayload) -> dict:
     return launcher_service.fail_desktop_action(action_id, payload.desktopSessionId, payload.result)
 
 
-@router.post("/launcher/desktop-sessions", status_code=201)
+@router.post(
+    "/launcher/desktop-sessions",
+    status_code=201,
+    response_model=LauncherDesktopSessionResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_register_desktop_session(payload: DesktopSessionPayload) -> dict:
     return launcher_service.register_desktop_session(payload.model_dump())
 
 
-@router.put("/launcher/desktop-sessions/{desktop_session_id}/windows/{role}")
+@router.put(
+    "/launcher/desktop-sessions/{desktop_session_id}/windows/{role}",
+    response_model=LauncherDesktopSessionResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_update_desktop_session_window(
     desktop_session_id: str,
     role: str,
@@ -354,7 +515,11 @@ def launcher_update_desktop_session_window(
     )
 
 
-@router.post("/launcher/desktop-sessions/{desktop_session_id}/heartbeat")
+@router.post(
+    "/launcher/desktop-sessions/{desktop_session_id}/heartbeat",
+    response_model=LauncherDesktopSessionResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_heartbeat_desktop_session(
     desktop_session_id: str, payload: DesktopSessionRevisionPayload
 ) -> dict:
@@ -363,7 +528,11 @@ def launcher_heartbeat_desktop_session(
     )
 
 
-@router.delete("/launcher/desktop-sessions/{desktop_session_id}")
+@router.delete(
+    "/launcher/desktop-sessions/{desktop_session_id}",
+    response_model=LauncherDesktopSessionResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_close_desktop_session(
     desktop_session_id: str, payload: DesktopSessionRevisionPayload
 ) -> dict:
@@ -372,7 +541,12 @@ def launcher_close_desktop_session(
     )
 
 
-@router.post("/launcher/runtime-scene/events", status_code=202)
+@router.post(
+    "/launcher/runtime-scene/events",
+    status_code=202,
+    response_model=LauncherRuntimeSceneEventResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_runtime_scene_event(payload: LauncherRuntimeSceneEventPayload) -> dict:
     try:
         return runtime_scene_service.record_electron_supervisor_event(
@@ -404,6 +578,11 @@ def _request_audit(request: Request, *, operation: str) -> launcher_service.Laun
     )
 
 
-@router.post("/launcher/supervisor/reattach", status_code=202)
+@router.post(
+    "/launcher/supervisor/reattach",
+    status_code=202,
+    response_model=LauncherAcceptedCommandResponse,
+    response_model_exclude_unset=True,
+)
 def launcher_supervisor_reattach() -> dict:
     return launcher_service.request_launcher_supervisor_reattach()

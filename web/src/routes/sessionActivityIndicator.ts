@@ -9,14 +9,16 @@
  *
  * `ready` is the persisted resting state after a successful turn, not an
  * unread event. Historical ready sessions stay idle until a previously read
- * session gets a new activity stamp.
+ * session gets a new completion identity (last preview / turn status), not a
+ * recency timestamp tick.
  */
 
 export type SessionActivityTone = "running" | "approval" | "error" | "completed" | "none";
 
 const SEEN_STORAGE_KEY = "vibelution.session-activity-seen.v1";
 
-type SeenMap = Record<string, string>;
+type SeenMap = Record<string, string | string[]>;
+const MAX_SEEN_STAMPS_PER_SESSION = 12;
 
 function activityStorage() {
   try {
@@ -45,41 +47,94 @@ function readSeenMap(): SeenMap {
   }
 }
 
-function writeSeenMap(map: SeenMap) {
+function writeSeenMap(map: SeenMap): boolean {
   const storage = activityStorage();
   if (!storage) {
-    return;
+    return false;
   }
   try {
     storage.setItem(SEEN_STORAGE_KEY, JSON.stringify(map));
+    return true;
   } catch {
-    // ignore quota / private mode
+    // ignore quota / private mode; callers must not report a persisted mutation
+    return false;
   }
 }
 
-export function sessionActivityStamp(
-  session: {
-    id?: string;
-    updatedAt?: string;
-    lastActive?: string;
-    lastTurnStatus?: string;
-  },
-) {
-  return String(session.updatedAt || session.lastActive || session.lastTurnStatus || session.id || "").trim();
+type SessionActivityStampSource = {
+  id?: string;
+  taskSummary?: string;
+  lastTurnStatus?: string;
+  terminalReason?: string;
+  updatedAt?: string;
+  lastActive?: string;
+};
+
+function seenStampsFor(map: SeenMap, sessionId: string) {
+  const raw = map[sessionId];
+  if (typeof raw === "string") {
+    const stamp = raw.trim();
+    return stamp ? [stamp] : [];
+  }
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw.map((value) => String(value || "").trim()).filter(Boolean);
+}
+
+/**
+ * Unread identity for a completion. Recency (`updatedAt` / `lastActive`) is
+ * intentionally ignored: persist, title, and detail-merge rewrite those clocks
+ * without a new turn the operator has not already seen.
+ */
+export function sessionActivityStamp(session: SessionActivityStampSource) {
+  return String(
+    session.taskSummary
+    || session.lastTurnStatus
+    || session.terminalReason
+    || session.id
+    || "",
+  ).trim();
 }
 
 export function markSessionActivitySeen(sessionId: string, stamp: string) {
   const id = String(sessionId || "").trim();
   const activityStamp = String(stamp || "").trim();
   if (!id || !activityStamp) {
-    return;
+    return false;
   }
   const map = readSeenMap();
-  if (map[id] === activityStamp) {
-    return;
+  const stamps = seenStampsFor(map, id);
+  if (stamps.includes(activityStamp)) {
+    return false;
   }
-  map[id] = activityStamp;
-  writeSeenMap(map);
+  const next = [...stamps, activityStamp];
+  if (next.length > MAX_SEEN_STAMPS_PER_SESSION) {
+    next.splice(0, next.length - MAX_SEEN_STAMPS_PER_SESSION);
+  }
+  map[id] = next;
+  return writeSeenMap(map);
+}
+
+export function markSessionActivitySnapshotsSeen(
+  sessionId: string,
+  snapshots: Array<SessionActivityStampSource | null | undefined>,
+) {
+  let wrote = false;
+  for (const snapshot of snapshots) {
+    if (!snapshot) {
+      continue;
+    }
+    if (markSessionActivitySeen(sessionId, sessionActivityStamp({
+      id: sessionId,
+      taskSummary: snapshot.taskSummary,
+      lastTurnStatus: snapshot.lastTurnStatus,
+      terminalReason: snapshot.terminalReason,
+    }))) {
+      wrote = true;
+    }
+  }
+  return wrote;
 }
 
 export function isSessionActivitySeen(sessionId: string, stamp: string) {
@@ -89,7 +144,7 @@ export function isSessionActivitySeen(sessionId: string, stamp: string) {
     // Without a stable id/stamp we cannot mark as read; keep completed visible.
     return false;
   }
-  return readSeenMap()[id] === activityStamp;
+  return seenStampsFor(readSeenMap(), id).includes(activityStamp);
 }
 
 export function hasPriorSessionActivitySeen(sessionId: string) {
@@ -97,7 +152,7 @@ export function hasPriorSessionActivitySeen(sessionId: string) {
   if (!id) {
     return false;
   }
-  return Boolean(String(readSeenMap()[id] || "").trim());
+  return seenStampsFor(readSeenMap(), id).length > 0;
 }
 
 /** Idle resting state after a successful turn, not an unread completion. */
@@ -198,7 +253,9 @@ export function resolveSessionActivityTone(
     currentPhase?: string;
     status?: string;
     lastTurnStatus?: string;
+    terminalReason?: string;
     sessionKind?: string;
+    taskSummary?: string;
     updatedAt?: string;
     lastActive?: string;
     agentInboxPendingCount?: number;

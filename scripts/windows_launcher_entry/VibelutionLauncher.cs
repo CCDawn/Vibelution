@@ -42,13 +42,16 @@ internal static class VibelutionLauncher
                 }
                 if (!created || ElectronOwnsDesktopTray(projectDir))
                 {
-                    // Already running as a tray app; do not open the full Launcher window.
+                    if (!created && !waitForRestart && !ElectronOwnsDesktopTray(projectDir) && parsed.FromShortcut)
+                    {
+                        return HandleSecondaryTrayLaunch(projectDir);
+                    }
                     return 0;
                 }
 
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
-                Application.Run(new TrayApplicationContext(projectDir));
+                Application.Run(new TrayApplicationContext(projectDir, parsed.FromShortcut));
             }
             return 0;
         }
@@ -63,19 +66,22 @@ internal static class VibelutionLauncher
     {
         public string ProjectDir;
         public List<string> ForwardedArgs;
+        public bool FromShortcut;
     }
 
     private sealed class TrayApplicationContext : ApplicationContext
     {
         private readonly string projectDir;
+        private readonly bool fromShortcut;
         private readonly string launcherUrl;
         private readonly NotifyIcon notifyIcon;
         private readonly SynchronizationContext uiContext;
         private readonly FileSystemWatcher ownerWatcher;
 
-        public TrayApplicationContext(string projectDir)
+        public TrayApplicationContext(string projectDir, bool fromShortcut)
         {
             this.projectDir = projectDir;
+            this.fromShortcut = fromShortcut;
             this.launcherUrl = "http://127.0.0.1:" + LauncherControlPort(projectDir).ToString();
             this.uiContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
             this.notifyIcon = new NotifyIcon();
@@ -95,13 +101,10 @@ internal static class VibelutionLauncher
             var freshnessItem = DisabledMenuItem("Launcher 版本未知");
             menu.Items.Add(freshnessItem);
             menu.Items.Add(MenuItem("重启 Launcher", delegate { QueueRestartLauncher(); }));
-            menu.Opening += delegate { RefreshFreshnessItem(freshnessItem); };
+            menu.Opening += delegate { QueueRefreshFreshnessItem(freshnessItem); };
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(BranchActionMenu("启动", "start"));
             menu.Items.Add(BranchActionMenu("停止", "stop"));
-            menu.Items.Add(MenuItem("重启当前 main", delegate { QueuePost("/api/launcher/restart", "重启当前 main"); }));
-            menu.Items.Add(MenuItem("重建并启动（最新）", delegate { QueueRebuildAndStart(); }));
-            menu.Items.Add(MenuItem("状态", delegate { QueueStatus(); }));
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(MenuItem("退出 Launcher", delegate { QueueExitLauncher(false); }));
             menu.Items.Add(MenuItem("停止全部", delegate { QueueExitLauncher(true); }));
@@ -111,40 +114,80 @@ internal static class VibelutionLauncher
         private ToolStripMenuItem BranchActionMenu(string label, string operation)
         {
             var item = new ToolStripMenuItem(label);
-            item.DropDownOpening += delegate { PopulateBranchActionMenu(item, operation); };
+            item.DropDownOpening += delegate { QueuePopulateBranchActionMenu(item, operation); };
             item.DropDownItems.Add(DisabledMenuItem(operation == "stop" ? "没有正在运行的实例" : "没有可启动的实例"));
             return item;
         }
 
-        private void PopulateBranchActionMenu(ToolStripMenuItem item, string operation)
+        private void QueuePopulateBranchActionMenu(ToolStripMenuItem item, string operation)
         {
             item.DropDownItems.Clear();
-            try
-            {
-                EnsureLauncherBackend();
-                var instances = ParseBranchInstances(GetLauncher("/api/launcher/branch-instances"));
-                foreach (var inst in instances)
+            item.DropDownItems.Add(DisabledMenuItem("正在读取…"));
+            ThreadPool.QueueUserWorkItem(
+                delegate
                 {
-                    bool include = operation == "stop" ? inst.Alive : inst.Startable;
-                    if (!include)
+                    List<BranchInstanceItem> matched = null;
+                    string placeholder = null;
+                    try
                     {
-                        continue;
+                        if (!LauncherBackendHealthy(projectDir))
+                        {
+                            placeholder = "Launcher 后端未就绪";
+                        }
+                        else
+                        {
+                            matched = new List<BranchInstanceItem>();
+                            foreach (var inst in ParseBranchInstances(
+                                RequestLauncherStatic(projectDir, "/api/launcher/branch-instances", "GET")
+                            ))
+                            {
+                                bool include = operation == "stop" ? inst.Alive : inst.Startable;
+                                if (include)
+                                {
+                                    matched.Add(inst);
+                                }
+                            }
+                            if (matched.Count == 0)
+                            {
+                                placeholder = operation == "stop" ? "没有正在运行的实例" : "没有可启动的实例";
+                                matched = null;
+                            }
+                        }
                     }
-                    var child = new ToolStripMenuItem(inst.Label);
-                    string instanceId = inst.Id;
-                    string instanceLabel = inst.Label;
-                    child.Click += delegate { QueueInstanceLifecycle(operation, instanceId, instanceLabel); };
-                    item.DropDownItems.Add(child);
+                    catch
+                    {
+                        placeholder = "无法读取分支列表";
+                        matched = null;
+                    }
+
+                    uiContext.Post(
+                        delegate
+                        {
+                            try
+                            {
+                                item.DropDownItems.Clear();
+                                if (!string.IsNullOrEmpty(placeholder))
+                                {
+                                    item.DropDownItems.Add(DisabledMenuItem(placeholder));
+                                    return;
+                                }
+                                foreach (var inst in matched)
+                                {
+                                    var child = new ToolStripMenuItem(inst.Label);
+                                    string instanceId = inst.Id;
+                                    string instanceLabel = inst.Label;
+                                    child.Click += delegate { QueueInstanceLifecycle(operation, instanceId, instanceLabel); };
+                                    item.DropDownItems.Add(child);
+                                }
+                            }
+                            catch
+                            {
+                            }
+                        },
+                        null
+                    );
                 }
-                if (item.DropDownItems.Count == 0)
-                {
-                    item.DropDownItems.Add(DisabledMenuItem(operation == "stop" ? "没有正在运行的实例" : "没有可启动的实例"));
-                }
-            }
-            catch
-            {
-                item.DropDownItems.Add(DisabledMenuItem("无法读取分支列表"));
-            }
+            );
         }
 
         private void QueueInstanceLifecycle(string operation, string instanceId, string label)
@@ -158,7 +201,7 @@ internal static class VibelutionLauncher
                         EnsureLauncherBackend();
                         PostLauncher(
                             "/api/launcher/branch-instances/" + operation,
-                            "{"instanceId":" + Quote(instanceId) + "}"
+                            "{\"instanceId\":" + Quote(instanceId) + "}"
                         );
                         ShowInfo(actionLabel + "请求已发送。");
                     }
@@ -196,7 +239,7 @@ internal static class VibelutionLauncher
             {
                 return items;
             }
-            foreach (Match match in Regex.Matches(json, "(?:\{|,)\s*"id"\s*:\s*"(?<id>[^"]+)""))
+            foreach (Match match in Regex.Matches(json, "(?:\\{|,)\\s*\"id\"\\s*:\\s*\"(?<id>[^\"]+)\""))
             {
                 int start = Math.Max(0, match.Index - 8);
                 int length = Math.Min(json.Length - start, 1200);
@@ -224,7 +267,7 @@ internal static class VibelutionLauncher
 
         private static bool ExtractJsonBool(string json, string key)
         {
-            var match = Regex.Match(json, """ + Regex.Escape(key) + ""\s*:\s*(true|false)", RegexOptions.IgnoreCase);
+            var match = Regex.Match(json, "\"" + Regex.Escape(key) + "\"\\s*:\\s*(true|false)", RegexOptions.IgnoreCase);
             return match.Success && match.Groups[1].Value.Equals("true", StringComparison.OrdinalIgnoreCase);
         }
 
@@ -251,12 +294,22 @@ internal static class VibelutionLauncher
         {
             try
             {
-                RunPythonBridge(projectDir, "bootstrap", true, true);
-                ShowInfo("Launcher 已在托盘后台运行。");
+                EnsureFreshLauncherBackend(projectDir);
+                if (!fromShortcut)
+                {
+                    ShowInfo("Launcher 已在托盘后台运行。");
+                }
             }
             catch (Exception ex)
             {
-                ShowWarning("Launcher 后台启动失败：" + ShortMessage(ex.Message));
+                if (!fromShortcut)
+                {
+                    ShowWarning("Launcher 后台启动失败：" + ShortMessage(ex.Message));
+                }
+                else
+                {
+                    WriteNativeEntryLog(projectDir, "native_action.bootstrap_failed", ShortStaticMessage(ex.Message));
+                }
             }
         }
 
@@ -277,19 +330,43 @@ internal static class VibelutionLauncher
             );
         }
 
-        private void RefreshFreshnessItem(ToolStripMenuItem item)
+        private void QueueRefreshFreshnessItem(ToolStripMenuItem item)
         {
-            try
-            {
-                EnsureLauncherBackend();
-                string body = GetLauncher("/api/launcher/freshness");
-                string label = ExtractJsonString(body, "label");
-                item.Text = string.IsNullOrWhiteSpace(label) ? "Launcher 版本未知" : label;
-            }
-            catch
-            {
-                item.Text = "Launcher 版本未知";
-            }
+            ThreadPool.QueueUserWorkItem(
+                delegate
+                {
+                    string nextLabel = "Launcher 版本未知";
+                    try
+                    {
+                        if (LauncherBackendHealthy(projectDir))
+                        {
+                            string body = RequestLauncherStatic(projectDir, "/api/launcher/freshness", "GET");
+                            string label = ExtractJsonString(body, "label");
+                            if (!string.IsNullOrWhiteSpace(label))
+                            {
+                                nextLabel = label;
+                            }
+                        }
+                    }
+                    catch
+                    {
+                    }
+
+                    uiContext.Post(
+                        delegate
+                        {
+                            try
+                            {
+                                item.Text = nextLabel;
+                            }
+                            catch
+                            {
+                            }
+                        },
+                        null
+                    );
+                }
+            );
         }
 
         private void QueueRestartLauncher()
@@ -299,7 +376,10 @@ internal static class VibelutionLauncher
                 {
                     try
                     {
-                        ShowInfo("正在重启 Launcher，以加载最新本地代码…");
+                        EnsureLauncherBackend();
+                        ShowInfo("正在停止全部托管进程并重启 Launcher…");
+                        PostLauncher("/api/launcher/force-stop");
+                        Thread.Sleep(1500);
                         string exe = Application.ExecutablePath;
                         string args = "--action launcher --project " + Quote(projectDir);
                         var start = new ProcessStartInfo();
@@ -528,24 +608,12 @@ internal static class VibelutionLauncher
 
         private void EnsureLauncherBackend()
         {
-            if (LauncherHealthy())
-            {
-                return;
-            }
-            RunPythonBridge(projectDir, "bootstrap", true, true);
+            EnsureFreshLauncherBackend(projectDir);
         }
 
         private bool LauncherHealthy()
         {
-            try
-            {
-                GetLauncher("/api/health");
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
+            return LauncherBackendHealthy(projectDir);
         }
 
         private void PostLauncher(string path)
@@ -584,6 +652,8 @@ internal static class VibelutionLauncher
         {
             var request = (HttpWebRequest)WebRequest.Create(launcherUrl + path);
             request.Method = "GET";
+            request.Timeout = 15000;
+            request.ReadWriteTimeout = 15000;
             using (var response = (HttpWebResponse)request.GetResponse())
             using (var stream = response.GetResponseStream())
             using (var reader = new StreamReader(stream))
@@ -710,16 +780,124 @@ internal static class VibelutionLauncher
         }
     }
 
+    private static int HandleSecondaryTrayLaunch(string projectDir)
+    {
+        try
+        {
+            EnsureFreshLauncherBackend(projectDir);
+            RunPythonBridge(projectDir, "launcher", false, false);
+            WriteNativeEntryLog(projectDir, "native_action.secondary_launch", "action=open_console");
+        }
+        catch (Exception ex)
+        {
+            WriteFailure(projectDir, ex.ToString());
+            return 1;
+        }
+        return 0;
+    }
+
+    private static void EnsureFreshLauncherBackend(string projectDir)
+    {
+        bool healthy = LauncherBackendHealthy(projectDir);
+        bool fresh = healthy && LauncherBackendFresh(projectDir);
+        if (fresh)
+        {
+            return;
+        }
+        if (healthy)
+        {
+            try
+            {
+                RunPythonBridge(projectDir, "stop-launcher", true, false);
+                Thread.Sleep(500);
+            }
+            catch
+            {
+            }
+        }
+        RunPythonBridge(projectDir, "bootstrap", true, true);
+    }
+
+    private static bool LauncherBackendHealthy(string projectDir)
+    {
+        try
+        {
+            RequestLauncherStatic(projectDir, "/api/health", "GET");
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool LauncherBackendFresh(string projectDir)
+    {
+        try
+        {
+            string body = RequestLauncherStatic(projectDir, "/api/launcher/freshness", "GET");
+            if (body.IndexOf("\"current\":true", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+            if (body.IndexOf("\"current\":false", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return false;
+            }
+            return false;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string RequestLauncherStatic(string projectDir, string path, string method)
+    {
+        string url = "http://127.0.0.1:" + LauncherControlPort(projectDir).ToString() + path;
+        var request = (HttpWebRequest)WebRequest.Create(url);
+        request.Method = method;
+        request.Timeout = 15000;
+        request.ReadWriteTimeout = 15000;
+        request.Headers["X-Vibelution-Launcher-Trigger"] = "native_entry";
+        if (method == "POST")
+        {
+            request.ContentLength = 0;
+        }
+        using (var response = (HttpWebResponse)request.GetResponse())
+        using (var stream = response.GetResponseStream())
+        using (var reader = new StreamReader(stream))
+        {
+            return reader.ReadToEnd();
+        }
+    }
+
+    private static string ShortStaticMessage(string message)
+    {
+        string text = (message ?? "").Trim();
+        if (text.Length <= 180)
+        {
+            return text;
+        }
+        return text.Substring(0, 177) + "...";
+    }
+
     private static ParsedArgs ParseArgs(string[] args)
     {
         var forwardedArgs = new List<string>();
         string projectDir = "";
+        bool fromShortcut = false;
         for (int index = 0; index < args.Length; index++)
         {
             string arg = args[index] ?? "";
             if (arg.Equals("--project", StringComparison.OrdinalIgnoreCase) && index + 1 < args.Length)
             {
                 projectDir = args[++index];
+                continue;
+            }
+            if (arg.Equals("--from-shortcut", StringComparison.OrdinalIgnoreCase))
+            {
+                fromShortcut = true;
                 continue;
             }
             forwardedArgs.Add(arg);
@@ -732,7 +910,8 @@ internal static class VibelutionLauncher
         return new ParsedArgs
         {
             ProjectDir = Path.GetFullPath(projectDir),
-            ForwardedArgs = forwardedArgs
+            ForwardedArgs = forwardedArgs,
+            FromShortcut = fromShortcut
         };
     }
 
@@ -769,17 +948,32 @@ internal static class VibelutionLauncher
         bool noBrowser = HasArgument(forwardedArgs, "--no-browser", "-nobrowser", "-no-browser");
         if (action == "open")
         {
+            if (ForwardOrLaunchElectron(projectDir, action, forwardedArgs))
+            {
+                WriteNativeEntryLog(projectDir, "native_action.electron_forwarded", "action=open");
+                return 0;
+            }
             RunPythonBridge(projectDir, noBrowser ? "bootstrap" : "launcher", noBrowser, noBrowser);
             WriteNativeEntryLog(projectDir, "native_action.succeeded", "action=open");
             return 0;
         }
 
-        if (action != "toggle" && action != "start" && action != "stop" && action != "close" && action != "restart" && action != "status")
+        if (action != "toggle" && action != "start" && action != "stop" && action != "force-stop" && action != "close" && action != "restart" && action != "rebuild-and-start" && action != "status")
         {
             WriteNativeEntryLog(projectDir, "native_action.rejected", "action=" + ShortMessage(action));
             return 2;
         }
 
+        // T8: the packaged Electron shell owns lifecycle commands. When it exists,
+        // forward argv to the live instance (second-instance) or launch it; never
+        // bootstrap a Python :8765 control plane from this shim.
+        if (ForwardOrLaunchElectron(projectDir, action, forwardedArgs))
+        {
+            WriteNativeEntryLog(projectDir, "native_action.electron_forwarded", "action=" + action);
+            return 0;
+        }
+
+        // No packaged Electron (development checkout): keep the legacy Python bridge path.
         RunPythonBridge(projectDir, "bootstrap", true, true);
         if (action == "status")
         {
@@ -798,6 +992,27 @@ internal static class VibelutionLauncher
         RequestLauncher(projectDir, "/api/launcher/" + effectiveAction, "POST");
         WriteNativeEntryLog(projectDir, "native_action.succeeded", "action=" + action + ";effective_action=" + effectiveAction);
         return 0;
+    }
+
+    private static bool ForwardOrLaunchElectron(string projectDir, string action, List<string> forwardedArgs)
+    {
+        string electronExe = Path.Combine(projectDir, "dist", "desktop", "win-unpacked", "Vibelution.exe");
+        if (!File.Exists(electronExe))
+        {
+            return false;
+        }
+        var args = new List<string> { "--project", Quote(projectDir), action };
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = electronExe,
+            Arguments = string.Join(" ", args.ToArray()),
+            WorkingDirectory = projectDir,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WindowStyle = ProcessWindowStyle.Hidden
+        };
+        Process.Start(startInfo);
+        return true;
     }
 
     private static bool HasArgument(List<string> args, params string[] accepted)

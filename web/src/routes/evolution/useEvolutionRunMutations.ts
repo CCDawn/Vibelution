@@ -5,7 +5,15 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Dispatch, SetStateAction } from "react";
 
-import { fetchJson } from "../../api/client";
+import {
+  createEvolutionWorktreeRun,
+  createSelfEvolutionWorktreeRun,
+  deleteSelfEvolutionHistory,
+  postEvolutionRunAction,
+  postEvolutionWorktreeRunAction,
+  postSelfObservationRunAction,
+  startSelfObservationRun,
+} from "../../api/evolution";
 import { queryKeys } from "../../api/queryKeys";
 import {
   executeSelfEvolutionAutonomousLoopAction,
@@ -79,23 +87,19 @@ export function useEvolutionRunMutations(options: UseEvolutionRunMutationsOption
     },
     mutationFn: () => {
       const payload = options.getStartPayload();
-      return fetchJson<SupervisedWorktreeRun>("/api/evolution/worktree-runs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sourceKind: payload.sourceKind,
-          datasetName: payload.sourceKind === "dataset" ? payload.datasetName : "",
-          datasetLimit: payload.datasetLimit,
-          bundleName: payload.sourceKind === "bundle" ? payload.bundleName : "",
-          keepWorktree: true,
-          approvalMode: payload.approvalMode,
-          mode: payload.currentIntakeMode === "auto" ? "auto" : "manual",
-          executionMode: "real",
-          confirmRealLlmCost: true,
-          mentalModelMode: payload.mentalModelMode,
-          uiRoute: uiRoute(),
-          clientAction: "start_supervised_worktree_run",
-        }),
+      return createEvolutionWorktreeRun<SupervisedWorktreeRun>({
+        sourceKind: payload.sourceKind,
+        datasetName: payload.sourceKind === "dataset" ? payload.datasetName : "",
+        datasetLimit: payload.datasetLimit,
+        bundleName: payload.sourceKind === "bundle" ? payload.bundleName : "",
+        keepWorktree: true,
+        approvalMode: payload.approvalMode,
+        mode: payload.currentIntakeMode === "auto" ? "auto" : "manual",
+        executionMode: "real",
+        confirmRealLlmCost: true,
+        mentalModelMode: payload.mentalModelMode,
+        uiRoute: uiRoute(),
+        clientAction: "start_supervised_worktree_run",
       });
     },
     onSuccess: async (snapshot) => {
@@ -120,23 +124,19 @@ export function useEvolutionRunMutations(options: UseEvolutionRunMutationsOption
     },
     mutationFn: () => {
       const payload = options.getStartPayload();
-      return fetchJson<SupervisedWorktreeRun>("/api/evolution/worktree-runs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sourceKind: payload.sourceKind,
-          datasetName: payload.sourceKind === "dataset" ? payload.datasetName : "",
-          datasetLimit: payload.datasetLimit,
-          bundleName: payload.sourceKind === "bundle" ? payload.bundleName : "",
-          keepWorktree: true,
-          approvalMode: payload.approvalMode,
-          mode: payload.currentIntakeMode === "auto" ? "auto" : "manual",
-          executionMode: "simulation",
-          confirmRealLlmCost: false,
-          mentalModelMode: payload.mentalModelMode,
-          uiRoute: uiRoute(),
-          clientAction: "start_supervised_worktree_simulation",
-        }),
+      return createEvolutionWorktreeRun<SupervisedWorktreeRun>({
+        sourceKind: payload.sourceKind,
+        datasetName: payload.sourceKind === "dataset" ? payload.datasetName : "",
+        datasetLimit: payload.datasetLimit,
+        bundleName: payload.sourceKind === "bundle" ? payload.bundleName : "",
+        keepWorktree: true,
+        approvalMode: payload.approvalMode,
+        mode: payload.currentIntakeMode === "auto" ? "auto" : "manual",
+        executionMode: "simulation",
+        confirmRealLlmCost: false,
+        mentalModelMode: payload.mentalModelMode,
+        uiRoute: uiRoute(),
+        clientAction: "start_supervised_worktree_simulation",
       });
     },
     onSuccess: async (snapshot) => {
@@ -152,18 +152,14 @@ export function useEvolutionRunMutations(options: UseEvolutionRunMutationsOption
     },
     mutationFn: () => {
       const payload = options.getSelfStartPayload();
-      return fetchJson<SupervisedWorktreeRun>("/api/evolution/self/worktree-runs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          goal: payload.goal,
-          sourceKind: "bundle",
-          bundleName: payload.bundleName,
-          mode: "manual",
-          executionMode: "simulation",
-          confirmRealLlmCost: false,
-          uiRoute: uiRoute(),
-        }),
+      return createSelfEvolutionWorktreeRun<SupervisedWorktreeRun>({
+        goal: payload.goal,
+        sourceKind: "bundle",
+        bundleName: payload.bundleName,
+        mode: "manual",
+        executionMode: "simulation",
+        confirmRealLlmCost: false,
+        uiRoute: uiRoute(),
       });
     },
     onSuccess: async (snapshot) => {
@@ -177,11 +173,7 @@ export function useEvolutionRunMutations(options: UseEvolutionRunMutationsOption
       options.setSelfActionFeedback("");
     },
     mutationFn: (payload: Record<string, unknown>) =>
-      fetchJson<SelfObservationRun>("/api/evolution/self/observation-runs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...payload, uiRoute: "/evolution?track=self" }),
-      }),
+      startSelfObservationRun<SelfObservationRun>({ ...payload, uiRoute: "/evolution?track=self" }),
     onSuccess: async (snapshot) => {
       queryClient.setQueryData(
         queryKeys.evolutionSelfObservationRun(snapshot.runId),
@@ -198,14 +190,7 @@ export function useEvolutionRunMutations(options: UseEvolutionRunMutationsOption
       options.setSelfActionFeedback("");
     },
     mutationFn: ({ runId, action }: { runId: string; action: string }) =>
-      fetchJson<SelfObservationRun>(
-        `/api/evolution/self/observation-runs/${encodeURIComponent(runId)}/actions`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action }),
-        },
-      ),
+      postSelfObservationRunAction<SelfObservationRun>(runId, action),
     onSuccess: async (snapshot) => {
       queryClient.setQueryData(
         queryKeys.evolutionSelfObservationRun(snapshot.runId),
@@ -256,11 +241,7 @@ export function useEvolutionRunMutations(options: UseEvolutionRunMutationsOption
       options.setSelfActionFeedback("");
     },
     mutationFn: (txnIds: string[]) =>
-      fetchJson<SelfEvolutionHistoryDeleteResponse>("/api/evolution/self/history/delete", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ txnIds }),
-      }),
+      deleteSelfEvolutionHistory<SelfEvolutionHistoryDeleteResponse>(txnIds),
     onSuccess: async (payload) => {
       options.setSelfActionFeedback(payload.summary || "");
       await options.afterSelfEvolutionChanged();
@@ -269,11 +250,7 @@ export function useEvolutionRunMutations(options: UseEvolutionRunMutationsOption
 
   const actionMutation = useMutation({
     mutationFn: (variables: { sessionId: string; action: string }) =>
-      fetchJson<EvolutionRunActionResponse>(`/api/evolution/runs/${variables.sessionId}/actions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: variables.action }),
-      }),
+      postEvolutionRunAction<EvolutionRunActionResponse>(variables.sessionId, variables.action),
     onSuccess: async (payload) => {
       options.setActionFeedback(payload.summary);
       await options.afterSupervisedWorkspaceChanged();
@@ -285,17 +262,10 @@ export function useEvolutionRunMutations(options: UseEvolutionRunMutationsOption
       options.setActionFeedback("");
     },
     mutationFn: (variables: { runId: string; action: string; reviewerNote?: string }) =>
-      fetchJson<SupervisedWorktreeRun>(
-        `/api/evolution/worktree-runs/${encodeURIComponent(variables.runId)}/actions`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: variables.action,
-            reviewerNote: variables.reviewerNote ?? "",
-          }),
-        },
-      ),
+      postEvolutionWorktreeRunAction<SupervisedWorktreeRun>(variables.runId, {
+        action: variables.action,
+        reviewerNote: variables.reviewerNote,
+      }),
     onSuccess: async (snapshot) => {
       options.setActionFeedback(snapshot.latestMessage || options.statusLabel(snapshot.status));
       if (options.isSelfEvolutionWorktreeRun(snapshot)) {

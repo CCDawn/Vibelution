@@ -1,6 +1,6 @@
 /**
  * Pure apply-request builders for ConfigRoute.
- * React state, requestJson, and syncWorkspace remain on the route.
+ * React state and syncWorkspace remain on the route.
  */
 import type {
   ConfigDraftMeta,
@@ -26,6 +26,14 @@ export type ConfigApplyRequestPayload = {
 
 export function isConfigBaselineStaleErrorMessage(message: string): boolean {
   return /配置基线已过期|edit baseline is stale/i.test(String(message || ""));
+}
+
+const IMMEDIATE_APPLY_ROOTS = new Set(["ui", "user_profile", "avatar", "pet"]);
+
+/** Appearance/profile section paths persist on save; routing and tooling still wait for explicit apply. */
+export function shouldImmediateApplyConfigPath(path: string): boolean {
+  const root = String(path || "").split(".")[0]?.trim();
+  return Boolean(root) && IMMEDIATE_APPLY_ROOTS.has(root);
 }
 
 /**

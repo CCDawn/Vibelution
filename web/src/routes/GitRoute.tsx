@@ -4,10 +4,19 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bot, CheckSquare, Clock3, FileText, GitBranch, GitCommitHorizontal, RefreshCw, Save, Square } from "lucide-react";
 import { type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useMemo, useState } from "react";
 
-import { fetchJson } from "../api/client";
+import { fetchConfigWorkspace } from "../api/config";
+import {
+  createGitCommit,
+  fetchGitCommits,
+  fetchGitFileDiff,
+  fetchGitObjectDetail,
+  fetchGitStatus,
+  generateGitCommitMessage,
+  updateGitCommitMessageDefaultModel,
+  updateGitCommitMessagePrompt,
+} from "../api/git";
 import { queryKeys } from "../api/queryKeys";
 import {
-  ConfigWorkspace,
   GitCommitSummary,
   GitCommitMessageResponse,
   GitCommitResponse,
@@ -245,19 +254,19 @@ export function GitRoute() {
 
   const statusQuery = useQuery({
     queryKey: queryKeys.gitStatus(),
-    queryFn: ({ signal }) => fetchJson<GitStatusSummary>("/api/git/status?limit=500", { signal }),
+    queryFn: ({ signal }) => fetchGitStatus({ limit: 500, signal }),
     refetchInterval: resolvePollingInterval(pageVisible, 6_000),
     refetchIntervalInBackground: false,
   });
   const commitsQuery = useQuery({
     queryKey: queryKeys.gitCommits(),
-    queryFn: ({ signal }) => fetchJson<GitCommitsResponse>("/api/git/commits?limit=20", { signal }),
+    queryFn: ({ signal }) => fetchGitCommits({ limit: 20, signal }),
     refetchInterval: resolvePollingInterval(pageVisible, 30_000),
     refetchIntervalInBackground: false,
   });
   const configQuery = useQuery({
     queryKey: queryKeys.configWorkspace(),
-    queryFn: ({ signal }) => fetchJson<ConfigWorkspace>("/api/config/workspace", { signal }),
+    queryFn: ({ signal }) => fetchConfigWorkspace({ signal }),
     staleTime: 30_000,
   });
 
@@ -304,19 +313,20 @@ export function GitRoute() {
 
   const diffQuery = useQuery({
     queryKey: queryKeys.gitDiff(activePath ?? ""),
-    queryFn: ({ signal }) => fetchJson<GitFileDiff>(`/api/git/diff?path=${encodeURIComponent(activePath ?? "")}`, { signal }),
+    queryFn: ({ signal }) => fetchGitFileDiff(activePath ?? "", { signal }),
     enabled: Boolean(activePath && statusQuery.data?.available),
   });
   const objectDetailQuery = useQuery({
     queryKey: ["git", "object-detail", activeObject?.kind ?? "", activeObject?.ref ?? "", activeObject?.path ?? ""] as const,
-    queryFn: ({ signal }) => {
-      const params = new URLSearchParams({
-        kind: activeObject?.kind ?? "",
-        ref: activeObject?.ref ?? "",
-        path: activeObject?.path ?? "",
-      });
-      return fetchJson<GitObjectDetail>(`/api/git/object-detail?${params.toString()}`, { signal });
-    },
+    queryFn: ({ signal }) =>
+      fetchGitObjectDetail(
+        {
+          kind: activeObject?.kind ?? "",
+          ref: activeObject?.ref ?? "",
+          path: activeObject?.path ?? "",
+        },
+        { signal },
+      ),
     enabled: Boolean(activeObject && statusQuery.data?.available),
   });
 
@@ -331,11 +341,7 @@ export function GitRoute() {
 
   const generateMessageMutation = useMutation({
     mutationFn: (payload: { paths: string[]; modelId: string }) =>
-      fetchJson<GitCommitMessageResponse>("/api/git/commit-message", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      }),
+      generateGitCommitMessage(payload),
     onSuccess: (payload) => {
       setCommitMessage(payload.message);
       setCommitNotice({ tone: "success", text: t("gitAiMessageReady") });
@@ -346,11 +352,7 @@ export function GitRoute() {
   });
   const saveDefaultModelMutation = useMutation({
     mutationFn: (payload: { modelId: string }) =>
-      fetchJson<{ modelId: string; previousModelId: string }>("/api/git/commit-message/default-model", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      }),
+      updateGitCommitMessageDefaultModel(payload),
     onSuccess: () => {
       setSelectedAiModelId("");
       setCommitNotice({ tone: "success", text: t("gitAiDefaultModelSaved") });
@@ -363,11 +365,7 @@ export function GitRoute() {
   });
   const savePromptMutation = useMutation({
     mutationFn: (payload: { prompt: string }) =>
-      fetchJson<{ prompt: string; previousPromptChars: number; promptChars: number }>("/api/git/commit-message/prompt", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      }),
+      updateGitCommitMessagePrompt(payload),
     onSuccess: () => {
       setCommitNotice({ tone: "success", text: t("gitAiPromptSaved") });
       void queryClient.invalidateQueries({ queryKey: queryKeys.configWorkspace() });
@@ -380,11 +378,7 @@ export function GitRoute() {
 
   const commitMutation = useMutation({
     mutationFn: (payload: { paths: string[]; message: string }) =>
-      fetchJson<GitCommitResponse>("/api/git/commit", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      }),
+      createGitCommit(payload),
     onSuccess: (payload) => {
       setCommitNotice({ tone: "success", text: `${t("gitCommitSuccess")} ${payload.shortSha}` });
       setSelectedPaths([]);

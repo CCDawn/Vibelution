@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
@@ -47,6 +49,10 @@ class ResolvedProtocolRoute:
     source: str
     wire_source: str
     source_scope: str
+    service_class: str
+    driver: str
+    backend_identity: str
+    route_fingerprint: str
     warnings: tuple[str, ...] = ()
 
     def log_summary(self) -> dict[str, Any]:
@@ -65,6 +71,10 @@ class ResolvedProtocolRoute:
             "providerId": self.provider_id,
             "providerKind": self.provider_kind,
             "providerApi": self.provider_api,
+            "serviceClass": self.service_class,
+            "driver": self.driver,
+            "backendIdentity": self.backend_identity,
+            "routeFingerprint": self.route_fingerprint,
             "protocolWarnings": list(self.warnings),
             "reasoningRoundtripEnabled": self.compat.reasoning_roundtrip,
             "thinkingFormat": self.compat.thinking_format,
@@ -323,6 +333,36 @@ def _runtime_endpoint(
     return f"{endpoint}/{relative.lstrip('/')}"
 
 
+def _wire_adapter_id(provider: ProviderConfig, wire_protocol: WireProtocol) -> str:
+    if wire_protocol == WireProtocol.ANTHROPIC_MESSAGES:
+        driver = _read_optional_string(provider, "driver").lower()
+        service_class = _read_optional_string(provider, "service_class").lower()
+        compat_mode = _read_optional_string(provider, "compat_mode").lower()
+        if driver == "anthropic" and service_class == "official_api" and compat_mode == "native":
+            return "anthropic_messages_native"
+        return "anthropic_messages_litellm_compat"
+    return wire_protocol.value
+
+
+def _backend_identity(wire_protocol: WireProtocol, adapter_id: str) -> str:
+    if adapter_id == "anthropic_messages_native":
+        return "anthropic_messages_http_native"
+    if wire_protocol == WireProtocol.RESPONSES:
+        return "litellm_responses"
+    if wire_protocol == WireProtocol.ANTHROPIC_MESSAGES:
+        return "litellm_anthropic_messages_compat"
+    if wire_protocol == WireProtocol.GEMINI_GENERATE_CONTENT:
+        return "litellm_gemini_generate_content_compat"
+    return "litellm_chat_completions"
+
+
+def _route_fingerprint(payload: dict[str, Any]) -> str:
+    encoded = json.dumps(
+        payload, ensure_ascii=True, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
+
+
 def _resolve_wire_protocol(
     *,
     model_entry: Any,
@@ -567,6 +607,32 @@ def resolve_model_protocol(
         warnings=warnings,
     )
     configured_endpoint = _read_optional_string(provider, "base_url")
+    runtime_endpoint = _runtime_endpoint(
+        provider,
+        configured_endpoint,
+        wire_protocol,
+        model_ref=_read_optional_string(model_entry, "model_ref"),
+    )
+    adapter_id = _wire_adapter_id(provider, wire_protocol)
+    service_class = _read_optional_string(provider, "service_class") or "official_api"
+    driver = _read_optional_string(provider, "driver") or "openai"
+    backend_identity = _backend_identity(wire_protocol, adapter_id)
+    route_fingerprint = _route_fingerprint(
+        {
+            "providerId": _read_optional_string(provider, "provider_id") or _read_optional_string(profile, "provider_id"),
+            "serviceClass": service_class,
+            "driver": driver,
+            "authKind": _read_optional_string(provider, "auth_kind"),
+            "credentialRef": _read_optional_string(provider, "credential_ref"),
+            "modelId": model_id,
+            "effectiveModel": effective_model,
+            "wireProtocol": wire_protocol.value,
+            "adapterId": adapter_id,
+            "backendIdentity": backend_identity,
+            "runtimeEndpoint": runtime_endpoint,
+            "modelProtocol": protocol.value,
+        }
+    )
     return ResolvedProtocolRoute(
         profile_id=_read_optional_string(profile, "profile_id"),
         model_id=model_id,
@@ -576,20 +642,19 @@ def resolve_model_protocol(
         model=effective_model,
         effective_model=effective_model,
         wire_protocol=wire_protocol,
-        adapter_id=wire_protocol.value,
+        adapter_id=adapter_id,
         configured_endpoint=configured_endpoint,
-        runtime_endpoint=_runtime_endpoint(
-            provider,
-            configured_endpoint,
-            wire_protocol,
-            model_ref=_read_optional_string(model_entry, "model_ref"),
-        ),
+        runtime_endpoint=runtime_endpoint,
         protocol=protocol,
         policy=policy,
         compat=compat,
         source=source,
         wire_source=wire_source,
         source_scope=source_scope,
+        service_class=service_class,
+        driver=driver,
+        backend_identity=backend_identity,
+        route_fingerprint=route_fingerprint,
         warnings=tuple(warnings),
     )
 

@@ -1,6 +1,7 @@
 import type { QueryClient } from "@tanstack/react-query";
 
-import { fetchJson } from "../../api/client";
+import { fetchSessionDetail, isSessionNotFoundError } from "../../api/chat";
+import { evictUnopenableSessionFromCaches } from "../chatSessionIndexQuery";
 import { queryKeys } from "../../api/queryKeys";
 import type {
   ChatRoomDetail,
@@ -42,19 +43,13 @@ export function fetchSessionDetailWindow(
   options: SessionDetailWindowOptions = {},
 ) {
   const normalizedSessionId = String(sessionId || "").trim();
-  const params = new URLSearchParams();
-  params.set("messageLimit", String(options.messageLimit ?? SESSION_DETAIL_INITIAL_MESSAGE_LIMIT));
-  params.set("transcriptScope", options.transcriptScope ?? "window");
-  if (options.beforeMessageIndex && options.beforeMessageIndex > 0) {
-    params.set("beforeMessageIndex", String(options.beforeMessageIndex));
-  }
-  if (options.includeSecondary === false) {
-    params.set("includeSecondary", "false");
-  }
-  return fetchJson<SessionDetail>(
-    `/api/sessions/${encodeURIComponent(normalizedSessionId)}?${params.toString()}`,
-    { signal: options.signal },
-  );
+  return fetchSessionDetail(normalizedSessionId, {
+    messageLimit: options.messageLimit ?? SESSION_DETAIL_INITIAL_MESSAGE_LIMIT,
+    transcriptScope: options.transcriptScope ?? "window",
+    beforeMessageIndex: options.beforeMessageIndex,
+    includeSecondary: options.includeSecondary,
+    signal: options.signal,
+  });
 }
 
 /**
@@ -77,7 +72,19 @@ export function prefetchSessionDetailWindow(
       messageLimit: options.messageLimit,
     }),
     staleTime: SESSION_DETAIL_PREFETCH_STALE_MS,
-  }).then(() => queryClient.getQueryData<SessionDetail>(queryKeys.session(normalizedSessionId)));
+  }).then(() => {
+    const state = queryClient.getQueryState<SessionDetail>(queryKeys.session(normalizedSessionId));
+    if (state?.status === "error" && isSessionNotFoundError(state.error)) {
+      evictUnopenableSessionFromCaches(queryClient, normalizedSessionId);
+      return undefined;
+    }
+    return queryClient.getQueryData<SessionDetail>(queryKeys.session(normalizedSessionId));
+  }).catch((error: unknown) => {
+    if (isSessionNotFoundError(error)) {
+      evictUnopenableSessionFromCaches(queryClient, normalizedSessionId);
+    }
+    return undefined;
+  });
 }
 
 /** Prefer recently updated sessions other than the active one (list order as-is). */
@@ -106,10 +113,7 @@ export function resolveNeighborSessionIdsForPrefetch(input: {
 }
 
 
-export function isSessionNotFoundError(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error ?? "");
-  return /session not found|会话不存在|未找到会话/i.test(message);
-}
+export { isSessionNotFoundError } from "../../api/chat";
 
 /**
  * Minimal SessionDetail shell from list summary so session switches can paint

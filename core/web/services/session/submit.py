@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import base64
 import binascii
-from typing import Any
+import threading
+from contextlib import contextmanager
+from typing import Any, Iterator
 
 from .admission import (
     DevelopmentSubmissionAdmissionConfigurationError,
@@ -26,6 +28,76 @@ def _service():
     from core.web.services import session_service
 
     return session_service
+
+
+_SESSION_SUBMIT_ADMIT_LOCKS_GUARD = threading.Lock()
+_SESSION_SUBMIT_ADMIT_LOCKS: dict[str, threading.Lock] = {}
+
+
+def _session_submit_admit_lock(session_id: str) -> threading.Lock:
+    """Serialize admit for one session without blocking other sessions."""
+
+    normalized = str(session_id or "").strip()
+    with _SESSION_SUBMIT_ADMIT_LOCKS_GUARD:
+        lock = _SESSION_SUBMIT_ADMIT_LOCKS.get(normalized)
+        if lock is None:
+            lock = threading.Lock()
+            _SESSION_SUBMIT_ADMIT_LOCKS[normalized] = lock
+        return lock
+
+
+@contextmanager
+def _release_acquired_lock(lock: threading.Lock) -> Iterator[threading.Lock]:
+    try:
+        yield lock
+    finally:
+        lock.release()
+
+
+def _session_still_running_error(service: Any, lang: str) -> Any:
+    return service.SessionBusyError(
+        service.text_for(
+            lang,
+            zh="当前会话仍在运行，请等这一轮结束后再继续发送。",
+            en="This session is still running. Wait for the current turn to finish before sending again.",
+        )
+    )
+
+
+def _session_reference_conversation_rows(
+    service: Any,
+    conversation_id: str,
+    conversation: dict[str, Any],
+    references: Any,
+) -> list[dict[str, Any]]:
+    """Load only the current session and referenced session runtime rows."""
+
+    rows = [conversation]
+    seen = {str(conversation_id or "").strip()}
+    for reference in service._normalize_session_references(references):
+        target_id = str(reference.get("sessionId") or "").strip()
+        if not target_id or target_id in seen:
+            continue
+        target = service.load_session_chat_state(service.PROJECT_ROOT, target_id)
+        if target is None:
+            continue
+        rows.append(target)
+        seen.add(target_id)
+    return rows
+
+
+def _require_positive_context_limit(service: Any, conversation: dict[str, Any], lang: str) -> dict[str, Any]:
+    context_limit_payload = service._session_context_limit_payload(conversation)
+    if int(context_limit_payload.get("limit") or 0) <= 0:
+        detail = str(context_limit_payload.get("error") or "").strip()
+        if not detail:
+            detail = service.text_for(
+                lang,
+                zh="未配置模型 max 上下文窗口（禁止默认兜底）。请在设置中为对话模型填写 context_window，或先运行模型发现。",
+                en="Model max context window is not configured (silent defaults are disabled). Set context_window for the dialogue model in settings, or run model discovery first.",
+            )
+        raise service.SessionValidationError(detail)
+    return context_limit_payload
 
 
 def _append_initial_session_journal_markers(
@@ -210,6 +282,29 @@ def submit_session_guidance(session_id: str, content: str, *, mode: str = "safe"
             running=running,
         )
 
+    guidance_kind = "user_interrupt_guidance" if normalized_mode == "interrupt" else "user_guidance"
+    if active_turn_id:
+        s._append_session_conversation_event(
+            conversation_id,
+            active_turn_id,
+            s.EVENT_USER_MESSAGE,
+            status="recorded",
+            payload={
+                "content": guidance_text,
+                "attachments": [],
+                "references": [],
+                "metadata": {
+                    "kind": guidance_kind,
+                    "source": "steer",
+                    "guidanceMode": normalized_mode,
+                    "turnId": active_turn_id,
+                },
+                "source": "steer",
+            },
+            source="submit_session_guidance",
+            visible_in_model=True,
+        )
+
     if normalized_mode == "interrupt" and running:
         return s.request_stop_session_turn(conversation_id)
 
@@ -276,27 +371,62 @@ def submit_session_message(
     if not conversation_id:
         raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
     s._validate_user_message_not_encoding_replacement(message, lang=lang)
-    lock_wait_started_at = s._perf_counter()
-    with s._CHAT_STATE_LOCK:
-        lock_acquired_at = s._perf_counter()
-        submit_timing_fields["chatStateLockWaitMs"] = s._elapsed_ms_between(lock_wait_started_at, lock_acquired_at)
-        payload = s.load_chat_state(s.PROJECT_ROOT)
-        s._materialize_agent_directory_conversation_locked(payload, conversation_id, source="submit_session_message")
-        conversation = s._find_conversation_entry(payload, conversation_id)
+    if s._is_session_running(conversation_id):
+        raise _session_still_running_error(s, lang)
+
+    # Ledger I/O is per-session. Holding _CHAT_STATE_LOCK across it serializes
+    # every other session's 202 accept (measured 6-way wait ~20s).
+    admit_lock = _session_submit_admit_lock(conversation_id)
+    admit_lock.acquire()
+    prepared_agent: dict[str, Any] | None = None
+    prepared_agent_id = ""
+    prepared_context_limit_ok = False
+    try:
+        if s._is_session_running(conversation_id):
+            raise _session_still_running_error(s, lang)
+        ledger_started_at = s._perf_counter()
+        s._reconcile_stale_session_ledger(conversation_id, reason="new_turn_submitted")
+        previous_messages = s._session_ledger_visible_messages(conversation_id)
+        submit_timing_fields["ledgerReconcileMs"] = s._elapsed_ms(ledger_started_at)
+        prepare_started_at = s._perf_counter()
+        conversation = s.load_session_chat_state(s.PROJECT_ROOT, conversation_id)
+        if conversation is None:
+            current_active = str(s.load_active_conversation_id(s.PROJECT_ROOT) or "").strip()
+            if s._ensure_agent_directory_conversation_materialized(
+                conversation_id,
+                source="submit_session_message",
+                activate=not current_active,
+            ):
+                conversation = s.load_session_chat_state(s.PROJECT_ROOT, conversation_id)
+        if conversation is not None:
+            s._ensure_session_mutable(
+                conversation_id,
+                conversation=conversation,
+            )
+            _require_positive_context_limit(s, conversation, lang)
+            prepared_context_limit_ok = True
+            prepared_agent_id = str(
+                conversation.get("agent_id") or conversation.get("agentId") or ""
+            ).strip()
+            if prepared_agent_id:
+                prepared_agent = s._resolve_active_agent_for_turn(
+                    conversation_id,
+                    prepared_agent_id,
+                    lang=lang,
+                )
+        submit_timing_fields["submitPrepareMs"] = s._elapsed_ms(prepare_started_at)
+    except BaseException:
+        admit_lock.release()
+        raise
+
+    persist_started_at = s._perf_counter()
+    submit_timing_fields["chatStateLockWaitMs"] = 0
+    try:
         if conversation is None:
             raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
         # Fail closed: never run a turn with an invented context window.
-        context_limit_payload = s._session_context_limit_payload(conversation)
-        context_limit = int(context_limit_payload.get("limit") or 0)
-        if context_limit <= 0:
-            detail = str(context_limit_payload.get("error") or "").strip()
-            if not detail:
-                detail = s.text_for(
-                    lang,
-                    zh="未配置模型 max 上下文窗口（禁止默认兜底）。请在设置中为对话模型填写 context_window，或先运行模型发现。",
-                    en="Model max context window is not configured (silent defaults are disabled). Set context_window for the dialogue model in settings, or run model discovery first.",
-                )
-            raise s.SessionValidationError(detail)
+        if not prepared_context_limit_ok:
+            _require_positive_context_limit(s, conversation, lang)
         s._ensure_session_mutable(
             conversation_id,
             conversation=conversation,
@@ -310,7 +440,12 @@ def submit_session_message(
         session_references = s._resolve_session_references(
             conversation_id,
             references or [],
-            conversations=payload.get("conversations") or [],
+            conversations=_session_reference_conversation_rows(
+                s,
+                conversation_id,
+                conversation,
+                references or [],
+            ),
             lang=lang,
         )
         active_task = s._normalize_session_active_task(conversation.get("active_task") or conversation.get("activeTask"))
@@ -364,13 +499,7 @@ def submit_session_message(
             )
 
         if s._is_session_running(conversation_id):
-            raise s.SessionBusyError(
-                s.text_for(
-                    lang,
-                    zh="当前会话仍在运行，请等这一轮结束后再继续发送。",
-                    en="This session is still running. Wait for the current turn to finish before sending again.",
-                )
-            )
+            raise _session_still_running_error(s, lang)
 
         if normalized_message_source == "supervised_evolution":
             requested_leases = [s.SUPERVISED_EVALUATION_CHAT_LEASE]
@@ -397,17 +526,20 @@ def submit_session_message(
                 lease_conflicts=lease_decision.conflicts,
                 lang=lang,
             )
-            payload["updated_at"] = conversation.get("updated_at") or s._now_timestamp()
-            s.save_chat_state(s.PROJECT_ROOT, payload)
+            s.save_session_chat_state(s.PROJECT_ROOT, conversation_id, conversation)
             raise s.SessionBusyError(localized_reason)
 
-        s._ensure_conversation_agent_metadata(conversation)
-        agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
-        agent = s._resolve_active_agent_for_turn(conversation_id, agent_id, lang=lang)
+        if prepared_agent is None:
+            s._ensure_conversation_agent_metadata(conversation)
+            agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
+            agent = s._resolve_active_agent_for_turn(conversation_id, agent_id, lang=lang)
+        else:
+            agent_id = str(
+                conversation.get("agent_id") or conversation.get("agentId") or prepared_agent_id
+            ).strip() or prepared_agent_id
+            agent = prepared_agent
         skill_command = s.parse_skill_slash_command(message)
         skill_invocation = s._skill_invocation_payload(skill_command) if skill_command is not None else None
-        s._reconcile_stale_session_ledger(conversation_id, reason="new_turn_submitted")
-        previous_messages = s._session_ledger_visible_messages(conversation_id)
         reserved_turn_id = str(
             (existing_development_admission or {}).get("turnId") or ""
         ).strip()
@@ -486,20 +618,7 @@ def submit_session_message(
         conversation.pop("lastTurnError", None)
         conversation["last_turn_status"] = "running"
         conversation["updated_at"] = user_entry["timestamp"]
-        conversation_metadata = (
-            conversation.get("metadata")
-            if isinstance(conversation.get("metadata"), dict)
-            else {}
-        )
-        trusted_external_task = (
-            normalized_message_source == "external_agent_task"
-            and str(conversation_metadata.get("source") or "").strip()
-            == "external_agent_task"
-        )
-        if not trusted_external_task:
-            payload["active_conversation_id"] = conversation_id
-        payload["updated_at"] = user_entry["timestamp"]
-        s.save_chat_state(s.PROJECT_ROOT, payload)
+        s.save_session_chat_state(s.PROJECT_ROOT, conversation_id, conversation)
         s._set_session_running(conversation_id, True, turn_id=turn_control.turn_id, leases=requested_leases)
         s._persist_chat_turn_work_run(
             session_id=conversation_id,
@@ -511,7 +630,9 @@ def submit_session_message(
             started_at=user_entry["timestamp"],
             updated_at=user_entry["timestamp"],
         )
-        submit_timing_fields["chatStateLockedMs"] = s._elapsed_ms_between(lock_acquired_at)
+        submit_timing_fields["chatStateLockedMs"] = s._elapsed_ms_between(persist_started_at)
+    finally:
+        admit_lock.release()
     from . import directory_bridge
 
     directory_bridge.sync_conversation_record(
@@ -891,9 +1012,10 @@ def edit_and_resubmit_session_message(
         )
     s._validate_user_message_not_encoding_replacement(message, lang=lang)
 
-    with s._CHAT_STATE_LOCK:
-        payload = s.load_chat_state(s.PROJECT_ROOT)
-        conversation = s._find_conversation_entry(payload, conversation_id)
+    admit_lock = _session_submit_admit_lock(conversation_id)
+    admit_lock.acquire()
+    try:
+        conversation = s.load_session_chat_state(s.PROJECT_ROOT, conversation_id)
         if conversation is None:
             raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
         s._ensure_session_mutable(
@@ -951,8 +1073,7 @@ def edit_and_resubmit_session_message(
                 lease_conflicts=lease_decision.conflicts,
                 lang=lang,
             )
-            payload["updated_at"] = conversation.get("updated_at") or s._now_timestamp()
-            s.save_chat_state(s.PROJECT_ROOT, payload)
+            s.save_session_chat_state(s.PROJECT_ROOT, conversation_id, conversation)
             raise s.SessionBusyError(localized_reason)
 
         s._ensure_conversation_agent_metadata(conversation)
@@ -994,9 +1115,7 @@ def edit_and_resubmit_session_message(
         conversation.pop("lastTurnError", None)
         conversation["last_turn_status"] = "running"
         conversation["updated_at"] = user_entry["timestamp"]
-        payload["active_conversation_id"] = conversation_id
-        payload["updated_at"] = user_entry["timestamp"]
-        s.save_chat_state(s.PROJECT_ROOT, payload)
+        s.save_session_chat_state(s.PROJECT_ROOT, conversation_id, conversation)
         s._set_session_running(conversation_id, True, turn_id=turn_control.turn_id, leases=requested_leases)
         s._persist_chat_turn_work_run(
             session_id=conversation_id,
@@ -1008,6 +1127,8 @@ def edit_and_resubmit_session_message(
             started_at=user_entry["timestamp"],
             updated_at=user_entry["timestamp"],
         )
+    finally:
+        admit_lock.release()
     s._append_session_conversation_event(
         conversation_id,
         turn_control.turn_id,

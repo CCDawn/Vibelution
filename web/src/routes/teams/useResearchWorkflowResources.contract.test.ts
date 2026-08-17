@@ -53,7 +53,7 @@ describe("research workflow shared read-query contract", () => {
 
   it("passes React Query cancellation signals through every fetch", () => {
     expect(resourcesSource.match(/queryFn: \(\{ signal \}\)/g) ?? []).toHaveLength(9);
-    expect(resourcesSource.match(/\{ signal \}/g)?.length ?? 0).toBeGreaterThanOrEqual(18);
+    expect(resourcesSource.match(/\{ signal \}/g)?.length ?? 0).toBeGreaterThanOrEqual(16);
   });
 
   it("keeps each resource behind its own demand flag", () => {

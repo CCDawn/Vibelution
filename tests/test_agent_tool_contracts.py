@@ -49,6 +49,15 @@ TEAM_MEMORY_TOOLS = {
     "knowledge_rating_suggestion_tool",
 }
 
+PROJECT_OPERATION_LIFECYCLE_TOOLS = {
+    "agent_create_tool",
+    "agent_archive_tool",
+    "agent_reset_tool",
+    "session_create_tool",
+    "session_stop_tool",
+    "session_delete_tool",
+}
+
 CURRENT_AGENT_TOOL_CONTRACT = (
     TEAM_COLLABORATION_TOOLS
     | EVOLUTION_TOOLS
@@ -84,6 +93,9 @@ def test_team_evolution_and_memory_tools_have_current_registry_contract():
 
     assert CURRENT_AGENT_TOOL_CONTRACT.issubset(canonical_names)
     assert CURRENT_AGENT_TOOL_CONTRACT.issubset(llm_facing_names)
+    assert PROJECT_OPERATION_LIFECYCLE_TOOLS.issubset(canonical_names)
+    assert PROJECT_OPERATION_LIFECYCLE_TOOLS.issubset(llm_facing_names)
+    assert "agent_purge_tool" not in canonical_names
     assert RETIRED_TOOL_NAMES.isdisjoint(canonical_names)
 
     expected_categories = {
@@ -105,6 +117,7 @@ def test_team_evolution_and_memory_tools_have_current_registry_contract():
         assert metadata["capabilityTags"], tool_name
 
     bundles = {bundle["bundleId"]: bundle for bundle in tool_catalog.list_tool_bundles()}
+    assert set(agent_directory_service.GENERATION_HANDOFF_MEMORY_TOOLS).isdisjoint(set(bundles["core"]["toolNames"]))
     assert TEAM_COLLABORATION_TOOLS.issubset(set(bundles["source_collection_stage"]["toolNames"]))
     assert {"unified_memory_search_tool"}.issubset(set(bundles["memory_context"]["toolNames"]))
     assert {
@@ -117,6 +130,31 @@ def test_team_evolution_and_memory_tools_have_current_registry_contract():
         "close_evolution_transaction_tool",
         "get_evolution_fitness_tool",
     }.issubset(set(bundles["operations"]["toolNames"]))
+
+
+def test_hypothesis_writeback_tool_description_exposes_complete_score_contract():
+    tools_by_name = {tool.name: tool for tool in create_llm_facing_tools()}
+    description = str(
+        getattr(
+            tools_by_name["challenge_cup_experiment_writeback_tool"],
+            "description",
+            "",
+        )
+        or ""
+    )
+
+    for score_key in (
+        "novelty",
+        "competitionFit",
+        "falsifiability",
+        "evidenceSupport",
+        "feasibility",
+    ):
+        assert score_key in description
+    assert "0 到 1" in description
+    assert "counterEvidenceRefs" in description
+    assert "runId 由当前正式任务绑定" in description
+    assert "不得猜测或填写" in description
 
 
 def test_agent_message_tool_blocks_without_bound_agent_runtime(monkeypatch):

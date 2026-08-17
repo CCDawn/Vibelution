@@ -9,6 +9,16 @@ describe("desktop CLI arguments", () => {
     expect(parseDesktopCliArgs(["--workspace", "C:/workspace"]).projectRoot).toBe("");
   });
 
+  it("parses forwarded shim lifecycle commands without confusing them with paths", () => {
+    expect(parseDesktopCliArgs(["--project", "C:/repo", "start"]).lifecycleCommand).toBe("start");
+    expect(parseDesktopCliArgs(["--project", "C:/repo", "restart"]).lifecycleCommand).toBe("restart");
+    expect(parseDesktopCliArgs(["--project", "C:/repo", "rebuild-and-start"]).lifecycleCommand).toBe(
+      "rebuild-and-start"
+    );
+    expect(parseDesktopCliArgs(["--project", "C:/repo"]).lifecycleCommand).toBe("");
+    expect(parseDesktopCliArgs(["--workspace", "C:/repo", "toggle"]).lifecycleCommand).toBe("toggle");
+  });
+
   it("keeps --project as a slot apply path and does not treat it as workspace root", () => {
     const args = parseDesktopCliArgs([
       "--workspace",
@@ -45,7 +55,8 @@ describe("desktop CLI arguments", () => {
       configPath: "C:/Users/17533/Documents/Vibelution/config/config.toml",
       smoke: true,
       openWorkbench: true,
-      workbenchCloseCanary: true
+      workbenchCloseCanary: true,
+      lifecycleCommand: ""
     });
     expect(applyDesktopCliToEnvironment({ NODE_ENV: "production" } as NodeJS.ProcessEnv, args)).toMatchObject({
       NODE_ENV: "production",
@@ -89,6 +100,8 @@ describe("desktop CLI arguments", () => {
       },
       shutdown: {
         attempted: false,
+        stopManagedRuntime: false,
+        managedRuntimeError: "",
         stopPythonLauncher: false,
         stopStatus: "not_requested",
         stoppedPidCount: 0,

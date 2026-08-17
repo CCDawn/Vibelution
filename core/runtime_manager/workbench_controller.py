@@ -40,7 +40,11 @@ from .scene_logging import (
     runtime_manager_event_phase,
     truncate_event_text,
 )
-from .window_provider_state import window_provider_projection, with_window_provider_projection
+from .window_provider_state import (
+    compose_observed_state,
+    window_provider_projection,
+    with_window_provider_projection,
+)
 
 INTERNAL_LAUNCHER_ENV = "VIBELUTION_RUNTIME_MANAGER_INTERNAL_LAUNCHER"
 INTERNAL_LAUNCHER_VALUE = "1"
@@ -526,6 +530,40 @@ def persist_workbench_launcher_state_after_open(
     browser_launch_pid = int(observed.get("browserLaunchPid") or browser_window_pid or 0)
     backend_launch_pid = int(observed.get("backendLaunchPid") or backend_pid or 0)
     backend_port = int(observed.get("backendPort") or configured_backend_port())
+    window_provider = str(observed.get("windowProvider") or "").strip().lower()
+    window_owned = bool(
+        observed.get("windowManaged")
+        if window_provider == "electron"
+        else observed.get("browserManaged")
+    )
+    window_ready = bool(
+        observed.get("browserWindowAlive")
+        and window_owned
+    )
+    backend_ready = bool(
+        not observed.get("backendPortConflict")
+        and observed.get("backendObserved")
+        and (
+            observed.get("backendHealthy")
+            or (
+                observed.get("backendPortListening")
+                and observed.get("backendPortOwnerTrusted")
+            )
+        )
+    )
+    observed_state = compose_observed_state(backend_ready=backend_ready, window_ready=window_ready)
+    if observed_state == "open":
+        lifecycle_consistency = "consistent"
+        status_line = "Workbench is running."
+    elif backend_ready:
+        lifecycle_consistency = "browser_missing"
+        status_line = "Workbench window is closed; backend is still running."
+    elif window_ready:
+        lifecycle_consistency = "backend_missing"
+        status_line = "Workbench window is open; backend is unavailable."
+    else:
+        lifecycle_consistency = str(observed.get("lifecycleConsistency") or "backend_missing")
+        status_line = "Workbench is unavailable."
     workbench_profile_dir = str(
         observed.get("browserProfileDir")
         or previous_state.get("workbenchBrowserProfileDir")
@@ -539,7 +577,7 @@ def persist_workbench_launcher_state_after_open(
             "sessionRole": "workbench",
             "sessionId": str(observed.get("sessionId") or previous_state.get("sessionId") or "").strip(),
             "desiredState": "open",
-            "observedState": "open",
+            "observedState": observed_state,
             "phase": "steady",
             "backendPid": backend_pid,
             "backendLaunchPid": backend_launch_pid,
@@ -555,8 +593,11 @@ def persist_workbench_launcher_state_after_open(
             "url": str(observed.get("url") or previous_state.get("url") or DEFAULT_URL).strip() or DEFAULT_URL,
             "backendPort": backend_port,
             "port": backend_port,
-            "statusLine": "Workbench is running.",
+            "statusLine": status_line,
             "failureMessage": "",
+            "backendMissing": bool(window_ready and not backend_ready),
+            "frontendOrphaned": bool(window_ready and not backend_ready),
+            "lifecycleConsistency": lifecycle_consistency,
             "lastReason": str(last_reason or previous_state.get("lastReason") or "runtime_manager_open").strip(),
             "lastSource": str(last_source or previous_state.get("lastSource") or "runtime_manager").strip(),
             "updatedAt": datetime.now(timezone.utc).isoformat(),
@@ -1020,11 +1061,18 @@ def observe_workbench(
                         or bool(_visible_top_level_window_handles(browser_window_pid))
                     )
     launcher_browser_window_alive = _is_browser_window_alive(launcher_browser_window_pid)
-    managed_browser_missing = bool(
+    window_provider = str(window_projection.get("windowProvider") or "").strip().lower()
+    electron_window_missing = bool(
         observed_session_role != "launcher_control_surface"
-        and browser_managed
+        and window_provider == "electron"
         and backend_observed
         and not browser_window_alive
+    )
+    managed_browser_missing = bool(
+        observed_session_role != "launcher_control_surface"
+        and backend_observed
+        and not browser_window_alive
+        and (browser_managed or electron_window_missing)
     )
     if observed_session_role == "launcher_control_surface":
         observed_state = "closed"
@@ -1410,26 +1458,29 @@ def _bootstrap_packaged_electron_workbench(
         current_timing_key = "desktopActionSubmitMs"
         startup_telemetry["failureStage"] = current_stage
         stage_started = time.monotonic()
-        intent = _submit_electron_window_action(
-            action="open_workbench",
-            reason=f"{action}:electron_first_start",
-            session=session,
-        )
-        if str(intent.get("status") or "") != "accepted":
-            raise RuntimeError(
-                "Electron first-start Workbench action was not accepted by the Launcher: "
-                f"{str(intent.get('rejectionReason') or intent.get('status') or 'unknown')}"
+        if not _electron_main_orchestrates_windows():
+            intent = _submit_electron_window_action(
+                action="open_workbench",
+                reason=f"{action}:electron_first_start",
+                session=session,
             )
-        timings[current_timing_key] = _startup_elapsed_ms(stage_started)
+            if str(intent.get("status") or "") != "accepted":
+                raise RuntimeError(
+                    "Electron first-start Workbench action was not accepted by the Launcher: "
+                    f"{str(intent.get('rejectionReason') or intent.get('status') or 'unknown')}"
+                )
+            timings[current_timing_key] = _startup_elapsed_ms(stage_started)
 
-        current_stage = "workbench_window_open"
-        current_timing_key = "workbenchWindowOpenMs"
-        startup_telemetry["failureStage"] = current_stage
-        stage_started = time.monotonic()
-        opened_session = _await_electron_workbench_open(
-            process,
-            desktop_session_id=str(session.get("desktopSessionId") or ""),
-        )
+            current_stage = "workbench_window_open"
+            current_timing_key = "workbenchWindowOpenMs"
+            startup_telemetry["failureStage"] = current_stage
+            stage_started = time.monotonic()
+            opened_session = _await_electron_workbench_open(
+                process,
+                desktop_session_id=str(session.get("desktopSessionId") or ""),
+            )
+        else:
+            opened_session = session
         timings[current_timing_key] = _startup_elapsed_ms(stage_started)
         timings["electronFirstStartTotalMs"] = _startup_elapsed_ms(total_started)
         startup_telemetry["workbenchOpen"] = True
@@ -1446,6 +1497,11 @@ def _bootstrap_packaged_electron_workbench(
         if process is not None:
             _terminate_packaged_electron_after_failed_bootstrap(process)
         raise
+
+
+def _electron_main_orchestrates_windows() -> bool:
+    """T6: Electron main owns window actions; Python only reports backend state."""
+    return str(os.environ.get("VIBELUTION_ELECTRON_MAIN_ORCHESTRATES_WINDOWS", "")).strip() == "1"
 
 
 def _electron_window_action_for_launcher_action(action: str) -> str:
@@ -1723,7 +1779,7 @@ def run_launcher_action(
         startup_telemetry["timingsMs"]["launcherControlPlaneBackendReadyMs"] = _startup_elapsed_ms(
             control_plane_started
         )
-        if completed.returncode == 0 and electron_window_action:
+        if completed.returncode == 0 and electron_window_action and not _electron_main_orchestrates_windows():
             if electron_session:
                 startup_telemetry["failureStage"] = "desktop_action_submit"
                 desktop_action_started = time.monotonic()

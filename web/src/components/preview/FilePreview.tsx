@@ -6,6 +6,7 @@ import type { Extension } from "@codemirror/state";
 import { Decoration, EditorView } from "@codemirror/view";
 
 import { FileContent } from "../../api/types";
+import { type BrowserTelemetryEventInput, postBrowserTelemetry } from "../../app/browserTelemetry";
 import { VButton } from "../vui";
 import { workbenchCodeMirrorTheme } from "../../design/codeMirrorTheme";
 import { useAppI18n } from "../../i18n/useAppI18n";
@@ -33,6 +34,75 @@ type PreviewEditorErrorBoundaryState = {
   failed: boolean;
 };
 
+const reportedPreviewErrorKeys = new Set<string>();
+const PREVIEW_PATH_LOG_LIMIT = 240;
+const PREVIEW_ERROR_TEXT_LIMIT = 240;
+
+function compactErrorText(error: unknown, limit: number) {
+  const text = error instanceof Error
+    ? `${error.name}: ${error.message}`
+    : String(error ?? "Unknown preview editor error");
+  const compacted = text.replace(/\s+/g, " ").trim();
+  if (compacted.length <= limit) {
+    return compacted || "Unknown preview editor error";
+  }
+  return `${compacted.slice(0, Math.max(0, limit - 3))}...`;
+}
+
+export function safePreviewPathForLog(path: string) {
+  const text = String(path || "").replace(/\\/g, "/").trim();
+  if (!text) {
+    return "";
+  }
+  const isAbsolute = /^[A-Za-z]:/.test(text) || text.startsWith("/") || text.startsWith("//");
+  const escaped = text.includes("..");
+  if (isAbsolute || escaped) {
+    return (text.split("/").filter(Boolean).at(-1) || "").slice(0, PREVIEW_PATH_LOG_LIMIT);
+  }
+  return text.slice(0, PREVIEW_PATH_LOG_LIMIT);
+}
+
+export function buildPreviewEditorErrorTelemetryEvent(
+  error: unknown,
+  previewPath: string,
+  info?: { componentStackLength?: number },
+): BrowserTelemetryEventInput {
+  return {
+    phase: "error",
+    eventCode: "browser.preview.error",
+    message: "file preview editor crashed",
+    level: "error",
+    fields: {
+      surface: "file_preview",
+      path: safePreviewPathForLog(previewPath),
+      errorName: error instanceof Error ? error.name : "Unknown",
+      errorMessage: compactErrorText(error, PREVIEW_ERROR_TEXT_LIMIT),
+      componentStackLength: info?.componentStackLength ?? 0,
+    },
+  };
+}
+
+export function resetPreviewEditorErrorTelemetryForTests() {
+  reportedPreviewErrorKeys.clear();
+}
+
+export function reportPreviewEditorError(
+  error: unknown,
+  previewPath: string,
+  info?: { componentStackLength?: number },
+) {
+  const event = buildPreviewEditorErrorTelemetryEvent(error, previewPath, info);
+  const key = [
+    String(event.fields?.path ?? ""),
+    String(event.fields?.errorName ?? ""),
+    String(event.fields?.errorMessage ?? ""),
+  ].join("|");
+  if (reportedPreviewErrorKeys.has(key)) {
+    return;
+  }
+  reportedPreviewErrorKeys.add(key);
+  postBrowserTelemetry(event);
+}
 
 class PreviewEditorErrorBoundary extends Component<
   PreviewEditorErrorBoundaryProps,
@@ -47,11 +117,13 @@ class PreviewEditorErrorBoundary extends Component<
   componentDidCatch(error: unknown, info: ErrorInfo) {
     const errorName = error instanceof Error ? error.name : typeof error;
     const errorMessage = error instanceof Error ? error.message : String(error);
+    const componentStackLength = info.componentStack?.length ?? 0;
+    reportPreviewEditorError(error, this.props.previewPath, { componentStackLength });
     console.warn("[file-preview-fallback]", {
-      path: this.props.previewPath,
+      path: safePreviewPathForLog(this.props.previewPath),
       errorName,
       errorMessage,
-      componentStackLength: info.componentStack?.length ?? 0,
+      componentStackLength,
     });
   }
 

@@ -135,6 +135,83 @@ def test_same_project_agent_reuses_flat_session_without_touching_direct_session(
     assert session_service.get_session_detail(legacy_direct_session["id"]) is not None
 
 
+def test_formal_workflow_nodes_use_exact_scoped_sessions_without_reusing_flat_history(
+    tmp_path, monkeypatch
+):
+    team, project, agent, _legacy_direct_session = _project_and_agent(
+        tmp_path, monkeypatch
+    )
+
+    flat = resolve_research_project_agent_session(
+        team["teamId"],
+        research_project_id=project["projectId"],
+        agent_id=agent["agentId"],
+        role_key="source_finder",
+        role_label="资料寻找",
+        created_from_task_id="manual-task",
+    )
+    hypothesis = resolve_research_project_agent_session(
+        team["teamId"],
+        research_project_id=project["projectId"],
+        agent_id=agent["agentId"],
+        role_key="source_finder",
+        role_label="假设设计",
+        created_from_task_id="workflow-task-hypothesis",
+        workflow_run_id="run-sci-096",
+        workflow_node_id="hypothesis_design",
+    )
+    hypothesis_replay = resolve_research_project_agent_session(
+        team["teamId"],
+        research_project_id=project["projectId"],
+        agent_id=agent["agentId"],
+        role_key="source_finder",
+        role_label="假设设计",
+        created_from_task_id="workflow-task-hypothesis-replay",
+        workflow_run_id="run-sci-096",
+        workflow_node_id="hypothesis_design",
+    )
+    protocol = resolve_research_project_agent_session(
+        team["teamId"],
+        research_project_id=project["projectId"],
+        agent_id=agent["agentId"],
+        role_key="source_finder",
+        role_label="协议设计",
+        created_from_task_id="workflow-task-protocol",
+        workflow_run_id="run-sci-096",
+        workflow_node_id="protocol_design",
+    )
+    next_run_hypothesis = resolve_research_project_agent_session(
+        team["teamId"],
+        research_project_id=project["projectId"],
+        agent_id=agent["agentId"],
+        role_key="source_finder",
+        role_label="假设设计",
+        created_from_task_id="workflow-task-next-run",
+        workflow_run_id="run-sci-097",
+        workflow_node_id="hypothesis_design",
+    )
+
+    assert hypothesis["sessionCreated"] is True
+    assert hypothesis["sessionAttempt"] == 1
+    assert hypothesis["sessionId"] != flat["sessionId"]
+    assert hypothesis["sessionTitle"] == "层级反馈实验｜假设设计"
+    assert hypothesis_replay["sessionCreated"] is False
+    assert hypothesis_replay["sessionId"] == hypothesis["sessionId"]
+    assert protocol["sessionAttempt"] == 1
+    assert protocol["sessionId"] not in {flat["sessionId"], hypothesis["sessionId"]}
+    assert next_run_hypothesis["sessionAttempt"] == 1
+    assert next_run_hypothesis["sessionId"] not in {
+        flat["sessionId"],
+        hypothesis["sessionId"],
+        protocol["sessionId"],
+    }
+    scoped_binding = session_service.get_session_detail(hypothesis["sessionId"])[
+        "experimentBinding"
+    ]
+    assert scoped_binding["workflowRunId"] == "run-sci-096"
+    assert scoped_binding["workflowNodeId"] == "hypothesis_design"
+
+
 def test_project_agent_session_recovers_exact_identity_from_real_stage_turn_journal(
     tmp_path, monkeypatch
 ):
@@ -497,6 +574,73 @@ def test_session_binding_recovers_registry_without_creating_a_duplicate(
     assert recovered["sessionId"] == first["sessionId"]
     assert recovered["sessionCreated"] is False
     assert registry_path.exists()
+
+
+def test_scoped_session_binding_recovers_only_the_exact_workflow_node(
+    tmp_path, monkeypatch
+):
+    team, project, agent, _legacy_direct_session = _project_and_agent(
+        tmp_path, monkeypatch
+    )
+    first = resolve_research_project_agent_session(
+        team["teamId"],
+        research_project_id=project["projectId"],
+        agent_id=agent["agentId"],
+        role_key="source_finder",
+        role_label="假设设计",
+        workflow_run_id="run-sci-096",
+        workflow_node_id="hypothesis_design",
+    )
+    registry_path = (
+        team_workflow_orchestration_service.resolve_research_project_workspace_root(
+            team["teamId"],
+            project["projectId"],
+        )
+        / "research_project_agent_sessions.json"
+    )
+    registry_path.unlink()
+
+    recovered = resolve_research_project_agent_session(
+        team["teamId"],
+        research_project_id=project["projectId"],
+        agent_id=agent["agentId"],
+        role_key="source_finder",
+        role_label="假设设计",
+        workflow_run_id="run-sci-096",
+        workflow_node_id="hypothesis_design",
+    )
+    different_node = resolve_research_project_agent_session(
+        team["teamId"],
+        research_project_id=project["projectId"],
+        agent_id=agent["agentId"],
+        role_key="source_finder",
+        role_label="协议设计",
+        workflow_run_id="run-sci-096",
+        workflow_node_id="protocol_design",
+    )
+
+    assert recovered["sessionId"] == first["sessionId"]
+    assert recovered["sessionCreated"] is False
+    assert different_node["sessionId"] != first["sessionId"]
+    assert different_node["sessionAttempt"] == 1
+
+
+def test_formal_workflow_session_rejects_partial_scope(tmp_path, monkeypatch):
+    team, project, agent, _legacy_direct_session = _project_and_agent(
+        tmp_path, monkeypatch
+    )
+
+    with pytest.raises(
+        ResearchProjectAgentSessionError,
+        match="both workflowRunId and workflowNodeId",
+    ):
+        resolve_research_project_agent_session(
+            team["teamId"],
+            research_project_id=project["projectId"],
+            agent_id=agent["agentId"],
+            role_key="source_finder",
+            workflow_run_id="run-sci-096",
+        )
 
 
 def test_retry_title_keeps_role_and_attempt_suffix_within_limit(tmp_path, monkeypatch):

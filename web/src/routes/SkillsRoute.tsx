@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Ban, BookOpen, CheckSquare, Copy, FileText, RefreshCw, Search, Sparkles, Square } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { fetchJson } from "../api/client";
+import { fetchSkillLibrary, fetchSkillLibraryDetail } from "../api/skills";
 import { queryKeys } from "../api/queryKeys";
 import { SkillLibraryDetail, SkillLibraryItem, SkillLibraryPayload } from "../api/types";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
@@ -99,8 +99,8 @@ function copyFor(lang: string) {
         copyFailed: "复制失败，请手动复制指令",
         copyCommand: "复制指令",
         bulkSelected: "已选",
-        bulkSelectVisible: "选择当前列表",
-        bulkClear: "清空",
+        bulkSelectVisible: "选择可见",
+        bulkClear: "清除选择",
         bulkCopyCommands: "批量复制指令",
         bulkEdit: "批量编辑",
         bulkDelete: "批量删除",
@@ -134,7 +134,7 @@ function copyFor(lang: string) {
         copyCommand: "Copy command",
         bulkSelected: "Selected",
         bulkSelectVisible: "Select visible",
-        bulkClear: "Clear",
+        bulkClear: "Clear selection",
         bulkCopyCommands: "Copy commands",
         bulkEdit: "Bulk edit",
         bulkDelete: "Bulk delete",
@@ -156,7 +156,7 @@ export function SkillsRoute() {
 
   const libraryQuery = useQuery({
     queryKey: queryKeys.skills(),
-    queryFn: () => fetchJson<SkillLibraryPayload>("/api/skills"),
+    queryFn: () => fetchSkillLibrary(),
   });
   const skills = libraryQuery.data?.skills ?? [];
   const filteredSkills = useMemo(() => {
@@ -191,7 +191,7 @@ export function SkillsRoute() {
 
   const detailQuery = useQuery({
     queryKey: queryKeys.skill(activeCommand),
-    queryFn: () => fetchJson<SkillLibraryDetail>(`/api/skills/${encodeURIComponent(normalizeCommand(activeCommand))}`),
+    queryFn: () => fetchSkillLibraryDetail(normalizeCommand(activeCommand)),
     enabled: Boolean(activeCommand),
   });
   const activeSkill = detailQuery.data ?? filteredSkills.find((skill) => skill.command === activeCommand) ?? null;

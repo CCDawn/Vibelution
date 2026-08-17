@@ -8,9 +8,57 @@ import type {
   TeamResearchProjectSourceCollectionResetPayload,
 } from "./types";
 
-export function listTeamResearchProjects(teamId: string) {
+export function listTeamResearchProjects(
+  teamId: string,
+  options?: { signal?: AbortSignal },
+) {
   return fetchJson<TeamResearchProjectListPayload>(
     `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/research-projects`,
+    { signal: options?.signal },
+  );
+}
+
+export function createTeamResearchProject(
+  teamId: string,
+  body: {
+    name: string;
+    topic: string;
+    experimentMethod: string;
+  },
+) {
+  return fetchJson<TeamResearchProjectListPayload>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/research-projects`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export function updateTeamResearchProject(
+  teamId: string,
+  projectId: string,
+  body: {
+    name?: string;
+    topic: string;
+    experimentMethod: string;
+  },
+) {
+  return fetchJson<TeamResearchProjectListPayload>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/research-projects/${encodeURIComponent(projectId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+}
+
+export function activateTeamResearchProject(teamId: string, projectId: string) {
+  return fetchJson<TeamResearchProjectListPayload>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/research-projects/${encodeURIComponent(projectId)}/activate`,
+    { method: "POST" },
   );
 }
 

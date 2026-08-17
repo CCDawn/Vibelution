@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any
 
 from core.research.workflow.contracts import (
@@ -27,9 +28,11 @@ from core.research.workflow.models import ActorKind
 from core.research.workflow.transitions import NodeAttemptStatus
 
 from .action_registry import ActionRegistry, VerifiedDomainResult
+from .block_projection import sync_run_succeeded, terminal_facts_for_run
 from .domain_ports import DomainPorts
 from .failure_projection import apply_node_run_failure
 from .ids import new_id
+from .iteration_route import branch_decision_from_run, routed_successors
 
 
 # Adapter execution may synchronously wait for a canonical Agent turn.  The
@@ -78,6 +81,7 @@ class AdapterDispatchWorker:
 
     def _handle(self, outbox: Any) -> None:
         action = PendingAction.from_dict(json.loads(outbox.payload_json))
+        action = _heal_pending_action_identity(outbox, action)
         adapter = self._registry.get(action.action_kind)
         if adapter is None:
             self._fail_unregistered(outbox, action)
@@ -300,6 +304,12 @@ class AdapterDispatchWorker:
             )
 
             successors = self._successor_fn(action.node_id)
+            branch = branch_decision_from_run(run)
+            routed = routed_successors(action.node_id, branch)
+            if routed:
+                successors = routed
+            elif action.node_id in {"iteration_decision", "version_governance"}:
+                successors = ()
             if successors:
                 uow.repository.insert_handoff(
                     handoff_id=handoff_id,
@@ -320,19 +330,20 @@ class AdapterDispatchWorker:
                 for index, receipt_id in enumerate(receipt_id_by_index):
                     uow.repository.insert_handoff_receipt(handoff_id, receipt_id, index)
 
-                receipt = ExecutionReceipt(
-                    action_id=action.action_id,
-                    node_run_id=action.node_run_id,
-                    outcome="succeeded",
-                    artifact_receipt_ids=tuple(receipt_id_by_index),
-                    execution_anchor_id=anchor_id,
-                    budget_receipt_id=budget_receipt_id,
-                    problem=None,
-                    completed_at_ms=now_ms,
-                )
-                attempt = uow.repository.get_attempt(action.node_run_id)
-                if attempt is None:
-                    return
+            receipt = ExecutionReceipt(
+                action_id=action.action_id,
+                node_run_id=action.node_run_id,
+                outcome="succeeded",
+                artifact_receipt_ids=tuple(receipt_id_by_index),
+                execution_anchor_id=anchor_id,
+                budget_receipt_id=budget_receipt_id,
+                problem=None,
+                completed_at_ms=now_ms,
+            )
+            attempt = uow.repository.get_attempt(action.node_run_id)
+            if attempt is None:
+                return
+            if successors or action.node_id == "result_package":
                 uow.repository.insert_outbox(
                     _resume_dispatch_record(
                         run=run,
@@ -341,7 +352,19 @@ class AdapterDispatchWorker:
                         receipt=receipt,
                         command_id=outbox.command_id,
                         now_ms=now_ms,
+                        state_update={"branch_decision": branch} if branch else None,
                     )
+                )
+            if action.node_id == "result_package":
+                completion_kind, terminal_reason = terminal_facts_for_run(run)
+                sync_run_succeeded(
+                    uow,
+                    run_id=action.run_id,
+                    now_ms=now_ms,
+                    completion_kind=completion_kind,
+                    terminal_reason=terminal_reason,
+                    node_id=action.node_id,
+                    actor_id=self._owner,
                 )
 
             uow.repository.insert_event(
@@ -667,6 +690,23 @@ class AdapterDispatchWorker:
         )
 
 
+def _heal_pending_action_identity(outbox: Any, action: PendingAction) -> PendingAction:
+    """Ledger outbox columns are authoritative when lag-walk payload omitted runId."""
+    column_run_id = str(getattr(outbox, "run_id", "") or "").strip()
+    column_node_run_id = str(getattr(outbox, "node_run_id", "") or "").strip()
+    payload_run_id = str(action.run_id or "").strip()
+    payload_node_run_id = str(action.node_run_id or "").strip()
+    run_id = payload_run_id or column_run_id
+    node_run_id = payload_node_run_id
+    if node_run_id.startswith("nr--") or not node_run_id:
+        node_run_id = column_node_run_id
+    if run_id and (node_run_id.startswith("nr--") or not node_run_id):
+        node_run_id = f"nr-{run_id}-{action.node_id}-a{action.attempt}"
+    if run_id == payload_run_id and node_run_id == payload_node_run_id:
+        return action
+    return replace(action, run_id=run_id, node_run_id=node_run_id)
+
+
 def _event(*, run_id: str, sequence: int, run_version: int, event_id: str, event_type: str, correlation_id: str, payload: dict, now_ms: int):
     from core.research.workflow.ledger import EventRecord
 
@@ -684,7 +724,7 @@ def _event(*, run_id: str, sequence: int, run_version: int, event_id: str, event
     )
 
 
-def _resume_dispatch_record(*, run: Any, attempt: Any, action: PendingAction, receipt: ExecutionReceipt, command_id: str | None, now_ms: int):
+def _resume_dispatch_record(*, run: Any, attempt: Any, action: PendingAction, receipt: ExecutionReceipt, command_id: str | None, now_ms: int, state_update: dict[str, Any] | None = None):
     from .graph_dispatch_factory import build_graph_dispatch_record
 
     return build_graph_dispatch_record(
@@ -694,4 +734,5 @@ def _resume_dispatch_record(*, run: Any, attempt: Any, action: PendingAction, re
         dispatch_kind="resume_action",
         now_ms=now_ms,
         receipt_payload=receipt.to_dict(),
+        state_update=state_update,
     )

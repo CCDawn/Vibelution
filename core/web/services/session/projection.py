@@ -99,7 +99,7 @@ def list_sessions(
         load_phase_timings: dict[str, int] = {
             "agentDirectoryMs": s._elapsed_ms(agent_directory_started_at),
         }
-        active_id, conversations = s._load_conversations(
+        _, conversations = s._load_conversations(
             repair=False,
             agent_by_id=agent_by_id,
             hidden_team_member_agent_ids=hidden_team_member_agent_ids,
@@ -136,7 +136,6 @@ def list_sessions(
         s._record_session_agent_missing_index_batch_event(hidden_summaries, source="list_sessions")
         sessions.sort(
             key=lambda item: (
-                0 if item["id"] == active_id else 1,
                 -s._timestamp_sort_key(item.get("updatedAt") or item.get("lastActive") or ""),
             )
         )
@@ -216,13 +215,15 @@ def get_session_detail(
     # Exact deep links are allowed to recover a real, non-deleted session
     # workspace.  A missing row must not make the client silently switch to an
     # unrelated active conversation.
-    s._ensure_session_conversation_record(
-        normalized_session_id,
-        source="session.detail",
-    )
     agent_by_id = s._agent_lookup_for_conversations()
-    payload = s.load_chat_state(s.PROJECT_ROOT)
-    if s._find_conversation_entry(payload, normalized_session_id) is None:
+    conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
+    if conversation is None:
+        s._ensure_session_conversation_record(
+            normalized_session_id,
+            source="session.detail",
+        )
+        conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
+    if conversation is None:
         fallback = s._agent_directory_session_stub_for_id(normalized_session_id, agent_by_id=agent_by_id)
         if fallback is None:
             return None
@@ -233,6 +234,9 @@ def get_session_detail(
             transcript_scope=transcript_scope,
             include_secondary=include_secondary_lists,
         )
+    from . import directory_bridge
+
+    directory_bridge.sync_conversation_record(conversation)
 
     with s._RUNNING_SESSIONS_LOCK:
         active_turn_id = str(s._SESSION_ACTIVE_TURN_IDS.get(normalized_session_id) or "").strip()
@@ -242,11 +246,12 @@ def get_session_detail(
         active_turn_id=active_turn_id if session_running else "",
         reason="detail_loaded_after_restart",
     )
-    payload = s.load_chat_state(s.PROJECT_ROOT)
+    conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id) or conversation
     target = s._load_conversation_detail_target(
         normalized_session_id,
-        payload=payload,
+        payload={"conversations": [conversation]},
         repair=True,
+        persist_session_row=True,
         agent_by_id=agent_by_id,
         lightweight=window_requested,
     )
@@ -289,14 +294,13 @@ def get_active_session_detail() -> dict | None:
     """Return the current active conversation detail when available."""
     s = _service()
 
-    active_id, conversations = s._load_conversations()
-    if not conversations:
+    active_id = str(s.load_active_conversation_id(s.PROJECT_ROOT) or "").strip()
+    if not active_id:
+        ids = s.list_session_runtime_ids(s.PROJECT_ROOT)
+        active_id = str(ids[0] or "").strip() if ids else ""
+    if not active_id:
         return None
-    target_id = active_id or conversations[0]["id"]
-    for item in conversations:
-        if item["id"] == target_id:
-            return s._build_session_detail(item)
-    return s._build_session_detail(conversations[0])
+    return s.get_session_detail(active_id)
 
 
 def get_active_session_summary() -> dict | None:
@@ -306,25 +310,27 @@ def get_active_session_summary() -> dict | None:
     agent_by_id = s._agent_lookup_for_conversations()
     active_id, target = s._load_active_conversation_summary_target(agent_by_id=agent_by_id)
     if target is None:
-        active_id, conversations = s._load_conversations(
-            repair=False,
-            agent_by_id=agent_by_id,
-            lightweight=True,
-        )
-        conversations = s._append_agent_directory_conversations(conversations, agent_by_id=agent_by_id)
-        if not conversations:
-            return None
-        target_id = str(active_id or "").strip()
-        target = next(
-            (
-                item
-                for item in conversations
-                if isinstance(item, dict) and str(item.get("id") or "").strip() == target_id
-            ),
-            None,
-        )
+        fallback_id = str(active_id or "").strip()
+        if fallback_id:
+            s._ensure_agent_directory_conversation_materialized(
+                fallback_id,
+                source="session.active_summary",
+            )
+            active_id, target = s._load_active_conversation_summary_target(agent_by_id=agent_by_id)
         if target is None:
-            target = next((item for item in conversations if isinstance(item, dict)), None)
+            ids = s.list_session_runtime_ids(s.PROJECT_ROOT)
+            fallback_id = str(ids[0] or "").strip() if ids else ""
+            if fallback_id:
+                raw_target = s.load_session_chat_state(s.PROJECT_ROOT, fallback_id)
+                if raw_target is not None:
+                    target = s._normalize_conversation(
+                        raw_target,
+                        agent_by_id=agent_by_id,
+                        hidden_team_member_agent_ids=s._agent_directory_stub_hidden_team_member_ids(),
+                        ensure_workspace=False,
+                        lightweight=True,
+                    )
+                    active_id = fallback_id
     if target is None:
         return None
     target = s._with_direct_session_agent_for_summary(target, agent_by_id=agent_by_id)
@@ -666,6 +672,7 @@ def _build_session_summary(
         "taskSummary": summary,
         "lastActive": updated_at,
         "updatedAt": updated_at,
+        "createdAt": str(conversation.get("createdAt") or conversation.get("created_at") or "").strip(),
         "currentPhase": status,
         "sessionKind": session_kind,
         "hiddenFromIndex": bool(conversation.get("hiddenFromIndex") or conversation.get("hidden_from_index")),
@@ -703,7 +710,7 @@ def _public_experiment_binding(value: Any) -> dict[str, Any] | None:
         attempt = max(1, int(value.get("attempt") or 1))
     except (TypeError, ValueError):
         attempt = 1
-    return {
+    binding = {
         "teamId": str(value.get("teamId") or "").strip()[:160],
         "researchProjectId": research_project_id,
         "experimentName": str(value.get("experimentName") or "").strip()[:160],
@@ -715,6 +722,14 @@ def _public_experiment_binding(value: Any) -> dict[str, Any] | None:
         "createdFromTaskId": str(value.get("createdFromTaskId") or "").strip()[:160],
         "createdAt": str(value.get("createdAt") or "").strip()[:120],
     }
+    workflow_run_id = str(value.get("workflowRunId") or "").strip()[:160]
+    workflow_node_id = str(value.get("workflowNodeId") or "").strip()[:80]
+    if bool(workflow_run_id) != bool(workflow_node_id):
+        return None
+    if workflow_run_id and workflow_node_id:
+        binding["workflowRunId"] = workflow_run_id
+        binding["workflowNodeId"] = workflow_node_id
+    return binding
 
 
 def _load_lightweight_conversation_preview(
@@ -4327,7 +4342,6 @@ def _load_conversations(
             payload = s._repair_stale_running_conversations(payload)
         active_id = str(payload.get("active_conversation_id") or s.DEFAULT_CHAT_CONVERSATION_ID).strip()
         conversations: list[dict[str, Any]] = []
-        changed = False
         agent_by_id = agent_by_id if agent_by_id is not None else s._agent_lookup_for_conversations()
         hidden_team_member_agent_ids = (
             hidden_team_member_agent_ids
@@ -4343,11 +4357,14 @@ def _load_conversations(
             except Exception:
                 ledger_workspace_root = None
         if repair:
-            changed = s._repair_child_root_agent_direct_session_bindings(payload, agent_by_id=agent_by_id) or changed
+            s._repair_child_root_agent_direct_session_bindings(payload, agent_by_id=agent_by_id)
+        dirty_runtime_rows: list[dict[str, Any]] = []
         for raw in list(payload.get("conversations") or []):
             if repair and isinstance(raw, dict):
-                changed = s._ensure_conversation_agent_metadata(raw, agent_by_id=agent_by_id) or changed
-                changed = s._ensure_conversation_workspace_metadata(raw) or changed
+                row_changed = s._ensure_conversation_agent_metadata(raw, agent_by_id=agent_by_id)
+                row_changed = s._ensure_conversation_workspace_metadata(raw) or row_changed
+                if row_changed:
+                    dirty_runtime_rows.append(raw)
             conversation = s._normalize_conversation(
                 raw,
                 agent_by_id=agent_by_id,
@@ -4374,9 +4391,9 @@ def _load_conversations(
                 conversation["_hasLedgerMessages"] = has_ledger_messages
             if conversation is not None:
                 conversations.append(conversation)
-        if repair and changed:
+        if dirty_runtime_rows:
             payload["updated_at"] = s._now_timestamp()
-            s.save_chat_state(s.PROJECT_ROOT, payload)
+            s._persist_dirty_session_runtime_rows(dirty_runtime_rows)
         if phase_timings is not None:
             phase_timings["conversationNormalizeMs"] = s._elapsed_ms(normalize_started_at)
         return active_id or s.DEFAULT_CHAT_CONVERSATION_ID, conversations

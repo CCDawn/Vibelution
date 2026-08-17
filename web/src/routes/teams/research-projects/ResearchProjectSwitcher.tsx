@@ -2,11 +2,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FolderKanban, Pencil, Plus, Save } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { fetchJson } from "../../../api/client";
+import { startUserAction } from "../../../app/userActionTelemetry";
+import {
+  activateTeamResearchProject,
+  createTeamResearchProject,
+  listTeamResearchProjects,
+  updateTeamResearchProject,
+} from "../../../api/researchProjectAgentTasks";
 import type {
   ExperimentMethodId,
   TeamResearchProject,
-  TeamResearchProjectListPayload,
 } from "../../../api/types";
 import {
   VButton,
@@ -74,10 +79,7 @@ export function ResearchProjectSwitcher({
   const lastAppliedProjectIdRef = useRef("");
   const projectsQuery = useQuery({
     queryKey: researchProjectQueryKey(teamId),
-    queryFn: () =>
-      fetchJson<TeamResearchProjectListPayload>(
-        `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/research-projects`,
-      ),
+    queryFn: () => listTeamResearchProjects(teamId),
     enabled: Boolean(teamId),
   });
   const activeProject = useMemo(
@@ -105,11 +107,12 @@ export function ResearchProjectSwitcher({
 
   const activateMutation = useMutation({
     mutationFn: (projectId: string) =>
-      fetchJson<TeamResearchProjectListPayload>(
-        `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/research-projects/${encodeURIComponent(projectId)}/activate`,
-        { method: "POST" },
-      ),
-    onSuccess: async (payload) => {
+      activateTeamResearchProject(teamId, projectId),
+    onMutate: (projectId) => ({
+      telemetry: startUserAction("team_research_project_activate", { teamId, projectId }),
+    }),
+    onSuccess: async (payload, projectId, context) => {
+      context?.telemetry?.succeeded({ teamId, projectId });
       queryClient.setQueryData(researchProjectQueryKey(teamId), payload);
       if (payload.project) {
         onProjectActivated(payload.project);
@@ -117,23 +120,29 @@ export function ResearchProjectSwitcher({
       await refreshWorkflowQueries();
       setMessage(lang === "zh" ? "已切换项目，三阶段数据已隔离刷新。" : "Project switched; stage data refreshed.");
     },
+    onError: (error, projectId, context) => {
+      context?.telemetry?.failed(error, { teamId, projectId });
+    },
   });
 
   const createMutation = useMutation({
     mutationFn: () =>
-      fetchJson<TeamResearchProjectListPayload>(
-        `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/research-projects`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: draft.name.trim(),
-            topic: draft.topic.trim(),
-            experimentMethod: currentExperimentMethod,
-          }),
-        },
-      ),
-    onSuccess: async (payload) => {
+      createTeamResearchProject(teamId, {
+        name: draft.name.trim(),
+        topic: draft.topic.trim(),
+        experimentMethod: currentExperimentMethod,
+      }),
+    onMutate: () => ({
+      telemetry: startUserAction("team_research_project_create", {
+        teamId,
+        experimentMethod: currentExperimentMethod,
+      }),
+    }),
+    onSuccess: async (payload, _variables, context) => {
+      context?.telemetry?.succeeded({
+        teamId,
+        projectId: payload.project?.projectId ?? "",
+      });
       queryClient.setQueryData(researchProjectQueryKey(teamId), payload);
       setDialogMode(null);
       setDraft(EMPTY_DRAFT);
@@ -141,29 +150,41 @@ export function ResearchProjectSwitcher({
         await activateMutation.mutateAsync(payload.project.projectId);
       }
     },
+    onError: (error, _variables, context) => {
+      context?.telemetry?.failed(error, { teamId });
+    },
   });
 
   const updateMutation = useMutation({
     mutationFn: () =>
-      fetchJson<TeamResearchProjectListPayload>(
-        `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/research-projects/${encodeURIComponent(activeProject?.projectId || "")}`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ...(activeProject?.nameLocked ? {} : { name: draft.name.trim() }),
-            topic: draft.topic.trim(),
-            experimentMethod: currentExperimentMethod,
-          }),
-        },
-      ),
-    onSuccess: (payload) => {
+      updateTeamResearchProject(teamId, activeProject?.projectId || "", {
+        ...(activeProject?.nameLocked ? {} : { name: draft.name.trim() }),
+        topic: draft.topic.trim(),
+        experimentMethod: currentExperimentMethod,
+      }),
+    onMutate: () => ({
+      telemetry: startUserAction("team_research_project_update", {
+        teamId,
+        projectId: activeProject?.projectId || "",
+      }),
+    }),
+    onSuccess: (payload, _variables, context) => {
+      context?.telemetry?.succeeded({
+        teamId,
+        projectId: payload.project?.projectId ?? activeProject?.projectId ?? "",
+      });
       queryClient.setQueryData(researchProjectQueryKey(teamId), payload);
       if (payload.project) {
         onProjectActivated(payload.project);
       }
       setDialogMode(null);
       setMessage(lang === "zh" ? "项目设置已保存。" : "Project settings saved.");
+    },
+    onError: (error, _variables, context) => {
+      context?.telemetry?.failed(error, {
+        teamId,
+        projectId: activeProject?.projectId || "",
+      });
     },
   });
 

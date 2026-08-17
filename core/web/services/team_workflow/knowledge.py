@@ -2627,6 +2627,40 @@ def invoke_local_research_model(team_id: str, payload: dict[str, Any], *, llm_cl
     return record_response
 
 
+def _steward_pack_local_file_paths(team_id: str, output: dict[str, Any]) -> list[dict[str, Any]]:
+    """Collect candidate-local files that can be copied into the central source store."""
+
+    s = _service()
+    candidate_ids = s._normalize_text_list(output.get("candidateIds"), max_items=32, max_length=160)
+    candidate_store = s._load_candidate_store(team_id)
+    by_id = {
+        str(item.get("candidateId") or ""): item
+        for item in list(candidate_store.get("candidates") or [])
+        if isinstance(item, dict) and str(item.get("candidateId") or "").strip()
+    }
+    paths: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    max_copies = int(getattr(s.team_knowledge_service, "MAX_LOCAL_SOURCE_COPIES", 16) or 16)
+    for candidate_id in candidate_ids:
+        item = by_id.get(candidate_id)
+        if item is None:
+            continue
+        source_path = s._source_manifest_path(item)
+        if not source_path or source_path in seen:
+            continue
+        seen.add(source_path)
+        paths.append(
+            {
+                "candidateId": candidate_id,
+                "path": source_path,
+                "title": s._source_manifest_label(item),
+            }
+        )
+        if len(paths) >= max_copies:
+            break
+    return paths
+
+
 def submit_steward_pack_to_knowledge_ingestion(team_id: str, candidate_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     s = _service()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
@@ -2662,6 +2696,7 @@ def submit_steward_pack_to_knowledge_ingestion(team_id: str, candidate_id: str, 
         output,
         proposed_by_agent_id=proposed_by_agent_id,
     )
+    local_file_paths = _steward_pack_local_file_paths(normalized_team_id, output)
 
     if not central_source_id:
         try:
@@ -2678,6 +2713,7 @@ def submit_steward_pack_to_knowledge_ingestion(team_id: str, candidate_id: str, 
                 title=ingestion_payload["sourceTitle"],
                 summary=ingestion_payload["sourceSummary"],
                 actor_agent_id=proposed_by_agent_id,
+                local_file_paths=local_file_paths,
             )
         except (s.team_knowledge_service.TeamKnowledgeError, s.team_knowledge_service.TeamKnowledgeNotFoundError) as exc:
             raise s.TeamWorkflowOrchestrationError(str(exc)) from exc
@@ -2700,6 +2736,7 @@ def submit_steward_pack_to_knowledge_ingestion(team_id: str, candidate_id: str, 
                 "ratingSuggestionId": "",
                 "submittedByAgentId": proposed_by_agent_id,
                 "submittedAt": now,
+                "localCopyCount": len(list(inbox_source.get("localCopies") or [])),
                 "writesOfficialKnowledge": False,
                 "writesOfficialRag": False,
                 "writesOfficialGraph": False,

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class WorkbenchWindowModePayload(BaseModel):
@@ -116,6 +116,172 @@ class LauncherRuntimeSceneEventPayload(BaseModel):
     level: str = "info"
     outcome: str = "observed"
     occurredAt: str = ""
+
+
+class LauncherJsonResponse(BaseModel):
+    """Evolving Launcher JSON envelopes.
+
+    Known top-level fields remain explicit for OpenAPI and route consumers,
+    while forward-compatible tray/control-plane extras pass through. Routes
+    use response_model_exclude_unset=True so defaults are never injected.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+
+class LauncherStatusResponse(LauncherJsonResponse):
+    launcher: dict[str, Any] = Field(default_factory=dict)
+    projectBundle: dict[str, Any] = Field(default_factory=dict)
+    controlPlaneEvidence: dict[str, Any] = Field(default_factory=dict)
+    guardianAdapter: dict[str, Any] = Field(default_factory=dict)
+    runtimeManager: dict[str, Any] = Field(default_factory=dict)
+    lifecycleProof: dict[str, Any] = Field(default_factory=dict)
+    settings: dict[str, Any] = Field(default_factory=dict)
+    overallState: str = ""
+    observedState: str = ""
+    phase: str = ""
+    lifecycleConsistency: str = ""
+    failureMessage: str = ""
+    lastErrorMessage: str = ""
+    lastErrorScope: str = ""
+    lastErrorAt: str = ""
+    stateVersion: str = ""
+
+
+class LauncherFreshnessResponse(LauncherJsonResponse):
+    schemaVersion: int = 1
+    current: bool | None = None
+    label: str = ""
+    runningCommit: str = ""
+    runningShort: str = ""
+    runningBranch: str = ""
+    headCommit: str = ""
+    headShort: str = ""
+    headBranch: str = ""
+    startedAt: str = ""
+
+
+class LauncherBranchInstanceListResponse(LauncherJsonResponse):
+    schemaVersion: int = 1
+    integrationRoot: str = ""
+    branchPool: str = ""
+    currentId: str = ""
+    currentShortName: str = ""
+    currentWorkbenchTitle: str = ""
+    currentLauncherTitle: str = ""
+    items: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class WorkbenchWindowModeSettingResponse(LauncherJsonResponse):
+    mode: str = ""
+    effectiveMode: str = ""
+    envOverride: str = ""
+    configPath: str = ""
+    configHash: str = ""
+    restartRequired: bool = True
+    options: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class WorkbenchWindowModeUpdateResponse(LauncherJsonResponse):
+    ok: bool = False
+    mode: str = ""
+    setting: WorkbenchWindowModeSettingResponse = Field(
+        default_factory=WorkbenchWindowModeSettingResponse
+    )
+    message: str = ""
+
+
+class LauncherStartupSettingsResponse(LauncherJsonResponse):
+    launcher: dict[str, Any] = Field(default_factory=dict)
+    runtime: dict[str, Any] = Field(default_factory=dict)
+    workbench: dict[str, Any] = Field(default_factory=dict)
+    interface: dict[str, Any] = Field(default_factory=dict)
+    configPath: str = ""
+    configHash: str = ""
+    restartRequired: bool = True
+
+
+class LauncherStartupSettingsUpdateResponse(LauncherJsonResponse):
+    ok: bool = False
+    setting: LauncherStartupSettingsResponse = Field(
+        default_factory=LauncherStartupSettingsResponse
+    )
+    message: str = ""
+
+
+class LauncherDeveloperModeSettingResponse(LauncherJsonResponse):
+    schemaVersion: int = 1
+    enabled: bool = False
+    defaulted: bool = False
+    updatedAt: str = ""
+    updatedBy: str = ""
+    controller: str = ""
+    scope: str = ""
+    mode: str = ""
+    configPath: str = ""
+    configHash: str = ""
+    sandbox: dict[str, Any] = Field(default_factory=dict)
+    policy: dict[str, Any] = Field(default_factory=dict)
+
+
+class LauncherDeveloperModeUpdateResponse(LauncherJsonResponse):
+    ok: bool = False
+    setting: LauncherDeveloperModeSettingResponse = Field(
+        default_factory=LauncherDeveloperModeSettingResponse
+    )
+    message: str = ""
+
+
+class LauncherDeveloperNoiseOverviewResponse(LauncherJsonResponse):
+    schemaVersion: int = 1
+    developerMode: LauncherDeveloperModeSettingResponse = Field(
+        default_factory=LauncherDeveloperModeSettingResponse
+    )
+    projectRoot: str = ""
+    items: list[dict[str, Any]] = Field(default_factory=list)
+    updatedAt: str = ""
+
+
+class LauncherAcceptedCommandResponse(LauncherJsonResponse):
+    accepted: bool = False
+    commandId: str = ""
+    message: str = ""
+    instanceId: str = ""
+    operation: str = ""
+
+
+class LauncherCleanupPlanResponse(LauncherJsonResponse):
+    planId: str = ""
+    action: str = ""
+    ok: bool = False
+
+
+class LauncherLifecycleIntentResponse(LauncherJsonResponse):
+    intentId: str = ""
+    status: str = ""
+    action: str = ""
+
+
+class LauncherWorkbenchCloseResponse(LauncherJsonResponse):
+    closeId: str = ""
+    phase: str = ""
+    desktopSessionId: str = ""
+
+
+class LauncherDesktopActionResponse(LauncherJsonResponse):
+    actionId: str = ""
+    desktopSessionId: str = ""
+
+
+class LauncherDesktopSessionResponse(LauncherJsonResponse):
+    desktopSessionId: str = ""
+    revision: int = 0
+    status: str = ""
+
+
+class LauncherRuntimeSceneEventResponse(LauncherJsonResponse):
+    accepted: bool = False
+    runtimeSceneId: str = ""
 
 
 def launcher_error_detail(code: str, exc: Exception | str, **extra: Any) -> dict[str, Any]:

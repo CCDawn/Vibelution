@@ -199,3 +199,76 @@ def test_complete_turn_does_not_invent_example_local_candidates(
         __import__(
             "core.web.services.team_workflow.research_runtime.agent_turn_materializer"
         )
+
+
+def test_completed_project_agent_task_is_closed_before_successor_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[object] = []
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.agent_turn_completion.wait_for_agent_turn_terminal",
+        lambda *_a, **_k: {"terminal": True, "terminalStatus": "completed"},
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.agent_turn_completion.collect_required_artifact_refs",
+        lambda *_a, **_k: calls.append("collect")
+        or [
+            {
+                "canonicalRef": "hypothesis_set://team-p0/run-p0/hash-p0",
+                "kind": "hypothesis_set",
+                "sha256": "a" * 64,
+                "version": "1.0.0",
+            }
+        ],
+    )
+
+    def reconcile_project_tasks(*args, **kwargs):
+        calls.append((args, kwargs))
+        return {
+            "tasks": [
+                {
+                    "taskId": "task-p0",
+                    "status": "completed",
+                    "resultRefs": ["challenge-sci-096"],
+                }
+            ]
+        }
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_project_agent_tasks.get_research_project_agent_task_status",
+        reconcile_project_tasks,
+    )
+
+    refs = complete_agent_turn_outputs(
+        action=PendingAction(
+            action_id="act-hypothesis-p0",
+            run_id="run-p0",
+            node_run_id="nr-hypothesis-p0",
+            node_id="hypothesis_design",
+            attempt=1,
+            actor_kind=ActorKind.AGENT,
+            action_kind="start_agent_task",
+            input_snapshot_hash="a" * 64,
+            input_artifact_refs=(),
+            binding_snapshot_id=None,
+            budget_policy_hash="",
+        ),
+        handle=AgentTaskHandle(
+            session_id="session-p0",
+            session_attempt=1,
+            task_id="task-p0",
+            turn_id="turn-p0",
+        ),
+        input_snapshot={
+            "teamId": "team-p0",
+            "projectId": "project-p0",
+            "sourceCollectionRunId": "sc-p0",
+        },
+    )
+
+    assert refs[0]["kind"] == "hypothesis_set"
+    assert calls[0] == "collect"
+    assert calls[1] == (
+        ("team-p0", "project-p0"),
+        {},
+    )

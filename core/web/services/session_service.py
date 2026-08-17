@@ -131,10 +131,14 @@ from core.ui.chat_state import (
     chat_state_transaction,
     chat_state_path,
     load_chat_state,
+    load_active_conversation_id,
+    load_session_chat_state,
+    list_session_runtime_ids,
     normalize_chat_attachments,
     normalize_chat_messages,
     normalize_chat_tool_calls,
     save_chat_state,
+    save_session_chat_state,
 )
 
 from . import agent_directory_service
@@ -331,6 +335,10 @@ from core.web.services.session.agent_sessions import (
     _record_agent_inbox_idle_drain_event,
     _record_agent_inbox_startup_recovery_event,
 )
+from core.web.services.session.session_bulk_delete import (
+    MAX_BULK_SESSION_IDS,
+    bulk_delete_chat_sessions,
+)
 from core.web.services.session.conversation_index import (
     _ensure_conversation_workspace_metadata,
     _conversation_index_kind_from_raw,
@@ -363,6 +371,8 @@ from core.web.services.session.conversation_index import (
     _agent_directory_stub_hidden_team_member_ids,
     _ensure_agent_directory_conversation_materialized,
     _ensure_session_conversation_record,
+    _session_has_openable_body,
+    _retire_unopenable_directory_session,
     _recover_agent_id_from_session_journal,
     _recover_stage_task_workspace_conversation,
     _recover_missing_conversation_from_workspace_locked,
@@ -594,6 +604,7 @@ from core.web.services.session.session_ops import (
     _load_conversation_detail_target,
     _make_chat_message,
     _make_local_runtime_error_chat_message,
+    _persist_dirty_session_runtime_rows,
     _pending_tool_governance_requests_for_session,
     _terminal_reason_for_turn,
     _terminal_reason_from_conversation,
@@ -784,6 +795,7 @@ from core.web.services.session.runtime_glue import (
     _is_session_running,
     _is_session_stop_requested,
     _is_session_turn_current,
+    _is_steer_guidance_message_entry,
     _is_system_authored_user_message_entry,
     _is_task_tool_backed_active_task,
     _is_task_tool_name,
@@ -826,6 +838,7 @@ from core.web.services.session.runtime_glue import (
     _perf_counter,
     _recent_session_guidance_context_block,
     _recent_session_guidance_summaries,
+    _recent_session_steer_guidance_texts,
     _replacement_active_chat_turn_id,
     _resolve_active_agent_for_turn,
     _resolve_chat_source_log_path,

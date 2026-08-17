@@ -35,11 +35,12 @@ Historical structure/optimization notes (non-authoritative): `docs/archive/plans
 | Experiment plan/catalog/freeze/baseline | `experiment_api/plan.py` |
 | Experiment hypothesis materialize/complete | `experiment_api/hypothesis.py` |
 | Experiment smoke run/result | `experiment_api/smoke.py` |
+| Working-layer experiment outcome graph | `outcome_graph.py` |
 | Experiment full run prepare/execute/register | `experiment_api/full_run.py` |
 | Experiment result knowledge ingestion | `experiment_api/knowledge.py` |
 | Experiment private kernel | `experiment_kernel.py` |
 | Research loop / stage round | `research_loop.py` |
-| Research-project Agent tasks / flat sessions | `research_project_agent_tasks.py` + `research_project_agent_sessions.py` |
+| Research-project Agent tasks / scoped sessions | `research_project_agent_tasks.py` + `research_project_agent_sessions.py` |
 | Knowledge / steward / graph / paper-note entry | `knowledge.py` |
 | Knowledge private kernel | `knowledge_kernel.py` |
 | Iteration / export / inbox / stage-round glue | `workflow_ops.py` |
@@ -63,6 +64,7 @@ Frontend claim alignment: `web/src/routes/teams/README.md` when present. Structu
 | SC projection / summary helpers | `source_collection_projection.py` | agent directory |
 | SC agent session context seeding | `source_collection_context.py` | LLM client internals |
 | Research memory context packing | `research_memory_context.py` | chat stream capture |
+| Working-layer outcomeGraph (tests/supports/falsifies) | `outcome_graph.py` | official graph sync; memory_graph_service |
 | Candidates register/import/extract/list | `source_collection/candidates.py` | pet system |
 | SC runs / search entry + summaries | `source_collection/runs.py` | session list cache |
 | Experiment plan/smoke/full-run APIs | `experiment.py` | session submit |
@@ -91,7 +93,7 @@ Frontend claim alignment: `web/src/routes/teams/README.md` when present. Structu
 | Experiment design/execution entry | `experiment.py` |
 | Experiment plan/status/notify kernel | `experiment_kernel.py` |
 | Research loop / stage round | `research_loop.py` |
-| Flat project Agent task lifecycle | `research_project_agent_tasks.py` |
+| Project Agent task lifecycle | `research_project_agent_tasks.py` |
 | Knowledge ingestion / steward / graph / coordination entry | `knowledge.py` |
 | Knowledge private kernel | `knowledge_kernel.py` |
 
@@ -102,6 +104,16 @@ Frontend claim alignment: `web/src/routes/teams/README.md` when present. Structu
 3. Pure normalizers stay free of FastAPI / Request objects.
 4. Prefer vertical packs (SC / experiment / loop) over a single `helpers.py`.
 5. When moving a public function, re-export it from the facade in the same change.
+
+## Project Agent session identity
+
+- Manual project tasks keep one flat session per project Agent.
+- Formal workflow tasks carry both `workflowRunId` and `workflowNodeId`; their
+  canonical Chat session is isolated by that exact pair. A different node or
+  different Run must not reuse another node's messages or tool-result history.
+- Partial workflow scope fails closed. Registry recovery reads the same scoped
+  fields from the canonical session binding and never falls back to an
+  unscoped Agent session.
 
 ## Extraction progress
 

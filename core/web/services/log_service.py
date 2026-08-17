@@ -7,6 +7,11 @@ from pathlib import Path
 from typing import Any
 
 from core.web.services.log_diagnostics import analyze_log_content
+from vibelution_storage import (
+    resolve_project_logs_home,
+    resolve_project_runtime_home,
+    resolve_project_workspace_home,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 MAX_TREE_DEPTH = 6
@@ -15,6 +20,7 @@ MAX_ROOT_SUMMARY_ITEMS = 20_000
 
 LOG_ROOTS = (
     {"id": "runtime_scenes", "path": "logs/runtime_scenes"},
+    {"id": "launcher_runtime", "path": ".runtime/launcher"},
     {"id": "runtime_logs", "path": "logs"},
     {"id": "workspace_logs", "path": "workspace/logs"},
     {"id": "conversation_logs", "path": "logs/conversations"},
@@ -44,9 +50,13 @@ ROOT_GUIDES = {
         "userGuide": "优先按一次运行查看统一时间线，再打开关联原始日志。",
         "agentGuide": "先读 runtime scene timeline；需要上下文时再追 rawRefs 指向的原始日志。",
     },
+    "launcher_runtime": {
+        "userGuide": "Launcher 进程 stdout/stderr、启动控制与前端构建日志。",
+        "agentGuide": "排查启动、关闭、端口和后台服务时优先读 backend.stdout.log / backend.stderr.log / launcher-control.log；大文件先看 agent_log_context.resolvedEvidenceRefs 或 runtime scene raw 尾段。",
+    },
     "runtime_logs": {
-        "userGuide": "适合检查当前后端、launcher 和运行器即时输出。",
-        "agentGuide": "排查启动、关闭、端口、后台服务问题时优先读取这里；不要在此根下直接处理 runtime_scenes。",
+        "userGuide": "项目 logs/ 根下的普通运行日志（不含 runtime_scenes 包与 conversations）。",
+        "agentGuide": "仅用于 logs/ 根目录的普通日志；Launcher 即时输出在 launcher_runtime，诊断现场在 runtime_scenes。",
     },
     "workspace_logs": {
         "userGuide": "适合回看工作区内生成的转录、轮次和辅助运行记录。",
@@ -297,9 +307,16 @@ def _format_mtime(value: float) -> str:
 
 
 def _resolve_log_root(root_id: str) -> Path:
-    for root in LOG_ROOTS:
-        if root["id"] == root_id:
-            return (PROJECT_ROOT / root["path"]).resolve()
+    logs_root = resolve_project_logs_home(PROJECT_ROOT).resolve()
+    resolved_roots = {
+        "runtime_scenes": logs_root / "runtime_scenes",
+        "launcher_runtime": resolve_project_runtime_home(PROJECT_ROOT) / "launcher",
+        "runtime_logs": logs_root,
+        "workspace_logs": resolve_project_workspace_home(PROJECT_ROOT) / "logs",
+        "conversation_logs": logs_root / "conversations",
+    }
+    if root_id in resolved_roots:
+        return resolved_roots[root_id].resolve()
     raise ValueError(f"Unknown log root: {root_id}")
 
 

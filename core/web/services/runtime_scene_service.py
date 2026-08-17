@@ -147,6 +147,7 @@ from .runtime_scene.record import (
     record_research_scene_event,
     record_runtime_scene_conversation_event,
     record_runtime_scene_event,
+    record_runtime_scene_event_quietly,
 )
 from .runtime_scene.query import (
     _analyze_runtime_scene_content,
@@ -294,7 +295,9 @@ from .runtime_scene.package_index import (
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-LAUNCHER_STATE_PATH = PROJECT_ROOT / ".runtime" / "launcher" / "state.json"
+from vibelution_storage import resolve_project_runtime_home
+
+LAUNCHER_STATE_PATH = resolve_project_runtime_home(PROJECT_ROOT) / "launcher" / "state.json"
 MAX_TEXT_CHARS = 200_000
 MAX_PACKAGE_INDEX_SEARCH_TEXT_CHARS = 6_000
 JSONL_FILE_CACHE_LIMIT = 256

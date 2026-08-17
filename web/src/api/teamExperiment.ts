@@ -136,3 +136,186 @@ export function completeTeamScientificHypothesisFromDesign(
     },
   );
 }
+
+function writeJson<T>(url: string, method: string, body?: unknown): Promise<T> {
+  return fetchJson<T>(url, {
+    method,
+    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
+export function fetchExperimentPlanningStatus<T>(
+  teamId: string,
+  options?: { signal?: AbortSignal },
+): Promise<T> {
+  return fetchJson<T>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/experiments/status`,
+    { signal: options?.signal },
+  );
+}
+
+export function fetchExperimentMethodCatalog<T>(
+  teamId: string,
+  options?: { signal?: AbortSignal },
+): Promise<T> {
+  return fetchJson<T>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/experiments/methods`,
+    { signal: options?.signal },
+  );
+}
+
+export function fetchTeamWorkflowCandidates<T>(
+  teamId: string,
+  options?: {
+    limit?: number;
+    candidateType?: string;
+    includeValidation?: boolean;
+    includeStore?: boolean;
+    signal?: AbortSignal;
+  },
+): Promise<T> {
+  const search = new URLSearchParams();
+  if (options?.limit != null) {
+    search.set("limit", String(options.limit));
+  }
+  if (options?.candidateType) {
+    search.set("candidateType", options.candidateType);
+  }
+  if (options?.includeValidation != null) {
+    search.set("includeValidation", String(options.includeValidation));
+  }
+  if (options?.includeStore != null) {
+    search.set("includeStore", String(options.includeStore));
+  }
+  const suffix = search.toString();
+  const path = `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/candidates`;
+  return fetchJson<T>(suffix ? `${path}?${suffix}` : path, { signal: options?.signal });
+}
+
+export function createTeamExperimentPlan<T>(teamId: string, body: unknown): Promise<T> {
+  return writeJson<T>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/experiments/plan`,
+    "POST",
+    body,
+  );
+}
+
+export function freezeTeamExperimentDesign<T>(teamId: string, planId: string, body: unknown): Promise<T> {
+  return writeJson<T>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/experiments/plans/${encodeURIComponent(planId)}/freeze`,
+    "POST",
+    body,
+  );
+}
+
+export function registerTeamExperimentBaselineArtifact<T>(teamId: string, planId: string, body: unknown): Promise<T> {
+  return writeJson<T>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/experiments/plans/${encodeURIComponent(planId)}/baseline-artifact`,
+    "POST",
+    body,
+  );
+}
+
+export function registerTeamExperimentSmokeResult<T>(teamId: string, planId: string, body: unknown): Promise<T> {
+  return writeJson<T>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/experiments/plans/${encodeURIComponent(planId)}/smoke-result`,
+    "POST",
+    body,
+  );
+}
+
+export function registerTeamExperimentFullRunResult<T>(teamId: string, planId: string, body: unknown): Promise<T> {
+  return writeJson<T>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/experiments/plans/${encodeURIComponent(planId)}/full-run-result`,
+    "POST",
+    body,
+  );
+}
+
+export function requestTeamExperimentKnowledgeIngestion<T>(teamId: string, planId: string, body: unknown): Promise<T> {
+  return writeJson<T>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/experiments/plans/${encodeURIComponent(planId)}/knowledge-ingestion-request`,
+    "POST",
+    body,
+  );
+}
+
+export function fetchChallengeQuestionRunStatus<T>(
+  teamId: string,
+  options?: { signal?: AbortSignal },
+): Promise<T> {
+  return fetchJson<T>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/challenge-program/question-runs/status`,
+    { signal: options?.signal },
+  );
+}
+
+export function registerChallengeQuestionRun<T>(teamId: string, body: unknown): Promise<T> {
+  return writeJson<T>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/challenge-program/question-runs`,
+    "POST",
+    body,
+  );
+}
+
+export function publishChallengeQuestionRun<T>(teamId: string, body: unknown): Promise<T> {
+  return writeJson<T>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/challenge-program/question-runs/publish`,
+    "POST",
+    body,
+  );
+}
+
+export function reviewChallengeQuestionRun<T>(
+  teamId: string,
+  questionId: string,
+  runId: string,
+  body: unknown,
+): Promise<T> {
+  return writeJson<T>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/challenge-program/questions/${encodeURIComponent(questionId)}/runs/${encodeURIComponent(runId)}/review`,
+    "POST",
+    body,
+  );
+}
+
+export function prepareTeamExperimentFullRun<T>(teamId: string, planId: string, body: unknown): Promise<T> {
+  return writeJson<T>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/experiments/plans/${encodeURIComponent(planId)}/full-run/prepare`,
+    "POST",
+    body,
+  );
+}
+
+export function executeTeamExperimentFullRun<T>(teamId: string, planId: string, body: unknown): Promise<T> {
+  return writeJson<T>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/experiments/plans/${encodeURIComponent(planId)}/full-run/execute`,
+    "POST",
+    body,
+  );
+}
+
+export function retryStageRoundCoordination<T>(teamId: string, stageRoundId: string): Promise<T> {
+  return writeJson<T>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/stage-rounds/${encodeURIComponent(stageRoundId)}/coordination/retry`,
+    "POST",
+  );
+}
+
+export function retryStageRoundMemoryRecord<T>(teamId: string, stageRoundId: string): Promise<T> {
+  return writeJson<T>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/stage-rounds/${encodeURIComponent(stageRoundId)}/memory-record/retry`,
+    "POST",
+  );
+}
+
+export function fetchTeamWorkflowCandidateValidation<T>(
+  teamId: string,
+  options?: { signal?: AbortSignal },
+): Promise<T> {
+  return fetchJson<T>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/candidates/validation`,
+    { signal: options?.signal },
+  );
+}

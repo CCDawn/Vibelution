@@ -68,6 +68,9 @@ import knowledgeDetailPanelSource from "./MemoryKnowledgeDetailPanel.tsx?raw";
 import userContentPanelSource from "./MemoryUserContentPanel.tsx?raw";
 import userContentPanelStyles from "./MemoryUserContentPanel.styles";
 import queryKeysSource from "../api/queryKeys.ts?raw";
+import memoryApiSource from "../api/memory.ts?raw";
+import knowledgeApiSource from "../api/knowledge.ts?raw";
+import userContentApiSource from "../api/userContent.ts?raw";
 import memoryTypesSource from "../api/types/memory.ts?raw";
 import knowledgeItemRatingCardSource from "./MemoryKnowledgeItemRatingCard.tsx?raw";
 import knowledgeItemRatingCardStyles from "./MemoryKnowledgeItemRatingCard.styles";
@@ -137,19 +140,20 @@ describe("MemoryRoute layout contract", () => {
 
   it("reads the read-only memory overview endpoint through the shared query key", () => {
     expect(workbenchQueriesSource).toContain("queryKeys.memoryOverview()");
-    expect(workbenchQueriesSource).toContain('fetchJson<MemoryOverview>("/api/memory/overview?includeContent=false", { signal })');
+    expect(workbenchQueriesSource).toContain("fetchMemoryOverview<MemoryOverview>({ includeContent: false, signal })");
+    expect(memoryApiSource).toContain("/api/memory/overview");
     expect(routeSource).toContain("overviewQuery");
     expect(routeSource).toContain("queryKeys.memoryItemDetail(activeSection?.id ?? \"\", activeItem?.id ?? \"\")");
-    expect(routeSource).toContain("/api/memory/items/${encodeURIComponent(activeSection?.id ?? \"\")}/${encodeURIComponent(activeItem?.id ?? \"\")}");
+    expect(routeSource).toContain("fetchMemoryItemDetail<MemoryItemDetailPayload>(");
+    expect(memoryApiSource).toContain("/api/memory/items/${encodeURIComponent(sectionId)}/${encodeURIComponent(itemId)}");
     expect(routeSource).toContain("queryKeys.memoryItemDetails()");
   });
 
   it("reads Agent-private memory through the dedicated inventory API", () => {
     expect(workbenchQueriesSource).toContain("AgentMemoryInventoryPayload");
-    expect(workbenchQueriesSource).toContain('fetchJson<AgentMemoryInventoryPayload>("/api/memory/agents", { signal })');
-    expect(workbenchQueriesSource).toContain(
-      "`/api/memory/agents/${encodeURIComponent(selectedAgentMemoryAgentId)}?actorAgentId=${encodeURIComponent(selectedAgentMemoryAgentId)}`",
-    );
+    expect(workbenchQueriesSource).toContain("fetchMemoryAgents<AgentMemoryInventoryPayload>({ signal })");
+    expect(workbenchQueriesSource).toContain("fetchMemoryAgentDetail<AgentMemoryInventoryPayload>(selectedAgentMemoryAgentId, {");
+    expect(memoryApiSource).toContain("/api/memory/agents/${encodeURIComponent(agentId)}");
     expect(routeSource).toContain("selectedAgentMemoryAgentId");
     expect(routeSource).toContain("createAgentMemoryPanel()");
     expect(routeSource).toContain("copy.agentMemoryView");
@@ -182,8 +186,10 @@ describe("MemoryRoute layout contract", () => {
     );
 
     expect(routeSource).toContain("MemoryUserContentPanel");
-    expect(userContentPanelSource).toContain("/api/user-content/markdown-spaces/import-preview");
-    expect(userContentPanelSource).toContain("/api/user-content/markdown-spaces/import");
+    expect(userContentPanelSource).toContain("previewUserMarkdownSpaceImport<UserMarkdownSpaceImportPreviewPayload>({");
+    expect(userContentPanelSource).toContain("importUserMarkdownSpace<UserMarkdownSpaceImportPayload>({");
+    expect(userContentApiSource).toContain("/api/user-content/markdown-spaces/import-preview");
+    expect(userContentApiSource).toContain("/api/user-content/markdown-spaces/import");
     expect(userContentPanelSource).toContain("queryKeys.userMarkdownSpaces(userId)");
     expect(userContentPanelSource).toContain("queryKeys.userMarkdownSpacePages(userId, selectedSpaceId, searchQuery, tagFilter)");
     expect(userContentPanelSource).toContain("queryKeys.userMarkdownSpacePage(userId, selectedSpaceId, selectedPageId)");
@@ -217,12 +223,14 @@ describe("MemoryRoute layout contract", () => {
   });
 
   it("exposes manual memory management actions through guarded API mutations", () => {
-    expect(routeSource).toContain("useMutation");
-    expect(itemMutationsSource).toContain('fetchJson<{ sectionId: string; itemId: string }>("/api/memory/items"');
-    expect(itemMutationsSource).toContain('method: "POST"');
-    expect(itemMutationsSource).toContain('method: "PATCH"');
-    expect(itemMutationsSource).toContain('method: "DELETE"');
-    expect(itemMutationsSource).toContain('options.memoryMutationEndpoint(sectionId, itemId, "/restore")');
+    expect(itemMutationsSource).toContain("useMutation");
+    expect(itemMutationsSource).toContain("createMemoryItem<{ sectionId: string; itemId: string }>(");
+    expect(itemMutationsSource).toContain("updateMemoryItem<{ sectionId: string; itemId: string }>(");
+    expect(itemMutationsSource).toContain("deleteMemoryItem<{ sectionId: string; itemId: string }>(");
+    expect(itemMutationsSource).toContain("restoreMemoryItem<{ sectionId: string; itemId: string }>(");
+    expect(memoryApiSource).toContain('"POST"');
+    expect(memoryApiSource).toContain('"PATCH"');
+    expect(memoryApiSource).toContain('"DELETE"');
     expect(routeSource).toContain("managedState");
     expect(managePanelSource).toContain("copy.addMemory");
     expect(managePanelSource).toContain("copy.editMemory");
@@ -234,8 +242,8 @@ describe("MemoryRoute layout contract", () => {
   it("surfaces the project-memory proposal queue without implying a coordinator role", () => {
     expect(routeSource).toContain("AgentProjectMemoryUpdateProposal");
     expect(workbenchQueriesSource).toContain("queryKeys.agentProjectMemoryUpdates");
-    expect(workbenchQueriesSource).toContain("/api/agents/project-memory-updates?");
-    expect(routeSource).toContain("project-memory-updates");
+    expect(workbenchQueriesSource).toContain("listAgentProjectMemoryUpdates(");
+    expect(itemMutationsSource).toContain("resolveAgentProjectMemoryUpdate(");
     expect(routeSource).toContain("projectMemoryUpdatesQuery");
     expect(itemMutationsSource).toContain('resolvedBy: "user"');
     expect(routeSource).toContain("projectMemoryProposalResolverLabel");
@@ -602,11 +610,13 @@ describe("MemoryRoute layout contract", () => {
     expect(workbenchQueriesSource).toContain('queryKeys.memoryKnowledgeGraph(fallbackKnowledgeActorAgentId, "officialResearchGraph", requestedTeamId)');
     expect(workbenchQueriesSource).toContain('include: "officialResearchGraph"');
     expect(workbenchQueriesSource).toContain("appendAgentParam(");
-    expect(workbenchQueriesSource).toContain("/api/memory/knowledge-graph?");
+    expect(memoryApiSource).toContain("/api/memory/knowledge-graph?");
+    expect(workbenchQueriesSource).toContain("fetchMemoryKnowledgeGraph<MemoryKnowledgeGraphPayload>({");
     expect(workbenchQueriesSource).toContain("MemoryKnowledgeGraphNodeDetailPayload");
     expect(workbenchQueriesSource).toContain("queryKeys.memoryKnowledgeGraphNodeDetail(selectedGraphNodeId, fallbackKnowledgeActorAgentId)");
     expect(workbenchQueriesSource).toContain("nodeId: selectedGraphNodeId");
-    expect(workbenchQueriesSource).toContain("/api/memory/knowledge-graph/node-detail?");
+    expect(workbenchQueriesSource).toContain("fetchMemoryKnowledgeGraphNodeDetail<MemoryKnowledgeGraphNodeDetailPayload>({");
+    expect(memoryApiSource).toContain("/api/memory/knowledge-graph/node-detail?");
     expect(routeSource).toContain("memoryKnowledgeGraphQuery");
     expect(routeSource).toContain("memoryKnowledgeGraphNodeDetailQuery");
     expect(routeSource).toContain('import("./MemoryGraphViewPanel")');
@@ -747,10 +757,16 @@ describe("MemoryRoute layout contract", () => {
   it("wires the hard-delete memory cleanup console behind preview and confirmation APIs", () => {
     expect(routeSource).toContain("MemoryCleanupTargetRequest");
     expect(routeSource).toContain("MemoryCleanupPreviewResponse");
-    expect(itemMutationsSource).toContain('"/api/memory/cleanup/preview"');
-    expect(itemMutationsSource).toContain('"/api/memory/cleanup/execute"');
+    expect(itemMutationsSource).toContain("previewMemoryCleanup<MemoryCleanupPreviewResponse>(");
+    expect(itemMutationsSource).toContain("executeMemoryCleanup<MemoryCleanupExecuteResponse>(");
+    expect(memoryApiSource).toContain('"/api/memory/cleanup/preview"');
+    expect(memoryApiSource).toContain('"/api/memory/cleanup/execute"');
+    expect(itemMutationsSource).toContain("previewToken");
+    expect(itemMutationsSource).toContain("isMemoryCleanupExecutionSuccessful");
     expect(routeSource).toContain("confirmationPhrase");
-    expect(routeSource).toContain("cleanupConfirmationText.trim()");
+    expect(routeSource).toContain("canExecuteMemoryCleanup(");
+    expect(routeSource).toContain("cleanupPreview.previewToken");
+    expect(routeSource).not.toContain('report?.confirmationPhrase || "硬删除记忆"');
     expect(cleanupPanelSource).toContain("copy.cleanupHardDelete");
     expect(cleanupPanelSource).toContain("copy.cleanupNoBackup");
     expect(cleanupPanelSource).toContain("copy.cleanupCentralSourceBoundary");
@@ -800,12 +816,12 @@ describe("MemoryRoute layout contract", () => {
   it("wires the team knowledge platform to a dashboard snapshot plus scoped action APIs", () => {
     expect(workbenchQueriesSource).toContain("queryKeys.memoryUsageContract()");
     expect(routeSource).toContain("memoryUsageContractQuery");
-    expect(workbenchQueriesSource).toContain('fetchJson<MemoryUsageContractPayload>("/api/memory/usage-contract", { signal })');
+    expect(workbenchQueriesSource).toContain("fetchMemoryUsageContract<MemoryUsageContractPayload>({ signal })");
+    expect(memoryApiSource).toContain("/api/memory/usage-contract");
     expect(workbenchQueriesSource).toContain("queryKeys.knowledgeDashboardSnapshot(fallbackKnowledgeActorAgentId)");
-    expect(workbenchQueriesSource).toContain("appendAgentParam(new URLSearchParams({");
-    expect(workbenchQueriesSource).toContain('recommendationLimit: "6"');
-    expect(workbenchQueriesSource).toContain("fetchJson<KnowledgeDashboardSnapshotPayload>(");
-    expect(workbenchQueriesSource).toContain("/api/knowledge/dashboard-snapshot?");
+    expect(workbenchQueriesSource).toContain("fetchKnowledgeDashboardSnapshot<KnowledgeDashboardSnapshotPayload>({");
+    expect(workbenchQueriesSource).toContain("recommendationLimit: 6");
+    expect(knowledgeApiSource).toContain("/api/knowledge/dashboard-snapshot?");
     expect(routeSource).toContain('sourceType: "manual_user_entry"');
     expect(routeSource).not.toContain("/source-artifacts");
     expect(routeSource).toContain("KnowledgeSourceInboxPayload");
@@ -813,9 +829,12 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("KnowledgeSourceInboxReviewResponse");
     expect(workbenchQueriesSource).toContain("queryKeys.knowledgeSourceInbox(");
     expect(workbenchQueriesSource).toContain("queryKeys.knowledgeCentralSources(");
-    expect(workbenchQueriesSource).toContain("/api/knowledge/sources/inbox");
-    expect(workbenchQueriesSource).toContain("/api/knowledge/sources/registry");
-    expect(knowledgeMutationsSource).toContain("/central-source-artifacts");
+    expect(workbenchQueriesSource).toContain("listKnowledgeSourceInbox<KnowledgeSourceInboxPayload>({");
+    expect(workbenchQueriesSource).toContain("listKnowledgeCentralSources<KnowledgeCentralSourceRegistryPayload>({");
+    expect(knowledgeApiSource).toContain("/api/knowledge/sources/inbox");
+    expect(knowledgeApiSource).toContain("/api/knowledge/sources/registry");
+    expect(knowledgeMutationsSource).toContain("createKnowledgeCentralSourceArtifact<");
+    expect(knowledgeApiSource).toContain("/central-source-artifacts");
     expect(routeSource).toContain("ownerSourceDraft");
     expect(routeSource).toContain("sourceOwnerType");
     expect(routeSource).toContain("sourceOwnerId");
@@ -842,10 +861,12 @@ describe("MemoryRoute layout contract", () => {
     expect(memoryCssSource).toContain(".sourceGovernanceGrid");
     expect(memoryCssSource).toContain(".sourceRecord");
     expect(memoryCssSource).toContain(".sourceRecordMeta");
-    expect(knowledgeMutationsSource).toContain("/refinement-proposals");
+    expect(knowledgeMutationsSource).toContain("createKnowledgeRefinementProposal<");
     expect(routeSource).not.toContain("/ingestion-packages");
-    expect(knowledgeMutationsSource).toContain("/review");
-    expect(workbenchQueriesSource).toContain("/api/knowledge/search");
+    expect(knowledgeMutationsSource).toContain("reviewKnowledgeRefinementProposal<");
+    expect(knowledgeApiSource).toContain("/refinement-proposals");
+    expect(workbenchQueriesSource).toContain("searchKnowledgeItems<KnowledgeSearchPayload>({");
+    expect(knowledgeApiSource).toContain("/api/knowledge/search?");
     expect(workbenchQueriesSource).toContain("queryKeys.knowledgeSearch(");
     expect(workbenchQueriesSource).toContain("queryKeys.knowledgeItems(activeKnowledgeBaseForItems, activeKnowledgeActorAgentId)");
     expect(routeSource).toContain("knowledgeSearchQuery");
@@ -883,13 +904,13 @@ describe("MemoryRoute layout contract", () => {
     expect(knowledgeBaseSidebarSource).not.toContain("useMutation");
     expect(knowledgeBaseSidebarSource).not.toContain("fetchJson");
     expect(workbenchQueriesSource).toContain("queryKeys.knowledgeRagHealth(activeKnowledgeActorAgentId)");
-    expect(workbenchQueriesSource).toContain("/api/knowledge/rag/health?");
-    expect(workbenchQueriesSource).toContain("fetchJson<KnowledgeRagHealthPayload>");
+    expect(workbenchQueriesSource).toContain("fetchKnowledgeRagHealth<KnowledgeRagHealthPayload>({");
+    expect(knowledgeApiSource).toContain("/api/knowledge/rag/health?");
     expect(workbenchQueriesSource).toContain("queryKeys.knowledgeRagRetrieve");
-    expect(workbenchQueriesSource).toContain("/api/knowledge/rag/retrieve");
-    expect(workbenchQueriesSource).toContain('params.set("agentId", activeKnowledgeActorAgentId)');
+    expect(workbenchQueriesSource).toContain("retrieveKnowledgeRag<KnowledgeRagRetrievalPayload>({");
+    expect(knowledgeApiSource).toContain("/api/knowledge/rag/retrieve?");
+    expect(knowledgeApiSource).toContain('params.set("agentId", options.agentId)');
     expect(routeSource).toContain("actorAgentIdForKnowledgeContext(activeKnowledgeBase, knowledgeActorAgents, fallbackKnowledgeActorAgentId)");
-    expect(workbenchQueriesSource).toContain("fetchJson<KnowledgeRagRetrievalPayload>");
     expect(routeSource).toContain("knowledgeRagHealthQuery");
     expect(routeSource).toContain("knowledgeRagRetrieveQuery");
     expect(routeSource).toContain('import("./MemoryKnowledgeSearchPanel")');
@@ -931,20 +952,26 @@ describe("MemoryRoute layout contract", () => {
     expect(knowledgeRagPanelSource).not.toContain("useQuery");
     expect(knowledgeRagPanelSource).not.toContain("useMutation");
     expect(knowledgeRagPanelSource).not.toContain("fetchJson");
-    expect(workbenchQueriesSource).toContain("/api/knowledge/governance/tasks");
-    expect(workbenchQueriesSource).toContain("knowledge/governance/tasks?agentId=");
+    expect(workbenchQueriesSource).toContain("fetchKnowledgeGovernanceTasks<KnowledgeGovernanceTasksPayload>({");
+    expect(knowledgeApiSource).toContain("/api/knowledge/governance/tasks?");
+    expect(knowledgeApiSource).toContain("knowledge/governance/tasks?");
     expect(routeSource).toContain("knowledgeDashboardSnapshot?.operationsHealth");
     expect(routeSource).toContain("knowledgeDashboardSnapshot?.governancePlan");
     expect(routeSource).toContain("knowledgeDashboardSnapshot?.steward");
     expect(routeSource).toContain("knowledgeDashboardSnapshot?.recommendations");
     expect(routeSource).toContain("knowledgeDashboardSnapshot?.workbench");
-    expect(workbenchQueriesSource).toContain("/api/knowledge/ingestion-adapters");
-    expect(workbenchQueriesSource).toContain("/trace/");
+    expect(workbenchQueriesSource).toContain("listKnowledgeIngestionAdapters<KnowledgeIngestionAdaptersPayload>({ signal })");
+    expect(knowledgeApiSource).toContain("/api/knowledge/ingestion-adapters");
+    expect(workbenchQueriesSource).toContain("fetchKnowledgeTrace<KnowledgeTracePayload>(");
+    expect(knowledgeApiSource).toContain("/trace/");
     expect(workbenchQueriesSource).toContain("queryKeys.knowledgeTrace(activeKnowledgeBaseForItems, activeKnowledgeActorAgentId, traceTargetId)");
-    expect(workbenchQueriesSource).toContain("/rating-suggestions");
+    expect(workbenchQueriesSource).toContain("listKnowledgeRatingSuggestions<KnowledgeRatingSuggestionsPayload>(");
+    expect(knowledgeApiSource).toContain("/rating-suggestions");
     expect(workbenchQueriesSource).toContain("queryKeys.knowledgeRatingSuggestions(");
-    expect(knowledgeMutationsSource).toContain("/rating-suggestions/review-batch");
-    expect(workbenchQueriesSource).toContain("/api/knowledge/permissions/audit?agentId=");
+    expect(knowledgeMutationsSource).toContain("bulkReviewKnowledgeRatingSuggestions<");
+    expect(knowledgeApiSource).toContain("/rating-suggestions/review-batch");
+    expect(workbenchQueriesSource).toContain("fetchKnowledgePermissionAudit<KnowledgePermissionAuditPayload>({");
+    expect(knowledgeApiSource).toContain("/api/knowledge/permissions/audit?agentId=");
     expect(routeSource).toContain("governanceTasksQuery");
     expect(routeSource).toContain("ingestionAdaptersQuery");
     expect(routeSource).toContain("knowledgeTraceQuery");
@@ -1537,8 +1564,9 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("setActiveKnowledgeBaseId(knowledgeBaseRequestId(requestedTeamKnowledgeBase))");
     expect(routeSource).toContain("useState(() => requestedGraphNodeId)");
     expect(workbenchQueriesSource).toContain('queryKeys.memoryKnowledgeGraph(fallbackKnowledgeActorAgentId, "officialResearchGraph", requestedTeamId)');
-    expect(workbenchQueriesSource).toContain('new URLSearchParams({ include: "officialResearchGraph" })');
-    expect(workbenchQueriesSource).toContain('params.set("teamId", requestedTeamId)');
+    expect(workbenchQueriesSource).toContain('include: "officialResearchGraph"');
+    expect(workbenchQueriesSource).toContain("teamId: requestedTeamId || undefined");
+    expect(memoryApiSource).toContain('params.set("teamId", options.teamId)');
     expect(routeSource).toContain("requestedTeamId");
     expect(routeSource).toContain("memoryKnowledgeGraphQuery");
   });

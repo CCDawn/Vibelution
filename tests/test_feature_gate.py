@@ -126,3 +126,70 @@ def test_supervised_mental_model_can_be_narrowed_per_run() -> None:
     assert decision.configured_enabled is True
     assert decision.effective_enabled is False
     assert decision.reason == "run_narrowed_disabled"
+
+
+def test_string_false_does_not_enable_operator_features() -> None:
+    decision = resolve_feature_decision(
+        "runtime_status",
+        config={"runtime_status": {"enabled": "false"}},
+    )
+    assert decision.configured_enabled is False
+    assert decision.effective_enabled is False
+    assert decision.reason == "operator_config_disabled"
+
+    bytes_off = resolve_feature_decision(
+        "runtime_status",
+        config={"runtime_status": {"enabled": b"off"}},
+    )
+    assert bytes_off.configured_enabled is False
+    assert bytes_off.effective_enabled is False
+
+    json_off = resolve_feature_decision(
+        "runtime_status",
+        config='{"runtime_status": {"enabled": false}}',
+    )
+    assert json_off.configured_enabled is False
+    assert json_off.effective_enabled is False
+
+    compression = resolve_feature_decision(
+        "context_compression",
+        config={"context_compression": {"enabled": "true"}},
+    )
+    assert compression.configured_enabled is True
+    assert compression.effective_enabled is True
+
+
+def test_string_requested_flags_are_coerced() -> None:
+    enabled = resolve_feature_decision(
+        "mental_model",
+        config=_config(mental_model=False),
+        requested="true",
+    )
+    assert enabled.effective_enabled is True
+    assert enabled.source == "turn_request"
+    assert enabled.run_requested is True
+
+    bytes_on = resolve_feature_decision(
+        "mental_model",
+        config=_config(mental_model=False),
+        requested=b"on",
+    )
+    assert bytes_on.effective_enabled is True
+
+    narrowed = resolve_feature_decision(
+        "runtime_status",
+        config={"runtime_status": {"enabled": True}},
+        requested="false",
+    )
+    assert narrowed.configured_enabled is True
+    assert narrowed.effective_enabled is False
+    assert narrowed.reason == "run_narrowed_disabled"
+    assert narrowed.run_requested is False
+
+    denied = resolve_feature_decision(
+        "runtime_status",
+        config={"runtime_status": {"enabled": True}},
+        managed_denied="false",
+    )
+    assert denied.effective_enabled is True
+    assert denied.managed_denied is False

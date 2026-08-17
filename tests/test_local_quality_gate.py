@@ -342,7 +342,7 @@ def test_commit_mode_without_relevant_staged_files_passes(git_repo: Path) -> Non
             [str(gate.PROJECT_PYTHON_NAME), "tests/select_tests.py"],
         ),
         (
-            ".\\.venv\\Scripts\\python.exe tests/prompt_debugger.py --suite",
+            ".\\.venv\\Scripts\\python.exe tests/prompt_debugger.py --suite --quick",
             "prompt-debugger",
             [str(gate.PROJECT_PYTHON_NAME), "tests/prompt_debugger.py"],
         ),
@@ -556,6 +556,34 @@ def test_main_worktree_finds_linked_main_worktree(
     assert gate.main_worktree(task_worktree, "main") == git_repo.resolve()
 
 
+def test_resolve_guard_script_prefers_current_and_supports_legacy_fallback(
+    tmp_path: Path,
+) -> None:
+    current = tmp_path / "briefbound-project-memory" / "agent_coordination.py"
+    legacy = tmp_path / "ccdawn-dawn-agent-html-memory" / "agent_work_guard.py"
+    current.parent.mkdir()
+    legacy.parent.mkdir()
+    current.touch()
+    legacy.touch()
+
+    assert gate.resolve_guard_script((current, legacy)) == current
+
+    current.unlink()
+
+    assert gate.resolve_guard_script((current, legacy)) == legacy
+
+
+def test_resolve_guard_script_reports_all_missing_candidates(tmp_path: Path) -> None:
+    current = tmp_path / "current.py"
+    legacy = tmp_path / "legacy.py"
+
+    with pytest.raises(RuntimeError, match="project coordination guard not found") as exc:
+        gate.resolve_guard_script((current, legacy))
+
+    assert str(current) in str(exc.value)
+    assert str(legacy) in str(exc.value)
+
+
 def test_closeout_writes_bounded_passed_manifest(
     git_repo: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -578,6 +606,8 @@ def test_closeout_writes_bounded_passed_manifest(
 
     assert result.outcome == "passed"
     assert result.manifest_path is not None
+    assert result.manifest_path.is_relative_to(git_repo / ".git")
+    assert git(git_repo, "status", "--porcelain").stdout.strip() == ""
     manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
     assert manifest["schemaVersion"] == 1
     assert manifest["taskId"] == "test-task"

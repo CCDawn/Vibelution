@@ -530,8 +530,8 @@ describe("AgentsRoute layout contract", () => {
     expect(onRetry).toHaveBeenCalledOnce();
   });
   it("loads the read-only Agent config workspace endpoint", () => {
-    expect(routeSource).toContain("fetchJson<AgentConfigWorkspaceWithTeamIndexes>(\"/api/agents/config-workspace?includeRuntime=false\")");
-    expect(routeSource).toContain("fetchJson<AgentConfigWorkspaceAgent[]>(\"/api/agents?includeArchived=true&detail=summary\")");
+    expect(routeSource).toContain("fetchAgentConfigWorkspace<AgentConfigWorkspaceWithTeamIndexes>({ includeRuntime: false })");
+    expect(routeSource).toContain("listAgentSummaries<AgentConfigWorkspaceAgent>({ includeArchived: true })");
     expect(routeSource).toContain("queryKeys.agentSummary(true)");
     expect(routeSource).toContain("queryKeys.agentConfigWorkspace()");
     expect(routeSource).toContain("const workspace = resolveAgentWorkspaceSource({");
@@ -707,9 +707,9 @@ describe("AgentsRoute layout contract", () => {
     expect(avatarEditorPanelSource).toContain('from "./AgentAvatarEditorPanel.styles"');
     expect(avatarEditorPanelSource).not.toContain("AgentsRoute.styles");
     expect(avatarEditorPanelSource).toContain("styles.agentAvatarImage");
-    expect(routeSource).toContain("/api/agents/avatar-options");
-    expect(workbenchMutationsSource).toContain("/avatar-image");
-    expect(workbenchMutationsSource).toContain("/avatar");
+    expect(routeSource).toContain("listAgentAvatarOptions()");
+    expect(workbenchMutationsSource).toContain("uploadAgentAvatarImage(");
+    expect(workbenchMutationsSource).toContain("updateAgentAvatar(");
     expect(routeSource).not.toContain("styles.avatarEditorPanel");
     expect(avatarEditorPanelSource).toContain("styles.avatarEditorPanel");
     expect(avatarEditorStyles.avatarEditorPanel).toBeTruthy();
@@ -881,9 +881,7 @@ describe("AgentsRoute layout contract", () => {
     expect(agentCreateDialogSource).toContain("selectedModelId={selectedModelId}");
     expect(createPanelSource).toContain("value={selectedModelId}");
     expect(coreConfigPanelSource).toContain("<AgentModelPicker");
-    expect(configDraftMutationsSource).toContain(
-      "/llm-bindings/${encodeURIComponent(payload.slot.slot)}/promote",
-    );
+    expect(configDraftMutationsSource).toContain("promoteAgentModel<AgentModelPromotionResult>(");
     expect(configDraftMutationsSource).toContain("expectedBaseHash");
     expect(configDraftMutationsSource).toContain("expectedAgentUpdatedAt");
     expect(configDraftMutationsSource).toContain("confirmed: true");
@@ -1053,7 +1051,7 @@ describe("AgentsRoute layout contract", () => {
   });
 
   it("updates mode membership locally after saving so bindings stay aligned", () => {
-    expect(workbenchMutationsSource).toContain("fetchJson<AgentModeBindings>");
+    expect(workbenchMutationsSource).toContain("updateAgentModeMembership(");
     expect(workbenchMutationsSource).toContain("queryClient.setQueryData<AgentConfigWorkspace | undefined>");
     expect(workbenchMutationsSource).toContain("modeBindings: payload.modes ?? current.modeBindings");
     expect(workbenchMutationsSource).toContain("options.setMembershipDraft(variables.draft)");
@@ -1188,7 +1186,7 @@ describe("AgentsRoute layout contract", () => {
     expect(configDraftMutationsSource).toContain("toolPolicyId: payload.draft.toolPolicyId");
     expect(configDraftMutationsSource).toContain("memoryPolicyId: payload.draft.memoryPolicyId");
     expect(configDraftMutationsSource).toContain("status: payload.draft.status");
-    expect(configDraftMutationsSource).toContain('method: "PATCH"');
+    expect(configDraftMutationsSource).toContain("updateAgent(payload.agentId");
     expect(routeSource).toContain("queryKeys.agentConfigWorkspace()");
     expect(coreConfigStyles.healthGuidePanel).toBeTruthy();
     expect(coreConfigStyles.healthGuide_warning).toBeTruthy();
@@ -1375,7 +1373,7 @@ describe("AgentsRoute layout contract", () => {
   it("edits Agent mode membership from the same detail card", () => {
     expect(routeSource).toContain("AgentModeMembershipDraft");
     expect(routeSource).toContain("membershipDraftFromWorkspace");
-    expect(workbenchMutationsSource).toContain("/mode-membership");
+    expect(workbenchMutationsSource).toContain("updateAgentModeMembership(");
     expect(selectedDetailContentPanelSource).toContain("<AgentConfigReferencesPanePanel");
     expect(configReferencesPanePanelSource).toContain("<AgentModeMembershipPanel");
     expect(modeMembershipPanelSource).toContain('from "./AgentModeMembershipPanel.styles"');
@@ -1496,7 +1494,8 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("AgentToolGovernanceRequest");
     expect(routeSource).toContain("toolGovernanceDraftFromAgent");
     expect(routeSource).toContain("toolPolicyDeltaFromDraft");
-    expect(workbenchMutationsSource).toContain("/tool-governance-requests");
+    expect(workbenchMutationsSource).toContain("createAgentToolGovernanceRequest(");
+    expect(workbenchMutationsSource).toContain("resolveAgentCenterToolGovernanceRequest(");
     expect(configPrimaryPanePanelSource).toContain("<AgentToolGovernancePanel");
     expect(routeSource).toContain("requests: selectedAgent.toolGovernanceRequests ?? []");
     expect(routeSource).toContain("pendingRequestId:");
@@ -1564,6 +1563,7 @@ describe("AgentsRoute layout contract", () => {
     expect(selectedDetailContentPanelSource).toContain("AgentConfigChangeHistoryPanel");
     expect(selectedDetailContentPanelSource).toContain('activePane === "changes"');
     expect(routeSource).toContain("config-changes");
+    expect(routeSource).toContain("fetchAgentConfigChanges(");
     expect(routeSource).toContain("copy.managementBriefTitle");
     expect(routeSource).toContain("copy.nextActionsTitle");
     expect(routeSource).not.toContain("className={styles.managementBriefPanel}");
@@ -1588,7 +1588,7 @@ describe("AgentsRoute layout contract", () => {
     expect(memoryPolicyPanelSource).toContain("copy.memoryPolicyTitle");
     expect(modeMembershipPanelSource).toContain("copy.membershipTitle");
     expect(selectedDetailContentPanelSource).toContain("activePane === \"activity\"");
-    expect(routeSource).toContain("fetchJson<AgentRunHistory>");
+    expect(routeSource).toContain("fetchAgentRunHistory(");
     expect(routeSource).toContain("queryKeys.agentRuns");
     expect(routeSource).not.toContain("summary?.runningAgentCount");
     expect(routeSource).not.toContain("summary?.blockedAgentCount");
@@ -1690,11 +1690,13 @@ describe("AgentsRoute layout contract", () => {
   it("surfaces pending Agent inbox messages from the activity pane", () => {
     expect(routeSource).toContain("AgentInboxMessage");
     expect(routeSource).toContain("queryKeys.agentMessages");
-    expect(routeSource).toContain("/messages?status=pending&limit=8");
-    expect(workbenchMutationsSource).toContain("/consume");
+    expect(routeSource).toContain("fetchAgentInboxMessages(");
+    expect(routeSource).toContain("status: \"pending\"");
+    expect(routeSource).toContain("limit: 8");
+    expect(workbenchMutationsSource).toContain("consumeAgentInboxMessage(");
     expect(routeSource).toContain("consumeMessageMutation");
     expect(routeSource).toContain("consumeAllMessagesMutation");
-    expect(workbenchMutationsSource).toContain("/messages/consume-all");
+    expect(workbenchMutationsSource).toContain("consumeAllAgentInboxMessages<");
     expect(routeSource).toContain("copy.handleInboxNow");
     expect(routeSource).toContain("copy.consumeAllMessages");
     expect(routeSource).toContain("copy.inboxTitle");
@@ -1791,8 +1793,7 @@ describe("AgentsRoute layout contract", () => {
 
   it("creates Agents through the shared dialog and safely archives them", () => {
     expect(routeSource).toContain("<AgentCreateWizardDialog");
-    expect(agentCreateDialogSource).toContain('fetchJson<AgentConfigWorkspaceAgent>("/api/agents"');
-    expect(agentCreateDialogSource).toContain('method: "POST"');
+    expect(agentCreateDialogSource).toContain("createAgent(createAgentPayload(nextDraft, toolBundles))");
     expect(agentCreateDialogSource).toContain("createMutation");
     expect(routeSource).toContain("copy.createAgent");
     expect(agentCreateDialogSource).toContain("<AgentCreatePanel");
@@ -1802,14 +1803,14 @@ describe("AgentsRoute layout contract", () => {
     expect(createPanelStyles.createAgentPanel).toBeTruthy();
     expect(createPanelStyles.createAgentGrid).toBeTruthy();
     expect(routeSource).toContain("archiveAgentMutation");
-    expect(workbenchMutationsSource).toContain('method: "DELETE"');
+    expect(workbenchMutationsSource).toContain("purgeArchivedAgent(");
     expect(routeSource).not.toContain("window.confirm");
     expect(archiveZonePanelSource).toContain("copy.archiveAgent");
     expect(routeSource).toContain("archivedWorkspaceCache");
     expect(routeSource).toContain("purgedWorkspaceCache");
     expect(workbenchMutationsSource).toContain("queryClient.setQueryData<AgentConfigWorkspace | undefined>");
     expect(routeSource).toContain("purgeAgentMutation");
-    expect(workbenchMutationsSource).toContain("/purge");
+    expect(workbenchMutationsSource).toContain("purgeArchivedAgent(");
     expect(archiveZonePanelSource).toContain("copy.purgeAgent");
     expect(routeSource).toContain("copy.maintenanceTitle");
     expect(healthMaintenancePanelSource).toContain("styles.maintenanceIntro");
@@ -1828,7 +1829,7 @@ describe("AgentsRoute layout contract", () => {
     expect(workbenchMutationsSource).toContain("const previousActivePane = options.getActivePane()");
     expect(workbenchMutationsSource).toContain("options.archivedWorkspaceCache(current, options.optimisticArchivedAgent(optimisticAgent))");
     expect(workbenchMutationsSource).toContain("options.purgedWorkspaceCache(current, payload.agentId)");
-    expect(workbenchMutationsSource).toContain("return { previousWorkspace, previousSelectedAgentId, previousActivePane }");
+    expect(workbenchMutationsSource).toContain("return { previousWorkspace, previousSelectedAgentId, previousActivePane, telemetry }");
     expect(workbenchMutationsSource).toContain("queryClient.setQueryData(queryKeys.agentConfigWorkspace(), context.previousWorkspace)");
     expect(workbenchMutationsSource).toContain("options.setSelectedAgentId(context?.previousSelectedAgentId ?? \"\")");
     expect(workbenchMutationsSource).toContain("options.setActivePane(context?.previousActivePane ?? \"overview\")");
@@ -1842,8 +1843,8 @@ describe("AgentsRoute layout contract", () => {
     expect(workbenchMutationsSource).toContain("new Set(current)");
     expect(workbenchMutationsSource).toContain("next.add(payload.agentId)");
     expect(workbenchMutationsSource).toContain("next.delete(payload.agentId)");
-    expect(workbenchMutationsSource).toContain("/reset");
-    expect(workbenchMutationsSource).toContain('method: "POST"');
+    expect(workbenchMutationsSource).toContain("resetAgent<");
+    expect(workbenchMutationsSource).toContain("payload.options");
     expect(configPrimaryPanePanelSource).toContain("<AgentDebugResetPanel");
     expect(routeSource).toContain("options: resetOptions");
     expect(routeSource).toContain("canReset: canResetAgent");
@@ -2285,20 +2286,21 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("copy.bulkSkippedProtected");
     expect(agentsRouteCopySource).toContain("bulkPurgeConfirm:");
     expect(agentsRouteCopySource).toContain("bulkArchiveConfirm:");
+    expect(agentsRouteCopySource).toContain("不会批量删除会话记录");
     expect(routeSource).toContain("copy.bulkPurgeResult");
     expect(bulkOperationsPanelSource).toContain("copy.bulkPurgeConfirm");
     expect(bulkOperationsPanelSource).toContain("copy.bulkArchiveConfirm");
     expect(bulkConfigPanelSource).toContain("copy.bulkEditMixed");
     expect(bulkConfigPanelSource).toContain('from "./AgentBulkConfigPanel.styles"');
     expect(bulkConfigPanelSource).not.toContain("AgentsRoute.styles");
-    expect(routeSource).toContain('"/api/agents/bulk-prompt-template"');
-    expect(routeSource).toContain('"/api/agents/bulk-config"');
+    expect(routeSource).toContain("bulkUpdateAgentPromptTemplate<");
+    expect(routeSource).toContain("bulkUpdateAgentConfig<");
     expect(routeSource).toContain("applyFields: bulkConfigApplyFields(bulkConfigApply)");
     expect(routeSource).toContain("patch: bulkConfigPatchFromDraft(bulkConfigDraft, bulkConfigApply)");
-    expect(routeSource).toContain("body: JSON.stringify({ agentIds: selectedBulkAgents.map((agent) => agent.agentId), promptTemplateId: bulkPromptTemplateId })");
+    expect(routeSource).toContain("promptTemplateId: bulkPromptTemplateId");
     expect(routeSource).toContain("bulkUpdatedAgentWorkspaceCache");
-    expect(routeSource).toContain('"/api/agents/bulk-archive"');
-    expect(routeSource).toContain('"/api/agents/bulk-purge"');
+    expect(routeSource).toContain("requestBulkArchiveAgents<");
+    expect(routeSource).toContain("requestBulkPurgeAgents<");
     expect(routeSource).toContain("bulkPurgeWorkspaceCache");
     expect(routeSource).toContain("bulkConfig: selectedBulkAgents.length > 1 ? {");
     expect(detailWorkspacePanelSource).toContain("<AgentBulkConfigPanel");
@@ -2321,7 +2323,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toContain("const updatedAgent = await fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(agent.agentId)}`");
     expect(routeSource).not.toContain("for (const agent of selectedBulkAgents) {\n      if (agentArchiveProtected(agent))");
     expect(routeSource).not.toContain("`/api/agents/${encodeURIComponent(agent.agentId)}/purge`");
-    expect(workbenchMutationsSource).toContain('method: "DELETE"');
+    expect(workbenchMutationsSource).toContain("purgeArchivedAgent(");
     expect(routeSource).toContain("onPurge: bulkPurgeAgents");
     expect(routeSource).not.toContain("window.confirm(copy.bulkArchiveConfirm)");
     expect(routeSource).not.toContain("window.confirm(copy.bulkPurgeConfirm)");

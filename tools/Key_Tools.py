@@ -75,6 +75,10 @@ from core.infrastructure.workspace_cleaner import (
 )
 from tools.agent_tools import spawn_agent as _spawn_agent_impl
 from tools.agent_message_tools import agent_message_tool as _agent_message_impl
+from tools.episodic_memory_tools import (
+    append_personal_memory_tool as _append_personal_memory_impl,
+    supersede_personal_memory_tool as _supersede_personal_memory_impl,
+)
 from tools.agent_tool_governance_tools import agent_tool_permission_request_tool as _agent_tool_permission_request_impl
 from tools.research_organization_tools import (
     research_agent_creation_proposal_tool as _research_agent_creation_proposal_impl,
@@ -116,6 +120,14 @@ from tools.session_reference_tools import session_reference_query_tool as _sessi
 from tools.session_child_tools import (
     create_child_session_tool as _create_child_session_impl,
     list_child_sessions_tool as _list_child_sessions_impl,
+)
+from tools.project_operation_tools import (
+    agent_archive_tool as _agent_archive_impl,
+    agent_create_tool as _agent_create_impl,
+    agent_reset_tool as _agent_reset_impl,
+    session_create_tool as _session_create_impl,
+    session_delete_tool as _session_delete_impl,
+    session_stop_tool as _session_stop_impl,
 )
 from tools.cli_agent_tools import cli_agent_run_tool as _cli_agent_run_impl
 
@@ -793,16 +805,23 @@ def _build_key_tools() -> List[BaseTool]:
         recorded_by_agent: str = "",
     ) -> str:
         """
-        【挑战杯实验账本回写】登记实验计划、baseline、smoke/full-run 结果或入库申请。
+        【挑战杯实验账本回写】登记假设集、实验计划、baseline、smoke/full-run 结果或入库申请。
 
         该工具只写实验账本，不执行训练、smoke runner、Shell、Git、RAG 或 official graph。
-        operation 支持 create_plan / register_baseline_artifact / register_smoke_result /
+        operation 支持 record_hypothesis_set / create_plan / register_baseline_artifact / register_smoke_result /
         register_full_run_result / request_knowledge_ingestion。
+
+        当 operation=record_hypothesis_set 时，payload_json 须包含 portfolioId、maxCandidates、
+        maxEvolutionRounds、currentEvolutionRound 和 candidates；runId 由当前正式任务绑定，Agent 不得猜测或填写。
+        每个 candidate 须包含 candidateId、claim、
+        scores、counterEvidenceRefs、derivedFromCandidateIds、status、reviewRef。scores 须同时包含 novelty、
+        competitionFit、falsifiability、evidenceSupport、feasibility，且所有分数都在 0 到 1 之间；
+        counterEvidenceRefs 只能引用上下文 allowedEvidenceRefs 中的真实值。
 
         Args:
             team_id: 团队 ID
             operation: 回写动作
-            plan_id: 实验计划 ID，create_plan 可留空
+            plan_id: 实验计划 ID，record_hypothesis_set / create_plan 可留空
             payload_json: JSON 对象字符串
             recorded_by_agent: 记录者 Agent
 
@@ -1458,7 +1477,7 @@ def _build_key_tools() -> List[BaseTool]:
         constraints: str = "",
         excluded_context_summary: str = "",
         auto_start: bool = True,
-        switch_to_child: bool = True,
+        switch_to_child: bool = False,
         parent_session_id: str = "",
     ) -> str:
         """
@@ -1512,6 +1531,158 @@ def _build_key_tools() -> List[BaseTool]:
             JSON 格式的子对话摘要列表
         """
         return _list_child_sessions_impl(parent_session_id=parent_session_id)
+
+    @tool
+    def agent_create_tool(
+        display_name: str,
+        primary_mode: str = "",
+        role_key: str = "",
+        prompt_template_id: str = "",
+        model_id: str = "",
+        llm_bindings_json: str = "",
+        persona_profile_json: str = "",
+        task_profile_json: str = "",
+        tool_policy_json: str = "",
+        metadata_json: str = "",
+        context_compression_policy_json: str = "",
+        avatar_image_path: str = "",
+    ) -> str:
+        """
+        【Agent 创建】按项目治理契约创建新的 Agent（与 POST /api/agents 同语义）。
+
+        chat 模式可使用默认角色/人物/任务/工具策略；非 chat 模式必须显式提供
+        role_key、persona_profile_json、task_profile_json、tool_policy_json。
+
+        Args:
+            display_name: Agent 功能名（必填）
+            primary_mode: 使用位置，chat 为工作会话
+            role_key: 非 chat 必填
+            prompt_template_id: 提示词模板 ID（必填）
+            model_id: 对话模型 ID；也可用 llm_bindings_json 覆盖
+            llm_bindings_json: 可选 LLM 绑定 JSON
+            persona_profile_json: 非 chat 必填的人物档案 JSON
+            task_profile_json: 非 chat 必填的任务档案 JSON
+            tool_policy_json: 非 chat 必填的工具策略 JSON
+            metadata_json: 可选元数据 JSON
+            context_compression_policy_json: 可选上下文压缩策略 JSON
+            avatar_image_path: 可选头像路径
+
+        Returns:
+            JSON，含 ok/status/agentId/directSessionId/agent
+        """
+        return _agent_create_impl(
+            display_name=display_name,
+            primary_mode=primary_mode,
+            role_key=role_key,
+            prompt_template_id=prompt_template_id,
+            model_id=model_id,
+            llm_bindings_json=llm_bindings_json,
+            persona_profile_json=persona_profile_json,
+            task_profile_json=task_profile_json,
+            tool_policy_json=tool_policy_json,
+            metadata_json=metadata_json,
+            context_compression_policy_json=context_compression_policy_json,
+            avatar_image_path=avatar_image_path,
+        )
+
+    @tool
+    def agent_archive_tool(agent_id: str) -> str:
+        """
+        【Agent 归档】归档一个 Agent（非删除），走完整 archive lifecycle。
+
+        受保护 Agent 或存在 queued/running/stopping/paused 关联 Session 时会失败。
+
+        Args:
+            agent_id: 要归档的 Agent ID
+
+        Returns:
+            JSON，含 ok/status/agentId/archiveSummary
+        """
+        return _agent_archive_impl(agent_id=agent_id)
+
+    @tool
+    def agent_reset_tool(
+        agent_id: str,
+        clear_runtime_state: bool = True,
+        reset_direct_session: bool = True,
+        direct_session_id: str = "",
+        reset_persona_profile: bool = False,
+        reset_task_profile: bool = False,
+        reset_tool_policy: bool = False,
+        reset_memory_policy: bool = False,
+        reset_runtime_policy: bool = False,
+    ) -> str:
+        """
+        【Agent 重置】重置 Agent 运行时与策略（高风险，需审批）。
+
+        Args:
+            agent_id: 要重置的 Agent ID
+            clear_runtime_state: 是否清理运行时状态
+            reset_direct_session: 是否重置直连会话
+            direct_session_id: 可选直连会话校验 ID
+            reset_persona_profile: 是否重置人物档案
+            reset_task_profile: 是否重置任务档案
+            reset_tool_policy: 是否重置工具策略
+            reset_memory_policy: 是否重置记忆策略
+            reset_runtime_policy: 是否重置运行时策略
+
+        Returns:
+            JSON，含 ok/status/agentId/resetSummary
+        """
+        return _agent_reset_impl(
+            agent_id=agent_id,
+            clear_runtime_state=clear_runtime_state,
+            reset_direct_session=reset_direct_session,
+            direct_session_id=direct_session_id,
+            reset_persona_profile=reset_persona_profile,
+            reset_task_profile=reset_task_profile,
+            reset_tool_policy=reset_tool_policy,
+            reset_memory_policy=reset_memory_policy,
+            reset_runtime_policy=reset_runtime_policy,
+        )
+
+    @tool
+    def session_create_tool(title: str = "", agent_id: str = "") -> str:
+        """
+        【根会话创建】为已有 Agent 创建新的根 Session，不会隐式创建 Agent。
+
+        agent_id 留空时默认使用当前 Agent runtime 的 agentId；若仍无则失败。
+
+        Args:
+            title: 会话标题
+            agent_id: 可选 Agent ID
+
+        Returns:
+            JSON，含 ok/status/agentId/sessionId/session
+        """
+        return _session_create_impl(title=title, agent_id=agent_id)
+
+    @tool
+    def session_stop_tool(session_id: str, turn_id: str) -> str:
+        """
+        【停止 Session turn】请求停止指定 Session 的当前 turn（必须带 turn_id）。
+
+        Args:
+            session_id: 目标 Session ID
+            turn_id: 当前运行 turn ID（必填，防止无守卫停止）
+
+        Returns:
+            JSON，含 ok/status/sessionId/turnId/session
+        """
+        return _session_stop_impl(session_id=session_id, turn_id=turn_id)
+
+    @tool
+    def session_delete_tool(session_id: str) -> str:
+        """
+        【Session 删除】删除一个 Session（高风险，需审批）。
+
+        Args:
+            session_id: 要删除的 Session ID
+
+        Returns:
+            JSON，含 ok/status/sessionId/deletedSessionId
+        """
+        return _session_delete_impl(session_id=session_id)
 
     # ── 后台任务工具 ──────────────────────────────────────────────────────
 
@@ -1784,6 +1955,65 @@ def _build_key_tools() -> List[BaseTool]:
             wake_target=wake_target,
             thread_id=thread_id,
             metadata_json=metadata_json,
+        )
+
+    @tool
+    def append_personal_memory_tool(
+        text: str,
+        kind: str = "note",
+        refs_json: str = "",
+        occurred_at: str = "",
+    ) -> str:
+        """
+        为当前 Agent 追加一条个人记忆（偏好、会话事实、私人笔记）。
+
+        先读本轮「个人记忆」章节，再决定是否写入。
+        不要用 glob、grep 或 cli_tool 查找或打开个人记忆落盘文件。
+        只写后续会话仍有用的内容；不拷规范、skill、代码或身份。
+        这不是世代交接记忆，不升公共目录，不写团队知识。
+        热路径只追加。当前会话会自动记入 refs。过期请用 supersede_personal_memory_tool。
+
+        Args:
+            text: 记忆正文（必填）。
+            kind: note | preference | session_fact | private_note，默认 note。
+            refs_json: 可选 JSON 列表，元素为 {type, id}，type 为 session|path|card|item。
+            occurred_at: 可选 ISO 时间，表示事实发生时刻。
+
+        Returns:
+            JSON，含 ok、episodeId。
+        """
+        return _append_personal_memory_impl(
+            text=text,
+            kind=kind,
+            refs_json=refs_json,
+            occurred_at=occurred_at,
+        )
+
+    @tool
+    def supersede_personal_memory_tool(
+        episode_id: str,
+        successor_text: str = "",
+        kind: str = "note",
+    ) -> str:
+        """
+        作废当前 Agent 的一条个人记忆；可选同时追加替换条目。
+
+        episodeId 取自本轮「个人记忆」章节，不要用文件搜索去找。
+        原记录保留，只填 validUntil。用于过期偏好或被更新的事实。
+        这不是世代交接记忆，不升公共目录，不写团队知识。
+
+        Args:
+            episode_id: 要作废的当前个人记忆（必填）。
+            successor_text: 可选替换正文；空则只作废。
+            kind: 替换条目的 kind，默认 note。
+
+        Returns:
+            JSON，含 ok、episodeId、successorEpisodeId。
+        """
+        return _supersede_personal_memory_impl(
+            episode_id=episode_id,
+            successor_text=successor_text,
+            kind=kind,
         )
 
     @tool
@@ -2587,6 +2817,12 @@ def _build_key_tools() -> List[BaseTool]:
         plan_update_tool,
         create_child_session_tool,
         list_child_sessions_tool,
+        agent_create_tool,
+        agent_archive_tool,
+        agent_reset_tool,
+        session_create_tool,
+        session_stop_tool,
+        session_delete_tool,
         session_reference_query_tool,
         # 后台任务
         task_start_tool,
@@ -2606,6 +2842,8 @@ def _build_key_tools() -> List[BaseTool]:
         get_session_files_tool,
         # Agent 间通信
         agent_message_tool,
+        append_personal_memory_tool,
+        supersede_personal_memory_tool,
         agent_tool_permission_request_tool,
         research_agent_creation_proposal_tool,
         research_communication_edge_proposal_tool,

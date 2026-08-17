@@ -27,12 +27,18 @@ def _service():
 def list_teams(*, include_archived: bool = False) -> dict[str, Any]:
     s = _service()
     agent_refs = s._agent_reference_maps()
+    pending_agent_ids: list[str] = []
     with s._TEAM_LOCK:
         state = s._load_index()
         changed = s._repair_index_state(state, agent_refs=agent_refs)
-        changed = s._repair_archived_team_member_agents(state, reason="s.list_teams", strict=False, agent_refs=agent_refs) or changed
+        member_changed, pending_agent_ids = s._repair_archived_team_member_agents(
+            state, reason="s.list_teams", strict=False, agent_refs=agent_refs
+        )
+        changed = member_changed or changed
         if changed:
             s._save_index(state)
+    if pending_agent_ids:
+        s._cascade_archive_member_agents_unlocked(pending_agent_ids, reason="s.list_teams")
     teams = [
         s._team_to_api(item, agent_refs=agent_refs)
         for item in list(state.get("teams") or [])
@@ -169,9 +175,19 @@ def create_team(
         s._save_index(state)
         canvas = s._default_canvas_for_team(team)
         s._write_json(s._team_canvas_path(team_id), canvas)
-        s._ensure_team_chat_room_link(team)
         state["updatedAt"] = team["updatedAt"]
         s._save_index(state)
+    s._ensure_active_member_direct_sessions(team)
+    s._ensure_team_chat_room_link(team)
+    with s._TEAM_LOCK:
+        state = s._load_index()
+        stored = s._find_team(state, team_id)
+        if stored is not None:
+            stored["linkedChatRoomId"] = str(team.get("linkedChatRoomId") or "").strip()
+            stored["updatedAt"] = s.utc_now_iso()
+            state["updatedAt"] = stored["updatedAt"]
+            s._save_index(state)
+            team = stored
     s._record_team_event("team.created", team, fields={"memberCount": len(normalized_members)})
     return s.get_team(team_id)
 
@@ -181,22 +197,26 @@ def get_team(team_id: str) -> dict[str, Any]:
     started_at = s._perf_counter()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
     agent_refs = s._agent_reference_maps()
+    pending_agent_ids: list[str] = []
     with s._TEAM_LOCK:
         state = s._load_index()
         team = s._find_team(state, normalized_team_id)
         if team is None:
             raise s.TeamNotFoundError("Team not found.")
         changed = s._repair_team(team, agent_refs=agent_refs)
-        changed = s._repair_archived_team_member_agents_for_team(
+        member_changed, pending_agent_ids = s._repair_archived_team_member_agents_for_team(
             team,
             state,
             reason="s.get_team",
             strict=False,
             agent_refs=agent_refs,
-        ) or changed
+        )
+        changed = member_changed or changed
         if changed:
             state["updatedAt"] = s.utc_now_iso()
             s._save_index(state)
+    if pending_agent_ids:
+        s._cascade_archive_member_agents_unlocked(pending_agent_ids, reason="s.get_team")
     detail = s._team_detail_to_api(team, agent_refs=agent_refs)
     s._record_team_detail_loaded(detail, started_at)
     return detail
@@ -251,6 +271,8 @@ def update_team(
 ) -> dict[str, Any]:
     s = _service()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
+    should_archive = False
+    members_changed = False
     with s._TEAM_LOCK:
         state = s._load_index()
         team = s._find_team(state, normalized_team_id)
@@ -270,16 +292,32 @@ def update_team(
             if normalized_status not in s.TEAM_STATUSES:
                 raise s.TeamServiceError(f"Unsupported team status: {status}")
             if normalized_status == "archived" and str(team.get("status") or s.DEFAULT_TEAM_STATUS).strip() != "archived":
-                return s._archive_team_in_state(state, team)
-            team["status"] = normalized_status
+                should_archive = True
+            else:
+                team["status"] = normalized_status
         if members is not None:
             normalized_members = s._normalize_members(members, require_active=True)
             s._ensure_members_can_join_team(normalized_members, state, normalized_team_id)
             team["members"] = normalized_members
+            members_changed = True
         team["updatedAt"] = s.utc_now_iso()
         team["canvasPath"] = s._relative_path(s._team_canvas_path(normalized_team_id))
         state["updatedAt"] = team["updatedAt"]
         s._save_index(state)
+    if should_archive:
+        return s.archive_team(normalized_team_id)
+    if members_changed:
+        s._ensure_active_member_direct_sessions(team)
+        s._ensure_team_chat_room_link(team)
+        with s._TEAM_LOCK:
+            state = s._load_index()
+            stored = s._find_team(state, normalized_team_id)
+            if stored is not None:
+                stored["linkedChatRoomId"] = str(team.get("linkedChatRoomId") or "").strip()
+                stored["updatedAt"] = s.utc_now_iso()
+                state["updatedAt"] = stored["updatedAt"]
+                s._save_index(state)
+                team = stored
     s._record_team_event("team.updated", team, fields={"memberCount": len(team.get("members") or [])})
     return s.get_team(normalized_team_id)
 
@@ -416,13 +454,16 @@ def restore_removed_agents_to_teams(restore_token: dict[str, Any] | None) -> dic
 def archive_team(team_id: str) -> dict[str, Any]:
     s = _service()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
+    already_archived = False
+    agent_ids: list[str] = []
     with s._TEAM_LOCK:
         state = s._load_index()
         team = s._find_team(state, normalized_team_id)
         if team is None:
             raise s.TeamNotFoundError("Team not found.")
         if str(team.get("status") or s.DEFAULT_TEAM_STATUS).strip() == "archived":
-            member_changed = s._repair_archived_team_member_agents_for_team(
+            already_archived = True
+            member_changed, agent_ids = s._repair_archived_team_member_agents_for_team(
                 team,
                 state,
                 reason="archive_team_already_archived",
@@ -432,13 +473,39 @@ def archive_team(team_id: str) -> dict[str, Any]:
             if member_changed or room_changed:
                 state["updatedAt"] = s.utc_now_iso()
                 s._save_index(state)
+        else:
+            s._reject_system_or_unsupported_team_archive(team)
+            agent_ids = s._unique_active_member_agent_ids(team)
+            s._ensure_team_member_agents_can_archive(team, agent_ids)
+
+    cascade = {"archivedAgentIds": [], "removedFromRoomIds": [], "roomCleanupByAgentId": {}}
+    if agent_ids:
+        cascade = s._cascade_archive_member_agents_unlocked(
+            agent_ids,
+            reason="team_archive" if not already_archived else "archive_team_already_archived",
+        )
+        if already_archived and cascade.get("archivedAgentIds"):
+            s._record_archived_team_member_cascade_repaired(
+                {"teamId": normalized_team_id},
+                list(cascade.get("archivedAgentIds") or []),
+                reason="archive_team_already_archived",
+            )
+
+    if already_archived:
+        return s.get_team(normalized_team_id)
+
+    with s._TEAM_LOCK:
+        state = s._load_index()
+        team = s._find_team(state, normalized_team_id)
+        if team is None:
+            raise s.TeamNotFoundError("Team not found.")
+        if str(team.get("status") or s.DEFAULT_TEAM_STATUS).strip() == "archived":
             return s.get_team(normalized_team_id)
-        return s._archive_team_in_state(state, team)
+        return s._finalize_archived_team_in_state(state, team, cascade=cascade)
 
 
-def _archive_team_in_state(state: dict[str, Any], team: dict[str, Any]) -> dict[str, Any]:
+def _reject_system_or_unsupported_team_archive(team: dict[str, Any]) -> None:
     s = _service()
-    team_id = str(team.get("teamId") or "").strip()
     team_kind = str(team.get("teamKind") or s._infer_team_kind(team)).strip() or "custom"
     if team_kind in {"research", "ai_search", "self_evolution", "supervised_evolution"}:
         s._record_team_archive_rejected(team, reason="system_team")
@@ -447,20 +514,34 @@ def _archive_team_in_state(state: dict[str, Any], team: dict[str, Any]) -> dict[
         s._record_team_archive_rejected(team, reason="unsupported_team_kind")
         raise s.TeamServiceError(f"Team kind cannot be archived with cascade Agent deletion: {team_kind}")
 
-    agent_ids = s._unique_active_member_agent_ids(team)
-    s._ensure_team_member_agents_can_archive(team, agent_ids)
-    deleted_room_ids = s._delete_team_linked_chat_rooms(team, reason="team_archive", strict_busy=True)
-    room_cleanup = s._remove_team_member_agents_from_chat_rooms(team, agent_ids)
 
+def _archive_team_in_state(state: dict[str, Any], team: dict[str, Any]) -> dict[str, Any]:
+    """Compatibility wrapper. Member Agent/session writes happen in archive_team without _TEAM_LOCK."""
+
+    s = _service()
+    team_id = str(team.get("teamId") or "").strip()
+    if not team_id:
+        raise s.TeamServiceError("Team id is required.")
+    return s.archive_team(team_id)
+
+
+def _finalize_archived_team_in_state(
+    state: dict[str, Any],
+    team: dict[str, Any],
+    *,
+    cascade: dict[str, Any],
+) -> dict[str, Any]:
+    s = _service()
+    team_id = str(team.get("teamId") or "").strip()
+    s._reject_system_or_unsupported_team_archive(team)
+    deleted_room_ids = s._delete_team_linked_chat_rooms(team, reason="team_archive", strict_busy=True)
     now = s.utc_now_iso()
     team["status"] = "archived"
     team["updatedAt"] = now
     team["canvasPath"] = s._relative_path(s._team_canvas_path(team_id))
     state["updatedAt"] = now
     s._save_index(state)
-
-    archived_agent_ids = s._archive_team_member_agents(team, agent_ids, reason="team_archive")
-
+    archived_agent_ids = list(cascade.get("archivedAgentIds") or [])
     s._record_team_event(
         "team.archived_with_agents",
         team,
@@ -469,9 +550,9 @@ def _archive_team_in_state(state: dict[str, Any], team: dict[str, Any]) -> dict[
             "archivedAgentCount": len(archived_agent_ids),
             "deletedLinkedChatRoomIds": deleted_room_ids,
             "deletedLinkedChatRoomCount": len(deleted_room_ids),
-            "removedFromRoomIds": list(room_cleanup.get("changedRoomIds") or []),
-            "removedFromRoomCount": len(list(room_cleanup.get("changedRoomIds") or [])),
-            "roomCleanupByAgentId": dict(room_cleanup.get("removedByAgentId") or {}),
+            "removedFromRoomIds": list(cascade.get("removedFromRoomIds") or []),
+            "removedFromRoomCount": len(list(cascade.get("removedFromRoomIds") or [])),
+            "roomCleanupByAgentId": dict(cascade.get("roomCleanupByAgentId") or {}),
         },
     )
     return s.get_team(team_id)

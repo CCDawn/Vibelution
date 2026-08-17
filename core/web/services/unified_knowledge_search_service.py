@@ -123,6 +123,11 @@ def search_unified_memory(
         _result_from_knowledge_item(item, rank=index + 1, backend=_backend_for_mode(effective_mode))
         for index, item in enumerate(matched_items[:bounded_limit])
     ]
+    catalog_results = _catalog_results(
+        agent_id=normalized_agent_id,
+        query=normalized_query,
+        limit=bounded_limit,
+    )
     user_results = _user_content_results(
         include_user_content=bool(include_user_content),
         user_id=normalized_user_id,
@@ -131,7 +136,7 @@ def search_unified_memory(
         max_excerpt_chars=max_context_chars,
         allowed_space_ids=normalized_user_content_space_ids,
     )
-    results = _merge_ranked_results(formal_results, user_results, limit=bounded_limit)
+    results = _merge_ranked_results([*formal_results, *catalog_results], user_results, limit=bounded_limit)
     return _payload(
         agent_id=normalized_agent_id,
         query=normalized_query,
@@ -371,6 +376,7 @@ def _result_from_knowledge_item(item: dict[str, Any], *, rank: int, backend: str
         "knowledgeItemId": knowledge_item_id,
         "sourceArtifactIds": [str(value or "").strip() for value in list(item.get("sourceArtifactIds") or []) if str(value or "").strip()],
         "centralSourceIds": [str(value or "").strip() for value in list(item.get("centralSourceIds") or []) if str(value or "").strip()],
+        "localCopies": [copy for copy in list(item.get("localCopies") or []) if isinstance(copy, dict)][:16],
         "searchBackend": backend,
         "matchReason": str(item.get("matchReason") or "").strip(),
         "metadata": {
@@ -405,6 +411,7 @@ def _result_from_rag_context(context: dict[str, Any], *, rank: int) -> dict[str,
         "knowledgeItemId": knowledge_item_id,
         "sourceArtifactIds": [str(value or "").strip() for value in list(source.get("sourceArtifactIds") or []) if str(value or "").strip()],
         "centralSourceIds": [str(value or "").strip() for value in list(source.get("centralSourceIds") or []) if str(value or "").strip()],
+        "localCopies": [copy for copy in list(source.get("localCopies") or context.get("localCopies") or []) if isinstance(copy, dict)][:16],
         "searchBackend": "local_rag",
         "matchReason": str(context.get("matchReason") or "").strip(),
         "metadata": {
@@ -547,6 +554,25 @@ def _citation_from_rag_context(context: dict[str, Any], *, rank: int) -> dict[st
         "provider": str(context.get("provider") or "").strip(),
         "retrievalMode": str(context.get("retrievalMode") or "").strip(),
     }
+
+
+def _catalog_results(*, agent_id: str, query: str, limit: int) -> list[dict[str, Any]]:
+    """Third read-only source: public catalog card metadata (no content/excerpt).
+
+    Catalog hits are discovery only; the caller must open the locator source
+    before acting. Never map card summary into the knowledge_item excerpt.
+    """
+    if not str(query or "").strip():
+        return []
+    try:
+        payload = team_knowledge_service.search_public_catalog(query=query, limit=limit, agent_id=agent_id)
+    except Exception:
+        return []
+    results = list(payload.get("results") or [])
+    for result in results:
+        result.pop("excerpt", None)
+        result.pop("content", None)
+    return results
 
 
 def _knowledge_search_payloads(

@@ -35,7 +35,7 @@ from core.web.services.runtime_scene.record import (
     _append_scene_log_line,
     _resolve_current_runtime_scene_dir,
 )
-from core.runtime_manager.state_store import load_pid, load_state
+from core.runtime_manager.state_store import clear_pid, load_pid, load_state
 from core.runtime_manager import work_run_store
 from core.runtime_manager.work_run_store import WorkRunStore
 from core.runtime_manager.workbench_controller import _is_process_alive, observe_workbench
@@ -47,7 +47,7 @@ from .branch_instance_lifecycle import BranchInstanceLifecycleError
 from . import maintenance_reset as launcher_maintenance_reset
 
 
-LauncherOperation = Literal["start", "stop", "restart", "force-stop"]
+LauncherOperation = Literal["start", "stop", "restart", "force-stop", "shutdown"]
 LauncherSupervisorOperation = Literal["supervisor_reattach"]
 RuntimeProfile = Literal["safe_local", "safe_remote", "debug", "ci"]
 UiLanguage = Literal["zh", "en"]
@@ -87,6 +87,10 @@ _WORKBENCH_WINDOW_MODE_DETAILS = {
     },
 }
 _RUNTIME_MANAGER_STATUS_FAST_PATH_MAX_AGE_SECONDS = 15.0
+_FAST_LAUNCHER_REAP_TIMEOUT_SECONDS = 1.0
+_LAUNCHER_REAP_FALLBACK_TIMEOUT_SECONDS = 5.0
+_LAUNCHER_CLEANUP_PROOF_PATH = STATE_PATH.with_name("launcher-cleanup-proof.json")
+_LAUNCHER_CLEANUP_PROOF_SCHEMA_VERSION = 1
 
 
 def _launcher_elapsed_ms(started_at: float) -> float:
@@ -192,9 +196,34 @@ def list_launcher_branch_instances() -> dict[str, Any]:
     from core.launcher.branch_instance_cleanup import annotate_cleanup_metadata
     from core.launcher.branch_instance_lifecycle import list_overlayed_branch_instances
 
-    status = get_launcher_status()
-    current_bundle = status.get("projectBundle") if isinstance(status.get("projectBundle"), dict) else {}
+    current_bundle = _current_project_bundle_for_branch_list()
     return annotate_cleanup_metadata(list_overlayed_branch_instances(current_bundle=current_bundle))
+
+
+def _current_project_bundle_for_branch_list() -> dict[str, Any]:
+    """Overlay the current checkout from on-disk launcher/runtime-manager state.
+
+    The instance table must not wait on live ``observe_workbench`` probes used by
+    ``get_launcher_status``. Settings, guardian, and control-plane evidence stay
+    on the status poll path.
+    """
+
+    runtime_state = _runtime_manager_state()
+    launcher_state = _load_launcher_state()
+    workbench = _workbench_payload(runtime_state=runtime_state, observed_workbench={})
+    runtime_manager = _runtime_manager_payload(runtime_state)
+    lifecycle_proof = _lifecycle_proof(
+        runtime_manager=runtime_manager,
+        workbench=workbench,
+        active_work_runs=[],
+        runtime_state=runtime_state,
+    )
+    bundle = _project_bundle_from_workbench(
+        workbench,
+        lifecycle_proof=lifecycle_proof,
+        launcher_state=launcher_state,
+    )
+    return bundle if isinstance(bundle, dict) else {}
 
 
 def cleanup_launcher_branch_instances(
@@ -260,7 +289,9 @@ def get_launcher_status() -> dict[str, Any]:
     """Return standalone Launcher status without importing the Web service layer."""
 
     runtime_state = _runtime_manager_state()
-    if _recover_stale_close_commands_when_manager_offline(runtime_state):
+    if _recover_stale_open_command_when_manager_offline(runtime_state):
+        runtime_state = _runtime_manager_state()
+    elif _recover_stale_close_commands_when_manager_offline(runtime_state):
         runtime_state = _runtime_manager_state()
     launcher_state = _load_launcher_state()
     observed_workbench = _status_observed_workbench(runtime_state)
@@ -271,6 +302,7 @@ def get_launcher_status() -> dict[str, Any]:
         runtime_manager=runtime_manager,
         workbench=workbench,
         active_work_runs=active_work_runs,
+        runtime_state=runtime_state,
     )
     last_error = runtime_state.get("lastError") if isinstance(runtime_state.get("lastError"), dict) else {}
     last_error_message = str(last_error.get("message") or "").strip()
@@ -861,9 +893,54 @@ def _ensure_config_section(public_config: dict[str, Any], section: str) -> dict[
 def _load_launcher_public_config() -> dict[str, Any]:
     try:
         public_config = load_public_config(CONFIG_PATH)
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 - invalid operator config must not crash launcher
+        _record_launcher_config_load_failed(
+            exception_type=type(exc).__name__,
+            exception_message=str(exc),
+            config_type="",
+        )
         return {}
-    return public_config if isinstance(public_config, dict) else {}
+    if isinstance(public_config, dict):
+        return public_config
+    _record_launcher_config_load_failed(
+        exception_type="TypeError",
+        exception_message="Public config is not a dict.",
+        config_type=type(public_config).__name__,
+    )
+    return {}
+
+
+def _record_launcher_config_load_failed(
+    *,
+    exception_type: str,
+    exception_message: str,
+    config_type: str,
+) -> None:
+    message = f"Launcher public config load failed: {exception_type}"
+    _debug_logger.warning(message, tag="LAUNCHER")
+    payload = {
+        "phase": "config",
+        "message": message[:240],
+        "outcome": "failed",
+        "level": "warning",
+        "exceptionType": exception_type,
+        "exceptionMessage": str(exception_message or "")[:240],
+        "configType": config_type,
+    }
+    try:
+        event_at = append_runtime_manager_file_event(
+            "launcher.config.load_failed",
+            payload,
+            suppress_io_errors=True,
+        )
+        record_runtime_manager_scene_event(
+            "launcher.config.load_failed",
+            payload,
+            phase="config",
+            occurred_at=event_at,
+        )
+    except Exception as exc:  # noqa: BLE001 - diagnostics must never fail launcher startup
+        _debug_logger.warning(f"Failed to record launcher config load failure: {exc}")
 
 
 def _read_port_env_override(env_names: tuple[str, ...]) -> int | None:
@@ -985,34 +1062,521 @@ def launcher_active_work_runs() -> list[dict[str, str]]:
     return items
 
 
-def ensure_runtime_manager_daemon_alive() -> dict[str, Any]:
-    """Watchdog: recover a dead runtime-manager daemon and its stuck commands.
+def _managed_process_exclude_pids() -> set[int]:
+    excluded = {os.getpid()}
+    parent_pid = os.getppid()
+    if parent_pid > 0:
+        excluded.add(parent_pid)
+    return excluded
 
-    Returns what was done so callers (e.g. a periodic control-plane loop) can
-    record evidence. Never kills a healthy daemon; only acts when the daemon
-    pid is missing or the tracked process is not a runtime-manager process.
+
+def _trusted_repo_runtime_pid(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        from core.runtime_manager.process_inventory import repo_runtime_process_for_pid
+
+        return repo_runtime_process_for_pid(pid, project_root=PROJECT_ROOT) is not None
+    except Exception:
+        return False
+
+
+def _trusted_managed_browser_pid(pid: int, *, profile_dir: str) -> bool:
+    if pid <= 0 or not str(profile_dir or "").strip():
+        return False
+    try:
+        from core.runtime_manager.process_inventory import managed_browser_pid_matches_profile
+
+        return managed_browser_pid_matches_profile(pid, profile_dir=profile_dir)
+    except Exception:
+        return False
+
+
+def _launcher_workbench_browser_profile_dir(workbench: dict[str, Any]) -> str:
+    external_window_owner = str(workbench.get("externalWindowOwner") or "").strip().lower()
+    if external_window_owner == "electron":
+        return ""
+    return str(workbench.get("browserProfileDir") or "").strip()
+
+
+def _launcher_cleanup_context(
+    *,
+    runtime_state: dict[str, Any],
+    observed_workbench: dict[str, Any],
+    workbench: dict[str, Any],
+) -> dict[str, Any]:
+    state_workbench = runtime_state.get("workbench") if isinstance(runtime_state.get("workbench"), dict) else {}
+    observed = observed_workbench if isinstance(observed_workbench, dict) else {}
+    return {**state_workbench, **observed, **workbench, "_cleanupObservationAvailable": bool(observed)}
+
+
+def _load_launcher_cleanup_proof() -> dict[str, Any]:
+    try:
+        payload = json.loads(_LAUNCHER_CLEANUP_PROOF_PATH.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _launcher_cleanup_proof_is_valid(
+    proof: dict[str, Any],
+    *,
+    runtime_state: dict[str, Any],
+    workbench: dict[str, Any],
+) -> bool:
+    if not isinstance(proof, dict) or not bool(proof.get("valid")):
+        return False
+    if int(proof.get("schemaVersion") or 0) != _LAUNCHER_CLEANUP_PROOF_SCHEMA_VERSION:
+        return False
+    expected_root = os.path.normcase(os.path.abspath(str(PROJECT_ROOT.resolve())))
+    proof_root_text = str(proof.get("projectRoot") or "").strip()
+    if not proof_root_text:
+        return False
+    proof_root = os.path.normcase(os.path.abspath(proof_root_text))
+    if proof_root != expected_root:
+        return False
+    state_version = _positive_int(runtime_state.get("stateVersion"))
+    state_updated_at = str(runtime_state.get("updatedAt") or "").strip()
+    if state_version <= 0 or not state_updated_at:
+        return False
+    if _positive_int(proof.get("stateVersion")) != state_version:
+        return False
+    if str(proof.get("stateUpdatedAt") or "").strip() != state_updated_at:
+        return False
+    if not bool(workbench.get("_cleanupObservationAvailable")):
+        return False
+    command = runtime_state.get("command") if isinstance(runtime_state.get("command"), dict) else {}
+    if str(command.get("activeCommandId") or "").strip():
+        return False
+    return _launcher_cleanup_observation_is_clean(workbench)
+
+
+def _runtime_manager_cleanup_proof_is_valid(
+    proof: dict[str, Any],
+    *,
+    runtime_state: dict[str, Any],
+    workbench: dict[str, Any],
+) -> bool:
+    if not isinstance(proof, dict) or not bool(proof.get("valid")):
+        return False
+    if int(proof.get("schemaVersion") or 0) != _LAUNCHER_CLEANUP_PROOF_SCHEMA_VERSION:
+        return False
+    expected_root = os.path.normcase(os.path.abspath(str(PROJECT_ROOT.resolve())))
+    proof_root_text = str(proof.get("projectRoot") or "").strip()
+    if not proof_root_text:
+        return False
+    if os.path.normcase(os.path.abspath(proof_root_text)) != expected_root:
+        return False
+    if not bool(workbench.get("_cleanupObservationAvailable")):
+        return False
+    command = runtime_state.get("command") if isinstance(runtime_state.get("command"), dict) else {}
+    if str(command.get("activeCommandId") or "").strip():
+        return False
+    state_workbench = runtime_state.get("workbench") if isinstance(runtime_state.get("workbench"), dict) else {}
+    if str(state_workbench.get("desiredState") or "").strip().lower() != "closed":
+        return False
+    if str(state_workbench.get("phase") or "").strip().lower() != "steady":
+        return False
+    return _launcher_cleanup_observation_is_clean(workbench)
+
+
+def _launcher_cleanup_observation_is_clean(workbench: dict[str, Any]) -> bool:
+    if str(workbench.get("observedState") or "closed").strip().lower() != "closed":
+        return False
+    if str(workbench.get("lifecycleConsistency") or "consistent").strip().lower() != "consistent":
+        return False
+    if any(
+        bool(workbench.get(key))
+        for key in (
+            "backendAlive",
+            "backendHealthy",
+            "backendObserved",
+            "backendPortListening",
+            "backendPortOwnerResidual",
+            "backendPortConflict",
+            "browserWindowAlive",
+            "frontendOrphaned",
+        )
+    ):
+        return False
+    return True
+
+
+def _write_launcher_cleanup_proof(*, runtime_state: dict[str, Any], reason: str, cleanup_mode: str) -> bool:
+    from core.infrastructure.atomic_io import atomic_write_json
+
+    state_version = _positive_int(runtime_state.get("stateVersion"))
+    state_updated_at = str(runtime_state.get("updatedAt") or "").strip()
+    if state_version <= 0 or not state_updated_at:
+        return False
+    try:
+        atomic_write_json(
+            _LAUNCHER_CLEANUP_PROOF_PATH,
+            {
+                "schemaVersion": _LAUNCHER_CLEANUP_PROOF_SCHEMA_VERSION,
+                "valid": True,
+                "projectRoot": str(PROJECT_ROOT.resolve()),
+                "stateVersion": state_version,
+                "stateUpdatedAt": state_updated_at,
+                "cleanupMode": str(cleanup_mode or "").strip(),
+                "reason": str(reason or "").strip(),
+                "verifiedAt": datetime.now(timezone.utc).isoformat(),
+            },
+            ensure_fsync=False,
+            retry_timeout_seconds=0.25,
+            fallback_timeout_seconds=0.25,
+        )
+    except OSError:
+        return False
+    return True
+
+
+def _invalidate_launcher_cleanup_proof() -> bool:
+    try:
+        _LAUNCHER_CLEANUP_PROOF_PATH.unlink(missing_ok=True)
+    except OSError:
+        return False
+    return True
+
+
+def _launcher_cleanup_should_persist_proof(*, include_runtime_manager: bool, reason: str) -> bool:
+    return include_runtime_manager or str(reason or "").strip() == "launcher_force_stop_button"
+
+
+def _launcher_cleanup_state_is_trusted(
+    *,
+    runtime_state: dict[str, Any],
+    observed_workbench: dict[str, Any],
+    workbench: dict[str, Any],
+    known_pids: set[int],
+    include_runtime_manager: bool,
+) -> bool:
+    if not known_pids or not _runtime_manager_state_is_fresh(runtime_state):
+        return False
+    observed = observed_workbench if isinstance(observed_workbench, dict) else {}
+    if not observed or not bool(observed.get("launcherStatePresent")):
+        return False
+    if bool(workbench.get("backendPortConflict")) or bool(workbench.get("backendPortOwnerResidual")):
+        return False
+    consistency = str(workbench.get("lifecycleConsistency") or "consistent").strip().lower()
+    if consistency in {"residual_backend", "orphaned_browser", "port_conflict"}:
+        return False
+
+    expected_pids: set[int] = set()
+    for key in ("backendPid", "backendLaunchPid"):
+        pid = _positive_pid(workbench.get(key))
+        if pid > 0:
+            expected_pids.add(pid)
+    if str(workbench.get("externalWindowOwner") or "").strip().lower() != "electron":
+        for key in ("browserWindowPid", "browserLaunchPid"):
+            pid = _positive_pid(workbench.get(key))
+            if pid > 0:
+                expected_pids.add(pid)
+    if expected_pids - known_pids:
+        return False
+    if include_runtime_manager and bool(runtime_state.get("daemonRunning")):
+        manager_pid = _positive_pid(runtime_state.get("managerPid"))
+        if manager_pid <= 0 or manager_pid not in known_pids:
+            return False
+    return True
+
+
+def _collect_trusted_launcher_cleanup_pids(
+    *,
+    include_runtime_manager: bool,
+    runtime_state: dict[str, Any],
+    workbench: dict[str, Any],
+) -> set[int]:
+    excluded = _managed_process_exclude_pids()
+    known: set[int] = set()
+    browser_profile_dir = _launcher_workbench_browser_profile_dir(workbench)
+    external_window_owner = str(workbench.get("externalWindowOwner") or "").strip().lower() == "electron"
+
+    for key in ("backendPid", "backendLaunchPid"):
+        pid = _positive_pid(workbench.get(key))
+        if pid and pid not in excluded and _trusted_repo_runtime_pid(pid):
+            known.add(pid)
+
+    if include_runtime_manager:
+        manager_pid = _positive_pid(runtime_state.get("managerPid"))
+        if manager_pid <= 0:
+            try:
+                manager_pid = _positive_pid(load_pid())
+            except Exception:
+                manager_pid = 0
+        if manager_pid and manager_pid not in excluded and is_runtime_manager_process(manager_pid):
+            known.add(manager_pid)
+
+    if not external_window_owner and bool(workbench.get("browserManaged", True)):
+        for key in ("browserWindowPid", "browserLaunchPid"):
+            pid = _positive_pid(workbench.get(key))
+            if pid <= 0 or pid in excluded:
+                continue
+            if _trusted_repo_runtime_pid(pid) or (
+                browser_profile_dir and _trusted_managed_browser_pid(pid, profile_dir=browser_profile_dir)
+            ):
+                known.add(pid)
+
+    return known
+
+
+def _launcher_backend_port_still_listening(workbench: dict[str, Any]) -> bool:
+    try:
+        port = int(workbench.get("backendPort") or 0)
+    except (TypeError, ValueError):
+        port = 0
+    if port > 0:
+        try:
+            from core.runtime_manager.workbench_controller import _port_is_listening_socket
+
+            return _port_is_listening_socket(port)
+        except Exception:
+            pass
+    return bool(workbench.get("backendPortListening"))
+
+
+def _launcher_cleanup_needs_inventory_fallback(
+    *,
+    cleanup: dict[str, Any],
+    workbench: dict[str, Any],
+    include_runtime_manager: bool,
+    runtime_manager_pid: int,
+    cleanup_state_trusted: bool = True,
+) -> tuple[bool, str]:
+    remaining = cleanup.get("remaining") if isinstance(cleanup.get("remaining"), list) else []
+    if remaining:
+        return True, "remaining_processes_after_known_pid_cleanup"
+    if _launcher_backend_port_still_listening(workbench):
+        return True, "backend_port_still_listening"
+    if include_runtime_manager and runtime_manager_pid > 0 and _is_process_alive(runtime_manager_pid):
+        return True, "runtime_manager_still_alive"
+    if not cleanup_state_trusted:
+        return True, "cleanup_state_untrusted"
+    return False, ""
+
+
+def _terminate_managed_launcher_subtree(*, include_runtime_manager: bool, reason: str) -> dict[str, Any]:
+    """Force-stop Launcher-owned project processes without going through the RM queue."""
+
+    from core.runtime_manager.daemon import _mark_persistent_active_work_runs_force_stopped
+    from core.runtime_manager.process_inventory import terminate_workbench_processes
+
+    total_started = time.monotonic()
+    cleanup_timings_ms: dict[str, Any] = {}
+    cleanup_phases: dict[str, Any] = {
+        "fastPathAttempted": False,
+        "usedFallback": False,
+        "usedCleanProof": False,
+        "cleanProofSource": "",
+        "fallbackReason": "",
+        "knownPidCount": 0,
+        "cleanupStateTrusted": False,
+        "cleanProofWritten": False,
+    }
+
+    collect_started = time.monotonic()
+    runtime_state = _runtime_manager_state()
+    observed_workbench = _observed_workbench()
+    workbench = _workbench_payload(runtime_state=runtime_state, observed_workbench=observed_workbench)
+    cleanup_workbench = _launcher_cleanup_context(
+        runtime_state=runtime_state,
+        observed_workbench=observed_workbench,
+        workbench=workbench,
+    )
+    known_pids = _collect_trusted_launcher_cleanup_pids(
+        include_runtime_manager=include_runtime_manager,
+        runtime_state=runtime_state,
+        workbench=cleanup_workbench,
+    )
+    cleanup_timings_ms["collectKnownPidsMs"] = _launcher_elapsed_ms(collect_started)
+    cleanup_phases["knownPidCount"] = len(known_pids)
+
+    excluded = _managed_process_exclude_pids()
+    runtime_manager_pid = load_pid() if include_runtime_manager else 0
+    browser_profile_dir = _launcher_workbench_browser_profile_dir(cleanup_workbench)
+    external_window_owner = str(cleanup_workbench.get("externalWindowOwner") or "").strip().lower() == "electron"
+    has_known_browser_pids = any(
+        _positive_pid(cleanup_workbench.get(key)) in known_pids for key in ("browserWindowPid", "browserLaunchPid")
+    )
+    fast_browser_profile_dir = "" if external_window_owner or has_known_browser_pids else browser_profile_dir
+    cleanup_state_trusted = _launcher_cleanup_state_is_trusted(
+        runtime_state=runtime_state,
+        observed_workbench=observed_workbench,
+        workbench=cleanup_workbench,
+        known_pids=known_pids,
+        include_runtime_manager=include_runtime_manager,
+    )
+    cleanup_phases["cleanupStateTrusted"] = cleanup_state_trusted
+    file_clean_proof = _load_launcher_cleanup_proof()
+    file_clean_proof_valid = not known_pids and _launcher_cleanup_proof_is_valid(
+        file_clean_proof,
+        runtime_state=runtime_state,
+        workbench=cleanup_workbench,
+    )
+    state_workbench = runtime_state.get("workbench") if isinstance(runtime_state.get("workbench"), dict) else {}
+    runtime_clean_proof = (
+        state_workbench.get("cleanupProof") if isinstance(state_workbench.get("cleanupProof"), dict) else {}
+    )
+    runtime_clean_proof_valid = not known_pids and _runtime_manager_cleanup_proof_is_valid(
+        runtime_clean_proof,
+        runtime_state=runtime_state,
+        workbench=cleanup_workbench,
+    )
+    clean_proof_valid = file_clean_proof_valid or runtime_clean_proof_valid
+    if file_clean_proof_valid:
+        cleanup_phases["cleanProofSource"] = "file"
+    elif runtime_clean_proof_valid:
+        cleanup_phases["cleanProofSource"] = "runtime_state"
+    if not file_clean_proof_valid:
+        cleanup_phases["cleanProofInvalidated"] = _invalidate_launcher_cleanup_proof()
+
+    process_cleanup: dict[str, Any]
+    if known_pids:
+        cleanup_phases["fastPathAttempted"] = True
+        fast_started = time.monotonic()
+        fast_cleanup = terminate_workbench_processes(
+            exclude_pids=excluded,
+            known_pids=sorted(known_pids),
+            browser_profile_dir=fast_browser_profile_dir,
+            include_runtime_manager=include_runtime_manager,
+            timeout_seconds=_FAST_LAUNCHER_REAP_TIMEOUT_SECONDS,
+            verify_remaining_with_inventory=False,
+        )
+        cleanup_timings_ms["knownPidCleanupMs"] = _launcher_elapsed_ms(fast_started)
+        needs_fallback, fallback_reason = _launcher_cleanup_needs_inventory_fallback(
+            cleanup=fast_cleanup,
+            workbench=cleanup_workbench,
+            include_runtime_manager=include_runtime_manager,
+            runtime_manager_pid=int(runtime_manager_pid or 0),
+            cleanup_state_trusted=cleanup_state_trusted,
+        )
+        if needs_fallback:
+            cleanup_phases["usedFallback"] = True
+            cleanup_phases["fallbackReason"] = fallback_reason
+            fallback_started = time.monotonic()
+            process_cleanup = terminate_workbench_processes(
+                exclude_pids=excluded,
+                include_runtime_manager=include_runtime_manager,
+                browser_profile_dir="" if external_window_owner else browser_profile_dir,
+                timeout_seconds=_LAUNCHER_REAP_FALLBACK_TIMEOUT_SECONDS,
+                verify_remaining_with_inventory=True,
+            )
+            cleanup_timings_ms["fallbackInventoryCleanupMs"] = _launcher_elapsed_ms(fallback_started)
+        else:
+            process_cleanup = fast_cleanup
+    elif clean_proof_valid:
+        cleanup_phases["usedCleanProof"] = True
+        process_cleanup = {
+            "supported": True,
+            "requested": [],
+            "terminated": [],
+            "remaining": [],
+            "repoCandidates": [],
+            "browserCandidates": [],
+            "candidateScan": "cleanup_proof",
+            "remainingCheck": "trusted_clean_state",
+            "timingsMs": {"totalMs": 0.0},
+            "processCounts": {
+                "repoCandidates": 0,
+                "browserCandidates": 0,
+                "targetProcesses": 0,
+                "liveTargets": 0,
+                "remaining": 0,
+            },
+        }
+    else:
+        cleanup_phases["usedFallback"] = True
+        cleanup_phases["fallbackReason"] = "no_trusted_known_pids"
+        fallback_started = time.monotonic()
+        process_cleanup = terminate_workbench_processes(
+            exclude_pids=excluded,
+            include_runtime_manager=include_runtime_manager,
+            browser_profile_dir="" if external_window_owner else browser_profile_dir,
+            timeout_seconds=_LAUNCHER_REAP_FALLBACK_TIMEOUT_SECONDS,
+            verify_remaining_with_inventory=True,
+        )
+        cleanup_timings_ms["fallbackInventoryCleanupMs"] = _launcher_elapsed_ms(fallback_started)
+
+    remaining = process_cleanup.get("remaining") if isinstance(process_cleanup.get("remaining"), list) else []
+    cleanup_mode = (
+        "cleanup_proof"
+        if cleanup_phases["usedCleanProof"]
+        else "inventory"
+        if cleanup_phases["usedFallback"]
+        else "known_pids"
+    )
+    if (
+        _launcher_cleanup_should_persist_proof(
+            include_runtime_manager=include_runtime_manager,
+            reason=reason,
+        )
+        and bool(process_cleanup.get("supported", True))
+        and not remaining
+    ):
+        proof_started = time.monotonic()
+        proof_state = load_state()
+        proof_observed_workbench = _observed_workbench()
+        proof_workbench = _workbench_payload(
+            runtime_state=proof_state,
+            observed_workbench=proof_observed_workbench,
+        )
+        proof_cleanup_workbench = _launcher_cleanup_context(
+            runtime_state=proof_state,
+            observed_workbench=proof_observed_workbench,
+            workbench=proof_workbench,
+        )
+        proof_command = proof_state.get("command") if isinstance(proof_state.get("command"), dict) else {}
+        if not str(proof_command.get("activeCommandId") or "").strip() and _launcher_cleanup_observation_is_clean(
+            proof_cleanup_workbench
+        ):
+            cleanup_phases["cleanProofWritten"] = _write_launcher_cleanup_proof(
+                runtime_state=proof_state,
+                reason=reason,
+                cleanup_mode=cleanup_mode,
+            )
+        cleanup_timings_ms["cleanProofWriteMs"] = _launcher_elapsed_ms(proof_started)
+    else:
+        cleanup_phases["cleanProofInvalidated"] = _invalidate_launcher_cleanup_proof()
+
+    cleanup_timings_ms["totalMs"] = _launcher_elapsed_ms(total_started)
+    stopped_runs = _mark_persistent_active_work_runs_force_stopped(reason)
+    if runtime_manager_pid > 0:
+        clear_pid(runtime_manager_pid)
+    return {
+        "processCleanup": process_cleanup,
+        "forceStoppedWorkRuns": stopped_runs,
+        "cleanupTimingsMs": cleanup_timings_ms,
+        "cleanupPhases": cleanup_phases,
+    }
+
+
+def ensure_runtime_manager_daemon_alive() -> dict[str, Any]:
+    """Watchdog: keep the runtime-manager daemon alive on the current checkout.
+
+    A live daemon is reused only when ``ensure_daemon_running`` confirms its
+    source signature still matches disk. Stale source is recycled so the next
+    start/restart cannot attach to yesterday's pythonw.
     """
 
     started = time.monotonic()
-    if is_daemon_running():
-        return {"action": "already_running", "daemonRunning": True, "elapsedMs": _launcher_elapsed_ms(started)}
-
+    was_running = is_daemon_running()
     recovered_commands: list[str] = []
-    try:
-        recovered_commands = command_queue.recover_processing_queue()
-    except Exception as exc:  # pragma: no cover - defensive watchdog boundary
-        _record_launcher_event(
-            "launcher.daemon.watchdog.recovery_failed",
-            phase="runtime_manager",
-            message="Runtime-manager queue recovery failed before daemon restart.",
-            outcome="failed",
-            level="warning",
-            fields={"errorType": type(exc).__name__, "errorMessage": str(exc)},
-        )
+    if not was_running:
+        try:
+            recovered_commands = command_queue.recover_processing_queue()
+        except Exception as exc:  # pragma: no cover - defensive watchdog boundary
+            _record_launcher_event(
+                "launcher.daemon.watchdog.recovery_failed",
+                phase="runtime_manager",
+                message="Runtime-manager queue recovery failed before daemon restart.",
+                outcome="failed",
+                level="warning",
+                fields={"errorType": type(exc).__name__, "errorMessage": str(exc)},
+            )
 
     ensured = False
     try:
-        ensured = ensure_daemon_running()
+        ensured = bool(ensure_daemon_running())
     except Exception as exc:  # pragma: no cover - defensive watchdog boundary
         _record_launcher_event(
             "launcher.daemon.watchdog.restart_failed",
@@ -1022,6 +1586,20 @@ def ensure_runtime_manager_daemon_alive() -> dict[str, Any]:
             level="error",
             fields={"errorType": type(exc).__name__, "errorMessage": str(exc)},
         )
+        return {
+            "action": "restart_failed",
+            "daemonRunning": False,
+            "ensured": False,
+            "recoveredCommandCount": len(recovered_commands),
+            "elapsedMs": _launcher_elapsed_ms(started),
+        }
+
+    if was_running and not ensured:
+        return {"action": "already_running", "daemonRunning": True, "elapsedMs": _launcher_elapsed_ms(started)}
+
+    # A replacement daemon recovers the processing queue before entering its
+    # command loop. Recovering here after it reports alive can race a fresh
+    # claim and move that active command back to the inbox.
 
     action = "restarted" if ensured else "restart_failed"
     _record_launcher_event(
@@ -1037,6 +1615,7 @@ def ensure_runtime_manager_daemon_alive() -> dict[str, Any]:
             "recoveredCommandCount": len(recovered_commands),
             "recoveredCommands": recovered_commands[:8],
             "elapsedMs": _launcher_elapsed_ms(started),
+            "recycledStaleDaemon": bool(was_running and ensured),
         },
     )
     return {
@@ -1519,6 +2098,18 @@ def _positive_int(value: Any) -> int:
     return max(0, parsed)
 
 
+def _electron_main_orchestrates_windows() -> bool:
+    return str(os.environ.get("VIBELUTION_ELECTRON_MAIN_ORCHESTRATES_WINDOWS", "")).strip() == "1"
+
+
+def _allow_dirty_launch_from_env() -> bool:
+    return str(os.environ.get("VIBELUTION_ALLOW_DIRTY_LAUNCH") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
 def request_launcher_start() -> LauncherCommandResponse:
     """Request the managed project bundle to start."""
 
@@ -1531,13 +2122,26 @@ def request_launcher_start() -> LauncherCommandResponse:
         fields={"source": "launcher_api"},
     )
     try:
+        reap_started = time.monotonic()
+        _terminate_managed_launcher_subtree(
+            include_runtime_manager=False,
+            reason="launcher_start_button",
+        )
+        prequeue_timings_ms["reapWorkbenchMs"] = _launcher_elapsed_ms(reap_started)
         ensure_started = time.monotonic()
         ensure_runtime_manager_daemon_alive()
         prequeue_timings_ms["ensureDaemonMs"] = _launcher_elapsed_ms(ensure_started)
         submit_started = time.monotonic()
+        start_args: dict[str, Any] = {
+            "reason": "launcher_start_button",
+            "source": "launcher_api",
+            "noBrowser": _electron_main_orchestrates_windows(),
+        }
+        if _allow_dirty_launch_from_env():
+            start_args["allowDirty"] = True
         command = submit_command(
             "open_workbench",
-            args={"reason": "launcher_start_button", "source": "launcher_api", "noBrowser": False},
+            args=start_args,
             requested_by="launcher_api",
         )
         prequeue_timings_ms["submitCommandMs"] = _launcher_elapsed_ms(submit_started)
@@ -1755,12 +2359,25 @@ def request_launcher_force_stop(request_audit: LauncherRequestAudit | None = Non
         message="Launcher project bundle force-stop requested.",
         fields=requested_fields,
     )
+    try:
+        _terminate_managed_launcher_subtree(
+            include_runtime_manager=False,
+            reason="launcher_force_stop_button",
+        )
+    except Exception as exc:
+        _record_launcher_event(
+            "launcher.bundle.force_stop.process_cleanup_failed",
+            phase="stop",
+            message="Launcher force-stop could not terminate managed project processes.",
+            outcome="failed",
+            level="warning",
+            fields={"errorType": type(exc).__name__, "errorMessage": str(exc)},
+        )
     already_closed_started = time.monotonic()
     already_closed = _launcher_workbench_already_closed()
     prequeue_timings_ms["alreadyClosedMs"] = _launcher_elapsed_ms(already_closed_started)
-    # Only skip when the workbench is already closed *and* no residual work-run
-    # snapshots still block stop/restart. Otherwise still queue force_close so
-    # the daemon can mark zombie active work as force-stopped.
+    # Only skip the RM queue when the workbench is already closed *and* no residual
+    # work-run snapshots still block stop/restart. Process trees are still killed above.
     if already_closed and not active_work_runs:
         prequeue_timings_ms["totalPrequeueMs"] = _launcher_elapsed_ms(prequeue_started)
         _record_launcher_prequeue_timing(
@@ -1914,6 +2531,52 @@ def request_launcher_force_stop(request_audit: LauncherRequestAudit | None = Non
     return response
 
 
+def request_launcher_runtime_shutdown() -> LauncherCommandResponse:
+    """Stop every Launcher-managed project process, including the runtime-manager daemon."""
+
+    started = time.monotonic()
+    _record_launcher_event(
+        "launcher.runtime.shutdown.requested",
+        phase="stop",
+        message="Launcher is shutting down every managed project process before the desktop shell exits.",
+        fields={"source": "electron_desktop_shell"},
+    )
+    cleanup = _terminate_managed_launcher_subtree(
+        include_runtime_manager=True,
+        reason="desktop_shell_quit",
+    )
+    elapsed_ms = _launcher_elapsed_ms(started)
+    process_cleanup = cleanup.get("processCleanup") if isinstance(cleanup.get("processCleanup"), dict) else {}
+    cleanup_timings_ms = cleanup.get("cleanupTimingsMs") if isinstance(cleanup.get("cleanupTimingsMs"), dict) else {}
+    cleanup_phases = cleanup.get("cleanupPhases") if isinstance(cleanup.get("cleanupPhases"), dict) else {}
+    remaining = process_cleanup.get("remaining") if isinstance(process_cleanup, dict) else []
+    remaining_count = len(remaining) if isinstance(remaining, list) else 0
+    _record_launcher_event(
+        "launcher.runtime.shutdown.completed",
+        phase="stop",
+        message="Launcher finished shutting down managed project processes.",
+        outcome="succeeded" if remaining_count == 0 else "partial",
+        fields={
+            "elapsedMs": elapsed_ms,
+            "terminatedCount": len(process_cleanup.get("terminated") or []) if isinstance(process_cleanup, dict) else 0,
+            "remainingCount": remaining_count,
+            "forceStoppedWorkRunCount": len(cleanup.get("forceStoppedWorkRuns") or []),
+            "cleanupTimingsMs": dict(cleanup_timings_ms),
+            "cleanupPhases": dict(cleanup_phases),
+            "usedFallback": bool(cleanup_phases.get("usedFallback")),
+            "fallbackReason": str(cleanup_phases.get("fallbackReason") or ""),
+        },
+    )
+    return {
+        "accepted": True,
+        "mode": "runtime_manager",
+        "launcherMode": "standalone_control_plane",
+        "operation": "shutdown",
+        "commandId": "",
+        "message": "已关闭 Launcher 管理的全部项目进程。",
+    }
+
+
 def _launcher_workbench_already_closed() -> bool:
     try:
         runtime_state = _runtime_manager_state()
@@ -1958,6 +2621,12 @@ def request_launcher_restart(
     _raise_if_active_work("restart")
     prequeue_timings_ms["activeWorkMs"] = _launcher_elapsed_ms(active_work_started)
     try:
+        reap_started = time.monotonic()
+        _terminate_managed_launcher_subtree(
+            include_runtime_manager=False,
+            reason=reason,
+        )
+        prequeue_timings_ms["reapWorkbenchMs"] = _launcher_elapsed_ms(reap_started)
         ensure_started = time.monotonic()
         ensure_runtime_manager_daemon_alive()
         prequeue_timings_ms["ensureDaemonMs"] = _launcher_elapsed_ms(ensure_started)
@@ -1967,7 +2636,7 @@ def request_launcher_restart(
             args={
                 "reason": reason,
                 "source": source,
-                "noBrowser": False,
+                "noBrowser": _electron_main_orchestrates_windows(),
                 "forceFrontendRebuild": bool(force_frontend_rebuild),
             },
             requested_by=source or "launcher_api",
@@ -2058,6 +2727,12 @@ def request_launcher_rebuild_and_start() -> LauncherCommandResponse:
         return response
 
     try:
+        reap_started = time.monotonic()
+        _terminate_managed_launcher_subtree(
+            include_runtime_manager=False,
+            reason="tray_rebuild_and_start",
+        )
+        prequeue_timings_ms["reapWorkbenchMs"] = _launcher_elapsed_ms(reap_started)
         ensure_started = time.monotonic()
         ensure_runtime_manager_daemon_alive()
         prequeue_timings_ms["ensureDaemonMs"] = _launcher_elapsed_ms(ensure_started)
@@ -2067,7 +2742,7 @@ def request_launcher_rebuild_and_start() -> LauncherCommandResponse:
             args={
                 "reason": "tray_rebuild_and_start",
                 "source": "launcher_tray",
-                "noBrowser": False,
+                "noBrowser": _electron_main_orchestrates_windows(),
                 "forceFrontendRebuild": True,
             },
             requested_by="launcher_tray",
@@ -2219,6 +2894,28 @@ def _runtime_manager_state() -> dict[str, Any]:
     payload["managerPid"] = int(manager_pid or 0)
     payload.setdefault("projectRoot", str(PROJECT_ROOT))
     return payload
+
+
+def _recover_stale_open_command_when_manager_offline(runtime_state: dict[str, Any]) -> bool:
+    """Resume an accepted open/restart command if its daemon exited mid-flight.
+
+    Launcher status polling is the one component guaranteed to remain alive
+    while the Workbench overlay waits.  Recovery is restricted to commands
+    already moved into ``processing`` so a passive status read never invents a
+    new lifecycle intent.
+    """
+
+    if bool(runtime_state.get("daemonRunning")):
+        return False
+    try:
+        processing = _recent_command_files(PROCESSING_DIR, limit=20)
+    except Exception:
+        processing = []
+    recoverable_types = {"open_workbench", "restart_workbench", "hot_restart_workbench"}
+    if not any(str(command.get("type") or "").strip() in recoverable_types for command in processing):
+        return False
+    result = ensure_runtime_manager_daemon_alive()
+    return str(result.get("action") or "") in {"restarted", "already_running"}
 
 
 def _recover_stale_close_commands_when_manager_offline(runtime_state: dict[str, Any]) -> bool:
@@ -2546,6 +3243,65 @@ def _positive_pid(value: object) -> int:
     return pid if pid > 0 else 0
 
 
+_DEFERRED_RESIDUAL_PROCESSES_PAYLOAD: dict[str, Any] = {
+    "count": 0,
+    "items": [],
+    "mode": "deferred_for_status_poll",
+}
+
+
+def _normalize_residual_processes_payload(payload: object) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {"count": 0, "items": []}
+    items = [item for item in payload.get("items", []) if isinstance(item, dict)]
+    try:
+        reported = int(payload.get("count") or 0)
+    except (TypeError, ValueError):
+        reported = 0
+    normalized = {
+        "count": max(reported, len(items)),
+        "items": items[:16],
+    }
+    mode = str(payload.get("mode") or "").strip()
+    if mode:
+        normalized["mode"] = mode
+    return normalized
+
+
+def _residual_processes_from_runtime_state(runtime_state: dict[str, Any]) -> dict[str, Any] | None:
+    cached = runtime_state.get("residualProcesses")
+    if not isinstance(cached, dict) or "items" not in cached:
+        return None
+    return _normalize_residual_processes_payload(cached)
+
+
+def _should_defer_residual_inventory_for_status(
+    *,
+    workbench: dict[str, Any],
+    runtime_manager: dict[str, Any],
+) -> bool:
+    desired_state = str(workbench.get("desiredState") or "closed").strip().lower()
+    observed_state = str(workbench.get("observedState") or "closed").strip().lower()
+    phase = str(workbench.get("phase") or "steady").strip().lower()
+    if desired_state == "closed" and observed_state == "closed" and phase in {"steady", ""}:
+        return True
+    if not bool(runtime_manager.get("running")) and observed_state == "closed":
+        return True
+    return False
+
+
+def _should_refresh_residual_inventory_for_status(
+    *,
+    workbench: dict[str, Any],
+) -> bool:
+    desired_state = str(workbench.get("desiredState") or "closed").strip().lower()
+    observed_state = str(workbench.get("observedState") or "closed").strip().lower()
+    phase = str(workbench.get("phase") or "steady").strip().lower()
+    if desired_state != observed_state:
+        return True
+    return phase in {"closing", "failed"}
+
+
 def _residual_excluded_pids(*, runtime_manager: dict[str, Any], workbench: dict[str, Any]) -> set[int]:
     excluded = {os.getpid()}
     trusted_port_owner = workbench.get("backendPortOwnerPid") if workbench.get("backendPortOwnerTrusted") else 0
@@ -2563,7 +3319,18 @@ def _residual_excluded_pids(*, runtime_manager: dict[str, Any], workbench: dict[
     return excluded
 
 
-def _residual_processes_payload(*, runtime_manager: dict[str, Any], workbench: dict[str, Any]) -> dict[str, Any]:
+def _residual_processes_payload(
+    *,
+    runtime_manager: dict[str, Any],
+    workbench: dict[str, Any],
+    runtime_state: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    runtime_state = runtime_state if isinstance(runtime_state, dict) else {}
+    cached = _residual_processes_from_runtime_state(runtime_state)
+    if cached is not None and not _should_refresh_residual_inventory_for_status(workbench=workbench):
+        return cached
+    if _should_defer_residual_inventory_for_status(workbench=workbench, runtime_manager=runtime_manager):
+        return dict(_DEFERRED_RESIDUAL_PROCESSES_PAYLOAD)
     try:
         from core.runtime_manager.process_inventory import residual_process_payload
 
@@ -2573,17 +3340,7 @@ def _residual_processes_payload(*, runtime_manager: dict[str, Any], workbench: d
         )
     except Exception:
         return {"count": 0, "items": []}
-    if not isinstance(payload, dict):
-        return {"count": 0, "items": []}
-    items = [item for item in payload.get("items", []) if isinstance(item, dict)]
-    try:
-        reported = int(payload.get("count") or 0)
-    except (TypeError, ValueError):
-        reported = 0
-    return {
-        "count": max(reported, len(items)),
-        "items": items[:16],
-    }
+    return _normalize_residual_processes_payload(payload)
 
 
 def _lifecycle_proof(
@@ -2591,6 +3348,7 @@ def _lifecycle_proof(
     runtime_manager: dict[str, Any],
     workbench: dict[str, Any],
     active_work_runs: list[dict[str, str]],
+    runtime_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     verified_at = datetime.now(timezone.utc).isoformat()
     desired_state = str(workbench.get("desiredState") or "closed")
@@ -2690,6 +3448,7 @@ def _lifecycle_proof(
         "residualProcesses": _residual_processes_payload(
             runtime_manager=runtime_manager,
             workbench=workbench,
+            runtime_state=runtime_state,
         ),
     }
 

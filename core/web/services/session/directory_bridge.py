@@ -6,9 +6,10 @@ Callers must not wait on SQLite futures while holding ``_CHAT_STATE_LOCK``.
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Mapping
+from concurrent.futures import Future
 from datetime import datetime
+import logging
 from typing import Any
 
 from core.chat.conversation_store import parse_directory_cursor
@@ -86,7 +87,7 @@ def query_session_summaries(
     include_hidden = bool(normalized_agent_id)
     before = parse_directory_cursor(cursor)
     started_at_head = before is None
-    _active_id, experiment_bindings = _chat_state_directory_overlay()
+    _, experiment_bindings = _chat_state_directory_overlay()
     if normalized_sort != "updatedAt_desc":
         page = store.repository.list_directory_page(
             agent_id=normalized_agent_id,
@@ -214,7 +215,7 @@ def list_session_summaries(*, include_hidden: bool = False) -> list[dict[str, An
         before = parse_directory_cursor(next_cursor)
         if before is None:
             break
-    active_id, experiment_bindings = _chat_state_directory_overlay()
+    _, experiment_bindings = _chat_state_directory_overlay()
     summaries = [
         _summary_from_directory_row(
             row,
@@ -234,7 +235,6 @@ def list_session_summaries(*, include_hidden: bool = False) -> list[dict[str, An
     )
     summaries.sort(
         key=lambda item: (
-            0 if str(item.get("id") or "").strip() == active_id else 1,
             -s._timestamp_sort_key(item.get("updatedAt") or item.get("lastActive") or ""),
         )
     )
@@ -345,22 +345,43 @@ def touch_directory_session_safe(
         )
 
 
-def archive_directory_session_safe(session_id: str, *, wait: bool = True) -> None:
+def archive_directory_session_safe(
+    session_id: str,
+    *,
+    wait: bool = True,
+) -> Future[dict[str, Any] | None] | None:
     store = directory_runtime.get_open_directory_store()
     if store is None:
         return
     normalized = str(session_id or "").strip()
     if not normalized:
         return
+    future: Future[dict[str, Any] | None] | None = None
     try:
         future = store.repository.archive_directory_session(normalized)
         if wait:
             future.result(timeout=_SYNC_TIMEOUT_SECONDS)
+        else:
+
+            def log_deferred_failure(completed: Future[dict[str, Any] | None]) -> None:
+                try:
+                    completed.result()
+                except Exception as exc:
+                    logger.warning(
+                        "Deferred session directory archive failed (%s).",
+                        type(exc).__name__,
+                    )
+
+            future.add_done_callback(log_deferred_failure)
     except Exception as exc:
         logger.warning(
             "Session directory archive failed (%s).",
             type(exc).__name__,
         )
+        if future is None and not wait:
+            future = Future()
+            future.set_exception(exc)
+    return future
 
 
 def _ensure_agent_revision(store: Any, agent_id: str) -> str:
@@ -441,7 +462,7 @@ def _experiment_binding_for_directory(value: Any) -> dict[str, Any] | None:
         attempt = max(1, int(value.get("attempt") or 1))
     except (TypeError, ValueError):
         attempt = 1
-    return {
+    binding = {
         "teamId": team_id,
         "researchProjectId": research_project_id,
         "experimentName": str(value.get("experimentName") or "").strip()[:160],
@@ -453,6 +474,14 @@ def _experiment_binding_for_directory(value: Any) -> dict[str, Any] | None:
         "createdFromTaskId": str(value.get("createdFromTaskId") or "").strip()[:160],
         "createdAt": str(value.get("createdAt") or "").strip()[:120],
     }
+    workflow_run_id = str(value.get("workflowRunId") or "").strip()[:160]
+    workflow_node_id = str(value.get("workflowNodeId") or "").strip()[:80]
+    if bool(workflow_run_id) != bool(workflow_node_id):
+        return None
+    if workflow_run_id and workflow_node_id:
+        binding["workflowRunId"] = workflow_run_id
+        binding["workflowNodeId"] = workflow_node_id
+    return binding
 
 
 def _chat_state_directory_overlay() -> tuple[str, dict[str, dict[str, Any]]]:
@@ -656,6 +685,7 @@ def _summary_from_directory_row(
         "taskSummary": preview,
         "lastActive": updated_at,
         "updatedAt": updated_at,
+        "createdAt": _iso_from_ms(row.get("createdAtMs")),
         "currentPhase": status,
         "sessionKind": session_kind,
         "hiddenFromIndex": bool(row.get("hiddenFromIndex")),

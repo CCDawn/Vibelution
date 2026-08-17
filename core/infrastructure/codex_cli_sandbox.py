@@ -23,6 +23,7 @@ from typing import Any, Callable
 from core.logging import debug as _debug_logger
 from core.infrastructure.codex_sandbox.environment import (
     sandbox_process_environment as _adapter_sandbox_process_environment,
+    sandbox_temp_root as _adapter_sandbox_temp_root,
 )
 from core.infrastructure.codex_sandbox.platform import host_platform as _host_platform
 from core.infrastructure.codex_sandbox.process import (
@@ -169,7 +170,7 @@ def _sandbox_process_environment(
 def _cleanup_sandbox_temp(workdir: Path, sandbox_temp: Path | None) -> None:
     if sandbox_temp is None:
         return
-    temp_root = (workdir / ".runtime" / "codex-cli").resolve()
+    temp_root = _adapter_sandbox_temp_root(workdir)
     resolved = sandbox_temp.resolve()
     if resolved == temp_root or not resolved.is_relative_to(temp_root):
         return

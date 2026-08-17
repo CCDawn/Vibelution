@@ -6,7 +6,17 @@
 | --- | --- |
 | Config home | `%USERPROFILE%\Documents\Vibelution\config` |
 | 活跃文件 | `…\config\config.toml` |
-| Data home | `%USERPROFILE%\Documents\Vibelution\data` |
+| Project identity | `<project-root>\.vibelution\project.json`（tracked，只含稳定 `projectId`） |
+| Project state | `%LOCALAPPDATA%\Vibelution\projects\<projectId>` |
+| Instance data | `…\instances\<instanceId>\data` |
+| Runtime / logs / cache | `…\instances\<instanceId>\{runtime,logs,cache}` |
+| Project memory | `…\memory`（跨实例共享，不是运行时事实源） |
+
+旧版 `%USERPROFILE%\Documents\Vibelution\data` 与项目根内的
+`logs/`、`.runtime/`、`.cache/`、`.docs/project-memory/` 在
+`activePaths.migrated=true` 后**仅作只读 rollback 保留**，不再是 active 读路径。
+迁移规则见 [ADR 0008](../../adr/0008-project-mutable-state-lives-outside-source-tree.md)；
+收敛任务见 [compat SSOT closeout plan](../../plans/2026-08-16-compat-ssot-closeout-plan.md)。
 
 ## 环境变量
 
@@ -15,10 +25,24 @@
 | `VIBELUTION_CONFIG_PATH` | 直接指定 `config.toml` 绝对路径 |
 | `VIBELUTION_CONFIG_HOME` | 指定配置目录（其下读 `config.toml`） |
 | `VIBELUTION_DATA_HOME` | 数据根 |
+| `VIBELUTION_PROJECTS_HOME` | 覆盖项目状态总根（默认 `%LOCALAPPDATA%\Vibelution\projects`） |
 | `VIBELUTION_ENABLE_USER_ENV_FALLBACK` | Windows 下允许回退读用户级环境变量中的 API Key |
 
-实现：`config/paths.py`。
-决策锁定：[ADR 0003](../../adr/0003-operator-config-lives-outside-repo.md)。
+实现：`config/paths.py`、`vibelution_storage.py`。
+决策锁定：[ADR 0003](../../adr/0003-operator-config-lives-outside-repo.md)、[ADR 0008](../../adr/0008-project-mutable-state-lives-outside-source-tree.md)。
+
+## 清点与迁移
+
+先只读清点；确认当前 checkout 没有 Launcher、Runtime Manager、测试或 Agent
+写入后再执行 apply：
+
+```powershell
+python scripts/migrate_project_storage.py inventory --project <project-root>
+python scripts/migrate_project_storage.py apply --project <project-root>
+```
+
+`apply` 只复制并验证，不删除旧数据；冲突或源文件变化会阻止切换。需要回退时
+执行 `rollback`，它只归档切换 marker，两边数据都保留。
 
 ## 加载与校验
 

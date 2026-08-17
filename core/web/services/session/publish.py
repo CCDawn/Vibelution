@@ -188,11 +188,9 @@ def get_session_stream_initial_state(session_id: str) -> dict | None:
     with s._RUNNING_SESSIONS_LOCK:
         active_turn_id = str(s._SESSION_ACTIVE_TURN_IDS.get(normalized_session_id) or "").strip()
         session_running = normalized_session_id in s._RUNNING_SESSION_IDS
-    payload = s.load_chat_state(s.PROJECT_ROOT)
     agent_by_id = s._agent_lookup_for_conversations()
     target = s._load_conversation_detail_target(
         normalized_session_id,
-        payload=payload,
         repair=False,
         agent_by_id=agent_by_id,
         lightweight=True,

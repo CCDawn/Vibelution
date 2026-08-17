@@ -257,3 +257,65 @@ def test_resolver_source_does_not_hardcode_user_or_desktop_paths():
     assert "Users\\" not in source
     assert "Users/" not in source
     assert "USERPROFILE" not in source
+
+
+def test_worktree_is_dirty_skips_invalid_cwd(tmp_path, monkeypatch):
+    missing = tmp_path / "not-a-dir"
+    file_path = tmp_path / "not-a-dir.txt"
+    file_path.write_text("x", encoding="utf-8")
+
+    def boom(*_args, **_kwargs):
+        raise NotADirectoryError(267, "目录名称无效")
+
+    monkeypatch.setattr(workspace.git_process, "run_git", boom)
+
+    assert workspace._worktree_is_dirty(missing) is False
+    assert workspace._worktree_is_dirty(file_path) is False
+    assert workspace._worktree_is_dirty(tmp_path) is False
+
+
+def test_worktree_dirty_map_dedupes_paths_and_parallelizes(tmp_path, monkeypatch):
+    calls: list[str] = []
+
+    def fake_dirty(path):
+        calls.append(str(path))
+        return False
+
+    monkeypatch.setattr(workspace, "_worktree_is_dirty", fake_dirty)
+    first = tmp_path / "one"
+    second = tmp_path / "two"
+    third = tmp_path / "three"
+    fourth = tmp_path / "four"
+    for path in (first, second, third, fourth):
+        path.mkdir()
+
+    sequential = workspace._worktree_dirty_map([first, first, first])
+    assert sequential[workspace._norm(first)] is False
+    assert calls.count(str(first)) == 1
+
+    calls.clear()
+    monkeypatch.setattr(workspace, "DIRTY_PARALLEL_THRESHOLD", 2)
+    parallel = workspace._worktree_dirty_map([first, second, third, fourth, first])
+    assert set(parallel) == {
+        workspace._norm(first),
+        workspace._norm(second),
+        workspace._norm(third),
+        workspace._norm(fourth),
+    }
+    assert len(calls) == 4
+
+
+def test_worktree_is_dirty_fail_closed_on_timeout(tmp_path, monkeypatch):
+    import subprocess
+
+    root = tmp_path / "tree"
+    root.mkdir()
+    called = {"n": 0}
+
+    def boom(*_args, **_kwargs):
+        called["n"] += 1
+        raise subprocess.TimeoutExpired(cmd="git status", timeout=15)
+
+    monkeypatch.setattr(workspace.git_process, "run_git", boom)
+    assert workspace._worktree_is_dirty(root) is True
+    assert called["n"] == 1

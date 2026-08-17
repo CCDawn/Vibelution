@@ -1520,7 +1520,13 @@ def _runtime_scene_research_summary_payload(events: list[dict[str, Any]]) -> dic
 
 def _runtime_scene_root() -> Path:
     s = _service()
-    return (s.PROJECT_ROOT / "logs" / "runtime_scenes").resolve()
+    from vibelution_storage import ProjectIdentityError, resolve_active_project_storage_paths
+
+    try:
+        logs_root = resolve_active_project_storage_paths(s.PROJECT_ROOT).logs
+    except ProjectIdentityError:
+        logs_root = s.PROJECT_ROOT / "logs"
+    return (logs_root / "runtime_scenes").resolve()
 
 
 def _runtime_scene_safe_id(value: Any) -> str:
@@ -2316,6 +2322,7 @@ def record_backend_api_event(payload: dict[str, Any]) -> dict[str, Any]:
             "operationalClientError": is_operational_client_error,
             "diagnosticProbe": is_diagnostic_probe,
             "testClientProbe": is_test_client_probe,
+            "clientOperationId": s._truncate_text(str(payload.get("client_operation_id") or ""), 120),
         }
     ), project_root=s.PROJECT_ROOT)
 
@@ -2693,6 +2700,45 @@ def record_runtime_scene_event(
             tag="SCENE",
         )
         raise
+
+
+def record_runtime_scene_event_quietly(
+    component: str,
+    phase: str,
+    event_code: str,
+    *,
+    message: str = "",
+    level: str = "info",
+    outcome: str = "observed",
+    fields: dict[str, Any] | None = None,
+    raw_refs: list[dict[str, Any]] | None = None,
+    child_log_path: str = "",
+    child_log_payload: dict[str, Any] | None = None,
+    lifecycle: bool = False,
+    occurred_at: str = "",
+    allow_recent_completed: bool = False,
+    refresh_package_if_due: bool = True,
+) -> dict[str, Any] | None:
+    """Best-effort scene record for diagnostics; never raises to callers."""
+    try:
+        return record_runtime_scene_event(
+            component,
+            phase,
+            event_code,
+            message=message,
+            level=level,
+            outcome=outcome,
+            fields=fields,
+            raw_refs=raw_refs,
+            child_log_path=child_log_path,
+            child_log_payload=child_log_payload,
+            lifecycle=lifecycle,
+            occurred_at=occurred_at,
+            allow_recent_completed=allow_recent_completed,
+            refresh_package_if_due=refresh_package_if_due,
+        )
+    except Exception:  # noqa: BLE001 - diagnostics must never fail the caller
+        return None
 
 
 def _record_runtime_scene_event_impl(

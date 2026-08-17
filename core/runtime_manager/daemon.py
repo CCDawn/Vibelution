@@ -22,6 +22,7 @@ from config.llm_key_env import (
     sync_llm_key_env_from_persisted_user_env,
 )
 from config.public_config import load_public_config, read_persisted_user_env_var
+from core.logging.log_rotation import rotate_log_file as _rotate_daemon_log_file
 from core.runtime_manager.evolution_store import build_evolution_summary
 from core.web.services import self_evolution_control_service, supervised_control_service
 
@@ -60,11 +61,13 @@ from .state_store import clear_pid, default_state, load_pid, load_state, now_iso
 from . import work_run_store
 from .process_inventory import (
     list_repo_runtime_processes,
+    managed_browser_pid_matches_profile,
     residual_process_payload,
     terminate_process_descendants,
     terminate_unmanaged_workbench_processes,
     terminate_workbench_processes,
 )
+from .window_provider_state import compose_observed_state
 from .workbench_controller import (
     LAUNCHER_ACTION_CANCELLED_RETURN_CODE,
     clear_workbench_launcher_state_after_close,
@@ -112,6 +115,7 @@ _OPEN_VERIFICATION_POLL_INTERVAL_SECONDS = 0.4
 _CLOSE_VERIFICATION_TIMEOUT_SECONDS = 8.0
 _CLOSE_VERIFICATION_POLL_INTERVAL_SECONDS = 0.4
 _FAST_CLOSE_PROCESS_TERMINATE_TIMEOUT_SECONDS = 1.0
+_WORKBENCH_CLEANUP_PROOF_SCHEMA_VERSION = 1
 _DEFERRED_RESTART_ACTIVE_WORK_POLL_SECONDS = 10.0
 _STARTUP_COMMAND_GRACE_SECONDS = 1.0
 _STARTUP_COMMAND_GRACE_POLL_SECONDS = 0.05
@@ -1005,12 +1009,12 @@ def _open_window_ready(observation: dict[str, Any]) -> bool:
 
 
 def _open_request_ready(observation: dict[str, Any], *, no_browser: bool, launcher_confirmed: bool = False) -> bool:
-    if str(observation.get("observedState") or "closed") != "open":
-        return False
     if not _open_backend_ready(observation, launcher_confirmed=launcher_confirmed):
         return False
     if no_browser:
         return True
+    if str(observation.get("observedState") or "closed") != "open":
+        return False
     return _open_window_ready(observation)
 
 
@@ -1362,6 +1366,32 @@ def _closed_observation_has_residual_evidence(observation: dict[str, Any]) -> bo
     }
 
 
+def _build_workbench_cleanup_proof(
+    observation: dict[str, Any],
+    *,
+    cleanup_result: dict[str, Any],
+    cleanup_mode: str,
+    reason: str,
+) -> dict[str, Any]:
+    remaining = cleanup_result.get("remaining") if isinstance(cleanup_result.get("remaining"), list) else []
+    if not bool(cleanup_result.get("supported", True)) or remaining:
+        return {}
+    if not _close_request_already_satisfied(observation) or _closed_observation_has_residual_evidence(observation):
+        return {}
+    if bool(observation.get("backendPortConflict")):
+        return {}
+    if str(observation.get("lifecycleConsistency") or "consistent").strip().lower() != "consistent":
+        return {}
+    return {
+        "schemaVersion": _WORKBENCH_CLEANUP_PROOF_SCHEMA_VERSION,
+        "valid": True,
+        "projectRoot": str(PROJECT_ROOT.resolve()),
+        "cleanupMode": str(cleanup_mode or "").strip(),
+        "reason": str(reason or "").strip(),
+        "verifiedAt": now_iso(),
+    }
+
+
 def _clear_launcher_state_after_verified_close(
     observation: dict[str, Any],
     *,
@@ -1585,64 +1615,13 @@ def _hidden_startup_info() -> subprocess.STARTUPINFO | None:
     return startupinfo
 
 
-def _rotated_log_path(path: Path, index: int) -> Path:
-    return path.with_name(f"{path.name}.{index}")
-
-
-def _rotate_daemon_log_file(
-    path: Path,
-    *,
-    max_bytes: int | None = None,
-    backup_count: int | None = None,
-) -> dict[str, Any]:
-    effective_max_bytes = DAEMON_LOG_MAX_BYTES if max_bytes is None else max_bytes
-    effective_backup_count = DAEMON_LOG_BACKUP_COUNT if backup_count is None else backup_count
-    payload: dict[str, Any] = {
-        "path": str(path),
-        "maxBytes": int(effective_max_bytes),
-        "backupCount": int(effective_backup_count),
-        "sizeBytes": 0,
-        "rotated": False,
-        "backupPath": "",
-        "action": "none",
-        "errorType": "",
-        "errorMessage": "",
-    }
-    try:
-        if int(effective_max_bytes) <= 0 or not path.exists():
-            return payload
-        size_bytes = int(path.stat().st_size)
-        payload["sizeBytes"] = size_bytes
-        if size_bytes <= int(effective_max_bytes):
-            return payload
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if int(effective_backup_count) <= 0:
-            path.write_text("", encoding="utf-8")
-            payload.update({"rotated": True, "action": "truncated"})
-            return payload
-        for index in range(int(effective_backup_count), 0, -1):
-            source = _rotated_log_path(path, index)
-            if index == int(effective_backup_count):
-                if source.exists():
-                    source.unlink()
-                continue
-            target = _rotated_log_path(path, index + 1)
-            if source.exists():
-                source.replace(target)
-        backup_path = _rotated_log_path(path, 1)
-        path.replace(backup_path)
-        path.touch()
-        payload.update({"rotated": True, "backupPath": str(backup_path), "action": "rotated"})
-    except Exception as exc:  # pragma: no cover - platform-specific filesystem race
-        payload.update({"errorType": type(exc).__name__, "errorMessage": str(exc)})
-    return payload
-
-
 def _rotate_daemon_logs_before_launch() -> None:
-    for result in (
-        _rotate_daemon_log_file(DAEMON_STDOUT_PATH),
-        _rotate_daemon_log_file(DAEMON_STDERR_PATH),
-    ):
+    for path in (DAEMON_STDOUT_PATH, DAEMON_STDERR_PATH):
+        result = _rotate_daemon_log_file(
+            path,
+            max_bytes=DAEMON_LOG_MAX_BYTES,
+            backup_count=DAEMON_LOG_BACKUP_COUNT,
+        )
         if result.get("rotated") or result.get("errorType"):
             event_type = "daemon.log_rotation.failed" if result.get("errorType") else "daemon.log_rotation.completed"
             _append_event(event_type, result)
@@ -2105,6 +2084,12 @@ def _frontend_dependency_restore_command() -> tuple[str, list[str]]:
     return "node npm-cli.js install", [node_command, npm_cli_script, "install"]
 
 
+def _subprocess_text_kwargs() -> dict[str, object]:
+    """Decode hidden child output without crashing Windows reader threads."""
+
+    return {"text": True, "encoding": "utf-8", "errors": "replace"}
+
+
 def _frontend_build_preflight_missing_dependency_entries(commands: list[tuple[str, list[str]]]) -> list[dict[str, str]]:
     missing: list[dict[str, str]] = []
     for label, command in commands:
@@ -2124,12 +2109,12 @@ def _restore_frontend_dependencies_for_restart(command_id: str, missing_entries:
             cwd=str(PROJECT_ROOT / "web"),
             stdin=subprocess.DEVNULL,
             capture_output=True,
-            text=True,
             timeout=_RESTART_BUILD_PREFLIGHT_TIMEOUT_SECONDS,
             # Waitable node install: never DETACHED (would ignore CREATE_NO_WINDOW).
             creationflags=_creation_flags(detach=False),
             startupinfo=_hidden_startup_info(),
             check=False,
+            **_subprocess_text_kwargs(),
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         payload = {
@@ -2476,12 +2461,12 @@ def _preflight_frontend_build_for_restart(command_id: str, *, force: bool = Fals
                 cwd=str(PROJECT_ROOT / "web"),
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
-                text=True,
                 timeout=_RESTART_BUILD_PREFLIGHT_TIMEOUT_SECONDS,
                 # Waitable tsc/vite: CREATE_NO_WINDOW only (never with DETACHED).
                 creationflags=_creation_flags(detach=False),
                 startupinfo=_hidden_startup_info(),
                 check=False,
+                **_subprocess_text_kwargs(),
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             payload = {
@@ -3131,6 +3116,7 @@ class RuntimeManagerDaemon:
         reconcile: bool = True,
         reconcile_observation: dict[str, Any] | None = None,
         reconcile_residual_processes: dict[str, Any] | None = None,
+        workbench_updates: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         state = load_state()
         state.setdefault("command", {}).update(
@@ -3154,6 +3140,8 @@ class RuntimeManagerDaemon:
             if _command_affects_workbench_lifecycle(error_scope):
                 state.setdefault("workbench", {})["phase"] = "failed"
                 state["workbench"]["failureMessage"] = failure_message or message
+        if isinstance(workbench_updates, dict):
+            state.setdefault("workbench", {}).update(workbench_updates)
         if reconcile:
             state = self._reconcile_observation(
                 state,
@@ -3186,10 +3174,16 @@ class RuntimeManagerDaemon:
     ) -> dict[str, Any]:
         state = load_state()
         workbench = state.setdefault("workbench", {})
+        window_ready = _open_window_ready(verification)
+        backend_ready = _open_backend_ready(verification, launcher_confirmed=True)
+        observed_state = compose_observed_state(backend_ready=backend_ready, window_ready=window_ready)
+        lifecycle_consistency = str(verification.get("lifecycleConsistency") or "consistent")
+        if observed_state == "partial" and backend_ready and not window_ready:
+            lifecycle_consistency = "browser_missing"
         workbench.update(
             {
                 "desiredState": "open",
-                "observedState": "open",
+                "observedState": observed_state,
                 "phase": "steady",
                 "failureMessage": "",
                 "sessionId": str(verification.get("sessionId") or "").strip(),
@@ -3212,15 +3206,15 @@ class RuntimeManagerDaemon:
                 "browserManaged": bool(verification.get("browserManaged", True)),
                 "backendMissing": False,
                 "frontendOrphaned": False,
-                "lifecycleConsistency": str(verification.get("lifecycleConsistency") or "consistent"),
+                "lifecycleConsistency": lifecycle_consistency,
                 "url": str(verification.get("url") or workbench.get("url") or "").strip(),
                 "statusLine": _build_workbench_status_line(
                     desired_state="open",
-                    observed_state="open",
+                    observed_state=observed_state,
                     phase="steady",
                     backend_pid=int(verification.get("backendPid") or 0),
                     browser_pid=int(verification.get("browserWindowPid") or 0),
-                    lifecycle_consistency=str(verification.get("lifecycleConsistency") or "consistent"),
+                    lifecycle_consistency=lifecycle_consistency,
                 ),
             }
         )
@@ -3716,6 +3710,7 @@ class RuntimeManagerDaemon:
         request_audit = _safe_lifecycle_request_audit(args)
         no_browser = bool(args.get("noBrowser"))
         force_frontend_rebuild = bool(args.get("forceFrontendRebuild"))
+        allow_dirty_launch = force_frontend_rebuild or bool(args.get("allowDirty"))
         if force_frontend_rebuild:
             # Rebuild before any already-open short-circuit so tray "rebuild and start"
             # always refreshes static assets even when the workbench is already healthy.
@@ -3736,6 +3731,7 @@ class RuntimeManagerDaemon:
                     "lastSource": str(workbench.get("lastSource") or args.get("source") or "runtime_manager"),
                     "lastRequestAudit": request_audit,
                     "failureMessage": "",
+                    "cleanupProof": {},
                 }
             )
             save_state(self._reconcile_observation(state))
@@ -3803,6 +3799,7 @@ class RuntimeManagerDaemon:
                 "lastTransitionAt": now_iso(),
                 "lastRequestAudit": request_audit,
                 "failureMessage": "",
+                "cleanupProof": {},
             }
         )
         state["runtimeState"] = "running"
@@ -3845,7 +3842,7 @@ class RuntimeManagerDaemon:
                 extra_result_data={"lifecycleTimingsMs": lifecycle_timings_ms},
             )
         launcher_started = time.monotonic()
-        if force_frontend_rebuild:
+        if allow_dirty_launch:
             result = open_workbench(
                 no_browser=no_browser,
                 cancel_check=cancel_check,
@@ -3966,7 +3963,7 @@ class RuntimeManagerDaemon:
                     | {"attempts": verification_attempts},
                 )
                 retry_launcher_started = time.monotonic()
-                if force_frontend_rebuild:
+                if allow_dirty_launch:
                     retry_result = open_workbench(
                         no_browser=no_browser,
                         cancel_check=cancel_check,
@@ -4494,10 +4491,16 @@ class RuntimeManagerDaemon:
                     "failureMessage": "",
                 }
             )
-            save_state(self._reconcile_observation(state, observation=observation))
+            save_state(state)
             cleanup_result = {"supported": True, "requested": [], "terminated": [], "remaining": [], "skipped": "already_closed_no_residual"}
             if bool(args.get("stopManager")) or _closed_observation_has_residual_evidence(observation):
                 cleanup_result = self._cleanup_residual_workbench_processes()
+            cleanup_proof = _build_workbench_cleanup_proof(
+                observation,
+                cleanup_result=cleanup_result,
+                cleanup_mode=str(cleanup_result.get("candidateScan") or cleanup_result.get("skipped") or "already_closed"),
+                reason=reason,
+            )
             launcher_state_cleanup = _clear_launcher_state_after_verified_close(
                 observation,
                 command_id=command_id,
@@ -4527,6 +4530,11 @@ class RuntimeManagerDaemon:
                     "closeRequest": request_fields,
                 },
                 reconcile_observation=observation,
+                reconcile_residual_processes={
+                    "count": len(cleanup_result.get("remaining") or []),
+                    "items": list(cleanup_result.get("remaining") or []),
+                },
+                workbench_updates={"cleanupProof": cleanup_proof},
             )
 
         closed_runs = _close_active_evolution_runs_for_shutdown()
@@ -4541,7 +4549,7 @@ class RuntimeManagerDaemon:
                 "failureMessage": "",
             }
         )
-        save_state(self._reconcile_observation(state, observation=observation))
+        save_state(state)
         close_outcome = self._close_workbench_with_fast_path(
             command_id=command_id,
             initial_observation=observation,
@@ -4597,6 +4605,12 @@ class RuntimeManagerDaemon:
                 event_type="workbench.close.launcher_state_cleanup",
             )
         reopen_intent = _claim_workbench_reopen_intent() if bool(args.get("stopManager")) else None
+        cleanup_proof = _build_workbench_cleanup_proof(
+            verification,
+            cleanup_result=cleanup_result,
+            cleanup_mode=close_strategy,
+            reason=reason,
+        )
         final_result = self._finish_command(
             command_id,
             ok=True,
@@ -4613,6 +4627,11 @@ class RuntimeManagerDaemon:
                 "closeRequest": request_fields,
             },
             reconcile_observation=verification,
+            reconcile_residual_processes={
+                "count": len(cleanup_result.get("remaining") or []),
+                "items": list(cleanup_result.get("remaining") or []),
+            },
+            workbench_updates={"cleanupProof": cleanup_proof},
         )
         if bool(args.get("stopManager")):
             if reopen_intent:
@@ -4909,9 +4928,24 @@ class RuntimeManagerDaemon:
                 pid = 0
             if pid > 0 and pid not in excluded_pids:
                 known_pids.add(pid)
+        browser_profile_dir = "" if external_window_owner else str(observed.get("browserProfileDir") or "").strip()
+        trusted_browser_pids: set[int] = set()
+        if browser_profile_dir:
+            for key in ("browserLaunchPid", "browserWindowPid"):
+                try:
+                    pid = int(observed.get(key) or 0)
+                except (TypeError, ValueError):
+                    pid = 0
+                if (
+                    pid > 0
+                    and pid not in excluded_pids
+                    and managed_browser_pid_matches_profile(pid, profile_dir=browser_profile_dir)
+                ):
+                    trusted_browser_pids.add(pid)
+        known_pids.update(trusted_browser_pids)
         cleanup_result = terminate_workbench_processes(
             project_root=PROJECT_ROOT,
-            browser_profile_dir="" if external_window_owner else str(observed.get("browserProfileDir") or ""),
+            browser_profile_dir="" if trusted_browser_pids else browser_profile_dir,
             exclude_pids=excluded_pids,
             known_pids=known_pids,
             timeout_seconds=_FAST_CLOSE_PROCESS_TERMINATE_TIMEOUT_SECONDS,

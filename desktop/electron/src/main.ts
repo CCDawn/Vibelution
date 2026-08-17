@@ -1,7 +1,7 @@
-import { BrowserWindow, Notification, app, dialog, ipcMain, nativeImage, nativeTheme } from "electron";
+import { BrowserWindow, Notification, app, dialog, ipcMain, nativeImage, nativeTheme, protocol } from "electron";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import {
   pinSharedDesktopShellUserData,
@@ -22,7 +22,10 @@ import {
   DesktopSessionMutationQueue,
   type DesktopCloseReason
 } from "./lifecycle/desktopLifecycleCoordinator.js";
+import { DesktopSessionMirrorQueue } from "./lifecycle/desktopSessionMirrorQueue.js";
 import { isWorkbenchCloseControlFetchFailure } from "./lifecycle/workbenchCloseFailOpen.js";
+import { waitForWorkbenchBackendSettledForWindowClose } from "./lifecycle/workbenchBackendCloseReadiness.js";
+import { readRuntimeManagerLauncherStatusSummary } from "./lifecycle/runtimeManagerStatusSnapshot.js";
 import {
   createConversationNotificationService,
   type ConversationNotificationService,
@@ -41,12 +44,20 @@ import {
   type LauncherControlPostPath
 } from "./protocol/launcherControlClient.js";
 import {
-  acknowledgeWorkbenchCloseWindowClosed,
-  fetchWorkbenchCloseTransaction,
-  isRecoverableWorkbenchCloseTransactionControlRejection,
-  retryRejectedWorkbenchCloseSubmitOnce,
-  submitWorkbenchCloseTransaction,
-  type WorkbenchCloseTransaction
+  createLauncherIpcHost,
+  type LauncherIpcInvokePayload,
+  type OrchestratedBranchInstanceResult,
+  type OrchestratedLifecycleResult
+} from "./protocol/launcherIpcHost.js";
+import { createLocalLauncherStatusSnapshot } from "./protocol/launcherStatusSnapshot.js";
+import {
+  LAUNCHER_APP_PROTOCOL,
+  launcherAppOriginFor,
+  registerLauncherAppProtocolHandle,
+  resolveLauncherDistRoot
+} from "./protocol/launcherAppProtocol.js";
+import {
+  isRecoverableWorkbenchCloseTransactionControlRejection
 } from "./protocol/workbenchCloseTransactionClient.js";
 import { findVibelutionDeepLinkArg, parsePublicVibelutionDeepLink } from "./protocol/deepLink.js";
 import {
@@ -57,10 +68,28 @@ import {
   type DeepLinkRegistrationResult
 } from "./protocol/deepLinkRegistration.js";
 import {
-  bootstrapPythonLauncherService,
   stopPythonLauncherService,
   type LauncherServiceStopResult
 } from "./process/launcherServiceClient.js";
+import {
+  runWorkbenchLifecycle,
+  type WorkbenchLifecycleOperation
+} from "./process/workbenchLifecycle.js";
+import {
+  runBranchInstanceBridge,
+  type BranchInstanceOperation
+} from "./process/branchInstanceBridge.js";
+import { runPythonJsonBridge } from "./process/pythonJsonBridge.js";
+import {
+  decideLauncherShellRestart,
+  decidePackagedDesktopShellRefresh,
+  decidePeriodicDesktopShellRefresh,
+  inspectDesktopShell,
+  scheduleDesktopShellRefresh,
+  shouldRefreshBeforeLifecycle,
+  thenLifecycleFromDesktopCli,
+  type DesktopShellStatus
+} from "./process/desktopShellFreshness.js";
 import {
   completeBootstrapWithoutWaitingForTelemetry,
   drainTelemetryWithDeadline,
@@ -68,7 +97,7 @@ import {
   type LauncherBootstrapResult
 } from "./process/launcherBootstrap.js";
 import { assertTrustedIpcSender } from "./security/ipcSenderValidation.js";
-import { executeApprovedDesktopShellShutdown, DESKTOP_SHELL_EXIT_BUDGET_MS, DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS, withDesktopShellExitTimeout } from "./shutdown/desktopShellExit.js";
+import { executeApprovedDesktopShellShutdown, reapManagedRuntimeOnDesktopStart, DESKTOP_SHELL_EXIT_BUDGET_MS, DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS, withDesktopShellExitTimeout } from "./shutdown/desktopShellExit.js";
 import {
   decideShutdown,
   executeShutdownAuthorizationBoundary,
@@ -86,7 +115,15 @@ import {
   desktopWorkbenchCloseCanarySummaryPath
 } from "./smoke/workbenchCloseCanary.js";
 import { prepareDesktopSmokeShutdown } from "./smoke/desktopSmokeShutdown.js";
-import { createDesktopTray, DESKTOP_TRAY_MENU_LABELS } from "./tray/desktopTray.js";
+import { createDesktopTray } from "./tray/desktopTray.js";
+import {
+  captureRunningInstanceIds,
+  clearTrayRestartAllPending,
+  readTrayRestartAllPending,
+  summarizeTrayRestartAllRestore,
+  writeTrayRestartAllPending,
+  type TrayRestartAllRestoreResult
+} from "./tray/trayRestartAllCoordinator.js";
 import {
   claimElectronDesktopShellOwner,
   releaseElectronDesktopShellOwner
@@ -97,14 +134,27 @@ import {
   registerDesktopSession,
   reportDesktopWindowState
 } from "./windows/desktopSessionClient.js";
+import { InProcessDesktopSessionStore } from "./windows/desktopSessionStore.js";
 import { ElectronWindowProvider } from "./windows/electronWindowProvider.js";
 import type { ManagedWindowState } from "./windows/windowProviderTypes.js";
 import { createLauncherWindow } from "./windows/launcherWindow.js";
 import { createWorkbenchWindow } from "./windows/workbenchWindow.js";
-import { resolveLauncherUrl, resolveWorkbenchUrl } from "./windows/windowUrlResolver.js";
+import {
+    resolveLauncherWindowUrl,
+  resolveWorkbenchUrl
+} from "./windows/windowUrlResolver.js";
+import { waitForWorkbenchHttp, workbenchLoopbackUrl } from "./windows/workbenchHttpReady.js";
 import { installBrokenPipeGuards } from "./runtime/brokenPipeGuard.js";
+import { MainWorkbenchCloseTransactionStore } from "./lifecycle/workbenchCloseTransactionStore.js";
 
 installBrokenPipeGuards();
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: LAUNCHER_APP_PROTOCOL,
+    privileges: { standard: true, secure: true, supportFetchAPI: true }
+  }
+]);
 
 const DESKTOP_ACTION_POLL_MS = 2000;
 const DESKTOP_ACTION_WAIT_MS = 1750;
@@ -116,6 +166,8 @@ const WORKBENCH_CLOSE_TRANSACTION_CAPABILITY = "workbench_close.transaction.v1";
 const DESKTOP_SESSION_GENERATION = `${process.pid}-${Date.now().toString(36)}`;
 const WORKBENCH_CLOSE_AUTHORIZATION_MAX_WAIT_MS = 30_000;
 const ACTIVE_WORK_STATUS_TIMEOUT_MS = DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS;
+const PERIODIC_SHELL_FRESHNESS_MS = 5 * 60_000;
+const ACTIVE_WORK_POLICY_FORCE_INTERRUPT = true;
 const ELECTRON_PROCESS_STARTED_AT_MS = performance.now();
 const ELECTRON_STARTUP_TRACE_ID = String(process.env.VIBELUTION_STARTUP_TRACE_ID || "").trim().slice(0, 96);
 
@@ -133,8 +185,19 @@ let desktopSessionRegistered = false;
 let desktopSessionRevision = 0;
 let desktopControlRecoveryPromise: Promise<void> | null = null;
 let shutdownApproved = false;
+let launcherIpcHost: ReturnType<typeof createLauncherIpcHost> | null = null;
+let launcherStatusCliCache: unknown = null;
+let launcherStatusCliRefresh: Promise<void> | null = null;
+const inProcessDesktopSessionStore = new InProcessDesktopSessionStore();
+const mainWorkbenchCloseStore = new MainWorkbenchCloseTransactionStore();
+const WORKBENCH_CLOSE_BACKEND_WAIT_MS = 30_000;
+const WORKBENCH_START_READY_WAIT_MS = 90_000;
+const WORKBENCH_REBUILD_READY_WAIT_MS = 300_000;
 const desktopLifecycleCoordinator = new DesktopLifecycleCoordinator();
 const desktopSessionMutations = new DesktopSessionMutationQueue();
+const desktopSessionMirror = new DesktopSessionMirrorQueue((error: unknown) => {
+  console.warn(error instanceof Error ? error.message : String(error));
+});
 let conversationNotificationService: ConversationNotificationService | null = null;
 const desktopCliArgs = parseDesktopCliArgs(process.argv.slice(1));
 let pendingOpenWorkbenchRequest = desktopCliArgs.openWorkbench;
@@ -144,6 +207,11 @@ let pendingWorkbenchCloseAck: PendingWorkbenchCloseAck | null = null;
 let electronStartupStage = "electron_process_ready";
 let electronStartupSummaryRecorded = false;
 let workbenchOpenRequestedAtMs: number | null = null;
+let trayRestartAllInFlight = false;
+let trayQuitAllInFlight = false;
+let trayRestartLauncherInFlight = false;
+let shellRefreshInFlight = false;
+let periodicShellFreshnessTimer: ReturnType<typeof setInterval> | null = null;
 
 type DesktopActionLoopContext = {
   launcherOrigin: string;
@@ -164,10 +232,14 @@ type PendingPublicDeepLink = {
 };
 
 const pendingPublicDeepLinks: PendingPublicDeepLink[] = [];
-pinSharedDesktopShellUserData(app, { smoke: desktopCliArgs.smoke, env: process.env });
+pinSharedDesktopShellUserData(app, {
+  smoke: desktopCliArgs.smoke,
+  workbenchCloseCanary: desktopCliArgs.workbenchCloseCanary,
+  env: process.env
+});
 const lockDecision = singleInstanceDecision(app.requestSingleInstanceLock());
 nativeTheme.themeSource = "light";
-if (!desktopCliArgs.smoke && lockDecision.action === "focus_existing") {
+if (!desktopCliArgs.smoke && !desktopCliArgs.workbenchCloseCanary && lockDecision.action === "focus_existing") {
   app.quit();
 }
 
@@ -275,7 +347,7 @@ function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapR
   conversationNotificationService = null;
   return new ElectronWindowProvider(
     paths,
-    resolveLauncherUrl(desktopEnv, bootstrap?.launcherUrl),
+    resolveLauncherWindowUrl(desktopEnv),
     resolveWorkbenchUrl(desktopEnv, bootstrap?.workbenchUrl),
     {
       createLauncherWindow,
@@ -283,7 +355,15 @@ function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapR
       listLauncherWindows: (launcherOrigin) =>
         BrowserWindow.getAllWindows().filter((window) => {
           try {
-            return new URL(window.webContents.getURL()).origin === launcherOrigin;
+            return launcherAppOriginFor(window.webContents.getURL()) === launcherOrigin;
+          } catch {
+            return false;
+          }
+        }),
+      listWorkbenchWindows: (workbenchOrigin) =>
+        BrowserWindow.getAllWindows().filter((window) => {
+          try {
+            return new URL(window.webContents.getURL()).origin === workbenchOrigin;
           } catch {
             return false;
           }
@@ -372,6 +452,7 @@ function resolveConversationNotificationService(): ConversationNotificationServi
       return notification;
     },
     createBadgeIcon: createConversationBadgeIcon,
+    notificationOpenedChannel: IPC_CHANNELS.conversationNotificationOpened,
     recordEvent: async (event) => {
       await recordElectronSupervisorEvent(launcherBootstrap, {
         ...event,
@@ -382,37 +463,76 @@ function resolveConversationNotificationService(): ConversationNotificationServi
   return conversationNotificationService;
 }
 
-async function bootstrapLauncherIfEnabled(paths: DesktopPaths): Promise<LauncherBootstrapResult | null> {
+async function bootstrapMainOwnedLauncher(paths: DesktopPaths): Promise<LauncherBootstrapResult | null> {
+  // T9: Electron main is the Launcher control plane. The Python :8765 service
+  // is no longer spawned; the workbench URL is resolved through a no-console
+  // Python bridge (env → ports.json → config → default).
   const desktopEnv = desktopEnvironment();
-  if (desktopEnv.VIBELUTION_ELECTRON_START_LAUNCHER === "0") {
-    return null;
-  }
   const pythonPath = String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
-  if (!pythonPath) {
-    console.warn("Launcher Service bootstrap skipped: no VIBELUTION_PYTHON_PATH, PYTHON, or workspace .venv interpreter.");
-    return null;
-  }
   electronStartupStage = "control_plane_attach";
   const stageStartedAtMs = performance.now();
-  const result = await bootstrapPythonLauncherService({
+  let workbenchUrl = "";
+  if (pythonPath) {
+    try {
+      const raw = await runPythonJsonBridge({
+        pythonPath,
+        args: [
+          resolve(paths.workspaceRoot, "scripts", "vibelution_desktop_entry.py"),
+          "--action",
+          "resolve-workbench",
+          "--output",
+          "json",
+          "--workspace",
+          paths.workspaceRoot,
+          "--config",
+          String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
+          "--no-browser"
+        ],
+        cwd: paths.workspaceRoot,
+        failureLabel: "resolve workbench bridge"
+      });
+      const parsed = JSON.parse(raw) as { schemaVersion?: number; workbenchUrl?: string };
+      if (parsed.schemaVersion === 1 && typeof parsed.workbenchUrl === "string" && parsed.workbenchUrl.trim()) {
+        workbenchUrl = parsed.workbenchUrl.trim();
+      }
+    } catch (error: unknown) {
+      console.warn(error instanceof Error ? error.message : String(error));
+    }
+  }
+  workbenchUrl = resolveWorkbenchUrl(desktopEnv, workbenchUrl || undefined);
+  const bootstrapIdentity = `electron-${process.pid}-${Date.now().toString(36)}`;
+  const result: LauncherBootstrapResult = {
+    schemaVersion: 1,
     workspaceRoot: paths.workspaceRoot,
-    pythonPath,
-    operatorConfigPath: String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim()
-  });
+    operatorConfigPath: String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
+    workspaceId: "electron-main",
+    launcherInstanceId: bootstrapIdentity,
+    mode: "attached",
+    launcherBackendPid: 0,
+    launcherUrl: workbenchUrl,
+    workbenchUrl,
+    ready: true,
+    protocolVersion: 1,
+    minDesktopProtocolVersion: 1,
+    maxDesktopProtocolVersion: 1,
+    capabilities: [
+      "desktop_actions.claim",
+      "desktop_sessions.heartbeat",
+      "runtime_scene.electron_event",
+      "workbench_close.transaction.v1"
+    ]
+  };
   const event = {
     eventCode: "electron.startup.control_plane_attached",
-    message: "Electron attached to the Launcher control plane.",
+    message: "Electron main is the Launcher control plane.",
     fields: electronStartupFields({
       stage: "control_plane_attach",
       stageDurationMs: electronStageElapsedMs(stageStartedAtMs),
-      mode: result.mode,
-      launcherBackendPid: result.launcherBackendPid
+      mode: "main_orchestrated",
+      launcherBackendPid: 0
     })
   };
-  return completeBootstrapWithoutWaitingForTelemetry(
-    result,
-    () => recordElectronSupervisorEvent(result, event)
-  );
+  return completeBootstrapWithoutWaitingForTelemetry(result, () => recordElectronSupervisorEvent(result, event));
 }
 
 function startDesktopActionLoop(
@@ -575,17 +695,21 @@ async function persistManagedWindowState(
     if (!desktopSessionRegistered) {
       electronStartupStage = "desktop_session_registration";
       const stageStartedAtMs = performance.now();
-      const registration = await registerDesktopSession({
-        ...context,
-        workspaceRoot: paths.workspaceRoot,
+      const registration = inProcessDesktopSessionStore.register({
+        desktopSessionId: context.desktopSessionId,
         capabilities: desktopSessionCapabilities(bootstrap)
       });
       desktopSessionRevision = registration.revision;
       desktopSessionRegistered = true;
+      void desktopSessionMirror.register(() => registerDesktopSession({
+        ...context,
+        workspaceRoot: paths.workspaceRoot,
+        capabilities: desktopSessionCapabilities(bootstrap)
+      })).catch(() => undefined);
       startDesktopSessionHeartbeatIfNeeded(paths, bootstrap);
       const registrationEvent = {
         eventCode: "electron.startup.desktop_session_registered",
-        message: "Electron registered its scoped desktop session.",
+        message: "Electron registered its in-process desktop session.",
         fields: electronStartupFields({
           stage: "desktop_session_registration",
           stageDurationMs: electronStageElapsedMs(stageStartedAtMs),
@@ -594,13 +718,19 @@ async function persistManagedWindowState(
       };
       scheduleTelemetryWithoutWaiting(() => recordElectronSupervisorEvent(bootstrap, registrationEvent));
     }
-    const result = await reportDesktopWindowState({
-      ...context,
+    const result = inProcessDesktopSessionStore.reportWindow({
+      desktopSessionId: context.desktopSessionId,
       role: state.role,
       revision: desktopSessionRevision,
       state
     });
     desktopSessionRevision = result.revision;
+    void desktopSessionMirror.mutate("window", (mirrorRevision) => reportDesktopWindowState({
+      ...context,
+      role: state.role,
+      revision: mirrorRevision,
+      state
+    })).catch(() => undefined);
     if (state.role === "workbench" && state.open && !electronStartupSummaryRecorded) {
       electronStartupStage = "workbench_window_ready";
       const stageStartedAtMs = workbenchOpenRequestedAtMs ?? ELECTRON_PROCESS_STARTED_AT_MS;
@@ -657,11 +787,16 @@ function startDesktopSessionHeartbeatIfNeeded(paths: DesktopPaths, bootstrap: La
     desktopSessionHeartbeatRunning = true;
     try {
       await desktopSessionMutations.enqueue("heartbeat", async () => {
-        const result = await heartbeatDesktopSession({
-          ...(await resolveDesktopActionLoopContext(currentBootstrap)),
+        const context = await resolveDesktopActionLoopContext(currentBootstrap);
+        const result = inProcessDesktopSessionStore.heartbeat({
+          desktopSessionId: context.desktopSessionId,
           revision: desktopSessionRevision
         });
         desktopSessionRevision = result.revision;
+        await desktopSessionMirror.mutate("heartbeat", (mirrorRevision) => heartbeatDesktopSession({
+          ...context,
+          revision: mirrorRevision
+        }));
       });
     } catch (error: unknown) {
       if (isRecoverableDesktopControlError(error) && windowProvider !== null) {
@@ -692,7 +827,7 @@ async function resolveDesktopActionLoopContext(
     return desktopActionContext;
   }
   const desktopEnv = desktopEnvironment();
-  const launcherOrigin = resolveLauncherUrl(desktopEnv, bootstrap.launcherUrl);
+  const launcherOrigin = resolveWorkbenchUrl(desktopEnv, bootstrap.workbenchUrl);
   const envToken = String(desktopEnv.VIBELUTION_WEB_CONTROL_TOKEN || "").trim();
   const controlToken = options.forceControlTokenRefresh
     ? await fetchLauncherControlToken({ launcherOrigin })
@@ -800,66 +935,74 @@ function desktopSessionCapabilities(bootstrap: LauncherBootstrapResult): string[
 async function requestTransactionalWorkbenchClose(
   paths: DesktopPaths,
   bootstrap: LauncherBootstrapResult | null,
-  desktopActionPayload: Record<string, unknown> = {}
+  _desktopActionPayload: Record<string, unknown> = {}
 ): Promise<void> {
   const provider = windowProvider;
   if (provider === null || bootstrap === null) {
     throw new Error("Electron Workbench close transaction requires an active Launcher bootstrap.");
   }
   await desktopLifecycleCoordinator.request("workbench_window_close", async () => {
-    if (!desktopSessionRegistered) {
-      await reportManagedWindowState(paths, bootstrap, provider.snapshot().workbench);
+    const context = await resolveDesktopActionLoopContext(bootstrap);
+    let activeWork = false;
+    try {
+      const status = await withDesktopShellExitTimeout(
+        fetchLauncherActiveWorkStatus(context),
+        ACTIVE_WORK_STATUS_TIMEOUT_MS,
+        "resolve launcher active work status for workbench close"
+      );
+      activeWork = status.active;
+    } catch {
+      activeWork = false;
     }
-    if (!desktopSessionRegistered) {
-      throw new Error("Electron Workbench close transaction requires an active desktop session.");
-    }
-    let context = await resolveDesktopActionLoopContext(bootstrap);
-    const existingCloseId = closeTransactionIdFromDesktopAction(desktopActionPayload, context.desktopSessionId);
-    let transaction: WorkbenchCloseTransaction;
-    if (existingCloseId) {
-      transaction = await fetchWorkbenchCloseTransactionWithControlRecovery(paths, bootstrap, provider, {
-        ...context,
-        closeId: existingCloseId
-      });
-    } else {
-      const normalIdempotencyKey = `electron-workbench-close:${context.desktopSessionId}:${randomUUID()}`;
-      transaction = await submitWorkbenchCloseTransactionWithControlRecovery(paths, bootstrap, provider, {
-        idempotencyKey: normalIdempotencyKey,
-        mode: "normal",
-        reason: "workbench_window_close"
-      });
-      if (transaction.phase === "confirmation_required") {
-        const confirmed = await confirmWorkbenchForceClose(provider);
-        if (!confirmed) {
-          await recordElectronSupervisorEvent(bootstrap, {
-            eventCode: "electron.workbench_close.cancelled_active_work",
-            message: "Workbench close was cancelled while active work was present.",
-            fields: { closeId: transaction.closeId, desktopSessionId: context.desktopSessionId }
-          });
-          return;
-        }
-        transaction = await submitWorkbenchCloseTransactionWithControlRecovery(paths, bootstrap, provider, {
-          idempotencyKey: `${normalIdempotencyKey}:force`,
-          mode: "force",
-          reason: "workbench_window_close",
-          confirmationCloseId: transaction.closeId
+    let transaction = mainWorkbenchCloseStore.submit({
+      mode: "normal",
+      reason: "workbench_window_close",
+      activeWork
+    });
+    if (transaction.phase === "confirmation_required") {
+      const confirmed = await confirmWorkbenchForceClose(provider);
+      if (!confirmed) {
+        await recordElectronSupervisorEvent(bootstrap, {
+          eventCode: "electron.workbench_close.cancelled_active_work",
+          message: "Workbench close was cancelled while active work was present.",
+          fields: { closeId: transaction.closeId, desktopSessionId: context.desktopSessionId }
         });
+        return;
       }
-    }
-    // A recovered submit replaces the cached control context. Refresh this
-    // local handle before polling and acknowledging the same close transaction.
-    context = await resolveDesktopActionLoopContext(bootstrap);
-    transaction = await awaitWorkbenchCloseAuthorization(context, transaction);
-    if (transaction.phase !== "window_close_authorized") {
-      throw new Error(workbenchCloseTransactionFailureMessage(transaction));
+      transaction = mainWorkbenchCloseStore.confirm(transaction.closeId);
     }
     pendingWorkbenchCloseAck = {
       closeId: transaction.closeId,
       desktopSessionId: context.desktopSessionId
     };
     await recordElectronSupervisorEvent(bootstrap, {
+      eventCode: "electron.workbench_close.backend_stopping",
+      message: "Electron is stopping the workbench backend through the Python lifecycle bridge.",
+      fields: { closeId: transaction.closeId, desktopSessionId: context.desktopSessionId }
+    });
+    await stopWorkbenchBackend(paths, bootstrap);
+    const backendStopped = await waitForWorkbenchBackendSettledForWindowClose({
+      readStatus: async () => {
+        try {
+          return await fetchLauncherStatusSummary(context);
+        } catch {
+          return readRuntimeManagerLauncherStatusSummary(paths.workspaceRoot);
+        }
+      },
+      timeoutMs: WORKBENCH_CLOSE_BACKEND_WAIT_MS
+    });
+    if (!backendStopped) {
+      mainWorkbenchCloseStore.fail(
+        transaction.closeId,
+        "backend_stop_timeout",
+        "Workbench backend did not settle closed before window authorization."
+      );
+      throw new Error("Workbench backend did not settle closed before window authorization.");
+    }
+    transaction = mainWorkbenchCloseStore.backendStopped(transaction.closeId);
+    await recordElectronSupervisorEvent(bootstrap, {
       eventCode: "electron.workbench_close.window_authorized",
-      message: "Workbench backend close completed; Electron is requesting the final window close.",
+      message: "Workbench backend closed; Electron is requesting the final window close.",
       fields: {
         closeId: transaction.closeId,
         desktopSessionId: context.desktopSessionId,
@@ -870,54 +1013,22 @@ async function requestTransactionalWorkbenchClose(
   });
 }
 
-function closeTransactionIdFromDesktopAction(
-  payload: Record<string, unknown>,
-  desktopSessionId: string
-): string {
-  const targetSessionId = String(payload.desktopSessionId || "").trim();
-  const closeId = String(payload.closeId || "").trim();
-  if (!closeId || targetSessionId !== desktopSessionId) {
-    return "";
-  }
-  return closeId;
-}
-
-async function submitWorkbenchCloseTransactionWithControlRecovery(
+async function stopWorkbenchBackend(
   paths: DesktopPaths,
-  bootstrap: LauncherBootstrapResult,
-  provider: ElectronWindowProvider,
-  input: {
-    idempotencyKey: string;
-    mode: "normal" | "force";
-    reason: string;
-    confirmationCloseId?: string;
+  bootstrap: LauncherBootstrapResult
+): Promise<void> {
+  const desktopEnv = desktopEnvironment();
+  const pythonPath = String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
+  if (!pythonPath) {
+    throw new Error("VIBELUTION_PYTHON_PATH or PYTHON is required to stop the workbench backend");
   }
-): Promise<WorkbenchCloseTransaction> {
-  return await retryRejectedWorkbenchCloseSubmitOnce(
-    async () =>
-      await submitWorkbenchCloseTransaction({
-        ...(await resolveDesktopActionLoopContext(bootstrap)),
-        ...input
-      }),
-    async () => await recoverWorkbenchCloseControlContext(paths, bootstrap, provider)
-  );
-}
-
-async function fetchWorkbenchCloseTransactionWithControlRecovery(
-  paths: DesktopPaths,
-  bootstrap: LauncherBootstrapResult,
-  provider: ElectronWindowProvider,
-  input: DesktopActionLoopContext & { closeId: string }
-): Promise<WorkbenchCloseTransaction> {
-  try {
-    return await fetchWorkbenchCloseTransaction(input);
-  } catch (error: unknown) {
-    if (!isRecoverableWorkbenchCloseTransactionControlRejection(error, "fetch")) {
-      throw error;
-    }
-    await recoverWorkbenchCloseControlContext(paths, bootstrap, provider);
-    return await fetchWorkbenchCloseTransaction({ ...(await resolveDesktopActionLoopContext(bootstrap)), closeId: input.closeId });
-  }
+  await runWorkbenchLifecycle({
+    workspaceRoot: paths.workspaceRoot,
+    pythonPath,
+    operatorConfigPath:
+      bootstrap.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
+    operation: "stop"
+  });
 }
 
 function isRecoverableDesktopControlError(error: unknown): boolean {
@@ -986,19 +1097,13 @@ async function acknowledgeTransactionalWorkbenchClose(
   if (pending === null || bootstrap === null) {
     return;
   }
-  const context = await resolveDesktopActionLoopContext(bootstrap);
-  if (context.desktopSessionId !== pending.desktopSessionId) {
-    throw new Error("Electron Workbench close acknowledgement desktop session changed before the window closed.");
-  }
-  const transaction = await acknowledgeWorkbenchCloseWindowClosed({
-    ...context,
-    closeId: pending.closeId,
-    desktopSessionRevision
-  });
-  if (transaction.phase !== "succeeded") {
-    throw new Error(workbenchCloseTransactionFailureMessage(transaction));
-  }
+  const transaction = mainWorkbenchCloseStore.get(pending.closeId);
   pendingWorkbenchCloseAck = null;
+  if (transaction === null) {
+    return;
+  }
+  mainWorkbenchCloseStore.windowClosed(transaction.closeId);
+  const context = await resolveDesktopActionLoopContext(bootstrap);
   writeWorkbenchCloseCanarySummary(paths, {
     closeId: transaction.closeId,
     desktopSessionId: context.desktopSessionId,
@@ -1007,7 +1112,7 @@ async function acknowledgeTransactionalWorkbenchClose(
   });
   await recordElectronSupervisorEvent(bootstrap, {
     eventCode: "electron.workbench_close.completed",
-    message: "Electron confirmed the Workbench closed after the backend close transaction completed.",
+    message: "Electron confirmed the Workbench closed after the backend stopped.",
     fields: {
       closeId: transaction.closeId,
       desktopSessionId: context.desktopSessionId,
@@ -1083,35 +1188,6 @@ async function handleTransactionalWorkbenchCloseFailure(
   }, 0);
 }
 
-async function awaitWorkbenchCloseAuthorization(
-  context: DesktopActionLoopContext,
-  initialTransaction: WorkbenchCloseTransaction
-): Promise<WorkbenchCloseTransaction> {
-  let transaction = initialTransaction;
-  const startedAt = Date.now();
-  while (transaction.phase === "backend_closing") {
-    if (Date.now() - startedAt >= WORKBENCH_CLOSE_AUTHORIZATION_MAX_WAIT_MS) {
-      throw new Error(
-        `Workbench backend close authorization timed out after ${WORKBENCH_CLOSE_AUTHORIZATION_MAX_WAIT_MS}ms`
-      );
-    }
-    const deadlineEpochMs = Date.parse(String(transaction.deadlineAt || ""));
-    if (Number.isFinite(deadlineEpochMs) && Date.now() >= deadlineEpochMs) {
-      throw new Error("Workbench backend close transaction reached its Launcher deadline before window authorization.");
-    }
-    if (!transaction.retryable) {
-      throw new Error("Workbench backend close transaction stopped being retryable before window authorization.");
-    }
-    const nextPollAfterMs = Number(transaction.nextPollAfterMs);
-    if (!Number.isFinite(nextPollAfterMs) || nextPollAfterMs <= 0) {
-      throw new Error("Workbench backend close transaction is missing a valid Launcher-directed retry interval.");
-    }
-    await waitForTransactionPoll(nextPollAfterMs);
-    transaction = await fetchWorkbenchCloseTransaction({ ...context, closeId: transaction.closeId });
-  }
-  return transaction;
-}
-
 async function confirmWorkbenchForceClose(provider: ElectronWindowProvider): Promise<boolean> {
   const options = {
     type: "warning" as const,
@@ -1144,14 +1220,6 @@ async function confirmWorkbenchCloseRetry(provider: ElectronWindowProvider, deta
   return response.response === 0;
 }
 
-function waitForTransactionPoll(delayMs: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, Math.round(delayMs)));
-}
-
-function workbenchCloseTransactionFailureMessage(transaction: WorkbenchCloseTransaction): string {
-  return String(transaction.message || transaction.failureCode || `Unexpected close transaction phase: ${transaction.phase}`);
-}
-
 function stopDesktopActionLoop(): void {
   if (desktopActionTimer !== null) {
     clearInterval(desktopActionTimer);
@@ -1169,12 +1237,17 @@ async function closeDesktopSessionIfRegistered(): Promise<void> {
   stopDesktopSessionHeartbeat();
   try {
     await desktopSessionMutations.enqueue("close", async () => {
-      const result = await closeDesktopSession({
-        ...(await resolveDesktopActionLoopContext(bootstrap)),
+      const context = await resolveDesktopActionLoopContext(bootstrap);
+      const result = inProcessDesktopSessionStore.close({
+        desktopSessionId: context.desktopSessionId,
         revision: desktopSessionRevision
       });
       desktopSessionRevision = result.revision;
       desktopSessionRegistered = false;
+      await desktopSessionMirror.mutate("close", (mirrorRevision) => closeDesktopSession({
+        ...context,
+        revision: mirrorRevision
+      }));
     });
   } catch (error: unknown) {
     console.warn(error instanceof Error ? error.message : String(error));
@@ -1205,11 +1278,127 @@ async function stopOwnedPythonLauncherService(): Promise<LauncherServiceStopResu
   });
 }
 
+async function stopManagedRuntime(): Promise<void> {
+  const desktopEnv = desktopEnvironment();
+  const pythonPath = String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
+  if (!pythonPath) {
+    throw new Error("VIBELUTION_PYTHON_PATH or PYTHON is required to stop managed project processes");
+  }
+  const paths = createDesktopPathsForApp();
+  await runWorkbenchLifecycle({
+    workspaceRoot: paths.workspaceRoot,
+    pythonPath,
+    operatorConfigPath:
+      launcherBootstrap?.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
+    operation: "shutdown"
+  });
+}
+
+function desktopPythonPath(): string {
+  const desktopEnv = desktopEnvironment();
+  return String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
+}
+
+async function inspectCurrentDesktopShell(): Promise<DesktopShellStatus> {
+  const pythonPath = desktopPythonPath();
+  if (!pythonPath) {
+    throw new Error("VIBELUTION_PYTHON_PATH or PYTHON is required to inspect the desktop shell");
+  }
+  const paths = createDesktopPathsForApp();
+  return await inspectDesktopShell({
+    workspaceRoot: paths.workspaceRoot,
+    pythonPath
+  });
+}
+
+async function scheduleCurrentDesktopShellRefresh(
+  thenLifecycle: string,
+  options: { force?: boolean } = {}
+): Promise<void> {
+  const pythonPath = desktopPythonPath();
+  if (!pythonPath) {
+    throw new Error("VIBELUTION_PYTHON_PATH or PYTHON is required to refresh the desktop shell");
+  }
+  const paths = createDesktopPathsForApp();
+  const scheduled = await scheduleDesktopShellRefresh({
+    workspaceRoot: paths.workspaceRoot,
+    pythonPath,
+    waitPid: process.pid,
+    thenLifecycle,
+    force: options.force === true
+  });
+  if (!scheduled.scheduled || scheduled.helperPid <= 0) {
+    const reason = scheduled.reason ? ` (${scheduled.reason})` : "";
+    throw new Error(`desktop shell refresh helper did not start${reason}`);
+  }
+}
+
+async function refreshPackagedDesktopShellIfStale(thenLifecycle: string): Promise<boolean> {
+  if (
+    decidePackagedDesktopShellRefresh({
+      isPackaged: app.isPackaged,
+      smoke: desktopCliArgs.smoke,
+      workbenchCloseCanary: desktopCliArgs.workbenchCloseCanary,
+      stale: true,
+      refreshBlocked: false
+    }) !== "refresh"
+  ) {
+    return false;
+  }
+  let status: DesktopShellStatus;
+  try {
+    status = await inspectCurrentDesktopShell();
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    notifyDesktopTray("Vibelution", `检查桌面壳版本失败，继续使用当前壳：${detail.slice(0, 220)}`, "warning");
+    return false;
+  }
+  if (status.refreshBlocked) {
+    const detail = String(status.refreshBlockedDetail || status.refreshBlockedReason || "recent refresh failure").slice(0, 180);
+    notifyDesktopTray(
+      "Vibelution",
+      `桌面壳自动更新已暂停，继续使用当前壳：${detail}。可在托盘使用「全部重启」重试。`,
+      "warning"
+    );
+    return false;
+  }
+  if (
+    decidePackagedDesktopShellRefresh({
+      isPackaged: app.isPackaged,
+      smoke: desktopCliArgs.smoke,
+      workbenchCloseCanary: desktopCliArgs.workbenchCloseCanary,
+      stale: status.stale,
+      refreshBlocked: status.refreshBlocked
+    }) !== "refresh"
+  ) {
+    return false;
+  }
+  notifyDesktopTray("Vibelution", "桌面壳不是当前代码，Launcher 正在自行更新…");
+  shellRefreshInFlight = true;
+  try {
+    await scheduleCurrentDesktopShellRefresh(thenLifecycle);
+  } catch (error: unknown) {
+    shellRefreshInFlight = false;
+    const detail = error instanceof Error ? error.message : String(error);
+    notifyDesktopTray("Vibelution", `无法安排桌面壳更新：${detail.slice(0, 220)}`, "warning");
+    return false;
+  }
+  try {
+    await stopManagedRuntime();
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    notifyDesktopTray("Vibelution", `停止托管项目进程失败，仍将退出以便更新：${detail.slice(0, 220)}`, "warning");
+  }
+  shutdownApproved = true;
+  app.exit(0);
+  return true;
+}
+
 async function runSmokeAndQuit(paths: DesktopPaths): Promise<void> {
   const desktopEnv = desktopEnvironment();
   const bootstrap = await resolveSmokeBootstrap(paths, desktopEnv);
   launcherBootstrap = bootstrap.result;
-  const launcherUrl = bootstrap.launcherUrl || String(desktopEnv.VIBELUTION_LAUNCHER_URL || "http://127.0.0.1:8765/launcher");
+  const launcherUrl = resolveLauncherWindowUrl(desktopEnv);
   const workbenchUrl = bootstrap.workbenchUrl || String(desktopEnv.VIBELUTION_WORKBENCH_URL || "http://127.0.0.1:8000/");
   const controlToken = String(desktopEnv.VIBELUTION_WEB_CONTROL_TOKEN || "");
   const shutdown = await prepareDesktopSmokeShutdown({
@@ -1224,6 +1413,7 @@ async function runSmokeAndQuit(paths: DesktopPaths): Promise<void> {
         }
       });
     },
+    stopManagedRuntime,
     stopPythonLauncher: stopOwnedPythonLauncherService,
     approveShutdown: () => {
       shutdownApproved = true;
@@ -1269,7 +1459,7 @@ async function resolveSmokeBootstrap(
     return { summary: emptySmokeBootstrapSummary({ attempted: false }), result: null, launcherUrl: "", workbenchUrl: "" };
   }
   try {
-    const result = await bootstrapLauncherIfEnabled(paths);
+    const result = await bootstrapMainOwnedLauncher(paths);
     if (result === null) {
       return { summary: emptySmokeBootstrapSummary({ attempted: true }), result: null, launcherUrl: "", workbenchUrl: "" };
     }
@@ -1323,7 +1513,7 @@ function trustedIpcOrigins(): string[] {
   const workbenchUrl = currentWorkbenchUrl || resolveWorkbenchUrl(desktopEnv, launcherBootstrap?.workbenchUrl);
   return Array.from(
     new Set([
-      new URL(resolveLauncherUrl(desktopEnv, launcherBootstrap?.launcherUrl)).origin,
+      launcherAppOriginFor(resolveLauncherWindowUrl(desktopEnv)),
       new URL(workbenchUrl).origin
     ])
   );
@@ -1371,6 +1561,7 @@ async function requestDesktopShellExit(
                 }
               });
             },
+            stopManagedRuntime,
             stopPythonLauncher: stopOwnedPythonLauncherService,
             approveShutdown: () => {
               shutdownApproved = true;
@@ -1395,7 +1586,16 @@ async function requestDesktopShellExit(
         }).catch(() => undefined);
         shutdownApproved = true;
         pendingWorkbenchCloseAck = null;
-        // Best-effort stop owned Python before force quit so orphans are less likely.
+        // Best-effort stop managed runtime and owned Python before force quit so orphans are less likely.
+        try {
+          await withDesktopShellExitTimeout(
+            stopManagedRuntime(),
+            Math.min(3_000, DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS),
+            "stop managed runtime on exit budget fail-open"
+          );
+        } catch {
+          // Fail-open: stop must not block the forced Electron quit.
+        }
         try {
           await withDesktopShellExitTimeout(
             stopOwnedPythonLauncherService(),
@@ -1449,23 +1649,416 @@ async function resolveTrayControlContextOrLoopback(): Promise<{
     return await resolveTrayLauncherControlContext();
   } catch {
     return {
-      launcherOrigin: "http://127.0.0.1:8765/launcher",
+      launcherOrigin: resolveWorkbenchUrl(desktopEnvironment(), launcherBootstrap?.workbenchUrl),
       controlToken: ""
     };
   }
 }
 
-async function restartLauncherShell(): Promise<void> {
-  notifyDesktopTray("Vibelution", "正在重启 Launcher，以加载最新本地代码…");
+async function resolveInterruptedActiveWorkCount(): Promise<number> {
+  if (launcherBootstrap === null) {
+    return 0;
+  }
+  try {
+    const context = await resolveDesktopActionLoopContext(launcherBootstrap);
+    const status = await withDesktopShellExitTimeout(
+      fetchLauncherActiveWorkStatus(context),
+      ACTIVE_WORK_STATUS_TIMEOUT_MS,
+      "resolve launcher active work for tray force action"
+    );
+    return status.active ? 1 : 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function recordTrayForceInterruptEvidence(eventCode: string, message: string, fields: Record<string, string | number | boolean>): Promise<void> {
+  await recordElectronSupervisorEvent(launcherBootstrap, {
+    eventCode,
+    message,
+    fields: {
+      activeWorkPolicy: "FORCE_INTERRUPT",
+      ...fields
+    }
+  }).catch(() => undefined);
+}
+
+async function stopAllManagedRuntimeTrees(): Promise<void> {
+  try {
+    await orchestrateLauncherLifecycle("force-stop", { schemaVersion: 1, path: "force-stop" });
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    notifyDesktopTray("Vibelution", `停止托管运行时失败，仍将重启 Launcher：${detail.slice(0, 220)}`, "warning");
+  }
+  try {
+    await stopManagedRuntime();
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    notifyDesktopTray("Vibelution", `停止托管项目进程失败，仍将重启 Launcher：${detail.slice(0, 220)}`, "warning");
+  }
   try {
     await stopOwnedPythonLauncherService();
   } catch (error: unknown) {
     const detail = error instanceof Error ? error.message : String(error);
-    notifyDesktopTray("Vibelution", `停止旧 Launcher 服务失败，仍将重启：${detail.slice(0, 220)}`, "warning");
+    notifyDesktopTray("Vibelution", `停止 Launcher 后端失败，仍将重启：${detail.slice(0, 220)}`, "warning");
+  }
+  const provider = windowProvider;
+  if (provider !== null) {
+    try {
+      await provider.approveWorkbenchCloseOnce();
+    } catch (error: unknown) {
+      console.warn(error instanceof Error ? error.message : String(error));
+    }
+  }
+}
+
+async function exitAndRelaunchLauncherShell(options: { forceShellRefresh?: boolean } = {}): Promise<void> {
+  let stale = false;
+  if (app.isPackaged) {
+    try {
+      stale = (await inspectCurrentDesktopShell()).stale;
+    } catch {
+      stale = false;
+    }
+  }
+  if (decideLauncherShellRestart({ isPackaged: app.isPackaged, stale }) === "rebuild-and-exit") {
+    shellRefreshInFlight = true;
+    try {
+      await scheduleCurrentDesktopShellRefresh("", { force: options.forceShellRefresh === true });
+    } catch (error: unknown) {
+      shellRefreshInFlight = false;
+      const detail = error instanceof Error ? error.message : String(error);
+      notifyDesktopTray("Vibelution", `无法安排桌面壳更新，继续使用当前壳重启：${detail.slice(0, 220)}`, "warning");
+      app.relaunch();
+      shutdownApproved = true;
+      app.exit(0);
+      return;
+    }
+    shutdownApproved = true;
+    app.exit(0);
+    return;
   }
   app.relaunch();
   shutdownApproved = true;
   app.exit(0);
+}
+
+async function runTrayRestartLauncher(): Promise<void> {
+  if (trayRestartLauncherInFlight || trayRestartAllInFlight || trayQuitAllInFlight || shellRefreshInFlight) {
+    notifyDesktopTray("Vibelution", "已有托盘操作进行中，请稍候。", "warning");
+    return;
+  }
+  trayRestartLauncherInFlight = true;
+  const paths = createDesktopPathsForApp();
+  try {
+    const interruptedActiveWorkCount = ACTIVE_WORK_POLICY_FORCE_INTERRUPT
+      ? await resolveInterruptedActiveWorkCount()
+      : 0;
+    if (interruptedActiveWorkCount > 0) {
+      await recordTrayForceInterruptEvidence("electron.tray.restart_launcher.force_interrupt", "Tray restart-launcher proceeding while active work was present.", {
+        interruptedActiveWorkCount
+      });
+    }
+    clearTrayRestartAllPending(paths.workspaceRoot);
+    notifyDesktopTray("Vibelution", "正在停止全部托管进程并重启 Launcher…");
+    await stopAllManagedRuntimeTrees();
+    await exitAndRelaunchLauncherShell({ forceShellRefresh: true });
+  } finally {
+    trayRestartLauncherInFlight = false;
+  }
+}
+
+async function restoreTrayRestartAllPending(workspaceRoot: string): Promise<TrayRestartAllRestoreResult> {
+  const pending = readTrayRestartAllPending(workspaceRoot);
+  if (pending === null) {
+    return { restored: [], failed: [], skipped: [] };
+  }
+  clearTrayRestartAllPending(workspaceRoot);
+  const result: TrayRestartAllRestoreResult = { restored: [], failed: [], skipped: [] };
+  if (!pending.instanceIds.length) {
+    return result;
+  }
+  const paths = createDesktopPathsForApp();
+  const desktopEnv = desktopEnvironment();
+  const pythonPath = String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
+  const operatorConfigPath =
+    launcherBootstrap?.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim();
+  if (!pythonPath) {
+    result.failed.push({ instanceId: "*", message: "缺少 Python 路径，无法恢复运行集合。" });
+    return result;
+  }
+  for (const instanceId of pending.instanceIds) {
+    try {
+      if (instanceId === "main") {
+        const lifecycle = await runWorkbenchLifecycle({
+          workspaceRoot: paths.workspaceRoot,
+          pythonPath,
+          operatorConfigPath,
+          operation: "start"
+        });
+        if (!lifecycle.accepted) {
+          result.failed.push({
+            instanceId,
+            message: String(lifecycle.message || lifecycle.code || "main 启动未受理")
+          });
+          continue;
+        }
+      } else {
+        const branch = await runBranchInstanceBridge({
+          workspaceRoot: paths.workspaceRoot,
+          pythonPath,
+          operatorConfigPath,
+          operation: "start",
+          instanceId
+        });
+        if (!branch.accepted) {
+          result.failed.push({
+            instanceId,
+            message: String(branch.message || branch.code || "隔离实例启动未受理")
+          });
+          continue;
+        }
+      }
+      result.restored.push(instanceId);
+    } catch (error: unknown) {
+      result.failed.push({
+        instanceId,
+        message: error instanceof Error ? error.message.slice(0, 220) : String(error)
+      });
+    }
+  }
+  await recordTrayForceInterruptEvidence("electron.tray.restart_all.restore", "Tray restart-all restore completed.", {
+    restoredCount: result.restored.length,
+    failedCount: result.failed.length,
+    interruptedActiveWorkCount: pending.interruptedActiveWorkCount
+  });
+  return result;
+}
+
+async function maybeRestoreTrayRestartAllPending(): Promise<void> {
+  const paths = createDesktopPathsForApp();
+  const pending = readTrayRestartAllPending(paths.workspaceRoot);
+  if (pending === null) {
+    return;
+  }
+  const restore = await restoreTrayRestartAllPending(paths.workspaceRoot);
+  notifyDesktopTray("Vibelution", summarizeTrayRestartAllRestore(restore), restore.failed.length ? "warning" : "info");
+  if (restore.failed.length) {
+    for (const failure of restore.failed.slice(0, 3)) {
+      await recordTrayForceInterruptEvidence("electron.tray.restart_all.restore_failed", "Tray restart-all instance restore failed.", {
+        instanceId: failure.instanceId,
+        message: failure.message.slice(0, 220)
+      });
+    }
+  }
+  if (app.isPackaged) {
+    try {
+      const status = await inspectCurrentDesktopShell();
+      if (status.stale) {
+        notifyDesktopTray("Vibelution", `桌面壳更新后仍判定过期（${status.reason}），请查看 runtime 证据。`, "warning");
+        await recordTrayForceInterruptEvidence("electron.tray.restart_all.post_refresh_stale", "Desktop shell remained stale after tray restart-all refresh.", {
+          reason: status.reason
+        });
+      }
+    } catch (error: unknown) {
+      const detail = error instanceof Error ? error.message : String(error);
+      notifyDesktopTray("Vibelution", `无法二次验证桌面壳版本：${detail.slice(0, 220)}`, "warning");
+    }
+  }
+}
+
+async function runTrayRestartAll(): Promise<void> {
+  if (trayRestartAllInFlight || trayQuitAllInFlight || trayRestartLauncherInFlight || shellRefreshInFlight) {
+    notifyDesktopTray("Vibelution", "已有托盘操作进行中，请稍候。", "warning");
+    return;
+  }
+  trayRestartAllInFlight = true;
+  const paths = createDesktopPathsForApp();
+  try {
+    const interruptedActiveWorkCount = ACTIVE_WORK_POLICY_FORCE_INTERRUPT
+      ? await resolveInterruptedActiveWorkCount()
+      : 0;
+    if (interruptedActiveWorkCount > 0) {
+      await recordTrayForceInterruptEvidence("electron.tray.restart_all.force_interrupt", "Tray restart-all proceeding while active work was present.", {
+        interruptedActiveWorkCount
+      });
+    }
+    let runningInstanceIds: string[] = [];
+    try {
+      runningInstanceIds = captureRunningInstanceIds(
+        await fetchLauncherBranchInstances({
+          ...(await resolveTrayControlContextOrLoopback()),
+          requestTimeoutMs: 20_000
+        })
+      );
+    } catch (error: unknown) {
+      const detail = error instanceof Error ? error.message : String(error);
+      notifyDesktopTray("Vibelution", `无法读取运行集合，已取消全部重启：${detail.slice(0, 220)}`, "warning");
+      return;
+    }
+    let stale = false;
+    if (app.isPackaged) {
+      try {
+        stale = (await inspectCurrentDesktopShell()).stale;
+      } catch (error: unknown) {
+        const detail = error instanceof Error ? error.message : String(error);
+        notifyDesktopTray("Vibelution", `检查桌面壳版本失败，继续使用当前壳：${detail.slice(0, 220)}`, "warning");
+      }
+    }
+    writeTrayRestartAllPending(paths.workspaceRoot, {
+      instanceIds: runningInstanceIds,
+      interruptedActiveWorkCount,
+      shellRefreshScheduled: false
+    });
+    notifyDesktopTray("Vibelution", "正在全部重启…");
+    await stopAllManagedRuntimeTrees();
+    if (app.isPackaged && stale) {
+      shellRefreshInFlight = true;
+      writeTrayRestartAllPending(paths.workspaceRoot, {
+        instanceIds: runningInstanceIds,
+        interruptedActiveWorkCount,
+        shellRefreshScheduled: true
+      });
+      try {
+        await scheduleCurrentDesktopShellRefresh("", { force: true });
+      } catch (error: unknown) {
+        shellRefreshInFlight = false;
+        const detail = error instanceof Error ? error.message : String(error);
+        notifyDesktopTray("Vibelution", `无法安排桌面壳更新：${detail.slice(0, 220)}`, "warning");
+        clearTrayRestartAllPending(paths.workspaceRoot);
+        return;
+      }
+      shutdownApproved = true;
+      app.exit(0);
+      return;
+    }
+    await exitAndRelaunchLauncherShell({ forceShellRefresh: true });
+  } finally {
+    trayRestartAllInFlight = false;
+  }
+}
+
+async function requestForcedDesktopShellExit(
+  closeReason: DesktopCloseReason = "desktop_shell_quit"
+): Promise<void> {
+  if (trayQuitAllInFlight || trayRestartAllInFlight || trayRestartLauncherInFlight) {
+    notifyDesktopTray("Vibelution", "已有托盘操作进行中，请稍候。", "warning");
+    return;
+  }
+  trayQuitAllInFlight = true;
+  try {
+    return await desktopLifecycleCoordinator.request(closeReason, async () => {
+      const ownershipMode = launcherBootstrap?.mode ?? "attached";
+      const interruptedActiveWorkCount = ACTIVE_WORK_POLICY_FORCE_INTERRUPT
+        ? await resolveInterruptedActiveWorkCount()
+        : 0;
+      if (interruptedActiveWorkCount > 0) {
+        await recordTrayForceInterruptEvidence("electron.tray.quit_all.force_interrupt", "Tray quit-all proceeding while active work was present.", {
+          interruptedActiveWorkCount
+        });
+      }
+      try {
+        await orchestrateLauncherLifecycle("force-stop", { schemaVersion: 1, path: "force-stop" });
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+      } catch (error: unknown) {
+        const detail = error instanceof Error ? error.message : String(error);
+        notifyDesktopTray("Vibelution", `停止托管运行时失败：${detail.slice(0, 220)}`, "warning");
+      }
+      pendingWorkbenchCloseAck = null;
+      await withDesktopShellExitTimeout(
+        executeApprovedDesktopShellShutdown({
+          decision: { allowed: true, reason: "no_active_work", stopPythonLauncher: ownershipMode === "started" },
+          closeDesktopSession: closeDesktopSessionIfRegistered,
+          recordEvent: async (event) => {
+            await recordElectronSupervisorEvent(launcherBootstrap, {
+              ...event,
+              fields: {
+                closeReason,
+                ownershipMode,
+                forced: true,
+                interruptedActiveWorkCount,
+                ...(event.fields ?? {})
+              }
+            });
+          },
+          stopManagedRuntime,
+          stopPythonLauncher: stopOwnedPythonLauncherService,
+          approveShutdown: () => {
+            shutdownApproved = true;
+          },
+          stopDesktopActionLoop,
+          quitApp: () => {
+            app.quit();
+          },
+          stepTimeoutMs: DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS
+        }),
+        DESKTOP_SHELL_EXIT_BUDGET_MS,
+        "forced desktop shell exit"
+      );
+    });
+  } finally {
+    trayQuitAllInFlight = false;
+  }
+}
+
+async function runTrayQuitAll(): Promise<void> {
+  try {
+    await requestForcedDesktopShellExit("desktop_shell_quit");
+  } catch (error: unknown) {
+    console.warn(error instanceof Error ? error.message : String(error));
+  }
+}
+
+function startPeriodicShellFreshnessWatch(): void {
+  if (periodicShellFreshnessTimer !== null) {
+    return;
+  }
+  periodicShellFreshnessTimer = setInterval(() => {
+    void (async () => {
+      if (
+        decidePeriodicDesktopShellRefresh({
+          isPackaged: app.isPackaged,
+          smoke: desktopCliArgs.smoke,
+          workbenchCloseCanary: desktopCliArgs.workbenchCloseCanary,
+          stale: false,
+          refreshInFlight: shellRefreshInFlight || trayRestartAllInFlight || trayQuitAllInFlight || trayRestartLauncherInFlight,
+          shutdownApproved
+        }) !== "refresh"
+      ) {
+        return;
+      }
+      let status: DesktopShellStatus | null = null;
+      try {
+        status = await inspectCurrentDesktopShell();
+      } catch {
+        return;
+      }
+      if (
+        decidePeriodicDesktopShellRefresh({
+          isPackaged: app.isPackaged,
+          smoke: desktopCliArgs.smoke,
+          workbenchCloseCanary: desktopCliArgs.workbenchCloseCanary,
+          stale: status.stale,
+          refreshInFlight: shellRefreshInFlight || trayRestartAllInFlight || trayQuitAllInFlight || trayRestartLauncherInFlight,
+          shutdownApproved,
+          refreshBlocked: status.refreshBlocked
+        }) !== "refresh"
+      ) {
+        return;
+      }
+      shellRefreshInFlight = true;
+      notifyDesktopTray("Vibelution", "检测到桌面壳过期，正在无控制台更新…");
+      const refreshed = await refreshPackagedDesktopShellIfStale("");
+      if (!refreshed) {
+        shellRefreshInFlight = false;
+      }
+    })().catch((error: unknown) => {
+      shellRefreshInFlight = false;
+      console.warn(error instanceof Error ? error.message : String(error));
+    });
+  }, PERIODIC_SHELL_FRESHNESS_MS);
+  void periodicShellFreshnessTimer;
 }
 
 async function runTrayLauncherPost(
@@ -1490,17 +2083,6 @@ async function runTrayLauncherPost(
   }
 }
 
-async function runTrayLauncherStatus(): Promise<void> {
-  try {
-    const context = await resolveTrayLauncherControlContext();
-    const summary = await fetchLauncherStatusSummary(context);
-    notifyDesktopTray("Vibelution", formatLauncherStatusSummary(summary));
-  } catch (error: unknown) {
-    const detail = error instanceof Error ? error.message : String(error);
-    notifyDesktopTray("Vibelution", `获取状态失败：${detail.slice(0, 300)}`, "warning");
-  }
-}
-
 async function runTrayStopAll(): Promise<void> {
   try {
     const context = await resolveTrayLauncherControlContext();
@@ -1520,6 +2102,16 @@ async function runTrayStopAll(): Promise<void> {
     await requestDesktopShellExit();
   } catch (error: unknown) {
     console.warn(error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function runTrayLifecycle(operation: WorkbenchLifecycleOperation, label: string): Promise<void> {
+  try {
+    await orchestrateLauncherLifecycle(operation, { schemaVersion: 1, path: operation });
+    notifyDesktopTray("Vibelution", `${label}请求已发送。`);
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    notifyDesktopTray("Vibelution", `${label}失败：${detail.slice(0, 300)}`, "warning");
   }
 }
 
@@ -1567,6 +2159,318 @@ ipcMain.handle(IPC_CHANNELS.notifyConversationCompleted, async (event, payload: 
   return await service.notify(payload);
 });
 
+function launcherIpcTrustedOrigins(): string[] {
+  const desktopEnv = desktopEnvironment();
+  return [launcherAppOriginFor(resolveLauncherWindowUrl(desktopEnv))];
+}
+
+async function orchestrateLauncherLifecycle(
+  operation: string,
+  _payload: LauncherIpcInvokePayload
+): Promise<OrchestratedLifecycleResult> {
+  if (launcherBootstrap === null) {
+    throw new Error("Launcher backend is not available.");
+  }
+  const desktopEnv = desktopEnvironment();
+  const pythonPath = String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
+  if (!pythonPath) {
+    throw new Error("VIBELUTION_PYTHON_PATH or PYTHON is required to orchestrate the workbench lifecycle");
+  }
+  if (app.isPackaged) {
+    try {
+      const status = await inspectCurrentDesktopShell();
+      if (shouldRefreshBeforeLifecycle(operation, { isPackaged: true, stale: status.stale })) {
+        notifyDesktopTray("Vibelution", "桌面壳不是当前代码，Launcher 正在自行更新后再执行…");
+        await scheduleCurrentDesktopShellRefresh(operation);
+        try {
+          await stopManagedRuntime();
+        } catch (error: unknown) {
+          const detail = error instanceof Error ? error.message : String(error);
+          notifyDesktopTray("Vibelution", `停止托管项目进程失败，仍将退出以便更新：${detail.slice(0, 220)}`, "warning");
+        }
+        shutdownApproved = true;
+        app.exit(0);
+        return {
+          schemaVersion: 1,
+          accepted: true,
+          operation,
+          message: "desktop shell refresh scheduled"
+        };
+      }
+    } catch (error: unknown) {
+      console.warn(error instanceof Error ? error.message : String(error));
+    }
+  }
+  const paths = createDesktopPathsForApp();
+  const result = await runWorkbenchLifecycle({
+    workspaceRoot: paths.workspaceRoot,
+    pythonPath,
+    operatorConfigPath:
+      launcherBootstrap.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
+    operation: operation as WorkbenchLifecycleOperation
+  });
+  if (result.accepted && (operation === "start" || operation === "restart" || operation === "rebuild-and-start")) {
+    const provider = windowProvider;
+    if (provider !== null && result.commandId) {
+      const readyWaitMs = operation === "rebuild-and-start"
+        ? WORKBENCH_REBUILD_READY_WAIT_MS
+        : WORKBENCH_START_READY_WAIT_MS;
+      void openWorkbenchAfterLifecycleReady(paths, launcherBootstrap, provider, result.commandId, readyWaitMs)
+        .catch((error: unknown) => {
+          console.warn(error instanceof Error ? error.message : String(error));
+        });
+    }
+  }
+  if (result.accepted && (operation === "stop" || operation === "force-stop")) {
+    const provider = windowProvider;
+    if (provider !== null) {
+      void provider.approveWorkbenchCloseOnce().catch((error: unknown) => {
+        console.warn(error instanceof Error ? error.message : String(error));
+      });
+    }
+  }
+  return result;
+}
+
+function isCurrentCheckoutInstance(instanceId: string): boolean {
+  return instanceId === "main";
+}
+
+function resolveOrchestratedWorkbenchUrl(port?: number): string {
+  if (typeof port === "number" && Number.isFinite(port) && port > 0) {
+    return workbenchLoopbackUrl(port);
+  }
+  try {
+    return resolveWorkbenchUrl(desktopEnvironment(), launcherBootstrap?.workbenchUrl);
+  } catch {
+    return workbenchLoopbackUrl();
+  }
+}
+
+function openOrchestratedWorkbenchWindow(instanceId: string, port?: number): void {
+  void (async () => {
+    const provider = windowProvider;
+    if (provider === null) {
+      return;
+    }
+    const url = resolveOrchestratedWorkbenchUrl(port);
+    await waitForWorkbenchHttp({ url, timeoutMs: WORKBENCH_START_READY_WAIT_MS });
+    if (isCurrentCheckoutInstance(instanceId)) {
+      await provider.openOrFocusWorkbench(url);
+      return;
+    }
+    await provider.openOrFocusInstanceWorkbench({ instanceId, url });
+  })().catch((error: unknown) => {
+    console.warn(error instanceof Error ? error.message : String(error));
+  });
+}
+
+function closeOrchestratedWorkbenchWindow(instanceId: string): void {
+  const provider = windowProvider;
+  if (provider === null) {
+    return;
+  }
+  const closed = isCurrentCheckoutInstance(instanceId)
+    ? provider.approveWorkbenchCloseOnce()
+    : provider.closeInstanceWorkbench(instanceId);
+  void closed.catch((error: unknown) => {
+    console.warn(error instanceof Error ? error.message : String(error));
+  });
+}
+
+async function openWorkbenchForCloseCanary(
+  paths: DesktopPaths,
+  bootstrap: LauncherBootstrapResult,
+  provider: ElectronWindowProvider
+): Promise<void> {
+  electronStartupStage = "workbench_window_ready";
+  markWorkbenchOpenRequested();
+  const desktopEnv = desktopEnvironment();
+  const pythonPath = String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
+  if (!pythonPath) {
+    await provider.openOrFocusWorkbench();
+    return;
+  }
+  const startResult = await runWorkbenchLifecycle({
+    workspaceRoot: paths.workspaceRoot,
+    pythonPath,
+    operatorConfigPath:
+      bootstrap.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
+    operation: "start"
+  });
+  if (startResult.accepted) {
+    await openWorkbenchAfterLifecycleReady(
+      paths,
+      bootstrap,
+      provider,
+      startResult.commandId ?? "",
+      WORKBENCH_START_READY_WAIT_MS
+    );
+    return;
+  }
+  await provider.openOrFocusWorkbench();
+}
+
+async function openWorkbenchAfterLifecycleReady(
+  paths: DesktopPaths,
+  bootstrap: LauncherBootstrapResult,
+  provider: ElectronWindowProvider,
+  _commandId: string,
+  timeoutMs: number
+): Promise<void> {
+  const url = resolveOrchestratedWorkbenchUrl();
+  await waitForWorkbenchHttp({ url, timeoutMs });
+  await openWorkbenchAtCurrentLauncherUrl(paths, bootstrap, provider, { workbenchUrl: url });
+}
+
+async function orchestrateBranchInstanceLifecycle(
+  operation: string,
+  payload: LauncherIpcInvokePayload
+): Promise<OrchestratedBranchInstanceResult> {
+  if (launcherBootstrap === null) {
+    throw new Error("Launcher backend is not available.");
+  }
+  const desktopEnv = desktopEnvironment();
+  const pythonPath = String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
+  if (!pythonPath) {
+    throw new Error("VIBELUTION_PYTHON_PATH or PYTHON is required to orchestrate branch instances");
+  }
+  const body = payload.init?.body;
+  const instanceId =
+    typeof body === "object" && body !== null
+      ? String((body as Record<string, unknown>).instanceId ?? "").trim()
+      : "";
+  if (!instanceId) {
+    throw new Error("branch instance id is required");
+  }
+  const paths = createDesktopPathsForApp();
+  const result = await runBranchInstanceBridge({
+    workspaceRoot: paths.workspaceRoot,
+    pythonPath,
+    operatorConfigPath:
+      launcherBootstrap.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
+    operation: operation as BranchInstanceOperation,
+    instanceId
+  });
+  if (result.accepted && (operation === "start" || operation === "restart")) {
+    if (isCurrentCheckoutInstance(instanceId) || (result.port && result.port > 0)) {
+      openOrchestratedWorkbenchWindow(instanceId, result.port);
+    }
+  }
+  if (result.accepted && (operation === "stop" || operation === "force-stop")) {
+    closeOrchestratedWorkbenchWindow(instanceId);
+  }
+  return result;
+}
+
+async function orchestrateLauncherApi(
+  path: string,
+  payload: LauncherIpcInvokePayload
+): Promise<unknown> {
+  if (launcherBootstrap === null) {
+    throw new Error("Launcher backend is not available.");
+  }
+  const desktopEnv = desktopEnvironment();
+  const pythonPath = String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
+  if (!pythonPath) {
+    throw new Error("VIBELUTION_PYTHON_PATH or PYTHON is required for the launcher API bridge");
+  }
+  const paths = createDesktopPathsForApp();
+  const method = String(payload.init?.method ?? "GET").toUpperCase();
+  const body = payload.init?.body;
+  const args = [
+    resolve(paths.workspaceRoot, "scripts", "vibelution_desktop_entry.py"),
+    "--action",
+    "launcher-api",
+    "--launcher-api-path",
+    path,
+    "--launcher-api-method",
+    method,
+    ...(body !== undefined ? ["--launcher-api-body", JSON.stringify(body)] : []),
+    "--output",
+    "json",
+    "--workspace",
+    paths.workspaceRoot,
+    "--config",
+    launcherBootstrap.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
+    "--no-browser"
+  ];
+  const raw = await runPythonJsonBridge({
+    pythonPath,
+    args,
+    cwd: paths.workspaceRoot,
+    failureLabel: "launcher api bridge"
+  });
+  const parsed = JSON.parse(raw) as { ok?: boolean; payload?: unknown; message?: string };
+  if (parsed.ok !== true) {
+    throw new Error(parsed.message || "launcher api bridge failed");
+  }
+  return parsed.payload;
+}
+
+function scheduleLauncherStatusCliRefresh(): void {
+  if (launcherStatusCliRefresh !== null || launcherBootstrap === null) {
+    return;
+  }
+  launcherStatusCliRefresh = orchestrateLauncherApi("status", {
+    schemaVersion: 1,
+    path: "status",
+    init: { method: "GET" }
+  })
+    .then((payload) => {
+      launcherStatusCliCache = payload;
+    })
+    .catch((error: unknown) => {
+      console.warn(error instanceof Error ? error.message : String(error));
+    })
+    .finally(() => {
+      launcherStatusCliRefresh = null;
+    });
+}
+
+function resolveLauncherIpcHost() {
+  if (launcherIpcHost !== null) {
+    return launcherIpcHost;
+  }
+  launcherIpcHost = createLauncherIpcHost({
+    resolveContext: async () => {
+      if (launcherBootstrap === null) {
+        return null;
+      }
+      try {
+        const context = await resolveDesktopActionLoopContext(launcherBootstrap);
+        return {
+          launcherOrigin: context.launcherOrigin,
+          controlToken: context.controlToken
+        };
+      } catch {
+        return null;
+      }
+    },
+    resolveWindowTruth: () => {
+      const provider = windowProvider;
+      const snapshot = provider?.snapshot();
+      return {
+        workbench: snapshot?.workbench.open
+          ? { open: true, rendererProcessId: snapshot.workbench.rendererProcessId }
+          : null,
+        instances: provider ? provider.instanceWindowStates() : []
+      };
+    },
+    orchestrateLifecycle: orchestrateLauncherLifecycle,
+    orchestrateBranchInstance: orchestrateBranchInstanceLifecycle,
+    orchestrateLauncherApi,
+    resolveLocalStatus: () => launcherStatusCliCache ?? createLocalLauncherStatusSnapshot(),
+    scheduleStatusRefresh: scheduleLauncherStatusCliRefresh
+  });
+  return launcherIpcHost;
+}
+
+ipcMain.handle(IPC_CHANNELS.launcherInvoke, async (event, payload: LauncherIpcInvokePayload) => {
+  assertTrustedIpcSender(event, launcherIpcTrustedOrigins());
+  return await resolveLauncherIpcHost().invoke(payload);
+});
+
 function requestOpenWorkbench(): void {
   const provider = windowProvider;
   if (provider === null) {
@@ -1593,7 +2497,9 @@ async function requestOpenWorkbenchFromSecondInstance(): Promise<void> {
   }
   pendingOpenWorkbenchRequest = false;
   markWorkbenchOpenRequested();
-  await provider.openOrFocusWorkbench();
+  const url = resolveOrchestratedWorkbenchUrl();
+  await waitForWorkbenchHttp({ url, timeoutMs: WORKBENCH_START_READY_WAIT_MS });
+  await provider.openOrFocusWorkbench(url);
 }
 
 async function applyPendingProjectSlot(projectRoot: string): Promise<void> {
@@ -1626,12 +2532,29 @@ async function applyPendingProjectSlot(projectRoot: string): Promise<void> {
 app.whenReady()
   .then(async () => {
     const paths = createDesktopPathsForApp();
+    registerLauncherAppProtocolHandle({
+      distRoot: resolveLauncherDistRoot({
+        resourcesRoot: paths.resourcesRoot,
+        workspaceRoot: paths.workspaceRoot,
+        packaged: app.isPackaged,
+        env: desktopEnvironment()
+      })
+    });
+    await reapManagedRuntimeOnDesktopStart({
+      stopManagedRuntime,
+      recordEvent: async (event) => {
+        await recordElectronSupervisorEvent(launcherBootstrap, event);
+      }
+    });
     if (desktopCliArgs.smoke) {
       await runSmokeAndQuit(paths);
       return;
     }
+    if (await refreshPackagedDesktopShellIfStale(thenLifecycleFromDesktopCli(desktopCliArgs))) {
+      return;
+    }
     const deepLinkRegistration = registerPackagedDeepLinks(paths);
-    launcherBootstrap = await bootstrapLauncherIfEnabled(paths);
+    launcherBootstrap = await bootstrapMainOwnedLauncher(paths);
     electronStartupStage = "tray_ready";
     const trayStartedAtMs = performance.now();
     windowProvider = createWindowProvider(paths, launcherBootstrap);
@@ -1654,7 +2577,7 @@ app.whenReady()
         });
       },
       restartLauncher: () => {
-        void restartLauncherShell();
+        void runTrayRestartLauncher();
       },
       startInstance: (instanceId, label) => {
         void runTrayLauncherPost(
@@ -1672,15 +2595,6 @@ app.whenReady()
           { instanceId }
         );
       },
-      restartProject: () => {
-        void runTrayLauncherPost("/api/launcher/restart", DESKTOP_TRAY_MENU_LABELS.restartProject);
-      },
-      rebuildAndStart: () => {
-        void runTrayLauncherPost("/api/launcher/rebuild-and-start", DESKTOP_TRAY_MENU_LABELS.rebuildAndStart);
-      },
-      showStatus: () => {
-        void runTrayLauncherStatus();
-      },
       quit: () => {
         void requestDesktopShellExit().catch((error: unknown) => {
           console.warn(error instanceof Error ? error.message : String(error));
@@ -1690,6 +2604,8 @@ app.whenReady()
         void runTrayStopAll();
       }
     });
+    startPeriodicShellFreshnessWatch();
+    void maybeRestoreTrayRestartAllPending();
     claimElectronDesktopShellOwner(paths.workspaceRoot);
     await recordElectronSupervisorEvent(launcherBootstrap, {
       eventCode: "electron.tray.created",
@@ -1740,10 +2656,27 @@ app.whenReady()
       await windowProvider.openLauncher();
     }
     if (desktopCliArgs.workbenchCloseCanary) {
-      await windowProvider.openOrFocusWorkbench();
+      if (launcherBootstrap === null) {
+        throw new Error("Launcher bootstrap is unavailable for workbench close canary.");
+      }
+      await openWorkbenchForCloseCanary(paths, launcherBootstrap, windowProvider);
       return;
     }
-    startDesktopActionLoop(paths, launcherBootstrap, windowProvider);
+    const firstLifecycle = String(desktopCliArgs.lifecycleCommand || "").trim().toLowerCase();
+    if (firstLifecycle && firstLifecycle !== "status" && windowProvider !== null) {
+      if (firstLifecycle === "open") {
+        pendingOpenWorkbenchRequest = false;
+        markWorkbenchOpenRequested();
+        await windowProvider.openOrFocusWorkbench();
+      } else {
+        void handleSecondInstanceLifecycleCommand(firstLifecycle).catch((error: unknown) => {
+          console.warn(error instanceof Error ? error.message : String(error));
+        });
+      }
+    }
+    // T6: window actions are orchestrated by Electron main; the Python desktop
+    // action claim loop is no longer polled. startDesktopActionLoop stays
+    // available for shutdown bookkeeping but is not started here.
     if (!desktopCliArgs.openWorkbench && !desktopCliArgs.projectRoot) {
       scheduleTelemetryWithoutWaiting(() =>
         recordElectronStartupSummaryOnce(launcherBootstrap, {
@@ -1776,6 +2709,18 @@ app.on("second-instance", (_event, argv) => {
     projectRoot: secondCli.projectRoot,
     openWorkbench: secondCli.openWorkbench
   });
+  if (secondCli.lifecycleCommand === "open") {
+    void requestOpenWorkbenchFromSecondInstance().catch((error: unknown) => {
+      console.warn(error instanceof Error ? error.message : String(error));
+    });
+    return;
+  }
+  if (secondCli.lifecycleCommand && secondCli.lifecycleCommand !== "open") {
+    void handleSecondInstanceLifecycleCommand(secondCli.lifecycleCommand).catch((error: unknown) => {
+      console.warn(error instanceof Error ? error.message : String(error));
+    });
+    return;
+  }
   if (intent.action === "handle_deep_link") {
     void handlePublicDeepLinkUrl(intent.rawUrl, "second_instance");
     return;
@@ -1794,6 +2739,37 @@ app.on("second-instance", (_event, argv) => {
     focusExistingDesktopShell();
   }
 });
+
+async function handleSecondInstanceLifecycleCommand(command: string): Promise<void> {
+  if (command === "status") {
+    focusExistingDesktopShell();
+    return;
+  }
+  if (command === "toggle") {
+    if (launcherBootstrap === null) {
+      return;
+    }
+    try {
+      const context = await resolveDesktopActionLoopContext(launcherBootstrap);
+      const summary = await fetchLauncherStatusSummary(context);
+      const observed = String(summary.observedState || "").trim().toLowerCase();
+      await orchestrateLauncherLifecycle(
+        observed === "open" || observed === "running" || observed === "starting" ? "stop" : "start",
+        { schemaVersion: 1, path: "toggle" }
+      );
+    } catch (error: unknown) {
+      notifyDesktopTray("Vibelution", `切换失败：${error instanceof Error ? error.message.slice(0, 220) : String(error)}`, "warning");
+    }
+    return;
+  }
+  const operation = command === "rebuild-and-start" ? "rebuild-and-start" : command;
+  try {
+    await orchestrateLauncherLifecycle(operation, { schemaVersion: 1, path: command });
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    notifyDesktopTray("Vibelution", `Launcher 命令失败：${detail.slice(0, 300)}`, "warning");
+  }
+}
 
 app.on("open-url", (event, rawUrl) => {
   event.preventDefault();

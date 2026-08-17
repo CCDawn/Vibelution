@@ -3,16 +3,28 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import threading
+import time
+from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from core.runtime_manager.constants import PROJECT_ROOT
+from core.runtime_manager.constants import RUNTIME_ROOT
 
 
-DESKTOP_SESSION_DB_PATH = PROJECT_ROOT / ".runtime" / "launcher" / "desktop_sessions.sqlite3"
+DESKTOP_SESSION_DB_PATH = RUNTIME_ROOT / "launcher" / "desktop_sessions.sqlite3"
 DESKTOP_SESSION_HEARTBEAT_LEASE_SECONDS = 45
+DESKTOP_SESSION_RETENTION_CLOSED_DAYS = 7
+DESKTOP_SESSION_RETENTION_STALE_ACTIVE_DAYS = 30
+DESKTOP_SESSION_PRUNE_INTERVAL_SECONDS = 3600
 WINDOW_ROLES = {"launcher", "workbench"}
+
+_INIT_CACHE_MAX_ENTRIES = 128
+_schema_ready: OrderedDict[str, None] = OrderedDict()
+_schema_guard = threading.Lock()
+_last_prune_at = 0.0
+_prune_guard = threading.Lock()
 
 
 class DesktopSessionRevisionConflict(ValueError):
@@ -43,14 +55,41 @@ def _connect() -> sqlite3.Connection:
     DESKTOP_SESSION_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(DESKTOP_SESSION_DB_PATH), timeout=5.0, isolation_level=None)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=5000")
-    _init_schema(conn)
+    conn.execute("PRAGMA foreign_keys = ON")
+    if int(conn.execute("PRAGMA foreign_keys").fetchone()[0]) != 1:
+        conn.close()
+        raise RuntimeError("desktop session store could not enable foreign_keys")
+    _ensure_schema_once(conn)
+    _maybe_prune_sessions(conn)
     return conn
 
 
+def _ensure_schema_once(conn: sqlite3.Connection) -> None:
+    """Run schema DDL in one startup transaction, once per process per path;
+    runtime connections never execute DDL again."""
+    key = str(DESKTOP_SESSION_DB_PATH)
+    with _schema_guard:
+        if key in _schema_ready:
+            return
+        # WAL is a persistent file mode; set it once under the guard so
+        # concurrent first connects cannot race the exclusive lock switch.
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            _init_schema(conn)
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+        _schema_ready[key] = None
+        while len(_schema_ready) > _INIT_CACHE_MAX_ENTRIES:
+            _schema_ready.popitem(last=False)
+
+
 def _init_schema(conn: sqlite3.Connection) -> None:
-    conn.executescript(
+    _run_script(
+        conn,
         """
         CREATE TABLE IF NOT EXISTS desktop_sessions (
           desktop_session_id TEXT PRIMARY KEY,
@@ -65,7 +104,47 @@ def _init_schema(conn: sqlite3.Connection) -> None:
           last_heartbeat_at TEXT NOT NULL,
           closed_at TEXT NOT NULL DEFAULT ''
         );
-        """
+        CREATE INDEX IF NOT EXISTS idx_desktop_sessions_status_heartbeat
+          ON desktop_sessions(status, last_heartbeat_at);
+        CREATE INDEX IF NOT EXISTS idx_desktop_sessions_status_workspace_heartbeat
+          ON desktop_sessions(status, replace(lower(workspace_root), '/', '\\'), last_heartbeat_at);
+        """,
+    )
+
+
+def _run_script(conn: sqlite3.Connection, script: str) -> None:
+    """Execute a DDL script statement-by-statement inside the caller's
+    transaction (``executescript`` would implicitly commit it)."""
+    for statement in script.split(";"):
+        if statement.strip():
+            conn.execute(statement)
+
+
+def _maybe_prune_sessions(conn: sqlite3.Connection) -> None:
+    global _last_prune_at
+    with _prune_guard:
+        if time.monotonic() - _last_prune_at < DESKTOP_SESSION_PRUNE_INTERVAL_SECONDS:
+            return
+    _prune_sessions(conn)
+    with _prune_guard:
+        _last_prune_at = time.monotonic()
+
+
+def _prune_sessions(conn: sqlite3.Connection) -> None:
+    """Bounded retention: drop closed rows after 7 days and stale active rows
+    after 30 days. Rows inside the heartbeat lease are never removed."""
+    now = datetime.now(timezone.utc)
+    closed_cutoff = (now - timedelta(days=DESKTOP_SESSION_RETENTION_CLOSED_DAYS)).isoformat()
+    stale_cutoff = (
+        now - timedelta(days=DESKTOP_SESSION_RETENTION_STALE_ACTIVE_DAYS)
+    ).isoformat()
+    conn.execute(
+        "DELETE FROM desktop_sessions WHERE status='closed' AND last_heartbeat_at < ?",
+        (closed_cutoff,),
+    )
+    conn.execute(
+        "DELETE FROM desktop_sessions WHERE status='active' AND last_heartbeat_at < ?",
+        (stale_cutoff,),
     )
 
 
@@ -246,20 +325,38 @@ def latest_active_desktop_session(
     workspace_root: str = "",
     window_role: str = "",
 ) -> dict[str, Any]:
-    """Return the newest live desktop session matching the optional scope."""
+    """Return the newest live desktop session matching the optional scope.
+
+    Lease, provider, workspace, and window-role conditions are pushed into
+    SQL before the LIMIT, so newer unrelated rows can no longer shadow a
+    valid target. Python-side checks remain as a defensive second layer.
+    """
 
     normalized_provider = _safe_text(provider, max_length=80)
     normalized_window_role = _safe_text(window_role, max_length=80)
-    expected_workspace = _normalize_workspace_root(workspace_root)
+    normalized_workspace = _normalize_workspace_root(workspace_root)
+    lease_cutoff = (
+        datetime.now(timezone.utc)
+        - timedelta(seconds=DESKTOP_SESSION_HEARTBEAT_LEASE_SECONDS)
+    ).isoformat()
+    clauses = ["status = 'active'", "last_heartbeat_at >= ?"]
+    parameters: list[str] = [lease_cutoff]
+    if normalized_provider:
+        clauses.append("provider = ?")
+        parameters.append(normalized_provider)
+    if normalized_workspace:
+        clauses.append("replace(lower(workspace_root), '/', '\\') = ?")
+        parameters.append(normalized_workspace)
+    if normalized_window_role:
+        clauses.append("json_type(windows_json, '$.' || ?) = 'object'")
+        parameters.append(normalized_window_role)
     try:
         with _connect() as conn:
             rows = conn.execute(
-                """
-                SELECT * FROM desktop_sessions
-                WHERE status = 'active'
-                ORDER BY last_heartbeat_at DESC, updated_at DESC
-                LIMIT 32
-                """
+                "SELECT * FROM desktop_sessions WHERE "
+                + " AND ".join(clauses)
+                + " ORDER BY last_heartbeat_at DESC, updated_at DESC LIMIT 32",
+                parameters,
             ).fetchall()
     except (OSError, sqlite3.Error):
         return {}
@@ -268,10 +365,13 @@ def latest_active_desktop_session(
             continue
         if normalized_provider and _safe_text(row["provider"], max_length=80) != normalized_provider:
             continue
-        if expected_workspace and _normalize_workspace_root(row["workspace_root"]) != expected_workspace:
+        if normalized_workspace and _normalize_workspace_root(row["workspace_root"]) != normalized_workspace:
             continue
         if normalized_window_role:
-            windows = json.loads(row["windows_json"] or "{}")
+            try:
+                windows = json.loads(str(row["windows_json"] or "{}"))
+            except json.JSONDecodeError:
+                windows = {}
             if not isinstance(windows.get(normalized_window_role), dict):
                 continue
         return _public_session(row)
@@ -319,8 +419,8 @@ def latest_active_window_provider_projection(*, workspace_root: str = "") -> dic
         "desktopSessionRevision": int(session.get("revision") or 0),
         "desktopSessionLeaseExpiresAt": str(session.get("leaseExpiresAt") or "").strip(),
     }
-    if workbench:
-        projection["observedState"] = "open" if is_open else "closed"
+    if is_open:
+        projection["observedState"] = "open"
     return projection
 
 
@@ -334,8 +434,7 @@ def latest_active_workbench_projection() -> dict[str, Any]:
     if not window:
         return {}
     is_open = bool(window.get("open", False))
-    return {
-        "observedState": "open" if is_open else "closed",
+    payload = {
         "browserWindowAlive": is_open,
         "browserManaged": False,
         "windowProvider": "electron",
@@ -347,6 +446,9 @@ def latest_active_workbench_projection() -> dict[str, Any]:
         "desktopSessionRevision": int(window.get("desktopSessionRevision") or 0),
         "desktopSessionLeaseExpiresAt": str(window.get("desktopSessionLeaseExpiresAt") or "").strip(),
     }
+    if is_open:
+        payload["observedState"] = "open"
+    return payload
 
 
 def _normalize_workspace_root(value: Any) -> str:

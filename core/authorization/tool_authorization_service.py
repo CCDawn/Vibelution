@@ -18,6 +18,86 @@ MAX_TERMINAL_WAITS_PER_SESSION = 8
 MAX_TERMINAL_WAITS_PER_TURN = 16
 
 
+def _as_mapping(value: Any) -> dict[str, Any]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {}
+
+
+def _mapping_items(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, Mapping):
+        if any(key in value for key in ("name", "enabled", "capabilities", "aliases")):
+            return [dict(value)]
+        return [dict(item) for item in value.values() if isinstance(item, Mapping)]
+    if isinstance(value, (str, bytes)) or value is None:
+        return []
+    try:
+        iterator = list(value)
+    except TypeError:
+        return []
+    return [dict(item) for item in iterator if isinstance(item, Mapping)]
+
+
+def _coerce_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+def _coerce_str_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, bytes):
+        text = value.decode("utf-8", errors="replace").strip()
+        return [text] if text else []
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    if isinstance(value, Mapping):
+        return [str(key or "").strip() for key in value if str(key or "").strip()]
+    try:
+        iterator = list(value)
+    except TypeError:
+        text = str(value or "").strip()
+        return [text] if text else []
+    names: list[str] = []
+    for item in iterator:
+        text = str(item or "").strip()
+        if text and text not in names:
+            names.append(text)
+    return names
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    if isinstance(value, bool) or value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _coerce_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on", "enabled"}:
+        return True
+    if text in {"0", "false", "no", "off", "disabled"}:
+        return False
+    return default
+
+
 class ToolAuthorizationContextError(ValueError):
     """Raised when an enforced authorization decision lacks trusted identity facts."""
 
@@ -88,18 +168,22 @@ def _resolve_authorization(
     """Resolve one canonical decision without any legacy visibility input."""
 
     started = perf_counter()
-    payload = dict(registry_payload or _load_registry_payload(registry_loader))
+    loaded = registry_payload if registry_payload is not None else _load_registry_payload(registry_loader)
+    payload = _as_mapping(loaded)
     descriptors = _descriptors_from_registry(payload)
     registered_names = tuple(descriptor.name for descriptor in descriptors)
-    agent = runtime.get("agent") if isinstance(runtime.get("agent"), Mapping) else {}
-    raw_policy = runtime.get("toolPolicy")
+    runtime_values = _as_mapping(runtime)
+    agent = _as_mapping(runtime_values.get("agent"))
+    raw_policy = runtime_values.get("toolPolicy")
+    if raw_policy is None:
+        raw_policy = runtime_values.get("tool_policy")
     policy = _role_policy_projection(
         agent=agent,
         raw_policy=raw_policy,
         registered_names=registered_names,
     )
-    turn_id = str(runtime.get("turnId") or runtime.get("runId") or "").strip()
-    source = _turn_source(runtime, agent)
+    turn_id = _coerce_text(runtime_values.get("turnId") or runtime_values.get("runId")).strip()
+    source = _turn_source(runtime_values, agent)
     capabilities = tuple(sorted({capability for descriptor in descriptors for capability in descriptor.capabilities}))
     grant = TurnToolGrant(
         turn_id=turn_id,
@@ -111,23 +195,22 @@ def _resolve_authorization(
     available_names = tuple(
         sorted(
             {
-                str(item.get("name") or "").strip()
-                for item in payload.get("tools") or []
-                if isinstance(item, Mapping)
-                and item.get("enabled")
-                and item.get("runtimeActive")
-                and item.get("llmVisible")
-                and str(item.get("name") or "").strip()
+                _coerce_text(item.get("name")).strip()
+                for item in _mapping_items(payload.get("tools"))
+                if _coerce_bool(item.get("enabled"), False)
+                and _coerce_bool(item.get("runtimeActive"), False)
+                and _coerce_bool(item.get("llmVisible"), False)
+                and _coerce_text(item.get("name")).strip()
             }
         )
     )
     decision = evaluate_tool_policy(
-        agent_id=str(runtime.get("agentId") or agent.get("agentId") or "").strip(),
+        agent_id=_coerce_text(runtime_values.get("agentId") or agent.get("agentId")).strip(),
         policy=policy,
         grant=grant,
         descriptors=descriptors,
-        registry_version=int(payload.get("registryVersion") or 0),
-        registry_fingerprint=str(payload.get("registryFingerprint") or "").strip(),
+        registry_version=_safe_int(payload.get("registryVersion"), 0),
+        registry_fingerprint=_coerce_text(payload.get("registryFingerprint")).strip(),
         available_tool_names=available_names,
         generated_at=generated_at or datetime.now(timezone.utc).isoformat(),
     )
@@ -135,7 +218,7 @@ def _resolve_authorization(
     return AuthorizationReport(
         decision=decision,
         deny_code_counts=tuple(sorted(deny_counts.items())),
-        registry_fingerprint=str(payload.get("registryFingerprint") or "").strip(),
+        registry_fingerprint=_coerce_text(payload.get("registryFingerprint")).strip(),
         duration_ms=max(0, int((perf_counter() - started) * 1000)),
     )
 
@@ -149,12 +232,12 @@ def resolve_enforced_authorization(
 ) -> AuthorizationReport:
     """Resolve the only model-visible and executable tool decision."""
 
-    values = dict(runtime or {})
-    agent = values.get("agent") if isinstance(values.get("agent"), Mapping) else {}
-    agent_id = str(values.get("agentId") or agent.get("agentId") or "").strip()
+    values = _as_mapping(runtime)
+    agent = _as_mapping(values.get("agent"))
+    agent_id = _coerce_text(values.get("agentId") or agent.get("agentId")).strip()
     if not agent_id:
         raise ToolAuthorizationContextError("tool authorization requires agentId")
-    turn_id = str(values.get("turnId") or values.get("runId") or "").strip()
+    turn_id = _coerce_text(values.get("turnId") or values.get("runId")).strip()
     if not turn_id:
         raise ToolAuthorizationContextError("tool authorization requires turnId")
     return _resolve_authorization(
@@ -168,27 +251,23 @@ def resolve_enforced_authorization(
 def _runtime_llm_identity(runtime: Mapping[str, Any]) -> tuple[str, str, str]:
     """Best-effort model/provider/profile identity for budget profiles."""
 
-    model = str(runtime.get("model") or runtime.get("llmModel") or "").strip()
-    provider = str(runtime.get("provider") or runtime.get("llmProvider") or "").strip()
-    profile_id = str(runtime.get("llmProfileId") or runtime.get("profileId") or "").strip()
-    config_snapshot = (
-        runtime.get("agentConfigSnapshot")
-        if isinstance(runtime.get("agentConfigSnapshot"), Mapping)
-        else {}
-    )
-    if isinstance(config_snapshot, Mapping):
-        model = model or str(config_snapshot.get("model") or config_snapshot.get("llmModel") or "").strip()
-        provider = provider or str(
-            config_snapshot.get("provider") or config_snapshot.get("llmProvider") or ""
+    model = _coerce_text(runtime.get("model") or runtime.get("llmModel")).strip()
+    provider = _coerce_text(runtime.get("provider") or runtime.get("llmProvider")).strip()
+    profile_id = _coerce_text(runtime.get("llmProfileId") or runtime.get("profileId")).strip()
+    config_snapshot = _as_mapping(runtime.get("agentConfigSnapshot"))
+    if config_snapshot:
+        model = model or _coerce_text(config_snapshot.get("model") or config_snapshot.get("llmModel")).strip()
+        provider = provider or _coerce_text(
+            config_snapshot.get("provider") or config_snapshot.get("llmProvider")
         ).strip()
-        profile_id = profile_id or str(
-            config_snapshot.get("llmProfileId") or config_snapshot.get("profileId") or ""
+        profile_id = profile_id or _coerce_text(
+            config_snapshot.get("llmProfileId") or config_snapshot.get("profileId")
         ).strip()
-        bindings = config_snapshot.get("llmBindings") if isinstance(config_snapshot.get("llmBindings"), Mapping) else {}
-        primary = bindings.get("primary") if isinstance(bindings, Mapping) else None
-        if isinstance(primary, Mapping):
-            model = model or str(primary.get("model") or primary.get("modelId") or "").strip()
-            provider = provider or str(primary.get("provider") or primary.get("providerId") or "").strip()
+        bindings = _as_mapping(config_snapshot.get("llmBindings"))
+        primary = _as_mapping(bindings.get("primary"))
+        if primary:
+            model = model or _coerce_text(primary.get("model") or primary.get("modelId")).strip()
+            provider = provider or _coerce_text(primary.get("provider") or primary.get("providerId")).strip()
     if not model or not provider:
         try:
             from config.settings import get_config
@@ -214,27 +293,26 @@ def install_execution_authorization(report: AuthorizationReport) -> ToolExecutio
     from core.web.services.agent_directory_service import current_agent_runtime
 
     decision = report.decision
-    runtime = dict(current_agent_runtime() or {})
-    policy = runtime.get("toolPolicy") if isinstance(runtime.get("toolPolicy"), Mapping) else {}
-    config_snapshot = (
-        runtime.get("agentConfigSnapshot")
-        if isinstance(runtime.get("agentConfigSnapshot"), Mapping)
-        else {}
-    )
+    runtime = _as_mapping(current_agent_runtime())
+    policy = runtime.get("toolPolicy")
+    if policy is None:
+        policy = runtime.get("tool_policy")
+    policy = policy if isinstance(policy, Mapping) else {}
+    config_snapshot = _as_mapping(runtime.get("agentConfigSnapshot"))
     model, provider, profile_id = _runtime_llm_identity(runtime)
     max_calls_per_turn, budget_profile = resolve_max_calls_per_turn(
-        policy if isinstance(policy, Mapping) else {},
+        policy,
         model=model,
         provider=provider,
         profile_id=profile_id,
     )
     context = ToolExecutionAuthorizationContext(
-        agent_id=str(decision.agent_id or "").strip(),
-        turn_id=str(decision.turn_id or "").strip(),
-        decision_fingerprint=str(decision.decision_fingerprint or "").strip(),
-        config_revision=int(config_snapshot.get("configRevision") or 0),
-        config_hash=str(config_snapshot.get("configHash") or "").strip(),
-        permission_preset=str(runtime.get("permissionPreset") or "").strip(),
+        agent_id=_coerce_text(decision.agent_id).strip(),
+        turn_id=_coerce_text(decision.turn_id).strip(),
+        decision_fingerprint=_coerce_text(decision.decision_fingerprint).strip(),
+        config_revision=_safe_int(config_snapshot.get("configRevision"), 0),
+        config_hash=_coerce_text(config_snapshot.get("configHash")).strip(),
+        permission_preset=_coerce_text(runtime.get("permissionPreset")).strip(),
         executable_tools=tuple(decision.executable_tools),
         approval_requirements=tuple(getattr(decision, "approval_requirements", ()) or ()),
         max_calls_per_turn=max_calls_per_turn,
@@ -270,13 +348,13 @@ def _empty_terminal_wait_session_id(
     tool_name: str,
     tool_args: Mapping[str, Any] | None,
 ) -> str:
-    if str(tool_name or "").strip().lower() != "write_stdin" or not isinstance(tool_args, Mapping):
+    if _coerce_text(tool_name).strip().lower() != "write_stdin" or not isinstance(tool_args, Mapping):
         return ""
     chars = tool_args.get("chars", tool_args.get("input", ""))
     if chars not in (None, ""):
         return ""
     for key in ("terminal_session_id", "session_id", "sessionId", "terminal_id", "terminalId"):
-        session_id = str(tool_args.get(key) or "").strip()
+        session_id = _coerce_text(tool_args.get(key)).strip()
         if session_id:
             return session_id
     return ""
@@ -291,8 +369,8 @@ def authorize_tool_execution(
 ) -> ToolExecutionAuthorizationResult:
     from core.web.services.agent_directory_service import current_agent_runtime
 
-    runtime = dict(current_agent_runtime() or {})
-    runtime_agent_id = str(runtime.get("agentId") or "").strip()
+    runtime = _as_mapping(current_agent_runtime())
+    runtime_agent_id = _coerce_text(runtime.get("agentId")).strip()
     if not runtime_agent_id:
         return ToolExecutionAuthorizationResult(
             enforced=False,
@@ -300,27 +378,23 @@ def authorize_tool_execution(
             code="system_context",
             message="",
         )
-    runtime_turn_id = str(runtime.get("turnId") or runtime.get("runId") or "").strip()
+    runtime_turn_id = _coerce_text(runtime.get("turnId") or runtime.get("runId")).strip()
     context = current_execution_authorization()
     if context is None:
         return _execution_denial("missing_decision", "当前 Agent 缺少可信工具授权决策。", runtime_agent_id, runtime_turn_id)
-    if not str(tool_call_id or "").strip():
+    if not _coerce_text(tool_call_id).strip():
         return _execution_denial("missing_call_id", "当前工具调用缺少 callId。", runtime_agent_id, runtime_turn_id, context)
     if context.agent_id != runtime_agent_id:
         return _execution_denial("agent_mismatch", "工具授权决策不属于当前 Agent。", runtime_agent_id, runtime_turn_id, context)
     if runtime_turn_id and context.turn_id != runtime_turn_id:
         return _execution_denial("turn_mismatch", "工具授权决策不属于当前回合。", runtime_agent_id, runtime_turn_id, context)
-    runtime_config_snapshot = (
-        runtime.get("agentConfigSnapshot")
-        if isinstance(runtime.get("agentConfigSnapshot"), Mapping)
-        else {}
-    )
+    runtime_config_snapshot = _as_mapping(runtime.get("agentConfigSnapshot"))
     if (
-        int(runtime_config_snapshot.get("configRevision") or 0)
+        _safe_int(runtime_config_snapshot.get("configRevision"), 0)
         != context.config_revision
-        or str(runtime_config_snapshot.get("configHash") or "").strip()
+        or _coerce_text(runtime_config_snapshot.get("configHash")).strip()
         != context.config_hash
-        or str(runtime.get("permissionPreset") or "").strip()
+        or _coerce_text(runtime.get("permissionPreset")).strip()
         != context.permission_preset
     ):
         return _execution_denial(
@@ -330,7 +404,7 @@ def authorize_tool_execution(
             runtime_turn_id,
             context,
         )
-    normalized_tool = str(tool_name or "").strip()
+    normalized_tool = _coerce_text(tool_name).strip()
     if normalized_tool not in set(context.executable_tools):
         return _execution_denial("tool_not_executable", "当前工具未被本回合授权执行。", runtime_agent_id, runtime_turn_id, context)
     constraint_denial = _runtime_constraint_denial(runtime, normalized_tool, tool_args or {})
@@ -444,7 +518,6 @@ def _runtime_constraint_denial(
     from core.web.services.agent_directory_service import (
         DISABLED_AGENT_DIRECT_READ_TOOL_NAMES,
         SUBAGENT_DELEGATION_TOOL_NAMES,
-        normalize_delegation_policy,
     )
 
     if tool_name in DISABLED_AGENT_DIRECT_READ_TOOL_NAMES:
@@ -453,8 +526,14 @@ def _runtime_constraint_denial(
             f"当前 Agent 已关闭 `{tool_name}` 直读能力，请使用已授权的受控读取工具。",
         )
     if tool_name in SUBAGENT_DELEGATION_TOOL_NAMES:
-        delegation_policy = normalize_delegation_policy(runtime.get("delegationPolicy"))
-        if not bool(delegation_policy.get("allowSubagents", False)):
+        raw_policy = _as_mapping(runtime.get("delegationPolicy") or runtime.get("delegation_policy"))
+        allow_subagents = _coerce_bool(
+            raw_policy.get("allowSubagents")
+            if "allowSubagents" in raw_policy
+            else raw_policy.get("allow_subagents"),
+            False,
+        )
+        if not allow_subagents:
             return (
                 "subagent_delegation_disabled",
                 "当前 Agent 的委托策略（DelegationPolicy）默认关闭子 agent 派发权限。",
@@ -490,20 +569,18 @@ def _load_registry_payload(registry_loader: Callable[[], Mapping[str, Any]] | No
 
 def _descriptors_from_registry(payload: Mapping[str, Any]) -> tuple[_RegistryDescriptor, ...]:
     descriptors: list[_RegistryDescriptor] = []
-    for item in payload.get("descriptors") or []:
-        if not isinstance(item, Mapping):
-            continue
-        name = str(item.get("name") or "").strip()
+    for item in _mapping_items(payload.get("descriptors")):
+        name = _coerce_text(item.get("name")).strip()
         if not name:
             continue
         descriptors.append(
             _RegistryDescriptor(
                 name=name,
-                enabled=bool(item.get("enabled")),
-                capabilities=tuple(str(value or "").strip() for value in item.get("capabilities") or [] if str(value or "").strip()),
-                risk=str(item.get("risk") or "read").strip() or "read",
-                approval=str(item.get("approval") or "never").strip() or "never",
-                aliases=tuple(str(value or "").strip() for value in item.get("aliases") or [] if str(value or "").strip()),
+                enabled=_coerce_bool(item.get("enabled"), False),
+                capabilities=tuple(_coerce_str_list(item.get("capabilities"))),
+                risk=_coerce_text(item.get("risk") or "read").strip() or "read",
+                approval=_coerce_text(item.get("approval") or "never").strip() or "never",
+                aliases=tuple(_coerce_str_list(item.get("aliases"))),
             )
         )
     return tuple(descriptors)
@@ -512,30 +589,37 @@ def _descriptors_from_registry(payload: Mapping[str, Any]) -> tuple[_RegistryDes
 def _role_policy_projection(*, agent: Mapping[str, Any], raw_policy: Any, registered_names: Sequence[str]):
     from core.web.services import agent_role_tool_profile_service
 
+    metadata = _as_mapping(agent.get("metadata"))
+    policy = _as_mapping(raw_policy)
+    role_key = _coerce_text(agent.get("roleKey")).strip()
+    primary_mode = _coerce_text(agent.get("primaryMode")).strip()
+    policy_id = (
+        _coerce_text(policy.get("policyId") or policy.get("id")).strip()
+        or f"tool-{_coerce_text(agent.get('agentId') or 'agent').strip()}"
+    )
     role_policy = agent_role_tool_profile_service.resolve_role_tool_policy_v2(
-        role_key=str(agent.get("roleKey") or "").strip(),
-        primary_mode=str(agent.get("primaryMode") or "").strip(),
-        metadata=dict(agent.get("metadata") or {}) if isinstance(agent.get("metadata"), Mapping) else {},
-        policy_id=str(
-            (raw_policy or {}).get("policyId") if isinstance(raw_policy, Mapping) else ""
-        ).strip()
-        or f"tool-{str(agent.get('agentId') or 'agent').strip()}",
+        role_key=role_key,
+        primary_mode=primary_mode,
+        metadata=metadata,
+        policy_id=policy_id,
         registered_tool_names=registered_names,
     )
     if role_policy is not None and agent_role_tool_profile_service.role_has_explicit_tool_profile(
-        str(agent.get("roleKey") or "").strip(),
-        primary_mode=str(agent.get("primaryMode") or "").strip(),
-        metadata=dict(agent.get("metadata") or {}) if isinstance(agent.get("metadata"), Mapping) else {},
+        role_key,
+        primary_mode=primary_mode,
+        metadata=metadata,
     ):
         return role_policy
     return normalize_legacy_tool_policy(
-        raw_policy,
+        raw_policy if isinstance(raw_policy, Mapping) else policy or None,
         registered_tool_names=registered_names,
     )
 
 
 def _turn_source(runtime: Mapping[str, Any], agent: Mapping[str, Any]) -> str:
-    mode = str(agent.get("primaryMode") or runtime.get("primaryMode") or runtime.get("mode") or "").strip().lower()
+    mode = _coerce_text(
+        agent.get("primaryMode") or runtime.get("primaryMode") or runtime.get("mode")
+    ).strip().lower()
     if runtime.get("roomId") or runtime.get("roundId"):
         return "team"
     if mode == "research":

@@ -17,8 +17,17 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from config.effective_llm_graph import EffectiveLLMGraphBuilder, LLMGraphError
+from config.llm_canonical_schema import (
+    CanonicalLLMConfigError,
+    validate_canonical_llm_payload,
+)
 from config.llm_credentials import canonicalize_credential_ref, resolve_credential_ref
-from config.llm_identity import make_model_key, make_model_ref, normalize_provider_endpoint
+from config.llm_identity import (
+    make_model_key,
+    make_model_ref,
+    normalize_provider_endpoint,
+)
 from config.llm_provider_registry import suggest_provider_id
 from config.llm_security import validate_llm_public_config
 from config.paths import resolve_config_backup_dir
@@ -39,13 +48,15 @@ from core.web.services.model_reference_service import (
     scan_model_references,
 )
 
-
 _PREVIEW_TTL_SECONDS = 15 * 60
 _PREVIEW_LIMIT = 32
 _PREVIEWS: dict[str, tuple[float, "ModelConfigMigrationPreview"]] = {}
 _PROCESS_HMAC_KEY = os.urandom(32)
 _ARTIFACT_SUFFIXES = (".gguf", ".safetensors", ".bin")
 _WINDOWS_ABSOLUTE_RE = re.compile(r"^[A-Za-z]:[\\/]")
+_INTERACTION_CONTRACT_VALUES = frozenset(
+    {"basic_chat", "tool_chat", "reasoning_chat", "responses_agent"}
+)
 
 
 @dataclass(frozen=True)
@@ -58,6 +69,8 @@ class ModelConfigMigrationPreview:
     reference_impact: dict[str, Any]
     conflicts: tuple[dict[str, Any], ...]
     proposed_public_config: dict[str, Any] = field(repr=False)
+    migration_summary: dict[str, Any]
+    rollback_plan_id: str
 
 
 @dataclass(frozen=True)
@@ -152,13 +165,21 @@ def _model_payload(entry: dict[str, Any], upstream_id: str) -> dict[str, Any]:
     ):
         if source in entry:
             defaults[target] = copy.deepcopy(entry[source])
+    legacy_protocol = str(entry.get("protocol") or "").strip().lower()
+    interaction_contracts = {"basic_chat", "tool_chat", "reasoning_chat", "responses_agent"}
+    interaction_contract = (
+        legacy_protocol
+        if legacy_protocol in interaction_contracts
+        else str(entry.get("contract") or "tool_chat")
+    )
+    model_protocol = "" if legacy_protocol in interaction_contracts else legacy_protocol
     payload: dict[str, Any] = {
         "upstream_id": upstream_id,
         "label": str(entry.get("label") or upstream_id),
         "enabled": True,
         "wire_protocol": str(entry.get("transport") or "chat_completions"),
-        "interaction_contract": str(entry.get("contract") or "tool_chat"),
-        "model_protocol": str(entry.get("protocol") or ""),
+        "interaction_contract": interaction_contract,
+        "model_protocol": model_protocol,
         "compatibility": copy.deepcopy(entry.get("compat") or {}),
         "defaults": defaults,
     }
@@ -285,6 +306,26 @@ def preview_v1_to_v2(
     )
 
     conflicts: list[dict[str, Any]] = []
+    typo_fields = {"protcols", "wire_protcol", "overides", "service_clas"}
+    for model_id, raw_entry in library.items():
+        if not isinstance(raw_entry, dict):
+            continue
+        for field_name in sorted(set(raw_entry).intersection(typo_fields)):
+            conflicts.append(
+                {
+                    "code": "unknown_legacy_field",
+                    "path": f"llm.model_library.{model_id}.{field_name}",
+                }
+            )
+        raw_provider = raw_entry.get("provider")
+        if isinstance(raw_provider, dict):
+            for field_name in sorted(set(raw_provider).intersection(typo_fields)):
+                conflicts.append(
+                    {
+                        "code": "unknown_legacy_field",
+                        "path": f"llm.model_library.{model_id}.provider.{field_name}",
+                    }
+                )
     grouped: dict[
         tuple[str, str],
         list[tuple[str, dict[str, Any], dict[str, Any], str, str, str, str]],
@@ -505,6 +546,19 @@ def preview_v1_to_v2(
     )
     preview_id = "preview-" + hashlib.sha256(stable_payload.encode("utf-8")).hexdigest()[:24]
     blocking = [item for item in conflicts if item.get("severity") != "suggestion"]
+    before_summary = {
+        "providers": len(library),
+        "models": len(library),
+        "profiles": len(llm.get("profiles") or {}) if isinstance(llm.get("profiles"), dict) else 0,
+    }
+    after_summary = {
+        "providers": len(provider_registry),
+        "models": sum(len(provider.get("models") or {}) for provider in provider_registry.values()),
+        "profiles": len(proposed_llm.get("profiles") or {}) if isinstance(proposed_llm.get("profiles"), dict) else 0,
+    }
+    rollback_plan_id = "rollback-plan-" + hashlib.sha256(
+        f"{preview_id}\0{base_hash}".encode("utf-8")
+    ).hexdigest()[:24]
     preview = ModelConfigMigrationPreview(
         preview_id=preview_id,
         base_hash=base_hash,
@@ -514,6 +568,166 @@ def preview_v1_to_v2(
         reference_impact=_reference_impact(model_ref_map, source, Path(project_root)),
         conflicts=tuple(conflicts),
         proposed_public_config=proposed,
+        migration_summary={
+            "before": before_summary,
+            "after": after_summary,
+            "blockingIssueCount": len(blocking),
+        },
+        rollback_plan_id=rollback_plan_id,
+    )
+    now = time.monotonic()
+    _purge_expired_previews(now)
+    _PREVIEWS[preview_id] = (now + _PREVIEW_TTL_SECONDS, preview)
+    return preview
+
+
+def preview_v2_canonical_repair(
+    public_config: dict[str, Any],
+    *,
+    project_root: Path | str,
+    model_ref_map: dict[str, str],
+) -> ModelConfigMigrationPreview:
+    """Preview a strict, transactional repair of an existing schema v2 config.
+
+    The caller supplies explicit legacy-id to canonical-model-ref mappings so an
+    ambiguous provider choice is never inferred from a model name alone.
+    """
+
+    source = copy.deepcopy(public_config)
+    llm = source.get("llm") if isinstance(source, dict) else None
+    if not isinstance(llm, dict) or int(llm.get("schema_version") or 1) != 2:
+        raise ValueError("canonical repair preview requires llm schema v2")
+
+    proposed = copy.deepcopy(source)
+    proposed_llm = proposed["llm"]
+    conflicts: list[dict[str, Any]] = []
+    protocol_field_repairs = 0
+    providers = proposed_llm.get("providers")
+    if not isinstance(providers, dict):
+        conflicts.append({"code": "provider_registry_missing", "path": "llm.providers"})
+        providers = {}
+
+    canonical_refs: set[str] = set()
+    for provider_id, provider in sorted(providers.items(), key=lambda item: str(item[0])):
+        if not isinstance(provider, dict):
+            continue
+        models = provider.get("models")
+        if not isinstance(models, dict):
+            continue
+        for model_key, model in sorted(models.items(), key=lambda item: str(item[0])):
+            canonical_ref = make_model_ref(str(provider_id), str(model_key))
+            canonical_refs.add(canonical_ref)
+            if not isinstance(model, dict):
+                continue
+            model_protocol = str(model.get("model_protocol") or "").strip()
+            if model_protocol not in _INTERACTION_CONTRACT_VALUES:
+                continue
+            path = f"llm.providers.{provider_id}.models.{model_key}"
+            interaction_contract = str(model.get("interaction_contract") or "").strip()
+            if interaction_contract and interaction_contract != model_protocol:
+                conflicts.append(
+                    {
+                        "code": "interaction_contract_conflict",
+                        "path": path,
+                        "modelProtocol": model_protocol,
+                        "interactionContract": interaction_contract,
+                    }
+                )
+                continue
+            model["interaction_contract"] = model_protocol
+            model["model_protocol"] = ""
+            protocol_field_repairs += 1
+
+    normalized_mapping: dict[str, str] = {}
+    for legacy_id, target_ref in sorted(model_ref_map.items(), key=lambda item: str(item[0])):
+        legacy = str(legacy_id or "").strip()
+        target = str(target_ref or "").strip()
+        if not legacy or not target:
+            conflicts.append({"code": "invalid_model_ref_mapping", "modelId": legacy})
+            continue
+        if target not in canonical_refs:
+            conflicts.append(
+                {
+                    "code": "model_ref_target_not_found",
+                    "modelId": legacy,
+                    "targetModelRef": target,
+                }
+            )
+            continue
+        normalized_mapping[legacy] = target
+
+    blocking = [item for item in conflicts if item.get("severity") != "suggestion"]
+    if not blocking:
+        try:
+            canonical = validate_canonical_llm_payload(proposed_llm)
+            EffectiveLLMGraphBuilder().build(canonical)
+            build_effective_config(proposed)
+            validate_llm_public_config(proposed)
+        except CanonicalLLMConfigError as exc:
+            conflicts.extend(
+                {
+                    "code": issue.code,
+                    "path": f"llm.{issue.path}" if issue.path else "llm",
+                    "message": issue.message,
+                }
+                for issue in exc.issues
+            )
+        except LLMGraphError as exc:
+            conflicts.extend(
+                {
+                    "code": issue.code,
+                    "subjectRef": issue.subject_ref,
+                    "message": issue.message,
+                }
+                for issue in exc.issues
+            )
+        except ValueError as exc:
+            conflicts.append(
+                {
+                    "code": "canonical_validation_failed",
+                    "errorType": type(exc).__name__,
+                }
+            )
+
+    reference_impact = _reference_impact(normalized_mapping, source, Path(project_root))
+    blocking = [item for item in conflicts if item.get("severity") != "suggestion"]
+    base_hash = public_config_hash(source)
+    stable_payload = json.dumps(
+        {
+            "baseHash": base_hash,
+            "mapping": normalized_mapping,
+            "protocolFieldRepairs": protocol_field_repairs,
+            "conflicts": conflicts,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    preview_id = "preview-v2-repair-" + hashlib.sha256(stable_payload.encode("utf-8")).hexdigest()[:24]
+    rollback_plan_id = "rollback-plan-" + hashlib.sha256(
+        f"{preview_id}\0{base_hash}".encode("utf-8")
+    ).hexdigest()[:24]
+    preview = ModelConfigMigrationPreview(
+        preview_id=preview_id,
+        base_hash=base_hash,
+        status="NEEDS_REVIEW" if blocking else "READY",
+        providers=tuple(
+            {
+                "provider_id": str(provider_id),
+                "model_count": len(provider.get("models") or {}) if isinstance(provider, dict) else 0,
+            }
+            for provider_id, provider in sorted(providers.items(), key=lambda item: str(item[0]))
+        ),
+        model_ref_map=normalized_mapping,
+        reference_impact=reference_impact,
+        conflicts=tuple(conflicts),
+        proposed_public_config=proposed,
+        migration_summary={
+            "protocolFieldRepairCount": protocol_field_repairs,
+            "referenceRewriteCount": reference_impact["liveReferenceCount"],
+            "blockingIssueCount": len(blocking),
+        },
+        rollback_plan_id=rollback_plan_id,
     )
     now = time.monotonic()
     _purge_expired_previews(now)
@@ -683,6 +897,23 @@ def apply_v1_to_v2(
             raise
 
 
+def apply_v2_canonical_repair(
+    preview_id: str,
+    *,
+    expected_base_hash: str,
+    config_path: Path | str,
+    project_root: Path | str,
+) -> dict[str, Any]:
+    """Apply a READY schema v2 repair using the shared transactional writer."""
+
+    return apply_v1_to_v2(
+        preview_id,
+        expected_base_hash=expected_base_hash,
+        config_path=config_path,
+        project_root=project_root,
+    )
+
+
 def rollback_v1_to_v2(
     migration_id: str,
     *,
@@ -741,12 +972,32 @@ def rollback_v1_to_v2(
     }
 
 
+def rollback_v2_canonical_repair(
+    migration_id: str,
+    *,
+    config_path: Path | str,
+    project_root: Path | str,
+    expected_current_hash: str = "",
+) -> dict[str, Any]:
+    """Roll back a schema v2 repair from its verified whole-file backups."""
+
+    return rollback_v1_to_v2(
+        migration_id,
+        config_path=config_path,
+        project_root=project_root,
+        expected_current_hash=expected_current_hash,
+    )
+
+
 __all__ = [
     "ArtifactResolution",
     "ModelConfigMigrationPreview",
     "ModelConfigMigrationRollbackError",
     "apply_v1_to_v2",
+    "apply_v2_canonical_repair",
     "normalize_legacy_service_root",
     "preview_v1_to_v2",
+    "preview_v2_canonical_repair",
     "rollback_v1_to_v2",
+    "rollback_v2_canonical_repair",
 ]

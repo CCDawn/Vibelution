@@ -240,7 +240,7 @@ Outcome 必须结合 mode 解释，每个组合只对应一个恢复动作：
 | `verify-manifest` | `claim_conflict` | manifest claim 已失效、缺失或不覆盖当前 changed files；修正或续期本任务 claim 后重跑 closeout |
 | `verify-manifest` | `dirty_worktree` | task worktree 在 closeout 后出现改动；提交或撤回本任务内容，使 worktree clean 后重跑 closeout |
 
-质量门只生成或复核证据，不执行 merge、claim release、junction/worktree/branch 删除。冲突和 `stale_main` 都回 task worktree 处理；root local `main` 仅在 clean 且 SHA 仍匹配时执行 `git merge --ff-only <task-branch>`，随后做最小 post-merge verification，并只清理本任务资源。
+质量门只生成或复核合入前证据，不执行 merge、claim release、junction/worktree/branch 删除。冲突和 `stale_main` 都回 task worktree 处理；root local `main` 仅在 clean 且 SHA 仍匹配、所有验证已闭合时执行 `git merge --ff-only <task-branch>`。merge 成功后不等待 post-merge verification，立即清理可证明属于本任务的临时内容、claim、junction、干净 worktree 和已合并本地 branch；清理后的状态检查只证明吸收和资源收口。
 
 ### 3.7 使用服务器分布式测试
 

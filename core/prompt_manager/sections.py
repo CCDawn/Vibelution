@@ -12,6 +12,7 @@ import re
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any, List
+from vibelution_storage import resolve_project_workspace_home
 
 from core.prompt_manager.core_prompt_sources import (
     CORE_PROMPT_NAMES,
@@ -299,7 +300,7 @@ def make_codebase_map_section(
 
 def make_git_rules_section(project_root: Path) -> SystemPromptSection:
     """Git 提交规则摘要 — 从工作流文档提炼运行时提醒。"""
-    workflow_path = project_root / "workspace" / "prompts" / "GIT_WORKFLOW.md"
+    workflow_path = resolve_project_workspace_home(project_root) / "prompts" / "GIT_WORKFLOW.md"
 
     def compute() -> Optional[str]:
         try:
@@ -592,7 +593,7 @@ def make_session_child_routing_section() -> SystemPromptSection:
             "- 当前会话承载一个主线目标；当用户提出明显独立的新事项、并行事项或会把当前主线搅混的任务时，先把它视为候选子对话。\n"
             "- 若新事项与当前主线关系不确定，先向用户提出一个简短确认问题；只有当前工具集中实际可见 `create_child_session_tool`，且用户明确允许拆分时，才创建同一 Agent 的子对话。\n"
             "- 创建子对话时携带完整 user_request、清晰 task_title、split_reason，以及真正有用的 inherited_facts/relevant_files/relevant_logs/constraints；不要搬运整段无关历史。\n"
-            "- 默认 `auto_start=true`，让子对话创建后自动开始；默认 `switch_to_child=true`，让用户能进入子对话查看独立工作流。\n"
+            "- 默认 `auto_start=true`，让子对话创建后自动开始；默认 `switch_to_child=false`，子对话在后台推进，不抢走正在看的父会话。\n"
             "- 子对话只做一层；如果当前已经在子对话中又出现新的独立事项，仍创建到 root 会话下，作为兄弟子对话。\n"
             "- 不要为普通追问、同一任务的小步骤、测试验证、实现细节或用户明确要求继续当前主线的内容创建子对话。\n"
             "- 需要汇报多事项状态或避免重复拆分时，只有当前工具集中实际可见 `list_child_sessions_tool`，才查看当前 root 下已有子对话。\n"

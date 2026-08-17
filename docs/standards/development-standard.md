@@ -14,7 +14,7 @@ This standard is written for every in-project Agent working on Vibelution. It de
 - `docs/agents/worktree-collaboration.md` is the detailed multi-Agent worktree protocol.
 - `docs/agents/domain.md` defines domain vocabulary. Use it for product and architecture language.
 - `docs/adr/` records major design decisions and why they exist.
-- `.docs/project-memory/` is the structured current-state memory and Agent territory registry.
+- External project `memory/` is the durable cross-session projection; resolve it with `python scripts/migrate_project_storage.py inventory`. Live Agent territory/claim state is under the Git common dir. Legacy `.docs/project-memory/` is read-only migration input.
 
 If a task worktree does not contain `AGENTS.md`, read this file directly before development. If these sources conflict, do not silently pick one. Stop, identify the conflict, and update the relevant source in the same governance round.
 
@@ -62,7 +62,7 @@ Use the lightest tier that protects the user, the repository, and concurrent wor
 | Tier | Use when | Required workflow | Validation and closeout |
 | --- | --- | --- | --- |
 | `FAST_PATCH` | Single-surface, reversible, low-risk work such as copy, docs, rule wording, tiny UI style/layout polish, small tests, focused read-only review, or a mechanical helper change. No data migration, API contract, deletion, permissions, runtime lifecycle, release, or shared DTO impact. | Use a task worktree and `codex/<task-slug>` branch exactly like every other write. `FAST_PATCH` only reduces planning and validation weight; it never permits direct writes or commits on `main`. BRT can be silent/micro. No planning/task-splitting/memory sync by default. Hot-file edits need active-claim review, narrow scope, scoped staging, and stronger final evidence. | Run the smallest useful check, or state why no executable check is useful. Review `git status` and the current diff. Commit the task branch, then integrate with `git merge --ff-only` when the merge gates pass. Report refresh/memory/version as `not affected` when true. |
-| `STANDARD_TASK` | Normal feature or bug work, multi-file UI changes, user-visible behavior, component extraction, backend route/service changes, or changes that need focused tests to be trustworthy. | Use a task worktree by default. Run BRT in micro/align mode, claim relevant scopes in multi-session work, and reuse project-native patterns. | Run focused tests and any required build/typecheck for the affected surface. Make a Launcher refresh decision. Commit or explicitly hand off not-ready work. Update or propose project memory when the task changes durable project state. |
+| `STANDARD_TASK` | Normal feature or bug work, multi-file UI changes, user-visible behavior, component extraction, backend route/service changes, or changes that need focused tests to be trustworthy. | Use a task worktree by default. Run BRT in micro/align mode, claim relevant scopes in multi-session work, and reuse project-native patterns. | Run focused tests and any required build/typecheck for the affected surface. Make a Launcher refresh decision. Self-review the current-task diff, then merge with `git merge --ff-only` when the merge gates pass, or report an exact blocker. Waiting for the user to request review or merge is not done. Update or propose project memory when the task changes durable project state. |
 | `HIGH_RISK` | Work touching data loss, archive/delete/reset, permissions, secrets, persistence, migrations, public API/DTO contracts, runtime/Launcher lifecycle, LLM/tool routing, memory/RAG, release/versioning, cross-lane coordination, remote publication, or shared hot files. | Full flow: BRT, root-cause or source-of-truth reasoning, explicit guard/claim decision, isolated worktree, plan when useful, no destructive action without explicit confirmation. Remote push/PR/publication may proceed only after the remote sync gate passes. | Add or update tests/logging evidence, run broad enough validation, handle refresh and memory explicitly, judge version impact, self-review diff, and close the claim with evidence. |
 
 Upgrade the tier when evidence shows hidden risk. Downgrade when the remaining process would only create delay without improving correctness, safety, or handoff quality.
@@ -105,7 +105,7 @@ For non-trivial state, config, lifecycle, cache, registry, memory, or generated-
 
 If the table cannot be filled in, the design is not ready for implementation.
 
-Dual writes, compatibility aliases, copied defaults, duplicated lifecycle status, and parallel registries are temporary migration scaffolding only. They require an explicit owner, expiry or removal trigger, validation evidence, and cleanup plan before stable merge.
+Dual writes, compatibility aliases, copied defaults, duplicated lifecycle status, and parallel registries are temporary migration scaffolding only. They require an explicit owner, expiry or removal trigger, validation evidence, and cleanup plan before stable merge. Active cross-domain compat retirement is tracked in [compat SSOT closeout plan](../plans/2026-08-16-compat-ssot-closeout-plan.md).
 
 Validation anchor: changes must prove that writes go to the canonical source, derived views refresh from it, stale derived data cannot override it, and old sources cannot silently become active again.
 
@@ -128,14 +128,14 @@ Validation anchor: user-visible or debugging-critical fallback behavior needs te
 
 For bugs, regressions, stalls, runtime mismatches, failed commands, unexpected behavior, bad delegation, repeated tool loops, or broken convergence, start from the newest relevant lifecycle log package under:
 
-`logs/runtime_scenes/`
+`<active-logs>/runtime_scenes/` (resolve `activePaths.logs` with the storage inventory command)
 
 Use the newest package matching the affected run or workbench lifecycle as the primary evidence unit. Start from its manifest or package index, then inspect:
 
 - `timeline.jsonl`;
 - `lifecycle.jsonl`;
 - child logs under `raw/`, `conversations/`, `agent/`, and `artifacts/`;
-- fallback evidence under `logs/`;
+- fallback evidence under `<active-logs>/`;
 - `log_info/conversation_*.jsonl`;
 - matching `log_info/debug_*.log`;
 - adjacent validation outputs.
@@ -177,7 +177,7 @@ Add or update runtime scene logging when a change affects:
 - Gym promotion;
 - error handling.
 
-New logs should normally write into the current lifecycle package under `logs/runtime_scenes/` through existing helpers.
+New logs should normally write into the current lifecycle package under `<active-logs>/runtime_scenes/` through existing helpers.
 
 Each new feature should add or update the smallest useful automated tests protecting the behavior and logging contract. Cover the primary success path and at least one important failure or boundary path.
 
@@ -205,7 +205,7 @@ The root workspace:
 
 `<project-root>`
 
-is the local `main` integration workspace. It is for syncing, fast-forward merging, final validation, reviewed publication, and remote sync. Every source, test, documentation, rule, memory, configuration, and `FAST_PATCH` write belongs in a task worktree. Direct writes and commits on `main` are forbidden; `main` must remain clean except for the transient state of an explicit merge operation.
+is the local `main` integration workspace. It is for syncing, fast-forward merging, merge-result inspection, reviewed publication, and remote sync. All validation must finish before merge. Every source, test, documentation, rule, memory, configuration, and `FAST_PATCH` write belongs in a task worktree. Direct writes and commits on `main` are forbidden; `main` must remain clean except for the transient state of an explicit merge operation.
 
 This root path is the durable local development-main checkout and must stay checked out on branch `main`. Do not leave `<project-root>` on a task branch, unresolved merge, or long-lived dirty experiment. If root is found on a non-main branch, first preserve or migrate that branch's dirty work into `<project-root>\.worktrees\<task-slug>` or a named stash, then restore root to `main` before continuing normal development or integration. A separate `main` worktree may be used only as a short-lived recovery exception while root is blocked, and it should be retired once root has been restored.
 
@@ -233,17 +233,17 @@ git worktree add .worktrees/<task-slug> -b codex/<task-slug> main
 Before editing hot files, shared scopes, or any `STANDARD_TASK` / `HIGH_RISK` work in a multi-session project, use the project memory guard to inspect active work and, when needed, reserve a narrow write scope:
 
 ```powershell
-python "<codex-skill-root>\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "<project-root>" status
-python "<codex-skill-root>\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "<project-root>" check --lane "<lane-id>" --scope "<write-scope>" --scope "<second-write-scope>"
-python "<codex-skill-root>\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "<project-root>" claim --lane "<lane-id>" --scope "<write-scope>" --agent "<agent-id>" --task "<task title>" --ttl-minutes 120 --note "<scope and validation note>"
-python "<codex-skill-root>\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "<project-root>" release --claim-id "<claim-id>" --status completed --reason "<validation or blocker summary>"
+python "<codex-skill-root>\briefbound-project-memory\scripts\agent_coordination.py" "<project-root>" status --json
+python "<codex-skill-root>\briefbound-project-memory\scripts\agent_coordination.py" "<project-root>" preflight --agent-id "<agent-id>" --scope "<write-scope>" --scope "<second-write-scope>" --write-kind development --json
+python "<codex-skill-root>\briefbound-project-memory\scripts\agent_coordination.py" "<project-root>" claim --lane "<lane-id>" --scope "<write-scope>" --agent-id "<agent-id>" --task "<task title>" --ttl-minutes 120 --note "<scope and validation note>" --json
+python "<codex-skill-root>\briefbound-project-memory\scripts\agent_coordination.py" "<project-root>" release --claim-id "<claim-id>" --status completed --reason "<validation or blocker summary>" --json
 ```
 
 If a scope hits an active claim, coordinate with the owner, choose a non-overlapping slice, or make an explicit main-integration decision and record the reason. Hotspot status alone is not a stop sign, but it raises the review, validation, scoped staging, and reconciliation burden.
 
 One Agent should bind to one active task worktree at a time. Do not reuse an old task worktree for a new goal.
 
-The lightweight guard command vocabulary is `status`, `check`, `claim`, `activate`, `release`, and `prune`. Historical registry or merge-queue records may still use states such as `ready_for_merge`, `merged_to_main`, `local_applied`, `blocked`, or `cancelled`; treat those as queue semantics, not guard subcommands.
+The lightweight guard command vocabulary includes `status`, `preflight`, `check`, `claim`, `activate`, `release`, and `prune`. Historical registry or merge-queue records may still use states such as `ready_for_merge`, `merged_to_main`, `local_applied`, `blocked`, or `cancelled`; treat those as queue semantics, not guard subcommands.
 
 For `STANDARD_TASK` and `HIGH_RISK`, the Agent that implements a task owns the full local development loop by default: self-review the diff, run the scoped validation, commit the task branch, decide whether the merge gate is satisfied, and either merge the task into local `main` or explicitly hand off a ready/blocked queue state with the reason. Do not treat implementation as complete merely because a worktree commit exists.
 
@@ -255,8 +255,8 @@ Treat these as shared hot files. They may be edited, but require active-claim re
 
 - `AGENTS.md`;
 - `docs/standards/development-standard.md`;
-- `.docs/project-memory/**`;
-- `PROJECT_MEMORY.html`;
+- resolved external `<active-memory>/**`;
+- live Git common-dir coordination registry;
 - `agent.py`;
 - `core/web/app.py`;
 - `core/web/services/session_service.py`;
@@ -325,7 +325,7 @@ Required patterns:
 Diagnosis and closure:
 
 - Terminal-popup issues during startup are Launcher/runtime lifecycle bugs until proven otherwise.
-- Inspect parent/child command lines, visible window titles, `.runtime/launcher/state.json`, runtime-manager events, and short-lived terminal hosts in the product-owned tree—not global IDE/Codex process noise.
+- Inspect parent/child command lines, visible window titles, `<active-runtime>/launcher/state.json`, runtime-manager events, and short-lived terminal hosts in the product-owned tree—not global IDE/Codex process noise.
 - Closure requires live evidence that the user action no longer creates visible consoles, plus focused tests (source/AST locks for naked Git subprocesses, no-console helper behavior, or control-signature freshness).
 - Exception: user-explicit interactive surfaces only (Workbench CLI terminal panel, operator-opened shell). Those must not auto-resume stale terminals on page restore or Launcher startup.
 
@@ -584,7 +584,7 @@ powershell -ExecutionPolicy Bypass -File "<project-root>\scripts\vibelution_laun
 python scripts/vibelution_launcher.py --action restart --no-browser
 ```
 
-The Launcher control plane and managed Workbench are separate. `-Action launcher` opens only `http://127.0.0.1:8765/launcher`. Workbench remains `http://127.0.0.1:8000` unless config overrides apply.
+The Launcher control plane and managed Workbench are separate. `-Action launcher` opens only the Launcher control surface. Workbench defaults to port `8000`, but the live listen port is whatever `scripts/vibelution_desktop_entry.py --action resolve-workbench` returns when run from the Launcher checkout (`VIBELUTION_PORT` / `AGENT_WORKBENCH_BACKEND_PORT` → `.runtime/launcher/ports.json` → `[workbench].backend_port`). A closed `:8000` does not mean Workbench is down. Do not resolve the URL from a task worktree; that copy has no live `ports.json` and will fall back to `8000`.
 
 Stopping Workbench must preserve Launcher control unless the user explicitly asks to shut down Launcher itself.
 
@@ -629,7 +629,7 @@ Commit messages should be concise, scoped, and behavior-oriented. Prefer prefixe
 - `docs: ...`;
 - `chore: ...`.
 
-After implementation and validation in a task worktree, the owning Agent should self-review and close the local loop. This is the default expectation for every development session: do not hand off routine PR review, scoped validation, local commit, or local `main` merge merely because a separate main integration session exists. A task Agent should first try to finish its own local review-and-merge cycle when the merge gates below pass.
+After implementation and validation in a task worktree, the owning Agent should self-review and close the local loop. This is the default expectation for every development session: do not hand off routine PR review, scoped validation, local commit, or local `main` merge merely because a separate main integration session exists, and do not wait for the user to request review or merge. A task Agent should first try to finish its own local review-and-merge cycle when the merge gates below pass.
 
 `FAST_PATCH` work must also be committed in its task worktree. It may use compact diff review and scoped validation, but it still enters local `main` only through a reviewed `git merge --ff-only` when all merge gates pass:
 
@@ -643,14 +643,14 @@ After implementation and validation in a task worktree, the owning Agent should 
 - the user did not ask to stop before merge, keep work isolated, or hand off only;
 - any post-merge remote sync uses the remote sync gate in section 14.
 
-When the gates pass, merge one task at a time into root local `main` with `git merge --ff-only <task-branch>`, run the smallest useful post-merge validation or state why docs-only/rule-only/`FAST_PATCH` validation is sufficient, then close only that task's claim and remove only that task's junction (when present), worktree, and branch. The gate supplies evidence for this sequence but does not execute merge, release, or cleanup.
+When the gates pass, merge one task at a time into root local `main` with `git merge --ff-only <task-branch>`. All review, testing, quality gates, mergeability checks, and acceptance evidence must already be complete before this command. A successful fast-forward merge immediately triggers bounded task cleanup: remove only provably task-owned temporary content and background processes/listeners, close only that task's claim, and remove only that task's junction (when present), clean worktree, and merged local branch. Do not run or wait for post-merge validation before cleanup. The gate supplies pre-merge evidence but does not execute merge, release, or cleanup.
 
 Direct development on `main` is a policy violation even when the change is small or reversible. If `main` becomes dirty outside an active merge, stop and identify the owner; do not continue editing, commit directly, or bypass the pre-commit guard. Move the change into a task worktree, then return to `main` only for the serialized fast-forward merge.
 
 When any gate fails, do not force the merge. `stale_main` and routine small conflicts inside the owning Agent's claimed scope return to the task worktree: merge the latest local `main` there, resolve conflicts, commit, and rerun `closeout`. Wait for a main integration session only for large conflicts, cross-lane conflicts, shared DTO/projection conflicts, hot-file conflicts with active claims, release/version conflicts, unclear semantic conflicts, or user-designated integration work. Close the lightweight guard claim as blocked, or create a separate ready/blocked queue handoff in the project memory lane if integration must happen later:
 
 ```powershell
-python "<codex-skill-root>\ccdawn-dawn-agent-html-memory\scripts\agent_work_guard.py" "<project-root>" release --claim-id "<claim-id>" --status blocked --reason "<failed merge gate, validation, or conflict summary>"
+python "<codex-skill-root>\briefbound-project-memory\scripts\agent_coordination.py" "<project-root>" release --claim-id "<claim-id>" --status blocked --reason "<failed merge gate, validation, or conflict summary>" --json
 ```
 
 Self-merge may be followed by push, PR creation, `workflow_dispatch`, or publication when the remote sync gate passes, but remote push is not part of the default local closeout. Remote branch deletion, force/overwrite, and treating `origin/main` as authority to reset local `main` remain destructive choices and require explicit confirmation.
@@ -725,13 +725,13 @@ Task handoff must include version bump recommendation, capability domain, user-v
 
 ## 16. Mainline Integration
 
-Task-owning Agents should self-review and self-merge by default when the merge gates in section 13 pass. The mandatory local sequence is: branch from current local `main`; perform every write and commit in the task worktree; run the staged-path-driven light gate and claim-bound `closeout`; verify the manifest immediately before integration; confirm root `main` is clean and unchanged; run `git merge --ff-only <task-branch>` in root `main`; run minimal post-merge verification; then release and remove only the current task's resources. A mainline integration session is a fallback and serialization owner, not a direct-development workspace. It is still responsible for queued, cross-lane, large-conflict, release-sensitive, or user-designated integration work:
+Task-owning Agents should self-review and self-merge by default when the merge gates in section 13 pass. Waiting for the user to request review or merge is not done. The mandatory local sequence is: branch from current local `main`; perform every write and commit in the task worktree; complete all review, validation, staged-path light gates, claim-bound `closeout`, and acceptance evidence; verify the manifest immediately before integration; confirm root `main` is clean and unchanged; run `git merge --ff-only <task-branch>` in root `main`; then immediately release and remove only the current task's resources. A mainline integration session is a fallback and serialization owner, not a direct-development workspace. It is still responsible for queued, cross-lane, large-conflict, release-sensitive, or user-designated integration work:
 
 - keeping local `main` clean before each merge;
 - reviewing claim status and write scopes;
 - merging only `ready_for_merge` claims when the owning Agent cannot safely self-merge;
 - merging one task at a time;
-- running targeted validation after each merge;
+- confirming each fast-forward merge succeeded and the target contains the task tip, without treating that inspection as product validation;
 - handling conflicts or returning them to the owning worktree;
 - closing lightweight guard claims with `release`;
 - cleaning successfully merged worktrees;
@@ -740,7 +740,9 @@ Task-owning Agents should self-review and self-merge by default when the merge g
 
 If a branch cannot merge cleanly, leave it in its own worktree and mark it blocked with the conflicting files and next action.
 
-The quality gate does not merge, release claims, or delete resources. Cleanup is task-owned and bounded (`只清理本任务`): release only the current task claim; remove only its junction if one was created; remove only its clean worktree; then delete only its merged task branch. Never delete or reuse another unfinished task's branch, worktree, junction, or claim. As each task closes itself, the worktree inventory naturally converges to the durable root `main` only; do not achieve that appearance by deleting unfinished work.
+The quality gate does not merge, release claims, or delete resources. Cleanup is immediate after a successful local merge, task-owned, and bounded (`只清理本任务`): remove only provably task-owned disposable files/directories, debug output, scratch artifacts, and background processes/listeners; release only the current task claim; remove only its junction if one was created; remove only its clean worktree; then delete only its merged task branch and safely prune stale worktree metadata. Never delay this sequence for post-merge validation. Never delete or reuse another unfinished task's branch, worktree, junction, claim, process, or content. As each task closes itself, the worktree inventory naturally converges to the durable root `main` only; do not achieve that appearance by deleting unfinished work.
+
+Cleanup uses exact paths and proven ownership, never broad scans, `git clean -fdx`, force deletion, or guesses. If cleanup cannot finish safely, report `cleanup pending` with the exact residue and reason; retain unclear, dirty, conflicted, unmerged, or active resources without changing the fact that a successful merge was already absorbed.
 
 Do not keep conflict markers, staged partial resolutions, or an in-progress merge in the main integration workspace.
 
@@ -779,7 +781,7 @@ The shared registry records peer session identity, territory, work claims, confl
 
 Every session-level Agent must treat its `agentId` plus bound `sessionId` as runtime identity when an AgentDirectory binding exists.
 
-`.docs/project-memory/agent-registry.json` is the source for lane territories, registered Agents, active `workClaims`, handoff targets, and merge queue state.
+The live registry under `<git-common-dir>/briefbound/coordination/registry.json` is the source for lane territories, registered Agents, active claims, handoff targets, and merge queue state. Durable project memory is only a recovery projection.
 
 If a user asks an Agent to implement outside its management scope, state the mismatch, name the closest handoff target when available, and wait for explicit confirmation instead of silently taking over.
 
@@ -789,34 +791,34 @@ Handoff is gated on real user request and must not be triggered by system-inject
 
 ## 19. Project Memory
 
-Project memory is single-writer shared state.
+Project memory is single-writer shared state under the external project
+`memory/` root. Resolve the active path through
+`python scripts/migrate_project_storage.py inventory`; do not assume a repo path.
 
 Before `STANDARD_TASK`, `HIGH_RISK`, continuation work, cross-session decisions, or any task where memory can change the answer, read:
 
-- `.docs/project-memory/INDEX.md`;
-- `.docs/project-memory/memory.json`;
-- `.docs/project-memory/profile.json`;
-- `.docs/project-memory/agent-registry.json`;
-- relevant lane files under `.docs/project-memory/lanes/`.
+- `<active-memory>/INDEX.md`;
+- `<active-memory>/memory.json`;
+- `<active-memory>/profile.json`;
+- the live registry under the Git common dir;
+- relevant lane files under `<active-memory>/lanes/`.
 
 For `FAST_PATCH`, read project memory only when the patch touches governance, active claims, remembered decisions, hot files, or an existing memory fact. Do not read the full memory bundle for trivial read-only questions, tiny cosmetic edits, or docs wording where memory cannot affect the conclusion.
 
-Session-level Agents must not hand-edit `.docs/project-memory/**` or `PROJECT_MEMORY.html` while working in parallel unless they are the current memory-sync owner with an explicit claim. Parallel Agents should write append-only memory proposals or report exact lane/update payloads.
+Session-level Agents must not hand-edit `<active-memory>/**` while working in parallel unless they are the current memory-sync owner with an explicit claim. `.docs/project-memory/**` and `PROJECT_MEMORY.html` are legacy read-only artifacts. Parallel Agents should write append-only proposals or report exact lane/update payloads.
 
 After `STANDARD_TASK` or `HIGH_RISK` meaningful development, update or propose updates for:
 
-- current lane file under `.docs/project-memory/lanes/`;
-- `.docs/project-memory/memory.json` for shared metadata/global recent updates;
-- `.docs/project-memory/agent-registry.json` for Agent/claim/lane changes;
-- `.docs/project-memory/INDEX.md`;
-- `.docs/project-memory/overview.html`;
-- root `PROJECT_MEMORY.html`.
+- current lane file under `<active-memory>/lanes/`;
+- `<active-memory>/memory.json` for shared metadata/global recent updates;
+- live registry for Agent/claim changes;
+- `<active-memory>/INDEX.md` and `overview.html`.
 
 Preferred sync commands:
 
 ```powershell
-python "<codex-skill-root>\ccdawn-dawn-agent-html-memory\scripts\sync_project_memory.py" "<project-root>" --lane "<stable-responsibility-id>" --focus "<current focus>" --update "<what changed>"
-python "<codex-skill-root>\ccdawn-dawn-agent-html-memory\scripts\render_overview.py" "<project-root>"
+python scripts/migrate_project_storage.py inventory --project "<project-root>"
+# Use only project-memory tooling that accepts the resolved external memory root.
 ```
 
 Do not finish `STANDARD_TASK` or `HIGH_RISK` work with stale project memory or a stale active claim unless the user explicitly says to skip it. `FAST_PATCH` may report "project memory not affected" when it changes no durable project state, lane status, blocker, decision, or follow-up. If memory sync cannot be done safely in the task worktree, report the exact proposal for the main integration/memory-sync owner.
@@ -827,7 +829,7 @@ Historical specs/plans live under `docs/archive/` (including former `docs/superp
 
 When a task needs a new written plan or design:
 
-1. Prefer a short note in the task claim / project-memory lane, or a single dated file that will be archived on close.
+1. Prefer a short note in the task claim / external project-memory lane, or a single dated file that will be archived on close.
 2. Begin with compact status metadata: `Status`, `Owner`, `Claim`/branch/worktree, `Scope`, `Supersedes`, `Implementation link`, `Validation`, `Close condition`.
 3. Use status vocabulary: `draft`, `user-approved`, `active-plan`, `in-progress`, `implemented`, `superseded`, `blocked`, or `historical`.
 4. On close: set status to `implemented` / `superseded` / `historical` and **move the file into `docs/archive/`** (or delete only if the user explicitly wants no history).
@@ -913,7 +915,9 @@ A development round is not done until its tier-specific checklist is satisfied:
 - logging, testing, Launcher refresh, project memory, and version impact are either handled or explicitly `not affected`;
 - relevant lightweight checks ran, or the final report explains why no executable check is useful;
 - Git status and the current-task diff were reviewed;
+- the owning Agent actively self-reviewed the current-task diff and either merged into local `main` with `git merge --ff-only` or reported an exact merge blocker; waiting for the user to request review or merge is not done;
 - any guard claim created for a hot file was released;
+- if the task was merged, its task-owned temporary content, background processes/listeners, claim, junction, clean worktree, and merged local branch were cleaned immediately, or exact `cleanup pending` residue was reported;
 - final report states remaining risk and next action.
 
 `STANDARD_TASK` and `HIGH_RISK`:
@@ -931,8 +935,9 @@ A development round is not done until its tier-specific checklist is satisfied:
 - Git status was reviewed;
 - current-task diff was self-reviewed;
 - changes are committed or explicitly marked not ready;
-- merge gates were evaluated;
+- merge gates were evaluated, and the owning Agent either merged into local `main` with `git merge --ff-only` or reported an exact merge blocker; waiting for the user to request review or merge is not done;
 - lightweight guard claim was released as `completed`, `blocked`, or `released`, or the handoff queue state is explicitly recorded as `ready_for_merge`, `merged_to_main`, `local_applied`, `blocked`, or `cancelled`;
+- if the task was merged, cleanup ran immediately without waiting for post-merge validation and the final report records removed resources or exact `cleanup pending` residue;
 - project memory was updated, explicitly not affected, or an exact update proposal was handed off;
 - version impact was judged;
 - final report states remaining risk and next action.
@@ -1009,7 +1014,7 @@ Default rule: behavior that can fail, stall, branch, retry, or repair must leave
 
 Prefer:
 
-- existing runtime-scene services and package structure under `logs/runtime_scenes/`;
+- existing runtime-scene services and package structure under `<active-logs>/runtime_scenes/`;
 - structured fields for state transitions, identifiers, duration, result status, and failure class;
 - redacted summaries instead of raw prompts, secrets, large outputs, or unbounded diffs;
 - focused logging at the cause site rather than broad wrapper logs.
@@ -1052,7 +1057,7 @@ Default rule: transient, candidate, formal, and project-governance memory must s
 
 Prefer:
 
-- project-memory guard and sync scripts for `.docs/project-memory/**`;
+- project-memory guard and sync scripts that target the resolved external `memory/` root;
 - `memory_service`, `team_knowledge_service`, and existing knowledge promotion paths for runtime knowledge;
 - candidate knowledge or proposal records before formal memory when confidence, ownership, or source quality is uncertain;
 - generated views rebuilt by their owning scripts instead of hand-edited HTML snapshots.
@@ -1260,7 +1265,7 @@ For backend-only or frontend-only work, explicitly state why the other half is n
 ### 24.3 Hard Boundaries
 
 - Product UI must not call browser `fetch` directly. Shared transport remains `fetchJson`; exceptional telemetry, streaming, download, or browser-native flows must stay in a named adapter with bounded error handling.
-- New route and product-component files must not import or call `fetchJson` directly. Put domain endpoint functions in `web/src/api/<domain>.ts`. Existing direct route calls are migration debt governed by `web/src/api/fullStackApiBoundary.test.ts`.
+- New route and product-component files must not import or call `fetchJson` directly. Put domain endpoint functions in `web/src/api/<domain>.ts`. Route-layer JSON transport migration is complete; `web/src/api/fullStackApiBoundary.test.ts` keeps the budget at zero.
 - Route entry modules should remain composition roots. When a touched route already owns endpoint strings, multiple mutations, cache repair, and view code, extract the touched API or model slice instead of adding another parallel block.
 - Public JSON endpoints must declare an explicit Pydantic response contract. Returning an untyped `dict` from a service is allowed internally only when the route validates or projects it into the public response model.
 - Frontend TypeScript DTOs describe API data, not component display state. Display-only unions, selected-row state, draft form state, and view models stay in their route-domain module.
@@ -1269,18 +1274,33 @@ For backend-only or frontend-only work, explicitly state why the other half is n
 - Cross-domain changes must name one source owner and projection consumers. A projection may cache or render facts; it must not silently become a second writer.
 - API changes must preserve or intentionally migrate developer/formal mode parity, permissions, redaction, delete/archive semantics, and runtime evidence.
 
-### 24.4 Incremental Migration And Guard Budgets
+### 24.4 Migration Guards (Closed Ledger)
 
-This contract applies immediately to new code and to the slice materially touched by a task. It does not authorize a big-bang rewrite of existing routes, DTOs, services, or tests.
+Route-layer JSON transport migration finished in 2026-08: the frontend ledger is empty and the aggregate budget is `0`. This section now describes **permanent guards**, not an in-flight debt burn-down.
 
-The first structural guards are debt budgets:
+**Frontend — `web/src/api/fullStackApiBoundary.test.ts`**
 
-- `web/src/api/fullStackApiBoundary.test.ts` records existing route-layer `fetchJson` call counts. New files and count increases fail; an intentional extraction must lower the recorded budget in the same change.
-- `tests/test_full_stack_contract_guards.py` records existing FastAPI endpoints without explicit `response_model`. New untyped endpoints and count increases fail; adding response contracts must lower the matching budget.
+- `web/src/routes/**` must contain **zero** `fetchJson(` calls and **zero** imports of `api/client`.
+- The recorded per-file budget map is `{}`; any new route-layer call or `api/client` import fails CI.
+- New JSON endpoints belong in `web/src/api/<domain>.ts` as named exports. See [`web/src/api/README.md`](../../web/src/api/README.md) for module ownership and contract-test conventions.
+- **Allowed route-layer exceptions (non-`fetchJson`):** SSE/`EventSource` streams (for example evolution active-run events, CLI terminal session events), bounded browser telemetry/download adapters named in code review, and other flows explicitly listed in the domain API README. Do not re-introduce JSON transport in routes “because it is only one call”.
 
-Guard budgets are not exemptions for new work. Raising a budget requires a documented compatibility or emergency reason, owner, removal trigger, and review evidence. Normal feature development must keep budgets equal or lower.
+**Backend — `tests/test_full_stack_contract_guards.py`**
 
-Do not move files solely to satisfy a count. Migrate one behavior slice with its API function, DTO, cache contract, service owner, and tests. Existing compatibility barrels and service facades may remain while imports converge.
+- FastAPI route modules must declare explicit `response_model` or `response_class` on JSON endpoints. Per-module untyped-endpoint budgets are `0`.
+- New handlers without a public response contract fail CI. Adding contracts keeps budgets at zero.
+
+Guard budgets are not exemptions for new work. Raising a budget requires a documented compatibility or emergency reason, owner, removal trigger, and review evidence in this section or an ADR. Normal feature development keeps both guards at zero.
+
+When extracting legacy behavior, migrate one slice with its API function, DTO, cache contract, service owner, and tests. Do not move files solely to satisfy a guard.
+
+**Verification (touching `web/src/api/` or route transports):**
+
+```text
+pytest tests/test_full_stack_contract_guards.py -q
+npx vitest run src/api/fullStackApiBoundary.test.ts --fileParallelism=false
+npx tsc -b --pretty false   # in web/ when types or DTOs change
+```
 
 ### 24.5 Cross-Layer Definition Of Done
 

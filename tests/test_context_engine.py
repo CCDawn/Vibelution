@@ -725,6 +725,36 @@ def test_build_agent_context_auto_initializes_project_agent_registry_without_mem
     assert "conversation-ui" in packet.context_block
 
 
+def test_build_agent_context_initializes_registry_outside_identified_checkout(tmp_path, monkeypatch):
+    identity_path = tmp_path / ".vibelution" / "project.json"
+    identity_path.parent.mkdir(parents=True)
+    identity_path.write_text(
+        json.dumps({"schemaVersion": 1, "projectId": "test-vibelution"}) + "\n",
+        encoding="utf-8",
+    )
+    projects_home = tmp_path / "external" / "projects"
+    monkeypatch.setenv("VIBELUTION_PROJECTS_HOME", str(projects_home))
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="外部记忆 Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+        primary_mode="chat",
+        direct_session_id="session-external-memory",
+        metadata={"includeProjectAgentRegistryContext": True},
+    )
+
+    packet = context_engine.build_agent_context(
+        agent["agentId"],
+        session_id="session-external-memory",
+        run_id="turn-1",
+    )
+
+    registry_path = projects_home / "test-vibelution" / "memory" / "agent-registry.json"
+    assert registry_path.exists()
+    assert not (tmp_path / ".docs" / "project-memory" / "agent-registry.json").exists()
+    assert "active external project memory/agent-registry.json" in packet.context_block
+
+
 def test_build_agent_context_keeps_invalid_project_agent_registry_file(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     registry_path = tmp_path / ".docs" / "project-memory" / "agent-registry.json"
@@ -1152,3 +1182,201 @@ def test_list_agent_runs_returns_bounded_safe_snapshots(tmp_path, monkeypatch):
     assert payload["subAgentRuns"][0]["runKind"] == "sub_agent_run"
     assert payload["subAgentRuns"][0]["parentRunId"] == "session-runs-turn-1"
     assert payload["subAgentRuns"][0]["parentAgentId"] == agent["agentId"]
+
+
+def test_string_registry_names_are_kept_as_one_item():
+    entry = context_engine._project_agent_registry_entry_from_sources(
+        {},
+        {
+            "agentId": "agent-1",
+            "handoffTargets": "quality-and-operations",
+            "managementScope": {
+                "summary": "runtime",
+                "files": "core/orchestration/**",
+                "taskTypes": "runtime-context",
+            },
+        },
+        lane_defaults={},
+    )
+    assert entry["handoffTargets"] == ["quality-and-operations"]
+    assert entry["managementScope"]["files"] == ["core/orchestration/**"]
+    assert entry["managementScope"]["taskTypes"] == ["runtime-context"]
+    assert context_engine._join_context_segments("not-a-segment-list", "cache_prefix") == ""
+    assert context_engine._bounded_limit("bad", default=6) == 6
+    assert context_engine._safe_int(0) == 0
+    assert context_engine._safe_int("bad") == 0
+    assert context_engine._safe_int(True) == 0
+    assert context_engine._safe_int(b"6") == 6
+    assert context_engine._coerce_bool("false", default=True) is False
+    assert context_engine._context_hash(b"static-block") == context_engine._context_hash("static-block")
+    assert context_engine._agent_allows_project_agent_registry_context(
+        {"metadata": '{"includeProjectAgentRegistryContext":"false"}'}
+    ) is False
+    assert context_engine._agent_allows_project_agent_registry_context(
+        {"metadata": '{"includeProjectAgentRegistryContext":"true"}'}
+    ) is True
+
+
+def test_context_engine_parses_json_name_lists_and_segment_envelopes():
+    assert context_engine._coerce_str_list('["alpha", "beta"]') == ["alpha", "beta"]
+    assert context_engine._coerce_str_list(bytearray(b"ops-lane")) == ["ops-lane"]
+    assert context_engine._coerce_str_list(
+        {"ops": {"enabled": False}, "quality": {"enabled": True}}
+    ) == ["quality"]
+    assert context_engine._join_context_segments(
+        b'{"items": [{"placement": "cache_prefix", "block": "hello"}]}',
+        b"cache_prefix",
+    ) == "hello"
+    assert context_engine._join_context_segments(
+        [{"placement": b"cache_prefix", "block": b"hello"}],
+        "cache_prefix",
+    ) == "hello"
+    assert context_engine._bounded_limit(True, default=6) == 6
+
+
+def test_list_agent_runs_for_agents_treats_string_id_as_one_agent(monkeypatch):
+    seen: dict[str, object] = {}
+
+    def fake_list(agent_ids, *, limit=20):
+        seen["ids"] = list(agent_ids)
+        seen["limit"] = limit
+        return {"agentIds": list(agent_ids), "limit": limit, "agents": {}}
+
+    monkeypatch.setattr(context_engine.agent_run_store, "list_agent_runs_for_agents", fake_list)
+    payload = context_engine.list_agent_runs_for_agents("agent-xyz", limit="5")
+    assert seen["ids"] == ["agent-xyz"]
+    assert seen["limit"] == 5
+    assert payload["agentIds"] == ["agent-xyz"]
+
+    json_payload = context_engine.list_agent_runs_for_agents(
+        '["agent-a", "agent-b"]',
+        limit=True,
+    )
+    assert seen["ids"] == ["agent-a", "agent-b"]
+    assert seen["limit"] == 20
+    assert json_payload["agentIds"] == ["agent-a", "agent-b"]
+
+
+def test_record_agent_turn_result_keeps_explicit_zero_tool_calls(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="零工具调用 Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+        primary_mode="chat",
+        direct_session_id="session-zero-tools",
+    )
+
+    context_engine.record_agent_turn_result(
+        agent["agentId"],
+        "session-zero-tools",
+        {
+            "status": "completed",
+            "summary": "no tools",
+            "tool_call_count": 0,
+            "toolCallCount": 9,
+        },
+        run_id="session-zero-tools-turn-1",
+    )
+
+    event_path = tmp_path / agent["workspacePath"] / "events" / "agent_turn_results.jsonl"
+    records = [
+        json.loads(line)
+        for line in event_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert records[0]["toolCallCount"] == 0
+
+
+def test_prepare_subagent_spawn_accepts_bytes_context_mode(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    parent = agent_directory_service.create_agent_instance(
+        display_name="字节模式父 Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+        primary_mode="chat",
+        direct_session_id="session-bytes-parent",
+        metadata={
+            "delegationPolicy": {
+                "allowSubagents": True,
+                "maxDepth": 1,
+                "maxConcurrent": 1,
+                "allowWakeMessages": True,
+                "allowedContextModes": ["isolated", "fork"],
+            }
+        },
+    )
+
+    isolated = context_engine.prepare_subagent_spawn(
+        parent["agentId"],
+        "session-bytes-parent",
+        context_mode=b"isolated",
+    )
+    assert isolated.context_mode == "isolated"
+    assert isolated.parent_context is None
+
+
+def test_build_agent_context_coerces_json_snapshot_and_false_prompt_flag(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="JSON 快照 Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+        primary_mode="chat",
+        direct_session_id="session-json-snapshot",
+    )
+    original_get_agent = agent_directory_service.get_agent
+
+    def reject_duplicate_agent_lookup(agent_id, *, include_archived=False):
+        if agent_id == agent["agentId"] and not include_archived:
+            raise AssertionError("JSON Agent snapshot should avoid duplicate get_agent")
+        return original_get_agent(agent_id, include_archived=include_archived)
+
+    monkeypatch.setattr(agent_directory_service, "get_agent", reject_duplicate_agent_lookup)
+    monkeypatch.setattr(
+        context_engine,
+        "_build_prompt_template_context_block",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("string false should skip prompt template context")
+        ),
+    )
+
+    snapshot = dict(agent)
+    snapshot["agent_id"] = snapshot.pop("agentId")
+    packet = context_engine.build_agent_context(
+        agent["agentId"].encode("utf-8"),
+        session_id=b"session-json-snapshot",
+        run_id=b"turn-1",
+        agent_snapshot=json.dumps(snapshot),
+        include_prompt_template_context="false",
+    )
+
+    assert packet.agent_id == agent["agentId"]
+    assert packet.display_name == agent["displayName"]
+    assert packet.session_id == "session-json-snapshot"
+    assert packet.timings["promptTemplateContextSkipped"] is True
+    assert all(segment["key"] != "prompt_template" for segment in packet.context_segments)
+
+
+def test_record_agent_turn_result_parses_json_payload(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="JSON 结果 Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+        primary_mode="chat",
+        direct_session_id="session-json-result",
+    )
+
+    context_engine.record_agent_turn_result(
+        agent["agentId"],
+        b"session-json-result",
+        '{"status":"completed","summary":"ok","toolCallCount":"3","runId":"session-json-result-turn-1"}',
+    )
+
+    event_path = tmp_path / agent["workspacePath"] / "events" / "agent_turn_results.jsonl"
+    records = [
+        json.loads(line)
+        for line in event_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert records[0]["sessionId"] == "session-json-result"
+    assert records[0]["toolCallCount"] == 3
+    assert records[0]["runId"] == "session-json-result-turn-1"
+    assert records[0]["status"] == "completed"

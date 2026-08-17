@@ -1,7 +1,7 @@
-import { Bot, Check, LoaderCircle, MessageCircle, X } from "lucide-react";
+import { Bot, Check, CheckSquare, LoaderCircle, MessageCircle, Square, X } from "lucide-react";
 import type { DragEvent, KeyboardEvent, MouseEvent } from "react";
 
-import type { AgentInstance, SessionSummary } from "../api/types";
+import type { AgentInstance, SessionSummary, Team } from "../api/types";
 import { VIconButton, VNativeButton, VNativeInput, VTooltip } from "../components/vui";
 import type { TranslationKey } from "../i18n/dictionary";
 import {
@@ -16,6 +16,7 @@ import {
   sessionPrimaryStatus,
   type SessionActivityTone,
 } from "./sessionActivityIndicator";
+import { SessionTeamBindingTag } from "./chat/SessionTeamBindingTag";
 import styles from "./DirectSessionIndexItem.styles";
 
 export function sessionListTitle(
@@ -253,6 +254,7 @@ type DirectSessionIndexItemProps = {
   sessionDisplay: AgentDisplayInfo;
   sessionSummary: string;
   sessionTitle: string;
+  teams?: Team[];
   lang: "zh" | "en";
   statusLabel: (status: string) => string;
   formatTime: (value: string) => string;
@@ -265,6 +267,10 @@ type DirectSessionIndexItemProps = {
   onPrefetch?: (sessionId: string) => void;
   onRenameTitleChange: (title: string) => void;
   onSubmitRename: (session: SessionSummary) => void;
+  bulkSelected?: boolean;
+  bulkSelectionEnabled?: boolean;
+  bulkSelectLabel?: string;
+  onToggleBulk?: (sessionId: string, selected: boolean, shiftKey?: boolean) => void;
 };
 
 function renderSessionAvatar(className: string, imageUrl: string | undefined, fallback: string) {
@@ -292,6 +298,7 @@ export function DirectSessionIndexItem({
   sessionDisplay,
   sessionSummary,
   sessionTitle,
+  teams = [],
   lang,
   statusLabel,
   formatTime,
@@ -303,6 +310,10 @@ export function DirectSessionIndexItem({
   onPrefetch,
   onRenameTitleChange,
   onSubmitRename,
+  bulkSelected = false,
+  bulkSelectionEnabled = false,
+  bulkSelectLabel = "",
+  onToggleBulk,
 }: DirectSessionIndexItemProps) {
   const sessionIsChild = isChildSession(session);
   const sessionStatus = sessionStatusValue(session);
@@ -327,6 +338,7 @@ export function DirectSessionIndexItem({
   const sessionItemClassName = [
     styles.sessionItem,
     styles.directSessionItem,
+    bulkSelectionEnabled ? styles.sessionItemWithBulkSelect : "",
     sessionIsChild ? styles.childTopLevelSessionItem : "",
     active ? styles.sessionItemActive : "",
     contextMenuActive && !active ? styles.sessionItemContextTarget : "",
@@ -387,14 +399,40 @@ export function DirectSessionIndexItem({
     draggable: true,
     onDragStart,
   };
+  const bulkSelectionControl = bulkSelectionEnabled && onToggleBulk ? (
+    <label
+      className={styles.sessionBulkSelectControl}
+      onClick={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      <VNativeInput
+        type="checkbox"
+        checked={bulkSelected}
+        aria-label={bulkSelectLabel}
+        className={styles.sessionBulkSelectInput}
+        onChange={(event) =>
+          onToggleBulk(
+            session.id,
+            event.target.checked,
+            Boolean((event.nativeEvent as globalThis.MouseEvent).shiftKey),
+          )
+        }
+      />
+      {bulkSelected ? <CheckSquare size={15} /> : <Square size={15} />}
+    </label>
+  ) : null;
 
   return (
     <div
       aria-current={active ? "true" : undefined}
       data-selected={active ? "true" : undefined}
       onContextMenu={(event) => onContextMenu(event, session)}
-      className={sessionItemClassName}
+      className={[
+        sessionItemClassName,
+        bulkSelected ? styles.sessionItemBulkSelected : "",
+      ].filter(Boolean).join(" ")}
     >
+      {bulkSelectionControl}
       {editing ? (
         <div className={styles.sessionItemMain}>
           {renderSessionAvatar(avatarClassName, sessionAvatarImageUrl, sessionAvatarFallback)}
@@ -488,6 +526,9 @@ export function DirectSessionIndexItem({
           </VNativeButton>
         </VTooltip>
       )}
+      <div className={styles.sessionTeamBindingSlot} onClick={(event) => event.stopPropagation()}>
+        <SessionTeamBindingTag session={session} lang={lang} teams={teams} />
+      </div>
       {editing ? (
         <div className={styles.sessionActionStack}>
           <VIconButton

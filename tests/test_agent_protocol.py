@@ -672,15 +672,18 @@ class TestToolMessageFlow:
                 {
                     "role": "assistant",
                     "content": "运行相关测试验证修改：",
-                    "toolCalls": [
+                    "tool_calls": [
                         {
+                            "id": "call_cli",
                             "name": "cli_tool",
-                            "arguments": {"command": "python -m pytest"},
-                            "status": "failed",
-                            "result": long_result,
-                            "resultPreview": "Windows detected Unix shell fragment.",
+                            "args": {"command": "python -m pytest"},
                         }
                     ],
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_cli",
+                    "content": long_result,
                 },
             ]
         )
@@ -694,7 +697,7 @@ class TestToolMessageFlow:
         ]
 
         assert len(tool_messages) == 1
-        assert tool_messages[0].tool_call_id == "history_tool_1_1"
+        assert tool_messages[0].tool_call_id == "call_cli"
         assert "完整工具结果" in tool_messages[0].content
         assert "failure-line\n" * 120 in tool_messages[0].content
         assert "Windows detected Unix shell fragment" not in tool_messages[0].content
@@ -5717,6 +5720,7 @@ class TestLocalProviderBootstrap:
             lambda *args, **kwargs: scene_events.append((args, kwargs)),
         )
         agent._compress_messages = fake_compress
+        agent._reconcile_chat_conversation_before_llm = lambda msgs: (msgs, True)
 
         def fake_invoke(messages, replay_state=None):
             llm_message_counts.append(len(messages))
@@ -6276,14 +6280,14 @@ class TestResolvedApiKeyUsage:
 
         message = str(exc_info.value)
         assert "modelId=relay_gpt_5_6_luna" in message
-        assert "provider=default" in message
+        assert f"provider={primary_provider.provider_id}" in message
         assert model_key_env in message
         assert provider_key_env in message
         assert "llm.providers.<provider_id>" not in message
         missing_event = next(event for event in scene_events if event[1] == "agent.api_key.missing")
         fields = missing_event[2]["fields"]
         assert fields["modelId"] == "relay_gpt_5_6_luna"
-        assert fields["providerId"] == "default"
+        assert fields["providerId"] == primary_provider.provider_id
         assert fields["providerKind"] == "relay"
         assert fields["modelApiKeyEnv"] == model_key_env
         assert fields["providerApiKeyEnv"] == provider_key_env
@@ -6491,7 +6495,11 @@ class TestRuntimeStateMemoryFlow:
                 preserve_errors=True,
             ),
         )
-        monkeypatch.setattr(agent_module, "estimate_messages_tokens", lambda value: 10000 if value is messages else 9800)
+        monkeypatch.setattr(
+            agent_module,
+            "estimate_messages_tokens",
+            lambda value: 10000 if len(value) >= 5 else 9800,
+        )
         monkeypatch.setattr(agent_module, "_turn_runtime_from_env", lambda: {"sessionId": "session-low", "runId": "turn-low"})
         monkeypatch.setattr(agent_module, "get_ui", lambda: SimpleNamespace(add_log=MagicMock(), note_context_compression_event=MagicMock()))
         monkeypatch.setattr(agent_module, "get_state_manager", lambda: SimpleNamespace(set_state=MagicMock()))
@@ -6571,7 +6579,7 @@ class TestRuntimeStateMemoryFlow:
         monkeypatch.setattr(
             agent_module,
             "estimate_messages_tokens",
-            lambda value: 12000 if value is messages else 3000,
+            lambda value: 12000 if len(value) >= 4 else 3000,
         )
         monkeypatch.setattr(
             agent_module,
@@ -6660,7 +6668,7 @@ class TestRuntimeStateMemoryFlow:
         monkeypatch.setattr(
             agent_module,
             "estimate_messages_tokens",
-            lambda value: 20000 if value is messages else 3000,
+            lambda value: 20000 if len(value) >= 5 else 3000,
         )
         ui = SimpleNamespace(add_log=MagicMock(), note_context_compression_event=MagicMock())
         monkeypatch.setattr(agent_module, "get_ui", lambda: ui)
@@ -6715,7 +6723,11 @@ class TestRuntimeStateMemoryFlow:
                 preserve_errors=True,
             ),
         )
-        monkeypatch.setattr(agent_module, "estimate_messages_tokens", lambda value: 10000 if value is messages else 3000)
+        monkeypatch.setattr(
+            agent_module,
+            "estimate_messages_tokens",
+            lambda value: 10000 if len(value) >= 5 else 3000,
+        )
         monkeypatch.setattr(agent_module, "_turn_runtime_from_env", lambda: {"sessionId": "session-failed", "runId": "turn-failed"})
         monkeypatch.setattr(agent_module, "get_ui", lambda: SimpleNamespace(add_log=MagicMock(), note_context_compression_event=MagicMock()))
         monkeypatch.setattr(agent_module, "get_state_manager", lambda: SimpleNamespace(set_state=MagicMock()))

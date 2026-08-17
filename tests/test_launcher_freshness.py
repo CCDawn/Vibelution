@@ -33,3 +33,25 @@ def test_freshness_is_stale_when_head_moves_after_start(monkeypatch):
     assert payload["runningShort"] == "aaa111bbbb"[:12]
     assert payload["headShort"] == "ccc222dddd"[:12]
     assert "落后本地 main" in payload["label"]
+
+
+def test_freshness_retries_when_first_git_identity_is_empty(monkeypatch):
+    launcher_freshness.reset_launcher_start_identity_for_tests()
+    states = iter(
+        [
+            {"commit": "", "branch": ""},
+            {"commit": "", "branch": ""},
+            {"commit": "aaa111bbbbcc", "branch": "main"},
+            {"commit": "aaa111bbbbcc", "branch": "main"},
+        ]
+    )
+    monkeypatch.setattr(launcher_freshness, "_git_identity", lambda: next(states))
+
+    first = launcher_freshness.get_launcher_freshness()
+    assert first["current"] is None
+    assert first["label"] == "Launcher 版本未知"
+
+    second = launcher_freshness.get_launcher_freshness()
+    assert second["current"] is True
+    assert second["runningCommit"] == "aaa111bbbbcc"
+    assert "已是最新" in second["label"]

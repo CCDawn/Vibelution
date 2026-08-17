@@ -48,6 +48,21 @@ class AgentConfigRevisionConflictError(RuntimeError):
     """A config update targeted a revision that is no longer current."""
 
 
+class ChatStateRevisionConflictError(RuntimeError):
+    """A chat state save targeted a stale ``state_revision``.
+
+    Callers must re-read the current document and replay a deterministic
+    mutation with a bounded retry budget instead of overwriting blindly.
+    """
+
+    def __init__(self, *, expected: int, current: int) -> None:
+        super().__init__(
+            f"chat state revision conflict: expected {expected}, current {current}"
+        )
+        self.expected = expected
+        self.current = current
+
+
 class AgentDao:
     def __init__(self, connection: sqlite3.Connection) -> None:
         self._connection = connection
@@ -885,12 +900,134 @@ class WorkspaceChatStateDao:
         payload["conversations"] = conversations
         return payload
 
+    def list_session_ids(self) -> list[str]:
+        rows = self._connection.execute(
+            "SELECT session_id FROM session_runtime_state ORDER BY position ASC"
+        ).fetchall()
+        return [str(row["session_id"] or "").strip() for row in rows if str(row["session_id"] or "").strip()]
+
+    def get_active_session_id(self) -> str:
+        root = self._connection.execute(
+            "SELECT active_session_id FROM workspace_chat_state WHERE id=1"
+        ).fetchone()
+        return str(root["active_session_id"] or "").strip() if root is not None else ""
+
+    def get_one(self, session_id: str) -> dict[str, Any] | None:
+        normalized = str(session_id or "").strip()
+        if not normalized:
+            return None
+        row = self._connection.execute(
+            "SELECT payload_json FROM session_runtime_state WHERE session_id=?",
+            (normalized,),
+        ).fetchone()
+        if row is None:
+            return None
+        decoded = _decode_json_object(row["payload_json"], label="session runtime state")
+        debug_row = self._connection.execute(
+            "SELECT payload_json FROM session_debug_snapshots WHERE session_id=?",
+            (normalized,),
+        ).fetchone()
+        if debug_row is not None:
+            decoded.update(
+                _decode_json_object(debug_row["payload_json"], label="session debug snapshot")
+            )
+        return decoded
+
+    def upsert_one(
+        self,
+        session_id: str,
+        conversation: Mapping[str, Any],
+        *,
+        activate: bool = False,
+    ) -> dict[str, Any]:
+        normalized = str(session_id or "").strip()
+        if not normalized:
+            raise ValueError("Session runtime state requires a session id.")
+        _session_id, payload, debug = _split_runtime_conversation(conversation, index=0)
+        if _session_id and _session_id != normalized:
+            raise ValueError("Session runtime state id does not match the conversation payload.")
+        payload.setdefault("conversation_id", normalized)
+        payload.setdefault("conversationId", normalized)
+        now_ms = _now_ms()
+        existing = self._connection.execute(
+            "SELECT position, payload_json, experiment_binding_json "
+            "FROM session_runtime_state WHERE session_id=?",
+            (normalized,),
+        ).fetchone()
+        existing_debug = self._connection.execute(
+            "SELECT payload_json FROM session_debug_snapshots WHERE session_id=?",
+            (normalized,),
+        ).fetchone()
+        payload_json = _canonical_json(payload)
+        binding_json = _experiment_binding_json(payload)
+        debug_json = _canonical_json(debug) if debug else ""
+        existing_debug_json = str(existing_debug["payload_json"] or "") if existing_debug is not None else ""
+        if existing is not None:
+            position = int(existing["position"])
+            if (
+                str(existing["payload_json"] or "") == payload_json
+                and str(existing["experiment_binding_json"] or "") == binding_json
+                and existing_debug_json == debug_json
+            ):
+                root = self._connection.execute(
+                    "SELECT state_revision, active_session_id FROM workspace_chat_state WHERE id=1"
+                ).fetchone()
+                current_active = str(root["active_session_id"] or "") if root is not None else ""
+                if activate and current_active != normalized:
+                    revision = self._bump_workspace_revision(
+                        updated_at=str(payload.get("updated_at") or ""),
+                        active_session_id=normalized,
+                    )
+                    return {
+                        "stateRevision": revision,
+                        "conversationCount": 1,
+                        "activeSessionId": normalized,
+                        "sessionId": normalized,
+                        "changed": True,
+                    }
+                return {
+                    "stateRevision": int(root["state_revision"] if root is not None else 0),
+                    "conversationCount": 1,
+                    "activeSessionId": current_active,
+                    "sessionId": normalized,
+                    "changed": False,
+                }
+        else:
+            position_row = self._connection.execute(
+                "SELECT COALESCE(MAX(position), -1) AS max_pos FROM session_runtime_state"
+            ).fetchone()
+            position = int(position_row["max_pos"] if position_row is not None else -1) + 1
+        revision = self._bump_workspace_revision(
+            updated_at=str(payload.get("updated_at") or ""),
+            active_session_id=normalized if activate else None,
+        )
+        self._upsert_runtime_row(
+            session_id=normalized,
+            position=position,
+            payload_json=payload_json,
+            binding_json=binding_json,
+            debug=debug,
+            now_ms=now_ms,
+        )
+        root = self._connection.execute(
+            "SELECT active_session_id FROM workspace_chat_state WHERE id=1"
+        ).fetchone()
+        return {
+            "stateRevision": revision,
+            "conversationCount": 1,
+            "activeSessionId": str(root["active_session_id"] or "") if root is not None else "",
+            "sessionId": normalized,
+            "changed": True,
+        }
+
     def replace(
         self,
         state: Mapping[str, Any],
         *,
         imported_source_sha256: str = "",
         imported_at_ms: int | None = None,
+        expected_state_revision: int | None = None,
+        imported_legacy_state_revision: int | None = None,
     ) -> dict[str, Any]:
         frozen = dict(state)
         raw_conversations = frozen.get("conversations")
@@ -926,7 +1063,24 @@ class WorkspaceChatStateDao:
             "SELECT state_revision, imported_source_sha256, imported_at_ms "
             "FROM workspace_chat_state WHERE id=1"
         ).fetchone()
-        revision = max(0, int(existing["state_revision"] if existing is not None else 0)) + 1
+        current_revision = max(
+            0, int(existing["state_revision"] if existing is not None else 0)
+        )
+        if (
+            expected_state_revision is not None
+            and int(expected_state_revision) != current_revision
+        ):
+            raise ChatStateRevisionConflictError(
+                expected=int(expected_state_revision),
+                current=current_revision,
+            )
+        if existing is None and imported_legacy_state_revision is not None:
+            # One-time import: continue the legacy document's revision
+            # sequence so CAS callers and catalog freshness stay coherent.
+            current_revision = max(
+                current_revision, max(0, int(imported_legacy_state_revision))
+            )
+        revision = current_revision + 1
         now_ms = _now_ms()
         extras = {key: value for key, value in frozen.items() if key not in _CHAT_STATE_ROOT_KEYS}
         source_hash = str(imported_source_sha256 or "").strip()
@@ -960,36 +1114,136 @@ class WorkspaceChatStateDao:
                 effective_imported_at,
             ),
         )
-        self._connection.execute("DELETE FROM session_runtime_state")
-        self._connection.execute("DELETE FROM session_debug_snapshots")
-        for position, (session_id, conversation, debug) in enumerate(conversations):
-            self._connection.execute(
-                "INSERT INTO session_runtime_state("
-                "session_id, position, payload_json, experiment_binding_json, updated_at_ms"
-                ") VALUES (?, ?, ?, ?, ?)",
-                (
-                    session_id,
-                    position,
-                    _canonical_json(conversation),
-                    _canonical_json(
-                        conversation.get("experimentBinding")
-                        or conversation.get("experiment_binding")
-                        or {}
-                    ),
-                    now_ms,
-                ),
-            )
-            if debug:
+        existing_rows = {
+            str(row["session_id"]): row
+            for row in self._connection.execute(
+                "SELECT session_id, position, payload_json, experiment_binding_json "
+                "FROM session_runtime_state"
+            ).fetchall()
+        }
+        existing_debug = {
+            str(row["session_id"]): str(row["payload_json"] or "")
+            for row in self._connection.execute(
+                "SELECT session_id, payload_json FROM session_debug_snapshots"
+            ).fetchall()
+        }
+        incoming_ids = {session_id for session_id, _conversation, _debug in conversations}
+        for session_id in existing_rows:
+            if session_id not in incoming_ids:
                 self._connection.execute(
-                    "INSERT INTO session_debug_snapshots(session_id, payload_json, updated_at_ms) "
-                    "VALUES (?, ?, ?)",
-                    (session_id, _canonical_json(debug), now_ms),
+                    "DELETE FROM session_runtime_state WHERE session_id=?",
+                    (session_id,),
                 )
+                self._connection.execute(
+                    "DELETE FROM session_debug_snapshots WHERE session_id=?",
+                    (session_id,),
+                )
+        for position, (session_id, conversation, debug) in enumerate(conversations):
+            payload_json = _canonical_json(conversation)
+            binding_json = _experiment_binding_json(conversation)
+            debug_json = _canonical_json(debug) if debug else ""
+            existing = existing_rows.get(session_id)
+            if (
+                existing is not None
+                and int(existing["position"]) == position
+                and str(existing["payload_json"] or "") == payload_json
+                and str(existing["experiment_binding_json"] or "") == binding_json
+                and existing_debug.get(session_id, "") == debug_json
+            ):
+                continue
+            self._upsert_runtime_row(
+                session_id=session_id,
+                position=position,
+                payload_json=payload_json,
+                binding_json=binding_json,
+                debug=debug,
+                now_ms=now_ms,
+            )
         return {
             "stateRevision": revision,
             "conversationCount": len(conversations),
             "activeSessionId": str(frozen.get("active_conversation_id") or "").strip(),
         }
+
+    def _bump_workspace_revision(
+        self,
+        *,
+        updated_at: str = "",
+        active_session_id: str | None = None,
+    ) -> int:
+        existing = self._connection.execute(
+            "SELECT version, active_session_id, state_revision, extras_json, "
+            "imported_source_sha256, imported_at_ms FROM workspace_chat_state WHERE id=1"
+        ).fetchone()
+        current_revision = max(0, int(existing["state_revision"] if existing is not None else 0))
+        revision = current_revision + 1
+        next_active = (
+            str(active_session_id or "").strip()
+            if active_session_id is not None
+            else (str(existing["active_session_id"] or "") if existing is not None else "")
+        )
+        self._connection.execute(
+            """
+            INSERT INTO workspace_chat_state(
+              id, version, active_session_id, state_revision, updated_at,
+              extras_json, imported_source_sha256, imported_at_ms
+            ) VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              state_revision=excluded.state_revision,
+              updated_at=excluded.updated_at,
+              active_session_id=excluded.active_session_id
+            """,
+            (
+                max(1, int(existing["version"] if existing is not None else 1)),
+                next_active,
+                revision,
+                str(updated_at or ""),
+                str(existing["extras_json"] or "{}") if existing is not None else "{}",
+                str(existing["imported_source_sha256"] or "") if existing is not None else "",
+                existing["imported_at_ms"] if existing is not None else None,
+            ),
+        )
+        return revision
+
+    def _upsert_runtime_row(
+        self,
+        *,
+        session_id: str,
+        position: int,
+        payload_json: str,
+        binding_json: str,
+        debug: Mapping[str, Any],
+        now_ms: int,
+    ) -> None:
+        self._connection.execute(
+            """
+            INSERT INTO session_runtime_state(
+              session_id, position, payload_json, experiment_binding_json, updated_at_ms
+            ) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(session_id) DO UPDATE SET
+              position=excluded.position,
+              payload_json=excluded.payload_json,
+              experiment_binding_json=excluded.experiment_binding_json,
+              updated_at_ms=excluded.updated_at_ms
+            """,
+            (session_id, position, payload_json, binding_json, now_ms),
+        )
+        if debug:
+            self._connection.execute(
+                """
+                INSERT INTO session_debug_snapshots(session_id, payload_json, updated_at_ms)
+                VALUES (?, ?, ?)
+                ON CONFLICT(session_id) DO UPDATE SET
+                  payload_json=excluded.payload_json,
+                  updated_at_ms=excluded.updated_at_ms
+                """,
+                (session_id, _canonical_json(debug), now_ms),
+            )
+            return
+        self._connection.execute(
+            "DELETE FROM session_debug_snapshots WHERE session_id=?",
+            (session_id,),
+        )
 
     def directory_overlay(self) -> tuple[str, dict[str, dict[str, Any]]]:
         root = self._connection.execute(
@@ -1267,6 +1521,35 @@ class ConversationRepository:
         with self._database.reader() as connection:
             return WorkspaceChatStateDao(connection).get()
 
+    def get_session_runtime_state(self, session_id: str) -> dict[str, Any] | None:
+        with self._database.reader() as connection:
+            return WorkspaceChatStateDao(connection).get_one(session_id)
+
+    def list_session_runtime_ids(self) -> list[str]:
+        with self._database.reader() as connection:
+            return WorkspaceChatStateDao(connection).list_session_ids()
+
+    def get_active_session_id(self) -> str:
+        with self._database.reader() as connection:
+            return WorkspaceChatStateDao(connection).get_active_session_id()
+
+    def upsert_session_runtime_state(
+        self,
+        session_id: str,
+        conversation: Mapping[str, Any],
+        *,
+        activate: bool = False,
+    ) -> Future[dict[str, Any]]:
+        frozen = dict(conversation)
+        return self._writer.submit(
+            lambda unit_of_work: unit_of_work.chat_state.upsert_one(
+                session_id,
+                frozen,
+                activate=activate,
+            ),
+            force_flush=True,
+        )
+
     def get_chat_state_directory_overlay(self) -> tuple[str, dict[str, dict[str, Any]]]:
         with self._database.reader() as connection:
             return WorkspaceChatStateDao(connection).directory_overlay()
@@ -1277,6 +1560,8 @@ class ConversationRepository:
         *,
         imported_source_sha256: str = "",
         imported_at_ms: int | None = None,
+        expected_state_revision: int | None = None,
+        imported_legacy_state_revision: int | None = None,
     ) -> Future[dict[str, Any]]:
         frozen = dict(state)
         return self._writer.submit(
@@ -1284,9 +1569,115 @@ class ConversationRepository:
                 frozen,
                 imported_source_sha256=imported_source_sha256,
                 imported_at_ms=imported_at_ms,
+                expected_state_revision=expected_state_revision,
+                imported_legacy_state_revision=imported_legacy_state_revision,
             ),
             force_flush=True,
         )
+
+    def update_chat_state(
+        self,
+        mutate: Callable[[dict[str, Any]], Any],
+        *,
+        expected_state_revision: int | None = None,
+    ) -> Future[dict[str, Any]]:
+        """Atomic read-modify-write of the workspace chat state.
+
+        ``mutate`` runs on the writer thread inside the open transaction:
+        it receives the current document and its changes are committed
+        together with the replace. The mutator must be deterministic and
+        must not submit other store work or block for a long time.
+        """
+
+        def mutation(unit_of_work: ConversationUnitOfWork) -> dict[str, Any]:
+            current = unit_of_work.chat_state.get()
+            current_revision = max(0, int(current.get("state_revision") or 0))
+            if (
+                expected_state_revision is not None
+                and int(expected_state_revision) != current_revision
+            ):
+                raise ChatStateRevisionConflictError(
+                    expected=int(expected_state_revision),
+                    current=current_revision,
+                )
+            payload = dict(current)
+            mutate(payload)
+            return unit_of_work.chat_state.replace(payload)
+
+        return self._writer.submit(mutation, force_flush=True)
+
+    def archive_session_and_replace_chat_state(
+        self,
+        *,
+        session_id: str,
+        state: Mapping[str, Any],
+        imported_source_sha256: str = "",
+        imported_at_ms: int | None = None,
+        expected_state_revision: int | None = None,
+    ) -> Future[dict[str, Any]]:
+        """Delete one session in a single transaction.
+
+        Replaces the workspace chat state document and archives the matching
+        directory session row in the same commit. Either both effects land or
+        neither does; callers never observe a half-deleted session.
+        """
+
+        frozen = dict(state)
+        normalized_session_id = str(session_id or "").strip()
+
+        def mutation(unit_of_work: ConversationUnitOfWork) -> dict[str, Any]:
+            chat_state_result = unit_of_work.chat_state.replace(
+                frozen,
+                imported_source_sha256=imported_source_sha256,
+                imported_at_ms=imported_at_ms,
+                expected_state_revision=expected_state_revision,
+            )
+            archive_result = unit_of_work.sessions.archive(normalized_session_id)
+            return {
+                "archive": archive_result,
+                "chatState": chat_state_result,
+            }
+
+        return self._writer.submit(mutation, force_flush=True)
+
+
+def _decode_json_object(raw: Any, *, label: str) -> dict[str, Any]:
+    try:
+        decoded = json.loads(str(raw or "{}"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"SQLite {label} is invalid JSON.") from exc
+    if not isinstance(decoded, dict):
+        raise ValueError(f"SQLite {label} must be an object.")
+    return decoded
+
+
+def _split_runtime_conversation(
+    raw: Mapping[str, Any],
+    *,
+    index: int,
+) -> tuple[str, dict[str, Any], dict[str, Any]]:
+    conversation = dict(raw)
+    session_id = str(
+        conversation.get("conversation_id")
+        or conversation.get("conversationId")
+        or conversation.get("id")
+        or ""
+    ).strip()
+    if not session_id:
+        raise ValueError(f"Chat state conversation at index {index} requires an id.")
+    debug = {
+        key: conversation.pop(key)
+        for key in tuple(conversation)
+        if key in _CHAT_STATE_DEBUG_KEYS
+    }
+    return session_id, conversation, debug
+
+
+def _experiment_binding_json(conversation: Mapping[str, Any]) -> str:
+    binding = conversation.get("experimentBinding") or conversation.get("experiment_binding") or {}
+    if not isinstance(binding, Mapping):
+        binding = {}
+    return _canonical_json(binding)
 
 
 def _canonical_json(value: Mapping[str, Any]) -> str:

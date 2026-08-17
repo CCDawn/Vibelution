@@ -25,7 +25,13 @@ import {
 } from "react";
 import { useLocation } from "react-router-dom";
 
-import { fetchJson } from "../api/client";
+import {
+  clearLogFile,
+  deleteLogFiles,
+  fetchLogContent,
+  fetchLogRoots,
+  fetchLogTree,
+} from "../api/logs";
 import { queryKeys } from "../api/queryKeys";
 import {
   FileTreeNode,
@@ -56,6 +62,7 @@ import styles from "./LogsRoute.styles";
 
 const ROOT_LABEL_KEYS = {
   runtime_scenes: "logsRootRuntimeScenes",
+  launcher_runtime: "logsRootLauncherRuntime",
   runtime_logs: "logsRootRuntime",
   workspace_logs: "logsRootWorkspace",
   conversation_logs: "logsRootConversation",
@@ -363,7 +370,7 @@ export function LogsRoute() {
 
   const rootsQuery = useQuery({
     queryKey: queryKeys.logRoots(),
-    queryFn: () => fetchJson<LogRoot[]>("/api/logs/roots"),
+    queryFn: () => fetchLogRoots(),
     refetchInterval: resolvePollingInterval(pageVisible, 10_000),
     refetchIntervalInBackground: false,
   });
@@ -399,7 +406,7 @@ export function LogsRoute() {
     queryKey: queryKeys.logTree(activeRoot?.id ?? ""),
     enabled: Boolean(activeRoot?.id) && !isRuntimeScenesRoot,
     queryFn: () =>
-      fetchJson<LogTreeResponse>(`/api/logs/tree?root=${encodeURIComponent(activeRoot?.id ?? "")}`),
+      fetchLogTree(activeRoot?.id ?? ""),
     refetchInterval: resolvePollingInterval(pageVisible, 5_000),
     refetchIntervalInBackground: false,
   });
@@ -518,22 +525,14 @@ export function LogsRoute() {
     queryKey: queryKeys.logContent(activeRoot?.id ?? "", activeFilePath),
     enabled: Boolean(activeRoot?.id && activeFilePath) && !isRuntimeScenesRoot,
     queryFn: () =>
-      fetchJson<LogFileContent>(
-        `/api/logs/content?root=${encodeURIComponent(activeRoot?.id ?? "")}&path=${encodeURIComponent(activeFilePath)}`,
-      ),
+      fetchLogContent(activeRoot?.id ?? "", activeFilePath),
     refetchInterval: resolvePollingInterval(pageVisible, 5_000),
     refetchIntervalInBackground: false,
   });
 
   const clearLogMutation = useMutation({
     mutationFn: async ({ root, path }: { root: string; path: string }) =>
-      fetchJson<LogFileContent>("/api/logs/clear", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ root, path }),
-      }),
+      clearLogFile(root, path),
     onSuccess: (payload, variables) => {
       queryClient.setQueryData(queryKeys.logContent(variables.root, variables.path), payload);
       setActionNotice({
@@ -551,13 +550,7 @@ export function LogsRoute() {
 
   const deleteLogsMutation = useMutation({
     mutationFn: async ({ root, paths }: { root: string; paths: string[] }) =>
-      fetchJson<LogDeleteResponse>("/api/logs/delete", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ root, paths }),
-      }),
+      deleteLogFiles(root, paths),
     onSuccess: (payload, variables) => {
       const deletedPathSet = new Set(payload.deletedPaths);
       setSelectedLogPathsByRoot((current) => ({

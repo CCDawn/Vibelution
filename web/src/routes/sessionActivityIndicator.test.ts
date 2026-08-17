@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   isSessionActivitySeen,
   markSessionActivitySeen,
+  markSessionActivitySnapshotsSeen,
   resolveAgentActivityTone,
   resolveSessionActivityTone,
   sessionActivityStamp,
@@ -40,13 +41,39 @@ describe("sessionActivityIndicator", () => {
     })).toBe("none");
   });
 
-  it("shows unread completed when a previously read ready session gets a new stamp", () => {
-    const previous = { id: "s-ready", status: "ready", updatedAt: "t1" };
+  it("does not treat recency-only updates as unread completed", () => {
+    const previous = { id: "s-ready", status: "ready", taskSummary: "same reply", updatedAt: "t1" };
     markSessionActivitySeen(previous.id, sessionActivityStamp(previous));
-    const updated = { id: "s-ready", status: "ready", updatedAt: "t2" };
+    const updated = { id: "s-ready", status: "ready", taskSummary: "same reply", updatedAt: "t2" };
+    expect(sessionActivityStamp(updated)).toBe(sessionActivityStamp(previous));
+    expect(resolveSessionActivityTone(updated)).toBe("none");
+  });
+
+  it("shows unread completed when a previously read ready session gets a new preview", () => {
+    const previous = { id: "s-ready", status: "ready", taskSummary: "turn 1" };
+    markSessionActivitySeen(previous.id, sessionActivityStamp(previous));
+    const updated = { id: "s-ready", status: "ready", taskSummary: "turn 2" };
     expect(resolveSessionActivityTone(updated)).toBe("completed");
     markSessionActivitySeen(updated.id, sessionActivityStamp(updated));
     expect(resolveSessionActivityTone(updated)).toBe("none");
+  });
+
+  it("keeps a session read when directory and detail use different completion identities", () => {
+    const directory = { id: "s-open", status: "ready", taskSummary: "short preview" };
+    const detail = { id: "s-open", status: "ready", taskSummary: "full assistant reply" };
+    expect(markSessionActivitySnapshotsSeen(directory.id, [directory, detail])).toBe(true);
+    expect(resolveSessionActivityTone(directory)).toBe("none");
+    expect(resolveSessionActivityTone(detail)).toBe("none");
+  });
+
+  it("still honors a legacy single-string seen stamp", () => {
+    const session = { id: "s-legacy", status: "completed", taskSummary: "old reply" };
+    globalThis.localStorage.setItem(
+      "vibelution.session-activity-seen.v1",
+      JSON.stringify({ [session.id]: sessionActivityStamp(session) }),
+    );
+    expect(isSessionActivitySeen(session.id, sessionActivityStamp(session))).toBe(true);
+    expect(resolveSessionActivityTone(session)).toBe("none");
   });
 
   it("shows completed until marked seen, then none", () => {
@@ -55,6 +82,21 @@ describe("sessionActivityIndicator", () => {
     markSessionActivitySeen(session.id, sessionActivityStamp(session));
     expect(isSessionActivitySeen(session.id, sessionActivityStamp(session))).toBe(true);
     expect(resolveSessionActivityTone(session)).toBe("none");
+  });
+
+  it("does not report a successful mutation when the seen write fails", () => {
+    const session = { id: "s-write-fail", status: "completed", taskSummary: "turn 1" };
+    const stamp = sessionActivityStamp(session);
+    vi.stubGlobal("localStorage", {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error("QuotaExceededError");
+      },
+    });
+    expect(markSessionActivitySeen(session.id, stamp)).toBe(false);
+    expect(markSessionActivitySnapshotsSeen(session.id, [session])).toBe(false);
+    expect(isSessionActivitySeen(session.id, stamp)).toBe(false);
+    expect(resolveSessionActivityTone(session)).toBe("completed");
   });
 
   it("hides completed indicator while the session is actively open", () => {

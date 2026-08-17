@@ -1,6 +1,6 @@
 import "../design/route-css/memory.tailwind.css";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   Brain,
@@ -12,7 +12,11 @@ import {
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 
-import { fetchJson } from "../api/client";
+import {
+  deleteMemoryItem,
+  fetchMemoryItemDetail,
+  restoreMemoryItem,
+} from "../api/memory";
 import { queryKeys } from "../api/queryKeys";
 import {
   AgentProjectMemoryUpdateProposal,
@@ -59,6 +63,7 @@ import { VButton, VDenseOpsPage, VRouteLinkButton, VSplitWorkspace, VStateSurfac
 import { memoryProposalStatusTone, memoryVisibilityTone } from "./memoryStatusTone";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { useMemoryItemMutations } from "./memory/useMemoryItemMutations";
+import { canExecuteMemoryCleanup } from "./memory/memoryCleanupSafety";
 import { useMemoryKnowledgeMutations } from "./memory/useMemoryKnowledgeMutations";
 import { useMemoryCoreQueries, useMemoryKnowledgeQueries } from "./memory/useMemoryWorkbenchQueries";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
@@ -1814,14 +1819,6 @@ function newKnowledgeSearchDraft(): MemoryKnowledgeSearchDraft {
   };
 }
 
-function memoryMutationEndpoint(sectionId: string, itemId: string, suffix = "") {
-  return `/api/memory/items/${encodeURIComponent(sectionId)}/${encodeURIComponent(itemId)}${suffix}`;
-}
-
-function projectMemoryProposalResolveEndpoint(proposal: AgentProjectMemoryUpdateProposal) {
-  return `/api/agents/${encodeURIComponent(proposal.agentId)}/project-memory-updates/${encodeURIComponent(proposal.proposalId)}`;
-}
-
 function projectMemoryProposalAgentLabel(proposal: AgentProjectMemoryUpdateProposal) {
   return [proposal.agentName, proposal.agentCode, proposal.agentId].map((value) => String(value || "").trim()).find(Boolean) ?? "-";
 }
@@ -2293,8 +2290,6 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     setCleanupFeedback,
     fallbackKnowledgeActorAgentId,
     requestedTeamId,
-    memoryMutationEndpoint,
-    projectMemoryProposalResolveEndpoint,
     invalidateMemoryQueries,
     invalidateKnowledgeDashboard,
   });
@@ -2780,8 +2775,9 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const activeItemDetailQuery = useQuery({
     queryKey: queryKeys.memoryItemDetail(activeSection?.id ?? "", activeItem?.id ?? ""),
     queryFn: ({ signal }) =>
-      fetchJson<MemoryItemDetailPayload>(
-        `/api/memory/items/${encodeURIComponent(activeSection?.id ?? "")}/${encodeURIComponent(activeItem?.id ?? "")}`,
+      fetchMemoryItemDetail<MemoryItemDetailPayload>(
+        activeSection?.id ?? "",
+        activeItem?.id ?? "",
         { signal },
       ),
     enabled: Boolean(activeSection?.id && activeItem?.id && activeItem.contentDeferred),
@@ -3141,10 +3137,9 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     try {
       await Promise.all(
         pairs.map(({ section, item }) =>
-          fetchJson<MemoryMutationResponse>(
-            memoryMutationEndpoint(section.id, item.id, action === "restore" ? "/restore" : ""),
-            { method: action === "restore" ? "POST" : "DELETE" },
-          ),
+          action === "restore"
+            ? restoreMemoryItem<MemoryMutationResponse>(section.id, item.id)
+            : deleteMemoryItem<MemoryMutationResponse>(section.id, item.id),
         ),
       );
       setSelectedMemoryKeys((current) => {
@@ -3282,13 +3277,14 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     cleanupPreviewMutation.mutate(selectedCleanupTargets);
   };
   const executeCleanup = () => {
-    if (!selectedCleanupTargets.length) {
+    if (!selectedCleanupTargets.length || !cleanupPreview?.previewToken) {
       setCleanupFeedback({ tone: "error", text: copy.cleanupSelectTargets });
       return;
     }
     cleanupExecuteMutation.mutate({
       targets: selectedCleanupTargets,
       confirmationPhrase: cleanupConfirmationText,
+      previewToken: cleanupPreview.previewToken,
     });
   };
 
@@ -3981,7 +3977,11 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
 
   const createCleanupPanel = () => {
     const report = cleanupExecution ?? cleanupPreview;
-    const canExecute = selectedCleanupTargets.length > 0 && cleanupConfirmationText.trim() === (report?.confirmationPhrase || "硬删除记忆");
+    const canExecute = canExecuteMemoryCleanup(
+      cleanupPreview,
+      selectedCleanupTargets.length,
+      cleanupConfirmationText,
+    );
 
     return (
       <MemoryCleanupPanel

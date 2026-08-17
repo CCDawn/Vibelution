@@ -113,6 +113,49 @@ def test_active_session_route_returns_empty_id_without_persisted_selection(monke
     assert response.json() == {"activeSessionId": ""}
 
 
+def test_session_select_route_keeps_last_viewed_preference_contract(monkeypatch):
+    """POST /select stays a last-viewed preference write (ADR 0009).
+
+    It must return the target session detail for cache seeding and must only
+    write the target preference. The frontend never treats the response as a
+    window navigation authority.
+    """
+    observed: list[tuple[str, str]] = []
+    expected_detail = {"id": "session-active", "title": "target", "messages": []}
+    monkeypatch.setattr(
+        session_routes,
+        "select_chat_session",
+        lambda session_id, *, lightweight=False: (
+            observed.append((session_id, "respond-async" if lightweight else ""))
+            or expected_detail
+        ),
+    )
+
+    response = client.post(
+        "/api/sessions/session-active/select",
+        headers={"Prefer": "respond-async"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == expected_detail
+    assert observed == [("session-active", "respond-async")]
+
+
+def test_session_select_route_rejects_missing_target_without_fallback(monkeypatch):
+    monkeypatch.setattr(
+        session_routes,
+        "select_chat_session",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            session_routes.SessionNotFoundError("missing")
+        ),
+    )
+
+    response = client.post("/api/sessions/session-missing/select")
+
+    assert response.status_code == 404
+    assert "missing" in response.json()["detail"]
+
+
 def test_session_bootstrap_route_delegates_to_one_service_boundary(monkeypatch):
     calls: list[dict] = []
     expected = {
@@ -132,6 +175,190 @@ def test_session_bootstrap_route_delegates_to_one_service_boundary(monkeypatch):
     assert response.status_code == 200
     assert response.json() == expected
     assert calls == [{"limit": 25, "cursor": "next", "q": "needle"}]
+
+
+def test_session_catalog_response_models_keep_unknown_fields(monkeypatch):
+    """Typed catalog envelopes must not strip extras the UI already consumes."""
+    from core.web.routes.session_catalog_models import SessionCatalogItem, SessionDeleteResponse
+
+    item = SessionCatalogItem.model_validate(
+        {
+            "id": "s1",
+            "title": "t",
+            "messages": [{"role": "user", "content": "hi"}],
+            "customFlag": True,
+        }
+    )
+    dumped = item.model_dump(exclude_unset=True)
+    assert dumped["messages"] == [{"role": "user", "content": "hi"}]
+    assert dumped["customFlag"] is True
+    assert "status" not in dumped
+
+    delete_payload = SessionDeleteResponse.model_validate(
+        {
+            "deleted": True,
+            "deletedSessionId": "s1",
+            "nextActiveSessionId": "s2",
+            "replacementDirectSessionId": "s3",
+        }
+    )
+    assert delete_payload.model_dump(exclude_unset=True)["replacementDirectSessionId"] == "s3"
+
+    monkeypatch.setattr(
+        session_routes,
+        "list_sessions",
+        lambda: [
+            {
+                "id": "s1",
+                "title": "t",
+                "agentId": "a1",
+                "hiddenFromIndex": True,
+                "customFlag": True,
+            }
+        ],
+    )
+    listed = client.get("/api/sessions")
+    assert listed.status_code == 200
+    listed_item = listed.json()[0]
+    assert listed_item["agentId"] == "a1"
+    assert listed_item["hiddenFromIndex"] is True
+    assert listed_item["customFlag"] is True
+    assert "status" not in listed_item
+
+    expected_select = {
+        "id": "session-active",
+        "title": "target",
+        "messages": [{"role": "user", "content": "hi"}],
+        "selectedLightweight": True,
+        "agentId": "agent-a",
+    }
+    monkeypatch.setattr(
+        session_routes,
+        "select_chat_session",
+        lambda *_args, **_kwargs: expected_select,
+    )
+    selected = client.post("/api/sessions/session-active/select")
+    assert selected.status_code == 200
+    assert selected.json() == expected_select
+
+    expected_delete = {
+        "deleted": True,
+        "deletedSessionId": "session-active",
+        "nextActiveSessionId": "session-next",
+        "replacementDirectSessionId": "session-replacement",
+    }
+    monkeypatch.setattr(
+        session_routes,
+        "delete_chat_session",
+        lambda *_args, **_kwargs: expected_delete,
+    )
+    deleted = client.delete("/api/sessions/session-active")
+    assert deleted.status_code == 200
+    assert deleted.json() == expected_delete
+
+
+def test_session_turn_response_models_keep_unknown_fields(monkeypatch):
+    """Typed turn envelopes must keep extras used by accept and detail payloads."""
+    from core.web.routes.session_turn_models import (
+        SessionAttachmentResponse,
+        SessionLlmOptionsResponse,
+        SessionTurnCommandResponse,
+    )
+
+    accepted = SessionTurnCommandResponse.model_validate(
+        {
+            "accepted": True,
+            "sessionId": "s1",
+            "turnId": "t1",
+            "clientSubmissionId": "c1",
+            "status": "running",
+            "acceptedAt": "now",
+            "startedTurnId": "t1",
+        }
+    )
+    accepted_dump = accepted.model_dump(exclude_unset=True)
+    assert accepted_dump["startedTurnId"] == "t1"
+    assert "id" not in accepted_dump
+
+    detail = SessionTurnCommandResponse.model_validate(
+        {
+            "id": "s1",
+            "title": "t",
+            "messages": [{"role": "user", "content": "hi"}],
+            "startedTurnId": "t1",
+        }
+    )
+    detail_dump = detail.model_dump(exclude_unset=True)
+    assert detail_dump["messages"] == [{"role": "user", "content": "hi"}]
+    assert detail_dump["startedTurnId"] == "t1"
+    assert "accepted" not in detail_dump
+
+    attachment = SessionAttachmentResponse.model_validate(
+        {"artifactId": "a1", "kind": "user_image", "path": "hidden-ok"}
+    )
+    assert attachment.model_dump(exclude_unset=True)["path"] == "hidden-ok"
+
+    options = SessionLlmOptionsResponse.model_validate(
+        {
+            "sessionId": "s1",
+            "currentModelId": "m1",
+            "currentReasoningEffort": "high",
+            "model": {"modelId": "m1", "extraFlag": True},
+        }
+    )
+    assert options.model_dump(exclude_unset=True)["model"]["extraFlag"] is True
+
+    expected_accept = {
+        "accepted": True,
+        "sessionId": "session-active",
+        "turnId": "turn-1",
+        "clientSubmissionId": "sub-1",
+        "status": "running",
+        "acceptedAt": "now",
+        "startedTurnId": "turn-1",
+    }
+    monkeypatch.setattr(
+        session_routes,
+        "submit_session_message_lightweight",
+        lambda *_args, **_kwargs: expected_accept,
+    )
+    accepted_response = client.post(
+        "/api/sessions/session-active/messages",
+        json={"content": "hi", "clientSubmissionId": "sub-1"},
+        headers={"Prefer": "respond-async"},
+    )
+    assert accepted_response.status_code == 202
+    assert accepted_response.json() == expected_accept
+
+    expected_stop = {
+        "id": "session-active",
+        "currentPhase": "stopping",
+        "messages": [{"role": "assistant", "content": "partial"}],
+        "stopRequested": True,
+    }
+    monkeypatch.setattr(
+        session_routes,
+        "request_stop_session_turn",
+        lambda *_args, **_kwargs: expected_stop,
+    )
+    stopped = client.post("/api/sessions/session-active/stop", json={"turnId": "turn-1"})
+    assert stopped.status_code == 202
+    assert stopped.json() == expected_stop
+
+    expected_options = {
+        "sessionId": "session-active",
+        "currentModelId": "m1",
+        "currentReasoningEffort": "high",
+        "model": {"modelId": "m1", "supportsReasoningEffort": True},
+    }
+    monkeypatch.setattr(
+        session_routes,
+        "get_session_llm_options",
+        lambda *_args, **_kwargs: expected_options,
+    )
+    options_response = client.get("/api/sessions/session-active/llm-options")
+    assert options_response.status_code == 200
+    assert options_response.json() == expected_options
 
 
 def test_chat_workbench_bootstrap_reuses_agent_projection_for_session_query(monkeypatch):
@@ -2283,7 +2510,7 @@ def test_self_observation_message_source_does_not_route_recent_image_reference(t
     assert "resolvedRecentImageReference" not in (latest_user.get("metadata") or {})
 
 
-def test_session_query_keeps_active_session_on_default_first_page(tmp_path, monkeypatch):
+def test_session_query_does_not_pin_active_session_on_default_first_page(tmp_path, monkeypatch):
     conversations = []
     for index in range(60):
         session_id = f"session-{index:02d}"
@@ -2318,8 +2545,12 @@ def test_session_query_keeps_active_session_on_default_first_page(tmp_path, monk
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["items"][0]["id"] == "session-active"
+    item_ids = [item["id"] for item in payload["items"]]
+    assert item_ids[0] == "session-59"
+    assert "session-active" not in item_ids
     assert payload["nextCursor"] == "10"
+
+
 def test_session_summary_exposes_dialogue_model_id(tmp_path, monkeypatch):
     _seed_chat_state(
         tmp_path,
@@ -2465,7 +2696,8 @@ def test_agent_directory_detail_materialization_does_not_switch_active_session(t
     assert payload["agentId"] == "agent-knowledge-steward"
     persisted = load_chat_state(tmp_path)
     assert persisted["active_conversation_id"] == "session-active"
-    assert client.get("/api/sessions").json()[0]["id"] == "session-active"
+    listed_ids = [item["id"] for item in client.get("/api/sessions").json()]
+    assert "session-active" in listed_ids
 
 
 def test_session_select_switches_active_and_materializes_agent_directory_session(tmp_path, monkeypatch):
@@ -2521,7 +2753,8 @@ def test_session_select_switches_active_and_materializes_agent_directory_session
     assert payload["agentId"] == "agent-knowledge-steward"
     persisted = load_chat_state(tmp_path)
     assert persisted["active_conversation_id"] == "agent-knowledge-steward-direct"
-    assert client.get("/api/sessions").json()[0]["id"] == "agent-knowledge-steward-direct"
+    listed_ids = [item["id"] for item in client.get("/api/sessions").json()]
+    assert "agent-knowledge-steward-direct" in listed_ids
 
 
 def test_session_detail_uses_targeted_conversation_read(tmp_path, monkeypatch):

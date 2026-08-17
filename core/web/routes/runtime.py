@@ -6,13 +6,20 @@ import asyncio
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
 
 from core.runtime_manager.command_queue import cancel_lifecycle_command
+from core.web.routes.runtime_models import (
+    BrowserTelemetryPayload,
+    RuntimeBrowserTelemetryResponse,
+    RuntimeCodeFreshnessResponse,
+    RuntimeLifecycleCancelPayload,
+    RuntimeLifecycleCancelResponse,
+    RuntimeLifecycleResponse,
+    RuntimeSummaryResponse,
+)
 from core.web.services.code_freshness import resolve_code_freshness
 from core.web.services.runtime_scene_service import record_browser_telemetry
 from core.web.services.runtime_service import (
@@ -27,31 +34,30 @@ router = APIRouter(tags=["runtime"])
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
-class BrowserTelemetryPayload(BaseModel):
-    phase: str = Field(default="page", min_length=1)
-    eventCode: str = Field(..., min_length=1)
-    message: str = ""
-    level: str = Field(default="info", min_length=1)
-    fields: dict[str, Any] = Field(default_factory=dict)
-
-
-class RuntimeLifecycleCancelPayload(BaseModel):
-    commandId: str = ""
-    operation: str = ""
-    source: str = "web_ui"
-
-
-@router.get("/runtime/summary")
+@router.get(
+    "/runtime/summary",
+    response_model=RuntimeSummaryResponse,
+    response_model_exclude_unset=True,
+)
 async def runtime_summary() -> dict:
     return await asyncio.wrap_future(get_runtime_summary_http_future())
 
 
-@router.get("/runtime/code-freshness")
+@router.get(
+    "/runtime/code-freshness",
+    response_model=RuntimeCodeFreshnessResponse,
+    response_model_exclude_unset=True,
+)
 def runtime_code_freshness() -> dict:
     return resolve_code_freshness(project_root=PROJECT_ROOT)
 
 
-@router.post("/runtime/shutdown", status_code=202)
+@router.post(
+    "/runtime/shutdown",
+    status_code=202,
+    response_model=RuntimeLifecycleResponse,
+    response_model_exclude_unset=True,
+)
 def runtime_shutdown() -> dict:
     try:
         return request_runtime_shutdown()
@@ -66,7 +72,12 @@ def runtime_shutdown() -> dict:
         ) from exc
 
 
-@router.post("/runtime/restart", status_code=202)
+@router.post(
+    "/runtime/restart",
+    status_code=202,
+    response_model=RuntimeLifecycleResponse,
+    response_model_exclude_unset=True,
+)
 def runtime_restart() -> dict:
     try:
         return request_runtime_restart()
@@ -81,7 +92,11 @@ def runtime_restart() -> dict:
         ) from exc
 
 
-@router.post("/runtime/lifecycle-command/cancel")
+@router.post(
+    "/runtime/lifecycle-command/cancel",
+    response_model=RuntimeLifecycleCancelResponse,
+    response_model_exclude_unset=True,
+)
 def runtime_lifecycle_command_cancel(payload: RuntimeLifecycleCancelPayload) -> dict:
     return cancel_lifecycle_command(
         command_id=payload.commandId,
@@ -90,12 +105,20 @@ def runtime_lifecycle_command_cancel(payload: RuntimeLifecycleCancelPayload) -> 
     )
 
 
-@router.post("/runtime/browser-telemetry", status_code=202)
+@router.post(
+    "/runtime/browser-telemetry",
+    status_code=202,
+    response_model=RuntimeBrowserTelemetryResponse,
+    response_model_exclude_unset=True,
+)
 def runtime_browser_telemetry(payload: BrowserTelemetryPayload) -> dict:
     return record_browser_telemetry(payload.model_dump())
 
 
-@router.get("/runtime/events")
+@router.get(
+    "/runtime/events",
+    response_class=StreamingResponse,
+)
 async def runtime_events() -> StreamingResponse:
     async def event_stream():
         while True:

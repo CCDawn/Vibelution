@@ -213,7 +213,7 @@ describe("SupervisedReviewRoute layout contract", () => {
   it("hosts candidate worktree review inside the sample review workspace", () => {
     expect(routeSource).toContain("SupervisedWorktreeReviewPanel");
     expect(routeSource).toContain("queryKeys.evolutionWorkspaceSnapshot()");
-    expect(routeSource).toContain('"/api/evolution/workspace-snapshot"');
+    expect(routeSource).toContain("fetchEvolutionWorkspaceSnapshot<");
     expect(routeSource).toContain("worktreeActionMutation");
     expect(routeSource).toContain('action: "approve_review"');
     expect(routeSource).toContain('reviewerNote: t("selfWorktreeReviewNote")');
@@ -223,10 +223,10 @@ describe("SupervisedReviewRoute layout contract", () => {
   });
 
   it("loads chat review queue summaries and selected candidate details separately", () => {
-    expect(routeSource).toContain('fetchJson<EvolutionChatReviewQueue>("/api/evolution/chat-review")');
+    expect(routeSource).toContain("fetchEvolutionChatReviewQueue<");
     expect(routeSource).toContain("queryKeys.evolutionChatReviewCandidate");
-    expect(routeSource).toContain("fetchJson<EvolutionChatReviewCandidate>");
-    expect(routeSource).toContain('`/api/evolution/chat-review/${encodeURIComponent(selectedCandidate?.candidateId ?? "")}`');
+    expect(routeSource).toContain("fetchEvolutionChatReviewCandidate<");
+    expect(routeSource).not.toContain("/api/evolution/chat-review");
     expect(routeSource).not.toContain("includeDetails=true");
   });
 

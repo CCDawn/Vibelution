@@ -32,11 +32,11 @@ import {
 type DesktopConversationNotifier = {
   handleSessionDetail: (
     detail: SessionDetail,
-    options: { sessionTitle: string },
+    options: { sessionTitle: string; viewedSessionId?: string },
   ) => void;
   handleAssistantDelta: (
     payload: Extract<SessionStreamEvent, { type: "assistant_delta" }>,
-    options: { sessionTitle: string },
+    options: { sessionTitle: string; viewedSessionId?: string },
   ) => void;
 };
 
@@ -52,6 +52,7 @@ export type UseSessionDetailStreamOptions = {
   desktopConversationNotifierRef: MutableRefObject<DesktopConversationNotifier>;
   /** Live title for desktop notifications (detail title or summary title). */
   sessionTitleForNotifications: string;
+  viewedSessionId?: string;
 };
 
 /**
@@ -69,6 +70,7 @@ export function useSessionDetailStream({
   sessionStreamDecisionSnapshotRef,
   desktopConversationNotifierRef,
   sessionTitleForNotifications,
+  viewedSessionId,
 }: UseSessionDetailStreamOptions): { sessionStreamConnected: boolean } {
   const [sessionStreamConnected, setSessionStreamConnected] = useState(false);
   const [streamReconnectTick, setStreamReconnectTick] = useState(0);
@@ -77,6 +79,8 @@ export function useSessionDetailStream({
   const sessionStreamApplyStatsRef = useRef<Record<string, SessionStreamApplyStats>>({});
   const sessionTitleForNotificationsRef = useRef(sessionTitleForNotifications);
   sessionTitleForNotificationsRef.current = sessionTitleForNotifications;
+  const viewedSessionIdRef = useRef(viewedSessionId || activeSessionId || "");
+  viewedSessionIdRef.current = viewedSessionId || activeSessionId || "";
 
   // Perf root cause: sessionStreamShouldConnect flaps while the route settles.
   // Keeping it out of the stream effect's dependency list stops close/reopen
@@ -282,7 +286,8 @@ export function useSessionDetailStream({
       }
       syncSessionDetail(detail);
       desktopConversationNotifierRef.current.handleSessionDetail(detail, {
-        sessionTitle: detail.title || detail.id,
+        sessionTitle: detail.title || detail.agentDisplayName || detail.id,
+        viewedSessionId: viewedSessionIdRef.current,
       });
       if (decision.clearActiveLayer) {
         committedAssistantDeltaLayer = undefined;
@@ -486,6 +491,9 @@ export function useSessionDetailStream({
     };
 
     function handleSessionDetail(event: MessageEvent<string>) {
+      if (disposed) {
+        return;
+      }
       const routed = routeSessionStreamEvent({
         activeSessionId: streamSessionId,
         expectedType: "session_detail",
@@ -500,6 +508,9 @@ export function useSessionDetailStream({
     }
 
     function handleSessionInitial(event: MessageEvent<string>) {
+      if (disposed) {
+        return;
+      }
       const routed = routeSessionStreamEvent({
         activeSessionId: streamSessionId,
         expectedType: "session_initial",
@@ -530,6 +541,9 @@ export function useSessionDetailStream({
     }
 
     function handleAssistantDelta(event: MessageEvent<string>) {
+      if (disposed) {
+        return;
+      }
       const routed = routeSessionStreamEvent({
         activeSessionId: streamSessionId,
         expectedType: "assistant_delta",
@@ -542,6 +556,7 @@ export function useSessionDetailStream({
       setSessionStreamConnected(true);
       desktopConversationNotifierRef.current.handleAssistantDelta(routed.payload, {
         sessionTitle: sessionTitleForNotificationsRef.current || streamSessionId,
+        viewedSessionId: viewedSessionIdRef.current,
       });
       queueAssistantDelta(routed.payload, routed.trace);
     }
@@ -551,17 +566,13 @@ export function useSessionDetailStream({
     stream.addEventListener("assistant_delta", handleAssistantDelta as EventListener);
 
     return () => {
-      const readyStateBeforeClose = stream.readyState;
-      applyPendingAssistantDeltas("close");
-      applyPendingDetail("close");
+      // Route/session switch: dispose synchronously BEFORE touching the UI. Any
+      // pending payload from the old stream must be discarded, never applied to
+      // the React Query cache or the active-turn layer. Cleanup also cancels the
+      // coalesce timer and the assistant-delta animation frame so no expensive
+      // main-thread work outlives the old EventSource.
       disposed = true;
-      setSessionStreamConnected(false);
-      if (activeStreamRef.current?.stream === stream) {
-        activeStreamRef.current = null;
-      }
-      if (forceCloseStreamRef.current === forceCloseStream) {
-        forceCloseStreamRef.current = null;
-      }
+      const readyStateBeforeClose = stream.readyState;
       if (applyTimer) {
         window.clearTimeout(applyTimer);
         applyTimer = null;
@@ -569,6 +580,16 @@ export function useSessionDetailStream({
       if (assistantDeltaApplyFrame !== null) {
         window.cancelAnimationFrame(assistantDeltaApplyFrame);
         assistantDeltaApplyFrame = null;
+      }
+      pendingDetail = null;
+      pendingDetailTrace = null;
+      assistantDeltaScheduler.cancel();
+      setSessionStreamConnected(false);
+      if (activeStreamRef.current?.stream === stream) {
+        activeStreamRef.current = null;
+      }
+      if (forceCloseStreamRef.current === forceCloseStream) {
+        forceCloseStreamRef.current = null;
       }
       stream.removeEventListener("session_detail", handleSessionDetail as EventListener);
       stream.removeEventListener("session_initial", handleSessionInitial as EventListener);

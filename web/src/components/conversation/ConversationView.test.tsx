@@ -72,11 +72,13 @@ function renderConversation(
       agentDisplayName?: string;
     }>;
     composerDisabled?: boolean;
+    composerPlaceholder?: string;
     composerActionMode?: "send" | "stop";
     composerActionDisabled?: boolean;
     submitLabel?: string;
     composerError?: string;
     composerGuidance?: string;
+    followupQueue?: Array<{ id: string; text: string }>;
     composerModeNotice?: string;
     composerModeTargetPreview?: string;
     cancelComposerModeLabel?: string;
@@ -123,7 +125,7 @@ function renderConversation(
         showComposer={options.showComposer}
         {...processDisplayProps}
         composerValue={options.composerValue ?? ""}
-        composerPlaceholder="Type"
+        composerPlaceholder={options.composerPlaceholder ?? "Type"}
         composerDisabled={options.composerDisabled ?? false}
         composerActionMode={options.composerActionMode}
         composerActionDisabled={options.composerActionDisabled}
@@ -131,6 +133,7 @@ function renderConversation(
         submitLabel={options.submitLabel}
         composerError={options.composerError}
         composerGuidance={options.composerGuidance}
+        followupQueue={options.followupQueue}
         composerModeNotice={options.composerModeNotice}
         composerModeTargetPreview={options.composerModeTargetPreview}
         cancelComposerModeLabel={options.cancelComposerModeLabel}
@@ -172,6 +175,8 @@ describe("ConversationView VUI control contract", () => {
     expect(conversationViewSource).not.toMatch(/<input\b/);
     expect(conversationViewSource).not.toMatch(/<select\b/);
     expect(conversationViewSource).not.toMatch(/<textarea\b/);
+    expect(conversationViewSource).toContain("primaryActionIsQueueSubmit");
+    expect(conversationViewSource).toContain("ConversationFollowupQueueBar");
   });
 });
 
@@ -574,9 +579,17 @@ describe("ConversationView edit resend affordance", () => {
     expect(conversationViewSource).toContain("<ComposerContextRing");
     expect(ringSource).toContain('data-chrome="bare"');
     expect(ringSource).toContain("isIconOnly");
+    expect(ringSource).not.toContain("ContourArcs");
+    expect(ringSource).not.toContain('r="12.2"');
+    expect(ringSource).not.toContain("strokeDasharray={`0 ${start}");
+    expect(ringSource).toContain('stroke="color-mix(in srgb, var(--accent-cool) 18%, transparent)"');
+    expect(ringSource).not.toContain("var(--vui-border-subtle) 90%");
     expect(ringStyles.trigger).toContain("!overflow-hidden");
     expect(ringStyles.trigger).toContain("!rounded-full");
     expect(ringStyles.trigger).toContain("!border-0");
+    expect(ringStyles.ring).toContain("overflow-visible");
+    expect(ringStyles.ring).not.toContain("overflow-hidden");
+    expect(ringStyles.ring.split(/\s+/)).not.toContain("ring");
     expect(conversationViewSource).toContain("composerContextRing");
     expect(conversationViewSource).toContain('composerVariant === "codex" ? composerActions : null');
     expect(conversationViewSource).toContain('composerVariant === "compact" ? composerActions : null');
@@ -1128,7 +1141,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain('src="/api/config/avatar-image/avatar-test.png"');
     expect(html).not.toContain(">C</div>");
   });
-  it("keeps the composer writable while a running turn shows guidance and keeps stop actions", () => {
+  it("keeps the composer writable while a running turn shows a labeled queue action and stop", () => {
     const html = renderConversation([], {
       composerValue: "下一句先写在这里",
       composerDisabled: true,
@@ -1142,31 +1155,51 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("下一句先写在这里");
     expect(html).toContain("当前轮仍在运行");
     expect(html).toContain("打断引导会先记录再请求停止当前轮");
-    expect(html).toContain('aria-label="安全引导"');
+    expect(html).toContain('aria-label="排队"');
+    expect(html).toContain(">排队</");
     expect(html).not.toContain('aria-label="打断引导"');
     expect(html).toContain('aria-label="终止"');
-    expect(html).toContain("composerRoundButtonPrimary");
+    expect(html).toContain("composerEditSubmitButton");
     expect(html).toContain("stopButton");
     const textarea = html.match(/<textarea[^>]*>/)?.[0] ?? "";
     expect(textarea).not.toMatch(/\sdisabled(?:[=>\s]|$)/);
   });
 
-  it("keeps the running composer stop-only until a draft exists while guidance remains visible", () => {
+  it("keeps the running composer stop-only until a draft or queue exists", () => {
     const html = renderConversation([], {
       composerValue: "",
+      composerPlaceholder: "",
       composerDisabled: true,
       composerActionMode: "stop",
       composerActionDisabled: false,
-      composerGuidance: "当前轮仍在运行。安全引导会记录到会话上下文；打断引导会先记录再请求停止当前轮。",
       onSafeGuidance: () => undefined,
       onInterruptGuidance: () => undefined,
     });
 
-    expect(html).toContain("当前轮仍在运行");
-    expect(html).toContain("打断引导会先记录再请求停止当前轮");
-    expect(html).not.toContain('aria-label="安全引导"');
+    expect(html).toContain("输入后排队，当前轮结束后自动发出");
+    expect(html).not.toContain('aria-label="排队"');
+    expect(html).not.toContain('aria-label="立刻引导"');
+    expect(html).not.toContain('aria-label="打断引导"');
     expect(html).toContain('aria-label="终止"');
     expect(html.match(/composerRoundButton/g)?.length).toBe(1);
+  });
+
+  it("shows queued follow-ups above the composer and offers immediate steer when the draft is empty", () => {
+    const html = renderConversation([], {
+      composerValue: "",
+      composerPlaceholder: "",
+      composerDisabled: true,
+      composerActionMode: "stop",
+      composerActionDisabled: false,
+      followupQueue: [{ id: "q-1", text: "先不要改测试，只汇报改了哪些文件。" }],
+    });
+
+    expect(html).toContain("先不要改测试，只汇报改了哪些文件。");
+    expect(html).toContain("followupQueueBar");
+    expect(html).toContain('aria-label="立刻引导"');
+    expect(html).toContain(">立刻引导</");
+    expect(html).toContain("再输入则追加；空输入再 Enter 立刻引导");
+    expect(html).toContain('aria-label="终止"');
   });
 
   it("renders edit controls only for the latest user message", () => {
@@ -1194,6 +1227,35 @@ describe("ConversationView edit resend affordance", () => {
     expect(html.match(/aria-label="Edit and resend"/g)?.length).toBe(1);
     expect(html).toContain("Second prompt");
     expect(html).toContain("First prompt");
+  });
+
+  it("renders running-turn steer records without an edit control", () => {
+    const html = renderConversation([
+      {
+        id: "message-user-1",
+        role: "user",
+        content: "First prompt",
+        timestamp: "2026-05-22T00:00:00Z",
+      },
+      {
+        id: "message-assistant-1",
+        role: "assistant",
+        content: "First answer",
+        timestamp: "2026-05-22T00:01:00Z",
+      },
+      {
+        id: "message-steer-1",
+        role: "user",
+        content: "这一轮先不要改代码，只汇报。",
+        timestamp: "2026-05-22T00:01:30Z",
+        metadata: { kind: "user_guidance", source: "steer" },
+      },
+    ]);
+
+    expect(html).toContain("这一轮先不要改代码，只汇报。");
+    expect(html).toContain("引导");
+    expect(html.match(/aria-label="Edit and resend"/g)?.length).toBe(1);
+    expect(html).toContain("turnEditBadge");
   });  it("renders user image attachments and composer image chips", () => {
     const userMessage: ConversationMessage = {
       id: "message-user",

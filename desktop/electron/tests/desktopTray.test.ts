@@ -77,10 +77,7 @@ function createActions() {
     getFreshness: vi.fn().mockResolvedValue({ current: false, label: "Launcher 落后本地 main · aaa111 → bbb222" }),
     startInstance: vi.fn(),
     stopInstance: vi.fn(),
-    restartProject: vi.fn(),
-    rebuildAndStart: vi.fn(),
     restartLauncher: vi.fn(),
-    showStatus: vi.fn(),
     quit: vi.fn(),
     stopAll: vi.fn()
   };
@@ -106,7 +103,24 @@ describe("Electron desktop tray", () => {
     expect(trayInstances[0].tooltip).toBe("Vibelution");
   });
 
-  it("exposes start/stop as instance submenus and keeps the other tray actions", async () => {
+  it("uses launcher-centric tray labels without direct main-workbench restart actions", () => {
+    expect(DESKTOP_TRAY_MENU_LABELS).toEqual({
+      openLauncher: "打开 Launcher 控制窗口",
+      startProject: "启动工作区…",
+      stopProject: "停止工作区…",
+      restartLauncher: "重启 Launcher 桌面程序",
+      freshnessUnknown: "Launcher 代码版本：未知",
+      freshnessLoading: "正在读取 Launcher 代码版本…",
+      quit: "退出桌面程序（不强停任务）",
+      stopAll: "停止全部托管进程并退出…",
+      noStartable: "没有可启动的工作区",
+      noRunning: "没有正在运行的工作区",
+      listFailed: "无法读取工作区列表",
+      listLoading: "正在读取工作区列表…"
+    });
+  });
+
+  it("exposes start/stop submenus and launcher lifecycle actions only", async () => {
     const actions = createActions();
     const tray = createDesktopTray(desktopPaths, actions) as unknown as InstanceType<typeof FakeTray>;
 
@@ -117,9 +131,6 @@ describe("Electron desktop tray", () => {
       "separator",
       DESKTOP_TRAY_MENU_LABELS.startProject,
       DESKTOP_TRAY_MENU_LABELS.stopProject,
-      DESKTOP_TRAY_MENU_LABELS.restartProject,
-      DESKTOP_TRAY_MENU_LABELS.rebuildAndStart,
-      DESKTOP_TRAY_MENU_LABELS.showStatus,
       "separator",
       DESKTOP_TRAY_MENU_LABELS.quit,
       DESKTOP_TRAY_MENU_LABELS.stopAll
@@ -140,26 +151,20 @@ describe("Electron desktop tray", () => {
     ]);
     const startMenu = refreshed[4]?.submenu as Array<Record<string, unknown>>;
     const stopMenu = refreshed[5]?.submenu as Array<Record<string, unknown>>;
-    expect(startMenu.map((item) => item.label)).toEqual(["task"]);
-    expect(stopMenu.map((item) => item.label)).toEqual(["主"]);
+    expect(startMenu.map((item) => item.label)).toEqual(["启动「task」工作区"]);
+    expect(stopMenu.map((item) => item.label)).toEqual(["停止「主」工作区"]);
 
     (startMenu[0].click as () => void)();
     (stopMenu[0].click as () => void)();
     (refreshed[0].click as () => void)();
     (refreshed[2].click as () => void)();
-    (refreshed[6].click as () => void)();
     (refreshed[7].click as () => void)();
     (refreshed[8].click as () => void)();
-    (refreshed[10].click as () => void)();
-    (refreshed[11].click as () => void)();
 
     expect(actions.startInstance).toHaveBeenCalledWith("worktree:task", "task");
     expect(actions.stopInstance).toHaveBeenCalledWith("main", "主");
     expect(actions.openLauncher).toHaveBeenCalledTimes(1);
     expect(actions.restartLauncher).toHaveBeenCalledTimes(1);
-    expect(actions.restartProject).toHaveBeenCalledTimes(1);
-    expect(actions.rebuildAndStart).toHaveBeenCalledTimes(1);
-    expect(actions.showStatus).toHaveBeenCalledTimes(1);
     expect(actions.quit).toHaveBeenCalledTimes(1);
     expect(actions.stopAll).toHaveBeenCalledTimes(1);
   });
@@ -180,7 +185,9 @@ describe("Electron desktop tray", () => {
       expect(menuTemplates.length).toBeGreaterThan(1);
     });
     const firstLive = menuTemplates[menuTemplates.length - 1];
-    expect((firstLive[5]?.submenu as Array<Record<string, unknown>>).map((item) => item.label)).toEqual(["main"]);
+    expect((firstLive[5]?.submenu as Array<Record<string, unknown>>).map((item) => item.label)).toEqual([
+      "停止「main」工作区"
+    ]);
 
     const tray = trayInstances[0];
     tray.emit("right-click");
@@ -189,6 +196,8 @@ describe("Electron desktop tray", () => {
     });
     const failed = menuTemplates[menuTemplates.length - 1];
     expect(failed[1]?.label).toBe("Launcher 已是最新 · abc123");
-    expect((failed[5]?.submenu as Array<Record<string, unknown>>).map((item) => item.label)).toEqual(["main"]);
+    expect((failed[5]?.submenu as Array<Record<string, unknown>>).map((item) => item.label)).toEqual([
+      "停止「main」工作区"
+    ]);
   });
 });

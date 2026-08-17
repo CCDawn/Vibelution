@@ -3,7 +3,11 @@ import { Terminal } from "@xterm/xterm";
 import { RotateCcw, SquareTerminal } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { fetchJson } from "../../api/client";
+import {
+  ensureCliAgentTerminalSession,
+  resizeCliAgentTerminal,
+  sendCliAgentTerminalInput,
+} from "../../api/cliAgents";
 import { VButton } from "../../components/vui";
 import type { CliAgentRunView, CliAgentTerminalSession } from "../ChatCodingRoute";
 import {
@@ -168,11 +172,7 @@ export function CliAgentRunTerminalPanel({
       return;
     }
     setTerminalError("");
-    fetchJson<CliAgentTerminalAck>(`/api/cli-agents/terminal-sessions/${encodeURIComponent(sessionId)}/input`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ data }),
-    })
+    sendCliAgentTerminalInput<CliAgentTerminalAck>(sessionId, { data })
       .then((ack) => {
         if (ack.alive === false) {
           setTerminalSession((current) => current ? { ...current, ...ack, alive: false } : current);
@@ -197,11 +197,7 @@ export function CliAgentRunTerminalPanel({
       return;
     }
     lastPostedSizeRef.current = { rows, cols };
-    fetchJson<CliAgentTerminalAck>(`/api/cli-agents/terminal-sessions/${encodeURIComponent(sessionId)}/resize`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rows, cols }),
-    })
+    resizeCliAgentTerminal<CliAgentTerminalAck>(sessionId, { rows, cols })
       .then((ack) => {
         setTerminalSession((current) => {
           if (!current || ack.terminalSessionId !== current.terminalSessionId) {
@@ -332,24 +328,19 @@ export function CliAgentRunTerminalPanel({
 
   const fetchTerminalSession = useCallback((intent: "view" | "resume" | "start", signal?: AbortSignal) => {
     const terminalSize = terminalSizeForRequest();
-    return fetchJson<CliAgentTerminalSession>("/api/cli-agents/terminal-sessions/ensure", {
-      method: "POST",
-      signal,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        agentType: run.agentType,
-        task: run.task,
-        cwd: run.cwd,
-        mode: run.mode || "readonly",
-        intent,
-        sourceSessionId,
-        sourceMessageId: run.messageId,
-        sourceRunId: run.sourceRunId,
-        cliSessionId: intent === "start" ? "" : terminalCliSessionIdRef.current,
-        rows: terminalSize.rows,
-        cols: terminalSize.cols,
-      }),
-    })
+    return ensureCliAgentTerminalSession<CliAgentTerminalSession>({
+      agentType: run.agentType,
+      task: run.task,
+      cwd: run.cwd,
+      mode: run.mode || "readonly",
+      intent,
+      sourceSessionId,
+      sourceMessageId: run.messageId,
+      sourceRunId: run.sourceRunId,
+      cliSessionId: intent === "start" ? "" : terminalCliSessionIdRef.current,
+      rows: terminalSize.rows,
+      cols: terminalSize.cols,
+    }, { signal })
       .then((session) => {
         setTerminalSession(session);
         if (intent === "view" || !canInputTerminal(session)) {

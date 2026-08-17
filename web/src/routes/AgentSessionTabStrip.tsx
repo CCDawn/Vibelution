@@ -1,7 +1,7 @@
 import { Bot, Check, LoaderCircle, Plus, SquareTerminal, X } from "lucide-react";
 import type { DragEvent, KeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
 
-import type { AgentInstance, SessionReferenceAttachment, SessionSummary } from "../api/types";
+import type { AgentInstance, SessionReferenceAttachment, SessionSummary, Team } from "../api/types";
 import { VButton, VIconButton, VNativeInput } from "../components/vui";
 import type { TranslationKey } from "../i18n/dictionary";
 import { sessionAgentDisplayInfo } from "./agentDisplay";
@@ -12,6 +12,7 @@ import {
 } from "./sessionActivityIndicator";
 import styles from "./AgentSessionTabStrip.styles";
 import { isBusyPhase } from "./chat/chatCodingRouteViewModel";
+import { SessionTeamBindingTag } from "./chat/SessionTeamBindingTag";
 
 export type CliAgentRunTab = {
   id: string;
@@ -45,7 +46,9 @@ export function agentSessionStatusTone(
       | "currentPhase"
       | "status"
       | "lastTurnStatus"
+      | "terminalReason"
       | "sessionKind"
+      | "taskSummary"
       | "updatedAt"
       | "lastActive"
       | "agentInboxPendingCount"
@@ -133,6 +136,8 @@ export type AgentSessionTabStripProps = {
   /** @deprecated use deletePendingSessionId — global true freezes every tab close. */
   deletePending?: boolean;
   sessions: SessionSummary[];
+  /** Active team catalog for membership-based「团队」binding tags. */
+  teams?: Team[];
   /** Session ids with an active runtime chat_turn (green spinner). */
   runtimeRunningSessionIds?: readonly string[];
   /** Session ids waiting on tool/permission approval (yellow spinner). */
@@ -176,6 +181,7 @@ export function AgentSessionTabStrip({
   deletePendingSessionId = "",
   deletePending = false,
   sessions,
+  teams = [],
   runtimeRunningSessionIds = [],
   sessionIdsNeedingApproval = [],
   statusLabel: _statusLabel,
@@ -269,7 +275,8 @@ export function AgentSessionTabStrip({
           needsApproval,
           isRuntimeRunning,
           session,
-          isActive: tabActive,
+          // Blue/unread clears for the open conversation, even if a file tab is in front.
+          isActive: activeSessionId === session.id,
         });
         const statusShortLabel = agentSessionStatusShortLabel(statusTone, lang);
         const sessionTitle =
@@ -435,6 +442,7 @@ export function AgentSessionTabStrip({
               </span>
               {renderAgentSessionStatusSlot(statusTone)}
             </VButton>
+            <SessionTeamBindingTag session={session} lang={lang} teams={teams} />
             <VIconButton
               type="button"
               variant="ghost"

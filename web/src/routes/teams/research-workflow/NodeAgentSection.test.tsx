@@ -33,5 +33,6 @@ describe("NodeAgentSection", () => {
     expect(markup).toContain("pane=config");
     expect(markup).toContain("agent=agent-finder");
     expect(markup).not.toContain("source_finder");
+    expect(markup).toContain('data-layout="stacked"');
   });
 });

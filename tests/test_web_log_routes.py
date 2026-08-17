@@ -27,6 +27,7 @@ def test_logs_roots_and_tree_are_read_only(tmp_path, monkeypatch):
     conversation_log = tmp_path / "logs" / "conversations" / "chat.jsonl"
     conversation_log.parent.mkdir(parents=True, exist_ok=True)
     conversation_log.write_text('{"message":"ok"}\n', encoding="utf-8")
+    (tmp_path / ".runtime" / "launcher").mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setattr(log_service, "PROJECT_ROOT", tmp_path)
 
@@ -44,6 +45,7 @@ def test_logs_roots_and_tree_are_read_only(tmp_path, monkeypatch):
         for item in roots_payload
     ] == [
         {"id": "runtime_scenes", "path": "logs/runtime_scenes", "exists": True},
+        {"id": "launcher_runtime", "path": ".runtime/launcher", "exists": True},
         {"id": "runtime_logs", "path": "logs", "exists": True},
         {"id": "workspace_logs", "path": "workspace/logs", "exists": True},
         {"id": "conversation_logs", "path": "logs/conversations", "exists": True},
@@ -51,7 +53,7 @@ def test_logs_roots_and_tree_are_read_only(tmp_path, monkeypatch):
     runtime_root = next(item for item in roots_payload if item["id"] == "runtime_logs")
     assert runtime_root["summary"]["fileCount"] == 1
     assert runtime_root["summary"]["latestPath"] == "agent_realtime.log"
-    assert "后端" in runtime_root["summary"]["userGuide"]
+    assert "logs/" in runtime_root["summary"]["userGuide"]
     conversation_root = next(item for item in roots_payload if item["id"] == "conversation_logs")
     assert conversation_root["summary"]["fileCount"] == 1
     assert "conversation_" in conversation_root["summary"]["agentGuide"] or "debug_" in conversation_root["summary"]["agentGuide"]

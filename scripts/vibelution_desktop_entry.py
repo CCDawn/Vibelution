@@ -24,8 +24,29 @@ from typing import Iterator
 
 import tomllib
 
+try:
+    from scripts.windowless_subprocess import no_window_subprocess_kwargs
+except ModuleNotFoundError:  # Direct execution sets sys.path[0] to scripts/.
+    import importlib.util
+
+    _windowless_spec = importlib.util.spec_from_file_location(
+        "vibelution_windowless_subprocess",
+        Path(__file__).with_name("windowless_subprocess.py"),
+    )
+    if _windowless_spec is None or _windowless_spec.loader is None:
+        raise RuntimeError("Unable to load the windowless subprocess policy.")
+    _windowless_module = importlib.util.module_from_spec(_windowless_spec)
+    _windowless_spec.loader.exec_module(_windowless_module)
+    no_window_subprocess_kwargs = _windowless_module.no_window_subprocess_kwargs
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-RUNTIME_DIR = PROJECT_ROOT / ".runtime" / "launcher"
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from vibelution_storage import resolve_active_project_storage_paths, resolve_project_runtime_home
+
+PROJECT_STORAGE = resolve_active_project_storage_paths(PROJECT_ROOT)
+RUNTIME_DIR = PROJECT_STORAGE.runtime / "launcher"
 STATE_PATH = RUNTIME_DIR / "state.json"
 PYTHON_BRIDGE_LOG_PATH = RUNTIME_DIR / "desktop-entry-python.log"
 LAUNCHER_STDOUT_PATH = RUNTIME_DIR / "launcher-backend.stdout.log"
@@ -81,22 +102,11 @@ def _append_log(event: str, *, level: str = "info", **fields: object) -> None:
         handle.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n")
 
 
-def _hidden_creation_flags() -> int:
+def _desktop_process_group_flag() -> int:
+    """Return CREATE_NEW_PROCESS_GROUP on Windows; shared helper adds CREATE_NO_WINDOW + hidden startup info."""
     if os.name != "nt":
         return 0
-    flags = 0
-    for name in ("CREATE_NEW_PROCESS_GROUP", "CREATE_NO_WINDOW"):
-        flags |= int(getattr(subprocess, name, 0))
-    return flags
-
-
-def _hidden_startup_info() -> subprocess.STARTUPINFO | None:
-    if os.name != "nt" or not hasattr(subprocess, "STARTUPINFO"):
-        return None
-    startupinfo = subprocess.STARTUPINFO()
-    startupinfo.dwFlags |= int(getattr(subprocess, "STARTF_USESHOWWINDOW", 0))
-    startupinfo.wShowWindow = int(getattr(subprocess, "SW_HIDE", 0))
-    return startupinfo
+    return int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
 
 
 def _select_no_console_python(executable: str) -> str:
@@ -159,7 +169,7 @@ def _env_port(names: tuple[str, ...]) -> int | None:
 def _project_local_backend_port() -> int | None:
     """Read checkout-local port assignment written by the launcher on multi-project conflict."""
 
-    ports_path = PROJECT_ROOT / ".runtime" / "launcher" / "ports.json"
+    ports_path = resolve_project_runtime_home(PROJECT_ROOT) / "launcher" / "ports.json"
     try:
         raw = json.loads(ports_path.read_text(encoding="utf-8"))
     except (OSError, TypeError, ValueError, json.JSONDecodeError):
@@ -749,8 +759,7 @@ def _open_launcher_window(url: str) -> int:
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        creationflags=_hidden_creation_flags(),
-        startupinfo=_hidden_startup_info(),
+        **no_window_subprocess_kwargs(creationflags=_desktop_process_group_flag()),
     )
     app_identity = _apply_managed_browser_app_identity(int(process.pid), "launcher")
     return int(app_identity.get("windowPid") or process.pid)
@@ -776,8 +785,7 @@ def _start_launcher_backend(python_exe: str, port: int) -> int:
             stdin=subprocess.DEVNULL,
             stdout=stdout,
             stderr=stderr,
-            creationflags=_hidden_creation_flags(),
-            startupinfo=_hidden_startup_info(),
+            **no_window_subprocess_kwargs(creationflags=_desktop_process_group_flag()),
         )
     finally:
         stdout.close()
@@ -1213,6 +1221,257 @@ def _stop_owned_launcher(args: argparse.Namespace) -> dict[str, object]:
     }
 
 
+def _run_lifecycle_bridge(args: argparse.Namespace) -> dict[str, object]:
+    """Run a managed workbench lifecycle operation in-process on behalf of Electron main."""
+    operation = str(args.lifecycle_operation or "").strip().lower()
+    if operation not in _LIFECYCLE_OPERATIONS:
+        raise ValueError(f"Unsupported lifecycle operation: {operation}")
+    from core.launcher import service as launcher_service
+
+    _append_log("desktop_entry_python.lifecycle.started", operation=operation)
+    try:
+        if operation == "start":
+            response = launcher_service.request_launcher_start()
+        elif operation == "stop":
+            response = launcher_service.request_launcher_stop()
+        elif operation == "force-stop":
+            response = launcher_service.request_launcher_force_stop()
+        elif operation == "restart":
+            response = launcher_service.request_launcher_restart(
+                reason="electron_main_restart", source="electron_main"
+            )
+        elif operation == "shutdown":
+            response = launcher_service.request_launcher_runtime_shutdown()
+        else:
+            response = launcher_service.request_launcher_rebuild_and_start()
+    except launcher_service.LauncherActiveWorkBlocked as exc:
+        _append_log(
+            "desktop_entry_python.lifecycle.blocked",
+            level="warning",
+            operation=operation,
+            message=exc.message,
+        )
+        return {
+            "schemaVersion": 1,
+            "accepted": False,
+            "code": "active_work_blocked",
+            "operation": operation,
+            "message": str(exc.message),
+            "activeWorkRuns": list(getattr(exc, "active_work_runs", []) or []),
+        }
+    _append_log(
+        "desktop_entry_python.lifecycle.succeeded",
+        operation=operation,
+        command_id=str(response.get("commandId") or ""),
+    )
+    return {"schemaVersion": 1, **response}
+
+
+_LIFECYCLE_OPERATIONS = {"start", "stop", "force-stop", "restart", "rebuild-and-start", "shutdown"}
+
+
+def _run_branch_instance_bridge(args: argparse.Namespace) -> dict[str, object]:
+    """Run a branch-instance lifecycle operation in-process on behalf of Electron main."""
+    operation = str(args.branch_instance_operation or "").strip().lower()
+    instance_id = str(args.instance_id or "").strip()
+    if operation not in _BRANCH_INSTANCE_OPERATIONS:
+        raise ValueError(f"Unsupported branch instance operation: {operation}")
+    if not instance_id:
+        raise ValueError("branch instance id is required")
+    from core.launcher import service as launcher_service
+
+    _append_log("desktop_entry_python.branch_instance.started", operation=operation, instance_id=instance_id)
+    try:
+        response = launcher_service.request_branch_instance_operation(instance_id, operation)
+    except launcher_service.LauncherActiveWorkBlocked as exc:
+        _append_log(
+            "desktop_entry_python.branch_instance.blocked",
+            level="warning",
+            operation=operation,
+            instance_id=instance_id,
+            message=exc.message,
+        )
+        return {
+            "schemaVersion": 1,
+            "accepted": False,
+            "code": "active_work_blocked",
+            "operation": operation,
+            "instanceId": instance_id,
+            "message": str(exc.message),
+            "activeWorkRuns": list(getattr(exc, "active_work_runs", []) or []),
+        }
+    except Exception as exc:
+        _append_log(
+            "desktop_entry_python.branch_instance.failed",
+            level="error",
+            operation=operation,
+            instance_id=instance_id,
+            error_type=type(exc).__name__,
+            error=str(exc),
+        )
+        return {
+            "schemaVersion": 1,
+            "accepted": False,
+            "code": "branch_instance_operation_failed",
+            "operation": operation,
+            "instanceId": instance_id,
+            "message": str(exc),
+        }
+    _append_log(
+        "desktop_entry_python.branch_instance.succeeded",
+        operation=operation,
+        instance_id=instance_id,
+    )
+    return {"schemaVersion": 1, **response}
+
+
+_BRANCH_INSTANCE_OPERATIONS = {"start", "stop", "force-stop", "restart"}
+
+
+def _run_launcher_api_bridge(args: argparse.Namespace) -> dict[str, object]:
+    """Serve settings/developer-mode/maintenance through a no-console JSON CLI."""
+    path = str(args.launcher_api_path or "").strip()
+    method = str(args.launcher_api_method or "GET").strip().upper()
+    body: dict[str, object] = {}
+    if args.launcher_api_body:
+        body = json.loads(args.launcher_api_body) if isinstance(args.launcher_api_body, str) else dict(args.launcher_api_body)
+    if not isinstance(body, dict):
+        body = {}
+    from core.launcher import service as launcher_service
+
+    _append_log("desktop_entry_python.launcher_api.started", method=method, path=path)
+    try:
+        if path == "settings/workbench-window" and method == "GET":
+            response = launcher_service.get_workbench_window_mode_setting()
+        elif path == "settings/workbench-window" and method == "PUT":
+            response = launcher_service.update_workbench_window_mode(
+                str(body.get("mode") or ""), base_hash=str(body.get("baseHash") or "")
+            )
+        elif path == "settings/startup" and method == "GET":
+            response = launcher_service.get_launcher_startup_settings()
+        elif path == "settings/startup" and method == "PUT":
+            response = launcher_service.update_launcher_startup_settings(body)
+        elif path == "developer-mode" and method == "GET":
+            response = launcher_service.get_launcher_developer_mode_setting()
+        elif path == "developer-mode" and method == "PUT":
+            response = launcher_service.update_launcher_developer_mode(
+                body.get("enabled"), base_hash=str(body.get("baseHash") or "")
+            )
+        elif path == "developer-mode/reset-sandbox" and method == "POST":
+            response = launcher_service.reset_launcher_developer_sandbox()
+        elif path == "developer-mode/noise-overview" and method == "GET":
+            response = launcher_service.get_launcher_developer_noise_overview()
+        elif path == "developer-mode/cleanup/preview" and method == "POST":
+            response = launcher_service.preview_launcher_developer_cleanup(str(body.get("action") or ""))
+        elif path == "developer-mode/cleanup/apply" and method == "POST":
+            response = launcher_service.apply_launcher_developer_cleanup(body)
+        elif path == "maintenance/reset/summary" and method == "GET":
+            response = launcher_service.get_launcher_maintenance_summary()
+        elif path == "maintenance/reset/preview" and method == "POST":
+            response = launcher_service.preview_launcher_maintenance_plan(body)
+        elif path == "maintenance/reset/apply" and method == "POST":
+            response = launcher_service.apply_launcher_maintenance_plan(body)
+        elif path == "status" and method == "GET":
+            response = launcher_service.get_launcher_status()
+        elif path == "freshness" and method == "GET":
+            response = launcher_service.get_launcher_freshness()
+        elif path == "branch-instances" and method == "GET":
+            response = launcher_service.list_launcher_branch_instances()
+        elif path == "branch-instances/cleanup" and method == "POST":
+            instance_ids = body.get("instanceIds")
+            if not isinstance(instance_ids, list):
+                instance_ids = []
+            response = launcher_service.cleanup_launcher_branch_instances(
+                [str(item) for item in instance_ids],
+                confirm=bool(body.get("confirm")),
+            )
+        else:
+            raise RuntimeError(f"Unsupported launcher api path: {method} {path}")
+    except Exception as exc:
+        _append_log(
+            "desktop_entry_python.launcher_api.failed",
+            level="error",
+            method=method,
+            path=path,
+            error_type=type(exc).__name__,
+            error=str(exc),
+        )
+        return {
+            "schemaVersion": 1,
+            "ok": False,
+            "code": "launcher_api_bridge_failed",
+            "message": str(exc),
+        }
+    _append_log("desktop_entry_python.launcher_api.succeeded", method=method, path=path)
+    return {"schemaVersion": 1, "ok": True, "payload": response}
+
+
+def _resolve_workbench_bridge(_args: argparse.Namespace) -> dict[str, object]:
+    """Resolve the managed workbench URL without a Python Launcher control plane."""
+    port = _workbench_port()
+    url = str(_read_state().get("url") or "").strip()
+    if not url.startswith("http://127.0.0.1:") and not url.startswith("http://localhost:"):
+        url = f"http://{DEFAULT_HOST}:{port}/"
+    _append_log("desktop_entry_python.resolve_workbench.succeeded", backend_port=port, url=url)
+    return {
+        "schemaVersion": 1,
+        "workbenchUrl": url,
+        "backendPort": port,
+    }
+
+
+def _workspace_root(args: argparse.Namespace) -> Path:
+    requested = str(getattr(args, "workspace", "") or "").strip()
+    return Path(requested or PROJECT_ROOT).resolve()
+
+
+def _desktop_shell_status_bridge(args: argparse.Namespace) -> dict[str, object]:
+    from core.launcher.desktop_shell import inspect_desktop_shell
+
+    payload = inspect_desktop_shell(_workspace_root(args))
+    _append_log(
+        "desktop_entry_python.desktop_shell.status",
+        stale=bool(payload.get("stale")),
+        reason=str(payload.get("reason") or ""),
+    )
+    return payload
+
+
+def _schedule_desktop_shell_refresh_bridge(args: argparse.Namespace) -> dict[str, object]:
+    from core.launcher.desktop_shell import schedule_desktop_shell_refresh
+
+    payload = schedule_desktop_shell_refresh(
+        wait_pid=int(args.wait_pid or 0),
+        then_lifecycle=str(args.then_lifecycle or ""),
+        project_root=_workspace_root(args),
+        python_executable=str(args.python_exe or sys.executable),
+        force=bool(getattr(args, "force_refresh", False)),
+    )
+    _append_log(
+        "desktop_entry_python.desktop_shell.refresh_scheduled",
+        helper_pid=int(payload.get("helperPid") or 0),
+        wait_pid=int(payload.get("waitPid") or 0),
+        then_lifecycle=str(payload.get("thenLifecycle") or ""),
+    )
+    return payload
+
+
+def _refresh_desktop_shell_bridge(args: argparse.Namespace) -> dict[str, object]:
+    from core.launcher.desktop_shell import run_desktop_shell_refresh
+
+    payload = run_desktop_shell_refresh(
+        wait_pid=int(args.wait_pid or 0),
+        then_lifecycle=str(args.then_lifecycle or ""),
+        project_root=_workspace_root(args),
+    )
+    _append_log(
+        "desktop_entry_python.desktop_shell.refreshed",
+        then_lifecycle=str(args.then_lifecycle or ""),
+        wait_pid=int(args.wait_pid or 0),
+    )
+    return payload
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Open the Vibelution Launcher without a console window.")
     parser.add_argument("--action", default="launcher")
@@ -1224,14 +1483,48 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--run-id", default="")
     parser.add_argument("--owned-backend-pid", type=int, default=0)
     parser.add_argument("--attach-healthy-launcher", action="store_true")
+    parser.add_argument("--lifecycle-operation", default="")
+    parser.add_argument("--branch-instance-operation", default="")
+    parser.add_argument("--instance-id", default="")
+    parser.add_argument("--launcher-api-path", default="")
+    parser.add_argument("--launcher-api-method", default="GET")
+    parser.add_argument("--launcher-api-body", default="")
+    parser.add_argument("--wait-pid", type=int, default=0)
+    parser.add_argument("--then-lifecycle", default="")
+    parser.add_argument(
+        "--force-refresh",
+        action="store_true",
+        help="Clear recent desktop shell refresh failure cooldown before scheduling.",
+    )
     return parser.parse_args(argv)
+
+
+def _configure_utf8_stdio() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            with contextlib.suppress(OSError, ValueError):
+                reconfigure(encoding="utf-8", errors="replace")
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     action = str(args.action or "launcher").strip().lower()
-    if action not in {"launcher", "bootstrap", "stop-launcher"}:
+    if action not in {
+        "launcher",
+        "bootstrap",
+        "stop-launcher",
+        "lifecycle",
+        "branch-instance",
+        "launcher-api",
+        "resolve-workbench",
+        "desktop-shell-status",
+        "schedule-desktop-shell-refresh",
+        "refresh-desktop-shell",
+    }:
         raise SystemExit(f"Unsupported desktop-entry Python bridge action: {action}")
+    if str(args.output or "").strip().lower() == "json":
+        _configure_utf8_stdio()
     try:
         _append_log("desktop_entry_python.open.started", action=action, no_browser=bool(args.no_browser), run_id=args.run_id)
         if action == "bootstrap":
@@ -1246,6 +1539,48 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
             else:
                 print(f"Launcher stop {payload['status']}")
+        elif action == "lifecycle":
+            payload = _run_lifecycle_bridge(args)
+            if args.output == "json":
+                print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+            else:
+                print(f"Lifecycle {payload.get('operation')} accepted={payload.get('accepted')}")
+        elif action == "branch-instance":
+            payload = _run_branch_instance_bridge(args)
+            if args.output == "json":
+                print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+            else:
+                print(f"Branch instance {payload.get('operation')} accepted={payload.get('accepted')}")
+        elif action == "launcher-api":
+            payload = _run_launcher_api_bridge(args)
+            if args.output == "json":
+                print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+            else:
+                print(f"Launcher api ok={payload.get('ok')}")
+        elif action == "resolve-workbench":
+            payload = _resolve_workbench_bridge(args)
+            if args.output == "json":
+                print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+            else:
+                print(f"Workbench {payload.get('workbenchUrl')}")
+        elif action == "desktop-shell-status":
+            payload = _desktop_shell_status_bridge(args)
+            if args.output == "json":
+                print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+            else:
+                print(f"Desktop shell stale={payload.get('stale')} reason={payload.get('reason')}")
+        elif action == "schedule-desktop-shell-refresh":
+            payload = _schedule_desktop_shell_refresh_bridge(args)
+            if args.output == "json":
+                print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+            else:
+                print(f"Desktop shell refresh scheduled helperPid={payload.get('helperPid')}")
+        elif action == "refresh-desktop-shell":
+            payload = _refresh_desktop_shell_bridge(args)
+            if args.output == "json":
+                print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+            else:
+                print("Desktop shell refreshed")
         else:
             _open_launcher(args)
         _append_log("desktop_entry_python.open.succeeded", action=action, run_id=args.run_id)

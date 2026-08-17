@@ -3,7 +3,7 @@ import type { IpcMainInvokeEvent } from "electron";
 import { IPC_CHANNELS } from "../src/ipc.js";
 import { assertLocalHttpUrl } from "../src/security/urlPolicy.js";
 import { assertTrustedIpcSender } from "../src/security/ipcSenderValidation.js";
-import { resolveLauncherUrl, resolveWorkbenchUrl } from "../src/windows/windowUrlResolver.js";
+import { resolveLauncherWindowUrl, resolveWorkbenchUrl } from "../src/windows/windowUrlResolver.js";
 import {
   ElectronWindowProvider,
   shouldCancelWorkbenchInPageNavigation,
@@ -28,6 +28,7 @@ class FakeWindow implements ElectronWindowLike {
   loadedUrls: string[] = [];
   overlayCalls: Array<{ icon: unknown; description: string }> = [];
   flashCalls: boolean[] = [];
+  sentIpc: Array<{ channel: string; payload: unknown }> = [];
   title = "";
   private destroyed = false;
   private focused = false;
@@ -50,6 +51,9 @@ class FakeWindow implements ElectronWindowLike {
       },
       setWindowOpenHandler: (handler) => {
         this.windowOpenHandler = handler;
+      },
+      send: (channel, payload) => {
+        this.sentIpc.push({ channel, payload });
       }
     };
   }
@@ -593,6 +597,88 @@ describe("Electron window provider state", () => {
     expect(extra.isDestroyed()).toBe(true);
   });
 
+  it("adopts one existing workbench window and destroys extras", async () => {
+    const first = new FakeWindow(42, "http://127.0.0.1:8002/teams", 4242);
+    const extra = new FakeWindow(43, "http://127.0.0.1:8002/chat", 4343);
+    let created = 0;
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8002", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: (url) => {
+        created += 1;
+        return new FakeWindow(44, url, 4444);
+      },
+      listWorkbenchWindows: () => [first, extra].filter((window) => !window.isDestroyed())
+    });
+
+    const state = await provider.openOrFocusWorkbench("http://127.0.0.1:8002/");
+
+    expect(created).toBe(0);
+    expect(state.windowId).toBe(42);
+    expect(first.loadedUrls).toEqual(["http://127.0.0.1:8002/"]);
+    expect(extra.destroyCount).toBe(1);
+    expect(extra.isDestroyed()).toBe(true);
+    expect(provider.snapshot().workbench).toMatchObject({
+      open: true,
+      windowId: 42,
+      url: "http://127.0.0.1:8002/"
+    });
+  });
+
+  it("reports a leftover workbench window as open and closes it without creating another", async () => {
+    const leftover = new FakeWindow(42, "http://127.0.0.1:8002/teams", 4242);
+    const reports: Array<{ role: string; open: boolean; windowId?: number }> = [];
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8002", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: (url) => new FakeWindow(99, url, 9999),
+      listWorkbenchWindows: () => (leftover.isDestroyed() ? [] : [leftover]),
+      reportState: (state) => reports.push({ role: state.role, open: state.open, windowId: state.windowId }),
+      hungCloseDestroyAfterMs: 0
+    });
+
+    await provider.openLauncher();
+    expect(provider.snapshot().workbench).toMatchObject({
+      open: true,
+      windowId: 42,
+      url: "http://127.0.0.1:8002/teams"
+    });
+    expect(reports).toEqual(
+      expect.arrayContaining([{ role: "workbench", open: true, windowId: 42 }])
+    );
+
+    await provider.approveWorkbenchCloseOnce();
+    expect(leftover.isDestroyed()).toBe(true);
+    expect(provider.snapshot().workbench.open).toBe(false);
+  });
+
+  it("does not destroy an isolated instance window while sweeping leftover workbench windows", async () => {
+    const leftover = new FakeWindow(42, "http://127.0.0.1:8002/teams", 4242);
+    const isolated = new FakeWindow(99, "http://127.0.0.1:8004/", 9999);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8002", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: (url, _paths, options) => {
+        if (String(url).includes(":8004")) {
+          if (options?.title) {
+            isolated.setTitle(options.title);
+          }
+          return isolated;
+        }
+        return leftover;
+      },
+      listWorkbenchWindows: () => [leftover, isolated].filter((window) => !window.isDestroyed())
+    });
+
+    await provider.openOrFocusInstanceWorkbench({
+      instanceId: "worktree:task",
+      url: "http://127.0.0.1:8004/",
+      title: "branch+task 台"
+    });
+    const state = await provider.openOrFocusWorkbench("http://127.0.0.1:8002/");
+
+    expect(state.windowId).toBe(42);
+    expect(isolated.isDestroyed()).toBe(false);
+    expect(provider.snapshot().workbench.windowId).toBe(42);
+  });
+
   it("closes only Workbench while Launcher remains available", async () => {
     const launcherWindow = new FakeWindow(7, "http://127.0.0.1:8765/launcher", 7070);
     const workbenchWindow = new FakeWindow(42, "http://127.0.0.1:8000/", 4242, false);
@@ -632,6 +718,29 @@ describe("Electron window provider state", () => {
     workbenchWindow.blur();
 
     expect(provider.isWorkbenchFocused()).toBe(false);
+  });
+
+  it("sends notification click payloads to the workbench renderer", async () => {
+    const workbenchWindow = new FakeWindow(42, "http://127.0.0.1:8000/", 4242);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: () => workbenchWindow
+    });
+
+    expect(provider.sendToWorkbench("launcher:conversation-notification-opened", { sessionId: "session-1" })).toBe(false);
+
+    await provider.openOrFocusWorkbench();
+
+    expect(provider.sendToWorkbench("launcher:conversation-notification-opened", {
+      schemaVersion: 1,
+      sessionId: "session-1"
+    })).toBe(true);
+    expect(workbenchWindow.sentIpc).toEqual([
+      {
+        channel: "launcher:conversation-notification-opened",
+        payload: { schemaVersion: 1, sessionId: "session-1" }
+      }
+    ]);
   });
 
   it("applies and clears workbench taskbar attention", async () => {
@@ -753,6 +862,22 @@ describe("Launcher new-window requests", () => {
     expect(workbenchWindows).toHaveLength(0);
     expect(provider.isWorkbenchFocused()).toBe(false);
   });
+
+  it("denies workbench window.open and reuses the current window", async () => {
+    const workbenchWindow = new FakeWindow(42, "", 4242);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8002", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: () => workbenchWindow
+    });
+
+    await provider.openOrFocusWorkbench("http://127.0.0.1:8002/");
+    const focusCount = workbenchWindow.focusCount;
+
+    expect(workbenchWindow.windowOpenHandler).not.toBeNull();
+    expect(workbenchWindow.openRequest("http://127.0.0.1:8002/teams")).toEqual({ action: "deny" });
+    await vi.waitFor(() => expect(workbenchWindow.focusCount).toBeGreaterThan(focusCount));
+    expect(workbenchWindow.openRequest("https://example.com/open")).toEqual({ action: "deny" });
+  });
 });
 
 describe("Electron URL policy", () => {
@@ -770,15 +895,15 @@ describe("Electron URL policy", () => {
   });
 });
 
-describe("resolveLauncherUrl", () => {
-  it("does not silently hard-code a production port", () => {
-    expect(() => resolveLauncherUrl({ NODE_ENV: "production" } as NodeJS.ProcessEnv)).toThrow(
-      "Launcher URL is not resolved"
+describe("resolveLauncherWindowUrl", () => {
+  it("defaults the launcher window to the packaged app protocol", () => {
+    expect(resolveLauncherWindowUrl({ NODE_ENV: "production" } as NodeJS.ProcessEnv)).toBe(
+      "vibelution-launcher://launcher/launcher"
     );
   });
 
   it("accepts an explicit development override", () => {
-    expect(resolveLauncherUrl({ VIBELUTION_LAUNCHER_URL: "http://127.0.0.1:9000/launcher" } as NodeJS.ProcessEnv)).toBe(
+    expect(resolveLauncherWindowUrl({ VIBELUTION_LAUNCHER_URL: "http://127.0.0.1:9000/launcher" } as NodeJS.ProcessEnv)).toBe(
       "http://127.0.0.1:9000/launcher"
     );
   });
@@ -801,9 +926,11 @@ describe("resolveWorkbenchUrl", () => {
 describe("IPC channels", () => {
   it("keeps the bridge narrow", () => {
     expect(Object.keys(IPC_CHANNELS).sort()).toEqual([
+      "conversationNotificationOpened",
       "focusWorkbenchWindow",
       "getDesktopShellSummary",
       "getVersion",
+      "launcherInvoke",
       "notifyConversationCompleted",
       "requestDesktopShellExit"
     ]);

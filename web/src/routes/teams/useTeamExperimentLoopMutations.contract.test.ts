@@ -63,7 +63,7 @@ describe("team experiment loop mutations contract", () => {
   });
 
   it("preserves key write endpoints used by experiment ledger and research loop", () => {
-    expect(mutationsSource).toContain("/workflow-orchestration/experiments/plan");
+    expect(mutationsSource).toContain("createTeamExperimentPlan<");
     expect(mutationsSource).toContain("materializeTeamEngineeringProxyHypothesis(");
     expect(mutationsSource).toContain("completeTeamScientificHypothesisFromDesign(");
     expect(mutationsSource).toContain("reviewTeamExperimentHypothesis(");
@@ -72,7 +72,9 @@ describe("team experiment loop mutations contract", () => {
     expect(experimentApiSource).toContain("/complete-design");
     expect(experimentApiSource).toContain("/research/review/decide");
     expect(experimentApiSource).toContain("/hypotheses/${encodeURIComponent(candidateId)}/revision");
-    expect(mutationsSource).toContain("/baseline-artifact");
+    expect(experimentApiSource).toContain("/workflow-orchestration/experiments/plan");
+    expect(experimentApiSource).toContain("/baseline-artifact");
+    expect(mutationsSource).toContain("registerTeamExperimentBaselineArtifact<");
     expect(mutationsSource).toContain("runTeamExperimentSmoke(");
     expect(mutationsSource).not.toContain("/smoke-run");
     expect(experimentApiSource).toContain("/smoke-run");
@@ -80,13 +82,17 @@ describe("team experiment loop mutations contract", () => {
     expect(experimentApiSource).toContain("encodeURIComponent(planId)");
     expect(experimentApiSource).toContain("JSON.stringify(request)");
     expect(experimentApiSource).toContain("recordedByAgent");
-    expect(mutationsSource).toContain("/smoke-result");
-    expect(mutationsSource).toContain("/full-run-result");
-    expect(mutationsSource).toContain("/knowledge-ingestion-request");
-    expect(mutationsSource).toContain("/workflow-orchestration/research-loop/loops");
-    expect(mutationsSource).toContain("/evidence");
-    expect(mutationsSource).toContain("/decision");
-    expect(mutationsSource).toContain("/design-draft");
+    expect(mutationsSource).toContain("registerTeamExperimentSmokeResult<");
+    expect(mutationsSource).toContain("registerTeamExperimentFullRunResult<");
+    expect(mutationsSource).toContain("requestTeamExperimentKnowledgeIngestion<");
+    expect(mutationsSource).toContain("freezeTeamExperimentDesign<");
+    expect(experimentApiSource).toContain("/smoke-result");
+    expect(experimentApiSource).toContain("/full-run-result");
+    expect(experimentApiSource).toContain("/knowledge-ingestion-request");
+    expect(mutationsSource).toContain("createResearchLoop<");
+    expect(mutationsSource).toContain("recordResearchLoopEvidence<");
+    expect(mutationsSource).toContain("recordResearchLoopDecision<");
+    expect(mutationsSource).toContain("materializeResearchLoopIterationDesign<");
     expect(mutationsSource).toContain("allowedVariableChanges:");
     expect(mutationsSource).toContain("frozenControls:");
   });

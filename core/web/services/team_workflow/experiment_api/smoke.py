@@ -15,6 +15,33 @@ def _service():
     return team_workflow_orchestration_service
 
 
+def _resolve_declared_smoke_adapter(
+    s: Any,
+    *,
+    sources: tuple[Any, ...],
+    known_smoke_adapters: set[str],
+) -> str:
+    """Pick a smoke adapter, skipping formal-only FashionMNIST selection.
+
+    Frozen-protocol bind stamps ``fashion_mnist_predictive_coding_multi_seed``
+    onto ``adapterSelection`` so later full-run readiness can see an explicit
+    choice. That id is not a V1 CPU smoke adapter. Treating it as one 422s
+    SCI-096 ``controlled_run`` retry before bounded STOP can run.
+    Unknown smoke-plan ids still fail closed.
+    """
+    formal_only = {s.formal_runner.FASHION_MNIST_MULTI_SEED_ADAPTER}
+    for raw in sources:
+        text = s._trim_text(raw, max_length=120)
+        if not text or text in formal_only:
+            continue
+        if text not in known_smoke_adapters:
+            raise s.TeamWorkflowOrchestrationError(
+                f"Experiment plan declares an unavailable smoke adapter: {text}."
+            )
+        return text
+    return ""
+
+
 def run_experiment_smoke_run(team_id: str, plan_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     """N-11：对 experiment plan 执行 V1 CPU 确定性 smoke runner，并记录结果。
 
@@ -70,21 +97,20 @@ def run_experiment_smoke_run(team_id: str, plan_id: str, payload: dict[str, Any]
         if isinstance(experiment_contract.get("adapterSelection"), dict)
         else {}
     )
-    declared_adapter = s._trim_text(
-        adapter_selection.get("requestedAdapterId")
-        or adapter_selection.get("resolvedAdapterId")
-        or smoke_plan.get("adapter")
-        or legacy_smoke_settings.get("adapter"),
-        max_length=120,
-    )
     known_smoke_adapters = {
         *s.smoke_runner.WHITELIST_ADAPTERS,
         *s.smoke_runner.NON_EXECUTABLE_ADAPTERS,
     }
-    if declared_adapter and declared_adapter not in known_smoke_adapters:
-        raise s.TeamWorkflowOrchestrationError(
-            f"Experiment plan declares an unavailable smoke adapter: {declared_adapter}."
-        )
+    declared_adapter = _resolve_declared_smoke_adapter(
+        s,
+        sources=(
+            adapter_selection.get("requestedAdapterId"),
+            adapter_selection.get("resolvedAdapterId"),
+            smoke_plan.get("adapter"),
+            legacy_smoke_settings.get("adapter"),
+        ),
+        known_smoke_adapters=known_smoke_adapters,
+    )
     requested_adapter = s._trim_text(payload.get("adapter"), max_length=120)
     if declared_adapter and requested_adapter and declared_adapter != requested_adapter:
         raise s.TeamWorkflowOrchestrationError(
@@ -216,6 +242,14 @@ def register_experiment_smoke_result(team_id: str, plan_id: str, payload: dict[s
         plan["status"] = "smoke_passed" if smoke_result["status"] == "passed" else f"smoke_{smoke_result['status']}"
         plan["updatedAt"] = smoke_result["recordedAt"]
         s._refresh_experiment_plan_readiness(plan)
+        from core.web.services.team_workflow.outcome_graph import merge_registered_result
+
+        merge_registered_result(
+            plan,
+            smoke_result,
+            extra=request_payload,
+            peer_plans=[item for item in list(plan_store.get("plans") or []) if isinstance(item, dict)],
+        )
         plan_store["activePlanId"] = plan["planId"]
         plan_store["updatedAt"] = smoke_result["recordedAt"]
         s._write_json(s._experiment_plan_store_path(normalized_team_id), plan_store)

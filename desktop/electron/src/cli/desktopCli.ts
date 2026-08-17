@@ -5,7 +5,19 @@ export type DesktopCliArgs = {
   smoke: boolean;
   openWorkbench: boolean;
   workbenchCloseCanary: boolean;
+  lifecycleCommand: string;
 };
+
+const LIFECYCLE_COMMANDS = new Set([
+  "start",
+  "stop",
+  "force-stop",
+  "restart",
+  "rebuild-and-start",
+  "toggle",
+  "status",
+  "open"
+]);
 
 export function parseDesktopCliArgs(argv: string[]): DesktopCliArgs {
   const result: DesktopCliArgs = {
@@ -14,7 +26,8 @@ export function parseDesktopCliArgs(argv: string[]): DesktopCliArgs {
     configPath: "",
     smoke: false,
     openWorkbench: false,
-    workbenchCloseCanary: false
+    workbenchCloseCanary: false,
+    lifecycleCommand: ""
   };
   for (let index = 0; index < argv.length; index += 1) {
     const item = argv[index];
@@ -43,6 +56,11 @@ export function parseDesktopCliArgs(argv: string[]): DesktopCliArgs {
     }
     if (item === "--workbench-close-canary") {
       result.workbenchCloseCanary = true;
+      continue;
+    }
+    const lowered = String(item || "").trim().toLowerCase();
+    if (!item.startsWith("-") && LIFECYCLE_COMMANDS.has(lowered) && !result.lifecycleCommand) {
+      result.lifecycleCommand = lowered;
     }
   }
   return result;

@@ -13,77 +13,17 @@ const routeSourcePattern = /\.(ts|tsx)$/;
 const routeTestPattern = /\.test\.(ts|tsx)$/;
 
 /**
- * Transitional debt ledger. Counts may only stay equal or decrease.
- * New domain requests belong in web/src/api/<domain>.ts.
+ * Permanent frontend API boundary guard.
  *
- * The 2026-07-26 route-pack extraction redistributed existing calls without
- * increasing the aggregate debt. Keep the exact per-file ledger so future
- * moves remain reviewable, and keep the aggregate ceiling until these hooks
- * migrate to domain API modules.
+ * Route-layer JSON transport migration completed 2026-08; the ledger is empty
+ * and the aggregate budget is 0. Any new `fetchJson(` call or `api/client`
+ * import under web/src/routes/ fails this test.
+ *
+ * New JSON endpoints belong in web/src/api/<domain>.ts — see web/src/api/README.md
+ * and docs/standards/development-standard.md §24.4.
  */
-// Regenerated 2026-08 (R01 Chat workbench extract + current route client imports).
-// Counts may only stay equal or decrease from this snapshot without explicit review.
-const legacyRouteFetchJsonCallBudgets: Record<string, number> = {
-  "routes/AgentsRoute.tsx": 12,
-  "routes/ConfigProviderRegistryPanel.tsx": 4,
-  "routes/ConfigRoute.tsx": 1,
-  "routes/EvolutionRoute.tsx": 6,
-  "routes/GitRoute.tsx": 9,
-  "routes/HomeRedirect.tsx": 1,
-  "routes/LegacyEvolutionRedirect.tsx": 1,
-  "routes/LogsRoute.tsx": 5,
-  "routes/MemoryRoute.tsx": 2,
-  "routes/MemoryUserContentPanel.tsx": 6,
-  "routes/PetRoute.tsx": 1,
-  "routes/PromptTemplatesRoute.tsx": 7,
-  "routes/RuntimeScenesPane.tsx": 4,
-  "routes/SelfEvolutionTrack.tsx": 3,
-  "routes/SkillsRoute.tsx": 2,
-  "routes/SupervisedReviewRoute.tsx": 7,
-  "routes/SupervisedWorkspaceControls.tsx": 3,
-  "routes/ToolsRoute.tsx": 13,
-  "routes/UsageRoute.tsx": 1,
-  "routes/WorkbenchDomainRoute.tsx": 1,
-  "routes/WorkbenchModeRoute.tsx": 1,
-  "routes/agent-create/AgentCreateWizardDialog.tsx": 5,
-  "routes/agents/useAgentConfigDraftMutations.ts": 4,
-  "routes/agents/useAgentWorkbenchMutations.ts": 15,
-  "routes/chat/ChatCodingRouteWorkbench.tsx": 6,
-  "routes/chat/CliAgentRunTerminalPanel.tsx": 3,
-  "routes/chat/chatComposerSubmitModel.ts": 1,
-  "routes/chat/chatSessionDetailHelpers.ts": 1,
-  "routes/chat/useChatCliAgentTerminal.ts": 1,
-  "routes/chat/useChatComposerSubmit.ts": 4,
-  "routes/chat/useChatSessionDetailMutations.ts": 3,
-  "routes/chat/useChatSessionSelection.ts": 1,
-  "routes/chat/useChatWorkbenchCatalogQueries.ts": 11,
-  "routes/chat/useChatWorkspaceLifecycle.ts": 11,
-  "routes/chatSessionIndexQuery.ts": 1,
-  "routes/config/useConfigMigrationActions.ts": 1,
-  "routes/config/useConfigProviderDraftActions.ts": 1,
-  "routes/config/useConfigWorkspaceQueries.ts": 2,
-  "routes/evolution/useEvolutionProposalMutations.ts": 5,
-  "routes/evolution/useEvolutionRunMutations.ts": 8,
-  "routes/memory/useMemoryItemMutations.ts": 7,
-  "routes/memory/useMemoryKnowledgeMutations.ts": 8,
-  "routes/memory/useMemoryWorkbenchQueries.ts": 20,
-  "routes/teams/research-projects/ResearchProjectSwitcher.tsx": 4,
-  "routes/teams/useResearchWorkflowResources.ts": 9,
-  "routes/teams/useSourceCollectionRunQueries.ts": 4,
-  "routes/teams/useSourceCollectionWorkspace.ts": 2,
-  "routes/teams/useTeamExperimentLoopMutations.ts": 10,
-  "routes/teams/useTeamResearchSecondaryQueries.ts": 4,
-  "routes/teams/useTeamShellMutations.ts": 6,
-  "routes/teams/useTeamSourceCollectionMutations.ts": 11,
-  "routes/teams/useTeamWorkflowStartMutations.ts": 5,
-  "routes/teams/useTeamsCatalogQueries.ts": 2,
-  "routes/teams/useTeamsSecondaryDataQueries.ts": 1,
-  "routes/teams/useTeamsSelectedTeamDetail.ts": 1,
-  "routes/teams/useTeamsShellCanvasWorkspace.ts": 1,
-  "routes/teams/useTeamsWorkbenchFoundation.tsx": 1,
-};
-// Task 9: ResearchFlowCanvasRoute.tsx + ResearchRoute.tsx fully removed (redirect-only shells deleted).
-const legacyRouteFetchJsonAggregateBudget = 270;
+const legacyRouteFetchJsonCallBudgets: Record<string, number> = {};
+const legacyRouteFetchJsonAggregateBudget = 0;
 
 function walkSourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((entry) => {
@@ -128,7 +68,7 @@ describe("full-stack frontend API boundary", () => {
     expect(countFetchJsonCalls('fetchJson<Foo>("/api/foo");\nfetchJson("/api/bar");')).toBe(2);
   });
 
-  it("keeps legacy route-layer transport debt explicit and non-growing", () => {
+  it("keeps route-layer fetchJson absent from the recorded budget map", () => {
     const currentCounts = currentRouteCallCounts();
     const paths = new Set([
       ...Object.keys(legacyRouteFetchJsonCallBudgets),
@@ -145,25 +85,25 @@ describe("full-stack frontend API boundary", () => {
     expect(drift).toEqual([]);
   });
 
-  it("keeps direct API client imports inside the same legacy ledger", () => {
+  it("keeps route files from importing api/client directly", () => {
     expect(currentRouteClientImports()).toEqual(
       Object.keys(legacyRouteFetchJsonCallBudgets).sort(),
     );
   });
 
-  it("keeps route-layer transport debt at or below the pre-extraction aggregate ceiling", () => {
+  it("keeps the route-layer fetchJson aggregate budget at zero", () => {
     const aggregateBudget = Object.values(legacyRouteFetchJsonCallBudgets)
       .reduce((total, count) => total + count, 0);
     expect(aggregateBudget).toBeLessThanOrEqual(legacyRouteFetchJsonAggregateBudget);
   });
 
-  it("keeps legacy fetchJson calls visible instead of hiding them behind aliases", () => {
+  it("rejects fetchJson import aliases in route files", () => {
     const offenders = currentRouteClientImports()
       .filter((path) => /\bfetchJson\s+as\s+/.test(readFileSync(join(sourceRoot, path), "utf-8")));
     expect(offenders).toEqual([]);
   });
 
-  it("keeps the debt ledger explicit and reviewable", () => {
+  it("keeps the empty budget map aligned with existing route files", () => {
     const missing = Object.keys(legacyRouteFetchJsonCallBudgets)
       .filter((path) => !existsSync(join(sourceRoot, path)));
     expect(missing).toEqual([]);

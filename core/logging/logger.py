@@ -32,13 +32,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from vibelution_storage import ProjectIdentityError, resolve_active_project_storage_paths
+
 # ============================================================================
 # 落盘路径常量（统一到项目 logs/ 下，与 runtime_scenes 同根）
 # ============================================================================
 
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-LOG_ROOT = os.path.join(_PROJECT_ROOT, "logs")
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+try:
+    LOG_ROOT = str(resolve_active_project_storage_paths(_PROJECT_ROOT).logs)
+except ProjectIdentityError:
+    LOG_ROOT = str(_PROJECT_ROOT / "logs")
 CONVERSATION_LOG_DIR = os.path.join(LOG_ROOT, "conversations")
 
 _logger = logging.getLogger("core.logging.logger")

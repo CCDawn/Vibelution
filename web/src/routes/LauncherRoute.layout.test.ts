@@ -162,7 +162,7 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("const busy = controlBusy || supervisorMutation.isPending");
     expect(routeSource).toContain("const projectSummary = selectedIsCurrent");
     expect(routeSource).toContain("const startDisabled = selectedIsCurrent");
-    expect(routeSource).toContain("const startDisabledReason = launcherStatusDisconnected");
+    expect(routeSource).toContain("const startDisabledReason = launcherControlPlaneStarting");
     expect(routeSource).toContain("startDisabledReason");
     expect(routeSource).toContain("startDisabledBusy");
     expect(routeSource).toContain("const destructiveActionDisabled = selectedIsCurrent");
@@ -184,7 +184,8 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).not.toContain("forceStopDisabled={forceStopDisabled}");
     expect(routeSource).not.toContain("restartDisabled={destructiveActionDisabled}");
     expect(branchInstancesPanelSource).toContain("onLifecycle");
-    expect(branchInstancesPanelSource).toContain("labels.start");
+    expect(branchInstancesPanelSource).toContain("onStopMany");
+    expect(branchInstancesPanelSource).toContain('onLifecycle?.(item.id, "start")');
   });
 
   it("renders a dense lifecycle console rather than a landing page", () => {
@@ -391,7 +392,9 @@ describe("LauncherRoute layout contract", () => {
   });
 
   it("keeps the complete launcher surface reachable when the window is short", () => {
-    expect(routeStylesSource).toContain("content-start");
+    expect(routeSource).toContain("bodyClassName={styles.routeBody}");
+    expect(routeSource).toContain("fill");
+    expect(routeStylesSource).toContain("routeBody:");
     expect(routeStylesSource).toContain("overflow-y-auto");
     expect(routeStylesSource).toContain("overflow-x-hidden");
     expect(routeStylesSource).toContain("overscroll-contain");
@@ -654,6 +657,68 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).not.toContain("windowModeMutation");
   });
 
+  it("collapses startup settings into an accessible summary that expands to the unchanged form", () => {
+    expect(startupSettingsPanelSource).toContain("<details");
+    expect(startupSettingsPanelSource).toContain("<summary");
+    expect(startupSettingsPanelSource).not.toContain("<details open");
+    expect(startupSettingsPanelSource).toContain("onToggle={(event) => setSettingsOpen(event.currentTarget.open)}");
+    expect(startupSettingsPanelSource).toContain("expandSettings");
+    expect(startupSettingsPanelSource).toContain("collapseSettings");
+    // The concise summary is built from current profile, ports, and effective window mode.
+    expect(startupSettingsPanelSource).toContain("runtimeProfileLabel(current.runtime.profile, uiLang)");
+    expect(startupSettingsPanelSource).toContain("effectiveWindowModeLabel");
+    expect(startupSettingsPanelSource).toContain("effectiveControlPort || current.launcher.controlPort");
+    expect(startupSettingsPanelSource).toContain("effectiveBackendPort || current.workbench.backendPort");
+    expect(startupSettingsPanelSource).toContain("effectiveFrontendPort || current.workbench.frontendPort");
+    // The editable form stays inside the fold body with save/validation/window-mode semantics intact.
+    expect(startupSettingsPanelSource).toContain("settingsBody");
+    expect(startupSettingsPanelSource).toContain("saveDraft");
+    expect(startupSettingsPanelSource).toContain("setValidationError(copy.invalidPort)");
+    expect(startupSettingsPanelSource).toContain("saveWindowMode({ windowMode: value })");
+    expect(startupSettingsPanelSource).toContain("controlsDisabled");
+    // The collapsed summary title must stay on one line in the compact top strip.
+    expect(startupSettingsPanelStyles.settingsTitle).toContain("shrink-0");
+    expect(startupSettingsPanelStyles.settingsTitle).toContain("whitespace-nowrap");
+  });
+
+  it("keeps branch management and startup settings stacked without an empty side rail", () => {
+    expect(routeSource).toContain("styles.primaryRail");
+    expect(routeSource).toContain("styles.primaryColumn");
+    expect(routeSource).toContain("styles.settingsRail");
+    expect(routeSource).toContain('data-vui-region="launcher-primary-rail"');
+    expect(routeSource).toContain('data-vui-region="launcher-primary"');
+    expect(routeSource).toContain('data-vui-region="launcher-settings-rail"');
+    // Both the branch panel and the settings Suspense/panel live inside the rail container.
+    const railStart = routeSource.indexOf("className={styles.primaryRail}");
+    const statusErrorIndex = routeSource.indexOf("{statusQuery.isError && !launcherControlPlaneStarting ? (");
+    expect(railStart).toBeGreaterThan(0);
+    expect(statusErrorIndex).toBeGreaterThan(railStart);
+    expect(routeSource.slice(railStart, statusErrorIndex)).toContain("<LauncherBranchInstancesPanel");
+    expect(routeSource.slice(railStart, statusErrorIndex)).toContain("<LauncherStartupSettingsPanel");
+    // Status notices and advanced maintenance/diagnostics stay below the primary layout.
+    const settingsIndex = routeSource.indexOf("<LauncherStartupSettingsPanel");
+    const workspaceIndex = routeSource.indexOf("className={styles.workspace}");
+    const advancedIndex = routeSource.indexOf("className={styles.advancedFold}");
+    expect(settingsIndex).toBeGreaterThan(routeSource.indexOf("<LauncherBranchInstancesPanel"));
+    expect(statusErrorIndex).toBeGreaterThan(settingsIndex);
+    expect(workspaceIndex).toBeGreaterThan(statusErrorIndex);
+    expect(advancedIndex).toBeGreaterThan(workspaceIndex);
+    // Collapsed settings sit in an auto-height top strip; the branch table fills the rest.
+    // Expanding the form grows that strip full-width instead of reserving an empty side column.
+    expect(styles.primaryRail).toContain("grid-cols-1");
+    expect(styles.primaryRail).toContain("grid-rows-[auto_minmax(0,1fr)]");
+    expect(styles.primaryRail).not.toContain("minmax(250px,");
+    expect(styles.primaryRail).toContain("flex-1");
+    expect(styles.primaryColumn).toContain("min-w-0");
+    expect(styles.primaryColumn).toContain("flex-col");
+    expect(styles.primaryColumn).toContain("row-start-2");
+    expect(styles.settingsRail).toContain("min-w-0");
+    expect(styles.settingsRail).toContain("row-start-1");
+    expect(styles.settingsRail).not.toContain("col-span-full");
+    expect(startupSettingsPanelStyles.settingsStrip).not.toContain("self-start");
+    expect(startupSettingsPanelStyles.settingsStrip).toContain("w-full");
+  });
+
   it("keeps developer mode launcher-owned with preview and plan-hash cleanup guards", () => {
     expect(routeSource).toContain("developerModeSetting = status?.settings?.developerMode");
     expect(routeSource).toContain("developerModeMutation");
@@ -712,7 +777,7 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("launcherStatusDisconnected");
     expect(routeSource).toContain("lastControlOperation");
     expect(routeSource).toContain('setLastControlOperation((operation === "stop" || operation === "force-stop") && response.accepted ? operation : null)');
-    expect(routeSource).toContain('statusQuery.isError && (lastControlOperation === "stop" || lastControlOperation === "force-stop" || launcherStatusDisconnected)');
+    expect(routeSource).toContain('statusQuery.isError && !launcherControlPlaneStarting && (lastControlOperation === "stop" || lastControlOperation === "force-stop" || launcherStatusDisconnected)');
     expect(routeSource).toContain("expectedStopDisconnect ? copy.stoppedStatusUnavailable");
     expect(routeSource).toContain('tone={expectedStopDisconnect ? "info" : launcherControlLimited ? "unavailable" : "error"}');
     expect(routeSource).toContain("工作台已关闭，Launcher 后端连接已断开。重新启动后会恢复状态。");
@@ -740,5 +805,35 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).not.toMatch(
       /addEventListener\("beforeunload"[\s\S]*?\}, \[launcherCloseGuardArmed/,
     );
+  });
+
+  it("gates the control window on IPC host readiness instead of painting a disconnected empty dashboard", () => {
+    expect(routeSource).toContain("isLauncherControlPlaneNotReady");
+    expect(routeSource).toContain("launcherControlPlaneStarting");
+    expect(routeSource).toContain("!launcherControlPlaneStarting");
+    expect(routeSource).toContain("launcherStatusDisconnected = statusQuery.isError");
+    // Not-ready must not be classified as a network disconnect idle surface.
+    expect(routeSource).not.toMatch(/launcherStatusDisconnected = statusQuery\.isError && isLauncherStatusNetworkDisconnect\(statusQuery\.error\);\s*\n/);
+    // Start stays disabled while the control plane host is still starting.
+    expect(sourceSlice(routeSource, "const startDisabled =", "const startDisabledReason =")).toContain(
+      "launcherControlPlaneStarting",
+    );
+    expect(sourceSlice(routeSource, "const startDisabledReason =", "const projectSummary =")).toContain(
+      "launcherControlPlaneStarting",
+    );
+    // The first-read surface shows a starting state instead of 未连接 with an empty dashboard.
+    expect(sourceSlice(routeSource, "const launcherSummary =", "const controlSummary =")).toContain(
+      "launcherControlPlaneStarting || statusQuery.isPending ? copy.launcherMaintaining : copy.launcherOffline",
+    );
+    expect(sourceSlice(routeSource, "{statusQuery.isError && !launcherControlPlaneStarting ? (", "launcherControlPlaneStarting ? (")).toContain(
+      "copy.loadFailed",
+    );
+    expect(routeSource).toContain("launcherControlPlaneStarting ? (");
+    expect(routeSource).toContain('title={copy.lifecycleStarting}');
+    expect(routeSource).toContain("launcherReading={Boolean(");
+    expect(routeSource).toContain("listLoading={Boolean(");
+    expect(routeSource).toContain("branchInstancesQuery.isPending || (branchInstancesQuery.isFetching && !branchInstancesQuery.data)");
+    // The lifecycle display must expose a dedicated starting state while the host is not ready.
+    expect(routeSource).toContain("starting: launcherControlPlaneStarting");
   });
 });

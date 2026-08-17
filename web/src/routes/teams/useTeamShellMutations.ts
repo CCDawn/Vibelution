@@ -5,12 +5,20 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Dispatch, SetStateAction } from "react";
 
-import { fetchJson } from "../../api/client";
+import { startChatRoomRound } from "../../api/chat";
 import {
   revokeProjectAgentBusMessage,
   sendTeamProjectBusMessage,
 } from "../../api/projectAgentBus";
+import { startUserAction } from "../../app/userActionTelemetry";
 import { queryKeys } from "../../api/queryKeys";
+import {
+  archiveTeam,
+  repairChallengeCupTeamAgents,
+  repairKnowledgeExpansionTeamAgents,
+  saveTeamCanvas,
+  syncTeamChatRoom,
+} from "../../api/teams";
 import type { ChatRoomDetail, Team, TeamOrganizationCanvas } from "../../api/types";
 import { createChatWorkspaceCache } from "../chatWorkspaceCache";
 
@@ -31,39 +39,55 @@ export function useTeamShellMutations(options: UseTeamShellMutationsOptions) {
   const { chatWorkspaceCache } = options;
 
   const archiveTeamMutation = useMutation({
-    mutationFn: (teamId: string) =>
-      fetchJson<Team>(`/api/teams/${encodeURIComponent(teamId)}`, {
-        method: "DELETE",
-      }),
-    onSuccess: (team, teamId) => {
+    mutationFn: (teamId: string) => archiveTeam(teamId),
+    onMutate: (teamId) => ({
+      telemetry: startUserAction("team_archive", { teamId }, { destructive: true }),
+    }),
+    onSuccess: (team, teamId, context) => {
+      context?.telemetry?.succeeded({ teamId });
       options.setSelectedTeamId("");
       options.setSelectedNodeId("");
       options.clearTeamSearchParams();
       void chatWorkspaceCache.afterTeamArchived(teamId, team.linkedChatRoomId || team.linkedChatRoom?.roomId);
     },
+    onError: (error, teamId, context) => {
+      context?.telemetry?.failed(error, { teamId });
+    },
   });
 
   const saveCanvasMutation = useMutation({
-    mutationFn: (nextCanvas: TeamOrganizationCanvas) =>
-      fetchJson<TeamOrganizationCanvas>(`/api/teams/${encodeURIComponent(nextCanvas.teamId)}/canvas`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(nextCanvas),
-      }),
-    onSuccess: (canvas, variables) => {
+    mutationFn: (nextCanvas: TeamOrganizationCanvas) => saveTeamCanvas(nextCanvas),
+    onMutate: (variables) => ({
+      telemetry: startUserAction("team_canvas_save", { teamId: variables.teamId }),
+    }),
+    onSuccess: (canvas, variables, context) => {
+      context?.telemetry?.succeeded({ teamId: variables.teamId });
       queryClient.setQueryData(queryKeys.teamCanvas(variables.teamId), canvas);
       void chatWorkspaceCache.afterTeamChanged(variables.teamId);
+    },
+    onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, { teamId: variables.teamId });
     },
   });
 
   const sendTeamMessageMutation = useMutation({
     mutationFn: (payload: { teamId: string; content: string; interruptMode: string }) =>
       sendTeamProjectBusMessage(payload),
-    onSuccess: (_payload, variables) => {
+    onMutate: (variables) => ({
+      telemetry: startUserAction("team_message_send", {
+        teamId: variables.teamId,
+        interruptMode: variables.interruptMode,
+      }),
+    }),
+    onSuccess: (_payload, variables, context) => {
+      context?.telemetry?.succeeded({ teamId: variables.teamId });
       if (variables.teamId === options.selectedTeamId) {
         options.setTeamMessage("");
       }
       void chatWorkspaceCache.afterTeamChanged(variables.teamId);
+    },
+    onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, { teamId: variables.teamId });
     },
   });
 
@@ -73,16 +97,26 @@ export function useTeamShellMutations(options: UseTeamShellMutationsOptions) {
         eventId: payload.eventId,
         reason: "Revoked from Agent Center team broadcast history.",
       }),
-    onSuccess: (_payload, variables) => {
+    onMutate: (variables) => ({
+      telemetry: startUserAction("team_message_revoke", {
+        teamId: variables.teamId,
+        eventId: variables.eventId,
+      }, { destructive: true }),
+    }),
+    onSuccess: (_payload, variables, context) => {
+      context?.telemetry?.succeeded({ teamId: variables.teamId, eventId: variables.eventId });
       void chatWorkspaceCache.afterTeamChanged(variables.teamId);
+    },
+    onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, {
+        teamId: variables.teamId,
+        eventId: variables.eventId,
+      });
     },
   });
 
   const syncTeamChatRoomMutation = useMutation({
-    mutationFn: (teamId: string) =>
-      fetchJson<Team>(`/api/teams/${encodeURIComponent(teamId)}/chat-room/sync`, {
-        method: "POST",
-      }),
+    mutationFn: (teamId: string) => syncTeamChatRoom(teamId),
     onSuccess: (team) => {
       queryClient.setQueryData(queryKeys.team(team.teamId, "light"), team);
       queryClient.setQueryData(queryKeys.team(team.teamId, "full"), team);
@@ -95,10 +129,7 @@ export function useTeamShellMutations(options: UseTeamShellMutationsOptions) {
   });
 
   const repairChallengeCupTeamAgentsMutation = useMutation({
-    mutationFn: (teamId: string) =>
-      fetchJson<{ team: Team }>(`/api/teams/${encodeURIComponent(teamId)}/challenge-cup-agents/repair`, {
-        method: "POST",
-      }),
+    mutationFn: (teamId: string) => repairChallengeCupTeamAgents(teamId),
     onSuccess: (payload, teamId) => {
       if (payload.team) {
         queryClient.setQueryData(queryKeys.team(payload.team.teamId, "light"), payload.team);
@@ -110,10 +141,7 @@ export function useTeamShellMutations(options: UseTeamShellMutationsOptions) {
   });
 
   const repairKnowledgeExpansionTeamAgentsMutation = useMutation({
-    mutationFn: (teamId: string) =>
-      fetchJson<{ team: Team }>(`/api/teams/${encodeURIComponent(teamId)}/knowledge-expansion-agents/repair`, {
-        method: "POST",
-      }),
+    mutationFn: (teamId: string) => repairKnowledgeExpansionTeamAgents(teamId),
     onSuccess: (payload, teamId) => {
       if (payload.team) {
         queryClient.setQueryData(queryKeys.team(payload.team.teamId, "light"), payload.team);
@@ -126,18 +154,14 @@ export function useTeamShellMutations(options: UseTeamShellMutationsOptions) {
 
   const startTeamRoundMutation = useMutation({
     mutationFn: (payload: { roomId: string; teamId: string; topic: string; mode: string; purpose: string }) =>
-      fetchJson<ChatRoomDetail>(`/api/chat-rooms/${payload.roomId}/rounds`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          topic: payload.topic,
-          mode: payload.mode,
-          purpose: payload.purpose,
-          config: {
-            source: "team_workspace",
-            teamId: payload.teamId,
-          },
-        }),
+      startChatRoomRound(payload.roomId, {
+        topic: payload.topic,
+        mode: payload.mode,
+        purpose: payload.purpose,
+        config: {
+          source: "team_workspace",
+          teamId: payload.teamId,
+        },
       }),
     onSuccess: (room, variables) => {
       options.setTeamTaskTopic("");

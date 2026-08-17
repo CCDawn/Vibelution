@@ -4,7 +4,17 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Dispatch, SetStateAction } from "react";
 
-import { fetchJson } from "../../api/client";
+import {
+  bulkReviewKnowledgeRatingSuggestions,
+  collectKnowledgeSourceInbox,
+  createKnowledgeCentralSourceArtifact,
+  createKnowledgeRatingSuggestion,
+  createKnowledgeRefinementProposal,
+  reviewKnowledgeRatingSuggestion,
+  reviewKnowledgeRefinementProposal,
+  reviewKnowledgeSourceInbox,
+} from "../../api/knowledge";
+import { startUserAction } from "../../app/userActionTelemetry";
 import { queryKeys } from "../../api/queryKeys";
 import type {
   KnowledgeItem,
@@ -51,28 +61,29 @@ export function useMemoryKnowledgeMutations(options: UseMemoryKnowledgeMutations
 
   const proposalMutation = useMutation({
     mutationFn: async ({ knowledgeBaseId, draft }: { knowledgeBaseId: string; draft: any }) =>
-      fetchJson<KnowledgeRefinementProposal>(
-        `/api/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/refinement-proposals`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sourceArtifactIds: options.commaList(draft.sourceArtifactIds),
-            proposedByAgentId: draft.proposedByAgentId,
-            title: draft.title,
-            summary: draft.summary,
-            content: draft.content,
-            tags: options.commaList(draft.tags),
-          }),
-        },
-      ),
-    onSuccess: () => {
+      createKnowledgeRefinementProposal<KnowledgeRefinementProposal>(knowledgeBaseId, {
+        sourceArtifactIds: options.commaList(draft.sourceArtifactIds),
+        proposedByAgentId: draft.proposedByAgentId,
+        title: draft.title,
+        summary: draft.summary,
+        content: draft.content,
+        tags: options.commaList(draft.tags),
+      }),
+    onMutate: ({ knowledgeBaseId, draft }) => ({
+      telemetry: startUserAction("memory_knowledge_proposal_create", {
+        knowledgeBaseId,
+        proposedByAgentId: draft.proposedByAgentId,
+      }),
+    }),
+    onSuccess: (_payload, variables, context) => {
+      context?.telemetry?.succeeded({ knowledgeBaseId: variables.knowledgeBaseId });
       options.setProposalDraft(options.newProposalDraft());
       options.setKnowledgeFeedback({ tone: "success", text: options.copy.mutationDone });
       options.invalidateKnowledgeDashboard(queryClient, options.getActiveKnowledgeActorAgentId());
       options.invalidateMemoryQueries(queryClient);
     },
-    onError: (error) => {
+    onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, { knowledgeBaseId: variables.knowledgeBaseId });
       options.setKnowledgeFeedback({
         tone: "error",
         text: `${options.copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}`,
@@ -90,15 +101,23 @@ export function useMemoryKnowledgeMutations(options: UseMemoryKnowledgeMutations
       proposalId: string;
       status: string;
     }) =>
-      fetchJson<KnowledgeReviewResponse>(
-        `/api/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/refinement-proposals/${encodeURIComponent(proposalId)}/review`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status, reviewedByAgentId: options.getActiveKnowledgeActorAgentId() }),
-        },
-      ),
-    onSuccess: (payload) => {
+      reviewKnowledgeRefinementProposal<KnowledgeReviewResponse>(knowledgeBaseId, proposalId, {
+        status,
+        reviewedByAgentId: options.getActiveKnowledgeActorAgentId(),
+      }),
+    onMutate: (variables) => ({
+      telemetry: startUserAction("memory_knowledge_proposal_review", {
+        knowledgeBaseId: variables.knowledgeBaseId,
+        proposalId: variables.proposalId,
+        status: variables.status,
+      }),
+    }),
+    onSuccess: (payload, variables, context) => {
+      context?.telemetry?.succeeded({
+        knowledgeBaseId: variables.knowledgeBaseId,
+        proposalId: variables.proposalId,
+        status: variables.status,
+      });
       options.setKnowledgeFeedback({
         tone: "success",
         text: payload.item ? `${options.copy.mutationDone} · ${payload.item.title}` : options.copy.mutationDone,
@@ -113,7 +132,11 @@ export function useMemoryKnowledgeMutations(options: UseMemoryKnowledgeMutations
       });
       options.invalidateMemoryQueries(queryClient);
     },
-    onError: (error) => {
+    onError: (error, variables, context) => {
+      context?.telemetry?.failed(error, {
+        knowledgeBaseId: variables.knowledgeBaseId,
+        proposalId: variables.proposalId,
+      });
       options.setKnowledgeFeedback({
         tone: "error",
         text: `${options.copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}`,
@@ -131,23 +154,16 @@ export function useMemoryKnowledgeMutations(options: UseMemoryKnowledgeMutations
       item: KnowledgeItem;
       draft: any;
     }) =>
-      fetchJson<KnowledgeRatingSuggestion>(
-        `/api/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/rating-suggestions`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            suggestedByAgentId: draft.actorAgentId,
-            targetType: "knowledge_item",
-            knowledgeItemId: item.knowledgeItemId,
-            importanceLevel: draft.importanceLevel,
-            confidence: draft.confidence.trim() ? Number(draft.confidence) : null,
-            stability: draft.stability,
-            reviewPriority: draft.reviewPriority,
-            markingReason: draft.markingReason,
-          }),
-        },
-      ),
+      createKnowledgeRatingSuggestion<KnowledgeRatingSuggestion>(knowledgeBaseId, {
+        suggestedByAgentId: draft.actorAgentId,
+        targetType: "knowledge_item",
+        knowledgeItemId: item.knowledgeItemId,
+        importanceLevel: draft.importanceLevel,
+        confidence: draft.confidence.trim() ? Number(draft.confidence) : null,
+        stability: draft.stability,
+        reviewPriority: draft.reviewPriority,
+        markingReason: draft.markingReason,
+      }),
     onSuccess: () => {
       options.setKnowledgeFeedback({ tone: "success", text: options.copy.mutationDone });
       void queryClient.invalidateQueries({ queryKey: ["knowledge", "rating-suggestions"] });
@@ -171,12 +187,12 @@ export function useMemoryKnowledgeMutations(options: UseMemoryKnowledgeMutations
       suggestionId: string;
       status: "applied" | "rejected";
     }) =>
-      fetchJson<KnowledgeRatingSuggestionReviewResponse>(
-        `/api/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/rating-suggestions/${encodeURIComponent(suggestionId)}/review`,
+      reviewKnowledgeRatingSuggestion<KnowledgeRatingSuggestionReviewResponse>(
+        knowledgeBaseId,
+        suggestionId,
         {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status, reviewedByAgentId: options.getActiveKnowledgeActorAgentId() }),
+          status,
+          reviewedByAgentId: options.getActiveKnowledgeActorAgentId(),
         },
       ),
     onSuccess: () => {
@@ -209,18 +225,11 @@ export function useMemoryKnowledgeMutations(options: UseMemoryKnowledgeMutations
       suggestionIds: string[];
       status: "applied" | "rejected";
     }) =>
-      fetchJson<KnowledgeRatingSuggestionBulkReviewResponse>(
-        `/api/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/rating-suggestions/review-batch`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            suggestionIds,
-            status,
-            reviewedByAgentId: options.getActiveKnowledgeActorAgentId(),
-          }),
-        },
-      ),
+      bulkReviewKnowledgeRatingSuggestions<KnowledgeRatingSuggestionBulkReviewResponse>(knowledgeBaseId, {
+        suggestionIds,
+        status,
+        reviewedByAgentId: options.getActiveKnowledgeActorAgentId(),
+      }),
     onSuccess: (payload) => {
       options.setSelectedRatingSuggestionIds([]);
       options.setKnowledgeFeedback({
@@ -251,24 +260,20 @@ export function useMemoryKnowledgeMutations(options: UseMemoryKnowledgeMutations
 
   const sourceInboxCollectMutation = useMutation({
     mutationFn: async (draft: any) =>
-      fetchJson<KnowledgeOwnerSource>("/api/knowledge/sources/inbox", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ownerType: options.getActiveSourceOwnerType(),
-          ownerId: options.getActiveSourceOwnerId(),
-          sourceType: draft.sourceType,
-          sourceRef: options.parseJsonObject(draft.sourceRef),
-          originalContent: draft.originalContent,
-          originalFilename: draft.originalFilename,
-          sourceCreatedAt: draft.sourceCreatedAt,
-          capturedBy: draft.capturedBy.trim() || options.getActiveKnowledgeActorAgentId(),
-          sourceHash: draft.sourceHash,
-          evidenceRange: options.parseJsonObject(draft.evidenceRange),
-          title: draft.title,
-          summary: draft.summary,
-          actorAgentId: options.getActiveKnowledgeActorAgentId(),
-        }),
+      collectKnowledgeSourceInbox<KnowledgeOwnerSource>({
+        ownerType: options.getActiveSourceOwnerType(),
+        ownerId: options.getActiveSourceOwnerId(),
+        sourceType: draft.sourceType,
+        sourceRef: options.parseJsonObject(draft.sourceRef),
+        originalContent: draft.originalContent,
+        originalFilename: draft.originalFilename,
+        sourceCreatedAt: draft.sourceCreatedAt,
+        capturedBy: draft.capturedBy.trim() || options.getActiveKnowledgeActorAgentId(),
+        sourceHash: draft.sourceHash,
+        evidenceRange: options.parseJsonObject(draft.evidenceRange),
+        title: draft.title,
+        summary: draft.summary,
+        actorAgentId: options.getActiveKnowledgeActorAgentId(),
       }),
     onSuccess: () => {
       options.setOwnerSourceDraft(options.newOwnerSourceDraft());
@@ -299,17 +304,15 @@ export function useMemoryKnowledgeMutations(options: UseMemoryKnowledgeMutations
       source: KnowledgeOwnerSource;
       decision: "accepted" | "rejected" | "duplicate" | "needs_more_context";
     }) =>
-      fetchJson<KnowledgeSourceInboxReviewResponse>(
-        `/api/knowledge/sources/inbox/${encodeURIComponent(options.getActiveSourceOwnerType())}/${encodeURIComponent(options.getActiveSourceOwnerId())}/${encodeURIComponent(source.inboxSourceId)}/review`,
+      reviewKnowledgeSourceInbox<KnowledgeSourceInboxReviewResponse>(
+        options.getActiveSourceOwnerType(),
+        options.getActiveSourceOwnerId(),
+        source.inboxSourceId,
         {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            decision,
-            reviewedByAgentId: options.getActiveKnowledgeActorAgentId(),
-            resolutionNote: options.getSourceReviewNote(),
-            duplicateOf: decision === "duplicate" ? options.getDuplicateCentralSourceId() : "",
-          }),
+          decision,
+          reviewedByAgentId: options.getActiveKnowledgeActorAgentId(),
+          resolutionNote: options.getSourceReviewNote(),
+          duplicateOf: decision === "duplicate" ? options.getDuplicateCentralSourceId() : "",
         },
       ),
     onSuccess: (payload) => {
@@ -348,15 +351,11 @@ export function useMemoryKnowledgeMutations(options: UseMemoryKnowledgeMutations
 
   const centralSourceAttachMutation = useMutation({
     mutationFn: async (centralSourceId: string) =>
-      fetchJson<KnowledgeSourceArtifact>(
-        `/api/knowledge-bases/${encodeURIComponent(options.getActiveKnowledgeBaseForItems())}/central-source-artifacts`,
+      createKnowledgeCentralSourceArtifact<KnowledgeSourceArtifact>(
+        options.getActiveKnowledgeBaseForItems(),
         {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            centralSourceId,
-            actorAgentId: options.getActiveKnowledgeActorAgentId(),
-          }),
+          centralSourceId,
+          actorAgentId: options.getActiveKnowledgeActorAgentId(),
         },
       ),
     onSuccess: (payload) => {

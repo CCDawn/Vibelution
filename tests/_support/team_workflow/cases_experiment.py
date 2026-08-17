@@ -603,6 +603,167 @@ def test_run_experiment_smoke_run_rejects_unavailable_declared_adapter_before_pa
     assert stored["plans"][0].get("smokeRunResults") in (None, [])
 
 
+def test_run_experiment_smoke_run_ignores_formal_fashionmnist_and_uses_v1_cpu(
+    tmp_path, monkeypatch
+):
+    from core.web.services.team_workflow.experiment_api.plan import (
+        bind_frozen_protocol_to_experiment_plan,
+    )
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    bound = bind_frozen_protocol_to_experiment_plan(
+        team["teamId"],
+        {
+            "planId": "exp-plan-20260813211108-fdb104ea",
+            "protocolId": "exp-plan-20260813211108-fdb104ea",
+            "status": "frozen",
+            "protocol": {
+                "dataset": "dataset-sci-096-v1",
+                "metric": "stimulus decoding accuracy",
+                "baseline": "two-layer decoder",
+                "smoke_plan": {
+                    "phase": "smoke_gate",
+                    "required": ["subset 1000 trials"],
+                },
+            },
+        },
+    )
+    selection = bound["experimentContract"]["adapterSelection"]
+    assert (
+        selection["resolvedAdapterId"]
+        == team_workflow_orchestration_service.formal_runner.FASHION_MNIST_MULTI_SEED_ADAPTER
+    )
+
+    response = team_workflow_orchestration_service.run_experiment_smoke_run(
+        team["teamId"],
+        bound["planId"],
+        {},
+    )
+
+    assert response["adapter"] == "synthetic_classification_baseline_vs_variant"
+    assert response["runnerResult"]["runnerMode"] == "v1_cpu_smoke"
+    assert response["status"] == "needs_review"
+
+
+def test_needs_review_smoke_allows_formal_full_run_require():
+    from core.research import formal_runner
+
+    plan = {
+        "experimentContract": {
+            "adapterSelection": {
+                "resolvedAdapterId": formal_runner.FASHION_MNIST_MULTI_SEED_ADAPTER
+            },
+            "methodConfig": {"seeds": [17, 42, 101]},
+        },
+        "contractValidation": {"valid": True},
+        "readiness": {"readyForFullRun": False},
+        "activeSmokeRun": {"status": "needs_review", "smokeRunId": "smokerun-1"},
+    }
+    adapter_id, method = team_workflow_orchestration_service._require_formal_full_run_ready(
+        plan
+    )
+    assert adapter_id == formal_runner.FASHION_MNIST_MULTI_SEED_ADAPTER
+    assert method["seeds"] == [17, 42, 101]
+
+
+def test_execute_experiment_full_run_uses_env_execution_config(tmp_path, monkeypatch):
+    from core.web.services.team_workflow.experiment_api import full_run as full_run_api
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    team_workflow_orchestration_service.ensure_team_workflow_orchestration(team["teamId"])
+    plan_id = _seed_formal_full_run_plan(team["teamId"])
+    captured: dict[str, object] = {}
+
+    monkeypatch.setenv("VIBELUTION_FORMAL_PYTHON_EXECUTABLE", "C:/runner/python.exe")
+    monkeypatch.setenv("VIBELUTION_FORMAL_DATA_ROOT", "C:/data/fashionmnist")
+    monkeypatch.setenv("VIBELUTION_FORMAL_OUTPUT_ROOT", "C:/experiments/out")
+    monkeypatch.setenv("VIBELUTION_FORMAL_EPOCHS", "1")
+    monkeypatch.setenv("VIBELUTION_FORMAL_TRAIN_SAMPLES", "256")
+
+    def _run_full_run(adapter_id, **kwargs):
+        captured["adapterId"] = adapter_id
+        captured["executionConfig"] = kwargs.get("execution_config")
+        return {
+            "adapterId": adapter_id,
+            "status": "completed",
+            "seedCount": 3,
+            "resultPath": "C:/experiments/out/formal-run-result.json",
+            "logRef": "C:/experiments/out/formal-run-log.json",
+            "requiresResultReview": True,
+            "automaticPromotion": False,
+        }
+
+    monkeypatch.setattr(
+        team_workflow_orchestration_service.formal_runner,
+        "run_full_run",
+        _run_full_run,
+    )
+
+    response = team_workflow_orchestration_service.execute_experiment_full_run(
+        team["teamId"], plan_id, {}
+    )
+
+    assert response["execution"]["status"] == "completed"
+    config = captured["executionConfig"]
+    assert isinstance(config, dict)
+    assert config["pythonExecutable"] == "C:/runner/python.exe"
+    assert config["dataRoot"] == "C:/data/fashionmnist"
+    assert config["outputRoot"] == "C:/experiments/out"
+    assert config["epochs"] == 1
+    assert config["trainSamples"] == 256
+    assert full_run_api.formal_execution_config_is_provisioned(config) is True
+
+
+def test_formal_execution_config_prefers_payload_then_skips_bounded_fallback():
+    from core.web.services.team_workflow.experiment_api.full_run import (
+        formal_execution_config_is_provisioned,
+        resolve_formal_execution_config,
+    )
+
+    payload = {
+        "executionConfig": {
+            "pythonExecutable": "C:/payload/python.exe",
+            "dataRoot": "C:/payload/data",
+            "outputRoot": "C:/payload/out",
+        }
+    }
+    resolved = resolve_formal_execution_config({}, payload)
+    assert resolved["pythonExecutable"] == "C:/payload/python.exe"
+    assert formal_execution_config_is_provisioned(resolved) is True
+    assert formal_execution_config_is_provisioned({}) is False
+
+
+def test_formal_execution_config_overlays_partial_payload_on_stored_preparation():
+    from core.web.services.team_workflow.experiment_api.full_run import (
+        resolve_formal_execution_config,
+    )
+
+    plan = {
+        "activeFullRunPreparation": {
+            "executionConfig": {
+                "pythonExecutable": "C:/stored/python.exe",
+                "dataRoot": "C:/stored/data",
+                "outputRoot": "C:/stored/out",
+                "epochs": 5,
+                "timeoutSeconds": 3600,
+            },
+        },
+    }
+
+    resolved = resolve_formal_execution_config(
+        plan,
+        {"executionConfig": {"epochs": 1, "timeoutSeconds": 60}},
+    )
+
+    assert resolved["pythonExecutable"] == "C:/stored/python.exe"
+    assert resolved["dataRoot"] == "C:/stored/data"
+    assert resolved["outputRoot"] == "C:/stored/out"
+    assert resolved["epochs"] == 1
+    assert resolved["timeoutSeconds"] == 60
+
+
 def test_explicit_design_gate_blocks_smoke_until_plan_is_frozen(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="挑战杯科研团队")
@@ -2471,3 +2632,114 @@ def test_planning_gap_does_not_claim_complete_active_design_fields_are_missing()
         "Review and select an algorithm_hypothesis candidate that is ready for plan review.",
         "Keep the complete active design contract unchanged unless the selected hypothesis requires a new revision.",
     ]
+
+
+def test_experiment_smoke_failure_writes_working_falsifies_edge(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="ai科学研究团队")
+    prepared = _create_experiment_plan_with_active_baseline(team["teamId"])
+
+    registered = team_workflow_orchestration_service.register_experiment_smoke_result(
+        team["teamId"],
+        prepared["baseline"]["plan"]["planId"],
+        {
+            "status": "failed",
+            "metricValue": "0.65 validation accuracy",
+            "resultPath": "workspace/experiments/smoke/context-gated-routing-failed.json",
+            "logRef": "logs/experiments/context-gated-routing-smoke-failed.log",
+            "notes": "routing entropy collapsed",
+            "recordedByAgent": "Experiment Planning Agent",
+        },
+    )
+    graph = registered["plan"]["outcomeGraph"]
+    live = [edge for edge in graph["edges"] if not edge.get("validUntil")]
+    falsifies = [edge for edge in live if edge["relation"] == "falsifies"]
+    context = team_workflow_orchestration_service._build_research_memory_context(
+        stage_type="experiment_design",
+        research_question=registered["plan"]["experimentContract"]["researchQuestion"],
+        plans=[registered["plan"]],
+    )
+    claim_id = context["claimMap"][0]["claimId"]
+
+    assert falsifies[0]["fromId"] == f"run:{registered['smokeResult']['smokeResultId']}"
+    assert falsifies[0]["toId"] == claim_id
+    assert falsifies[0]["interpretation"]
+    assert falsifies[0]["failedGates"]
+    assert falsifies[0]["evidenceRefs"]
+    assert context["negativeExperiments"][0]["planId"] == registered["plan"]["planId"]
+    assert context["forbiddenDuplicateExperiments"][0]["experimentSignature"] == falsifies[0]["experimentSignature"]
+    assert context["claimMap"][0]["status"] == "unsupported"
+
+
+def test_experiment_full_run_pass_writes_working_supports_without_qualifying_claim(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="ai科学研究团队")
+    prepared = _create_experiment_plan_with_active_baseline(team["teamId"])
+    smoke = team_workflow_orchestration_service.register_experiment_smoke_result(
+        team["teamId"],
+        prepared["baseline"]["plan"]["planId"],
+        {
+            "status": "passed",
+            "metricValue": "0.75 validation accuracy",
+            "resultPath": "workspace/experiments/smoke/context-gated-routing.json",
+            "recordedByAgent": "Experiment Planning Agent",
+        },
+    )
+    registered = team_workflow_orchestration_service.register_experiment_full_run_result(
+        team["teamId"],
+        smoke["plan"]["planId"],
+        {
+            "status": "passed",
+            "metricValue": "0.79 validation accuracy",
+            "resultPath": "workspace/experiments/full_run/context-gated-routing.json",
+            "recordedByAgent": "Experiment Planning Agent",
+        },
+    )
+    live = [edge for edge in registered["plan"]["outcomeGraph"]["edges"] if not edge.get("validUntil")]
+    supports = [edge for edge in live if edge["relation"] == "supports"]
+    context = team_workflow_orchestration_service._build_research_memory_context(
+        stage_type="experiment_design",
+        research_question=registered["plan"]["experimentContract"]["researchQuestion"],
+        plans=[registered["plan"]],
+    )
+
+    assert any(edge["fromId"] == f"run:{registered['fullRunResult']['fullRunResultId']}" for edge in supports)
+    assert registered["fullRunResult"]["fullRunResultId"] in {
+        item["resultId"] for item in context["priorSuccessfulRuns"]
+    }
+    assert context["claimMap"][0]["status"] == "not_established"
+    assert context["claimMap"][0]["claimId"] == supports[-1]["toId"]
+
+
+def test_experiment_later_smoke_failure_closes_prior_supports_and_keeps_old_edge(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="ai科学研究团队")
+    prepared = _create_experiment_plan_with_active_baseline(team["teamId"])
+    passed = team_workflow_orchestration_service.register_experiment_smoke_result(
+        team["teamId"],
+        prepared["baseline"]["plan"]["planId"],
+        {
+            "status": "passed",
+            "metricValue": "0.75 validation accuracy",
+            "resultPath": "workspace/experiments/smoke/context-gated-routing.json",
+            "recordedByAgent": "Experiment Planning Agent",
+        },
+    )
+    failed = team_workflow_orchestration_service.register_experiment_smoke_result(
+        team["teamId"],
+        passed["plan"]["planId"],
+        {
+            "status": "failed",
+            "metricValue": "0.61 validation accuracy",
+            "resultPath": "workspace/experiments/smoke/context-gated-routing-failed.json",
+            "recordedByAgent": "Experiment Planning Agent",
+        },
+    )
+    graph = failed["plan"]["outcomeGraph"]
+    supports = [edge for edge in graph["edges"] if edge["relation"] == "supports"]
+    falsifies = [edge for edge in graph["edges"] if edge["relation"] == "falsifies"]
+
+    assert supports
+    assert supports[0]["validUntil"] == failed["smokeResult"]["recordedAt"]
+    assert supports[0]["supersededByEdgeId"] == falsifies[0]["edgeId"]
+    assert all(not edge.get("validUntil") for edge in falsifies)

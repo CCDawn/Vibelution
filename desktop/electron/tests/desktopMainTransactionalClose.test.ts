@@ -3,6 +3,10 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const mainSourcePath = fileURLToPath(new URL("../src/main.ts", import.meta.url));
+const closeStoreSource = readFileSync(
+  fileURLToPath(new URL("../src/lifecycle/workbenchCloseTransactionStore.ts", import.meta.url)),
+  "utf8",
+);
 
 describe("Electron main transactional Workbench close", () => {
   it("advertises the Electron close capability instead of reusing only Launcher capabilities", () => {
@@ -13,34 +17,41 @@ describe("Electron main transactional Workbench close", () => {
     expect(source).toContain("capabilities: desktopSessionCapabilities(bootstrap)");
   });
 
-  it("routes Workbench X and desktop actions through the same transaction before shell shutdown approval", () => {
+  it("owns the close transaction state machine in Electron main", () => {
     const source = readFileSync(mainSourcePath, "utf8");
 
-    expect(source).toContain('from "./protocol/workbenchCloseTransactionClient.js"');
+    expect(source).toContain('from "./lifecycle/workbenchCloseTransactionStore.js"');
+    expect(source).toContain("const mainWorkbenchCloseStore = new MainWorkbenchCloseTransactionStore();");
     expect(source).toContain("shouldInterceptWorkbenchClose: () => !shutdownApproved");
-    expect(source).toContain("onWorkbenchCloseRequest: () =>");
     expect(source).toContain("requestTransactionalWorkbenchClose(paths, bootstrap)");
-    expect(source).toContain("closeWorkbench: (payload) => requestTransactionalWorkbenchClose(paths, bootstrap, payload)");
-    expect(source).toContain("function closeTransactionIdFromDesktopAction(");
+    expect(source).toContain("mainWorkbenchCloseStore.submit(");
+    expect(source).toContain("mainWorkbenchCloseStore.confirm(");
+    expect(source).toContain("mainWorkbenchCloseStore.backendStopped(");
     expect(source).toContain("await provider.approveWorkbenchCloseOnce()");
-    expect(source).toContain("isWorkbenchCloseControlFetchFailure(error)");
-    expect(source).toContain("electron.workbench_close.fail_open_destroy");
     expect(source).toContain("buttons: [\"重试\", \"仍关闭窗口\"]");
     const providerStart = source.indexOf("function createWindowProvider(");
     const providerEnd = source.indexOf("\nfunction createConversationBadgeIcon", providerStart);
     const providerSource = source.slice(providerStart, providerEnd);
     expect(providerSource).toContain("requestTransactionalWorkbenchClose(paths, bootstrap)");
     expect(providerSource).not.toContain('requestDesktopShellExit("workbench_window_close")');
-    expect(source).toContain("targetSessionId !== desktopSessionId");
+    expect(closeStoreSource).toContain("confirmation_required");
+    expect(closeStoreSource).toContain("window_close_authorized");
   });
 
-  it("waits from Launcher transaction metadata and acknowledges only after the window closed callback", () => {
+  it("stops the backend through the Python lifecycle bridge before authorizing the window close", () => {
     const source = readFileSync(mainSourcePath, "utf8");
 
-    expect(source).toContain("transaction.nextPollAfterMs");
-    expect(source).toContain("transaction.deadlineAt");
+    expect(source).toContain("electron.workbench_close.backend_stopping");
+    expect(source).toContain("stopWorkbenchBackend(paths, bootstrap)");
+    expect(source).toContain("runWorkbenchLifecycle({");
+    expect(source).toContain('operation: "stop"');
+    expect(source).toContain('from "./lifecycle/workbenchBackendCloseReadiness.js"');
+    expect(source).toContain("waitForWorkbenchBackendSettledForWindowClose({");
+    expect(source).toContain("timeoutMs: WORKBENCH_CLOSE_BACKEND_WAIT_MS");
+    expect(source).toContain("mainWorkbenchCloseStore.fail(");
+    expect(source).toContain('"backend_stop_timeout"');
     expect(source).toContain("onWorkbenchClosed: () =>");
-    expect(source).toContain("acknowledgeWorkbenchCloseWindowClosed");
+    expect(source).toContain("mainWorkbenchCloseStore.windowClosed(transaction.closeId)");
     expect(source).toContain("desktopSessionRevision");
   });
 
@@ -48,17 +59,20 @@ describe("Electron main transactional Workbench close", () => {
     const source = readFileSync(mainSourcePath, "utf8");
 
     expect(source).toContain("desktopCliArgs.workbenchCloseCanary");
-    expect(source).toContain("await windowProvider.openOrFocusWorkbench()");
+    expect(source).toContain("async function openWorkbenchForCloseCanary(");
+    expect(source).toContain('operation: "start"');
+    expect(source).toContain("await openWorkbenchForCloseCanary(paths, launcherBootstrap, windowProvider);");
     expect(source).toContain("function writeWorkbenchCloseCanarySummary(");
     expect(source).toContain("desktopWorkbenchCloseCanarySummaryPath(paths.workspaceRoot)");
     expect(source).toContain("desktopWorkbenchCloseCanarySummary({");
   });
 
-  it("keeps the Workbench-close canary outside the normal desktop action loop", () => {
+  it("keeps the Python desktop action claim loop stopped after the T6 reversal", () => {
     const source = readFileSync(mainSourcePath, "utf8");
 
-    expect(source).toMatch(
-      /if \(desktopCliArgs\.workbenchCloseCanary\) \{\s*await windowProvider\.openOrFocusWorkbench\(\);\s*return;\s*\}\s*startDesktopActionLoop\(paths, launcherBootstrap, windowProvider\);/
+    expect(source).toContain("startDesktopActionLoop stays");
+    expect(source).not.toMatch(
+      /if \(desktopCliArgs\.workbenchCloseCanary\) \{\s*await openWorkbenchForCloseCanary\(paths, launcherBootstrap, windowProvider\);\s*return;\s*\}\s*startDesktopActionLoop\(paths, launcherBootstrap, windowProvider\);/
     );
   });
 
@@ -81,16 +95,12 @@ describe("Electron main transactional Workbench close", () => {
     );
   });
 
-  it("repairs one rejected close submit by refreshing the session control context before showing a retry dialog", () => {
+  it("keeps the control context recovery helper for session heartbeat and workbench close", () => {
     const source = readFileSync(mainSourcePath, "utf8");
 
     expect(source).toContain("async function recoverWorkbenchCloseControlContext(");
     expect(source).toContain("await fetchLauncherControlToken({ launcherOrigin })");
-    expect(source).toContain("async function submitWorkbenchCloseTransactionWithControlRecovery(");
-    expect(source).toContain("retryRejectedWorkbenchCloseSubmitOnce(");
-    expect(source).toContain("await recoverWorkbenchCloseControlContext(paths, bootstrap, provider)");
     expect(source).toContain("context = await resolveDesktopActionLoopContext(bootstrap);");
-    expect(source).toContain("transaction = await awaitWorkbenchCloseAuthorization(context, transaction);");
     expect(source).toContain("runtimeSceneBridge = null;");
   });
 });

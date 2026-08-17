@@ -44,13 +44,18 @@ def build_research_workflow_snapshot(inputs: ProjectionInputs) -> ResearchWorkfl
     for attempt in inputs.attempts:
         node_attempts.setdefault(attempt.node_id, []).append(_attempt_summary(attempt))
 
-    active_ids: list[str] = []
-    if run.active_node_id:
-        active_ids.append(run.active_node_id)
-    for attempt in inputs.attempts:
-        if attempt.status in {"starting", "dispatching", "running", "waiting_human"}:
-            if attempt.node_id not in active_ids:
-                active_ids.append(attempt.node_id)
+    active_ids = _active_node_ids(run, inputs.attempts)
+    canonical_active_node_id = active_ids[0] if active_ids else None
+    run_summary = _run_summary_with_active_block(
+        run,
+        inputs.attempts,
+        active_node_id=canonical_active_node_id,
+    )
+    if run_summary.active_node_id != canonical_active_node_id:
+        run_summary = replace(
+            run_summary,
+            active_node_id=canonical_active_node_id,
+        )
 
     binding_refs = tuple(
         sorted(
@@ -73,12 +78,12 @@ def build_research_workflow_snapshot(inputs: ProjectionInputs) -> ResearchWorkfl
 
     safety_limits = _loads(run.safety_limits_json)
     return ResearchWorkflowSnapshot(
-        run=_run_summary_with_active_block(run, inputs.attempts),
+        run=run_summary,
         definition=inputs.definition.to_dict(),
         node_attempts={
             node_id: tuple(items) for node_id, items in node_attempts.items()
         },
-        active_node_ids=tuple(active_ids),
+        active_node_ids=active_ids,
         pending_human_tasks=tuple(
             _coerce_human_task(item) for item in inputs.pending_human_tasks
         ),
@@ -108,19 +113,53 @@ def build_research_workflow_snapshot(inputs: ProjectionInputs) -> ResearchWorkfl
     )
 
 
+_LIVE_ATTEMPT_STATUS = frozenset(
+    {"starting", "dispatching", "running", "waiting_human"}
+)
+
+
+def _active_node_ids(
+    run: RunRecord,
+    attempts: Sequence[NodeAttemptRecord],
+) -> tuple[str, ...]:
+    """Project one canonical active-node set from durable attempt state.
+
+    A successor can become live before the run row's convenience pointer is
+    updated.  Live attempts are the stronger fact; the pointer is used only
+    while no live attempt exists (for example, a newly created or failed run).
+    """
+    live_ids = tuple(
+        dict.fromkeys(
+            attempt.node_id
+            for attempt in attempts
+            if attempt.status in _LIVE_ATTEMPT_STATUS
+        )
+    )
+    if live_ids:
+        active = str(run.active_node_id or "").strip()
+        if active in live_ids:
+            return (active, *(node_id for node_id in live_ids if node_id != active))
+        return live_ids
+    active = str(run.active_node_id or "").strip()
+    return (active,) if active else ()
+
+
 _TERMINAL_RUN_STATUS = frozenset(
     {"succeeded", "failed", "cancelled", "archived"}
 )
 
 
 def _run_summary_with_active_block(
-    run: RunRecord, attempts: Sequence[NodeAttemptRecord]
+    run: RunRecord,
+    attempts: Sequence[NodeAttemptRecord],
+    *,
+    active_node_id: str | None = None,
 ) -> WorkflowRunSummary:
     """Surface active-node blocks even when ledger run.status is still running."""
     summary = _run_summary(run)
     if run.status in _TERMINAL_RUN_STATUS:
         return summary
-    active = str(run.active_node_id or "")
+    active = str(active_node_id or run.active_node_id or "")
     if not active:
         return summary
     latest: NodeAttemptRecord | None = None

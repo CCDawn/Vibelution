@@ -5,7 +5,18 @@ import { ArrowLeft, CheckCircle2, CheckSquare, CircleSlash, FlaskConical, Power,
 import { type CSSProperties, type KeyboardEvent, type PointerEvent, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
-import { fetchJson } from "../api/client";
+import { listAgentSummaries, updateAgentToolPolicy, validateAgentToolPolicy } from "../api/agents";
+import {
+  bulkDeleteToolRegistry,
+  bulkSetGeneratedToolsEnabled,
+  deleteTool,
+  fetchToolImage2Models,
+  fetchToolRegistry,
+  fetchWebSearchToolHealth,
+  setGeneratedToolEnabled,
+  setToolImage2DefaultModel,
+  testTool,
+} from "../api/tools";
 import { queryKeys } from "../api/queryKeys";
 import {
   AgentToolPolicyConfiguration,
@@ -56,18 +67,6 @@ type ToolFilter = "all" | "built_in" | "generated" | "llm" | "enabled";
 type ToolPolicyMode = "inherited" | "explicit_required" | "allowed" | "blocked" | "excluded";
 type ToolStatusTone = "error" | "active" | "enabled" | "idle";
 type ToolReadinessTone = "ready" | "blocked";
-type ToolBulkMutationResponse = {
-  action: string;
-  enabled?: boolean;
-  successCount: number;
-  skippedCount: number;
-  failedCount: number;
-  results: Array<{
-    toolId: string;
-    status: string;
-    reason?: string;
-  }>;
-};
 type ToolBundleGroup = {
   bundleId: string;
   label: string;
@@ -916,7 +915,7 @@ export function ToolsRoute() {
 
   const toolsQuery = useQuery({
     queryKey: queryKeys.tools(),
-    queryFn: () => fetchJson<ToolRegistryPayload>("/api/tools"),
+    queryFn: () => fetchToolRegistry(),
     staleTime: 30_000,
     refetchInterval: false,
     refetchIntervalInBackground: false,
@@ -924,7 +923,7 @@ export function ToolsRoute() {
 
   const image2ModelsQuery = useQuery({
     queryKey: queryKeys.toolImage2Models(),
-    queryFn: () => fetchJson<ToolImage2ModelConfig>("/api/tools/image2/models"),
+    queryFn: () => fetchToolImage2Models(),
     refetchInterval: false,
     refetchIntervalInBackground: false,
   });
@@ -1006,7 +1005,7 @@ export function ToolsRoute() {
 
   const agentsQuery = useQuery({
     queryKey: queryKeys.agents(),
-    queryFn: () => fetchJson<AgentInstance[]>("/api/agents?detail=summary"),
+    queryFn: () => listAgentSummaries(),
     staleTime: 30_000,
     refetchInterval: false,
     refetchIntervalInBackground: false,
@@ -1143,11 +1142,7 @@ export function ToolsRoute() {
 
   const enableMutation = useMutation({
     mutationFn: (payload: { toolId: string; enabled: boolean }) =>
-      fetchJson<ToolRegistryItem>(`/api/tools/generated/${encodeURIComponent(payload.toolId)}/enabled`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled: payload.enabled }),
-      }),
+      setGeneratedToolEnabled(payload.toolId, payload.enabled),
     onMutate: async (payload) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.tools() });
       const previousTools = queryClient.getQueryData<ToolRegistryPayload>(queryKeys.tools());
@@ -1185,9 +1180,7 @@ export function ToolsRoute() {
 
   const deleteMutation = useMutation({
     mutationFn: (toolId: string) =>
-      fetchJson<GeneratedToolDeleteResponse>(`/api/tools/${encodeURIComponent(toolId)}`, {
-        method: "DELETE",
-      }),
+      deleteTool(toolId),
     onMutate: async (toolId) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.tools() });
       const previousTools = queryClient.getQueryData<ToolRegistryPayload>(queryKeys.tools());
@@ -1230,20 +1223,14 @@ export function ToolsRoute() {
 
   const validateToolPolicyMutation = useMutation({
     mutationFn: (payload: { agentId: string; draft: AgentToolPolicyDraft; basePolicy: ToolPolicy | undefined }) =>
-      fetchJson<AgentToolPolicyConfiguration>(`/api/agents/${encodeURIComponent(payload.agentId)}/tool-policy/validate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          toolPolicy: {
-            ...defaultToolPolicy(payload.basePolicy?.policyId || "default"),
-            ...(payload.basePolicy ?? {}),
-            allowedTools: sortedIds(payload.draft.allowedTools),
-            preferredTools: sortedIds(payload.draft.preferredTools),
-            blockedTools: sortedIds(payload.draft.blockedTools),
-            readScopes: sortedIds(payload.draft.readScopes),
-            writeScopes: sortedIds(payload.draft.writeScopes),
-          },
-        }),
+      validateAgentToolPolicy(payload.agentId, {
+        ...defaultToolPolicy(payload.basePolicy?.policyId || "default"),
+        ...(payload.basePolicy ?? {}),
+        allowedTools: sortedIds(payload.draft.allowedTools),
+        preferredTools: sortedIds(payload.draft.preferredTools),
+        blockedTools: sortedIds(payload.draft.blockedTools),
+        readScopes: sortedIds(payload.draft.readScopes),
+        writeScopes: sortedIds(payload.draft.writeScopes),
       }),
     onSuccess: (preview) => {
       setToolPolicyPreview(preview);
@@ -1268,11 +1255,7 @@ export function ToolsRoute() {
         readScopes: sortedIds(payload.draft.readScopes),
         writeScopes: sortedIds(payload.draft.writeScopes),
       };
-      const preview = await fetchJson<AgentToolPolicyConfiguration>(`/api/agents/${encodeURIComponent(payload.agent.agentId)}/tool-policy/validate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ toolPolicy }),
-      });
+      const preview = await validateAgentToolPolicy(payload.agent.agentId, toolPolicy);
       setToolPolicyPreview(preview);
       if (!preview.validation.valid) {
         throw new Error(preview.validation.errors.join("; "));
@@ -1281,15 +1264,11 @@ export function ToolsRoute() {
       if (!confirmed) {
         throw new Error(lang === "zh" ? "已取消高影响工具策略变更。" : "High-impact ToolPolicy change cancelled.");
       }
-      return fetchJson<AgentToolPolicyConfiguration>(`/api/agents/${encodeURIComponent(payload.agent.agentId)}/tool-policy`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          toolPolicy,
-          expectedAgentUpdatedAt: payload.agent.updatedAt,
-          expectedPolicyFingerprint: preview.policyFingerprint,
-          confirmed: preview.confirmation.required,
-        }),
+      return updateAgentToolPolicy(payload.agent.agentId, {
+        toolPolicy,
+        expectedAgentUpdatedAt: payload.agent.updatedAt,
+        expectedPolicyFingerprint: preview.policyFingerprint,
+        confirmed: preview.confirmation.required,
       });
     },
     onSuccess: (configuration) => {
@@ -1316,11 +1295,7 @@ export function ToolsRoute() {
 
   const testMutation = useMutation({
     mutationFn: (payload: { toolId: string; agentScopeId: string; agentId: string }) =>
-      fetchJson<ToolTestResponse>(`/api/tools/${encodeURIComponent(payload.toolId)}/test`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ args: {}, agentScope: payload.agentScopeId, agentId: payload.agentId }),
-      }),
+      testTool(payload),
     onSuccess: (payload, variables) => {
       setTestResult({
         key: toolTestKey(variables.toolId, variables.agentScopeId, variables.agentId),
@@ -1339,11 +1314,7 @@ export function ToolsRoute() {
 
   const image2ModelMutation = useMutation({
     mutationFn: (modelRef: string) =>
-      fetchJson<ToolImage2ModelConfig>("/api/tools/image2/default-model", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ modelRef }),
-      }),
+      setToolImage2DefaultModel(modelRef),
     onSuccess: (payload) => {
       setNotice({
         tone: "success",
@@ -1409,7 +1380,7 @@ export function ToolsRoute() {
   }));
   const webSearchHealthQuery = useQuery({
     queryKey: queryKeys.toolWebSearchHealth(),
-    queryFn: () => fetchJson<ToolDependencyHealth>("/api/tools/web-search/health"),
+    queryFn: () => fetchWebSearchToolHealth(),
     enabled: activeIsWebSearchTool,
     refetchInterval: activeIsWebSearchTool ? resolvePollingInterval(pageVisible, 15_000) : false,
     refetchIntervalInBackground: false,
@@ -1590,13 +1561,9 @@ export function ToolsRoute() {
     setBulkToolPending(true);
     const skippedLocal = selectedTools.filter((tool) => !canBulkToggleTool(tool));
     try {
-      const payload = await fetchJson<ToolBulkMutationResponse>("/api/tools/generated/bulk-enabled", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          toolIds: selectedTools.filter(canBulkToggleTool).map((tool) => tool.id),
-          enabled,
-        }),
+      const payload = await bulkSetGeneratedToolsEnabled({
+        toolIds: selectedTools.filter(canBulkToggleTool).map((tool) => tool.id),
+        enabled,
       });
       const notes = [
         ...skippedLocal.map((tool) => `${tool.name}: ${bulkCopy.skippedToggle}`),
@@ -1637,11 +1604,9 @@ export function ToolsRoute() {
     let deletedActiveTool = false;
     const skippedLocal = selectedTools.filter((tool) => !tool.deleteAllowed);
     try {
-      const payload = await fetchJson<ToolBulkMutationResponse>("/api/tools/bulk-delete", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ toolIds: selectedTools.filter((tool) => tool.deleteAllowed).map((tool) => tool.id) }),
-      });
+      const payload = await bulkDeleteToolRegistry(
+        selectedTools.filter((tool) => tool.deleteAllowed).map((tool) => tool.id),
+      );
       deletedActiveTool = payload.results.some((item) => item.status === "deleted" && item.toolId === activeToolId);
       if (deletedActiveTool) {
         setActiveToolId(null);

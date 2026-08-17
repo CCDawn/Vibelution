@@ -1,26 +1,23 @@
 # Vibelution
 
+![Vibelution](docs/assets/readme/vibelution-github-hero.png)
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.11%2B-green.svg)](https://www.python.org/)
 [![React](https://img.shields.io/badge/Frontend-React%20%2B%20Vite-61dafb.svg)](web/)
+[![本地优先](https://img.shields.io/badge/Local--First-%E6%9C%AC%E5%9C%B0%E4%BC%98%E5%85%88-brightgreen.svg)](#隐私与安全)
 
-本地优先的 AI Agent 工作台。把编码对话、Agent 管理、Git、Teams 科研流程、自进化、监督评测和运行日志收在同一套 **本机** runtime 里（Python / FastAPI + React 界面 + launcher）。
-
-不是托管聊天壳，也不打算把你的仓库默认送上云端。配置和密钥放在用户目录的外部 `config.toml`，不进这个 git 仓库。
+本地优先的 AI Agent 工作台：把编码会话、科研团队、Git 证据、监督评测与运行态证据收进同一个**本机控制室**；仓库、配置与密钥默认只留在你自己的机器上。
 
 当前版本 **1.1.2**（见 [VERSION](VERSION) · [CHANGELOG.md](CHANGELOG.md)）。
 
-文档入口：[快速开始](#快速开始) · [Windows 安装（最终用户）](docs/guides/install-windows.md) · [当前能力](#当前能力) · [CONTRIBUTING.md](CONTRIBUTING.md) · [docs/product](docs/product/README.md) · [LICENSE](LICENSE)
+[快速开始](#快速开始) · [当前能力](#当前能力) · [Windows 安装](docs/guides/install-windows.md) · [Agent 开发](#agent-开发) · [LICENSE](LICENSE)
 
-## 界面预览
+## 为什么 Vibelution
 
-![Agent 管理](docs/assets/readme/web-workbench-chat.png)
-
-![团队科研流程](docs/assets/readme/web-workbench-teams.png)
-
-![Git](docs/assets/readme/web-workbench-git.png)
-
-![监督进化](docs/assets/readme/web-workbench-supervised.png)
+- **一个本地控制室**：编码会话、科研团队、Git 证据、监督评测与运行态证据都收进同一套本机工作台，不必在多工具间来回切换。
+- **证据驱动的工作流**：会话、评测与运行都留下可审计的日志与证据，改进有据可查。
+- **本地所有权与控制**：仓库、配置与密钥默认只留本机；外部 `config.toml` 里的密钥不进 git 仓库。
 
 ## 当前能力
 
@@ -69,9 +66,11 @@ Vibelution/
 ├── web/                        # React + Vite 前端工程
 ├── workspace/                  # 本地运行态产物、evaluation 数据和日志
 ├── tests/                      # Python 测试套件
-├── scripts/web_workbench.py    # 本地 Web workbench 启动脚本
-└── .docs/project-memory/       # 项目记忆与多页 HTML 状态面
+├── scripts/                    # launcher、install、migrate_project_storage 等
+└── .worktrees/                 # 任务 worktree 池（gitignored）
 ```
+
+项目记忆不在仓库树里当现行目录：先跑 `python scripts/migrate_project_storage.py inventory`，再读 `activePaths.memory`。`.docs/project-memory/` 仅迁移前只读兼容。
 
 ## 快速开始
 
@@ -104,7 +103,7 @@ powershell -ExecutionPolicy Bypass -File scripts/vibelution_launcher.ps1 -Action
 
 ### 开发者路径
 
-依赖：Python 3.11+（建议 3.12）、Node.js 18+（npm）、Git。Windows 若走桌面窗口，建议本机有 Edge。
+依赖：Python 3.11+（建议 3.12）、Node.js 18+（npm）、Git。Windows 若走桌面窗口，建议本机有 Edge。Debian/Ubuntu 还需系统包 `python3-venv`（例如 `sudo apt install python3.12-venv`）；这些发行版 PATH 里通常是 `python3` 而不是 `python`。
 
 ```bash
 git clone https://github.com/CCDawn/Vibelution.git
@@ -120,7 +119,7 @@ powershell -ExecutionPolicy Bypass -File scripts/vibelution_launcher.ps1 -Action
 
 ```bash
 # macOS / Linux（不自动开浏览器）
-python scripts/vibelution_launcher.py --action start --no-browser
+python3 scripts/vibelution_launcher.py --action start --no-browser
 # 本机打开 http://127.0.0.1:8000（以日志为准）
 ```
 
@@ -131,7 +130,7 @@ python scripts/vibelution_launcher.py --action start --no-browser
 #### 2. 手动装 Python 依赖
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 # Windows: .\.venv\Scripts\activate
 # macOS / Linux: source .venv/bin/activate
 pip install -r requirements.txt
@@ -142,6 +141,8 @@ pip install -r requirements.txt
 ```bash
 cd web
 npm install
+npm run build
+cd ..
 ```
 
 如果本机已安装 Bun，可以在依赖已就绪后使用辅助脚本加快本地开发循环：
@@ -223,7 +224,7 @@ $taskId = (git branch --show-current).Replace("codex/", "")
 
 `closeout` 绑定本任务 claim、当前本地 `main` SHA、task HEAD SHA、影响面 selector 命令、fast-forward ancestry 与 merge preflight。`verify-manifest` 会在合并前重查 branch/worktree/HEAD/changed files、active claim、clean 状态、checks 与 commands，而不只复核 schema 和 SHA。manifest 的 `outcome=passed` 只表示这些当前授权证据通过，不代表任务已经 merge；进入 root local `main` 前仍须确认 root clean，并只用 `git merge --ff-only <task-branch>`。如果得到 `stale_main`、`claim_conflict`、`dirty_worktree` 或合并冲突，按 `tests/README.md` 的 outcome matrix 回 task worktree 修复并重新运行 `closeout`。
 
-质量门不会执行 merge、release 或删除。fast-forward 后在 root `main` 做最小 post-merge verification，再由任务拥有者只释放本任务 claim，并只移除本任务创建的 junction（如有）、worktree 与 branch；不得清理其他未完成任务。远端 push、PR 和 CI `workflow_dispatch` 是可选发布/远端验证步骤，不属于默认本地闭环。
+质量门不会执行 merge、release 或删除。所有审查、验证和验收证据必须在 fast-forward 前闭合；`git merge --ff-only <task-branch>` 成功后不再等待 post-merge verification，任务拥有者立即清理可证明属于本任务的临时内容，释放本任务 claim，并只移除本任务创建的 junction（如有）、干净 worktree 与已合并本地 branch。清理后的 Git/worktree/registry 检查只证明吸收和资源收口，不属于产品验证；不得清理其他未完成任务。远端 push、PR 和 CI `workflow_dispatch` 是可选发布/远端验证步骤，不属于默认本地闭环。
 
 ## 启动方式
 
@@ -387,7 +388,7 @@ CI 通常覆盖：
 | [docs/product/README.md](docs/product/README.md) | 产品定位 |
 | [docs/README.md](docs/README.md) | 文档地图 |
 | [docs/standards/README.md](docs/standards/README.md) | 开发规范入口 |
-| [INDEX.md](INDEX.md) | 项目索引 |
+| [INDEX.md](INDEX.md) | 目录地图（流程以 AGENTS / docs 为准） |
 | [docs/agents/domain.md](docs/agents/domain.md) | 领域词 |
 | [core/core_prompt/SOUL.md](core/core_prompt/SOUL.md) | 行为边界 |
 | [docs/standards/development-standard.md](docs/standards/development-standard.md) | 交付标准 |

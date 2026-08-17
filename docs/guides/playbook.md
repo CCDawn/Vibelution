@@ -8,11 +8,14 @@
 ## 1. 运行时拓扑
 
 ```text
-Launcher → Runtime Manager → FastAPI (core/web) + agent.py turn
-                          → React Workbench (web/)
+当前 (ADR 0009): Electron main (TS 控制面 + IPC) → Python 子进程（Runtime Manager + FastAPI 工作台 + agent.py turn）
+Launcher UI: Electron 控制窗口（vibelution-launcher://）；renderer 只走 IPC，禁止 fetch :8765
+Workbench UI: React (web/)；常见 HTTP :8000（以 status/日志为准）
 Config: Documents\Vibelution\config\config.toml   (ADR0003)
-Evidence: logs/runtime_scenes/
+State: %LOCALAPPDATA%\Vibelution\projects\<projectId>\instances\<instanceId>\
+Evidence: <active-state>\logs\runtime_scenes\
 Turn SSOT: turn_journal.jsonl → SessionTurnItem 投影
+Chat route: committed Router URL 为窗口内会话/群聊权威 (ADR0010)
 ```
 
 Chat 地图：`docs/agents/conversation-flow-map.md`
@@ -32,6 +35,7 @@ LLM：`core/llm/PROTOCOL.md`
 | R6 | 用户内容进模型/索引前隔离清洗 |
 | R7 | remote/force 需明确授权 |
 | R8 | 有意义任务必须有验证 + refresh + claim/memory 判断 |
+| R9 | 验证闭合后主动自审并合入本地 `main`（合入门通过时）；不得等用户再下令 |
 
 ---
 

@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 import contextlib
 import importlib.util
+import json
 import os
+import subprocess
 import sys
 import time
 import types
@@ -26,6 +28,20 @@ def _load_desktop_entry_py():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def test_desktop_entry_direct_execution_loads_local_windowless_helper(tmp_path):
+    result = subprocess.run(
+        [sys.executable, str(DESKTOP_ENTRY_PY), "--help"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Open the Vibelution Launcher without a console window." in result.stdout
 
 
 def test_desktop_entry_imports_safely_on_non_windows(monkeypatch):
@@ -333,3 +349,301 @@ def test_bootstrap_workbench_url_falls_back_to_workbench_port(monkeypatch):
     )
 
     assert result["workbenchUrl"] == "http://127.0.0.1:8002"
+
+
+def test_lifecycle_bridge_parses_operations():
+    args = desktop_entry.parse_args(["--action", "lifecycle", "--lifecycle-operation", "restart"])
+    assert args.lifecycle_operation == "restart"
+
+def test_lifecycle_bridge_dispatches_start(monkeypatch):
+    entry = _load_desktop_entry_py()
+    calls = []
+    monkeypatch.setattr(entry, "_append_log", lambda *a, **k: None)
+
+    class FakeService:
+        class LauncherActiveWorkBlocked(Exception):
+            def __init__(self, message, active_work_runs=None):
+                super().__init__(message)
+                self.message = message
+                self.active_work_runs = active_work_runs or []
+
+        @staticmethod
+        def request_launcher_start():
+            calls.append("start")
+            return {"accepted": True, "operation": "start", "commandId": "cmd-1"}
+
+        @staticmethod
+        def request_launcher_stop(request_audit=None):
+            calls.append("stop")
+            return {"accepted": True, "operation": "stop", "commandId": "cmd-2"}
+
+        @staticmethod
+        def request_launcher_force_stop(request_audit=None):
+            calls.append("force-stop")
+            return {"accepted": True, "operation": "force-stop", "commandId": "cmd-3"}
+
+        @staticmethod
+        def request_launcher_restart(**kwargs):
+            calls.append("restart")
+            return {"accepted": True, "operation": "restart", "commandId": "cmd-4"}
+
+        @staticmethod
+        def request_launcher_rebuild_and_start():
+            calls.append("rebuild-and-start")
+            return {"accepted": True, "operation": "rebuild-and-start", "commandId": "cmd-5"}
+
+        @staticmethod
+        def request_launcher_runtime_shutdown():
+            calls.append("shutdown")
+            return {"accepted": True, "operation": "shutdown", "commandId": ""}
+
+    monkeypatch.setitem(sys.modules, "core.launcher", types.ModuleType("core.launcher"))
+    launcher_module = types.ModuleType("core.launcher.service")
+    launcher_module.LauncherActiveWorkBlocked = FakeService.LauncherActiveWorkBlocked
+    launcher_module.request_launcher_start = FakeService.request_launcher_start
+    launcher_module.request_launcher_stop = FakeService.request_launcher_stop
+    launcher_module.request_launcher_force_stop = FakeService.request_launcher_force_stop
+    launcher_module.request_launcher_restart = FakeService.request_launcher_restart
+    launcher_module.request_launcher_rebuild_and_start = FakeService.request_launcher_rebuild_and_start
+    launcher_module.request_launcher_runtime_shutdown = FakeService.request_launcher_runtime_shutdown
+    monkeypatch.setitem(sys.modules, "core.launcher.service", launcher_module)
+
+    for operation, expected_call in [
+        ("start", "start"),
+        ("stop", "stop"),
+        ("force-stop", "force-stop"),
+        ("restart", "restart"),
+        ("rebuild-and-start", "rebuild-and-start"),
+        ("shutdown", "shutdown"),
+    ]:
+        payload = entry._run_lifecycle_bridge(argparse.Namespace(lifecycle_operation=operation))
+        assert payload["accepted"] is True
+        assert calls[-1] == expected_call
+        assert payload["schemaVersion"] == 1
+
+def test_lifecycle_bridge_returns_active_work_block(monkeypatch):
+    entry = _load_desktop_entry_py()
+    monkeypatch.setattr(entry, "_append_log", lambda *a, **k: None)
+
+    class Blocked(Exception):
+        def __init__(self, message, active_work_runs=None):
+            super().__init__(message)
+            self.message = message
+            self.active_work_runs = active_work_runs or [{"kind": "agent_turn"}]
+
+    launcher_module = types.ModuleType("core.launcher.service")
+    launcher_module.LauncherActiveWorkBlocked = Blocked
+    launcher_module.request_launcher_stop = lambda request_audit=None: (_ for _ in ()).throw(Blocked("有进行中的任务"))
+    monkeypatch.setitem(sys.modules, "core.launcher", types.ModuleType("core.launcher"))
+    monkeypatch.setitem(sys.modules, "core.launcher.service", launcher_module)
+
+    payload = entry._run_lifecycle_bridge(argparse.Namespace(lifecycle_operation="stop"))
+    assert payload["accepted"] is False
+    assert payload["code"] == "active_work_blocked"
+    assert payload["operation"] == "stop"
+
+def test_lifecycle_bridge_rejects_unknown_operation():
+    entry = _load_desktop_entry_py()
+    with pytest.raises(ValueError):
+        entry._run_lifecycle_bridge(argparse.Namespace(lifecycle_operation="taskkill"))
+
+
+def test_branch_instance_bridge_parses_operations():
+    args = desktop_entry.parse_args(
+        ["--action", "branch-instance", "--branch-instance-operation", "start", "--instance-id", "worktree:task"]
+    )
+    assert args.branch_instance_operation == "start"
+    assert args.instance_id == "worktree:task"
+
+
+def test_branch_instance_bridge_dispatches_to_service(monkeypatch):
+    entry = _load_desktop_entry_py()
+    monkeypatch.setattr(entry, "_append_log", lambda *a, **k: None)
+    calls = []
+
+    launcher_module = types.ModuleType("core.launcher.service")
+    launcher_module.LauncherActiveWorkBlocked = type("LauncherActiveWorkBlocked", (Exception,), {})
+    launcher_module.request_branch_instance_operation = lambda instance_id, operation, request_audit=None: calls.append(
+        (instance_id, operation)
+    ) or {
+        "accepted": True,
+        "operation": operation,
+        "instanceId": instance_id,
+        "port": 8002,
+        "message": "ok",
+    }
+    monkeypatch.setitem(sys.modules, "core.launcher", types.ModuleType("core.launcher"))
+    monkeypatch.setitem(sys.modules, "core.launcher.service", launcher_module)
+
+    payload = entry._run_branch_instance_bridge(
+        argparse.Namespace(branch_instance_operation="start", instance_id="worktree:task", trigger="")
+    )
+    assert payload["accepted"] is True
+    assert payload["schemaVersion"] == 1
+    assert calls == [("worktree:task", "start")]
+
+
+def test_branch_instance_bridge_surfaces_operability_errors(monkeypatch):
+    entry = _load_desktop_entry_py()
+    monkeypatch.setattr(entry, "_append_log", lambda *a, **k: None)
+
+    class NotOperable(Exception):
+        pass
+
+    launcher_module = types.ModuleType("core.launcher.service")
+    launcher_module.LauncherActiveWorkBlocked = type("LauncherActiveWorkBlocked", (Exception,), {})
+    launcher_module.request_branch_instance_operation = lambda instance_id, operation, request_audit=None: (_ for _ in ()).throw(
+        NotOperable("instance not operable")
+    )
+    monkeypatch.setitem(sys.modules, "core.launcher", types.ModuleType("core.launcher"))
+    monkeypatch.setitem(sys.modules, "core.launcher.service", launcher_module)
+
+    payload = entry._run_branch_instance_bridge(
+        argparse.Namespace(branch_instance_operation="start", instance_id="worktree:task", trigger="")
+    )
+    assert payload["accepted"] is False
+    assert payload["code"] == "branch_instance_operation_failed"
+    assert payload["message"] == "instance not operable"
+
+
+def test_branch_instance_bridge_rejects_unknown_operation():
+    entry = _load_desktop_entry_py()
+    with pytest.raises(ValueError):
+        entry._run_branch_instance_bridge(
+            argparse.Namespace(branch_instance_operation="explode", instance_id="x", trigger="")
+        )
+
+
+def _fake_launcher_service_module():
+    launcher_module = types.ModuleType("core.launcher.service")
+    launcher_module.LauncherActiveWorkBlocked = type("LauncherActiveWorkBlocked", (Exception,), {})
+
+    def record(marker):
+        return lambda *args, **kwargs: {"marker": marker}
+
+    for path, marker in [
+        ("settings/workbench-window", "workbench_window"),
+        ("settings/startup", "startup"),
+        ("developer-mode", "developer_mode"),
+        ("developer-mode/noise-overview", "noise"),
+        ("developer-mode/cleanup/preview", "cleanup_preview"),
+        ("developer-mode/cleanup/apply", "cleanup_apply"),
+        ("maintenance/reset/summary", "maintenance_summary"),
+        ("maintenance/reset/preview", "maintenance_preview"),
+        ("maintenance/reset/apply", "maintenance_apply"),
+    ]:
+        setattr(launcher_module, f"_{path}", record(marker))
+    launcher_module.get_workbench_window_mode_setting = record("workbench_window")
+    launcher_module.update_workbench_window_mode = record("workbench_window_put")
+    launcher_module.get_launcher_startup_settings = record("startup")
+    launcher_module.update_launcher_startup_settings = record("startup_put")
+    launcher_module.get_launcher_developer_mode_setting = record("developer_mode")
+    launcher_module.update_launcher_developer_mode = record("developer_mode_put")
+    launcher_module.reset_launcher_developer_sandbox = record("reset_sandbox")
+    launcher_module.get_launcher_developer_noise_overview = record("noise")
+    launcher_module.preview_launcher_developer_cleanup = record("cleanup_preview")
+    launcher_module.apply_launcher_developer_cleanup = record("cleanup_apply")
+    launcher_module.get_launcher_maintenance_summary = record("maintenance_summary")
+    launcher_module.preview_launcher_maintenance_plan = record("maintenance_preview")
+    launcher_module.apply_launcher_maintenance_plan = record("maintenance_apply")
+    launcher_module.get_launcher_status = record("status")
+    launcher_module.get_launcher_freshness = record("freshness")
+    launcher_module.list_launcher_branch_instances = record("branch_instances")
+    launcher_module.cleanup_launcher_branch_instances = record("branch_cleanup")
+    return launcher_module
+
+
+def test_launcher_api_bridge_dispatches_settings_and_maintenance(monkeypatch):
+    entry = _load_desktop_entry_py()
+    monkeypatch.setattr(entry, "_append_log", lambda *a, **k: None)
+    monkeypatch.setitem(sys.modules, "core.launcher", types.ModuleType("core.launcher"))
+    monkeypatch.setitem(sys.modules, "core.launcher.service", _fake_launcher_service_module())
+
+    payload = entry._run_launcher_api_bridge(
+        argparse.Namespace(launcher_api_path="settings/workbench-window", launcher_api_method="GET", launcher_api_body="")
+    )
+    assert payload["ok"] is True
+    assert payload["payload"]["marker"] == "workbench_window"
+
+    payload = entry._run_launcher_api_bridge(
+        argparse.Namespace(
+            launcher_api_path="maintenance/reset/apply",
+            launcher_api_method="POST",
+            launcher_api_body=json.dumps({"profileId": "clean_start"}),
+        )
+    )
+    assert payload["ok"] is True
+    assert payload["payload"]["marker"] == "maintenance_apply"
+
+    payload = entry._run_launcher_api_bridge(
+        argparse.Namespace(launcher_api_path="status", launcher_api_method="GET", launcher_api_body="")
+    )
+    assert payload["ok"] is True
+    assert payload["payload"]["marker"] == "status"
+
+    payload = entry._run_launcher_api_bridge(
+        argparse.Namespace(launcher_api_path="freshness", launcher_api_method="GET", launcher_api_body="")
+    )
+    assert payload["ok"] is True
+    assert payload["payload"]["marker"] == "freshness"
+
+    payload = entry._run_launcher_api_bridge(
+        argparse.Namespace(launcher_api_path="branch-instances", launcher_api_method="GET", launcher_api_body="")
+    )
+    assert payload["ok"] is True
+    assert payload["payload"]["marker"] == "branch_instances"
+
+
+def test_launcher_api_bridge_rejects_unknown_paths(monkeypatch):
+    entry = _load_desktop_entry_py()
+    monkeypatch.setattr(entry, "_append_log", lambda *a, **k: None)
+    monkeypatch.setitem(sys.modules, "core.launcher", types.ModuleType("core.launcher"))
+    monkeypatch.setitem(sys.modules, "core.launcher.service", _fake_launcher_service_module())
+
+    payload = entry._run_launcher_api_bridge(
+        argparse.Namespace(launcher_api_path="workbench-close-transactions", launcher_api_method="GET", launcher_api_body="")
+    )
+    assert payload["ok"] is False
+    assert "Unsupported launcher api path" in str(payload["message"])
+
+
+def test_launcher_api_bridge_surfaces_service_errors(monkeypatch):
+    entry = _load_desktop_entry_py()
+    monkeypatch.setattr(entry, "_append_log", lambda *a, **k: None)
+    launcher_module = _fake_launcher_service_module()
+    launcher_module.apply_launcher_maintenance_plan = lambda body: (_ for _ in ()).throw(ValueError("active work blocks reset"))
+    monkeypatch.setitem(sys.modules, "core.launcher", types.ModuleType("core.launcher"))
+    monkeypatch.setitem(sys.modules, "core.launcher.service", launcher_module)
+
+    payload = entry._run_launcher_api_bridge(
+        argparse.Namespace(launcher_api_path="maintenance/reset/apply", launcher_api_method="POST", launcher_api_body="{}")
+    )
+    assert payload["ok"] is False
+    assert payload["code"] == "launcher_api_bridge_failed"
+    assert "active work blocks reset" in str(payload["message"])
+
+
+def test_desktop_shell_status_bridge_uses_workspace_root(monkeypatch, tmp_path):
+    entry = _load_desktop_entry_py()
+    monkeypatch.setattr(entry, "_append_log", lambda *a, **k: None)
+    seen = {}
+
+    def fake_inspect(root):
+        seen["root"] = Path(root)
+        return {"schemaVersion": 1, "stale": True, "reason": "provenance_mismatch"}
+
+    import core.launcher.desktop_shell as shell
+
+    monkeypatch.setattr(shell, "inspect_desktop_shell", fake_inspect)
+    payload = entry._desktop_shell_status_bridge(argparse.Namespace(workspace=str(tmp_path)))
+    assert payload["stale"] is True
+    assert seen["root"] == tmp_path.resolve()
+
+
+def test_parse_args_accepts_desktop_shell_refresh_flags():
+    args = desktop_entry.parse_args(
+        ["--action", "schedule-desktop-shell-refresh", "--wait-pid", "12", "--then-lifecycle", "start"]
+    )
+    assert args.action == "schedule-desktop-shell-refresh"
+    assert args.wait_pid == 12
+    assert args.then_lifecycle == "start"

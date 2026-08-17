@@ -3,8 +3,9 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
-from typing import Iterable
+from typing import Any, Iterable, Mapping
 
 from core.orchestration.agent_modes import AgentMode, ModePolicy
 
@@ -20,6 +21,190 @@ _CODE_CONTEXT_TOOL_NAMES = {
     "run_test_for_tool",
     "cli_tool",
 }
+
+
+def _decode_binary(value: Any) -> Any:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).decode("utf-8", errors="replace")
+    return value
+
+
+def _maybe_json(value: Any) -> Any:
+    value = _decode_binary(value)
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if not text or text[0] not in "{[":
+        return value
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return value
+
+
+def _coerce_text(value: Any) -> str:
+    if value is None:
+        return ""
+    value = _decode_binary(value)
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+def _coerce_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    value = _decode_binary(value)
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return bool(value)
+    text = str(value).strip().lower()
+    if not text:
+        return default
+    if text in {"1", "true", "yes", "on", "enabled"}:
+        return True
+    if text in {"0", "false", "no", "off", "disabled"}:
+        return False
+    return default
+
+
+def _flag_enabled(value: Any, default: bool = True) -> bool:
+    value = _maybe_json(value)
+    if isinstance(value, Mapping):
+        nested = value.get("enabled")
+        if nested is None:
+            nested = value.get("visible")
+        if nested is None:
+            nested = value.get("allowed")
+        return _coerce_bool(nested, default)
+    return _coerce_bool(value, default)
+
+
+_POLICY_KEYS = (
+    "maxCallsPerTurn",
+    "max_calls_per_turn",
+    "allowedTools",
+    "allowed_tools",
+    "writeScopes",
+    "write_scopes",
+    "mutationAccess",
+    "mutation_access",
+)
+_POLICY_ENVELOPES = ("policy", "toolPolicy", "tool_policy", "config", "payload")
+_NAME_ENVELOPES = (
+    "tools",
+    "allowedTools",
+    "allowed_tools",
+    "items",
+    "names",
+    "components",
+)
+
+
+def _as_mapping(value: Any) -> dict[str, Any]:
+    value = _maybe_json(value)
+    if not isinstance(value, Mapping):
+        return {}
+    mapping = dict(value)
+    if any(key in mapping for key in _POLICY_KEYS):
+        return mapping
+    for envelope in _POLICY_ENVELOPES:
+        if envelope not in mapping:
+            continue
+        nested = _as_mapping(mapping.get(envelope))
+        if nested:
+            return nested
+    return mapping
+
+
+def _mapping_get(mapping: Mapping[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in mapping:
+            return mapping.get(key)
+    return None
+
+
+def _coerce_nonnegative_int(value: Any, *, default: int = 0) -> int:
+    if isinstance(value, bool) or value is None:
+        parsed = 0
+    else:
+        value = _decode_binary(value)
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            parsed = 0
+    if parsed > 0:
+        return parsed
+    if isinstance(default, bool) or default is None:
+        fallback = 0
+    else:
+        try:
+            fallback = int(default)
+        except (TypeError, ValueError):
+            fallback = 0
+    return fallback if fallback > 0 else 0
+
+
+def _coerce_goal_text(value: Any) -> str:
+    parsed = _maybe_json(value)
+    if isinstance(parsed, Mapping):
+        nested = _mapping_get(parsed, "goal", "text", "content", "prompt")
+        if nested is not None:
+            return _coerce_text(nested).strip()
+        if parsed is not value:
+            return _coerce_text(value).strip()
+        return ""
+    return _coerce_text(value).strip()
+
+
+def _coerce_name_set(items: Any) -> set[str]:
+    items = _maybe_json(items)
+    if items is None:
+        return set()
+    if isinstance(items, (str, bytes, bytearray, memoryview)):
+        text = _coerce_text(items).strip()
+        parsed = _maybe_json(text)
+        if parsed is not text and not isinstance(parsed, (str, bytes, bytearray, memoryview)):
+            return _coerce_name_set(parsed)
+        return {text} if text else set()
+    if isinstance(items, Mapping):
+        for key in _NAME_ENVELOPES:
+            if key not in items:
+                continue
+            nested = items.get(key)
+            if nested is None or isinstance(nested, (bool, int, float)):
+                continue
+            return _coerce_name_set(nested)
+        tool_name = items.get("name")
+        if tool_name is None:
+            tool_name = items.get("id")
+        if tool_name is not None and not any(key in items for key in _NAME_ENVELOPES):
+            if not _flag_enabled(items, True):
+                return set()
+            name = _coerce_text(tool_name).strip()
+            return {name} if name else set()
+        names: set[str] = set()
+        for key, enabled in items.items():
+            name = _coerce_text(key).strip()
+            if name and _flag_enabled(enabled, True):
+                names.add(name)
+        return names
+    try:
+        iterator = list(items)
+    except TypeError:
+        name = _coerce_text(items).strip()
+        return {name} if name else set()
+    names: set[str] = set()
+    for item in iterator:
+        item = _maybe_json(item)
+        if isinstance(item, Mapping):
+            names.update(_coerce_name_set(item))
+            continue
+        name = _coerce_text(item).strip()
+        if name:
+            names.add(name)
+    return names
 
 
 @dataclass(frozen=True)
@@ -58,7 +243,7 @@ class RuntimeGoalPacket:
     def allowed_components(self, registered_components: Iterable[str]) -> set[str]:
         """返回当前目标包允许激活的提示词组件。"""
 
-        allowed = {str(item).strip().upper() for item in registered_components if str(item).strip()}
+        allowed = {name.upper() for name in _coerce_name_set(registered_components)}
         if not self.code_context_allowed():
             allowed.discard("CODEBASE_MAP")
         if not self.allow_git_commit and not self.allow_evolution_transaction:
@@ -69,8 +254,8 @@ class RuntimeGoalPacket:
         """Return whether codebase prompt context is available for this turn."""
 
         if self.allow_code_context is not None:
-            return bool(self.allow_code_context)
-        return bool(self.allow_file_writes)
+            return _coerce_bool(self.allow_code_context, default=False)
+        return _coerce_bool(self.allow_file_writes, default=False)
 
     def render(self) -> str:
         forbidden = list(self.forbidden_actions) or ["无额外禁止项；仍遵守工具、日志、Git 和安全边界。"]
@@ -106,10 +291,13 @@ def build_runtime_goal_packet(
 ) -> RuntimeGoalPacket:
     """根据当前策略构建目标包，但不改变 agent 身份。"""
 
-    mode = policy.mode
-    goal_text = str(goal or "").strip()
-    max_calls = _max_calls_per_turn(agent_tool_policy)
-    if mode == AgentMode.CHAT:
+    mode = getattr(policy, "mode", None)
+    mode_text = _coerce_text(getattr(mode, "value", mode)).strip().lower()
+    goal_text = _coerce_goal_text(goal)
+    tool_policy = _as_mapping(agent_tool_policy)
+    max_calls = _max_calls_per_turn(tool_policy)
+    allow_auto_loop = _coerce_bool(getattr(policy, "allow_auto_loop", False), default=False)
+    if mode_text == AgentMode.CHAT:
         profile = _chat_capability_profile(policy, goal_text)
         return RuntimeGoalPacket(
             goal=goal_text,
@@ -123,19 +311,19 @@ def build_runtime_goal_packet(
             allow_subagents=profile.allow_subagents,
             allow_code_context=_allow_code_context_for_turn(
                 profile.allow_file_writes,
-                agent_tool_policy,
+                tool_policy,
             ),
             max_calls_per_turn=max_calls,
             completion_standard=profile.completion_standard,
             forbidden_actions=profile.forbidden_actions,
         )
-    if mode == AgentMode.SUPERVISED_EVOLUTION:
+    if mode_text == AgentMode.SUPERVISED_EVOLUTION:
         return RuntimeGoalPacket(
             goal=goal_text,
             source="监督进化入口",
             objective_type="evaluation_case",
             capability_profile="supervised_evaluation",
-            allow_auto_continue=policy.allow_auto_loop,
+            allow_auto_continue=allow_auto_loop,
             allow_file_writes=True,
             allow_git_commit=False,
             allow_evolution_transaction=True,
@@ -153,7 +341,7 @@ def build_runtime_goal_packet(
         source="自进化入口",
         objective_type="self_improvement",
         capability_profile="self_improvement",
-        allow_auto_continue=policy.allow_auto_loop,
+        allow_auto_continue=allow_auto_loop,
         allow_file_writes=True,
         allow_git_commit=True,
         allow_evolution_transaction=True,
@@ -166,18 +354,16 @@ def build_runtime_goal_packet(
 
 
 def _max_calls_per_turn(agent_tool_policy: dict | None) -> int:
-    if not isinstance(agent_tool_policy, dict):
+    policy = _as_mapping(agent_tool_policy)
+    if not policy:
         return 0
-    raw = agent_tool_policy.get("maxCallsPerTurn")
-    try:
-        value = int(raw or 0)
-    except (TypeError, ValueError):
-        return 0
-    return value if value > 0 else 0
+    return _coerce_nonnegative_int(
+        _mapping_get(policy, "maxCallsPerTurn", "max_calls_per_turn")
+    )
 
 
 def _tool_budget_lines(max_calls_per_turn: int) -> list[str]:
-    budget = max(0, int(max_calls_per_turn or 0))
+    budget = _coerce_nonnegative_int(max_calls_per_turn)
     if budget <= 0:
         return [
             "- 工具调用预算: 未从策略解析到上限；仍按「失败 1 次换路」执行。",
@@ -192,21 +378,19 @@ def _tool_budget_lines(max_calls_per_turn: int) -> list[str]:
 def _allow_code_context_for_turn(allow_file_writes: bool, agent_tool_policy: dict | None) -> bool:
     """Decide whether CODEBASE_MAP is allowed for this Agent turn."""
 
-    if not isinstance(agent_tool_policy, dict):
-        return bool(allow_file_writes)
-    mutation_access = str(agent_tool_policy.get("mutationAccess") or "").strip().lower()
-    write_scopes = agent_tool_policy.get("writeScopes")
-    allowed_tools = {
-        str(item or "").strip()
-        for item in (agent_tool_policy.get("allowedTools") or [])
-        if str(item or "").strip()
-    }
+    policy = _as_mapping(agent_tool_policy)
+    if not policy:
+        return _coerce_bool(allow_file_writes, default=False)
+    mutation_access = _coerce_text(
+        _mapping_get(policy, "mutationAccess", "mutation_access")
+    ).strip().lower()
+    allowed_tools = _coerce_name_set(_mapping_get(policy, "allowedTools", "allowed_tools"))
     has_code_tool = bool(allowed_tools & _CODE_CONTEXT_TOOL_NAMES)
     if has_code_tool:
         return True
-    if not allow_file_writes:
+    if not _coerce_bool(allow_file_writes, default=False):
         return False
-    has_write_scope = bool(write_scopes) if isinstance(write_scopes, list) else False
+    has_write_scope = bool(_coerce_name_set(_mapping_get(policy, "writeScopes", "write_scopes")))
     if mutation_access == "none" and not has_write_scope and not has_code_tool:
         return False
     return has_code_tool or has_write_scope or mutation_access not in {"", "none"}
@@ -232,7 +416,7 @@ def _chat_capability_profile(policy: ModePolicy, goal_text: str) -> TurnCapabili
     return TurnCapabilityProfile(
         profile_id="write_capable_chat",
         objective_type="user_request",
-        allow_auto_continue=policy.allow_auto_loop,
+        allow_auto_continue=_coerce_bool(getattr(policy, "allow_auto_loop", False), default=False),
         allow_file_writes=True,
         allow_git_commit=True,
         allow_evolution_transaction=False,
@@ -246,7 +430,7 @@ def _chat_capability_profile(policy: ModePolicy, goal_text: str) -> TurnCapabili
 
 
 def _is_readonly_discussion_goal(goal_text: str) -> bool:
-    normalized = " ".join(str(goal_text or "").lower().split())
+    normalized = " ".join(_coerce_text(goal_text).lower().split())
     if not normalized:
         return False
     explicit_readonly_markers = (
@@ -296,4 +480,4 @@ def _is_readonly_discussion_goal(goal_text: str) -> bool:
 
 
 def _yes_no(value: bool) -> str:
-    return "允许" if value else "不允许"
+    return "允许" if _coerce_bool(value, default=False) else "不允许"

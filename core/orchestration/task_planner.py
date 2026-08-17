@@ -13,12 +13,223 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, ClassVar, Dict, List, Optional
+from typing import Any, ClassVar, Dict, List, Mapping, Optional
 
 from core.prompt_manager.task_analyzer import TaskStatus
 
 
 _TASK_STORAGE_OVERRIDE: ContextVar[str] = ContextVar("vibelution_task_storage_override", default="")
+
+
+def _coerce_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+def _maybe_json(value: Any) -> Any:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith("{") or text.startswith("["):
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                return value
+    return value
+
+
+def _as_mapping(value: Any) -> Dict[str, Any]:
+    value = _maybe_json(value)
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {}
+
+
+def _mapping_get(mapping: Mapping[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in mapping:
+            return mapping.get(key)
+    return None
+
+
+def _mapping_items(value: Any) -> List[Dict[str, Any]]:
+    value = _maybe_json(value)
+    if value is None or isinstance(value, (str, bytes, bytearray, memoryview)):
+        return []
+    if isinstance(value, Mapping):
+        nested = value.get("tasks")
+        if nested is None:
+            nested = value.get("items")
+        if nested is None:
+            nested = value.get("entries")
+        if nested is None:
+            nested = value.get("subtasks")
+        if nested is not None:
+            return _mapping_items(nested)
+        if any(key in value for key in ("description", "name", "status", "is_completed", "isCompleted", "id")):
+            return [dict(value)]
+        return [dict(item) for item in value.values() if isinstance(item, Mapping)]
+    try:
+        iterator = list(value)
+    except TypeError:
+        return []
+    items: List[Dict[str, Any]] = []
+    for item in iterator:
+        item = _maybe_json(item)
+        if isinstance(item, Mapping):
+            items.append(dict(item))
+    return items
+
+
+def _coerce_str_list(value: Any) -> List[str]:
+    value = _maybe_json(value)
+    if value is None:
+        return []
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        text = bytes(value).decode("utf-8", errors="replace").strip()
+        return [text] if text else []
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    if isinstance(value, Mapping):
+        nested = value.get("items")
+        if nested is None:
+            nested = value.get("names")
+        if nested is None:
+            nested = value.get("tags")
+        if nested is not None:
+            return _coerce_str_list(nested)
+        names: List[str] = []
+        for key, item in value.items():
+            if isinstance(item, Mapping) and not _coerce_bool(
+                item.get("enabled", item.get("enable")), True
+            ):
+                continue
+            text = _coerce_text(key).strip()
+            if text and text not in names:
+                names.append(text)
+        return names
+    try:
+        iterator = list(value)
+    except TypeError:
+        text = _coerce_text(value).strip()
+        return [text] if text else []
+    names = []
+    for item in iterator:
+        text = _coerce_text(item).strip()
+        if text and text not in names:
+            names.append(text)
+    return names
+
+
+def _safe_int(value: Any, default: int | None = 0) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return default
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_float(value: Any, default: float) -> float:
+    if isinstance(value, bool) or value is None:
+        return default
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _coerce_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value).decode("utf-8", errors="replace")
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return bool(value)
+    normalized = str(value).strip().lower()
+    if not normalized:
+        return default
+    if normalized in {"1", "true", "yes", "on", "enabled"}:
+        return True
+    if normalized in {"0", "false", "no", "off", "disabled"}:
+        return False
+    return default
+
+
+def _coerce_int_list(value: Any) -> List[int]:
+    value = _maybe_json(value)
+    if value is None:
+        return []
+    if isinstance(value, (bytes, bytearray, memoryview, str)):
+        parsed = _safe_int(_coerce_text(value).strip(), None)
+        return [parsed] if parsed is not None else []
+    if isinstance(value, Mapping):
+        nested = value.get("ids")
+        if nested is None:
+            nested = value.get("items")
+        if nested is None:
+            nested = value.get("taskIds")
+        if nested is None:
+            nested = value.get("task_ids")
+        if nested is not None:
+            return _coerce_int_list(nested)
+        value = list(value)
+    try:
+        iterator = list(value)
+    except TypeError:
+        parsed = _safe_int(value, None)
+        return [parsed] if parsed is not None else []
+    ids: List[int] = []
+    for item in iterator:
+        parsed = _safe_int(item, None)
+        if parsed is not None and parsed not in ids:
+            ids.append(parsed)
+    return ids
+
+
+def _coerce_substeps(value: Any) -> List[Dict[str, Any]]:
+    value = _maybe_json(value)
+    if value is None:
+        return []
+    if isinstance(value, (bytes, bytearray, memoryview, str)):
+        text = _coerce_text(value).strip()
+        return [{"description": text}] if text else []
+    if isinstance(value, Mapping):
+        nested = value.get("items")
+        if nested is None:
+            nested = value.get("steps")
+        if nested is None:
+            nested = value.get("substeps")
+        if nested is not None:
+            return _coerce_substeps(nested)
+        return [dict(value)] if value else []
+    try:
+        iterator = list(value)
+    except TypeError:
+        return []
+    steps: List[Dict[str, Any]] = []
+    for item in iterator:
+        item = _maybe_json(item)
+        if isinstance(item, Mapping):
+            steps.append(dict(item))
+            continue
+        text = _coerce_text(item).strip()
+        if text:
+            steps.append({"description": text})
+    return steps
 
 
 @contextmanager
@@ -162,10 +373,12 @@ class TaskManager:
         try:
             with open(fpath, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            self._goal = data.get("goal", data.get("generation_goal", ""))
-            self._created_at = data.get("created_at", "")
-            raw = data.get("tasks", data.get("subtasks", []))
-            self._light_tasks = [self._normalize_light_task(task) for task in raw]
+            self._goal = _coerce_text(
+                _mapping_get(_as_mapping(data), "goal", "generation_goal")
+            )
+            self._created_at = _coerce_text(_mapping_get(_as_mapping(data), "created_at", "createdAt"))
+            raw = _mapping_get(_as_mapping(data), "tasks", "subtasks") or []
+            self._light_tasks = [self._normalize_light_task(task) for task in _mapping_items(raw)]
             self._next_light_id = max([t["id"] for t in self._light_tasks], default=0) + 1
         except (json.JSONDecodeError, OSError, TypeError, ValueError):
             self._light_tasks = []
@@ -193,32 +406,39 @@ class TaskManager:
             )
 
     def _normalize_light_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
-        task_id = int(task.get("id", self._next_light_id))
-        is_completed = bool(task.get("is_completed", False))
-        status = task.get("status") or ("completed" if is_completed else "pending")
-        description = task.get("description") or task.get("name") or ""
-        created_at = task.get("created_at") or datetime.now().isoformat()
+        data = _as_mapping(task)
+        task_id = _safe_int(_mapping_get(data, "id"), self._next_light_id)
+        if task_id is None:
+            task_id = self._next_light_id
+        is_completed = _coerce_bool(_mapping_get(data, "is_completed", "isCompleted"), False)
+        status = _mapping_get(data, "status") or ("completed" if is_completed else "pending")
+        description = _coerce_text(
+            _mapping_get(data, "description", "name") or ""
+        )
+        created_at = _mapping_get(data, "created_at", "createdAt") or datetime.now().isoformat()
         return {
             "id": task_id,
-            "name": task.get("name") or description,
+            "name": _coerce_text(_mapping_get(data, "name") or description),
             "description": description,
             "status": status,
-            "is_completed": status == TaskStatus.COMPLETED.value or is_completed,
-            "result_summary": task.get("result_summary", ""),
-            "substeps": list(task.get("substeps", [])),
+            "is_completed": str(status) == TaskStatus.COMPLETED.value or is_completed,
+            "result_summary": _coerce_text(_mapping_get(data, "result_summary", "resultSummary")),
+            "substeps": _coerce_substeps(_mapping_get(data, "substeps")),
             "created_at": created_at,
-            "started_at": task.get("started_at"),
-            "completed_at": task.get("completed_at"),
-            "priority": task.get("priority", TaskPriority.MEDIUM.value),
-            "estimated_hours": task.get("estimated_hours", 1.0),
-            "actual_hours": task.get("actual_hours", 0.0),
-            "dependencies": [str(dep) for dep in task.get("dependencies", [])],
-            "tags": list(task.get("tags", [])),
-            "metadata": dict(task.get("metadata", {})),
+            "started_at": _mapping_get(data, "started_at", "startedAt"),
+            "completed_at": _mapping_get(data, "completed_at", "completedAt"),
+            "priority": _mapping_get(data, "priority") or TaskPriority.MEDIUM.value,
+            "estimated_hours": _safe_float(_mapping_get(data, "estimated_hours", "estimatedHours"), 1.0),
+            "actual_hours": _safe_float(_mapping_get(data, "actual_hours", "actualHours"), 0.0),
+            "dependencies": _coerce_str_list(_mapping_get(data, "dependencies")),
+            "tags": _coerce_str_list(_mapping_get(data, "tags")),
+            "metadata": _as_mapping(_mapping_get(data, "metadata")),
         }
 
     def _find_light_task(self, task_id: str | int) -> Optional[Dict[str, Any]]:
-        tid = int(task_id)
+        tid = _safe_int(task_id, None)
+        if tid is None:
+            return None
         return next((task for task in self._light_tasks if task["id"] == tid), None)
 
     def _parse_datetime(self, raw: Any) -> Optional[datetime]:
@@ -234,37 +454,41 @@ class TaskManager:
     def _priority_from_raw(self, raw: Any) -> TaskPriority:
         if isinstance(raw, TaskPriority):
             return raw
+        if isinstance(raw, bool) or raw is None:
+            return TaskPriority.MEDIUM
+        if isinstance(raw, (bytes, bytearray, memoryview)):
+            raw = bytes(raw).decode("utf-8", errors="replace")
         try:
             return TaskPriority(int(raw))
         except (TypeError, ValueError):
             try:
-                return TaskPriority[str(raw).upper()]
+                return TaskPriority[_coerce_text(raw).upper()]
             except (KeyError, TypeError):
                 return TaskPriority.MEDIUM
 
     def _status_from_raw(self, raw: Any, is_completed: bool = False) -> TaskStatus:
         if isinstance(raw, TaskStatus):
             return raw
-        if is_completed:
+        if _coerce_bool(is_completed, False):
             return TaskStatus.COMPLETED
         try:
-            return TaskStatus(str(raw))
+            return TaskStatus(_coerce_text(raw))
         except ValueError:
             return TaskStatus.PENDING
 
     def _task_from_light(self, light: Dict[str, Any]) -> Task:
-        status = self._status_from_raw(light.get("status"), bool(light.get("is_completed")))
+        status = self._status_from_raw(light.get("status"), _coerce_bool(light.get("is_completed"), False))
         return Task(
             task_id=str(light["id"]),
             name=light.get("name") or light.get("description", ""),
             description=light.get("description", ""),
             status=status,
             priority=self._priority_from_raw(light.get("priority")),
-            estimated_hours=float(light.get("estimated_hours", 1.0) or 1.0),
-            actual_hours=float(light.get("actual_hours", 0.0) or 0.0),
-            dependencies=[str(dep) for dep in light.get("dependencies", [])],
-            tags=list(light.get("tags", [])),
-            metadata=dict(light.get("metadata", {}), substeps=list(light.get("substeps", []))),
+            estimated_hours=_safe_float(light.get("estimated_hours"), 1.0),
+            actual_hours=_safe_float(light.get("actual_hours"), 0.0),
+            dependencies=_coerce_str_list(light.get("dependencies")),
+            tags=_coerce_str_list(light.get("tags")),
+            metadata={**_as_mapping(light.get("metadata")), "substeps": _coerce_substeps(light.get("substeps"))},
             created_at=self._parse_datetime(light.get("created_at")) or datetime.now(),
             started_at=self._parse_datetime(light.get("started_at")),
             completed_at=self._parse_datetime(light.get("completed_at")),
@@ -274,8 +498,10 @@ class TaskManager:
     def _apply_task_to_light(self, task: Task) -> Dict[str, Any]:
         light = self._find_light_task(task.task_id)
         if light is None:
-            light = {"id": int(task.task_id)}
+            parsed_id = _safe_int(task.task_id, self._next_light_id)
+            light = {"id": parsed_id if parsed_id is not None else self._next_light_id}
             self._light_tasks.append(light)
+        metadata = _as_mapping(task.metadata)
         light.update(
             {
                 "name": task.name,
@@ -283,19 +509,21 @@ class TaskManager:
                 "status": task.status.value,
                 "is_completed": task.status == TaskStatus.COMPLETED,
                 "result_summary": task.result_summary,
-                "substeps": list(task.metadata.get("substeps", light.get("substeps", []))),
+                "substeps": _coerce_substeps(metadata.get("substeps", light.get("substeps", []))),
                 "created_at": task.created_at.isoformat() if task.created_at else datetime.now().isoformat(),
                 "started_at": task.started_at.isoformat() if task.started_at else None,
                 "completed_at": task.completed_at.isoformat() if task.completed_at else None,
                 "priority": task.priority.value,
                 "estimated_hours": task.estimated_hours,
                 "actual_hours": task.actual_hours,
-                "dependencies": [str(dep) for dep in task.dependencies],
-                "tags": list(task.tags),
-                "metadata": dict(task.metadata),
+                "dependencies": _coerce_str_list(task.dependencies),
+                "tags": _coerce_str_list(task.tags),
+                "metadata": metadata,
             }
         )
-        self._next_light_id = max(self._next_light_id, int(task.task_id) + 1)
+        next_id = _safe_int(task.task_id, None)
+        if next_id is not None:
+            self._next_light_id = max(self._next_light_id, next_id + 1)
         return light
 
     def _all_tasks(self) -> List[Task]:
@@ -320,9 +548,9 @@ class TaskManager:
             priority=priority,
             estimated_hours=estimated_hours,
             deadline=deadline,
-            dependencies=[str(dep) for dep in (dependencies or [])],
-            tags=tags or [],
-            metadata=metadata or {},
+            dependencies=_coerce_str_list(dependencies),
+            tags=_coerce_str_list(tags),
+            metadata=_as_mapping(metadata),
         )
         self._apply_task_to_light(task)
         self._stats["tasks_created"] += 1
@@ -366,7 +594,7 @@ class TaskManager:
         task.status = TaskStatus.COMPLETED
         task.completed_at = datetime.now()
         task.started_at = task.started_at or task.completed_at
-        task.result_summary = result_summary
+        task.result_summary = _coerce_text(result_summary)
         task.actual_hours = (task.completed_at - task.started_at).total_seconds() / 3600
         self._stats["tasks_completed"] += 1
         self._apply_task_to_light(task)
@@ -380,7 +608,7 @@ class TaskManager:
             return False
         task.status = TaskStatus.FAILED
         task.completed_at = datetime.now()
-        task.result_summary = reason
+        task.result_summary = _coerce_text(reason)
         self._stats["tasks_failed"] += 1
         self._apply_task_to_light(task)
         self._save_tasks()
@@ -414,7 +642,8 @@ class TaskManager:
         if priority:
             result = [task for task in result if task.priority == priority]
         if tags:
-            result = [task for task in result if any(tag in task.tags for tag in tags)]
+            wanted = set(_coerce_str_list(tags))
+            result = [task for task in result if wanted.intersection(task.tags)]
         return result
 
     def get_current_plan(self) -> Optional[Plan]:
@@ -428,9 +657,9 @@ class TaskManager:
                     id=str(task["id"]),
                     name=task.get("name") or task.get("description", ""),
                     description=task.get("description", ""),
-                    status=self._status_from_raw(task.get("status"), bool(task.get("is_completed"))),
+                    status=self._status_from_raw(task.get("status"), _coerce_bool(task.get("is_completed"), False)),
                     result_summary=task.get("result_summary", ""),
-                    substeps=list(task.get("substeps", [])),
+                    substeps=_coerce_substeps(task.get("substeps")),
                 )
                 for task in self._light_tasks
             },
@@ -473,30 +702,35 @@ class TaskManager:
 
     def task_create(self, tasks: List[Dict[str, Any]], goal: str = "") -> str:
         """创建任务清单（清空旧清单），返回摘要。"""
-        self._goal = goal
+        self._goal = _coerce_text(goal)
         self._light_tasks = []
         self._next_light_id = 1
         self._created_at = datetime.now().isoformat()
-        for task in tasks:
+        for task in _mapping_items(tasks):
+            description = _coerce_text(_mapping_get(task, "description", "name")).strip()
+            estimated_hours = _mapping_get(task, "estimated_hours", "estimatedHours")
             light = self._normalize_light_task(
                 {
                     "id": self._next_light_id,
-                    "description": task["description"],
-                    "name": task.get("name") or task["description"],
-                    "substeps": task.get("substeps", []),
-                    "priority": task.get("priority", TaskPriority.MEDIUM.value),
-                    "estimated_hours": task.get("estimated_hours", 1.0),
-                    "dependencies": task.get("dependencies", []),
-                    "tags": task.get("tags", []),
-                    "metadata": task.get("metadata", {}),
+                    "description": description,
+                    "name": _coerce_text(_mapping_get(task, "name") or description),
+                    "substeps": _mapping_get(task, "substeps") or [],
+                    "priority": _mapping_get(task, "priority") or TaskPriority.MEDIUM.value,
+                    "estimated_hours": 1.0 if estimated_hours is None else estimated_hours,
+                    "dependencies": _mapping_get(task, "dependencies") or [],
+                    "tags": _mapping_get(task, "tags") or [],
+                    "metadata": _mapping_get(task, "metadata") or {},
+                    "is_completed": _mapping_get(task, "is_completed", "isCompleted"),
+                    "result_summary": _mapping_get(task, "result_summary", "resultSummary"),
                     "created_at": datetime.now().isoformat(),
                 }
             )
             self._light_tasks.append(light)
             self._next_light_id += 1
-        self._stats["tasks_created"] += len(tasks)
+        self._stats["tasks_created"] += len(self._light_tasks)
         self._save_tasks()
-        return f"已创建 {len(tasks)} 个任务，当前共 {len(self._light_tasks)} 个子任务。"
+        created = len(self._light_tasks)
+        return f"已创建 {created} 个任务，当前共 {created} 个子任务。"
 
     def task_update(
         self,
@@ -510,14 +744,16 @@ class TaskManager:
         if not task:
             return f"任务 {task_id} 不存在。"
         if is_completed is not None:
-            task["is_completed"] = is_completed
-            task["status"] = TaskStatus.COMPLETED.value if is_completed else TaskStatus.PENDING.value
-            task["completed_at"] = datetime.now().isoformat() if is_completed else None
+            completed = _coerce_bool(is_completed, False)
+            task["is_completed"] = completed
+            task["status"] = TaskStatus.COMPLETED.value if completed else TaskStatus.PENDING.value
+            task["completed_at"] = datetime.now().isoformat() if completed else None
         if result_summary is not None:
-            task["result_summary"] = result_summary
+            task["result_summary"] = _coerce_text(result_summary)
         if description is not None:
-            task["description"] = description
-            task["name"] = description
+            text = _coerce_text(description)
+            task["description"] = text
+            task["name"] = text
         self._save_tasks()
         status_label = "完成" if task["is_completed"] else "未完成"
         return f"任务 {task_id} 已更新: {status_label}"
@@ -536,17 +772,17 @@ class TaskManager:
         lines.append("| # | 描述 | 状态 | 结果摘要 |\n")
         lines.append("|---|------|------|----------|\n")
         for task in self._light_tasks:
-            status = "✅ 完成" if task.get("is_completed") else "⏳ 进行中"
+            status = "✅ 完成" if _coerce_bool(task.get("is_completed"), False) else "⏳ 进行中"
             summary = task.get("result_summary") or "—"
             lines.append(f"| {task['id']} | {task['description']} | {status} | {summary} |\n")
-        pending = [task for task in self._light_tasks if not task.get("is_completed")]
+        pending = [task for task in self._light_tasks if not _coerce_bool(task.get("is_completed"), False)]
         if pending:
             lines.append(f"\n**未完成任务 {len(pending)} 个**，请继续执行下一个待办事项。\n")
         return "".join(lines)
 
     def get_completion_stats(self) -> Dict[str, int]:
         total = len(self._light_tasks)
-        completed = sum(1 for task in self._light_tasks if task.get("is_completed"))
+        completed = sum(1 for task in self._light_tasks if _coerce_bool(task.get("is_completed"), False))
         return {"total": total, "completed": completed, "pending": total - completed}
 
     def task_breakdown(self, task_id: int) -> Optional[List[Dict[str, Any]]]:
@@ -576,7 +812,7 @@ class TaskManager:
     def task_prioritize(self, task_ids: List[int]) -> Optional[List[int]]:
         """对指定任务 ID 列表按优先级排序（过滤无效 ID）。"""
         valid_ids = {task["id"] for task in self._light_tasks}
-        ordered_ids = [tid for tid in task_ids if tid in valid_ids]
+        ordered_ids = [tid for tid in _coerce_int_list(task_ids) if tid in valid_ids]
         if not ordered_ids:
             return None
         by_id = {task["id"]: task for task in self._light_tasks}

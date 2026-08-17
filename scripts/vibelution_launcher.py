@@ -27,11 +27,38 @@ from pathlib import Path
 import tomllib
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-RUNTIME_DIR = PROJECT_ROOT / ".runtime" / "launcher"
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from vibelution_storage import resolve_active_project_storage_paths
+
+
+def _load_log_rotation_stdlib():
+    """Load log_rotation.py without importing core.logging (pydantic / config)."""
+
+    import importlib.util
+
+    path = PROJECT_ROOT / "core" / "logging" / "log_rotation.py"
+    spec = importlib.util.spec_from_file_location("_vibelution_launcher_log_rotation", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"unable to load {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_LOG_ROTATION = _load_log_rotation_stdlib()
+DEFAULT_LOG_BACKUP_COUNT = _LOG_ROTATION.DEFAULT_LOG_BACKUP_COUNT
+DEFAULT_LOG_MAX_BYTES = _LOG_ROTATION.DEFAULT_LOG_MAX_BYTES
+rotate_log_file = _LOG_ROTATION.rotate_log_file
+write_log_tail_copy = _LOG_ROTATION.write_log_tail_copy
+
+PROJECT_STORAGE = resolve_active_project_storage_paths(PROJECT_ROOT)
+RUNTIME_DIR = PROJECT_STORAGE.runtime / "launcher"
 STATE_PATH = RUNTIME_DIR / "state.json"
 PORTS_PATH = RUNTIME_DIR / "ports.json"
 ACTIVE_RUNTIME_SCENE_PATH = RUNTIME_DIR / "active-runtime-scene.json"
-RUNTIME_SCENE_ROOT = PROJECT_ROOT / "logs" / "runtime_scenes"
+RUNTIME_SCENE_ROOT = PROJECT_STORAGE.logs / "runtime_scenes"
 BACKEND_STDOUT_PATH = RUNTIME_DIR / "backend.stdout.log"
 BACKEND_STDERR_PATH = RUNTIME_DIR / "backend.stderr.log"
 FRONTEND_BUILD_LOG_PATH = RUNTIME_DIR / "frontend-build.log"
@@ -56,6 +83,13 @@ FRONTEND_PACKAGE_MANAGER_ENV = "VIBELUTION_FRONTEND_PM"
 INTERNAL_LAUNCHER_ENV = "VIBELUTION_RUNTIME_MANAGER_INTERNAL_LAUNCHER"
 INTERNAL_ACTIONS = {"internal-start", "internal-focus", "internal-stop", "internal-restart"}
 RUNTIME_SAFE_UNTRACKED_PREFIXES = ("scripts/_tmp_stash_p3_manifest/",)
+
+LAUNCHER_SCENE_RAW_MAP = (
+    ("backend.stdout.log", "raw/backend.stdout.log"),
+    ("backend.stderr.log", "raw/backend.stderr.log"),
+    ("launcher-control.log", "raw/launcher-control.log"),
+    ("frontend-build.log", "raw/frontend.build.log"),
+)
 
 
 def _now_iso() -> str:
@@ -125,6 +159,23 @@ def _start_runtime_scene(trigger: str) -> dict[str, str]:
     tmp_path.write_text(json.dumps(reference, ensure_ascii=False, indent=2), encoding="utf-8")
     tmp_path.replace(ACTIVE_RUNTIME_SCENE_PATH)
     return reference
+
+
+def _rotate_launcher_process_logs_before_start() -> None:
+    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    for name, _scene_relative in LAUNCHER_SCENE_RAW_MAP:
+        rotate_log_file(
+            RUNTIME_DIR / name,
+            max_bytes=DEFAULT_LOG_MAX_BYTES,
+            backup_count=DEFAULT_LOG_BACKUP_COUNT,
+        )
+
+
+def _sync_launcher_logs_to_scene_raw(scene_dir: Path) -> None:
+    if not scene_dir.is_dir():
+        return
+    for launcher_name, scene_relative in LAUNCHER_SCENE_RAW_MAP:
+        write_log_tail_copy(RUNTIME_DIR / launcher_name, scene_dir / scene_relative)
 
 
 def _pid_probe(pid: int) -> str:
@@ -489,10 +540,19 @@ def _wait_for_started_backend(process: subprocess.Popen[bytes], port: int, host:
     while time.monotonic() < deadline:
         if process.poll() is not None:
             return 0
+        if not _backend_healthy(port, host):
+            time.sleep(0.35)
+            continue
         owner_pid = _listening_pid_for_port(port)
-        if owner_pid > 0 and _pid_belongs_to_process_tree(owner_pid, int(process.pid)) and _backend_healthy(port, host):
-            return owner_pid
-        time.sleep(0.35)
+        if owner_pid > 0:
+            if _pid_belongs_to_process_tree(owner_pid, int(process.pid)):
+                return owner_pid
+            time.sleep(0.35)
+            continue
+        # Fresh Linux clones often run the launcher with system Python: no
+        # psutil, and `ss` may be absent. Health is already 200 and this spawn
+        # is still alive, so treat it as the owner instead of killing it.
+        return int(process.pid)
     return 0
 
 
@@ -929,13 +989,21 @@ def _npm_cli_script_for_node(node_command: str) -> str:
         if not npm_command:
             continue
         npm_path = Path(npm_command)
+        resolved = npm_path.resolve()
+        if resolved.is_file() and resolved.name == "npm-cli.js":
+            return str(resolved)
         candidates.extend([npm_path.parent, npm_path.parent.parent])
     node_path = Path(node_command)
     candidates.extend([node_path.parent, node_path.parent.parent])
+    relative_cli_paths = (
+        Path("node_modules") / "npm" / "bin" / "npm-cli.js",
+        Path("lib") / "node_modules" / "npm" / "bin" / "npm-cli.js",
+    )
     for root in candidates:
-        candidate = root / "node_modules" / "npm" / "bin" / "npm-cli.js"
-        if candidate.is_file():
-            return str(candidate)
+        for relative in relative_cli_paths:
+            candidate = root / relative
+            if candidate.is_file():
+                return str(candidate)
     raise RuntimeError(
         "npm-cli.js was not found next to Node.js/npm. "
         "Install Node.js with npm, or repair the Node installation. "
@@ -946,7 +1014,9 @@ def _npm_cli_script_for_node(node_command: str) -> str:
 def _npm_install_command() -> tuple[list[str], str]:
     node_command = _node_command()
     npm_cli_script = _npm_cli_script_for_node(node_command)
-    return [node_command, npm_cli_script, "install"], "node npm-cli.js install"
+    # ci keeps package-lock.json untouched so the clean-worktree launch guard
+    # does not fail on a first-run clone after frontend bootstrap.
+    return [node_command, npm_cli_script, "ci"], "node npm-cli.js ci"
 
 
 def _frontend_build_commands(package_manager: str, web_dir: Path) -> list[tuple[list[str], str]]:
@@ -2045,6 +2115,8 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
     # Mid-flight checks only need commit/tree drift detection (full porcelain already done).
     _assert_runtime_source_identity(source_identity, light=True)
     runtime_scene = _start_runtime_scene("python_launcher_fresh_start")
+    _rotate_launcher_process_logs_before_start()
+    _sync_launcher_logs_to_scene_raw(Path(str(runtime_scene.get("runtimeSceneDir") or "")))
     stdout = BACKEND_STDOUT_PATH.open("ab")
     stderr = BACKEND_STDERR_PATH.open("ab")
     python_started = time.monotonic()

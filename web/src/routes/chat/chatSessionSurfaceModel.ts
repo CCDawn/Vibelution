@@ -490,6 +490,32 @@ export function buildChatSessionStateViewModel(options: {
   };
 }
 
+type AgentSessionTabOrderFields = Pick<SessionSummary, "id"> & {
+  createdAt?: string;
+};
+
+/**
+ * Tab order is a viewing affordance. Running activity (`updatedAt` / `lastActive`)
+ * must not reshuffle tabs or the selected highlight looks stolen.
+ */
+export function compareAgentSessionTabOrder(
+  left: AgentSessionTabOrderFields,
+  right: AgentSessionTabOrderFields,
+): number {
+  const leftCreated = String(left.createdAt || "").trim();
+  const rightCreated = String(right.createdAt || "").trim();
+  if (leftCreated !== rightCreated) {
+    if (!leftCreated) {
+      return 1;
+    }
+    if (!rightCreated) {
+      return -1;
+    }
+    return leftCreated.localeCompare(rightCreated);
+  }
+  return String(left.id || "").localeCompare(String(right.id || ""));
+}
+
 export function buildAgentSessionTabs(options: {
   sessions: SessionSummary[] | null | undefined;
   selectedChatAgentDirectSessionId: string | null | undefined;
@@ -499,8 +525,5 @@ export function buildAgentSessionTabs(options: {
   return sessions
     .filter((session): session is SessionSummary => Boolean(session))
     .filter((session, index, items) => items.findIndex((item) => item.id === session.id) === index)
-    .sort((left, right) => (
-      String(right.updatedAt || right.lastActive || "")
-        .localeCompare(String(left.updatedAt || left.lastActive || ""))
-    ));
+    .sort(compareAgentSessionTabOrder);
 }

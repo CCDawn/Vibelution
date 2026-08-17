@@ -31,6 +31,7 @@ def test_start_node_commits_command_attempt_outbox_events(tmp_path: Path) -> Non
         attempt = attempts[0]
         assert attempt.status == "starting"
         assert attempt.node_id == "source_finding"
+        assert attempt.actor_kind == "agent"
         assert attempt.attempt == 1
         assert attempt.command_id == receipt.command_id
 
@@ -47,6 +48,39 @@ def test_start_node_commits_command_attempt_outbox_events(tmp_path: Path) -> Non
             "node_starting",
         ]
         assert harness.wake_count == 1
+    finally:
+        harness.close()
+
+
+def test_start_node_records_definition_actor_kind(tmp_path: Path) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run()
+        harness.service.submit(
+            harness.request(node_id="source_finding", idempotency_key="ui:agent")
+        )
+        agent = harness.store.latest_attempt("run-test", "source_finding")
+        assert agent is not None and agent.actor_kind == "agent"
+
+        harness.service.submit(
+            harness.request(
+                node_id="smoke_gate",
+                expected_run_version=2,
+                idempotency_key="ui:human",
+            )
+        )
+        human = harness.store.latest_attempt("run-test", "smoke_gate")
+        assert human is not None and human.actor_kind == "human"
+
+        harness.service.submit(
+            harness.request(
+                node_id="controlled_run",
+                expected_run_version=3,
+                idempotency_key="ui:system",
+            )
+        )
+        system = harness.store.latest_attempt("run-test", "controlled_run")
+        assert system is not None and system.actor_kind == "system"
     finally:
         harness.close()
 

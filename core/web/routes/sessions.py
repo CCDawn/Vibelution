@@ -12,6 +12,26 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.responses import StreamingResponse
 
+from core.web.routes.session_catalog_models import (
+    ChatWorkbenchBootstrapResponse,
+    SessionActiveResponse,
+    SessionBulkDeletePayload,
+    SessionBulkDeleteResponse,
+    SessionCatalogItem,
+    SessionDeleteResponse,
+    SessionQueryResponse,
+)
+from core.web.routes.session_detail_models import SessionDetailResponse
+from core.web.routes.session_side_models import (
+    SessionChatReviewCandidateResponse,
+    SessionChildCreateResponse,
+    SessionToolApprovalItem,
+)
+from core.web.routes.session_turn_models import (
+    SessionAttachmentResponse,
+    SessionLlmOptionsResponse,
+    SessionTurnCommandResponse,
+)
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 from core.web.services.session.tool_approvals import (
     ToolApprovalConflictError,
@@ -29,8 +49,9 @@ from core.web.services.session_service import (
     create_chat_review_candidate_from_session,
     create_chat_session,
     create_child_session,
+    bulk_delete_chat_sessions,
     delete_chat_session,
-    delete_chat_session_lightweight,
+    MAX_BULK_SESSION_IDS,
     edit_and_resubmit_session_message,
     get_active_session_summary,
     get_session_detail,
@@ -187,7 +208,7 @@ class ChildSessionCreatePayload(BaseModel):
     constraints: list[str] = []
     excludedContextSummary: str = ""
     autoStart: bool = True
-    switchToChild: bool = True
+    switchToChild: bool = False
     source: str = "agent_auto_split"
 
 
@@ -197,18 +218,30 @@ class SessionToolApprovalDecisionPayload(BaseModel):
     decision: Literal["accept", "acceptForSession", "acceptAlways", "decline", "cancel"]
 
 
-@router.get("/sessions")
+@router.get(
+    "/sessions",
+    response_model=list[SessionCatalogItem],
+    response_model_exclude_unset=True,
+)
 def sessions() -> list[dict]:
     return list_sessions()
 
 
-@router.get("/sessions/active")
+@router.get(
+    "/sessions/active",
+    response_model=SessionActiveResponse,
+    response_model_exclude_unset=True,
+)
 def active_session() -> dict[str, str]:
     summary = get_active_session_summary() or {}
     return {"activeSessionId": str(summary.get("id") or "").strip()}
 
 
-@router.get("/sessions/query")
+@router.get(
+    "/sessions/query",
+    response_model=SessionQueryResponse,
+    response_model_exclude_unset=True,
+)
 def session_query(
     limit: int = Query(default=50, ge=1, le=100),
     cursor: str = "",
@@ -229,7 +262,11 @@ def session_query(
     )
 
 
-@router.get("/sessions/bootstrap")
+@router.get(
+    "/sessions/bootstrap",
+    response_model=ChatWorkbenchBootstrapResponse,
+    response_model_exclude_unset=True,
+)
 def session_bootstrap(
     limit: int = Query(default=50, ge=1, le=100),
     cursor: str = "",
@@ -246,7 +283,12 @@ def session_bootstrap(
     )
 
 
-@router.post("/sessions", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/sessions",
+    status_code=status.HTTP_201_CREATED,
+    response_model=SessionCatalogItem,
+    response_model_exclude_unset=True,
+)
 def session_create(
     request: Request,
     payload: SessionCreatePayload | None = None,
@@ -260,7 +302,11 @@ def session_create(
     )
 
 
-@router.get("/sessions/{session_id}")
+@router.get(
+    "/sessions/{session_id}",
+    response_model=SessionDetailResponse,
+    response_model_exclude_unset=True,
+)
 def session_detail(
     session_id: str,
     messageLimit: int = Query(default=0, ge=0, le=200),
@@ -280,7 +326,11 @@ def session_detail(
     return detail
 
 
-@router.get("/sessions/{session_id}/llm-options")
+@router.get(
+    "/sessions/{session_id}/llm-options",
+    response_model=SessionLlmOptionsResponse,
+    response_model_exclude_unset=True,
+)
 def session_llm_options(session_id: str) -> dict:
     try:
         return get_session_llm_options(session_id)
@@ -288,7 +338,11 @@ def session_llm_options(session_id: str) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.patch("/sessions/{session_id}/reasoning-effort")
+@router.patch(
+    "/sessions/{session_id}/reasoning-effort",
+    response_model=SessionLlmOptionsResponse,
+    response_model_exclude_unset=True,
+)
 def session_reasoning_effort_update(session_id: str, payload: SessionReasoningEffortPayload) -> dict:
     try:
         return update_session_reasoning_effort(
@@ -303,7 +357,11 @@ def session_reasoning_effort_update(session_id: str, payload: SessionReasoningEf
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/sessions/{session_id}/select")
+@router.post(
+    "/sessions/{session_id}/select",
+    response_model=SessionCatalogItem,
+    response_model_exclude_unset=True,
+)
 def session_select(session_id: str, request: Request) -> dict:
     try:
         prefer = str(request.headers.get("prefer") or "").lower()
@@ -315,12 +373,21 @@ def session_select(session_id: str, request: Request) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/sessions/{session_id}/child-sessions")
+@router.get(
+    "/sessions/{session_id}/child-sessions",
+    response_model=list[SessionCatalogItem],
+    response_model_exclude_unset=True,
+)
 def session_child_sessions(session_id: str) -> list[dict]:
     return list_child_sessions(session_id)
 
 
-@router.post("/sessions/{session_id}/child-sessions", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/sessions/{session_id}/child-sessions",
+    status_code=status.HTTP_201_CREATED,
+    response_model=SessionChildCreateResponse,
+    response_model_exclude_unset=True,
+)
 def session_create_child_session(session_id: str, payload: ChildSessionCreatePayload) -> dict:
     try:
         return create_child_session(
@@ -345,7 +412,11 @@ def session_create_child_session(session_id: str, payload: ChildSessionCreatePay
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.patch("/sessions/{session_id}")
+@router.patch(
+    "/sessions/{session_id}",
+    response_model=SessionCatalogItem,
+    response_model_exclude_unset=True,
+)
 def session_update(session_id: str, payload: SessionUpdatePayload) -> dict:
     try:
         if payload.agentId is not None:
@@ -361,11 +432,13 @@ def session_update(session_id: str, payload: SessionUpdatePayload) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.delete("/sessions/{session_id}")
-def session_delete(session_id: str, request: Request) -> dict:
+@router.delete(
+    "/sessions/{session_id}",
+    response_model=SessionDeleteResponse,
+    response_model_exclude_unset=True,
+)
+def session_delete(session_id: str) -> dict:
     try:
-        if "respond-async" in str(request.headers.get("prefer") or "").lower():
-            return delete_chat_session_lightweight(session_id)
         return delete_chat_session(session_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -375,7 +448,24 @@ def session_delete(session_id: str, request: Request) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/sessions/{session_id}/events")
+@router.post(
+    "/sessions/bulk-delete",
+    response_model=SessionBulkDeleteResponse,
+    response_model_exclude_unset=True,
+)
+def sessions_bulk_delete(payload: SessionBulkDeletePayload) -> dict:
+    if len(payload.sessionIds) > MAX_BULK_SESSION_IDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Bulk session remove accepts at most {MAX_BULK_SESSION_IDS} session ids.",
+        )
+    try:
+        return bulk_delete_chat_sessions(payload.sessionIds)
+    except SessionValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/sessions/{session_id}/events", response_class=StreamingResponse)
 async def session_events(session_id: str, initial: str = Query("light")) -> StreamingResponse:
     try:
         initial_mode, detail, initial_state = await asyncio.get_running_loop().run_in_executor(
@@ -401,7 +491,7 @@ async def session_events(session_id: str, initial: str = Query("light")) -> Stre
     )
 
 
-@router.get("/sessions/{session_id}/artifacts/{artifact_id}")
+@router.get("/sessions/{session_id}/artifacts/{artifact_id}", response_class=FileResponse)
 def session_image_artifact(
     session_id: str,
     artifact_id: str,
@@ -415,7 +505,12 @@ def session_image_artifact(
     return FileResponse(path, media_type=content_type, filename=filename)
 
 
-@router.post("/sessions/{session_id}/attachments", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/sessions/{session_id}/attachments",
+    status_code=status.HTTP_201_CREATED,
+    response_model=SessionAttachmentResponse,
+    response_model_exclude_unset=True,
+)
 async def session_upload_attachment(session_id: str, request: Request) -> dict:
     content_type = str(request.headers.get("content-type") or "").strip()
     filename = str(request.headers.get("x-vibelution-filename") or "").strip()
@@ -433,7 +528,12 @@ async def session_upload_attachment(session_id: str, request: Request) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/sessions/{session_id}/messages", status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "/sessions/{session_id}/messages",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=SessionTurnCommandResponse,
+    response_model_exclude_unset=True,
+)
 def session_submit_message(session_id: str, payload: SessionMessagePayload, request: Request) -> dict:
     client_submission_id = str(payload.clientSubmissionId or "").strip() or _new_client_submission_id()
     try:
@@ -472,7 +572,12 @@ def session_submit_message(session_id: str, payload: SessionMessagePayload, requ
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/sessions/{session_id}/messages/edit-resubmit", status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "/sessions/{session_id}/messages/edit-resubmit",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=SessionCatalogItem,
+    response_model_exclude_unset=True,
+)
 def session_edit_resubmit_message(session_id: str, payload: SessionMessageEditPayload) -> dict:
     client_submission_id = str(payload.clientSubmissionId or "").strip() or _new_client_submission_id()
     try:
@@ -496,7 +601,12 @@ def session_edit_resubmit_message(session_id: str, payload: SessionMessageEditPa
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/sessions/{session_id}/stop", status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "/sessions/{session_id}/stop",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=SessionCatalogItem,
+    response_model_exclude_unset=True,
+)
 def session_stop_turn(session_id: str, payload: SessionStopPayload) -> dict:
     try:
         return request_stop_session_turn(session_id, expected_turn_id=payload.turnId)
@@ -506,7 +616,11 @@ def session_stop_turn(session_id: str, payload: SessionStopPayload) -> dict:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-@router.get("/sessions/{session_id}/tool-approvals")
+@router.get(
+    "/sessions/{session_id}/tool-approvals",
+    response_model=list[SessionToolApprovalItem],
+    response_model_exclude_unset=True,
+)
 def session_tool_approvals(
     session_id: str,
     approval_status: str = Query("", alias="status"),
@@ -517,7 +631,11 @@ def session_tool_approvals(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/sessions/{session_id}/tool-approvals/{request_id}/decision")
+@router.post(
+    "/sessions/{session_id}/tool-approvals/{request_id}/decision",
+    response_model=SessionToolApprovalItem,
+    response_model_exclude_unset=True,
+)
 def session_resolve_tool_approval(
     session_id: str,
     request_id: str,
@@ -537,7 +655,12 @@ def session_resolve_tool_approval(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/sessions/{session_id}/guidance", status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "/sessions/{session_id}/guidance",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=SessionCatalogItem,
+    response_model_exclude_unset=True,
+)
 def session_submit_guidance(session_id: str, payload: SessionGuidancePayload) -> dict:
     try:
         return submit_session_guidance(session_id, payload.content, mode=payload.mode)
@@ -547,7 +670,12 @@ def session_submit_guidance(session_id: str, payload: SessionGuidancePayload) ->
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.post("/sessions/{session_id}/chat-review-candidate", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/sessions/{session_id}/chat-review-candidate",
+    status_code=status.HTTP_201_CREATED,
+    response_model=SessionChatReviewCandidateResponse,
+    response_model_exclude_unset=True,
+)
 def session_create_chat_review_candidate(session_id: str) -> dict:
     try:
         return create_chat_review_candidate_from_session(session_id)

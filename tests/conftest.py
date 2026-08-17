@@ -11,6 +11,7 @@ pytest 配置和共享 fixtures
 import pytest
 import os
 import sys
+import ast
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
@@ -93,71 +94,88 @@ def pytest_ignore_collect(collection_path=None, path=None, config=None):
     return False
 
 
-_RUNTIME_ISOLATION_HINTS = (
-    "core.web.",
-    "core.web import",
-    "core.ui.chat_state",
+_RUNTIME_MODULE_PREFIXES = (
+    "core.web",
     "core.runtime_manager",
-    "runtime_scene_service",
-    "session_service",
-    "chat_room_service",
-    "agent_directory_service",
-    "agent_mode_binding_service",
-    "prompt_template_service",
-    "team_service",
-    "team_workflow_orchestration_service",
-    "team_knowledge_service",
-    "research_service",
-    "data_processing_service",
-    "project_agent_bus_service",
-    "supervised_agent_service",
-    "self_evolution_control_service",
-    "core.infrastructure.tool_executor",
-    "core.infrastructure import tool_executor",
-    "work_run_store",
-    "evolution_store",
+    "core.ui.chat_state",
 )
 
-
-_SINGLETON_RESET_HINTS = _RUNTIME_ISOLATION_HINTS + (
+_SINGLETON_ONLY_MODULE_PREFIXES = (
     "config.settings",
-    "config import settings",
     "core.infrastructure.state",
-    "core.infrastructure import state",
     "core.infrastructure.agent_session",
-    "core.infrastructure import agent_session",
     "core.infrastructure.event_bus",
-    "core.infrastructure import event_bus",
-    "core.orchestration.task_planner",
-    "core.orchestration import task_planner",
-    "core.prompt_manager",
+    "core.infrastructure.tool_executor",
     "core.infrastructure.git_memory",
-    "core.infrastructure import git_memory",
+    "core.orchestration.task_planner",
+    "core.prompt_manager",
 )
+
+_TRANSITIVE_TEST_MODULE_PREFIXES = (
+    "tests._support.team_workflow",
+    "tests.test_agent_config_workspace_service",
+)
+
+
+def _collect_import_modules(path: Path) -> frozenset[str] | None:
+    """Return imported module names from a test file, or None when parsing fails."""
+    try:
+        source = path.read_text(encoding="utf-8", errors="ignore")
+        tree = ast.parse(source, filename=str(path))
+    except (OSError, SyntaxError):
+        return None
+
+    modules: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            if node.module:
+                modules.add(node.module)
+    return frozenset(modules)
+
+
+def _module_matches_prefix(module: str, prefixes: tuple[str, ...]) -> bool:
+    return any(module == prefix or module.startswith(f"{prefix}.") for prefix in prefixes)
+
+
+def _modules_need_runtime_manager_isolation(modules: frozenset[str]) -> bool:
+    for module in modules:
+        if _module_matches_prefix(module, _RUNTIME_MODULE_PREFIXES):
+            return True
+        if module == "core.web.services" or module.startswith("core.web.services."):
+            return True
+        if _module_matches_prefix(module, _TRANSITIVE_TEST_MODULE_PREFIXES):
+            return True
+    return False
+
+
+def _modules_need_singleton_reset(modules: frozenset[str]) -> bool:
+    if _modules_need_runtime_manager_isolation(modules):
+        return True
+    return any(_module_matches_prefix(module, _SINGLETON_ONLY_MODULE_PREFIXES) for module in modules)
 
 
 @lru_cache(maxsize=512)
 def _test_file_needs_runtime_manager_isolation(path_value: str) -> bool:
     """Return whether a test module needs the expensive web/runtime isolation stack."""
     if not path_value:
+        return False
+    modules = _collect_import_modules(Path(path_value))
+    if modules is None:
         return True
-    try:
-        text = Path(path_value).read_text(encoding="utf-8", errors="ignore")
-    except OSError:
-        return True
-    return any(hint in text for hint in _RUNTIME_ISOLATION_HINTS)
+    return _modules_need_runtime_manager_isolation(modules)
 
 
 @lru_cache(maxsize=512)
 def _test_file_needs_singleton_reset(path_value: str) -> bool:
     """Return whether a test module touches singleton-heavy runtime modules."""
     if not path_value:
+        return False
+    modules = _collect_import_modules(Path(path_value))
+    if modules is None:
         return True
-    try:
-        text = Path(path_value).read_text(encoding="utf-8", errors="ignore")
-    except OSError:
-        return True
-    return any(hint in text for hint in _SINGLETON_RESET_HINTS)
+    return _modules_need_singleton_reset(modules)
 
 
 def _reset_agent_directory_caches(agent_directory_service):

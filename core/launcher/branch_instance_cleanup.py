@@ -14,6 +14,7 @@ import os
 import shutil
 import stat
 from collections.abc import Callable, Iterable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -53,10 +54,13 @@ def annotate_cleanup_metadata(
     if not isinstance(items, list):
         return payload
     root = Path(integration_root or payload.get("integrationRoot") or PROJECT_ROOT)
+    heads = [str(item.get("head") or "").strip() for item in items if isinstance(item, dict)]
+    merged_by_head = _merged_to_main_lookup(root, heads)
     for item in items:
         if not isinstance(item, dict):
             continue
-        merged = _merged_to_main(root, str(item.get("head") or ""))
+        head = str(item.get("head") or "").strip()
+        merged = bool(merged_by_head.get(head)) if head else False
         item["mergedToMain"] = merged
         item["cleanupEligible"] = cleanup_eligible(item)
         item["cleanupRisks"] = cleanup_risks(item, merged_to_main=merged)
@@ -280,10 +284,99 @@ def _list_instances() -> dict[str, Any]:
 
 def _merged_to_main(root: Path, head: str) -> bool:
     commit = str(head or "").strip()
-    if not commit or not root.exists():
+    if not commit:
         return False
-    result = _run_git(root, "merge-base", "--is-ancestor", commit, "main")
+    return bool(_merged_to_main_lookup(root, [commit]).get(commit))
+
+
+def _merged_to_main_lookup(root: Path, heads: Iterable[str]) -> dict[str, bool]:
+    unique: list[str] = []
+    seen: set[str] = set()
+    for raw in heads:
+        commit = str(raw or "").strip()
+        if not commit or commit in seen:
+            continue
+        seen.add(commit)
+        unique.append(commit)
+    if not unique:
+        return {}
+    if not root.exists():
+        return {commit: False for commit in unique}
+
+    merged_tips = _merged_main_tip_names(root)
+    found: dict[str, bool] = {}
+    remaining: list[str] = []
+    for commit in unique:
+        if _head_matches_merged_tip(commit, merged_tips):
+            found[commit] = True
+        else:
+            remaining.append(commit)
+    if remaining:
+        found.update(_unique_commits_merged_to_main(root, remaining))
+    return found
+
+
+def _merged_main_tip_names(root: Path) -> set[str]:
+    result = _run_git(
+        root,
+        "for-each-ref",
+        "--format=%(objectname)%09%(objectname:short)",
+        "--merged=main",
+        "refs/heads",
+        timeout=15.0,
+    )
+    names: set[str] = set()
+    if result.returncode != 0:
+        return names
+    for raw_line in str(result.stdout or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        full, _, short = line.partition("\t")
+        if full:
+            names.add(full.casefold())
+        if short:
+            names.add(short.casefold())
+    return names
+
+
+def _head_matches_merged_tip(head: str, names: set[str]) -> bool:
+    needle = str(head or "").strip().casefold()
+    if not needle or len(needle) < 7:
+        return needle in names
+    if needle in names:
+        return True
+    for name in names:
+        if len(name) < 7:
+            continue
+        if name.startswith(needle) or needle.startswith(name):
+            return True
+    return False
+
+
+def _commit_is_ancestor_of_main(root: Path, commit: str) -> bool:
+    try:
+        result = _run_git(root, "merge-base", "--is-ancestor", commit, "main", timeout=15.0)
+    except Exception:
+        return False
     return result.returncode == 0
+
+
+def _unique_commits_merged_to_main(root: Path, commits: list[str]) -> dict[str, bool]:
+    if len(commits) <= 1:
+        return {commit: _commit_is_ancestor_of_main(root, commit) for commit in commits}
+
+    found: dict[str, bool] = {}
+    workers = min(8, len(commits))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(_commit_is_ancestor_of_main, root, commit): commit for commit in commits}
+        for future in as_completed(futures):
+            commit = futures[future]
+            try:
+                found[commit] = bool(future.result())
+            except Exception:
+                found[commit] = False
+    return found
 
 
 def _local_branch_exists(root: Path, branch: str) -> bool:

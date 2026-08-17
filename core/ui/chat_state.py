@@ -11,7 +11,7 @@ import time
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, Callable
 
 from core.infrastructure import developer_sandbox
 from core.chat.session_catalog import (
@@ -317,13 +317,125 @@ def load_chat_state(project_root: Path) -> dict[str, Any]:
             return repository.get_chat_state()
 
 
-def save_chat_state(project_root: Path, state: dict[str, Any]) -> None:
+def save_chat_state(
+    project_root: Path,
+    state: dict[str, Any],
+    *,
+    archive_session_id: str = "",
+    expected_state_revision: int | None = None,
+) -> None:
     with chat_state_transaction(project_root):
         cleaned, _changed = _drop_legacy_chat_state_messages(state, project_root=project_root)
+        normalized_archive_session_id = str(archive_session_id or "").strip()
         with _chat_state_repository(project_root) as repository:
-            result = repository.replace_chat_state(cleaned).result(timeout=5)
+            if normalized_archive_session_id:
+                combined = repository.archive_session_and_replace_chat_state(
+                    session_id=normalized_archive_session_id,
+                    state=cleaned,
+                    expected_state_revision=expected_state_revision,
+                ).result(timeout=5)
+                result = dict(combined.get("chatState") or {})
+            else:
+                result = repository.replace_chat_state(
+                    cleaned,
+                    expected_state_revision=expected_state_revision,
+                ).result(timeout=5)
         revision = int(result.get("stateRevision") or 0)
         cleaned["state_revision"] = revision
+        notify_session_catalog_dirty(
+            project_root,
+            CATALOG_GLOBAL_DIRTY_SESSION_ID,
+            f"state:{revision}",
+        )
+
+
+def mutate_chat_state(
+    project_root: Path,
+    mutate: Callable[[dict[str, Any]], Any],
+    *,
+    expected_state_revision: int | None = None,
+) -> dict[str, Any]:
+    """Atomically read-modify-write the chat state inside one store transaction.
+
+    ``mutate`` receives the current document and runs on the writer thread;
+    it must be deterministic, must not submit other store work, and must not
+    block for a long time. Concurrent updates are never overwritten because
+    every mutation reads the freshest revision inside the transaction.
+    """
+
+    with chat_state_transaction(project_root):
+        with _chat_state_repository(project_root) as repository:
+            result = repository.update_chat_state(
+                mutate,
+                expected_state_revision=expected_state_revision,
+            ).result(timeout=5)
+        revision = int(result.get("stateRevision") or 0)
+        notify_session_catalog_dirty(
+            project_root,
+            CATALOG_GLOBAL_DIRTY_SESSION_ID,
+            f"state:{revision}",
+        )
+        return result
+
+
+def load_session_chat_state(project_root: Path, session_id: str) -> dict[str, Any] | None:
+    """Load one session runtime row without assembling the compatibility document."""
+
+    normalized = str(session_id or "").strip()
+    if not normalized:
+        return None
+    with _chat_state_repository(project_root) as repository:
+        return repository.get_session_runtime_state(normalized)
+
+
+def list_session_runtime_ids(project_root: Path) -> list[str]:
+    """List session runtime ids without assembling conversation payloads."""
+
+    with _chat_state_repository(project_root) as repository:
+        return list(repository.list_session_runtime_ids())
+
+
+def load_active_conversation_id(project_root: Path) -> str:
+    """Load the workspace active session id without assembling conversations."""
+
+    with _chat_state_repository(project_root) as repository:
+        return str(repository.get_active_session_id() or "").strip()
+
+
+def save_session_chat_state(
+    project_root: Path,
+    session_id: str,
+    conversation: dict[str, Any],
+    *,
+    activate: bool = False,
+) -> None:
+    """Persist one session runtime row without rewriting sibling sessions."""
+
+    normalized = str(session_id or "").strip()
+    if not normalized:
+        raise ValueError("Session runtime state requires a session id.")
+    cleaned, _changed = _drop_legacy_chat_state_messages(
+        {"conversations": [dict(conversation)]},
+        project_root=project_root,
+    )
+    conversations = cleaned.get("conversations") if isinstance(cleaned, dict) else []
+    payload = dict(conversations[0]) if conversations and isinstance(conversations[0], dict) else dict(conversation)
+    payload.setdefault("conversation_id", normalized)
+    payload.setdefault("conversationId", normalized)
+    with chat_state_transaction(project_root):
+        with _chat_state_repository(project_root) as repository:
+            result = repository.upsert_session_runtime_state(
+                normalized,
+                payload,
+                activate=activate,
+            ).result(timeout=5)
+    revision = int((result or {}).get("stateRevision") or 0)
+    notify_session_catalog_dirty(
+        project_root,
+        normalized,
+        f"state:{revision}",
+    )
+    if activate:
         notify_session_catalog_dirty(
             project_root,
             CATALOG_GLOBAL_DIRTY_SESSION_ID,
