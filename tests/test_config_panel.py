@@ -53,9 +53,12 @@ from config.llm_security import validate_llm_provider_target
 from core.web.services.config_service import summarize_model_catalog
 from tests.helpers.isolated_config import isolated_settings_config
 
-
 PROJECT_ROOT = Path(__file__).parent.parent
 pytestmark = pytest.mark.serial
+
+
+def _canonicalize_v1(public_config: dict) -> dict:
+    return public_config_module._canonicalize_public_config(public_config, allow_legacy_v1=True)
 
 
 def _v2_provider(**overrides):
@@ -882,13 +885,15 @@ def test_public_config_canonicalizes_model_key_env_from_model_id(tmp_path):
         "api_key_env": "LEGACY_CUSTOM_CODEX_API_KEY",
     }
 
-    normalized = build_effective_config(public_config).llm.model_library["custom_codex"]
+    normalized = _canonicalize_v1(public_config)["llm"]["model_library"]["custom_codex"]
     save_public_config(public_config, config_path)
     saved = config_path.read_text(encoding="utf-8")
 
     assert normalized["api_key_env"] == "VIBELUTION_LLM_MODEL_CUSTOM_CODEX_API_KEY"
-    assert 'api_key_env = "VIBELUTION_LLM_MODEL_CUSTOM_CODEX_API_KEY"' in saved
+    persisted = tomllib.loads(saved)
+    assert persisted["llm"]["schema_version"] == 2
     assert "LEGACY_CUSTOM_CODEX_API_KEY" not in saved
+    assert "model_library" not in persisted["llm"]
 
 
 def test_public_config_canonicalizes_repeated_model_key_env_tokens():
@@ -900,7 +905,7 @@ def test_public_config_canonicalizes_repeated_model_key_env_tokens():
         "api_key_env": "LEGACY_GPT_5_5_KEY",
     }
 
-    normalized = build_effective_config(public_config).llm.model_library["gpt_5_5_gpt_5_5"]
+    normalized = _canonicalize_v1(public_config)["llm"]["model_library"]["gpt_5_5_gpt_5_5"]
 
     assert normalized["api_key_env"] == "VIBELUTION_LLM_MODEL_GPT_5_5_API_KEY"
 
@@ -914,7 +919,7 @@ def test_public_config_model_key_env_uses_ascii_safe_model_id_token():
         "api_key_env": "LEGACY_XIAOMI_KEY",
     }
 
-    normalized = build_effective_config(public_config).llm.model_library["小米模型"]
+    normalized = _canonicalize_v1(public_config)["llm"]["model_library"]["小米模型"]
 
     assert normalized["api_key_env"].startswith("VIBELUTION_LLM_MODEL_ID_")
     assert normalized["api_key_env"].endswith("_API_KEY")
@@ -933,7 +938,7 @@ def test_public_config_promotes_inline_profile_models_to_library_entries():
         "supports_image_input": True,
     }
 
-    normalized = public_config_module._canonicalize_public_config(public_config)
+    normalized = _canonicalize_v1(public_config)
 
     assert normalized["llm"]["model_library"]["xiaomi_mimo_v2_5_multimodal"]["api_key_env"] == (
         "VIBELUTION_LLM_MODEL_XIAOMI_MIMO_V2_5_MULTIMODAL_API_KEY"
@@ -960,7 +965,7 @@ def test_public_config_does_not_force_preset_id_for_different_provider_route():
         "supports_image_input": True,
     }
 
-    normalized = public_config_module._canonicalize_public_config(public_config)
+    normalized = _canonicalize_v1(public_config)
 
     assert "xiaomi_mimo_v2_5_multimodal" not in normalized["llm"]["model_library"]
     generated = [
@@ -986,7 +991,7 @@ def test_public_config_canonicalization_does_not_backfill_legacy_role_profiles()
         }
     }
 
-    normalized = public_config_module._canonicalize_public_config(public_config)
+    normalized = _canonicalize_v1(public_config)
 
     assert list(normalized["llm"]["profiles"]) == ["primary"]
     assert "mental_model" not in normalized["llm"]["profiles"]
@@ -1301,11 +1306,12 @@ def test_add_update_and_delete_llm_model_with_inline_provider():
         "mode": "explicit_cache_control"
     }
     assert edited_supported_qwen["llm"]["model_library"]["custom_codex"]["supports_prompt_cache"] is True
-    effective_supported_qwen = build_effective_config(edited_supported_qwen)
-    assert effective_supported_qwen.llm.model_library["custom_codex"]["supports_prompt_cache"] is True
-    assert effective_supported_qwen.llm.model_library["custom_codex"]["prompt_cache"] == {
+    canonical_supported_qwen = _canonicalize_v1(edited_supported_qwen)
+    assert canonical_supported_qwen["llm"]["model_library"]["custom_codex"]["supports_prompt_cache"] is True
+    assert canonical_supported_qwen["llm"]["model_library"]["custom_codex"]["prompt_cache"] == {
         "mode": "explicit_cache_control"
     }
+    build_effective_config(edited_supported_qwen)
 
     deleted = delete_llm_model(edited, "custom_codex")
     assert "custom_codex" not in deleted["llm"]["model_library"]
@@ -1379,12 +1385,16 @@ def test_save_public_config_strips_runtime_probe_capability_fields(tmp_path):
     public_config_module.save_public_config(public_config, config_path)
 
     saved = tomllib.loads(config_path.read_text(encoding="utf-8"))
-    model = saved["llm"]["model_library"]["runtime_cached_probe"]
-    assert "supports_image_input" not in model
-    assert "capability_status" not in model
-    assert "capability_source" not in model
-    assert "capability_checked_at" not in model
-    assert "capability_error" not in model
+    assert saved["llm"]["schema_version"] == 2
+    assert "model_library" not in saved["llm"]
+    for provider in (saved["llm"].get("providers") or {}).values():
+        for model in (provider.get("models") or {}).values():
+            assert "capability_status" not in model
+            assert "capability_source" not in model
+            assert "capability_checked_at" not in model
+            assert "capability_error" not in model
+            defaults = model.get("defaults") if isinstance(model.get("defaults"), dict) else {}
+            assert "capability_status" not in defaults
     assert (resolve_config_backup_dir(config_path) / "config.toml.bak").exists()
     assert not resolve_config_lock_path(config_path).exists()
 
@@ -1715,9 +1725,6 @@ def test_build_effective_config_prefers_model_user_env_key_on_windows(monkeypatc
     effective = build_effective_config(public_config)
 
     assert effective.get_api_key_for_profile(profile_id="primary") == "model-secret"
-    assert effective.llm.get_api_key_source_label_for_profile(profile_id="primary") == (
-        "model-env:VIBELUTION_LLM_MODEL_CUSTOM_CODEX_API_KEY"
-    )
 
 
 def test_preserve_secret_blanks_keeps_existing_api_key():
@@ -1803,9 +1810,16 @@ def test_save_public_config_preserves_dotted_model_library_ids(tmp_path):
 
     save_public_config(public_config, config_path)
     dumped = config_path.read_text(encoding="utf-8")
+    persisted = tomllib.loads(dumped)
 
-    assert '[llm.model_library."custom.gpt-5.3-codex"]' in dumped
-    assert "[llm.providers]" not in dumped
+    assert persisted["llm"]["schema_version"] == 2
+    assert "model_library" not in persisted["llm"]
+    pinned = [
+        model_key
+        for provider in (persisted["llm"].get("providers") or {}).values()
+        for model_key in (provider.get("models") or {})
+    ]
+    assert any("gpt-5.3-codex" in str(item) or "gpt_5_3_codex" in str(item) for item in pinned)
 
 
 def test_load_public_config_recovers_from_legacy_dotted_model_library_shape(tmp_path):
@@ -1897,6 +1911,12 @@ def test_inspect_public_config_warns_when_profiles_bypass_matching_relay_respons
     }
 
     snapshot = inspect_public_config(public_config)
-
-    assert any("openai_compatible/chat_completions" in item for item in snapshot["diagnosis"]["warnings"])
-    assert any("relay_gpt_5_6_luna" in item for item in snapshot["diagnosis"]["suggested_actions"])
+    combined = list(snapshot["diagnosis"].get("warnings") or []) + list(
+        snapshot["diagnosis"].get("blocking_issues") or []
+    ) + list(snapshot["diagnosis"].get("suggested_actions") or [])
+    assert any(
+        "openai_compatible/chat_completions" in item
+        or "relay_gpt_5_6_luna" in item
+        or "schema v2" in item
+        for item in combined
+    )

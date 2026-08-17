@@ -34,6 +34,7 @@ from config.paths import resolve_config_backup_dir
 from config.public_config import (
     PROFILE_OVERRIDE_FIELDS,
     _config_edit_lock,
+    _load_raw_public_config,
     build_effective_config,
     load_public_config,
     public_config_hash,
@@ -144,12 +145,42 @@ def _service_class(provider: dict[str, Any], base_url: str = "") -> str:
     return "official_api" if kind in {"openai", "anthropic", "gemini"} else "relay"
 
 
+_KIND_VENDORS = {
+    "openai": "openai",
+    "anthropic": "anthropic",
+    "gemini": "google",
+    "google": "google",
+    "deepseek": "deepseek",
+    "aliyun": "aliyun",
+    "groq": "groq",
+    "minimax": "minimax",
+    "xiaomi": "xiaomi",
+    "zhipu": "zhipu",
+    "siliconflow": "siliconflow",
+    "local": "local",
+    "ollama": "ollama",
+    "llamacpp": "llamacpp",
+    "local_runtime": "local",
+    "opencode": "opencode",
+}
+_GENERIC_HOST_TOKENS = {"api", "www", "open", "app", "cloud"}
+
+
 def _vendor(base_url: str, provider: dict[str, Any]) -> str:
     explicit = str(provider.get("vendor") or "").strip().lower()
     if explicit:
         return explicit
+    kind = str(provider.get("kind") or "").strip().lower()
+    mapped = _KIND_VENDORS.get(kind)
+    if mapped:
+        return mapped
+    if kind in {"openai_compatible", "openai-compatible"}:
+        return "custom"
     host = urlsplit(base_url).hostname or "custom"
-    token = host.split(".")[0].lower()
+    parts = [part.lower() for part in host.split(".") if part]
+    token = parts[0] if parts else "custom"
+    if token in _GENERIC_HOST_TOKENS and len(parts) > 1:
+        token = parts[1]
     return re.sub(r"[^a-z0-9_-]+", "_", token).strip("_") or "custom"
 
 
@@ -183,7 +214,16 @@ def _model_payload(entry: dict[str, Any], upstream_id: str) -> dict[str, Any]:
         "compatibility": copy.deepcopy(entry.get("compat") or {}),
         "defaults": defaults,
     }
-    for field_name in ("prompt_cache", "thinking_type", "thinking_display", "reasoning_effort"):
+    for field_name in (
+        "prompt_cache",
+        "thinking_type",
+        "thinking_display",
+        "reasoning_effort",
+        "reasoning_state_field",
+        "discovery_enabled",
+        "strict_compatibility",
+        "retry_policy",
+    ):
         if field_name in entry:
             payload[field_name] = copy.deepcopy(entry[field_name])
     if "supports_image_input" in entry:
@@ -291,7 +331,9 @@ def preview_v1_to_v2(
     project_root: Path | str,
     artifact_resolutions: list[dict[str, Any]] | None = None,
 ) -> ModelConfigMigrationPreview:
-    source = copy.deepcopy(public_config)
+    from config.public_config import _ensure_model_library_prompt_cache_defaults
+
+    source = _ensure_model_library_prompt_cache_defaults(copy.deepcopy(public_config))
     llm = source.get("llm") if isinstance(source, dict) else None
     if not isinstance(llm, dict) or int(llm.get("schema_version") or 1) != 1:
         raise ValueError("migration preview requires llm schema v1")
@@ -492,7 +534,9 @@ def preview_v1_to_v2(
     proposed_llm.pop("model_library", None)
     proposed_llm["schema_version"] = 2
     proposed_llm["providers"] = provider_registry
-    proposed_llm["model_aliases"] = dict(sorted(model_ref_map.items()))
+    proposed_llm["model_aliases"] = dict(
+        sorted((old, new) for old, new in model_ref_map.items() if old != new)
+    )
     profiles = proposed_llm.get("profiles")
     if isinstance(profiles, dict):
         for profile in profiles.values():
@@ -510,9 +554,19 @@ def preview_v1_to_v2(
                     "capability_checked_at",
                     "capability_error",
                 }:
+                    profile.pop(field_name, None)
                     continue
                 if field_name in profile:
                     overrides[field_name] = profile.pop(field_name)
+            for stale_key in (
+                "api_key",
+                "api_key_env",
+                "credential_ref",
+                "provider",
+                "model",
+                "provider_id",
+            ):
+                profile.pop(stale_key, None)
             profile["overrides"] = overrides
     for section, field_name in (("tools", "default_model_ref"), ("git", "commit_message_model_ref")):
         if section == "tools":
@@ -819,7 +873,7 @@ def apply_v1_to_v2(
     manifest: dict[str, Any] | None = None
     phase = "preflight"
     with _config_edit_lock(resolved_config):
-        current = load_public_config(resolved_config)
+        current = _load_raw_public_config(resolved_config)
         current_hash = public_config_hash(current)
         if current_hash != preview.base_hash or current_hash != expected:
             raise ValueError("stale config hash")
@@ -875,11 +929,21 @@ def apply_v1_to_v2(
         except Exception as exc:
             for target, before, _ in reversed(written_payloads):
                 _strict_atomic_write(target, before)
-            restored = load_public_config(resolved_config)
-            build_effective_config(restored)
+            restored = _load_raw_public_config(resolved_config)
             rollback_reload_error: Exception | None = None
+            restored_llm = restored.get("llm") if isinstance(restored, dict) else None
+            restored_schema = (
+                int(restored_llm.get("schema_version") or 2) if isinstance(restored_llm, dict) else 2
+            )
             try:
-                reload_config(str(resolved_config))
+                if restored_schema == 2:
+                    build_effective_config(restored)
+                    reload_config(str(resolved_config))
+                else:
+                    import config.settings as config_settings
+
+                    config_settings._settings = None
+                    config_settings._config_path = None
             except Exception as rollback_exc:
                 rollback_reload_error = rollback_exc
             manifest.update(
@@ -956,9 +1020,19 @@ def rollback_v1_to_v2(
             for target, before, after in targets:
                 _strict_atomic_write(target, before)
                 written.append((target, after))
-            restored = load_public_config(resolved_config)
-            build_effective_config(restored)
-            reload_config(str(resolved_config))
+            restored = _load_raw_public_config(resolved_config)
+            restored_llm = restored.get("llm") if isinstance(restored, dict) else None
+            restored_schema = (
+                int(restored_llm.get("schema_version") or 2) if isinstance(restored_llm, dict) else 2
+            )
+            if restored_schema == 2:
+                build_effective_config(restored)
+                reload_config(str(resolved_config))
+            else:
+                import config.settings as config_settings
+
+                config_settings._settings = None
+                config_settings._config_path = None
         except Exception:
             for target, after in reversed(written):
                 _strict_atomic_write(target, after)

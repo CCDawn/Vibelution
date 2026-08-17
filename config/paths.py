@@ -189,6 +189,10 @@ def ensure_global_config_initialized(
         config_source = str(upgraded_config.get("sourceType") or "external_starter_upgrade")
     else:
         config_source = str(existing_meta.get("configSource") or "existing")
+    if target.exists():
+        from config.llm_schema_upgrader import upgrade_persisted_llm_schema_if_needed
+
+        upgrade_persisted_llm_schema_if_needed(target)
     meta = {
         "schemaVersion": CONFIG_META_SCHEMA_VERSION,
         "configHome": str(target.parent),

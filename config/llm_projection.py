@@ -211,6 +211,11 @@ def project_v2_llm_for_runtime(public_config: dict[str, Any]) -> dict[str, Any]:
             prompt_cache_default = _default_v2_prompt_cache(raw_provider, raw_model, defaults)
             if prompt_cache_default is not None:
                 runtime_model["prompt_cache"] = prompt_cache_default
+            capabilities = raw_model.get("capabilities") if isinstance(raw_model.get("capabilities"), dict) else {}
+            if "image_input" in capabilities:
+                runtime_model["supports_image_input"] = bool(capabilities["image_input"])
+            elif "supports_image_input" in raw_model:
+                runtime_model["supports_image_input"] = bool(raw_model["supports_image_input"])
             reasoning_defaults = _default_v2_reasoning_effort_defaults(raw_provider, raw_model, defaults)
             if reasoning_defaults is not None:
                 for key, value in reasoning_defaults.items():
@@ -226,6 +231,15 @@ def project_v2_llm_for_runtime(public_config: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(f"llm.profiles.{profile_id} must be an object")
         _validate_credential_ownership(raw_profile, "profile", skip_descendants=frozenset({"overrides"}))
         requested_ref = str(raw_profile.get("model_ref") or "").strip()
+        if not requested_ref or requested_ref == "__unconfigured__":
+            runtime_profiles[str(profile_id)] = {
+                "profile_id": str(profile_id),
+                "model_ref": "__unconfigured__",
+                "provider_id": "",
+                "model": "",
+                "overrides": {},
+            }
+            continue
         model_ref = alias_resolver.resolve_model_ref(requested_ref)
         provider_id, model_key = split_model_ref(model_ref)
         canonical_ref = make_model_ref(provider_id, model_key)
