@@ -55,7 +55,12 @@ _PACKAGED_ELECTRON_ENTRY = Path("dist") / "desktop" / "win-unpacked" / "Vibeluti
 _ELECTRON_SESSION_BOOTSTRAP_TIMEOUT_SECONDS = 20.0
 _ELECTRON_WORKBENCH_OPEN_TIMEOUT_SECONDS = 30.0
 _ELECTRON_DESKTOP_ACTION_ACK_TIMEOUT_SECONDS = 8.0
+_ELECTRON_OPEN_SIGNAL_TIMEOUT_SECONDS = 8.0
 _ELECTRON_SESSION_PROCESS_RE = re.compile(r"-(\d+)-[a-z0-9]+$", re.IGNORECASE)
+_ELECTRON_WINDOW_REQUIRED_MESSAGE = (
+    "Electron desktop shell is unavailable. Refusing Edge fallback. "
+    "Start or rebuild dist/desktop/win-unpacked/Vibelution.exe."
+)
 
 
 def _is_process_alive_windows(pid: int) -> bool:
@@ -1322,6 +1327,108 @@ def _packaged_electron_desktop_executable() -> Path | None:
     return candidate if candidate.is_file() else None
 
 
+def _looks_like_electron_desktop_executable(path: Path) -> bool:
+    name = path.name.lower()
+    if name.startswith("vibelutionlauncher"):
+        return False
+    return name == "vibelution.exe" or "electron" in name
+
+
+def _process_image_path(pid: int) -> Path | None:
+    if os.name != "nt" or int(pid or 0) <= 0:
+        return None
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    process_query_limited_information = 0x1000
+    handle = kernel32.OpenProcess(process_query_limited_information, False, int(pid))
+    if not handle:
+        return None
+    try:
+        query = kernel32.QueryFullProcessImageNameW
+        query.argtypes = [
+            wintypes.HANDLE,
+            wintypes.DWORD,
+            wintypes.LPWSTR,
+            ctypes.POINTER(wintypes.DWORD),
+        ]
+        query.restype = wintypes.BOOL
+        length = wintypes.DWORD(32768)
+        buffer = ctypes.create_unicode_buffer(int(length.value))
+        if not query(handle, 0, buffer, ctypes.byref(length)):
+            return None
+        image = Path(buffer.value)
+        return image if image.is_file() else None
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _desktop_session_process_id(session: dict[str, Any]) -> int:
+    session_id = str(session.get("desktopSessionId") or "").strip()
+    match = _ELECTRON_SESSION_PROCESS_RE.search(session_id)
+    if match is None:
+        return 0
+    try:
+        return int(match.group(1))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _live_electron_owner_pid() -> int:
+    try:
+        from core.launcher.desktop_shell_owner import is_pid_alive, read_desktop_shell_owner
+
+        current = read_desktop_shell_owner(PROJECT_ROOT)
+    except (OSError, TypeError, ValueError):
+        return 0
+    if not current or str(current.get("owner") or "") != "electron":
+        return 0
+    pid = int(current.get("pid") or 0)
+    return pid if is_pid_alive(pid) else 0
+
+
+def _resolve_live_electron_executable(session: dict[str, Any] | None = None) -> Path | None:
+    packaged = _packaged_electron_desktop_executable()
+    if packaged is not None:
+        return packaged
+    pids = [_desktop_session_process_id(session or {}), _live_electron_owner_pid()]
+    for pid in pids:
+        image = _process_image_path(pid)
+        if image is not None and _looks_like_electron_desktop_executable(image):
+            return image
+    return None
+
+
+def _signal_live_electron_open_workbench(*, executable: Path, env: dict[str, str]) -> None:
+    """Ask the live packaged shell to open Workbench; never spawn Edge."""
+
+    desktop_env = dict(env)
+    desktop_env["VIBELUTION_WORKSPACE_ROOT"] = str(PROJECT_ROOT)
+    desktop_env["VIBELUTION_PYTHON_PATH"] = _electron_bootstrap_python_executable()
+    process = subprocess.Popen(
+        [str(executable), "--project", str(PROJECT_ROOT), "--open-workbench"],
+        cwd=str(PROJECT_ROOT),
+        env=desktop_env,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=_creation_flags(detach=False),
+        startupinfo=_hidden_startup_info(),
+        shell=False,
+    )
+    try:
+        return_code = process.wait(timeout=_ELECTRON_OPEN_SIGNAL_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        # First-instance start keeps running; second-instance handoff exits quickly.
+        return
+    if int(return_code or 0) != 0:
+        raise RuntimeError(
+            "Electron desktop shell refused --open-workbench "
+            f"(exit code {int(return_code or 0)})."
+        )
+
+
 def _electron_bootstrap_python_executable() -> str:
     """Prefer the project interpreter so Electron can bootstrap Launcher consistently."""
 
@@ -1721,10 +1828,21 @@ def run_launcher_action(
     electron_session = _latest_active_electron_desktop_session()
     electron_window_action = _electron_window_action_for_launcher_action(action)
     packaged_electron = _packaged_electron_desktop_executable()
+    live_electron_owner_pid = _live_electron_owner_pid()
+    electron_orchestrates = bool(_electron_main_orchestrates_windows() or live_electron_owner_pid > 0)
     bootstrap_packaged_electron = bool(
         not no_browser and not electron_session and electron_window_action == "open_workbench" and packaged_electron is not None
     )
-    effective_no_browser = bool(no_browser or electron_session or bootstrap_packaged_electron)
+    effective_no_browser = bool(
+        no_browser or electron_session or bootstrap_packaged_electron or electron_orchestrates
+    )
+    needs_visible_electron_window = bool(electron_window_action) and not no_browser
+    missing_visible_electron = (
+        needs_visible_electron_window
+        and not electron_session
+        and not bootstrap_packaged_electron
+        and not electron_orchestrates
+    )
     reuse_electron_backend = _can_reuse_backend_for_electron_window_open(
         action=action,
         session=electron_session,
@@ -1751,6 +1869,9 @@ def run_launcher_action(
             no_browser=effective_no_browser,
             env=env,
         )
+        if missing_visible_electron:
+            startup_telemetry["failureStage"] = "electron_window_required"
+            raise RuntimeError(_ELECTRON_WINDOW_REQUIRED_MESSAGE)
         control_plane_started = time.monotonic()
         if reuse_electron_backend:
             completed = subprocess.CompletedProcess(
@@ -1779,8 +1900,8 @@ def run_launcher_action(
         startup_telemetry["timingsMs"]["launcherControlPlaneBackendReadyMs"] = _startup_elapsed_ms(
             control_plane_started
         )
-        if completed.returncode == 0 and electron_window_action and not _electron_main_orchestrates_windows():
-            if electron_session:
+        if completed.returncode == 0 and electron_window_action and not no_browser:
+            if electron_session and not _electron_main_orchestrates_windows():
                 startup_telemetry["failureStage"] = "desktop_action_submit"
                 desktop_action_started = time.monotonic()
                 intent = _submit_electron_window_action(
@@ -1833,14 +1954,22 @@ def run_launcher_action(
                         f"desktopSessionId={bootstrap['desktopSessionId']}"
                     ),
                 )
-            elif packaged_electron is None and not no_browser:
+            elif electron_orchestrates or electron_session:
+                executable = _resolve_live_electron_executable(electron_session)
+                if executable is None:
+                    raise RuntimeError(_ELECTRON_WINDOW_REQUIRED_MESSAGE)
+                startup_telemetry["failureStage"] = "electron_open_signal"
+                _signal_live_electron_open_workbench(executable=executable, env=env)
+                startup_telemetry["workbenchOpen"] = True
                 _record_launcher_action_event(
-                    "launcher.action.edge_fallback_package_missing",
+                    "launcher.action.electron_open_signaled",
                     action=action,
                     no_browser=effective_no_browser,
                     env=env,
-                    stdout="Electron package unavailable; legacy Edge app window provider selected.",
+                    stdout=f"electronExecutable={executable}",
                 )
+            else:
+                raise RuntimeError(_ELECTRON_WINDOW_REQUIRED_MESSAGE)
         if int(completed.returncode or 0) == 0:
             startup_telemetry["outcome"] = "succeeded"
             startup_telemetry["failureStage"] = ""

@@ -10,6 +10,7 @@ from core.launcher.isolated_workbench_window import (
     overlay_instance_window_pid,
     persist_instance_window_from_desktop_action,
 )
+from core.launcher import isolated_workbench_window as isolated
 from core.runtime_manager import instances_registry as registry
 
 
@@ -66,3 +67,49 @@ def test_persist_instance_window_from_desktop_ack(registry_path):
         }
     )
     assert registry.get_instance("worktree:task")["windowPid"] == 0
+
+
+def test_default_open_fails_without_electron_instead_of_edge(monkeypatch):
+    monkeypatch.setattr(isolated, "_electron_desktop_shell_available", lambda: False)
+    monkeypatch.setattr(
+        isolated,
+        "_open_via_named_edge",
+        lambda *_args, **_kwargs: pytest.fail("Edge fallback is forbidden"),
+    )
+    with pytest.raises(RuntimeError, match="Refusing Edge fallback"):
+        isolated._default_open(
+            {"id": "worktree:task", "url": "http://127.0.0.1:8010/", "shortName": "branch+task"}
+        )
+
+
+def test_open_via_electron_fails_when_window_is_unconfirmed(monkeypatch):
+    monkeypatch.setattr(
+        isolated,
+        "_submit_instance_window_action",
+        lambda *_args, **_kwargs: {"intentId": "intent-1", "status": "failed"},
+    )
+    monkeypatch.setattr(
+        isolated,
+        "_wait_for_intent",
+        lambda *_args, **_kwargs: {"status": "failed", "result": {}},
+    )
+    monkeypatch.setattr(
+        isolated,
+        "_open_via_named_edge",
+        lambda *_args, **_kwargs: pytest.fail("Edge fallback is forbidden"),
+    )
+    with pytest.raises(RuntimeError, match="Refusing Edge fallback"):
+        isolated._open_via_electron(
+            {"id": "worktree:task"},
+            url="http://127.0.0.1:8010/",
+            title="branch+task 台",
+        )
+
+
+def test_named_edge_opener_is_a_hard_failure():
+    with pytest.raises(RuntimeError, match="Refusing Edge fallback"):
+        isolated._open_via_named_edge(
+            {"id": "worktree:task", "path": "."},
+            url="http://127.0.0.1:8010/",
+            title="branch+task 台",
+        )

@@ -1,9 +1,10 @@
 """Open and close named Workbench windows for isolated branch instances.
 
 Isolated worktrees keep their own backend. The product desktop shell stays
-singular: Electron opens an extra titled window, or Edge --app is used when
-no Electron session is alive. Tests inject openers so this module never
-touches the operator desktop during pytest.
+singular: Electron opens an extra titled window. Missing or unconfirmed
+Electron is a hard failure; Edge --app is not a product fallback. Tests
+inject openers so this module never touches the operator desktop during
+pytest.
 """
 
 from __future__ import annotations
@@ -17,7 +18,6 @@ from uuid import uuid4
 
 from core.infrastructure.instance_display_name import workbench_window_title
 from core.launcher import desktop_session_store, lifecycle_intent_store
-from core.launcher.slot_identity import slot_id_for_project
 from core.runtime_manager import instances_registry as registry
 from core.runtime_manager.constants import PROJECT_ROOT
 from vibelution_storage import resolve_project_runtime_home
@@ -26,6 +26,9 @@ OPEN_INSTANCE_WORKBENCH = "open_instance_workbench"
 CLOSE_INSTANCE_WORKBENCH = "close_instance_workbench"
 _WINDOW_OPEN_WAIT_SECONDS = 8.0
 _WINDOW_OPEN_POLL_SECONDS = 0.2
+_ELECTRON_WINDOW_REQUIRED_MESSAGE = (
+    "Electron desktop shell is unavailable. Refusing Edge fallback for the isolated workbench window."
+)
 
 WindowOpener = Callable[[dict[str, Any]], dict[str, Any]]
 WindowCloser = Callable[[dict[str, Any]], dict[str, Any]]
@@ -122,9 +125,9 @@ def _default_open(item: dict[str, Any]) -> dict[str, Any]:
     url = _instance_workbench_url(item)
     if not url:
         return {"provider": "", "windowPid": 0, "title": title}
-    if _electron_desktop_shell_available():
-        return _open_via_electron(item, url=url, title=title)
-    return _open_via_named_edge(item, url=url, title=title)
+    if not _electron_desktop_shell_available():
+        raise RuntimeError(_ELECTRON_WINDOW_REQUIRED_MESSAGE)
+    return _open_via_electron(item, url=url, title=title)
 
 
 def _default_close(item: dict[str, Any]) -> dict[str, Any]:
@@ -152,7 +155,7 @@ def _open_via_electron(item: dict[str, Any], *, url: str, title: str) -> dict[st
     window_state = result.get("windowState") if isinstance(result.get("windowState"), dict) else {}
     pid = _positive_int(window_state.get("rendererProcessId"))
     status = str(finished.get("status") or intent.get("status") or "")
-    if pid > 0 or status in {"accepted", "executing", ""}:
+    if pid > 0 and status == "succeeded":
         return {
             "provider": "electron",
             "windowPid": pid,
@@ -160,38 +163,14 @@ def _open_via_electron(item: dict[str, Any], *, url: str, title: str) -> dict[st
             "intentId": intent_id,
             "status": status,
         }
-    edge = _open_via_named_edge(item, url=url, title=title)
-    edge["intentId"] = intent_id
-    edge["electronStatus"] = status
-    return edge
+    raise RuntimeError(
+        "Electron did not open the isolated workbench window "
+        f"(status={status or 'unknown'}). Refusing Edge fallback."
+    )
 
 
 def _open_via_named_edge(item: dict[str, Any], *, url: str, title: str) -> dict[str, Any]:
-    if os.name != "nt":
-        return {"provider": "none", "windowPid": 0, "title": title}
-    worktree = Path(str(item.get("path") or "")).expanduser()
-    profile_dir = resolve_project_runtime_home(worktree) / "launcher" / "workbench-app-profile"
-    slot_id = str(item.get("slotId") or "")
-    if not slot_id and worktree.exists():
-        try:
-            slot_id = slot_id_for_project(worktree)
-        except (OSError, TypeError, ValueError):
-            slot_id = "isolated"
-    app_id = f"Vibelution.Workbench.{slot_id or 'isolated'}"
-    from scripts.vibelution_launcher import start_named_workbench_browser
-
-    started = start_named_workbench_browser(
-        url,
-        profile_dir=profile_dir,
-        app_id=app_id,
-        display_name=title,
-    )
-    return {
-        "provider": "edge_app",
-        "windowPid": _positive_int(started.get("browserWindowPid") or started.get("browserLaunchPid")),
-        "title": title,
-        "appUserModelId": app_id,
-    }
+    raise RuntimeError(_ELECTRON_WINDOW_REQUIRED_MESSAGE)
 
 
 def _submit_instance_window_action(

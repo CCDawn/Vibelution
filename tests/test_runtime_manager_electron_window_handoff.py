@@ -214,17 +214,51 @@ def test_first_open_uses_packaged_electron_after_headless_backend_start(monkeypa
     ]
 
 
-def test_first_open_uses_edge_only_when_packaged_electron_is_missing(monkeypatch):
+def test_first_open_fails_when_packaged_electron_is_missing(monkeypatch):
     launcher_calls: list[dict] = []
-    events: list[str] = []
 
     monkeypatch.setattr(workbench_controller, "_latest_active_electron_desktop_session", lambda: {})
     monkeypatch.setattr(workbench_controller, "_packaged_electron_desktop_executable", lambda: None)
+    monkeypatch.setattr(workbench_controller, "_live_electron_owner_pid", lambda: 0)
+    monkeypatch.setattr(workbench_controller, "_electron_main_orchestrates_windows", lambda: False)
     monkeypatch.setattr(
         workbench_controller,
         "_run_waitable_launcher_process",
         lambda *args, **kwargs: launcher_calls.append({"args": args, "kwargs": kwargs})
         or subprocess.CompletedProcess(args=["launcher"], returncode=0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(workbench_controller, "_record_launcher_action_event", lambda *_args, **_kwargs: None)
+
+    with pytest.raises(RuntimeError, match="Refusing Edge fallback"):
+        workbench_controller.run_launcher_action("internal-start")
+
+    assert launcher_calls == []
+
+
+def test_live_electron_owner_signals_open_workbench_instead_of_edge(monkeypatch):
+    launcher_calls: list[dict] = []
+    signals: list[dict] = []
+    events: list[str] = []
+
+    monkeypatch.setattr(workbench_controller, "_latest_active_electron_desktop_session", lambda: {})
+    monkeypatch.setattr(workbench_controller, "_packaged_electron_desktop_executable", lambda: None)
+    monkeypatch.setattr(workbench_controller, "_live_electron_owner_pid", lambda: 44044)
+    monkeypatch.setattr(workbench_controller, "_electron_main_orchestrates_windows", lambda: False)
+    monkeypatch.setattr(
+        workbench_controller,
+        "_resolve_live_electron_executable",
+        lambda _session=None: Path("C:/Vibelution.exe"),
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "_run_waitable_launcher_process",
+        lambda *args, **kwargs: launcher_calls.append({"args": args, "kwargs": kwargs})
+        or subprocess.CompletedProcess(args=["launcher"], returncode=0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "_signal_live_electron_open_workbench",
+        lambda **kwargs: signals.append(kwargs),
     )
     monkeypatch.setattr(
         workbench_controller,
@@ -235,13 +269,11 @@ def test_first_open_uses_edge_only_when_packaged_electron_is_missing(monkeypatch
     result = workbench_controller.run_launcher_action("internal-start")
 
     assert result.returncode == 0
-    assert "--no-browser" not in launcher_calls[0]["args"][0]
-    assert events == [
-        "launcher.action.requested",
-        "launcher.action.edge_fallback_package_missing",
-        "launcher.action.completed",
-        "launcher.action.startup_summary",
-    ]
+    assert "--no-browser" in launcher_calls[0]["args"][0]
+    assert len(signals) == 1
+    assert signals[0]["executable"] == Path("C:/Vibelution.exe")
+    assert "launcher.action.electron_open_signaled" in events
+    assert "launcher.action.edge_fallback_package_missing" not in events
 
 
 def test_first_open_does_not_silently_fall_back_to_edge_when_packaged_electron_fails(monkeypatch):

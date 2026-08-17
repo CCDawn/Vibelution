@@ -2,8 +2,9 @@ import { ArrowLeft } from "lucide-react";
 
 import type { ChallengeQuestionRunDetailPayload } from "../../../api/types";
 import {
+  VButton,
   VEmptyState,
-  VNativeButton,
+  VStateSurface,
   VStatusChip,
   VSurface,
 } from "../../../components/vui";
@@ -41,7 +42,7 @@ export function ChallengeQuestionDetailPanel({
   if (isLoading) {
     return (
       <VSurface className={css.state} tone="workspace">
-        <strong>正在读取 {requestedQuestionId} 的审核工件…</strong>
+        <VStateSurface title={`正在读取 ${requestedQuestionId} 的审核工件`} tone="loading" />
       </VSurface>
     );
   }
@@ -50,9 +51,9 @@ export function ChallengeQuestionDetailPanel({
       <VSurface className={css.state} tone="workspace">
         <VEmptyState title={`${requestedQuestionId || "该题"} 的审核工件不可用`} />
         {errorMessage ? <code>{errorMessage}</code> : null}
-        <VNativeButton className={css.secondaryButton} type="button" onClick={onClose}>
+        <VButton density="compact" onPress={onClose} variant="secondary">
           返回题目列表
-        </VNativeButton>
+        </VButton>
       </VSurface>
     );
   }
@@ -65,16 +66,15 @@ export function ChallengeQuestionDetailPanel({
         <div>
           <span className={css.eyebrow}>单题验收</span>
           <h2>{detail.questionId}: {output.question_en}</h2>
-          {output.question_zh ? <p>{output.question_zh}</p> : null}
+          {output.question_zh ? <p className={css.questionZh}>{output.question_zh}</p> : null}
         </div>
         <div className={css.headerActions}>
           <VStatusChip tone={record.status === "approved" ? "accent" : "warning"}>
             {record.status === "approved" ? "正式批准" : record.status}
           </VStatusChip>
-          <VNativeButton className={css.secondaryButton} type="button" onClick={onClose}>
-            <ArrowLeft size={15} aria-hidden="true" />
+          <VButton density="compact" icon={<ArrowLeft size={15} aria-hidden="true" />} onPress={onClose} variant="secondary">
             返回题目列表
-          </VNativeButton>
+          </VButton>
         </div>
       </header>
 

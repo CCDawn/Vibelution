@@ -1536,8 +1536,11 @@ def start_named_workbench_browser(
     }
 
 
-def _start_managed_browser(url: str) -> dict[str, object]:
-    return start_named_workbench_browser(url)
+def _start_managed_browser(_url: str) -> dict[str, object]:
+    raise RuntimeError(
+        "Electron desktop shell is unavailable. Refusing Edge fallback. "
+        "Start or rebuild dist/desktop/win-unpacked/Vibelution.exe."
+    )
 
 
 def _preserved_launcher_control_state(state: dict) -> dict[str, object]:
@@ -2093,7 +2096,13 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
 
     Previous project-owned process handles (backend + managed browser) are retired
     first. Start never attaches to an already-running workbench PID.
+    Visible windows belong to Electron; this adapter must not spawn Edge.
     """
+    if not no_browser:
+        raise RuntimeError(
+            "Electron desktop shell is unavailable. Refusing Edge fallback. "
+            "Start or rebuild dist/desktop/win-unpacked/Vibelution.exe."
+        )
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
     previous_state = _read_state()
     preferred_port = int(port or DEFAULT_PORT)
@@ -2172,23 +2181,6 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
         "browserWindowPid": 0,
         "browserProfileDir": "",
     }
-    if not no_browser:
-        try:
-            browser_started = time.monotonic()
-            browser_info = _start_managed_browser(url)
-            open_timings_ms["browserStartMs"] = round((time.monotonic() - browser_started) * 1000.0, 1)
-        except Exception:
-            _terminate_pid(process.pid)
-            raise
-        browser_launch = int(browser_info.get("browserLaunchPid") or 0)
-        browser_window = int(browser_info.get("browserWindowPid") or 0)
-        if browser_launch in retired_set or browser_window in retired_set:
-            _terminate_pid(browser_launch)
-            _terminate_pid(browser_window)
-            _terminate_pid(process.pid)
-            raise RuntimeError(
-                "Fresh start browser handles collide with the retired instance; refusing takeover."
-            )
     try:
         _assert_runtime_source_identity(source_identity, light=True)
     except Exception:
