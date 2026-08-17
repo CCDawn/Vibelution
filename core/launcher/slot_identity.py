@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from config.paths import CONFIG_HOME_ENV, DATA_HOME_ENV, resolve_config_home
-from core.infrastructure.storage_paths import (
+from vibelution_storage import (
     ProjectIdentityError,
     instance_id_for_project,
     resolve_active_project_storage_paths,
