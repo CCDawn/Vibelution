@@ -216,3 +216,35 @@ def test_binding_coerces_bytes_json_and_string_false_restart_focus():
     ) is True
     assert guard_restart_focus_tool("apply_diff_edit_tool", restart_focus=bytearray(b"false")) is None
     assert materialize_authorized_tools("read_file_tool", report) == []
+
+
+def test_binding_unwraps_runtime_and_visible_tool_envelopes():
+    runtime = bind_authorization_runtime(
+        current_runtime={"runtime": {"agent_id": "agent-env"}},
+        turn_runtime={"payload": {"run_id": "turn-env", "mode": "chat"}},
+        agent_binding=None,
+    )
+    assert runtime["agentId"] == "agent-env"
+    assert runtime["turnId"] == "turn-env"
+    assert runtime["mode"] == "chat"
+
+    report = SimpleNamespace(
+        decision=SimpleNamespace(visible_tools={"tools": ["read_file_tool"]}),
+    )
+    tools = [_tool("read_file_tool"), _tool("write_file_tool")]
+    assert [tool.name for tool in materialize_authorized_tools(tools, report)] == ["read_file_tool"]
+
+    assert is_tool_visible_to_agent(
+        "read_file_tool",
+        '{"items":[{"name":"read_file_tool","enabled":true},{"name":"write_file_tool","enabled":false}]}',
+    ) is True
+    assert is_tool_visible_to_agent(
+        "write_file_tool",
+        [{"name": "read_file_tool"}, {"id": "write_file_tool", "enabled": False}],
+    ) is False
+    assert is_tool_visible_to_agent(
+        "read_file_tool",
+        {"read_file_tool": {"enabled": False}, "write_file_tool": {"enabled": True}},
+    ) is False
+    assert guard_restart_focus_tool("apply_diff_edit_tool", restart_focus={"enabled": False}) is None
+    assert guard_restart_focus_tool("apply_diff_edit_tool", restart_focus={"enabled": True})
