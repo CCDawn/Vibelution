@@ -209,7 +209,7 @@ def test_runtime_capability_error_never_returns_or_persists_raw_secret(tmp_path,
     assert '"error": "other"' in state_text
 
 
-def test_upgrader_corrupt_json_marks_complete_without_clobbering_catalog(tmp_path, monkeypatch):
+def test_upgrader_corrupt_json_records_cold_rebuild_without_clobbering_catalog(tmp_path, monkeypatch):
     config_path = tmp_path / "config.toml"
     catalog_path = tmp_path / "model-catalog-state.json"
     legacy_path = tmp_path / "model-capabilities.json"
@@ -238,9 +238,57 @@ def test_upgrader_corrupt_json_marks_complete_without_clobbering_catalog(tmp_pat
 
     catalog = load_model_catalog_state(catalog_path)
     assert catalog["metadata"]["legacyCapabilityImportCompleted"] is True
+    assert catalog["metadata"]["legacyCapabilityImportOutcome"] == "cold_rebuild"
     assert catalog["metadata"]["keep"] is True
     assert catalog["providers"]["relay"]["models"]["gpt-a"]["upstreamId"] == "gpt-a"
     assert legacy_path.read_text(encoding="utf-8") == "{not json"
+
+
+def test_upgrader_valid_and_missing_legacy_cache_record_distinct_outcomes(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    legacy_path = tmp_path / "model-capabilities.json"
+    config_path.write_text("[llm]\nschema_version = 2\n", encoding="utf-8")
+    legacy_path.write_text('{"schemaVersion": 1, "models": {}}', encoding="utf-8")
+    monkeypatch.setenv("VIBELUTION_CONFIG_PATH", str(config_path))
+    monkeypatch.delenv("VIBELUTION_MODEL_CAPABILITY_CACHE", raising=False)
+
+    imported = upgrade_legacy_capability_cache_if_needed({"llm": {}}, config_path=config_path)
+    assert imported["metadata"]["legacyCapabilityImportOutcome"] == "imported"
+
+    second_config_path = tmp_path / "missing" / "config.toml"
+    second_config_path.parent.mkdir()
+    second_config_path.write_text("[llm]\nschema_version = 2\n", encoding="utf-8")
+    not_present = upgrade_legacy_capability_cache_if_needed(
+        {"llm": {}},
+        config_path=second_config_path,
+    )
+    assert not_present["metadata"]["legacyCapabilityImportOutcome"] == "not_present"
+
+
+def test_upgrader_backfills_prior_completion_without_claiming_unknown_import(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    catalog_path = tmp_path / "model-catalog-state.json"
+    legacy_path = tmp_path / "model-capabilities.json"
+    config_path.write_text("[llm]\nschema_version = 2\n", encoding="utf-8")
+    catalog_path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 2,
+                "providers": {},
+                "metadata": {"legacyCapabilityImportCompleted": True, "keep": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+    legacy_path.write_text('{"schemaVersion": 1, "models": {}}', encoding="utf-8")
+    monkeypatch.setenv("VIBELUTION_CONFIG_PATH", str(config_path))
+    monkeypatch.delenv("VIBELUTION_MODEL_CAPABILITY_CACHE", raising=False)
+
+    backfilled = upgrade_legacy_capability_cache_if_needed({"llm": {}}, config_path=config_path)
+
+    assert backfilled["metadata"]["legacyCapabilityImportOutcome"] == "legacy_completed"
+    assert backfilled["metadata"]["keep"] is True
+    assert legacy_path.exists()
 
 
 def test_upgrader_write_failure_restores_original_catalog(tmp_path, monkeypatch):
