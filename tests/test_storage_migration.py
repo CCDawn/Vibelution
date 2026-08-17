@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import sqlite3
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -42,6 +43,58 @@ def _project(tmp_path: Path, monkeypatch) -> tuple[Path, Path, Path]:
     monkeypatch.setenv("VIBELUTION_PROJECTS_HOME", str(projects_home))
     monkeypatch.setenv("VIBELUTION_DATA_HOME", str(data_home))
     return project, projects_home, data_home
+
+
+def _git(root: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    return result.stdout.strip()
+
+
+def _git_project(tmp_path: Path) -> Path:
+    project = tmp_path / "git-project"
+    project.mkdir()
+    _git(project, "init")
+    (project / "seed.txt").write_text("seed\n", encoding="utf-8")
+    _git(project, "add", "seed.txt")
+    _git(
+        project,
+        "-c",
+        "user.name=Vibelution Tests",
+        "-c",
+        "user.email=tests@example.invalid",
+        "commit",
+        "-m",
+        "seed",
+    )
+    return project
+
+
+def _write_common_registry(
+    project: Path,
+    namespace: str,
+    *,
+    claims: list[dict[str, object]],
+    agents: list[dict[str, object]] | None = None,
+) -> Path:
+    common_dir = Path(_git(project, "rev-parse", "--git-common-dir"))
+    if not common_dir.is_absolute():
+        common_dir = (project / common_dir).resolve()
+    registry = common_dir / namespace / "coordination" / "registry.json"
+    registry.parent.mkdir(parents=True, exist_ok=True)
+    registry.write_text(
+        json.dumps({"claims": claims, "agents": agents or []}) + "\n",
+        encoding="utf-8",
+    )
+    return registry
 
 
 def _sqlite_quarantine_dirs(parent: Path) -> list[Path]:
@@ -390,6 +443,107 @@ def test_conflict_fails_without_switching_or_overwriting(tmp_path, monkeypatch):
     assert destination.read_text(encoding="utf-8") == "newer\n"
     assert not storage_migration_state_path(target).exists()
     assert resolve_active_project_storage_paths(project).migrated is False
+
+
+def test_active_claims_use_ccdawn_common_dir_from_main_and_linked_worktree(tmp_path):
+    project = _git_project(tmp_path)
+    linked = tmp_path / "linked-worktree"
+    _git(project, "worktree", "add", "-b", "codex/linked-test", str(linked))
+    _write_common_registry(
+        project,
+        "ccdawn",
+        claims=[
+            {"id": "claim-active", "agentId": "agent-live", "status": "active"},
+            {"id": "claim-complete", "agentId": "agent-live", "status": "completed"},
+        ],
+        agents=[{"id": "agent-live", "branch": "codex/live-branch"}],
+    )
+
+    for checkout in (project, linked):
+        claims, uncertain = storage_migration_module._load_active_claims(checkout)
+        assert uncertain is False
+        assert claims == [
+            {
+                "claimId": "claim-active",
+                "status": "active",
+                "branch": "codex/live-branch",
+            }
+        ]
+
+
+def test_active_claims_prefer_briefbound_registry_over_ccdawn(tmp_path):
+    project = _git_project(tmp_path)
+    _write_common_registry(
+        project,
+        "ccdawn",
+        claims=[{"id": "claim-ccdawn", "status": "active"}],
+    )
+    _write_common_registry(
+        project,
+        "briefbound",
+        claims=[{"id": "claim-briefbound", "status": "ready", "branch": "codex/ready"}],
+    )
+
+    claims, uncertain = storage_migration_module._load_active_claims(project)
+
+    assert uncertain is False
+    assert claims == [
+        {"claimId": "claim-briefbound", "status": "ready", "branch": "codex/ready"}
+    ]
+
+
+def test_active_claims_ignore_stale_legacy_registry_when_live_exists(tmp_path):
+    project = _git_project(tmp_path)
+    legacy_registry = project / ".docs" / "project-memory" / "agent-registry.json"
+    legacy_registry.parent.mkdir(parents=True)
+    legacy_registry.write_text(
+        json.dumps(
+            {
+                "workClaims": {
+                    "claim-stale": {"status": "active", "branch": "codex/stale"}
+                }
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    _write_common_registry(project, "ccdawn", claims=[])
+
+    claims, uncertain = storage_migration_module._load_active_claims(project)
+
+    assert uncertain is False
+    assert claims == []
+
+
+def test_active_claims_fall_back_to_legacy_memory_registry(tmp_path, monkeypatch):
+    project, _projects_home, _data_home = _project(tmp_path, monkeypatch)
+    registry = project / ".docs" / "project-memory" / "agent-registry.json"
+    registry.parent.mkdir(parents=True)
+    registry.write_text(
+        json.dumps(
+            {"claims": {"claim-legacy": {"status": "active", "branch": "codex/legacy"}}}
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    claims, uncertain = storage_migration_module._load_active_claims(project)
+
+    assert uncertain is False
+    assert claims == [
+        {"claimId": "claim-legacy", "status": "active", "branch": "codex/legacy"}
+    ]
+
+
+def test_active_claims_fail_closed_for_malformed_live_registry(tmp_path):
+    project = _git_project(tmp_path)
+    registry = _write_common_registry(project, "ccdawn", claims=[])
+    registry.write_text("{not-json\n", encoding="utf-8")
+
+    claims, uncertain = storage_migration_module._load_active_claims(project)
+
+    assert claims == []
+    assert uncertain is True
 
 
 def test_readiness_blocks_active_claim_and_apply(tmp_path, monkeypatch):

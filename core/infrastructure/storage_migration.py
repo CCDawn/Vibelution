@@ -29,7 +29,9 @@ from vibelution_storage import (
 CACHE_POLICY_COLD_REBUILD = "cold_rebuild"
 SQLITE_BUNDLE_CHANGED_DURING_COPY = "sqlite_bundle_changed_during_copy"
 SQLITE_BUNDLE_DESTINATION_CONFLICT = "sqlite_bundle_destination_conflict"
-_ACTIVE_CLAIM_STATUSES = frozenset({"active", "claimed", "in_progress", "running"})
+_ACTIVE_CLAIM_STATUSES = frozenset(
+    {"active", "claimed", "in_progress", "ready", "running"}
+)
 _SQLITE_MAIN_SUFFIXES = (".sqlite", ".sqlite3", ".db")
 _SQLITE_INTEGRITY_EVIDENCE_BOUND = 240
 _DEFAULT_QUIESCENCE_WINDOW_SECONDS = 0.05
@@ -1505,55 +1507,101 @@ def _read_json_object(path: Path) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
-def _coordination_registry_paths(project_root: Path) -> list[Path]:
-    paths = [resolve_project_memory_home(project_root) / "agent-registry.json"]
+def _coordination_registry_path(project_root: Path) -> Path:
+    """Resolve the authoritative live registry, with legacy memory as fallback."""
+
     try:
         from core.infrastructure.branch_workspace import resolve_branch_workspace
 
         layout = resolve_branch_workspace(project_root)
-        paths.append(layout.git_common_dir / "briefbound" / "coordination" / "registry.json")
+        for namespace in ("briefbound", "ccdawn"):
+            candidate = layout.git_common_dir / namespace / "coordination" / "registry.json"
+            if candidate.exists():
+                return candidate
     except Exception:
         pass
-    unique: list[Path] = []
-    seen: set[str] = set()
-    for path in paths:
-        key = os.path.normcase(str(path))
-        if key in seen:
-            continue
-        seen.add(key)
-        unique.append(path)
-    return unique
+    return resolve_project_memory_home(project_root) / "agent-registry.json"
+
+
+def _registry_agent_branches(payload: dict[str, Any]) -> tuple[dict[str, str], bool]:
+    raw_agents = payload.get("agents", {})
+    if raw_agents is None:
+        raw_agents = {}
+    if isinstance(raw_agents, dict):
+        entries = raw_agents.items()
+    elif isinstance(raw_agents, list):
+        entries = ((str(raw.get("id") or ""), raw) for raw in raw_agents if isinstance(raw, dict))
+        if any(not isinstance(raw, dict) for raw in raw_agents):
+            return {}, True
+    else:
+        return {}, True
+
+    branches: dict[str, str] = {}
+    for agent_id, raw in entries:
+        if not isinstance(raw, dict):
+            return {}, True
+        resolved_id = str(raw.get("id") or agent_id or "").strip()
+        if resolved_id:
+            branches[resolved_id] = str(raw.get("branch") or "")
+    return branches, False
+
+
+def _registry_claim_entries(
+    payload: dict[str, Any],
+) -> tuple[list[tuple[str, dict[str, Any]]], bool]:
+    if "workClaims" in payload:
+        raw_claims = payload.get("workClaims")
+    else:
+        raw_claims = payload.get("claims", {})
+    if raw_claims is None:
+        raw_claims = {}
+    if isinstance(raw_claims, dict):
+        entries: list[tuple[str, dict[str, Any]]] = []
+        for claim_id, raw in raw_claims.items():
+            if not isinstance(raw, dict):
+                return [], True
+            entries.append((str(claim_id), raw))
+        return entries, False
+    if isinstance(raw_claims, list):
+        entries = []
+        for raw in raw_claims:
+            if not isinstance(raw, dict):
+                return [], True
+            claim_id = str(raw.get("id") or raw.get("claimId") or "")
+            entries.append((claim_id, raw))
+        return entries, False
+    return [], True
 
 
 def _load_active_claims(project_root: Path) -> tuple[list[dict[str, str]], bool]:
     claims: list[dict[str, str]] = []
-    uncertain = False
-    for registry_path in _coordination_registry_paths(project_root):
-        if not registry_path.exists():
+    registry_path = _coordination_registry_path(project_root)
+    if not registry_path.exists():
+        return claims, False
+    try:
+        payload = json.loads(registry_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return claims, True
+    if not isinstance(payload, dict):
+        return claims, True
+
+    agent_branches, agents_uncertain = _registry_agent_branches(payload)
+    claim_entries, claims_uncertain = _registry_claim_entries(payload)
+    if agents_uncertain or claims_uncertain:
+        return claims, True
+    for claim_id, raw in claim_entries:
+        status = str(raw.get("status") or "").strip().lower()
+        if status not in _ACTIVE_CLAIM_STATUSES:
             continue
-        try:
-            payload = json.loads(registry_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            uncertain = True
-            continue
-        raw_claims = payload.get("workClaims") or payload.get("claims") or {}
-        if not isinstance(raw_claims, dict):
-            uncertain = True
-            continue
-        for claim_id, raw in raw_claims.items():
-            if not isinstance(raw, dict):
-                continue
-            status = str(raw.get("status") or "").strip().lower()
-            if status not in _ACTIVE_CLAIM_STATUSES:
-                continue
-            claims.append(
-                {
-                    "claimId": str(claim_id),
-                    "status": status,
-                    "branch": str(raw.get("branch") or ""),
-                }
-            )
-    return claims, uncertain
+        agent_id = str(raw.get("agentId") or raw.get("agent") or "").strip()
+        claims.append(
+            {
+                "claimId": claim_id,
+                "status": status,
+                "branch": str(raw.get("branch") or agent_branches.get(agent_id) or ""),
+            }
+        )
+    return claims, False
 
 
 def _probe_active_work(project_root: Path) -> dict[str, object]:
