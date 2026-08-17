@@ -58,7 +58,16 @@ def _coerce_message_list(value: Any) -> list:
     if value is None or isinstance(value, (str, bytes, bytearray, memoryview)):
         return []
     if isinstance(value, Mapping):
-        return [dict(value)]
+        nested = value.get("messages")
+        if nested is None:
+            nested = value.get("items")
+        if nested is None:
+            nested = value.get("history")
+        if nested is not None:
+            return _coerce_message_list(nested)
+        if any(key in value for key in ("role", "content", "type", "kind")):
+            return [dict(value)]
+        return []
     try:
         return list(value)
     except TypeError:
@@ -66,9 +75,18 @@ def _coerce_message_list(value: Any) -> list:
 
 
 def _response_metadata(response: Any) -> Dict[str, Any]:
-    if isinstance(response, Mapping):
-        return _as_mapping(response.get("response_metadata") or response.get("responseMetadata"))
-    return _as_mapping(getattr(response, "response_metadata", None))
+    parsed = _maybe_json(response)
+    if isinstance(parsed, Mapping):
+        nested = parsed.get("response_metadata")
+        if nested is None:
+            nested = parsed.get("responseMetadata")
+        if nested is not None:
+            return _as_mapping(nested)
+        return {}
+    return _as_mapping(
+        getattr(response, "response_metadata", None)
+        or getattr(response, "responseMetadata", None)
+    )
 
 
 def publish_llm_retry_status(
