@@ -214,6 +214,10 @@ def _launcher_health_url(port: int) -> str:
     return f"{_launcher_base_url(port)}/api/health"
 
 
+def _launcher_freshness_url(port: int) -> str:
+    return f"{_launcher_base_url(port)}/api/launcher/freshness"
+
+
 def _launcher_control_url(port: int) -> str:
     return f"{_launcher_base_url(port)}/launcher"
 
@@ -224,6 +228,41 @@ def _launcher_control_healthy(port: int) -> bool:
             return int(getattr(response, "status", 0) or 0) == 200
     except (OSError, TimeoutError, urllib.error.URLError, ValueError):
         return False
+
+
+def _launcher_control_git_current(port: int) -> bool | None:
+    """Return whether the live control plane matches disk HEAD.
+
+    ``None`` means the probe failed or the running identity is unknown; callers
+    must not treat that as stale, or a downed freshness endpoint would kill a
+    healthy backend.
+    """
+
+    request = urllib.request.Request(
+        _launcher_freshness_url(port),
+        headers={"X-Vibelution-Launcher-Trigger": "desktop_entry_python"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=1.5) as response:
+            status = int(getattr(response, "status", 0) or 0)
+            raw = response.read().decode("utf-8", errors="replace")
+    except (OSError, TimeoutError, urllib.error.URLError, ValueError):
+        return None
+    if status != 200:
+        return None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    current = payload.get("current")
+    if current is True:
+        return True
+    if current is False:
+        return False
+    return None
 
 
 def _wait_for_launcher_control(port: int, pid: int, *, timeout_seconds: float = 25.0) -> bool:
@@ -831,8 +870,15 @@ def _replace_stale_launcher_control(state: dict[str, object], port: int, current
     backend_pid = int(state.get("launcherBackendPid") or 0)
     if not _launcher_control_healthy(port):
         return False
-    if _launcher_backend_source_current(state, backend_pid, current_signature):
-        return False
+    source_current = _launcher_backend_source_current(state, backend_pid, current_signature)
+    if source_current:
+        git_current = _launcher_control_git_current(port)
+        if git_current is not False:
+            return False
+        stale_reason = "git_freshness"
+    else:
+        git_current = None
+        stale_reason = "source_signature"
     pids = _launcher_pids_from_state(state)
     if not pids:
         return False
@@ -841,6 +887,9 @@ def _replace_stale_launcher_control(state: dict[str, object], port: int, current
         port=port,
         backend_pid=backend_pid,
         pids=pids,
+        reason=stale_reason,
+        source_current=source_current,
+        git_current=git_current,
     )
     for pid in pids:
         _terminate_pid(pid)
@@ -1152,24 +1201,52 @@ def _launcher_bootstrap_mode(*, before_pid: int, backend_pid: int) -> str:
     return "started"
 
 
+def _same_workspace_root(left: Path, right: Path) -> bool:
+    try:
+        return os.path.normcase(str(left.resolve())) == os.path.normcase(str(right.resolve()))
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
+def _resolve_stop_owned_backend_pid(args: argparse.Namespace, state: dict[str, object]) -> tuple[int, str]:
+    expected_backend_pid = int(getattr(args, "owned_backend_pid", 0) or 0)
+    if expected_backend_pid > 0:
+        return expected_backend_pid, ""
+    if not bool(getattr(args, "use_state_owned_backend_pid", False)):
+        return 0, "owned_backend_pid_required"
+    state_root_raw = str(state.get("runtimeProjectRoot") or "").strip()
+    if not state_root_raw:
+        return 0, "workspace_root_missing"
+    try:
+        state_root = Path(state_root_raw).resolve()
+    except (OSError, RuntimeError, ValueError):
+        return 0, "workspace_root_invalid"
+    if not _same_workspace_root(state_root, _workspace_root(args)):
+        return 0, "workspace_mismatch"
+    state_pid = int(state.get("launcherBackendPid") or 0)
+    if state_pid <= 0:
+        return 0, "owned_backend_pid_required"
+    return state_pid, ""
+
+
 def _stop_owned_launcher(args: argparse.Namespace) -> dict[str, object]:
     state = _read_state()
-    expected_backend_pid = int(args.owned_backend_pid or 0)
+    expected_backend_pid, skip_reason = _resolve_stop_owned_backend_pid(args, state)
     backend_pid = int(state.get("launcherBackendPid") or 0)
     backend_launch_pid = int(state.get("launcherBackendLaunchPid") or 0)
     port = int(state.get("launcherControlPort") or _launcher_control_port())
-    if expected_backend_pid <= 0:
+    if skip_reason:
         _append_log(
             "desktop_entry_python.stop.skipped",
             level="warning",
-            reason="owned_backend_pid_required",
+            reason=skip_reason,
             launcher_backend_pid=backend_pid,
             launcher_backend_launch_pid=backend_launch_pid,
         )
         return {
             "schemaVersion": 1,
             "status": "skipped",
-            "reason": "owned_backend_pid_required",
+            "reason": skip_reason,
             "expectedBackendPid": expected_backend_pid,
             "launcherBackendPid": backend_pid,
             "terminatedPids": [],
@@ -1482,6 +1559,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--python-exe", default="")
     parser.add_argument("--run-id", default="")
     parser.add_argument("--owned-backend-pid", type=int, default=0)
+    parser.add_argument(
+        "--use-state-owned-backend-pid",
+        action="store_true",
+        help=(
+            "Allow stop-launcher to use launcherBackendPid from this workspace's "
+            "state.json when --owned-backend-pid is omitted. Native tray restart/exit "
+            "uses this; Electron still passes an explicit pid."
+        ),
+    )
     parser.add_argument("--attach-healthy-launcher", action="store_true")
     parser.add_argument("--lifecycle-operation", default="")
     parser.add_argument("--branch-instance-operation", default="")
