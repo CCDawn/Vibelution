@@ -58,14 +58,33 @@ import type {
 export type { AgentMemoryInventoryAgent, AgentMemoryInventoryPayload } from "./agentMemoryView";
 
 export type MemoryRouteView =
+  | "personal"
+  | "team"
+  | "library"
+  | "graph"
+  | "manage"
   | "overview"
   | "effective"
   | "agents"
-  | "manage"
   | "sources"
   | "knowledge"
-  | "graph"
   | "cleanup";
+
+export function isPersonalMemoryView(view: MemoryRouteView) {
+  return view === "personal" || view === "agents";
+}
+
+export function isTeamMemoryView(view: MemoryRouteView) {
+  return view === "team" || view === "knowledge";
+}
+
+export function isLibraryMemoryView(view: MemoryRouteView) {
+  return view === "library";
+}
+
+export function isManageMemoryView(view: MemoryRouteView) {
+  return view === "manage" || view === "cleanup" || view === "sources" || view === "effective" || view === "overview";
+}
 
 export type MemoryProposalStatusFilter = "pending" | "";
 export type RatingSuggestionStatusFilter = "pending" | "applied" | "rejected" | "all";
@@ -101,7 +120,7 @@ export function useMemoryCoreQueries(options: UseMemoryCoreQueriesOptions) {
 
   const overviewQuery = useQuery({
     queryKey: queryKeys.memoryOverview(),
-    queryFn: ({ signal }) => fetchMemoryOverview<MemoryOverview>({ includeContent: false, signal }),
+    queryFn: ({ signal }) => fetchMemoryOverview<MemoryOverview>({ includeContent: true, signal }),
     refetchInterval: resolvePollingInterval(pageVisible, 30_000),
     refetchIntervalInBackground: false,
   });
@@ -127,14 +146,14 @@ export function useMemoryCoreQueries(options: UseMemoryCoreQueriesOptions) {
   const agentsQuery = useQuery({
     queryKey: queryKeys.agents(),
     queryFn: ({ signal }) => listAgentSummaries({ signal }),
-    enabled: forcedView === "agents" || forcedView === "knowledge" || forcedView === "graph" || forcedView === "cleanup",
+    enabled: isPersonalMemoryView(forcedView) || isTeamMemoryView(forcedView) || forcedView === "graph" || isManageMemoryView(forcedView),
     refetchInterval: resolvePollingInterval(pageVisible, 60_000),
     refetchIntervalInBackground: false,
   });
   const agentMemoryInventoryQuery = useQuery({
     queryKey: ["memory", "agents", "inventory"],
     queryFn: ({ signal }) => fetchMemoryAgents<AgentMemoryInventoryPayload>({ signal }),
-    enabled: forcedView === "agents",
+    enabled: isPersonalMemoryView(forcedView),
     refetchInterval: resolvePollingInterval(pageVisible, 45_000),
     refetchIntervalInBackground: false,
   });
@@ -144,12 +163,7 @@ export function useMemoryCoreQueries(options: UseMemoryCoreQueriesOptions) {
   const requestedAgentMemoryAgent = requestedKnowledgeActorAgentId
     ? agentMemoryInventoryAgents.find((agent) => agent.agentId === requestedKnowledgeActorAgentId) ?? null
     : null;
-  const selectedAgentMemoryAgentId =
-    requestedAgentMemoryAgent?.agentId
-    || agentMemoryInventoryAgents.find((agent) => agent.hasPrivateMemory)?.agentId
-    || agentMemoryInventoryAgents.find((agent) => agent.status !== "archived")?.agentId
-    || agentMemoryInventoryAgents[0]?.agentId
-    || "";
+  const selectedAgentMemoryAgentId = requestedAgentMemoryAgent?.agentId || "";
   const fallbackKnowledgeActorAgentId =
     requestedKnowledgeActorAgentId
     || knowledgeActorAgents.find((agent) => agent.status !== "archived")?.agentId
@@ -163,7 +177,7 @@ export function useMemoryCoreQueries(options: UseMemoryCoreQueriesOptions) {
         includeContent: true,
         signal,
       }),
-    enabled: forcedView === "agents" && Boolean(selectedAgentMemoryAgentId),
+    enabled: isPersonalMemoryView(forcedView) && Boolean(selectedAgentMemoryAgentId),
     refetchInterval: false,
   });
   const knowledgeDashboardSnapshotQuery = useQuery({
@@ -178,7 +192,7 @@ export function useMemoryCoreQueries(options: UseMemoryCoreQueriesOptions) {
       }),
     refetchInterval: resolvePollingInterval(pageVisible, 45_000),
     refetchIntervalInBackground: false,
-    enabled: (forcedView === "knowledge" || forcedView === "cleanup") && Boolean(fallbackKnowledgeActorAgentId),
+    enabled: (isTeamMemoryView(forcedView) || isManageMemoryView(forcedView)) && Boolean(fallbackKnowledgeActorAgentId),
   });
   const memoryKnowledgeGraphQuery = useQuery({
     queryKey: queryKeys.memoryKnowledgeGraph(fallbackKnowledgeActorAgentId, "officialResearchGraph", requestedTeamId),
@@ -260,7 +274,7 @@ export function useMemoryKnowledgeQueries(options: UseMemoryKnowledgeQueriesOpti
         agentId: activeKnowledgeActorAgentId,
         signal,
       }),
-    enabled: forcedView === "knowledge" && Boolean(activeKnowledgeBaseForItems) && Boolean(activeKnowledgeActorAgentId),
+    enabled: isTeamMemoryView(forcedView) && Boolean(activeKnowledgeBaseForItems) && Boolean(activeKnowledgeActorAgentId),
     refetchInterval: resolvePollingInterval(pageVisible, 45_000),
     refetchIntervalInBackground: false,
   });

@@ -10,6 +10,10 @@ const propsSource = readFileSync(
   new URL("./teams/researchStageLauncherProps.ts", import.meta.url),
   "utf8",
 );
+const modelSource = readFileSync(
+  new URL("./teams/experimentLoopModel.ts", import.meta.url),
+  "utf8",
+);
 const panelAndProps = `${source}\n${propsSource}`;
 
 describe("TeamResearchStageLauncherPanel lifecycle truth", () => {
@@ -37,10 +41,16 @@ describe("TeamResearchStageLauncherPanel lifecycle truth", () => {
     expect(panelAndProps).toContain("flattenResearchStageLauncherProps");
   });
 
-  it("keeps the Challenge Cup program projection on the overview console", () => {
-    // The program projection renders read-only program-level state (stage 1
-    // readiness / MVP progress); single-question acceptance moved to the
-    // workflow workspace panel=question deep link, not a parallel rail shell.
+  it("projects authoritative Program v2 truth while keeping legacy state read-only", () => {
+    expect(source).toContain("competitionProgramProjection");
+    expect(source).toContain("competitionProgramProjection.completion.completed");
+    expect(source).toContain("fullCatalogResultSet");
+    expect(source).toContain("requiredDeepExperiments");
+    expect(source).toContain("Program v2 交付状态");
+    expect(source).toContain("两个实验使用独立 Theme 与独立 Campaign");
+    expect(modelSource).toContain("@deprecated Read-only compatibility projection");
+    // The legacy projection can still describe the old stage cards, but it
+    // cannot decide Program v2 completion.
     expect(source).toContain("challengeProgramProjection");
     expect(source).not.toContain("challengeTeamSurface");
     expect(source).not.toContain("ChallengeQuestionDetailPanel");

@@ -52,7 +52,22 @@ export type InstancePendingOperation = {
   instanceId: string;
   instanceIds?: string[];
   operation: "start" | "stop" | "restart";
+  baselineLifecycleState?: LauncherBranchInstance["runtime"]["lifecycleState"];
 };
+
+export function toPendingBranchOperation(input: {
+  instanceId: string;
+  instanceIds?: string[];
+  operation: "start" | "stop" | "restart" | "force-stop";
+  baselineLifecycleState?: LauncherBranchInstance["runtime"]["lifecycleState"];
+}): InstancePendingOperation {
+  return {
+    instanceId: input.instanceId,
+    instanceIds: input.instanceIds && input.instanceIds.length > 0 ? input.instanceIds : undefined,
+    operation: input.operation === "force-stop" ? "stop" : input.operation,
+    baselineLifecycleState: input.baselineLifecycleState,
+  };
+}
 
 export type BranchInstanceGroups = {
   running: LauncherBranchInstance[];
@@ -107,6 +122,48 @@ function pendingAppliesTo(item: LauncherBranchInstance, pending?: InstancePendin
   return pending.instanceId === item.id;
 }
 
+export function pendingLifecycleReflected(
+  item: LauncherBranchInstance,
+  pending: InstancePendingOperation,
+): boolean {
+  const state = item.runtime.lifecycleState;
+  if (pending.baselineLifecycleState) {
+    return state !== pending.baselineLifecycleState;
+  }
+  if (pending.operation === "start") {
+    return state !== "closed";
+  }
+  if (pending.operation === "stop") {
+    return state === "closed" || state === "stopping" || state === "error";
+  }
+  return state === "restarting" || state === "starting" || state === "error";
+}
+
+export function resolveActivePendingOperation(
+  pending: InstancePendingOperation | undefined,
+  items: readonly LauncherBranchInstance[],
+): InstancePendingOperation | undefined {
+  if (!pending) {
+    return undefined;
+  }
+  const ids = pending.instanceIds && pending.instanceIds.length > 0
+    ? pending.instanceIds
+    : [pending.instanceId];
+  const remaining = ids.filter((id) => {
+    const item = items.find((candidate) => candidate.id === id);
+    return !item || !pendingLifecycleReflected(item, pending);
+  });
+  if (remaining.length === 0) {
+    return undefined;
+  }
+  return {
+    instanceId: remaining[0],
+    instanceIds: remaining.length > 1 ? remaining : undefined,
+    operation: pending.operation,
+    baselineLifecycleState: pending.baselineLifecycleState,
+  };
+}
+
 export function instanceRuntimeState(
   item: LauncherBranchInstance,
   pending?: InstancePendingOperation,
@@ -132,7 +189,7 @@ export function instanceRuntimeState(
 export function instanceRuntimeStateLabel(state: InstanceRuntimeState, isZh: boolean): string {
   if (isZh) {
     return {
-      starting: "启动中",
+      starting: "正在启动",
       running: "正常运行",
       partial: "部分运行",
       stopping: "停止中",

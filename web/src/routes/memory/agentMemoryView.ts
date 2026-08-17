@@ -150,6 +150,7 @@ export function toAgentMemoryItemView(
     contentType: item.contentType || "",
     truncated: Boolean(item.contentTruncated),
     active: item.id === selectedItemId,
+    content: item.content || "",
   };
 }
 

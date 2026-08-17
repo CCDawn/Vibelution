@@ -59,13 +59,13 @@ import {
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { type PaneSpec } from "../components/layout/paneLayoutPersistence";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
-import { VButton, VDenseOpsPage, VRouteLinkButton, VSplitWorkspace, VStateSurface, VStatusChip } from "../components/vui";
+import { VButton, VDenseOpsPage, VRouteLinkButton, VSplitWorkspace, VStateSurface, VStatusChip, VTabs } from "../components/vui";
 import { memoryProposalStatusTone, memoryVisibilityTone } from "./memoryStatusTone";
 import { useShellI18n } from "../i18n/useShellI18n";
 import { useMemoryItemMutations } from "./memory/useMemoryItemMutations";
 import { canExecuteMemoryCleanup } from "./memory/memoryCleanupSafety";
 import { useMemoryKnowledgeMutations } from "./memory/useMemoryKnowledgeMutations";
-import { useMemoryCoreQueries, useMemoryKnowledgeQueries } from "./memory/useMemoryWorkbenchQueries";
+import { useMemoryCoreQueries, useMemoryKnowledgeQueries, isLibraryMemoryView, isPersonalMemoryView, isTeamMemoryView } from "./memory/useMemoryWorkbenchQueries";
 import {
   toAgentMemoryAgentView,
   toAgentMemoryItemView,
@@ -87,7 +87,7 @@ import { MemoryManagementEditor, type MemoryManagementEditorDraft } from "./Memo
 import { MemoryManagePanel } from "./MemoryManagePanel";
 import { MemoryMatrixPanel } from "./MemoryMatrixPanel";
 import { MemoryItemListPanel } from "./MemoryItemListPanel";
-import { MemoryOverviewPanel } from "./MemoryOverviewPanel";
+import { MemoryContentBrowsePanel } from "./MemoryContentBrowsePanel";
 import { MemoryProjectMemoryQueuePanel } from "./MemoryProjectMemoryQueuePanel";
 import { MemoryReviewQueuePanel } from "./MemoryReviewQueuePanel";
 import { MemorySelectedConfigPanel } from "./MemorySelectedConfigPanel";
@@ -241,12 +241,18 @@ type Copy = {
   mutationDone: string;
   mutationFailed: string;
   overviewView: string;
+  personalView: string;
+  teamView: string;
+  libraryView: string;
   effectiveView: string;
   agentMemoryView: string;
   manageView: string;
   sourcesView: string;
   knowledgeView: string;
   overviewSubtitle: string;
+  personalSubtitle: string;
+  teamSubtitle: string;
+  librarySubtitle: string;
   effectiveSubtitle: string;
   agentMemorySubtitle: string;
   manageSubtitle: string;
@@ -263,6 +269,8 @@ type Copy = {
   agentMemoryNoFileSelected: string;
   agentMemorySelectPrompt: string;
   agentMemoryFormalBases: string;
+  browseBack: string;
+  memoryCount: string;
   healthOverview: string;
   affectedRuntimeMemory: string;
   needsReview: string;
@@ -537,7 +545,7 @@ type Copy = {
 
 type FilterMode = "all" | "prompt" | "visible" | "manual" | "missing";
 type ManageFilterMode = "all" | "prompt" | "editable" | "changed" | "missing";
-export type MemoryRouteView = "overview" | "effective" | "agents" | "manage" | "sources" | "knowledge" | "graph" | "cleanup";
+export type MemoryRouteView = "personal" | "team" | "library" | "graph" | "manage" | "overview" | "effective" | "agents" | "sources" | "knowledge" | "cleanup";
 type MemoryChannel = "conversation" | "research" | "self_evolution" | "supervised_evolution" | "explicit_read";
 type ChannelFilter = MemoryChannel | "";
 type AgentMemoryKnowledgeSummary = {
@@ -739,12 +747,18 @@ const COPY: Record<"zh" | "en", Copy> = {
     mutationDone: "操作已保存",
     mutationFailed: "操作失败",
     overviewView: "总览",
+    personalView: "个人",
+    teamView: "团队",
+    libraryView: "整个记忆库",
     effectiveView: "生效范围",
     agentMemoryView: "Agent 记忆",
-    manageView: "来源管理",
+    manageView: "管理",
     sourcesView: "来源审计",
     knowledgeView: "团队知识库",
     overviewSubtitle: "先看 Agent 正在用哪些记忆，再处理需要你确认的条目。",
+    personalSubtitle: "点一张 Agent 卡片，查看它现在有的记忆。",
+    teamSubtitle: "点一个知识库，查看团队现在有的记忆。",
+    librarySubtitle: "项目里当前存在的共享记忆。",
     effectiveSubtitle: "按对话、自进化、监督进化和显式读取说明哪些记忆会被 agent 感知。",
     agentMemorySubtitle: "逐个查看 Agent 私有 workspace 记忆文件与正式私有知识库，点击文件读取内容。",
     manageSubtitle: "集中管理可覆盖、可禁用和用户手动新增的来源，不代表单个 Agent 的私有记忆。",
@@ -761,6 +775,8 @@ const COPY: Record<"zh" | "en", Copy> = {
     agentMemoryNoFileSelected: "选择一个私有记忆文件查看内容",
     agentMemorySelectPrompt: "选择一个 Agent 查看私有记忆",
     agentMemoryFormalBases: "正式知识库",
+    browseBack: "返回卡片",
+    memoryCount: "条记忆",
     healthOverview: "现在的记忆",
     affectedRuntimeMemory: "Agent 正在用",
     needsReview: "需要你处理",
@@ -1133,12 +1149,18 @@ const COPY: Record<"zh" | "en", Copy> = {
     mutationDone: "Saved",
     mutationFailed: "Action failed",
     overviewView: "Overview",
+    personalView: "Personal",
+    teamView: "Team",
+    libraryView: "Memory library",
     effectiveView: "Effective scope",
     agentMemoryView: "Agent memory",
-    manageView: "Source management",
+    manageView: "Manage",
     sourcesView: "Source audit",
     knowledgeView: "Team knowledge",
     overviewSubtitle: "See which memories the Agent is using, then handle anything that needs your confirmation.",
+    personalSubtitle: "Open an Agent card to read the memories it currently has.",
+    teamSubtitle: "Open a knowledge base to read the team's current memories.",
+    librarySubtitle: "Shared project memories that currently exist.",
     effectiveSubtitle: "Shows how conversation, self-evolution, supervised evolution, and explicit-read memory can be perceived.",
     agentMemorySubtitle: "Inspect each Agent private workspace memory file and formal private knowledge base, then open files to read their content.",
     manageSubtitle: "Manage overridable, disable-able, and user-created source records. This is not a single Agent private memory view.",
@@ -1155,6 +1177,8 @@ const COPY: Record<"zh" | "en", Copy> = {
     agentMemoryNoFileSelected: "Select a private memory file to inspect its content",
     agentMemorySelectPrompt: "Select an Agent to inspect private memory",
     agentMemoryFormalBases: "Formal knowledge bases",
+    browseBack: "Back to cards",
+    memoryCount: "memories",
     healthOverview: "Current memory",
     affectedRuntimeMemory: "In use by Agent",
     needsReview: "Needs your attention",
@@ -1922,22 +1946,25 @@ type MemoryRouteProps = {
 };
 
 const MEMORY_VIEWS: Array<{ key: MemoryRouteView; href: string }> = [
-  { key: "overview", href: "/memory" },
-  { key: "effective", href: "/memory/effective" },
-  { key: "agents", href: "/memory/agents" },
-  { key: "manage", href: "/memory/manage" },
-  { key: "sources", href: "/memory/sources" },
-  { key: "knowledge", href: "/memory/knowledge" },
+  { key: "personal", href: "/memory" },
+  { key: "team", href: "/memory/team" },
+  { key: "library", href: "/memory/library" },
   { key: "graph", href: "/memory/graph" },
-  { key: "cleanup", href: "/memory/cleanup" },
+  { key: "manage", href: "/memory/manage" },
 ];
 
 function memoryViewLabel(copy: Copy, view: MemoryRouteView) {
+  if (view === "personal" || view === "agents") {
+    return copy.personalView;
+  }
+  if (view === "team" || view === "knowledge") {
+    return copy.teamView;
+  }
+  if (view === "library") {
+    return copy.libraryView;
+  }
   if (view === "effective") {
     return copy.effectiveView;
-  }
-  if (view === "agents") {
-    return copy.agentMemoryView;
   }
   if (view === "manage") {
     return copy.manageView;
@@ -1945,41 +1972,32 @@ function memoryViewLabel(copy: Copy, view: MemoryRouteView) {
   if (view === "sources") {
     return copy.sourcesView;
   }
-  if (view === "knowledge") {
-    return copy.knowledgeView;
-  }
   if (view === "graph") {
     return copy.graphView;
   }
   if (view === "cleanup") {
     return copy.cleanupView;
   }
-  return copy.overviewView;
+  return copy.personalView;
 }
 
 function memoryViewSubtitle(copy: Copy, view: MemoryRouteView) {
-  if (view === "effective") {
-    return copy.effectiveSubtitle;
+  if (view === "personal" || view === "agents") {
+    return copy.personalSubtitle;
   }
-  if (view === "agents") {
-    return copy.agentMemorySubtitle;
+  if (view === "team" || view === "knowledge") {
+    return copy.teamSubtitle;
   }
-  if (view === "manage") {
-    return copy.manageSubtitle;
-  }
-  if (view === "sources") {
-    return copy.sourcesSubtitle;
-  }
-  if (view === "knowledge") {
-    return copy.knowledgeSubtitle;
+  if (view === "library") {
+    return copy.librarySubtitle;
   }
   if (view === "graph") {
     return copy.graphSubtitle;
   }
-  if (view === "cleanup") {
-    return copy.cleanupSubtitle;
+  if (view === "manage" || view === "sources" || view === "cleanup" || view === "effective" || view === "overview") {
+    return copy.manageSubtitle;
   }
-  return copy.overviewSubtitle;
+  return copy.personalSubtitle;
 }
 
 function memoryPairPriority(pair: MemoryPair) {
@@ -2201,7 +2219,7 @@ function invalidateMemoryQueries(queryClient: ReturnType<typeof useQueryClient>)
   void queryClient.invalidateQueries({ queryKey: ["memory", "agents"] });
 }
 
-export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
+export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
   const { lang } = useShellI18n();
   const copy = COPY[lang];
   const queryClient = useQueryClient();
@@ -2232,6 +2250,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     text: "",
   });
   const [bulkActionPending, setBulkActionPending] = useState<BulkMemoryAction | null>(null);
+  const [manageTab, setManageTab] = useState<"sources" | "cleanup">("sources");
   const [activeKnowledgeBaseId, setActiveKnowledgeBaseId] = useState("");
   const [activeKnowledgeWorkspaceMode, setActiveKnowledgeWorkspaceMode] = useState<KnowledgeWorkspaceMode>("sources");
   const [showOwnerSourceForm, setShowOwnerSourceForm] = useState(false);
@@ -2385,7 +2404,8 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       return String(base.ownerType || "team") === "team" && (ownerId === requestedTeamId || base.teamId === requestedTeamId);
     }) ?? null;
   const activeKnowledgeBase: TeamKnowledgeBase | null =
-    knowledgeBases.find((base) => knowledgeBaseRequestId(base) === activeKnowledgeBaseId) ?? knowledgeBases[0] ?? null;
+    knowledgeBases.find((base) => knowledgeBaseRequestId(base) === activeKnowledgeBaseId)
+    ?? (isTeamMemoryView(forcedView) ? null : knowledgeBases[0] ?? null);
   const activeKnowledgeBaseForItems = knowledgeBaseRequestId(activeKnowledgeBase);
   const activeKnowledgeActorAgentId = actorAgentIdForKnowledgeContext(activeKnowledgeBase, knowledgeActorAgents, fallbackKnowledgeActorAgentId);
   const {
@@ -2944,10 +2964,16 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       setActiveKnowledgeBaseId(knowledgeBaseRequestId(requestedTeamKnowledgeBase));
       return;
     }
+    if (isTeamMemoryView(forcedView)) {
+      if (activeKnowledgeBaseId && !knowledgeBases.some((base) => knowledgeBaseRequestId(base) === activeKnowledgeBaseId)) {
+        setActiveKnowledgeBaseId("");
+      }
+      return;
+    }
     if (!activeKnowledgeBaseId || !knowledgeBases.some((base) => knowledgeBaseRequestId(base) === activeKnowledgeBaseId)) {
       setActiveKnowledgeBaseId(knowledgeBaseRequestId(knowledgeBases[0]));
     }
-  }, [activeKnowledgeBaseId, knowledgeBases, requestedTeamKnowledgeBase]);
+  }, [activeKnowledgeBaseId, forcedView, knowledgeBases, requestedTeamKnowledgeBase]);
 
   useEffect(() => {
     const ownerId = knowledgeBaseOwnerId(activeKnowledgeBase);
@@ -3297,9 +3323,11 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     <nav className={styles.subnav} aria-label={copy.title}>
       {MEMORY_VIEWS.map((view) => {
         const path = location.pathname;
-        const routeActive = view.key === "overview"
-          ? path === "/memory" || path === "/memory/"
-          : path === view.href || path.startsWith(`${view.href}/`);
+        const routeActive = view.key === "personal"
+          ? path === "/memory" || path === "/memory/" || path === "/memory/agents" || path.startsWith("/memory/agents/")
+          : view.key === "team"
+            ? path === "/memory/team" || path === "/memory/knowledge" || path.startsWith("/memory/team/") || path.startsWith("/memory/knowledge/")
+            : path === view.href || path.startsWith(`${view.href}/`);
         const active = routeActive || forcedView === view.key;
         return (
           <VRouteLinkButton
@@ -3661,6 +3689,119 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     );
   };
 
+  const createTeamBrowsePanel = () => (
+    <MemoryContentBrowsePanel
+      copy={{
+        loading: copy.loading,
+        loadFailed: copy.knowledgeLoadFailed,
+        browseBack: copy.browseBack,
+        browseSelectCard: copy.agentMemorySelectPrompt,
+        browseEmptyCards: copy.noKnowledgeBases,
+        browseEmptyEntries: copy.noMatches,
+        noContent: copy.noContent,
+        searchPlaceholder: copy.searchPlaceholder,
+      }}
+      cards={knowledgeBases.map((base) => ({
+        id: knowledgeBaseRequestId(base),
+        title: base.name || base.teamName || knowledgeBaseRequestId(base),
+        meta: `${base.stats.itemCount} ${copy.memoryCount}`,
+      }))}
+      selectedCardId={activeKnowledgeBaseId}
+      onSelectCard={setActiveKnowledgeBaseId}
+      onClearCard={() => setActiveKnowledgeBaseId("")}
+      entries={knowledgeItems
+        .filter((item) => String(item.stability || "") !== "deprecated")
+        .map((item) => ({
+          id: item.knowledgeItemId,
+          title: item.title,
+          body: item.content || item.summary || "",
+        }))}
+      selectedEntryId={activeItemId}
+      onSelectEntry={setActiveItemId}
+      loading={knowledgeDashboardSnapshotQuery.isPending && !knowledgeBases.length}
+      errorText={
+        knowledgeDashboardSnapshotQuery.isError && !knowledgeDashboardSnapshot
+          ? knowledgeDashboardSnapshotQuery.error instanceof Error
+            ? knowledgeDashboardSnapshotQuery.error.message
+            : String(knowledgeDashboardSnapshotQuery.error)
+          : ""
+      }
+      entriesLoading={Boolean(activeKnowledgeBaseId) && knowledgeItemsQuery.isPending}
+    />
+  );
+
+  const createLibraryBrowsePanel = () => {
+    const libraryGroups = sections
+      .map((section) => ({
+        section,
+        items: section.items.filter((item) => item.exists && !item.managedState?.disabled),
+      }))
+      .filter((group) => group.items.length);
+    const selectedGroup = libraryGroups.find((group) => group.section.id === activeSectionId) ?? null;
+    return (
+      <MemoryContentBrowsePanel
+        copy={{
+          loading: copy.loading,
+          loadFailed: copy.loadFailed,
+          browseBack: copy.browseBack,
+          browseSelectCard: copy.agentMemorySelectPrompt,
+          browseEmptyCards: copy.noMatches,
+          browseEmptyEntries: copy.noMatches,
+          noContent: copy.noContent,
+          searchPlaceholder: copy.searchPlaceholder,
+        }}
+        cards={libraryGroups.map((group) => ({
+          id: group.section.id,
+          title: group.section.title,
+          meta: `${group.items.length} ${copy.memoryCount}`,
+        }))}
+        selectedCardId={activeSectionId}
+        onSelectCard={(sectionId) => {
+          setActiveSectionId(sectionId);
+          setActiveItemId("");
+        }}
+        onClearCard={() => {
+          setActiveSectionId("");
+          setActiveItemId("");
+        }}
+        entries={(selectedGroup?.items ?? []).map((item) => ({
+          id: item.id,
+          title: item.title,
+          body: item.content || item.summary || "",
+        }))}
+        selectedEntryId={activeItemId}
+        onSelectEntry={setActiveItemId}
+        loading={overviewQuery.isPending && !hasOverviewSections}
+        errorText={
+          showBlockingOverviewError
+            ? overviewQuery.error instanceof Error
+              ? overviewQuery.error.message
+              : String(overviewQuery.error)
+            : ""
+        }
+      />
+    );
+  };
+
+  const createOpsPanel = () => {
+    const activeTab = forcedView === "cleanup" || manageTab === "cleanup" ? "cleanup" : "sources";
+    return (
+      <div className={styles.viewStack}>
+        <VTabs
+          density="compact"
+          aria-label={copy.manageView}
+          value={activeTab}
+          onValueChange={(value) => setManageTab(value === "cleanup" ? "cleanup" : "sources")}
+          items={[
+            { id: "sources", label: copy.sourcesView },
+            { id: "cleanup", label: copy.cleanupView },
+          ]}
+        />
+        {activeTab === "cleanup" ? createCleanupPanel() : createManagePanel()}
+      </div>
+    );
+  };
+
   const renderSourcesView = () => (
     <>
       {createMatrixPanel(copy.sourceAudit)}
@@ -4002,9 +4143,9 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const viewStackClassName =
     forcedView === "graph"
       ? `${styles.viewStack} ${styles.graphViewStack}`
-      : forcedView === "agents"
+      : isPersonalMemoryView(forcedView)
         ? `${styles.viewStack} ${styles.agentMemoryViewStack}`
-      : forcedView === "knowledge"
+      : isTeamMemoryView(forcedView)
         ? `${styles.viewStack} ${styles.knowledgeViewStack}`
         : styles.viewStack;
 
@@ -4043,47 +4184,26 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       )}
     >
       <div className={viewStackClassName} data-vui-region="memory-main">
-        {forcedView === "overview"
-          ? (
-            <MemoryOverviewPanel
-              copy={copy}
-              summary={overview?.summary}
-              managedStateCount={managedStateCount}
-              disabledOrOverriddenCount={disabledOrOverriddenCount}
-              priorityReviewCount={priorityReviewPairs.length}
-              runtimeMemoryCount={runtimePairs.length}
-              warningStrip={createWarningStrip()}
-              reviewQueue={reviewQueuePanel}
-              projectMemoryQueue={projectMemoryQueuePanel}
-              runtimeMemoryList={renderMemoryList(runtimePairs, copy.noRuntimeMemory, true, false, true)}
+        <Suspense
+          fallback={(
+            <VStateSurface
+              fill
+              density="compact"
+              tone="info"
+              title={lang === "zh" ? "正在加载工作区…" : "Loading workspace…"}
             />
-          )
-          : (
-            <Suspense
-              fallback={(
-                <VStateSurface
-                  fill
-                  density="compact"
-                  tone="info"
-                  title={lang === "zh" ? "正在加载工作区…" : "Loading workspace…"}
-                />
-              )}
-            >
-              {forcedView === "effective"
-                ? createEffectivePanel()
-                : forcedView === "agents"
-                  ? createAgentMemoryPanel()
-                  : forcedView === "manage"
-                    ? createManagePanel()
-                    : forcedView === "knowledge"
-                      ? renderKnowledgeView()
-                      : forcedView === "graph"
-                        ? renderGraphView()
-                        : forcedView === "cleanup"
-                          ? createCleanupPanel()
-                          : renderSourcesView()}
-            </Suspense>
           )}
+        >
+          {isPersonalMemoryView(forcedView)
+            ? createAgentMemoryPanel()
+            : isTeamMemoryView(forcedView)
+              ? createTeamBrowsePanel()
+              : isLibraryMemoryView(forcedView)
+                ? createLibraryBrowsePanel()
+                : forcedView === "graph"
+                  ? renderGraphView()
+                  : createOpsPanel()}
+        </Suspense>
       </div>
     </VDenseOpsPage>
   );

@@ -52,6 +52,11 @@ import { launcherRouteStyles as styles } from "./LauncherRoute.styles";
 
 /** T4: secondary launcher panels load as route packs — keep lifecycle shell first. */
 import { LauncherBranchInstancesPanel } from "./LauncherBranchInstancesPanel";
+import {
+  resolveActivePendingOperation,
+  toPendingBranchOperation,
+  type InstancePendingOperation,
+} from "./LauncherBranchInstancesPanel.model";
 import { buildAllInstanceMonitorRows } from "./LauncherProcessMonitor.binding";
 import { LauncherProcessMonitorPanel, type LauncherProcessRow } from "./LauncherProcessMonitorPanel";
 
@@ -1471,6 +1476,8 @@ export function LauncherRoute() {
   const [notice, setNotice] = useState<LauncherNotice>({ tone: "neutral", text: "" });
   const [lastControlOperation, setLastControlOperation] = useState<LauncherOperation | null>(null);
   const [trackedCommand, setTrackedCommand] = useState<LauncherTrackedCommand | null>(null);
+  const [optimisticBranchOperation, setOptimisticBranchOperation] = useState<InstancePendingOperation | null>(null);
+  const lifecycleInFlightRef = useRef(false);
   const [selectedCleanupAction, setSelectedCleanupAction] = useState<LauncherDeveloperCleanupAction>("quick_clean");
   const [cleanupPlan, setCleanupPlan] = useState<LauncherDeveloperCleanupPlan | null>(null);
   const [maintenanceProfile, setMaintenanceProfile] = useState<LauncherMaintenanceProfileId>("clean_start");
@@ -1560,12 +1567,26 @@ export function LauncherRoute() {
       return last;
     },
     onMutate: (input) => {
-      const operation = resolveControlRequest(input).operation;
+      const request = resolveControlRequest(input);
+      const operation = request.operation;
+      const target = branchItems.find((candidate) => candidate.id === request.instanceId);
+      setOptimisticBranchOperation(toPendingBranchOperation({
+        instanceId: request.instanceId,
+        instanceIds: request.instanceIds,
+        operation,
+        baselineLifecycleState: target?.runtime.lifecycleState,
+      }));
       setLastControlOperation(operation);
       markControlledProjectLifecycleOperation(operation);
       postLauncherLifecycleControlTelemetry(operation, "requested");
       // Immediate feedback — restart/stop used to look like a no-op until status poll returned.
-      if (operation === "restart") {
+      if (operation === "start") {
+        setNotice({
+          tone: "neutral",
+          text: copy.lifecycleStartingDetail,
+          source: "lifecycle-control",
+        });
+      } else if (operation === "restart") {
         setNotice({
           tone: "neutral",
           text: copy.lifecycleRestartingDetail,
@@ -1588,6 +1609,7 @@ export function LauncherRoute() {
       );
       if (!response.accepted) {
         clearControlledProjectLifecycleOperation();
+        setOptimisticBranchOperation(null);
       }
       setLastControlOperation((operation === "stop" || operation === "force-stop") && response.accepted ? operation : null);
       setTrackedCommand(response.accepted && response.commandId ? { commandId: response.commandId, operation } : null);
@@ -1609,6 +1631,7 @@ export function LauncherRoute() {
         errorMessage: error instanceof Error ? error.message : String(error),
       });
       clearControlledProjectLifecycleOperation();
+      setOptimisticBranchOperation(null);
       setLastControlOperation(null);
       setTrackedCommand(null);
       setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error), source: "lifecycle-control" });
@@ -1800,16 +1823,24 @@ export function LauncherRoute() {
   const launcherControlLimited = statusQuery.isError
     && !launcherControlPlaneStarting
     && isControlTokenError(statusQuery.error);
-  const pendingBranchOperation = controlMutation.isPending && controlMutation.variables
-    ? (() => {
-        const request = resolveControlRequest(controlMutation.variables);
-        return {
-          instanceId: request.instanceId,
-          instanceIds: request.instanceIds,
-          operation: request.operation === "force-stop" ? "stop" : request.operation,
-        } as const;
-      })()
-    : undefined;
+  const requestedBranchOperation = optimisticBranchOperation
+    ?? (controlMutation.isPending && controlMutation.variables
+      ? toPendingBranchOperation(resolveControlRequest(controlMutation.variables))
+      : undefined);
+  const pendingBranchOperation = resolveActivePendingOperation(requestedBranchOperation, branchItems);
+  useEffect(() => {
+    if (!optimisticBranchOperation) {
+      return;
+    }
+    if (!resolveActivePendingOperation(optimisticBranchOperation, branchItems)) {
+      setOptimisticBranchOperation(null);
+    }
+  }, [branchItems, optimisticBranchOperation]);
+  useEffect(() => {
+    if (!pendingBranchOperation && !controlMutation.isPending) {
+      lifecycleInFlightRef.current = false;
+    }
+  }, [controlMutation.isPending, pendingBranchOperation]);
   const lifecycleDisplay = resolveLifecycleDisplay(status, copy, { disconnected: launcherStatusDisconnected, controlLimited: launcherControlLimited, starting: launcherControlPlaneStarting });
   const projectIsOpen = lifecycleDisplay.state === "running";
   const projectIsPartial = lifecycleDisplay.state === "partial";
@@ -2368,12 +2399,20 @@ export function LauncherRoute() {
               branchInstancesQuery.isPending || (branchInstancesQuery.isFetching && !branchInstancesQuery.data)
             )}
             pendingOperation={pendingBranchOperation}
-            lifecyclePending={controlMutation.isPending}
+            lifecyclePending={Boolean(pendingBranchOperation) || controlMutation.isPending}
             onLifecycle={(instanceId, operation) => {
+              if (lifecycleInFlightRef.current) {
+                return;
+              }
+              lifecycleInFlightRef.current = true;
               setSelectedInstanceId(instanceId);
               controlMutation.mutate({ operation, instanceId });
             }}
             onStopMany={(instanceIds) => {
+              if (lifecycleInFlightRef.current) {
+                return;
+              }
+              lifecycleInFlightRef.current = true;
               if (instanceIds[0]) {
                 setSelectedInstanceId(instanceIds[0]);
               }
