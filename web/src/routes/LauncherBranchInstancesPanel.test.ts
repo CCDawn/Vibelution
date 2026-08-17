@@ -15,10 +15,13 @@ import {
   formatGitStatus,
   formatWorkbenchStatus,
   groupBranchInstances,
+  canRequestOpenInstance,
   instanceRuntimeState,
+  instanceRuntimeStateLabel,
   instanceStopLabel,
   isCleanupEligible,
   paginateItems,
+  resolveActivePendingOperation,
 } from "./LauncherBranchInstancesPanel.model";
 
 function instance(overrides: Partial<LauncherBranchInstance> = {}): LauncherBranchInstance {
@@ -95,6 +98,9 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain('<VStatusChip tone="success">{labels.ready}</VStatusChip>');
     expect(panelSource).toContain('variant="primary"');
     expect(panelSource).toContain('variant="danger"');
+    expect(panelSource).toContain("isPending={state === \"starting\" || state === \"restarting\"}");
+    expect(panelSource).toContain("clickGuardRef");
+    expect(panelSource).toContain("kind === \"startable\" && state === \"stopped\"");
     expect(panelSource).toContain("resizable");
     expect(panelSource).not.toMatch(/from\s+["']@heroui\/react["']/);
     expect(panelSource).not.toMatch(/renderers\/shadcn/);
@@ -232,9 +238,32 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(groups.startable).toEqual([]);
     expect(groups.maintenance.map((item) => item.id)).toEqual(["retired:old"]);
     expect(instanceRuntimeState(startable, { instanceId: startable.id, operation: "start" })).toBe("starting");
+    expect(instanceRuntimeStateLabel("starting", true)).toBe("正在启动");
+    expect(canRequestOpenInstance(startable, { instanceId: startable.id, operation: "start" })).toBe(false);
     expect(canStopInstance(failed)).toBe(true);
     expect(instanceStopLabel(failed, true)).toBe("关闭");
     expect(formatAttentionReason(failed, true)).toBe("上次启动失败");
+  });
+
+  it("keeps an accepted start pending until the instance leaves closed", () => {
+    const startable = instance({ id: "main", kind: "main", branch: "main", current: true });
+    const pending = {
+      instanceId: startable.id,
+      operation: "start" as const,
+      baselineLifecycleState: "closed" as const,
+    };
+
+    expect(resolveActivePendingOperation(pending, [startable])).toEqual(pending);
+    expect(instanceRuntimeState(startable, pending)).toBe("starting");
+    expect(canRequestOpenInstance(startable, pending)).toBe(false);
+    expect(resolveActivePendingOperation(pending, [{
+      ...startable,
+      runtime: { ...startable.runtime, lifecycleState: "starting" },
+    }])).toBeUndefined();
+    expect(resolveActivePendingOperation(pending, [{
+      ...startable,
+      runtime: { ...startable.runtime, lifecycleState: "running" },
+    }])).toBeUndefined();
   });
 
   it("lets a retired failed leftover close without restart", () => {
