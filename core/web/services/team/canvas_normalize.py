@@ -8,6 +8,7 @@ recording. Pure edge normalize remains in canvas_primitives.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,31 @@ def get_team_canvas(team_id: str) -> dict[str, Any]:
         agents_by_id=agent_refs["by_id"],
         active_agents_by_id=agent_refs["active_by_id"],
     )
+
+
+def list_team_role_binding_sources(team_id: str) -> dict[str, list[dict[str, Any]]]:
+    """Return canvas nodes and members for role→agent mapping.
+
+    Read-only: no canvas validation, default-edge repair, or full Team hydration.
+    """
+    s = _service()
+    normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
+    with s._TEAM_LOCK:
+        state = s._load_index()
+        team = s._find_team(state, normalized_team_id)
+        if team is None:
+            return {"canvas_nodes": [], "members": []}
+        members = [dict(item) for item in list(team.get("members") or []) if isinstance(item, dict)]
+        canvas_path = s._team_canvas_path(str(team.get("teamId") or normalized_team_id))
+    nodes: list[dict[str, Any]] = []
+    if canvas_path.exists():
+        try:
+            raw = s._read_json(canvas_path)
+        except (OSError, json.JSONDecodeError):
+            raw = {}
+        raw_nodes = raw.get("nodes") if isinstance(raw, dict) else []
+        nodes = [dict(item) for item in list(raw_nodes or []) if isinstance(item, dict)]
+    return {"canvas_nodes": nodes, "members": members}
 
 
 def _team_canvas_with_validation(

@@ -23,6 +23,7 @@ describe("packaged Launcher control plane", () => {
 
     expect(source).toContain('"stop-launcher"');
     expect(source).toContain("windowsHide: true");
+    expect(source).toContain("--use-state-owned-backend-pid");
     expect(source).not.toContain("bootstrapPythonLauncherService");
     expect(source).not.toContain('"bootstrap"');
     expect(source).not.toContain("--attach-healthy-launcher");

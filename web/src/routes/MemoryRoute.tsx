@@ -66,6 +66,13 @@ import { useMemoryItemMutations } from "./memory/useMemoryItemMutations";
 import { canExecuteMemoryCleanup } from "./memory/memoryCleanupSafety";
 import { useMemoryKnowledgeMutations } from "./memory/useMemoryKnowledgeMutations";
 import { useMemoryCoreQueries, useMemoryKnowledgeQueries } from "./memory/useMemoryWorkbenchQueries";
+import {
+  toAgentMemoryAgentView,
+  toAgentMemoryItemView,
+  toAgentMemorySummaryView,
+  toSelectedAgentMemoryItemView,
+  toSelectedAgentMemoryView,
+} from "./memory/agentMemoryView";
 import { safeAgentCenterReturnToPath } from "./agentCenterRoutes";
 import { MemoryDetailPanel } from "./MemoryDetailPanel";
 import { MemoryEffectivePanel } from "./MemoryEffectivePanel";
@@ -254,6 +261,7 @@ type Copy = {
   agentMemoryNoAgents: string;
   agentMemoryNoPrivateMemory: string;
   agentMemoryNoFileSelected: string;
+  agentMemorySelectPrompt: string;
   agentMemoryFormalBases: string;
   healthOverview: string;
   affectedRuntimeMemory: string;
@@ -631,7 +639,7 @@ const COPY: Record<"zh" | "en", Copy> = {
     returnToAgents: "返回 Agent 配置",
     returnToSource: "返回来源页",
     refresh: "刷新",
-    loading: "正在整理记忆...",
+    loading: "正在加载记忆...",
     loadFailed: "记忆概览加载失败",
     knowledgeLoadFailed: "知识库工作区加载失败",
     retry: "重试",
@@ -745,6 +753,7 @@ const COPY: Record<"zh" | "en", Copy> = {
     agentMemoryNoAgents: "暂无 Agent",
     agentMemoryNoPrivateMemory: "该 Agent 暂无私有记忆文件",
     agentMemoryNoFileSelected: "选择一个私有记忆文件查看内容",
+    agentMemorySelectPrompt: "选择一个 Agent 查看私有记忆",
     agentMemoryFormalBases: "正式知识库",
     healthOverview: "记忆健康概览",
     affectedRuntimeMemory: "会影响运行的记忆",
@@ -1132,6 +1141,7 @@ const COPY: Record<"zh" | "en", Copy> = {
     agentMemoryNoAgents: "No Agents",
     agentMemoryNoPrivateMemory: "This Agent has no private memory files",
     agentMemoryNoFileSelected: "Select a private memory file to inspect its content",
+    agentMemorySelectPrompt: "Select an Agent to inspect private memory",
     agentMemoryFormalBases: "Formal knowledge bases",
     healthOverview: "Memory health",
     affectedRuntimeMemory: "Runtime-affecting memory",
@@ -3311,7 +3321,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     </nav>
   );
 
-  const renderMemoryList = (pairs: MemoryPair[], emptyText: string, compact = false, selectable = false) => (
+  const renderMemoryList = (pairs: MemoryPair[], emptyText: string, compact = false, selectable = false, fillParent = false) => (
     <MemoryItemListPanel
       pairs={pairs}
       emptyText={emptyText}
@@ -3322,6 +3332,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           : ""
       }
       compact={compact}
+      fillParent={fillParent}
       selectable={selectable}
       activePairKey={activePairKey}
       selectedMemoryKeys={selectedMemoryKeySet}
@@ -3496,7 +3507,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           id: card.id,
           title: card.title,
           count: pairs.length,
-          memoryList: renderMemoryList(pairs, copy.noMatches, true),
+          memoryList: renderMemoryList(pairs, copy.noMatches, true, false, true),
         };
       })}
     />
@@ -3546,7 +3557,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       flatVisibleItemCount={flatVisibleItems.length}
       showRefreshNotice={showRefreshNotice}
       refreshErrorText={overviewQuery.error instanceof Error ? overviewQuery.error.message : String(overviewQuery.error)}
-      memoryList={renderMemoryList(flatVisibleItems, copy.noMatches, true)}
+      memoryList={renderMemoryList(flatVisibleItems, copy.noMatches, true, false, true)}
     />
   );
 
@@ -3623,68 +3634,26 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     return (
       <MemoryAgentMemoryPanel
         copy={copy}
-        summary={{
-          agentCount: summary?.agentCount ?? 0,
-          privateFileCount: summary?.privateFileCount ?? 0,
-          privateByteText: formatByteCount(summary?.privateByteCount ?? 0),
-          formalKnowledgeItemCount: summary?.formalKnowledgeItemCount ?? 0,
-          formalKnowledgeBaseCount: summary?.formalKnowledgeBaseCount ?? 0,
-          warningCount: (summary as any)?.warnings?.length ?? summary?.warningCount ?? 0,
-        }}
+        summary={toAgentMemorySummaryView(summary, formatByteCount(summary?.privateByteCount ?? 0))}
         searchText={searchText}
         onSearchTextChange={setSearchText}
-        agents={visibleAgents.map((agent: any) => ({
-          id: agent.agentId,
-          name: agent.displayName || agent.agentId,
-          status: agent.status,
-          origin: agent.agentCode || agent.agentId,
-          path: agent.privateMemoryRoot || agent.workspacePath,
-          privateFileCount: agent.fileCount ?? agent.privateFileCount ?? 0,
-          formalKnowledgeBaseCount: agent.knowledgeSummary?.knowledgeBaseCount ?? agent.formalKnowledgeBaseCount ?? 0,
-          hasPrivateMemory: agent.hasPrivateMemory,
-          active: agent.agentId === selectedAgentMemoryAgentId,
-        }))}
-        selectedAgent={
-          (selectedAgentMemoryAgent
-            ? {
-              name: selectedAgentMemoryAgent.displayName || selectedAgentMemoryAgent.agentId,
-              privateRoot: selectedAgentMemoryAgent.privateMemoryRoot,
-              workspacePath: selectedAgentMemoryAgent.workspacePath,
-              fileCount: (selectedAgentMemoryAgent as any).fileCount ?? 0,
-              formalKnowledgeItemCount: (selectedAgentMemoryAgent as any).knowledgeSummary?.itemCount ?? 0,
-              formalKnowledgeBaseCount: (selectedAgentMemoryAgent as any).knowledgeSummary?.knowledgeBaseCount ?? 0,
-              knowledgeError: (selectedAgentMemoryAgent as any).knowledgeSummary?.error,
-              knowledgeBases: ((selectedAgentMemoryAgent as any).knowledgeSummary?.knowledgeBases ?? []).map((base: any) => ({
-                id: base.scopedKnowledgeBaseId || base.knowledgeBaseId,
-                label: base.name || base.knowledgeBaseId,
-                title: base.scopedKnowledgeBaseId || base.knowledgeBaseId,
-              })),
-            }
-            : null) as any
-        }
+        agents={visibleAgents.map((agent) => toAgentMemoryAgentView(agent, selectedAgentMemoryAgentId))}
+        selectedAgent={selectedAgentMemoryAgent ? toSelectedAgentMemoryView(selectedAgentMemoryAgent) : null}
         selectedItem={
-          (selectedAgentMemoryItem
-            ? {
-              title: selectedAgentMemoryItem.relativePath || selectedAgentMemoryItem.title || "",
-              path: selectedAgentMemoryItem.path,
-              sizeText: formatByteCount(selectedAgentMemoryItem.sizeBytes ?? 0),
-              contentType: selectedAgentMemoryItem.contentType,
-              contentLanguage: contentLanguage(selectedAgentMemoryItem.contentType || ""),
-              content: selectedAgentMemoryItem.content,
-            }
-            : null) as any
+          selectedAgentMemoryItem
+            ? toSelectedAgentMemoryItemView(
+              selectedAgentMemoryItem,
+              formatByteCount(selectedAgentMemoryItem.sizeBytes ?? 0),
+              contentLanguage(selectedAgentMemoryItem.contentType || ""),
+            )
+            : null
         }
-        items={selectedAgentMemoryItems.map((item: any) => ({
-          id: item.id,
-          title: item.relativePath || item.title || "",
-          updatedAtText: formatTimestamp(item.updatedAt, lang),
-          path: item.path,
-          summary: item.summary,
-          sizeText: formatByteCount(item.sizeBytes ?? 0),
-          contentType: item.contentType,
-          truncated: item.contentTruncated,
-          active: item.id === selectedAgentMemoryItem?.id,
-        }))}
+        items={selectedAgentMemoryItems.map((item) => toAgentMemoryItemView(
+          item,
+          selectedAgentMemoryItem?.id ?? "",
+          formatTimestamp(item.updatedAt ?? "", lang),
+          formatByteCount(item.sizeBytes ?? 0),
+        ))}
         inventoryPending={agentMemoryInventoryQuery.isPending}
         inventoryErrorText={agentMemoryInventoryQuery.error instanceof Error ? agentMemoryInventoryQuery.error.message : agentMemoryInventoryQuery.error ? String(agentMemoryInventoryQuery.error) : ""}
         detailPending={agentMemoryDetailQuery.isPending && Boolean(selectedAgentMemoryAgentId)}
@@ -4092,8 +4061,8 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               warningStrip={createWarningStrip()}
               reviewQueue={reviewQueuePanel}
               projectMemoryQueue={projectMemoryQueuePanel}
-              runtimeMemoryList={renderMemoryList(runtimePairs, copy.noRuntimeMemory, true)}
-              reviewMemoryList={renderMemoryList(reviewPairs, copy.noIssues, true)}
+              runtimeMemoryList={renderMemoryList(runtimePairs, copy.noRuntimeMemory, true, false, true)}
+              reviewMemoryList={renderMemoryList(reviewPairs, copy.noIssues, true, false, true)}
             />
           )
           : (

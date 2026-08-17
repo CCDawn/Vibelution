@@ -39,7 +39,9 @@ export async function decideShutdown(input: {
   return {
     allowed: true,
     reason: "no_active_work",
-    stopPythonLauncher: input.ownershipMode === "started"
+    // Leftover Python :8765 is not a second product control plane. Reap it on
+    // every approved quit, including attached bootstraps that never spawned it.
+    stopPythonLauncher: true
   };
 }
 
@@ -60,6 +62,47 @@ export async function executeShutdownAuthorizationBoundary(input: {
     await input.failOpenAfterApproval(decision, error);
   }
   return decision;
+}
+
+export function isActiveWorkProbeAuthFailure(error: unknown): boolean {
+  const detail = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  return (
+    /(?:^|\D)(?:401|403)(?:\D|$)/.test(detail) ||
+    detail.includes("unauthorized") ||
+    detail.includes("forbidden")
+  );
+}
+
+export function isActiveWorkProbeTransientFailure(error: unknown): boolean {
+  const detail = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  return isActiveWorkProbeAuthFailure(error) || detail.includes("timed out");
+}
+
+export async function resolveQuitActiveWorkStatus(input: {
+  probe: () => Promise<ActiveWorkStatus>;
+  recoverAndRetry?: () => Promise<ActiveWorkStatus>;
+}): Promise<ActiveWorkStatus> {
+  try {
+    return await input.probe();
+  } catch (error) {
+    if (!isActiveWorkProbeTransientFailure(error)) {
+      throw error;
+    }
+    if (input.recoverAndRetry) {
+      try {
+        return await input.recoverAndRetry();
+      } catch (retryError) {
+        if (isActiveWorkProbeAuthFailure(retryError)) {
+          return { active: false, message: "" };
+        }
+        throw retryError;
+      }
+    }
+    if (isActiveWorkProbeAuthFailure(error)) {
+      return { active: false, message: "" };
+    }
+    throw error;
+  }
 }
 
 export async function fetchLauncherActiveWorkStatus(input: {

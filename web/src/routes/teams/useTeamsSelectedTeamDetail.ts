@@ -95,7 +95,9 @@ export function useTeamsSelectedTeamDetail({
       challengeCupResearchTeamSelected
       && !sourceCollectionStandalone
       && researchWorkspaceView !== "source_collection"
-      && researchWorkspaceView !== "knowledge_collection",
+      && researchWorkspaceView !== "knowledge_collection"
+      && researchWorkspaceView !== "workflow"
+      && researchWorkspaceView !== "overview",
   });
   const aiSearchScopeTeamSelected = isAiSearchScopeTeam(selectedTeam);
   const sourceCollectionWorkspaceSelected =

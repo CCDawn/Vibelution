@@ -37,6 +37,7 @@ type MemoryItemListPanelProps = {
   loading: boolean;
   errorText: string;
   compact?: boolean;
+  fillParent?: boolean;
   selectable?: boolean;
   activePairKey: string;
   selectedMemoryKeys: ReadonlySet<string>;
@@ -59,6 +60,7 @@ export function MemoryItemListPanel({
   loading,
   errorText,
   compact = false,
+  fillParent = false,
   selectable = false,
   activePairKey,
   selectedMemoryKeys,
@@ -216,6 +218,13 @@ export function MemoryItemListPanel({
       });
 
   if (compact) {
+    if (fillParent) {
+      return (
+        <div className={`${styles.compactMemoryList} ${styles.compactMemoryListFill}`} role="region" aria-label={copy.selectMemory}>
+          {listItems}
+        </div>
+      );
+    }
     return (
       <PersistedHeightListShell
         layoutId={MEMORY_LIST_HEIGHT_LAYOUT_ID}

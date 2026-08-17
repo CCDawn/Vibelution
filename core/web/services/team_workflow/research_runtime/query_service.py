@@ -396,13 +396,13 @@ def _agent_display_name(agent_id: str) -> str:
     if not agent_id:
         return ""
     try:
-        from core.web.services.agent_directory_service import get_agent
+        from core.web.services.team_service import lookup_agent_display_name_map
 
-        agent = get_agent(agent_id)
-        if isinstance(agent, dict):
-            return str(agent.get("displayName") or agent.get("agentName") or agent_id)
-    except (ImportError, KeyError, OSError, TypeError, ValueError):
-        return agent_id
+        name = str(lookup_agent_display_name_map().get(agent_id) or "").strip()
+        if name:
+            return name
+    except Exception:
+        pass
     return agent_id
 
 

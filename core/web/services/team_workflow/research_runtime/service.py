@@ -112,16 +112,19 @@ def _node_attempt(record: dict[str, Any], node_id: str) -> int:
     return 0
 
 
-def _agent_display_name(agent_id: str) -> str:
+def _agent_display_name_map() -> dict[str, str]:
     try:
-        from core.web.services.agent_directory_service import get_agent
+        from core.web.services.team_service import lookup_agent_display_name_map
 
-        agent = get_agent(agent_id)
-        if isinstance(agent, dict):
-            return str(agent.get("displayName") or agent.get("agentName") or agent_id)
-    except (ImportError, KeyError, OSError, TypeError, ValueError):
-        pass
-    return agent_id
+        return lookup_agent_display_name_map()
+    except Exception:
+        return {}
+
+
+def _agent_display_name(agent_id: str) -> str:
+    if not agent_id:
+        return ""
+    return str(_agent_display_name_map().get(agent_id) or "") or agent_id
 
 
 class ResearchWorkflowError(Exception):
@@ -228,6 +231,7 @@ class ResearchWorkflowRuntimeService:
         meta = self.get_definition(workflow_id)
         definition = build_challenge_cup_workflow_definition()
         layers = self._effective_binding_layers(workflow_id, team_id)
+        names = _agent_display_name_map()
         bindings = []
         for node in definition.nodes:
             if node.actorKind is not ActorKind.AGENT:
@@ -238,7 +242,7 @@ class ResearchWorkflowRuntimeService:
                     "nodeId": node.nodeId,
                     "roleKey": node.primaryRoleKey,
                     "agentId": agent_id,
-                    "displayName": _agent_display_name(agent_id) if agent_id else "",
+                    "displayName": (str(names.get(agent_id) or "") or agent_id) if agent_id else "",
                     "resolvedFrom": resolved_from,
                 }
             )

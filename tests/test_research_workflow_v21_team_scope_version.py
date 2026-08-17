@@ -10,7 +10,6 @@ from core.research.workflow.bindings import AgentBindingLayers
 from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
-from core.web.services import agent_directory_service
 from core.web.services.team_workflow.research_runtime.service import (
     ResearchWorkflowRuntimeService,
     reset_research_workflow_runtime_service_for_tests,
@@ -56,13 +55,14 @@ def test_effective_bindings_include_canonical_agent_display_name(
         lambda _workflow_id, _team_id: SOURCE_BINDING,
     )
     monkeypatch.setattr(
-        agent_directory_service,
-        "get_agent",
-        lambda agent_id: {
-            "agentId": agent_id,
-            "displayName": "资料寻找 Agent",
-        } if agent_id == "agent-source-finder" else None,
+        "core.web.services.team_workflow.research_runtime.service._agent_display_name_map",
+        lambda: {"agent-source-finder": "资料寻找 Agent"},
     )
+
+    def boom_get_agent(*_args, **_kwargs):
+        raise AssertionError("full get_agent must not run")
+
+    monkeypatch.setattr("core.web.services.agent_directory_service.get_agent", boom_get_agent)
 
     payload = service.get_effective_agent_bindings(
         CHALLENGE_CUP_WORKFLOW_ID,

@@ -3,7 +3,9 @@ import { executeApprovedDesktopShellShutdown, withDesktopShellExitTimeout } from
 import {
   decideShutdown,
   executeShutdownAuthorizationBoundary,
-  fetchLauncherActiveWorkStatus
+  fetchLauncherActiveWorkStatus,
+  isActiveWorkProbeAuthFailure,
+  resolveQuitActiveWorkStatus
 } from "../src/shutdown/shutdownCoordinator.js";
 
 describe("decideShutdown", () => {
@@ -20,7 +22,7 @@ describe("decideShutdown", () => {
     });
   });
 
-  it("detaches from attached launcher service without stopping it", async () => {
+  it("reaps leftover Python launcher even when bootstrap mode is attached", async () => {
     await expect(
       decideShutdown({
         ownershipMode: "attached",
@@ -29,11 +31,11 @@ describe("decideShutdown", () => {
     ).resolves.toEqual({
       allowed: true,
       reason: "no_active_work",
-      stopPythonLauncher: false
+      stopPythonLauncher: true
     });
   });
 
-  it("stops only the python launcher service it started itself", async () => {
+  it("reaps leftover Python launcher after a started bootstrap as well", async () => {
     await expect(
       decideShutdown({
         ownershipMode: "started",
@@ -119,6 +121,57 @@ describe("decideShutdown", () => {
     });
     expect(sideEffects).toEqual(["denied"]);
     vi.useRealTimers();
+  });
+});
+
+describe("resolveQuitActiveWorkStatus", () => {
+  it("treats a stale 403 control token as idle after a recovered retry still fails auth", async () => {
+    const calls: string[] = [];
+    await expect(
+      resolveQuitActiveWorkStatus({
+        probe: async () => {
+          calls.push("probe");
+          throw new Error("launcher active-work status request failed: 403");
+        },
+        recoverAndRetry: async () => {
+          calls.push("retry");
+          throw new Error("launcher active-work status request failed: 403");
+        }
+      })
+    ).resolves.toEqual({ active: false, message: "" });
+    expect(calls).toEqual(["probe", "retry"]);
+  });
+
+  it("returns recovered active-work status after a 401 probe", async () => {
+    await expect(
+      resolveQuitActiveWorkStatus({
+        probe: async () => {
+          throw new Error("launcher active-work status request failed: 401");
+        },
+        recoverAndRetry: async () => ({ active: true, message: "1 active work item(s) block lifecycle commands." })
+      })
+    ).resolves.toEqual({
+      active: true,
+      message: "1 active work item(s) block lifecycle commands."
+    });
+  });
+
+  it("retries a timed-out probe but still fails closed on a second timeout", async () => {
+    await expect(
+      resolveQuitActiveWorkStatus({
+        probe: async () => {
+          throw new Error("resolve launcher active work status for quit timed out after 20000ms");
+        },
+        recoverAndRetry: async () => {
+          throw new Error("resolve launcher active work status for quit timed out after 20000ms");
+        }
+      })
+    ).rejects.toThrow(/timed out after 20000ms/);
+  });
+
+  it("classifies launcher 403 as an auth failure rather than unknown unavailability", () => {
+    expect(isActiveWorkProbeAuthFailure(new Error("launcher active-work status request failed: 403"))).toBe(true);
+    expect(isActiveWorkProbeAuthFailure(new Error("status unreachable"))).toBe(false);
   });
 });
 

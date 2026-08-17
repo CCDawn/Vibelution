@@ -496,17 +496,16 @@ def _drop_legacy_chat_state_messages(
                 cleaned_conversations.append(conversation)
                 continue
             try:
-                _materialize_legacy_messages_into_ledger(project_root, conversation)
+                materialized = _materialize_legacy_messages_into_ledger(project_root, conversation)
             except Exception as exc:
                 _debug_logger.warning(
                     f"[ChatState] legacy message materialize failed: {type(exc).__name__}: {exc}"
                 )
-                from core.chat.conversation_ledger import latest_ledger_sequence
-
-                session_id = _conversation_session_id(conversation)
-                if session_id and latest_ledger_sequence(Path(project_root), session_id) <= 0:
-                    cleaned_conversations.append(conversation)
-                    continue
+                cleaned_conversations.append(conversation)
+                continue
+            if not materialized:
+                cleaned_conversations.append(conversation)
+                continue
             conversation.pop("messages", None)
             conversation.pop("legacy_messages_preserved", None)
             conversation.pop("legacyMessagesPreserved", None)
@@ -526,42 +525,106 @@ def _conversation_session_id(conversation: dict[str, Any]) -> str:
     ).strip()
 
 
-def _materialize_legacy_messages_into_ledger(project_root: Path, conversation: dict[str, Any]) -> None:
+def _materialize_legacy_messages_into_ledger(project_root: Path, conversation: dict[str, Any]) -> bool:
     session_id = _conversation_session_id(conversation)
     if not session_id:
-        return
+        return False
     from core.chat.conversation_ledger import (
         EVENT_ASSISTANT_MESSAGE,
         EVENT_USER_MESSAGE,
         append_conversation_event,
-        latest_ledger_sequence,
+        load_conversation_events,
     )
 
-    if latest_ledger_sequence(Path(project_root), session_id) > 0:
-        return
+    turn_id = "legacy-chat-state-import"
+    existing = load_conversation_events(Path(project_root), session_id)
+    legacy_existing = [
+        event
+        for event in existing
+        if event.turn_id == turn_id
+        and event.source == "legacy_chat_state_import"
+        and event.source_kind == "legacy_import"
+        and event.event_type in {EVENT_USER_MESSAGE, EVENT_ASSISTANT_MESSAGE}
+    ]
     raw_messages = conversation.get("messages")
     if not isinstance(raw_messages, list):
-        return
-    turn_id = "legacy-chat-state-import"
+        return bool(existing) and not legacy_existing
+
+    expected: list[tuple[str, str, str]] = []
     for item in raw_messages:
         if not isinstance(item, dict):
-            continue
+            return False
         role = str(item.get("role") or "").strip().lower()
         if role not in {"user", "assistant"}:
-            continue
+            return False
         content = str(item.get("content") or "")
         event_type = EVENT_USER_MESSAGE if role == "user" else EVENT_ASSISTANT_MESSAGE
+        expected.append((event_type, content, str(item.get("timestamp") or "").strip()))
+
+    if existing and not legacy_existing:
+        # A canonical ledger already owns this session. Never let the leftover
+        # blob overwrite or append behind it.
+        return True
+    if len(legacy_existing) != len(existing) or len(legacy_existing) > len(expected):
+        # A partial legacy prefix mixed with other facts is ambiguous. Keep the
+        # source blob so an operator can reconcile it without losing messages.
+        return False
+
+    declared_total: int | None = None
+    complete_markers = bool(legacy_existing)
+    marker_prefix = "legacy-chat-state-import:"
+    for position, event in enumerate(legacy_existing, start=1):
+        marker = str(event.correlation_id or "")
+        if not marker.startswith(marker_prefix):
+            complete_markers = False
+            break
+        try:
+            ordinal_text, total_text = marker.removeprefix(marker_prefix).split("/", 1)
+            ordinal = int(ordinal_text)
+            total = int(total_text)
+        except (TypeError, ValueError):
+            complete_markers = False
+            break
+        if (
+            ordinal != position
+            or total < position
+            or (declared_total is not None and total != declared_total)
+        ):
+            complete_markers = False
+            break
+        declared_total = total
+    if complete_markers and declared_total is not None:
+        if len(legacy_existing) == declared_total:
+            # This ledger already completed an earlier import. A leftover blob
+            # reappearing later must not replace or extend canonical history.
+            return True
+        if declared_total != len(expected):
+            return False
+
+    for index, event in enumerate(legacy_existing):
+        expected_type, expected_content, expected_timestamp = expected[index]
+        if event.event_type != expected_type or str(event.payload.get("content") or "") != expected_content:
+            return False
+        if expected_timestamp and event.timestamp != expected_timestamp:
+            return False
+
+    for index, (event_type, content, timestamp) in enumerate(
+        expected[len(legacy_existing):],
+        start=len(legacy_existing),
+    ):
         append_conversation_event(
             Path(project_root),
             session_id,
             turn_id,
             event_type,
-            status="recorded" if role == "user" else "completed",
+            status="recorded" if event_type == EVENT_USER_MESSAGE else "completed",
             payload={"content": content},
             source="legacy_chat_state_import",
-            timestamp=str(item.get("timestamp") or "").strip(),
+            timestamp=timestamp,
+            correlation_id=f"legacy-chat-state-import:{index + 1}/{len(expected)}",
             source_kind="legacy_import",
         )
+    return True
 
 
 def _backup_corrupt_chat_state(path: Path, exc: Exception) -> None:

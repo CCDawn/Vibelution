@@ -11,16 +11,28 @@ export type TeamWorkflowResourceDemandInput = {
   researchWorkspaceView: ResearchWorkspaceView | string;
   sourceCollectionWorkspaceSelected: boolean;
   selectedSourceCollectionStageId: SourceCollectionStageModuleId | string | null | undefined;
+  challengeCupResearchTeamSelected?: boolean;
 };
 
 export type TeamWorkflowResourceDemand = {
+  processCanvasHome: boolean;
   sourceCollectionNeedsCandidateList: boolean;
+  teamWorkflowOrchestrationEnabled: boolean;
   teamWorkflowCandidateListEnabled: boolean;
   teamWorkflowGraphEnabled: boolean;
   teamWorkflowKnowledgeIngestionEnabled: boolean;
   teamWorkflowSourceQualityEnabled: boolean;
   researchStageRoundStatusEnabled: boolean;
 };
+
+/** Process-flow canvas is the Challenge Cup home; it must not wait on legacy orchestration. */
+export function isResearchProcessCanvasHome(input: {
+  researchWorkspaceView: ResearchWorkspaceView | string;
+  challengeCupResearchTeamSelected?: boolean;
+}): boolean {
+  return input.researchWorkspaceView === "workflow"
+    || (Boolean(input.challengeCupResearchTeamSelected) && input.researchWorkspaceView === "overview");
+}
 
 export function resolveTeamWorkflowResourceDemand(
   input: TeamWorkflowResourceDemandInput,
@@ -31,12 +43,21 @@ export function resolveTeamWorkflowResourceDemand(
     researchWorkspaceView,
     sourceCollectionWorkspaceSelected,
     selectedSourceCollectionStageId,
+    challengeCupResearchTeamSelected,
   } = input;
 
+  const processCanvasHome = isResearchProcessCanvasHome({
+    researchWorkspaceView,
+    challengeCupResearchTeamSelected,
+  });
   const sourceCollectionNeedsCandidateList = sourceCollectionWorkspaceSelected;
+  const teamWorkflowOrchestrationEnabled = Boolean(
+    effectiveTeamId && researchWorkflowTeamSelected && !processCanvasHome,
+  );
   const teamWorkflowCandidateListEnabled = Boolean(
     effectiveTeamId
     && researchWorkflowTeamSelected
+    && !processCanvasHome
     && (
       researchWorkspaceView === "overview"
       || researchWorkspaceView === "candidates"
@@ -80,11 +101,14 @@ export function resolveTeamWorkflowResourceDemand(
   const researchStageRoundStatusEnabled = Boolean(
     effectiveTeamId
     && researchWorkflowTeamSelected
-    && !sourceCollectionWorkspaceSelected,
+    && !sourceCollectionWorkspaceSelected
+    && !processCanvasHome,
   );
 
   return {
+    processCanvasHome,
     sourceCollectionNeedsCandidateList,
+    teamWorkflowOrchestrationEnabled,
     teamWorkflowCandidateListEnabled,
     teamWorkflowGraphEnabled,
     teamWorkflowKnowledgeIngestionEnabled,
