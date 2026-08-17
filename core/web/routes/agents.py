@@ -87,6 +87,7 @@ from core.web.services.agent_bulk_delete_service import (
     bulk_archive_agents,
     bulk_purge_agents,
 )
+from core.web.services.agent_operation_service import create_agent_from_catalog_request
 from core.web.services.agent_bulk_edit_service import bulk_update_agent_config, bulk_update_agent_prompt_template
 from core.web.services.agent_mode_binding_service import (
     AgentModeBindingError,
@@ -683,98 +684,25 @@ def agent_avatar_upload(agent_id: str, payload: AgentAvatarUploadPayload) -> dic
 )
 def agent_create(payload: AgentCreatePayload) -> dict:
     try:
-        display_name = payload.displayName.strip()
-        llm_bindings = agent_directory_service.normalize_agent_llm_bindings(payload.llmBindings)
-        persona_profile = payload.personaProfile if isinstance(payload.personaProfile, dict) else {}
-        task_profile = payload.taskProfile if isinstance(payload.taskProfile, dict) else {}
-        tool_policy = payload.toolPolicy if isinstance(payload.toolPolicy, dict) else {}
-        _validate_agent_create_payload(
-            display_name=display_name,
-            llm_bindings=llm_bindings,
+        agent = create_agent_from_catalog_request(
+            display_name=payload.displayName,
+            llm_bindings=payload.llmBindings,
             primary_mode=payload.primaryMode,
             role_key=payload.roleKey,
             prompt_template_id=payload.promptTemplateId,
-            persona_profile=persona_profile,
-            task_profile=task_profile,
-            tool_policy=tool_policy,
+            context_compression_policy=payload.contextCompressionPolicy,
+            tool_policy=payload.toolPolicy,
+            persona_profile=payload.personaProfile,
+            task_profile=payload.taskProfile,
+            metadata=payload.metadata,
+            avatar_image_path=payload.avatarImagePath,
+            source="api_agents",
         )
-        metadata = dict(payload.metadata or {})
-        session = session_service.create_chat_session(
-            title=display_name,
-            llm_bindings=llm_bindings,
-            created_by="api_agents",
-            conversation_index_kind=agent_directory_service.CONVERSATION_INDEX_KIND_PERSONAL_AGENT,
-        )
-        agent_id = str(session.get("agentId") or "").strip()
-        agent = get_agent(agent_id) if agent_id else None
-        if not agent:
-            raise AgentDirectoryError("Agent was not created for the direct session.")
-        if metadata:
-            agent = update_agent_instance(agent_id, metadata=metadata)
-        if payload.primaryMode or payload.roleKey or payload.promptTemplateId or payload.contextCompressionPolicy:
-            runtime_policy_updates: dict[str, Any] = {}
-            if payload.contextCompressionPolicy:
-                runtime_policy_updates["context_compression_policy"] = payload.contextCompressionPolicy
-            agent = update_agent_instance(
-                agent_id,
-                llm_bindings=llm_bindings,
-                primary_mode=payload.primaryMode or None,
-                role_key=payload.roleKey or None,
-                prompt_template_id=payload.promptTemplateId or None,
-                **runtime_policy_updates,
-            )
-        if persona_profile:
-            agent = update_agent_instance(agent_id, persona_profile=persona_profile)
-        if task_profile:
-            agent = update_agent_instance(agent_id, task_profile=task_profile)
-        if tool_policy:
-            agent = update_agent_instance(agent_id, tool_policy=tool_policy)
-        avatar_path = str(payload.avatarImagePath or "").strip()
-        if avatar_path:
-            try:
-                agent = update_agent_avatar(agent_id, avatar_image_path=avatar_path)
-            except AgentDirectoryError as exc:
-                raise HTTPException(status_code=422, detail=str(exc)) from exc
         return _with_agent_workspace_cache_invalidated(agent)
     except session_service.SessionValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except AgentDirectoryError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-
-def _validate_agent_create_payload(
-    *,
-    display_name: str,
-    llm_bindings: dict[str, Any],
-    primary_mode: str,
-    role_key: str,
-    prompt_template_id: str,
-    persona_profile: dict[str, Any],
-    task_profile: dict[str, Any],
-    tool_policy: dict[str, Any],
-) -> None:
-    missing: list[str] = []
-    normalized_primary_mode = str(primary_mode or "").strip()
-    is_work_session = normalized_primary_mode in {"", "chat"}
-    if not display_name:
-        missing.append("功能名")
-    if not agent_directory_service.agent_dialogue_model_id({"llmBindings": llm_bindings}):
-        missing.append("对话模型")
-    if not normalized_primary_mode:
-        missing.append("使用位置")
-    if not is_work_session and not str(role_key or "").strip():
-        missing.append("角色键")
-    if not str(prompt_template_id or "").strip():
-        missing.append("提示词")
-    if not is_work_session and not agent_directory_service.agent_persona_profile_has_content(persona_profile):
-        missing.append("人物档案")
-    if not is_work_session and not agent_directory_service.agent_task_profile_has_content(task_profile):
-        missing.append("任务档案")
-    allowed_tools = tool_policy.get("allowedTools") if isinstance(tool_policy, dict) else []
-    if not is_work_session and (not isinstance(allowed_tools, list) or not any(str(item or "").strip() for item in allowed_tools)):
-        missing.append("工具包")
-    if missing:
-        raise AgentDirectoryError("Agent 创建信息不完整，请补齐：" + "、".join(missing) + "。")
 
 
 @router.get(

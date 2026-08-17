@@ -121,6 +121,14 @@ from tools.session_child_tools import (
     create_child_session_tool as _create_child_session_impl,
     list_child_sessions_tool as _list_child_sessions_impl,
 )
+from tools.project_operation_tools import (
+    agent_archive_tool as _agent_archive_impl,
+    agent_create_tool as _agent_create_impl,
+    agent_reset_tool as _agent_reset_impl,
+    session_create_tool as _session_create_impl,
+    session_delete_tool as _session_delete_impl,
+    session_stop_tool as _session_stop_impl,
+)
 from tools.cli_agent_tools import cli_agent_run_tool as _cli_agent_run_impl
 
 def _shell_dialect_block() -> str:
@@ -1524,6 +1532,158 @@ def _build_key_tools() -> List[BaseTool]:
         """
         return _list_child_sessions_impl(parent_session_id=parent_session_id)
 
+    @tool
+    def agent_create_tool(
+        display_name: str,
+        primary_mode: str = "",
+        role_key: str = "",
+        prompt_template_id: str = "",
+        model_id: str = "",
+        llm_bindings_json: str = "",
+        persona_profile_json: str = "",
+        task_profile_json: str = "",
+        tool_policy_json: str = "",
+        metadata_json: str = "",
+        context_compression_policy_json: str = "",
+        avatar_image_path: str = "",
+    ) -> str:
+        """
+        【Agent 创建】按项目治理契约创建新的 Agent（与 POST /api/agents 同语义）。
+
+        chat 模式可使用默认角色/人物/任务/工具策略；非 chat 模式必须显式提供
+        role_key、persona_profile_json、task_profile_json、tool_policy_json。
+
+        Args:
+            display_name: Agent 功能名（必填）
+            primary_mode: 使用位置，chat 为工作会话
+            role_key: 非 chat 必填
+            prompt_template_id: 提示词模板 ID（必填）
+            model_id: 对话模型 ID；也可用 llm_bindings_json 覆盖
+            llm_bindings_json: 可选 LLM 绑定 JSON
+            persona_profile_json: 非 chat 必填的人物档案 JSON
+            task_profile_json: 非 chat 必填的任务档案 JSON
+            tool_policy_json: 非 chat 必填的工具策略 JSON
+            metadata_json: 可选元数据 JSON
+            context_compression_policy_json: 可选上下文压缩策略 JSON
+            avatar_image_path: 可选头像路径
+
+        Returns:
+            JSON，含 ok/status/agentId/directSessionId/agent
+        """
+        return _agent_create_impl(
+            display_name=display_name,
+            primary_mode=primary_mode,
+            role_key=role_key,
+            prompt_template_id=prompt_template_id,
+            model_id=model_id,
+            llm_bindings_json=llm_bindings_json,
+            persona_profile_json=persona_profile_json,
+            task_profile_json=task_profile_json,
+            tool_policy_json=tool_policy_json,
+            metadata_json=metadata_json,
+            context_compression_policy_json=context_compression_policy_json,
+            avatar_image_path=avatar_image_path,
+        )
+
+    @tool
+    def agent_archive_tool(agent_id: str) -> str:
+        """
+        【Agent 归档】归档一个 Agent（非删除），走完整 archive lifecycle。
+
+        受保护 Agent 或存在 queued/running/stopping/paused 关联 Session 时会失败。
+
+        Args:
+            agent_id: 要归档的 Agent ID
+
+        Returns:
+            JSON，含 ok/status/agentId/archiveSummary
+        """
+        return _agent_archive_impl(agent_id=agent_id)
+
+    @tool
+    def agent_reset_tool(
+        agent_id: str,
+        clear_runtime_state: bool = True,
+        reset_direct_session: bool = True,
+        direct_session_id: str = "",
+        reset_persona_profile: bool = False,
+        reset_task_profile: bool = False,
+        reset_tool_policy: bool = False,
+        reset_memory_policy: bool = False,
+        reset_runtime_policy: bool = False,
+    ) -> str:
+        """
+        【Agent 重置】重置 Agent 运行时与策略（高风险，需审批）。
+
+        Args:
+            agent_id: 要重置的 Agent ID
+            clear_runtime_state: 是否清理运行时状态
+            reset_direct_session: 是否重置直连会话
+            direct_session_id: 可选直连会话校验 ID
+            reset_persona_profile: 是否重置人物档案
+            reset_task_profile: 是否重置任务档案
+            reset_tool_policy: 是否重置工具策略
+            reset_memory_policy: 是否重置记忆策略
+            reset_runtime_policy: 是否重置运行时策略
+
+        Returns:
+            JSON，含 ok/status/agentId/resetSummary
+        """
+        return _agent_reset_impl(
+            agent_id=agent_id,
+            clear_runtime_state=clear_runtime_state,
+            reset_direct_session=reset_direct_session,
+            direct_session_id=direct_session_id,
+            reset_persona_profile=reset_persona_profile,
+            reset_task_profile=reset_task_profile,
+            reset_tool_policy=reset_tool_policy,
+            reset_memory_policy=reset_memory_policy,
+            reset_runtime_policy=reset_runtime_policy,
+        )
+
+    @tool
+    def session_create_tool(title: str = "", agent_id: str = "") -> str:
+        """
+        【根会话创建】为已有 Agent 创建新的根 Session，不会隐式创建 Agent。
+
+        agent_id 留空时默认使用当前 Agent runtime 的 agentId；若仍无则失败。
+
+        Args:
+            title: 会话标题
+            agent_id: 可选 Agent ID
+
+        Returns:
+            JSON，含 ok/status/agentId/sessionId/session
+        """
+        return _session_create_impl(title=title, agent_id=agent_id)
+
+    @tool
+    def session_stop_tool(session_id: str, turn_id: str) -> str:
+        """
+        【停止 Session turn】请求停止指定 Session 的当前 turn（必须带 turn_id）。
+
+        Args:
+            session_id: 目标 Session ID
+            turn_id: 当前运行 turn ID（必填，防止无守卫停止）
+
+        Returns:
+            JSON，含 ok/status/sessionId/turnId/session
+        """
+        return _session_stop_impl(session_id=session_id, turn_id=turn_id)
+
+    @tool
+    def session_delete_tool(session_id: str) -> str:
+        """
+        【Session 删除】删除一个 Session（高风险，需审批）。
+
+        Args:
+            session_id: 要删除的 Session ID
+
+        Returns:
+            JSON，含 ok/status/sessionId/deletedSessionId
+        """
+        return _session_delete_impl(session_id=session_id)
+
     # ── 后台任务工具 ──────────────────────────────────────────────────────
 
     @tool
@@ -2657,6 +2817,12 @@ def _build_key_tools() -> List[BaseTool]:
         plan_update_tool,
         create_child_session_tool,
         list_child_sessions_tool,
+        agent_create_tool,
+        agent_archive_tool,
+        agent_reset_tool,
+        session_create_tool,
+        session_stop_tool,
+        session_delete_tool,
         session_reference_query_tool,
         # 后台任务
         task_start_tool,

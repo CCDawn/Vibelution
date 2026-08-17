@@ -332,6 +332,12 @@ def test_selector_matches_memory_cleanup_and_tool_registry_services():
     assert rule_ids == {"memory-cleanup", "tool-registry"}
     assert any("tests/test_memory_cleanup_service.py" in command for command in result["commands"])
     assert any("tests/test_tool_registry_service.py" in command for command in result["commands"])
+    assert any(
+        "tests/prompt_debugger.py" in command
+        and "--suite" in command
+        and "--quick" in command
+        for command in result["commands"]
+    )
     assert len(result["commands"]) == len(set(result["commands"]))
 
 

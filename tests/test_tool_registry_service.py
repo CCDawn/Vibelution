@@ -695,6 +695,37 @@ def test_tool_test_runs_safe_builtin_inside_selected_agent_runtime(tmp_path, mon
     }
 
 
+def test_project_operation_tools_have_governed_registry_metadata(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
+
+    payload = registry.get_tool_registry()
+    descriptors = {item["name"]: item for item in payload["descriptors"]}
+    bundles = {item["bundleId"]: item for item in payload["toolBundles"]}
+    project_operation_tools = (
+        "agent_create_tool",
+        "agent_archive_tool",
+        "agent_reset_tool",
+        "session_create_tool",
+        "session_stop_tool",
+        "session_delete_tool",
+    )
+
+    for tool_name in project_operation_tools:
+        item = next(entry for entry in payload["tools"] if entry["name"] == tool_name)
+        descriptor = descriptors[tool_name]
+        assert item["category"] == "agent_collaboration"
+        assert item["permissionTier"] == "high"
+        assert tool_name in bundles["collaboration"]["toolNames"]
+        if tool_name in {"agent_create_tool", "session_create_tool", "session_stop_tool"}:
+            assert descriptor["risk"] == "write"
+            assert descriptor["approval"] == "on_request"
+            assert descriptor["concurrency"] == "serialized"
+        else:
+            assert descriptor["risk"] == "destructive"
+            assert descriptor["approval"] == "always"
+            assert descriptor["concurrency"] == "serialized"
+
+
 @pytest.mark.slow
 def test_builtin_tool_test_times_out_without_waiting_for_slow_tool(tmp_path, monkeypatch):
     monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
