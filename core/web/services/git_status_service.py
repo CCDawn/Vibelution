@@ -25,6 +25,9 @@ MAX_STATUS_LIMIT = 500
 # (each cold status can spawn many git processes and flash consoles on Windows).
 GIT_STATUS_SNAPSHOT_CACHE_TTL_SECONDS = 45.0
 GIT_STATUS_METADATA_CACHE_TTL_SECONDS = 120.0
+# Utility menu polls ~6s; only emit read-path scenes for slow, failed, or truncated results.
+GIT_READ_SLOW_THRESHOLD_MS = 2000.0
+GIT_READ_ERROR_MAX_CHARS = 240
 DEFAULT_COMMIT_LIMIT = 20
 MAX_COMMIT_LIMIT = 60
 STATUS_LOCAL_COMMIT_LIMIT = 5
@@ -81,6 +84,72 @@ def _record_git_scene_event(
     )
 
 
+def _truncate_git_read_error(error: str) -> str:
+    text = str(error or "").strip()
+    if len(text) <= GIT_READ_ERROR_MAX_CHARS:
+        return text
+    return text[:GIT_READ_ERROR_MAX_CHARS] + "..."
+
+
+def _safe_git_path_for_log(path: str) -> str:
+    text = str(path or "").strip().replace("\\", "/")
+    if not text:
+        return ""
+    posix_path = PurePosixPath(text)
+    if _WINDOWS_DRIVE_PATH_PATTERN.match(text) or posix_path.is_absolute() or text.startswith("//"):
+        return posix_path.name[:GIT_READ_ERROR_MAX_CHARS]
+    return text[:GIT_READ_ERROR_MAX_CHARS]
+
+
+def _maybe_record_git_read_event(
+    family: str,
+    *,
+    elapsed_ms: float,
+    available: bool,
+    truncated: bool = False,
+    cache_hit: bool = False,
+    fields: dict[str, Any] | None = None,
+    error: str = "",
+) -> None:
+    slow = elapsed_ms >= GIT_READ_SLOW_THRESHOLD_MS
+    failed = not available
+    if cache_hit and not slow:
+        return
+    if not (failed or truncated or slow):
+        return
+    phase = family.split(".", 1)[-1] if family.startswith("git.") else "read"
+    payload_fields = {
+        "elapsedMs": round(elapsed_ms, 2),
+        "truncated": bool(truncated),
+        "cacheHit": bool(cache_hit),
+        "available": bool(available),
+        **(fields or {}),
+    }
+    error_text = _truncate_git_read_error(error)
+    if error_text:
+        payload_fields["error"] = error_text
+    if failed:
+        _record_git_scene_event(
+            phase,
+            f"{family}.failed",
+            message=f"Git {phase} read failed.",
+            level="error",
+            outcome="failed",
+            fields=payload_fields,
+            lifecycle=False,
+        )
+        return
+    _record_git_scene_event(
+        phase,
+        f"{family}.loaded",
+        message=f"Git {phase} read was slow or truncated.",
+        level="warning",
+        outcome="truncated" if truncated else "slow",
+        fields=payload_fields,
+        lifecycle=False,
+    )
+
+
 def _monotonic() -> float:
     return time.monotonic()
 
@@ -91,7 +160,7 @@ def _clear_git_status_cache() -> None:
         _GIT_STATUS_METADATA_CACHE.clear()
 
 
-def _cached_working_tree_snapshot(service: Any) -> Any:
+def _cached_working_tree_snapshot(service: Any) -> tuple[Any, bool]:
     cache_key = str(id(service))
     now = _monotonic()
     with _GIT_STATUS_CACHE_LOCK:
@@ -99,7 +168,7 @@ def _cached_working_tree_snapshot(service: Any) -> Any:
         cached_at = float(_GIT_STATUS_SNAPSHOT_CACHE.get("cached_at") or 0.0)
         cached_snapshot = _GIT_STATUS_SNAPSHOT_CACHE.get("snapshot")
         if cached_key == cache_key and cached_snapshot is not None and now - cached_at <= GIT_STATUS_SNAPSHOT_CACHE_TTL_SECONDS:
-            return copy.deepcopy(cached_snapshot)
+            return copy.deepcopy(cached_snapshot), True
 
     snapshot = service.scan_working_tree(store=False)
     with _GIT_STATUS_CACHE_LOCK:
@@ -111,7 +180,7 @@ def _cached_working_tree_snapshot(service: Any) -> Any:
                 "snapshot": copy.deepcopy(snapshot),
             }
         )
-    return snapshot
+    return snapshot, False
 
 
 def _cached_git_status_metadata(service: Any, snapshot: Any) -> dict[str, Any]:
@@ -334,154 +403,253 @@ def update_git_commit_message_prompt(prompt: str) -> dict[str, Any]:
 def get_git_status(limit: int | None = DEFAULT_STATUS_LIMIT) -> dict[str, Any]:
     """Return a compact, read-only view of the current repository state."""
 
-    service = get_git_memory_service()
-    snapshot = _cached_working_tree_snapshot(service)
-    metadata = _cached_git_status_metadata(service, snapshot)
-    head_rev = str(metadata.get("headRev") or getattr(snapshot, "base_rev", "") or "").strip()
-    branch = str(metadata.get("branch") or "").strip()
-    files = [_file_payload(_object_payload(item)) for item in snapshot.files]
-    counts = _status_counts(files)
-    dirty = bool(files)
-    visible_files = _limit_files(files, limit)
-    upstream = metadata.get("upstream") if isinstance(metadata.get("upstream"), dict) else _empty_upstream()
-    local_commits = metadata.get("localCommits") if isinstance(metadata.get("localCommits"), dict) else _empty_local_commits()
-    worktrees = metadata.get("worktrees") if isinstance(metadata.get("worktrees"), dict) else _empty_worktrees()
-    status_level = _status_level(snapshot, counts, upstream, worktrees)
-
-    return {
-        "available": bool(snapshot.available),
-        "error": snapshot.error or "",
-        "branch": branch,
-        "headRev": head_rev or snapshot.base_rev or "",
-        "headRevShort": _short_rev(head_rev or snapshot.base_rev),
-        "upstream": upstream,
-        "snapshotId": snapshot.snapshot_id,
-        "createdAt": snapshot.created_at,
-        "dirty": dirty,
-        "requiresAttention": status_level not in {"clean", "unavailable"},
-        "statusLevel": status_level,
-        "summary": _summary(snapshot, counts, upstream=upstream, worktrees=worktrees),
-        "counts": counts,
-        "localCommits": local_commits,
-        "worktrees": worktrees,
-        "files": visible_files,
-        "totalFiles": len(files),
-        "truncated": len(visible_files) < len(files),
-    }
+    started = time.perf_counter()
+    cache_hit = False
+    try:
+        service = get_git_memory_service()
+        snapshot, cache_hit = _cached_working_tree_snapshot(service)
+        metadata = _cached_git_status_metadata(service, snapshot)
+        head_rev = str(metadata.get("headRev") or getattr(snapshot, "base_rev", "") or "").strip()
+        branch = str(metadata.get("branch") or "").strip()
+        files = [_file_payload(_object_payload(item)) for item in snapshot.files]
+        counts = _status_counts(files)
+        dirty = bool(files)
+        visible_files = _limit_files(files, limit)
+        upstream = metadata.get("upstream") if isinstance(metadata.get("upstream"), dict) else _empty_upstream()
+        local_commits = metadata.get("localCommits") if isinstance(metadata.get("localCommits"), dict) else _empty_local_commits()
+        worktrees = metadata.get("worktrees") if isinstance(metadata.get("worktrees"), dict) else _empty_worktrees()
+        status_level = _status_level(snapshot, counts, upstream, worktrees)
+        payload = {
+            "available": bool(snapshot.available),
+            "error": snapshot.error or "",
+            "branch": branch,
+            "headRev": head_rev or snapshot.base_rev or "",
+            "headRevShort": _short_rev(head_rev or snapshot.base_rev),
+            "upstream": upstream,
+            "snapshotId": snapshot.snapshot_id,
+            "createdAt": snapshot.created_at,
+            "dirty": dirty,
+            "requiresAttention": status_level not in {"clean", "unavailable"},
+            "statusLevel": status_level,
+            "summary": _summary(snapshot, counts, upstream=upstream, worktrees=worktrees),
+            "counts": counts,
+            "localCommits": local_commits,
+            "worktrees": worktrees,
+            "files": visible_files,
+            "totalFiles": len(files),
+            "truncated": len(visible_files) < len(files),
+        }
+    except Exception as exc:
+        _maybe_record_git_read_event(
+            "git.status",
+            elapsed_ms=(time.perf_counter() - started) * 1000,
+            available=False,
+            cache_hit=cache_hit,
+            error=str(exc),
+            fields={"errorType": type(exc).__name__},
+        )
+        raise
+    _maybe_record_git_read_event(
+        "git.status",
+        elapsed_ms=(time.perf_counter() - started) * 1000,
+        available=bool(payload.get("available")),
+        truncated=bool(payload.get("truncated")),
+        cache_hit=cache_hit,
+        error=str(payload.get("error") or ""),
+        fields={
+            "totalFiles": int(payload.get("totalFiles") or 0),
+            "statusLevel": str(payload.get("statusLevel") or ""),
+        },
+    )
+    return payload
 
 
 def get_git_commits(limit: int = DEFAULT_COMMIT_LIMIT) -> dict[str, Any]:
-    service = get_git_memory_service()
-    available, error = service.is_git_available()
-    if not available:
-        return {"available": False, "error": error or "git unavailable", "commits": []}
-
-    safe_limit = max(1, min(int(limit or DEFAULT_COMMIT_LIMIT), MAX_COMMIT_LIMIT))
-    result = _safe_run_git(
-        service,
-        [
-            "log",
-            f"--max-count={safe_limit}",
-            "--date=iso-strict",
-            "--pretty=format:%H%x1f%h%x1f%aN%x1f%aI%x1f%s",
-        ],
+    started = time.perf_counter()
+    try:
+        service = get_git_memory_service()
+        available, error = service.is_git_available()
+        if not available:
+            payload = {"available": False, "error": error or "git unavailable", "commits": []}
+        else:
+            safe_limit = max(1, min(int(limit or DEFAULT_COMMIT_LIMIT), MAX_COMMIT_LIMIT))
+            result = _safe_run_git(
+                service,
+                [
+                    "log",
+                    f"--max-count={safe_limit}",
+                    "--date=iso-strict",
+                    "--pretty=format:%H%x1f%h%x1f%aN%x1f%aI%x1f%s",
+                ],
+            )
+            if result is None or result.returncode != 0:
+                payload = {
+                    "available": False,
+                    "error": _git_error(result) or "git log failed",
+                    "commits": [],
+                }
+            else:
+                commits = _parse_commit_lines(result.stdout)
+                payload = {"available": True, "error": "", "commits": commits}
+    except Exception as exc:
+        _maybe_record_git_read_event(
+            "git.commits",
+            elapsed_ms=(time.perf_counter() - started) * 1000,
+            available=False,
+            error=str(exc),
+            fields={"errorType": type(exc).__name__},
+        )
+        raise
+    _maybe_record_git_read_event(
+        "git.commits",
+        elapsed_ms=(time.perf_counter() - started) * 1000,
+        available=bool(payload.get("available")),
+        error=str(payload.get("error") or ""),
+        fields={"commitCount": len(payload.get("commits") or [])},
     )
-    if result is None or result.returncode != 0:
-        return {
-            "available": False,
-            "error": _git_error(result) or "git log failed",
-            "commits": [],
-        }
-
-    commits = _parse_commit_lines(result.stdout)
-    return {"available": True, "error": "", "commits": commits}
+    return payload
 
 
 def get_git_file_diff(path: str) -> dict[str, Any]:
-    service = get_git_memory_service()
-    normalized_path = _normalize_git_path(path)
-    available, error = service.is_git_available()
-    if not available:
-        return {
-            "available": False,
-            "error": error or "git unavailable",
-            "path": normalized_path,
-            "status": "",
-            "statusLabel": "",
-            "summary": "Git unavailable",
-            "diff": "",
-            "content": "",
-            "language": _language_for_path(normalized_path),
-            "truncated": False,
-            "binary": False,
-        }
+    started = time.perf_counter()
+    normalized_path = ""
+    try:
+        service = get_git_memory_service()
+        normalized_path = _normalize_git_path(path)
+        available, error = service.is_git_available()
+        if not available:
+            payload = {
+                "available": False,
+                "error": error or "git unavailable",
+                "path": normalized_path,
+                "status": "",
+                "statusLabel": "",
+                "summary": "Git unavailable",
+                "diff": "",
+                "content": "",
+                "language": _language_for_path(normalized_path),
+                "truncated": False,
+                "binary": False,
+            }
+        else:
+            status_file = _find_status_file(service, normalized_path)
+            staged = _git_stdout(service, ["diff", "--cached", "--no-ext-diff", "--no-color", "--", normalized_path])
+            unstaged = _git_stdout(service, ["diff", "--no-ext-diff", "--no-color", "--", normalized_path])
+            chunks = []
+            if staged:
+                chunks.append(f"# staged\n{staged}".rstrip())
+            if unstaged:
+                chunks.append(f"# unstaged\n{unstaged}".rstrip())
+            diff = "\n\n".join(chunks).strip()
 
-    status_file = _find_status_file(service, normalized_path)
-    staged = _git_stdout(service, ["diff", "--cached", "--no-ext-diff", "--no-color", "--", normalized_path])
-    unstaged = _git_stdout(service, ["diff", "--no-ext-diff", "--no-color", "--", normalized_path])
-    chunks = []
-    if staged:
-        chunks.append(f"# staged\n{staged}".rstrip())
-    if unstaged:
-        chunks.append(f"# unstaged\n{unstaged}".rstrip())
-    diff = "\n\n".join(chunks).strip()
+            content = ""
+            binary = False
+            if not diff and status_file and status_file.get("untracked"):
+                content, binary = _read_untracked_content(normalized_path)
 
-    content = ""
-    binary = False
-    if not diff and status_file and status_file.get("untracked"):
-        content, binary = _read_untracked_content(normalized_path)
+            display = diff or content
+            truncated = len(display) > MAX_DIFF_CHARS
+            if truncated:
+                display = display[:MAX_DIFF_CHARS] + "\n\n... git preview truncated ..."
+            if diff:
+                diff = display
+            else:
+                content = display
 
-    display = diff or content
-    truncated = len(display) > MAX_DIFF_CHARS
-    if truncated:
-        display = display[:MAX_DIFF_CHARS] + "\n\n... git preview truncated ..."
-    if diff:
-        diff = display
-    else:
-        content = display
-
-    status = str(status_file.get("status") if status_file else "").strip()
-    return {
-        "available": True,
-        "error": "",
-        "path": normalized_path,
-        "status": status,
-        "statusLabel": str(status_file.get("statusLabel") if status_file else ""),
-        "summary": _diff_summary(status_file, bool(diff), bool(content), binary),
-        "diff": diff,
-        "content": content,
-        "language": "diff" if diff else _language_for_path(normalized_path),
-        "truncated": truncated,
-        "binary": binary,
-    }
+            status = str(status_file.get("status") if status_file else "").strip()
+            payload = {
+                "available": True,
+                "error": "",
+                "path": normalized_path,
+                "status": status,
+                "statusLabel": str(status_file.get("statusLabel") if status_file else ""),
+                "summary": _diff_summary(status_file, bool(diff), bool(content), binary),
+                "diff": diff,
+                "content": content,
+                "language": "diff" if diff else _language_for_path(normalized_path),
+                "truncated": truncated,
+                "binary": binary,
+            }
+    except Exception as exc:
+        _maybe_record_git_read_event(
+            "git.diff",
+            elapsed_ms=(time.perf_counter() - started) * 1000,
+            available=False,
+            error=str(exc),
+            fields={
+                "errorType": type(exc).__name__,
+                "path": _safe_git_path_for_log(normalized_path or path),
+            },
+        )
+        raise
+    _maybe_record_git_read_event(
+        "git.diff",
+        elapsed_ms=(time.perf_counter() - started) * 1000,
+        available=bool(payload.get("available")),
+        truncated=bool(payload.get("truncated")),
+        error=str(payload.get("error") or ""),
+        fields={
+            "path": _safe_git_path_for_log(str(payload.get("path") or normalized_path)),
+            "binary": bool(payload.get("binary")),
+            "displayChars": len(str(payload.get("diff") or payload.get("content") or "")),
+        },
+    )
+    return payload
 
 
 def get_git_object_detail(kind: str, ref: str, path: str = "") -> dict[str, Any]:
     """Return a read-only Git object/worktree preview for the Git route."""
 
-    service = get_git_memory_service()
+    started = time.perf_counter()
     normalized_kind = str(kind or "").strip().lower()
-    normalized_ref = str(ref or "").strip()
-    available, error = service.is_git_available()
-    if not available:
-        return _git_object_detail_payload(
-            kind=normalized_kind,
-            ref=normalized_ref,
-            path=path,
-            status_label="unavailable",
-            summary="Git unavailable",
-            content=error or "git unavailable",
+    try:
+        service = get_git_memory_service()
+        normalized_ref = str(ref or "").strip()
+        available, error = service.is_git_available()
+        if not available:
+            payload = _git_object_detail_payload(
+                kind=normalized_kind,
+                ref=normalized_ref,
+                path=path,
+                status_label="unavailable",
+                summary="Git unavailable",
+                content=error or "git unavailable",
+                available=False,
+                error=error or "git unavailable",
+            )
+        elif normalized_kind == "commit":
+            payload = _git_commit_detail(service, normalized_ref)
+        elif normalized_kind == "branch":
+            payload = _git_branch_detail(service, normalized_ref)
+        elif normalized_kind == "worktree":
+            payload = _git_worktree_detail(service, normalized_ref, path)
+        else:
+            raise ValueError("Unsupported Git detail kind")
+    except Exception as exc:
+        _maybe_record_git_read_event(
+            "git.object",
+            elapsed_ms=(time.perf_counter() - started) * 1000,
             available=False,
-            error=error or "git unavailable",
+            error=str(exc),
+            fields={
+                "errorType": type(exc).__name__,
+                "kind": normalized_kind,
+                "path": _safe_git_path_for_log(path),
+            },
         )
-
-    if normalized_kind == "commit":
-        return _git_commit_detail(service, normalized_ref)
-    if normalized_kind == "branch":
-        return _git_branch_detail(service, normalized_ref)
-    if normalized_kind == "worktree":
-        return _git_worktree_detail(service, normalized_ref, path)
-    raise ValueError("Unsupported Git detail kind")
+        raise
+    _maybe_record_git_read_event(
+        "git.object",
+        elapsed_ms=(time.perf_counter() - started) * 1000,
+        available=bool(payload.get("available")),
+        truncated=bool(payload.get("truncated")),
+        error=str(payload.get("error") or ""),
+        fields={
+            "kind": str(payload.get("kind") or normalized_kind),
+            "path": _safe_git_path_for_log(str(payload.get("path") or path)),
+        },
+    )
+    return payload
 
 
 def _git_commit_detail(service: Any, ref: str) -> dict[str, Any]:

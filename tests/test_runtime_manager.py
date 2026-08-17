@@ -9532,6 +9532,70 @@ def test_handle_close_workbench_uses_runtime_manager_fast_path(monkeypatch):
     assert succeeded["closeStrategy"] == "runtime_manager_fast_path"
 
 
+def test_force_cleanup_uses_trusted_browser_pid_without_profile_inventory(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    cleanup_calls: list[dict[str, object]] = []
+    profile_checks: list[tuple[int, str]] = []
+
+    def fake_profile_match(pid, *, profile_dir):
+        profile_checks.append((int(pid), str(profile_dir)))
+        return int(pid) == 29999
+
+    monkeypatch.setattr(daemon, "managed_browser_pid_matches_profile", fake_profile_match, raising=False)
+    monkeypatch.setattr(
+        daemon,
+        "terminate_workbench_processes",
+        lambda **kwargs: cleanup_calls.append(dict(kwargs))
+        or {"supported": True, "requested": sorted(kwargs["known_pids"]), "terminated": [], "remaining": []},
+    )
+
+    result = runtime_daemon._force_cleanup_workbench_processes(
+        {
+            "backendPid": 28888,
+            "backendLaunchPid": 27777,
+            "browserWindowPid": 29999,
+            "browserLaunchPid": 26666,
+            "browserProfileDir": "C:/tmp/vibelution-workbench-profile",
+        }
+    )
+
+    assert result["supported"] is True
+    assert profile_checks == [
+        (26666, "C:/tmp/vibelution-workbench-profile"),
+        (29999, "C:/tmp/vibelution-workbench-profile"),
+    ]
+    assert cleanup_calls[0]["known_pids"] == {27777, 28888, 29999}
+    assert cleanup_calls[0]["browser_profile_dir"] == ""
+
+
+def test_force_cleanup_keeps_profile_inventory_fallback_for_untrusted_browser_pids(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    cleanup_calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        daemon,
+        "managed_browser_pid_matches_profile",
+        lambda _pid, *, profile_dir: False,
+    )
+    monkeypatch.setattr(
+        daemon,
+        "terminate_workbench_processes",
+        lambda **kwargs: cleanup_calls.append(dict(kwargs))
+        or {"supported": True, "requested": [], "terminated": [], "remaining": []},
+    )
+
+    runtime_daemon._force_cleanup_workbench_processes(
+        {
+            "backendPid": 28888,
+            "browserWindowPid": 29999,
+            "browserProfileDir": "C:/tmp/vibelution-workbench-profile",
+        }
+    )
+
+    assert cleanup_calls[0]["known_pids"] == {28888}
+    assert cleanup_calls[0]["browser_profile_dir"] == "C:/tmp/vibelution-workbench-profile"
+
+
 def test_handle_close_workbench_uses_light_observation_and_reuses_it(monkeypatch):
     runtime_daemon = daemon.RuntimeManagerDaemon()
     state = {

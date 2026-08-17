@@ -131,11 +131,18 @@ describe("LauncherBranchInstancesPanel contracts", () => {
 
   it("renders one global empty surface for zero items and a distinct recoverable filtered miss", () => {
     expect(panelSource).toContain("<VEmptyState");
+    expect(panelSource).toContain("<VStateSurface");
     expect(panelSource).toContain("labels.globalEmptyTitle");
     expect(panelSource).toContain("labels.globalEmptyHint");
+    expect(panelSource).toContain("labels.listLoadingTitle");
+    expect(panelSource).toContain("正在读取分支实例");
+    expect(panelSource).toContain("Reading branch instances");
+    expect(panelSource).toContain("还没有分支实例");
     expect(panelSource).toContain("const hasAnyItems = items.length > 0");
-    // Table, filters, pagination, and bulk actions are gated behind hasAnyItems.
-    expect(panelSource).toContain("{!hasAnyItems ? (");
+    expect(panelSource).toContain("const showListLoading = listLoading && !hasAnyItems");
+    expect(panelSource).toContain("{showListLoading ? (");
+    expect(panelSource).toContain('tone="loading"');
+    expect(panelSource).toContain("!hasAnyItems ? (");
     expect(panelSource).toContain("labels.filteredEmptyTitle");
     expect(panelSource).toContain("labels.filteredEmptyHint");
     expect(panelSource).toContain("labels.clearSearch");
