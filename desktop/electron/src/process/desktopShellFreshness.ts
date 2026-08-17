@@ -125,6 +125,10 @@ export function thenLifecycleFromDesktopCli(input: {
   return "";
 }
 
+export function shouldDeferWorkbenchOpenUntilLifecycleStart(lifecycleCommand: string): boolean {
+  return REFRESH_BEFORE_LIFECYCLE.has(String(lifecycleCommand || "").trim().toLowerCase());
+}
+
 export function shouldRefreshBeforeLifecycle(
   operation: string,
   input: { isPackaged: boolean; stale: boolean }

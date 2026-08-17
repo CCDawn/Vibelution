@@ -77,6 +77,7 @@ describe("NodeInspectorOpsCard", () => {
     expect(markup).toContain("资料入库");
     expect(markup).toContain("Tokens");
     expect(markup).toContain('data-testid="node-inspector-model-trigger"');
+    expect(markup).toContain("nio-icon-link");
     expect(markup).not.toContain("source_ingestor");
     expect(markup).not.toContain("执行者");
   });

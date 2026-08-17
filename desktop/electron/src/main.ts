@@ -6,6 +6,7 @@ import { performance } from "node:perf_hooks";
 import {
   pinSharedDesktopShellUserData,
   resolveSecondInstanceIntent,
+  shouldRunDesktopWhenReadyHandlers,
   singleInstanceDecision
 } from "./appLock.js";
 import { applyDesktopCliToEnvironment, parseDesktopCliArgs } from "./cli/desktopCli.js";
@@ -90,6 +91,7 @@ import {
   decidePeriodicDesktopShellRefresh,
   inspectDesktopShell,
   scheduleDesktopShellRefresh,
+  shouldDeferWorkbenchOpenUntilLifecycleStart,
   shouldRefreshBeforeLifecycle,
   thenLifecycleFromDesktopCli,
   type DesktopShellStatus
@@ -245,7 +247,13 @@ pinSharedDesktopShellUserData(app, {
 });
 const lockDecision = singleInstanceDecision(app.requestSingleInstanceLock());
 nativeTheme.themeSource = "light";
-if (!desktopCliArgs.smoke && !desktopCliArgs.workbenchCloseCanary && lockDecision.action === "focus_existing") {
+const runPrimaryWhenReady = shouldRunDesktopWhenReadyHandlers({
+  lockAction: lockDecision.action,
+  smoke: desktopCliArgs.smoke,
+  workbenchCloseCanary: desktopCliArgs.workbenchCloseCanary
+});
+if (!runPrimaryWhenReady) {
+  shutdownApproved = true;
   app.quit();
 }
 
@@ -2571,6 +2579,7 @@ async function applyPendingProjectSlot(projectRoot: string): Promise<void> {
   }
 }
 
+if (runPrimaryWhenReady) {
 app.whenReady()
   .then(async () => {
     const paths = createDesktopPathsForApp();
@@ -2685,13 +2694,18 @@ app.whenReady()
     if (pendingProjectRoot) {
       await applyPendingProjectSlot(pendingProjectRoot);
     }
-    if (pendingOpenWorkbenchRequest && !desktopCliArgs.workbenchCloseCanary) {
+    const firstLifecycle = String(desktopCliArgs.lifecycleCommand || "").trim().toLowerCase();
+    const deferWorkbenchOpen = shouldDeferWorkbenchOpenUntilLifecycleStart(firstLifecycle);
+    if (pendingOpenWorkbenchRequest && !desktopCliArgs.workbenchCloseCanary && !deferWorkbenchOpen) {
       pendingOpenWorkbenchRequest = false;
       electronStartupStage = "workbench_window_ready";
       markWorkbenchOpenRequested();
       await windowProvider.openOrFocusWorkbench();
     } else if (!desktopCliArgs.workbenchCloseCanary && !desktopCliArgs.projectRoot) {
       await windowProvider.openLauncher();
+    }
+    if (deferWorkbenchOpen) {
+      pendingOpenWorkbenchRequest = false;
     }
     if (desktopCliArgs.workbenchCloseCanary) {
       if (launcherBootstrap === null) {
@@ -2700,7 +2714,6 @@ app.whenReady()
       await openWorkbenchForCloseCanary(paths, launcherBootstrap, windowProvider);
       return;
     }
-    const firstLifecycle = String(desktopCliArgs.lifecycleCommand || "").trim().toLowerCase();
     if (firstLifecycle && firstLifecycle !== "status" && windowProvider !== null) {
       if (firstLifecycle === "open") {
         pendingOpenWorkbenchRequest = false;
@@ -2739,6 +2752,7 @@ app.whenReady()
     console.error(error instanceof Error ? error.message : String(error));
     app.quit();
   });
+}
 
 app.on("second-instance", (_event, argv) => {
   const secondCli = parseDesktopCliArgs(argv);

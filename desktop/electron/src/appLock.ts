@@ -26,6 +26,17 @@ export function singleInstanceDecision(hasLock: boolean): SingleInstanceDecision
   return hasLock ? { action: "continue_as_primary" } : { action: "focus_existing", reason: "secondary_launch" };
 }
 
+export function shouldRunDesktopWhenReadyHandlers(input: {
+  lockAction: SingleInstanceDecision["action"];
+  smoke: boolean;
+  workbenchCloseCanary?: boolean;
+}): boolean {
+  if (input.smoke || input.workbenchCloseCanary) {
+    return true;
+  }
+  return input.lockAction === "continue_as_primary";
+}
+
 export function shouldPinSharedDesktopShellUserData(options: {
   smoke: boolean;
   workbenchCloseCanary?: boolean;

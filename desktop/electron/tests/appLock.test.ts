@@ -5,6 +5,7 @@ import {
   resolveDesktopShellUserDataRoot,
   resolveSecondInstanceIntent,
   shouldPinSharedDesktopShellUserData,
+  shouldRunDesktopWhenReadyHandlers,
   singleInstanceDecision
 } from "../src/appLock.js";
 import { createDesktopPaths, resolveWorkspaceRuntimeDir } from "../src/paths.js";
@@ -28,6 +29,39 @@ describe("singleInstanceDecision", () => {
 
   it("focuses the existing launcher for secondary launches", () => {
     expect(singleInstanceDecision(false)).toEqual({ action: "focus_existing", reason: "secondary_launch" });
+  });
+});
+
+describe("shouldRunDesktopWhenReadyHandlers", () => {
+  it("keeps smoke and close-canary instances on the whenReady path", () => {
+    expect(
+      shouldRunDesktopWhenReadyHandlers({
+        lockAction: "focus_existing",
+        smoke: true
+      })
+    ).toBe(true);
+    expect(
+      shouldRunDesktopWhenReadyHandlers({
+        lockAction: "focus_existing",
+        smoke: false,
+        workbenchCloseCanary: true
+      })
+    ).toBe(true);
+  });
+
+  it("skips product whenReady on a secondary instance so reap cannot race start", () => {
+    expect(
+      shouldRunDesktopWhenReadyHandlers({
+        lockAction: "focus_existing",
+        smoke: false
+      })
+    ).toBe(false);
+    expect(
+      shouldRunDesktopWhenReadyHandlers({
+        lockAction: "continue_as_primary",
+        smoke: false
+      })
+    ).toBe(true);
   });
 });
 
