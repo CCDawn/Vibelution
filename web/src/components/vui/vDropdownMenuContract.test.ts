@@ -64,7 +64,7 @@ describe("VDropdownMenu contract", () => {
     expect(lifecycleActions).toContain("launcher_route_stop_button");
     expect(tray).toContain("startProject:");
     expect(tray).toContain("stopProject:");
-    expect(tray).toContain("restartProject:");
+    expect(tray).toContain("restartLauncher:");
     expect(tray).toContain("stopAll:");
   });
 });

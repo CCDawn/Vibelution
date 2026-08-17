@@ -193,7 +193,8 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionStylesSource).toContain("min-h-[148px]");
     expect(selfEvolutionStylesSource).toContain("max-h-[180px]");
     expect(selfEvolutionStylesSource).toContain("self-start");
-    expect(selfEvolutionStylesSource).toContain("grid-cols-3");
+    expect(selfEvolutionStylesSource).toContain("grid-cols-[minmax(240px,300px)_minmax(0,1fr)]");
+    expect(selfEvolutionStylesSource).toContain("max-[1180px]:grid-cols-1");
     expect(selfEvolutionStylesSource).toContain("max-[1180px]:min-h-[172px]");
     expect(selfEvolutionStylesSource).toContain("max-[1180px]:max-h-[210px]");
     expect(selfEvolutionStylesSource).not.toContain("min-height: min(520px, 72vh)");
@@ -512,7 +513,8 @@ describe("SelfEvolutionTrack static assets", () => {
   it("keeps the pet companion read-only inside self-evolution", () => {
     expect(selfEvolutionSource).toContain("deriveSelfEvolutionPetCompanionState");
     expect(selfEvolutionSource).toContain("petSelfCompanion");
-    expect(selfEvolutionSource).toContain('fetchJson<PetSummary>("/api/pet/summary")');
+    expect(selfEvolutionSource).toContain("fetchPetSummary");
+    expect(selfEvolutionSource).toContain('from "../api/pet"');
     expect(selfEvolutionSource).not.toContain("/api/pet/actions");
   });
 
