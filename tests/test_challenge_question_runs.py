@@ -107,10 +107,23 @@ def _output(question_number: int = 96, *, approved: bool = False) -> dict:
         for dimension in dimensions
     ]
     return {
-        "schema_version": 1,
-        "catalog_id": "science-125-questions-2021",
-        "question_id": question_id,
-        "question_en": catalog_question["question_en"],
+        "schema_version": 2,
+        "identity": {
+            "catalog_id": "science-125-questions-2021",
+            "question_id": question_id,
+            "question_en": catalog_question["question_en"],
+        },
+        "classification": {
+            "domain": catalog_question["domain"],
+            "specialization_profile_id": "SPEC-COMP-INFO-NEURO-v1",
+            "is_specialty_question": catalog_question["domain"] in {"information_science", "neuroscience"},
+        },
+        "scope": {
+            "theme_id": f"theme-{question_id.lower()}",
+            "campaign_id": f"campaign-{question_id.lower()}",
+            "research_project_id": f"project-{question_id.lower()}",
+            "memory_scope": "same_theme",
+        },
         "run": {
             "run_id": f"run-{question_id.lower()}",
             "started_at": "2026-07-23T00:00:00Z",
@@ -120,7 +133,6 @@ def _output(question_number: int = 96, *, approved: bool = False) -> dict:
             "platform": "aliyun_bailian",
             "invocation_evidence_refs": ["model-evidence-real-1"],
         },
-        "status": status,
         "problem_understanding": {
             "scope": "A bounded scientific interpretation.",
             "subquestions": ["Which code families are distinguishable?"],
@@ -173,14 +185,47 @@ def _output(question_number: int = 96, *, approved: bool = False) -> dict:
                 "human_feedback": "Pending final review.",
             }
         ],
-        "final_summary": {
-            "answer_boundary": "This is a research hypothesis, not a solved neural code.",
-            "selected_hypothesis": "First falsifiable hypothesis.",
-            "research_plan_summary": "Use held-out decoding and controls.",
-            "key_evidence_refs": ["E1", "E2"],
-            "counterevidence_refs": ["E4"],
-            "limitations": ["Public data may not span all circuits."],
-            "next_validation_step": "Run preregistered decoder comparison.",
+        "result_classification": {
+            "status": status,
+            "actual_execution": False,
+            "classification": "proposal_only",
+            "claim_boundary": "A bounded hypothesis and research plan only.",
+            "final_summary": {
+                "answer_boundary": "This is a research hypothesis, not a solved neural code.",
+                "selected_hypothesis": "First falsifiable hypothesis.",
+                "research_plan_summary": "Use held-out decoding and controls.",
+                "key_evidence_refs": ["E1", "E2"],
+                "counterevidence_refs": ["E4"],
+                "limitations": ["Public data may not span all circuits."],
+                "next_validation_step": "Run preregistered decoder comparison.",
+            },
+        },
+        "competition_result_view": {
+            "problem_statement": catalog_question["question_en"],
+            "rationale": "The question supports a falsifiable comparison.",
+            "technical_details": "Use preregistered held-out decoding and controls.",
+            "datasets": {"source": ["Public spike dataset"], "target": ["Versioned analysis dataset"]},
+            "paper_title": "A bounded study of neural spike coding",
+            "paper_abstract": "We compare two falsifiable accounts with controlled decoding.",
+            "methods": ["held-out decoding"],
+            "experiments": ["preregistered decoder comparison"],
+            "results": ["proposal_only"],
+            "references": ["E1", "E2", "E4"],
+        },
+        "collaboration_refs": {
+            "team_id": "research-team",
+            "meeting_digest_ids": [],
+            "knowledge_item_ids": ["E1", "E2", "E4"],
+            "template_version": "challenge-question-v2",
+        },
+        "review": {
+            "human_review_status": human_status,
+            "question_review_digest_ids": [],
+        },
+        "submission": {
+            "eligible": approved,
+            "projection_version": "1.0-review.1",
+            "blockers": [] if approved else ["human_review_pending"],
         },
         "audit": {
             "source_catalog_sha256": "0" * 64,
@@ -369,8 +414,57 @@ def test_get_question_detail_can_select_prior_run_without_active_project_fallbac
     )
 
     assert detail["selectedRunId"] == "sci-096-v1"
-    assert detail["output"]["question_id"] == "SCI-096"
+    assert detail["output"]["identity"]["question_id"] == "SCI-096"
     assert "researchProjectId" not in detail
+
+
+def test_v1_artifact_remains_readable_but_never_enters_formal_summary(tmp_path, monkeypatch):
+    _isolate_store(tmp_path, monkeypatch)
+    legacy_output = {
+        "schema_version": 1,
+        "catalog_id": "science-125-questions-2021",
+        "question_id": "SCI-096",
+        "question_en": "What are the coding principles embedded in neuronal spike trains?",
+        "run": {"run_id": "legacy-sci-096-v1"},
+    }
+    output_hash = challenge_question_runs._output_sha256(legacy_output)
+    artifact_path = tmp_path / "challenge_program" / "question_runs" / "SCI-096" / "legacy-sci-096-v1.json"
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.write_text(json.dumps(legacy_output), encoding="utf-8")
+    store_path = tmp_path / "challenge_program" / "question_runs" / "index.json"
+    store_path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "storeKind": "challenge_question_run_store",
+                "teamId": "research-team",
+                "records": [
+                    {
+                        "recordId": "SCI-096:legacy-sci-096-v1",
+                        "questionId": "SCI-096",
+                        "runId": "legacy-sci-096-v1",
+                        "schemaVersion": 1,
+                        "status": "approved",
+                        "outputSha256": output_hash,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    detail = challenge_question_runs.get_challenge_question_run_detail(
+        "research-team",
+        "SCI-096",
+        run_id="legacy-sci-096-v1",
+    )
+    summary = challenge_question_runs.challenge_question_run_summary("research-team")
+
+    assert detail["output"]["schema_version"] == 1
+    assert detail["output"]["question_id"] == "SCI-096"
+    assert summary["validCandidateCount"] == 0
+    assert summary["completedQuestionIds"] == []
+    assert summary["completedQuestionResults"] == []
 
 
 def test_get_question_detail_fails_closed_for_unknown_question_or_tampered_artifact(tmp_path, monkeypatch):
@@ -467,7 +561,7 @@ def test_five_approved_unique_questions_complete_trial_count(tmp_path, monkeypat
         )
         challenge_question_runs.review_challenge_question_output(
             "research-team",
-            output["question_id"],
+            output["identity"]["question_id"],
             registered["record"]["runId"],
             {
                 "reviewer": "Human Reviewer",
@@ -500,7 +594,7 @@ def test_deferred_h4_review_preserves_revision_requested_decision(tmp_path, monk
 
     response = challenge_question_runs.review_challenge_question_output(
         "research-team",
-        output["question_id"],
+        output["identity"]["question_id"],
         registered["record"]["runId"],
         {
             "reviewer": "Human Reviewer",
@@ -558,7 +652,7 @@ def test_unregistered_model_evidence_cannot_satisfy_official_call_gate(tmp_path,
 def test_catalog_question_text_mismatch_fails_schema_gate(tmp_path, monkeypatch):
     _isolate_store(tmp_path, monkeypatch)
     output = _output()
-    output["question_en"] = "A rewritten question that is not the official catalog wording."
+    output["identity"]["question_en"] = "A rewritten question that is not the official catalog wording."
 
     response = challenge_question_runs.register_challenge_question_output(
         "research-team",
@@ -567,7 +661,7 @@ def test_catalog_question_text_mismatch_fails_schema_gate(tmp_path, monkeypatch)
 
     assert response["record"]["validation"]["schemaValidation"] == "failed"
     assert any(
-        issue["path"] == "question_en"
+        issue["path"] == "identity.question_en"
         for issue in response["record"]["validation"]["schemaIssues"]
     )
 

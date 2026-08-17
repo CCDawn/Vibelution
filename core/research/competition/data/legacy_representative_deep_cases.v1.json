@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "registryKind": "challenge_program_representative_cases",
+  "cases": [
+    {
+      "caseId": "fashion_mnist_predictive_coding",
+      "title": "FashionMNIST 预测编码工程案例",
+      "role": "representative_execution_and_revision_evidence",
+      "internalStatus": "accepted_for_writeup",
+      "projectCompletionStatus": "case_only",
+      "evidenceStatus": "documented_program_fact",
+      "evidenceRefs": [
+        "挑战杯/README.md#5-当前真实进展",
+        ".docs/project-memory/lanes/challenge-cup-research-flow.json"
+      ],
+      "claimBoundary": "仅支持已声明的 FashionMNIST 数据与结构化遮挡实验边界，不证明生物神经机制真实性，也不扩展为跨任务普适结论。"
+    }
+  ]
+}

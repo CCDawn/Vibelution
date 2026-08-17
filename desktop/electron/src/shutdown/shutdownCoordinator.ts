@@ -62,6 +62,47 @@ export async function executeShutdownAuthorizationBoundary(input: {
   return decision;
 }
 
+export function isActiveWorkProbeAuthFailure(error: unknown): boolean {
+  const detail = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  return (
+    /(?:^|\D)(?:401|403)(?:\D|$)/.test(detail) ||
+    detail.includes("unauthorized") ||
+    detail.includes("forbidden")
+  );
+}
+
+export function isActiveWorkProbeTransientFailure(error: unknown): boolean {
+  const detail = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  return isActiveWorkProbeAuthFailure(error) || detail.includes("timed out");
+}
+
+export async function resolveQuitActiveWorkStatus(input: {
+  probe: () => Promise<ActiveWorkStatus>;
+  recoverAndRetry?: () => Promise<ActiveWorkStatus>;
+}): Promise<ActiveWorkStatus> {
+  try {
+    return await input.probe();
+  } catch (error) {
+    if (!isActiveWorkProbeTransientFailure(error)) {
+      throw error;
+    }
+    if (input.recoverAndRetry) {
+      try {
+        return await input.recoverAndRetry();
+      } catch (retryError) {
+        if (isActiveWorkProbeAuthFailure(retryError)) {
+          return { active: false, message: "" };
+        }
+        throw retryError;
+      }
+    }
+    if (isActiveWorkProbeAuthFailure(error)) {
+      return { active: false, message: "" };
+    }
+    throw error;
+  }
+}
+
 export async function fetchLauncherActiveWorkStatus(input: {
   launcherOrigin: string;
   controlToken: string;

@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "manifestKind": "challenge_cup_submission_source_manifest",
+  "sourceCommit": "0123456789abcdef0123456789abcdef01234567",
+  "programContract": {
+    "version": "2.2.0",
+    "coreBehaviorHash": "C3965023488C76DF032130341347915E5EAD5451EE53C2501E75914205EB423A"
+  },
+  "catalogPolicy": {
+    "version": "1.2.0",
+    "corePolicyHash": "D3A8FB5B97D1A4ECAF08798D4CFB283AC56A2563EA434C28EC988D15827EB83E"
+  },
+  "entries": [
+    {
+      "path": "core/research/competition/resources.py",
+      "kind": "source",
+      "sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "sizeBytes": 100,
+      "provenance": "Vibelution project source",
+      "licenseStatus": "project_owned",
+      "requiredAtRuntime": true
+    }
+  ]
+}

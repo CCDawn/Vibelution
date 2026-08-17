@@ -29,6 +29,7 @@ class ExperimentPlanningStatusResponse(BaseModel):
     activePlan: dict[str, Any] | None = None
     plans: list[dict[str, Any]] = Field(default_factory=list)
     lifecycleProjection: dict[str, Any] = Field(default_factory=dict)
+    competitionProgramProjection: dict[str, Any] = Field(default_factory=dict)
     challengeProgramProjection: dict[str, Any] = Field(default_factory=dict)
     hypothesisCandidates: list[dict[str, Any]] = Field(default_factory=list)
     readyHypothesisCandidates: list[dict[str, Any]] = Field(default_factory=list)
