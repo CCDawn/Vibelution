@@ -25,6 +25,7 @@
 - 不记录 secrets、完整 Prompt、大段 diff、完整文件或无界工具输出。
 - 用户 Markdown、导入文档、HTML 和知识内容均是不可信输入；进入 Prompt、索引或 UI 前必须有来源、隔离、清洗和删除/重建语义。
 - **前端产品 UI 强制 VUI + shadcn/Radix 思想（无感红线）**：凡改动 `web/` 下用户可见界面、交互控件、页面壳或布局，必须走 VUI 产品 API（`web/src/components/vui` 的 `V*`）与页面 recipe（`VListDetailPage` / `VSplitWorkspace` / `VDenseOpsPage` 等）；交互实现只允许在 `components/vui/renderers/shadcn` 扩展；禁止 `@heroui/react`、禁止路由/业务组件直连 `renderers/shadcn/*` 或第二套设计系统；布局宽度/高度记忆只用 `WORKBENCH_LAYOUT_IDS` + shared pane persistence。**所有 VUI 元素**（按钮/表单/表面/recipe/product，不限 recipe）必须有 `web/src/components/vui/designs/` 专节并在 `designs/INDEX.md` 登记；新建前检索防冗余。细则见 [development-standard.md §9.1](docs/standards/development-standard.md)、[VUI README](web/src/components/vui/README.md)、[designs/README.md](web/src/components/vui/designs/README.md)；机器门：`vuiShadcnRouteContract.test.ts`、`vuiComponentDesignContract.test.ts`。
+- **写入前必须同时做本地复用评估与仓外成熟方案调研（二者都要做，不是二选一）**：凡会改代码、行为、架构或验证边界的任务，禁止盲目开写。先定位 owning surface 与可复用实现，并评估它是否真的合适——本地能复用 ≠ 本地就是好方案，也 ≠ 可以原样照搬；不够好就要**改造后再复用**，或换更合适的路径。同时对照 GitHub、论文、官方文档/标准等成熟方案，选最合适的再借鉴。深度随分级缩放，两扇门都不得整段跳过。细则见 [development-standard.md §2.2](docs/standards/development-standard.md)。
 - 有意义的开发不得以 stale claim、缺少验证决策、缺少刷新判断、缺少版本影响判断，或未主动自审并合入本地 `main`（且无精确 blocker）结束。
 
 ## 3. Start And Routing
@@ -39,25 +40,27 @@
 | 默认动作 | 每条相关用户消息、在首个广扫 / 下游 skill / 写入前：内部 BRT 门（意图、范围、权限、成功证据、流程重量）→ 再 `route` / `ownership` / 实现 |
 | 可静默 | 唯一合理行为的 `FAST_PATCH` 可 silent/micro，**仍按 BRT 最小门**，不整段跳过技能纪律 |
 | 必须 ALIGN | 意图不清、多义、改 owning surface / 交互 / 数据 / 兼容 / 验收时：先窄 probe，仍不够则一轮对齐问题，禁止带着高影响假设写入 |
-| 禁止 | 不读 BRT 就广扫全仓、叠 process 框架（superpowers / 无请求 TDD 等）、或跳过路由直接改代码 |
+| 禁止 | 不读 BRT 就广扫全仓、叠 process 框架（superpowers / 无请求 TDD 等）、跳过路由直接改代码、把「仓库里已有」当成已验证最优，或不调研不评估就开写 |
 
 细则与分级仍见 [development-standard.md §2](docs/standards/development-standard.md)；加载序见 [docs/guides/README.md](docs/guides/README.md)。
 
 开始非简单任务前：
 
 1. **先 BRT**（本 §3.0）：加载 `ccdawn-brt`，完成意图/分级/owner 选择。
-2. 非平凡任务按 [Agent 开发路由](docs/guides/README.md)：`route.md` 定 READ/EDIT/TEST → `ownership.md` 定落点 → `loop.md` 验证与完成块；细则只下钻 [规范索引](docs/standards/README.md) 相关条。
-3. `STANDARD_TASK`、`HIGH_RISK`、续接或记忆敏感任务先运行 `python scripts/migrate_project_storage.py inventory` 解析 `activePaths.memory`，再读取其中 `INDEX.md` 与 `profile.json`；`.docs/project-memory/` 仅作迁移前只读兼容，禁止新增写入。
-4. 多会话写入先用项目 guard 执行 `status/check/preflight/claim`；完成后 `release`。
-5. Bug、回归、卡住、运行不一致或异常命令：先 [`agent-log-routing.md`](docs/guides/agent-log-routing.md) 的 **`agent_log_context`**，再按 `agentBrief.evidence_refs` 深读。
-6. 非平凡行为、状态、权限、迁移、Prompt、Agent 或运行时变更：BRT 对齐未闭合前不得实现。
-7. 执行 Agent、Session、Inbox 或 Knowledge ACL 操作前，必须先读 [docs/agents/project-operation-catalog.md](docs/agents/project-operation-catalog.md)，并优先使用其中登记的标准受管工具，不得自造工具名，也不得通过裸存储写入绕过生命周期或 ACL。
+2. **再调研门**（§2 红线 / [development-standard.md §2.2](docs/standards/development-standard.md)）：同时评估本地复用（能否原样用、是否要改造后再用、要不要换掉）与仓外成熟方案；未闭合前不得写入。
+3. 非平凡任务按 [Agent 开发路由](docs/guides/README.md)：`route.md` 定 READ/EDIT/TEST → `ownership.md` 定落点 → `loop.md` 验证与完成块；细则只下钻 [规范索引](docs/standards/README.md) 相关条。
+4. `STANDARD_TASK`、`HIGH_RISK`、续接或记忆敏感任务先运行 `python scripts/migrate_project_storage.py inventory` 解析 `activePaths.memory`，再读取其中 `INDEX.md` 与 `profile.json`；`.docs/project-memory/` 仅作迁移前只读兼容，禁止新增写入。
+5. 多会话写入先用项目 guard 执行 `status/check/preflight/claim`；完成后 `release`。
+6. Bug、回归、卡住、运行不一致或异常命令：先 [`agent-log-routing.md`](docs/guides/agent-log-routing.md) 的 **`agent_log_context`**，再按 `agentBrief.evidence_refs` 深读。
+7. 非平凡行为、状态、权限、迁移、Prompt、Agent 或运行时变更：BRT 对齐与调研门未闭合前不得实现。
+8. 执行 Agent、Session、Inbox 或 Knowledge ACL 操作前，必须先读 [docs/agents/project-operation-catalog.md](docs/agents/project-operation-catalog.md)，并优先使用其中登记的标准受管工具，不得自造工具名，也不得通过裸存储写入绕过生命周期或 ACL。
 
 按任务读取：
 
 | 任务 | 文档 |
 | --- | --- |
 | **默认规划 / BRT 路由（每任务）** | 本机 `ccdawn-brt` skill · [development-standard §2](docs/standards/development-standard.md) · [guides 加载序](docs/guides/README.md) |
+| **本地复用评估 + 仓外成熟方案调研（每任务写入前）** | 根 `AGENTS.md` §2 · [development-standard §2.2](docs/standards/development-standard.md) |
 | **Agent 开发路由（任务→路径/命令）** | [guides/README](docs/guides/README.md) · [route](docs/guides/route.md) · [ownership](docs/guides/ownership.md) · [loop](docs/guides/loop.md) · [playbook](docs/guides/playbook.md) |
 | 开发分级、架构、前后端、测试、Git、Launcher、发布、完成条件 | [开发标准](docs/standards/development-standard.md) |
 | Windows 无控制台弹窗（cmd/powershell/WT/OpenConsole）红线 | [开发标准 §8.0](docs/standards/development-standard.md)（根红线见本文件 §2） |
