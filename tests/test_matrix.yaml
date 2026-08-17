@@ -291,7 +291,7 @@ rules:
       - "On Windows, include no-console regression coverage for runtime Git paths."
 
   - id: teams-knowledge
-    description: "Teams, Team Knowledge, Challenge Cup flow, and source collection workflow."
+    description: "Teams, Team Knowledge, and source collection workflow."
     executionLayers:
       - "focused"
       - "local-parallel"
@@ -319,15 +319,12 @@ rules:
       - "web/src/routes/TeamsRoute.styles.ts"
       - "web/src/routes/TeamsRoute.layout.test.ts"
       - "web/src/routes/teams/**"
-      - "挑战杯/**"
     commands:
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_team_workflow_facade_contract.py tests/test_team_workflow_structure_packs.py tests/test_team_service.py tests/test_team_knowledge_service.py -q"
       - ".\\.venv\\Scripts\\python.exe -m pytest tests/test_team_workflow_routes.py tests/test_team_workflow_structure_cases.py tests/test_team_workflow_source_collection_cases.py tests/test_team_workflow_experiment_cases.py tests/test_team_workflow_research_knowledge_cases.py tests/test_team_workflow_remainder_cases.py -n 4 --dist loadfile -q"
       - "node web/node_modules/vitest/vitest.mjs run src/routes/teams TeamsRoute.layout.test.ts"
       - "npm --prefix web run build"
-      - "node 挑战杯/build_research_flow_site.mjs"
     notes:
-      - "Challenge Cup flow changes must regenerate and verify the research flow HTML."
       - "Behavioral cases are split into five domain packs for xdist loadfile; the aggregate test_team_workflow_orchestration_service.py is skipped when those packs are collected."
       - "Single-domain debug: pytest tests/test_team_workflow_source_collection_cases.py -q (or cases_*.py under _support/)."
       - "Team workflow Python tests are not serial-marked; use local-parallel / remote-distributed for speed."
