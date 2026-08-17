@@ -2,6 +2,8 @@ from pathlib import Path
 import json
 import re
 
+import pytest
+
 from core.research.agent_templates import research_default_prompt
 from core.web.services import prompt_template_service
 
@@ -476,7 +478,10 @@ def test_challenge_cup_source_collection_contract_names_source_ingestor_as_inges
     team_service_source = (
         repo_root / "core" / "web" / "services" / "team" / "system_teams.py"
     ).read_text(encoding="utf-8")
-    flow_builder_source = (repo_root / "挑战杯" / "build_research_flow_site.mjs").read_text(encoding="utf-8")
+    flow_builder = repo_root / "挑战杯" / "build_research_flow_site.mjs"
+    if not flow_builder.is_file():
+        pytest.skip("operator-private 挑战杯 materials are absent from a clean clone")
+    flow_builder_source = flow_builder.read_text(encoding="utf-8")
 
     assert "资料入库/知识库管理员" not in agent_directory_source
     assert "source_ingestor 做最终入库审核" in agent_directory_source

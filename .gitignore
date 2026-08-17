@@ -134,6 +134,15 @@ workspace/
 !/experiments/challenge_cup_neural_spike/NOTICE.md
 !/experiments/challenge_cup_neural_spike/fixtures/
 !/experiments/challenge_cup_neural_spike/fixtures/**
+!/experiments/challenge_cup_spike_coding/
+/experiments/challenge_cup_spike_coding/**
+!/experiments/challenge_cup_spike_coding/README.md
+!/experiments/challenge_cup_spike_coding/NOTICE.md
+!/experiments/challenge_cup_spike_coding/data_manifest.example.json
+!/experiments/challenge_cup_spike_coding/sci096_dandi_probe.py
+!/experiments/challenge_cup_spike_coding/sci096_dandi000121_adapter.py
+!/experiments/challenge_cup_spike_coding/sci096_dandi000121_multisession.py
+!/experiments/challenge_cup_spike_coding/sci096_epoch_discrimination.py
 
 # Challenge-cup design docs and preview materials stay local (not pushed to GitHub).
 /docs/archive/plans/2026-08-07/challenge-cup-*

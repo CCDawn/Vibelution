@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "datasetId": "dandi-000140",
+  "sourceUri": "https://dandiarchive.org/dandiset/000140",
+  "redistributionAllowed": false,
+  "note": "Raw NWB files are not tracked. Obtain data only after research authorization and checksum verification.",
+  "files": []
+}
