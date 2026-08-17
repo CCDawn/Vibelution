@@ -54,6 +54,12 @@ function memoryItemListKey(sectionId: string, itemId: string) {
   return `${sectionId}:${itemId}`;
 }
 
+function compactPathLabel(path: string) {
+  const normalized = String(path || "").replace(/\\/g, "/");
+  const name = normalized.split("/").filter(Boolean).pop();
+  return name || path;
+}
+
 export function MemoryItemListPanel({
   pairs,
   emptyText,
@@ -88,6 +94,7 @@ export function MemoryItemListPanel({
         const originLabel = formatSourceOrigin(section, item);
         const updatedAtText = formatTimestamp(item.updatedAt);
         const sourcePath = item.path || item.source;
+        const sourceFileLabel = compactPathLabel(sourcePath);
         const statusLabel = item.inPrompt ? copy.inPrompt : item.agentVisible ? copy.canUse : copy.manualOnly;
         const managedStateBadges = (
           <>
@@ -104,9 +111,9 @@ export function MemoryItemListPanel({
               <strong>{item.title}</strong>
               <span>{updatedAtText}</span>
             </span>
-            <span className={styles.compactItemMeta}>
+            <span className={styles.compactItemMeta} title={sourcePath}>
               <span>{originLabel}</span>
-              <span title={sourcePath}>{sourcePath}</span>
+              <span>{sourceFileLabel}</span>
             </span>
             <span className={styles.compactItemSummary}>{item.summary}</span>
           </>

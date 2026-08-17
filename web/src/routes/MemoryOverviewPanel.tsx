@@ -5,16 +5,21 @@ import styles from "./MemoryOverviewPanel.styles";
 
 export type MemoryOverviewPanelCopy = {
   sectionCount: string;
+  sectionCountHint: string;
   itemCount: string;
+  itemCountHint: string;
   agentVisible: string;
+  agentVisibleHint: string;
   runtimeInjected: string;
+  runtimeInjectedHint: string;
   managedMemory: string;
+  managedMemoryHint: string;
   disabledOrOverridden: string;
+  disabledOrOverriddenHint: string;
   healthOverview: string;
   reviewQueue: string;
   reviewQueueHint: string;
   affectedRuntimeMemory: string;
-  needsReview: string;
 };
 
 export type MemoryOverviewSummary = {
@@ -31,12 +36,10 @@ type MemoryOverviewPanelProps = {
   disabledOrOverriddenCount: number;
   priorityReviewCount: number;
   runtimeMemoryCount: number;
-  reviewMemoryCount: number;
   warningStrip: ReactNode;
   reviewQueue: ReactNode;
   projectMemoryQueue: ReactNode;
   runtimeMemoryList: ReactNode;
-  reviewMemoryList: ReactNode;
 };
 
 export function MemoryOverviewPanel({
@@ -46,24 +49,22 @@ export function MemoryOverviewPanel({
   disabledOrOverriddenCount,
   priorityReviewCount,
   runtimeMemoryCount,
-  reviewMemoryCount,
   warningStrip,
   reviewQueue,
   projectMemoryQueue,
   runtimeMemoryList,
-  reviewMemoryList,
 }: MemoryOverviewPanelProps) {
   return (
     <div className={styles.overviewStack}>
       <VMetricStrip
         ariaLabel={copy.healthOverview}
         metrics={[
-          { id: "sections", label: copy.sectionCount, value: summary?.sectionCount ?? 0 },
-          { id: "items", label: copy.itemCount, value: summary?.itemCount ?? 0 },
-          { id: "visible", label: copy.agentVisible, value: summary?.agentVisibleCount ?? 0 },
-          { id: "runtime", label: copy.runtimeInjected, value: summary?.runtimeInjectedCount ?? 0 },
-          { id: "managed", label: copy.managedMemory, value: managedStateCount },
-          { id: "overrides", label: copy.disabledOrOverridden, value: disabledOrOverriddenCount },
+          { id: "sections", label: copy.sectionCount, value: summary?.sectionCount ?? 0, detail: copy.sectionCountHint },
+          { id: "items", label: copy.itemCount, value: summary?.itemCount ?? 0, detail: copy.itemCountHint },
+          { id: "visible", label: copy.agentVisible, value: summary?.agentVisibleCount ?? 0, detail: copy.agentVisibleHint },
+          { id: "runtime", label: copy.runtimeInjected, value: summary?.runtimeInjectedCount ?? 0, detail: copy.runtimeInjectedHint },
+          { id: "managed", label: copy.managedMemory, value: managedStateCount, detail: copy.managedMemoryHint },
+          { id: "overrides", label: copy.disabledOrOverridden, value: disabledOrOverriddenCount, detail: copy.disabledOrOverriddenHint },
         ]}
       />
 
@@ -87,18 +88,11 @@ export function MemoryOverviewPanel({
           <VPanelHeader
             eyebrow={copy.healthOverview}
             title={copy.affectedRuntimeMemory}
+            tooltip={copy.runtimeInjectedHint}
+            tooltipLabel={`${copy.affectedRuntimeMemory} details`}
             actions={<VChip tone="neutral">{runtimeMemoryCount}</VChip>}
           />
           <div className={styles.reviewQueueScroll}>{runtimeMemoryList}</div>
-        </VSurface>
-
-        <VSurface className={styles.overviewPanel} elevation="panel" tone="rail">
-          <VPanelHeader
-            eyebrow={copy.healthOverview}
-            title={copy.needsReview}
-            actions={<VChip tone="neutral">{reviewMemoryCount}</VChip>}
-          />
-          <div className={styles.reviewQueueScroll}>{reviewMemoryList}</div>
         </VSurface>
       </div>
     </div>

@@ -386,7 +386,10 @@ describe("MemoryRoute layout contract", () => {
     expect(styles.headerActions).toContain("[&_[data-vui=\"button\"]]:max-w-full");
     expect(styles.refreshButton).toContain("shrink-0");
     expect(styles.returnButton).toContain("shrink-0");
-    expect(overviewPanelStyles.overviewGrid).toContain("grid-cols-[repeat(2,minmax(0,1fr))]");
+    expect(overviewPanelStyles.overviewGrid).toContain("grid-cols-1");
+    expect(overviewPanelStyles.overviewGrid).not.toContain("grid-cols-[repeat(2,minmax(0,1fr))]");
+    expect(overviewPanelSource).not.toContain("reviewMemoryList");
+    expect(itemListPanelSource).toContain("function compactPathLabel");
     expect(overviewPanelStyles.reviewQueuePanel).toContain("overflow-hidden");
     expect(overviewPanelStyles.reviewQueuePanel).toContain("grid-rows-[auto_minmax(0,1fr)]");
     expect(overviewPanelStyles.reviewQueueScroll).toContain("overflow-y-auto");
@@ -1132,6 +1135,9 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("reasonInPrompt");
     expect(routeSource).toContain("reasonAgentVisible");
     expect(routeSource).toContain("reasonUserManaged");
+    expect(routeSource).not.toContain("reasons.push(copy.reasonInPrompt)");
+    expect(routeSource).not.toContain("reasons.push(copy.reasonAgentVisible)");
+    expect(routeSource).not.toContain("reasons.push(copy.reasonUserManaged)");
     expect(overviewPanelSource).toContain('tooltip={copy.reviewQueueHint}');
     expect(overviewPanelSource).not.toContain('title={copy.reviewQueueHint}');
     expect(routeSource).not.toContain("<p className={styles.panelLead}>{copy.reviewQueueHint}</p>");
