@@ -227,3 +227,59 @@ def test_runtime_bindings_coerce_bytes_json_and_invalid_ints():
     )
     assert captured["fields"]["toolCount"] == 1
     assert captured["fields"]["coreChatToolsPresent"] == ["read_file_tool"]
+
+
+def test_runtime_bindings_unwrap_envelopes_and_skip_disabled_tools():
+    metadata = _safe_turn_runtime_metadata(
+        {"runtime": {"session_id": "s-env", "run_id": "t-env"}}
+    )
+    assert metadata["sessionId"] == "s-env"
+    assert metadata["runId"] == "t-env"
+
+    binding = _runtime_agent_binding_from_env({"binding": {"agent_id": "agent-env"}})
+    assert binding["agentId"] == "agent-env"
+
+    goal = _normalize_goal_from_chat_history(
+        "1,确认,2,可以",
+        None,
+        {
+            "messages": [
+                {"role": "assistant", "content": {"text": "需求：实现入口"}},
+            ]
+        },
+    )
+    assert goal.startswith("需求：实现入口")
+
+    captured = {}
+    _record_agent_tool_surface_event(
+        {
+            "tools": [
+                {"name": "read_file_tool", "enabled": True},
+                {"name": "write_file_tool", "enabled": False},
+            ]
+        },
+        recorder=lambda *args, **kwargs: captured.setdefault("fields", kwargs.get("fields")),
+    )
+    assert captured["fields"]["toolCount"] == 1
+    assert captured["fields"]["coreChatToolsPresent"] == ["read_file_tool"]
+
+    captured = {}
+    _record_agent_tool_surface_event(
+        {"read_file_tool": {"enabled": False}, "cli_tool": True},
+        recorder=lambda *args, **kwargs: captured.setdefault("fields", kwargs.get("fields")),
+    )
+    assert captured["fields"]["coreChatToolsPresent"] == ["cli_tool"]
+
+    summary = _format_tool_result_replacement_summary(
+        {
+            "replacements": {
+                "items": [
+                    {"toolName": "read_file_tool", "originalChars": 12, "reference": "ref-1"},
+                    {"toolName": "cli_tool", "enabled": False, "originalChars": 99},
+                ]
+            }
+        }
+    )
+    assert "read_file_tool" in summary
+    assert "cli_tool" not in summary
+    assert _stall_signal_threshold_events({"no_new_evidence_steps": True}, {}) == []
