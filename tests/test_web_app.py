@@ -8774,7 +8774,7 @@ def test_session_detail_recovers_stale_running_legacy_messages(tmp_path, monkeyp
     assert payload["runtimeNotices"][-1]["kind"] == "turn_recovered"
     persisted = load_chat_state(tmp_path)["conversations"][0]
     assert persisted["last_turn_status"] == "ready"
-    assert "messages" in persisted
+    assert "messages" not in persisted
 
 
 def test_submit_session_message_persists_lease_conflict_notice_without_llm_call(tmp_path, monkeypatch):

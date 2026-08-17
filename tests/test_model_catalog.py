@@ -19,6 +19,7 @@ from config.paths import resolve_model_catalog_state_path
 from config.runtime_capabilities import (
     apply_model_capability_overrides,
     record_model_image_input_capability,
+    upgrade_legacy_capability_cache_if_needed,
 )
 
 
@@ -515,10 +516,11 @@ def test_runtime_adapter_never_dual_writes_legacy_cache_filename(tmp_path) -> No
     assert state["providers"]["relay"]["models"]["gpt-a"]["capabilities"]["image_input"]["value"] == "supported"
 
 
-def test_runtime_adapter_imports_legacy_cache_via_canonical_alias_once(tmp_path, monkeypatch) -> None:
+def test_one_shot_upgrader_imports_legacy_cache_via_canonical_alias_once(tmp_path, monkeypatch) -> None:
     config_path = tmp_path / "operator" / "config.toml"
     legacy_path = config_path.with_name("model-capabilities.json")
     legacy_path.parent.mkdir(parents=True)
+    config_path.write_text("schema_version = 2\n", encoding="utf-8")
     legacy_path.write_text(
         """{
   "schemaVersion": 1,
@@ -545,9 +547,42 @@ def test_runtime_adapter_imports_legacy_cache_via_canonical_alias_once(tmp_path,
         }
     }
 
+    first = upgrade_legacy_capability_cache_if_needed(public_config, config_path=config_path)
+    second = upgrade_legacy_capability_cache_if_needed(public_config, config_path=config_path)
     updated = apply_model_capability_overrides(public_config)
 
     model = updated["llm"]["model_library"]["relay/gpt-a"]
     assert model["supports_image_input"] is True
     catalog = load_model_catalog_state(config_path.with_name("model-catalog-state.json"))
     assert catalog["metadata"]["legacyCapabilityImportCompleted"] is True
+    assert first == second
+    assert legacy_path.exists()
+
+
+def test_apply_model_capability_overrides_does_not_import_legacy_json(tmp_path, monkeypatch) -> None:
+    config_path = tmp_path / "operator" / "config.toml"
+    legacy_path = config_path.with_name("model-capabilities.json")
+    legacy_path.parent.mkdir(parents=True)
+    config_path.write_text("schema_version = 2\n", encoding="utf-8")
+    legacy_path.write_text(
+        """{
+  "schemaVersion": 1,
+  "models": {
+    "relay/gpt-a": {
+      "capabilities": {
+        "image_input": {"capability_status": "supported"}
+      }
+    }
+  }
+}
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("VIBELUTION_CONFIG_PATH", str(config_path))
+    monkeypatch.delenv("VIBELUTION_MODEL_CAPABILITY_CACHE", raising=False)
+    public_config = {"llm": {"model_library": {"relay/gpt-a": {"model": "gpt-a"}}}}
+
+    updated = apply_model_capability_overrides(public_config)
+
+    assert "supports_image_input" not in updated["llm"]["model_library"]["relay/gpt-a"]
+    assert not config_path.with_name("model-catalog-state.json").exists()

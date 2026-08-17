@@ -101,7 +101,7 @@ def test_v2_effective_config_resolves_provider_credential_without_inline_copies(
     assert not any(provider_id.startswith("inline_") for provider_id in effective.llm.providers)
 
 
-def test_v1_normalization_remains_read_only_and_compatible() -> None:
+def test_v1_normalization_is_no_longer_a_runtime_path() -> None:
     legacy = {
         "llm": {
             "schema_version": 1,
@@ -118,8 +118,15 @@ def test_v1_normalization_remains_read_only_and_compatible() -> None:
             "profiles": {"primary": {"model_ref": "relay_model"}},
         }
     }
-    normalized = normalize_public_config_dict(legacy)
+    with pytest.raises(ValueError, match="schema v2"):
+        normalize_public_config_dict(legacy)
+
+    from config.llm_schema_upgrader import convert_legacy_llm_config
+
+    proposed = convert_legacy_llm_config(legacy)
     assert legacy["llm"]["model_library"]["relay_model"]["provider"]["kind"] == "relay"
+    normalized = normalize_public_config_dict(proposed)
+    assert normalized["llm"]["schema_version"] == 2
     assert normalized["llm"]["profiles"]["primary"]["model"] == "gpt-5.6-luna"
 
 
@@ -579,7 +586,7 @@ def test_v2_config_loader_applies_allowlisted_nested_profile_override(tmp_path) 
     assert effective.llm.get_profile("primary").provider_id == "pixel_relay"
 
 
-def test_v1_config_loader_keeps_profile_scalar_kwargs_behavior(tmp_path) -> None:
+def test_v1_config_loader_upgrades_profile_scalar_kwargs_to_v2(tmp_path) -> None:
     config_path = tmp_path / "config.toml"
     config_path.write_text(
         """
@@ -589,6 +596,7 @@ schema_version = 1
 [llm.providers.default]
 kind = "relay"
 base_url = "https://relay.example/v1"
+api_key_env = "VIBELUTION_LLM_PROVIDER_DEFAULT_API_KEY"
 
 [llm.profiles.primary]
 provider_id = "default"
@@ -597,13 +605,15 @@ model = "gpt-5.6-luna"
         encoding="utf-8",
     )
 
-    effective = ConfigLoader(str(config_path)).load(**{"llm.profiles.primary.temperature": 0.2})
+    effective = ConfigLoader(str(config_path)).load(
+        **{"llm.profiles.primary.overrides.temperature": 0.2}
+    )
 
-    assert effective.llm.schema_version == 1
+    assert effective.llm.schema_version == 2
     assert effective.llm.get_profile("primary").temperature == 0.2
 
 
-def test_v1_config_loader_no_longer_materializes_legacy_provider_api_key(tmp_path, monkeypatch) -> None:
+def test_v1_config_loader_fails_closed_on_unapproved_legacy_api_key_env(tmp_path, monkeypatch) -> None:
     config_path = tmp_path / "config.toml"
     config_path.write_text(
         """
@@ -622,12 +632,12 @@ model = "gpt-5.6-luna"
         encoding="utf-8",
     )
     monkeypatch.setenv("LEGACY_RELAY_KEY", "legacy-materialized-secret")
+    original = config_path.read_bytes()
 
-    effective = ConfigLoader(str(config_path)).load()
+    with pytest.raises(Exception, match="unresolved_conflicts|write_failed_restored|credential"):
+        ConfigLoader(str(config_path)).load()
 
-    assert effective.llm.schema_version == 1
-    assert effective.llm.get_provider(role="primary").api_key == ""
-    assert effective.llm.get_provider(role="primary").api_key_env == "LEGACY_RELAY_KEY"
+    assert config_path.read_bytes() == original
 
 
 @pytest.mark.parametrize("scope", ["defaults", "overrides"])

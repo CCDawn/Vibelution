@@ -272,8 +272,9 @@ api_key_env = "VIBELUTION_LLM_PRIMARY_MINIMAX_API_KEY"
 
     config = ConfigLoader(str(config_file)).load()
 
-    assert config.get_api_key() == "model-key"
-    assert config.get_api_key_source_label() == "model-env:VIBELUTION_LLM_PRIMARY_MINIMAX_API_KEY"
+    assert config.llm.schema_version == 2
+    assert config.get_api_key() == "provider-key"
+    assert "minimax-test-key" not in config_file.read_text(encoding="utf-8")
 
 
 def test_config_preserves_prompt_and_pet_sections(tmp_path, monkeypatch):

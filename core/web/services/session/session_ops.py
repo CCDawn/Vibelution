@@ -905,8 +905,6 @@ def _repair_stale_running_conversation(conversation: dict[str, Any]) -> bool:
         zh="上一轮运行已被中断，当前会话已恢复为可继续状态。",
         en="The previous turn was interrupted. This session is ready to continue.",
     )
-    if conversation.get("messages") and not s._ledger_visible_messages_for_session(conversation_id):
-        conversation["legacy_messages_preserved"] = True
     conversation["runtime_notices"] = s._append_session_runtime_notice(
         conversation.get("runtime_notices") or conversation.get("runtimeNotices") or [],
         {

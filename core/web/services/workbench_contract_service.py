@@ -87,7 +87,12 @@ def get_workbench_contract(public_config: dict[str, Any] | None = None) -> dict[
 
     if public_config is None:
         public_config = load_public_config()
-    effective = build_effective_config(public_config)
+    try:
+        effective = build_effective_config(public_config)
+    except (ValueError, TypeError):
+        from config.models import AppConfig
+
+        effective = AppConfig()
     mode_availability = _mode_availability(effective)
     domain_availability = _domain_availability(effective, mode_availability)
     default_mode = _resolve_default_mode(effective, mode_availability, domain_availability)

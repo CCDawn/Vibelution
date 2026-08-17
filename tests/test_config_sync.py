@@ -10,6 +10,7 @@ import pytest
 
 from config import AppConfig, ConfigLoader, Settings, normalize_public_config_dict, reload_config
 from config import workbench as workbench_config
+from config.llm_schema_upgrader import convert_legacy_llm_config
 
 
 SAMPLE_PUBLIC_CONFIG = """
@@ -151,7 +152,7 @@ def test_sample_config_exposes_all_public_model_blocks(tmp_path):
 def test_config_loader_normalizes_nested_public_blocks(tmp_path):
     config_file = _write_sample_public_config(tmp_path)
     raw = _load_toml(config_file)
-    normalized = normalize_public_config_dict(raw)
+    normalized = normalize_public_config_dict(convert_legacy_llm_config(raw))
     config = AppConfig.model_validate(normalized)
 
     primary_profile = raw["llm"]["profiles"]["primary"]
@@ -192,7 +193,7 @@ supports_image_input = true
 
 [llm.profiles.primary.provider]
 kind = "openai_compatible"
-api_key_env = "UNIT_PROVIDER_KEY"
+api_key_env = "VIBELUTION_LLM_PROVIDER_UNIT_API_KEY"
 base_url = "https://unit-test.example.com/v1"
 compat_mode = "openai"
 requires_api_key = true
@@ -201,23 +202,22 @@ context_window = 1000000
         encoding="utf-8",
     )
     monkeypatch.delenv("LEGACY_PROFILE_ENV", raising=False)
-    monkeypatch.delenv("UNIT_PROVIDER_KEY", raising=False)
+    monkeypatch.delenv("VIBELUTION_LLM_PROVIDER_UNIT_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setenv("VIBELUTION_ENABLE_USER_ENV_FALLBACK", "0")
 
     config = ConfigLoader(str(config_file)).load()
     profile = config.llm.get_profile("primary")
     model_id, entry = config.llm.get_model_library_entry_for_profile(profile)
-    monkeypatch.delenv(entry["api_key_env"], raising=False)
 
+    assert config.llm.schema_version == 2
+    assert profile.model == "unit-runtime-model"
     assert model_id
-    assert str(model_id).startswith("generated_openai_compatible_unit_runtime_model_")
     assert isinstance(entry, dict)
-    assert profile.api_key_env == entry["api_key_env"]
-    assert entry["api_key_env"].startswith("VIBELUTION_LLM_MODEL_GENERATED_OPENAI_COMPATIBLE_UNIT_")
     assert config.get_api_key_for_profile(profile_id="primary") is None
 
-    monkeypatch.setenv(entry["api_key_env"], "runtime-model-key")
+    env_name = str(config.llm.get_provider(profile.provider_id).api_key_env or "")
+    monkeypatch.setenv(env_name, "runtime-model-key")
 
     assert config.get_api_key_for_profile(profile_id="primary") == "runtime-model-key"
 
@@ -314,11 +314,61 @@ def test_reload_config_refreshes_cached_settings_config(tmp_path):
     first_config = tmp_path / "first.toml"
     second_config = tmp_path / "second.toml"
     first_config.write_text(
-        "[llm.profiles.primary]\nmodel = \"first-model\"\n",
+        """
+[llm]
+schema_version = 2
+
+[llm.providers.pixel_relay]
+label = "Pixel Relay"
+service_class = "relay"
+vendor = "multi_model"
+driver = "openai"
+base_url = "https://relay.example/v1"
+auth_kind = "api_key"
+credential_ref = "env:VIBELUTION_LLM_PROVIDER_PIXEL_RELAY_API_KEY"
+requires_credential = true
+
+[llm.providers.pixel_relay.protocols]
+default = "responses"
+allowed = ["responses"]
+
+[llm.providers.pixel_relay.models.first-model]
+upstream_id = "first-model"
+enabled = true
+
+[llm.profiles.primary]
+model_ref = "pixel_relay/first-model"
+""".strip()
+        + "\n",
         encoding="utf-8",
     )
     second_config.write_text(
-        "[llm.profiles.primary]\nmodel = \"second-model\"\n",
+        """
+[llm]
+schema_version = 2
+
+[llm.providers.pixel_relay]
+label = "Pixel Relay"
+service_class = "relay"
+vendor = "multi_model"
+driver = "openai"
+base_url = "https://relay.example/v1"
+auth_kind = "api_key"
+credential_ref = "env:VIBELUTION_LLM_PROVIDER_PIXEL_RELAY_API_KEY"
+requires_credential = true
+
+[llm.providers.pixel_relay.protocols]
+default = "responses"
+allowed = ["responses"]
+
+[llm.providers.pixel_relay.models.second-model]
+upstream_id = "second-model"
+enabled = true
+
+[llm.profiles.primary]
+model_ref = "pixel_relay/second-model"
+""".strip()
+        + "\n",
         encoding="utf-8",
     )
 
