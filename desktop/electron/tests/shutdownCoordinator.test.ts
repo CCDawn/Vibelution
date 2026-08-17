@@ -22,7 +22,7 @@ describe("decideShutdown", () => {
     });
   });
 
-  it("detaches from attached launcher service without stopping it", async () => {
+  it("reaps leftover Python launcher even when bootstrap mode is attached", async () => {
     await expect(
       decideShutdown({
         ownershipMode: "attached",
@@ -31,11 +31,11 @@ describe("decideShutdown", () => {
     ).resolves.toEqual({
       allowed: true,
       reason: "no_active_work",
-      stopPythonLauncher: false
+      stopPythonLauncher: true
     });
   });
 
-  it("stops only the python launcher service it started itself", async () => {
+  it("reaps leftover Python launcher after a started bootstrap as well", async () => {
     await expect(
       decideShutdown({
         ownershipMode: "started",

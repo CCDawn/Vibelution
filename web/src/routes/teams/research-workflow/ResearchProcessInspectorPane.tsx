@@ -99,7 +99,7 @@ export function ResearchProcessInspectorPane(props: {
     return <ResearchTeamPanel teamId={scope.teamId} teamName={scope.teamName} linkedChatRoomId={scope.linkedChatRoomId} run={state.run} projection={state.projection} effectiveBindings={state.effectiveBindings} />;
   }
   if (scope.selectedNodeId && !scope.runId && state.projection) {
-    return <ResearchProcessDefinitionNodePanel nodeId={scope.selectedNodeId} definition={state.projection.definition} effectiveBindings={state.effectiveBindings} />;
+    return <ResearchProcessDefinitionNodePanel teamId={scope.teamId} nodeId={scope.selectedNodeId} definition={state.projection.definition} effectiveBindings={state.effectiveBindings} />;
   }
   if (!scope.selectedNodeId) return <ResearchCenteredEmptyState title="选择流程节点" />;
   if (state.nodeDetail.kind === "loading" || state.nodeDetail.kind === "idle") {
@@ -116,9 +116,12 @@ export function ResearchProcessInspectorPane(props: {
   if (state.nodeDetail.kind === "empty") return <ResearchCenteredEmptyState title="暂无节点详情" />;
   return (
     <ResearchProcessNodeInspector
+      teamId={scope.teamId}
       nodeId={scope.selectedNodeId}
       adapter={getNodeAdapter(scope.selectedNodeId)}
       detail={state.nodeDetail.detail}
+      effectiveBindings={state.effectiveBindings}
+      budget={state.insights.budget}
       handoffs={handoffsForNode(state.insights.handoffs?.handoffs ?? [], scope.selectedNodeId)}
       handoffPending={Boolean(actions.pendingTaskId(scope.selectedNodeId))}
       busy={state.busy}

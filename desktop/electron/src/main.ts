@@ -1257,26 +1257,20 @@ async function closeDesktopSessionIfRegistered(): Promise<void> {
 }
 
 async function stopOwnedPythonLauncherService(): Promise<LauncherServiceStopResult> {
-  if (launcherBootstrap === null || launcherBootstrap.launcherBackendPid <= 0) {
-    return {
-      schemaVersion: 1,
-      status: "skipped",
-      reason: "missing_owned_launcher_backend_pid",
-      expectedBackendPid: 0,
-      launcherBackendPid: launcherBootstrap?.launcherBackendPid ?? 0,
-      terminatedPids: []
-    };
-  }
   const desktopEnv = desktopEnvironment();
   const pythonPath = String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
   if (!pythonPath) {
-    throw new Error("VIBELUTION_PYTHON_PATH or PYTHON is required to stop the owned Launcher Service");
+    throw new Error("VIBELUTION_PYTHON_PATH or PYTHON is required to stop the leftover Launcher Service");
   }
+  const paths = createDesktopPathsForApp();
+  const workspaceRoot = launcherBootstrap?.workspaceRoot || paths.workspaceRoot;
+  const operatorConfigPath =
+    launcherBootstrap?.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim();
   return await stopPythonLauncherService({
-    workspaceRoot: launcherBootstrap.workspaceRoot,
+    workspaceRoot,
     pythonPath,
-    operatorConfigPath: launcherBootstrap.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
-    launcherBackendPid: launcherBootstrap.launcherBackendPid
+    operatorConfigPath,
+    launcherBackendPid: launcherBootstrap?.launcherBackendPid ?? 0
   });
 }
 
@@ -1977,7 +1971,7 @@ async function requestForcedDesktopShellExit(
       pendingWorkbenchCloseAck = null;
       await withDesktopShellExitTimeout(
         executeApprovedDesktopShellShutdown({
-          decision: { allowed: true, reason: "no_active_work", stopPythonLauncher: ownershipMode === "started" },
+          decision: { allowed: true, reason: "no_active_work", stopPythonLauncher: true },
           closeDesktopSession: closeDesktopSessionIfRegistered,
           recordEvent: async (event) => {
             await recordElectronSupervisorEvent(launcherBootstrap, {
@@ -2551,6 +2545,7 @@ app.whenReady()
     });
     await reapManagedRuntimeOnDesktopStart({
       stopManagedRuntime,
+      stopLeftoverPythonLauncher: stopOwnedPythonLauncherService,
       recordEvent: async (event) => {
         await recordElectronSupervisorEvent(launcherBootstrap, event);
       }
@@ -2633,7 +2628,7 @@ app.whenReady()
     });
     await recordElectronSupervisorEvent(launcherBootstrap, {
       eventCode: "electron.launcher_service.started",
-      message: "Python launcher service is attached to Electron.",
+      message: "Electron main is the Launcher control plane; leftover Python launcher is not attached.",
       fields: {
         mode: launcherBootstrap?.mode ?? "",
         launcherBackendPid: launcherBootstrap?.launcherBackendPid ?? 0

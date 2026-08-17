@@ -1,26 +1,35 @@
-import type { EffectiveAgentBinding } from "../../../api/types/researchWorkflow";
-import { TeamSourceCollectionStageAgentsPanel } from "../source-collection/ui/TeamSourceCollectionStageAgentsPanel";
-import { buildResearchAgentCard } from "./researchAgentCardModel";
+import type { EffectiveAgentBinding, ResearchBudgetProjection } from "../../../api/types/researchWorkflow";
+import { NodeInspectorOpsSection } from "./NodeInspectorOpsSection";
 
-export function DefinitionNodeAgentSection({
-  binding,
-}: {
+export function DefinitionNodeAgentSection(props: {
+  teamId: string;
+  nodeId: string;
+  stageId: string;
+  stageLabel: string;
+  title: string;
   binding: EffectiveAgentBinding | null;
+  effectiveBindings: EffectiveAgentBinding[] | null;
+  budget?: ResearchBudgetProjection | null;
 }) {
-  if (!binding) return null;
-
-  const card = buildResearchAgentCard({
-    nodeId: binding.nodeId,
-    roleKey: binding.roleKey,
-    agentId: binding.agentId,
-    agentName: binding.displayName || binding.agentId,
-    resolvedFrom: binding.resolvedFrom,
-    sessionBound: false,
-  });
-
+  const agentId = String(props.binding?.agentId || "");
   return (
     <section data-vui="definition-node-agent-section">
-      <TeamSourceCollectionStageAgentsPanel lang="zh" agents={[card]} layout="stacked" />
+      <NodeInspectorOpsSection
+        teamId={props.teamId}
+        nodeId={props.nodeId}
+        stageId={props.stageId}
+        stageLabel={props.stageLabel}
+        title={props.title}
+        agentId={agentId}
+        agentName={String(props.binding?.displayName || agentId)}
+        unbound={!agentId}
+        canRebindAgent
+        effectiveBindings={props.effectiveBindings}
+        budget={props.budget ?? null}
+        primaryOffer={null}
+        busy={false}
+        sessionHref={null}
+      />
     </section>
   );
 }

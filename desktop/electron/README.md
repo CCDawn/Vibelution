@@ -31,6 +31,7 @@ Electron 主进程（TS）= Launcher 服务
   └─ 子进程：Python 工作台（FastAPI + Runtime Manager）
      以及必要的 git/worktree/maintenance CLI
      关闭桌面壳时必须停掉这棵进程树；打开桌面壳时必须先清掉上一轮托管进程，再拉起当前 checkout 的新 daemon
+     打开/退出时还要 `stop-launcher --use-state-owned-backend-pid` 清掉 leftover Python `:8765`，不得把它当成第二控制面 attach
 
 VibelutionLauncher.exe = 无控制台薄 shim
   → Electron 已在：转发 start|stop|restart
@@ -40,7 +41,7 @@ VibelutionLauncher.exe = 无控制台薄 shim
   → 不自建 :8765 控制面
 ```
 
-Packaged / product Electron **不再 spawn 或代理** Python `:8765`。控制面唯一入口是 IPC；`launcherServiceClient` 只保留 owned leftover 进程的 `stop-launcher` 清理。无 `win-unpacked` 或 packaged 落后当前 `HEAD:desktop/electron` 时，C# shim / Python `launch-desktop-shell` 启动 **当前 checkout 的 unpackaged Electron main**（`desktop/electron` 的 `npm run build` + `electron dist/main.js`），不是 Python HTTP 控制面。
+Packaged / product Electron **不再 spawn 或代理** Python `:8765`。控制面唯一入口是 IPC；`launcherServiceClient` 只保留 leftover 进程的 `stop-launcher` 清理：无已知 owned pid 时走 `--use-state-owned-backend-pid`。桌面壳 **打开** 时与托管进程树一起 reap leftover `:8765`；**退出** 时即使 bootstrap `mode` 是 `attached` 也要再清一次。无 `win-unpacked` 或 packaged 落后当前 `HEAD:desktop/electron` 时，C# shim / Python `launch-desktop-shell` 启动 **当前 checkout 的 unpackaged Electron main**（`desktop/electron` 的 `npm run build` + `electron dist/main.js`），不是 Python HTTP 控制面。
 
 ---
 

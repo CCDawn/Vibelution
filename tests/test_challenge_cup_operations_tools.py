@@ -14,6 +14,7 @@ from tools.challenge_cup_operations_tools import (
     challenge_cup_iteration_writeback_tool,
     challenge_cup_versioning_context_tool,
     challenge_cup_versioning_writeback_tool,
+    research_knowledge_collection_tool,
 )
 
 
@@ -996,3 +997,121 @@ def test_challenge_cup_versioning_tool_logs_writeback_child_payload(monkeypatch)
     assert child_payload["relationId"] == "relation-1"
     assert child_payload["evidenceRefCount"] == 1
     assert child_payload["changeSetCount"] == 1
+
+
+def _valid_scope_json() -> str:
+    scope_hash = "a" * 64
+    return json.dumps(
+        {
+            "program": "XH-202619",
+            "theme": "cc-gpu-operator-001",
+            "campaign": "cc-campaign-gpu-operator-001",
+            "question": "SCI-091",
+            "branch": "main",
+            "workflow": "hypothesis_and_plan",
+            "agentId": "agent-alpha",
+            "mode": "formal",
+            "scopeHash": scope_hash,
+            "artifactLocator": f"research-artifact://x/{scope_hash}",
+            "ledgerRoot": f"research-ledger://x/{scope_hash}",
+            "cacheKey": f"scope:{scope_hash}:main:agent-alpha",
+        }
+    )
+
+
+def test_research_knowledge_collection_tool_wraps_single_facade(monkeypatch):
+    scene_events = []
+    monkeypatch.setattr(
+        runtime_scene_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: scene_events.append((args, kwargs)) or {"accepted": True},
+    )
+    from core.web.services.team_workflow.source_collection import facade as facade_module
+
+    calls = []
+
+    def fake_facade(**kwargs):
+        calls.append(dict(kwargs))
+        return {
+            "schemaVersion": 1,
+            "action": kwargs.get("action"),
+            "status": "ok",
+            "created": kwargs.get("action") == "ensure",
+            "found": True,
+            "locator": {"runId": "dprun-tool", "scopeHash": "s" * 64},
+            "summary": {"status": "collecting", "available": True, "counts": {"recordCount": 4}},
+            "scope": {"scopeHash": "s" * 64},
+            "searchEnvelope": {"keywords": ["predictive coding"]},
+            "requirements": {},
+            "writebackPolicy": {},
+            "boundaries": {"singleVisibleInterface": True},
+        }
+
+    monkeypatch.setattr(facade_module, "research_knowledge_collection_facade", fake_facade)
+
+    result = json.loads(
+        research_knowledge_collection_tool(
+            action="inspect",
+            scope=_valid_scope_json(),
+            searchEnvelope='{"keywords":["predictive coding"],"sourceTypes":["paper"]}',
+            requirements='{"minEvidenceLevel":"primary"}',
+            writebackPolicy='{"providerWriteback":true}',
+        )
+    )
+
+    assert result["status"] == "ok"
+    assert result["locator"]["runId"] == "dprun-tool"
+    assert calls[0]["action"] == "inspect"
+    assert calls[0]["scope"]["scopeHash"] == "a" * 64
+    assert calls[0]["searchEnvelope"]["keywords"] == ["predictive coding"]
+    assert calls[0]["requirements"] == {"minEvidenceLevel": "primary"}
+    assert calls[0]["writebackPolicy"] == {"providerWriteback": True}
+
+    completed_events = [
+        kwargs
+        for args, kwargs in scene_events
+        if len(args) >= 3 and args[2] == "tool.research_knowledge_collection.completed"
+    ]
+    assert completed_events
+    assert completed_events[-1]["fields"]["action"] == "inspect"
+    assert completed_events[-1]["fields"]["runId"] == "dprun-tool"
+
+
+def test_research_knowledge_collection_tool_returns_error_payload(monkeypatch):
+    scene_events = []
+    monkeypatch.setattr(
+        runtime_scene_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: scene_events.append((args, kwargs)) or {"accepted": True},
+    )
+    from core.web.services.team_workflow.source_collection import facade as facade_module
+
+    def raise_error(**kwargs):
+        raise facade_module.ResearchKnowledgeCollectionError(
+            "bad scope", code="scope_invalid"
+        )
+
+    monkeypatch.setattr(facade_module, "research_knowledge_collection_facade", raise_error)
+
+    result = json.loads(
+        research_knowledge_collection_tool(
+            action="ensure",
+            scope=_valid_scope_json(),
+            searchEnvelope="{}",
+        )
+    )
+
+    assert result["status"] == "error"
+    assert result["errorType"] == "ResearchKnowledgeCollectionError"
+    assert "bad scope" in result["message"]
+    assert result["boundaries"]["singleVisibleInterface"] is True
+    assert result["boundaries"]["autoExecution"] is False
+
+    failed_events = [
+        kwargs
+        for args, kwargs in scene_events
+        if len(args) >= 3 and args[2] == "tool.research_knowledge_collection.failed"
+    ]
+    assert failed_events
+    assert failed_events[-1]["level"] == "warning"
+    assert failed_events[-1]["fields"]["outcome"] == "failed"
