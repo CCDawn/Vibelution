@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import core.chat.conversation_ledger as conversation_ledger
 from core.chat.conversation_ledger import (
     EVENT_USER_MESSAGE,
     append_conversation_event,
@@ -147,18 +148,73 @@ def test_corrupt_blob_does_not_clobber_existing_ledger(tmp_path):
     assert "messages" not in loaded
 
 
-def test_interrupted_materialize_resumes_without_duplicating(tmp_path):
+def test_interrupted_materialize_preserves_source_and_resumes_without_duplicating(tmp_path, monkeypatch):
     conversation = _conversation(
         status="queued",
         messages=[
             {"role": "user", "content": "only-once", "timestamp": "2026-08-17T00:00:00Z"},
+            {"role": "assistant", "content": "resume-me", "timestamp": "2026-08-17T00:00:01Z"},
         ],
     )
+    original_append = conversation_ledger.append_conversation_event
+    calls = 0
+
+    def _fail_second_append(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls >= 2:
+            raise OSError("injected second append failure")
+        return original_append(*args, **kwargs)
+
+    monkeypatch.setattr(conversation_ledger, "append_conversation_event", _fail_second_append)
     save_session_chat_state(tmp_path, SESSION_ID, conversation)
-    first_seq = latest_ledger_sequence(tmp_path, SESSION_ID)
-    conversation["messages"] = [
-        {"role": "user", "content": "only-once", "timestamp": "2026-08-17T00:00:00Z"},
-    ]
-    save_session_chat_state(tmp_path, SESSION_ID, conversation)
-    assert latest_ledger_sequence(tmp_path, SESSION_ID) == first_seq
+
+    failed_row = load_chat_state(tmp_path)["conversations"][0]
+    assert failed_row["messages"] == conversation["messages"]
+    assert _visible_texts(tmp_path) == ["only-once"]
+
+    monkeypatch.setattr(conversation_ledger, "append_conversation_event", original_append)
+    save_session_chat_state(tmp_path, SESSION_ID, failed_row)
+    loaded = load_chat_state(tmp_path)["conversations"][0]
+
+    assert "messages" not in loaded
     assert _visible_texts(tmp_path).count("only-once") == 1
+    assert _visible_texts(tmp_path).count("resume-me") == 1
+
+
+def test_legacy_import_prefix_mismatch_preserves_source_blob(tmp_path):
+    append_conversation_event(
+        tmp_path,
+        SESSION_ID,
+        "legacy-chat-state-import",
+        EVENT_USER_MESSAGE,
+        status="recorded",
+        payload={"content": "different-prefix"},
+        source="legacy_chat_state_import",
+        timestamp="2026-08-17T00:00:00Z",
+        source_kind="legacy_import",
+    )
+    save_chat_state(
+        tmp_path,
+        _state(
+            _conversation(
+                status="running",
+                messages=[{"role": "user", "content": "source-message", "timestamp": "2026-08-17T00:00:00Z"}],
+            )
+        ),
+    )
+
+    loaded = load_chat_state(tmp_path)["conversations"][0]
+    assert loaded["messages"][0]["content"] == "source-message"
+    assert _visible_texts(tmp_path) == ["different-prefix"]
+
+
+def test_unrecognizable_legacy_blob_without_canonical_ledger_is_preserved(tmp_path):
+    save_chat_state(
+        tmp_path,
+        _state(_conversation(status="running", messages="not-a-list")),
+    )
+
+    loaded = load_chat_state(tmp_path)["conversations"][0]
+    assert loaded["messages"] == "not-a-list"
+    assert latest_ledger_sequence(tmp_path, SESSION_ID) == 0
