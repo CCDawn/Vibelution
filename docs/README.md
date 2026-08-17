@@ -57,7 +57,6 @@
 
 | 草案 | 说明 |
 | --- | --- |
-| [plans/2026-08-16-compat-ssot-closeout-plan.md](plans/2026-08-16-compat-ssot-closeout-plan.md) | active-plan：兼容层收敛与 SSOT 优化（存储 / Launcher / FE / 工具） |
 | [plans/2026-08-15-research-graph-outcome-memory.md](plans/2026-08-15-research-graph-outcome-memory.md) | 三层记忆 + 公共结构策展/保鲜 + 研究成败图 v2.3（非正式规范） |
 | [plans/2026-08-15-deep-architecture-decoupling-plan.md](plans/2026-08-15-deep-architecture-decoupling-plan.md) | ACTIVE：Agent / Chat / API 契约分 Gate 解耦 |
 | [plans/2026-08-14-llm-config-runtime-routing-optimization-plan.md](plans/2026-08-14-llm-config-runtime-routing-optimization-plan.md) | active-plan：模型配置与协议路由 |
@@ -71,6 +70,7 @@
 | --- | --- |
 | `docs/plans/*` | `archive/plans/2026-06-07/`（及既有 `2026-05/`） |
 | `docs/plans/2026-08-11-vui-wave-migration-backlog.md` | `archive/plans/2026-08-11/` |
+| `docs/plans/2026-08-16-compat-ssot-closeout-plan.md` | `archive/plans/2026-08/`（Implemented；长期规则 [development-standard §25](standards/development-standard.md)） |
 | `docs/ops/2026-05-*`、efficiency-baselines | `archive/ops/` |
 | `docs/frontend/*` | `archive/frontend/` |
 | `docs/superpowers/*` | `archive/superpowers/` |

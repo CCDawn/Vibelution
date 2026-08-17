@@ -10,6 +10,7 @@
 
 - Chat workbench widths now persist only through `paneLayouts.chat` (`WORKBENCH_LAYOUT_IDS.chat` + `vibelution.pane-layouts.v1`). Leftover `shell.chatPanelWidths` is migrated once when canonical is missing, then dropped. Server `paneLayouts` remains a durable mirror. Version impact: **patch**; no release is executed.
 - Frontend compatibility redirects for `/chat-rooms`, `/agents/teams`, `/agents/memory/*`, and `/evolution` are removed. Canonical routes (`/chat`, `/teams`, `/memory/*`, `/supervised-evolution` / `/self-evolution`) are the only workbench entries; unknown leftover URLs follow the product's unmatched-route behavior. Version impact: **patch**; no release is executed.
+- Compat SSOT closeout is archived. Permanent retirement rules live in `docs/standards/development-standard.md` §25 (no waiting stability gates; one-shot upgraders; fail-closed reads; no new long-lived fallback). Version impact: **patch**; docs only; no release is executed.
 
 ## 1.1.2 - 2026-08-06
 

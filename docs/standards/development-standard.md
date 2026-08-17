@@ -105,7 +105,7 @@ For non-trivial state, config, lifecycle, cache, registry, memory, or generated-
 
 If the table cannot be filled in, the design is not ready for implementation.
 
-Dual writes, compatibility aliases, copied defaults, duplicated lifecycle status, and parallel registries are temporary migration scaffolding only. They require an explicit owner, expiry or removal trigger, validation evidence, and cleanup plan before stable merge. Active cross-domain compat retirement is tracked in [compat SSOT closeout plan](../plans/2026-08-16-compat-ssot-closeout-plan.md).
+Dual writes, compatibility aliases, copied defaults, duplicated lifecycle status, and parallel registries are temporary migration scaffolding only. They require an explicit owner, expiry or removal trigger, validation evidence, and cleanup plan before stable merge. Permanent retirement rules are in §25. The 2026-08 closeout ledger is historical: [compat SSOT closeout plan](../archive/plans/2026-08/2026-08-16-compat-ssot-closeout-plan.md).
 
 Validation anchor: changes must prove that writes go to the canonical source, derived views refresh from it, stale derived data cannot override it, and old sources cannot silently become active again.
 
@@ -1319,3 +1319,34 @@ Use the smallest applicable rows; a full-stack feature normally needs all of the
 | Delivery | scoped diff, version-impact judgment, clean claim release, and no unrelated files |
 
 When the endpoint contract changes, passing frontend and backend tests independently is insufficient. The change must include one piece of shared contract evidence: an OpenAPI/schema assertion, a route payload test consumed by the TypeScript shape, generated/static alignment, or an equivalent checked fixture that fails on field drift.
+
+## 25. Compatibility Retirement
+
+Compatibility layers are not a default delivery strategy. A leftover path, dual writer, alias, or observe-only bridge may exist only with a named owner, a removal trigger, validation evidence, and a cleanup plan.
+
+### 25.1 No Waiting Stability Gates
+
+Do not treat calendar time, zero-hit telemetry, version-support windows, “other environments might still use this”, gray-release, shadow, or observe-only periods as completion conditions for retiring a compatibility layer. Current code facts, a one-shot upgrader, fail-closed behavior, existing data shapes, automated tests, local integration evidence, and the minimum live check required by risk are enough to retire.
+
+This rule does not cancel correctness checks, data protection, Git ownership, tests, migration safety, or destructive-permission confirmation. Remote push/PR/release, physical deletion of leftover storage directories, and real storage apply/reapply/rollback still need independent authorization.
+
+### 25.2 One-Shot Upgraders And Fail-Closed Reads
+
+When a persisted format is retired:
+
+- runtime consumes only the canonical schema;
+- recognizable leftovers are upgraded once, atomically;
+- inputs that cannot be upgraded fail closed and must not overwrite the original file;
+- do not add a long-lived fallback, dual-write, feature flag, or shadow path whose only purpose is to postpone retirement.
+
+### 25.3 Storage And Launcher Leftovers
+
+After `activePaths.migrated=true`, repo-root `.runtime/`, `logs/`, `.cache/`, and `.docs/project-memory/` are rollback retainers, not active read paths. Physical deletion of those directories requires a separate destructive confirmation. Rollback archives the completion marker and keeps both copies; it does not rehydrate post-cutover writes.
+
+The packaged Launcher product path must not spawn Python `:8765`. Unpackaged checkout HTTP remains valid for tests and the native shim. Do not treat the archived control-plane ledger as living procedure.
+
+### 25.4 Documentation
+
+`docs/archive/` is archaeology, not living authority ([ADR 0005](../adr/0005-docs-authority-and-archive-policy.md)). Keep correct “removed / forbidden” warnings (for example HeroUI). Do not cite deleted compatibility layers as current procedure. Durable rules belong in this file, ADRs, and module READMEs.
+
+Historical closeout ledger: [2026-08-16-compat-ssot-closeout-plan.md](../archive/plans/2026-08/2026-08-16-compat-ssot-closeout-plan.md). Storage identity: [ADR 0008](../adr/0008-project-mutable-state-lives-outside-source-tree.md). Launcher control plane: [ADR 0009](../adr/0009-launcher-control-plane-lives-in-electron-main.md).

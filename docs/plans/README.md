@@ -7,8 +7,8 @@
 
 | 文件 | Status | 说明 |
 | --- | --- | --- |
-| [2026-08-16-compat-ssot-closeout-plan.md](2026-08-16-compat-ssot-closeout-plan.md) | active-plan | 兼容层收敛与单一事实源（存储 / Launcher / FE 域 / 工具路径） |
 | [2026-08-15-deep-architecture-decoupling-plan.md](2026-08-15-deep-architecture-decoupling-plan.md) | ACTIVE PLAN | Agent / Chat / API 契约分 Gate；全部 Gate 关闭后归档 |
+| [2026-08-15-research-graph-outcome-memory.md](2026-08-15-research-graph-outcome-memory.md) | 草案 | 三层记忆 + 公共结构策展/保鲜 + 研究成败图 v2.3（非正式规范） |
 | [2026-08-14-llm-config-runtime-routing-optimization-plan.md](2026-08-14-llm-config-runtime-routing-optimization-plan.md) | active-plan | 模型配置与运行时协议路由 |
 | [2026-08-14-multi-agent-configuration-and-protocol-routing-research-design.md](2026-08-14-multi-agent-configuration-and-protocol-routing-research-design.md) | user-approved | 多 Agent 配置与协议路由设计 |
 | [2026-08-13-portable-branch-workspace.md](2026-08-13-portable-branch-workspace.md) | 草案 | 仓内 `.worktrees` + Launcher 分支清单 |
@@ -17,3 +17,4 @@
 历史快照（已迁出）：
 
 - `2026-08-11-vui-wave-migration-backlog.md` → [archive/plans/2026-08-11/](../archive/plans/2026-08-11/2026-08-11-vui-wave-migration-backlog.md)
+- `2026-08-16-compat-ssot-closeout-plan.md` → [archive/plans/2026-08/](../archive/plans/2026-08/2026-08-16-compat-ssot-closeout-plan.md)（Implemented；长期规则见 [development-standard §25](../standards/development-standard.md)）

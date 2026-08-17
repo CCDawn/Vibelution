@@ -2,16 +2,16 @@
 
 | 字段 | 值 |
 | --- | --- |
-| **Status** | `active-plan` |
+| **Status** | `implemented`（2026-08-17 关闭并归档） |
 | **Created** | 2026-08-16 |
 | **Reviewed** | 2026-08-16（仓库审查结论重放至最新 main） |
-| **Implementation status** | T1 apply 已执行（2026-08-16）；**T1G 代码门已落地**（commit `91a1f6fb4`）；**T2 / T3b done**（2026-08-17）；**T4a–T4c done**（2026-08-17）；**T5 done**（2026-08-17：packaged Electron 不再 spawn `:8765`，profile 只写 `operatorConfigPath`）；**T6 done**（2026-08-17：`types/knowledge.ts` 打断 memory↔teams 循环；`memory.ts`/`knowledge.ts` 仍分域）；**T7 done**（2026-08-17：Chat 宽度唯一写 `paneLayouts.chat`；`shell.chatPanelWidths` 仅一次性单向迁移）；**T8 done**（2026-08-17：删除 `Legacy*Redirect` 与 leftover URL 路由，不等待 30 天零命中）；T2 仅完成代码收口，未执行新的真实 apply / reapply / rollback / legacy 删除 |
+| **Implementation status** | T1 apply 已执行（2026-08-16）；**T1G 代码门已落地**（commit `91a1f6fb4`）；**T2 / T3b done**（2026-08-17）；**T4a–T4c done**（2026-08-17）；**T5 done**（2026-08-17：packaged Electron 不再 spawn `:8765`，profile 只写 `operatorConfigPath`）；**T6 done**（2026-08-17：`types/knowledge.ts` 打断 memory↔teams 循环；`memory.ts`/`knowledge.ts` 仍分域）；**T7 done**（2026-08-17：Chat 宽度唯一写 `paneLayouts.chat`；`shell.chatPanelWidths` 仅一次性单向迁移）；**T8 done**（2026-08-17：删除 `Legacy*Redirect` 与 leftover URL 路由，不等待 30 天零命中）；**D1 / H2 / T9(readonly) done**（2026-08-17）；T2 仅完成代码收口，未执行新的真实 apply / reapply / rollback / legacy 物理删除 |
 | **Tier** | `HIGH_RISK`（整体）；子任务按 `FAST_PATCH` / `STANDARD_TASK` / `HIGH_RISK` 分级 |
-| **Related ADR** | [0002](../adr/0002-agent-collaboration-session-addressing.md) · [0003](../adr/0003-operator-config-lives-outside-repo.md) · [0004](../adr/0004-product-ui-uses-vui-shadcn-only.md) · [0005](../adr/0005-docs-authority-and-archive-policy.md) · [0008](../adr/0008-project-mutable-state-lives-outside-source-tree.md) · [0009](../adr/0009-launcher-control-plane-lives-in-electron-main.md) |
-| **Related docs** | [development-standard §24](../standards/development-standard.md) · [web/src/api/README.md](../../web/src/api/README.md) · [worktree-collaboration](../agents/worktree-collaboration.md) |
-| **Close when** | Critical Path（T0→T1→T1G→T2/T3b→T4a–T4c→T6/T7→T8）验收通过；支持关闭 H1(done) / H2 / T5 / D1；living doc 无 legacy 误引；T4d / T9 不阻塞。**不等待** storage 14 天、T8 30 天零命中、telemetry 观察窗口或版本支持窗口 |
+| **Related ADR** | [0002](../../../adr/0002-agent-collaboration-session-addressing.md) · [0003](../../../adr/0003-operator-config-lives-outside-repo.md) · [0004](../../../adr/0004-product-ui-uses-vui-shadcn-only.md) · [0005](../../../adr/0005-docs-authority-and-archive-policy.md) · [0008](../../../adr/0008-project-mutable-state-lives-outside-source-tree.md) · [0009](../../../adr/0009-launcher-control-plane-lives-in-electron-main.md) |
+| **Related docs** | [development-standard §25](../../../standards/development-standard.md) · [web/src/api/README.md](../../../../web/src/api/README.md) · [worktree-collaboration](../../../agents/worktree-collaboration.md) |
+| **Close when** | 已满足。Critical Path 与 D1/H2 已闭合；T4d Deferred；T9 只读报告已写且**未物理删除**。长期规则已提炼到 [development-standard §25](../../../standards/development-standard.md)。 |
 
-> **草案说明：** 本文件是实施计划，不是现行规范。权威顺序见 [ADR 0005](../adr/0005-docs-authority-and-archive-policy.md)。关闭后 `git mv` 至 `docs/archive/plans/2026-08/`。
+> **归档说明：** 本文件是已关闭的实施账本，不是现行规范。权威顺序见 [ADR 0005](../../../adr/0005-docs-authority-and-archive-policy.md)。长期规则见 [development-standard §25](../../../standards/development-standard.md)。路径：`docs/archive/plans/2026-08/`。
 >
 > **Operator override（2026-08-17）：禁止等待型稳定门。** 用户已取消本计划中所有人为等待型完成条件：不等待 14 天 storage 稳定期、不等待 T8 的 30 天零命中、不设置 telemetry 观察窗口、不以“再观察一段时间”为完成条件、不设置版本支持窗口、不以“其它环境可能仍在使用”无限延期、不以零命中 / 灰度 / shadow period 作为删除前置、不新增仅用于拖延收敛的 feature flag / 双写 / 兼容开关 / shadow path / observe-only 阶段、不等待 OpenCode 或其它 Agent 恢复、不把普通 `main` 漂移写成 blocker。当前代码事实、一次性 upgrader、fail-closed、现有数据结构、自动化测试、本地集成验证和必要运行验收即为实施依据。本覆盖 **不等于** 取消正确性验证、数据保护、Git ownership、测试、迁移安全或破坏性权限确认。远端操作、T9 物理删除、真实 storage apply/reapply/rollback 仍需独立授权。
 
@@ -95,7 +95,7 @@ python scripts/migrate_project_storage.py inventory --project "<project-root>"
 | Memory | 外部 `projects/<id>/memory/` | ADR 0002 inbox legacy body 只读 recover |
 | Config | Documents `config.toml` | 仓库 template + bootstrap 升级 |
 | Launcher 控制 | `desktop/electron/` IPC | browser-dev HTTP（ADR/history/fixture 合法保留） |
-| FE JSON API | `web/src/api/<domain>.ts` | route 层 SSE 例外（见 [web/src/api/README.md](../../web/src/api/README.md)） |
+| FE JSON API | `web/src/api/<domain>.ts` | route 层 SSE 例外（见 [web/src/api/README.md](../../../../web/src/api/README.md)） |
 | Chat 布局 | `paneLayouts.chat`（`vibelution.pane-layouts.v1` + `WORKBENCH_LAYOUT_IDS`） | server paneLayouts 仅 durable mirror，不作第二写源 |
 | Agent claim | Git common-dir **live registry** | 旧 memory `agent-registry.json` 仅限时只读兼容 + removal trigger |
 | 会话消息 body | SQLite session / ledger | `chat_state.json` 消息 blob（退役中） |
@@ -254,7 +254,7 @@ flowchart TB
 | --- | --- |
 | **Tier** | `STANDARD_TASK` |
 | **Dependency** | 与 backend pack README ownership 对齐（`team_knowledge/` vs memory facade） |
-| **交付** | 保持 **one backend domain → one transport**：**不合并 `memory.ts` / `knowledge.ts`**；`types/knowledge.ts` 打断 `types/memory.ts` ↔ `types/teams.ts` 循环；queryKeys 按 `memory.*` / `knowledge.*` 分前缀；更新 [web/src/api/README.md](../../web/src/api/README.md) |
+| **交付** | 保持 **one backend domain → one transport**：**不合并 `memory.ts` / `knowledge.ts`**；`types/knowledge.ts` 打断 `types/memory.ts` ↔ `types/teams.ts` 循环；queryKeys 按 `memory.*` / `knowledge.*` 分前缀；更新 [web/src/api/README.md](../../../../web/src/api/README.md) |
 | **Worktree** | `codex/fe-memory-knowledge-unify` |
 
 **Task T7: Chat 布局单写 SSOT** — **done**（2026-08-17）
@@ -280,35 +280,36 @@ flowchart TB
 | **门控** | **立即退役**。不等待 30 天、telemetry 零命中或观察窗口。旧 URL 走产品当前统一的未知路由 / 404 行为 |
 | **Tier** | `STANDARD_TASK` |
 
-**Task D1: 文档与引用治理（全程并行）** — **in progress**
+**Task D1: 文档与引用治理（全程并行）** — **done**（2026-08-17）
 
 | 项 | 内容 |
 | --- | --- |
-| **交付** | living doc 清 legacy 误引；closed plans → archive；可选在 development-standard 增「兼容退役 checklist」链到本文 |
-| **Done slice** | 本 plan 任务状态与 Sprint 表；[01-authority-and-paths](../ops/config/01-authority-and-paths.md) 迁移后路径表述 |
+| **交付** | living doc 清 legacy 误引；closed plans → archive；development-standard §25 吸收兼容退役规则（禁止等待型稳定门、一次性 upgrader、fail-closed、不新增长期 fallback） |
+| **Done slice** | 本 plan Status=`implemented`；[01-authority-and-paths](../../../ops/config/01-authority-and-paths.md) 改链 ADR 0008 + §25 + 本 archive；ADR 0009 增补 packaged 不再 spawn `:8765`；`docs/README.md` / `docs/plans/README.md` 白名单对账（补 `research-graph-outcome-memory`，移出本文） |
+| **刻意未改** | `memory_service.py` `used_by` 仍含 `"/agents/memory/knowledge"`；`runtime_scene_api.py` referer set 仍含 `"/agents/teams"`（改代码会扩大 selector，且可能暴露 T4c reset leftover；非文档误引） |
 | **Tier** | `FAST_PATCH` ~ `STANDARD_TASK` |
 
-**Task H2: Worktree / 分支卫生（只读盘点优先）**
+**Task H2: Worktree / 分支卫生（只读盘点优先）** — **done**（2026-08-17，只读盘点 + 本轮清理）
 
 | 项 | 内容 |
 | --- | --- |
 | **Dependency** | T0 差异表 |
 | **规则** | 禁止删 dirty / 未 merge worktree；**只清理本任务拥有、或证明 clean + merged + inactive + 无 claim 的项**；未知一律保留 |
-| **交付** | 只读盘点 + 安全可清项 + **精确残留报告** 即可完成，不要求全部清空 |
+| **交付** | 见 §15.1。本轮 T4a–T8 worktree/junction/已合并本地分支已清理。其余 Git 注册 worktree 与磁盘孤儿目录全部保留 |
 
 ---
 
 ### Phase 5 — 物理清理（独立 optional closeout，非主链 / 非关闭条件）
 
-**Task T9: Legacy 目录物理清除**
+**Task T9: Legacy 目录物理清除** — **readonly report only**（2026-08-17）
 
 | 项 | 内容 |
 | --- | --- |
 | **Tier** | `HIGH_RISK` |
 | **Dependency** | 主链 T1–T8 验收通过 |
 | **稳定门** | 外部读写健康；无 legacy 写 / rollback / integrity 告警；**不要求无 post-cutover 正常写** |
-| **用户授权** | **独立破坏性确认**后删除 repo 内 `.runtime/`、`logs/`、`.cache/`、`.docs/project-memory/`（可选留 MOVED 指针） |
-| **验证** | 全量 pytest · Launcher 重启 · inventory |
+| **用户授权** | **未获物理删除授权。未执行物理删除。** 报告见 §15.2 |
+| **验证** | 删除后才需要全量 pytest · Launcher 重启 · inventory；本次只做只读 inventory |
 
 ---
 
@@ -373,7 +374,7 @@ HeroUI prop 别名 · route re-export barrels · Vitest shims · archive 正文 
 | T8 | `Legacy*Redirect` 已删除；canonical route 为唯一入口；诊断事件可保留但不是删除前置 |
 | T9 | （optional）物理 legacy 空；inventory 仅 external |
 
-**每 slice 完成块（[loop.md](../guides/loop.md) §4）：** 变更摘要 · 验证命令 · Launcher refresh · merge + cleanup · version impact
+**每 slice 完成块（[loop.md](../../../guides/loop.md) §4）：** 变更摘要 · 验证命令 · Launcher refresh · merge + cleanup · version impact
 
 | 任务组 | Version impact |
 | --- | --- |
@@ -425,15 +426,15 @@ HeroUI prop 别名 · route re-export barrels · Vitest shims · archive 正文 
 1. Critical Path（T0→T1→T1G→T2/T3b→T4a–T4c→T6/T7→T8）验收证据已闭合；支持关闭 H1(done)、H2、T5、D1；T4d / T9 **不阻塞**；
 2. 交付已进入本地 `main`，集成验证通过；living docs 不再引用已删除兼容层。**不再要求** `activePaths.migrated=true` 稳定 ≥14 天，也 **不再要求** T8 30 天零命中；
 3. 本文 Status 改为 `implemented` 或 `superseded`；
-4. 更新 [plans/README.md](README.md) 与 [docs/README.md](../README.md) 白名单；
+4. 更新 [plans/README.md](../../../plans/README.md) 与 [docs/README.md](../../../README.md) 白名单；
 
-执行：
+执行（已完成 2026-08-17）：
 
 ```powershell
 git mv docs/plans/2026-08-16-compat-ssot-closeout-plan.md docs/archive/plans/2026-08/
 ```
 
-并在 archive 条目注明 superseding ADR / standard 章节（若规范已吸收要点）。
+长期规则：[development-standard §25](../../../standards/development-standard.md)；存储 [ADR 0008](../../../adr/0008-project-mutable-state-lives-outside-source-tree.md)；Launcher [ADR 0009](../../../adr/0009-launcher-control-plane-lives-in-electron-main.md)（2026-08-17 增补 packaged 不再 spawn `:8765`）。
 
 ---
 
@@ -460,3 +461,62 @@ npx tsc -b --pretty false
 git worktree list
 git worktree prune
 ```
+
+---
+
+## 15. D1 / H2 / T9 关闭证据（2026-08-17）
+
+### 15.1 H2 worktree / branch 卫生
+
+**本轮已清理（T4a–T8）：** 各任务 worktree、junction（`.venv` / `web/node_modules` / `挑战杯`）、已 `ff-only` 合入的本地 `codex/compat-*` 分支；已执行 `git worktree prune`。
+
+**Git 仍注册、禁止本任务清理：**
+
+| 路径 | 分支 | HEAD（盘点时） | 原因 |
+| --- | --- | --- | --- |
+| `<root>` | `main` | `41776d7fe`（D1 合入前含 launcher current-checkout Electron 漂移） | 集成工作区 |
+| `.worktrees/challenge-cup-d01-core` | `codex/challenge-cup-d01-core` | `f5407ce1d` | 活跃 peer claim（challenge-cup D01） |
+| `.worktrees/compat-ssot-plan-review` | `codex/compat-ssot-plan-review` | `8752f54de` | 他任务 / 未知是否仍用 |
+| `.worktrees/launch-current-electron-main` | `codex/launch-current-electron-main` | `f5407ce1d` | 他任务 / peer |
+| `.worktrees/compat-ssot-d1-closeout` | `codex/compat-ssot-d1-closeout` | 本关闭 slice | 合入后由本任务清理 |
+
+**磁盘孤儿目录（无 `.git`，未知 owner，全部保留）：** `agent-throughput-docs`、`bulk-copy-layout-contract`、`chat-f4d-layout-fix`、`chat-g3-phase-f-2`、`chat-g3-phase-f-3`、`chat-g3-phase-f-4c`、`chat-wave1-alignment-fix`、`compat-d1-docs`、`compat-ssot-s1-hygiene`、`fe-api-hygiene`、`fix-shell-refresh-loop`、`launcher-fill-layout`、`launcher-shortcut-seamless`、`launcher-status-fast-load`、`probe-control-token`、`restore-tray-menu`、`route-error-telemetry`、`route-loading-shell`、`session-list-bulk-remove`、`simplify-launcher-tray`、`storage-migration-t1g-race-closeout`、`test-runtime-bindings`、`tray-restart-launcher-unified`、`tray-ui-force-refresh`。
+
+未 force 清理。精确残留即上表 + 孤儿目录名单。
+
+### 15.2 T9 只读删除候选报告
+
+**未获物理删除授权。未执行物理删除。**
+
+只读 inventory（集成根，2026-08-17）：`ok=true`；`projectId=ccdawn-vibelution`；`instanceId=bcabd5ca`；`activePaths.migrated=true`；外部合计约 **7,799 files / 1,603,835,886 bytes**。
+
+| 对照 | 路径 | 角色 |
+| --- | --- | --- |
+| External SSOT | `%LOCALAPPDATA%\Vibelution\projects\ccdawn-vibelution\instances\bcabd5ca\{data,runtime,logs,cache}` + project `memory\` | 运行时唯一 active 读路径 |
+| Repo leftover | `<root>\.runtime\` | 约 5,041 files / 1,118,773,946 bytes；rollback 保留 |
+| Repo leftover | `<root>\logs\` | 约 1,310 files / 133,445,919 bytes；rollback 保留 |
+| Repo leftover | `<root>\.cache\` | 目录存在，0 files |
+| Repo leftover | `<root>\.docs\project-memory\` | 约 104 files / 11,575,210 bytes；只读兼容，禁止新写 |
+| Pre-apply backup | `instances\bcabd5ca.pre-legacy-apply-backup-20260816` | apply 前快照；不是当前 external 的完整恢复源 |
+
+**Writer / rollback / integrity：** T2 后 marker-post-cutover 不再回落 repo leftover。`rollback` 只归档 completion marker，两边数据都保留，**不会**把 post-cutover 新写回灌进 leftover。因此 leftover 已不是 SSOT；删它不删当前运行时数据，但会失去 apply 前 rollback 副本（backup 实例仍在）。
+
+**精确删除候选（仅在用户再说「允许物理删除」之后）：**
+
+1. `<project-root>\.runtime\`
+2. `<project-root>\logs\`
+3. `<project-root>\.cache\`
+4. `<project-root>\.docs\project-memory\`（可选留 MOVED 指针）
+
+**可恢复方案：** 不要指望 Git（这些目录被 ignore）。恢复 leftover 用 `bcabd5ca.pre-legacy-apply-backup-20260816` 或未删的 leftover 本身。恢复当前产品状态用 external `activePaths`，不是 leftover。
+
+**删除后验证（未执行）：**
+
+```powershell
+python scripts/migrate_project_storage.py inventory --project "<project-root>"
+# 确认 activePaths.migrated=true 且路径仍指向 external
+.\.venv\Scripts\python.exe tests\select_tests.py --from-git main --commands-only
+# Launcher refresh 后再做一次 inventory / 运行冒烟
+```
+
+**非目录残留（不在 T9 物理删除范围）：** `core/web/services/memory_service.py` `used_by` 仍含 `"/agents/memory/knowledge"`；`core/web/middleware/runtime_scene_api.py` `API_RUNTIME_ALWAYS_RECORD_REFERER_PATHS` 仍含 `"/agents/teams"`；unpackaged `:8765` HTTP 合法保留；T4d XML decoder Deferred。

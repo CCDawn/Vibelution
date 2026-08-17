@@ -15,8 +15,9 @@
 旧版 `%USERPROFILE%\Documents\Vibelution\data` 与项目根内的
 `logs/`、`.runtime/`、`.cache/`、`.docs/project-memory/` 在
 `activePaths.migrated=true` 后**仅作只读 rollback 保留**，不再是 active 读路径。
-迁移规则见 [ADR 0008](../../adr/0008-project-mutable-state-lives-outside-source-tree.md)；
-收敛任务见 [compat SSOT closeout plan](../../plans/2026-08-16-compat-ssot-closeout-plan.md)。
+迁移规则见 [ADR 0008](../../adr/0008-project-mutable-state-lives-outside-source-tree.md)。
+兼容层退役的长期规则见 [development-standard §25](../../standards/development-standard.md)；
+2026-08 关闭账本见 [compat SSOT closeout plan](../../archive/plans/2026-08/2026-08-16-compat-ssot-closeout-plan.md)（非现行规范）。
 
 ## 环境变量
 
