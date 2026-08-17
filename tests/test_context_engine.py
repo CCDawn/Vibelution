@@ -1217,6 +1217,23 @@ def test_string_registry_names_are_kept_as_one_item():
     ) is True
 
 
+def test_context_engine_parses_json_name_lists_and_segment_envelopes():
+    assert context_engine._coerce_str_list('["alpha", "beta"]') == ["alpha", "beta"]
+    assert context_engine._coerce_str_list(bytearray(b"ops-lane")) == ["ops-lane"]
+    assert context_engine._coerce_str_list(
+        {"ops": {"enabled": False}, "quality": {"enabled": True}}
+    ) == ["quality"]
+    assert context_engine._join_context_segments(
+        b'{"items": [{"placement": "cache_prefix", "block": "hello"}]}',
+        b"cache_prefix",
+    ) == "hello"
+    assert context_engine._join_context_segments(
+        [{"placement": b"cache_prefix", "block": b"hello"}],
+        "cache_prefix",
+    ) == "hello"
+    assert context_engine._bounded_limit(True, default=6) == 6
+
+
 def test_list_agent_runs_for_agents_treats_string_id_as_one_agent(monkeypatch):
     seen: dict[str, object] = {}
 
@@ -1230,6 +1247,14 @@ def test_list_agent_runs_for_agents_treats_string_id_as_one_agent(monkeypatch):
     assert seen["ids"] == ["agent-xyz"]
     assert seen["limit"] == 5
     assert payload["agentIds"] == ["agent-xyz"]
+
+    json_payload = context_engine.list_agent_runs_for_agents(
+        '["agent-a", "agent-b"]',
+        limit=True,
+    )
+    assert seen["ids"] == ["agent-a", "agent-b"]
+    assert seen["limit"] == 20
+    assert json_payload["agentIds"] == ["agent-a", "agent-b"]
 
 
 def test_record_agent_turn_result_keeps_explicit_zero_tool_calls(tmp_path, monkeypatch):

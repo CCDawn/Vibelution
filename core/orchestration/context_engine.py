@@ -62,7 +62,7 @@ def _coerce_bool(value: Any, default: bool) -> bool:
         return default
     if isinstance(value, (bytes, bytearray, memoryview)):
         value = bytes(value).decode("utf-8", errors="replace")
-    if isinstance(value, (int, float)):
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
         return bool(value)
     text = str(value).strip().lower()
     if not text:
@@ -74,17 +74,21 @@ def _coerce_bool(value: Any, default: bool) -> bool:
     return default
 
 
-def _as_mapping(value: Any) -> dict[str, Any]:
+def _maybe_json(value: Any) -> Any:
     if isinstance(value, (bytes, bytearray, memoryview)):
         value = bytes(value).decode("utf-8", errors="replace")
     if isinstance(value, str):
         text = value.strip()
-        if not text:
-            return {}
-        try:
-            value = json.loads(text)
-        except json.JSONDecodeError:
-            return {}
+        if text.startswith("{") or text.startswith("["):
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                return value
+    return value
+
+
+def _as_mapping(value: Any) -> dict[str, Any]:
+    value = _maybe_json(value)
     if isinstance(value, Mapping):
         return dict(value)
     return {}
@@ -178,12 +182,12 @@ def _context_segment(
 
 
 def _join_context_segments(segments: list[dict[str, Any]], placement: str) -> str:
-    normalized_placement = str(placement or "").strip()
+    normalized_placement = _coerce_text(placement).strip()
     return "\n\n".join(
-        str(segment.get("block") or "").strip()
+        _coerce_text(segment.get("block")).strip()
         for segment in _mapping_items(segments)
-        if str(segment.get("placement") or "").strip() == normalized_placement
-        and str(segment.get("block") or "").strip()
+        if _coerce_text(segment.get("placement")).strip() == normalized_placement
+        and _coerce_text(segment.get("block")).strip()
     ).strip()
 
 
@@ -1554,15 +1558,28 @@ def _record_context_event(event_code: str, *, outcome: str, fields: dict[str, An
 
 
 def _mapping_items(value: Any) -> list[dict[str, Any]]:
-    if isinstance(value, Mapping):
-        return [dict(value)]
-    if isinstance(value, (str, bytes, bytearray, memoryview)) or value is None:
+    value = _maybe_json(value)
+    if value is None or isinstance(value, (str, bytes, bytearray, memoryview)):
         return []
+    if isinstance(value, Mapping):
+        nested = value.get("items")
+        if nested is None:
+            nested = value.get("segments")
+        if nested is None:
+            nested = value.get("entries")
+        if nested is not None:
+            return _mapping_items(nested)
+        return [dict(value)] if value else []
     try:
         iterator = list(value)
     except TypeError:
         return []
-    return [dict(item) for item in iterator if isinstance(item, Mapping)]
+    items: list[dict[str, Any]] = []
+    for item in iterator:
+        item = _maybe_json(item)
+        if isinstance(item, Mapping):
+            items.append(dict(item))
+    return items
 
 
 def _first_present(*values: Any) -> Any:
@@ -1573,21 +1590,39 @@ def _first_present(*values: Any) -> Any:
 
 
 def _coerce_str_list(value: Any, *, limit: int | None = None) -> list[str]:
+    value = _maybe_json(value)
     if value is None:
         names: list[str] = []
-    elif isinstance(value, bytes):
-        text = value.decode("utf-8", errors="replace").strip()
+    elif isinstance(value, (bytes, bytearray, memoryview)):
+        text = bytes(value).decode("utf-8", errors="replace").strip()
         names = [text] if text else []
     elif isinstance(value, str):
         text = value.strip()
         names = [text] if text else []
     elif isinstance(value, Mapping):
-        names = [str(key or "").strip() for key in value if str(key or "").strip()]
+        nested = value.get("items")
+        if nested is None:
+            nested = value.get("names")
+        if nested is None:
+            nested = value.get("agentIds")
+        if nested is None:
+            nested = value.get("agent_ids")
+        if nested is not None:
+            return _coerce_str_list(nested, limit=limit)
+        names = []
+        for key, item in value.items():
+            if isinstance(item, Mapping) and not _coerce_bool(
+                item.get("enabled", item.get("enable")), True
+            ):
+                continue
+            text = _coerce_text(key).strip()
+            if text and text not in names:
+                names.append(text)
     else:
         try:
             iterator = list(value)
         except TypeError:
-            text = str(value or "").strip()
+            text = _coerce_text(value).strip()
             names = [text] if text else []
         else:
             names = []
