@@ -100,3 +100,34 @@ def test_prepare_accepts_mapping_json_and_non_mapping_without_crash():
     )
     assert from_view.mode == "chat"
     assert from_view.session_id == "session-e"
+
+
+def test_prepare_unwraps_runtime_envelopes_and_rejects_bool_identity():
+    runtime = prepare_agent_turn_runtime(
+        {
+            "runtime": {
+                "mode": "chat",
+                "runKind": "chat_turn",
+                "sessionId": "session-env",
+                "agentId": "agent-env",
+            }
+        }
+    )
+    assert runtime.mode == "chat"
+    assert runtime.run_kind == "chat_turn"
+    assert runtime.session_id == "session-env"
+    assert runtime.agent_id == "agent-env"
+
+    from_json = prepare_agent_turn_runtime(
+        '{"payload":{"mode":"chat","run_kind":"chat_turn","session_id":"session-payload"}}'
+    )
+    assert from_json.mode == "chat"
+    assert from_json.session_id == "session-payload"
+
+    bool_mode = prepare_agent_turn_runtime({"mode": True, "runKind": True, "sessionId": True})
+    assert bool_mode.mode == "self_evolution"
+    assert bool_mode.run_kind == "self_evolution"
+    assert bool_mode.session_id == ""
+    env = runtime_metadata_env({"request": {"mode": "chat", "runKind": "chat_turn", "sessionId": "session-req"}})
+    assert env["VIBELUTION_TURN_MODE"] == "chat"
+    assert env["VIBELUTION_TURN_SESSION_ID"] == "session-req"
