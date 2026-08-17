@@ -24,30 +24,97 @@ DEFAULT_MAX_CALLS_BY_MODEL_FAMILY: dict[str, int] = {
 }
 
 
+def _decode_binary(value: Any) -> Any:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).decode("utf-8", errors="replace")
+    return value
+
+
+def _maybe_json(value: Any) -> Any:
+    value = _decode_binary(value)
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if not text or text[0] not in "{[":
+        return value
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return value
+
+
 def _coerce_text(value: Any) -> str:
     if value is None:
         return ""
-    if isinstance(value, (bytes, bytearray, memoryview)):
-        return bytes(value).decode("utf-8", errors="replace")
+    value = _decode_binary(value)
     if isinstance(value, str):
         return value
     return str(value)
 
 
-def _as_mapping(value: Any) -> dict[str, Any]:
-    if isinstance(value, (bytes, bytearray, memoryview)):
-        value = bytes(value).decode("utf-8", errors="replace")
-    if isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return {}
-        try:
-            value = json.loads(text)
-        except json.JSONDecodeError:
-            return {}
+def _coerce_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    value = _decode_binary(value)
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return bool(value)
+    text = str(value).strip().lower()
+    if not text:
+        return default
+    if text in {"1", "true", "yes", "on", "enabled"}:
+        return True
+    if text in {"0", "false", "no", "off", "disabled"}:
+        return False
+    return default
+
+
+def _flag_enabled(value: Any, default: bool = True) -> bool:
+    value = _maybe_json(value)
     if isinstance(value, Mapping):
-        return dict(value)
-    return {}
+        nested = value.get("enabled")
+        if nested is None:
+            nested = value.get("visible")
+        return _coerce_bool(nested, default)
+    return _coerce_bool(value, default)
+
+
+def _identity_text(value: Any) -> str:
+    value = _maybe_json(value)
+    if isinstance(value, Mapping):
+        for key in ("model", "id", "name", "provider", "profileId", "profile_id"):
+            text = _coerce_text(value.get(key)).strip()
+            if text:
+                return text
+        return ""
+    return _coerce_text(value).strip()
+
+
+_POLICY_KEYS = (
+    "maxCallsPerTurn",
+    "max_calls_per_turn",
+    "maxCallsPerTurnByModelFamily",
+    "max_calls_per_turn_by_model_family",
+)
+_POLICY_ENVELOPES = ("policy", "toolPolicy", "tool_policy", "config", "payload")
+_FAMILY_ENVELOPES = ("families", "items", "overrides", "byFamily", "by_family")
+
+
+def _as_mapping(value: Any) -> dict[str, Any]:
+    value = _maybe_json(value)
+    if not isinstance(value, Mapping):
+        return {}
+    mapping = dict(value)
+    if any(key in mapping for key in _POLICY_KEYS):
+        return mapping
+    for envelope in _POLICY_ENVELOPES:
+        if envelope not in mapping:
+            continue
+        nested = _as_mapping(mapping.get(envelope))
+        if nested:
+            return nested
+    return mapping
 
 
 def _first_present(*values: Any) -> Any:
@@ -68,7 +135,7 @@ def detect_model_family(
     haystack = " ".join(
         text
         for part in (model, provider, profile_id)
-        for text in [_coerce_text(part).strip().lower()]
+        for text in [_identity_text(part).lower()]
         if text
     )
     if not haystack:
@@ -89,10 +156,10 @@ def detect_model_family(
 
 
 def _positive_int(value: Any, *, default: int = 0) -> int:
+    value = _maybe_json(value)
     if isinstance(value, bool) or value is None:
         value = default
-    if isinstance(value, (bytes, bytearray, memoryview)):
-        value = bytes(value).decode("utf-8", errors="replace")
+    value = _decode_binary(value)
     if isinstance(value, bool) or value is None:
         return 0
     try:
@@ -103,6 +170,31 @@ def _positive_int(value: Any, *, default: int = 0) -> int:
         except (TypeError, ValueError):
             return 0
     return max(0, parsed)
+
+
+def _budget_from_entry(raw_budget: Any, *, default: int = 0) -> int | None:
+    raw_budget = _maybe_json(raw_budget)
+    if isinstance(raw_budget, bool):
+        return None
+    if isinstance(raw_budget, Mapping):
+        if not _flag_enabled(raw_budget, True):
+            return None
+        nested = _first_present(
+            raw_budget.get("maxCallsPerTurn"),
+            raw_budget.get("max_calls_per_turn"),
+            raw_budget.get("maxCalls"),
+            raw_budget.get("max_calls"),
+            raw_budget.get("value"),
+            raw_budget.get("budget"),
+        )
+        if nested is None:
+            return None
+        return _positive_int(nested, default=default)
+    return _positive_int(raw_budget, default=default)
+
+
+def _known_family_key(key: str) -> bool:
+    return key == "default" or key in DEFAULT_MAX_CALLS_BY_MODEL_FAMILY
 
 
 def resolve_max_calls_per_turn(
@@ -161,22 +253,53 @@ def default_max_calls_by_model_family_payload() -> dict[str, int]:
 
 
 def normalize_max_calls_by_model_family(value: Any) -> dict[str, int]:
-    if isinstance(value, (bytes, bytearray, memoryview)):
-        value = bytes(value).decode("utf-8", errors="replace")
-    if isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return {}
-        try:
-            value = json.loads(text)
-        except json.JSONDecodeError:
-            return {}
-    if not isinstance(value, Mapping):
+    value = _maybe_json(value)
+    if isinstance(value, Mapping):
+        mapping = dict(value)
+        has_family_key = any(_known_family_key(_coerce_text(key).strip().lower()) for key in mapping)
+        if not has_family_key:
+            for envelope in _FAMILY_ENVELOPES:
+                if envelope in mapping:
+                    return normalize_max_calls_by_model_family(mapping.get(envelope))
+        normalized: dict[str, int] = {}
+        for raw_key, raw_budget in mapping.items():
+            key = _coerce_text(raw_key).strip().lower()
+            if not key or key in _FAMILY_ENVELOPES:
+                continue
+            budget = _budget_from_entry(raw_budget, default=0)
+            if budget is None:
+                continue
+            normalized[key] = budget
+        return normalized
+    if value is None or isinstance(value, (str, bytes, bytearray, memoryview)):
+        return {}
+    try:
+        iterator = list(value)
+    except TypeError:
         return {}
     normalized: dict[str, int] = {}
-    for raw_key, raw_budget in value.items():
-        key = _coerce_text(raw_key).strip().lower()
-        if not key:
+    for item in iterator:
+        item = _maybe_json(item)
+        if isinstance(item, Mapping):
+            if not _flag_enabled(item, True):
+                continue
+            key = _coerce_text(
+                _first_present(
+                    item.get("family"),
+                    item.get("name"),
+                    item.get("id"),
+                    item.get("modelFamily"),
+                    item.get("model_family"),
+                )
+            ).strip().lower()
+            if not key:
+                continue
+            budget = _budget_from_entry(item, default=0)
+            if budget is None:
+                continue
+            normalized[key] = budget
             continue
-        normalized[key] = _positive_int(raw_budget, default=0)
+        key = _coerce_text(item).strip().lower()
+        if key:
+            normalized[key] = DEFAULT_MAX_CALLS_BY_MODEL_FAMILY.get(key, 0)
     return normalized
