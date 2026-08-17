@@ -56,6 +56,7 @@ describe("Chat session tool approval API", () => {
     expect(apiSource).toContain("/messages");
     expect(apiSource).toContain("/messages/edit-resubmit");
     expect(apiSource).toContain("/stop");
+    expect(apiSource).toContain('priority: "high"');
     expect(apiSource).toContain("/guidance");
     expect(apiSource).toContain("/attachments");
     expect(apiSource).toContain("/llm-options");

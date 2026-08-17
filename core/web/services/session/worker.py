@@ -142,6 +142,84 @@ def _attach_runtime_prompt_assembly_manifest(result: Any, runtime_agent: Any) ->
     return result
 
 
+def _finish_session_turn_worker(
+    session_id: str,
+    turn_id: str,
+    turn_control: Any,
+) -> None:
+    """Release running-turn bookkeeping after persist or an early stop abort."""
+
+    s = _service()
+    s._ensure_session_turn_terminal_fallback(
+        session_id,
+        turn_id,
+        stop_reason=s._get_turn_control_stop_reason(turn_control),
+    )
+    s._record_session_turn_lifecycle_event(
+        session_id,
+        "worker_finished",
+        turn_id=turn_id,
+        outcome="finished",
+        fields={
+            "wasCurrentTurn": s._is_session_turn_current(session_id, turn_id),
+        },
+    )
+    s._record_session_execution_registry_event(
+        session_id,
+        turn_id,
+        "main_agent_loop",
+        "finished",
+        details={"wasCurrentTurn": s._is_session_turn_current(session_id, turn_id)},
+    )
+    s._set_session_running(session_id, False, turn_id=turn_id)
+    s._clear_session_turn_control(session_id, turn_id=turn_id)
+    s._publish_session_detail_snapshot(session_id)
+
+
+def _abort_session_turn_for_stop(
+    *,
+    session_id: str,
+    turn_id: str,
+    turn_control: Any,
+    stage: str,
+    mental_model_enabled: bool,
+    context: dict[str, Any],
+    finish_worker: bool,
+) -> bool:
+    """Persist a user stop if the controller already requested one.
+
+    ``finish_worker=True`` is for aborting *before* the main ``try/finally``
+    so running-state cleanup still happens. Inside that ``try``, leave
+    cleanup to ``finally``.
+    """
+
+    s = _service()
+    stop_reason = s._get_turn_control_stop_reason(turn_control)
+    if not stop_reason:
+        return False
+    s._record_session_turn_lifecycle_event(
+        session_id,
+        "stop_observed",
+        turn_id=turn_id,
+        outcome="stopped",
+        fields={
+            "stage": stage,
+            "stopReason": trim_lines(stop_reason, max_lines=2),
+        },
+    )
+    s._persist_session_turn_result(
+        session_id,
+        s._build_stopped_turn_result(stop_reason),
+        mental_model_enabled=mental_model_enabled,
+        active_task_hint=context.get("active_task"),
+        user_message_source=str(context.get("user_message_source") or "").strip(),
+        turn_id=turn_id,
+    )
+    if finish_worker:
+        _finish_session_turn_worker(session_id, turn_id, turn_control)
+    return True
+
+
 def _run_session_turn(context: dict[str, Any]) -> None:
     s = _service()
     prepare_started_at = s._perf_counter()
@@ -169,6 +247,16 @@ def _run_session_turn(context: dict[str, Any]) -> None:
         requested=mental_model_requested,
     )
     mental_model_enabled = mental_model_decision.effective_enabled
+    if _abort_session_turn_for_stop(
+        session_id=session_id,
+        turn_id=turn_id,
+        turn_control=turn_control,
+        stage="prepare",
+        mental_model_enabled=mental_model_enabled,
+        context=context,
+        finish_worker=True,
+    ):
+        return
     runtime_status_requested = s._normalize_optional_bool(context.get("runtime_status_enabled"))
     llm_slot = str(context.get("llm_slot") or s.SESSION_LLM_SLOT_DIALOGUE).strip() or s.SESSION_LLM_SLOT_DIALOGUE
     prepare_timings: dict[str, Any] = {}
@@ -237,6 +325,16 @@ def _run_session_turn(context: dict[str, Any]) -> None:
     )
     agent_prompt_snapshot_block = s._render_agent_prompt_snapshot_block(agent_prompt_snapshot)
     prepare_timings["promptSnapshotMs"] = s._elapsed_ms(stage_started_at)
+    if _abort_session_turn_for_stop(
+        session_id=session_id,
+        turn_id=turn_id,
+        turn_control=turn_control,
+        stage="prepare_prompt_snapshot",
+        mental_model_enabled=mental_model_enabled,
+        context=context,
+        finish_worker=True,
+    ):
+        return
     prepare_timings["promptSnapshotIncluded"] = bool(agent_prompt_snapshot_block)
     prepare_timings["promptSnapshotReason"] = str(agent_prompt_snapshot.get("reason") or "").strip() if isinstance(agent_prompt_snapshot, dict) else ""
     stage_started_at = s._perf_counter()
@@ -262,6 +360,16 @@ def _run_session_turn(context: dict[str, Any]) -> None:
     )
     prepare_timings["agentContextBuildMs"] = s._elapsed_ms(stage_started_at)
     prepare_timings["agentContextBuildSkipped"] = bool(agent_id and agent_context_packet is None)
+    if _abort_session_turn_for_stop(
+        session_id=session_id,
+        turn_id=turn_id,
+        turn_control=turn_control,
+        stage="prepare_agent_context",
+        mental_model_enabled=mental_model_enabled,
+        context=context,
+        finish_worker=True,
+    ):
+        return
     agent_context_timings = (
         dict(getattr(agent_context_packet, "timings", {}) or {})
         if agent_context_packet is not None
@@ -403,6 +511,16 @@ def _run_session_turn(context: dict[str, Any]) -> None:
         outcome="completed",
         fields=s._session_turn_prepare_timing_log_fields(prepare_timings),
     )
+    if _abort_session_turn_for_stop(
+        session_id=session_id,
+        turn_id=turn_id,
+        turn_control=turn_control,
+        stage="prepare_completed",
+        mental_model_enabled=mental_model_enabled,
+        context=context,
+        finish_worker=True,
+    ):
+        return
     llm_model_id_for_turn = str(getattr(resolved_agent_llm, "model_id", "") or "") or s._session_agent_llm_slot_model_id(
         agent_instance or historical_agent,
         llm_slot,
@@ -582,26 +700,15 @@ def _run_session_turn(context: dict[str, Any]) -> None:
             s.mental_model_enabled_override(mental_model_enabled),
             task_workspace_context,
         ):
-            initial_stop_reason = s._get_turn_control_stop_reason(turn_control)
-            if initial_stop_reason:
-                s._record_session_turn_lifecycle_event(
-                    session_id,
-                    "stop_observed",
-                    turn_id=turn_id,
-                    outcome="stopped",
-                    fields={
-                        "stage": "initial",
-                        "stopReason": trim_lines(initial_stop_reason, max_lines=2),
-                    },
-                )
-                s._persist_session_turn_result(
-                    session_id,
-                    s._build_stopped_turn_result(initial_stop_reason),
-                    mental_model_enabled=mental_model_enabled,
-                    active_task_hint=context.get("active_task"),
-                    user_message_source=str(context.get("user_message_source") or "").strip(),
-                    turn_id=turn_id,
-                )
+            if _abort_session_turn_for_stop(
+                session_id=session_id,
+                turn_id=turn_id,
+                turn_control=turn_control,
+                stage="initial",
+                mental_model_enabled=mental_model_enabled,
+                context=context,
+                finish_worker=False,
+            ):
                 return
 
             with s._capture_session_ui_stream(session_id, turn_capture, mental_model_enabled=mental_model_enabled):
@@ -1133,30 +1240,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
         if s._is_session_turn_current(session_id, turn_id):
             s._persist_session_turn_failure(session_id, context, exc)
     finally:
-        s._ensure_session_turn_terminal_fallback(
-            session_id,
-            turn_id,
-            stop_reason=s._get_turn_control_stop_reason(turn_control),
-        )
-        s._record_session_turn_lifecycle_event(
-            session_id,
-            "worker_finished",
-            turn_id=turn_id,
-            outcome="finished",
-            fields={
-                "wasCurrentTurn": s._is_session_turn_current(session_id, turn_id),
-            },
-        )
-        s._record_session_execution_registry_event(
-            session_id,
-            turn_id,
-            "main_agent_loop",
-            "finished",
-            details={"wasCurrentTurn": s._is_session_turn_current(session_id, turn_id)},
-        )
-        s._set_session_running(session_id, False, turn_id=turn_id)
-        s._clear_session_turn_control(session_id, turn_id=turn_id)
-        s._publish_session_detail_snapshot(session_id)
+        _finish_session_turn_worker(session_id, turn_id, turn_control)
 
 def _run_session_continuation_loop(
     agent: Any,

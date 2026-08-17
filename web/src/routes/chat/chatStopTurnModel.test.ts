@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import type { SessionDetail } from "../../api/types";
+import { queryKeys } from "../../api/queryKeys";
 import {
+  congestedQueryKeysForSessionStop,
   resolveSessionStopTurnId,
   sessionStopRequestBody,
 } from "./chatStopTurnModel";
@@ -80,5 +82,17 @@ describe("chat stop turn model", () => {
   it("does not create an unbound stop request", () => {
     expect(sessionStopRequestBody("")).toBeUndefined();
     expect(sessionStopRequestBody(" turn-1 ")).toBe('{"turnId":"turn-1"}');
+  });
+
+  it("cancels congested catalog queries before a stop POST competes for HTTP/1.1 slots", () => {
+    expect(congestedQueryKeysForSessionStop("session-a")).toEqual([
+      queryKeys.conversations(),
+      queryKeys.sessions(),
+      queryKeys.session("session-a"),
+      queryKeys.launcherBranchInstances(),
+      queryKeys.launcherStatus(),
+      queryKeys.gitStatus(),
+      queryKeys.agents(),
+    ]);
   });
 });

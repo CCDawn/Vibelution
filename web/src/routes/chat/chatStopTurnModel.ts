@@ -1,3 +1,6 @@
+import type { QueryClient } from "@tanstack/react-query";
+
+import { queryKeys } from "../../api/queryKeys";
 import type { SessionDetail } from "../../api/types";
 import { latestUserTurnId } from "../chatActiveTurnLayer";
 
@@ -22,4 +25,26 @@ export function sessionStopRequestBody(turnId: string) {
     return undefined;
   }
   return JSON.stringify({ turnId: normalizedTurnId });
+}
+
+export function congestedQueryKeysForSessionStop(sessionId: string) {
+  const normalizedSessionId = clean(sessionId);
+  return [
+    queryKeys.conversations(),
+    queryKeys.sessions(),
+    queryKeys.session(normalizedSessionId),
+    queryKeys.launcherBranchInstances(),
+    queryKeys.launcherStatus(),
+    queryKeys.gitStatus(),
+    queryKeys.agents(),
+  ] as const;
+}
+
+export async function cancelCongestedQueriesForSessionStop(
+  queryClient: QueryClient,
+  sessionId: string,
+) {
+  await Promise.all(
+    congestedQueryKeysForSessionStop(sessionId).map((queryKey) => queryClient.cancelQueries({ queryKey })),
+  );
 }

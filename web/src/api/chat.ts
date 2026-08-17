@@ -321,7 +321,8 @@ export function stopSessionTurn(sessionId: string, turnId: string): Promise<Sess
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ turnId }),
-  });
+    priority: "high",
+  } as RequestInit);
 }
 
 export function submitSessionGuidance(

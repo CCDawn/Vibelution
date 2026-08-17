@@ -24,6 +24,9 @@ def request_stop_session_turn(session_id: str, *, expected_turn_id: str = "") ->
     Interactive HTTP callers always provide ``expected_turn_id``. Trusted
     internal shutdown paths may omit it to retain explicit stop-current
     behavior.
+
+    Signal the controller before hydrating session detail. A running turn
+    must start stopping even when detail projection is congested.
     """
     s = _service()
 
@@ -32,11 +35,10 @@ def request_stop_session_turn(session_id: str, *, expected_turn_id: str = "") ->
     if not conversation_id:
         raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
 
-    detail = s.get_session_detail(conversation_id)
-    if detail is None:
-        raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
-
     if not s._is_session_running(conversation_id):
+        detail = s.get_session_detail(conversation_id)
+        if detail is None:
+            raise s.SessionNotFoundError(s.text_for(lang, zh="未找到当前会话。", en="Session not found."))
         return detail
 
     controller = s._get_session_turn_control(conversation_id)
@@ -92,8 +94,17 @@ def request_stop_session_turn(session_id: str, *, expected_turn_id: str = "") ->
         )
         s._set_session_running(conversation_id, False, turn_id=controller.turn_id)
         controller.mark_released_to_user()
+    next_detail = s.get_session_detail(conversation_id)
+    if next_detail is not None:
+        s._publish_session_detail_snapshot(conversation_id, detail=next_detail)
+        return next_detail
     s._publish_session_detail_snapshot(conversation_id)
-    return s.get_session_detail(conversation_id) or detail
+    return {
+        "id": conversation_id,
+        "currentPhase": "stopping",
+        "stopRequested": True,
+        "activeTurnId": str(stop_snapshot.get("turnId") or controller.turn_id),
+    }
 
 
 def _persist_session_interrupted_snapshot(
