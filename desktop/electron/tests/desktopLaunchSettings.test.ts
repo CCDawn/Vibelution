@@ -136,6 +136,32 @@ describe("desktop launch settings", () => {
     expect(settings.profileError).toBe("");
   });
 
+  it("recovers operatorConfigPath from a leftover profile configPath once without writing it back", () => {
+    const resourcesRoot = "C:/package/resources";
+    const profilePath = join(resourcesRoot, DESKTOP_LAUNCH_PROFILE_FILE);
+
+    const settings = resolveWithFiles({
+      resourcesRoot,
+      files: {
+        [profilePath]: JSON.stringify({
+          schemaVersion: 1,
+          workspaceRoot: "C:/Users/17533/Desktop/Vibelution",
+          configPath: "C:/Users/17533/Documents/Vibelution/config/config.toml",
+          pythonPath: "C:/Python/python.exe"
+        })
+      }
+    });
+
+    expect(settings.configPath).toBe("C:/Users/17533/Documents/Vibelution/config/config.toml");
+    expect(
+      createDesktopLaunchProfile({
+        workspaceRoot: settings.workspaceRoot,
+        operatorConfigPath: settings.configPath,
+        pythonPath: settings.pythonPath
+      })
+    ).not.toHaveProperty("configPath");
+  });
+
   it("round-trips generated package launch profiles through the runtime resolver", () => {
     const resourcesRoot = "C:/Users/17533/Desktop/Vibelution/dist/desktop/win-unpacked/resources";
     const profilePath = join(resourcesRoot, DESKTOP_LAUNCH_PROFILE_FILE);
@@ -153,6 +179,7 @@ describe("desktop launch settings", () => {
       operatorConfigPath: "C:/Users/17533/Documents/Vibelution/config/config.toml",
       pythonPath: "C:/Users/17533/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe"
     });
+    expect(JSON.parse(serialized)).not.toHaveProperty("configPath");
 
     const settings = resolveWithFiles({
       resourcesRoot,

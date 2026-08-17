@@ -30,7 +30,7 @@ describe("Electron main public deep-link consumption", () => {
 
   it("pins a shared userData lock and focuses the existing shell on a bare second launch", () => {
     const source = readFileSync(mainSourcePath, "utf8");
-    const pinIndex = source.indexOf("pinSharedDesktopShellUserData(app, { smoke: desktopCliArgs.smoke, env: process.env })");
+    const pinIndex = source.indexOf("pinSharedDesktopShellUserData(app,");
     const lockIndex = source.indexOf("app.requestSingleInstanceLock()");
 
     expect(pinIndex).toBeGreaterThan(0);

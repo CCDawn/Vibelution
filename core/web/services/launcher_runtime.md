@@ -38,16 +38,17 @@ Electron main (TS) = Launcher 控制面（ADR 0009 已落地）
   → 工作台 renderer 加载工作台 origin（通常 :8000）
   → lifecycle / 分支实例 / settings / maintenance 由 main 编排，经无控制台 Python JSON CLI
     （vibelution_desktop_entry.py --action lifecycle|branch-instance|launcher-api|resolve-workbench）
-  → Python 子进程：Runtime Manager + FastAPI 工作台（不再长期占用 :8765）
+  → Python 子进程：Runtime Manager + FastAPI 工作台（packaged/product 不占用 :8765）
   → 关闭桌面壳 / 重启 Launcher 必须先停掉 RM daemon 及其工作台/隔离实例进程树
   → 打开桌面壳时必须先清掉上一轮托管进程树，不能 attach 到已无父进程的 RM/工作台；点启动/重启也会先杀掉遗留工作台再拉当前 checkout
   → close transaction / desktop session 真相在 main；Python 侧只报告 backend 状态
   → 「工作台开着」= 后端健康 **且** Electron 工作台窗口 open。仅后端就绪（noBrowser）是 `partial` / `browser_missing`，不是 `open`
   → isolated worktree backends 仍在同一 desktop shell 开 `{shortName} 台`
+  → Electron `launcherServiceClient` 只 `stop-launcher` 清理 leftover owned PID，不再 bootstrap uvicorn `:8765`
 
 VibelutionLauncher.exe = thin no-console shim
-  → packaged Vibelution.exe 存在：转发 start|stop|restart|rebuild-and-start 给 Electron（second-instance）
-  → 无 packaged Electron（开发 checkout）：legacy Python 路径 + WinForms NotifyIcon
+  → packaged Vibelution.exe 存在：转发 start|stop|restart|rebuild-and-start 给 Electron（second-instance），不自建 :8765
+  → 无 packaged Electron（开发 checkout）：`vibelution_desktop_entry.py --action launcher` browser-dev HTTP + WinForms NotifyIcon（owner：`tests/test_launcher_scripts.py` / native shim tests；不是产品控制面，不设观察期）
 ```
 
 Web: `core/web/routes/launcher.py` · `runtime.py` · `logs.py` → `launcher_service` / `runtime_service` / `runtime_scene_service`（薄委托）。
