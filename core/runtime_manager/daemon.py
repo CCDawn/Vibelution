@@ -61,6 +61,7 @@ from .state_store import clear_pid, default_state, load_pid, load_state, now_iso
 from . import work_run_store
 from .process_inventory import (
     list_repo_runtime_processes,
+    managed_browser_pid_matches_profile,
     residual_process_payload,
     terminate_process_descendants,
     terminate_unmanaged_workbench_processes,
@@ -4927,9 +4928,24 @@ class RuntimeManagerDaemon:
                 pid = 0
             if pid > 0 and pid not in excluded_pids:
                 known_pids.add(pid)
+        browser_profile_dir = "" if external_window_owner else str(observed.get("browserProfileDir") or "").strip()
+        trusted_browser_pids: set[int] = set()
+        if browser_profile_dir:
+            for key in ("browserLaunchPid", "browserWindowPid"):
+                try:
+                    pid = int(observed.get(key) or 0)
+                except (TypeError, ValueError):
+                    pid = 0
+                if (
+                    pid > 0
+                    and pid not in excluded_pids
+                    and managed_browser_pid_matches_profile(pid, profile_dir=browser_profile_dir)
+                ):
+                    trusted_browser_pids.add(pid)
+        known_pids.update(trusted_browser_pids)
         cleanup_result = terminate_workbench_processes(
             project_root=PROJECT_ROOT,
-            browser_profile_dir="" if external_window_owner else str(observed.get("browserProfileDir") or ""),
+            browser_profile_dir="" if trusted_browser_pids else browser_profile_dir,
             exclude_pids=excluded_pids,
             known_pids=known_pids,
             timeout_seconds=_FAST_CLOSE_PROCESS_TERMINATE_TIMEOUT_SECONDS,
