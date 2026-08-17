@@ -135,6 +135,11 @@ export function ChallengeMvpProgressPanel({
                 </div>
                 <div className={styles.experimentIds}>{experiment.themeId}</div>
                 <div className={styles.experimentIds}>{experiment.campaignId}</div>
+                <div className={styles.locator}>
+                  {zh
+                    ? "下一合法动作：DEV fixture；真实 CUDA / DANDI 需单独科研授权。"
+                    : "Next legal action: DEV fixture; real CUDA/DANDI needs research authorization."}
+                </div>
               </article>
             ))}
           </div>
@@ -151,6 +156,35 @@ export function ChallengeMvpProgressPanel({
               {zh ? "提交方向要求尚未捕获，当前不能标记 submission ready。" : "Submission direction is not captured; submission ready remains blocked."}
             </div>
           ) : null}
+          <section className={styles.readiness} aria-label={zh ? "开发态就绪与批次控制" : "DEV readiness and batch control"}>
+            <div className={styles.sectionHeader}>
+              <strong>{zh ? "开发态就绪 / 批次 / 证据 locator" : "DEV readiness / batches / locators"}</strong>
+            </div>
+            <div className={styles.gateRow}>
+              <VStatusChip tone="warning">R0 source_integrity=CLI</VStatusChip>
+              <VStatusChip tone="warning">R1 clean_clone=CLI</VStatusChip>
+              <VStatusChip tone="warning">PlatformFlowReady CLI</VStatusChip>
+              <VStatusChip tone={program.directionSubmissionRequirement.blocksSubmissionReady ? "warning" : "accent"}>
+                {program.directionSubmissionRequirement.blocksSubmissionReady
+                  ? (zh ? "提交投影未冻结" : "Submission projection unfrozen")
+                  : (zh ? "提交投影已捕获" : "Submission projection captured")}
+              </VStatusChip>
+            </div>
+            <div className={styles.locator}>
+              python scripts/challenge_cup/platform_flow_ready.py
+            </div>
+            <div className={styles.boundary} role="note">
+              <strong>{zh ? "DEV 批次" : "DEV batches"}</strong>
+              <span>
+                {zh
+                  ? "允许 fixture 计划 dev-1 / dev-5；真实 G1/G5/G12/G125、Qwen 与联网搜集未授权。"
+                  : "Fixture plans dev-1 / dev-5 are allowed; real G1/G5/G12/G125, Qwen and live collection are unauthorized."}
+              </span>
+            </div>
+            <div className={styles.locator}>
+              {zh ? "下一合法动作：运行 DEV fixture 与 PlatformFlowReady CLI，然后停止于 RESEARCH_AUTHORIZATION_REQUIRED。" : "Next legal action: run DEV fixtures and the PlatformFlowReady CLI, then stop at RESEARCH_AUTHORIZATION_REQUIRED."}
+            </div>
+          </section>
         </section>
       ) : (
         <VEmptyState title={zh ? "Program v2 状态不可用" : "Program v2 unavailable"} className={styles.empty}>

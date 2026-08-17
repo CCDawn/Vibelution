@@ -150,6 +150,10 @@ describe("ChallengeMvpProgressPanel", () => {
     expect(markup).toContain("SCI-001");
     expect(markup).toContain("run-9");
     expect(markup).toContain("详情");
+    expect(markup).toContain("DEV fixture");
+    expect(markup).toContain("dev-1");
+    expect(markup).toContain("platform_flow_ready.py");
+    expect(markup).toContain("RESEARCH_AUTHORIZATION_REQUIRED");
   });
 
   it("keeps zero-approved Program state explicit without claiming completion", () => {
