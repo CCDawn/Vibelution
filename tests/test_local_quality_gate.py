@@ -342,7 +342,7 @@ def test_commit_mode_without_relevant_staged_files_passes(git_repo: Path) -> Non
             [str(gate.PROJECT_PYTHON_NAME), "tests/select_tests.py"],
         ),
         (
-            ".\\.venv\\Scripts\\python.exe tests/prompt_debugger.py --suite",
+            ".\\.venv\\Scripts\\python.exe tests/prompt_debugger.py --suite --quick",
             "prompt-debugger",
             [str(gate.PROJECT_PYTHON_NAME), "tests/prompt_debugger.py"],
         ),
