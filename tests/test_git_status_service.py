@@ -522,3 +522,225 @@ def test_ai_diff_payload_truncates_large_diffs_without_dropping_summary(monkeypa
 
     assert "M core/web/services/git_status_service.py" in payload["summary"]
     assert "... file diff truncated ..." in payload["diff"]
+
+
+def _capture_git_scene_events(monkeypatch):
+    events = []
+    monkeypatch.setattr(
+        git_status_service,
+        "_record_git_scene_event",
+        lambda phase, event_code, **kwargs: events.append(
+            {
+                "phase": phase,
+                "event_code": event_code,
+                **kwargs,
+            }
+        ),
+    )
+    return events
+
+
+def _status_metadata_results(branch: str = "codex/git-read-logging"):
+    return {
+        ("branch", "--show-current"): ok(f"{branch}\n"),
+        ("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"): ok(f"origin/{branch}\n"),
+        ("rev-list", "--left-right", "--count", f"origin/{branch}...HEAD"): ok("0\t0\n"),
+        (
+            "log",
+            "--max-count=5",
+            "--date=iso-strict",
+            "--pretty=format:%H%x1f%h%x1f%aN%x1f%aI%x1f%s",
+            f"origin/{branch}..HEAD",
+        ): ok(),
+        ("worktree", "list", "--porcelain"): ok(),
+        ("branch", "--no-merged", "main", "--format=%(refname:short)"): ok(),
+    }
+
+
+def test_get_git_status_records_truncated_read_once_per_cache_miss(monkeypatch):
+    service = FakeGitService(
+        [
+            changed_file("web/src/routes/GitRoute.tsx"),
+            changed_file("core/web/services/git_status_service.py"),
+        ],
+        results=_status_metadata_results(),
+    )
+    events = _capture_git_scene_events(monkeypatch)
+    monkeypatch.setattr(git_status_service, "get_git_memory_service", lambda: service)
+
+    first = git_status_service.get_git_status(limit=1)
+    second = git_status_service.get_git_status(limit=1)
+
+    assert first["truncated"] is True
+    assert second["truncated"] is True
+    loaded = [event for event in events if event["event_code"] == "git.status.loaded"]
+    assert len(loaded) == 1
+    assert loaded[0]["phase"] == "status"
+    assert loaded[0]["level"] == "warning"
+    assert loaded[0]["outcome"] == "truncated"
+    assert loaded[0]["lifecycle"] is False
+    assert loaded[0]["fields"]["truncated"] is True
+    assert loaded[0]["fields"]["cacheHit"] is False
+    assert loaded[0]["fields"]["totalFiles"] == 2
+
+
+def test_get_git_status_skips_fast_complete_reads(monkeypatch):
+    service = FakeGitService(
+        [changed_file("web/src/routes/GitRoute.tsx")],
+        results=_status_metadata_results(),
+    )
+    events = _capture_git_scene_events(monkeypatch)
+    monkeypatch.setattr(git_status_service, "get_git_memory_service", lambda: service)
+
+    payload = git_status_service.get_git_status()
+
+    assert payload["available"] is True
+    assert payload["truncated"] is False
+    assert events == []
+
+
+def test_get_git_status_records_slow_read_even_when_complete(monkeypatch):
+    service = FakeGitService(
+        [changed_file("web/src/routes/GitRoute.tsx")],
+        results=_status_metadata_results(),
+    )
+    events = _capture_git_scene_events(monkeypatch)
+    monkeypatch.setattr(git_status_service, "get_git_memory_service", lambda: service)
+    clock = {"calls": 0}
+
+    def fake_perf_counter():
+        clock["calls"] += 1
+        return 0.0 if clock["calls"] == 1 else 2.5
+
+    monkeypatch.setattr(git_status_service.time, "perf_counter", fake_perf_counter)
+
+    payload = git_status_service.get_git_status()
+
+    assert payload["truncated"] is False
+    loaded = [event for event in events if event["event_code"] == "git.status.loaded"]
+    assert len(loaded) == 1
+    assert loaded[0]["outcome"] == "slow"
+    assert loaded[0]["fields"]["elapsedMs"] == 2500.0
+    assert loaded[0]["fields"]["truncated"] is False
+
+
+def test_get_git_status_records_unavailable_on_cache_miss_only(monkeypatch):
+    service = FakeGitService([])
+
+    def scan_working_tree(store=False):
+        service.scan_calls += 1
+        return SimpleNamespace(
+            available=False,
+            error="not a git repository",
+            snapshot_id="unavailable",
+            created_at="2026-05-21T10:00:00",
+            base_rev=None,
+            files=[],
+        )
+
+    service.scan_working_tree = scan_working_tree
+    events = _capture_git_scene_events(monkeypatch)
+    monkeypatch.setattr(git_status_service, "get_git_memory_service", lambda: service)
+
+    first = git_status_service.get_git_status()
+    second = git_status_service.get_git_status()
+
+    assert first["available"] is False
+    assert second["available"] is False
+    failed = [event for event in events if event["event_code"] == "git.status.failed"]
+    assert len(failed) == 1
+    assert failed[0]["level"] == "error"
+    assert failed[0]["outcome"] == "failed"
+    assert failed[0]["fields"]["error"] == "not a git repository"
+    assert failed[0]["lifecycle"] is False
+
+
+def test_get_git_status_records_scan_exception_then_reraises(monkeypatch):
+    service = FakeGitService([])
+
+    def scan_working_tree(store=False):
+        raise RuntimeError("scan exploded")
+
+    service.scan_working_tree = scan_working_tree
+    events = _capture_git_scene_events(monkeypatch)
+    monkeypatch.setattr(git_status_service, "get_git_memory_service", lambda: service)
+
+    with pytest.raises(RuntimeError, match="scan exploded"):
+        git_status_service.get_git_status()
+
+    failed = [event for event in events if event["event_code"] == "git.status.failed"]
+    assert len(failed) == 1
+    assert failed[0]["fields"]["errorType"] == "RuntimeError"
+    assert failed[0]["fields"]["error"] == "scan exploded"
+
+
+def test_get_git_commits_records_failed_log(monkeypatch):
+    service = FakeGitService(
+        [],
+        results={
+            (
+                "log",
+                "--max-count=20",
+                "--date=iso-strict",
+                "--pretty=format:%H%x1f%h%x1f%aN%x1f%aI%x1f%s",
+            ): failed("fatal: your current branch does not have any commits yet"),
+        },
+    )
+    events = _capture_git_scene_events(monkeypatch)
+    monkeypatch.setattr(git_status_service, "get_git_memory_service", lambda: service)
+
+    payload = git_status_service.get_git_commits()
+
+    assert payload["available"] is False
+    failed_events = [event for event in events if event["event_code"] == "git.commits.failed"]
+    assert len(failed_events) == 1
+    assert failed_events[0]["phase"] == "commits"
+    assert "fatal: your current branch does not have any commits yet" in failed_events[0]["fields"]["error"]
+
+
+def test_get_git_file_diff_records_truncated_preview(monkeypatch):
+    service = FakeGitService(
+        [changed_file("web/src/routes/GitRoute.tsx")],
+        results={
+            ("diff", "--cached", "--no-ext-diff", "--no-color", "--", "web/src/routes/GitRoute.tsx"): ok(),
+            ("diff", "--no-ext-diff", "--no-color", "--", "web/src/routes/GitRoute.tsx"): ok("+" + ("x" * 80)),
+        },
+    )
+    events = _capture_git_scene_events(monkeypatch)
+    monkeypatch.setattr(git_status_service, "get_git_memory_service", lambda: service)
+    monkeypatch.setattr(git_status_service, "MAX_DIFF_CHARS", 20)
+
+    payload = git_status_service.get_git_file_diff("web/src/routes/GitRoute.tsx")
+
+    assert payload["truncated"] is True
+    loaded = [event for event in events if event["event_code"] == "git.diff.loaded"]
+    assert len(loaded) == 1
+    assert loaded[0]["phase"] == "diff"
+    assert loaded[0]["outcome"] == "truncated"
+    assert loaded[0]["fields"]["path"] == "web/src/routes/GitRoute.tsx"
+    assert "xxxx" not in json.dumps(events)
+
+
+def test_get_git_object_detail_records_unavailable_and_redacts_absolute_path(monkeypatch):
+    service = FakeGitService([])
+    service.is_git_available = lambda: (False, "not a git repository")
+    events = _capture_git_scene_events(monkeypatch)
+    monkeypatch.setattr(git_status_service, "get_git_memory_service", lambda: service)
+
+    payload = git_status_service.get_git_object_detail(
+        "worktree",
+        "codex/demo",
+        path=r"C:\Users\Administrator\Desktop\Vibelution-worktrees\demo",
+    )
+
+    assert payload["available"] is False
+    failed = [event for event in events if event["event_code"] == "git.object.failed"]
+    assert len(failed) == 1
+    assert failed[0]["fields"]["kind"] == "worktree"
+    assert failed[0]["fields"]["path"] == "demo"
+    assert "Vibelution-worktrees" not in json.dumps(events)
+
+
+def test_safe_git_path_for_log_keeps_repo_relative_paths():
+    assert git_status_service._safe_git_path_for_log("web/src/routes/GitRoute.tsx") == "web/src/routes/GitRoute.tsx"
+    assert git_status_service._safe_git_path_for_log("/tmp/secret.diff") == "secret.diff"
