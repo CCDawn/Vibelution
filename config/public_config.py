@@ -37,6 +37,7 @@ from .profiles import apply_runtime_profile
 from .runtime_capabilities import (
     apply_model_capability_overrides,
     strip_runtime_model_capability_fields,
+    upgrade_legacy_capability_cache_if_needed,
 )
 from .settings import (
     MODEL_LIBRARY_DETAIL_FIELDS,
@@ -1077,7 +1078,9 @@ def _legacy_v1_public_payload(public_config: dict | None) -> bool:
 
 
 def load_public_config(config_path: Path | None = None, *, allow_legacy_v1: bool | None = None) -> dict:
-    raw = _load_raw_public_config(_resolve_public_config_path(config_path))
+    resolved = _resolve_public_config_path(config_path)
+    raw = _load_raw_public_config(resolved)
+    upgrade_legacy_capability_cache_if_needed(raw, config_path=resolved)
     if allow_legacy_v1 is None:
         allow_legacy_v1 = _legacy_v1_public_payload(raw)
     return strip_runtime_model_capability_fields(
