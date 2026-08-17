@@ -5,7 +5,7 @@
 | **Status** | `active-plan` |
 | **Created** | 2026-08-16 |
 | **Reviewed** | 2026-08-16（仓库审查结论重放至最新 main） |
-| **Implementation status** | T1 apply 已执行（2026-08-16）；**T1G 代码门已落地**（commit `91a1f6fb4`：readiness / SQLite bundle / quiescence / integrity_check / rollback delta / 同父私有 quarantine 身份安全清理）；**T3b done**（2026-08-17）；T2 **blocked**（未完成）；**T1G 是代码门而非运行时操作**：T1G 落地后未执行任何真实 apply / reapply / rollback / legacy 删除 |
+| **Implementation status** | T1 apply 已执行（2026-08-16）；**T1G 代码门已落地**（commit `91a1f6fb4`：readiness / SQLite bundle / quiescence / integrity_check / rollback delta / 同父私有 quarantine 身份安全清理）；**T2 / T3b done**（2026-08-17）；T2 仅完成代码收口，未执行新的真实 apply / reapply / rollback / legacy 删除 |
 | **Tier** | `HIGH_RISK`（整体）；子任务按 `FAST_PATCH` / `STANDARD_TASK` / `HIGH_RISK` 分级 |
 | **Related ADR** | [0002](../adr/0002-agent-collaboration-session-addressing.md) · [0003](../adr/0003-operator-config-lives-outside-repo.md) · [0004](../adr/0004-product-ui-uses-vui-shadcn-only.md) · [0005](../adr/0005-docs-authority-and-archive-policy.md) · [0008](../adr/0008-project-mutable-state-lives-outside-source-tree.md) · [0009](../adr/0009-launcher-control-plane-lives-in-electron-main.md) |
 | **Related docs** | [development-standard §24](../standards/development-standard.md) · [web/src/api/README.md](../../web/src/api/README.md) · [worktree-collaboration](../agents/worktree-collaboration.md) |
@@ -19,7 +19,7 @@
 
 项目在 ADR 0003 / 0008 / 0009 等决策下已定义 **目标 SSOT**，但代码、工具与运行时仍维护大量 **过渡兼容层**：
 
-- **存储双轨（T1 前）**：`targetPaths.migrated=true` 而 `activePaths.migrated=false` 时，外部目标树已有数据，运行时仍读仓库内 `.runtime/`、`logs/`、`.docs/project-memory/` 等 legacy 路径。T1 apply 后 `activePaths.migrated=true`，legacy 读分支与双轨代码仍需按 T2 退役。
+- **存储双轨（T1 前）**：`targetPaths.migrated=true` 而 `activePaths.migrated=false` 时，外部目标树已有数据，运行时仍读仓库内 `.runtime/`、`logs/`、`.docs/project-memory/` 等 legacy 路径。T1 apply 后 `activePaths.migrated=true`；T2 已将 marker-post-cutover fallback fail-closed 并删除 `storage_paths.py` re-export，marker 缺失时仍保留 pre-cutover 迁移兼容。
 - **域双轨：** 前端 Memory/Knowledge 双 API 模块、Chat 布局三写、Launcher HTTP/IPC + stale runtime shim、后端 LLM v1 / capability cache / chat_state JSON 等。
 - **协作双轨：** audit、reset、quality gate 曾硬编码 `.docs/project-memory`（T3a 已用 resolved API）；agent live registry 已改走 Git common-dir（**T3b done** 2026-08-17）；磁盘 `.worktrees` 孤儿目录与 Git 注册不一致。
 
@@ -81,7 +81,7 @@ python scripts/migrate_project_storage.py inventory --project "<project-root>"
 | `Vibelution-worktrees` 兄弟目录 | 不存在 |
 | T1 apply 备份 | `instances\bcabd5ca.pre-legacy-apply-backup-20260816` |
 
-**结论：** 存储 **authoritative 切换已完成**；legacy 目录仍只读保留。**post-cutover 总量已增长**，直接 marker rollback 明确 **blocked**；回退只能停写、reverse delta、显式 reconcile 且用户独立确认。当前 rollback 实现只撤 marker/registration 并保留复制数据、**不回灌新写**。T2 门控见 T1G + 稳定门（至少 2026-08-18），不能只靠 48 小时。
+**结论：** 存储 **authoritative 切换已完成**；legacy 目录仍只读保留。**post-cutover 总量已增长**，直接 marker rollback 明确 **blocked**；回退只能停写、reverse delta、显式 reconcile 且用户独立确认。当前 rollback 实现只撤 marker/registration 并保留复制数据、**不回灌新写**。用户于 2026-08-17 明确授权提前完成 T2 代码收口；这不等于授权真实 rollback、reverse reconcile 或 legacy 目录删除。
 
 ---
 
@@ -161,7 +161,7 @@ flowchart TB
 | **Rollback 现状** | post-cutover 总量已增长，**直接 marker rollback 明确 blocked**；回退只能停写、reverse delta、显式 reconcile 且用户独立确认。当前 `rollback` 实现只撤 marker/registration 并保留复制数据，**不回灌新写** |
 | **验证** | storage pytest；新 runtime scene 落外部 `logs/`；`activePaths.memory` 指向 external |
 
-**Task T1G: 迁移后完整性补证 + future apply/reapply 强制门** — **done**（**代码门**，本地 main commit `91a1f6fb4`；非运行时 apply/reapply/rollback/delete；T2 **blocked** 仍须稳定门）
+**Task T1G: 迁移后完整性补证 + future apply/reapply 强制门** — **done**（**代码门**，本地 main commit `91a1f6fb4`；非运行时 apply/reapply/rollback/delete；T2 代码收口已于 2026-08-17 完成）
 
 | 项 | 内容 |
 | --- | --- |
@@ -172,13 +172,14 @@ flowchart TB
 | **门语义** | T1G 落地后，**每次** apply / reapply 仍须自身重验，且用户独立确认；禁止真实 checkout 上未经确认的 apply / rollback |
 | **验证** | `tests/test_storage_migration.py`：**50 passed**（readiness / quiescence / destination conflict / SQLite bundle+WAL+SHM 的 quick+integrity / rollback delta / quarantine 身份安全清理 / reapply 强制重验）。**仅该测试文件范围，未执行真实 apply/reapply/rollback/legacy 删除，不代表更广运行时验收** |
 
-**Task T2: 删除/收缩 legacy 存储读分支** — **blocked**（至少至 2026-08-18，且满足稳定门）
+**Task T2: 删除/收缩 legacy 存储读分支** — **done**（2026-08-17；代码 commit `651be093b`；用户明确授权提前执行代码收口，未执行真实 apply/reapply/rollback/legacy 目录删除）
 
 | 项 | 内容 |
 | --- | --- |
 | **Owner** | `vibelution_storage.py` · `storage_migration.py` |
-| **Dependency** | T1G 全绿；外部读写健康；无 legacy-path 新写；无 rollback trigger / integrity 告警。**不能只靠 T1 后 48 小时** |
-| **交付** | marker 存在时不再 fallback 到 repo 内路径；删除 `core/infrastructure/storage_paths.py` re-export（codemod → `vibelution_storage`） |
+| **Dependency** | T1G 已全绿，`activePaths.migrated=true` 且 external memory 已成为权威；原 2026-08-18 等待门由用户在 2026-08-17 明确授权提前执行**代码收口**。本任务仍未执行真实迁移、rollback、reverse reconcile 或 legacy 目录删除 |
+| **交付** | instance storage marker 存在时：合法 marker 只走 external，损坏/错配 marker 以 `ProjectStorageMigrationStateError` + 稳定 reason code fail-closed，不再回落 repo legacy；project-memory marker 损坏/目标错配同样 fail-closed，合法但尚未登记当前 clone 的共享 marker 保留 pre-cutover 兼容（不属于已切换后的 fallback）；全仓 Python import codemod → `vibelution_storage`，删除 `core/infrastructure/storage_paths.py` re-export |
+| **验证** | TDD RED（新异常未实现时 collection fail）→ GREEN；storage 与直接消费者聚焦 **84 passed**；selector 要求的 authorization **5 passed**、evolution/gym **226 passed**；全仓旧 Python import 检索为 0；全量 collect **914 collected + 1 既有环境错误**（worktree 缺 `挑战赛/data/representative_deep_cases.json`，与本任务无关） |
 | **Tier** | `HIGH_RISK` |
 
 **Task T3: 工具与 audit 路径对齐** — **部分完成**
@@ -328,7 +329,7 @@ flowchart TB
 | 6 | 仓库 config 被当运行时 | D1 + doctor 提示 |
 | 7 | Legacy URL redirects | T8 |
 | 8 | Dead query keys / duplicate API exports | H1 |
-| 9 | `storage_paths.py` re-export | T2 |
+| 9 | `storage_paths.py` re-export | T2 done（2026-08-17） |
 | 10 | orphan `.worktrees` | H2 |
 | 11 | audit/reset 硬编码 memory 路径 | T3a done；agent registry — **T3b done**（2026-08-17） |
 
