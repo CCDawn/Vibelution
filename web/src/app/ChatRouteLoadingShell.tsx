@@ -4,6 +4,7 @@ import { ChatSessionWorkbenchShell } from "../routes/chat/ChatSessionWorkbenchSh
 import chatStyles from "../routes/ChatCodingRoute.styles";
 import { ProgressiveRegionSkeleton } from "../routes/shared/ProgressiveRegionSkeleton";
 
+import styles from "./ChatRouteLoadingShell.styles";
 import { type RouteErrorSurface } from "./RouteErrorBoundary";
 
 export type ChatRouteLoadingShellProps = {
@@ -20,7 +21,7 @@ export function ChatRouteLoadingShell({
   surface = "workbench",
 }: ChatRouteLoadingShellProps) {
   const layoutRef = useRef<HTMLDivElement>(null);
-  const conversationIndexPaneClassName = `${chatStyles.rightPane} ${chatStyles.rightPaneWithoutTabs}`;
+  const conversationIndexPaneClassName = `${chatStyles.rightPane} ${chatStyles.rightPaneWithoutTabs} ${styles.paneFill}`;
 
   return (
     <div
@@ -30,9 +31,9 @@ export function ChatRouteLoadingShell({
       aria-label={label}
       data-vui-app={surface}
       data-route-loading="chat"
-      className="min-w-0 w-full"
+      className={styles.shell}
     >
-      <span className="sr-only">{label}</span>
+      <span className={styles.srOnly}>{label}</span>
       <ChatSessionWorkbenchShell
         layoutRef={layoutRef}
         className={chatStyles.layout}
@@ -41,10 +42,10 @@ export function ChatRouteLoadingShell({
         conversationIndex={(
           <div
             data-loading-region="chat-index"
-            className={`${conversationIndexPaneClassName} min-h-0`}
+            className={conversationIndexPaneClassName}
           >
             <ProgressiveRegionSkeleton
-              className="min-h-0 flex-1 overflow-hidden p-1"
+              className={styles.indexSkeleton}
               label={label}
               variant="list"
             />
@@ -53,10 +54,10 @@ export function ChatRouteLoadingShell({
         center={(
           <div
             data-loading-region="chat-workspace"
-            className={`${chatStyles.centerPane} min-h-0`}
+            className={`${chatStyles.centerPane} ${styles.paneFill}`}
           >
             <ProgressiveRegionSkeleton
-              className="min-h-0 h-full"
+              className={styles.workspaceSkeleton}
               label={label}
               variant="conversation"
             />
@@ -65,9 +66,9 @@ export function ChatRouteLoadingShell({
         statusRail={(
           <div
             data-loading-region="chat-status-rail"
-            className={`${chatStyles.leftRail} min-h-0`}
+            className={`${chatStyles.leftRail} ${styles.paneFill}`}
           >
-            <ProgressiveRegionSkeleton className="p-1" label={label} variant="panel" />
+            <ProgressiveRegionSkeleton className={styles.statusRailSkeleton} label={label} variant="panel" />
           </div>
         )}
       />
