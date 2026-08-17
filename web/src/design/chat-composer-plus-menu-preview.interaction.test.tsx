@@ -142,8 +142,14 @@ describe("chat composer plus menu preview loop", () => {
 
     const clusterLabels = ["添加与引用", "对话能力", "会话与陪伴"];
     for (const label of clusterLabels) {
-      expect(buttonByLabel(label)).toBeTruthy();
+      const clusterButton = buttonByLabel(label);
+      expect(clusterButton).toBeTruthy();
+      expect(clusterButton?.querySelector('[data-slot="cluster-icon"]')).toBeTruthy();
+      expect(clusterButton?.getAttribute("aria-haspopup")).toBe("menu");
     }
+    const primaryMenu = document.body.querySelector(".plus-menu-preview-plus-menu-primary");
+    expect(primaryMenu).toBeTruthy();
+    expect(primaryMenu?.children.length).toBe(clusterLabels.length);
 
     const menuText = menu?.textContent ?? "";
     expect(menuText).not.toContain("输入辅助");

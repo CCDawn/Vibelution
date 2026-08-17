@@ -64,6 +64,7 @@ type PlusMenuItem = {
 type PlusMenuCluster = {
   id: string;
   label: string;
+  icon: ReactNode;
   items: PlusMenuItem[];
 };
 
@@ -355,6 +356,7 @@ export function ChatComposerPlusMenuPreviewApp() {
     {
       id: "add-reference",
       label: "添加与引用",
+      icon: <ImagePlus size={16} />,
       items: [
         {
           id: "attach-image",
@@ -382,6 +384,7 @@ export function ChatComposerPlusMenuPreviewApp() {
     {
       id: "conversation-capabilities",
       label: "对话能力",
+      icon: <BrainCircuit size={16} />,
       items: [
         {
           id: "mental-model",
@@ -406,6 +409,7 @@ export function ChatComposerPlusMenuPreviewApp() {
     {
       id: "session-companion",
       label: "会话与陪伴",
+      icon: <MessageCircleHeart size={16} />,
       items: [
         {
           id: "open-direct-session",
@@ -442,6 +446,7 @@ export function ChatComposerPlusMenuPreviewApp() {
           {
             id: "group-team",
             label: "群聊与团队",
+            icon: <UsersRound size={16} />,
             items: [
               {
                 id: "group-manage",
@@ -702,6 +707,9 @@ export function ChatComposerPlusMenuPreviewApp() {
                                 openPlusCluster(cluster.id);
                               }}
                             >
+                              <span data-slot="cluster-icon" aria-hidden="true">
+                                {cluster.icon}
+                              </span>
                               <span className={styles.menuItemCopy}>
                                 <strong>{cluster.label}</strong>
                               </span>
