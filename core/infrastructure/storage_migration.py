@@ -645,6 +645,26 @@ def apply_storage_migration(
     the completion marker absent, so all current readers stay on legacy paths.
     """
 
+    return _run_logged_storage_migration_step(
+        action="apply",
+        project_root=project_root,
+        projects_home=projects_home,
+        run=lambda: _apply_storage_migration_unchecked(
+            project_root,
+            projects_home=projects_home,
+            config_path=config_path,
+            quiescence_window_seconds=quiescence_window_seconds,
+        ),
+    )
+
+
+def _apply_storage_migration_unchecked(
+    project_root: str | os.PathLike[str],
+    *,
+    projects_home: str | os.PathLike[str] | None = None,
+    config_path: str | os.PathLike[str] | None = None,
+    quiescence_window_seconds: float = _DEFAULT_QUIESCENCE_WINDOW_SECONDS,
+) -> dict[str, object]:
     _require_readiness_for_apply(
         project_root,
         projects_home=projects_home,
@@ -719,6 +739,22 @@ def rollback_storage_switch(
 ) -> dict[str, object]:
     """Deactivate the switch by archiving its marker; copied data is retained."""
 
+    return _run_logged_storage_migration_step(
+        action="rollback",
+        project_root=project_root,
+        projects_home=projects_home,
+        run=lambda: _rollback_storage_switch_unchecked(
+            project_root,
+            projects_home=projects_home,
+        ),
+    )
+
+
+def _rollback_storage_switch_unchecked(
+    project_root: str | os.PathLike[str],
+    *,
+    projects_home: str | os.PathLike[str] | None = None,
+) -> dict[str, object]:
     target = resolve_project_storage_paths(project_root, projects_home=projects_home)
     marker_path = storage_migration_state_path(target)
     memory_marker_path = project_memory_migration_state_path(target)
@@ -1747,6 +1783,147 @@ def _read_manifest_entries(path: Path) -> tuple[StorageMigrationEntry, ...]:
             )
         )
     return tuple(entries)
+
+
+def _elapsed_ms(started_at: float) -> int:
+    return max(0, int((time.perf_counter() - started_at) * 1000))
+
+
+def _safe_project_id(
+    project_root: str | os.PathLike[str],
+    *,
+    projects_home: str | os.PathLike[str] | None = None,
+) -> str:
+    try:
+        return str(resolve_project_storage_paths(project_root, projects_home=projects_home).project_id or "")
+    except Exception:
+        return ""
+
+
+def _is_safe_reason_code(value: str) -> bool:
+    if not value or len(value) > 80:
+        return False
+    return all(ch.islower() or ch.isdigit() or ch == "_" for ch in value)
+
+
+def _safe_reason_token(value: object) -> str:
+    text = str(value or "").strip()
+    return text if _is_safe_reason_code(text) else ""
+
+
+def _safe_migration_reason_code(exc: BaseException) -> str:
+    if not isinstance(exc, StorageMigrationError):
+        return ""
+    text = str(exc)
+    for prefix in (
+        "storage migration rollback blocked: ",
+        "storage migration readiness blocked: ",
+    ):
+        if text.startswith(prefix):
+            return _safe_reason_token(text[len(prefix) :])
+    if "legacy sources changed during migration" in text:
+        return "legacy_sources_changed"
+    if text.startswith("destination conflicts:"):
+        return "destination_conflicts"
+    return ""
+
+
+def _optional_int(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
+def _run_logged_storage_migration_step(
+    *,
+    action: str,
+    project_root: str | os.PathLike[str],
+    projects_home: str | os.PathLike[str] | None,
+    run: Any,
+) -> dict[str, object]:
+    project_id = _safe_project_id(project_root, projects_home=projects_home)
+    started_at = time.perf_counter()
+    _log_storage_migration_step(action=action, step="started", project_id=project_id)
+    try:
+        result = run()
+    except Exception as exc:
+        _log_storage_migration_step(
+            action=action,
+            step="failed",
+            project_id=project_id,
+            error_type=type(exc).__name__,
+            reason_code=_safe_migration_reason_code(exc),
+            elapsed_ms=_elapsed_ms(started_at),
+        )
+        raise
+    _log_storage_migration_step(
+        action=action,
+        step="completed",
+        project_id=project_id,
+        reason_code=_safe_reason_token(result.get("reason")),
+        copied_files=_optional_int(result.get("copiedFiles")),
+        reused_files=_optional_int(result.get("reusedFiles")),
+        total_files=_optional_int(result.get("totalFiles")),
+        rolled_back=result.get("rolledBack") if isinstance(result.get("rolledBack"), bool) else None,
+        elapsed_ms=_elapsed_ms(started_at),
+    )
+    return result
+
+
+def _log_storage_migration_step(
+    *,
+    action: str,
+    step: str,
+    project_id: str = "",
+    reason_code: str = "",
+    error_type: str = "",
+    copied_files: int | None = None,
+    reused_files: int | None = None,
+    total_files: int | None = None,
+    rolled_back: bool | None = None,
+    elapsed_ms: int | None = None,
+) -> None:
+    payload: dict[str, object] = {
+        "action": action,
+        "step": step,
+        "projectId": project_id,
+    }
+    if reason_code:
+        payload["reasonCode"] = reason_code
+    if error_type:
+        payload["errorType"] = error_type
+    if copied_files is not None:
+        payload["copiedFiles"] = copied_files
+    if reused_files is not None:
+        payload["reusedFiles"] = reused_files
+    if total_files is not None:
+        payload["totalFiles"] = total_files
+    if rolled_back is not None:
+        payload["rolledBack"] = rolled_back
+    if elapsed_ms is not None:
+        payload["elapsedMs"] = elapsed_ms
+    event_name = f"storage_migration.step.{step}"
+    try:
+        from core.runtime_manager.scene_logging import append_runtime_manager_file_event
+
+        append_runtime_manager_file_event(event_name, payload, suppress_io_errors=True)
+    except Exception:
+        pass
+    try:
+        from core.web.services.runtime_scene_service import record_runtime_scene_event_quietly
+
+        record_runtime_scene_event_quietly(
+            "storage_migration",
+            "step",
+            event_name,
+            message=f"storage migration {action} {step}",
+            level="error" if step == "failed" else "info",
+            outcome="failed" if step == "failed" else step,
+            fields=payload,
+            lifecycle=True,
+        )
+    except Exception:
+        return
 
 
 def _log_readiness_blocked(
