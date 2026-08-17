@@ -1,0 +1,315 @@
+{
+  "schemaVersion": "2.2.0",
+  "contractId": "cc-xh-202619-program-v2",
+  "contractVersion": "2.2.0",
+  "status": "core_frozen",
+  "createdAt": "2026-08-17T14:52:27+08:00",
+  "lastReviewedAt": "2026-08-17T16:39:26+08:00",
+  "authoritySnapshot": {
+    "asOf": "2026-08-17",
+    "officialPublicPage": "https://university.aliyun.com/action/tzbjbgs2026",
+    "localOfficialBaseline": "04-官方任务书/XH-202619_基于国产开源大模型的AI_Scientist的研发与应用.pdf",
+    "latestFaqSource": {
+      "path": "C:/Users/Administrator/.codex/attachments/e5b8c08b-65b8-42f9-aa81-59d2e2135403/pasted-text.txt",
+      "sha256": "DE0390D70FA5F3DB60F2A3B6C0A1E1371367D454B7ADE58A058B4485606FEE99",
+      "all125ResultsRequired": true,
+      "domainPreferenceAllowed": true
+    },
+    "directionSubmissionRequirementSnapshot": {
+      "captured": false,
+      "lastCheckedAt": "2026-08-17",
+      "officialPageObservedState": "submission_entry_coming_soon",
+      "blocksProgramCoreFreeze": false,
+      "blocksSubmissionProjectionFreeze": true,
+      "blocksG125Authorization": true,
+      "blocksDevelopmentPlanning": false,
+      "blocksSubmissionReady": true
+    },
+    "precedence": [
+      "latest_official_notice_direction_attachment_qa_and_upload_instructions",
+      "current_aliyun_public_page",
+      "local_official_pdf_baseline",
+      "frozen_competition_program_contract",
+      "legacy_vibelution_projection"
+    ],
+    "officialAlignmentStatus": "verified_latest_qa_all125_public_page_submission_entry_still_coming_soon"
+  },
+  "freezeLayers": {
+    "programCore": {
+      "status": "frozen",
+      "scope": [
+        "track_direction_and_dimensions",
+        "all_125_standard_results",
+        "two_required_independent_deep_experiments",
+        "completion_semantics",
+        "isolation_policy",
+        "legacy_read_only_compatibility"
+      ],
+      "blocksActiveCompletionImplementationUntilFrozen": false,
+      "frozenAt": "2026-08-17T16:39:26+08:00",
+      "approvedBy": ["project_owner"],
+      "coreBehaviorHash": "C3965023488C76DF032130341347915E5EAD5451EE53C2501E75914205EB423A"
+    },
+    "submissionProjection": {
+      "status": "provisional_v1_pending_direction_popup",
+      "baseProjectionVersion": "1.0-review.1",
+      "baseRequiredFieldCount": 11,
+      "unknownOfficialFieldsRequireNewProjectionVersion": true,
+      "blocksProgramCoreImplementation": false,
+      "blocksG125Authorization": true,
+      "blocksSubmissionReady": true
+    },
+    "catalogCapacityAuthorization": {
+      "status": "not_authorized_until_g12",
+      "isPreDevelopmentFreezeRequirement": false,
+      "blocksG125Authorization": true
+    },
+    "submissionCommit": {
+      "status": "not_started",
+      "requiresImplementedAndVerifiedCommit": true,
+      "requiresSourceAndResultManifestHashes": true,
+      "requiresR0AndR1BeforeFreeze": true
+    }
+  },
+  "program": {
+    "problemId": "XH-202619",
+    "workingTitle": "面向前沿科学问题的AI假设生成与研究计划设计平台",
+    "submissionTitleStatus": "fixed_registered_do_not_change",
+    "track": "赛道一：科学问题",
+    "direction": "方向1：科学实验任务规划与反馈迭代",
+    "dimensions": [
+      "A. 科学假设生成与研究计划设计",
+      "B. 科学实验任务规划与反馈迭代"
+    ],
+    "foundationModelFamily": "Qwen",
+    "allowedModelForms": [
+      "open_weight_qwen",
+      "managed_or_closed_qwen"
+    ],
+    "allowedDeploymentModes": [
+      "aliyun_bailian",
+      "local_qwen_deployment",
+      "competition_website_recommended_tool"
+    ],
+    "allowedOfficialCallChannels": [
+      "aliyun_bailian",
+      "competition_website_recommended_tool"
+    ],
+    "modelInvocationEvidenceRequired": true,
+    "localDeploymentStillRequiresVerifiableModelAndEnvironmentEvidence": true,
+    "submissionDeadline": {
+      "date": "2026-09-05",
+      "publicPageExactTimePublished": false,
+      "mustReconfirmBeforeSubmission": true
+    },
+    "requiredSubmission": {
+      "technicalProposalPdf": true,
+      "maximumPdfPages": 20
+    },
+    "optionalSupplementarySubmission": {
+      "interactiveFrontend": true,
+      "demoVideoMaximumMinutes": 10
+    }
+  },
+  "catalogExecutionPolicy": {
+    "catalog": "Science 125 questions",
+    "catalogQuestionCount": 125,
+    "catalogRole": "required_full_result_submission",
+    "fullCatalogResultSubmissionRequired": true,
+    "interpretationSource": "latest_official_faq",
+    "standardResultDepth": "hypothesis_and_plan_with_feedback_revision",
+    "realExperimentRequiredForAll125": false,
+    "defaultBatchSize": 5,
+    "plannedBatchCount": 25,
+    "status": "planned_not_started",
+    "approvedQuestionCount": 0,
+    "deepExperimentQuestionIds": [
+      "SCI-091",
+      "SCI-096"
+    ],
+    "selectionMode": "all_125_standard_results_plus_two_required_independent_deep_experiments",
+    "scopeChangeRequiresNewContractVersion": true
+  },
+  "specializationProfile": {
+    "profileId": "SPEC-COMP-INFO-NEURO-v1",
+    "version": "1.0-review.1",
+    "status": "core_frozen",
+    "methodBias": "computable_measurable_controlled_validation_scientific_problems",
+    "specialtyDomains": [
+      "information_science",
+      "neuroscience"
+    ],
+    "specialtyQuestionCount": 16,
+    "nonSpecialtyQuestionCount": 109,
+    "deepDomainAnchors": [
+      "computing_systems_gpu_operator",
+      "computational_neuroscience_spike_coding"
+    ],
+    "allDomainsShareMinimumQualityGate": true,
+    "differentBudgetOrModelMustBeDisclosed": true,
+    "comparisonMetrics": [
+      "citation_validity_and_coverage",
+      "counterevidence_coverage",
+      "hypothesis_diversity",
+      "falsifiability",
+      "plan_executability",
+      "claim_calibration",
+      "feedback_revision_gain",
+      "human_blind_review",
+      "cost_latency_failure_rate"
+    ]
+  },
+  "fullCatalogResultSetContract": {
+    "resultSetId": "cc-science-125-full-result-set-001",
+    "catalogRef": "data/science_125_questions.json",
+    "questionCount": 125,
+    "requiredApprovedQuestionCount": 125,
+    "currentApprovedQuestionCount": 0,
+    "missingQuestionCountRequired": 0,
+    "duplicateQuestionCountRequired": 0,
+    "unresolvedSchemaFailureCountRequired": 0,
+    "unresolvedCitationFailureCountRequired": 0,
+    "status": "planned_not_started",
+    "contractRef": "../../03-工程合同/2026-08-17-full-125-question-result-submission-requirements.md",
+    "contractVersion": "1.3.0",
+    "executionPolicyRef": "data/full_catalog_execution_policy_v1.json",
+    "executionPolicyVersion": "1.2.0",
+    "freezeCandidateVersion": "1.2.0",
+    "competitionResultViewProjectionVersion": "1.0-review.1",
+    "competitionResultViewRequiredForAll125": true,
+    "catalogCapacityAuthorizationRequiredBeforeG125": true
+  },
+  "requiredDeepExperiments": [
+    {
+      "experimentId": "EXP-GPU-OPERATOR-001",
+      "questionId": "SCI-091",
+      "name": "GPU 算子智能生成、自动优化与性能边界实验",
+      "themeId": "cc-gpu-operator-001",
+      "campaignId": "cc-campaign-gpu-operator-001",
+      "required": true,
+      "status": "planned_not_started",
+      "approvalStatus": "not_approved"
+    },
+    {
+      "experimentId": "EXP-NEURAL-SPIKE-001",
+      "questionId": "SCI-096",
+      "name": "神经元脉冲编码竞争假说实验",
+      "themeId": "cc-neural-information-001",
+      "campaignId": "cc-campaign-neural-spike-001",
+      "required": true,
+      "status": "planned_not_started",
+      "approvalStatus": "not_approved"
+    }
+  ],
+  "completionContract": {
+    "representativeExperimentSuiteRule": "all_required_experiments_approved",
+    "programRule": "full_catalog_result_set_approved AND all_required_deep_experiments_approved",
+    "projectCompletedDerivedOnly": true,
+    "requiredGates": [
+      "platform_flow_readiness_passed",
+      "full_catalog_result_set_125_of_125_approved",
+      "competition_result_view_125_of_125_complete",
+      "catalog_capacity_authorization_was_approved_before_g125",
+      "human_capacity_plan_execution_evidence_complete",
+      "all_required_deep_experiments_approved",
+      "qwen_official_call_evidence_complete",
+      "result_driven_revision_complete_for_each_experiment",
+      "multimodal_scientific_evidence_complete",
+      "clean_clone_reproduction_passed",
+      "pdf_and_submission_package_passed",
+      "official_rules_reverified",
+      "submission_dry_run_passed"
+    ],
+    "negativeOrInconclusiveExperimentMayBeApproved": true,
+    "legacyQuestionCountsAffectCompletion": false,
+    "legacyRepresentativeCaseCountsAffectCompletion": false
+  },
+  "isolationPolicy": {
+    "separateThemeContracts": true,
+    "separateCampaigns": true,
+    "separateTeams": true,
+    "separateAgentSessions": true,
+    "separateDiscussionChats": true,
+    "separateTeamKnowledgeNamespaces": true,
+    "separateHypothesisTemplateProtocolAndClaimSpaces": true,
+    "separateBudgetsCachesLedgersAndArtifactRoots": true,
+    "crossExperimentScientificEvidenceReuse": "forbidden",
+    "agentPrivateMemoryCrossThemeReuse": "tagged_cross_theme_advisory_only"
+  },
+  "officialEvidenceContract": {
+    "qwenInvocationReceipt": true,
+    "scientificSourceTraceability": true,
+    "multimodalScientificArtifactValidation": true,
+    "experimentFeedbackRevision": true,
+    "codeResultAndProcessReproduction": true,
+    "technicalProposalPdfWithinPageLimit": true,
+    "finalOfficialRequirementRecheck": true
+  },
+  "scoringMatrix": [
+    {
+      "category": "科学价值",
+      "points": 40,
+      "items": [
+        {"name": "科学事实表达准确性", "points": 15},
+        {"name": "内容转化、解释或展示的清晰度", "points": 15},
+        {"name": "作品主题的完整性与一致性", "points": 10}
+      ]
+    },
+    {
+      "category": "技术深度",
+      "points": 30,
+      "items": [
+        {"name": "模型、智能体、技能设计完整性", "points": 10},
+        {"name": "多模态数据处理、生成、推理或交互能力", "points": 10},
+        {"name": "结果校验、反馈迭代与稳定性设计", "points": 10}
+      ]
+    },
+    {
+      "category": "应用潜力",
+      "points": 30,
+      "items": [
+        {"name": "面向真实场景的使用价值", "points": 10},
+        {"name": "作品演示、交互入口与交付完整度", "points": 10},
+        {"name": "代码、结果与流程可复现性", "points": 10}
+      ]
+    }
+  ],
+  "compatibilityPolicy": {
+    "legacyProjectionMode": "read_only",
+    "legacyHistoryPreserved": true,
+    "legacyStage1GoldenSampleAndTrialCountsActive": false,
+    "legacyAll125CompletionActive": false,
+    "legacyStage2BatchingConceptReusable": true,
+    "legacyStage2ArtifactsAutoPromote": false,
+    "legacyThreeRepresentativeCasesCompletionActive": false,
+    "legacyFieldsMaySetProjectCompleted": false,
+    "clientsMustUseContractVersionAndHash": true
+  },
+  "implementationSnapshot": {
+    "vibelutionCommit": "264cc8162cd29ba824a3286f2ed20090b36939f3",
+    "observedAt": "2026-08-17T16:41:30+08:00",
+    "workingTreeClean": true,
+    "changesSince031dSnapshotAffectChallengeCupOwningSurface": false,
+    "contractImplemented": false,
+    "legacyProgramProjectionStillActive": true,
+    "platformFlowReady": false,
+    "formalWorkflowRunCount": 0,
+    "gpuAdapterImplemented": false,
+    "neuralAdapterProductionIntegrated": false,
+    "sourceReproductionBoundaryPassed": false
+  },
+  "approval": {
+    "requiredApprovers": [
+      "product_owner",
+      "competition_owner",
+      "engineering_owner",
+      "research_owner"
+    ],
+    "coreFrozenAt": "2026-08-17T16:39:26+08:00",
+    "coreFrozenBy": ["project_owner"],
+    "coreFreezeEvidence": "user_continue_after_explicit_freeze_recommendation",
+    "frozenAt": null,
+    "contentHash": null,
+    "approvedBy": []
+  }
+}

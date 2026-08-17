@@ -12,6 +12,12 @@ from typing import Any
 
 from jsonschema import Draft202012Validator, FormatChecker
 
+from core.research.competition.resources import (
+    CATALOG_ID,
+    CATALOG_SHA256,
+    QUESTION_CATALOG_PATH,
+    load_science_question_catalog,
+)
 from core.web.services import team_service
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 from core.web.services.team_workflow.research_projects import (
@@ -22,7 +28,6 @@ from core.web.services.team_workflow.research_projects import (
 
 STORE_SCHEMA_VERSION = 1
 STORE_KIND = "challenge_question_run_store"
-CATALOG_ID = "science-125-questions-2021"
 OFFICIAL_PROVIDERS = {"dashscope", "bailian", "aliyun"}
 APPROVED_GATE_DECISION = "approved"
 REQUIRED_DIMENSIONS = {
@@ -33,6 +38,12 @@ REQUIRED_DIMENSIONS = {
     "plan_feasibility",
     "risk_and_ethics",
     "counterexample_coverage",
+}
+REQUIRED_HUMAN_GATE_KEYS = {
+    "H1_problem_understanding",
+    "H2_hypothesis_selection",
+    "H3_research_plan",
+    "H4_external_output",
 }
 _STORE_LOCK = RLock()
 
@@ -53,12 +64,12 @@ def _artifact_path(team_id: str, question_id: str, run_id: str) -> Path:
     return _workflow_root(team_id) / "challenge_program" / "question_runs" / question_id / f"{run_id}.json"
 
 
-def _schema_path() -> Path:
-    return _project_root() / "挑战杯" / "schemas" / "challenge_question_output.schema.json"
+def _schema_path(version: int = 2) -> Path:
+    return _project_root() / "schemas" / f"challenge_question_output.v{version}.schema.json"
 
 
 def _catalog_path() -> Path:
-    return _project_root() / "挑战杯" / "data" / "science_125_questions.json"
+    return QUESTION_CATALOG_PATH
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -87,11 +98,12 @@ def _sha256_bytes(value: bytes) -> str:
 
 
 def _catalog_sha256() -> str:
-    return _sha256_bytes(_catalog_path().read_bytes())
+    load_science_question_catalog()
+    return CATALOG_SHA256.lower()
 
 
 def _catalog_question(question_id: str) -> dict[str, Any] | None:
-    catalog = _read_json(_catalog_path())
+    catalog = load_science_question_catalog()
     for item in catalog.get("questions") if isinstance(catalog.get("questions"), list) else []:
         if isinstance(item, dict) and str(item.get("id") or "") == question_id:
             return item
@@ -106,8 +118,68 @@ def _output_sha256(output: dict[str, Any]) -> str:
     return _sha256_bytes(encoded)
 
 
+def _output_schema_version(output: dict[str, Any]) -> int:
+    value = output.get("schema_version")
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def _output_identity(output: dict[str, Any]) -> dict[str, Any]:
+    if _output_schema_version(output) == 2:
+        identity = output.get("identity")
+        return identity if isinstance(identity, dict) else {}
+    return output
+
+
+def _output_question_id(output: dict[str, Any]) -> str:
+    return str(_output_identity(output).get("question_id") or "").strip()
+
+
+def _output_catalog_id(output: dict[str, Any]) -> str:
+    return str(_output_identity(output).get("catalog_id") or "").strip()
+
+
+def _output_question_en(output: dict[str, Any]) -> str:
+    return str(_output_identity(output).get("question_en") or "").strip()
+
+
+def _output_result_classification(output: dict[str, Any]) -> dict[str, Any]:
+    if _output_schema_version(output) == 2:
+        result = output.get("result_classification")
+        return result if isinstance(result, dict) else {}
+    return output
+
+
+def _output_status(output: dict[str, Any]) -> str:
+    return str(_output_result_classification(output).get("status") or "").strip()
+
+
+def _set_output_status(output: dict[str, Any], status: str) -> None:
+    _output_result_classification(output)["status"] = status
+
+
+def _output_final_summary(output: dict[str, Any]) -> dict[str, Any]:
+    summary = _output_result_classification(output).get("final_summary")
+    return summary if isinstance(summary, dict) else {}
+
+
+def _require_writable_schema(output: dict[str, Any]) -> None:
+    version = _output_schema_version(output)
+    if version == 1:
+        raise ValueError("Challenge question output schema v1 is read-only; new writes require v2.")
+    if version != 2:
+        raise ValueError(f"Unsupported challenge question schema version: {version}.")
+
+
 def _schema_issues(output: dict[str, Any]) -> list[dict[str, str]]:
-    schema = _read_json(_schema_path())
+    version = _output_schema_version(output)
+    if version not in {1, 2}:
+        return [
+            {
+                "path": "schema_version",
+                "message": f"Unsupported challenge question schema version: {version}.",
+            }
+        ]
+    schema = _read_json(_schema_path(version))
     validator = Draft202012Validator(schema, format_checker=FormatChecker())
     issues: list[dict[str, str]] = []
     for error in sorted(
@@ -212,12 +284,18 @@ def _human_gate_summary(output: dict[str, Any]) -> dict[str, Any]:
     problem = output.get("problem_understanding") if isinstance(output.get("problem_understanding"), dict) else {}
     selection = output.get("selection") if isinstance(output.get("selection"), dict) else {}
     plan = output.get("research_plan") if isinstance(output.get("research_plan"), dict) else {}
+    review = output.get("review") if isinstance(output.get("review"), dict) else {}
     audit = output.get("audit") if isinstance(output.get("audit"), dict) else {}
+    human_review_status = (
+        review.get("human_review_status")
+        if _output_schema_version(output) == 2
+        else audit.get("human_review_status")
+    )
     h4_decision = {
         "passed": "approved",
         "revision_requested": "revision_requested",
         "rejected": "rejected",
-    }.get(str(audit.get("human_review_status") or ""), "pending")
+    }.get(str(human_review_status or ""), "pending")
     decisions = {
         "H1_problem_understanding": str((problem.get("human_gate") or {}).get("decision") or "pending"),
         "H2_hypothesis_selection": str((selection.get("human_gate") or {}).get("decision") or "pending"),
@@ -247,8 +325,24 @@ def _set_pending_human_gates(output: dict[str, Any]) -> None:
         section["human_gate"] = gate
         output[field] = section
     output.setdefault("audit", {})["human_review_status"] = "pending"
-    if str(output.get("status") or "") not in {"blocked", "failed"}:
-        output["status"] = "review_required"
+    if _output_schema_version(output) == 2:
+        output.setdefault("review", {})["human_review_status"] = "pending"
+        output.setdefault("submission", {}).update(
+            {"eligible": False, "projection_version": "1.0-review.1", "blockers": ["human_review_pending"]}
+        )
+    if _output_status(output) not in {"blocked", "failed"}:
+        _set_output_status(output, "review_required")
+
+
+def _all_human_gates_approved(gates: Any) -> bool:
+    if not isinstance(gates, dict) or gates.get("allApproved") is not True:
+        return False
+    decisions = gates.get("decisions")
+    return (
+        isinstance(decisions, dict)
+        and set(decisions) == REQUIRED_HUMAN_GATE_KEYS
+        and all(str(decisions[key]) == APPROVED_GATE_DECISION for key in REQUIRED_HUMAN_GATE_KEYS)
+    )
 
 
 def _official_model_evidence_ids(team_id: str) -> set[str]:
@@ -541,7 +635,8 @@ def publish_research_project_challenge_question_output(
     if not isinstance(raw_output, dict):
         raise ValueError("output must be an object.")
     output = deepcopy(raw_output)
-    if str(output.get("question_id") or "") != question_id:
+    _require_writable_schema(output)
+    if _output_question_id(output) != question_id:
         raise ValueError("challenge_question_publish_question_mismatch: output.question_id must match questionId.")
     run = output.get("run") if isinstance(output.get("run"), dict) else {}
     if (
@@ -568,8 +663,8 @@ def publish_research_project_challenge_question_output(
     catalog_question = _catalog_question(question_id)
     if catalog_question is None:
         issues.append({"path": "question_id", "message": "Question id is not present in the official catalog."})
-    elif str(catalog_question.get("question_en") or "") != str(preview.get("question_en") or ""):
-        issues.append({"path": "question_en", "message": "Question text does not match the official catalog."})
+    elif str(catalog_question.get("question_en") or "") != _output_question_en(preview):
+        issues.append({"path": "identity.question_en", "message": "Question text does not match the official catalog."})
     issues.extend(semantic["issues"])
     if issues or citation["status"] != "passed" or semantic["status"] != "passed":
         raise ValueError("challenge_question_publish_not_ready: schema, citations, hypotheses, seven reviews and research plan must pass.")
@@ -634,6 +729,7 @@ def challenge_question_run_summary(team_id: str) -> dict[str, Any]:
         record
         for record in records
         if isinstance(record, dict)
+        and record.get("schemaVersion") == 2
         and (record.get("validation") or {}).get("schemaValidation") == "passed"
         and (record.get("validation") or {}).get("citationValidation") == "passed"
         and (record.get("validation") or {}).get("officialModelCall") is True
@@ -646,10 +742,25 @@ def challenge_question_run_summary(team_id: str) -> dict[str, Any]:
     completed = [
         record
         for record in valid_candidates
-        if (record.get("humanGates") or {}).get("allApproved") is True
+        if record.get("submissionEligible") is True
+        and _all_human_gates_approved(record.get("humanGates"))
         and str(record.get("status") or "") == "approved"
     ]
     completed_question_ids = sorted({str(record.get("questionId") or "") for record in completed})
+    completed_question_results = [
+        {
+            "questionId": str(record.get("questionId") or ""),
+            "runId": str(record.get("runId") or ""),
+            "schemaVersion": record.get("schemaVersion"),
+            "submissionEligible": record.get("submissionEligible") is True,
+            "status": str(record.get("status") or ""),
+            "validation": deepcopy(record.get("validation") or {}),
+            "humanGates": deepcopy(record.get("humanGates") or {}),
+            "outputSha256": str(record.get("outputSha256") or ""),
+            "artifactPath": str(record.get("artifactPath") or ""),
+        }
+        for record in completed
+    ]
     latest_validated_by_question: dict[str, dict[str, Any]] = {}
     for record in validated_candidates:
         question_id = str(record.get("questionId") or "")
@@ -681,6 +792,7 @@ def challenge_question_run_summary(team_id: str) -> dict[str, Any]:
         "validatedQuestionResults": validated_question_results,
         "completedCount": len(completed_question_ids),
         "completedQuestionIds": completed_question_ids,
+        "completedQuestionResults": completed_question_results,
         "latestCandidate": deepcopy(valid_candidates[-1]) if valid_candidates else None,
     }
 
@@ -734,7 +846,7 @@ def get_challenge_question_run_detail(
     expected_sha256 = str(selected_record.get("outputSha256") or "")
     if (
         not output
-        or str(output.get("question_id") or "").strip().upper() != normalized_question_id
+        or _output_question_id(output).upper() != normalized_question_id
         or str((output.get("run") or {}).get("run_id") or "").strip() != selected_run_id
         or _output_sha256(output) != expected_sha256
     ):
@@ -763,6 +875,7 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
     if not isinstance(raw_output, dict):
         raise ValueError("output must be an object.")
     output = deepcopy(raw_output)
+    _require_writable_schema(output)
     _set_pending_human_gates(output)
     audit = output.setdefault("audit", {})
     audit["source_catalog_sha256"] = _catalog_sha256()
@@ -783,10 +896,10 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
     matched_evidence_refs = sorted({str(item) for item in evidence_refs} & registered_official_evidence)
     official_call = model_provider in OFFICIAL_PROVIDERS and bool(matched_evidence_refs)
     gates = _human_gate_summary(output)
-    question_id = str(output.get("question_id") or "").strip()
+    question_id = _output_question_id(output)
     run_id = str(run.get("run_id") or "").strip()
     if not question_id or not run_id:
-        raise ValueError("output.question_id and output.run.run_id are required.")
+        raise ValueError("output.identity.question_id and output.run.run_id are required.")
     parent_run_id = str(payload.get("parentRunId") or "").strip()
     if parent_run_id == run_id:
         raise ValueError("parentRunId must reference an earlier run.")
@@ -800,9 +913,9 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
     )
     catalog_question = _catalog_question(question_id)
     if catalog_question is None:
-        issues.append({"path": "question_id", "message": "Question id is not present in the official catalog."})
-    elif str(catalog_question.get("question_en") or "") != str(output.get("question_en") or ""):
-        issues.append({"path": "question_en", "message": "Question text does not match the official catalog."})
+        issues.append({"path": "identity.question_id", "message": "Question id is not present in the official catalog."})
+    elif str(catalog_question.get("question_en") or "") != _output_question_en(output):
+        issues.append({"path": "identity.question_en", "message": "Question text does not match the official catalog."})
     issues.extend(semantic["issues"])
     audit["schema_validation"] = "passed" if not issues else "failed"
     output_hash = _output_sha256(output)
@@ -812,7 +925,9 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
         "recordId": f"{question_id}:{run_id}",
         "questionId": question_id,
         "runId": run_id,
-        "status": str(output.get("status") or ""),
+        "schemaVersion": _output_schema_version(output),
+        "submissionEligible": bool((output.get("submission") or {}).get("eligible")),
+        "status": _output_status(output),
         "modelProvider": model_provider,
         "modelId": str(run.get("model_id") or ""),
         "invocationEvidenceRefs": [str(item) for item in evidence_refs],
@@ -931,6 +1046,7 @@ def review_challenge_question_output(
     output = _read_json(artifact_path)
     if not output:
         raise ValueError("Challenge question output artifact was not found.")
+    _require_writable_schema(output)
     decided_at = _utc_now()
     field_by_gate = {
         "H1_problem_understanding": "problem_understanding",
@@ -949,14 +1065,31 @@ def review_challenge_question_output(
         )
     h4_decision = str(decisions["H4_external_output"])
     all_approved = all(str(value) == "approved" for value in decisions.values())
-    output["audit"]["human_review_status"] = (
+    human_review_status = (
         "passed"
         if h4_decision == "approved"
         else "revision_requested"
         if h4_decision == "revision_requested"
         else "rejected"
     )
-    output["status"] = "approved" if all_approved else "needs_revision"
+    output["audit"]["human_review_status"] = human_review_status
+    output.setdefault("review", {}).update(
+        {
+            "human_review_status": human_review_status,
+            "reviewer": reviewer,
+            "decided_at": decided_at,
+            "rationale": rationale,
+        }
+    )
+    submission = output.setdefault("submission", {})
+    submission.update(
+        {
+            "eligible": all_approved,
+            "projection_version": "1.0-review.1",
+            "blockers": [] if all_approved else ["human_review_not_approved"],
+        }
+    )
+    _set_output_status(output, "approved" if all_approved else "needs_revision")
     output["audit"]["output_sha256"] = _output_sha256(output)
     gates = _human_gate_summary(output)
 
@@ -982,7 +1115,8 @@ def review_challenge_question_output(
             or validation.get("officialModelCall") is not True
         ):
             raise ValueError("Only fully validated official-model candidates can enter human review.")
-        record["status"] = output["status"]
+        record["status"] = _output_status(output)
+        record["submissionEligible"] = bool(submission.get("eligible"))
         record["humanGates"] = gates
         record["outputSha256"] = output["audit"]["output_sha256"]
         record["review"] = {
@@ -1007,7 +1141,7 @@ def review_challenge_question_output(
             "runId": run_id,
             "reviewer": reviewer,
             "approvedGateCount": gates["approvedCount"],
-            "status": output["status"],
+            "status": _output_status(output),
         },
         lifecycle=True,
     )

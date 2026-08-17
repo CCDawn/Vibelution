@@ -11,7 +11,19 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from core.research.competition.resources import (
+    CATALOG_ID,
+    CATALOG_QUESTION_COUNT,
+    CATALOG_SHA256,
+    CORE_BEHAVIOR_HASH,
+    CORE_POLICY_HASH,
+    CompetitionResourceError,
+    load_competition_program_core,
+    load_full_catalog_execution_core,
+    load_science_question_catalog,
+)
 from core.web.services.team_workflow.challenge_question_runs import (
+    REQUIRED_HUMAN_GATE_KEYS,
     challenge_question_run_summary,
     get_challenge_question_run_detail,
 )
@@ -53,28 +65,75 @@ def _mapping(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
 
 
+def _output_identity(output: Mapping[str, Any]) -> dict[str, Any]:
+    return _mapping(output.get("identity"))
+
+
+def _output_result_classification(output: Mapping[str, Any]) -> dict[str, Any]:
+    return _mapping(output.get("result_classification"))
+
+
+def _formal_record_eligible(record: Mapping[str, Any]) -> bool:
+    gates = _mapping(record.get("humanGates"))
+    validation = _mapping(record.get("validation"))
+    decisions = gates.get("decisions")
+    return (
+        record.get("schemaVersion") == 2
+        and record.get("submissionEligible") is True
+        and _text(record.get("status")) == "approved"
+        and gates.get("allApproved") is True
+        and isinstance(decisions, Mapping)
+        and set(decisions) == REQUIRED_HUMAN_GATE_KEYS
+        and all(_text(decisions.get(key)) == "approved" for key in REQUIRED_HUMAN_GATE_KEYS)
+        and validation.get("schemaValidation") == "passed"
+        and validation.get("citationValidation") == "passed"
+        and validation.get("officialModelCall") is True
+    )
+
+
 def _approved_details(team_id: str) -> dict[str, dict[str, Any]]:
     summary = challenge_question_run_summary(team_id)
-    approved_ids = sorted({_text(value).upper() for value in summary.get("completedQuestionIds") or [] if _text(value)})
     details: dict[str, dict[str, Any]] = {}
-    for question_id in approved_ids:
+    completed_results = [
+        _mapping(value)
+        for value in summary.get("completedQuestionResults") or []
+        if isinstance(value, Mapping)
+    ]
+    for completed in completed_results:
+        if not _formal_record_eligible(completed):
+            continue
+        question_id = _text(completed.get("questionId")).upper()
+        run_id = _text(completed.get("runId"))
+        if not question_id or not run_id:
+            continue
         try:
-            detail = get_challenge_question_run_detail(team_id, question_id)
+            detail = get_challenge_question_run_detail(team_id, question_id, run_id=run_id)
         except ValueError as exc:
             raise QuestionLaunchError(
                 f"Approved question artifact is unavailable for {question_id}.",
                 code="challenge_question_artifact_unavailable",
             ) from exc
         record = _mapping(detail.get("record"))
-        gates = _mapping(record.get("humanGates"))
-        if _text(record.get("status")) != "approved" or gates.get("allApproved") is not True:
-            continue
+        output = _mapping(detail.get("output"))
+        review = _mapping(output.get("review"))
+        submission = _mapping(output.get("submission"))
+        if (
+            not _formal_record_eligible(record)
+            or output.get("schema_version") != 2
+            or review.get("human_review_status") != "passed"
+            or submission.get("eligible") is not True
+        ):
+            raise QuestionLaunchError(
+                f"Approved question artifact is not a formal v2 submission candidate for {question_id}.",
+                code="challenge_question_artifact_invalid",
+            )
         details[question_id] = detail
     return details
 
 
 def _question_title(output: Mapping[str, Any], question_id: str) -> str:
-    return _text(output.get("question_en")) or _text(output.get("question")) or question_id
+    identity = _output_identity(output)
+    return _text(identity.get("question_en")) or question_id
 
 
 def _question_scope(output: Mapping[str, Any]) -> str:
@@ -94,7 +153,7 @@ def list_question_launch_options(team_id: str) -> dict[str, Any]:
                 "questionId": question_id,
                 "title": _question_title(output, question_id),
                 "scope": _question_scope(output),
-                "catalogId": _text(output.get("catalog_id")),
+                "catalogId": _text(_output_identity(output).get("catalog_id")),
                 "reviewRunId": _text(detail.get("selectedRunId")),
                 "artifactSha256": _text(artifact.get("sha256")),
             }
@@ -177,7 +236,8 @@ def build_question_run_input(
     artifact = _mapping(detail.get("artifact"))
     review_run_id = _text(detail.get("selectedRunId"))
     artifact_sha256 = _text(artifact.get("sha256"))
-    catalog_id = _text(output.get("catalog_id"))
+    identity = _output_identity(output)
+    catalog_id = _text(identity.get("catalog_id"))
     if not review_run_id or not artifact_sha256 or not catalog_id:
         raise QuestionLaunchError(
             "The approved question artifact is missing immutable identity fields.",
@@ -198,8 +258,36 @@ def build_question_run_input(
             code=getattr(exc, "code", "challenge_project_resolution_failed"),
         ) from exc
 
-    final_summary = _mapping(output.get("final_summary"))
+    final_summary = _mapping(_output_result_classification(output).get("final_summary"))
     research_plan = _mapping(output.get("research_plan"))
+    try:
+        program = load_competition_program_core()
+        policy = load_full_catalog_execution_core()
+        catalog = load_science_question_catalog()
+    except CompetitionResourceError as exc:
+        raise QuestionLaunchError(
+            "The frozen competition Program, Policy, or catalog resource is unavailable or drifted.",
+            code="challenge_competition_snapshot_invalid",
+        ) from exc
+    program_body = _mapping(program.get("program"))
+    directions = [_text(item) for item in program_body.get("dimensions") or [] if _text(item)]
+    competition_program_snapshot = {
+        "programContractVersion": _text(program.get("contractVersion")),
+        "programCoreBehaviorHash": CORE_BEHAVIOR_HASH,
+        "fullCatalogPolicyVersion": _text(policy.get("version")),
+        "fullCatalogCorePolicyHash": CORE_POLICY_HASH,
+        "catalogId": CATALOG_ID,
+        "catalogQuestionCount": CATALOG_QUESTION_COUNT,
+        "catalogSha256": CATALOG_SHA256,
+        "questionSchemaVersion": 2,
+        "directionMode": "a_plus_b",
+        "directions": directions,
+    }
+    if catalog.get("catalog_id") != CATALOG_ID or len(directions) != 2:
+        raise QuestionLaunchError(
+            "The frozen competition Program, Policy, catalog, or A+B direction snapshot is invalid.",
+            code="challenge_competition_snapshot_invalid",
+        )
     artifact_ref = f"challenge-question-artifact://{catalog_id}/{normalized_question_id}/{review_run_id}/{artifact_sha256}"
     return {
         "teamId": _text(team_id),
@@ -216,12 +304,19 @@ def build_question_run_input(
             "formalWrites": False,
             "challengeQuestionArtifact": artifact_ref,
             "questionReviewRunId": review_run_id,
+            "competitionProgramSnapshot": competition_program_snapshot,
         },
+        "competitionProgramSnapshot": competition_program_snapshot,
         "competitionRuleRef": catalog_id,
         "competitionRuleVersion": f"question-output-v{int(output.get('schema_version') or 1)}",
         "trackAndRubricSnapshot": {
-            "track": "赛道一 / 方向一 / A 科学假设生成与研究计划设计",
-            "blockingRules": ["approved_question_artifact_required"],
+            "track": _text(program_body.get("track")),
+            "directionMode": "a_plus_b",
+            "directions": directions,
+            "blockingRules": [
+                "approved_v2_question_artifact_required",
+                "program_policy_catalog_snapshot_required",
+            ],
         },
         "researchObjectiveContract": {
             "question": title,

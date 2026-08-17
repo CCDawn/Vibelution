@@ -223,6 +223,8 @@ def test_challenge_program_projection_stays_team_scoped_across_active_projects(t
                         "recordId": "SCI-096:stage1-sci-096-v3",
                         "questionId": "SCI-096",
                         "runId": "stage1-sci-096-v3",
+                        "schemaVersion": 2,
+                        "submissionEligible": True,
                         "status": "approved",
                         "validation": {
                             "schemaValidation": "passed",
@@ -230,7 +232,15 @@ def test_challenge_program_projection_stays_team_scoped_across_active_projects(t
                             "semanticValidation": "passed",
                             "officialModelCall": True,
                         },
-                        "humanGates": {"allApproved": True},
+                        "humanGates": {
+                            "allApproved": True,
+                            "decisions": {
+                                "H1_problem_understanding": "approved",
+                                "H2_hypothesis_selection": "approved",
+                                "H3_research_plan": "approved",
+                                "H4_external_output": "approved",
+                            },
+                        },
                     }
                 ],
             }
@@ -244,6 +254,9 @@ def test_challenge_program_projection_stays_team_scoped_across_active_projects(t
     before_projection = client.get(
         f"/api/teams/{team_id}/workflow-orchestration/experiments/status"
     ).json()["challengeProgramProjection"]
+    before_active_projection = client.get(
+        f"/api/teams/{team_id}/workflow-orchestration/experiments/status"
+    ).json()["competitionProgramProjection"]
     project = client.post(
         f"/api/teams/{team_id}/workflow-orchestration/research-projects",
         json={"name": "Isolated unpublished project", "topic": "Unpublished evidence"},
@@ -276,6 +289,15 @@ def test_challenge_program_projection_stays_team_scoped_across_active_projects(t
     assert after_projection["stage1ComplianceReadiness"]["singleQuestionSample"]["completed"] == 1
     assert before_projection["stage1ComplianceReadiness"]["officialModelCallEvidence"]["count"] == 1
     assert after_projection["stage1ComplianceReadiness"]["officialModelCallEvidence"]["count"] == 1
+    assert before_active_projection["schemaVersion"] == 2
+    assert before_active_projection["questionCatalog"]["questionCount"] == 125
+    assert len(before_active_projection["questionCatalog"]["questions"]) == 125
+    assert before_active_projection["program"]["directionMode"] == "a_plus_b"
+    assert [item["questionId"] for item in before_active_projection["requiredDeepExperiments"]] == [
+        "SCI-091",
+        "SCI-096",
+    ]
+    assert before_active_projection["allRequiredDeepExperimentsApproved"] is False
 
 
 def test_team_research_project_update_and_unknown_activation(tmp_path, monkeypatch):

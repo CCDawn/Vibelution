@@ -1,0 +1,251 @@
+{
+  "schemaVersion": "1.0.0",
+  "policyId": "cc-full-catalog-execution-policy-001",
+  "version": "1.2.0",
+  "status": "core_frozen_submission_projection_pending",
+  "createdAt": "2026-08-17T00:00:00+08:00",
+  "contractRef": "../../03-工程合同/2026-08-17-125题开发前冻结候选评审基线.md",
+  "catalog": {
+    "catalogId": "science-125-questions-2021",
+    "questionCount": 125,
+    "domainCount": 12,
+    "sha256": "D5035032F80574B9521CC9CC8D73F127721CCADF54451411004323727D2FAAB9"
+  },
+  "currentQuestionSchema": {
+    "version": 1,
+    "sha256": "0B3214A44C7AFD13D530DAF4CA7D2B6481D35025F77F12F74A6B5C359E937337",
+    "targetVersion": 2,
+    "migrationMode": "dual_version_reader_append_only_no_auto_promotion"
+  },
+  "questionSchemaV2RequiredGroups": [
+    "identity",
+    "classification",
+    "scope",
+    "run",
+    "problem_understanding",
+    "evidence",
+    "hypotheses",
+    "dimension_reviews",
+    "selection",
+    "research_plan",
+    "feedback_iterations",
+    "result_classification",
+    "competition_result_view",
+    "collaboration_refs",
+    "review",
+    "submission",
+    "audit"
+  ],
+  "minimumContentPolicy": {
+    "minimumDistinctSources": 4,
+    "minimumPeerReviewedAuthoritativeOrPrimarySources": 2,
+    "minimumChallengeCounterevidenceOrBoundarySources": 1,
+    "minimumMechanisticallyDistinctHypotheses": 2,
+    "requiredIndependentReviewDimensions": 7,
+    "minimumFeedbackRevisions": 1,
+    "minimumQuestionReviewDigests": 1,
+    "qwenEvidenceRequired": true,
+    "actualExecutionMustBeExplicit": true,
+    "aggregateScoreAllowed": false
+  },
+  "officialCompetitionResultView": {
+    "projectionVersion": "1.0-review.1",
+    "requiredForAll125": true,
+    "secondScientificTruthSourceAllowed": false,
+    "requiredFields": [
+      "problem_statement",
+      "rationale",
+      "technical_details",
+      "datasets.source",
+      "datasets.target",
+      "paper_title",
+      "paper_abstract",
+      "methods",
+      "experiments",
+      "results",
+      "references"
+    ],
+    "resultClassificationMustMatchExecutionEvidence": true,
+    "proposedExperimentMustNotBeExportedAsActual": true,
+    "referencesMustBeClaimLinkedAndTraceable": true,
+    "directionSpecificExtensionsRequireNewProjectionVersion": true
+  },
+  "specializationProfile": {
+    "profileId": "SPEC-COMP-INFO-NEURO-v1",
+    "version": "1.0-review.1",
+    "status": "core_frozen",
+    "methodBias": "computable_measurable_controlled_validation",
+    "specialtyDomains": [
+      "information_science",
+      "neuroscience"
+    ],
+    "specialtyQuestionCount": 16,
+    "nonSpecialtyQuestionCount": 109,
+    "deepAnchors": [
+      "SCI-091",
+      "SCI-096"
+    ],
+    "artificialIntelligenceDomainAutomaticallyIncluded": false,
+    "equalBudgetStandardComparisonRequired": true,
+    "enhancedBudgetReportedSeparately": true,
+    "unsupportedPreferenceClaimMustBeReportedAsUnsupported": true
+  },
+  "progressiveGates": [
+    {
+      "gateId": "G0_DEV",
+      "cumulativeRealQuestionCount": 0,
+      "questionIds": [],
+      "realExternalSideEffectsAllowed": false,
+      "status": "not_started"
+    },
+    {
+      "gateId": "G1",
+      "cumulativeRealQuestionCount": 1,
+      "questionIds": ["SCI-091"],
+      "deepExperimentExecutionAllowed": false,
+      "status": "not_started"
+    },
+    {
+      "gateId": "G5",
+      "cumulativeRealQuestionCount": 5,
+      "questionIds": ["SCI-091", "SCI-096", "SCI-002", "SCI-020", "SCI-056"],
+      "deepExperimentExecutionAllowed": false,
+      "status": "not_started"
+    },
+    {
+      "gateId": "G12",
+      "cumulativeRealQuestionCount": 12,
+      "questionIds": [
+        "SCI-091",
+        "SCI-096",
+        "SCI-002",
+        "SCI-020",
+        "SCI-056",
+        "SCI-008",
+        "SCI-034",
+        "SCI-080",
+        "SCI-087",
+        "SCI-110",
+        "SCI-117",
+        "SCI-120"
+      ],
+      "coversEveryCatalogDomain": true,
+      "deepExperimentExecutionAllowed": false,
+      "status": "not_started"
+    },
+    {
+      "gateId": "G125",
+      "cumulativeRealQuestionCount": 125,
+      "questionIdsSource": "frozen_catalog",
+      "requiresDirectionSubmissionSnapshot": true,
+      "requiresBudgetApproval": true,
+      "requiresG12Passed": true,
+      "status": "not_authorized"
+    }
+  ],
+  "executionPolicy": {
+    "defaultBatchSize": 5,
+    "plannedBatchCount": 25,
+    "defaultMaxConcurrentQuestionRuns": 2,
+    "hardMaxConcurrentQuestionRuns": 4,
+    "concurrencyAboveDefaultRequiresG12Evidence": true,
+    "batchRetrospectiveRequired": true,
+    "checkpointResumeRequired": true,
+    "idempotentRetryRequired": true,
+    "budgetCircuitBreakerRequired": true
+  },
+  "capacityAndBudgetAuthorization": {
+    "status": "pending_g12_observation_and_human_approval",
+    "observedFromGate": "G12",
+    "totalApprovedBudgetCny": null,
+    "spentCny": null,
+    "projectedRemainingCostCny": null,
+    "minimumReserveRatio": 0.25,
+    "observedP95QuestionWallTimeMinutes": null,
+    "latestAllowedProjectedCompletionAt": "2026-09-01T18:00:00+08:00",
+    "plannedConcurrentQuestionRuns": 2,
+    "allowedConcurrentQuestionRuns": [2, 3, 4],
+    "humanCapacityPlanRef": null,
+    "minimumUniqueStandardQuestionsForHumanReview": 36,
+    "humanCapacityPlanRequiredFields": [
+      "named_or_role_bound_reviewers",
+      "daily_available_hours",
+      "review_shards",
+      "backup_reviewers",
+      "risk_trigger_owner",
+      "deep_experiment_h1_h4_owner",
+      "submission_manifest_owner"
+    ],
+    "authorizationDecision": "not_authorized"
+  },
+  "reviewPolicy": {
+    "machineReviewAll125": true,
+    "structuredTeamReviewAll125": true,
+    "humanReviewAllRiskTriggered": true,
+    "humanReviewAllSpecialtyQuestions": true,
+    "humanReviewAllG12Questions": true,
+    "humanReviewAllDeepExperiments": true,
+    "nonSpecialtyMinimumSamplePerDomain": 2,
+    "samplingManifestRequired": true,
+    "manifestHumanApprovalRequired": true,
+    "notSampledDisposition": "not_selected_under_policy",
+    "notSampledMayBeCalledHumanApproved": false
+  },
+  "programCompletionRule": "full_catalog_result_set_approved AND all_required_deep_experiments_approved",
+  "freezeLayers": {
+    "programAndQuestionCore": {
+      "status": "frozen",
+      "blocksCp0CoreImplementationUntilFrozen": false,
+      "frozenAt": "2026-08-17T16:39:26+08:00",
+      "approvedBy": ["project_owner"],
+      "corePolicyHash": "D3A8FB5B97D1A4ECAF08798D4CFB283AC56A2563EA434C28EC988D15827EB83E"
+    },
+    "submissionProjection": {
+      "status": "provisional_v1_pending_direction_popup",
+      "projectionVersion": "1.0-review.1",
+      "blocksCp0CoreImplementation": false,
+      "blocksG125Authorization": true,
+      "blocksSubmissionReady": true
+    },
+    "catalogCapacityAuthorization": {
+      "status": "not_authorized_until_g12",
+      "isPreDevelopmentFreezeRequirement": false,
+      "blocksG125Authorization": true
+    },
+    "submissionManifest": {
+      "status": "not_started",
+      "requiresImplementedVerifiedCommit": true
+    }
+  },
+  "directionSubmissionRequirementSnapshot": {
+    "captured": false,
+    "officialPageObservedState": "submission_entry_coming_soon",
+    "blocksProgramAndQuestionCoreFreeze": false,
+    "blocksSubmissionProjectionFreeze": true,
+    "blocksG125Authorization": true,
+    "blocksSubmissionReady": true,
+    "blocksGenericImplementationPlanning": false
+  },
+  "runtimeStatus": {
+    "platformFlowReady": false,
+    "currentAuthorizedGate": "none",
+    "realQuestionRunCount": 0,
+    "approvedQuestionCount": 0,
+    "deepExperimentRunCount": 0,
+    "catalogCapacityAuthorization": "pending",
+    "humanCapacityPlan": "pending"
+  },
+  "approval": {
+    "requiredApprovers": [
+      "product_owner",
+      "competition_owner",
+      "engineering_owner",
+      "research_owner"
+    ],
+    "approvedBy": [],
+    "coreFrozenAt": "2026-08-17T16:39:26+08:00",
+    "coreFrozenBy": ["project_owner"],
+    "frozenAt": null,
+    "contentHash": null
+  }
+}

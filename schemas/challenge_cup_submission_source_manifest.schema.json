@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vibelution.local/challenge-cup/schemas/challenge_cup_submission_source_manifest.schema.json",
+  "title": "Challenge Cup Submission Source Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "manifestKind", "sourceCommit", "programContract", "catalogPolicy", "entries"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "manifestKind": { "const": "challenge_cup_submission_source_manifest" },
+    "sourceCommit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "programContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "coreBehaviorHash"],
+      "properties": {
+        "version": { "const": "2.2.0" },
+        "coreBehaviorHash": { "const": "C3965023488C76DF032130341347915E5EAD5451EE53C2501E75914205EB423A" }
+      }
+    },
+    "catalogPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "corePolicyHash"],
+      "properties": {
+        "version": { "const": "1.2.0" },
+        "corePolicyHash": { "const": "D3A8FB5B97D1A4ECAF08798D4CFB283AC56A2563EA434C28EC988D15827EB83E" }
+      }
+    },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "kind", "sha256", "sizeBytes", "provenance", "licenseStatus", "requiredAtRuntime"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300,
+            "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)[^\\u0000]+$"
+          },
+          "kind": { "enum": ["source", "test", "schema", "fixture", "lock", "notice", "documentation"] },
+          "sha256": { "type": "string", "pattern": "^[A-F0-9]{64}$" },
+          "sizeBytes": { "type": "integer", "minimum": 1 },
+          "provenance": { "type": "string", "minLength": 1, "maxLength": 500 },
+          "licenseStatus": { "enum": ["project_owned", "compatible", "reviewed_not_applicable"] },
+          "requiredAtRuntime": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}
