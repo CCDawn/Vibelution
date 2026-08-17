@@ -2149,6 +2149,58 @@ def append_cli_agent_task_result_event(
     return result_entry
 
 
+def _conversation_row_id(raw: dict[str, Any]) -> str:
+    return str(raw.get("conversation_id") or raw.get("conversationId") or raw.get("id") or "").strip()
+
+
+def _conversation_row_updated_at(raw: dict[str, Any]) -> str:
+    return str(raw.get("updated_at") or raw.get("updatedAt") or "").strip()
+
+
+def _delete_session_control_phase(session_id: str, conversation: dict[str, Any]) -> str:
+    """Return running/stopping/queued without replaying turn journals."""
+    s = _service()
+    if s._is_session_stop_requested(session_id):
+        return "stopping"
+    last_status = str(
+        conversation.get("last_turn_status") or conversation.get("lastTurnStatus") or ""
+    ).strip().lower()
+    if s._is_session_running(session_id):
+        if last_status == "queued":
+            return "queued"
+        return "running"
+    return last_status or "ready"
+
+
+def _next_active_session_id_from_remaining(
+    remaining: list[dict[str, Any]],
+    *,
+    current_active_id: str,
+    deleted_session_id: str,
+) -> str:
+    s = _service()
+    remaining_ids = [
+        session_id
+        for session_id in (_conversation_row_id(item) for item in remaining)
+        if session_id
+    ]
+    normalized_active = str(current_active_id or "").strip()
+    if (
+        normalized_active
+        and normalized_active != deleted_session_id
+        and normalized_active in remaining_ids
+    ):
+        return normalized_active
+    dated = [item for item in remaining if _conversation_row_id(item)]
+    if not dated:
+        return ""
+    latest = max(
+        dated,
+        key=lambda item: s._timestamp_sort_key(_conversation_row_updated_at(item)),
+    )
+    return _conversation_row_id(latest)
+
+
 def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = False) -> dict[str, str]:
     """Delete one chat session and return ids needed by UI and Agent rebind callers."""
     s = _service()
@@ -2243,14 +2295,17 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
             conversation=target_conversation,
         )
         s._ensure_conversation_workspace_metadata(target_conversation)
-        s._ensure_conversation_agent_metadata(target_conversation)
         target_agent_id = str(target_conversation.get("agent_id") or target_conversation.get("agentId") or "").strip()
         target_agent = s.get_agent(target_agent_id, include_archived=False) if target_agent_id else None
         target_agent_direct_session_id = str((target_agent or {}).get("directSessionId") or "").strip()
 
-        normalized_target = s._normalize_conversation(target_conversation) or {}
-        target_phase = s._conversation_phase(conversation_id, normalized_target)
-        target_message_count = len(s._session_ledger_visible_messages(conversation_id))
+        # Keep this critical section off the journal replay path. The live
+        # delete stall was resolve_target scanning turn_journal.jsonl (and
+        # then normalizing every remaining conversation) while holding
+        # _CHAT_STATE_LOCK, which blocked sibling GET detail / select.
+        target_phase = _delete_session_control_phase(conversation_id, target_conversation)
+        raw_messages = target_conversation.get("messages")
+        target_message_count = len(raw_messages) if isinstance(raw_messages, list) else 0
         timings["resolve_target"] = s._elapsed_ms(resolve_started_at)
         s._record_session_delete_event(
             "requested",
@@ -2287,11 +2342,6 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
             for index, item in enumerate(conversations)
             if index != target_index and isinstance(item, dict)
         ]
-        normalized_remaining = [
-            item
-            for item in (s._normalize_conversation(raw) for raw in remaining)
-            if item is not None
-        ]
         replacement_direct_session_id = ""
         agent_unbound = False
         if target_agent and target_agent_direct_session_id == conversation_id:
@@ -2307,15 +2357,12 @@ def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = 
             timings["unbind_agent"] = 0
 
         current_active_id = str(payload.get("active_conversation_id") or "").strip()
-        if any(item["id"] == current_active_id for item in normalized_remaining) and current_active_id != conversation_id:
-            next_active_id = current_active_id
-        elif normalized_remaining:
-            latest = max(
-                normalized_remaining,
-                key=lambda item: s._timestamp_sort_key(item.get("updatedAt") or ""),
-            )
-            next_active_id = latest["id"]
-        else:
+        next_active_id = _next_active_session_id_from_remaining(
+            remaining,
+            current_active_id=current_active_id,
+            deleted_session_id=conversation_id,
+        )
+        if not next_active_id:
             now = s._now_timestamp()
             next_active_id = s._new_conversation_id({conversation_id})
             replacement_conversation = s._make_empty_conversation(
