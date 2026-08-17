@@ -131,6 +131,10 @@ def test_native_launcher_python_bridge_uses_no_console_outer_runtime():
     assert "string pythonPath = ResolvePython(projectDir, useNoConsole: true);" in bridge_source
     assert 'Quote(ResolvePython(projectDir, useNoConsole: false))' in bridge_source
     assert 'useNoConsole ? "pythonw.exe" : "python.exe"' in source
+    assert 'string.Equals(action, "stop-launcher", StringComparison.OrdinalIgnoreCase)' in bridge_source
+    assert '--use-state-owned-backend-pid' in bridge_source
+    assert 'arguments.Add("--workspace")' in bridge_source
+    assert "Quote(projectDir)" in bridge_source
 
 
 def test_native_launcher_build_references_windows_forms_and_icon():
