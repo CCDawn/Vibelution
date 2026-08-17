@@ -49,6 +49,8 @@ export type OrchestratedBranchInstanceResult = {
   instanceId?: string;
   port?: number;
   controlPort?: number;
+  generation?: number;
+  commandId?: string;
   message?: string;
   code?: string;
   activeWorkRuns?: unknown[];

@@ -151,13 +151,17 @@ def test_isolated_start_allocates_ports_and_spawns_without_touching_current(regi
     assert response["mode"] == "isolated_worktree"
     assert response["port"] == 8001
     assert response["controlPort"] == 8766
-    assert calls == [(worktree, "start", 8001, 8766, {"short_name": ""})]
+    assert calls == [(worktree, "start", 8001, 8766, {"short_name": "", "detach": True})]
     stored = registry.get_instance("worktree:task")
-    assert stored["status"] == "running"
+    assert stored["status"] == "starting"
+    assert stored["desiredState"] == "open"
+    assert stored["generation"] == 1
+    assert stored["commandId"]
     assert stored["port"] == 8001
     assert stored["controlPort"] == 8766
     assert stored["slotId"] == slot_id_for_project(worktree)
     assert stored["dataHome"] == str(data_home_for_project(worktree))
+    assert response["generation"] == 1
 
 
 def test_isolated_stop_reuses_reserved_ports(registry_path, tmp_path):
@@ -379,8 +383,8 @@ def test_isolated_start_records_named_window_pid(registry_path, tmp_path, monkey
 
     stored = registry.get_instance("worktree:task")
     assert response["accepted"] is True
-    assert stored["windowPid"] == 4242
-    assert stored["windowTitle"] == "branch+task 台"
+    assert stored["status"] == "starting"
+    assert int(stored.get("windowPid") or 0) == 0
 
 
 def test_isolated_start_reopens_window_when_backend_already_alive(registry_path, tmp_path, monkeypatch):
@@ -442,3 +446,100 @@ def test_spawn_sets_instance_short_name(tmp_path, monkeypatch):
     assert captured["env"]["VIBELUTION_INSTANCE_SHORT_NAME"] == "branch+task"
     assert captured["env"]["VIBELUTION_ALLOW_DIRTY_LAUNCH"] == "1"
     assert captured["env"]["VIBELUTION_ALLOW_NON_MAIN_LAUNCH"] == "1"
+
+
+def test_isolated_start_is_busy_while_in_flight(registry_path, tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "_port_is_free", lambda port, host: True)
+    monkeypatch.setattr(lifecycle, "current_live_ports", lambda launcher_state=None: {8000, 8765})
+    worktree = tmp_path / "task"
+    worktree.mkdir()
+    registry.upsert_instance("worktree:task", status="starting", generation=3, projectRoot=str(worktree))
+
+    with pytest.raises(lifecycle.BranchInstanceLifecycleError) as busy:
+        lifecycle.run_isolated_operation(
+            _item(path=str(worktree)),
+            "start",
+            runner=lambda *args, **kwargs: {"returncode": 0, "pid": 9},
+        )
+    assert busy.value.code == "instance_busy"
+    assert busy.value.status_code == 409
+
+
+def test_observe_error_matches_generation(registry_path):
+    registry.upsert_instance("worktree:task", status="starting", generation=4, desiredState="open", phase="starting")
+    stale = lifecycle.observe_isolated_transition("worktree:task", "observe-error", generation=3, message="stale")
+    assert registry.get_instance("worktree:task")["status"] == "starting"
+    assert stale["status"] == "starting"
+
+    lifecycle.observe_isolated_transition("worktree:task", "observe-error", generation=4, message="HTTP timeout")
+    stored = registry.get_instance("worktree:task")
+    assert stored["status"] == "failed"
+    assert stored["failureMessage"] == "HTTP timeout"
+
+
+def test_stop_reaps_spawn_pid_before_stop_script(registry_path, tmp_path):
+    worktree = tmp_path / "task"
+    worktree.mkdir()
+    registry.upsert_instance(
+        "worktree:task",
+        port=8004,
+        controlPort=8769,
+        projectRoot=str(worktree),
+        status="starting",
+        generation=2,
+        spawnPid=424242,
+    )
+    reaped: list[int] = []
+    calls: list[tuple] = []
+
+    def fake_spawn(root, action, backend_port, control_port, **kwargs):
+        calls.append((action, backend_port, kwargs.get("detach")))
+        return {"returncode": 0}
+
+    response = lifecycle.run_isolated_operation(
+        _item(path=str(worktree), port=8004, controlPort=8769),
+        "stop",
+        runner=fake_spawn,
+        terminate_pid=lambda pid: reaped.append(pid) or {"supported": True, "rootPid": pid},
+    )
+
+    assert response["accepted"] is True
+    assert reaped == [424242]
+    assert calls[0][0] == "stop"
+    assert calls[0][2] is False
+    assert registry.get_instance("worktree:task")["status"] == "closed"
+    assert registry.get_instance("worktree:task")["spawnPid"] == 0
+
+
+def test_spawn_detached_start_uses_current_supervisor_script(tmp_path, monkeypatch):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "AppData" / "Local"))
+    worktree = tmp_path / "task"
+    (worktree / ".venv" / "Scripts").mkdir(parents=True)
+    pythonw = worktree / ".venv" / "Scripts" / "pythonw.exe"
+    pythonw.write_text("", encoding="utf-8")
+    captured: dict = {}
+
+    class FakeProcess:
+        pid = 77
+
+    def fake_popen(command, **kwargs):
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+        return FakeProcess()
+
+    monkeypatch.setattr(lifecycle.subprocess, "Popen", fake_popen)
+    result = lifecycle.spawn_worktree_launcher(worktree, "start", 8002, 8767, detach=True)
+    assert captured["command"][0].lower().endswith("pythonw.exe")
+    assert captured["command"][1] == str(lifecycle.PYTHON_LAUNCHER_SCRIPT_PATH)
+    assert captured["kwargs"]["cwd"] == str(worktree)
+    if lifecycle.os.name == "nt":
+        flags = int(captured["kwargs"]["creationflags"])
+        assert flags & lifecycle.subprocess.DETACHED_PROCESS
+        assert not (flags & int(getattr(lifecycle.subprocess, "CREATE_NO_WINDOW", 0)))
+    assert result["pid"] == 77
+
+
+def test_launcher_script_resolves_workspace_env_before_sys_path():
+    text = Path(__file__).resolve().parents[1].joinpath("scripts", "vibelution_launcher.py").read_text(encoding="utf-8")
+    assert text.index("VIBELUTION_WORKSPACE_ROOT") < text.index("sys.path.insert")
+    assert "SUPERVISOR_ROOT" in text

@@ -4,7 +4,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from scripts.windowless_subprocess import no_window_subprocess_kwargs
+from scripts.windowless_subprocess import detached_no_console_popen_kwargs, no_window_subprocess_kwargs
 
 
 def test_windows_subprocess_policy_suppresses_console_windows() -> None:
@@ -16,6 +16,19 @@ def test_windows_subprocess_policy_suppresses_console_windows() -> None:
 
     assert kwargs["creationflags"] & int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
     assert kwargs["creationflags"] & 0x00000200
+    assert kwargs["startupinfo"].wShowWindow == int(getattr(subprocess, "SW_HIDE", 0))
+
+
+def test_detached_popen_kwargs_break_away_without_visible_console() -> None:
+    kwargs = detached_no_console_popen_kwargs()
+    assert kwargs["stdin"] is subprocess.DEVNULL
+    if os.name != "nt":
+        assert kwargs["start_new_session"] is True
+        return
+    flags = int(kwargs["creationflags"])
+    assert flags & int(getattr(subprocess, "DETACHED_PROCESS", 0x00000008))
+    assert flags & 0x01000000
+    assert not (flags & int(getattr(subprocess, "CREATE_NO_WINDOW", 0)))
     assert kwargs["startupinfo"].wShowWindow == int(getattr(subprocess, "SW_HIDE", 0))
 
 
@@ -31,6 +44,7 @@ def test_windowless_policy_is_used_by_high_risk_process_owners() -> None:
         "core/restarter_manager/restarter.py",
         "core/web/services/config_service.py",
         "tools/python_intelligence_tools.py",
+        "core/launcher/branch_instance_lifecycle.py",
     )
 
     for relative_path in owners:

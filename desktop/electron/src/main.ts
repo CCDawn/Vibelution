@@ -83,6 +83,10 @@ import {
   runBranchInstanceBridge,
   type BranchInstanceOperation
 } from "./process/branchInstanceBridge.js";
+import {
+  ISOLATED_INSTANCE_READY_WAIT_MS,
+  superviseIsolatedInstanceStart
+} from "./process/isolatedInstanceSupervisor.js";
 import { runPythonJsonBridge } from "./process/pythonJsonBridge.js";
 import { resolveWorkbenchUrlFromBridge } from "./process/resolveWorkbenchBridge.js";
 import {
@@ -2401,8 +2405,50 @@ async function orchestrateBranchInstanceLifecycle(
     instanceId
   });
   if (result.accepted && (operation === "start" || operation === "restart")) {
-    if (isCurrentCheckoutInstance(instanceId) || (result.port && result.port > 0)) {
+    if (isCurrentCheckoutInstance(instanceId)) {
       openOrchestratedWorkbenchWindow(instanceId, result.port);
+    } else if (result.port && result.port > 0) {
+      const url = workbenchLoopbackUrl(result.port);
+      const generation = Number(result.generation || 0);
+      const provider = windowProvider;
+      const operatorConfigPath =
+        launcherBootstrap.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim();
+      void superviseIsolatedInstanceStart({
+        instanceId,
+        url,
+        generation,
+        timeoutMs: ISOLATED_INSTANCE_READY_WAIT_MS,
+        waitForHttp: (target, timeoutMs) => waitForWorkbenchHttp({ url: target, timeoutMs }),
+        openWindow: async () => {
+          if (provider === null) {
+            throw new Error("window provider is unavailable");
+          }
+          await provider.openOrFocusInstanceWorkbench({ instanceId, url });
+        },
+        markReady: async (observedGeneration) => {
+          await runBranchInstanceBridge({
+            workspaceRoot: paths.workspaceRoot,
+            pythonPath,
+            operatorConfigPath,
+            operation: "observe-ready",
+            instanceId,
+            generation: observedGeneration
+          });
+        },
+        markError: async (observedGeneration, message) => {
+          await runBranchInstanceBridge({
+            workspaceRoot: paths.workspaceRoot,
+            pythonPath,
+            operatorConfigPath,
+            operation: "observe-error",
+            instanceId,
+            generation: observedGeneration,
+            message
+          });
+        }
+      }).catch((error: unknown) => {
+        console.warn(error instanceof Error ? error.message : String(error));
+      });
     }
   }
   if (result.accepted && (operation === "stop" || operation === "force-stop")) {

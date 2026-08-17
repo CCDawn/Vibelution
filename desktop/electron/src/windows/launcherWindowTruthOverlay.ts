@@ -10,6 +10,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function composeInstanceLifecycleState(input: {
   phase?: string;
   observedState?: string;
+  desiredState?: string;
+  registryStatus?: string;
   backendAlive?: boolean;
   backendHealthy?: boolean;
   backendListening?: boolean;
@@ -19,23 +21,29 @@ export function composeInstanceLifecycleState(input: {
   failureMessage?: string;
 }): "starting" | "restarting" | "stopping" | "error" | "running" | "partial" | "closed" {
   const phase = String(input.phase || "").trim().toLowerCase();
-  if (phase === "restarting" || phase === "restart") {
+  const registryStatus = String(input.registryStatus || "").trim().toLowerCase();
+  const desiredState = String(input.desiredState || "").trim().toLowerCase();
+  if (phase === "restarting" || phase === "restart" || registryStatus === "restarting") {
     return "restarting";
   }
-  if (phase === "closing" || phase === "stopping" || phase === "force_stopping") {
+  if (phase === "closing" || phase === "stopping" || phase === "force_stopping" || registryStatus === "stopping") {
     return "stopping";
-  }
-  if (input.backendConflict) {
-    return "error";
-  }
-  if (phase === "failed" || String(input.failureMessage || "").trim()) {
-    return "error";
   }
   const backendReady = Boolean(
     input.backendAlive && input.backendHealthy && input.backendListening && !input.backendConflict
   );
-  if ((phase === "opening" || phase === "starting") && !backendReady && !input.windowOpen) {
+  const inFlightStart =
+    ((registryStatus === "starting" || registryStatus === "restarting") && desiredState === "open")
+    || phase === "opening"
+    || phase === "starting";
+  if (inFlightStart && !backendReady && !input.windowOpen) {
     return "starting";
+  }
+  if (input.backendConflict) {
+    return "error";
+  }
+  if (phase === "failed" || registryStatus === "failed" || String(input.failureMessage || "").trim()) {
+    return "error";
   }
   if (backendReady && input.frontendReady !== false && input.windowOpen) {
     return "running";
@@ -207,6 +215,8 @@ function overlayBranchInstancesWindowTruth(
         const lifecycleState = composeInstanceLifecycleState({
           phase: String(runtime.phase || ""),
           observedState: String(runtime.observedState || ""),
+          desiredState: String(runtime.desiredState || ""),
+          registryStatus: String(runtime.registryStatus || ""),
           backendAlive: backend.alive === true,
           backendHealthy: backend.healthy === true,
           backendListening: backend.listening === true,

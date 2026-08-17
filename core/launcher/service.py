@@ -158,6 +158,7 @@ class LauncherCommandResponse(TypedDict, total=False):
     port: int
     controlPort: int
     url: str
+    generation: int
 
 
 class LauncherRequestAudit(TypedDict, total=False):
@@ -249,8 +250,11 @@ def cleanup_launcher_branch_instances(
 
 def request_branch_instance_operation(
     instance_id: str,
-    operation: LauncherOperation,
+    operation: str,
     request_audit: LauncherRequestAudit | None = None,
+    *,
+    generation: int | None = None,
+    message: str = "",
 ) -> LauncherCommandResponse:
     """Start/stop/restart the selected branch instance.
 
@@ -260,9 +264,18 @@ def request_branch_instance_operation(
 
     from core.launcher.branch_instance_lifecycle import (
         assert_instance_operable,
+        observe_isolated_transition,
         resolve_branch_instance,
         run_isolated_operation,
     )
+
+    if operation in {"observe-error", "observe-ready"}:
+        return observe_isolated_transition(
+            instance_id,
+            operation,
+            generation=generation,
+            message=message,
+        )
 
     item = resolve_branch_instance(instance_id)
     assert_instance_operable(item, operation)
@@ -274,7 +287,7 @@ def request_branch_instance_operation(
 
 
 def _current_branch_instance_operation(
-    operation: LauncherOperation,
+    operation: str,
     request_audit: LauncherRequestAudit | None,
 ) -> LauncherCommandResponse:
     if operation == "start":

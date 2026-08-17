@@ -57,9 +57,14 @@ describe("Electron main Launcher IPC facade", () => {
     expect(mainSource).toContain("resolveWorkbenchUrlFromBridge");
     expect(mainSource).toContain("return workbenchLoopbackUrl();");
     const branchStart = mainSource.indexOf("async function orchestrateBranchInstanceLifecycle");
-    const branchBody = mainSource.slice(branchStart, branchStart + 1800);
+    const branchBody = mainSource.slice(branchStart, branchStart + 2800);
     expect(branchBody).toContain('operation === "start" || operation === "restart"');
-    expect(branchBody).toContain("isCurrentCheckoutInstance(instanceId) || (result.port && result.port > 0)");
+    expect(branchBody).toContain("isCurrentCheckoutInstance(instanceId)");
+    expect(branchBody).toContain("superviseIsolatedInstanceStart");
+    expect(branchBody).toContain("ISOLATED_INSTANCE_READY_WAIT_MS");
+    expect(branchBody).toContain('operation: "observe-error"');
+    expect(branchBody).toContain('operation: "observe-ready"');
+    expect(mainSource).toContain("from \"./process/isolatedInstanceSupervisor.js\"");
   });
 
   it("closes Electron workbench windows on stop instead of waiting for Python to own them", () => {

@@ -117,3 +117,38 @@ def test_save_is_atomic_and_keeps_payload(registry_path):
 def test_empty_instance_id_rejected():
     with pytest.raises(ValueError):
         registry.upsert_instance("  ")
+
+
+def test_allocate_instance_ports_writes_once(registry_path, monkeypatch):
+    monkeypatch.setattr(registry, "_port_is_free", lambda port, host: True)
+    writes: list[int] = []
+    original = registry.save_registry
+
+    def counted(payload):
+        writes.append(1)
+        return original(payload)
+
+    monkeypatch.setattr(registry, "save_registry", counted)
+    registry.allocate_instance_ports("worktree:task")
+    assert writes == [1]
+
+
+def test_concurrent_allocate_instance_ports_are_disjoint(registry_path, monkeypatch):
+    monkeypatch.setattr(registry, "_port_is_free", lambda port, host: True)
+    results: list[tuple[int, int]] = []
+
+    def worker(instance_id: str) -> None:
+        results.append(registry.allocate_instance_ports(instance_id))
+
+    threads = [
+        __import__("threading").Thread(target=worker, args=(f"worktree:{index}",))
+        for index in range(8)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    backends = [item[0] for item in results]
+    controls = [item[1] for item in results]
+    assert len(set(backends + controls)) == 16
