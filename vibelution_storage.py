@@ -30,6 +30,10 @@ class ProjectIdentityError(ValueError):
     """Raised when a checkout has no valid tracked project identity."""
 
 
+class ProjectStorageMigrationStateError(RuntimeError):
+    """Raised when a present migration marker cannot authorize external storage."""
+
+
 @dataclass(frozen=True)
 class ProjectIdentity:
     schema_version: int
@@ -162,17 +166,8 @@ def project_memory_migration_state_path(paths: ProjectStoragePaths) -> Path:
 
 
 def project_memory_migration_complete(paths: ProjectStoragePaths) -> bool:
-    try:
-        payload = json.loads(project_memory_migration_state_path(paths).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return False
-    if not (
-        isinstance(payload, dict)
-        and payload.get("schemaVersion") == STORAGE_MIGRATION_SCHEMA_VERSION
-        and payload.get("status") == "completed"
-        and str(payload.get("projectId") or "") == paths.project_id
-        and _marker_path_matches(payload.get("targetRoot"), paths.memory)
-    ):
+    payload = _valid_project_memory_migration_marker(paths)
+    if payload is None:
         return False
     current_source = _integration_project_root(paths.project_root) / ".docs" / "project-memory"
     sources = payload.get("sources")
@@ -255,10 +250,19 @@ def resolve_active_project_storage_paths(
     projects_home: str | os.PathLike[str] | None = None,
     config_path: str | os.PathLike[str] | None = None,
 ) -> ProjectStoragePaths:
-    """Use legacy state until verified migration makes the external root active."""
+    """Use legacy state only before a migration marker exists.
+
+    A present marker is a cutover boundary. Invalid marker contents therefore
+    fail closed instead of silently routing writes back into checkout storage.
+    """
 
     target = resolve_project_storage_paths(project_root, projects_home=projects_home)
-    if storage_migration_complete(target) or not legacy_project_state_present(target):
+    marker_path = storage_migration_state_path(target)
+    if marker_path.exists():
+        if not storage_migration_complete(target):
+            raise ProjectStorageMigrationStateError("storage_migration_marker_invalid")
+        return target
+    if not legacy_project_state_present(target):
         return target
     return legacy_project_storage_paths(project_root, target=target, config_path=config_path)
 
@@ -329,7 +333,20 @@ def resolve_project_memory_home(project_root: str | os.PathLike[str]) -> Path:
     except ProjectIdentityError:
         return root / ".docs" / "project-memory"
     legacy = _integration_project_root(root) / ".docs" / "project-memory"
-    if project_memory_migration_complete(target) or not _directory_has_entries(legacy):
+    marker_path = project_memory_migration_state_path(target)
+    if marker_path.exists():
+        payload = _valid_project_memory_migration_marker(target)
+        if payload is None:
+            raise ProjectStorageMigrationStateError(
+                "project_memory_migration_marker_invalid"
+            )
+        current_source = _integration_project_root(root) / ".docs" / "project-memory"
+        if any(
+            _marker_path_matches(item.get("sourceRoot"), current_source)
+            for item in payload["sources"]
+        ):
+            return target.memory
+    if not _directory_has_entries(legacy):
         return target.memory
     return legacy
 
@@ -363,6 +380,36 @@ def _directory_has_entries(path: Path) -> bool:
     except (FileNotFoundError, NotADirectoryError, StopIteration, OSError):
         return False
     return True
+
+
+def _valid_project_memory_migration_marker(
+    paths: ProjectStoragePaths,
+) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(
+            project_memory_migration_state_path(paths).read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not (
+        isinstance(payload, dict)
+        and payload.get("schemaVersion") == STORAGE_MIGRATION_SCHEMA_VERSION
+        and payload.get("status") == "completed"
+        and str(payload.get("projectId") or "") == paths.project_id
+        and _marker_path_matches(payload.get("targetRoot"), paths.memory)
+    ):
+        return None
+    sources = payload.get("sources")
+    if not (
+        isinstance(sources, list)
+        and sources
+        and all(
+            isinstance(item, dict) and str(item.get("sourceRoot") or "").strip()
+            for item in sources
+        )
+    ):
+        return None
+    return payload
 
 
 def _marker_path_matches(value: object, expected: Path) -> bool:
@@ -408,6 +455,7 @@ __all__ = [
     "STORAGE_MIGRATION_STATE_NAME",
     "ProjectIdentity",
     "ProjectIdentityError",
+    "ProjectStorageMigrationStateError",
     "ProjectStoragePaths",
     "default_projects_home",
     "ensure_project_storage",

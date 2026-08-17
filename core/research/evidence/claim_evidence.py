@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterable
 
-from core.infrastructure.storage_paths import resolve_project_workspace_home
+from vibelution_storage import resolve_project_workspace_home
 
 
 SCHEMA_VERSION = 1
