@@ -136,9 +136,12 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain("labels.globalEmptyHint");
     expect(panelSource).toContain("labels.listLoadingTitle");
     expect(panelSource).toContain("正在读取分支实例");
+    expect(panelSource).toContain("Reading branch instances");
+    expect(panelSource).toContain("还没有分支实例");
     expect(panelSource).toContain("const hasAnyItems = items.length > 0");
     expect(panelSource).toContain("const showListLoading = listLoading && !hasAnyItems");
     expect(panelSource).toContain("{showListLoading ? (");
+    expect(panelSource).toContain('tone="loading"');
     expect(panelSource).toContain("!hasAnyItems ? (");
     expect(panelSource).toContain("labels.filteredEmptyTitle");
     expect(panelSource).toContain("labels.filteredEmptyHint");

@@ -235,7 +235,7 @@ def test_service_binds_current_project_bundle_into_branch_runtime(monkeypatch):
     bundle = {"observedState": "partial", "backend": {"alive": True}}
     seen: dict[str, object] = {}
 
-    monkeypatch.setattr(launcher_service, "get_launcher_status", lambda: {"projectBundle": bundle})
+    monkeypatch.setattr(launcher_service, "_current_project_bundle_for_branch_list", lambda: bundle)
 
     from core.launcher import branch_instance_cleanup, branch_instance_lifecycle
 
@@ -248,3 +248,27 @@ def test_service_binds_current_project_bundle_into_branch_runtime(monkeypatch):
 
     assert launcher_service.list_launcher_branch_instances() == {"items": []}
     assert seen["bundle"] is bundle
+
+
+def test_branch_list_does_not_call_full_launcher_status(monkeypatch):
+    monkeypatch.setattr(
+        launcher_service,
+        "_current_project_bundle_for_branch_list",
+        lambda: {"observedState": "closed"},
+    )
+
+    def boom():
+        raise AssertionError("branch list must not wait on get_launcher_status")
+
+    monkeypatch.setattr(launcher_service, "get_launcher_status", boom)
+
+    from core.launcher import branch_instance_cleanup, branch_instance_lifecycle
+
+    monkeypatch.setattr(
+        branch_instance_lifecycle,
+        "list_overlayed_branch_instances",
+        lambda *, current_bundle=None: {"items": []},
+    )
+    monkeypatch.setattr(branch_instance_cleanup, "annotate_cleanup_metadata", lambda payload: payload)
+
+    assert launcher_service.list_launcher_branch_instances() == {"items": []}

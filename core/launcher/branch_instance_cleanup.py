@@ -14,6 +14,7 @@ import os
 import shutil
 import stat
 from collections.abc import Callable, Iterable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -353,11 +354,28 @@ def _head_matches_merged_tip(head: str, names: set[str]) -> bool:
     return False
 
 
-def _unique_commits_merged_to_main(root: Path, commits: list[str]) -> dict[str, bool]:
-    found: dict[str, bool] = {}
-    for commit in commits:
+def _commit_is_ancestor_of_main(root: Path, commit: str) -> bool:
+    try:
         result = _run_git(root, "merge-base", "--is-ancestor", commit, "main", timeout=15.0)
-        found[commit] = result.returncode == 0
+    except Exception:
+        return False
+    return result.returncode == 0
+
+
+def _unique_commits_merged_to_main(root: Path, commits: list[str]) -> dict[str, bool]:
+    if len(commits) <= 1:
+        return {commit: _commit_is_ancestor_of_main(root, commit) for commit in commits}
+
+    found: dict[str, bool] = {}
+    workers = min(8, len(commits))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(_commit_is_ancestor_of_main, root, commit): commit for commit in commits}
+        for future in as_completed(futures):
+            commit = futures[future]
+            try:
+                found[commit] = bool(future.result())
+            except Exception:
+                found[commit] = False
     return found
 
 
