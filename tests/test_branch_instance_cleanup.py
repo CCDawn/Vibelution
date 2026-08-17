@@ -75,6 +75,64 @@ def test_annotate_marks_main_protected_and_lists_risks():
     assert cleanup.RISK_DELETE_UNMERGED in dirty["cleanupRisks"]
 
 
+def test_annotate_reuses_merged_ref_lookup_instead_of_per_item_merge_base(tmp_path, monkeypatch):
+    root = _init_repo(tmp_path / "repo")
+    head = _git(root, "rev-parse", "--short=12", "HEAD")
+    calls: list[tuple[str, ...]] = []
+    real = cleanup._run_git
+
+    def wrapped(git_root, *args, **kwargs):
+        calls.append(args)
+        return real(git_root, *args, **kwargs)
+
+    monkeypatch.setattr(cleanup, "_run_git", wrapped)
+    payload = {
+        "integrationRoot": str(root),
+        "items": [
+            _item(id="local_branch:one", kind="local_branch", branch="codex/one", head=head),
+            _item(id="local_branch:two", kind="local_branch", branch="codex/two", head=head),
+            _item(id="local_branch:three", kind="local_branch", branch="codex/three", head=head),
+        ],
+    }
+
+    annotated = cleanup.annotate_cleanup_metadata(payload, integration_root=root)
+
+    assert all(item["mergedToMain"] is True for item in annotated["items"])
+    assert [args for args in calls if args and args[0] == "for-each-ref"]
+    assert [args for args in calls if args and args[0] == "merge-base"] == []
+
+
+def test_annotate_unique_unmerged_head_uses_one_ancestor_check(tmp_path, monkeypatch):
+    root = _init_repo(tmp_path / "repo")
+    _git(root, "checkout", "-b", "codex/topic")
+    (root / "README.md").write_text("topic\n", encoding="utf-8")
+    _git(root, "add", ".")
+    _git(root, "commit", "-m", "topic")
+    topic_head = _git(root, "rev-parse", "--short=12", "HEAD")
+    _git(root, "checkout", "main")
+    calls: list[tuple[str, ...]] = []
+    real = cleanup._run_git
+
+    def wrapped(git_root, *args, **kwargs):
+        calls.append(args)
+        return real(git_root, *args, **kwargs)
+
+    monkeypatch.setattr(cleanup, "_run_git", wrapped)
+    payload = {
+        "integrationRoot": str(root),
+        "items": [
+            _item(id="worktree:a", branch="codex/topic", head=topic_head),
+            _item(id="worktree:b", branch="codex/topic", head=topic_head),
+        ],
+    }
+
+    annotated = cleanup.annotate_cleanup_metadata(payload, integration_root=root)
+
+    assert annotated["items"][0]["mergedToMain"] is False
+    assert annotated["items"][1]["mergedToMain"] is False
+    assert len([args for args in calls if args and args[0] == "merge-base"]) == 1
+
+
 def test_cleanup_requires_confirm_and_ids():
     with pytest.raises(cleanup.BranchInstanceCleanupError) as missing_confirm:
         cleanup.cleanup_branch_instances(["worktree:task"], confirm=False)

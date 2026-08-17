@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -24,6 +25,7 @@ from core.infrastructure.instance_display_name import (
 BRANCH_POOL_NAME = ".worktrees"
 RETIRED_DIR_NAME = "_retired"
 LEGACY_FIXED_SIBLING_NAME = "Vibelution-worktrees"
+DIRTY_PARALLEL_THRESHOLD = 4
 
 CheckoutRole = Literal["main", "task", "legacy_task", "retired", "unknown"]
 
@@ -232,12 +234,16 @@ def list_branch_instances(checkout: Path | str) -> dict[str, Any]:
     items: list[dict[str, Any]] = []
     seen_paths: set[str] = set()
     seen_ids: set[str] = set()
-
+    unique_worktrees: list[tuple[dict[str, str], Path]] = []
     for entry in worktrees:
         path = Path(str(entry.get("worktree") or "")).resolve()
         if not str(path) or _norm(path) in seen_paths:
             continue
         seen_paths.add(_norm(path))
+        unique_worktrees.append((entry, path))
+    dirty_by_path = _worktree_dirty_map([path for _, path in unique_worktrees])
+
+    for entry, path in unique_worktrees:
         role, slug = _classify_checkout(
             path,
             integration_root=layout.integration_root,
@@ -253,7 +259,7 @@ def list_branch_instances(checkout: Path | str) -> dict[str, Any]:
         head = _short_sha(str(entry.get("HEAD") or ""))
         kind = _instance_kind(role)
         instance_id = _instance_id(kind, slug=slug or path.name, branch=branch)
-        dirty = _worktree_is_dirty(path)
+        dirty = dirty_by_path.get(_norm(path), False)
         observation = _runtime_observation(path)
         item = _instance_payload(
             instance_id=instance_id,
@@ -563,12 +569,40 @@ def _worktree_is_dirty(path: Path) -> bool:
             cwd=str(path),
             capture_output=True,
             check=False,
+            timeout=15.0,
         )
     except OSError:
         return False
     if result.returncode != 0:
         return True
     return bool(result.stdout)
+
+
+def _worktree_dirty_map(paths: list[Path]) -> dict[str, bool]:
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for path in paths:
+        key = _norm(path)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        unique.append(path)
+    if not unique:
+        return {}
+    if len(unique) < DIRTY_PARALLEL_THRESHOLD:
+        return {_norm(path): _worktree_is_dirty(path) for path in unique}
+
+    found: dict[str, bool] = {}
+    workers = min(8, len(unique))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(_worktree_is_dirty, path): path for path in unique}
+        for future in as_completed(futures):
+            path = futures[future]
+            try:
+                found[_norm(path)] = bool(future.result())
+            except Exception:
+                found[_norm(path)] = True
+    return found
 
 
 def _runtime_observation(path: Path) -> dict[str, Any]:

@@ -2364,6 +2364,9 @@ export function LauncherRoute() {
             launcherReading={Boolean(
               !status && (statusQuery.isPending || launcherControlPlaneStarting)
             )}
+            listLoading={Boolean(
+              branchInstancesQuery.isPending || (branchInstancesQuery.isFetching && !branchInstancesQuery.data)
+            )}
             pendingOperation={pendingBranchOperation}
             lifecyclePending={controlMutation.isPending}
             onLifecycle={(instanceId, operation) => {

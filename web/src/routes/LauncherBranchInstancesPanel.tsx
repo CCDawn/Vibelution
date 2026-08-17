@@ -4,7 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { requestBranchInstanceCleanup, type LauncherBranchInstance } from "../api/launcher";
 import { queryKeys } from "../api/queryKeys";
-import { VButton, VCheckbox, VConfirmDialog, VDenseTable, VEmptyState, VNativeInput, VStatusChip, VTabs, VToolbar, VTooltip, type VDenseTableColumn } from "../components/vui";
+import { VButton, VCheckbox, VConfirmDialog, VDenseTable, VEmptyState, VNativeInput, VStateSurface, VStatusChip, VTabs, VToolbar, VTooltip, type VDenseTableColumn } from "../components/vui";
 import type { LauncherOperation } from "../api/types";
 import { LauncherBranchStatusHelp } from "./LauncherBranchStatusHelp";
 import {
@@ -53,6 +53,7 @@ type LauncherBranchInstancesPanelProps = {
   launcherTitle?: string;
   launcherOnline?: boolean;
   launcherReading?: boolean;
+  listLoading?: boolean;
   lifecyclePending?: boolean;
   onLifecycle?: (instanceId: string, operation: Extract<LauncherOperation, "start" | "stop">) => void;
   onStopMany?: (instanceIds: string[]) => void;
@@ -131,6 +132,7 @@ export function LauncherBranchInstancesPanel({
   launcherTitle,
   launcherOnline = false,
   launcherReading = false,
+  listLoading = false,
   lifecyclePending = false,
   onLifecycle,
   onStopMany,
@@ -158,6 +160,7 @@ export function LauncherBranchInstancesPanel({
         emptyStartable: "当前没有可启动的分支",
         globalEmptyTitle: "还没有分支实例",
         globalEmptyHint: "检出分支的 worktree 后，实例会出现在这里；分支区的操作只影响本地工作区。",
+        listLoadingTitle: "正在读取分支实例",
         filteredEmptyTitle: "没有匹配的分支",
         filteredEmptyHint: "试试清除搜索，或关闭未提交 / 未合入筛选。",
         clearSearch: "清除搜索与筛选",
@@ -217,6 +220,7 @@ export function LauncherBranchInstancesPanel({
         emptyStartable: "No branch is currently ready to start",
         globalEmptyTitle: "No branch instances yet",
         globalEmptyHint: "Checked-out branch worktrees appear here. Branch actions only affect the local workspace.",
+        listLoadingTitle: "Reading branch instances",
         filteredEmptyTitle: "No matching branches",
         filteredEmptyHint: "Try clearing the search or turning off the Uncommitted / Not merged filters.",
         clearSearch: "Clear search and filters",
@@ -426,6 +430,7 @@ export function LauncherBranchInstancesPanel({
   };
 
   const hasAnyItems = items.length > 0;
+  const showListLoading = listLoading && !hasAnyItems;
   const filteredEmpty = hasAnyItems && visibleItems.length === 0;
   const activePager = activeTab === "all" ? pagedAll : activeTab === "startable" ? pagedStartable : null;
   const activeTotal = activeTab === "all"
@@ -573,7 +578,14 @@ export function LauncherBranchInstancesPanel({
         </p>
       </div>
 
-      {!hasAnyItems ? (
+      {showListLoading ? (
+        <VStateSurface
+          className={styles.globalEmpty}
+          tone="loading"
+          title={labels.listLoadingTitle}
+          skeletonLines={3}
+        />
+      ) : !hasAnyItems ? (
         <VEmptyState
           align="start"
           className={styles.globalEmpty}
