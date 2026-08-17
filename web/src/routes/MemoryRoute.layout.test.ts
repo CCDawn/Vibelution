@@ -7,6 +7,7 @@ import itemMutationsSource from "./memory/useMemoryItemMutations.ts?raw";
 import knowledgeMutationsSource from "./memory/useMemoryKnowledgeMutations.ts?raw";
 import workbenchQueriesSource from "./memory/useMemoryWorkbenchQueries.ts?raw";
 import agentMemoryPanelSource from "./MemoryAgentMemoryPanel.tsx?raw";
+import contentBrowsePanelSource from "./MemoryContentBrowsePanel.tsx?raw";
 import cleanupPanelSource from "./MemoryCleanupPanel.tsx?raw";
 import detailPanelSource from "./MemoryDetailPanel.tsx?raw";
 import effectivePanelSource from "./MemoryEffectivePanel.tsx?raw";
@@ -140,7 +141,7 @@ describe("MemoryRoute layout contract", () => {
 
   it("reads the read-only memory overview endpoint through the shared query key", () => {
     expect(workbenchQueriesSource).toContain("queryKeys.memoryOverview()");
-    expect(workbenchQueriesSource).toContain("fetchMemoryOverview<MemoryOverview>({ includeContent: false, signal })");
+    expect(workbenchQueriesSource).toContain("fetchMemoryOverview<MemoryOverview>({ includeContent: true, signal })");
     expect(memoryApiSource).toContain("/api/memory/overview");
     expect(routeSource).toContain("overviewQuery");
     expect(routeSource).toContain("queryKeys.memoryItemDetail(activeSection?.id ?? \"\", activeItem?.id ?? \"\")");
@@ -159,8 +160,8 @@ describe("MemoryRoute layout contract", () => {
     expect(memoryApiSource).toContain("/api/memory/agents/${encodeURIComponent(agentId)}");
     expect(routeSource).toContain("selectedAgentMemoryAgentId");
     expect(routeSource).toContain("createAgentMemoryPanel()");
-    expect(routeSource).toContain("copy.agentMemoryView");
-    expect(agentMemoryPanelSource).toContain("copy.agentMemoryPrivateFiles");
+    expect(routeSource).toContain("copy.personalView");
+    expect(agentMemoryPanelSource).toContain("copy.memoryCount");
     expect(routeSource).toContain("styles.agentMemoryViewStack");
     expect(memoryCssSource).toContain(".agentMemoryViewStack");
     expect(memoryCssSource).toContain(".agentMemoryWorkspace");
@@ -168,17 +169,10 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("<MemoryAgentMemoryPanel");
     expect(routeSource).not.toContain("const renderAgentMemoryView = () =>");
     expect(agentMemoryPanelSource).toContain("export function MemoryAgentMemoryPanel");
-    expect(agentMemoryPanelSource).toContain("VSplitWorkspace");
-    expect(agentMemoryPanelSource).toContain("AGENT_MEMORY_SPLIT_RESIZE");
-    expect(agentMemoryPanelSource).toContain("WORKBENCH_LAYOUT_IDS.memory");
-    expect(agentMemoryPanelSource).toContain("agent-list");
-    expect(agentMemoryPanelSource).toContain("agent-detail");
+    expect(contentBrowsePanelSource).toContain("VSplitWorkspace");
+    expect(contentBrowsePanelSource).toContain("WORKBENCH_LAYOUT_IDS.memory");
+    expect(contentBrowsePanelSource).toContain("memory-browse-list");
     expect(agentMemoryPanelSource).toContain("styles.agentMemoryWorkspace");
-    expect(agentMemoryPanelSource).toContain("styles.sourcePanel");
-    expect(agentMemoryPanelSource).toContain("styles.itemPanel");
-    expect(agentMemoryPanelSource).toContain("styles.detailPanel");
-    expect(agentMemoryPanelSource).toContain("VMetricStrip");
-    expect(agentMemoryPanelSource).toContain("VLoadingValue");
     expect(agentMemoryPanelSource).toContain("copy.agentMemorySelectPrompt");
     expect(agentMemoryPanelSource).not.toContain("useQuery");
     expect(agentMemoryPanelSource).not.toContain("useMutation");
@@ -325,27 +319,21 @@ describe("MemoryRoute layout contract", () => {
     expect(sourceAndItemPanelsSource).not.toContain("fetchJson");
   });
 
-  it("splits memory into overview, effective scope, Agent memory, source management, source audit, team knowledge, graph, and cleanup views", () => {
+  it("splits memory into personal, team, library, graph, and manage views", () => {
     expect(routeSource).toContain(
-      'export type MemoryRouteView = "overview" | "effective" | "agents" | "manage" | "sources" | "knowledge" | "graph" | "cleanup"',
+      'export type MemoryRouteView = "personal" | "team" | "library" | "graph" | "manage" | "overview" | "effective" | "agents" | "sources" | "knowledge" | "cleanup"',
     );
     expect(routeSource).toContain("MEMORY_VIEWS");
     expect(routeSource).toContain("styles.subnav");
-    expect(routeSource).toContain("<MemoryOverviewPanel");
-    expect(routeSource).toContain("createEffectivePanel()");
     expect(routeSource).toContain("createAgentMemoryPanel()");
-    expect(routeSource).toContain("createManagePanel()");
-    expect(routeSource).toContain("renderSourcesView()");
-    expect(routeSource).toContain("renderKnowledgeView()");
+    expect(routeSource).toContain("createTeamBrowsePanel()");
+    expect(routeSource).toContain("createLibraryBrowsePanel()");
+    expect(routeSource).toContain("createOpsPanel()");
     expect(routeSource).toContain("renderGraphView()");
-    expect(routeSource).toContain("createCleanupPanel()");
-    expect(routeSource).toContain('forcedView === "overview"');
-    expect(routeSource).toContain('forcedView === "effective"');
-    expect(routeSource).toContain('forcedView === "agents"');
-    expect(routeSource).toContain('forcedView === "manage"');
-    expect(routeSource).toContain('forcedView === "knowledge"');
     expect(routeSource).toContain('forcedView === "graph"');
-    expect(routeSource).toContain('forcedView === "cleanup"');
+    expect(routeSource).toContain("isPersonalMemoryView(forcedView)");
+    expect(routeSource).toContain("isTeamMemoryView(forcedView)");
+    expect(routeSource).toContain("isLibraryMemoryView(forcedView)");
   });
 
   it("does not expose the removed workspace migration compatibility controls", () => {
@@ -512,23 +500,11 @@ describe("MemoryRoute layout contract", () => {
     expect(graphViewPanelStyles).not.toHaveProperty("managementHeader");
   });
 
-  it("delegates the dense overview body to a dedicated panel component", () => {
-    expect(routeSource).toContain('import { MemoryOverviewPanel } from "./MemoryOverviewPanel"');
-    expect(routeSource).toContain("<MemoryOverviewPanel");
-    expect(routeSource).not.toContain("const renderOverviewView = () => (");
-
-    expect(overviewPanelSource).toContain("export function MemoryOverviewPanel");
-    expect(overviewPanelSource).toContain('from "./MemoryOverviewPanel.styles"');
-    expect(overviewPanelSource).not.toContain("MemoryRoute.styles");
-    expect(overviewPanelSource).toContain("VMetricStrip");
-    expect(overviewPanelSource).not.toContain("styles.summaryCard");
-    expect(overviewPanelSource).toContain("className={styles.reviewQueuePanel}");
-    expect(overviewPanelSource).toContain("className={styles.overviewGrid}");
-    expect(overviewPanelStyles.reviewQueuePanel).toBeTruthy();
-    expect(overviewPanelStyles.overviewGrid).toBeTruthy();
-    expect(overviewPanelSource).not.toContain("useQuery");
-    expect(overviewPanelSource).not.toContain("useMutation");
-    expect(overviewPanelSource).not.toContain("fetchJson");
+  it("delegates browse bodies to a dedicated content panel", () => {
+    expect(routeSource).toContain('import { MemoryContentBrowsePanel } from "./MemoryContentBrowsePanel"');
+    expect(routeSource).toContain("<MemoryContentBrowsePanel");
+    expect(routeSource).toContain("createTeamBrowsePanel()");
+    expect(routeSource).toContain("createLibraryBrowsePanel()");
   });
 
   it("delegates diagnostic warnings to a dedicated warning strip component", () => {
@@ -1402,22 +1378,24 @@ describe("MemoryRoute layout contract", () => {
 
   it("is registered as a primary Memory Library with legacy Agent memory redirects", () => {
     expect(routerSource).toContain('path: "memory"');
-    expect(routerSource).toContain('<MemoryRoute forcedView="overview" />');
-    expect(routerSource).toContain('path: "memory/effective"');
-    expect(routerSource).toContain('<MemoryRoute forcedView="effective" />');
+    expect(routerSource).toContain('<MemoryRoute forcedView="personal" />');
+    expect(routerSource).toContain('path: "memory/team"');
+    expect(routerSource).toContain('<MemoryRoute forcedView="team" />');
+    expect(routerSource).toContain('path: "memory/library"');
+    expect(routerSource).toContain('<MemoryRoute forcedView="library" />');
     expect(routerSource).toContain('path: "memory/agents"');
-    expect(routerSource).toContain('<MemoryRoute forcedView="agents" />');
+    expect(routerSource).toContain('path: "memory/knowledge"');
     expect(routerSource).toContain('path: "memory/manage"');
     expect(routerSource).toContain('<MemoryRoute forcedView="manage" />');
-    expect(routerSource).toContain('path: "memory/sources"');
-    expect(routerSource).toContain('<MemoryRoute forcedView="sources" />');
-    expect(routerSource).toContain('path: "memory/knowledge"');
-    expect(routerSource).toContain('<MemoryRoute forcedView="knowledge" />');
+    expect(routerSource).toContain('path: "memory/graph"');
+    expect(routerSource).toContain('<MemoryRoute forcedView="graph" />');
     expect(routerSource).toContain('path: "memory/cleanup"');
     expect(routerSource).toContain('<MemoryRoute forcedView="cleanup" />');
     expect(routerSource).not.toContain('path: "agents/memory"');
     expect(routerSource).not.toContain("LegacyMemoryRedirect");
-    expect(routeSource).toContain('{ key: "overview", href: "/memory" }');
+    expect(routeSource).toContain('{ key: "personal", href: "/memory" }');
+    expect(routeSource).toContain('{ key: "team", href: "/memory/team" }');
+    expect(routeSource).toContain('{ key: "library", href: "/memory/library" }');
     expect(routeSource).toContain("auditHref: `/memory/sources?section=");
     expect(routeSource).toContain("manageHref: memoryPairActionTarget(pair) === \"manage\" ? `/memory/manage?section=");
     expect(reviewQueuePanelSource).toContain("to={item.auditHref}");
