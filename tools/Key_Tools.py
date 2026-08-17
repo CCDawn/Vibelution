@@ -124,10 +124,16 @@ from tools.session_child_tools import (
 from tools.project_operation_tools import (
     agent_archive_tool as _agent_archive_impl,
     agent_create_tool as _agent_create_impl,
+    agent_inbox_list_tool as _agent_inbox_list_impl,
+    agent_message_consume_tool as _agent_message_consume_impl,
+    agent_messages_consume_all_tool as _agent_messages_consume_all_impl,
     agent_reset_tool as _agent_reset_impl,
+    agent_update_tool as _agent_update_impl,
+    knowledge_base_acl_grant_tool as _knowledge_base_acl_grant_impl,
     session_create_tool as _session_create_impl,
     session_delete_tool as _session_delete_impl,
     session_stop_tool as _session_stop_impl,
+    session_update_tool as _session_update_impl,
 )
 from tools.cli_agent_tools import cli_agent_run_tool as _cli_agent_run_impl
 
@@ -1586,6 +1592,29 @@ def _build_key_tools() -> List[BaseTool]:
         )
 
     @tool
+    def agent_update_tool(
+        agent_id: str,
+        updates_json: str,
+        expected_updated_at: str = "",
+        expected_config_revision: int = -1,
+        source_draft_id: str = "",
+    ) -> str:
+        """
+        【Agent 更新】更新非生命周期 Agent 配置；归档必须改用 agent_archive_tool。
+
+        updates_json 使用 PATCH /api/agents/{id} 的 camelCase 字段，例如
+        {"displayName":"Reviewer","promptTemplateId":"prompt-review"}。
+        status 不被接受；未出现的字段不会被清空。
+        """
+        return _agent_update_impl(
+            agent_id=agent_id,
+            updates_json=updates_json,
+            expected_updated_at=expected_updated_at,
+            expected_config_revision=expected_config_revision,
+            source_draft_id=source_draft_id,
+        )
+
+    @tool
     def agent_archive_tool(agent_id: str) -> str:
         """
         【Agent 归档】归档一个 Agent（非删除），走完整 archive lifecycle。
@@ -1658,6 +1687,18 @@ def _build_key_tools() -> List[BaseTool]:
         return _session_create_impl(title=title, agent_id=agent_id)
 
     @tool
+    def session_update_tool(session_id: str, title: str = "", agent_id: str = "") -> str:
+        """
+        【Session 更新】更新会话标题和/或绑定已有 active Agent。
+
+        Args:
+            session_id: 目标 Session ID
+            title: 可选新标题
+            agent_id: 可选新 Agent ID
+        """
+        return _session_update_impl(session_id=session_id, title=title, agent_id=agent_id)
+
+    @tool
     def session_stop_tool(session_id: str, turn_id: str) -> str:
         """
         【停止 Session turn】请求停止指定 Session 的当前 turn（必须带 turn_id）。
@@ -1683,6 +1724,57 @@ def _build_key_tools() -> List[BaseTool]:
             JSON，含 ok/status/sessionId/deletedSessionId
         """
         return _session_delete_impl(session_id=session_id)
+
+    @tool
+    def agent_inbox_list_tool(agent_id: str = "", status: str = "pending", limit: int = 20) -> str:
+        """【Agent 收件箱读取】读取指定或当前 Agent 的有界消息列表。"""
+        return _agent_inbox_list_impl(agent_id=agent_id, status=status, limit=limit)
+
+    @tool
+    def agent_message_consume_tool(
+        message_id: str,
+        agent_id: str = "",
+        consumed_by_session_id: str = "",
+        consumed_by_turn_id: str = "",
+    ) -> str:
+        """【单条消息消费】把一条 Agent inbox 消息标记为 consumed。"""
+        return _agent_message_consume_impl(
+            message_id=message_id,
+            agent_id=agent_id,
+            consumed_by_session_id=consumed_by_session_id,
+            consumed_by_turn_id=consumed_by_turn_id,
+        )
+
+    @tool
+    def agent_messages_consume_all_tool(
+        agent_id: str = "",
+        consumed_by_session_id: str = "",
+        consumed_by_turn_id: str = "",
+    ) -> str:
+        """【全部消息消费】把一个 Agent inbox 的所有未消费消息标记为 consumed。"""
+        return _agent_messages_consume_all_impl(
+            agent_id=agent_id,
+            consumed_by_session_id=consumed_by_session_id,
+            consumed_by_turn_id=consumed_by_turn_id,
+        )
+
+    @tool
+    def knowledge_base_acl_grant_tool(
+        knowledge_base_id: str,
+        target_agent_id: str,
+        permissions_json: str = '["read", "propose"]',
+    ) -> str:
+        """
+        【知识库 ACL 授权】由当前 owner/reviewer Agent 为目标 active Agent 授予显式权限。
+
+        actor 身份只取当前 Agent runtime，不能通过参数伪造；permissions_json 仅允许
+        read、propose、review，不支持 wildcard。
+        """
+        return _knowledge_base_acl_grant_impl(
+            knowledge_base_id=knowledge_base_id,
+            target_agent_id=target_agent_id,
+            permissions_json=permissions_json,
+        )
 
     # ── 后台任务工具 ──────────────────────────────────────────────────────
 
@@ -2818,11 +2910,17 @@ def _build_key_tools() -> List[BaseTool]:
         create_child_session_tool,
         list_child_sessions_tool,
         agent_create_tool,
+        agent_update_tool,
         agent_archive_tool,
         agent_reset_tool,
         session_create_tool,
+        session_update_tool,
         session_stop_tool,
         session_delete_tool,
+        agent_inbox_list_tool,
+        agent_message_consume_tool,
+        agent_messages_consume_all_tool,
+        knowledge_base_acl_grant_tool,
         session_reference_query_tool,
         # 后台任务
         task_start_tool,

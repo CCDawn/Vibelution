@@ -49,13 +49,19 @@ TEAM_MEMORY_TOOLS = {
     "knowledge_rating_suggestion_tool",
 }
 
-PROJECT_OPERATION_LIFECYCLE_TOOLS = {
+PROJECT_OPERATION_TOOLS = {
     "agent_create_tool",
+    "agent_update_tool",
     "agent_archive_tool",
     "agent_reset_tool",
     "session_create_tool",
+    "session_update_tool",
     "session_stop_tool",
     "session_delete_tool",
+    "agent_inbox_list_tool",
+    "agent_message_consume_tool",
+    "agent_messages_consume_all_tool",
+    "knowledge_base_acl_grant_tool",
 }
 
 CURRENT_AGENT_TOOL_CONTRACT = (
@@ -93,8 +99,8 @@ def test_team_evolution_and_memory_tools_have_current_registry_contract():
 
     assert CURRENT_AGENT_TOOL_CONTRACT.issubset(canonical_names)
     assert CURRENT_AGENT_TOOL_CONTRACT.issubset(llm_facing_names)
-    assert PROJECT_OPERATION_LIFECYCLE_TOOLS.issubset(canonical_names)
-    assert PROJECT_OPERATION_LIFECYCLE_TOOLS.issubset(llm_facing_names)
+    assert PROJECT_OPERATION_TOOLS.issubset(canonical_names)
+    assert PROJECT_OPERATION_TOOLS.issubset(llm_facing_names)
     assert "agent_purge_tool" not in canonical_names
     assert RETIRED_TOOL_NAMES.isdisjoint(canonical_names)
 
