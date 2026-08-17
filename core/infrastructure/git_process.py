@@ -117,7 +117,7 @@ def run_git(
             )
             time.sleep(0.2 * (attempt + 1))
             continue
-        if result.returncode != 0:
+        if result.returncode != 0 and not _is_expected_git_boolean_status(args, result.returncode):
             _observe_git_process_result(
                 "command",
                 "git_process.command.failed",
@@ -253,6 +253,15 @@ def _is_git_lock_contention(result: subprocess.CompletedProcess[Any]) -> bool:
         if part
     ).lower()
     return "index.lock" in text or "another git process" in text
+
+
+def _is_expected_git_boolean_status(args: Sequence[str], returncode: int) -> bool:
+    """Return True for Git probes that use exit 1 as a normal boolean answer."""
+
+    if int(returncode) != 1:
+        return False
+    argv = [str(arg) for arg in args]
+    return "merge-base" in argv and "--is-ancestor" in argv
 
 
 def _process_output_text(value: Any) -> str:

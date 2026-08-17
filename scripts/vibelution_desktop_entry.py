@@ -1347,6 +1347,9 @@ def _run_lifecycle_bridge(args: argparse.Namespace) -> dict[str, object]:
 _LIFECYCLE_OPERATIONS = {"start", "stop", "force-stop", "restart", "rebuild-and-start", "shutdown"}
 
 
+_BRANCH_INSTANCE_OPERATIONS = {"start", "stop", "force-stop", "restart"}
+
+
 def _run_branch_instance_bridge(args: argparse.Namespace) -> dict[str, object]:
     """Run a branch-instance lifecycle operation in-process on behalf of Electron main."""
     operation = str(args.branch_instance_operation or "").strip().lower()
@@ -1402,12 +1405,26 @@ def _run_branch_instance_bridge(args: argparse.Namespace) -> dict[str, object]:
     return {"schemaVersion": 1, **response}
 
 
-_BRANCH_INSTANCE_OPERATIONS = {"start", "stop", "force-stop", "restart"}
+def _split_launcher_api_path(path: str) -> tuple[str, dict[str, str]]:
+    raw = str(path or "").strip()
+    route, _, query = raw.partition("?")
+    params: dict[str, str] = {}
+    if query:
+        from urllib.parse import parse_qs
+
+        parsed = parse_qs(query, keep_blank_values=False)
+        params = {key: (values[-1] if values else "") for key, values in parsed.items()}
+    return route, params
+
+
+def _query_flag(value: str) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _run_launcher_api_bridge(args: argparse.Namespace) -> dict[str, object]:
     """Serve settings/developer-mode/maintenance through a no-console JSON CLI."""
-    path = str(args.launcher_api_path or "").strip()
+    raw_path = str(args.launcher_api_path or "").strip()
+    path, query = _split_launcher_api_path(raw_path)
     method = str(args.launcher_api_method or "GET").strip().upper()
     body: dict[str, object] = {}
     if args.launcher_api_body:
@@ -1416,7 +1433,7 @@ def _run_launcher_api_bridge(args: argparse.Namespace) -> dict[str, object]:
         body = {}
     from core.launcher import service as launcher_service
 
-    _append_log("desktop_entry_python.launcher_api.started", method=method, path=path)
+    _append_log("desktop_entry_python.launcher_api.started", method=method, path=raw_path)
     try:
         if path == "settings/workbench-window" and method == "GET":
             response = launcher_service.get_workbench_window_mode_setting()
@@ -1453,7 +1470,10 @@ def _run_launcher_api_bridge(args: argparse.Namespace) -> dict[str, object]:
         elif path == "freshness" and method == "GET":
             response = launcher_service.get_launcher_freshness()
         elif path == "branch-instances" and method == "GET":
-            response = launcher_service.list_launcher_branch_instances()
+            if _query_flag(query.get("cleanupMetadata", "")):
+                response = launcher_service.list_launcher_branch_instances(include_cleanup_metadata=True)
+            else:
+                response = launcher_service.list_launcher_branch_instances()
         elif path == "branch-instances/cleanup" and method == "POST":
             instance_ids = body.get("instanceIds")
             if not isinstance(instance_ids, list):

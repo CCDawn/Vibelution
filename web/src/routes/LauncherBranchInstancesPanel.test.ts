@@ -18,6 +18,7 @@ import {
   instanceRuntimeState,
   instanceStopLabel,
   isCleanupEligible,
+  overlayCleanupMetadata,
   paginateItems,
 } from "./LauncherBranchInstancesPanel.model";
 
@@ -139,7 +140,8 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain("Reading branch instances");
     expect(panelSource).toContain("还没有分支实例");
     expect(panelSource).toContain("const hasAnyItems = items.length > 0");
-    expect(panelSource).toContain("const showListLoading = listLoading && !hasAnyItems");
+    expect(panelSource).toContain("const showListLoading = (listLoading && !hasAnyItems) || waitingUnmergedMetadata");
+    expect(panelSource).toContain("const filteredEmpty = hasAnyItems && visibleItems.length === 0 && !waitingUnmergedMetadata");
     expect(panelSource).toContain("{showListLoading ? (");
     expect(panelSource).toContain('tone="loading"');
     expect(panelSource).toContain("!hasAnyItems ? (");
@@ -161,11 +163,39 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain("askBatchStop");
     expect(panelSource).toContain("cleanupSelected");
     expect(panelSource).toContain("requestBranchInstanceCleanup");
-    expect(panelSource).toContain("queryClient.invalidateQueries({ queryKey: queryKeys.launcherBranchInstances() })");
+    expect(panelSource).toContain("queryClient.invalidateQueries({ queryKey: [\"launcher\", \"branch-instances\"] })");
+    expect(panelSource).toContain("getLauncherBranchInstances({ cleanupMetadata: true })");
     expect(panelSource).toContain("cleanupMutation");
     expect(panelSource).toContain("pendingIds");
     expect(panelSource).toContain("batchStopIds");
     expect(panelSource).toContain("onStopMany");
+    expect(panelSource).toContain("needsCleanupMetadata");
+    expect(panelSource).toContain("overlayCleanupMetadata");
+    expect(panelSource).toContain("waitingCleanupConfirmMetadata");
+  });
+
+  it("overlays cleanup metadata onto fast list rows by id", () => {
+    const base = instance({ id: "worktree:task" });
+    const [row] = overlayCleanupMetadata(
+      [base],
+      [instance({
+        id: "worktree:task",
+        mergedToMain: false,
+        cleanupEligible: true,
+        cleanupRisks: ["delete_unmerged"],
+      })],
+    );
+    expect(row.mergedToMain).toBe(false);
+    expect(row.cleanupEligible).toBe(true);
+    expect(row.cleanupRisks).toEqual(["delete_unmerged"]);
+    expect(overlayCleanupMetadata([base], null)).toEqual([base]);
+  });
+
+  it("hides unmerged rows until cleanup metadata marks them unmerged", () => {
+    const unknown = instance({ id: "worktree:task" });
+    const unmerged = instance({ id: "worktree:task", mergedToMain: false });
+    expect(filterBranchInstances([unknown], "", { unmerged: true })).toEqual([]);
+    expect(filterBranchInstances([unmerged], "", { unmerged: true }).map((item) => item.id)).toEqual(["worktree:task"]);
   });
 
   it("keeps live instances running and failed zombies in attention", () => {

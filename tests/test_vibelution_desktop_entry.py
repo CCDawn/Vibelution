@@ -593,6 +593,46 @@ def test_launcher_api_bridge_dispatches_settings_and_maintenance(monkeypatch):
     assert payload["ok"] is True
     assert payload["payload"]["marker"] == "branch_instances"
 
+    payload = entry._run_launcher_api_bridge(
+        argparse.Namespace(
+            launcher_api_path="branch-instances?cleanupMetadata=1",
+            launcher_api_method="GET",
+            launcher_api_body="",
+        )
+    )
+    assert payload["ok"] is True
+    assert payload["payload"]["marker"] == "branch_instances"
+
+
+def test_launcher_api_bridge_branch_instances_cleanup_metadata_is_opt_in(monkeypatch):
+    entry = _load_desktop_entry_py()
+    monkeypatch.setattr(entry, "_append_log", lambda *a, **k: None)
+    launcher_module = _fake_launcher_service_module()
+    seen: list[dict[str, object]] = []
+
+    def capture_list(*args, **kwargs):
+        seen.append({"args": args, "kwargs": kwargs})
+        return {"items": []}
+
+    launcher_module.list_launcher_branch_instances = capture_list
+    monkeypatch.setitem(sys.modules, "core.launcher", types.ModuleType("core.launcher"))
+    monkeypatch.setitem(sys.modules, "core.launcher.service", launcher_module)
+
+    default_payload = entry._run_launcher_api_bridge(
+        argparse.Namespace(launcher_api_path="branch-instances", launcher_api_method="GET", launcher_api_body="")
+    )
+    annotated_payload = entry._run_launcher_api_bridge(
+        argparse.Namespace(
+            launcher_api_path="branch-instances?cleanupMetadata=1",
+            launcher_api_method="GET",
+            launcher_api_body="",
+        )
+    )
+    assert default_payload["ok"] is True
+    assert annotated_payload["ok"] is True
+    assert seen[0]["kwargs"] == {}
+    assert seen[1]["kwargs"] == {"include_cleanup_metadata": True}
+
 
 def test_launcher_api_bridge_rejects_unknown_paths(monkeypatch):
     entry = _load_desktop_entry_py()

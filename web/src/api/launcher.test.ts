@@ -127,6 +127,24 @@ describe("launcher api helpers", () => {
     expect(fetchMock.mock.calls[0][0]).toBe("/api/launcher/branch-instances");
   });
 
+  it("requests cleanup metadata only when the caller opts in", async () => {
+    vi.stubGlobal("window", {
+      location: {
+        href: "http://127.0.0.1:8000/launcher",
+        origin: "http://127.0.0.1:8000",
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ schemaVersion: 1, items: [] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getLauncherBranchInstances({ cleanupMetadata: true });
+
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/launcher/branch-instances?cleanupMetadata=1");
+  });
+
   it("normalizes stale flat branch-instance payloads before the Launcher renders them", async () => {
     vi.stubGlobal("window", {
       location: {
@@ -712,6 +730,28 @@ describe("launcher api IPC transport", () => {
     const request = invoke.mock.calls[0][0] as { schemaVersion: number; path: string };
     expect(request.schemaVersion).toBe(1);
     expect(request.path).toBe("status");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("sends the cleanup-metadata query over the preload bridge", async () => {
+    vi.stubGlobal("window", {
+      location: {
+        href: "http://127.0.0.1:8765/launcher",
+        origin: "http://127.0.0.1:8765",
+      },
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const invoke = vi.fn().mockResolvedValue({
+      ok: true,
+      payload: { schemaVersion: 1, items: [] },
+    });
+    stubLauncherIpcBridge(invoke);
+
+    await getLauncherBranchInstances({ cleanupMetadata: true });
+
+    const request = invoke.mock.calls[0][0] as { path: string };
+    expect(request.path).toBe("branch-instances?cleanupMetadata=1");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

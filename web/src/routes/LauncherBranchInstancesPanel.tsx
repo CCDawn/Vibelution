@@ -1,8 +1,8 @@
 import { GitBranch } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { requestBranchInstanceCleanup, type LauncherBranchInstance } from "../api/launcher";
+import { getLauncherBranchInstances, requestBranchInstanceCleanup, type LauncherBranchInstance } from "../api/launcher";
 import { queryKeys } from "../api/queryKeys";
 import { VButton, VCheckbox, VConfirmDialog, VDenseTable, VEmptyState, VNativeInput, VStateSurface, VStatusChip, VTabs, VToolbar, VTooltip, type VDenseTableColumn } from "../components/vui";
 import type { LauncherOperation } from "../api/types";
@@ -24,6 +24,7 @@ import {
   instanceStopLabel,
   instanceWindowOpen,
   isCleanupEligible,
+  overlayCleanupMetadata,
   paginateItems,
   type InstanceListFilters,
   type InstancePendingOperation,
@@ -273,8 +274,24 @@ export function LauncherBranchInstancesPanel({
   const [batchStopKind, setBatchStopKind] = useState<"stop" | "close">("stop");
   const [notice, setNotice] = useState("");
   const [noticeTone, setNoticeTone] = useState<"neutral" | "error">("neutral");
+  const needsCleanupMetadata = Boolean(filters.unmerged || (pendingIds && pendingIds.length > 0));
+  const cleanupMetadataQuery = useQuery({
+    queryKey: queryKeys.launcherBranchInstances(true),
+    queryFn: () => getLauncherBranchInstances({ cleanupMetadata: true }),
+    enabled: needsCleanupMetadata,
+    staleTime: 30_000,
+  });
+  const waitingUnmergedMetadata = Boolean(filters.unmerged) && cleanupMetadataQuery.isPending;
+  const waitingCleanupConfirmMetadata = Boolean(pendingIds?.length) && !cleanupMetadataQuery.isSuccess;
+  const annotatedItems = useMemo(
+    () => overlayCleanupMetadata(items, cleanupMetadataQuery.data?.items),
+    [cleanupMetadataQuery.data?.items, items],
+  );
 
-  const visibleItems = useMemo(() => filterBranchInstances(items, query, filters), [filters, items, query]);
+  const visibleItems = useMemo(
+    () => filterBranchInstances(annotatedItems, query, filters),
+    [annotatedItems, filters, query],
+  );
   const grouped = useMemo(() => groupBranchInstances(visibleItems, pendingOperation), [pendingOperation, visibleItems]);
   const allItems = useMemo(
     () => [...grouped.running, ...grouped.attention, ...grouped.startable],
@@ -343,8 +360,8 @@ export function LauncherBranchInstancesPanel({
   const pageEligible = pagedMaintenance.items;
   const pageSelectedCount = pageEligible.filter((item) => cleanupSelected.includes(item.id)).length;
   const allPageSelected = pageEligible.length > 0 && pageSelectedCount === pageEligible.length;
-  const pendingItems = pendingIds ? items.filter((item) => pendingIds.includes(item.id)) : [];
-  const batchStopItems = batchStopIds ? items.filter((item) => batchStopIds.includes(item.id)) : [];
+  const pendingItems = pendingIds ? annotatedItems.filter((item) => pendingIds.includes(item.id)) : [];
+  const batchStopItems = batchStopIds ? annotatedItems.filter((item) => batchStopIds.includes(item.id)) : [];
 
   const cleanupMutation = useMutation({
     mutationFn: (instanceIds: string[]) => requestBranchInstanceCleanup(instanceIds, true),
@@ -353,7 +370,7 @@ export function LauncherBranchInstancesPanel({
       setNotice(failed.length > 0 ? `${labels.failed}：${failed.map((item) => item.shortName || item.id).join("、")}` : labels.done);
       setNoticeTone(failed.length > 0 ? "error" : "neutral");
       setSelectedIds((current) => current.filter((id) => !payload.cleaned.some((item) => item.id === id)));
-      void queryClient.invalidateQueries({ queryKey: queryKeys.launcherBranchInstances() });
+      void queryClient.invalidateQueries({ queryKey: ["launcher", "branch-instances"] });
     },
     onError: (error) => {
       setNotice(error instanceof Error ? error.message : labels.failed);
@@ -430,8 +447,8 @@ export function LauncherBranchInstancesPanel({
   };
 
   const hasAnyItems = items.length > 0;
-  const showListLoading = listLoading && !hasAnyItems;
-  const filteredEmpty = hasAnyItems && visibleItems.length === 0;
+  const showListLoading = (listLoading && !hasAnyItems) || waitingUnmergedMetadata;
+  const filteredEmpty = hasAnyItems && visibleItems.length === 0 && !waitingUnmergedMetadata;
   const activePager = activeTab === "all" ? pagedAll : activeTab === "startable" ? pagedStartable : null;
   const activeTotal = activeTab === "all"
     ? allItems.length
@@ -854,8 +871,8 @@ export function LauncherBranchInstancesPanel({
         size="md"
         confirmLabel={labels.cleanup}
         cancelLabel={zh ? "取消" : "Cancel"}
-        confirmPending={cleanupMutation.isPending}
-        confirmDisabled={pendingItems.length === 0}
+        confirmPending={cleanupMutation.isPending || waitingCleanupConfirmMetadata}
+        confirmDisabled={pendingItems.length === 0 || waitingCleanupConfirmMetadata}
         onConfirm={() => {
           if (pendingIds && pendingIds.length > 0) {
             cleanupMutation.mutate(pendingIds);
@@ -863,7 +880,12 @@ export function LauncherBranchInstancesPanel({
         }}
       >
         <ul className={styles.confirmList}>
-          {pendingItems.map((item) => {
+          {waitingCleanupConfirmMetadata ? (
+            <li className={styles.confirmItem}>
+              <p className={styles.confirmName}>{labels.listLoadingTitle}</p>
+            </li>
+          ) : (
+            pendingItems.map((item) => {
             const risks = cleanupRiskLabels(item, zh);
             return (
               <li key={item.id} className={styles.confirmItem}>
@@ -876,7 +898,8 @@ export function LauncherBranchInstancesPanel({
                 </ul>
               </li>
             );
-          })}
+          })
+          )}
         </ul>
       </VConfirmDialog>
 

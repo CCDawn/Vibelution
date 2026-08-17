@@ -372,6 +372,20 @@ def test_launcher_status_settings_routes_keep_unknown_fields(monkeypatch) -> Non
     assert instances.status_code == 200
     assert instances.json() == expected_instances
 
+    seen_cleanup: list[dict[str, object]] = []
+
+    def capture_list(*args, **kwargs):
+        seen_cleanup.append({"args": args, "kwargs": kwargs})
+        return expected_instances
+
+    monkeypatch.setattr(launcher_routes.launcher_service, "list_launcher_branch_instances", capture_list)
+    default_list = client.get("/api/launcher/branch-instances")
+    annotated_list = client.get("/api/launcher/branch-instances", params={"cleanupMetadata": True})
+    assert default_list.status_code == 200
+    assert annotated_list.status_code == 200
+    assert seen_cleanup[0]["kwargs"] == {}
+    assert seen_cleanup[1]["kwargs"] == {"include_cleanup_metadata": True}
+
     expected_window = {"mode": "windowed", "effectiveMode": "windowed", "customWindow": True}
     monkeypatch.setattr(
         launcher_routes.launcher_service,

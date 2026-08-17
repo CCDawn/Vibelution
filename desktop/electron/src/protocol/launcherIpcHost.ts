@@ -77,8 +77,12 @@ function launcherIpcError(code: string, message: string): LauncherIpcInvokeResul
   return { ok: false, error: { code, message } };
 }
 
+function launcherApiRoute(path: string): string {
+  return String(path || "").trim().split("?")[0].split("#")[0];
+}
+
 function isLauncherApiPath(path: string): boolean {
-  const raw = String(path || "").trim();
+  const raw = launcherApiRoute(path);
   if (!raw) {
     return false;
   }
@@ -178,7 +182,8 @@ export function createLauncherIpcHost(input: {
           `Launcher IPC path is outside the /api/launcher control surface: ${normalized.path.slice(0, 80)}`,
         );
       }
-      if (LIFECYCLE_PATHS.has(normalized.path) && input.orchestrateLifecycle) {
+      const apiRoute = launcherApiRoute(normalized.path);
+      if (LIFECYCLE_PATHS.has(apiRoute) && input.orchestrateLifecycle) {
         try {
           const result = await input.orchestrateLifecycle(normalized.path, normalized);
           return { ok: true, payload: result };
@@ -189,16 +194,16 @@ export function createLauncherIpcHost(input: {
           );
         }
       }
-      if (normalized.path === "status" && input.resolveLocalStatus) {
+      if (apiRoute === "status" && input.resolveLocalStatus) {
         input.scheduleStatusRefresh?.();
         return {
           ok: true,
-          payload: overlayLauncherWindowTruth(normalized.path, input.resolveLocalStatus(), resolveWindowTruth())
+          payload: overlayLauncherWindowTruth(apiRoute, input.resolveLocalStatus(), resolveWindowTruth())
         };
       }
-      if (BRANCH_INSTANCE_PATHS.has(normalized.path) && input.orchestrateBranchInstance) {
+      if (BRANCH_INSTANCE_PATHS.has(apiRoute) && input.orchestrateBranchInstance) {
         try {
-          const operation = normalized.path.split("/")[1];
+          const operation = apiRoute.split("/")[1];
           const result = await input.orchestrateBranchInstance(operation, normalized);
           return { ok: true, payload: result };
         } catch (error: unknown) {
@@ -208,12 +213,12 @@ export function createLauncherIpcHost(input: {
           );
         }
       }
-      if (LAUNCHER_API_PATHS.has(normalized.path) && input.orchestrateLauncherApi) {
+      if (LAUNCHER_API_PATHS.has(apiRoute) && input.orchestrateLauncherApi) {
         try {
           const result = await input.orchestrateLauncherApi(normalized.path, normalized);
           return {
             ok: true,
-            payload: overlayLauncherWindowTruth(normalized.path, result, resolveWindowTruth())
+            payload: overlayLauncherWindowTruth(apiRoute, result, resolveWindowTruth())
           };
         } catch (error: unknown) {
           return launcherIpcError(
@@ -275,7 +280,7 @@ export function createLauncherIpcHost(input: {
         const payload = (await response.json()) as unknown;
         return {
           ok: true,
-          payload: overlayLauncherWindowTruth(normalized.path, payload, resolveWindowTruth())
+          payload: overlayLauncherWindowTruth(apiRoute, payload, resolveWindowTruth())
         };
       } catch (error: unknown) {
         return launcherIpcError(

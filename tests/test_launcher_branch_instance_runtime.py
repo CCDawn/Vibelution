@@ -244,7 +244,11 @@ def test_service_binds_current_project_bundle_into_branch_runtime(monkeypatch):
         return {"items": []}
 
     monkeypatch.setattr(branch_instance_lifecycle, "list_overlayed_branch_instances", fake_list)
-    monkeypatch.setattr(branch_instance_cleanup, "annotate_cleanup_metadata", lambda payload: payload)
+
+    def boom_annotate(_payload):
+        raise AssertionError("default branch list must not annotate cleanup metadata")
+
+    monkeypatch.setattr(branch_instance_cleanup, "annotate_cleanup_metadata", boom_annotate)
 
     assert launcher_service.list_launcher_branch_instances() == {"items": []}
     assert seen["bundle"] is bundle
@@ -269,6 +273,39 @@ def test_branch_list_does_not_call_full_launcher_status(monkeypatch):
         "list_overlayed_branch_instances",
         lambda *, current_bundle=None: {"items": []},
     )
-    monkeypatch.setattr(branch_instance_cleanup, "annotate_cleanup_metadata", lambda payload: payload)
+
+    def boom_annotate(_payload):
+        raise AssertionError("default branch list must not annotate cleanup metadata")
+
+    monkeypatch.setattr(branch_instance_cleanup, "annotate_cleanup_metadata", boom_annotate)
 
     assert launcher_service.list_launcher_branch_instances() == {"items": []}
+
+
+def test_service_cleanup_metadata_annotation_is_opt_in(monkeypatch):
+    monkeypatch.setattr(
+        launcher_service,
+        "_current_project_bundle_for_branch_list",
+        lambda: {"observedState": "closed"},
+    )
+
+    from core.launcher import branch_instance_cleanup, branch_instance_lifecycle
+
+    monkeypatch.setattr(
+        branch_instance_lifecycle,
+        "list_overlayed_branch_instances",
+        lambda *, current_bundle=None: {"items": [{"id": "worktree:task"}]},
+    )
+    annotated = {"items": [{"id": "worktree:task", "mergedToMain": False}]}
+    seen: dict[str, object] = {}
+
+    def fake_annotate(payload):
+        seen["payload"] = payload
+        return annotated
+
+    monkeypatch.setattr(branch_instance_cleanup, "annotate_cleanup_metadata", fake_annotate)
+
+    assert launcher_service.list_launcher_branch_instances() == {"items": [{"id": "worktree:task"}]}
+    assert seen == {}
+    assert launcher_service.list_launcher_branch_instances(include_cleanup_metadata=True) == annotated
+    assert seen["payload"] == {"items": [{"id": "worktree:task"}]}

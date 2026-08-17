@@ -16,7 +16,7 @@ export function LauncherShell() {
   const [theme] = useState(() => readStoredWorkbenchTheme());
   const branchInstancesQuery = useQuery({
     queryKey: queryKeys.launcherBranchInstances(),
-    queryFn: getLauncherBranchInstances,
+    queryFn: () => getLauncherBranchInstances(),
     staleTime: 15_000,
   });
   const launcherWindowTitle = currentInstanceWindowTitle("launcher", branchInstancesQuery.data);

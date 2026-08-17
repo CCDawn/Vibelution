@@ -115,7 +115,9 @@ def launcher_freshness() -> dict:
     response_model=LauncherBranchInstanceListResponse,
     response_model_exclude_unset=True,
 )
-def launcher_branch_instances() -> dict:
+def launcher_branch_instances(cleanupMetadata: bool = False) -> dict:
+    if cleanupMetadata:
+        return launcher_service.list_launcher_branch_instances(include_cleanup_metadata=True)
     return launcher_service.list_launcher_branch_instances()
 
 

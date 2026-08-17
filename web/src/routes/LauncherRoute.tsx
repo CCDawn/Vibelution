@@ -1490,7 +1490,7 @@ export function LauncherRoute() {
   });
   const branchInstancesQuery = useQuery({
     queryKey: queryKeys.launcherBranchInstances(),
-    queryFn: getLauncherBranchInstances,
+    queryFn: () => getLauncherBranchInstances(),
     refetchInterval: pageVisible ? 20_000 : false,
   });
   const [selectedInstanceId, setSelectedInstanceId] = useState("");
@@ -1602,7 +1602,7 @@ export function LauncherRoute() {
       }
       void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.launcherBranchInstances() });
+      void queryClient.invalidateQueries({ queryKey: ["launcher", "branch-instances"] });
     },
     onError: (error, input) => {
       postLauncherLifecycleControlTelemetry(resolveControlRequest(input).operation, "request_failed", {

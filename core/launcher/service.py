@@ -190,14 +190,23 @@ def get_launcher_freshness() -> dict[str, Any]:
     return _freshness()
 
 
-def list_launcher_branch_instances() -> dict[str, Any]:
-    """Return Git-governed branch instances for the Launcher first screen."""
+def list_launcher_branch_instances(*, include_cleanup_metadata: bool = False) -> dict[str, Any]:
+    """Return Git-governed branch instances for the Launcher first screen.
 
-    from core.launcher.branch_instance_cleanup import annotate_cleanup_metadata
+    Tray refresh and the status table only need worktree identity plus runtime
+    overlay. ``merge-base --is-ancestor`` cleanup annotation is opt-in because
+    it is only required when the user filters unmerged rows or confirms cleanup.
+    """
+
     from core.launcher.branch_instance_lifecycle import list_overlayed_branch_instances
 
     current_bundle = _current_project_bundle_for_branch_list()
-    return annotate_cleanup_metadata(list_overlayed_branch_instances(current_bundle=current_bundle))
+    payload = list_overlayed_branch_instances(current_bundle=current_bundle)
+    if not include_cleanup_metadata:
+        return payload
+    from core.launcher.branch_instance_cleanup import annotate_cleanup_metadata
+
+    return annotate_cleanup_metadata(payload)
 
 
 def _current_project_bundle_for_branch_list() -> dict[str, Any]:

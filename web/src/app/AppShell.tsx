@@ -723,7 +723,7 @@ export function AppShell() {
   });
   const branchInstancesQuery = useQuery({
     queryKey: queryKeys.launcherBranchInstances(),
-    queryFn: getLocalBranchInstances,
+    queryFn: () => getLocalBranchInstances(),
     staleTime: 15_000,
   });
   const workbenchWindowTitle = currentInstanceWindowTitle("workbench", branchInstancesQuery.data);

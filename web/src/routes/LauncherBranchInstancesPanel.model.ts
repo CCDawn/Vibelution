@@ -66,6 +66,28 @@ export type InstanceListFilters = {
   unmerged?: boolean;
 };
 
+export function overlayCleanupMetadata(
+  items: readonly LauncherBranchInstance[],
+  annotated?: readonly LauncherBranchInstance[] | null,
+): LauncherBranchInstance[] {
+  if (!annotated?.length) {
+    return [...items];
+  }
+  const byId = new Map(annotated.map((item) => [item.id, item]));
+  return items.map((item) => {
+    const extra = byId.get(item.id);
+    if (!extra) {
+      return item;
+    }
+    return {
+      ...item,
+      mergedToMain: extra.mergedToMain,
+      cleanupEligible: extra.cleanupEligible,
+      cleanupRisks: extra.cleanupRisks,
+    };
+  });
+}
+
 export function instanceWindowOpen(item: LauncherBranchInstance): boolean {
   return Boolean(item.runtime.window.open);
 }

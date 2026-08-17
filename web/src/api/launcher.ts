@@ -368,13 +368,15 @@ export function getLauncherStatus() {
   return fetchLauncherJson<LauncherStatus>("status");
 }
 
-export function getLauncherBranchInstances() {
-  return fetchLauncherJson<LauncherBranchInstancesPayload>("branch-instances")
+export function getLauncherBranchInstances(options?: { cleanupMetadata?: boolean }) {
+  const path = options?.cleanupMetadata ? "branch-instances?cleanupMetadata=1" : "branch-instances";
+  return fetchLauncherJson<LauncherBranchInstancesPayload>(path)
     .then(normalizeLauncherBranchInstances);
 }
 
-export function getLocalBranchInstances() {
-  return fetchJson<LauncherBranchInstancesPayload>("/api/launcher/branch-instances")
+export function getLocalBranchInstances(options?: { cleanupMetadata?: boolean }) {
+  const suffix = options?.cleanupMetadata ? "?cleanupMetadata=1" : "";
+  return fetchJson<LauncherBranchInstancesPayload>(`/api/launcher/branch-instances${suffix}`)
     .then(normalizeLauncherBranchInstances);
 }
 

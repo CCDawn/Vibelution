@@ -258,3 +258,61 @@ def test_run_git_records_timeout_before_raising(monkeypatch, tmp_path):
         raise AssertionError("run_git should propagate subprocess.TimeoutExpired")
 
     assert events[0][0][1] == "git_process.command.timeout"
+
+
+def test_run_git_does_not_record_merge_base_is_ancestor_false(monkeypatch, tmp_path):
+    events = []
+    resolved_git = str(tmp_path / "git.exe")
+    monkeypatch.setattr(git_process, "resolve_git_executable", lambda: resolved_git)
+    monkeypatch.setattr(git_process, "no_console_subprocess_kwargs", dict)
+    monkeypatch.setattr(
+        git_process,
+        "_record_git_process_scene_event",
+        lambda *args, **kwargs: events.append((args, kwargs)),
+    )
+    monkeypatch.setattr(
+        git_process.subprocess,
+        "run",
+        lambda args, **kwargs: subprocess.CompletedProcess(args=args, returncode=1, stdout="", stderr=""),
+    )
+
+    result = git_process.run_git(
+        ["merge-base", "--is-ancestor", "abc123", "main"],
+        cwd=tmp_path,
+        retries=0,
+    )
+
+    assert result.returncode == 1
+    assert events == []
+
+
+def test_run_git_still_records_unexpected_merge_base_failure(monkeypatch, tmp_path):
+    events = []
+    resolved_git = str(tmp_path / "git.exe")
+    monkeypatch.setattr(git_process, "resolve_git_executable", lambda: resolved_git)
+    monkeypatch.setattr(git_process, "no_console_subprocess_kwargs", dict)
+    monkeypatch.setattr(
+        git_process,
+        "_record_git_process_scene_event",
+        lambda *args, **kwargs: events.append((args, kwargs)),
+    )
+    monkeypatch.setattr(
+        git_process.subprocess,
+        "run",
+        lambda args, **kwargs: subprocess.CompletedProcess(
+            args=args,
+            returncode=128,
+            stdout="",
+            stderr="fatal: Not a valid object name abc123",
+        ),
+    )
+
+    result = git_process.run_git(
+        ["merge-base", "--is-ancestor", "abc123", "main"],
+        cwd=tmp_path,
+        retries=0,
+    )
+
+    assert result.returncode == 128
+    assert events
+    assert events[0][0][1] == "git_process.command.failed"

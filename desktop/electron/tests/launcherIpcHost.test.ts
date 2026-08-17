@@ -267,6 +267,33 @@ describe("createLauncherIpcHost", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it("keeps window overlay when branch-instances carries a cleanupMetadata query", async () => {
+    const fetchImpl = vi.fn();
+    const orchestrate = vi.fn().mockResolvedValue({
+      items: [
+        { id: "main", current: true, alive: false, startable: true, runtime: { window: { open: false, pid: 0 } } },
+      ],
+    });
+    const host = createLauncherIpcHost({
+      resolveContext: async () => ({ launcherOrigin: "http://127.0.0.1:8002", controlToken: "t" }),
+      resolveWindowTruth: () => ({ workbench: { open: true, rendererProcessId: 7070 }, instances: [] }),
+      orchestrateLauncherApi: orchestrate,
+      fetchImpl,
+    });
+    const result = await host.invoke(validPayload({ path: "branch-instances?cleanupMetadata=1" }));
+    expect(result.ok).toBe(true);
+    expect(orchestrate).toHaveBeenCalledWith(
+      "branch-instances?cleanupMetadata=1",
+      expect.objectContaining({ path: "branch-instances?cleanupMetadata=1" }),
+    );
+    if (result.ok) {
+      const item = ((result.payload as Record<string, unknown>).items as Record<string, unknown>[])[0];
+      expect(item.startable).toBe(false);
+      expect((item.runtime as Record<string, unknown>).window).toMatchObject({ open: true, pid: 7070 });
+    }
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("routes lifecycle commands through the main orchestrator instead of the Python proxy", async () => {
     const fetchImpl = vi.fn();
     const orchestrate = vi.fn().mockResolvedValue({
