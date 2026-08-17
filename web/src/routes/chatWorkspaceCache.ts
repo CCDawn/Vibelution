@@ -164,6 +164,15 @@ export function createChatWorkspaceCache(queryClient: QueryClientLike) {
         queryKeys.conversations(),
       ]);
     },
+    afterAgentRenamed(agentId?: string) {
+      // Display-name PATCH is not structural. Keep the agents-list cache order
+      // (already patched in place) and skip session/conversation reshuffles.
+      const normalizedAgentId = String(agentId || "").trim();
+      return invalidateAll(queryClient, [
+        queryKeys.agentConfigWorkspace(),
+        ...(normalizedAgentId ? [queryKeys.agent(normalizedAgentId)] : []),
+      ]);
+    },
     afterChatWorkspaceReset() {
       queryClient.removeQueries?.({ queryKey: queryKeys.sessions() });
       return invalidateAll(queryClient, [
