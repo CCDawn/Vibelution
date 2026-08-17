@@ -12,10 +12,17 @@ from pathlib import Path
 from typing import Any
 
 from core.infrastructure import developer_sandbox
+from core.research.workflow.contracts import (
+    DEFAULT_PROGRAM_ID,
+    ContractValidationError,
+    ResearchCampaignActivation,
+    build_campaign_activation_payload,
+)
 from core.web.services import team_service
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 
 SCHEMA_VERSION = 1
+ACTIVATION_SCHEMA_VERSION = 1
 LEGACY_PROJECT_ID = "legacy-default"
 CHALLENGE_PROJECT_ID_PREFIX = "challenge-"
 _STORE_LOCK = threading.RLock()
@@ -101,6 +108,10 @@ def _default_project(now: str) -> dict[str, Any]:
         "experimentMethod": "",
         "storageMode": "legacy",
         "challengeQuestionId": "",
+        "themeId": "",
+        "campaignId": "",
+        "activationRef": "",
+        "activatedAt": "",
         "nameLocked": False,
         "nameLockedAt": "",
         "nameLockReason": "",
@@ -119,6 +130,10 @@ def _normalize_project(project: dict[str, Any], *, fallback_now: str) -> dict[st
         "experimentMethod": str(project.get("experimentMethod") or "").strip()[:120],
         "storageMode": storage_mode,
         "challengeQuestionId": str(project.get("challengeQuestionId") or "").strip()[:32],
+        "themeId": str(project.get("themeId") or "").strip()[:96],
+        "campaignId": str(project.get("campaignId") or "").strip()[:96],
+        "activationRef": str(project.get("activationRef") or "").strip()[:240],
+        "activatedAt": str(project.get("activatedAt") or "").strip()[:120],
         "nameLocked": bool(project.get("nameLocked")),
         "nameLockedAt": str(project.get("nameLockedAt") or ""),
         "nameLockReason": str(project.get("nameLockReason") or "").strip()[:160],
@@ -141,11 +156,14 @@ def _load_store(team_id: str) -> dict[str, Any]:
     active_project_id = str(payload.get("activeProjectId") or LEGACY_PROJECT_ID).strip()
     if not any(item["projectId"] == active_project_id for item in projects):
         active_project_id = LEGACY_PROJECT_ID
+    activations = payload.get("activations") if isinstance(payload.get("activations"), dict) else {}
     return {
         "schemaVersion": SCHEMA_VERSION,
+        "activationSchemaVersion": ACTIVATION_SCHEMA_VERSION,
         "teamId": str(team_id),
         "activeProjectId": active_project_id,
         "projects": projects,
+        "activations": activations,
         "updatedAt": str(payload.get("updatedAt") or now),
     }
 
@@ -186,6 +204,10 @@ def create_research_project(team_id: str, payload: dict[str, Any]) -> dict[str, 
             "experimentMethod": str(payload.get("experimentMethod") or "").strip()[:120],
             "storageMode": "isolated",
             "challengeQuestionId": "",
+            "themeId": "",
+            "campaignId": "",
+            "activationRef": "",
+            "activatedAt": "",
             "nameLocked": False,
             "nameLockedAt": "",
             "nameLockReason": "",
@@ -255,6 +277,10 @@ def ensure_challenge_question_project(
                 "experimentMethod": "",
                 "storageMode": "isolated",
                 "challengeQuestionId": normalized_question_id,
+                "themeId": "",
+                "campaignId": "",
+                "activationRef": "",
+                "activatedAt": "",
                 "nameLocked": False,
                 "nameLockedAt": "",
                 "nameLockReason": "",
@@ -309,7 +335,109 @@ def activate_research_project(team_id: str, project_id: str) -> dict[str, Any]:
         store["activeProjectId"] = project_id
         _persist_store(team_id, store)
     _record_project_event("research_project.activated", team_id, project_id)
+    _maybe_wire_theme_campaign_activation(team_id, project)
     return {"project": project, **store}
+
+
+def get_theme_activation(team_id: str, theme_id: str) -> dict[str, Any]:
+    """Read the persisted formal activation record for one theme.
+
+    Returns an empty dict when the theme has never been formally activated so
+    the research-scope facade keeps enforcing the DEV/platform-only regime.
+    """
+    team_service.get_team(team_id)
+    normalized_theme_id = str(theme_id or "").strip()
+    if not normalized_theme_id:
+        return {}
+    with _STORE_LOCK:
+        store = _load_store(team_id)
+        record = store["activations"].get(normalized_theme_id)
+        return dict(record) if isinstance(record, dict) else {}
+
+
+def record_theme_campaign_activation(
+    team_id: str,
+    *,
+    activation: dict[str, Any],
+) -> dict[str, Any]:
+    """Persist one formal campaign activation inside the existing project store.
+
+    The activation contract is validated before anything is written; an
+    unhashable or malformed activation is rejected without touching the store.
+    """
+    team_service.get_team(team_id)
+    parsed = ResearchCampaignActivation.from_dict(activation)
+    with _STORE_LOCK:
+        store = _load_store(team_id)
+        record = parsed.to_dict()
+        store["activations"][parsed.themeId] = record
+        for project in store["projects"]:
+            if str(project.get("challengeQuestionId") or "").strip().upper() != _question_for_theme(parsed.themeId):
+                continue
+            project["themeId"] = parsed.themeId
+            project["campaignId"] = parsed.campaignId
+            project["activationRef"] = parsed.activationRef
+            project["activatedAt"] = parsed.activatedAt
+            project["updatedAt"] = _utc_now()
+        _persist_store(team_id, store)
+    _record_project_event("research_campaign.activated", team_id, parsed.themeId)
+    return dict(record)
+
+
+def _frozen_theme_records() -> list[dict[str, Any]]:
+    from core.research.competition.resources import load_competition_program_core
+
+    try:
+        program = load_competition_program_core()
+    except Exception:
+        return []
+    experiments = program.get("requiredDeepExperiments") if isinstance(program, dict) else []
+    return [item for item in experiments if isinstance(item, dict)] if isinstance(experiments, list) else []
+
+
+def _theme_for_question(question_id: str) -> dict[str, Any] | None:
+    normalized_question_id = str(question_id or "").strip().upper()
+    if not normalized_question_id:
+        return None
+    for item in _frozen_theme_records():
+        if str(item.get("questionId") or "").strip().upper() == normalized_question_id:
+            return {
+                "programId": DEFAULT_PROGRAM_ID,
+                "themeId": str(item.get("themeId") or "").strip(),
+                "campaignId": str(item.get("campaignId") or "").strip(),
+                "questionId": normalized_question_id,
+            }
+    return None
+
+
+def _question_for_theme(theme_id: str) -> str:
+    for item in _frozen_theme_records():
+        if str(item.get("themeId") or "").strip() == str(theme_id or "").strip():
+            return str(item.get("questionId") or "").strip().upper()
+    return ""
+
+
+def _maybe_wire_theme_campaign_activation(team_id: str, project: dict[str, Any]) -> None:
+    """Best-effort formal activation when the project is bound to a real theme.
+
+    DEV themes and question-less projects never match a frozen theme, so they
+    stay inactive and keep the DEV/platform-only regime enforced by the scope
+    facade.
+    """
+    theme = _theme_for_question(str(project.get("challengeQuestionId") or ""))
+    if not theme or not theme["themeId"] or not theme["campaignId"]:
+        return
+    try:
+        activation = build_campaign_activation_payload(
+            program_id=theme["programId"],
+            theme_id=theme["themeId"],
+            campaign_id=theme["campaignId"],
+            activated_by="research_project_activation",
+            activation_ref=f"research-project://{str(project.get('projectId') or '')}",
+        )
+        record_theme_campaign_activation(team_id, activation=activation)
+    except (ContractValidationError, ResearchProjectError):
+        return
 
 
 def get_research_project(team_id: str, project_id: str) -> dict[str, Any]:
