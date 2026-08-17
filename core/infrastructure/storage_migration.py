@@ -33,6 +33,8 @@ _ACTIVE_CLAIM_STATUSES = frozenset({"active", "claimed", "in_progress", "running
 _SQLITE_MAIN_SUFFIXES = (".sqlite", ".sqlite3", ".db")
 _SQLITE_INTEGRITY_EVIDENCE_BOUND = 240
 _DEFAULT_QUIESCENCE_WINDOW_SECONDS = 0.05
+_SQLITE_QUARANTINE_DIR_PREFIX = ".vibelution-storage-migration-cleanup-"
+_SQLITE_QUARANTINE_MEMBER_NAME = "member"
 
 
 class StorageMigrationError(RuntimeError):
@@ -58,6 +60,43 @@ class _PromotedSqliteMember:
     inode: int
     size: int
     sha256: str
+
+
+@dataclass(frozen=True)
+class _SqliteFileIdentity:
+    device: int
+    inode: int
+    size: int
+    sha256: str
+
+    @classmethod
+    def from_path(cls, path: Path) -> "_SqliteFileIdentity | None":
+        path_io = _io_path(path)
+        try:
+            stat = path_io.stat()
+        except OSError:
+            return None
+        return cls(
+            device=int(stat.st_dev),
+            inode=int(stat.st_ino),
+            size=int(stat.st_size),
+            sha256=_sha256_file(path_io),
+        )
+
+    @classmethod
+    def from_member(cls, member: _PromotedSqliteMember) -> "_SqliteFileIdentity":
+        return cls(
+            device=member.device,
+            inode=member.inode,
+            size=member.size,
+            sha256=member.sha256,
+        )
+
+
+@dataclass(frozen=True)
+class _SqliteQuarantineClaim:
+    directory: Path
+    member_path: Path
 
 
 @dataclass(frozen=True)
@@ -910,34 +949,90 @@ def _sqlite_destination_member_conflict(final_io: Path) -> StorageMigrationError
 
 def _rollback_linked_promotion(staged_io: Path, final_io: Path) -> None:
     try:
-        if final_io.exists() and staged_io.exists():
-            final_stat = final_io.stat()
-            staged_stat = staged_io.stat()
-            if final_stat.st_dev == staged_stat.st_dev and final_stat.st_ino == staged_stat.st_ino:
-                final_io.unlink()
-                return
-        if final_io.exists():
-            final_io.unlink()
+        expected = _SqliteFileIdentity.from_path(staged_io)
+        if expected is None:
+            return
+        _quarantine_then_unlink_if_identity_matches(final_io, expected)
     except OSError:
         return
 
 
+def _mkdtemp_quarantine_directory(parent_io: Path) -> Path | None:
+    parent_text = str(parent_io)
+    if parent_text.startswith("\\\\?\\UNC\\"):
+        parent_text = "\\\\" + parent_text[8:]
+    elif parent_text.startswith("\\\\?\\"):
+        parent_text = parent_text[4:]
+    try:
+        created = tempfile.mkdtemp(
+            prefix=_SQLITE_QUARANTINE_DIR_PREFIX,
+            dir=parent_text,
+        )
+    except OSError:
+        return None
+    return _io_path(Path(created))
+
+
+def _remove_empty_sqlite_quarantine_directory(quarantine_dir: Path) -> None:
+    quarantine_io = _io_path(quarantine_dir)
+    try:
+        if quarantine_io.is_dir() and not any(quarantine_io.iterdir()):
+            quarantine_io.rmdir()
+    except OSError:
+        return
+
+
+def _quarantine_sqlite_member_path(path_io: Path) -> _SqliteQuarantineClaim | None:
+    parent_io = _io_path(path_io.parent)
+    quarantine_dir = _mkdtemp_quarantine_directory(parent_io)
+    if quarantine_dir is None:
+        return None
+    claim_io = quarantine_dir / _SQLITE_QUARANTINE_MEMBER_NAME
+    try:
+        os.replace(path_io, claim_io)
+    except OSError:
+        _remove_empty_sqlite_quarantine_directory(quarantine_dir)
+        return None
+    return _SqliteQuarantineClaim(directory=quarantine_dir, member_path=claim_io)
+
+
+def _restore_claimed_sqlite_member(path_io: Path, claim_io: Path) -> None:
+    try:
+        if not claim_io.is_file():
+            return
+        os.link(claim_io, path_io)
+    except OSError:
+        return
+
+
+def _quarantine_then_unlink_if_identity_matches(
+    path: Path,
+    expected: _SqliteFileIdentity,
+) -> None:
+    path_io = _io_path(path)
+    if not path_io.is_file():
+        return
+    claim = _quarantine_sqlite_member_path(path_io)
+    if claim is None:
+        return
+    actual = _SqliteFileIdentity.from_path(claim.member_path)
+    if actual is None or actual != expected:
+        _restore_claimed_sqlite_member(path_io, claim.member_path)
+        return
+    try:
+        claim.member_path.unlink()
+    except OSError:
+        _restore_claimed_sqlite_member(path_io, claim.member_path)
+        return
+    _remove_empty_sqlite_quarantine_directory(claim.directory)
+
+
 def _cleanup_attempt_sqlite_members(members: Iterable[_PromotedSqliteMember]) -> None:
     for member in members:
-        member_io = _io_path(Path(member.path))
-        if not member_io.is_file():
-            continue
-        try:
-            stat = member_io.stat()
-        except OSError:
-            continue
-        if int(stat.st_dev) != member.device or int(stat.st_ino) != member.inode:
-            continue
-        if int(stat.st_size) != member.size:
-            continue
-        if _sha256_file(member_io) != member.sha256:
-            continue
-        member_io.unlink(missing_ok=True)
+        _quarantine_then_unlink_if_identity_matches(
+            Path(member.path),
+            _SqliteFileIdentity.from_member(member),
+        )
 
 
 def _verify_sqlite_bundle_entry(
