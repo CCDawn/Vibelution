@@ -219,6 +219,7 @@ def test_first_open_fails_when_packaged_electron_is_missing(monkeypatch):
 
     monkeypatch.setattr(workbench_controller, "_latest_active_electron_desktop_session", lambda: {})
     monkeypatch.setattr(workbench_controller, "_packaged_electron_desktop_executable", lambda: None)
+    monkeypatch.setattr(workbench_controller, "_checkout_electron_launch_command", lambda **_kwargs: None)
     monkeypatch.setattr(workbench_controller, "_live_electron_owner_pid", lambda: 0)
     monkeypatch.setattr(workbench_controller, "_electron_main_orchestrates_windows", lambda: False)
     monkeypatch.setattr(
@@ -235,7 +236,46 @@ def test_first_open_fails_when_packaged_electron_is_missing(monkeypatch):
     assert launcher_calls == []
 
 
-def test_live_electron_owner_signals_open_workbench_instead_of_edge(monkeypatch):
+def test_first_open_uses_checkout_electron_when_packaged_is_missing(monkeypatch):
+    launcher_calls: list[dict] = []
+    bootstraps: list[dict] = []
+    events: list[str] = []
+    checkout_command = [r"C:\electron.exe", r"C:\desktop\electron\dist\main.js", "--open-workbench"]
+
+    monkeypatch.setattr(workbench_controller, "_latest_active_electron_desktop_session", lambda: {})
+    monkeypatch.setattr(workbench_controller, "_packaged_electron_desktop_executable", lambda: None)
+    monkeypatch.setattr(
+        workbench_controller,
+        "_checkout_electron_launch_command",
+        lambda **_kwargs: list(checkout_command),
+    )
+    monkeypatch.setattr(workbench_controller, "_live_electron_owner_pid", lambda: 0)
+    monkeypatch.setattr(workbench_controller, "_electron_main_orchestrates_windows", lambda: False)
+    monkeypatch.setattr(
+        workbench_controller,
+        "_run_waitable_launcher_process",
+        lambda *args, **kwargs: launcher_calls.append({"args": args, "kwargs": kwargs})
+        or subprocess.CompletedProcess(args=["launcher"], returncode=0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "_bootstrap_packaged_electron_workbench",
+        lambda **kwargs: bootstraps.append(kwargs)
+        or {"electronLaunchPid": 802, "desktopSessionId": "electron-session-checkout", "desktopSessionRevision": 1},
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "_record_launcher_action_event",
+        lambda event_type, **_kwargs: events.append(event_type),
+    )
+
+    result = workbench_controller.run_launcher_action("internal-start")
+
+    assert result.returncode == 0
+    assert "--no-browser" in launcher_calls[0]["args"][0]
+    assert len(bootstraps) == 1
+    assert bootstraps[0]["launch_command"] == checkout_command
+    assert "launcher.action.electron_first_start_succeeded" in events
     launcher_calls: list[dict] = []
     signals: list[dict] = []
     events: list[str] = []
