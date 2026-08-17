@@ -3,6 +3,7 @@ import type {
   ExperimentContractValidation,
   TeamWorkflowOrchestration,
 } from "../../api/types";
+import type { CompetitionProgramProjection } from "../../api/types/challengeCup";
 import type { ResearchMemoryContextSummary } from "./ResearchMemoryEvidencePanel";
 import type {
   ResearchStageRound,
@@ -278,6 +279,9 @@ export type ExperimentPlanningStatusPayload = {
       appendOnlyEvidencePreserved: boolean;
     };
   };
+  /** Authoritative Challenge Cup Program v2 projection. */
+  competitionProgramProjection?: CompetitionProgramProjection;
+  /** @deprecated Read-only compatibility projection; never decides Program v2 completion. */
   challengeProgramProjection?: {
     schemaVersion: number;
     migrationMode: string;
