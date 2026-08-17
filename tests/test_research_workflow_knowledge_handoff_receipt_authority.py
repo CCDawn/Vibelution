@@ -16,6 +16,9 @@ from core.web.services.team_workflow.research_runtime.experiment_stage_bootstrap
     ExperimentStageBootstrapError,
     ensure_experiment_stage_round_for_agent_node,
 )
+from core.web.services.team_workflow.research_project_hypothesis_context import (
+    build_hypothesis_input_context,
+)
 from core.web.services.team_workflow.research_runtime.human_acceptance_artifact import (
     load_accepted_knowledge_package_from_receipt,
 )
@@ -40,9 +43,13 @@ def _accepted_package() -> dict[str, Any]:
         "teamId": "research-team",
         "sourceCollectionRunId": "sc-run-1",
         "accepted": True,
+        "candidateId": "accepted-package",
+        "knowledgeBaseId": "team:research-team:kb-1",
         "knowledgeItems": [
             {"knowledgeItemId": "ki-accepted", "contentHash": "b" * 64}
         ],
+        "sourceArtifactIds": ["source-package-1"],
+        "approval": {"reviewedByAgentId": "reviewer-1"},
     }
 
 
@@ -51,9 +58,13 @@ def _stale_inventory_package() -> dict[str, Any]:
         "teamId": "research-team",
         "sourceCollectionRunId": "sc-run-1",
         "accepted": True,
+        "candidateId": "stale-package",
+        "knowledgeBaseId": "team:research-team:kb-1",
         "knowledgeItems": [
             {"knowledgeItemId": "ki-stale", "contentHash": "c" * 64}
         ],
+        "sourceArtifactIds": ["source-stale"],
+        "approval": {"reviewedByAgentId": "reviewer-1"},
     }
 
 
@@ -122,13 +133,21 @@ def _seed_pending_knowledge_gate(harness: CommandHarness) -> None:
     harness.store.submit(mutate, force_flush=True).result(timeout=10)
 
 
-def _bind_accepted_receipt(harness: CommandHarness, package: dict[str, Any]) -> str:
+def _bind_accepted_receipt(
+    harness: CommandHarness,
+    package: dict[str, Any],
+    *,
+    canonical_hash: str | None = None,
+    ledger_hash: str | None = None,
+) -> str:
     content_hash = canonical_sha256(package)
+    ref_hash = str(canonical_hash or content_hash)
+    sha256 = str(ledger_hash or content_hash)
     canonical_ref = build_canonical_ref(
         kind="knowledge_package",
         team_id="research-team",
         authority_run_id="sc-run-1",
-        content_hash=content_hash,
+        content_hash=ref_hash,
     )
 
     def mutate(uow):
@@ -148,7 +167,7 @@ def _bind_accepted_receipt(harness: CommandHarness, package: dict[str, Any]) -> 
                 ensure_ascii=False,
             ),
             artifact_version="1.0.0",
-            sha256=content_hash,
+            sha256=sha256,
             domain_revision="d" * 32,
             materialized=1,
             verified_at_ms=FIXED_NOW_MS + 1,
@@ -160,7 +179,7 @@ def _bind_accepted_receipt(harness: CommandHarness, package: dict[str, Any]) -> 
         )
 
     harness.store.submit(mutate, force_flush=True).result(timeout=10)
-    return content_hash
+    return sha256
 
 
 def _patch_inventory(
@@ -187,6 +206,59 @@ def _patch_inventory(
         fake_load,
     )
     return loads
+
+
+def _patch_hypothesis_lookups(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.source_collection.candidates.list_candidate_store",
+        lambda *_args, **_kwargs: {
+            "candidates": [
+                {
+                    "candidateId": "accepted-package",
+                    "metadata": {
+                        "output": {
+                            "claims": [
+                                {
+                                    "claim": "Accepted evidence claim.",
+                                    "sourceRef": "source-accepted",
+                                }
+                            ]
+                        }
+                    },
+                },
+                {
+                    "candidateId": "stale-package",
+                    "metadata": {
+                        "output": {
+                            "claims": [
+                                {
+                                    "claim": "Stale inventory claim.",
+                                    "sourceRef": "source-stale",
+                                }
+                            ]
+                        }
+                    },
+                },
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_knowledge_service.list_knowledge_items",
+        lambda *_args, **_kwargs: {
+            "items": [
+                {
+                    "knowledgeItemId": "ki-accepted",
+                    "title": "Accepted",
+                    "summary": "Bound receipt",
+                },
+                {
+                    "knowledgeItemId": "ki-stale",
+                    "title": "Stale",
+                    "summary": "Inventory update",
+                },
+            ]
+        },
+    )
 
 
 def test_accepted_receipt_is_the_only_knowledge_package_readback(
@@ -282,6 +354,16 @@ def test_inventory_without_receipt_does_not_unlock_experiment_handoff(
                 store=harness.store,
                 run_id="run-test",
             )
+        hypothesis = build_hypothesis_input_context(
+            "research-team",
+            {
+                "workflowRunId": "run-test",
+                "sourceCollectionRunId": "sc-run-1",
+            },
+            store=harness.store,
+        )
+        assert hypothesis["status"] == "blocked"
+        assert hypothesis["code"] == "knowledge_package_not_materialized"
     finally:
         harness.close()
 
@@ -330,5 +412,94 @@ def test_bootstrap_reads_bound_receipt_not_inventory(
         }
         assert calls == [("research-team", result)]
         assert loads == [accepted_hash]
+    finally:
+        harness.close()
+
+
+def test_hypothesis_context_uses_bound_receipt_not_inventory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        accepted = _accepted_package()
+        stale = _stale_inventory_package()
+        _seed_pending_knowledge_gate(harness)
+        accepted_hash = _bind_accepted_receipt(harness, accepted)
+        loads = _patch_inventory(
+            monkeypatch,
+            accepted=accepted,
+            stale=stale,
+            accepted_hash=accepted_hash,
+        )
+        _patch_hypothesis_lookups(monkeypatch)
+
+        context = build_hypothesis_input_context(
+            "research-team",
+            {
+                "workflowRunId": "run-test",
+                "sourceCollectionRunId": "sc-run-1",
+            },
+            store=harness.store,
+        )
+
+        assert context["status"] == "ready"
+        assert context["knowledgePackage"]["candidateId"] == "accepted-package"
+        assert context["knowledgePackage"]["knowledgeItems"] == [
+            {
+                "knowledgeItemId": "ki-accepted",
+                "title": "Accepted",
+                "summary": "Bound receipt",
+            }
+        ]
+        assert context["evidenceClaims"] == [
+            {"claim": "Accepted evidence claim.", "sourceRef": "source-accepted"}
+        ]
+        assert "source-stale" not in context["allowedEvidenceRefs"]
+        assert loads == [accepted_hash]
+    finally:
+        harness.close()
+
+
+def test_receipt_content_hash_mismatch_fail_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        accepted = _accepted_package()
+        stale = _stale_inventory_package()
+        _seed_pending_knowledge_gate(harness)
+        package_hash = canonical_sha256(accepted)
+        _bind_accepted_receipt(
+            harness,
+            accepted,
+            canonical_hash="e" * 64,
+            ledger_hash=package_hash,
+        )
+        loads = _patch_inventory(
+            monkeypatch,
+            accepted=accepted,
+            stale=stale,
+            accepted_hash=package_hash,
+        )
+        _patch_hypothesis_lookups(monkeypatch)
+
+        payload = load_accepted_knowledge_package_from_receipt(
+            harness.store,
+            team_id="research-team",
+            run_id="run-test",
+        )
+        hypothesis = build_hypothesis_input_context(
+            "research-team",
+            {
+                "workflowRunId": "run-test",
+                "sourceCollectionRunId": "sc-run-1",
+            },
+            store=harness.store,
+        )
+
+        assert payload is None
+        assert hypothesis["status"] == "blocked"
+        assert hypothesis["code"] == "knowledge_package_not_materialized"
+        assert loads == []
     finally:
         harness.close()

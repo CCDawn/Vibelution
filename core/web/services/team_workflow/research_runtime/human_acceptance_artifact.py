@@ -210,8 +210,9 @@ def load_accepted_knowledge_package_from_receipt(
         return None
     if str(parsed.get("teamId") or "") != normalized_team:
         return None
-    pinned_hash = str(parsed.get("contentHash") or content_hash or "").strip()
-    if len(pinned_hash) < 16:
+    pinned_hash = str(parsed.get("contentHash") or "").strip()
+    ledger_hash = str(content_hash or "").strip()
+    if not pinned_hash or pinned_hash != ledger_hash or len(pinned_hash) < 16:
         return None
     payload = load_scoped_artifact_payload(
         "knowledge_package",
@@ -359,8 +360,14 @@ def _bound_knowledge_package_receipt(
         if isinstance(payload, dict):
             canonical_ref = str(payload.get("canonicalRef") or "").strip()
         content_hash = str(row[5] or "").strip()
-        if canonical_ref and content_hash:
-            return canonical_ref, content_hash
+        if not canonical_ref or not content_hash:
+            continue
+        parsed = parse_canonical_ref(canonical_ref)
+        if parsed is None or parsed.get("kind") != "knowledge_package":
+            return None
+        if str(parsed.get("contentHash") or "").strip() != content_hash:
+            return None
+        return canonical_ref, content_hash
     return None
 
 
