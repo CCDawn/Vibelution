@@ -5,7 +5,7 @@
 | **Status** | `active-plan` |
 | **Created** | 2026-08-16 |
 | **Reviewed** | 2026-08-16（仓库审查结论重放至最新 main） |
-| **Implementation status** | T1 apply 已执行（2026-08-16）；**T1G 代码门已落地**（readiness / SQLite bundle / quiescence / integrity_check / rollback delta）；**T3b done**（2026-08-17）；T2 **blocked**（未完成）；未执行真实 apply / reapply / rollback / delete |
+| **Implementation status** | T1 apply 已执行（2026-08-16）；**T1G 代码门已落地**（commit `91a1f6fb4`：readiness / SQLite bundle / quiescence / integrity_check / rollback delta / 同父私有 quarantine 身份安全清理）；**T3b done**（2026-08-17）；T2 **blocked**（未完成）；**T1G 是代码门而非运行时操作**：T1G 落地后未执行任何真实 apply / reapply / rollback / legacy 删除 |
 | **Tier** | `HIGH_RISK`（整体）；子任务按 `FAST_PATCH` / `STANDARD_TASK` / `HIGH_RISK` 分级 |
 | **Related ADR** | [0002](../adr/0002-agent-collaboration-session-addressing.md) · [0003](../adr/0003-operator-config-lives-outside-repo.md) · [0004](../adr/0004-product-ui-uses-vui-shadcn-only.md) · [0005](../adr/0005-docs-authority-and-archive-policy.md) · [0008](../adr/0008-project-mutable-state-lives-outside-source-tree.md) · [0009](../adr/0009-launcher-control-plane-lives-in-electron-main.md) |
 | **Related docs** | [development-standard §24](../standards/development-standard.md) · [web/src/api/README.md](../../web/src/api/README.md) · [worktree-collaboration](../agents/worktree-collaboration.md) |
@@ -161,16 +161,16 @@ flowchart TB
 | **Rollback 现状** | post-cutover 总量已增长，**直接 marker rollback 明确 blocked**；回退只能停写、reverse delta、显式 reconcile 且用户独立确认。当前 `rollback` 实现只撤 marker/registration 并保留复制数据，**不回灌新写** |
 | **验证** | storage pytest；新 runtime scene 落外部 `logs/`；`activePaths.memory` 指向 external |
 
-**Task T1G: 迁移后完整性补证 + future apply/reapply 强制门** — **done**（代码门 2026-08-17；T2 仍须稳定门）
+**Task T1G: 迁移后完整性补证 + future apply/reapply 强制门** — **done**（**代码门**，本地 main commit `91a1f6fb4`；非运行时 apply/reapply/rollback/delete；T2 **blocked** 仍须稳定门）
 
 | 项 | 内容 |
 | --- | --- |
 | **Owner** | `scripts/migrate_project_storage.py` · `vibelution_storage.py` · `core/infrastructure/storage_migration.py` · ADR 0008 |
 | **Tier** | `HIGH_RISK` |
 | **位置** | T1 之后、T2 之前 |
-| **已落地** | ① 机器化静止：active-work / Launcher / Runtime Manager / writer 全部静止；② destination conflict（含 orphan WAL/SHM）；③ SQLite bundle fingerprint + staging/atomic no-clobber promote + `quick_check`/`integrity_check`（私有快照，不改源）；④ source-write / quiescence window / bundle / rollback delta（含 `target.memory` 与 sidecar）测试；⑤ cache `cold_rebuild`；⑥ apply / reapply 强制重跑 readiness，窗口内源变化 fail-closed |
+| **已落地** | ① 机器化静止：active-work / Launcher / Runtime Manager / writer 全部静止；② destination conflict（含 orphan WAL/SHM）；③ SQLite bundle fingerprint + staging/atomic no-clobber promote + `quick_check`/`integrity_check`（私有快照，不改源）；④ source-write / quiescence window / bundle / rollback delta（含 `target.memory` 与 sidecar）测试；⑤ cache `cold_rebuild`；⑥ apply / reapply 强制重跑 readiness，窗口内源变化 fail-closed；⑦ **同父私有 quarantine 身份安全清理**（commit `91a1f6fb4`）：失败清理先以 `tempfile.mkdtemp` 在成员**同父**目录建立私有 quarantine（`.vibelution-storage-migration-cleanup-*`）再移入目标成员，**仅当 quarantine 后身份（device/inode/size/sha256）与 attempt 的 promote 记录一致时才删除**（只删 attempt 自有身份）；身份不符或删除失败用 **no-clobber `os.link`** 恢复原路径；安全恢复不可能（如并发目标已出现）时 **foreign 恢复残留保留在 quarantine 目录、fail-closed**，不做破坏性删除 |
 | **门语义** | T1G 落地后，**每次** apply / reapply 仍须自身重验，且用户独立确认；禁止真实 checkout 上未经确认的 apply / rollback |
-| **验证** | `tests/test_storage_migration.py` |
+| **验证** | `tests/test_storage_migration.py`：**50 passed**（readiness / quiescence / destination conflict / SQLite bundle+WAL+SHM 的 quick+integrity / rollback delta / quarantine 身份安全清理 / reapply 强制重验）。**仅该测试文件范围，未执行真实 apply/reapply/rollback/legacy 删除，不代表更广运行时验收** |
 
 **Task T2: 删除/收缩 legacy 存储读分支** — **blocked**（至少至 2026-08-18，且满足稳定门）
 
