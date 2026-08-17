@@ -255,16 +255,18 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
     const stageStatusLoading = !researchStageRoundStatus && researchStageRoundStatusQuery.isPending;
     const stageStatusUnavailable = !researchStageRoundStatus && researchStageRoundStatusQuery.isError;
     const experimentLifecycleProjection = experimentPlanningStatus?.lifecycleProjection;
-    // Challenge-program projection is a read-only program-level surface shown
-    // on the overview console; the workflow canvas remains the operations
-    // surface (no parallel stage-rail shell).
+    // Program v2 is the authoritative completion/readiness projection. The
+    // legacy Challenge projection remains a read-only stage-detail fallback
+    // while the existing three-stage rail is retired incrementally.
+    const competitionProgramProjection = experimentPlanningStatus?.competitionProgramProjection;
     const challengeProgramProjection = experimentPlanningStatus?.challengeProgramProjection;
     const challengeProgramExpected = isChallengeCupResearchWorkflowTeam(selectedTeam);
+    const challengeProgramAvailable = Boolean(competitionProgramProjection || challengeProgramProjection);
     const challengeProgramLoading = challengeProgramExpected
-      && !challengeProgramProjection
+      && !challengeProgramAvailable
       && experimentPlanningStatusQuery.isPending;
     const challengeProgramUnavailable = challengeProgramExpected
-      && !challengeProgramProjection
+      && !challengeProgramAvailable
       && !experimentPlanningStatusQuery.isPending;
     const requestedExperimentMethod = searchParams.get("experimentMethod");
     const requestedExperimentMethodIsValid = experimentMethodCatalogQuery.data?.methods.some(
@@ -563,6 +565,92 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
       ? researchWorkspaceViewLabel(researchStageRoundStatus.currentStage as ResearchStageWorkspaceView, lang)
       : lang === "zh" ? "待启动" : "not started";
     const renderChallengeProgramResults = () => {
+      if (competitionProgramProjection) {
+        const catalog = competitionProgramProjection.fullCatalogResultSet;
+        const approvedExperimentCount = competitionProgramProjection.requiredDeepExperiments.filter(
+          (experiment) => experiment.approved,
+        ).length;
+        const completionRecorded = competitionProgramProjection.completion.completed;
+        return (
+          <section
+            id="challenge-program-v2-results"
+            className={styles.challengeProgramResults}
+            aria-labelledby="challenge-program-v2-results-title"
+          >
+            <VPanelHeader
+              className={styles.challengeProgramResultsHeader}
+              headingLevel={null}
+              title={<strong id="challenge-program-v2-results-title">{lang === "zh" ? "Program v2 交付状态" : "Program v2 delivery status"}</strong>}
+              actions={(
+                <span className={`${styles.researchStageStatus} ${completionRecorded ? styles.researchStageStatusRecorded : styles.researchStageStatusPending}`}>
+                  {completionRecorded
+                    ? (lang === "zh" ? "后端判定：已完成" : "Backend: complete")
+                    : (lang === "zh" ? "后端判定：未完成" : "Backend: incomplete")}
+                </span>
+              )}
+            />
+            <p className="m-0 mb-2 text-[var(--fg-secondary)] [font-size:var(--vui-font-xs)] leading-tight">
+              {lang === "zh"
+                ? `完成态只读取合同 ${competitionProgramProjection.contractVersion} 的后端判定；旧 MVP 数量不参与计算。`
+                : `Completion is read only from backend contract ${competitionProgramProjection.contractVersion}; legacy MVP counts do not participate.`}
+            </p>
+            <div className={styles.challengeProgramResultGrid}>
+              <article className={styles.challengeProgramResultCard}>
+                <VPanelHeader
+                  headingLevel={null}
+                  title={<strong>{lang === "zh" ? "125 题完整结果集" : "Full 125-question result set"}</strong>}
+                  actions={(
+                    <span className={`${styles.researchStageStatus} ${catalog.complete ? styles.researchStageStatusRecorded : styles.researchStageStatusPending}`}>
+                      {catalog.approvedQuestionCount}/{catalog.requiredApprovedQuestionCount}
+                    </span>
+                  )}
+                />
+                <p>{lang === "zh" ? `尚缺 ${catalog.missingQuestionCount} 题；题目 Schema v${competitionProgramProjection.questionSchema.activeVersion}。` : `${catalog.missingQuestionCount} missing; question schema v${competitionProgramProjection.questionSchema.activeVersion}.`}</p>
+                <p title={competitionProgramProjection.questionCatalog.catalogSha256}>
+                  {competitionProgramProjection.questionCatalog.catalogId} · SHA-256 {competitionProgramProjection.questionCatalog.catalogSha256.slice(0, 12)}…
+                </p>
+              </article>
+              {competitionProgramProjection.requiredDeepExperiments.map((experiment) => (
+                <article className={styles.challengeProgramResultCard} key={experiment.experimentId}>
+                  <VPanelHeader
+                    headingLevel={null}
+                    title={<strong>{experiment.questionId} · {experiment.name}</strong>}
+                    actions={(
+                      <span className={`${styles.researchStageStatus} ${experiment.approved ? styles.researchStageStatusRecorded : styles.researchStageStatusPending}`}>
+                        {experiment.approved ? (lang === "zh" ? "已批准" : "approved") : (lang === "zh" ? "未启动/未批准" : "not approved")}
+                      </span>
+                    )}
+                  />
+                  <p title={experiment.themeId}>Theme · {experiment.themeId}</p>
+                  <p title={experiment.campaignId}>Campaign · {experiment.campaignId}</p>
+                </article>
+              ))}
+              <article className={styles.challengeProgramResultCard}>
+                <VPanelHeader
+                  headingLevel={null}
+                  title={<strong>{lang === "zh" ? "隔离与提交门禁" : "Isolation and submission gate"}</strong>}
+                  actions={(
+                    <span className={`${styles.researchStageStatus} ${approvedExperimentCount === competitionProgramProjection.requiredDeepExperiments.length ? styles.researchStageStatusRecorded : styles.researchStageStatusPending}`}>
+                      {approvedExperimentCount}/{competitionProgramProjection.requiredDeepExperiments.length}
+                    </span>
+                  )}
+                />
+                <p>
+                  {competitionProgramProjection.independentThemeBoundaries.separateThemes
+                    && competitionProgramProjection.independentThemeBoundaries.separateCampaigns
+                    ? (lang === "zh" ? "两个实验使用独立 Theme 与独立 Campaign。" : "The experiments use separate themes and campaigns.")
+                    : (lang === "zh" ? "实验隔离合同未满足。" : "Experiment isolation contract is not satisfied.")}
+                </p>
+                <p>
+                  {competitionProgramProjection.directionSubmissionRequirement.blocksSubmissionReady
+                    ? (lang === "zh" ? "提交方向要求尚未捕获，submission ready 保持阻塞。" : "Submission direction is not captured; submission ready remains blocked.")
+                    : (lang === "zh" ? "提交方向门禁已满足。" : "Submission direction gate is satisfied.")}
+                </p>
+              </article>
+            </div>
+          </section>
+        );
+      }
       if (!challengeProgramProjection) {
         return null;
       }
@@ -683,11 +771,15 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
             <strong>
               {stageCardsReadOnly
                 ? (lang === "zh" ? "阶段进度" : "Stage progress")
-                : (challengeProgramProjection?.program.title || (lang === "zh" ? "科研控制台（三阶段）" : "Research console (3 stages)"))}
+                : (competitionProgramProjection?.program.title
+                  || challengeProgramProjection?.program.title
+                  || (lang === "zh" ? "科研控制台（三阶段）" : "Research console (3 stages)"))}
             </strong>
             <span>
               {stageCardsReadOnly
                 ? (lang === "zh" ? "只读 · 主操作在上方「下一步」" : "Read-only · primary action is Next above")
+                : competitionProgramProjection
+                ? `${competitionProgramProjection.program.problemId} · ${competitionProgramProjection.program.track}`
                 : challengeProgramProjection
                 ? `${challengeProgramProjection.program.officialProblemId} · ${challengeProgramProjection.program.track}`
                 : researchStageRoundStatus
@@ -729,7 +821,19 @@ export function TeamResearchStageLauncherPanel(props: TeamResearchStageLauncherP
             setPreferredExperimentMethod(project.experimentMethod || "");
           }}
         />
-        {challengeProgramProjection ? (
+        {competitionProgramProjection ? (
+          <div className={styles.challengeProgramScope}>
+            <strong>
+              Program v2 · {lang === "zh" ? "125 题批准" : "125-question approval"}{" "}
+              {competitionProgramProjection.fullCatalogResultSet.approvedQuestionCount}/{competitionProgramProjection.fullCatalogResultSet.requiredApprovedQuestionCount}
+            </strong>
+            <span>
+              {lang === "zh" ? "尚缺" : "missing"} {competitionProgramProjection.fullCatalogResultSet.missingQuestionCount}
+              {" · "}{lang === "zh" ? "独立深度实验" : "independent deep experiments"}{" "}
+              {competitionProgramProjection.requiredDeepExperiments.filter((experiment) => experiment.approved).length}/{competitionProgramProjection.requiredDeepExperiments.length}
+            </span>
+          </div>
+        ) : challengeProgramProjection ? (
           <div className={styles.challengeProgramScope}>
             <strong>{lang === "zh" ? "当前范围：1 个黄金样例 + 3 个试运行题（共 4 题）" : "Current scope: 1 golden sample + 3 trial questions (4 total)"}</strong>
             <span>{lang === "zh" ? "125 题规模化与三案例深研已明确延后" : "125-question scale-up and three deep cases are explicitly deferred"}</span>
