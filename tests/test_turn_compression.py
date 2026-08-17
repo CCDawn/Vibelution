@@ -323,3 +323,31 @@ def test_emergency_bytes_chat_mode_does_not_break():
     )
     assert result[1] is False
     assert result[2] is True
+
+
+def test_compress_unwraps_message_envelope_without_treating_true_as_iteration_one():
+    original = [AIMessage(content="keep")]
+    compressor = _FakeCompressor([AIMessage(content="x")])
+    extras = {}
+    result = _run(
+        messages={"messages": original},
+        compressor=compressor,
+        config=_feature_config(),
+        extra=extras,
+        iteration=True,
+    )
+    assert compressor.calls[0]["messages"] == original
+    assert result[1] is False
+    assert result[4] == 0
+    assert extras["events"][0]["kwargs"]["fields"]["iteration"] == 0
+
+    json_compressor = _FakeCompressor([AIMessage(content="x")])
+    json_result = _run(
+        messages=b'{"history": [{"role": "assistant", "content": "keep"}]}',
+        compressor=json_compressor,
+        config=_feature_config(),
+        extra={},
+        iteration=4,
+    )
+    assert json_compressor.calls[0]["messages"] == [{"role": "assistant", "content": "keep"}]
+    assert json_result[0] == [AIMessage(content="x")]
