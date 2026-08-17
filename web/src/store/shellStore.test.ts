@@ -83,7 +83,7 @@ describe("shellStore", () => {
     });
   });
 
-  it("dual-writes Chat panel widths into shared pane-layouts.v1[chat]", () => {
+  it("writes Chat panel widths only into shared pane-layouts.v1[chat]", () => {
     useShellStore.getState().setChatPanelWidths({
       leftPanelWidth: 340,
       rightPanelWidth: 260,
@@ -98,6 +98,8 @@ describe("shellStore", () => {
       right: 260,
     });
     expect(localStorage.getItem(PANE_LAYOUT_STORAGE_KEY)).toContain("chat");
+    const persistedShell = localStorage.getItem("vibelution-shell-store") ?? "";
+    expect(persistedShell).not.toContain("chatPanelWidths");
   });
 
   it("restores preferred chat widths below the previous default floor", async () => {
@@ -122,6 +124,43 @@ describe("shellStore", () => {
     expect(useShellStore.getState().chatPanelWidths).toEqual({
       leftPanelWidth: 280,
       rightPanelWidth: 210,
+    });
+    expect(readPaneLayout(CHAT_PANE_LAYOUT_ID)).toEqual({
+      left: 280,
+      right: 210,
+    });
+  });
+
+  it("does not clobber canonical pane-layouts.v1[chat] with leftover shell widths", async () => {
+    localStorage.setItem(
+      PANE_LAYOUT_STORAGE_KEY,
+      JSON.stringify({ chat: { left: 330, right: 240 } }),
+    );
+    localStorage.setItem(
+      "vibelution-shell-store",
+      JSON.stringify({
+        state: {
+          evolutionTrack: "supervised",
+          evolutionView: "live",
+          chatPanelWidths: {
+            leftPanelWidth: 280,
+            rightPanelWidth: 210,
+          },
+          topBarMode: "full",
+        },
+        version: 0,
+      }),
+    );
+
+    await useShellStore.persist.rehydrate();
+
+    expect(useShellStore.getState().chatPanelWidths).toEqual({
+      leftPanelWidth: 330,
+      rightPanelWidth: 240,
+    });
+    expect(readPaneLayout(CHAT_PANE_LAYOUT_ID)).toEqual({
+      left: 330,
+      right: 240,
     });
   });
 

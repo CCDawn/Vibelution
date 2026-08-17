@@ -56,7 +56,7 @@ function normalizePanelWidth(
   return Math.min(bounds.max, Math.max(bounds.min, Math.round(numericValue)));
 }
 
-function dualWriteChatPaneLayouts(widths: ChatPanelWidths): void {
+function persistChatPaneLayouts(widths: ChatPanelWidths): void {
   persistPaneWidths(CHAT_PANE_LAYOUT_ID, {
     left: widths.leftPanelWidth,
     right: widths.rightPanelWidth,
@@ -87,34 +87,37 @@ function readChatPaneLayoutsFallback(): ChatPanelWidths | null {
 }
 
 function normalizePersistedChatPanelWidths(widths: Partial<ChatPanelWidths> | undefined): ChatPanelWidths {
+  const fromShared = readChatPaneLayoutsFallback();
+  if (fromShared) {
+    return fromShared;
+  }
+
   if (
     widths?.leftPanelWidth === LEGACY_STATUS_LEFT_PANEL_WIDTHS.leftPanelWidth &&
     widths?.rightPanelWidth === LEGACY_STATUS_LEFT_PANEL_WIDTHS.rightPanelWidth
   ) {
+    persistChatPaneLayouts(DEFAULT_CHAT_PANEL_WIDTHS);
     return DEFAULT_CHAT_PANEL_WIDTHS;
   }
 
-  const fromShell = {
-    leftPanelWidth: normalizePanelWidth(
-      widths?.leftPanelWidth,
-      DEFAULT_CHAT_PANEL_WIDTHS.leftPanelWidth,
-      CHAT_LEFT_PANE_BOUNDS,
-    ),
-    rightPanelWidth: normalizePanelWidth(
-      widths?.rightPanelWidth,
-      DEFAULT_CHAT_PANEL_WIDTHS.rightPanelWidth,
-      CHAT_RIGHT_PANE_BOUNDS,
-    ),
-  };
-
-  // Prefer shell store values when present; otherwise hydrate from shared pane-layouts.
   if (widths?.leftPanelWidth != null || widths?.rightPanelWidth != null) {
-    dualWriteChatPaneLayouts(fromShell);
+    const fromShell = {
+      leftPanelWidth: normalizePanelWidth(
+        widths?.leftPanelWidth,
+        DEFAULT_CHAT_PANEL_WIDTHS.leftPanelWidth,
+        CHAT_LEFT_PANE_BOUNDS,
+      ),
+      rightPanelWidth: normalizePanelWidth(
+        widths?.rightPanelWidth,
+        DEFAULT_CHAT_PANEL_WIDTHS.rightPanelWidth,
+        CHAT_RIGHT_PANE_BOUNDS,
+      ),
+    };
+    persistChatPaneLayouts(fromShell);
     return fromShell;
   }
 
-  const fromShared = readChatPaneLayoutsFallback();
-  return fromShared ?? DEFAULT_CHAT_PANEL_WIDTHS;
+  return DEFAULT_CHAT_PANEL_WIDTHS;
 }
 
 /**
@@ -170,7 +173,7 @@ export const useShellStore = create<ShellState>()(
             ...state.chatPanelWidths,
             ...widths,
           };
-          dualWriteChatPaneLayouts(next);
+          persistChatPaneLayouts(next);
           return { chatPanelWidths: next };
         }),
       setTopBarMode: (topBarMode) => set({ topBarMode }),
@@ -181,7 +184,6 @@ export const useShellStore = create<ShellState>()(
       partialize: (state) => ({
         evolutionTrack: state.evolutionTrack,
         evolutionView: state.evolutionView,
-        chatPanelWidths: state.chatPanelWidths,
         topBarMode: state.topBarMode,
       }),
       merge: (persistedState, currentState) => {

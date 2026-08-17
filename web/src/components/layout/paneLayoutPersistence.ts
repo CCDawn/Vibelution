@@ -22,7 +22,7 @@ function isBrowser(): boolean {
 type PaneLayoutPersistHook = () => void;
 let paneLayoutPersistHook: PaneLayoutPersistHook | null = null;
 
-/** Optional listener when pane widths are written (project-local dual-write). */
+/** Optional listener when pane widths are written (durable server mirror). */
 export function setPaneLayoutPersistHook(hook: PaneLayoutPersistHook | null): void {
   paneLayoutPersistHook = hook;
 }
@@ -31,7 +31,7 @@ function notifyPaneLayoutPersist(): void {
   try {
     paneLayoutPersistHook?.();
   } catch {
-    // Dual-write listeners must not break local persistence.
+    // Mirror listeners must not break local persistence.
   }
 }
 

@@ -5,7 +5,7 @@
 | **Status** | `active-plan` |
 | **Created** | 2026-08-16 |
 | **Reviewed** | 2026-08-16（仓库审查结论重放至最新 main） |
-| **Implementation status** | T1 apply 已执行（2026-08-16）；**T1G 代码门已落地**（commit `91a1f6fb4`）；**T2 / T3b done**（2026-08-17）；**T4a–T4c done**（2026-08-17）；**T5 done**（2026-08-17：packaged Electron 不再 spawn `:8765`，profile 只写 `operatorConfigPath`）；**T6 done**（2026-08-17：`types/knowledge.ts` 打断 memory↔teams 循环；`memory.ts`/`knowledge.ts` 仍分域）；T2 仅完成代码收口，未执行新的真实 apply / reapply / rollback / legacy 删除 |
+| **Implementation status** | T1 apply 已执行（2026-08-16）；**T1G 代码门已落地**（commit `91a1f6fb4`）；**T2 / T3b done**（2026-08-17）；**T4a–T4c done**（2026-08-17）；**T5 done**（2026-08-17：packaged Electron 不再 spawn `:8765`，profile 只写 `operatorConfigPath`）；**T6 done**（2026-08-17：`types/knowledge.ts` 打断 memory↔teams 循环；`memory.ts`/`knowledge.ts` 仍分域）；**T7 done**（2026-08-17：Chat 宽度唯一写 `paneLayouts.chat`；`shell.chatPanelWidths` 仅一次性单向迁移）；T2 仅完成代码收口，未执行新的真实 apply / reapply / rollback / legacy 删除 |
 | **Tier** | `HIGH_RISK`（整体）；子任务按 `FAST_PATCH` / `STANDARD_TASK` / `HIGH_RISK` 分级 |
 | **Related ADR** | [0002](../adr/0002-agent-collaboration-session-addressing.md) · [0003](../adr/0003-operator-config-lives-outside-repo.md) · [0004](../adr/0004-product-ui-uses-vui-shadcn-only.md) · [0005](../adr/0005-docs-authority-and-archive-policy.md) · [0008](../adr/0008-project-mutable-state-lives-outside-source-tree.md) · [0009](../adr/0009-launcher-control-plane-lives-in-electron-main.md) |
 | **Related docs** | [development-standard §24](../standards/development-standard.md) · [web/src/api/README.md](../../web/src/api/README.md) · [worktree-collaboration](../agents/worktree-collaboration.md) |
@@ -257,7 +257,7 @@ flowchart TB
 | **交付** | 保持 **one backend domain → one transport**：**不合并 `memory.ts` / `knowledge.ts`**；`types/knowledge.ts` 打断 `types/memory.ts` ↔ `types/teams.ts` 循环；queryKeys 按 `memory.*` / `knowledge.*` 分前缀；更新 [web/src/api/README.md](../../web/src/api/README.md) |
 | **Worktree** | `codex/fe-memory-knowledge-unify` |
 
-**Task T7: Chat 布局单写 SSOT**
+**Task T7: Chat 布局单写 SSOT** — **done**（2026-08-17）
 
 | 项 | 内容 |
 | --- | --- |
