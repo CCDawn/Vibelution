@@ -2009,7 +2009,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sourceCollectionSummaryStageRound");
     expect(routeSource).toContain("sourceCollectionSummaryCounts");
     expect(routeSource).toContain("summarySourceCollectionActiveWorkRun");
-    expect(routeSource).toContain("workflow: Boolean(effectiveTeamId && researchWorkflowTeamSelected)");
+    expect(routeSource).toContain("workflow: teamWorkflowOrchestrationEnabled");
+    expect(routeSource).toContain("teamWorkflowOrchestrationEnabled");
+    expect(routeSource).toContain("processCanvasHome");
     expect(routeSource).toContain("const sourceCollectionFindingDetailsVisible = Boolean(");
     const sourceCollectionFindingDetailsVisibleSource = routeSource.slice(
       routeSource.indexOf("const sourceCollectionFindingDetailsVisible = Boolean("),

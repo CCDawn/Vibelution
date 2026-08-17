@@ -50,6 +50,7 @@ export async function withDesktopShellExitTimeout<T>(
 
 export type DesktopStartRuntimeReapInput = {
   stopManagedRuntime: () => Promise<void>;
+  stopLeftoverPythonLauncher?: () => Promise<LauncherServiceStopResult>;
   recordEvent: (event: RuntimeSceneElectronEvent) => Promise<void>;
   stepTimeoutMs?: number;
 };
@@ -57,6 +58,9 @@ export type DesktopStartRuntimeReapInput = {
 export type DesktopStartRuntimeReapResult = {
   stopManagedRuntime: boolean;
   managedRuntimeError: string;
+  stopLeftoverPythonLauncher: boolean;
+  leftoverPythonStopStatus: "stopped" | "skipped" | "failed" | "not_requested";
+  leftoverPythonStopError: string;
 };
 
 export async function reapManagedRuntimeOnDesktopStart(
@@ -64,6 +68,8 @@ export async function reapManagedRuntimeOnDesktopStart(
 ): Promise<DesktopStartRuntimeReapResult> {
   const stepTimeoutMs = input.stepTimeoutMs ?? DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS;
   let managedRuntimeError = "";
+  let leftoverPythonStopError = "";
+  let leftoverStopResult: LauncherServiceStopResult | null = null;
   await input
     .recordEvent({
       eventCode: "electron.runtime.start_reap_requested",
@@ -83,9 +89,37 @@ export async function reapManagedRuntimeOnDesktopStart(
       })
       .catch(() => undefined);
   }
+  if (input.stopLeftoverPythonLauncher) {
+    await input
+      .recordEvent({
+        eventCode: "electron.launcher_service.start_reap_requested",
+        message: "Leftover Python launcher service stop requested before desktop shell start.",
+        fields: {}
+      })
+      .catch(() => undefined);
+    try {
+      leftoverStopResult = await withDesktopShellExitTimeout(
+        input.stopLeftoverPythonLauncher(),
+        stepTimeoutMs,
+        "reap leftover python launcher"
+      );
+    } catch (error: unknown) {
+      leftoverPythonStopError = error instanceof Error ? error.message : String(error);
+      await input
+        .recordEvent({
+          eventCode: "electron.launcher_service.start_reap_failed",
+          message: "Leftover Python launcher service stop failed before desktop shell start.",
+          fields: { error: leftoverPythonStopError.slice(0, 500) }
+        })
+        .catch(() => undefined);
+    }
+  }
   return {
     stopManagedRuntime: true,
-    managedRuntimeError
+    managedRuntimeError,
+    stopLeftoverPythonLauncher: Boolean(input.stopLeftoverPythonLauncher),
+    leftoverPythonStopStatus: leftoverStopResult?.status ?? (leftoverPythonStopError ? "failed" : "not_requested"),
+    leftoverPythonStopError
   };
 }
 

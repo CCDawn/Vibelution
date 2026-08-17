@@ -22,7 +22,7 @@ export type LauncherServiceStartInput = {
 };
 
 export type LauncherServiceStopInput = LauncherServiceStartInput & {
-  launcherBackendPid: number;
+  launcherBackendPid?: number;
 };
 
 export type LauncherServiceStopResult = {
@@ -34,24 +34,33 @@ export type LauncherServiceStopResult = {
   terminatedPids: number[];
 };
 
+function stopLauncherBridgeArgs(input: LauncherServiceStopInput): string[] {
+  const args = [
+    resolve(input.workspaceRoot, "scripts", "vibelution_desktop_entry.py"),
+    "--action",
+    "stop-launcher",
+    "--output",
+    "json",
+    "--workspace",
+    input.workspaceRoot,
+    "--config",
+    input.operatorConfigPath
+  ];
+  const ownedPid = Number(input.launcherBackendPid || 0);
+  if (ownedPid > 0) {
+    args.push("--owned-backend-pid", String(ownedPid));
+  } else {
+    args.push("--use-state-owned-backend-pid");
+  }
+  args.push("--no-browser");
+  return args;
+}
+
 export async function stopPythonLauncherService(input: LauncherServiceStopInput): Promise<LauncherServiceStopResult> {
   const spawnImpl = input.spawnImpl ?? spawn;
   const child = spawnImpl(
     input.pythonPath,
-    [
-      resolve(input.workspaceRoot, "scripts", "vibelution_desktop_entry.py"),
-      "--action",
-      "stop-launcher",
-      "--output",
-      "json",
-      "--workspace",
-      input.workspaceRoot,
-      "--config",
-      input.operatorConfigPath,
-      "--owned-backend-pid",
-      String(input.launcherBackendPid),
-      "--no-browser"
-    ],
+    stopLauncherBridgeArgs(input),
     {
       cwd: input.workspaceRoot,
       windowsHide: true,

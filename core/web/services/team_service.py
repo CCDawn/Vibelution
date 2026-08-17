@@ -169,6 +169,7 @@ _compact_chat_room = _chat_room_links._compact_chat_room
 _record_compact_chat_room_sync_skipped_busy = _chat_room_links._record_compact_chat_room_sync_skipped_busy
 
 get_team_canvas = _canvas_normalize.get_team_canvas
+list_team_role_binding_sources = _canvas_normalize.list_team_role_binding_sources
 _team_canvas_with_validation = _canvas_normalize._team_canvas_with_validation
 save_team_canvas = _canvas_normalize.save_team_canvas
 _normalize_canvas = _canvas_normalize._normalize_canvas
@@ -277,6 +278,7 @@ _members_to_api = _team_projection._members_to_api
 _get_team_record = _team_projection._get_team_record
 _agent_reference_maps = _team_projection._agent_reference_maps
 _load_lightweight_agent_references = _team_projection._load_lightweight_agent_references
+lookup_agent_display_name_map = _team_projection.lookup_agent_display_name_map
 _agent_reference_maps_from_agents = _team_projection._agent_reference_maps_from_agents
 _merged_agent_reference_maps = _team_projection._merged_agent_reference_maps
 _agent_reference = _team_projection._agent_reference

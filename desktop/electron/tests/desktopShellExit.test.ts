@@ -64,7 +64,7 @@ describe("executeApprovedDesktopShellShutdown", () => {
     });
   });
 
-  it("stops managed project processes even when the Launcher was attached", async () => {
+  it("can skip leftover Python stop when the approved decision does not request it", async () => {
     const calls: string[] = [];
 
     const result = await executeApprovedDesktopShellShutdown({
@@ -182,7 +182,10 @@ describe("reapManagedRuntimeOnDesktopStart", () => {
     ]);
     expect(result).toEqual({
       stopManagedRuntime: true,
-      managedRuntimeError: ""
+      managedRuntimeError: "",
+      stopLeftoverPythonLauncher: false,
+      leftoverPythonStopStatus: "not_requested",
+      leftoverPythonStopError: ""
     });
   });
 
@@ -206,7 +209,80 @@ describe("reapManagedRuntimeOnDesktopStart", () => {
     ]);
     expect(result).toEqual({
       stopManagedRuntime: true,
-      managedRuntimeError: "python missing"
+      managedRuntimeError: "python missing",
+      stopLeftoverPythonLauncher: false,
+      leftoverPythonStopStatus: "not_requested",
+      leftoverPythonStopError: ""
+    });
+  });
+
+  it("reaps leftover Python launcher before the desktop shell continues starting", async () => {
+    const calls: string[] = [];
+
+    const result = await reapManagedRuntimeOnDesktopStart({
+      recordEvent: async (event) => {
+        calls.push(`event:${event.eventCode}`);
+      },
+      stopManagedRuntime: async () => {
+        calls.push("stop-managed-runtime");
+      },
+      stopLeftoverPythonLauncher: async () => {
+        calls.push("stop-leftover-python");
+        return {
+          schemaVersion: 1,
+          status: "stopped",
+          reason: "",
+          expectedBackendPid: 39368,
+          launcherBackendPid: 39368,
+          terminatedPids: [39368]
+        };
+      }
+    });
+
+    expect(calls).toEqual([
+      "event:electron.runtime.start_reap_requested",
+      "stop-managed-runtime",
+      "event:electron.launcher_service.start_reap_requested",
+      "stop-leftover-python"
+    ]);
+    expect(result).toEqual({
+      stopManagedRuntime: true,
+      managedRuntimeError: "",
+      stopLeftoverPythonLauncher: true,
+      leftoverPythonStopStatus: "stopped",
+      leftoverPythonStopError: ""
+    });
+  });
+
+  it("fails open when leftover Python launcher cannot be stopped at start", async () => {
+    const calls: string[] = [];
+
+    const result = await reapManagedRuntimeOnDesktopStart({
+      recordEvent: async (event) => {
+        calls.push(`event:${event.eventCode}`);
+      },
+      stopManagedRuntime: async () => {
+        calls.push("stop-managed-runtime");
+      },
+      stopLeftoverPythonLauncher: async () => {
+        calls.push("stop-leftover-python");
+        throw new Error("python missing");
+      }
+    });
+
+    expect(calls).toEqual([
+      "event:electron.runtime.start_reap_requested",
+      "stop-managed-runtime",
+      "event:electron.launcher_service.start_reap_requested",
+      "stop-leftover-python",
+      "event:electron.launcher_service.start_reap_failed"
+    ]);
+    expect(result).toEqual({
+      stopManagedRuntime: true,
+      managedRuntimeError: "",
+      stopLeftoverPythonLauncher: true,
+      leftoverPythonStopStatus: "failed",
+      leftoverPythonStopError: "python missing"
     });
   });
 });
