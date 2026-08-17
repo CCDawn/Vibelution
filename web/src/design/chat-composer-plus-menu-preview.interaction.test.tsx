@@ -210,7 +210,7 @@ describe("chat composer plus menu preview loop", () => {
     expect(document.body.querySelectorAll('[role="group"]').length).toBe(1);
   });
 
-  it("omits the removed mental-runtime rail section while keeping other read-only rail content", async () => {
+  it("omits the removed mental-runtime and context-cache rail sections while keeping other read-only rail content", async () => {
     const host = await mountPreview();
 
     await act(async () => {
@@ -222,10 +222,11 @@ describe("chat composer plus menu preview loop", () => {
     expect(rail?.querySelector('[aria-label="心智与运行（只读）"]')).toBeNull();
     expect(rail?.textContent).not.toContain("心智与运行 · 下轮生效");
     expect(rail?.textContent).not.toContain("认知状态稳定，注意力集中在当前会话目标。");
-    expect(rail?.querySelector('[aria-label="上下文与缓存（只读）"]')).toBeTruthy();
-    expect(rail?.textContent).toContain("上下文与缓存");
+    expect(rail?.querySelector('[aria-label="上下文与缓存（只读）"]')).toBeNull();
+    expect(rail?.textContent).not.toContain("上下文与缓存");
     expect(rail?.querySelector('[aria-label="当前会话（只读）"]')).toBeTruthy();
     expect(rail?.textContent).toContain("Relay GPT-5.6 Luna");
+    expect(host.querySelector('button[aria-label="上下文占用 42%，命中 67%"]')).toBeTruthy();
 
     await act(async () => {
       buttonByLabel("更多操作")?.click();

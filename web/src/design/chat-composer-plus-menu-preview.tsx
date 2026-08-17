@@ -836,22 +836,6 @@ export function ChatComposerPlusMenuPreviewApp() {
                 </section>
               )}
 
-              <section className={styles.railSection} aria-label="上下文与缓存（只读）">
-                <div className={styles.railSectionTitle}>上下文与缓存</div>
-                <div className={styles.railRow}>
-                  <span className={styles.railRowLabel}>占用</span>
-                  <span className={styles.railRowValue}>{session.usagePercent}%</span>
-                </div>
-                <div className={styles.railRow}>
-                  <span className={styles.railRowLabel}>命中</span>
-                  <span className={styles.railRowValue}>{session.hitPercent}%</span>
-                </div>
-                <div className={styles.railRow}>
-                  <span className={styles.railRowLabel}>缓存</span>
-                  <span className={styles.railRowValue}>{session.cacheLabel}</span>
-                </div>
-              </section>
-
               <section className={styles.railSection} aria-label="陪伴（只读）">
                 <div className={styles.railSectionTitle}>陪伴</div>
                 <div className={styles.railRow}>
