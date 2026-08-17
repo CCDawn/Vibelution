@@ -105,6 +105,32 @@ def test_windows_no_console_red_line_is_normative():
     assert "CREATE_NEW_PROCESS_GROUP" in restarter
 
 
+def test_research_before_write_red_line_is_normative():
+    """Local reuse and external mature-scheme research are both required before writes."""
+
+    agents = (PROJECT_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    standard = (PROJECT_ROOT / "docs" / "standards" / "development-standard.md").read_text(
+        encoding="utf-8"
+    )
+    standards_index = (PROJECT_ROOT / "docs" / "standards" / "README.md").read_text(
+        encoding="utf-8"
+    )
+    loop = (PROJECT_ROOT / "docs" / "guides" / "loop.md").read_text(encoding="utf-8")
+    playbook = (PROJECT_ROOT / "docs" / "guides" / "playbook.md").read_text(encoding="utf-8")
+    route = (PROJECT_ROOT / "docs" / "guides" / "route.md").read_text(encoding="utf-8")
+
+    assert "本地能复用 ≠ 本地就是好方案" in agents
+    assert "改造后再复用" in agents
+    assert "二者都要做，不是二选一" in agents
+    assert "### 2.2 Local Reuse And Mature-Scheme Research" in standard
+    assert "adapt then reuse" in standard
+    assert "§2.2" in standards_index
+    assert "调研门未闭合" in loop
+    assert "R10" in playbook
+    assert "改造后再用" in playbook
+    assert "不评估本地复用/改造" in route
+
+
 def test_governance_entry_links_resolve():
     _assert_local_links_resolve(PROJECT_ROOT / "AGENTS.md")
     _assert_local_links_resolve(PROJECT_ROOT / "docs" / "README.md")
