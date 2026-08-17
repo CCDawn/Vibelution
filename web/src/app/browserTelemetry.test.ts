@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { getControlToken, resetControlTokenForTests } from "../api/client";
-import { collectBrowserMemorySnapshot, collectBrowserPageSnapshot, postBrowserTelemetry } from "./browserTelemetry";
+import {
+  collectBrowserMemorySnapshot,
+  collectBrowserPageSnapshot,
+  peekBrowserTelemetryDeliveryBufferForTests,
+  postBrowserTelemetry,
+  resetBrowserTelemetryDeliveryBufferForTests,
+} from "./browserTelemetry";
 import { resetPageInstanceIdForTests } from "./pageInstance";
 
 describe("browser telemetry", () => {
@@ -9,6 +15,7 @@ describe("browser telemetry", () => {
     vi.restoreAllMocks();
     resetControlTokenForTests();
     resetPageInstanceIdForTests();
+    resetBrowserTelemetryDeliveryBufferForTests();
   });
 
   it("clears cached control token after telemetry receives 403", async () => {
@@ -256,5 +263,127 @@ describe("browser telemetry", () => {
       expect.stringContaining("network down"),
     );
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(peekBrowserTelemetryDeliveryBufferForTests()).toHaveLength(1);
+    expect(peekBrowserTelemetryDeliveryBufferForTests()[0]).toContain("browser.route.error");
+  });
+
+  it("buffers HTTP delivery failures without posting another telemetry event", async () => {
+    vi.stubGlobal("window", { location: { origin: "http://127.0.0.1:8000" } });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          header: "X-Vibelution-Control-Token",
+          controlToken: "telemetry-token",
+        }),
+      })
+      .mockResolvedValueOnce({ ok: false, status: 500 });
+    vi.stubGlobal("fetch", fetchMock);
+
+    postBrowserTelemetry({
+      phase: "error",
+      eventCode: "browser.preview.error",
+      message: "preview render failed",
+    });
+    await vi.waitFor(() => expect(warn).toHaveBeenCalled());
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(peekBrowserTelemetryDeliveryBufferForTests()).toHaveLength(1);
+    expect(peekBrowserTelemetryDeliveryBufferForTests()[0]).toContain("browser.preview.error");
+  });
+
+  it("does not buffer 403 telemetry responses", async () => {
+    vi.stubGlobal("window", { location: { origin: "http://127.0.0.1:8000" } });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          header: "X-Vibelution-Control-Token",
+          controlToken: "expired-token",
+        }),
+      })
+      .mockResolvedValueOnce({ ok: false, status: 403 });
+    vi.stubGlobal("fetch", fetchMock);
+
+    postBrowserTelemetry({
+      phase: "page",
+      eventCode: "browser.page.snapshot",
+      message: "snapshot",
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    expect(warn).not.toHaveBeenCalled();
+    expect(peekBrowserTelemetryDeliveryBufferForTests()).toEqual([]);
+  });
+
+  it("flushes buffered deliveries after the next successful post", async () => {
+    vi.stubGlobal("window", { location: { origin: "http://127.0.0.1:8000" } });
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          header: "X-Vibelution-Control-Token",
+          controlToken: "telemetry-token",
+        }),
+      })
+      .mockRejectedValueOnce(new Error("network down"))
+      .mockResolvedValueOnce({ ok: true, status: 202 })
+      .mockResolvedValueOnce({ ok: true, status: 202 });
+    vi.stubGlobal("fetch", fetchMock);
+
+    postBrowserTelemetry({
+      phase: "error",
+      eventCode: "browser.route.error",
+      message: "workbench route render failed",
+    });
+    await vi.waitFor(() => expect(peekBrowserTelemetryDeliveryBufferForTests()).toHaveLength(1));
+
+    postBrowserTelemetry({
+      phase: "page",
+      eventCode: "browser.page.snapshot",
+      message: "snapshot",
+    });
+    await vi.waitFor(() => expect(peekBrowserTelemetryDeliveryBufferForTests()).toHaveLength(0));
+
+    const postedBodies = fetchMock.mock.calls
+      .slice(1)
+      .map((call) => String((call[1] as RequestInit | undefined)?.body ?? ""));
+    expect(postedBodies.some((body) => body.includes("browser.route.error"))).toBe(true);
+    expect(postedBodies.some((body) => body.includes("browser.page.snapshot"))).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("drops the oldest buffered delivery when the ring is full", async () => {
+    vi.stubGlobal("window", { location: { origin: "http://127.0.0.1:8000" } });
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          header: "X-Vibelution-Control-Token",
+          controlToken: "telemetry-token",
+        }),
+      });
+    for (let index = 0; index < 21; index += 1) {
+      fetchMock.mockRejectedValueOnce(new Error("network down"));
+    }
+    vi.stubGlobal("fetch", fetchMock);
+
+    for (let index = 0; index < 21; index += 1) {
+      postBrowserTelemetry({
+        phase: "error",
+        eventCode: `browser.overflow.${index}`,
+        message: "overflow",
+      });
+    }
+    await vi.waitFor(() => expect(peekBrowserTelemetryDeliveryBufferForTests()).toHaveLength(20));
+
+    const buffered = peekBrowserTelemetryDeliveryBufferForTests();
+    expect(buffered[0]).toContain("browser.overflow.1");
+    expect(buffered[19]).toContain("browser.overflow.20");
+    expect(buffered.some((body) => body.includes("browser.overflow.0"))).toBe(false);
   });
 });
