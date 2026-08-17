@@ -863,7 +863,22 @@ def _with_active_electron_window_projection(observation: dict[str, Any]) -> dict
     except (OSError, TypeError, ValueError):
         projection = {}
     if isinstance(projection, dict) and projection and _electron_session_process_is_live(projection):
+        live_url = str(payload.get("url") or "").strip()
         payload.update(projection)
+        # A launcher-only Electron session projects url="" while the workbench
+        # window is closed. Never blank out the live backend endpoint.
+        if not str(payload.get("url") or "").strip() and live_url:
+            payload["url"] = live_url
+        backend_live = bool(
+            payload.get("backendObserved")
+            or payload.get("backendAlive")
+            or payload.get("backendHealthy")
+            or payload.get("backendPortListening")
+        )
+        if payload.get("browserWindowAlive") and backend_live:
+            payload["observedState"] = "open"
+            if str(payload.get("lifecycleConsistency") or "") in {"", "browser_missing"}:
+                payload["lifecycleConsistency"] = "consistent"
     return with_window_provider_projection(payload)
 
 
@@ -1970,7 +1985,11 @@ def run_launcher_action(
         startup_telemetry["timingsMs"]["launcherControlPlaneBackendReadyMs"] = _startup_elapsed_ms(
             control_plane_started
         )
-        if completed.returncode == 0 and electron_window_action and not no_browser:
+        request_electron_window = bool(
+            electron_window_action
+            and (not no_browser or bool(electron_session) or electron_orchestrates)
+        )
+        if completed.returncode == 0 and request_electron_window:
             if electron_session and not _electron_main_orchestrates_windows():
                 startup_telemetry["failureStage"] = "desktop_action_submit"
                 desktop_action_started = time.monotonic()

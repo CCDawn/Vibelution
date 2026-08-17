@@ -53,6 +53,8 @@ describe("Electron main Launcher IPC facade", () => {
     expect(mainSource).toContain("isCurrentCheckoutInstance(instanceId)");
     expect(mainSource).toContain("provider.openOrFocusWorkbench(url)");
     expect(mainSource).toContain("await waitForWorkbenchHttp({ url, timeoutMs: WORKBENCH_START_READY_WAIT_MS })");
+    expect(mainSource).toContain("refreshLiveWorkbenchUrl");
+    expect(mainSource).toContain("resolveWorkbenchUrlFromBridge");
     expect(mainSource).toContain("return workbenchLoopbackUrl();");
     const branchStart = mainSource.indexOf("async function orchestrateBranchInstanceLifecycle");
     const branchBody = mainSource.slice(branchStart, branchStart + 1800);
@@ -68,5 +70,14 @@ describe("Electron main Launcher IPC facade", () => {
     expect(lifecycleBody).toContain("shouldRefreshBeforeLifecycle");
     expect(lifecycleBody).toContain('operation === "stop" || operation === "force-stop"');
     expect(lifecycleBody).toContain("approveWorkbenchCloseOnce");
+  });
+
+  it("refreshes the live workbench URL after start instead of waiting on a stale bootstrap port", () => {
+    const readyStart = mainSource.indexOf("async function openWorkbenchAfterLifecycleReady");
+    const readyBody = mainSource.slice(readyStart, readyStart + 700);
+    expect(readyBody).toContain("await refreshLiveWorkbenchUrl(paths)");
+    const secondStart = mainSource.indexOf("async function requestOpenWorkbenchFromSecondInstance");
+    const secondBody = mainSource.slice(secondStart, secondStart + 1200);
+    expect(secondBody).toContain("await refreshLiveWorkbenchUrl(");
   });
 });

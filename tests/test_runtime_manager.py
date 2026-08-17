@@ -12488,6 +12488,7 @@ def test_maybe_auto_close_on_browser_missing_schedules_and_submits_after_grace(m
     )
     submitted = []
     events = []
+    monkeypatch.delenv("VIBELUTION_ELECTRON_MAIN_ORCHESTRATES_WINDOWS", raising=False)
     monkeypatch.setattr(daemon, "now_iso", lambda: next(timestamps))
     monkeypatch.setattr(
         daemon,
@@ -12534,6 +12535,7 @@ def test_maybe_auto_close_on_browser_missing_schedules_and_submits_after_grace(m
 
 def test_maybe_auto_close_on_browser_missing_clears_when_window_returns(monkeypatch):
     runtime_daemon = daemon.RuntimeManagerDaemon()
+    monkeypatch.delenv("VIBELUTION_ELECTRON_MAIN_ORCHESTRATES_WINDOWS", raising=False)
     monkeypatch.setattr(daemon, "now_iso", lambda: "2026-08-10T10:00:00+00:00")
     monkeypatch.setattr(daemon, "submit_command", lambda *a, **k: {"commandId": "cmd"})
     monkeypatch.setattr(daemon, "_append_event", lambda *a, **k: None)
@@ -12563,6 +12565,7 @@ def test_maybe_auto_close_on_browser_missing_clears_when_window_returns(monkeypa
 
 def test_maybe_auto_close_on_browser_missing_skips_when_command_active(monkeypatch):
     runtime_daemon = daemon.RuntimeManagerDaemon()
+    monkeypatch.delenv("VIBELUTION_ELECTRON_MAIN_ORCHESTRATES_WINDOWS", raising=False)
     monkeypatch.setattr(daemon, "now_iso", lambda: "2026-08-10T10:00:00+00:00")
     submitted = []
     monkeypatch.setattr(
@@ -12574,6 +12577,69 @@ def test_maybe_auto_close_on_browser_missing_skips_when_command_active(monkeypat
 
     state = {
         "command": {"activeCommandId": "cmd-running"},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "partial",
+            "phase": "steady",
+            "lifecycleConsistency": "browser_missing",
+        },
+    }
+    result = runtime_daemon._maybe_auto_close_on_browser_missing(state)
+    assert "browserMissingSince" not in result
+    assert submitted == []
+
+
+def test_maybe_auto_close_on_browser_missing_skips_when_electron_owns_window(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    timestamps = iter(
+        [
+            "2026-08-10T10:00:00+00:00",
+            "2026-08-10T10:00:11+00:00",
+        ]
+    )
+    submitted = []
+    events = []
+    monkeypatch.delenv("VIBELUTION_ELECTRON_MAIN_ORCHESTRATES_WINDOWS", raising=False)
+    monkeypatch.setattr(daemon, "now_iso", lambda: next(timestamps))
+    monkeypatch.setattr(
+        daemon,
+        "submit_command",
+        lambda command_type, args=None, requested_by="unknown": submitted.append(command_type) or {"commandId": "cmd"},
+    )
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload=None: events.append(event_type))
+
+    state = {
+        "command": {},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "partial",
+            "phase": "steady",
+            "lifecycleConsistency": "browser_missing",
+            "windowProvider": "electron",
+        },
+    }
+    first = runtime_daemon._maybe_auto_close_on_browser_missing(state)
+    assert "browserMissingSince" not in first
+    later = runtime_daemon._maybe_auto_close_on_browser_missing(first)
+    assert "browserMissingSince" not in later
+    assert submitted == []
+    assert events == []
+
+
+def test_maybe_auto_close_on_browser_missing_skips_when_electron_orchestrates(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    submitted = []
+    monkeypatch.setenv("VIBELUTION_ELECTRON_MAIN_ORCHESTRATES_WINDOWS", "1")
+    monkeypatch.setattr(daemon, "now_iso", lambda: "2026-08-10T10:00:00+00:00")
+    monkeypatch.setattr(
+        daemon,
+        "submit_command",
+        lambda command_type, args=None, requested_by="unknown": submitted.append(command_type) or {"commandId": "cmd"},
+    )
+    monkeypatch.setattr(daemon, "_append_event", lambda *a, **k: None)
+
+    state = {
+        "command": {},
         "workbench": {
             "desiredState": "open",
             "observedState": "partial",

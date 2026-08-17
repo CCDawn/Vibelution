@@ -1250,6 +1250,33 @@ def _electron_external_window_pending_ack(workbench: dict[str, Any], observation
     )
 
 
+def _electron_session_owns_workbench_window(state: dict[str, Any]) -> bool:
+    """Return True when Electron, not Edge, owns the workbench window.
+
+    Python process probes cannot see Electron BrowserWindows. Auto-closing a
+    backend for browser_missing would hide a just-opened Electron workbench.
+    """
+
+    workbench = state.get("workbench") if isinstance(state.get("workbench"), dict) else {}
+    if str(workbench.get("windowProvider") or "").strip().lower() == "electron":
+        return True
+    if str(workbench.get("desktopSessionId") or "").strip():
+        return True
+    if str(os.environ.get("VIBELUTION_ELECTRON_MAIN_ORCHESTRATES_WINDOWS", "")).strip() == "1":
+        return True
+    try:
+        from core.launcher.desktop_session_store import latest_active_window_provider_projection
+
+        projection = latest_active_window_provider_projection()
+    except (OSError, TypeError, ValueError):
+        projection = {}
+    if not isinstance(projection, dict) or not projection:
+        return False
+    return str(projection.get("windowProvider") or "").strip().lower() == "electron" and bool(
+        str(projection.get("desktopSessionId") or "").strip()
+    )
+
+
 def _backend_port_is_closed_for_fast_close(port: int) -> bool:
     if int(port or 0) <= 0:
         return True
@@ -2759,6 +2786,11 @@ class RuntimeManagerDaemon:
         Only fires when desiredState is open and no lifecycle command is
         already active; the close itself still goes through the normal queue
         (active-work guard, verification, launcher state cleanup).
+
+        Electron-owned workbenches are excluded: Python cannot see Electron
+        BrowserWindows, so a successful ``--no-browser`` open always looks like
+        browser_missing. Closing that backend after 8s is what made Launcher
+        report a just-opened project as 可以启动 / 未运行.
         """
 
         workbench = state.get("workbench") if isinstance(state.get("workbench"), dict) else {}
@@ -2773,6 +2805,7 @@ class RuntimeManagerDaemon:
             or lifecycle_consistency != "browser_missing"
             or phase == "failed"
             or active_command_id
+            or _electron_session_owns_workbench_window(state)
         ):
             if "browserMissingSince" in state:
                 state.pop("browserMissingSince", None)

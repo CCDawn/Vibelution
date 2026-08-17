@@ -316,6 +316,47 @@ def test_first_open_uses_checkout_electron_when_packaged_is_missing(monkeypatch)
     assert "launcher.action.edge_fallback_package_missing" not in events
 
 
+def test_no_browser_open_still_signals_live_electron_workbench(monkeypatch):
+    launcher_calls: list[dict] = []
+    signals: list[dict] = []
+    events: list[str] = []
+
+    monkeypatch.setattr(workbench_controller, "_latest_active_electron_desktop_session", lambda: {})
+    monkeypatch.setattr(workbench_controller, "_packaged_electron_desktop_executable", lambda: None)
+    monkeypatch.setattr(workbench_controller, "_live_electron_owner_pid", lambda: 44044)
+    monkeypatch.setattr(workbench_controller, "_electron_main_orchestrates_windows", lambda: True)
+    monkeypatch.setattr(
+        workbench_controller,
+        "_resolve_live_electron_executable",
+        lambda _session=None: Path("C:/Vibelution.exe"),
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "_run_waitable_launcher_process",
+        lambda *args, **kwargs: launcher_calls.append({"args": args, "kwargs": kwargs})
+        or subprocess.CompletedProcess(args=["launcher"], returncode=0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "_signal_live_electron_open_workbench",
+        lambda **kwargs: signals.append(kwargs),
+    )
+    monkeypatch.setattr(
+        workbench_controller,
+        "_record_launcher_action_event",
+        lambda event_type, **_kwargs: events.append(event_type),
+    )
+
+    result = workbench_controller.run_launcher_action("internal-start", no_browser=True)
+
+    assert result.returncode == 0
+    assert "--no-browser" in launcher_calls[0]["args"][0]
+    assert len(signals) == 1
+    assert signals[0]["executable"] == Path("C:/Vibelution.exe")
+    assert "launcher.action.electron_open_signaled" in events
+    assert "launcher.action.electron_first_start_succeeded" not in events
+
+
 def test_first_open_does_not_silently_fall_back_to_edge_when_packaged_electron_fails(monkeypatch):
     launcher_calls: list[dict] = []
 
@@ -535,3 +576,77 @@ def test_observe_workbench_retargets_stale_url_to_live_ports_json(monkeypatch):
     assert snapshot["url"] == "http://127.0.0.1:8002"
     assert snapshot["backendPort"] == 8002
     assert snapshot["backendPortListening"] is True
+
+
+def test_active_electron_projection_keeps_live_backend_url(monkeypatch):
+    monkeypatch.setattr(
+        "core.launcher.desktop_session_store.latest_active_window_provider_projection",
+        lambda **_kwargs: {
+            "browserWindowAlive": False,
+            "browserManaged": False,
+            "windowProvider": "electron",
+            "windowManaged": False,
+            "windowId": 0,
+            "rendererProcessId": 0,
+            "url": "",
+            "desktopSessionId": "electron-session-launcher-only",
+            "desktopSessionRevision": 1,
+        },
+    )
+    monkeypatch.setattr(workbench_controller, "_electron_session_process_is_live", lambda _session: True)
+    monkeypatch.setattr(workbench_controller, "with_window_provider_projection", lambda payload: payload)
+
+    result = workbench_controller._with_active_electron_window_projection(
+        {
+            "url": "http://127.0.0.1:8002/",
+            "backendPort": 8002,
+            "backendObserved": True,
+            "backendHealthy": True,
+            "backendPortListening": True,
+            "observedState": "partial",
+            "lifecycleConsistency": "browser_missing",
+        }
+    )
+
+    assert result["url"] == "http://127.0.0.1:8002/"
+    assert result["backendPort"] == 8002
+    assert result["windowProvider"] == "electron"
+    assert result["observedState"] == "partial"
+    assert result["lifecycleConsistency"] == "browser_missing"
+
+
+def test_active_electron_projection_marks_open_when_window_and_backend_are_live(monkeypatch):
+    monkeypatch.setattr(
+        "core.launcher.desktop_session_store.latest_active_window_provider_projection",
+        lambda **_kwargs: {
+            "browserWindowAlive": True,
+            "browserManaged": False,
+            "windowProvider": "electron",
+            "windowManaged": True,
+            "windowId": 12,
+            "rendererProcessId": 99,
+            "url": "",
+            "desktopSessionId": "electron-session-1",
+            "desktopSessionRevision": 2,
+            "observedState": "open",
+        },
+    )
+    monkeypatch.setattr(workbench_controller, "_electron_session_process_is_live", lambda _session: True)
+    monkeypatch.setattr(workbench_controller, "with_window_provider_projection", lambda payload: payload)
+
+    result = workbench_controller._with_active_electron_window_projection(
+        {
+            "url": "http://127.0.0.1:8002/",
+            "backendPort": 8002,
+            "backendObserved": True,
+            "backendHealthy": True,
+            "backendPortListening": True,
+            "observedState": "partial",
+            "lifecycleConsistency": "browser_missing",
+        }
+    )
+
+    assert result["url"] == "http://127.0.0.1:8002/"
+    assert result["observedState"] == "open"
+    assert result["lifecycleConsistency"] == "consistent"
+    assert result["browserWindowAlive"] is True

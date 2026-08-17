@@ -80,6 +80,7 @@ import {
   type BranchInstanceOperation
 } from "./process/branchInstanceBridge.js";
 import { runPythonJsonBridge } from "./process/pythonJsonBridge.js";
+import { resolveWorkbenchUrlFromBridge } from "./process/resolveWorkbenchBridge.js";
 import {
   decideLauncherShellRestart,
   decidePackagedDesktopShellRefresh,
@@ -2239,9 +2240,48 @@ function isCurrentCheckoutInstance(instanceId: string): boolean {
   return instanceId === "main";
 }
 
+function rememberLiveWorkbenchUrl(url: string): string {
+  const safe = url.trim();
+  if (!safe) {
+    return resolveOrchestratedWorkbenchUrl();
+  }
+  currentWorkbenchUrl = safe;
+  if (launcherBootstrap !== null) {
+    launcherBootstrap = { ...launcherBootstrap, workbenchUrl: safe };
+  }
+  return safe;
+}
+
+async function refreshLiveWorkbenchUrl(paths: DesktopPaths): Promise<string> {
+  const desktopEnv = desktopEnvironment();
+  const pythonPath = String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
+  if (!pythonPath) {
+    return resolveOrchestratedWorkbenchUrl();
+  }
+  try {
+    const resolved = await resolveWorkbenchUrlFromBridge({
+      workspaceRoot: paths.workspaceRoot,
+      pythonPath,
+      operatorConfigPath:
+        launcherBootstrap?.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim()
+    });
+    return rememberLiveWorkbenchUrl(resolveWorkbenchUrl(desktopEnv, resolved));
+  } catch (error: unknown) {
+    console.warn(error instanceof Error ? error.message : String(error));
+    return resolveOrchestratedWorkbenchUrl();
+  }
+}
+
 function resolveOrchestratedWorkbenchUrl(port?: number): string {
   if (typeof port === "number" && Number.isFinite(port) && port > 0) {
     return workbenchLoopbackUrl(port);
+  }
+  if (currentWorkbenchUrl.trim()) {
+    try {
+      return resolveWorkbenchUrl(desktopEnvironment(), currentWorkbenchUrl);
+    } catch {
+      // Fall through to bootstrap / default loopback.
+    }
   }
   try {
     return resolveWorkbenchUrl(desktopEnvironment(), launcherBootstrap?.workbenchUrl);
@@ -2256,7 +2296,13 @@ function openOrchestratedWorkbenchWindow(instanceId: string, port?: number): voi
     if (provider === null) {
       return;
     }
-    const url = resolveOrchestratedWorkbenchUrl(port);
+    const url =
+      typeof port === "number" && Number.isFinite(port) && port > 0
+        ? workbenchLoopbackUrl(port)
+        : await refreshLiveWorkbenchUrl(createDesktopPathsForApp());
+    if (isCurrentCheckoutInstance(instanceId) && typeof port === "number" && port > 0) {
+      rememberLiveWorkbenchUrl(url);
+    }
     await waitForWorkbenchHttp({ url, timeoutMs: WORKBENCH_START_READY_WAIT_MS });
     if (isCurrentCheckoutInstance(instanceId)) {
       await provider.openOrFocusWorkbench(url);
@@ -2321,7 +2367,7 @@ async function openWorkbenchAfterLifecycleReady(
   _commandId: string,
   timeoutMs: number
 ): Promise<void> {
-  const url = resolveOrchestratedWorkbenchUrl();
+  const url = await refreshLiveWorkbenchUrl(paths);
   await waitForWorkbenchHttp({ url, timeoutMs });
   await openWorkbenchAtCurrentLauncherUrl(paths, bootstrap, provider, { workbenchUrl: url });
 }
@@ -2500,7 +2546,9 @@ async function requestOpenWorkbenchFromSecondInstance(): Promise<void> {
   }
   pendingOpenWorkbenchRequest = false;
   markWorkbenchOpenRequested();
-  const url = resolveOrchestratedWorkbenchUrl();
+  const url = bootstrap !== null
+    ? await refreshLiveWorkbenchUrl(createDesktopPathsForApp())
+    : resolveOrchestratedWorkbenchUrl();
   await waitForWorkbenchHttp({ url, timeoutMs: WORKBENCH_START_READY_WAIT_MS });
   await provider.openOrFocusWorkbench(url);
 }
