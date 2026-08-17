@@ -98,8 +98,8 @@ def test_hypothesis_context_uses_the_accepted_candidate_claims(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "core.web.services.team_workflow.research_runtime.knowledge_artifact_authority.load_knowledge_package_payload",
-        lambda **_kwargs: {
+        "core.web.services.team_workflow.research_runtime.human_acceptance_artifact.load_accepted_knowledge_package_from_receipt",
+        lambda _store, **_kwargs: {
             "candidateId": "accepted-package",
             "knowledgeBaseId": "team:research-team:kb-1",
             "knowledgeItems": [{"knowledgeItemId": "item-1"}],
@@ -147,6 +147,7 @@ def test_hypothesis_context_uses_the_accepted_candidate_claims(
             "workflowRunId": "run-sci-096",
             "sourceCollectionRunId": "dprun-sci-096",
         },
+        store=object(),
     )
 
     assert context["status"] == "ready"
