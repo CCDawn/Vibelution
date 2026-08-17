@@ -79,6 +79,7 @@ export const queryKeys = {
   dataProcessingRunStatus: (id: string) => ["data-processing", "runs", id, "status"] as const,
   dataProcessingCollectionAssignments: (id: string) => ["data-processing", "runs", id, "collection-assignments"] as const,
   fileContent: (path: string) => ["files", "content", path] as const,
+  // Memory workbench — web/src/api/memory.ts / /api/memory/*
   memoryOverview: () => ["memory", "overview"] as const,
   memoryItemDetails: () => ["memory", "item-detail"] as const,
   memoryItemDetail: (sectionId: string, itemId: string) => ["memory", "item-detail", sectionId, itemId] as const,
@@ -94,6 +95,7 @@ export const queryKeys = {
   memoryKnowledgeGraph: (agentId = "", include = "", teamId = "", knowledgeBaseId = "", limit = 800) =>
     ["memory", "knowledge-graph", agentId, include, teamId, knowledgeBaseId, limit] as const,
   memoryKnowledgeGraphNodeDetail: (nodeId: string, agentId = "") => ["memory", "knowledge-graph", "node-detail", nodeId, agentId] as const,
+  // Knowledge platform — web/src/api/knowledge.ts; do not merge with memory.* keys
   knowledgeDashboardSnapshot: (agentId = "") => ["knowledge", "dashboard-snapshot", agentId] as const,
   knowledgeItems: (knowledgeBaseId: string, agentId = "") => ["knowledge", "items", knowledgeBaseId, agentId] as const,
   knowledgeSearch: (knowledgeBaseId: string, agentId: string, query: string, tags: string, mode = "") =>
