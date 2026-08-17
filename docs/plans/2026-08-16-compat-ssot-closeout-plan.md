@@ -216,7 +216,7 @@ flowchart TB
 | --- | --- | --- |
 | **T4a** | LLM config v1 / `role_bindings` → 一次性 upgrader + 运行时 fail-closed | **done** 2026-08-17。可识别旧配置原子升级；无法安全升级 fail-closed；失败不覆盖原文件；运行时不再消费 v1 fallback。不等待版本支持窗口。 |
 | **T4b** | `runtime_capabilities` legacy import 删除 | **done** 2026-08-17。facade 保留为 canonical 投影；`apply_model_capability_overrides` 只读 catalog；leftover JSON 仅一次性 upgrader 导入。不等待版本窗口。 |
-| **T4c** | `chat_state.json` 消息路径删除 | **立即删除** legacy message 读写；不等待零命中。queued/running/stopping、`latest_ledger_sequence<=0`、损坏/中断/重复迁移与 canonical no-clobber 必须用一次性迁移或 canonical 恢复契约覆盖 |
+| **T4c** | `chat_state.json` 消息路径删除 | **done** 2026-08-17。leftover message blob 一次性 materialize 进 ledger 后删除；queued/running/stopping 与 `latest_ledger_sequence<=0` 可恢复；canonical ledger no-clobber。不等待零命中。 |
 
 **Dependency：** T2/T3b 后。T4c **不再**等待 storage 稳定观察期。
 
