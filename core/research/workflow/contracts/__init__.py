@@ -9,11 +9,53 @@ from ._validation import ContractValidationError
 from .artifact_manifest import ArtifactManifest
 from .artifact_receipt import ArtifactReceipt, BudgetReceipt
 from .budget import ResearchBudgetLedger
+from .claim_ledger import (
+    ACCEPTED_REVIEW_STATUS,
+    CLAIM_SOURCES,
+    CLAIM_STATUSES,
+    ClaimEvidenceRef,
+    ClaimLedgerEntry,
+    SUPPORT_LEVELS,
+)
 from .competition_evaluation import CompetitionEvaluationSnapshot
+from .decision_record import (
+    DECISION_KINDS,
+    DECISION_STATUSES,
+    DecisionRecord,
+)
 from .execution import NodeExecutionEnvelope, TaskLease, TaskLeaseStatus
 from .execution_anchor import ExecutionAnchor
 from .experiment_campaign import ExperimentCampaign, ExperimentCampaignStage
 from .hypothesis import HypothesisCandidate, HypothesisPortfolio
+from .hypothesis_round import (
+    COMPARISON_OUTCOMES,
+    LINEAGE_KINDS,
+    MEETING_REF_KINDS,
+    MIN_CANDIDATES,
+    ROUND_STATUSES,
+    SCORE_DIMENSIONS,
+    HypothesisLineageRef,
+    HypothesisMeetingRef,
+    HypothesisMetaReview,
+    HypothesisPairwiseComparison,
+    HypothesisParetoAnalysis,
+    HypothesisRound,
+    HypothesisRoundCandidate,
+)
+from .meeting_digest import MeetingDigest
+from .meeting_round import MEETING_STATUSES, MEETING_TYPES, MeetingRound
+from .personal_memory_candidate import (
+    EVIDENCE_STATUSES,
+    MEMORY_CLASSES,
+    REUSE_POLICIES,
+    PersonalMemoryCandidate,
+)
+from .research_template import (
+    ADDENDUM_STATUSES,
+    BASELINE_STATUSES,
+    TemplateAddendum,
+    TemplateBaseline,
+)
 from .node_readiness import (
     ActorReadiness,
     BudgetReadiness,
@@ -75,27 +117,39 @@ from .workflow_snapshot import (
 )
 
 __all__ = [
+    "ACCEPTED_REVIEW_STATUS",
+    "ADDENDUM_STATUSES",
     "ActorReadiness",
     "ActorRef",
     "AgentBindingSummary",
     "ArtifactManifest",
     "ArtifactReceipt",
+    "BASELINE_STATUSES",
     "BLOCKER_CAMPAIGN_THEME_MISMATCH",
     "BLOCKER_DEV_THEME_ONLY",
     "BLOCKER_THEME_NOT_ACTIVATED",
     "BudgetReadiness",
     "BudgetReceipt",
     "BudgetSummary",
+    "CLAIM_SOURCES",
+    "CLAIM_STATUSES",
+    "COMPARISON_OUTCOMES",
     "CampaignActivationStatus",
+    "ClaimEvidenceRef",
+    "ClaimLedgerEntry",
     "CommandOffer",
     "CommandReceipt",
     "CommandRequest",
     "CompetitionEvaluationSnapshot",
     "ConfirmationContract",
     "ContractValidationError",
+    "DECISION_KINDS",
+    "DECISION_STATUSES",
     "DEFAULT_PROGRAM_ID",
     "DEV_PROGRAM_ID",
     "DEV_THEME_PREFIX",
+    "DecisionRecord",
+    "EVIDENCE_STATUSES",
     "ExecutionAnchor",
     "ExecutionReceipt",
     "ExperimentCampaign",
@@ -103,13 +157,31 @@ __all__ = [
     "HandoffSummary",
     "HumanTaskSummary",
     "HypothesisCandidate",
+    "HypothesisLineageRef",
+    "HypothesisMeetingRef",
+    "HypothesisMetaReview",
+    "HypothesisPairwiseComparison",
+    "HypothesisParetoAnalysis",
     "HypothesisPortfolio",
+    "HypothesisRound",
+    "HypothesisRoundCandidate",
+    "LINEAGE_KINDS",
+    "MEETING_REF_KINDS",
+    "MEETING_STATUSES",
+    "MEETING_TYPES",
+    "MEMORY_CLASSES",
+    "MIN_CANDIDATES",
+    "MeetingDigest",
+    "MeetingRound",
     "NodeAttemptSummary",
     "NodeExecutionEnvelope",
     "NodeReadiness",
     "PendingAction",
+    "PersonalMemoryCandidate",
     "PlatformFlowReadinessReport",
     "REQUIRED_SCOPE_FIELDS",
+    "REUSE_POLICIES",
+    "ROUND_STATUSES",
     "ReadinessBlocker",
     "Remediation",
     "RemediationKind",
@@ -120,9 +192,13 @@ __all__ = [
     "ResearchTaskBundle",
     "ResearchWorkflowNodeDetail",
     "ResearchWorkflowSnapshot",
+    "SCORE_DIMENSIONS",
+    "SUPPORT_LEVELS",
     "ScopeMode",
     "TaskLease",
     "TaskLeaseStatus",
+    "TemplateAddendum",
+    "TemplateBaseline",
     "ThemeContract",
     "ThemeContractStatus",
     "WorkflowCommandKind",
