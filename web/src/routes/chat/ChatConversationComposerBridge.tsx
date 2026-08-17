@@ -109,7 +109,7 @@ export function buildConversationComposerBridgeState(
 ): ChatConversationComposerBridgeState {
   const hasSession = Boolean(input.sessionId);
   const isEditingMessage = Boolean(input.editTargetMessageId);
-  const actionMode = input.sessionBusy ? "stop" : "send";
+  const actionMode = input.sessionBusy || input.submitPending ? "stop" : "send";
   const pending = actionMode === "stop"
     ? input.stopPending || input.sessionStopping
     : input.submitPending;
@@ -120,7 +120,7 @@ export function buildConversationComposerBridgeState(
   const hasReferences = input.references.length > 0;
   const actionDisabled = !hasSession || (
     actionMode === "stop"
-      ? pending
+      ? input.sessionStopping
       : input.submitPending || (!hasDraftContent && !hasAttachments && !hasReferences)
   );
   const placeholder = !hasSession

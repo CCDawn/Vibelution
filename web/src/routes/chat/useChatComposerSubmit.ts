@@ -74,7 +74,7 @@ import {
 } from "../../components/conversation/composerFollowupQueueModel";
 import { postSubmitTelemetry } from "./chatSubmitTelemetry";
 import { startUserAction } from "../../app/userActionTelemetry";
-import { resolveSessionStopTurnId } from "./chatStopTurnModel";
+import { resolveSessionStopTurnId, cancelCongestedQueriesForSessionStop } from "./chatStopTurnModel";
 
 type ChatEditTarget = { messageId: string; original: string };
 type ChatWorkspaceCache = ReturnType<typeof createChatWorkspaceCache>;
@@ -453,12 +453,14 @@ export function useChatComposerTurnMutations({
   const stopTurnMutation = useMutation({
     mutationFn: async ({ sessionId, turnId }: { sessionId: string; turnId: string }) =>
       stopSessionTurn(sessionId, turnId),
-    onMutate: (variables) => ({
-      telemetry: startUserAction("session_turn_stop", {
+    onMutate: async (variables) => {
+      const telemetry = startUserAction("session_turn_stop", {
         sessionId: variables.sessionId,
         turnId: variables.turnId,
-      }),
-    }),
+      });
+      await cancelCongestedQueriesForSessionStop(queryClient, variables.sessionId);
+      return { telemetry };
+    },
     onSuccess: (nextDetail, variables, context) => {
       context?.telemetry?.succeeded({
         sessionId: variables.sessionId,
@@ -634,6 +636,7 @@ export function useChatComposerSubmitActions({
   setRuntimeStatusEnabledForNextTurn,
 }: UseChatComposerSubmitActionsOptions): UseChatComposerSubmitActionsResult {
   const stoppedTurnAutoFlushRef = useRef<{ sessionId: string; turnId: string } | null>(null);
+  const pendingStopAfterAcceptRef = useRef("");
   const previousBusyRef = useRef(sessionBusy);
   const previousSessionRef = useRef(activeSessionId);
 
@@ -1240,21 +1243,23 @@ export function useChatComposerSubmitActions({
   }, [activeSessionId, setSessionFollowupQueues]);
 
   const handleStopTurn = useCallback(() => {
-    if (!activeSessionId || !sessionBusy || sessionStopping) {
+    if (!activeSessionId || sessionStopping) {
       return;
     }
+    const submitPending = Boolean(
+      (submitTurnMutation.isPending && submitTurnMutation.variables?.sessionId === activeSessionId)
+      || (editResubmitMutation.isPending && editResubmitMutation.variables?.sessionId === activeSessionId)
+    );
+    if (!sessionBusy && !submitPending) {
+      return;
+    }
+    void cancelCongestedQueriesForSessionStop(queryClient, activeSessionId);
     const turnId = resolveSessionStopTurnId(detail, activeTurnId);
     if (!turnId) {
-      setSessionComposerErrors((current) => ({
-        ...current,
-        [activeSessionId]: describeError(
-          new Error("Active turn identity is not available."),
-          lang === "zh" ? "停止失败" : "Failed to stop",
-        ),
-      }));
-      void queryClient.invalidateQueries({ queryKey: queryKeys.session(activeSessionId) });
+      pendingStopAfterAcceptRef.current = activeSessionId;
       return;
     }
+    pendingStopAfterAcceptRef.current = "";
     stoppedTurnAutoFlushRef.current = { sessionId: activeSessionId, turnId };
     stopTurnMutation.mutate({
       sessionId: activeSessionId,
@@ -1263,15 +1268,33 @@ export function useChatComposerSubmitActions({
   }, [
     activeSessionId,
     activeTurnId,
-    describeError,
     detail,
-    lang,
+    editResubmitMutation.isPending,
+    editResubmitMutation.variables?.sessionId,
     queryClient,
     sessionBusy,
     sessionStopping,
-    setSessionComposerErrors,
     stopTurnMutation,
+    submitTurnMutation.isPending,
+    submitTurnMutation.variables?.sessionId,
   ]);
+
+  useEffect(() => {
+    const pendingSessionId = pendingStopAfterAcceptRef.current;
+    if (!activeSessionId || pendingSessionId !== activeSessionId || sessionStopping) {
+      return;
+    }
+    const turnId = resolveSessionStopTurnId(detail, activeTurnId);
+    if (!turnId) {
+      return;
+    }
+    pendingStopAfterAcceptRef.current = "";
+    stoppedTurnAutoFlushRef.current = { sessionId: activeSessionId, turnId };
+    stopTurnMutation.mutate({
+      sessionId: activeSessionId,
+      turnId,
+    });
+  }, [activeSessionId, activeTurnId, detail, sessionStopping, stopTurnMutation]);
 
   const handleSubmitGuidance = useCallback((mode: SessionGuidanceMode) => {
     if (!activeSessionId || !sessionBusy || sessionStopping) {
@@ -1293,6 +1316,9 @@ export function useChatComposerSubmitActions({
     const previousSession = previousSessionRef.current;
     previousBusyRef.current = sessionBusy;
     previousSessionRef.current = activeSessionId;
+    if (previousSession !== activeSessionId) {
+      pendingStopAfterAcceptRef.current = "";
+    }
     const stoppedTurn = stoppedTurnAutoFlushRef.current;
     if (
       sessionBusy

@@ -11,6 +11,7 @@ describe("chat composer user-action telemetry contract", () => {
     expect(composerSource).toContain('startUserAction("session_message_submit"');
     expect(composerSource).toContain('startUserAction("session_edit_resubmit"');
     expect(composerSource).toContain('startUserAction("session_turn_stop"');
+    expect(composerSource).toContain("cancelCongestedQueriesForSessionStop");
     expect(composerSource).toContain('startUserAction("session_guidance_submit"');
     expect(composerSource).toContain("telemetry?.succeeded({");
     expect(composerSource).toContain("telemetry?.failed(error");
