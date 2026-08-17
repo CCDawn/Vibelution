@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
@@ -571,8 +572,12 @@ def _worktree_is_dirty(path: Path) -> bool:
             check=False,
             timeout=15.0,
         )
+    except subprocess.TimeoutExpired:
+        return True
     except OSError:
         return False
+    except Exception:
+        return True
     if result.returncode != 0:
         return True
     return bool(result.stdout)

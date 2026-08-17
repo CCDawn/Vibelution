@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import threading
 from pathlib import Path
 
 import pytest
@@ -131,6 +132,47 @@ def test_annotate_unique_unmerged_head_uses_one_ancestor_check(tmp_path, monkeyp
     assert annotated["items"][0]["mergedToMain"] is False
     assert annotated["items"][1]["mergedToMain"] is False
     assert len([args for args in calls if args and args[0] == "merge-base"]) == 1
+
+
+def test_annotate_distinct_unmerged_heads_use_one_ancestor_each(tmp_path, monkeypatch):
+    root = _init_repo(tmp_path / "repo")
+    _git(root, "checkout", "-b", "codex/one")
+    (root / "README.md").write_text("one\n", encoding="utf-8")
+    _git(root, "add", ".")
+    _git(root, "commit", "-m", "one")
+    head_one = _git(root, "rev-parse", "--short=12", "HEAD")
+    _git(root, "checkout", "main")
+    _git(root, "checkout", "-b", "codex/two")
+    (root / "README.md").write_text("two\n", encoding="utf-8")
+    _git(root, "add", ".")
+    _git(root, "commit", "-m", "two")
+    head_two = _git(root, "rev-parse", "--short=12", "HEAD")
+    _git(root, "checkout", "main")
+    calls: list[tuple[str, ...]] = []
+    lock = threading.Lock()
+    real = cleanup._run_git
+
+    def wrapped(git_root, *args, **kwargs):
+        with lock:
+            calls.append(args)
+        return real(git_root, *args, **kwargs)
+
+    monkeypatch.setattr(cleanup, "_run_git", wrapped)
+    payload = {
+        "integrationRoot": str(root),
+        "items": [
+            _item(id="worktree:one", branch="codex/one", head=head_one),
+            _item(id="worktree:two", branch="codex/two", head=head_two),
+            _item(id="local_branch:one", kind="local_branch", branch="codex/one", head=head_one),
+        ],
+    }
+
+    annotated = cleanup.annotate_cleanup_metadata(payload, integration_root=root)
+
+    assert all(item["mergedToMain"] is False for item in annotated["items"])
+    merge_base = [args for args in calls if args and args[0] == "merge-base"]
+    assert len(merge_base) == 2
+    assert {args[2] for args in merge_base} == {head_one, head_two}
 
 
 def test_cleanup_requires_confirm_and_ids():

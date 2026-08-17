@@ -196,9 +196,34 @@ def list_launcher_branch_instances() -> dict[str, Any]:
     from core.launcher.branch_instance_cleanup import annotate_cleanup_metadata
     from core.launcher.branch_instance_lifecycle import list_overlayed_branch_instances
 
-    status = get_launcher_status()
-    current_bundle = status.get("projectBundle") if isinstance(status.get("projectBundle"), dict) else {}
+    current_bundle = _current_project_bundle_for_branch_list()
     return annotate_cleanup_metadata(list_overlayed_branch_instances(current_bundle=current_bundle))
+
+
+def _current_project_bundle_for_branch_list() -> dict[str, Any]:
+    """Overlay the current checkout from on-disk launcher/runtime-manager state.
+
+    The instance table must not wait on live ``observe_workbench`` probes used by
+    ``get_launcher_status``. Settings, guardian, and control-plane evidence stay
+    on the status poll path.
+    """
+
+    runtime_state = _runtime_manager_state()
+    launcher_state = _load_launcher_state()
+    workbench = _workbench_payload(runtime_state=runtime_state, observed_workbench={})
+    runtime_manager = _runtime_manager_payload(runtime_state)
+    lifecycle_proof = _lifecycle_proof(
+        runtime_manager=runtime_manager,
+        workbench=workbench,
+        active_work_runs=[],
+        runtime_state=runtime_state,
+    )
+    bundle = _project_bundle_from_workbench(
+        workbench,
+        lifecycle_proof=lifecycle_proof,
+        launcher_state=launcher_state,
+    )
+    return bundle if isinstance(bundle, dict) else {}
 
 
 def cleanup_launcher_branch_instances(

@@ -303,3 +303,19 @@ def test_worktree_dirty_map_dedupes_paths_and_parallelizes(tmp_path, monkeypatch
         workspace._norm(fourth),
     }
     assert len(calls) == 4
+
+
+def test_worktree_is_dirty_fail_closed_on_timeout(tmp_path, monkeypatch):
+    import subprocess
+
+    root = tmp_path / "tree"
+    root.mkdir()
+    called = {"n": 0}
+
+    def boom(*_args, **_kwargs):
+        called["n"] += 1
+        raise subprocess.TimeoutExpired(cmd="git status", timeout=15)
+
+    monkeypatch.setattr(workspace.git_process, "run_git", boom)
+    assert workspace._worktree_is_dirty(root) is True
+    assert called["n"] == 1
