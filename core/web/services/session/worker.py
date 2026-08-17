@@ -14,7 +14,11 @@ from pathlib import Path
 from typing import Any
 
 from core.chat.chat_task_types import trim_lines
-from core.infrastructure.tool_execution_scope import ToolExecutionScope, tool_execution_scope
+from core.infrastructure.tool_execution_scope import (
+    ToolExecutionScope,
+    tool_execution_scope,
+)
+from core.orchestration.context_engine import AgentContextInterrupted
 
 
 def _service():
@@ -314,61 +318,77 @@ def _run_session_turn(context: dict[str, Any]) -> None:
         if isinstance(context.get("agent_prompt_snapshot"), dict)
         else None
     )
-    agent_prompt_snapshot = (
-        s._ensure_session_agent_prompt_snapshot(
-            session_id,
-            agent_instance,
-            snapshot_hint=prompt_snapshot_hint,
+    def interrupt_checker() -> str:
+        return s._get_turn_control_stop_reason(turn_control)
+    try:
+        agent_prompt_snapshot = (
+            s._ensure_session_agent_prompt_snapshot(
+                session_id,
+                agent_instance,
+                snapshot_hint=prompt_snapshot_hint,
+                interrupt_checker=interrupt_checker,
+            )
+            if agent_instance
+            else {}
         )
-        if agent_instance
-        else {}
-    )
-    agent_prompt_snapshot_block = s._render_agent_prompt_snapshot_block(agent_prompt_snapshot)
-    prepare_timings["promptSnapshotMs"] = s._elapsed_ms(stage_started_at)
-    if _abort_session_turn_for_stop(
-        session_id=session_id,
-        turn_id=turn_id,
-        turn_control=turn_control,
-        stage="prepare_prompt_snapshot",
-        mental_model_enabled=mental_model_enabled,
-        context=context,
-        finish_worker=True,
-    ):
-        return
-    prepare_timings["promptSnapshotIncluded"] = bool(agent_prompt_snapshot_block)
-    prepare_timings["promptSnapshotReason"] = str(agent_prompt_snapshot.get("reason") or "").strip() if isinstance(agent_prompt_snapshot, dict) else ""
-    stage_started_at = s._perf_counter()
-    turn_attachments = s._normalize_message_attachments(context.get("attachments") or [])
-    lightweight_chat_payload, lightweight_chat_payload_reason = s._lightweight_chat_payload_decision(
-        context,
-        attachments=turn_attachments,
-    )
-    prepare_timings["lightweightChatDecisionMs"] = s._elapsed_ms(stage_started_at)
-    prepare_timings["lightweightChatPayload"] = lightweight_chat_payload
-    prepare_timings["lightweightChatPayloadReason"] = lightweight_chat_payload_reason
-    stage_started_at = s._perf_counter()
-    agent_context_packet = (
-        s.build_agent_context(
-            agent_id,
+        agent_prompt_snapshot_block = s._render_agent_prompt_snapshot_block(agent_prompt_snapshot)
+        prepare_timings["promptSnapshotMs"] = s._elapsed_ms(stage_started_at)
+        if _abort_session_turn_for_stop(
             session_id=session_id,
-            run_id=turn_id,
-            agent_snapshot=agent_instance,
-            include_prompt_template_context=not bool(agent_prompt_snapshot_block),
+            turn_id=turn_id,
+            turn_control=turn_control,
+            stage="prepare_prompt_snapshot",
+            mental_model_enabled=mental_model_enabled,
+            context=context,
+            finish_worker=True,
+        ):
+            return
+        prepare_timings["promptSnapshotIncluded"] = bool(agent_prompt_snapshot_block)
+        prepare_timings["promptSnapshotReason"] = str(agent_prompt_snapshot.get("reason") or "").strip() if isinstance(agent_prompt_snapshot, dict) else ""
+        stage_started_at = s._perf_counter()
+        turn_attachments = s._normalize_message_attachments(context.get("attachments") or [])
+        lightweight_chat_payload, lightweight_chat_payload_reason = s._lightweight_chat_payload_decision(
+            context,
+            attachments=turn_attachments,
         )
-        if agent_id
-        else None
-    )
-    prepare_timings["agentContextBuildMs"] = s._elapsed_ms(stage_started_at)
-    prepare_timings["agentContextBuildSkipped"] = bool(agent_id and agent_context_packet is None)
-    if _abort_session_turn_for_stop(
-        session_id=session_id,
-        turn_id=turn_id,
-        turn_control=turn_control,
-        stage="prepare_agent_context",
-        mental_model_enabled=mental_model_enabled,
-        context=context,
-        finish_worker=True,
-    ):
+        prepare_timings["lightweightChatDecisionMs"] = s._elapsed_ms(stage_started_at)
+        prepare_timings["lightweightChatPayload"] = lightweight_chat_payload
+        prepare_timings["lightweightChatPayloadReason"] = lightweight_chat_payload_reason
+        stage_started_at = s._perf_counter()
+        agent_context_packet = (
+            s.build_agent_context(
+                agent_id,
+                session_id=session_id,
+                run_id=turn_id,
+                agent_snapshot=agent_instance,
+                include_prompt_template_context=not bool(agent_prompt_snapshot_block),
+                interrupt_checker=interrupt_checker,
+            )
+            if agent_id
+            else None
+        )
+        prepare_timings["agentContextBuildMs"] = s._elapsed_ms(stage_started_at)
+        prepare_timings["agentContextBuildSkipped"] = bool(agent_id and agent_context_packet is None)
+        if _abort_session_turn_for_stop(
+            session_id=session_id,
+            turn_id=turn_id,
+            turn_control=turn_control,
+            stage="prepare_agent_context",
+            mental_model_enabled=mental_model_enabled,
+            context=context,
+            finish_worker=True,
+        ):
+            return
+    except AgentContextInterrupted as exc:
+        _abort_session_turn_for_stop(
+            session_id=session_id,
+            turn_id=turn_id,
+            turn_control=turn_control,
+            stage=str(exc.stage or "").strip() or "prepare",
+            mental_model_enabled=mental_model_enabled,
+            context=context,
+            finish_worker=True,
+        )
         return
     agent_context_timings = (
         dict(getattr(agent_context_packet, "timings", {}) or {})

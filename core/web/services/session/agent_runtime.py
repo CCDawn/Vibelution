@@ -299,7 +299,10 @@ def _ensure_session_agent_prompt_snapshot(
     agent: dict[str, Any] | None,
     *,
     snapshot_hint: dict[str, Any] | None = None,
+    interrupt_checker: Any = None,
 ) -> dict[str, Any]:
+    from core.orchestration.context_engine import raise_if_agent_context_interrupted
+
     s = _service()
     normalized_session_id = str(session_id or "").strip()
     if not normalized_session_id or not isinstance(agent, dict):
@@ -309,19 +312,23 @@ def _ensure_session_agent_prompt_snapshot(
     if not agent_id or not prompt_template_id:
         return {}
     include_chat_base = str(agent.get("primaryMode") or "").strip().lower() == "chat"
+    raise_if_agent_context_interrupted(
+        interrupt_checker,
+        stage="prepare_prompt_snapshot.versions",
+    )
     required_versions = s.prompt_template_service.get_agent_prompt_snapshot_versions(
         prompt_template_id,
         project_root=Path(__file__).resolve().parents[4],
         include_chat_base=include_chat_base,
     )
-    if s._agent_prompt_snapshot_matches_agent(
-        snapshot_hint,
-        agent_id=agent_id,
-        prompt_template_id=prompt_template_id,
-        builtin_content_version=required_versions.get("builtinContentVersion", 0),
-        chat_base_prompt_version=required_versions.get("chatBasePromptVersion", 0),
-        core_prompt_schema_version=required_versions.get("corePromptSchemaVersion", 0),
-    ):
+    match_kwargs = {
+        "agent_id": agent_id,
+        "prompt_template_id": prompt_template_id,
+        "builtin_content_version": required_versions.get("builtinContentVersion", 0),
+        "chat_base_prompt_version": required_versions.get("chatBasePromptVersion", 0),
+        "core_prompt_schema_version": required_versions.get("corePromptSchemaVersion", 0),
+    }
+    if s._agent_prompt_snapshot_matches_agent(snapshot_hint, **match_kwargs):
         s._record_session_prompt_snapshot_event(
             normalized_session_id,
             agent_id=agent_id,
@@ -334,14 +341,7 @@ def _ensure_session_agent_prompt_snapshot(
         if conversation is None:
             return {}
         existing = conversation.get("agentPromptSnapshot")
-        if s._agent_prompt_snapshot_matches_agent(
-            existing,
-            agent_id=agent_id,
-            prompt_template_id=prompt_template_id,
-            builtin_content_version=required_versions.get("builtinContentVersion", 0),
-            chat_base_prompt_version=required_versions.get("chatBasePromptVersion", 0),
-            core_prompt_schema_version=required_versions.get("corePromptSchemaVersion", 0),
-        ):
+        if s._agent_prompt_snapshot_matches_agent(existing, **match_kwargs):
             s._record_session_prompt_snapshot_event(
                 normalized_session_id,
                 agent_id=agent_id,
@@ -349,22 +349,44 @@ def _ensure_session_agent_prompt_snapshot(
                 outcome="reused",
             )
             return dict(existing)
-        snapshot = s.prompt_template_service.build_agent_prompt_snapshot(
-            prompt_template_id,
+        had_existing_snapshot = isinstance(existing, dict)
+    raise_if_agent_context_interrupted(
+        interrupt_checker,
+        stage="prepare_prompt_snapshot.before_build",
+    )
+    snapshot = s.prompt_template_service.build_agent_prompt_snapshot(
+        prompt_template_id,
+        agent_id=agent_id,
+        agent_code=str(agent.get("agentCode") or "").strip(),
+        agent_display_name=str(agent.get("displayName") or "").strip(),
+        project_root=Path(__file__).resolve().parents[4],
+        include_chat_base=include_chat_base,
+    )
+    raise_if_agent_context_interrupted(
+        interrupt_checker,
+        stage="prepare_prompt_snapshot.after_build",
+    )
+    if str(snapshot.get("reason") or "").strip():
+        s._record_session_prompt_snapshot_event(
+            normalized_session_id,
             agent_id=agent_id,
-            agent_code=str(agent.get("agentCode") or "").strip(),
-            agent_display_name=str(agent.get("displayName") or "").strip(),
-            project_root=Path(__file__).resolve().parents[4],
-            include_chat_base=include_chat_base,
+            snapshot=snapshot,
+            outcome="failed",
         )
-        if str(snapshot.get("reason") or "").strip():
+        return dict(snapshot)
+    with s._CHAT_STATE_LOCK:
+        conversation = s.load_session_chat_state(s.PROJECT_ROOT, normalized_session_id)
+        if conversation is None:
+            return dict(snapshot)
+        existing = conversation.get("agentPromptSnapshot")
+        if s._agent_prompt_snapshot_matches_agent(existing, **match_kwargs):
             s._record_session_prompt_snapshot_event(
                 normalized_session_id,
                 agent_id=agent_id,
-                snapshot=snapshot,
-                outcome="failed",
+                snapshot=existing,
+                outcome="reused",
             )
-            return dict(snapshot)
+            return dict(existing)
         conversation["agentPromptSnapshot"] = dict(snapshot)
         conversation["updated_at"] = s._now_timestamp()
         s.save_session_chat_state(s.PROJECT_ROOT, normalized_session_id, conversation)
@@ -372,7 +394,7 @@ def _ensure_session_agent_prompt_snapshot(
             normalized_session_id,
             agent_id=agent_id,
             snapshot=snapshot,
-            outcome="refreshed" if isinstance(existing, dict) else "created",
+            outcome="refreshed" if had_existing_snapshot else "created",
         )
         return dict(snapshot)
 

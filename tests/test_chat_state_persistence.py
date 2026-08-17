@@ -1125,6 +1125,85 @@ def test_ensure_session_agent_prompt_snapshot_writes_only_target_session_row(tmp
     assert load_session_chat_state(tmp_path, "session-b")["title"] == "B"
 
 
+def test_ensure_session_agent_prompt_snapshot_builds_outside_chat_state_lock(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_two_runtime_rows(tmp_path, status_a="ready")
+    monkeypatch.setattr(
+        session_service.prompt_template_service,
+        "get_agent_prompt_snapshot_versions",
+        lambda *_args, **_kwargs: {
+            "builtinContentVersion": 1,
+            "chatBasePromptVersion": 1,
+            "corePromptSchemaVersion": 1,
+        },
+    )
+    lock_depth = {"value": 0}
+    build_lock_depth: list[int] = []
+    real_lock = session_service._CHAT_STATE_LOCK
+
+    class HoldRecorder:
+        def __enter__(self):
+            lock_depth["value"] += 1
+            return real_lock.__enter__()
+
+        def __exit__(self, exc_type, exc, tb):
+            lock_depth["value"] -= 1
+            return real_lock.__exit__(exc_type, exc, tb)
+
+    def fake_build(*_args, **_kwargs):
+        build_lock_depth.append(lock_depth["value"])
+        return {"agentId": "agent-x", "promptTemplateId": "tpl", "content": "frozen"}
+
+    monkeypatch.setattr(session_service, "_CHAT_STATE_LOCK", HoldRecorder())
+    monkeypatch.setattr(session_service.prompt_template_service, "build_agent_prompt_snapshot", fake_build)
+    monkeypatch.setattr(session_service, "_record_session_prompt_snapshot_event", lambda *_args, **_kwargs: None)
+
+    snapshot = session_service._ensure_session_agent_prompt_snapshot(
+        "session-a",
+        {"agentId": "agent-x", "promptTemplateId": "tpl", "primaryMode": "chat"},
+    )
+
+    assert snapshot["content"] == "frozen"
+    assert build_lock_depth == [0]
+
+
+def test_ensure_session_agent_prompt_snapshot_stops_before_build(tmp_path, monkeypatch):
+    from core.orchestration.context_engine import AgentContextInterrupted
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    _seed_two_runtime_rows(tmp_path, status_a="ready")
+    monkeypatch.setattr(
+        session_service.prompt_template_service,
+        "get_agent_prompt_snapshot_versions",
+        lambda *_args, **_kwargs: {
+            "builtinContentVersion": 1,
+            "chatBasePromptVersion": 1,
+            "corePromptSchemaVersion": 1,
+        },
+    )
+    monkeypatch.setattr(
+        session_service.prompt_template_service,
+        "build_agent_prompt_snapshot",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("build should not run after stop")),
+    )
+    monkeypatch.setattr(session_service, "_record_session_prompt_snapshot_event", lambda *_args, **_kwargs: None)
+    checks = {"count": 0}
+
+    def interrupt_checker():
+        checks["count"] += 1
+        return "operator requested stop" if checks["count"] > 1 else ""
+
+    with pytest.raises(AgentContextInterrupted) as exc_info:
+        session_service._ensure_session_agent_prompt_snapshot(
+            "session-a",
+            {"agentId": "agent-x", "promptTemplateId": "tpl", "primaryMode": "chat"},
+            interrupt_checker=interrupt_checker,
+        )
+
+    assert exc_info.value.stage == "prepare_prompt_snapshot.before_build"
+    assert load_session_chat_state(tmp_path, "session-a").get("agentPromptSnapshot") is None
+
+
 def test_turn_completion_snapshot_does_not_assemble_compat_document(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     _seed_two_runtime_rows(tmp_path, status_a="ready")

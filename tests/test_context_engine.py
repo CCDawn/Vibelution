@@ -114,6 +114,40 @@ def test_build_chat_agent_context_skips_research_org_context(tmp_path, monkeypat
     assert packet.timings["researchOrgContextSkipped"] is True
 
 
+def test_build_agent_context_stops_before_later_stages(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="可中断上下文 Agent",
+        llm_bindings={"dialogue": {"modelId": "model-primary"}},
+        primary_mode="chat",
+        direct_session_id="session-stop",
+    )
+    stages: list[str] = []
+    original_episodic = agent_directory_service.list_current_episodic_events
+
+    def episodic(*args, **kwargs):
+        stages.append("episodic")
+        return original_episodic(*args, **kwargs)
+
+    monkeypatch.setattr(agent_directory_service, "list_current_episodic_events", episodic)
+
+    def interrupt_checker():
+        return "operator requested stop" if "episodic" in stages else ""
+
+    with pytest.raises(context_engine.AgentContextInterrupted) as exc_info:
+        context_engine.build_agent_context(
+            agent["agentId"],
+            session_id="session-stop",
+            run_id="turn-1",
+            agent_snapshot=agent,
+            interrupt_checker=interrupt_checker,
+        )
+
+    assert stages == ["episodic"]
+    assert exc_info.value.stage == "prepare_agent_context.group_context_events"
+    assert exc_info.value.reason == "operator requested stop"
+
+
 def test_build_agent_context_reuses_supplied_agent_snapshot(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(

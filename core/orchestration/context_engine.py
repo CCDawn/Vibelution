@@ -45,6 +45,27 @@ _ACTIVE_AGENT_DIRECTORY_CACHE_LOCK = threading.Lock()
 _ACTIVE_AGENT_DIRECTORY_CACHE: dict[tuple[str, int, int], list[dict[str, Any]]] = {}
 
 
+class AgentContextInterrupted(RuntimeError):
+    """Raised when a turn stop is observed during context assembly."""
+
+    def __init__(self, reason: str = "", *, stage: str = "") -> None:
+        normalized_reason = str(reason or "").strip()
+        super().__init__(normalized_reason or "agent context interrupted")
+        self.reason = normalized_reason
+        self.stage = str(stage or "").strip()
+
+
+def raise_if_agent_context_interrupted(interrupt_checker: Any, *, stage: str) -> None:
+    if not callable(interrupt_checker):
+        return
+    try:
+        reason = str(interrupt_checker() or "").strip()
+    except Exception:
+        return
+    if reason:
+        raise AgentContextInterrupted(reason, stage=stage)
+
+
 def _coerce_text(value: Any) -> str:
     if value is None:
         return ""
@@ -300,6 +321,7 @@ def build_agent_context(
     agent_snapshot: dict[str, Any] | None = None,
     include_prompt_template_context: bool = True,
     assembly_context: PromptAssemblyContext | None = None,
+    interrupt_checker: Any = None,
 ) -> AgentContextPacket:
     """Build the bounded context packet used by a persistent Agent turn."""
 
@@ -307,6 +329,12 @@ def build_agent_context(
 
     context_started_at = _perf_counter()
     timings: dict[str, Any] = {}
+
+    def _stop(stage: str) -> None:
+        raise_if_agent_context_interrupted(
+            interrupt_checker,
+            stage=f"prepare_agent_context.{stage}",
+        )
     normalized_agent_id = _coerce_text(agent_id).strip()
     bounded_limit = _bounded_limit(limit, default=6)
     session_id = _coerce_text(session_id).strip()
@@ -352,12 +380,14 @@ def build_agent_context(
             },
         )
 
+    _stop("episodic_events")
     stage_started_at = _perf_counter()
     episodic_events = agent_directory_service.list_current_episodic_events(
         normalized_agent_id,
         limit=agent_directory_service.PROMPT_LIST_LIMIT,
     )
     timings["episodicEventsMs"] = _elapsed_ms(stage_started_at)
+    _stop("group_context_events")
     stage_started_at = _perf_counter()
     group_events = agent_directory_service.list_group_context_events_for_agent(
         normalized_agent_id,
@@ -365,6 +395,7 @@ def build_agent_context(
         prompt_eligible_only=True,
     )
     timings["groupContextEventsMs"] = _elapsed_ms(stage_started_at)
+    _stop("inbox_messages")
     stage_started_at = _perf_counter()
     inbox_messages = agent_directory_service.list_agent_inbox_messages_for_agent(
         normalized_agent_id,
@@ -373,9 +404,11 @@ def build_agent_context(
         prompt_eligible_only=True,
     )
     timings["inboxMessagesMs"] = _elapsed_ms(stage_started_at)
+    _stop("memory_policy")
     stage_started_at = _perf_counter()
     memory_policy = agent_directory_service.resolve_memory_policy_for_agent(normalized_agent_id)
     timings["memoryPolicyMs"] = _elapsed_ms(stage_started_at)
+    _stop("runtime_context_block")
     stage_started_at = _perf_counter()
     raw_runtime_context_block = agent_directory_service.build_agent_runtime_context_block(
         normalized_agent_id,
@@ -390,6 +423,7 @@ def build_agent_context(
     agent_static_context_block, agent_dynamic_context_block = _split_agent_runtime_context_block(raw_runtime_context_block)
     research_org_context_block = ""
     if _agent_needs_research_organization_context(agent):
+        _stop("research_organization")
         stage_started_at = _perf_counter()
         research_org_result = _build_research_organization_context_block(
             normalized_agent_id,
@@ -407,6 +441,7 @@ def build_agent_context(
     ).strip()
     prompt_context_block = ""
     if include_prompt_template_context:
+        _stop("prompt_template")
         stage_started_at = _perf_counter()
         prompt_context_block = _build_prompt_template_context_block(
             prompt_template_id,
@@ -429,6 +464,7 @@ def build_agent_context(
     timings["projectRulesContextSkipped"] = True
     project_agent_registry_context_block = ""
     if _agent_allows_project_agent_registry_context(agent):
+        _stop("project_agent_registry")
         stage_started_at = _perf_counter()
         project_agent_registry_context_block = _build_project_agent_registry_context_block(
             agent_directory_service.PROJECT_ROOT,
@@ -442,6 +478,7 @@ def build_agent_context(
         timings["projectAgentRegistryContextSkipped"] = True
     public_structure_context_block = ""
     if _agent_allows_public_structure_context(agent):
+        _stop("public_structure")
         stage_started_at = _perf_counter()
         public_structure_result = _build_public_structure_context_block(agent_directory_service.PROJECT_ROOT, agent_id=normalized_agent_id)
         public_structure_context_block = public_structure_result["contextBlock"]
@@ -500,6 +537,7 @@ def build_agent_context(
     static_context_block = _join_context_segments(context_segments, "cache_prefix")
     dynamic_context_block = _join_context_segments(context_segments, "volatile_turn")
     runtime_context_block = _join_context_blocks(static_context_block, dynamic_context_block)
+    _stop("tool_policy")
     stage_started_at = _perf_counter()
     tool_policy = agent_directory_service.resolve_tool_policy_for_agent(normalized_agent_id)
     timings["toolPolicyMs"] = _elapsed_ms(stage_started_at)

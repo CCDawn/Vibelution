@@ -148,3 +148,99 @@ def test_run_session_turn_aborts_prepare_when_stop_already_requested(monkeypatch
     assert "stop_observed" in calls
     assert "worker_finished" in calls
     assert "running_cleared" in calls
+
+
+def test_run_session_turn_aborts_when_prepare_context_interrupted(monkeypatch):
+    from pathlib import Path
+
+    from core.orchestration.context_engine import AgentContextInterrupted
+
+    calls: list[str] = []
+    control = session_service.SessionTurnControl(session_id="worker-s1", turn_id="turn-stop")
+
+    class _Decision:
+        effective_enabled = False
+
+    monkeypatch.setattr(session_service, "_is_session_turn_current", lambda sid, tid: True)
+    monkeypatch.setattr(session_service, "_normalize_optional_bool", lambda value: False)
+    monkeypatch.setattr(session_service, "resolve_feature_decision", lambda *args, **kwargs: _Decision())
+    monkeypatch.setattr(session_service, "_ensure_session_workspace", lambda *args, **kwargs: Path("."))
+    monkeypatch.setattr(session_service, "_sync_agent_directory_project_root", lambda *args, **kwargs: None)
+    monkeypatch.setattr(session_service, "get_agent", lambda *args, **kwargs: {"agentId": "agent-1"})
+    monkeypatch.setattr(session_service, "_supervised_role_for_runtime_context", lambda *args, **kwargs: "")
+    monkeypatch.setattr(session_service, "_supervised_runtime_tool_grants_for_context", lambda *args, **kwargs: None)
+    monkeypatch.setattr(session_service, "_ensure_session_agent_prompt_snapshot", lambda *args, **kwargs: {})
+    monkeypatch.setattr(session_service, "_render_agent_prompt_snapshot_block", lambda *args, **kwargs: "")
+    monkeypatch.setattr(session_service, "_normalize_message_attachments", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        session_service,
+        "_lightweight_chat_payload_decision",
+        lambda *args, **kwargs: (False, "unified_conversation_chain"),
+    )
+
+    def fake_build(*args, **kwargs):
+        calls.append("context")
+        assert callable(kwargs.get("interrupt_checker"))
+        control.request_stop("operator requested stop")
+        raise AgentContextInterrupted(
+            "operator requested stop",
+            stage="prepare_agent_context.group_context_events",
+        )
+
+    monkeypatch.setattr(session_service, "build_agent_context", fake_build)
+    monkeypatch.setattr(
+        session_service,
+        "_persist_session_turn_result",
+        lambda *args, **kwargs: calls.append("persist"),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_turn_lifecycle_event",
+        lambda session_id, phase, **kwargs: calls.append(str(phase)),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_ensure_session_turn_terminal_fallback",
+        lambda *args, **kwargs: calls.append("fallback"),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_execution_registry_event",
+        lambda *args, **kwargs: calls.append("registry"),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_set_session_running",
+        lambda *args, **kwargs: calls.append("running_cleared"),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_clear_session_turn_control",
+        lambda *args, **kwargs: calls.append("control_cleared"),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_publish_session_detail_snapshot",
+        lambda *args, **kwargs: calls.append("published"),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "evaluate_agent_workspace_write",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("prepare continued after interrupt")),
+    )
+
+    worker._run_session_turn(
+        {
+            "session_id": "worker-s1",
+            "turn_id": "turn-stop",
+            "turn_control": control,
+            "agent_id": "agent-1",
+            "user_message": "hello",
+        }
+    )
+
+    assert "context" in calls
+    assert "persist" in calls
+    assert "stop_observed" in calls
+    assert "worker_finished" in calls
+    assert "running_cleared" in calls
