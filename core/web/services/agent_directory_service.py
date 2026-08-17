@@ -448,6 +448,14 @@ _EPISODIC_NAMED_SESSION_AGENT_ALLOWED_TOOLS = (
     *_NARROW_HANDOFF_SESSION_AGENT_ALLOWED_TOOLS,
     "supersede_episodic_memory_tool",
 )
+PROJECT_OPERATION_TOOL_NAMES = (
+    "agent_create_tool",
+    "agent_archive_tool",
+    "agent_reset_tool",
+    "session_create_tool",
+    "session_stop_tool",
+    "session_delete_tool",
+)
 DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = tuple(
     [
         *[
@@ -457,6 +465,7 @@ DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = tuple(
         ],
         PERSONAL_MEMORY_APPEND_TOOL_NAME,
         PERSONAL_MEMORY_SUPERSEDE_TOOL_NAME,
+        *PROJECT_OPERATION_TOOL_NAMES,
     ]
 )
 DEFAULT_SESSION_AGENT_PREFERRED_TOOLS = tuple(
