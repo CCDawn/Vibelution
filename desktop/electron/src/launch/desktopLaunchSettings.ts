@@ -43,6 +43,7 @@ export function resolveDesktopLaunchSettings(input: DesktopLaunchSettingsInput):
   const profile = loadedProfile.profile;
 
   const profileWorkspaceRoot = readProfileString(profile?.workspaceRoot);
+  // Writers only emit operatorConfigPath. `configPath` is a one-shot recover for old profiles.
   const profileConfigPath = readProfileString(profile?.operatorConfigPath) || readProfileString(profile?.configPath);
   const profilePythonPath = readProfileString(profile?.pythonPath);
   const workspaceRoot = firstString(input.cliArgs.workspaceRoot, input.env.VIBELUTION_WORKSPACE_ROOT, profileWorkspaceRoot);

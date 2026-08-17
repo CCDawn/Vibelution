@@ -1,56 +1,24 @@
-import {
-  Apple,
-  ArrowUpRight,
-  Check,
-  ChevronRight,
-  HeartHandshake,
-  MessageCircleHeart,
-  RotateCcw,
-  Sparkles,
-  Trash2,
-} from "lucide-react";
-import { lazy, Suspense, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import { ChevronRight, Sparkles } from "lucide-react";
+import { lazy, Suspense } from "react";
 
 import type {
-  AgentInstance,
   ChatRoomDetail,
-  ChatRoomMode,
-  ChatRoomPurpose,
   PetSummary,
   SessionAgentPromptSnapshot,
   SessionLlmPayloadTrace,
   SessionPromptAssemblyManifest,
-  SessionSummary,
 } from "../../api/types";
 import { PersistedHeightListShell } from "../../components/layout/PersistedHeightListShell";
-import {
-  VButton,
-  VContextualHint,
-  VNativeInput,
-  VStringSelect,
-  VTooltip,
-  type VButtonProps,
-} from "../../components/vui";
+import { VContextualHint } from "../../components/vui";
 import type { TranslationKey } from "../../i18n/dictionary";
-import { sessionAgentDisplayInfo } from "../agentDisplay";
-import { isBusyPhase } from "./chatCodingRouteViewModel";
-import type { FeaturePresetKey } from "./chatFeaturePresets";
-import {
-  CHAT_COMPACT_DETAILS_HEIGHT_PANE,
-  CHAT_GROUP_MEMBER_PICKER_HEIGHT_PANE,
-  CHAT_LIST_HEIGHT_LAYOUT_ID,
-} from "./chatListHeights";
-import { ChatPromptAssemblyInspector } from "./ChatPromptAssemblyInspector";
-import { TokenCoreStatusPanel, type TokenCoreStatusMetric } from "./TokenCoreStatusPanel";
-import { TurnStatusTailPanel } from "./TurnStatusTailPanel";
 import routeStyles from "../ChatCodingRoute.styles";
+import { isBusyPhase } from "./chatCodingRouteViewModel";
+import { CHAT_COMPACT_DETAILS_HEIGHT_PANE, CHAT_LIST_HEIGHT_LAYOUT_ID } from "./chatListHeights";
+import { ChatPromptAssemblyInspector } from "./ChatPromptAssemblyInspector";
 import styles from "./ChatStatusRail.styles";
 
-/** Secondary-lazy: status-rail debug panel, not required for first Chat paint. */
 const LlmPayloadTracePanel = lazy(() =>
-  import("./LlmPayloadTracePanel").then((module) => ({
-    default: module.LlmPayloadTracePanel,
-  })),
+  import("./LlmPayloadTracePanel").then((module) => ({ default: module.LlmPayloadTracePanel })),
 );
 
 export type ChatStatusRailProps = {
@@ -61,58 +29,18 @@ export type ChatStatusRailProps = {
   lang: "zh" | "en";
   t: (key: TranslationKey) => string;
   numberFormatter: Intl.NumberFormat;
-  // group profile
   activeGroupRoom: ChatRoomDetail | null | undefined;
   activeGroupTeamOwned: boolean;
-  activeGroupTeam: { teamId: string } | null | undefined;
   availableGroupParticipantCount: number;
   statusLabel: (status: string) => string;
-  groupManageChanged: boolean;
-  groupManageDisabled: boolean;
-  groupDeleteDisabled: boolean;
-  groupResetDisabled: boolean;
-  groupRoundActive: boolean;
   groupRoundRunning: boolean;
-  groupRoomActionError: string;
-  setGroupRoomActionError: Dispatch<SetStateAction<string>>;
-  groupManageTitleDraft: string;
-  setGroupManageTitleDraft: Dispatch<SetStateAction<string>>;
-  groupManageModeDraft: string;
-  setGroupManageModeDraft: Dispatch<SetStateAction<string>>;
-  groupManagePurposeDraft: string;
-  setGroupManagePurposeDraft: Dispatch<SetStateAction<string>>;
-  readyChatRoomModes: ChatRoomMode[];
-  availableChatRoomPurposes: ChatRoomPurpose[];
-  chatRoomModeLabel: (mode: ChatRoomMode, lang: "zh" | "en") => string;
-  chatRoomPurposeLabel: (purpose: ChatRoomPurpose, lang: "zh" | "en") => string;
-  groupManageSessionIds: string[];
-  groupManageSessionSet: Set<string>;
-  sessions: SessionSummary[] | undefined;
-  agentsById: Map<string, AgentInstance>;
-  resolveModelLabel: (modelId: string) => string | undefined;
-  renderAgentAvatar: (className: string, imageUrl: string | undefined, fallback: string) => ReactNode;
-  avatarInitials: (agentCode?: string, name?: string, fallback?: string) => string;
-  agentRoleClass: (tone: string) => string;
-  avatarImageUrlFrom: (...sources: unknown[]) => string | undefined;
-  updateGroupRoomPending: boolean;
-  deleteGroupRoomPending: boolean;
-  resetGroupRoomPending: boolean;
-  onOpenTeam: (teamId: string) => void;
-  onApplyGroupRoomManagement: () => void;
-  onDeleteActiveGroupRoom: () => void;
-  onResetActiveGroupRoom: () => void;
-  onToggleGroupManageSession: (sessionId: string) => void;
-  // direct session status
   activeSurfaceTitle: string;
   sessionStateValue: string;
   sessionStateLabel: string;
   sessionStateLine: string;
   compactSessionStateLine: string;
   agentDirectSessionMismatch: boolean;
-  agentPrimaryDirectSessionId: string | null | undefined;
   sessionBindingMismatchLine: string;
-  onOpenDirectSession: (sessionId: string) => void;
-  onPrefetchDirectSession?: (sessionId: string) => void;
   sessionCompactRows: Array<{ label: string; value: string; title?: string }>;
   activeSkillSummary: boolean;
   activeSkillStatusStyle: string;
@@ -121,51 +49,18 @@ export type ChatStatusRailProps = {
   activeSkillCommand: string;
   activeSkillStatusLabel: string;
   activeSkillShortHash: string;
-  mentalModelEnabledForNextTurn: boolean;
-  runtimeStatusEnabledForNextTurn: boolean;
-  activeSessionId: string | null | undefined;
-  onMentalModelEnabledChange: (enabled: boolean) => void;
-  onRuntimeStatusEnabledChange: (enabled: boolean) => void;
-  featurePresetState: Record<FeaturePresetKey, boolean>;
-  onToggleFeaturePreset: (key: FeaturePresetKey) => void;
-  cacheDetailAvailable: boolean;
-  cacheDetailOpen: boolean;
-  cacheDetailOpenLabel: string;
-  tokenStatusMetrics: TokenCoreStatusMetric[];
-  onOpenCacheDetail: () => void;
   promptSnapshot?: SessionAgentPromptSnapshot;
   promptAssembly?: SessionPromptAssemblyManifest;
   lastLlmPayloadTrace: SessionLlmPayloadTrace | null | undefined;
-  mentalCompactLine: string;
-  mentalSourceLabel: string;
-  mentalCognitiveStateValue: string;
-  mentalStateLabel: string;
-  mentalSummary: string;
-  mentalWhisper: string;
-  mentalCognitiveStateLabel: string;
-  mentalConfidence: string;
-  mentalRelativeTime: string;
-  formatTime: (value: string) => string;
-  mental: { updatedAt?: string | null } | null | undefined;
   pet: PetSummary | null | undefined;
   petPresetLabel: string;
   petCompactLine: string;
   petAvatarSkinStyle: string;
   petAvatarSymbol: string;
   petVitals: Array<{ key: string; label: string; value: string | number }>;
-  petInteractionLabels: {
-    group: string;
-    feed: string;
-    feedTitle: string;
-    talk: string;
-    talkTitle: string;
-    care: string;
-    careTitle: string;
-    pending: string;
-  };
+  petInteractionLabels: { pending: string };
   petActionPending: boolean;
   petActionFeedback: string;
-  onPetInteraction: (action: "feed" | "talk" | "care") => void;
 };
 
 export function ChatStatusRail(props: ChatStatusRailProps) {
@@ -179,54 +74,16 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
     numberFormatter,
     activeGroupRoom,
     activeGroupTeamOwned,
-    activeGroupTeam,
     availableGroupParticipantCount,
     statusLabel,
-    groupManageChanged,
-    groupManageDisabled,
-    groupDeleteDisabled,
-    groupResetDisabled,
-    groupRoundActive,
     groupRoundRunning,
-    groupRoomActionError,
-    setGroupRoomActionError,
-    groupManageTitleDraft,
-    setGroupManageTitleDraft,
-    groupManageModeDraft,
-    setGroupManageModeDraft,
-    groupManagePurposeDraft,
-    setGroupManagePurposeDraft,
-    readyChatRoomModes,
-    availableChatRoomPurposes,
-    chatRoomModeLabel,
-    chatRoomPurposeLabel,
-    groupManageSessionIds,
-    groupManageSessionSet,
-    sessions,
-    agentsById,
-    resolveModelLabel,
-    renderAgentAvatar,
-    avatarInitials,
-    agentRoleClass,
-    avatarImageUrlFrom,
-    updateGroupRoomPending,
-    deleteGroupRoomPending,
-    resetGroupRoomPending,
-    onOpenTeam,
-    onApplyGroupRoomManagement,
-    onDeleteActiveGroupRoom,
-    onResetActiveGroupRoom,
-    onToggleGroupManageSession,
     activeSurfaceTitle,
     sessionStateValue,
     sessionStateLabel,
     sessionStateLine,
     compactSessionStateLine,
     agentDirectSessionMismatch,
-    agentPrimaryDirectSessionId,
     sessionBindingMismatchLine,
-    onOpenDirectSession,
-    onPrefetchDirectSession,
     sessionCompactRows,
     activeSkillSummary,
     activeSkillStatusStyle,
@@ -235,33 +92,9 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
     activeSkillCommand,
     activeSkillStatusLabel,
     activeSkillShortHash,
-    mentalModelEnabledForNextTurn,
-    runtimeStatusEnabledForNextTurn,
-    activeSessionId,
-    onMentalModelEnabledChange,
-    onRuntimeStatusEnabledChange,
-    // Reserved frontend presets (planning/goal/tool) stay wired but off-rail for this preview.
-    featurePresetState: _featurePresetState,
-    onToggleFeaturePreset: _onToggleFeaturePreset,
-    cacheDetailAvailable,
-    cacheDetailOpen,
-    cacheDetailOpenLabel,
-    tokenStatusMetrics,
-    onOpenCacheDetail,
     promptSnapshot,
     promptAssembly,
     lastLlmPayloadTrace,
-    mentalCompactLine,
-    mentalSourceLabel,
-    mentalCognitiveStateValue,
-    mentalStateLabel,
-    mentalSummary,
-    mentalWhisper,
-    mentalCognitiveStateLabel,
-    mentalConfidence,
-    mentalRelativeTime,
-    formatTime,
-    mental,
     pet,
     petPresetLabel,
     petCompactLine,
@@ -271,580 +104,146 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
     petInteractionLabels,
     petActionPending,
     petActionFeedback,
-    onPetInteraction,
   } = props;
 
   const sessionBusy = isBusyPhase(sessionStateValue);
 
   return (
-      <aside
-        id="chat-status-pane"
-        className={statusRailClassName}
-        data-vui-region="chat-status-rail"
-        data-vui-layout-id={CHAT_LIST_HEIGHT_LAYOUT_ID}
-        aria-hidden={statusRailCollapsed}
-        role={statusRailOverlayOpen ? "dialog" : undefined}
-        aria-label={statusRailOverlayOpen ? (lang === "zh" ? "状态栏" : "Status panel") : undefined}
-      >
-        {standardGroupRoomActive ? (
-          <section className={`${routeStyles.leftBlock} ${styles.groupProfileBlock}${groupRoundRunning ? ` ${styles.railBlockActive}` : ""}`}>
-            <div className={routeStyles.sectionHeader}>
-              <div className={routeStyles.sectionIdentity}>
-                <div className={routeStyles.sectionEyebrowRow}>
-                  <p className={routeStyles.blockEyebrow}>{lang === "zh" ? "群资料与设置" : "Group profile"}</p>
-                  <VContextualHint
-                    content={activeGroupTeamOwned
-                      ? (lang === "zh"
-                        ? "这是团队关联群聊；成员、角色和同步关系由团队页维护，这里只负责讨论运行与成员状态观察。"
-                        : "This room is owned by a Team. Membership, roles, and sync stay in Teams; Chat only runs discussion and shows member status.")
-                      : (lang === "zh"
-                        ? "这里管理当前普通群聊的资料、成员和调度；成员状态索引放在左侧会话列。"
-                        : "Manage this standalone group's info, members, and scheduling here. Member status lives in the left conversation column.")}
-                    label={lang === "zh" ? "群资料与设置说明" : "Group profile details"}
-                    width="wide"
-                  />
-                </div>
-                <h3 className={routeStyles.sectionTitle}>{activeGroupRoom?.title ?? (lang === "zh" ? "群聊加载中" : "Loading group")}</h3>
-              </div>
-              <span className={`${styles.sessionStatePill} ${styles[`sessionStatePill_${String(activeGroupRoom?.status ?? "ready").trim().toLowerCase()}`]}`}>
-                {statusLabel(activeGroupRoom?.status ?? "ready")}
-              </span>
-            </div>
-            <div className={routeStyles.resourceSplit}>
-              <div className={routeStyles.resourceMetric}>
-                <span>{lang === "zh" ? "可用成员" : "Available"}</span>
-                <strong>{numberFormatter.format(availableGroupParticipantCount)}</strong>
-              </div>
-              <div className={routeStyles.resourceMetric}>
-                <span>{lang === "zh" ? "调度" : "Mode"}</span>
-                <strong>{activeGroupRoom?.mode ?? "round_robin"}</strong>
-              </div>
-              <div className={routeStyles.resourceMetric}>
-                <span>{lang === "zh" ? "目的" : "Purpose"}</span>
-                <strong>{activeGroupRoom?.purpose ?? "discussion"}</strong>
-              </div>
-            </div>
-            <section className={styles.groupManagementPanel} aria-label={lang === "zh" ? "群聊管理" : "Group management"}>
-              <div className={styles.groupManagementHeader}>
-                <div>
-                  <span className={styles.groupManagementTitleRow}>
-                    <strong>{activeGroupTeamOwned ? (lang === "zh" ? "团队群聊引用" : "Team room reference") : (lang === "zh" ? "群设置" : "Group settings")}</strong>
-                    {activeGroupTeamOwned ? (
-                      <VContextualHint
-                        content={lang === "zh"
-                          ? "团队关联群聊的成员来自团队组织画布；如需调整成员、角色或同步关系，请打开团队页。"
-                          : "Team-owned room members come from the Team canvas. Open Teams to change members, roles, or sync."}
-                        label={lang === "zh" ? "团队群聊引用说明" : "Team room reference details"}
-                        width="wide"
-                      />
-                    ) : null}
-                  </span>
-                  <span title={activeGroupRoom?.title ?? ""}>
-                    {activeGroupRoom?.title ?? (lang === "zh" ? "群聊加载中" : "Loading group")}
-                  </span>
-                </div>
-                <div className={styles.groupManagementActions}>
-                  {activeGroupTeamOwned && activeGroupTeam ? (
-                    <VButton
-                      type="button"
-                      className={styles.groupSecondaryButton}
-                      onClick={() => onOpenTeam(activeGroupTeam.teamId)}
-
-                        icon={<ArrowUpRight size={14} />}
-                      >
-                        <span>{lang === "zh" ? "打开团队" : "Open team"}</span>
-                      </VButton>
-                  ) : null}
-                  <VButton
-                    type="button"
-                    className={groupManageChanged ? styles.groupApplyButton : styles.groupSecondaryButton}
-                    isDisabled={groupManageDisabled || !groupManageChanged}
-                    onClick={onApplyGroupRoomManagement}
-                icon={<Check size={14} />}><span>
-                      {updateGroupRoomPending
-                        ? (lang === "zh" ? "应用中" : "Applying")
-                        : (lang === "zh" ? "应用变更" : "Apply")}
-                    </span></VButton>
-                  <VButton
-                    type="button"
-                    className={styles.groupDeleteButton}
-                    isDisabled={groupDeleteDisabled}
-                    onClick={onDeleteActiveGroupRoom}
-                icon={<Trash2 size={14} />}><span>
-                      {deleteGroupRoomPending
-                        ? (lang === "zh" ? "删除中" : "Deleting")
-                        : (lang === "zh" ? "删除" : "Delete")}
-                    </span></VButton>
-                  <VButton
-                    type="button"
-                    className={styles.groupSecondaryButton}
-                    isDisabled={groupResetDisabled}
-                    onClick={onResetActiveGroupRoom}
-                icon={<RotateCcw size={14} />}><span>
-                      {resetGroupRoomPending
-                        ? (lang === "zh" ? "重置中" : "Resetting")
-                        : (lang === "zh" ? "重置消息" : "Reset messages")}
-                    </span></VButton>
-                </div>
-              </div>
-              {groupRoomActionError ? (
-                <div className={routeStyles.panelNotice}>{groupRoomActionError}</div>
-              ) : null}
-              <div className={styles.groupManagementControls}>
-                <label className={styles.groupTitleField}>
-                  <span>{lang === "zh" ? "群名" : "Name"}</span>
-                  <VNativeInput
-                    value={groupManageTitleDraft}
-                    maxLength={80}
-                    disabled={activeGroupTeamOwned || groupRoundActive || updateGroupRoomPending}
-                    onChange={(event) => {
-                      setGroupRoomActionError("");
-                      setGroupManageTitleDraft(event.target.value);
-                    }}
-                  />
-                </label>
-                <label className={styles.groupModeSelect}>
-                  <span>{lang === "zh" ? "调度模式" : "Mode"}</span>
-                  <VStringSelect
-                    ariaLabel={lang === "zh" ? "调度模式" : "Mode"}
-                    value={groupManageModeDraft}
-                    isDisabled={activeGroupTeamOwned || groupRoundActive || updateGroupRoomPending}
-                    onValueChange={(value) => {
-                      setGroupRoomActionError("");
-                      setGroupManageModeDraft(value);
-                    }}
-                    options={readyChatRoomModes.map((mode) => ({
-                      value: mode.id,
-                      label: chatRoomModeLabel(mode, lang),
-                    }))}
-                  />
-                </label>
-                <label className={styles.groupModeSelect}>
-                  <span>{lang === "zh" ? "对话目的" : "Purpose"}</span>
-                  <VStringSelect
-                    ariaLabel={lang === "zh" ? "对话目的" : "Purpose"}
-                    value={groupManagePurposeDraft}
-                    isDisabled={activeGroupTeamOwned || groupRoundRunning || updateGroupRoomPending}
-                    onValueChange={(value) => {
-                      setGroupRoomActionError("");
-                      setGroupManagePurposeDraft(value);
-                    }}
-                    options={availableChatRoomPurposes.map((purpose) => ({
-                      value: purpose.id,
-                      label: chatRoomPurposeLabel(purpose, lang),
-                    }))}
-                  />
-                </label>
-                <div className={styles.groupManagementCount}>
-                  <span>{lang === "zh" ? "已选" : "Selected"}</span>
-                  <strong>
-                    {groupManageSessionIds.length}/{sessions?.length ?? 0}
-                  </strong>
-                </div>
-                <PersistedHeightListShell
-                  layoutId={CHAT_LIST_HEIGHT_LAYOUT_ID}
-                  pane={CHAT_GROUP_MEMBER_PICKER_HEIGHT_PANE}
-                  label={lang === "zh" ? "调整群成员选择列表高度" : "Resize group member picker height"}
-                  className={styles.groupMemberPicker}
-                  resizeHandleClassName={styles.groupMemberPickerResizeHandle}
-                  role="region"
-                  aria-label={lang === "zh" ? "群成员选择" : "Group member picker"}
-                >
-                  {(sessions ?? []).map((session) => {
-                    const selected = groupManageSessionSet.has(session.id);
-                    const sessionAgent = session.agentId ? agentsById.get(session.agentId) : undefined;
-                    const display = sessionAgentDisplayInfo(session, sessionAgent, lang, resolveModelLabel);
-                    const sessionAvatarImageUrl = avatarImageUrlFrom(sessionAgent, session);
-                    const missingMessage = session.agentMissing
-                      ? session.agentStatusMessage || (lang === "zh" ? "缺少有效 Agent" : "Missing valid Agent")
-                      : "";
-                    return (
-                      <label
-                        key={session.id}
-                        className={
-                          selected
-                            ? `${styles.groupMemberChip} ${styles.groupMemberChipSelected}`
-                            : styles.groupMemberChip
-                        }
-                      >
-                        <VNativeInput
-                          type="checkbox"
-                          checked={selected}
-                          disabled={activeGroupTeamOwned || groupRoundActive || updateGroupRoomPending}
-                          onChange={() => onToggleGroupManageSession(session.id)}
-                        />
-                        {renderAgentAvatar(
-                          routeStyles.agentOptionAvatar,
-                          sessionAvatarImageUrl,
-                          avatarInitials(session.agentCode, display.name),
-                        )}
-                        <span className={styles.groupMemberCopy}>
-                          <strong>{display.name}</strong>
-                          <small className={`${routeStyles.agentRoleTag} ${styles[agentRoleClass(display.tone)]}`}>
-                            {display.functionLabel}
-                          </small>
-                        </span>
-                        {missingMessage ? (
-                          <span className={styles.agentMissingInline} title={missingMessage}>
-                            {lang === "zh" ? "缺少有效 Agent" : "Missing Agent"}
-                          </span>
-                        ) : null}
-                      </label>
-                    );
-                  })}
-                </PersistedHeightListShell>
-              </div>
-              {groupRoundActive ? (
-                <p className={styles.groupManagementHint}>
-                  {lang === "zh" ? "群聊运行中，成员和模式会在本轮结束后允许修改。" : "The group is running. Members and mode can be changed after this round finishes."}
-                </p>
-              ) : groupManageSessionIds.length < 2 ? (
-                <p className={styles.groupManagementHint}>
-                  {lang === "zh" ? "群聊至少需要保留 2 位 Agent。" : "A group needs at least 2 agents."}
-                </p>
-              ) : null}
-            </section>
-          </section>
-        ) : (
-          <>
-        <section className={`${routeStyles.leftBlock} ${styles.currentSessionBlock}${sessionBusy ? ` ${styles.railBlockActive}` : ""}`}>
+    <aside
+      id="chat-status-pane"
+      className={statusRailClassName}
+      data-vui-region="chat-status-rail"
+      data-vui-layout-id={CHAT_LIST_HEIGHT_LAYOUT_ID}
+      aria-hidden={statusRailCollapsed}
+      role={statusRailOverlayOpen ? "dialog" : undefined}
+      aria-label={statusRailOverlayOpen ? (lang === "zh" ? "状态栏" : "Status panel") : undefined}
+    >
+      {standardGroupRoomActive ? (
+        <section className={`${routeStyles.leftBlock} ${styles.groupProfileBlock}${groupRoundRunning ? ` ${styles.railBlockActive}` : ""}`}>
           <div className={routeStyles.sectionHeader}>
             <div className={routeStyles.sectionIdentity}>
-              <p className={routeStyles.blockEyebrow}>{t("currentSession")}</p>
-              <h3 className={routeStyles.sectionTitle}>{activeSurfaceTitle}</h3>
+              <div className={routeStyles.sectionEyebrowRow}>
+                <p className={routeStyles.blockEyebrow}>{lang === "zh" ? "群资料" : "Group profile"}</p>
+                <VContextualHint
+                  content={activeGroupTeamOwned
+                    ? (lang === "zh" ? "团队关联群聊的成员、角色和同步关系由团队页维护。" : "Team membership, roles, and sync are managed in Teams.")
+                    : (lang === "zh" ? "这里仅展示当前群聊资料；管理操作已移至输入框下方的加号菜单。" : "This panel is read-only. Management actions are in the composer plus menu.")}
+                  label={lang === "zh" ? "群资料说明" : "Group profile details"}
+                  width="wide"
+                />
+              </div>
+              <h3 className={routeStyles.sectionTitle}>{activeGroupRoom?.title ?? (lang === "zh" ? "群聊加载中" : "Loading group")}</h3>
             </div>
-            <span className={`${styles.sessionStatePill} ${styles[`sessionStatePill_${sessionStateValue}`]}`}>
-              {sessionStateLabel}
+            <span className={`${styles.sessionStatePill} ${styles[`sessionStatePill_${String(activeGroupRoom?.status ?? "ready").trim().toLowerCase()}`]}`}>
+              {statusLabel(activeGroupRoom?.status ?? "ready")}
             </span>
           </div>
-          <p className={`${routeStyles.contextLineCompact} ${styles.currentSessionLine}`} title={sessionStateLine}>
-            {compactSessionStateLine}
-          </p>
-          {agentDirectSessionMismatch && agentPrimaryDirectSessionId ? (
-            <div className={styles.sessionBindingNotice} role="status">
-              <span>{sessionBindingMismatchLine}</span>
-              <VButton
-                type="button"
-                onPointerEnter={() => onPrefetchDirectSession?.(agentPrimaryDirectSessionId)}
-                onFocus={() => onPrefetchDirectSession?.(agentPrimaryDirectSessionId)}
-                onClick={() => onOpenDirectSession(agentPrimaryDirectSessionId)}
-                title={`${t("openCurrentDirectSession")} · ${agentPrimaryDirectSessionId}`}
-
-                  icon={<ArrowUpRight size={13} />}
-                >
-                  <span>{t("openCurrentDirectSession")}</span>
-                </VButton>
+          <div className={routeStyles.resourceSplit}>
+            <div className={routeStyles.resourceMetric}>
+              <span>{lang === "zh" ? "可用成员" : "Available"}</span>
+              <strong>{numberFormatter.format(availableGroupParticipantCount)}</strong>
             </div>
-          ) : null}
-          {sessionCompactRows.length > 0 ? (
-            <div className={`${styles.inlineMetaList} ${styles.currentSessionMetaList}`}>
-              {sessionCompactRows.map((row) => (
-                <span key={row.label} className={styles.inlineMetaPill} title={row.title ?? row.value}>
-                  <span>{row.label}</span>
-                  <strong>{row.value}</strong>
-                </span>
-              ))}
+            <div className={routeStyles.resourceMetric}>
+              <span>{lang === "zh" ? "调度" : "Mode"}</span>
+              <strong>{activeGroupRoom?.mode ?? "round_robin"}</strong>
             </div>
-          ) : null}
-          {activeSkillSummary ? (
-            <section
-              className={`${styles.activeSkillStatus} ${activeSkillStatusStyle}`}
-              title={activeSkillTitle}
-              aria-label={lang === "zh" ? "当前 active skill 状态" : "Current active skill status"}
-            >
-              <div className={styles.activeSkillIdentity}>
-                <span className={styles.activeSkillEyebrow}>
-                  {lang === "zh" ? "当前 Skill" : "Active skill"}
-                </span>
-                <strong>{activeSkillName || activeSkillCommand}</strong>
-              </div>
-              <div className={styles.activeSkillMeta}>
-                {activeSkillCommand ? <span>/{activeSkillCommand}</span> : null}
-                <span className={styles.activeSkillState}>{activeSkillStatusLabel}</span>
-                {activeSkillShortHash ? <span>#{activeSkillShortHash}</span> : null}
-              </div>
-            </section>
-          ) : null}
+            <div className={routeStyles.resourceMetric}>
+              <span>{lang === "zh" ? "目的" : "Purpose"}</span>
+              <strong>{activeGroupRoom?.purpose ?? "discussion"}</strong>
+            </div>
+          </div>
         </section>
-
-        <section
-          className={`${routeStyles.leftBlock} ${styles.featurePresetBlock} ${styles.runModeBlock} ${styles.mentalRuntimeBlock}`}
-          data-testid="mental-runtime-module"
-          aria-label={lang === "zh" ? "心智与运行" : "Mental and runtime"}
-        >
-          <div className={routeStyles.sectionHeader}>
-            <h3 className={routeStyles.railSectionHeading}>
-              {lang === "zh" ? "心智与运行" : "Mental & runtime"}
-            </h3>
-            <span className={styles.featurePresetScope} title={t("chatFeaturePanelHint")}>
-              {lang === "zh" ? "下轮生效" : "Next turn"}
-            </span>
-          </div>
-          <div className={styles.featureChipRow}>
-            <VButton
-              type="button"
-              contentLayout="plain"
-              className={
-                mentalModelEnabledForNextTurn
-                  ? `${styles.featureChip} ${styles.featureChipPrimary} ${styles.featureChipPrimaryActive}`
-                  : `${styles.featureChip} ${styles.featureChipPrimary}`
-              }
-              aria-pressed={mentalModelEnabledForNextTurn}
-              isDisabled={!activeSessionId}
-              onClick={() => onMentalModelEnabledChange(!mentalModelEnabledForNextTurn)}
-              title={t("chatFeatureMentalModelHint")}
-            >
-              <strong>{lang === "zh" ? "心智" : t("chatFeatureMentalModel")}</strong>
-              <em>{mentalModelEnabledForNextTurn ? (lang === "zh" ? "开" : "On") : (lang === "zh" ? "关" : "Off")}</em>
-            </VButton>
-            <VButton
-              type="button"
-              contentLayout="plain"
-              className={
-                runtimeStatusEnabledForNextTurn
-                  ? `${styles.featureChip} ${styles.featureChipPrimary} ${styles.featureChipPrimaryActive}`
-                  : `${styles.featureChip} ${styles.featureChipPrimary}`
-              }
-              aria-pressed={runtimeStatusEnabledForNextTurn}
-              isDisabled={!activeSessionId}
-              onClick={() => onRuntimeStatusEnabledChange(!runtimeStatusEnabledForNextTurn)}
-              title={lang === "zh"
-                ? "运行状态：把预算/进度注入模型上下文（下轮生效）"
-                : "Runtime status: inject budget/progress into model context (next turn)"}
-            >
-              <strong>{lang === "zh" ? "状态" : "Status"}</strong>
-              <em>{runtimeStatusEnabledForNextTurn ? (lang === "zh" ? "开" : "On") : (lang === "zh" ? "关" : "Off")}</em>
-            </VButton>
-          </div>
-
-          <div className={styles.mentalRuntimeSummary}>
-            <VTooltip
-              content={mentalCompactLine || mentalSourceLabel || mentalSummary}
-              renderTrigger={(tooltipTriggerProps) => {
-                const {
-                  children: _triggerChildren,
-                  className: triggerClassName,
-                  role: _triggerRole,
-                  tabIndex: _triggerTabIndex,
-                  ...triggerProps
-                } = tooltipTriggerProps;
-
-                return (
-                  <VButton
-                    {...(triggerProps as unknown as VButtonProps)}
-                    type="button"
-                    className={[
-                      triggerClassName,
-                      routeStyles.mentalStateBadge,
-                      styles[`mentalStateBadge_${mentalCognitiveStateValue}`],
-                    ].filter(Boolean).join(" ")}
-                    aria-label={`${mentalStateLabel}. ${mentalCompactLine || mentalSourceLabel || mentalSummary}`}
-                  >
-                    {mentalStateLabel}
-                  </VButton>
-                );
-              }}
-            >
-              {mentalStateLabel}
-            </VTooltip>
-            <div className={styles.mentalRuntimeSummaryCopy}>
-              <div className={styles.companionHeaderMeta}>
-                <strong className={styles.mentalRuntimeSummaryTitle}>
-                  {lang === "zh" ? "本轮心智" : "This turn"}
-                </strong>
-                {!mentalModelEnabledForNextTurn ? (
-                  <span
-                    className={styles.featurePresetScope}
-                    title={t("chatMentalHistoryVisibleHint")}
-                  >
-                    {lang === "zh" ? "下轮关" : "Next off"}
-                  </span>
-                ) : null}
+      ) : (
+        <>
+          <section className={`${routeStyles.leftBlock} ${styles.currentSessionBlock}${sessionBusy ? ` ${styles.railBlockActive}` : ""}`}>
+            <div className={routeStyles.sectionHeader}>
+              <div className={routeStyles.sectionIdentity}>
+                <p className={routeStyles.blockEyebrow}>{t("currentSession")}</p>
+                <h3 className={routeStyles.sectionTitle}>{activeSurfaceTitle}</h3>
               </div>
-              <p title={mentalCompactLine || mentalSummary}>
-                {mentalCompactLine || mentalSummary || (lang === "zh" ? "暂无心智快照" : "No mental snapshot yet")}
-              </p>
+              <span className={`${styles.sessionStatePill} ${styles[`sessionStatePill_${sessionStateValue}`]}`}>{sessionStateLabel}</span>
             </div>
-          </div>
-
-          <details className={styles.compactDetails}>
-            <summary>
-              <ChevronRight size={14} aria-hidden="true" />
-              <span className={styles.compactDetailsClosedLabel}>
-                {lang === "zh" ? "心智明细" : "Mental details"}
-              </span>
-              <span className={styles.compactDetailsOpenLabel}>{t("collapseSection")}</span>
-            </summary>
-            <div className={styles.compactDetailsBody}>
-              <p className={routeStyles.oneLineValue} title={mentalWhisper}>
-                <span>{t("mentalWhisper")}</span>
-                {mentalWhisper}
-              </p>
-              <div className={styles.inlineStatGrid}>
-                <div className={styles.inlineStat}>
-                  <span>{t("state")}</span>
-                  <strong>{mentalCognitiveStateLabel}</strong>
-                </div>
-                <div className={styles.inlineStat}>
-                  <span>{t("mentalConfidence")}</span>
-                  <strong>{mentalConfidence}</strong>
-                </div>
-                <div className={styles.inlineStat}>
-                  <span>{t("mentalSource")}</span>
-                  <strong>{mentalSourceLabel}</strong>
-                </div>
-                <div className={styles.inlineStat}>
-                  <span>{t("mentalLastUpdated")}</span>
-                  <strong title={formatTime(mental?.updatedAt ?? "")}>{mentalRelativeTime}</strong>
-                </div>
-              </div>
-              {!mentalModelEnabledForNextTurn ? (
-                <p className={routeStyles.contextLineCompact} title={t("chatMentalHistoryVisibleHint")}>
-                  {lang === "zh" ? "下轮心智关闭；历史快照仍展示。" : "Next-turn mental is off; historical snapshots still show."}
-                </p>
-              ) : null}
-            </div>
-          </details>
-
-          <TurnStatusTailPanel
-            activeSessionId={String(activeSessionId || "")}
-            injectMasterEnabled={runtimeStatusEnabledForNextTurn}
-            lang={lang}
-            variant="embedded"
-          />
-        </section>
-
-        <TokenCoreStatusPanel
-          cacheDetailAvailable={cacheDetailAvailable}
-          cacheDetailOpen={cacheDetailOpen}
-          cacheDetailOpenLabel={cacheDetailOpenLabel}
-          lang={lang}
-          metrics={tokenStatusMetrics}
-          onOpenCacheDetail={onOpenCacheDetail}
-          scopeLabel={t("tokenStatusScopeLastTurn")}
-          scopeTitle={t("tokenStatusScopeLastTurnHint")}
-        />
-
-        {promptSnapshot ? (
-          <section
-            className={routeStyles.leftBlock}
-            aria-label={lang === "zh" ? "Prompt 装配状态" : "Prompt assembly status"}
-          >
-            <ChatPromptAssemblyInspector
-              lang={lang}
-              snapshot={promptSnapshot}
-              manifest={promptAssembly}
-            />
-          </section>
-        ) : null}
-
-        {lastLlmPayloadTrace ? (
-          <Suspense fallback={null}>
-            <LlmPayloadTracePanel lang={lang} trace={lastLlmPayloadTrace} />
-          </Suspense>
-        ) : null}
-
-        <section className={`${routeStyles.leftBlock} ${styles.companionBlock}`}>
-          <div className={routeStyles.sectionHeader}>
-            <h3 className={routeStyles.railSectionHeading}>{lang === "zh" ? "陪伴" : "Companion"}</h3>
-          </div>
-          <div className={styles.companionCompact}>
-            <div className={styles.petMiniAvatar} aria-hidden="true">
-              <div className={`${styles.petShowcaseAvatar} ${petAvatarSkinStyle}`}>
-                <span className={styles.petShowcaseEarLeft} />
-                <span className={styles.petShowcaseEarRight} />
-                <span className={styles.petShowcaseFace}>
-                  <span className={styles.petShowcaseEye} />
-                  <span className={styles.petShowcaseMuzzle} />
-                  <span className={styles.petShowcaseEye} />
-                </span>
-                <span className={styles.petShowcaseSymbol}>{petAvatarSymbol}</span>
-                <span className={styles.petShowcaseFootLeft} />
-                <span className={styles.petShowcaseFootRight} />
-              </div>
-            </div>
-            <div className={styles.companionCopy}>
-              <div className={styles.companionTopLine}>
-                <strong>{pet?.name ?? t("loadingPetState")}</strong>
-                <span>{t("level")} {pet?.level ?? 0} · {petPresetLabel}</span>
-              </div>
-              <p title={petCompactLine}>{petCompactLine || (lang === "zh" ? "暂无陪伴状态" : "No companion state yet")}</p>
-            </div>
-          </div>
-          {pet ? (
-          <details className={styles.compactDetails}>
-            <summary>
-              <ChevronRight size={14} aria-hidden="true" />
-              <span className={styles.compactDetailsClosedLabel}>{lang === "zh" ? "明细" : "Details"}</span>
-              <span className={styles.compactDetailsOpenLabel}>{t("collapseSection")}</span>
-            </summary>
-            <PersistedHeightListShell
-              layoutId={CHAT_LIST_HEIGHT_LAYOUT_ID}
-              pane={CHAT_COMPACT_DETAILS_HEIGHT_PANE}
-              label={lang === "zh" ? "调整陪伴明细高度" : "Resize companion details height"}
-              className={styles.compactDetailsBody}
-              resizeHandleClassName={styles.compactDetailsResizeHandle}
-            >
-              <div className={styles.inlineMetaList}>
-                <span className={styles.inlineMetaPill}>
-                  <span>{t("dailyTokens")}</span>
-                  <strong>{numberFormatter.format(pet?.dailyTokens ?? 0)}</strong>
-                </span>
-                {petVitals.map((vital) => (
-                  <span key={vital.key} className={styles.inlineMetaPill}>
-                    <span>{vital.label}</span>
-                    <strong>{vital.value}</strong>
+            <p className={`${routeStyles.contextLineCompact} ${styles.currentSessionLine}`} title={sessionStateLine}>
+              {compactSessionStateLine}
+            </p>
+            {agentDirectSessionMismatch ? (
+              <div className={styles.sessionBindingNotice} role="status"><span>{sessionBindingMismatchLine}</span></div>
+            ) : null}
+            {sessionCompactRows.length > 0 ? (
+              <div className={`${styles.inlineMetaList} ${styles.currentSessionMetaList}`}>
+                {sessionCompactRows.map((row) => (
+                  <span key={row.label} className={styles.inlineMetaPill} title={row.title ?? row.value}>
+                    <span>{row.label}</span><strong>{row.value}</strong>
                   </span>
                 ))}
               </div>
-              <div className={styles.petShowcaseActions} aria-label={petInteractionLabels.group}>
-                <VButton
-                  type="button"
-                  contentLayout="plain"
-                  className={styles.petShowcaseAction}
-                  onClick={() => onPetInteraction("feed")}
-                  isDisabled={petActionPending}
-                  title={petInteractionLabels.feedTitle}
-                >
-                  <Apple size={14} />
-                  <span>{petInteractionLabels.feed}</span>
-                </VButton>
-                <VButton
-                  type="button"
-                  contentLayout="plain"
-                  className={styles.petShowcaseAction}
-                  onClick={() => onPetInteraction("talk")}
-                  isDisabled={petActionPending}
-                  title={petInteractionLabels.talkTitle}
-                >
-                  <MessageCircleHeart size={14} />
-                  <span>{petInteractionLabels.talk}</span>
-                </VButton>
-                <VButton
-                  type="button"
-                  contentLayout="plain"
-                  className={styles.petShowcaseAction}
-                  onClick={() => onPetInteraction("care")}
-                  isDisabled={petActionPending}
-                  title={petInteractionLabels.careTitle}
-                >
-                  <HeartHandshake size={14} />
-                  <span>{petInteractionLabels.care}</span>
-                </VButton>
-              </div>
-              {petActionPending ? (
-                <span className={styles.petShowcaseActionHint}>
-                  <Sparkles size={13} />
-                  <span>{petInteractionLabels.pending}</span>
-                </span>
-              ) : null}
-              {petActionFeedback ? <p className={styles.petShowcaseFeedback}>{petActionFeedback}</p> : null}
-            </PersistedHeightListShell>
-          </details>
+            ) : null}
+            {activeSkillSummary ? (
+              <section className={`${styles.activeSkillStatus} ${activeSkillStatusStyle}`} title={activeSkillTitle} aria-label={lang === "zh" ? "当前 active skill 状态" : "Current active skill status"}>
+                <div className={styles.activeSkillIdentity}>
+                  <span className={styles.activeSkillEyebrow}>{lang === "zh" ? "当前 Skill" : "Active skill"}</span>
+                  <strong>{activeSkillName || activeSkillCommand}</strong>
+                </div>
+                <div className={styles.activeSkillMeta}>
+                  {activeSkillCommand ? <span>/{activeSkillCommand}</span> : null}
+                  <span className={styles.activeSkillState}>{activeSkillStatusLabel}</span>
+                  {activeSkillShortHash ? <span>#{activeSkillShortHash}</span> : null}
+                </div>
+              </section>
+            ) : null}
+          </section>
+
+          {promptSnapshot ? (
+            <section className={routeStyles.leftBlock} aria-label={lang === "zh" ? "Prompt 装配状态" : "Prompt assembly status"}>
+              <ChatPromptAssemblyInspector lang={lang} snapshot={promptSnapshot} manifest={promptAssembly} />
+            </section>
           ) : null}
-        </section>
-          </>
-        )}
-      </aside>
+
+          {lastLlmPayloadTrace ? (
+            <Suspense fallback={null}><LlmPayloadTracePanel lang={lang} trace={lastLlmPayloadTrace} /></Suspense>
+          ) : null}
+
+          <section className={`${routeStyles.leftBlock} ${styles.companionBlock}`}>
+            <div className={routeStyles.sectionHeader}>
+              <h3 className={routeStyles.railSectionHeading}>{lang === "zh" ? "陪伴" : "Companion"}</h3>
+            </div>
+            <div className={styles.companionCompact}>
+              <div className={styles.petMiniAvatar} aria-hidden="true">
+                <div className={`${styles.petShowcaseAvatar} ${petAvatarSkinStyle}`}>
+                  <span className={styles.petShowcaseEarLeft} /><span className={styles.petShowcaseEarRight} />
+                  <span className={styles.petShowcaseFace}><span className={styles.petShowcaseEye} /><span className={styles.petShowcaseMuzzle} /><span className={styles.petShowcaseEye} /></span>
+                  <span className={styles.petShowcaseSymbol}>{petAvatarSymbol}</span>
+                  <span className={styles.petShowcaseFootLeft} /><span className={styles.petShowcaseFootRight} />
+                </div>
+              </div>
+              <div className={styles.companionCopy}>
+                <div className={styles.companionTopLine}>
+                  <strong>{pet?.name ?? t("loadingPetState")}</strong>
+                  <span>{t("level")} {pet?.level ?? 0} · {petPresetLabel}</span>
+                </div>
+                <p title={petCompactLine}>{petCompactLine || (lang === "zh" ? "暂无陪伴状态" : "No companion state yet")}</p>
+              </div>
+            </div>
+            {pet ? (
+              <details className={styles.compactDetails}>
+                <summary>
+                  <ChevronRight size={14} aria-hidden="true" />
+                  <span className={styles.compactDetailsClosedLabel}>{lang === "zh" ? "明细" : "Details"}</span>
+                  <span className={styles.compactDetailsOpenLabel}>{t("collapseSection")}</span>
+                </summary>
+                <PersistedHeightListShell layoutId={CHAT_LIST_HEIGHT_LAYOUT_ID} pane={CHAT_COMPACT_DETAILS_HEIGHT_PANE} label={lang === "zh" ? "调整陪伴明细高度" : "Resize companion details height"} className={styles.compactDetailsBody} resizeHandleClassName={styles.compactDetailsResizeHandle}>
+                  <div className={styles.inlineMetaList}>
+                    <span className={styles.inlineMetaPill}><span>{t("dailyTokens")}</span><strong>{numberFormatter.format(pet.dailyTokens ?? 0)}</strong></span>
+                    {petVitals.map((vital) => <span key={vital.key} className={styles.inlineMetaPill}><span>{vital.label}</span><strong>{vital.value}</strong></span>)}
+                  </div>
+                  {petActionPending ? <span className={styles.petShowcaseActionHint}><Sparkles size={13} /><span>{petInteractionLabels.pending}</span></span> : null}
+                  {petActionFeedback ? <p className={styles.petShowcaseFeedback}>{petActionFeedback}</p> : null}
+                </PersistedHeightListShell>
+              </details>
+            ) : null}
+          </section>
+        </>
+      )}
+    </aside>
   );
 }

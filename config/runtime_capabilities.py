@@ -1,8 +1,13 @@
-"""Compatibility adapter for runtime capability observations.
+"""Canonical facade for runtime capability observations.
 
-Runtime observations are persisted only in the provider-scoped model catalog.
-The legacy cache filename and environment override remain readable compatibility
-surfaces for callers and the one-time import path.
+Owning relationships:
+
+- ``config.model_catalog`` is the persisted catalog SSOT.
+- This module is the public facade consumed by ``config.public_config`` and
+  ``core.web.services.config_service``. It projects catalog observations onto
+  public config views; it does not own a second cache.
+- Leftover ``model-capabilities.json`` is imported only by the one-shot
+  upgrader. ``apply_model_capability_overrides`` reads the catalog only.
 """
 
 from __future__ import annotations
@@ -52,7 +57,7 @@ def _utcnow_iso() -> str:
 
 
 def get_model_capability_cache_path() -> Path:
-    """Return the legacy cache location for compatibility and one-time import."""
+    """Return the leftover JSON location used only by the one-shot upgrader."""
 
     override = os.environ.get(MODEL_CAPABILITY_CACHE_ENV, "").strip()
     if override:
@@ -250,17 +255,53 @@ def _legacy_to_canonical_refs(public_config: dict[str, Any]) -> dict[str, str]:
     return mapping
 
 
-def _load_catalog_with_legacy_import(public_config: dict[str, Any], *, cache_path: Path | None) -> dict[str, Any]:
-    path = _catalog_path(cache_path)
+def upgrade_legacy_capability_cache_if_needed(
+    public_config: dict[str, Any],
+    *,
+    config_path: Path | None = None,
+    cache_path: Path | None = None,
+) -> dict[str, Any]:
+    """Import leftover ``model-capabilities.json`` into the catalog once.
+
+    Idempotent. Missing or unreadable JSON still records completion so runtime
+    never waits on the leftover file. Does not delete the JSON file. A failed
+    catalog write restores the previous catalog bytes when they existed.
+    ``cache_path`` selects an explicit catalog file and skips the leftover JSON
+    import, matching test fixtures that already own a catalog.
+    """
+
+    if cache_path is not None:
+        return load_model_catalog_state(_catalog_path(cache_path))
+    leftover: Path
+    if config_path is not None:
+        resolved_config = Path(config_path).expanduser().resolve()
+        if "tests" in resolved_config.parts and "fixtures" in resolved_config.parts:
+            return load_model_catalog_state(resolve_model_catalog_state_path(resolved_config))
+        if os.environ.get(MODEL_CAPABILITY_CACHE_ENV, "").strip():
+            path = _catalog_path(None)
+            leftover = get_model_capability_cache_path()
+        else:
+            path = resolve_model_catalog_state_path(resolved_config)
+            leftover = resolved_config.with_name(MODEL_CAPABILITY_CACHE_FILENAME)
+    else:
+        path = _catalog_path(None)
+        leftover = get_model_capability_cache_path()
     state = load_model_catalog_state(path)
     metadata = state.get("metadata", {})
-    if cache_path is not None:
-        return state
     if isinstance(metadata, dict) and metadata.get("legacyCapabilityImportCompleted") is True:
         return state
-    legacy = _load_legacy_capability_cache(get_model_capability_cache_path())
+    legacy = _load_legacy_capability_cache(leftover)
     imported = import_legacy_capability_cache(state, legacy, _legacy_to_canonical_refs(public_config))
-    save_model_catalog_state(imported, path)
+    original = path.read_bytes() if path.exists() else None
+    try:
+        save_model_catalog_state(imported, path)
+    except Exception:
+        if original is None:
+            if path.exists():
+                path.unlink()
+        else:
+            path.write_bytes(original)
+        raise
     return imported
 
 
@@ -274,7 +315,7 @@ def apply_model_capability_overrides(
     model_library = llm.get("model_library", {}) if isinstance(llm, dict) else {}
     if not isinstance(model_library, dict):
         return updated
-    state = _load_catalog_with_legacy_import(updated, cache_path=cache_path)
+    state = load_model_catalog_state(_catalog_path(cache_path))
     for model_id, entry in model_library.items():
         if not isinstance(entry, dict) or _has_operator_image_input_capability(entry):
             continue
@@ -314,6 +355,7 @@ __all__ = [
     "RUNTIME_CAPABILITY_SOURCE",
     "RUNTIME_MODEL_CAPABILITY_FIELDS",
     "apply_model_capability_overrides",
+    "upgrade_legacy_capability_cache_if_needed",
     "get_model_capability_cache_path",
     "get_model_image_input_capability",
     "load_model_capability_cache",

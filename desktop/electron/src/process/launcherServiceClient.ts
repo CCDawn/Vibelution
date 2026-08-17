@@ -1,6 +1,5 @@
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
-import { parseLauncherBootstrap, type LauncherBootstrapResult } from "./launcherBootstrap.js";
 import { pythonBridgeEnv } from "./pythonBridgeEnv.js";
 
 type LauncherServiceChild = Pick<ReturnType<typeof spawn>, "kill" | "once" | "stdout" | "stderr">;
@@ -34,34 +33,6 @@ export type LauncherServiceStopResult = {
   launcherBackendPid: number;
   terminatedPids: number[];
 };
-
-export async function bootstrapPythonLauncherService(input: LauncherServiceStartInput): Promise<LauncherBootstrapResult> {
-  const spawnImpl = input.spawnImpl ?? spawn;
-  const child = spawnImpl(
-    input.pythonPath,
-    [
-      resolve(input.workspaceRoot, "scripts", "vibelution_desktop_entry.py"),
-      "--action",
-      "bootstrap",
-      "--output",
-      "json",
-      "--workspace",
-      input.workspaceRoot,
-      "--config",
-      input.operatorConfigPath,
-      "--no-browser",
-      "--attach-healthy-launcher"
-    ],
-    {
-      cwd: input.workspaceRoot,
-      windowsHide: true,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: pythonBridgeEnv()
-    }
-  );
-  const stdout = await readBoundedStdout(child, 64_000);
-  return parseLauncherBootstrap(stdout);
-}
 
 export async function stopPythonLauncherService(input: LauncherServiceStopInput): Promise<LauncherServiceStopResult> {
   const spawnImpl = input.spawnImpl ?? spawn;
@@ -128,7 +99,7 @@ async function readBoundedStdout(child: LauncherServiceChild, maxBytes: number):
       total += chunk.length;
       if (total > maxBytes) {
         child.kill();
-        rejectOnce(new Error("launcher bootstrap output exceeded limit"));
+        rejectOnce(new Error("launcher stop output exceeded limit"));
         return;
       }
       chunks.push(chunk);
@@ -142,7 +113,7 @@ async function readBoundedStdout(child: LauncherServiceChild, maxBytes: number):
         return;
       }
       if (code !== 0) {
-        rejectOnce(new Error(`launcher bootstrap exited with code ${code ?? "unknown"}`));
+        rejectOnce(new Error(`launcher stop exited with code ${code ?? "unknown"}`));
         return;
       }
       settled = true;

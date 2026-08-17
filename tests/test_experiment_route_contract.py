@@ -111,6 +111,24 @@ def test_experiment_read_models_keep_unknown_fields_without_injecting_defaults()
     }
 
 
+def test_experiment_planning_status_next_actions_accepts_service_string_list() -> None:
+    status = ExperimentPlanningStatusResponse.model_validate(
+        {
+            "teamId": "team-1",
+            "status": "needs_hypothesis",
+            "nextActions": [
+                "Start the experiment planning stage round.",
+                "Keep training execution disabled until a plan is reviewed.",
+            ],
+        }
+    )
+
+    assert status.nextActions == [
+        "Start the experiment planning stage round.",
+        "Keep training execution disabled until a plan is reviewed.",
+    ]
+
+
 def test_experiment_write_catch_all_remains_empty_shell() -> None:
     properties = set(ExperimentRouteResponse.model_json_schema().get("properties") or {})
     assert properties == set()

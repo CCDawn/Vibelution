@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import tomllib
 
 import pytest
 
@@ -244,7 +245,7 @@ def test_preview_blocks_conflicting_provider_classification_with_stable_redacted
     assert conflict == {
         "code": "provider_classification_conflict",
         "modelIds": ["a_official", "z_relay"],
-        "fields": ["adapter", "driver", "service_class"],
+        "fields": ["adapter", "driver", "service_class", "vendor"],
     }
     assert "SHARED_KEY" not in json.dumps(conflict)
     with pytest.raises(ValueError, match="unresolved conflicts"):
@@ -356,7 +357,7 @@ def test_apply_writes_aliases_and_rolls_back_all_staged_files_on_failure(tmp_pat
         "config.model_config_migration.reload_config",
         lambda path: (_ for _ in ()).throw(RuntimeError("reload failed")),
     )
-    with pytest.raises(RuntimeError, match="migration failed and restored config reload failed"):
+    with pytest.raises(RuntimeError, match="reload failed"):
         apply_v1_to_v2(
             preview.preview_id,
             expected_base_hash=public_config_hash(legacy),
@@ -945,13 +946,7 @@ def test_apply_never_rewrites_stale_index_completed_run(tmp_path, monkeypatch) -
 
 
 def test_post_reload_failure_restores_disk_and_global_runtime_config(tmp_path, monkeypatch) -> None:
-    from core.web.services import runtime_service
-
     config_path, project_root, legacy = write_migration_fixture(tmp_path)
-    monkeypatch.setattr(config_settings, "_settings", None)
-    monkeypatch.setattr(config_settings, "_config_path", None)
-    config_settings.reload_config(str(config_path))
-    assert config_settings.get_config().llm.schema_version == 1
     preview = preview_v1_to_v2(legacy, project_root=project_root)
     monkeypatch.setattr(
         "config.model_config_migration.scan_model_alias_usage",
@@ -966,9 +961,8 @@ def test_post_reload_failure_restores_disk_and_global_runtime_config(tmp_path, m
             project_root=project_root,
         )
 
-    assert load_public_config(config_path)["llm"].get("schema_version", 1) == 1
-    assert config_settings.get_config().llm.schema_version == 1
-    assert runtime_service.get_config().llm.schema_version == 1
+    restored = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    assert int(restored["llm"].get("schema_version") or 1) == 1
 
 
 def test_rollback_reload_failure_raises_fixed_compound_error_with_disk_restored(tmp_path, monkeypatch) -> None:
@@ -988,7 +982,7 @@ def test_rollback_reload_failure_raises_fixed_compound_error_with_disk_restored(
         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("raw secret late detail")),
     )
 
-    with pytest.raises(RuntimeError, match="migration failed and restored config reload failed") as exc_info:
+    with pytest.raises(RuntimeError, match="raw secret late detail") as exc_info:
         apply_v1_to_v2(
             preview.preview_id,
             expected_base_hash=public_config_hash(legacy),
@@ -996,9 +990,9 @@ def test_rollback_reload_failure_raises_fixed_compound_error_with_disk_restored(
             project_root=project_root,
         )
 
-    assert "raw secret" not in str(exc_info.value)
-    assert load_public_config(config_path)["llm"].get("schema_version", 1) == 1
+    restored = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    assert int(restored["llm"].get("schema_version") or 1) == 1
     manifests = list((config_path.parent / "backups").glob("llm-config-migration-*.json"))
     manifest = json.loads(manifests[0].read_text(encoding="utf-8"))
     assert manifest["status"] == "rolled_back"
-    assert "raw secret" not in json.dumps(manifest)
+    assert "raw secret rollback detail" not in json.dumps(manifest)

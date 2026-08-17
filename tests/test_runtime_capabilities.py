@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
-from config.runtime_capabilities import apply_model_capability_overrides, record_model_image_input_capability
+from config.model_catalog import load_model_catalog_state
+from config.runtime_capabilities import (
+    apply_model_capability_overrides,
+    record_model_image_input_capability,
+    upgrade_legacy_capability_cache_if_needed,
+)
 
 
 MODEL_REF = "relay/vision-model"
@@ -200,3 +207,66 @@ def test_runtime_capability_error_never_returns_or_persists_raw_secret(tmp_path,
     assert secret_shaped_error not in repr(result)
     assert secret_shaped_error not in state_text
     assert '"error": "other"' in state_text
+
+
+def test_upgrader_corrupt_json_marks_complete_without_clobbering_catalog(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    catalog_path = tmp_path / "model-catalog-state.json"
+    legacy_path = tmp_path / "model-capabilities.json"
+    config_path.write_text("[llm]\nschema_version = 2\n", encoding="utf-8")
+    catalog_path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 2,
+                "providers": {
+                    "relay": {
+                        "models": {
+                            "gpt-a": {"upstreamId": "gpt-a", "availability": "unknown"},
+                        }
+                    }
+                },
+                "metadata": {"legacyCapabilityImportCompleted": False, "keep": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+    legacy_path.write_text("{not json", encoding="utf-8")
+    monkeypatch.setenv("VIBELUTION_CONFIG_PATH", str(config_path))
+    monkeypatch.delenv("VIBELUTION_MODEL_CAPABILITY_CACHE", raising=False)
+
+    upgrade_legacy_capability_cache_if_needed({"llm": {}}, config_path=config_path)
+
+    catalog = load_model_catalog_state(catalog_path)
+    assert catalog["metadata"]["legacyCapabilityImportCompleted"] is True
+    assert catalog["metadata"]["keep"] is True
+    assert catalog["providers"]["relay"]["models"]["gpt-a"]["upstreamId"] == "gpt-a"
+    assert legacy_path.read_text(encoding="utf-8") == "{not json"
+
+
+def test_upgrader_write_failure_restores_original_catalog(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    catalog_path = tmp_path / "model-catalog-state.json"
+    legacy_path = tmp_path / "model-capabilities.json"
+    original = json.dumps(
+        {
+            "schemaVersion": 2,
+            "providers": {},
+            "metadata": {"legacyCapabilityImportCompleted": False, "marker": "original"},
+        },
+        indent=2,
+    )
+    config_path.write_text("[llm]\nschema_version = 2\n", encoding="utf-8")
+    catalog_path.write_text(original, encoding="utf-8")
+    legacy_path.write_text('{"schemaVersion": 1, "models": {}}', encoding="utf-8")
+    monkeypatch.setenv("VIBELUTION_CONFIG_PATH", str(config_path))
+    monkeypatch.delenv("VIBELUTION_MODEL_CAPABILITY_CACHE", raising=False)
+
+    def _boom(*_args, **_kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr("config.runtime_capabilities.save_model_catalog_state", _boom)
+    with pytest.raises(OSError, match="disk full"):
+        upgrade_legacy_capability_cache_if_needed({"llm": {}}, config_path=config_path)
+
+    assert catalog_path.read_text(encoding="utf-8") == original
+    assert json.loads(catalog_path.read_text(encoding="utf-8"))["metadata"]["marker"] == "original"

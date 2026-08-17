@@ -103,7 +103,7 @@ powershell -ExecutionPolicy Bypass -File scripts/vibelution_launcher.ps1 -Action
 
 ### 开发者路径
 
-依赖：Python 3.11+（建议 3.12）、Node.js 18+（npm）、Git。Windows 若走桌面窗口，建议本机有 Edge。
+依赖：Python 3.11+（建议 3.12）、Node.js 18+（npm）、Git。Windows 若走桌面窗口，建议本机有 Edge。Debian/Ubuntu 还需系统包 `python3-venv`（例如 `sudo apt install python3.12-venv`）；这些发行版 PATH 里通常是 `python3` 而不是 `python`。
 
 ```bash
 git clone https://github.com/CCDawn/Vibelution.git
@@ -119,7 +119,7 @@ powershell -ExecutionPolicy Bypass -File scripts/vibelution_launcher.ps1 -Action
 
 ```bash
 # macOS / Linux（不自动开浏览器）
-python scripts/vibelution_launcher.py --action start --no-browser
+python3 scripts/vibelution_launcher.py --action start --no-browser
 # 本机打开 http://127.0.0.1:8000（以日志为准）
 ```
 
@@ -130,7 +130,7 @@ python scripts/vibelution_launcher.py --action start --no-browser
 #### 2. 手动装 Python 依赖
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 # Windows: .\.venv\Scripts\activate
 # macOS / Linux: source .venv/bin/activate
 pip install -r requirements.txt
@@ -141,6 +141,8 @@ pip install -r requirements.txt
 ```bash
 cd web
 npm install
+npm run build
+cd ..
 ```
 
 如果本机已安装 Bun，可以在依赖已就绪后使用辅助脚本加快本地开发循环：

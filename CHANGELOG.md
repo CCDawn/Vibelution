@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Breaking
+
+- LLM operator config schema v1 and `role_bindings` are no longer runtime-readable. Persisted v1 files are upgraded in place by a one-shot atomic upgrader; inputs that cannot be upgraded fail closed and do not overwrite the original file. In-memory drafts may still be materialized to schema v2. This is a public compatibility break and is recorded as a **major** version impact; no release is executed in this change.
+
 ## 1.1.2 - 2026-08-06
 
 Five-wave structure pass:

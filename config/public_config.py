@@ -37,6 +37,7 @@ from .profiles import apply_runtime_profile
 from .runtime_capabilities import (
     apply_model_capability_overrides,
     strip_runtime_model_capability_fields,
+    upgrade_legacy_capability_cache_if_needed,
 )
 from .settings import (
     MODEL_LIBRARY_DETAIL_FIELDS,
@@ -67,7 +68,7 @@ PUBLIC_PROVIDER_FIELDS = PUBLIC_INLINE_PROVIDER_FIELDS
 PROFILE_OVERRIDE_FIELDS = PROFILE_REFERENCE_OVERRIDE_FIELDS
 SCHEMA_V2_LEGACY_MODEL_WRITE_ERROR = (
     "schema v2 model writes must use provider-scoped configuration; "
-    "use migration preview for schema v1 configuration"
+    "use a one-shot schema upgrader for schema v1 configuration"
 )
 LLM_MODEL_PRESETS = {
     "openai_gpt_5_5": {
@@ -1002,14 +1003,16 @@ def _ensure_profile_model_library_entries(public_config: dict) -> dict:
     return updated
 
 
-def _canonicalize_public_config(public_config: dict) -> dict:
+def _canonicalize_public_config(public_config: dict, *, allow_legacy_v1: bool = False) -> dict:
     candidate = copy.deepcopy(public_config) if isinstance(public_config, dict) else {}
     llm = candidate.get("llm", {})
-    schema_version = int(llm.get("schema_version") or 2) if isinstance(llm, dict) else 1
+    schema_version = int(llm.get("schema_version") or 2) if isinstance(llm, dict) else 2
     if schema_version == 2:
         build_effective_config_for_validation = normalize_public_config_dict(candidate)
         AppConfig.model_validate(build_effective_config_for_validation)
         return candidate
+    if not allow_legacy_v1:
+        raise ValueError("runtime LLM config requires schema v2; upgrade persisted config first")
     denormalized = denormalize_config_dict(candidate)
     repaired = _repair_legacy_model_library_shape(denormalized)
     with_profile_models = _ensure_profile_model_library_entries(repaired)
@@ -1019,7 +1022,16 @@ def _canonicalize_public_config(public_config: dict) -> dict:
 
 
 def public_config_hash(public_config: dict) -> str:
-    canonical = strip_runtime_model_capability_fields(_canonicalize_public_config(public_config))
+    llm = public_config.get("llm") if isinstance(public_config, dict) else None
+    allow_legacy_v1 = False
+    if isinstance(llm, dict):
+        try:
+            allow_legacy_v1 = int(llm.get("schema_version") or 2) == 1
+        except (TypeError, ValueError):
+            allow_legacy_v1 = False
+    canonical = strip_runtime_model_capability_fields(
+        _canonicalize_public_config(public_config, allow_legacy_v1=allow_legacy_v1)
+    )
     payload = json.dumps(
         canonical,
         ensure_ascii=False,
@@ -1040,18 +1052,73 @@ def _resolve_public_config_path(config_path: Path | None = None) -> Path:
     return _default_config_path()
 
 
-def load_public_config(config_path: Path | None = None) -> dict:
-    raw = _load_raw_public_config(_resolve_public_config_path(config_path))
-    return strip_runtime_model_capability_fields(_canonicalize_public_config(raw))
+def _legacy_v1_public_payload(public_config: dict | None) -> bool:
+    llm = public_config.get("llm") if isinstance(public_config, dict) else None
+    if not isinstance(llm, dict):
+        return False
+    if "role_bindings" in llm:
+        return True
+    try:
+        raw_version = llm.get("schema_version")
+        if raw_version is None:
+            library = llm.get("model_library")
+            if isinstance(library, dict):
+                for item in library.values():
+                    if isinstance(item, dict) and isinstance(item.get("provider"), dict):
+                        return True
+            providers = llm.get("providers")
+            if isinstance(providers, dict):
+                for item in providers.values():
+                    if isinstance(item, dict) and "kind" in item and "models" not in item:
+                        return True
+            return False
+        return int(raw_version) == 1
+    except (TypeError, ValueError):
+        return False
+
+
+def load_public_config(config_path: Path | None = None, *, allow_legacy_v1: bool | None = None) -> dict:
+    resolved = _resolve_public_config_path(config_path)
+    raw = _load_raw_public_config(resolved)
+    upgrade_legacy_capability_cache_if_needed(raw, config_path=resolved)
+    if allow_legacy_v1 is None:
+        allow_legacy_v1 = _legacy_v1_public_payload(raw)
+    return strip_runtime_model_capability_fields(
+        _canonicalize_public_config(raw, allow_legacy_v1=bool(allow_legacy_v1))
+    )
 
 
 def build_effective_config(public_config: dict) -> AppConfig:
+    if _legacy_v1_public_payload(public_config):
+        from config.settings import _normalize_v1_kwargs_runtime_dict
+
+        decorated = apply_model_capability_overrides(copy.deepcopy(public_config))
+        normalized = _normalize_v1_kwargs_runtime_dict(decorated)
+        config = AppConfig.model_validate(normalized)
+        effective = apply_runtime_profile(config)
+        assert_llm_compatibility(effective)
+        return effective
     canonical = strip_runtime_model_capability_fields(_canonicalize_public_config(public_config))
     normalized = normalize_public_config_dict(apply_model_capability_overrides(canonical))
     config = AppConfig.model_validate(normalized)
     effective = apply_runtime_profile(config)
     assert_llm_compatibility(effective)
     return effective
+
+
+def build_effective_from_public_payload(public_config: dict) -> AppConfig:
+    """Build runtime config from a public payload that may still be schema v1."""
+
+    return build_effective_config(public_config)
+
+
+def _validate_mutated_public_payload(public_config: dict) -> None:
+    """v1 library writes stay v1-shaped; only canonical v2 is runtime-normalized."""
+
+    if _legacy_v1_public_payload(public_config):
+        _canonicalize_public_config(copy.deepcopy(public_config), allow_legacy_v1=True)
+        return
+    build_effective_config(public_config)
 
 
 def _model_library_id(provider_id: str, model: str) -> str:
@@ -1540,7 +1607,7 @@ def apply_llm_model_preset(
     entry = _model_library_entry(resolved_provider, resolved_model, resolved_label, model_defaults)
     entry["api_key_env"] = _canonical_model_api_key_env(resolved_model_id)
     model_library[resolved_model_id] = entry
-    build_effective_config(updated)
+    _validate_mutated_public_payload(updated)
     return updated
 
 
@@ -1741,7 +1808,7 @@ def add_llm_model(
     entry = _model_library_entry(provider, model, label or model, details)
     entry["api_key_env"] = _canonical_model_api_key_env(model_id)
     model_library[model_id] = entry
-    build_effective_config(updated)
+    _validate_mutated_public_payload(updated)
     return updated
 
 
@@ -1789,7 +1856,7 @@ def update_llm_model(
     entry = _model_library_entry(provider, model, label or model, merged_details)
     entry["api_key_env"] = _canonical_model_api_key_env(model_id)
     model_library[model_id] = entry
-    build_effective_config(updated)
+    _validate_mutated_public_payload(updated)
     return updated
 
 
@@ -1803,7 +1870,6 @@ def delete_llm_model(public_config: dict, model_id: str) -> dict:
         model_library.pop(model_id, None)
     elif not isinstance(model_library, dict):
         llm["model_library"] = {}
-    build_effective_config(updated)
     return updated
 
 
@@ -1909,7 +1975,7 @@ def _inspect_llm_route_consistency(public_config: dict, effective: AppConfig, di
 
 
 def _find_profile_id_for_provider(public_config: dict, provider_id: str) -> str:
-    effective = build_effective_config(public_config)
+    effective = build_effective_from_public_payload(public_config)
     for profile_id, profile in effective.llm.profiles.items():
         if effective.llm.get_provider(profile.provider_id).provider_id == provider_id:
             return str(profile_id)
@@ -1959,7 +2025,7 @@ def add_llm_profile(
         validate_llm_provider_target(new_profile["provider"], context="llm.profiles.provider")
         new_profile["model"] = model
     profiles[profile_id] = new_profile
-    build_effective_config(updated)
+    _validate_mutated_public_payload(updated)
     return updated
 
 
@@ -2155,7 +2221,7 @@ def _probe_llm_runtime(provider, profile, api_key: str | None = None) -> dict:
 
 def test_llm_connection(public_config: dict, profile_id: str | None = None) -> dict:
     validate_llm_public_config(public_config)
-    effective = build_effective_config(public_config)
+    effective = build_effective_from_public_payload(public_config)
     profile = effective.llm.get_profile(profile_id=profile_id) if profile_id else effective.llm.get_profile(role="primary")
     provider = effective.llm.get_provider(profile.provider_id)
     api_key = effective.get_api_key_for_profile(profile_id=profile.profile_id)
@@ -2208,7 +2274,14 @@ def preserve_secret_blanks(new_public: dict, old_public: dict) -> dict:
 
 def save_public_config(public_config: dict, config_path: Path | None = None) -> None:
     resolved_config_path = _resolve_public_config_path(config_path)
-    cleaned_public_config = strip_runtime_model_capability_fields(_canonicalize_public_config(public_config))
+    payload = public_config
+    if _legacy_v1_public_payload(public_config):
+        from config.llm_schema_upgrader import convert_legacy_llm_config
+
+        payload = convert_legacy_llm_config(public_config, allow_missing_credentials=True)
+    cleaned_public_config = strip_runtime_model_capability_fields(
+        _canonicalize_public_config(payload)
+    )
     with _config_edit_lock(resolved_config_path):
         backup_dir = resolve_config_backup_dir(resolved_config_path)
         backup_dir.mkdir(parents=True, exist_ok=True)
@@ -2286,7 +2359,58 @@ def _profile_api_key_status(effective: AppConfig) -> tuple[int, int]:
 
 
 def inspect_public_config(public_config: dict) -> dict[str, Any]:
-    effective = build_effective_config(public_config)
+    upgrade_error: Exception | None = None
+    try:
+        effective = build_effective_from_public_payload(public_config)
+    except Exception as exc:
+        if not _legacy_v1_public_payload(public_config):
+            raise
+        upgrade_error = exc
+        canonical = _canonicalize_public_config(copy.deepcopy(public_config), allow_legacy_v1=True)
+        try:
+            effective = build_effective_from_public_payload(canonical)
+        except Exception as exc2:
+            upgrade_error = exc2
+            llm = public_config.get("llm", {})
+            profiles = llm.get("profiles", {}) if isinstance(llm, dict) else {}
+            model_library = llm.get("model_library", {}) if isinstance(llm, dict) else {}
+            diagnosis = {
+                "blocking_issues": [
+                    str(upgrade_error).strip()
+                    or "runtime LLM config requires schema v2; upgrade persisted config first"
+                ],
+                "warnings": [],
+                "suggested_actions": [
+                    "Run the one-shot LLM schema upgrader before applying this draft."
+                ],
+                "identity": {"provider": "", "model_name": "", "runtime_profile": ""},
+                "sources": {"api_key": ""},
+            }
+            try:
+                validate_llm_public_config(public_config)
+            except ValueError as exc:
+                diagnosis["blocking_issues"].append(f"LLM security guard: {exc}")
+                diagnosis["suggested_actions"].append(
+                    "Review LLM provider base_url and api_key_env before testing or applying this config."
+                )
+            summary = {
+                "provider_count": 0,
+                "profile_count": len(profiles) if isinstance(profiles, dict) else 0,
+                "model_library_count": len(model_library) if isinstance(model_library, dict) else 0,
+                "selectable_model_count": len(list_llm_model_options(public_config)),
+                "configured_profile_count": 0,
+                "missing_api_key_count": 0,
+                "blocking_count": len(diagnosis["blocking_issues"]),
+                "warning_count": 0,
+                "action_count": len(diagnosis["suggested_actions"]),
+                "active_profile_id": "",
+            }
+            del upgrade_error
+            return {
+                "effective": None,
+                "diagnosis": diagnosis,
+                "summary": summary,
+            }
     diagnosis = effective.diagnose_config()
     _inspect_llm_route_consistency(public_config, effective, diagnosis)
     try:
@@ -2332,6 +2456,7 @@ __all__ = [
     "public_config_hash",
     "load_public_config",
     "build_effective_config",
+    "build_effective_from_public_payload",
     "resolve_llm_model_context_window",
     "apply_discovered_context_windows",
     "list_llm_model_preset_options",

@@ -233,14 +233,14 @@ describe("workbench layout gate (Wave 5)", () => {
 
   it("keeps Chat group member picker and Launcher noise grids on shared height API (Wave 6G)", () => {
     const chatHeights = readFileSync(resolve(webSrc, "routes/chat/chatListHeights.ts"), "utf-8");
-    const statusRail = readFileSync(resolve(webSrc, "routes/chat/ChatStatusRail.tsx"), "utf-8");
+    const groupManagementDialog = readFileSync(resolve(webSrc, "routes/chat/ChatGroupManagementDialog.tsx"), "utf-8");
     const launcherHeights = readFileSync(resolve(webSrc, "routes/launcherListHeights.ts"), "utf-8");
     const developer = readFileSync(resolve(webSrc, "routes/LauncherDeveloperModePanel.tsx"), "utf-8");
     const maintenance = readFileSync(resolve(webSrc, "routes/LauncherProjectMaintenancePanel.tsx"), "utf-8");
     expect(chatHeights).toContain("group-member-picker");
     expect(chatHeights).toContain("WORKBENCH_LAYOUT_IDS.chat");
-    expect(statusRail).toContain("PersistedHeightListShell");
-    expect(statusRail).toContain("CHAT_GROUP_MEMBER_PICKER_HEIGHT_PANE");
+    expect(groupManagementDialog).toContain("PersistedHeightListShell");
+    expect(groupManagementDialog).toContain("CHAT_GROUP_MEMBER_PICKER_HEIGHT_PANE");
     expect(launcherHeights).toContain("noise-item-grid");
     expect(developer).toContain("LAUNCHER_NOISE_ITEM_GRID_HEIGHT_PANE");
     expect(maintenance).toContain("LAUNCHER_NOISE_ITEM_GRID_HEIGHT_PANE");

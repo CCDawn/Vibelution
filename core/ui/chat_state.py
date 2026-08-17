@@ -489,36 +489,79 @@ def _drop_legacy_chat_state_messages(
                 cleaned_conversations.append(item)
                 continue
             conversation = dict(item)
-            if "messages" in conversation and not _should_keep_legacy_chat_messages(project_root, conversation):
-                conversation.pop("messages", None)
-                changed = True
+            if "messages" not in conversation:
+                cleaned_conversations.append(conversation)
+                continue
+            if project_root is None:
+                cleaned_conversations.append(conversation)
+                continue
+            try:
+                _materialize_legacy_messages_into_ledger(project_root, conversation)
+            except Exception as exc:
+                _debug_logger.warning(
+                    f"[ChatState] legacy message materialize failed: {type(exc).__name__}: {exc}"
+                )
+                from core.chat.conversation_ledger import latest_ledger_sequence
+
+                session_id = _conversation_session_id(conversation)
+                if session_id and latest_ledger_sequence(Path(project_root), session_id) <= 0:
+                    cleaned_conversations.append(conversation)
+                    continue
+            conversation.pop("messages", None)
+            conversation.pop("legacy_messages_preserved", None)
+            conversation.pop("legacyMessagesPreserved", None)
+            changed = True
             cleaned_conversations.append(conversation)
         if changed:
             cleaned["conversations"] = cleaned_conversations
     return cleaned, changed
 
 
-def _should_keep_legacy_chat_messages(project_root: Path | None, conversation: dict[str, Any]) -> bool:
-    legacy_preserved = bool(conversation.get("legacy_messages_preserved") or conversation.get("legacyMessagesPreserved"))
-    persisted_status = str(conversation.get("last_turn_status") or conversation.get("lastTurnStatus") or "").strip().lower()
-    if not legacy_preserved and persisted_status not in {"queued", "running", "stopping"}:
-        return False
-    if project_root is None:
-        return False
-    conversation_id = str(
+def _conversation_session_id(conversation: dict[str, Any]) -> str:
+    return str(
         conversation.get("conversation_id")
         or conversation.get("conversationId")
         or conversation.get("id")
         or ""
     ).strip()
-    if not conversation_id:
-        return False
-    try:
-        from core.chat.conversation_ledger import latest_ledger_sequence
 
-        return latest_ledger_sequence(Path(project_root), conversation_id) <= 0
-    except Exception:
-        return False
+
+def _materialize_legacy_messages_into_ledger(project_root: Path, conversation: dict[str, Any]) -> None:
+    session_id = _conversation_session_id(conversation)
+    if not session_id:
+        return
+    from core.chat.conversation_ledger import (
+        EVENT_ASSISTANT_MESSAGE,
+        EVENT_USER_MESSAGE,
+        append_conversation_event,
+        latest_ledger_sequence,
+    )
+
+    if latest_ledger_sequence(Path(project_root), session_id) > 0:
+        return
+    raw_messages = conversation.get("messages")
+    if not isinstance(raw_messages, list):
+        return
+    turn_id = "legacy-chat-state-import"
+    for item in raw_messages:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "").strip().lower()
+        if role not in {"user", "assistant"}:
+            continue
+        content = str(item.get("content") or "")
+        event_type = EVENT_USER_MESSAGE if role == "user" else EVENT_ASSISTANT_MESSAGE
+        append_conversation_event(
+            Path(project_root),
+            session_id,
+            turn_id,
+            event_type,
+            status="recorded" if role == "user" else "completed",
+            payload={"content": content},
+            source="legacy_chat_state_import",
+            timestamp=str(item.get("timestamp") or "").strip(),
+            source_kind="legacy_import",
+        )
 
 
 def _backup_corrupt_chat_state(path: Path, exc: Exception) -> None:

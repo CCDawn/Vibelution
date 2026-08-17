@@ -3155,7 +3155,7 @@ def discover_config_models(
         if not canonical_provider_id:
             raise ValueError(
                 "provider_id is required for schema v2 provider-scoped discovery; "
-                "use migration preview for schema v1 configuration"
+                "upgrade persisted schema v1 configuration first"
             )
         result = discover_provider_models(
             submitted,

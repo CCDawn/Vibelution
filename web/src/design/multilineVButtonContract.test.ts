@@ -10,12 +10,12 @@ describe("multiline VButton hardening (Path B wave 10)", () => {
     expect(button).toContain('contentLayout === "plain" ? "!h-auto"');
   });
 
-  it("uses plain layout for chat feature chips, pet actions, and model picker cards", () => {
-    const chat = src("routes/chat/ChatStatusRail.tsx");
+  it("uses plain layout for chat plus-menu actions and model picker cards", () => {
+    const chatMenu = src("routes/chat/ChatComposerPlusMenu.tsx");
     const picker = src("routes/AgentModelPicker.tsx");
     const token = src("routes/chat/TokenCoreStatusPanel.tsx");
-    expect(chat).toMatch(/contentLayout="plain"[\s\S]{0,120}styles\.featureChip/);
-    expect(chat).toMatch(/contentLayout="plain"[\s\S]{0,80}styles\.petShowcaseAction/);
+    expect(chatMenu).toMatch(/contentLayout="plain"[\s\S]{0,120}styles\.menuItem/);
+    expect(chatMenu).toContain('role="menuitemcheckbox"');
     expect(picker).toMatch(/contentLayout="plain"[\s\S]{0,120}styles\.option/);
     expect(token).toMatch(/contentLayout="plain"[\s\S]{0,160}styles\.tokenStatusMetricButton/);
   });

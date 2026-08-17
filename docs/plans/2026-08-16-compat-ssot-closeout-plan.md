@@ -5,13 +5,15 @@
 | **Status** | `active-plan` |
 | **Created** | 2026-08-16 |
 | **Reviewed** | 2026-08-16（仓库审查结论重放至最新 main） |
-| **Implementation status** | T1 apply 已执行（2026-08-16）；**T1G 代码门已落地**（commit `91a1f6fb4`：readiness / SQLite bundle / quiescence / integrity_check / rollback delta / 同父私有 quarantine 身份安全清理）；**T2 / T3b done**（2026-08-17）；T2 仅完成代码收口，未执行新的真实 apply / reapply / rollback / legacy 删除 |
+| **Implementation status** | T1 apply 已执行（2026-08-16）；**T1G 代码门已落地**（commit `91a1f6fb4`）；**T2 / T3b done**（2026-08-17）；**T4a–T4c done**（2026-08-17）；**T5 done**（2026-08-17：packaged Electron 不再 spawn `:8765`，profile 只写 `operatorConfigPath`）；T2 仅完成代码收口，未执行新的真实 apply / reapply / rollback / legacy 删除 |
 | **Tier** | `HIGH_RISK`（整体）；子任务按 `FAST_PATCH` / `STANDARD_TASK` / `HIGH_RISK` 分级 |
 | **Related ADR** | [0002](../adr/0002-agent-collaboration-session-addressing.md) · [0003](../adr/0003-operator-config-lives-outside-repo.md) · [0004](../adr/0004-product-ui-uses-vui-shadcn-only.md) · [0005](../adr/0005-docs-authority-and-archive-policy.md) · [0008](../adr/0008-project-mutable-state-lives-outside-source-tree.md) · [0009](../adr/0009-launcher-control-plane-lives-in-electron-main.md) |
 | **Related docs** | [development-standard §24](../standards/development-standard.md) · [web/src/api/README.md](../../web/src/api/README.md) · [worktree-collaboration](../agents/worktree-collaboration.md) |
-| **Close when** | Critical Path（T0→T1→T1G→T2/T3b→T4a–T4c→T6/T7→T8）验收通过；支持关闭 H1(done) / H2 / T5 / D1；`activePaths.migrated=true` 稳定 ≥14 天；living doc 无 legacy 误引；T4d / T9 不阻塞 |
+| **Close when** | Critical Path（T0→T1→T1G→T2/T3b→T4a–T4c→T6/T7→T8）验收通过；支持关闭 H1(done) / H2 / T5 / D1；living doc 无 legacy 误引；T4d / T9 不阻塞。**不等待** storage 14 天、T8 30 天零命中、telemetry 观察窗口或版本支持窗口 |
 
 > **草案说明：** 本文件是实施计划，不是现行规范。权威顺序见 [ADR 0005](../adr/0005-docs-authority-and-archive-policy.md)。关闭后 `git mv` 至 `docs/archive/plans/2026-08/`。
+>
+> **Operator override（2026-08-17）：禁止等待型稳定门。** 用户已取消本计划中所有人为等待型完成条件：不等待 14 天 storage 稳定期、不等待 T8 的 30 天零命中、不设置 telemetry 观察窗口、不以“再观察一段时间”为完成条件、不设置版本支持窗口、不以“其它环境可能仍在使用”无限延期、不以零命中 / 灰度 / shadow period 作为删除前置、不新增仅用于拖延收敛的 feature flag / 双写 / 兼容开关 / shadow path / observe-only 阶段、不等待 OpenCode 或其它 Agent 恢复、不把普通 `main` 漂移写成 blocker。当前代码事实、一次性 upgrader、fail-closed、现有数据结构、自动化测试、本地集成验证和必要运行验收即为实施依据。本覆盖 **不等于** 取消正确性验证、数据保护、Git ownership、测试、迁移安全或破坏性权限确认。远端操作、T9 物理删除、真实 storage apply/reapply/rollback 仍需独立授权。
 
 ---
 
@@ -50,7 +52,7 @@
 - 远端 push / 未经确认的物理删 legacy 目录
 - 合并 Session 与 chat-rooms **产品概念**（仅评估 `/api/conversations` 索引是否可删）
 - 全仓 `:8765` 零命中（ADR/history/fixture/browser-dev HTTP 合法保留）
-- 删除 `runtime_capabilities` facade 整体（需版本窗口 / upgrader）
+- 删除 `runtime_capabilities` facade 整体（facade 可保留，但只允许 canonical 实现；legacy import 立即退役，不等待版本窗口）
 - 关闭以 T4d / T9 为必要条件
 
 ---
@@ -212,25 +214,25 @@ flowchart TB
 
 | 子任务 | 内容 | 门控 |
 | --- | --- | --- |
-| **T4a** | LLM config v1 / `role_bindings` → 升级脚本 + fail-closed | 版本支持窗口 + bootstrap / upgrader 落地，外部 config 无 v1 |
-| **T4b** | `runtime_capabilities` legacy import 删除 | 需版本窗口 / upgrader；**facade 不可整删**；本机 schema2 / import complete **非全局**；明确 `public_config` / `config_service` 的 facade 消费关系 |
-| **T4c** | `chat_state.json` 消息路径删除 | 正常保存已删 messages；仅 `legacy_messages_preserved` 或 status queued/running/stopping 且 `latest_ledger_sequence<=0` 时保留兜底；任务是测命中、零命中/升级窗口后移除 |
+| **T4a** | LLM config v1 / `role_bindings` → 一次性 upgrader + 运行时 fail-closed | **done** 2026-08-17。可识别旧配置原子升级；无法安全升级 fail-closed；失败不覆盖原文件；运行时不再消费 v1 fallback。不等待版本支持窗口。 |
+| **T4b** | `runtime_capabilities` legacy import 删除 | **done** 2026-08-17。facade 保留为 canonical 投影；`apply_model_capability_overrides` 只读 catalog；leftover JSON 仅一次性 upgrader 导入。不等待版本窗口。 |
+| **T4c** | `chat_state.json` 消息路径删除 | **done** 2026-08-17。leftover message blob 一次性 materialize 进 ledger 后删除；queued/running/stopping 与 `latest_ledger_sequence<=0` 可恢复；canonical ledger no-clobber。不等待零命中。 |
 
-**Dependency：** T2/T3b 后；T4c 建议 storage 稳定后。
+**Dependency：** T2/T3b 后。T4c **不再**等待 storage 稳定观察期。
 
 **Task T4d: XML tool decoder 退役** — **完全 Deferred**（从 Phase 2 移出）
 
 - 不在本轮交付范围；协议 matrix 完成 + 零命中后 **另立并重新分级**，不预判 version impact。
 
-**Task T5: Launcher 残留审计（独立于 storage 主链）**
+**Task T5: Launcher 残留审计（独立于 storage 主链）** — **done**（2026-08-17）
 
 | 项 | 内容 |
 | --- | --- |
 | **Owner** | `core/launcher/` · `desktop/electron/` · `web/src/api/launcher.ts` |
 | **Tier** | `HIGH_RISK` |
 | **现状** | ADR0009 迁移已关闭；产品控制面 = Electron IPC |
-| **交付** | 证明 packaged/product **不依赖 `:8765`** → 删确证死代码；ADR/history/fixture/browser-dev HTTP **合法保留**；profile 只写 `operatorConfigPath` |
-| **验证** | electron vitest · `test_launcher_*` · 打包冒烟 |
+| **交付** | packaged Electron **不 spawn / 不代理** `:8765`；删除 `bootstrapPythonLauncherService` 死路径；profile **只写** `operatorConfigPath`（旧 `configPath` 仅一次性读取 recover）；ADR/history/fixture 与 unpackaged checkout browser-dev HTTP **合法保留**（owner：`tests/test_launcher_scripts.py` / native shim）；**不设观察期** |
+| **验证** | electron vitest（含 `packagedLauncherControlPlane.contract.test.ts`）· `test_native_launcher_entry.py` · `test_vibelution_desktop_entry.py` |
 | **Worktree** | `codex/launcher-strangler-closeout` |
 
 ---
@@ -274,8 +276,8 @@ flowchart TB
 | 项 | 内容 |
 | --- | --- |
 | **Dependency** | T6/T7 |
-| **步骤** | 先上线 `browser.user_action.legacy_redirect_observed`；fields 至少 `legacyRoute` / `targetRoute` / `pathname` / `search` 分类 |
-| **门控** | **30 天自事件上线起**，按 route **零命中**后移除 `Legacy*Redirect` |
+| **步骤** | 立即删除 `Legacy*Redirect` 与对应 legacy URL 路由；同步修复调用方、导航、书签入口、测试和文档。可保留 `browser.user_action.legacy_redirect_observed` 作为诊断事件，但 **不是** 删除前置，也不得重新引入 redirect |
+| **门控** | **立即退役**。不等待 30 天、telemetry 零命中或观察窗口。旧 URL 走产品当前统一的未知路由 / 404 行为 |
 | **Tier** | `STANDARD_TASK` |
 
 **Task D1: 文档与引用治理（全程并行）** — **in progress**
@@ -333,9 +335,9 @@ flowchart TB
 | 10 | orphan `.worktrees` | H2 |
 | 11 | audit/reset 硬编码 memory 路径 | T3a done；agent registry — **T3b done**（2026-08-17） |
 
-### 7.3 P2 — 需迁移门后再删
+### 7.3 P2 — 立即收敛（等待型稳定门已取消）
 
-LLM v1 materialization（T4a） · capability cache import（T4b，facade 不可整删） · `chat_state.json`（T4c，测命中后移除） · legacy inbox body · `legacyBranchInstanceRuntime` · `core/launcher/app.py` HTTP（T5 残留审计后删确证死代码） · agent `legacyWorkspacePath` · user env fallback
+LLM v1 materialization（**T4a done**） · capability cache import（T4b，立即删 legacy import；facade 不可整删） · `chat_state.json`（T4c，立即删 legacy message 路径，不等待零命中） · legacy inbox body · `legacyBranchInstanceRuntime` · `core/launcher/app.py` HTTP（T5 残留审计后删确证死代码，不设观察期） · agent `legacyWorkspacePath` · user env fallback
 
 ### 7.4 P3 / 保留
 
@@ -365,10 +367,10 @@ HeroUI prop 别名 · route re-export barrels · Vitest shims · archive 正文 
 | T1 | `activePaths.migrated=true`；外部 logs 有新 scene |
 | T1G | 机器化静止门 / destination conflict / SQLite DB+WAL+SHM quick+integrity / source-write、quiescence、SQLite bundle、rollback 测试 / cache cold rebuild 全绿 |
 | T2–T3b | 无代码写 repo 内 `.runtime`；工具用 resolved paths；agent live registry 走 Git common-dir |
-| T4 | `test_full_stack_contract_guards.py` 仍 0 budget；T4b 有版本窗口 / upgrader；T4c 命中测后移除 |
+| T4 | `test_full_stack_contract_guards.py` 仍 0 budget；T4a 一次性 upgrader + 运行时 fail-closed；T4b 立即删 legacy import；T4c 立即删 legacy message 路径 |
 | T5 | packaged/product 不依赖 `:8765`；确证死代码已删；ADR/history/fixture/browser-dev HTTP 保留 |
 | T6–T7 | Memory 与 Knowledge 两个 backend domain **各一个 canonical transport、二者不合并**；DTO cycle 打断；Chat 单写契约；`tsc -b` 绿 |
-| T8 | `legacy_redirect_observed` 事件上线；30 天按 route 零命中 |
+| T8 | `Legacy*Redirect` 已删除；canonical route 为唯一入口；诊断事件可保留但不是删除前置 |
 | T9 | （optional）物理 legacy 空；inventory 仅 external |
 
 **每 slice 完成块（[loop.md](../guides/loop.md) §4）：** 变更摘要 · 验证命令 · Launcher refresh · merge + cleanup · version impact
@@ -421,7 +423,7 @@ HeroUI prop 别名 · route re-export barrels · Vitest shims · archive 正文 
 当以下条件 **全部** 满足：
 
 1. Critical Path（T0→T1→T1G→T2/T3b→T4a–T4c→T6/T7→T8）验收证据已闭合；支持关闭 H1(done)、H2、T5、D1；T4d / T9 **不阻塞**；
-2. `activePaths.migrated=true` 稳定 ≥14 天，外部读写健康、无 legacy 写 / rollback / integrity 告警（不要求无 post-cutover 正常写）；
+2. 交付已进入本地 `main`，集成验证通过；living docs 不再引用已删除兼容层。**不再要求** `activePaths.migrated=true` 稳定 ≥14 天，也 **不再要求** T8 30 天零命中；
 3. 本文 Status 改为 `implemented` 或 `superseded`；
 4. 更新 [plans/README.md](README.md) 与 [docs/README.md](../README.md) 白名单；
 
