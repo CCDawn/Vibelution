@@ -4,6 +4,7 @@
 **目标：30 秒内定位生命周期、无控制台红线与主测；不要在 Web facade 里堆进程逻辑。**
 
 权威细则：`docs/standards/development-standard.md` §8.0 · 根 `AGENTS.md` §2 · [ADR 0009](../../../docs/adr/0009-launcher-control-plane-lives-in-electron-main.md)。
+隔离实例生命周期合同：[`core/launcher/instance-lifecycle.md`](../../launcher/instance-lifecycle.md)。
 Runtime scene pack：[`runtime_scene/README.md`](runtime_scene/README.md)。
 Electron 壳：[`desktop/electron/README.md`](../../../desktop/electron/README.md)。已归档迁移账本：[`docs/archive/plans/2026-08/CONTROL_PLANE_MIGRATION.md`](../../../docs/archive/plans/2026-08/CONTROL_PLANE_MIGRATION.md)。
 
@@ -14,6 +15,7 @@ Electron 壳：[`desktop/electron/README.md`](../../../desktop/electron/README.m
 | 你在改… | 先打开 | 禁止 |
 | --- | --- | --- |
 | start / stop / restart / active-work 拦截 | Electron main（`desktop/electron/src/main.ts` `orchestrateLauncherLifecycle`）→ Python `core/launcher/service.py`（RM 队列） | 在 `runtime_service.py` 再写一套 lifecycle；renderer 直连 :8765 |
+| 隔离 worktree 启停 / READY / 端口 | [`instance-lifecycle.md`](../../launcher/instance-lifecycle.md) · `branch_instance_lifecycle.py` · `instances_registry.py` · Electron `isolatedInstanceSupervisor.ts` | exec 目标树 `vibelution_launcher.py`；spawn exit 0 当 `running`；无锁改 `instances.json` |
 | Launcher 窗口真相 / leftover adopt | `desktop/electron/src/windows/electronWindowProvider.ts` | Python overlay 把 live window 标成 closed |
 | Launcher UI 传输 | `web/src/api/launcher.ts`（preload IPC 门面） | 可操作仪表盘在 API 未就绪时画空表 + `未连接` |
 | Web 路由 import 稳定面 | `launcher_service.py`（re-export only） | 往 facade 加业务体 |
@@ -121,3 +123,4 @@ node desktop\electron\node_modules\vitest\vitest.mjs run tests/windowProvider.te
 | [`docs/archive/plans/2026-08/CONTROL_PLANE_MIGRATION.md`](../../../docs/archive/plans/2026-08/CONTROL_PLANE_MIGRATION.md) | 已归档迁移账本 |
 | [`docs/guides/loop.md`](../../../docs/guides/loop.md) | 诊断三件套 + Launcher 命令 |
 | [`docs/ops/config/07-launcher-runtime-workbench.md`](../../../docs/ops/config/07-launcher-runtime-workbench.md) | 运维配置 |
+| [`core/launcher/instance-lifecycle.md`](../../launcher/instance-lifecycle.md) | 隔离实例 desired/observed、202、generation、READY |

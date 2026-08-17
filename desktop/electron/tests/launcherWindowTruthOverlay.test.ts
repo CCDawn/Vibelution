@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  composeInstanceLifecycleState,
   overlayLauncherWindowTruth,
   type LauncherWindowTruth,
 } from "../src/windows/launcherWindowTruthOverlay.js";
@@ -217,6 +218,69 @@ describe("launcher branch-instances window truth overlay", () => {
     expect((runtime.window as Record<string, unknown>).open).toBe(false);
     expect(item.alive).toBe(true);
     expect(item.startable).toBe(false);
+  });
+
+  it("keeps an in-flight isolated start as starting even when leftover failureMessage is present", () => {
+    const payload = {
+      items: [
+        {
+          id: "worktree:task",
+          current: false,
+          alive: false,
+          startable: false,
+          runtime: {
+            lifecycleState: "error",
+            desiredState: "open",
+            registryStatus: "starting",
+            phase: "starting",
+            observedState: "closed",
+            backend: { alive: false, healthy: false, listening: false, portConflict: false },
+            frontend: { ready: true },
+            window: { open: false, pid: 0 },
+            error: { code: "runtime_error", message: "上次启动失败" },
+          },
+        },
+      ],
+    };
+    const overlaid = overlayLauncherWindowTruth(
+      "branch-instances",
+      payload,
+      truth({ instances: [{ instanceId: "worktree:task", open: false, rendererProcessId: 0 }] })
+    ) as Record<string, unknown>;
+    const item = (overlaid.items as Record<string, unknown>[])[0];
+    const runtime = item.runtime as Record<string, unknown>;
+    expect(runtime.lifecycleState).toBe("starting");
+    expect((runtime.window as Record<string, unknown>).open).toBe(false);
+  });
+});
+
+describe("composeInstanceLifecycleState", () => {
+  it("ignores leftover failure while an isolated start is in flight", () => {
+    expect(
+      composeInstanceLifecycleState({
+        phase: "starting",
+        desiredState: "open",
+        registryStatus: "starting",
+        failureMessage: "上次启动失败",
+        frontendReady: true,
+        windowOpen: false,
+      })
+    ).toBe("starting");
+  });
+
+  it("does not mark running when the window is closed", () => {
+    expect(
+      composeInstanceLifecycleState({
+        phase: "steady",
+        desiredState: "open",
+        registryStatus: "steady",
+        backendAlive: true,
+        backendHealthy: true,
+        backendListening: true,
+        frontendReady: true,
+        windowOpen: false,
+      })
+    ).toBe("partial");
   });
 });
 

@@ -26,9 +26,25 @@ from pathlib import Path
 
 import tomllib
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+def _supervisor_root() -> Path:
+    return Path(__file__).resolve().parent.parent
+
+
+def _workspace_root_from_env(environ: dict[str, str] | None = None) -> Path:
+    env = os.environ if environ is None else environ
+    raw = str(env.get("VIBELUTION_WORKSPACE_ROOT") or "").strip()
+    if raw:
+        try:
+            return Path(raw).expanduser().resolve()
+        except OSError:
+            pass
+    return _supervisor_root()
+
+
+SUPERVISOR_ROOT = _supervisor_root()
+PROJECT_ROOT = _workspace_root_from_env()
+if str(SUPERVISOR_ROOT) not in sys.path:
+    sys.path.insert(0, str(SUPERVISOR_ROOT))
 
 from vibelution_storage import resolve_active_project_storage_paths
 

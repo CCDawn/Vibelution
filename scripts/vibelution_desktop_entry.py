@@ -1347,7 +1347,14 @@ def _run_lifecycle_bridge(args: argparse.Namespace) -> dict[str, object]:
 _LIFECYCLE_OPERATIONS = {"start", "stop", "force-stop", "restart", "rebuild-and-start", "shutdown"}
 
 
-_BRANCH_INSTANCE_OPERATIONS = {"start", "stop", "force-stop", "restart"}
+_BRANCH_INSTANCE_OPERATIONS = {
+    "start",
+    "stop",
+    "force-stop",
+    "restart",
+    "observe-error",
+    "observe-ready",
+}
 
 
 def _run_branch_instance_bridge(args: argparse.Namespace) -> dict[str, object]:
@@ -1359,10 +1366,18 @@ def _run_branch_instance_bridge(args: argparse.Namespace) -> dict[str, object]:
     if not instance_id:
         raise ValueError("branch instance id is required")
     from core.launcher import service as launcher_service
+    from core.launcher.branch_instance_lifecycle import BranchInstanceLifecycleError
 
+    generation = int(getattr(args, "branch_instance_generation", 0) or 0)
+    message = str(getattr(args, "branch_instance_message", "") or "")
     _append_log("desktop_entry_python.branch_instance.started", operation=operation, instance_id=instance_id)
     try:
-        response = launcher_service.request_branch_instance_operation(instance_id, operation)
+        response = launcher_service.request_branch_instance_operation(
+            instance_id,
+            operation,
+            generation=generation or None,
+            message=message,
+        )
     except launcher_service.LauncherActiveWorkBlocked as exc:
         _append_log(
             "desktop_entry_python.branch_instance.blocked",
@@ -1379,6 +1394,23 @@ def _run_branch_instance_bridge(args: argparse.Namespace) -> dict[str, object]:
             "instanceId": instance_id,
             "message": str(exc.message),
             "activeWorkRuns": list(getattr(exc, "active_work_runs", []) or []),
+        }
+    except BranchInstanceLifecycleError as exc:
+        _append_log(
+            "desktop_entry_python.branch_instance.rejected",
+            level="warning",
+            operation=operation,
+            instance_id=instance_id,
+            code=exc.code,
+            message=exc.message,
+        )
+        return {
+            "schemaVersion": 1,
+            "accepted": False,
+            "code": exc.code,
+            "operation": operation,
+            "instanceId": instance_id,
+            "message": str(exc.message),
         }
     except Exception as exc:
         _append_log(
@@ -1610,6 +1642,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--lifecycle-operation", default="")
     parser.add_argument("--branch-instance-operation", default="")
     parser.add_argument("--instance-id", default="")
+    parser.add_argument("--branch-instance-generation", type=int, default=0)
+    parser.add_argument("--branch-instance-message", default="")
     parser.add_argument("--launcher-api-path", default="")
     parser.add_argument("--launcher-api-method", default="GET")
     parser.add_argument("--launcher-api-body", default="")

@@ -68,6 +68,34 @@ describe("runBranchInstanceBridge", () => {
     expect(options.stdio).toEqual(["ignore", "pipe", "pipe"]);
   });
 
+  it("passes generation and message for observe-error", async () => {
+    const spawnImpl = fakeSpawnWithOutput(
+      JSON.stringify({
+        schemaVersion: 1,
+        accepted: true,
+        operation: "observe-error",
+        instanceId: "worktree:task",
+        generation: 4,
+      })
+    );
+    await runBranchInstanceBridge({
+      workspaceRoot: "C:/repo",
+      pythonPath: "python",
+      operatorConfigPath: "",
+      operation: "observe-error",
+      instanceId: "worktree:task",
+      generation: 4,
+      message: "HTTP timeout",
+      spawnImpl,
+    });
+    const args = spawnImpl.mock.calls[0][1] as string[];
+    expect(args).toContain("observe-error");
+    expect(args).toContain("--branch-instance-generation");
+    expect(args).toContain("4");
+    expect(args).toContain("--branch-instance-message");
+    expect(args).toContain("HTTP timeout");
+  });
+
   it("surfaces failed operations with their code and message", async () => {
     const spawnImpl = fakeSpawnWithOutput(
       JSON.stringify({

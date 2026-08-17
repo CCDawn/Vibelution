@@ -157,7 +157,8 @@ def test_runtime_contract_classifies_running_partial_error_and_reserved_port(tmp
 
     assert by_id["worktree:failed"]["runtime"]["lifecycleState"] == "error"
     assert by_id["worktree:failed"]["runtime"]["error"]["code"] == "registry_failed"
-    assert by_id["worktree:failed"]["startBlockReason"] == "runtime_error"
+    assert by_id["worktree:failed"]["startable"] is True
+    assert by_id["worktree:failed"]["startBlockReason"] == ""
 
     assert by_id["worktree:stopped"]["runtime"]["lifecycleState"] == "closed"
     assert by_id["worktree:stopped"]["runtime"]["backend"]["portReserved"] is True
@@ -211,6 +212,7 @@ def test_runtime_lifecycle_projection_preserves_transitions_and_conflicts(
         window_open=False,
         failure_message="",
     )
+    assert state == expected
     assert code == error_code
 
 
@@ -228,6 +230,60 @@ def test_runtime_lifecycle_projection_keeps_starting_only_before_backend_is_read
         failure_message="",
     )
     assert state == "starting"
+    assert code == ""
+
+
+def test_runtime_lifecycle_projection_ignores_stale_failure_during_start():
+    state, code = lifecycle._instance_lifecycle_state(
+        observed_state="closed",
+        phase="starting",
+        desired_state="open",
+        registry_status="starting",
+        backend_alive=False,
+        backend_healthy=False,
+        backend_listening=False,
+        backend_conflict=False,
+        frontend_ready=True,
+        window_open=False,
+        failure_message="上次启动失败",
+    )
+    assert state == "starting"
+    assert code == ""
+
+
+def test_runtime_lifecycle_projection_does_not_treat_registry_running_as_ready():
+    state, code = lifecycle._instance_lifecycle_state(
+        observed_state="closed",
+        phase="steady",
+        desired_state="closed",
+        registry_status="running",
+        backend_alive=False,
+        backend_healthy=False,
+        backend_listening=False,
+        backend_conflict=False,
+        frontend_ready=True,
+        window_open=False,
+        failure_message="",
+    )
+    assert state == "closed"
+    assert code == ""
+
+
+def test_runtime_lifecycle_projection_requires_window_for_running():
+    state, code = lifecycle._instance_lifecycle_state(
+        observed_state="partial",
+        phase="steady",
+        desired_state="open",
+        registry_status="steady",
+        backend_alive=True,
+        backend_healthy=True,
+        backend_listening=True,
+        backend_conflict=False,
+        frontend_ready=True,
+        window_open=False,
+        failure_message="",
+    )
+    assert state == "partial"
     assert code == ""
 
 
@@ -309,3 +365,42 @@ def test_service_cleanup_metadata_annotation_is_opt_in(monkeypatch):
     assert seen == {}
     assert launcher_service.list_launcher_branch_instances(include_cleanup_metadata=True) == annotated
     assert seen["payload"] == {"items": [{"id": "worktree:task"}]}
+
+
+def test_overlay_prefers_registry_starting_over_stale_worktree_failure(tmp_path, monkeypatch):
+    path = tmp_path / "task"
+    path.mkdir()
+    _prepare_bundled_frontend(path)
+    _write_workbench_state(
+        path,
+        desiredState="closed",
+        observedState="closed",
+        phase="failed",
+        failureMessage="上次启动失败",
+    )
+    monkeypatch.setattr(lifecycle, "_slot_fields_for_path", lambda _path: {})
+    monkeypatch.setattr(
+        lifecycle.registry,
+        "list_instances",
+        lambda: [
+            {
+                "instanceId": "worktree:feature",
+                "projectRoot": str(path),
+                "status": "starting",
+                "desiredState": "open",
+                "phase": "starting",
+                "generation": 2,
+                "failureMessage": "",
+                "port": 8003,
+            }
+        ],
+    )
+    payload = lifecycle.overlay_instance_ports(
+        {"items": [_item(path)]},
+        launcher_state={},
+    )
+    runtime = payload["items"][0]["runtime"]
+    assert runtime["lifecycleState"] == "starting"
+    assert runtime["desiredState"] == "open"
+    assert runtime["generation"] == 2
+    assert "error" not in runtime
