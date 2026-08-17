@@ -5,9 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from core.infrastructure.storage_paths import (
+from vibelution_storage import (
     PROJECTS_HOME_ENV,
     ProjectIdentityError,
+    ProjectStorageMigrationStateError,
     ensure_project_storage,
     instance_id_for_project,
     legacy_project_storage_paths,
@@ -167,6 +168,49 @@ def test_primary_checkout_keeps_legacy_paths_until_verified_migration(monkeypatc
     assert resolve_active_project_storage_paths(project_root) == target
 
 
+def test_present_invalid_storage_marker_fails_closed_without_legacy_fallback(
+    monkeypatch, tmp_path
+):
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / ".git").mkdir()
+    _write_identity(project_root)
+    legacy_runtime = project_root / ".runtime"
+    legacy_runtime.mkdir()
+    (legacy_runtime / "state.json").write_text("{}\n", encoding="utf-8")
+    monkeypatch.setenv(PROJECTS_HOME_ENV, str(tmp_path / "project-state"))
+
+    target = resolve_project_storage_paths(project_root)
+    marker_path = storage_migration_state_path(target)
+    marker_path.parent.mkdir(parents=True)
+    marker_path.write_text("{not-json\n", encoding="utf-8")
+
+    with pytest.raises(
+        ProjectStorageMigrationStateError,
+        match="storage_migration_marker_invalid",
+    ):
+        resolve_active_project_storage_paths(project_root)
+
+    marker_path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "status": "completed",
+                "projectId": target.project_id,
+                "instanceId": "wrong-instance",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ProjectStorageMigrationStateError,
+        match="storage_migration_marker_invalid",
+    ):
+        resolve_active_project_storage_paths(project_root)
+
+
 def test_linked_worktree_uses_integration_root_legacy_memory_before_shared_switch(
     monkeypatch, tmp_path
 ):
@@ -218,8 +262,19 @@ def test_project_memory_marker_requires_matching_target_and_source(monkeypatch, 
             encoding="utf-8",
         )
 
+    marker_path.write_text("{not-json\n", encoding="utf-8")
+    with pytest.raises(
+        ProjectStorageMigrationStateError,
+        match="project_memory_migration_marker_invalid",
+    ):
+        resolve_project_memory_home(project_root)
+
     write_marker(target_root=tmp_path / "wrong-target", source_root=legacy_memory)
-    assert resolve_project_memory_home(project_root) == legacy_memory
+    with pytest.raises(
+        ProjectStorageMigrationStateError,
+        match="project_memory_migration_marker_invalid",
+    ):
+        resolve_project_memory_home(project_root)
 
     write_marker(target_root=target.memory, source_root=tmp_path / "other-clone-memory")
     assert resolve_project_memory_home(project_root) == legacy_memory

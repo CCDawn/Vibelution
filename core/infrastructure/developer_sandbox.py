@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from config.paths import resolve_workspace_home as resolve_operator_workspace_home
-from core.infrastructure.storage_paths import (
+from vibelution_storage import (
     ProjectIdentityError,
     load_project_identity,
     resolve_active_project_storage_paths,
