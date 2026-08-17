@@ -28,9 +28,9 @@ export const launcherRouteStyles = {
   opsToolbarStack: "grid min-w-0 shrink-0 gap-0",
   panelEyebrow: "m-0 [font-size:var(--vui-font-xs)] uppercase tracking-[0.08em] text-vui-fg-tertiary",
   primaryRail:
-    "mx-0 grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(250px,clamp(250px,26vw,380px))] items-stretch gap-1.5 px-0 max-[1024px]:grid-cols-[minmax(0,1fr)]",
-  primaryColumn: "flex min-h-0 min-w-0 flex-col",
-  settingsRail: "min-w-0 [&:has([open])]:col-span-full",
+    "mx-0 grid min-h-0 min-w-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] items-stretch gap-1.5 px-0",
+  primaryColumn: "flex min-h-0 min-w-0 flex-col row-start-2",
+  settingsRail: "min-w-0 min-h-0 row-start-1",
   statusBar:
     "grid w-full max-w-none min-w-0 grid-cols-[minmax(0,1fr)_max-content] items-center gap-2 max-[1200px]:grid-cols-[minmax(0,1fr)] max-[1200px]:justify-items-stretch",
   statusBarReason:
