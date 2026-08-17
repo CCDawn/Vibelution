@@ -85,19 +85,32 @@ def save_model_capability_cache(payload: dict[str, Any], cache_path: Path | None
     save_model_catalog_state(payload, _catalog_path(cache_path))
 
 
-def _load_legacy_capability_cache(path: Path) -> dict[str, Any]:
+def _load_legacy_capability_cache(path: Path) -> tuple[dict[str, Any], str]:
     if not path.exists():
-        return {"schemaVersion": 1, "models": {}}
+        return {"schemaVersion": 1, "models": {}}, "not_present"
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return {"schemaVersion": 1, "models": {}}
+        return {"schemaVersion": 1, "models": {}}, "cold_rebuild"
     if not isinstance(payload, dict) or payload.get("schemaVersion", 1) != 1:
-        return {"schemaVersion": 1, "models": {}}
+        return {"schemaVersion": 1, "models": {}}, "cold_rebuild"
     models = payload.get("models")
     if not isinstance(models, dict):
-        payload["models"] = {}
-    return payload
+        return {"schemaVersion": 1, "models": {}}, "cold_rebuild"
+    return payload, "imported"
+
+
+def _save_catalog_preserving_original(payload: dict[str, Any], path: Path) -> None:
+    original = path.read_bytes() if path.exists() else None
+    try:
+        save_model_catalog_state(payload, path)
+    except Exception:
+        if original is None:
+            if path.exists():
+                path.unlink()
+        else:
+            path.write_bytes(original)
+        raise
 
 
 def _normalized_image_input_capability(details: dict[str, Any]) -> dict[str, Any]:
@@ -263,9 +276,11 @@ def upgrade_legacy_capability_cache_if_needed(
 ) -> dict[str, Any]:
     """Import leftover ``model-capabilities.json`` into the catalog once.
 
-    Idempotent. Missing or unreadable JSON still records completion so runtime
-    never waits on the leftover file. Does not delete the JSON file. A failed
-    catalog write restores the previous catalog bytes when they existed.
+    Idempotent. Missing JSON records a ``not_present`` outcome. Unreadable or
+    invalid non-authoritative cache records ``cold_rebuild`` so runtime never
+    waits on the leftover file or claims its contents were imported. The
+    leftover file is not changed. A failed catalog write restores the previous
+    catalog bytes when they existed.
     ``cache_path`` selects an explicit catalog file and skips the leftover JSON
     import, matching test fixtures that already own a catalog.
     """
@@ -289,19 +304,21 @@ def upgrade_legacy_capability_cache_if_needed(
     state = load_model_catalog_state(path)
     metadata = state.get("metadata", {})
     if isinstance(metadata, dict) and metadata.get("legacyCapabilityImportCompleted") is True:
-        return state
-    legacy = _load_legacy_capability_cache(leftover)
+        if str(metadata.get("legacyCapabilityImportOutcome") or "").strip():
+            return state
+        _legacy, inferred_outcome = _load_legacy_capability_cache(leftover)
+        backfilled = copy.deepcopy(state)
+        backfilled_metadata = backfilled.setdefault("metadata", {})
+        backfilled_metadata["legacyCapabilityImportOutcome"] = (
+            "legacy_completed" if inferred_outcome == "imported" else inferred_outcome
+        )
+        _save_catalog_preserving_original(backfilled, path)
+        return backfilled
+    legacy, import_outcome = _load_legacy_capability_cache(leftover)
     imported = import_legacy_capability_cache(state, legacy, _legacy_to_canonical_refs(public_config))
-    original = path.read_bytes() if path.exists() else None
-    try:
-        save_model_catalog_state(imported, path)
-    except Exception:
-        if original is None:
-            if path.exists():
-                path.unlink()
-        else:
-            path.write_bytes(original)
-        raise
+    imported_metadata = imported.setdefault("metadata", {})
+    imported_metadata["legacyCapabilityImportOutcome"] = import_outcome
+    _save_catalog_preserving_original(imported, path)
     return imported
 
 
