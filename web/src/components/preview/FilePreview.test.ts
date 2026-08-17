@@ -1,8 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { buildFilePreviewKey } from "./FilePreview";
+import { postBrowserTelemetry } from "../../app/browserTelemetry";
+import {
+  buildFilePreviewKey,
+  buildPreviewEditorErrorTelemetryEvent,
+  reportPreviewEditorError,
+  resetPreviewEditorErrorTelemetryForTests,
+  safePreviewPathForLog,
+} from "./FilePreview";
 import previewSource from "./FilePreview.tsx?raw";
 import stylesSource from "./FilePreview.styles.ts?raw";
+
+vi.mock("../../app/browserTelemetry", () => ({
+  postBrowserTelemetry: vi.fn(),
+}));
 
 describe("buildFilePreviewKey", () => {
   it("changes when the preview content or log filter changes", () => {
@@ -86,6 +97,8 @@ describe("FilePreview editor fallback contract", () => {
     expect(previewSource).toContain("className={styles.plainFallbackClass}");
     expect(stylesSource).toContain("plainFallbackClass");
     expect(previewSource).toContain("[file-preview-fallback]");
+    expect(previewSource).toContain("reportPreviewEditorError");
+    expect(previewSource).toContain("browser.preview.error");
   });
 
   it("loads CodeMirror language extensions on demand", () => {
@@ -100,5 +113,56 @@ describe("FilePreview editor fallback contract", () => {
     expect(previewSource).toContain('import("@codemirror/lang-python")');
     expect(previewSource).toContain('import("@codemirror/lang-yaml")');
     expect(previewSource).toContain("useFilePreviewLanguageExtensions(file.language)");
+  });
+});
+
+describe("PreviewEditorErrorBoundary telemetry", () => {
+  afterEach(() => {
+    resetPreviewEditorErrorTelemetryForTests();
+    vi.mocked(postBrowserTelemetry).mockClear();
+  });
+
+  it("builds a scene-ready preview crash event without file body text", () => {
+    const error = new Error("CodeMirror exploded");
+    const event = buildPreviewEditorErrorTelemetryEvent(error, "web/src/routes/GitRoute.tsx", {
+      componentStackLength: 42,
+    });
+
+    expect(event).toMatchObject({
+      phase: "error",
+      eventCode: "browser.preview.error",
+      level: "error",
+      message: "file preview editor crashed",
+      fields: {
+        surface: "file_preview",
+        path: "web/src/routes/GitRoute.tsx",
+        errorName: "Error",
+        errorMessage: "Error: CodeMirror exploded",
+        componentStackLength: 42,
+      },
+    });
+    expect(JSON.stringify(event)).not.toContain("fallback");
+    expect(JSON.stringify(event)).not.toContain("displayContent");
+  });
+
+  it("redacts absolute and escaped preview paths to a basename", () => {
+    expect(safePreviewPathForLog(String.raw`C:\Users\Administrator\secret\notes.md`)).toBe("notes.md");
+    expect(safePreviewPathForLog("../secret.txt")).toBe("secret.txt");
+    expect(safePreviewPathForLog("core/web/services/file_service.py")).toBe("core/web/services/file_service.py");
+  });
+
+  it("posts one telemetry event per unique preview crash", () => {
+    const error = new Error("unique preview crash");
+    reportPreviewEditorError(error, "raw/backend.stdout.log", { componentStackLength: 12 });
+    reportPreviewEditorError(error, "raw/backend.stdout.log", { componentStackLength: 12 });
+
+    expect(postBrowserTelemetry).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(postBrowserTelemetry).mock.calls[0]?.[0]).toMatchObject({
+      eventCode: "browser.preview.error",
+      fields: {
+        path: "raw/backend.stdout.log",
+        errorMessage: "Error: unique preview crash",
+      },
+    });
   });
 });
