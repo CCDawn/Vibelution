@@ -827,6 +827,8 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("launcherControlPlaneStarting ? (");
     expect(routeSource).toContain('title={copy.lifecycleStarting}');
     expect(routeSource).toContain("launcherReading={Boolean(");
+    expect(routeSource).toContain("listLoading={Boolean(");
+    expect(routeSource).toContain("branchInstancesQuery.isPending || (branchInstancesQuery.isFetching && !branchInstancesQuery.data)");
     // The lifecycle display must expose a dedicated starting state while the host is not ready.
     expect(routeSource).toContain("starting: launcherControlPlaneStarting");
   });

@@ -272,3 +272,34 @@ def test_worktree_is_dirty_skips_invalid_cwd(tmp_path, monkeypatch):
     assert workspace._worktree_is_dirty(missing) is False
     assert workspace._worktree_is_dirty(file_path) is False
     assert workspace._worktree_is_dirty(tmp_path) is False
+
+
+def test_worktree_dirty_map_dedupes_paths_and_parallelizes(tmp_path, monkeypatch):
+    calls: list[str] = []
+
+    def fake_dirty(path):
+        calls.append(str(path))
+        return False
+
+    monkeypatch.setattr(workspace, "_worktree_is_dirty", fake_dirty)
+    first = tmp_path / "one"
+    second = tmp_path / "two"
+    third = tmp_path / "three"
+    fourth = tmp_path / "four"
+    for path in (first, second, third, fourth):
+        path.mkdir()
+
+    sequential = workspace._worktree_dirty_map([first, first, first])
+    assert sequential[workspace._norm(first)] is False
+    assert calls.count(str(first)) == 1
+
+    calls.clear()
+    monkeypatch.setattr(workspace, "DIRTY_PARALLEL_THRESHOLD", 2)
+    parallel = workspace._worktree_dirty_map([first, second, third, fourth, first])
+    assert set(parallel) == {
+        workspace._norm(first),
+        workspace._norm(second),
+        workspace._norm(third),
+        workspace._norm(fourth),
+    }
+    assert len(calls) == 4
