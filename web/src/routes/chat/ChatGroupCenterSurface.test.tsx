@@ -75,6 +75,16 @@ describe("ChatGroupCenterSurface hand-test substitutes", () => {
     expect(html).toContain("value=\"下一议题\"");
   });
 
+  it("renders the route-owned leading control in the standard group composer", () => {
+    const html = renderToStaticMarkup(
+      <ChatGroupCenterSurface
+        {...baseProps({ composerLeadingControl: <button type="button">更多操作</button> })}
+      />,
+    );
+    expect(html).toContain("更多操作");
+    expect(html.indexOf("更多操作")).toBeLessThan(html.indexOf("value=\"下一议题\""));
+  });
+
   it("renders project-bus empty notice stream and broadcast composer", () => {
     const html = renderToStaticMarkup(
       <ChatGroupCenterSurface

@@ -1,0 +1,27 @@
+const styles: Record<string, string> = {
+  primaryPanel: "vui-routes-chatcomposerplusmenu primaryPanel grid w-60 shrink-0 content-start gap-0.5 p-1.5 max-h-[min(70vh,35rem)] overflow-y-auto overscroll-contain",
+  secondaryPanel: "vui-routes-chatcomposerplusmenu secondaryPanel grid w-72 shrink-0 content-start gap-0.5 border-l border-[var(--vui-border-subtle)] p-1.5 max-h-[min(70vh,35rem)] overflow-y-auto overscroll-contain",
+  clusterButton: "vui-routes-chatcomposerplusmenu clusterButton !flex min-h-11 w-full items-center !justify-start gap-2.5 rounded-[calc(var(--radius-control)-2px)] px-2 py-1.5 text-left text-[var(--fg-secondary)] hover:bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)] hover:text-[var(--fg-primary)]",
+  clusterButtonExpanded: "vui-routes-chatcomposerplusmenu clusterButtonExpanded bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)] text-[var(--fg-primary)]",
+  clusterIcon: "vui-routes-chatcomposerplusmenu clusterIcon inline-grid size-7 shrink-0 place-items-center rounded-full bg-[var(--vui-surface-raised)] text-[var(--fg-tertiary)]",
+  clusterLabel: "vui-routes-chatcomposerplusmenu clusterLabel min-w-0 flex-1 truncate text-sm font-semibold",
+  clusterChevron: "vui-routes-chatcomposerplusmenu clusterChevron shrink-0 text-[var(--fg-tertiary)]",
+  menuItem: "vui-routes-chatcomposerplusmenu menuItem !flex min-h-10 w-full items-center !justify-start gap-2 rounded-[calc(var(--radius-control)-2px)] px-2.5 py-2 text-left text-[var(--fg-secondary)] hover:bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)] hover:text-[var(--fg-primary)]",
+  itemIcon: "vui-routes-chatcomposerplusmenu itemIcon inline-grid size-5 shrink-0 place-items-center text-[var(--fg-tertiary)]",
+  itemCopy: "vui-routes-chatcomposerplusmenu itemCopy grid min-w-0 flex-1 gap-0.5",
+  itemLabel: "vui-routes-chatcomposerplusmenu itemLabel truncate text-sm font-semibold",
+  itemHint: "vui-routes-chatcomposerplusmenu itemHint truncate text-xs text-[var(--fg-tertiary)]",
+  toggleStateOn: "vui-routes-chatcomposerplusmenu toggleStateOn text-xs font-bold text-[var(--accent-cool-2)]",
+  toggleStateOff: "vui-routes-chatcomposerplusmenu toggleStateOff text-xs font-bold text-[var(--fg-tertiary)]",
+  popoverContent: "vui-routes-chatcomposerplusmenu popoverContent !max-w-none !overflow-visible !p-0",
+  menu: "vui-routes-chatcomposerplusmenu menu flex w-max items-stretch",
+  hiddenInput: "vui-routes-chatcomposerplusmenu hiddenInput sr-only",
+  referenceBody: "vui-routes-chatcomposerplusmenu referenceBody grid min-h-0 gap-3 overflow-hidden py-1",
+  referenceList: "vui-routes-chatcomposerplusmenu referenceList grid max-h-[min(52vh,24rem)] gap-1 overflow-y-auto",
+  referenceOption: "vui-routes-chatcomposerplusmenu referenceOption !grid min-h-11 w-full !justify-start gap-0.5 px-3 py-2 text-left",
+  referenceTitle: "vui-routes-chatcomposerplusmenu referenceTitle truncate text-sm",
+  referenceMeta: "vui-routes-chatcomposerplusmenu referenceMeta truncate text-xs text-[var(--fg-tertiary)]",
+  referenceEmpty: "vui-routes-chatcomposerplusmenu referenceEmpty px-3 py-5 text-center text-sm text-[var(--fg-tertiary)]",
+};
+
+export default styles;

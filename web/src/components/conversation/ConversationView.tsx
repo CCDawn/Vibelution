@@ -410,6 +410,7 @@ export function ConversationView({
   composerReferences = [],
   slashCommandSuggestions = [],
   composerAttachmentInputDisabled,
+  composerLeadingControl,
   permissionControl,
   toolApproval = null,
   llmControl,
@@ -4502,17 +4503,19 @@ export function ConversationView({
           />
           <div className={composerVariant === "codex" ? styles.composerToolbarCodex : styles.composerToolbar}>
             <div className={styles.composerToolbarStart}>
-              <VButton
-                className={styles.attachButton}
-                isIconOnly
-                isDisabled={attachmentInputDisabled || !onAddComposerAttachments}
-                type="button"
-                onClick={() => attachmentInputRef.current?.click()}
-                title={lang === "zh" ? "添加图片" : "Attach image"}
-                aria-label={lang === "zh" ? "添加图片" : "Attach image"}
-              >
-                <ImagePlus size={16} />
-              </VButton>
+              {composerLeadingControl ?? (
+                <VButton
+                  className={styles.attachButton}
+                  isIconOnly
+                  isDisabled={attachmentInputDisabled || !onAddComposerAttachments}
+                  type="button"
+                  onClick={() => attachmentInputRef.current?.click()}
+                  title={lang === "zh" ? "添加图片" : "Attach image"}
+                  aria-label={lang === "zh" ? "添加图片" : "Attach image"}
+                >
+                  <ImagePlus size={16} />
+                </VButton>
+              )}
               {permissionControl ? (
                 <AgentPermissionPresetControl
                   {...permissionControl}

@@ -112,6 +112,8 @@ export type ConversationViewProps = {
   composerReferences?: SessionReferenceAttachment[];
   slashCommandSuggestions?: SkillLibraryItem[];
   composerAttachmentInputDisabled?: boolean;
+  /** Route-owned leading composer control, such as the formal Chat plus menu. */
+  composerLeadingControl?: ReactNode;
   permissionControl?: ConversationPermissionControl;
   /** Pending tool approval shown under the matching running tool (Codex-style). */
   toolApproval?: ConversationToolApprovalSurface | null;

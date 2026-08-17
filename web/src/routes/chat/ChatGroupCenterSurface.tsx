@@ -47,6 +47,7 @@ export type ChatGroupCenterSurfaceProps = {
   expandedGroupMessageIds: string[];
   chatMentionTargets: ChatMentionTarget[];
   userDisplayName: string;
+  composerLeadingControl?: ReactNode;
   projectBusRefreshing: boolean;
   projectBusRefreshError: string;
   projectBusSendPending: boolean;
@@ -253,6 +254,7 @@ export function ChatGroupCenterSurface({
   expandedGroupMessageIds,
   chatMentionTargets,
   userDisplayName,
+  composerLeadingControl,
   projectBusRefreshing,
   projectBusRefreshError,
   projectBusSendPending,
@@ -522,6 +524,7 @@ export function ChatGroupCenterSurface({
         )}
       </div>
       <div className={styles.groupComposerBar}>
+        {composerLeadingControl}
         <VNativeInput
           value={groupTopicDraft}
           onChange={(event) => onGroupTopicDraftChange(event.target.value)}
