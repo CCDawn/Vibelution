@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from core.web.services import agent_config_change_service
 from core.web.services import agent_directory_service
 from core.web.services import session_service
 from core.web.services.agent_config_workspace_service import invalidate_agent_config_workspace_cache
@@ -124,3 +125,75 @@ def create_agent_from_catalog_request(
         agent = update_agent_avatar(agent_id, avatar_image_path=avatar_path)
     invalidate_agent_config_workspace_cache()
     return agent
+
+
+_AGENT_UPDATE_FIELD_MAP = {
+    "displayName": "display_name",
+    "llmBindings": "llm_bindings",
+    "primaryMode": "primary_mode",
+    "roleKey": "role_key",
+    "promptTemplateId": "prompt_template_id",
+    "toolPolicyId": "tool_policy_id",
+    "memoryPolicyId": "memory_policy_id",
+    "toolPolicy": "tool_policy",
+    "memoryPolicy": "memory_policy",
+    "contextCompressionPolicy": "context_compression_policy",
+    "delegationPolicy": "delegation_policy",
+    "supervisionPolicy": "supervision_policy",
+    "reasoningEffortBySlot": "reasoning_effort_by_slot",
+    "permissionPreset": "permission_preset",
+    "personaProfile": "persona_profile",
+    "taskProfile": "task_profile",
+    "metadata": "metadata",
+}
+
+
+def update_agent_from_catalog_request(
+    agent_id: str,
+    *,
+    updates: dict[str, Any],
+    expected_updated_at: str = "",
+    expected_config_revision: int | None = None,
+    source_draft_id: str = "",
+    source: str = "agent_update_tool",
+) -> dict[str, Any]:
+    """Update non-lifecycle Agent configuration through the authoritative directory service."""
+
+    normalized_agent_id = str(agent_id or "").strip()
+    if not normalized_agent_id:
+        raise AgentDirectoryError("Agent id is required.")
+    if not isinstance(updates, dict) or not updates:
+        raise AgentDirectoryError("At least one Agent update field is required.")
+
+    unknown_fields = sorted(set(updates).difference(_AGENT_UPDATE_FIELD_MAP))
+    if unknown_fields:
+        if "status" in unknown_fields:
+            raise AgentDirectoryError("Agent lifecycle status must use agent_archive_tool; status is not accepted here.")
+        raise AgentDirectoryError("Unsupported Agent update fields: " + ", ".join(unknown_fields))
+
+    current = get_agent(normalized_agent_id, include_archived=True)
+    if current is None:
+        raise agent_directory_service.AgentNotFoundError(f"Agent not found: {normalized_agent_id}")
+
+    update_kwargs = {
+        _AGENT_UPDATE_FIELD_MAP[field]: value
+        for field, value in updates.items()
+    }
+    updated = update_agent_instance(
+        normalized_agent_id,
+        **update_kwargs,
+        expected_updated_at=str(expected_updated_at or "").strip(),
+        expected_config_revision=expected_config_revision,
+    )
+    revision = agent_config_change_service.record_agent_config_revision(
+        normalized_agent_id,
+        before=current,
+        after=updated,
+        source=str(source or "agent_update_tool").strip() or "agent_update_tool",
+        source_draft_id=str(source_draft_id or "").strip(),
+    )
+    invalidate_agent_config_workspace_cache()
+    return {
+        **updated,
+        **({"publishedConfigChange": revision} if revision else {}),
+    }

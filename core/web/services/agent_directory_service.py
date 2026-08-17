@@ -450,11 +450,17 @@ _EPISODIC_NAMED_SESSION_AGENT_ALLOWED_TOOLS = (
 )
 PROJECT_OPERATION_TOOL_NAMES = (
     "agent_create_tool",
+    "agent_update_tool",
     "agent_archive_tool",
     "agent_reset_tool",
     "session_create_tool",
+    "session_update_tool",
     "session_stop_tool",
     "session_delete_tool",
+    "agent_inbox_list_tool",
+    "agent_message_consume_tool",
+    "agent_messages_consume_all_tool",
+    "knowledge_base_acl_grant_tool",
 )
 DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = tuple(
     [

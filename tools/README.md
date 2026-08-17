@@ -56,7 +56,7 @@ Model 可见性
 | `agent_tool_governance_tools.py` | `agent_tool_permission_request_tool` | `test_tool_authorization_execution.py` |
 | `cli_agent_tools.py` | `cli_agent_run_tool` | `test_agent_protocol.py` |
 | `session_child_tools.py` | `create_child_session_tool` · `list_child_sessions_tool` | `test_agent_protocol.py` |
-| `project_operation_tools.py` | `agent_create_tool` · `agent_archive_tool` · `agent_reset_tool` · `session_create_tool` · `session_stop_tool` · `session_delete_tool` | `test_project_operation_tools.py` |
+| `project_operation_tools.py` | `agent_create_tool` · `agent_update_tool` · `agent_archive_tool` · `agent_reset_tool` · `session_create_tool` · `session_update_tool` · `session_stop_tool` · `session_delete_tool` · `agent_inbox_list_tool` · `agent_message_consume_tool` · `agent_messages_consume_all_tool` · `knowledge_base_acl_grant_tool` | `test_project_operation_tools.py` |
 | `conversation_history_tools.py` | `history_search_tool` · `history_fetch_tool` · `history_timeline_tool` · `history_checkpoint_tool` | `test_agent_protocol.py` |
 | `conversation_log_tools.py` | `conversation_log_inspect_tool` | `test_conversation_log_tools.py` |
 | `python_intelligence_tools.py` | `code_symbol_tool` · `python_lint_tool` | `test_python_intelligence_tools.py` |
