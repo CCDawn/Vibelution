@@ -86,7 +86,8 @@ describe("UsageRoute layout contract", () => {
   ] as const;
 
   it("renders a compact operational token usage route from the usage summary API", () => {
-    expect(routeSource).toContain('fetchJson<UsageSummaryResponse>("/api/usage/summary")');
+    expect(routeSource).toContain('from "../api/usage"');
+    expect(routeSource).toContain("fetchUsageSummary");
     expect(routeSource).toContain("queryKeys.usageSummary");
     expect(routeSource).toContain("globalTokenUsage");
     expect(routeSource).toContain("lastTokenUsage");
