@@ -811,6 +811,119 @@ def test_readiness_blocked_log_excludes_absolute_paths(tmp_path, monkeypatch):
     assert str(project.resolve()) not in serialized
 
 
+def _capture_storage_migration_step_logs(monkeypatch) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    rm_events: list[dict[str, object]] = []
+    scene_events: list[dict[str, object]] = []
+
+    def capture_rm(event_name, payload, **kwargs):
+        if str(event_name).startswith("storage_migration.step."):
+            rm_events.append({"event": event_name, **dict(payload)})
+
+    def capture_scene(component, phase, event_code, **kwargs):
+        if str(event_code).startswith("storage_migration.step."):
+            scene_events.append(
+                {
+                    "component": component,
+                    "phase": phase,
+                    "event": event_code,
+                    **dict(kwargs.get("fields") or {}),
+                }
+            )
+
+    monkeypatch.setattr(
+        "core.runtime_manager.scene_logging.append_runtime_manager_file_event",
+        capture_rm,
+    )
+    monkeypatch.setattr(
+        "core.web.services.runtime_scene_service.record_runtime_scene_event_quietly",
+        capture_scene,
+    )
+    return rm_events, scene_events
+
+
+def test_apply_step_logs_exclude_absolute_paths(tmp_path, monkeypatch):
+    project, _projects_home, data_home = _project(tmp_path, monkeypatch)
+    source = data_home / "workspace" / "agent.json"
+    source.parent.mkdir(parents=True)
+    source.write_text("data\n", encoding="utf-8")
+    rm_events, scene_events = _capture_storage_migration_step_logs(monkeypatch)
+
+    result = apply_storage_migration(project)
+
+    assert result["status"] == "completed"
+    assert [item["event"] for item in rm_events] == [
+        "storage_migration.step.started",
+        "storage_migration.step.completed",
+    ]
+    assert [item["event"] for item in scene_events] == [
+        "storage_migration.step.started",
+        "storage_migration.step.completed",
+    ]
+    completed = rm_events[-1]
+    assert completed["action"] == "apply"
+    assert completed["step"] == "completed"
+    assert completed["projectId"] == "test-vibelution"
+    assert completed["copiedFiles"] == 1
+    assert completed["totalFiles"] >= 1
+    assert isinstance(completed["elapsedMs"], int)
+    assert "projectRoot" not in completed
+    serialized = json.dumps(rm_events + scene_events)
+    assert str(project.resolve()) not in serialized
+    assert str(source) not in serialized
+
+
+def test_apply_step_failed_log_uses_safe_reason_code(tmp_path, monkeypatch):
+    project, _projects_home, data_home = _project(tmp_path, monkeypatch)
+    source = data_home / "workspace" / "agent.json"
+    source.parent.mkdir(parents=True)
+    source.write_text("data\n", encoding="utf-8")
+    registry = project / ".docs" / "project-memory" / "agent-registry.json"
+    registry.parent.mkdir(parents=True)
+    registry.write_text(
+        json.dumps({"workClaims": {"claim-1": {"status": "active", "branch": "codex/test"}}}) + "\n",
+        encoding="utf-8",
+    )
+    rm_events, scene_events = _capture_storage_migration_step_logs(monkeypatch)
+
+    with pytest.raises(StorageMigrationError, match="readiness blocked"):
+        apply_storage_migration(project)
+
+    assert [item["event"] for item in rm_events] == [
+        "storage_migration.step.started",
+        "storage_migration.step.failed",
+    ]
+    failed = rm_events[-1]
+    assert failed["action"] == "apply"
+    assert failed["errorType"] == "StorageMigrationError"
+    assert failed["reasonCode"] == "active_work_present"
+    assert scene_events[-1]["reasonCode"] == "active_work_present"
+    serialized = json.dumps(rm_events + scene_events)
+    assert str(project.resolve()) not in serialized
+    assert "codex/test" not in serialized
+
+
+def test_rollback_step_logs_missing_marker_without_paths(tmp_path, monkeypatch):
+    project, _projects_home, _data_home = _project(tmp_path, monkeypatch)
+    rm_events, scene_events = _capture_storage_migration_step_logs(monkeypatch)
+
+    result = rollback_storage_switch(project)
+
+    assert result["rolledBack"] is False
+    assert result["reason"] == "completion_marker_missing"
+    completed = rm_events[-1]
+    assert [item["event"] for item in rm_events] == [
+        "storage_migration.step.started",
+        "storage_migration.step.completed",
+    ]
+    assert completed["action"] == "rollback"
+    assert completed["rolledBack"] is False
+    assert completed["reasonCode"] == "completion_marker_missing"
+    assert "markerPath" not in completed
+    serialized = json.dumps(rm_events + scene_events)
+    assert str(project.resolve()) not in serialized
+    assert "markerPath" not in serialized
+
+
 def test_sqlite_destination_conflict_preserves_preexisting_bundle(tmp_path, monkeypatch):
     project, _projects_home, data_home = _project(tmp_path, monkeypatch)
     database = data_home / "workspace" / "state.sqlite"
