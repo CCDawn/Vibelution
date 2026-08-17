@@ -1076,6 +1076,12 @@ internal static class VibelutionLauncher
         {
             arguments.Add("--no-browser");
         }
+        if (string.Equals(action, "stop-launcher", StringComparison.OrdinalIgnoreCase))
+        {
+            arguments.Add("--use-state-owned-backend-pid");
+            arguments.Add("--workspace");
+            arguments.Add(Quote(projectDir));
+        }
 
         var startInfo = new ProcessStartInfo
         {
