@@ -55,43 +55,85 @@ _ASSISTANT_GOAL_CONTEXT_KEYWORDS = (
 )
 
 
+def _decode_binary(value: Any) -> Any:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).decode("utf-8", errors="replace")
+    return value
+
+
+def _maybe_json(value: Any) -> Any:
+    value = _decode_binary(value)
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if not text or text[0] not in "{[":
+        return value
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return value
+
+
 def _coerce_text(value: Any) -> str:
     if value is None:
         return ""
-    if isinstance(value, (bytes, bytearray, memoryview)):
-        return bytes(value).decode("utf-8", errors="replace")
+    value = _decode_binary(value)
     if isinstance(value, str):
         return value
     return str(value)
 
 
-def _maybe_json(value: Any) -> Any:
-    if isinstance(value, (bytes, bytearray, memoryview)):
-        value = bytes(value).decode("utf-8", errors="replace")
-    if isinstance(value, str):
-        text = value.strip()
-        if text.startswith("{") or text.startswith("["):
-            try:
-                return json.loads(text)
-            except json.JSONDecodeError:
-                return value
-    return value
+_MAPPING_KEEP_KEYS = (
+    "sessionId",
+    "session_id",
+    "runId",
+    "run_id",
+    "agentId",
+    "agent_id",
+    "mode",
+    "runKind",
+    "run_kind",
+    "llmSlot",
+    "llm_slot",
+    "modelId",
+    "model_id",
+    "profileId",
+    "profile_id",
+    "directSessionId",
+    "direct_session_id",
+    "workspacePath",
+    "workspace_path",
+    "supervisedRole",
+    "supervised_role",
+    "replacements",
+    "no_new_evidence_steps",
+    "consecutive_tool_only_steps",
+    "consecutive_bookkeeping_tool_only_steps",
+    "delegation_failures",
+    "messageIndex",
+    "payloadValidationErrorType",
+    "promptCachePartition",
+    "prompt_cache_partition",
+    "llmBindings",
+    "llm_bindings",
+)
+_MAPPING_ENVELOPES = ("runtime", "payload", "config", "binding", "current", "details", "state")
 
 
 def _as_mapping(value: Any) -> Dict[str, Any]:
-    if isinstance(value, (bytes, bytearray, memoryview)):
-        value = bytes(value).decode("utf-8", errors="replace")
-    if isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return {}
-        try:
-            value = json.loads(text)
-        except json.JSONDecodeError:
-            return {}
-    if isinstance(value, Mapping):
-        return dict(value)
-    return {}
+    value = _maybe_json(value)
+    if not isinstance(value, Mapping):
+        return {}
+    mapping = dict(value)
+    if any(key in mapping for key in _MAPPING_KEEP_KEYS):
+        return mapping
+    for envelope in _MAPPING_ENVELOPES:
+        if envelope not in mapping:
+            continue
+        nested = _as_mapping(mapping.get(envelope))
+        if nested:
+            return nested
+    return mapping
 
 
 def _mapping_get(mapping: Mapping[str, Any], *keys: str) -> Any:
@@ -163,14 +205,76 @@ def _looks_like_numbered_confirmation(text: str) -> bool:
     return any(keyword in prompt for keyword in _CONFIRMATION_KEYWORDS)
 
 
+def _flag_enabled(value: Any, default: bool = True) -> bool:
+    value = _maybe_json(value)
+    if isinstance(value, Mapping):
+        nested = value.get("enabled")
+        if nested is None:
+            nested = value.get("visible")
+        if nested is None:
+            nested = value.get("allowed")
+        return _coerce_bool(nested, default)
+    return _coerce_bool(value, default)
+
+
+def _coerce_name_list(value: Any) -> List[str]:
+    value = _maybe_json(value)
+    if value is None:
+        return []
+    if isinstance(value, (str, bytes, bytearray, memoryview)):
+        text = _coerce_text(value).strip()
+        parsed = _maybe_json(text)
+        if parsed is not text and not isinstance(parsed, (str, bytes, bytearray, memoryview)):
+            return _coerce_name_list(parsed)
+        return [text] if text else []
+    if isinstance(value, Mapping):
+        for key in ("tools", "items", "names", "visible_tools", "visibleTools"):
+            if key not in value:
+                continue
+            nested = value.get(key)
+            if nested is None or isinstance(nested, (bool, int, float)):
+                continue
+            return _coerce_name_list(nested)
+        tool_name = value.get("name")
+        if tool_name is None:
+            tool_name = value.get("id")
+        if tool_name is not None:
+            if not _flag_enabled(value, True):
+                return []
+            name = _coerce_text(tool_name).strip()
+            return [name] if name else []
+        names: List[str] = []
+        for key, enabled in value.items():
+            name = _coerce_text(key).strip()
+            if name and _flag_enabled(enabled, True):
+                names.append(name)
+        return names
+    try:
+        iterator = list(value)
+    except TypeError:
+        name = _coerce_text(value).strip()
+        return [name] if name else []
+    names: List[str] = []
+    for item in iterator:
+        for name in _coerce_name_list(item):
+            if name not in names:
+                names.append(name)
+    return names
+
+
 def _coerce_message_list(messages: Any) -> List[Any]:
     messages = _maybe_json(messages)
-    if messages is None:
+    if messages is None or isinstance(messages, (str, bytes, bytearray, memoryview)):
         return []
     if isinstance(messages, Mapping):
-        return [dict(messages)]
-    if isinstance(messages, (str, bytes, bytearray, memoryview)):
-        return []
+        nested = messages.get("messages")
+        if nested is None:
+            nested = messages.get("items")
+        if nested is None:
+            nested = messages.get("history")
+        if nested is not None:
+            return _coerce_message_list(nested)
+        return [dict(messages)] if messages else []
     try:
         return list(messages)
     except TypeError:
@@ -203,9 +307,21 @@ def _message_content(message: Any) -> str:
     message = _maybe_json(message)
     if isinstance(message, dict):
         content = message.get("content", "")
+        if content in (None, "") and message.get("text") not in (None, ""):
+            content = message.get("text")
     else:
         content = getattr(message, "content", "")
-    content = _maybe_json(content)
+    parsed = _maybe_json(content)
+    if parsed is not content and isinstance(parsed, Mapping) and any(
+        key in parsed for key in ("text", "content", "value")
+    ):
+        content = parsed
+    elif parsed is not content and isinstance(parsed, list):
+        content = parsed
+    if isinstance(content, Mapping):
+        return _coerce_text(
+            content.get("text") or content.get("content") or content.get("value") or ""
+        ).strip()
     if isinstance(content, list):
         parts = []
         for item in content:
@@ -575,17 +691,7 @@ def _record_llm_route_success(
 
 def _record_agent_tool_surface_event(tool_names: List[str], *, recorder: Any = None) -> None:
     fn = recorder or _record_agent_scene_event
-    parsed_names = _maybe_json(tool_names)
-    if isinstance(parsed_names, Mapping):
-        parsed_names = list(parsed_names)
-    elif isinstance(parsed_names, (str, bytes, bytearray, memoryview)):
-        name = _coerce_text(parsed_names).strip()
-        parsed_names = [name] if name else []
-    try:
-        items = list(parsed_names or [])
-    except TypeError:
-        items = []
-    names = [_coerce_text(name).strip() for name in items if _coerce_text(name).strip()]
+    names = _coerce_name_list(tool_names)
     group_counts: Dict[str, int] = {}
     for name in names:
         group = _TOOL_SURFACE_GROUPS.get(name, "other")
@@ -626,22 +732,34 @@ def _coerce_nonnegative_int(value: Any) -> int:
 
 def _format_tool_result_replacement_summary(state: Dict[str, Any]) -> str:
     payload = _as_mapping(state)
-    raw_replacements = payload.get("replacements")
-    if isinstance(raw_replacements, (bytes, bytearray, memoryview)):
-        raw_replacements = bytes(raw_replacements).decode("utf-8", errors="replace")
-    if isinstance(raw_replacements, str):
-        try:
-            raw_replacements = json.loads(raw_replacements)
-        except json.JSONDecodeError:
-            raw_replacements = []
+    raw_replacements = _maybe_json(payload.get("replacements"))
     if isinstance(raw_replacements, Mapping):
-        raw_items = [item for item in raw_replacements.values() if isinstance(item, Mapping)]
-    else:
+        nested = raw_replacements.get("items")
+        if nested is None:
+            nested = raw_replacements.get("replacements")
+        if nested is not None:
+            raw_replacements = _maybe_json(nested)
+        else:
+            raw_replacements = [
+                item for item in raw_replacements.values() if isinstance(item, Mapping)
+            ]
+    if isinstance(raw_replacements, (str, bytes, bytearray, memoryview)):
+        raw_replacements = _maybe_json(raw_replacements)
+    if not isinstance(raw_replacements, list):
         try:
             raw_items = list(raw_replacements or [])
         except TypeError:
             raw_items = []
-    replacements = [item for item in raw_items if isinstance(item, Mapping)]
+    else:
+        raw_items = raw_replacements
+    replacements = []
+    for item in raw_items:
+        item = _maybe_json(item)
+        if not isinstance(item, Mapping):
+            continue
+        if not _flag_enabled(item, True):
+            continue
+        replacements.append(item)
     if not replacements:
         return ""
     lines = ["工具结果压缩引用:"]
