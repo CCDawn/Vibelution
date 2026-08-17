@@ -96,3 +96,33 @@ def test_round_state_coerces_false_flags_bytes_outcome_and_string_max_iterations
     )
     assert json_map.substantive_tool_calls == 0
     assert json_map.consecutive_bookkeeping_tool_only_steps == 1
+
+
+def test_round_state_unwraps_tool_name_envelopes_and_skips_disabled():
+    state = RoundStateController(max_iterations=5)
+    state.note_response_tools(
+        2,
+        "",
+        tool_names={
+            "items": [
+                {"name": "read_file_tool", "enabled": True},
+                {"name": "grep_search_tool", "enabled": False},
+            ]
+        },
+    )
+    assert state.substantive_tool_calls == 1
+    assert state.consecutive_tool_only_steps == 1
+
+    disabled = RoundStateController(max_iterations=5)
+    disabled.note_response_tools(
+        1,
+        "",
+        tool_names={"read_file_tool": {"enabled": False}, "task_list_tool": True},
+    )
+    assert disabled.substantive_tool_calls == 0
+    assert disabled.consecutive_bookkeeping_tool_only_steps == 1
+
+    filtered = RoundStateController(max_iterations=5)
+    filtered.note_response_tools(1, "", tool_names={"name": "read_file_tool", "enabled": False})
+    assert filtered.substantive_tool_calls == 0
+    assert filtered.consecutive_bookkeeping_tool_only_steps == 1

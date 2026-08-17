@@ -41,14 +41,25 @@ def _coerce_bool(value: Any, default: bool) -> bool:
 def _maybe_json(value: Any) -> Any:
     if isinstance(value, (bytes, bytearray, memoryview)):
         value = bytes(value).decode("utf-8", errors="replace")
-    if isinstance(value, str):
-        text = value.strip()
-        if text.startswith("{") or text.startswith("["):
-            try:
-                return json.loads(text)
-            except json.JSONDecodeError:
-                return value
-    return value
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if not text or text[0] not in "{[":
+        return value
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return value
+
+
+def _flag_enabled(value: Any, default: bool = True) -> bool:
+    value = _maybe_json(value)
+    if isinstance(value, Mapping):
+        nested = value.get("enabled")
+        if nested is None:
+            nested = value.get("visible")
+        return _coerce_bool(nested, default)
+    return _coerce_bool(value, default)
 
 
 def _coerce_nonnegative_int(value: Any, *, default: int = 0) -> int:
@@ -75,19 +86,29 @@ def _coerce_name_list(value: Any) -> list[str] | None:
     value = _maybe_json(value)
     if value is None:
         return None
-    if isinstance(value, (bytes, bytearray, memoryview)):
-        value = bytes(value).decode("utf-8", errors="replace")
-    if isinstance(value, str):
-        text = value.strip()
+    if isinstance(value, (str, bytes, bytearray, memoryview)):
+        text = _coerce_text(value).strip()
+        parsed = _maybe_json(text)
+        if parsed is not text and not isinstance(parsed, (str, bytes, bytearray, memoryview)):
+            return _coerce_name_list(parsed)
         return [text] if text else []
     if isinstance(value, Mapping):
+        for key in ("items", "tools", "names", "tool_names", "toolNames"):
+            if key not in value:
+                continue
+            nested = value.get(key)
+            if nested is None or isinstance(nested, (bool, int, float)):
+                continue
+            return _coerce_name_list(nested)
         if "name" in value or "toolName" in value:
+            if not _flag_enabled(value, True):
+                return []
             name = _coerce_text(value.get("name") or value.get("toolName")).strip()
             return [name] if name else []
         names: list[str] = []
         for key, enabled in value.items():
             name = _coerce_text(key).strip()
-            if name and _coerce_bool(enabled, True):
+            if name and _flag_enabled(enabled, True):
                 names.append(name)
         return names
     try:
@@ -97,8 +118,11 @@ def _coerce_name_list(value: Any) -> list[str] | None:
         return [text] if text else []
     names: list[str] = []
     for item in items:
+        item = _maybe_json(item)
         if isinstance(item, Mapping):
-            name = _coerce_text(item.get("name") or item.get("toolName")).strip()
+            if not _flag_enabled(item, True):
+                continue
+            name = _coerce_text(item.get("name") or item.get("toolName") or item.get("id") or "").strip()
         else:
             name = _coerce_text(item).strip()
         if name:
@@ -234,9 +258,14 @@ class RoundStateController:
         if named is None:
             return count
         named = [name for name in named if name]
-        if not named:
-            return count
-        return sum(1 for name in named if name not in cls.BOOKKEEPING_TOOL_NAMES)
+        if named:
+            return sum(1 for name in named if name not in cls.BOOKKEEPING_TOOL_NAMES)
+        parsed = _maybe_json(tool_names)
+        if isinstance(parsed, Mapping):
+            return 0
+        if isinstance(parsed, (list, tuple)) and parsed:
+            return 0
+        return count
 
     def add_token_usage(self, input_tokens: int, output_tokens: int) -> None:
         self.total_input_tokens += _coerce_nonnegative_int(input_tokens)
