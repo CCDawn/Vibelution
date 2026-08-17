@@ -46,32 +46,61 @@ def _decode_binary(value: Any) -> Any:
 
 def _maybe_json(value: Any) -> Any:
     value = _decode_binary(value)
-    if isinstance(value, str):
-        text = value.strip()
-        if text.startswith("{") or text.startswith("["):
-            try:
-                return json.loads(text)
-            except json.JSONDecodeError:
-                return value
-    return value
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if not text or text[0] not in "{[":
+        return value
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return value
+
+
+_SNAPSHOT_KEYS = (
+    "modified_paths",
+    "recent_blockers",
+    "delegation_history",
+    "delegation_failures",
+    "last_validation_summary",
+    "last_validation_passed",
+    "delegation_evidence_digest",
+    "status",
+    "task_type",
+    "summary",
+    "findings",
+    "scope",
+    "timeout",
+    "goal",
+)
+_SNAPSHOT_ENVELOPES = ("snapshot", "payload", "config", "state", "attention", "result")
 
 
 def _as_mapping(value: Any) -> Dict[str, Any]:
     value = _maybe_json(value)
-    if isinstance(value, Mapping):
-        return dict(value)
-    return {}
+    if not isinstance(value, Mapping):
+        return {}
+    mapping = dict(value)
+    if any(key in mapping for key in _SNAPSHOT_KEYS):
+        return mapping
+    for envelope in _SNAPSHOT_ENVELOPES:
+        if envelope not in mapping:
+            continue
+        nested = _as_mapping(mapping.get(envelope))
+        if nested:
+            return nested
+    return mapping
 
 
 def _mapping_items(value: Any) -> List[Dict[str, Any]]:
     value = _maybe_json(value)
     if isinstance(value, Mapping):
-        nested = value.get("items")
-        if nested is None:
-            nested = value.get("entries")
-        if nested is None:
-            nested = value.get("history")
-        if nested is not None:
+        for key in ("items", "entries", "history", "blockers", "failures", "records"):
+            if key not in value:
+                continue
+            nested = value.get(key)
+            if nested is None or isinstance(nested, (bool, int, float)):
+                continue
             return _mapping_items(nested)
         return [dict(value)]
     if isinstance(value, (str, bytes, bytearray, memoryview)) or value is None:
@@ -88,19 +117,39 @@ def _mapping_items(value: Any) -> List[Dict[str, Any]]:
     return items
 
 
+def _flag_enabled(value: Any, default: bool = True) -> bool:
+    value = _maybe_json(value)
+    if isinstance(value, Mapping):
+        nested = value.get("enabled")
+        if nested is None:
+            nested = value.get("visible")
+        return _coerce_bool(nested, default)
+    return _coerce_bool(value, default)
+
+
 def _coerce_str_list(value: Any) -> List[str]:
     if value is None:
         return []
     value = _maybe_json(value)
     if isinstance(value, Mapping):
+        for key in ("items", "paths", "names", "findings", "evidence"):
+            if key not in value:
+                continue
+            nested = value.get(key)
+            if nested is None or isinstance(nested, (bool, int, float)):
+                continue
+            return _coerce_str_list(nested)
         names: List[str] = []
         for key, enabled in value.items():
             text = _coerce_text(key).strip()
-            if text and _coerce_bool(enabled, True) and text not in names:
+            if text and _flag_enabled(enabled, True) and text not in names:
                 names.append(text)
         return names
     if isinstance(value, (str, bytes, bytearray, memoryview)):
         text = _coerce_text(value).strip()
+        parsed = _maybe_json(text)
+        if parsed is not text and not isinstance(parsed, (str, bytes, bytearray, memoryview)):
+            return _coerce_str_list(parsed)
         return [text] if text else []
     try:
         iterator = list(value)
@@ -109,6 +158,20 @@ def _coerce_str_list(value: Any) -> List[str]:
         return [text] if text else []
     names = []
     for item in iterator:
+        item = _maybe_json(item)
+        if isinstance(item, Mapping):
+            if not _flag_enabled(item, True):
+                continue
+            text = _coerce_text(
+                item.get("path")
+                or item.get("name")
+                or item.get("text")
+                or item.get("summary")
+                or ""
+            ).strip()
+            if text and text not in names:
+                names.append(text)
+            continue
         text = _coerce_text(item).strip()
         if text and text not in names:
             names.append(text)
@@ -808,11 +871,18 @@ class DelegationGovernor:
         ui = self._ui_getter()
         session = self._session_getter()
         payload = _as_mapping(payload)
-        try:
-            parsed = json.loads(result_text or "{}")
-        except Exception as exc:
-            _debug_logger.warning(f"[委派治理] 子 agent 结果 JSON 解析失败: {type(exc).__name__}: {exc}")
-            fallback_text = str(result_text or "").strip()
+        parsed = _maybe_json(result_text)
+        if isinstance(parsed, Mapping):
+            if "status" not in parsed and "summary" not in parsed:
+                nested = parsed.get("result")
+                if nested is None:
+                    nested = parsed.get("payload")
+                nested_map = _as_mapping(nested)
+                if nested_map:
+                    parsed = nested_map
+        if not isinstance(parsed, Mapping):
+            _debug_logger.warning("[委派治理] 子 agent 结果 JSON 解析失败: invalid payload")
+            fallback_text = _coerce_text(result_text).strip()
             if fallback_text.startswith("[超时]"):
                 parsed = {
                     "status": "timeout",

@@ -124,3 +124,57 @@ def test_delegation_governor_parses_json_snapshot_and_rejects_true_iteration():
         },
         b"diagnose",
     ) is True
+
+
+def test_delegation_governor_unwraps_snapshot_envelopes_and_skips_disabled_paths():
+    assert DelegationGovernor.has_delegation_reading_load(
+        {"snapshot": {"modified_paths": {"items": ["core/a.py", "core/b.py"]}}}
+    ) is True
+    assert DelegationGovernor.has_delegation_reading_load(
+        {
+            "modified_paths": {
+                "core/a.py": {"enabled": True},
+                "core/b.py": {"enabled": False},
+            }
+        }
+    ) is False
+    assert DelegationGovernor.is_unhelpful_terminal_delegation(
+        {"status": "completed", "findings": {"items": []}, "summary": ""}
+    ) is True
+    assert DelegationGovernor.should_cooldown_delegation(
+        {
+            "delegation_history": {
+                "items": [
+                    {"task_type": "diagnose", "status": "failed"},
+                    {"task_type": "diagnose", "status": "failed"},
+                ]
+            }
+        },
+        "diagnose",
+    ) is True
+    assert DelegationGovernor.contains_any("read the log", {"log": True, "foo": {"enabled": False}}) is True
+
+    ui = SimpleNamespace(
+        add_log=lambda *_args, **_kwargs: None,
+        add_content=lambda *_args, **_kwargs: None,
+        add_delegation_evidence=lambda *_args, **_kwargs: None,
+        finish_subagent_activity=lambda *_args, **_kwargs: None,
+    )
+    session = SimpleNamespace(
+        record_delegation_result=lambda *_args, **_kwargs: None,
+        record_delegation_failure=lambda *_args, **_kwargs: None,
+    )
+    governor = DelegationGovernor(
+        spawn_execute=lambda *_args, **_kwargs: ("{}", None),
+        sync_runtime_state_memory=lambda: None,
+        ui_getter=lambda: ui,
+        session_getter=lambda: session,
+    )
+    messages: list = []
+    outcome = governor.apply_result(
+        {"task_type": "inspect", "goal": "check", "scope": {}},
+        '{"result":{"status":"completed","summary":"ok","findings":{"items":["a.py"]}}}',
+        messages,
+    )
+    assert outcome["useful"] is True
+    assert outcome["summary"] == "ok"
