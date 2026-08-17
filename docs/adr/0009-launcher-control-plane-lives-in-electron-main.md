@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-08-14). Amended 2026-08-17: the packaged product path no longer spawns Python `:8765`.
+Accepted (2026-08-14). Amended 2026-08-17: the packaged product path no longer spawns Python `:8765`. Amended 2026-08-17: Electron start/quit reaps leftover `:8765` via `stop-launcher --use-state-owned-backend-pid` and must not attach to it as a second control plane.
 
 ## Context
 
@@ -30,7 +30,7 @@ The Launcher should be an independent product whose **service and frontend stay 
 2. **The Launcher renderer talks to main over IPC**, using the existing `preload.ts` / `IPC_CHANNELS` pattern. The product path must not `fetch` `:8765`. A disconnected empty dashboard is a control-plane failure, not a valid idle UI.
 3. **Workbench remains Python.** Electron opens a separate renderer that loads the workbench origin (typically `:8000` / Runtime Manager + FastAPI + `web/dist`). Isolated branch instances remain extra workbench windows inside the same Electron process, each with its own Python backend.
 4. **`VibelutionLauncher.exe` stays a thin no-console shim.** If an Electron desktop owner is alive, the shim forwards `start|stop|restart|rebuild-and-start` into that process (second-instance argv or an equivalent local command channel). It must not become a second control plane. WinForms NotifyIcon remains last-resort bootstrap only when Electron is not running.
-5. **Python `:8765` is a strangler leftover, not the target.** Packaged Electron no longer spawns or proxies it as the product control plane (`bootstrapMainOwnedLauncher` + `resolve-workbench`). Unpackaged checkout HTTP (`vibelution_desktop_entry.py --action launcher`) remains for tests and the native shim. Remaining Python launcher logic on the product path is invoked as no-console child/CLI libraries (`pythonw` + `windowsHide` / `CREATE_NO_WINDOW`), not as a long-lived Launcher HTTP server. `core/launcher/app.py` serving `/launcher` and `/api/launcher/*` is not the packaged control plane.
+5. **Python `:8765` is a strangler leftover, not the target.** Packaged Electron no longer spawns or proxies it as the product control plane (`bootstrapMainOwnedLauncher` + `resolve-workbench`). Unpackaged checkout HTTP (`vibelution_desktop_entry.py --action launcher`) remains for tests and the native shim. Remaining Python launcher logic on the product path is invoked as no-console child/CLI libraries (`pythonw` + `windowsHide` / `CREATE_NO_WINDOW`), not as a long-lived Launcher HTTP server. `core/launcher/app.py` serving `/launcher` and `/api/launcher/*` is not the packaged control plane. Electron start and quit must reap leftover `:8765` (`stop-launcher --use-state-owned-backend-pid` when no owned pid is known); attached bootstrap mode must not leave that HTTP host running as a second control plane.
 6. **Preserve already-shipped contracts** while moving ownership:
    - leftover workbench windows of the same origin are adopted; extras are destroyed; isolated instance windows are not destroyed as leftovers;
    - Close leftover ≠ 维护与清理; Close does not delete worktrees or uncommitted files;

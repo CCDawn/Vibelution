@@ -76,4 +76,46 @@ describe("prepareDesktopSmokeShutdown", () => {
       stopError: ""
     });
   });
+
+  it("reaps leftover Python launcher for attached smoke bootstraps", async () => {
+    const calls: string[] = [];
+
+    const summary = await prepareDesktopSmokeShutdown({
+      bootstrap: bootstrap({ mode: "attached", launcherBackendPid: 0 }),
+      closeDesktopSession: async () => {
+        calls.push("close-session");
+      },
+      recordEvent: async (event) => {
+        calls.push(`event:${event.eventCode}`);
+      },
+      stopManagedRuntime: async () => {
+        calls.push("stop-managed-runtime");
+      },
+      stopPythonLauncher: async () => {
+        calls.push("stop-python-launcher");
+        return {
+          schemaVersion: 1,
+          status: "stopped",
+          reason: "",
+          expectedBackendPid: 39368,
+          launcherBackendPid: 39368,
+          terminatedPids: [39368]
+        };
+      },
+      approveShutdown: () => {
+        calls.push("approve-shutdown");
+      },
+      stopDesktopActionLoop: () => {
+        calls.push("stop-action-loop");
+      }
+    });
+
+    expect(calls).toContain("stop-python-launcher");
+    expect(summary).toMatchObject({
+      attempted: true,
+      stopPythonLauncher: true,
+      stopStatus: "stopped",
+      stoppedPidCount: 1
+    });
+  });
 });

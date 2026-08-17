@@ -41,6 +41,8 @@ describe("Electron main tray integration", () => {
 
     expect(beforeQuitSource).toContain("if (shutdownApproved)");
     expect(mainSource).toContain("claimElectronDesktopShellOwner(paths.workspaceRoot)");
+    expect(mainSource).toContain("stopLeftoverPythonLauncher: stopOwnedPythonLauncherService");
+    expect(mainSource).not.toContain("stopPythonLauncher: ownershipMode === \"started\"");
   });
 
   it("records tray force-interrupt evidence when restart-all runs under FORCE_INTERRUPT", () => {

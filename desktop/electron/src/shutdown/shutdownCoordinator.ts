@@ -39,7 +39,9 @@ export async function decideShutdown(input: {
   return {
     allowed: true,
     reason: "no_active_work",
-    stopPythonLauncher: input.ownershipMode === "started"
+    // Leftover Python :8765 is not a second product control plane. Reap it on
+    // every approved quit, including attached bootstraps that never spawned it.
+    stopPythonLauncher: true
   };
 }
 
