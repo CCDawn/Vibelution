@@ -333,10 +333,15 @@ def compress_turn_messages(
                     "agent.context_compression_checkpoint_failed",
                     message="Failed to append context compression checkpoint to conversation ledger.",
                     level="warning",
+                    outcome="failed",
                     fields={
                         "sessionId": session_id,
                         "turnId": turn_id,
                         "errorType": type(exc).__name__,
+                        "reason": _coerce_text(combined_reason)[:160],
+                        "beforeTokens": current_tokens,
+                        "afterTokens": after_tokens,
+                        "stage": "checkpoint",
                     },
                 )
                 try:
@@ -359,8 +364,24 @@ def compress_turn_messages(
                     )
                     ledger_checkpoint_written = event is not None
                     summary_written = ledger_checkpoint_written
-                except Exception:
-                    pass
+                except Exception as fallback_exc:
+                    recorder(
+                        "runtime",
+                        "session.context_compression.ledger_failed",
+                        message="Failed to append context compression ledger fallback attempt.",
+                        level="warning",
+                        outcome="failed",
+                        fields={
+                            "sessionId": session_id,
+                            "turnId": turn_id,
+                            "errorType": type(fallback_exc).__name__,
+                            "checkpointErrorType": type(exc).__name__,
+                            "reason": _coerce_text(combined_reason)[:160],
+                            "beforeTokens": current_tokens,
+                            "afterTokens": after_tokens,
+                            "stage": "attempt_fallback",
+                        },
+                    )
         try:
             if not ledger_checkpoint_written and prompt_manager is not None:
                 prompt_manager.update_state_memory(
