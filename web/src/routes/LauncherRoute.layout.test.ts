@@ -186,6 +186,11 @@ describe("LauncherRoute layout contract", () => {
     expect(branchInstancesPanelSource).toContain("onLifecycle");
     expect(branchInstancesPanelSource).toContain("onStopMany");
     expect(branchInstancesPanelSource).toContain('onLifecycle?.(item.id, "start")');
+    expect(routeSource).toContain("optimisticBranchOperation");
+    expect(routeSource).toContain("resolveActivePendingOperation");
+    expect(routeSource).toContain("lifecyclePending={Boolean(pendingBranchOperation) || controlMutation.isPending}");
+    expect(branchInstancesPanelSource).toContain("isPending={state === \"starting\" || state === \"restarting\"}");
+    expect(branchInstancesPanelSource).toContain("clickGuardRef");
   });
 
   it("renders a dense lifecycle console rather than a landing page", () => {
