@@ -84,3 +84,75 @@ class CandidateStoreValidationResponse(BaseModel):
     summary: dict[str, Any] = Field(default_factory=dict)
     candidates: list[dict[str, Any]] = Field(default_factory=list)
     storagePath: str = ""
+
+
+class ThemeContractResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    programId: str = ""
+    themeId: str = ""
+    themeName: str = ""
+    campaignId: str = ""
+    status: str = ""
+    isolationPolicy: dict[str, Any] = Field(default_factory=dict)
+    activatedAt: str = ""
+    activatedBy: str = ""
+    activationRef: str = ""
+
+
+class ResearchCampaignActivationResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    programId: str = ""
+    themeId: str = ""
+    campaignId: str = ""
+    status: str = ""
+    activatedBy: str = ""
+    activatedAt: str = ""
+    activationRef: str = ""
+    scopeHash: str = ""
+    activationHash: str = ""
+
+
+class ResearchScopeEnvelopeResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    program: str = ""
+    theme: str = ""
+    campaign: str = ""
+    question: str = ""
+    branch: str = ""
+    workflow: str = ""
+    agentId: str = ""
+    mode: str = ""
+    scopeHash: str = ""
+    artifactLocator: str = ""
+    ledgerRoot: str = ""
+    cacheKey: str = ""
+
+
+class PrivateMemoryMigrationResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    targetScopeHash: str = ""
+    candidateCount: int = 0
+    rejectedCount: int = 0
+    candidates: list[dict[str, Any]] = Field(default_factory=list)
+    policy: dict[str, Any] = Field(default_factory=dict)
+
+
+class PlatformFlowReadinessResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    programId: str = ""
+    themeId: str = ""
+    campaignId: str = ""
+    themeActivated: bool = False
+    mode: str = ""
+    devContractTestsAllowed: bool = False
+    realCampaignAllowed: bool = False
+    formalArtifactReadWriteAllowed: bool = False
+    blockers: list[str] = Field(default_factory=list)
+    scopeHash: str = ""
+    privateMemoryMigration: list[dict[str, Any]] = Field(default_factory=list)
+    generatedAt: str = ""
