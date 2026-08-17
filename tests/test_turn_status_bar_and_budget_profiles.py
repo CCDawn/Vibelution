@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from core.orchestration.tool_budget_profiles import (
     detect_model_family,
     normalize_max_calls_by_model_family,
@@ -314,3 +316,75 @@ def test_status_bar_coerces_false_flags_json_extras_and_rejects_character_split(
     assert extras_payload["runDigest"]["recentTools"] == ["cli_tool"]
     assert extras_payload["cacheHint"]["cacheReadTokens"] == 12
     assert "git" not in extras_payload
+
+
+def test_status_bar_unwraps_message_envelopes_and_json_tool_lists():
+    from types import SimpleNamespace
+
+    snapshot = collect_turn_status_snapshot(
+        iteration=True,
+        model="deepseek-chat",
+        authorization=SimpleNamespace(max_calls_per_turn=8, call_count=1),
+    )
+    assert snapshot.iteration == 0
+    text = format_turn_status_bar(snapshot)
+    assert "- iteration:" not in text
+
+    extras = {
+        "git": {
+            "available": True,
+            "branch": "main",
+            "files": '{"items":[{"path":"a.py","status":"M"},{"path":"b.py","status":"A"}]}',
+        },
+        "runDigest": {
+            "task": "fix",
+            "recentTools": '["grep_search_tool","cli_tool"]',
+        },
+    }
+    text = format_turn_status_bar(
+        snapshot,
+        config={
+            "blocks": {
+                "budget": True,
+                "clock": False,
+                "git_paths": True,
+                "run_digest": True,
+            }
+        },
+        extras=extras,
+    )
+    assert "M a.py" in text
+    assert "A b.py" in text
+    assert "recent_tools: grep_search_tool, cli_tool" in text
+
+    extras_payload = collect_turn_status_tail_extras(
+        recent_tools=bytearray(b'["grep_search_tool","read_file"]'),
+        cache_hint=None,
+    )
+    assert extras_payload["runDigest"]["recentTools"] == ["grep_search_tool", "read_file"]
+
+    extras_payload = collect_turn_status_tail_extras(
+        recent_tools={"grep_search_tool": True, "shell": {"enabled": False}},
+    )
+    assert extras_payload["runDigest"]["recentTools"] == ["grep_search_tool"]
+
+    header = f"{TURN_STATUS_BAR_HEADER}\n- purpose: live"
+    messages = {
+        "messages": [
+            {"role": "user", "content": "hi"},
+            {"role": "system", "content": header},
+        ]
+    }
+    cleaned = strip_turn_status_bar_messages(messages)
+    assert len(cleaned) == 1
+    assert cleaned[0]["content"] == "hi"
+
+    json_messages = json.dumps(
+        [
+            {"role": "user", "content": "keep"},
+            {"role": "system", "content": header},
+        ]
+    )
+    cleaned = strip_turn_status_bar_messages(json_messages)
+    assert len(cleaned) == 1
+    assert cleaned[0]["content"] == "keep"

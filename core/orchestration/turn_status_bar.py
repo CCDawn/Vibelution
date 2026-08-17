@@ -42,6 +42,25 @@ class TurnStatusBarSnapshot:
     mental_intervention: str = ""
 
 
+def _decode_binary(value: Any) -> Any:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).decode("utf-8", errors="replace")
+    return value
+
+
+def _maybe_json(value: Any) -> Any:
+    value = _decode_binary(value)
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if not text or text[0] not in "{[":
+        return value
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return value
+
+
 def _coerce_text(value: Any) -> str:
     if value is None:
         return ""
@@ -72,16 +91,7 @@ def _coerce_bool(value: Any, default: bool) -> bool:
 
 
 def _as_mapping(value: Any) -> dict[str, Any]:
-    if isinstance(value, (bytes, bytearray, memoryview)):
-        value = bytes(value).decode("utf-8", errors="replace")
-    if isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return {}
-        try:
-            value = json.loads(text)
-        except json.JSONDecodeError:
-            return {}
+    value = _maybe_json(value)
     if isinstance(value, Mapping):
         return dict(value)
     return {}
@@ -109,27 +119,56 @@ def _coerce_nonnegative_int(value: Any, *, default: int = 0) -> int:
 
 
 def _coerce_message_list(value: Any) -> list:
+    value = _maybe_json(value)
     if value is None or isinstance(value, (str, bytes, bytearray, memoryview)):
         return []
     if isinstance(value, Mapping):
-        return [dict(value)]
+        nested = value.get("messages")
+        if nested is None:
+            nested = value.get("items")
+        if nested is None:
+            nested = value.get("history")
+        if nested is not None:
+            return _coerce_message_list(nested)
+        return [dict(value)] if value else []
     try:
         return list(value)
     except TypeError:
         return []
 
 
+def _mapping_enabled(item: Any) -> bool:
+    if isinstance(item, bool):
+        return item
+    if isinstance(item, Mapping):
+        return _coerce_bool(_mapping_get(item, "enabled"), default=True)
+    return True
+
+
 def _coerce_str_list(value: Any) -> list[str]:
+    value = _maybe_json(value)
     if value is None:
         return []
     if isinstance(value, (bytes, bytearray, memoryview)):
         text = bytes(value).decode("utf-8", errors="replace").strip()
+        parsed = _maybe_json(text)
+        if parsed is not text and not isinstance(parsed, (str, bytes, bytearray, memoryview)):
+            return _coerce_str_list(parsed)
         return [text] if text else []
     if isinstance(value, str):
         text = value.strip()
+        parsed = _maybe_json(text)
+        if parsed is not text and not isinstance(parsed, (str, bytes, bytearray, memoryview)):
+            return _coerce_str_list(parsed)
         return [text] if text else []
     if isinstance(value, Mapping):
-        return [_coerce_text(key).strip() for key in value if _coerce_text(key).strip()]
+        names: list[str] = []
+        for key, item in value.items():
+            text = _coerce_text(key).strip()
+            if not text or not _mapping_enabled(item):
+                continue
+            names.append(text)
+        return names
     try:
         iterator = list(value)
     except TypeError:
@@ -137,7 +176,14 @@ def _coerce_str_list(value: Any) -> list[str]:
         return [text] if text else []
     names: list[str] = []
     for item in iterator:
-        text = _coerce_text(item).strip()
+        if isinstance(item, Mapping):
+            if not _mapping_enabled(item):
+                continue
+            text = _coerce_text(
+                _mapping_get(item, "name", "tool", "id") or next(iter(item), "")
+            ).strip()
+        else:
+            text = _coerce_text(item).strip()
         if text and text not in names:
             names.append(text)
     return names
@@ -357,13 +403,17 @@ def _append_git_paths_section(
     git = _as_mapping(_mapping_get(_as_mapping(extras), "git"))
     if not git:
         return
-    files = _mapping_get(git, "files")
+    files = _maybe_json(_mapping_get(git, "files"))
+    if isinstance(files, Mapping):
+        nested = files.get("items")
+        if nested is None:
+            nested = files.get("files")
+        if nested is None:
+            nested = files.get("paths")
+        files = _maybe_json(nested)
     if isinstance(files, (bytes, bytearray, memoryview, str)):
-        text = _coerce_text(files).strip()
-        try:
-            files = json.loads(text) if text.startswith("[") else []
-        except json.JSONDecodeError:
-            files = []
+        parsed = _maybe_json(files)
+        files = parsed if not isinstance(parsed, (str, bytes, bytearray, memoryview)) else []
     if not isinstance(files, list):
         files = []
     if not files:
