@@ -540,10 +540,19 @@ def _wait_for_started_backend(process: subprocess.Popen[bytes], port: int, host:
     while time.monotonic() < deadline:
         if process.poll() is not None:
             return 0
+        if not _backend_healthy(port, host):
+            time.sleep(0.35)
+            continue
         owner_pid = _listening_pid_for_port(port)
-        if owner_pid > 0 and _pid_belongs_to_process_tree(owner_pid, int(process.pid)) and _backend_healthy(port, host):
-            return owner_pid
-        time.sleep(0.35)
+        if owner_pid > 0:
+            if _pid_belongs_to_process_tree(owner_pid, int(process.pid)):
+                return owner_pid
+            time.sleep(0.35)
+            continue
+        # Fresh Linux clones often run the launcher with system Python: no
+        # psutil, and `ss` may be absent. Health is already 200 and this spawn
+        # is still alive, so treat it as the owner instead of killing it.
+        return int(process.pid)
     return 0
 
 

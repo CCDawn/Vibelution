@@ -936,6 +936,23 @@ def test_python_launcher_does_not_accept_a_healthy_listener_owned_by_another_pro
     assert launcher._wait_for_started_backend(Process(), 8000, "127.0.0.1", timeout_seconds=0.1) == 0
 
 
+def test_python_launcher_accepts_healthy_spawn_when_listener_pid_is_unresolvable(monkeypatch):
+    launcher = _load_python_launcher()
+
+    class Process:
+        pid = 7188
+
+        @staticmethod
+        def poll():
+            return None
+
+    monkeypatch.setattr(launcher, "_listening_pid_for_port", lambda port: 0)
+    monkeypatch.setattr(launcher, "_backend_healthy", lambda port, host: True)
+    monkeypatch.setattr(launcher.time, "sleep", lambda _seconds: None)
+
+    assert launcher._wait_for_started_backend(Process(), 8000, "127.0.0.1", timeout_seconds=5.0) == 7188
+
+
 def test_python_launcher_finds_standard_windows_node_install_when_path_is_restricted(monkeypatch, tmp_path):
     launcher = _load_python_launcher()
     program_files = tmp_path / "Program Files"
