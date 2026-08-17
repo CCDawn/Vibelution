@@ -139,3 +139,55 @@ def test_runtime_goal_coerces_json_policy_bytes_goal_and_false_budget():
     )
     assert parsed_list.allow_code_context is True
     assert "CODEBASE_MAP" in parsed_list.allowed_components(["SOUL", "CODEBASE_MAP"])
+
+
+def test_runtime_goal_unwraps_policy_envelopes_and_skips_disabled_tools():
+    packet = build_runtime_goal_packet(
+        _chat_policy(),
+        {"goal": "do not modify files; keep this read-only"},
+        agent_tool_policy={
+            "policy": {
+                "allowedTools": {
+                    "items": [
+                        {"name": "grep_search_tool", "enabled": False},
+                        {"name": "web_search_tool", "enabled": True},
+                    ]
+                },
+                "writeScopes": [],
+                "mutationAccess": "none",
+                "maxCallsPerTurn": "24",
+            }
+        },
+    )
+    assert packet.goal.startswith("do not modify files")
+    assert packet.allow_file_writes is False
+    assert packet.allow_code_context is False
+    assert packet.max_calls_per_turn == 24
+
+    enabled = build_runtime_goal_packet(
+        _chat_policy(),
+        "审查当前代码结构",
+        agent_tool_policy={
+            "allowedTools": {"grep_search_tool": {"enabled": False}, "web_search_tool": True},
+            "writeScopes": [],
+            "mutationAccess": "none",
+        },
+    )
+    assert enabled.allow_code_context is False
+    assert "CODEBASE_MAP" not in enabled.allowed_components(
+        {"SOUL": True, "CODEBASE_MAP": {"enabled": True}}
+    )
+
+    wrapped = build_runtime_goal_packet(
+        _chat_policy(),
+        '{"goal":"审查当前代码结构"}',
+        agent_tool_policy='{"allowed_tools":{"items":["grep_search_tool"]},"mutation_access":"none"}',
+    )
+    assert wrapped.allow_code_context is True
+    assert wrapped.goal == "审查当前代码结构"
+    assert "CODEBASE_MAP" not in wrapped.allowed_components(
+        {"SOUL": True, "CODEBASE_MAP": {"enabled": False}}
+    )
+    assert "SOUL" in wrapped.allowed_components(
+        {"SOUL": True, "CODEBASE_MAP": {"enabled": False}}
+    )

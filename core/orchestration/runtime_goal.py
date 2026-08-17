@@ -23,11 +23,29 @@ _CODE_CONTEXT_TOOL_NAMES = {
 }
 
 
+def _decode_binary(value: Any) -> Any:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).decode("utf-8", errors="replace")
+    return value
+
+
+def _maybe_json(value: Any) -> Any:
+    value = _decode_binary(value)
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if not text or text[0] not in "{[":
+        return value
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return value
+
+
 def _coerce_text(value: Any) -> str:
     if value is None:
         return ""
-    if isinstance(value, (bytes, bytearray, memoryview)):
-        return bytes(value).decode("utf-8", errors="replace")
+    value = _decode_binary(value)
     if isinstance(value, str):
         return value
     return str(value)
@@ -38,9 +56,8 @@ def _coerce_bool(value: Any, default: bool) -> bool:
         return value
     if value is None:
         return default
-    if isinstance(value, (bytes, bytearray, memoryview)):
-        value = bytes(value).decode("utf-8", errors="replace")
-    if isinstance(value, (int, float)):
+    value = _decode_binary(value)
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
         return bool(value)
     text = str(value).strip().lower()
     if not text:
@@ -52,20 +69,53 @@ def _coerce_bool(value: Any, default: bool) -> bool:
     return default
 
 
-def _as_mapping(value: Any) -> dict[str, Any]:
-    if isinstance(value, (bytes, bytearray, memoryview)):
-        value = bytes(value).decode("utf-8", errors="replace")
-    if isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return {}
-        try:
-            value = json.loads(text)
-        except json.JSONDecodeError:
-            return {}
+def _flag_enabled(value: Any, default: bool = True) -> bool:
+    value = _maybe_json(value)
     if isinstance(value, Mapping):
-        return dict(value)
-    return {}
+        nested = value.get("enabled")
+        if nested is None:
+            nested = value.get("visible")
+        if nested is None:
+            nested = value.get("allowed")
+        return _coerce_bool(nested, default)
+    return _coerce_bool(value, default)
+
+
+_POLICY_KEYS = (
+    "maxCallsPerTurn",
+    "max_calls_per_turn",
+    "allowedTools",
+    "allowed_tools",
+    "writeScopes",
+    "write_scopes",
+    "mutationAccess",
+    "mutation_access",
+)
+_POLICY_ENVELOPES = ("policy", "toolPolicy", "tool_policy", "config", "payload")
+_NAME_ENVELOPES = (
+    "tools",
+    "allowedTools",
+    "allowed_tools",
+    "items",
+    "names",
+    "components",
+)
+
+
+def _as_mapping(value: Any) -> dict[str, Any]:
+    value = _maybe_json(value)
+    if not isinstance(value, Mapping):
+        return {}
+    mapping = dict(value)
+    if any(key in mapping for key in _POLICY_KEYS):
+        return mapping
+    for envelope in _POLICY_ENVELOPES:
+        if envelope not in mapping:
+            continue
+        nested = _as_mapping(mapping.get(envelope))
+        if nested:
+            return nested
+    return mapping
 
 
 def _mapping_get(mapping: Mapping[str, Any], *keys: str) -> Any:
@@ -79,8 +129,7 @@ def _coerce_nonnegative_int(value: Any, *, default: int = 0) -> int:
     if isinstance(value, bool) or value is None:
         parsed = 0
     else:
-        if isinstance(value, (bytes, bytearray, memoryview)):
-            value = bytes(value).decode("utf-8", errors="replace")
+        value = _decode_binary(value)
         try:
             parsed = int(value)
         except (TypeError, ValueError):
@@ -97,35 +146,65 @@ def _coerce_nonnegative_int(value: Any, *, default: int = 0) -> int:
     return fallback if fallback > 0 else 0
 
 
-def _maybe_json(value: Any) -> Any:
-    if isinstance(value, (bytes, bytearray, memoryview)):
-        value = bytes(value).decode("utf-8", errors="replace")
-    if isinstance(value, str):
-        text = value.strip()
-        if text.startswith("{") or text.startswith("["):
-            try:
-                return json.loads(text)
-            except json.JSONDecodeError:
-                return value
-    return value
+def _coerce_goal_text(value: Any) -> str:
+    parsed = _maybe_json(value)
+    if isinstance(parsed, Mapping):
+        nested = _mapping_get(parsed, "goal", "text", "content", "prompt")
+        if nested is not None:
+            return _coerce_text(nested).strip()
+        if parsed is not value:
+            return _coerce_text(value).strip()
+        return ""
+    return _coerce_text(value).strip()
 
 
 def _coerce_name_set(items: Any) -> set[str]:
     items = _maybe_json(items)
     if items is None:
         return set()
-    if isinstance(items, (bytes, bytearray, memoryview)):
-        items = bytes(items).decode("utf-8", errors="replace")
-    if isinstance(items, str):
-        name = items.strip()
-        return {name} if name else set()
+    if isinstance(items, (str, bytes, bytearray, memoryview)):
+        text = _coerce_text(items).strip()
+        parsed = _maybe_json(text)
+        if parsed is not text and not isinstance(parsed, (str, bytes, bytearray, memoryview)):
+            return _coerce_name_set(parsed)
+        return {text} if text else set()
     if isinstance(items, Mapping):
-        return {_coerce_text(key).strip() for key in items if _coerce_text(key).strip()}
+        for key in _NAME_ENVELOPES:
+            if key not in items:
+                continue
+            nested = items.get(key)
+            if nested is None or isinstance(nested, (bool, int, float)):
+                continue
+            return _coerce_name_set(nested)
+        tool_name = items.get("name")
+        if tool_name is None:
+            tool_name = items.get("id")
+        if tool_name is not None and not any(key in items for key in _NAME_ENVELOPES):
+            if not _flag_enabled(items, True):
+                return set()
+            name = _coerce_text(tool_name).strip()
+            return {name} if name else set()
+        names: set[str] = set()
+        for key, enabled in items.items():
+            name = _coerce_text(key).strip()
+            if name and _flag_enabled(enabled, True):
+                names.add(name)
+        return names
     try:
-        return {_coerce_text(item).strip() for item in items if _coerce_text(item).strip()}
+        iterator = list(items)
     except TypeError:
         name = _coerce_text(items).strip()
         return {name} if name else set()
+    names: set[str] = set()
+    for item in iterator:
+        item = _maybe_json(item)
+        if isinstance(item, Mapping):
+            names.update(_coerce_name_set(item))
+            continue
+        name = _coerce_text(item).strip()
+        if name:
+            names.add(name)
+    return names
 
 
 @dataclass(frozen=True)
@@ -214,7 +293,7 @@ def build_runtime_goal_packet(
 
     mode = getattr(policy, "mode", None)
     mode_text = _coerce_text(getattr(mode, "value", mode)).strip().lower()
-    goal_text = _coerce_text(goal).strip()
+    goal_text = _coerce_goal_text(goal)
     tool_policy = _as_mapping(agent_tool_policy)
     max_calls = _max_calls_per_turn(tool_policy)
     allow_auto_loop = _coerce_bool(getattr(policy, "allow_auto_loop", False), default=False)
