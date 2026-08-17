@@ -11,3 +11,7 @@ export function isWorkbenchCloseControlFetchFailure(error: unknown): boolean {
     message.includes("network")
   );
 }
+
+export function shouldNotifyForceStopControlFailure(error: unknown): boolean {
+  return !isWorkbenchCloseControlFetchFailure(error);
+}
