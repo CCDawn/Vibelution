@@ -1829,7 +1829,7 @@ describe("AgentsRoute layout contract", () => {
     expect(workbenchMutationsSource).toContain("const previousActivePane = options.getActivePane()");
     expect(workbenchMutationsSource).toContain("options.archivedWorkspaceCache(current, options.optimisticArchivedAgent(optimisticAgent))");
     expect(workbenchMutationsSource).toContain("options.purgedWorkspaceCache(current, payload.agentId)");
-    expect(workbenchMutationsSource).toContain("return { previousWorkspace, previousSelectedAgentId, previousActivePane }");
+    expect(workbenchMutationsSource).toContain("return { previousWorkspace, previousSelectedAgentId, previousActivePane, telemetry }");
     expect(workbenchMutationsSource).toContain("queryClient.setQueryData(queryKeys.agentConfigWorkspace(), context.previousWorkspace)");
     expect(workbenchMutationsSource).toContain("options.setSelectedAgentId(context?.previousSelectedAgentId ?? \"\")");
     expect(workbenchMutationsSource).toContain("options.setActivePane(context?.previousActivePane ?? \"overview\")");
