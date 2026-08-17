@@ -1,6 +1,8 @@
+import { useEffect } from "react";
 import { useRouteError } from "react-router-dom";
 
 import { VButton } from "../components/vui/primitives/VButton";
+import { type BrowserTelemetryEventInput, postBrowserTelemetry } from "./browserTelemetry";
 import { allowNextWorkbenchWindowUnload } from "./projectCloseGuard";
 import { isDynamicImportFetchError } from "./routeChunkRecovery";
 import styles from "./RouteErrorBoundary.styles";
@@ -17,6 +19,8 @@ export type RouteErrorBoundaryViewModel = {
   isDynamicImportFailure: boolean;
 };
 
+const reportedRouteErrorKeys = new Set<string>();
+
 function compactTechnicalSummary(error: unknown, limit = 900) {
   const message = error instanceof Error
     ? `${error.name}: ${error.message}${error.stack ? `\n${error.stack}` : ""}`
@@ -28,6 +32,20 @@ function compactTechnicalSummary(error: unknown, limit = 900) {
   return `${compacted.slice(0, Math.max(0, limit - 3))}...`;
 }
 
+function compactErrorText(error: unknown, limit: number) {
+  const text = error instanceof Error
+    ? `${error.name}: ${error.message}`
+    : String(error ?? "Unknown route error");
+  const compacted = text.replace(/\s+/g, " ").trim();
+  if (compacted.length <= limit) {
+    return compacted || "Unknown route error";
+  }
+  return `${compacted.slice(0, Math.max(0, limit - 3))}...`;
+}
+
+function currentPathname() {
+  return typeof window === "undefined" ? "" : window.location.pathname;
+}
 
 export function buildRouteErrorBoundaryViewModel(
   error: unknown,
@@ -59,9 +77,58 @@ export function buildRouteErrorBoundaryViewModel(
   };
 }
 
+export function buildRouteErrorTelemetryEvent(
+  error: unknown,
+  surface: RouteErrorSurface = "workbench",
+): BrowserTelemetryEventInput {
+  const viewModel = buildRouteErrorBoundaryViewModel(error, surface);
+  return {
+    phase: "error",
+    eventCode: "browser.route.error",
+    message: viewModel.isDynamicImportFailure
+      ? `${surface} route chunk failed to load`
+      : `${surface} route render failed`,
+    level: "error",
+    fields: {
+      surface,
+      pathname: currentPathname(),
+      isDynamicImportFailure: viewModel.isDynamicImportFailure,
+      title: viewModel.title,
+      errorName: error instanceof Error ? error.name : "Unknown",
+      errorMessage: compactErrorText(error, 240),
+      technicalSummary: viewModel.technicalSummary,
+    },
+  };
+}
+
+export function resetRouteErrorTelemetryForTests() {
+  reportedRouteErrorKeys.clear();
+}
+
+export function reportRouteErrorBoundary(
+  error: unknown,
+  surface: RouteErrorSurface = "workbench",
+) {
+  const event = buildRouteErrorTelemetryEvent(error, surface);
+  const key = [
+    surface,
+    String(event.fields?.isDynamicImportFailure ?? false),
+    String(event.fields?.technicalSummary ?? "").slice(0, 240),
+  ].join("|");
+  if (reportedRouteErrorKeys.has(key)) {
+    return;
+  }
+  reportedRouteErrorKeys.add(key);
+  postBrowserTelemetry(event);
+}
+
 export function RouteErrorBoundary({ surface = "workbench" }: { surface?: RouteErrorSurface }) {
   const error = useRouteError();
   const viewModel = buildRouteErrorBoundaryViewModel(error, surface);
+
+  useEffect(() => {
+    reportRouteErrorBoundary(error, surface);
+  }, [error, surface]);
 
   const reloadPage = () => {
     // Parent AppShell may still arm beforeunload; pass it so Edge does not flash
