@@ -25,7 +25,7 @@
 - 不记录 secrets、完整 Prompt、大段 diff、完整文件或无界工具输出。
 - 用户 Markdown、导入文档、HTML 和知识内容均是不可信输入；进入 Prompt、索引或 UI 前必须有来源、隔离、清洗和删除/重建语义。
 - **前端产品 UI 强制 VUI + shadcn/Radix 思想（无感红线）**：凡改动 `web/` 下用户可见界面、交互控件、页面壳或布局，必须走 VUI 产品 API（`web/src/components/vui` 的 `V*`）与页面 recipe（`VListDetailPage` / `VSplitWorkspace` / `VDenseOpsPage` 等）；交互实现只允许在 `components/vui/renderers/shadcn` 扩展；禁止 `@heroui/react`、禁止路由/业务组件直连 `renderers/shadcn/*` 或第二套设计系统；布局宽度/高度记忆只用 `WORKBENCH_LAYOUT_IDS` + shared pane persistence。**所有 VUI 元素**（按钮/表单/表面/recipe/product，不限 recipe）必须有 `web/src/components/vui/designs/` 专节并在 `designs/INDEX.md` 登记；新建前检索防冗余。细则见 [development-standard.md §9.1](docs/standards/development-standard.md)、[VUI README](web/src/components/vui/README.md)、[designs/README.md](web/src/components/vui/designs/README.md)；机器门：`vuiShadcnRouteContract.test.ts`、`vuiComponentDesignContract.test.ts`。
-- **写入前必须同时做本地复用评估与仓外成熟方案调研（二者都要做，不是二选一）**：凡会改代码、行为、架构或验证边界的任务，禁止盲目开写。先定位 owning surface 与可复用实现，并评估它是否真的合适——本地能复用 ≠ 本地就是好方案，也 ≠ 可以原样照搬；不够好就要**改造后再复用**，或换更合适的路径。同时对照 GitHub、论文、官方文档/标准等成熟方案，选最合适的再借鉴。深度随分级缩放，两扇门都不得整段跳过。细则见 [development-standard.md §2.2](docs/standards/development-standard.md)。
+- **写入前必须同时做本地复用评估与仓外成熟方案调研（二者都要做，不是二选一）**：凡会改代码、行为、架构或验证边界的任务，禁止盲目开写。先定位 owning surface 与可复用实现，并评估它是否真的合适——本地能复用 ≠ 本地就是好方案，也 ≠ 可以原样照搬；不够好就要**改造后再复用**，或换更合适的路径。同时对照 GitHub、论文、官方文档/标准等成熟方案。调研之后必须**评估排序**：按项目贴合度排出候选，只抽取**最符合本项目、最值得借鉴的部分**再复用或改造后复用；禁止整仓照搬、禁止只堆链接不裁决。深度随分级缩放，两扇门都不得整段跳过。细则见 [development-standard.md §2.2](docs/standards/development-standard.md)。
 - 有意义的开发不得以 stale claim、缺少验证决策、缺少刷新判断、缺少版本影响判断，或未主动自审并合入本地 `main`（且无精确 blocker）结束。
 
 ## 3. Start And Routing
@@ -47,7 +47,7 @@
 开始非简单任务前：
 
 1. **先 BRT**（本 §3.0）：加载 `ccdawn-brt`，完成意图/分级/owner 选择。
-2. **再调研门**（§2 红线 / [development-standard.md §2.2](docs/standards/development-standard.md)）：同时评估本地复用（能否原样用、是否要改造后再用、要不要换掉）与仓外成熟方案；未闭合前不得写入。
+2. **再调研门**（§2 红线 / [development-standard.md §2.2](docs/standards/development-standard.md)）：同时评估本地复用（能否原样用、是否要改造后再用、要不要换掉）与仓外成熟方案；调研后评估排序，只借最符合项目、最值得借鉴的部分；未闭合前不得写入。
 3. 非平凡任务按 [Agent 开发路由](docs/guides/README.md)：`route.md` 定 READ/EDIT/TEST → `ownership.md` 定落点 → `loop.md` 验证与完成块；细则只下钻 [规范索引](docs/standards/README.md) 相关条。
 4. `STANDARD_TASK`、`HIGH_RISK`、续接或记忆敏感任务先运行 `python scripts/migrate_project_storage.py inventory` 解析 `activePaths.memory`，再读取其中 `INDEX.md` 与 `profile.json`；`.docs/project-memory/` 仅作迁移前只读兼容，禁止新增写入。
 5. 多会话写入先用项目 guard 执行 `status/check/preflight/claim`；完成后 `release`。

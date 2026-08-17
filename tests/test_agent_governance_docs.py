@@ -122,12 +122,16 @@ def test_research_before_write_red_line_is_normative():
     assert "本地能复用 ≠ 本地就是好方案" in agents
     assert "改造后再复用" in agents
     assert "二者都要做，不是二选一" in agents
+    assert "评估排序" in agents
+    assert "最符合本项目、最值得借鉴的部分" in agents
     assert "### 2.2 Local Reuse And Mature-Scheme Research" in standard
     assert "adapt then reuse" in standard
+    assert "Rank and extract" in standard
     assert "§2.2" in standards_index
     assert "调研门未闭合" in loop
+    assert "评估排序" in loop
     assert "R10" in playbook
-    assert "改造后再用" in playbook
+    assert "最值得借鉴的部分" in playbook
     assert "不评估本地复用/改造" in route
 
 

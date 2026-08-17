@@ -17,7 +17,7 @@
 | 5 | `playbook.md` | ~75 | 架构边界/红线速查仍不够时 | route+standards 已答清边界 |
 | 6 | 下表「权威」列 | 不定 | 细则；**禁止**用 archive 当规则 | 子文档 + 模块 README 已足够 |
 
-**默认规划门：** 未完成 0b 的 BRT 意图/分级/owner 选择前，不得广扫全仓、加载无关 process skill、或开始实现写入。`FAST_PATCH` 可 silent/micro，仍服从 BRT 最小门。写入前另须闭合 `AGENTS.md` §2 / `development-standard` §2.2 调研门（本地复用评估含改造后再用，**以及**仓外成熟方案对照）。
+**默认规划门：** 未完成 0b 的 BRT 意图/分级/owner 选择前，不得广扫全仓、加载无关 process skill、或开始实现写入。`FAST_PATCH` 可 silent/micro，仍服从 BRT 最小门。写入前另须闭合 `AGENTS.md` §2 / `development-standard` §2.2 调研门（本地复用评估含改造后再用，仓外成熟方案对照，**评估排序后只借最符合项目的部分**）。
 
 **Token 预算（guides 全目录）：** 若按序全读 §0–§5 约 **~600 行**；常态开发最小集 = `AGENTS.md` + `route.md` 一行 + `ownership.md` 命中段 + `loop.md` §1/§3/§6（约 **~250 行**）。
 

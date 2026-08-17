@@ -19,7 +19,7 @@
 ```text
 1 CLASSIFY  tier + route.md 行
 2 LOCATE    ownership.md → 模块 README → 现有 test
-3 RESEARCH  §2.2：评估本地（原样复用 / 改造后复用 / 换掉）+ 对照仓外成熟方案；未闭合不写
+3 RESEARCH  §2.2：评估本地 + 对照仓外成熟方案 → 评估排序，只借最符合项目的切片；未闭合不写
 4 ISOLATE   worktree if STANDARD+|ISOLATION_REQUIRED；claim if multi-agent
 5 IMPLEMENT 只改 owner；SSOT 表 if 状态/API
 6 VERIFY    select_tests → focused → UI contract if FE；所有验证在 merge 前完成
@@ -135,7 +135,7 @@ active-work 挡 restart → 固定句（`AGENTS.md`§4），禁止强杀。
 | 需 remote push/PR/force | 停；要用户授权 |
 | 需 force、远端删除、或归属不明的删/重置 | 停；要确认；已合入本任务的安全本地清理不重复询问 |
 | SSOT 表填不出 | 停；不实现 |
-| 调研门未闭合（未评估本地复用/改造，或未对照仓外成熟方案） | 停；不实现 |
+| 调研门未闭合（未评估本地复用/改造，未对照仓外方案，或未评估排序并选出最值得借鉴的部分） | 停；不实现 |
 | 仅 archive 有「规定」 | 提炼到现行或标 historical；不直接执行 archive |
 
 ---
@@ -144,6 +144,7 @@ active-work 挡 restart → 固定句（`AGENTS.md`§4），禁止强杀。
 
 ```text
 [ ] 不调研不评估就开写 / 把本地能复用当成原样照搬
+[ ] 调研后不排序、整仓照搬或只堆链接不裁决
 [ ] archive 当现行规则
 [ ] 非 VUI 交付可见 UI
 [ ] route 直连 renderer / HeroUI
