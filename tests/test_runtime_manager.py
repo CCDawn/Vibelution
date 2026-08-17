@@ -802,7 +802,7 @@ def test_python_launcher_frontend_build_defaults_to_direct_node_build(monkeypatc
     launcher._ensure_frontend_build(source_identity)
 
     assert calls == [
-        ([r"C:\node\node.exe", r"C:\node\node_modules\npm\bin\npm-cli.js", "install"], "node npm-cli.js install"),
+        ([r"C:\node\node.exe", r"C:\node\node_modules\npm\bin\npm-cli.js", "ci"], "node npm-cli.js ci"),
         ([r"C:\node\node.exe", str(web_dir / "node_modules" / "typescript" / "bin" / "tsc"), "-b"], "node tsc -b"),
         ([r"C:\node\node.exe", str(web_dir / "node_modules" / "vite" / "bin" / "vite.js"), "build"], "node vite build"),
     ]

@@ -224,6 +224,40 @@ def _load_python_launcher():
     return module
 
 
+def test_npm_cli_follows_unix_symlink_and_lib_prefix_layout(tmp_path, monkeypatch):
+    launcher = _load_python_launcher()
+    prefix = tmp_path / "node-prefix"
+    cli = prefix / "lib" / "node_modules" / "npm" / "bin" / "npm-cli.js"
+    cli.parent.mkdir(parents=True)
+    cli.write_text("#!/usr/bin/env node\n", encoding="utf-8")
+    bin_dir = prefix / "bin"
+    bin_dir.mkdir()
+    npm_link = bin_dir / "npm"
+    npm_link.symlink_to(cli)
+
+    def fake_which(name: str):
+        if name == "npm":
+            return str(npm_link)
+        return None
+
+    monkeypatch.setattr(launcher.shutil, "which", fake_which)
+    resolved = Path(launcher._npm_cli_script_for_node(str(bin_dir / "node")))
+    assert resolved == cli.resolve()
+
+
+def test_npm_cli_finds_lib_node_modules_next_to_node(tmp_path, monkeypatch):
+    launcher = _load_python_launcher()
+    prefix = tmp_path / "exec-daemon"
+    cli = prefix / "lib" / "node_modules" / "npm" / "bin" / "npm-cli.js"
+    cli.parent.mkdir(parents=True)
+    cli.write_text("#!/usr/bin/env node\n", encoding="utf-8")
+    node_bin = prefix / "node"
+    node_bin.write_text("", encoding="utf-8")
+    monkeypatch.setattr(launcher.shutil, "which", lambda name: None)
+    resolved = Path(launcher._npm_cli_script_for_node(str(node_bin)))
+    assert resolved == cli
+
+
 def test_python_launcher_bootstraps_project_venv_with_current_interpreter(monkeypatch, tmp_path):
     launcher = _load_python_launcher()
     monkeypatch.setattr(launcher.os, "name", "posix")
