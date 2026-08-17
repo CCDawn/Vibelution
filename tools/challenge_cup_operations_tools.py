@@ -743,6 +743,86 @@ def challenge_cup_versioning_writeback_tool(
         )
 
 
+def research_knowledge_collection_tool(
+    action: str = "inspect",
+    scope: str = "",
+    searchEnvelope: str = "",
+    requirements: str = "",
+    writebackPolicy: str = "",
+) -> str:
+    """D03 stage-1 knowledge collection through the single facade tool.
+
+    This is the only Agent-visible interface for stage-1 knowledge collection.
+    It validates the ResearchScopeEnvelope and the search envelope, then reuses
+    the existing source-collection node/ledger/storage.  It never runs a
+    provider search and never performs formal-knowledge, RAG, or graph writes.
+    """
+
+    try:
+        from core.web.services.team_workflow.source_collection.facade import (
+            research_knowledge_collection_facade,
+        )
+
+        payload = research_knowledge_collection_facade(
+            action=action,
+            scope=_json_object(scope),
+            searchEnvelope=_json_object(searchEnvelope),
+            requirements=_json_object(requirements),
+            writebackPolicy=_json_object(writebackPolicy),
+        )
+        _record_tool_event(
+            "tool.research_knowledge_collection.completed",
+            fields={
+                "action": _text(action),
+                "scopeHash": _text(
+                    (payload.get("scope") if isinstance(payload.get("scope"), dict) else {}).get("scopeHash")
+                ),
+                "runId": _text(
+                    (payload.get("locator") if isinstance(payload.get("locator"), dict) else {}).get("runId")
+                ),
+                "created": bool(payload.get("created")),
+                "found": bool(payload.get("found")),
+                "status": _text(payload.get("status")),
+            },
+        )
+        return _json_dump(payload)
+    except Exception as exc:
+        _record_tool_event(
+            "tool.research_knowledge_collection.failed",
+            level="warning",
+            outcome="failed",
+            fields={
+                "action": _text(action),
+                "errorType": type(exc).__name__,
+            },
+        )
+        return _knowledge_collection_tool_error(exc, action=action)
+
+
+def _knowledge_collection_tool_error(exc: Exception, *, action: str) -> str:
+    return _json_dump(
+        {
+            "status": "error",
+            "errorType": type(exc).__name__,
+            "message": str(exc),
+            "action": _text(action),
+            "boundaries": {
+                "autoExecution": False,
+                "autoApply": False,
+                "externalExecution": False,
+                "writesFormalKnowledge": False,
+                "writesRag": False,
+                "writesOfficialGraph": False,
+                "networkExecution": False,
+                "providerWriteback": False,
+                "directStageWriteback": False,
+                "singleVisibleInterface": True,
+                "boundary": "d03_knowledge_collection_facade_only",
+            },
+        }
+    )
+
+
 def _project_task_binding(
     workflow_service,
     *,

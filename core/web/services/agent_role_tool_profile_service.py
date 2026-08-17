@@ -86,6 +86,14 @@ CHALLENGE_CUP_OPERATION_FORBIDDEN_TOOLS = (
     *SEARCH_TOOLS,
     *FETCH_TOOLS,
 )
+KNOWLEDGE_COLLECTION_FACADE_TOOL = "research_knowledge_collection_tool"
+# Internal provider/writeback tools are never exposed to any fixed role; they are
+# explicitly denied below and only reachable through the single facade.
+INTERNAL_PROVIDER_TOOLS = (*SEARCH_TOOLS, *FETCH_TOOLS)
+INTERNAL_SOURCE_COLLECTION_TOOLS = (
+    "source_collection_context_tool",
+    "source_collection_stage_writeback_tool",
+)
 
 
 def _unique(values: Any) -> tuple[str, ...]:
@@ -498,6 +506,27 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
         mutation_access="restricted",
         max_calls_per_turn=8,
     ),
+    "research_knowledge_collector": _profile(
+        "research_knowledge_collector",
+        allowed_tools=(KNOWLEDGE_COLLECTION_FACADE_TOOL,),
+        forbidden_tools=(
+            *CHALLENGE_CUP_OPERATION_FORBIDDEN_TOOLS,
+            *INTERNAL_SOURCE_COLLECTION_TOOLS,
+            "unified_memory_search_tool",
+            "research_knowledge_query_tool",
+            "challenge_cup_experiment_context_tool",
+            "challenge_cup_experiment_writeback_tool",
+            "challenge_cup_iteration_context_tool",
+            "challenge_cup_iteration_writeback_tool",
+            "challenge_cup_versioning_context_tool",
+            "challenge_cup_versioning_writeback_tool",
+        ),
+        network_access="none",
+        mutation_access="restricted",
+        max_calls_per_turn=16,
+        role_family="knowledge_collection",
+        description="D03 stage-1 knowledge collection through the single research_knowledge_collection_tool facade only.",
+    ),
     "research_paper_reader": _profile(
         "research_paper_reader",
         allowed_tools=(
@@ -643,6 +672,190 @@ DEFAULT_RESEARCH_TOOL_PROFILE_IDS = {
     "research_source_default",
     "research_role_default",
 }
+
+# ============================================================================
+# RoleCapabilityContract
+# ============================================================================
+# Each fixed role binds its prompt responsibility to an explicit allow/deny tool
+# set.  Internal provider/writeback tools are never exposed directly; the D03
+# stage-1 collection role sees exactly the single facade tool.
+# ============================================================================
+
+ROLE_CAPABILITY_CONTRACT_VERSION = 1
+
+ROLE_CAPABILITY_CONTRACTS: dict[str, dict[str, Any]] = {
+    "research_knowledge_collector": {
+        "roleKey": "research_knowledge_collector",
+        "promptTemplateId": "",
+        "promptResponsibility": (
+            "D03 阶段一知识搜集：校验研究范围与搜索信封，通过唯一接口 "
+            "research_knowledge_collection_tool 复用现有 source collection 状态并"
+            "返回提炼摘要/状态/locator；绝不执行联网检索、绝不写正式知识、绝不调用"
+            "内部 provider/writeback 工具。"
+        ),
+        "allowedTools": (KNOWLEDGE_COLLECTION_FACADE_TOOL,),
+        "deniedTools": (
+            *INTERNAL_PROVIDER_TOOLS,
+            *INTERNAL_SOURCE_COLLECTION_TOOLS,
+            *KNOWLEDGE_STEWARD_TOOLS,
+            "unified_memory_search_tool",
+            "research_knowledge_query_tool",
+            "challenge_cup_experiment_context_tool",
+            "challenge_cup_experiment_writeback_tool",
+            "challenge_cup_iteration_context_tool",
+            "challenge_cup_iteration_writeback_tool",
+            "challenge_cup_versioning_context_tool",
+            "challenge_cup_versioning_writeback_tool",
+        ),
+        "networkAccess": "none",
+        "mutationAccess": "restricted",
+        "writesFormalKnowledge": False,
+        "singleVisibleInterface": True,
+    },
+    "challenge_cup_experiment_planner": {
+        "roleKey": "challenge_cup_experiment_planner",
+        "promptTemplateId": "prompt-challenge-cup-experiment-planner",
+        "promptResponsibility": (
+            "实验修订：基于已审资料修订实验计划与协议；只见实验账本上下文/回写最小工具，"
+            "不接触知识搜集 facade，不执行训练或联网检索。"
+        ),
+        "allowedTools": CHALLENGE_CUP_EXPERIMENT_TOOLS,
+        "deniedTools": (
+            *CHALLENGE_CUP_OPERATION_FORBIDDEN_TOOLS,
+            KNOWLEDGE_COLLECTION_FACADE_TOOL,
+            *INTERNAL_SOURCE_COLLECTION_TOOLS,
+            "challenge_cup_iteration_writeback_tool",
+            "challenge_cup_versioning_writeback_tool",
+        ),
+        "networkAccess": "none",
+        "mutationAccess": "restricted",
+        "writesFormalKnowledge": False,
+        "singleVisibleInterface": False,
+    },
+    "challenge_cup_experiment_ledger": {
+        "roleKey": "challenge_cup_experiment_ledger",
+        "promptTemplateId": "prompt-challenge-cup-experiment-ledger",
+        "promptResponsibility": (
+            "实验执行：登记实验执行证据（baseline/smoke/full-run）与入库申请；只见实验账本"
+            "最小工具，不接触知识搜集 facade，不执行训练或联网检索。"
+        ),
+        "allowedTools": CHALLENGE_CUP_EXPERIMENT_TOOLS,
+        "deniedTools": (
+            *CHALLENGE_CUP_OPERATION_FORBIDDEN_TOOLS,
+            KNOWLEDGE_COLLECTION_FACADE_TOOL,
+            *INTERNAL_SOURCE_COLLECTION_TOOLS,
+            "challenge_cup_iteration_writeback_tool",
+            "challenge_cup_versioning_writeback_tool",
+        ),
+        "networkAccess": "none",
+        "mutationAccess": "restricted",
+        "writesFormalKnowledge": False,
+        "singleVisibleInterface": False,
+    },
+    "challenge_cup_iteration_planner": {
+        "roleKey": "challenge_cup_iteration_planner",
+        "promptTemplateId": "prompt-challenge-cup-iteration-planner",
+        "promptResponsibility": (
+            "实验评估：基于证据记录 Research Loop 决策与迭代规划；只见迭代/实验上下文最小"
+            "工具，不接触知识搜集 facade，不执行训练或联网检索。"
+        ),
+        "allowedTools": (*CHALLENGE_CUP_ITERATION_TOOLS, "challenge_cup_experiment_context_tool"),
+        "deniedTools": (
+            *CHALLENGE_CUP_OPERATION_FORBIDDEN_TOOLS,
+            KNOWLEDGE_COLLECTION_FACADE_TOOL,
+            *INTERNAL_SOURCE_COLLECTION_TOOLS,
+            "challenge_cup_experiment_writeback_tool",
+            "challenge_cup_versioning_writeback_tool",
+        ),
+        "networkAccess": "none",
+        "mutationAccess": "restricted",
+        "writesFormalKnowledge": False,
+        "singleVisibleInterface": False,
+    },
+    "challenge_cup_versioning": {
+        "roleKey": "challenge_cup_versioning",
+        "promptTemplateId": "prompt-challenge-cup-versioning",
+        "promptResponsibility": (
+            "候选版本治理：登记候选版本历史与关系；只见版本/迭代上下文最小工具，"
+            "不接触知识搜集 facade，不执行训练或联网检索。"
+        ),
+        "allowedTools": (*CHALLENGE_CUP_VERSIONING_TOOLS, "challenge_cup_iteration_context_tool"),
+        "deniedTools": (
+            *CHALLENGE_CUP_OPERATION_FORBIDDEN_TOOLS,
+            KNOWLEDGE_COLLECTION_FACADE_TOOL,
+            *INTERNAL_SOURCE_COLLECTION_TOOLS,
+            "challenge_cup_experiment_writeback_tool",
+            "challenge_cup_iteration_writeback_tool",
+        ),
+        "networkAccess": "none",
+        "mutationAccess": "restricted",
+        "writesFormalKnowledge": False,
+        "singleVisibleInterface": False,
+    },
+}
+
+ALL_INTERNAL_PROVIDER_WRITEBACK_TOOLS = tuple(
+    sorted(
+        set(INTERNAL_PROVIDER_TOOLS)
+        | set(INTERNAL_SOURCE_COLLECTION_TOOLS)
+        | set(FORMAL_KNOWLEDGE_WRITE_TOOLS)
+    )
+)
+
+
+def role_capability_contract_for_role(role_key: str) -> dict[str, Any] | None:
+    normalized_role = normalize_role_key(role_key)
+    contract = ROLE_CAPABILITY_CONTRACTS.get(normalized_role)
+    return dict(contract) if isinstance(contract, dict) else None
+
+
+def role_capability_contract_allows(role_key: str, tool_name: str) -> bool:
+    contract = role_capability_contract_for_role(role_key)
+    if not contract:
+        return False
+    normalized_tool = str(tool_name or "").strip()
+    return normalized_tool in set(contract["allowedTools"])
+
+
+def role_capability_contract_denies(role_key: str, tool_name: str) -> bool:
+    contract = role_capability_contract_for_role(role_key)
+    if not contract:
+        return False
+    normalized_tool = str(tool_name or "").strip()
+    return normalized_tool in set(contract["deniedTools"])
+
+
+def role_capability_contract_snapshot() -> list[dict[str, Any]]:
+    """Deterministic snapshot of role/prompt-responsibility/allow-deny bindings."""
+    snapshot: list[dict[str, Any]] = []
+    for contract in ROLE_CAPABILITY_CONTRACTS.values():
+        snapshot.append(
+            {
+                "roleKey": contract["roleKey"],
+                "promptTemplateId": contract["promptTemplateId"],
+                "promptResponsibility": contract["promptResponsibility"],
+                "allowedTools": sorted(contract["allowedTools"]),
+                "deniedTools": sorted(contract["deniedTools"]),
+                "networkAccess": contract["networkAccess"],
+                "mutationAccess": contract["mutationAccess"],
+                "writesFormalKnowledge": contract["writesFormalKnowledge"],
+                "singleVisibleInterface": contract["singleVisibleInterface"],
+            }
+        )
+    snapshot.sort(key=lambda item: item["roleKey"])
+    return snapshot
+
+
+def role_capability_contract_fingerprint() -> str:
+    """Stable fingerprint for the RoleCapabilityContract snapshot."""
+    from core.research.workflow.contracts import sha256_hex
+
+    return sha256_hex(
+        {
+            "contractVersion": ROLE_CAPABILITY_CONTRACT_VERSION,
+            "contracts": role_capability_contract_snapshot(),
+        }
+    )
 
 
 def normalize_role_key(value: Any) -> str:
