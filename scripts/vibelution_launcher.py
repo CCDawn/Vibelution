@@ -1982,8 +1982,8 @@ def _ensure_frontend_build(
     if not web_dir.exists():
         return {}
     identity = source_identity or _runtime_source_identity()
-    # Ordinary start must not block the window on tsc/vite. Restart/force still
-    # require a current artifact; missing dist always falls through to build.
+    # Open/start rebuilds when the artifact is missing or not current.
+    # Restart/force uses the same check; missing dist always falls through to build.
     if not require_current and _frontend_dist_is_servable(web_dir):
         return _reuse_existing_frontend_build(
             identity,
@@ -2118,8 +2118,9 @@ def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
     source_identity = _runtime_source_identity()
     open_timings_ms["sourceIdentityMs"] = round((time.monotonic() - identity_started) * 1000.0, 1)
     frontend_started = time.monotonic()
-    # Start serves existing dist. Restart/tray force rebuild before this path.
-    frontend_provenance = _ensure_frontend_build(source_identity, require_current=False)
+    # Open/start must serve the current checkout. Skip tsc/vite only when dist
+    # already matches this frontend tree; stale artifacts are rebuilt first.
+    frontend_provenance = _ensure_frontend_build(source_identity, require_current=True)
     open_timings_ms["frontendEnsureMs"] = round((time.monotonic() - frontend_started) * 1000.0, 1)
     # Mid-flight checks only need commit/tree drift detection (full porcelain already done).
     _assert_runtime_source_identity(source_identity, light=True)

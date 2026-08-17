@@ -1128,7 +1128,7 @@ def test_python_launcher_reattests_reused_build_for_current_matching_tree(monkey
     assert result["lastValidatedCommit"] == "2" * 40
 
 
-def test_python_launcher_start_reuses_existing_dist_even_when_sources_are_newer(monkeypatch, tmp_path):
+def test_python_launcher_ensure_rebuilds_when_sources_are_newer(monkeypatch, tmp_path):
     launcher = _load_python_launcher()
     web_dir = tmp_path / "web"
     source = web_dir / "src" / "App.tsx"
@@ -1139,7 +1139,7 @@ def test_python_launcher_start_reuses_existing_dist_even_when_sources_are_newer(
     dist_index.parent.mkdir(parents=True)
     node_modules.mkdir(parents=True)
     source.write_text("export {};", encoding="utf-8")
-    dist_index.write_text("<html>current</html>", encoding="utf-8")
+    dist_index.write_text("<html>stale</html>", encoding="utf-8")
     provenance_path.write_text(
         json.dumps(
             {
@@ -1171,18 +1171,14 @@ def test_python_launcher_start_reuses_existing_dist_even_when_sources_are_newer(
     )
     monkeypatch.setattr(launcher, "_run_checked", lambda args, cwd, label: commands.append((args, label)))
     monkeypatch.setattr(launcher, "_append_frontend_build_log", lambda payload: None)
+    monkeypatch.setattr(launcher, "_assert_runtime_source_identity", lambda identity, light=False: identity)
 
-    result = launcher._ensure_frontend_build(source_identity, require_current=False)
+    result = launcher._ensure_frontend_build(source_identity, require_current=True)
 
-    assert commands == []
-    assert result["rebuilt"] is False
-    assert result["skipped"] is True
-    assert result["skipReason"] == "start_reuses_existing_dist"
-    assert result["frontendTree"] == "tree-old"
-    assert result["builtFromCommit"] == "1" * 40
-    stamped = json.loads(provenance_path.read_text(encoding="utf-8"))
-    assert stamped["frontendTree"] == "tree-old"
-    assert stamped["builtFromCommit"] == "1" * 40
+    assert commands == [(["npm", "run", "build"], "npm build")]
+    assert result["rebuilt"] is True
+    assert result["frontendTree"] == "tree-new"
+    assert result["builtFromCommit"] == "2" * 40
 
 
 def test_python_launcher_start_builds_when_dist_is_missing(monkeypatch, tmp_path):
@@ -1219,7 +1215,7 @@ def test_python_launcher_start_builds_when_dist_is_missing(monkeypatch, tmp_path
     assert result["rebuilt"] is True
 
 
-def test_python_launcher_start_backend_does_not_require_current_frontend(monkeypatch, tmp_path):
+def test_python_launcher_start_backend_requires_current_frontend(monkeypatch, tmp_path):
     launcher = _load_python_launcher()
     project_dir = tmp_path / "project"
     venv_python = project_dir / ".venv" / "bin" / "python"
@@ -1240,7 +1236,7 @@ def test_python_launcher_start_backend_does_not_require_current_frontend(monkeyp
 
     def fake_ensure(identity, *, require_current=True):
         ensure_calls.append({"identity": identity, "require_current": require_current})
-        return {"rebuilt": False, "skipped": True, "skipReason": "start_reuses_existing_dist"}
+        return {"rebuilt": False, "skipped": False, "skipReason": ""}
 
     monkeypatch.setattr(launcher, "_read_state", lambda: {})
     monkeypatch.setattr(launcher, "_preserved_launcher_control_state", lambda state: {})
@@ -1295,7 +1291,7 @@ def test_python_launcher_start_backend_does_not_require_current_frontend(monkeyp
 
     launcher._start_backend(8000, "127.0.0.1", no_browser=True)
 
-    assert ensure_calls == [{"identity": source_identity, "require_current": False}]
+    assert ensure_calls == [{"identity": source_identity, "require_current": True}]
 
 
 def test_python_launcher_runtime_identity_requires_clean_main(monkeypatch, tmp_path):
