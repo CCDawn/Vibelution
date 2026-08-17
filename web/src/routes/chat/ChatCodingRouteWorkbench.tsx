@@ -94,11 +94,6 @@ import {
   resolveChatUserDisplayName,
 } from "../chatCompactPanel";
 import {
-  tokenSpeedSampleFromMessages,
-  updateTokenSpeedTracker,
-  type TokenSpeedTrackerState,
-} from "../chatTokenSpeed";
-import {
   browserDesktopNotificationBridge,
   createDesktopConversationNotifier,
 } from "../chatDesktopNotifications";
@@ -143,6 +138,8 @@ import { useChatComposerBridgeState } from "./useChatComposerBridgeState";
 import { useChatGroupRoomViewModel } from "./useChatGroupRoomViewModel";
 import { ChatSessionWorkspacePanel } from "./ChatSessionWorkspacePanel";
 import { ChatConversationIndexRail } from "./ChatConversationIndexRail";
+import { ChatComposerPlusMenu } from "./ChatComposerPlusMenu";
+import { ChatGroupManagementDialog } from "./ChatGroupManagementDialog";
 import {
   chatStreamPerformanceNowMs,
   describeChatRouteError as describeError,
@@ -225,10 +222,8 @@ import {
   chatTurnSessionIdsFromRuntime,
   runtimeHasChatTurnForSession,
 } from "./chatRuntimeWorkRuns";
-import { buildChatTokenStatusViewModel } from "./chatTokenStatusModel";
 import {
   buildChatActiveSkillViewModel,
-  buildChatMentalStateViewModel,
   buildChatPetCompanionViewModel,
   buildChatSessionStateViewModel,
   type ActiveSkillContract,
@@ -270,12 +265,6 @@ import {
   cliAgentRunIdFromTabId,
   cliAgentRunTabId,
 } from "./cliAgentRunModel";
-import {
-  CHAT_FEATURE_PRESETS,
-  DEFAULT_CHAT_FEATURE_PRESETS,
-  chatFeaturePresetShortLabel,
-  type FeaturePresetKey,
-} from "./chatFeaturePresets";
 import { postSubmitTelemetry } from "./chatSubmitTelemetry";
 import {
   buildSessionReferencePayload,
@@ -613,7 +602,6 @@ export function ChatCodingRoute() {
     editingSessionTitleRef.current = editingSessionTitle;
   }, [editingSessionTitle]);
 
-  const [tokenSpeedTracker, setTokenSpeedTracker] = useState<TokenSpeedTrackerState | null>(null);
   const [petActionFeedback, setPetActionFeedback] = useState("");
   const [mentalModelEnabledForNextTurn, setMentalModelEnabledForNextTurn] = useState<boolean>(
     () => readStoredMentalModelToggle() ?? false,
@@ -621,9 +609,7 @@ export function ChatCodingRoute() {
   const [runtimeStatusEnabledForNextTurn, setRuntimeStatusEnabledForNextTurn] = useState<boolean>(
     () => readStoredRuntimeStatusToggle() ?? true,
   );
-  const [featurePresetState, setFeaturePresetState] = useState<Record<FeaturePresetKey, boolean>>(
-    DEFAULT_CHAT_FEATURE_PRESETS,
-  );
+  const [groupManageDialogOpen, setGroupManageDialogOpen] = useState(false);
   const {
     groupComposerOpen,
     setGroupComposerOpen,
@@ -1643,7 +1629,6 @@ export function ChatCodingRoute() {
   const {
     locale,
     numberFormatter,
-    compactNumberFormatter,
     formatTime,
     formatConversationIndexTime,
   } = useChatLocaleFormatters(lang);
@@ -2242,7 +2227,6 @@ export function ChatCodingRoute() {
     numberFormatter,
   });
   const petAvatarSkinStyle = styles[`petShowcaseAvatar_${petAvatarPresetKey}`] ?? styles.petShowcaseAvatar_default;
-  const compression = runtimeMatchesSelectedSession ? runtime?.contextCompression : undefined;
   const {
     activeSurfaceTitle,
     sessionStateLabel,
@@ -2284,90 +2268,6 @@ export function ChatCodingRoute() {
     latestControlSignalTitle,
     hasLatestControlSignal: Boolean(latestControlSignal),
   });
-  useEffect(() => {
-    const sample = groupPanelActive
-      ? null
-      : tokenSpeedSampleFromMessages(
-        detail?.id ?? activeSessionId,
-        detail?.messages,
-        sessionStateValue,
-        Date.now(),
-      );
-    setTokenSpeedTracker((previous) => updateTokenSpeedTracker(previous, sample));
-  }, [activeSessionId, detail?.id, detail?.messages, groupPanelActive, sessionStateValue]);
-  const { tokenStatusMetrics } = useMemo(
-    () => buildChatTokenStatusViewModel({
-      detail,
-      lastCacheComposition,
-      lastContextComposition,
-      compression,
-      runtimeMatchesSelectedSession,
-      cache: {
-        cacheDetailAvailable,
-        cacheCompositionPercent,
-        providerCachedInputTokens,
-        providerCacheInputTokens,
-        cacheCompositionSummary,
-        cacheDetailOpenLabel,
-        cacheCompositionTitle,
-      },
-      tokenSpeedTracker,
-      activeSessionId,
-      groupPanelActive,
-      sessionStateValue,
-      sessionStateLabel,
-      sessionStateLine,
-      lang,
-      t,
-      numberFormatter,
-      compactNumberFormatter,
-      locale,
-      formatTime,
-    }),
-    [
-      activeSessionId,
-      cacheCompositionPercent,
-      cacheCompositionSummary,
-      cacheCompositionTitle,
-      cacheDetailAvailable,
-      cacheDetailOpenLabel,
-      compactNumberFormatter,
-      compression,
-      detail,
-      groupPanelActive,
-      lang,
-      lastCacheComposition,
-      lastContextComposition,
-      locale,
-      numberFormatter,
-      providerCacheInputTokens,
-      providerCachedInputTokens,
-      runtimeMatchesSelectedSession,
-      sessionStateLabel,
-      sessionStateLine,
-      sessionStateValue,
-      t,
-      tokenSpeedTracker,
-    ],
-  );
-  const {
-    mental,
-    mentalCognitiveStateValue,
-    mentalCognitiveStateLabel,
-    mentalSourceLabel,
-    mentalStateLabel,
-    mentalSummary,
-    mentalWhisper,
-    mentalConfidence,
-    mentalRelativeTime,
-    mentalCompactLine,
-  } = buildChatMentalStateViewModel({
-    // Prefer the selected session's last assistant snapshot over global runtime mood.
-    mental: latestMentalSnapshot(detail?.messages) ?? runtime?.mentalState,
-    lang,
-    t,
-    locale,
-  });
 
   const {
     agentsById,
@@ -2378,6 +2278,21 @@ export function ChatCodingRoute() {
     agents: agentsQuery.data,
     pendingArchiveAgentIds,
   });
+
+  const composerSessionReferenceOptions = useMemo(() =>
+    (sessionsQuery.data ?? [])
+      .filter((session) => session.id !== activeSessionId)
+      .map((session) => {
+        const sessionAgent = session.agentId ? agentsById.get(session.agentId) : undefined;
+        const display = sessionAgentDisplayInfo(session, sessionAgent, lang, resolveModelLabel);
+        return {
+          id: session.id,
+          title: String(session.taskTitle || session.resultCard?.title || session.title || session.id).trim(),
+          meta: display.name,
+          reference: buildSessionReferencePayload(session, display.name, session.taskSummary ?? ""),
+        };
+      }),
+  [activeSessionId, agentsById, lang, resolveModelLabel, sessionsQuery.data]);
 
   const {
     allVisibleSessions,
@@ -2644,13 +2559,6 @@ export function ChatCodingRoute() {
     renameAgentEmptyMessage: t("renameAgentEmpty"),
   });
 
-  const toggleFeaturePreset = useCallback((key: FeaturePresetKey) => {
-    setFeaturePresetState((current) => ({
-      ...current,
-      [key]: !current[key],
-    }));
-  }, []);
-
   const {
     contextMenuSession,
     contextMenuSessionId,
@@ -2883,54 +2791,16 @@ export function ChatCodingRoute() {
         numberFormatter={numberFormatter}
         activeGroupRoom={activeGroupRoom}
         activeGroupTeamOwned={activeGroupTeamOwned}
-        activeGroupTeam={activeGroupTeam}
         availableGroupParticipantCount={availableGroupParticipantCount}
         statusLabel={statusLabel}
-        groupManageChanged={groupManageChanged}
-        groupManageDisabled={groupManageDisabled}
-        groupDeleteDisabled={groupDeleteDisabled}
-        groupResetDisabled={groupResetDisabled}
-        groupRoundActive={groupRoundActive}
         groupRoundRunning={groupRoundRunning}
-        groupRoomActionError={groupRoomActionError}
-        setGroupRoomActionError={setGroupRoomActionError}
-        groupManageTitleDraft={groupManageTitleDraft}
-        setGroupManageTitleDraft={setGroupManageTitleDraft}
-        groupManageModeDraft={groupManageModeDraft}
-        setGroupManageModeDraft={setGroupManageModeDraft}
-        groupManagePurposeDraft={groupManagePurposeDraft}
-        setGroupManagePurposeDraft={setGroupManagePurposeDraft}
-        readyChatRoomModes={readyChatRoomModes}
-        availableChatRoomPurposes={availableChatRoomPurposes}
-        chatRoomModeLabel={chatRoomModeLabel}
-        chatRoomPurposeLabel={chatRoomPurposeLabel}
-        groupManageSessionIds={groupManageSessionIds}
-        groupManageSessionSet={groupManageSessionSet}
-        sessions={sessionsQuery.data}
-        agentsById={agentsById}
-        resolveModelLabel={resolveModelLabel}
-        renderAgentAvatar={renderAgentAvatar}
-        avatarInitials={avatarInitials}
-        agentRoleClass={agentRoleClass}
-        avatarImageUrlFrom={avatarImageUrlFrom}
-        updateGroupRoomPending={updateGroupRoomMutation.isPending}
-        deleteGroupRoomPending={deleteGroupRoomMutation.isPending}
-        resetGroupRoomPending={resetGroupRoomMutation.isPending}
-        onOpenTeam={(teamId) => navigate(teamWorkspaceRoute(teamId))}
-        onApplyGroupRoomManagement={handleApplyGroupRoomManagement}
-        onDeleteActiveGroupRoom={handleDeleteActiveGroupRoom}
-        onResetActiveGroupRoom={handleResetActiveGroupRoom}
-        onToggleGroupManageSession={handleToggleGroupManageSession}
         activeSurfaceTitle={activeSurfaceTitle}
         sessionStateValue={sessionStateValue}
         sessionStateLabel={sessionStateLabel}
         sessionStateLine={sessionStateLine}
         compactSessionStateLine={compactSessionStateLine}
         agentDirectSessionMismatch={agentDirectSessionMismatch}
-        agentPrimaryDirectSessionId={agentPrimaryDirectSessionId}
         sessionBindingMismatchLine={sessionBindingMismatchLine}
-        onOpenDirectSession={handleOpenDirectSession}
-        onPrefetchDirectSession={handlePrefetchDirectSession}
         sessionCompactRows={sessionCompactRows}
         activeSkillSummary={hasActiveSkill}
         activeSkillStatusStyle={activeSkillStatusStyle}
@@ -2939,32 +2809,9 @@ export function ChatCodingRoute() {
         activeSkillCommand={activeSkillCommand}
         activeSkillStatusLabel={activeSkillStatusLabel}
         activeSkillShortHash={activeSkillShortHash}
-        mentalModelEnabledForNextTurn={mentalModelEnabledForNextTurn}
-        runtimeStatusEnabledForNextTurn={runtimeStatusEnabledForNextTurn}
-        activeSessionId={activeSessionId}
-        onMentalModelEnabledChange={handleMentalModelEnabledChange}
-        onRuntimeStatusEnabledChange={handleRuntimeStatusEnabledChange}
-        featurePresetState={featurePresetState}
-        onToggleFeaturePreset={toggleFeaturePreset}
-        cacheDetailAvailable={cacheDetailAvailable}
-        cacheDetailOpen={cacheDetailOpen}
-        cacheDetailOpenLabel={cacheDetailOpenLabel}
-        tokenStatusMetrics={tokenStatusMetrics}
-        onOpenCacheDetail={openCacheDetail}
         promptSnapshot={detail?.agentPromptSnapshot}
         promptAssembly={detail?.lastPromptAssembly}
         lastLlmPayloadTrace={lastLlmPayloadTrace}
-        mentalCompactLine={mentalCompactLine}
-        mentalSourceLabel={mentalSourceLabel}
-        mentalCognitiveStateValue={mentalCognitiveStateValue}
-        mentalStateLabel={mentalStateLabel}
-        mentalSummary={mentalSummary}
-        mentalWhisper={mentalWhisper}
-        mentalCognitiveStateLabel={mentalCognitiveStateLabel}
-        mentalConfidence={mentalConfidence}
-        mentalRelativeTime={mentalRelativeTime}
-        formatTime={formatTime}
-        mental={mental}
         pet={pet}
         petPresetLabel={petPresetLabel}
         petCompactLine={petCompactLine}
@@ -2974,7 +2821,6 @@ export function ChatCodingRoute() {
         petInteractionLabels={petInteractionLabels}
         petActionPending={petActionMutation.isPending}
         petActionFeedback={petActionFeedback}
-        onPetInteraction={handlePetInteraction}
       />
       </Suspense>
       )}
@@ -3122,6 +2968,28 @@ export function ChatCodingRoute() {
               expandedGroupMessageIds={expandedGroupMessageIds}
               chatMentionTargets={chatMentionTargets}
               userDisplayName={runtime?.userName || (lang === "zh" ? "我" : "Me")}
+              composerLeadingControl={standardGroupRoomActive && activeGroupRoom ? (
+                <ChatComposerPlusMenu
+                  lang={lang}
+                  showAddReference={false}
+                  showCapabilities={false}
+                  attachmentDisabled
+                  sessionReferences={[]}
+                  mentalModelEnabled={mentalModelEnabledForNextTurn}
+                  runtimeStatusEnabled={runtimeStatusEnabledForNextTurn}
+                  capabilityDisabled
+                  onMentalModelEnabledChange={handleMentalModelEnabledChange}
+                  onRuntimeStatusEnabledChange={handleRuntimeStatusEnabledChange}
+                  group={{
+                    title: activeGroupRoom.title,
+                    onManage: () => setGroupManageDialogOpen(true),
+                    teamId: activeGroupTeamOwned ? activeGroupTeam?.teamId : undefined,
+                    onOpenTeam: activeGroupTeamOwned && activeGroupTeam
+                      ? () => navigate(teamWorkspaceRoute(activeGroupTeam.teamId))
+                      : undefined,
+                  }}
+                />
+              ) : undefined}
               projectBusRefreshing={projectAgentBusQuery.isFetching}
               projectBusRefreshError={projectAgentBusQuery.isError ? describeError(projectAgentBusQuery.error, t("loadFailed")) : ""}
               projectBusSendPending={sendProjectBusMessageMutation.isPending}
@@ -3191,6 +3059,39 @@ export function ChatCodingRoute() {
                     : "",
                 onComposerFocusRequestSettled: settleSessionComposerFocusRequest,
                 composer: conversationComposer,
+                composerLeadingControl: (
+                  <ChatComposerPlusMenu
+                    lang={lang}
+                    attachmentDisabled={conversationComposer.attachmentInputDisabled}
+                    onAddAttachments={handleAddComposerAttachments}
+                    sessionReferences={composerSessionReferenceOptions}
+                    onAddSessionReference={handleAddComposerReference}
+                    mentalModelEnabled={mentalModelEnabledForNextTurn}
+                    runtimeStatusEnabled={runtimeStatusEnabledForNextTurn}
+                    capabilityDisabled={!activeSessionId}
+                    onMentalModelEnabledChange={handleMentalModelEnabledChange}
+                    onRuntimeStatusEnabledChange={handleRuntimeStatusEnabledChange}
+                    directSession={agentDirectSessionMismatch && agentPrimaryDirectSessionId ? {
+                      id: agentPrimaryDirectSessionId,
+                      label: sessionBindingMismatchLine,
+                      onOpen: () => handleOpenDirectSession(agentPrimaryDirectSessionId),
+                      onPrefetch: () => handlePrefetchDirectSession(agentPrimaryDirectSessionId),
+                    } : null}
+                    companion={pet ? {
+                      name: pet.name,
+                      pending: petActionMutation.isPending,
+                      onAction: handlePetInteraction,
+                    } : null}
+                    group={standardGroupRoomActive && activeGroupRoom ? {
+                      title: activeGroupRoom.title,
+                      onManage: () => setGroupManageDialogOpen(true),
+                      teamId: activeGroupTeamOwned ? activeGroupTeam?.teamId : undefined,
+                      onOpenTeam: activeGroupTeamOwned && activeGroupTeam
+                        ? () => navigate(teamWorkspaceRoute(activeGroupTeam.teamId))
+                        : undefined,
+                    } : null}
+                  />
+                ),
                 permissionControl: activeSessionAgent ? {
                   value: activeSessionAgent.permissionPreset || "request_approval",
                   disabled: (
@@ -3362,6 +3263,49 @@ export function ChatCodingRoute() {
       />
       )}
     >
+      <ChatGroupManagementDialog
+        open={groupManageDialogOpen}
+        onOpenChange={setGroupManageDialogOpen}
+        lang={lang}
+        activeGroupRoom={activeGroupRoom}
+        activeGroupTeamOwned={activeGroupTeamOwned}
+        activeGroupTeam={activeGroupTeam}
+        groupManageChanged={groupManageChanged}
+        groupManageDisabled={groupManageDisabled}
+        groupDeleteDisabled={groupDeleteDisabled}
+        groupResetDisabled={groupResetDisabled}
+        groupRoundActive={groupRoundActive}
+        groupRoundRunning={groupRoundRunning}
+        groupRoomActionError={groupRoomActionError}
+        setGroupRoomActionError={setGroupRoomActionError}
+        groupManageTitleDraft={groupManageTitleDraft}
+        setGroupManageTitleDraft={setGroupManageTitleDraft}
+        groupManageModeDraft={groupManageModeDraft}
+        setGroupManageModeDraft={setGroupManageModeDraft}
+        groupManagePurposeDraft={groupManagePurposeDraft}
+        setGroupManagePurposeDraft={setGroupManagePurposeDraft}
+        readyChatRoomModes={readyChatRoomModes}
+        availableChatRoomPurposes={availableChatRoomPurposes}
+        chatRoomModeLabel={chatRoomModeLabel}
+        chatRoomPurposeLabel={chatRoomPurposeLabel}
+        groupManageSessionIds={groupManageSessionIds}
+        groupManageSessionSet={groupManageSessionSet}
+        sessions={sessionsQuery.data}
+        agentsById={agentsById}
+        resolveModelLabel={resolveModelLabel}
+        renderAgentAvatar={renderAgentAvatar}
+        avatarInitials={avatarInitials}
+        agentRoleClass={agentRoleClass}
+        avatarImageUrlFrom={avatarImageUrlFrom}
+        updateGroupRoomPending={updateGroupRoomMutation.isPending}
+        deleteGroupRoomPending={deleteGroupRoomMutation.isPending}
+        resetGroupRoomPending={resetGroupRoomMutation.isPending}
+        onOpenTeam={(teamId) => navigate(teamWorkspaceRoute(teamId))}
+        onApplyGroupRoomManagement={handleApplyGroupRoomManagement}
+        onDeleteActiveGroupRoom={handleDeleteActiveGroupRoom}
+        onResetActiveGroupRoom={handleResetActiveGroupRoom}
+        onToggleGroupManageSession={handleToggleGroupManageSession}
+      />
       {cacheDetailOpen && cacheDetailAvailable ? (
         <Suspense fallback={null}>
           <CacheDetailDialog

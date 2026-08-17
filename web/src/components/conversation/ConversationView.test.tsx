@@ -23,6 +23,13 @@ import type { ConversationProcessDisplayMode } from "./conversationViewTypes";
 import { shouldShowNextStateSignalInConversation } from "./conversationNextStateSignal";
 import { isAgentInboxMessage } from "./conversationMessagePredicates";
 
+describe("composer leading control contract", () => {
+  it("lets Chat replace the legacy image button without changing other routes", () => {
+    expect(conversationViewSource).toContain("composerLeadingControl ?? (");
+    expect(conversationViewSource).toContain("attachmentInputRef.current?.click()");
+  });
+});
+
 // Server-rendered integration tests must exercise the loaded Markdown renderer.
 // Production keeps it lazy so the initial ConversationView chunk stays small.
 vi.mock("./LazyConversationMarkdownRenderer", async () => {

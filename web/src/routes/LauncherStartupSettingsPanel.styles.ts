@@ -19,14 +19,14 @@ const styles = {
   settingField: "grid min-w-0 gap-[3px] [&>span]:[font-size:var(--vui-font-xs)] [&>span]:uppercase [&>span]:tracking-[0.06em] [&>span]:text-[var(--fg-tertiary)] [&>small]:min-w-0 [&>small]:truncate [&>small]:[font-size:var(--vui-font-xs)] [&>small]:text-[var(--fg-secondary)] [&_input]:min-h-7 [&_input]:w-full [&_input]:min-w-0 [&_input]:rounded-[var(--radius-control)] [&_input]:border [&_input]:border-[var(--border-soft)] [&_input]:bg-[var(--vui-surface-row)] [&_input]:px-[7px] [&_input]:py-[3px] [&_input]:[font-size:var(--vui-font-xs)] [&_input]:text-[var(--fg-primary)] [&_select]:min-h-7 [&_select]:w-full [&_select]:min-w-0 [&_select]:rounded-[var(--radius-control)] [&_select]:border [&_select]:border-[var(--border-soft)] [&_select]:bg-[var(--vui-surface-row)] [&_select]:px-[7px] [&_select]:py-[3px] [&_select]:[font-size:var(--vui-font-xs)] [&_select]:text-[var(--fg-primary)]",
   settingToggle: "inline-flex min-h-7 min-w-0 items-center gap-1.5 whitespace-nowrap self-end pb-px [&>span]:[font-size:var(--vui-font-xs)] [&>span]:uppercase [&>span]:tracking-[0.06em] [&>span]:text-[var(--fg-tertiary)] [&_input]:m-0 [&_input]:h-3.5 [&_input]:w-3.5",
   settingsTitle: "m-0 shrink-0 whitespace-nowrap [font-size:var(--vui-font-xs)] uppercase tracking-[0.08em] text-vui-fg-tertiary",
-  settingsFold: "block min-w-0",
+  settingsFold: "block min-w-0 w-full",
   settingsSummary:
     "flex min-w-0 cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden [&::-webkit-details-marker]:[display:none]",
   settingsSummaryValue: "min-w-0 flex-auto truncate [font-size:var(--vui-font-xs)] text-vui-fg-primary",
   settingsSummaryHint: "shrink-0 [font-size:var(--vui-font-2xs)] text-vui-fg-tertiary",
   settingsBody: "mt-1.5 grid min-w-0 gap-2",
   settingsSaveButton: `${primaryControl} justify-self-end self-end py-[3px]`,
-  settingsStrip: `mx-2 mt-1.5 grid min-h-0 min-w-0 max-w-full gap-2 self-start overflow-hidden ${panelSurface} px-2 py-1.5`,
+  settingsStrip: `mx-2 mt-1.5 grid min-h-0 min-w-0 w-full max-w-full gap-2 overflow-hidden ${panelSurface} px-2 py-1.5`,
   settingsPrimary:
     "grid min-w-0 max-w-full grid-cols-4 items-end gap-1.5 max-[860px]:grid-cols-2 max-[620px]:grid-cols-[minmax(0,1fr)]",
   settingsWindow:

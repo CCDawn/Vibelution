@@ -9,9 +9,44 @@ def _text(value: Any, *, limit: int = 160) -> str:
     return str(value or "").strip()[:limit]
 
 
+def _load_receipt_bound_knowledge_package(
+    *,
+    team_id: str,
+    workflow_run_id: str,
+    store: Any | None,
+) -> dict[str, Any] | None:
+    """Read the accepted package from the bound receipt only.
+
+    Inventory without a receipt must not unlock hypothesis input. A later
+    inventory item also must not replace the receipt-pinned content hash.
+    """
+    resolved = store
+    if resolved is None:
+        try:
+            from core.web.services.team_workflow.research_runtime.formal_write_runtime import (
+                FormalWriteRuntimeUnavailable,
+                WorkflowMigrationRequired,
+                get_write_store,
+            )
+
+            resolved = get_write_store()
+        except (FormalWriteRuntimeUnavailable, WorkflowMigrationRequired):
+            return None
+    from core.web.services.team_workflow.research_runtime.human_acceptance_artifact import (
+        load_accepted_knowledge_package_from_receipt,
+    )
+
+    return load_accepted_knowledge_package_from_receipt(
+        resolved,
+        team_id=team_id,
+        run_id=workflow_run_id,
+    )
+
+
 def build_hypothesis_input_context(
     team_id: str,
     task: dict[str, Any],
+    store: Any | None = None,
 ) -> dict[str, Any]:
     """Resolve one accepted package into evidence claims and writeback limits."""
     workflow_run_id = _text(task.get("workflowRunId"))
@@ -26,17 +61,14 @@ def build_hypothesis_input_context(
         }
 
     from core.web.services import team_knowledge_service
-    from core.web.services.team_workflow.research_runtime.knowledge_artifact_authority import (
-        load_knowledge_package_payload,
-    )
     from core.web.services.team_workflow.source_collection.candidates import (
         list_candidate_store,
     )
 
-    package = load_knowledge_package_payload(
+    package = _load_receipt_bound_knowledge_package(
         team_id=team_id,
-        authority_run_id=source_run_id,
         workflow_run_id=workflow_run_id,
+        store=store,
     )
     if package is None:
         return {

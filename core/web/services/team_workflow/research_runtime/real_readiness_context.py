@@ -147,8 +147,16 @@ class RealDomainReadinessContext:
         )
 
     def knowledge_package(self, team_id: str, run_id: str) -> Mapping[str, Any] | None:
-        return self._query("knowledge_package", team_id, run_id) or self._artifact(
-            "knowledge_package", team_id, run_id
+        if "knowledge_package" in self._overrides:
+            return self._query("knowledge_package", team_id, run_id)
+        from .human_acceptance_artifact import (
+            load_accepted_knowledge_package_from_receipt,
+        )
+
+        return load_accepted_knowledge_package_from_receipt(
+            self._store,
+            team_id=team_id,
+            run_id=run_id,
         )
 
     def hypothesis_set(self, team_id: str, run_id: str) -> Mapping[str, Any] | None:

@@ -676,12 +676,12 @@ describe("LauncherRoute layout contract", () => {
     expect(startupSettingsPanelSource).toContain("setValidationError(copy.invalidPort)");
     expect(startupSettingsPanelSource).toContain("saveWindowMode({ windowMode: value })");
     expect(startupSettingsPanelSource).toContain("controlsDisabled");
-    // The collapsed summary title must stay on one line inside the 250-380px rail.
+    // The collapsed summary title must stay on one line in the compact top strip.
     expect(startupSettingsPanelStyles.settingsTitle).toContain("shrink-0");
     expect(startupSettingsPanelStyles.settingsTitle).toContain("whitespace-nowrap");
   });
 
-  it("keeps branch management and startup settings in a responsive primary-plus-rail layout", () => {
+  it("keeps branch management and startup settings stacked without an empty side rail", () => {
     expect(routeSource).toContain("styles.primaryRail");
     expect(routeSource).toContain("styles.primaryColumn");
     expect(routeSource).toContain("styles.settingsRail");
@@ -703,16 +703,20 @@ describe("LauncherRoute layout contract", () => {
     expect(statusErrorIndex).toBeGreaterThan(settingsIndex);
     expect(workspaceIndex).toBeGreaterThan(statusErrorIndex);
     expect(advancedIndex).toBeGreaterThan(workspaceIndex);
-    // Responsive contract: 1fr primary + 250px-or-larger rail at lg, stacked below lg.
-    expect(styles.primaryRail).toContain("minmax(0,1fr)");
-    expect(styles.primaryRail).toContain("minmax(250px,");
-    expect(styles.primaryRail).toContain("max-[1024px]:grid-cols-[minmax(0,1fr)]");
+    // Collapsed settings sit in an auto-height top strip; the branch table fills the rest.
+    // Expanding the form grows that strip full-width instead of reserving an empty side column.
+    expect(styles.primaryRail).toContain("grid-cols-1");
+    expect(styles.primaryRail).toContain("grid-rows-[auto_minmax(0,1fr)]");
+    expect(styles.primaryRail).not.toContain("minmax(250px,");
+    expect(styles.primaryRail).toContain("flex-1");
     expect(styles.primaryColumn).toContain("min-w-0");
     expect(styles.primaryColumn).toContain("flex-col");
-    expect(styles.primaryRail).toContain("flex-1");
+    expect(styles.primaryColumn).toContain("row-start-2");
     expect(styles.settingsRail).toContain("min-w-0");
-    // Open settings details spans the full route grid row; closed stays the compact rail.
-    expect(styles.settingsRail).toContain("[&:has([open])]:col-span-full");
+    expect(styles.settingsRail).toContain("row-start-1");
+    expect(styles.settingsRail).not.toContain("col-span-full");
+    expect(startupSettingsPanelStyles.settingsStrip).not.toContain("self-start");
+    expect(startupSettingsPanelStyles.settingsStrip).toContain("w-full");
   });
 
   it("keeps developer mode launcher-owned with preview and plan-hash cleanup guards", () => {
