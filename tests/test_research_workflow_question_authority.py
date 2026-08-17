@@ -13,6 +13,7 @@ from core.web.services.team_workflow.research_runtime import question_launch
 from core.web.services.team_workflow.research_runtime import (
     service as runtime_service_module,
 )
+from core.web.services.team_workflow.research_runtime.runtime_factory import build_workflow_runtime
 from core.web.services.team_workflow.research_runtime.service import (
     reset_research_workflow_runtime_service_for_tests,
 )
@@ -27,17 +28,51 @@ def _approved_detail(question_id: str = "SCI-096") -> dict:
         "record": {
             "questionId": question_id,
             "runId": "stage1-sci-096-v3",
+            "schemaVersion": 2,
+            "submissionEligible": True,
             "status": "approved",
-            "humanGates": {"allApproved": True},
+            "humanGates": {
+                "allApproved": True,
+                "decisions": {
+                    "H1_problem_understanding": "approved",
+                    "H2_hypothesis_selection": "approved",
+                    "H3_research_plan": "approved",
+                    "H4_external_output": "approved",
+                },
+            },
+            "validation": {
+                "schemaValidation": "passed",
+                "citationValidation": "passed",
+                "officialModelCall": True,
+            },
         },
         "output": {
-            "schema_version": 1,
-            "catalog_id": "science-125-questions-2021",
-            "question_id": question_id,
-            "question_en": "How does the brain retrieve memories?",
+            "schema_version": 2,
+            "identity": {
+                "catalog_id": "science-125-questions-2021",
+                "question_id": question_id,
+                "question_en": "How does the brain retrieve memories?",
+            },
+            "classification": {
+                "domain": "neuroscience",
+                "specialization_profile_id": "SPEC-COMP-INFO-NEURO-v1",
+            },
+            "scope": {
+                "theme_id": "theme-sci-096",
+                "campaign_id": "campaign-sci-096",
+                "research_project_id": "project-sci-096",
+                "memory_scope": "same_theme",
+            },
             "problem_understanding": {"scope": "只讨论可证伪的记忆提取机制。"},
             "research_plan": {"failure_criteria": "无法区分"},
-            "final_summary": {"next_validation_step": "执行对照。"},
+            "result_classification": {
+                "status": "approved",
+                "actual_execution": False,
+                "classification": "proposal_only",
+                "final_summary": {"next_validation_step": "执行对照。"},
+            },
+            "review": {"human_review_status": "passed", "question_review_digest_ids": []},
+            "submission": {"eligible": True, "projection_version": "1.0-review.1", "blockers": []},
         },
         "artifact": {"sha256": "a" * 64, "immutable": True},
     }
@@ -60,12 +95,37 @@ def _patch_approved_question(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         question_launch,
         "challenge_question_run_summary",
-        lambda _team_id: {"completedQuestionIds": ["SCI-096"]},
+        lambda _team_id: {
+            "completedQuestionIds": ["SCI-096"],
+            "completedQuestionResults": [
+                {
+                    "questionId": "SCI-096",
+                    "runId": "stage1-sci-096-v3",
+                    "schemaVersion": 2,
+                    "submissionEligible": True,
+                    "status": "approved",
+                    "humanGates": {
+                        "allApproved": True,
+                        "decisions": {
+                            "H1_problem_understanding": "approved",
+                            "H2_hypothesis_selection": "approved",
+                            "H3_research_plan": "approved",
+                            "H4_external_output": "approved",
+                        },
+                    },
+                    "validation": {
+                        "schemaValidation": "passed",
+                        "citationValidation": "passed",
+                        "officialModelCall": True,
+                    },
+                }
+            ],
+        },
     )
     monkeypatch.setattr(
         question_launch,
         "get_challenge_question_run_detail",
-        lambda _team_id, question_id: _approved_detail(question_id),
+        lambda _team_id, question_id, *, run_id="": _approved_detail(question_id),
     )
     monkeypatch.setattr(
         question_launch,
@@ -104,6 +164,13 @@ def test_launch_options_and_frozen_input_derive_from_one_approved_question(
     assert run_input["researchObjectiveContract"]["question"] == "How does the brain retrieve memories?"
     assert run_input["budgetPolicy"]["stageBudgets"]["execution_iteration"]["tokens"] == 250000
     assert set(run_input["modelRoutingPolicy"].values()) == {"relay_openai/gpt-5.6-luna"}
+    assert run_input["competitionProgramSnapshot"]["programContractVersion"] == "2.2.0"
+    assert run_input["competitionProgramSnapshot"]["fullCatalogPolicyVersion"] == "1.2.0"
+    assert run_input["competitionProgramSnapshot"]["catalogQuestionCount"] == 125
+    assert run_input["competitionProgramSnapshot"]["questionSchemaVersion"] == 2
+    assert run_input["competitionProgramSnapshot"]["directionMode"] == "a_plus_b"
+    assert len(run_input["competitionProgramSnapshot"]["directions"]) == 2
+    assert run_input["constraintSnapshot"]["competitionProgramSnapshot"] == run_input["competitionProgramSnapshot"]
     assert "projectId" not in options["questions"][0]
 
 
@@ -157,11 +224,17 @@ def test_canonical_question_project_collision_fails_loudly(
 def test_create_endpoint_forbids_client_authored_contract_fields(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
 ) -> None:
     reset_research_workflow_runtime_service_for_tests(
         run_store=WorkflowRunStore(tmp_path / "runs"),
         checkpoint_path=str(tmp_path / "checkpoints.sqlite"),
     )
+    formal_runtime = build_workflow_runtime(
+        tmp_path / "ledger.sqlite",
+        checkpoint_path=tmp_path / "formal-checkpoints.sqlite",
+    )
+    request.addfinalizer(formal_runtime.close)
     canonical_input = question_launch.build_question_run_input
     _patch_approved_question(monkeypatch)
     monkeypatch.setattr(
@@ -207,5 +280,5 @@ def test_create_endpoint_forbids_client_authored_contract_fields(
     assert accepted.status_code == 201
     body = accepted.json()
     assert body["projectId"] == "challenge-sci-096"
-    assert body["inputSnapshot"]["researchBriefHash"] == "a" * 64
-    assert body["inputSnapshot"]["createdBy"] == "operator"
+    assert body["questionId"] == "SCI-096"
+    assert "researchBriefHash" not in body

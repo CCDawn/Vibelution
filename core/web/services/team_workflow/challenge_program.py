@@ -1,14 +1,34 @@
-"""Challenge Cup program-level three-stage projection.
+"""Challenge Cup program-level projections.
 
-The experiment lifecycle remains an append-only compatibility source for one
-representative deep-research case.  It must never be promoted to the completion
-state of the whole 125-question competition program.
+``build_challenge_program_projection`` is the readonly legacy compatibility
+projection over the append-only experiment lifecycle.  It must never be
+promoted to completion of the whole 125-question competition program.
+
+``build_competition_program_projection`` is the active typed v2 projection
+driven by the tracked Program 2.2.0 and FullCatalogPolicy 1.2.0 resources.
+Only schemaVersion=2 approved and submission-eligible question results count
+toward the formal 125-question completion contract.
 """
 
 from __future__ import annotations
 
 from typing import Any
 from urllib.parse import urlparse
+
+from core.research.competition.resources import (
+    CATALOG_ID,
+    CATALOG_QUESTION_COUNT,
+    CATALOG_SHA256,
+    CORE_BEHAVIOR_HASH,
+    CORE_POLICY_HASH,
+    CompetitionResourceError,
+    load_competition_program_core,
+    load_full_catalog_execution_core,
+    load_science_question_catalog,
+    validate_competition_program_core,
+    validate_full_catalog_execution_core,
+    validate_question_catalog,
+)
 
 
 PROGRAM_TITLE = "面向前沿科学问题的AI假设生成与研究计划设计平台"
@@ -394,5 +414,206 @@ def build_challenge_program_projection(
             "appendOnlyEvidencePreserved": True,
             "historyRewritten": False,
             "caseRecoverySource": case_recovery_source,
+        },
+    }
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def build_competition_program_projection(
+    *,
+    question_run_summary: dict[str, Any] | None = None,
+    program_core: dict[str, Any] | None = None,
+    policy: dict[str, Any] | None = None,
+    catalog: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build the active typed v2 program projection from frozen tracked resources.
+
+    Only schemaVersion=2, human-approved, submission-eligible question results
+    contribute to the formal 125-question completion contract.  Legacy
+    question/case counts never affect active completion.
+    """
+    try:
+        program = (
+            validate_competition_program_core(program_core)
+            if isinstance(program_core, dict)
+            else load_competition_program_core()
+        )
+        execution = (
+            validate_full_catalog_execution_core(policy)
+            if isinstance(policy, dict)
+            else load_full_catalog_execution_core()
+        )
+        question_catalog = (
+            validate_question_catalog(catalog)
+            if isinstance(catalog, dict)
+            else load_science_question_catalog()
+        )
+    except CompetitionResourceError as exc:
+        raise CompetitionResourceError(f"Active competition projection requires frozen tracked resources: {exc}") from exc
+
+    run_summary = question_run_summary if isinstance(question_run_summary, dict) else {}
+    approved_question_ids = sorted(
+        {
+            str(question_id)
+            for question_id in run_summary.get("completedQuestionIds") or []
+            if str(question_id)
+        }
+    )
+    approved_question_set = set(approved_question_ids)
+    approved_deep_experiment_question_set = {
+        str(question_id)
+        for question_id in run_summary.get("approvedDeepExperimentQuestionIds") or []
+        if str(question_id)
+    }
+    catalog_question_ids = {
+        str(item.get("id") or "")
+        for item in question_catalog.get("questions", [])
+        if isinstance(item, dict)
+    }
+    full_result_set_complete = (
+        len(approved_question_set) >= CATALOG_QUESTION_COUNT
+        and len(catalog_question_ids) == CATALOG_QUESTION_COUNT
+        and catalog_question_ids <= approved_question_set
+    )
+    program_program = _mapping(program.get("program"))
+    dimensions = list(program_program.get("dimensions") or [])
+    deep_experiments = [
+        _mapping(item)
+        for item in program.get("requiredDeepExperiments") or []
+        if isinstance(item, dict)
+    ]
+    deep_experiment_records: list[dict[str, Any]] = []
+    for experiment in deep_experiments:
+        question_id = _text(experiment.get("questionId"))
+        deep_experiment_records.append(
+            {
+                "experimentId": _text(experiment.get("experimentId")),
+                "questionId": question_id,
+                "name": _text(experiment.get("name")),
+                "themeId": _text(experiment.get("themeId")),
+                "campaignId": _text(experiment.get("campaignId")),
+                "required": experiment.get("required") is True,
+                "questionResultApproved": question_id in approved_question_set,
+                "approved": (
+                    question_id in approved_question_set
+                    and question_id in approved_deep_experiment_question_set
+                ),
+            }
+        )
+    all_deep_experiments_approved = bool(deep_experiment_records) and all(
+        item["required"] and item["approved"] for item in deep_experiment_records
+    )
+    completion_contract = _mapping(program.get("completionContract"))
+    program_completed = full_result_set_complete and all_deep_experiments_approved
+    approved_count = len(approved_question_set)
+    submission_snapshot = _mapping(execution.get("directionSubmissionRequirementSnapshot"))
+    return {
+        "schemaVersion": 2,
+        "contractVersion": _text(program.get("contractVersion")),
+        "contractId": _text(program.get("contractId")),
+        "status": _text(program.get("status")),
+        "program": {
+            "problemId": _text(program_program.get("problemId")),
+            "title": _text(program_program.get("workingTitle")),
+            "track": _text(program_program.get("track")),
+            "direction": _text(program_program.get("direction")),
+            "dimensions": list(dimensions),
+            "directionMode": "a_plus_b",
+            "foundationModelFamily": _text(program_program.get("foundationModelFamily")),
+            "officialQuestionCount": CATALOG_QUESTION_COUNT,
+            "catalogId": CATALOG_ID,
+            "catalogSha256": CATALOG_SHA256,
+            "questionSchemaVersion": 2,
+            "completed": program_completed,
+        },
+        "directions": [
+            {
+                "directionId": direction_id,
+                "name": _text(dimensions[index]) if index < len(dimensions) else "",
+                "required": True,
+                "role": role,
+            }
+            for index, (direction_id, role) in enumerate(
+                (
+                    ("A", "full_catalog_hypothesis_and_research_plan"),
+                    ("B", "deep_experiment_planning_and_feedback"),
+                )
+            )
+        ],
+        "programContract": {
+            "version": _text(program.get("contractVersion")),
+            "coreBehaviorHash": CORE_BEHAVIOR_HASH,
+        },
+        "fullCatalogPolicy": {
+            "version": _text(execution.get("version")),
+            "corePolicyHash": CORE_POLICY_HASH,
+        },
+        "questionSchema": {
+            "activeVersion": 2,
+            "readOnlyVersions": [1],
+            "migrationMode": "dual_version_reader_append_only_no_auto_promotion",
+        },
+        "fullCatalogResultSet": {
+            "questionCount": CATALOG_QUESTION_COUNT,
+            "requiredApprovedQuestionCount": CATALOG_QUESTION_COUNT,
+            "approvedQuestionCount": approved_count,
+            "approvedQuestionIds": approved_question_ids,
+            "missingQuestionCount": max(0, CATALOG_QUESTION_COUNT - approved_count),
+            "complete": full_result_set_complete,
+        },
+        "questionCatalog": {
+            "catalogId": CATALOG_ID,
+            "catalogSha256": CATALOG_SHA256,
+            "questionCount": CATALOG_QUESTION_COUNT,
+            "questions": [
+                {
+                    "questionId": _text(item.get("id")),
+                    "domain": _text(item.get("domain")),
+                    "questionEn": _text(item.get("question_en")),
+                }
+                for item in question_catalog.get("questions", [])
+                if isinstance(item, dict)
+            ],
+        },
+        "requiredDeepExperiments": deep_experiment_records,
+        "allRequiredDeepExperimentsApproved": all_deep_experiments_approved,
+        "independentThemeBoundaries": {
+            "separateThemes": len({item["themeId"] for item in deep_experiment_records if item["themeId"]})
+            == len([item for item in deep_experiment_records if item["themeId"]]),
+            "separateCampaigns": len({item["campaignId"] for item in deep_experiment_records if item["campaignId"]})
+            == len([item for item in deep_experiment_records if item["campaignId"]]),
+            "crossExperimentScientificEvidenceReuse": "forbidden",
+        },
+        "completion": {
+            "programRule": _text(completion_contract.get("programRule")),
+            "fullCatalogResultSetRequired": completion_contract.get("fullCatalogResultSetRequired"),
+            "allRequiredDeepExperimentsRequired": completion_contract.get("allRequiredDeepExperimentsRequired"),
+            "projectCompletedDerivedOnly": completion_contract.get("projectCompletedDerivedOnly") is True,
+            "legacyQuestionCountsAffectCompletion": False,
+            "legacyRepresentativeCaseCountsAffectCompletion": False,
+            "completed": program_completed,
+        },
+        "directionSubmissionRequirement": {
+            "captured": submission_snapshot.get("captured") is True,
+            "officialPageObservedState": _text(submission_snapshot.get("officialPageObservedState")),
+            "blocksSubmissionReady": submission_snapshot.get("blocksSubmissionReady") is True,
+        },
+        "legacyProjection": {
+            "mode": "read_only",
+            "schemaVersion": 1,
+            "affectsCompletion": False,
+            "deprecated": True,
+        },
+        "isolationPolicy": {
+            "separateThemeContracts": _mapping(program.get("isolationPolicy")).get("separateThemeContracts") is True,
+            "separateCampaigns": _mapping(program.get("isolationPolicy")).get("separateCampaigns") is True,
+            "separateTeams": _mapping(program.get("isolationPolicy")).get("separateTeams") is True,
         },
     }

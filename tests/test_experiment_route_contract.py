@@ -23,6 +23,7 @@ def test_experiment_read_models_publish_known_schema_fields() -> None:
             "activePlan",
             "plans",
             "lifecycleProjection",
+            "competitionProgramProjection",
             "challengeProgramProjection",
             "hypothesisCandidates",
             "readyHypothesisCandidates",

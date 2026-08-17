@@ -102,6 +102,7 @@ import {
   decideShutdown,
   executeShutdownAuthorizationBoundary,
   fetchLauncherActiveWorkStatus,
+  resolveQuitActiveWorkStatus,
   type ShutdownDecision
 } from "./shutdown/shutdownCoordinator.js";
 import {
@@ -166,6 +167,7 @@ const WORKBENCH_CLOSE_TRANSACTION_CAPABILITY = "workbench_close.transaction.v1";
 const DESKTOP_SESSION_GENERATION = `${process.pid}-${Date.now().toString(36)}`;
 const WORKBENCH_CLOSE_AUTHORIZATION_MAX_WAIT_MS = 30_000;
 const ACTIVE_WORK_STATUS_TIMEOUT_MS = DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS;
+const QUIT_ACTIVE_WORK_STATUS_TIMEOUT_MS = 20_000;
 const PERIODIC_SHELL_FRESHNESS_MS = 5 * 60_000;
 const ACTIVE_WORK_POLICY_FORCE_INTERRUPT = true;
 const ELECTRON_PROCESS_STARTED_AT_MS = performance.now();
@@ -1529,17 +1531,24 @@ async function requestDesktopShellExit(
         await decideShutdown({
         ownershipMode,
         activeWorkStatus: async () => {
-          if (launcherBootstrap === null) {
+          const bootstrap = launcherBootstrap;
+          if (bootstrap === null) {
             return { active: false, message: "" };
           }
-          return await withDesktopShellExitTimeout(
-            (async () => {
-              const context = await resolveDesktopActionLoopContext(launcherBootstrap);
-              return await fetchLauncherActiveWorkStatus(context);
-            })(),
-            ACTIVE_WORK_STATUS_TIMEOUT_MS,
-            "resolve launcher active work status for quit"
-          );
+          const probeQuitActiveWork = async (forceControlTokenRefresh: boolean) => {
+            const context = await resolveDesktopActionLoopContext(bootstrap, {
+              forceControlTokenRefresh
+            });
+            return await withDesktopShellExitTimeout(
+              fetchLauncherActiveWorkStatus(context),
+              QUIT_ACTIVE_WORK_STATUS_TIMEOUT_MS,
+              "resolve launcher active work status for quit"
+            );
+          };
+          return await resolveQuitActiveWorkStatus({
+            probe: () => probeQuitActiveWork(false),
+            recoverAndRetry: () => probeQuitActiveWork(true)
+          });
         }
       }),
       onDenied: (decision) => {

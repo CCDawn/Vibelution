@@ -50,6 +50,12 @@ import type {
 } from "../../api/types";
 import { resolvePollingInterval } from "../../app/pollingPolicy";
 import type { MemoryKnowledgeSearchDraft } from "../MemoryKnowledgeSearchPanel";
+import type {
+  AgentMemoryInventoryAgent,
+  AgentMemoryInventoryPayload,
+} from "./agentMemoryView";
+
+export type { AgentMemoryInventoryAgent, AgentMemoryInventoryPayload } from "./agentMemoryView";
 
 export type MemoryRouteView =
   | "overview"
@@ -65,48 +71,6 @@ export type MemoryProposalStatusFilter = "pending" | "";
 export type RatingSuggestionStatusFilter = "pending" | "applied" | "rejected" | "all";
 export type RatingSuggestionPriorityFilter = "all" | "urgent" | "elevated" | "normal";
 export type MemoryKnowledgeSourceOwnerType = "team" | "agent";
-
-export type AgentMemoryInventoryAgent = {
-  agentId: string;
-  displayName?: string;
-  agentCode?: string;
-  status?: string;
-  hasPrivateMemory?: boolean;
-  workspacePath?: string;
-  privateMemoryRoot?: string;
-  privateFileCount?: number;
-  formalKnowledgeBaseCount?: number;
-  origin?: string;
-  primaryMode?: string;
-  roleKey?: string;
-  items?: Array<{
-    id: string;
-    relativePath?: string;
-    title?: string;
-    updatedAt?: string;
-    path?: string;
-    summary?: string;
-    sizeBytes?: number;
-    contentType?: string;
-    contentTruncated?: boolean;
-    content?: string;
-  }>;
-};
-
-export type AgentMemoryInventoryPayload = {
-  agents?: AgentMemoryInventoryAgent[];
-  summary?: {
-    agentCount?: number;
-    privateFileCount?: number;
-    privateByteCount?: number;
-    formalKnowledgeItemCount?: number;
-    formalKnowledgeBaseCount?: number;
-    warningCount?: number;
-  };
-  generatedAt?: string;
-  selectedAgent?: AgentMemoryInventoryAgent | null;
-};
-
 
 export function appendAgentParam(params: URLSearchParams, agentId: string) {
   const normalized = agentId.trim();
@@ -196,6 +160,7 @@ export function useMemoryCoreQueries(options: UseMemoryCoreQueriesOptions) {
     queryFn: ({ signal }) =>
       fetchMemoryAgentDetail<AgentMemoryInventoryPayload>(selectedAgentMemoryAgentId, {
         actorAgentId: selectedAgentMemoryAgentId,
+        includeContent: true,
         signal,
       }),
     enabled: forcedView === "agents" && Boolean(selectedAgentMemoryAgentId),

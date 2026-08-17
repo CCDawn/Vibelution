@@ -1339,6 +1339,13 @@ When a persisted format is retired:
 - inputs that cannot be upgraded fail closed and must not overwrite the original file;
 - do not add a long-lived fallback, dual-write, feature flag, or shadow path whose only purpose is to postpone retirement.
 
+An explicitly non-authoritative, reproducibly rebuildable cache may use a
+terminal `cold_rebuild` outcome instead of blocking startup. This exception must
+leave an unreadable leftover untouched, record `cold_rebuild` rather than claim
+that its contents were imported, rebuild only from the canonical runtime source,
+and must not reintroduce a legacy read path, dual write, fallback, observation
+window, or waiting gate.
+
 ### 25.3 Storage And Launcher Leftovers
 
 After `activePaths.migrated=true`, repo-root `.runtime/`, `logs/`, `.cache/`, and `.docs/project-memory/` are rollback retainers, not active read paths. Physical deletion of those directories requires a separate destructive confirmation. Rollback archives the completion marker and keeps both copies; it does not rehydrate post-cutover writes.

@@ -11,11 +11,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-from core.web.services.team_workflow.challenge_program import build_challenge_program_projection
+from core.research.competition.resources import load_legacy_representative_cases
+from core.web.services.team_workflow.challenge_program import (
+    build_challenge_program_projection,
+    build_competition_program_projection,
+)
 from core.web.services.team_workflow.challenge_question_runs import challenge_question_run_summary
-
-
-CHALLENGE_PROGRAM_CASE_REGISTRY_PATH = Path("挑战杯") / "data" / "representative_deep_cases.json"
 
 
 def _service():
@@ -25,9 +26,7 @@ def _service():
 
 
 def _load_challenge_program_case_registry() -> dict[str, Any]:
-    s = _service()
-    path = Path(s.PROJECT_ROOT) / CHALLENGE_PROGRAM_CASE_REGISTRY_PATH
-    return s._read_json(path) if path.exists() else {}
+    return load_legacy_representative_cases()
 
 
 def _require_formal_full_run_ready(plan: dict[str, Any]) -> tuple[str, dict[str, Any]]:
@@ -940,12 +939,16 @@ def _experiment_planning_status(
         active_plan=active_plan,
     )
     official_model_evidence_store = s._load_program_official_model_evidence_store(team_id)
+    question_summary = challenge_question_run_summary(team_id)
     challenge_program_projection = build_challenge_program_projection(
         legacy_lifecycle=lifecycle_projection,
         public_config=s.load_public_config(),
         official_model_evidence=s._official_model_evidence_entries(official_model_evidence_store),
         compatibility_case_registry=_load_challenge_program_case_registry(),
-        question_run_summary=challenge_question_run_summary(team_id),
+        question_run_summary=question_summary,
+    )
+    competition_program_projection = build_competition_program_projection(
+        question_run_summary=question_summary,
     )
     gaps = s._experiment_planning_gaps(
         latest_experiment=latest_experiment,
@@ -990,6 +993,7 @@ def _experiment_planning_status(
         "activePlan": active_plan,
         "plans": plans[-12:],
         "lifecycleProjection": lifecycle_projection,
+        "competitionProgramProjection": competition_program_projection,
         "challengeProgramProjection": challenge_program_projection,
         "hypothesisCandidates": hypothesis_candidates[:24],
         "readyHypothesisCandidates": ready_hypotheses[:24],

@@ -9,8 +9,16 @@ assert _SPEC is not None and _SPEC.loader is not None
 _MODULE = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_MODULE)
 build_challenge_program_projection = _MODULE.build_challenge_program_projection
+build_competition_program_projection = _MODULE.build_competition_program_projection
 _COMPATIBILITY_CASE_REGISTRY = json.loads(
-    (Path(__file__).parents[1] / "挑战杯" / "data" / "representative_deep_cases.json").read_text(encoding="utf-8")
+    (
+        Path(__file__).parents[1]
+        / "core"
+        / "research"
+        / "competition"
+        / "data"
+        / "legacy_representative_deep_cases.v1.json"
+    ).read_text(encoding="utf-8")
 )
 
 
@@ -374,3 +382,36 @@ def test_live_legacy_case_takes_precedence_over_documented_compatibility_registr
     assert case["title"] == "FashionMNIST 预测编码工程案例"
     assert case.get("evidenceStatus") != "documented_program_fact"
     assert projection["compatibility"]["caseRecoverySource"] == "legacy_lifecycle"
+
+
+def test_active_competition_projection_is_full_catalog_ab_and_deep_experiment_fail_closed():
+    empty = build_competition_program_projection(question_run_summary={})
+
+    assert empty["schemaVersion"] == 2
+    assert empty["programContract"] == {
+        "version": "2.2.0",
+        "coreBehaviorHash": "C3965023488C76DF032130341347915E5EAD5451EE53C2501E75914205EB423A",
+    }
+    assert empty["fullCatalogPolicy"]["version"] == "1.2.0"
+    assert empty["questionSchema"] == {
+        "activeVersion": 2,
+        "readOnlyVersions": [1],
+        "migrationMode": "dual_version_reader_append_only_no_auto_promotion",
+    }
+    assert empty["program"]["directionMode"] == "a_plus_b"
+    assert [item["directionId"] for item in empty["directions"]] == ["A", "B"]
+    assert empty["questionCatalog"]["questionCount"] == 125
+    assert len(empty["questionCatalog"]["questions"]) == 125
+    assert [item["questionId"] for item in empty["requiredDeepExperiments"]] == ["SCI-091", "SCI-096"]
+    assert empty["allRequiredDeepExperimentsApproved"] is False
+    assert empty["program"]["completed"] is False
+
+    complete = build_competition_program_projection(
+        question_run_summary={
+            "completedQuestionIds": [f"SCI-{index:03d}" for index in range(1, 126)],
+            "approvedDeepExperimentQuestionIds": ["SCI-091", "SCI-096"],
+        }
+    )
+    assert complete["fullCatalogResultSet"]["complete"] is True
+    assert complete["allRequiredDeepExperimentsApproved"] is True
+    assert complete["program"]["completed"] is True
