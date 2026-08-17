@@ -153,6 +153,9 @@ describe("MemoryRoute layout contract", () => {
     expect(workbenchQueriesSource).toContain("AgentMemoryInventoryPayload");
     expect(workbenchQueriesSource).toContain("fetchMemoryAgents<AgentMemoryInventoryPayload>({ signal })");
     expect(workbenchQueriesSource).toContain("fetchMemoryAgentDetail<AgentMemoryInventoryPayload>(selectedAgentMemoryAgentId, {");
+    expect(workbenchQueriesSource).toContain("includeContent: true");
+    expect(routeSource).toContain("toAgentMemoryAgentView");
+    expect(routeSource).toContain("agentMemorySelectPrompt:");
     expect(memoryApiSource).toContain("/api/memory/agents/${encodeURIComponent(agentId)}");
     expect(routeSource).toContain("selectedAgentMemoryAgentId");
     expect(routeSource).toContain("createAgentMemoryPanel()");
@@ -174,6 +177,9 @@ describe("MemoryRoute layout contract", () => {
     expect(agentMemoryPanelSource).toContain("styles.sourcePanel");
     expect(agentMemoryPanelSource).toContain("styles.itemPanel");
     expect(agentMemoryPanelSource).toContain("styles.detailPanel");
+    expect(agentMemoryPanelSource).toContain("VMetricStrip");
+    expect(agentMemoryPanelSource).toContain("VLoadingValue");
+    expect(agentMemoryPanelSource).toContain("copy.agentMemorySelectPrompt");
     expect(agentMemoryPanelSource).not.toContain("useQuery");
     expect(agentMemoryPanelSource).not.toContain("useMutation");
     expect(agentMemoryPanelSource).not.toContain("fetchJson");
@@ -391,7 +397,7 @@ describe("MemoryRoute layout contract", () => {
     expect(reviewQueuePanelStyles.reviewQueueList).toContain("content-start");
     expect(itemListPanelStyles.compactItemPrimary).toContain("flex");
     expect(itemListPanelStyles.compactItemPrimary).not.toContain("rounded-[var(--radius-control)]");
-    expect(itemListPanelStyles.compactItemSummary).toContain("line-clamp-2");
+    expect(itemListPanelStyles.compactItemSummary).toContain("line-clamp-1");
     expect(overviewPanelStyles.overviewPanel).toContain("grid-rows-[auto_minmax(0,1fr)]");
     expect(overviewPanelStyles.overviewPanel).toContain("overflow-hidden");
     expect(matrixPanelStyles.matrixPanel).toMatch(/bg-vui-surface-panel|bg-\[var\(--vui-surface-panel\)\]/);
@@ -477,8 +483,8 @@ describe("MemoryRoute layout contract", () => {
     expect(detailPanelStyles.detailHeader).toContain("[&_p]:line-clamp-2");
     expect(detailPanelStyles.factGrid).toContain("[&_strong]:break-all");
     expect(itemListPanelStyles.compactItemPrimary).toContain("[&>strong]:truncate");
-    expect(itemListPanelStyles.itemPath).toContain("break-all");
-    expect(itemListPanelStyles.manageItemSummary).toContain("line-clamp-2");
+    expect(itemListPanelStyles.itemPath).toContain("truncate");
+    expect(itemListPanelStyles.manageItemSummary).toContain("line-clamp-1");
     expect(sourceAndItemPanelStyles.sourceCopy).toContain("[&_strong]:truncate");
     expect(graphViewPanelStyles.graphNodeList).toContain("[&_[data-vui=\"button\"]]:w-full");
     expect(graphNodeInspectorPanelStyles.graphKnowledgeContent).toContain("whitespace-pre-wrap");
@@ -1214,10 +1220,11 @@ describe("MemoryRoute layout contract", () => {
     expect(managementActionPreviewPanelStyles.editPreviewPanel).toBeTypeOf("string");
     expect(managementActionPreviewPanelStyles.editPreviewGrid).toBeTypeOf("string");
     expect(itemListPanelStyles.itemButtonDense).toContain("min-h-[62px]");
-    expect(itemListPanelStyles.itemContentButtonDense).toContain("grid-rows-[16px_14px_18px]");
+    expect(itemListPanelStyles.itemContentButtonDense).toContain("content-start");
+    expect(itemListPanelStyles.itemContentButtonDense).not.toContain("grid-rows-[16px_14px_18px]");
     expect(itemListPanelStyles.manageItemBadges).toContain("[&>span]:truncate");
-    expect(itemListPanelStyles.manageItemBadges).toContain("grid-cols-[repeat(auto-fit,minmax(82px,1fr))]");
-    expect(itemListPanelStyles.manageItemBadges).toContain("max-h-[74px]");
+    expect(itemListPanelStyles.manageItemBadges).toContain("flex");
+    expect(itemListPanelStyles.manageItemBadges).not.toContain("max-h-[74px]");
   });
 
   it("keeps explanatory Memory platform copy out of persistent paragraphs", () => {
@@ -1427,13 +1434,14 @@ describe("MemoryRoute layout contract", () => {
     expect(effectivePanelSource).not.toContain("useQuery");
     expect(effectivePanelSource).not.toContain("useMutation");
     expect(effectivePanelSource).not.toContain("fetchJson");
-    expect(effectivePanelStyles.effectiveGrid).toContain("[&_.overviewPanel]:max-h-[min(260px,36vh)]");
-    expect(effectivePanelStyles.effectiveGrid).toContain("[&_.overviewPanel]:overflow-auto");
+    expect(effectivePanelStyles.effectiveGrid).toContain("[&_.overviewPanel]:min-h-0");
+    expect(effectivePanelStyles.effectiveGrid).toContain("[&_.overviewPanel]:overflow-hidden");
     expect(effectivePanelStyles.effectiveGrid).toContain("[&_.panelLead]:line-clamp-2");
     // Wave 6F: compact list height is shared PaneHeight, not fixed max-h.
     expect(itemListPanelStyles.compactMemoryList).not.toContain("max-h-[148px]");
     expect(itemListPanelSource).toContain("PersistedHeightListShell");
     expect(itemListPanelSource).toContain("MEMORY_COMPACT_LIST_HEIGHT_PANE");
+    expect(itemListPanelSource).toContain("fillParent");
   });
 
   it("visualizes the P1 team knowledge pipeline and prompt boundary", () => {
@@ -1450,6 +1458,7 @@ describe("MemoryRoute layout contract", () => {
     expect(knowledgePipelinePanelSource).toContain("copy.pipelineRating");
     expect(knowledgePipelinePanelSource).toContain("copy.toolReadableOnly");
     expect(knowledgePipelinePanelSource).toContain("copy.promptBoundary");
+    expect(knowledgePipelinePanelSource).toContain("VMetricStrip");
     expect(knowledgePipelinePanelSource).toContain("styles.pipelinePanel");
     expect(knowledgePipelinePanelSource).toContain("VTooltip");
     expect(knowledgePipelinePanelSource).toContain('<VTooltip content={copy.knowledgeSubtitle} width="wide">');

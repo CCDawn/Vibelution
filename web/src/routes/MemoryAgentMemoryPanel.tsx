@@ -1,7 +1,8 @@
 import { Brain, Database, FileText, Search } from "lucide-react";
+import type { ReactNode } from "react";
 
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
-import { VButton, VNativeInput, VSplitWorkspace, VStateSurface, VStatusChip } from "../components/vui";
+import { VButton, VLoadingValue, VMetricStrip, VNativeInput, VSplitWorkspace, VStateSurface, VStatusChip } from "../components/vui";
 import styles from "./MemoryAgentMemoryPanel.styles";
 
 export type MemoryAgentMemorySummaryView = {
@@ -70,6 +71,7 @@ export type MemoryAgentMemoryPanelCopy = {
   agentMemoryFormalBases: string;
   warnings: string;
   agentMemorySelectedAgent: string;
+  agentMemorySelectPrompt: string;
   searchPlaceholder: string;
   loading: string;
   loadFailed: string;
@@ -122,6 +124,10 @@ const AGENT_MEMORY_SPLIT_RESIZE = {
   },
 } as const;
 
+function metricValue(pending: boolean, loadingLabel: string, value: ReactNode): ReactNode {
+  return pending ? <VLoadingValue label={loadingLabel} /> : value;
+}
+
 export function MemoryAgentMemoryPanel({
   copy,
   summary,
@@ -140,27 +146,25 @@ export function MemoryAgentMemoryPanel({
   onSelectAgent,
   onSelectItem,
 }: MemoryAgentMemoryPanelProps) {
+  const filesLoading = inventoryPending || (Boolean(selectedAgent) && detailPending && !items.length);
+  const emptyAsideHint = inventoryPending
+    ? copy.loading
+    : agents.length
+      ? copy.agentMemorySelectPrompt
+      : copy.agentMemoryNoAgents;
+
   return (
     <>
       <div className={styles.summaryGrid}>
-        <section className={styles.summaryCard}>
-          <span>{copy.agentMemoryAgents}</span>
-          <strong>{summary.agentCount}</strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{copy.agentMemoryPrivateFiles}</span>
-          <strong>{summary.privateFileCount}</strong>
-          <small>{summary.privateByteText}</small>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{copy.agentMemoryFormalKnowledge}</span>
-          <strong>{summary.formalKnowledgeItemCount}</strong>
-          <small>{copy.agentMemoryFormalBases}: {summary.formalKnowledgeBaseCount}</small>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{copy.warnings}</span>
-          <strong>{summary.warningCount}</strong>
-        </section>
+        <VMetricStrip
+          ariaLabel={copy.agentMemoryAgents}
+          metrics={[
+            { id: "agents", label: copy.agentMemoryAgents, value: metricValue(inventoryPending, copy.loading, summary.agentCount) },
+            { id: "files", label: copy.agentMemoryPrivateFiles, value: metricValue(inventoryPending, copy.loading, summary.privateFileCount), detail: summary.privateByteText },
+            { id: "knowledge", label: copy.agentMemoryFormalKnowledge, value: metricValue(inventoryPending, copy.loading, summary.formalKnowledgeItemCount), detail: `${copy.agentMemoryFormalBases}: ${summary.formalKnowledgeBaseCount}` },
+            { id: "warnings", label: copy.warnings, value: metricValue(inventoryPending, copy.loading, summary.warningCount) },
+          ]}
+        />
       </div>
 
       <VSplitWorkspace
@@ -175,7 +179,7 @@ export function MemoryAgentMemoryPanel({
                 <p className={styles.panelEyebrow}>{copy.agentMemoryAgents}</p>
                 <h2>{copy.agentMemorySelectedAgent}</h2>
               </div>
-              <span className={styles.countPill}>{agents.length}</span>
+              <span className={styles.countPill}>{inventoryPending ? "…" : agents.length}</span>
             </div>
             <label className={styles.searchBox}>
               <Search size={15} />
@@ -202,7 +206,7 @@ export function MemoryAgentMemoryPanel({
                     <span>{agent.status}</span>
                   </span>
                   <span className={styles.itemOrigin}>{agent.origin}</span>
-                  <span className={styles.itemPath}>{agent.path}</span>
+                  <span className={styles.itemPath} title={agent.path}>{agent.path}</span>
                   <span className={styles.itemBadges}>
                     <VStatusChip tone={agent.hasPrivateMemory ? "success" : "neutral"}>
                       {copy.agentMemoryPrivateFiles}: {agent.privateFileCount}
@@ -228,19 +232,19 @@ export function MemoryAgentMemoryPanel({
               <span className={styles.countPill}>{selectedAgent?.fileCount ?? 0}</span>
             </div>
             <section className={styles.detailMeta}>
-              <span>{copy.agentMemoryPrivateRoot}: {selectedAgent?.privateRoot || "-"}</span>
-              <span>{copy.sourcePath}: {selectedAgent?.workspacePath || "-"}</span>
+              <span title={selectedAgent?.privateRoot || ""}>{copy.agentMemoryPrivateRoot}: {selectedAgent?.privateRoot || "-"}</span>
+              <span title={selectedAgent?.workspacePath || ""}>{copy.sourcePath}: {selectedAgent?.workspacePath || "-"}</span>
               <span>{copy.agentMemoryFormalKnowledge}: {selectedAgent?.formalKnowledgeItemCount ?? 0}</span>
             </section>
             <div className={styles.itemList}>
-              {detailPending && selectedAgent ? <VStateSurface tone="loading" title={copy.loading} skeletonLines={2} /> : null}
+              {filesLoading ? <VStateSurface tone="loading" title={copy.loading} skeletonLines={2} /> : null}
               {detailErrorText ? (
                 <VStateSurface tone="error" title={copy.loadFailed}>
                   {detailErrorText}
                 </VStateSurface>
               ) : null}
-              {!items.length && !detailPending ? (
-                <VStateSurface tone="empty" title={copy.agentMemoryNoPrivateMemory} />
+              {!filesLoading && !items.length ? (
+                <VStateSurface tone="empty" title={selectedAgent ? copy.agentMemoryNoPrivateMemory : copy.agentMemorySelectPrompt} />
               ) : null}
               {items.map((item) => (
                 <VButton
@@ -254,7 +258,7 @@ export function MemoryAgentMemoryPanel({
                     <strong>{item.title}</strong>
                     <span>{item.updatedAtText}</span>
                   </span>
-                  <span className={styles.itemPath}>{item.path}</span>
+                  <span className={styles.itemPath} title={item.path}>{item.path}</span>
                   <span className={styles.itemSummary}>{item.summary}</span>
                   <span className={styles.itemBadges}>
                     <VStatusChip tone="neutral">{item.sizeText}</VStatusChip>
@@ -273,8 +277,8 @@ export function MemoryAgentMemoryPanel({
                 <div className={styles.detailHeader}>
                   <div>
                     <p className={styles.panelEyebrow}>{copy.agentMemorySelectedFile}</p>
-                    <h2>{selectedItem?.title ?? copy.agentMemoryNoFileSelected}</h2>
-                    <p>{selectedItem?.path || selectedAgent.privateRoot || "-"}</p>
+                    <h2 title={selectedItem?.title}>{selectedItem?.title ?? copy.agentMemoryNoFileSelected}</h2>
+                    <p title={selectedItem?.path || selectedAgent.privateRoot || ""}>{selectedItem?.path || selectedAgent.privateRoot || "-"}</p>
                   </div>
                   {selectedItem ? <span className={styles.countPill}>{selectedItem.sizeText}</span> : null}
                 </div>
@@ -319,7 +323,7 @@ export function MemoryAgentMemoryPanel({
               <section className={styles.emptyDetail}>
                 <Brain size={24} />
                 <strong>{copy.agentMemorySelectedAgent}</strong>
-                <p>{inventoryPending ? copy.loading : copy.agentMemoryNoAgents}</p>
+                <p>{emptyAsideHint}</p>
               </section>
             )}
           </div>

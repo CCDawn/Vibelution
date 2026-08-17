@@ -16,7 +16,7 @@ const styles = {
   pipelineSteps:
     "pipelineSteps min-w-0 grid grid-cols-[repeat(5,minmax(0,1fr))] gap-1 max-[920px]:grid-cols-[repeat(auto-fit,minmax(min(100%,8rem),1fr))] max-[520px]:grid-cols-[1fr]",
   summaryCard: `summaryCard min-w-0 ${vuiOpaqueRowClass} grid min-h-[54px] grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-2 py-1.5 [&>span]:[font-size:var(--vui-font-xs)] [&>strong]:[font-size:var(--vui-font-title)]`,
-  summaryGrid: `summaryGrid min-w-0 ${vuiFlatPanelClass} p-2 grid gap-1.5 grid-cols-[repeat(auto-fit,minmax(min(100%,9rem),1fr))]`,
+  summaryGrid: `summaryGrid min-w-0 shrink-0`,
 } as const;
 
 export default styles;

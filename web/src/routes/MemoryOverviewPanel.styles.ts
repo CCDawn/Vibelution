@@ -3,9 +3,9 @@ import {
 } from "../design/vuiSurfaceRecipes";
 
 const styles = {
-  // Full overview column: metrics → queues → dual lists, no section paint-through.
+  // Metrics stay auto; priority queue is the primary scan surface; bottom lists stay a compact strip.
   overviewStack:
-    "overviewStack grid min-h-0 min-w-0 flex-1 grid-rows-[auto_auto_minmax(0,0.42fr)_auto_minmax(0,1fr)] gap-2 overflow-hidden p-1",
+    "overviewStack grid min-h-0 min-w-0 flex-1 grid-rows-[auto_auto_minmax(12rem,1fr)_auto_minmax(9rem,0.32fr)] gap-2 overflow-hidden p-1",
   overviewGrid:
     "overviewGrid min-h-0 min-w-0 grid gap-2 overflow-hidden grid-cols-[repeat(2,minmax(0,1fr))] max-[900px]:grid-cols-1",
   overviewPanel:

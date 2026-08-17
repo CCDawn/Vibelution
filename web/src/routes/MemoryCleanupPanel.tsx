@@ -1,7 +1,7 @@
 import { CheckCircle2, Eye, Trash2, TriangleAlert } from "lucide-react";
 
 import type { MemoryCleanupExecuteResponse, MemoryCleanupPreviewResponse } from "../api/types";
-import { VButton, VNativeInput, VStateSurface, VTooltip } from "../components/vui";
+import { VButton, VMetricStrip, VNativeInput, VStateSurface, VTooltip } from "../components/vui";
 import styles from "./MemoryCleanupPanel.styles";
 
 export type MemoryCleanupTargetOptionView = {
@@ -84,26 +84,15 @@ export function MemoryCleanupPanel({
   return (
     <>
       <div className={styles.summaryGrid}>
-        <section className={styles.summaryCard}>
-          <span>{copy.cleanupSelectedTargets}</span>
-          <strong>{selectedTargetCount}</strong>
-          <small>{totalTargetCount}</small>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{copy.cleanupRows}</span>
-          <strong>{totals?.rowCount ?? 0}</strong>
-          <small>{copy.cleanupHardDelete}</small>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{copy.cleanupFiles}</span>
-          <strong>{totals?.fileCount ?? 0}</strong>
-          <small>{formatByteCount(totals?.byteCount ?? 0)}</small>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{copy.cleanupVectorRecords}</span>
-          <strong>{totals?.vectorRecordCount ?? 0}</strong>
-          <small>RAG</small>
-        </section>
+        <VMetricStrip
+          ariaLabel={copy.cleanupTargets}
+          metrics={[
+            { id: "targets", label: copy.cleanupSelectedTargets, value: selectedTargetCount, detail: String(totalTargetCount) },
+            { id: "rows", label: copy.cleanupRows, value: totals?.rowCount ?? 0, detail: copy.cleanupHardDelete },
+            { id: "files", label: copy.cleanupFiles, value: totals?.fileCount ?? 0, detail: formatByteCount(totals?.byteCount ?? 0) },
+            { id: "vectors", label: copy.cleanupVectorRecords, value: totals?.vectorRecordCount ?? 0, detail: "RAG" },
+          ]}
+        />
       </div>
 
       <VTooltip content={copy.cleanupNoBackup} tone="warning" width="wide">
