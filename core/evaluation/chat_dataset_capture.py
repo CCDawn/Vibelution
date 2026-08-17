@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Sequence
 
 from config import AppConfig, get_config
-from core.infrastructure.storage_paths import resolve_project_data_home
+from vibelution_storage import resolve_project_data_home
 
 from .chat_review_queue import append_review_decision, append_review_queue_candidate
 from .chat_segmenter import (
