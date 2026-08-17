@@ -16,6 +16,7 @@
 
 - 当前 Git checkout 是项目根；运行时解析路径，不假设固定 Windows 用户名。
 - 根 `main` 是只读的本地集成工作区。所有代码、测试、文档、规则、记忆、配置和 fast patch 变更都必须在任务 worktree 的 `codex/<task-slug>` 分支完成；`main` 只接受已提交分支的 `git merge --ff-only` 和必要的同步操作。
+- 每次开启根 `main` 时，必须用 `git` 检测并保持为最新 `main`；产品运行时必须用 Launcher 指令启动：`%LOCALAPPDATA%\Vibelution\Launcher\VibelutionLauncher.exe --project "<project-root>" start`。
 - 所有审查、测试、质量门、mergeability 与验收证据必须在合入前完成。验证与验收证据闭合后，任务 owner 必须**主动自审当前任务 diff**，并在合入门通过时**主动** `git merge --ff-only` **合入本地 `main`**；不得把「等用户再说审查/合入」当作完成态。仅当用户明确要求先停、保持隔离或只交接，或合入门失败 / 大冲突 / 跨 lane / 热文件冲突时，才报告精确 blocker 并停止合入。远端 push/PR 仍需用户明确授权。`git merge --ff-only` 成功即代表该分支任务已被本地 `main` 吸收，必须立即清理且不得等待合入后验证：只清理本任务明确创建的临时文件/目录、调试产物、后台进程或监听器，释放本任务 claim，移除本任务 junction、干净 worktree 和已合并本地分支，并执行安全的 `git worktree prune`。清理失败要报告 `cleanup pending`、精确残留和原因，但不改变“已合入”事实；禁止 force 清理、删除未合入/dirty/冲突/仍在使用或归属不明的资源，远端分支删除仍需用户单独明确授权。
 - 不覆盖、回滚、删除或重置无关的用户/Agent 改动；发现重叠先检查 claim 和 diff。
 - 远端 push、PR、发布需要用户明确授权和远端同步门；force、覆盖或远端删除需要破坏性确认。
