@@ -9,6 +9,7 @@ import {
   inspectDesktopShell,
   parseDesktopShellStatus,
   scheduleDesktopShellRefresh,
+  shouldDeferWorkbenchOpenUntilLifecycleStart,
   shouldRefreshBeforeLifecycle,
   thenLifecycleFromDesktopCli
 } from "../src/process/desktopShellFreshness.js";
@@ -115,6 +116,15 @@ describe("desktop shell freshness", () => {
     expect(thenLifecycleFromDesktopCli({ lifecycleCommand: "start", openWorkbench: false })).toBe("start");
     expect(thenLifecycleFromDesktopCli({ lifecycleCommand: "status", openWorkbench: true })).toBe("open");
     expect(thenLifecycleFromDesktopCli({ lifecycleCommand: "toggle", openWorkbench: false })).toBe("");
+  });
+
+  it("defers first-window loadURL until start/restart/rebuild-and-start can bring the backend up", () => {
+    expect(shouldDeferWorkbenchOpenUntilLifecycleStart("start")).toBe(true);
+    expect(shouldDeferWorkbenchOpenUntilLifecycleStart("restart")).toBe(true);
+    expect(shouldDeferWorkbenchOpenUntilLifecycleStart("rebuild-and-start")).toBe(true);
+    expect(shouldDeferWorkbenchOpenUntilLifecycleStart("open")).toBe(false);
+    expect(shouldDeferWorkbenchOpenUntilLifecycleStart("stop")).toBe(false);
+    expect(shouldDeferWorkbenchOpenUntilLifecycleStart("")).toBe(false);
   });
 
   it("inspects through the Python desktop-entry JSON bridge", async () => {
