@@ -87,8 +87,8 @@ def run_preflight_doctor(config: AppConfig, *, project_root: Path | None = None)
     expected_python = project_venv_python(root)
     if config.runtime.require_venv and Path(sys.executable).resolve() != expected_python.resolve():
         raise RuntimeError(
-            f"当前解释器不是项目 .venv: {sys.executable}\n"
-            f"请使用: {expected_python}"
+            f"当前解释器不是项目 .venv: {Path(sys.executable).resolve().as_posix()}\n"
+            f"请使用: {expected_python.as_posix()}"
         )
 
     if sys.platform != "win32":
