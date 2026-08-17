@@ -164,3 +164,29 @@ def test_task_create_parses_json_payload_camelcase_and_bytes(isolated_task_manag
     assert task_planner._safe_int(True, 0) == 0
     assert task_planner._safe_int(b"1") == 1
     assert task_planner._coerce_bool(b"false", default=True) is False
+
+
+def test_task_create_unwraps_envelopes_and_json_lists(isolated_task_manager):
+    result = isolated_task_manager.task_create(
+        {
+            "tasks": [
+                {
+                    "description": "Inspect config",
+                    "tags": '["runtime", "planner"]',
+                    "dependencies": {"setup": {"enabled": False}, "gate": {"enabled": True}},
+                    "substeps": {"items": [{"description": "read file"}]},
+                },
+                {"description": "Ship it"},
+            ]
+        },
+        goal="Envelope",
+    )
+    assert "已创建 2 个任务" in result
+    first, second = isolated_task_manager.task_list()
+    assert first["description"] == "Inspect config"
+    assert first["tags"] == ["runtime", "planner"]
+    assert first["dependencies"] == ["gate"]
+    assert first["substeps"] == [{"description": "read file"}]
+    assert second["description"] == "Ship it"
+    assert isolated_task_manager.task_prioritize("[2, 1]") == [2, 1]
+    assert [task["id"] for task in isolated_task_manager.task_list()] == [2, 1]

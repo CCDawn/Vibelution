@@ -31,17 +31,21 @@ def _coerce_text(value: Any) -> str:
     return str(value)
 
 
-def _as_mapping(value: Any) -> Dict[str, Any]:
+def _maybe_json(value: Any) -> Any:
     if isinstance(value, (bytes, bytearray, memoryview)):
         value = bytes(value).decode("utf-8", errors="replace")
     if isinstance(value, str):
         text = value.strip()
-        if not text:
-            return {}
-        try:
-            value = json.loads(text)
-        except json.JSONDecodeError:
-            return {}
+        if text.startswith("{") or text.startswith("["):
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                return value
+    return value
+
+
+def _as_mapping(value: Any) -> Dict[str, Any]:
+    value = _maybe_json(value)
     if isinstance(value, Mapping):
         return dict(value)
     return {}
@@ -55,47 +59,68 @@ def _mapping_get(mapping: Mapping[str, Any], *keys: str) -> Any:
 
 
 def _mapping_items(value: Any) -> List[Dict[str, Any]]:
-    if isinstance(value, (bytes, bytearray, memoryview)):
-        value = bytes(value).decode("utf-8", errors="replace")
-    if isinstance(value, str):
-        text = value.strip()
-        if text.startswith("{") or text.startswith("["):
-            try:
-                value = json.loads(text)
-            except json.JSONDecodeError:
-                return []
-        else:
-            return []
+    value = _maybe_json(value)
+    if value is None or isinstance(value, (str, bytes, bytearray, memoryview)):
+        return []
     if isinstance(value, Mapping):
+        nested = value.get("tasks")
+        if nested is None:
+            nested = value.get("items")
+        if nested is None:
+            nested = value.get("entries")
+        if nested is None:
+            nested = value.get("subtasks")
+        if nested is not None:
+            return _mapping_items(nested)
         if any(key in value for key in ("description", "name", "status", "is_completed", "isCompleted", "id")):
             return [dict(value)]
         return [dict(item) for item in value.values() if isinstance(item, Mapping)]
-    if value is None:
-        return []
     try:
         iterator = list(value)
     except TypeError:
         return []
-    return [dict(item) for item in iterator if isinstance(item, Mapping)]
+    items: List[Dict[str, Any]] = []
+    for item in iterator:
+        item = _maybe_json(item)
+        if isinstance(item, Mapping):
+            items.append(dict(item))
+    return items
 
 
 def _coerce_str_list(value: Any) -> List[str]:
+    value = _maybe_json(value)
     if value is None:
         return []
-    if isinstance(value, bytes):
-        text = value.decode("utf-8", errors="replace").strip()
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        text = bytes(value).decode("utf-8", errors="replace").strip()
         return [text] if text else []
     if isinstance(value, str):
         text = value.strip()
         return [text] if text else []
     if isinstance(value, Mapping):
-        return [_coerce_text(key).strip() for key in value if _coerce_text(key).strip()]
+        nested = value.get("items")
+        if nested is None:
+            nested = value.get("names")
+        if nested is None:
+            nested = value.get("tags")
+        if nested is not None:
+            return _coerce_str_list(nested)
+        names: List[str] = []
+        for key, item in value.items():
+            if isinstance(item, Mapping) and not _coerce_bool(
+                item.get("enabled", item.get("enable")), True
+            ):
+                continue
+            text = _coerce_text(key).strip()
+            if text and text not in names:
+                names.append(text)
+        return names
     try:
         iterator = list(value)
     except TypeError:
         text = _coerce_text(value).strip()
         return [text] if text else []
-    names: List[str] = []
+    names = []
     for item in iterator:
         text = _coerce_text(item).strip()
         if text and text not in names:
@@ -132,7 +157,7 @@ def _coerce_bool(value: Any, default: bool) -> bool:
         return default
     if isinstance(value, (bytes, bytearray, memoryview)):
         value = bytes(value).decode("utf-8", errors="replace")
-    if isinstance(value, (int, float)):
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
         return bool(value)
     normalized = str(value).strip().lower()
     if not normalized:
@@ -145,14 +170,22 @@ def _coerce_bool(value: Any, default: bool) -> bool:
 
 
 def _coerce_int_list(value: Any) -> List[int]:
+    value = _maybe_json(value)
     if value is None:
         return []
-    if isinstance(value, bytes):
-        value = value.decode("utf-8", errors="replace")
-    if isinstance(value, str):
-        parsed = _safe_int(value.strip(), None)
+    if isinstance(value, (bytes, bytearray, memoryview, str)):
+        parsed = _safe_int(_coerce_text(value).strip(), None)
         return [parsed] if parsed is not None else []
     if isinstance(value, Mapping):
+        nested = value.get("ids")
+        if nested is None:
+            nested = value.get("items")
+        if nested is None:
+            nested = value.get("taskIds")
+        if nested is None:
+            nested = value.get("task_ids")
+        if nested is not None:
+            return _coerce_int_list(nested)
         value = list(value)
     try:
         iterator = list(value)
@@ -168,27 +201,28 @@ def _coerce_int_list(value: Any) -> List[int]:
 
 
 def _coerce_substeps(value: Any) -> List[Dict[str, Any]]:
+    value = _maybe_json(value)
     if value is None:
         return []
-    if isinstance(value, (bytes, bytearray, memoryview)):
-        value = bytes(value).decode("utf-8", errors="replace")
-    if isinstance(value, str):
-        text = value.strip()
-        if text.startswith("{") or text.startswith("["):
-            try:
-                value = json.loads(text)
-            except json.JSONDecodeError:
-                return [{"description": text}] if text else []
-        else:
-            return [{"description": text}] if text else []
+    if isinstance(value, (bytes, bytearray, memoryview, str)):
+        text = _coerce_text(value).strip()
+        return [{"description": text}] if text else []
     if isinstance(value, Mapping):
-        return [dict(value)]
+        nested = value.get("items")
+        if nested is None:
+            nested = value.get("steps")
+        if nested is None:
+            nested = value.get("substeps")
+        if nested is not None:
+            return _coerce_substeps(nested)
+        return [dict(value)] if value else []
     try:
         iterator = list(value)
     except TypeError:
         return []
     steps: List[Dict[str, Any]] = []
     for item in iterator:
+        item = _maybe_json(item)
         if isinstance(item, Mapping):
             steps.append(dict(item))
             continue
