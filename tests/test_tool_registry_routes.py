@@ -144,6 +144,7 @@ def test_tools_api_updates_image2_default_model(monkeypatch):
     reloaded = {}
     public_config = {
         "llm": {
+            "schema_version": 1,
             "model_library": {
                 "image_model": {
                     "provider": {

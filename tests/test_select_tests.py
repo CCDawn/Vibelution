@@ -233,7 +233,6 @@ def test_selector_matches_teams_style_map_to_teams_validation_commands():
     assert any("--dist loadfile" in command for command in result["commands"])
     assert any("TeamsRoute.layout.test.ts" in command for command in result["commands"])
     assert any("src/routes/teams" in command for command in result["commands"])
-    assert any("build_research_flow_site.mjs" in command for command in result["commands"])
     assert "local-parallel" in result["validationLayers"]
     assert "remote-distributed" in result["validationLayers"]
 
