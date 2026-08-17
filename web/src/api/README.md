@@ -10,7 +10,7 @@
 1. **One backend domain → one module** (`<domain>.ts`), unless an existing module already owns the URL prefix.
 2. **Only `client.ts` calls `fetchJson` directly** for JSON (plus colocated domain modules). Routes must not import `api/client`.
 3. **Export named functions** (`fetchX`, `createX`, `updateX`, …) with stable URL/method/body semantics. Preserve `encodeURIComponent`, query strings, and `AbortSignal` passthrough when replacing inline calls.
-4. **DTOs live in `types.ts`** (or generated equivalents). Domain modules import types; they do not define display-only view models.
+4. **DTOs live in `types/<domain>.ts`**, re-exported by `types.ts`. Domain modules import types; they do not define display-only view models. Knowledge / RAG DTOs live in `types/knowledge.ts` so `types/memory.ts` and `types/teams.ts` do not import each other.
 5. **Query keys stay in `queryKeys.ts`**. Invalidation contracts remain in routes/hooks; transports stay dumb.
 6. **Colocated contract tests** (`<domain>.test.ts`) use Vitest `?raw` imports: API source owns paths; route sources use function names and must not embed `/api/<domain>/` string literals (import paths like `../api/skills` are fine).
 
@@ -19,7 +19,8 @@
 | File | Role |
 | --- | --- |
 | `client.ts` | Shared `fetchJson` transport, error normalization |
-| `types.ts` | Cross-route TypeScript DTOs |
+| `types.ts` | Public DTO barrel (`types/<domain>.ts`) |
+| `types/knowledge.ts` | Knowledge / RAG DTOs (not memory, not teams) |
 | `queryKeys.ts` | React Query key factories |
 | `fullStackApiBoundary.test.ts` | Route-layer `fetchJson` / `api/client` guard (budget zero) |
 
@@ -37,10 +38,10 @@
 | `files.ts` | `/api/files/content` |
 | `git.ts` | `/api/git/*` |
 | `kernel.ts` | `/api/kernel/*` |
-| `knowledge.ts` | `/api/knowledge/*` (memory workbench knowledge) |
+| `knowledge.ts` | `/api/knowledge/*`, `/api/knowledge-bases/*` (do not merge with `memory.ts`) |
 | `launcher.ts` | Launcher/workbench control JSON |
 | `logs.ts` | `/api/logs/*`, runtime scene list/detail/delete |
-| `memory.ts` | `/api/memory/*` |
+| `memory.ts` | `/api/memory/*` (do not merge with `knowledge.ts`) |
 | `pet.ts` | `/api/pet/*` |
 | `projectAgentBus.ts` | Project agent bus |
 | `researchLoop.ts` | Research loop substrate |
@@ -52,7 +53,7 @@
 | `sourceCollection.ts` | Team source collection |
 | `stageRounds.ts` | Stage rounds |
 | `teamExperiment.ts` | Team experiments |
-| `teamKnowledge.ts` | Team knowledge (distinct from memory `knowledge.ts`) |
+| `teamKnowledge.ts` | Team workflow knowledge ingestion (`/api/teams/.../knowledge-ingestion`); distinct from `knowledge.ts` |
 | `teamMemberMessages.ts` | Team member messages |
 | `teamResearchOps.ts` | Team research ops |
 | `teams.ts` | `/api/teams/*` |

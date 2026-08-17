@@ -5,6 +5,7 @@ import agentsTypesSource from "./types/agents.ts?raw";
 import chatTypesSource from "./types/chat.ts?raw";
 import configTypesSource from "./types/config.ts?raw";
 import evolutionTypesSource from "./types/evolution.ts?raw";
+import knowledgeTypesSource from "./types/knowledge.ts?raw";
 import memoryTypesSource from "./types/memory.ts?raw";
 import runtimeTypesSource from "./types/runtime.ts?raw";
 import sharedTypesSource from "./types/shared.ts?raw";
@@ -13,6 +14,7 @@ import teamsTypesSource from "./types/teams.ts?raw";
 const expectedBarrel = [
   'export * from "./types/shared";',
   'export * from "./types/chat";',
+  'export * from "./types/knowledge";',
   'export * from "./types/teams";',
   'export * from "./types/agents";',
   'export * from "./types/runtime";',
@@ -26,6 +28,7 @@ const domainSources = [
   chatTypesSource,
   configTypesSource,
   evolutionTypesSource,
+  knowledgeTypesSource,
   memoryTypesSource,
   runtimeTypesSource,
   sharedTypesSource,
@@ -45,6 +48,9 @@ describe("api type domain modules", () => {
     expect(agentsTypesSource).toContain("export type AgentInstance");
     expect(runtimeTypesSource).toContain("export type RuntimeSummary");
     expect(memoryTypesSource).toContain("export type MemoryOverview");
+    expect(knowledgeTypesSource).toContain("export type KnowledgeItem");
+    expect(knowledgeTypesSource).toContain("export type KnowledgeGovernanceTask");
+    expect(knowledgeTypesSource).toContain("export type TeamKnowledgeBase");
     expect(evolutionTypesSource).toContain("export type EvolutionOverview");
     expect(configTypesSource).toContain("export type ConfigSummary");
   });
@@ -53,5 +59,14 @@ describe("api type domain modules", () => {
     for (const source of domainSources) {
       expect(source).not.toMatch(/^import\s+(?!type\b)/m);
     }
+  });
+
+  it("breaks the memory ↔ teams DTO cycle through types/knowledge.ts", () => {
+    expect(memoryTypesSource).not.toContain('from "./teams"');
+    expect(memoryTypesSource).not.toContain("export type KnowledgeItem");
+    expect(teamsTypesSource).not.toContain('from "./memory"');
+    expect(teamsTypesSource).toContain('from "./knowledge"');
+    expect(knowledgeTypesSource).not.toContain('from "./memory"');
+    expect(knowledgeTypesSource).not.toContain('from "./teams"');
   });
 });
