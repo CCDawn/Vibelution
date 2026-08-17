@@ -7,8 +7,6 @@ and unmanifested experiment sources fail closed.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import dataclass
 import fnmatch
 import hashlib
 import json
@@ -16,6 +14,8 @@ import os
 import re
 import subprocess
 import tarfile
+from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -67,9 +67,16 @@ INCLUDE_GLOBS: tuple[str, ...] = (
     "scripts/challenge_cup/**",
     "tests/test_competition_program_core_resources.py",
     "tests/test_platform_flow_readiness.py",
+    "tests/test_platform_flow_ready.py",
     "tests/test_challenge_cup_source_boundary.py",
     "tests/test_challenge_cup_submission_source_manifest_schema.py",
+    "tests/test_challenge_cup_export.py",
     "tests/test_challenge_cup_spike_coding_*.py",
+    "tests/test_challenge_cup_role_capabilities.py",
+    "tests/test_research_workflow_hypothesis_rounds.py",
+    "tests/test_research_workflow_research_templates.py",
+    "tests/test_research_claim_ledger.py",
+    "tests/test_research_personal_memory_scope.py",
     "tests/test_experiment_adapter_*.py",
 )
 
@@ -100,6 +107,11 @@ R1_PYTEST_TARGETS: tuple[str, ...] = (
     "tests/test_experiment_adapter_fashion_mnist.py",
     "tests/test_challenge_cup_source_boundary.py",
     "tests/test_platform_flow_readiness.py",
+    "tests/test_research_workflow_hypothesis_rounds.py",
+    "tests/test_research_workflow_research_templates.py",
+    "tests/test_research_claim_ledger.py",
+    "tests/test_research_personal_memory_scope.py",
+    "tests/test_challenge_cup_role_capabilities.py",
 )
 
 
@@ -187,6 +199,21 @@ def git_output(repo: Path, *args: str) -> str:
     return result.stdout
 
 
+def git_show_bytes(repo: Path, path: str) -> bytes:
+    normalized = posix_relpath(path)
+    result = subprocess.run(
+        ["git", "-C", str(repo), "show", f"HEAD:{normalized}"],
+        check=False,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or b"git show failed").decode(
+            "utf-8", "replace"
+        ).strip()
+        raise SourceBoundaryError(f"unreadable HEAD blob {normalized}: {detail}")
+    return result.stdout
+
+
 def git_ls_files(repo: Path, *pathspecs: str) -> tuple[str, ...]:
     args = ["ls-files", "-z", "--"]
     args.extend(pathspecs or [])
@@ -249,9 +276,9 @@ def build_entry(repo: Path, path: str, *, max_entry_bytes: int) -> tuple[dict[st
         failures.append(f"forbidden source suffix {normalized}")
     file_path = repo / Path(*normalized.split("/"))
     try:
-        payload = file_path.read_bytes()
-    except OSError as exc:
-        failures.append(f"unreadable {normalized}: {exc}")
+        payload = git_show_bytes(repo, normalized)
+    except SourceBoundaryError as exc:
+        failures.append(str(exc))
         return {}, failures
     size = len(payload)
     if size < 1:
@@ -342,7 +369,18 @@ def build_source_manifest(
 def extract_head_archive(repo: Path, dest: Path) -> None:
     dest.mkdir(parents=True, exist_ok=True)
     proc = subprocess.Popen(
-        ["git", "-C", str(repo), "archive", "--format=tar", "HEAD"],
+        [
+            "git",
+            "-C",
+            str(repo),
+            "-c",
+            "core.autocrlf=false",
+            "-c",
+            "core.eol=lf",
+            "archive",
+            "--format=tar",
+            "HEAD",
+        ],
         stdout=subprocess.PIPE,
     )
     if proc.stdout is None:
@@ -350,8 +388,10 @@ def extract_head_archive(repo: Path, dest: Path) -> None:
     with tarfile.open(fileobj=proc.stdout, mode="r|") as archive:
         try:
             archive.extractall(dest, filter="data")
-        except TypeError:
-            archive.extractall(dest)
+        except TypeError as exc:
+            raise SourceBoundaryError(
+                "tar extract requires filter='data'; refusing unfiltered extractall"
+            ) from exc
     if proc.wait() != 0:
         raise SourceBoundaryError("git archive failed")
 
@@ -385,12 +425,26 @@ def run_r1_pytest(tree: Path, *, python: str, targets: Sequence[str]) -> list[st
         return failures or ["R1 pytest target list is empty"]
     env = os.environ.copy()
     env["PYTHONPATH"] = str(tree)
+    env.pop("PYTEST_CURRENT_TEST", None)
+    env["PYTEST_ADDOPTS"] = ""
     result = subprocess.run(
-        [python, "-m", "pytest", *existing, "-q", "--tb=short"],
+        [
+            python,
+            "-m",
+            "pytest",
+            *existing,
+            "-q",
+            "--tb=short",
+            "-p",
+            "no:cacheprovider",
+            "-k",
+            "not test_current_repo_source_integrity_uses_git_ls_files",
+        ],
         cwd=tree,
         capture_output=True,
         text=True,
         env=env,
+        check=False,
     )
     if result.returncode != 0:
         detail = (result.stdout or "")[-2000:] + (result.stderr or "")[-1000:]

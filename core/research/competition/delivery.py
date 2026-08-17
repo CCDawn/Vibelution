@@ -31,9 +31,9 @@ def formal_blockers(payload: dict[str, Any]) -> list[str]:
         blockers.append("r0_not_pass")
     if str(payload.get("r1") or "") != "PASS":
         blockers.append("r1_not_pass")
-    if str(payload.get("r2") or "pending") not in {"PASS", "not_required_for_preview"}:
+    if str(payload.get("r2") or "pending") != "PASS":
         blockers.append("r2_not_pass")
-    if str(payload.get("r3") or "pending") not in {"PASS", "not_required_for_preview"}:
+    if str(payload.get("r3") or "pending") != "PASS":
         blockers.append("r3_not_pass")
     if int(payload.get("pendingClaimCount") or 0) > 0:
         blockers.append("pending_claims")

@@ -22,8 +22,8 @@ def main(argv: list[str] | None = None) -> int:
     challenge = challenge_cup_dispatcher()
     default = ExperimentDispatcher()
     payload = {
-        "challengeAdapterIds": sorted(challenge._registry),
-        "defaultAdapterIds": sorted(default._registry),
+        "challengeAdapterIds": list(challenge.adapters()),
+        "defaultAdapterIds": list(default.adapters()),
         "startsRealResearch": False,
     }
     sys.stdout.write(json.dumps(payload, indent=2) + "\n")
@@ -33,9 +33,9 @@ def main(argv: list[str] | None = None) -> int:
         "gpu_operator_benchmark",
         "neural_spike_coding",
     }
-    if not expected.issubset(set(challenge._registry)):
+    if not expected.issubset(set(challenge.adapters())):
         return 1
-    if "gpu_operator_benchmark" in default._registry:
+    if "gpu_operator_benchmark" in default.adapters():
         return 1
     return 0
 

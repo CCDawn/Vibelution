@@ -7,6 +7,7 @@ exercised with fixtures. It is not competition completion.
 
 from __future__ import annotations
 
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -36,7 +37,17 @@ from core.research.experiment_adapters import (
     ExperimentOutcome,
     challenge_cup_dispatcher,
 )
-from core.research.workflow.contracts import ResearchScopeEnvelope
+from core.research.workflow.contracts import (
+    MIN_CANDIDATES,
+    ClaimLedgerEntry,
+    ContractValidationError,
+    MeetingDigest,
+    PersonalMemoryCandidate,
+    ResearchScopeEnvelope,
+    TemplateAddendum,
+    TemplateBaseline,
+    scope_hash_for,
+)
 from core.research.workflow.contracts.model_invocation_receipt import (
     ModelInvocationReceipt,
     ModelInvocationStatus,
@@ -51,8 +62,17 @@ from core.research.workflow.contracts.multimodal_validation import (
 
 PROGRAM_CONTRACT_VERSION = "2.2.0"
 CATALOG_POLICY_VERSION = "1.2.0"
+REPORT_KIND = "ChallengeCupPlatformDevelopmentReadinessReport"
 GPU_ADAPTER = "gpu_operator_benchmark"
 NEURAL_ADAPTER = "neural_spike_coding"
+CONTROL_FLOW_TEST_FILES: tuple[str, ...] = (
+    "tests/test_research_workflow_hypothesis_rounds.py",
+    "tests/test_research_workflow_research_templates.py",
+    "tests/test_research_claim_ledger.py",
+    "tests/test_research_personal_memory_scope.py",
+    "tests/test_challenge_cup_role_capabilities.py",
+    "tests/test_platform_flow_readiness.py",
+)
 
 GPU_ENVELOPE = {
     "program": "XH-202619",
@@ -129,20 +149,36 @@ def gate_program_hash() -> dict[str, str]:
     return _gate("program_hash", "PASS", "frozen program, policy and 125-question catalog match")
 
 
-def gate_r0(repo: Path) -> dict[str, str]:
-    report = evaluate_source_integrity(repo, require_clean=False)
+def gate_r0(repo: Path, *, require_clean: bool = True) -> dict[str, str]:
+    report = evaluate_source_integrity(repo, require_clean=require_clean)
     if report["source_integrity"] != "PASS":
         return _gate("r0_source_integrity", "FAIL", "; ".join(report["failures"])[:500])
     return _gate(
         "r0_source_integrity",
         "PASS",
-        f"source_integrity=PASS entries={report['entryCount']}",
+        f"source_integrity=PASS entries={report['entryCount']} require_clean={require_clean}",
     )
 
 
-def gate_r1(repo: Path, dest: Path) -> dict[str, str]:
+def gate_r1(
+    repo: Path,
+    dest: Path,
+    *,
+    require_clean: bool = True,
+    run_pytest: bool = True,
+) -> dict[str, str]:
+    if not run_pytest:
+        return _gate(
+            "r1_clean_clone",
+            "BLOCKED",
+            "R1 pytest was skipped; READY is not allowed",
+        )
     report = evaluate_clean_clone(
-        repo, dest, require_clean=False, run_pytest=False
+        repo,
+        dest,
+        require_clean=require_clean,
+        run_pytest=True,
+        python=sys.executable,
     )
     if report["clean_clone_reproduction"] != "PASS":
         return _gate(
@@ -150,7 +186,11 @@ def gate_r1(repo: Path, dest: Path) -> dict[str, str]:
             "FAIL",
             "; ".join(report["failures"])[:500],
         )
-    return _gate("r1_clean_clone", "PASS", "clean_clone_reproduction=PASS")
+    return _gate(
+        "r1_clean_clone",
+        "PASS",
+        "clean_clone_reproduction=PASS including R1 pytest",
+    )
 
 
 def gate_adapters() -> dict[str, str]:
@@ -205,7 +245,8 @@ def gate_adapters() -> dict[str, str]:
         return _gate("adapters_dev_isolated", "FAIL", "gpu adapter accepted neural scope")
     if real.outcome is not ExperimentOutcome.UNAVAILABLE:
         return _gate("adapters_dev_isolated", "FAIL", "full GPU run was not unavailable")
-    if GPU_ADAPTER in default._registry or NEURAL_ADAPTER in default._registry:
+    default_ids = default.adapters()
+    if GPU_ADAPTER in default_ids or NEURAL_ADAPTER in default_ids:
         return _gate("adapters_dev_isolated", "FAIL", "default dispatcher registered challenge adapters")
     return _gate(
         "adapters_dev_isolated",
@@ -349,10 +390,180 @@ def gate_product_projection(repo: Path) -> dict[str, str]:
         return _gate("product_projection", "FAIL", "progress panel does not project Program v2")
     if "CompetitionProgramProjection" not in types_text:
         return _gate("product_projection", "FAIL", "challenge cup API types are missing")
+    if "PlatformFlowReady CLI" not in panel_text or "scripts/challenge_cup/platform_flow_ready.py" not in panel_text:
+        return _gate("product_projection", "FAIL", "progress panel does not surface PlatformFlowReady CLI")
     return _gate(
         "product_projection",
         "PASS",
         "Program v2 progress panel and typed projection are present",
+    )
+
+
+def _dev_scope_identity() -> tuple[dict[str, str], str]:
+    identity = {
+        "program": "XH-202619",
+        "theme": "cc-gpu-operator-001",
+        "campaign": "cc-campaign-gpu-operator-001",
+        "question": "SCI-091",
+        "branch": "main",
+        "workflow": "hypothesis_and_plan",
+        "agentId": "agent-dev-platform",
+        "mode": "dev",
+    }
+    digest = scope_hash_for(
+        program=identity["program"],
+        theme=identity["theme"],
+        campaign=identity["campaign"],
+        question=identity["question"],
+        branch=identity["branch"],
+        workflow=identity["workflow"],
+        agent_id=identity["agentId"],
+        mode=identity["mode"],
+    )
+    return identity, digest
+
+
+def gate_control_flow_contracts(repo: Path) -> dict[str, str]:
+    missing = [path for path in CONTROL_FLOW_TEST_FILES if not (repo / path).is_file()]
+    if missing:
+        return _gate("control_flow_contracts", "FAIL", f"missing {missing}")
+    if MIN_CANDIDATES < 2:
+        return _gate("control_flow_contracts", "FAIL", "hypothesis rounds allow fewer than two candidates")
+    try:
+        from core.web.services import agent_role_tool_profile_service as role_svc
+
+        profile = role_svc.role_tool_profile_for_role(
+            "research_knowledge_collector",
+            primary_mode="research",
+        )
+        allowed = set(profile["allowedTools"]) if profile else set()
+        if allowed != {"research_knowledge_collection_tool"}:
+            return _gate("control_flow_contracts", "FAIL", "collection role is not limited to the facade tool")
+        identity, digest = _dev_scope_identity()
+        TemplateBaseline.from_dict(
+            {
+                **identity,
+                "baselineId": "baseline-dev-1",
+                "templateId": "template-dev",
+                "version": 1,
+                "parentVersion": 0,
+                "status": "frozen",
+                "content": {"hypothesisFormat": "claim-rationale-falsifier"},
+                "scopeHash": digest,
+                "approvedBy": "operator",
+                "approvedAt": "2026-08-18T00:00:00Z",
+                "approvalRef": "approval://dev-baseline",
+                "frozenAt": "2026-08-18T00:00:00Z",
+                "createdAt": "2026-08-18T00:00:00Z",
+            }
+        )
+        try:
+            TemplateAddendum.from_dict(
+                {
+                    "addendumId": "addendum-semantic",
+                    "baselineId": "baseline-dev-1",
+                    "templateId": "template-dev",
+                    "version": 1,
+                    "reason": "rewrite method",
+                    "deltas": {"hypothesisFormat": "replacement"},
+                    "semanticChange": True,
+                    "appendedBy": "agent-dev-platform",
+                    "appendedAt": "2026-08-18T00:00:00Z",
+                    "status": "active",
+                }
+            )
+        except ContractValidationError:
+            pass
+        else:
+            return _gate("control_flow_contracts", "FAIL", "semantic template rewrite was accepted as addendum")
+        MeetingDigest.from_dict(
+            {
+                "digestId": "digest-dev-1",
+                "meetingRoundId": "meeting-dev-1",
+                "scopeHash": digest,
+                "summary": "DEV fixture meeting closed two hypothesis candidates.",
+                "participantAgentIds": ["agent-dev-platform"],
+                "discussionTopics": ["hypothesis_round"],
+                "decisionRefs": ["decision-dev-1"],
+                "closedBy": "agent-dev-platform",
+                "createdAt": "2026-08-18T00:00:00Z",
+            }
+        )
+        try:
+            ClaimLedgerEntry.from_dict(
+                {
+                    **identity,
+                    "claimId": "claim-meeting-invalid",
+                    "claim": "Meeting text is not evidence.",
+                    "scopeHash": digest,
+                    "status": "proposed",
+                    "source": "meeting",
+                    "evidenceRefs": [
+                        {
+                            "claimEvidenceId": "evidence-1",
+                            "scopeHash": digest,
+                            "reviewStatus": "accepted",
+                            "supportLevel": "supports",
+                            "sourceId": "artifact:evidence-1",
+                        }
+                    ],
+                    "counterEvidenceRefs": [],
+                    "meetingPromotionAllowed": False,
+                    "createdBy": "agent-dev-platform",
+                    "createdAt": "2026-08-18T00:00:00Z",
+                }
+            )
+        except ContractValidationError:
+            pass
+        else:
+            return _gate("control_flow_contracts", "FAIL", "meeting-sourced claim accepted evidence refs")
+        neural_hash = scope_hash_for(
+            program=identity["program"],
+            theme="cc-neural-information-001",
+            campaign="cc-campaign-neural-spike-001",
+            question="SCI-096",
+            branch=identity["branch"],
+            workflow=identity["workflow"],
+            agent_id=identity["agentId"],
+            mode=identity["mode"],
+        )
+        memory = PersonalMemoryCandidate.from_dict(
+            {
+                "memoryCandidateId": "memory-dev-1",
+                "agentId": identity["agentId"],
+                "theme": identity["theme"],
+                "campaign": identity["campaign"],
+                "scopeHash": digest,
+                "targetTheme": "cc-neural-information-001",
+                "targetCampaign": "cc-campaign-neural-spike-001",
+                "targetScopeHash": neural_hash,
+                "sourceRefs": ["meeting://digest-dev-1"],
+                "memoryClass": "lesson",
+                "reusePolicy": "advisory_only",
+                "evidenceStatus": "reported",
+                "summary": "Cross-theme memory stays advisory.",
+                "needsRevalidation": True,
+                "advisoryOnly": True,
+                "accepted": False,
+                "injected": False,
+                "createdAt": "2026-08-18T00:00:00Z",
+            }
+        )
+        if not memory.is_cross_theme() or memory.injected:
+            return _gate("control_flow_contracts", "FAIL", "cross-theme memory was not advisory-only")
+    except (
+        AttributeError,
+        ContractValidationError,
+        ImportError,
+        KeyError,
+        TypeError,
+        ValueError,
+    ) as exc:
+        return _gate("control_flow_contracts", "FAIL", str(exc)[:500])
+    return _gate(
+        "control_flow_contracts",
+        "PASS",
+        "role tools, frozen template, meeting digest, claim and memory contracts stay fail-closed",
     )
 
 
@@ -371,15 +582,18 @@ def build_platform_flow_readiness_report(
     repo: Path,
     *,
     clone_dest: Path | None = None,
+    require_clean: bool = True,
+    run_pytest: bool = True,
 ) -> dict[str, Any]:
     repo = repo.resolve()
     dest = clone_dest or (repo / ".runtime" / "challenge-cup-platform-flow-clone")
     gates = [
         gate_program_hash(),
-        gate_r0(repo),
-        gate_r1(repo, dest),
+        gate_r0(repo, require_clean=require_clean),
+        gate_r1(repo, dest, require_clean=require_clean, run_pytest=run_pytest),
         gate_adapters(),
         gate_catalog_resume(),
+        gate_control_flow_contracts(repo),
         gate_model_receipt(),
         gate_multimodal(),
         gate_product_projection(repo),
@@ -387,7 +601,7 @@ def build_platform_flow_readiness_report(
     status = overall_status(gates)
     return {
         "schemaVersion": 1,
-        "reportKind": "PlatformFlowReadinessReport",
+        "reportKind": REPORT_KIND,
         "status": status,
         "programContract": {
             "version": PROGRAM_CONTRACT_VERSION,
