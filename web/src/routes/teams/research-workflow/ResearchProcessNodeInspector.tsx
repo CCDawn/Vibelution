@@ -1,19 +1,22 @@
-import type { NodeHandoffRecord } from "../../../api/types/researchWorkflow";
+import type { NodeHandoffRecord, ResearchBudgetProjection, EffectiveAgentBinding } from "../../../api/types/researchWorkflow";
 import type { ResearchWorkflowNodeDetail } from "../../../api/types/research-workflow/core";
 import { VEmptyState, VSurface } from "../../../components/vui";
 import type { NodeAdapterSpec } from "./nodeAdapterModel";
 import { NodeAgentSection } from "./NodeAgentSection";
 import { NodeCommandSection } from "./NodeCommandSection";
 import { NodeHandoffSection } from "./NodeHandoffSection";
-import { NodeSessionSection } from "./NodeSessionSection";
+import { pickPrimaryCommandOffer, remainingCommandOffers } from "./nodeInspectorOpsModel";
 import { researchActorLabel, researchStageLabel } from "./researchNodePresentation";
 import styles from "./ResearchProcessNodeInspector.styles";
 import type { CommandOffer } from "../../../api/types/research-workflow/commands";
 
 export type ResearchProcessNodeInspectorProps = {
+  teamId: string;
   nodeId: string | null;
   adapter: NodeAdapterSpec | null;
   detail: ResearchWorkflowNodeDetail | null;
+  effectiveBindings: EffectiveAgentBinding[] | null;
+  budget: ResearchBudgetProjection | null;
   handoffs?: NodeHandoffRecord[];
   handoffPending: boolean;
   busy: boolean;
@@ -39,27 +42,41 @@ export function ResearchProcessNodeInspector(props: ResearchProcessNodeInspector
   }
 
   const { adapter, detail } = props;
-  const attempt = detail.nodeAttempt || detail.latestAttempt?.attempt || 0;
+  const primaryOffer = adapter.actorKind === "agent"
+    ? pickPrimaryCommandOffer(detail.commandOffers)
+    : null;
+  const restOffers = adapter.actorKind === "agent"
+    ? remainingCommandOffers(detail.commandOffers, primaryOffer)
+    : (detail.commandOffers ?? []);
+
   return (
     <VSurface tone="panel" className={styles.root} data-vui="node-inspector">
-      <header>
-        <div className={styles.stage}>{researchStageLabel(adapter.stageId)}</div>
-        <h3 className={styles.title}>{detail.label || adapter.label}</h3>
-        <div className={styles.meta}>
-          {researchActorLabel(adapter.actorKind)}
-          {detail.runtimeCurrent ? " · 运行当前" : ""}
-          {attempt ? ` · 第 ${attempt} 次尝试` : ""}
-        </div>
-      </header>
-      {adapter.actorKind === "agent" ? <NodeAgentSection detail={detail} /> : null}
-      {adapter.actorKind === "agent" ? <NodeSessionSection detail={detail} /> : null}
+      {adapter.actorKind === "agent" ? (
+        <NodeAgentSection
+          teamId={props.teamId}
+          stageId={adapter.stageId}
+          stageLabel={researchStageLabel(adapter.stageId)}
+          detail={detail}
+          effectiveBindings={props.effectiveBindings}
+          budget={props.budget}
+          primaryOffer={primaryOffer}
+          busy={props.busy}
+          onOffer={props.onOffer}
+        />
+      ) : (
+        <header>
+          <div className={styles.stage}>{researchStageLabel(adapter.stageId)}</div>
+          <h3 className={styles.title}>{detail.label || adapter.label}</h3>
+          <div className={styles.meta}>{researchActorLabel(adapter.actorKind)}</div>
+        </header>
+      )}
       <NodeHandoffSection
         handoffs={props.handoffs ?? []}
         pending={props.handoffPending}
         blockedReason={detail.blockedReason || ""}
       />
       <NodeCommandSection
-        offers={detail.commandOffers ?? []}
+        offers={restOffers}
         busy={props.busy}
         onOffer={props.onOffer}
       />

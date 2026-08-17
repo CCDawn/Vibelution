@@ -1,0 +1,260 @@
+.nio-header {
+  display: grid;
+  gap: 6px;
+}
+
+.nio-stage {
+  color: var(--fg-tertiary);
+  font-size: 10px;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.nio-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.nio-title {
+  margin: 0;
+  min-width: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.nio-identity {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.nio-avatar,
+.nio-avatar-empty {
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-display);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.nio-avatar {
+  background: color-mix(in srgb, var(--accent-cool) 18%, var(--vui-control-muted));
+  color: var(--fg-primary);
+}
+
+.nio-avatar-empty {
+  border: 1px dashed var(--vui-border-strong);
+  background: transparent;
+  color: var(--fg-tertiary);
+}
+
+.nio-identity-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.nio-name {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--vui-font-sm);
+  font-weight: 780;
+}
+
+.nio-model-trigger {
+  align-items: center;
+  gap: 10px;
+  padding: 10px 10px 10px 0;
+  text-align: left;
+  border: 1px solid var(--vui-border-subtle);
+  background: var(--vui-surface-raised);
+  color: var(--fg-primary);
+  box-shadow: var(--vui-elevation-1);
+  grid-template-columns: 4px minmax(0, 1fr) auto;
+}
+
+.nio-model-trigger:hover {
+  border-color: var(--vui-border-strong);
+  background: var(--vui-surface-row-hover);
+}
+
+.nio-model-rail {
+  width: 4px;
+  align-self: stretch;
+  border-radius: 0 2px 2px 0;
+  background: var(--accent-cool);
+}
+
+.nio-model-trigger[data-provider="deepseek"] .nio-model-rail,
+.nio-picker-item[data-provider="deepseek"] .nio-model-rail {
+  background: var(--accent-warm);
+}
+
+.nio-model-trigger[data-provider="anthropic"] .nio-model-rail,
+.nio-picker-item[data-provider="anthropic"] .nio-model-rail {
+  background: var(--fg-primary);
+}
+
+.nio-model-trigger[data-empty="true"] {
+  opacity: 0.72;
+}
+
+.nio-model-body {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  padding: 2px 0;
+}
+
+.nio-model-kicker {
+  color: var(--fg-tertiary);
+  font-size: 10px;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+}
+
+.nio-model-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.98rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.nio-model-meta {
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+}
+
+.nio-picker {
+  width: min(320px, calc(100vw - 24px));
+  padding: 8px;
+  display: grid;
+  gap: 8px;
+}
+
+.nio-picker-search {
+  width: 100%;
+}
+
+.nio-picker-list {
+  display: grid;
+  gap: 4px;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.nio-picker-item {
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 0;
+  text-align: left;
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  grid-template-columns: 4px minmax(0, 1fr);
+}
+
+.nio-picker-item:hover,
+.nio-picker-item-active {
+  border-color: var(--vui-border-subtle);
+  background: var(--vui-surface-row);
+}
+
+.nio-picker-item .nio-model-rail {
+  border-radius: 2px;
+}
+
+.nio-picker-item-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.nio-picker-agent-item {
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  text-align: left;
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  grid-template-columns: 28px minmax(0, 1fr);
+}
+
+.nio-picker-agent-item:hover,
+.nio-picker-agent-item.nio-picker-item-active {
+  border-color: var(--vui-border-subtle);
+  background: var(--vui-surface-row);
+}
+
+.nio-picker-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--accent-cool) 18%, var(--vui-control-muted));
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.nio-budget {
+  display: grid;
+  gap: 8px;
+}
+
+.nio-meter {
+  display: grid;
+  gap: 4px;
+}
+
+.nio-meter-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+  font-weight: 700;
+}
+
+.nio-meter-track {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg-tertiary) 18%, transparent);
+}
+
+.nio-meter-fill {
+  height: 100%;
+  width: var(--nio-fill, 0%);
+  border-radius: inherit;
+  background: var(--accent-cool);
+}
+
+.nio-meter-warn .nio-meter-fill {
+  background: var(--state-warning);
+}
+
+.nio-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nio-notice {
+  margin: 0;
+  color: var(--state-error);
+  font-size: var(--vui-font-xs);
+}
