@@ -6188,6 +6188,7 @@ def test_terminate_workbench_processes_known_pids_include_runtime_manager_withou
 def no_active_electron_desktop_session(monkeypatch):
     monkeypatch.setattr(workbench_controller, "_latest_active_electron_desktop_session", lambda: None)
     monkeypatch.setattr(workbench_controller, "_packaged_electron_desktop_executable", lambda: None)
+    monkeypatch.setattr(workbench_controller, "_checkout_electron_launch_command", lambda **_kwargs: None)
     monkeypatch.setattr(workbench_controller, "_live_electron_owner_pid", lambda: 0)
     monkeypatch.setattr(workbench_controller, "_electron_main_orchestrates_windows", lambda: False)
 

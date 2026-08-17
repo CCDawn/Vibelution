@@ -294,7 +294,7 @@ internal static class VibelutionLauncher
         {
             try
             {
-                EnsureFreshLauncherBackend(projectDir);
+                LaunchCurrentElectronMain(projectDir, "open", false);
                 if (!fromShortcut)
                 {
                     ShowInfo("Launcher 已在托盘后台运行。");
@@ -320,7 +320,7 @@ internal static class VibelutionLauncher
                 {
                     try
                     {
-                        RunPythonBridge(projectDir, "launcher", false, false);
+                        LaunchCurrentElectronMain(projectDir, "open", false);
                     }
                     catch (Exception ex)
                     {
@@ -784,8 +784,7 @@ internal static class VibelutionLauncher
     {
         try
         {
-            EnsureFreshLauncherBackend(projectDir);
-            RunPythonBridge(projectDir, "launcher", false, false);
+            LaunchCurrentElectronMain(projectDir, "open", false);
             WriteNativeEntryLog(projectDir, "native_action.secondary_launch", "action=open_console");
         }
         catch (Exception ex)
@@ -945,7 +944,6 @@ internal static class VibelutionLauncher
     private static int RunNativeAction(string projectDir, List<string> forwardedArgs)
     {
         string action = ResolveAction(forwardedArgs);
-        bool noBrowser = HasArgument(forwardedArgs, "--no-browser", "-nobrowser", "-no-browser");
         if (action == "open")
         {
             if (ForwardOrLaunchElectron(projectDir, action, forwardedArgs))
@@ -953,9 +951,8 @@ internal static class VibelutionLauncher
                 WriteNativeEntryLog(projectDir, "native_action.electron_forwarded", "action=open");
                 return 0;
             }
-            RunPythonBridge(projectDir, noBrowser ? "bootstrap" : "launcher", noBrowser, noBrowser);
-            WriteNativeEntryLog(projectDir, "native_action.succeeded", "action=open");
-            return 0;
+            WriteNativeEntryLog(projectDir, "native_action.electron_launch_failed", "action=open");
+            return 1;
         }
 
         if (action != "toggle" && action != "start" && action != "stop" && action != "force-stop" && action != "close" && action != "restart" && action != "rebuild-and-start" && action != "status")
@@ -964,55 +961,36 @@ internal static class VibelutionLauncher
             return 2;
         }
 
-        // T8: the packaged Electron shell owns lifecycle commands. When it exists,
-        // forward argv to the live instance (second-instance) or launch it; never
-        // bootstrap a Python :8765 control plane from this shim.
+        // Electron main owns lifecycle commands. Launch the current checkout
+        // shell (packaged if current, otherwise unpackaged Electron main).
         if (ForwardOrLaunchElectron(projectDir, action, forwardedArgs))
         {
             WriteNativeEntryLog(projectDir, "native_action.electron_forwarded", "action=" + action);
             return 0;
         }
 
-        // No packaged Electron (development checkout): keep the legacy Python bridge path.
-        RunPythonBridge(projectDir, "bootstrap", true, true);
-        if (action == "status")
-        {
-            RequestLauncher(projectDir, "/api/launcher/status", "GET");
-            WriteNativeEntryLog(projectDir, "native_action.succeeded", "action=status");
-            return 0;
-        }
-
-        string effectiveAction = action == "close" ? "stop" : action;
-        if (effectiveAction == "toggle")
-        {
-            string status = RequestLauncher(projectDir, "/api/launcher/status", "GET");
-            string observed = ExtractJsonString(status, "observedState").ToLowerInvariant();
-            effectiveAction = observed == "open" || observed == "running" || observed == "starting" ? "stop" : "start";
-        }
-        RequestLauncher(projectDir, "/api/launcher/" + effectiveAction, "POST");
-        WriteNativeEntryLog(projectDir, "native_action.succeeded", "action=" + action + ";effective_action=" + effectiveAction);
-        return 0;
+        WriteNativeEntryLog(projectDir, "native_action.electron_launch_failed", "action=" + action);
+        return 1;
     }
 
     private static bool ForwardOrLaunchElectron(string projectDir, string action, List<string> forwardedArgs)
     {
-        string electronExe = Path.Combine(projectDir, "dist", "desktop", "win-unpacked", "Vibelution.exe");
-        if (!File.Exists(electronExe))
+        bool openWorkbench = action == "open" || action == "start" || action == "restart" || action == "rebuild-and-start";
+        try
         {
+            LaunchCurrentElectronMain(projectDir, action, openWorkbench);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            WriteNativeEntryLog(projectDir, "native_action.electron_launch_failed", ShortStaticMessage(ex.Message));
             return false;
         }
-        var args = new List<string> { "--project", Quote(projectDir), action };
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = electronExe,
-            Arguments = string.Join(" ", args.ToArray()),
-            WorkingDirectory = projectDir,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            WindowStyle = ProcessWindowStyle.Hidden
-        };
-        Process.Start(startInfo);
-        return true;
+    }
+
+    private static void LaunchCurrentElectronMain(string projectDir, string thenLifecycle, bool openWorkbench)
+    {
+        RunPythonBridge(projectDir, "launch-desktop-shell", true, true, thenLifecycle, openWorkbench, 120000);
     }
 
     private static bool HasArgument(List<string> args, params string[] accepted)
@@ -1052,6 +1030,18 @@ internal static class VibelutionLauncher
 
     private static void RunPythonBridge(string projectDir, string action, bool noBrowser, bool outputJson)
     {
+        RunPythonBridge(projectDir, action, noBrowser, outputJson, "", false, 45000);
+    }
+
+    private static void RunPythonBridge(
+        string projectDir,
+        string action,
+        bool noBrowser,
+        bool outputJson,
+        string thenLifecycle,
+        bool openWorkbench,
+        int timeoutMs)
+    {
         string bridgePath = Path.Combine(projectDir, "scripts", "vibelution_desktop_entry.py");
         if (!File.Exists(bridgePath))
         {
@@ -1076,11 +1066,24 @@ internal static class VibelutionLauncher
         {
             arguments.Add("--no-browser");
         }
+        if (string.Equals(action, "stop-launcher", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(action, "launch-desktop-shell", StringComparison.OrdinalIgnoreCase))
+        {
+            arguments.Add("--workspace");
+            arguments.Add(Quote(projectDir));
+        }
         if (string.Equals(action, "stop-launcher", StringComparison.OrdinalIgnoreCase))
         {
             arguments.Add("--use-state-owned-backend-pid");
-            arguments.Add("--workspace");
-            arguments.Add(Quote(projectDir));
+        }
+        if (!string.IsNullOrWhiteSpace(thenLifecycle))
+        {
+            arguments.Add("--then-lifecycle");
+            arguments.Add(thenLifecycle);
+        }
+        if (openWorkbench)
+        {
+            arguments.Add("--open-workbench");
         }
 
         var startInfo = new ProcessStartInfo
@@ -1103,7 +1106,8 @@ internal static class VibelutionLauncher
             }
             string stdout = process.StandardOutput.ReadToEnd();
             string stderr = process.StandardError.ReadToEnd();
-            if (!process.WaitForExit(45000))
+            int waitMs = timeoutMs > 0 ? timeoutMs : 45000;
+            if (!process.WaitForExit(waitMs))
             {
                 try { process.Kill(); } catch { }
                 throw new TimeoutException("Desktop entry Python bridge timed out.");

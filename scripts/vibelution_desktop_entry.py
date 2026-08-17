@@ -1549,6 +1549,24 @@ def _refresh_desktop_shell_bridge(args: argparse.Namespace) -> dict[str, object]
     return payload
 
 
+def _launch_desktop_shell_bridge(args: argparse.Namespace) -> dict[str, object]:
+    from core.launcher.desktop_shell import launch_desktop_shell
+
+    payload = launch_desktop_shell(
+        project_root=_workspace_root(args),
+        then_lifecycle=str(args.then_lifecycle or ""),
+        open_workbench=bool(getattr(args, "open_workbench", False)),
+    )
+    _append_log(
+        "desktop_entry_python.desktop_shell.launched",
+        kind=str(payload.get("kind") or ""),
+        pid=int(payload.get("pid") or 0),
+        then_lifecycle=str(payload.get("thenLifecycle") or ""),
+        open_workbench=bool(payload.get("openWorkbench")),
+    )
+    return payload
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Open the Vibelution Launcher without a console window.")
     parser.add_argument("--action", default="launcher")
@@ -1577,6 +1595,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--launcher-api-body", default="")
     parser.add_argument("--wait-pid", type=int, default=0)
     parser.add_argument("--then-lifecycle", default="")
+    parser.add_argument(
+        "--open-workbench",
+        action="store_true",
+        help="Ask Electron main to open or focus the workbench window after launch.",
+    )
     parser.add_argument(
         "--force-refresh",
         action="store_true",
@@ -1607,6 +1630,7 @@ def main(argv: list[str] | None = None) -> int:
         "desktop-shell-status",
         "schedule-desktop-shell-refresh",
         "refresh-desktop-shell",
+        "launch-desktop-shell",
     }:
         raise SystemExit(f"Unsupported desktop-entry Python bridge action: {action}")
     if str(args.output or "").strip().lower() == "json":
@@ -1667,6 +1691,14 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
             else:
                 print("Desktop shell refreshed")
+        elif action == "launch-desktop-shell":
+            payload = _launch_desktop_shell_bridge(args)
+            if args.output == "json":
+                print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+            else:
+                print(
+                    f"Desktop shell launched kind={payload.get('kind')} pid={payload.get('pid')}"
+                )
         else:
             _open_launcher(args)
         _append_log("desktop_entry_python.open.succeeded", action=action, run_id=args.run_id)

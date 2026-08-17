@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-08-14).
+Accepted (2026-08-14). Amended 2026-08-17: the packaged product path no longer spawns Python `:8765`.
 
 ## Context
 
@@ -30,13 +30,13 @@ The Launcher should be an independent product whose **service and frontend stay 
 2. **The Launcher renderer talks to main over IPC**, using the existing `preload.ts` / `IPC_CHANNELS` pattern. The product path must not `fetch` `:8765`. A disconnected empty dashboard is a control-plane failure, not a valid idle UI.
 3. **Workbench remains Python.** Electron opens a separate renderer that loads the workbench origin (typically `:8000` / Runtime Manager + FastAPI + `web/dist`). Isolated branch instances remain extra workbench windows inside the same Electron process, each with its own Python backend.
 4. **`VibelutionLauncher.exe` stays a thin no-console shim.** If an Electron desktop owner is alive, the shim forwards `start|stop|restart|rebuild-and-start` into that process (second-instance argv or an equivalent local command channel). It must not become a second control plane. WinForms NotifyIcon remains last-resort bootstrap only when Electron is not running.
-5. **Python `:8765` is a strangler leftover, not the target.** Until it is retired, Electron main may spawn and proxy it. After retirement, remaining Python launcher logic is invoked as no-console child/CLI libraries (`pythonw` + `windowsHide` / `CREATE_NO_WINDOW`), not as a long-lived Launcher HTTP server. `core/launcher/app.py` serving `/launcher` and `/api/launcher/*` goes away.
+5. **Python `:8765` is a strangler leftover, not the target.** Packaged Electron no longer spawns or proxies it as the product control plane (`bootstrapMainOwnedLauncher` + `resolve-workbench`). Unpackaged checkout HTTP (`vibelution_desktop_entry.py --action launcher`) remains for tests and the native shim. Remaining Python launcher logic on the product path is invoked as no-console child/CLI libraries (`pythonw` + `windowsHide` / `CREATE_NO_WINDOW`), not as a long-lived Launcher HTTP server. `core/launcher/app.py` serving `/launcher` and `/api/launcher/*` is not the packaged control plane.
 6. **Preserve already-shipped contracts** while moving ownership:
    - leftover workbench windows of the same origin are adopted; extras are destroyed; isolated instance windows are not destroyed as leftovers;
    - Close leftover ≠ 维护与清理; Close does not delete worktrees or uncommitted files;
    - active-work guard still blocks refresh with the fixed Chinese sentence in `AGENTS.md` §4;
    - Windows product paths remain no-console (`AGENTS.md` §2 / development-standard §8.0).
-7. **Migrate with a strangler**, not a one-shot rewrite of `core/launcher/service.py`. Execution ledger: [`desktop/electron/CONTROL_PLANE_MIGRATION.md`](../../desktop/electron/CONTROL_PLANE_MIGRATION.md). Living ownership: [`desktop/electron/README.md`](../../desktop/electron/README.md) and [`core/web/services/launcher_runtime.md`](../../core/web/services/launcher_runtime.md).
+7. **Migrate with a strangler**, not a one-shot rewrite of `core/launcher/service.py`. The execution ledger is archived at [`docs/archive/plans/2026-08/CONTROL_PLANE_MIGRATION.md`](../archive/plans/2026-08/CONTROL_PLANE_MIGRATION.md) and is not living procedure. Living ownership: [`desktop/electron/README.md`](../../desktop/electron/README.md) and [`core/web/services/launcher_runtime.md`](../../core/web/services/launcher_runtime.md).
 
 ## Consequences
 
@@ -44,11 +44,11 @@ The Launcher should be an independent product whose **service and frontend stay 
 - `launcherControlClient.ts`, `desktopActionClient.ts`, `desktopSessionClient.ts`, `workbenchCloseTransactionClient.ts`, tray POSTs, and shutdown status fetches invert: they become in-process calls, then Python is a child for workbench spawn/git/worktree/maintenance only.
 - Tests move with ownership: Electron vitest becomes the control-plane suite; `tests/test_launcher_*.py` shrink to Python child/CLI contracts; C# shim tests must not assume `:8765` as the product control plane.
 - Packaged desktop still loads `dist/desktop/win-unpacked`. Electron main changes do not take effect until the live `Vibelution.exe` quits and the packaged `app.asar` is rebuilt; Launcher owns that refresh (detached no-console helper after the current shell exits). Python `stop` alone is not enough.
-- Dual-writer risk exists until `:8765` is retired. Each phase must have a single writer for window truth and for lifecycle commands. Feature-flag HTTP proxy is allowed only as an explicit strangler bridge inside main, never as a renderer fallback that paints an empty dashboard.
+- Dual-writer risk on the packaged product path is closed: Electron main owns window truth and lifecycle commands. Do not reintroduce a renderer `fetch` to `:8765` as a dashboard fallback. Unpackaged checkout HTTP is a test/native-shim leftover, not a second product control plane.
 
 ## Related
 
-- `desktop/electron/CONTROL_PLANE_MIGRATION.md` (execution ledger; archive when close condition hits)
+- `docs/archive/plans/2026-08/CONTROL_PLANE_MIGRATION.md` (historical execution ledger)
 - `desktop/electron/README.md`
 - `core/web/services/launcher_runtime.md`
 - `docs/ops/config/07-launcher-runtime-workbench.md`

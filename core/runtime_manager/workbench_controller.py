@@ -59,7 +59,7 @@ _ELECTRON_OPEN_SIGNAL_TIMEOUT_SECONDS = 8.0
 _ELECTRON_SESSION_PROCESS_RE = re.compile(r"-(\d+)-[a-z0-9]+$", re.IGNORECASE)
 _ELECTRON_WINDOW_REQUIRED_MESSAGE = (
     "Electron desktop shell is unavailable. Refusing Edge fallback. "
-    "Start or rebuild dist/desktop/win-unpacked/Vibelution.exe."
+    "Start the checkout Electron main or rebuild dist/desktop/win-unpacked/Vibelution.exe."
 )
 
 
@@ -1327,6 +1327,45 @@ def _packaged_electron_desktop_executable() -> Path | None:
     return candidate if candidate.is_file() else None
 
 
+def _packaged_electron_is_current_checkout() -> bool:
+    """True when the real packaged exe matches current desktop/electron, or a test fake."""
+
+    packaged = _packaged_electron_desktop_executable()
+    if packaged is None:
+        return False
+    expected = PROJECT_ROOT / _PACKAGED_ELECTRON_ENTRY
+    try:
+        if packaged.resolve() != expected.resolve():
+            return True
+    except OSError:
+        if packaged != expected:
+            return True
+    try:
+        from core.launcher.desktop_shell import inspect_desktop_shell
+
+        status = inspect_desktop_shell(PROJECT_ROOT)
+    except (OSError, TypeError, ValueError):
+        return True
+    return not bool(status.get("stale"))
+
+
+def _checkout_electron_launch_command(*, open_workbench: bool = True) -> list[str] | None:
+    """Return unpackaged Electron argv for the current checkout, if that is the launch kind."""
+
+    try:
+        from core.launcher.desktop_shell import resolve_desktop_shell_launch
+
+        spec = resolve_desktop_shell_launch(PROJECT_ROOT, open_workbench=open_workbench)
+    except (OSError, RuntimeError, FileNotFoundError, TypeError, ValueError):
+        return None
+    if not isinstance(spec, dict) or spec.get("kind") != "unpackaged":
+        return None
+    args = spec.get("args")
+    if not isinstance(args, list) or not args:
+        return None
+    return [str(item) for item in args]
+
+
 def _looks_like_electron_desktop_executable(path: Path) -> bool:
     name = path.name.lower()
     if name.startswith("vibelutionlauncher"):
@@ -1401,13 +1440,18 @@ def _resolve_live_electron_executable(session: dict[str, Any] | None = None) -> 
 
 
 def _signal_live_electron_open_workbench(*, executable: Path, env: dict[str, str]) -> None:
-    """Ask the live packaged shell to open Workbench; never spawn Edge."""
+    """Ask the live Electron shell to open Workbench; never spawn Edge."""
 
     desktop_env = dict(env)
     desktop_env["VIBELUTION_WORKSPACE_ROOT"] = str(PROJECT_ROOT)
     desktop_env["VIBELUTION_PYTHON_PATH"] = _electron_bootstrap_python_executable()
+    command = [str(executable), "--project", str(PROJECT_ROOT), "--open-workbench"]
+    if executable.name.lower() != "vibelution.exe":
+        checkout_command = _checkout_electron_launch_command(open_workbench=True)
+        if checkout_command:
+            command = checkout_command
     process = subprocess.Popen(
-        [str(executable), "--project", str(PROJECT_ROOT), "--open-workbench"],
+        command,
         cwd=str(PROJECT_ROOT),
         env=desktop_env,
         stdin=subprocess.DEVNULL,
@@ -1441,12 +1485,21 @@ def _electron_bootstrap_python_executable() -> str:
 def _launch_packaged_electron_desktop(*, executable: Path, env: dict[str, str]) -> subprocess.Popen[Any]:
     """Launch the visible Electron package directly, never through a console shell."""
 
+    return _launch_electron_desktop_command(
+        command=[str(executable), "--workspace", str(PROJECT_ROOT), "--open-workbench"],
+        env=env,
+    )
+
+
+def _launch_electron_desktop_command(*, command: list[str], env: dict[str, str]) -> subprocess.Popen[Any]:
+    """Launch a visible Electron process directly, never through a console shell."""
+
     desktop_env = dict(env)
     desktop_env["VIBELUTION_WORKSPACE_ROOT"] = str(PROJECT_ROOT)
     desktop_env["VIBELUTION_PYTHON_PATH"] = _electron_bootstrap_python_executable()
     desktop_env["VIBELUTION_INSTANCE_SHORT_NAME"] = _instance_short_name_for_checkout(PROJECT_ROOT)
     return subprocess.Popen(
-        [str(executable), "--workspace", str(PROJECT_ROOT), "--open-workbench"],
+        command,
         cwd=str(PROJECT_ROOT),
         env=desktop_env,
         stdin=subprocess.DEVNULL,
@@ -1536,12 +1589,10 @@ def _bootstrap_packaged_electron_workbench(
     action: str,
     no_browser: bool,
     startup_telemetry: dict[str, Any],
+    launch_command: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Start the package and route the first Workbench open through desktop actions."""
+    """Start Electron and route the first Workbench open through desktop actions."""
 
-    executable = _packaged_electron_desktop_executable()
-    if executable is None:
-        return {}
     timings = startup_telemetry.setdefault("timingsMs", {})
     total_started = time.monotonic()
     current_stage = "electron_process_spawn"
@@ -1550,7 +1601,13 @@ def _bootstrap_packaged_electron_workbench(
     process: subprocess.Popen[Any] | None = None
     try:
         startup_telemetry["failureStage"] = current_stage
-        process = _launch_packaged_electron_desktop(executable=executable, env=env)
+        if launch_command:
+            process = _launch_electron_desktop_command(command=list(launch_command), env=env)
+        else:
+            executable = _packaged_electron_desktop_executable()
+            if executable is None:
+                return {}
+            process = _launch_packaged_electron_desktop(executable=executable, env=env)
         timings[current_timing_key] = _startup_elapsed_ms(stage_started)
 
         current_stage = "desktop_session_registration"
@@ -1828,19 +1885,32 @@ def run_launcher_action(
     electron_session = _latest_active_electron_desktop_session()
     electron_window_action = _electron_window_action_for_launcher_action(action)
     packaged_electron = _packaged_electron_desktop_executable()
+    packaged_current = bool(packaged_electron) and _packaged_electron_is_current_checkout()
     live_electron_owner_pid = _live_electron_owner_pid()
     electron_orchestrates = bool(_electron_main_orchestrates_windows() or live_electron_owner_pid > 0)
-    bootstrap_packaged_electron = bool(
-        not no_browser and not electron_session and electron_window_action == "open_workbench" and packaged_electron is not None
+    wants_first_electron = bool(
+        not no_browser and not electron_session and electron_window_action == "open_workbench"
+    )
+    checkout_electron_command: list[str] | None = None
+    if wants_first_electron and not packaged_current and not electron_orchestrates:
+        checkout_electron_command = _checkout_electron_launch_command(open_workbench=True)
+    bootstrap_packaged_electron = bool(wants_first_electron and packaged_current)
+    bootstrap_checkout_electron = bool(
+        wants_first_electron and not packaged_current and checkout_electron_command
     )
     effective_no_browser = bool(
-        no_browser or electron_session or bootstrap_packaged_electron or electron_orchestrates
+        no_browser
+        or electron_session
+        or bootstrap_packaged_electron
+        or bootstrap_checkout_electron
+        or electron_orchestrates
     )
     needs_visible_electron_window = bool(electron_window_action) and not no_browser
     missing_visible_electron = (
         needs_visible_electron_window
         and not electron_session
         and not bootstrap_packaged_electron
+        and not bootstrap_checkout_electron
         and not electron_orchestrates
     )
     reuse_electron_backend = _can_reuse_backend_for_electron_window_open(
@@ -1936,13 +2006,14 @@ def run_launcher_action(
                     env=env,
                     stdout=f"desktopAction={electron_window_action}",
                 )
-            elif bootstrap_packaged_electron:
+            elif bootstrap_packaged_electron or bootstrap_checkout_electron:
                 startup_telemetry["electronFirstStart"] = True
                 bootstrap = _bootstrap_packaged_electron_workbench(
                     env=env,
                     action=action,
                     no_browser=effective_no_browser,
                     startup_telemetry=startup_telemetry,
+                    launch_command=checkout_electron_command if bootstrap_checkout_electron else None,
                 )
                 _record_launcher_action_event(
                     "launcher.action.electron_first_start_succeeded",

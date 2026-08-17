@@ -79,6 +79,7 @@
 | **Fallback / degraded 语义** | §3.2 | 不得静默当 success |
 | **Project memory** | §19 · §19.1 | `migrate_project_storage.py inventory` |
 | **全栈新功能** | **§24 全节** | §24.5 DoD 清单 |
+| **兼容层退役 / 禁止等待门** | **§25** | ADR 0008 · ADR 0009 · [closeout ledger](../archive/plans/2026-08/2026-08-16-compat-ssot-closeout-plan.md) |
 
 § 链接格式：`development-standard.md#` + 锚点（GitHub/IDE 可跳转）；子节如 `§8.0` = `### 8.0 Windows No-Console...`。
 

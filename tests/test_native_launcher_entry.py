@@ -22,14 +22,15 @@ def test_native_launcher_default_action_runs_as_tray_app():
     assert "Global\\\\Vibelution.Launcher.Tray" in source
     assert "HandleSecondaryTrayLaunch(projectDir)" in source
     assert "EnsureFreshLauncherBackend(projectDir)" in source
+    assert "LaunchCurrentElectronMain(projectDir, \"open\", false)" in source
     assert "RunPythonBridge(projectDir, \"bootstrap\", true, true)" in source
-    assert "RunPythonBridge(projectDir, \"launcher\", false, false)" in source
 
 
 def test_native_launcher_secondary_shortcut_launch_refreshes_stale_backend_and_opens_console():
     source = _source()
 
     assert "native_action.secondary_launch" in source
+    assert "LaunchCurrentElectronMain(projectDir, \"open\", false)" in source
     assert "/api/launcher/freshness" in source
     assert "RunPythonBridge(projectDir, \"stop-launcher\", true, false)" in source
     assert "--from-shortcut" in source
@@ -96,8 +97,8 @@ def test_native_launcher_non_default_actions_use_console_free_control_api():
     assert "RunNativeAction(projectDir, parsed.ForwardedArgs)" in source
     assert "RunPythonBridge(projectDir, \"bootstrap\", true, true)" in source
     assert '"/api/launcher/status"' in source
-    assert '"/api/launcher/" + effectiveAction' in source
     assert '"/api/launcher/force-stop"' in source
+    assert "launch-desktop-shell" in source
     assert "vibelution_desktop_entry.vbs" not in source
     assert "wscript.exe" not in source
     assert "RunLegacyScriptAction" not in source
@@ -106,20 +107,22 @@ def test_native_launcher_non_default_actions_use_console_free_control_api():
 def test_native_launcher_forwards_lifecycle_to_packaged_electron():
     source = _source()
 
-    # The shim forwards argv to the packaged Electron shell and never builds a
-    # second Python :8765 control plane when the Electron binary exists.
+    # The shim launches current checkout Electron main (packaged if current,
+    # otherwise unpackaged) and never builds a Python :8765 control plane.
     assert "ForwardOrLaunchElectron(projectDir, action, forwardedArgs)" in source
-    assert 'Path.Combine(projectDir, "dist", "desktop", "win-unpacked", "Vibelution.exe")' in source
+    assert "LaunchCurrentElectronMain" in source
+    assert "launch-desktop-shell" in source
+    assert "--open-workbench" in source
     assert "native_action.electron_forwarded" in source
-    assert "CreateNoWindow = true" in source
     assert 'action != "force-stop"' in source
     assert 'action != "rebuild-and-start"' in source
-    # Legacy Python bridge remains only for development checkouts without the packaged Electron.
-    forward_index = source.index("private static bool ForwardOrLaunchElectron")
+    assert "No packaged Electron (development checkout)" not in source
+    assert 'RunPythonBridge(projectDir, noBrowser ? "bootstrap" : "launcher"' not in source
     native_action_index = source.index("private static int RunNativeAction")
+    forward_index = source.index("private static bool ForwardOrLaunchElectron")
     forward_block = source[native_action_index:forward_index]
-    assert "// T8:" in forward_block
-    assert "No packaged Electron (development checkout)" in forward_block
+    assert "Electron main owns lifecycle commands" in forward_block
+    assert "native_action.electron_launch_failed" in forward_block
 
 
 def test_native_launcher_python_bridge_uses_no_console_outer_runtime():
@@ -132,8 +135,11 @@ def test_native_launcher_python_bridge_uses_no_console_outer_runtime():
     assert 'Quote(ResolvePython(projectDir, useNoConsole: false))' in bridge_source
     assert 'useNoConsole ? "pythonw.exe" : "python.exe"' in source
     assert 'string.Equals(action, "stop-launcher", StringComparison.OrdinalIgnoreCase)' in bridge_source
+    assert 'string.Equals(action, "launch-desktop-shell", StringComparison.OrdinalIgnoreCase)' in bridge_source
     assert '--use-state-owned-backend-pid' in bridge_source
     assert 'arguments.Add("--workspace")' in bridge_source
+    assert 'arguments.Add("--then-lifecycle")' in bridge_source
+    assert 'arguments.Add("--open-workbench")' in bridge_source
     assert "Quote(projectDir)" in bridge_source
 
 

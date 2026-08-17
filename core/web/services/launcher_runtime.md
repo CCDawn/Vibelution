@@ -47,8 +47,8 @@ Electron main (TS) = Launcher 控制面（ADR 0009 已落地）
   → Electron `launcherServiceClient` 只 `stop-launcher` 清理 leftover owned PID，不再 bootstrap uvicorn `:8765`
 
 VibelutionLauncher.exe = thin no-console shim
-  → packaged Vibelution.exe 存在：转发 start|stop|restart|rebuild-and-start 给 Electron（second-instance），不自建 :8765
-  → 无 packaged Electron（开发 checkout）：`vibelution_desktop_entry.py --action launcher` browser-dev HTTP + WinForms NotifyIcon（owner：`tests/test_launcher_scripts.py` / native shim tests；不是产品控制面，不设观察期）
+  → packaged Vibelution.exe 且 provenance 当前：转发 start|stop|restart|rebuild-and-start 给 Electron（second-instance），不自建 :8765
+  → packaged 缺失或落后当前 `HEAD:desktop/electron`：`vibelution_desktop_entry.py --action launch-desktop-shell` 编译并启动 unpackaged Electron main（当前 checkout），不自建 :8765
 ```
 
 Web: `core/web/routes/launcher.py` · `runtime.py` · `logs.py` → `launcher_service` / `runtime_service` / `runtime_scene_service`（薄委托）。

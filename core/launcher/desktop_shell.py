@@ -28,6 +28,12 @@ PROVENANCE_RELATIVE = (
 ASAR_RELATIVE = Path("dist") / "desktop" / "win-unpacked" / "resources" / "app.asar"
 ELECTRON_SRC_RELATIVE = Path("desktop") / "electron" / "src"
 ELECTRON_PACKAGE_DIR = Path("desktop") / "electron"
+UNPACKAGED_MAIN_RELATIVE = Path("desktop") / "electron" / "dist" / "main.js"
+UNPACKAGED_PROVENANCE_RELATIVE = Path("desktop") / "electron" / "dist" / "unpackaged-provenance.json"
+UNPACKAGED_ELECTRON_EXE_RELATIVE = (
+    Path("desktop") / "electron" / "node_modules" / "electron" / "dist" / "electron.exe"
+)
+UNPACKAGED_ELECTRON_BIN_RELATIVE = Path("desktop") / "electron" / "node_modules" / "electron" / "dist" / "electron"
 REFRESH_FAILURE_RELATIVE = Path(".runtime") / "launcher" / "desktop-shell-refresh-failure.json"
 REFRESH_LOCK_RELATIVE = Path(".runtime") / "launcher" / "desktop-shell-refresh.lock"
 REFRESH_COOLDOWN_SECONDS = 900.0
@@ -48,6 +54,23 @@ def packaged_provenance_path(project_root: Path | str = PROJECT_ROOT) -> Path:
 
 def packaged_asar_path(project_root: Path | str = PROJECT_ROOT) -> Path:
     return Path(project_root) / ASAR_RELATIVE
+
+
+def unpackaged_electron_executable(project_root: Path | str = PROJECT_ROOT) -> Path | None:
+    root = Path(project_root)
+    windows_exe = root / UNPACKAGED_ELECTRON_EXE_RELATIVE
+    if windows_exe.is_file():
+        return windows_exe
+    posix_bin = root / UNPACKAGED_ELECTRON_BIN_RELATIVE
+    return posix_bin if posix_bin.is_file() else None
+
+
+def unpackaged_main_js(project_root: Path | str = PROJECT_ROOT) -> Path:
+    return Path(project_root) / UNPACKAGED_MAIN_RELATIVE
+
+
+def unpackaged_provenance_path(project_root: Path | str = PROJECT_ROOT) -> Path:
+    return Path(project_root) / UNPACKAGED_PROVENANCE_RELATIVE
 
 
 def _refresh_failure_path(project_root: Path | str) -> Path:
@@ -343,6 +366,137 @@ def rebuild_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> dict[str, 
     }
 
 
+def inspect_unpackaged_electron(project_root: Path | str = PROJECT_ROOT) -> dict[str, Any]:
+    """Return whether checkout Electron main matches current desktop/electron."""
+
+    root = Path(project_root)
+    current_tree = _git_tree_hash(root, "HEAD:desktop/electron")
+    provenance = _read_json(unpackaged_provenance_path(root))
+    bundled_tree = str(provenance.get("electronTreeHash") or "").strip()
+    electron_bin = unpackaged_electron_executable(root)
+    main_js = unpackaged_main_js(root)
+    source_newer = _electron_sources_newer_than(root, main_js)
+    if electron_bin is None:
+        reason = "missing_binary"
+        stale = True
+    elif not main_js.is_file():
+        reason = "missing_bundle"
+        stale = True
+    elif not bundled_tree:
+        reason = "missing_provenance"
+        stale = True
+    elif current_tree and bundled_tree != current_tree:
+        reason = "provenance_mismatch"
+        stale = True
+    elif source_newer:
+        reason = "source_newer_than_bundle"
+        stale = True
+    else:
+        reason = "current"
+        stale = False
+    return {
+        "schemaVersion": 1,
+        "stale": stale,
+        "reason": reason,
+        "bundledElectronTree": bundled_tree,
+        "currentElectronTree": current_tree,
+        "electronExecutable": str(electron_bin or ""),
+        "mainJs": str(main_js),
+        "sourceNewerThanBundle": source_newer,
+    }
+
+
+def ensure_unpackaged_electron(project_root: Path | str = PROJECT_ROOT) -> dict[str, Any]:
+    """Compile checkout Electron main when it is behind HEAD:desktop/electron."""
+
+    root = Path(project_root)
+    status = inspect_unpackaged_electron(root)
+    if not status["stale"]:
+        return {"ensured": True, "rebuilt": False, **status}
+    if status["reason"] == "missing_binary":
+        raise RuntimeError(
+            "Unpackaged Electron binary was not found at "
+            "desktop/electron/node_modules/electron/dist/electron.exe. "
+            "Install desktop/electron dependencies, then retry."
+        )
+    rebuilt = _rebuild_unpackaged_electron(root)
+    current_tree = str(rebuilt.get("currentElectronTree") or _git_tree_hash(root, "HEAD:desktop/electron"))
+    _write_unpackaged_provenance(root, current_tree)
+    status = inspect_unpackaged_electron(root)
+    if status["stale"]:
+        raise RuntimeError(f"checkout Electron main is still stale after build: {status['reason']}")
+    return {"ensured": True, "rebuilt": True, **status}
+
+
+def resolve_desktop_shell_launch(
+    project_root: Path | str = PROJECT_ROOT,
+    *,
+    then_lifecycle: str = "",
+    open_workbench: bool = False,
+) -> dict[str, Any]:
+    """Choose the current checkout's Electron main: packaged if current, else unpackaged."""
+
+    root = Path(project_root)
+    lifecycle = str(then_lifecycle or "").strip().lower()
+    packaged_status = inspect_desktop_shell(root)
+    if not packaged_status.get("stale") and packaged_status.get("reason") == "current":
+        args = [str(packaged_desktop_exe(root)), "--workspace", str(root)]
+        if open_workbench:
+            args.append("--open-workbench")
+        if lifecycle:
+            args.append(lifecycle)
+        return {
+            "schemaVersion": 1,
+            "kind": "packaged",
+            "args": args,
+            "cwd": str(root),
+            "reason": "current",
+            "currentElectronTree": str(packaged_status.get("currentElectronTree") or ""),
+        }
+    unpackaged = ensure_unpackaged_electron(root)
+    electron_bin = unpackaged_electron_executable(root)
+    main_js = unpackaged_main_js(root)
+    if electron_bin is None or not main_js.is_file():
+        raise RuntimeError("checkout Electron main is not launchable after ensure")
+    args = [str(electron_bin), str(main_js), "--workspace", str(root)]
+    if open_workbench:
+        args.append("--open-workbench")
+    if lifecycle:
+        args.append(lifecycle)
+    return {
+        "schemaVersion": 1,
+        "kind": "unpackaged",
+        "args": args,
+        "cwd": str(root),
+        "reason": str(unpackaged.get("reason") or "current"),
+        "currentElectronTree": str(unpackaged.get("currentElectronTree") or ""),
+        "rebuilt": bool(unpackaged.get("rebuilt")),
+    }
+
+
+def launch_desktop_shell(
+    *,
+    project_root: Path | str = PROJECT_ROOT,
+    then_lifecycle: str = "",
+    open_workbench: bool = False,
+) -> dict[str, Any]:
+    """Start Electron main for the current checkout without hiding the GUI."""
+
+    spec = resolve_desktop_shell_launch(
+        project_root,
+        then_lifecycle=then_lifecycle,
+        open_workbench=open_workbench,
+    )
+    process = _spawn_visible_electron(list(spec["args"]), cwd=Path(str(spec["cwd"])))
+    return {
+        **spec,
+        "launched": True,
+        "pid": int(getattr(process, "pid", 0) or 0),
+        "thenLifecycle": str(then_lifecycle or "").strip().lower(),
+        "openWorkbench": bool(open_workbench),
+    }
+
+
 def launch_packaged_desktop_shell(
     *,
     project_root: Path | str = PROJECT_ROOT,
@@ -356,25 +510,29 @@ def launch_packaged_desktop_shell(
     lifecycle = str(then_lifecycle or "").strip().lower()
     if lifecycle:
         args.append(lifecycle)
+    process = _spawn_visible_electron(args, cwd=root)
+    return {
+        "launched": True,
+        "pid": int(getattr(process, "pid", 0) or 0),
+        "thenLifecycle": lifecycle,
+    }
+
+
+def _spawn_visible_electron(args: list[str], *, cwd: Path) -> subprocess.Popen[Any]:
     popen_kwargs: dict[str, Any] = {}
     if os.name == "nt":
         # GUI Electron must not inherit STARTUPINFO SW_HIDE / CREATE_NO_WINDOW
         # from the no-console helper policy, or the new shell can come up invisible.
         popen_kwargs["creationflags"] = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB
         popen_kwargs["close_fds"] = True
-    process = subprocess.Popen(
+    return subprocess.Popen(
         args,
-        cwd=str(root),
+        cwd=str(cwd),
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         **popen_kwargs,
     )
-    return {
-        "launched": True,
-        "pid": int(getattr(process, "pid", 0) or 0),
-        "thenLifecycle": lifecycle,
-    }
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -395,23 +553,65 @@ def _git_tree_hash(project_root: Path, spec: str) -> str:
 
 
 def _electron_sources_newer_than_asar(project_root: Path) -> bool:
-    asar_path = packaged_asar_path(project_root)
+    return _electron_sources_newer_than(project_root, packaged_asar_path(project_root))
+
+
+def _electron_sources_newer_than(project_root: Path, artifact: Path) -> bool:
     src_root = project_root / ELECTRON_SRC_RELATIVE
-    if not asar_path.is_file() or not src_root.is_dir():
+    if not artifact.is_file() or not src_root.is_dir():
         return False
     try:
-        asar_mtime = asar_path.stat().st_mtime
+        artifact_mtime = artifact.stat().st_mtime
     except OSError:
         return True
     for path in src_root.rglob("*"):
         if not path.is_file():
             continue
         try:
-            if path.stat().st_mtime > asar_mtime:
+            if path.stat().st_mtime > artifact_mtime:
                 return True
         except OSError:
             continue
     return False
+
+
+def _rebuild_unpackaged_electron(project_root: Path) -> dict[str, Any]:
+    electron_dir = project_root / ELECTRON_PACKAGE_DIR
+    node_command = _node_command()
+    npm_cli = _npm_cli_script_for_node(node_command)
+    command = [node_command, npm_cli, "run", "build"]
+    result = subprocess.run(
+        command,
+        cwd=str(electron_dir),
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+        **no_window_subprocess_kwargs(),
+    )
+    if int(result.returncode or 0) != 0:
+        detail = (result.stderr or result.stdout or "").strip().replace("\r", "")[-800:]
+        _append_refresh_log(project_root, "unpackaged.build.failed", exit_code=int(result.returncode or 0), detail=detail)
+        raise RuntimeError(f"checkout Electron main build failed with exit code {result.returncode}: {detail}")
+    main_js = unpackaged_main_js(project_root)
+    if not main_js.is_file():
+        raise RuntimeError(f"checkout Electron main was not produced: {main_js}")
+    return {
+        "rebuilt": True,
+        "currentElectronTree": _git_tree_hash(project_root, "HEAD:desktop/electron"),
+    }
+
+
+def _write_unpackaged_provenance(project_root: Path, tree_hash: str) -> None:
+    path = unpackaged_provenance_path(project_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schemaVersion": 1,
+        "electronTreeHash": str(tree_hash or "").strip(),
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def _wait_for_pid_exit(pid: int, *, timeout_seconds: float) -> None:

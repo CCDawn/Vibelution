@@ -34,10 +34,13 @@ Electron 主进程（TS）= Launcher 服务
 
 VibelutionLauncher.exe = 无控制台薄 shim
   → Electron 已在：转发 start|stop|restart
-  → Electron 不在：启动 Electron，不自建 :8765 控制面
+  → Electron 不在：启动当前 checkout 的 Electron main
+     （packaged 且 provenance 对应当前 `HEAD:desktop/electron` 时用 `Vibelution.exe`；
+      否则编译并启动 unpackaged `desktop/electron` 的 `electron dist/main.js`）
+  → 不自建 :8765 控制面
 ```
 
-Packaged / product Electron **不再 spawn 或代理** Python `:8765`。控制面唯一入口是 IPC；`launcherServiceClient` 只保留 owned leftover 进程的 `stop-launcher` 清理。unpackaged 开发 checkout 的 C# shim 仍可能走 `vibelution_desktop_entry.py --action launcher`（browser-dev HTTP，owner 为 `tests/test_launcher_scripts.py` + native shim 测试），那不是产品控制面，也不设观察期。
+Packaged / product Electron **不再 spawn 或代理** Python `:8765`。控制面唯一入口是 IPC；`launcherServiceClient` 只保留 owned leftover 进程的 `stop-launcher` 清理。无 `win-unpacked` 或 packaged 落后当前 `HEAD:desktop/electron` 时，C# shim / Python `launch-desktop-shell` 启动 **当前 checkout 的 unpackaged Electron main**（`desktop/electron` 的 `npm run build` + `electron dist/main.js`），不是 Python HTTP 控制面。
 
 ---
 

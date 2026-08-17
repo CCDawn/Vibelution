@@ -42,7 +42,6 @@
 @source "../routes/AgentCreatePanel.tsx";
 @source "../routes/AgentCreatePanel.styles.ts";
 @source "../routes/agent-create/**/*.{ts,tsx}";
-@source "../routes/LegacyChatRoomsRedirect.tsx";
 @source "../routes/HomeRedirect.tsx";
 @source "../routes/WorkbenchDomainRoute.tsx";
 @source "../routes/WorkbenchModeRoute.tsx";

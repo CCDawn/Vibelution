@@ -649,6 +649,37 @@ def test_parse_args_accepts_desktop_shell_refresh_flags():
     assert args.then_lifecycle == "start"
 
 
+def test_parse_args_accepts_launch_desktop_shell_flags():
+    args = desktop_entry.parse_args(
+        ["--action", "launch-desktop-shell", "--then-lifecycle", "start", "--open-workbench", "--workspace", r"C:\repo"]
+    )
+    assert args.action == "launch-desktop-shell"
+    assert args.then_lifecycle == "start"
+    assert args.open_workbench is True
+    assert args.workspace == r"C:\repo"
+
+
+def test_launch_desktop_shell_action_dispatches_to_desktop_shell(monkeypatch, capsys):
+    captured: dict[str, object] = {}
+
+    def fake_launch(*, project_root, then_lifecycle, open_workbench):
+        captured["project_root"] = project_root
+        captured["then_lifecycle"] = then_lifecycle
+        captured["open_workbench"] = open_workbench
+        return {"schemaVersion": 1, "kind": "unpackaged", "pid": 9, "thenLifecycle": then_lifecycle, "openWorkbench": open_workbench}
+
+    monkeypatch.setattr("core.launcher.desktop_shell.launch_desktop_shell", fake_launch)
+    result = desktop_entry.main(
+        ["--action", "launch-desktop-shell", "--output", "json", "--then-lifecycle", "start", "--open-workbench"]
+    )
+    assert result == 0
+    assert captured["then_lifecycle"] == "start"
+    assert captured["open_workbench"] is True
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["kind"] == "unpackaged"
+    assert payload["pid"] == 9
+
+
 def test_parse_args_accepts_state_owned_backend_pid_flag():
     args = desktop_entry.parse_args(
         ["--action", "stop-launcher", "--use-state-owned-backend-pid", "--workspace", r"C:\repo"]
