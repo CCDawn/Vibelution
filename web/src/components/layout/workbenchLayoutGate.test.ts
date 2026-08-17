@@ -124,13 +124,15 @@ describe("workbench layout gate (Wave 5)", () => {
     expect(memory).not.toContain("--memory-left-width");
   });
 
-  it("keeps Memory agent-memory three-pane on VSplitWorkspace under memory layout id", () => {
+  it("keeps Memory agent-memory browse on top-down grouped cards", () => {
     const agent = readFileSync(resolve(webSrc, "routes/MemoryAgentMemoryPanel.tsx"), "utf-8");
     const browse = readFileSync(resolve(webSrc, "routes/MemoryContentBrowsePanel.tsx"), "utf-8");
-    expect(browse).toContain("VSplitWorkspace");
-    expect(browse).toContain("WORKBENCH_LAYOUT_IDS.memory");
-    expect(browse).toContain("memory-browse-list");
+    expect(browse).toContain("VSection");
+    expect(browse).toContain("VSkeleton");
+    expect(browse).toContain("toReadableMemoryBlocks");
+    expect(browse).not.toContain("VSplitWorkspace");
     expect(agent).toContain('data-vui-region="memory-agent-workspace"');
+    expect(agent).toContain("groupHasMemory");
     expect(agent).not.toMatch(/import\s*\{[^}]*usePersistedPaneResize/);
     expect(browse).not.toMatch(/import\s*\{[^}]*usePersistedPaneResize/);
   });

@@ -385,6 +385,11 @@ describe("VUI workbench layout templates", () => {
         <span>Body</span>
       </VDenseOpsPage>,
     );
+    expect(bareToolbarMarkup).toContain('data-vui="dense-ops-chrome"');
+    expect(bareToolbarMarkup).toContain('data-vui="dense-ops-body"');
+    expect(bareToolbarMarkup.indexOf('data-vui="dense-ops-chrome"')).toBeLessThan(
+      bareToolbarMarkup.indexOf('data-vui="dense-ops-body"'),
+    );
     expect(bareToolbarMarkup).toContain('data-vui-recipe="dense-ops-toolbar"');
     expect(bareToolbarMarkup).toContain('data-test-id="metric-slot"');
     expect(bareToolbarMarkup).not.toContain('data-vui="toolbar"');

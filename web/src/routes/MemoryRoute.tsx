@@ -271,6 +271,21 @@ type Copy = {
   agentMemoryFormalBases: string;
   browseBack: string;
   memoryCount: string;
+  groupHasMemory: string;
+  groupNoMemory: string;
+  groupChat: string;
+  groupResearch: string;
+  groupSelfEvolution: string;
+  groupSupervised: string;
+  groupGeneral: string;
+  groupOther: string;
+  groupTeamFallback: string;
+  groupLibrary: string;
+  searchAgents: string;
+  searchTeam: string;
+  searchLibrary: string;
+  browseSelectTeam: string;
+  browseSelectLibrary: string;
   healthOverview: string;
   affectedRuntimeMemory: string;
   needsReview: string;
@@ -671,7 +686,7 @@ const COPY: Record<"zh" | "en", Copy> = {
     rawContent: "原文",
     noContent: "无原文",
     sourceOrigin: "来源",
-    searchPlaceholder: "搜索来源、路径、摘要或作用位置",
+    searchPlaceholder: "搜索名称",
     allSections: "全部来源",
     noMatches: "无匹配记忆",
     yes: "是",
@@ -777,6 +792,21 @@ const COPY: Record<"zh" | "en", Copy> = {
     agentMemoryFormalBases: "正式知识库",
     browseBack: "返回卡片",
     memoryCount: "条记忆",
+    groupHasMemory: "有记忆",
+    groupNoMemory: "暂无记忆",
+    groupChat: "对话",
+    groupResearch: "研究",
+    groupSelfEvolution: "自进化",
+    groupSupervised: "监督进化",
+    groupGeneral: "通用",
+    groupOther: "其他",
+    groupTeamFallback: "团队",
+    groupLibrary: "记忆分类",
+    searchAgents: "搜索 Agent",
+    searchTeam: "搜索团队或知识库",
+    searchLibrary: "搜索记忆分类",
+    browseSelectTeam: "选择一个知识库查看记忆",
+    browseSelectLibrary: "选择一个分类查看记忆",
     healthOverview: "现在的记忆",
     affectedRuntimeMemory: "Agent 正在用",
     needsReview: "需要你处理",
@@ -1073,7 +1103,7 @@ const COPY: Record<"zh" | "en", Copy> = {
     rawContent: "Raw content",
     noContent: "No content",
     sourceOrigin: "Source",
-    searchPlaceholder: "Search source, path, summary, or usage",
+    searchPlaceholder: "Search by name",
     allSections: "All sources",
     noMatches: "No matches",
     yes: "Yes",
@@ -1179,6 +1209,21 @@ const COPY: Record<"zh" | "en", Copy> = {
     agentMemoryFormalBases: "Formal knowledge bases",
     browseBack: "Back to cards",
     memoryCount: "memories",
+    groupHasMemory: "Has memory",
+    groupNoMemory: "No memory yet",
+    groupChat: "Chat",
+    groupResearch: "Research",
+    groupSelfEvolution: "Self-evolution",
+    groupSupervised: "Supervised evolution",
+    groupGeneral: "General",
+    groupOther: "Other",
+    groupTeamFallback: "Team",
+    groupLibrary: "Memory categories",
+    searchAgents: "Search Agents",
+    searchTeam: "Search teams or knowledge bases",
+    searchLibrary: "Search memory categories",
+    browseSelectTeam: "Open a knowledge base to read its memories",
+    browseSelectLibrary: "Open a category to read its memories",
     healthOverview: "Current memory",
     affectedRuntimeMemory: "In use by Agent",
     needsReview: "Needs your attention",
@@ -3689,21 +3734,32 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
     );
   };
 
-  const createTeamBrowsePanel = () => (
+  const createTeamBrowsePanel = () => {
+    const teamSearch = searchText.trim().toLowerCase();
+    const visibleBases = knowledgeBases.filter((base) =>
+      !teamSearch
+      || [base.name, base.teamName, base.agentName, knowledgeBaseRequestId(base)]
+        .some((value) => String(value || "").toLowerCase().includes(teamSearch)),
+    );
+    return (
     <MemoryContentBrowsePanel
       copy={{
         loading: copy.loading,
         loadFailed: copy.knowledgeLoadFailed,
         browseBack: copy.browseBack,
-        browseSelectCard: copy.agentMemorySelectPrompt,
+        browseSelectCard: copy.browseSelectTeam,
         browseEmptyCards: copy.noKnowledgeBases,
         browseEmptyEntries: copy.noMatches,
         noContent: copy.noContent,
-        searchPlaceholder: copy.searchPlaceholder,
+        searchPlaceholder: copy.searchTeam,
+        ungrouped: copy.groupTeamFallback,
       }}
-      cards={knowledgeBases.map((base) => ({
+      searchText={searchText}
+      onSearchTextChange={setSearchText}
+      cards={visibleBases.map((base) => ({
         id: knowledgeBaseRequestId(base),
-        title: base.name || base.teamName || knowledgeBaseRequestId(base),
+        title: base.name || knowledgeBaseRequestId(base),
+        group: base.teamName || copy.groupTeamFallback,
         meta: `${base.stats.itemCount} ${copy.memoryCount}`,
       }))}
       selectedCardId={activeKnowledgeBaseId}
@@ -3714,6 +3770,7 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
         .map((item) => ({
           id: item.knowledgeItemId,
           title: item.title,
+          group: item.tags?.[0] || "",
           body: item.content || item.summary || "",
         }))}
       selectedEntryId={activeItemId}
@@ -3726,9 +3783,10 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
             : String(knowledgeDashboardSnapshotQuery.error)
           : ""
       }
-      entriesLoading={Boolean(activeKnowledgeBaseId) && knowledgeItemsQuery.isPending}
+      entriesLoading={Boolean(activeKnowledgeBaseId) && knowledgeItemsQuery.isPending && !knowledgeItems.length}
     />
-  );
+    );
+  };
 
   const createLibraryBrowsePanel = () => {
     const libraryGroups = sections
@@ -3744,15 +3802,24 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
           loading: copy.loading,
           loadFailed: copy.loadFailed,
           browseBack: copy.browseBack,
-          browseSelectCard: copy.agentMemorySelectPrompt,
+          browseSelectCard: copy.browseSelectLibrary,
           browseEmptyCards: copy.noMatches,
           browseEmptyEntries: copy.noMatches,
           noContent: copy.noContent,
-          searchPlaceholder: copy.searchPlaceholder,
+          searchPlaceholder: copy.searchLibrary,
+          ungrouped: copy.groupLibrary,
         }}
-        cards={libraryGroups.map((group) => ({
+        searchText={searchText}
+        onSearchTextChange={setSearchText}
+        cards={libraryGroups
+          .filter((group) => {
+            const librarySearch = searchText.trim().toLowerCase();
+            return !librarySearch || group.section.title.toLowerCase().includes(librarySearch);
+          })
+          .map((group) => ({
           id: group.section.id,
           title: group.section.title,
+          group: copy.groupLibrary,
           meta: `${group.items.length} ${copy.memoryCount}`,
         }))}
         selectedCardId={activeSectionId}
@@ -4143,10 +4210,8 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
   const viewStackClassName =
     forcedView === "graph"
       ? `${styles.viewStack} ${styles.graphViewStack}`
-      : isPersonalMemoryView(forcedView)
-        ? `${styles.viewStack} ${styles.agentMemoryViewStack}`
-      : isTeamMemoryView(forcedView)
-        ? `${styles.viewStack} ${styles.knowledgeViewStack}`
+      : isPersonalMemoryView(forcedView) || isTeamMemoryView(forcedView) || isLibraryMemoryView(forcedView)
+        ? `${styles.viewStack} ${styles.browseViewStack}`
         : styles.viewStack;
 
   return (
@@ -4187,9 +4252,8 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
         <Suspense
           fallback={(
             <VStateSurface
-              fill
               density="compact"
-              tone="info"
+              tone="loading"
               title={lang === "zh" ? "正在加载工作区…" : "Loading workspace…"}
             />
           )}

@@ -66,33 +66,40 @@ export function VDenseOpsPage({
   className,
   ...props
 }: VDenseOpsPageProps) {
+  const showHeader = !hideHeader;
+  const showToolbar = Boolean(toolbar || toolbarSlot);
+  const chromeOnlyBody = fill && !showHeader && !showToolbar;
   return (
     <VWorkbenchPage
       ariaLabel={ariaLabel}
       className={className}
       data-vui-recipe="dense-ops-page"
       fill={fill}
-      fillLayout={hideHeader && fill ? "stack" : "header-body"}
+      fillLayout={chromeOnlyBody ? "stack" : "header-body"}
       {...props}
     >
-      {hideHeader ? null : (
-        <VRouteHeader
-          className={headerClassName}
-          eyebrow={eyebrow}
-          title={title ?? ""}
-          meta={meta}
-          actions={actions}
-        />
-      )}
-      {toolbarSlot ? (
-        <div data-vui-recipe="dense-ops-toolbar" className="min-w-0 shrink-0">
-          {toolbarSlot}
+      {showHeader || showToolbar ? (
+        <div data-vui="dense-ops-chrome" className="grid min-w-0 shrink-0 gap-0">
+          {showHeader ? (
+            <VRouteHeader
+              className={headerClassName}
+              eyebrow={eyebrow}
+              title={title ?? ""}
+              meta={meta}
+              actions={actions}
+            />
+          ) : null}
+          {toolbarSlot ? (
+            <div data-vui-recipe="dense-ops-toolbar" className="min-w-0 shrink-0">
+              {toolbarSlot}
+            </div>
+          ) : null}
+          {toolbar ? (
+            <VToolbar ariaLabel={toolbarAriaLabel} data-vui-recipe="dense-ops-toolbar" className="shrink-0">
+              {toolbar}
+            </VToolbar>
+          ) : null}
         </div>
-      ) : null}
-      {toolbar ? (
-        <VToolbar ariaLabel={toolbarAriaLabel} data-vui-recipe="dense-ops-toolbar" className="shrink-0">
-          {toolbar}
-        </VToolbar>
       ) : null}
       <div
         data-vui="dense-ops-body"

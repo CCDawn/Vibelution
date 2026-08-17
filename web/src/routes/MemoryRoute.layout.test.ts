@@ -162,16 +162,17 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("createAgentMemoryPanel()");
     expect(routeSource).toContain("copy.personalView");
     expect(agentMemoryPanelSource).toContain("copy.memoryCount");
-    expect(routeSource).toContain("styles.agentMemoryViewStack");
-    expect(memoryCssSource).toContain(".agentMemoryViewStack");
+    expect(routeSource).toContain("styles.browseViewStack");
+    expect(memoryCssSource).toContain(".browseViewStack");
     expect(memoryCssSource).toContain(".agentMemoryWorkspace");
     expect(routeSource).toContain('import("./MemoryAgentMemoryPanel")');
     expect(routeSource).toContain("<MemoryAgentMemoryPanel");
     expect(routeSource).not.toContain("const renderAgentMemoryView = () =>");
     expect(agentMemoryPanelSource).toContain("export function MemoryAgentMemoryPanel");
-    expect(contentBrowsePanelSource).toContain("VSplitWorkspace");
-    expect(contentBrowsePanelSource).toContain("WORKBENCH_LAYOUT_IDS.memory");
-    expect(contentBrowsePanelSource).toContain("memory-browse-list");
+    expect(contentBrowsePanelSource).toContain("VSection");
+    expect(contentBrowsePanelSource).toContain("VSkeleton");
+    expect(contentBrowsePanelSource).toContain("toReadableMemoryBlocks");
+    expect(contentBrowsePanelSource).not.toContain("VSplitWorkspace");
     expect(agentMemoryPanelSource).toContain("styles.agentMemoryWorkspace");
     expect(agentMemoryPanelSource).toContain("copy.agentMemorySelectPrompt");
     expect(agentMemoryPanelSource).not.toContain("useQuery");
@@ -537,7 +538,7 @@ describe("MemoryRoute layout contract", () => {
   });
 
   it("lets routed Memory subviews fill the route slot before their own panels scroll", () => {
-    for (const viewClassName of [styles.agentMemoryViewStack, styles.knowledgeViewStack, styles.graphViewStack]) {
+    for (const viewClassName of [styles.browseViewStack, styles.knowledgeViewStack, styles.graphViewStack]) {
       expect(viewClassName).toContain("h-full");
       expect(viewClassName).toContain("min-h-0");
       expect(viewClassName).toContain("overflow-hidden");
@@ -1477,7 +1478,7 @@ describe("MemoryRoute layout contract", () => {
     expect(knowledgeBaseSidebarSource).toContain("visibleTools.length");
     expect(knowledgeBaseSidebarSource).toContain("hiddenTools.length");
     expect(routeSource).toContain("const viewStackClassName =");
-    expect(routeSource).toContain("styles.knowledgeViewStack");
+    expect(routeSource).toContain("styles.browseViewStack");
     expect(routeSource).toContain("className={styles.knowledgeGovernanceDeck}");
     expect(routeSource).toContain('type KnowledgeWorkspaceMode = "sources" | "search" | "review" | "governance" | "permissions"');
     expect(routeSource).toContain('import("./MemoryKnowledgeModeTabs")');

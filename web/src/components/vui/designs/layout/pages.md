@@ -125,8 +125,8 @@ import { VDenseOpsPage } from "@/components/vui";
 | --- | --- | --- |
 | title / eyebrow / meta / actions | 顶栏 | domain 用 `data-vui-domain-recipe` |
 | `hideHeader` | 不渲染顶栏 | 窗口标题已能识别该页时使用，例如桌面 Launcher |
-| `toolbar` / `toolbarSlot` | 过滤条 / 指标条 | 已是 strip 用 toolbarSlot |
-| children / empty / isEmpty | 主区 | 默认 fill |
+| `toolbar` / `toolbarSlot` | 过滤条 / 指标条 | 已是 strip 用 toolbarSlot。顶栏与工具条包在同一 chrome 行，避免 `header-body` 两行网格把正文挤到页面底部 |
+| children / empty / isEmpty | 主区 | 默认 fill；是 `VWorkbenchPage` 的第二行（1fr），从上往下铺内容 |
 
 ### 反冗余
 - 不要 `VOpsPage` / `VTablePage` 平行。

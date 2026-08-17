@@ -8,15 +8,14 @@ import {
 
 import {
   vuiFlatPanelClass,
-  vuiStateCoolInfoClass,
   vuiStateDangerSoftClass,
   vuiStateSelectedRowClass,
   vuiWorkspaceFillClass,
 } from "../design/vuiSurfaceRecipes";
 
 const styles = {
-  agentMemoryViewStack:
-    `agentMemoryViewStack min-w-0 !grid h-full min-h-0 !grid-rows-[auto_minmax(0,1fr)] overflow-hidden ${vuiStateCoolInfoClass}`,
+  browseViewStack:
+    "browseViewStack min-w-0 h-full min-h-0 flex flex-col overflow-hidden",
   controlStrip:
     "controlStrip min-w-0 flex items-center gap-1.5 overflow-x-auto overflow-y-hidden px-2 pb-1",
   graphViewStack:

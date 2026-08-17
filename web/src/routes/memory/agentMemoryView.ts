@@ -109,7 +109,8 @@ export function toAgentMemoryAgentView(
     path: agent.privateMemoryRoot || agent.workspacePath || "",
     privateFileCount: agentPrivateFileCount(agent),
     formalKnowledgeBaseCount: agentFormalBaseCount(agent),
-    hasPrivateMemory: Boolean(agent.hasPrivateMemory),
+    hasPrivateMemory: Boolean(agent.hasPrivateMemory) || agentPrivateFileCount(agent) > 0,
+    primaryMode: agent.primaryMode || "",
     active: agent.agentId === selectedAgentId,
   };
 }

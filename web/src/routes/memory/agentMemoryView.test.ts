@@ -35,6 +35,8 @@ describe("agentMemoryView", () => {
       name: "Planner",
       privateFileCount: 4,
       formalKnowledgeBaseCount: 2,
+      hasPrivateMemory: true,
+      primaryMode: "",
       active: true,
     });
     expect(toSelectedAgentMemoryView(agent)).toMatchObject({
