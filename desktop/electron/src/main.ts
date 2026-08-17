@@ -23,7 +23,10 @@ import {
   type DesktopCloseReason
 } from "./lifecycle/desktopLifecycleCoordinator.js";
 import { DesktopSessionMirrorQueue } from "./lifecycle/desktopSessionMirrorQueue.js";
-import { isWorkbenchCloseControlFetchFailure } from "./lifecycle/workbenchCloseFailOpen.js";
+import {
+  isWorkbenchCloseControlFetchFailure,
+  shouldNotifyForceStopControlFailure
+} from "./lifecycle/workbenchCloseFailOpen.js";
 import { waitForWorkbenchBackendSettledForWindowClose } from "./lifecycle/workbenchBackendCloseReadiness.js";
 import { readRuntimeManagerLauncherStatusSummary } from "./lifecycle/runtimeManagerStatusSnapshot.js";
 import {
@@ -1966,8 +1969,10 @@ async function requestForcedDesktopShellExit(
         await orchestrateLauncherLifecycle("force-stop", { schemaVersion: 1, path: "force-stop" });
         await new Promise((resolve) => setTimeout(resolve, 1500));
       } catch (error: unknown) {
-        const detail = error instanceof Error ? error.message : String(error);
-        notifyDesktopTray("Vibelution", `停止托管运行时失败：${detail.slice(0, 220)}`, "warning");
+        if (shouldNotifyForceStopControlFailure(error)) {
+          const detail = error instanceof Error ? error.message : String(error);
+          notifyDesktopTray("Vibelution", `停止托管运行时失败：${detail.slice(0, 220)}`, "warning");
+        }
       }
       pendingWorkbenchCloseAck = null;
       await withDesktopShellExitTimeout(
@@ -2089,21 +2094,7 @@ async function runTrayLauncherPost(
 
 async function runTrayStopAll(): Promise<void> {
   try {
-    const context = await resolveTrayLauncherControlContext();
-    await postLauncherControl({
-      launcherOrigin: context.launcherOrigin,
-      controlToken: context.controlToken,
-      path: "/api/launcher/force-stop",
-      trigger: "electron_tray_stop_all"
-    });
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-  } catch (error: unknown) {
-    const detail = error instanceof Error ? error.message : String(error);
-    notifyDesktopTray("Vibelution", `停止全部失败：${detail.slice(0, 300)}`, "warning");
-    return;
-  }
-  try {
-    await requestDesktopShellExit();
+    await requestForcedDesktopShellExit("desktop_shell_quit");
   } catch (error: unknown) {
     console.warn(error instanceof Error ? error.message : String(error));
   }

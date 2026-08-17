@@ -51,4 +51,20 @@ describe("Electron main tray integration", () => {
     expect(mainSource).toContain("recordTrayForceInterruptEvidence");
     expect(mainSource).toContain("writeTrayRestartAllPending");
   });
+
+  it("routes tray stop-all through forced shell exit instead of aborting on control fetch failed", () => {
+    const stopAllStart = mainSource.indexOf("async function runTrayStopAll");
+    const stopAllEnd = mainSource.indexOf("\nasync function ", stopAllStart + 1);
+    const stopAllSource = mainSource.slice(stopAllStart, stopAllEnd);
+    expect(stopAllSource).toContain("requestForcedDesktopShellExit");
+    expect(stopAllSource).not.toContain("postLauncherControl");
+    expect(stopAllSource).not.toContain("停止全部失败");
+
+    const forcedStart = mainSource.indexOf("async function requestForcedDesktopShellExit");
+    const forcedEnd = mainSource.indexOf("\nasync function ", forcedStart + 1);
+    const forcedSource = mainSource.slice(forcedStart, forcedEnd);
+    expect(forcedSource).toContain("shouldNotifyForceStopControlFailure");
+    expect(forcedSource).toContain("executeApprovedDesktopShellShutdown");
+    expect(forcedSource).toContain('orchestrateLauncherLifecycle("force-stop"');
+  });
 });
