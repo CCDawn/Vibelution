@@ -280,7 +280,7 @@ export function NodeInspectorOpsCard(props: NodeInspectorOpsCardProps) {
             to={props.sessionHref}
             variant="ghost"
             aria-label="打开会话"
-            className="h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] min-w-[var(--vui-control-height-sm)] aspect-square flex-none shrink-0 px-0"
+            className={styles.iconLink}
             icon={<MessageSquare size={15} />}
           />
         ) : (
@@ -297,7 +297,7 @@ export function NodeInspectorOpsCard(props: NodeInspectorOpsCardProps) {
             to={props.configHref}
             variant="ghost"
             aria-label="源配置"
-            className="h-[var(--vui-control-height-sm)] w-[var(--vui-control-height-sm)] min-w-[var(--vui-control-height-sm)] aspect-square flex-none shrink-0 px-0"
+            className={styles.iconLink}
             icon={<Settings2 size={15} />}
           />
         ) : (

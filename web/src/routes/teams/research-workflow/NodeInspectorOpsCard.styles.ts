@@ -29,5 +29,6 @@ export const nodeInspectorOpsCardStyles = {
   meterFill: "nio-meter-fill",
   meterWarn: "nio-meter-warn",
   actions: "nio-actions",
+  iconLink: "nio-icon-link",
   notice: "nio-notice",
 } as const;

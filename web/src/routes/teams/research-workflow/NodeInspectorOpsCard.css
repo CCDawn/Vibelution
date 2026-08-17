@@ -253,6 +253,15 @@
   gap: 8px;
 }
 
+.nio-icon-link {
+  height: var(--vui-control-height-sm);
+  width: var(--vui-control-height-sm);
+  min-width: var(--vui-control-height-sm);
+  aspect-ratio: 1 / 1;
+  flex: none;
+  padding-inline: 0;
+}
+
 .nio-notice {
   margin: 0;
   color: var(--state-error);
