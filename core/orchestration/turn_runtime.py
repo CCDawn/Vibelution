@@ -36,20 +36,65 @@ class AgentTurnRuntime:
     metadata: dict[str, Any]
 
 
-def _maybe_json(value: Any) -> Any:
-    if isinstance(value, str):
-        text = value.strip()
-        if text.startswith("{") or text.startswith("["):
-            try:
-                return json.loads(text)
-            except json.JSONDecodeError:
-                return value
+def _decode_binary(value: Any) -> Any:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).decode("utf-8", errors="replace")
     return value
 
 
+def _maybe_json(value: Any) -> Any:
+    value = _decode_binary(value)
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if not text or text[0] not in "{[":
+        return value
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return value
+
+
+_REQUEST_KEYS = (
+    "mode",
+    "run_kind",
+    "runKind",
+    "run_id",
+    "runId",
+    "session_id",
+    "sessionId",
+    "agent_id",
+    "agentId",
+    "llm_slot",
+    "llmSlot",
+    "model_id",
+    "modelId",
+    "cache_scope",
+    "cacheScope",
+    "workspace_path",
+    "workspacePath",
+)
+_REQUEST_ENVELOPES = ("runtime", "payload", "request", "config", "binding", "current", "turn")
+
+
+def _as_mapping(value: Any) -> dict[str, Any]:
+    value = _maybe_json(value)
+    if not isinstance(value, Mapping):
+        return {}
+    mapping = dict(value)
+    if any(key in mapping for key in _REQUEST_KEYS):
+        return mapping
+    for envelope in _REQUEST_ENVELOPES:
+        if envelope not in mapping:
+            continue
+        nested = _as_mapping(mapping.get(envelope))
+        if nested:
+            return nested
+    return mapping
+
+
 def _clean(value: Any, *, fallback: str = "") -> str:
-    if isinstance(value, (bytes, bytearray, memoryview)):
-        value = bytes(value).decode("utf-8", errors="replace")
+    value = _decode_binary(value)
     value = _maybe_json(value)
     if isinstance(value, Mapping) or isinstance(value, (list, tuple, set)):
         return fallback
@@ -71,24 +116,12 @@ def _short_hash(value: Any) -> str:
 def _as_request(request: Any) -> AgentTurnRuntimeRequest:
     if isinstance(request, AgentTurnRuntimeRequest):
         return request
-    if isinstance(request, (bytes, bytearray, memoryview)):
-        request = bytes(request).decode("utf-8", errors="replace")
-    if isinstance(request, str):
-        text = request.strip()
-        if not text:
-            request = {}
-        else:
-            try:
-                request = json.loads(text)
-            except json.JSONDecodeError:
-                request = {}
-    if not isinstance(request, Mapping):
-        request = {}
+    mapping = _as_mapping(request)
 
     def pick(*keys: str) -> Any:
         for key in keys:
-            if key in request:
-                return request.get(key)
+            if key in mapping:
+                return mapping.get(key)
         return ""
 
     return AgentTurnRuntimeRequest(
