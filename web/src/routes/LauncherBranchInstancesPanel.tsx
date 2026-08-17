@@ -1,5 +1,5 @@
 import { GitBranch } from "lucide-react";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { requestBranchInstanceCleanup, type LauncherBranchInstance } from "../api/launcher";
@@ -273,6 +273,7 @@ export function LauncherBranchInstancesPanel({
   const [batchStopKind, setBatchStopKind] = useState<"stop" | "close">("stop");
   const [notice, setNotice] = useState("");
   const [noticeTone, setNoticeTone] = useState<"neutral" | "error">("neutral");
+  const clickGuardRef = useRef(false);
 
   const visibleItems = useMemo(() => filterBranchInstances(items, query, filters), [filters, items, query]);
   const grouped = useMemo(() => groupBranchInstances(visibleItems, pendingOperation), [pendingOperation, visibleItems]);
@@ -309,6 +310,11 @@ export function LauncherBranchInstancesPanel({
       setMaintenancePage(pagedMaintenance.page);
     }
   }, [maintenancePage, pagedMaintenance.page]);
+  useEffect(() => {
+    if (!lifecyclePending && !pendingOperation) {
+      clickGuardRef.current = false;
+    }
+  }, [lifecyclePending, pendingOperation]);
   useEffect(() => {
     const allIndex = allItems.findIndex((item) => item.id === selectedId);
     if (allIndex >= 0) {
@@ -412,17 +418,48 @@ export function LauncherBranchInstancesPanel({
   const renderLifecycleActions = (item: LauncherBranchInstance) => {
     const state = instanceRuntimeState(item, pendingOperation);
     const windowOpen = instanceWindowOpen(item);
-    const openLabel = state === "failed" ? labels.retryStart : windowOpen ? labels.focusWindow : labels.openWindow;
+    const inFlight = ["starting", "stopping", "restarting"].includes(state);
+    const openLabel = state === "starting" || state === "restarting"
+      ? instanceRuntimeStateLabel(state, zh)
+      : state === "failed" ? labels.retryStart : windowOpen ? labels.focusWindow : labels.openWindow;
+    const showOpen = canRequestOpenInstance(item, pendingOperation) || state === "starting" || state === "restarting";
+    const requestOpen = () => {
+      if (clickGuardRef.current || lifecyclePending || inFlight) {
+        return;
+      }
+      clickGuardRef.current = true;
+      onLifecycle?.(item.id, "start");
+    };
     return (
       <span className={styles.actionButtons} onClick={(event) => event.stopPropagation()}>
-        {canRequestOpenInstance(item, pendingOperation) ? (
-          <VButton type="button" variant="primary" density="compact" isDisabled={lifecyclePending} onPress={() => onLifecycle?.(item.id, "start")}>
+        {showOpen ? (
+          <VButton
+            type="button"
+            variant="primary"
+            density="compact"
+            isDisabled={lifecyclePending || inFlight}
+            isPending={state === "starting" || state === "restarting"}
+            onPress={requestOpen}
+          >
             {openLabel}
           </VButton>
         ) : null}
-        {canStopInstance(item, pendingOperation) ? (
-          <VButton type="button" variant="secondary" density="compact" isDisabled={lifecyclePending} onPress={() => onLifecycle?.(item.id, "stop")}>
-            {instanceStopLabel(item, zh, pendingOperation)}
+        {canStopInstance(item, pendingOperation) || state === "stopping" ? (
+          <VButton
+            type="button"
+            variant="secondary"
+            density="compact"
+            isDisabled={lifecyclePending || inFlight}
+            isPending={state === "stopping"}
+            onPress={() => {
+              if (clickGuardRef.current || lifecyclePending || inFlight) {
+                return;
+              }
+              clickGuardRef.current = true;
+              onLifecycle?.(item.id, "stop");
+            }}
+          >
+            {state === "stopping" ? instanceRuntimeStateLabel(state, zh) : instanceStopLabel(item, zh, pendingOperation)}
           </VButton>
         ) : null}
       </span>
@@ -489,7 +526,7 @@ export function LauncherBranchInstancesPanel({
       render: (item: LauncherBranchInstance) => {
         const state = instanceRuntimeState(item, pendingOperation);
         const kind = kindById.get(item.id);
-        if (kind === "startable") {
+        if (kind === "startable" && state === "stopped") {
           return (
             <LauncherBranchStatusHelp item={item} state="stopped" isZh={zh} kind="runtime">
               <VStatusChip tone="success">{labels.ready}</VStatusChip>
