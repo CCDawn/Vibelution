@@ -160,7 +160,12 @@ export function postBrowserTelemetry(
         clearControlToken();
       }
     })
-    .catch(() => {});
+    .catch((error: unknown) => {
+      // Never post another telemetry event here: delivery failure must not recurse.
+      if (typeof console !== "undefined" && typeof console.warn === "function") {
+        console.warn("browser telemetry delivery failed", compactText(summarizeUnknown(error, 180), 200));
+      }
+    });
 }
 
 function finiteNumber(value: unknown): number {

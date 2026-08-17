@@ -1,7 +1,17 @@
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { buildRouteErrorBoundaryViewModel } from "./RouteErrorBoundary";
+import { postBrowserTelemetry } from "./browserTelemetry";
+import {
+  buildRouteErrorBoundaryViewModel,
+  buildRouteErrorTelemetryEvent,
+  reportRouteErrorBoundary,
+  resetRouteErrorTelemetryForTests,
+} from "./RouteErrorBoundary";
+
+vi.mock("./browserTelemetry", () => ({
+  postBrowserTelemetry: vi.fn(),
+}));
 
 const routeErrorBoundarySource = readFileSync(new URL("./RouteErrorBoundary.tsx", import.meta.url), "utf8");
 
@@ -39,5 +49,66 @@ describe("RouteErrorBoundary view model", () => {
     expect(routeErrorBoundarySource).toContain("location.reload()");
     expect(routeErrorBoundarySource).not.toContain("styles.primaryAction");
     expect(routeErrorBoundarySource).not.toContain("#2563eb");
+    expect(routeErrorBoundarySource).toContain("useEffect");
+    expect(routeErrorBoundarySource).toContain("reportRouteErrorBoundary");
+    expect(routeErrorBoundarySource).toContain("browser.route.error");
+  });
+});
+
+describe("RouteErrorBoundary telemetry", () => {
+  afterEach(() => {
+    resetRouteErrorTelemetryForTests();
+    vi.mocked(postBrowserTelemetry).mockClear();
+  });
+
+  it("builds a scene-ready route error event without page body text", () => {
+    vi.stubGlobal("window", { location: { pathname: "/git" } });
+    const error = new Error("ordinary render failure");
+    const event = buildRouteErrorTelemetryEvent(error, "workbench");
+
+    expect(event).toMatchObject({
+      phase: "error",
+      eventCode: "browser.route.error",
+      level: "error",
+      message: "workbench route render failed",
+      fields: {
+        surface: "workbench",
+        pathname: "/git",
+        isDynamicImportFailure: false,
+        title: "工作台页面加载失败",
+        errorName: "Error",
+        errorMessage: "Error: ordinary render failure",
+      },
+    });
+    expect(String(event.fields?.technicalSummary)).toContain("ordinary render failure");
+  });
+
+  it("marks stale dynamic import failures in telemetry fields", () => {
+    const event = buildRouteErrorTelemetryEvent(
+      new TypeError("Failed to fetch dynamically imported module: http://127.0.0.1:8000/assets/EvolutionRoute-old.js"),
+      "launcher",
+    );
+
+    expect(event.message).toBe("launcher route chunk failed to load");
+    expect(event.fields).toMatchObject({
+      surface: "launcher",
+      isDynamicImportFailure: true,
+      title: "Launcher 需要刷新",
+    });
+  });
+
+  it("posts one telemetry event per unique route error", () => {
+    const error = new Error("unique route crash");
+    reportRouteErrorBoundary(error, "workbench");
+    reportRouteErrorBoundary(error, "workbench");
+
+    expect(postBrowserTelemetry).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(postBrowserTelemetry).mock.calls[0]?.[0]).toMatchObject({
+      eventCode: "browser.route.error",
+      fields: {
+        surface: "workbench",
+        errorMessage: "Error: unique route crash",
+      },
+    });
   });
 });

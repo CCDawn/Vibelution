@@ -229,4 +229,32 @@ describe("browser telemetry", () => {
       available: false,
     });
   });
+
+  it("warns when telemetry delivery fails without posting another event", async () => {
+    vi.stubGlobal("window", { location: { origin: "http://127.0.0.1:8000" } });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          header: "X-Vibelution-Control-Token",
+          controlToken: "telemetry-token",
+        }),
+      })
+      .mockRejectedValueOnce(new Error("network down"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    postBrowserTelemetry({
+      phase: "error",
+      eventCode: "browser.route.error",
+      message: "workbench route render failed",
+    });
+    await vi.waitFor(() => expect(warn).toHaveBeenCalled());
+
+    expect(warn).toHaveBeenCalledWith(
+      "browser telemetry delivery failed",
+      expect.stringContaining("network down"),
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 });
