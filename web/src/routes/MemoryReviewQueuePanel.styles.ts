@@ -22,7 +22,7 @@ const styles = {
     "reviewQueueList min-w-0 grid content-start gap-2",
   // Plain body text; do not re-introduce nested bordered cards.
   reviewQueueSummary:
-    "reviewQueueSummary m-0 min-w-0 max-w-full [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [overflow-wrap:anywhere] [word-break:break-word]",
+    "reviewQueueSummary m-0 min-w-0 max-w-full line-clamp-3 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   reviewQueueTime:
     "reviewQueueTime min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   // Title + origin on one row: title takes remaining width, origin is content-sized chip (no 0.38fr dead column).

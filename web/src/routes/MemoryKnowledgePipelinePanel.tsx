@@ -1,4 +1,4 @@
-import { VTooltip } from "../components/vui";
+import { VMetricStrip, VTooltip } from "../components/vui";
 import styles from "./MemoryKnowledgePipelinePanel.styles";
 
 export type MemoryKnowledgePipelinePanelCopy = {
@@ -49,22 +49,15 @@ export function MemoryKnowledgePipelinePanel({
   return (
     <>
       <div className={styles.summaryGrid}>
-        <section className={styles.summaryCard}>
-          <span>{copy.knowledgeBases}</span>
-          <strong>{knowledgeBaseCount}</strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{copy.pendingProposals}</span>
-          <strong>{pendingProposalCount}</strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{copy.formalKnowledge}</span>
-          <strong>{itemCount}</strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{copy.sourceArtifacts}</span>
-          <strong>{sourceArtifactCount}</strong>
-        </section>
+        <VMetricStrip
+          ariaLabel={copy.platformPipeline}
+          metrics={[
+            { id: "bases", label: copy.knowledgeBases, value: knowledgeBaseCount },
+            { id: "proposals", label: copy.pendingProposals, value: pendingProposalCount },
+            { id: "items", label: copy.formalKnowledge, value: itemCount },
+            { id: "artifacts", label: copy.sourceArtifacts, value: sourceArtifactCount },
+          ]}
+        />
       </div>
       <VTooltip content={copy.knowledgeSubtitle} width="wide">
         <section

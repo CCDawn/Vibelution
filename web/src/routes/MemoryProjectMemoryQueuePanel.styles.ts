@@ -42,7 +42,7 @@ const styles = {
   projectMemoryProposalResolved:
     "projectMemoryProposalResolved min-w-0",
   projectMemoryProposalRow: `projectMemoryProposalRow min-w-0 ${vuiOpaqueRowClass} p-2`,
-  projectMemoryProposalTitleLine: `projectMemoryProposalTitleLine min-w-0 ${vuiOpaqueRowClass} p-2 [font-size:var(--vui-font-title)] font-semibold leading-tight text-[var(--fg-primary)] !grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5`,
+  projectMemoryProposalTitleLine: "projectMemoryProposalTitleLine min-w-0 !grid grid-cols-[minmax(0,1fr)_auto] items-center gap-1.5 [font-size:var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-primary)] [&_strong]:min-w-0 [&_strong]:truncate",
   projectMemoryQueueControls:
     "projectMemoryQueueControls min-w-0 flex flex-wrap items-center gap-1.5",
   // Wave 6D: height comes from usePersistedPaneHeight (project-memory-queue), not fixed max-h.
