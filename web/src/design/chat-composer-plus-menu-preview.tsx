@@ -1,4 +1,4 @@
-import { StrictMode, useState, type ReactNode } from "react";
+import { StrictMode, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Activity,
@@ -6,7 +6,7 @@ import {
   ArrowUpRight,
   BrainCircuit,
   ChevronLeft,
-  Database,
+  ChevronRight,
   FileText,
   HeartHandshake,
   ImagePlus,
@@ -18,7 +18,6 @@ import {
   Settings2,
   ShieldCheck,
   Square,
-  SquareTerminal,
   Trash2,
   UsersRound,
   X,
@@ -26,7 +25,6 @@ import {
 
 import {
   VButton,
-  VChip,
   VConfirmDialog,
   VDialog,
   VNativeInput,
@@ -60,14 +58,30 @@ type PlusMenuItem = {
   icon: ReactNode;
   toggle?: boolean;
   active?: boolean;
-  onSelect: () => void;
+  onSelect?: () => void;
 };
 
-type PlusMenuGroup = {
+type PlusMenuCluster = {
   id: string;
   label: string;
   items: PlusMenuItem[];
 };
+
+type SlashTokenContext = {
+  query: string;
+  start: number;
+  end: number;
+};
+
+function parseSlashToken(value: string): SlashTokenContext | null {
+  const match = value.match(/(?:^|\s)(\/[^\s]*)$/);
+  if (!match?.[1]) {
+    return null;
+  }
+  const token = match[1];
+  const start = value.length - token.length;
+  return { query: token.slice(1), start, end: value.length };
+}
 
 type ReferenceKind = "session" | "file";
 
@@ -122,8 +136,6 @@ const DIRECT_SESSION = {
   usagePercent: 42,
   hitPercent: 67,
   cacheLabel: "5.2k tokens 命中",
-  mentalSummary: "认知状态稳定，注意力集中在当前会话目标。",
-  runtimeLine: "预算 68% · 已完成 2/4 步骤",
 };
 
 const GROUP_SESSION = {
@@ -133,8 +145,6 @@ const GROUP_SESSION = {
   usagePercent: 38,
   hitPercent: 71,
   cacheLabel: "6.1k tokens 命中",
-  mentalSummary: "本轮心智关闭；历史快照仍展示。",
-  runtimeLine: "预算 41% · 轮询等待下一位成员",
 };
 
 const GROUP_META = {
@@ -163,6 +173,8 @@ export function ChatComposerPlusMenuPreviewApp() {
   const [runtimeEnabled, setRuntimeEnabled] = useState(true);
   const [draft, setDraft] = useState("");
   const [plusOpen, setPlusOpen] = useState(false);
+  const [plusActiveCluster, setPlusActiveCluster] = useState<string | null>(null);
+  const [plusHoverCluster, setPlusHoverCluster] = useState<string | null>(null);
   const [statusRailOpen, setStatusRailOpen] = useState(false);
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
@@ -170,33 +182,65 @@ export function ChatComposerPlusMenuPreviewApp() {
   const [referencePicker, setReferencePicker] = useState<ReferenceKind | null>(null);
   const [referenceQuery, setReferenceQuery] = useState("");
   const [references, setReferences] = useState<ReferenceItem[]>([]);
-  const [slashPickerOpen, setSlashPickerOpen] = useState(false);
-  const [slashQuery, setSlashQuery] = useState("");
+  const [slashDismissed, setSlashDismissed] = useState(false);
   const [groupNameDraft, setGroupNameDraft] = useState(GROUP_META.name);
   const [feedback, setFeedback] = useState("");
-  const [log, setLog] = useState<string[]>(["预览已就绪：状态栏默认折叠，控制动作已收敛到「+」菜单。"]);
-  const [narrowPreview, setNarrowPreview] = useState(false);
+
+  const plusCloseTimerRef = useRef<number | null>(null);
 
   const session = scene === "direct" ? DIRECT_SESSION : GROUP_SESSION;
   const transcript = scene === "direct" ? DIRECT_TRANSCRIPT : GROUP_TRANSCRIPT;
   const stateLabel = sessionBusy ? "进行中" : "空闲";
   const contextRingLabel = `上下文占用 ${session.usagePercent}%，命中 ${session.hitPercent}%`;
+  const slashToken = useMemo(() => parseSlashToken(draft), [draft]);
+  const slashPaletteOpen = slashToken !== null && !slashDismissed;
+  const filteredSlashCommands = useMemo(() => {
+    if (!slashToken) {
+      return [];
+    }
+    const query = slashToken.query.trim().toLowerCase();
+    return SLASH_COMMANDS.filter((command) => {
+      const commandBody = command.command.slice(1).toLowerCase();
+      const haystack = `${commandBody} ${command.label} ${command.description}`.toLowerCase();
+      return query.length === 0 || commandBody.startsWith(query) || haystack.includes(query);
+    });
+  }, [slashToken]);
 
-  function pushLog(line: string) {
-    setLog((current) => [line, ...current].slice(0, 6));
+  useEffect(() => {
+    setSlashDismissed(false);
+  }, [slashToken?.query, slashToken?.start]);
+
+  function clearPlusCloseTimer() {
+    if (plusCloseTimerRef.current !== null) {
+      window.clearTimeout(plusCloseTimerRef.current);
+      plusCloseTimerRef.current = null;
+    }
+  }
+
+  function schedulePlusHoverClose() {
+    clearPlusCloseTimer();
+    plusCloseTimerRef.current = window.setTimeout(() => {
+      setPlusHoverCluster(null);
+    }, 180);
+  }
+
+  function openPlusCluster(clusterId: string) {
+    clearPlusCloseTimer();
+    setPlusHoverCluster(clusterId);
   }
 
   function applyScene(next: Scene) {
     setScene(next);
     setPlusOpen(false);
+    setPlusActiveCluster(null);
+    setPlusHoverCluster(null);
     setGroupDialogOpen(false);
     setConfirmResetOpen(false);
     setConfirmDeleteOpen(false);
     setReferencePicker(null);
     setReferenceQuery("");
     setReferences([]);
-    setSlashPickerOpen(false);
-    setSlashQuery("");
+    setSlashDismissed(false);
     setFeedback("");
     setDraft("");
     setGroupNameDraft(GROUP_META.name);
@@ -204,19 +248,18 @@ export function ChatComposerPlusMenuPreviewApp() {
       setSessionBusy(true);
       setMentalEnabled(true);
       setRuntimeEnabled(true);
-      pushLog("场景：直接会话 mock 已就绪（运行中）");
     } else {
       setSessionBusy(false);
       setMentalEnabled(false);
       setRuntimeEnabled(true);
-      pushLog("场景：群聊会话 mock 已就绪（空闲）");
     }
   }
 
   function sendMockMessage() {
     const text = draft.trim() || "（空消息）";
     setDraft("");
-    pushLog(`已模拟发送：${text}`);
+    setSlashDismissed(false);
+    setFeedback(`已模拟发送：${text}`);
     if (!sessionBusy) {
       setSessionBusy(true);
     }
@@ -224,36 +267,37 @@ export function ChatComposerPlusMenuPreviewApp() {
 
   function stopMockTurn() {
     setSessionBusy(false);
-    pushLog("已模拟停止当前轮；队列内容保持不变");
+    setFeedback("已模拟停止当前轮；队列内容保持不变");
   }
 
   function toggleMental() {
-    const next = !mentalEnabled;
-    setMentalEnabled(next);
-    pushLog(`心智模型：${next ? "开启" : "关闭"}（下轮生效，模拟）`);
+    setMentalEnabled((current) => !current);
   }
 
   function toggleRuntime() {
-    const next = !runtimeEnabled;
-    setRuntimeEnabled(next);
-    pushLog(`运行状态注入：${next ? "开启" : "关闭"}（下轮生效，模拟）`);
+    setRuntimeEnabled((current) => !current);
   }
 
   function runSimulated(label: string) {
     setPlusOpen(false);
+    setPlusActiveCluster(null);
+    setPlusHoverCluster(null);
     setFeedback(label);
-    pushLog(label);
   }
 
   function openGroupManage() {
-    setPlusOpen(false);
     setGroupDialogOpen(true);
+    setPlusOpen(false);
+    setPlusActiveCluster(null);
+    setPlusHoverCluster(null);
   }
 
   function openReferencePicker(kind: ReferenceKind) {
-    setPlusOpen(false);
     setReferenceQuery("");
     setReferencePicker(kind);
+    setPlusOpen(false);
+    setPlusActiveCluster(null);
+    setPlusHoverCluster(null);
   }
 
   function chooseReference(kind: ReferenceKind, option: ReferenceOption) {
@@ -264,36 +308,36 @@ export function ChatComposerPlusMenuPreviewApp() {
     const kindLabel = kind === "session" ? "会话" : "工作区文件";
     if (alreadyAdded) {
       setFeedback(`「${option.title}」已在引用中，未重复添加（模拟）`);
-      pushLog(`跳过重复引用：${option.title}`);
       return;
     }
     setReferences((current) => [...current, { id, kind, title: option.title }]);
     setFeedback(`已引用${kindLabel}：${option.title}（模拟）`);
-    pushLog(`已添加${kindLabel}引用：${option.title}`);
   }
 
   function removeReference(id: string) {
     setReferences((current) => current.filter((item) => item.id !== id));
-    pushLog("已移除引用");
-  }
-
-  function openSlashPicker() {
-    setPlusOpen(false);
-    setSlashQuery("");
-    setSlashPickerOpen(true);
   }
 
   function chooseSlashCommand(command: string) {
-    setDraft((current) => (current.trim() ? `${current.trim()} ${command}` : command));
-    setSlashPickerOpen(false);
-    setSlashQuery("");
+    if (!slashToken) {
+      return;
+    }
+    const replacement = `${command} `;
+    setDraft(`${draft.slice(0, slashToken.start)}${replacement}${draft.slice(slashToken.end)}`);
+    setSlashDismissed(true);
     setFeedback(`已插入斜杠指令：${command}（模拟）`);
-    pushLog(`已插入斜杠指令：${command}`);
   }
 
-  const filteredSlashCommands = SLASH_COMMANDS.filter((command) =>
-    `${command.command} ${command.label} ${command.description}`.toLowerCase().includes(slashQuery.trim().toLowerCase()),
-  );
+  function handleDraftChange(value: string) {
+    setDraft(value);
+  }
+
+  function handleDraftKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Escape" && slashPaletteOpen) {
+      event.preventDefault();
+      setSlashDismissed(true);
+    }
+  }
 
   const referenceOptions = referencePicker === "session" ? SESSION_REFERENCES : FILE_REFERENCES;
   const filteredReferenceOptions = referenceOptions.filter((option) =>
@@ -305,13 +349,12 @@ export function ChatComposerPlusMenuPreviewApp() {
     setConfirmResetOpen(false);
     setConfirmDeleteOpen(false);
     setFeedback(msg);
-    pushLog(msg);
   }
 
-  const plusGroups: PlusMenuGroup[] = [
+  const plusClusters: PlusMenuCluster[] = [
     {
-      id: "add-context",
-      label: "添加上下文",
+      id: "add-reference",
+      label: "添加与引用",
       items: [
         {
           id: "attach-image",
@@ -337,19 +380,6 @@ export function ChatComposerPlusMenuPreviewApp() {
       ],
     },
     {
-      id: "input-assist",
-      label: "输入辅助",
-      items: [
-        {
-          id: "slash-command",
-          label: "斜杠指令",
-          hint: "/ 也可以直接输入",
-          icon: <SquareTerminal size={15} />,
-          onSelect: openSlashPicker,
-        },
-      ],
-    },
-    {
       id: "conversation-capabilities",
       label: "对话能力",
       items: [
@@ -363,26 +393,19 @@ export function ChatComposerPlusMenuPreviewApp() {
           onSelect: toggleMental,
         },
         {
-          id: "runtime-status",
-          label: "运行状态",
+          id: "runtime-injection",
+          label: "运行状态注入",
           hint: "把预算/进度注入上下文",
           icon: <Activity size={15} />,
           toggle: true,
           active: runtimeEnabled,
           onSelect: toggleRuntime,
         },
-        {
-          id: "cache-detail",
-          label: "上下文/缓存详情",
-          hint: "命中分布与压缩阈值",
-          icon: <Database size={15} />,
-          onSelect: () => runSimulated("已打开上下文/缓存命中详情（模拟）"),
-        },
       ],
     },
     {
-      id: "session-actions",
-      label: "会话操作",
+      id: "session-companion",
+      label: "会话与陪伴",
       items: [
         {
           id: "open-direct-session",
@@ -391,12 +414,6 @@ export function ChatComposerPlusMenuPreviewApp() {
           icon: <ArrowUpRight size={15} />,
           onSelect: () => runSimulated(`已跳转到直接会话：${DIRECT_SESSION.title}（模拟）`),
         },
-      ],
-    },
-    {
-      id: "companion-actions",
-      label: "陪伴操作",
-      items: [
         {
           id: "companion-feed",
           label: "陪伴投喂",
@@ -423,8 +440,8 @@ export function ChatComposerPlusMenuPreviewApp() {
     ...(scene === "group"
       ? [
           {
-            id: "group-actions",
-            label: "群聊管理",
+            id: "group-team",
+            label: "群聊与团队",
             items: [
               {
                 id: "group-manage",
@@ -446,10 +463,58 @@ export function ChatComposerPlusMenuPreviewApp() {
       : []),
   ];
 
+  const visiblePlusCluster = plusClusters.find(
+    (cluster) => cluster.id === (plusHoverCluster ?? plusActiveCluster),
+  ) ?? null;
+
+  function renderPlusClusterItem(item: PlusMenuItem) {
+    if (item.toggle) {
+      const active = item.active ?? false;
+      return (
+        <VButton
+          key={item.id}
+          role="menuitemcheckbox"
+          aria-checked={active}
+          aria-label={`${item.label}：${active ? "开启" : "关闭"}`}
+          className={styles.menuToggleRow}
+          contentLayout="plain"
+          variant="ghost"
+          icon={item.icon}
+          onPress={item.onSelect}
+        >
+          <span className={styles.menuItemCopy}>
+            <strong>{item.label}</strong>
+            {item.hint ? <small className={styles.menuItemHint}>{item.hint}</small> : null}
+          </span>
+          <span className={`${styles.menuToggleValue} ${active ? styles.menuToggleValueOn : ""}`}>
+            {active ? "开启" : "关闭"}
+          </span>
+        </VButton>
+      );
+    }
+
+    return (
+      <VButton
+        key={item.id}
+        role="menuitem"
+        aria-label={item.label}
+        className={styles.menuItem}
+        contentLayout="plain"
+        variant="ghost"
+        icon={item.icon}
+        onPress={item.onSelect}
+      >
+        <span className={styles.menuItemCopy}>
+          <strong>{item.label}</strong>
+          {item.hint ? <small className={styles.menuItemHint}>{item.hint}</small> : null}
+        </span>
+      </VButton>
+    );
+  }
+
   return (
     <main
       className={styles.page}
-      data-narrow={narrowPreview ? "true" : undefined}
       data-composer-plus-preview="true"
     >
       <header className={styles.header}>
@@ -458,7 +523,7 @@ export function ChatComposerPlusMenuPreviewApp() {
           <h1>Composer 加号菜单</h1>
           <p className={styles.subtitle}>
             将原右侧状态栏动作收敛到输入框左下角的「+」菜单；模型、权限、上下文与发送/停止保留在菜单外。
-            状态栏保持只读并在桌面端默认折叠为细条，窄屏下完全隐藏、可经顶栏展开为浮层。
+            状态栏保持只读并在桌面端默认折叠为细条，可经顶栏展开查看快照。
           </p>
         </div>
         <div className={styles.headerActions}>
@@ -477,15 +542,6 @@ export function ChatComposerPlusMenuPreviewApp() {
           >
             状态栏
           </VButton>
-          <VButton
-            variant="secondary"
-            density="compact"
-            className={styles.chip}
-            aria-pressed={narrowPreview}
-            onPress={() => setNarrowPreview((value) => !value)}
-          >
-            窄屏预览
-          </VButton>
         </div>
       </header>
 
@@ -494,12 +550,6 @@ export function ChatComposerPlusMenuPreviewApp() {
           {feedback}
         </div>
       ) : null}
-
-      <div className={styles.logStrip} aria-label="最近操作">
-        {log.map((item) => (
-          <span key={item} className={styles.logItem}>{item}</span>
-        ))}
-      </div>
 
       <div className={styles.workspace} data-rail-open={statusRailOpen ? "true" : "false"}>
         <section className={styles.conversation}>
@@ -554,21 +604,62 @@ export function ChatComposerPlusMenuPreviewApp() {
                 ))}
               </div>
             ) : null}
-            <div className={styles.composerField}>
-              <VNativeTextarea
-                className={styles.composerInput}
-                value={draft}
-                placeholder="描述下一步要做什么..."
-                aria-label="发送消息"
-                onChange={(event) => setDraft(event.target.value)}
-              />
+            <div className={styles.composerFieldWrap}>
+              {slashPaletteOpen ? (
+                <div
+                  className={styles.slashPalette}
+                  role="listbox"
+                  aria-label="斜杠指令"
+                  onMouseDown={(event) => event.preventDefault()}
+                >
+                  {filteredSlashCommands.length ? (
+                    filteredSlashCommands.map((command) => (
+                      <VButton
+                        key={command.command}
+                        role="option"
+                        aria-selected={false}
+                        aria-label={command.command}
+                        contentLayout="plain"
+                        variant="ghost"
+                        className={styles.slashPaletteItem}
+                        onPress={() => chooseSlashCommand(command.command)}
+                      >
+                        <span className={styles.slashPaletteMark} aria-hidden="true">/</span>
+                        <span className={styles.slashPaletteCopy}>
+                          <strong>{command.command.slice(1)}</strong>
+                          <small>{command.label} · {command.description}</small>
+                        </span>
+                      </VButton>
+                    ))
+                  ) : (
+                    <p className={styles.slashPaletteEmpty}>没有匹配的指令。</p>
+                  )}
+                </div>
+              ) : null}
+              <div className={styles.composerField}>
+                <VNativeTextarea
+                  className={styles.composerInput}
+                  value={draft}
+                  placeholder="描述下一步要做什么..."
+                  aria-label="发送消息"
+                  onChange={(event) => handleDraftChange(event.target.value)}
+                  onKeyDown={handleDraftKeyDown}
+                />
+              </div>
             </div>
             <div className={styles.composerToolbar}>
               <div className={styles.composerToolbarStart}>
                 <div className={styles.plusRow}>
                   <VPopover
                     open={plusOpen}
-                    onOpenChange={setPlusOpen}
+                    onOpenChange={(open) => {
+                      setPlusOpen(open);
+                      if (!open) {
+                        setPlusActiveCluster(null);
+                        setPlusHoverCluster(null);
+                        clearPlusCloseTimer();
+                      }
+                    }}
                     side="top"
                     align="start"
                     sideOffset={10}
@@ -584,50 +675,57 @@ export function ChatComposerPlusMenuPreviewApp() {
                       />
                     )}
                   >
-                    <div role="menu" aria-label="更多操作菜单">
-                      {plusGroups.map((group) => (
-                        <div key={group.id}>
-                          <div className={styles.menuGroupLabel}>{group.label}</div>
-                          {group.items.map((item) => (
+                    <div
+                      className={styles.plusMenuShell}
+                      role="menu"
+                      aria-label="更多操作菜单"
+                      onMouseLeave={schedulePlusHoverClose}
+                    >
+                      <div className={styles.plusMenuPrimary}>
+                        {plusClusters.map((cluster) => {
+                          const expanded = visiblePlusCluster?.id === cluster.id;
+                          return (
                             <VButton
-                              key={item.id}
-                              role={item.toggle ? "menuitemcheckbox" : "menuitem"}
-                              aria-checked={item.toggle ? item.active : undefined}
-                              aria-label={item.label}
-                              className={styles.menuItem}
+                              key={cluster.id}
+                              role="menuitem"
+                              aria-haspopup="menu"
+                              aria-expanded={expanded}
+                              aria-label={cluster.label}
+                              className={`${styles.menuClusterRow} ${expanded ? styles.menuClusterRowActive : ""}`}
                               contentLayout="plain"
                               variant="ghost"
-                              icon={item.icon}
-                              onPress={item.onSelect}
+                              onPress={() => {
+                                setPlusActiveCluster((current) => (current === cluster.id ? null : cluster.id));
+                                openPlusCluster(cluster.id);
+                              }}
+                              onMouseEnter={() => {
+                                openPlusCluster(cluster.id);
+                              }}
                             >
                               <span className={styles.menuItemCopy}>
-                                <strong>{item.label}</strong>
-                                {item.hint ? <small className={styles.menuItemHint}>{item.hint}</small> : null}
+                                <strong>{cluster.label}</strong>
                               </span>
-                              {item.toggle ? (
-                                <span
-                                  className={`${styles.menuItemToggle} ${item.active ? styles.menuItemToggleOn : ""}`}
-                                  aria-hidden="true"
-                                >
-                                  {item.active ? "开" : "关"}
-                                </span>
-                              ) : null}
+                              <ChevronRight className={styles.menuClusterChevron} size={15} aria-hidden="true" />
                             </VButton>
-                          ))}
+                          );
+                        })}
+                      </div>
+                      {visiblePlusCluster ? (
+                        <div
+                          className={styles.menuSubmenuFlyout}
+                          role="group"
+                          aria-label={visiblePlusCluster.label}
+                          onMouseEnter={() => {
+                            clearPlusCloseTimer();
+                            setPlusHoverCluster(visiblePlusCluster.id);
+                          }}
+                          onMouseLeave={schedulePlusHoverClose}
+                        >
+                          {visiblePlusCluster.items.map((item) => renderPlusClusterItem(item))}
                         </div>
-                      ))}
+                      ) : null}
                     </div>
                   </VPopover>
-                  {mentalEnabled ? (
-                    <VChip tone="info" className={styles.stateChip} aria-label="心智模型已开启">
-                      心智开
-                    </VChip>
-                  ) : null}
-                  {runtimeEnabled ? (
-                    <VChip tone="info" className={styles.stateChip} aria-label="运行状态已开启">
-                      状态开
-                    </VChip>
-                  ) : null}
                 </div>
               </div>
               <div className={styles.composerToolbarEnd}>
@@ -636,7 +734,7 @@ export function ChatComposerPlusMenuPreviewApp() {
                   density="compact"
                   className={styles.toolbarControl}
                   aria-label={`模型：${session.modelLabel}`}
-                  onPress={() => pushLog("模型选择器（模拟）：打开模型列表")}
+                  onPress={() => setFeedback("模型选择器（模拟）：打开模型列表")}
                 >
                   模型 · {session.modelLabel}
                 </VButton>
@@ -646,7 +744,7 @@ export function ChatComposerPlusMenuPreviewApp() {
                   className={styles.toolbarControl}
                   icon={<ShieldCheck size={14} />}
                   aria-label={`权限预设：${session.permissionLabel}`}
-                  onPress={() => pushLog("权限预设（模拟）：标准读写")}
+                  onPress={() => setFeedback("权限预设（模拟）：标准读写")}
                 >
                   {session.permissionLabel}
                 </VButton>
@@ -655,7 +753,7 @@ export function ChatComposerPlusMenuPreviewApp() {
                   density="compact"
                   className={styles.toolbarControl}
                   aria-label={contextRingLabel}
-                  onPress={() => pushLog(`上下文明细（模拟）：${contextRingLabel}`)}
+                  onPress={() => setFeedback(`上下文明细（模拟）：${contextRingLabel}`)}
                 >
                   上下文 {session.usagePercent}%
                 </VButton>
@@ -738,23 +836,6 @@ export function ChatComposerPlusMenuPreviewApp() {
                 </section>
               )}
 
-              <section className={styles.railSection} aria-label="心智与运行（只读）">
-                <div className={styles.railSectionTitle}>心智与运行 · 下轮生效</div>
-                <div className={styles.railRow}>
-                  <span className={styles.railRowLabel}>心智模型</span>
-                  {mentalEnabled
-                    ? <span className={`${styles.railPill} ${styles.railPillOn}`}>开</span>
-                    : <span className={`${styles.railPill} ${styles.railPillOff}`}>关</span>}
-                </div>
-                <div className={styles.railRow}>
-                  <span className={styles.railRowLabel}>运行状态</span>
-                  {runtimeEnabled
-                    ? <span className={`${styles.railPill} ${styles.railPillOn}`}>开</span>
-                    : <span className={`${styles.railPill} ${styles.railPillOff}`}>关</span>}
-                </div>
-                <p className={styles.railNote}>{session.mentalSummary}</p>
-              </section>
-
               <section className={styles.railSection} aria-label="上下文与缓存（只读）">
                 <div className={styles.railSectionTitle}>上下文与缓存</div>
                 <div className={styles.railRow}>
@@ -814,7 +895,7 @@ export function ChatComposerPlusMenuPreviewApp() {
               density="compact"
               onPress={() => {
                 setGroupDialogOpen(false);
-                pushLog("已关闭群聊管理");
+                setFeedback("已关闭群聊管理");
               }}
             >
               关闭
@@ -824,7 +905,6 @@ export function ChatComposerPlusMenuPreviewApp() {
               density="compact"
               onPress={() => {
                 setFeedback("已模拟应用群聊变更");
-                pushLog("已模拟应用群聊变更");
               }}
             >
               应用变更
@@ -958,47 +1038,6 @@ export function ChatComposerPlusMenuPreviewApp() {
           ))}
           {filteredReferenceOptions.length === 0 ? (
             <p className={styles.pickerEmpty}>没有匹配的{referencePicker === "session" ? "会话" : "文件"}。</p>
-          ) : null}
-        </div>
-      </VDialog>
-
-      <VDialog
-        open={slashPickerOpen}
-        onOpenChange={setSlashPickerOpen}
-        title="斜杠指令"
-        description="也可以直接在输入框输入 / 呼出指令；这里先浏览可用指令（模拟）。"
-        size="md"
-      >
-        <div className={styles.pickerSearchRow}>
-          <VNativeInput
-            className={styles.pickerSearch}
-            value={slashQuery}
-            aria-label="搜索斜杠指令"
-            placeholder="搜索指令或描述…"
-            onChange={(event) => setSlashQuery(event.target.value)}
-          />
-        </div>
-        <div className={styles.pickerList} role="listbox" aria-label="可用斜杠指令">
-          {filteredSlashCommands.map((command) => (
-            <VButton
-              key={command.command}
-              role="option"
-              aria-selected={false}
-              aria-label={command.command}
-              contentLayout="plain"
-              variant="ghost"
-              className={styles.pickerOption}
-              onPress={() => chooseSlashCommand(command.command)}
-            >
-              <span className={styles.pickerOptionMark} aria-hidden="true">/</span>
-              <span className={styles.pickerOptionCopy}>
-                <strong>{command.command.slice(1)}</strong>
-                <small>{command.label} · {command.description}</small>
-              </span>
-            </VButton>
-          ))}
-          {filteredSlashCommands.length === 0 ? (
-            <p className={styles.pickerEmpty}>没有匹配的指令。</p>
           ) : null}
         </div>
       </VDialog>
