@@ -233,3 +233,39 @@ def test_report_stall_signals_coerces_json_telemetry_and_false_reported():
     assert reported.get("consecutive_bookkeeping_tool_only_steps") is True
     assert warnings
     assert warnings[0][1] == "STATE"
+
+
+def test_diagnostics_unwrap_message_envelopes_and_json_response_without_true_attempt():
+    bus = _Bus()
+    publish_llm_retry_status(
+        attempt=True,
+        max_attempts=5,
+        category="timeout",
+        action="retry",
+        event_bus_getter=lambda: bus,
+    )
+    assert bus.events[0][1]["attempt"] == 0
+
+    token_usage = SimpleNamespace(
+        observed=True,
+        input_tokens=10,
+        output_tokens=1,
+        total_tokens=11,
+        cached_input_tokens=0,
+        cache_creation_input_tokens=0,
+        uncached_input_tokens=10,
+    )
+    ui = _Ui()
+    messages = [SystemMessage(content="system prompt"), HumanMessage(content="hello")]
+    llm_usage, metadata = record_turn_cache_diagnostics(
+        token_usage=token_usage,
+        response=b'{"responseMetadata": {"provider": "openai", "model": "gpt-test"}}',
+        messages={"messages": messages},
+        current_turn=7,
+        context_window_limit=8000,
+        get_ui_fn=lambda: ui,
+        turn_runtime_fn=lambda: {"promptCachePartition": "part-json"},
+    )
+    assert llm_usage["promptCachePartition"] == "part-json"
+    assert metadata["context_composition"]["segments"]
+    assert metadata["context_composition"]["turnId"] == "7"
