@@ -1531,11 +1531,12 @@ async function requestDesktopShellExit(
         await decideShutdown({
         ownershipMode,
         activeWorkStatus: async () => {
-          if (launcherBootstrap === null) {
+          const bootstrap = launcherBootstrap;
+          if (bootstrap === null) {
             return { active: false, message: "" };
           }
           const probeQuitActiveWork = async (forceControlTokenRefresh: boolean) => {
-            const context = await resolveDesktopActionLoopContext(launcherBootstrap, {
+            const context = await resolveDesktopActionLoopContext(bootstrap, {
               forceControlTokenRefresh
             });
             return await withDesktopShellExitTimeout(
