@@ -88,7 +88,7 @@ def _run(*, messages, compressor, config, extra=None, **kwargs):
         effective_max_token_limit=kwargs.pop("effective_max_token_limit", 1000),
         threshold_tokens=kwargs.pop("threshold_tokens", 800),
         runtime_agent_binding={"agentId": "a1", "directSessionId": "s1"},
-        project_root="",
+        project_root=kwargs.pop("project_root", ""),
         mode=kwargs.pop("mode", AgentMode.CHAT),
         last_compression_iteration=kwargs.pop("last_compression_iteration", 0),
         compression_min_iteration_gap=kwargs.pop("compression_min_iteration_gap", 3),
@@ -351,3 +351,82 @@ def test_compress_unwraps_message_envelope_without_treating_true_as_iteration_on
     )
     assert json_compressor.calls[0]["messages"] == [{"role": "assistant", "content": "keep"}]
     assert json_result[0] == [AIMessage(content="x")]
+
+
+def test_ledger_checkpoint_failure_records_tokens_without_summary_body(monkeypatch, tmp_path):
+    original = [AIMessage(content="long-context-message")]
+    compressed = [AIMessage(content="x")]
+    extras = {}
+
+    monkeypatch.setattr(
+        "core.chat.conversation_ledger.append_context_compression_checkpoint",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("checkpoint boom")),
+    )
+    monkeypatch.setattr(
+        "core.chat.conversation_ledger.append_context_compression_attempt",
+        lambda *_args, **_kwargs: SimpleNamespace(event_id="attempt-1"),
+    )
+
+    result = _run(
+        messages=original,
+        compressor=_FakeCompressor(compressed, summary="secret compression summary"),
+        config=_feature_config(),
+        extra=extras,
+        project_root=str(tmp_path),
+        reason="context_pressure",
+    )
+
+    failed = [
+        item for item in extras["events"] if item["args"][1] == "agent.context_compression_checkpoint_failed"
+    ]
+    assert failed
+    fields = failed[0]["kwargs"]["fields"]
+    assert fields["errorType"] == "RuntimeError"
+    assert fields["sessionId"] == "s1"
+    assert fields["turnId"] == "t1"
+    assert fields["reason"] == "context_pressure"
+    assert fields["stage"] == "checkpoint"
+    assert fields["beforeTokens"] > fields["afterTokens"]
+    assert "secret compression summary" not in str(extras["events"])
+    assert [
+        item for item in extras["events"] if item["args"][1] == "session.context_compression.ledger_failed"
+    ] == []
+    assert result[2] is True
+
+
+def test_ledger_fallback_failure_records_session_ledger_failed(monkeypatch, tmp_path):
+    original = [AIMessage(content="long-context-message")]
+    compressed = [AIMessage(content="x")]
+    extras = {}
+
+    monkeypatch.setattr(
+        "core.chat.conversation_ledger.append_context_compression_checkpoint",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("checkpoint boom")),
+    )
+    monkeypatch.setattr(
+        "core.chat.conversation_ledger.append_context_compression_attempt",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("attempt boom")),
+    )
+
+    _run(
+        messages=original,
+        compressor=_FakeCompressor(compressed, summary="secret compression summary"),
+        config=_feature_config(),
+        extra=extras,
+        project_root=str(tmp_path),
+        reason="context_pressure",
+    )
+
+    ledger_failed = [
+        item for item in extras["events"] if item["args"][1] == "session.context_compression.ledger_failed"
+    ]
+    assert ledger_failed
+    fields = ledger_failed[0]["kwargs"]["fields"]
+    assert ledger_failed[0]["kwargs"]["level"] == "warning"
+    assert ledger_failed[0]["kwargs"]["outcome"] == "failed"
+    assert fields["errorType"] == "OSError"
+    assert fields["checkpointErrorType"] == "RuntimeError"
+    assert fields["stage"] == "attempt_fallback"
+    assert fields["beforeTokens"] > 0
+    assert fields["reason"] == "context_pressure"
+    assert "secret compression summary" not in str(extras["events"])

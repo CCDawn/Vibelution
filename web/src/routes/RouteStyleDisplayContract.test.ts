@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import chatRouteSource from "./chat/ChatCodingRouteWorkbench.tsx?raw";
 import chatLayoutSource from "./chat/useChatWorkbenchLayout.ts?raw";
+import directSessionIndexItemSource from "./DirectSessionIndexItem.tsx?raw";
 import gitRouteSource from "./GitRoute.tsx?raw";
 import selfEvolutionTrackSource from "./SelfEvolutionTrack.tsx?raw";
 
@@ -25,6 +26,7 @@ const composedGridTemplateModifiers = new Set([
   "GitRoute.styles.ts:workspaceOverview",
   "GitRoute.styles.ts:historyPanel",
   "GitRoute.styles.ts:modelActionRow",
+  "DirectSessionIndexItem.styles.ts:sessionItemWithBulkSelect",
 ]);
 
 function readRouteStyleEntries(): StyleEntry[] {
@@ -78,6 +80,9 @@ describe("route style display contract", () => {
     expect(gitRouteSource).toContain("`${styles.workspace} ${styles.workspaceOverview}`");
     expect(gitRouteSource).toContain("`${styles.commitPanel} ${styles.historyPanel}`");
     expect(gitRouteSource).toContain("`${styles.modelDefaultRow} ${styles.modelActionRow}`");
+
+    expect(directSessionIndexItemSource).toContain("styles.sessionItem,");
+    expect(directSessionIndexItemSource).toContain("bulkSelectionEnabled ? styles.sessionItemWithBulkSelect");
 
     expect(selfEvolutionTrackSource).toContain("className={styles.centerColumn}");
   });

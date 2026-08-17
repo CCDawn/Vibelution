@@ -5720,6 +5720,7 @@ class TestLocalProviderBootstrap:
             lambda *args, **kwargs: scene_events.append((args, kwargs)),
         )
         agent._compress_messages = fake_compress
+        agent._reconcile_chat_conversation_before_llm = lambda msgs: (msgs, True)
 
         def fake_invoke(messages, replay_state=None):
             llm_message_counts.append(len(messages))
@@ -6494,7 +6495,11 @@ class TestRuntimeStateMemoryFlow:
                 preserve_errors=True,
             ),
         )
-        monkeypatch.setattr(agent_module, "estimate_messages_tokens", lambda value: 10000 if value is messages else 9800)
+        monkeypatch.setattr(
+            agent_module,
+            "estimate_messages_tokens",
+            lambda value: 10000 if len(value) >= 5 else 9800,
+        )
         monkeypatch.setattr(agent_module, "_turn_runtime_from_env", lambda: {"sessionId": "session-low", "runId": "turn-low"})
         monkeypatch.setattr(agent_module, "get_ui", lambda: SimpleNamespace(add_log=MagicMock(), note_context_compression_event=MagicMock()))
         monkeypatch.setattr(agent_module, "get_state_manager", lambda: SimpleNamespace(set_state=MagicMock()))
@@ -6574,7 +6579,7 @@ class TestRuntimeStateMemoryFlow:
         monkeypatch.setattr(
             agent_module,
             "estimate_messages_tokens",
-            lambda value: 12000 if value is messages else 3000,
+            lambda value: 12000 if len(value) >= 4 else 3000,
         )
         monkeypatch.setattr(
             agent_module,
@@ -6663,7 +6668,7 @@ class TestRuntimeStateMemoryFlow:
         monkeypatch.setattr(
             agent_module,
             "estimate_messages_tokens",
-            lambda value: 20000 if value is messages else 3000,
+            lambda value: 20000 if len(value) >= 5 else 3000,
         )
         ui = SimpleNamespace(add_log=MagicMock(), note_context_compression_event=MagicMock())
         monkeypatch.setattr(agent_module, "get_ui", lambda: ui)
@@ -6718,7 +6723,11 @@ class TestRuntimeStateMemoryFlow:
                 preserve_errors=True,
             ),
         )
-        monkeypatch.setattr(agent_module, "estimate_messages_tokens", lambda value: 10000 if value is messages else 3000)
+        monkeypatch.setattr(
+            agent_module,
+            "estimate_messages_tokens",
+            lambda value: 10000 if len(value) >= 5 else 3000,
+        )
         monkeypatch.setattr(agent_module, "_turn_runtime_from_env", lambda: {"sessionId": "session-failed", "runId": "turn-failed"})
         monkeypatch.setattr(agent_module, "get_ui", lambda: SimpleNamespace(add_log=MagicMock(), note_context_compression_event=MagicMock()))
         monkeypatch.setattr(agent_module, "get_state_manager", lambda: SimpleNamespace(set_state=MagicMock()))
