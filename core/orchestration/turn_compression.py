@@ -56,6 +56,13 @@ def _coerce_message_list(value: Any) -> list:
     if value is None or isinstance(value, (str, bytes, bytearray, memoryview)):
         return []
     if isinstance(value, Mapping):
+        nested = value.get("messages")
+        if nested is None:
+            nested = value.get("items")
+        if nested is None:
+            nested = value.get("history")
+        if nested is not None:
+            return _coerce_message_list(nested)
         if any(key in value for key in ("role", "content", "type", "kind")):
             return [dict(value)]
         return []
@@ -107,7 +114,7 @@ def compress_turn_messages(
     threshold_tokens = _coerce_nonnegative_int(threshold_tokens)
     reason = _coerce_text(reason)
     mode_text = _coerce_text(getattr(mode, "value", mode)).strip().lower()
-    current_tokens = estimator(messages)
+    current_tokens = _coerce_nonnegative_int(estimator(messages))
     budget = max(1, _coerce_nonnegative_int(effective_max_token_limit, default=1))
     runtime_binding = _as_mapping(runtime_agent_binding)
     runtime_getter = turn_runtime_fn or _turn_runtime_from_env
@@ -220,7 +227,7 @@ def compress_turn_messages(
         summary = f"{summary}\n\n{replacement_summary}".strip() if summary else replacement_summary
 
     # 日志
-    after_tokens = estimator(compressed)
+    after_tokens = _coerce_nonnegative_int(estimator(compressed))
     token_saved = current_tokens - after_tokens
     last_context_compression_applied = token_saved > 0
     if not summary and token_saved <= 0:
