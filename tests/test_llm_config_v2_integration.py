@@ -29,7 +29,7 @@ from tests import select_tests
 FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "config"
 SCHEMA_V2_LEGACY_WRITE_MESSAGE = (
     "schema v2 model writes must use provider-scoped configuration; "
-    "use migration preview for schema v1 configuration"
+    "use a one-shot schema upgrader for schema v1 configuration"
 )
 
 
@@ -98,18 +98,21 @@ def test_alias_is_read_only_and_new_writes_are_canonical() -> None:
     }
 
 
-def test_v1_fixture_remains_readable_and_migration_preview_is_write_free(tmp_path) -> None:
+def test_v1_fixture_is_not_runtime_readable_and_migration_preview_is_write_free(tmp_path) -> None:
     source = _fixture("llm_schema_v1_inline.toml")
     before = copy.deepcopy(source)
-    effective = build_effective_config(source)
+    with pytest.raises(ValueError, match="schema v2"):
+        config_settings.normalize_public_config_dict(source)
     preview = preview_v1_to_v2(source, project_root=tmp_path)
 
-    assert effective.llm.schema_version == 1
-    assert effective.llm.get_profile("primary").model == "gpt-5.6-luna"
     assert preview.proposed_public_config["llm"]["schema_version"] == 2
     assert preview.model_ref_map["relay_text"].endswith("/gpt-5.6-luna")
     assert source == before
     assert list(tmp_path.rglob("*")) == []
+    effective = build_effective_config(source)
+    assert source == before
+    assert effective.llm.schema_version == 2
+    assert effective.llm.get_profile("primary").model == "gpt-5.6-luna"
 
 
 def test_migrated_runtime_projection_uses_split_upstream_id_not_artifact_path(tmp_path) -> None:
@@ -246,7 +249,7 @@ def test_schema_v2_legacy_discovery_route_rejects_before_operator_or_network_acc
 
     with pytest.raises(
         ValueError,
-        match=r"^provider_id is required for schema v2 provider-scoped discovery; .*migration preview.*$",
+        match=r"^provider_id is required for schema v2 provider-scoped discovery; .*upgrade persisted schema v1.*$",
     ):
         config_service.discover_config_models(_fixture("llm_schema_v2_provider.toml"))
 

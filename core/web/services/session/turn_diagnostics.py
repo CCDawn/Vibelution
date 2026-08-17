@@ -123,6 +123,31 @@ def _reconcile_stale_session_ledger(session_id: str, *, active_turn_id: str = ""
         return
 
 
+# Mirror projection's ephemeral tool-event bubble kinds; completion must not treat
+# these compatibility shells as turn-scoped assistant prose.
+_COMPLETION_SNAPSHOT_INTERMEDIATE_TOOL_EVENT_KINDS = frozenset(
+    {
+        "tool_result",
+        "tool_call_started",
+        "cli_task_result",
+        "cli_task_sent",
+        "cli_session_lifecycle",
+    }
+)
+
+
+def _completion_snapshot_rejects_intermediate_tool_event_assistant(
+    message: dict[str, Any] | None,
+) -> bool:
+    """True when the selected assistant row is only a tool-journal compatibility shell."""
+
+    if not isinstance(message, dict):
+        return False
+    metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+    kind = str(metadata.get("kind") or "").strip().lower()
+    return kind in _COMPLETION_SNAPSHOT_INTERMEDIATE_TOOL_EVENT_KINDS
+
+
 def get_session_turn_completion_snapshot(session_id: str, turn_id: str = "") -> dict[str, Any]:
     """Return a turn-scoped completion snapshot for external harness pollers."""
     s = _service()
@@ -177,6 +202,8 @@ def get_session_turn_completion_snapshot(session_id: str, turn_id: str = "") -> 
         messages = s._session_ledger_visible_messages(session_id)
 
     assistant_message = s._find_turn_scoped_assistant_message(messages, normalized_turn_id)
+    if _completion_snapshot_rejects_intermediate_tool_event_assistant(assistant_message):
+        assistant_message = None
     assistant_text = str((assistant_message or {}).get("content") or "").strip()
     if not assistant_text and assistant_message:
         from core.web.services.session.session_ops import _turn_items_visible_text

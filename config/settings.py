@@ -451,18 +451,18 @@ def _canonicalize_model_library_api_key_envs(public_config: Dict[str, Any]) -> D
 def _canonicalize_runtime_public_config(public_config: Dict[str, Any]) -> Dict[str, Any]:
     candidate = copy.deepcopy(public_config)
     llm = candidate.get("llm", {})
-    schema_version = int(llm.get("schema_version") or 2) if isinstance(llm, dict) else 1
-    if schema_version == 2:
-        if "model_library" not in llm and (
-            not isinstance(llm.get("providers"), dict) or not isinstance(llm.get("profiles"), dict)
-        ):
-            return candidate
-        from .llm_projection import project_v2_llm_for_runtime
+    if isinstance(llm, dict) and "role_bindings" in llm:
+        raise ValueError("llm.role_bindings is not a runtime field; upgrade persisted config first")
+    schema_version = int(llm.get("schema_version") or 2) if isinstance(llm, dict) else 2
+    if schema_version != 2:
+        raise ValueError("runtime LLM config requires schema v2; upgrade persisted config first")
+    if "model_library" not in llm and (
+        not isinstance(llm.get("providers"), dict) or not isinstance(llm.get("profiles"), dict)
+    ):
+        return candidate
+    from .llm_projection import project_v2_llm_for_runtime
 
-        return project_v2_llm_for_runtime(candidate)
-    repaired = _repair_legacy_model_library_shape(candidate)
-    with_profile_models = _ensure_profile_model_library_entries(repaired)
-    return _ensure_model_library_prompt_cache_defaults(with_profile_models)
+    return project_v2_llm_for_runtime(candidate)
 
 
 def _materialize_role_bound_profiles(llm_section: Dict[str, Any]) -> None:
@@ -692,13 +692,12 @@ def normalize_public_config_dict(config: Dict[str, Any]) -> Dict[str, Any]:
                 + ", ".join(found_legacy)
                 + ". Use [llm.profiles.<id>.provider] / [llm.model_library.<id>.provider] / [llm.discovery]."
             )
-        # Accept role_bindings only as an input compatibility shim; it is
-        # normalized away before the config reaches the runtime/UI layers.
+        if "role_bindings" in llm_section:
+            raise ValueError("llm.role_bindings is not a runtime field; upgrade persisted config first")
         supported_llm_keys = {
             "schema_version",
             "providers",
             "profiles",
-            "role_bindings",
             "discovery",
             "model_library",
             "model_aliases",
@@ -710,11 +709,9 @@ def normalize_public_config_dict(config: Dict[str, Any]) -> Dict[str, Any]:
                 + ", ".join(unknown_llm_keys)
                 + ". Use [llm.profiles.<id>] / [llm.model_library.<id>] / [llm.discovery]."
             )
-        _materialize_role_bound_profiles(llm_section)
         schema_version = int(llm_section.get("schema_version") or 2)
-        _materialize_model_ref_profiles(llm_section, preserve_model_ref=schema_version == 2)
-        if schema_version == 1:
-            _materialize_inline_llm_providers(llm_section)
+        if schema_version != 2:
+            raise ValueError("runtime LLM config requires schema v2; upgrade persisted config first")
 
     if "pet" in result and isinstance(result["pet"], dict):
         pet_section = result["pet"]
@@ -885,6 +882,9 @@ class ConfigLoader:
             print("警告: 需要安装 toml 库来读取配置文件 (pip install toml)")
             return {}
 
+        from config.llm_schema_upgrader import upgrade_persisted_llm_schema_if_needed
+
+        upgrade_persisted_llm_schema_if_needed(config_file)
         try:
             with open(config_file, 'rb') as f:
                 config = tomllib.load(f)
@@ -1286,8 +1286,14 @@ class ConfigLoader:
 
         # 4. 从 kwargs 加载，让 runtime.profile 参与 profile 解析
         kwargs_config = None
+        kwargs_were_v1 = False
         if kwargs:
             kwargs_config = self._flatten_kwargs(kwargs)
+            incoming_schema = (kwargs_config.get("llm") or {}).get("schema_version") if isinstance(kwargs_config.get("llm"), dict) else None
+            try:
+                kwargs_were_v1 = incoming_schema is not None and int(incoming_schema) == 1
+            except (TypeError, ValueError):
+                kwargs_were_v1 = False
             config = self._apply_dict(config, kwargs_config)
 
         from .profiles import apply_runtime_profile
@@ -1295,16 +1301,20 @@ class ConfigLoader:
 
         # 5. profile 提供运行基线，显式 kwargs 仍保持最高优先级
         if kwargs_config:
-            config = self._apply_dict(config, kwargs_config)
-            if config.runtime.profile:
-                runtime_overrides = {
-                    key: value
-                    for key, value in kwargs_config.get("runtime", {}).items()
-                    if key != "profile"
-                }
-                config = apply_runtime_profile(config)
-                if runtime_overrides:
-                    config = self._apply_dict(config, {"runtime": runtime_overrides})
+            replay = copy.deepcopy(kwargs_config)
+            if kwargs_were_v1 and isinstance(replay.get("llm"), dict):
+                replay.pop("llm", None)
+            if replay:
+                config = self._apply_dict(config, replay)
+                if config.runtime.profile:
+                    runtime_overrides = {
+                        key: value
+                        for key, value in replay.get("runtime", {}).items()
+                        if key != "profile"
+                    }
+                    config = apply_runtime_profile(config)
+                    if runtime_overrides:
+                        config = self._apply_dict(config, {"runtime": runtime_overrides})
         return config
 
     def _flatten_kwargs(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
@@ -1430,12 +1440,7 @@ class ConfigLoader:
                         _validate_runtime_overrides(overrides, "overrides")
                         profile_update.update(overrides)
         else:
-            if config.llm.schema_version == 1:
-                incoming_llm = data.get("llm")
-                if isinstance(incoming_llm, dict) and "schema_version" not in incoming_llm:
-                    data = copy.deepcopy(data)
-                    data["llm"] = {**incoming_llm, "schema_version": 1}
-            data = normalize_public_config_dict(data)
+            data = _normalize_incremental_public_config(data, current_schema=config.llm.schema_version)
         # 深度合并字典
         current = config.model_dump()
 
@@ -1462,6 +1467,86 @@ class ConfigLoader:
             config = AppConfig.model_validate(merged)
 
         return config
+
+
+def _flatten_pet_and_prompt_sections(result: Dict[str, Any]) -> Dict[str, Any]:
+    if "pet" in result and isinstance(result["pet"], dict):
+        pet_section = result["pet"]
+        pet_subsections = (
+            "gene",
+            "heart",
+            "dream",
+            "personality",
+            "hunger",
+            "diary",
+            "social",
+            "health",
+            "skin",
+            "sound",
+        )
+        for sub_key in pet_subsections:
+            if sub_key in pet_section:
+                result[f"pet_{sub_key}"] = pet_section.pop(sub_key)
+
+    if "prompt" in result and isinstance(result["prompt"], dict):
+        prompt_section = result["prompt"]
+        sections = prompt_section.get("sections")
+        if isinstance(sections, list):
+            for raw_section in sections:
+                if not isinstance(raw_section, dict):
+                    continue
+                name = str(raw_section.get("name") or "").strip()
+                if name:
+                    continue
+                fallback_name = str(raw_section.get("id") or "").strip()
+                if not fallback_name and isinstance(raw_section.get("path"), str):
+                    fallback_name = Path(raw_section.get("path")).name
+                    if "." in fallback_name:
+                        fallback_name = fallback_name.rsplit(".", 1)[0]
+                raw_section["name"] = fallback_name.upper() if fallback_name else ""
+    return result
+
+
+def _normalize_v1_kwargs_runtime_dict(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Materialize v1-shaped Settings kwargs into a runtime AppConfig dict.
+
+    This is not a persisted v1 fallback. Operator TOML is upgraded to schema v2
+    before runtime load. Test helpers still construct LLMClient configs via
+    v1-shaped kwargs and must keep provider ids, secrets, and protocol fields.
+    """
+
+    payload = copy.deepcopy(data)
+    llm = payload.setdefault("llm", {})
+    if isinstance(llm, dict):
+        llm["schema_version"] = 1
+        if "role_bindings" in llm:
+            _materialize_role_bound_profiles(llm)
+    repaired = _repair_legacy_model_library_shape(payload)
+    with_profile_models = _ensure_profile_model_library_entries(repaired)
+    result = _ensure_model_library_prompt_cache_defaults(with_profile_models)
+    llm_section = result.get("llm")
+    if isinstance(llm_section, dict):
+        _materialize_model_ref_profiles(llm_section, preserve_model_ref=True)
+        _materialize_inline_llm_providers(llm_section)
+        llm_section["schema_version"] = 2
+    return _flatten_pet_and_prompt_sections(result)
+
+
+def _normalize_incremental_public_config(data: Dict[str, Any], *, current_schema: int | None) -> Dict[str, Any]:
+    payload = copy.deepcopy(data)
+    llm = payload.get("llm")
+    if not isinstance(llm, dict):
+        return normalize_public_config_dict(payload)
+    from config.llm_schema_upgrader import llm_config_needs_upgrade
+
+    schema_hint = llm.get("schema_version")
+    try:
+        schema_value = int(schema_hint) if schema_hint is not None else int(current_schema or 2)
+    except (TypeError, ValueError):
+        schema_value = int(current_schema or 2)
+    if llm_config_needs_upgrade(payload) or schema_value == 1:
+        return _normalize_v1_kwargs_runtime_dict(payload)
+    return normalize_public_config_dict(payload)
 
 
 # ============================================================================

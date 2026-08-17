@@ -189,6 +189,8 @@ def parse_allowed_command(command: str, root: Path) -> CommandSpec:
         }
         if argv[4] in npm_kinds:
             return CommandSpec(npm_kinds[argv[4]], argv, root)
+    if normalized == ["npm", "--prefix", "desktop/electron", "test"]:
+        return CommandSpec("electron-test", argv, root)
     if normalized[:3] == ["node", "web/node_modules/vitest/vitest.mjs", "run"]:
         # Frontend selectors intentionally use paths relative to ``web`` (for example
         # ``src/routes/...``).  Running the node entrypoint from the repository root

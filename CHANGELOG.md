@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Breaking
+
+- LLM operator config schema v1 and `role_bindings` are no longer runtime-readable. Persisted v1 files are upgraded in place by a one-shot atomic upgrader; inputs that cannot be upgraded fail closed and do not overwrite the original file. In-memory drafts may still be materialized to schema v2. This is a public compatibility break and is recorded as a **major** version impact; no release is executed in this change.
+
+### Changed
+
+- Chat workbench widths now persist only through `paneLayouts.chat` (`WORKBENCH_LAYOUT_IDS.chat` + `vibelution.pane-layouts.v1`). Leftover `shell.chatPanelWidths` is migrated once when canonical is missing, then dropped. Server `paneLayouts` remains a durable mirror. Version impact: **patch**; no release is executed.
+
 ## 1.1.2 - 2026-08-06
 
 Five-wave structure pass:

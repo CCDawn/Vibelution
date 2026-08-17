@@ -37,7 +37,7 @@ VibelutionLauncher.exe = 无控制台薄 shim
   → Electron 不在：启动 Electron，不自建 :8765 控制面
 ```
 
-迁移完成前，主进程仍可能 **spawn 并代理** Python `:8765`。那是 strangler 桥，不是目标架构。
+Packaged / product Electron **不再 spawn 或代理** Python `:8765`。控制面唯一入口是 IPC；`launcherServiceClient` 只保留 owned leftover 进程的 `stop-launcher` 清理。unpackaged 开发 checkout 的 C# shim 仍可能走 `vibelution_desktop_entry.py --action launcher`（browser-dev HTTP，owner 为 `tests/test_launcher_scripts.py` + native shim 测试），那不是产品控制面，也不设观察期。
 
 ---
 
@@ -56,7 +56,7 @@ VibelutionLauncher.exe = 无控制台薄 shim
 ```powershell
 cd desktop\electron
 npx tsc --noEmit --pretty false
-node node_modules\vitest\vitest.mjs run tests/windowProvider.test.ts tests/desktopTray.test.ts tests/desktopMainTransactionalClose.test.ts tests/desktopMainTrayIntegration.test.ts tests/launcherServiceClient.test.ts
+node node_modules\vitest\vitest.mjs run tests/windowProvider.test.ts tests/desktopTray.test.ts tests/desktopMainTransactionalClose.test.ts tests/desktopMainTrayIntegration.test.ts tests/launcherServiceClient.test.ts tests/packagedLauncherControlPlane.contract.test.ts
 ```
 
 改 `web/src/api/launcher.ts` 或 Launcher 路由时，另跑：

@@ -49,6 +49,27 @@ def _parse_json_object(raw: Any, *, field_name: str) -> dict[str, Any]:
     return dict(parsed)
 
 
+def _parse_json_string_list(raw: Any, *, field_name: str) -> list[str]:
+    if isinstance(raw, (list, tuple)):
+        parsed = list(raw)
+    else:
+        text = str(raw or "").strip()
+        if not text:
+            return []
+        try:
+            parsed = json.loads(text)
+        except Exception as exc:
+            raise ValueError(f"{field_name} must be valid JSON: {type(exc).__name__}") from exc
+    if not isinstance(parsed, list):
+        raise ValueError(f"{field_name} must be a JSON array.")
+    values: list[str] = []
+    for item in parsed:
+        normalized = str(item or "").strip()
+        if normalized and normalized not in values:
+            values.append(normalized)
+    return values
+
+
 def _resolve_llm_bindings(model_id: str, llm_bindings_json: str) -> dict[str, Any]:
     if str(llm_bindings_json or "").strip():
         return _parse_json_object(llm_bindings_json, field_name="llm_bindings_json")
@@ -72,6 +93,16 @@ def _current_agent_id(explicit_agent_id: str = "") -> str:
         )
         runtime = {}
     return str((runtime or {}).get("agentId") or "").strip()
+
+
+def _current_agent_target(explicit_agent_id: str = "") -> str:
+    """Resolve a self-owned target; runtime Agents cannot impersonate another inbox owner."""
+
+    explicit = str(explicit_agent_id or "").strip()
+    current = _current_agent_id()
+    if current and explicit and explicit != current:
+        raise PermissionError("Current Agent can only access its own inbox.")
+    return current or explicit
 
 
 def agent_create_tool(
@@ -142,6 +173,70 @@ def agent_create_tool(
         agentId=agent_id,
         directSessionId=str(agent.get("directSessionId") or "").strip(),
         agent=agent,
+    )
+
+
+def agent_update_tool(
+    agent_id: str,
+    updates_json: str,
+    expected_updated_at: str = "",
+    expected_config_revision: int = -1,
+    source_draft_id: str = "",
+) -> str:
+    """Update non-lifecycle Agent configuration using PATCH-compatible field names."""
+
+    normalized_agent_id = str(agent_id or "").strip()
+    if not normalized_agent_id:
+        return _json_result(
+            ok=False,
+            status="error",
+            error="agent_id_required",
+            message="agent_id is required.",
+        )
+    try:
+        updates = _parse_json_object(updates_json, field_name="updates_json")
+    except ValueError as exc:
+        return _json_result(ok=False, status="error", error="invalid_input", message=str(exc), agentId=normalized_agent_id)
+    try:
+        from core.web.services import session_service
+        from core.web.services.agent_directory_service import (
+            AgentDirectoryError,
+            AgentNotFoundError,
+            AgentStateConflictError,
+        )
+        from core.web.services.agent_operation_service import update_agent_from_catalog_request
+
+        agent = update_agent_from_catalog_request(
+            normalized_agent_id,
+            updates=updates,
+            expected_updated_at=expected_updated_at,
+            expected_config_revision=(
+                int(expected_config_revision)
+                if int(expected_config_revision) >= 0
+                else None
+            ),
+            source_draft_id=source_draft_id,
+            source="agent_update_tool",
+        )
+    except AgentNotFoundError as exc:
+        return _json_result(ok=False, status="error", error="not_found", message=str(exc), agentId=normalized_agent_id)
+    except AgentStateConflictError as exc:
+        return _json_result(ok=False, status="blocked", error="conflict", message=str(exc), agentId=normalized_agent_id)
+    except session_service.SessionBusyError as exc:
+        return _json_result(ok=False, status="blocked", error="busy", message=str(exc), agentId=normalized_agent_id)
+    except AgentDirectoryError as exc:
+        return _json_result(ok=False, status="error", error="validation_error", message=str(exc), agentId=normalized_agent_id)
+    except Exception as exc:
+        return _json_result(ok=False, status="error", error=exc.__class__.__name__, message=str(exc), agentId=normalized_agent_id)
+
+    return _json_result(
+        ok=True,
+        status="ok",
+        message="Agent updated.",
+        error="",
+        agentId=normalized_agent_id,
+        agent=agent,
+        publishedConfigChange=agent.get("publishedConfigChange"),
     )
 
 
@@ -360,6 +455,54 @@ def session_create_tool(
     )
 
 
+def session_update_tool(
+    session_id: str,
+    title: str = "",
+    agent_id: str = "",
+) -> str:
+    """Update one Session title and/or bind it to an existing active Agent."""
+
+    normalized_session_id = str(session_id or "").strip()
+    normalized_title = str(title or "").strip()
+    normalized_agent_id = str(agent_id or "").strip()
+    if not normalized_session_id:
+        return _json_result(ok=False, status="error", error="session_id_required", message="session_id is required.")
+    if not normalized_title and not normalized_agent_id:
+        return _json_result(
+            ok=False,
+            status="error",
+            error="update_required",
+            message="title or agent_id is required.",
+            sessionId=normalized_session_id,
+        )
+    try:
+        from core.web.services import session_service
+
+        session = session_service.update_chat_session(
+            normalized_session_id,
+            title=normalized_title or None,
+            agent_id=normalized_agent_id or None,
+        )
+    except session_service.SessionNotFoundError as exc:
+        return _json_result(ok=False, status="error", error="not_found", message=str(exc), sessionId=normalized_session_id)
+    except session_service.SessionBusyError as exc:
+        return _json_result(ok=False, status="blocked", error="busy", message=str(exc), sessionId=normalized_session_id)
+    except session_service.SessionValidationError as exc:
+        return _json_result(ok=False, status="error", error="validation_error", message=str(exc), sessionId=normalized_session_id)
+    except Exception as exc:
+        return _json_result(ok=False, status="error", error=exc.__class__.__name__, message=str(exc), sessionId=normalized_session_id)
+
+    return _json_result(
+        ok=True,
+        status="ok",
+        message="Session updated.",
+        error="",
+        sessionId=normalized_session_id,
+        agentId=str(session.get("agentId") or "").strip(),
+        session=session,
+    )
+
+
 def session_stop_tool(session_id: str, turn_id: str) -> str:
     """Request stop for the active turn; requires both session_id and turn_id."""
 
@@ -485,3 +628,152 @@ def session_delete_tool(session_id: str) -> str:
         replacementDirectSessionId=str(result.get("replacementDirectSessionId") or "").strip(),
         deleteResult=result,
     )
+
+
+def agent_inbox_list_tool(
+    agent_id: str = "",
+    status: str = "pending",
+    limit: int = 20,
+) -> str:
+    """List a bounded Agent inbox through the authoritative directory service."""
+
+    try:
+        normalized_agent_id = _current_agent_target(agent_id)
+    except PermissionError as exc:
+        return _json_result(ok=False, status="blocked", error="permission_denied", message=str(exc), agentId=str(agent_id or "").strip())
+    if not normalized_agent_id:
+        return _json_result(ok=False, status="error", error="agent_id_required", message="agent_id is required when no current Agent runtime is bound.")
+    try:
+        from core.web.services.agent_directory_service import get_agent, list_agent_inbox_messages_for_agent
+
+        if not get_agent(normalized_agent_id, include_archived=True):
+            return _json_result(ok=False, status="error", error="not_found", message=f"Agent not found: {normalized_agent_id}", agentId=normalized_agent_id)
+        normalized_limit = max(1, min(int(limit or 20), 100))
+        messages = list_agent_inbox_messages_for_agent(
+            normalized_agent_id,
+            status=str(status or "").strip(),
+            limit=normalized_limit,
+        )
+    except (TypeError, ValueError) as exc:
+        return _json_result(ok=False, status="error", error="invalid_input", message=str(exc), agentId=normalized_agent_id)
+    except Exception as exc:
+        return _json_result(ok=False, status="error", error=exc.__class__.__name__, message=str(exc), agentId=normalized_agent_id)
+    return _json_result(
+        ok=True,
+        status="ok",
+        message="Agent inbox listed.",
+        error="",
+        agentId=normalized_agent_id,
+        messageCount=len(messages),
+        messages=messages,
+    )
+
+
+def agent_message_consume_tool(
+    message_id: str,
+    agent_id: str = "",
+    consumed_by_session_id: str = "",
+    consumed_by_turn_id: str = "",
+) -> str:
+    """Consume one Agent inbox message."""
+
+    try:
+        normalized_agent_id = _current_agent_target(agent_id)
+    except PermissionError as exc:
+        return _json_result(ok=False, status="blocked", error="permission_denied", message=str(exc), agentId=str(agent_id or "").strip(), messageId=str(message_id or "").strip())
+    normalized_message_id = str(message_id or "").strip()
+    if not normalized_agent_id:
+        return _json_result(ok=False, status="error", error="agent_id_required", message="agent_id is required when no current Agent runtime is bound.")
+    if not normalized_message_id:
+        return _json_result(ok=False, status="error", error="message_id_required", message="message_id is required.", agentId=normalized_agent_id)
+    try:
+        from core.web.services.agent_directory_service import (
+            AgentMessageNotFoundError,
+            AgentNotFoundError,
+            consume_agent_inbox_message,
+        )
+
+        message = consume_agent_inbox_message(
+            normalized_agent_id,
+            normalized_message_id,
+            consumed_by_session_id=consumed_by_session_id,
+            consumed_by_turn_id=consumed_by_turn_id,
+        )
+    except (AgentNotFoundError, AgentMessageNotFoundError) as exc:
+        return _json_result(ok=False, status="error", error="not_found", message=str(exc), agentId=normalized_agent_id, messageId=normalized_message_id)
+    except Exception as exc:
+        return _json_result(ok=False, status="error", error=exc.__class__.__name__, message=str(exc), agentId=normalized_agent_id, messageId=normalized_message_id)
+    return _json_result(ok=True, status="ok", message="Agent inbox message consumed.", error="", agentId=normalized_agent_id, messageId=normalized_message_id, inboxMessage=message)
+
+
+def agent_messages_consume_all_tool(
+    agent_id: str = "",
+    consumed_by_session_id: str = "",
+    consumed_by_turn_id: str = "",
+) -> str:
+    """Consume every pending message in one Agent inbox."""
+
+    try:
+        normalized_agent_id = _current_agent_target(agent_id)
+    except PermissionError as exc:
+        return _json_result(ok=False, status="blocked", error="permission_denied", message=str(exc), agentId=str(agent_id or "").strip())
+    if not normalized_agent_id:
+        return _json_result(ok=False, status="error", error="agent_id_required", message="agent_id is required when no current Agent runtime is bound.")
+    try:
+        from core.web.services.agent_directory_service import AgentNotFoundError, consume_all_agent_inbox_messages
+
+        result = consume_all_agent_inbox_messages(
+            normalized_agent_id,
+            consumed_by_session_id=consumed_by_session_id,
+            consumed_by_turn_id=consumed_by_turn_id,
+        )
+    except AgentNotFoundError as exc:
+        return _json_result(ok=False, status="error", error="not_found", message=str(exc), agentId=normalized_agent_id)
+    except Exception as exc:
+        return _json_result(ok=False, status="error", error=exc.__class__.__name__, message=str(exc), agentId=normalized_agent_id)
+    return _json_result(ok=True, status="ok", message="Agent inbox messages consumed.", error="", consumeResult=result, **result)
+
+
+def knowledge_base_acl_grant_tool(
+    knowledge_base_id: str,
+    target_agent_id: str,
+    permissions_json: str = '["read", "propose"]',
+) -> str:
+    """Grant explicit KB permissions as the current authorized owner/reviewer Agent."""
+
+    normalized_kb_id = str(knowledge_base_id or "").strip()
+    normalized_target_id = str(target_agent_id or "").strip()
+    actor_agent_id = _current_agent_id()
+    if not normalized_kb_id:
+        return _json_result(ok=False, status="error", error="knowledge_base_id_required", message="knowledge_base_id is required.")
+    if not normalized_target_id:
+        return _json_result(ok=False, status="error", error="target_agent_id_required", message="target_agent_id is required.", knowledgeBaseId=normalized_kb_id)
+    if not actor_agent_id:
+        return _json_result(ok=False, status="blocked", error="current_agent_required", message="Current Agent runtime is required; actor identity cannot be supplied by arguments.", knowledgeBaseId=normalized_kb_id, targetAgentId=normalized_target_id)
+    try:
+        permissions = _parse_json_string_list(permissions_json, field_name="permissions_json")
+    except ValueError as exc:
+        return _json_result(ok=False, status="error", error="invalid_input", message=str(exc), knowledgeBaseId=normalized_kb_id, targetAgentId=normalized_target_id)
+    try:
+        from core.web.services.team_knowledge_service import (
+            TeamKnowledgeError,
+            TeamKnowledgeNotFoundError,
+            TeamKnowledgePermissionError,
+            grant_knowledge_base_access,
+        )
+
+        result = grant_knowledge_base_access(
+            normalized_kb_id,
+            normalized_target_id,
+            permissions=permissions,
+            actor_agent_id=actor_agent_id,
+        )
+    except TeamKnowledgePermissionError as exc:
+        return _json_result(ok=False, status="blocked", error="permission_denied", message=str(exc), knowledgeBaseId=normalized_kb_id, targetAgentId=normalized_target_id)
+    except TeamKnowledgeNotFoundError as exc:
+        return _json_result(ok=False, status="error", error="not_found", message=str(exc), knowledgeBaseId=normalized_kb_id, targetAgentId=normalized_target_id)
+    except TeamKnowledgeError as exc:
+        return _json_result(ok=False, status="error", error="validation_error", message=str(exc), knowledgeBaseId=normalized_kb_id, targetAgentId=normalized_target_id)
+    except Exception as exc:
+        return _json_result(ok=False, status="error", error=exc.__class__.__name__, message=str(exc), knowledgeBaseId=normalized_kb_id, targetAgentId=normalized_target_id)
+    return _json_result(ok=True, status="ok", message="Knowledge base access granted.", error="", knowledgeBaseId=normalized_kb_id, targetAgentId=normalized_target_id, actorAgentId=actor_agent_id, grantResult=result)

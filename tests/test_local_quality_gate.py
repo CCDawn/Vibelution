@@ -362,6 +362,11 @@ def test_commit_mode_without_relevant_staged_files_passes(git_repo: Path) -> Non
             ["npm", "--prefix", "web", "run", "check:bundle"],
         ),
         (
+            "npm --prefix desktop/electron test",
+            "electron-test",
+            ["npm", "--prefix", "desktop/electron", "test"],
+        ),
+        (
             "node 挑战杯/build_research_flow_site.mjs",
             "challenge-cup-build",
             ["node", "挑战杯/build_research_flow_site.mjs"],

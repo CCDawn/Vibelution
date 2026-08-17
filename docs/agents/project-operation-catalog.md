@@ -108,46 +108,54 @@
 | List sessions | `GET /api/sessions` | `AUTO_READ` | safe |
 | Session detail | `GET /api/sessions/{id}` | `AUTO_READ` | safe |
 | Create session | `POST /api/sessions` | `GOVERNED_WRITE` | safe（`session_create_tool`） |
-| Update session | `PATCH /api/sessions/{id}` | `GOVERNED_WRITE` | safe（HTTP-only） |
+| Update session | `PATCH /api/sessions/{id}` | `GOVERNED_WRITE` | safe（`session_update_tool`） |
 | Stop turn | `POST /api/sessions/{id}/stop`（202 异步受理） | `GOVERNED_WRITE` | safe（`session_stop_tool`） |
 | Delete session | `DELETE /api/sessions/{id}` | `APPROVAL_REQUIRED` | delete（`session_delete_tool`） |
 | List child sessions | `GET /api/sessions/{id}/child-sessions` | `AUTO_READ` | safe（已有 `list_child_sessions_tool`） |
 | Create child session | `POST /api/sessions/{id}/child-sessions` | `GOVERNED_WRITE` | safe（已有 `create_child_session_tool`） |
 | List agents | `GET /api/agents` | `AUTO_READ` | safe |
 | Agent detail | `GET /api/agents/{id}` | `AUTO_READ` | safe |
-| Inbox list | `GET /api/agents/{id}/messages` | `AUTO_READ` | safe（HTTP-only，无 governed tool） |
+| Inbox list | `GET /api/agents/{id}/messages` | `AUTO_READ` | safe（`agent_inbox_list_tool`） |
 | Send message | `POST /api/agents/{id}/messages` | `GOVERNED_WRITE` | safe（已有 `agent_message_tool` 语义能力，仅覆盖 send） |
-| Consume message | `POST /api/agents/{id}/messages/{message_id}/consume` | `GOVERNED_WRITE` | safe（HTTP-only；`agent_message_tool` 不覆盖 GET/consume） |
-| Consume all messages | `POST /api/agents/{id}/messages/consume-all` | `GOVERNED_WRITE` | safe（HTTP-only；`agent_message_tool` 不覆盖） |
+| Consume message | `POST /api/agents/{id}/messages/{message_id}/consume` | `GOVERNED_WRITE` | safe（`agent_message_consume_tool`） |
+| Consume all messages | `POST /api/agents/{id}/messages/consume-all` | `GOVERNED_WRITE` | safe（`agent_messages_consume_all_tool`） |
 | Create agent | `POST /api/agents` | `APPROVAL_REQUIRED` | safe（`agent_create_tool`） |
-| Update agent | `PATCH /api/agents/{id}` | `APPROVAL_REQUIRED` | safe（HTTP-only） |
+| Update agent | `PATCH /api/agents/{id}` | `APPROVAL_REQUIRED` | safe（`agent_update_tool`；不接受 status） |
 | Archive agent | `DELETE /api/agents/{id}` | `APPROVAL_REQUIRED` | archive（`agent_archive_tool`） |
 | Reset agent | `POST /api/agents/{id}/reset` | `APPROVAL_REQUIRED` | reset（`agent_reset_tool`） |
 | Purge agent | `DELETE /api/agents/{id}/purge` | `OPERATOR_ONLY` | purge（HTTP-only） |
+| Grant KB ACL | 当前无公开 PATCH；canonical service/tool | `APPROVAL_REQUIRED` | safe（`knowledge_base_acl_grant_tool`） |
 
-## 6. 已知治理缺口（Missing Governed Tools）
+## 6. Canonical Governed Tools 与剩余缺口
 
 Phase 2 已实现以下 canonical governed tools（`tools/project_operation_tools.py`）：
 
 | 工具 | 语义 | 治理类 |
 | --- | --- | --- |
 | `agent_create_tool` | 创建 Agent（与 `POST /api/agents` 同服务语义） | `APPROVAL_REQUIRED` / write · on_request |
+| `agent_update_tool` | 更新非生命周期 Agent 配置；显式拒绝 `status`，归档必须走 archive | `APPROVAL_REQUIRED` / write · on_request |
 | `agent_archive_tool` | 归档 Agent（完整 archive lifecycle） | `APPROVAL_REQUIRED` / destructive · always |
 | `agent_reset_tool` | 重置 Agent（`reset_agent_instance`） | `APPROVAL_REQUIRED` / destructive · always |
 | `session_create_tool` | 为已有 Agent 创建根 Session（不隐式创建 Agent） | `GOVERNED_WRITE` / write · on_request |
+| `session_update_tool` | 更新 Session 标题和/或绑定已有 active Agent | `GOVERNED_WRITE` / write · on_request |
 | `session_stop_tool` | 停止 Session turn（必须带 `turn_id`） | `GOVERNED_WRITE` / write · on_request |
 | `session_delete_tool` | 删除 Session（`delete_chat_session`） | `APPROVAL_REQUIRED` / destructive · always |
+| `agent_inbox_list_tool` | 有界读取指定/当前 Agent inbox | `AUTO_READ` / read · never |
+| `agent_message_consume_tool` | 消费一条 inbox 消息并记录 Session/turn 来源 | `GOVERNED_WRITE` / write · on_request |
+| `agent_messages_consume_all_tool` | 消费一个 Agent inbox 的全部未消费消息 | `GOVERNED_WRITE` / write · on_request |
+| `knowledge_base_acl_grant_tool` | 当前 owner/reviewer 为 active Agent 授予显式 read/propose/review；actor 只能来自当前 runtime | `APPROVAL_REQUIRED` / write · on_request |
 
-以下操作仍有后端 HTTP 端点，但 **canonical governed tool 不存在**：
+以下边界仍必须保持：
 
-1. **Agent update 无 governed tool** — HTTP-only。
-2. **Root Session update 无 governed tool** — HTTP-only。
-3. **Agent inbox list（GET）、consume、consume-all 无 governed tool** — HTTP-only。
+1. `agent_update_tool` 不接受 `status`；Agent 归档只能走 `agent_archive_tool`，不能借普通更新绕过 lifecycle。
+2. `agent_inbox_list_tool` / consume 工具在 Agent runtime 中只能操作当前 Agent 自身；跨 Agent inbox 必须留给受控操作者，不能通过显式 `agent_id` 冒充。
+3. `knowledge_base_acl_grant_tool` 不接受 actor 参数、不允许 wildcard、不接受不存在或 archived 的目标 Agent；只有当前 runtime Agent 自身具备 owner/review 权限时可用。
 4. **无 pause/resume、无通用 restore、无单 Session archive/restore 工具** — 这些能力不存在或为内部服务，**不要发明**对应工具名。
+5. 新 Agent 创建完成后，如需项目知识库，必须显式调用 `knowledge_base_acl_grant_tool`；不得硬编码某个 KB，也不得直接改知识状态文件。
 
 例外与既有面：
 - `create_child_session_tool` / `list_child_sessions_tool`（`tools/session_child_tools.py`）**已存在**。
-- `agent_message_tool`（`tools/agent_message_tools.py`）**已存在**，仅提供 **send** 语义能力，**不覆盖 inbox list（GET）或 consume**。
+- `agent_message_tool`（`tools/agent_message_tools.py`）**已存在**，仅提供 **send** 语义能力；list/consume 分别由本节专用工具承担。
 - **Purge 是有意 `OPERATOR_ONLY`**，不是缺失的普通工具，**不得**补成 `agent_purge_tool` 或任何 governed tool。
 
 ## 7. 上线顺序（Rollout Order）

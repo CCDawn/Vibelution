@@ -40,7 +40,7 @@ describe("Wave 3B Chat session workbench composition", () => {
     expect(recipeSource).toContain("data-vui-layout-id");
   });
 
-  it("keeps Chat width dual-write on shellStore (Wave 6D boundary)", () => {
+  it("keeps Chat width writes on shellStore setter (Wave 6D boundary)", () => {
     const layoutSource = readFileSync(resolve(routesRoot, "chat/useChatWorkbenchLayout.ts"), "utf8");
     expect(layoutSource).toContain("setChatPanelWidths");
     expect(layoutSource).toContain("attachAxisResizeSession");

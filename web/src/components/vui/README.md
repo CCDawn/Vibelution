@@ -98,7 +98,7 @@ Canonical ids live in `components/layout/workbenchLayoutIds.ts` (`WORKBENCH_LAYO
 | `usePersistedPaneResize({ layoutId: WORKBENCH_LAYOUT_IDS.logs, panes })` for custom shells | Copy-pasted drag/keyboard handlers per route |
 | `data-vui-layout-id` on the shell root | Hard-coded string literals outside the registry |
 
-New list-detail pages should start from a page recipe + registry `layoutId`. Domain shells (Chat dual-write via `shellStore`, Agents flex) still use the same registry ids.
+New list-detail pages should start from a page recipe + registry `layoutId`. Domain shells (Chat via `shellStore.setChatPanelWidths` → `pane-layouts.v1[chat]`, Agents flex) still use the same registry ids.
 
 **Evolution / Runtime scenes:** multi-column Evolution width rails and Logs nested `RuntimeScenesPane` sidebar use `usePersistedPaneResize` + registry ids (`evolution`, `logs-runtime-scenes`). Self-evolution sidebar uses the same hook (`evolution-self`).
 
@@ -111,7 +111,7 @@ New list-detail pages should start from a page recipe + registry `layoutId`. Dom
 | `attachAxisResizeSession` for window-level drag body cursor | Copy-pasted pointermove/up listeners per route |
 | `usePersistedPaneResize` / `usePersistedPaneHeight` | New `vibelution.*-width` / `*-height` localStorage keys |
 | `WORKBENCH_LAYOUT_IDS.*` + `data-vui-layout-id` | Hard-coded layout id strings |
-| Chat dual-write via `setChatPanelWidths` (shellStore + pane-layouts) | Direct Chat width keys outside shellStore |
+| Chat widths via `setChatPanelWidths` → `pane-layouts.v1[chat]` | Direct Chat width keys outside shellStore / pane-layouts |
 
 Gate: `components/layout/workbenchLayoutGate.test.ts` blocks new ad-hoc width/height keys under `routes/`.
 
@@ -198,7 +198,7 @@ Gate: `workbenchLayoutGate` + `design/vuiDomainWorkbenchCompositionContract.test
 
 | Surface | Contract |
 | --- | --- |
-| Chat session workbench | Page recipe `session-workbench-page` + domain `chat-session-workbench` via `VSessionWorkbenchPage` / `ChatSessionWorkbenchShell`. Width dual-writes `shellStore.setChatPanelWidths` → `pane-layouts.v1[chat]`. Coupled dual-pane bounds stay Chat-owned. |
+| Chat session workbench | Page recipe `session-workbench-page` + domain `chat-session-workbench` via `VSessionWorkbenchPage` / `ChatSessionWorkbenchShell`. Width SSOT is `pane-layouts.v1[chat]` via `shellStore.setChatPanelWidths` (in-memory shell is not durable). Coupled dual-pane bounds stay Chat-owned. |
 | Memory project memory queue | `memory` / `project-memory-queue` via `usePersistedPaneHeight` (replaces fixed `max-h-[min(220px,28vh)]`) |
 
 **Chat prefer / avoid**
@@ -206,10 +206,10 @@ Gate: `workbenchLayoutGate` + `design/vuiDomainWorkbenchCompositionContract.test
 | Prefer | Avoid |
 | --- | --- |
 | `attachAxisResizeSession` + `paneResizeKeyboard` + `PaneCollapseHandle` | Private pointermove listeners or lit-rule chrome on Chat style maps |
-| `setChatPanelWidths` dual-write | New Chat-only width localStorage keys |
+| `setChatPanelWidths` → `pane-layouts.v1[chat]` | New Chat-only width localStorage keys or `shell.chatPanelWidths` writes |
 | Document Chat-owned center-track coupling | Forcing Chat onto `usePersistedPaneResize` (breaks coupled dual-pane math) |
 
-Gate: Chat dual-write + layout id stay in `workbenchLayoutGate`; height consumers include project-memory-queue and Teams source-collection lists.
+Gate: Chat `setChatPanelWidths` + layout id stay in `workbenchLayoutGate`; height consumers include project-memory-queue and Teams source-collection lists.
 
 Each sets `data-vui-recipe="…"` on the page root for contracts and debugging.
 

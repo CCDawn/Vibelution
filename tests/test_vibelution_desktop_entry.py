@@ -647,3 +647,188 @@ def test_parse_args_accepts_desktop_shell_refresh_flags():
     assert args.action == "schedule-desktop-shell-refresh"
     assert args.wait_pid == 12
     assert args.then_lifecycle == "start"
+
+
+def test_parse_args_accepts_state_owned_backend_pid_flag():
+    args = desktop_entry.parse_args(
+        ["--action", "stop-launcher", "--use-state-owned-backend-pid", "--workspace", r"C:\repo"]
+    )
+    assert args.action == "stop-launcher"
+    assert args.use_state_owned_backend_pid is True
+    assert args.workspace == r"C:\repo"
+
+
+def test_launcher_control_git_current_parses_false_payload(monkeypatch):
+    class FakeResponse:
+        status = 200
+
+        def read(self) -> bytes:
+            return b'{"schemaVersion":1,"current":false}'
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> bool:
+            return False
+
+    monkeypatch.setattr(desktop_entry.urllib.request, "urlopen", lambda *args, **kwargs: FakeResponse())
+    assert desktop_entry._launcher_control_git_current(8765) is False
+
+
+def test_stop_launcher_uses_state_owned_pid_when_workspace_matches(monkeypatch, capsys, tmp_path):
+    bridge = _load_desktop_entry_py()
+    state = {
+        "sessionRole": "launcher_control_surface",
+        "launcherBackendPid": 111,
+        "launcherBackendLaunchPid": 111,
+        "launcherBrowserWindowPid": 222,
+        "launcherBrowserLaunchPid": 222,
+        "launcherControlPort": 8765,
+        "runtimeProjectRoot": str(tmp_path),
+        "browserManaged": True,
+    }
+    terminated: list[int] = []
+    saved_states: list[dict[str, object]] = []
+
+    monkeypatch.setattr(bridge, "_append_log", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bridge, "_read_state", lambda: dict(state))
+    monkeypatch.setattr(bridge, "_write_state", lambda next_state: saved_states.append(dict(next_state)))
+    monkeypatch.setattr(bridge, "_terminate_pid", lambda pid: terminated.append(pid))
+    monkeypatch.setattr(bridge, "_wait_for_launcher_control_stopped", lambda port: True)
+
+    result = bridge.main(
+        [
+            "--action",
+            "stop-launcher",
+            "--output",
+            "json",
+            "--use-state-owned-backend-pid",
+            "--workspace",
+            str(tmp_path),
+        ]
+    )
+
+    assert result == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "stopped"
+    assert payload["expectedBackendPid"] == 111
+    assert payload["terminatedPids"] == [111, 222]
+    assert terminated == [111, 222]
+    assert saved_states[-1]["launcherBackendPid"] == 0
+
+
+def test_stop_launcher_state_owned_pid_skips_workspace_mismatch(monkeypatch, capsys, tmp_path):
+    bridge = _load_desktop_entry_py()
+    state = {
+        "sessionRole": "launcher_control_surface",
+        "launcherBackendPid": 111,
+        "launcherBackendLaunchPid": 111,
+        "launcherControlPort": 8765,
+        "runtimeProjectRoot": str(tmp_path / "other"),
+    }
+    terminated: list[int] = []
+
+    monkeypatch.setattr(bridge, "_append_log", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bridge, "_read_state", lambda: dict(state))
+    monkeypatch.setattr(bridge, "_write_state", lambda next_state: pytest.fail("mismatch must not write state"))
+    monkeypatch.setattr(bridge, "_terminate_pid", lambda pid: terminated.append(pid))
+
+    result = bridge.main(
+        [
+            "--action",
+            "stop-launcher",
+            "--output",
+            "json",
+            "--use-state-owned-backend-pid",
+            "--workspace",
+            str(tmp_path),
+        ]
+    )
+
+    assert result == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "skipped"
+    assert payload["reason"] == "workspace_mismatch"
+    assert terminated == []
+
+
+def test_open_launcher_replaces_git_stale_backend_when_source_signature_matches(monkeypatch):
+    bridge = _load_desktop_entry_py()
+    state = {
+        "sessionRole": "launcher_control_surface",
+        "launcherBackendPid": 111,
+        "launcherBackendLaunchPid": 111,
+        "launcherBrowserWindowPid": 222,
+        "launcherControlSourceSignature": "same-source-sig",
+    }
+    terminated: list[int] = []
+    replace_logs: list[dict[str, object]] = []
+
+    @contextlib.contextmanager
+    def fake_lock():
+        yield True
+
+    def capture_log(event, **fields):
+        if event == "desktop_entry_python.stale_launcher_control.replacing":
+            replace_logs.append(fields)
+
+    monkeypatch.setattr(bridge, "_append_log", capture_log)
+    monkeypatch.setattr(bridge, "_single_launcher_open_lock", fake_lock)
+    monkeypatch.setattr(bridge, "_read_state", lambda: dict(state))
+    monkeypatch.setattr(bridge, "_write_state", lambda next_state: None)
+    monkeypatch.setattr(bridge, "_source_signature", lambda: "same-source-sig")
+    monkeypatch.setattr(bridge, "_launcher_control_port", lambda: 8765)
+    monkeypatch.setattr(bridge, "_active_electron_desktop_session_for_workspace", lambda workspace_root: {})
+    monkeypatch.setattr(bridge, "_launcher_control_git_current", lambda port: False)
+    health_results = iter([True, False, False])
+    monkeypatch.setattr(bridge, "_launcher_control_healthy", lambda port: next(health_results))
+    monkeypatch.setattr(bridge, "_wait_for_launcher_control_stopped", lambda port: True)
+    monkeypatch.setattr(bridge, "_terminate_pid", lambda pid: terminated.append(pid))
+    monkeypatch.setattr(bridge, "_start_launcher_backend", lambda python_exe, port: 333)
+    monkeypatch.setattr(bridge, "_open_launcher_window", lambda url: 444)
+    monkeypatch.setattr(bridge, "_pid_alive", lambda pid: False)
+
+    result = bridge.main(["--action", "launcher"])
+
+    assert result == 0
+    assert terminated == [111, 222]
+    assert replace_logs[0]["reason"] == "git_freshness"
+
+
+def test_open_launcher_keeps_backend_when_git_freshness_unknown_and_source_current(monkeypatch):
+    bridge = _load_desktop_entry_py()
+    state = {
+        "sessionRole": "launcher_control_surface",
+        "launcherBackendPid": 111,
+        "launcherBackendLaunchPid": 111,
+        "launcherBrowserWindowPid": 222,
+        "launcherControlSourceSignature": "same-source-sig",
+    }
+    terminated: list[int] = []
+
+    @contextlib.contextmanager
+    def fake_lock():
+        yield True
+
+    monkeypatch.setattr(bridge, "_append_log", lambda *args, **kwargs: None)
+    monkeypatch.setattr(bridge, "_single_launcher_open_lock", fake_lock)
+    monkeypatch.setattr(bridge, "_read_state", lambda: dict(state))
+    monkeypatch.setattr(bridge, "_write_state", lambda next_state: None)
+    monkeypatch.setattr(bridge, "_source_signature", lambda: "same-source-sig")
+    monkeypatch.setattr(bridge, "_launcher_control_port", lambda: 8765)
+    monkeypatch.setattr(bridge, "_active_electron_desktop_session_for_workspace", lambda workspace_root: {})
+    monkeypatch.setattr(bridge, "_launcher_control_git_current", lambda port: None)
+    monkeypatch.setattr(bridge, "_launcher_control_healthy", lambda port: True)
+    monkeypatch.setattr(bridge, "_terminate_pid", lambda pid: terminated.append(pid))
+    monkeypatch.setattr(
+        bridge,
+        "_start_launcher_backend",
+        lambda python_exe, port: pytest.fail("unknown freshness must not start a replacement backend"),
+    )
+    monkeypatch.setattr(bridge, "_open_launcher_window", lambda url: 444)
+    monkeypatch.setattr(bridge, "_pid_alive", lambda pid: True)
+
+    result = bridge.main(["--action", "launcher"])
+
+    assert result == 0
+    assert terminated == []

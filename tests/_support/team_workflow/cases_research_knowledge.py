@@ -1,6 +1,30 @@
 from __future__ import annotations
 
+from core.web.services.team_workflow import knowledge as _team_workflow_knowledge
 from tests._support.team_workflow.helpers import *  # noqa: F403
+
+
+def _patch_knowledge_background_thread_immediate(monkeypatch):
+    """Patch knowledge module threading binding so only background workers run inline."""
+    real_threading = _team_workflow_knowledge.threading
+
+    class _ImmediateThread:
+        def __init__(self, *, target=None, args=(), name="", daemon=None, **_kwargs):
+            self._target = target
+            self._args = args
+            self.name = name
+
+        def start(self):
+            self._target(*self._args)
+
+    class _KnowledgeThreadingBinding:
+        Thread = _ImmediateThread
+
+        def __getattr__(self, name):
+            return getattr(real_threading, name)
+
+    monkeypatch.setattr(_team_workflow_knowledge, "threading", _KnowledgeThreadingBinding())
+
 
 def test_register_candidate_source_strict_blocks_invalid(tmp_path, monkeypatch):
     """写入口统一校验：缺来源位置的候选——非 strict 隔离写入；strict 硬拦截。envelope 级始终通过。"""
@@ -2421,17 +2445,7 @@ def test_knowledge_collection_ingestion_background_completes_and_reports_status(
     monkeypatch.setattr(
         team_workflow_orchestration_service, "_knowledge_ingestion_work_run_store", lambda: isolated_store
     )
-
-    class _ImmediateThread:
-        def __init__(self, *, target=None, args=(), name="", daemon=None, **_kwargs):
-            self._target = target
-            self._args = args
-            self.name = name
-
-        def start(self):
-            self._target(*self._args)
-
-    monkeypatch.setattr(team_workflow_orchestration_service.threading, "Thread", _ImmediateThread)
+    _patch_knowledge_background_thread_immediate(monkeypatch)
 
     steward_id = agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
     coordinator = agent_directory_service.create_agent_instance(display_name="Research Coordinator")
@@ -2496,15 +2510,7 @@ def test_knowledge_collection_completion_background_normalizes_one_click_default
         team_workflow_orchestration_service, "_knowledge_ingestion_work_run_store", lambda: isolated_store
     )
     captured = {}
-
-    class _ImmediateThread:
-        def __init__(self, *, target=None, args=(), name="", daemon=None, **_kwargs):
-            self._target = target
-            self._args = args
-            self.name = name
-
-        def start(self):
-            self._target(*self._args)
+    _patch_knowledge_background_thread_immediate(monkeypatch)
 
     def fake_completion(team_id, payload):
         captured["team_id"] = team_id
@@ -2518,7 +2524,6 @@ def test_knowledge_collection_completion_background_normalizes_one_click_default
             "summary": {"formalKnowledgeItemCount": 1, "knowledgeBaseId": "kb-1"},
         }
 
-    monkeypatch.setattr(team_workflow_orchestration_service.threading, "Thread", _ImmediateThread)
     monkeypatch.setattr(team_workflow_orchestration_service, "run_knowledge_collection_completion", fake_completion)
     team = team_service.create_team(name="挑战杯科研团队", members=[])
 
@@ -2603,15 +2608,7 @@ def test_knowledge_collection_completion_background_failure_logs_child_payload(t
     monkeypatch.setattr(
         team_workflow_orchestration_service, "_knowledge_ingestion_work_run_store", lambda: isolated_store
     )
-
-    class _ImmediateThread:
-        def __init__(self, *, target=None, args=(), name="", daemon=None, **_kwargs):
-            self._target = target
-            self._args = args
-            self.name = name
-
-        def start(self):
-            self._target(*self._args)
+    _patch_knowledge_background_thread_immediate(monkeypatch)
 
     def fake_completion(_team_id, _payload):
         exc = team_workflow_orchestration_service.TeamWorkflowOrchestrationError("Source extraction failed.")
@@ -2626,7 +2623,6 @@ def test_knowledge_collection_completion_background_failure_logs_child_payload(t
         }
         raise exc
 
-    monkeypatch.setattr(team_workflow_orchestration_service.threading, "Thread", _ImmediateThread)
     monkeypatch.setattr(team_workflow_orchestration_service, "run_knowledge_collection_completion", fake_completion)
     team = team_service.create_team(name="挑战杯科研团队", members=[])
 

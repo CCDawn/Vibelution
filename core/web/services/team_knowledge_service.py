@@ -330,6 +330,85 @@ def ensure_knowledge_base_review_grant(knowledge_base_id: str, agent_id: str) ->
         return dict(target)
 
 
+def grant_knowledge_base_access(
+    knowledge_base_id: str,
+    target_agent_id: str,
+    *,
+    permissions: list[str] | tuple[str, ...],
+    actor_agent_id: str,
+) -> dict[str, Any]:
+    """Grant explicit per-Agent KB permissions through the governed owner ACL."""
+
+    normalized_actor_id = str(actor_agent_id or "").strip()
+    if not normalized_actor_id:
+        raise TeamKnowledgePermissionError("Current Agent identity is required to grant knowledge base access.")
+    target_agent = _require_agent(target_agent_id)
+    normalized_target_id = str(target_agent.get("agentId") or "").strip()
+    normalized_permissions = _unique_strings(
+        str(permission or "").strip().lower()
+        for permission in list(permissions or [])
+    )
+    allowed_permissions = {"read", "propose", "review"}
+    unsupported = sorted(set(normalized_permissions).difference(allowed_permissions))
+    if unsupported:
+        raise TeamKnowledgeError("Unsupported knowledge base permissions: " + ", ".join(unsupported))
+    if not normalized_permissions:
+        raise TeamKnowledgeError("At least one knowledge base permission is required.")
+
+    owner, base = _require_base_with_owner(knowledge_base_id)
+    _require_permission(owner, base, normalized_actor_id, "review")
+    changed_permissions: list[str] = []
+    with _LOCK:
+        state = _load_bases_state_for_owner(owner)
+        bases = state.get("knowledgeBases") if isinstance(state.get("knowledgeBases"), list) else []
+        target = _find_by_id(bases, "knowledgeBaseId", base["knowledgeBaseId"])
+        if not target:
+            raise TeamKnowledgeNotFoundError("Knowledge base not found.")
+        acl = _normalize_acl(target.get("acl"))
+        for permission in normalized_permissions:
+            grants = list(acl["grants"].get(permission) or [])
+            if normalized_target_id not in grants:
+                grants.append(normalized_target_id)
+                acl["grants"][permission] = _unique_strings(grants)
+                changed_permissions.append(permission)
+        if changed_permissions:
+            target["acl"] = acl
+            target["updatedAt"] = utc_now_iso()
+            state["updatedAt"] = target["updatedAt"]
+            _save_bases_state_for_owner(owner, state)
+            audit_payload = {
+                "knowledgeBaseId": base["knowledgeBaseId"],
+                "targetAgentId": normalized_target_id,
+                "grantedPermissions": changed_permissions,
+            }
+            _append_audit(
+                owner,
+                "knowledge_base.access_granted",
+                audit_payload,
+                actor_agent_id=normalized_actor_id,
+            )
+        result = dict(target)
+
+    if changed_permissions:
+        _record_event(
+            "knowledge.knowledge_base.access_granted",
+            owner,
+            base["knowledgeBaseId"],
+            actor_agent_id=normalized_actor_id,
+            fields={
+                "targetAgentId": normalized_target_id,
+                "grantedPermissions": changed_permissions,
+            },
+        )
+    return {
+        "knowledgeBase": _knowledge_base_to_api(result, owner),
+        "targetAgentId": normalized_target_id,
+        "requestedPermissions": normalized_permissions,
+        "changedPermissions": changed_permissions,
+        "changed": bool(changed_permissions),
+    }
+
+
 def create_agent_knowledge_base(
     agent_id: str,
     *,

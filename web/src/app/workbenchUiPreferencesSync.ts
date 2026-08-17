@@ -1,9 +1,9 @@
 /**
  * Port/origin-stable UI layout memory.
  *
- * Browser localStorage is origin-scoped (8000 vs 8002 loses state). We dual-write
- * preferred chat/shell widths into project-local `.runtime/workbench/ui-preferences.json`
- * via the backend and hydrate on boot.
+ * Canonical Chat widths live in vibelution.pane-layouts.v1[chat].
+ * Server paneLayouts is a durable mirror. leftover shell.chatPanelWidths is
+ * migrated once when canonical is missing, then dropped.
  */
 
 import {
@@ -14,6 +14,7 @@ import {
 import {
   PANE_LAYOUT_STORAGE_KEY,
   readAllPaneLayouts,
+  readPaneLayout,
   setPaneLayoutPersistHook,
   writeAllPaneLayouts,
   writePaneLayout,
@@ -39,51 +40,32 @@ function applyServerPreferences(prefs: WorkbenchUiPreferences): void {
     writeAllPaneLayouts({ ...local, ...prefs.paneLayouts });
   }
 
+  const canonical = readPaneLayout(CHAT_PANE_LAYOUT_ID);
+  const hasCanonical = Boolean(canonical.left || canonical.right);
   const shell = prefs.shell || {};
-  const patch: {
-    chatPanelWidths?: { leftPanelWidth: number; rightPanelWidth: number };
-    topBarMode?: "full" | "hidden";
-  } = {};
-
-  const chat = shell.chatPanelWidths;
-  const current = useShellStore.getState().chatPanelWidths;
-  if (chat) {
-    const left = Number(chat.leftPanelWidth);
-    const right = Number(chat.rightPanelWidth);
+  if (!hasCanonical) {
+    const chat = shell.chatPanelWidths;
+    const left = Number(chat?.leftPanelWidth);
+    const right = Number(chat?.rightPanelWidth);
     if (Number.isFinite(left) && left > 0 && Number.isFinite(right) && right > 0) {
-      patch.chatPanelWidths = {
-        leftPanelWidth: Math.round(left),
-        rightPanelWidth: Math.round(right),
-      };
-    } else if (Number.isFinite(left) && left > 0) {
-      patch.chatPanelWidths = {
-        leftPanelWidth: Math.round(left),
-        rightPanelWidth: current.rightPanelWidth,
-      };
-    } else if (Number.isFinite(right) && right > 0) {
-      patch.chatPanelWidths = {
-        leftPanelWidth: current.leftPanelWidth,
-        rightPanelWidth: Math.round(right),
-      };
+      writePaneLayout(CHAT_PANE_LAYOUT_ID, {
+        left: Math.round(left),
+        right: Math.round(right),
+      });
     }
   }
 
-  if (shell.topBarMode === "full" || shell.topBarMode === "hidden") {
-    patch.topBarMode = shell.topBarMode;
-  }
-
-  if (patch.chatPanelWidths) {
-    useShellStore.setState({
-      chatPanelWidths: patch.chatPanelWidths,
-      ...(patch.topBarMode ? { topBarMode: patch.topBarMode } : {}),
-    });
-    writePaneLayout(CHAT_PANE_LAYOUT_ID, {
-      left: patch.chatPanelWidths.leftPanelWidth,
-      right: patch.chatPanelWidths.rightPanelWidth,
-    });
-  } else if (patch.topBarMode) {
-    useShellStore.setState({ topBarMode: patch.topBarMode });
-  }
+  const stored = readPaneLayout(CHAT_PANE_LAYOUT_ID);
+  const current = useShellStore.getState().chatPanelWidths;
+  const nextWidths = {
+    leftPanelWidth: stored.left || current.leftPanelWidth,
+    rightPanelWidth: stored.right || current.rightPanelWidth,
+  };
+  const nextTopBar = shell.topBarMode === "full" || shell.topBarMode === "hidden" ? shell.topBarMode : undefined;
+  useShellStore.setState({
+    chatPanelWidths: nextWidths,
+    ...(nextTopBar ? { topBarMode: nextTopBar } : {}),
+  });
 
   lastShellFingerprint = shellFingerprint({
     leftPanelWidth: useShellStore.getState().chatPanelWidths.leftPanelWidth,
@@ -125,10 +107,6 @@ export async function flushWorkbenchUiPreferencesToServer(): Promise<void> {
     await saveWorkbenchUiPreferences({
       paneLayouts,
       shell: {
-        chatPanelWidths: {
-          leftPanelWidth: state.chatPanelWidths.leftPanelWidth,
-          rightPanelWidth: state.chatPanelWidths.rightPanelWidth,
-        },
         topBarMode: state.topBarMode,
       },
     });
@@ -138,8 +116,8 @@ export async function flushWorkbenchUiPreferencesToServer(): Promise<void> {
 }
 
 /**
- * Hydrate shell + pane layouts from project-local preferences, then keep them
- * dual-written on subsequent shell changes.
+ * Hydrate shell + pane layouts from project-local preferences, then mirror
+ * paneLayouts to the server. Chat widths are not written back to shell.chatPanelWidths.
  */
 export function startWorkbenchUiPreferencesSync(): () => void {
   if (typeof window === "undefined") {

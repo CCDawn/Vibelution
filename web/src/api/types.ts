@@ -1,5 +1,6 @@
 export * from "./types/shared";
 export * from "./types/chat";
+export * from "./types/knowledge";
 export * from "./types/teams";
 export * from "./types/agents";
 export * from "./types/runtime";

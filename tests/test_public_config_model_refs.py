@@ -6,13 +6,14 @@ LLM 模型模板引用结构测试
 from pathlib import Path
 
 from config import ConfigLoader
+from config.llm_schema_upgrader import convert_legacy_llm_config
 from config.public_config import (
     LLM_MODEL_PRESETS,
     apply_llm_model_preset,
     build_effective_config,
     delete_llm_model,
     list_llm_model_options,
-    load_public_config,
+    _load_raw_public_config,
 )
 from core.web.services.config_service import _decorate_model_options
 
@@ -22,8 +23,12 @@ PROJECT_ROOT = Path(__file__).parent.parent
 
 def _load_schema_v1_public_config() -> dict:
     fixture_path = PROJECT_ROOT / "tests" / "fixtures" / "config" / "llm_schema_v1_inline.toml"
-    public_config = load_public_config(fixture_path)
+    public_config = _load_raw_public_config(fixture_path)
     return apply_llm_model_preset(public_config, "relay_gpt_5_6_luna")
+
+
+def _effective(public_config: dict):
+    return build_effective_config(convert_legacy_llm_config(public_config))
 
 
 def _openai_gpt_5_5_library_entry() -> dict:
@@ -89,7 +94,7 @@ def test_build_effective_config_resolves_model_ref_and_overrides():
         },
     }
 
-    effective = build_effective_config(public_config)
+    effective = _effective(public_config)
     profile = effective.llm.get_profile("primary")
     provider = effective.llm.get_provider(profile.provider_id)
 
@@ -111,7 +116,7 @@ def test_claude_opus_4_7_model_ref_template_omits_temperature():
         "overrides": {},
     }
     claude = public_config["llm"]["model_library"]["anthropic_claude_opus_4_7"]
-    effective = build_effective_config(public_config)
+    effective = _effective(public_config)
     profile = effective.llm.get_profile("primary")
 
     assert claude["provider"]["kind"] == "anthropic"
@@ -129,7 +134,7 @@ def test_current_prompt_cache_modes_follow_model_library_config():
         "overrides": {},
     }
 
-    effective = build_effective_config(public_config)
+    effective = _effective(public_config)
     profile = effective.llm.get_profile("primary")
 
     assert profile.model == "gpt-5.6-luna"
@@ -165,7 +170,7 @@ def test_openai_compatible_model_without_prompt_cache_defaults_to_automatic():
         "overrides": {},
     }
 
-    effective = build_effective_config(public_config)
+    effective = _effective(public_config)
     profile = effective.llm.get_profile("primary")
 
     assert public_config["llm"]["model_library"]["gpt_5_5_gpt_5_5"].get("prompt_cache") is None
@@ -195,7 +200,7 @@ def test_deepseek_model_without_prompt_cache_declares_automatic_by_default():
         "overrides": {},
     }
 
-    effective = build_effective_config(public_config)
+    effective = _effective(public_config)
     profile = effective.llm.get_profile("primary")
 
     assert profile.model == "deepseek-v4-pro"
@@ -226,7 +231,7 @@ def test_local_qwen_without_prompt_cache_support_stays_disabled_by_default():
         "overrides": {},
     }
 
-    effective = build_effective_config(public_config)
+    effective = _effective(public_config)
     profile = effective.llm.get_profile("primary")
 
     assert profile.model == "Qwen3-32B-AWQ"
@@ -258,7 +263,7 @@ def test_local_qwen_with_prompt_cache_support_defaults_to_explicit_cache_control
         "overrides": {},
     }
 
-    effective = build_effective_config(public_config)
+    effective = _effective(public_config)
     profile = effective.llm.get_profile("primary")
 
     assert profile.model == "Qwen3-32B-AWQ"
@@ -294,7 +299,7 @@ def test_prompt_cache_override_can_change_referenced_model_mode():
         "overrides": {"prompt_cache": {"mode": "unsupported"}},
     }
 
-    effective = build_effective_config(public_config)
+    effective = _effective(public_config)
     profile = effective.llm.get_profile("primary")
 
     assert profile.model == "gpt-5.5"

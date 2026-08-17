@@ -4,6 +4,7 @@ export type WorkbenchUiPreferences = {
   schemaVersion: number;
   paneLayouts: Record<string, Record<string, number>>;
   shell: {
+    /** Leftover-only; current clients never write this. Migrated once into paneLayouts.chat. */
     chatPanelWidths?: {
       leftPanelWidth?: number;
       rightPanelWidth?: number;

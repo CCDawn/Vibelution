@@ -35,6 +35,21 @@ def _empty_payload() -> dict[str, Any]:
     }
 
 
+def _write_payload_unlocked(payload: dict[str, Any]) -> None:
+    PREFERENCES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = PREFERENCES_PATH.with_suffix(".tmp")
+    text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+    tmp_path.write_text(text, encoding="utf-8")
+    tmp_path.replace(PREFERENCES_PATH)
+
+
+def _shell_has_leftover_chat_widths(raw: object) -> bool:
+    if not isinstance(raw, dict):
+        return False
+    shell = raw.get("shell")
+    return isinstance(shell, dict) and "chatPanelWidths" in shell
+
+
 def _coerce_pane_layouts(value: object) -> dict[str, dict[str, int]]:
     if not isinstance(value, dict):
         return {}
@@ -47,7 +62,7 @@ def _coerce_pane_layouts(value: object) -> dict[str, dict[str, int]]:
         for pane_id, width in panes.items():
             pane_key = str(pane_id or "").strip()
             try:
-                numeric = int(round(float(width)))
+                numeric = round(float(width))
             except (TypeError, ValueError):
                 continue
             if pane_key and numeric > 0:
@@ -67,7 +82,7 @@ def _coerce_shell(value: object) -> dict[str, Any]:
         for field in ("leftPanelWidth", "rightPanelWidth"):
             raw = chat.get(field)
             try:
-                numeric = int(round(float(raw)))
+                numeric = round(float(raw))
             except (TypeError, ValueError):
                 continue
             if numeric > 0:
@@ -83,6 +98,29 @@ def _coerce_shell(value: object) -> dict[str, Any]:
     return shell
 
 
+def _migrate_legacy_chat_panel_widths(payload: dict[str, Any]) -> dict[str, Any]:
+    """One-shot: leftover shell.chatPanelWidths → paneLayouts.chat; then drop the legacy field."""
+
+    layouts = dict(payload.get("paneLayouts") or {})
+    shell = dict(payload.get("shell") or {})
+    leftover = shell.pop("chatPanelWidths", None)
+    if "chat" not in layouts and isinstance(leftover, dict):
+        migrated: dict[str, int] = {}
+        for source, dest in (("leftPanelWidth", "left"), ("rightPanelWidth", "right")):
+            raw = leftover.get(source)
+            try:
+                numeric = round(float(raw))
+            except (TypeError, ValueError):
+                continue
+            if numeric > 0:
+                migrated[dest] = numeric
+        if migrated:
+            layouts["chat"] = migrated
+    payload["paneLayouts"] = layouts
+    payload["shell"] = shell
+    return payload
+
+
 def _normalize_payload(raw: object) -> dict[str, Any]:
     base = _empty_payload()
     if not isinstance(raw, dict):
@@ -92,7 +130,7 @@ def _normalize_payload(raw: object) -> dict[str, Any]:
     updated = raw.get("updatedAt")
     if isinstance(updated, str) and updated.strip():
         base["updatedAt"] = updated.strip()
-    return base
+    return _migrate_legacy_chat_panel_widths(base)
 
 
 def load_workbench_ui_preferences() -> dict[str, Any]:
@@ -103,7 +141,12 @@ def load_workbench_ui_preferences() -> dict[str, Any]:
             payload = json.loads(PREFERENCES_PATH.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return _empty_payload()
-        return _normalize_payload(payload)
+        normalized = _normalize_payload(payload)
+        if _shell_has_leftover_chat_widths(payload):
+            normalized["schemaVersion"] = SCHEMA_VERSION
+            normalized["updatedAt"] = _utc_now()
+            _write_payload_unlocked(normalized)
+        return normalized
 
 
 def save_workbench_ui_preferences(payload: dict[str, Any] | None) -> dict[str, Any]:
@@ -127,18 +170,30 @@ def save_workbench_ui_preferences(payload: dict[str, Any] | None) -> dict[str, A
                     current["paneLayouts"] = layouts
 
         if "shell" in incoming and isinstance(incoming.get("shell"), dict):
+            incoming_shell = _coerce_shell(incoming.get("shell"))
+            leftover_chat = incoming_shell.pop("chatPanelWidths", None)
+            layouts = dict(current.get("paneLayouts") or {})
+            if leftover_chat and "chat" not in layouts:
+                migrated: dict[str, int] = {}
+                for source, dest in (("leftPanelWidth", "left"), ("rightPanelWidth", "right")):
+                    raw = leftover_chat.get(source)
+                    try:
+                        numeric = round(float(raw))
+                    except (TypeError, ValueError):
+                        continue
+                    if numeric > 0:
+                        migrated[dest] = numeric
+                if migrated:
+                    layouts["chat"] = migrated
+                    current["paneLayouts"] = layouts
             shell = dict(current.get("shell") or {})
-            shell.update(_coerce_shell(incoming.get("shell")))
+            shell.pop("chatPanelWidths", None)
+            shell.update(incoming_shell)
             current["shell"] = shell
 
         current["schemaVersion"] = SCHEMA_VERSION
         current["updatedAt"] = _utc_now()
-
-        PREFERENCES_PATH.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = PREFERENCES_PATH.with_suffix(".tmp")
-        text = json.dumps(current, ensure_ascii=False, indent=2) + "\n"
-        tmp_path.write_text(text, encoding="utf-8")
-        tmp_path.replace(PREFERENCES_PATH)
+        _write_payload_unlocked(current)
         return current
 
 
