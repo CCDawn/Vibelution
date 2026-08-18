@@ -240,6 +240,15 @@ def test_current_repo_source_integrity_uses_git_ls_files() -> None:
     assert "experiments/challenge_cup_spike_coding/sci096_dandi_probe.py" in paths
     assert "core/research/experiment_adapters/gpu_operator.py" in paths
     assert "core/research/experiment_adapters/neural_spike.py" in paths
+    for required in (
+        "core/web/services/team_workflow/challenge_cup_dev_controls.py",
+        "core/web/routes/team_workflows/challenge_cup_dev_controls.py",
+        "core/web/routes/team_workflows/challenge_cup_dev_controls_models.py",
+        "web/src/api/teamExperiment.ts",
+        "web/src/api/types/challengeCup.ts",
+        "web/src/routes/teams/research-workflow/ChallengeMvpProgressPanel.tsx",
+    ):
+        assert required in paths, required
     schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
     assert [error.message for error in Draft202012Validator(schema).iter_errors(manifest)] == []
 
@@ -252,3 +261,35 @@ def test_source_boundary_uses_only_core_no_console_helpers() -> None:
     assert "import scripts" not in source
     assert "no_window_subprocess_kwargs" not in source
     assert "no_console_subprocess_kwargs" in source
+    run_r1_source = source.split("def run_r1_pytest")[1]
+    assert "**no_console_subprocess_kwargs()" in run_r1_source
+    assert "timeout=R1_PYTEST_TIMEOUT_SECONDS" in run_r1_source
+
+
+def test_r1_pytest_uses_bounded_timeout_constant() -> None:
+    """R1 pytest must run under an explicit, bounded timeout so a hung clone
+    never blocks the report indefinitely."""
+    timeout = source_boundary.R1_PYTEST_TIMEOUT_SECONDS
+    assert isinstance(timeout, (int, float))
+    assert 0 < timeout <= 3600
+
+
+def test_run_r1_pytest_converts_timeout_to_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tree = tmp_path / "clone"
+    target = "tests/test_dummy.py"
+    path = tree / target
+    path.parent.mkdir(parents=True)
+    path.write_text("def test_ok(): pass\n", encoding="utf-8")
+
+    def fake_run(*args, **kwargs):
+        raise subprocess.TimeoutExpired(
+            cmd=args[0] if args else [], timeout=kwargs.get("timeout", 0)
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    failures = source_boundary.run_r1_pytest(tree, python="python", targets=(target,))
+    assert failures != []
+    assert any("timed out" in item for item in failures)

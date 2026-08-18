@@ -31,6 +31,7 @@ from core.infrastructure.no_console_git import (
 from .resources import CORE_BEHAVIOR_HASH, CORE_POLICY_HASH
 
 GIT_TIMEOUT_SECONDS = 120.0
+R1_PYTEST_TIMEOUT_SECONDS = 1800.0
 
 MANIFEST_KIND = "challenge_cup_submission_source_manifest"
 SCHEMA_VERSION = 1
@@ -78,6 +79,7 @@ INCLUDE_GLOBS: tuple[str, ...] = (
     "tests/test_platform_flow_readiness.py",
     "tests/test_platform_flow_ready.py",
     "tests/test_challenge_cup_source_boundary.py",
+    "tests/test_challenge_cup_platform_controls.py",
     "tests/test_challenge_cup_submission_source_manifest_schema.py",
     "tests/test_challenge_cup_export.py",
     "tests/test_challenge_cup_spike_coding_*.py",
@@ -87,6 +89,12 @@ INCLUDE_GLOBS: tuple[str, ...] = (
     "tests/test_research_claim_ledger.py",
     "tests/test_research_personal_memory_scope.py",
     "tests/test_experiment_adapter_*.py",
+    "core/web/services/team_workflow/challenge_cup_dev_controls.py",
+    "core/web/routes/team_workflows/challenge_cup_dev_controls.py",
+    "core/web/routes/team_workflows/challenge_cup_dev_controls_models.py",
+    "web/src/api/teamExperiment.ts",
+    "web/src/api/types/challengeCup.ts",
+    "web/src/routes/teams/research-workflow/ChallengeMvpProgressPanel.tsx",
 )
 
 REQUIRED_PATHS: tuple[str, ...] = (
@@ -107,6 +115,12 @@ REQUIRED_PATHS: tuple[str, ...] = (
     "experiments/challenge_cup_spike_coding/sci096_epoch_discrimination.py",
     "scripts/challenge_cup/source_manifest.py",
     "scripts/challenge_cup/clean_clone_verify.py",
+    "core/web/services/team_workflow/challenge_cup_dev_controls.py",
+    "core/web/routes/team_workflows/challenge_cup_dev_controls.py",
+    "core/web/routes/team_workflows/challenge_cup_dev_controls_models.py",
+    "web/src/api/teamExperiment.ts",
+    "web/src/api/types/challengeCup.ts",
+    "web/src/routes/teams/research-workflow/ChallengeMvpProgressPanel.tsx",
 )
 
 R1_PYTEST_TARGETS: tuple[str, ...] = (
@@ -115,6 +129,7 @@ R1_PYTEST_TARGETS: tuple[str, ...] = (
     "tests/test_experiment_adapter_neural_spike.py",
     "tests/test_experiment_adapter_fashion_mnist.py",
     "tests/test_challenge_cup_source_boundary.py",
+    "tests/test_challenge_cup_platform_controls.py",
     "tests/test_platform_flow_readiness.py",
     "tests/test_research_workflow_hypothesis_rounds.py",
     "tests/test_research_workflow_research_templates.py",
@@ -432,26 +447,33 @@ def run_r1_pytest(tree: Path, *, python: str, targets: Sequence[str]) -> list[st
     env["PYTHONPATH"] = str(tree)
     env.pop("PYTEST_CURRENT_TEST", None)
     env["PYTEST_ADDOPTS"] = ""
-    result = subprocess.run(
-        [
-            python,
-            "-m",
-            "pytest",
-            *existing,
-            "-q",
-            "--tb=short",
-            "-p",
-            "no:cacheprovider",
-            "-k",
-            "not test_current_repo_source_integrity_uses_git_ls_files",
-        ],
-        cwd=tree,
-        capture_output=True,
-        text=True,
-        env=env,
-        check=False,
-        **no_console_subprocess_kwargs(),
-    )
+    try:
+        result = subprocess.run(
+            [
+                python,
+                "-m",
+                "pytest",
+                *existing,
+                "-q",
+                "--tb=short",
+                "-p",
+                "no:cacheprovider",
+                "-k",
+                "not test_current_repo_source_integrity_uses_git_ls_files",
+            ],
+            cwd=tree,
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+            timeout=R1_PYTEST_TIMEOUT_SECONDS,
+            **no_console_subprocess_kwargs(),
+        )
+    except subprocess.TimeoutExpired:
+        failures.append(
+            f"R1 pytest timed out after {R1_PYTEST_TIMEOUT_SECONDS}s"
+        )
+        return failures
     if result.returncode != 0:
         detail = (result.stdout or "")[-2000:] + (result.stderr or "")[-1000:]
         failures.append(f"R1 pytest failed ({result.returncode}): {detail.strip()}")

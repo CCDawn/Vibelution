@@ -12,6 +12,7 @@ from core.research.competition.platform_flow_ready import (
     gate_control_flow_contracts,
     gate_model_receipt,
     gate_multimodal,
+    gate_product_projection,
     gate_program_hash,
     gate_r0,
     overall_status,
@@ -33,6 +34,7 @@ def test_program_hash_and_dev_control_gates_pass() -> None:
 
 def test_r1_pytest_targets_exist_and_exclude_this_report() -> None:
     assert "tests/test_platform_flow_ready.py" not in R1_PYTEST_TARGETS
+    assert "tests/test_challenge_cup_platform_controls.py" in R1_PYTEST_TARGETS
     missing = [path for path in R1_PYTEST_TARGETS if not (ROOT / path).is_file()]
     assert missing == []
 
@@ -53,6 +55,9 @@ def test_skipped_r1_pytest_cannot_be_ready(tmp_path: Path) -> None:
 def test_platform_flow_readiness_report_is_ready_for_dev_control_flow(
     tmp_path: Path,
 ) -> None:
+    # gate_r1 extracts a clean clone and runs the full R1 pytest target list
+    # there; tests/test_challenge_cup_platform_controls.py is on that list, so
+    # this READY proves the D14A DEV control contract runs inside the clone.
     report = build_platform_flow_readiness_report(
         ROOT,
         clone_dest=tmp_path / "clone",
@@ -106,3 +111,32 @@ def test_overall_status_does_not_promote_failures() -> None:
     assert overall_status([{"status": "PASS"}, {"status": "FAIL"}]) == "NOT_READY"
     assert overall_status([{"status": "PASS"}, {"status": "BLOCKED"}]) == "BLOCKED"
     assert overall_status([{"status": "PASS"}]) == "READY"
+
+
+def test_gate_product_projection_passes_on_current_repo() -> None:
+    gate = gate_product_projection(ROOT)
+    assert gate["status"] == "PASS", gate
+
+
+def test_gate_product_projection_fails_when_dev_markers_missing(tmp_path: Path) -> None:
+    panel = (
+        tmp_path
+        / "web"
+        / "src"
+        / "routes"
+        / "teams"
+        / "research-workflow"
+        / "ChallengeMvpProgressPanel.tsx"
+    )
+    panel.parent.mkdir(parents=True)
+    panel.write_text("competitionProgramProjection requiredDeepExperiments", encoding="utf-8")
+    types = tmp_path / "web" / "src" / "api" / "types" / "challengeCup.ts"
+    types.parent.mkdir(parents=True, exist_ok=True)
+    types.write_text("CompetitionProgramProjection", encoding="utf-8")
+    api = tmp_path / "web" / "src" / "api" / "teamExperiment.ts"
+    api.parent.mkdir(parents=True, exist_ok=True)
+    api.write_text("export function noDevApi() {}", encoding="utf-8")
+
+    gate = gate_product_projection(tmp_path)
+    assert gate["status"] == "FAIL"
+    assert "typed DEV API" in gate["detail"]

@@ -381,21 +381,50 @@ def gate_multimodal() -> dict[str, str]:
 def gate_product_projection(repo: Path) -> dict[str, str]:
     panel = repo / "web" / "src" / "routes" / "teams" / "research-workflow" / "ChallengeMvpProgressPanel.tsx"
     types = repo / "web" / "src" / "api" / "types" / "challengeCup.ts"
-    missing = [str(path.relative_to(repo)) for path in (panel, types) if not path.is_file()]
+    api = repo / "web" / "src" / "api" / "teamExperiment.ts"
+    missing = [str(path.relative_to(repo)) for path in (panel, types, api) if not path.is_file()]
     if missing:
         return _gate("product_projection", "FAIL", f"missing {missing}")
     panel_text = panel.read_text(encoding="utf-8")
     types_text = types.read_text(encoding="utf-8")
+    api_text = api.read_text(encoding="utf-8")
     if "competitionProgramProjection" not in panel_text or "requiredDeepExperiments" not in panel_text:
         return _gate("product_projection", "FAIL", "progress panel does not project Program v2")
     if "CompetitionProgramProjection" not in types_text:
         return _gate("product_projection", "FAIL", "challenge cup API types are missing")
-    if "PlatformFlowReady CLI" not in panel_text or "scripts/challenge_cup/platform_flow_ready.py" not in panel_text:
-        return _gate("product_projection", "FAIL", "progress panel does not surface PlatformFlowReady CLI")
+    for marker in (
+        "fetchChallengeCupDevControlSnapshot",
+        "runChallengeCupDevReadiness",
+        "runChallengeCupDevBatch",
+        "ChallengeCupDevControlSnapshot",
+        "/dev-controls",
+    ):
+        if marker not in api_text:
+            return _gate("product_projection", "FAIL", f"typed DEV API is missing {marker!r}")
+    for marker in (
+        "ChallengeCupDevControlSnapshot",
+        "ChallengeCupDevNextLegalAction",
+        "ChallengeCupDevBatchProjection",
+        "ChallengeCupDevReadinessProjection",
+    ):
+        if marker not in types_text:
+            return _gate("product_projection", "FAIL", f"typed DEV projection is missing {marker!r}")
+    if "useQuery" not in panel_text or "challengeCupDevControlsSnapshot" not in panel_text:
+        return _gate("product_projection", "FAIL", "panel does not load the DEV snapshot through React Query")
+    for marker in (
+        "nextLegalAction",
+        "run_dev_1_fixture_batch",
+        "run_dev_5_fixture_batch",
+        "RESEARCH_AUTHORIZATION_REQUIRED",
+    ):
+        if marker not in panel_text:
+            return _gate("product_projection", "FAIL", f"DEV nextLegalAction marker is missing {marker!r}")
+    if "data-dev-controls" not in panel_text:
+        return _gate("product_projection", "FAIL", "DEV controls product markers are missing")
     return _gate(
         "product_projection",
         "PASS",
-        "Program v2 progress panel and typed projection are present",
+        "Program v2, typed DEV API and DEV control projection are present",
     )
 
 
