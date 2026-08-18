@@ -27,7 +27,6 @@ from core.infrastructure.no_console_git import (
     resolve_git_executable,
     run_git,
 )
-from scripts.windowless_subprocess import no_window_subprocess_kwargs
 
 from .resources import CORE_BEHAVIOR_HASH, CORE_POLICY_HASH
 
@@ -451,7 +450,7 @@ def run_r1_pytest(tree: Path, *, python: str, targets: Sequence[str]) -> list[st
         text=True,
         env=env,
         check=False,
-        **no_window_subprocess_kwargs(),
+        **no_console_subprocess_kwargs(),
     )
     if result.returncode != 0:
         detail = (result.stdout or "")[-2000:] + (result.stderr or "")[-1000:]

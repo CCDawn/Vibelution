@@ -532,6 +532,12 @@ from core.web.services.team_workflow.challenge_question_runs import (
     register_challenge_question_output,
     review_challenge_question_output,
 )
+from core.web.services.team_workflow.challenge_cup_dev_controls import (
+    ChallengeCupDevControlsError,
+    get_challenge_cup_dev_control_snapshot,
+    run_challenge_cup_dev_batch,
+    run_challenge_cup_dev_readiness,
+)
 from core.web.services.team_workflow.experiment_kernel import (
     _require_formal_full_run_ready,
     _require_explicit_experiment_design_frozen,

@@ -1,6 +1,7 @@
 """D14A Challenge Cup DEV platform control tests.
 
-Covers pure batch invariants, service invariants (team-scoped persistence),
+Covers pure batch invariants, service invariants (team-scoped persistence,
+clean-tree requirement, bounded runtime-scene evidence, ordered nextLegalAction),
 HTTP contracts and error mapping. No real experiment, Qwen, network, CUDA/GPU,
 DANDI or formal submission is ever invoked.
 """
@@ -23,15 +24,21 @@ from core.research.competition.dev_control_batch import (
     DevBatchError,
     new_dev_batch_state,
     project_dev_batch_checkpoint,
+    project_dev_batch_outcomes,
     run_dev_fixture_batch,
     validate_dev_batch_max_items,
     validate_dev_batch_plan,
 )
 from core.research.competition.platform_flow_ready import REPORT_KIND
 from core.web.routes.team_workflows import challenge_cup_dev_controls as dev_controls_routes
+from core.web.services import team_service
 from core.web.services.team_workflow import challenge_cup_dev_controls as dev_controls_service
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
+
+DEV_CONTROLS_BASE = (
+    "/api/teams/research-team/workflow-orchestration/challenge-program/dev-controls"
+)
 
 
 def _client() -> TestClient:
@@ -139,6 +146,13 @@ def test_batch_checkpoint_projection_is_explicit() -> None:
     assert projection["statusSummary"]["succeeded"] == 2
 
 
+def test_outcomes_project_to_camel_case_wire_shape() -> None:
+    projected = project_dev_batch_outcomes(
+        [{"question_id": "SCI-091", "outcome": "succeeded"}]
+    )
+    assert projected == [{"questionId": "SCI-091", "outcome": "succeeded"}]
+
+
 # ---------------------------------------------------------------------------
 # Service invariants (team-scoped persistence)
 # ---------------------------------------------------------------------------
@@ -151,6 +165,9 @@ def controls_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         dev_controls_service,
         "team_workspace_root",
         lambda team_id: root / team_id,
+    )
+    monkeypatch.setattr(
+        dev_controls_service.team_service, "get_team", lambda team_id: {"teamId": team_id}
     )
     return root
 
@@ -169,7 +186,19 @@ def test_snapshot_starts_unrun_without_inventing_lifecycle(controls_root: Path) 
     assert "dev-125" in snapshot["boundary"]["forbiddenPlans"]
 
 
-def test_readiness_run_persists_report_and_snapshot_derives_next_action(
+def test_snapshot_rejects_missing_team(
+    controls_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def missing(team_id: str) -> dict:
+        raise team_service.TeamNotFoundError("Team not found.")
+
+    monkeypatch.setattr(dev_controls_service.team_service, "get_team", missing)
+    with pytest.raises(team_service.TeamNotFoundError):
+        dev_controls_service.get_challenge_cup_dev_control_snapshot("missing-team")
+
+
+def test_readiness_run_requires_clean_tree_and_persists_report(
     controls_root: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -194,7 +223,7 @@ def test_readiness_run_persists_report_and_snapshot_derives_next_action(
     assert response["cleanedUp"] is True
     assert calls[0]["mode"] == "dev"
     assert calls[0]["runPytest"] is True
-    assert calls[0]["requireClean"] is False
+    assert calls[0]["requireClean"] is True
     assert "clone" in calls[0]["cloneDest"]
 
     report_file = controls_root / "team-1" / "challenge_cup_dev_controls" / "readiness_report.json"
@@ -207,7 +236,7 @@ def test_readiness_run_persists_report_and_snapshot_derives_next_action(
     assert snapshot["report"] is not None
     assert snapshot["report"]["status"] == "READY"
     assert snapshot["report"]["realCampaignAllowed"] is False
-    assert snapshot["nextLegalAction"] == "RESEARCH_AUTHORIZATION_REQUIRED"
+    assert snapshot["nextLegalAction"] == "run_dev_1_fixture_batch"
 
 
 def test_readiness_rejects_non_dev_mode_before_any_build(
@@ -228,6 +257,7 @@ def test_dev_1_batch_persists_checkpoint_team_scoped(controls_root: Path) -> Non
     assert response["gateId"] == "G1"
     assert response["checkpoint"]["succeededCount"] == 1
     assert response["persisted"] is True
+    assert response["outcomes"] == [{"questionId": "SCI-091", "outcome": "succeeded"}]
 
     batch_file = controls_root / "team-1" / "challenge_cup_dev_controls" / "batches" / "dev-1.json"
     assert batch_file.is_file()
@@ -235,6 +265,141 @@ def test_dev_1_batch_persists_checkpoint_team_scoped(controls_root: Path) -> Non
     assert snapshot["batches"]["dev-1"]["succeededCount"] == 1
     assert snapshot["batches"]["dev-1"]["pendingCount"] == 0
     assert snapshot["batches"]["dev-1"]["canResume"] is False
+
+
+def test_next_legal_action_advances_only_after_persisted_state(
+    controls_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_build(repo, *, clone_dest, require_clean, run_pytest, mode):
+        return _ready_report()
+
+    monkeypatch.setattr(
+        dev_controls_service, "build_platform_flow_readiness_report", fake_build
+    )
+
+    def action() -> str:
+        return dev_controls_service.get_challenge_cup_dev_control_snapshot("team-1")[
+            "nextLegalAction"
+        ]
+
+    assert action() == "run_dev_readiness"
+
+    dev_controls_service.run_challenge_cup_dev_readiness("team-1")
+    assert action() == "run_dev_1_fixture_batch"
+
+    dev_controls_service.run_challenge_cup_dev_batch("team-1", "dev-1", None)
+    assert action() == "run_dev_5_fixture_batch"
+
+    dev_controls_service.run_challenge_cup_dev_batch("team-1", "dev-5", 2)
+    assert action() == "resume_dev_5_fixture_batch"
+
+    dev_controls_service.run_challenge_cup_dev_batch("team-1", "dev-5", None)
+    assert action() == "RESEARCH_AUTHORIZATION_REQUIRED"
+
+
+def _persist_readiness_report(controls_root: Path, team_id: str) -> None:
+    path = controls_root / team_id / "challenge_cup_dev_controls" / "readiness_report.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "report": _ready_report(),
+                "realCampaignAllowed": False,
+                "updatedAt": "2026-08-18T00:00:00Z",
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+
+def _persist_batch_checkpoint(
+    controls_root: Path,
+    team_id: str,
+    plan_id: str,
+    checkpoint: dict,
+) -> None:
+    path = controls_root / team_id / "challenge_cup_dev_controls" / "batches" / f"{plan_id}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "planId": plan_id,
+                "updatedAt": "2026-08-18T00:00:00Z",
+                "checkpoint": checkpoint,
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_failed_dev_1_returns_repair_and_does_not_advance_to_dev_5(
+    controls_root: Path,
+) -> None:
+    _persist_readiness_report(controls_root, "team-1")
+    state = new_dev_batch_state("dev-1")
+    run_dev_fixture_batch(state)
+    state.record_failure(state.plan.question_ids[0], "fixture rejected")
+    _persist_batch_checkpoint(controls_root, "team-1", "dev-1", state.to_checkpoint())
+
+    snapshot = dev_controls_service.get_challenge_cup_dev_control_snapshot("team-1")
+    assert snapshot["batches"]["dev-1"]["failedCount"] == 1
+    assert snapshot["nextLegalAction"] == "repair_dev_1_fixture_batch"
+
+
+def test_blocked_dev_1_returns_repair_and_does_not_advance_to_dev_5(
+    controls_root: Path,
+) -> None:
+    _persist_readiness_report(controls_root, "team-1")
+    state = new_dev_batch_state("dev-1")
+    run_dev_fixture_batch(state)
+    state.record_blocked(state.plan.question_ids[0], "fixture blocked")
+    _persist_batch_checkpoint(controls_root, "team-1", "dev-1", state.to_checkpoint())
+
+    snapshot = dev_controls_service.get_challenge_cup_dev_control_snapshot("team-1")
+    assert snapshot["batches"]["dev-1"]["blockedCount"] == 1
+    assert snapshot["nextLegalAction"] == "repair_dev_1_fixture_batch"
+
+
+def test_failed_dev_5_returns_repair_and_does_not_advance_to_authorization(
+    controls_root: Path,
+) -> None:
+    _persist_readiness_report(controls_root, "team-1")
+    dev_1 = new_dev_batch_state("dev-1")
+    run_dev_fixture_batch(dev_1)
+    _persist_batch_checkpoint(controls_root, "team-1", "dev-1", dev_1.to_checkpoint())
+
+    dev_5 = new_dev_batch_state("dev-5")
+    run_dev_fixture_batch(dev_5, max_items=2)
+    dev_5.record_failure(dev_5.plan.question_ids[0], "fixture rejected")
+    _persist_batch_checkpoint(controls_root, "team-1", "dev-5", dev_5.to_checkpoint())
+
+    snapshot = dev_controls_service.get_challenge_cup_dev_control_snapshot("team-1")
+    assert snapshot["batches"]["dev-1"]["failedCount"] == 0
+    assert snapshot["batches"]["dev-5"]["failedCount"] == 1
+    assert snapshot["nextLegalAction"] == "repair_dev_5_fixture_batch"
+
+
+def test_blocked_dev_5_returns_repair_and_does_not_advance_to_authorization(
+    controls_root: Path,
+) -> None:
+    _persist_readiness_report(controls_root, "team-1")
+    dev_1 = new_dev_batch_state("dev-1")
+    run_dev_fixture_batch(dev_1)
+    _persist_batch_checkpoint(controls_root, "team-1", "dev-1", dev_1.to_checkpoint())
+
+    dev_5 = new_dev_batch_state("dev-5")
+    run_dev_fixture_batch(dev_5, max_items=2)
+    dev_5.record_blocked(dev_5.plan.question_ids[0], "fixture blocked")
+    _persist_batch_checkpoint(controls_root, "team-1", "dev-5", dev_5.to_checkpoint())
+
+    snapshot = dev_controls_service.get_challenge_cup_dev_control_snapshot("team-1")
+    assert snapshot["batches"]["dev-5"]["blockedCount"] == 1
+    assert snapshot["nextLegalAction"] == "repair_dev_5_fixture_batch"
 
 
 def test_dev_5_pause_then_resume_persists_and_never_reruns(controls_root: Path) -> None:
@@ -258,6 +423,54 @@ def test_forbidden_batch_plans_fail_closed(controls_root: Path) -> None:
             dev_controls_service.run_challenge_cup_dev_batch("team-1", plan_id, None)
 
 
+def test_service_records_bounded_runtime_scene_transitions(
+    controls_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[dict] = []
+
+    def fake_record(component, phase, event_code, **kwargs):
+        events.append({"component": component, "phase": phase, "event_code": event_code, **kwargs})
+
+    monkeypatch.setattr(dev_controls_service, "record_runtime_scene_event", fake_record)
+    dev_controls_service.run_challenge_cup_dev_batch("team-1", "dev-1", None)
+
+    codes = [item["event_code"] for item in events]
+    assert codes == [
+        "challenge_cup_dev_controls.batch.started",
+        "challenge_cup_dev_controls.batch.succeeded",
+    ]
+    for item in events:
+        assert item["component"] == "team_workflow_orchestration"
+        fields = item.get("fields") or {}
+        assert "teamId" in fields
+        assert "checkpoint" not in fields
+        assert "outcomes" not in fields
+
+
+def test_service_records_rejection_and_failure_scene_events(
+    controls_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+
+    def fake_record(component, phase, event_code, **kwargs):
+        events.append(event_code)
+
+    monkeypatch.setattr(dev_controls_service, "record_runtime_scene_event", fake_record)
+    with pytest.raises(DevBatchError, match="not authorized"):
+        dev_controls_service.run_challenge_cup_dev_batch("team-1", "dev-12", None)
+    assert "challenge_cup_dev_controls.batch.rejected" in events
+
+    def fail_run(state, *, max_items=None, on_item=None):
+        raise RuntimeError("fixture boom")
+
+    monkeypatch.setattr(dev_controls_service, "run_dev_fixture_batch", fail_run)
+    with pytest.raises(RuntimeError, match="fixture boom"):
+        dev_controls_service.run_challenge_cup_dev_batch("team-1", "dev-1", None)
+    assert "challenge_cup_dev_controls.batch.failed" in events
+
+
 # ---------------------------------------------------------------------------
 # HTTP contracts and error mapping
 # ---------------------------------------------------------------------------
@@ -278,7 +491,7 @@ def _snapshot_payload() -> dict:
             "realCampaignAllowed": False,
             "authorizedPlans": ["dev-1", "dev-5"],
             "forbiddenPlans": ["dev-12", "dev-125"],
-            "forbiddenFeatures": [],
+            "forbiddenFeatures": ["real_qwen_invocation"],
             "fixtureOnly": True,
         },
     }
@@ -288,13 +501,14 @@ def test_get_dev_control_snapshot_http_contract(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(
         dev_controls_routes, "get_challenge_cup_dev_control_snapshot", lambda team_id: _snapshot_payload()
     )
-    response = _client().get("/api/teams/research-team/challenge-cup-dev-controls")
+    response = _client().get(f"{DEV_CONTROLS_BASE}")
     assert response.status_code == 200
     body = response.json()
     assert body["teamId"] == "research-team"
     assert body["mode"] == "dev"
     assert body["realCampaignAllowed"] is False
     assert body["boundary"]["authorizedPlans"] == ["dev-1", "dev-5"]
+    assert body["boundary"]["fixtureOnly"] is True
 
 
 def test_post_readiness_http_contract(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -321,7 +535,7 @@ def test_post_readiness_http_contract(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(dev_controls_routes, "run_challenge_cup_dev_readiness", fake_run)
     response = _client().post(
-        "/api/teams/research-team/challenge-cup-dev-controls/readiness",
+        f"{DEV_CONTROLS_BASE}/readiness",
         json={"mode": "dev"},
     )
     assert response.status_code == 200
@@ -340,7 +554,7 @@ def test_post_batch_http_contract(monkeypatch: pytest.MonkeyPatch) -> None:
             "planId": plan_id,
             "gateId": "G1",
             "attempted": ["SCI-091"],
-            "outcomes": [{"question_id": "SCI-091", "outcome": "succeeded"}],
+            "outcomes": [{"questionId": "SCI-091", "outcome": "succeeded"}],
             "checkpoint": {
                 "schemaVersion": 1,
                 "planId": "dev-1",
@@ -363,7 +577,7 @@ def test_post_batch_http_contract(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(dev_controls_routes, "run_challenge_cup_dev_batch", fake_run)
     response = _client().post(
-        "/api/teams/research-team/challenge-cup-dev-controls/batches/dev-1",
+        f"{DEV_CONTROLS_BASE}/batches/dev-1",
         json={"maxItems": None},
     )
     assert response.status_code == 200
@@ -371,30 +585,51 @@ def test_post_batch_http_contract(monkeypatch: pytest.MonkeyPatch) -> None:
     assert body["planId"] == "dev-1"
     assert body["checkpoint"]["succeededCount"] == 1
     assert body["checkpoint"]["canResume"] is False
+    assert body["outcomes"] == [{"questionId": "SCI-091", "outcome": "succeeded"}]
 
 
-def test_forbidden_batch_plan_maps_to_422(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_forbidden_batch_plan_maps_to_422(
+    controls_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     for plan_id in ("dev-12", "dev-125"):
         response = _client().post(
-            f"/api/teams/research-team/challenge-cup-dev-controls/batches/{plan_id}",
+            f"{DEV_CONTROLS_BASE}/batches/{plan_id}",
             json={"maxItems": None},
         )
         assert response.status_code == 422
         assert "not authorized" in response.json()["detail"]
 
 
-def test_non_dev_readiness_mode_maps_to_422() -> None:
+def test_non_dev_readiness_mode_maps_to_422(
+    controls_root: Path,
+) -> None:
     response = _client().post(
-        "/api/teams/research-team/challenge-cup-dev-controls/readiness",
+        f"{DEV_CONTROLS_BASE}/readiness",
         json={"mode": "formal"},
     )
     assert response.status_code == 422
     assert "DEV-only" in response.json()["detail"]
 
 
-def test_out_of_bounds_max_items_maps_to_422(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_out_of_bounds_max_items_maps_to_422(
+    controls_root: Path,
+) -> None:
     response = _client().post(
-        "/api/teams/research-team/challenge-cup-dev-controls/batches/dev-1",
+        f"{DEV_CONTROLS_BASE}/batches/dev-1",
         json={"maxItems": MAX_DEV_BATCH_MAX_ITEMS + 1},
     )
     assert response.status_code == 422
+
+
+def test_missing_team_maps_to_404(
+    controls_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def missing(team_id: str) -> dict:
+        raise team_service.TeamNotFoundError("Team not found.")
+
+    monkeypatch.setattr(dev_controls_service.team_service, "get_team", missing)
+    response = _client().get(DEV_CONTROLS_BASE)
+    assert response.status_code == 404
+    assert "Team not found" in response.json()["detail"]

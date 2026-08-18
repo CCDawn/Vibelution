@@ -13,8 +13,10 @@ from core.research.competition.platform_flow_ready import (
     gate_model_receipt,
     gate_multimodal,
     gate_program_hash,
+    gate_r0,
     overall_status,
 )
+from core.research.competition import platform_flow_ready as platform_flow_ready_module
 from core.research.competition.source_boundary import R1_PYTEST_TARGETS
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -65,6 +67,39 @@ def test_platform_flow_readiness_report_is_ready_for_dev_control_flow(
     assert failed == [], failed
     assert report["status"] == "READY"
     assert report["nextLegalAction"] == "RESEARCH_AUTHORIZATION_REQUIRED"
+
+
+def test_readiness_defaults_require_clean_tree() -> None:
+    """The report defaults to a clean-source gate so dirty trees never regress to READY."""
+    import inspect
+
+    params = inspect.signature(build_platform_flow_readiness_report).parameters
+    assert params["require_clean"].default is True
+    assert params["run_pytest"].default is True
+
+
+def test_gate_r0_fails_on_dirty_tree(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    repo = tmp_path / "repo"
+
+    def fake_evaluate(repo_path, *, policy=None, require_clean=False):
+        assert require_clean is True
+        return {
+            "source_integrity": "FAIL",
+            "sourceCommit": "",
+            "entryCount": 0,
+            "manifest": None,
+            "failures": ["working tree is dirty; refuse to freeze a source manifest"],
+        }
+
+    monkeypatch.setattr(
+        platform_flow_ready_module, "evaluate_source_integrity", fake_evaluate
+    )
+    gate = gate_r0(repo, require_clean=True)
+    assert gate["status"] == "FAIL"
+    assert "dirty" in gate["detail"]
 
 
 def test_overall_status_does_not_promote_failures() -> None:

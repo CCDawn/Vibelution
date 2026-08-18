@@ -63,6 +63,27 @@ def test_facade_public_surface_includes_key_exports() -> None:
         assert hasattr(facade, name), name
 
 
+def test_facade_reexports_challenge_cup_dev_controls() -> None:
+    """D14A: the facade re-exports the DEV control behavior so routes import
+    through the stable facade instead of reaching into the pack module."""
+    from core.web.services import team_workflow_orchestration_service as facade
+
+    for name in (
+        "get_challenge_cup_dev_control_snapshot",
+        "run_challenge_cup_dev_readiness",
+        "run_challenge_cup_dev_batch",
+        "ChallengeCupDevControlsError",
+    ):
+        assert hasattr(facade, name), name
+
+    facade_src = FACADE.read_text(encoding="utf-8")
+    assert "challenge_cup_dev_controls" in facade_src
+
+    route_src = (ROUTES / "challenge_cup_dev_controls.py").read_text(encoding="utf-8")
+    assert "team_workflow_orchestration_service" in route_src
+    assert "team_workflow.challenge_cup_dev_controls" not in route_src
+
+
 def test_source_collection_stages_package_split() -> None:
     """Clarity B6: stages re-exports stage_session + stage_writeback."""
     sc = PACK / "source_collection"

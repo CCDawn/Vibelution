@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from jsonschema import Draft202012Validator
 
+from core.research.competition import source_boundary
 from core.research.competition.source_boundary import (
     SourceBoundaryError,
     SourceBoundaryPolicy,
@@ -161,6 +162,16 @@ def test_require_clean_rejects_dirty_worktree(tmp_path: Path) -> None:
         build_source_manifest(repo, policy=policy, require_clean=True)
 
 
+def test_evaluate_source_integrity_fails_on_dirty_tree_for_r0(tmp_path: Path) -> None:
+    """R0 never reports PASS on a dirty tree, so READY cannot regress."""
+    repo = _init_repo(tmp_path / "repo")
+    _commit_tree(repo, {"core/research/competition/resources.py": "tracked = True\n"})
+    (repo / "core/research/competition/resources.py").write_text("dirty\n", encoding="utf-8")
+    report = evaluate_source_integrity(repo, require_clean=True)
+    assert report["source_integrity"] == "FAIL"
+    assert any("working tree is dirty" in item for item in report["failures"])
+
+
 def test_manifest_hashes_head_blob_not_dirty_worktree(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path / "repo")
     schema = SCHEMA_PATH.read_text(encoding="utf-8")
@@ -231,3 +242,13 @@ def test_current_repo_source_integrity_uses_git_ls_files() -> None:
     assert "core/research/experiment_adapters/neural_spike.py" in paths
     schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
     assert [error.message for error in Draft202012Validator(schema).iter_errors(manifest)] == []
+
+
+def test_source_boundary_uses_only_core_no_console_helpers() -> None:
+    """R1 must never import from scripts/ and must route waitable subprocesses
+    through the core no-console helper (no visible console windows)."""
+    source = Path(source_boundary.__file__).read_text(encoding="utf-8")
+    assert "from scripts" not in source
+    assert "import scripts" not in source
+    assert "no_window_subprocess_kwargs" not in source
+    assert "no_console_subprocess_kwargs" in source

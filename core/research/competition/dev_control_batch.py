@@ -8,6 +8,7 @@ submission, and it rejects dev-12 / dev-125 and formal/real scopes fail-closed.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any, Callable
 
 from core.research.competition.catalog_execution import (
@@ -272,3 +273,21 @@ def project_dev_batch_checkpoint(
 ) -> dict[str, Any]:
     state = CatalogExecutionState.from_checkpoint(checkpoint)
     return project_dev_batch_state(state, updated_at=updated_at)
+
+
+def project_dev_batch_outcomes(
+    outcomes: Sequence[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Project raw batch outcome items into the typed public camelCase shape.
+
+    The internal state machine emits ``question_id``/``outcome`` items; the
+    public wire contract is camelCase and must never leak the internal key.
+    """
+    return [
+        {
+            "questionId": str(item.get("question_id") or ""),
+            "outcome": str(item.get("outcome") or ""),
+        }
+        for item in outcomes
+        if isinstance(item, dict)
+    ]
