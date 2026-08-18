@@ -53,9 +53,8 @@ describe("VDenseTable", () => {
     expect(html).toContain("w-full");
     expect(html).toContain('style="min-width:300px"');
     expect(html).toContain('data-vui-fill="true"');
-    expect(html).toContain('style="min-width:220px"');
+    expect(html).toContain('style="min-width:220px;width:100%"');
     expect(html).toContain('style="width:80px;min-width:80px"');
-    expect(html).not.toContain("width:220px;");
     expect(resolveDenseTableFillColumnId([
       { id: "path", header: "Path", fill: true, render: () => null },
       { id: "state", header: "State", render: () => null },

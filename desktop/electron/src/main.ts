@@ -154,6 +154,7 @@ import {
     resolveLauncherWindowUrl,
   resolveWorkbenchUrl
 } from "./windows/windowUrlResolver.js";
+import { startOrFocusWorkbenchFromProductEntry } from "./windows/productEntryWorkbench.js";
 import { waitForWorkbenchHttp, workbenchLoopbackUrl } from "./windows/workbenchHttpReady.js";
 import { installBrokenPipeGuards } from "./runtime/brokenPipeGuard.js";
 import { MainWorkbenchCloseTransactionStore } from "./lifecycle/workbenchCloseTransactionStore.js";
@@ -2578,6 +2579,26 @@ function requestOpenWorkbench(): void {
   });
 }
 
+async function startOrFocusWorkbenchFromProductEntryOnShell(): Promise<void> {
+  const provider = windowProvider;
+  if (provider === null) {
+    pendingOpenWorkbenchRequest = true;
+    return;
+  }
+  pendingOpenWorkbenchRequest = false;
+  markWorkbenchOpenRequested();
+  const paths = createDesktopPathsForApp();
+  const url = launcherBootstrap !== null
+    ? await refreshLiveWorkbenchUrl(paths)
+    : resolveOrchestratedWorkbenchUrl();
+  await startOrFocusWorkbenchFromProductEntry({
+    url,
+    waitForHttp: (opts) => waitForWorkbenchHttp(opts),
+    openOrFocus: (target) => provider.openOrFocusWorkbench(target),
+    startLifecycle: () => orchestrateLauncherLifecycle("start", { schemaVersion: 1, path: "open" })
+  });
+}
+
 async function requestOpenWorkbenchFromSecondInstance(): Promise<void> {
   const provider = windowProvider;
   if (provider === null) {
@@ -2589,13 +2610,7 @@ async function requestOpenWorkbenchFromSecondInstance(): Promise<void> {
     const paths = createDesktopPathsForApp();
     await recoverDesktopControlContext(paths, bootstrap, provider, "second_instance_open_workbench");
   }
-  pendingOpenWorkbenchRequest = false;
-  markWorkbenchOpenRequested();
-  const url = bootstrap !== null
-    ? await refreshLiveWorkbenchUrl(createDesktopPathsForApp())
-    : resolveOrchestratedWorkbenchUrl();
-  await waitForWorkbenchHttp({ url, timeoutMs: WORKBENCH_START_READY_WAIT_MS });
-  await provider.openOrFocusWorkbench(url);
+  await startOrFocusWorkbenchFromProductEntryOnShell();
 }
 
 async function applyPendingProjectSlot(projectRoot: string): Promise<void> {
@@ -2764,7 +2779,9 @@ app.whenReady()
       if (firstLifecycle === "open") {
         pendingOpenWorkbenchRequest = false;
         markWorkbenchOpenRequested();
-        await windowProvider.openOrFocusWorkbench();
+        void startOrFocusWorkbenchFromProductEntryOnShell().catch((error: unknown) => {
+          console.warn(error instanceof Error ? error.message : String(error));
+        });
       } else {
         void handleSecondInstanceLifecycleCommand(firstLifecycle).catch((error: unknown) => {
           console.warn(error instanceof Error ? error.message : String(error));

@@ -282,6 +282,22 @@ describe("composeInstanceLifecycleState", () => {
       })
     ).toBe("partial");
   });
+
+  it("ignores leftover observedState when no process, port, or window is live", () => {
+    expect(
+      composeInstanceLifecycleState({
+        phase: "steady",
+        observedState: "open",
+        desiredState: "open",
+        registryStatus: "running",
+        backendAlive: false,
+        backendHealthy: false,
+        backendListening: false,
+        frontendReady: true,
+        windowOpen: false,
+      })
+    ).toBe("closed");
+  });
 });
 
 describe("retired launcher control port overlay", () => {

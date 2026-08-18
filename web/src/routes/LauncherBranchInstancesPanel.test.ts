@@ -134,6 +134,9 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelStyles.statusTable).toContain("w-full");
     expect(panelStyles.panel).toContain("overflow-hidden");
     expect(panelStyles.panel).toContain("min-w-0");
+    expect(panelSource).toContain("minWidth: 150");
+    expect(panelStyles.actionCell).toContain("sticky");
+    expect(panelStyles.actionCell).toContain("min-w-[150px]");
   });
 
   it("renders one global empty surface for zero items and a distinct recoverable filtered miss", () => {

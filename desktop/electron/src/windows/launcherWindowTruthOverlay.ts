@@ -48,16 +48,7 @@ export function composeInstanceLifecycleState(input: {
   if (backendReady && input.frontendReady !== false && input.windowOpen) {
     return "running";
   }
-  const observed = String(input.observedState || "").trim().toLowerCase();
-  if (
-    input.backendAlive
-    || input.backendListening
-    || input.windowOpen
-    || observed === "open"
-    || observed === "partial"
-    || observed === "running"
-    || observed === "healthy"
-  ) {
+  if (input.backendAlive || input.backendListening || input.windowOpen) {
     return "partial";
   }
   return "closed";

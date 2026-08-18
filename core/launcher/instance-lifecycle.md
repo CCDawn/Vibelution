@@ -123,8 +123,8 @@ Registry 字段（隔离行）：
 4. `backendConflict` → `error` / `backend_port_conflict`
 5. `phase == failed` 或 `registryStatus == failed` 或（有 `failureMessage` 且非步骤 3）→ `error`
 6. 后端 READY 且 `frontendReady !== false` 且 `windowOpen` → `running`
-7. 有活信号（进程/监听/窗口/`observedState ∈ {open, partial, running, healthy}`）→ `partial`
-   **禁止**把 `registryStatus == running` 当作活信号
+7. 有活信号（进程/监听/窗口）→ `partial`
+   **禁止**把 `registryStatus == running` 或仅磁盘 `observedState ∈ {open, partial, running, healthy}` 当作活信号。列表 overlay 在 daemon 未跑且后端端口未听时，必须把 leftover `opening/open` 收成 `closed`。
 8. 否则 `closed`
 
 Electron overlay 在写入 `window.open` 后必须用同一函数重算 `lifecycleState`，并传入 `desiredState` / `registryStatus`。

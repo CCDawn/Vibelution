@@ -46,17 +46,23 @@ describe("Electron main public deep-link consumption", () => {
       'recoverDesktopControlContext(paths, bootstrap, provider, "second_instance_open_workbench")',
       helperIndex
     );
-    const waitIndex = source.indexOf(
-      "await waitForWorkbenchHttp({ url, timeoutMs: WORKBENCH_START_READY_WAIT_MS })",
-      helperIndex
-    );
-    const openIndex = source.indexOf("await provider.openOrFocusWorkbench(url)", helperIndex);
+    const startOrFocusIndex = source.indexOf("await startOrFocusWorkbenchFromProductEntryOnShell()", helperIndex);
 
     expect(helperIndex).toBeGreaterThan(0);
     expect(recoveryIndex).toBeGreaterThan(helperIndex);
-    expect(waitIndex).toBeGreaterThan(recoveryIndex);
-    expect(openIndex).toBeGreaterThan(waitIndex);
+    expect(startOrFocusIndex).toBeGreaterThan(recoveryIndex);
     expect(source).toContain("void requestOpenWorkbenchFromSecondInstance().catch((error: unknown) => {");
+  });
+
+  it("treats a product-entry open as start-or-focus instead of a window-only open", () => {
+    const source = readFileSync(mainSourcePath, "utf8");
+    const openIndex = source.indexOf('if (firstLifecycle === "open")');
+    const openBlock = source.slice(openIndex, source.indexOf("} else {", openIndex));
+
+    expect(openIndex).toBeGreaterThan(0);
+    expect(openBlock).toContain("startOrFocusWorkbenchFromProductEntryOnShell()");
+    expect(openBlock).not.toContain("await windowProvider.openOrFocusWorkbench()");
+    expect(source).toContain('orchestrateLauncherLifecycle("start", { schemaVersion: 1, path: "open" })');
   });
 
   it("opens the Launcher window on a bare first launch and resolves the workbench URL without python", () => {

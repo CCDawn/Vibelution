@@ -268,6 +268,8 @@ def _instance_lifecycle_state(
     normalized_phase = str(phase or "").strip().lower()
     normalized_status = str(registry_status or "").strip().lower()
     normalized_desired = str(desired_state or "").strip().lower()
+    # Leftover disk observedState is not a live signal; keep the argument for Python ≡ TS.
+    _ = str(observed_state or "").strip().lower()
     if normalized_phase in {"restarting", "restart"} or normalized_status == "restarting":
         return "restarting", ""
     if normalized_phase in {"closing", "stopping", "force_stopping"} or normalized_status == "stopping":
@@ -294,7 +296,6 @@ def _instance_lifecycle_state(
         backend_alive
         or backend_listening
         or window_open
-        or observed_state in {"open", "partial", "running", "healthy"}
     )
     if has_runtime_signal:
         return "partial", ""

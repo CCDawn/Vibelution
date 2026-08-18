@@ -215,7 +215,8 @@ def _current_project_bundle_for_branch_list() -> dict[str, Any]:
 
     The instance table must not wait on live ``observe_workbench`` probes used by
     ``get_launcher_status``. Settings, guardian, and control-plane evidence stay
-    on the status poll path.
+    on the status poll path. Leftover disk flags are reconciled against a live
+    daemon or a listening backend port before they reach the table.
     """
 
     runtime_state = _runtime_manager_state()
@@ -233,7 +234,66 @@ def _current_project_bundle_for_branch_list() -> dict[str, Any]:
         lifecycle_proof=lifecycle_proof,
         launcher_state=launcher_state,
     )
-    return bundle if isinstance(bundle, dict) else {}
+    if not isinstance(bundle, dict):
+        return {}
+    return _reconcile_stale_disk_bundle_for_branch_list(bundle, runtime_state)
+
+
+def _live_backend_port_listening(port: int) -> bool:
+    if port <= 0:
+        return False
+    try:
+        from core.runtime_manager.workbench_controller import _port_is_listening_socket
+
+        return bool(_port_is_listening_socket(int(port)))
+    except Exception:
+        return False
+
+
+def _reconcile_stale_disk_bundle_for_branch_list(
+    bundle: dict[str, Any],
+    runtime_state: dict[str, Any],
+) -> dict[str, Any]:
+    """Drop leftover on-disk open/partial flags when the daemon and port are dead.
+
+    The instance table skips live ``observe_workbench``. Disk RM state can keep
+    ``observedState=open`` / ``phase=opening`` / healthy backend flags after the
+    processes are gone. Only a live daemon or a listening backend port counts.
+    """
+
+    if bool(runtime_state.get("daemonRunning")):
+        return bundle
+    backend = dict(bundle.get("backend") if isinstance(bundle.get("backend"), dict) else {})
+    workbench = runtime_state.get("workbench") if isinstance(runtime_state.get("workbench"), dict) else {}
+    port = 0
+    try:
+        port = int(backend.get("port") or 0)
+    except (TypeError, ValueError):
+        port = 0
+    if port <= 0:
+        try:
+            port = int(workbench.get("backendPort") or 0)
+        except (TypeError, ValueError):
+            port = 0
+    if _live_backend_port_listening(port):
+        return bundle
+
+    bundle = dict(bundle)
+    backend["alive"] = False
+    backend["healthy"] = False
+    backend["portListening"] = False
+    bundle["backend"] = backend
+    phase = str(bundle.get("phase") or "").strip().lower()
+    if phase in {"opening", "starting"}:
+        bundle["phase"] = "steady"
+    browser = bundle.get("browser") if isinstance(bundle.get("browser"), dict) else {}
+    window_open = bool(browser.get("alive"))
+    if not window_open:
+        bundle["observedState"] = "closed"
+        if str(bundle.get("desiredState") or "").strip().lower() == "open":
+            bundle["desiredState"] = "closed"
+        bundle["failureMessage"] = ""
+    return bundle
 
 
 def cleanup_launcher_branch_instances(

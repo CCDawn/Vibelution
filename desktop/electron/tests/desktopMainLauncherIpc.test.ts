@@ -81,8 +81,12 @@ describe("Electron main Launcher IPC facade", () => {
     const readyStart = mainSource.indexOf("async function openWorkbenchAfterLifecycleReady");
     const readyBody = mainSource.slice(readyStart, readyStart + 700);
     expect(readyBody).toContain("await refreshLiveWorkbenchUrl(paths)");
+    const productStart = mainSource.indexOf("async function startOrFocusWorkbenchFromProductEntryOnShell");
+    const productBody = mainSource.slice(productStart, productStart + 1200);
+    expect(productBody).toContain("await refreshLiveWorkbenchUrl(");
+    expect(productBody).toContain('orchestrateLauncherLifecycle("start", { schemaVersion: 1, path: "open" })');
     const secondStart = mainSource.indexOf("async function requestOpenWorkbenchFromSecondInstance");
-    const secondBody = mainSource.slice(secondStart, secondStart + 1200);
-    expect(secondBody).toContain("await refreshLiveWorkbenchUrl(");
+    const secondBody = mainSource.slice(secondStart, secondStart + 900);
+    expect(secondBody).toContain("await startOrFocusWorkbenchFromProductEntryOnShell()");
   });
 });
