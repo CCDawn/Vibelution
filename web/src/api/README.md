@@ -37,6 +37,7 @@
 | `evolution.ts` | `/api/evolution/*` supervised/review JSON |
 | `files.ts` | `/api/files/content` |
 | `git.ts` | `/api/git/*` |
+| `hypothesisFirst.ts` | `/api/teams/.../workflow-orchestration/hypothesis-first/*`, `meeting-rounds`, `hypothesis-rounds` (HF-5) |
 | `kernel.ts` | `/api/kernel/*` |
 | `knowledge.ts` | `/api/knowledge/*`, `/api/knowledge-bases/*` (do not merge with `memory.ts`) |
 | `launcher.ts` | Launcher/workbench control JSON |
