@@ -21,7 +21,17 @@ from typing import Any
 
 from jsonschema import Draft202012Validator
 
+from core.infrastructure.no_console_git import (
+    apply_no_console_git_env,
+    no_console_subprocess_kwargs,
+    resolve_git_executable,
+    run_git,
+)
+from scripts.windowless_subprocess import no_window_subprocess_kwargs
+
 from .resources import CORE_BEHAVIOR_HASH, CORE_POLICY_HASH
+
+GIT_TIMEOUT_SECONDS = 120.0
 
 MANIFEST_KIND = "challenge_cup_submission_source_manifest"
 SCHEMA_VERSION = 1
@@ -187,12 +197,7 @@ def provenance_for(path: str) -> str:
 
 
 def git_output(repo: Path, *args: str) -> str:
-    result = subprocess.run(
-        ["git", "-C", str(repo), *args],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    result = run_git([*args], cwd=str(repo), timeout=GIT_TIMEOUT_SECONDS)
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "git command failed").strip()
         raise SourceBoundaryError(detail)
@@ -202,9 +207,11 @@ def git_output(repo: Path, *args: str) -> str:
 def git_show_bytes(repo: Path, path: str) -> bytes:
     normalized = posix_relpath(path)
     result = subprocess.run(
-        ["git", "-C", str(repo), "show", f"HEAD:{normalized}"],
-        check=False,
+        [resolve_git_executable(), "-C", str(repo), "show", f"HEAD:{normalized}"],
+        stdin=subprocess.DEVNULL,
         capture_output=True,
+        env=apply_no_console_git_env(),
+        **no_console_subprocess_kwargs(),
     )
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or b"git show failed").decode(
@@ -223,12 +230,7 @@ def git_ls_files(repo: Path, *pathspecs: str) -> tuple[str, ...]:
 
 
 def git_is_dirty(repo: Path) -> bool:
-    result = subprocess.run(
-        ["git", "-C", str(repo), "status", "--porcelain"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    result = run_git(["status", "--porcelain"], cwd=str(repo), timeout=GIT_TIMEOUT_SECONDS)
     if result.returncode != 0:
         raise SourceBoundaryError((result.stderr or "git status failed").strip())
     return bool(result.stdout.strip())
@@ -368,9 +370,10 @@ def build_source_manifest(
 
 def extract_head_archive(repo: Path, dest: Path) -> None:
     dest.mkdir(parents=True, exist_ok=True)
+    git_exe = resolve_git_executable()
     proc = subprocess.Popen(
         [
-            "git",
+            git_exe,
             "-C",
             str(repo),
             "-c",
@@ -381,7 +384,10 @@ def extract_head_archive(repo: Path, dest: Path) -> None:
             "--format=tar",
             "HEAD",
         ],
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
+        env=apply_no_console_git_env(git_exe=git_exe),
+        **no_console_subprocess_kwargs(),
     )
     if proc.stdout is None:
         raise SourceBoundaryError("git archive produced no stdout")
@@ -445,6 +451,7 @@ def run_r1_pytest(tree: Path, *, python: str, targets: Sequence[str]) -> list[st
         text=True,
         env=env,
         check=False,
+        **no_window_subprocess_kwargs(),
     )
     if result.returncode != 0:
         detail = (result.stdout or "")[-2000:] + (result.stderr or "")[-1000:]

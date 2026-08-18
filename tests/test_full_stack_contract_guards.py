@@ -187,3 +187,29 @@ def test_response_contract_debt_ledger_points_to_existing_routes() -> None:
         if not (ROUTES_ROOT / key).is_file()
     )
     assert missing == []
+
+
+def test_challenge_cup_dev_control_routes_declare_response_models() -> None:
+    """D14A: every new Challenge Cup DEV control endpoint must be typed."""
+    source = (ROUTES_ROOT / "team_workflows" / "challenge_cup_dev_controls.py").read_text(
+        encoding="utf-8"
+    )
+    assert _untyped_endpoint_count(
+        source, filename="team_workflows/challenge_cup_dev_controls.py"
+    ) == 0
+    assert source.count("@router.") == 3
+
+
+def test_challenge_cup_dev_control_routes_stay_thin() -> None:
+    """D14A: plan allowlisting / rejection stays in the service, not the route."""
+    source = (ROUTES_ROOT / "team_workflows" / "challenge_cup_dev_controls.py").read_text(
+        encoding="utf-8"
+    )
+    for marker in ("dev-12", "dev-125", "challenge_cup_dispatcher", "CatalogExecutionState"):
+        assert marker not in source, f"route layer must not re-implement {marker}"
+
+    service = (REPO_ROOT / "core" / "web" / "services" / "team_workflow" / "challenge_cup_dev_controls.py")
+    service_source = service.read_text(encoding="utf-8")
+    assert "team_workspace_root" in service_source
+    assert "atomic_write_json" in service_source
+    assert "realCampaignAllowed" in service_source

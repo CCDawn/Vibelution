@@ -584,7 +584,13 @@ def build_platform_flow_readiness_report(
     clone_dest: Path | None = None,
     require_clean: bool = True,
     run_pytest: bool = True,
+    mode: str = "dev",
 ) -> dict[str, Any]:
+    if str(mode or "").strip().lower() != "dev":
+        raise ValueError(
+            "ChallengeCupPlatformDevelopmentReadinessReport is DEV-only; "
+            "formal modes are not authorized."
+        )
     repo = repo.resolve()
     dest = clone_dest or (repo / ".runtime" / "challenge-cup-platform-flow-clone")
     gates = [
