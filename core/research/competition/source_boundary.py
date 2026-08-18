@@ -15,6 +15,7 @@ import re
 import subprocess
 import tarfile
 import tempfile
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,6 +34,10 @@ from .resources import CORE_BEHAVIOR_HASH, CORE_POLICY_HASH
 
 GIT_TIMEOUT_SECONDS = 120.0
 R1_PYTEST_TIMEOUT_SECONDS = 1800.0
+R1_ARCHIVE_MAX_MEMBERS = 50_000
+R1_ARCHIVE_MAX_TOTAL_BYTES = 512_000_000
+R1_ARCHIVE_MAX_MEMBER_BYTES = 10_000_000
+R1_ARCHIVE_EXTRACT_TIMEOUT_SECONDS = 120.0
 R1_NESTED_PYTEST_EXCLUDES: tuple[str, ...] = (
     "test_manifest_hashes_head_blob_not_dirty_worktree",
     "test_clean_clone_passes_then_fails_on_hash_change",
@@ -52,6 +57,7 @@ LOCAL_PATH_RE = re.compile(
 SECRET_RE = re.compile(
     r"(?i)(?:api[_-]?key|secret|password|token)\s*=\s*['\"][^'\"]{8,}['\"]"
 )
+_monotonic = time.monotonic
 TEXT_SUFFIXES = {
     ".py",
     ".md",
@@ -99,8 +105,13 @@ INCLUDE_GLOBS: tuple[str, ...] = (
     "core/web/routes/team_workflows/challenge_cup_dev_controls.py",
     "core/web/routes/team_workflows/challenge_cup_dev_controls_models.py",
     "web/src/api/teamExperiment.ts",
+    "web/src/api/teamExperiment.test.ts",
+    "web/src/api/queryKeys.ts",
     "web/src/api/types/challengeCup.ts",
+    "web/src/routes/teams/research-workflow/ChallengeMvpProgressPanel.styles.ts",
+    "web/src/routes/teams/research-workflow/ChallengeMvpProgressPanel.test.tsx",
     "web/src/routes/teams/research-workflow/ChallengeMvpProgressPanel.tsx",
+    "web/src/routes/teams/research-workflow/ResearchProcessInspectorPane.tsx",
 )
 
 REQUIRED_PATHS: tuple[str, ...] = (
@@ -125,8 +136,13 @@ REQUIRED_PATHS: tuple[str, ...] = (
     "core/web/routes/team_workflows/challenge_cup_dev_controls.py",
     "core/web/routes/team_workflows/challenge_cup_dev_controls_models.py",
     "web/src/api/teamExperiment.ts",
+    "web/src/api/teamExperiment.test.ts",
+    "web/src/api/queryKeys.ts",
     "web/src/api/types/challengeCup.ts",
+    "web/src/routes/teams/research-workflow/ChallengeMvpProgressPanel.styles.ts",
+    "web/src/routes/teams/research-workflow/ChallengeMvpProgressPanel.test.tsx",
     "web/src/routes/teams/research-workflow/ChallengeMvpProgressPanel.tsx",
+    "web/src/routes/teams/research-workflow/ResearchProcessInspectorPane.tsx",
 )
 
 R1_PYTEST_TARGETS: tuple[str, ...] = (
@@ -226,13 +242,19 @@ def git_output(repo: Path, *args: str) -> str:
 
 def git_show_bytes(repo: Path, path: str) -> bytes:
     normalized = posix_relpath(path)
-    result = subprocess.run(
-        [resolve_git_executable(), "-C", str(repo), "show", f"HEAD:{normalized}"],
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        env=apply_no_console_git_env(),
-        **no_console_subprocess_kwargs(),
-    )
+    try:
+        result = subprocess.run(
+            [resolve_git_executable(), "-C", str(repo), "show", f"HEAD:{normalized}"],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            env=apply_no_console_git_env(),
+            timeout=GIT_TIMEOUT_SECONDS,
+            **no_console_subprocess_kwargs(),
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise SourceBoundaryError(
+            f"git show timed out after {GIT_TIMEOUT_SECONDS}s: {normalized}"
+        ) from exc
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or b"git show failed").decode(
             "utf-8", "replace"
@@ -429,11 +451,29 @@ def extract_head_archive(repo: Path, dest: Path) -> None:
             ).strip()
             raise SourceBoundaryError(detail)
         with tarfile.open(archive_path, mode="r:") as archive:
+            members = archive.getmembers()
+            if len(members) > R1_ARCHIVE_MAX_MEMBERS:
+                raise SourceBoundaryError("R1 archive has too many members")
+            total_bytes = 0
+            for member in members:
+                if member.size > R1_ARCHIVE_MAX_MEMBER_BYTES:
+                    raise SourceBoundaryError(
+                        f"R1 archive member is too large: {member.name}"
+                    )
+                total_bytes += max(0, int(member.size))
+            if total_bytes > R1_ARCHIVE_MAX_TOTAL_BYTES:
+                raise SourceBoundaryError("R1 archive expanded size exceeds the limit")
+            deadline = _monotonic() + R1_ARCHIVE_EXTRACT_TIMEOUT_SECONDS
             try:
-                archive.extractall(dest, filter="data")
+                for member in members:
+                    if _monotonic() > deadline:
+                        raise SourceBoundaryError(
+                            "R1 archive extraction timed out"
+                        )
+                    archive.extract(member, path=dest, filter="data")
             except TypeError as exc:
                 raise SourceBoundaryError(
-                    "tar extract requires filter='data'; refusing unfiltered extractall"
+                    "tar extract requires filter='data'; refusing unfiltered extraction"
                 ) from exc
     finally:
         try:

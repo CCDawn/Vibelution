@@ -382,14 +382,22 @@ def gate_multimodal() -> dict[str, str]:
 
 def gate_product_projection(repo: Path) -> dict[str, str]:
     panel = repo / "web" / "src" / "routes" / "teams" / "research-workflow" / "ChallengeMvpProgressPanel.tsx"
+    styles = repo / "web" / "src" / "routes" / "teams" / "research-workflow" / "ChallengeMvpProgressPanel.styles.ts"
+    panel_test = repo / "web" / "src" / "routes" / "teams" / "research-workflow" / "ChallengeMvpProgressPanel.test.tsx"
+    inspector = repo / "web" / "src" / "routes" / "teams" / "research-workflow" / "ResearchProcessInspectorPane.tsx"
     types = repo / "web" / "src" / "api" / "types" / "challengeCup.ts"
     api = repo / "web" / "src" / "api" / "teamExperiment.ts"
-    missing = [str(path.relative_to(repo)) for path in (panel, types, api) if not path.is_file()]
+    api_test = repo / "web" / "src" / "api" / "teamExperiment.test.ts"
+    query_keys = repo / "web" / "src" / "api" / "queryKeys.ts"
+    product_files = (panel, styles, panel_test, inspector, types, api, api_test, query_keys)
+    missing = [str(path.relative_to(repo)) for path in product_files if not path.is_file()]
     if missing:
         return _gate("product_projection", "FAIL", f"missing {missing}")
     panel_text = panel.read_text(encoding="utf-8")
+    inspector_text = inspector.read_text(encoding="utf-8")
     types_text = types.read_text(encoding="utf-8")
     api_text = api.read_text(encoding="utf-8")
+    query_keys_text = query_keys.read_text(encoding="utf-8")
     if "competitionProgramProjection" not in panel_text or "requiredDeepExperiments" not in panel_text:
         return _gate("product_projection", "FAIL", "progress panel does not project Program v2")
     if "CompetitionProgramProjection" not in types_text:
@@ -413,6 +421,15 @@ def gate_product_projection(repo: Path) -> dict[str, str]:
             return _gate("product_projection", "FAIL", f"typed DEV projection is missing {marker!r}")
     if "useQuery" not in panel_text or "challengeCupDevControlsSnapshot" not in panel_text:
         return _gate("product_projection", "FAIL", "panel does not load the DEV snapshot through React Query")
+    if "ChallengeMvpProgressPanel.styles" not in panel_text:
+        return _gate("product_projection", "FAIL", "DEV panel styles are not mounted")
+    if "challengeCupDevControlsSnapshot" not in query_keys_text:
+        return _gate("product_projection", "FAIL", "DEV snapshot query key is missing")
+    if (
+        "ChallengeMvpProgressPanel" not in inspector_text
+        or "<ChallengeMvpProgressPanel" not in inspector_text
+    ):
+        return _gate("product_projection", "FAIL", "DEV panel is not mounted in the inspector")
     for marker in (
         "nextLegalAction",
         "run_dev_1_fixture_batch",

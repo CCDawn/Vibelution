@@ -289,6 +289,27 @@ def test_extract_head_archive_converts_git_timeout_to_failure(
     assert not list(tmp_path.glob(".challenge-cup-r1-*.tar"))
 
 
+def test_git_show_bytes_converts_timeout_to_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_run(*args, **kwargs):
+        raise subprocess.TimeoutExpired(
+            cmd=args[0] if args else [], timeout=kwargs.get("timeout", 0)
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with pytest.raises(SourceBoundaryError, match="git show timed out"):
+        source_boundary.git_show_bytes(tmp_path, "core/example.py")
+
+
+def test_r1_archive_extraction_has_member_size_and_time_bounds() -> None:
+    assert 0 < source_boundary.R1_ARCHIVE_MAX_MEMBERS <= 100_000
+    assert 0 < source_boundary.R1_ARCHIVE_MAX_MEMBER_BYTES <= 50_000_000
+    assert 0 < source_boundary.R1_ARCHIVE_MAX_TOTAL_BYTES <= 1_000_000_000
+    assert 0 < source_boundary.R1_ARCHIVE_EXTRACT_TIMEOUT_SECONDS <= 300
+
+
 def test_r1_nested_pytest_excludes_clean_clone_meta_tests() -> None:
     """The R1 clone already proves archive extraction before pytest starts.
 

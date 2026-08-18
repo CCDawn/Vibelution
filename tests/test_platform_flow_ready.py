@@ -132,12 +132,29 @@ def test_gate_product_projection_fails_when_dev_markers_missing(tmp_path: Path) 
     )
     panel.parent.mkdir(parents=True)
     panel.write_text("competitionProgramProjection requiredDeepExperiments", encoding="utf-8")
+    panel.with_name("ChallengeMvpProgressPanel.styles.ts").write_text(
+        "export default {}", encoding="utf-8"
+    )
+    panel.with_name("ChallengeMvpProgressPanel.test.tsx").write_text(
+        "test('DEV mouse controls', () => {})", encoding="utf-8"
+    )
+    panel.with_name("ResearchProcessInspectorPane.tsx").write_text(
+        "import { ChallengeMvpProgressPanel } from './ChallengeMvpProgressPanel'; "
+        "export const Pane = () => <ChallengeMvpProgressPanel />;",
+        encoding="utf-8",
+    )
     types = tmp_path / "web" / "src" / "api" / "types" / "challengeCup.ts"
     types.parent.mkdir(parents=True, exist_ok=True)
     types.write_text("CompetitionProgramProjection", encoding="utf-8")
     api = tmp_path / "web" / "src" / "api" / "teamExperiment.ts"
     api.parent.mkdir(parents=True, exist_ok=True)
     api.write_text("export function noDevApi() {}", encoding="utf-8")
+    api.with_name("teamExperiment.test.ts").write_text(
+        "test('DEV API', () => {})", encoding="utf-8"
+    )
+    api.with_name("queryKeys.ts").write_text(
+        "export const challengeCupDevControlsSnapshot = true", encoding="utf-8"
+    )
 
     gate = gate_product_projection(tmp_path)
     assert gate["status"] == "FAIL"

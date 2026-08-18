@@ -9,6 +9,9 @@ DANDI or formal submission is ever invoked.
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -30,6 +33,7 @@ from core.research.competition.dev_control_batch import (
     validate_dev_batch_plan,
 )
 from core.research.competition.platform_flow_ready import REPORT_KIND
+from core.infrastructure.no_console_git import no_console_subprocess_kwargs
 from core.web.routes.team_workflows import challenge_cup_dev_controls as dev_controls_routes
 from core.web.services import team_service
 from core.web.services.team_workflow import challenge_cup_dev_controls as dev_controls_service
@@ -191,6 +195,11 @@ def controls_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     )
     monkeypatch.setattr(
         dev_controls_service,
+        "_current_tree_is_clean",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        dev_controls_service,
         "team_workspace_root",
         lambda team_id: root / team_id,
     )
@@ -347,6 +356,20 @@ def _persist_readiness_report(controls_root: Path, team_id: str) -> None:
     )
 
 
+def _test_readiness_evidence(controls_root: Path, team_id: str) -> dict:
+    report_path = (
+        controls_root / team_id / "challenge_cup_dev_controls" / "readiness_report.json"
+    )
+    envelope = json.loads(report_path.read_text(encoding="utf-8"))
+    report = envelope["report"]
+    return {
+        "reportUpdatedAt": envelope["updatedAt"],
+        "sourceCommit": report["sourceCommit"],
+        "programContract": report["programContract"],
+        "catalogPolicy": report["catalogPolicy"],
+    }
+
+
 def _persist_batch_checkpoint(
     controls_root: Path,
     team_id: str,
@@ -366,9 +389,10 @@ def _persist_batch_checkpoint(
     path.write_text(
         json.dumps(
             {
-                "schemaVersion": 1,
+                "schemaVersion": 2,
                 "planId": plan_id,
                 "updatedAt": updated_at,
+                "readinessEvidence": _test_readiness_evidence(controls_root, team_id),
                 "upstreamCheckpointUpdatedAt": upstream_updated_at,
                 "checkpoint": checkpoint,
             },
@@ -1005,6 +1029,136 @@ def test_dev_5_bound_to_stale_dev_1_checkpoint_fails_closed(
         match="stale dev-1 checkpoint version",
     ):
         dev_controls_service.get_challenge_cup_dev_control_snapshot("team-1")
+
+
+def test_ready_report_is_rejected_while_working_tree_is_dirty(
+    controls_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(dev_controls_service, "_current_tree_is_clean", lambda: False)
+    with pytest.raises(
+        dev_controls_service.DevControlsStorageError,
+        match="working tree is dirty",
+    ):
+        dev_controls_service._persist_report("team-1", _ready_report())
+
+
+def test_dirty_not_ready_report_replaces_previous_ready_report(
+    controls_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _persist_readiness_report(controls_root, "team-1")
+    failed_gates = [
+        dict(gate) for gate in _ready_report()["gates"]
+    ]
+    failed_gates[0]["status"] = "FAIL"
+    monkeypatch.setattr(dev_controls_service, "_current_tree_is_clean", lambda: False)
+
+    dev_controls_service._persist_report(
+        "team-1",
+        _ready_report(
+            status="NOT_READY",
+            gates=failed_gates,
+            nextLegalAction="repair_failed_platform_gates",
+            sourceCommit="",
+        ),
+    )
+
+    snapshot = dev_controls_service.get_challenge_cup_dev_control_snapshot("team-1")
+    assert snapshot["report"]["status"] == "NOT_READY"
+    assert snapshot["nextLegalAction"] == "repair_failed_platform_gates"
+
+
+def test_new_readiness_evidence_invalidates_old_batches(controls_root: Path) -> None:
+    _persist_readiness_report(controls_root, "team-1")
+    dev_1 = new_dev_batch_state("dev-1")
+    run_dev_fixture_batch(dev_1)
+    _persist_batch_checkpoint(controls_root, "team-1", "dev-1", dev_1.to_checkpoint())
+    dev_5 = new_dev_batch_state("dev-5")
+    run_dev_fixture_batch(dev_5)
+    _persist_batch_checkpoint(controls_root, "team-1", "dev-5", dev_5.to_checkpoint())
+
+    report_path = controls_root / "team-1" / "challenge_cup_dev_controls" / "readiness_report.json"
+    envelope = json.loads(report_path.read_text(encoding="utf-8"))
+    envelope["updatedAt"] = dev_controls_service._utc_now()
+    report_path.write_text(json.dumps(envelope, sort_keys=True), encoding="utf-8")
+
+    snapshot = dev_controls_service.get_challenge_cup_dev_control_snapshot("team-1")
+    assert snapshot["batches"] == {}
+    assert snapshot["nextLegalAction"] == "run_dev_1_fixture_batch"
+
+
+def test_current_batch_missing_readiness_evidence_fails_closed(
+    controls_root: Path,
+) -> None:
+    _persist_readiness_report(controls_root, "team-1")
+    state = new_dev_batch_state("dev-1")
+    run_dev_fixture_batch(state)
+    _persist_batch_checkpoint(controls_root, "team-1", "dev-1", state.to_checkpoint())
+    batch_path = controls_root / "team-1" / "challenge_cup_dev_controls" / "batches" / "dev-1.json"
+    envelope = json.loads(batch_path.read_text(encoding="utf-8"))
+    envelope.pop("readinessEvidence")
+    batch_path.write_text(json.dumps(envelope, sort_keys=True), encoding="utf-8")
+    with pytest.raises(
+        dev_controls_service.DevControlsStorageError,
+        match="readiness evidence",
+    ):
+        dev_controls_service.get_challenge_cup_dev_control_snapshot("team-1")
+
+
+@pytest.mark.parametrize("mutation", ["missing_locator", "submission_eligible"])
+def test_non_dev_fixture_result_fails_closed(
+    controls_root: Path,
+    mutation: str,
+) -> None:
+    _persist_readiness_report(controls_root, "team-1")
+    state = new_dev_batch_state("dev-1")
+    run_dev_fixture_batch(state)
+    checkpoint = state.to_checkpoint()
+    result = checkpoint["records"][0]["result"]
+    if mutation == "missing_locator":
+        result.pop("model_receipt_locator")
+    else:
+        result["status"] = "submission_eligible"
+        result["submission_eligible"] = True
+    _persist_batch_checkpoint(controls_root, "team-1", "dev-1", checkpoint)
+    with pytest.raises(
+        dev_controls_service.DevControlsStorageError,
+        match="record semantics|DEV fixture result",
+    ):
+        dev_controls_service.get_challenge_cup_dev_control_snapshot("team-1")
+
+
+def test_team_transaction_lock_is_cross_process_and_team_scoped(
+    controls_root: Path,
+) -> None:
+    lock_path = dev_controls_service._team_lock_path("team-1")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+b") as handle:
+        assert dev_controls_service._try_lock_handle(handle) is True
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
+        code = (
+            "from pathlib import Path; "
+            "from core.web.services.team_workflow.challenge_cup_dev_controls "
+            "import _try_lock_handle; "
+            f"h=Path({str(lock_path)!r}).open('a+b'); "
+            "print('acquired' if _try_lock_handle(h) else 'blocked'); h.close()"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=30,
+            **no_console_subprocess_kwargs(),
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "blocked"
+        dev_controls_service._unlock_handle(handle)
+    with dev_controls_service._team_transaction("team-1"):
+        with dev_controls_service._team_transaction("team-2"):
+            pass
 
 
 def test_readiness_in_progress_blocks_batch_and_second_readiness(
