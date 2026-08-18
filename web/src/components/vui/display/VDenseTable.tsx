@@ -48,8 +48,8 @@ export function denseTableFillGridStyle(gridTemplateColumns: string): {
     contain: "inline-size",
     display: "grid",
     gridTemplateColumns,
-    width: "100%",
-    maxWidth: "100%",
+    width: "var(--vui-window-width, 100%)",
+    maxWidth: "var(--vui-window-width, 100%)",
     minWidth: "0px",
   };
 }
@@ -163,7 +163,7 @@ export function VDenseTable<TRow>({
     .filter(Boolean)
     .join(" ");
   const viewportBoxStyle = fillColumnId
-    ? { contain: "inline-size" as const, minWidth: 0, maxWidth: "100%", width: "100%" }
+    ? { contain: "inline-size" as const, minWidth: 0, maxWidth: "var(--vui-window-width, 100%)", width: "var(--vui-window-width, 100%)" }
     : undefined;
   const gridStyle = fillColumnId
     ? denseTableFillGridStyle(gridTemplateColumns)
