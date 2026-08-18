@@ -58,6 +58,7 @@ describe("teamMutationSurface", () => {
       reviewExperimentHypothesis: idle,
       createExperimentHypothesisRevision: idle,
       freezeExperimentDesign: idle,
+      resumeExperimentHypothesis: idle,
       registerExperimentBaselineArtifact: idle,
       runExperimentSmoke: idle,
       registerExperimentSmokeResult: idle,
