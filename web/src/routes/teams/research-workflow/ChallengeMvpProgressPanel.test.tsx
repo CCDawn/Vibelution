@@ -506,6 +506,35 @@ describe("ChallengeMvpProgressPanel", () => {
     expect(markup).toContain("运行 DEV readiness");
   });
 
+  it("offers a register/publish entry that opens the question-write dialog", async () => {
+    setMainData(emptyMainData());
+    setDevControls(devSnapshot());
+    const markup = renderToStaticMarkup(
+      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />,
+    );
+    expect(markup).toContain("登记 / 发布题目产出");
+
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />);
+    });
+    const entry = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("登记 / 发布题目产出"));
+    expect(entry).toBeTruthy();
+    await act(async () => {
+      entry!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(document.body.textContent).toContain("粘贴研究运行产出的题目 JSON");
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
   it("surfaces a total load error with a retry action", () => {
     Object.assign(queryState.current, {
       isPending: false,

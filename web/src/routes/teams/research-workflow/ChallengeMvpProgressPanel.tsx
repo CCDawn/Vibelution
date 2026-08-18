@@ -39,6 +39,7 @@ import {
   type VStatusTone,
 } from "../../../components/vui";
 import type { ExperimentPlanningStatusPayload } from "../experimentLoopModel";
+import { ChallengeQuestionRegisterDialog } from "../challenge-cup/ChallengeQuestionRegisterDialog";
 import styles from "./ChallengeMvpProgressPanel.styles";
 
 export type ChallengeMvpProgressPanelProps = {
@@ -136,6 +137,7 @@ export function ChallengeMvpProgressPanel({
 
   const queryClient = useQueryClient();
   const [snapshotRefreshing, setSnapshotRefreshing] = useState(false);
+  const [registerDialogOpen, setRegisterDialogOpen] = useState(false);
   const refreshDevControls = async () => {
     setSnapshotRefreshing(true);
     try {
@@ -554,7 +556,12 @@ export function ChallengeMvpProgressPanel({
       <section className={styles.questionSection} aria-label={zh ? "单题结果" : "Question results"}>
         <div className={styles.sectionHeader}>
           <strong>{zh ? "单题结果与审核" : "Question results"}</strong>
-          {summary ? <span>{zh ? `已验证 ${summary.validatedQuestionCount}` : `${summary.validatedQuestionCount} validated`}</span> : null}
+          <div className={styles.actions}>
+            {summary ? <span>{zh ? `已验证 ${summary.validatedQuestionCount}` : `${summary.validatedQuestionCount} validated`}</span> : null}
+            <VButton type="button" variant="secondary" density="compact" onClick={() => setRegisterDialogOpen(true)}>
+              {zh ? "登记 / 发布题目产出" : "Register / publish output"}
+            </VButton>
+          </div>
         </div>
         {statusQuery.isPending ? (
           <VStateSurface tone="loading" title={zh ? "读取题目结果" : "Loading question results"} className={styles.fill} />
@@ -587,6 +594,17 @@ export function ChallengeMvpProgressPanel({
           </>
         )}
       </section>
+
+      {registerDialogOpen ? (
+        <ChallengeQuestionRegisterDialog
+          teamId={teamId}
+          onClose={() => setRegisterDialogOpen(false)}
+          onOpenQuestion={(questionId) => {
+            setRegisterDialogOpen(false);
+            onOpenQuestion(questionId);
+          }}
+        />
+      ) : null}
     </VSurface>
   );
 }

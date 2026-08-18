@@ -238,15 +238,65 @@ def _scoped_question_records(
     ]
 
 
+def _auto_open_review_meeting(
+    team_id: str,
+    record: Mapping[str, Any],
+    *,
+    agent_runner: Any = None,
+    background: bool = True,
+) -> dict[str, Any]:
+    """Best-effort auto-open of the first hypothesis-review meeting (HF-4).
+
+    The selection is already persisted (append-only fact), so a meeting
+    failure is reported structurally instead of rolling the selection back.
+    Replays reuse the already-opened meeting through the chain's deterministic
+    meeting id, which also self-heals a previously failed auto-open.
+    """
+    try:
+        from core.web.services.team_workflow.research_runtime import (
+            hypothesis_first_chain,
+        )
+
+        opened = hypothesis_first_chain.open_review_meeting_for_selection(
+            team_id,
+            record,
+            agent_runner=agent_runner,
+            background=background,
+            round_index=1,
+        )
+        return {
+            "status": str(opened.get("status") or ""),
+            "meetingRound": opened.get("meetingRound") or {},
+            "roomId": str(opened.get("roomId") or ""),
+            "roundId": str(opened.get("roundId") or ""),
+            "chatRoomRoundIds": list(opened.get("chatRoomRoundIds") or []),
+            "discussion": dict(opened.get("discussion") or {}),
+            "roundIndex": int(opened.get("roundIndex") or 1),
+        }
+    except Exception as exc:  # selection fact stays; report the side effect
+        return {
+            "status": "failed",
+            "error": str(exc),
+            "errorType": type(exc).__name__,
+        }
+
+
 def record_hypothesis_selection(
     team_id: str,
     payload: Mapping[str, Any] | None = None,
+    *,
+    agent_runner: Any = None,
+    background: bool = True,
 ) -> dict[str, Any]:
     """Record one append-only hypothesis selection, failing closed on defects.
 
     Repeating an identical request reuses the existing record; a changed
     selection for the same scoped question appends a new record that must link
     to an existing one through ``previousSelectionId``.
+
+    After the record is on disk, the first hypothesis-review meeting is
+    auto-opened in the background (HF-4 orchestration); the outcome is
+    reported under ``reviewMeeting`` and never rolls the selection back.
     """
     from core.web.services.team_service import assert_team_exists
 
@@ -294,6 +344,12 @@ def record_hypothesis_selection(
                     "teamId": normalized_team_id,
                     "status": "reused",
                     "selection": existing,
+                    "reviewMeeting": _auto_open_review_meeting(
+                        normalized_team_id,
+                        existing,
+                        agent_runner=agent_runner,
+                        background=background,
+                    ),
                     "storagePath": str(_storage_path(normalized_team_id)),
                 }
         existing_by_id = _latest_by_id(records, "selectionId", record["selectionId"])
@@ -307,6 +363,12 @@ def record_hypothesis_selection(
                 "teamId": normalized_team_id,
                 "status": "reused",
                 "selection": existing_by_id,
+                "reviewMeeting": _auto_open_review_meeting(
+                    normalized_team_id,
+                    existing_by_id,
+                    agent_runner=agent_runner,
+                    background=background,
+                ),
                 "storagePath": str(_storage_path(normalized_team_id)),
             }
         question_records = _scoped_question_records(
@@ -331,6 +393,12 @@ def record_hypothesis_selection(
         "teamId": normalized_team_id,
         "status": "created",
         "selection": record,
+        "reviewMeeting": _auto_open_review_meeting(
+            normalized_team_id,
+            record,
+            agent_runner=agent_runner,
+            background=background,
+        ),
         "storagePath": str(_storage_path(normalized_team_id)),
     }
 

@@ -54,6 +54,15 @@ const styles: Record<string, string> = {
   gateRow:
     "grid grid-cols-[1fr_auto] items-center gap-2 [&>span]:text-xs [&>span]:font-[650] [&>span]:text-[var(--fg-secondary)] [&>button]:col-span-2",
   field: "grid gap-1 [&>span]:text-xs [&>span]:font-[650] [&>span]:text-[var(--fg-secondary)]",
+  registerDialog: "grid gap-3 text-[var(--fg-primary)]",
+  registerFields: "grid grid-cols-1 gap-2 sm:grid-cols-2",
+  registerPreview:
+    "break-all rounded bg-[var(--vui-surface-inset)] px-2 py-1.5 font-mono text-[10px] text-[var(--fg-secondary)]",
+  registerHint: "m-0 text-xs text-[var(--fg-secondary)]",
+  registerResult:
+    "grid gap-2 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-inset)] p-3",
+  registerResultGrid: "flex flex-wrap items-center gap-1.5",
+  registerActions: "flex flex-wrap items-center gap-2",
   artifact:
     "flex items-start gap-2.5 [&>div]:grid [&>div]:min-w-0 [&>div]:gap-1.25 [&_code]:wrap-anywhere [&_code]:text-xs [&_code]:text-[var(--fg-secondary)]",
   state:

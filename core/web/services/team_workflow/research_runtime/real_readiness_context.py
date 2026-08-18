@@ -159,6 +159,28 @@ class RealDomainReadinessContext:
             run_id=run_id,
         )
 
+    def hypothesis_first_flow(self, team_id: str, run_id: str) -> bool:
+        """True when the run's input snapshot carries the hypothesis-first marker."""
+        from core.web.services.team_workflow.research_runtime import (
+            hypothesis_first_chain,
+        )
+
+        run = self._store.get_run(run_id)
+        if run is None or run.team_id != team_id:
+            return False
+        return hypothesis_first_chain.is_hypothesis_first_snapshot(
+            hypothesis_first_chain._input_snapshot(run)
+        )
+
+    def hypothesis_first_chain_state(
+        self, team_id: str, question_id: str
+    ) -> Mapping[str, Any] | None:
+        from core.web.services.team_workflow.research_runtime import (
+            hypothesis_first_chain,
+        )
+
+        return hypothesis_first_chain.chain_state(team_id, question_id)
+
     def hypothesis_set(self, team_id: str, run_id: str) -> Mapping[str, Any] | None:
         return self._query("hypothesis_set", team_id, run_id) or self._artifact(
             "hypothesis_set", team_id, run_id

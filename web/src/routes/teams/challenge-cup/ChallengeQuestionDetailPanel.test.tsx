@@ -227,6 +227,30 @@ describe("ChallengeQuestionDetailPanel", () => {
     expect(markup).toContain("审核意见");
   });
 
+  it("offers revision registration only while the record needs revision", () => {
+    const revision = detail();
+    revision.record = { ...revision.record, status: "needs_revision" };
+    const revisionMarkup = renderPanel(
+      <ChallengeQuestionDetailPanel
+        requestedQuestionId="SCI-096"
+        detail={revision}
+        isLoading={false}
+        onClose={() => undefined}
+      />,
+    );
+    expect(revisionMarkup).toContain("登记修订产出");
+
+    const approvedMarkup = renderPanel(
+      <ChallengeQuestionDetailPanel
+        requestedQuestionId="SCI-096"
+        detail={detail()}
+        isLoading={false}
+        onClose={() => undefined}
+      />,
+    );
+    expect(approvedMarkup).not.toContain("登记修订产出");
+  });
+
   it("fails closed when the requested question artifact is unavailable", () => {
     const markup = renderPanel(
       <ChallengeQuestionDetailPanel
