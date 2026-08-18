@@ -22,7 +22,7 @@ export const launcherRouteStyles = {
   route:
     `max-w-full text-vui-fg-primary [--accent-primary:var(--accent-warm)] [--danger:var(--state-error)] [&_[data-vui=button]]:w-fit [&_[data-vui=button]]:[max-width:100%] [&_[data-vui=button]]:[white-space:nowrap] ${vuiWorkspaceFillClass}`,
   routeBody:
-    "min-h-0 gap-1.5 !overflow-y-auto overflow-x-hidden overscroll-contain pb-[max(12px,env(safe-area-inset-bottom))] [scrollbar-gutter:stable]",
+    "min-h-0 gap-1.5 !overflow-y-auto overflow-x-clip overscroll-contain pb-[max(12px,env(safe-area-inset-bottom))] [scrollbar-gutter:stable]",
   header:
     "mx-2 mt-2 min-w-0 border-[var(--vui-border-subtle)] !bg-transparent !shadow-none !backdrop-blur-none",
   opsToolbarStack: "grid min-w-0 shrink-0 gap-0",

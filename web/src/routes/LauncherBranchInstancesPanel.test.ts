@@ -145,7 +145,8 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(gitIdx).toBeGreaterThan(workbenchIdx);
     expect(panelSource.slice(workbenchIdx, gitIdx)).not.toContain("fill: true");
     expect(panelStyles.actionCell).not.toContain("sticky");
-    expect(panelStyles.actionCell).toContain("min-w-[150px]");
+    expect(panelStyles.actionCell).toContain("min-w-0");
+    expect(panelStyles.actionCell).not.toContain("!overflow-visible");
     expect(panelStyles.statusTable).not.toContain("overflow-auto");
   });
 
