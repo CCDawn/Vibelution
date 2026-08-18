@@ -7,6 +7,7 @@ export {
   listResearchWorkflowRuns,
   fetchResearchWorkflowLaunchOptions,
   createResearchWorkflowRun,
+  activateResearchWorkflowExperiment,
   fetchTeamWorkflowResearchProjects,
 } from "./catalog";
 export type {
@@ -14,6 +15,8 @@ export type {
   CreateResearchWorkflowRunInput,
   ResearchWorkflowSafetyLimits,
   ResearchWorkflowLaunchOption,
+  ResearchWorkflowExperimentOption,
+  ResearchWorkflowExperimentActivation,
   ResearchWorkflowLaunchOptionsResponse,
 } from "./catalog";
 export type { WorkflowDefinitionResponse } from "./definitions";

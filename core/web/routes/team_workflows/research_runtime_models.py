@@ -32,6 +32,20 @@ class ResearchWorkflowLaunchOptionsResponse(ResearchRuntimeJsonResponse):
     workflowId: str = ""
     teamId: str = ""
     questions: list[dict[str, Any]] = Field(default_factory=list)
+    experiments: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ResearchWorkflowExperimentActivationResponse(ResearchRuntimeJsonResponse):
+    experimentId: str = ""
+    programId: str = ""
+    themeId: str = ""
+    campaignId: str = ""
+    status: str = ""
+    activatedBy: str = ""
+    activatedAt: str = ""
+    activationRef: str = ""
+    scopeHash: str = ""
+    activationHash: str = ""
 
 
 class ResearchWorkflowEffectiveBindingsResponse(ResearchRuntimeJsonResponse):

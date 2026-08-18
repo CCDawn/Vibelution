@@ -4,6 +4,13 @@ The approved question artifact is the only source for a new workflow's
 identity and immutable research contract.  Operators may set safety ceilings,
 but they never supply a parallel project, rules, evidence hash, or model
 contract.
+
+The two frozen deep experiments (SCI-091, SCI-096) are governed separately:
+their launch options derive only from the frozen Program core, the existing
+campaign activation ledger, approved formal v2 question artifacts, and the
+persisted DEV control snapshot.  A DEV fixture result is never formal
+approval; DEV readiness only unlocks the ability to activate the real
+campaign.
 """
 
 from __future__ import annotations
@@ -22,6 +29,7 @@ from core.research.competition.resources import (
     load_full_catalog_execution_core,
     load_science_question_catalog,
 )
+from core.research.workflow.contracts import DEFAULT_PROGRAM_ID
 from core.web.services.team_workflow.challenge_question_runs import (
     REQUIRED_HUMAN_GATE_KEYS,
     challenge_question_run_summary,
@@ -30,6 +38,7 @@ from core.web.services.team_workflow.challenge_question_runs import (
 from core.web.services.team_workflow.research_projects import (
     ResearchProjectError,
     ensure_challenge_question_project,
+    get_theme_activation,
 )
 
 _MODEL_REF = "relay_openai/gpt-5.6-luna"
@@ -141,6 +150,185 @@ def _question_scope(output: Mapping[str, Any]) -> str:
     return _text(understanding.get("scope"))
 
 
+def _frozen_deep_experiment_records() -> list[dict[str, Any]]:
+    """Read the two required independent experiments from the frozen Program core."""
+    try:
+        program = load_competition_program_core()
+    except CompetitionResourceError as exc:
+        raise QuestionLaunchError(
+            "The frozen competition Program resource is unavailable or drifted.",
+            code="challenge_competition_snapshot_invalid",
+        ) from exc
+    experiments = program.get("requiredDeepExperiments")
+    records: list[dict[str, Any]] = []
+    for item in experiments or []:
+        if not isinstance(item, dict):
+            continue
+        records.append(
+            {
+                "experimentId": _text(item.get("experimentId")),
+                "questionId": _text(item.get("questionId")).upper(),
+                "name": _text(item.get("name")),
+                "themeId": _text(item.get("themeId")),
+                "campaignId": _text(item.get("campaignId")),
+                "required": bool(item.get("required") is True),
+            }
+        )
+    return records
+
+
+def _deep_experiment_question_ids() -> set[str]:
+    return {record["questionId"] for record in _frozen_deep_experiment_records() if record["questionId"]}
+
+
+def _is_campaign_active(team_id: str, record: Mapping[str, Any]) -> bool:
+    activation = get_theme_activation(team_id, _text(record.get("themeId")))
+    return (
+        bool(activation)
+        and _text(activation.get("status")) == "active"
+        and _text(activation.get("campaignId")) == _text(record.get("campaignId"))
+    )
+
+
+def _dev_authorization_ready(team_id: str) -> bool:
+    """DEV fixtures must be complete so the next legal action is authorization.
+
+    A DEV fixture result never counts as formal approval; reaching this marker
+    only unlocks the ability to activate the real campaign.
+    """
+    try:
+        from core.web.services.team_workflow.challenge_cup_dev_controls import (
+            get_challenge_cup_dev_control_snapshot,
+        )
+
+        snapshot = get_challenge_cup_dev_control_snapshot(team_id)
+    except Exception:
+        return False
+    return _text(snapshot.get("nextLegalAction")) == "RESEARCH_AUTHORIZATION_REQUIRED"
+
+
+def list_experiment_launch_options(team_id: str) -> dict[str, Any]:
+    """Return the two frozen deep experiments with derived status fields.
+
+    Status is derived only from the frozen Program core, the existing campaign
+    activation ledger, approved formal v2 question artifacts, and the persisted
+    DEV control snapshot.  DEV fixture success is never formal approval.
+    """
+    records = _frozen_deep_experiment_records()
+    approved = set(_approved_details(team_id))
+    authorization_ready = _dev_authorization_ready(team_id)
+    experiments: list[dict[str, Any]] = []
+    for record in records:
+        question_id = record["questionId"]
+        activation = get_theme_activation(team_id, record["themeId"])
+        activated = (
+            bool(activation)
+            and _text(activation.get("status")) == "active"
+            and _text(activation.get("campaignId")) == record["campaignId"]
+        )
+        question_result_approved = question_id in approved
+        activation_allowed = authorization_ready and not activated
+        blockers: list[str] = []
+        if not activated and not authorization_ready:
+            blockers.append("DEV fixtures are not complete; real Qwen/GPU work is not authorized")
+        if not question_result_approved:
+            blockers.append("question result is not formally approved")
+        if activated and question_result_approved:
+            next_action = "create_run"
+        elif activation_allowed:
+            next_action = "activate_campaign"
+        elif activated:
+            next_action = "await_formal_question_approval"
+        else:
+            next_action = "await_dev_readiness"
+        experiments.append(
+            {
+                "experimentId": record["experimentId"],
+                "questionId": question_id,
+                "name": record["name"],
+                "themeId": record["themeId"],
+                "campaignId": record["campaignId"],
+                "required": record["required"],
+                "activated": activated,
+                "activationStatus": "active" if activated else "not_activated",
+                "activationAllowed": activation_allowed,
+                "questionResultApproved": question_result_approved,
+                "launchable": activated and question_result_approved,
+                "nextAction": next_action,
+                "blockers": blockers,
+                "activatedAt": _text(activation.get("activatedAt")) if activated else "",
+            }
+        )
+    return {"teamId": _text(team_id), "experiments": experiments}
+
+
+def activate_experiment_campaign(
+    team_id: str,
+    *,
+    experiment_id: str,
+    confirmed: bool = False,
+    activated_by: str = "operator",
+) -> dict[str, Any]:
+    """Activate one frozen deep experiment's canonical campaign (governed).
+
+    Requires the persisted DEV control snapshot to have reached
+    RESEARCH_AUTHORIZATION_REQUIRED and an explicit confirmation.  Reuses the
+    existing research-scope activation so the campaign stays the single
+    activation ledger.  An already-active campaign is idempotent.
+    """
+    normalized_experiment_id = _text(experiment_id)
+    record = next(
+        (
+            item
+            for item in _frozen_deep_experiment_records()
+            if item["experimentId"] == normalized_experiment_id
+        ),
+        None,
+    )
+    if record is None:
+        raise QuestionLaunchError(
+            "Unknown deep experiment; only frozen Program experiments are activatable.",
+            code="deep_experiment_not_found",
+        )
+    if not confirmed:
+        raise QuestionLaunchError(
+            "Experiment campaign activation requires explicit confirmation.",
+            code="experiment_activation_confirmation_required",
+        )
+    existing = get_theme_activation(team_id, record["themeId"])
+    if (
+        bool(existing)
+        and _text(existing.get("status")) == "active"
+        and _text(existing.get("campaignId")) == record["campaignId"]
+    ):
+        return {"experimentId": normalized_experiment_id, **dict(existing)}
+    if not _dev_authorization_ready(team_id):
+        raise QuestionLaunchError(
+            "Experiment activation requires completed DEV fixtures and RESEARCH_AUTHORIZATION_REQUIRED.",
+            code="experiment_activation_not_allowed",
+        )
+    from core.web.services.team_workflow.research_scope import (
+        ResearchScopeError,
+        activate_research_campaign,
+    )
+
+    try:
+        activation = activate_research_campaign(
+            team_id,
+            program_id=DEFAULT_PROGRAM_ID,
+            theme_id=record["themeId"],
+            campaign_id=record["campaignId"],
+            activated_by=_text(activated_by) or "operator",
+            activation_ref=f"research-experiment://{normalized_experiment_id}",
+        )
+    except ResearchScopeError as exc:
+        raise QuestionLaunchError(
+            str(exc),
+            code=getattr(exc, "code", "experiment_activation_not_allowed"),
+        ) from exc
+    return {"experimentId": normalized_experiment_id, **activation}
+
+
 def list_question_launch_options(team_id: str) -> dict[str, Any]:
     """Return only fully approved questions that may start a workflow run."""
 
@@ -231,6 +419,19 @@ def build_question_run_input(
         raise QuestionLaunchError(
             "The selected question is not approved for workflow launch.",
             code="challenge_question_not_launchable",
+        )
+    deep_record = next(
+        (
+            item
+            for item in _frozen_deep_experiment_records()
+            if item["questionId"] == normalized_question_id
+        ),
+        None,
+    )
+    if deep_record is not None and not _is_campaign_active(team_id, deep_record):
+        raise QuestionLaunchError(
+            "Deep experiment run requires its canonical campaign to be activated.",
+            code="deep_experiment_campaign_not_activated",
         )
     output = _mapping(detail.get("output"))
     artifact = _mapping(detail.get("artifact"))

@@ -50,10 +50,41 @@ export type ResearchWorkflowLaunchOption = {
   artifactSha256: string;
 };
 
+export type ResearchWorkflowExperimentOption = {
+  experimentId: string;
+  questionId: string;
+  name: string;
+  themeId: string;
+  campaignId: string;
+  required: boolean;
+  activated: boolean;
+  activationStatus: string;
+  activationAllowed: boolean;
+  questionResultApproved: boolean;
+  launchable: boolean;
+  nextAction: string;
+  blockers: string[];
+  activatedAt: string;
+};
+
+export type ResearchWorkflowExperimentActivation = {
+  experimentId: string;
+  programId: string;
+  themeId: string;
+  campaignId: string;
+  status: string;
+  activatedBy: string;
+  activatedAt: string;
+  activationRef: string;
+  scopeHash: string;
+  activationHash: string;
+};
+
 export type ResearchWorkflowLaunchOptionsResponse = {
   workflowId: string;
   teamId: string;
   questions: ResearchWorkflowLaunchOption[];
+  experiments: ResearchWorkflowExperimentOption[];
 };
 
 export async function listResearchWorkflowRuns(
@@ -88,6 +119,24 @@ export async function createResearchWorkflowRun(
       idempotencyKey: requireText(input.idempotencyKey, "idempotencyKey"),
     }),
   });
+}
+
+export async function activateResearchWorkflowExperiment(
+  workflowId: string,
+  experimentId: string,
+  input: { teamId: string; confirmed: boolean },
+): Promise<ResearchWorkflowExperimentActivation> {
+  return fetchJson(
+    `/api/research/workflows/${encodeURIComponent(workflowId)}/experiments/${encodeURIComponent(experimentId)}/activate`,
+    {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({
+        teamId: requireTeamId(input.teamId),
+        confirmed: Boolean(input.confirmed),
+      }),
+    },
+  );
 }
 
 export async function fetchTeamWorkflowResearchProjects(

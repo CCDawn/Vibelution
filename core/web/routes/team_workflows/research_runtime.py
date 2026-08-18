@@ -7,7 +7,7 @@ from typing import Any
 
 from fastapi import Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 
 from core.research.workflow.contracts import ActorRef, CommandRequest, WorkflowCommandKind
 from core.research.workflow.ledger.errors import (
@@ -74,6 +74,7 @@ from .research_runtime_models import (
     ResearchWorkflowEffectiveBindingsResponse,
     ResearchWorkflowEvaluationResponse,
     ResearchWorkflowEventPageResponse,
+    ResearchWorkflowExperimentActivationResponse,
     ResearchWorkflowHandoffDetailResponse,
     ResearchWorkflowHandoffListResponse,
     ResearchWorkflowHypothesisListResponse,
@@ -112,6 +113,12 @@ class CreateRunPayload(TeamScopedPayload):
     questionId: str = Field(..., min_length=1)
     safetyLimits: ResearchRunSafetyLimitsPayload
     idempotencyKey: str = Field(..., min_length=1)
+
+
+class ActivateExperimentPayload(TeamScopedPayload):
+    model_config = ConfigDict(extra="forbid")
+
+    confirmed: StrictBool = False
 
 
 class VersionedCommandPayload(TeamScopedPayload):
@@ -154,6 +161,7 @@ def _map_error(exc: ResearchWorkflowError) -> HTTPException:
         "handoff_not_found",
         "task_not_found",
         "node_not_scheduled",
+        "deep_experiment_not_found",
     }:
         status = 404
     elif code in {
@@ -165,8 +173,17 @@ def _map_error(exc: ResearchWorkflowError) -> HTTPException:
         "command_not_allowed_for_node",
         "research_project_question_mismatch",
         "challenge_question_not_launchable",
+        "deep_experiment_campaign_not_activated",
+        "experiment_activation_not_allowed",
+        "campaign_theme_mismatch",
+        "dev_theme_not_activatable",
     }:
         status = 409
+    elif code in {
+        "experiment_activation_confirmation_required",
+        "invalid_safety_limits",
+    }:
+        status = 422
     elif code in {
         "run_version_missing",
         "required_artifact_missing",
@@ -327,6 +344,27 @@ def research_workflow_create_run(workflow_id: str, payload: CreateRunPayload) ->
         )
     except (FormalWriteRuntimeUnavailable, WorkflowMigrationRequired) as exc:
         raise _map_query_error(exc) from exc
+    except ResearchWorkflowError as exc:
+        raise _map_error(exc) from exc
+
+
+@router.post(
+    "/research/workflows/{workflow_id}/experiments/{experiment_id}/activate",
+    response_model=ResearchWorkflowExperimentActivationResponse,
+    response_model_exclude_unset=True,
+)
+def research_workflow_activate_experiment(
+    workflow_id: str,
+    experiment_id: str,
+    payload: ActivateExperimentPayload,
+) -> dict:
+    try:
+        return _svc().activate_experiment_campaign(
+            workflow_id,
+            team_id=payload.teamId,
+            experiment_id=experiment_id,
+            confirmed=payload.confirmed,
+        )
     except ResearchWorkflowError as exc:
         raise _map_error(exc) from exc
 

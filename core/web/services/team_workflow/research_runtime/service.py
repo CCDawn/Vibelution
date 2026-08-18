@@ -69,7 +69,9 @@ from .node_operational_projection import project_node_operations
 from .node_recovery import reconcile_expired_execution, retry_node_execution
 from .question_launch import (
     QuestionLaunchError,
+    activate_experiment_campaign,
     build_question_run_input,
+    list_experiment_launch_options,
     list_question_launch_options,
 )
 from .research_ledger import project_research_ledger
@@ -188,7 +190,27 @@ class ResearchWorkflowRuntimeService:
     ) -> dict[str, Any]:
         self.get_definition(workflow_id)
         try:
-            return {"workflowId": workflow_id, **list_question_launch_options(team_id)}
+            options = list_question_launch_options(team_id)
+            options["experiments"] = list_experiment_launch_options(team_id)["experiments"]
+            return {"workflowId": workflow_id, **options}
+        except QuestionLaunchError as exc:
+            raise ResearchWorkflowError(str(exc), code=exc.code) from exc
+
+    def activate_experiment_campaign(
+        self,
+        workflow_id: str = CHALLENGE_CUP_WORKFLOW_ID,
+        *,
+        team_id: str,
+        experiment_id: str,
+        confirmed: bool,
+    ) -> dict[str, Any]:
+        self.get_definition(workflow_id)
+        try:
+            return activate_experiment_campaign(
+                team_id,
+                experiment_id=experiment_id,
+                confirmed=confirmed,
+            )
         except QuestionLaunchError as exc:
             raise ResearchWorkflowError(str(exc), code=exc.code) from exc
 

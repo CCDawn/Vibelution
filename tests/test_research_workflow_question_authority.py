@@ -132,6 +132,22 @@ def _patch_approved_question(monkeypatch: pytest.MonkeyPatch) -> None:
         "ensure_challenge_question_project",
         lambda _team_id, **_kwargs: {"project": {"projectId": "challenge-sci-096"}},
     )
+    monkeypatch.setattr(
+        question_launch,
+        "get_theme_activation",
+        lambda _team_id, theme_id: {
+            "themeId": theme_id,
+            "status": "active",
+            "campaignId": (
+                "cc-campaign-gpu-operator-001"
+                if theme_id == "cc-gpu-operator-001"
+                else "cc-campaign-neural-spike-001"
+            ),
+            "activatedBy": "operator",
+            "activatedAt": "2026-08-18T00:00:00Z",
+            "activationRef": "research-experiment://EXP-GPU-OPERATOR-001",
+        },
+    )
 
 
 def test_launch_options_and_frozen_input_derive_from_one_approved_question(
@@ -282,3 +298,316 @@ def test_create_endpoint_forbids_client_authored_contract_fields(
     assert body["projectId"] == "challenge-sci-096"
     assert body["questionId"] == "SCI-096"
     assert "researchBriefHash" not in body
+
+
+def _isolate_research_projects_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(research_projects.team_service, "get_team", lambda _team_id: {})
+    monkeypatch.setattr(research_projects.team_service, "assert_team_exists", lambda _team_id: None)
+    monkeypatch.setattr(
+        research_projects,
+        "team_workspace_root",
+        lambda team_id: tmp_path / "teams" / str(team_id),
+    )
+    monkeypatch.setattr(research_projects, "_record_project_event", lambda *args, **kwargs: None)
+
+
+def test_experiment_options_stay_visible_when_questions_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        question_launch,
+        "challenge_question_run_summary",
+        lambda _team_id: {"completedQuestionResults": []},
+    )
+    monkeypatch.setattr(question_launch, "get_theme_activation", lambda _team_id, _theme_id: {})
+    monkeypatch.setattr(question_launch, "_dev_authorization_ready", lambda _team_id: True)
+
+    options = question_launch.list_experiment_launch_options("research-team")
+    experiments = options["experiments"]
+
+    assert [item["questionId"] for item in experiments] == ["SCI-091", "SCI-096"]
+    assert [item["experimentId"] for item in experiments] == [
+        "EXP-GPU-OPERATOR-001",
+        "EXP-NEURAL-SPIKE-001",
+    ]
+    for item in experiments:
+        assert item["activated"] is False
+        assert item["activationStatus"] == "not_activated"
+        assert item["activationAllowed"] is True
+        assert item["questionResultApproved"] is False
+        assert item["launchable"] is False
+        assert item["nextAction"] == "activate_campaign"
+        assert "question result is not formally approved" in item["blockers"]
+
+
+def test_experiment_activation_refuses_unconfirmed_or_dev_not_ready(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _isolate_research_projects_store(tmp_path, monkeypatch)
+    monkeypatch.setattr(question_launch, "_dev_authorization_ready", lambda _team_id: False)
+
+    with pytest.raises(question_launch.QuestionLaunchError) as not_ready:
+        question_launch.activate_experiment_campaign(
+            "research-team",
+            experiment_id="EXP-GPU-OPERATOR-001",
+            confirmed=True,
+        )
+    assert not_ready.value.code == "experiment_activation_not_allowed"
+
+    monkeypatch.setattr(question_launch, "_dev_authorization_ready", lambda _team_id: True)
+    with pytest.raises(question_launch.QuestionLaunchError) as unconfirmed:
+        question_launch.activate_experiment_campaign(
+            "research-team",
+            experiment_id="EXP-GPU-OPERATOR-001",
+            confirmed=False,
+        )
+    assert unconfirmed.value.code == "experiment_activation_confirmation_required"
+
+    with pytest.raises(question_launch.QuestionLaunchError) as unknown:
+        question_launch.activate_experiment_campaign(
+            "research-team",
+            experiment_id="EXP-NOPE",
+            confirmed=True,
+        )
+    assert unknown.value.code == "deep_experiment_not_found"
+
+
+def test_experiment_activation_succeeds_and_is_idempotent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _isolate_research_projects_store(tmp_path, monkeypatch)
+    monkeypatch.setattr(question_launch, "_dev_authorization_ready", lambda _team_id: True)
+
+    first = question_launch.activate_experiment_campaign(
+        "research-team",
+        experiment_id="EXP-GPU-OPERATOR-001",
+        confirmed=True,
+    )
+    second = question_launch.activate_experiment_campaign(
+        "research-team",
+        experiment_id="EXP-GPU-OPERATOR-001",
+        confirmed=True,
+    )
+
+    assert first["experimentId"] == "EXP-GPU-OPERATOR-001"
+    assert first["status"] == "active"
+    assert first["themeId"] == "cc-gpu-operator-001"
+    assert first["campaignId"] == "cc-campaign-gpu-operator-001"
+    assert first["activationHash"] == second["activationHash"]
+    assert (
+        research_projects.get_theme_activation(
+            "research-team", "cc-gpu-operator-001"
+        )["status"]
+        == "active"
+    )
+
+    options = question_launch.list_experiment_launch_options("research-team")
+    activated = next(item for item in options["experiments"] if item["experimentId"] == "EXP-GPU-OPERATOR-001")
+    assert activated["activated"] is True
+    assert activated["activationStatus"] == "active"
+    assert activated["activationAllowed"] is False
+    assert activated["activatedAt"]
+
+
+def test_deep_experiment_run_requires_activated_campaign(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_approved_question(monkeypatch)
+    approved_keys = [
+        "H1_problem_understanding",
+        "H2_hypothesis_selection",
+        "H3_research_plan",
+        "H4_external_output",
+    ]
+    monkeypatch.setattr(
+        question_launch,
+        "challenge_question_run_summary",
+        lambda _team_id: {
+            "completedQuestionIds": ["SCI-096", "SCI-091"],
+            "completedQuestionResults": [
+                {
+                    "questionId": question_id,
+                    "runId": f"stage1-{question_id.lower()}-v1",
+                    "schemaVersion": 2,
+                    "submissionEligible": True,
+                    "status": "approved",
+                    "humanGates": {
+                        "allApproved": True,
+                        "decisions": {key: "approved" for key in approved_keys},
+                    },
+                    "validation": {
+                        "schemaValidation": "passed",
+                        "citationValidation": "passed",
+                        "officialModelCall": True,
+                    },
+                }
+                for question_id in ("SCI-096", "SCI-091")
+            ],
+        },
+    )
+    monkeypatch.setattr(question_launch, "get_theme_activation", lambda _team_id, _theme_id: {})
+
+    for question_id in ("SCI-096", "SCI-091"):
+        with pytest.raises(question_launch.QuestionLaunchError) as blocked:
+            question_launch.build_question_run_input(
+                "research-team",
+                question_id=question_id,
+                safety_limits=_safety_limits(),
+            )
+        assert blocked.value.code == "deep_experiment_campaign_not_activated"
+
+
+def test_ordinary_approved_question_needs_no_campaign_activation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_approved_question(monkeypatch)
+    approved_keys = [
+        "H1_problem_understanding",
+        "H2_hypothesis_selection",
+        "H3_research_plan",
+        "H4_external_output",
+    ]
+    monkeypatch.setattr(
+        question_launch,
+        "challenge_question_run_summary",
+        lambda _team_id: {
+            "completedQuestionIds": ["SCI-042"],
+            "completedQuestionResults": [
+                {
+                    "questionId": "SCI-042",
+                    "runId": "stage1-sci-042-v1",
+                    "schemaVersion": 2,
+                    "submissionEligible": True,
+                    "status": "approved",
+                    "humanGates": {
+                        "allApproved": True,
+                        "decisions": {key: "approved" for key in approved_keys},
+                    },
+                    "validation": {
+                        "schemaValidation": "passed",
+                        "citationValidation": "passed",
+                        "officialModelCall": True,
+                    },
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        question_launch,
+        "get_challenge_question_run_detail",
+        lambda _team_id, question_id, *, run_id="": _approved_detail(question_id),
+    )
+    monkeypatch.setattr(question_launch, "get_theme_activation", lambda _team_id, _theme_id: {})
+
+    run_input = question_launch.build_question_run_input(
+        "research-team",
+        question_id="SCI-042",
+        safety_limits=_safety_limits(),
+    )
+    assert run_input["questionId"] == "SCI-042"
+    assert run_input["projectId"] == "challenge-sci-096"
+
+
+def test_activate_experiment_endpoint_succeeds_and_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+) -> None:
+    reset_research_workflow_runtime_service_for_tests(
+        run_store=WorkflowRunStore(tmp_path / "runs"),
+        checkpoint_path=str(tmp_path / "checkpoints.sqlite"),
+    )
+    formal_runtime = build_workflow_runtime(
+        tmp_path / "ledger.sqlite",
+        checkpoint_path=tmp_path / "formal-checkpoints.sqlite",
+    )
+    request.addfinalizer(formal_runtime.close)
+    _isolate_research_projects_store(tmp_path, monkeypatch)
+    monkeypatch.setattr(question_launch, "_dev_authorization_ready", lambda _team_id: True)
+    client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
+
+    activated = client.post(
+        f"/api/research/workflows/{CHALLENGE_CUP_WORKFLOW_ID}/experiments/EXP-GPU-OPERATOR-001/activate",
+        json={"teamId": "research-team", "confirmed": True},
+    )
+    assert activated.status_code == 200
+    body = activated.json()
+    assert body["experimentId"] == "EXP-GPU-OPERATOR-001"
+    assert body["status"] == "active"
+    assert body["themeId"] == "cc-gpu-operator-001"
+    assert body["activationHash"]
+
+    repeated = client.post(
+        f"/api/research/workflows/{CHALLENGE_CUP_WORKFLOW_ID}/experiments/EXP-GPU-OPERATOR-001/activate",
+        json={"teamId": "research-team", "confirmed": True},
+    )
+    assert repeated.status_code == 200
+    assert repeated.json()["activationHash"] == body["activationHash"]
+
+    unconfirmed = client.post(
+        f"/api/research/workflows/{CHALLENGE_CUP_WORKFLOW_ID}/experiments/EXP-GPU-OPERATOR-001/activate",
+        json={"teamId": "research-team", "confirmed": False},
+    )
+    assert unconfirmed.status_code == 422
+    assert unconfirmed.json()["detail"]["code"] == "experiment_activation_confirmation_required"
+
+    monkeypatch.setattr(question_launch, "_dev_authorization_ready", lambda _team_id: False)
+    not_ready = client.post(
+        f"/api/research/workflows/{CHALLENGE_CUP_WORKFLOW_ID}/experiments/EXP-NEURAL-SPIKE-001/activate",
+        json={"teamId": "research-team", "confirmed": True},
+    )
+    assert not_ready.status_code == 409
+    assert not_ready.json()["detail"]["code"] == "experiment_activation_not_allowed"
+
+    unknown = client.post(
+        f"/api/research/workflows/{CHALLENGE_CUP_WORKFLOW_ID}/experiments/EXP-NOPE/activate",
+        json={"teamId": "research-team", "confirmed": True},
+    )
+    assert unknown.status_code == 404
+    assert unknown.json()["detail"]["code"] == "deep_experiment_not_found"
+
+
+def test_activate_experiment_endpoint_rejects_non_boolean_confirmation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+) -> None:
+    reset_research_workflow_runtime_service_for_tests(
+        run_store=WorkflowRunStore(tmp_path / "runs"),
+        checkpoint_path=str(tmp_path / "checkpoints.sqlite"),
+    )
+    formal_runtime = build_workflow_runtime(
+        tmp_path / "ledger.sqlite",
+        checkpoint_path=tmp_path / "formal-checkpoints.sqlite",
+    )
+    request.addfinalizer(formal_runtime.close)
+    _isolate_research_projects_store(tmp_path, monkeypatch)
+    monkeypatch.setattr(question_launch, "_dev_authorization_ready", lambda _team_id: True)
+    client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
+
+    for truthy_not_boolean in ("yes", "1", 1):
+        rejected = client.post(
+            f"/api/research/workflows/{CHALLENGE_CUP_WORKFLOW_ID}/experiments/EXP-GPU-OPERATOR-001/activate",
+            json={"teamId": "research-team", "confirmed": truthy_not_boolean},
+        )
+        assert rejected.status_code == 422
+        detail = rejected.json()["detail"]
+        assert isinstance(detail, list)
+        assert any(
+            "confirmed" in ".".join(str(part) for part in error.get("loc") or [])
+            for error in detail
+        )
+
+    assert (
+        research_projects.get_theme_activation(
+            "research-team", "cc-gpu-operator-001"
+        )
+        == {}
+    )
+
+    activated = client.post(
+        f"/api/research/workflows/{CHALLENGE_CUP_WORKFLOW_ID}/experiments/EXP-GPU-OPERATOR-001/activate",
+        json={"teamId": "research-team", "confirmed": True},
+    )
+    assert activated.status_code == 200
+    assert activated.json()["status"] == "active"
