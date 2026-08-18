@@ -589,7 +589,7 @@ export function LauncherBranchInstancesPanel({
     {
       id: "workbench",
       header: labels.workbench,
-      width: 200,
+      width: 160,
       minWidth: 140,
       render: (item: LauncherBranchInstance) => formatWorkbenchStatus(item, zh),
     },
