@@ -311,6 +311,38 @@ describe("launcher branch-instances window truth overlay", () => {
     expect(runtime.lifecycleState).toBe("starting");
     expect((runtime.window as Record<string, unknown>).open).toBe(false);
   });
+
+  it("keeps the Python start_supervisor_lost error instead of recomputing back to starting", () => {
+    const payload = {
+      items: [
+        {
+          id: "worktree:task",
+          current: false,
+          alive: false,
+          startable: true,
+          runtime: {
+            lifecycleState: "error",
+            desiredState: "open",
+            registryStatus: "starting",
+            phase: "starting",
+            observedState: "closed",
+            backend: { alive: false, healthy: false, listening: false, portConflict: false },
+            frontend: { ready: true },
+            window: { open: false, pid: 0 },
+            error: { code: "start_supervisor_lost", message: "启动监督进程已退出且超过启动期限，启动未完成。可直接重试启动。" },
+          },
+        },
+      ],
+    };
+    const overlaid = overlayLauncherWindowTruth(
+      "branch-instances",
+      payload,
+      truth({ instances: [{ instanceId: "worktree:task", open: false, rendererProcessId: 0 }] })
+    ) as Record<string, unknown>;
+    const item = (overlaid.items as Record<string, unknown>[])[0];
+    const runtime = item.runtime as Record<string, unknown>;
+    expect(runtime.lifecycleState).toBe("error");
+  });
 });
 
 describe("composeInstanceLifecycleState", () => {
@@ -356,6 +388,32 @@ describe("composeInstanceLifecycleState", () => {
         windowOpen: false,
       })
     ).toBe("closed");
+  });
+
+  it("marks an in-flight start as error when the supervisor is lost", () => {
+    expect(
+      composeInstanceLifecycleState({
+        phase: "starting",
+        desiredState: "open",
+        registryStatus: "starting",
+        frontendReady: true,
+        windowOpen: false,
+        startSupervisorLost: true,
+      })
+    ).toBe("error");
+  });
+
+  it("keeps restarting when the supervisor is lost but the window is open", () => {
+    expect(
+      composeInstanceLifecycleState({
+        phase: "restarting",
+        desiredState: "open",
+        registryStatus: "restarting",
+        frontendReady: true,
+        windowOpen: true,
+        startSupervisorLost: true,
+      })
+    ).toBe("restarting");
   });
 });
 

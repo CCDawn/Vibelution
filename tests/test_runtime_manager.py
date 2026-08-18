@@ -11117,6 +11117,7 @@ def test_electron_owned_normal_close_stops_backend_without_terminating_window_ow
         "sessionId": "desktop-session-1",
     }
     cleanup_calls: list[dict] = []
+    state_cleanup_calls: list[str] = []
 
     monkeypatch.setattr(daemon, "load_state", lambda: state)
     monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
@@ -11142,6 +11143,11 @@ def test_electron_owned_normal_close_stops_backend_without_terminating_window_ow
         lambda **kwargs: cleanup_calls.append(kwargs)
         or {"supported": True, "requested": [41001], "terminated": [41001], "remaining": []},
     )
+    monkeypatch.setattr(
+        daemon,
+        "clear_workbench_launcher_state_after_close",
+        lambda: state_cleanup_calls.append("cleanup") or {"removedState": True, "reason": "no_launcher_control_process_alive"},
+    )
 
     result = runtime_daemon._handle_close_workbench(
         command_id="cmd-electron-close",
@@ -11152,6 +11158,8 @@ def test_electron_owned_normal_close_stops_backend_without_terminating_window_ow
     assert result["externalWindowOwner"] == "electron"
     assert result["closePhase"] == "window_close_authorized"
     assert result["backendClosed"] is True
+    assert state_cleanup_calls == ["cleanup"]
+    assert result["launcherStateCleanup"]["reason"] == "no_launcher_control_process_alive"
     assert state["workbench"]["desiredState"] == "closed"
     assert state["workbench"]["observedState"] == "partial"
     assert state["workbench"]["phase"] == "closing"
@@ -11186,6 +11194,7 @@ def test_electron_owned_force_close_preserves_window_owner_and_records_force_sto
         "windowManaged": True,
     }
     cleanup_calls: list[dict] = []
+    state_cleanup_calls: list[str] = []
 
     monkeypatch.setattr(daemon, "load_state", lambda: state)
     monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
@@ -11203,6 +11212,11 @@ def test_electron_owned_force_close_preserves_window_owner_and_records_force_sto
         lambda **kwargs: cleanup_calls.append(kwargs)
         or {"supported": True, "requested": [42001], "terminated": [42001], "remaining": []},
     )
+    monkeypatch.setattr(
+        daemon,
+        "clear_workbench_launcher_state_after_close",
+        lambda: state_cleanup_calls.append("cleanup") or {"removedState": True, "reason": "no_launcher_control_process_alive"},
+    )
 
     result = runtime_daemon._handle_force_close_workbench(
         command_id="cmd-electron-force",
@@ -11213,6 +11227,8 @@ def test_electron_owned_force_close_preserves_window_owner_and_records_force_sto
     assert result["externalWindowOwner"] == "electron"
     assert result["activeWorkRuns"] == [{"runId": "chat-run-1"}]
     assert result["forceStoppedWorkRuns"] == [{"runId": "chat-run-1"}]
+    assert state_cleanup_calls == ["cleanup"]
+    assert result["launcherStateCleanup"]["reason"] == "no_launcher_control_process_alive"
     assert {runtime_daemon._pid, 53001, 53002}.issubset(set(cleanup_calls[0]["exclude_pids"]))
 
 

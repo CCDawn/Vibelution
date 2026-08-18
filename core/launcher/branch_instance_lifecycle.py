@@ -196,6 +196,12 @@ def _instance_runtime_projection(
         else:
             failure_message = registry_failure or workbench_failure
 
+    start_supervisor_lost = not bundle and _registry_entry_stale_in_flight_start(
+        entry,
+        backend_alive=backend_alive,
+        backend_listening=backend_listening,
+        window_open=window_open,
+    )
     lifecycle_state, error_code = _instance_lifecycle_state(
         observed_state=observed_state,
         phase=phase,
@@ -208,12 +214,14 @@ def _instance_runtime_projection(
         frontend_ready=frontend_ready,
         window_open=window_open,
         failure_message=failure_message,
+        start_supervisor_lost=start_supervisor_lost,
     )
     if lifecycle_state == "error" and not failure_message:
         failure_message = {
             "backend_port_conflict": "后端端口被其他进程占用。",
             "registry_failed": "该分支上次启动失败。",
             "lifecycle_failed": "该分支生命周期进入失败状态。",
+            "start_supervisor_lost": "启动监督进程已退出且超过启动期限，启动未完成。可直接重试启动。",
         }.get(error_code, "该分支运行状态异常。")
 
     runtime: dict[str, Any] = {
@@ -264,17 +272,23 @@ def _instance_lifecycle_state(
     window_open: bool,
     failure_message: str,
     desired_state: str = "",
+    start_supervisor_lost: bool = False,
 ) -> tuple[str, str]:
     normalized_phase = str(phase or "").strip().lower()
     normalized_status = str(registry_status or "").strip().lower()
     normalized_desired = str(desired_state or "").strip().lower()
     # Leftover disk observedState is not a live signal; keep the argument for Python ≡ TS.
     _ = str(observed_state or "").strip().lower()
+    backend_ready = backend_alive and backend_healthy and backend_listening and not backend_conflict
+    # A start/restart claim whose supervisor died past its own deadline must not
+    # pin the row in starting/restarting forever; only reachable for registry
+    # in-flight start claims (see _registry_entry_stale_in_flight_start).
+    if start_supervisor_lost and not backend_ready and not window_open:
+        return "error", "start_supervisor_lost"
     if normalized_phase in {"restarting", "restart"} or normalized_status == "restarting":
         return "restarting", ""
     if normalized_phase in {"closing", "stopping", "force_stopping"} or normalized_status == "stopping":
         return "stopping", ""
-    backend_ready = backend_alive and backend_healthy and backend_listening and not backend_conflict
     in_flight_start = (
         normalized_status in {"starting", "restarting"}
         and normalized_desired == "open"
@@ -300,6 +314,124 @@ def _instance_lifecycle_state(
     if has_runtime_signal:
         return "partial", ""
     return "closed", ""
+
+
+def _iso_timestamp_in_past(value: Any) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) > parsed.astimezone(timezone.utc)
+
+
+def _pid_alive(pid: int) -> bool:
+    if int(pid or 0) <= 0:
+        return False
+    try:
+        import psutil
+    except ImportError:
+        psutil = None  # type: ignore[assignment]
+    if psutil is not None:
+        try:
+            return bool(psutil.pid_exists(int(pid)))
+        except (psutil.Error, OSError):
+            return False
+    if os.name == "nt":
+        import ctypes
+
+        handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, int(pid))
+        if handle:
+            ctypes.windll.kernel32.CloseHandle(handle)
+            return True
+        return False
+    try:
+        os.kill(int(pid), 0)
+    except OSError:
+        return False
+    return True
+
+
+def _registry_entry_stale_in_flight_start(
+    entry: dict[str, Any] | None,
+    *,
+    backend_alive: bool,
+    backend_listening: bool,
+    window_open: bool,
+) -> bool:
+    """True when a registry in-flight start outlived its own supervisor.
+
+    The Electron supervisor promises an ``observe-error`` writeback by
+    ``deadlineAt``; when the deadline passed, the spawned supervisor pid is
+    gone, and no runtime signal materialized, the claim is a leftover and must
+    not keep the row in ``starting``/``restarting`` (or block a retry) forever.
+    """
+
+    if not isinstance(entry, dict) or not entry:
+        return False
+    status = str(entry.get("status") or "").strip().lower()
+    if status not in {"starting", "restarting"}:
+        return False
+    if str(entry.get("desiredState") or "").strip().lower() != "open":
+        return False
+    if backend_alive or backend_listening or window_open:
+        return False
+    if not _iso_timestamp_in_past(entry.get("deadlineAt")):
+        return False
+    spawn_pid = _positive_int(entry.get("spawnPid"))
+    return spawn_pid <= 0 or not _pid_alive(spawn_pid)
+
+
+def _reclaim_stale_in_flight_start(
+    instance_id: str,
+    item: dict[str, Any],
+    existing: dict[str, Any],
+) -> bool:
+    """Collapse a provably dead in-flight start claim so a retry can proceed.
+
+    Returns True only when the registry row was reclaimed as ``failed`` under
+    the registry lock; live or not-yet-expired claims stay busy (409).
+    """
+
+    wanted = str(instance_id or "").strip()
+    if not wanted or not isinstance(existing, dict) or not existing:
+        return False
+    backend = _runtime_section(item, "backend")
+    window = _runtime_section(item, "window")
+    if not _registry_entry_stale_in_flight_start(
+        existing,
+        backend_alive=bool(item.get("alive")) or bool(backend.get("alive")),
+        backend_listening=bool(backend.get("listening")),
+        window_open=bool(window.get("open")),
+    ):
+        return False
+
+    def mutator(payload: dict[str, Any]) -> dict[str, Any]:
+        instances = payload.setdefault("instances", {})
+        entry = instances.get(wanted)
+        if not isinstance(entry, dict):
+            return {}
+        status = str(entry.get("status") or "").strip().lower()
+        if status not in {"starting", "restarting"}:
+            return dict(entry)
+        if str(entry.get("desiredState") or "").strip().lower() != "open":
+            return dict(entry)
+        if not _iso_timestamp_in_past(entry.get("deadlineAt")):
+            return dict(entry)
+        spawn_pid = _positive_int(entry.get("spawnPid"))
+        if spawn_pid > 0 and _pid_alive(spawn_pid):
+            return dict(entry)
+        entry["status"] = "failed"
+        entry["phase"] = "failed"
+        entry["failureMessage"] = "启动监督进程已退出且超过启动期限，启动未完成。"
+        return dict(entry)
+
+    stored = registry.mutate_registry(mutator)
+    return str(stored.get("status") or "").strip().lower() == "failed"
 
 
 def _instance_start_block_reason(item: dict[str, Any], runtime: dict[str, Any]) -> str:
@@ -420,11 +552,14 @@ def run_isolated_operation(
     if operation in {"start", "restart"}:
         existing = registry.get_instance(instance_id)
         if str(existing.get("status") or "").strip().lower() in registry.IN_FLIGHT_STATUSES:
-            raise BranchInstanceLifecycleError(
-                "instance_busy",
-                "该分支实例正在执行生命周期操作。",
-                status_code=409,
-            )
+            if _reclaim_stale_in_flight_start(instance_id, item, existing):
+                existing = registry.get_instance(instance_id)
+            else:
+                raise BranchInstanceLifecycleError(
+                    "instance_busy",
+                    "该分支实例正在执行生命周期操作。",
+                    status_code=409,
+                )
         if operation == "start" and _isolated_backend_alive(item):
             backend_port = _positive_int(item.get("port")) or registry.DEFAULT_BASE_PORT
             control_port = _positive_int(item.get("controlPort")) or registry.DEFAULT_CONTROL_PORT

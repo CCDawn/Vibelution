@@ -19,19 +19,25 @@ export function composeInstanceLifecycleState(input: {
   frontendReady?: boolean;
   windowOpen?: boolean;
   failureMessage?: string;
+  startSupervisorLost?: boolean;
 }): "starting" | "restarting" | "stopping" | "error" | "running" | "partial" | "closed" {
   const phase = String(input.phase || "").trim().toLowerCase();
   const registryStatus = String(input.registryStatus || "").trim().toLowerCase();
   const desiredState = String(input.desiredState || "").trim().toLowerCase();
+  const backendReady = Boolean(
+    input.backendAlive && input.backendHealthy && input.backendListening && !input.backendConflict
+  );
+  // Python ≡ TS: a start/restart claim whose supervisor died past its own
+  // deadline is an error, not a perpetual starting/restarting row.
+  if (input.startSupervisorLost && !backendReady && !input.windowOpen) {
+    return "error";
+  }
   if (phase === "restarting" || phase === "restart" || registryStatus === "restarting") {
     return "restarting";
   }
   if (phase === "closing" || phase === "stopping" || phase === "force_stopping" || registryStatus === "stopping") {
     return "stopping";
   }
-  const backendReady = Boolean(
-    input.backendAlive && input.backendHealthy && input.backendListening && !input.backendConflict
-  );
   const inFlightStart =
     ((registryStatus === "starting" || registryStatus === "restarting") && desiredState === "open")
     || phase === "opening"
@@ -232,7 +238,8 @@ function overlayBranchInstancesWindowTruth(
           backendConflict: backend.portConflict === true,
           frontendReady: frontend.ready !== false,
           windowOpen,
-          failureMessage: String(error.message || "")
+          failureMessage: String(error.message || ""),
+          startSupervisorLost: String(error.code || "") === "start_supervisor_lost"
         });
         runtime.lifecycleState = lifecycleState;
         const backendLive = backend.alive === true || backend.listening === true;

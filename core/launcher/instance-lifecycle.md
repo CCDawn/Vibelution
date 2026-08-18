@@ -88,7 +88,7 @@ running|starting|partial|error → stopping → closed
 
 - 仅 **后端 READY + 前端资产就绪 + 窗口 open** 才是 `running`。
 - stop / force-stop 可取消 in-flight start（先 bump `generation`）。
-- 同一实例在 `starting|stopping|restarting` 时第二次 start → **409** `instance_busy`。
+- 同一实例在 `starting|stopping|restarting` 时第二次 start → **409** `instance_busy`；除非该 in-flight start 已证明死亡（`deadlineAt` 已过、`spawnPid` 不存在或已死、无后端/窗口活信号）→ 先在锁内回收为 `failed` 再放行新 claim。
 - 无活进程的 `error` leftover **允许再次 start**（新 generation 清掉旧 `failureMessage`）。
 - `main` 行不走本状态机的 registry claim。
 
@@ -118,6 +118,7 @@ Registry 字段（隔离行）：
 
 顺序：
 
+0. **监督丢失的 in-flight start**（`startSupervisorLost`）：`deadlineAt` 已过、`spawnPid` 缺失或已死、后端未 READY 且窗口未开 → `error` / `start_supervisor_lost`。监督进程承诺在 `deadlineAt` 前写 `observe-error`；它死了就不能让行永远停在 `starting`/`restarting`。
 1. `phase ∈ {restarting, restart}` 或 `registryStatus == restarting` → `restarting`
 2. `phase ∈ {closing, stopping, force_stopping}` 或 `registryStatus == stopping` → `stopping`
 3. **in-flight start**：`(desiredState == open 且 registryStatus ∈ {starting, restarting})` 或 `phase ∈ {opening, starting}`，且后端未 READY、窗口未开 → `starting`（**忽略** leftover `failureMessage`）
@@ -162,6 +163,8 @@ Electron overlay 在写入 `window.open` 后必须用同一函数重算 `lifecyc
 4. 窗口未开：不是 `running`。
 5. 第二次 start（in-flight）：409 `instance_busy`。
 6. 并发 start / 并发端口分配：端口不重复。
+7. 监督死亡（`deadlineAt` 过 + `spawnPid` 死 + 无活信号）的 `starting` → `error` / `start_supervisor_lost`，且重试 start 在锁内回收旧 claim 后放行；监督仍活或期限未到的 in-flight 仍 409。
+8. Electron-owned close 后端验证关闭后立即清 launcher `state.json`（同 fast path），不等窗口 ack；ack 缺失不得留下 `open/steady` + 死 `backendPid` 的残留。
 
 ---
 

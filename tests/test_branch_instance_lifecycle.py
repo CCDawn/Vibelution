@@ -479,6 +479,70 @@ def test_isolated_start_is_busy_while_in_flight(registry_path, tmp_path, monkeyp
     assert busy.value.status_code == 409
 
 
+def test_isolated_start_reclaims_stale_in_flight_claim(registry_path, tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "_port_is_free", lambda port, host: True)
+    monkeypatch.setattr(lifecycle, "current_live_ports", lambda launcher_state=None: {8000, 8765})
+    monkeypatch.setattr(lifecycle, "_pid_alive", lambda _pid: False)
+    worktree = tmp_path / "task"
+    worktree.mkdir()
+    registry.upsert_instance(
+        "worktree:task",
+        status="starting",
+        desiredState="open",
+        phase="starting",
+        generation=3,
+        projectRoot=str(worktree),
+        spawnPid=424242,
+        deadlineAt="2026-08-18T04:52:41Z",
+    )
+    calls: list[tuple] = []
+
+    def fake_spawn(root, action, backend_port, control_port, **kwargs):
+        calls.append((action, backend_port, control_port, kwargs))
+        return {"returncode": 0, "pid": 9}
+
+    response = lifecycle.run_isolated_operation(
+        _item(path=str(worktree)),
+        "start",
+        runner=fake_spawn,
+    )
+
+    assert response["accepted"] is True
+    assert response["generation"] == 4
+    assert calls and calls[0][0] == "start"
+    stored = registry.get_instance("worktree:task")
+    assert stored["status"] == "starting"
+    assert stored["generation"] == 4
+    assert stored["failureMessage"] == ""
+
+
+def test_isolated_start_stays_busy_when_supervisor_alive_past_deadline(registry_path, tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "_port_is_free", lambda port, host: True)
+    monkeypatch.setattr(lifecycle, "current_live_ports", lambda launcher_state=None: {8000, 8765})
+    monkeypatch.setattr(lifecycle, "_pid_alive", lambda _pid: True)
+    worktree = tmp_path / "task"
+    worktree.mkdir()
+    registry.upsert_instance(
+        "worktree:task",
+        status="starting",
+        desiredState="open",
+        phase="starting",
+        generation=3,
+        projectRoot=str(worktree),
+        spawnPid=424242,
+        deadlineAt="2026-08-18T04:52:41Z",
+    )
+
+    with pytest.raises(lifecycle.BranchInstanceLifecycleError) as busy:
+        lifecycle.run_isolated_operation(
+            _item(path=str(worktree)),
+            "start",
+            runner=lambda *args, **kwargs: {"returncode": 0, "pid": 9},
+        )
+    assert busy.value.code == "instance_busy"
+    assert registry.get_instance("worktree:task")["status"] == "starting"
+
+
 def test_observe_error_matches_generation(registry_path):
     registry.upsert_instance("worktree:task", status="starting", generation=4, desiredState="open", phase="starting")
     stale = lifecycle.observe_isolated_transition("worktree:task", "observe-error", generation=3, message="stale")

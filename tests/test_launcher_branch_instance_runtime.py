@@ -527,3 +527,127 @@ def test_overlay_prefers_registry_starting_over_stale_worktree_failure(tmp_path,
     assert runtime["desiredState"] == "open"
     assert runtime["generation"] == 2
     assert "error" not in runtime
+
+
+def _stale_starting_entry(path: Path, **overrides: object) -> dict[str, object]:
+    entry: dict[str, object] = {
+        "instanceId": "worktree:feature",
+        "projectRoot": str(path),
+        "status": "starting",
+        "desiredState": "open",
+        "phase": "starting",
+        "generation": 1,
+        "failureMessage": "",
+        "port": 8003,
+        "spawnPid": 424242,
+        "deadlineAt": "2026-08-18T04:52:41Z",
+    }
+    entry.update(overrides)
+    return entry
+
+
+def test_overlay_collapses_starting_when_supervisor_died_past_deadline(tmp_path, monkeypatch):
+    path = tmp_path / "task"
+    path.mkdir()
+    _prepare_bundled_frontend(path)
+    monkeypatch.setattr(lifecycle, "_slot_fields_for_path", lambda _path: {})
+    monkeypatch.setattr(lifecycle, "_pid_alive", lambda _pid: False)
+    monkeypatch.setattr(
+        lifecycle.registry,
+        "list_instances",
+        lambda: [_stale_starting_entry(path)],
+    )
+
+    payload = lifecycle.overlay_instance_ports(
+        {"items": [_item(path)]},
+        launcher_state={},
+    )
+
+    item = payload["items"][0]
+    runtime = item["runtime"]
+    assert runtime["lifecycleState"] == "error"
+    assert runtime["error"]["code"] == "start_supervisor_lost"
+    assert "重试启动" in runtime["error"]["message"]
+    assert item["startable"] is True
+
+
+def test_overlay_keeps_starting_when_supervisor_alive_past_deadline(tmp_path, monkeypatch):
+    path = tmp_path / "task"
+    path.mkdir()
+    _prepare_bundled_frontend(path)
+    monkeypatch.setattr(lifecycle, "_slot_fields_for_path", lambda _path: {})
+    monkeypatch.setattr(lifecycle, "_pid_alive", lambda _pid: True)
+    monkeypatch.setattr(
+        lifecycle.registry,
+        "list_instances",
+        lambda: [_stale_starting_entry(path)],
+    )
+
+    payload = lifecycle.overlay_instance_ports(
+        {"items": [_item(path)]},
+        launcher_state={},
+    )
+
+    runtime = payload["items"][0]["runtime"]
+    assert runtime["lifecycleState"] == "starting"
+    assert "error" not in runtime
+
+
+def test_overlay_keeps_starting_before_deadline_even_when_spawn_pid_dead(tmp_path, monkeypatch):
+    path = tmp_path / "task"
+    path.mkdir()
+    _prepare_bundled_frontend(path)
+    monkeypatch.setattr(lifecycle, "_slot_fields_for_path", lambda _path: {})
+    monkeypatch.setattr(lifecycle, "_pid_alive", lambda _pid: False)
+    monkeypatch.setattr(
+        lifecycle.registry,
+        "list_instances",
+        lambda: [_stale_starting_entry(path, deadlineAt="2999-01-01T00:00:00Z")],
+    )
+
+    payload = lifecycle.overlay_instance_ports(
+        {"items": [_item(path)]},
+        launcher_state={},
+    )
+
+    runtime = payload["items"][0]["runtime"]
+    assert runtime["lifecycleState"] == "starting"
+    assert "error" not in runtime
+
+
+def test_runtime_lifecycle_projection_marks_lost_restarting_as_error():
+    state, code = lifecycle._instance_lifecycle_state(
+        observed_state="closed",
+        phase="starting",
+        desired_state="open",
+        registry_status="restarting",
+        backend_alive=False,
+        backend_healthy=False,
+        backend_listening=False,
+        backend_conflict=False,
+        frontend_ready=True,
+        window_open=False,
+        failure_message="",
+        start_supervisor_lost=True,
+    )
+    assert state == "error"
+    assert code == "start_supervisor_lost"
+
+
+def test_runtime_lifecycle_projection_lost_supervisor_does_not_override_live_window():
+    state, code = lifecycle._instance_lifecycle_state(
+        observed_state="partial",
+        phase="starting",
+        desired_state="open",
+        registry_status="starting",
+        backend_alive=False,
+        backend_healthy=False,
+        backend_listening=False,
+        backend_conflict=False,
+        frontend_ready=True,
+        window_open=True,
+        failure_message="",
+        start_supervisor_lost=True,
+    )
+    assert state == "partial"
+    assert code == ""

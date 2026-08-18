@@ -4422,6 +4422,18 @@ class RuntimeManagerDaemon:
             )
 
         verification = _electron_owned_backend_closed_observation(initial_observation, cleanup_result)
+        # The backend close is verified at this point; the launcher state file must
+        # not keep claiming an open workbench while we wait for the Electron window
+        # acknowledgement. Mirror the fast-path cleanup so a missing ack (app quit,
+        # supervisor loss) never leaves a stale open/steady launcher state behind.
+        state_cleanup_started = time.monotonic()
+        state_cleanup = _clear_launcher_state_after_verified_close(
+            verification,
+            command_id=command_id,
+            cleanup_result=cleanup_result,
+            event_type=f"{event_prefix}.electron_launcher_state_cleanup",
+        )
+        lifecycle_timings_ms["launcher_state_cleanup_ms"] = _elapsed_monotonic_ms(state_cleanup_started)
         state = load_state()
         state.setdefault("workbench", {}).update(
             {
@@ -4448,6 +4460,7 @@ class RuntimeManagerDaemon:
             | {
                 "externalWindowOwner": "electron",
                 "closePhase": "window_close_authorized",
+                "stateCleanup": state_cleanup,
                 "timingsMs": lifecycle_timings_ms,
             },
         )
@@ -4465,6 +4478,7 @@ class RuntimeManagerDaemon:
                 "forceStoppedWorkRuns": force_stopped_runs,
                 "activeWorkRuns": active_work_runs,
                 "alreadyBackendClosed": already_backend_closed,
+                "launcherStateCleanup": state_cleanup,
                 "lifecycleTimingsMs": lifecycle_timings_ms,
                 "closeRequest": request_fields,
             },
