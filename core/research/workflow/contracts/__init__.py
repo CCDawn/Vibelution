@@ -42,6 +42,7 @@ from .hypothesis_round import (
     HypothesisRound,
     HypothesisRoundCandidate,
 )
+from .hypothesis_selection import MAX_SELECTED_CANDIDATES, HypothesisSelectionRecord
 from .meeting_digest import MeetingDigest
 from .meeting_round import MEETING_STATUSES, MEETING_TYPES, MeetingRound
 from .personal_memory_candidate import (
@@ -165,7 +166,9 @@ __all__ = [
     "HypothesisPortfolio",
     "HypothesisRound",
     "HypothesisRoundCandidate",
+    "HypothesisSelectionRecord",
     "LINEAGE_KINDS",
+    "MAX_SELECTED_CANDIDATES",
     "MEETING_REF_KINDS",
     "MEETING_STATUSES",
     "MEETING_TYPES",
