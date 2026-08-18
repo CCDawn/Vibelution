@@ -186,10 +186,13 @@ def gate_r1(
         python=sys.executable,
     )
     if report["clean_clone_reproduction"] != "PASS":
+        detail = "; ".join(report["failures"])
+        if len(detail) > 500:
+            detail = detail[:120] + " ... " + detail[-375:]
         return _gate(
             "r1_clean_clone",
             "FAIL",
-            "; ".join(report["failures"])[:500],
+            detail,
         )
     return _gate(
         "r1_clean_clone",

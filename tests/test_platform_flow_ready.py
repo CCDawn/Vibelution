@@ -15,6 +15,7 @@ from core.research.competition.platform_flow_ready import (
     gate_product_projection,
     gate_program_hash,
     gate_r0,
+    gate_r1,
     overall_status,
 )
 from core.research.competition import platform_flow_ready as platform_flow_ready_module
@@ -107,6 +108,26 @@ def test_gate_r0_fails_on_dirty_tree(
     gate = gate_r0(repo, require_clean=True)
     assert gate["status"] == "FAIL"
     assert "dirty" in gate["detail"]
+
+
+def test_gate_r1_failure_keeps_the_actionable_tail(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        platform_flow_ready_module,
+        "evaluate_clean_clone",
+        lambda *args, **kwargs: {
+            "clean_clone_reproduction": "FAIL",
+            "failures": ["prefix " + "x" * 600 + " ASSERTION_TAIL"],
+        },
+    )
+
+    gate = gate_r1(tmp_path, tmp_path / "clone")
+
+    assert gate["status"] == "FAIL"
+    assert "ASSERTION_TAIL" in gate["detail"]
+    assert len(gate["detail"]) <= 500
 
 
 def test_overall_status_does_not_promote_failures() -> None:

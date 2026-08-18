@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 from jsonschema import Draft202012Validator
 
+from core.infrastructure.no_console_git import run_git
 from core.research.competition import source_boundary
 from core.research.competition.source_boundary import (
     SourceBoundaryError,
@@ -26,13 +27,15 @@ SCHEMA_PATH = ROOT / "schemas" / "challenge_cup_submission_source_manifest.schem
 
 
 def git(root: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", *args],
-        cwd=root,
-        check=check,
-        capture_output=True,
-        text=True,
-    )
+    result = run_git(args, cwd=root, timeout=30.0)
+    if check and result.returncode != 0:
+        raise subprocess.CalledProcessError(
+            result.returncode,
+            result.args,
+            output=result.stdout,
+            stderr=result.stderr,
+        )
+    return result
 
 
 def _init_repo(root: Path) -> Path:
