@@ -3,7 +3,7 @@ import { type KeyboardEvent, type PointerEvent, type ReactNode, useMemo, useStat
 export type VDenseTableColumn<TRow> = {
   align?: "left" | "center" | "right";
   className?: string;
-  /** Preferred grow column. Resizable tables give this track `minmax(minWidth, 1fr)` so later columns keep their pixel width. */
+  /** Preferred grow column. Resizable tables give this track `minmax(0, 1fr)` so content cannot blow out later columns. */
   fill?: boolean;
   header: ReactNode;
   id: string;
@@ -69,7 +69,7 @@ export function denseTableGridTemplateColumns<TRow>(
   return columns
     .map((column) => {
       if (column.fill) {
-        return `minmax(${column.minWidth ?? DEFAULT_MIN_WIDTH}px, 1fr)`;
+        return "minmax(0, 1fr)";
       }
       return `${columnWidths[column.id] ?? column.width ?? DEFAULT_COLUMN_WIDTH}px`;
     })
