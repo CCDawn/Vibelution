@@ -644,18 +644,20 @@ def spawn_worktree_launcher(
 
 
 def resolve_no_console_python(worktree: Path) -> str:
+    # Spawn the supervisor launcher with the current-shell interpreter. A leftover
+    # incomplete worktree .venv must not win over a ready supervisor pythonw.
     if os.name == "nt":
         candidates = (
-            worktree / ".venv" / "Scripts" / "pythonw.exe",
             Path(sys.executable).with_name("pythonw.exe"),
-            worktree / ".venv" / "Scripts" / "python.exe",
             Path(sys.executable),
+            worktree / ".venv" / "Scripts" / "pythonw.exe",
+            worktree / ".venv" / "Scripts" / "python.exe",
         )
     else:
         candidates = (
+            Path(sys.executable),
             worktree / ".venv" / "bin" / "python3",
             worktree / ".venv" / "bin" / "python",
-            Path(sys.executable),
         )
     for candidate in candidates:
         if candidate.is_file():

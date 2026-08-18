@@ -1572,12 +1572,37 @@ def _preserved_launcher_control_state(state: dict) -> dict[str, object]:
     return {key: state[key] for key in keys if key in state}
 
 
+def _venv_python_for(venv_dir: Path) -> Path:
+    """Interpreter inside a virtualenv directory (POSIX: .venv/bin/python)."""
+
+    if os.name == "nt":
+        return venv_dir / "Scripts" / "python.exe"
+    return venv_dir / "bin" / "python"
+
+
 def _venv_python_executable() -> Path:
     """Project-local virtual environment interpreter (POSIX: .venv/bin/python)."""
 
-    if os.name == "nt":
-        return VENV_DIR / "Scripts" / "python.exe"
-    return VENV_DIR / "bin" / "python"
+    return _venv_python_for(VENV_DIR)
+
+
+def _isolated_workspace() -> bool:
+    try:
+        return PROJECT_ROOT.resolve() != SUPERVISOR_ROOT.resolve()
+    except OSError:
+        return False
+
+
+def _is_supervisor_venv_python(python_executable: str) -> bool:
+    raw = str(python_executable or "").strip()
+    if not raw:
+        return False
+    try:
+        resolved = Path(raw).resolve()
+        supervisor_venv = (SUPERVISOR_ROOT / ".venv").resolve()
+        return resolved == supervisor_venv or supervisor_venv in resolved.parents
+    except OSError:
+        return False
 
 
 def _dependency_stamp_path() -> Path:
@@ -1643,12 +1668,16 @@ def _requirements_marker_applies(marker: str) -> bool:
     return is_windows
 
 
-def _requirements_fingerprint() -> str:
+def _requirements_fingerprint_at(path: Path) -> str:
     try:
-        content = REQUIREMENTS_PATH.read_text(encoding="utf-8")
+        content = path.read_text(encoding="utf-8")
     except OSError:
         return ""
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def _requirements_fingerprint() -> str:
+    return _requirements_fingerprint_at(REQUIREMENTS_PATH)
 
 
 def _read_dependency_stamp() -> str:
@@ -1801,6 +1830,10 @@ def _create_project_virtualenv() -> None:
 
 
 def _install_project_dependencies(python_executable: str) -> None:
+    if _isolated_workspace() and _is_supervisor_venv_python(python_executable):
+        raise RuntimeError(
+            "Refusing to install isolated-instance dependencies into the supervisor venv."
+        )
     result = subprocess.run(
         [
             str(python_executable),
@@ -1827,17 +1860,94 @@ def _install_project_dependencies(python_executable: str) -> None:
         )
 
 
+def _try_reuse_supervisor_python_runtime() -> str:
+    """Reuse the supervisor .venv when an isolated workspace has the same requirements.
+
+    Isolated start must never pip-install into the shared supervisor environment.
+    """
+
+    if not _isolated_workspace():
+        return ""
+    supervisor_python = _venv_python_for(SUPERVISOR_ROOT / ".venv")
+    if not supervisor_python.is_file():
+        return ""
+    worktree_fingerprint = _requirements_fingerprint()
+    supervisor_fingerprint = _requirements_fingerprint_at(SUPERVISOR_ROOT / "requirements.txt")
+    if not worktree_fingerprint or worktree_fingerprint != supervisor_fingerprint:
+        return ""
+    python = str(supervisor_python)
+    if _runtime_core_imports_available(python):
+        return python
+    return ""
+
+
+def _local_venv_stamp_ready_python() -> str:
+    """Return the workspace .venv interpreter when stamp and core imports already match."""
+
+    venv_python_path = _venv_python_executable()
+    if not venv_python_path.exists():
+        return ""
+    fingerprint = _requirements_fingerprint()
+    stored_fingerprint = _read_dependency_stamp()
+    if not (fingerprint and stored_fingerprint == fingerprint):
+        return ""
+    # Fast path: stamp already matches requirements.txt → skip heavy full-import probe.
+    venv_python = str(venv_python_path)
+    _ensure_langgraph_checkpoint_sqlite_shim(venv_python)
+    if _runtime_core_imports_available(venv_python):
+        return venv_python
+    return ""
+
+
+def _local_venv_full_ready_python() -> str:
+    """Return the workspace .venv interpreter after a full import probe."""
+
+    venv_python_path = _venv_python_executable()
+    if not venv_python_path.exists():
+        return ""
+    venv_python = str(venv_python_path)
+    _ensure_langgraph_checkpoint_sqlite_shim(venv_python)
+    fingerprint = _requirements_fingerprint()
+    stored_fingerprint = _read_dependency_stamp()
+    runtime_ready = _runtime_imports_available(venv_python)
+    if runtime_ready and (not fingerprint or stored_fingerprint == fingerprint):
+        if fingerprint and not stored_fingerprint:
+            _write_dependency_stamp(fingerprint)
+        return venv_python
+    return ""
+
+
 def _ensure_project_python_runtime() -> str:
     """Bootstrap the project venv and return its interpreter, installing requirements when needed.
 
-    - Uses the project-local .venv interpreter when present.
-    - Creates it from the current interpreter when missing.
+    - Uses the project-local .venv interpreter when present and ready.
+    - Isolated workspaces reuse the supervisor .venv when requirements.txt matches
+      and that interpreter can import fastapi/uvicorn; they do not create or pip-install
+      a private venv in that case.
+    - Creates a workspace .venv from the current interpreter when missing and reuse
+      is not available (including when isolated requirements differ).
     - Installs requirements.txt only when the runtime imports are incomplete or the
       requirements fingerprint changed; a ready venv is never reinstalled.
     - When the stamp matches, only a cheap fastapi/uvicorn probe runs (not a full
       langchain/litellm import of every requirements module).
     """
 
+    local = _local_venv_stamp_ready_python()
+    if local:
+        return local
+    reused = _try_reuse_supervisor_python_runtime()
+    if reused:
+        _append_frontend_build_log(
+            {
+                "event": "python_runtime.reused_supervisor",
+                "pythonExecutable": reused,
+                "reason": "requirements_fingerprint_match",
+            }
+        )
+        return reused
+    local = _local_venv_full_ready_python()
+    if local:
+        return local
     venv_python = str(_venv_python_executable())
     if not _venv_python_executable().exists():
         _create_project_virtualenv()
@@ -1845,15 +1955,6 @@ def _ensure_project_python_runtime() -> str:
     # Heal known pip-name vs import-name mismatches (safe no-op if already present).
     _ensure_langgraph_checkpoint_sqlite_shim(venv_python)
     fingerprint = _requirements_fingerprint()
-    stored_fingerprint = _read_dependency_stamp()
-    # Fast path: stamp already matches requirements.txt → skip heavy full-import probe.
-    if fingerprint and stored_fingerprint == fingerprint and _runtime_core_imports_available(venv_python):
-        return venv_python
-    runtime_ready = _runtime_imports_available(venv_python)
-    if runtime_ready and (not fingerprint or stored_fingerprint == fingerprint):
-        if fingerprint and not stored_fingerprint:
-            _write_dependency_stamp(fingerprint)
-        return venv_python
     if not REQUIREMENTS_PATH.exists():
         raise RuntimeError(
             f"Project virtual environment at {VENV_DIR} is not usable and requirements.txt "
