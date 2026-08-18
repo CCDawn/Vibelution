@@ -8,7 +8,14 @@
  * and mutation pending state; repair states only surface a blocking hint and
  * never advance to the next stage. No real experiment, Qwen, CUDA/GPU, DANDI,
  * network collection or formal submission is ever started.
+ *
+ * The program/question combined query degrades independently from the DEV
+ * controls: while it is pending or failing the DEV snapshot section stays
+ * fully visible and operable. After a mutation, actions stay pending/disabled
+ * until the snapshot refetch completes so a delayed refetch cannot trigger a
+ * duplicate POST.
  */
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { getChallengeQuestionRunStatus } from "../../../api/challengeQuestionRuns";
@@ -128,8 +135,14 @@ export function ChallengeMvpProgressPanel({
   });
 
   const queryClient = useQueryClient();
-  const refreshDevControls = () => {
-    void queryClient.invalidateQueries({ queryKey: devControlsKey });
+  const [snapshotRefreshing, setSnapshotRefreshing] = useState(false);
+  const refreshDevControls = async () => {
+    setSnapshotRefreshing(true);
+    try {
+      await queryClient.invalidateQueries({ queryKey: devControlsKey });
+    } finally {
+      setSnapshotRefreshing(false);
+    }
   };
 
   async function runDevReadiness(vars: { teamId: string }) {
@@ -137,49 +150,44 @@ export function ChallengeMvpProgressPanel({
   }
 
   async function runDev1(vars: { teamId: string }) {
-    return runChallengeCupDevBatch(vars.teamId, "dev-1", { maxItems: null });
+    return runChallengeCupDevBatch(vars.teamId, "dev-1", { maxItems: null, retryFailed: false });
   }
 
   async function runDev5(vars: { teamId: string; maxItems: number | null }) {
-    return runChallengeCupDevBatch(vars.teamId, "dev-5", { maxItems: vars.maxItems });
+    return runChallengeCupDevBatch(vars.teamId, "dev-5", { maxItems: vars.maxItems, retryFailed: false });
+  }
+
+  async function repairDev1(vars: { teamId: string }) {
+    return runChallengeCupDevBatch(vars.teamId, "dev-1", { maxItems: null, retryFailed: true });
+  }
+
+  async function repairDev5(vars: { teamId: string }) {
+    return runChallengeCupDevBatch(vars.teamId, "dev-5", { maxItems: null, retryFailed: true });
   }
 
   const readinessMutation = useMutation({
     mutationFn: runDevReadiness,
-    onSuccess: refreshDevControls,
+    onSuccess: () => refreshDevControls(),
   });
   const dev1Mutation = useMutation({
     mutationFn: runDev1,
-    onSuccess: refreshDevControls,
+    onSuccess: () => refreshDevControls(),
   });
   const dev5Mutation = useMutation({
     mutationFn: runDev5,
-    onSuccess: refreshDevControls,
+    onSuccess: () => refreshDevControls(),
+  });
+  const repairDev1Mutation = useMutation({
+    mutationFn: repairDev1,
+    onSuccess: () => refreshDevControls(),
+  });
+  const repairDev5Mutation = useMutation({
+    mutationFn: repairDev5,
+    onSuccess: () => refreshDevControls(),
   });
 
-  if (statusQuery.isPending) {
-    return (
-      <VSurface tone="panel" className={styles.root}>
-        <VStateSurface tone="loading" title={zh ? "读取比赛与题目进度" : "Loading program and question progress"} fill className={styles.fill} />
-      </VSurface>
-    );
-  }
-
-  if (statusQuery.isError || !statusQuery.data) {
-    return (
-      <VSurface tone="panel" className={styles.root}>
-        <div className={styles.error} role="alert">
-          {statusQuery.error instanceof Error ? statusQuery.error.message : String(statusQuery.error)}
-        </div>
-        <VButton type="button" variant="secondary" onClick={() => void statusQuery.refetch()}>
-          {zh ? "重试" : "Retry"}
-        </VButton>
-      </VSurface>
-    );
-  }
-
-  const program = statusQuery.data.experimentStatus?.competitionProgramProjection;
-  const summary = statusQuery.data.questionStatus?.summary;
+  const program = statusQuery.data?.experimentStatus?.competitionProgramProjection;
+  const summary = statusQuery.data?.questionStatus?.summary;
   const results = summary?.validatedQuestionResults ?? [];
   const approvedDeepExperimentCount = program?.requiredDeepExperiments.filter((item) => item.approved).length ?? 0;
 
@@ -189,12 +197,25 @@ export function ChallengeMvpProgressPanel({
   const dev1 = snapshot?.batches?.["dev-1"];
   const dev5 = snapshot?.batches?.["dev-5"];
   const boundary = snapshot?.boundary ?? null;
-  const anyMutationPending = readinessMutation.isPending || dev1Mutation.isPending || dev5Mutation.isPending;
-  const activeMutationError = readinessMutation.error ?? dev1Mutation.error ?? dev5Mutation.error;
-  const isRepairAction =
-    nextLegalAction === "repair_failed_platform_gates"
-    || nextLegalAction === "repair_dev_1_fixture_batch"
-    || nextLegalAction === "repair_dev_5_fixture_batch";
+  const anyMutationPending =
+    readinessMutation.isPending
+    || dev1Mutation.isPending
+    || dev5Mutation.isPending
+    || repairDev1Mutation.isPending
+    || repairDev5Mutation.isPending;
+  const anyActionPending = anyMutationPending || snapshotRefreshing;
+  const activeMutationError =
+    readinessMutation.error
+    ?? dev1Mutation.error
+    ?? dev5Mutation.error
+    ?? repairDev1Mutation.error
+    ?? repairDev5Mutation.error;
+
+  const programRetry = (
+    <VButton type="button" variant="secondary" onClick={() => void statusQuery.refetch()}>
+      {zh ? "重试" : "Retry"}
+    </VButton>
+  );
 
   return (
     <VSurface tone="panel" className={styles.root} data-vui="competition-program-progress-panel">
@@ -208,7 +229,13 @@ export function ChallengeMvpProgressPanel({
         </VButton>
       </div>
 
-      {program ? (
+      {statusQuery.isPending ? (
+        <VStateSurface tone="loading" title={zh ? "读取比赛与题目进度" : "Loading program and question progress"} className={styles.fill} />
+      ) : statusQuery.isError ? (
+        <VStateSurface tone="error" title={zh ? "比赛与题目状态加载失败" : "Program and question status failed"} className={styles.fill} actions={programRetry}>
+          {statusQuery.error instanceof Error ? statusQuery.error.message : String(statusQuery.error)}
+        </VStateSurface>
+      ) : program ? (
         <section className={styles.program} aria-label={zh ? "比赛总合同" : "Program contract"}>
           <div className={styles.programHeader}>
             <span>{program.program.problemId} · {program.program.track}</span>
@@ -272,8 +299,8 @@ export function ChallengeMvpProgressPanel({
           ) : null}
         </section>
       ) : (
-        <VEmptyState title={zh ? "Program v2 状态不可用" : "Program v2 unavailable"} className={styles.empty}>
-          {statusQuery.data.programError || (zh ? "后端尚未提供 competitionProgramProjection。" : "competitionProgramProjection is not available.")}
+        <VEmptyState title={zh ? "Program v2 状态不可用" : "Program v2 unavailable"} className={styles.empty} actions={programRetry}>
+          {statusQuery.data?.programError || (zh ? "后端尚未提供 competitionProgramProjection。" : "competitionProgramProjection is not available.")}
         </VEmptyState>
       )}
 
@@ -289,7 +316,12 @@ export function ChallengeMvpProgressPanel({
           <VStateSurface tone="loading" title={zh ? "读取 DEV 控制快照" : "Loading DEV control snapshot"} fill className={styles.fill} />
         ) : devControlsQuery.isError || !snapshot ? (
           <div className={styles.error} role="alert" data-dev-controls="snapshot-error">
-            {devControlsQuery.error instanceof Error ? devControlsQuery.error.message : String(devControlsQuery.error ?? (zh ? "DEV 控制快照不可用" : "DEV control snapshot unavailable"))}
+            <div className={styles.devMeta}>
+              {devControlsQuery.error instanceof Error ? devControlsQuery.error.message : String(devControlsQuery.error ?? (zh ? "DEV 控制快照不可用" : "DEV control snapshot unavailable"))}
+            </div>
+            <VButton type="button" variant="secondary" data-dev-controls="snapshot-retry" onClick={() => void devControlsQuery.refetch()}>
+              {zh ? "重试" : "Retry"}
+            </VButton>
           </div>
         ) : (
           <>
@@ -367,12 +399,12 @@ export function ChallengeMvpProgressPanel({
               );
             })}
 
-            <div className={styles.actions} data-dev-controls="actions">
+            <div className={styles.actions} data-dev-controls="actions" aria-live="polite">
               {nextLegalAction === "run_dev_readiness" ? (
                 <VButton
                   type="button"
                   variant="primary"
-                  isDisabled={anyMutationPending}
+                  isDisabled={anyActionPending}
                   isPending={readinessMutation.isPending}
                   onClick={() => readinessMutation.mutate({ teamId })}
                 >
@@ -383,7 +415,7 @@ export function ChallengeMvpProgressPanel({
                 <VButton
                   type="button"
                   variant="primary"
-                  isDisabled={anyMutationPending}
+                  isDisabled={anyActionPending}
                   isPending={dev1Mutation.isPending}
                   onClick={() => dev1Mutation.mutate({ teamId })}
                 >
@@ -394,7 +426,7 @@ export function ChallengeMvpProgressPanel({
                 <VButton
                   type="button"
                   variant="primary"
-                  isDisabled={anyMutationPending}
+                  isDisabled={anyActionPending}
                   isPending={dev5Mutation.isPending}
                   onClick={() => dev5Mutation.mutate({ teamId, maxItems: 2 })}
                 >
@@ -405,19 +437,66 @@ export function ChallengeMvpProgressPanel({
                 <VButton
                   type="button"
                   variant="primary"
-                  isDisabled={anyMutationPending}
+                  isDisabled={anyActionPending}
                   isPending={dev5Mutation.isPending}
                   onClick={() => dev5Mutation.mutate({ teamId, maxItems: null })}
                 >
                   {zh ? "恢复 dev-5（maxItems=null）" : "Resume dev-5 (maxItems=null)"}
                 </VButton>
               ) : null}
-              {isRepairAction ? (
-                <div className={styles.notice} role="note">
-                  {zh
-                    ? `${actionLabel(zh, nextLegalAction)}：fixture 存在失败/阻塞，必须修复后才能继续；下一阶段保持阻塞，禁止放行。`
-                    : `${actionLabel(zh, nextLegalAction)}: failed/blocked fixture requires repair; the next stage stays blocked and cannot advance.`}
-                </div>
+              {nextLegalAction === "repair_failed_platform_gates" ? (
+                <>
+                  <VButton
+                    type="button"
+                    variant="danger"
+                    isDisabled={anyActionPending}
+                    isPending={readinessMutation.isPending}
+                    onClick={() => readinessMutation.mutate({ teamId })}
+                  >
+                    {zh ? "重新运行 readiness" : "Re-run readiness"}
+                  </VButton>
+                  <div className={styles.notice} role="note">
+                    {zh
+                      ? "平台门禁存在失败，必须修复后才能继续；下一阶段保持阻塞，禁止放行。"
+                      : "Platform gates failed; repair required before continuing; the next stage stays blocked and cannot advance."}
+                  </div>
+                </>
+              ) : null}
+              {nextLegalAction === "repair_dev_1_fixture_batch" ? (
+                <>
+                  <VButton
+                    type="button"
+                    variant="danger"
+                    isDisabled={anyActionPending}
+                    isPending={repairDev1Mutation.isPending}
+                    onClick={() => repairDev1Mutation.mutate({ teamId })}
+                  >
+                    {zh ? "修复 dev-1 fixture" : "Repair dev-1 fixture"}
+                  </VButton>
+                  <div className={styles.notice} role="note">
+                    {zh
+                      ? "dev-1 fixture 存在失败/阻塞，必须修复后才能继续；下一阶段保持阻塞，禁止放行。"
+                      : "dev-1 fixture has failed/blocked items; repair required before continuing; the next stage stays blocked and cannot advance."}
+                  </div>
+                </>
+              ) : null}
+              {nextLegalAction === "repair_dev_5_fixture_batch" ? (
+                <>
+                  <VButton
+                    type="button"
+                    variant="danger"
+                    isDisabled={anyActionPending}
+                    isPending={repairDev5Mutation.isPending}
+                    onClick={() => repairDev5Mutation.mutate({ teamId })}
+                  >
+                    {zh ? "修复 dev-5 fixture" : "Repair dev-5 fixture"}
+                  </VButton>
+                  <div className={styles.notice} role="note">
+                    {zh
+                      ? "dev-5 fixture 存在失败/阻塞，必须修复后才能继续；下一阶段保持阻塞，禁止放行。"
+                      : "dev-5 fixture has failed/blocked items; repair required before continuing; the next stage stays blocked and cannot advance."}
+                  </div>
+                </>
               ) : null}
               {nextLegalAction === "RESEARCH_AUTHORIZATION_REQUIRED" ? (
                 <div className={styles.notice} role="status">
@@ -467,25 +546,35 @@ export function ChallengeMvpProgressPanel({
           <strong>{zh ? "单题结果与审核" : "Question results"}</strong>
           {summary ? <span>{zh ? `已验证 ${summary.validatedQuestionCount}` : `${summary.validatedQuestionCount} validated`}</span> : null}
         </div>
-        {statusQuery.data.questionError ? <div className={styles.error} role="alert">{statusQuery.data.questionError}</div> : null}
-        {!summary || results.length === 0 ? (
-          <VEmptyState title={zh ? "暂无已验证题目" : "No validated questions"} className={styles.empty}>
-            {zh ? "完成受控运行与候选晋升后，题目结果会出现在这里。" : "Question results appear here after controlled runs and candidate promotion."}
-          </VEmptyState>
+        {statusQuery.isPending ? (
+          <VStateSurface tone="loading" title={zh ? "读取题目结果" : "Loading question results"} className={styles.fill} />
+        ) : statusQuery.isError ? (
+          <VStateSurface tone="error" title={zh ? "题目结果加载失败" : "Question results failed"} className={styles.fill} actions={programRetry}>
+            {statusQuery.error instanceof Error ? statusQuery.error.message : String(statusQuery.error)}
+          </VStateSurface>
         ) : (
-          <ul className={styles.list}>
-            {results.map((item) => (
-              <li key={item.questionId} className={styles.item}>
-                <div className={styles.itemText}>
-                  <div className={styles.itemTitle}>{item.questionId}</div>
-                  <div className={styles.itemMeta}>{item.runId} · {item.status}</div>
-                </div>
-                <VButton type="button" variant="ghost" onClick={() => onOpenQuestion(item.questionId)}>
-                  {zh ? "详情" : "Detail"}
-                </VButton>
-              </li>
-            ))}
-          </ul>
+          <>
+            {statusQuery.data?.questionError ? <div className={styles.error} role="alert">{statusQuery.data.questionError}</div> : null}
+            {!summary || results.length === 0 ? (
+              <VEmptyState title={zh ? "暂无已验证题目" : "No validated questions"} className={styles.empty}>
+                {zh ? "完成受控运行与候选晋升后，题目结果会出现在这里。" : "Question results appear here after controlled runs and candidate promotion."}
+              </VEmptyState>
+            ) : (
+              <ul className={styles.list}>
+                {results.map((item) => (
+                  <li key={item.questionId} className={styles.item}>
+                    <div className={styles.itemText}>
+                      <div className={styles.itemTitle}>{item.questionId}</div>
+                      <div className={styles.itemMeta}>{item.runId} · {item.status}</div>
+                    </div>
+                    <VButton type="button" variant="ghost" onClick={() => onOpenQuestion(item.questionId)}>
+                      {zh ? "详情" : "Detail"}
+                    </VButton>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
         )}
       </section>
     </VSurface>

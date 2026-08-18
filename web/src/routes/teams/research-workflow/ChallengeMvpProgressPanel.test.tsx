@@ -83,14 +83,19 @@ vi.mock("@tanstack/react-query", () => ({
     }
     return queryState.current;
   },
-  useMutation: (options?: { mutationFn?: { name?: string }; onSuccess?: (...args: unknown[]) => void }) => {
+  useMutation: (options?: { mutationFn?: { name?: string }; onSuccess?: (...args: unknown[]) => unknown }) => {
     const name = options?.mutationFn?.name ?? "default";
     const mock = mutationState.get(name);
     return {
       ...mock,
       mutate: (variables?: unknown) => {
-        mock.mutate(variables);
-        options?.onSuccess?.({}, variables, undefined);
+        void (async () => {
+          Object.assign(mock, { isPending: true, isIdle: false, isError: false, isSuccess: false });
+          mock.mutate(variables);
+          const onSuccessResult = options?.onSuccess?.({}, variables, undefined);
+          await onSuccessResult;
+          Object.assign(mock, { isPending: false, isIdle: false, isSuccess: true });
+        })();
       },
     };
   },
@@ -98,6 +103,7 @@ vi.mock("@tanstack/react-query", () => ({
 }));
 
 import { ChallengeMvpProgressPanel } from "./ChallengeMvpProgressPanel";
+import panelSource from "./ChallengeMvpProgressPanel.tsx?raw";
 
 function setMainData(data: unknown) {
   Object.assign(queryState.current, {
@@ -366,6 +372,26 @@ function stateDev1Repair() {
   });
 }
 
+function stateRepairReadiness() {
+  return devSnapshot({
+    report: {
+      schemaVersion: 1,
+      reportKind: "platform_flow_readiness",
+      status: "FAILED",
+      mode: "dev",
+      realCampaignAllowed: false,
+      researchAuthorizationRequired: true,
+      nextLegalAction: "repair_failed_platform_gates",
+      generatedAt: "2026-08-18T00:00:00Z",
+      updatedAt: "2026-08-18T00:00:00Z",
+      gates: [
+        { gateId: "r1_clean_clone", status: "FAIL", detail: "R1 pytest failed" },
+      ],
+    },
+    nextLegalAction: "repair_failed_platform_gates",
+  });
+}
+
 function stateDev5Repair() {
   return devSnapshot({
     report: readyReport(),
@@ -384,6 +410,11 @@ function emptyMainData() {
     questionError: "",
     programError: "",
   };
+}
+
+function findButton(container: HTMLElement, text: string): HTMLButtonElement | undefined {
+  return Array.from(container.querySelectorAll("button"))
+    .find((button) => button.textContent?.includes(text)) as HTMLButtonElement | undefined;
 }
 
 describe("ChallengeMvpProgressPanel", () => {
@@ -628,5 +659,339 @@ describe("ChallengeMvpProgressPanel", () => {
     expect(markup).toContain("CLI 诊断");
     expect(markup).toContain("platform_flow_ready.py");
     expect(markup).toContain("下一合法动作：运行 DEV readiness");
+  });
+
+  it("routes normal batch actions through retryFailed=false and repair through retryFailed=true", () => {
+    expect(panelSource).toMatch(/async function runDev1[\s\S]*?retryFailed: false/);
+    expect(panelSource).toMatch(/async function runDev5[\s\S]*?retryFailed: false/);
+    expect(panelSource).toMatch(/async function repairDev1[\s\S]*?retryFailed: true/);
+    expect(panelSource).toMatch(/async function repairDev5[\s\S]*?retryFailed: true/);
+  });
+
+  it("clicks the full readiness → dev-1 → dev-5(maxItems=2) → resume(null) loop", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    const readinessSpy = vi.fn();
+    const dev1Spy = vi.fn();
+    const runDev5Spy = vi.fn();
+    mutationState.set("runDevReadiness", { mutate: readinessSpy });
+    mutationState.set("runDev1", { mutate: dev1Spy });
+    mutationState.set("runDev5", { mutate: runDev5Spy });
+    setMainData(emptyMainData());
+    setDevControls(devSnapshot());
+
+    await act(async () => {
+      root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />);
+    });
+
+    let readinessButton = findButton(container, "运行 DEV readiness");
+    expect(readinessButton).toBeTruthy();
+    await act(async () => {
+      readinessButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(readinessSpy).toHaveBeenCalledWith({ teamId: "team-1" });
+    expect(queryClientMock.invalidateQueries).toHaveBeenCalled();
+
+    setDevControls(stateReadinessOnly());
+    await act(async () => {
+      root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />);
+    });
+    let dev1Button = findButton(container, "运行 dev-1 fixture");
+    expect(dev1Button).toBeTruthy();
+    await act(async () => {
+      dev1Button!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(dev1Spy).toHaveBeenCalledWith({ teamId: "team-1" });
+
+    setDevControls(stateDev1Done());
+    await act(async () => {
+      root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />);
+    });
+    let dev5First = findButton(container, "首次运行 dev-5");
+    expect(dev5First).toBeTruthy();
+    await act(async () => {
+      dev5First!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(runDev5Spy).toHaveBeenLastCalledWith({ teamId: "team-1", maxItems: 2 });
+
+    setDevControls(stateDev5Paused());
+    await act(async () => {
+      root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />);
+    });
+    let resumeButton = findButton(container, "恢复 dev-5");
+    expect(resumeButton).toBeTruthy();
+    await act(async () => {
+      resumeButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(runDev5Spy).toHaveBeenLastCalledWith({ teamId: "team-1", maxItems: null });
+
+    setDevControls(stateDev5Done());
+    await act(async () => {
+      root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />);
+    });
+    expect(container.textContent).toContain("RESEARCH_AUTHORIZATION_REQUIRED");
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it("renders a re-run readiness repair action for failed platform gates without advancing", () => {
+    setMainData(emptyMainData());
+    setDevControls(stateRepairReadiness());
+    const markup = renderToStaticMarkup(
+      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />,
+    );
+    expect(markup).toContain("重新运行 readiness");
+    expect(markup).toContain("禁止放行");
+    expect(markup).not.toContain("运行 DEV readiness");
+    expect(markup).not.toContain("运行 dev-1 fixture");
+    expect(markup).not.toContain("首次运行 dev-5");
+  });
+
+  it("re-runs readiness from the failed-platform-gates repair action", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const readinessSpy = vi.fn();
+    mutationState.set("runDevReadiness", { mutate: readinessSpy });
+    setMainData(emptyMainData());
+    setDevControls(stateRepairReadiness());
+
+    await act(async () => {
+      root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />);
+    });
+    const repairButton = findButton(container, "重新运行 readiness");
+    expect(repairButton).toBeTruthy();
+    await act(async () => {
+      repairButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(readinessSpy).toHaveBeenCalledWith({ teamId: "team-1" });
+    expect(queryClientMock.invalidateQueries).toHaveBeenCalled();
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it("clicks the dev-1 repair button that posts retryFailed=true", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const repairDev1Spy = vi.fn();
+    mutationState.set("repairDev1", { mutate: repairDev1Spy });
+    setMainData(emptyMainData());
+    setDevControls(stateDev1Repair());
+
+    await act(async () => {
+      root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />);
+    });
+    const repairButton = findButton(container, "修复 dev-1 fixture");
+    expect(repairButton).toBeTruthy();
+    await act(async () => {
+      repairButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(repairDev1Spy).toHaveBeenCalledWith({ teamId: "team-1" });
+    expect(container.querySelector('[data-dev-controls="actions"]')?.textContent).toContain("禁止放行");
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it("clicks the dev-5 repair button that posts retryFailed=true", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    const repairDev5Spy = vi.fn();
+    mutationState.set("repairDev5", { mutate: repairDev5Spy });
+    setMainData(emptyMainData());
+    setDevControls(stateDev5Repair());
+
+    await act(async () => {
+      root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />);
+    });
+    const repairButton = findButton(container, "修复 dev-5 fixture");
+    expect(repairButton).toBeTruthy();
+    await act(async () => {
+      repairButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(repairDev5Spy).toHaveBeenCalledWith({ teamId: "team-1" });
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it("keeps actions disabled while the snapshot refetch is pending and never double-POSTs", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    let resolveRefetch: (() => void) | undefined;
+    const deferred = new Promise<void>((resolve) => {
+      resolveRefetch = resolve;
+    });
+    queryClientMock.invalidateQueries.mockReturnValue(deferred);
+
+    const readinessSpy = vi.fn();
+    mutationState.set("runDevReadiness", { mutate: readinessSpy });
+    setMainData(emptyMainData());
+    setDevControls(devSnapshot());
+
+    await act(async () => {
+      root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />);
+    });
+    const readinessButton = findButton(container, "运行 DEV readiness");
+    expect(readinessButton).toBeTruthy();
+
+    await act(async () => {
+      readinessButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(readinessSpy).toHaveBeenCalledTimes(1);
+
+    // The snapshot refetch is still pending: the action must stay disabled.
+    expect(readinessButton!.disabled).toBe(true);
+    expect(readinessButton!.getAttribute("disabled")).not.toBeNull();
+
+    // A second click on the disabled action must not trigger a second POST.
+    await act(async () => {
+      readinessButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(readinessSpy).toHaveBeenCalledTimes(1);
+
+    // Once the refetch resolves the snapshot advances and the next action appears.
+    await act(async () => {
+      resolveRefetch!();
+    });
+    setDevControls(stateReadinessOnly());
+    await act(async () => {
+      root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />);
+    });
+    const nextButton = findButton(container, "运行 dev-1 fixture");
+    expect(nextButton).toBeTruthy();
+    expect(nextButton!.disabled).toBe(false);
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+    queryClientMock.invalidateQueries.mockReset();
+  });
+
+  it("keeps DEV controls operable when the program/question query fails entirely", () => {
+    Object.assign(queryState.current, {
+      isPending: false,
+      isError: true,
+      error: new Error("program and question boom"),
+      data: undefined,
+      refetch: vi.fn(),
+    });
+    setDevControls(devSnapshot());
+    const markup = renderToStaticMarkup(
+      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />,
+    );
+    expect(markup).toContain("program and question boom");
+    expect(markup).toContain("运行 DEV readiness");
+    expect(markup).toContain("单题结果与审核");
+    expect(markup).toContain("DEV 隔离边界");
+  });
+
+  it("executes DEV actions even when the program/question query failed", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    Object.assign(queryState.current, {
+      isPending: false,
+      isError: true,
+      error: new Error("program and question boom"),
+      data: undefined,
+      refetch: vi.fn(),
+    });
+    setDevControls(devSnapshot());
+    const readinessSpy = vi.fn();
+    mutationState.set("runDevReadiness", { mutate: readinessSpy });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />);
+    });
+    const readinessButton = findButton(container, "运行 DEV readiness");
+    expect(readinessButton).toBeTruthy();
+    await act(async () => {
+      readinessButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(readinessSpy).toHaveBeenCalledWith({ teamId: "team-1" });
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it("shows an independent retry for the DEV snapshot error without hiding the program section", () => {
+    setMainData(emptyMainData());
+    Object.assign(devControlsQueryState.current, {
+      isPending: false,
+      isError: true,
+      error: new Error("dev snapshot boom"),
+      data: undefined,
+      refetch: vi.fn(),
+    });
+    const markup = renderToStaticMarkup(
+      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />,
+    );
+    expect(markup).toContain("dev snapshot boom");
+    expect(markup).toContain('data-dev-controls="snapshot-retry"');
+    expect(markup).toContain("Challenge Cup Program v2");
+    expect(markup).not.toContain("运行 DEV readiness");
+  });
+
+  it("refetches the DEV snapshot from its independent retry button", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    setMainData(emptyMainData());
+    const devRefetch = vi.fn();
+    Object.assign(devControlsQueryState.current, {
+      isPending: false,
+      isError: true,
+      error: new Error("dev snapshot boom"),
+      data: undefined,
+      refetch: devRefetch,
+    });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />);
+    });
+    const retryButton = container.querySelector('[data-dev-controls="snapshot-retry"]') as HTMLButtonElement | null;
+    expect(retryButton).toBeTruthy();
+    await act(async () => {
+      retryButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(devRefetch).toHaveBeenCalled();
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it("announces DEV action changes in a live region", () => {
+    setMainData(emptyMainData());
+    setDevControls(devSnapshot());
+    const markup = renderToStaticMarkup(
+      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />,
+    );
+    expect(markup).toContain('aria-live="polite"');
+    expect(markup).toContain('data-dev-controls="actions"');
   });
 });

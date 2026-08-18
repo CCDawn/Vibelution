@@ -7,6 +7,7 @@ import {
   runChallengeCupDevReadiness,
 } from "./teamExperiment";
 import apiSource from "./teamExperiment.ts?raw";
+import challengeCupTypesSource from "./types/challengeCup.ts?raw";
 import mutationsSource from "../routes/teams/useTeamExperimentLoopMutations.ts?raw";
 import resourcesSource from "../routes/teams/useResearchWorkflowResources.ts?raw";
 import secondarySource from "../routes/teams/useTeamResearchSecondaryQueries.ts?raw";
@@ -76,6 +77,10 @@ describe("team experiment API", () => {
     expect(apiSource).toContain("encodeURIComponent(teamId)");
   });
 
+  it("requires an explicit retryFailed flag on every batch run request", () => {
+    expect(challengeCupTypesSource).toContain("retryFailed: boolean");
+  });
+
   it("fetches the DEV control snapshot with team segment encoded", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ schemaVersion: 1, teamId: "team a/b" }), {
       status: 200,
@@ -117,7 +122,7 @@ describe("team experiment API", () => {
     vi.unstubAllGlobals();
   });
 
-  it("posts dev-1 / dev-5 batches with bounded maxItems and encoded plan segment", async () => {
+  it("posts dev-1 / dev-5 batches with bounded maxItems and explicit retryFailed=false", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({
         ok: true,
@@ -129,20 +134,20 @@ describe("team experiment API", () => {
       }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await runChallengeCupDevBatch("team 1/2", "dev 5/next", { maxItems: 2 });
+    await runChallengeCupDevBatch("team 1/2", "dev 5/next", { maxItems: 2, retryFailed: false });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[1]).toEqual([
       "/api/teams/team%201%2F2/workflow-orchestration/challenge-program/dev-controls/batches/dev%205%2Fnext",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ maxItems: 2 }),
+        body: JSON.stringify({ maxItems: 2, retryFailed: false }),
       }),
     ]);
     vi.unstubAllGlobals();
   });
 
-  it("resumes a dev-5 batch with a null maxItems payload", async () => {
+  it("resumes a dev-5 batch with a null maxItems payload and explicit retryFailed=false", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({
         ok: true,
@@ -154,14 +159,39 @@ describe("team experiment API", () => {
       }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await runChallengeCupDevBatch("team-1", "dev-5", { maxItems: null });
+    await runChallengeCupDevBatch("team-1", "dev-5", { maxItems: null, retryFailed: false });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[1]).toEqual([
       "/api/teams/team-1/workflow-orchestration/challenge-program/dev-controls/batches/dev-5",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ maxItems: null }),
+        body: JSON.stringify({ maxItems: null, retryFailed: false }),
+      }),
+    ]);
+    vi.unstubAllGlobals();
+  });
+
+  it("posts a repair batch with explicit retryFailed=true", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ header: "X-Vibelution-Control-Token", controlToken: "test-token" }),
+      })
+      .mockResolvedValueOnce(new Response(JSON.stringify({ schemaVersion: 1, planId: "dev-1" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await runChallengeCupDevBatch("team-1", "dev-1", { maxItems: null, retryFailed: true });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1]).toEqual([
+      "/api/teams/team-1/workflow-orchestration/challenge-program/dev-controls/batches/dev-1",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ maxItems: null, retryFailed: true }),
       }),
     ]);
     vi.unstubAllGlobals();

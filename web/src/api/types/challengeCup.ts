@@ -195,6 +195,8 @@ export type ChallengeCupDevReadinessRunResponse = {
 
 export type ChallengeCupDevBatchRunRequest = {
   maxItems: number | null;
+  /** True only for repair POSTs; normal batch runs always send false. */
+  retryFailed: boolean;
 };
 
 export type ChallengeCupDevBatchOutcome = {
