@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 import threading
 from contextlib import contextmanager
@@ -34,6 +35,7 @@ from core.research.competition.catalog_execution import (
 from core.research.competition.dev_control_batch import (
     ALLOWED_DEV_BATCH_PLAN_IDS,
     FORBIDDEN_DEV_BATCH_PLAN_IDS,
+    dev_fixture_adapter_id,
     new_dev_batch_state,
     project_dev_batch_checkpoint,
     project_dev_batch_outcomes,
@@ -417,15 +419,21 @@ def _validate_batch_checkpoint(checkpoint: dict[str, Any], plan_id: str) -> None
                 raise DevControlsStorageError(
                     f"Batch checkpoint record result is malformed: {question_id}."
                 )
+            model_locator = str(raw_result.get("model_receipt_locator") or "")
+            expected_model_prefix = (
+                f"model-receipt://dev/{dev_fixture_adapter_id(question_id)}/"
+            )
+            model_result_id = (
+                model_locator.removeprefix(expected_model_prefix)
+                if model_locator.startswith(expected_model_prefix)
+                else ""
+            )
             if (
                 raw_result.get("status") != "dev_fixture"
                 or raw_result.get("submission_eligible") is not False
-                or not str(raw_result.get("model_receipt_locator") or "").startswith(
-                    "model-receipt://dev/"
-                )
-                or not str(raw_result.get("knowledge_locator") or "").startswith(
-                    "knowledge://dev/"
-                )
+                or re.fullmatch(r"[0-9a-fA-F]{64}", model_result_id) is None
+                or raw_result.get("knowledge_locator")
+                != f"knowledge://dev/{question_id}"
             ):
                 raise DevControlsStorageError(
                     f"Batch checkpoint result is not a DEV fixture result: {question_id}."

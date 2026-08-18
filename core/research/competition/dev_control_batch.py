@@ -108,6 +108,11 @@ def _fixture_identity(question_id: str) -> dict[str, str]:
     }
 
 
+def dev_fixture_adapter_id(question_id: str) -> str:
+    """Return the canonical DEV fixture adapter bound to one catalog question."""
+    return _fixture_identity(question_id)["adapter"]
+
+
 def _fixture_scope(question_id: str) -> ResearchScopeEnvelope:
     identity = _fixture_identity(question_id)
     digest = scope_hash_for(

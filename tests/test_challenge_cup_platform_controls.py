@@ -1106,7 +1106,16 @@ def test_current_batch_missing_readiness_evidence_fails_closed(
         dev_controls_service.get_challenge_cup_dev_control_snapshot("team-1")
 
 
-@pytest.mark.parametrize("mutation", ["missing_locator", "submission_eligible"])
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "missing_locator",
+        "submission_eligible",
+        "empty_locators",
+        "cross_question_knowledge",
+        "wrong_adapter",
+    ],
+)
 def test_non_dev_fixture_result_fails_closed(
     controls_root: Path,
     mutation: str,
@@ -1118,9 +1127,18 @@ def test_non_dev_fixture_result_fails_closed(
     result = checkpoint["records"][0]["result"]
     if mutation == "missing_locator":
         result.pop("model_receipt_locator")
-    else:
+    elif mutation == "submission_eligible":
         result["status"] = "submission_eligible"
         result["submission_eligible"] = True
+    elif mutation == "empty_locators":
+        result["model_receipt_locator"] = "model-receipt://dev/"
+        result["knowledge_locator"] = "knowledge://dev/"
+    elif mutation == "cross_question_knowledge":
+        result["knowledge_locator"] = "knowledge://dev/SCI-096"
+    else:
+        result["model_receipt_locator"] = (
+            "model-receipt://dev/neural_spike_coding/" + "a" * 64
+        )
     _persist_batch_checkpoint(controls_root, "team-1", "dev-1", checkpoint)
     with pytest.raises(
         dev_controls_service.DevControlsStorageError,
