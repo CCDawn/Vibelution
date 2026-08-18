@@ -1556,7 +1556,7 @@ def _build_key_tools() -> List[BaseTool]:
         """
         【Agent 创建】按项目治理契约创建新的 Agent（与 POST /api/agents 同语义）。
 
-        chat 模式可使用默认角色/人物/任务/工具策略；非 chat 模式必须显式提供
+        chat 模式可使用默认角色/人物/任务/工具策略；非 chat 模式需要显式提供
         role_key、persona_profile_json、task_profile_json、tool_policy_json。
 
         Args:
@@ -1600,7 +1600,7 @@ def _build_key_tools() -> List[BaseTool]:
         source_draft_id: str = "",
     ) -> str:
         """
-        【Agent 更新】更新非生命周期 Agent 配置；归档必须改用 agent_archive_tool。
+        【Agent 更新】更新非生命周期 Agent 配置；归档请改用 agent_archive_tool。
 
         updates_json 使用 PATCH /api/agents/{id} 的 camelCase 字段，例如
         {"displayName":"Reviewer","promptTemplateId":"prompt-review"}。
@@ -1701,7 +1701,7 @@ def _build_key_tools() -> List[BaseTool]:
     @tool
     def session_stop_tool(session_id: str, turn_id: str) -> str:
         """
-        【停止 Session turn】请求停止指定 Session 的当前 turn（必须带 turn_id）。
+        【停止 Session turn】请求停止指定 Session 的当前 turn（需要带 turn_id）。
 
         Args:
             session_id: 目标 Session ID
