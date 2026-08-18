@@ -28,10 +28,10 @@ const styles = {
   rangeLabel: "min-w-0 truncate text-[var(--fg-muted)]",
   notice: "min-w-0 flex-auto truncate text-[var(--fg-secondary)]",
   noticeError: "min-w-0 flex-auto truncate text-[var(--state-error)]",
-  statusTable: `min-h-0 min-w-0 w-full flex-1 overflow-auto ${rowSurfaceMuted}`,
+  statusTable: `min-h-0 min-w-0 w-full flex-1 ${rowSurfaceMuted}`,
   selectCell: "w-9 !px-1",
   branchName: "font-medium text-[var(--fg-primary)]",
-  actionCell: "sticky right-0 z-[1] min-w-[150px] bg-vui-surface-row !overflow-visible",
+  actionCell: "z-[1] w-[170px] min-w-[150px] bg-vui-surface-row !overflow-visible",
   actionButtons: "flex min-w-0 flex-wrap items-center justify-end gap-1",
   maintenanceFold:
     "mt-2 shrink-0 overflow-hidden rounded-md border border-vui-border-subtle bg-vui-surface-row [&>summary]:flex [&>summary]:cursor-pointer [&>summary]:list-none [&>summary]:items-center [&>summary]:justify-between [&>summary]:gap-2 [&>summary]:px-2 [&>summary]:py-1.5 [&>summary]:[font-size:var(--vui-font-xs)] [&>summary]:font-medium [&>summary]:text-vui-fg-secondary",

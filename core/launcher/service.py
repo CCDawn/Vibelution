@@ -250,6 +250,77 @@ def _live_backend_port_listening(port: int) -> bool:
         return False
 
 
+def _positive_backend_port(value: object) -> int:
+    try:
+        port = int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    return port if port > 0 else 0
+
+
+def _branch_list_backend_ports_to_probe(
+    bundle: dict[str, Any],
+    runtime_state: dict[str, Any],
+) -> list[int]:
+    """Disk ``backend.port`` can lag behind ports.json (``:8000`` vs live ``:8002``)."""
+
+    ports: list[int] = []
+
+    def add(value: object) -> None:
+        port = _positive_backend_port(value)
+        if port and port not in ports:
+            ports.append(port)
+
+    backend = bundle.get("backend") if isinstance(bundle.get("backend"), dict) else {}
+    add(backend.get("port"))
+    workbench = runtime_state.get("workbench") if isinstance(runtime_state.get("workbench"), dict) else {}
+    add(workbench.get("backendPort"))
+    launcher_state = _load_launcher_state()
+    add(launcher_state.get("backendPort") or launcher_state.get("port"))
+    launcher_workbench = (
+        launcher_state.get("workbench") if isinstance(launcher_state.get("workbench"), dict) else {}
+    )
+    add(launcher_workbench.get("backendPort"))
+    for raw_url in (
+        launcher_workbench.get("url"),
+        launcher_state.get("url"),
+        bundle.get("url"),
+    ):
+        url = str(raw_url or "").strip()
+        if not url:
+            continue
+        try:
+            add(urlparse(url).port)
+        except ValueError:
+            continue
+    try:
+        from config.workbench import configured_backend_port
+
+        add(configured_backend_port())
+    except Exception:
+        pass
+    return ports
+
+
+def _first_listening_backend_port(ports: list[int]) -> int:
+    for port in ports:
+        if _live_backend_port_listening(port):
+            return port
+    return 0
+
+
+def _adopt_live_backend_port(bundle: dict[str, Any], live_port: int) -> dict[str, Any]:
+    bundle = dict(bundle)
+    backend = dict(bundle.get("backend") if isinstance(bundle.get("backend"), dict) else {})
+    backend["port"] = int(live_port)
+    backend["portListening"] = True
+    backend["alive"] = True
+    backend["healthy"] = True
+    backend["portConflict"] = False
+    bundle["backend"] = backend
+    return bundle
+
+
 def _reconcile_stale_disk_bundle_for_branch_list(
     bundle: dict[str, Any],
     runtime_state: dict[str, Any],
@@ -258,27 +329,20 @@ def _reconcile_stale_disk_bundle_for_branch_list(
 
     The instance table skips live ``observe_workbench``. Disk RM state can keep
     ``observedState=open`` / ``phase=opening`` / healthy backend flags after the
-    processes are gone. Only a live daemon or a listening backend port counts.
+    processes are gone. A live daemon, or any listening backend port from disk,
+    ports.json, or startup config, counts. Stale ``:8000`` must not hide ``:8002``.
     """
 
+    live_port = _first_listening_backend_port(
+        _branch_list_backend_ports_to_probe(bundle, runtime_state)
+    )
+    if live_port > 0:
+        return _adopt_live_backend_port(bundle, live_port)
     if bool(runtime_state.get("daemonRunning")):
-        return bundle
-    backend = dict(bundle.get("backend") if isinstance(bundle.get("backend"), dict) else {})
-    workbench = runtime_state.get("workbench") if isinstance(runtime_state.get("workbench"), dict) else {}
-    port = 0
-    try:
-        port = int(backend.get("port") or 0)
-    except (TypeError, ValueError):
-        port = 0
-    if port <= 0:
-        try:
-            port = int(workbench.get("backendPort") or 0)
-        except (TypeError, ValueError):
-            port = 0
-    if _live_backend_port_listening(port):
         return bundle
 
     bundle = dict(bundle)
+    backend = dict(bundle.get("backend") if isinstance(bundle.get("backend"), dict) else {})
     backend["alive"] = False
     backend["healthy"] = False
     backend["portListening"] = False

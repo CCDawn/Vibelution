@@ -182,6 +182,40 @@ describe("launcher branch-instances window truth overlay", () => {
     expect((item.runtime as Record<string, unknown>).window).toMatchObject({ open: false, pid: 0 });
   });
 
+  it("does not keep a live workbench startable when Python reports closed backend and a leftover closing phase", () => {
+    const payload = {
+      items: [
+        {
+          id: "main",
+          current: true,
+          alive: false,
+          startable: true,
+          runtime: {
+            lifecycleState: "stopping",
+            phase: "closing",
+            observedState: "closed",
+            desiredState: "closed",
+            registryStatus: "stopping",
+            backend: { alive: false, healthy: false, listening: false, portConflict: false },
+            frontend: { ready: true },
+            window: { open: false, pid: 0 },
+          },
+        },
+      ],
+    };
+    const overlaid = overlayLauncherWindowTruth(
+      "branch-instances",
+      payload,
+      truth({ workbench: { open: true, rendererProcessId: 7070 } })
+    ) as Record<string, unknown>;
+    const item = (overlaid.items as Record<string, unknown>[])[0];
+    const runtime = item.runtime as Record<string, unknown>;
+    expect((runtime.window as Record<string, unknown>).open).toBe(true);
+    expect(runtime.lifecycleState).toBe("partial");
+    expect(item.alive).toBe(true);
+    expect(item.startable).toBe(false);
+  });
+
   it("applies isolated instance window truth without touching other instances", () => {
     const payload = {
       items: [

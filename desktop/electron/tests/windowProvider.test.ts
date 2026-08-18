@@ -696,6 +696,26 @@ describe("Electron window provider state", () => {
     });
   });
 
+  it("keeps an owned workbench window when live listing later returns empty", async () => {
+    const leftover = new FakeWindow(42, "http://127.0.0.1:8002/chat", 4242);
+    let live: FakeWindow[] = [leftover];
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000/", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: () => new FakeWindow(99, "http://127.0.0.1:8000/", 9999),
+      listWorkbenchWindows: (origin) =>
+        live.filter((window) => !window.isDestroyed() && isLiveWorkbenchWindowUrl(window.webContents.getURL(), origin))
+    });
+
+    await provider.openLauncher();
+    expect(provider.snapshot().workbench.windowId).toBe(42);
+    live = [];
+    expect(provider.snapshot().workbench).toMatchObject({
+      open: true,
+      windowId: 42,
+      url: "http://127.0.0.1:8002/chat"
+    });
+  });
+
   it("closes only Workbench while Launcher remains available", async () => {
     const launcherWindow = new FakeWindow(7, "http://127.0.0.1:8765/launcher", 7070);
     const workbenchWindow = new FakeWindow(42, "http://127.0.0.1:8000/", 4242, false);

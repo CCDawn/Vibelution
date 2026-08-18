@@ -77,6 +77,25 @@ describe("VDenseTable", () => {
     expect(html).toContain("w-[23%]");
   });
 
+  it("keeps overflow-x scrolling on the table shell even when className sets overflow-auto", () => {
+    const html = renderToStaticMarkup(
+      <VDenseTable
+        ariaLabel="instances"
+        resizable
+        className="overflow-auto"
+        rows={[{ id: "main" }]}
+        getRowKey={(row) => row.id}
+        columns={[
+          { id: "name", header: "Branch", width: 160, render: () => "main" },
+          { id: "actions", header: "Actions", width: 170, render: () => "open" },
+        ]}
+      />,
+    );
+
+    expect(html).toContain("!overflow-x-auto");
+    expect(html).toContain('style="width:170px;min-width:170px"');
+  });
+
   it("clamps dragged column widths to the column minimum", () => {
     expect(nextDenseTableColumnWidth(120, 40, 48)).toBe(160);
     expect(nextDenseTableColumnWidth(80, -100, 48)).toBe(48);

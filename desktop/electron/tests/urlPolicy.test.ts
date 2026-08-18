@@ -19,6 +19,11 @@ describe("isLiveWorkbenchWindowUrl", () => {
   it("rejects non-local URLs", () => {
     expect(isLiveWorkbenchWindowUrl("https://example.com/", "http://127.0.0.1:8000")).toBe(false);
   });
+
+  it("still recognizes a loopback workbench when expected origin is the launcher protocol", () => {
+    expect(isLiveWorkbenchWindowUrl("http://127.0.0.1:8002/chat", "vibelution-launcher://launcher")).toBe(true);
+    expect(isLiveWorkbenchWindowUrl("http://127.0.0.1:5173/", "vibelution-launcher://launcher")).toBe(false);
+  });
 });
 
 describe("assertLocalHttpUrl", () => {

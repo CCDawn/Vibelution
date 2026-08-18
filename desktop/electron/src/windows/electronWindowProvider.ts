@@ -669,8 +669,8 @@ export class ElectronWindowProvider {
       const url = this.workbenchWindow.webContents.getURL().trim();
       if (url) {
         this.syncWorkbenchUrlFromWindow(this.workbenchWindow);
-        return this.workbenchWindow;
       }
+      return this.workbenchWindow;
     }
     const live = this.listLiveWorkbenchWindows().filter((window) => window.webContents.getURL().trim());
     const expectedOrigin = (() => {
@@ -719,7 +719,7 @@ export class ElectronWindowProvider {
     try {
       origin = new URL(this.workbenchUrl).origin;
     } catch {
-      return [];
+      origin = "http://127.0.0.1:8000";
     }
     const ownedInstances = new Set(
       [...this.instanceWindows.values()].map((entry) => entry.window)
@@ -761,9 +761,6 @@ export class ElectronWindowProvider {
   private stateFor(role: ElectronWindowRole): ManagedWindowState {
     const window = role === "launcher" ? this.launcherWindow : this.workbenchWindow;
     if (!window || window.isDestroyed()) {
-      return closedWindowState(role);
-    }
-    if (role === "workbench" && this.workbenchReadyUrl === null && !window.webContents.getURL().trim()) {
       return closedWindowState(role);
     }
     return {

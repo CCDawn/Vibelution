@@ -358,6 +358,41 @@ def test_branch_list_bundle_keeps_live_port_when_daemon_is_dead(monkeypatch):
     assert reconciled["backend"]["healthy"] is True
 
 
+def test_branch_list_bundle_adopts_live_ports_json_when_disk_port_is_dead(monkeypatch):
+    leftover = {
+        "observedState": "closed",
+        "desiredState": "closed",
+        "phase": "steady",
+        "backend": {
+            "alive": False,
+            "healthy": False,
+            "port": 8000,
+            "portListening": False,
+            "portConflict": False,
+        },
+        "browser": {"alive": False},
+    }
+    monkeypatch.setattr(
+        launcher_service,
+        "_live_backend_port_listening",
+        lambda port: int(port) == 8002,
+    )
+    monkeypatch.setattr(
+        launcher_service,
+        "_branch_list_backend_ports_to_probe",
+        lambda _bundle, _runtime_state: [8000, 8002],
+    )
+    reconciled = launcher_service._reconcile_stale_disk_bundle_for_branch_list(
+        leftover,
+        {"daemonRunning": False, "workbench": {"backendPort": 8000}},
+    )
+    assert reconciled["backend"]["port"] == 8002
+    assert reconciled["backend"]["alive"] is True
+    assert reconciled["backend"]["healthy"] is True
+    assert reconciled["backend"]["portListening"] is True
+    assert reconciled["observedState"] == "closed"
+
+
 def test_branch_list_bundle_keeps_opening_while_daemon_runs(monkeypatch):
     leftover = {
         "observedState": "closed",

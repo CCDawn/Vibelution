@@ -23,7 +23,7 @@ export function isLiveWorkbenchWindowUrl(windowUrl: string, expectedOrigin: stri
     }
     const expected = new URL(expectedOrigin);
     if (!isLoopbackHttpUrl(expected)) {
-      return url.origin === expected.origin;
+      return url.port !== "5173";
     }
     if (url.port === "5173" && expected.port !== "5173") {
       return false;

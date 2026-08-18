@@ -142,8 +142,9 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(workbenchIdx).toBeGreaterThan(-1);
     expect(gitIdx).toBeGreaterThan(workbenchIdx);
     expect(panelSource.slice(workbenchIdx, gitIdx)).not.toContain("fill: true");
-    expect(panelStyles.actionCell).toContain("sticky");
+    expect(panelStyles.actionCell).not.toContain("sticky");
     expect(panelStyles.actionCell).toContain("min-w-[150px]");
+    expect(panelStyles.statusTable).not.toContain("overflow-auto");
   });
 
   it("renders one global empty surface for zero items and a distinct recoverable filtered miss", () => {

@@ -109,8 +109,8 @@ export function VDenseTable<TRow>({
       aria-label={ariaLabel}
       className={[
         "min-w-0 w-full rounded-[var(--radius-control)] border border-vui-border-hairline bg-vui-surface-row",
-        resizable ? "overflow-x-auto" : "overflow-hidden",
         className,
+        resizable ? "!overflow-x-auto" : "overflow-hidden",
       ]
         .filter(Boolean)
         .join(" ")}

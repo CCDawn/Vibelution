@@ -87,7 +87,7 @@ import {
   ISOLATED_INSTANCE_READY_WAIT_MS,
   superviseIsolatedInstanceStart
 } from "./process/isolatedInstanceSupervisor.js";
-import { runPythonJsonBridge } from "./process/pythonJsonBridge.js";
+import { LAUNCHER_API_JSON_BRIDGE_MAX_BYTES, runPythonJsonBridge } from "./process/pythonJsonBridge.js";
 import { resolveWorkbenchUrlFromBridge } from "./process/resolveWorkbenchBridge.js";
 import {
   decideLauncherShellRestart,
@@ -2495,7 +2495,8 @@ async function orchestrateLauncherApi(
     pythonPath,
     args,
     cwd: paths.workspaceRoot,
-    failureLabel: "launcher api bridge"
+    failureLabel: "launcher api bridge",
+    maxBytes: LAUNCHER_API_JSON_BRIDGE_MAX_BYTES
   });
   const parsed = JSON.parse(raw) as { ok?: boolean; payload?: unknown; message?: string };
   if (parsed.ok !== true) {

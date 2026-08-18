@@ -163,6 +163,22 @@ function overlayStatusWindowTruth(
   return payload;
 }
 
+function overlayComposePhase(phase: string, windowOpen: boolean): string {
+  const normalized = String(phase || "").trim().toLowerCase();
+  if (windowOpen && ["closing", "stopping", "force_stopping"].includes(normalized)) {
+    return "steady";
+  }
+  return String(phase || "");
+}
+
+function overlayComposeRegistryStatus(status: string, windowOpen: boolean): string {
+  const normalized = String(status || "").trim().toLowerCase();
+  if (windowOpen && normalized === "stopping") {
+    return "";
+  }
+  return String(status || "");
+}
+
 function overlayBranchInstancesWindowTruth(
   payload: Record<string, unknown>,
   truth: LauncherWindowTruth
@@ -206,10 +222,10 @@ function overlayBranchInstancesWindowTruth(
         const frontend = isRecord(runtime.frontend) ? runtime.frontend : {};
         const error = isRecord(runtime.error) ? runtime.error : {};
         const lifecycleState = composeInstanceLifecycleState({
-          phase: String(runtime.phase || ""),
+          phase: overlayComposePhase(String(runtime.phase || ""), windowOpen),
           observedState: String(runtime.observedState || ""),
           desiredState: String(runtime.desiredState || ""),
-          registryStatus: String(runtime.registryStatus || ""),
+          registryStatus: overlayComposeRegistryStatus(String(runtime.registryStatus || ""), windowOpen),
           backendAlive: backend.alive === true,
           backendHealthy: backend.healthy === true,
           backendListening: backend.listening === true,

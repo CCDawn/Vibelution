@@ -2,6 +2,9 @@ import { spawn } from "node:child_process";
 
 import { pythonBridgeEnv } from "./pythonBridgeEnv.js";
 
+export const DEFAULT_PYTHON_JSON_BRIDGE_MAX_BYTES = 64_000;
+export const LAUNCHER_API_JSON_BRIDGE_MAX_BYTES = 2_000_000;
+
 export type PythonJsonBridgeChild = Pick<ReturnType<typeof spawn>, "kill" | "once" | "stdout" | "stderr">;
 export type PythonJsonBridgeSpawn = (
   command: string,
@@ -23,7 +26,7 @@ export async function runPythonJsonBridge(input: {
   maxBytes?: number;
 }): Promise<string> {
   const spawnImpl = input.spawnImpl ?? spawn;
-  const maxBytes = Math.max(1_000, Math.round(input.maxBytes ?? 64_000));
+  const maxBytes = Math.max(1_000, Math.round(input.maxBytes ?? DEFAULT_PYTHON_JSON_BRIDGE_MAX_BYTES));
   const child = spawnImpl(input.pythonPath, input.args, {
     cwd: input.cwd,
     windowsHide: true,
