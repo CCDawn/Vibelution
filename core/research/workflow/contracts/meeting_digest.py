@@ -1,9 +1,19 @@
-"""Meeting digest contract produced when a meeting round closes."""
+"""Meeting digest contract produced when a meeting round closes.
+
+Schema v2 aligns with the full-lifecycle digest model (requirements §15.3):
+the digest keeps the agenda summary, agreements, structured disagreements,
+owned action items, risks, blockers, knowledge candidates, source message
+refs, and a content hash so a closed meeting stays auditable and every
+conclusion can be traced back to the original room messages.  Legacy v1
+digests (no schemaVersion or ``schemaVersion: 1``) stay read-only compatible:
+the new fields default to empty, mirroring the Question v1/v2 dual-read
+pattern.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from ._validation import (
@@ -12,6 +22,72 @@ from ._validation import (
     require_sha256,
     require_text,
 )
+
+
+def _optional_str_tuple(payload: Mapping[str, Any], key: str) -> tuple[str, ...]:
+    if key not in payload or payload.get(key) is None:
+        return ()
+    return tuple(str(item) for item in require_list(payload, key))
+
+
+def _disagreements(payload: Mapping[str, Any]) -> tuple[dict[str, Any], ...]:
+    if "disagreements" not in payload or payload.get("disagreements") is None:
+        return ()
+    items = require_list(payload, "disagreements")
+    normalized: list[dict[str, Any]] = []
+    for index, item in enumerate(items):
+        if not isinstance(item, Mapping):
+            raise ContractValidationError(f"disagreements[{index}] must be an object")
+        issue = str(item.get("issue") or "").strip()
+        if not issue:
+            raise ContractValidationError(f"disagreements[{index}].issue must be a non-empty string")
+        positions = item.get("positions")
+        if not isinstance(positions, list) or not positions:
+            raise ContractValidationError(f"disagreements[{index}].positions must be a non-empty list")
+        unresolved_reason = str(item.get("unresolvedReason") or "").strip()
+        if not unresolved_reason:
+            raise ContractValidationError(
+                f"disagreements[{index}].unresolvedReason must be a non-empty string"
+            )
+        normalized.append(
+            {
+                "issue": issue,
+                "positions": [str(position) for position in positions],
+                "unresolvedReason": unresolved_reason,
+            }
+        )
+    return tuple(normalized)
+
+
+def _action_items(payload: Mapping[str, Any]) -> tuple[dict[str, Any], ...]:
+    if "actionItems" not in payload or payload.get("actionItems") is None:
+        return ()
+    items = require_list(payload, "actionItems")
+    normalized: list[dict[str, Any]] = []
+    for index, item in enumerate(items):
+        if not isinstance(item, Mapping):
+            raise ContractValidationError(f"actionItems[{index}] must be an object")
+        owner_role_id = str(item.get("ownerRoleId") or "").strip()
+        if not owner_role_id:
+            raise ContractValidationError(f"actionItems[{index}].ownerRoleId must be a non-empty string")
+        action = str(item.get("action") or "").strip()
+        if not action:
+            raise ContractValidationError(f"actionItems[{index}].action must be a non-empty string")
+        normalized.append(
+            {
+                "ownerRoleId": owner_role_id,
+                "action": action,
+                "dueGate": str(item.get("dueGate") or "").strip(),
+            }
+        )
+    return tuple(normalized)
+
+
+def _optional_content_hash(payload: Mapping[str, Any]) -> str:
+    value = str(payload.get("contentHash") or "").strip().lower()
+    if not value:
+        return ""
+    return require_sha256(payload, "contentHash")
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +103,15 @@ class MeetingDigest:
     decisionRefs: tuple[str, ...]
     closedBy: str
     createdAt: str
+    agendaSummary: str = ""
+    agreements: tuple[str, ...] = field(default_factory=tuple)
+    disagreements: tuple[dict[str, Any], ...] = field(default_factory=tuple)
+    actionItems: tuple[dict[str, Any], ...] = field(default_factory=tuple)
+    risks: tuple[str, ...] = field(default_factory=tuple)
+    blockers: tuple[str, ...] = field(default_factory=tuple)
+    knowledgeCandidates: tuple[str, ...] = field(default_factory=tuple)
+    sourceMessageRefs: tuple[str, ...] = field(default_factory=tuple)
+    contentHash: str = ""
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> MeetingDigest:
@@ -48,6 +133,15 @@ class MeetingDigest:
             ),
             closedBy=require_text(payload, "closedBy"),
             createdAt=require_text(payload, "createdAt"),
+            agendaSummary=str(payload.get("agendaSummary") or "").strip(),
+            agreements=_optional_str_tuple(payload, "agreements"),
+            disagreements=_disagreements(payload),
+            actionItems=_action_items(payload),
+            risks=_optional_str_tuple(payload, "risks"),
+            blockers=_optional_str_tuple(payload, "blockers"),
+            knowledgeCandidates=_optional_str_tuple(payload, "knowledgeCandidates"),
+            sourceMessageRefs=_optional_str_tuple(payload, "sourceMessageRefs"),
+            contentHash=_optional_content_hash(payload),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -61,4 +155,13 @@ class MeetingDigest:
             "decisionRefs": list(self.decisionRefs),
             "closedBy": self.closedBy,
             "createdAt": self.createdAt,
+            "agendaSummary": self.agendaSummary,
+            "agreements": list(self.agreements),
+            "disagreements": [dict(item) for item in self.disagreements],
+            "actionItems": [dict(item) for item in self.actionItems],
+            "risks": list(self.risks),
+            "blockers": list(self.blockers),
+            "knowledgeCandidates": list(self.knowledgeCandidates),
+            "sourceMessageRefs": list(self.sourceMessageRefs),
+            "contentHash": self.contentHash,
         }
