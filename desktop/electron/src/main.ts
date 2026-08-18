@@ -107,6 +107,7 @@ import {
   type LauncherBootstrapResult
 } from "./process/launcherBootstrap.js";
 import { assertTrustedIpcSender } from "./security/ipcSenderValidation.js";
+import { isLiveWorkbenchWindowUrl } from "./security/urlPolicy.js";
 import { executeApprovedDesktopShellShutdown, reapManagedRuntimeOnDesktopStart, DESKTOP_SHELL_EXIT_BUDGET_MS, DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS, withDesktopShellExitTimeout } from "./shutdown/desktopShellExit.js";
 import {
   decideShutdown,
@@ -382,7 +383,7 @@ function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapR
       listWorkbenchWindows: (workbenchOrigin) =>
         BrowserWindow.getAllWindows().filter((window) => {
           try {
-            return new URL(window.webContents.getURL()).origin === workbenchOrigin;
+            return isLiveWorkbenchWindowUrl(window.webContents.getURL(), workbenchOrigin);
           } catch {
             return false;
           }
