@@ -20,22 +20,27 @@ describe("startOrFocusWorkbenchFromProductEntry", () => {
     expect(startLifecycle).not.toHaveBeenCalled();
   });
 
-  it("starts the current checkout when the probe cannot reach HTTP", async () => {
+  it("starts then opens the live URL when the probe cannot reach HTTP", async () => {
     const openOrFocus = vi.fn(async () => undefined);
     const startLifecycle = vi.fn(async () => undefined);
+    const waitForHttp = vi.fn(async (opts: { url: string; timeoutMs: number }) => {
+      if (opts.timeoutMs <= 1500) {
+        throw new Error("workbench HTTP was not reachable");
+      }
+    });
 
     await expect(
       startOrFocusWorkbenchFromProductEntry({
-        url: "http://127.0.0.1:8002/",
-        waitForHttp: async () => {
-          throw new Error("workbench HTTP was not reachable");
-        },
+        url: "http://127.0.0.1:8000/",
+        waitForHttp,
         openOrFocus,
-        startLifecycle
+        startLifecycle,
+        resolveReadyUrl: async () => "http://127.0.0.1:8002/",
+        readyTimeoutMs: 5_000
       })
     ).resolves.toBe("started");
 
-    expect(openOrFocus).not.toHaveBeenCalled();
     expect(startLifecycle).toHaveBeenCalledTimes(1);
+    expect(openOrFocus).toHaveBeenCalledWith("http://127.0.0.1:8002/");
   });
 });

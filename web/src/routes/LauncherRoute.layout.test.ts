@@ -157,6 +157,8 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("launcherStatusCommandActive(status)");
     expect(routeSource).toContain("launcherStatusLifecycleChanging(status)");
     expect(routeSource).toContain("refetchIntervalInBackground: true");
+    expect(routeSource).toContain("launcherOpenWarmup");
+    expect(routeSource).toContain("resolvePollingInterval");
     expect(routeSource).toContain("const controlPlaneIdle = isControlPlaneIdle(evidence)");
     expect(routeSource).toContain("const controlBusy = controlMutation.isPending && !(controlPlaneIdle && lifecycleSettled)");
     expect(routeSource).toContain("const busy = controlBusy || supervisorMutation.isPending");

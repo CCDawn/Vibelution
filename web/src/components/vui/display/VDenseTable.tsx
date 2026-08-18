@@ -225,7 +225,7 @@ function initialColumnWidths<TRow>(columns: Array<VDenseTableColumn<TRow>>): Rec
 
 function columnColStyle(width: number, fill: boolean): { minWidth: string; width?: string } {
   if (fill) {
-    return { minWidth: `${width}px`, width: "100%" };
+    return { minWidth: `${width}px` };
   }
   return { width: `${width}px`, minWidth: `${width}px` };
 }

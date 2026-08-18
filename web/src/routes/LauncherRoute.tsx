@@ -33,7 +33,7 @@ import type {
   WorkbenchWindowMode,
 } from "../api/types";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "../app/browserTelemetry";
-import { resolveLauncherStatusPollingInterval, usePageVisibility } from "../app/pollingPolicy";
+import { resolveLauncherStatusPollingInterval, resolvePollingInterval, usePageVisibility, useStartupWarmup } from "../app/pollingPolicy";
 import {
   applyBeforeUnloadProjectCloseGuard,
   buildProjectWindowCloseBlockedTelemetry,
@@ -941,6 +941,7 @@ export function LauncherRoute() {
   const { lang } = useShellI18n({ configEnabled: false });
   const queryClient = useQueryClient();
   const pageVisible = usePageVisibility();
+  const launcherOpenWarmup = useStartupWarmup(false);
   const { request: requestLifecycle } = useWorkbenchLifecycleActions("launcher_route");
   const locale = lang === "zh" ? "zh-CN" : "en-US";
   const copy = lang === "zh"
@@ -1498,7 +1499,12 @@ export function LauncherRoute() {
   const branchInstancesQuery = useQuery({
     queryKey: queryKeys.launcherBranchInstances(),
     queryFn: () => getLauncherBranchInstances(),
-    refetchInterval: pageVisible ? 20_000 : false,
+    refetchInterval: resolvePollingInterval(
+      pageVisible,
+      launcherOpenWarmup ? 4_000 : 20_000,
+      { backgroundMs: launcherOpenWarmup ? 4_000 : 15_000 },
+    ),
+    refetchIntervalInBackground: true,
   });
   const [selectedInstanceId, setSelectedInstanceId] = useState("");
   const branchItems = branchInstancesQuery.data?.items ?? [];

@@ -25,7 +25,7 @@ import { VDenseTable } from "@/components/vui";
 | --- | --- | --- |
 | columns / rows | 列定义与数据 | 空表用 EmptyState 槽 |
 | columns[].width / minWidth | 默认列宽与拖拽下限 | 表头与单元格共用同一列宽 |
-| columns[].fill | 弹性列 | 容器宽于列宽之和时，多余宽度落到该列（`width:100%` + `minWidth`）。禁止只设 `minWidth`：`table-fixed` 会把后续列挤成 0。运维表通常给路径/名称列 |
+| columns[].fill | 弹性列 | 容器宽于列宽之和时，多余宽度落到该列（只设 `minWidth`，不要 `width:100%`）。后续 GIT/操作列必须带明确 `width`，否则 `table-fixed` 会把它们挤成 0。运维表通常给路径/名称/窗口列 |
 | resizable | 拖拽调整列宽 | 真表 `colgroup`；拖一列只改该列像素宽。表格 `w-full`，`minWidth` 为列宽之和；窄于总和时横向滚动，其它列像素宽不变 |
 | onRowClick / getRowState | 行选择与色条 | 运维表可选 |
 

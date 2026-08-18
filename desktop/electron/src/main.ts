@@ -2546,8 +2546,11 @@ function resolveLauncherIpcHost() {
       const provider = windowProvider;
       const snapshot = provider?.snapshot();
       return {
-        workbench: snapshot?.workbench.open
-          ? { open: true, rendererProcessId: snapshot.workbench.rendererProcessId }
+        workbench: snapshot
+          ? {
+              open: snapshot.workbench.open === true,
+              rendererProcessId: snapshot.workbench.rendererProcessId
+            }
           : null,
         instances: provider ? provider.instanceWindowStates() : []
       };
@@ -2591,12 +2594,18 @@ async function startOrFocusWorkbenchFromProductEntryOnShell(): Promise<void> {
   const url = launcherBootstrap !== null
     ? await refreshLiveWorkbenchUrl(paths)
     : resolveOrchestratedWorkbenchUrl();
-  await startOrFocusWorkbenchFromProductEntry({
-    url,
-    waitForHttp: (opts) => waitForWorkbenchHttp(opts),
-    openOrFocus: (target) => provider.openOrFocusWorkbench(target),
-    startLifecycle: () => orchestrateLauncherLifecycle("start", { schemaVersion: 1, path: "open" })
-  });
+  try {
+    await startOrFocusWorkbenchFromProductEntry({
+      url,
+      waitForHttp: (opts) => waitForWorkbenchHttp(opts),
+      openOrFocus: (target) => provider.openOrFocusWorkbench(target),
+      startLifecycle: () => orchestrateLauncherLifecycle("start", { schemaVersion: 1, path: "open" }),
+      resolveReadyUrl: () => refreshLiveWorkbenchUrl(paths),
+      readyTimeoutMs: WORKBENCH_START_READY_WAIT_MS
+    });
+  } finally {
+    scheduleLauncherStatusCliRefresh();
+  }
 }
 
 async function requestOpenWorkbenchFromSecondInstance(): Promise<void> {

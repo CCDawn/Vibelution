@@ -186,8 +186,10 @@ function overlayBranchInstancesWindowTruth(
     let windowOpen: boolean | null = null;
     let rendererPid = 0;
     if (item.current === true) {
-      windowOpen = truth.workbench?.open === true;
-      rendererPid = truth.workbench?.rendererProcessId ?? 0;
+      if (truth.workbench) {
+        windowOpen = truth.workbench.open === true;
+        rendererPid = truth.workbench.rendererProcessId ?? 0;
+      }
     } else {
       const instanceState = instancesById.get(String(item.id || ""));
       if (instanceState) {

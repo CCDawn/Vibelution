@@ -11,6 +11,8 @@ export async function startOrFocusWorkbenchFromProductEntry(input: {
   openOrFocus: (url: string) => Promise<unknown>;
   startLifecycle: () => Promise<unknown>;
   probeTimeoutMs?: number;
+  resolveReadyUrl?: () => Promise<string>;
+  readyTimeoutMs?: number;
 }): Promise<"focused" | "started"> {
   const url = input.url.trim();
   const probeTimeoutMs = Math.max(1, input.probeTimeoutMs ?? PRODUCT_ENTRY_HTTP_PROBE_MS);
@@ -25,6 +27,13 @@ export async function startOrFocusWorkbenchFromProductEntry(input: {
     return "focused";
   } catch {
     await input.startLifecycle();
+    const readyUrl = String((await input.resolveReadyUrl?.()) || url).trim() || url;
+    await input.waitForHttp({
+      url: readyUrl,
+      timeoutMs: Math.max(1, input.readyTimeoutMs ?? 90_000),
+      pollIntervalMs: 400
+    });
+    await input.openOrFocus(readyUrl);
     return "started";
   }
 }

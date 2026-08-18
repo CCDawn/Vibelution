@@ -144,7 +144,7 @@ describe("launcher branch-instances window truth overlay", () => {
     expect((item.runtime as Record<string, unknown>).window).toMatchObject({ open: true, pid: 7070 });
   });
 
-  it("keeps the current instance window closed when the provider reports no window", () => {
+  it("leaves Python window truth alone when Electron has no provider snapshot", () => {
     const payload = {
       items: [
         {
@@ -157,6 +157,27 @@ describe("launcher branch-instances window truth overlay", () => {
       ],
     };
     const overlaid = overlayLauncherWindowTruth("branch-instances", payload, truth()) as Record<string, unknown>;
+    const item = (overlaid.items as Record<string, unknown>[])[0];
+    expect((item.runtime as Record<string, unknown>).window).toMatchObject({ open: true, pid: 7070 });
+  });
+
+  it("keeps the current instance window closed when the provider reports a closed window", () => {
+    const payload = {
+      items: [
+        {
+          id: "main",
+          current: true,
+          alive: true,
+          startable: false,
+          runtime: { window: { open: true, pid: 7070 } },
+        },
+      ],
+    };
+    const overlaid = overlayLauncherWindowTruth(
+      "branch-instances",
+      payload,
+      truth({ workbench: { open: false, rendererProcessId: 0 } })
+    ) as Record<string, unknown>;
     const item = (overlaid.items as Record<string, unknown>[])[0];
     expect((item.runtime as Record<string, unknown>).window).toMatchObject({ open: false, pid: 0 });
   });
@@ -211,7 +232,11 @@ describe("launcher branch-instances window truth overlay", () => {
         },
       ],
     };
-    const overlaid = overlayLauncherWindowTruth("branch-instances", payload, truth()) as Record<string, unknown>;
+    const overlaid = overlayLauncherWindowTruth(
+      "branch-instances",
+      payload,
+      truth({ workbench: { open: false, rendererProcessId: 0 } })
+    ) as Record<string, unknown>;
     const item = (overlaid.items as Record<string, unknown>[])[0];
     const runtime = item.runtime as Record<string, unknown>;
     expect(runtime.lifecycleState).toBe("partial");
