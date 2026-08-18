@@ -17,6 +17,12 @@ export type NodeStatusVisual = {
   borderClass: string;
   ringClass: string;
   textClass: string;
+  /** Serpentine card surface tint — keeps the four status buckets legible on white cards. */
+  surfaceClass: string;
+  /** Serpentine top accent bar, colored by status bucket. */
+  accentBarClass: string;
+  /** Status badge (icon + label) chip classes. */
+  badgeClass: string;
 };
 
 const STATUS_LABEL_ZH: Record<WorkflowNodeRunStatus, string> = {
@@ -39,7 +45,11 @@ export function nodeStatusLabel(status: WorkflowNodeRunStatus, lang: "zh" | "en"
   return STATUS_LABEL_ZH[status] ?? status;
 }
 
-/** Visual grammar: no green for success; system blue only for running emphasis. */
+/**
+ * Visual grammar: four legible buckets aligned with CI/pipeline convention —
+ * Done uses the shared `--state-success` token, In Progress uses system blue,
+ * attention uses amber, failure uses red, and pending stays the faintest.
+ */
 export function resolveNodeStatusVisual(status: WorkflowNodeRunStatus): NodeStatusVisual {
   switch (status) {
     case "pending":
@@ -47,10 +57,14 @@ export function resolveNodeStatusVisual(status: WorkflowNodeRunStatus): NodeStat
         status,
         statusLabel: STATUS_LABEL_ZH.pending,
         icon: "circle",
-        toneClass: "bg-[var(--vui-surface-row)] text-[var(--fg-tertiary)]",
+        toneClass: "bg-[color-mix(in_srgb,var(--vui-surface-row)_55%,transparent)] text-[var(--fg-tertiary)]",
         borderClass: "border-[var(--vui-border-subtle)]",
         ringClass: "",
         textClass: "text-[var(--fg-tertiary)]",
+        surfaceClass: "bg-[color-mix(in_srgb,var(--vui-surface-row)_38%,var(--vui-surface-panel))]",
+        accentBarClass: "bg-[var(--vui-border-subtle)]",
+        badgeClass:
+          "border-[var(--vui-border-subtle)] bg-[color-mix(in_srgb,var(--vui-surface-row)_72%,transparent)] text-[var(--fg-tertiary)]",
       };
     case "ready":
       return {
@@ -58,19 +72,27 @@ export function resolveNodeStatusVisual(status: WorkflowNodeRunStatus): NodeStat
         statusLabel: STATUS_LABEL_ZH.ready,
         icon: "circle",
         toneClass: "bg-[var(--vui-surface-panel)] text-[var(--fg-secondary)]",
-        borderClass: "border-[var(--vui-border-strong,var(--vui-border-subtle))]",
+        borderClass: "border-[color-mix(in_srgb,var(--accent-cool)_32%,var(--vui-border-subtle))]",
         ringClass: "",
         textClass: "text-[var(--fg-secondary)]",
+        surfaceClass: "bg-[color-mix(in_srgb,var(--accent-cool)_3%,var(--vui-surface-panel))]",
+        accentBarClass: "bg-[color-mix(in_srgb,var(--accent-cool)_55%,transparent)]",
+        badgeClass:
+          "border-[color-mix(in_srgb,var(--accent-cool)_30%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_7%,transparent)] text-[var(--accent-cool)]",
       };
     case "running":
       return {
         status,
         statusLabel: STATUS_LABEL_ZH.running,
         icon: "play",
-        toneClass: "bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-panel))] text-[var(--accent-cool)]",
-        borderClass: "border-[color-mix(in_srgb,var(--accent-cool)_55%,var(--vui-border-subtle))]",
+        toneClass: "bg-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-surface-panel))] text-[var(--accent-cool)]",
+        borderClass: "border-[color-mix(in_srgb,var(--accent-cool)_60%,var(--vui-border-subtle))]",
         ringClass: "ring-2 ring-[color-mix(in_srgb,var(--accent-cool)_35%,transparent)]",
         textClass: "text-[var(--accent-cool)]",
+        surfaceClass: "bg-[color-mix(in_srgb,var(--accent-cool)_7%,var(--vui-surface-panel))]",
+        accentBarClass: "bg-[var(--accent-cool)]",
+        badgeClass:
+          "border-[color-mix(in_srgb,var(--accent-cool)_38%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_12%,transparent)] text-[var(--accent-cool)]",
       };
     case "waiting_human":
       return {
@@ -81,16 +103,24 @@ export function resolveNodeStatusVisual(status: WorkflowNodeRunStatus): NodeStat
         borderClass: "border-[color-mix(in_srgb,var(--state-warning)_48%,var(--vui-border-subtle))]",
         ringClass: "ring-2 ring-[color-mix(in_srgb,var(--state-warning)_28%,transparent)]",
         textClass: "text-[var(--state-warning)]",
+        surfaceClass: "bg-[color-mix(in_srgb,var(--state-warning)_7%,var(--vui-surface-panel))]",
+        accentBarClass: "bg-[var(--state-warning)]",
+        badgeClass:
+          "border-[color-mix(in_srgb,var(--state-warning)_38%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-warning)_12%,transparent)] text-[var(--state-warning)]",
       };
     case "succeeded":
       return {
         status,
         statusLabel: STATUS_LABEL_ZH.succeeded,
         icon: "check",
-        toneClass: "bg-[var(--vui-surface-row)] text-[var(--fg-secondary)]",
-        borderClass: "border-[var(--vui-border-subtle)]",
+        toneClass: "bg-[color-mix(in_srgb,var(--state-success)_9%,var(--vui-surface-panel))] text-[var(--state-success)]",
+        borderClass: "border-[color-mix(in_srgb,var(--state-success)_48%,var(--vui-border-subtle))]",
         ringClass: "",
-        textClass: "text-[var(--fg-secondary)]",
+        textClass: "text-[var(--state-success)]",
+        surfaceClass: "bg-[color-mix(in_srgb,var(--state-success)_6%,var(--vui-surface-panel))]",
+        accentBarClass: "bg-[var(--state-success)]",
+        badgeClass:
+          "border-[color-mix(in_srgb,var(--state-success)_36%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-success)_12%,transparent)] text-[var(--state-success)]",
       };
     case "failed":
       return {
@@ -101,6 +131,10 @@ export function resolveNodeStatusVisual(status: WorkflowNodeRunStatus): NodeStat
         borderClass: "border-[color-mix(in_srgb,var(--state-error)_48%,var(--vui-border-subtle))]",
         ringClass: "",
         textClass: "text-[var(--state-error)]",
+        surfaceClass: "bg-[color-mix(in_srgb,var(--state-error)_6%,var(--vui-surface-panel))]",
+        accentBarClass: "bg-[var(--state-error)]",
+        badgeClass:
+          "border-[color-mix(in_srgb,var(--state-error)_36%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-error)_10%,transparent)] text-[var(--state-error)]",
       };
     case "blocked":
       return {
@@ -111,6 +145,10 @@ export function resolveNodeStatusVisual(status: WorkflowNodeRunStatus): NodeStat
         borderClass: "border-[color-mix(in_srgb,var(--state-warning)_40%,var(--state-error))]",
         ringClass: "ring-1 ring-[color-mix(in_srgb,var(--state-error)_25%,transparent)]",
         textClass: "text-[var(--state-error)]",
+        surfaceClass: "bg-[color-mix(in_srgb,var(--state-error)_5%,var(--vui-surface-panel))]",
+        accentBarClass: "bg-[var(--state-error)]",
+        badgeClass:
+          "border-[color-mix(in_srgb,var(--state-error)_36%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-error)_10%,transparent)] text-[var(--state-error)]",
       };
     case "skipped":
       return {
@@ -121,6 +159,10 @@ export function resolveNodeStatusVisual(status: WorkflowNodeRunStatus): NodeStat
         borderClass: "border-dashed border-[var(--vui-border-subtle)]",
         ringClass: "",
         textClass: "text-[var(--fg-tertiary)]",
+        surfaceClass: "bg-[color-mix(in_srgb,var(--vui-surface-panel)_70%,transparent)]",
+        accentBarClass: "bg-transparent",
+        badgeClass:
+          "border-dashed border-[var(--vui-border-subtle)] bg-transparent text-[var(--fg-tertiary)]",
       };
     case "stale":
       return {
@@ -131,6 +173,10 @@ export function resolveNodeStatusVisual(status: WorkflowNodeRunStatus): NodeStat
         borderClass: "border-dashed border-[var(--vui-border-subtle)]",
         ringClass: "",
         textClass: "text-[var(--fg-tertiary)]",
+        surfaceClass: "bg-[color-mix(in_srgb,var(--vui-surface-panel)_70%,transparent)]",
+        accentBarClass: "bg-transparent",
+        badgeClass:
+          "border-dashed border-[var(--vui-border-subtle)] bg-transparent text-[var(--fg-tertiary)]",
       };
     case "cancelled":
       return {
@@ -141,6 +187,10 @@ export function resolveNodeStatusVisual(status: WorkflowNodeRunStatus): NodeStat
         borderClass: "border-[var(--vui-border-subtle)]",
         ringClass: "",
         textClass: "text-[var(--fg-tertiary)]",
+        surfaceClass: "bg-[color-mix(in_srgb,var(--vui-surface-panel)_70%,transparent)]",
+        accentBarClass: "bg-transparent",
+        badgeClass:
+          "border-[var(--vui-border-subtle)] bg-transparent text-[var(--fg-tertiary)]",
       };
     default:
       return resolveNodeStatusVisual("pending");

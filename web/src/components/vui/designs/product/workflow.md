@@ -37,7 +37,7 @@ const graph: WorkflowLayoutInput = projectionToCanvasGraph(projection);
 
 `stage-columns` 保留为默认兼容模式；调用方不得自行复制 renderer 或直接引入 `@xyflow/react` 来实现另一套几何。
 
-节点在 `serpentine` 模式下使用约 `244 × 102` 的紧凑科研步骤卡：第一行仅保留类型图标、类别、名称与执行主体，第二行展示状态和一条运行摘要，底部展示中文角色与绑定结果。长描述、输入/输出、检查项与技术 `agentId` 不在画布常驻，完整信息进入节点 tooltip 与 Inspector。卡片默认白色，中性色成功态不铺绿色；人工/失败/运行仅用细顶部强调线、状态图标和选中描边区分。
+节点在 `serpentine` 模式下使用约 `244 × 102` 的紧凑科研步骤卡：第一行仅保留类型图标、名称与执行主体，第二行展示状态徽章和一条运行摘要，底部展示中文角色与绑定结果。长描述、输入/输出、检查项与技术 `agentId` 不在画布常驻，完整信息进入节点 tooltip 与 Inspector。卡片状态按四桶整卡表达：完成（`--state-success` 淡绿 tint + 绿色顶部强调条 + 对勾徽章）、进行（`--accent-cool` 淡蓝 tint + 蓝条）、等待/关注（`--state-warning`）、失败（`--state-error`）、待运行（最淡灰）；选中另用细蓝色 outline，不与状态色冲突。
 
 该模式使用三条轻量阶段带，阶段头包含编号、名称、完成计数和短进度条。普通相邻边默认不常驻标签；只有 `knowledge_package`、`smoke`、`promotion` 和决策/回路语义常显，其他标签仅在 hover 或 active/attention 状态出现。跨阶段交接使用对齐节点之间的一条短叙事桥；同协议重跑沿所在阶段底部的局部反馈轨道返回，禁止绕画布或阶段绘制大矩形回路。ELK 仍负责节点顺序、阶段位置与空间预算，renderer 只收敛这两类叙事边的可见几何。
 
@@ -57,11 +57,12 @@ const graph: WorkflowLayoutInput = projectionToCanvasGraph(projection);
 
 严格使用 `NodeRunStatus`：`pending | ready | running | waiting_human | succeeded | failed | blocked | skipped | stale | cancelled`。
 
-- `running`：system blue 轮廓/轻 ring
+- `running`：system blue tint/轮廓/轻 ring
 - `waiting_human`：琥珀 + 人工图标
-- `succeeded`：**中性灰 + check，禁止绿色**
+- `succeeded`：`--state-success` 绿 tint + check 徽章（与 pending 在表面、边框、徽章三通道拉开；沿用 VUI 既有 success token，与 VDenseTable 等一致）
 - `failed` vs `blocked`：不同图标（x / ban）与文案
 - selected：细蓝色 outline；runtime current：独立运行态标识；二者不得互相覆盖
+- 阶段头：`done` 绿实心编号 + 对勾徽章，`active` 蓝实心编号 + 旋转进行中徽章，`attention` 琥珀实心编号 + 需关注徽章；进度条随 tone 着色
 
 ### 边语义
 

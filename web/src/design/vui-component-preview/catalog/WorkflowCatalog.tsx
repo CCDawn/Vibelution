@@ -92,12 +92,79 @@ const demoGraph: WorkflowLayoutInput = {
   },
 };
 
+const serpentineStatusGraph: WorkflowLayoutInput = {
+  stages: [
+    {
+      stageId: "s_knowledge",
+      label: "知识搜集",
+      nodeIds: ["sk_find", "sk_extract", "sk_ingest"],
+      stageTone: "done",
+    },
+    {
+      stageId: "s_experiment",
+      label: "实验设计",
+      nodeIds: ["se_hypothesis", "se_protocol", "se_review", "se_smoke"],
+      stageTone: "active",
+    },
+    {
+      stageId: "s_iteration",
+      label: "执行迭代",
+      nodeIds: ["si_run", "si_eval", "si_decision"],
+      stageTone: "attention",
+    },
+    {
+      stageId: "s_misc",
+      label: "其余状态",
+      nodeIds: ["sm_ready", "sm_skipped", "sm_stale", "sm_cancelled"],
+      stageTone: "idle",
+    },
+  ],
+  nodes: [
+    { nodeId: "sk_find", stageId: "s_knowledge", label: "资料寻找", actorKind: "agent", visualKind: "agent_task", status: "succeeded", primaryRoleKey: "source_finder", primaryAgentId: "agent-bai" },
+    { nodeId: "sk_extract", stageId: "s_knowledge", label: "证据提炼", actorKind: "agent", visualKind: "agent_task", status: "succeeded", primaryRoleKey: "source_extractor", primaryAgentId: "agent-gu" },
+    { nodeId: "sk_ingest", stageId: "s_knowledge", label: "知识入库", actorKind: "system", visualKind: "system_task", status: "succeeded", primaryRoleKey: "source_ingestor" },
+    { nodeId: "se_hypothesis", stageId: "s_experiment", label: "假设起草", actorKind: "agent", visualKind: "agent_task", status: "succeeded", primaryRoleKey: "experiment_planner", primaryAgentId: "agent-lin" },
+    { nodeId: "se_protocol", stageId: "s_experiment", label: "协议冻结", actorKind: "agent", visualKind: "agent_task", status: "running", isRuntimeCurrent: true, primaryRoleKey: "experiment_planner", primaryAgentId: "agent-shen" },
+    { nodeId: "se_review", stageId: "s_experiment", label: "人工评审", actorKind: "human", visualKind: "human_gate", status: "waiting_human", primaryRoleKey: "research_owner" },
+    { nodeId: "se_smoke", stageId: "s_experiment", label: "Smoke 门禁", actorKind: "system", visualKind: "system_task", status: "pending", primaryRoleKey: "formal_runner" },
+    { nodeId: "si_run", stageId: "s_iteration", label: "批次执行", actorKind: "agent", visualKind: "agent_task", status: "failed", primaryRoleKey: "formal_runner", primaryAgentId: "agent-zhou" },
+    { nodeId: "si_eval", stageId: "s_iteration", label: "结果评估", actorKind: "agent", visualKind: "agent_task", status: "blocked", primaryRoleKey: "experiment_ledger" },
+    { nodeId: "si_decision", stageId: "s_iteration", label: "迭代决策", actorKind: "agent", visualKind: "decision", status: "pending", primaryRoleKey: "iteration_planner" },
+    { nodeId: "sm_ready", stageId: "s_misc", label: "就绪任务", actorKind: "agent", visualKind: "agent_task", status: "ready", primaryRoleKey: "iteration_planner" },
+    { nodeId: "sm_skipped", stageId: "s_misc", label: "跳过任务", actorKind: "agent", visualKind: "agent_task", status: "skipped", primaryRoleKey: "iteration_versioning" },
+    { nodeId: "sm_stale", stageId: "s_misc", label: "过期任务", actorKind: "agent", visualKind: "agent_task", status: "stale", primaryRoleKey: "package_builder" },
+    { nodeId: "sm_cancelled", stageId: "s_misc", label: "取消任务", actorKind: "agent", visualKind: "agent_task", status: "cancelled", primaryRoleKey: "package_builder" },
+  ],
+  edges: [
+    { edgeId: "se1", fromNodeId: "sk_find", toNodeId: "sk_extract", label: "提交提炼", gateKind: "auto", semanticKind: "main", pathState: "traversed", labelAlwaysVisible: false },
+    { edgeId: "se2", fromNodeId: "sk_extract", toNodeId: "sk_ingest", label: "入库", gateKind: "auto", semanticKind: "main", pathState: "traversed", labelAlwaysVisible: false },
+    { edgeId: "se3", fromNodeId: "sk_ingest", toNodeId: "se_hypothesis", label: "证据交接", gateKind: "knowledge_package", semanticKind: "human_gate", pathState: "traversed", labelAlwaysVisible: true },
+    { edgeId: "se4", fromNodeId: "se_hypothesis", toNodeId: "se_protocol", label: "冻结", gateKind: "auto", semanticKind: "main", pathState: "active", labelAlwaysVisible: false },
+    { edgeId: "se5", fromNodeId: "se_protocol", toNodeId: "se_review", label: "送审", gateKind: "human", semanticKind: "human_gate", pathState: "attention", labelAlwaysVisible: true },
+    { edgeId: "se6", fromNodeId: "se_review", toNodeId: "se_smoke", label: "放行", gateKind: "smoke", semanticKind: "main", pathState: "idle", labelAlwaysVisible: false },
+    { edgeId: "se7", fromNodeId: "se_smoke", toNodeId: "si_run", label: "进入执行", gateKind: "auto", semanticKind: "main", pathState: "idle", labelAlwaysVisible: false },
+    { edgeId: "se8", fromNodeId: "si_run", toNodeId: "si_eval", label: "评估", gateKind: "auto", semanticKind: "main", pathState: "danger", labelAlwaysVisible: false },
+    { edgeId: "se9", fromNodeId: "si_eval", toNodeId: "si_decision", label: "门禁判定", gateKind: "promotion", semanticKind: "decision_branch", pathState: "idle", labelAlwaysVisible: true },
+    { edgeId: "se10", fromNodeId: "si_decision", toNodeId: "sm_ready", label: "重跑", gateKind: "auto", semanticKind: "rerun", pathState: "idle", labelAlwaysVisible: true },
+  ],
+  run: {
+    runId: "run-serpentine-demo",
+    status: "running",
+    runtimeCurrentNodeIds: ["se_protocol"],
+  },
+};
+
 export function WorkflowCatalog() {
   return (
     <VuiPreviewSection title="Workflow">
       <VuiPreviewCard name="VWorkflowCanvas" className={workflowCatalogClasses.card}>
         <div className={workflowCatalogClasses.host}>
           <VWorkflowCanvas graph={demoGraph} height="100%" />
+        </div>
+      </VuiPreviewCard>
+      <VuiPreviewCard name="VWorkflowCanvas · serpentine 全状态" className={workflowCatalogClasses.card}>
+        <div className={workflowCatalogClasses.hostTall}>
+          <VWorkflowCanvas graph={serpentineStatusGraph} height="100%" layoutMode="serpentine" showMiniMap />
         </div>
       </VuiPreviewCard>
     </VuiPreviewSection>

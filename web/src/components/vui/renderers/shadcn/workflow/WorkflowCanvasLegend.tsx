@@ -1,12 +1,12 @@
 /**
- * Compact status legend — low noise, no green success.
+ * Compact status legend — mirrors the four-bucket node status grammar.
  */
 export function WorkflowCanvasLegend() {
   const items: Array<{ label: string; className: string }> = [
     { label: "运行中", className: "bg-[var(--accent-cool)]" },
     { label: "等待人工", className: "bg-[var(--state-warning)]" },
     { label: "阻塞/失败", className: "bg-[var(--state-error)]" },
-    { label: "已完成", className: "bg-[var(--fg-tertiary)]" },
+    { label: "已完成", className: "bg-[var(--state-success)]" },
     { label: "待运行", className: "bg-[var(--vui-border-subtle)]" },
   ];
   return (
