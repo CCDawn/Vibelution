@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { ArrowLeft } from "lucide-react";
 
 import type { ChallengeQuestionRunDetailPayload } from "../../../api/types";
@@ -11,6 +12,7 @@ import {
 import { ChallengeQuestionAnalysisSection } from "./ChallengeQuestionAnalysisSection";
 import { ChallengeQuestionEvidenceSection } from "./ChallengeQuestionEvidenceSection";
 import { ChallengeQuestionPlanSection } from "./ChallengeQuestionPlanSection";
+import { ChallengeQuestionRegisterDialog } from "./ChallengeQuestionRegisterDialog";
 import css from "./ChallengeQuestionDetailPanel.styles";
 
 export type ChallengeQuestionDetailPanelProps = {
@@ -39,6 +41,8 @@ export function ChallengeQuestionDetailPanel({
   errorMessage = "",
   onClose,
 }: ChallengeQuestionDetailPanelProps) {
+  const [reviseDialogOpen, setReviseDialogOpen] = useState(false);
+
   if (isLoading) {
     return (
       <VSurface className={css.state} tone="workspace">
@@ -72,6 +76,11 @@ export function ChallengeQuestionDetailPanel({
           <VStatusChip tone={record.status === "approved" ? "accent" : "warning"}>
             {record.status === "approved" ? "正式批准" : record.status}
           </VStatusChip>
+          {record.status === "needs_revision" ? (
+            <VButton density="compact" variant="primary" onPress={() => setReviseDialogOpen(true)}>
+              登记修订产出
+            </VButton>
+          ) : null}
           <VButton density="compact" icon={<ArrowLeft size={15} aria-hidden="true" />} onPress={onClose} variant="secondary">
             返回题目列表
           </VButton>
@@ -87,6 +96,16 @@ export function ChallengeQuestionDetailPanel({
       <ChallengeQuestionEvidenceSection detail={detail} />
       <ChallengeQuestionAnalysisSection output={output} />
       <ChallengeQuestionPlanSection detail={detail} />
+
+      {reviseDialogOpen ? (
+        <ChallengeQuestionRegisterDialog
+          teamId={detail.teamId}
+          initialMode="register"
+          parentRunId={record.runId}
+          questionIdHint={detail.questionId}
+          onClose={() => setReviseDialogOpen(false)}
+        />
+      ) : null}
     </main>
   );
 }
