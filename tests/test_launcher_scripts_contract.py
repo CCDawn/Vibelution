@@ -189,6 +189,7 @@ def test_ps_launcher_python_deps_stamp_aligns_with_content_hash():
     assert "_requirements_fingerprint" in py_source
     assert "_runtime_core_imports_available" in py_source
     assert "stamp already matches" in py_source
+    assert "python_runtime.reused_supervisor" in py_source
     assert "workbench.open.timings" in py_source
 
 def test_python_launcher_workbench_window_applies_vibelution_app_identity():

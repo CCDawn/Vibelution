@@ -32,6 +32,7 @@ P0 只修 **生命周期内核**：一个监督者、一套 READY、desired/obse
 | systemd | `READY` ≠ “进程已 spawn” | unit 文件 / journald |
 | Kubernetes | `generation` CAS；过期观察者不得写回 | apiserver / etcd |
 | Compose | **一份当前二进制** 操作目标 cwd | YAML / 项目模型 |
+| PostHog light worktree | lockfile 字节相同则借用主仓 toolchain/venv，禁止往共享环境写包 | flox / `UV_NO_SYNC` / husky 钩子 |
 
 禁止引入 k8s、systemd、Compose、etcd。
 
@@ -60,14 +61,14 @@ Python `_instance_lifecycle_state` 与 Electron `composeInstanceLifecycleState` 
 隔离 start/restart：
 
 1. 当前 checkout 的 `PYTHON_LAUNCHER_SCRIPT_PATH`（`core/runtime_manager/constants.py` → `scripts/vibelution_launcher.py`）。
-2. 目标 worktree 的 `pythonw`（无则当前壳 `pythonw`）。
+2. 当前壳 `pythonw`（监督者解释器）。目标树残留的不完整 `.venv` 不得抢先。后端解释器由 launcher 再选：`requirements.txt` 与监督者相同且监督者 `.venv` 可用则复用，禁止往共享环境 `pip install`；只有依赖不同才在目标树建私有 `.venv`。
 3. `cwd` = 目标 worktree。
 4. `apply_slot_spawn_environment`：`VIBELUTION_WORKSPACE_ROOT`、端口、slot data home。
 5. start/restart 额外：`VIBELUTION_ALLOW_DIRTY_LAUNCH=1`、`VIBELUTION_ALLOW_NON_MAIN_LAUNCH=1`、`--no-browser`。
 6. **Popen 分离**（Windows：`DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB` + hidden STARTUPINFO；禁止可见控制台）。父 JSON CLI 在 202 后立即退出，子树必须能活过父进程。
 7. **禁止** `subprocess.run` 等待隔离 start；**禁止** exec 目标树自己的 `vibelution_launcher.py`。
 
-`vibelution_launcher.py` 必须在 `sys.path.insert` **之前** 读取 `VIBELUTION_WORKSPACE_ROOT` 作为工作区根（runtime/state/venv/cwd 语义），同时把 **脚本所在 checkout** 插入 `sys.path`，保证跑的是监督者协议代码而非目标树旧模块。
+`vibelution_launcher.py` 必须在 `sys.path.insert` **之前** 读取 `VIBELUTION_WORKSPACE_ROOT` 作为工作区根（runtime/state/cwd 语义）。Python 包默认复用监督者 `.venv`（requirements 指纹相同）；私有 `.venv` 仅在指纹不同时创建。同时把 **脚本所在 checkout** 插入 `sys.path`，保证跑的是监督者协议代码而非目标树旧模块。工作台进程仍执行目标树的 `scripts/web_workbench.py`（`Path(__file__).parent.parent` 进 `sys.path`），源码来自该 worktree。
 
 stop / force-stop：仍 **等待** 目标 stop（超时 60s）；但必须 **先** 用 in-process `psutil` 杀掉登记的 `spawnPid` 进程树（含根进程），再跑 `--action stop`。禁止 `taskkill.exe`。
 

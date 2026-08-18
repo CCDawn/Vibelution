@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -291,6 +292,19 @@ def test_spawn_uses_pythonw_and_hidden_console(tmp_path, monkeypatch):
     if lifecycle.os.name == "nt":
         assert captured["kwargs"]["creationflags"] & lifecycle.subprocess.CREATE_NO_WINDOW
     assert result["returncode"] == 0
+
+
+def test_resolve_no_console_python_prefers_supervisor_over_worktree_venv(tmp_path):
+    worktree = tmp_path / "task"
+    leftover = worktree / ".venv" / "Scripts" / "pythonw.exe"
+    leftover.parent.mkdir(parents=True)
+    leftover.write_text("", encoding="utf-8")
+    supervisor_pythonw = Path(sys.executable).with_name("pythonw.exe")
+    if not supervisor_pythonw.is_file():
+        pytest.skip("current interpreter has no pythonw.exe sibling")
+    resolved = Path(lifecycle.resolve_no_console_python(worktree))
+    assert resolved == supervisor_pythonw.resolve()
+    assert resolved != leftover.resolve()
 
 
 def test_current_row_delegates_to_existing_start(monkeypatch):

@@ -389,6 +389,147 @@ def test_python_launcher_reports_missing_runtime_dependencies_after_install(monk
     assert installed == [str(venv_python)]
 
 
+def _write_posix_venv_python(root: Path) -> Path:
+    python = root / ".venv" / "bin" / "python"
+    python.parent.mkdir(parents=True, exist_ok=True)
+    python.write_text("#!/usr/bin/env python3", encoding="utf-8")
+    return python
+
+
+def test_isolated_start_reuses_supervisor_venv_when_requirements_match(monkeypatch, tmp_path):
+    launcher = _load_python_launcher()
+    monkeypatch.setattr(launcher.os, "name", "posix")
+    supervisor = tmp_path / "supervisor"
+    worktree = tmp_path / "worktree"
+    supervisor.mkdir()
+    worktree.mkdir()
+    requirements = "fastapi>=0.111.0\nuvicorn>=0.30.0\n"
+    (supervisor / "requirements.txt").write_text(requirements, encoding="utf-8")
+    (worktree / "requirements.txt").write_text(requirements, encoding="utf-8")
+    supervisor_python = _write_posix_venv_python(supervisor)
+    monkeypatch.setattr(launcher, "SUPERVISOR_ROOT", supervisor)
+    monkeypatch.setattr(launcher, "PROJECT_ROOT", worktree)
+    monkeypatch.setattr(launcher, "VENV_DIR", worktree / ".venv")
+    monkeypatch.setattr(launcher, "REQUIREMENTS_PATH", worktree / "requirements.txt")
+    monkeypatch.setattr(launcher, "RUNTIME_DIR", tmp_path / "slot-runtime" / "launcher")
+    events: list[dict] = []
+    created: list[str] = []
+    installed: list[str] = []
+    monkeypatch.setattr(launcher, "_append_frontend_build_log", lambda payload: events.append(dict(payload)))
+    monkeypatch.setattr(launcher, "_create_project_virtualenv", lambda: created.append("created"))
+    monkeypatch.setattr(launcher, "_install_project_dependencies", lambda exe: installed.append(exe))
+    monkeypatch.setattr(
+        launcher,
+        "_runtime_core_imports_available",
+        lambda exe: exe == str(supervisor_python),
+    )
+    monkeypatch.setattr(launcher, "_runtime_imports_available", lambda exe: False)
+
+    resolved = launcher._ensure_project_python_runtime()
+
+    assert resolved == str(supervisor_python)
+    assert created == []
+    assert installed == []
+    assert not (worktree / ".venv").exists()
+    assert events == [
+        {
+            "event": "python_runtime.reused_supervisor",
+            "pythonExecutable": str(supervisor_python),
+            "reason": "requirements_fingerprint_match",
+        }
+    ]
+
+
+def test_isolated_start_skips_incomplete_local_venv_when_supervisor_matches(monkeypatch, tmp_path):
+    launcher = _load_python_launcher()
+    monkeypatch.setattr(launcher.os, "name", "posix")
+    supervisor = tmp_path / "supervisor"
+    worktree = tmp_path / "worktree"
+    supervisor.mkdir()
+    worktree.mkdir()
+    requirements = "fastapi>=0.111.0\n"
+    (supervisor / "requirements.txt").write_text(requirements, encoding="utf-8")
+    (worktree / "requirements.txt").write_text(requirements, encoding="utf-8")
+    supervisor_python = _write_posix_venv_python(supervisor)
+    leftover = _write_posix_venv_python(worktree)
+    monkeypatch.setattr(launcher, "SUPERVISOR_ROOT", supervisor)
+    monkeypatch.setattr(launcher, "PROJECT_ROOT", worktree)
+    monkeypatch.setattr(launcher, "VENV_DIR", worktree / ".venv")
+    monkeypatch.setattr(launcher, "REQUIREMENTS_PATH", worktree / "requirements.txt")
+    monkeypatch.setattr(launcher, "RUNTIME_DIR", tmp_path / "slot-runtime" / "launcher")
+    installed: list[str] = []
+    monkeypatch.setattr(launcher, "_append_frontend_build_log", lambda payload: None)
+    monkeypatch.setattr(launcher, "_install_project_dependencies", lambda exe: installed.append(exe))
+    monkeypatch.setattr(launcher, "_create_project_virtualenv", lambda: (_ for _ in ()).throw(AssertionError("should not create")))
+    monkeypatch.setattr(launcher, "_ensure_langgraph_checkpoint_sqlite_shim", lambda exe: None)
+    monkeypatch.setattr(
+        launcher,
+        "_runtime_core_imports_available",
+        lambda exe: exe == str(supervisor_python),
+    )
+    monkeypatch.setattr(launcher, "_runtime_imports_available", lambda exe: False)
+
+    resolved = launcher._ensure_project_python_runtime()
+
+    assert resolved == str(supervisor_python)
+    assert leftover.exists()
+    assert installed == []
+
+
+def test_isolated_start_installs_private_venv_when_requirements_differ(monkeypatch, tmp_path):
+    launcher = _load_python_launcher()
+    monkeypatch.setattr(launcher.os, "name", "posix")
+    supervisor = tmp_path / "supervisor"
+    worktree = tmp_path / "worktree"
+    supervisor.mkdir()
+    worktree.mkdir()
+    (supervisor / "requirements.txt").write_text("fastapi>=0.111.0\n", encoding="utf-8")
+    (worktree / "requirements.txt").write_text("fastapi>=0.111.0\nlitellm>=1.0.0\n", encoding="utf-8")
+    supervisor_python = _write_posix_venv_python(supervisor)
+    worktree_python = worktree / ".venv" / "bin" / "python"
+    monkeypatch.setattr(launcher, "SUPERVISOR_ROOT", supervisor)
+    monkeypatch.setattr(launcher, "PROJECT_ROOT", worktree)
+    monkeypatch.setattr(launcher, "VENV_DIR", worktree / ".venv")
+    monkeypatch.setattr(launcher, "REQUIREMENTS_PATH", worktree / "requirements.txt")
+    monkeypatch.setattr(launcher, "RUNTIME_DIR", tmp_path / "slot-runtime" / "launcher")
+    installed: list[str] = []
+    venv_creation: list[list[str]] = []
+
+    def fake_run(args, **kwargs):
+        if args[:3] == [launcher._bootstrap_python_executable(), "-m", "venv"]:
+            venv_creation.append(list(args))
+            worktree_python.parent.mkdir(parents=True, exist_ok=True)
+            worktree_python.write_text("#!/usr/bin/env python3", encoding="utf-8")
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(launcher.subprocess, "run", fake_run)
+    monkeypatch.setattr(launcher, "_runtime_core_imports_available", lambda exe: exe == str(supervisor_python))
+    monkeypatch.setattr(launcher, "_runtime_imports_available", lambda exe: False)
+    monkeypatch.setattr(launcher, "_install_project_dependencies", lambda exe: installed.append(exe))
+    monkeypatch.setattr(launcher, "_missing_runtime_modules", lambda exe, modules: [])
+    monkeypatch.setattr(launcher, "_ensure_langgraph_checkpoint_sqlite_shim", lambda exe: None)
+
+    resolved = launcher._ensure_project_python_runtime()
+
+    assert resolved == str(worktree_python)
+    assert installed == [str(worktree_python)]
+    assert str(supervisor_python) not in installed
+    assert venv_creation == [[launcher._bootstrap_python_executable(), "-m", "venv", str(worktree / ".venv")]]
+
+
+def test_isolated_install_refuses_supervisor_venv(monkeypatch, tmp_path):
+    launcher = _load_python_launcher()
+    supervisor = tmp_path / "supervisor"
+    worktree = tmp_path / "worktree"
+    supervisor.mkdir()
+    worktree.mkdir()
+    supervisor_python = _write_posix_venv_python(supervisor)
+    monkeypatch.setattr(launcher, "SUPERVISOR_ROOT", supervisor)
+    monkeypatch.setattr(launcher, "PROJECT_ROOT", worktree)
+    with pytest.raises(RuntimeError, match="supervisor venv"):
+        launcher._install_project_dependencies(str(supervisor_python))
+
+
 def test_python_launcher_dependency_install_failure_is_diagnosable(monkeypatch, tmp_path):
     launcher = _load_python_launcher()
     project_dir = tmp_path / "project"
