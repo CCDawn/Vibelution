@@ -30,8 +30,8 @@ describe("VDenseTable", () => {
     expect(html).toContain("grid-cols-subgrid");
     expect(html).not.toContain("<colgroup>");
     expect(html).toContain("w-full");
+    expect(html).toContain("max-w-[calc(100vw-2.5rem)]");
     expect(html).toContain("display:grid");
-    expect(html).toContain("grid-template-columns:160px 80px");
     expect(html).toContain("width:240px;min-width:240px;max-width:240px");
     expect(html).toContain('role="separator"');
     expect(html).toContain("Resize name");
@@ -59,7 +59,7 @@ describe("VDenseTable", () => {
     expect(html).toContain("w-full");
     expect(html).toContain("display:grid");
     expect(html).toContain("grid-template-columns:minmax(0, 1fr) 80px 170px");
-    expect(html).toContain("width:100%;max-width:100%;min-width:360px");
+    expect(html).toContain("width:100%;max-width:min(100%, calc(100vw - 2.5rem));min-width:360px");
     expect(html).not.toContain("max-width:470px");
     expect(html).toContain('data-vui-fill="true"');
     expect(html).not.toContain("Resize path");

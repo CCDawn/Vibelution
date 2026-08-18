@@ -139,7 +139,7 @@ export function VDenseTable<TRow>({
   };
 
   const shellClassName = [
-    "min-w-0 max-w-full w-full rounded-[var(--radius-control)] border border-vui-border-hairline bg-vui-surface-row",
+    "min-w-0 max-w-[calc(100vw-2.5rem)] w-full rounded-[var(--radius-control)] border border-vui-border-hairline bg-vui-surface-row",
     className,
     resizable ? "!overflow-x-auto" : "overflow-hidden",
   ]
@@ -150,7 +150,7 @@ export function VDenseTable<TRow>({
         display: "grid",
         gridTemplateColumns,
         width: "100%",
-        maxWidth: "100%",
+        maxWidth: "min(100%, calc(100vw - 2.5rem))",
         minWidth: `${tableMinWidth}px`,
       }
     : {
