@@ -117,39 +117,16 @@ export function VDenseTable<TRow>({
     >
       <div
         data-vui-table-sizer={resizable ? "true" : undefined}
-        style={
-          resizable
-            ? {
-                display: "inline-block",
-                width: `${tableWidth}px`,
-                minWidth: `${tableWidth}px`,
-                maxWidth: `${tableWidth}px`,
-                verticalAlign: "top",
-              }
-            : undefined
-        }
+        style={resizable ? { width: `${tableWidth}px`, minWidth: `${tableWidth}px` } : undefined}
       >
-      <table
-        className={["table-fixed border-collapse text-left", resizable ? "" : "w-full"].filter(Boolean).join(" ")}
-        style={
-          resizable
-            ? {
-                display: "inline-table",
-                width: `${tableWidth}px`,
-                minWidth: `${tableWidth}px`,
-                maxWidth: `${tableWidth}px`,
-                tableLayout: "fixed",
-              }
-            : undefined
-        }
-      >
+      <table className="w-full table-fixed border-collapse text-left">
         {resizable ? (
           <colgroup>
             {columns.map((column) => (
               <col
                 key={column.id}
                 data-vui-fill={column.id === fillColumnId ? "true" : undefined}
-                style={columnColWidth(columnWidths[column.id] ?? DEFAULT_COLUMN_WIDTH)}
+                style={columnBoxStyle(columnWidths[column.id] ?? DEFAULT_COLUMN_WIDTH, column.id === fillColumnId)}
               />
             ))}
           </colgroup>
@@ -248,10 +225,6 @@ export function VDenseTable<TRow>({
 
 function initialColumnWidths<TRow>(columns: Array<VDenseTableColumn<TRow>>): Record<string, number> {
   return Object.fromEntries(columns.map((column) => [column.id, column.width ?? DEFAULT_COLUMN_WIDTH]));
-}
-
-function columnColWidth(width: number): { width: string } {
-  return { width: `${width}px` };
 }
 
 function columnBoxStyle(width: number, fill: boolean): { width: string; minWidth: string; maxWidth?: string } {
