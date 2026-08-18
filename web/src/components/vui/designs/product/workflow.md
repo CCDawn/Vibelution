@@ -43,6 +43,8 @@ const graph: WorkflowLayoutInput = projectionToCanvasGraph(projection);
 
 画布必须提供平移、缩放、适应全部和定位当前工作；页面本身不得产生横向滚动。
 
+`VCanvasWorkbenchPage` 的 inspector 列只在选中节点或打开 Agent / 时间线 / 团队 / 题目进度 / 创建运行 等工具面板时挂载。未选节点时不要用「选择流程节点」空状态占住 300–520px 白列，让画布吃满主区。点击节点或工具按钮后再展开 inspector。
+
 ### 节点视觉种类
 
 | visualKind | 用途 |

@@ -17,3 +17,14 @@ export function shouldApplyCanvasNodeSelection({
 }): boolean {
   return nodeId !== null || panel === "node";
 }
+
+/** Node inspector is a real column only when it has a node or a tool panel. */
+export function shouldShowResearchProcessInspector({
+  panel,
+  selectedNodeId,
+}: {
+  panel: ResearchProcessPanel;
+  selectedNodeId: string | null;
+}): boolean {
+  return panel !== "node" || Boolean(selectedNodeId);
+}
