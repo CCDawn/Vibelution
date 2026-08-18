@@ -39,6 +39,7 @@ from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 DEV_CONTROLS_BASE = (
     "/api/teams/research-team/workflow-orchestration/challenge-program/dev-controls"
 )
+TEST_SOURCE_COMMIT = "a" * 40
 
 
 def _client() -> TestClient:
@@ -66,7 +67,7 @@ def _ready_report(**overrides) -> dict:
             for gate_id in dev_controls_service.REQUIRED_READINESS_GATES
         ],
         "nextLegalAction": "RESEARCH_AUTHORIZATION_REQUIRED",
-        "sourceCommit": dev_controls_service._current_source_commit(),
+        "sourceCommit": TEST_SOURCE_COMMIT,
         "generatedAt": dev_controls_service._utc_now(),
     }
     report.update(overrides)
@@ -183,6 +184,11 @@ def test_outcomes_project_to_camel_case_wire_shape() -> None:
 @pytest.fixture()
 def controls_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     root = tmp_path / "teams"
+    monkeypatch.setattr(
+        dev_controls_service,
+        "_current_source_commit",
+        lambda: TEST_SOURCE_COMMIT,
+    )
     monkeypatch.setattr(
         dev_controls_service,
         "team_workspace_root",
