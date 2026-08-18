@@ -214,7 +214,9 @@ def test_challenge_cup_dev_control_routes_stay_thin() -> None:
     service = (REPO_ROOT / "core" / "web" / "services" / "team_workflow" / "challenge_cup_dev_controls.py")
     service_source = service.read_text(encoding="utf-8")
     assert "team_workspace_root" in service_source
-    assert "atomic_write_json" in service_source
+    assert "_strict_json_write" in service_source
+    assert "os.replace" in service_source
+    assert "atomic_write_json" not in service_source
     assert "realCampaignAllowed" in service_source
     assert "require_clean=True" in service_source
     assert "run_pytest=True" in service_source

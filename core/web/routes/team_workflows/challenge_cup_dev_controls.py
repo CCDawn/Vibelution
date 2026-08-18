@@ -14,6 +14,8 @@ from core.research.competition.dev_control_batch import DevBatchError
 from core.web.services.team_service import TeamNotFoundError
 from core.web.services.team_workflow_orchestration_service import (
     ChallengeCupDevControlsError,
+    DevControlsStorageError,
+    DevFlowConflict,
     get_challenge_cup_dev_control_snapshot,
     run_challenge_cup_dev_batch,
     run_challenge_cup_dev_readiness,
@@ -46,6 +48,8 @@ def challenge_cup_dev_control_snapshot(team_id: str) -> dict:
         return get_challenge_cup_dev_control_snapshot(team_id)
     except TeamNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except DevControlsStorageError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except _DEV_CONTROL_CONTRACT_ERRORS as exc:
         _raise_team_workflow_route_error(
             "challenge_cup_dev_controls.snapshot", team_id, exc, status_code=422
@@ -65,6 +69,8 @@ def challenge_cup_dev_readiness_run(
         return run_challenge_cup_dev_readiness(team_id, mode=payload.mode)
     except TeamNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except DevControlsStorageError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except _DEV_CONTROL_CONTRACT_ERRORS as exc:
         _raise_team_workflow_route_error(
             "challenge_cup_dev_controls.readiness", team_id, exc, status_code=422
@@ -82,9 +88,18 @@ def challenge_cup_dev_batch_run(
     payload: ChallengeCupDevBatchRunRequest,
 ) -> dict:
     try:
-        return run_challenge_cup_dev_batch(team_id, plan_id, payload.maxItems)
+        return run_challenge_cup_dev_batch(
+            team_id,
+            plan_id,
+            payload.maxItems,
+            retry_failed=payload.retryFailed,
+        )
     except TeamNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except DevFlowConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except DevControlsStorageError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except _DEV_CONTROL_CONTRACT_ERRORS as exc:
         _raise_team_workflow_route_error(
             "challenge_cup_dev_controls.batch", team_id, exc, status_code=422

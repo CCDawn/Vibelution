@@ -56,13 +56,28 @@ def _ready_report(**overrides) -> dict:
         "researchAuthorizationRequired": True,
         "realCampaignAllowed": False,
         "gates": [
-            {"gateId": "r1_clean_clone", "status": "PASS", "detail": "R1 pytest passed"}
+            {"gateId": gate_id, "status": "PASS", "detail": f"{gate_id} fixture PASS"}
+            for gate_id in dev_controls_service.REQUIRED_READINESS_GATES
         ],
         "nextLegalAction": "RESEARCH_AUTHORIZATION_REQUIRED",
         "generatedAt": "2026-08-18T00:00:00Z",
     }
     report.update(overrides)
     return report
+
+
+def _ready_team(
+    controls_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    team_id: str = "team-1",
+) -> None:
+    monkeypatch.setattr(
+        dev_controls_service,
+        "build_platform_flow_readiness_report",
+        lambda repo, *, clone_dest=None, require_clean=True, run_pytest=True, mode="dev": _ready_report(),
+    )
+    dev_controls_service.run_challenge_cup_dev_readiness(team_id)
 
 
 # ---------------------------------------------------------------------------
@@ -251,7 +266,11 @@ def test_readiness_rejects_non_dev_mode_before_any_build(
         dev_controls_service.run_challenge_cup_dev_readiness("team-1", mode="formal")
 
 
-def test_dev_1_batch_persists_checkpoint_team_scoped(controls_root: Path) -> None:
+def test_dev_1_batch_persists_checkpoint_team_scoped(
+    controls_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _ready_team(controls_root, monkeypatch)
     response = dev_controls_service.run_challenge_cup_dev_batch("team-1", "dev-1", None)
     assert response["planId"] == "dev-1"
     assert response["gateId"] == "G1"
@@ -402,7 +421,12 @@ def test_blocked_dev_5_returns_repair_and_does_not_advance_to_authorization(
     assert snapshot["nextLegalAction"] == "repair_dev_5_fixture_batch"
 
 
-def test_dev_5_pause_then_resume_persists_and_never_reruns(controls_root: Path) -> None:
+def test_dev_5_pause_then_resume_persists_and_never_reruns(
+    controls_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _ready_team(controls_root, monkeypatch)
+    dev_controls_service.run_challenge_cup_dev_batch("team-1", "dev-1", None)
     paused = dev_controls_service.run_challenge_cup_dev_batch("team-1", "dev-5", 2)
     assert paused["checkpoint"]["succeededCount"] == 2
     assert paused["checkpoint"]["pendingCount"] == 3
@@ -433,9 +457,12 @@ def test_service_records_bounded_runtime_scene_transitions(
         events.append({"component": component, "phase": phase, "event_code": event_code, **kwargs})
 
     monkeypatch.setattr(dev_controls_service, "record_runtime_scene_event", fake_record)
+    _ready_team(controls_root, monkeypatch)
     dev_controls_service.run_challenge_cup_dev_batch("team-1", "dev-1", None)
 
-    codes = [item["event_code"] for item in events]
+    codes = [
+        item["event_code"] for item in events if "batch" in item["event_code"]
+    ]
     assert codes == [
         "challenge_cup_dev_controls.batch.started",
         "challenge_cup_dev_controls.batch.succeeded",
@@ -461,6 +488,8 @@ def test_service_records_rejection_and_failure_scene_events(
     with pytest.raises(DevBatchError, match="not authorized"):
         dev_controls_service.run_challenge_cup_dev_batch("team-1", "dev-12", None)
     assert "challenge_cup_dev_controls.batch.rejected" in events
+
+    _ready_team(controls_root, monkeypatch)
 
     def fail_run(state, *, max_items=None, on_item=None):
         raise RuntimeError("fixture boom")
@@ -546,7 +575,13 @@ def test_post_readiness_http_contract(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_post_batch_http_contract(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_run(team_id: str, plan_id: str, max_items: int | None) -> dict:
+    def fake_run(
+        team_id: str,
+        plan_id: str,
+        max_items: int | None,
+        *,
+        retry_failed: bool = False,
+    ) -> dict:
         assert plan_id == "dev-1"
         return {
             "schemaVersion": 1,
@@ -633,3 +668,293 @@ def test_missing_team_maps_to_404(
     response = _client().get(DEV_CONTROLS_BASE)
     assert response.status_code == 404
     assert "Team not found" in response.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Authoritative team id, flow order, repair, storage integrity
+# ---------------------------------------------------------------------------
+
+
+def test_authoritative_team_id_is_used_everywhere(
+    controls_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_get_team(team_id: str) -> dict:
+        canonical = str(team_id or "").strip()
+        if not canonical:
+            raise team_service.TeamNotFoundError("Team not found.")
+        return {"teamId": canonical}
+
+    monkeypatch.setattr(dev_controls_service.team_service, "get_team", fake_get_team)
+    _ready_team(controls_root, monkeypatch)
+    response = dev_controls_service.run_challenge_cup_dev_batch(" team-1 ", "dev-1", None)
+    assert response["teamId"] == "team-1"
+    canonical_file = (
+        controls_root / "team-1" / "challenge_cup_dev_controls" / "batches" / "dev-1.json"
+    )
+    assert canonical_file.is_file()
+
+    snapshot = dev_controls_service.get_challenge_cup_dev_control_snapshot(" team-1 ")
+    assert snapshot["teamId"] == "team-1"
+    assert snapshot["batches"]["dev-1"]["succeededCount"] == 1
+
+
+def test_missing_authoritative_team_id_fails_closed(
+    controls_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(dev_controls_service.team_service, "get_team", lambda team_id: {})
+    with pytest.raises(
+        dev_controls_service.ChallengeCupDevControlsError,
+        match="authoritative teamId",
+    ):
+        dev_controls_service.get_challenge_cup_dev_control_snapshot("team-alias")
+
+
+def test_similar_team_ids_stay_isolated(controls_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_get_team(team_id: str) -> dict:
+        canonical = str(team_id or "").strip()
+        if canonical not in {"team-1", "team-1-alt"}:
+            raise team_service.TeamNotFoundError("Team not found.")
+        return {"teamId": canonical}
+
+    monkeypatch.setattr(dev_controls_service.team_service, "get_team", fake_get_team)
+    _ready_team(controls_root, monkeypatch)
+    dev_controls_service.run_challenge_cup_dev_batch("team-1", "dev-1", None)
+
+    with pytest.raises(dev_controls_service.DevFlowConflict, match="out of order"):
+        dev_controls_service.run_challenge_cup_dev_batch("team-1-alt", "dev-1", None)
+    assert not (
+        controls_root / "team-1-alt" / "challenge_cup_dev_controls" / "batches" / "dev-1.json"
+    ).exists()
+
+
+def test_dev_1_batch_without_readiness_conflicts_409(controls_root: Path) -> None:
+    response = _client().post(
+        f"{DEV_CONTROLS_BASE}/batches/dev-1",
+        json={"maxItems": None},
+    )
+    assert response.status_code == 409
+    assert "out of order" in response.json()["detail"]
+
+
+def test_dev_5_batch_before_dev_1_conflicts_409(
+    controls_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _ready_team(controls_root, monkeypatch, team_id="research-team")
+    response = _client().post(
+        f"{DEV_CONTROLS_BASE}/batches/dev-5",
+        json={"maxItems": None},
+    )
+    assert response.status_code == 409
+    assert "out of order" in response.json()["detail"]
+
+
+def test_dev_1_rerun_after_completion_conflicts_409(
+    controls_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _ready_team(controls_root, monkeypatch, team_id="research-team")
+    dev_controls_service.run_challenge_cup_dev_batch("research-team", "dev-1", None)
+    response = _client().post(
+        f"{DEV_CONTROLS_BASE}/batches/dev-1",
+        json={"maxItems": None},
+    )
+    assert response.status_code == 409
+
+
+def test_repair_retry_reruns_only_failed_items(
+    controls_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _ready_team(controls_root, monkeypatch)
+    dev_1 = new_dev_batch_state("dev-1")
+    run_dev_fixture_batch(dev_1)
+    _persist_batch_checkpoint(controls_root, "team-1", "dev-1", dev_1.to_checkpoint())
+
+    dev_5 = new_dev_batch_state("dev-5")
+    run_dev_fixture_batch(dev_5)
+    failed_id = dev_5.plan.question_ids[2]
+    dev_5.record_failure(failed_id, "fixture rejected")
+    _persist_batch_checkpoint(controls_root, "team-1", "dev-5", dev_5.to_checkpoint())
+
+    with pytest.raises(dev_controls_service.DevFlowConflict, match="out of order"):
+        dev_controls_service.run_challenge_cup_dev_batch("team-1", "dev-5", None)
+
+    response = dev_controls_service.run_challenge_cup_dev_batch(
+        "team-1", "dev-5", None, retry_failed=True
+    )
+    assert response["attempted"] == [failed_id]
+    assert response["checkpoint"]["failedCount"] == 0
+    assert response["checkpoint"]["blockedCount"] == 0
+    assert response["checkpoint"]["succeededCount"] == 5
+    assert response["checkpoint"]["totalAttempts"] == 6
+    snapshot = dev_controls_service.get_challenge_cup_dev_control_snapshot("team-1")
+    assert snapshot["nextLegalAction"] == "RESEARCH_AUTHORIZATION_REQUIRED"
+
+
+def test_retry_failed_true_on_healthy_plan_conflicts(
+    controls_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _ready_team(controls_root, monkeypatch)
+    with pytest.raises(dev_controls_service.DevFlowConflict, match="retryFailed"):
+        dev_controls_service.run_challenge_cup_dev_batch(
+            "team-1", "dev-1", None, retry_failed=True
+        )
+
+
+def test_corrupt_checkpoint_blocks_dispatch_and_snapshot(
+    controls_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _ready_team(controls_root, monkeypatch)
+    batch_dir = controls_root / "team-1" / "challenge_cup_dev_controls" / "batches"
+    batch_dir.mkdir(parents=True, exist_ok=True)
+    path = batch_dir / "dev-1.json"
+    path.write_text("{not json", encoding="utf-8")
+    with pytest.raises(dev_controls_service.DevControlsStorageError, match="corrupt JSON"):
+        dev_controls_service.run_challenge_cup_dev_batch("team-1", "dev-1", None)
+    assert path.read_text(encoding="utf-8") == "{not json"
+    with pytest.raises(dev_controls_service.DevControlsStorageError, match="corrupt JSON"):
+        dev_controls_service.get_challenge_cup_dev_control_snapshot("team-1")
+
+
+def test_wrong_plan_checkpoint_blocks_dispatch(
+    controls_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _ready_team(controls_root, monkeypatch)
+    dev_5 = new_dev_batch_state("dev-5")
+    _persist_batch_checkpoint(controls_root, "team-1", "dev-1", dev_5.to_checkpoint())
+    with pytest.raises(dev_controls_service.DevControlsStorageError, match="plan id mismatch"):
+        dev_controls_service.run_challenge_cup_dev_batch("team-1", "dev-1", None)
+
+
+def test_corrupt_readiness_report_blocks_flow(
+    controls_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    report_dir = controls_root / "research-team" / "challenge_cup_dev_controls"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    (report_dir / "readiness_report.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "realCampaignAllowed": False,
+                "report": {"schemaVersion": 1, "status": "READY"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(dev_controls_service.DevControlsStorageError, match="report kind"):
+        dev_controls_service.get_challenge_cup_dev_control_snapshot("research-team")
+    response = _client().get(DEV_CONTROLS_BASE)
+    assert response.status_code == 409
+    assert "report kind" in response.json()["detail"]
+
+
+@pytest.mark.parametrize("endpoint", ["snapshot", "readiness", "batch"])
+def test_storage_errors_map_to_409_for_all_routes(
+    controls_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    endpoint: str,
+) -> None:
+    def corrupt(*args, **kwargs):
+        raise dev_controls_service.DevControlsStorageError("stored DEV state is corrupt")
+
+    if endpoint == "snapshot":
+        monkeypatch.setattr(dev_controls_routes, "get_challenge_cup_dev_control_snapshot", corrupt)
+        response = _client().get(DEV_CONTROLS_BASE)
+    elif endpoint == "readiness":
+        monkeypatch.setattr(dev_controls_routes, "run_challenge_cup_dev_readiness", corrupt)
+        response = _client().post(f"{DEV_CONTROLS_BASE}/readiness", json={"mode": "dev"})
+    else:
+        monkeypatch.setattr(dev_controls_routes, "run_challenge_cup_dev_batch", corrupt)
+        response = _client().post(
+            f"{DEV_CONTROLS_BASE}/batches/dev-1",
+            json={"maxItems": None, "retryFailed": False},
+        )
+    assert response.status_code == 409
+    assert "stored DEV state is corrupt" in response.json()["detail"]
+
+
+@pytest.mark.parametrize("mutation", ["duplicate", "invalid_status", "inconsistent_ready"])
+def test_readiness_report_is_validated_before_persist(
+    controls_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    report = _ready_report()
+    if mutation == "duplicate":
+        report["gates"].append(dict(report["gates"][0]))
+        expected = "duplicated"
+    elif mutation == "invalid_status":
+        report["gates"][0]["status"] = "UNKNOWN"
+        expected = "invalid status"
+    else:
+        report["gates"][0]["status"] = "FAIL"
+        expected = "inconsistent"
+    writes: list[object] = []
+    monkeypatch.setattr(
+        dev_controls_service,
+        "_strict_json_write",
+        lambda *args, **kwargs: writes.append((args, kwargs)),
+    )
+    with pytest.raises(dev_controls_service.DevControlsStorageError, match=expected):
+        dev_controls_service._persist_report("team-1", report)
+    assert writes == []
+
+
+def test_strict_write_failure_keeps_old_file(controls_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = controls_root / "team-1" / "challenge_cup_dev_controls" / "batches" / "dev-1.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("OLD", encoding="utf-8")
+
+    def boom(source, dest):
+        raise OSError("replace boom")
+
+    monkeypatch.setattr(dev_controls_service, "_os_replace", boom)
+    with pytest.raises(dev_controls_service.DevControlsStorageError, match="write failed"):
+        dev_controls_service._strict_json_write(path, {"planId": "dev-1"})
+    assert path.read_text(encoding="utf-8") == "OLD"
+    assert not list(path.parent.glob(".*.tmp"))
+
+
+def test_batch_persist_failure_never_falls_back_to_inplace(
+    controls_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _ready_team(controls_root, monkeypatch)
+
+    def boom(source, dest):
+        raise OSError("replace boom")
+
+    monkeypatch.setattr(dev_controls_service, "_os_replace", boom)
+    with pytest.raises(dev_controls_service.DevControlsStorageError, match="write failed"):
+        dev_controls_service.run_challenge_cup_dev_batch("team-1", "dev-1", None)
+    batch_path = (
+        controls_root / "team-1" / "challenge_cup_dev_controls" / "batches" / "dev-1.json"
+    )
+    assert not batch_path.exists()
+    assert not list(batch_path.parent.glob(".*.tmp"))
+
+
+def test_out_of_order_batch_dispatches_nothing(
+    controls_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _ready_team(controls_root, monkeypatch)
+    calls: list[list] = []
+
+    def spy_run(state, *, max_items=None, on_item=None):
+        calls.append([state, max_items, on_item])
+        from core.research.competition.dev_control_batch import run_dev_fixture_batch as real_run
+
+        return real_run(state, max_items=max_items, on_item=on_item)
+
+    monkeypatch.setattr(dev_controls_service, "run_dev_fixture_batch", spy_run)
+    with pytest.raises(dev_controls_service.DevFlowConflict, match="out of order"):
+        dev_controls_service.run_challenge_cup_dev_batch("team-1", "dev-5", None)
+    assert calls == []

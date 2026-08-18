@@ -6,21 +6,29 @@ fixture ``CatalogExecutionState`` checkpoints. The state machines and fixture
 adapters live in ``core.research.competition``; this module never starts a real
 experiment, Qwen invocation, network collection, CUDA/GPU benchmark, DANDI
 download or formal submission.
+
+All storage is team-scoped by the authoritative team id resolved from the team
+service, never by the raw request value, so alias requests and similar team ids
+stay isolated. The flow order readiness -> dev-1 -> dev-5 is enforced inside the
+store lock and any out-of-order action raises ``DevFlowConflict`` (mapped to 409
+by the route layer) without dispatching anything.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from core.infrastructure.atomic_io import atomic_write_json
 from core.research.competition.catalog_execution import (
     CatalogExecutionError,
     CatalogExecutionState,
+    QuestionStatus,
+    dev_plan,
 )
 from core.research.competition.dev_control_batch import (
     ALLOWED_DEV_BATCH_PLAN_IDS,
@@ -37,7 +45,9 @@ from core.research.competition.dev_control_batch import (
 from core.research.competition.platform_flow_ready import (
     REPORT_KIND,
     build_platform_flow_readiness_report,
+    overall_status,
 )
+from core.research.competition.result_set import CatalogScope, ResultSetContractError
 from core.web.services import team_service
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 from core.web.services.team_workflow.research_projects import team_workspace_root
@@ -47,14 +57,48 @@ REPORT_FILENAME = "readiness_report.json"
 BATCH_DIRNAME = "batches"
 REPORT_ENVELOPE_SCHEMA_VERSION = 1
 BATCH_ENVELOPE_SCHEMA_VERSION = 1
+REPORT_SCHEMA_VERSION = 1
 SNAPSHOT_SCHEMA_VERSION = 1
 DEV_ONLY_MODE = "dev"
+REPORT_STATUSES = frozenset({"READY", "NOT_READY", "BLOCKED"})
+REQUIRED_READINESS_GATES: tuple[str, ...] = (
+    "program_hash",
+    "r0_source_integrity",
+    "r1_clean_clone",
+    "adapters_dev_isolated",
+    "catalog_batch_resume",
+    "control_flow_contracts",
+    "model_receipt",
+    "multimodal",
+    "product_projection",
+)
+_RUN_ACTIONS = {
+    "dev-1": ("run_dev_1_fixture_batch",),
+    "dev-5": ("run_dev_5_fixture_batch", "resume_dev_5_fixture_batch"),
+}
+_REPAIR_ACTIONS = {
+    "dev-1": "repair_dev_1_fixture_batch",
+    "dev-5": "repair_dev_5_fixture_batch",
+}
 
 _STORE_LOCK = threading.RLock()
+
+_os_replace = os.replace
+_os_fsync = os.fsync
+_os_fdopen = os.fdopen
+_mkstemp = tempfile.mkstemp
 
 
 class ChallengeCupDevControlsError(ValueError):
     """A Challenge Cup DEV control request is invalid or fail-closed."""
+
+
+class DevControlsStorageError(RuntimeError):
+    """Persisted DEV control storage is corrupt or otherwise unusable."""
+
+
+class DevFlowConflict(RuntimeError):
+    """A Challenge Cup DEV control action violated the required flow order."""
 
 
 def _utc_now() -> str:
@@ -73,29 +117,174 @@ def _batch_path(team_id: str, plan_id: str) -> Path:
     return _controls_root(team_id) / BATCH_DIRNAME / f"{plan_id}.json"
 
 
-def _read_json(path: Path) -> dict[str, Any]:
+def _strict_json_write(path: Path, payload: dict[str, Any]) -> None:
+    """Atomically persist a JSON envelope with domain-strict durability.
+
+    Writes via temp-file + flush + fsync + ``os.replace`` with no in-place
+    fallback: any failure keeps the previous file untouched and propagates to
+    the caller. The shared atomic-write helper with its in-place fallback is
+    deliberately not used here because that fallback can overwrite state
+    mid-race.
+    """
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    encoded = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    fd = -1
+    temp_name = ""
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return value if isinstance(value, dict) else {}
+        fd, temp_name = _mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=str(target.parent))
+        with _os_fdopen(fd, "w", encoding="utf-8") as handle:
+            fd = -1
+            handle.write(encoded)
+            handle.flush()
+            _os_fsync(handle.fileno())
+        _os_replace(temp_name, target)
+    except Exception as exc:
+        if fd >= 0:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        if temp_name:
+            try:
+                Path(temp_name).unlink(missing_ok=True)
+            except OSError:
+                pass
+        raise DevControlsStorageError(
+            f"DEV control store write failed: {target.name}."
+        ) from exc
+
+
+def _read_strict_json(path: Path) -> dict[str, Any]:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise DevControlsStorageError(f"DEV control store is unreadable: {path.name}.") from exc
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise DevControlsStorageError(f"DEV control store is corrupt JSON: {path.name}.") from exc
+    if not isinstance(value, dict):
+        raise DevControlsStorageError(f"DEV control store root is not an object: {path.name}.")
+    return value
+
+
+def _validate_report_envelope(envelope: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(envelope, dict):
+        raise DevControlsStorageError("Readiness store root is not an object.")
+    if str(envelope.get("schemaVersion") or "") != str(REPORT_ENVELOPE_SCHEMA_VERSION):
+        raise DevControlsStorageError("Readiness envelope schema version mismatch.")
+    if envelope.get("realCampaignAllowed") is not False:
+        raise DevControlsStorageError("Readiness envelope must never allow a real campaign.")
+    report = envelope.get("report")
+    if not isinstance(report, dict):
+        raise DevControlsStorageError("Readiness store has no report object.")
+    if str(report.get("schemaVersion") or "") != str(REPORT_SCHEMA_VERSION):
+        raise DevControlsStorageError("Readiness report schema version mismatch.")
+    if str(report.get("reportKind") or "") != REPORT_KIND:
+        raise DevControlsStorageError("Readiness report kind mismatch.")
+    if str(report.get("mode") or "").strip().lower() != DEV_ONLY_MODE:
+        raise DevControlsStorageError("Readiness report is not DEV-only.")
+    if report.get("realCampaignAllowed") is not False:
+        raise DevControlsStorageError("Readiness report must never allow a real campaign.")
+    if report.get("researchAuthorizationRequired") is not True:
+        raise DevControlsStorageError("Readiness report must require research authorization.")
+    status = str(report.get("status") or "")
+    if status not in REPORT_STATUSES:
+        raise DevControlsStorageError(f"Readiness report has an unknown status: {status!r}.")
+    gates = report.get("gates")
+    if not isinstance(gates, list):
+        raise DevControlsStorageError("Readiness report gates must be an array.")
+    gate_ids: set[str] = set()
+    for gate in gates:
+        if not isinstance(gate, dict) or not str(gate.get("gateId") or ""):
+            raise DevControlsStorageError("Readiness report gate is malformed.")
+        gate_id = str(gate["gateId"])
+        if gate_id in gate_ids:
+            raise DevControlsStorageError(f"Readiness report gate is duplicated: {gate_id}.")
+        if str(gate.get("status") or "") not in {"PASS", "FAIL", "BLOCKED"}:
+            raise DevControlsStorageError(
+                f"Readiness report gate has an invalid status: {gate_id}."
+            )
+        gate_ids.add(gate_id)
+    missing = [gate_id for gate_id in REQUIRED_READINESS_GATES if gate_id not in gate_ids]
+    if missing:
+        raise DevControlsStorageError(f"Readiness report is missing required gates: {missing}.")
+    expected_status = overall_status(gates)
+    if status != expected_status:
+        raise DevControlsStorageError(
+            f"Readiness report status is inconsistent with its gates: {status} != {expected_status}."
+        )
+    return report
+
+
+def _validate_batch_checkpoint(checkpoint: dict[str, Any], plan_id: str) -> None:
+    expected_plan = dev_plan(plan_id)
+    plan = checkpoint.get("plan")
+    if not isinstance(plan, dict):
+        raise DevControlsStorageError("Batch checkpoint plan is missing.")
+    if str(plan.get("plan_id") or "") != plan_id:
+        raise DevControlsStorageError("Batch checkpoint plan id mismatch.")
+    if str(plan.get("gate_id") or "") != expected_plan.gate_id:
+        raise DevControlsStorageError("Batch checkpoint gate id mismatch.")
+    question_ids = plan.get("question_ids")
+    if not isinstance(question_ids, list):
+        raise DevControlsStorageError("Batch checkpoint question ids are missing.")
+    if [str(item) for item in question_ids] != list(expected_plan.question_ids):
+        raise DevControlsStorageError("Batch checkpoint question ids mismatch the DEV plan.")
+    scope = checkpoint.get("scope")
+    if not isinstance(scope, dict):
+        raise DevControlsStorageError("Batch checkpoint scope is missing.")
+    try:
+        restored_scope = CatalogScope.from_dict(scope)
+    except (ResultSetContractError, KeyError, TypeError, ValueError) as exc:
+        raise DevControlsStorageError("Batch checkpoint scope is invalid.") from exc
+    expected_scope = CatalogScope.from_tracked_resources()
+    if restored_scope != expected_scope:
+        raise DevControlsStorageError("Batch checkpoint scope is not the DEV catalog scope.")
+    records = checkpoint.get("records")
+    if not isinstance(records, list):
+        raise DevControlsStorageError("Batch checkpoint records are missing.")
+    if len(records) != expected_plan.question_count:
+        raise DevControlsStorageError("Batch checkpoint records are incomplete.")
+    seen: set[str] = set()
+    for raw in records:
+        if not isinstance(raw, dict):
+            raise DevControlsStorageError("Batch checkpoint record is malformed.")
+        question_id = str(raw.get("question_id") or "")
+        if question_id not in expected_plan.question_ids:
+            raise DevControlsStorageError(
+                f"Batch checkpoint record is not part of the plan: {question_id}."
+            )
+        if question_id in seen:
+            raise DevControlsStorageError(f"Batch checkpoint record is duplicated: {question_id}.")
+        seen.add(question_id)
 
 
 def _load_batch_checkpoint(team_id: str, plan_id: str) -> tuple[bool, dict[str, Any], str]:
-    payload = _read_json(_batch_path(team_id, plan_id))
+    path = _batch_path(team_id, plan_id)
+    if not path.exists():
+        return False, {}, ""
+    payload = _read_strict_json(path)
+    if str(payload.get("schemaVersion") or "") != str(BATCH_ENVELOPE_SCHEMA_VERSION):
+        raise DevControlsStorageError(f"Batch envelope schema version mismatch: {plan_id}.")
+    if str(payload.get("planId") or "") != plan_id:
+        raise DevControlsStorageError(f"Batch envelope plan id mismatch: {plan_id}.")
     checkpoint = payload.get("checkpoint")
     if not isinstance(checkpoint, dict):
-        return False, {}, ""
+        raise DevControlsStorageError(f"Batch checkpoint is missing: {plan_id}.")
+    _validate_batch_checkpoint(checkpoint, plan_id)
     return True, checkpoint, str(payload.get("updatedAt") or "")
 
 
 def _project_report(team_id: str) -> dict[str, Any] | None:
-    payload = _read_json(_report_path(team_id))
-    report = payload.get("report")
-    if not isinstance(report, dict):
+    path = _report_path(team_id)
+    if not path.exists():
         return None
+    payload = _read_strict_json(path)
+    report = _validate_report_envelope(payload)
     return {
-        "schemaVersion": 1,
+        "schemaVersion": REPORT_SCHEMA_VERSION,
         "reportKind": str(report.get("reportKind") or REPORT_KIND),
         "status": str(report.get("status") or ""),
         "mode": str(report.get("mode") or DEV_ONLY_MODE),
@@ -114,13 +303,19 @@ def _project_batch(team_id: str, plan_id: str) -> dict[str, Any] | None:
         return None
     try:
         return project_dev_batch_checkpoint(checkpoint, updated_at=updated_at)
-    except (CatalogExecutionError, ValueError):
-        return None
+    except (CatalogExecutionError, ValueError) as exc:
+        raise DevControlsStorageError(
+            f"Batch checkpoint is not projectable: {plan_id}."
+        ) from exc
 
 
-def _require_team(team_id: str) -> None:
-    """Assert the team exists before any read or write on its controls."""
-    team_service.get_team(team_id)
+def _require_team(team_id: str) -> str:
+    """Resolve the authoritative team id; the team must exist before any read/write."""
+    detail = team_service.get_team(team_id)
+    authoritative_team_id = str(detail.get("teamId") or "").strip()
+    if not authoritative_team_id:
+        raise ChallengeCupDevControlsError("Team detail has no authoritative teamId.")
+    return authoritative_team_id
 
 
 def _record_scene_event(
@@ -196,18 +391,19 @@ def get_challenge_cup_dev_control_snapshot(team_id: str) -> dict[str, Any]:
 
     Derived purely from the persisted serialized ``CatalogExecutionState``
     checkpoints and the latest persisted readiness report; it never invents a
-    parallel lifecycle. The team must exist before any read.
+    parallel lifecycle. The team must exist before any read, and its
+    authoritative id is used for every storage path.
     """
-    _require_team(team_id)
-    report = _project_report(team_id)
+    authoritative_team_id = _require_team(team_id)
+    report = _project_report(authoritative_team_id)
     batches: dict[str, Any] = {}
     for plan_id in ALLOWED_DEV_BATCH_PLAN_IDS:
-        projection = _project_batch(team_id, plan_id)
+        projection = _project_batch(authoritative_team_id, plan_id)
         if projection is not None:
             batches[plan_id] = projection
     return {
         "schemaVersion": SNAPSHOT_SCHEMA_VERSION,
-        "teamId": str(team_id or ""),
+        "teamId": authoritative_team_id,
         "generatedAt": _utc_now(),
         "mode": DEV_ONLY_MODE,
         "realCampaignAllowed": False,
@@ -229,8 +425,9 @@ def _persist_report(team_id: str, report: dict[str, Any]) -> dict[str, Any]:
         "realCampaignAllowed": False,
         "updatedAt": _utc_now(),
     }
+    _validate_report_envelope(envelope)
     with _STORE_LOCK:
-        atomic_write_json(_report_path(team_id), envelope, sort_keys=True)
+        _strict_json_write(_report_path(team_id), envelope)
     return envelope
 
 
@@ -241,24 +438,28 @@ def run_challenge_cup_dev_readiness(team_id: str, *, mode: str = DEV_ONLY_MODE) 
     always cleaned up, even when the report build fails. A dirty working tree is
     never READY: ``require_clean`` is always True and ``run_pytest`` is always
     True under ``build_platform_flow_readiness_report``, and
-    ``realCampaignAllowed`` can never become true.
+    ``realCampaignAllowed`` can never become true. Repairing failed platform
+    gates is always performed by re-running readiness.
     """
+    authoritative_team_id = _require_team(team_id)
     if str(mode or "").strip().lower() != DEV_ONLY_MODE:
         _record_scene_event(
             "challenge_cup_dev_controls.readiness.rejected",
             message="Challenge Cup readiness rejected a non-dev mode.",
             outcome="blocked",
-            fields={"teamId": team_id, "errorType": "ChallengeCupDevControlsError"},
+            fields={
+                "teamId": authoritative_team_id,
+                "errorType": "ChallengeCupDevControlsError",
+            },
         )
         raise ChallengeCupDevControlsError(
             "Challenge Cup readiness is DEV-only; formal modes are not authorized."
         )
-    _require_team(team_id)
     _record_scene_event(
         "challenge_cup_dev_controls.readiness.started",
         message="Challenge Cup DEV readiness build started.",
         outcome="started",
-        fields={"teamId": team_id, "mode": DEV_ONLY_MODE},
+        fields={"teamId": authoritative_team_id, "mode": DEV_ONLY_MODE},
     )
     from core.infrastructure.path_containment import PROJECT_ROOT
 
@@ -277,45 +478,88 @@ def run_challenge_cup_dev_readiness(team_id: str, *, mode: str = DEV_ONLY_MODE) 
             message="Challenge Cup DEV readiness build failed.",
             outcome="failed",
             fields={
-                "teamId": team_id,
+                "teamId": authoritative_team_id,
                 "errorType": type(exc).__name__,
                 "errorDetail": str(exc)[:320],
             },
         )
         raise
-    envelope = _persist_report(team_id, report)
+    envelope = _persist_report(authoritative_team_id, report)
     _record_scene_event(
         "challenge_cup_dev_controls.readiness.succeeded",
         message="Challenge Cup DEV readiness report was persisted.",
         outcome="succeeded",
         fields={
-            "teamId": team_id,
+            "teamId": authoritative_team_id,
             "status": str(report.get("status") or ""),
             "nextLegalAction": str(report.get("nextLegalAction") or ""),
         },
     )
     return {
         "schemaVersion": SNAPSHOT_SCHEMA_VERSION,
-        "teamId": str(team_id or ""),
-        "report": _project_report(team_id),
+        "teamId": authoritative_team_id,
+        "report": _project_report(authoritative_team_id),
         "cleanedUp": True,
         "updatedAt": str(envelope.get("updatedAt") or ""),
     }
+
+
+def _next_legal_action(team_id: str) -> str:
+    report = _project_report(team_id)
+    batches: dict[str, Any] = {}
+    for plan_id in ALLOWED_DEV_BATCH_PLAN_IDS:
+        projection = _project_batch(team_id, plan_id)
+        if projection is not None:
+            batches[plan_id] = projection
+    return _snapshot_next_legal_action(report, batches)
+
+
+def _enforce_batch_flow(plan_id: str, *, next_action: str, retry_failed: bool) -> None:
+    if retry_failed:
+        repair_action = _REPAIR_ACTIONS[plan_id]
+        if next_action != repair_action:
+            raise DevFlowConflict(
+                f"DEV flow conflict: {plan_id} repair requires retryFailed=true and "
+                f"{repair_action}, but the next legal action is {next_action}."
+            )
+        return
+    allowed = _RUN_ACTIONS[plan_id]
+    if next_action not in allowed:
+        raise DevFlowConflict(
+            f"DEV flow conflict: {plan_id} is out of order; the next legal action "
+            f"is {next_action}."
+        )
+
+
+def _invalidate_failed_blocked(state: CatalogExecutionState) -> list[str]:
+    invalidated: list[str] = []
+    for question_id in state.plan.question_ids:
+        if state.status(question_id) in (QuestionStatus.FAILED, QuestionStatus.BLOCKED):
+            state.invalidate(question_id, "repair retry requested")
+            invalidated.append(question_id)
+    return invalidated
 
 
 def run_challenge_cup_dev_batch(
     team_id: str,
     plan_id: str,
     max_items: int | None,
+    *,
+    retry_failed: bool = False,
 ) -> dict[str, Any]:
-    """Execute/resume only dev-1 or dev-5 fixture batches and persist checkpoints.
+    """Execute/resume/repair only dev-1 or dev-5 fixture batches and persist checkpoints.
 
-    The checkpoint is persisted after every completed/failed item, so a dev-5
-    interruption can always be resumed without re-running succeeded items.
-    dev-12/dev-125 and formal/real scopes are rejected fail-closed. The team
-    must exist before any read or write.
+    The flow order readiness -> dev-1 -> dev-5 is enforced inside the store
+    lock; an out-of-order request raises ``DevFlowConflict`` and dispatches
+    nothing. The checkpoint is persisted after every completed/failed item, so a
+    dev-5 interruption can always be resumed without re-running succeeded items.
+    ``retry_failed=True`` is only legal when the next legal action is this plan's
+    repair action, and it invalidates only this plan's failed/blocked items;
+    succeeded items are never re-run. dev-12/dev-125 and formal/real scopes are
+    rejected fail-closed. The team must exist before any read or write and its
+    authoritative id is used for every storage path and response field.
     """
-    _require_team(team_id)
+    authoritative_team_id = _require_team(team_id)
     try:
         normalized_plan = validate_dev_batch_plan(plan_id)
         bounded = validate_dev_batch_max_items(max_items)
@@ -325,52 +569,77 @@ def run_challenge_cup_dev_batch(
             message="Challenge Cup DEV fixture batch was rejected.",
             outcome="blocked",
             fields={
-                "teamId": team_id,
+                "teamId": authoritative_team_id,
                 "planId": str(plan_id or "")[:80],
                 "errorType": type(exc).__name__,
                 "errorDetail": str(exc)[:320],
             },
         )
         raise
-    _record_scene_event(
-        "challenge_cup_dev_controls.batch.started",
-        message="Challenge Cup DEV fixture batch started.",
-        outcome="started",
-        fields={
-            "teamId": team_id,
-            "planId": normalized_plan,
-            "maxItems": bounded,
-        },
-    )
     try:
         with _STORE_LOCK:
-            present, checkpoint, _ = _load_batch_checkpoint(team_id, normalized_plan)
+            _enforce_batch_flow(
+                normalized_plan,
+                next_action=_next_legal_action(authoritative_team_id),
+                retry_failed=retry_failed,
+            )
+            _record_scene_event(
+                "challenge_cup_dev_controls.batch.started",
+                message="Challenge Cup DEV fixture batch started.",
+                outcome="started",
+                fields={
+                    "teamId": authoritative_team_id,
+                    "planId": normalized_plan,
+                    "maxItems": bounded,
+                    "retryFailed": retry_failed,
+                },
+            )
+            present, checkpoint, _ = _load_batch_checkpoint(
+                authoritative_team_id, normalized_plan
+            )
             state = (
                 CatalogExecutionState.from_checkpoint(checkpoint)
                 if present
                 else new_dev_batch_state(normalized_plan)
             )
+            if retry_failed:
+                _invalidate_failed_blocked(state)
 
-            def persist(_item: dict[str, Any]) -> None:
+            def persist(_item: dict[str, Any] | None) -> None:
                 envelope = {
                     "schemaVersion": BATCH_ENVELOPE_SCHEMA_VERSION,
                     "planId": normalized_plan,
                     "updatedAt": _utc_now(),
                     "checkpoint": state.to_checkpoint(),
                 }
-                atomic_write_json(_batch_path(team_id, normalized_plan), envelope, sort_keys=True)
+                _strict_json_write(
+                    _batch_path(authoritative_team_id, normalized_plan), envelope
+                )
 
             result = run_dev_fixture_batch(state, max_items=bounded, on_item=persist)
             persisted_at = _utc_now()
             persist(None)
             projection = project_dev_batch_state(state, updated_at=persisted_at)
+    except DevFlowConflict as exc:
+        _record_scene_event(
+            "challenge_cup_dev_controls.batch.conflict",
+            message="Challenge Cup DEV fixture batch conflicted with the flow order.",
+            outcome="blocked",
+            fields={
+                "teamId": authoritative_team_id,
+                "planId": normalized_plan,
+                "errorType": "DevFlowConflict",
+                "errorDetail": str(exc)[:320],
+            },
+        )
+        raise
     except Exception as exc:
         _record_scene_event(
             "challenge_cup_dev_controls.batch.failed",
             message="Challenge Cup DEV fixture batch failed.",
             outcome="failed",
             fields={
-                "teamId": team_id,
+                "teamId": authoritative_team_id,
                 "planId": normalized_plan,
                 "errorType": type(exc).__name__,
                 "errorDetail": str(exc)[:320],
@@ -382,7 +651,7 @@ def run_challenge_cup_dev_batch(
         message="Challenge Cup DEV fixture batch completed and was persisted.",
         outcome="succeeded",
         fields={
-            "teamId": team_id,
+            "teamId": authoritative_team_id,
             "planId": normalized_plan,
             "attemptedCount": len(result["attempted"]),
             "succeededCount": projection["succeededCount"],
@@ -392,7 +661,7 @@ def run_challenge_cup_dev_batch(
     )
     return {
         "schemaVersion": SNAPSHOT_SCHEMA_VERSION,
-        "teamId": str(team_id or ""),
+        "teamId": authoritative_team_id,
         "planId": normalized_plan,
         "gateId": projection["gateId"],
         "attempted": result["attempted"],

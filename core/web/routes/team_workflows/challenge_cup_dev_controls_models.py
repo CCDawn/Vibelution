@@ -8,6 +8,8 @@ lifecycle.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from core.research.competition.dev_control_batch import MAX_DEV_BATCH_MAX_ITEMS
@@ -90,12 +92,13 @@ class ChallengeCupDevReadinessRunResponse(BaseModel):
     schemaVersion: int = 1
     teamId: str = ""
     report: ChallengeCupDevReadinessProjectionResponse
-    cleanedUp: bool = True
+    cleanedUp: Literal[True]
     updatedAt: str = ""
 
 
 class ChallengeCupDevBatchRunRequest(BaseModel):
     maxItems: int | None = Field(None, ge=0, le=MAX_DEV_BATCH_MAX_ITEMS)
+    retryFailed: bool = False
 
 
 class ChallengeCupDevBatchOutcomeResponse(BaseModel):
@@ -112,4 +115,4 @@ class ChallengeCupDevBatchRunResponse(BaseModel):
     outcomes: list[ChallengeCupDevBatchOutcomeResponse] = Field(default_factory=list)
     checkpoint: ChallengeCupDevBatchProjectionResponse
     persistedAt: str = ""
-    persisted: bool = True
+    persisted: Literal[True]
