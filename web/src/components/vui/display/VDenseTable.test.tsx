@@ -61,7 +61,8 @@ describe("VDenseTable", () => {
     expect(html).toContain("display:grid");
     expect(html).toContain("grid-template-columns:minmax(0, 1fr) 80px 170px");
     expect(html).toContain("contain:inline-size");
-    expect(html).toContain("width:100%;max-width:100%;min-width:0");
+    expect(html).toContain("var(--vui-window-width, 100%)");
+    expect(html).toContain("min-width:0");
     expect(html).not.toContain("max-width:470px");
     expect(html).toContain('data-vui-fill="true"');
     expect(html).not.toContain("Resize path");
@@ -95,8 +96,8 @@ describe("VDenseTable", () => {
       contain: "inline-size",
       display: "grid",
       gridTemplateColumns: "minmax(0, 1fr) 170px",
-      width: "100%",
-      maxWidth: "100%",
+      width: "var(--vui-window-width, 100%)",
+      maxWidth: "var(--vui-window-width, 100%)",
       minWidth: "0px",
     });
   });

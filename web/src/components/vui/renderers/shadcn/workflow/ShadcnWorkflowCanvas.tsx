@@ -388,7 +388,7 @@ function WorkflowCanvasInner({
                 if (status === "failed" || status === "blocked") return "var(--state-error)";
                 if (status === "waiting_human") return "var(--state-warning)";
                 if (status === "running" || status === "ready") return "var(--accent-cool)";
-                if (status === "succeeded") return "var(--fg-tertiary)";
+                if (status === "succeeded") return "var(--state-success)";
                 return "var(--vui-border-strong)";
               }}
               nodeStrokeWidth={2}

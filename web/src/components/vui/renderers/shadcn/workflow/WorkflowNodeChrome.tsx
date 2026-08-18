@@ -124,15 +124,6 @@ function KindGlyph({ kind }: { kind: WorkflowNodeVisualKind }) {
   return null;
 }
 
-const NODE_CATEGORY_LABEL: Record<WorkflowNodeVisualKind, string> = {
-  agent_task: "Agent 任务",
-  human_gate: "人工门禁",
-  system_task: "系统执行",
-  decision: "决策门禁",
-  start: "流程起点",
-  end: "结果发布",
-};
-
 const ROLE_LABELS: Record<string, string> = {
   source_finder: "资料搜集",
   source_extractor: "证据提炼",
@@ -214,11 +205,6 @@ export function WorkflowNodeChrome({
           : visualKind === "system_task"
             ? "系统执行"
             : "待运行";
-  const accentClass = status === "failed" || status === "blocked"
-    ? "bg-[var(--state-error)]"
-    : visualKind === "human_gate" || status === "waiting_human"
-      ? "bg-[var(--state-warning)]"
-      : "bg-[var(--accent-cool)]";
 
   return (
     <div
@@ -248,7 +234,7 @@ export function WorkflowNodeChrome({
     >
       {spacious ? (
         <span
-          className={cn("pointer-events-none absolute inset-x-3 top-0 h-0.5 rounded-b", accentClass)}
+          className={cn("pointer-events-none absolute inset-x-3 top-0 h-[3px] rounded-b", visual.accentBarClass)}
           aria-hidden
         />
       ) : null}
@@ -276,7 +262,7 @@ export function WorkflowNodeChrome({
         )
       ) : null}
 
-      <div className={cn("flex min-w-0 items-start justify-between", spacious ? "gap-2" : "gap-1.5")}>
+      <div className={cn("flex min-w-0 justify-between", spacious ? "items-center gap-2" : "items-start gap-1.5")}>
         <div className={cn("flex min-w-0 items-center", spacious ? "gap-2.5" : "gap-1.5")}>
           {spacious ? (
             <span className="grid size-[30px] shrink-0 place-items-center rounded-lg bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-row))] text-[var(--accent-cool)]">
@@ -285,18 +271,11 @@ export function WorkflowNodeChrome({
           ) : (
             <KindGlyph kind={visualKind} />
           )}
-          <div className="min-w-0">
-            {spacious ? (
-              <div className="truncate text-[8px] font-semibold tracking-[0.03em] text-[var(--fg-tertiary)]">
-                {NODE_CATEGORY_LABEL[visualKind]}
-              </div>
-            ) : null}
-            <div className={cn(
-              "min-w-0 font-semibold text-[var(--fg-primary)]",
-              spacious ? "truncate text-[13px] leading-[1.2]" : "truncate text-[13px] leading-tight",
-            )}>
-              {label}
-            </div>
+          <div className={cn(
+            "min-w-0 font-semibold text-[var(--fg-primary)]",
+            spacious ? "truncate text-[13px] leading-[1.2]" : "truncate text-[13px] leading-tight",
+          )}>
+            {label}
           </div>
         </div>
         {spacious ? (
@@ -313,10 +292,18 @@ export function WorkflowNodeChrome({
 
       {spacious ? (
         <>
-          <div className={cn("mt-2 flex min-w-0 items-center gap-1 text-[9px] font-medium leading-none", visual.textClass)}>
-            <StatusIcon icon={visual.icon} />
-            <span className="truncate">{visual.statusLabel}</span>
-            <span className="truncate text-[var(--fg-tertiary)]">· {compactMeta}</span>
+          <div className="mt-2 flex min-w-0 items-center gap-1.5 leading-none">
+            <span
+              className={cn(
+                "inline-flex h-5 shrink-0 items-center gap-1 rounded-md border px-1.5 text-[10px] font-semibold",
+                visual.badgeClass,
+              )}
+              data-status-badge={status}
+            >
+              <StatusIcon icon={visual.icon} />
+              {visual.statusLabel}
+            </span>
+            <span className="truncate text-[9px] font-medium text-[var(--fg-tertiary)]">{compactMeta}</span>
           </div>
           <div className="mt-auto grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-2 border-t border-[var(--vui-border-subtle)] pt-1.5 text-[8.5px] leading-none text-[var(--fg-tertiary)]">
             <span className="truncate font-medium text-[var(--fg-secondary)]">{roleLabel(primaryRoleKey)}</span>

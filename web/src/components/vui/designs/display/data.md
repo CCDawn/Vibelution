@@ -25,7 +25,7 @@ import { VDenseTable } from "@/components/vui";
 | --- | --- | --- |
 | columns / rows | 列定义与数据 | 空表用 EmptyState 槽 |
 | columns[].width / minWidth | 默认列宽与拖拽下限 | 表头与单元格共用同一列宽 |
-| columns[].fill | 弹性列标记 | 可缩放表用 `role="table"` 的 CSS Grid + 行级 `subgrid`，避免在 `<table>`/`<tr>` 上使用 `display:contents`（Chromium 会丢掉后列）。fill 列 `minmax(0, 1fr)`，非 fill 列像素 track。表宽 `100%` + `contain:inline-size` + `min-width:0`，让 1fr 相对**已定宽**的祖先收缩。不要用 `innerWidth`/`100vw` 写死像素：溢出文档会把布局视口撑大，写成像素等于把溢出锁死。启动器页要把 `html`/`body`/`#root` 和 route body 设成 `overflow-x: clip` 且 `min-w-0`，操作列不要 `overflow:visible`/`min-width:auto`。不要给 fill 设 `width:100%` |
+| columns[].fill | 弹性列标记 | 可缩放表用 `role="table"` 的 CSS Grid + 行级 `subgrid`，避免在 `<table>`/`<tr>` 上使用 `display:contents`（Chromium 会丢掉后列）。fill 列 `minmax(0, 1fr)`，非 fill 列像素 track。表宽 `var(--vui-window-width, 100%)` + `contain:inline-size` + `min-width:0`。`--vui-window-width` 由 `web/index.html` 在 React 挂载前写成当时的 `documentElement.clientWidth`，避免表格把布局视口撑开后再用 `%`/`innerWidth` 回写。启动器 route body 用 `overflow-x: clip`；操作列不要 `overflow:visible`/`min-width:auto`。不要给 fill 设 `width:100%` |
 | resizable | 拖拽调整列宽 | 拖非 fill 列只改该列像素 track。fill 列不提供拖拽，避免和 `1fr` 抢宽。壳 `overflow-x-auto`，窄于 `min-width` 时横向滚动。操作列不要 `sticky`：祖先 `overflow-x-hidden` 会把粘滞列裁成 0 |
 | onRowClick / getRowState | 行选择与色条 | 运维表可选 |
 
