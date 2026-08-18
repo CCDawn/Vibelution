@@ -60,6 +60,38 @@ $startArgs = @(
     "--action",
     "launcher"
 )
+
+function Repair-DesktopLauncherShortcut {
+    $desktopDir = [Environment]::GetFolderPath("Desktop")
+    if (-not $desktopDir) {
+        return
+    }
+    $shortcutPath = Join-Path $desktopDir "Vibelution Launcher.lnk"
+    $powershellExe = Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\powershell.exe"
+    $wrapperScript = $PSCommandPath
+    if (-not $wrapperScript) {
+        $wrapperScript = $MyInvocation.MyCommand.Path
+    }
+    $shortcutArguments = ('-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}" -ProjectDir "{1}"' -f $wrapperScript, $ProjectDir)
+    try {
+        $shell = New-Object -ComObject WScript.Shell
+        $shortcut = $shell.CreateShortcut($shortcutPath)
+        $shortcut.TargetPath = $powershellExe
+        $shortcut.Arguments = $shortcutArguments
+        $shortcut.WorkingDirectory = $ProjectDir
+        if (Test-Path -LiteralPath $iconPath) {
+            $shortcut.IconLocation = ('{0},0' -f $iconPath)
+        }
+        $shortcut.Description = "Vibelution Launcher"
+        $shortcut.WindowStyle = 7
+        $shortcut.Save()
+    } catch {
+        # Desktop shortcut repair must not block launching.
+    }
+}
+
+Repair-DesktopLauncherShortcut
+
 Start-Process `
     -FilePath $entryExe `
     -ArgumentList $startArgs `

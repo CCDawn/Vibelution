@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { IpcMainInvokeEvent } from "electron";
 import { IPC_CHANNELS } from "../src/ipc.js";
-import { assertLocalHttpUrl } from "../src/security/urlPolicy.js";
+import { assertLocalHttpUrl, isLiveWorkbenchWindowUrl } from "../src/security/urlPolicy.js";
 import { assertTrustedIpcSender } from "../src/security/ipcSenderValidation.js";
 import { resolveLauncherWindowUrl, resolveWorkbenchUrl } from "../src/windows/windowUrlResolver.js";
 import {
@@ -677,6 +677,43 @@ describe("Electron window provider state", () => {
     expect(state.windowId).toBe(42);
     expect(isolated.isDestroyed()).toBe(false);
     expect(provider.snapshot().workbench.windowId).toBe(42);
+  });
+
+  it("treats a leftover workbench on a different loopback port as the live current window", async () => {
+    const leftover = new FakeWindow(42, "http://127.0.0.1:8002/chat", 4242);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000/", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: () => new FakeWindow(99, "http://127.0.0.1:8000/", 9999),
+      listWorkbenchWindows: (origin) =>
+        [leftover].filter((window) => !window.isDestroyed() && isLiveWorkbenchWindowUrl(window.webContents.getURL(), origin))
+    });
+
+    await provider.openLauncher();
+    expect(provider.snapshot().workbench).toMatchObject({
+      open: true,
+      windowId: 42,
+      url: "http://127.0.0.1:8002/chat"
+    });
+  });
+
+  it("keeps an owned workbench window when live listing later returns empty", async () => {
+    const leftover = new FakeWindow(42, "http://127.0.0.1:8002/chat", 4242);
+    let live: FakeWindow[] = [leftover];
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8000/", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: () => new FakeWindow(99, "http://127.0.0.1:8000/", 9999),
+      listWorkbenchWindows: (origin) =>
+        live.filter((window) => !window.isDestroyed() && isLiveWorkbenchWindowUrl(window.webContents.getURL(), origin))
+    });
+
+    await provider.openLauncher();
+    expect(provider.snapshot().workbench.windowId).toBe(42);
+    live = [];
+    expect(provider.snapshot().workbench).toMatchObject({
+      open: true,
+      windowId: 42,
+      url: "http://127.0.0.1:8002/chat"
+    });
   });
 
   it("closes only Workbench while Launcher remains available", async () => {

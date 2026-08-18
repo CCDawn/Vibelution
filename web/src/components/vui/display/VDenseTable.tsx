@@ -3,7 +3,7 @@ import { type KeyboardEvent, type PointerEvent, type ReactNode, useMemo, useStat
 export type VDenseTableColumn<TRow> = {
   align?: "left" | "center" | "right";
   className?: string;
-  /** Absorb leftover width when the resizable table stretches to the container. */
+  /** Preferred grow column. Grid-rendered resizable tables pin every column to its pixel width. */
   fill?: boolean;
   header: ReactNode;
   id: string;
@@ -73,6 +73,10 @@ export function VDenseTable<TRow>({
     [columnWidths, columns],
   );
   const fillColumnId = useMemo(() => resolveDenseTableFillColumnId(columns), [columns]);
+  const gridTemplateColumns = useMemo(
+    () => columns.map((column) => `${columnWidths[column.id] ?? DEFAULT_COLUMN_WIDTH}px`).join(" "),
+    [columnWidths, columns],
+  );
 
   const startResize = (column: VDenseTableColumn<TRow>, event: PointerEvent<HTMLSpanElement>) => {
     if (!canResizeColumn(column, resizable)) {
@@ -109,34 +113,38 @@ export function VDenseTable<TRow>({
       aria-label={ariaLabel}
       className={[
         "min-w-0 w-full rounded-[var(--radius-control)] border border-vui-border-hairline bg-vui-surface-row",
-        resizable ? "overflow-x-auto" : "overflow-hidden",
         className,
+        resizable ? "!overflow-x-auto" : "overflow-hidden",
       ]
         .filter(Boolean)
         .join(" ")}
     >
       <table
         className="w-full table-fixed border-collapse text-left"
-        style={resizable ? { minWidth: tableWidth } : undefined}
+        style={
+          resizable
+            ? {
+                display: "grid",
+                gridTemplateColumns,
+                width: `${tableWidth}px`,
+                minWidth: `${tableWidth}px`,
+                maxWidth: `${tableWidth}px`,
+              }
+            : undefined
+        }
       >
-        {resizable ? (
-          <colgroup>
-            {columns.map((column) => (
-              <col
-                key={column.id}
-                data-vui-fill={column.id === fillColumnId ? "true" : undefined}
-                style={columnColStyle(columnWidths[column.id] ?? DEFAULT_COLUMN_WIDTH, column.id === fillColumnId)}
-              />
-            ))}
-          </colgroup>
-        ) : null}
-        <thead className="bg-vui-surface-toolbar text-vui-fg-tertiary">
-          <tr>
+        <thead
+          className="bg-vui-surface-toolbar text-vui-fg-tertiary"
+          style={resizable ? { display: "contents" } : undefined}
+        >
+          <tr style={resizable ? { display: "contents" } : undefined}>
             {columns.map((column) => (
               <th
                 key={column.id}
+                data-vui-fill={resizable && column.id === fillColumnId ? "true" : undefined}
                 className={[
                   "relative px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold uppercase tracking-[0.04em]",
+                  resizable ? "min-w-0 overflow-hidden" : "",
                   alignClass(column.align),
                   column.className,
                 ]
@@ -162,7 +170,7 @@ export function VDenseTable<TRow>({
             ))}
           </tr>
         </thead>
-        <tbody>
+        <tbody style={resizable ? { display: "contents" } : undefined}>
           {rows.length ? (
             rows.map((row) => {
               const state = getRowState?.(row) ?? {};
@@ -179,6 +187,7 @@ export function VDenseTable<TRow>({
                   ]
                     .filter(Boolean)
                     .join(" ")}
+                  style={resizable ? { display: "contents" } : undefined}
                   data-selected={state.selected ? "true" : "false"}
                   data-tone={state.tone ?? "neutral"}
                   tabIndex={state.tabIndex ?? (onRowClick ? 0 : undefined)}
@@ -190,6 +199,7 @@ export function VDenseTable<TRow>({
                       key={column.id}
                       className={[
                         "min-w-0 px-2 py-1.5 align-middle [font-size:var(--vui-font-sm)]",
+                        resizable ? "overflow-hidden" : "",
                         column.truncate === false ? "overflow-visible" : "truncate",
                         alignClass(column.align),
                         column.className,
@@ -204,9 +214,10 @@ export function VDenseTable<TRow>({
               );
             })
           ) : (
-            <tr>
+            <tr style={resizable ? { display: "contents" } : undefined}>
               <td
                 className="px-2 py-2 [font-size:var(--vui-font-sm)] text-vui-fg-tertiary"
+                style={resizable ? { gridColumn: "1 / -1" } : undefined}
                 colSpan={columns.length}
               >
                 {emptyText}
@@ -221,13 +232,6 @@ export function VDenseTable<TRow>({
 
 function initialColumnWidths<TRow>(columns: Array<VDenseTableColumn<TRow>>): Record<string, number> {
   return Object.fromEntries(columns.map((column) => [column.id, column.width ?? DEFAULT_COLUMN_WIDTH]));
-}
-
-function columnColStyle(width: number, fill: boolean): { minWidth: string; width?: string } {
-  if (fill) {
-    return { minWidth: `${width}px` };
-  }
-  return { width: `${width}px`, minWidth: `${width}px` };
 }
 
 function canResizeColumn<TRow>(column: VDenseTableColumn<TRow>, tableResizable: boolean): boolean {

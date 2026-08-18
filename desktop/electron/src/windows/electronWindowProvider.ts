@@ -666,19 +666,52 @@ export class ElectronWindowProvider {
 
   private reconcileCurrentWorkbenchWindow(): ElectronWindowLike | null {
     if (this.workbenchWindow && !this.workbenchWindow.isDestroyed()) {
+      const url = this.workbenchWindow.webContents.getURL().trim();
+      if (url) {
+        this.syncWorkbenchUrlFromWindow(this.workbenchWindow);
+      }
       return this.workbenchWindow;
     }
-    this.workbenchWindow = null;
-    const adopted = this.listLiveWorkbenchWindows()[0] ?? null;
+    const live = this.listLiveWorkbenchWindows().filter((window) => window.webContents.getURL().trim());
+    const expectedOrigin = (() => {
+      try {
+        return new URL(this.workbenchUrl).origin;
+      } catch {
+        return "";
+      }
+    })();
+    const adopted =
+      live.find((window) => {
+        try {
+          return new URL(window.webContents.getURL()).origin === expectedOrigin;
+        } catch {
+          return false;
+        }
+      })
+      ?? live[0]
+      ?? null;
     if (!adopted) {
+      this.workbenchWindow = null;
       this.workbenchReadyUrl = null;
       return null;
     }
     this.workbenchWindow = adopted;
     this.attachWindowEvents("workbench", adopted);
-    const currentUrl = adopted.webContents.getURL().trim();
-    this.workbenchReadyUrl = currentUrl || null;
+    this.syncWorkbenchUrlFromWindow(adopted);
     return adopted;
+  }
+
+  private syncWorkbenchUrlFromWindow(window: ElectronWindowLike): void {
+    const currentUrl = window.webContents.getURL().trim();
+    this.workbenchReadyUrl = currentUrl || null;
+    if (!currentUrl) {
+      return;
+    }
+    try {
+      this.workbenchUrl = localWorkbenchUrl(currentUrl);
+    } catch {
+      // Keep the previously resolved workbench URL if the live window URL is not loadable.
+    }
   }
 
   private listLiveWorkbenchWindows(): ElectronWindowLike[] {
@@ -686,7 +719,7 @@ export class ElectronWindowProvider {
     try {
       origin = new URL(this.workbenchUrl).origin;
     } catch {
-      return [];
+      origin = "http://127.0.0.1:8000";
     }
     const ownedInstances = new Set(
       [...this.instanceWindows.values()].map((entry) => entry.window)
@@ -728,9 +761,6 @@ export class ElectronWindowProvider {
   private stateFor(role: ElectronWindowRole): ManagedWindowState {
     const window = role === "launcher" ? this.launcherWindow : this.workbenchWindow;
     if (!window || window.isDestroyed()) {
-      return closedWindowState(role);
-    }
-    if (role === "workbench" && this.workbenchReadyUrl === null && !window.webContents.getURL().trim()) {
       return closedWindowState(role);
     }
     return {

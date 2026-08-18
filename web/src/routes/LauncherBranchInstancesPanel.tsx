@@ -529,6 +529,7 @@ export function LauncherBranchInstancesPanel({
       header: copy.branchColumn,
       width: 180,
       minWidth: 110,
+      fill: true,
       render: (item: LauncherBranchInstance) => (
         <VTooltip content={`${item.shortName || item.branch || item.id} · ${item.branch || item.id} · ${item.path || item.displayPath || item.id}`} width="wide">
           <span className={styles.branchName}>{item.shortName || item.branch || item.id}</span>
@@ -590,7 +591,6 @@ export function LauncherBranchInstancesPanel({
       header: labels.workbench,
       width: 200,
       minWidth: 140,
-      fill: true,
       render: (item: LauncherBranchInstance) => formatWorkbenchStatus(item, zh),
     },
     {

@@ -134,6 +134,17 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelStyles.statusTable).toContain("w-full");
     expect(panelStyles.panel).toContain("overflow-hidden");
     expect(panelStyles.panel).toContain("min-w-0");
+    expect(panelSource).toContain("minWidth: 150");
+    expect(panelSource).toContain('id: "branch"');
+    expect(panelSource).toMatch(/id: "branch"[\s\S]{0,180}?fill: true/);
+    const workbenchIdx = panelSource.indexOf('id: "workbench"');
+    const gitIdx = panelSource.indexOf('id: "git"', workbenchIdx);
+    expect(workbenchIdx).toBeGreaterThan(-1);
+    expect(gitIdx).toBeGreaterThan(workbenchIdx);
+    expect(panelSource.slice(workbenchIdx, gitIdx)).not.toContain("fill: true");
+    expect(panelStyles.actionCell).not.toContain("sticky");
+    expect(panelStyles.actionCell).toContain("min-w-[150px]");
+    expect(panelStyles.statusTable).not.toContain("overflow-auto");
   });
 
   it("renders one global empty surface for zero items and a distinct recoverable filtered miss", () => {

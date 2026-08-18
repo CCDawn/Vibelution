@@ -45,6 +45,10 @@ def test_launch_vibelution_shortcut_script_builds_content_addressed_entry():
     assert "build_vibelution_launcher_entry.ps1" in source
     assert "Start-Process" in source
     assert "WindowStyle Hidden" in source
+    assert "Vibelution Launcher.lnk" in source
+    assert "WScript.Shell" in source
+    assert "WindowStyle = 7" in source
+    assert "Repair-DesktopLauncherShortcut" in source
 
 
 def test_native_launcher_tray_menu_exposes_lifecycle_controls():

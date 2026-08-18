@@ -87,7 +87,7 @@ import {
   ISOLATED_INSTANCE_READY_WAIT_MS,
   superviseIsolatedInstanceStart
 } from "./process/isolatedInstanceSupervisor.js";
-import { runPythonJsonBridge } from "./process/pythonJsonBridge.js";
+import { LAUNCHER_API_JSON_BRIDGE_MAX_BYTES, runPythonJsonBridge } from "./process/pythonJsonBridge.js";
 import { resolveWorkbenchUrlFromBridge } from "./process/resolveWorkbenchBridge.js";
 import {
   decideLauncherShellRestart,
@@ -107,6 +107,7 @@ import {
   type LauncherBootstrapResult
 } from "./process/launcherBootstrap.js";
 import { assertTrustedIpcSender } from "./security/ipcSenderValidation.js";
+import { isLiveWorkbenchWindowUrl } from "./security/urlPolicy.js";
 import { executeApprovedDesktopShellShutdown, reapManagedRuntimeOnDesktopStart, DESKTOP_SHELL_EXIT_BUDGET_MS, DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS, withDesktopShellExitTimeout } from "./shutdown/desktopShellExit.js";
 import {
   decideShutdown,
@@ -154,6 +155,7 @@ import {
     resolveLauncherWindowUrl,
   resolveWorkbenchUrl
 } from "./windows/windowUrlResolver.js";
+import { startOrFocusWorkbenchFromProductEntry } from "./windows/productEntryWorkbench.js";
 import { waitForWorkbenchHttp, workbenchLoopbackUrl } from "./windows/workbenchHttpReady.js";
 import { installBrokenPipeGuards } from "./runtime/brokenPipeGuard.js";
 import { MainWorkbenchCloseTransactionStore } from "./lifecycle/workbenchCloseTransactionStore.js";
@@ -381,7 +383,7 @@ function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapR
       listWorkbenchWindows: (workbenchOrigin) =>
         BrowserWindow.getAllWindows().filter((window) => {
           try {
-            return new URL(window.webContents.getURL()).origin === workbenchOrigin;
+            return isLiveWorkbenchWindowUrl(window.webContents.getURL(), workbenchOrigin);
           } catch {
             return false;
           }
@@ -2493,7 +2495,8 @@ async function orchestrateLauncherApi(
     pythonPath,
     args,
     cwd: paths.workspaceRoot,
-    failureLabel: "launcher api bridge"
+    failureLabel: "launcher api bridge",
+    maxBytes: LAUNCHER_API_JSON_BRIDGE_MAX_BYTES
   });
   const parsed = JSON.parse(raw) as { ok?: boolean; payload?: unknown; message?: string };
   if (parsed.ok !== true) {
@@ -2545,8 +2548,11 @@ function resolveLauncherIpcHost() {
       const provider = windowProvider;
       const snapshot = provider?.snapshot();
       return {
-        workbench: snapshot?.workbench.open
-          ? { open: true, rendererProcessId: snapshot.workbench.rendererProcessId }
+        workbench: snapshot
+          ? {
+              open: snapshot.workbench.open === true,
+              rendererProcessId: snapshot.workbench.rendererProcessId
+            }
           : null,
         instances: provider ? provider.instanceWindowStates() : []
       };
@@ -2578,6 +2584,32 @@ function requestOpenWorkbench(): void {
   });
 }
 
+async function startOrFocusWorkbenchFromProductEntryOnShell(): Promise<void> {
+  const provider = windowProvider;
+  if (provider === null) {
+    pendingOpenWorkbenchRequest = true;
+    return;
+  }
+  pendingOpenWorkbenchRequest = false;
+  markWorkbenchOpenRequested();
+  const paths = createDesktopPathsForApp();
+  const url = launcherBootstrap !== null
+    ? await refreshLiveWorkbenchUrl(paths)
+    : resolveOrchestratedWorkbenchUrl();
+  try {
+    await startOrFocusWorkbenchFromProductEntry({
+      url,
+      waitForHttp: (opts) => waitForWorkbenchHttp(opts),
+      openOrFocus: (target) => provider.openOrFocusWorkbench(target),
+      startLifecycle: () => orchestrateLauncherLifecycle("start", { schemaVersion: 1, path: "open" }),
+      resolveReadyUrl: () => refreshLiveWorkbenchUrl(paths),
+      readyTimeoutMs: WORKBENCH_START_READY_WAIT_MS
+    });
+  } finally {
+    scheduleLauncherStatusCliRefresh();
+  }
+}
+
 async function requestOpenWorkbenchFromSecondInstance(): Promise<void> {
   const provider = windowProvider;
   if (provider === null) {
@@ -2589,13 +2621,7 @@ async function requestOpenWorkbenchFromSecondInstance(): Promise<void> {
     const paths = createDesktopPathsForApp();
     await recoverDesktopControlContext(paths, bootstrap, provider, "second_instance_open_workbench");
   }
-  pendingOpenWorkbenchRequest = false;
-  markWorkbenchOpenRequested();
-  const url = bootstrap !== null
-    ? await refreshLiveWorkbenchUrl(createDesktopPathsForApp())
-    : resolveOrchestratedWorkbenchUrl();
-  await waitForWorkbenchHttp({ url, timeoutMs: WORKBENCH_START_READY_WAIT_MS });
-  await provider.openOrFocusWorkbench(url);
+  await startOrFocusWorkbenchFromProductEntryOnShell();
 }
 
 async function applyPendingProjectSlot(projectRoot: string): Promise<void> {
@@ -2764,7 +2790,9 @@ app.whenReady()
       if (firstLifecycle === "open") {
         pendingOpenWorkbenchRequest = false;
         markWorkbenchOpenRequested();
-        await windowProvider.openOrFocusWorkbench();
+        void startOrFocusWorkbenchFromProductEntryOnShell().catch((error: unknown) => {
+          console.warn(error instanceof Error ? error.message : String(error));
+        });
       } else {
         void handleSecondInstanceLifecycleCommand(firstLifecycle).catch((error: unknown) => {
           console.warn(error instanceof Error ? error.message : String(error));

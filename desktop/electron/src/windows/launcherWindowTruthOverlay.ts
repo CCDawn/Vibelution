@@ -48,16 +48,7 @@ export function composeInstanceLifecycleState(input: {
   if (backendReady && input.frontendReady !== false && input.windowOpen) {
     return "running";
   }
-  const observed = String(input.observedState || "").trim().toLowerCase();
-  if (
-    input.backendAlive
-    || input.backendListening
-    || input.windowOpen
-    || observed === "open"
-    || observed === "partial"
-    || observed === "running"
-    || observed === "healthy"
-  ) {
+  if (input.backendAlive || input.backendListening || input.windowOpen) {
     return "partial";
   }
   return "closed";
@@ -172,6 +163,22 @@ function overlayStatusWindowTruth(
   return payload;
 }
 
+function overlayComposePhase(phase: string, windowOpen: boolean): string {
+  const normalized = String(phase || "").trim().toLowerCase();
+  if (windowOpen && ["closing", "stopping", "force_stopping"].includes(normalized)) {
+    return "steady";
+  }
+  return String(phase || "");
+}
+
+function overlayComposeRegistryStatus(status: string, windowOpen: boolean): string {
+  const normalized = String(status || "").trim().toLowerCase();
+  if (windowOpen && normalized === "stopping") {
+    return "";
+  }
+  return String(status || "");
+}
+
 function overlayBranchInstancesWindowTruth(
   payload: Record<string, unknown>,
   truth: LauncherWindowTruth
@@ -195,8 +202,10 @@ function overlayBranchInstancesWindowTruth(
     let windowOpen: boolean | null = null;
     let rendererPid = 0;
     if (item.current === true) {
-      windowOpen = truth.workbench?.open === true;
-      rendererPid = truth.workbench?.rendererProcessId ?? 0;
+      if (truth.workbench) {
+        windowOpen = truth.workbench.open === true;
+        rendererPid = truth.workbench.rendererProcessId ?? 0;
+      }
     } else {
       const instanceState = instancesById.get(String(item.id || ""));
       if (instanceState) {
@@ -213,10 +222,10 @@ function overlayBranchInstancesWindowTruth(
         const frontend = isRecord(runtime.frontend) ? runtime.frontend : {};
         const error = isRecord(runtime.error) ? runtime.error : {};
         const lifecycleState = composeInstanceLifecycleState({
-          phase: String(runtime.phase || ""),
+          phase: overlayComposePhase(String(runtime.phase || ""), windowOpen),
           observedState: String(runtime.observedState || ""),
           desiredState: String(runtime.desiredState || ""),
-          registryStatus: String(runtime.registryStatus || ""),
+          registryStatus: overlayComposeRegistryStatus(String(runtime.registryStatus || ""), windowOpen),
           backendAlive: backend.alive === true,
           backendHealthy: backend.healthy === true,
           backendListening: backend.listening === true,
