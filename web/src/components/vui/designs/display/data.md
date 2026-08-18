@@ -25,8 +25,8 @@ import { VDenseTable } from "@/components/vui";
 | --- | --- | --- |
 | columns / rows | 列定义与数据 | 空表用 EmptyState 槽 |
 | columns[].width / minWidth | 默认列宽与拖拽下限 | 表头与单元格共用同一列宽 |
-| columns[].fill | 弹性列 | 容器宽于列宽之和时，多余宽度落到该列（只设 `minWidth`，不要 `width:100%`）。后续 GIT/操作列必须带明确 `width`，否则 `table-fixed` 会把它们挤成 0。运维表通常给路径/名称/窗口列 |
-| resizable | 拖拽调整列宽 | 真表 `colgroup`；拖一列只改该列像素宽。表格 `w-full`，`minWidth` 为列宽之和；窄于总和时横向滚动，其它列像素宽不变。操作列不要 `sticky`：祖先 `overflow-x-hidden` 会把最后一列裁成 0 |
+| columns[].fill | 弹性列标记 | 可缩放表把 `<table>` 渲成 `display:grid`，`grid-template-columns` 按列宽之和逐列定像素宽；`thead/tbody/tr` 用 `display:contents`，行内单元格不再走 CSS table 的「撑满包含块」规则。fill 只是语义标记，不会把 GIT/操作挤成 0。不要给 fill 设 `width:100%` |
+| resizable | 拖拽调整列宽 | 拖一列只改该列像素宽，grid track 随之更新。壳 `overflow-x-auto`，窄于总和时横向滚动。操作列不要 `sticky`：祖先 `overflow-x-hidden` 会把粘滞列裁成 0 |
 | onRowClick / getRowState | 行选择与色条 | 运维表可选 |
 
 ### 非职责

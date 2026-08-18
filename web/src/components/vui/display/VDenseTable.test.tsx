@@ -25,18 +25,18 @@ describe("VDenseTable", () => {
     );
 
     expect(html).toContain("<table");
-    expect(html).toContain("<colgroup>");
+    expect(html).not.toContain("<colgroup>");
     expect(html).toContain("w-full");
-    expect(html).toContain('style="min-width:240px"');
-    expect(html).toContain('style="width:160px;min-width:160px"');
-    expect(html).toContain('style="width:80px;min-width:80px"');
+    expect(html).toContain("display:grid");
+    expect(html).toContain("grid-template-columns:160px 80px");
+    expect(html).toContain("width:240px;min-width:240px;max-width:240px");
     expect(html).toContain('role="separator"');
     expect(html).toContain("Resize name");
     expect(html).toContain("Branch");
     expect(html).toContain("main");
   });
 
-  it("lets a fill column absorb leftover width while the table stretches", () => {
+  it("pins resizable columns with a grid track list so a fill column cannot collapse trailing actions", () => {
     const html = renderToStaticMarkup(
       <VDenseTable
         ariaLabel="instances"
@@ -46,16 +46,18 @@ describe("VDenseTable", () => {
         columns={[
           { id: "path", header: "Path", width: 220, fill: true, render: (row) => row.path },
           { id: "state", header: "State", width: 80, render: () => "idle" },
+          { id: "actions", header: "操作", width: 170, render: () => "open" },
         ]}
       />,
     );
 
     expect(html).toContain("w-full");
-    expect(html).toContain('style="min-width:300px"');
+    expect(html).toContain("display:grid");
+    expect(html).toContain("grid-template-columns:220px 80px 170px");
+    expect(html).toContain("width:470px;min-width:470px;max-width:470px");
     expect(html).toContain('data-vui-fill="true"');
-    expect(html).toContain('style="min-width:220px"');
     expect(html).not.toContain("width:100%");
-    expect(html).toContain('style="width:80px;min-width:80px"');
+    expect(html).toContain("操作");
     expect(resolveDenseTableFillColumnId([
       { id: "path", header: "Path", fill: true, render: () => null },
       { id: "state", header: "State", render: () => null },
@@ -93,7 +95,8 @@ describe("VDenseTable", () => {
     );
 
     expect(html).toContain("!overflow-x-auto");
-    expect(html).toContain('style="width:170px;min-width:170px"');
+    expect(html).toContain("grid-template-columns:160px 170px");
+    expect(html).toContain("width:330px;min-width:330px;max-width:330px");
   });
 
   it("clamps dragged column widths to the column minimum", () => {
