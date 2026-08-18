@@ -1,4 +1,4 @@
-import { type KeyboardEvent, type PointerEvent, type ReactNode, useMemo, useState } from "react";
+import { type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useMemo, useState } from "react";
 
 export type VDenseTableColumn<TRow> = {
   align?: "left" | "center" | "right";
@@ -35,6 +35,46 @@ export type VDenseTableProps<TRow> = {
 
 const DEFAULT_COLUMN_WIDTH = 120;
 const DEFAULT_MIN_WIDTH = 48;
+export const DENSE_TABLE_VIEWPORT_INSET_PX = 40;
+
+export function denseTableViewportCapPx(
+  viewportWidth: number,
+  insetPx: number = DENSE_TABLE_VIEWPORT_INSET_PX,
+): number {
+  return Math.max(320, Math.round(viewportWidth - insetPx));
+}
+
+export function readDenseTableViewportWidth(
+  view: Pick<Window, "innerWidth"> & { visualViewport?: { width: number } | null },
+): number {
+  const visual = view.visualViewport?.width;
+  if (typeof visual === "number" && Number.isFinite(visual) && visual > 0) {
+    return visual;
+  }
+  return view.innerWidth;
+}
+
+export function denseTableFillGridStyle(
+  gridTemplateColumns: string,
+  tableMinWidth: number,
+  viewportCapPx?: number,
+): {
+  display: "grid";
+  gridTemplateColumns: string;
+  width: string;
+  maxWidth: string;
+  minWidth: string;
+} {
+  const minWidthPx = viewportCapPx != null ? Math.min(tableMinWidth, viewportCapPx) : tableMinWidth;
+  const size = viewportCapPx != null ? `${viewportCapPx}px` : "100%";
+  return {
+    display: "grid",
+    gridTemplateColumns,
+    width: size,
+    maxWidth: size,
+    minWidth: `${minWidthPx}px`,
+  };
+}
 
 export function nextDenseTableColumnWidth(startWidth: number, delta: number, minWidth: number): number {
   return Math.max(minWidth, Math.round(startWidth + delta));
@@ -109,6 +149,19 @@ export function VDenseTable<TRow>({
     () => denseTableGridTemplateColumns(columns, columnWidths),
     [columnWidths, columns],
   );
+  const [viewportCapPx, setViewportCapPx] = useState<number>();
+  useEffect(() => {
+    const apply = () => {
+      setViewportCapPx(denseTableViewportCapPx(readDenseTableViewportWidth(window)));
+    };
+    apply();
+    window.addEventListener("resize", apply);
+    window.visualViewport?.addEventListener("resize", apply);
+    return () => {
+      window.removeEventListener("resize", apply);
+      window.visualViewport?.removeEventListener("resize", apply);
+    };
+  }, []);
 
   const startResize = (column: VDenseTableColumn<TRow>, event: PointerEvent<HTMLSpanElement>) => {
     if (!canResizeColumn(column, resizable)) {
@@ -145,14 +198,12 @@ export function VDenseTable<TRow>({
   ]
     .filter(Boolean)
     .join(" ");
+  const viewportBoxStyle =
+    fillColumnId && viewportCapPx != null
+      ? { width: `${viewportCapPx}px`, maxWidth: `${viewportCapPx}px` }
+      : undefined;
   const gridStyle = fillColumnId
-    ? {
-        display: "grid",
-        gridTemplateColumns,
-        width: "100%",
-        maxWidth: "100%",
-        minWidth: `${tableMinWidth}px`,
-      }
+    ? denseTableFillGridStyle(gridTemplateColumns, tableMinWidth, viewportCapPx)
     : {
         display: "grid",
         gridTemplateColumns,
@@ -163,7 +214,7 @@ export function VDenseTable<TRow>({
 
   if (resizable) {
     return (
-      <div data-vui="dense-table" data-vui-resizable="true" className={shellClassName}>
+      <div data-vui="dense-table" data-vui-resizable="true" className={shellClassName} style={viewportBoxStyle}>
         <div role="table" aria-label={ariaLabel} className="min-w-0 max-w-full w-full text-left" style={gridStyle}>
           <div
             role="row"
