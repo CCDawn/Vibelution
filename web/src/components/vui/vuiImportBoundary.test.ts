@@ -39,6 +39,10 @@ const productSharedParentStyleConsumers = [
   "routes/TeamSourceCollectionGraphWorkspacePanel.tsx",
   "routes/TeamSourceCollectionMemoryWorkspacePanel.tsx",
   "routes/TeamSourceCollectionScreeningWorkspacePanel.tsx",
+  // Challenge-question detail surface subcomponents share the owning panel's
+  // style module (ChallengeQuestionDetailPanel.styles) instead of owning one.
+  "routes/teams/challenge-cup/ChallengeQuestionRegisterDialog.tsx",
+  "routes/teams/challenge-cup/ChallengeQuestionReviewForm.tsx",
   "routes/teams/workflowTone.ts",
   "routes/TeamsRoute.tsx",
 ] as const;
