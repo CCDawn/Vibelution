@@ -705,6 +705,8 @@ describe("AppShell layout contract", () => {
 
     expect(indexHtml).toContain('data-theme="light"');
     expect(indexHtml).toContain('localStorage.getItem("vibelution.workbench.theme")');
+    expect(indexHtml).toContain("document.documentElement.clientWidth");
+    expect(indexHtml).toContain('node.style.overflowX = "clip"');
     expect(indexHtml).toContain('name="theme-color" content="#f7f8fa"');
     expect(indexHtml).toContain('name="color-scheme" content="light dark"');
     expect(indexHtml).toContain('rel="manifest" href="/manifest.webmanifest"');

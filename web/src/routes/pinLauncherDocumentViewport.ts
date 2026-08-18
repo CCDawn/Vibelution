@@ -5,24 +5,20 @@ export type LauncherViewportPinStyle = {
   width: string;
 };
 
-const PINNED_STYLE: LauncherViewportPinStyle = {
-  overflowX: "clip",
-  maxWidth: "100%",
-  width: "100%",
-  minWidth: "0",
-};
+/** Matches `createLauncherWindow` default width in desktop/electron. */
+export const LAUNCHER_CONTROL_WINDOW_WIDTH_PX = 1180;
 
-function pinElement(element: HTMLElement): () => void {
+function pinElement(element: HTMLElement, width: string): () => void {
   const previous: LauncherViewportPinStyle = {
     overflowX: element.style.overflowX,
     maxWidth: element.style.maxWidth,
     width: element.style.width,
     minWidth: element.style.minWidth,
   };
-  element.style.overflowX = PINNED_STYLE.overflowX;
-  element.style.maxWidth = PINNED_STYLE.maxWidth;
-  element.style.width = PINNED_STYLE.width;
-  element.style.minWidth = PINNED_STYLE.minWidth;
+  element.style.overflowX = "clip";
+  element.style.maxWidth = width;
+  element.style.width = width;
+  element.style.minWidth = "0";
   return () => {
     element.style.overflowX = previous.overflowX;
     element.style.maxWidth = previous.maxWidth;
@@ -31,11 +27,15 @@ function pinElement(element: HTMLElement): () => void {
   };
 }
 
-export function pinLauncherDocumentViewport(doc: Document): () => void {
+export function pinLauncherDocumentViewport(
+  doc: Document,
+  widthPx: number = Number(doc.documentElement?.clientWidth) || LAUNCHER_CONTROL_WINDOW_WIDTH_PX,
+): () => void {
+  const width = `${Math.max(320, Math.round(widthPx))}px`;
   const nodes = [doc.documentElement, doc.body, doc.getElementById("root")].filter(
     (node): node is HTMLElement => Boolean(node && typeof node === "object" && "style" in node),
   );
-  const restores = nodes.map((node) => pinElement(node));
+  const restores = nodes.map((node) => pinElement(node, width));
   return () => {
     for (const restore of restores) {
       restore();

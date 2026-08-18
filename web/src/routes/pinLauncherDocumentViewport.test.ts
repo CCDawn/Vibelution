@@ -8,7 +8,7 @@ function styleBox() {
 
 describe("pinLauncherDocumentViewport", () => {
   it("clips html, body, and #root to the viewport instead of content min-size", () => {
-    const documentElement = { style: styleBox() };
+    const documentElement = { style: styleBox(), clientWidth: 945 };
     const body = { style: styleBox() };
     const root = { style: styleBox() };
     const restore = pinLauncherDocumentViewport({
@@ -18,8 +18,8 @@ describe("pinLauncherDocumentViewport", () => {
     } as unknown as Document);
     for (const node of [documentElement, body, root]) {
       expect(node.style.overflowX).toBe("clip");
-      expect(node.style.width).toBe("100%");
-      expect(node.style.maxWidth).toBe("100%");
+      expect(node.style.width).toBe("945px");
+      expect(node.style.maxWidth).toBe("945px");
       expect(node.style.minWidth).toBe("0");
     }
     restore();

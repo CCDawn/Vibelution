@@ -23,6 +23,20 @@
           }
         } catch {
         }
+        try {
+          const width = document.documentElement.clientWidth;
+          if (width > 0) {
+            const px = `${Math.round(width)}px`;
+            for (const node of [document.documentElement, document.body, document.getElementById("root")]) {
+              if (!node) continue;
+              node.style.overflowX = "clip";
+              node.style.width = px;
+              node.style.maxWidth = px;
+              node.style.minWidth = "0";
+            }
+          }
+        } catch {
+        }
       })();
     </script>
     <script type="module" src="/src/main.tsx"></script>

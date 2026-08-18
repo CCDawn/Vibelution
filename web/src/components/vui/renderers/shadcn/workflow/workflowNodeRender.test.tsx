@@ -267,6 +267,38 @@ describe("WorkflowStageRegionNode render (P1-5)", () => {
     expect(markup).toContain("/ 5");
   });
 
+  it("uses a solid workspace-tinted fill so cards can sit on a darker stage band", () => {
+    const idle = renderNode(WorkflowStageRegionNode, {
+      label: "知识搜集",
+      stageTone: "idle",
+      stageIndex: 0,
+      layoutMode: "serpentine",
+    });
+    expect(idle).not.toContain("linear-gradient");
+    expect(idle).not.toContain("--vui-surface-region");
+    expect(idle).toContain("accent-cool)_8%,var(--vui-surface-workspace)");
+    expect(idle).toContain("accent-cool)_18%,var(--vui-border-subtle)");
+
+    const active = renderNode(WorkflowStageRegionNode, {
+      label: "知识搜集",
+      stageTone: "active",
+      stageIndex: 0,
+      layoutMode: "serpentine",
+    });
+    expect(active).toContain("accent-cool)_12%,var(--vui-surface-workspace)");
+  });
+
+  it("lifts serpentine task cards with an opaque panel and elevation token", () => {
+    const markup = renderNode(WorkflowAgentTaskNode, {
+      label: "协议设计",
+      status: "ready",
+      layoutMode: "serpentine",
+    });
+    expect(markup).toContain("bg-[var(--vui-surface-panel)]");
+    expect(markup).toContain("shadow-[var(--vui-elevation-1)]");
+    expect(markup).not.toContain("rgba(15,23,42,0.05)");
+  });
+
   it("is never focusable or selectable (no role/tabIndex/selection attributes)", () => {
     const markup = renderNode(WorkflowStageRegionNode, {
       label: "知识搜集",
