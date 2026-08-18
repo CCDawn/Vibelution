@@ -144,7 +144,7 @@ export function VDenseTable<TRow>({
       data-vui-resizable={resizable ? "true" : undefined}
       aria-label={ariaLabel}
       className={[
-        "min-w-0 w-full rounded-[var(--radius-control)] border border-vui-border-hairline bg-vui-surface-row",
+        "min-w-0 max-w-full w-full rounded-[var(--radius-control)] border border-vui-border-hairline bg-vui-surface-row",
         className,
         resizable ? "!overflow-x-auto" : "overflow-hidden",
       ]
@@ -152,7 +152,7 @@ export function VDenseTable<TRow>({
         .join(" ")}
     >
       <table
-        className="w-full table-fixed border-collapse text-left"
+        className="min-w-0 max-w-full w-full table-fixed border-collapse text-left"
         style={
           resizable
             ? fillColumnId
@@ -160,6 +160,7 @@ export function VDenseTable<TRow>({
                   display: "grid",
                   gridTemplateColumns,
                   width: "100%",
+                  maxWidth: "100%",
                   minWidth: `${tableMinWidth}px`,
                 }
               : {

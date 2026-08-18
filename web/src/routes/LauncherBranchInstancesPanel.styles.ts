@@ -4,7 +4,7 @@ const panelSurface = `${vuiFlatPanelClass}`;
 const rowSurfaceMuted = "rounded-md border border-vui-border-subtle bg-vui-surface-row";
 const styles = {
   panel: `mx-2 mt-1.5 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden ${panelSurface} px-2 py-[7px]`,
-  panelBody: "flex min-h-0 flex-1 flex-col",
+  panelBody: "flex min-h-0 min-w-0 flex-1 flex-col",
   panelHeader:
     "flex min-h-0 min-w-0 flex-wrap items-center justify-between gap-2 border-b border-[var(--border-soft)] pb-1.5",
   panelEyebrow: "m-0 [font-size:var(--vui-font-xs)] uppercase tracking-[0.08em] text-vui-fg-tertiary",
@@ -16,7 +16,7 @@ const styles = {
   tabLabel: "inline-flex min-w-0 items-center gap-1.5",
   tabCount:
     "inline-flex min-w-5 items-center justify-center rounded-full border border-vui-border-subtle bg-vui-surface-muted px-1.5 py-0.5 [font-size:var(--vui-font-2xs)] text-vui-fg-secondary",
-  tabBody: "mt-1.5 flex min-h-0 flex-1 flex-col",
+  tabBody: "mt-1.5 flex min-h-0 min-w-0 flex-1 flex-col",
   tabHeader: "flex min-w-0 shrink-0 flex-wrap items-end justify-between gap-2",
   tabHint: "m-0 min-w-0 [font-size:var(--vui-font-xs)] text-vui-fg-tertiary",
   tabHeaderActions: "flex min-w-0 flex-wrap items-center gap-1.5",

@@ -134,6 +134,8 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelStyles.statusTable).toContain("w-full");
     expect(panelStyles.panel).toContain("overflow-hidden");
     expect(panelStyles.panel).toContain("min-w-0");
+    expect(panelStyles.panelBody).toContain("min-w-0");
+    expect(panelStyles.tabBody).toContain("min-w-0");
     expect(panelSource).toContain("minWidth: 150");
     expect(panelSource).toContain('id: "branch"');
     expect(panelSource).toMatch(/id: "branch"[\s\S]{0,180}?fill: true/);

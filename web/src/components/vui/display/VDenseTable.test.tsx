@@ -56,7 +56,7 @@ describe("VDenseTable", () => {
     expect(html).toContain("w-full");
     expect(html).toContain("display:grid");
     expect(html).toContain("grid-template-columns:minmax(0, 1fr) 80px 170px");
-    expect(html).toContain("width:100%;min-width:360px");
+    expect(html).toContain("width:100%;max-width:100%;min-width:360px");
     expect(html).not.toContain("max-width:470px");
     expect(html).toContain('data-vui-fill="true"');
     expect(html).not.toContain("Resize path");
