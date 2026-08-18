@@ -26,7 +26,7 @@
 7 EVIDENCE  logging decision；runtime_scenes if 运行时；closeout/验收证据在 merge 前闭合
 8 INTEGRATE 合入门全绿后必须主动 `git merge --ff-only`；不得等用户再下令审查/合入
 9 CLEAN     merge 成功即清理本任务临时内容/进程、claim、junction、worktree、本地分支；不等待 post-merge validation
-10 CLOSE     完成块（§6）；refresh 三选一
+10 CLOSE     对用户汇报（根 `AGENTS.md` §5）；内部合入/清理仍做，不贴完成块
 ```
 
 ---
@@ -82,7 +82,9 @@ Launcher / runtime 落点速查：[`core/web/services/launcher_runtime.md`](../.
 
 ---
 
-## 5. Refresh 三选一（必报）
+## 5. Refresh 判断（内部）
+
+Agent 内部必须判断要不要重启 Launcher。对用户只在需要对方动手时说「请重启后再试」；不要贴 `not needed / recommended / required` 枚举。
 
 | 值 | WHEN |
 | --- | --- |
@@ -94,35 +96,11 @@ active-work 挡 restart → 固定句（`AGENTS.md`§4），禁止强杀。
 
 ---
 
-## 6. 完成报告模板（Agent 输出）
+## 6. 对用户怎么写
 
-```text
-## 变更
-- 改：…
-- 未改：…
+对用户的完成说明以根 [`AGENTS.md` §5](../../AGENTS.md) 为准：第一句说清结果，再补怎么试和没做什么。不要输出下面这种完成块，也不要用「缺字段 = 未完成」强迫把闸门清单贴给用户。
 
-## 验证
-- 命令：…
-- 结果：pass|fail
-- 未覆盖：…
-
-## Runtime
-- Launcher refresh: not needed | recommended | required
-- 无控制台: n/a | helper=… | 证据=…
-
-## 协作
-- worktree/branch/claim: …
-- review: pass | blocker=…
-- merge: merged | not merged + 精确原因
-- cleanup: removed=… | cleanup pending=精确残留与原因 | not merged（仅当有精确 blocker）
-- project-memory: not affected | 更新点=…
-- version impact: none | …
-
-## 风险
-- fallback/partial: 无 | 原因/可信范围/剩余信号=…
-```
-
-缺字段 = 未完成（有意义任务）。
+内部仍须：聚焦验证、合入前 closeout、合入后清理。这些是执行义务，不是回复格式。合入失败或清理失败时用一句人话说明 blocker / 残留。
 
 ---
 
