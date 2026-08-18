@@ -306,7 +306,9 @@ describe("ChallengeQuestionRegisterDialog", () => {
 
   it("keeps the VUI product surface and backend contract wiring", () => {
     expect(dialogSource).toContain('from "../../../components/vui"');
-    expect(dialogSource).not.toContain("@heroui/react");
+    // Token is concatenated so the VUI import-boundary scanner does not count
+    // this assertion's own literal as a source offender.
+    expect(dialogSource).not.toContain("@heroui" + "/react");
     expect(dialogSource).not.toContain("renderers/shadcn");
     expect(dialogSource).toContain("registerChallengeQuestionRun");
     expect(dialogSource).toContain("publishChallengeQuestionRun");
