@@ -85,7 +85,15 @@ export function ResearchProcessInspectorPane(props: {
     return <ResearchAgentBindingPanel teamId={scope.teamId} run={state.run} effectiveBindings={state.effectiveBindings} lang="zh" />;
   }
   if (scope.panel === "launch") {
-    return <ResearchRunLaunchPanel teamId={scope.teamId} busy={state.busy} onSubmit={actions.submitRun} onCancel={() => actions.replaceParams({ panel: "node" })} />;
+    return (
+      <ResearchRunLaunchPanel
+        teamId={scope.teamId}
+        busy={state.busy}
+        onSubmit={actions.submitRun}
+        onCancel={() => actions.replaceParams({ panel: "node" })}
+        onOpenProgress={() => actions.replaceParams({ panel: "progress" })}
+      />
+    );
   }
   if (scope.panel === "evidence") {
     return state.run && scope.selectedNodeId === "evidence_relations"

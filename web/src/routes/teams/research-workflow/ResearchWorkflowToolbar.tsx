@@ -34,7 +34,20 @@ export function ResearchWorkflowToolbar(props: {
         {props.questionId ? <span className={styles.truncated}>{props.questionId}</span> : null}
         {props.runId ? <span className={styles.truncated}>{researchRunStatusLabel(props.runStatus)}</span> : null}
         {props.runId ? <span aria-label="事件连接状态">{STREAM_LABEL[props.streamState]}</span> : null}
-        {props.nextAction ? <span className={styles.next}>下一步：{props.nextAction}</span> : null}
+        {props.nextAction && props.hasRuntimeNode ? (
+          <VButton
+            type="button"
+            variant="ghost"
+            className={styles.nextAction}
+            data-vui="research-next-action"
+            title="跳到当前节点处理下一步"
+            onClick={props.onJumpToRuntime}
+          >
+            下一步：{props.nextAction}
+          </VButton>
+        ) : props.nextAction ? (
+          <span className={styles.next}>下一步：{props.nextAction}</span>
+        ) : null}
       </div>
       <div className={styles.actions}>
         {props.runOptions.length > 0 ? (
@@ -55,7 +68,6 @@ export function ResearchWorkflowToolbar(props: {
         <VButton type="button" variant={props.panel === "timeline" ? "secondary" : "ghost"} onClick={() => props.onOpenPanel("timeline")}>时间线</VButton>
         <VButton type="button" variant={props.panel === "team" ? "secondary" : "ghost"} onClick={() => props.onOpenPanel("team")}>团队</VButton>
         <VButton type="button" variant={props.panel === "progress" || props.panel === "question" ? "secondary" : "ghost"} onClick={() => props.onOpenPanel("progress")}>题目进度</VButton>
-        {props.hasRuntimeNode ? <VButton type="button" variant="ghost" onClick={props.onJumpToRuntime}>当前节点</VButton> : null}
         {!props.runId ? (
           <VButton
             type="button"

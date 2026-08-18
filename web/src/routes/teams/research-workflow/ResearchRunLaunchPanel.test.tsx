@@ -295,6 +295,7 @@ describe("ResearchRunLaunchPanel", () => {
         busy={false}
         activationPending={false}
         onActivate={() => undefined}
+        onOpenProgress={() => undefined}
       />,
     );
 
@@ -302,6 +303,88 @@ describe("ResearchRunLaunchPanel", () => {
     expect(markup).toContain("完成 DEV readiness / dev-1 / dev-5 fixture");
     expect(markup).not.toContain("激活正式 Campaign");
     expect(markup).toContain("等待 DEV 流程完成");
+    expect(markup).toContain("去完成平台准备检查");
+    expect(markup).toContain('data-vui="experiment-next-action"');
+  });
+
+  it("navigates to the progress panel from the blocked next-action CTA", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const onOpenProgress = vi.fn();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <ExperimentLaunchStatus
+          experiment={experimentOption({
+            activationAllowed: false,
+            nextAction: "await_dev_readiness",
+            blockers: ["DEV fixtures are not complete; real Qwen/GPU work is not authorized"],
+          })}
+          busy={false}
+          activationPending={false}
+          onActivate={() => undefined}
+          onOpenProgress={onOpenProgress}
+        />,
+      );
+    });
+
+    const cta = findButton(container, "去完成平台准备检查");
+    expect(cta).toBeTruthy();
+    await act(async () => {
+      cta!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(onOpenProgress).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it("offers a review CTA when the experiment waits on formal question approval", () => {
+    const experiment = experimentOption({
+      activated: true,
+      activationStatus: "active",
+      activationAllowed: false,
+      launchable: false,
+      nextAction: "await_formal_question_approval",
+      blockers: ["question result is not formally approved"],
+      activatedAt: "2026-08-18T00:00:00Z",
+    });
+    const markup = renderToStaticMarkup(
+      <ExperimentLaunchStatus
+        experiment={experiment}
+        busy={false}
+        activationPending={false}
+        onActivate={() => undefined}
+        onOpenProgress={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain("等待正式题目审核通过");
+    expect(markup).toContain("去审核题目结果");
+    expect(markup).not.toContain("激活正式 Campaign");
+  });
+
+  it("keeps blocked states text-only when no navigation handler is provided", () => {
+    const experiment = experimentOption({
+      activationAllowed: false,
+      nextAction: "await_dev_readiness",
+      blockers: ["DEV fixtures are not complete; real Qwen/GPU work is not authorized"],
+    });
+    const markup = renderToStaticMarkup(
+      <ExperimentLaunchStatus
+        experiment={experiment}
+        busy={false}
+        activationPending={false}
+        onActivate={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain("等待 DEV 流程完成");
+    expect(markup).not.toContain('data-vui="experiment-next-action"');
   });
 
   it("keeps Create Run disabled for a selected deep experiment until it is launchable", () => {

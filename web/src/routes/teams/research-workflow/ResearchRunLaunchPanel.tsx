@@ -43,6 +43,21 @@ function nextActionLabel(experiment: ResearchWorkflowExperimentOption): string {
   }
 }
 
+/**
+ * Blocked states get exactly one CTA that navigates to where the task is done
+ * (Shopify setup-guide pattern); actionable states keep their local buttons.
+ */
+function nextActionCtaLabel(experiment: ResearchWorkflowExperimentOption): string | null {
+  switch (experiment.nextAction) {
+    case "await_dev_readiness":
+      return "去完成平台准备检查";
+    case "await_formal_question_approval":
+      return "去审核题目结果";
+    default:
+      return null;
+  }
+}
+
 export function isLaunchBlockedByExperiment(
   experiments: ResearchWorkflowExperimentOption[],
   questionId: string,
@@ -67,8 +82,10 @@ export function ExperimentLaunchStatus(props: {
   busy: boolean;
   activationPending: boolean;
   onActivate: () => void;
+  onOpenProgress?: () => void;
 }) {
-  const { experiment, busy, activationPending, onActivate } = props;
+  const { experiment, busy, activationPending, onActivate, onOpenProgress } = props;
+  const navigationCtaLabel = experiment.activationAllowed ? null : nextActionCtaLabel(experiment);
   return (
     <VSurface tone="inset" padding="compact" className={styles.selectedExperiment}>
       <div className={styles.experimentHeader}>
@@ -98,6 +115,16 @@ export function ExperimentLaunchStatus(props: {
           ))}
         </ul>
       ) : null}
+      {navigationCtaLabel && onOpenProgress ? (
+        <VButton
+          type="button"
+          variant="primary"
+          data-vui="experiment-next-action"
+          onClick={onOpenProgress}
+        >
+          {navigationCtaLabel}
+        </VButton>
+      ) : null}
       {experiment.activationAllowed ? (
         <VButton
           type="button"
@@ -119,8 +146,9 @@ export function ResearchRunLaunchPanel(props: {
   busy: boolean;
   onSubmit: (input: CreateResearchWorkflowRunInput) => Promise<void>;
   onCancel: () => void;
+  onOpenProgress?: () => void;
 }) {
-  const { teamId, busy, onSubmit, onCancel } = props;
+  const { teamId, busy, onSubmit, onCancel, onOpenProgress } = props;
   const [questionId, setQuestionId] = useState("");
   const [experimentId, setExperimentId] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -223,6 +251,7 @@ export function ResearchRunLaunchPanel(props: {
             setError(null);
             setConfirmOpen(true);
           }}
+          onOpenProgress={onOpenProgress}
         />
       ) : null}
       {questions.length ? (

@@ -4,6 +4,7 @@ export default {
   primary: "truncate text-[var(--fg-primary)]",
   truncated: "truncate",
   next: "truncate text-[var(--fg-primary)]",
+  nextAction: "max-w-[16rem] truncate text-[var(--fg-primary)]",
   actions: "flex flex-wrap items-center gap-2",
   select: "min-w-[18rem] max-w-[28rem]",
 } as const;

@@ -26,6 +26,7 @@ describe("ResearchWorkflowToolbar", () => {
     expect(empty).toContain("创建运行");
     expect(empty).toContain("SCI-096");
     expect(empty).toContain("科研团队");
+    expect(empty).not.toContain('data-vui="research-next-action"');
 
     const running = renderToStaticMarkup(
       <ResearchWorkflowToolbar
@@ -51,5 +52,8 @@ describe("ResearchWorkflowToolbar", () => {
     expect(running).toContain("下一步：资料寻找");
     expect(running).toContain("第 1 次运行");
     expect(running).not.toContain("waiting_human");
+    // 下一步在运行中渲染为可点击按钮，吸收原「当前节点」跳转入口
+    expect(running).toContain('data-vui="research-next-action"');
+    expect(running).not.toContain("当前节点");
   });
 });
