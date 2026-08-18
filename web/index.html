@@ -24,23 +24,14 @@
         } catch {
         }
         try {
-          const dpr = Number(window.devicePixelRatio) || 1;
-          let width = document.documentElement.clientWidth || window.innerWidth || 0;
-          if (dpr > 1.05 && width >= 1140) {
-            width = Math.round(width / dpr);
+          for (const node of [document.documentElement, document.body, document.getElementById("root")]) {
+            if (!node) continue;
+            node.style.overflowX = "clip";
+            node.style.width = "100%";
+            node.style.maxWidth = "100%";
+            node.style.minWidth = "0";
           }
-          if (width > 0) {
-            const px = `${Math.round(width)}px`;
-            const sized = `min(${px}, 100svw)`;
-            for (const node of [document.documentElement, document.body, document.getElementById("root")]) {
-              if (!node) continue;
-              node.style.overflowX = "clip";
-              node.style.width = sized;
-              node.style.maxWidth = sized;
-              node.style.minWidth = "0";
-            }
-            document.documentElement.style.setProperty("--vui-window-width", px);
-          }
+          document.documentElement.style.setProperty("--vui-window-width", "100svw");
         } catch {
         }
       })();

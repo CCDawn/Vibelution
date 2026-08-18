@@ -5,37 +5,8 @@ export type LauncherViewportPinStyle = {
   width: string;
 };
 
-export type LauncherVisibleCssWidthInput = {
-  clientWidth?: number;
-  designedWidthPx?: number;
-  devicePixelRatio?: number;
-  innerWidth?: number;
-  visualViewportWidth?: number;
-};
-
-/** Matches `createLauncherWindow` default width in desktop/electron. */
-export const LAUNCHER_CONTROL_WINDOW_WIDTH_PX = 1180;
-
-/**
- * Electron sizes the HWND in physical pixels matching `width: 1180`, while the
- * renderer `--device-scale-factor` is 1.25. `clientWidth` / `innerWidth` then
- * report ~1180 CSS px for a surface that only paints ~1180/dpr CSS px. Dividing
- * that DIP-sized reading by DPR yields the visible CSS width; already-small
- * readings (true CSS px) are left alone.
- */
-export function resolveLauncherVisibleCssWidth(input: LauncherVisibleCssWidthInput = {}): number {
-  const designed = input.designedWidthPx ?? LAUNCHER_CONTROL_WINDOW_WIDTH_PX;
-  const dpr = Number(input.devicePixelRatio) || 1;
-  const raw =
-    Number(input.visualViewportWidth) ||
-    Number(input.clientWidth) ||
-    Number(input.innerWidth) ||
-    designed;
-  if (dpr > 1.05 && raw >= designed - 40) {
-    return Math.max(320, Math.round(raw / dpr));
-  }
-  return Math.max(320, Math.round(raw));
-}
+const DOCUMENT_WIDTH = "100%";
+const WINDOW_WIDTH_VAR = "100svw";
 
 function pinElement(element: HTMLElement, width: string): () => void {
   const previous: LauncherViewportPinStyle = {
@@ -56,23 +27,20 @@ function pinElement(element: HTMLElement, width: string): () => void {
   };
 }
 
-export function pinLauncherDocumentViewport(
-  doc: Document,
-  widthPx: number = resolveLauncherVisibleCssWidth({
-    clientWidth: Number(doc.documentElement?.clientWidth) || 0,
-    innerWidth: Number(doc.defaultView?.innerWidth) || 0,
-    visualViewportWidth: Number(doc.defaultView?.visualViewport?.width) || 0,
-    devicePixelRatio: Number(doc.defaultView?.devicePixelRatio) || 1,
-  }),
-): () => void {
-  const width = `${Math.max(320, Math.round(widthPx))}px`;
+/**
+ * Fill the Electron client area instead of shrinking `html`/`body`/`#root` to a
+ * one-shot pixel cap. Dividing `clientWidth` by `devicePixelRatio` left a
+ * leftover strip of window chrome because BrowserWindow `width` is already DIP.
+ * `overflow-x: clip` still stops dense tables from expanding the layout viewport.
+ */
+export function pinLauncherDocumentViewport(doc: Document): () => void {
   if (doc.documentElement && "style" in doc.documentElement) {
-    doc.documentElement.style.setProperty("--vui-window-width", width);
+    doc.documentElement.style.setProperty("--vui-window-width", WINDOW_WIDTH_VAR);
   }
   const nodes = [doc.documentElement, doc.body, doc.getElementById("root")].filter(
     (node): node is HTMLElement => Boolean(node && typeof node === "object" && "style" in node),
   );
-  const restores = nodes.map((node) => pinElement(node, `min(${width}, 100svw)`));
+  const restores = nodes.map((node) => pinElement(node, DOCUMENT_WIDTH));
   return () => {
     for (const restore of restores) {
       restore();

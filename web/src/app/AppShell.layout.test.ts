@@ -705,10 +705,10 @@ describe("AppShell layout contract", () => {
 
     expect(indexHtml).toContain('data-theme="light"');
     expect(indexHtml).toContain('localStorage.getItem("vibelution.workbench.theme")');
-    expect(indexHtml).toContain("document.documentElement.clientWidth");
-    expect(indexHtml).toContain("devicePixelRatio");
+    expect(indexHtml).not.toContain("devicePixelRatio");
     expect(indexHtml).toContain("100svw");
     expect(indexHtml).toContain('node.style.overflowX = "clip"');
+    expect(indexHtml).toContain('node.style.width = "100%"');
     expect(indexHtml).toContain('--vui-window-width');
     expect(indexHtml).toContain('name="theme-color" content="#f7f8fa"');
     expect(indexHtml).toContain('name="color-scheme" content="light dark"');

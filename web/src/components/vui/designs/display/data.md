@@ -25,7 +25,7 @@ import { VDenseTable } from "@/components/vui";
 | --- | --- | --- |
 | columns / rows | 列定义与数据 | 空表用 EmptyState 槽 |
 | columns[].width / minWidth | 默认列宽与拖拽下限 | 表头与单元格共用同一列宽 |
-| columns[].fill | 弹性列标记 | 可缩放表用 `role="table"` 的 CSS Grid + 行级 `subgrid`，避免在 `<table>`/`<tr>` 上使用 `display:contents`（Chromium 会丢掉后列）。fill 列 `minmax(0, 1fr)`，非 fill 列像素 track。表宽 `min(100%, var(--vui-window-width, 100svw))` + `contain:inline-size` + `min-width:0`。`--vui-window-width` 由 `web/index.html` 在 React 挂载前写成可见 CSS 宽：若 `clientWidth` 仍接近 Electron 的 1180 且 `devicePixelRatio>1`，则除以 DPR，避免把 DIP 窗口数字当成已绘制 CSS 宽。启动器 route body 用 `overflow-x: clip`；操作列不要 `overflow:visible`/`min-width:auto`。不要给 fill 设无上限的 `width:100%` |
+| columns[].fill | 弹性列标记 | 可缩放表用 `role="table"` 的 CSS Grid + 行级 `subgrid`，避免在 `<table>`/`<tr>` 上使用 `display:contents`（Chromium 会丢掉后列）。fill 列 `minmax(0, 1fr)`，非 fill 列像素 track。表宽 `min(100%, var(--vui-window-width, 100svw))` + `contain:inline-size` + `min-width:0`。`--vui-window-width` 由 `web/index.html` 与启动器 route 写成 `100svw`，文档壳 `width:100%` + `overflow-x: clip`，铺满 Electron 客户区；不要把 `clientWidth` 再除以 DPR（BrowserWindow 宽已是 DIP）。操作列不要 `overflow:visible`/`min-width:auto`。不要给 fill 设无上限的 `width:100%` |
 | resizable | 拖拽调整列宽 | 拖非 fill 列只改该列像素 track。fill 列不提供拖拽，避免和 `1fr` 抢宽。壳 `overflow-x-auto`，窄于 `min-width` 时横向滚动。操作列不要 `sticky`：祖先 `overflow-x-hidden` 会把粘滞列裁成 0 |
 | onRowClick / getRowState | 行选择与色条 | 运维表可选 |
 
