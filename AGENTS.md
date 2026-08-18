@@ -18,7 +18,7 @@
 - 当前 Git checkout 是项目根；运行时解析路径，不假设固定 Windows 用户名。
 - 根 `main` 是只读的本地集成工作区。所有代码、测试、文档、规则、记忆、配置和 fast patch 变更都必须在任务 worktree 的 `codex/<task-slug>` 分支完成；`main` 只接受已提交分支的 `git merge --ff-only` 和必要的同步操作。
 - 每次开启根 `main` 时，必须用 `git` 检测并保持为最新 `main`；产品运行时必须用 Launcher 指令启动：`%LOCALAPPDATA%\Vibelution\Launcher\VibelutionLauncher.exe --project "<project-root>" start`。
-- 所有审查、测试、质量门、mergeability 与验收证据必须在合入前完成。验证与验收证据闭合后，任务 owner 必须**主动自审当前任务 diff**，并在合入门通过时**主动** `git merge --ff-only` **合入本地 `main`**；不得把「等用户再说审查/合入」当作完成态。仅当用户明确要求先停、保持隔离或只交接，或合入门失败 / 大冲突 / 跨 lane / 热文件冲突时，才报告精确 blocker 并停止合入。远端 push/PR 仍需用户明确授权。`git merge --ff-only` 成功即代表该分支任务已被本地 `main` 吸收，必须立即清理且不得等待合入后验证：只清理本任务明确创建的临时文件/目录、调试产物、后台进程或监听器，释放本任务 claim，移除本任务 junction、干净 worktree 和已合并本地分支，并执行安全的 `git worktree prune`。清理失败要报告 `cleanup pending`、精确残留和原因，但不改变“已合入”事实；禁止 force 清理、删除未合入/dirty/冲突/仍在使用或归属不明的资源，远端分支删除仍需用户单独明确授权。
+- 所有审查、测试、质量门、mergeability 与验收证据必须在合入前完成。验证与验收证据闭合后，任务 owner 必须**主动自审当前任务 diff**，并在合入门通过时**主动** `git merge --ff-only` **合入本地 `main`**；不得把「等用户再说审查/合入」当作完成态。仅当用户明确要求先停、保持隔离或只交接，或合入门失败 / 大冲突 / 跨 lane / 热文件冲突时，才报告精确 blocker 并停止合入。远端 push/PR 仍需用户明确授权。`git merge --ff-only` 成功即代表该分支任务已被本地 `main` 吸收，必须立即清理且不得等待合入后验证：只清理本任务明确创建的临时文件/目录、调试产物、后台进程或监听器，释放本任务 claim，移除本任务 junction、干净 worktree 和已合并本地分支，并执行安全的 `git worktree prune`。清理失败时向用户说明哪项没清掉、为什么，但不改变“已合入”事实；禁止 force 清理、删除未合入/dirty/冲突/仍在使用或归属不明的资源，远端分支删除仍需用户单独明确授权。
 - 不覆盖、回滚、删除或重置无关的用户/Agent 改动；发现重叠先检查 claim 和 diff。
 - 远端 push、PR、发布需要用户明确授权和远端同步门；force、覆盖或远端删除需要破坏性确认。
 - **Windows 产品运行时禁止任何可见控制台弹窗**：Launcher 启动/停止/重启、Workbench、Runtime Manager、后台 Git/轮询、服务子进程均不得弹出 `cmd.exe`、`powershell.exe` 控制台、Windows Terminal、OpenConsole 或交互式 Git 编辑器。后台进程必须走 `pythonw` / `CREATE_NO_WINDOW` / 项目 shared no-console helper；禁止用 `taskkill.exe`、裸 `git` cmd wrapper、`npm`/`cmd` 脚本壳作为后台路径。用户明确打开的 CLI 终端面板除外。细则见 [development-standard.md](docs/standards/development-standard.md) §8.0。
@@ -89,7 +89,7 @@
   - 仓库 **不会** 在打开项目、开始改代码或默认 pre-commit 时自动跑全量 `tsc -b`。`local_quality_gate.py commit` 以 staged 路径快检为主；pre-commit 额外校验 `web` 的 lock 一致性，**不**替你做 TypeScript 全量检查。
   - Runtime Manager / Launcher 仅在 **open/restart 前端预检需要重建** 时跑 `tsc -b`（例如源码相对 `web/dist` 已过期，或托盘 `forceFrontendRebuild` / `tray_rebuild_and_start`）。若 dist 仍判定 current，预检可 **跳过** `tsc`，旧 dist 仍能继续跑 workbench——类型错误会 **推迟** 到强制重建才爆。
   - 正式前端构建路径含 typecheck：`web` 下 `npm run build` ≡ `tsc -b && vite build`。
-  - **凡改动 `web/`（含 `*.tsx` / styles / 类型入口）**：在宣称完成、建议用户测试、或建议 Launcher **rebuild/restart** 之前，必须在 `web/` 主动执行 `npx tsc -b --pretty false`（或等价 `npm run build` 中的 typecheck）。绿了不必向用户报命令清单；红了或建议对方测前端时才说结果。不得把「等托盘重建再看」当作验证策略。
+  - **凡改动 `web/`（含 `*.tsx` / styles / 类型入口）**：在宣称完成、建议用户测试、或建议 Launcher **rebuild/restart** 之前，必须在 `web/` 主动执行 `npx tsc -b --pretty false`（或等价 `npm run build` 中的 typecheck）。不得把「等托盘重建再看」当作验证策略；对用户怎么说见 §5。
   - 组件与 `*.styles.ts` / CSS module 类型必须同步（例如 `styles.gitValueChip` 等 key 先于用法存在）；`tsc` 红时禁止建议 force frontend rebuild，应先修类型再刷新。
   - 命令与触面表见 [loop.md](docs/guides/loop.md)；Launcher/workbench 预检债见 [07-launcher-runtime-workbench](docs/ops/config/07-launcher-runtime-workbench.md)。
 - 后端 route 保持薄层，公共 DTO 明确，业务与来源权威归 service/pack；projection 不得成为第二写入者。
@@ -100,7 +100,9 @@
 
 ## 5. 对用户汇报
 
-对用户写完成说明，不写审计表。验证、合入、清理仍按 §2 / §4 和 [loop.md](docs/guides/loop.md) 执行，但默认不贴进用户正文。
+所有面向用户的汇报都按本节写，不只是任务完成时：卡住、要授权、报错、给结论也一样。
+
+验证、合入、清理仍按 §2 / §4 和 [loop.md](docs/guides/loop.md) 执行，但默认不贴进用户正文。
 
 写法对齐成熟 GitHub PR / Google CL：第一句能单独成立；正文补 why 和怎么试；机器已经断言的事不要再抄一遍。
 
@@ -113,21 +115,25 @@
 有才写，没有就省略：
 
 1. **现象与结果**：以前怎样，现在怎样。用产品语言，不堆内部模块名。
-2. **怎么试**：对方能照着做的步骤（点哪里、期望看到什么）。不要写「跑了测试」「closeout passed」。
+2. **怎么试**：对方能照着做的步骤（点哪里、期望看到什么）。不要只写测试通过，要写对方怎么复现。
 3. **没做 / 限制**：对方可能误以为已经修好的点，各一句。
 4. **对方要动手的事**：例如必须重启才能测。没有就不要提。
 
 日常交付 3–8 句。只有对方追问、合入失败、或有真实风险时才加细节。
 
-### 5.3 禁止出现在用户正文
+### 5.3 不要贴进用户正文
 
-- 流程词：closeout、claim、worktree、cleanup pending、quality gate、ff-only、Launcher refresh 三选一枚举
+- 内部闸门词当标题或空转汇报：closeout、claim、worktree、cleanup pending、quality gate、ff-only、Launcher refresh 三选一枚举
 - 空段：n/a、not affected、version impact: none、无控制台: n/a
 - 机器已经断言的事：ruff 绿、tsc 绿、N 个 pytest passed、自审 pass
 - 把 commit / 文件清单当汇报；diff 自己会说话
 - 把内部完成块、skill 输出合同、本文件旧模板原样贴给用户
 
-内部闸门、路径、SHA、claim 留给 Agent 自己。用户没问就不要报。合入失败或清理失败时，用一句人话说明 blocker 和残留，不要套完成块标题。
+内部闸门、路径、SHA、claim 留给 Agent 自己。用户没问就不要报。合入失败或清理失败时，用一句人话说明卡在哪、还剩什么，不要套完成块标题。
+
+### 5.4 合格示范
+
+> 修好了。以前点终止经常停不下来，因为拼上下文时不看停止信号，算 prompt 时还握着聊天锁。现在 prepare 会在阶段边界检查停止，snapshot 也不再占锁。重启 Launcher 后开个会转很久的对话，中途点终止，应该能停；当前那一段磁盘/网络 I/O 仍要等它自己返回。
 
 规则冲突、链接失效或本地事实与文档不一致时，不静默选择旧路径；先保留现场、定位唯一权威，再在同一治理轮修正文档与守卫。
 
