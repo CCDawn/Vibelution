@@ -225,8 +225,8 @@ export function WorkflowNodeChrome({
       className={cn(
         "relative flex h-full w-full flex-col justify-between overflow-hidden border outline-none transition duration-150",
         spacious
-          ? "rounded-[11px] bg-[color-mix(in_srgb,var(--vui-surface-panel)_98%,transparent)] px-3 py-2.5 shadow-[0_1px_2px_rgba(15,23,42,0.05),0_5px_14px_rgba(15,23,42,0.04)] hover:-translate-y-px hover:shadow-[0_2px_4px_rgba(15,23,42,0.06),0_9px_22px_rgba(15,23,42,0.08)]"
-          : "rounded-[10px] bg-[color-mix(in_srgb,var(--vui-surface-panel)_98%,transparent)] px-2.5 py-2 shadow-[0_1px_2px_rgba(0,0,0,0.04)]",
+          ? "rounded-[11px] bg-[var(--vui-surface-panel)] px-3 py-2.5 shadow-[var(--vui-elevation-1)] hover:-translate-y-px hover:shadow-[var(--vui-elevation-2)]"
+          : "rounded-[10px] bg-[var(--vui-surface-panel)] px-2.5 py-2 shadow-[var(--vui-elevation-1)]",
         visual.borderClass,
         spacious ? "text-[var(--fg-primary)]" : visual.toneClass,
         isRuntimeCurrent ? visual.ringClass : "",

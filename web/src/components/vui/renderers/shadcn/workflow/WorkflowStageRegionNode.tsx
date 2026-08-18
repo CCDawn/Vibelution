@@ -2,6 +2,23 @@ import type { NodeProps } from "@xyflow/react";
 
 import { cn } from "../../../lib/cn";
 
+/** Mix into workspace, not region/rail: light rail === panel white, and dark row sits above panel. */
+const STAGE_FILL: Record<string, string> = {
+  active: "bg-[color-mix(in_srgb,var(--accent-cool)_12%,var(--vui-surface-workspace))]",
+  attention: "bg-[color-mix(in_srgb,var(--state-warning)_10%,var(--vui-surface-workspace))]",
+  done: "bg-[color-mix(in_srgb,var(--accent-cool)_4%,var(--vui-surface-workspace))]",
+};
+
+const STAGE_FILL_IDLE = "bg-[color-mix(in_srgb,var(--accent-cool)_8%,var(--vui-surface-workspace))]";
+
+const STAGE_BORDER: Record<string, string> = {
+  active: "border-[color-mix(in_srgb,var(--accent-cool)_28%,var(--vui-border-subtle))]",
+  attention: "border-[color-mix(in_srgb,var(--state-warning)_32%,var(--vui-border-subtle))]",
+  done: "border-[color-mix(in_srgb,var(--accent-cool)_14%,var(--vui-border-subtle))] opacity-95",
+};
+
+const STAGE_BORDER_IDLE = "border-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-border-subtle))]";
+
 export function WorkflowStageRegionNode(props: NodeProps) {
   const label = String(props.data.label ?? "");
   const index = Number(props.data.stageIndex ?? 0) + 1;
@@ -13,17 +30,10 @@ export function WorkflowStageRegionNode(props: NodeProps) {
   return (
     <div
       className={cn(
-        "h-full w-full border bg-[color-mix(in_srgb,var(--vui-surface-region)_84%,transparent)]",
-        spacious
-          ? "rounded-2xl border-t-2 bg-[linear-gradient(90deg,color-mix(in_srgb,var(--accent-cool)_5%,var(--vui-surface-region)),color-mix(in_srgb,var(--vui-surface-region)_72%,transparent)_24%,color-mix(in_srgb,var(--vui-surface-region)_55%,transparent))] shadow-[inset_0_1px_0_rgba(255,255,255,0.72)]"
-          : "rounded-2xl",
-        tone === "active"
-          ? "border-[color-mix(in_srgb,var(--accent-cool)_28%,var(--vui-border-subtle))]"
-          : tone === "attention"
-            ? "border-[color-mix(in_srgb,var(--state-warning)_32%,var(--vui-border-subtle))]"
-            : tone === "done"
-              ? "border-[var(--vui-border-subtle)] opacity-95"
-              : "border-[var(--vui-border-subtle)]",
+        "h-full w-full border",
+        spacious ? "rounded-2xl border-t-2" : "rounded-2xl",
+        STAGE_FILL[tone] ?? STAGE_FILL_IDLE,
+        STAGE_BORDER[tone] ?? STAGE_BORDER_IDLE,
       )}
       data-vui="workflow-stage-region"
       data-stage-tone={tone}
