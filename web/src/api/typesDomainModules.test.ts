@@ -21,6 +21,7 @@ const expectedBarrel = [
   'export * from "./types/memory";',
   'export * from "./types/evolution";',
   'export * from "./types/config";',
+  'export * from "./types/hypothesisFirst";',
 ].join("\n");
 
 const domainSources = [

@@ -59,6 +59,20 @@ export const queryKeys = {
     ["teams", teamId, "challenge-program", "question-runs", "status"] as const,
   challengeCupDevControlsSnapshot: (teamId: string) =>
     ["teams", teamId, "challenge-program", "dev-controls", "snapshot"] as const,
+  hypothesisFirstSelectionContext: (teamId: string, questionId: string) =>
+    ["teams", teamId, "hypothesis-first", "selection-context", questionId] as const,
+  hypothesisFirstSelections: (teamId: string, questionId = "") =>
+    ["teams", teamId, "hypothesis-first", "selections", questionId] as const,
+  hypothesisFirstChainState: (teamId: string, questionId: string) =>
+    ["teams", teamId, "hypothesis-first", "chain", "state", questionId] as const,
+  teamMeetingRounds: (teamId: string) =>
+    ["teams", teamId, "meeting-rounds"] as const,
+  teamMeetingRound: (teamId: string, meetingRoundId: string) =>
+    ["teams", teamId, "meeting-rounds", meetingRoundId] as const,
+  teamMeetingRoundSourceMessages: (teamId: string, meetingRoundId: string) =>
+    ["teams", teamId, "meeting-rounds", meetingRoundId, "source-messages"] as const,
+  teamHypothesisRounds: (teamId: string) =>
+    ["teams", teamId, "hypothesis-rounds"] as const,
   researchWorkflowRuns: (workflowId: string, teamId: string) =>
     ["research-workflow", workflowId, teamId, "runs"] as const,
   researchWorkflowLaunchOptions: (workflowId: string, teamId: string) =>

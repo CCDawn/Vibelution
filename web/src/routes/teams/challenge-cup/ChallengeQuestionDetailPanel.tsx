@@ -9,10 +9,13 @@ import {
   VStatusChip,
   VSurface,
 } from "../../../components/vui";
+import { TeamHypothesisRoundTimeline } from "../TeamHypothesisRoundTimeline";
+import { TeamMeetingRoundPanel } from "../TeamMeetingRoundPanel";
 import { ChallengeQuestionAnalysisSection } from "./ChallengeQuestionAnalysisSection";
 import { ChallengeQuestionEvidenceSection } from "./ChallengeQuestionEvidenceSection";
 import { ChallengeQuestionPlanSection } from "./ChallengeQuestionPlanSection";
 import { ChallengeQuestionRegisterDialog } from "./ChallengeQuestionRegisterDialog";
+import { HypothesisSelectionPanel } from "./HypothesisSelectionPanel";
 import css from "./ChallengeQuestionDetailPanel.styles";
 
 export type ChallengeQuestionDetailPanelProps = {
@@ -29,6 +32,9 @@ const DETAIL_ANCHORS = [
   ["hypotheses", "候选假设"],
   ["reviews", "七维评价"],
   ["selection", "选择"],
+  ["hypothesis-first-selection", "假说选择"],
+  ["hypothesis-first-meeting", "评审讨论"],
+  ["hypothesis-first-rounds", "评审轮次"],
   ["plan", "研究计划"],
   ["feedback", "人工审核"],
   ["artifact", "最终工件"],
@@ -95,6 +101,9 @@ export function ChallengeQuestionDetailPanel({
 
       <ChallengeQuestionEvidenceSection detail={detail} />
       <ChallengeQuestionAnalysisSection output={output} />
+      <HypothesisSelectionPanel teamId={detail.teamId} questionId={detail.questionId} />
+      <TeamMeetingRoundPanel teamId={detail.teamId} questionId={detail.questionId} />
+      <TeamHypothesisRoundTimeline teamId={detail.teamId} questionId={detail.questionId} />
       <ChallengeQuestionPlanSection detail={detail} />
 
       {reviseDialogOpen ? (

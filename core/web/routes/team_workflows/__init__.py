@@ -9,5 +9,6 @@ from . import experiment as _experiment  # noqa: F401
 from . import knowledge as _knowledge  # noqa: F401
 from . import research_ops as _research_ops  # noqa: F401
 from . import research_runtime as _research_runtime  # noqa: F401
+from . import hypothesis_first as _hypothesis_first  # noqa: F401
 from . import challenge_cup_dev_controls as _challenge_cup_dev_controls  # noqa: F401
 __all__ = ["router"]
