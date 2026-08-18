@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from core.research.workflow.contracts.node_readiness import RemediationKind
 from core.research.workflow.models import WorkflowNodeSpec
 
 from .common import (
@@ -12,6 +13,8 @@ from .common import (
     DomainVerdict,
     RunSnapshot,
     blocker,
+    hypothesis_first_chain_state,
+    hypothesis_first_run,
 )
 
 
@@ -44,6 +47,47 @@ def evaluate_hypothesis_design(
                 "人工接受必须绑定可回读的 Team Knowledge 产物",
             )
         )
+    if hypothesis_first_run(context, run):
+        state = hypothesis_first_chain_state(context, run)
+        pending = int(state.get("pendingCollectionCount") or 0)
+        if pending > 0:
+            blockers.append(
+                blocker(
+                    "knowledge_gap_pending",
+                    "知识缺口搜集中",
+                    f"{pending} 个讨论决策触发的搜集请求尚未完成知识包交接",
+                    category="evidence_insufficient",
+                    remediation_kind=RemediationKind.RESOLVE_HUMAN,
+                    remediation_label="等待子运行知识包交接",
+                )
+            )
+        if not state.get("hypothesisConverged"):
+            detail = str(state.get("convergenceDetail") or "") or "最近一轮假说评审未闭环或未被接受"
+            if state.get("budgetExhausted"):
+                detail = (
+                    f"讨论轮次已达预算（{state.get('meetingCount') or 0}/"
+                    f"{state.get('roundBudget') or 0}）且仍未收敛，必须人工决策"
+                )
+            blockers.append(
+                blocker(
+                    "hypothesis_round_unconverged",
+                    "假说评审未收敛",
+                    detail,
+                    category="evidence_insufficient",
+                    remediation_kind=RemediationKind.RESOLVE_HUMAN,
+                    remediation_label="推进假说评审收敛",
+                )
+            )
+        if not state.get("templateBaselineExists"):
+            blockers.append(
+                blocker(
+                    "template_baseline_missing",
+                    "模板基线缺失",
+                    "实验设计要求该题作用域下存在 frozen 的模板基线",
+                    remediation_kind=RemediationKind.RESOLVE_HUMAN,
+                    remediation_label="冻结模板基线",
+                )
+            )
     return DomainVerdict(
         blockers=tuple(blockers),
         revision_vector=common.domain_revision_vector,

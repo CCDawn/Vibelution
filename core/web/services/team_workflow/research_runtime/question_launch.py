@@ -490,6 +490,17 @@ def build_question_run_input(
             code="challenge_competition_snapshot_invalid",
         )
     artifact_ref = f"challenge-question-artifact://{catalog_id}/{normalized_question_id}/{review_run_id}/{artifact_sha256}"
+    hypothesis_first = False
+    try:
+        from core.web.services.team_workflow import hypothesis_selection
+
+        hypothesis_first = bool(
+            hypothesis_selection.get_latest_hypothesis_selection(
+                team_id, normalized_question_id
+            ).get("selection")
+        )
+    except Exception:
+        hypothesis_first = False
     return {
         "teamId": _text(team_id),
         "projectId": _text(project.get("projectId")),
@@ -524,6 +535,7 @@ def build_question_run_input(
             "scope": scope,
             "falsifiableOutcome": _text(final_summary.get("next_validation_step"))
             or _text(research_plan.get("failure_criteria")),
+            "hypothesisFirst": hypothesis_first,
         },
         "sourcePolicy": {"minimumPrimarySources": 3, "requireCounterEvidence": True},
         "budgetPolicy": build_safety_budget_policy(safety_limits),

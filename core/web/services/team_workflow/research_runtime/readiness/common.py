@@ -244,6 +244,41 @@ class DomainReadinessContext(Protocol):
 
     def incoming_handoffs(self, run_id: str, node_id: str) -> Sequence[HandoffSnapshot]: ...
 
+    def hypothesis_first_flow(self, team_id: str, run_id: str) -> bool: ...
+
+    def hypothesis_first_chain_state(
+        self, team_id: str, question_id: str
+    ) -> Mapping[str, Any] | None: ...
+
+
+def hypothesis_first_run(context: DomainReadinessContext, run: RunSnapshot) -> bool:
+    """True when the run carries the hypothesis-first input-snapshot marker.
+
+    Duck-typed and fail-open: contexts without the probe (older fakes) simply
+    report ``False`` so non-hypothesis-first runs never see chain blockers.
+    """
+    probe = getattr(context, "hypothesis_first_flow", None)
+    if not callable(probe):
+        return False
+    try:
+        return bool(probe(run.team_id, run.run_id))
+    except Exception:
+        return False
+
+
+def hypothesis_first_chain_state(
+    context: DomainReadinessContext, run: RunSnapshot
+) -> dict[str, Any]:
+    """Read the chain state; unreadable state fails closed as an empty state."""
+    reader = getattr(context, "hypothesis_first_chain_state", None)
+    if not callable(reader):
+        return {}
+    try:
+        state = reader(run.team_id, run.question_id)
+    except Exception:
+        return {}
+    return dict(state) if isinstance(state, Mapping) else {}
+
 
 def blocker(
     code: str,
