@@ -6,10 +6,7 @@ import {
   denseTableFillGridStyle,
   denseTableGridTemplateColumns,
   denseTableMinWidth,
-  denseTableViewportCapPx,
   nextDenseTableColumnWidth,
-  pickDenseTableVisibleWidth,
-  readDenseTableViewportWidth,
   resolveDenseTableFillColumnId,
   sumDenseTableColumnWidths,
   VDenseTable,
@@ -63,7 +60,8 @@ describe("VDenseTable", () => {
     expect(html).toContain("w-full");
     expect(html).toContain("display:grid");
     expect(html).toContain("grid-template-columns:minmax(0, 1fr) 80px 170px");
-    expect(html).toContain("width:100%;max-width:100%;min-width:360px");
+    expect(html).toContain("contain:inline-size");
+    expect(html).toContain("width:100%;max-width:100%;min-width:0");
     expect(html).not.toContain("max-width:470px");
     expect(html).toContain('data-vui-fill="true"');
     expect(html).not.toContain("Resize path");
@@ -93,6 +91,14 @@ describe("VDenseTable", () => {
       { id: "path", header: "Path", fill: true, render: () => null },
       { id: "state", header: "State", render: () => null },
     ])).toBe("path");
+    expect(denseTableFillGridStyle("minmax(0, 1fr) 170px")).toEqual({
+      contain: "inline-size",
+      display: "grid",
+      gridTemplateColumns: "minmax(0, 1fr) 170px",
+      width: "100%",
+      maxWidth: "100%",
+      minWidth: "0px",
+    });
   });
 
   it("keeps existing non-resizable tables without drag handles", () => {
@@ -135,29 +141,5 @@ describe("VDenseTable", () => {
     expect(nextDenseTableColumnWidth(120, 40, 48)).toBe(160);
     expect(nextDenseTableColumnWidth(80, -100, 48)).toBe(48);
     expect(sumDenseTableColumnWidths([36, 188, 88, 112])).toBe(424);
-  });
-
-  it("caps fill tables to the visual viewport instead of an overflowing layout width", () => {
-    expect(readDenseTableViewportWidth({ innerWidth: 1230, visualViewport: { width: 944.8 } })).toBe(944.8);
-    expect(readDenseTableViewportWidth({ innerWidth: 944, visualViewport: null })).toBe(944);
-    expect(pickDenseTableVisibleWidth([1400, 1181, 0, 944.8])).toBe(944.8);
-    expect(pickDenseTableVisibleWidth([1400, 1195])).toBe(1195);
-    expect(pickDenseTableVisibleWidth([0, Number.NaN])).toBeUndefined();
-    expect(denseTableViewportCapPx(944.8)).toBe(905);
-    expect(denseTableViewportCapPx(100)).toBe(320);
-    expect(denseTableFillGridStyle("minmax(0, 1fr) 170px", 360)).toEqual({
-      display: "grid",
-      gridTemplateColumns: "minmax(0, 1fr) 170px",
-      width: "100%",
-      maxWidth: "100%",
-      minWidth: "360px",
-    });
-    expect(denseTableFillGridStyle("minmax(0, 1fr) 170px", 940, 905)).toEqual({
-      display: "grid",
-      gridTemplateColumns: "minmax(0, 1fr) 170px",
-      width: "905px",
-      maxWidth: "905px",
-      minWidth: "905px",
-    });
   });
 });

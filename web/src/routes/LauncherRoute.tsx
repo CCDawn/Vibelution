@@ -52,6 +52,7 @@ import { launcherRouteStyles as styles } from "./LauncherRoute.styles";
 
 /** T4: secondary launcher panels load as route packs — keep lifecycle shell first. */
 import { LauncherBranchInstancesPanel } from "./LauncherBranchInstancesPanel";
+import { pinLauncherDocumentViewport } from "./pinLauncherDocumentViewport";
 import {
   resolveActivePendingOperation,
   toPendingBranchOperation,
@@ -1834,6 +1835,7 @@ export function LauncherRoute() {
       ? toPendingBranchOperation(resolveControlRequest(controlMutation.variables))
       : undefined);
   const pendingBranchOperation = resolveActivePendingOperation(requestedBranchOperation, branchItems);
+  useEffect(() => pinLauncherDocumentViewport(document), []);
   useEffect(() => {
     if (!optimisticBranchOperation) {
       return;

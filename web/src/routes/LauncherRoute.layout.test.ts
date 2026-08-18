@@ -400,10 +400,11 @@ describe("LauncherRoute layout contract", () => {
 
   it("keeps the complete launcher surface reachable when the window is short", () => {
     expect(routeSource).toContain("bodyClassName={styles.routeBody}");
+    expect(routeSource).toContain("pinLauncherDocumentViewport");
     expect(routeSource).toContain("fill");
     expect(routeStylesSource).toContain("routeBody:");
     expect(routeStylesSource).toContain("overflow-y-auto");
-    expect(routeStylesSource).toContain("overflow-x-hidden");
+    expect(routeStylesSource).toContain("overflow-x-clip");
     expect(routeStylesSource).toContain("overscroll-contain");
     expect(routeStylesSource).toContain("[scrollbar-gutter:stable]");
     expect(routeStylesSource).toContain("pb-[max(12px,env(safe-area-inset-bottom))]");
