@@ -29,7 +29,7 @@ function pinElement(element: HTMLElement, width: string): () => void {
 
 export function pinLauncherDocumentViewport(
   doc: Document,
-  widthPx: number = LAUNCHER_CONTROL_WINDOW_WIDTH_PX,
+  widthPx: number = Number(doc.documentElement?.clientWidth) || LAUNCHER_CONTROL_WINDOW_WIDTH_PX,
 ): () => void {
   const width = `${Math.max(320, Math.round(widthPx))}px`;
   const nodes = [doc.documentElement, doc.body, doc.getElementById("root")].filter(
