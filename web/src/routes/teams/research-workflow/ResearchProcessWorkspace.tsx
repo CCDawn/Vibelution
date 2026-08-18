@@ -3,6 +3,7 @@ import { useCallback, useMemo } from "react";
 import { WORKBENCH_LAYOUT_IDS } from "../../../components/layout/workbenchLayoutIds";
 import { VCanvasWorkbenchPage } from "../../../components/vui";
 import { definitionToCanvasGraph, projectionToCanvasGraph } from "./researchProcessGraphModel";
+import { shouldShowResearchProcessInspector } from "./researchProcessPanelSelection";
 import { ResearchProcessInspectorPane } from "./ResearchProcessInspectorPane";
 import { ResearchWorkflowCanvasPane } from "./ResearchWorkflowCanvasPane";
 import { ResearchWorkflowToolbar } from "./ResearchWorkflowToolbar";
@@ -82,6 +83,10 @@ export function ResearchProcessWorkspace({
   const displayError =
     commands.error || formalCommand.commandError || runState.error || catalog.error;
   const commandBusy = runState.busy || commands.busy || formalCommand.busy;
+  const showInspector = shouldShowResearchProcessInspector({
+    panel: location.panel,
+    selectedNodeId: location.selectedNodeId,
+  });
 
   return (
     <div data-fill="true" data-vui="research-process-workspace-host" className={styles.host}>
@@ -119,34 +124,36 @@ export function ResearchProcessWorkspace({
             onSelectNode={location.selectNode}
           />
         )}
-        inspector={(
-          <ResearchProcessInspectorPane
-            scope={{
-              teamId,
-              teamName,
-              linkedChatRoomId,
-              runId: location.runId,
-              selectedNodeId: location.selectedNodeId,
-              questionId: location.questionId,
-              panel: location.panel,
-            }}
-            state={{
-              run: runState.run,
-              projection: runState.projection,
-              effectiveBindings: catalog.effectiveBindings,
-              nodeDetail: nodeDetail.state,
-              insights,
-              busy: commandBusy,
-            }}
-            actions={{
-              replaceParams: location.replaceParams,
-              retryNodeDetail: nodeDetail.retry,
-              submitRun: commands.submitRun,
-              pendingTaskId: commands.pendingTaskId,
-              submitOffer: commands.submitOffer,
-            }}
-          />
-        )}
+        inspector={
+          showInspector ? (
+            <ResearchProcessInspectorPane
+              scope={{
+                teamId,
+                teamName,
+                linkedChatRoomId,
+                runId: location.runId,
+                selectedNodeId: location.selectedNodeId,
+                questionId: location.questionId,
+                panel: location.panel,
+              }}
+              state={{
+                run: runState.run,
+                projection: runState.projection,
+                effectiveBindings: catalog.effectiveBindings,
+                nodeDetail: nodeDetail.state,
+                insights,
+                busy: commandBusy,
+              }}
+              actions={{
+                replaceParams: location.replaceParams,
+                retryNodeDetail: nodeDetail.retry,
+                submitRun: commands.submitRun,
+                pendingTaskId: commands.pendingTaskId,
+                submitOffer: commands.submitOffer,
+              }}
+            />
+          ) : undefined
+        }
         canvasClassName={styles.canvas}
         inspectorClassName={styles.inspector}
         className={styles.page}
