@@ -962,6 +962,18 @@ class WorkflowLedgerRepository:
             (node_run_id,),
         ).fetchall()
 
+    def list_artifact_receipts_for_run(self, run_id: str) -> list[tuple]:
+        return self.execute(
+            """
+            SELECT receipt_id, run_id, node_run_id, team_id, artifact_kind,
+                   canonical_ref_json, artifact_version, sha256, domain_revision,
+                   materialized, verified_at_ms
+            FROM artifact_receipts WHERE run_id = ?
+            ORDER BY verified_at_ms ASC
+            """,
+            (run_id,),
+        ).fetchall()
+
     def insert_budget_receipt(
         self,
         *,

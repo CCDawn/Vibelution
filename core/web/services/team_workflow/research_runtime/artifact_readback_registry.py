@@ -55,6 +55,9 @@ ARTIFACT_AUTHORITY: dict[str, ArtifactAuthoritySpec] = {
     "research_result_package": ArtifactAuthoritySpec(
         "research_result_package", "result_package"
     ),
+    "delivery_orchestration_result": ArtifactAuthoritySpec(
+        "delivery_orchestration_result", "workflow_system"
+    ),
 }
 
 
@@ -486,6 +489,7 @@ def load_scoped_artifact_payload(
         "protocol_review_report",
         "iteration_decision",
         "version_governance_record",
+        "delivery_orchestration_result",
     }:
         from .workflow_artifact_store import load_workflow_artifact_payload
 

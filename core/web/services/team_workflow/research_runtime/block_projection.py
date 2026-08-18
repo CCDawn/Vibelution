@@ -211,6 +211,12 @@ def sync_run_succeeded(
         terminal_reason=terminal_reason,
         blocked_problem_json=None,
     )
+    # Post-run delivery chain rides the same transaction: the outbox row is
+    # committed atomically with the terminal transition, so a crash between
+    # run close and worker pickup can never lose the orchestration.
+    from .delivery_orchestration import enqueue_delivery_orchestration
+
+    enqueue_delivery_orchestration(uow, run=run, now_ms=now_ms)
     sequence = uow.repository.advance_last_sequence(run_id, 1, now_ms)
     if sequence is None:
         return True

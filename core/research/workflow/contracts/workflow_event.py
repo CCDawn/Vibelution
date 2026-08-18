@@ -29,6 +29,9 @@ class WorkflowEventType(str, Enum):
     RUN_BLOCKED = "run_blocked"
     RUN_SUCCEEDED = "run_succeeded"
     RECONCILIATION_REQUIRED = "reconciliation_required"
+    DELIVERY_ORCHESTRATION_COMPLETED = "delivery_orchestration_completed"
+    DELIVERY_ORCHESTRATION_BLOCKED = "delivery_orchestration_blocked"
+    DELIVERY_ORCHESTRATION_FAILED = "delivery_orchestration_failed"
 
 
 @dataclass(frozen=True, slots=True)

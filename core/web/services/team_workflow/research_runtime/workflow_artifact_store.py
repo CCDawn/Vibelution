@@ -33,6 +33,7 @@ _SUPPORTED_KINDS = frozenset(
         "protocol_review_report",
         "iteration_decision",
         "version_governance_record",
+        "delivery_orchestration_result",
     }
 )
 

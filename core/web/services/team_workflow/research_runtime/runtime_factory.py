@@ -23,6 +23,7 @@ from .adapter_dispatch_worker import AdapterDispatchWorker
 from .adapters.domain_adapters import register_default_adapters
 from .checkpoint_fork_worker import CheckpointForkWorker
 from .command_service import WorkflowCommandService
+from .delivery_worker import DeliveryOrchestrationWorker
 from .formal_read_runtime import configure_formal_read_runtime, wake_stream_readers
 from .formal_write_runtime import configure_formal_write_runtime
 from .graph_dispatch_worker import GraphDispatchWorker
@@ -45,11 +46,13 @@ class WorkflowRuntime:
     graph_worker: GraphDispatchWorker
     adapter_worker: AdapterDispatchWorker
     fork_worker: CheckpointForkWorker
+    delivery_worker: DeliveryOrchestrationWorker
 
     def run_workers_once(self, limit: int = 4) -> int:
         handled = self.fork_worker.run_once(limit=limit)
         handled += self.graph_worker.run_once(limit=limit)
         handled += self.adapter_worker.run_once(limit=limit)
+        handled += self.delivery_worker.run_once(limit=limit)
         return handled
 
     def close(self) -> None:
@@ -168,6 +171,11 @@ def build_workflow_runtime(
         owner_id="checkpoint-fork-worker",
         commit_hook=combined_wake,
     )
+    delivery_worker = DeliveryOrchestrationWorker(
+        store=store,
+        owner_id="delivery-worker",
+        commit_hook=combined_wake,
+    )
     return WorkflowRuntime(
         store=store,
         coordinator=coordinator,
@@ -179,6 +187,7 @@ def build_workflow_runtime(
         graph_worker=graph_worker,
         adapter_worker=adapter_worker,
         fork_worker=fork_worker,
+        delivery_worker=delivery_worker,
     )
 
 

@@ -20,7 +20,7 @@ class Migration:
         return hashlib.sha256("\n".join(self.statements).encode("utf-8")).hexdigest()
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 MIGRATIONS: tuple[Migration, ...] = (
@@ -350,6 +350,65 @@ MIGRATIONS: tuple[Migration, ...] = (
             """,
             "DROP TABLE budget_receipts",
             "ALTER TABLE budget_receipts__v2 RENAME TO budget_receipts",
+        ),
+    ),
+    # Additive: accept outbox action kind `delivery_orchestration` (post-run
+    # delivery chain) and let run-scoped kinds skip command_id, like
+    # `reconcile`. Existing v2 DBs rebuild the table; new DBs apply v1..v3.
+    Migration(
+        version=3,
+        statements=(
+            """
+            CREATE TABLE outbox_actions__v3 (
+              action_id TEXT PRIMARY KEY,
+              run_id TEXT NOT NULL,
+              command_id TEXT,
+              node_run_id TEXT,
+              action_kind TEXT NOT NULL CHECK (action_kind IN (
+                'graph_dispatch','adapter_dispatch','event_publish','reconcile',
+                'checkpoint_fork','delivery_orchestration'
+              )),
+              idempotency_key TEXT NOT NULL UNIQUE,
+              payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
+              status TEXT NOT NULL CHECK (status IN (
+                'pending','leased','succeeded','failed','cancelled'
+              )),
+              attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+              available_at_ms INTEGER NOT NULL,
+              lease_owner TEXT,
+              lease_expires_at_ms INTEGER,
+              last_problem_json TEXT CHECK (
+                last_problem_json IS NULL OR json_valid(last_problem_json)
+              ),
+              created_at_ms INTEGER NOT NULL,
+              updated_at_ms INTEGER NOT NULL,
+              CHECK (action_kind IN ('reconcile','delivery_orchestration')
+                     OR command_id IS NOT NULL),
+              FOREIGN KEY (run_id) REFERENCES workflow_runs(run_id) ON DELETE RESTRICT,
+              FOREIGN KEY (command_id) REFERENCES workflow_commands(command_id) ON DELETE RESTRICT,
+              FOREIGN KEY (node_run_id) REFERENCES node_attempts(node_run_id) ON DELETE RESTRICT
+            )
+            """,
+            """
+            INSERT INTO outbox_actions__v3 (
+              action_id, run_id, command_id, node_run_id, action_kind,
+              idempotency_key, payload_json, status, attempt_count,
+              available_at_ms, lease_owner, lease_expires_at_ms,
+              last_problem_json, created_at_ms, updated_at_ms
+            )
+            SELECT
+              action_id, run_id, command_id, node_run_id, action_kind,
+              idempotency_key, payload_json, status, attempt_count,
+              available_at_ms, lease_owner, lease_expires_at_ms,
+              last_problem_json, created_at_ms, updated_at_ms
+            FROM outbox_actions
+            """,
+            "DROP TABLE outbox_actions",
+            "ALTER TABLE outbox_actions__v3 RENAME TO outbox_actions",
+            """
+            CREATE INDEX idx_outbox_ready
+            ON outbox_actions(status, available_at_ms, lease_expires_at_ms, action_id)
+            """,
         ),
     ),
 )
