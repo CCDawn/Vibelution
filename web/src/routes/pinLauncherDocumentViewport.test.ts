@@ -3,7 +3,19 @@ import { describe, expect, it } from "vitest";
 import { pinLauncherDocumentViewport } from "./pinLauncherDocumentViewport";
 
 function styleBox() {
-  return { overflowX: "", maxWidth: "", width: "", minWidth: "" };
+  const vars: Record<string, string> = {};
+  return {
+    overflowX: "",
+    maxWidth: "",
+    width: "",
+    minWidth: "",
+    setProperty(name: string, value: string) {
+      vars[name] = value;
+    },
+    getPropertyValue(name: string) {
+      return vars[name] ?? "";
+    },
+  };
 }
 
 describe("pinLauncherDocumentViewport", () => {
@@ -22,6 +34,7 @@ describe("pinLauncherDocumentViewport", () => {
       expect(node.style.maxWidth).toBe("945px");
       expect(node.style.minWidth).toBe("0");
     }
+    expect(documentElement.style.getPropertyValue("--vui-window-width")).toBe("945px");
     restore();
     expect(documentElement.style.overflowX).toBe("");
   });

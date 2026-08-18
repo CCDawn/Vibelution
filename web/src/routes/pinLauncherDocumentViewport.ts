@@ -32,6 +32,9 @@ export function pinLauncherDocumentViewport(
   widthPx: number = Number(doc.documentElement?.clientWidth) || LAUNCHER_CONTROL_WINDOW_WIDTH_PX,
 ): () => void {
   const width = `${Math.max(320, Math.round(widthPx))}px`;
+  if (doc.documentElement && "style" in doc.documentElement) {
+    doc.documentElement.style.setProperty("--vui-window-width", width);
+  }
   const nodes = [doc.documentElement, doc.body, doc.getElementById("root")].filter(
     (node): node is HTMLElement => Boolean(node && typeof node === "object" && "style" in node),
   );
