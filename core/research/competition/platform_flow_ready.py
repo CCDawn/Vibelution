@@ -153,11 +153,13 @@ def gate_r0(repo: Path, *, require_clean: bool = True) -> dict[str, str]:
     report = evaluate_source_integrity(repo, require_clean=require_clean)
     if report["source_integrity"] != "PASS":
         return _gate("r0_source_integrity", "FAIL", "; ".join(report["failures"])[:500])
-    return _gate(
+    gate = _gate(
         "r0_source_integrity",
         "PASS",
         f"source_integrity=PASS entries={report['entryCount']} require_clean={require_clean}",
     )
+    gate["sourceCommit"] = str(report["sourceCommit"])
+    return gate
 
 
 def gate_r1(
@@ -634,6 +636,7 @@ def build_platform_flow_readiness_report(
         gate_product_projection(repo),
     ]
     status = overall_status(gates)
+    r0_gate = next(item for item in gates if item["gateId"] == "r0_source_integrity")
     return {
         "schemaVersion": 1,
         "reportKind": REPORT_KIND,
@@ -646,6 +649,7 @@ def build_platform_flow_readiness_report(
             "version": CATALOG_POLICY_VERSION,
             "corePolicyHash": CORE_POLICY_HASH,
         },
+        "sourceCommit": str(r0_gate.get("sourceCommit") or ""),
         "mode": "dev",
         "researchAuthorizationRequired": True,
         "realCampaignAllowed": False,

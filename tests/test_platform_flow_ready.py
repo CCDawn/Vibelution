@@ -71,6 +71,8 @@ def test_platform_flow_readiness_report_is_ready_for_dev_control_flow(
     failed = [item for item in report["gates"] if item["status"] != "PASS"]
     assert failed == [], failed
     assert report["status"] == "READY"
+    assert len(report["sourceCommit"]) == 40
+    assert report["sourceCommit"] == report["gates"][1]["sourceCommit"]
     assert report["nextLegalAction"] == "RESEARCH_AUTHORIZATION_REQUIRED"
 
 
