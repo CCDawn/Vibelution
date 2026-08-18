@@ -8,6 +8,7 @@ import {
   denseTableMinWidth,
   denseTableViewportCapPx,
   nextDenseTableColumnWidth,
+  pickDenseTableVisibleWidth,
   readDenseTableViewportWidth,
   resolveDenseTableFillColumnId,
   sumDenseTableColumnWidths,
@@ -139,6 +140,9 @@ describe("VDenseTable", () => {
   it("caps fill tables to the visual viewport instead of an overflowing layout width", () => {
     expect(readDenseTableViewportWidth({ innerWidth: 1230, visualViewport: { width: 944.8 } })).toBe(944.8);
     expect(readDenseTableViewportWidth({ innerWidth: 944, visualViewport: null })).toBe(944);
+    expect(pickDenseTableVisibleWidth([1400, 1181, 0, 944.8])).toBe(944.8);
+    expect(pickDenseTableVisibleWidth([1400, 1195])).toBe(1195);
+    expect(pickDenseTableVisibleWidth([0, Number.NaN])).toBeUndefined();
     expect(denseTableViewportCapPx(944.8)).toBe(905);
     expect(denseTableViewportCapPx(100)).toBe(320);
     expect(denseTableFillGridStyle("minmax(0, 1fr) 170px", 360)).toEqual({

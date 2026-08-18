@@ -54,6 +54,17 @@ export function readDenseTableViewportWidth(
   return view.innerWidth;
 }
 
+export function pickDenseTableVisibleWidth(candidates: Iterable<number>): number | undefined {
+  let visible: number | undefined;
+  for (const candidate of candidates) {
+    if (!Number.isFinite(candidate) || candidate <= 0) {
+      continue;
+    }
+    visible = visible == null ? candidate : Math.min(visible, candidate);
+  }
+  return visible;
+}
+
 export function denseTableFillGridStyle(
   gridTemplateColumns: string,
   tableMinWidth: number,
@@ -151,15 +162,32 @@ export function VDenseTable<TRow>({
   );
   const [viewportCapPx, setViewportCapPx] = useState<number>();
   useEffect(() => {
+    const probe = document.createElement("div");
+    probe.setAttribute("data-vui", "dense-table-viewport-probe");
+    probe.style.cssText =
+      "position:fixed;top:0;left:0;right:0;height:0;margin:0;border:0;padding:0;visibility:hidden;pointer-events:none;";
+    document.body.appendChild(probe);
     const apply = () => {
-      setViewportCapPx(denseTableViewportCapPx(readDenseTableViewportWidth(window)));
+      const visible = pickDenseTableVisibleWidth([
+        probe.getBoundingClientRect().width,
+        window.visualViewport?.width ?? 0,
+        window.innerWidth,
+        window.outerWidth,
+      ]);
+      if (visible != null) {
+        setViewportCapPx(denseTableViewportCapPx(visible));
+      }
     };
+    const observer = new ResizeObserver(apply);
+    observer.observe(probe);
     apply();
     window.addEventListener("resize", apply);
     window.visualViewport?.addEventListener("resize", apply);
     return () => {
+      observer.disconnect();
       window.removeEventListener("resize", apply);
       window.visualViewport?.removeEventListener("resize", apply);
+      probe.remove();
     };
   }, []);
 
