@@ -57,6 +57,8 @@ export const queryKeys = {
     ["teams", teamId, "challenge-program", "questions", questionId, runId] as const,
   challengeQuestionRunStatus: (teamId: string) =>
     ["teams", teamId, "challenge-program", "question-runs", "status"] as const,
+  challengeCupDevControlsSnapshot: (teamId: string) =>
+    ["teams", teamId, "challenge-program", "dev-controls", "snapshot"] as const,
   researchWorkflowRuns: (workflowId: string, teamId: string) =>
     ["research-workflow", workflowId, teamId, "runs"] as const,
   researchWorkflowLaunchOptions: (workflowId: string, teamId: string) =>

@@ -1,20 +1,35 @@
 /**
  * Program v2 and question-result progress inside the research workflow canvas.
  *
- * Both sections are read-only backend projections. This component never derives
- * completion from legacy MVP counts and never starts a question or experiment.
+ * The Program v2 / question sections are read-only backend projections. The DEV
+ * control section is team-scoped and DEV-only: readiness gates, dev-1/dev-5
+ * fixture checkpoints and the legal next action come from the DEV controls
+ * snapshot. Mouse actions are strictly gated by the persisted nextLegalAction
+ * and mutation pending state; repair states only surface a blocking hint and
+ * never advance to the next stage. No real experiment, Qwen, CUDA/GPU, DANDI,
+ * network collection or formal submission is ever started.
  */
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { getChallengeQuestionRunStatus } from "../../../api/challengeQuestionRuns";
 import { queryKeys } from "../../../api/queryKeys";
-import { fetchExperimentPlanningStatus } from "../../../api/teamExperiment";
+import {
+  fetchChallengeCupDevControlSnapshot,
+  fetchExperimentPlanningStatus,
+  runChallengeCupDevBatch,
+  runChallengeCupDevReadiness,
+} from "../../../api/teamExperiment";
+import type {
+  ChallengeCupDevBatchProjection,
+  ChallengeCupDevReadinessProjection,
+} from "../../../api/types/challengeCup";
 import {
   VButton,
   VEmptyState,
   VStateSurface,
   VStatusChip,
   VSurface,
+  type VStatusTone,
 } from "../../../components/vui";
 import type { ExperimentPlanningStatusPayload } from "../experimentLoopModel";
 import styles from "./ChallengeMvpProgressPanel.styles";
@@ -27,6 +42,54 @@ export type ChallengeMvpProgressPanelProps = {
 
 function errorMessage(reason: unknown): string {
   return reason instanceof Error ? reason.message : String(reason || "unavailable");
+}
+
+function readinessLabel(
+  zh: boolean,
+  report: ChallengeCupDevReadinessProjection | null,
+  running: boolean,
+): string {
+  if (running) return zh ? "运行中" : "Running";
+  if (!report) return zh ? "未运行" : "Unrun";
+  if (report.status === "READY") return zh ? "就绪" : "Ready";
+  return zh ? `失败 ${report.status || ""}` : `Failed ${report.status || ""}`;
+}
+
+function batchLabel(
+  zh: boolean,
+  batch: ChallengeCupDevBatchProjection | undefined,
+  running: boolean,
+): string {
+  if (running) return zh ? "运行中" : "Running";
+  if (!batch) return zh ? "未运行" : "Unrun";
+  if (batch.failedCount > 0 || batch.blockedCount > 0) return zh ? "失败/阻塞" : "Failed/Blocked";
+  if (batch.pendingCount > 0) return zh ? "暂停可恢复" : "Paused/Resumable";
+  return zh ? "成功" : "Succeeded";
+}
+
+function batchTone(
+  batch: ChallengeCupDevBatchProjection | undefined,
+  running: boolean,
+): VStatusTone {
+  if (running) return "accent";
+  if (!batch) return "neutral";
+  if (batch.failedCount > 0 || batch.blockedCount > 0) return "danger";
+  if (batch.pendingCount > 0) return "warning";
+  return "success";
+}
+
+function actionLabel(zh: boolean, action: string): string {
+  const labels: Record<string, string> = {
+    run_dev_readiness: zh ? "运行 DEV readiness" : "Run DEV readiness",
+    run_dev_1_fixture_batch: zh ? "运行 dev-1 fixture" : "Run dev-1 fixture",
+    run_dev_5_fixture_batch: zh ? "运行 dev-5（首次 maxItems=2）" : "Run dev-5 (first maxItems=2)",
+    resume_dev_5_fixture_batch: zh ? "恢复 dev-5" : "Resume dev-5",
+    repair_failed_platform_gates: zh ? "修复失败的平台门禁" : "Repair failed platform gates",
+    repair_dev_1_fixture_batch: zh ? "修复 dev-1 fixture" : "Repair dev-1 fixture",
+    repair_dev_5_fixture_batch: zh ? "修复 dev-5 fixture" : "Repair dev-5 fixture",
+    RESEARCH_AUTHORIZATION_REQUIRED: "RESEARCH_AUTHORIZATION_REQUIRED",
+  };
+  return labels[action] ?? action;
 }
 
 export function ChallengeMvpProgressPanel({
@@ -56,6 +119,44 @@ export function ChallengeMvpProgressPanel({
     staleTime: 30_000,
   });
 
+  const devControlsKey = queryKeys.challengeCupDevControlsSnapshot(teamId);
+  const devControlsQuery = useQuery({
+    queryKey: devControlsKey,
+    queryFn: () => fetchChallengeCupDevControlSnapshot(teamId),
+    enabled: Boolean(teamId.trim()),
+    staleTime: 15_000,
+  });
+
+  const queryClient = useQueryClient();
+  const refreshDevControls = () => {
+    void queryClient.invalidateQueries({ queryKey: devControlsKey });
+  };
+
+  async function runDevReadiness(vars: { teamId: string }) {
+    return runChallengeCupDevReadiness(vars.teamId, { mode: "dev" });
+  }
+
+  async function runDev1(vars: { teamId: string }) {
+    return runChallengeCupDevBatch(vars.teamId, "dev-1", { maxItems: null });
+  }
+
+  async function runDev5(vars: { teamId: string; maxItems: number | null }) {
+    return runChallengeCupDevBatch(vars.teamId, "dev-5", { maxItems: vars.maxItems });
+  }
+
+  const readinessMutation = useMutation({
+    mutationFn: runDevReadiness,
+    onSuccess: refreshDevControls,
+  });
+  const dev1Mutation = useMutation({
+    mutationFn: runDev1,
+    onSuccess: refreshDevControls,
+  });
+  const dev5Mutation = useMutation({
+    mutationFn: runDev5,
+    onSuccess: refreshDevControls,
+  });
+
   if (statusQuery.isPending) {
     return (
       <VSurface tone="panel" className={styles.root}>
@@ -81,6 +182,19 @@ export function ChallengeMvpProgressPanel({
   const summary = statusQuery.data.questionStatus?.summary;
   const results = summary?.validatedQuestionResults ?? [];
   const approvedDeepExperimentCount = program?.requiredDeepExperiments.filter((item) => item.approved).length ?? 0;
+
+  const snapshot = devControlsQuery.data ?? null;
+  const nextLegalAction = snapshot?.nextLegalAction ?? "";
+  const report = snapshot?.report ?? null;
+  const dev1 = snapshot?.batches?.["dev-1"];
+  const dev5 = snapshot?.batches?.["dev-5"];
+  const boundary = snapshot?.boundary ?? null;
+  const anyMutationPending = readinessMutation.isPending || dev1Mutation.isPending || dev5Mutation.isPending;
+  const activeMutationError = readinessMutation.error ?? dev1Mutation.error ?? dev5Mutation.error;
+  const isRepairAction =
+    nextLegalAction === "repair_failed_platform_gates"
+    || nextLegalAction === "repair_dev_1_fixture_batch"
+    || nextLegalAction === "repair_dev_5_fixture_batch";
 
   return (
     <VSurface tone="panel" className={styles.root} data-vui="competition-program-progress-panel">
@@ -156,41 +270,197 @@ export function ChallengeMvpProgressPanel({
               {zh ? "提交方向要求尚未捕获，当前不能标记 submission ready。" : "Submission direction is not captured; submission ready remains blocked."}
             </div>
           ) : null}
-          <section className={styles.readiness} aria-label={zh ? "开发态就绪与批次控制" : "DEV readiness and batch control"}>
-            <div className={styles.sectionHeader}>
-              <strong>{zh ? "开发态就绪 / 批次 / 证据 locator" : "DEV readiness / batches / locators"}</strong>
-            </div>
-            <div className={styles.gateRow}>
-              <VStatusChip tone="warning">R0 source_integrity=CLI</VStatusChip>
-              <VStatusChip tone="warning">R1 clean_clone=CLI</VStatusChip>
-              <VStatusChip tone="warning">PlatformFlowReady CLI</VStatusChip>
-              <VStatusChip tone={program.directionSubmissionRequirement.blocksSubmissionReady ? "warning" : "accent"}>
-                {program.directionSubmissionRequirement.blocksSubmissionReady
-                  ? (zh ? "提交投影未冻结" : "Submission projection unfrozen")
-                  : (zh ? "提交投影已捕获" : "Submission projection captured")}
-              </VStatusChip>
-            </div>
-            <div className={styles.locator}>
-              python scripts/challenge_cup/platform_flow_ready.py
-            </div>
-            <div className={styles.boundary} role="note">
-              <strong>{zh ? "DEV 批次" : "DEV batches"}</strong>
-              <span>
-                {zh
-                  ? "允许 fixture 计划 dev-1 / dev-5；真实 G1/G5/G12/G125、Qwen 与联网搜集未授权。"
-                  : "Fixture plans dev-1 / dev-5 are allowed; real G1/G5/G12/G125, Qwen and live collection are unauthorized."}
-              </span>
-            </div>
-            <div className={styles.locator}>
-              {zh ? "下一合法动作：运行 DEV fixture 与 PlatformFlowReady CLI，然后停止于 RESEARCH_AUTHORIZATION_REQUIRED。" : "Next legal action: run DEV fixtures and the PlatformFlowReady CLI, then stop at RESEARCH_AUTHORIZATION_REQUIRED."}
-            </div>
-          </section>
         </section>
       ) : (
         <VEmptyState title={zh ? "Program v2 状态不可用" : "Program v2 unavailable"} className={styles.empty}>
           {statusQuery.data.programError || (zh ? "后端尚未提供 competitionProgramProjection。" : "competitionProgramProjection is not available.")}
         </VEmptyState>
       )}
+
+      <section className={styles.devControls} aria-label={zh ? "开发态就绪与批次控制" : "DEV readiness and batch control"}>
+        <div className={styles.sectionHeader}>
+          <strong>{zh ? "开发态就绪 / 批次 / 证据 locator" : "DEV readiness / batches / locators"}</strong>
+          <VStatusChip tone={report?.status === "READY" ? "success" : report ? "danger" : "neutral"}>
+            {zh ? "DEV-only" : "DEV-only"}
+          </VStatusChip>
+        </div>
+
+        {devControlsQuery.isPending ? (
+          <VStateSurface tone="loading" title={zh ? "读取 DEV 控制快照" : "Loading DEV control snapshot"} fill className={styles.fill} />
+        ) : devControlsQuery.isError || !snapshot ? (
+          <div className={styles.error} role="alert" data-dev-controls="snapshot-error">
+            {devControlsQuery.error instanceof Error ? devControlsQuery.error.message : String(devControlsQuery.error ?? (zh ? "DEV 控制快照不可用" : "DEV control snapshot unavailable"))}
+          </div>
+        ) : (
+          <>
+            <div className={styles.devRow} data-dev-controls="readiness">
+              <div className={styles.devRowHeader}>
+                <strong>Readiness</strong>
+                <VStatusChip tone={readinessMutation.isPending ? "accent" : report?.status === "READY" ? "success" : report ? "danger" : "neutral"}>
+                  {readinessLabel(zh, report, readinessMutation.isPending)}
+                </VStatusChip>
+              </div>
+              {report ? (
+                <>
+                  <div className={styles.devMeta}>
+                    {zh ? `报告状态 ${report.status} · 生成 ${report.generatedAt || "—"}` : `Status ${report.status} · generated ${report.generatedAt || "—"}`}
+                  </div>
+                  {report.gates.length > 0 ? (
+                    <ul className={styles.gateList}>
+                      {report.gates.map((gate) => (
+                        <li key={gate.gateId} className={styles.gateItem}>
+                          <span className={styles.gateId}>{gate.gateId}</span>
+                          <VStatusChip tone={gate.status === "PASS" ? "success" : gate.status === "FAIL" ? "danger" : "warning"}>
+                            {gate.status || "—"}
+                          </VStatusChip>
+                          <span className={styles.gateDetail}>{gate.detail}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </>
+              ) : (
+                <VEmptyState title={zh ? "readiness 未运行" : "Readiness not run"} className={styles.empty}>
+                  {zh ? "先运行 DEV readiness 生成门禁报告。" : "Run DEV readiness to generate the gate report."}
+                </VEmptyState>
+              )}
+            </div>
+
+            {(["dev-1", "dev-5"] as const).map((planId) => {
+              const batch = planId === "dev-1" ? dev1 : dev5;
+              const running = planId === "dev-1" ? dev1Mutation.isPending : dev5Mutation.isPending;
+              return (
+                <div className={styles.devRow} key={planId} data-dev-controls={planId}>
+                  <div className={styles.devRowHeader}>
+                    <strong>{planId}{batch ? <span className={styles.devMeta}> · {batch.gateId}</span> : null}</strong>
+                    <VStatusChip tone={batchTone(batch, running)}>{batchLabel(zh, batch, running)}</VStatusChip>
+                  </div>
+                  {batch ? (
+                    <>
+                      <div className={styles.devMeta}>
+                        {zh
+                          ? `成功 ${batch.succeededCount}/${batch.questionCount} · 待处理 ${batch.pendingCount} · 失败 ${batch.failedCount} · 阻塞 ${batch.blockedCount}`
+                          : `succeeded ${batch.succeededCount}/${batch.questionCount} · pending ${batch.pendingCount} · failed ${batch.failedCount} · blocked ${batch.blockedCount}`}
+                      </div>
+                      <div className={styles.devMeta}>
+                        attempts={batch.totalAttempts} · canResume={String(batch.canResume)} · updated={batch.lastUpdatedAt || "—"}
+                      </div>
+                      {batch.completedQuestionIds.length > 0 ? (
+                        <div className={styles.devMeta}>
+                          {zh ? "完成：" : "done: "}{batch.completedQuestionIds.join(", ")}
+                        </div>
+                      ) : null}
+                      {batch.pendingQuestionIds.length > 0 ? (
+                        <div className={styles.devMeta}>
+                          {zh ? "待处理：" : "pending: "}{batch.pendingQuestionIds.join(", ")}
+                        </div>
+                      ) : null}
+                    </>
+                  ) : (
+                    <VEmptyState title={`${planId} ${zh ? "未运行" : "unrun"}`} className={styles.empty}>
+                      {planId === "dev-1"
+                        ? (zh ? "readiness 通过后运行。" : "Run after readiness passes.")
+                        : (zh ? "dev-1 通过后首次以 maxItems=2 运行，随后恢复。" : "Run first with maxItems=2 after dev-1, then resume.")}
+                    </VEmptyState>
+                  )}
+                </div>
+              );
+            })}
+
+            <div className={styles.actions} data-dev-controls="actions">
+              {nextLegalAction === "run_dev_readiness" ? (
+                <VButton
+                  type="button"
+                  variant="primary"
+                  isDisabled={anyMutationPending}
+                  isPending={readinessMutation.isPending}
+                  onClick={() => readinessMutation.mutate({ teamId })}
+                >
+                  {zh ? "运行 DEV readiness" : "Run DEV readiness"}
+                </VButton>
+              ) : null}
+              {nextLegalAction === "run_dev_1_fixture_batch" ? (
+                <VButton
+                  type="button"
+                  variant="primary"
+                  isDisabled={anyMutationPending}
+                  isPending={dev1Mutation.isPending}
+                  onClick={() => dev1Mutation.mutate({ teamId })}
+                >
+                  {zh ? "运行 dev-1 fixture" : "Run dev-1 fixture"}
+                </VButton>
+              ) : null}
+              {nextLegalAction === "run_dev_5_fixture_batch" ? (
+                <VButton
+                  type="button"
+                  variant="primary"
+                  isDisabled={anyMutationPending}
+                  isPending={dev5Mutation.isPending}
+                  onClick={() => dev5Mutation.mutate({ teamId, maxItems: 2 })}
+                >
+                  {zh ? "首次运行 dev-5（maxItems=2）" : "Run dev-5 first (maxItems=2)"}
+                </VButton>
+              ) : null}
+              {nextLegalAction === "resume_dev_5_fixture_batch" ? (
+                <VButton
+                  type="button"
+                  variant="primary"
+                  isDisabled={anyMutationPending}
+                  isPending={dev5Mutation.isPending}
+                  onClick={() => dev5Mutation.mutate({ teamId, maxItems: null })}
+                >
+                  {zh ? "恢复 dev-5（maxItems=null）" : "Resume dev-5 (maxItems=null)"}
+                </VButton>
+              ) : null}
+              {isRepairAction ? (
+                <div className={styles.notice} role="note">
+                  {zh
+                    ? `${actionLabel(zh, nextLegalAction)}：fixture 存在失败/阻塞，必须修复后才能继续；下一阶段保持阻塞，禁止放行。`
+                    : `${actionLabel(zh, nextLegalAction)}: failed/blocked fixture requires repair; the next stage stays blocked and cannot advance.`}
+                </div>
+              ) : null}
+              {nextLegalAction === "RESEARCH_AUTHORIZATION_REQUIRED" ? (
+                <div className={styles.notice} role="status">
+                  {zh
+                    ? "DEV fixture 已全部通过，停在 RESEARCH_AUTHORIZATION_REQUIRED；真实 Qwen / CUDA / DANDI / 125 题 / 提交需单独科研授权。"
+                    : "DEV fixtures all passed; stopped at RESEARCH_AUTHORIZATION_REQUIRED. Real Qwen/CUDA/DANDI/125-question/submission needs separate research authorization."}
+                </div>
+              ) : null}
+              <div className={styles.locator}>
+                {zh ? "下一合法动作：" : "Next legal action: "}{actionLabel(zh, nextLegalAction)}
+              </div>
+            </div>
+
+            {boundary ? (
+              <div className={styles.boundary} role="note">
+                <strong>{zh ? "DEV 隔离边界" : "DEV-only boundary"}</strong>
+                <span>
+                  {zh
+                    ? `DEV fixture 只允许计划 ${boundary.authorizedPlans.join(" / ")}；${boundary.forbiddenPlans.join(" / ")} 与真实 G1/G5/G12/G125、Qwen、CUDA/GPU、DANDI 下载、联网搜集、正式提交均未授权（fixtureOnly=${String(boundary.fixtureOnly)}）。`
+                    : `DEV fixture plans ${boundary.authorizedPlans.join(" / ")} only; ${boundary.forbiddenPlans.join(" / ")} and real G1/G5/G12/G125, Qwen, CUDA/GPU, DANDI download, live collection and formal submission are unauthorized (fixtureOnly=${String(boundary.fixtureOnly)}).`}
+                </span>
+                <div className={styles.devMeta}>
+                  forbiddenFeatures: {boundary.forbiddenFeatures.join(" / ") || "—"}
+                </div>
+              </div>
+            ) : null}
+
+            <div className={styles.locator} data-dev-controls="cli-locator">
+              {zh
+                ? "CLI 诊断（非授权入口）：python scripts/challenge_cup/platform_flow_ready.py · PlatformFlowReady"
+                : "CLI diagnostic (not an authorization entry): python scripts/challenge_cup/platform_flow_ready.py · PlatformFlowReady"}
+            </div>
+          </>
+        )}
+
+        {activeMutationError ? (
+          <div className={styles.error} role="alert" data-dev-controls="mutation-error">
+            {zh
+              ? `DEV 操作失败：${errorMessage(activeMutationError)}（可安全重试）`
+              : `DEV action failed: ${errorMessage(activeMutationError)} (retry is safe)`}
+          </div>
+        ) : null}
+      </section>
 
       <section className={styles.questionSection} aria-label={zh ? "单题结果" : "Question results"}>
         <div className={styles.sectionHeader}>
