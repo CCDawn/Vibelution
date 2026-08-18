@@ -1,3 +1,5 @@
+import { Users } from "lucide-react";
+
 import {
   TeamCandidateCard,
   TeamStageCard,
@@ -5,8 +7,36 @@ import {
   TeamStagePipeline,
 } from "../../../components/vui/product/team-management";
 import { VButton } from "../../../components/vui";
+import teamsRouteStyles from "../../../routes/TeamsRoute.styles";
 import { VuiPreviewCard } from "../VuiPreviewCard";
 import { VuiPreviewSection } from "../VuiPreviewSection";
+
+// Preview-only demonstrator for the documented TeamCanvasNodeCard pattern.
+// The product pattern is rendered inline by TeamOrganizationCanvasSurface and
+// intentionally not exported; styles stay centralized in TeamsRoute.styles.
+function TeamCanvasNodeCard({
+  label,
+  functionLabel,
+  agentLine,
+  purpose,
+}: {
+  label: string;
+  functionLabel: string;
+  agentLine: string;
+  purpose?: string;
+}) {
+  return (
+    <div className={teamsRouteStyles.node}>
+      <span className={teamsRouteStyles.nodeIcon}>
+        <Users size={15} />
+      </span>
+      <strong>{label}</strong>
+      <span className={`${teamsRouteStyles.nodeRoleBadge} ${teamsRouteStyles.nodeRoleBadgeResearch}`}>{functionLabel}</span>
+      <small>{agentLine}</small>
+      {purpose ? <small className={teamsRouteStyles.nodePurpose}>{purpose}</small> : null}
+    </div>
+  );
+}
 
 export function TeamCatalog() {
   return (
@@ -45,6 +75,16 @@ export function TeamCatalog() {
             meta={[{ key: "agent", label: "实验 Agent" }]}
             source={{ label: "来源", value: "RUN-002", title: "运行 RUN-002", href: "https://example.test/runs/2" }}
             actions={<VButton variant="primary">采纳</VButton>}
+          />
+        </div>
+      </VuiPreviewCard>
+      <VuiPreviewCard name="TeamCanvasNodeCard" className="col-span-2 min-h-0">
+        <div className="w-full" style={{ position: "relative", minHeight: 120 }}>
+          <TeamCanvasNodeCard
+            label="科研负责人"
+            functionLabel="研究"
+            agentLine="科研 Agent · 林"
+            purpose="假设治理与评审收口"
           />
         </div>
       </VuiPreviewCard>
