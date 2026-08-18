@@ -122,7 +122,9 @@ def _hf_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     return team_id, agents
 
 
-def _patch_approved_question(monkeypatch: pytest.MonkeyPatch) -> None:
+def _patch_approved_question(
+    monkeypatch: pytest.MonkeyPatch, *, hypotheses: list[dict] | None = None
+) -> None:
     detail = {
         "teamId": "hf4",
         "questionId": _QUESTION_ID,
@@ -155,7 +157,9 @@ def _patch_approved_question(monkeypatch: pytest.MonkeyPatch) -> None:
                 "question_id": _QUESTION_ID,
                 "question_en": "Fixture question",
             },
-            "hypotheses": [
+            "hypotheses": hypotheses
+            if hypotheses is not None
+            else [
                 {"hypothesis_id": candidate_id, "statement": f"candidate {candidate_id}"}
                 for candidate_id in _CANDIDATE_IDS
             ],
@@ -429,87 +433,6 @@ def _drive_to_awaiting_approval(team_id: str, meeting_round_id: str, actor: str)
     assert drafted["status"] == "awaiting_approval"
 
 
-def _candidate(candidate_id: str, reviewer: str) -> dict:
-    return {
-        "candidateId": candidate_id,
-        "claim": f"{candidate_id} 声称脉冲序列通过层级预测编码携带信息",
-        "rationale": "fixture rationale",
-        "differenceFromAlternatives": f"{candidate_id} 与其他候选的编码层级假设不同",
-        "lineageRefs": [],
-        "scores": {
-            "novelty": 0.6,
-            "competitionFit": 0.7,
-            "falsifiability": 0.8,
-            "evidenceSupport": 0.7,
-            "feasibility": 0.6,
-            "replicability": 0.6,
-            "scopeAlignment": 0.9,
-        },
-        "reviewedBy": reviewer,
-        "status": "reviewed",
-    }
-
-
-def _close_hypothesis_round(
-    team_id: str,
-    agent_ids: list[str],
-    meeting_round_id: str,
-    closed_result: dict,
-    *,
-    accepted: bool,
-) -> dict:
-    digest_id = str(closed_result["digest"].get("digestId") or "")
-    decision_ids = [str(item.get("decisionId") or "") for item in closed_result["decisions"]]
-    created = hrounds.create_hypothesis_round(
-        team_id,
-        {
-            **_scope_fields(agent_ids[0]),
-            "candidates": [
-                _candidate("hyp-a", agent_ids[1]),
-                _candidate("hyp-b", agent_ids[1]),
-            ],
-        },
-    )
-    round_id = created["round"]["roundId"]
-    closed = hrounds.close_hypothesis_round(
-        team_id,
-        round_id,
-        {
-            "pairwiseComparisons": [
-                {
-                    "comparisonId": "cmp-1",
-                    "leftCandidateId": "hyp-a",
-                    "rightCandidateId": "hyp-b",
-                    "reviewerAgentId": agent_ids[1],
-                    "outcome": "left_wins",
-                    "justification": "hyp-a 的机制与泛化证据更完整",
-                }
-            ],
-            "pareto": {
-                "paretoFrontCandidateIds": ["hyp-a"],
-                "dominatedCandidateIds": ["hyp-b"],
-                "analystAgentId": agent_ids[1],
-                "notes": "",
-            },
-            "metaReview": {
-                "metaReviewId": "meta-hf4-1",
-                "reviewerAgentId": agent_ids[0],
-                "recommendationCandidateId": "hyp-a",
-                "rationale": "证据收敛，可以进入实验设计",
-                "riskNotes": "",
-                "accepted": accepted,
-            },
-            "meetingRefs": [
-                {"kind": "meeting_round", "id": meeting_round_id},
-                {"kind": "meeting_digest", "id": digest_id},
-                {"kind": "decision_record", "id": decision_ids[0]},
-            ],
-            "closedBy": agent_ids[0],
-        },
-    )
-    return closed["round"]
-
-
 def _freeze_template_baseline(team_id: str, agent_id: str) -> dict:
     created = templates.create_template_baseline(
         team_id,
@@ -609,6 +532,26 @@ def test_hypothesis_first_chain_end_to_end(tmp_path: Path, monkeypatch: pytest.M
                 "spike train coding",
             ]
 
+            # 3b. The closure auto-generates a closed HypothesisRound through
+            #     the HF-3 executor: meetingRefs point back to this meeting and
+            #     the first round's lineage terminates at the question candidates.
+            generated = closed["hypothesisRound"]
+            assert generated["status"] == "created"
+            first_round = generated["round"]
+            assert first_round["status"] == "closed"
+            assert first_round["metaReview"]["accepted"] is True
+            assert {
+                item["id"]
+                for item in first_round["meetingRefs"]
+                if item["kind"] == "meeting_round"
+            } == {first_meeting_id}
+            assert {
+                item["id"] for item in first_round["lineage"] if item["kind"] == "candidate"
+            } == {"hyp-a", "hyp-b"}
+            assert not [
+                item for item in first_round["lineage"] if item["kind"] == "round"
+            ]
+
             # 4. The collection decision unblocks source_finding; the pending
             #    collection request blocks hypothesis_design as a knowledge gap.
             finding = _evaluate(runtime, team_id, "source_finding")
@@ -669,8 +612,8 @@ def test_hypothesis_first_chain_end_to_end(tmp_path: Path, monkeypatch: pytest.M
             assert runtime.store.latest_attempt(_RUN_ID, "hypothesis_design") is None
 
             # 6. Second discussion closes without new evidence requests; the
-            #    HF-3 executor fixture closes an accepted round; a frozen
-            #    template baseline appears.
+            #    closure auto-generates the next HypothesisRound whose lineage
+            #    links back to the first round; a frozen baseline appears.
             _drive_to_awaiting_approval(team_id, second_meeting_id, agent_ids[0])
             closed_second = chain.close_review_meeting(
                 team_id,
@@ -680,9 +623,19 @@ def test_hypothesis_first_chain_end_to_end(tmp_path: Path, monkeypatch: pytest.M
             )
             assert closed_second["collection"]["requests"] == []
             assert len(collection_calls) == 1
-            _close_hypothesis_round(
-                team_id, agent_ids, second_meeting_id, closed_second, accepted=True
-            )
+            generated_second = closed_second["hypothesisRound"]
+            assert generated_second["status"] == "created"
+            second_round = generated_second["round"]
+            assert second_round["status"] == "closed"
+            assert second_round["metaReview"]["accepted"] is True
+            assert {
+                item["id"]
+                for item in second_round["meetingRefs"]
+                if item["kind"] == "meeting_round"
+            } == {second_meeting_id}
+            assert [
+                item["id"] for item in second_round["lineage"] if item["kind"] == "round"
+            ] == [first_round["roundId"]]
             _freeze_template_baseline(team_id, agent_ids[0])
 
             # 7. Converged: the readiness re-check passes and the parent run
@@ -786,16 +739,25 @@ def test_unconverged_round_blocks_hypothesis_design(
             )
             second_meeting_id = handoff["nextMeeting"]["meetingRound"]["meetingRoundId"]
             _drive_to_awaiting_approval(team_id, second_meeting_id, agent_ids[0])
+            # MetaReview does NOT accept: the auto-generated round stays
+            # unconverged and hypothesis_design remains blocked.
+            rejected_metareview = lambda context, candidates, pairwise, pareto: {
+                "recommendationCandidateId": "hyp-a",
+                "rationale": "证据仍不充分，暂不收敛",
+                "riskNotes": "hyp-b 泛化证据待补",
+                "accepted": False,
+            }
             closed_second = chain.close_review_meeting(
                 team_id,
                 second_meeting_id,
                 _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
                 runtime=runtime,
+                metareview_runner=rejected_metareview,
             )
-            # HF-3 executor fixture: round closes but MetaReview is NOT accepted.
-            _close_hypothesis_round(
-                team_id, agent_ids, second_meeting_id, closed_second, accepted=False
-            )
+            generated_second = closed_second["hypothesisRound"]
+            assert generated_second["status"] == "created"
+            assert generated_second["round"]["status"] == "closed"
+            assert generated_second["round"]["metaReview"]["accepted"] is False
             _freeze_template_baseline(team_id, agent_ids[0])
 
             design = _evaluate(runtime, team_id, "hypothesis_design")
@@ -892,9 +854,12 @@ def test_interruption_recovery_preserves_rounds_and_idempotency(
                 team_id, agent_ids, first_meeting_id, runtime
             )
             request = closed["collection"]["requests"][0]
+            first_round_id = closed["hypothesisRound"]["round"]["roundId"]
+            assert closed["hypothesisRound"]["status"] == "created"
 
             # Re-closing with the identical payload replays the closure and
-            # must not duplicate the collection request or the facade call.
+            # must not duplicate the collection request, the facade call, or
+            # the generated HypothesisRound.
             reclosed = chain.close_review_meeting(
                 team_id,
                 first_meeting_id,
@@ -905,6 +870,11 @@ def test_interruption_recovery_preserves_rounds_and_idempotency(
             assert len(reclosed["collection"]["requests"]) == 1
             assert reclosed["collection"]["requests"][0]["requestId"] == request["requestId"]
             assert len(collection_calls) == 1
+            assert reclosed["hypothesisRound"]["status"] == "reused"
+            assert reclosed["hypothesisRound"]["round"]["roundId"] == first_round_id
+            assert (
+                hrounds.list_hypothesis_rounds(team_id)["roundCount"] == 1
+            )
 
             handoff = chain.record_collection_handoff(
                 team_id,
@@ -940,5 +910,54 @@ def test_interruption_recovery_preserves_rounds_and_idempotency(
             assert state["pendingCollectionCount"] == 0
             assert state["collectionReady"] is True
             assert state["meetingCount"] == 2
+            assert state["hypothesisRoundCount"] == 1
+    finally:
+        runtime.close()
+
+
+def test_close_reports_failed_hypothesis_round_without_rollback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A candidate without a claim fails round generation, not the closure."""
+    team_id, agents = _hf_env(tmp_path, monkeypatch)
+    _patch_approved_question(
+        monkeypatch,
+        hypotheses=[
+            {"hypothesis_id": "hyp-a", "statement": "hyp-a 的机制陈述"},
+            {"hypothesis_id": "hyp-b", "statement": ""},
+            {"hypothesis_id": "hyp-c", "statement": "hyp-c 的机制陈述"},
+        ],
+    )
+    collection_calls = _fake_collection_runs(monkeypatch)
+    runtime = _build_runtime(tmp_path)
+    try:
+        _seed_parent_run(runtime, team_id, agents["experiment_planner"])
+        agent_ids = [agents[role] for role in _ROLES]
+
+        with server_operator_scope("u-1", roles=("operator",)):
+            recorded = _open_first_meeting(team_id, agent_ids)
+            first_meeting_id = recorded["reviewMeeting"]["meetingRound"]["meetingRoundId"]
+            _drive_to_awaiting_approval(team_id, first_meeting_id, agent_ids[0])
+            closed = chain.close_review_meeting(
+                team_id,
+                first_meeting_id,
+                _closure_payload(agent_ids, [_envelope_decision(agent_ids[0])]),
+                runtime=runtime,
+            )
+
+            # The closure and the collection trigger stand; only the round
+            # generation reports a structured failure (fail-closed via the
+            # readiness layer, never a rollback of the closed fact).
+            assert closed["meetingRound"]["status"] == "closed"
+            assert len(closed["collection"]["requests"]) == 1
+            assert len(collection_calls) == 1
+            hypothesis_round = closed["hypothesisRound"]
+            assert hypothesis_round["status"] == "failed"
+            assert "hyp-b" in hypothesis_round["error"]
+            assert hrounds.list_hypothesis_rounds(team_id)["roundCount"] == 0
+
+            # hypothesis_design stays blocked on the unconverged round gate.
+            design = _evaluate(runtime, team_id, "hypothesis_design")
+            assert "hypothesis_round_unconverged" in _blocker_codes(design)
     finally:
         runtime.close()

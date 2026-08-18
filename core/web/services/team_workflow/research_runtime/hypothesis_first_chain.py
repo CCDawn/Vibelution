@@ -694,20 +694,144 @@ def _process_collection_decisions(
     return {"requests": requests_out, "skipped": skipped}
 
 
+# ---------------------------------------------------------------------------
+# closure -> HypothesisRound generation (HF-3 executor entry point)
+
+
+def _build_round_candidates(
+    team_id: str, meeting_round: Mapping[str, Any]
+) -> list[dict[str, Any]]:
+    """Assemble review inputs for the candidates discussed in one meeting.
+
+    The authoritative source is the approved v2 question artifact (the same
+    read path HF-1 selection validation uses): ``statement`` maps to the
+    required ``claim``, ``mechanism`` to ``rationale``, and ``novelty_basis``
+    to ``differenceFromAlternatives`` when present (HF-3 otherwise applies its
+    default fallback wording).
+    """
+    from core.web.services.team_workflow.research_runtime import question_launch
+
+    candidate_ids = [
+        ref.split(":", 1)[1].strip()
+        for ref in _normalized_str_list(meeting_round.get("discussionItemRefs"))
+        if ref.startswith("hypothesis_candidate:") and ref.split(":", 1)[1].strip()
+    ]
+    question_id = str(meeting_round.get("question") or "").strip()
+    detail = question_launch._approved_details(team_id).get(question_id.upper())
+    if detail is None:
+        raise HypothesisFirstChainError(
+            f"question {question_id} has no approved v2 question artifact"
+        )
+    output = detail.get("output") if isinstance(detail.get("output"), Mapping) else {}
+    hypotheses = [
+        item
+        for item in list(output.get("hypotheses") or [])
+        if isinstance(item, Mapping)
+    ]
+    artifact_by_id = {
+        str(item.get("hypothesis_id") or "").strip(): item for item in hypotheses
+    }
+    candidates: list[dict[str, Any]] = []
+    for candidate_id in candidate_ids:
+        artifact = artifact_by_id.get(candidate_id) or {}
+        candidate: dict[str, Any] = {
+            "candidateId": candidate_id,
+            "claim": str(artifact.get("statement") or "").strip(),
+            "rationale": str(artifact.get("mechanism") or "").strip(),
+        }
+        difference = str(artifact.get("novelty_basis") or "").strip()
+        if difference:
+            candidate["differenceFromAlternatives"] = difference
+        candidates.append(candidate)
+    return candidates
+
+
+def _generate_hypothesis_round(
+    team_id: str,
+    meeting_round: Mapping[str, Any],
+    *,
+    reflection_runner: Any = None,
+    pairwise_runner: Any = None,
+    pareto_runner: Any = None,
+    metareview_runner: Any = None,
+) -> dict[str, Any]:
+    """Best-effort HypothesisRound generation after one review closure.
+
+    Mirrors the auto-open failure semantics: the closed meeting is an
+    append-only fact, so a generation failure is reported structurally and
+    never rolls the closure back; the readiness layer keeps blocking on
+    ``hypothesis_round_unconverged`` until a round converges (fail-closed).
+    Replays reuse the already-generated round through HF-3 idempotency.
+    """
+    try:
+        from core.web.services.team_workflow import hypothesis_rounds
+        from core.web.services.team_workflow import (
+            hypothesis_selection as selections,
+        )
+
+        meeting_round_id = str(meeting_round.get("meetingRoundId") or "").strip()
+        selection_id = _selection_id_from_meeting(meeting_round)
+        if not selection_id:
+            raise HypothesisFirstChainError(
+                "meeting carries no hypothesis_selection ref"
+            )
+        selection = selections.get_hypothesis_selection(team_id, selection_id)[
+            "selection"
+        ]
+        if str(selection.get("scopeHash") or "") != str(
+            meeting_round.get("scopeHash") or ""
+        ) or str(selection.get("questionId") or "").upper() != str(
+            meeting_round.get("question") or ""
+        ).upper():
+            raise HypothesisFirstChainError(
+                "selection scope/question does not match the meeting scope"
+            )
+        candidates = _build_round_candidates(team_id, meeting_round)
+        result = hypothesis_rounds.generate_hypothesis_round_from_meeting(
+            team_id,
+            meeting_round_id,
+            {"candidates": candidates},
+            reflection_runner=reflection_runner,
+            pairwise_runner=pairwise_runner,
+            pareto_runner=pareto_runner,
+            metareview_runner=metareview_runner,
+        )
+        round_record = result.get("round") if isinstance(result.get("round"), Mapping) else {}
+        return {
+            "status": str(result.get("status") or ""),
+            "roundId": str(round_record.get("roundId") or ""),
+            "round": dict(round_record),
+            "closed": True,
+        }
+    except Exception as exc:  # closure fact stays; report the side effect
+        return {
+            "status": "failed",
+            "error": str(exc),
+            "errorType": type(exc).__name__,
+        }
+
+
 def close_review_meeting(
     team_id: str,
     meeting_round_id: str,
     payload: Mapping[str, Any] | None = None,
     *,
     runtime: Any = None,
+    reflection_runner: Any = None,
+    pairwise_runner: Any = None,
+    pareto_runner: Any = None,
+    metareview_runner: Any = None,
 ) -> dict[str, Any]:
     """Approve one hypothesis-review closure, then apply chain effects.
 
     ``request_new_evidence`` decisions with a valid ``searchEnvelope`` start or
     reuse a stage-1 collection run through the facade; decisions without one
-    are reported as skipped and never trigger collection.  When a runtime is
-    provided the parent runs' ``hypothesis_design`` readiness is re-checked
-    outside any writer transaction.
+    are reported as skipped and never trigger collection.  A HypothesisRound
+    is then generated from the closed meeting through the HF-3 executor
+    (idempotent per meeting; failures are reported under ``hypothesisRound``
+    without rolling the closure back).  When a runtime is provided the parent
+    runs' ``hypothesis_design`` readiness is re-checked outside any writer
+    transaction.
     """
     from core.web.services import team_service
     from core.web.services.team_workflow import meeting_rounds
@@ -731,6 +855,14 @@ def close_review_meeting(
     collection = _process_collection_decisions(
         normalized_team_id, closed_record, result, request
     )
+    hypothesis_round = _generate_hypothesis_round(
+        normalized_team_id,
+        closed_record,
+        reflection_runner=reflection_runner,
+        pairwise_runner=pairwise_runner,
+        pareto_runner=pareto_runner,
+        metareview_runner=metareview_runner,
+    )
     resume = None
     if runtime is not None:
         resume = resume_parent_runs(
@@ -739,7 +871,12 @@ def close_review_meeting(
             runtime=runtime,
             trigger=f"close:{normalized_round_id}",
         )
-    return {**result, "collection": collection, "resume": resume}
+    return {
+        **result,
+        "collection": collection,
+        "hypothesisRound": hypothesis_round,
+        "resume": resume,
+    }
 
 
 # ---------------------------------------------------------------------------
