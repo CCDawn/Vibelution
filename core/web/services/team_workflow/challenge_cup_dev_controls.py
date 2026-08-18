@@ -411,6 +411,25 @@ def _validate_batch_checkpoint(checkpoint: dict[str, Any], plan_id: str) -> None
             raise DevControlsStorageError(
                 f"Batch checkpoint record invalidated flag is invalid: {question_id}."
             )
+        raw_result = raw.get("result")
+        if raw_result is not None:
+            if not isinstance(raw_result, dict):
+                raise DevControlsStorageError(
+                    f"Batch checkpoint record result is malformed: {question_id}."
+                )
+            if (
+                raw_result.get("status") != "dev_fixture"
+                or raw_result.get("submission_eligible") is not False
+                or not str(raw_result.get("model_receipt_locator") or "").startswith(
+                    "model-receipt://dev/"
+                )
+                or not str(raw_result.get("knowledge_locator") or "").startswith(
+                    "knowledge://dev/"
+                )
+            ):
+                raise DevControlsStorageError(
+                    f"Batch checkpoint result is not a DEV fixture result: {question_id}."
+                )
         seen.add(question_id)
         raw_by_question[question_id] = raw
     try:
@@ -445,15 +464,6 @@ def _validate_batch_checkpoint(checkpoint: dict[str, Any], plan_id: str) -> None
         ):
             raise DevControlsStorageError(
                 f"Batch checkpoint succeeded record is inconsistent: {question_id}."
-            )
-        if status is QuestionStatus.SUCCEEDED and result is not None and (
-            result.status != "dev_fixture"
-            or result.submission_eligible is not False
-            or not result.model_receipt_locator.startswith("model-receipt://dev/")
-            or not result.knowledge_locator.startswith("knowledge://dev/")
-        ):
-            raise DevControlsStorageError(
-                f"Batch checkpoint result is not a DEV fixture result: {question_id}."
             )
         if status in (QuestionStatus.FAILED, QuestionStatus.BLOCKED) and (
             attempts < 1 or not str(last_error or "").strip()
@@ -670,6 +680,16 @@ def get_challenge_cup_dev_control_snapshot(team_id: str) -> dict[str, Any]:
     authoritative id is used for every storage path.
     """
     authoritative_team_id = _require_team(team_id)
+    with _team_transaction(authoritative_team_id):
+        return _get_challenge_cup_dev_control_snapshot_transaction(
+            authoritative_team_id
+        )
+
+
+def _get_challenge_cup_dev_control_snapshot_transaction(
+    authoritative_team_id: str,
+) -> dict[str, Any]:
+    """Project one snapshot while the caller holds the team transaction lock."""
     report_state = _read_report_state(authoritative_team_id)
     report = report_state[0] if report_state is not None else None
     readiness_evidence = report_state[1] if report_state is not None else None

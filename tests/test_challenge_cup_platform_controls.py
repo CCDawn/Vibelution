@@ -1129,6 +1129,54 @@ def test_non_dev_fixture_result_fails_closed(
         dev_controls_service.get_challenge_cup_dev_control_snapshot("team-1")
 
 
+@pytest.mark.parametrize("status", ["failed", "blocked"])
+def test_failed_or_blocked_record_cannot_carry_a_formal_result(
+    controls_root: Path,
+    status: str,
+) -> None:
+    _persist_readiness_report(controls_root, "team-1")
+    state = new_dev_batch_state("dev-1")
+    run_dev_fixture_batch(state)
+    checkpoint = state.to_checkpoint()
+    record = checkpoint["records"][0]
+    record["status"] = status
+    record["last_error"] = "fixture failure"
+    record["result"]["status"] = "submission_eligible"
+    record["result"]["submission_eligible"] = True
+    _persist_batch_checkpoint(controls_root, "team-1", "dev-1", checkpoint)
+
+    with pytest.raises(
+        dev_controls_service.DevControlsStorageError,
+        match="DEV fixture result",
+    ):
+        dev_controls_service.get_challenge_cup_dev_control_snapshot("team-1")
+
+
+def test_dev_result_requires_literal_false_submission_eligibility(
+    controls_root: Path,
+) -> None:
+    _persist_readiness_report(controls_root, "team-1")
+    state = new_dev_batch_state("dev-1")
+    run_dev_fixture_batch(state)
+    checkpoint = state.to_checkpoint()
+    checkpoint["records"][0]["result"]["submission_eligible"] = 0
+    _persist_batch_checkpoint(controls_root, "team-1", "dev-1", checkpoint)
+
+    with pytest.raises(
+        dev_controls_service.DevControlsStorageError,
+        match="DEV fixture result",
+    ):
+        dev_controls_service.get_challenge_cup_dev_control_snapshot("team-1")
+
+
+def test_snapshot_uses_the_same_team_transaction_lock_as_writes(
+    controls_root: Path,
+) -> None:
+    with dev_controls_service._team_transaction("team-1"):
+        with pytest.raises(dev_controls_service.DevFlowConflict, match="transaction"):
+            dev_controls_service.get_challenge_cup_dev_control_snapshot("team-1")
+
+
 def test_team_transaction_lock_is_cross_process_and_team_scoped(
     controls_root: Path,
 ) -> None:

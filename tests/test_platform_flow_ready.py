@@ -120,6 +120,19 @@ def test_gate_product_projection_passes_on_current_repo() -> None:
     assert gate["status"] == "PASS", gate
 
 
+def test_gate_product_projection_fails_when_frontend_checks_fail(monkeypatch) -> None:
+    monkeypatch.setattr(
+        platform_flow_ready_module,
+        "_run_frontend_product_checks",
+        lambda repo: "TypeScript build failed",
+    )
+
+    gate = gate_product_projection(ROOT)
+
+    assert gate["status"] == "FAIL"
+    assert gate["detail"] == "TypeScript build failed"
+
+
 def test_gate_product_projection_fails_when_dev_markers_missing(tmp_path: Path) -> None:
     panel = (
         tmp_path

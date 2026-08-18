@@ -21,6 +21,11 @@ from core.web.services.team import (
     team_constants,
     team_store,
 )
+from core.web.services import (
+    self_evolution_control_service,
+    supervised_agent_service,
+    team_service,
+)
 
 
 def test_facade_reexports_canvas_primitives() -> None:
@@ -70,6 +75,32 @@ def test_facade_reexports_system_bootstrap_control_plane() -> None:
     assert hasattr(facade, "_TEAM_SYSTEM_BOOTSTRAP_THREAD")
     assert isinstance(facade._TEAM_SYSTEM_BOOTSTRAP_STATE, dict)
     assert facade.TEAM_SYSTEM_BOOTSTRAP_READY_CACHE_TTL_SECONDS == 30.0
+
+
+def test_evolution_system_agent_sync_imports_parent_service_modules(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        self_evolution_control_service,
+        "ensure_self_evolution_agent_instances",
+        lambda: calls.append("self") or [{"agentId": "self-agent"}],
+    )
+    monkeypatch.setattr(
+        supervised_agent_service,
+        "ensure_supervised_agent_instances",
+        lambda: calls.append("supervised") or [{"agentId": "supervised-agent"}],
+    )
+
+    ensured = system_teams._ensure_evolution_system_agents()
+
+    assert calls == ["self", "supervised"]
+    assert ensured == {
+        "self_evolution": [{"agentId": "self-agent"}],
+        "supervised_evolution": [{"agentId": "supervised-agent"}],
+    }
 
 
 def test_facade_reexports_team_projection() -> None:

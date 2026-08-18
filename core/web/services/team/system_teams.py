@@ -569,7 +569,7 @@ def _ensure_evolution_system_agents() -> dict[str, list[dict[str, Any]]]:
     project_root = Path(s.PROJECT_ROOT).resolve()
     ensured: dict[str, list[dict[str, Any]]] = {"self_evolution": [], "supervised_evolution": []}
     try:
-        from . import self_evolution_control_service
+        from .. import self_evolution_control_service
 
         previous_root = self_evolution_control_service.PROJECT_ROOT
         self_evolution_control_service.PROJECT_ROOT = project_root
@@ -580,7 +580,7 @@ def _ensure_evolution_system_agents() -> dict[str, list[dict[str, Any]]]:
     except Exception as exc:
         s._record_system_team_sync_failed("self_evolution", exc)
     try:
-        from . import supervised_agent_service
+        from .. import supervised_agent_service
 
         previous_root = supervised_agent_service.PROJECT_ROOT
         supervised_agent_service.PROJECT_ROOT = project_root

@@ -7,11 +7,14 @@ exercised with fixtures. It is not competition completion.
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from core.infrastructure.no_console_git import no_console_subprocess_kwargs
 from core.research.competition.catalog_execution import (
     CatalogExecutionState,
     dev_plan,
@@ -380,7 +383,59 @@ def gate_multimodal() -> dict[str, str]:
     return _gate("multimodal", "PASS", "multimodal fixture report is auditable")
 
 
-def gate_product_projection(repo: Path) -> dict[str, str]:
+def _run_frontend_product_checks(repo: Path) -> str | None:
+    web_root = repo / "web"
+    node = shutil.which("node")
+    tsc = web_root / "node_modules" / "typescript" / "bin" / "tsc"
+    vitest = web_root / "node_modules" / "vitest" / "vitest.mjs"
+    if not node:
+        return "Node.js is unavailable for the product projection gate"
+    missing = [path.name for path in (tsc, vitest) if not path.is_file()]
+    if missing:
+        return f"project-local frontend tools are unavailable: {missing}"
+    commands = (
+        ("TypeScript build", [node, str(tsc), "-b", "--pretty", "false"], 300.0),
+        (
+            "focused Vitest",
+            [
+                node,
+                str(vitest),
+                "run",
+                "src/api/teamExperiment.test.ts",
+                "src/routes/teams/research-workflow/ChallengeMvpProgressPanel.test.tsx",
+            ],
+            300.0,
+        ),
+    )
+    for label, command, timeout in commands:
+        try:
+            result = subprocess.run(
+                command,
+                cwd=str(web_root),
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout,
+                **no_console_subprocess_kwargs(),
+            )
+        except subprocess.TimeoutExpired:
+            return f"{label} timed out after {timeout:g}s"
+        except OSError:
+            return f"{label} could not start"
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip()
+            detail = detail.replace(str(repo), "<repo>")[-400:]
+            return f"{label} failed" + (f": {detail}" if detail else "")
+    return None
+
+
+def gate_product_projection(
+    repo: Path,
+    *,
+    run_frontend_checks: bool = True,
+) -> dict[str, str]:
     panel = repo / "web" / "src" / "routes" / "teams" / "research-workflow" / "ChallengeMvpProgressPanel.tsx"
     styles = repo / "web" / "src" / "routes" / "teams" / "research-workflow" / "ChallengeMvpProgressPanel.styles.ts"
     panel_test = repo / "web" / "src" / "routes" / "teams" / "research-workflow" / "ChallengeMvpProgressPanel.test.tsx"
@@ -440,10 +495,14 @@ def gate_product_projection(repo: Path) -> dict[str, str]:
             return _gate("product_projection", "FAIL", f"DEV nextLegalAction marker is missing {marker!r}")
     if "data-dev-controls" not in panel_text:
         return _gate("product_projection", "FAIL", "DEV controls product markers are missing")
+    if run_frontend_checks:
+        frontend_failure = _run_frontend_product_checks(repo)
+        if frontend_failure is not None:
+            return _gate("product_projection", "FAIL", frontend_failure)
     return _gate(
         "product_projection",
         "PASS",
-        "Program v2, typed DEV API and DEV control projection are present",
+        "Program v2, typed DEV API and DEV controls compile and pass focused Vitest",
     )
 
 
@@ -650,7 +709,7 @@ def build_platform_flow_readiness_report(
         gate_control_flow_contracts(repo),
         gate_model_receipt(),
         gate_multimodal(),
-        gate_product_projection(repo),
+        gate_product_projection(repo, run_frontend_checks=run_pytest),
     ]
     status = overall_status(gates)
     r0_gate = next(item for item in gates if item["gateId"] == "r0_source_integrity")

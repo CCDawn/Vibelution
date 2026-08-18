@@ -13,9 +13,9 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tarfile
 import tempfile
-import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -57,7 +57,6 @@ LOCAL_PATH_RE = re.compile(
 SECRET_RE = re.compile(
     r"(?i)(?:api[_-]?key|secret|password|token)\s*=\s*['\"][^'\"]{8,}['\"]"
 )
-_monotonic = time.monotonic
 TEXT_SUFFIXES = {
     ".py",
     ".md",
@@ -92,6 +91,7 @@ INCLUDE_GLOBS: tuple[str, ...] = (
     "tests/test_platform_flow_ready.py",
     "tests/test_challenge_cup_source_boundary.py",
     "tests/test_challenge_cup_platform_controls.py",
+    "tests/test_team_structure_packs.py",
     "tests/test_challenge_cup_submission_source_manifest_schema.py",
     "tests/test_challenge_cup_export.py",
     "tests/test_challenge_cup_spike_coding_*.py",
@@ -102,8 +102,14 @@ INCLUDE_GLOBS: tuple[str, ...] = (
     "tests/test_research_personal_memory_scope.py",
     "tests/test_experiment_adapter_*.py",
     "core/web/services/team_workflow/challenge_cup_dev_controls.py",
+    "core/web/services/team/system_teams.py",
     "core/web/routes/team_workflows/challenge_cup_dev_controls.py",
     "core/web/routes/team_workflows/challenge_cup_dev_controls_models.py",
+    "web/package-lock.json",
+    "web/package.json",
+    "web/tsconfig.app.json",
+    "web/tsconfig.json",
+    "web/tsconfig.node.json",
     "web/src/api/teamExperiment.ts",
     "web/src/api/teamExperiment.test.ts",
     "web/src/api/queryKeys.ts",
@@ -133,8 +139,14 @@ REQUIRED_PATHS: tuple[str, ...] = (
     "scripts/challenge_cup/source_manifest.py",
     "scripts/challenge_cup/clean_clone_verify.py",
     "core/web/services/team_workflow/challenge_cup_dev_controls.py",
+    "core/web/services/team/system_teams.py",
     "core/web/routes/team_workflows/challenge_cup_dev_controls.py",
     "core/web/routes/team_workflows/challenge_cup_dev_controls_models.py",
+    "web/package-lock.json",
+    "web/package.json",
+    "web/tsconfig.app.json",
+    "web/tsconfig.json",
+    "web/tsconfig.node.json",
     "web/src/api/teamExperiment.ts",
     "web/src/api/teamExperiment.test.ts",
     "web/src/api/queryKeys.ts",
@@ -152,6 +164,7 @@ R1_PYTEST_TARGETS: tuple[str, ...] = (
     "tests/test_experiment_adapter_fashion_mnist.py",
     "tests/test_challenge_cup_source_boundary.py",
     "tests/test_challenge_cup_platform_controls.py",
+    "tests/test_team_structure_packs.py",
     "tests/test_platform_flow_readiness.py",
     "tests/test_research_workflow_hypothesis_rounds.py",
     "tests/test_research_workflow_research_templates.py",
@@ -410,6 +423,62 @@ def build_source_manifest(
     return manifest
 
 
+def _extract_archive_payload(archive_path: Path, dest: Path) -> None:
+    """Validate and extract an R1 archive inside a separately timed process."""
+    with tarfile.open(archive_path, mode="r:") as archive:
+        members = archive.getmembers()
+        if len(members) > R1_ARCHIVE_MAX_MEMBERS:
+            raise SourceBoundaryError("R1 archive has too many members")
+        total_bytes = 0
+        for member in members:
+            if member.size > R1_ARCHIVE_MAX_MEMBER_BYTES:
+                raise SourceBoundaryError(
+                    f"R1 archive member is too large: {member.name}"
+                )
+            total_bytes += max(0, int(member.size))
+        if total_bytes > R1_ARCHIVE_MAX_TOTAL_BYTES:
+            raise SourceBoundaryError("R1 archive expanded size exceeds the limit")
+        try:
+            for member in members:
+                archive.extract(member, path=dest, filter="data")
+        except TypeError as exc:
+            raise SourceBoundaryError(
+                "tar extract requires filter='data'; refusing unfiltered extraction"
+            ) from exc
+
+
+def _run_archive_extractor(repo: Path, archive_path: Path, dest: Path) -> None:
+    worker = (
+        "from pathlib import Path; "
+        "from core.research.competition.source_boundary import _extract_archive_payload; "
+        "import sys; _extract_archive_payload(Path(sys.argv[1]), Path(sys.argv[2]))"
+    )
+    worker_env = os.environ.copy()
+    source_root = str(Path(__file__).resolve().parents[3])
+    existing_pythonpath = worker_env.get("PYTHONPATH", "")
+    worker_env["PYTHONPATH"] = (
+        source_root
+        if not existing_pythonpath
+        else source_root + os.pathsep + existing_pythonpath
+    )
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", worker, str(archive_path), str(dest)],
+            cwd=str(repo),
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            env=worker_env,
+            timeout=R1_ARCHIVE_EXTRACT_TIMEOUT_SECONDS,
+            **no_console_subprocess_kwargs(),
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise SourceBoundaryError(
+            f"R1 archive extraction timed out after {R1_ARCHIVE_EXTRACT_TIMEOUT_SECONDS}s"
+        ) from exc
+    if result.returncode != 0:
+        raise SourceBoundaryError("R1 archive extraction worker failed")
+
+
 def extract_head_archive(repo: Path, dest: Path) -> None:
     dest.mkdir(parents=True, exist_ok=True)
     git_exe = resolve_git_executable()
@@ -450,31 +519,7 @@ def extract_head_archive(repo: Path, dest: Path) -> None:
                 "utf-8", "replace"
             ).strip()
             raise SourceBoundaryError(detail)
-        with tarfile.open(archive_path, mode="r:") as archive:
-            members = archive.getmembers()
-            if len(members) > R1_ARCHIVE_MAX_MEMBERS:
-                raise SourceBoundaryError("R1 archive has too many members")
-            total_bytes = 0
-            for member in members:
-                if member.size > R1_ARCHIVE_MAX_MEMBER_BYTES:
-                    raise SourceBoundaryError(
-                        f"R1 archive member is too large: {member.name}"
-                    )
-                total_bytes += max(0, int(member.size))
-            if total_bytes > R1_ARCHIVE_MAX_TOTAL_BYTES:
-                raise SourceBoundaryError("R1 archive expanded size exceeds the limit")
-            deadline = _monotonic() + R1_ARCHIVE_EXTRACT_TIMEOUT_SECONDS
-            try:
-                for member in members:
-                    if _monotonic() > deadline:
-                        raise SourceBoundaryError(
-                            "R1 archive extraction timed out"
-                        )
-                    archive.extract(member, path=dest, filter="data")
-            except TypeError as exc:
-                raise SourceBoundaryError(
-                    "tar extract requires filter='data'; refusing unfiltered extraction"
-                ) from exc
+        _run_archive_extractor(repo, archive_path, dest)
     finally:
         try:
             archive_path.unlink(missing_ok=True)

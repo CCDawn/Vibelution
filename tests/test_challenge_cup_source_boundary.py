@@ -289,6 +289,24 @@ def test_extract_head_archive_converts_git_timeout_to_failure(
     assert not list(tmp_path.glob(".challenge-cup-r1-*.tar"))
 
 
+def test_archive_extractor_converts_worker_timeout_to_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_run(*args, **kwargs):
+        raise subprocess.TimeoutExpired(
+            cmd=args[0] if args else [], timeout=kwargs.get("timeout", 0)
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with pytest.raises(SourceBoundaryError, match="archive extraction timed out"):
+        source_boundary._run_archive_extractor(
+            tmp_path,
+            tmp_path / "archive.tar",
+            tmp_path / "clone",
+        )
+
+
 def test_git_show_bytes_converts_timeout_to_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
