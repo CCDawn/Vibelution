@@ -1,7 +1,7 @@
 import "../design/route-css/workbench-secondary.tailwind.css";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import {
   getLauncherBranchInstances,
@@ -1835,7 +1835,7 @@ export function LauncherRoute() {
       ? toPendingBranchOperation(resolveControlRequest(controlMutation.variables))
       : undefined);
   const pendingBranchOperation = resolveActivePendingOperation(requestedBranchOperation, branchItems);
-  useEffect(() => pinLauncherDocumentViewport(document), []);
+  useLayoutEffect(() => pinLauncherDocumentViewport(document), []);
   useEffect(() => {
     if (!optimisticBranchOperation) {
       return;

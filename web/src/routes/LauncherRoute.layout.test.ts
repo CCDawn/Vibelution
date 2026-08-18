@@ -400,7 +400,7 @@ describe("LauncherRoute layout contract", () => {
 
   it("keeps the complete launcher surface reachable when the window is short", () => {
     expect(routeSource).toContain("bodyClassName={styles.routeBody}");
-    expect(routeSource).toContain("pinLauncherDocumentViewport");
+    expect(routeSource).toContain("useLayoutEffect(() => pinLauncherDocumentViewport(document), [])");
     expect(routeSource).toContain("fill");
     expect(routeStylesSource).toContain("routeBody:");
     expect(routeStylesSource).toContain("overflow-y-auto");
