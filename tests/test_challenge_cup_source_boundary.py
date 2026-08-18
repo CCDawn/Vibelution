@@ -16,6 +16,7 @@ from core.research.competition.source_boundary import (
     build_source_manifest,
     evaluate_clean_clone,
     evaluate_source_integrity,
+    git_show_bytes,
     verify_manifest_on_tree,
 )
 
@@ -104,7 +105,7 @@ def test_build_manifest_from_git_ls_files_and_real_hashes(tmp_path: Path) -> Non
         for item in manifest["entries"]
         if item["path"] == "core/research/competition/resources.py"
     )
-    payload = (repo / "core/research/competition/resources.py").read_bytes()
+    payload = git_show_bytes(repo, "core/research/competition/resources.py")
     assert resources["sha256"] == hashlib.sha256(payload).hexdigest().upper()
 
 
@@ -160,6 +161,34 @@ def test_require_clean_rejects_dirty_worktree(tmp_path: Path) -> None:
         build_source_manifest(repo, policy=policy, require_clean=True)
 
 
+def test_manifest_hashes_head_blob_not_dirty_worktree(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    schema = SCHEMA_PATH.read_text(encoding="utf-8")
+    _commit_tree(
+        repo,
+        {
+            "schemas/challenge_cup_submission_source_manifest.schema.json": schema,
+            "core/research/competition/resources.py": "tracked = True\n",
+        },
+    )
+    policy = _policy("core/research/competition/resources.py")
+    committed = hashlib.sha256(b"tracked = True\n").hexdigest().upper()
+    (repo / "core/research/competition/resources.py").write_text("dirty worktree\n", encoding="utf-8")
+    manifest = build_source_manifest(repo, policy=policy, require_clean=False)
+    resources = next(
+        item
+        for item in manifest["entries"]
+        if item["path"] == "core/research/competition/resources.py"
+    )
+    assert resources["sha256"] == committed
+    dest = tmp_path / "clone"
+    report = evaluate_clean_clone(
+        repo, dest, policy=policy, require_clean=False, run_pytest=False
+    )
+    assert report["source_integrity"] == "PASS"
+    assert report["clean_clone_reproduction"] == "PASS"
+
+
 def test_clean_clone_passes_then_fails_on_hash_change(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path / "repo")
     schema = SCHEMA_PATH.read_text(encoding="utf-8")
@@ -188,6 +217,9 @@ def test_clean_clone_passes_then_fails_on_hash_change(tmp_path: Path) -> None:
 
 
 def test_current_repo_source_integrity_uses_git_ls_files() -> None:
+    git_marker = ROOT / ".git"
+    if not git_marker.exists():
+        pytest.skip("R1 archive clone has no git metadata")
     report = evaluate_source_integrity(ROOT, require_clean=False)
     assert report["failures"] == [], report["failures"]
     assert report["source_integrity"] == "PASS"

@@ -12,7 +12,6 @@ from core.research.competition.delivery import (
 )
 from core.research.competition.resources import CATALOG_QUESTION_COUNT
 
-
 COMPLETE = {
     "approvedQuestionCount": CATALOG_QUESTION_COUNT,
     "r0": "PASS",
@@ -53,11 +52,19 @@ def test_formal_pack_refuses_incomplete_catalog_and_unfrozen_projection() -> Non
     assert "submission_projection_unfrozen" in pack["blockers"]
 
 
-def test_formal_pack_requires_complete_control_payload() -> None:
-    pack = export_results(COMPLETE, mode="formal")
-    assert pack["status"] == "final"
-    assert pack["final"] is True
-    assert pack["blockers"] == []
+def test_formal_pack_rejects_preview_r2_r3_exemption() -> None:
+    pack = export_results(
+        {
+            **COMPLETE,
+            "r2": "not_required_for_preview",
+            "r3": "not_required_for_preview",
+        },
+        mode="formal",
+    )
+    assert pack["status"] == "refused"
+    assert pack["final"] is False
+    assert "r2_not_pass" in pack["blockers"]
+    assert "r3_not_pass" in pack["blockers"]
 
 
 def test_submission_projection_unfrozen_only_allows_preview() -> None:
