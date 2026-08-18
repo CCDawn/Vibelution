@@ -89,7 +89,7 @@ const styles: Record<string, string> = {
     `messageError min-w-0 ${vuiStateDangerSoftClass} [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]`,
   messageResult:
     "messageResult min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
-  node: `node min-w-0 !absolute left-[calc(var(--canvas-offset-x,0px)+var(--node-x,0px))] top-[calc(var(--canvas-offset-y,0px)+var(--node-y,0px))] z-[1] !grid h-[92px] w-[172px] cursor-grab select-none grid-cols-[20px_1fr] grid-rows-[auto_auto_auto] items-center gap-x-1.5 gap-y-0.5 ${vuiOpaqueRowClass} p-2 text-left text-[var(--fg-primary)] shadow-none touch-none [&_small]:truncate [&_span]:truncate [&_strong]:truncate`,
+  node: `node min-w-0 !absolute left-[calc(var(--canvas-offset-x,0px)+var(--node-x,0px))] top-[calc(var(--canvas-offset-y,0px)+var(--node-y,0px))] z-[1] !grid h-[108px] w-[172px] cursor-grab select-none grid-cols-[20px_1fr] grid-rows-[auto_auto_auto_auto] items-center gap-x-1.5 gap-y-0.5 ${vuiOpaqueRowClass} p-2 text-left text-[var(--fg-primary)] shadow-none touch-none [&_small]:truncate [&_span]:truncate [&_strong]:truncate`,
   nodeActive:
     `nodeActive min-w-0 ${vuiStateSelectedRowClass} shadow-[var(--vui-shadow-inset-accent)]`,
   nodeBindingPlaceholder:
@@ -99,9 +99,11 @@ const styles: Record<string, string> = {
   nodeBound:
     "nodeBound min-w-0 border-[color-mix(in_srgb,var(--state-success)_42%,var(--vui-border-subtle))]",
   nodeIcon:
-    "nodeIcon min-w-0 shrink-0 text-[var(--fg-tertiary)] row-span-3 inline-flex h-5 w-5 items-center justify-center text-[var(--fg-tertiary)]",
+    "nodeIcon min-w-0 shrink-0 text-[var(--fg-tertiary)] row-span-4 inline-flex h-5 w-5 items-center justify-center text-[var(--fg-tertiary)]",
   nodeOpen:
     `nodeOpen min-w-0 ${vuiStateCoolSoftClass} border-dashed`,
+  nodePurpose:
+    "nodePurpose min-w-0 truncate [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   nodeReadOnly:
     "nodeReadOnly min-w-0 cursor-pointer touch-manipulation",
   nodeRoleBadge:
@@ -115,7 +117,7 @@ const styles: Record<string, string> = {
   nodeRoleBadgeOpen:
     `nodeRoleBadgeOpen min-w-0 ${vuiStateCoolSoftClass} [--node-role-bg:var(--vui-control-muted)] [--node-role-border:var(--vui-border-subtle)] [--node-role-fg:var(--fg-tertiary)]`,
   nodeRoleBadgeResearch:
-    "nodeRoleBadgeResearch min-w-0 [--node-role-bg:color-mix(in_srgb,var(--accent-warm)_10%,var(--vui-surface-row))] [--node-role-border:color-mix(in_srgb,var(--accent-warm)_34%,var(--vui-border-subtle))] [--node-role-fg:var(--fg-secondary)]",
+    "nodeRoleBadgeResearch min-w-0 [--node-role-bg:color-mix(in_srgb,var(--accent-warm)_10%,var(--vui-surface-row))] [--node-role-border:color-mix(in_srgb,var(--accent-warm)_34%,var(--vui-border-subtle))] [--node-role-fg:var(--accent-warm)]",
   nodeRoleBadgeSelf:
     "nodeRoleBadgeSelf min-w-0 [--node-role-bg:color-mix(in_srgb,var(--state-error)_9%,var(--vui-surface-row))] [--node-role-border:color-mix(in_srgb,var(--state-error)_34%,var(--vui-border-subtle))] [--node-role-fg:var(--state-error)]",
   nodeRoleBadgeStale:

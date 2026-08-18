@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { TeamCanvasNode } from "../../api/types";
 import {
+  canvasNodeAgentLine,
   canvasNodeRoleBadgeKind,
   canvasNodeToneKind,
   nodeToneClass,
@@ -38,5 +39,42 @@ describe("teamCanvasNodePresentation", () => {
     const toneStyles = { stale: "ns", bound: "nb", open: "no" };
     expect(roleBadgeToneClass(node, badgeStyles)).toBe("st");
     expect(nodeToneClass(node, toneStyles)).toBe("nb");
+  });
+
+  it("resolves the card agent line through display name, stored names, then localized status", () => {
+    const bound = {
+      role: "source_finder",
+      purpose: "",
+      agentId: "a1",
+      agentName: "Finder Bot",
+      agentCode: "finder-01",
+      status: "bound",
+    } as TeamCanvasNode;
+    expect(canvasNodeAgentLine(bound, "资料寻找员", "zh")).toBe("资料寻找员");
+    expect(canvasNodeAgentLine(bound, undefined, "zh")).toBe("Finder Bot");
+    expect(canvasNodeAgentLine(bound, "  ", "zh")).toBe("Finder Bot");
+    expect(canvasNodeAgentLine({ ...bound, agentName: "" }, undefined, "zh")).toBe("finder-01");
+
+    const unbound = {
+      role: "worker",
+      purpose: "",
+      agentId: "",
+      agentName: "",
+      agentCode: "",
+      status: "unbound",
+    } as TeamCanvasNode;
+    expect(canvasNodeAgentLine(unbound, undefined, "zh")).toBe("未绑定");
+    expect(canvasNodeAgentLine(unbound, undefined, "en")).toBe("unbound");
+
+    const stale = {
+      role: "worker",
+      purpose: "",
+      agentId: "a9",
+      agentName: "",
+      agentCode: "",
+      status: "stale",
+    } as TeamCanvasNode;
+    expect(canvasNodeAgentLine(stale, undefined, "zh")).toBe("引用失效");
+    expect(canvasNodeAgentLine(stale, undefined, "en")).toBe("stale reference");
   });
 });

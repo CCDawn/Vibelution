@@ -24,6 +24,7 @@ import {
   VTooltip,
 } from "../../components/vui";
 import { edgeLine, isCommunicationEdge, teamCanvasNodeStyle } from "./canvasGeometry";
+import { canvasNodeAgentLine } from "./teamCanvasNodePresentation";
 import { teamNodeFunctionLabel } from "./teamRouteShellModel";
 
 export type TeamOrganizationCanvasSurfaceProps = {
@@ -252,16 +253,18 @@ export function TeamOrganizationCanvasSurface(props: TeamOrganizationCanvasSurfa
                   markerHeight="6"
                   orient="auto-start-reverse"
                 >
-                  <path d="M 0 0 L 10 5 L 0 10 z" />
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke" />
                 </marker>
               </defs>
               {visibleEdges.map((edge) => {
                 const line = edgeLine(edge, displayCanvasNodes, visibleEdges);
+                const communication = isCommunicationEdge(edge);
                 return line ? (
                   <path
                     key={edge.id}
-                    className={isCommunicationEdge(edge) ? styles.edgeCommunication : styles.edgeOrganization}
+                    className={communication ? styles.edgeCommunication : styles.edgeOrganization}
                     d={`M ${line.x1} ${line.y1} Q ${line.cx} ${line.cy} ${line.x2} ${line.y2}`}
+                    markerEnd={communication ? undefined : "url(#team-edge-arrow)"}
                   />
                 ) : null;
               })}
@@ -270,6 +273,8 @@ export function TeamOrganizationCanvasSurface(props: TeamOrganizationCanvasSurfa
               const agent = activeAgents.find((item) => item.agentId === node.agentId);
               const display = agent ? agentDisplay(agent, lang) : null;
               const functionLabel = teamNodeFunctionLabel(node, display?.functionLabel, lang);
+              const agentLine = canvasNodeAgentLine(node, display?.name, lang);
+              const purpose = String(node.purpose || "").trim();
               return (
                 <VNativeButton
                   key={node.id}
@@ -295,7 +300,8 @@ export function TeamOrganizationCanvasSurface(props: TeamOrganizationCanvasSurfa
                   <span className={styles.nodeIcon}>{node.agentId ? <Bot size={15} /> : <Users size={15} />}</span>
                   <strong>{node.label}</strong>
                   <span className={`${styles.nodeRoleBadge} ${roleBadgeToneClass(node, display?.tone)}`}>{functionLabel}</span>
-                  <small>{node.agentCode || node.status}</small>
+                  <small>{agentLine}</small>
+                  {purpose ? <small className={styles.nodePurpose}>{purpose}</small> : null}
                 </VNativeButton>
               );
             })}

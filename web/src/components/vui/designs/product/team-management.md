@@ -300,3 +300,35 @@
 | --- | --- | --- |
 | title / statusLabel / actions | 主数据与操作 | 默认一行；状态无控件外观，动作使用 VUI 按钮 |
 | summary / meta / source | 支撑信息与来源 | hover / focus 可读；来源以独立图标链接保留 |
+
+---
+
+## TeamCanvasNodeCard
+
+### 功能
+组织画布节点卡（`TeamOrganizationCanvasSurface` 内联渲染模式），表达团队中的一个角色/Agent 分工：主标签、职能 badge、绑定 Agent 显示名与职责说明。组织边（reports_to 等）带方向箭头，通讯边双向语义不挂箭头。
+
+### 适用范围
+- **适用**：teams 组织画布上的角色/Agent 节点卡。
+- **不适用**：通用流程图节点 → `VWorkflowCanvas`；看板列卡 → Board 域。
+
+| 场景 | 选择 |
+| --- | --- |
+| 组织画布节点 | `TeamCanvasNodeCard` 模式 |
+| 工作流图节点 | `VWorkflowCanvas` |
+
+### 使用方式
+```tsx
+// 由 TeamOrganizationCanvasSurface 渲染，不单独导出；
+// 内容行自上而下：label（strong）→ 职能 badge → Agent 显示名 / 本地化绑定状态 → purpose（可选）
+```
+
+| Prop | 说明 | 设计注意 |
+| --- | --- | --- |
+| label | 节点主名称 | 单行 truncate |
+| functionLabel | 职能 badge | 各角色 badge 前景用各自强调色；research 用 `--accent-warm` |
+| agentLine | 绑定 Agent 显示名（display name → agentName → agentCode），未绑定显示本地化状态 | 不直接显示英文机器 status |
+| purpose | 角色职责 | 可选行，tertiary 色，truncate；无 purpose 不渲染该行 |
+
+### 反冗余
+- 不新增第二套画布节点卡；样式集中在 `TeamsRoute.styles.ts` 的 `node*` map，分类纯函数在 `teamCanvasNodePresentation.ts`。

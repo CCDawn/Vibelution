@@ -128,6 +128,7 @@
 | `TeamStatusLabel` | [product/team-management.md](./product/team-management.md#teamstatuslabel) |
 | `TeamSourceEmptyState` | [product/team-management.md](./product/team-management.md#teamsourceemptystate) |
 | `TeamCandidateCard` | [product/team-management.md](./product/team-management.md#teamcandidatecard) |
+| `TeamCanvasNodeCard` | [product/team-management.md](./product/team-management.md#teamcanvasnodecard) |
 
 ## Provider
 

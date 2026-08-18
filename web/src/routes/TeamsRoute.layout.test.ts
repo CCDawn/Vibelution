@@ -29,6 +29,7 @@ import teamResearchWorkflowSurfaceRenderersSource from "./teams/teamResearchWork
 import teamResearchPrimarySurfaceRenderersSource from "./teams/teamResearchPrimarySurfaceRenderers.tsx?raw";
 import teamCanvasNodeEditingSource from "./teams/useTeamCanvasNodeEditing.ts?raw";
 import teamCanvasNodeModelSource from "./teams/teamCanvasNodeModel.ts?raw";
+import teamCanvasNodePresentationSource from "./teams/teamCanvasNodePresentation.ts?raw";
 import useSourceCollectionWorkspaceSource from "./teams/useSourceCollectionWorkspace.ts?raw";
 import useResearchExperimentWorkspaceSource from "./teams/useResearchExperimentWorkspace.ts?raw";
 import useTeamsShellCanvasWorkspaceSource from "./teams/useTeamsShellCanvasWorkspace.ts?raw";
@@ -3495,6 +3496,9 @@ describe("TeamsRoute layout contract", () => {
     expect(canvasGeometrySource).toContain("sourceFanSpread");
     expect(routeSource).not.toContain("<line key={edge.id}");
     expect(routeSource).toContain("className={styles.edges}");
+    // Organization edges carry the arrow marker; communication edges stay bidirectional.
+    expect(teamOrganizationCanvasSurfaceSource).toContain('fill="context-stroke"');
+    expect(teamOrganizationCanvasSurfaceSource).toContain('markerEnd={communication ? undefined : "url(#team-edge-arrow)"}');
   });
 
   it("separates organization lines from information lines by default", () => {
@@ -3553,6 +3557,22 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.node).toContain("!absolute");
     expect(routeStyles.node).toContain("left-[calc(var(--canvas-offset-x,0px)+var(--node-x,0px))]");
     expect(routeStyles.node).toContain("top-[calc(var(--canvas-offset-y,0px)+var(--node-y,0px))]");
+  });
+
+  it("shows agent display name, localized status, and purpose on canvas node cards", () => {
+    expect(teamOrganizationCanvasSurfaceSource).toContain("canvasNodeAgentLine(node, display?.name, lang)");
+    expect(teamOrganizationCanvasSurfaceSource).toContain("<small>{agentLine}</small>");
+    expect(teamOrganizationCanvasSurfaceSource).toContain("className={styles.nodePurpose}");
+    expect(teamOrganizationCanvasSurfaceSource).not.toContain("{node.agentCode || node.status}");
+    expect(teamCanvasNodePresentationSource).toContain("canvasNodeStatusLabel(node, lang)");
+    expect(teamRouteShellModelSource).toContain("canvasNodeStatusLabel");
+    expect(routeStyles.node).toContain("h-[108px]");
+    expect(routeStyles.node).toContain("grid-rows-[auto_auto_auto_auto]");
+    expect(routeStyles.nodeIcon).toContain("row-span-4");
+    expect(routeStyles.nodePurpose).toContain("text-[var(--fg-tertiary)]");
+    expect(routeStyles.nodePurpose).toContain("[font-size:var(--vui-font-xs)]");
+    // Research role badge foreground matches its warm accent like the other role badges.
+    expect(routeStyles.nodeRoleBadgeResearch).toContain("[--node-role-fg:var(--accent-warm)]");
   });
 
   it("keeps Teams dynamic layout values behind typed CSS variable helpers", () => {

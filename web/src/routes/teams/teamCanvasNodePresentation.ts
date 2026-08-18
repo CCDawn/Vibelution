@@ -3,6 +3,7 @@
  * Style class mapping stays in the shell (or a styles map inject).
  */
 import type { TeamCanvasNode } from "../../api/types";
+import { canvasNodeStatusLabel } from "./teamRouteShellModel";
 
 export type CanvasNodeRoleBadgeKind =
   | "stale"
@@ -50,6 +51,22 @@ export function canvasNodeToneKind(node: TeamCanvasNode): CanvasNodeToneKind {
     return "bound";
   }
   return "open";
+}
+
+/**
+ * Node card agent line: resolved agent display name with stored-name fallbacks;
+ * nodes without a resolvable agent show the localized binding status instead of
+ * raw machine status strings.
+ */
+export function canvasNodeAgentLine(
+  node: TeamCanvasNode,
+  displayName: string | undefined,
+  lang: "zh" | "en",
+) {
+  const name = String(displayName || "").trim()
+    || String(node.agentName || "").trim()
+    || String(node.agentCode || "").trim();
+  return name || canvasNodeStatusLabel(node, lang);
 }
 
 export type CanvasNodeRoleBadgeStyles = Record<CanvasNodeRoleBadgeKind, string> & {

@@ -3,7 +3,7 @@ import type { CSSProperties } from "react";
 import type { TeamCanvasNode } from "../../api/types";
 
 export const NODE_WIDTH = 172;
-export const NODE_HEIGHT = 92;
+export const NODE_HEIGHT = 108;
 export const CANVAS_VIEWPORT_WIDTH = 1180;
 export const CANVAS_VIEWPORT_HEIGHT = 760;
 export const RESEARCH_CANVAS_AUTO_LAYOUT_START_X = 64;

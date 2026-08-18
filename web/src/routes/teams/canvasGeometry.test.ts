@@ -7,6 +7,8 @@ import {
   edgeLine,
   isCommunicationEdge,
   nextNodeId,
+  NODE_HEIGHT,
+  RESEARCH_CANVAS_AUTO_LAYOUT_ROW_GAP,
   researchCanvasRoleLayer,
 } from "./canvasGeometry";
 
@@ -52,5 +54,9 @@ describe("canvasGeometry", () => {
     const line = edgeLine({ id: "e1", source: "a", target: "b", type: "reports_to" }, nodes);
     expect(line).not.toBeNull();
     expect(nextNodeId(nodes)).toMatch(/^node-/);
+  });
+
+  it("keeps the auto-layout row gap larger than the node card height", () => {
+    expect(RESEARCH_CANVAS_AUTO_LAYOUT_ROW_GAP).toBeGreaterThan(NODE_HEIGHT);
   });
 });
