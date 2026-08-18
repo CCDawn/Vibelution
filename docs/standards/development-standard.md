@@ -892,8 +892,6 @@ Do not mark a research workflow change complete while a user-visible projection 
 
 ## 21. Final Reports
 
-对用户的完成说明以根 `AGENTS.md` §5 为准：写给人看，不把本节清单当回复模板。下面条目是内部/交接检查，用户没问就不要贴。
-
 Final reports should be net-new first. Do not repeat stable background facts unless they block the current task, changed during the round, or the user asks.
 
 For feature or behavior changes, compactly cover:
