@@ -322,6 +322,16 @@ export function ChallengeMvpProgressPanel({
             <VButton type="button" variant="secondary" data-dev-controls="snapshot-retry" onClick={() => void devControlsQuery.refetch()}>
               {zh ? "重试" : "Retry"}
             </VButton>
+            <VButton
+              type="button"
+              variant="danger"
+              data-dev-controls="snapshot-readiness-repair"
+              isDisabled={readinessMutation.isPending}
+              isPending={readinessMutation.isPending}
+              onClick={() => readinessMutation.mutate({ teamId })}
+            >
+              {zh ? "重新运行 DEV readiness" : "Re-run DEV readiness"}
+            </VButton>
           </div>
         ) : (
           <>

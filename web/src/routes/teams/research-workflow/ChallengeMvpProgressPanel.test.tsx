@@ -952,14 +952,17 @@ describe("ChallengeMvpProgressPanel", () => {
     );
     expect(markup).toContain("dev snapshot boom");
     expect(markup).toContain('data-dev-controls="snapshot-retry"');
+    expect(markup).toContain('data-dev-controls="snapshot-readiness-repair"');
     expect(markup).toContain("Challenge Cup Program v2");
-    expect(markup).not.toContain("运行 DEV readiness");
+    expect(markup).toContain("重新运行 DEV readiness");
   });
 
-  it("refetches the DEV snapshot from its independent retry button", async () => {
+  it("can refetch or repair a stale DEV snapshot from the error surface", async () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     setMainData(emptyMainData());
     const devRefetch = vi.fn();
+    const readinessSpy = vi.fn();
+    mutationState.set("runDevReadiness", { mutate: readinessSpy });
     Object.assign(devControlsQueryState.current, {
       isPending: false,
       isError: true,
@@ -979,6 +982,12 @@ describe("ChallengeMvpProgressPanel", () => {
       retryButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     expect(devRefetch).toHaveBeenCalled();
+    const repairButton = container.querySelector('[data-dev-controls="snapshot-readiness-repair"]') as HTMLButtonElement | null;
+    expect(repairButton).toBeTruthy();
+    await act(async () => {
+      repairButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(readinessSpy).toHaveBeenCalledWith({ teamId: "team-1" });
     await act(async () => {
       root.unmount();
     });
