@@ -34,6 +34,7 @@ export function createExperimentController(ctx: ExperimentControllerContext) {
     reviewExperimentHypothesisMutation,
     createExperimentHypothesisRevisionMutation,
     freezeExperimentDesignMutation,
+    resumeExperimentHypothesisMutation,
     registerExperimentBaselineArtifactMutation,
     runExperimentSmokeMutation,
     registerExperimentSmokeResultMutation,
@@ -57,6 +58,7 @@ export function createExperimentController(ctx: ExperimentControllerContext) {
     reviewExperimentHypothesisMutation?.reset?.();
     createExperimentHypothesisRevisionMutation?.reset?.();
     freezeExperimentDesignMutation?.reset?.();
+    resumeExperimentHypothesisMutation?.reset?.();
     registerExperimentBaselineArtifactMutation?.reset?.();
     runExperimentSmokeMutation?.reset?.();
     registerExperimentSmokeResultMutation?.reset?.();

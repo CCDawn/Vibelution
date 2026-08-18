@@ -17,6 +17,7 @@ from core.web.services.team_workflow.challenge_program import (
     build_competition_program_projection,
 )
 from core.web.services.team_workflow.challenge_question_runs import challenge_question_run_summary
+from core.web.services.team_workflow import hypothesis_progress
 
 
 def _service():
@@ -176,6 +177,7 @@ def _load_experiment_plan_store(team_id: str) -> dict[str, Any]:
                 if isinstance(plan, dict):
                     _sanitize_projected_experiment_plan(plan)
                     _refresh_experiment_bounded_smoke_readiness(plan)
+                    _refresh_hypothesis_progress(plan)
             return projected
     now = s.utc_now_iso()
     payload = {
@@ -929,6 +931,11 @@ def _experiment_planning_status(
     ]
     plans = s._experiment_plans(plan_store)
     active_plan = s._active_experiment_plan(plan_store)
+    hypothesis_progress_by_candidate = hypothesis_progress.progress_summary_by_candidate(plans)
+    for candidate in hypothesis_candidates:
+        progress_summary = hypothesis_progress_by_candidate.get(str(candidate.get("candidateId") or ""))
+        if progress_summary is not None:
+            candidate["hypothesisProgress"] = progress_summary
     lifecycle_projection = s._experiment_lifecycle_projection(
         team_id=team_id,
         latest_collection=latest_collection,
@@ -1349,6 +1356,7 @@ def _build_experiment_plan_record(
         record["hypothesisSelection"] = s.deepcopy(hypothesis_selection)
     if design_gate is not None:
         record["designGate"] = design_gate
+    _refresh_hypothesis_progress(record)
     return record
 
 
@@ -2582,6 +2590,24 @@ def _refresh_experiment_plan_readiness(plan: dict[str, Any]) -> None:
     risk_controls["activeFullRunResultStatus"] = active_full_run_status
     plan["riskControls"] = risk_controls
     s.experiment_contract.sync_plan_record_contract_status(plan)
+    _refresh_hypothesis_progress(plan)
+
+
+def _refresh_hypothesis_progress(plan: dict[str, Any]) -> list[dict[str, Any]]:
+    """Facade: re-derive per-hypothesis checkpoints on the plan record."""
+    return hypothesis_progress.refresh_hypothesis_progress(plan)
+
+
+def _hypothesis_progress_plan_tracks(plan: dict[str, Any], candidate_id: str) -> bool:
+    return hypothesis_progress.plan_tracks_hypothesis(plan, candidate_id)
+
+
+def _hypothesis_progress_find(plan: dict[str, Any], candidate_id: str) -> dict[str, Any] | None:
+    return hypothesis_progress.find_hypothesis_progress(plan, candidate_id)
+
+
+def _hypothesis_progress_summary(entry: dict[str, Any] | None) -> dict[str, Any] | None:
+    return hypothesis_progress.hypothesis_progress_summary(entry)
 
 
 def _active_experiment_smoke_evidence(plan: dict[str, Any] | None) -> dict[str, Any] | None:

@@ -15,6 +15,7 @@ export type ExperimentWorkspacePendingFlags = {
   reviewExperimentHypothesisCandidateId: string;
   createExperimentHypothesisRevisionCandidateId: string;
   freezeExperimentDesignPending: boolean;
+  resumeExperimentHypothesisPending: boolean;
   registerExperimentBaselineArtifactPending: boolean;
   registerExperimentSmokeResultPending: boolean;
   runExperimentSmokePending: boolean;
@@ -41,6 +42,7 @@ export function buildExperimentWorkspacePendingFlags(options: {
   reviewExperimentHypothesisMutation: PendingTeamMutation;
   createExperimentHypothesisRevisionMutation: PendingTeamMutation;
   freezeExperimentDesignMutation: PendingTeamMutation;
+  resumeExperimentHypothesisMutation: PendingTeamMutation;
   registerExperimentBaselineArtifactMutation: PendingTeamMutation;
   registerExperimentSmokeResultMutation: PendingTeamMutation;
   runExperimentSmokeMutation: PendingTeamMutation;
@@ -67,6 +69,7 @@ export function buildExperimentWorkspacePendingFlags(options: {
       teamId,
     ),
     freezeExperimentDesignPending: teamPending(options.freezeExperimentDesignMutation, teamId),
+    resumeExperimentHypothesisPending: teamPending(options.resumeExperimentHypothesisMutation, teamId),
     registerExperimentBaselineArtifactPending: teamPending(
       options.registerExperimentBaselineArtifactMutation,
       teamId,

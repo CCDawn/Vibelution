@@ -22,6 +22,7 @@ import {
   registerTeamExperimentFullRunResult,
   registerTeamExperimentSmokeResult,
   requestTeamExperimentKnowledgeIngestion,
+  resumeTeamExperimentHypothesis,
   reviewTeamExperimentHypothesis,
   runTeamExperimentSmoke,
 } from "../../api/teamExperiment";
@@ -35,6 +36,7 @@ import {
   type ExperimentDesignFreezePayload,
   type ExperimentFullRunResultDraft,
   type ExperimentFullRunResultRegisterPayload,
+  type ExperimentHypothesisResumePayload,
   type ExperimentKnowledgeIngestionDraft,
   type ExperimentPlanCreatePayload,
   type ExperimentPlanRecord,
@@ -275,6 +277,20 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
     mutationFn: (payload: { teamId: string; plan: ExperimentPlanRecord }) =>
       freezeTeamExperimentDesign<ExperimentDesignFreezePayload>(payload.teamId, payload.plan.planId, {
         frozenByAgent: options.sourceCollectionOwnerAgentId,
+      }),
+    onSuccess: (payload, variables) => {
+      if (payload.experimentStatus) {
+        queryClient.setQueryData(experimentPlanningStatusQueryKey(variables.teamId), payload.experimentStatus);
+      }
+      void queryClient.invalidateQueries({ queryKey: experimentPlanningStatusQueryKey(variables.teamId) });
+      void queryClient.invalidateQueries({ queryKey: researchStageRoundStatusQueryKey(variables.teamId) });
+    },
+  });
+
+  const resumeExperimentHypothesisMutation = useMutation({
+    mutationFn: (payload: { teamId: string; hypothesisCandidateId: string }) =>
+      resumeTeamExperimentHypothesis<ExperimentHypothesisResumePayload>(payload.teamId, {
+        hypothesisCandidateId: payload.hypothesisCandidateId,
       }),
     onSuccess: (payload, variables) => {
       if (payload.experimentStatus) {
@@ -622,6 +638,7 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
     reviewExperimentHypothesisMutation,
     createExperimentHypothesisRevisionMutation,
     freezeExperimentDesignMutation,
+    resumeExperimentHypothesisMutation,
     registerExperimentBaselineArtifactMutation,
     runExperimentSmokeMutation,
     registerExperimentSmokeResultMutation,

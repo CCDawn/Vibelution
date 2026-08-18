@@ -23,6 +23,7 @@ import {
   type ExperimentBaselineArtifactDraft,
   type ExperimentFullRunResultDraft,
   type ExperimentFullRunResultStatus,
+  type ExperimentHypothesisCandidateSummary,
   type ExperimentKnowledgeIngestionDraft,
   type ExperimentPlanRecord,
   type ExperimentPlanningStatusPayload,
@@ -36,6 +37,7 @@ import {
   isExperimentWorkbenchStepUnlocked,
   resolveExperimentWorkbenchStep,
   shortProtocolLabel,
+  workbenchStepForHypothesisProgress,
   type ExperimentWorkbenchStepId,
 } from "./teams/experimentWorkbenchStepModel";
 import { TeamExperimentHypothesisGovernancePanel } from "./TeamExperimentHypothesisGovernancePanel";
@@ -191,6 +193,8 @@ export type TeamExperimentPlanningLedgerPanelProps = {
   selectedTeamFreezeExperimentDesignError: Error | null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   selectedTeamFreezeExperimentDesignResult: any;
+  selectedTeamResumeExperimentHypothesisPending?: boolean;
+  selectedTeamResumeExperimentHypothesisError?: Error | null;
   selectedTeamRegisterExperimentBaselineArtifactPending: boolean;
   selectedTeamRegisterExperimentBaselineArtifactError: Error | null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -227,6 +231,7 @@ export type TeamExperimentPlanningLedgerPanelProps = {
     candidateId: string,
   ) => void;
   freezeExperimentDesignFromWorkspace: (plan: ExperimentPlanRecord) => void;
+  resumeExperimentHypothesisFromWorkspace?: (hypothesisCandidateId: string) => void;
   registerExperimentBaselineArtifactFromWorkspace: (plan: ExperimentPlanRecord) => void;
   runExperimentSmokeFromWorkspace: (plan: ExperimentPlanRecord, adapter: string, seed: number) => void;
   registerExperimentSmokeResultFromWorkspace: (plan: ExperimentPlanRecord) => void;
@@ -305,6 +310,8 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
     selectedTeamFreezeExperimentDesignPending,
     selectedTeamFreezeExperimentDesignError,
     selectedTeamFreezeExperimentDesignResult,
+    selectedTeamResumeExperimentHypothesisPending,
+    selectedTeamResumeExperimentHypothesisError,
     selectedTeamRegisterExperimentBaselineArtifactPending,
     selectedTeamRegisterExperimentBaselineArtifactError,
     selectedTeamRegisterExperimentBaselineArtifactResult,
@@ -326,6 +333,7 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
     reviewExperimentHypothesisFromWorkspace,
     createExperimentHypothesisRevisionFromWorkspace,
     freezeExperimentDesignFromWorkspace,
+    resumeExperimentHypothesisFromWorkspace,
     registerExperimentBaselineArtifactFromWorkspace,
     runExperimentSmokeFromWorkspace,
     registerExperimentSmokeResultFromWorkspace,
@@ -509,6 +517,20 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
       ? stepOverride
       : autoStep;
 
+    const handleResumeHypothesis = (candidateId: string) => {
+      if (!resumeExperimentHypothesisFromWorkspace) {
+        return;
+      }
+      const progress = hypotheses.find(
+        (item: ExperimentHypothesisCandidateSummary) => item.candidateId === candidateId,
+      )?.hypothesisProgress;
+      const target = workbenchStepForHypothesisProgress(progress?.nextStep ?? "");
+      if (isExperimentWorkbenchStepUnlocked(target, stepInput)) {
+        setStepOverride(target);
+      }
+      resumeExperimentHypothesisFromWorkspace(candidateId);
+    };
+
     const requestedExperimentMethod = String(searchParams?.get("experimentMethod") || "").trim();
     const methodPanel = (
       <TeamExperimentMethodPanel
@@ -568,6 +590,9 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
         materializeError={selectedTeamMaterializeEngineeringProxyError}
         reviewError={selectedTeamReviewExperimentHypothesisError}
         revisionError={selectedTeamCreateExperimentHypothesisRevisionError}
+        resumeError={selectedTeamResumeExperimentHypothesisError ?? null}
+        resuming={Boolean(selectedTeamResumeExperimentHypothesisPending)}
+        onResume={resumeExperimentHypothesisFromWorkspace ? handleResumeHypothesis : undefined}
         onMaterialize={materializeEngineeringProxyHypothesisFromWorkspace}
         onReview={reviewExperimentHypothesisFromWorkspace}
         onCreateRevision={createExperimentHypothesisRevisionFromWorkspace}

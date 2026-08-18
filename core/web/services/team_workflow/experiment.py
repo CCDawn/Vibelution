@@ -32,6 +32,7 @@ from core.web.services.team_workflow.experiment_api.plan import (
     get_experiment_method_catalog,
     get_experiment_planning_status,
     register_experiment_baseline_artifact,
+    resume_experiment_hypothesis,
 )
 from core.web.services.team_workflow.experiment_api.smoke import (
     register_experiment_smoke_result,
@@ -55,5 +56,6 @@ __all__ = [
     "register_experiment_full_run_result",
     "register_experiment_smoke_result",
     "request_experiment_result_knowledge_ingestion",
+    "resume_experiment_hypothesis",
     "run_experiment_smoke_run",
 ]

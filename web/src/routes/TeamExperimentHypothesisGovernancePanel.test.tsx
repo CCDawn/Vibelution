@@ -241,4 +241,83 @@ describe("TeamExperimentHypothesisGovernancePanel", () => {
     expect(styles.candidateCard).toContain("grid-cols-[minmax(0,1fr)]");
     expect(styles.candidateActions).toContain("min-w-0");
   });
+
+  it("shows per-hypothesis checkpoint progress with a resume action", () => {
+    const markup = renderToStaticMarkup(
+      <TeamExperimentHypothesisGovernancePanel
+        lang="zh"
+        activePlan={activePlan}
+        hypotheses={[
+          {
+            ...proxyCandidate,
+            reviewDecision: "approve",
+            reviewRecordId: "candidate-review-1",
+            reviewedAt: "2026-07-30T01:00:00Z",
+            approvedForExperiment: true,
+            hypothesisProgress: {
+              candidateId: proxyCandidate.candidateId,
+              claimId: "claim-1",
+              planId: activePlan.planId,
+              status: "in_progress",
+              currentStep: "full_run",
+              nextStep: "full_run",
+              completedCount: 2,
+              totalSteps: 5,
+              evaluationOutcome: "",
+              updatedAt: "2026-07-30T02:00:00Z",
+            },
+          },
+        ]}
+        materializing={false}
+        reviewingCandidateId=""
+        revisingCandidateId=""
+        onMaterialize={() => undefined}
+        onReview={() => undefined}
+        onCreateRevision={() => undefined}
+        onResume={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain("实验进展 2/5");
+    expect(markup).toContain("下一步：正式运行");
+    expect(markup).toContain("继续此假设");
+    expect(markup).toContain(`hypothesis-resume-${proxyCandidate.candidateId}`);
+  });
+
+  it("marks a failed checkpoint without offering resume navigation", () => {
+    const markup = renderToStaticMarkup(
+      <TeamExperimentHypothesisGovernancePanel
+        lang="zh"
+        activePlan={activePlan}
+        hypotheses={[
+          {
+            ...proxyCandidate,
+            approvedForExperiment: true,
+            hypothesisProgress: {
+              candidateId: proxyCandidate.candidateId,
+              claimId: "claim-1",
+              planId: activePlan.planId,
+              status: "failed",
+              currentStep: "smoke",
+              nextStep: "smoke",
+              completedCount: 1,
+              totalSteps: 5,
+              evaluationOutcome: "",
+              updatedAt: "2026-07-30T02:00:00Z",
+            },
+          },
+        ]}
+        materializing={false}
+        reviewingCandidateId=""
+        revisingCandidateId=""
+        onMaterialize={() => undefined}
+        onReview={() => undefined}
+        onCreateRevision={() => undefined}
+        onResume={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain("实验进展 1/5");
+    expect(markup).toContain("止步于冒烟试跑");
+  });
 });

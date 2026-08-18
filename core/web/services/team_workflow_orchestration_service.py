@@ -519,6 +519,7 @@ from core.web.services.team_workflow.experiment import (
     register_experiment_full_run_result,
     register_experiment_smoke_result,
     request_experiment_result_knowledge_ingestion,
+    resume_experiment_hypothesis,
     run_experiment_smoke_run,
 )
 from core.web.services.team_workflow.challenge_question_runs import (
@@ -577,6 +578,10 @@ from core.web.services.team_workflow.experiment_kernel import (
     _notify_knowledge_steward_for_experiment_result,
     _refresh_experiment_bounded_smoke_readiness,
     _refresh_experiment_plan_readiness,
+    _refresh_hypothesis_progress,
+    _hypothesis_progress_find,
+    _hypothesis_progress_plan_tracks,
+    _hypothesis_progress_summary,
     _active_experiment_smoke_evidence,
     _experiment_plan_checklist,
     _experiment_checklist_item,

@@ -15,6 +15,7 @@ describe("buildExperimentWorkspacePendingFlags", () => {
       reviewExperimentHypothesisMutation: { isPending: false, variables: null },
       createExperimentHypothesisRevisionMutation: { isPending: false, variables: null },
       freezeExperimentDesignMutation: { isPending: false, variables: null },
+      resumeExperimentHypothesisMutation: { isPending: false, variables: null },
       registerExperimentBaselineArtifactMutation: { isPending: false, variables: null },
       registerExperimentSmokeResultMutation: { isPending: false, variables: null },
       runExperimentSmokeMutation: { isPending: false, variables: null },

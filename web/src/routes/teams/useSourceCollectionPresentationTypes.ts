@@ -72,6 +72,7 @@ export type UseSourceCollectionPresentationInput = {
   reviewExperimentHypothesisMutation: UseMutationResult<any, Error, any, unknown>;
   createExperimentHypothesisRevisionMutation: UseMutationResult<any, Error, any, unknown>;
   freezeExperimentDesignMutation: UseMutationResult<any, Error, any, unknown>;
+  resumeExperimentHypothesisMutation: UseMutationResult<any, Error, any, unknown>;
   registerExperimentBaselineArtifactMutation: UseMutationResult<any, Error, any, unknown>;
   runExperimentSmokeMutation: UseMutationResult<any, Error, any, unknown>;
   registerExperimentSmokeResultMutation: UseMutationResult<any, Error, any, unknown>;
