@@ -115,15 +115,11 @@ export function VDenseTable<TRow>({
         .filter(Boolean)
         .join(" ")}
     >
-      <table
-        className={[
-          "table-fixed border-collapse text-left",
-          resizable ? "" : "w-full",
-        ]
-          .filter(Boolean)
-          .join(" ")}
+      <div
+        data-vui-table-sizer={resizable ? "true" : undefined}
         style={resizable ? { width: `${tableWidth}px`, minWidth: `${tableWidth}px` } : undefined}
       >
+      <table className="w-full table-fixed border-collapse text-left">
         {resizable ? (
           <colgroup>
             {columns.map((column) => (
@@ -222,6 +218,7 @@ export function VDenseTable<TRow>({
           )}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }
