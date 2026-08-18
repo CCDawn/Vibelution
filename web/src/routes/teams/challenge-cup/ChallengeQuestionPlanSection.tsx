@@ -6,14 +6,15 @@ import {
   ChallengeQuestionSectionHeading,
   ChallengeStringList,
 } from "./ChallengeQuestionDetailPrimitives";
+import { ChallengeQuestionReviewForm } from "./ChallengeQuestionReviewForm";
 import css from "./ChallengeQuestionDetailPanel.styles";
 
 type ChallengeQuestionPlanSectionProps = {
-  artifact: ChallengeQuestionRunDetailPayload["artifact"];
-  output: ChallengeQuestionRunDetailPayload["output"];
+  detail: ChallengeQuestionRunDetailPayload;
 };
 
-export function ChallengeQuestionPlanSection({ artifact, output }: ChallengeQuestionPlanSectionProps) {
+export function ChallengeQuestionPlanSection({ detail }: ChallengeQuestionPlanSectionProps) {
+  const { artifact, output } = detail;
   return (
     <>
       <section className={css.section} id="plan">
@@ -39,6 +40,7 @@ export function ChallengeQuestionPlanSection({ artifact, output }: ChallengeQues
 
       <section className={css.section} id="feedback">
         <ChallengeQuestionSectionHeading index="07" title="人工审核" />
+        <ChallengeQuestionReviewForm detail={detail} />
         <div className={css.timeline}>
           {output.feedback_iterations.map((iteration) => (
             <article key={iteration.round}>

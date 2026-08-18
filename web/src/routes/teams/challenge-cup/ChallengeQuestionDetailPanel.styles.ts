@@ -46,6 +46,14 @@ const styles: Record<string, string> = {
     "grid gap-1.25 rounded-[var(--vui-radius-control)] border border-[var(--vui-border-subtle)] p-2.5 [&_small]:text-[var(--fg-secondary)]",
   timeline:
     "grid gap-[9px] [&_article]:grid [&_article]:grid-cols-[76px_1fr] [&_article]:gap-3 [&_article]:rounded-[var(--vui-radius-panel-soft)] [&_article]:border [&_article]:border-[var(--vui-border-subtle)] [&_article]:bg-[var(--vui-surface-card)] [&_article]:p-3 [&_article>span]:font-bold [&_article>span]:text-[var(--accent-cool)] [&_small]:text-[var(--state-warning)]",
+  reviewForm:
+    "grid gap-3 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-card)] p-3",
+  reviewSummary:
+    "grid gap-2 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-card)] p-3 [&_p]:text-xs",
+  gateList: "grid gap-1.5",
+  gateRow:
+    "grid grid-cols-[1fr_auto] items-center gap-2 [&>span]:text-xs [&>span]:font-[650] [&>span]:text-[var(--fg-secondary)] [&>button]:col-span-2",
+  field: "grid gap-1 [&>span]:text-xs [&>span]:font-[650] [&>span]:text-[var(--fg-secondary)]",
   artifact:
     "flex items-start gap-2.5 [&>div]:grid [&>div]:min-w-0 [&>div]:gap-1.25 [&_code]:wrap-anywhere [&_code]:text-xs [&_code]:text-[var(--fg-secondary)]",
   state:

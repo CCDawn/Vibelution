@@ -58,7 +58,7 @@ export function ChallengeQuestionDetailPanel({
     );
   }
 
-  const { output, record, artifact } = detail;
+  const { output, record } = detail;
 
   return (
     <main className={css.workspace} aria-label={`${detail.questionId} 单题验收`}>
@@ -86,7 +86,7 @@ export function ChallengeQuestionDetailPanel({
 
       <ChallengeQuestionEvidenceSection detail={detail} />
       <ChallengeQuestionAnalysisSection output={output} />
-      <ChallengeQuestionPlanSection artifact={artifact} output={output} />
+      <ChallengeQuestionPlanSection detail={detail} />
     </main>
   );
 }
