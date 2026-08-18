@@ -139,6 +139,10 @@ def _latest_by_id(records: list[dict[str, Any]], field: str, record_id: str) -> 
     return matched[-1] if matched else None
 
 
+def _normalized_str_list(value: Any) -> list[str]:
+    return [str(item or "").strip() for item in list(value or []) if str(item or "").strip()]
+
+
 def _storage_path(team_id: str) -> Path:
     return _kind_path(team_id, "hypothesis_rounds")
 
@@ -327,6 +331,239 @@ def close_hypothesis_round(
         "round": closed_record,
         "storagePath": str(_storage_path(normalized_team_id)),
     }
+
+
+def generate_hypothesis_round_from_meeting(
+    team_id: str,
+    meeting_round_id: str,
+    payload: dict[str, Any] | None = None,
+    *,
+    reflection_runner: Any = None,
+    pairwise_runner: Any = None,
+    pareto_runner: Any = None,
+    metareview_runner: Any = None,
+) -> dict[str, Any]:
+    """Generate a closed HypothesisRound from one closed hypothesis_review meeting.
+
+    The meeting must be a closed ``hypothesis_review`` round whose digest v2
+    carries the ``sourceMessageRefs`` evidence trail and whose closure
+    decision records all resolve.  The four separated review steps run in
+    ``hypothesis_review_executor`` over the bounded review context built by
+    ``research_memory_context``; any missing dimension, comparison, Pareto
+    classification, or recommendation fails closed before persistence.
+    Re-running with the same meeting and scope reuses the existing round
+    (append-only idempotency).
+    """
+
+    from core.web.services.team_service import assert_team_exists
+    from core.web.services.team_workflow import hypothesis_review_executor
+    from core.web.services.team_workflow import meeting_rounds as _meeting_rounds
+    from core.web.services.team_workflow import research_memory_context
+
+    normalized_team_id = assert_team_exists(team_id)
+    request = dict(payload) if isinstance(payload, Mapping) else {}
+    meeting_id = str(meeting_round_id or request.get("meetingRoundId") or "").strip()
+    if not meeting_id:
+        raise ResearchHypothesisRoundError("meetingRoundId is required")
+    meeting = _meeting_rounds.get_meeting_round(normalized_team_id, meeting_id)["meetingRound"]
+    if str(meeting.get("meetingType") or "") != "hypothesis_review":
+        raise ResearchHypothesisRoundError(
+            "hypothesis round generation requires a hypothesis_review meeting",
+        )
+    if str(meeting.get("status") or "") != "closed":
+        raise ResearchHypothesisRoundError(
+            "hypothesis round generation requires a closed meeting",
+        )
+    digest_id = str(meeting.get("digestId") or "").strip()
+    decision_ids = _normalized_str_list(meeting.get("decisionRefs"))
+    if not digest_id or not decision_ids:
+        raise ResearchHypothesisRoundError(
+            "closed meeting is missing digestId or decisionRefs",
+        )
+
+    # Package-internal read of the meeting stores, matching the meeting_runtime
+    # precedent; hypothesis_rounds never writes those stores.
+    digest = _meeting_rounds._latest_by_id(
+        _meeting_rounds._read_jsonl(_meeting_rounds._digests_path(normalized_team_id)),
+        "digestId",
+        digest_id,
+    )
+    if digest is None:
+        raise ResearchHypothesisRoundError(
+            f"meeting digest {digest_id} does not resolve",
+        )
+    source_refs = _normalized_str_list(digest.get("sourceMessageRefs"))
+    if not source_refs:
+        raise ResearchHypothesisRoundError(
+            "hypothesis round generation requires a digest v2 with sourceMessageRefs",
+        )
+    decision_records = _meeting_rounds._read_jsonl(
+        _meeting_rounds._decisions_path(normalized_team_id)
+    )
+    decisions: list[dict[str, Any]] = []
+    for decision_id in decision_ids:
+        record = _meeting_rounds._latest_by_id(decision_records, "decisionId", decision_id)
+        if record is None:
+            raise ResearchHypothesisRoundError(
+                f"decision record {decision_id} does not resolve",
+            )
+        decisions.append(record)
+
+    selected_ids = [
+        item.split(":", 1)[1].strip()
+        for item in _normalized_str_list(meeting.get("discussionItemRefs"))
+        if item.startswith("hypothesis_candidate:") and item.split(":", 1)[1].strip()
+    ]
+    candidate_inputs = [
+        dict(item)
+        for item in list(request.get("candidates") or [])
+        if isinstance(item, Mapping) and str(item.get("candidateId") or "").strip()
+    ]
+    input_by_id = {str(item["candidateId"]).strip(): item for item in candidate_inputs}
+    missing_inputs = [candidate_id for candidate_id in selected_ids if candidate_id not in input_by_id]
+    if missing_inputs:
+        raise ResearchHypothesisRoundError(
+            "every discussed candidate requires a review input: " + ", ".join(missing_inputs),
+        )
+    ordered_ids = selected_ids + [
+        str(item["candidateId"]).strip()
+        for item in candidate_inputs
+        if str(item["candidateId"]).strip() not in selected_ids
+    ]
+    candidates: list[dict[str, Any]] = []
+    for candidate_id in ordered_ids:
+        item = input_by_id[candidate_id]
+        claim = str(item.get("claim") or "").strip()
+        if not claim:
+            raise ResearchHypothesisRoundError(
+                f"candidate {candidate_id} requires a non-empty claim",
+            )
+        difference = str(item.get("differenceFromAlternatives") or "").strip() or (
+            f"{candidate_id} 与其他入选候选的机制路径差异待评审确认"
+        )
+        candidates.append(
+            {
+                "candidateId": candidate_id,
+                "claim": claim,
+                "rationale": str(item.get("rationale") or "").strip(),
+                "differenceFromAlternatives": difference,
+            }
+        )
+
+    participants = _normalized_str_list(meeting.get("participants"))
+    role_ids = _normalized_str_list(meeting.get("participantRoleIds"))
+    coordinator_agent = ""
+    for role, agent in zip(role_ids, participants):
+        if role == hypothesis_review_executor.METAREVIEW_ROLE:
+            coordinator_agent = agent
+            break
+    if not coordinator_agent:
+        coordinator_agent = str(meeting.get("closedBy") or "").strip()
+    if not coordinator_agent:
+        raise ResearchHypothesisRoundError(
+            "hypothesis review requires a resolvable meeting Coordinator for MetaReview",
+        )
+
+    scope = _resolve_scope(
+        {
+            key: meeting.get(key)
+            for key in ("program", "theme", "campaign", "question", "branch", "workflow", "agentId", "mode")
+        }
+    )
+    scope_hash = scope["scopeHash"]
+    if scope_hash != str(meeting.get("scopeHash") or ""):
+        raise ResearchHypothesisRoundError(
+            "meeting scope hash mismatch; refusing to generate a hypothesis round",
+        )
+    round_id = str(request.get("roundId") or "").strip() or (
+        f"hround-{_stable_hash({'meetingRoundId': meeting_id, 'scopeHash': scope_hash})[:12]}"
+    )
+
+    closed_prior_rounds = [
+        record
+        for record in _read_jsonl(_storage_path(normalized_team_id))
+        if str(record.get("status") or "") == "closed"
+        and str(record.get("scopeHash") or "") == scope_hash
+        and str(record.get("roundId") or "") != round_id
+    ]
+    previous_round_id = str(request.get("previousRoundId") or "").strip()
+    prior_round: dict[str, Any] | None = None
+    if previous_round_id:
+        matched = [
+            record
+            for record in closed_prior_rounds
+            if str(record.get("roundId") or "") == previous_round_id
+        ]
+        if not matched:
+            raise ResearchHypothesisRoundError(
+                f"previousRoundId {previous_round_id} does not resolve to a closed round in the same scope",
+            )
+        prior_round = matched[-1]
+    elif closed_prior_rounds:
+        prior_round = closed_prior_rounds[-1]
+
+    lineage: list[dict[str, str]] = []
+    if prior_round is not None:
+        lineage.append({"kind": "round", "id": str(prior_round["roundId"])})
+        carried = {
+            str(item.get("candidateId") or "")
+            for item in list(prior_round.get("candidates") or [])
+            if isinstance(item, Mapping)
+        }
+        lineage.extend(
+            {"kind": "candidate", "id": candidate_id}
+            for candidate_id in ordered_ids
+            if candidate_id not in carried
+        )
+    else:
+        lineage.extend({"kind": "candidate", "id": candidate_id} for candidate_id in ordered_ids)
+
+    context = research_memory_context.build_hypothesis_review_context(
+        meeting_round=meeting,
+        digest=digest,
+        decisions=decisions,
+        candidates=candidates,
+        prior_round=prior_round,
+        extra_evidence_refs=_normalized_str_list(request.get("evidenceRefs")),
+    )
+    review = hypothesis_review_executor.execute_hypothesis_review(
+        context,
+        round_id=round_id,
+        reflection_runner=reflection_runner,
+        pairwise_runner=pairwise_runner,
+        pareto_runner=pareto_runner,
+        metareview_runner=metareview_runner,
+        reviewer_assignments={"metareview": coordinator_agent},
+        position_seed=str(request.get("positionSeed") or "").strip(),
+    )
+    meeting_refs = [
+        {"kind": "meeting_round", "id": meeting_id},
+        {"kind": "meeting_digest", "id": digest_id},
+        *[{"kind": "decision_record", "id": decision_id} for decision_id in decision_ids],
+    ]
+    result = create_hypothesis_round(
+        normalized_team_id,
+        {
+            **scope,
+            "roundId": round_id,
+            "candidates": review["candidates"],
+            "pairwiseComparisons": review["pairwiseComparisons"],
+            "pareto": review["pareto"],
+            "metaReview": review["metaReview"],
+            "meetingRefs": meeting_refs,
+            "lineage": lineage,
+            "status": "closed",
+            "closedBy": coordinator_agent,
+            "closedAt": _utc_now(),
+        },
+    )
+    result["closed"] = True
+    result["review"] = {
+        "contextId": review["reviewContextId"],
+        "positionSeed": review["positionSeed"],
+        "roles": review["roles"],
+    }
+    return result
 
 
 def list_hypothesis_rounds(team_id: str) -> dict[str, Any]:
