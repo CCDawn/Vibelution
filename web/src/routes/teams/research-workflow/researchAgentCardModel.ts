@@ -11,14 +11,6 @@ const ROLE_LABELS: Record<string, string> = {
   iteration_versioning: "版本治理",
 };
 
-const SOURCE_LABELS: Record<string, string> = {
-  workflow_default: "团队/工作流默认",
-  stage_override: "阶段覆盖",
-  node_override: "节点覆盖",
-  rebind: "运行内换绑",
-  unbound: "未绑定",
-};
-
 export function buildResearchAgentCard(input: {
   nodeId: string;
   roleKey: string;
@@ -31,18 +23,13 @@ export function buildResearchAgentCard(input: {
   lang?: "zh" | "en";
 }): TeamSourceCollectionStageAgentCard {
   const isZh = input.lang !== "en";
-  const sourceLabel = SOURCE_LABELS[input.resolvedFrom] ?? input.resolvedFrom;
   const statusLabel = !input.agentId
-    ? isZh ? "未绑定" : "Unbound"
-    : input.sessionBound
-      ? isZh ? `会话已绑定 · ${sourceLabel}` : `Session bound · ${sourceLabel}`
-      : isZh ? `已绑定 · ${sourceLabel}` : `Bound · ${sourceLabel}`;
+    ? isZh ? "未配置" : "Not configured"
+    : isZh ? "可运行" : "Ready";
 
   return {
     id: input.nodeId,
-    tone: !input.agentId || input.resolvedFrom === "unbound"
-      ? "missing"
-      : input.sessionBound ? "ready" : "warning",
+    tone: !input.agentId || input.resolvedFrom === "unbound" ? "missing" : "ready",
     roleLabel: input.roleLabel || ROLE_LABELS[input.roleKey] || (isZh ? "科研执行" : "Research execution"),
     agentName: input.agentName || input.agentId || (isZh ? "未绑定" : "Unbound"),
     modelLabel: input.modelLabel || "",

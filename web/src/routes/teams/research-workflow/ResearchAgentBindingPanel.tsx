@@ -1,14 +1,17 @@
 /**
  * Agent binding panel for the research workflow single-canvas workspace.
  *
- * Reuses the existing team Agent-card visual (TeamSourceCollectionStageAgentsPanel)
- * — no second card system. Cards show: role, bound Agent (name/id), binding
- * source (team default / workflow / stage / node / run snapshot / rebind),
- * current session state, the exact-session entry and the config entry
- * /agents?pane=config&agent={agentId}.
+ * Reuses the existing dense Agent summary (TeamSourceCollectionStageAgentsPanel)
+ * — no second presentation system. Each row exposes only the responsibility,
+ * configured model and actionable status, while the row opens the exact Agent
+ * configuration entry /agents?pane=config&agent={agentId}.
  */
+import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 
+import { listAgentSummaries } from "../../../api/agents";
+import { queryKeys } from "../../../api/queryKeys";
+import type { AgentConfigWorkspaceAgent } from "../../../api/types";
 import type { EffectiveAgentBinding } from "../../../api/types/researchWorkflow";
 import {
   TeamSourceCollectionStageAgentsPanel,
@@ -16,6 +19,11 @@ import {
 } from "../source-collection/ui/TeamSourceCollectionStageAgentsPanel";
 import type { WorkflowRunRecord } from "../../../api/researchWorkflow";
 import { buildResearchAgentCard } from "./researchAgentCardModel";
+import {
+  researchStageAgentConfigStatusLabel,
+  researchStageAgentConfigTone,
+  researchStageAgentModelLabel,
+} from "../researchStageAgentPresentation";
 import styles from "./ResearchAgentBindingPanel.styles";
 
 type ResearchAgentBindingPanelProps = {
@@ -32,6 +40,16 @@ export function ResearchAgentBindingPanel({
   lang = "zh",
 }: ResearchAgentBindingPanelProps) {
   const isZh = lang === "zh";
+  const agentSummaryQuery = useQuery({
+    queryKey: queryKeys.agentSummary(false),
+    queryFn: ({ signal }) => listAgentSummaries<AgentConfigWorkspaceAgent>({ signal }),
+    enabled: Boolean(teamId),
+    staleTime: 10_000,
+  });
+  const agentById = useMemo(
+    () => new Map((agentSummaryQuery.data ?? []).map((agent) => [agent.agentId, agent])),
+    [agentSummaryQuery.data],
+  );
 
   const cards = useMemo<TeamSourceCollectionStageAgentCard[]>(() => {
     const snapshots = run?.bindingSnapshots ?? [];
@@ -52,17 +70,43 @@ export function ResearchAgentBindingPanel({
         | { sessionId?: string; status?: string }
         | undefined;
       const hasSession = Boolean(session?.sessionId && session.status === "bound");
-      return buildResearchAgentCard({
+      const agent = agentById.get(agentId);
+      const modelLabel = !agentId
+        ? "—"
+        : agent
+          ? researchStageAgentModelLabel(agent, lang)
+          : agentSummaryQuery.isPending
+            ? (isZh ? "加载中" : "Loading")
+            : agentSummaryQuery.isError
+              ? (isZh ? "读取失败" : "Unavailable")
+              : (isZh ? "未配置模型" : "Model missing");
+      const card = buildResearchAgentCard({
         nodeId: binding.nodeId,
         roleKey: String(snap?.roleKey || binding.roleKey || ""),
         agentId,
         agentName: String(snap?.displayName || binding.displayName || agentId),
         resolvedFrom: source,
         sessionBound: hasSession,
+        modelLabel,
         lang,
       });
+      if (!agentId) return card;
+      if (agent) {
+        return {
+          ...card,
+          tone: researchStageAgentConfigTone(agent),
+          statusLabel: researchStageAgentConfigStatusLabel(agent, lang),
+        };
+      }
+      return {
+        ...card,
+        tone: agentSummaryQuery.isPending ? "warning" : "blocked",
+        statusLabel: agentSummaryQuery.isPending
+          ? (isZh ? "加载中" : "Loading")
+          : (isZh ? "需修复" : "Needs repair"),
+      };
     });
-  }, [effectiveBindings, run, isZh]);
+  }, [agentById, agentSummaryQuery.isError, agentSummaryQuery.isPending, effectiveBindings, isZh, lang, run]);
 
   if (!teamId) {
     return null;

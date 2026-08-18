@@ -1,5 +1,11 @@
-import { Link2 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
+
+import {
+  VDenseTable,
+  VStatusChip,
+  type VDenseTableColumn,
+  type VStatusTone,
+} from "../../../../components/vui";
 
 import styles from "./TeamSourceCollectionStageAgentsPanel.styles";
 
@@ -18,6 +24,12 @@ export type TeamSourceCollectionStageAgentCard = {
   configLabel: string;
 };
 
+function statusTone(tone: TeamSourceCollectionStageAgentTone): VStatusTone {
+  if (tone === "blocked") return "danger";
+  if (tone === "warning" || tone === "missing") return "warning";
+  return "neutral";
+}
+
 type TeamSourceCollectionStageAgentsPanelProps = {
   lang: TeamSourceCollectionStageAgentsLang;
   agents: TeamSourceCollectionStageAgentCard[];
@@ -29,10 +41,36 @@ export function TeamSourceCollectionStageAgentsPanel({
   agents,
   layout = "inline",
 }: TeamSourceCollectionStageAgentsPanelProps) {
+  const navigate = useNavigate();
   if (!agents.length) {
     return null;
   }
   const isZh = lang === "zh";
+  const columns: Array<VDenseTableColumn<TeamSourceCollectionStageAgentCard>> = [
+    {
+      id: "role",
+      header: isZh ? "职责" : "Role",
+      className: styles.sourceCollectionStageAgentRole,
+      render: (agent) => <span title={agent.roleLabel}>{agent.roleLabel}</span>,
+    },
+    {
+      id: "model",
+      header: isZh ? "模型" : "Model",
+      className: styles.sourceCollectionStageAgentModel,
+      render: (agent) => (
+        <span title={agent.modelLabel || undefined}>{agent.modelLabel || "—"}</span>
+      ),
+    },
+    {
+      id: "status",
+      header: isZh ? "状态" : "Status",
+      className: styles.sourceCollectionStageAgentStatus,
+      truncate: false,
+      render: (agent) => (
+        <VStatusChip tone={statusTone(agent.tone)}>{agent.statusLabel}</VStatusChip>
+      ),
+    },
+  ];
 
   return (
     <section
@@ -43,51 +81,17 @@ export function TeamSourceCollectionStageAgentsPanel({
       <div className={styles.sourceCollectionStageAgentHeader}>
         <strong>{isZh ? "Agent 配置" : "Agent configuration"}</strong>
       </div>
-      <div className={styles.sourceCollectionStageAgentList}>
-        {agents.map((agent) => (
-          <article
-            key={agent.id}
-            className={[
-              styles.sourceCollectionStageAgentCard,
-              layout === "stacked" ? styles.sourceCollectionStageAgentCardStacked : "",
-              styles[`researchStageAgentCard_${agent.tone}` as keyof typeof styles],
-            ].filter(Boolean).join(" ")}
-          >
-            <div className={[
-              styles.sourceCollectionStageAgentCardBody,
-              layout === "stacked" ? styles.sourceCollectionStageAgentCardBodyStacked : "",
-            ].filter(Boolean).join(" ")}>
-              <span>
-                <small>{isZh ? "职责" : "Role"}</small>
-                <strong>{agent.roleLabel}</strong>
-              </span>
-              <span>
-                <small>Agent</small>
-                <strong>{agent.agentName}</strong>
-              </span>
-              {agent.modelLabel ? (
-                <span>
-                  <small>{isZh ? "模型" : "Model"}</small>
-                  <strong>{agent.modelLabel}</strong>
-                </span>
-              ) : null}
-            </div>
-            <div className={styles.sourceCollectionStageAgentCardActions}>
-              <span>{agent.statusLabel}</span>
-              {agent.memoryRoute ? (
-                <Link to={agent.memoryRoute}>
-                  <Link2 size={12} />
-                  {isZh ? "Agent 记忆" : "Memory"}
-                </Link>
-              ) : null}
-              <Link to={agent.configRoute}>
-                <Link2 size={12} />
-                {agent.configLabel}
-              </Link>
-            </div>
-          </article>
-        ))}
-      </div>
+      <VDenseTable
+        ariaLabel={isZh ? "Agent 职责、模型与状态" : "Agent role, model and status"}
+        className={styles.sourceCollectionStageAgentTable}
+        columns={columns}
+        getRowKey={(agent) => agent.id}
+        getRowState={(agent) => ({
+          tone: agent.tone === "ready" ? "neutral" : "warning",
+        })}
+        onRowClick={(agent) => navigate(agent.configRoute)}
+        rows={agents}
+      />
     </section>
   );
 }

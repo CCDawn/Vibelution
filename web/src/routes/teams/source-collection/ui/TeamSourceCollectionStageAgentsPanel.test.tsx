@@ -6,17 +6,17 @@ import { describe, expect, it } from "vitest";
 import { TeamSourceCollectionStageAgentsPanel } from "./TeamSourceCollectionStageAgentsPanel";
 
 describe("TeamSourceCollectionStageAgentsPanel", () => {
-  it("keeps the existing inline layout by default and exposes a stacked inspector layout", () => {
+  it("shows only the compact role, model and status summary", () => {
     const agent = {
       id: "source-finder",
       tone: "ready" as const,
       roleLabel: "资料寻找",
       agentName: "资料检索 Agent",
-      modelLabel: "",
-      statusLabel: "已绑定",
-      memoryRoute: "",
+      modelLabel: "qwen-plus",
+      statusLabel: "可运行",
+      memoryRoute: "/memory/agent/source-finder",
       configRoute: "/agents?pane=config&agent=source-finder",
-      configLabel: "Agent 配置",
+      configLabel: "打开设置",
     };
     const inline = renderToStaticMarkup(
       <MemoryRouter>
@@ -31,7 +31,17 @@ describe("TeamSourceCollectionStageAgentsPanel", () => {
 
     expect(inline).toContain('data-layout="inline"');
     expect(stacked).toContain('data-layout="stacked"');
-    expect(stacked).toContain("!grid-cols-[minmax(0,1fr)]");
-    expect(stacked).toContain("[&amp;_strong]:whitespace-normal");
+    expect(inline).toContain('data-vui="dense-table"');
+    expect(inline).toContain("职责");
+    expect(inline).toContain("模型");
+    expect(inline).toContain("状态");
+    expect(inline).toContain("资料寻找");
+    expect(inline).toContain("qwen-plus");
+    expect(inline).toContain("可运行");
+    expect(inline).toContain('data-tone="neutral"');
+    expect(inline).not.toContain("资料检索 Agent");
+    expect(inline).not.toContain("Agent 记忆");
+    expect(inline).not.toContain("打开设置");
+    expect(stacked).toContain('data-vui="dense-table"');
   });
 });

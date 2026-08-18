@@ -1,8 +1,11 @@
 import React from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 
+import { queryKeys } from "../../../api/queryKeys";
+import type { AgentConfigWorkspaceAgent } from "../../../api/types";
 import type { WorkflowRunRecord } from "../../../api/researchWorkflow";
 import type { EffectiveAgentBinding } from "../../../api/types/researchWorkflow";
 import { ResearchAgentBindingPanel } from "./ResearchAgentBindingPanel";
@@ -38,42 +41,62 @@ function makeRun(): WorkflowRunRecord {
 }
 
 function renderPanel(teamId = "research-team", run: WorkflowRunRecord | null = makeRun(), bindings: EffectiveAgentBinding[] | null = BINDINGS) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  queryClient.setQueryData<AgentConfigWorkspaceAgent[]>(queryKeys.agentSummary(false), [
+    {
+      agentId: "agent-finder",
+      llmBindings: { dialogue: { modelId: "qwen-plus" } },
+    } as AgentConfigWorkspaceAgent,
+    {
+      agentId: "agent-planner",
+      llmBindings: { dialogue: { modelId: "deepseek-v3" } },
+    } as AgentConfigWorkspaceAgent,
+  ]);
   return renderToStaticMarkup(
-    <MemoryRouter>
-      <ResearchAgentBindingPanel teamId={teamId} run={run} effectiveBindings={bindings} lang="zh" />
-    </MemoryRouter>,
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter>
+        <ResearchAgentBindingPanel teamId={teamId} run={run} effectiveBindings={bindings} lang="zh" />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
 describe("ResearchAgentBindingPanel", () => {
-  it("shows role, agent, binding source and session state per card", () => {
+  it("shows only role, model and actionable status", () => {
     const markup = renderPanel();
+    expect(markup).toContain("职责");
+    expect(markup).toContain("模型");
+    expect(markup).toContain("状态");
     expect(markup).toContain("资料寻找");
-    expect(markup).toContain("agent-finder");
-    expect(markup).toContain("团队/工作流默认");
-    expect(markup).toContain("会话已绑定");
-    expect(markup).toContain("未绑定");
+    expect(markup).toContain("qwen-plus");
+    expect(markup).toContain("deepseek-v3");
+    expect(markup).toContain("可用");
+    expect(markup).toContain("未配置");
+    expect(markup).not.toContain("agent-finder");
+    expect(markup).not.toContain("团队/工作流默认");
+    expect(markup).not.toContain("会话已绑定");
   });
 
-  it("links to the agent config entry with the stable agentId", () => {
+  it("keeps rows keyboard-activatable without a visible action column", () => {
     const markup = renderPanel();
-    expect(markup).toContain("pane=config");
-    expect(markup).toContain("agent=agent-finder");
+    expect(markup).toContain('tabindex="0"');
+    expect(markup).not.toContain("Agent 记忆");
+    expect(markup).not.toContain("pane=config");
   });
 
-  it("keeps unbound roles unbound with no per-agent config link", () => {
+  it("keeps unbound roles visibly unconfigured", () => {
     const markup = renderPanel();
-    expect(markup).toContain("未绑定");
-    expect(markup).not.toContain("agent=agent-extractor");
-    // Bound card still links to its own agent config.
-    expect(markup).toContain("agent=agent-finder");
+    expect(markup).toContain("未配置");
+    expect(markup).toContain("—");
   });
 
   it("renders nothing without a team", () => {
     const markup = renderToStaticMarkup(
-      <MemoryRouter>
-        <ResearchAgentBindingPanel teamId="" run={null} effectiveBindings={null} lang="zh" />
-      </MemoryRouter>,
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter>
+          <ResearchAgentBindingPanel teamId="" run={null} effectiveBindings={null} lang="zh" />
+        </MemoryRouter>
+      </QueryClientProvider>,
     );
     expect(markup).toBe("");
   });

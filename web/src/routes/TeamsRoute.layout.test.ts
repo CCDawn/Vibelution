@@ -1612,8 +1612,8 @@ describe("TeamsRoute layout contract", () => {
     // Agent card mapping lives on stageAgentsPresentation pure helper.
     expect(routeSource).toContain("bindings={sourceCollectionStageAgentBindings(stageId)}");
     expect(teamSourceCollectionStageAgentsPanelSource).toContain("当前步骤 Agent 配置");
-    expect(teamSourceCollectionStageAgentsPanelSource).toContain("sourceCollectionStageAgentCardBody");
-    expect(teamSourceCollectionStageAgentsPanelSource).toContain("sourceCollectionStageAgentCardActions");
+    expect(teamSourceCollectionStageAgentsPanelSource).toContain("VDenseTable");
+    expect(teamSourceCollectionStageAgentsPanelSource).toContain("VStatusChip");
     expect(teamSourceCollectionStageAgentsPanelSource).toContain("sourceCollectionStageAgentPanel");
     expect(routeSource).not.toContain("sourceCollectionStageAgentStrip");
     expect(routeSource).not.toContain("sourceCollectionStageAgentChips");
@@ -2792,10 +2792,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeStyles.researchStageAgentCard_missing).toBeTypeOf("string");
     expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentPanel).toBeTypeOf("string");
     expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentHeader).toBeTypeOf("string");
-    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentList).toBeTypeOf("string");
-    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentCard).toBeTypeOf("string");
-    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentCardBody).toBeTypeOf("string");
-    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentCardActions).toBeTypeOf("string");
+    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentTable).toBeTypeOf("string");
+    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentRole).toBeTypeOf("string");
+    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentModel).toBeTypeOf("string");
+    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentStatus).toBeTypeOf("string");
     expect(routeStyles.researchInspector).toBeTypeOf("string");
     expect(routeStyles.researchCanvasPanelHidden).toBeTypeOf("string");
     expect(routeStyles.canvasReadOnlyBadge).toBeTypeOf("string");
@@ -3030,7 +3030,7 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageChatActions).not.toContain(
       "bg-[image:var(--vui-gradient-route-soft)]",
     );
-    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentCard).toMatch(/bg-vui-surface-row|bg-\[var\(--vui-surface-row\)\]/);
+    expect(teamSourceCollectionStageAgentsPanelSource).toContain("VDenseTable");
     expect(teamSourceCollectionSourceDetailPanelStyles.sourceCollectionSourceDetailHeader).toMatch(/bg-vui-surface-row|bg-\[var\(--vui-surface-row\)\]/);
     expect(teamSourceCollectionSourceDetailPanelStyles.sourceCollectionSourceDetailFacts).toMatch(/bg-vui-surface-row|bg-\[var\(--vui-surface-row\)\]/);
   });
@@ -3061,8 +3061,6 @@ describe("TeamsRoute layout contract", () => {
       [routeStyles.researchStageCardHead, "grid-cols-[auto_minmax(0,1fr)]"],
       [routeStyles.researchStageCardMetrics, "grid-cols-[repeat(3,minmax(0,1fr))]"],
       [routeStyles.researchStageAgentGrid, "grid-cols-[repeat(auto-fit,minmax(210px,1fr))]"],
-      [teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentCard, "grid-cols-[minmax(0,1fr)_auto]"],
-      [teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentCardBody, "grid-cols-[repeat(3,minmax(0,1fr))]"],
       [teamSourceCollectionSourceDetailPanelStyles.sourceCollectionSourceDetailFacts, "grid-cols-[repeat(auto-fit,minmax(180px,1fr))]"],
       [routeStyles.researchStageHeroStats, "grid-cols-[repeat(3,minmax(0,1fr))]"],
       [routeStyles.workflowStats, "grid-cols-[repeat(3,minmax(0,1fr))]"],
@@ -3082,8 +3080,7 @@ describe("TeamsRoute layout contract", () => {
       expect(className).toContain(gridTemplate);
     }
 
-    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentCard).toContain("[&_a]:inline-flex");
-    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentCard).toContain("[&_[data-vui=native-button]]:inline-flex");
+    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentTable).toContain("h-11");
   });
 
   it("keeps source collection subpanels compact, text-safe, and mobile-safe", () => {
@@ -3106,15 +3103,10 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionStageChatActions).toContain("max-[1020px]:[&_[data-vui=native-button]]:w-fit");
 
     expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentPanel).not.toContain("shadow-[var(--vui-shadow-hairline)]");
-    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentCard).toMatch(/bg-vui-surface-row|bg-\[var\(--vui-surface-row\)\]/);
-    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentCard).toContain("max-[720px]:grid-cols-[minmax(0,1fr)]");
-    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentCardBody).not.toContain("shadow-[var(--vui-shadow-hairline)]");
-    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentCardBody).toContain("max-[680px]:grid-cols-[minmax(0,1fr)]");
-    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentCardBody).toContain("[&_strong]:truncate");
-    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentCardActions).not.toContain("shadow-[var(--vui-shadow-hairline)]");
-    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentCardActions).toContain("justify-end");
-    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentCardActions).toContain("max-[720px]:justify-start");
-    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentCardActions).toContain("[&_a]:w-fit");
+    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentTable).not.toContain("max-[720px]");
+    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentRole).toContain("w-[34%]");
+    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentModel).toContain("w-[44%]");
+    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentStatus).toContain("w-[22%]");
 
     for (const className of [
       teamWorkflowStatusPanelStyles.workflowIngestionStages,
