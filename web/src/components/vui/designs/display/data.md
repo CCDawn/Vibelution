@@ -25,7 +25,7 @@ import { VDenseTable } from "@/components/vui";
 | --- | --- | --- |
 | columns / rows | 列定义与数据 | 空表用 EmptyState 槽 |
 | columns[].width / minWidth | 默认列宽与拖拽下限 | 表头与单元格共用同一列宽 |
-| columns[].fill | 弹性列标记 | 可缩放表用 `role="table"` 的 CSS Grid + 行级 `subgrid`，避免在 `<table>`/`<tr>` 上使用 `display:contents`（Chromium 会丢掉后列）。fill 列 `minmax(0, 1fr)`，非 fill 列像素 track。表宽 `100%` 且 `max-width:100%`。调用方 flex 中间层也要 `min-w-0`。不要给 fill 设 `width:100%` |
+| columns[].fill | 弹性列标记 | 可缩放表用 `role="table"` 的 CSS Grid + 行级 `subgrid`，避免在 `<table>`/`<tr>` 上使用 `display:contents`（Chromium 会丢掉后列）。fill 列 `minmax(0, 1fr)`，非 fill 列像素 track。首帧表宽 `100%`；挂载后改写成 `visualViewport.width`（回退 `innerWidth`）减去边距的像素 `width`/`max-width`，因为祖先被内容撑宽时 `%` 和 `100vw` 都会跟着溢出文档走。`min-width` 不得超过该上限。调用方 flex 中间层也要 `min-w-0`。不要给 fill 设 `width:100%` |
 | resizable | 拖拽调整列宽 | 拖非 fill 列只改该列像素 track。fill 列不提供拖拽，避免和 `1fr` 抢宽。壳 `overflow-x-auto`，窄于 `min-width` 时横向滚动。操作列不要 `sticky`：祖先 `overflow-x-hidden` 会把粘滞列裁成 0 |
 | onRowClick / getRowState | 行选择与色条 | 运维表可选 |
 
