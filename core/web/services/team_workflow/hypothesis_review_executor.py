@@ -87,7 +87,7 @@ def deterministic_pairwise_order(
 
 
 def _fixture_score(context_id: str, candidate_id: str, dimension: str) -> float:
-    digest = hashlib.sha256(f"{context_id}:{candidate_id}:{dimension}".encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(f"{context_id}:{candidate_id}:{dimension}".encode()).hexdigest()
     return round(0.5 + (int(digest[:8], 16) % 46) / 100.0, 2)
 
 
@@ -259,11 +259,11 @@ def _pairwise_step(
     }
     missing = expected - covered
     if missing:
-        pair = sorted(missing)[0]
-        left_id, right_id = sorted(pair)
-        raise ContractValidationError(
-            f"missing pairwise comparison between {left_id} and {right_id}"
-        )
+        for left_id, right_id in deterministic_pairwise_order(list(by_id), position_seed):
+            if frozenset((left_id, right_id)) in missing:
+                raise ContractValidationError(
+                    f"missing pairwise comparison between {left_id} and {right_id}"
+                )
     return comparisons
 
 

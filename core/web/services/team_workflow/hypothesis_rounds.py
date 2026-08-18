@@ -356,9 +356,11 @@ def generate_hypothesis_round_from_meeting(
     """
 
     from core.web.services.team_service import assert_team_exists
-    from core.web.services.team_workflow import hypothesis_review_executor
+    from core.web.services.team_workflow import (
+        hypothesis_review_executor,
+        research_memory_context,
+    )
     from core.web.services.team_workflow import meeting_rounds as _meeting_rounds
-    from core.web.services.team_workflow import research_memory_context
 
     normalized_team_id = assert_team_exists(team_id)
     request = dict(payload) if isinstance(payload, Mapping) else {}

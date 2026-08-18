@@ -14,7 +14,6 @@ from core.web.services.team_workflow.outcome_graph import (
     project_outcome_memory,
 )
 
-
 NEGATIVE_PLAN_STATUSES = {
     "smoke_failed",
     "smoke_needs_review",

@@ -31,13 +31,14 @@ from core.web.services import (
     session_service,
     team_service,
 )
-from core.web.services.team_workflow import hypothesis_review_executor
-from core.web.services.team_workflow import hypothesis_rounds
+from core.web.services.team_workflow import (
+    hypothesis_review_executor,
+    hypothesis_rounds,
+    meeting_runtime,
+    research_memory_context,
+)
 from core.web.services.team_workflow import meeting_rounds as meetings
-from core.web.services.team_workflow import meeting_runtime
 from core.web.services.team_workflow import personal_memory_candidates as memories
-from core.web.services.team_workflow import research_memory_context
-
 from tests._support.team_workflow.helpers import _use_tmp_project_root
 
 _ROLES = ("coordinator", "researcher")
@@ -192,7 +193,7 @@ def _walk_lineage_to_candidates(team_id, round_record):
 
 
 def test_generate_from_closed_meeting_completes_full_review_loop(tmp_path, monkeypatch):
-    team_id, agents, opened, approved = _closed_meeting(tmp_path, monkeypatch)
+    team_id, agents, _opened, approved = _closed_meeting(tmp_path, monkeypatch)
     meeting_round = approved["meetingRound"]
     digest = approved["digest"]
     assert meeting_round["status"] == "closed"
@@ -284,7 +285,7 @@ def test_generate_from_closed_meeting_completes_full_review_loop(tmp_path, monke
 
 
 def test_review_context_is_bounded_and_reference_first(tmp_path, monkeypatch):
-    team_id, agents, opened, approved = _closed_meeting(tmp_path, monkeypatch)
+    _team_id, _agents, _opened, approved = _closed_meeting(tmp_path, monkeypatch)
     meeting_round = approved["meetingRound"]
 
     context = research_memory_context.build_hypothesis_review_context(
@@ -407,7 +408,7 @@ def test_generate_requires_a_closed_hypothesis_review_meeting(tmp_path, monkeypa
 
 
 def test_reflection_missing_dimension_fails_closed(tmp_path, monkeypatch):
-    team_id, agents, opened, approved = _closed_meeting(tmp_path, monkeypatch)
+    team_id, _agents, _opened, approved = _closed_meeting(tmp_path, monkeypatch)
     meeting_round_id = approved["meetingRound"]["meetingRoundId"]
 
     def incomplete_reflection(candidate, context):
@@ -424,7 +425,7 @@ def test_reflection_missing_dimension_fails_closed(tmp_path, monkeypatch):
 
 
 def test_pairwise_runner_gap_fails_closed(tmp_path, monkeypatch):
-    team_id, agents, opened, approved = _closed_meeting(tmp_path, monkeypatch)
+    team_id, _agents, _opened, approved = _closed_meeting(tmp_path, monkeypatch)
     meeting_round_id = approved["meetingRound"]["meetingRoundId"]
 
     def silent_pairwise(left, right, context):
@@ -445,7 +446,7 @@ def test_pairwise_runner_gap_fails_closed(tmp_path, monkeypatch):
 
 
 def test_pareto_must_classify_every_candidate(tmp_path, monkeypatch):
-    team_id, agents, opened, approved = _closed_meeting(tmp_path, monkeypatch)
+    team_id, _agents, _opened, approved = _closed_meeting(tmp_path, monkeypatch)
     meeting_round_id = approved["meetingRound"]["meetingRoundId"]
 
     def incomplete_pareto(scores_by_candidate, context):
@@ -463,7 +464,7 @@ def test_pareto_must_classify_every_candidate(tmp_path, monkeypatch):
 
 
 def test_metareview_requires_a_recommendation(tmp_path, monkeypatch):
-    team_id, agents, opened, approved = _closed_meeting(tmp_path, monkeypatch)
+    team_id, _agents, _opened, approved = _closed_meeting(tmp_path, monkeypatch)
     meeting_round_id = approved["meetingRound"]["meetingRoundId"]
 
     def no_recommendation(context, candidates, pairwise, pareto):
@@ -495,7 +496,7 @@ def test_metareview_requires_a_recommendation(tmp_path, monkeypatch):
 
 
 def test_generation_is_idempotent_for_the_same_meeting(tmp_path, monkeypatch):
-    team_id, agents, opened, approved = _closed_meeting(tmp_path, monkeypatch)
+    team_id, _agents, _opened, approved = _closed_meeting(tmp_path, monkeypatch)
     meeting_round_id = approved["meetingRound"]["meetingRoundId"]
 
     first = _generate(team_id, meeting_round_id)
@@ -525,7 +526,7 @@ def test_pairwise_order_is_randomized_seeded_and_recorded(tmp_path, monkeypatch)
     # The scheme actually randomizes: the fixed seed set produces both orders.
     assert len({tuple(ordering) for ordering in orderings.values()}) > 1
 
-    team_id, agents, opened, approved = _closed_meeting(tmp_path, monkeypatch)
+    team_id, _agents, _opened, approved = _closed_meeting(tmp_path, monkeypatch)
     result = _generate(
         team_id,
         approved["meetingRound"]["meetingRoundId"],
@@ -540,12 +541,12 @@ def test_pairwise_order_is_randomized_seeded_and_recorded(tmp_path, monkeypatch)
 
 def test_lineage_chain_walks_from_any_round_to_question_candidates(tmp_path, monkeypatch):
     team_id, agents = _team_with_room(tmp_path, monkeypatch)
-    opened_1, approved_1 = _open_and_close_meeting(team_id, agents)
+    _opened_1, approved_1 = _open_and_close_meeting(team_id, agents)
     first = _generate(team_id, approved_1["meetingRound"]["meetingRoundId"])
     first_round = first["round"]
 
     # Second discussion round brings one new candidate alongside the carry-overs.
-    opened_2, approved_2 = _open_and_close_meeting(
+    _opened_2, approved_2 = _open_and_close_meeting(
         team_id,
         agents,
         selectionId="sel-hf3-2",
@@ -582,9 +583,9 @@ def test_lineage_chain_walks_from_any_round_to_question_candidates(tmp_path, mon
 
 def test_previous_round_ref_must_resolve_to_a_closed_round(tmp_path, monkeypatch):
     team_id, agents = _team_with_room(tmp_path, monkeypatch)
-    opened_1, approved_1 = _open_and_close_meeting(team_id, agents)
+    _opened_1, approved_1 = _open_and_close_meeting(team_id, agents)
     first = _generate(team_id, approved_1["meetingRound"]["meetingRoundId"])
-    opened_2, approved_2 = _open_and_close_meeting(
+    _opened_2, approved_2 = _open_and_close_meeting(
         team_id, agents, selectionId="sel-hf3-2", meetingRoundId="meeting-hf3-2"
     )
     meeting_2_id = approved_2["meetingRound"]["meetingRoundId"]
@@ -606,7 +607,7 @@ def test_previous_round_ref_must_resolve_to_a_closed_round(tmp_path, monkeypatch
         "question": "SCI-096",
         "branch": "main",
         "workflow": "hypothesis_first",
-        "agentId": list(agents.values())[0],
+        "agentId": next(iter(agents.values())),
         "mode": "dev",
     }
     open_round = hypothesis_rounds.create_hypothesis_round(
