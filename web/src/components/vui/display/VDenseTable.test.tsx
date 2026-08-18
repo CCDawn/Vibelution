@@ -27,7 +27,6 @@ describe("VDenseTable", () => {
     expect(html).toContain("<table");
     expect(html).toContain("<colgroup>");
     expect(html).toContain("w-full");
-    expect(html).toContain('data-vui-table-sizer="true"');
     expect(html).toContain('style="width:240px;min-width:240px"');
     expect(html).toContain('style="width:160px;min-width:160px;max-width:160px"');
     expect(html).toContain('style="width:80px;min-width:80px;max-width:80px"');
@@ -53,7 +52,6 @@ describe("VDenseTable", () => {
     );
 
     expect(html).toContain("w-full");
-    expect(html).toContain('data-vui-table-sizer="true"');
     expect(html).toContain('style="width:470px;min-width:470px"');
     expect(html).toContain('data-vui-fill="true"');
     expect(html).toContain('style="width:220px;min-width:220px"');
@@ -61,7 +59,7 @@ describe("VDenseTable", () => {
     expect(html).toContain('style="width:80px;min-width:80px;max-width:80px"');
     expect(html).toContain('style="width:170px;min-width:170px;max-width:170px"');
     expect(html).toContain("操作");
-    expect(html).toMatch(/data-vui-table-sizer="true"[^>]*style="width:470px;min-width:470px"/);
+    expect(html).not.toMatch(/<table class="w-full/);
     expect(resolveDenseTableFillColumnId([
       { id: "path", header: "Path", fill: true, render: () => null },
       { id: "state", header: "State", render: () => null },
@@ -99,7 +97,6 @@ describe("VDenseTable", () => {
     );
 
     expect(html).toContain("!overflow-x-auto");
-    expect(html).toContain('data-vui-table-sizer="true"');
     expect(html).toContain('style="width:330px;min-width:330px"');
     expect(html).toContain('style="width:170px;min-width:170px;max-width:170px"');
   });
