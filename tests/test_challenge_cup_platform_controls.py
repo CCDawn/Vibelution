@@ -50,8 +50,14 @@ def _ready_report(**overrides) -> dict:
         "schemaVersion": 1,
         "reportKind": REPORT_KIND,
         "status": "READY",
-        "programContract": {"version": "2.2.0", "coreBehaviorHash": "a" * 64},
-        "catalogPolicy": {"version": "1.2.0", "corePolicyHash": "b" * 64},
+        "programContract": {
+            "version": dev_controls_service.PROGRAM_CONTRACT_VERSION,
+            "coreBehaviorHash": dev_controls_service.CORE_BEHAVIOR_HASH,
+        },
+        "catalogPolicy": {
+            "version": dev_controls_service.CATALOG_POLICY_VERSION,
+            "corePolicyHash": dev_controls_service.CORE_POLICY_HASH,
+        },
         "mode": "dev",
         "researchAuthorizationRequired": True,
         "realCampaignAllowed": False,
@@ -60,7 +66,8 @@ def _ready_report(**overrides) -> dict:
             for gate_id in dev_controls_service.REQUIRED_READINESS_GATES
         ],
         "nextLegalAction": "RESEARCH_AUTHORIZATION_REQUIRED",
-        "generatedAt": "2026-08-18T00:00:00Z",
+        "sourceCommit": dev_controls_service._current_source_commit(),
+        "generatedAt": dev_controls_service._utc_now(),
     }
     report.update(overrides)
     return report
@@ -342,12 +349,21 @@ def _persist_batch_checkpoint(
 ) -> None:
     path = controls_root / team_id / "challenge_cup_dev_controls" / "batches" / f"{plan_id}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
+    updated_at = dev_controls_service._utc_now()
+    upstream_updated_at = ""
+    if plan_id == "dev-5":
+        dev_1_path = path.parent / "dev-1.json"
+        if dev_1_path.is_file():
+            upstream_updated_at = str(
+                json.loads(dev_1_path.read_text(encoding="utf-8")).get("updatedAt") or ""
+            )
     path.write_text(
         json.dumps(
             {
                 "schemaVersion": 1,
                 "planId": plan_id,
-                "updatedAt": "2026-08-18T00:00:00Z",
+                "updatedAt": updated_at,
+                "upstreamCheckpointUpdatedAt": upstream_updated_at,
                 "checkpoint": checkpoint,
             },
             sort_keys=True,
@@ -880,7 +896,18 @@ def test_storage_errors_map_to_409_for_all_routes(
     assert "stored DEV state is corrupt" in response.json()["detail"]
 
 
-@pytest.mark.parametrize("mutation", ["duplicate", "invalid_status", "inconsistent_ready"])
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "duplicate",
+        "invalid_status",
+        "inconsistent_ready",
+        "stale_contract",
+        "stale_source",
+        "stale_time",
+        "wrong_action",
+    ],
+)
 def test_readiness_report_is_validated_before_persist(
     controls_root: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -893,9 +920,21 @@ def test_readiness_report_is_validated_before_persist(
     elif mutation == "invalid_status":
         report["gates"][0]["status"] = "UNKNOWN"
         expected = "invalid status"
-    else:
+    elif mutation == "inconsistent_ready":
         report["gates"][0]["status"] = "FAIL"
         expected = "inconsistent"
+    elif mutation == "stale_contract":
+        report["programContract"]["coreBehaviorHash"] = "0" * 64
+        expected = "program contract"
+    elif mutation == "stale_source":
+        report["sourceCommit"] = "0" * 40
+        expected = "source commit"
+    elif mutation == "stale_time":
+        report["generatedAt"] = "2000-01-01T00:00:00Z"
+        expected = "stale"
+    else:
+        report["nextLegalAction"] = "formal_submission"
+        expected = "nextLegalAction"
     writes: list[object] = []
     monkeypatch.setattr(
         dev_controls_service,
@@ -905,6 +944,84 @@ def test_readiness_report_is_validated_before_persist(
     with pytest.raises(dev_controls_service.DevControlsStorageError, match=expected):
         dev_controls_service._persist_report("team-1", report)
     assert writes == []
+
+
+def test_succeeded_checkpoint_without_result_fails_closed(
+    controls_root: Path,
+) -> None:
+    _persist_readiness_report(controls_root, "team-1")
+    checkpoint = new_dev_batch_state("dev-1").to_checkpoint()
+    record = checkpoint["records"][0]
+    record.update(
+        {
+            "status": "succeeded",
+            "attempts": 0,
+            "invalidated": False,
+            "last_error": None,
+            "result": None,
+        }
+    )
+    _persist_batch_checkpoint(controls_root, "team-1", "dev-1", checkpoint)
+    with pytest.raises(
+        dev_controls_service.DevControlsStorageError,
+        match="succeeded record is inconsistent",
+    ):
+        dev_controls_service.get_challenge_cup_dev_control_snapshot("team-1")
+
+
+def test_orphan_dev_5_checkpoint_fails_closed(
+    controls_root: Path,
+) -> None:
+    _persist_readiness_report(controls_root, "team-1")
+    dev_5 = new_dev_batch_state("dev-5")
+    run_dev_fixture_batch(dev_5)
+    _persist_batch_checkpoint(controls_root, "team-1", "dev-5", dev_5.to_checkpoint())
+    with pytest.raises(
+        dev_controls_service.DevControlsStorageError,
+        match="no bound dev-1 checkpoint version",
+    ):
+        dev_controls_service.get_challenge_cup_dev_control_snapshot("team-1")
+
+
+def test_dev_5_bound_to_stale_dev_1_checkpoint_fails_closed(
+    controls_root: Path,
+) -> None:
+    _persist_readiness_report(controls_root, "team-1")
+    dev_1 = new_dev_batch_state("dev-1")
+    run_dev_fixture_batch(dev_1)
+    _persist_batch_checkpoint(controls_root, "team-1", "dev-1", dev_1.to_checkpoint())
+    dev_5 = new_dev_batch_state("dev-5")
+    run_dev_fixture_batch(dev_5)
+    _persist_batch_checkpoint(controls_root, "team-1", "dev-5", dev_5.to_checkpoint())
+    _persist_batch_checkpoint(controls_root, "team-1", "dev-1", dev_1.to_checkpoint())
+    with pytest.raises(
+        dev_controls_service.DevControlsStorageError,
+        match="stale dev-1 checkpoint version",
+    ):
+        dev_controls_service.get_challenge_cup_dev_control_snapshot("team-1")
+
+
+def test_readiness_in_progress_blocks_batch_and_second_readiness(
+    controls_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _ready_team(controls_root, monkeypatch, team_id="research-team")
+    dev_controls_service._READINESS_IN_PROGRESS.add("research-team")
+    try:
+        batch_response = _client().post(
+            f"{DEV_CONTROLS_BASE}/batches/dev-1",
+            json={"maxItems": None, "retryFailed": False},
+        )
+        readiness_response = _client().post(
+            f"{DEV_CONTROLS_BASE}/readiness",
+            json={"mode": "dev"},
+        )
+    finally:
+        dev_controls_service._READINESS_IN_PROGRESS.discard("research-team")
+    assert batch_response.status_code == 409
+    assert "readiness is running" in batch_response.json()["detail"]
+    assert readiness_response.status_code == 409
+    assert "already running" in readiness_response.json()["detail"]
 
 
 def test_strict_write_failure_keeps_old_file(controls_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -920,6 +1037,20 @@ def test_strict_write_failure_keeps_old_file(controls_root: Path, monkeypatch: p
         dev_controls_service._strict_json_write(path, {"planId": "dev-1"})
     assert path.read_text(encoding="utf-8") == "OLD"
     assert not list(path.parent.glob(".*.tmp"))
+
+
+def test_strict_write_wraps_directory_creation_failure(
+    controls_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = controls_root / "team-1" / "challenge_cup_dev_controls" / "report.json"
+
+    def boom(*args, **kwargs):
+        raise OSError("mkdir boom")
+
+    monkeypatch.setattr(Path, "mkdir", boom)
+    with pytest.raises(dev_controls_service.DevControlsStorageError, match="write failed"):
+        dev_controls_service._strict_json_write(path, {"schemaVersion": 1})
 
 
 def test_batch_persist_failure_never_falls_back_to_inplace(

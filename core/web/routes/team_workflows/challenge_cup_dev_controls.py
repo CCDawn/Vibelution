@@ -48,6 +48,8 @@ def challenge_cup_dev_control_snapshot(team_id: str) -> dict:
         return get_challenge_cup_dev_control_snapshot(team_id)
     except TeamNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except DevFlowConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except DevControlsStorageError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except _DEV_CONTROL_CONTRACT_ERRORS as exc:
@@ -69,6 +71,8 @@ def challenge_cup_dev_readiness_run(
         return run_challenge_cup_dev_readiness(team_id, mode=payload.mode)
     except TeamNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except DevFlowConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except DevControlsStorageError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except _DEV_CONTROL_CONTRACT_ERRORS as exc:
