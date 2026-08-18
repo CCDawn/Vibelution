@@ -3,7 +3,7 @@ import { type KeyboardEvent, type PointerEvent, type ReactNode, useMemo, useStat
 export type VDenseTableColumn<TRow> = {
   align?: "left" | "center" | "right";
   className?: string;
-  /** Preferred grow column. Grid-rendered resizable tables pin every column to its pixel width. */
+  /** Preferred grow column. Resizable tables give this track `minmax(minWidth, 1fr)` so later columns keep their pixel width. */
   fill?: boolean;
   header: ReactNode;
   id: string;
@@ -52,6 +52,37 @@ export function resolveDenseTableFillColumnId<TRow>(columns: Array<VDenseTableCo
   return columns.find((column) => column.fill)?.id;
 }
 
+export function denseTableColumnMinTrack<TRow>(
+  column: VDenseTableColumn<TRow>,
+  columnWidths: Record<string, number>,
+): number {
+  if (column.fill) {
+    return column.minWidth ?? DEFAULT_MIN_WIDTH;
+  }
+  return columnWidths[column.id] ?? column.width ?? DEFAULT_COLUMN_WIDTH;
+}
+
+export function denseTableGridTemplateColumns<TRow>(
+  columns: Array<VDenseTableColumn<TRow>>,
+  columnWidths: Record<string, number>,
+): string {
+  return columns
+    .map((column) => {
+      if (column.fill) {
+        return `minmax(${column.minWidth ?? DEFAULT_MIN_WIDTH}px, 1fr)`;
+      }
+      return `${columnWidths[column.id] ?? column.width ?? DEFAULT_COLUMN_WIDTH}px`;
+    })
+    .join(" ");
+}
+
+export function denseTableMinWidth<TRow>(
+  columns: Array<VDenseTableColumn<TRow>>,
+  columnWidths: Record<string, number>,
+): number {
+  return sumDenseTableColumnWidths(columns.map((column) => denseTableColumnMinTrack(column, columnWidths)));
+}
+
 export function VDenseTable<TRow>({
   ariaLabel,
   className,
@@ -72,9 +103,10 @@ export function VDenseTable<TRow>({
     () => sumDenseTableColumnWidths(columns.map((column) => columnWidths[column.id] ?? DEFAULT_COLUMN_WIDTH)),
     [columnWidths, columns],
   );
+  const tableMinWidth = useMemo(() => denseTableMinWidth(columns, columnWidths), [columnWidths, columns]);
   const fillColumnId = useMemo(() => resolveDenseTableFillColumnId(columns), [columns]);
   const gridTemplateColumns = useMemo(
-    () => columns.map((column) => `${columnWidths[column.id] ?? DEFAULT_COLUMN_WIDTH}px`).join(" "),
+    () => denseTableGridTemplateColumns(columns, columnWidths),
     [columnWidths, columns],
   );
 
@@ -123,13 +155,20 @@ export function VDenseTable<TRow>({
         className="w-full table-fixed border-collapse text-left"
         style={
           resizable
-            ? {
-                display: "grid",
-                gridTemplateColumns,
-                width: `${tableWidth}px`,
-                minWidth: `${tableWidth}px`,
-                maxWidth: `${tableWidth}px`,
-              }
+            ? fillColumnId
+              ? {
+                  display: "grid",
+                  gridTemplateColumns,
+                  width: "100%",
+                  minWidth: `${tableMinWidth}px`,
+                }
+              : {
+                  display: "grid",
+                  gridTemplateColumns,
+                  width: `${tableWidth}px`,
+                  minWidth: `${tableWidth}px`,
+                  maxWidth: `${tableWidth}px`,
+                }
             : undefined
         }
       >
@@ -235,7 +274,7 @@ function initialColumnWidths<TRow>(columns: Array<VDenseTableColumn<TRow>>): Rec
 }
 
 function canResizeColumn<TRow>(column: VDenseTableColumn<TRow>, tableResizable: boolean): boolean {
-  return tableResizable && column.resizable !== false;
+  return tableResizable && column.resizable !== false && !column.fill;
 }
 
 function alignClass(align: VDenseTableColumn<unknown>["align"]): string {

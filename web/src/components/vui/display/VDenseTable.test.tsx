@@ -3,6 +3,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import {
+  denseTableGridTemplateColumns,
+  denseTableMinWidth,
   nextDenseTableColumnWidth,
   resolveDenseTableFillColumnId,
   sumDenseTableColumnWidths,
@@ -36,7 +38,7 @@ describe("VDenseTable", () => {
     expect(html).toContain("main");
   });
 
-  it("pins resizable columns with a grid track list so a fill column cannot collapse trailing actions", () => {
+  it("lets a fill column absorb leftover space so trailing actions keep their pixel track", () => {
     const html = renderToStaticMarkup(
       <VDenseTable
         ariaLabel="instances"
@@ -44,7 +46,7 @@ describe("VDenseTable", () => {
         rows={[{ id: "main", path: ".worktrees/task" }]}
         getRowKey={(row) => row.id}
         columns={[
-          { id: "path", header: "Path", width: 220, fill: true, render: (row) => row.path },
+          { id: "path", header: "Path", width: 220, minWidth: 110, fill: true, render: (row) => row.path },
           { id: "state", header: "State", width: 80, render: () => "idle" },
           { id: "actions", header: "操作", width: 170, render: () => "open" },
         ]}
@@ -53,11 +55,33 @@ describe("VDenseTable", () => {
 
     expect(html).toContain("w-full");
     expect(html).toContain("display:grid");
-    expect(html).toContain("grid-template-columns:220px 80px 170px");
-    expect(html).toContain("width:470px;min-width:470px;max-width:470px");
+    expect(html).toContain("grid-template-columns:minmax(110px, 1fr) 80px 170px");
+    expect(html).toContain("width:100%;min-width:360px");
+    expect(html).not.toContain("max-width:470px");
     expect(html).toContain('data-vui-fill="true"');
-    expect(html).not.toContain("width:100%");
+    expect(html).not.toContain("Resize path");
+    expect(html).toContain("Resize state");
     expect(html).toContain("操作");
+    expect(
+      denseTableGridTemplateColumns(
+        [
+          { id: "path", header: "Path", minWidth: 110, fill: true, render: () => null },
+          { id: "state", header: "State", width: 80, render: () => null },
+          { id: "actions", header: "操作", width: 170, render: () => null },
+        ],
+        { path: 220, state: 80, actions: 170 },
+      ),
+    ).toBe("minmax(110px, 1fr) 80px 170px");
+    expect(
+      denseTableMinWidth(
+        [
+          { id: "path", header: "Path", minWidth: 110, fill: true, render: () => null },
+          { id: "state", header: "State", width: 80, render: () => null },
+          { id: "actions", header: "操作", width: 170, render: () => null },
+        ],
+        { path: 220, state: 80, actions: 170 },
+      ),
+    ).toBe(360);
     expect(resolveDenseTableFillColumnId([
       { id: "path", header: "Path", fill: true, render: () => null },
       { id: "state", header: "State", render: () => null },
