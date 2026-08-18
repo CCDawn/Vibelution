@@ -32,6 +32,7 @@ export type ExperimentWorkspaceActionDeps = {
   reviewExperimentHypothesisCandidateId: string;
   createExperimentHypothesisRevisionCandidateId: string;
   freezeExperimentDesignPending: boolean;
+  resumeExperimentHypothesisPending: boolean;
   registerExperimentBaselineArtifactPending: boolean;
   registerExperimentSmokeResultPending: boolean;
   runExperimentSmokePending: boolean;
@@ -83,6 +84,7 @@ export type ExperimentWorkspaceActionDeps = {
     draft: ExperimentBaselineArtifactDraft;
   }>;
   freezeExperimentDesignMutation: MutateFn<{ teamId: string; plan: ExperimentPlanRecord }>;
+  resumeExperimentHypothesisMutation: MutateFn<{ teamId: string; hypothesisCandidateId: string }>;
   registerExperimentSmokeResultMutation: MutateFn<{
     teamId: string;
     plan: ExperimentPlanRecord;
@@ -217,6 +219,16 @@ export function createExperimentWorkspaceActions(deps: ExperimentWorkspaceAction
     deps.freezeExperimentDesignMutation.mutate({ teamId: deps.teamId, plan });
   }
 
+  function resumeExperimentHypothesisFromWorkspace(hypothesisCandidateId: string) {
+    if (!deps.teamId || deps.resumeExperimentHypothesisPending) {
+      return;
+    }
+    deps.resumeExperimentHypothesisMutation.mutate({
+      teamId: deps.teamId,
+      hypothesisCandidateId,
+    });
+  }
+
   function registerExperimentSmokeResultFromWorkspace(plan: ExperimentPlanRecord) {
     if (!deps.teamId || deps.registerExperimentSmokeResultPending) {
       return;
@@ -344,6 +356,7 @@ export function createExperimentWorkspaceActions(deps: ExperimentWorkspaceAction
     createExperimentHypothesisRevisionFromWorkspace,
     registerExperimentBaselineArtifactFromWorkspace,
     freezeExperimentDesignFromWorkspace,
+    resumeExperimentHypothesisFromWorkspace,
     registerExperimentSmokeResultFromWorkspace,
     runExperimentSmokeFromWorkspace,
     registerExperimentFullRunResultFromWorkspace,

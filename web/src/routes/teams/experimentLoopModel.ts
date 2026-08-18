@@ -17,6 +17,32 @@ export type ExperimentPlanChecklistItem = {
   note: string;
 };
 
+export type ExperimentHypothesisProgressStep = {
+  step: string;
+  status: "pending" | "in_progress" | "done" | "failed" | string;
+  updatedAt: string;
+  refs?: Record<string, string>;
+};
+
+export type ExperimentHypothesisProgressSummary = {
+  candidateId: string;
+  claimId: string;
+  planId: string;
+  status: string;
+  currentStep: string;
+  nextStep: string;
+  completedCount: number;
+  totalSteps: number;
+  evaluationOutcome: string;
+  updatedAt: string;
+};
+
+export type ExperimentHypothesisProgressEntry = ExperimentHypothesisProgressSummary & {
+  hypothesis: string;
+  steps: ExperimentHypothesisProgressStep[];
+  checkpointEvents: Array<Record<string, unknown>>;
+};
+
 export type ExperimentHypothesisCandidateSummary = {
   candidateId: string;
   title: string;
@@ -47,6 +73,7 @@ export type ExperimentHypothesisCandidateSummary = {
   sourceRefs: Array<Record<string, unknown>>;
   evidenceRefs: Array<Record<string, unknown>>;
   updatedAt: string;
+  hypothesisProgress?: ExperimentHypothesisProgressSummary | null;
 };
 
 export type EngineeringProxyHypothesisDraft = {
@@ -172,6 +199,7 @@ export type ExperimentPlanRecord = {
   goal: string;
   selectedHypotheses: ExperimentHypothesisCandidateSummary[];
   hypothesisCandidateIds: string[];
+  hypothesisProgress?: ExperimentHypothesisProgressEntry[];
   hypothesisSelection?: {
     sourcePlanId: string;
     hypothesisCandidateId: string;
@@ -718,6 +746,13 @@ export type ResearchLoopDecisionPayload = {
 export type ExperimentDesignFreezePayload = {
   status: "frozen" | "already_frozen" | string;
   plan: ExperimentPlanRecord;
+  experimentStatus?: ExperimentPlanningStatusPayload;
+};
+
+export type ExperimentHypothesisResumePayload = {
+  status: "resumed" | string;
+  plan: ExperimentPlanRecord;
+  resume: ExperimentHypothesisProgressSummary & { switchedActivePlan: boolean };
   experimentStatus?: ExperimentPlanningStatusPayload;
 };
 

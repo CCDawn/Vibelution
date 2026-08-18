@@ -111,8 +111,16 @@ def build_outcome_graph_delta(
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     extra_payload = extra if isinstance(extra, dict) else {}
-    hypothesis = _plan_hypothesis(plan)
-    claim_id = claim_id_for_hypothesis(hypothesis)
+    hypotheses = _plan_hypotheses(plan)
+    claim_ids: list[str] = []
+    for text in hypotheses:
+        claim_id = claim_id_for_hypothesis(text)
+        if claim_id and claim_id not in claim_ids:
+            claim_ids.append(claim_id)
+    claim_id = claim_ids[0] if claim_ids else ""
+    hypothesis_by_claim = {
+        claim_id_for_hypothesis(text): text for text in hypotheses if claim_id_for_hypothesis(text)
+    }
     protocol_id = _protocol_id(plan)
     run_id = run_node_id(result)
     occurred_at = str(result.get("recordedAt") or extra_payload.get("recordedAt") or "")
@@ -137,13 +145,13 @@ def build_outcome_graph_delta(
                 "occurredAt": occurred_at,
             }
         )
-    if claim_id:
+    for claim_item_id in claim_ids:
         nodes.append(
             {
-                "nodeId": claim_id,
+                "nodeId": claim_item_id,
                 "nodeKind": "claim",
-                "ref": {"claimId": claim_id, "planId": str(plan.get("planId") or "")},
-                "summary": hypothesis,
+                "ref": {"claimId": claim_item_id, "planId": str(plan.get("planId") or "")},
+                "summary": hypothesis_by_claim.get(claim_item_id, ""),
             }
         )
     if protocol_id:
@@ -156,20 +164,21 @@ def build_outcome_graph_delta(
             }
         )
     edges: list[dict[str, Any]] = []
-    if run_id and claim_id:
-        edges.append(
-            _edge(
-                relation="tests",
-                from_id=run_id,
-                to_id=claim_id,
-                occurred_at=occurred_at,
-                produced_by=_result_id(result),
-                interpretation=interpretation,
-                failed_gates=failed_gates if outcome == "failed" else [],
-                evidence_refs=evidence_refs,
-                signature=signature,
+    if run_id and claim_ids:
+        for claim_item_id in claim_ids:
+            edges.append(
+                _edge(
+                    relation="tests",
+                    from_id=run_id,
+                    to_id=claim_item_id,
+                    occurred_at=occurred_at,
+                    produced_by=_result_id(result),
+                    interpretation=interpretation,
+                    failed_gates=failed_gates if outcome == "failed" else [],
+                    evidence_refs=evidence_refs,
+                    signature=signature,
+                )
             )
-        )
         if protocol_id:
             edges.append(
                 _edge(
@@ -185,39 +194,42 @@ def build_outcome_graph_delta(
                 )
             )
         if outcome == "passed":
-            edges.append(
-                _edge(
-                    relation="supports",
-                    from_id=run_id,
-                    to_id=claim_id,
-                    occurred_at=occurred_at,
-                    produced_by=_result_id(result),
-                    interpretation=interpretation,
-                    failed_gates=[],
-                    evidence_refs=evidence_refs,
-                    signature=signature,
+            for claim_item_id in claim_ids:
+                edges.append(
+                    _edge(
+                        relation="supports",
+                        from_id=run_id,
+                        to_id=claim_item_id,
+                        occurred_at=occurred_at,
+                        produced_by=_result_id(result),
+                        interpretation=interpretation,
+                        failed_gates=[],
+                        evidence_refs=evidence_refs,
+                        signature=signature,
+                    )
                 )
-            )
         elif outcome == "failed":
-            edges.append(
-                _edge(
-                    relation="falsifies",
-                    from_id=run_id,
-                    to_id=claim_id,
-                    occurred_at=occurred_at,
-                    produced_by=_result_id(result),
-                    interpretation=interpretation,
-                    failed_gates=failed_gates,
-                    evidence_refs=evidence_refs,
-                    signature=signature,
+            for claim_item_id in claim_ids:
+                edges.append(
+                    _edge(
+                        relation="falsifies",
+                        from_id=run_id,
+                        to_id=claim_item_id,
+                        occurred_at=occurred_at,
+                        produced_by=_result_id(result),
+                        interpretation=interpretation,
+                        failed_gates=failed_gates,
+                        evidence_refs=evidence_refs,
+                        signature=signature,
+                    )
                 )
-            )
     return {
         "nodes": nodes,
         "edges": edges,
         "experimentSignature": signature,
         "occurredAt": occurred_at,
         "claimId": claim_id,
+        "claimIds": claim_ids,
         "runId": run_id,
         "outcome": outcome,
     }
@@ -346,31 +358,31 @@ def build_working_outcome_overlay(plans: list[dict[str, Any]]) -> dict[str, Any]
 
 
 def _apply_delta(graph: dict[str, Any], delta: dict[str, Any]) -> None:
-    claim_id = str(delta.get("claimId") or "")
+    claim_ids = [str(item) for item in list(delta.get("claimIds") or []) if str(item)]
+    if not claim_ids:
+        claim_id = str(delta.get("claimId") or "")
+        claim_ids = [claim_id] if claim_id else []
     outcome = str(delta.get("outcome") or "")
-    new_edge_ids: list[str] = []
     graph["nodes"] = _upsert_nodes(graph["nodes"], list(delta.get("nodes") or []))
-    if claim_id and outcome in {"passed", "failed"}:
+    if claim_ids and outcome in {"passed", "failed"}:
         close_relation = "falsifies" if outcome == "passed" else "supports"
+        incoming_by_claim: dict[str, dict[str, Any]] = {}
+        for item in list(delta.get("edges") or []):
+            relation = str(item.get("relation") or "")
+            if relation in {"supports", "falsifies"}:
+                incoming_by_claim.setdefault(str(item.get("toId") or ""), item)
         for edge in graph["edges"]:
+            to_id = str(edge.get("toId") or "")
             if (
-                str(edge.get("toId") or "") == claim_id
+                to_id in claim_ids
                 and str(edge.get("relation") or "") == close_relation
                 and str(edge.get("validUntil") or "").strip() == ""
             ):
-                incoming = next(
-                    (
-                        item
-                        for item in list(delta.get("edges") or [])
-                        if str(item.get("relation") or "") in {"supports", "falsifies"}
-                    ),
-                    {},
-                )
+                incoming = incoming_by_claim.get(to_id, {})
                 edge["validUntil"] = str(delta.get("occurredAt") or "")
                 edge["supersededByEdgeId"] = str(incoming.get("edgeId") or "")
     for edge in list(delta.get("edges") or []):
         graph["edges"].append(edge)
-        new_edge_ids.append(str(edge.get("edgeId") or ""))
 
 
 def _attach_cross_plan_duplicates(
@@ -541,11 +553,23 @@ def _explicitly_rejects(edge: dict[str, Any]) -> bool:
 
 
 def _plan_hypothesis(plan: dict[str, Any]) -> str:
+    hypotheses = _plan_hypotheses(plan)
+    return hypotheses[0] if hypotheses else ""
+
+
+def _plan_hypotheses(plan: dict[str, Any]) -> list[str]:
+    """Every selected hypothesis text; one claim node is written per entry."""
     selected = [item for item in list(plan.get("selectedHypotheses") or []) if isinstance(item, dict)]
-    if selected:
-        return _text(selected[0].get("hypothesis"), 800)
+    texts: list[str] = []
+    for item in selected:
+        text = _text(item.get("hypothesis"), 800)
+        if text and claim_id_for_hypothesis(text) not in {claim_id_for_hypothesis(row) for row in texts}:
+            texts.append(text)
+    if texts:
+        return texts
     contract = plan.get("experimentContract") if isinstance(plan.get("experimentContract"), dict) else {}
-    return _text(contract.get("researchQuestion"), 800)
+    fallback = _text(contract.get("researchQuestion"), 800)
+    return [fallback] if fallback else []
 
 
 def _protocol_id(plan: dict[str, Any]) -> str:

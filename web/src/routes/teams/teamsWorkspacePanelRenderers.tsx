@@ -385,6 +385,7 @@ export function createTeamsWorkspacePanelRenderers(ctx: TeamsWorkspacePanelRende
         registerExperimentFullRunResultFromWorkspace,
         registerExperimentSmokeResultFromWorkspace,
         requestExperimentKnowledgeIngestionFromWorkspace,
+        resumeExperimentHypothesisFromWorkspace,
         reviewExperimentHypothesisFromWorkspace,
         runExperimentSmokeFromWorkspace,
         searchParams: searchParamsProp,
@@ -413,6 +414,8 @@ export function createTeamsWorkspacePanelRenderers(ctx: TeamsWorkspacePanelRende
         selectedTeamRequestExperimentKnowledgeIngestionError,
         selectedTeamRequestExperimentKnowledgeIngestionPending,
         selectedTeamRequestExperimentKnowledgeIngestionResult,
+        selectedTeamResumeExperimentHypothesisError,
+        selectedTeamResumeExperimentHypothesisPending,
         selectedTeamReviewExperimentHypothesisCandidateId,
         selectedTeamReviewExperimentHypothesisError,
         selectedTeamRunExperimentSmokeError,
@@ -481,6 +484,9 @@ export function createTeamsWorkspacePanelRenderers(ctx: TeamsWorkspacePanelRende
           registerExperimentSmokeResultFromWorkspace={registerExperimentSmokeResultFromWorkspace}
           registerExperimentFullRunResultFromWorkspace={registerExperimentFullRunResultFromWorkspace}
           requestExperimentKnowledgeIngestionFromWorkspace={requestExperimentKnowledgeIngestionFromWorkspace}
+          resumeExperimentHypothesisFromWorkspace={resumeExperimentHypothesisFromWorkspace}
+          selectedTeamResumeExperimentHypothesisPending={selectedTeamResumeExperimentHypothesisPending}
+          selectedTeamResumeExperimentHypothesisError={selectedTeamResumeExperimentHypothesisError}
           openIterationWorkspace={() => {
             if (!selectedTeam?.teamId) {
               return;

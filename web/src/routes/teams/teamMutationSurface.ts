@@ -87,6 +87,7 @@ export type TeamMutationSurfaceMapInput = {
   reviewExperimentHypothesis: TeamScopedMutationLike<unknown, { teamId?: string; candidateId?: string }>;
   createExperimentHypothesisRevision: TeamScopedMutationLike<unknown, { teamId?: string; candidateId?: string }>;
   freezeExperimentDesign: TeamScopedMutationLike;
+  resumeExperimentHypothesis: TeamScopedMutationLike;
   registerExperimentBaselineArtifact: TeamScopedMutationLike;
   runExperimentSmoke: TeamScopedMutationLike;
   registerExperimentSmokeResult: TeamScopedMutationLike;
@@ -122,6 +123,7 @@ export function buildTeamsRouteMutationSurface(input: TeamMutationSurfaceMapInpu
   const reviewHypothesis = teamScopedMutationSurface(input.reviewExperimentHypothesis, teamId);
   const reviseHypothesis = teamScopedMutationSurface(input.createExperimentHypothesisRevision, teamId);
   const freezeDesign = teamScopedMutationSurface(input.freezeExperimentDesign, teamId);
+  const resumeHypothesis = teamScopedMutationSurface(input.resumeExperimentHypothesis, teamId);
   const registerBaseline = teamScopedMutationSurface(input.registerExperimentBaselineArtifact, teamId);
   const runSmoke = teamScopedMutationSurface(input.runExperimentSmoke, teamId);
   const registerSmoke = teamScopedMutationSurface(input.registerExperimentSmokeResult, teamId);
@@ -176,6 +178,9 @@ export function buildTeamsRouteMutationSurface(input: TeamMutationSurfaceMapInpu
     selectedTeamFreezeExperimentDesignPending: freezeDesign.pending,
     selectedTeamFreezeExperimentDesignError: freezeDesign.error,
     selectedTeamFreezeExperimentDesignResult: freezeDesign.result,
+    selectedTeamResumeExperimentHypothesisPending: resumeHypothesis.pending,
+    selectedTeamResumeExperimentHypothesisError: resumeHypothesis.error,
+    selectedTeamResumeExperimentHypothesisResult: resumeHypothesis.result,
     selectedTeamRegisterExperimentBaselineArtifactPending: registerBaseline.pending,
     selectedTeamRegisterExperimentBaselineArtifactError: registerBaseline.error,
     selectedTeamRegisterExperimentBaselineArtifactResult: registerBaseline.result,

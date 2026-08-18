@@ -2743,3 +2743,346 @@ def test_experiment_later_smoke_failure_closes_prior_supports_and_keeps_old_edge
     assert supports[0]["validUntil"] == failed["smokeResult"]["recordedAt"]
     assert supports[0]["supersededByEdgeId"] == falsifies[0]["edgeId"]
     assert all(not edge.get("validUntil") for edge in falsifies)
+
+
+def _register_approved_hypothesis(team_id, *, title, hypothesis):
+    candidate = team_workflow_orchestration_service.record_local_research_model_output(
+        team_id,
+        {
+            "taskType": "algorithm_hypothesis_draft",
+            "title": title,
+            "createdByAgent": "Algorithm Hypothesis Agent",
+            "output": {
+                "candidateType": "algorithm_hypothesis",
+                "sourceRefs": [{"type": "paper", "id": "paper-1", "label": "Paper 1"}],
+                "evidenceRefs": [{"type": "mapping", "id": "mapping-1", "label": "Mapping 1"}],
+                "claims": [{"claim": hypothesis, "sourceRef": "paper-1"}],
+                "mechanismMappingIds": ["mapping-1"],
+                "hypothesis": hypothesis,
+                "baseline": "standard MoE router",
+                "expectedBenefit": "better task adaptation at equal parameter count",
+                "expectedComputeCost": "one small gating MLP and no extra experts",
+                "experimentPlan": {
+                    "dataset": "synthetic task-switch benchmark",
+                    "metric": "validation accuracy and routing entropy",
+                    "baseline": "standard MoE router",
+                    "smokePlan": "train 200 mini-batches and compare metric direction",
+                },
+                "uncertainty": [],
+                "riskFlags": [],
+                "confidence": 0.52,
+                "nextAction": "send_to_research_review",
+                "requiresReview": True,
+            },
+        },
+    )["candidate"]
+    team_workflow_orchestration_service.decide_research_review(
+        team_id,
+        {
+            "candidateIds": [candidate["candidateId"]],
+            "decision": "approve",
+            "reviewedByAgent": "Research Coordination Agent",
+        },
+    )
+    return candidate
+
+
+def _progress_entry(plan, candidate_id):
+    for entry in list(plan.get("hypothesisProgress") or []):
+        if isinstance(entry, dict) and entry.get("candidateId") == candidate_id:
+            return entry
+    return None
+
+
+def _step_statuses(entry):
+    return {item["step"]: item["status"] for item in list(entry.get("steps") or [])}
+
+
+def test_hypothesis_progress_checkpoints_track_experiment_lifecycle(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="ai科学研究团队")
+    prepared = _create_experiment_plan_with_active_baseline(team["teamId"])
+    plan = prepared["baseline"]["plan"]
+    candidate_id = plan["selectedHypotheses"][0]["candidateId"]
+
+    entry = _progress_entry(plan, candidate_id)
+    assert entry is not None
+    assert entry["planId"] == plan["planId"]
+    assert entry["totalSteps"] == 5
+    assert _step_statuses(entry)["design"] in {"pending", "in_progress"}
+    assert entry["nextStep"] == "design"
+
+    smoke = team_workflow_orchestration_service.register_experiment_smoke_result(
+        team["teamId"],
+        plan["planId"],
+        {
+            "status": "passed",
+            "metricValue": "0.75 validation accuracy",
+            "resultPath": "workspace/experiments/smoke/context-gated-routing.json",
+            "recordedByAgent": "Experiment Planning Agent",
+        },
+    )
+    entry = _progress_entry(smoke["plan"], candidate_id)
+    steps = _step_statuses(entry)
+    assert steps["design"] == "done"
+    assert steps["smoke"] == "done"
+    assert steps["full_run"] == "pending"
+    assert entry["nextStep"] == "full_run"
+    assert entry["status"] == "in_progress"
+    smoke_step = next(item for item in entry["steps"] if item["step"] == "smoke")
+    assert smoke_step["refs"]["resultId"] == smoke["smokeResult"]["smokeResultId"]
+
+    full_run = team_workflow_orchestration_service.register_experiment_full_run_result(
+        team["teamId"],
+        plan["planId"],
+        {
+            "status": "passed",
+            "metricName": "validation accuracy",
+            "metricValue": "0.79 validation accuracy",
+            "baselineMetricValue": "0.71 validation accuracy",
+            "smokeMetricValue": "0.75 validation accuracy",
+            "delta": "+0.08 accuracy",
+            "resultPath": "workspace/experiments/full_run/context-gated-routing.json",
+            "recordedByAgent": "Experiment Planning Agent",
+        },
+    )
+    entry = _progress_entry(full_run["plan"], candidate_id)
+    steps = _step_statuses(entry)
+    assert steps["full_run"] == "done"
+    assert steps["evaluation"] == "done"
+    assert steps["promotion"] == "pending"
+    assert entry["nextStep"] == "promotion"
+    assert entry["evaluationOutcome"] == "supports"
+
+    status = team_workflow_orchestration_service.get_experiment_planning_status(team["teamId"])
+    candidate_row = next(
+        item for item in status["hypothesisCandidates"] if item["candidateId"] == candidate_id
+    )
+    assert candidate_row["hypothesisProgress"]["nextStep"] == "promotion"
+    assert candidate_row["hypothesisProgress"]["completedCount"] == 4
+
+
+def test_hypothesis_progress_refresh_is_idempotent(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="ai科学研究团队")
+    prepared = _create_experiment_plan_with_active_baseline(team["teamId"])
+    plan = prepared["baseline"]["plan"]
+    candidate_id = plan["selectedHypotheses"][0]["candidateId"]
+    smoke = team_workflow_orchestration_service.register_experiment_smoke_result(
+        team["teamId"],
+        plan["planId"],
+        {
+            "status": "passed",
+            "metricValue": "0.75 validation accuracy",
+            "resultPath": "workspace/experiments/smoke/context-gated-routing.json",
+        },
+    )
+    first = _progress_entry(smoke["plan"], candidate_id)
+    first_events = list(first["checkpointEvents"])
+    first_updated = first["updatedAt"]
+
+    refreshed = team_workflow_orchestration_service.get_experiment_planning_status(team["teamId"])
+    assert refreshed["hypothesisCandidates"]
+    reloaded = team_workflow_orchestration_service._load_experiment_plan_store(team["teamId"])
+    reloaded_plan = team_workflow_orchestration_service._find_experiment_plan(reloaded, plan["planId"])
+    second = _progress_entry(reloaded_plan, candidate_id)
+
+    assert second["checkpointEvents"] == first_events
+    assert second["updatedAt"] == first_updated
+    assert _step_statuses(second) == _step_statuses(first)
+
+
+def test_hypothesis_progress_marks_failed_steps_and_stops_resume(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="ai科学研究团队")
+    prepared = _create_experiment_plan_with_active_baseline(team["teamId"])
+    plan = prepared["baseline"]["plan"]
+    candidate_id = plan["selectedHypotheses"][0]["candidateId"]
+
+    failed = team_workflow_orchestration_service.register_experiment_smoke_result(
+        team["teamId"],
+        plan["planId"],
+        {
+            "status": "failed",
+            "metricValue": "0.61 validation accuracy",
+            "resultPath": "workspace/experiments/smoke/context-gated-routing-failed.json",
+        },
+    )
+    entry = _progress_entry(failed["plan"], candidate_id)
+    steps = _step_statuses(entry)
+    assert steps["smoke"] == "failed"
+    assert entry["status"] == "failed"
+    assert entry["currentStep"] == "smoke"
+    assert entry["nextStep"] == "smoke"
+
+
+def test_hypothesis_resume_returns_next_unfinished_step(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="ai科学研究团队")
+    prepared = _create_experiment_plan_with_active_baseline(team["teamId"])
+    plan = prepared["baseline"]["plan"]
+    candidate_id = plan["selectedHypotheses"][0]["candidateId"]
+    team_workflow_orchestration_service.register_experiment_smoke_result(
+        team["teamId"],
+        plan["planId"],
+        {
+            "status": "passed",
+            "metricValue": "0.75 validation accuracy",
+            "resultPath": "workspace/experiments/smoke/context-gated-routing.json",
+        },
+    )
+
+    resumed = team_workflow_orchestration_service.resume_experiment_hypothesis(
+        team["teamId"],
+        {"hypothesisCandidateId": candidate_id},
+    )
+    assert resumed["status"] == "resumed"
+    assert resumed["plan"]["planId"] == plan["planId"]
+    assert resumed["resume"]["nextStep"] == "full_run"
+    assert resumed["resume"]["completedCount"] == 2
+    assert resumed["resume"]["switchedActivePlan"] is False
+    assert resumed["experimentStatus"]["summary"]["activePlanId"] == plan["planId"]
+
+    again = team_workflow_orchestration_service.resume_experiment_hypothesis(
+        team["teamId"],
+        {"hypothesisCandidateId": candidate_id},
+    )
+    assert again["resume"]["nextStep"] == "full_run"
+    assert again["resume"]["switchedActivePlan"] is False
+
+    with pytest.raises(team_workflow_orchestration_service.TeamWorkflowOrchestrationError):
+        team_workflow_orchestration_service.resume_experiment_hypothesis(
+            team["teamId"],
+            {"hypothesisCandidateId": "cand_missing"},
+        )
+
+
+def test_hypothesis_resume_switches_active_plan_to_tracked_plan(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="ai科学研究团队")
+    first = _register_approved_hypothesis(
+        team["teamId"],
+        title="Context gated routing",
+        hypothesis="Context-gated routing improves adaptation under shifting tasks.",
+    )
+    second = _register_approved_hypothesis(
+        team["teamId"],
+        title="Sparse expert pruning",
+        hypothesis="Sparse expert pruning reduces compute without accuracy loss.",
+    )
+    stage_one = team_workflow_orchestration_service.start_research_stage_round(
+        team["teamId"],
+        {"stageType": "experiment", "topic": "routing experiment plan"},
+    )
+    plan_one = team_workflow_orchestration_service.create_experiment_plan(
+        team["teamId"],
+        {
+            "stageRoundId": stage_one["stageRound"]["stageRoundId"],
+            "hypothesisCandidateIds": [first["candidateId"]],
+            "createdByAgent": "Research Coordination Agent",
+        },
+    )["plan"]
+    stage_two = team_workflow_orchestration_service.start_research_stage_round(
+        team["teamId"],
+        {"stageType": "experiment", "topic": "pruning experiment plan"},
+    )
+    plan_two = team_workflow_orchestration_service.create_experiment_plan(
+        team["teamId"],
+        {
+            "stageRoundId": stage_two["stageRound"]["stageRoundId"],
+            "hypothesisCandidateIds": [second["candidateId"]],
+            "createdByAgent": "Research Coordination Agent",
+        },
+    )["plan"]
+    plan_store = team_workflow_orchestration_service._load_experiment_plan_store(team["teamId"])
+    plan_store["activePlanId"] = plan_one["planId"]
+    team_workflow_orchestration_service._write_json(
+        team_workflow_orchestration_service._experiment_plan_store_path(team["teamId"]), plan_store
+    )
+
+    resumed = team_workflow_orchestration_service.resume_experiment_hypothesis(
+        team["teamId"],
+        {"hypothesisCandidateId": second["candidateId"]},
+    )
+
+    assert resumed["plan"]["planId"] == plan_two["planId"]
+    assert resumed["resume"]["switchedActivePlan"] is True
+    assert resumed["resume"]["nextStep"] == "design"
+    store_after = team_workflow_orchestration_service._load_experiment_plan_store(team["teamId"])
+    assert store_after["activePlanId"] == plan_two["planId"]
+    assert resumed["experimentStatus"]["summary"]["activePlanId"] == plan_two["planId"]
+
+
+def test_outcome_graph_writes_claim_per_selected_hypothesis(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="ai科学研究团队")
+    first = _register_approved_hypothesis(
+        team["teamId"],
+        title="Context gated routing",
+        hypothesis="Context-gated routing improves adaptation under shifting tasks.",
+    )
+    second = _register_approved_hypothesis(
+        team["teamId"],
+        title="Sparse expert pruning",
+        hypothesis="Sparse expert pruning reduces compute without accuracy loss.",
+    )
+    stage = team_workflow_orchestration_service.start_research_stage_round(
+        team["teamId"],
+        {"stageType": "experiment", "topic": "multi-hypothesis experiment plan"},
+    )
+    draft = team_workflow_orchestration_service.create_experiment_plan(
+        team["teamId"],
+        {
+            "stageRoundId": stage["stageRound"]["stageRoundId"],
+            "hypothesisCandidateIds": [first["candidateId"], second["candidateId"]],
+            "createdByAgent": "Research Coordination Agent",
+        },
+    )
+    plan = draft["plan"]
+    assert len(plan["selectedHypotheses"]) == 2
+    baseline = team_workflow_orchestration_service.register_experiment_baseline_artifact(
+        team["teamId"],
+        plan["planId"],
+        {
+            "artifactPath": "workspace/experiments/baselines/standard-moe-router.json",
+            "reproductionCommand": "python experiments/run_baseline.py --config configs/standard_moe_router.yaml",
+            "evaluationCommand": "python experiments/evaluate.py --run standard-moe-router",
+            "metricValue": "0.71 validation accuracy",
+            "registeredByAgent": "Experiment Planning Agent",
+        },
+    )
+    smoke = team_workflow_orchestration_service.register_experiment_smoke_result(
+        team["teamId"],
+        baseline["plan"]["planId"],
+        {"status": "passed", "metricValue": "0.75", "resultPath": "workspace/experiments/smoke/multi.json"},
+    )
+    full_run = team_workflow_orchestration_service.register_experiment_full_run_result(
+        team["teamId"],
+        smoke["plan"]["planId"],
+        {"status": "passed", "metricValue": "0.79", "resultPath": "workspace/experiments/full_run/multi.json"},
+    )
+
+    from core.web.services.team_workflow.outcome_graph import (
+        claim_id_for_hypothesis,
+        current_edges,
+    )
+
+    graph = full_run["plan"]["outcomeGraph"]
+    claim_ids = {
+        claim_id_for_hypothesis("Context-gated routing improves adaptation under shifting tasks."),
+        claim_id_for_hypothesis("Sparse expert pruning reduces compute without accuracy loss."),
+    }
+    claim_nodes = [node for node in graph["nodes"] if node.get("nodeKind") == "claim"]
+    assert {node["nodeId"] for node in claim_nodes} == claim_ids
+    supports = [edge for edge in current_edges(graph) if edge["relation"] == "supports"]
+    assert {edge["toId"] for edge in supports} == claim_ids
+    tests_edges = [edge for edge in current_edges(graph) if edge["relation"] == "tests"]
+    assert claim_ids <= {edge["toId"] for edge in tests_edges}
+
+    progress = full_run["plan"]["hypothesisProgress"]
+    assert len(progress) == 2
+    for progress_entry in progress:
+        steps = _step_statuses(progress_entry)
+        assert steps["evaluation"] == "done"
+        assert progress_entry["evaluationOutcome"] == "supports"
+        assert progress_entry["nextStep"] == "promotion"

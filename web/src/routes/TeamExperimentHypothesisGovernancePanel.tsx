@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, FlaskConical, ShieldCheck } from "lucide-react";
+import { CheckCircle2, FlaskConical, Play, ShieldCheck } from "lucide-react";
 
 import {
   VNativeButton,
@@ -13,6 +13,7 @@ import type {
   ExperimentHypothesisCandidateSummary,
   ExperimentPlanRecord,
 } from "./teams/experimentLoopModel";
+import { hypothesisProgressStepLabel } from "./teams/experimentWorkbenchStepModel";
 import styles from "./TeamExperimentHypothesisGovernancePanel.styles";
 
 type Lang = "zh" | "en";
@@ -27,6 +28,9 @@ export type TeamExperimentHypothesisGovernancePanelProps = {
   materializeError?: Error | null;
   reviewError?: Error | null;
   revisionError?: Error | null;
+  resumeError?: Error | null;
+  resuming?: boolean;
+  onResume?: (candidateId: string) => void;
   onMaterialize: (
     plan: ExperimentPlanRecord,
     draft: EngineeringProxyHypothesisDraft,
@@ -102,6 +106,9 @@ export function TeamExperimentHypothesisGovernancePanel(
     materializeError,
     reviewError,
     revisionError,
+    resumeError,
+    resuming = false,
+    onResume,
     onMaterialize,
     onReview,
     onCreateRevision,
@@ -137,7 +144,7 @@ export function TeamExperimentHypothesisGovernancePanel(
     && draft.claimBoundary.trim()
     && !materializing,
   );
-  const error = materializeError || reviewError || revisionError;
+  const error = materializeError || reviewError || revisionError || resumeError;
 
   return (
     <section
@@ -260,6 +267,48 @@ export function TeamExperimentHypothesisGovernancePanel(
                   {candidate.experimentPlan.metric || "-"}
                 </span>
               )}
+              {candidate.hypothesisProgress ? (
+                <div
+                  className={styles.progressRow}
+                  data-testid={`hypothesis-progress-${candidate.candidateId}`}
+                >
+                  <span className={styles.progressText}>
+                    {lang === "zh"
+                      ? `实验进展 ${candidate.hypothesisProgress.completedCount}/${candidate.hypothesisProgress.totalSteps}`
+                      : `Progress ${candidate.hypothesisProgress.completedCount}/${candidate.hypothesisProgress.totalSteps}`}
+                  </span>
+                  {candidate.hypothesisProgress.status === "failed" ? (
+                    <span className={styles.progressFailed}>
+                      {lang === "zh"
+                        ? `止步于${hypothesisProgressStepLabel(candidate.hypothesisProgress.currentStep, lang)}`
+                        : `Failed at ${hypothesisProgressStepLabel(candidate.hypothesisProgress.currentStep, lang)}`}
+                    </span>
+                  ) : candidate.hypothesisProgress.nextStep ? (
+                    <span className={styles.progressNext}>
+                      {lang === "zh"
+                        ? `下一步：${hypothesisProgressStepLabel(candidate.hypothesisProgress.nextStep, lang)}`
+                        : `Next: ${hypothesisProgressStepLabel(candidate.hypothesisProgress.nextStep, lang)}`}
+                    </span>
+                  ) : (
+                    <span className={styles.progressNext}>
+                      {lang === "zh" ? "已完成全部步骤" : "All steps complete"}
+                    </span>
+                  )}
+                  {onResume && candidate.hypothesisProgress.nextStep ? (
+                    <VNativeButton
+                      type="button"
+                      disabled={resuming}
+                      data-testid={`hypothesis-resume-${candidate.candidateId}`}
+                      onClick={() => onResume(candidate.candidateId)}
+                    >
+                      <Play size={14} />
+                      {resuming
+                        ? (lang === "zh" ? "恢复中" : "Resuming")
+                        : (lang === "zh" ? "继续此假设" : "Resume")}
+                    </VNativeButton>
+                  ) : null}
+                </div>
+              ) : null}
               <div className={styles.candidateActions}>
                 {canReview ? (
                   <VNativeButton

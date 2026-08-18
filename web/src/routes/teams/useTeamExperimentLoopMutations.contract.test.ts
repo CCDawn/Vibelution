@@ -20,6 +20,7 @@ const mutationOwners = [
   "reviewExperimentHypothesisMutation",
   "createExperimentHypothesisRevisionMutation",
   "freezeExperimentDesignMutation",
+  "resumeExperimentHypothesisMutation",
   "registerExperimentBaselineArtifactMutation",
   "runExperimentSmokeMutation",
   "registerExperimentSmokeResultMutation",
@@ -86,6 +87,8 @@ describe("team experiment loop mutations contract", () => {
     expect(mutationsSource).toContain("registerTeamExperimentFullRunResult<");
     expect(mutationsSource).toContain("requestTeamExperimentKnowledgeIngestion<");
     expect(mutationsSource).toContain("freezeTeamExperimentDesign<");
+    expect(mutationsSource).toContain("resumeTeamExperimentHypothesis<");
+    expect(experimentApiSource).toContain("/hypothesis-resume");
     expect(experimentApiSource).toContain("/smoke-result");
     expect(experimentApiSource).toContain("/full-run-result");
     expect(experimentApiSource).toContain("/knowledge-ingestion-request");

@@ -66,6 +66,7 @@ function baseDeps(overrides: Record<string, unknown> = {}) {
     createExperimentHypothesisRevisionMutation: { mutate: vi.fn() },
     registerExperimentBaselineArtifactMutation: { mutate: vi.fn() },
     freezeExperimentDesignMutation: { mutate: vi.fn() },
+    resumeExperimentHypothesisMutation: { mutate: vi.fn() },
     registerExperimentSmokeResultMutation: { mutate: vi.fn() },
     runExperimentSmokeMutation: { mutate: vi.fn() },
     registerExperimentFullRunResultMutation: { mutate: vi.fn() },
@@ -183,5 +184,22 @@ describe("createExperimentWorkspaceActions", () => {
     const actions = createExperimentWorkspaceActions(deps);
     actions.freezeExperimentDesignFromWorkspace({ planId: "p1" } as ExperimentPlanRecord);
     expect(deps.freezeExperimentDesignMutation.mutate).not.toHaveBeenCalled();
+  });
+
+  it("resumes a hypothesis from its checkpoint", () => {
+    const deps = baseDeps();
+    const actions = createExperimentWorkspaceActions(deps);
+    actions.resumeExperimentHypothesisFromWorkspace("cand-1");
+    expect(deps.resumeExperimentHypothesisMutation.mutate).toHaveBeenCalledWith({
+      teamId: "research-team",
+      hypothesisCandidateId: "cand-1",
+    });
+  });
+
+  it("does not resume a hypothesis while pending", () => {
+    const deps = baseDeps({ resumeExperimentHypothesisPending: true });
+    const actions = createExperimentWorkspaceActions(deps);
+    actions.resumeExperimentHypothesisFromWorkspace("cand-1");
+    expect(deps.resumeExperimentHypothesisMutation.mutate).not.toHaveBeenCalled();
   });
 });

@@ -67,3 +67,38 @@ export function shortProtocolLabel(raw: string, max = 42): string {
   }
   return `${text.slice(0, Math.max(1, max - 1))}…`;
 }
+
+/**
+ * Hypothesis-level checkpoint steps (backend hypothesisProgress) mapped to the
+ * product workbench steps above, so "resume" lands on the next unfinished step.
+ */
+export const HYPOTHESIS_PROGRESS_STEP_IDS = ["design", "smoke", "full_run", "evaluation", "promotion"] as const;
+
+export type HypothesisProgressStepId = (typeof HYPOTHESIS_PROGRESS_STEP_IDS)[number];
+
+const HYPOTHESIS_PROGRESS_STEP_LABELS: Record<string, { zh: string; en: string }> = {
+  design: { zh: "实验设计", en: "Design" },
+  smoke: { zh: "冒烟试跑", en: "Smoke run" },
+  full_run: { zh: "正式运行", en: "Full run" },
+  evaluation: { zh: "结果评估", en: "Evaluation" },
+  promotion: { zh: "成果入库", en: "Promotion" },
+};
+
+export function hypothesisProgressStepLabel(step: string, lang: "zh" | "en"): string {
+  const label = HYPOTHESIS_PROGRESS_STEP_LABELS[step];
+  if (!label) {
+    return step;
+  }
+  return lang === "zh" ? label.zh : label.en;
+}
+
+/** Workbench step that owns the given hypothesis checkpoint step. */
+export function workbenchStepForHypothesisProgress(nextStep: string): ExperimentWorkbenchStepId {
+  if (nextStep === "design") {
+    return "protocol";
+  }
+  if (nextStep === "smoke" || nextStep === "full_run" || nextStep === "evaluation" || nextStep === "promotion") {
+    return "execute";
+  }
+  return "review";
+}

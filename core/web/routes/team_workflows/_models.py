@@ -330,6 +330,10 @@ class ExperimentDesignFreezePayload(BaseModel):
     frozenByAgent: str = Field("", max_length=160)
 
 
+class ExperimentHypothesisResumePayload(BaseModel):
+    hypothesisCandidateId: str = Field("", max_length=160)
+
+
 class ExperimentSmokeResultPayload(BaseModel):
     recordedByAgent: str = Field("", max_length=160)
     status: str = Field("needs_review", max_length=80)

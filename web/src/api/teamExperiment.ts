@@ -248,6 +248,14 @@ export function requestTeamExperimentKnowledgeIngestion<T>(teamId: string, planI
   );
 }
 
+export function resumeTeamExperimentHypothesis<T>(teamId: string, body: unknown): Promise<T> {
+  return writeJson<T>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/experiments/hypothesis-resume`,
+    "POST",
+    body,
+  );
+}
+
 export function fetchChallengeQuestionRunStatus<T>(
   teamId: string,
   options?: { signal?: AbortSignal },

@@ -250,6 +250,7 @@ def register_experiment_smoke_result(team_id: str, plan_id: str, payload: dict[s
             extra=request_payload,
             peer_plans=[item for item in list(plan_store.get("plans") or []) if isinstance(item, dict)],
         )
+        s._refresh_hypothesis_progress(plan)
         plan_store["activePlanId"] = plan["planId"]
         plan_store["updatedAt"] = smoke_result["recordedAt"]
         s._write_json(s._experiment_plan_store_path(normalized_team_id), plan_store)

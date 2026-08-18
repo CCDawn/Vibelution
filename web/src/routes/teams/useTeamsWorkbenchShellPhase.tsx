@@ -208,6 +208,7 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     reviewExperimentHypothesisMutation,
     createExperimentHypothesisRevisionMutation,
     freezeExperimentDesignMutation,
+    resumeExperimentHypothesisMutation,
     registerExperimentBaselineArtifactMutation,
     runExperimentSmokeMutation,
     registerExperimentSmokeResultMutation,

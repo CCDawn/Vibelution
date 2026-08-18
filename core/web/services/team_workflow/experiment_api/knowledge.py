@@ -353,6 +353,7 @@ def reconcile_experiment_knowledge_ingestion(
             plan["knowledgeIngestion"] = knowledge_ingestion
             plan["status"] = "ingested"
             plan["updatedAt"] = now
+            s._refresh_hypothesis_progress(plan)
             plan_store["activePlanId"] = plan["planId"]
             plan_store["updatedAt"] = now
             s._write_json(s._experiment_plan_store_path(normalized_team_id), plan_store)

@@ -324,6 +324,28 @@ def team_workflow_experiment_baseline_artifact_register(team_id: str, plan_id: s
 
 
 @router.post(
+    "/teams/{team_id}/workflow-orchestration/experiments/hypothesis-resume",
+    response_model=ExperimentRouteResponse,
+    response_model_exclude_unset=True,
+)
+def team_workflow_experiment_hypothesis_resume(team_id: str, payload: ExperimentHypothesisResumePayload) -> dict:
+    try:
+        return resume_experiment_hypothesis(team_id, payload.model_dump())
+    except TeamNotFoundError as exc:
+        _raise_team_workflow_route_error(
+            "experiment_hypothesis.resume", team_id, exc, status_code=404, fields={}
+        )
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        _raise_team_workflow_route_error(
+            "experiment_hypothesis.resume",
+            team_id,
+            exc,
+            status_code=422,
+            fields={"hypothesisCandidateId": payload.hypothesisCandidateId},
+        )
+
+
+@router.post(
     "/teams/{team_id}/workflow-orchestration/experiments/plans/{plan_id}/freeze",
     response_model=ExperimentRouteResponse,
     response_model_exclude_unset=True,

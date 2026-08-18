@@ -559,6 +559,91 @@ def create_experiment_plan_revision_from_hypothesis(
         "boundaries": created["boundaries"],
     }
 
+def resume_experiment_hypothesis(team_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Resume one hypothesis: point the workbench at the plan tracking it.
+
+    The hypothesis' checkpoint (``hypothesisProgress``) is the resume pointer;
+    switching ``activePlanId`` makes the existing status payload render that
+    plan's next uncompleted step. Idempotent: resuming the already-active plan
+    only re-derives progress.
+    """
+
+    s = _service()
+    normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
+    team = s.team_service.get_team(normalized_team_id)
+    request_payload = payload if isinstance(payload, dict) else {}
+    normalized_candidate_id = s._normalize_required_id(
+        request_payload.get("hypothesisCandidateId"),
+        "Hypothesis candidate id is required.",
+    )
+    with s._WORKFLOW_LOCK:
+        candidate_store = s._load_candidate_store(normalized_team_id)
+        candidate = s._find_candidate(candidate_store, normalized_candidate_id)
+        if candidate is None:
+            raise s.TeamWorkflowOrchestrationError("Hypothesis candidate not found.")
+        plan_store = s._load_experiment_plan_store(normalized_team_id)
+        plans = [
+            plan
+            for plan in s._experiment_plans(plan_store)
+            if s._hypothesis_progress_plan_tracks(plan, normalized_candidate_id)
+        ]
+        if not plans:
+            raise s.TeamWorkflowOrchestrationError(
+                "No experiment plan tracks this hypothesis candidate yet."
+            )
+        active_plan_id = str(plan_store.get("activePlanId") or "")
+        plans.sort(
+            key=lambda plan: (
+                str(plan.get("planId") or "") == active_plan_id,
+                _hypothesis_progress_rank(plan, normalized_candidate_id),
+                str(plan.get("updatedAt") or ""),
+            ),
+            reverse=True,
+        )
+        plan = plans[0]
+        s._refresh_hypothesis_progress(plan)
+        entry = s._hypothesis_progress_find(plan, normalized_candidate_id)
+        summary = s._hypothesis_progress_summary(entry)
+        switched = str(plan.get("planId") or "") != active_plan_id
+        if switched:
+            plan_store["activePlanId"] = plan["planId"]
+            plan_store["updatedAt"] = s.utc_now_iso()
+            s._write_json(s._experiment_plan_store_path(normalized_team_id), plan_store)
+        store = s._load_stage_round_store(normalized_team_id)
+        rounds = s._stage_rounds(store)
+        status_payload = s._experiment_planning_status(normalized_team_id, rounds, candidate_store, plan_store)
+    s._record_workflow_event(
+        "experiment_plan.hypothesis_resumed",
+        normalized_team_id,
+        fields={
+            "planId": str(plan.get("planId") or ""),
+            "hypothesisCandidateId": normalized_candidate_id,
+            "nextStep": str((summary or {}).get("nextStep") or ""),
+            "completedCount": int((summary or {}).get("completedCount") or 0),
+            "switchedActivePlan": switched,
+        },
+    )
+    return {
+        "status": "resumed",
+        "plan": plan,
+        "resume": {
+            **(summary or {}),
+            "switchedActivePlan": switched,
+        },
+        "experimentStatus": status_payload,
+        "team": {"teamId": team.get("teamId", normalized_team_id), "name": team.get("name", "")},
+        "boundaries": s._experiment_planning_boundaries(),
+    }
+
+
+def _hypothesis_progress_rank(plan: dict[str, Any], candidate_id: str) -> int:
+    s = _service()
+    entry = s._hypothesis_progress_find(plan, candidate_id)
+    if not isinstance(entry, dict):
+        return -1
+    return int(entry.get("completedCount") or 0)
+
+
 def freeze_experiment_design(team_id: str, plan_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     s = _service()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
@@ -609,6 +694,7 @@ def freeze_experiment_design(team_id: str, plan_id: str, payload: dict[str, Any]
         plan["status"] = "design_frozen"
         plan["updatedAt"] = now
         s._refresh_experiment_bounded_smoke_readiness(plan)
+        s._refresh_hypothesis_progress(plan)
         contract["status"] = "frozen"
         plan["experimentContract"] = contract
         plan_store["activePlanId"] = normalized_plan_id

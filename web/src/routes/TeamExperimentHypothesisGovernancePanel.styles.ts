@@ -41,6 +41,14 @@ const styles = {
     "[font-size:var(--vui-font-xs)] text-[var(--fg-secondary)]",
   candidateActions:
     "mt-auto flex min-w-0 items-center justify-end gap-2 pt-1",
+  progressRow:
+    "flex min-w-0 flex-wrap items-center gap-2 rounded-[var(--radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] px-2 py-1.5",
+  progressText:
+    "[font-size:var(--vui-font-xs)] text-[var(--fg-secondary)]",
+  progressNext:
+    "[font-size:var(--vui-font-xs)] font-semibold text-[var(--fg-primary)]",
+  progressFailed:
+    "[font-size:var(--vui-font-xs)] font-semibold text-[var(--state-error)]",
   selected:
     "inline-flex items-center gap-1 [font-size:var(--vui-font-xs)] text-[var(--state-success)]",
   approvalNote:
