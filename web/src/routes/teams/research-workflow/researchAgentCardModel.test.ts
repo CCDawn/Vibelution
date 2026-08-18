@@ -17,6 +17,7 @@ describe("research Agent card presentation", () => {
     expect(card.roleLabel).toBe("资料寻找");
     expect(card.modelLabel).toBe("");
     expect(card.statusLabel).toBe("可运行");
+    expect(card.configLabel).toBe("配置");
   });
 
   it("uses a user-facing fallback instead of leaking an unknown role key", () => {
@@ -31,5 +32,6 @@ describe("research Agent card presentation", () => {
     expect(card.roleLabel).toBe("科研执行");
     expect(card.roleLabel).not.toContain("future_internal_role");
     expect(card.statusLabel).toBe("未配置");
+    expect(card.configLabel).toBe("绑定");
   });
 });

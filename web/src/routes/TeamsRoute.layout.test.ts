@@ -1613,6 +1613,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("bindings={sourceCollectionStageAgentBindings(stageId)}");
     expect(teamSourceCollectionStageAgentsPanelSource).toContain("当前步骤 Agent 配置");
     expect(teamSourceCollectionStageAgentsPanelSource).toContain("VDenseTable");
+    expect(teamSourceCollectionStageAgentsPanelSource).toContain("VRouteLinkButton");
     expect(teamSourceCollectionStageAgentsPanelSource).toContain("VStatusChip");
     expect(teamSourceCollectionStageAgentsPanelSource).toContain("sourceCollectionStageAgentPanel");
     expect(routeSource).not.toContain("sourceCollectionStageAgentStrip");
@@ -2795,6 +2796,9 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentTable).toBeTypeOf("string");
     expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentRole).toBeTypeOf("string");
     expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentModel).toBeTypeOf("string");
+    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentModelContent).toBeTypeOf("string");
+    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentModelValue).toBeTypeOf("string");
+    expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentConfigLink).toBeTypeOf("string");
     expect(teamSourceCollectionStageAgentsPanelStyles.sourceCollectionStageAgentStatus).toBeTypeOf("string");
     expect(routeStyles.researchInspector).toBeTypeOf("string");
     expect(routeStyles.researchCanvasPanelHidden).toBeTypeOf("string");

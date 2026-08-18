@@ -2,6 +2,7 @@ import { useNavigate } from "react-router-dom";
 
 import {
   VDenseTable,
+  VRouteLinkButton,
   VStatusChip,
   type VDenseTableColumn,
   type VStatusTone,
@@ -58,7 +59,23 @@ export function TeamSourceCollectionStageAgentsPanel({
       header: isZh ? "模型" : "Model",
       className: styles.sourceCollectionStageAgentModel,
       render: (agent) => (
-        <span title={agent.modelLabel || undefined}>{agent.modelLabel || "—"}</span>
+        <div className={styles.sourceCollectionStageAgentModelContent}>
+          <span
+            className={styles.sourceCollectionStageAgentModelValue}
+            title={agent.modelLabel || undefined}
+          >
+            {agent.modelLabel || "—"}
+          </span>
+          <VRouteLinkButton
+            aria-label={`${agent.configLabel}：${agent.roleLabel}`}
+            chrome="shell-nav"
+            className={styles.sourceCollectionStageAgentConfigLink}
+            to={agent.configRoute}
+            onClick={(event) => event.stopPropagation()}
+          >
+            {agent.configLabel}
+          </VRouteLinkButton>
+        </div>
       ),
     },
     {

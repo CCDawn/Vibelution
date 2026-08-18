@@ -72,16 +72,19 @@ describe("ResearchAgentBindingPanel", () => {
     expect(markup).toContain("deepseek-v3");
     expect(markup).toContain("可用");
     expect(markup).toContain("未配置");
-    expect(markup).not.toContain("agent-finder");
+    expect(markup).toContain("配置");
+    expect(markup).toContain("绑定");
+    expect(markup).not.toContain(">agent-finder<");
     expect(markup).not.toContain("团队/工作流默认");
     expect(markup).not.toContain("会话已绑定");
   });
 
-  it("keeps rows keyboard-activatable without a visible action column", () => {
+  it("keeps rows keyboard-activatable and exposes a model configuration link", () => {
     const markup = renderPanel();
     expect(markup).toContain('tabindex="0"');
     expect(markup).not.toContain("Agent 记忆");
-    expect(markup).not.toContain("pane=config");
+    expect(markup).toContain("pane=config");
+    expect(markup).toContain("agent=agent-finder");
   });
 
   it("keeps unbound roles visibly unconfigured", () => {

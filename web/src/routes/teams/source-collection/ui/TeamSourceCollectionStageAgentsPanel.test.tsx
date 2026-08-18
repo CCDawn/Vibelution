@@ -38,10 +38,12 @@ describe("TeamSourceCollectionStageAgentsPanel", () => {
     expect(inline).toContain("资料寻找");
     expect(inline).toContain("qwen-plus");
     expect(inline).toContain("可运行");
+    expect(inline).toContain("打开设置");
+    expect(inline).toContain("pane=config");
+    expect(inline).toContain("agent=source-finder");
     expect(inline).toContain('data-tone="neutral"');
     expect(inline).not.toContain("资料检索 Agent");
     expect(inline).not.toContain("Agent 记忆");
-    expect(inline).not.toContain("打开设置");
     expect(stacked).toContain('data-vui="dense-table"');
   });
 });

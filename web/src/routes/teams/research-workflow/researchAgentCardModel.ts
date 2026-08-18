@@ -38,6 +38,8 @@ export function buildResearchAgentCard(input: {
     configRoute: input.agentId
       ? `/agents?pane=config&agent=${encodeURIComponent(input.agentId)}`
       : "/agents",
-    configLabel: isZh ? "Agent 配置" : "Configure",
+    configLabel: input.agentId
+      ? (isZh ? "配置" : "Configure")
+      : (isZh ? "绑定" : "Bind"),
   };
 }
