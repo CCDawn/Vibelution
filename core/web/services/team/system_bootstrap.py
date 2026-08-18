@@ -246,14 +246,14 @@ def _run_system_team_bootstrap(request_id: str, required_steps: list[str], reaso
         fields={"requestId": request_id, "requiredSteps": list(required_steps), "reason": reason},
     )
     try:
-        if "evolution_system_teams" in required_steps:
-            s.ensure_evolution_system_teams()
-        if "ai_search_system_team" in required_steps:
-            s.ensure_ai_search_system_team()
         if "challenge_cup_research_team_agents" in required_steps:
             s.ensure_challenge_cup_research_team_agents(purge_stale=True)
+        if "ai_search_system_team" in required_steps:
+            s.ensure_ai_search_system_team()
         if "knowledge_expansion_team_agents" in required_steps:
             s.ensure_knowledge_expansion_team_agents(purge_stale=True)
+        if "evolution_system_teams" in required_steps:
+            s.ensure_evolution_system_teams()
         remaining_steps = _system_team_bootstrap_required_steps()
         elapsed_ms = s._elapsed_ms(started_at)
         status = "ready" if not remaining_steps else "needs_retry"

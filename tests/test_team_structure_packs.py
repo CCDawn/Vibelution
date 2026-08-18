@@ -271,6 +271,60 @@ def test_system_bootstrap_required_steps_orders_missing_checks(monkeypatch) -> N
     assert calls == ["evolution", "ai_search", "challenge", "knowledge"]
 
 
+def test_system_bootstrap_materializes_challenge_team_before_slow_evolution(
+    monkeypatch,
+) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(
+        facade,
+        "_TEAM_SYSTEM_BOOTSTRAP_STATE",
+        dict(facade._TEAM_SYSTEM_BOOTSTRAP_STATE),
+    )
+    monkeypatch.setattr(
+        system_bootstrap,
+        "_record_system_team_bootstrap_event",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        system_bootstrap,
+        "_system_team_bootstrap_required_steps",
+        lambda: [],
+    )
+    monkeypatch.setattr(
+        facade,
+        "ensure_challenge_cup_research_team_agents",
+        lambda **kwargs: calls.append("challenge"),
+    )
+    monkeypatch.setattr(
+        facade,
+        "ensure_ai_search_system_team",
+        lambda: calls.append("ai_search"),
+    )
+    monkeypatch.setattr(
+        facade,
+        "ensure_knowledge_expansion_team_agents",
+        lambda **kwargs: calls.append("knowledge"),
+    )
+    monkeypatch.setattr(
+        facade,
+        "ensure_evolution_system_teams",
+        lambda: calls.append("evolution"),
+    )
+
+    system_bootstrap._run_system_team_bootstrap(
+        "request-test",
+        [
+            "evolution_system_teams",
+            "ai_search_system_team",
+            "challenge_cup_research_team_agents",
+            "knowledge_expansion_team_agents",
+        ],
+        "test",
+    )
+
+    assert calls == ["challenge", "ai_search", "knowledge", "evolution"]
+
+
 def test_ai_search_ranking_filters_and_scores() -> None:
     refs = ai_search_ranking.rank_ai_search_source_page_references(
         [
