@@ -20,4 +20,7 @@ export const RESEARCH_WORKFLOW_SSE_EVENT_TYPES = [
   "run_blocked",
   "run_succeeded",
   "reconciliation_required",
+  "delivery_orchestration_completed",
+  "delivery_orchestration_blocked",
+  "delivery_orchestration_failed",
 ] as const;
