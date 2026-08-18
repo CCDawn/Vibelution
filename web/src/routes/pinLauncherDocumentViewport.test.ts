@@ -18,8 +18,8 @@ describe("pinLauncherDocumentViewport", () => {
     } as unknown as Document);
     for (const node of [documentElement, body, root]) {
       expect(node.style.overflowX).toBe("clip");
-      expect(node.style.width).toBe("100%");
-      expect(node.style.maxWidth).toBe("100%");
+      expect(node.style.width).toBe("1180px");
+      expect(node.style.maxWidth).toBe("1180px");
       expect(node.style.minWidth).toBe("0");
     }
     restore();

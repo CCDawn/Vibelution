@@ -26,14 +26,16 @@ describe("workflowCanvasState visuals", () => {
     expect(visual.borderClass).toBeTruthy();
     expect(visual.textClass).toBeTruthy();
     // Done bucket uses the shared success token and must stay visually
-    // distinct from pending across surface, border, and badge channels.
+    // distinct from pending across border, accent-bar, and badge channels.
     if (status === "succeeded") {
       expect(visual.toneClass).toContain("state-success");
       expect(visual.borderClass).toContain("state-success");
       expect(visual.badgeClass).toContain("state-success");
+      expect(visual.accentBarClass).toContain("state-success");
       const pending = resolveNodeStatusVisual("pending");
-      expect(visual.surfaceClass).not.toBe(pending.surfaceClass);
       expect(visual.borderClass).not.toBe(pending.borderClass);
+      expect(visual.accentBarClass).not.toBe(pending.accentBarClass);
+      expect(visual.badgeClass).not.toBe(pending.badgeClass);
     }
   });
 

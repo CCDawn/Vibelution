@@ -37,9 +37,9 @@ const graph: WorkflowLayoutInput = projectionToCanvasGraph(projection);
 
 `stage-columns` 保留为默认兼容模式；调用方不得自行复制 renderer 或直接引入 `@xyflow/react` 来实现另一套几何。
 
-节点在 `serpentine` 模式下使用约 `244 × 102` 的紧凑科研步骤卡：第一行仅保留类型图标、名称与执行主体，第二行展示状态徽章和一条运行摘要，底部展示中文角色与绑定结果。长描述、输入/输出、检查项与技术 `agentId` 不在画布常驻，完整信息进入节点 tooltip 与 Inspector。卡片状态按四桶整卡表达：完成（`--state-success` 淡绿 tint + 绿色顶部强调条 + 对勾徽章）、进行（`--accent-cool` 淡蓝 tint + 蓝条）、等待/关注（`--state-warning`）、失败（`--state-error`）、待运行（最淡灰）；选中另用细蓝色 outline，不与状态色冲突。
+节点在 `serpentine` 模式下使用约 `244 × 102` 的紧凑科研步骤卡：第一行仅保留类型图标、名称与执行主体，第二行展示状态徽章和一条运行摘要，底部展示中文角色与绑定结果。长描述、输入/输出、检查项与技术 `agentId` 不在画布常驻，完整信息进入节点 tooltip 与 Inspector。卡片用实底 `--vui-surface-panel` 加 `--vui-elevation-1`（浅色即白卡）；状态按四桶经**边框 + 顶部强调条 + 状态徽章**三通道表达：完成（`--state-success` 绿）、进行（`--accent-cool` 蓝）、等待/关注（`--state-warning` 琥珀）、失败（`--state-error` 红）、待运行（最淡灰）；选中另用细蓝色 outline，不与状态色冲突。
 
-该模式使用三条轻量阶段带，阶段头包含编号、名称、完成计数和短进度条。普通相邻边默认不常驻标签；只有 `knowledge_package`、`smoke`、`promotion` 和决策/回路语义常显，其他标签仅在 hover 或 active/attention 状态出现。跨阶段交接使用对齐节点之间的一条短叙事桥；同协议重跑沿所在阶段底部的局部反馈轨道返回，禁止绕画布或阶段绘制大矩形回路。ELK 仍负责节点顺序、阶段位置与空间预算，renderer 只收敛这两类叙事边的可见几何。
+该模式使用三条阶段带做分组：实底为 `accent-cool` 混入 `--vui-surface-workspace`（idle 8% / active 12% / done 4%；attention 用 warning 10%），描边略强于 `border-subtle`。禁止洗白渐变、白色内高光，也禁止三阶段带换色相（蓝/琥珀/红留给运行状态）。阶段头包含编号、名称、完成计数和短进度条；**阶段头的小面积聚合指示器例外于换色相禁令**：编号徽章与进度条按 tone 着色（done 绿、active 蓝、attention 琥珀），并附状态 chip（已完成/进行中/需关注），让阶段完成度不依赖逐节点扫读。不得改全局 `--vui-surface-region`（浅色 rail 等于侧栏白底）。普通相邻边默认不常驻标签；只有 `knowledge_package`、`smoke`、`promotion` 和决策/回路语义常显，其他标签仅在 hover 或 active/attention 状态出现。跨阶段交接使用对齐节点之间的一条短叙事桥；同协议重跑沿所在阶段底部的局部反馈轨道返回，禁止绕画布或阶段绘制大矩形回路。ELK 仍负责节点顺序、阶段位置与空间预算，renderer 只收敛这两类叙事边的可见几何。
 
 画布必须提供平移、缩放、适应全部和定位当前工作；页面本身不得产生横向滚动。
 
@@ -59,7 +59,7 @@ const graph: WorkflowLayoutInput = projectionToCanvasGraph(projection);
 
 - `running`：system blue tint/轮廓/轻 ring
 - `waiting_human`：琥珀 + 人工图标
-- `succeeded`：`--state-success` 绿 tint + check 徽章（与 pending 在表面、边框、徽章三通道拉开；沿用 VUI 既有 success token，与 VDenseTable 等一致）
+- `succeeded`：`--state-success` 绿边框 + 绿顶部强调条 + check 徽章（与 pending 在边框、强调条、徽章三通道拉开；沿用 VUI 既有 success token，与 VDenseTable 等一致）
 - `failed` vs `blocked`：不同图标（x / ban）与文案
 - selected：细蓝色 outline；runtime current：独立运行态标识；二者不得互相覆盖
 - 阶段头：`done` 绿实心编号 + 对勾徽章，`active` 蓝实心编号 + 旋转进行中徽章，`attention` 琥珀实心编号 + 需关注徽章；进度条随 tone 着色
@@ -90,7 +90,7 @@ pathState：`idle | traversed | active | attention | danger` — 仅由 nodeRuns
 ### 阶段分区
 
 - 阶段为 React Flow 父节点（`parentId` + 相对坐标）
-- 轻量 surface + 编号标题，不抢节点层级
+- 分组靠明度（workspace 实底 + 不透明卡片），编号标题不抢节点层级；状态色不用于阶段带身份，仅出现在阶段头的小型聚合指示器（编号徽章 / 状态 chip / 进度条）
 - stageTone：`idle | active | done | attention`
 
 ### 状态/交互约束
