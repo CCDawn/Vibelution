@@ -14,6 +14,7 @@ import os
 import re
 import subprocess
 import tarfile
+import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,6 +33,11 @@ from .resources import CORE_BEHAVIOR_HASH, CORE_POLICY_HASH
 
 GIT_TIMEOUT_SECONDS = 120.0
 R1_PYTEST_TIMEOUT_SECONDS = 1800.0
+R1_NESTED_PYTEST_EXCLUDES: tuple[str, ...] = (
+    "test_manifest_hashes_head_blob_not_dirty_worktree",
+    "test_clean_clone_passes_then_fails_on_hash_change",
+    "test_current_repo_source_integrity_uses_git_ls_files",
+)
 
 MANIFEST_KIND = "challenge_cup_submission_source_manifest"
 SCHEMA_VERSION = 1
@@ -385,35 +391,55 @@ def build_source_manifest(
 def extract_head_archive(repo: Path, dest: Path) -> None:
     dest.mkdir(parents=True, exist_ok=True)
     git_exe = resolve_git_executable()
-    proc = subprocess.Popen(
-        [
-            git_exe,
-            "-C",
-            str(repo),
-            "-c",
-            "core.autocrlf=false",
-            "-c",
-            "core.eol=lf",
-            "archive",
-            "--format=tar",
-            "HEAD",
-        ],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        env=apply_no_console_git_env(git_exe=git_exe),
-        **no_console_subprocess_kwargs(),
+    archive_fd, archive_name = tempfile.mkstemp(
+        prefix=".challenge-cup-r1-", suffix=".tar", dir=str(dest.parent)
     )
-    if proc.stdout is None:
-        raise SourceBoundaryError("git archive produced no stdout")
-    with tarfile.open(fileobj=proc.stdout, mode="r|") as archive:
+    os.close(archive_fd)
+    archive_path = Path(archive_name)
+    try:
         try:
-            archive.extractall(dest, filter="data")
-        except TypeError as exc:
+            result = subprocess.run(
+                [
+                    git_exe,
+                    "-C",
+                    str(repo),
+                    "-c",
+                    "core.autocrlf=false",
+                    "-c",
+                    "core.eol=lf",
+                    "archive",
+                    "--format=tar",
+                    "--output",
+                    str(archive_path),
+                    "HEAD",
+                ],
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                env=apply_no_console_git_env(git_exe=git_exe),
+                timeout=GIT_TIMEOUT_SECONDS,
+                **no_console_subprocess_kwargs(),
+            )
+        except subprocess.TimeoutExpired as exc:
             raise SourceBoundaryError(
-                "tar extract requires filter='data'; refusing unfiltered extractall"
+                f"git archive timed out after {GIT_TIMEOUT_SECONDS}s"
             ) from exc
-    if proc.wait() != 0:
-        raise SourceBoundaryError("git archive failed")
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or b"git archive failed").decode(
+                "utf-8", "replace"
+            ).strip()
+            raise SourceBoundaryError(detail)
+        with tarfile.open(archive_path, mode="r:") as archive:
+            try:
+                archive.extractall(dest, filter="data")
+            except TypeError as exc:
+                raise SourceBoundaryError(
+                    "tar extract requires filter='data'; refusing unfiltered extractall"
+                ) from exc
+    finally:
+        try:
+            archive_path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def verify_manifest_on_tree(tree: Path, manifest: dict[str, Any]) -> list[str]:
@@ -447,6 +473,9 @@ def run_r1_pytest(tree: Path, *, python: str, targets: Sequence[str]) -> list[st
     env["PYTHONPATH"] = str(tree)
     env.pop("PYTEST_CURRENT_TEST", None)
     env["PYTEST_ADDOPTS"] = ""
+    nested_selector = " and ".join(
+        f"not {test_name}" for test_name in R1_NESTED_PYTEST_EXCLUDES
+    )
     try:
         result = subprocess.run(
             [
@@ -459,7 +488,7 @@ def run_r1_pytest(tree: Path, *, python: str, targets: Sequence[str]) -> list[st
                 "-p",
                 "no:cacheprovider",
                 "-k",
-                "not test_current_repo_source_integrity_uses_git_ls_files",
+                nested_selector,
             ],
             cwd=tree,
             capture_output=True,

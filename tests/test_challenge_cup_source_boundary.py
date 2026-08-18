@@ -274,6 +274,39 @@ def test_r1_pytest_uses_bounded_timeout_constant() -> None:
     assert 0 < timeout <= 3600
 
 
+def test_extract_head_archive_converts_git_timeout_to_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_run(*args, **kwargs):
+        raise subprocess.TimeoutExpired(
+            cmd=args[0] if args else [], timeout=kwargs.get("timeout", 0)
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with pytest.raises(SourceBoundaryError, match="git archive timed out"):
+        source_boundary.extract_head_archive(tmp_path, tmp_path / "clone")
+    assert not list(tmp_path.glob(".challenge-cup-r1-*.tar"))
+
+
+def test_r1_nested_pytest_excludes_clean_clone_meta_tests() -> None:
+    """The R1 clone already proves archive extraction before pytest starts.
+
+    Re-running clean-clone meta tests inside that pytest would create another
+    archive pipeline and can deadlock the bounded R1 subprocess on Windows.
+    The product/backend contract tests remain in ``R1_PYTEST_TARGETS``.
+    """
+    excluded = set(source_boundary.R1_NESTED_PYTEST_EXCLUDES)
+    assert excluded == {
+        "test_manifest_hashes_head_blob_not_dirty_worktree",
+        "test_clean_clone_passes_then_fails_on_hash_change",
+        "test_current_repo_source_integrity_uses_git_ls_files",
+    }
+    assert "tests/test_challenge_cup_platform_controls.py" in (
+        source_boundary.R1_PYTEST_TARGETS
+    )
+
+
 def test_run_r1_pytest_converts_timeout_to_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
