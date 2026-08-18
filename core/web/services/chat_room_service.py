@@ -124,7 +124,10 @@ AgentRunner = Callable[[dict[str, Any], str, dict[str, Any]], dict[str, Any]]
 _CHAT_ROOM_ROUND_CONTROLS_LOCK = threading.Lock()
 _CHAT_ROOM_ROUND_CONTROLS: dict[str, dict[str, str]] = {}
 _CHAT_ROOM_PARTICIPANT_INDEX_CACHE_LOCK = threading.Lock()
-_CHAT_ROOM_PARTICIPANT_INDEX_CACHE: dict[str, Any] = {}
+_CHAT_ROOM_PARTICIPANT_INDEX_CACHE_CONDITION = threading.Condition(_CHAT_ROOM_PARTICIPANT_INDEX_CACHE_LOCK)
+_CHAT_ROOM_PARTICIPANT_INDEX_CACHE: dict[tuple[Any, ...], dict[str, dict[str, dict[str, Any]]]] = {}
+_CHAT_ROOM_PARTICIPANT_INDEX_INFLIGHT: set[tuple[Any, ...]] = set()
+_CHAT_ROOM_PARTICIPANT_INDEX_CACHE_MAX_ENTRIES = 8
 _CHAT_ROOM_PARTICIPANT_INDEX_PREWARM_LOCK = threading.Lock()
 _CHAT_ROOM_PARTICIPANT_INDEX_PREWARM_INFLIGHT = False
 _MISSING_SESSION_STATUS_MESSAGE = "缺少有效 Agent：当前会话引用的 Agent 已不存在或不可用。"
@@ -3257,9 +3260,9 @@ def _participant_refresh_indexes(
     )
     _append_chat_room_detail_timing(timings, "participant_index.signature", stage_started_at)
     stage_started_at = _perf_counter()
-    with _CHAT_ROOM_PARTICIPANT_INDEX_CACHE_LOCK:
-        if _CHAT_ROOM_PARTICIPANT_INDEX_CACHE.get("signature") == signature:
-            cached = _CHAT_ROOM_PARTICIPANT_INDEX_CACHE.get("indexes")
+    with _CHAT_ROOM_PARTICIPANT_INDEX_CACHE_CONDITION:
+        while True:
+            cached = _CHAT_ROOM_PARTICIPANT_INDEX_CACHE.get(signature)
             if isinstance(cached, dict):
                 indexes = _copy_participant_refresh_indexes(cached)
                 _append_chat_room_detail_timing(
@@ -3270,50 +3273,57 @@ def _participant_refresh_indexes(
                     cache_hit=True,
                 )
                 return indexes, True, timings
-    stage_started_at = _perf_counter()
-    active_agent_indexes = _active_agent_participant_indexes(
-        agent_ids=participant_agent_ids if participants is not None else None,
-        session_ids=participant_session_ids if participants is not None else None,
-    )
-    _append_chat_room_detail_timing(
-        timings,
-        "participant_index.active_agents",
-        stage_started_at,
-        count=len(active_agent_indexes.get("by_id") or {}),
-    )
-    effective_session_ids = set(participant_session_ids)
-    for agent in active_agent_indexes.get("by_id", {}).values():
-        if isinstance(agent, dict):
-            direct_session_id = str(agent.get("directSessionId") or "").strip()
-            if direct_session_id:
-                effective_session_ids.add(direct_session_id)
-    stage_started_at = _perf_counter()
-    session_summaries = _session_summary_index(
-        session_ids=effective_session_ids if participants is not None else None
-    )
-    _append_chat_room_detail_timing(
-        timings,
-        "participant_index.session_summary",
-        stage_started_at,
-        count=len(session_summaries),
-    )
-    indexes = {
-        "session_summaries": session_summaries,
-        "active_agents_by_id": {},
-        "active_agents_by_session_id": {},
-    }
-    indexes["active_agents_by_id"] = active_agent_indexes["by_id"]
-    indexes["active_agents_by_session_id"] = active_agent_indexes["by_session_id"]
-    stage_started_at = _perf_counter()
-    with _CHAT_ROOM_PARTICIPANT_INDEX_CACHE_LOCK:
-        _CHAT_ROOM_PARTICIPANT_INDEX_CACHE.clear()
-        _CHAT_ROOM_PARTICIPANT_INDEX_CACHE.update(
-            {
-                "signature": signature,
-                "indexes": _copy_participant_refresh_indexes(indexes),
-            }
+            if signature not in _CHAT_ROOM_PARTICIPANT_INDEX_INFLIGHT:
+                _CHAT_ROOM_PARTICIPANT_INDEX_INFLIGHT.add(signature)
+                break
+            _CHAT_ROOM_PARTICIPANT_INDEX_CACHE_CONDITION.wait()
+
+    try:
+        stage_started_at = _perf_counter()
+        active_agent_indexes = _active_agent_participant_indexes(
+            agent_ids=participant_agent_ids if participants is not None else None,
+            session_ids=participant_session_ids if participants is not None else None,
         )
-    _append_chat_room_detail_timing(timings, "participant_index.cache_store", stage_started_at, cache_hit=False)
+        _append_chat_room_detail_timing(
+            timings,
+            "participant_index.active_agents",
+            stage_started_at,
+            count=len(active_agent_indexes.get("by_id") or {}),
+        )
+        effective_session_ids = set(participant_session_ids)
+        for agent in active_agent_indexes.get("by_id", {}).values():
+            if isinstance(agent, dict):
+                direct_session_id = str(agent.get("directSessionId") or "").strip()
+                if direct_session_id:
+                    effective_session_ids.add(direct_session_id)
+        stage_started_at = _perf_counter()
+        session_summaries = _session_summary_index(
+            session_ids=effective_session_ids if participants is not None else None
+        )
+        _append_chat_room_detail_timing(
+            timings,
+            "participant_index.session_summary",
+            stage_started_at,
+            count=len(session_summaries),
+        )
+        indexes = {
+            "session_summaries": session_summaries,
+            "active_agents_by_id": active_agent_indexes["by_id"],
+            "active_agents_by_session_id": active_agent_indexes["by_session_id"],
+        }
+        stage_started_at = _perf_counter()
+        with _CHAT_ROOM_PARTICIPANT_INDEX_CACHE_CONDITION:
+            _CHAT_ROOM_PARTICIPANT_INDEX_CACHE.pop(signature, None)
+            _CHAT_ROOM_PARTICIPANT_INDEX_CACHE[signature] = _copy_participant_refresh_indexes(indexes)
+            while len(_CHAT_ROOM_PARTICIPANT_INDEX_CACHE) > _CHAT_ROOM_PARTICIPANT_INDEX_CACHE_MAX_ENTRIES:
+                oldest_signature = next(iter(_CHAT_ROOM_PARTICIPANT_INDEX_CACHE))
+                _CHAT_ROOM_PARTICIPANT_INDEX_CACHE.pop(oldest_signature, None)
+        _append_chat_room_detail_timing(timings, "participant_index.cache_store", stage_started_at, cache_hit=False)
+    finally:
+        with _CHAT_ROOM_PARTICIPANT_INDEX_CACHE_CONDITION:
+            _CHAT_ROOM_PARTICIPANT_INDEX_INFLIGHT.discard(signature)
+            _CHAT_ROOM_PARTICIPANT_INDEX_CACHE_CONDITION.notify_all()
+
     stage_started_at = _perf_counter()
     copied = _copy_participant_refresh_indexes(indexes)
     _append_chat_room_detail_timing(
@@ -3327,7 +3337,7 @@ def _participant_refresh_indexes(
 
 
 def _clear_participant_refresh_index_cache() -> None:
-    with _CHAT_ROOM_PARTICIPANT_INDEX_CACHE_LOCK:
+    with _CHAT_ROOM_PARTICIPANT_INDEX_CACHE_CONDITION:
         _CHAT_ROOM_PARTICIPANT_INDEX_CACHE.clear()
 
 

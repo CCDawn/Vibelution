@@ -7,6 +7,8 @@ describe("ChatStatusRail read-only contract", () => {
     expect(source).toContain("ChatPromptAssemblyInspector");
     expect(source).toContain("LlmPayloadTracePanel");
     expect(source).toContain('lang === "zh" ? "群资料"');
+    expect(source).toContain("standardGroupRoomActive && groupRoomInitialLoading");
+    expect(source).toContain("正在加载群聊资料");
     expect(source).toContain('lang === "zh" ? "陪伴"');
     expect(source).not.toContain("mental-runtime-module");
     expect(source).not.toContain("TokenCoreStatusPanel");

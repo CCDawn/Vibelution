@@ -12,6 +12,7 @@ import { PersistedHeightListShell } from "../../components/layout/PersistedHeigh
 import { VContextualHint } from "../../components/vui";
 import type { TranslationKey } from "../../i18n/dictionary";
 import routeStyles from "../ChatCodingRoute.styles";
+import { ProgressiveRegionSkeleton } from "../shared/ProgressiveRegionSkeleton";
 import { isBusyPhase } from "./chatCodingRouteViewModel";
 import { CHAT_COMPACT_DETAILS_HEIGHT_PANE, CHAT_LIST_HEIGHT_LAYOUT_ID } from "./chatListHeights";
 import { ChatPromptAssemblyInspector } from "./ChatPromptAssemblyInspector";
@@ -26,6 +27,7 @@ export type ChatStatusRailProps = {
   statusRailCollapsed: boolean;
   statusRailOverlayOpen: boolean;
   standardGroupRoomActive: boolean;
+  groupRoomInitialLoading: boolean;
   lang: "zh" | "en";
   t: (key: TranslationKey) => string;
   numberFormatter: Intl.NumberFormat;
@@ -69,6 +71,7 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
     statusRailCollapsed,
     statusRailOverlayOpen,
     standardGroupRoomActive,
+    groupRoomInitialLoading,
     lang,
     t,
     numberFormatter,
@@ -118,7 +121,14 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
       role={statusRailOverlayOpen ? "dialog" : undefined}
       aria-label={statusRailOverlayOpen ? (lang === "zh" ? "状态栏" : "Status panel") : undefined}
     >
-      {standardGroupRoomActive ? (
+      {standardGroupRoomActive && groupRoomInitialLoading ? (
+        <section className={`${routeStyles.leftBlock} ${styles.groupProfileBlock}`}>
+          <ProgressiveRegionSkeleton
+            variant="detail"
+            label={lang === "zh" ? "正在加载群聊资料" : "Loading group profile"}
+          />
+        </section>
+      ) : standardGroupRoomActive ? (
         <section className={`${routeStyles.leftBlock} ${styles.groupProfileBlock}${groupRoundRunning ? ` ${styles.railBlockActive}` : ""}`}>
           <div className={routeStyles.sectionHeader}>
             <div className={routeStyles.sectionIdentity}>

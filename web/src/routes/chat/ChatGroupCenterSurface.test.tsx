@@ -9,6 +9,7 @@ function baseProps(patch: Partial<ChatGroupCenterSurfaceProps> = {}): ChatGroupC
     lang: "zh",
     projectBusActive: false,
     standardGroupRoomActive: true,
+    groupRoomInitialLoading: false,
     activeGroupRoom: {
       roomId: "room-1",
       title: "研究组",
@@ -67,6 +68,34 @@ function baseProps(patch: Partial<ChatGroupCenterSurfaceProps> = {}): ChatGroupC
 }
 
 describe("ChatGroupCenterSurface hand-test substitutes", () => {
+  it("renders a real loading state before the first group detail arrives", () => {
+    const html = renderToStaticMarkup(
+      <ChatGroupCenterSurface
+        {...baseProps({
+          activeGroupRoom: undefined,
+          availableGroupParticipantCount: 0,
+          groupRoomInitialLoading: true,
+        })}
+      />,
+    );
+
+    expect(html).toContain("正在加载群聊详情");
+    expect(html).not.toContain("0 位可用助手");
+    expect(html).not.toContain("round_robin");
+    expect(html).not.toContain("discussion");
+    expect(html).not.toContain("群聊已创建，输入议题后开始第一轮讨论。");
+  });
+
+  it("keeps loaded group detail visible during a background refresh", () => {
+    const html = renderToStaticMarkup(
+      <ChatGroupCenterSurface {...baseProps({ groupRoomRefreshing: true })} />,
+    );
+
+    expect(html).toContain("研究组");
+    expect(html).toContain("群聊已创建，输入议题后开始第一轮讨论。");
+    expect(html).not.toContain("正在加载群聊详情");
+  });
+
   it("renders standard group empty state and start-round controls", () => {
     const html = renderToStaticMarkup(<ChatGroupCenterSurface {...baseProps()} />);
     expect(html).toContain("研究组");

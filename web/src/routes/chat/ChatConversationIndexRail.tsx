@@ -47,6 +47,7 @@ export type ChatConversationIndexRailProps = {
   availableGroupParticipantCount: number;
   availableGroupParticipants: ChatRoomParticipant[];
   activeGroupRoom: ChatRoomDetail | null | undefined;
+  groupRoomInitialLoading: boolean;
   chatRoomModesPending: boolean;
   chatRoomPurposesPending: boolean;
   conversationIndexCollapsed: boolean;
@@ -132,6 +133,7 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
     availableGroupParticipantCount,
     availableGroupParticipants,
     activeGroupRoom,
+    groupRoomInitialLoading,
     chatRoomModesPending,
     chatRoomPurposesPending,
     conversationIndexCollapsed,
@@ -234,13 +236,20 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
         ) : null}
 
         {rightIndexPanel === "members" && standardGroupRoomActive ? (
-          <div className={styles.memberIndexSummary}>
-            <UsersRound size={15} />
-            <span>
-              {availableGroupParticipantCount} {lang === "zh" ? "位可用助手" : "available agents"}
-            </span>
-            <strong>{statusLabel(activeGroupRoom?.status ?? "ready")}</strong>
-          </div>
+          groupRoomInitialLoading ? (
+            <ProgressiveRegionSkeleton
+              variant="detail"
+              label={lang === "zh" ? "正在加载群聊成员摘要" : "Loading group member summary"}
+            />
+          ) : (
+            <div className={styles.memberIndexSummary}>
+              <UsersRound size={15} />
+              <span>
+                {availableGroupParticipantCount} {lang === "zh" ? "位可用助手" : "available agents"}
+              </span>
+              <strong>{statusLabel(activeGroupRoom?.status ?? "ready")}</strong>
+            </div>
+          )
         ) : (
           <div className={styles.panelSearch}>
             <Search size={15} aria-hidden="true" />
@@ -275,7 +284,13 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
           }
         >
           {rightIndexPanel === "members" && standardGroupRoomActive ? (
-            <section className={styles.agentIndexRoster} aria-label={lang === "zh" ? "群成员状态索引" : "Group member status index"}>
+            groupRoomInitialLoading ? (
+              <ProgressiveRegionSkeleton
+                variant="list"
+                label={lang === "zh" ? "正在加载群聊成员" : "Loading group members"}
+              />
+            ) : (
+              <section className={styles.agentIndexRoster} aria-label={lang === "zh" ? "群成员状态索引" : "Group member status index"}>
               <div className={routeStyles.sectionHeader}>
                 <div className={routeStyles.sectionIdentity}>
                   <div className={routeStyles.sectionEyebrowRow}>
@@ -427,7 +442,8 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
                   </p>
                 </div>
               )}
-            </section>
+              </section>
+            )
           ) : (
             <div className={styles.conversationIndexLayout}>
             <div className={styles.sessionActionRow}>

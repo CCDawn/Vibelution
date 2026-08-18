@@ -939,6 +939,125 @@ def test_chat_room_participant_index_stays_warm_for_message_only_session_changes
     assert summary_index_calls == 2
 
 
+def test_chat_room_participant_index_singleflights_same_signature(monkeypatch):
+    chat_room_service._clear_participant_refresh_index_cache()
+    signature_barrier = threading.Barrier(2)
+    summary_started = threading.Event()
+    release_summary = threading.Event()
+    summary_calls = 0
+    summary_calls_lock = threading.Lock()
+
+    def shared_signature(*, session_ids=None, agent_ids=None):
+        signature_barrier.wait(timeout=2)
+        return ("shared-participant-index-signature",)
+
+    def empty_active_agents(*, agent_ids=None, session_ids=None):
+        return {"by_id": {}, "by_session_id": {}}
+
+    def slow_summary_index(*, session_ids=None):
+        nonlocal summary_calls
+        with summary_calls_lock:
+            summary_calls += 1
+        summary_started.set()
+        assert release_summary.wait(timeout=2)
+        return {"session-alpha": {"id": "session-alpha", "title": "Alpha Agent"}}
+
+    monkeypatch.setattr(chat_room_service, "_participant_refresh_index_signature", shared_signature)
+    monkeypatch.setattr(chat_room_service, "_active_agent_participant_indexes", empty_active_agents)
+    monkeypatch.setattr(chat_room_service, "_session_summary_index", slow_summary_index)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(chat_room_service._participant_refresh_indexes) for _ in range(2)]
+        try:
+            assert summary_started.wait(timeout=2)
+            time.sleep(0.05)
+            assert summary_calls == 1
+        finally:
+            release_summary.set()
+        first = futures[0].result(timeout=2)
+        second = futures[1].result(timeout=2)
+
+    assert first[0] == second[0]
+    assert sorted([first[1], second[1]]) == [False, True]
+    assert summary_calls == 1
+    chat_room_service._clear_participant_refresh_index_cache()
+
+
+def test_chat_room_participant_index_keeps_different_signatures_separate(monkeypatch):
+    chat_room_service._clear_participant_refresh_index_cache()
+    summary_calls: list[set[str]] = []
+
+    monkeypatch.setattr(
+        chat_room_service,
+        "_participant_refresh_index_signature",
+        lambda *, session_ids=None, agent_ids=None: ("participant-scope", tuple(sorted(session_ids or set()))),
+    )
+    monkeypatch.setattr(
+        chat_room_service,
+        "_active_agent_participant_indexes",
+        lambda *, agent_ids=None, session_ids=None: {"by_id": {}, "by_session_id": {}},
+    )
+
+    def scoped_summary_index(*, session_ids=None):
+        scoped_ids = set(session_ids or set())
+        summary_calls.append(scoped_ids)
+        return {session_id: {"id": session_id, "title": session_id} for session_id in scoped_ids}
+
+    monkeypatch.setattr(chat_room_service, "_session_summary_index", scoped_summary_index)
+
+    alpha, alpha_cache_hit, _ = chat_room_service._participant_refresh_indexes(
+        participants=[{"sessionId": "session-alpha"}],
+    )
+    beta, beta_cache_hit, _ = chat_room_service._participant_refresh_indexes(
+        participants=[{"sessionId": "session-beta"}],
+    )
+    alpha_cached, alpha_cached_hit, _ = chat_room_service._participant_refresh_indexes(
+        participants=[{"sessionId": "session-alpha"}],
+    )
+
+    assert set(alpha["session_summaries"]) == {"session-alpha"}
+    assert set(beta["session_summaries"]) == {"session-beta"}
+    assert alpha_cached == alpha
+    assert [alpha_cache_hit, beta_cache_hit, alpha_cached_hit] == [False, False, True]
+    assert summary_calls == [{"session-alpha"}, {"session-beta"}]
+    chat_room_service._clear_participant_refresh_index_cache()
+
+
+def test_chat_room_participant_index_releases_singleflight_after_builder_error(monkeypatch):
+    chat_room_service._clear_participant_refresh_index_cache()
+    summary_calls = 0
+
+    monkeypatch.setattr(
+        chat_room_service,
+        "_participant_refresh_index_signature",
+        lambda *, session_ids=None, agent_ids=None: ("failed-participant-index-signature",),
+    )
+    monkeypatch.setattr(
+        chat_room_service,
+        "_active_agent_participant_indexes",
+        lambda *, agent_ids=None, session_ids=None: {"by_id": {}, "by_session_id": {}},
+    )
+
+    def flaky_summary_index(*, session_ids=None):
+        nonlocal summary_calls
+        summary_calls += 1
+        if summary_calls == 1:
+            raise RuntimeError("index build failed")
+        return {"session-alpha": {"id": "session-alpha", "title": "Alpha Agent"}}
+
+    monkeypatch.setattr(chat_room_service, "_session_summary_index", flaky_summary_index)
+
+    with pytest.raises(RuntimeError, match="index build failed"):
+        chat_room_service._participant_refresh_indexes()
+
+    indexes, cache_hit, _timings = chat_room_service._participant_refresh_indexes()
+
+    assert indexes["session_summaries"]["session-alpha"]["title"] == "Alpha Agent"
+    assert cache_hit is False
+    assert summary_calls == 2
+    chat_room_service._clear_participant_refresh_index_cache()
+
+
 def test_chat_room_refresh_rebinds_participant_to_current_agent_direct_session(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)

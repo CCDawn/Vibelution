@@ -1462,6 +1462,9 @@ export function ChatCodingRoute() {
   });
 
   const activeGroupRoom = activeGroupRoomQuery.data;
+  const groupRoomInitialLoading = Boolean(
+    standardGroupRoomActive && activeGroupRoomQuery.isPending && !activeGroupRoomQuery.data,
+  );
   useSyncChatGroupManageDrafts({
     activeGroupRoom,
     sessions: sessionsQuery.data,
@@ -2786,6 +2789,7 @@ export function ChatCodingRoute() {
         statusRailCollapsed={statusRailCollapsed}
         statusRailOverlayOpen={statusRailOverlayOpen}
         standardGroupRoomActive={standardGroupRoomActive}
+        groupRoomInitialLoading={groupRoomInitialLoading}
         lang={lang}
         t={t}
         numberFormatter={numberFormatter}
@@ -2952,6 +2956,7 @@ export function ChatCodingRoute() {
               lang={lang}
               projectBusActive={projectBusActive}
               standardGroupRoomActive={standardGroupRoomActive}
+              groupRoomInitialLoading={groupRoomInitialLoading}
               activeGroupRoom={activeGroupRoom}
               activeGroupRoomId={activeGroupRoomId}
               availableGroupParticipantCount={availableGroupParticipantCount}
@@ -3214,6 +3219,7 @@ export function ChatCodingRoute() {
         availableGroupParticipantCount={availableGroupParticipantCount}
         availableGroupParticipants={availableGroupParticipants}
         activeGroupRoom={activeGroupRoom}
+        groupRoomInitialLoading={groupRoomInitialLoading}
         expandedGroupAgentSessionIds={expandedGroupAgentSessionIds}
         setExpandedGroupAgentSessionIds={setExpandedGroupAgentSessionIds}
         expandedGroupAgentDetailsBySessionId={expandedGroupAgentDetailsBySessionId}

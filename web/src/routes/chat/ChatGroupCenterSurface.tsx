@@ -13,6 +13,7 @@ import type {
 } from "../../api/types";
 import { VButton, VContextualHint, VNativeInput } from "../../components/vui";
 import type { ChatMentionTarget } from "../chatMentionTokens";
+import { ProgressiveRegionSkeleton } from "../shared/ProgressiveRegionSkeleton";
 import styles from "./ChatGroupCenterSurface.styles";
 import { ChatGroupMessageBody, ChatMentionedText } from "./ChatGroupMessagePresentation";
 import { ChatMessageChromeHeader } from "./ChatMessageChromeHeader";
@@ -31,6 +32,7 @@ export type ChatGroupCenterSurfaceProps = {
   lang: "zh" | "en";
   projectBusActive: boolean;
   standardGroupRoomActive: boolean;
+  groupRoomInitialLoading: boolean;
   activeGroupRoom: ChatRoomDetail | null | undefined;
   activeGroupRoomId: string;
   availableGroupParticipantCount: number;
@@ -239,6 +241,7 @@ export function ChatGroupCenterSurface({
   lang,
   projectBusActive,
   standardGroupRoomActive,
+  groupRoomInitialLoading,
   activeGroupRoom,
   availableGroupParticipantCount,
   activeGroupParticipantById,
@@ -461,6 +464,17 @@ export function ChatGroupCenterSurface({
 
   if (!standardGroupRoomActive) {
     return null;
+  }
+
+  if (groupRoomInitialLoading) {
+    return (
+      <div className={styles.groupConversationFrame}>
+        <ProgressiveRegionSkeleton
+          variant="conversation"
+          label={lang === "zh" ? "正在加载群聊详情" : "Loading group details"}
+        />
+      </div>
+    );
   }
 
   const rounds = activeGroupRoom?.rounds ?? [];
