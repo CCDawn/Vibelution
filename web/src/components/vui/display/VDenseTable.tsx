@@ -138,59 +138,49 @@ export function VDenseTable<TRow>({
     handle.addEventListener("pointercancel", onUp);
   };
 
-  return (
-    <div
-      data-vui="dense-table"
-      data-vui-resizable={resizable ? "true" : undefined}
-      aria-label={ariaLabel}
-      className={[
-        "min-w-0 max-w-full w-full rounded-[var(--radius-control)] border border-vui-border-hairline bg-vui-surface-row",
-        className,
-        resizable ? "!overflow-x-auto" : "overflow-hidden",
-      ]
-        .filter(Boolean)
-        .join(" ")}
-    >
-      <table
-        className="min-w-0 max-w-full w-full table-fixed border-collapse text-left"
-        style={
-          resizable
-            ? fillColumnId
-              ? {
-                  display: "grid",
-                  gridTemplateColumns,
-                  width: "100%",
-                  maxWidth: "100%",
-                  minWidth: `${tableMinWidth}px`,
-                }
-              : {
-                  display: "grid",
-                  gridTemplateColumns,
-                  width: `${tableWidth}px`,
-                  minWidth: `${tableWidth}px`,
-                  maxWidth: `${tableWidth}px`,
-                }
-            : undefined
-        }
-      >
-        <thead
-          className="bg-vui-surface-toolbar text-vui-fg-tertiary"
-          style={resizable ? { display: "contents" } : undefined}
-        >
-          <tr style={resizable ? { display: "contents" } : undefined}>
+  const shellClassName = [
+    "min-w-0 max-w-full w-full rounded-[var(--radius-control)] border border-vui-border-hairline bg-vui-surface-row",
+    className,
+    resizable ? "!overflow-x-auto" : "overflow-hidden",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const gridStyle = fillColumnId
+    ? {
+        display: "grid",
+        gridTemplateColumns,
+        width: "100%",
+        maxWidth: "100%",
+        minWidth: `${tableMinWidth}px`,
+      }
+    : {
+        display: "grid",
+        gridTemplateColumns,
+        width: `${tableWidth}px`,
+        minWidth: `${tableWidth}px`,
+        maxWidth: `${tableWidth}px`,
+      };
+
+  if (resizable) {
+    return (
+      <div data-vui="dense-table" data-vui-resizable="true" className={shellClassName}>
+        <div role="table" aria-label={ariaLabel} className="min-w-0 max-w-full w-full text-left" style={gridStyle}>
+          <div
+            role="row"
+            className="col-span-full grid grid-cols-subgrid bg-vui-surface-toolbar text-vui-fg-tertiary"
+          >
             {columns.map((column) => (
-              <th
+              <div
                 key={column.id}
-                data-vui-fill={resizable && column.id === fillColumnId ? "true" : undefined}
+                role="columnheader"
+                data-vui-fill={column.id === fillColumnId ? "true" : undefined}
                 className={[
-                  "relative px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold uppercase tracking-[0.04em]",
-                  resizable ? "min-w-0 overflow-hidden" : "",
+                  "relative min-w-0 overflow-hidden px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold uppercase tracking-[0.04em]",
                   alignClass(column.align),
                   column.className,
                 ]
                   .filter(Boolean)
                   .join(" ")}
-                scope="col"
               >
                 {column.header}
                 {canResizeColumn(column, resizable) ? (
@@ -206,11 +196,86 @@ export function VDenseTable<TRow>({
                     onClick={(event) => event.stopPropagation()}
                   />
                 ) : null}
+              </div>
+            ))}
+          </div>
+          {rows.length ? (
+            rows.map((row) => {
+              const state = getRowState?.(row) ?? {};
+              return (
+                <div
+                  key={getRowKey(row)}
+                  role="row"
+                  className={[
+                    "col-span-full grid grid-cols-subgrid border-t border-vui-border-hairline text-vui-fg-secondary hover:bg-[var(--vui-surface-row-hover)]",
+                    onRowClick ? "cursor-pointer" : "",
+                    state.selected ? "bg-[color-mix(in_srgb,var(--vui-accent)_14%,var(--vui-surface-row))]" : "",
+                    state.tone === "success" ? "border-l-2 border-l-[var(--state-success)]" : "",
+                    state.tone === "warning" ? "border-l-2 border-l-[var(--state-warning)]" : "",
+                    state.className,
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  data-selected={state.selected ? "true" : "false"}
+                  data-tone={state.tone ?? "neutral"}
+                  tabIndex={state.tabIndex ?? (onRowClick ? 0 : undefined)}
+                  onClick={onRowClick ? () => onRowClick(row) : undefined}
+                  onKeyDown={onRowClick ? (event) => activateRow(event, () => onRowClick(row)) : undefined}
+                >
+                  {columns.map((column) => (
+                    <div
+                      key={column.id}
+                      role="cell"
+                      className={[
+                        "min-w-0 px-2 py-1.5 [font-size:var(--vui-font-sm)]",
+                        column.truncate === false ? "overflow-visible" : "overflow-hidden truncate",
+                        alignClass(column.align),
+                        column.className,
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}
+                    >
+                      {column.render(row)}
+                    </div>
+                  ))}
+                </div>
+              );
+            })
+          ) : (
+            <div role="row" className="col-span-full grid grid-cols-subgrid">
+              <div role="cell" className="col-span-full px-2 py-2 [font-size:var(--vui-font-sm)] text-vui-fg-tertiary">
+                {emptyText}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div data-vui="dense-table" aria-label={ariaLabel} className={shellClassName}>
+      <table className="w-full table-fixed border-collapse text-left">
+        <thead className="bg-vui-surface-toolbar text-vui-fg-tertiary">
+          <tr>
+            {columns.map((column) => (
+              <th
+                key={column.id}
+                className={[
+                  "relative px-2 py-1 [font-size:var(--vui-font-xs)] font-semibold uppercase tracking-[0.04em]",
+                  alignClass(column.align),
+                  column.className,
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+                scope="col"
+              >
+                {column.header}
               </th>
             ))}
           </tr>
         </thead>
-        <tbody style={resizable ? { display: "contents" } : undefined}>
+        <tbody>
           {rows.length ? (
             rows.map((row) => {
               const state = getRowState?.(row) ?? {};
@@ -227,7 +292,6 @@ export function VDenseTable<TRow>({
                   ]
                     .filter(Boolean)
                     .join(" ")}
-                  style={resizable ? { display: "contents" } : undefined}
                   data-selected={state.selected ? "true" : "false"}
                   data-tone={state.tone ?? "neutral"}
                   tabIndex={state.tabIndex ?? (onRowClick ? 0 : undefined)}
@@ -239,7 +303,6 @@ export function VDenseTable<TRow>({
                       key={column.id}
                       className={[
                         "min-w-0 px-2 py-1.5 align-middle [font-size:var(--vui-font-sm)]",
-                        resizable ? "overflow-hidden" : "",
                         column.truncate === false ? "overflow-visible" : "truncate",
                         alignClass(column.align),
                         column.className,
@@ -254,12 +317,8 @@ export function VDenseTable<TRow>({
               );
             })
           ) : (
-            <tr style={resizable ? { display: "contents" } : undefined}>
-              <td
-                className="px-2 py-2 [font-size:var(--vui-font-sm)] text-vui-fg-tertiary"
-                style={resizable ? { gridColumn: "1 / -1" } : undefined}
-                colSpan={columns.length}
-              >
+            <tr>
+              <td className="px-2 py-2 [font-size:var(--vui-font-sm)] text-vui-fg-tertiary" colSpan={columns.length}>
                 {emptyText}
               </td>
             </tr>
@@ -288,7 +347,7 @@ function alignClass(align: VDenseTableColumn<unknown>["align"]): string {
   return "text-left";
 }
 
-function activateRow(event: KeyboardEvent<HTMLTableRowElement>, activate: () => void): void {
+function activateRow(event: KeyboardEvent<HTMLElement>, activate: () => void): void {
   if (event.key === "Enter" || event.key === " ") {
     event.preventDefault();
     activate();

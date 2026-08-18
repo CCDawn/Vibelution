@@ -26,7 +26,8 @@ describe("VDenseTable", () => {
       />,
     );
 
-    expect(html).toContain("<table");
+    expect(html).toContain('role="table"');
+    expect(html).toContain("grid-cols-subgrid");
     expect(html).not.toContain("<colgroup>");
     expect(html).toContain("w-full");
     expect(html).toContain("display:grid");
@@ -53,6 +54,8 @@ describe("VDenseTable", () => {
       />,
     );
 
+    expect(html).toContain('role="table"');
+    expect(html).toContain("grid-cols-subgrid");
     expect(html).toContain("w-full");
     expect(html).toContain("display:grid");
     expect(html).toContain("grid-template-columns:minmax(0, 1fr) 80px 170px");
@@ -100,6 +103,7 @@ describe("VDenseTable", () => {
 
     expect(html).not.toContain("<colgroup>");
     expect(html).not.toContain('role="separator"');
+    expect(html).toContain("<table");
     expect(html).toContain("w-[23%]");
   });
 
