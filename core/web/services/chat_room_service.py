@@ -855,96 +855,120 @@ def start_chat_room_round(
         raise ChatRoomValidationError(text_for(lang, zh="请输入本轮群聊议题。", en="Enter a room topic."))
 
     runner = agent_runner or _run_participant_agent
-    lock_wait_started_at = _perf_counter()
-    with _CHAT_ROOM_LOCK:
-        lock_acquired_at = _perf_counter()
-        submit_timings["chatRoomLockWaitMs"] = _elapsed_ms_between(lock_wait_started_at, lock_acquired_at)
+    while True:
+        with _CHAT_ROOM_LOCK:
+            stage_started_at = _perf_counter()
+            state = _store().load()
+            submit_timings["storeLoadMs"] = _elapsed_ms(stage_started_at)
+            room = _find_room(state, normalized_room_id)
+            if room is None:
+                raise ChatRoomNotFoundError(text_for(lang, zh="未找到群聊。", en="Chat room not found."))
+            _raise_if_room_busy(room)
+            round_mode = _normalize_mode(mode or room.get("mode") or DEFAULT_MODE)
+            round_purpose = _resolve_round_purpose(
+                normalized_topic,
+                purpose or room.get("purpose") or DEFAULT_PURPOSE,
+            )
+            stage_started_at = _perf_counter()
+            _require_ready_mode(round_mode)
+            submit_timings["schedulerResolveMs"] = _elapsed_ms(stage_started_at)
+            round_config = {**_safe_config(room.get("config")), **_safe_config(config)}
+            participant_seed = copy.deepcopy(room.get("participants") or [])
+
         stage_started_at = _perf_counter()
-        state = _store().load()
-        submit_timings["storeLoadMs"] = _elapsed_ms(stage_started_at)
-        room = _find_room(state, normalized_room_id)
-        if room is None:
-            raise ChatRoomNotFoundError(text_for(lang, zh="未找到群聊。", en="Chat room not found."))
-        _raise_if_room_busy(room)
-        round_mode = _normalize_mode(mode or room.get("mode") or DEFAULT_MODE)
-        round_purpose = _resolve_round_purpose(normalized_topic, purpose or room.get("purpose") or DEFAULT_PURPOSE)
-        stage_started_at = _perf_counter()
-        scheduler = _require_ready_mode(round_mode)
-        submit_timings["schedulerResolveMs"] = _elapsed_ms(stage_started_at)
-        round_config = {**_safe_config(room.get("config")), **_safe_config(config)}
-        stage_started_at = _perf_counter()
-        participants = _refresh_participants(
-            room.get("participants") or [],
-            include_recent_messages=True,
-            session_summaries=_session_summary_index(),
-        )
+        participants = _refresh_chat_room_round_participants(participant_seed)
         refreshed_participant_count = len(participants)
         participants = _dedupe_chat_room_participants(participants)
         submit_timings["participantDedupeRemoved"] = max(0, refreshed_participant_count - len(participants))
         submit_timings["participantRefreshMs"] = _elapsed_ms(stage_started_at)
-        stage_started_at = _perf_counter()
-        speakers = scheduler.select_speakers(
-            participants,
-            topic=normalized_topic,
-            history=list(room.get("rounds") or []),
-            config=round_config,
-        )
-        case_state = build_team_case_state(
-            room=room,
-            topic=normalized_topic,
-            purpose=round_purpose,
-            participants=participants,
-            history=list(room.get("rounds") or []),
-            config=round_config,
-        )
-        speakers = select_speakers_for_case(
-            speakers,
-            participants=participants,
-            case_state=case_state,
-        )
-        speakers = _dedupe_chat_room_participants(speakers)
-        submit_timings["speakerSelectMs"] = _elapsed_ms(stage_started_at)
-        if not speakers:
-            raise ChatRoomValidationError(
-                text_for(lang, zh="群聊没有可发言的参与者。", en="The chat room has no enabled speakers.")
+
+        lock_wait_started_at = _perf_counter()
+        with _CHAT_ROOM_LOCK:
+            lock_acquired_at = _perf_counter()
+            submit_timings["chatRoomLockWaitMs"] = _elapsed_ms_between(lock_wait_started_at, lock_acquired_at)
+            stage_started_at = _perf_counter()
+            state = _store().load()
+            submit_timings["storeLoadMs"] = _elapsed_ms(stage_started_at)
+            room = _find_room(state, normalized_room_id)
+            if room is None:
+                raise ChatRoomNotFoundError(text_for(lang, zh="未找到群聊。", en="Chat room not found."))
+            _raise_if_room_busy(room)
+            if list(room.get("participants") or []) != participant_seed:
+                continue
+
+            round_mode = _normalize_mode(mode or room.get("mode") or DEFAULT_MODE)
+            round_purpose = _resolve_round_purpose(
+                normalized_topic,
+                purpose or room.get("purpose") or DEFAULT_PURPOSE,
             )
-        round_id = _new_id(
-            "round",
-            {
-                str(item.get("roundId") or "").strip()
-                for item in list(room.get("rounds") or [])
-                if isinstance(item, dict)
-            },
-        )
-        now = utc_now_iso()
-        round_payload = {
-            "roundId": round_id,
-            "roomId": normalized_room_id,
-            "topic": normalized_topic,
-            "mode": round_mode,
-            "purpose": round_purpose,
-            "config": round_config,
-            "caseState": case_state,
-            "status": "running",
-            "speakerOrder": [item["participantId"] for item in speakers],
-            "messages": [],
-            "summary": "",
-            "startedAt": now,
-            "updatedAt": now,
-            "finishedAt": "",
-        }
-        room["participants"] = participants
-        room["rounds"] = list(room.get("rounds") or []) + [round_payload]
-        room["status"] = "running"
-        room["activeRoundId"] = round_id
-        room["updatedAt"] = now
-        stage_started_at = _perf_counter()
-        _store().save(state)
-        submit_timings["storeSaveMs"] = _elapsed_ms(stage_started_at)
-        stage_started_at = _perf_counter()
-        _create_chat_room_round_control(normalized_room_id, round_id)
-        submit_timings["roundControlCreateMs"] = _elapsed_ms(stage_started_at)
-        submit_timings["chatRoomLockedMs"] = _elapsed_ms_between(lock_acquired_at)
+            stage_started_at = _perf_counter()
+            scheduler = _require_ready_mode(round_mode)
+            submit_timings["schedulerResolveMs"] = _elapsed_ms(stage_started_at)
+            round_config = {**_safe_config(room.get("config")), **_safe_config(config)}
+            stage_started_at = _perf_counter()
+            speakers = scheduler.select_speakers(
+                participants,
+                topic=normalized_topic,
+                history=list(room.get("rounds") or []),
+                config=round_config,
+            )
+            case_state = build_team_case_state(
+                room=room,
+                topic=normalized_topic,
+                purpose=round_purpose,
+                participants=participants,
+                history=list(room.get("rounds") or []),
+                config=round_config,
+            )
+            speakers = select_speakers_for_case(
+                speakers,
+                participants=participants,
+                case_state=case_state,
+            )
+            speakers = _dedupe_chat_room_participants(speakers)
+            submit_timings["speakerSelectMs"] = _elapsed_ms(stage_started_at)
+            if not speakers:
+                raise ChatRoomValidationError(
+                    text_for(lang, zh="群聊没有可发言的参与者。", en="The chat room has no enabled speakers.")
+                )
+            round_id = _new_id(
+                "round",
+                {
+                    str(item.get("roundId") or "").strip()
+                    for item in list(room.get("rounds") or [])
+                    if isinstance(item, dict)
+                },
+            )
+            now = utc_now_iso()
+            round_payload = {
+                "roundId": round_id,
+                "roomId": normalized_room_id,
+                "topic": normalized_topic,
+                "mode": round_mode,
+                "purpose": round_purpose,
+                "config": round_config,
+                "caseState": case_state,
+                "status": "running",
+                "speakerOrder": [item["participantId"] for item in speakers],
+                "messages": [],
+                "summary": "",
+                "startedAt": now,
+                "updatedAt": now,
+                "finishedAt": "",
+            }
+            room["participants"] = participants
+            room["rounds"] = list(room.get("rounds") or []) + [round_payload]
+            room["status"] = "running"
+            room["activeRoundId"] = round_id
+            room["updatedAt"] = now
+            stage_started_at = _perf_counter()
+            _store().save(state)
+            submit_timings["storeSaveMs"] = _elapsed_ms(stage_started_at)
+            stage_started_at = _perf_counter()
+            _create_chat_room_round_control(normalized_room_id, round_id)
+            submit_timings["roundControlCreateMs"] = _elapsed_ms(stage_started_at)
+            submit_timings["chatRoomLockedMs"] = _elapsed_ms_between(lock_acquired_at)
+            break
 
     stage_started_at = _perf_counter()
     kernel_trace = _create_chat_room_round_kernel_trace(room, round_payload, speakers)
@@ -3129,6 +3153,21 @@ def _refresh_participants(
                 fallback["enabled"] = False
             refreshed.append(fallback)
     return refreshed
+
+
+def _refresh_chat_room_round_participants(
+    participants: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Refresh round participants without holding the chat-room persistence lock."""
+
+    participant_indexes, _, _ = _participant_refresh_indexes(participants=participants)
+    return _refresh_participants(
+        participants,
+        include_recent_messages=True,
+        session_summaries=participant_indexes["session_summaries"],
+        active_agents_by_id=participant_indexes["active_agents_by_id"],
+        active_agents_by_session_id=participant_indexes["active_agents_by_session_id"],
+    )
 
 
 def _active_agent_for_participant(

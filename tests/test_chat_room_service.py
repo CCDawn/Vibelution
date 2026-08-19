@@ -1319,6 +1319,120 @@ def test_start_chat_room_round_runs_participants_in_round_robin_and_persists_wor
     assert speaker_fields["totalSpeakerMs"] >= 0
 
 
+def test_start_chat_room_round_refreshes_participants_outside_room_lock(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    room = chat_room_service.create_chat_room(
+        title="锁外刷新群聊",
+        participant_session_ids=["session-alpha", "session-beta"],
+    )
+    chat_room_service._clear_participant_refresh_index_cache()
+
+    details_started = threading.Event()
+    release_details = threading.Event()
+    real_get_session_detail = session_service.get_session_detail
+
+    def blocking_get_session_detail(session_id):
+        assert not chat_room_service._chat_room_lock_owned_by_current_thread()
+        details_started.set()
+        assert release_details.wait(timeout=5)
+        return real_get_session_detail(session_id)
+
+    monkeypatch.setattr(session_service, "get_session_detail", blocking_get_session_detail)
+
+    def fail_full_session_list(*args, **kwargs):
+        raise AssertionError("round start must use targeted session summaries")
+
+    monkeypatch.setattr(session_service, "list_sessions", fail_full_session_list)
+
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pytest-chat-room-lock-safety")
+    future = executor.submit(
+        chat_room_service.start_chat_room_round,
+        room["roomId"],
+        "锁外刷新后再持久化",
+        agent_runner=lambda participant, prompt, context: {
+            "status": "completed",
+            "raw_output": f"{participant['title']} 发言",
+            "summary": "ok",
+        },
+    )
+    try:
+        assert details_started.wait(timeout=5)
+        assert chat_room_service._CHAT_ROOM_LOCK.acquire(timeout=0.5)
+        chat_room_service._CHAT_ROOM_LOCK.release()
+        release_details.set()
+        detail = future.result(timeout=10)
+    finally:
+        release_details.set()
+        executor.shutdown(wait=True)
+
+    assert detail["rounds"][-1]["status"] == "completed"
+    assert detail["rounds"][-1]["speakerOrder"] == [
+        "session-session-alpha",
+        "session-session-beta",
+    ]
+
+
+def test_start_chat_room_round_revalidates_participant_snapshot_before_persist(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    room = chat_room_service.create_chat_room(
+        title="并发成员变化群聊",
+        participant_session_ids=["session-alpha", "session-beta"],
+    )
+
+    first_refresh_started = threading.Event()
+    release_first_refresh = threading.Event()
+    refresh_calls = 0
+    real_refresh = chat_room_service._refresh_chat_room_round_participants
+
+    def blocking_first_refresh(participants):
+        nonlocal refresh_calls
+        refresh_calls += 1
+        if refresh_calls == 1:
+            first_refresh_started.set()
+            assert release_first_refresh.wait(timeout=5)
+        return real_refresh(participants)
+
+    monkeypatch.setattr(
+        chat_room_service,
+        "_refresh_chat_room_round_participants",
+        blocking_first_refresh,
+    )
+
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pytest-chat-room-snapshot-recheck")
+    future = executor.submit(
+        chat_room_service.start_chat_room_round,
+        room["roomId"],
+        "成员变化后必须重新取快照",
+        agent_runner=lambda participant, prompt, context: {
+            "status": "completed",
+            "raw_output": f"{participant['title']} 发言",
+            "summary": "ok",
+        },
+    )
+    try:
+        assert first_refresh_started.wait(timeout=5)
+        updated = chat_room_service.update_chat_room(
+            room["roomId"],
+            participant_session_ids=["session-alpha"],
+        )
+        assert [item["sessionId"] for item in updated["participants"]] == ["session-alpha"]
+        release_first_refresh.set()
+        detail = future.result(timeout=10)
+    finally:
+        release_first_refresh.set()
+        executor.shutdown(wait=True)
+
+    assert refresh_calls >= 2
+    assert [item["sessionId"] for item in detail["participants"]] == ["session-alpha"]
+    assert detail["rounds"][-1]["speakerOrder"] == ["session-session-alpha"]
+
+
 def test_start_chat_room_round_preserves_structured_runner_failure(tmp_path, monkeypatch):
     _seed_chat_sessions(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
