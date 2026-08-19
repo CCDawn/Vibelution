@@ -4,6 +4,7 @@ class WorkbenchLifecycleCommandFailed extends Error {}
 
 export async function waitForWorkbenchLifecycleReady(input: {
   commandId: string;
+  expectedGeneration?: number;
   readStatus: () => Promise<LauncherStatusSummary>;
   timeoutMs: number;
   pollIntervalMs?: number;
@@ -13,6 +14,9 @@ export async function waitForWorkbenchLifecycleReady(input: {
   if (!commandId) {
     throw new Error("workbench lifecycle command id is required before opening the window");
   }
+  const expectedGeneration = Number.isFinite(input.expectedGeneration) && Number(input.expectedGeneration) > 0
+    ? Math.trunc(Number(input.expectedGeneration))
+    : null;
   const startedAt = Date.now();
   const pollIntervalMs = Math.max(0, input.pollIntervalMs ?? 500);
   let lastReadError = "";
@@ -21,7 +25,15 @@ export async function waitForWorkbenchLifecycleReady(input: {
     try {
       const status = await input.readStatus();
       input.signal?.throwIfAborted();
-      const result = status.lifecycleResults.find((item) => item.commandId === commandId && item.completed);
+      const result = status.lifecycleResults.find((item) => {
+        if (item.commandId !== commandId || !item.completed) {
+          return false;
+        }
+        if (expectedGeneration !== null && item.generation !== undefined && item.generation !== expectedGeneration) {
+          return false;
+        }
+        return true;
+      });
       if (result) {
         if (!result.ok) {
           throw new WorkbenchLifecycleCommandFailed(

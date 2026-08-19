@@ -8,6 +8,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+export function isSafeRuntimeManagerCommandId(commandId: string): boolean {
+  return commandId.length > 0 && /^[A-Za-z0-9_-]+$/.test(commandId);
+}
+
 function readLifecycleResult(path: string): LauncherLifecycleResultSummary | null {
   try {
     const payload = JSON.parse(readFileSync(path, "utf8")) as unknown;
@@ -15,19 +19,28 @@ function readLifecycleResult(path: string): LauncherLifecycleResultSummary | nul
       return null;
     }
     const commandId = typeof payload.commandId === "string" ? payload.commandId.trim() : "";
-    if (!commandId) {
+    if (!commandId || !isSafeRuntimeManagerCommandId(commandId)) {
       return null;
     }
     const message = typeof payload.message === "string" && payload.message.trim() ? payload.message.trim() : "";
+    const generationValue = Number(payload.generation);
     return {
       commandId,
       completed: payload.completed === true,
       ok: payload.ok === true,
-      ...(message ? { message } : {})
+      ...(message ? { message } : {}),
+      ...(Number.isFinite(generationValue) && generationValue > 0 ? { generation: Math.trunc(generationValue) } : {})
     };
   } catch {
     return null;
   }
+}
+
+function readExactLifecycleResult(runtimeManagerDir: string, commandId: string): LauncherLifecycleResultSummary | null {
+  if (!isSafeRuntimeManagerCommandId(commandId)) {
+    return null;
+  }
+  return readLifecycleResult(join(runtimeManagerDir, "results", `${commandId}.json`));
 }
 
 function readRecentLifecycleResults(runtimeManagerDir: string): LauncherLifecycleResultSummary[] {
@@ -49,7 +62,10 @@ function readRecentLifecycleResults(runtimeManagerDir: string): LauncherLifecycl
   });
 }
 
-export function readRuntimeManagerLauncherStatusSummary(workspaceRoot: string): LauncherStatusSummary {
+export function readRuntimeManagerLauncherStatusSummary(
+  workspaceRoot: string,
+  expectedCommandId?: string
+): LauncherStatusSummary {
   const runtimeManagerDir = resolveRuntimeManagerDir(workspaceRoot);
   const statePath = join(runtimeManagerDir, "state.json");
   const raw = JSON.parse(readFileSync(statePath, "utf8")) as unknown;
@@ -59,6 +75,12 @@ export function readRuntimeManagerLauncherStatusSummary(workspaceRoot: string): 
   const workbench = isRecord(raw.workbench) ? raw.workbench : {};
   const runtimeState = String(raw.runtimeState || "").trim().toLowerCase();
   const stateVersionValue = Number(raw.stateVersion ?? 0);
+  const recent = readRecentLifecycleResults(runtimeManagerDir);
+  const expected = String(expectedCommandId || "").trim();
+  const exact = expected ? readExactLifecycleResult(runtimeManagerDir, expected) : null;
+  const lifecycleResults = exact
+    ? [exact, ...recent.filter((item) => item.commandId !== exact.commandId)]
+    : recent;
   return {
     overallState: runtimeState === "running" ? "ready" : runtimeState || "unknown",
     observedState: String(workbench.observedState || "").trim() || "unknown",
@@ -67,6 +89,6 @@ export function readRuntimeManagerLauncherStatusSummary(workspaceRoot: string): 
     stateVersion: Number.isFinite(stateVersionValue) ? stateVersionValue : 0,
     backendHealthy: workbench.backendHealthy === true,
     backendPortListening: workbench.backendPortListening === true,
-    lifecycleResults: readRecentLifecycleResults(runtimeManagerDir)
+    lifecycleResults
   };
 }

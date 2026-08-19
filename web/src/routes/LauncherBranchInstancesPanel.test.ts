@@ -23,6 +23,9 @@ import {
   overlayCleanupMetadata,
   paginateItems,
   resolveActivePendingOperation,
+  acceptLifecycleIntent,
+  shouldApplyLifecycleMutationFeedback,
+  settleLifecycleIntentTable,
 } from "./LauncherBranchInstancesPanel.model";
 
 function instance(overrides: Partial<LauncherBranchInstance> = {}): LauncherBranchInstance {
@@ -284,6 +287,7 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(instanceRuntimeState(startable, { instanceId: startable.id, operation: "start" })).toBe("starting");
     expect(instanceRuntimeStateLabel("starting", true)).toBe("正在启动");
     expect(canRequestOpenInstance(startable, { instanceId: startable.id, operation: "start" })).toBe(false);
+    expect(canStopInstance(startable, { instanceId: startable.id, operation: "start" })).toBe(true);
     expect(canStopInstance(failed)).toBe(true);
     expect(instanceStopLabel(failed, true)).toBe("关闭");
     expect(formatAttentionReason(failed, true)).toBe("上次启动失败");
@@ -308,6 +312,8 @@ describe("LauncherBranchInstancesPanel contracts", () => {
       ...startable,
       runtime: { ...startable.runtime, lifecycleState: "running" },
     }])).toBeUndefined();
+    expect(canStopInstance(startable, pending)).toBe(true);
+    expect(canStartInstance(startable, pending)).toBe(false);
   });
 
   it("lets a retired failed leftover close without restart", () => {
@@ -328,6 +334,34 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(canStopInstance(retiredFailed)).toBe(true);
     expect(instanceStopLabel(retiredFailed, true)).toBe("关闭");
     expect(canStartInstance(retiredFailed)).toBe(false);
+  });
+
+  it("keeps unknown leftover diagnostic-only and still lets stop cancel an in-flight start", () => {
+    const unknownLeftover = instance({
+      id: "worktree:legacy",
+      startable: false,
+      runtime: {
+        ...instance().runtime,
+        lifecycleState: "error",
+        registryClassification: "unknown",
+        portLeaseStatus: "reclaimable",
+        firstObservedAt: "2026-08-19T06:00:00Z",
+        nextReconcileAt: "2026-08-19T06:00:10Z",
+        error: { code: "missing_identity", message: "缺少进程身份字段" },
+      },
+    });
+    const unknownStarting = instance({
+      id: "worktree:legacy-start",
+      runtime: {
+        ...instance().runtime,
+        registryClassification: "unknown",
+      },
+    });
+
+    expect(canStopInstance(unknownLeftover)).toBe(false);
+    expect(formatAttentionReason(unknownLeftover, true)).toContain("身份未知，仅可诊断");
+    expect(formatAttentionReason(unknownLeftover, true)).toContain("端口租约 reclaimable");
+    expect(canStopInstance(unknownStarting, { instanceId: unknownStarting.id, operation: "start" })).toBe(true);
   });
 
   it("does not present a reserved port as a running backend", () => {
@@ -450,5 +484,126 @@ describe("LauncherBranchInstancesPanel contracts", () => {
       "将先停止再拆除运行中的实例",
       "将删除尚未合入 main 的本地提交",
     ]);
+  });
+
+  it("lets stop supersede an in-flight start without blocking a different instance", () => {
+    const startable = instance({ id: "worktree:one" });
+    const other = instance({ id: "worktree:two" });
+    const restarting = instance({
+      id: "worktree:restart",
+      runtime: { ...instance().runtime, lifecycleState: "running" },
+      startable: false,
+    });
+    let table = acceptLifecycleIntent({}, {
+      instanceId: startable.id,
+      operation: "start",
+      requestId: "req-start-1",
+      baselineLifecycleState: "closed",
+    });
+    expect(table.accepted).toBe(true);
+    expect(canStopInstance(startable, table.table)).toBe(true);
+    expect(canStartInstance(other, table.table)).toBe(true);
+
+    const duplicateStart = acceptLifecycleIntent(table.table, {
+      instanceId: startable.id,
+      operation: "start",
+      requestId: "req-start-1b",
+    });
+    expect(duplicateStart.accepted).toBe(false);
+    expect(duplicateStart.reason).toBe("duplicate");
+
+    const otherStart = acceptLifecycleIntent(table.table, {
+      instanceId: other.id,
+      operation: "start",
+      requestId: "req-start-2",
+      baselineLifecycleState: "closed",
+    });
+    expect(otherStart.accepted).toBe(true);
+
+    const stop = acceptLifecycleIntent(otherStart.table, {
+      instanceId: startable.id,
+      operation: "stop",
+      requestId: "req-stop-1",
+      baselineLifecycleState: "closed",
+    });
+    expect(stop.accepted).toBe(true);
+    expect(stop.intent?.localRevision).toBe(2);
+    expect(instanceRuntimeState(startable, stop.table)).toBe("stopping");
+    expect(instanceRuntimeState(other, stop.table)).toBe("starting");
+    expect(shouldApplyLifecycleMutationFeedback(stop.table, {
+      instanceId: startable.id,
+      requestId: "req-start-1",
+      localRevision: 1,
+    })).toBe(false);
+    expect(shouldApplyLifecycleMutationFeedback(stop.table, {
+      instanceId: startable.id,
+      requestId: "req-stop-1",
+      localRevision: 2,
+    })).toBe(true);
+
+    const blockedStart = acceptLifecycleIntent(stop.table, {
+      instanceId: startable.id,
+      operation: "start",
+      requestId: "req-start-late",
+    });
+    expect(blockedStart.accepted).toBe(false);
+    expect(blockedStart.reason).toBe("blocked");
+
+    const restartStop = acceptLifecycleIntent({}, {
+      instanceId: restarting.id,
+      operation: "restart",
+      requestId: "req-restart-1",
+      baselineLifecycleState: "running",
+    });
+    const restartThenStop = acceptLifecycleIntent(restartStop.table, {
+      instanceId: restarting.id,
+      operation: "stop",
+      requestId: "req-stop-restart",
+      baselineLifecycleState: "running",
+    });
+    expect(canStopInstance(restarting, restartStop.table)).toBe(true);
+    expect(restartThenStop.accepted).toBe(true);
+    expect(instanceRuntimeState(restarting, restartThenStop.table)).toBe("stopping");
+    expect(canStopInstance(restarting, restartThenStop.table)).toBe(false);
+  });
+
+  it("keeps a stop intent through a late start success or error after the row is already closed", () => {
+    const startable = instance({ id: "main", kind: "main", branch: "main", current: true });
+    const started = acceptLifecycleIntent({}, {
+      instanceId: startable.id,
+      operation: "start",
+      requestId: "start-old",
+      baselineLifecycleState: "closed",
+    });
+    const stopped = acceptLifecycleIntent(started.table, {
+      instanceId: startable.id,
+      operation: "stop",
+      requestId: "stop-now",
+      baselineLifecycleState: "closed",
+    });
+    const lateStart = {
+      instanceId: startable.id,
+      requestId: "start-old",
+      localRevision: started.intent?.localRevision,
+    };
+
+    expect(shouldApplyLifecycleMutationFeedback(stopped.table, lateStart)).toBe(false);
+    expect(shouldApplyLifecycleMutationFeedback(stopped.table, {
+      instanceId: startable.id,
+      requestId: "stop-now",
+      localRevision: stopped.intent?.localRevision,
+    })).toBe(true);
+    expect(settleLifecycleIntentTable(stopped.table, [startable])).toEqual(stopped.table);
+    expect(instanceRuntimeState(startable, stopped.table)).toBe("stopping");
+  });
+
+  it("does not globally disable stop while a start is in flight", () => {
+    expect(panelSource).toContain("const startBusy");
+    expect(panelSource).toContain("const stopBusy");
+    expect(panelSource).toContain("isDisabled={startBusy}");
+    expect(panelSource).toContain("isDisabled={stopBusy}");
+    expect(panelSource).not.toContain("isDisabled={lifecyclePending || inFlight}");
+    expect(panelSource).toContain("if (clickGuardRef.current || startBusy)");
+    expect(panelSource).not.toContain("if (clickGuardRef.current || lifecyclePending || inFlight)");
   });
 });

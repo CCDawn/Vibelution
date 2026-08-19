@@ -9,6 +9,7 @@ import {
   hasLauncherStateBridge,
   onLauncherStateChanged,
   requestBranchInstanceLifecycle,
+  type LauncherRegistryReconciliationItem,
   getLauncherStatus,
   getLauncherDeveloperNoiseOverview,
   getLauncherMaintenanceSummary,
@@ -56,9 +57,10 @@ import { launcherRouteStyles as styles } from "./LauncherRoute.styles";
 import { LauncherBranchInstancesPanel } from "./LauncherBranchInstancesPanel";
 import { pinLauncherDocumentViewport } from "./pinLauncherDocumentViewport";
 import {
-  resolveActivePendingOperation,
-  toPendingBranchOperation,
-  type InstancePendingOperation,
+  acceptLifecycleIntent,
+  settleLifecycleIntentTable,
+  shouldApplyLifecycleMutationFeedback,
+  type LifecycleIntentTable,
 } from "./LauncherBranchInstancesPanel.model";
 import { buildAllInstanceMonitorRows } from "./LauncherProcessMonitor.binding";
 import { LauncherProcessMonitorPanel, type LauncherProcessRow } from "./LauncherProcessMonitorPanel";
@@ -409,6 +411,30 @@ function compactDate(value: string, locale: string) {
     minute: "2-digit",
     second: "2-digit",
   }).format(date);
+}
+
+function formatUnknownLeaseDiagnostics(
+  items: LauncherRegistryReconciliationItem[],
+  uiLang: string,
+  locale: string,
+): string {
+  const rows = items
+    .filter((item) => {
+      const lease = String(item.portLeaseStatus || "").trim().toLowerCase();
+      return item.classification === "unknown" || lease === "quarantined" || lease === "reclaimable";
+    })
+    .map((item) => [
+      item.instanceId,
+      item.classification,
+      item.portLeaseStatus,
+      item.reasons.slice(0, 4).join("/"),
+      item.firstObservedAt ? compactDate(item.firstObservedAt, locale) : "",
+      item.nextReconcileAt ? compactDate(item.nextReconcileAt, locale) : "",
+    ].filter(Boolean).join(" · "));
+  if (rows.length === 0) {
+    return uiLang === "zh" ? "无" : "None";
+  }
+  return rows.slice(0, 6).join("; ");
 }
 
 function stateTone(state: string, ok = true) {
@@ -1450,8 +1476,9 @@ export function LauncherRoute() {
   const [notice, setNotice] = useState<LauncherNotice>({ tone: "neutral", text: "" });
   const [lastControlOperation, setLastControlOperation] = useState<LauncherOperation | null>(null);
   const [trackedCommand, setTrackedCommand] = useState<LauncherTrackedCommand | null>(null);
-  const [optimisticBranchOperation, setOptimisticBranchOperation] = useState<InstancePendingOperation | null>(null);
-  const lifecycleInFlightRef = useRef(false);
+  const [lifecycleIntents, setLifecycleIntents] = useState<LifecycleIntentTable>({});
+  const lifecycleIntentsRef = useRef<LifecycleIntentTable>({});
+  lifecycleIntentsRef.current = lifecycleIntents;
   const [selectedCleanupAction, setSelectedCleanupAction] = useState<LauncherDeveloperCleanupAction>("quick_clean");
   const [cleanupPlan, setCleanupPlan] = useState<LauncherDeveloperCleanupPlan | null>(null);
   const [maintenanceProfile, setMaintenanceProfile] = useState<LauncherMaintenanceProfileId>("clean_start");
@@ -1520,17 +1547,38 @@ export function LauncherRoute() {
     operation: LauncherOperation;
     instanceId?: string;
     instanceIds?: string[];
+    requestId?: string;
+    localRevision?: number;
   };
   const resolveControlRequest = (input: LauncherControlRequest) => {
     if (typeof input === "string") {
-      return { operation: input, instanceId: selectedBranchId, instanceIds: undefined as string[] | undefined };
+      return {
+        operation: input,
+        instanceId: selectedBranchId,
+        instanceIds: undefined as string[] | undefined,
+        requestId: undefined as string | undefined,
+        localRevision: undefined as number | undefined,
+      };
     }
     const instanceIds = (input.instanceIds || []).map((id) => String(id || "").trim()).filter(Boolean);
     return {
       operation: input.operation,
       instanceId: input.instanceId || instanceIds[0] || selectedBranchId,
       instanceIds: instanceIds.length > 0 ? instanceIds : undefined,
+      requestId: input.requestId,
+      localRevision: input.localRevision,
     };
+  };
+  const dropLifecycleIntent = (instanceId: string) => {
+    setLifecycleIntents((current) => {
+      if (!current[instanceId]) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[instanceId];
+      lifecycleIntentsRef.current = next;
+      return next;
+    });
   };
   const controlMutation = useMutation({
     mutationFn: async (input: LauncherControlRequest) => {
@@ -1550,18 +1598,13 @@ export function LauncherRoute() {
     },
     onMutate: (input) => {
       const request = resolveControlRequest(input);
+      if (!shouldApplyLifecycleMutationFeedback(lifecycleIntentsRef.current, request)) {
+        return;
+      }
       const operation = request.operation;
-      const target = branchItems.find((candidate) => candidate.id === request.instanceId);
-      setOptimisticBranchOperation(toPendingBranchOperation({
-        instanceId: request.instanceId,
-        instanceIds: request.instanceIds,
-        operation,
-        baselineLifecycleState: target?.runtime.lifecycleState,
-      }));
       setLastControlOperation(operation);
       markControlledProjectLifecycleOperation(operation);
       postLauncherLifecycleControlTelemetry(operation, "requested");
-      // Immediate feedback — restart/stop used to look like a no-op until status poll returned.
       if (operation === "start") {
         setNotice({
           tone: "neutral",
@@ -1583,7 +1626,14 @@ export function LauncherRoute() {
       }
     },
     onSuccess: (response, input) => {
-      const operation = resolveControlRequest(input).operation;
+      const request = resolveControlRequest(input);
+      const operation = request.operation;
+      void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
+      void queryClient.invalidateQueries({ queryKey: ["launcher", "branch-instances"] });
+      if (!shouldApplyLifecycleMutationFeedback(lifecycleIntentsRef.current, request)) {
+        return;
+      }
       postLauncherLifecycleControlTelemetry(
         operation,
         response.accepted ? "accepted" : "rejected",
@@ -1591,7 +1641,7 @@ export function LauncherRoute() {
       );
       if (!response.accepted) {
         clearControlledProjectLifecycleOperation();
-        setOptimisticBranchOperation(null);
+        dropLifecycleIntent(request.instanceId);
       }
       setLastControlOperation((operation === "stop" || operation === "force-stop") && response.accepted ? operation : null);
       setTrackedCommand(response.accepted && response.commandId ? { commandId: response.commandId, operation } : null);
@@ -1600,25 +1650,56 @@ export function LauncherRoute() {
         text: launcherControlNoticeMessage(response, operation, uiLang, copy.commandDone),
         source: "lifecycle-control",
       });
-      const startedId = String(response.instanceId || resolveControlRequest(input).instanceId || currentInstanceId || "").trim();
+      const startedId = String(response.instanceId || request.instanceId || currentInstanceId || "").trim();
       if (response.accepted && (operation === "start" || operation === "restart") && startedId) {
         setSelectedInstanceId(startedId);
       }
-      void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
-      void queryClient.invalidateQueries({ queryKey: ["launcher", "branch-instances"] });
     },
     onError: (error, input) => {
-      postLauncherLifecycleControlTelemetry(resolveControlRequest(input).operation, "request_failed", {
+      const request = resolveControlRequest(input);
+      postLauncherLifecycleControlTelemetry(request.operation, "request_failed", {
         errorMessage: error instanceof Error ? error.message : String(error),
       });
+      if (!shouldApplyLifecycleMutationFeedback(lifecycleIntentsRef.current, request)) {
+        return;
+      }
       clearControlledProjectLifecycleOperation();
-      setOptimisticBranchOperation(null);
+      dropLifecycleIntent(request.instanceId);
       setLastControlOperation(null);
       setTrackedCommand(null);
       setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error), source: "lifecycle-control" });
     },
+    onSettled: (_data, _error, input) => {
+      const request = resolveControlRequest(input);
+      if (!shouldApplyLifecycleMutationFeedback(lifecycleIntentsRef.current, request)) {
+        return;
+      }
+    },
   });
+  const requestInstanceLifecycle = (instanceId: string, operation: Extract<LauncherOperation, "start" | "stop" | "restart">) => {
+    const item = branchItems.find((candidate) => candidate.id === instanceId);
+    const requestId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `lifecycle-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const accepted = acceptLifecycleIntent(lifecycleIntentsRef.current, {
+      instanceId,
+      operation,
+      requestId,
+      baselineLifecycleState: item?.runtime.lifecycleState,
+    });
+    if (!accepted.accepted || !accepted.intent) {
+      return;
+    }
+    lifecycleIntentsRef.current = accepted.table;
+    setLifecycleIntents(accepted.table);
+    setSelectedInstanceId(instanceId);
+    controlMutation.mutate({
+      operation,
+      instanceId,
+      requestId: accepted.intent.requestId,
+      localRevision: accepted.intent.localRevision,
+    });
+  };
   const supervisorMutation = useMutation({
     mutationFn: reattachLauncherSupervisor,
     onSuccess: (response) => {
@@ -1805,25 +1886,15 @@ export function LauncherRoute() {
   const launcherControlLimited = statusQuery.isError
     && !launcherControlPlaneStarting
     && isControlTokenError(statusQuery.error);
-  const requestedBranchOperation = optimisticBranchOperation
-    ?? (controlMutation.isPending && controlMutation.variables
-      ? toPendingBranchOperation(resolveControlRequest(controlMutation.variables))
-      : undefined);
-  const pendingBranchOperation = resolveActivePendingOperation(requestedBranchOperation, branchItems);
+  const pendingBranchOperation = lifecycleIntents;
   useLayoutEffect(() => pinLauncherDocumentViewport(document), []);
   useEffect(() => {
-    if (!optimisticBranchOperation) {
-      return;
-    }
-    if (!resolveActivePendingOperation(optimisticBranchOperation, branchItems)) {
-      setOptimisticBranchOperation(null);
-    }
-  }, [branchItems, optimisticBranchOperation]);
-  useEffect(() => {
-    if (!pendingBranchOperation && !controlMutation.isPending) {
-      lifecycleInFlightRef.current = false;
-    }
-  }, [controlMutation.isPending, pendingBranchOperation]);
+    setLifecycleIntents((current) => {
+      const next = settleLifecycleIntentTable(current, branchItems);
+      lifecycleIntentsRef.current = next;
+      return next;
+    });
+  }, [branchItems]);
   const lifecycleDisplay = resolveLifecycleDisplay(status, copy, { disconnected: launcherStatusDisconnected, controlLimited: launcherControlLimited, starting: launcherControlPlaneStarting });
   const projectIsOpen = lifecycleDisplay.state === "running";
   const projectIsPartial = lifecycleDisplay.state === "partial";
@@ -2188,6 +2259,38 @@ export function LauncherRoute() {
   const recovery = evidence?.recovery;
   const recentResults = (evidence?.results.recent ?? []).slice(0, 3);
   const recentEvents = (evidence?.events.recent ?? []).slice(0, 3);
+  const cleanupSnapshot = stateQuery.data?.cleanup;
+  const registryClassifications = cleanupSnapshot?.classifications ?? [];
+  const registryClassificationSummary = (["healthy", "stale", "orphan", "conflict", "unknown"] as const)
+    .map((classification) => {
+      const count = registryClassifications.filter((item) => item.classification === classification).length;
+      return count > 0 ? `${classification} ${count}` : "";
+    })
+    .filter(Boolean)
+    .join(" · ") || "-";
+  const portConflictSummary = cleanupSnapshot?.portConflicts.length
+    ? cleanupSnapshot.portConflicts
+      .map((item) => `${item.instanceId}${item.ports.length ? `:${item.ports.join("/")}` : ""}`)
+      .join(", ")
+    : (uiLang === "zh" ? "无" : "None");
+  const automaticCleanupSummary = cleanupSnapshot?.lastCompletedAt
+    ? `${cleanupSnapshot.cleanedCount} · ${compactDate(cleanupSnapshot.lastCompletedAt, locale)}`
+    : "-";
+  const worktreeDryRunSummary = cleanupSnapshot?.worktreeDryRun.length
+    ? cleanupSnapshot.worktreeDryRun
+      .map((item) => item.branch || item.instanceId)
+      .slice(0, 3)
+      .join(", ")
+    : (uiLang === "zh" ? "无" : "None");
+  const orphanCriteriaSummary = cleanupSnapshot?.orphanCriteria.length
+    ? (uiLang === "zh"
+      ? "路径脱离 Git、PID 身份失活、无窗口、无 owned listener、deadline 已过，且两次同结论间隔至少 10 秒"
+      : "Outside Git, inactive PID identities, no window, no owned listener, expired deadline, and two identical observations at least 10 seconds apart")
+    : "-";
+  const unknownLeaseSummary = formatUnknownLeaseDiagnostics(registryClassifications, uiLang, locale);
+  const nextReconcileSummary = stateQuery.data?.nextReconcileAt
+    ? compactDate(stateQuery.data.nextReconcileAt, locale)
+    : "-";
   const controlPlaneSpecs = [
     {
       label: uiLang === "zh" ? "快照时间" : "Snapshot time",
@@ -2205,6 +2308,13 @@ export function LauncherRoute() {
         ? stateQuery.data.cleanup.reconciliation.reason || (uiLang === "zh" ? "进行中" : "In progress")
         : (uiLang === "zh" ? "空闲" : "Idle"),
     },
+    { label: uiLang === "zh" ? "Registry 判定" : "Registry classes", value: registryClassificationSummary },
+    { label: uiLang === "zh" ? "身份未知 / 租约" : "Unknown / lease", value: unknownLeaseSummary },
+    { label: uiLang === "zh" ? "下次核对" : "Next reconcile", value: nextReconcileSummary },
+    { label: uiLang === "zh" ? "端口冲突" : "Port conflicts", value: portConflictSummary },
+    { label: uiLang === "zh" ? "最近自动清理" : "Recent automatic cleanup", value: automaticCleanupSummary },
+    { label: uiLang === "zh" ? "Worktree dry-run" : "Worktree dry-run", value: worktreeDryRunSummary },
+    { label: uiLang === "zh" ? "Orphan 判据" : "Orphan criteria", value: orphanCriteriaSummary },
     { label: copy.overall, value: launcherSummary },
     { label: copy.guardian, value: guardianProgress },
     { label: copy.reason, value: bundle?.lastOperation.reason || bundle?.lastReason || "-" },
@@ -2398,24 +2508,14 @@ export function LauncherRoute() {
               branchInstancesQuery.isPending || (branchInstancesQuery.isFetching && !branchInstancesQuery.data)
             )}
             pendingOperation={pendingBranchOperation}
-            lifecyclePending={Boolean(pendingBranchOperation) || controlMutation.isPending}
+            lifecyclePending={controlMutation.isPending}
             onLifecycle={(instanceId, operation) => {
-              if (lifecycleInFlightRef.current) {
-                return;
-              }
-              lifecycleInFlightRef.current = true;
-              setSelectedInstanceId(instanceId);
-              controlMutation.mutate({ operation, instanceId });
+              requestInstanceLifecycle(instanceId, operation);
             }}
             onStopMany={(instanceIds) => {
-              if (lifecycleInFlightRef.current) {
-                return;
-              }
-              lifecycleInFlightRef.current = true;
-              if (instanceIds[0]) {
-                setSelectedInstanceId(instanceIds[0]);
-              }
-              controlMutation.mutate({ operation: "stop", instanceIds });
+              instanceIds.forEach((instanceId) => {
+                requestInstanceLifecycle(instanceId, "stop");
+              });
             }}
           />
         </div>
@@ -2457,6 +2557,27 @@ export function LauncherRoute() {
               : "",
             stateQuery.data.staleReason || "",
           ].filter(Boolean).join(" · ")}
+        />
+      ) : null}
+
+      {stateBridgeAvailable && cleanupSnapshot && (
+        cleanupSnapshot.classifications.length > 0
+        || cleanupSnapshot.worktreeDryRun.length > 0
+        || cleanupSnapshot.removedInstanceIds.length > 0
+      ) ? (
+        <VStateSurface
+          className={styles.notice}
+          tone={cleanupSnapshot.portConflicts.length > 0 ? "error" : "info"}
+          title={[
+            uiLang === "zh" ? "Registry 与残留治理" : "Registry and residue governance",
+            registryClassificationSummary,
+            `${uiLang === "zh" ? "身份未知 / 租约" : "unknown / lease"}: ${unknownLeaseSummary}`,
+            `${uiLang === "zh" ? "下次核对" : "next reconcile"}: ${nextReconcileSummary}`,
+            `${uiLang === "zh" ? "端口冲突" : "port conflicts"}: ${portConflictSummary}`,
+            `${uiLang === "zh" ? "自动清理 metadata" : "metadata auto-cleaned"}: ${cleanupSnapshot.cleanedCount}`,
+            `${uiLang === "zh" ? "worktree 仅 dry-run" : "worktree dry-run only"}: ${cleanupSnapshot.worktreeDryRun.length}`,
+            `${uiLang === "zh" ? "orphan 判据" : "orphan criteria"}: ${orphanCriteriaSummary}`,
+          ].join(" · ")}
         />
       ) : null}
 

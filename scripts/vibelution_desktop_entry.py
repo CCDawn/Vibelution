@@ -1506,6 +1506,15 @@ def _run_launcher_api_bridge(args: argparse.Namespace) -> dict[str, object]:
                 response = launcher_service.list_launcher_branch_instances(include_cleanup_metadata=True)
             else:
                 response = launcher_service.list_launcher_branch_instances()
+        elif path == "state-refresh" and method == "POST":
+            from core.launcher.state_refresh import build_launcher_state_refresh
+
+            window_instance_ids = body.get("electronWindowInstanceIds")
+            if not isinstance(window_instance_ids, list):
+                window_instance_ids = []
+            response = build_launcher_state_refresh(
+                electron_window_instance_ids=window_instance_ids,
+            )
         elif path == "branch-instances/cleanup" and method == "POST":
             instance_ids = body.get("instanceIds")
             if not isinstance(instance_ids, list):

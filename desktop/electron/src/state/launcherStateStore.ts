@@ -19,6 +19,31 @@ export type LauncherInstanceState = {
   window: LauncherWindowState;
 };
 
+export type LauncherRegistryClassification = "healthy" | "stale" | "orphan" | "conflict" | "unknown";
+
+export type LauncherRegistryReconciliationItem = {
+  instanceId: string;
+  classification: LauncherRegistryClassification;
+  reasons: string[];
+  windowOpen: boolean;
+  listener: string[];
+  ports: number[];
+  portLeaseStatus?: string;
+  firstObservedAt?: string;
+  nextReconcileAt?: string;
+};
+
+export type LauncherWorktreeDryRunItem = {
+  instanceId: string;
+  projectRoot: string;
+  branch: string;
+  reason: string;
+  action: "dry_run_only";
+  dirty: boolean;
+  mergedToMain: boolean;
+  risks: string[];
+};
+
 export type LauncherCleanupSummary = {
   reconciliation: {
     active: boolean;
@@ -29,7 +54,16 @@ export type LauncherCleanupSummary = {
   cleanedCount: number;
   skippedCount: number;
   failedCount: number;
+  classifications: LauncherRegistryReconciliationItem[];
+  portConflicts: LauncherRegistryReconciliationItem[];
+  removedInstanceIds: string[];
+  worktreeDryRun: LauncherWorktreeDryRunItem[];
+  orphanCriteria: string[];
 };
+
+export type LauncherStateRefreshSource<T> =
+  | { ok: true; value: T }
+  | { ok: false; errorType: string; message: string };
 
 export type LauncherStateSnapshotV1 = {
   schemaVersion: 1;
@@ -37,6 +71,7 @@ export type LauncherStateSnapshotV1 = {
   observedAt: string;
   freshness: LauncherStateFreshness;
   staleReason?: string;
+  nextReconcileAt?: string;
   main: LauncherInstanceState;
   instances: LauncherInstanceState[];
   cleanup: LauncherCleanupSummary;
@@ -51,6 +86,8 @@ type LauncherStateSources = {
   status: unknown;
   branchInstances: unknown;
   freshness?: unknown;
+  cleanup?: unknown;
+  nextReconcileAt?: unknown;
 };
 
 type LauncherStateLoader = () => Promise<LauncherStateSources>;
@@ -61,7 +98,21 @@ const EMPTY_CLEANUP: LauncherCleanupSummary = {
   cleanedCount: 0,
   skippedCount: 0,
   failedCount: 0,
+  classifications: [],
+  portConflicts: [],
+  removedInstanceIds: [],
+  worktreeDryRun: [],
+  orphanCriteria: [],
 };
+
+const REGISTRY_CLASSIFICATIONS = new Set<LauncherRegistryClassification>([
+  "healthy",
+  "stale",
+  "orphan",
+  "conflict",
+  "unknown",
+]);
+const STALE_REASON_LIMIT = 180;
 
 function record(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null ? value as Record<string, unknown> : {};
@@ -77,6 +128,125 @@ function number(value: unknown): number {
 
 function boolean(value: unknown): boolean {
   return value === true;
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.map((item) => text(item)).filter(Boolean) : [];
+}
+
+function numberArray(value: unknown): number[] {
+  return Array.isArray(value)
+    ? value.map((item) => number(item)).filter((item) => item > 0)
+    : [];
+}
+
+export function boundedStaleReason(value: unknown): string {
+  let text = (typeof value === "string" ? value : String(value || "")).replace(/\r/g, " ").replace(/\n/g, " ").trim();
+  const cut = text.search(/stdout|stderr/i);
+  if (cut >= 0) {
+    text = text.slice(0, cut).replace(/[:\s=|-]+$/g, "").trim();
+  }
+  text = text.replace(/\s+/g, " ").trim();
+  if (!text) {
+    return "source_failed";
+  }
+  if (text.length > STALE_REASON_LIMIT) {
+    return `${text.slice(0, STALE_REASON_LIMIT - 1)}...`;
+  }
+  return text;
+}
+
+function unwrapSource(value: unknown): LauncherStateRefreshSource<unknown> | { ok: true; value: unknown; legacy: true } {
+  if (typeof value === "object" && value !== null && "ok" in value) {
+    const payload = value as Record<string, unknown>;
+    if (payload.ok === true) {
+      return { ok: true, value: payload.value };
+    }
+    if (payload.ok === false) {
+      return {
+        ok: false,
+        errorType: text(payload.errorType) || "Error",
+        message: boundedStaleReason(payload.message || payload.errorType || "source_failed"),
+      };
+    }
+  }
+  return { ok: true, value, legacy: true };
+}
+
+function registryItems(value: unknown): LauncherRegistryReconciliationItem[] {
+  const items = record(value).instances;
+  if (!Array.isArray(items)) {
+    return [];
+  }
+  return items.flatMap((value) => {
+    const item = record(value);
+    const instanceId = text(item.instanceId);
+    const classification = text(item.classification) as LauncherRegistryClassification;
+    if (!instanceId || !REGISTRY_CLASSIFICATIONS.has(classification)) {
+      return [];
+    }
+    const portLeaseStatus = text(item.portLeaseStatus).trim();
+    const firstObservedAt = text(item.firstObservedAt).trim();
+    const nextReconcileAt = nextReconcileAtFrom(item.nextReconcileAt);
+    return [{
+      instanceId,
+      classification,
+      reasons: stringArray(item.reasons),
+      windowOpen: boolean(item.windowOpen),
+      listener: stringArray(item.listener),
+      ports: numberArray(item.ports),
+      ...(portLeaseStatus ? { portLeaseStatus } : {}),
+      ...(firstObservedAt ? { firstObservedAt } : {}),
+      ...(nextReconcileAt ? { nextReconcileAt } : {}),
+    }];
+  });
+}
+
+function worktreeDryRunItems(value: unknown): LauncherWorktreeDryRunItem[] {
+  const items = record(value).worktreeDryRun;
+  if (!Array.isArray(items)) {
+    return [];
+  }
+  return items.flatMap((value) => {
+    const item = record(value);
+    const instanceId = text(item.instanceId);
+    if (!instanceId) {
+      return [];
+    }
+    return [{
+      instanceId,
+      projectRoot: text(item.projectRoot),
+      branch: text(item.branch),
+      reason: text(item.reason),
+      action: "dry_run_only" as const,
+      dirty: boolean(item.dirty),
+      mergedToMain: boolean(item.mergedToMain),
+      risks: stringArray(item.risks),
+    }];
+  });
+}
+
+function cleanupSummary(value: unknown, previous: LauncherCleanupSummary): LauncherCleanupSummary {
+  const payload = record(value);
+  if (Object.keys(payload).length === 0) {
+    return previous;
+  }
+  const classifications = registryItems(payload);
+  const worktreeDryRun = worktreeDryRunItems(payload);
+  const removedInstanceIds = stringArray(payload.removedInstanceIds);
+  const observedAt = text(payload.observedAt);
+  return {
+    reconciliation: previous.reconciliation,
+    ...(observedAt ? { lastCompletedAt: observedAt } : previous.lastCompletedAt ? { lastCompletedAt: previous.lastCompletedAt } : {}),
+    cleanedCount: removedInstanceIds.length,
+    skippedCount: worktreeDryRun.length,
+    failedCount: 0,
+    classifications,
+    portConflicts: classifications.filter((item) => item.classification === "conflict"),
+    removedInstanceIds,
+    worktreeDryRun,
+    orphanCriteria: stringArray(payload.orphanCriteria),
+  };
 }
 
 function mainInstance(statusValue: unknown, truth: LauncherWindowTruth): LauncherInstanceState {
@@ -130,6 +300,15 @@ function branchItems(payload: unknown): unknown[] {
   return Array.isArray(items) ? items : [];
 }
 
+function nextReconcileAtFrom(value: unknown, fallback = ""): string {
+  const raw = text(value).trim();
+  if (!raw) {
+    return fallback;
+  }
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : "";
+}
+
 export class LauncherStateStore {
   private revision = 0;
   private freshness: LauncherStateFreshness = "stale";
@@ -138,6 +317,7 @@ export class LauncherStateStore {
   private sources: LauncherStateSources;
   private truth: LauncherWindowTruth = { workbench: null, instances: [] };
   private cleanup: LauncherCleanupSummary = EMPTY_CLEANUP;
+  private nextReconcileAt = "";
   private readonly listeners = new Set<LauncherStateListener>();
   private refreshPromise: Promise<LauncherStateSnapshotV1> | null = null;
 
@@ -159,6 +339,7 @@ export class LauncherStateStore {
       observedAt: this.observedAt,
       freshness: this.freshness,
       ...(this.staleReason ? { staleReason: this.staleReason } : {}),
+      ...(this.nextReconcileAt ? { nextReconcileAt: this.nextReconcileAt } : {}),
       main,
       instances,
       cleanup: this.cleanup,
@@ -217,18 +398,53 @@ export class LauncherStateStore {
     this.publish();
     const pending = this.loader()
       .then((sources) => {
-        this.sources = sources;
-        this.freshness = "fresh" as const;
-        this.staleReason = "";
-        this.cleanup = {
-          ...this.cleanup,
-          reconciliation: { active: false, reason },
+        const status = unwrapSource(sources.status);
+        const branchInstances = unwrapSource(sources.branchInstances);
+        const freshness = sources.freshness === undefined ? null : unwrapSource(sources.freshness);
+        const cleanup = sources.cleanup === undefined ? null : unwrapSource(sources.cleanup);
+        this.sources = {
+          ...this.sources,
+          ...(status.ok ? { status: status.value } : {}),
+          ...(branchInstances.ok ? { branchInstances: branchInstances.value } : {}),
+          ...(freshness?.ok ? { freshness: freshness.value } : {}),
         };
+        const criticalFailed = !status.ok;
+        const reasons: string[] = [];
+        if (!status.ok) {
+          reasons.push(boundedStaleReason(status.message || status.errorType));
+        }
+        if (cleanup && !cleanup.ok) {
+          this.cleanup = {
+            ...this.cleanup,
+            failedCount: Math.max(1, this.cleanup.failedCount),
+            reconciliation: { active: false, reason: boundedStaleReason(cleanup.message || cleanup.errorType) },
+          };
+        } else if (cleanup?.ok) {
+          this.cleanup = cleanupSummary(cleanup.value, {
+            ...this.cleanup,
+            reconciliation: { active: false, reason },
+          });
+        } else {
+          this.cleanup = {
+            ...this.cleanup,
+            reconciliation: { active: false, reason },
+          };
+        }
+        this.freshness = criticalFailed ? "stale" : "fresh";
+        this.staleReason = criticalFailed ? reasons[0] || "status_failed" : "";
+        if (cleanup?.ok) {
+          this.nextReconcileAt = nextReconcileAtFrom(
+            sources.nextReconcileAt,
+            nextReconcileAtFrom(record(cleanup.value).nextReconcileAt),
+          );
+        } else if (sources.nextReconcileAt !== undefined) {
+          this.nextReconcileAt = nextReconcileAtFrom(sources.nextReconcileAt);
+        }
         return this.publish();
       })
       .catch((error: unknown) => {
         this.freshness = "stale" as const;
-        this.staleReason = error instanceof Error ? error.message : String(error);
+        this.staleReason = boundedStaleReason(error instanceof Error ? error.message : String(error));
         this.cleanup = {
           ...this.cleanup,
           reconciliation: { active: false, reason },

@@ -42,6 +42,135 @@ describe("LauncherStateStore", () => {
     });
   });
 
+  it("updates status after cleanup timeout and keeps the previous cleanup frame", async () => {
+    const store = new LauncherStateStore(async () => ({
+      status: { ok: true, value: { projectBundle: { id: "main", observedState: "open", backend: { pid: 9, port: 8000 } } } },
+      branchInstances: { ok: true, value: { items: [] } },
+      freshness: { ok: true, value: { current: true } },
+      cleanup: { ok: false, errorType: "TimeoutError", message: "git timed out stdout=" + "OUT".repeat(80) + " stderr=" + "ERR".repeat(80) },
+    }), initial);
+    store.updateCleanup({
+      classifications: [{ instanceId: "worktree:keep", classification: "healthy", reasons: [], windowOpen: true, listener: ["owned"], ports: [8000] }],
+    });
+
+    await store.refresh("file_hint");
+
+    expect(store.snapshot()).toMatchObject({
+      freshness: "fresh",
+      main: { observedState: "open", pid: 9 },
+      cleanup: {
+        failedCount: 1,
+        classifications: [{ instanceId: "worktree:keep", classification: "healthy" }],
+      },
+    });
+    expect(store.snapshot().staleReason).toBeUndefined();
+    expect(store.snapshot().cleanup.reconciliation.reason).not.toMatch(/stdout|stderr|OUT|ERR/);
+    expect(store.snapshot().cleanup.reconciliation.reason.length).toBeLessThanOrEqual(180);
+  });
+
+  it("keeps the previous status when only status fails and marks the snapshot stale", async () => {
+    const store = new LauncherStateStore(async () => ({
+      status: { ok: false, errorType: "RuntimeError", message: "status probe failed stdout=SECRET stderr=DUMP" },
+      branchInstances: { ok: true, value: { items: [{ id: "worktree:ok", kind: "worktree", runtime: {} }] } },
+      freshness: { ok: true, value: { current: true } },
+      cleanup: { ok: true, value: { instances: [] } },
+    }), initial);
+
+    await store.refresh("file_hint");
+
+    expect(store.snapshot()).toMatchObject({
+      freshness: "stale",
+      main: { observedState: "closed", pid: 0 },
+      instances: [{ id: "worktree:ok" }],
+    });
+    expect(store.snapshot().staleReason).toBe("status probe failed");
+    expect(store.snapshot().staleReason).not.toMatch(/stdout|stderr|SECRET|DUMP/);
+  });
+
+  it("projects registry classifications, external conflicts, and worktree dry-run", async () => {
+    const store = new LauncherStateStore(async () => ({
+      ...initial,
+      cleanup: {
+        observedAt: "2026-08-19T07:00:00Z",
+        instances: [
+          { instanceId: "worktree:healthy", classification: "healthy", reasons: ["owned_runtime_active"], windowOpen: true, listener: ["owned"], ports: [8000] },
+          { instanceId: "worktree:external", classification: "conflict", reasons: ["external_listener"], windowOpen: false, listener: ["external"], ports: [8765] },
+        ],
+        removedInstanceIds: ["worktree:orphan"],
+        worktreeDryRun: [
+          { instanceId: "worktree:dirty", projectRoot: "C:/repo/dirty", branch: "codex/dirty", reason: "branch_cleanup_preview", action: "dry_run_only", dirty: true, mergedToMain: false, risks: ["delete_unmerged"] },
+        ],
+        orphanCriteria: ["no_electron_window"],
+      },
+    }), initial);
+
+    await store.refresh("startup");
+
+    expect(store.snapshot().cleanup).toMatchObject({
+      lastCompletedAt: "2026-08-19T07:00:00Z",
+      cleanedCount: 1,
+      skippedCount: 1,
+      failedCount: 0,
+      removedInstanceIds: ["worktree:orphan"],
+      orphanCriteria: ["no_electron_window"],
+      portConflicts: [{ instanceId: "worktree:external", classification: "conflict", ports: [8765] }],
+      worktreeDryRun: [{ instanceId: "worktree:dirty", action: "dry_run_only" }],
+    });
+  });
+
+  it("projects unknown quarantine lease fields onto registry classifications", async () => {
+    const store = new LauncherStateStore(async () => ({
+      ...initial,
+      cleanup: {
+        observedAt: "2026-08-19T07:00:00Z",
+        nextReconcileAt: "2026-08-19T07:00:10Z",
+        instances: [
+          {
+            instanceId: "worktree:legacy",
+            classification: "unknown",
+            reasons: ["missing_identity_fields"],
+            windowOpen: false,
+            listener: ["none"],
+            ports: [8765],
+            portLeaseStatus: "reclaimable",
+            firstObservedAt: "2026-08-19T06:59:50Z",
+            nextReconcileAt: "2026-08-19T07:00:10Z",
+          },
+        ],
+      },
+    }), initial);
+
+    await store.refresh("startup");
+
+    expect(store.snapshot().nextReconcileAt).toBe("2026-08-19T07:00:10.000Z");
+    expect(store.snapshot().cleanup.classifications).toEqual([
+      {
+        instanceId: "worktree:legacy",
+        classification: "unknown",
+        reasons: ["missing_identity_fields"],
+        windowOpen: false,
+        listener: ["none"],
+        ports: [8765],
+        portLeaseStatus: "reclaimable",
+        firstObservedAt: "2026-08-19T06:59:50Z",
+        nextReconcileAt: "2026-08-19T07:00:10.000Z",
+      },
+    ]);
+  });
+
+  it("projects nextReconcileAt from a successful cleanup source", async () => {
+    const store = new LauncherStateStore(async () => ({
+      ...initial,
+      cleanup: {
+        observedAt: "2026-08-19T06:00:00Z",
+        nextReconcileAt: "2026-08-19T06:00:10Z",
+        instances: [],
+      },
+    }), initial);
+    await store.refresh("startup");
+    expect(store.snapshot().nextReconcileAt).toBe("2026-08-19T06:00:10.000Z");
+  });
+
   it("updates window truth without invoking the loader", () => {
     const loader = vi.fn(async () => initial);
     const store = new LauncherStateStore(loader, {

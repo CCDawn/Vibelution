@@ -463,7 +463,7 @@ def test_branch_instance_bridge_dispatches_to_service(monkeypatch):
 
     launcher_module = types.ModuleType("core.launcher.service")
     launcher_module.LauncherActiveWorkBlocked = type("LauncherActiveWorkBlocked", (Exception,), {})
-    launcher_module.request_branch_instance_operation = lambda instance_id, operation, request_audit=None: calls.append(
+    launcher_module.request_branch_instance_operation = lambda instance_id, operation, **_kwargs: calls.append(
         (instance_id, operation)
     ) or {
         "accepted": True,
@@ -474,6 +474,9 @@ def test_branch_instance_bridge_dispatches_to_service(monkeypatch):
     }
     monkeypatch.setitem(sys.modules, "core.launcher", types.ModuleType("core.launcher"))
     monkeypatch.setitem(sys.modules, "core.launcher.service", launcher_module)
+    lifecycle_module = types.ModuleType("core.launcher.branch_instance_lifecycle")
+    lifecycle_module.BranchInstanceLifecycleError = type("BranchInstanceLifecycleError", (Exception,), {})
+    monkeypatch.setitem(sys.modules, "core.launcher.branch_instance_lifecycle", lifecycle_module)
 
     payload = entry._run_branch_instance_bridge(
         argparse.Namespace(branch_instance_operation="start", instance_id="worktree:task", trigger="")
@@ -481,6 +484,35 @@ def test_branch_instance_bridge_dispatches_to_service(monkeypatch):
     assert payload["accepted"] is True
     assert payload["schemaVersion"] == 1
     assert calls == [("worktree:task", "start")]
+
+
+def test_launcher_api_bridge_dispatches_consolidated_state_refresh(monkeypatch):
+    entry = _load_desktop_entry_py()
+    monkeypatch.setattr(entry, "_append_log", lambda *a, **k: None)
+    launcher_module = _fake_launcher_service_module()
+    state_refresh_module = types.ModuleType("core.launcher.state_refresh")
+    seen = {}
+
+    def build_launcher_state_refresh(*, electron_window_instance_ids=()):
+        seen["window_ids"] = list(electron_window_instance_ids)
+        return {"schemaVersion": 1, "status": {}, "branchInstances": {"items": []}, "cleanup": {}}
+
+    state_refresh_module.build_launcher_state_refresh = build_launcher_state_refresh
+    monkeypatch.setitem(sys.modules, "core.launcher", types.ModuleType("core.launcher"))
+    monkeypatch.setitem(sys.modules, "core.launcher.service", launcher_module)
+    monkeypatch.setitem(sys.modules, "core.launcher.state_refresh", state_refresh_module)
+
+    payload = entry._run_launcher_api_bridge(
+        argparse.Namespace(
+            launcher_api_path="state-refresh",
+            launcher_api_method="POST",
+            launcher_api_body=json.dumps({"electronWindowInstanceIds": ["main", "worktree:task"]}),
+        )
+    )
+
+    assert payload["ok"] is True
+    assert payload["payload"]["schemaVersion"] == 1
+    assert seen["window_ids"] == ["main", "worktree:task"]
 
 
 def test_branch_instance_bridge_surfaces_operability_errors(monkeypatch):
@@ -492,11 +524,14 @@ def test_branch_instance_bridge_surfaces_operability_errors(monkeypatch):
 
     launcher_module = types.ModuleType("core.launcher.service")
     launcher_module.LauncherActiveWorkBlocked = type("LauncherActiveWorkBlocked", (Exception,), {})
-    launcher_module.request_branch_instance_operation = lambda instance_id, operation, request_audit=None: (_ for _ in ()).throw(
+    launcher_module.request_branch_instance_operation = lambda instance_id, operation, **_kwargs: (_ for _ in ()).throw(
         NotOperable("instance not operable")
     )
     monkeypatch.setitem(sys.modules, "core.launcher", types.ModuleType("core.launcher"))
     monkeypatch.setitem(sys.modules, "core.launcher.service", launcher_module)
+    lifecycle_module = types.ModuleType("core.launcher.branch_instance_lifecycle")
+    lifecycle_module.BranchInstanceLifecycleError = type("BranchInstanceLifecycleError", (Exception,), {})
+    monkeypatch.setitem(sys.modules, "core.launcher.branch_instance_lifecycle", lifecycle_module)
 
     payload = entry._run_branch_instance_bridge(
         argparse.Namespace(branch_instance_operation="start", instance_id="worktree:task", trigger="")

@@ -276,8 +276,17 @@ def test_reconcile_live_window_blocks_dead_process_cleanup(registry_path):
 
 def test_reconcile_requires_two_identical_observations_ten_seconds_apart(registry_path):
     registry.upsert_instance("orphan", **_safe_orphan_entry("C:/missing/orphan"))
-    inspect_dead = lambda _identity: {"status": "dead"}
-    inspect_none = lambda _port, _identities: {"status": "none"}
+    identity_calls: list[str] = []
+    listener_calls: list[int] = []
+
+    def inspect_dead(_identity):
+        identity_calls.append("dead")
+        return {"status": "dead"}
+
+    def inspect_none(_port, _identities):
+        listener_calls.append(int(_port))
+        return {"status": "none"}
+
     first_at = datetime(2026, 8, 19, 6, tzinfo=UTC)
 
     first = registry.reconcile_registry(
@@ -297,8 +306,15 @@ def test_reconcile_requires_two_identical_observations_ten_seconds_apart(registr
 
     assert first["removedInstanceIds"] == []
     assert too_soon["removedInstanceIds"] == []
+    assert first["nextReconcileAt"] == "2026-08-19T06:00:10Z"
+    assert too_soon["nextReconcileAt"] == "2026-08-19T06:00:10Z"
+    assert first["instances"][0]["nextReconcileAt"] == "2026-08-19T06:00:10Z"
     assert first["worktreeDryRun"][0]["projectRoot"] == "C:/missing/orphan"
     assert registry.get_instance("orphan")
+    first_identity_calls = len(identity_calls)
+    first_listener_calls = len(listener_calls)
+    assert first_identity_calls >= 1
+    assert first_listener_calls >= 1
 
     confirmed = registry.reconcile_registry(
         git_worktree_roots=[],
@@ -309,8 +325,11 @@ def test_reconcile_requires_two_identical_observations_ten_seconds_apart(registr
     )
 
     assert confirmed["removedInstanceIds"] == ["orphan"]
+    assert confirmed.get("nextReconcileAt") in (None, "")
     assert confirmed["worktreeDryRun"][0]["action"] == "dry_run_only"
     assert registry.get_instance("orphan") == {}
+    assert len(identity_calls) > first_identity_calls
+    assert len(listener_calls) > first_listener_calls
 
 
 def test_reconcile_no_change_does_not_rewrite_registry(registry_path, monkeypatch, tmp_path):
@@ -385,7 +404,205 @@ def test_allocate_reconciles_confirmed_orphan_before_claiming_ports(registry_pat
     assert registry.get_instance("orphan") == {}
 
 
-def test_external_python_http_server_listener_is_never_owned():
+def test_reconcile_deadline_reobserves_facts_and_cancels_cleanup(registry_path):
+    registry.upsert_instance("orphan", **_safe_orphan_entry("C:/missing/orphan"))
+    first_at = datetime(2026, 8, 19, 6, tzinfo=UTC)
+    facts = {"identity": "dead", "listener": "none", "windows": []}
+
+    def inspect_identity(_identity):
+        return {"status": facts["identity"]}
+
+    def inspect_listener(_port, _identities):
+        return {"status": facts["listener"]}
+
+    first = registry.reconcile_registry(
+        git_worktree_roots=[],
+        electron_window_instance_ids=facts["windows"],
+        now=first_at,
+        identity_inspector=inspect_identity,
+        listener_inspector=inspect_listener,
+    )
+    assert first["removedInstanceIds"] == []
+    assert registry.get_instance("orphan")
+
+    facts["listener"] = "owned"
+    owned = registry.reconcile_registry(
+        git_worktree_roots=[],
+        electron_window_instance_ids=[],
+        now=first_at + timedelta(seconds=10),
+        identity_inspector=inspect_identity,
+        listener_inspector=inspect_listener,
+    )
+    assert owned["removedInstanceIds"] == []
+    assert owned["instances"][0]["classification"] == "healthy"
+    assert registry.get_instance("orphan")
+    assert "cleanupObservation" not in registry.get_instance("orphan")
+
+    facts["listener"] = "none"
+    facts["identity"] = "match"
+    registry.upsert_instance("orphan", **_safe_orphan_entry("C:/missing/orphan"))
+    registry.reconcile_registry(
+        git_worktree_roots=[],
+        electron_window_instance_ids=[],
+        now=first_at,
+        identity_inspector=inspect_identity,
+        listener_inspector=inspect_listener,
+    )
+    matched = registry.reconcile_registry(
+        git_worktree_roots=[],
+        electron_window_instance_ids=[],
+        now=first_at + timedelta(seconds=10),
+        identity_inspector=inspect_identity,
+        listener_inspector=inspect_listener,
+    )
+    assert matched["removedInstanceIds"] == []
+    assert matched["instances"][0]["classification"] == "healthy"
+
+    facts["identity"] = "dead"
+    registry.upsert_instance("orphan", **_safe_orphan_entry("C:/missing/orphan"))
+    registry.reconcile_registry(
+        git_worktree_roots=[],
+        electron_window_instance_ids=[],
+        now=first_at,
+        identity_inspector=inspect_identity,
+        listener_inspector=inspect_listener,
+    )
+    windowed = registry.reconcile_registry(
+        git_worktree_roots=[],
+        electron_window_instance_ids=["orphan"],
+        now=first_at + timedelta(seconds=10),
+        identity_inspector=inspect_identity,
+        listener_inspector=inspect_listener,
+    )
+    assert windowed["removedInstanceIds"] == []
+    assert windowed["instances"][0]["classification"] == "stale"
+
+    registry.upsert_instance("orphan", **_safe_orphan_entry("C:/missing/orphan"))
+    registry.reconcile_registry(
+        git_worktree_roots=[],
+        electron_window_instance_ids=[],
+        now=first_at,
+        identity_inspector=inspect_identity,
+        listener_inspector=inspect_listener,
+    )
+    registry.upsert_instance("orphan", generation=9, commandId="cmd-changed")
+    fingerprint_changed = registry.reconcile_registry(
+        git_worktree_roots=[],
+        electron_window_instance_ids=[],
+        now=first_at + timedelta(seconds=10),
+        identity_inspector=inspect_identity,
+        listener_inspector=inspect_listener,
+    )
+    assert fingerprint_changed["removedInstanceIds"] == []
+    assert registry.get_instance("orphan")
+    assert fingerprint_changed["nextReconcileAt"] == "2026-08-19T06:00:20Z"
+
+
+def test_reconcile_legacy_unknown_quarantines_port_but_keeps_metadata(registry_path, monkeypatch):
+    monkeypatch.setattr(registry, "_port_is_free", lambda port, host: True)
+    registry.upsert_instance(
+        "legacy",
+        projectRoot="C:/missing/legacy",
+        spawnPid=999,
+        port=8765,
+        controlPort=9001,
+        deadlineAt="2026-08-19T05:00:00Z",
+    )
+    first_at = datetime(2026, 8, 19, 6, tzinfo=UTC)
+    inspect_none = lambda _port, _identities: {"status": "none"}
+    pid_missing = lambda _pid: False
+
+    first = registry.reconcile_registry(
+        git_worktree_roots=[],
+        electron_window_instance_ids=[],
+        now=first_at,
+        identity_inspector=lambda _identity: {"status": "dead"},
+        listener_inspector=inspect_none,
+        pid_existence_inspector=pid_missing,
+    )
+    too_soon = registry.reconcile_registry(
+        git_worktree_roots=[],
+        electron_window_instance_ids=[],
+        now=first_at + timedelta(seconds=9),
+        identity_inspector=lambda _identity: {"status": "dead"},
+        listener_inspector=inspect_none,
+        pid_existence_inspector=pid_missing,
+    )
+
+    assert first["instances"][0]["classification"] == "unknown"
+    assert first["removedInstanceIds"] == []
+    assert first["nextReconcileAt"] == "2026-08-19T06:00:10Z"
+    assert too_soon["removedInstanceIds"] == []
+    assert registry.get_instance("legacy")["port"] == 8765
+    assert registry.get_instance("legacy").get("portLeaseStatus") not in {"quarantined", "reclaimable"}
+
+    confirmed = registry.reconcile_registry(
+        git_worktree_roots=[],
+        electron_window_instance_ids=[],
+        now=first_at + timedelta(seconds=10),
+        identity_inspector=lambda _identity: {"status": "dead"},
+        listener_inspector=inspect_none,
+        pid_existence_inspector=pid_missing,
+    )
+
+    stored = registry.get_instance("legacy")
+    assert confirmed["removedInstanceIds"] == []
+    assert confirmed["instances"][0]["classification"] == "unknown"
+    assert confirmed["instances"][0]["portLeaseStatus"] == "reclaimable"
+    assert stored
+    assert stored["port"] == 8765
+    assert stored["portLeaseStatus"] == "reclaimable"
+
+    backend, control = registry.allocate_instance_ports(
+        "replacement",
+        preferred_backend=8765,
+        preferred_control=9001,
+        git_worktree_roots=[],
+        electron_window_instance_ids=[],
+        reconcile_now=first_at + timedelta(seconds=11),
+        identity_inspector=lambda _identity: {"status": "dead"},
+        listener_inspector=inspect_none,
+        pid_existence_inspector=pid_missing,
+    )
+
+    assert (backend, control) == (8765, 9001)
+    assert registry.get_instance("legacy")["port"] == 8765
+    assert registry.get_instance("legacy")["portLeaseStatus"] == "reclaimable"
+    assert registry.get_instance("replacement")["port"] == 8765
+
+
+def test_reconcile_legacy_unknown_does_not_quarantine_when_pid_still_exists(registry_path):
+    registry.upsert_instance(
+        "legacy",
+        projectRoot="C:/missing/legacy",
+        spawnPid=999,
+        port=8765,
+        deadlineAt="2026-08-19T05:00:00Z",
+    )
+    first_at = datetime(2026, 8, 19, 6, tzinfo=UTC)
+    first = registry.reconcile_registry(
+        git_worktree_roots=[],
+        electron_window_instance_ids=[],
+        now=first_at,
+        identity_inspector=lambda _identity: {"status": "dead"},
+        listener_inspector=lambda _port, _identities: {"status": "none"},
+        pid_existence_inspector=lambda _pid: True,
+    )
+    later = registry.reconcile_registry(
+        git_worktree_roots=[],
+        electron_window_instance_ids=[],
+        now=first_at + timedelta(seconds=10),
+        identity_inspector=lambda _identity: {"status": "dead"},
+        listener_inspector=lambda _port, _identities: {"status": "none"},
+        pid_existence_inspector=lambda _pid: True,
+    )
+
+    assert first["instances"][0]["classification"] == "unknown"
+    assert later["removedInstanceIds"] == []
+    assert registry.get_instance("legacy").get("portLeaseStatus") not in {"quarantined", "reclaimable"}
+
+
+def test_external_python_http_server_listener_is_conflict_and_never_killed(registry_path):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as reservation:
         reservation.bind(("127.0.0.1", 0))
         port = int(reservation.getsockname()[1])
@@ -401,6 +618,7 @@ def test_external_python_http_server_listener_is_never_owned():
     )
     try:
         deadline = time.monotonic() + 5
+        result = {}
         while time.monotonic() < deadline:
             result = process_identity.inspect_listener_identity(
                 port,
@@ -410,6 +628,21 @@ def test_external_python_http_server_listener_is_never_owned():
                 break
             time.sleep(0.05)
         assert result == {"status": "external", "pid": process.pid}
+        assert process.poll() is None
+
+        entry = _safe_orphan_entry("C:/missing/external-http")
+        entry["port"] = port
+        registry.upsert_instance("external-http", **entry)
+        summary = registry.reconcile_registry(
+            git_worktree_roots=[],
+            electron_window_instance_ids=[],
+            now=datetime(2026, 8, 19, 6, tzinfo=UTC),
+            identity_inspector=lambda _identity: {"status": "dead"},
+        )
+        assert summary["instances"][0]["classification"] == "conflict"
+        assert summary["removedInstanceIds"] == []
+        assert process.poll() is None
+        assert registry.get_instance("external-http")
     finally:
         process.terminate()
         try:

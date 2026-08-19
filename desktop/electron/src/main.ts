@@ -66,6 +66,7 @@ import {
   type OrchestratedLifecycleResult
 } from "./protocol/launcherIpcHost.js";
 import { createLocalLauncherStatusSnapshot } from "./protocol/launcherStatusSnapshot.js";
+import { createReconcileDeadlineScheduler } from "./state/reconcileDeadlineScheduler.js";
 import { LauncherStateStore, type LauncherWindowTruth } from "./state/launcherStateStore.js";
 import {
   LAUNCHER_APP_PROTOCOL,
@@ -234,24 +235,35 @@ const mainWorkbenchCloseStore = new MainWorkbenchCloseTransactionStore();
 const launcherLifecycleSupervisor = new LauncherLifecycleSupervisor();
 const launcherStateStore = new LauncherStateStore(
   async () => {
-    const [statusPayload, branchInstancesPayload, freshnessPayload] = await Promise.all([
-      orchestrateLauncherApi("status", {
-        schemaVersion: 1,
-        path: "status",
-        init: { method: "GET" }
-      }),
-      orchestrateLauncherApi("branch-instances?cleanupMetadata=1", {
-        schemaVersion: 1,
-        path: "branch-instances?cleanupMetadata=1",
-        init: { method: "GET" }
-      }),
-      orchestrateLauncherApi("freshness", {
-        schemaVersion: 1,
-        path: "freshness",
-        init: { method: "GET" }
-      })
-    ]);
-    return { status: statusPayload, branchInstances: branchInstancesPayload, freshness: freshnessPayload };
+    const truth = currentLauncherWindowTruth();
+    const electronWindowInstanceIds = truth.instances
+      .filter((item) => item.open)
+      .map((item) => item.instanceId);
+    if (truth.workbench?.open) {
+      electronWindowInstanceIds.push("main");
+    }
+    const payload = await orchestrateLauncherApi("state-refresh", {
+      schemaVersion: 1,
+      path: "state-refresh",
+      init: {
+        method: "POST",
+        body: { electronWindowInstanceIds }
+      }
+    });
+    if (typeof payload !== "object" || payload === null) {
+      throw new Error("launcher state refresh returned an invalid payload");
+    }
+    const state = payload as Record<string, unknown>;
+    if (!("status" in state) || !("branchInstances" in state)) {
+      throw new Error("launcher state refresh omitted required state sources");
+    }
+    return {
+      status: state.status,
+      branchInstances: state.branchInstances,
+      freshness: state.freshness,
+      cleanup: state.cleanup,
+      nextReconcileAt: state.nextReconcileAt
+    };
   },
   {
     status: createLocalLauncherStatusSnapshot(),
@@ -502,7 +514,14 @@ function updateLauncherWindowTruth(): void {
   launcherStateStore.updateWindowTruth(currentLauncherWindowTruth());
 }
 
+const reconcileDeadlineScheduler = createReconcileDeadlineScheduler({
+  onDue: () => {
+    void launcherStateStore.refresh("reconcile_deadline");
+  }
+});
+
 launcherStateStore.subscribe((snapshot) => {
+  reconcileDeadlineScheduler.schedule(snapshot.nextReconcileAt);
   windowProvider?.sendToLauncher(IPC_CHANNELS.launcherStateChanged, snapshot);
 });
 
@@ -2732,7 +2751,8 @@ async function openWorkbenchAfterLifecycleReady(
 ): Promise<void> {
   await waitForWorkbenchLifecycleReady({
     commandId: lease.commandId,
-    readStatus: async () => readRuntimeManagerLauncherStatusSummary(paths.workspaceRoot),
+    expectedGeneration: lease.generation,
+    readStatus: async () => readRuntimeManagerLauncherStatusSummary(paths.workspaceRoot, lease.commandId),
     timeoutMs,
     signal: lease.signal
   });
@@ -3064,6 +3084,7 @@ function stopLauncherStateFileHints(): void {
     clearInterval(launcherStateStatTimer);
     launcherStateStatTimer = null;
   }
+  reconcileDeadlineScheduler.clear();
   for (const watcher of launcherStateWatchers) {
     watcher.close();
   }

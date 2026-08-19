@@ -55,6 +55,18 @@ export type InstancePendingOperation = {
   baselineLifecycleState?: LauncherBranchInstance["runtime"]["lifecycleState"];
 };
 
+export type PendingLifecycleIntent = {
+  instanceId: string;
+  operation: "start" | "stop" | "restart";
+  localRevision: number;
+  requestId: string;
+  baselineLifecycleState?: LauncherBranchInstance["runtime"]["lifecycleState"];
+};
+
+export type LifecycleIntentTable = Record<string, PendingLifecycleIntent>;
+
+export type LifecyclePendingInput = InstancePendingOperation | LifecycleIntentTable;
+
 export function toPendingBranchOperation(input: {
   instanceId: string;
   instanceIds?: string[];
@@ -67,6 +79,121 @@ export function toPendingBranchOperation(input: {
     operation: input.operation === "force-stop" ? "stop" : input.operation,
     baselineLifecycleState: input.baselineLifecycleState,
   };
+}
+
+export function isLifecycleIntentTable(
+  pending?: LifecyclePendingInput,
+): pending is LifecycleIntentTable {
+  return Boolean(pending) && !("operation" in (pending as InstancePendingOperation));
+}
+
+export function pendingIntentToOperation(intent: PendingLifecycleIntent): InstancePendingOperation {
+  return {
+    instanceId: intent.instanceId,
+    operation: intent.operation,
+    baselineLifecycleState: intent.baselineLifecycleState,
+  };
+}
+
+export function resolveItemPending(
+  item: LauncherBranchInstance,
+  pending?: LifecyclePendingInput,
+): InstancePendingOperation | undefined {
+  if (!pending) {
+    return undefined;
+  }
+  if (isLifecycleIntentTable(pending)) {
+    const intent = pending[item.id];
+    return intent ? pendingIntentToOperation(intent) : undefined;
+  }
+  return pendingAppliesTo(item, pending) ? pending : undefined;
+}
+
+export function acceptLifecycleIntent(
+  table: LifecycleIntentTable,
+  input: {
+    instanceId: string;
+    operation: PendingLifecycleIntent["operation"];
+    requestId: string;
+    baselineLifecycleState?: PendingLifecycleIntent["baselineLifecycleState"];
+  },
+): {
+  accepted: boolean;
+  table: LifecycleIntentTable;
+  intent?: PendingLifecycleIntent;
+  reason?: "duplicate" | "blocked";
+} {
+  const current = table[input.instanceId];
+  if (current && current.operation === input.operation) {
+    return { accepted: false, table, reason: "duplicate" };
+  }
+  if (current && input.operation !== "stop") {
+    return { accepted: false, table, reason: "blocked" };
+  }
+  const intent: PendingLifecycleIntent = {
+    instanceId: input.instanceId,
+    operation: input.operation,
+    requestId: input.requestId,
+    localRevision: (current?.localRevision ?? 0) + 1,
+    baselineLifecycleState: input.baselineLifecycleState,
+  };
+  return {
+    accepted: true,
+    table: { ...table, [input.instanceId]: intent },
+    intent,
+  };
+}
+
+export function shouldApplyLifecycleMutationFeedback(
+  table: LifecycleIntentTable,
+  input: {
+    instanceId?: string;
+    instanceIds?: string[];
+    requestId?: string;
+    localRevision?: number;
+  },
+): boolean {
+  if (!input.requestId || input.localRevision == null) {
+    return false;
+  }
+  const ids = input.instanceIds && input.instanceIds.length > 0
+    ? input.instanceIds
+    : input.instanceId
+      ? [input.instanceId]
+      : [];
+  if (ids.length === 0) {
+    return false;
+  }
+  return ids.every((id) => {
+    const current = table[id];
+    return Boolean(
+      current
+      && current.requestId === input.requestId
+      && current.localRevision === input.localRevision,
+    );
+  });
+}
+
+export function settleLifecycleIntentTable(
+  table: LifecycleIntentTable,
+  items: readonly LauncherBranchInstance[],
+): LifecycleIntentTable {
+  const next: LifecycleIntentTable = {};
+  for (const [id, intent] of Object.entries(table)) {
+    const pending = pendingIntentToOperation(intent);
+    if (resolveActivePendingOperation(pending, items)) {
+      next[id] = intent;
+    }
+  }
+  const currentKeys = Object.keys(table);
+  const nextKeys = Object.keys(next);
+  if (
+    currentKeys.length === nextKeys.length
+    && currentKeys.every((key) => next[key] === table[key])
+  ) {
+    return table;
+  }
+  return next;
 }
 
 export type BranchInstanceGroups = {
@@ -166,13 +293,14 @@ export function resolveActivePendingOperation(
 
 export function instanceRuntimeState(
   item: LauncherBranchInstance,
-  pending?: InstancePendingOperation,
+  pending?: LifecyclePendingInput,
 ): InstanceRuntimeState {
-  if (pendingAppliesTo(item, pending) && pending) {
-    if (pending.operation === "stop") {
+  const active = resolveItemPending(item, pending);
+  if (active) {
+    if (active.operation === "stop") {
       return "stopping";
     }
-    return pending.operation === "restart" ? "restarting" : "starting";
+    return active.operation === "restart" ? "restarting" : "starting";
   }
   const states: Record<LauncherBranchInstance["runtime"]["lifecycleState"], InstanceRuntimeState> = {
     closed: "stopped",
@@ -213,11 +341,11 @@ export function isOperableInstance(item: LauncherBranchInstance): boolean {
   return Boolean(item.checkedOut && (item.kind === "main" || item.kind === "worktree"));
 }
 
-export function isStartableInstance(item: LauncherBranchInstance, pending?: InstancePendingOperation): boolean {
+export function isStartableInstance(item: LauncherBranchInstance, pending?: LifecyclePendingInput): boolean {
   return Boolean(item.startable && isOperableInstance(item) && instanceRuntimeState(item, pending) === "stopped");
 }
 
-export function isAttentionInstance(item: LauncherBranchInstance, pending?: InstancePendingOperation): boolean {
+export function isAttentionInstance(item: LauncherBranchInstance, pending?: LifecyclePendingInput): boolean {
   const state = instanceRuntimeState(item, pending);
   if (["starting", "stopping", "restarting"].includes(state)) {
     return false;
@@ -228,7 +356,7 @@ export function isAttentionInstance(item: LauncherBranchInstance, pending?: Inst
   return state === "partial" && !instanceHasLiveRuntime(item);
 }
 
-export function instanceStopLabel(item: LauncherBranchInstance, isZh: boolean, pending?: InstancePendingOperation): string {
+export function instanceStopLabel(item: LauncherBranchInstance, isZh: boolean, pending?: LifecyclePendingInput): string {
   if (isAttentionInstance(item, pending) && !instanceHasLiveRuntime(item)) {
     return isZh ? "关闭" : "Close";
   }
@@ -241,8 +369,9 @@ export function instanceErrorMessage(item: LauncherBranchInstance): string {
 
 export function formatAttentionReason(item: LauncherBranchInstance, isZh: boolean): string {
   const error = instanceErrorMessage(item);
+  const registryReason = formatRegistryLeaseReason(item, isZh);
   if (error) {
-    return error;
+    return registryReason ? `${error} · ${registryReason}` : error;
   }
   const bits: string[] = [];
   const backend = item.runtime.backend;
@@ -259,6 +388,9 @@ export function formatAttentionReason(item: LauncherBranchInstance, isZh: boolea
   if (!instanceWindowOpen(item)) {
     bits.push(isZh ? "窗口未打开" : "Window closed");
   }
+  if (registryReason) {
+    bits.push(registryReason);
+  }
   return bits.join(" · ") || (isZh ? "运行状态异常" : "Runtime needs attention");
 }
 
@@ -274,7 +406,7 @@ function compareInstances(a: LauncherBranchInstance, b: LauncherBranchInstance):
 
 export function groupBranchInstances(
   items: readonly LauncherBranchInstance[],
-  pending?: InstancePendingOperation,
+  pending?: LifecyclePendingInput,
 ): BranchInstanceGroups {
   const groups: BranchInstanceGroups = { running: [], attention: [], startable: [], maintenance: [] };
   items.forEach((item) => {
@@ -384,25 +516,59 @@ export function formatGitStatus(item: LauncherBranchInstance, isZh: boolean): st
   return states.length > 0 ? states.join(" · ") : (isZh ? "干净" : "Clean");
 }
 
-export function canRequestOpenInstance(item: LauncherBranchInstance, pending?: InstancePendingOperation): boolean {
+export function canRequestOpenInstance(item: LauncherBranchInstance, pending?: LifecyclePendingInput): boolean {
   if (!isOperableInstance(item) || item.startBlockReason === "launcher_refresh_required") {
     return false;
   }
   return !["starting", "stopping", "restarting"].includes(instanceRuntimeState(item, pending));
 }
 
-export function canStartInstance(item: LauncherBranchInstance, pending?: InstancePendingOperation): boolean {
+export function canStartInstance(item: LauncherBranchInstance, pending?: LifecyclePendingInput): boolean {
   return isStartableInstance(item, pending)
     || (canRequestOpenInstance(item, pending) && !instanceWindowOpen(item));
 }
 
-export function canStopInstance(item: LauncherBranchInstance, pending?: InstancePendingOperation): boolean {
+export function registryClassificationOf(item: LauncherBranchInstance): string {
+  return String(item.runtime.registryClassification || "").trim().toLowerCase();
+}
+
+export function isUnknownRegistryInstance(item: LauncherBranchInstance): boolean {
+  return registryClassificationOf(item) === "unknown";
+}
+
+export function formatRegistryLeaseReason(item: LauncherBranchInstance, isZh: boolean): string {
+  const bits: string[] = [];
+  if (isUnknownRegistryInstance(item)) {
+    bits.push(isZh ? "身份未知，仅可诊断" : "Unknown identity, diagnosis only");
+  }
+  const lease = String(item.runtime.portLeaseStatus || item.portLeaseStatus || "").trim();
+  if (lease) {
+    bits.push(isZh ? `端口租约 ${lease}` : `port lease ${lease}`);
+  }
+  const firstObservedAt = String(item.runtime.firstObservedAt || "").trim();
+  if (firstObservedAt) {
+    bits.push(isZh ? `首次观察 ${firstObservedAt}` : `first observed ${firstObservedAt}`);
+  }
+  const nextReconcileAt = String(item.runtime.nextReconcileAt || "").trim();
+  if (nextReconcileAt) {
+    bits.push(isZh ? `下次核对 ${nextReconcileAt}` : `next check ${nextReconcileAt}`);
+  }
+  return bits.join(" · ");
+}
+
+export function canStopInstance(item: LauncherBranchInstance, pending?: LifecyclePendingInput): boolean {
   const state = instanceRuntimeState(item, pending);
+  if (state === "stopping") {
+    return false;
+  }
+  const startingOrRestarting = state === "starting" || state === "restarting";
+  if (isUnknownRegistryInstance(item) && !instanceHasLiveRuntime(item) && !startingOrRestarting) {
+    return false;
+  }
   const failedLeftover = (state === "failed" || state === "partial") && !instanceHasLiveRuntime(item);
   return (isOperableInstance(item) || failedLeftover)
     && item.startBlockReason !== "launcher_refresh_required"
-    && !["starting", "stopping", "restarting"].includes(state)
-    && (instanceHasLiveRuntime(item) || state === "failed" || state === "partial");
+    && (instanceHasLiveRuntime(item) || state === "failed" || state === "partial" || startingOrRestarting);
 }
 
 export function paginateItems<T>(items: readonly T[], page: number, pageSize = BRANCH_INSTANCE_PAGE_SIZE) {

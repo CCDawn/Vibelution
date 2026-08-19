@@ -264,9 +264,10 @@ describe("createLauncherIpcHost", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("keeps window overlay when branch-instances carries a cleanupMetadata query", async () => {
+  it("loads cleanup metadata through one python api orchestrator instead of the memory snapshot", async () => {
     const fetchImpl = vi.fn();
-    const resolveLocalBranchInstances = vi.fn().mockReturnValue({
+    const resolveLocalBranchInstances = vi.fn().mockReturnValue({ items: [] });
+    const orchestrateLauncherApi = vi.fn().mockResolvedValue({
       items: [
         { id: "main", current: true, alive: false, startable: true, runtime: { window: { open: false, pid: 0 } } },
       ],
@@ -275,11 +276,14 @@ describe("createLauncherIpcHost", () => {
       resolveContext: async () => ({ launcherOrigin: "http://127.0.0.1:8002", controlToken: "t" }),
       resolveWindowTruth: () => ({ workbench: { open: true, rendererProcessId: 7070 }, instances: [] }),
       resolveLocalBranchInstances,
+      orchestrateLauncherApi,
       fetchImpl,
     });
     const result = await host.invoke(validPayload({ path: "branch-instances?cleanupMetadata=1" }));
     expect(result.ok).toBe(true);
-    expect(resolveLocalBranchInstances).toHaveBeenCalledTimes(1);
+    expect(resolveLocalBranchInstances).not.toHaveBeenCalled();
+    expect(orchestrateLauncherApi).toHaveBeenCalledTimes(1);
+    expect(orchestrateLauncherApi.mock.calls[0][0]).toBe("branch-instances?cleanupMetadata=1");
     if (result.ok) {
       const item = ((result.payload as Record<string, unknown>).items as Record<string, unknown>[])[0];
       expect(item.startable).toBe(false);
