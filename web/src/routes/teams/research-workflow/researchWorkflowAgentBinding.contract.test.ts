@@ -63,6 +63,12 @@ describe("researchWorkflowAgentBinding.contract", () => {
     expect(workspaceSource).toContain("useResearchWorkflowRun");
   });
 
+  it("agents panel language follows the shell instead of a hardcoded zh", () => {
+    expect(inspectorPaneSource).toContain("useShellI18n");
+    expect(inspectorPaneSource).toContain("lang={lang}");
+    expect(inspectorPaneSource).not.toContain('lang="zh"');
+  });
+
   it("removes legacy stage writers from the canonical workflow workspace", () => {
     expect(workspaceSource).not.toContain('panel === "experiment"');
     expect(workspaceSource).not.toContain("experimentPanel");

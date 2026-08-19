@@ -39,6 +39,7 @@ import { WorkflowStageRegionNode } from "./WorkflowStageRegionNode";
 import { WorkflowStartEndNode } from "./WorkflowStartEndNode";
 import { WorkflowSystemTaskNode } from "./WorkflowSystemTaskNode";
 import { useWorkflowInitialFit } from "./useWorkflowInitialFit";
+import { resolveEdgeStroke } from "./workflowCanvasState";
 import type { WorkflowCanvasLayoutMode } from "./workflowElkOptions";
 
 export type ShadcnWorkflowCanvasProps = {
@@ -293,16 +294,7 @@ function WorkflowCanvasInner({
           type: MarkerType.ArrowClosed,
           width: 16,
           height: 16,
-          color:
-            edge.pathState === "danger"
-              ? "var(--state-error, #dc2626)"
-              : edge.pathState === "attention"
-                ? "var(--state-warning, #d97706)"
-                : edge.pathState === "active"
-                  ? "var(--accent-cool, #2563eb)"
-                  : edge.pathState === "traversed"
-                    ? "var(--fg-secondary, #52525b)"
-                    : "var(--vui-border-strong, #a1a1aa)",
+          color: resolveEdgeStroke(edge.pathState, edge.semanticKind).stroke,
         },
         data: {
           label: edge.label,

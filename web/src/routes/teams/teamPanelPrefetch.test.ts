@@ -116,23 +116,53 @@ describe("teamPanelPrefetch", () => {
     ).toBe(false);
   });
 
+  it("warms the research workflow inspector pack only on the process canvas surface", () => {
+    expect(
+      resolveTeamsPanelPrefetchPacks({
+        researchWorkflowTeamSelected: true,
+        aiSearchScopeTeamSelected: false,
+        sourceCollectionWorkspaceSelected: false,
+        researchWorkspaceView: "workflow",
+      }),
+    ).toEqual(expect.arrayContaining(["research", "shared", "research_workflow"]));
+    expect(
+      resolveTeamsPanelPrefetchPacks({
+        researchWorkflowTeamSelected: true,
+        aiSearchScopeTeamSelected: false,
+        sourceCollectionWorkspaceSelected: false,
+        researchWorkspaceView: "overview",
+      }),
+    ).not.toContain("research_workflow");
+    expect(
+      resolveTeamsPanelPrefetchPacks({
+        researchWorkflowTeamSelected: true,
+        aiSearchScopeTeamSelected: false,
+        sourceCollectionWorkspaceSelected: true,
+        researchWorkspaceView: "workflow",
+      }),
+    ).not.toContain("research_workflow");
+  });
+
   it("invokes only selected pack loaders", () => {
     const shared = vi.fn(async () => ({}));
     const research = vi.fn(async () => ({}));
     const research_experiment = vi.fn(async () => ({}));
     const research_search = vi.fn(async () => ({}));
+    const research_workflow = vi.fn(async () => ({}));
     const source_collection = vi.fn(async () => ({}));
     prefetchTeamsPanelPacks(["research", "research_search", "shared"], {
       shared,
       research,
       research_experiment,
       research_search,
+      research_workflow,
       source_collection,
     });
     expect(shared).toHaveBeenCalledTimes(1);
     expect(research).toHaveBeenCalledTimes(1);
     expect(research_search).toHaveBeenCalledTimes(1);
     expect(research_experiment).not.toHaveBeenCalled();
+    expect(research_workflow).not.toHaveBeenCalled();
     expect(source_collection).not.toHaveBeenCalled();
   });
 });

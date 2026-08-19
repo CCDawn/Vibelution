@@ -169,11 +169,13 @@ function moduleSubtitle(
   roleKey: string | undefined,
   agentId: string | undefined,
 ): string {
+  if (kind === "decision") return "晋升 / 回滚 / 停止";
+  if (kind === "system_task") return "受控执行";
   const role = roleLabel(roleKey);
-  if (agentId) return `${role} · Agent 已绑定`;
   if (kind === "human_gate") return `${role} · 待确认`;
   if (kind === "start") return `${role} · 流程入口`;
   if (kind === "end") return `${role} · 流程出口`;
+  if (agentId) return `${role} · Agent 已绑定`;
   return `${role} · 未绑定`;
 }
 

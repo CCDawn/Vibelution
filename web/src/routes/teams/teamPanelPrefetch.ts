@@ -6,6 +6,7 @@ export type TeamsPanelPackId =
   | "research"
   | "research_experiment"
   | "research_search"
+  | "research_workflow"
   | "source_collection";
 
 export type TeamsPanelPrefetchInput = {
@@ -52,6 +53,10 @@ export function resolveTeamsPanelPrefetchPacks(input: TeamsPanelPrefetchInput): 
     if (!view || RESEARCH_EXPERIMENT_VIEWS.has(view)) {
       packs.add("research_experiment");
     }
+    // Process-canvas inspector leaves warm only when that surface is active.
+    if (view === "workflow") {
+      packs.add("research_workflow");
+    }
   }
 
   return [...packs];
@@ -78,6 +83,7 @@ export type TeamsPanelPackLoaders = {
   research: () => Promise<unknown>;
   research_experiment: () => Promise<unknown>;
   research_search: () => Promise<unknown>;
+  research_workflow: () => Promise<unknown>;
   source_collection: () => Promise<unknown>;
 };
 

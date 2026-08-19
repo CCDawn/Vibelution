@@ -103,39 +103,26 @@ describe("outer-ELK layout · full-rectangle label contracts (RED on current)", 
   });
 
   it("grows the stage gap when the cross-stage label widens (no hardcoded gap)", async () => {
-    const narrow = challengeCupDefinition();
-    const wide = {
-      ...narrow,
-      edges: narrow.edges.map((e) =>
-        e.edgeId === "e_kc_hypothesis"
-          ? { ...e, label: "交接" }
-          : e,
+    const base = challengeCupDefinition();
+    const withLabel = (label: string) => ({
+      ...base,
+      edges: base.edges.map((e) =>
+        e.edgeId === "e_kc_hypothesis" ? { ...e, label } : e,
       ),
-    };
-    const wider = {
-      ...narrow,
-      edges: narrow.edges.map((e) =>
-        e.edgeId === "e_kc_hypothesis"
-          ? { ...e, label: "知识包跨阶段正式交接" }
-          : e,
-      ),
-    };
-    const narrowResult = await layoutWith(narrow);
-    const wideResult = await layoutWith(wide);
-    const widerResult = await layoutWith(wider);
+    });
+    const twoChar = await layoutWith(withLabel("交接"));
+    const nineChar = await layoutWith(withLabel("知识包跨阶段正式交接"));
+    const saturated = await layoutWith(withLabel("一二三四五六七八九十一二三四五六七八九十"));
     const gapOf = (result: WorkflowLayoutResult, from: string, to: string) => {
       const a = result.nodes.find((n) => n.kind === "stage" && n.stageId === from)!;
       const b = result.nodes.find((n) => n.kind === "stage" && n.stageId === to)!;
       return b.x - (a.x + a.width);
     };
-    const baseGap = gapOf(narrowResult, "knowledge_collection", "experiment_design");
-    const twoCharGap = gapOf(wideResult, "knowledge_collection", "experiment_design");
-    const nineCharGap = gapOf(widerResult, "knowledge_collection", "experiment_design");
-    // Two different widths must produce two different gaps: the wider label
-    // (9 chars) pushes the gap beyond the shorter one (2 chars), and both
-    // differ from the original full-width label.
+    const twoCharGap = gapOf(twoChar, "knowledge_collection", "experiment_design");
+    const nineCharGap = gapOf(nineChar, "knowledge_collection", "experiment_design");
+    const saturatedGap = gapOf(saturated, "knowledge_collection", "experiment_design");
     expect(nineCharGap, `9-char gap ${nineCharGap} > 2-char gap ${twoCharGap}`).toBeGreaterThan(twoCharGap);
-    expect(baseGap, `full label gap ${baseGap} >= 9-char gap ${nineCharGap}`).toBeGreaterThanOrEqual(nineCharGap);
+    expect(saturatedGap, `max-width gap ${saturatedGap} >= 9-char gap ${nineCharGap}`).toBeGreaterThanOrEqual(nineCharGap);
   });
 
   it("keeps labels clear of unrelated task nodes (padded by 12px)", async () => {

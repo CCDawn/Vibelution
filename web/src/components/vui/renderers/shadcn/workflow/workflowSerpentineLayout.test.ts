@@ -14,6 +14,7 @@ import { structuralWorkflowLayoutHash } from "./workflowLayoutHash";
 import { resolveElkPorts } from "./workflowElkPorts";
 import { challengeCupDefinition } from "./workflowElkLayout.test";
 import { layoutTwoLevel } from "./workflowTwoLevelLayout";
+import { resolveEdgeLabelSpec } from "./workflowEdgeLabelGeometry";
 
 async function layoutSerpentine() {
   return layoutTwoLevel(challengeCupDefinition(), new ELK(), undefined, {
@@ -72,6 +73,22 @@ describe("workflow serpentine layout", () => {
       expect(label!.y, edge.id).toBeGreaterThanOrEqual(sourceStage.y + sourceStage.height);
       expect(label!.y + label!.height, edge.id).toBeLessThanOrEqual(targetStage.y);
     }
+  });
+
+  it("places the knowledge-package label beside the vertical handoff", async () => {
+    const result = await layoutSerpentine();
+    const edge = result.edges.find((item) => item.id === "e_kc_hypothesis")!;
+    const label = edge.labelBounds!;
+    expect(edge.label).toBe("Knowledge Package");
+    expect(label.width).toBe(resolveEdgeLabelSpec("Knowledge Package").width);
+    expect(edge.sections.length).toBeGreaterThan(0);
+    const strokeX = Math.max(
+      ...edge.sections
+        .filter((section) => Math.abs(section.start.x - section.end.x) < 1e-3)
+        .map((section) => section.start.x),
+    );
+    expect(Number.isFinite(strokeX)).toBe(true);
+    expect(label.x).toBeGreaterThan(strokeX);
   });
 
   it("uses a short narrative bridge for cross-stage handoffs", async () => {

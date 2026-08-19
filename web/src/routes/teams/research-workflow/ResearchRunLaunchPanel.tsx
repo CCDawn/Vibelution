@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { useQuery } from "@tanstack/react-query";
 
@@ -21,6 +21,11 @@ import {
   VSurface,
 } from "../../../components/vui";
 import { researchWorkflowErrorInlineText } from "../researchWorkflowErrorModel";
+import {
+  clearResearchRunLaunchDraft,
+  readResearchRunLaunchDraft,
+  writeResearchRunLaunchDraft,
+} from "./researchRunLaunchDraft";
 import { buildResearchRunInput } from "./researchRunLaunchContract";
 import { researchRunStatusLabel } from "./researchRunPresentation";
 import { ResearchRunSafetyLimitPanel } from "./ResearchRunSafetyLimitPanel";
@@ -181,10 +186,16 @@ export function ResearchRunLaunchPanel(props: {
   onContinueRun?: (input: { runId: string; nodeId: string }) => void;
 }) {
   const { teamId, busy, initialQuestionId, onSubmit, onCancel, onContinueRun } = props;
-  const [questionId, setQuestionId] = useState(initialQuestionId || "");
-  const [query, setQuery] = useState("");
-  const [safetyBudget, setSafetyBudget] = useState(createResearchRunSafetyBudget);
+  // Per-team session draft restores the form after panel switches; an explicit
+  // deep-link questionId always wins over the remembered draft.
+  const [draft] = useState(() => readResearchRunLaunchDraft(teamId));
+  const [questionId, setQuestionId] = useState(initialQuestionId || draft?.questionId || "");
+  const [query, setQuery] = useState(draft?.query ?? "");
+  const [safetyBudget, setSafetyBudget] = useState(() => draft?.safetyBudget ?? createResearchRunSafetyBudget());
   const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    writeResearchRunLaunchDraft(teamId, { questionId, query, safetyBudget });
+  }, [teamId, questionId, query, safetyBudget]);
   const launchOptionsKey = queryKeys.researchWorkflowLaunchOptions(
     CHALLENGE_CUP_WORKFLOW_ID,
     teamId,
@@ -326,9 +337,11 @@ export function ResearchRunLaunchPanel(props: {
             }
             try {
               const input = buildResearchRunInput({ teamId, questionId, safetyBudget });
-              void onSubmit(input).catch((reason: unknown) => {
-                setError(reason instanceof Error ? reason.message : String(reason));
-              });
+              void onSubmit(input)
+                .then(() => clearResearchRunLaunchDraft(teamId))
+                .catch((reason: unknown) => {
+                  setError(reason instanceof Error ? reason.message : String(reason));
+                });
             } catch (reason) {
               setError(reason instanceof Error ? reason.message : String(reason));
             }

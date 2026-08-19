@@ -205,16 +205,51 @@ export function resolveEdgeStroke(pathState: WorkflowEdgePathState, semanticKind
   if (pathState === "traversed") {
     return { stroke: "var(--fg-secondary, #52525b)", strokeWidth: 1.75, animated: false };
   }
-  if (semanticKind === "rerun" || semanticKind === "revise" || semanticKind === "rollback") {
+  const idle = pathState === "idle";
+  if (semanticKind === "promote") {
     return {
-      stroke: "var(--vui-border-strong, #a1a1aa)",
-      strokeWidth: 1.5,
+      stroke: idle
+        ? "color-mix(in srgb, var(--state-success, #16803c) 42%, transparent)"
+        : "var(--state-success, #16803c)",
+      strokeWidth: idle ? 1.35 : 2,
+      animated: false,
+    };
+  }
+  if (semanticKind === "rerun") {
+    return {
+      stroke: idle
+        ? "color-mix(in srgb, var(--accent-cool, #2563eb) 40%, transparent)"
+        : "var(--accent-cool, #2563eb)",
+      strokeWidth: idle ? 1.35 : 1.75,
+      animated: false,
+      dasharray: "6 4",
+    };
+  }
+  if (semanticKind === "revise" || semanticKind === "rollback") {
+    return {
+      stroke: idle
+        ? "color-mix(in srgb, var(--state-warning, #d97706) 42%, transparent)"
+        : "var(--state-warning, #d97706)",
+      strokeWidth: idle ? 1.35 : 1.75,
       animated: false,
       dasharray: "6 4",
     };
   }
   if (semanticKind === "stop") {
-    return { stroke: "var(--fg-tertiary, #71717a)", strokeWidth: 1.5, animated: false, dasharray: "4 4" };
+    return {
+      stroke: idle
+        ? "color-mix(in srgb, var(--state-error, #dc2626) 40%, transparent)"
+        : "var(--state-error, #dc2626)",
+      strokeWidth: idle ? 1.25 : 1.75,
+      animated: false,
+      dasharray: "4 4",
+    };
   }
-  return { stroke: "var(--vui-border-strong, #a1a1aa)", strokeWidth: 1.5, animated: false };
+  return {
+    stroke: idle
+      ? "color-mix(in srgb, var(--vui-border-strong, #a1a1aa) 55%, transparent)"
+      : "var(--vui-border-strong, #a1a1aa)",
+    strokeWidth: 1.5,
+    animated: false,
+  };
 }

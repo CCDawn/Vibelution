@@ -63,6 +63,22 @@ describe("workflowCanvasState visuals", () => {
     expect(resolveEdgeStroke("active", "main").stroke).toContain("accent-cool");
     expect(resolveEdgeStroke("attention", "human_gate").stroke).toContain("state-warning");
     expect(resolveEdgeStroke("danger", "main").stroke).toContain("state-error");
-    expect(resolveEdgeStroke("idle", "rerun").dasharray).toBeTruthy();
+    expect(resolveEdgeStroke("idle", "rerun").dasharray).toBe("6 4");
+  });
+
+  it("colors idle decision branches by outcome and dims them", () => {
+    const promote = resolveEdgeStroke("idle", "promote");
+    const rollback = resolveEdgeStroke("idle", "rollback");
+    const rerun = resolveEdgeStroke("idle", "rerun");
+    const stop = resolveEdgeStroke("idle", "stop");
+    expect(promote.dasharray).toBeUndefined();
+    expect(promote.stroke).toContain("state-success");
+    expect(rollback.dasharray).toBe("6 4");
+    expect(rollback.stroke).toContain("state-warning");
+    expect(rerun.stroke).toContain("accent-cool");
+    expect(stop.dasharray).toBe("4 4");
+    expect(stop.stroke).toContain("state-error");
+    expect(promote.stroke).toContain("42%");
+    expect(rerun.stroke).toContain("40%");
   });
 });

@@ -133,6 +133,7 @@ Contracts: `composers.contract.test.ts`, `source-collection/createSourceCollecti
 | Research core UI pack barrel | `teamResearchPanels.ts` | experiment / AI-search packs |
 | Research experiment UI pack barrel | `teamResearchExperimentPanels.ts` | core / SC packs |
 | Research AI-search UI pack barrel | `teamResearchSearchPanels.ts` | core / experiment packs |
+| Research workflow inspector UI pack barrel | `teamResearchWorkflowPanels.ts` | core / SC packs |
 | Source-collection UI pack barrel | `teamSourceCollectionPanels.ts` | research orchestration |
 | Experiment + research-loop mutations | `useTeamExperimentLoopMutations.ts` | drafts/view orchestration |
 | Source-collection write mutations | `useTeamSourceCollectionMutations.ts` | drafts/view/session-task orchestration |
@@ -166,6 +167,7 @@ Contracts: `composers.contract.test.ts`, `source-collection/createSourceCollecti
 | Research core | `loadTeamResearchPanels` | Stage launcher/agents, research loop |
 | Research experiment | `loadTeamResearchExperimentPanels` | Experiment ledger/method, workflow status, candidate preview |
 | Research search | `loadTeamResearchSearchPanels` | AI search workspace, team memory index |
+| Research workflow inspector | `loadTeamResearchWorkflowPanels` | Process-canvas inspector leaves (launch/timeline/evidence/progress/question/agents/team + node inspectors) |
 | Source-collection | `loadTeamSourceCollectionPanels` | SC chrome + workspace orchestration |
 
 **Rules:**

@@ -829,10 +829,13 @@ describe("TeamsRoute layout contract", () => {
     expect(teamLazyPanelsSource).toContain('import("./teamResearchPanels")');
     expect(teamLazyPanelsSource).toContain('import("./teamResearchExperimentPanels")');
     expect(teamLazyPanelsSource).toContain('import("./teamResearchSearchPanels")');
+    expect(teamLazyPanelsSource).toContain('import("./teamResearchWorkflowPanels")');
     expect(teamLazyPanelsSource).toContain("loadTeamResearchExperimentPanels");
     expect(teamLazyPanelsSource).toContain("loadTeamResearchSearchPanels");
+    expect(teamLazyPanelsSource).toContain("loadTeamResearchWorkflowPanels");
     expect(teamLazyPanelsSource).toContain('createLazyNamedTeamPanel(loadTeamResearchSearchPanels, "TeamAiSearchWorkspacePanel")');
     expect(teamLazyPanelsSource).toContain('createLazyNamedTeamPanel(loadTeamResearchExperimentPanels, "TeamExperimentPlanningLedgerPanel")');
+    expect(teamLazyPanelsSource).toContain('createLazyNamedTeamPanel(loadTeamResearchWorkflowPanels, "ResearchRunLaunchPanel")');
     expect(teamLazyPanelsSource).toContain('import("./teamSourceCollectionPanels")');
     expect(teamLazyPanelsSource).toContain('createLazyNamedTeamPanel(loadTeamSourceCollectionPanels, "TeamsSourceCollectionPanel")');
     // Wave 8N+prefetch: warm packs after team/view switch, not mount-all.
