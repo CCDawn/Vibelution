@@ -203,6 +203,40 @@ describe("HypothesisFirstMeetingOps automatic organization", () => {
     expect(mockedOpenGeneration).toHaveBeenCalledWith("team-1", "Q-01");
   });
 
+  it("offers one manual retry when meeting creation was interrupted before chat binding", async () => {
+    mockedFetchMeetingRound.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      meetingRound: { ...meetingRound("open"), chatRoomRoundIds: [] },
+    });
+    mockedFetchMessages.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      meetingRoundId: "meeting-1",
+      messageCount: 0,
+      messages: [],
+    });
+
+    render({
+      ...AUTO_ACTION,
+      stage: "generation_discussing",
+      command: undefined,
+      commandLabel: undefined,
+    });
+    await act(async () => {
+      await vi.waitFor(() => expect(container.textContent).toContain("重试启动候选讨论"));
+    });
+    expect(mockedOpenGeneration).not.toHaveBeenCalled();
+
+    const retry = [...container.querySelectorAll("button")]
+      .find((button) => button.textContent?.includes("重试启动候选讨论"));
+    await act(async () => {
+      retry?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await vi.waitFor(() => expect(mockedOpenGeneration).toHaveBeenCalledTimes(1));
+    });
+    expect(mockedOpenGeneration).toHaveBeenCalledWith("team-1", "Q-01");
+  });
+
   it("does not auto-loop when the request fails and exposes one manual retry", async () => {
     mockedDraftMeetingSummary
       .mockRejectedValueOnce(new Error("network unavailable"))
