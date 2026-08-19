@@ -5,4 +5,6 @@ export default {
   stage: "text-[10px] uppercase tracking-wide text-[var(--fg-tertiary)]",
   title: "m-0 [font-size:var(--vui-font-md)] font-semibold text-[var(--fg-primary)]",
   meta: "mt-1 [font-size:var(--vui-font-2xs)] text-[var(--fg-secondary)]",
+  status: "m-0 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)]",
+  nav: "flex flex-wrap items-center gap-2",
 } as const;

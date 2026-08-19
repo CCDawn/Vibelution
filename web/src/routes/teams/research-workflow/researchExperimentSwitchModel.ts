@@ -93,6 +93,7 @@ function optionFromQuestion(
   const questionId = normalizeQuestionId(question.questionId);
   const checkpoint = question.checkpoint;
   if (!questionId || !checkpoint?.runId) return null;
+  if (String(checkpoint.status || "").trim().toLowerCase() === "cancelled") return null;
   return {
     questionId,
     title: question.title.trim() || questionId,
@@ -146,14 +147,16 @@ export function buildExperimentSwitchOptions(input: {
 export function resolveExperimentSwitch(
   options: readonly ExperimentSwitchOption[],
   questionId: string,
+  focusNodeId?: string | null,
 ): ExperimentSwitchLocationPatch | null {
   const normalized = normalizeQuestionId(questionId);
   const match = options.find((item) => item.questionId === normalized);
   if (!match) return null;
+  const focused = String(focusNodeId || "").trim();
   return {
     questionId: match.questionId,
     runId: match.runId,
-    node: match.currentNodeId || null,
+    node: focused || match.currentNodeId || null,
     panel: "node",
   };
 }

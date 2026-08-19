@@ -428,8 +428,9 @@ def _closure_payload(agent_ids: list[str], decisions: list[dict], **overrides) -
 
 
 def _drive_to_awaiting_approval(team_id: str, meeting_round_id: str, actor: str) -> None:
-    meetings.begin_meeting_summary(team_id, meeting_round_id, actor=actor)
-    drafted = meeting_runtime.draft_meeting_digest(team_id, meeting_round_id)
+    drafted = meeting_runtime.prepare_meeting_summary_draft(
+        team_id, meeting_round_id, actor=actor, force=False
+    )
     assert drafted["status"] == "awaiting_approval"
 
 

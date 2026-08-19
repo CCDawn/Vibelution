@@ -28,12 +28,15 @@ from core.web.routes.team_workflows.hypothesis_first_models import (
     HypothesisSelectionRecordPayload,
     HypothesisSelectionRecordResponse,
     HypothesisSelectionResponse,
+    MeetingApproveDigestPayload,
     MeetingClosureApprovePayload,
+    MeetingDecisionPayload,
     MeetingDigestDraftPayload,
     MeetingRoundListResponse,
     MeetingRoundMutationResponse,
     MeetingRoundResponse,
     MeetingSourceMessagesResponse,
+    MeetingSummaryDraftRequest,
     ReviewRoundLinkListResponse,
     SelectionContextResponse,
 )
@@ -42,6 +45,7 @@ from core.web.services.team_workflow import (
     hypothesis_rounds,
     hypothesis_selection,
     meeting_rounds,
+    meeting_runtime,
 )
 from core.web.services.team_workflow.research_runtime import hypothesis_first_chain
 
@@ -226,6 +230,49 @@ def test_digest_draft_payload_requires_summary_and_source_refs() -> None:
         MeetingDigestDraftPayload.model_validate({"summary": "s", "sourceMessageRefs": []})
 
 
+def test_digest_draft_payload_keeps_candidates_and_evidence_requests() -> None:
+    payload = MeetingDigestDraftPayload.model_validate(
+        {
+            "summary": "讨论收敛",
+            "sourceMessageRefs": ["m-1"],
+            "proposedCandidates": [
+                {"candidateId": "c1", "statement": "腺苷假说", "rationale": "机制"}
+            ],
+            "evidenceRequests": [
+                {
+                    "rationale": "需要更多论文",
+                    "candidateRefs": ["hyp-a"],
+                    "searchEnvelope": {"keywords": ["nslb"]},
+                }
+            ],
+        }
+    )
+    dumped = payload.model_dump()
+    assert dumped["proposedCandidates"][0]["candidateId"] == "c1"
+    assert dumped["evidenceRequests"][0]["searchEnvelope"]["keywords"] == ["nslb"]
+
+
+def test_decision_payload_requirements_are_object() -> None:
+    payload = MeetingDecisionPayload.model_validate(
+        {
+            "decision": "request_new_evidence",
+            "rationale": "need more evidence",
+            "decidedBy": "operator",
+            "requirements": {"minEvidenceLevel": "medium"},
+        }
+    )
+    assert payload.requirements == {"minEvidenceLevel": "medium"}
+
+
+def test_summary_draft_and_approve_digest_payloads_are_minimal() -> None:
+    draft_req = MeetingSummaryDraftRequest.model_validate({"actor": "operator"})
+    assert draft_req.force is False
+    approve = MeetingApproveDigestPayload.model_validate(
+        {"closedBy": "operator", "expectedDigestContentHash": "abc"}
+    )
+    assert approve.expectedDigestContentHash == "abc"
+
+
 def test_closure_payload_requires_at_least_one_decision() -> None:
     with pytest.raises(ValidationError):
         MeetingClosureApprovePayload.model_validate({"decisions": []})
@@ -272,6 +319,7 @@ def _expected_routes() -> set[tuple[str, str]]:
         ("GET", f"{prefix}/meeting-rounds/{{meeting_round_id}}"),
         ("GET", f"{prefix}/meeting-rounds/{{meeting_round_id}}/source-messages"),
         ("POST", f"{prefix}/meeting-rounds/{{meeting_round_id}}/summary"),
+        ("POST", f"{prefix}/meeting-rounds/{{meeting_round_id}}/summary-draft"),
         ("POST", f"{prefix}/meeting-rounds/{{meeting_round_id}}/digest-draft"),
         ("POST", f"{prefix}/meeting-rounds/{{meeting_round_id}}/digest-reject"),
         ("POST", f"{prefix}/meeting-rounds/{{meeting_round_id}}/closure"),
@@ -283,6 +331,10 @@ def _expected_routes() -> set[tuple[str, str]]:
         (
             "POST",
             f"{prefix}/hypothesis-first/chain/review-meetings/{{meeting_round_id}}/close",
+        ),
+        (
+            "POST",
+            f"{prefix}/hypothesis-first/chain/meetings/{{meeting_round_id}}/approve-digest",
         ),
         (
             "POST",
@@ -1127,6 +1179,95 @@ def test_chain_collection_handoff_passes_arguments(monkeypatch) -> None:
     assert calls[0]["kwargs"]["handoff_ref"] == "run-123"
     assert calls[0]["kwargs"]["runtime"] is sentinel_runtime
     assert response.json()["request"]["status"] == "handed_off"
+
+
+def test_summary_draft_route_passes_actor_and_force(monkeypatch) -> None:
+    calls = []
+
+    def fake_prepare(team_id, meeting_round_id, *, actor="", force=False):
+        calls.append(
+            {
+                "teamId": team_id,
+                "meetingRoundId": meeting_round_id,
+                "actor": actor,
+                "force": force,
+            }
+        )
+        return {
+            "schemaVersion": 2,
+            "teamId": team_id,
+            "status": "awaiting_approval",
+            "meetingRound": {"meetingRoundId": meeting_round_id},
+            "digestDraft": {"summary": "draft", "contentHash": "h1"},
+            "storagePath": "x",
+        }
+
+    monkeypatch.setattr(meeting_runtime, "prepare_meeting_summary_draft", fake_prepare)
+    client = _client()
+    response = client.post(
+        "/api/teams/team-1/workflow-orchestration/meeting-rounds/mr-1/summary-draft",
+        json={"actor": "operator", "force": False},
+    )
+    assert response.status_code == 200, response.text
+    assert calls[0] == {
+        "teamId": "team-1",
+        "meetingRoundId": "mr-1",
+        "actor": "operator",
+        "force": False,
+    }
+    assert response.json()["digestDraft"]["contentHash"] == "h1"
+
+
+def test_approve_digest_route_passes_hash_and_maps_stale(monkeypatch) -> None:
+    calls = []
+    sentinel_runtime = object()
+    monkeypatch.setattr(hf_routes, "production_workflow_runtime", lambda: sentinel_runtime)
+
+    def fake_approve(team_id, meeting_round_id, *, closed_by, expected_digest_content_hash, runtime=None):
+        calls.append(
+            {
+                "teamId": team_id,
+                "meetingRoundId": meeting_round_id,
+                "closedBy": closed_by,
+                "expectedDigestContentHash": expected_digest_content_hash,
+                "runtime": runtime,
+            }
+        )
+        return {
+            "schemaVersion": 1,
+            "teamId": team_id,
+            "status": "created",
+            "closed": True,
+            "meetingRound": {"meetingRoundId": meeting_round_id, "status": "closed"},
+            "digest": {"digestId": "d-1"},
+            "decisions": [{"decisionId": "dec-1"}],
+            "collection": {"requests": []},
+            "storagePath": "x",
+        }
+
+    monkeypatch.setattr(hypothesis_first_chain, "approve_meeting_digest", fake_approve)
+    client = _client()
+    response = client.post(
+        "/api/teams/team-1/workflow-orchestration/hypothesis-first/chain/meetings/mr-1/approve-digest",
+        json={"closedBy": "operator", "expectedDigestContentHash": "hash-1"},
+    )
+    assert response.status_code == 200, response.text
+    assert calls[0]["expectedDigestContentHash"] == "hash-1"
+    assert calls[0]["runtime"] is sentinel_runtime
+
+    def stale_approve(*_args, **_kwargs):
+        raise hypothesis_first_chain.StaleDigestError(
+            "digest content hash is stale",
+            expected="hash-1",
+            actual="hash-2",
+        )
+
+    monkeypatch.setattr(hypothesis_first_chain, "approve_meeting_digest", stale_approve)
+    stale = client.post(
+        "/api/teams/team-1/workflow-orchestration/hypothesis-first/chain/meetings/mr-1/approve-digest",
+        json={"closedBy": "operator", "expectedDigestContentHash": "hash-2"},
+    )
+    assert stale.status_code == 409
 
 
 def test_routes_map_team_not_found_to_404(monkeypatch) -> None:

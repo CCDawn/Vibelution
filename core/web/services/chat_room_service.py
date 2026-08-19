@@ -1512,6 +1512,12 @@ def _execute_chat_room_round(
         _sync_group_round_to_participant_sessions(room, target_round)
     _publish_chat_room_detail_snapshot(normalized_room_id)
     _clear_chat_room_round_control(round_id)
+    try:
+        from core.web.services.team_workflow import meeting_runtime
+
+        meeting_runtime.maybe_auto_draft_after_chat_round(room, target_round)
+    except Exception:
+        pass
     return _room_to_api(room)
 
 

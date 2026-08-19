@@ -67,6 +67,8 @@ function renderInspector(detail: ResearchWorkflowNodeDetail | null, extras: {
   nodeId?: string | null;
   adapter?: ReturnType<typeof getNodeAdapter>;
   handoffPending?: boolean;
+  hideStartOffer?: boolean;
+  statusBanner?: string | null;
 } = {}) {
   return renderToStaticMarkup(
     <ResearchProcessNodeInspector
@@ -80,6 +82,8 @@ function renderInspector(detail: ResearchWorkflowNodeDetail | null, extras: {
       handoffPending={Boolean(extras.handoffPending)}
       busy={false}
       onOffer={vi.fn()}
+      hideStartOffer={extras.hideStartOffer}
+      statusBanner={extras.statusBanner}
     />,
   );
 }
@@ -178,5 +182,36 @@ describe("ResearchProcessNodeInspector command rendering", () => {
       { nodeId: "hypothesis_design", adapter: getNodeAdapter("hypothesis_design") },
     );
     expect(markup).not.toContain("打开实验设计面板");
+  });
+
+  it("hides start-collection and shows 资料搜集中 when collecting", () => {
+    const markup = renderInspector(makeDetail({
+      commandOffers: [
+        offer({ command: "start_node", label: "启动 资料寻找", available: false, reasonCode: "hypothesis_first_meeting_open" }),
+      ],
+    }), {
+      hideStartOffer: true,
+      statusBanner: "资料搜集中",
+    });
+    expect(markup).toContain("资料搜集中");
+    expect(markup).toContain('role="status"');
+    expect(markup).not.toContain("启动 资料寻找");
+    expect(markup).not.toContain("开始资料搜集");
+  });
+
+  it("shows human remediation copy instead of hypothesis_first_meeting_open", () => {
+    const markup = renderInspector(makeDetail({
+      commandOffers: [
+        offer({
+          command: "start_node",
+          label: "启动 资料寻找",
+          available: false,
+          reasonCode: "hypothesis_first_meeting_open",
+          payload: { remediation_label: "前往闭环首轮假说讨论" },
+        }),
+      ],
+    }));
+    expect(markup).toContain("前往闭环首轮假说讨论");
+    expect(markup).not.toContain("hypothesis_first_meeting_open");
   });
 });

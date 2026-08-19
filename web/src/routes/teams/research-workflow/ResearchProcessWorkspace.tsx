@@ -3,6 +3,11 @@ import { useCallback, useMemo } from "react";
 import { WORKBENCH_LAYOUT_IDS } from "../../../components/layout/workbenchLayoutIds";
 import { VCanvasWorkbenchPage } from "../../../components/vui";
 import { buildHypothesisFirstCanvasRegion } from "./hypothesisFirstCanvasRegion";
+import { fetchHypothesisFirstFocusNode } from "./hypothesisFirstFocus";
+import {
+  isHypothesisFirstDiscussionActive,
+  resolveHypothesisFirstNextAction,
+} from "./hypothesisFirstNextAction";
 import {
   buildExperimentChromeIdentity,
   buildExperimentSwitchOptions,
@@ -96,7 +101,9 @@ export function ResearchProcessWorkspace({
       reviewRoundLinks: hypothesisFirstChain.reviewRoundLinks,
       selection: hypothesisFirstChain.selection,
     });
-    return composeHypothesisFirstGraph(base, region);
+    return composeHypothesisFirstGraph(base, region, {
+      demotePipelineStages: isHypothesisFirstDiscussionActive(hypothesisFirstChain.meetings),
+    });
   }, [
     catalog.effectiveBindings,
     location.runId,
@@ -139,8 +146,31 @@ export function ResearchProcessWorkspace({
   const selectExperiment = useCallback((questionId: string) => {
     const patch = resolveExperimentSwitch(experimentOptions, questionId);
     if (!patch) return;
-    location.replaceParams(patch);
-  }, [experimentOptions, location]);
+    void fetchHypothesisFirstFocusNode(teamId, patch.questionId).then((node) => {
+      location.replaceParams({ ...patch, node });
+    });
+  }, [experimentOptions, location, teamId]);
+
+  const nextAction = useMemo(() => resolveHypothesisFirstNextAction({
+    run: runState.run,
+    chainState: hypothesisFirstChain.chainState,
+    meetings: hypothesisFirstChain.meetings,
+    selection: hypothesisFirstChain.selection,
+    collectionRequests: hypothesisFirstChain.collectionRequests,
+    collectionChildStatus: runState.projection?.run.nodeRuns.source_finding?.status ?? null,
+    selectedNodeId: location.selectedNodeId,
+  }), [
+    hypothesisFirstChain.chainState,
+    hypothesisFirstChain.collectionRequests,
+    hypothesisFirstChain.meetings,
+    hypothesisFirstChain.selection,
+    location.selectedNodeId,
+    runState.projection?.run.nodeRuns.source_finding?.status,
+    runState.run,
+  ]);
+  const retryCollectionOffer = (runState.commandOffers ?? []).find((offer) => (
+    offer.command === "retry_node" && (offer.nodeId === "source_finding" || !offer.nodeId)
+  )) ?? null;
 
   const displayError =
     commands.error
@@ -172,6 +202,12 @@ export function ResearchProcessWorkspace({
             createDisabled={runState.busy}
             onSelectExperiment={selectExperiment}
             onOpenPanel={location.openPanel}
+            navigationLabel={location.runId ? nextAction.navigationLabel : undefined}
+            onNavigateCurrent={
+              nextAction.targetNodeId
+                ? () => location.replaceParams({ node: nextAction.targetNodeId, panel: "node" })
+                : undefined
+            }
           />
         )}
         layoutId={WORKBENCH_LAYOUT_IDS.researchFlow}
@@ -212,6 +248,8 @@ export function ResearchProcessWorkspace({
                 pendingTaskId: commands.pendingTaskId,
                 submitOffer: commands.submitOffer,
               }}
+              nextAction={nextAction}
+              retryCollectionOffer={retryCollectionOffer}
             />
           ) : undefined
         }

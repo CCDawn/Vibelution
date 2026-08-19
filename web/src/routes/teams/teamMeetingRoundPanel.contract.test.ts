@@ -5,6 +5,10 @@ const panelSource = readFileSync(
   new URL("./TeamMeetingRoundPanel.tsx", import.meta.url),
   "utf8",
 );
+const displaySource = readFileSync(
+  new URL("./meetingRoundDisplay.tsx", import.meta.url),
+  "utf8",
+);
 const timelineSource = readFileSync(
   new URL("./TeamHypothesisRoundTimeline.tsx", import.meta.url),
   "utf8",
@@ -18,7 +22,8 @@ describe("TeamMeetingRoundPanel contract (HF-6)", () => {
   it("uses named hypothesisFirst API functions and never raw paths", () => {
     expect(panelSource).toContain("fetchMeetingRound");
     expect(panelSource).toContain("fetchMeetingRoundSourceMessages");
-    expect(panelSource).toContain("closeHypothesisReviewMeeting");
+    expect(panelSource).toContain("generationMeeting");
+    expect(panelSource).not.toContain("closeHypothesisReviewMeeting");
     expect(panelSource).toContain("queryKeys.teamMeetingRound(");
     expect(panelSource).not.toContain("fetch(");
     expect(panelSource).not.toMatch(/["'`]\/api\//);
@@ -26,31 +31,31 @@ describe("TeamMeetingRoundPanel contract (HF-6)", () => {
   });
 
   it("renders room discussion messages and the closure digest artifact", () => {
-    expect(panelSource).toContain("meeting-source-messages");
-    expect(panelSource).toContain("meeting-digest-draft");
-    // Digest sections from the server-side draft.
-    expect(panelSource).toContain("agreements");
-    expect(panelSource).toContain("disagreements");
-    expect(panelSource).toContain("actionItems");
-    expect(panelSource).toContain("knowledgeCandidates");
-    expect(panelSource).toContain("decisionRefs");
+    expect(displaySource).toContain("meeting-source-messages");
+    expect(displaySource).toContain("meeting-digest-draft");
+    expect(displaySource).toContain("agreements");
+    expect(displaySource).toContain("disagreements");
+    expect(displaySource).toContain("actionItems");
+    expect(displaySource).toContain("knowledgeCandidates");
+    expect(displaySource).toContain("decisionRefs");
+    expect(displaySource).toContain("evidenceRequests");
   });
 
   it("derives the four-state status from the server projection only", () => {
-    expect(panelSource).toContain("round.status");
-    expect(panelSource).toContain('"open"');
-    expect(panelSource).toContain('"summarizing"');
-    expect(panelSource).toContain('"awaiting_approval"');
-    expect(panelSource).toContain('"closed"');
-    expect(panelSource).toContain("VStatusChip");
+    expect(displaySource).toContain("round.status");
+    expect(displaySource).toContain('"open"');
+    expect(displaySource).toContain('"summarizing"');
+    expect(displaySource).toContain('"awaiting_approval"');
+    expect(displaySource).toContain('"closed"');
+    expect(displaySource).toContain("VStatusChip");
   });
 
-  it("gates the human closure button on awaiting_approval and confirms via dialog", () => {
-    expect(panelSource).toContain('status === "awaiting_approval"');
-    expect(panelSource).toContain("人工确认关门");
-    expect(panelSource).toContain("VConfirmDialog");
-    expect(panelSource).toContain("closeMutation.mutate");
-    expect(panelSource).toContain("select_candidate");
+  it("keeps the archive panel read-only without early-close writes", () => {
+    expect(panelSource).not.toContain("人工确认关门");
+    expect(panelSource).not.toContain("closeMutation");
+    expect(panelSource).not.toContain("select_candidate");
+    expect(panelSource).not.toContain("beginMeetingSummary");
+    expect(panelSource).not.toContain("submitMeetingDigestDraft");
   });
 
   it("stays on the VUI product API surface", () => {

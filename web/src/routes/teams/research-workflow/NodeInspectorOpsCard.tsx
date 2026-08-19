@@ -22,6 +22,7 @@ import {
 import "./NodeInspectorOpsCard.css";
 import { nodeInspectorOpsCardStyles as styles } from "./NodeInspectorOpsCard.styles";
 import {
+  commandOfferUnavailableReason,
   providerVisualId,
   type NodeInspectorBudgetMeter,
   type NodeInspectorProviderVisual,
@@ -273,12 +274,12 @@ export function NodeInspectorOpsCard(props: NodeInspectorOpsCardProps) {
             disabledReason={
               props.primaryOffer.available
                 ? undefined
-                : (props.primaryOffer.reasonCode || props.primaryOffer.blockerIds[0] || "command_unavailable")
+                : commandOfferUnavailableReason(props.primaryOffer, isZh)
             }
             aria-label={
               props.primaryOffer.available
                 ? undefined
-                : `${props.primaryOffer.label}：${props.primaryOffer.reasonCode || props.primaryOffer.blockerIds[0] || "command_unavailable"}`
+                : `${props.primaryOffer.label}：${commandOfferUnavailableReason(props.primaryOffer, isZh)}`
             }
             onClick={() => {
               if (!props.primaryOffer || !props.onOffer) return;

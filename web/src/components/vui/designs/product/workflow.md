@@ -120,10 +120,11 @@ pathState：`idle | traversed | active | attention | danger` — 仅由 nodeRuns
 
 科研流程画布的**显示层第一类区域**：把假说先行链（选假说 → 讨论·评审 → 资料搜集 → 再讨论 → 收敛）合成为 `stages[0]` 的「假说先行」阶段带，由链台账状态驱动，不改动任何执行拓扑。区域由路由层纯函数 `buildHypothesisFirstCanvasRegion`（`routes/teams/research-workflow/hypothesisFirstCanvasRegion.ts`）从链状态 + 会议轮 + 搜集请求 + 续轮台账 + 选择记录产出 `{ stage, nodes, edges }` 片段，再经 `composeHypothesisFirstGraph` 插入主图；无链活动时区域不合成，画布保持原 16 节点形态。
 
-卡片映射（nodeId 均以 `hf_` 前缀，Inspector 据此路由到链摘要面板）：
+卡片映射（nodeId 均以 `hf_` 前缀，Inspector 据此路由到**当前任务操作面**，不是只读摘要）：
 
 | 卡片 | nodeId | visualKind | 状态事实源 |
 | --- | --- | --- | --- |
+| 候选假说生成 | `hf_generation` | `agent_task` | 第 0 轮 `hypothesis_candidate_generation`：`open→running`、`summarizing/awaiting_approval→waiting_human`、`closed` 有候选→进入选择 |
 | 假说选择 | `hf_selection` | `human_gate` | 最新选择记录存在→`succeeded`，否则 `waiting_human` |
 | 第 N 轮讨论·评审 | `hf_meeting_<roundIndex>` | `agent_task` | 会议 `open→running`、`summarizing/awaiting_approval→waiting_human`、`closed` 有纪要→`succeeded`、无纪要→`blocked`（fail-closed） |
 | 资料搜集 · 缺口 j | `hf_collection_<requestId>` | `system_task` | 请求 `pending→pending`、`handed_off`/有交接引用→`succeeded`、`failed→failed` |
@@ -141,12 +142,14 @@ pathState：`idle | traversed | active | attention | danger` — 仅由 nodeRuns
 | `hf_e_m1_stage1` 首轮会议→`source_finding` | `human_gate`（gateKind `knowledge_package`） | 常显「首轮搜集范围就绪」 |
 | `hf_e_gate_stage2` 收敛门→`hypothesis_design` | `human_gate`（gateKind `knowledge_package`） | 常显「假说集就绪」 |
 
-阶段头计数：区域 stage 通过 `WorkflowCanvasStageInput.progress = { completed: 已闭环轮次, total: 轮次预算 }` 覆盖默认的「成功卡数/卡数」，显示「已闭环轮次/预算」（如 2/3）；stageTone 仍复用成员卡聚合规则。`progress` 是可选字段，不进入结构 hash，更新不触发重排。
+阶段头计数：区域 stage 通过 `WorkflowCanvasStageInput.progress = { completed: 已闭环轮次, total: 轮次预算 }` 覆盖默认的「成功卡数/卡数」，显示「已闭环轮次/预算」（如 2/3）。生成/评审讨论进行中时，`composeHypothesisFirstGraph(..., { demotePipelineStages: true })` 把 16 节点阶段 `stageTone` 降为 `idle`，假说先行阶段为 `active`。`progress` 是可选字段，不进入结构 hash，更新不触发重排。
 
 ### 适用范围
 
 - 仅假说先行题目（存在选择记录或 scoped 会议/搜集请求）的科研流程工作区画布；定义视图与运行视图同样合成。
-- 区域卡片无后端 node detail：Inspector 显示链摘要 + 深链赛题详情对应面板（选择 / 团队讨论 / 假说轮次时间线），`useNodeDetailState` 对 `hf_` 前缀节点直接返回 empty。
+- 区域卡片无后端 node detail：画布右侧 Inspector 是该阶段的**活操作面**（看讨论、生成纪要、确认、勾选假说、看搜集进度与恢复）。赛题详情只当验收档案；目录题无审核工件时详情 fail-soft，选择和会议仍可操作。`useNodeDetailState` 对 `hf_` 前缀节点直接返回 empty。
+- 顶栏只做「前往/查看」导航（`navigationLabel`）；Inspector 才执行写命令（`commandLabel`）。禁止同名按钮既导航又写入。有 run 时顶栏主按钮是前往当前任务，「新建运行」为次要。切换器文案为「切换实验」。
+- 创建/切换实验后按下一步模型定位 `hf_generation` / `hf_selection` / 已有搜集运行的 `source_finding`，不得默认落到被锁住的资料寻找。`collectionReady` 只表示搜集决策已成立；ensure 成功后 Inspector 显示「资料搜集中」，不再提供第二个「开始资料搜集」。
 - 轮次增加 = 拓扑变化 → 结构 hash 变化 → 自动重排；状态翻转不重排。
 
 ### 使用方式
@@ -159,7 +162,9 @@ const base = projectionToCanvasGraph(projection);
 const region = buildHypothesisFirstCanvasRegion({
   chainState, meetings, collectionRequests, reviewRoundLinks, selection,
 });
-const graph = composeHypothesisFirstGraph(base, region); // region 为 null 时原样返回 base
+const graph = composeHypothesisFirstGraph(base, region, {
+  demotePipelineStages: discussionActive,
+}); // region 为 null 时原样返回 base
 ```
 
 链数据由 `useHypothesisFirstChain(teamId, questionId)`（React Query，questionId 为空不发请求）提供；run SSE 事件经 `useHypothesisFirstChainInvalidation` 防抖失效相关 query。
@@ -168,10 +173,10 @@ const graph = composeHypothesisFirstGraph(base, region); // region 为 null 时�
 
 画布拓扑仍是一张图。顶栏切换的是**已开始的题目实验实例**，不是 125 题目录，也不是 Program 冻结的 `EXP-*` campaign。
 
-- 选项来自 `launch-options.questions[].checkpoint`（题目最新 workflow run）。文案：`SCI-096 · 当前节点 · 进度 · 状态`，description 为题目标题。
-- 选中一项即写入 URL：`questionId` + `runId` + `node=checkpoint.currentNodeId`。画布加载该 run 的投影（LangGraph/n8n/AutoGen Studio 的 thread/execution/session 切换语义）。
-- 顶栏常驻当前题号、标题与假说摘要（未选则写「尚未选择假说 / 尚未选择实验」）。假说正文仍在赛题详情，不把 125 题假说陈述预拉进切换器。
-- 「创建运行 / 新建运行」仍打开 launch 面板；切换器只列出已有 checkpoint 的实验。
+- 选项来自 `launch-options.questions[].checkpoint`（题目最新 workflow run）。文案：`SCI-096 · 假说摘要`（未选则「尚未选择假说」），description 为题目标题。过滤 `cancelled` checkpoint。
+- 选中一项即写入 URL：`questionId` + `runId` + `node=` 下一步模型算出的当前任务（生成讨论 / 选择 / 已有搜集运行），**不是**盲用 `checkpoint.currentNodeId` 的 `source_finding`。
+- 顶栏常驻当前题号、标题与假说摘要（未选则写「尚未选择假说 / 尚未选择实验」）。切换器 aria 为「切换实验」。假说正文仍在赛题详情，不把 125 题假说陈述预拉进切换器。
+- 有 run 时主按钮是「前往…」当前任务；「创建运行 / 新建运行」降为次要并仍打开 launch 面板。
 
 ### 渲染契约补丁（2026-08-19 修复）
 
@@ -179,7 +184,6 @@ const graph = composeHypothesisFirstGraph(base, region); // region 为 null 时�
 
 ### 限制
 
-- 不接真实 node command adapters（Inspector 仍走现有 ops）
-- 不改变迭代决策后端语义
-- 不实现 SSE
-- 不引入第二套设计系统 / HeroUI
+- 画布节点仍是投影，不是新的 backend node；不改 16 节点执行拓扑
+- 不把整份单题验收（审核工件、修订登记）塞进 Inspector
+- 不引入第二套设计系统 / HeroUI；路由不直连 `renderers/shadcn`

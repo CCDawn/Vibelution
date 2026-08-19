@@ -32,6 +32,8 @@ export function ResearchWorkflowToolbar(props: {
   panel: ResearchProcessPanel;
   createDisabled: boolean;
   createDisabledReason?: string;
+  navigationLabel?: string;
+  onNavigateCurrent?: () => void;
   onSelectExperiment: (questionId: string) => void;
   onOpenPanel: (panel: ResearchProcessPanel) => void;
 }) {
@@ -47,8 +49,8 @@ export function ResearchWorkflowToolbar(props: {
         {props.experimentOptions.length > 0 ? (
           <VSelect
             density="compact"
-            aria-label={isZh ? "切换假说" : "Switch hypothesis"}
-            placeholder={isZh ? "选择假说" : "Select hypothesis"}
+            aria-label={isZh ? "切换实验" : "Switch experiment"}
+            placeholder={isZh ? "选择实验" : "Select experiment"}
             selectedKey={selectedQuestionId}
             options={props.experimentOptions.map((item) => ({
               id: item.questionId,
@@ -81,10 +83,20 @@ export function ResearchWorkflowToolbar(props: {
           <VButton type="button" density="compact" variant={props.panel === "team" ? "secondary" : "ghost"} onClick={() => props.onOpenPanel("team")}>{isZh ? "团队" : "Team"}</VButton>
           <VButton type="button" density="compact" variant={props.panel === "progress" || props.panel === "question" ? "secondary" : "ghost"} onClick={() => props.onOpenPanel("progress")}>{isZh ? "题目进度" : "Progress"}</VButton>
         </VActionGroup>
+        {props.runId ? (
+          <VButton
+            type="button"
+            density="compact"
+            variant="primary"
+            onClick={() => props.onNavigateCurrent?.()}
+          >
+            {props.navigationLabel || (isZh ? "前往当前任务" : "Go to current task")}
+          </VButton>
+        ) : null}
         <VButton
           type="button"
           density="compact"
-          variant={props.panel === "launch" ? "secondary" : "primary"}
+          variant={props.runId ? (props.panel === "launch" ? "secondary" : "ghost") : (props.panel === "launch" ? "secondary" : "primary")}
           onClick={() => props.onOpenPanel("launch")}
           isDisabled={props.createDisabled}
           disabledReason={props.createDisabledReason}

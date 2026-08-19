@@ -22,6 +22,7 @@ export function ResearchTeamPanel(props: {
   run: WorkflowRunRecord | null;
   projection: WorkflowCanvasProjection | null;
   effectiveBindings: EffectiveAgentBinding[] | null;
+  meetingRoundId?: string;
 }) {
   const { lang } = useShellI18n();
   const isZh = lang === "zh";
@@ -50,6 +51,7 @@ export function ResearchTeamPanel(props: {
     props.linkedChatRoomId,
     returnTo,
     isZh ? "返回科研流程" : "Back to research workflow",
+    props.meetingRoundId,
   );
 
   return (

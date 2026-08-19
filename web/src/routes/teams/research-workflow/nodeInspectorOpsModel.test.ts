@@ -13,6 +13,8 @@ import {
   providerVisualId,
   remainingCommandOffers,
   researchAgentConfigRoute,
+  commandOfferUnavailableReason,
+  withoutStartNodeOffers,
 } from "./nodeInspectorOpsModel";
 
 function offer(partial: Partial<CommandOffer> & Pick<CommandOffer, "command" | "label">): CommandOffer {
@@ -116,5 +118,22 @@ describe("nodeInspectorOpsModel", () => {
       status: null,
       budgetWarn: false,
     }).label).toBe("待指定");
+  });
+
+  it("maps hypothesis_first_meeting_open to product copy and hides start offers", () => {
+    const blocked = offer({
+      command: "start_node",
+      label: "启动 资料寻找",
+      available: false,
+      reasonCode: "hypothesis_first_meeting_open",
+      payload: { remediation_label: "前往闭环首轮假说讨论" },
+    });
+    expect(commandOfferUnavailableReason(blocked, true)).toBe("前往闭环首轮假说讨论");
+    expect(commandOfferUnavailableReason({
+      ...blocked,
+      payload: {},
+    }, true)).toBe("前往闭环首轮假说讨论");
+    expect(commandOfferUnavailableReason(blocked, true)).not.toBe("hypothesis_first_meeting_open");
+    expect(withoutStartNodeOffers([blocked, offer({ command: "retry_node", label: "重试" })]).map((item) => item.command)).toEqual(["retry_node"]);
   });
 });

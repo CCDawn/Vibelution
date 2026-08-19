@@ -6,6 +6,7 @@ import type {
   WorkflowRunRecord,
 } from "../../../api/researchWorkflow";
 import type { ResearchWorkflowNodeDetail } from "../../../api/types/research-workflow/core";
+import { fetchHypothesisFirstFocusNode } from "./hypothesisFirstFocus";
 
 type ReplaceParams = (patch: Record<string, string | null | undefined>) => void;
 
@@ -48,9 +49,12 @@ export function useResearchWorkflowCommands(options: {
       setError(null);
       try {
         const created = await createRun(input);
+        const questionId = created.questionId || input.questionId;
+        const node = await fetchHypothesisFirstFocusNode(options.teamId, questionId);
         replaceParams({
           runId: created.runId,
-          node: created.runtimeCurrentNodeIds?.[0] || "source_finding",
+          questionId,
+          node,
           panel: "node",
         });
       } catch (reason) {
@@ -59,7 +63,7 @@ export function useResearchWorkflowCommands(options: {
         throw reason;
       }
     },
-    [createRun, replaceParams],
+    [createRun, options.teamId, replaceParams],
   );
 
   const submitOffer = useCallback(

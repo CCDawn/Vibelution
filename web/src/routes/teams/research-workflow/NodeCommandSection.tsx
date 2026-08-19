@@ -3,15 +3,11 @@ import { useState } from "react";
 import type { CommandOffer } from "../../../api/types/research-workflow/commands";
 import { VButton } from "../../../components/vui";
 import { researchWorkflowErrorInlineText } from "../researchWorkflowErrorModel";
+import { commandOfferUnavailableReason } from "./nodeInspectorOpsModel";
 import styles from "./NodeCommandSection.styles";
 
 function offerReason(offer: CommandOffer, isZh: boolean): string {
-  if (offer.available) return "";
-  const code = offer.reasonCode || offer.blockerIds[0] || "command_unavailable";
-  if (code === "retry_owns_recovery") return isZh ? "当前节点已阻塞，请使用重试" : "Node is blocked; use retry";
-  if (code === "node_in_flight") return isZh ? "当前节点已在执行" : "Node is already running";
-  if (code === "node_already_succeeded") return isZh ? "当前节点已完成" : "Node already completed";
-  return code;
+  return commandOfferUnavailableReason(offer, isZh);
 }
 
 export function NodeCommandSection(props: {

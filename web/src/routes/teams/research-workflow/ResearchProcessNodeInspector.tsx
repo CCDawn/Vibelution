@@ -1,12 +1,17 @@
 import type { NodeHandoffRecord, ResearchBudgetProjection, EffectiveAgentBinding } from "../../../api/types/researchWorkflow";
 import type { ResearchWorkflowNodeDetail } from "../../../api/types/research-workflow/core";
-import { VEmptyState, VSurface } from "../../../components/vui";
+import { VButton, VEmptyState, VSurface } from "../../../components/vui";
 import { useShellI18n } from "../../../i18n/useShellI18n";
 import type { NodeAdapterSpec } from "./nodeAdapterModel";
 import { NodeAgentSection } from "./NodeAgentSection";
 import { NodeCommandSection } from "./NodeCommandSection";
 import { NodeHandoffSection } from "./NodeHandoffSection";
-import { pickPrimaryCommandOffer, remainingCommandOffers } from "./nodeInspectorOpsModel";
+import {
+  isHypothesisFirstMeetingBlocker,
+  pickPrimaryCommandOffer,
+  remainingCommandOffers,
+  withoutStartNodeOffers,
+} from "./nodeInspectorOpsModel";
 import { researchActorLabel, researchStageLabel } from "./researchNodePresentation";
 import styles from "./ResearchProcessNodeInspector.styles";
 import type { CommandOffer } from "../../../api/types/research-workflow/commands";
@@ -22,6 +27,10 @@ export type ResearchProcessNodeInspectorProps = {
   handoffPending: boolean;
   busy: boolean;
   onOffer: (offer: CommandOffer) => Promise<void>;
+  hideStartOffer?: boolean;
+  statusBanner?: string | null;
+  hypothesisNavLabel?: string | null;
+  onNavigateHypothesis?: () => void;
 };
 
 export function ResearchProcessNodeInspector(props: ResearchProcessNodeInspectorProps) {
@@ -47,12 +56,19 @@ export function ResearchProcessNodeInspector(props: ResearchProcessNodeInspector
   }
 
   const { adapter, detail } = props;
+  const offers = props.hideStartOffer
+    ? withoutStartNodeOffers(detail.commandOffers)
+    : (detail.commandOffers ?? []);
   const primaryOffer = adapter.actorKind === "agent"
-    ? pickPrimaryCommandOffer(detail.commandOffers)
+    ? pickPrimaryCommandOffer(offers)
     : null;
   const restOffers = adapter.actorKind === "agent"
-    ? remainingCommandOffers(detail.commandOffers, primaryOffer)
-    : (detail.commandOffers ?? []);
+    ? remainingCommandOffers(offers, primaryOffer)
+    : offers;
+  const showHypothesisNav = Boolean(
+    props.onNavigateHypothesis
+    && (props.hypothesisNavLabel || (primaryOffer && isHypothesisFirstMeetingBlocker(primaryOffer))),
+  );
 
   return (
     <VSurface tone="panel" className={styles.root} data-vui="node-inspector">
@@ -76,6 +92,21 @@ export function ResearchProcessNodeInspector(props: ResearchProcessNodeInspector
           <div className={styles.meta}>{researchActorLabel(adapter.actorKind)}</div>
         </header>
       )}
+      {props.statusBanner ? (
+        <div role="status" className={styles.status}>{props.statusBanner}</div>
+      ) : null}
+      {showHypothesisNav ? (
+        <div className={styles.nav}>
+          <VButton
+            type="button"
+            variant="secondary"
+            density="compact"
+            onPress={() => props.onNavigateHypothesis?.()}
+          >
+            {props.hypothesisNavLabel || (isZh ? "前往闭环首轮假说讨论" : "Go to the first hypothesis discussion")}
+          </VButton>
+        </div>
+      ) : null}
       <NodeHandoffSection
         handoffs={props.handoffs ?? []}
         pending={props.handoffPending}
