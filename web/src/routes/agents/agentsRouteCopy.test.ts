@@ -34,15 +34,10 @@ describe("agentsRouteCopy", () => {
     } as AgentConfigWorkspaceAgent);
     expect(panes.map((pane) => pane.id)).toEqual([
       "overview",
-      "effective",
-      "relations",
       "config",
-      "changes",
       "activity",
     ]);
     expect(panes.find((pane) => pane.id === "config")?.count).toBe(2);
-    expect(panes.find((pane) => pane.id === "effective")?.count).toBe(1);
-    expect(panes.find((pane) => pane.id === "relations")?.count).toBe(1);
     expect(panes.find((pane) => pane.id === "activity")?.count).toBe(3);
     expect(panes.find((pane) => pane.id === "overview")?.count).toBe(0);
   });

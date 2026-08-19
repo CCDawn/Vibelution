@@ -84,6 +84,10 @@ import {
 import { type AgentResetOptions } from "./AgentDebugResetPanel";
 import { type AgentMemoryPolicyDraft } from "./AgentMemoryPolicyPanel";
 import { type AgentModeMembershipDraft } from "./AgentModeMembershipPanel";
+import {
+  type AgentFocusedOverviewAttention,
+  type AgentFocusedOverviewPanelProps,
+} from "./AgentFocusedOverviewPanel";
 import { AgentManagementHeaderPanel } from "./AgentManagementHeaderPanel";
 import {
   type AgentOverviewFact,
@@ -100,13 +104,6 @@ import {
 import { type AgentTaskDraft } from "./AgentTaskProfilePanel";
 import { AgentWorkspaceLayoutPanel } from "./AgentWorkspaceLayoutPanel";
 import { governanceStatusLabel } from "./agents/agentStatusPresentation";
-import { teamWorkspaceRoute } from "./teams/researchWorkspaceModel";
-
-const AgentEffectiveConfigurationInspectorPanel = lazy(() =>
-  import("./AgentEffectiveConfigurationPanel").then((module) => ({
-    default: module.AgentEffectiveConfigurationInspectorPanel,
-  })),
-);
 
 /** U1: create wizard only when open — keep wizard graph out of Agents shell. */
 const AgentCreateWizardDialog = lazy(() =>
@@ -433,7 +430,6 @@ export function AgentsRoute() {
   const [searchText, setSearchText] = useState("");
   const [selectedAgentId, setSelectedAgentId] = useState("");
   const [activePane, setActivePane] = useState<AgentConfigPaneId>("overview");
-  const [selectedEffectiveFieldKey, setSelectedEffectiveFieldKey] = useState("");
   const createOpen = requestedCreate;
   const [configDraft, setConfigDraft] = useState<AgentConfigDraft>(() => draftFromAgent(null));
   const [membershipDraft, setMembershipDraft] = useState<AgentModeMembershipDraft>(() => membershipDraftFromWorkspace(undefined, null));
@@ -449,11 +445,7 @@ export function AgentsRoute() {
   const [toolSearchText, setToolSearchText] = useState("");
   const [focusedMessageId, setFocusedMessageId] = useState("");
   const [avatarEditorOpen, setAvatarEditorOpen] = useState(false);
-  const [inspectorOpen, setInspectorOpen] = useState(() => (
-    typeof window === "undefined" || typeof window.matchMedia !== "function"
-      ? true
-      : window.matchMedia("(min-width: 1180px)").matches
-  ));
+  const [inspectorOpen, setInspectorOpen] = useState(false);
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [selectedBulkAgentIds, setSelectedBulkAgentIds] = useState<Set<string>>(() => new Set());
   const [bulkSelectionAnchorAgentId, setBulkSelectionAnchorAgentId] = useState("");
@@ -465,16 +457,6 @@ export function AgentsRoute() {
   const draftSyncSourceRef = useRef<AgentDraftSyncSource | null>(null);
   const appliedRouteTargetRef = useRef("");
   const agentCreateTriggerRef = useRef<HTMLButtonElement | null>(null);
-
-  useEffect(() => {
-    if (typeof window.matchMedia !== "function") {
-      return;
-    }
-    const media = window.matchMedia("(min-width: 1180px)");
-    const syncInspector = (event: MediaQueryListEvent) => setInspectorOpen(event.matches);
-    media.addEventListener("change", syncInspector);
-    return () => media.removeEventListener("change", syncInspector);
-  }, []);
 
   useEffect(() => {
     const refreshPresence = () => setConfigDraftPresenceDirty(readConfigDraftPresence());
@@ -493,7 +475,7 @@ export function AgentsRoute() {
     };
   }, []);
 
-  const fullWorkspaceNeeded = Boolean(activePane === "effective" || activePane === "relations" || activePane === "config" || activePane === "activity" || requestedAgentId);
+  const fullWorkspaceNeeded = Boolean(selectedAgentId || activePane === "config" || activePane === "activity" || requestedAgentId);
   const workspaceQuery = useQuery({
     queryKey: queryKeys.agentConfigWorkspace(),
     queryFn: () => fetchAgentConfigWorkspace<AgentConfigWorkspaceWithTeamIndexes>({ includeRuntime: false }),
@@ -670,17 +652,6 @@ export function AgentsRoute() {
     () => selectedAgent?.effectiveConfiguration?.fields ?? [],
     [selectedAgent?.effectiveConfiguration],
   );
-  const selectedEffectiveField = effectiveConfigurationFields.find(
-    (field) => field.key === selectedEffectiveFieldKey,
-  ) ?? effectiveConfigurationFields[0] ?? null;
-
-  useEffect(() => {
-    const firstKey = effectiveConfigurationFields[0]?.key ?? "";
-    setSelectedEffectiveFieldKey((current) => (
-      effectiveConfigurationFields.some((field) => field.key === current) ? current : firstKey
-    ));
-  }, [effectiveConfigurationFields]);
-
   const selectedTeamRelations = useMemo(() => {
     if (!selectedAgent) {
       return [];
@@ -710,7 +681,7 @@ export function AgentsRoute() {
   const configChangesQuery = useQuery({
     queryKey: ["agents", "config-changes", selectedAgent?.agentId ?? ""],
     queryFn: () => fetchAgentConfigChanges(selectedAgent?.agentId ?? ""),
-    enabled: Boolean(selectedAgent?.agentId && (activePane === "changes" || activePane === "config")),
+    enabled: Boolean(selectedAgent?.agentId && (activePane === "activity" || activePane === "config")),
     staleTime: 8_000,
   });
   const activeConfigDraftId = configChangesQuery.data?.activeDraft?.draftId ?? "";
@@ -2132,7 +2103,7 @@ export function AgentsRoute() {
       onOpenSession: runtimeFocusSessionId ? () => openAgentSession(runtimeFocusSessionId) : undefined,
       onOpenLogs: () => openAgentLogs(runtimeFocusEvidence.match),
     },
-    activities: activityTimeline.slice(0, 5).map((item) => ({
+    activities: activityTimeline.slice(0, 6).map((item) => ({
       id: item.id,
       title: item.title,
       body: item.body,
@@ -2185,10 +2156,99 @@ export function AgentsRoute() {
     },
   } : null;
 
+  const focusedOverview: AgentFocusedOverviewPanelProps | null = selectedAgent ? (() => {
+    const runs = agentRunsQuery.data?.runs ?? [];
+    const latestRun = runs.reduce<(typeof runs)[number] | null>((latest, run) => {
+      if (!latest) return run;
+      const latestAt = Date.parse(latest.updatedAt || latest.finishedAt || latest.startedAt);
+      const runAt = Date.parse(run.updatedAt || run.finishedAt || run.startedAt);
+      return Number.isFinite(runAt) && (!Number.isFinite(latestAt) || runAt > latestAt) ? run : latest;
+    }, null);
+    const modelFact = selectedAgentOverviewPanel?.facts.find((fact) => fact.id === "model");
+    const healthTone = issueTone(selectedAgent.health);
+    const statusTone = healthTone === "blocking"
+      ? "danger" as const
+      : healthTone === "warning"
+        ? "warning" as const
+        : selectedAgent.runtimeStatus?.state === "running"
+          ? "accent" as const
+          : "success" as const;
+    const pendingApprovalCount = (selectedAgent.toolGovernanceRequests ?? [])
+      .filter((request) => request.status === "pending_review").length;
+    const attentionCandidates: AgentFocusedOverviewAttention[] = [
+      ...(pendingApprovalCount > 0 ? [{
+        id: "pending-tool-approvals",
+        title: lang === "zh" ? `${pendingApprovalCount} 项工具审批待处理` : `${pendingApprovalCount} tool approvals pending`,
+        detail: lang === "zh" ? "到配置页处理授权申请后再继续运行。" : "Resolve the grants in Config before the next run.",
+        tone: "warning" as const,
+      }] : []),
+      ...selectedAgent.health.map((issue) => ({
+        id: `health:${issue.code || issue.title}`,
+        title: issue.title || (lang === "zh" ? "运行提醒" : "Runtime notice"),
+        detail: issue.detail || issue.action || "-",
+        tone: issue.severity === "blocking"
+          ? "danger" as const
+          : issue.severity === "warning"
+            ? "warning" as const
+            : "neutral" as const,
+      })),
+      ...managementBrief.actions.map((action) => ({
+        id: `action:${action.id}`,
+        title: action.label,
+        detail: action.detail,
+        tone: "neutral" as const,
+      })),
+    ];
+    const seenAttentionIds = new Set<string>();
+    const attentionItems = attentionCandidates.filter((item) => {
+      if (seenAttentionIds.has(item.id)) return false;
+      seenAttentionIds.add(item.id);
+      return true;
+    });
+
+    return {
+      lang,
+      summary: {
+        statusLabel: runtimeStatusLabel(selectedAgent, lang),
+        statusTone,
+        statusDetail: `${issueLabel(selectedAgent.health, lang)} · ${issueSummary(selectedAgent.health, lang)}`,
+        modelLabel: modelFact?.value || "-",
+        modelDetail: modelFact?.title || "-",
+        revisionLabel: Number.isFinite(selectedAgent.configRevision)
+          ? `r${selectedAgent.configRevision}`
+          : "-",
+        latestRunLabel: formatTimestamp(
+          latestRun?.updatedAt
+            || latestRun?.finishedAt
+            || latestRun?.startedAt
+            || selectedAgent.runtimeStatus?.updatedAt
+            || "",
+          lang,
+        ),
+      },
+      effectiveFields: effectiveConfigurationFields,
+      activities: overviewOperations?.activities ?? [],
+      activityState: overviewOperations?.state ?? "ready",
+      activityError: overviewOperations?.errorMessage,
+      identity: {
+        roleLabel: agentFunctionalLabel(selectedAgent, lang),
+        modeLabel: modeLabel(selectedAgent.primaryMode, lang),
+        workspaceLabel: selectedAgent.workspaceTerritory?.defaultWriteScope
+          || selectedAgent.workspacePath
+          || "-",
+        teamNames: selectedTeamRelations.map((relation) => relation.name),
+      },
+      runs,
+      pendingApprovalCount,
+      attentionItems,
+      onOpenConfig: () => setActivePane("config"),
+      onOpenActivity: () => setActivePane("activity"),
+    };
+  })() : null;
+
   const selectedAgentDetailContent: AgentSelectedDetailContentPanelProps | null = selectedAgent ? {
     activePane,
     preferOpsSection: (selectedAgent.health?.length ?? 0) > 0,
-    inspectorInWorkspaceRail: true,
     header: {
       copy,
       lang,
@@ -2216,7 +2276,7 @@ export function AgentsRoute() {
       onUploadAvatar: uploadSelectedAgentAvatar,
       onResetAvatar: resetSelectedAgentAvatar,
       onSelectAvatar: selectAgentAvatar,
-      onSelectPane: setActivePane,
+      onSelectPane: (pane) => setActivePane(normalizeAgentConfigPane(pane)),
       onToggleInspector: () => setInspectorOpen((open) => !open),
       onRun: runtimeFocusSessionId ? () => openAgentSession(runtimeFocusSessionId) : undefined,
     },
@@ -2231,23 +2291,10 @@ export function AgentsRoute() {
       onOpenRoute: (route: string) => {
         void navigate(route);
       },
-      onSelectPane: setActivePane,
+      onSelectPane: (pane) => setActivePane(normalizeAgentConfigPane(pane)),
     },
-    overview: selectedAgentOverviewPanel,
-    operations: overviewOperations,
+    overview: focusedOverview,
     resources: overviewResources,
-    effectiveConfiguration: {
-      fields: effectiveConfigurationFields,
-      selectedFieldKey: selectedEffectiveField?.key ?? "",
-      onSelectField: setSelectedEffectiveFieldKey,
-      onOpenConfig: () => setActivePane("config"),
-    },
-    teamRelations: {
-      relations: selectedTeamRelations,
-      onOpenTeam: (teamId: string) => {
-        void navigate(teamWorkspaceRoute(teamId));
-      },
-    },
     configChanges: {
       changes: configChangesQuery.data,
       configDirty,
@@ -2585,6 +2632,8 @@ export function AgentsRoute() {
         className={styles.route}
         ariaLabel={copy.title}
         title={copy.title}
+        narrowDetailTarget={requestedAgentId}
+        narrowBackLabel={lang === "zh" ? "返回 Agent 列表" : "Back to Agent list"}
         toolbar={(
           <AgentManagementHeaderPanel
             copy={{
@@ -2645,6 +2694,7 @@ export function AgentsRoute() {
             },
             columns: denseColumns,
             visibleAgentCount: visibleAgents.length,
+            bulkSelectionVisible: selectedBulkAgents.length > 0,
             isError: agentWorkspaceInitialError || agentWorkspaceBackgroundError,
             error: agentWorkspaceError,
             isPending: agentWorkspaceInitialLoading,
@@ -2693,20 +2743,10 @@ export function AgentsRoute() {
         inspectorRail={selectedAgentDetailContent && inspectorOpen ? {
           ariaLabel: lang === "zh" ? "Agent 侧栏" : "Agent inspector",
           title: lang === "zh" ? "检查器" : "Inspector",
-          subtitle: activePane === "effective" && selectedEffectiveField
-            ? selectedEffectiveField.label
-            : agentLabel(selectedAgent!),
+          subtitle: agentLabel(selectedAgent!),
           emptyTitle: lang === "zh" ? "选择 Agent 查看侧栏" : "Select an Agent",
           brief: selectedAgentDetailContent.brief,
           resources: selectedAgentDetailContent.resources,
-          extra: activePane === "effective" ? (
-            <Suspense fallback={null}>
-              <AgentEffectiveConfigurationInspectorPanel
-                field={selectedEffectiveField}
-                onOpenConfig={() => setActivePane("config")}
-              />
-            </Suspense>
-          ) : null,
           closeLabel: lang === "zh" ? "关闭检查器" : "Close inspector",
           onClose: () => setInspectorOpen(false),
         } : null}

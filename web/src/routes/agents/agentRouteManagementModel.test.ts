@@ -99,6 +99,9 @@ describe("agentRouteManagementModel", () => {
     expect(columns.map((column) => column.id)).toContain("session_agents");
     expect(columns.some((column) => column.id.startsWith("team_agents:"))).toBe(true);
     expect(normalizeAgentConfigPane("config")).toBe("config");
+    expect(normalizeAgentConfigPane("effective")).toBe("overview");
+    expect(normalizeAgentConfigPane("relations")).toBe("overview");
+    expect(normalizeAgentConfigPane("changes")).toBe("activity");
     expect(normalizeAgentConfigPane("nope")).toBe("overview");
     expect(groupSectionId({ section: "team_index" } as never)).toBe("team_index");
   });
