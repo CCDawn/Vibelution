@@ -41,6 +41,7 @@ from core.research.workflow.contracts import (
     ActorRef,
     CommandRequest,
     WorkflowCommandKind,
+    scope_hash_for,
 )
 from core.web.services import (
     agent_directory_service,
@@ -1041,7 +1042,20 @@ def test_reselection_chain_and_round_lineage_walk(
                 first_selection_id,
                 re_selection["selectionId"],
             ]
-            latest = selections.get_latest_hypothesis_selection(team_id, _QUESTION_ID)[
+            latest_scope = _scope_fields(agent_ids[0])
+            latest_scope["scopeHash"] = scope_hash_for(
+                **{
+                    field: latest_scope[field]
+                    for field in ("program", "theme", "campaign", "question", "branch", "workflow")
+                },
+                agent_id=latest_scope["agentId"],
+                mode=latest_scope["mode"],
+            )
+            latest = selections.get_latest_hypothesis_selection(
+                team_id,
+                _QUESTION_ID,
+                scope=latest_scope,
+            )[
                 "selection"
             ]
             assert latest["selectionId"] == re_selection["selectionId"]
