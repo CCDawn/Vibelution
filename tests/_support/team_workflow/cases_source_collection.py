@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from tests._support.team_workflow.helpers import *  # noqa: F403
+from tests.test_challenge_question_runs import _append_canonical_turn_output
+
 
 def test_source_collection_summary_reuses_processing_status_for_projection(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
@@ -8138,6 +8140,15 @@ def test_challenge_qwen_stage_task_records_bounded_canonical_evidence(tmp_path, 
         team["teamId"],
         run_response["run"]["runId"],
         {"stageId": "finding", "agentId": finder["agentId"], "agentRole": "source_finder"},
+    )
+
+    _append_canonical_turn_output(
+        tmp_path,
+        {
+            "sessionId": task["sessionId"],
+            "turn": {"turnId": "turn-challenge-qwen-1"},
+        },
+        {"run": {"run_id": run_response["run"]["runId"]}},
     )
 
     reconciled = team_workflow_orchestration_service.reconcile_source_collection_stage_session_task_after_turn(
