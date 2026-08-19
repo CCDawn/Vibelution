@@ -14,6 +14,7 @@ import {
   EdgeLabelRenderer,
   type EdgeProps,
 } from "@xyflow/react";
+import { useSmartEdgePath } from "@tisoap/react-flow-smart-edge";
 import { useMemo, useState } from "react";
 
 import { cn } from "../../../lib/cn";
@@ -31,7 +32,11 @@ import {
   sectionsToSvgPath,
 } from "./workflowElkEdgePath";
 import { workflowEdgeKeepsNarrativeLabel } from "./workflowElkOptions";
-import { resolveWorkflowManualEdgeGeometry } from "./workflowManualLayout";
+import {
+  resolveWorkflowManualEdgeGeometry,
+  workflowEdgeTerminalLead,
+  type WorkflowEdgeTerminalSide,
+} from "./workflowManualLayout";
 
 export type WorkflowSemanticEdgeData = {
   label?: string;
@@ -45,10 +50,14 @@ export type WorkflowSemanticEdgeData = {
   labelBounds?: WorkflowLabelBounds;
   /** True once a manual visual position is active or a task is being dragged. */
   manualRouteActive?: boolean;
+  /** Smart routing pauses during drag; the local terminal-safe path stays live. */
+  manualDragging?: boolean;
 };
 
 export function WorkflowSemanticEdge({
   id,
+  source,
+  target,
   data,
   markerEnd,
   style,
@@ -56,6 +65,8 @@ export function WorkflowSemanticEdge({
   sourceY,
   targetX,
   targetY,
+  sourcePosition,
+  targetPosition,
 }: EdgeProps) {
   const [hovered, setHovered] = useState(false);
   const edgeData = data as WorkflowSemanticEdgeData | undefined;
@@ -65,6 +76,30 @@ export function WorkflowSemanticEdge({
   const always = Boolean(edgeData?.labelAlwaysVisible);
   const gateKind = String(edgeData?.gateKind ?? "");
   const stroke = resolveEdgeStroke(pathState, semanticKind);
+  const sourceSide = sourcePosition as WorkflowEdgeTerminalSide;
+  const targetSide = targetPosition as WorkflowEdgeTerminalSide;
+  const smartWaypoints = useMemo(
+    () => areFinite(sourceX, sourceY, targetX, targetY)
+      ? [
+          workflowEdgeTerminalLead({ x: sourceX, y: sourceY }, sourceSide),
+          workflowEdgeTerminalLead({ x: targetX, y: targetY }, targetSide),
+        ]
+      : [],
+    [sourceSide, sourceX, sourceY, targetSide, targetX, targetY],
+  );
+  const smartEdge = useSmartEdgePath({
+    id,
+    source,
+    target,
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    sourcePosition,
+    targetPosition,
+    preset: "step",
+    waypoints: smartWaypoints,
+  });
 
   const sections = edgeData?.sections;
   const liveGeometry = useMemo(() => {
@@ -74,21 +109,32 @@ export function WorkflowSemanticEdge({
     return resolveWorkflowManualEdgeGeometry(
       { x: sourceX, y: sourceY },
       { x: targetX, y: targetY },
+      sourceSide,
+      targetSide,
     );
-  }, [edgeData?.manualRouteActive, sourceX, sourceY, targetX, targetY]);
+  }, [edgeData?.manualRouteActive, sourceSide, sourceX, sourceY, targetSide, targetX, targetY]);
+  const smartGeometry = edgeData?.manualRouteActive
+    && !edgeData.manualDragging
+    && smartEdge.route?.kind === "routed"
+    ? {
+        path: smartEdge.route.svgPathString,
+        labelAnchor: { x: smartEdge.route.edgeCenterX, y: smartEdge.route.edgeCenterY },
+      }
+    : null;
+  const manualGeometry = smartGeometry ?? liveGeometry;
   const edgePath = useMemo(
-    () => liveGeometry?.path ?? sectionsToSvgPath(sections ?? []),
-    [liveGeometry, sections],
+    () => manualGeometry?.path ?? sectionsToSvgPath(sections ?? []),
+    [manualGeometry, sections],
   );
   const sectionFault = useMemo(
-    () => (!liveGeometry && sections && sections.length > 0 ? !analyzeEdgeSections(sections).wellFormed : false),
-    [liveGeometry, sections],
+    () => (!manualGeometry && sections && sections.length > 0 ? !analyzeEdgeSections(sections).wellFormed : false),
+    [manualGeometry, sections],
   );
   const labelAnchor = useMemo(
-    () => liveGeometry?.labelAnchor ?? resolveEdgeLabelAnchor(edgeData?.labelBounds),
-    [edgeData?.labelBounds, liveGeometry],
+    () => manualGeometry?.labelAnchor ?? resolveEdgeLabelAnchor(edgeData?.labelBounds),
+    [edgeData?.labelBounds, manualGeometry],
   );
-  const labelFault = Boolean(label) && !liveGeometry && !edgeData?.labelBounds;
+  const labelFault = Boolean(label) && !manualGeometry && !edgeData?.labelBounds;
   // Shared label geometry contract: the rendered box is exactly the box the
   // layout claimed (spacer size), and long text is truncated the same way in
   // layout and render.
@@ -114,7 +160,8 @@ export function WorkflowSemanticEdge({
         markerEnd={markerEnd}
         data-section-fault={sectionFault ? "true" : undefined}
         data-label-fault={labelFault ? "true" : undefined}
-        data-manual-route={liveGeometry ? "true" : undefined}
+        data-manual-route={manualGeometry ? "true" : undefined}
+        data-smart-route={smartGeometry ? "true" : undefined}
         style={{
           ...style,
           stroke: stroke.stroke,

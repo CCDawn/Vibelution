@@ -20,6 +20,7 @@ import {
   type NodeTypes,
   type EdgeTypes,
 } from "@xyflow/react";
+import { SmartEdgeProvider } from "@tisoap/react-flow-smart-edge";
 import "@xyflow/react/dist/style.css";
 import {
   useCallback,
@@ -51,11 +52,16 @@ import { useWorkflowInitialFit } from "./useWorkflowInitialFit";
 import { resolveEdgeStroke } from "./workflowCanvasState";
 import type { WorkflowCanvasLayoutMode } from "./workflowElkOptions";
 import {
+  cloneWorkflowManualLayoutSnapshot,
   cloneWorkflowManualPositions,
   persistWorkflowManualLayout,
   readWorkflowManualLayout,
+  resolveWorkflowStageLabelPosition,
   snapWorkflowManualPosition,
+  WORKFLOW_STAGE_LABEL_HEIGHT,
+  WORKFLOW_STAGE_LABEL_WIDTH,
   type WorkflowManualLayoutScope,
+  type WorkflowManualLayoutSnapshot,
   type WorkflowManualPositions,
 } from "./workflowManualLayout";
 
@@ -180,6 +186,14 @@ function visualToRfType(visualKind: string): string {
 }
 
 const MANUAL_LAYOUT_HISTORY_LIMIT = 20;
+const WORKFLOW_SMART_EDGE_OPTIONS = {
+  preset: "step",
+  routeOnlyWhenBlocked: false,
+  routeWhileDragging: false,
+  debounceMs: 90,
+  nodePadding: 12,
+  gridRatio: 12,
+} as const;
 
 function WorkflowCanvasInner({
   graph,
@@ -205,31 +219,41 @@ function WorkflowCanvasInner({
     () => layout.nodes.filter((node) => node.kind === "task").map((node) => node.id).sort().join("\u0001"),
     [layout.nodes],
   );
+  const manualStageIdsKey = useMemo(
+    () => graph.stages.map((stage) => stage.stageId).sort().join("\u0001"),
+    [graph.stages],
+  );
   const manualScope = useMemo<WorkflowManualLayoutScope>(
     () => ({
       structureKey: layout.structureKey,
       runId: graph.run?.runId ?? null,
       nodeIds: manualNodeIdsKey ? manualNodeIdsKey.split("\u0001") : [],
+      stageIds: manualStageIdsKey ? manualStageIdsKey.split("\u0001") : [],
     }),
-    [graph.run?.runId, layout.structureKey, manualNodeIdsKey],
+    [graph.run?.runId, layout.structureKey, manualNodeIdsKey, manualStageIdsKey],
   );
   const [manualPositions, setManualPositions] = useState<WorkflowManualPositions>({});
+  const [stageLabelOffsets, setStageLabelOffsets] = useState<WorkflowManualPositions>({});
   const [manualLayoutLocked, setManualLayoutLocked] = useState(false);
-  const [manualHistory, setManualHistory] = useState<WorkflowManualPositions[]>([]);
+  const [manualHistory, setManualHistory] = useState<WorkflowManualLayoutSnapshot[]>([]);
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
   const manualPositionsRef = useRef<WorkflowManualPositions>({});
+  const stageLabelOffsetsRef = useRef<WorkflowManualPositions>({});
+  const stageAnchorByIdRef = useRef<Record<string, { x: number; y: number }>>({});
   const manualLockedRef = useRef(false);
-  const manualHistoryRef = useRef<WorkflowManualPositions[]>([]);
+  const manualHistoryRef = useRef<WorkflowManualLayoutSnapshot[]>([]);
   const manualDragFrameRef = useRef<number | null>(null);
 
   useEffect(() => {
     const saved = manualLayoutEnabled
       ? readWorkflowManualLayout(manualScope)
-      : { positions: {}, locked: false };
+      : { positions: {}, stageLabelOffsets: {}, locked: false };
     manualPositionsRef.current = saved.positions;
+    stageLabelOffsetsRef.current = saved.stageLabelOffsets;
     manualLockedRef.current = saved.locked;
     manualHistoryRef.current = [];
     setManualPositions(saved.positions);
+    setStageLabelOffsets(saved.stageLabelOffsets);
     setManualLayoutLocked(saved.locked);
     setManualHistory([]);
     setDraggingNodeId(null);
@@ -238,6 +262,10 @@ function WorkflowCanvasInner({
   useEffect(() => {
     manualPositionsRef.current = manualPositions;
   }, [manualPositions]);
+
+  useEffect(() => {
+    stageLabelOffsetsRef.current = stageLabelOffsets;
+  }, [stageLabelOffsets]);
 
   useEffect(() => {
     manualLockedRef.current = manualLayoutLocked;
@@ -253,55 +281,84 @@ function WorkflowCanvasInner({
     }
   }, []);
 
-  const commitManualLayout = useCallback((positions: WorkflowManualPositions, locked = manualLockedRef.current) => {
-    const nextPositions = cloneWorkflowManualPositions(positions);
-    manualPositionsRef.current = nextPositions;
+  const commitManualLayout = useCallback((snapshot: WorkflowManualLayoutSnapshot, locked = manualLockedRef.current) => {
+    const next = cloneWorkflowManualLayoutSnapshot(snapshot);
+    manualPositionsRef.current = next.positions;
+    stageLabelOffsetsRef.current = next.stageLabelOffsets;
     manualLockedRef.current = locked;
-    setManualPositions(nextPositions);
+    setManualPositions(next.positions);
+    setStageLabelOffsets(next.stageLabelOffsets);
     setManualLayoutLocked(locked);
-    persistWorkflowManualLayout(manualScope, { positions: nextPositions, locked });
+    persistWorkflowManualLayout(manualScope, { ...next, locked });
   }, [manualScope]);
 
   const rememberManualLayout = useCallback(() => {
     const next = [
       ...manualHistoryRef.current,
-      cloneWorkflowManualPositions(manualPositionsRef.current),
+      cloneWorkflowManualLayoutSnapshot({
+        positions: manualPositionsRef.current,
+        stageLabelOffsets: stageLabelOffsetsRef.current,
+      }),
     ].slice(-MANUAL_LAYOUT_HISTORY_LIMIT);
     manualHistoryRef.current = next;
     setManualHistory(next);
   }, []);
 
   const onNodeDragStart = useCallback((_event: unknown, node: Node) => {
-    if (!manualLayoutEnabled || manualLockedRef.current || node.type === "stageRegion") return;
+    if (!manualLayoutEnabled || manualLockedRef.current) return;
     rememberManualLayout();
     setDraggingNodeId(node.id);
   }, [manualLayoutEnabled, rememberManualLayout]);
 
   const onNodeDrag = useCallback((_event: unknown, node: Node) => {
-    if (!manualLayoutEnabled || manualLockedRef.current || node.type === "stageRegion") return;
-    const next = {
-      ...manualPositionsRef.current,
-      [node.id]: snapWorkflowManualPosition(node.position),
-    };
-    manualPositionsRef.current = next;
+    if (!manualLayoutEnabled || manualLockedRef.current) return;
+    if (node.type === "stageRegion") {
+      const stageId = String(node.data?.stageId ?? "");
+      const anchor = stageAnchorByIdRef.current[stageId];
+      if (!stageId || !anchor) return;
+      stageLabelOffsetsRef.current = {
+        ...stageLabelOffsetsRef.current,
+        [stageId]: snapWorkflowManualPosition({ x: node.position.x - anchor.x, y: node.position.y - anchor.y }),
+      };
+    } else {
+      manualPositionsRef.current = {
+        ...manualPositionsRef.current,
+        [node.id]: snapWorkflowManualPosition(node.position),
+      };
+    }
     if (manualDragFrameRef.current !== null) return;
     manualDragFrameRef.current = requestAnimationFrame(() => {
       manualDragFrameRef.current = null;
       setManualPositions(cloneWorkflowManualPositions(manualPositionsRef.current));
+      setStageLabelOffsets(cloneWorkflowManualPositions(stageLabelOffsetsRef.current));
     });
   }, [manualLayoutEnabled]);
 
   const onNodeDragStop = useCallback((_event: unknown, node: Node) => {
-    if (!manualLayoutEnabled || node.type === "stageRegion") return;
+    if (!manualLayoutEnabled) return;
     if (manualDragFrameRef.current !== null) {
       cancelAnimationFrame(manualDragFrameRef.current);
       manualDragFrameRef.current = null;
     }
-    const next = {
-      ...manualPositionsRef.current,
-      [node.id]: snapWorkflowManualPosition(node.position),
-    };
-    commitManualLayout(next);
+    if (node.type === "stageRegion") {
+      const stageId = String(node.data?.stageId ?? "");
+      const anchor = stageAnchorByIdRef.current[stageId];
+      if (stageId && anchor) {
+        stageLabelOffsetsRef.current = {
+          ...stageLabelOffsetsRef.current,
+          [stageId]: snapWorkflowManualPosition({ x: node.position.x - anchor.x, y: node.position.y - anchor.y }),
+        };
+      }
+    } else {
+      manualPositionsRef.current = {
+        ...manualPositionsRef.current,
+        [node.id]: snapWorkflowManualPosition(node.position),
+      };
+    }
+    commitManualLayout({
+      positions: manualPositionsRef.current,
+      stageLabelOffsets: stageLabelOffsetsRef.current,
+    });
     setDraggingNodeId(null);
   }, [commitManualLayout, manualLayoutEnabled]);
 
@@ -315,19 +372,29 @@ function WorkflowCanvasInner({
   }, [commitManualLayout]);
 
   const autoArrangeManualLayout = useCallback(() => {
-    if (Object.keys(manualPositionsRef.current).length > 0) {
+    if (
+      Object.keys(manualPositionsRef.current).length > 0
+      || Object.keys(stageLabelOffsetsRef.current).length > 0
+    ) {
       rememberManualLayout();
-      commitManualLayout({});
+      commitManualLayout({ positions: {}, stageLabelOffsets: {} });
     }
     requestAnimationFrame(() => fitAll());
   }, [commitManualLayout, fitAll, rememberManualLayout]);
 
   const toggleManualLayoutLock = useCallback(() => {
-    commitManualLayout(manualPositionsRef.current, !manualLockedRef.current);
+    commitManualLayout({
+      positions: manualPositionsRef.current,
+      stageLabelOffsets: stageLabelOffsetsRef.current,
+    }, !manualLockedRef.current);
   }, [commitManualLayout]);
 
   const manualRouteActive = manualLayoutEnabled
-    && (draggingNodeId !== null || Object.keys(manualPositions).length > 0);
+    && (
+      draggingNodeId !== null
+      || Object.keys(manualPositions).length > 0
+      || Object.keys(stageLabelOffsets).length > 0
+    );
 
   // P1-5: measured node types report rendered DOM sizes back to the layout
   // hook so the second pass of the layout uses real geometry.
@@ -363,16 +430,45 @@ function WorkflowCanvasInner({
     return map;
   }, [graph.stages]);
 
+  const stageAnchorById = useMemo(() => {
+    const anchors: Record<string, { x: number; y: number }> = {};
+    for (const stage of graph.stages) {
+      const stageLayout = layout.nodes.find((node) => node.kind === "stage" && node.stageId === stage.stageId);
+      const members = layout.nodes
+        .filter((node) => node.kind === "task" && (stage.nodeIds.includes(node.id) || node.stageId === stage.stageId))
+        .map((node) => ({
+          ...(manualPositions[node.id] ?? { x: node.x, y: node.y }),
+          width: node.width,
+          height: node.height,
+        }));
+      anchors[stage.stageId] = resolveWorkflowStageLabelPosition(
+        members,
+        { x: 0, y: 0 },
+        stageLayout ? { x: stageLayout.x, y: stageLayout.y } : { x: 0, y: 0 },
+      );
+    }
+    return anchors;
+  }, [graph.stages, layout.nodes, manualPositions]);
+
+  useEffect(() => {
+    stageAnchorByIdRef.current = stageAnchorById;
+  }, [stageAnchorById]);
+
   const nodes: Node[] = useMemo(
     () =>
       layout.nodes.map((node) => {
         if (node.kind === "stage") {
           const stageInput = graph.stages.find((stage) => stage.stageId === node.stageId);
+          const stageAnchor = stageAnchorById[node.stageId] ?? { x: node.x, y: node.y };
+          const stageOffset = stageLabelOffsets[node.stageId] ?? { x: 0, y: 0 };
           return {
             id: node.id,
             type: "stageRegion",
-            position: { x: node.x, y: node.y },
+            position: manualLayoutEnabled
+              ? { x: stageAnchor.x + stageOffset.x, y: stageAnchor.y + stageOffset.y }
+              : { x: node.x, y: node.y },
             data: {
+              stageId: node.stageId,
               label: node.label,
               stageTone: node.stageTone,
               stageIndex: stageIndexById.get(node.stageId) ?? 0,
@@ -385,13 +481,13 @@ function WorkflowCanvasInner({
               layoutMode,
             },
             style: {
-              width: node.width,
-              height: node.height,
-              pointerEvents: manualLayoutEnabled ? "none" : undefined,
+              width: manualLayoutEnabled ? WORKFLOW_STAGE_LABEL_WIDTH : node.width,
+              height: manualLayoutEnabled ? WORKFLOW_STAGE_LABEL_HEIGHT : node.height,
             },
             selectable: false,
-            draggable: false,
-            zIndex: 0,
+            draggable: manualLayoutEnabled && !manualLayoutLocked,
+            dragging: draggingNodeId === node.id,
+            zIndex: manualLayoutEnabled ? 3 : 0,
           } satisfies Node;
         }
         const parentId = node.parentStageId;
@@ -425,6 +521,7 @@ function WorkflowCanvasInner({
           style: { width: node.width, height: node.height },
           selectable: true,
           draggable: manualLayoutEnabled && !manualLayoutLocked,
+          dragging: draggingNodeId === node.id,
           selected: node.id === selectedNodeId,
           zIndex: 2,
         } satisfies Node;
@@ -438,9 +535,23 @@ function WorkflowCanvasInner({
       manualLayoutEnabled,
       manualLayoutLocked,
       manualPositions,
+      draggingNodeId,
       selectedNodeId,
       stageIndexById,
+      stageAnchorById,
+      stageLabelOffsets,
     ],
+  );
+
+  const routingNodes = useMemo(
+    () => nodes.map((node) => {
+      const width = typeof node.style?.width === "number" ? node.style.width : undefined;
+      const height = typeof node.style?.height === "number" ? node.style.height : undefined;
+      return width && height && !node.measured
+        ? { ...node, measured: { width, height } }
+        : node;
+    }),
+    [nodes],
   );
 
   const edges: Edge[] = useMemo(
@@ -468,10 +579,11 @@ function WorkflowCanvasInner({
           sections: edge.sections,
           labelBounds: edge.labelBounds,
           manualRouteActive,
+          manualDragging: draggingNodeId !== null,
         },
         zIndex: 1,
       })),
-    [layout.edges, manualRouteActive],
+    [draggingNodeId, layout.edges, manualRouteActive],
   );
 
   const onNodeClick = useCallback(
@@ -502,7 +614,8 @@ function WorkflowCanvasInner({
         className={fillHost ? "absolute inset-0 min-h-0" : "h-full w-full"}
         style={fillHost ? { width: "100%", height: "100%" } : undefined}
       >
-        <ReactFlow
+        <SmartEdgeProvider nodes={manualLayoutEnabled ? routingNodes : []} options={WORKFLOW_SMART_EDGE_OPTIONS}>
+          <ReactFlow
           nodes={nodes}
           edges={edges}
           nodeTypes={measuredNodeTypes}
@@ -527,7 +640,7 @@ function WorkflowCanvasInner({
           style={{ width: "100%", height: "100%" }}
           className={fillHost ? "h-full w-full" : undefined}
           defaultEdgeOptions={{ type: "workflowSemantic" }}
-        >
+          >
           <Background
             gap={layoutMode === "serpentine" ? 18 : 20}
             size={1}
@@ -565,7 +678,8 @@ function WorkflowCanvasInner({
               nodeStrokeWidth={2}
             />
           ) : null}
-        </ReactFlow>
+          </ReactFlow>
+        </SmartEdgeProvider>
       </div>
       {layout.degraded ? (
         <div

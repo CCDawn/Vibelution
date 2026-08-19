@@ -31,6 +31,7 @@ vi.mock("@xyflow/react", async () => {
 import { WorkflowAgentTaskNode } from "./WorkflowAgentTaskNode";
 import { WorkflowDecisionNode } from "./WorkflowDecisionNode";
 import { WorkflowHumanGateNode } from "./WorkflowHumanGateNode";
+import { workflowHandleSideOffset } from "./WorkflowNodeChrome";
 import { WorkflowStageRegionNode } from "./WorkflowStageRegionNode";
 import { WorkflowStartEndNode } from "./WorkflowStartEndNode";
 import { WorkflowSystemTaskNode } from "./WorkflowSystemTaskNode";
@@ -200,6 +201,21 @@ describe("WorkflowDecisionNode render (P1-4)", () => {
     expect(markup).toContain('data-handle="source:right"');
   });
 
+  it("gives ordinary outgoing edges unique handles with 16px same-side spacing", () => {
+    const markup = renderNode(WorkflowAgentTaskNode, {
+      label: "执行",
+      status: "pending",
+      portSides: {
+        source: { "out:east:one": "EAST", "out:east:two": "EAST" },
+        target: {},
+      },
+    });
+    expect(countHandles(markup, "out:east:one")).toBe(1);
+    expect(countHandles(markup, "out:east:two")).toBe(1);
+    expect(workflowHandleSideOffset(0, 2, "EAST")).toEqual({ top: "calc(50% + -8px)" });
+    expect(workflowHandleSideOffset(1, 2, "EAST")).toEqual({ top: "calc(50% + 8px)" });
+  });
+
   it("mirrors every real ELK target port as an id-bearing handle (P1-4)", () => {
     const markup = renderNode(WorkflowHumanGateNode, {
       label: "门禁",
@@ -304,7 +320,7 @@ describe("WorkflowStageRegionNode render (P1-5)", () => {
     expect(markup).toContain("/ 5");
   });
 
-  it("removes the large serpentine stage background and leaves a non-interactive heading", () => {
+  it("removes the large serpentine stage background and leaves a draggable heading", () => {
     const idle = renderNode(WorkflowStageRegionNode, {
       label: "知识搜集",
       stageTone: "idle",
@@ -315,7 +331,8 @@ describe("WorkflowStageRegionNode render (P1-5)", () => {
     expect(idle).not.toContain("accent-cool)_8%,var(--vui-surface-workspace)");
     expect(idle).not.toContain("accent-cool)_10%,var(--vui-border-subtle)");
     expect(idle).not.toContain("border-dashed");
-    expect(idle).toContain("pointer-events-none");
+    expect(idle).toContain("cursor-grab");
+    expect(idle).not.toContain("pointer-events-none");
   });
 
   it("lifts serpentine task cards with an opaque panel and elevation token", () => {

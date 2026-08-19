@@ -648,6 +648,8 @@ describe("probe · geometry invariants (engine results)", () => {
     const targetNode = result.nodes.find((n) => n.id === handoff.target)!;
     const handoffAssignment = resolveElkPorts({ nodes: input.nodes, edges: input.edges }).byEdgeId.get("e_handoff")!;
     expect(sourceNode.portSides?.source[handoffAssignment.sourcePortId]).toBe("EAST");
+    expect(sourceNode.sourceHandleIds).toContain(handoffAssignment.sourcePortId);
+    expect(handoff.sourceHandle).toBe(handoffAssignment.sourcePortId);
     // target port short name (strip ":<nodeId>" suffix) keys the target handle.
     const targetPortId = handoffAssignment.targetPortId;
     const shortName = targetPortId.slice(0, targetPortId.lastIndexOf(":"));

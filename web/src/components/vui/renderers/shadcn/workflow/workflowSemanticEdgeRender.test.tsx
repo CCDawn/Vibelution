@@ -11,7 +11,7 @@
  */
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { EdgeProps } from "@xyflow/react";
 
 type BaseEdgeStub = {
@@ -24,9 +24,19 @@ type BaseEdgeStub = {
   "data-section-fault"?: string;
   "data-label-fault"?: string;
   "data-manual-route"?: string;
+  "data-smart-route"?: string;
 };
 
 const baseEdgeCalls: BaseEdgeStub[] = vi.hoisted(() => []);
+const useSmartEdgePathMock = vi.hoisted(() => vi.fn(() => ({
+  route: null,
+  isDragging: false,
+  hasProvider: true,
+})));
+
+vi.mock("@tisoap/react-flow-smart-edge", () => ({
+  useSmartEdgePath: useSmartEdgePathMock,
+}));
 
 vi.mock("@xyflow/react", async () => {
   const React = (await import("react")).default;
@@ -85,6 +95,9 @@ function renderEdge(
 }
 
 describe("WorkflowSemanticEdge render (P1-3)", () => {
+  beforeEach(() => {
+    useSmartEdgePathMock.mockReturnValue({ route: null, isDragging: false, hasProvider: true });
+  });
   it("emits the engine-owned orthogonal path exactly, with marker and hit width", () => {
     renderEdge({ sections });
     const call = baseEdgeCalls[0];
@@ -107,10 +120,32 @@ describe("WorkflowSemanticEdge render (P1-3)", () => {
       },
       { sourceX: 10, sourceY: 20, targetX: 130, targetY: 80 },
     );
-    expect(baseEdgeCalls[0]?.path).toBe("M 10 20 L 70 20 L 70 80 L 130 80");
+    expect(baseEdgeCalls[0]?.path).toBe("M 10 20 L -22 20 L 70 20 L 70 80 L 162 80 L 130 80");
     expect(baseEdgeCalls[0]?.["data-manual-route"]).toBe("true");
     expect(baseEdgeCalls[0]?.["data-label-fault"]).toBeUndefined();
     expect(markup).toContain('translate(70px,50px)');
+  });
+
+  it("uses the settled smart route but keeps the local route while dragging", () => {
+    useSmartEdgePathMock.mockReturnValue({
+      route: {
+        kind: "routed",
+        wasRouted: true,
+        svgPathString: "M 10 20 L 42 20 L 42 120 L 98 120 L 98 80 L 130 80",
+        edgeCenterX: 70,
+        edgeCenterY: 120,
+        points: [],
+      },
+      isDragging: false,
+      hasProvider: true,
+    });
+    renderEdge({ sections, manualRouteActive: true });
+    expect(baseEdgeCalls[0]?.path).toContain("L 42 120");
+    expect(baseEdgeCalls[0]?.["data-smart-route"]).toBe("true");
+
+    renderEdge({ sections, manualRouteActive: true, manualDragging: true });
+    expect(baseEdgeCalls[0]?.path).not.toContain("L 42 120");
+    expect(baseEdgeCalls[0]?.["data-smart-route"]).toBeUndefined();
   });
 
   it("uses dashed semantic colors for idle rerun/revise/rollback instead of a shared grey", () => {
