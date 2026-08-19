@@ -232,6 +232,10 @@ export function mergeSelectionAndRuntime(options: {
  * `hypothesis_design`), so their pathState is re-resolved here against the
  * full node set — the region fragment only sees its own cards. A null region
  * returns the base graph untouched (field-for-field identical).
+ *
+ * Until the first review round closes (or a collection request exists), the
+ * downstream 16-node pipeline is omitted so idle knowledge-collection cards
+ * do not read as current work.
  */
 export function composeHypothesisFirstGraph(
   base: WorkflowLayoutInput,
@@ -241,8 +245,11 @@ export function composeHypothesisFirstGraph(
   if (!region) {
     return base;
   }
+  const includePipeline = region.showDownstreamPipeline;
+  const pipelineNodes = includePipeline ? base.nodes : [];
+  const pipelineEdges = includePipeline ? base.edges : [];
   const nodeById = new Map(
-    [...base.nodes, ...region.nodes].map((node) => [node.nodeId, node] as const),
+    [...pipelineNodes, ...region.nodes].map((node) => [node.nodeId, node] as const),
   );
   const runtimeCurrent = new Set(base.run?.runtimeCurrentNodeIds ?? []);
   const regionEdges = buildEdgePathStates(
@@ -252,21 +259,23 @@ export function composeHypothesisFirstGraph(
     nodeById,
     runtimeCurrent,
   );
-  const demotePipeline = Boolean(options?.demotePipelineStages);
+  const demotePipeline = Boolean(options?.demotePipelineStages) && includePipeline;
   return {
     ...base,
     stages: [
       {
         ...region.stage,
-        stageTone: demotePipeline ? "active" : region.stage.stageTone,
+        stageTone: region.stage.stageTone,
       },
-      ...base.stages.map((stage, position) => ({
-        ...stage,
-        index: position + 1,
-        stageTone: demotePipeline ? "idle" as const : stage.stageTone,
-      })),
+      ...pipelineNodes.length === 0
+        ? []
+        : base.stages.map((stage, position) => ({
+          ...stage,
+          index: position + 1,
+          stageTone: demotePipeline ? "idle" as const : stage.stageTone,
+        })),
     ],
-    nodes: [...region.nodes, ...base.nodes],
-    edges: [...regionEdges, ...base.edges],
+    nodes: [...region.nodes, ...pipelineNodes],
+    edges: [...regionEdges, ...pipelineEdges],
   };
 }
