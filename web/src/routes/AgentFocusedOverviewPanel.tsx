@@ -13,7 +13,21 @@ import {
   type VStatusTone,
 } from "../components/vui";
 import type { AgentOverviewActivityView } from "./AgentOverviewOperationsPanel";
+import {
+  effectiveConfigurationSourceLabel,
+  focusedEffectiveValue,
+  type AgentFocusedEffectiveResources,
+} from "./agents/agentEffectiveConfigurationPresentation";
 import styles from "./AgentFocusedOverviewPanel.styles";
+
+export {
+  effectiveConfigurationSourceLabel,
+  focusedEffectiveValue,
+} from "./agents/agentEffectiveConfigurationPresentation";
+export type {
+  AgentFocusedEffectiveResources,
+  FocusedEffectiveValueView,
+} from "./agents/agentEffectiveConfigurationPresentation";
 
 export type AgentFocusedOverviewAttention = {
   id: string;
@@ -34,6 +48,7 @@ export type AgentFocusedOverviewPanelProps = {
     latestRunLabel: string;
   };
   effectiveFields: AgentEffectiveConfigurationField[];
+  effectiveResources?: AgentFocusedEffectiveResources;
   activities: AgentOverviewActivityView[];
   activityState: "loading" | "ready" | "error";
   activityError?: string;
@@ -120,7 +135,7 @@ function copyFor(lang: "zh" | "en") {
         value: "有效值",
         source: "来源",
         state: "状态",
-        ready: "可用",
+        ready: "已生效",
         warning: "需关注",
         blocked: "受阻",
         configured: "已配置",
@@ -166,7 +181,7 @@ function copyFor(lang: "zh" | "en") {
         value: "Effective value",
         source: "Source",
         state: "Status",
-        ready: "Available",
+        ready: "Effective",
         warning: "Attention",
         blocked: "Blocked",
         configured: "Configured",
@@ -216,41 +231,6 @@ function effectiveStatusLabel(
   return copy.ready;
 }
 
-export function focusedEffectiveValue(
-  field: Pick<AgentEffectiveConfigurationField, "key" | "effectiveValue">,
-  lang: "zh" | "en",
-): string {
-  const copy = copyFor(lang);
-  const value = field.effectiveValue;
-  if (value === null || value === undefined || value === "") return "-";
-  if (typeof value === "string" || typeof value === "number") return String(value);
-  if (typeof value === "boolean") return value ? copy.enabled : copy.disabled;
-  if (Array.isArray(value)) return value.length ? `${value.length} ${copy.items}` : "-";
-  if (typeof value !== "object") return copy.configured;
-  const record = value as Record<string, unknown>;
-  if (field.key === "contextCompression") {
-    const mode = String(record.mode || "-");
-    const limit = Number(record.maxTokenLimit || 0);
-    return limit > 0 ? `${mode} · ${limit.toLocaleString()} tokens` : mode;
-  }
-  if (field.key === "delegation") {
-    const allowed = record.allowSubagents === true ? copy.enabled : copy.disabled;
-    const concurrency = Number(record.maxConcurrent || 0);
-    const depth = Number(record.maxDepth || 0);
-    return `${allowed} · ${concurrency || "-"} / ${depth || "-"}`;
-  }
-  if (field.key === "supervision") {
-    const enabled = record.supervisionEnabled === true ? copy.enabled : copy.disabled;
-    return `${enabled} · ${String(record.reviewMode || "-")}`;
-  }
-  const conciseValue = record.modelId
-    || record.modelRef
-    || record.promptTemplateId
-    || record.policyId
-    || record.id;
-  return conciseValue ? String(conciseValue) : copy.configured;
-}
-
 function formatDuration(durationMs: number | null, insufficient: string): string {
   if (durationMs === null) return "-";
   if (!Number.isFinite(durationMs) || durationMs < 0) return insufficient;
@@ -285,6 +265,7 @@ export function AgentFocusedOverviewPanel({
   lang,
   summary,
   effectiveFields,
+  effectiveResources,
   activities,
   activityState,
   activityError,
@@ -350,26 +331,37 @@ export function AgentFocusedOverviewPanel({
                   <span>{copy.source}</span>
                   <span>{copy.state}</span>
                 </div>
-                {visibleFields.map((field) => (
-                  <div key={field.key} className={styles.effectiveRow} role="row">
-                    <span className={styles.effectiveIdentity} role="cell">
-                      <strong>{field.label}</strong>
-                    </span>
-                    <span className={styles.effectiveValue} role="cell">
-                      {focusedEffectiveValue(field, lang)}
-                    </span>
-                    <span className={styles.effectiveSource} role="cell" title={field.source.label}>
-                      {field.source.label || "-"}
-                    </span>
-                    <VStatusChip
-                      className={styles.effectiveStatus}
-                      tone={effectiveTone(field.status)}
-                      role="cell"
-                    >
-                      {effectiveStatusLabel(field.status, copy)}
-                    </VStatusChip>
-                  </div>
-                ))}
+                {visibleFields.map((field) => {
+                  const valueView = focusedEffectiveValue(field, lang, effectiveResources);
+                  return (
+                    <div key={field.key} className={styles.effectiveRow} role="row">
+                      <span className={styles.effectiveIdentity} role="cell">
+                        <strong>{field.label}</strong>
+                      </span>
+                      <span
+                        className={styles.effectiveValue}
+                        role="cell"
+                        title={valueView.rawId ? `${lang === "zh" ? "内部 ID" : "Internal ID"}: ${valueView.rawId}` : valueView.primary}
+                        data-effective-value-id={valueView.rawId || undefined}
+                      >
+                        <strong className={styles.effectiveValuePrimary}>{valueView.primary}</strong>
+                        {valueView.secondary ? (
+                          <span className={styles.effectiveValueDetail}>{valueView.secondary}</span>
+                        ) : null}
+                      </span>
+                      <span className={styles.effectiveSource} role="cell" title={field.source.label}>
+                        {effectiveConfigurationSourceLabel(field.source.kind, lang, field.source.label)}
+                      </span>
+                      <VStatusChip
+                        className={styles.effectiveStatus}
+                        tone={effectiveTone(field.status)}
+                        role="cell"
+                      >
+                        {effectiveStatusLabel(field.status, copy)}
+                      </VStatusChip>
+                    </div>
+                  );
+                })}
               </div>
             ) : (
               <p className={styles.empty}>{copy.noEffective}</p>

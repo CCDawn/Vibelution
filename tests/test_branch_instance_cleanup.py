@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -101,6 +102,28 @@ def test_annotate_reuses_merged_ref_lookup_instead_of_per_item_merge_base(tmp_pa
     assert all(item["mergedToMain"] is True for item in annotated["items"])
     assert [args for args in calls if args and args[0] == "for-each-ref"]
     assert [args for args in calls if args and args[0] == "merge-base"] == []
+
+
+def test_annotate_cleanup_skips_merge_base_when_git_budget_expires(monkeypatch):
+    def slow_tips(root, *, timeout=15.0):
+        time.sleep(0.05)
+        return set()
+
+    monkeypatch.setattr(cleanup, "_merged_main_tip_names", slow_tips)
+    monkeypatch.setattr(
+        cleanup,
+        "_unique_commits_merged_to_main",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("merge-base must not run after budget")),
+    )
+    payload = {
+        "integrationRoot": ".",
+        "items": [_item(id="worktree:slow", head="abc1234def")],
+    }
+
+    annotated = cleanup.annotate_cleanup_metadata(payload, integration_root=Path("."), git_timeout=0.01)
+
+    assert annotated["items"][0]["mergedToMain"] is False
+    assert annotated["items"][0]["cleanupEligible"] is True
 
 
 def test_annotate_unique_unmerged_head_uses_one_ancestor_check(tmp_path, monkeypatch):

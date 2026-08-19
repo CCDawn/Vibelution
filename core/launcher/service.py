@@ -87,6 +87,8 @@ _WORKBENCH_WINDOW_MODE_DETAILS = {
     },
 }
 _RUNTIME_MANAGER_STATUS_FAST_PATH_MAX_AGE_SECONDS = 15.0
+_STATUS_OPEN_RECOVERY_MIN_AGE_SECONDS = 8.0
+_IN_FLIGHT_OPEN_PHASES = frozenset({"opening", "starting", "restarting", "restart"})
 _FAST_LAUNCHER_REAP_TIMEOUT_SECONDS = 1.0
 _LAUNCHER_REAP_FALLBACK_TIMEOUT_SECONDS = 5.0
 _LAUNCHER_CLEANUP_PROOF_PATH = STATE_PATH.with_name("launcher-cleanup-proof.json")
@@ -207,7 +209,9 @@ def list_launcher_branch_instances(*, include_cleanup_metadata: bool = False) ->
         return payload
     from core.launcher.branch_instance_cleanup import annotate_cleanup_metadata
 
-    return annotate_cleanup_metadata(payload)
+    # Electron status refresh uses a 5s JSON-bridge timeout and Promise.all.
+    # A 15s merge-base / for-each-ref here times out the whole snapshot.
+    return annotate_cleanup_metadata(payload, git_timeout=2.0)
 
 
 def _current_project_bundle_for_branch_list() -> dict[str, Any]:
@@ -3058,7 +3062,11 @@ def _recover_stale_open_command_when_manager_offline(runtime_state: dict[str, An
     except Exception:
         processing = []
     recoverable_types = {"open_workbench", "restart_workbench", "hot_restart_workbench"}
-    if not any(str(command.get("type") or "").strip() in recoverable_types for command in processing):
+    if not any(
+        str(command.get("type") or "").strip() in recoverable_types
+        and _open_command_is_old_enough_to_recover(command)
+        for command in processing
+    ):
         return False
     result = ensure_runtime_manager_daemon_alive()
     return str(result.get("action") or "") in {"restarted", "already_running"}
@@ -3114,7 +3122,52 @@ def _status_observed_workbench(runtime_state: dict[str, Any]) -> dict[str, Any]:
         and _runtime_state_workbench_is_live(runtime_state)
     ):
         return {}
+    if _in_flight_open_should_skip_live_observe(runtime_state):
+        return {}
     return _observed_workbench()
+
+
+def _in_flight_open_should_skip_live_observe(runtime_state: dict[str, Any]) -> bool:
+    """Do not run observe_workbench while an open/restart is already in flight.
+
+    Status is polled through a 5s Electron JSON bridge. Live observe plus a
+    watchdog daemon start during that window times out the whole snapshot and
+    freezes the control page on 正在启动.
+    """
+
+    workbench = runtime_state.get("workbench") if isinstance(runtime_state.get("workbench"), dict) else {}
+    desired = str(workbench.get("desiredState") or "").strip().lower()
+    phase = str(workbench.get("phase") or "").strip().lower()
+    if desired == "open" and phase in _IN_FLIGHT_OPEN_PHASES:
+        return True
+    return _has_young_processing_open_command()
+
+
+def _has_young_processing_open_command() -> bool:
+    try:
+        processing = _recent_command_files(PROCESSING_DIR, limit=20)
+    except Exception:
+        return False
+    recoverable_types = {"open_workbench", "restart_workbench", "hot_restart_workbench"}
+    return any(
+        str(command.get("type") or "").strip() in recoverable_types
+        and not _open_command_is_old_enough_to_recover(command)
+        for command in processing
+    )
+
+
+def _open_command_is_old_enough_to_recover(command: dict[str, Any]) -> bool:
+    raw = str(command.get("requestedAt") or "").strip()
+    if not raw:
+        return True
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    age_seconds = (datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)).total_seconds()
+    return age_seconds >= _STATUS_OPEN_RECOVERY_MIN_AGE_SECONDS
 
 
 def _runtime_state_workbench_is_live(runtime_state: dict[str, Any]) -> bool:

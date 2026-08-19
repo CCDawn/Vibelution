@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-label="Vibelution">
+  <path
+    d="M5 6.5h11.2L24 22.9l7.8-16.4H43L24 44 5 6.5Z"
+    fill="#000"
+    stroke="#fff"
+    stroke-linejoin="round"
+    stroke-width="1.7"
+  />
+  <path d="M29.4 23.1h8.8l-3.5 6.8h-8.8l3.5-6.8Z" fill="#fff" />
+</svg>

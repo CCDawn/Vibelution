@@ -28,7 +28,11 @@ const styles = {
   effectiveSource:
     "min-w-0 truncate [font-size:var(--vui-font-xs)] text-[var(--fg-tertiary)] max-[760px]:col-start-1 max-[760px]:row-start-2",
   effectiveValue:
-    "min-w-0 [overflow-wrap:anywhere] [font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-secondary)] max-[760px]:col-span-2 max-[760px]:row-start-3",
+    "grid min-w-0 gap-0.5 [overflow-wrap:anywhere] max-[760px]:col-span-2 max-[760px]:row-start-3",
+  effectiveValuePrimary:
+    "min-w-0 [overflow-wrap:anywhere] [font-size:var(--vui-font-sm)] font-semibold text-[var(--fg-primary)]",
+  effectiveValueDetail:
+    "min-w-0 [overflow-wrap:anywhere] [font-size:var(--vui-font-xs)] font-normal leading-5 text-[var(--fg-tertiary)]",
   effectiveStatus:
     "min-w-0 justify-self-end max-[760px]:col-start-2 max-[760px]:row-span-2 max-[760px]:row-start-1",
   activityList: "grid min-w-0 gap-1",
