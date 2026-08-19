@@ -26,6 +26,7 @@ import {
   type NodeInspectorBudgetMeter,
   type NodeInspectorProviderVisual,
 } from "./nodeInspectorOpsModel";
+import { researchWorkflowErrorInlineText } from "../researchWorkflowErrorModel";
 
 export type NodeInspectorAgentOption = {
   id: string;
@@ -88,6 +89,7 @@ export function NodeInspectorOpsCard(props: NodeInspectorOpsCardProps) {
   const [agentOpen, setAgentOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [pendingPromote, setPendingPromote] = useState<AgentModelChoice | null>(null);
+  const [offerError, setOfferError] = useState<string | null>(null);
   const modelDisabled = props.unbound || props.modelPending;
   const groups = useMemo(
     () => groupAgentModelCandidates(props.candidates, "dialogue", query),
@@ -269,7 +271,10 @@ export function NodeInspectorOpsCard(props: NodeInspectorOpsCardProps) {
             }
             onClick={() => {
               if (!props.primaryOffer || !props.onOffer) return;
-              void props.onOffer(props.primaryOffer).catch(() => undefined);
+              setOfferError(null);
+              void props.onOffer(props.primaryOffer).catch((error: unknown) => {
+                setOfferError(error instanceof Error ? error.message : String(error));
+              });
             }}
           >
             {props.primaryOffer.label}
@@ -310,6 +315,11 @@ export function NodeInspectorOpsCard(props: NodeInspectorOpsCardProps) {
           />
         )}
       </div>
+      {offerError ? (
+        <p className={styles.notice} role="alert">
+          {researchWorkflowErrorInlineText(offerError)}
+        </p>
+      ) : null}
       {props.notice ? <p className={styles.notice} role="alert">{props.notice}</p> : null}
 
       <VConfirmDialog

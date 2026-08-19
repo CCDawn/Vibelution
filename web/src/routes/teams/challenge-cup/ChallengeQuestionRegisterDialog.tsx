@@ -18,6 +18,7 @@ import {
   publishChallengeQuestionRun,
   registerChallengeQuestionRun,
 } from "../../../api/teamExperiment";
+import { experimentPlanningStatusQueryKey } from "../experimentLoopModel";
 import {
   VButton,
   VCheckbox,
@@ -187,6 +188,10 @@ export function ChallengeQuestionRegisterDialog({
         // 记住登记人只是便利，存储不可用时静默降级
       }
       await queryClient.invalidateQueries({ queryKey: queryKeys.challengeQuestionRunStatus(teamId) });
+      // The progress panel previously fetched the experiment planning status
+      // under the run-status key; keep that refresh semantics now that the
+      // panel uses the canonical planning key.
+      await queryClient.invalidateQueries({ queryKey: experimentPlanningStatusQueryKey(teamId) });
       const affectedQuestionId = data?.record?.questionId || (parsed.ok ? parsed.questionId : "");
       if (affectedQuestionId) {
         await queryClient.invalidateQueries({

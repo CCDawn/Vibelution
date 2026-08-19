@@ -67,6 +67,8 @@ const styles: Record<string, string> = {
     "flex items-start gap-2.5 [&>div]:grid [&>div]:min-w-0 [&>div]:gap-1.25 [&_code]:wrap-anywhere [&_code]:text-xs [&_code]:text-[var(--fg-secondary)]",
   state:
     "grid min-h-60 content-center justify-items-start gap-2.5 [&_span]:text-[var(--fg-secondary)] [&_code]:wrap-anywhere [&_code]:text-xs [&_code]:text-[var(--fg-secondary)]",
+  techDetails:
+    "grid max-w-full gap-1 text-xs text-[var(--fg-secondary)] [&>summary]:w-fit [&>summary]:cursor-pointer [&_code]:wrap-anywhere [&_code]:text-[10px] [&_code]:text-[var(--fg-secondary)]",
 };
 
 export default styles;

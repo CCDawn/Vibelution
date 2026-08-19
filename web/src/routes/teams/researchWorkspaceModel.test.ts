@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { RESEARCH_TEAM_ID } from "../TeamsRoute.canvasData";
+import { parseResearchProcessLocation } from "./research-workflow/researchProcessLocation";
 import {
   challengeQuestionDetailRoute,
   parseResearchWorkspaceView,
@@ -37,13 +38,20 @@ describe("researchWorkspaceModel", () => {
     expect(researchCanvasRoute(RESEARCH_TEAM_ID)).toContain("panel=agents");
   });
 
-  it("builds an explicit challenge question route without opening the active project workspace", () => {
+  it("builds a challenge question route the workflow parser can round-trip", () => {
     const route = challengeQuestionDetailRoute(RESEARCH_TEAM_ID, "SCI-096", "stage1-sci-096-v3");
 
     expect(route).toContain("teamId=research-team");
-    expect(route).toContain("challengeQuestion=SCI-096");
-    expect(route).toContain("challengeRun=stage1-sci-096-v3");
-    expect(route).not.toContain("researchView=knowledge_collection");
+    expect(route).toContain("researchView=workflow");
+    expect(route).toContain("workflowId=challenge-cup-research");
+    expect(route).not.toContain("challengeQuestion=");
+    expect(route).not.toContain("challengeRun=");
+
+    // Contract: the helper's URL must reopen the same question panel.
+    const parsed = parseResearchProcessLocation(new URLSearchParams(route.split("?")[1]));
+    expect(parsed.panel).toBe("question");
+    expect(parsed.questionId).toBe("SCI-096");
+    expect(parsed.runId).toBe("stage1-sci-096-v3");
   });
 
   it("labels workspace views for zh and en", () => {

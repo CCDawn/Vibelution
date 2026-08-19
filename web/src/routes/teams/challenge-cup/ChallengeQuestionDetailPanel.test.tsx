@@ -266,4 +266,81 @@ describe("ChallengeQuestionDetailPanel", () => {
     expect(markup).toContain("返回题目列表");
     expect(markup).not.toContain("当前研究项目或其他题目的资料");
   });
+
+  it("productizes the load error and keeps the raw message in collapsible technical details", () => {
+    const markup = renderPanel(
+      <ChallengeQuestionDetailPanel
+        requestedQuestionId="SCI-999"
+        isLoading={false}
+        errorMessage="challenge_question_run_not_found"
+        onClose={() => undefined}
+      />,
+    );
+
+    // Productized copy leads; the raw backend message only survives inside
+    // the collapsed technical-details block.
+    expect(markup).toContain("操作未完成");
+    expect(markup).toContain("技术细节");
+    expect(markup).toContain("<details");
+    expect(markup).toContain("challenge_question_run_not_found");
+  });
+
+  it("maps the record status enum to Chinese labels", () => {
+    const pending = detail();
+    pending.record = { ...pending.record, status: "pending_review" };
+    const pendingMarkup = renderPanel(
+      <ChallengeQuestionDetailPanel
+        requestedQuestionId="SCI-096"
+        detail={pending}
+        isLoading={false}
+        onClose={() => undefined}
+      />,
+    );
+    expect(pendingMarkup).toContain("待审核");
+    expect(pendingMarkup).not.toContain(">pending_review<");
+
+    const revision = detail();
+    revision.record = { ...revision.record, status: "needs_revision" };
+    const revisionMarkup = renderPanel(
+      <ChallengeQuestionDetailPanel
+        requestedQuestionId="SCI-096"
+        detail={revision}
+        isLoading={false}
+        onClose={() => undefined}
+      />,
+    );
+    expect(revisionMarkup).toContain("待修订");
+    expect(revisionMarkup).not.toContain(">needs_revision<");
+  });
+
+  it("maps the evidence relation enum to Chinese labels", () => {
+    const markup = renderPanel(
+      <ChallengeQuestionDetailPanel
+        requestedQuestionId="SCI-096"
+        detail={detail()}
+        isLoading={false}
+        onClose={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain(">支持<");
+    expect(markup).not.toContain(">supports<");
+  });
+
+  it("keeps the artifact path and SHA-256 inside collapsible technical details", () => {
+    const markup = renderPanel(
+      <ChallengeQuestionDetailPanel
+        requestedQuestionId="SCI-096"
+        detail={detail()}
+        isLoading={false}
+        onClose={() => undefined}
+      />,
+    );
+
+    const artifactSection = markup.split('id="artifact"')[1] ?? "";
+    expect(artifactSection).toContain("技术细节");
+    expect(artifactSection).toContain("<details");
+    expect(artifactSection).toContain("stage1-sci-096-v3.json");
+    expect(artifactSection).toContain("SHA256");
+  });
 });

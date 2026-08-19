@@ -129,3 +129,22 @@ export function researchWorkflowErrorActionLabel(
 ): string {
   return lang === "zh" ? presentation.actionLabelZh : presentation.actionLabelEn;
 }
+
+/**
+ * Compact single-line Chinese text for inline error display at the action
+ * site (button row). Known backend failures get the productized title plus
+ * guidance; unknown failures show only the generic title (or the caller's
+ * context-specific fallback) so raw technical messages stay out of the main
+ * flow.
+ */
+export function researchWorkflowErrorInlineText(
+  rawMessage: string | null | undefined,
+  fallbackZh?: string,
+): string {
+  const message = String(rawMessage || "").trim();
+  const presentation = presentResearchWorkflowError(message);
+  if (!message || presentation.bodyZh === message) {
+    return fallbackZh?.trim() || presentation.titleZh;
+  }
+  return `${presentation.titleZh}。${presentation.bodyZh}`;
+}

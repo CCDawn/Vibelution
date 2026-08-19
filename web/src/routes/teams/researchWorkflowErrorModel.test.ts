@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { presentResearchWorkflowError } from "./researchWorkflowErrorModel";
+import {
+  presentResearchWorkflowError,
+  researchWorkflowErrorInlineText,
+} from "./researchWorkflowErrorModel";
 
 describe("presentResearchWorkflowError", () => {
   it("maps cascade reset recommendation for downstream experiment blocks", () => {
@@ -22,5 +25,26 @@ describe("presentResearchWorkflowError", () => {
     const presented = presentResearchWorkflowError("Something custom failed");
     expect(presented.bodyZh).toBe("Something custom failed");
     expect(presented.recommendedAction).toBe("none");
+  });
+});
+
+describe("researchWorkflowErrorInlineText", () => {
+  it("combines productized title and guidance for known failures", () => {
+    const text = researchWorkflowErrorInlineText(
+      "The current project's source search is still running. Wait for it to finish before clearing this project.",
+    );
+    expect(text).toContain("资料搜索仍在进行");
+    expect(text).toContain("请等待当前批次搜索结束后再清空或重开");
+  });
+
+  it("keeps raw technical messages out of the inline flow for unknown failures", () => {
+    const text = researchWorkflowErrorInlineText("TypeError: Cannot read properties of undefined");
+    expect(text).toBe("操作未完成");
+    expect(text).not.toContain("TypeError");
+  });
+
+  it("renders the generic title for empty input", () => {
+    expect(researchWorkflowErrorInlineText("")).toBe("操作未完成");
+    expect(researchWorkflowErrorInlineText(null)).toBe("操作未完成");
   });
 });

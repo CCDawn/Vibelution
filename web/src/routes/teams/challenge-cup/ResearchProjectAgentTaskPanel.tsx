@@ -1,10 +1,12 @@
 import { AlertCircle, Bot, ExternalLink, RefreshCw } from "lucide-react";
+import { useState } from "react";
 
 import type {
   ResearchProjectAgentTaskKind,
   TeamResearchProjectAgentTask,
 } from "../../../api/types";
 import { VButton, VStatusChip, VTooltip, type VStatusTone } from "../../../components/vui";
+import { researchWorkflowErrorInlineText } from "../researchWorkflowErrorModel";
 import styles from "./ResearchProjectAgentTaskPanel.styles";
 
 type Stage = "experiment" | "iteration";
@@ -83,6 +85,18 @@ export function ResearchProjectAgentTaskPanel(props: {
   onOpenTask?: (task: TeamResearchProjectAgentTask) => void;
 }) {
   const projectMissing = !props.activeProjectId;
+  const [startError, setStartError] = useState<string | null>(null);
+
+  function runStartTask(
+    taskKind: ResearchProjectAgentTaskKind,
+    options?: { formalRetry?: boolean; retryTaskId?: string },
+  ) {
+    setStartError(null);
+    void props.onStartTask(taskKind, options).catch((error: unknown) => {
+      setStartError(error instanceof Error ? error.message : String(error));
+    });
+  }
+
   return (
     <section
       className={styles.root}
@@ -98,6 +112,11 @@ export function ResearchProjectAgentTaskPanel(props: {
       {props.errorMessage ? (
         <p className={styles.error} role="alert">
           任务状态读取或启动失败，请重试。
+        </p>
+      ) : null}
+      {startError ? (
+        <p className={styles.error} role="alert">
+          {researchWorkflowErrorInlineText(startError)}
         </p>
       ) : null}
       <div className={styles.grid}>
@@ -144,9 +163,7 @@ export function ResearchProjectAgentTaskPanel(props: {
                       variant="primary"
                       density="compact"
                       isDisabled={projectMissing || props.isLoading || props.isStarting}
-                      onPress={() => {
-                        void props.onStartTask(definition.taskKind).catch(() => undefined);
-                      }}
+                      onPress={() => runStartTask(definition.taskKind)}
                     >
                       {starting ? "启动中…" : task ? "继续任务" : "启动任务"}
                     </VButton>
@@ -158,12 +175,10 @@ export function ResearchProjectAgentTaskPanel(props: {
                       density="compact"
                       icon={<RefreshCw size={14} />}
                       isDisabled={projectMissing || props.isStarting}
-                      onPress={() => {
-                        void props.onStartTask(definition.taskKind, {
-                          formalRetry: true,
-                          retryTaskId: task.taskId,
-                        }).catch(() => undefined);
-                      }}
+                      onPress={() => runStartTask(definition.taskKind, {
+                        formalRetry: true,
+                        retryTaskId: task.taskId,
+                      })}
                     >
                       正式重试
                     </VButton>

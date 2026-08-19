@@ -197,6 +197,24 @@ describe("ResearchRunLaunchPanel", () => {
     expect(markup).not.toContain("数据集引用");
   });
 
+  it("productizes the launch-options load error with retry and collapsible technical details", () => {
+    Object.assign(queryState.current, {
+      isPending: false,
+      isError: true,
+      error: new Error("TypeError: fetch failed at /api/launch-options"),
+      data: undefined,
+      refetch: vi.fn(),
+    });
+    const markup = renderPanel();
+
+    expect(markup).toContain("题目目录加载失败");
+    expect(markup).toContain("暂时无法读取 125 题目录");
+    expect(markup).toContain("重试");
+    expect(markup).toContain("技术细节");
+    expect(markup).toContain("<details");
+    expect(markup).toContain("TypeError: fetch failed at /api/launch-options");
+  });
+
   it("lists catalog questions without requiring prior approval", () => {
     Object.assign(queryState.current, {
       data: launchOptions({
