@@ -1321,7 +1321,7 @@ def _register_canonical_formal_full_run(
 
 
 @pytest.mark.parametrize("mutation", [
-    lambda result, runs: result["seeds"].__setitem__(1, 999),
+    lambda result, runs: result.__setitem__("seeds", [1, 2, 3]),
     lambda result, runs: runs[1].__setitem__("seed", runs[0]["seed"]),
     lambda result, runs: runs[1].__setitem__("resultPath", runs[0]["resultPath"]),
     lambda result, runs: Path(runs[0]["resultPath"]).write_text("tampered", encoding="utf-8"),
@@ -1361,6 +1361,14 @@ def test_canonical_receipt_replays_after_external_manual_history_window(tmp_path
     plan_id = smoke["plan"]["planId"]
     canonical = _register_canonical_formal_full_run(tmp_path, team["teamId"], plan_id, monkeypatch, result_name="history")
     canonical_result = canonical["fullRunResult"]
+    canonical_run_id = f"run:{canonical_result['fullRunResultId']}"
+    graph_before = canonical["plan"].get("outcomeGraph") or {}
+    related_edges_before = sorted(
+        (edge["edgeId"], edge["relation"])
+        for edge in graph_before.get("edges", [])
+        if edge.get("fromId") == canonical_run_id
+        and edge.get("relation") in {"supports", "falsifies"}
+    )
     replay_payload = {
         "evidenceKind": "canonical_runner",
         "executionId": canonical_result["executionId"],
@@ -1383,11 +1391,21 @@ def test_canonical_receipt_replays_after_external_manual_history_window(tmp_path
         team["teamId"], plan_id, replay_payload
     )
     assert replayed["fullRunResult"]["fullRunResultId"] == canonical_result["fullRunResultId"]
-    assert any(
-        item.get("fullRunResultId") == canonical_result["fullRunResultId"]
-        and item.get("evidenceKind") == "canonical_runner"
+    canonical_receipts = [
+        item
         for item in replayed["plan"]["fullRunResults"]
+        if item.get("fullRunResultId") == canonical_result["fullRunResultId"]
+        and item.get("evidenceKind") == "canonical_runner"
+    ]
+    assert len(canonical_receipts) == 1
+    graph_after = replayed["plan"].get("outcomeGraph") or {}
+    related_edges_after = sorted(
+        (edge["edgeId"], edge["relation"])
+        for edge in graph_after.get("edges", [])
+        if edge.get("fromId") == canonical_run_id
+        and edge.get("relation") in {"supports", "falsifies"}
     )
+    assert related_edges_after == related_edges_before
 
 
 def test_start_experiment_stage_builds_bounded_memory_context_with_negative_shields(tmp_path, monkeypatch):
