@@ -4,19 +4,24 @@
  * Mature canvas products (LangGraph Studio threads, n8n executions, AutoGen
  * Studio sessions) keep one graph and switch *instances*. Here the instance is
  * a catalog question's latest workflow checkpoint — the same record the launch
- * panel already attaches. Switching restores `questionId` + `runId` + the
- * checkpoint node; it does not fork, compare, or list the frozen Program
- * EXP-* campaign records.
+ * panel already attaches. The switcher lists the full launch-options catalog
+ * (every question, including checkpoint-less and cancelled checkpoints) and
+ * each option surfaces checkpoint availability/status/progress. Selecting an
+ * option backed by a checkpoint restores `questionId` + `runId` + the focus
+ * node; selecting a checkpoint-less option clears stale runId/node and opens
+ * the launch panel prefilled for the question without auto-creating a run. It
+ * does not fork, compare, or list the frozen Program EXP-* campaign records.
  */
 import type {
   ResearchWorkflowLaunchOption,
 } from "../../../api/researchWorkflow";
+import { researchRunStatusLabel } from "./researchRunPresentation";
 
 export type ExperimentSwitchOption = {
   questionId: string;
   title: string;
-  runId: string;
-  currentNodeId: string;
+  runId?: string;
+  currentNodeId?: string;
   label: string;
   description: string;
 };
@@ -25,7 +30,7 @@ export type ExperimentSwitchLocationPatch = {
   questionId: string;
   runId: string;
   node: string | null;
-  panel: "node";
+  panel: "node" | "launch";
 };
 
 export type ExperimentChromeIdentity = {
@@ -83,6 +88,16 @@ function hypothesisForQuestion(
   return formatHypothesisSummary([], questionId);
 }
 
+function checkpointAvailability(question: ResearchWorkflowLaunchOption): string {
+  const checkpoint = question.checkpoint;
+  if (!checkpoint) return "无 checkpoint";
+  return [
+    checkpoint.currentNodeLabel?.trim() || checkpoint.currentNodeId?.trim() || "未开始",
+    `${checkpoint.completedCount}/${checkpoint.totalSteps}`,
+    researchRunStatusLabel(checkpoint.status),
+  ].filter(Boolean).join(" · ");
+}
+
 function optionFromQuestion(
   question: ResearchWorkflowLaunchOption,
   current?: {
@@ -91,16 +106,16 @@ function optionFromQuestion(
   },
 ): ExperimentSwitchOption | null {
   const questionId = normalizeQuestionId(question.questionId);
+  if (!questionId) return null;
   const checkpoint = question.checkpoint;
-  if (!questionId || !checkpoint?.runId) return null;
-  if (String(checkpoint.status || "").trim().toLowerCase() === "cancelled") return null;
+  const title = question.title.trim() || questionId;
   return {
     questionId,
-    title: question.title.trim() || questionId,
-    runId: checkpoint.runId,
-    currentNodeId: checkpoint.currentNodeId.trim(),
+    title,
+    runId: checkpoint?.runId || undefined,
+    currentNodeId: checkpoint?.currentNodeId.trim() || undefined,
     label: formatExperimentSwitchLabel(questionId, hypothesisForQuestion(questionId, current)),
-    description: truncateTitle(question.title.trim() || questionId),
+    description: `${truncateTitle(title)} · ${checkpointAvailability(question)}`,
   };
 }
 
@@ -121,18 +136,18 @@ export function buildExperimentSwitchOptions(input: {
   }
   const currentQuestionId = normalizeQuestionId(input.current?.questionId ?? "");
   const currentRunId = input.current?.runId.trim() ?? "";
-  if (currentQuestionId && currentRunId && !byQuestion.has(currentQuestionId)) {
+  if (currentQuestionId && !byQuestion.has(currentQuestionId)) {
     const currentNodeId = input.current?.currentNodeId?.trim() ?? "";
     byQuestion.set(currentQuestionId, {
       questionId: currentQuestionId,
       title: input.current?.title?.trim() || currentQuestionId,
-      runId: currentRunId,
-      currentNodeId,
+      runId: currentRunId || undefined,
+      currentNodeId: currentNodeId || undefined,
       label: formatExperimentSwitchLabel(
         currentQuestionId,
         hypothesisForQuestion(currentQuestionId, input.current),
       ),
-      description: truncateTitle(input.current?.title?.trim() || currentQuestionId),
+      description: `${truncateTitle(input.current?.title?.trim() || currentQuestionId)} · ${currentRunId ? "当前运行" : "无 checkpoint"}`,
     });
   }
   const ordered = [...byQuestion.values()];
@@ -152,6 +167,14 @@ export function resolveExperimentSwitch(
   const normalized = normalizeQuestionId(questionId);
   const match = options.find((item) => item.questionId === normalized);
   if (!match) return null;
+  if (!match.runId) {
+    return {
+      questionId: match.questionId,
+      runId: "",
+      node: null,
+      panel: "launch",
+    };
+  }
   const focused = String(focusNodeId || "").trim();
   return {
     questionId: match.questionId,

@@ -169,12 +169,13 @@ const graph = composeHypothesisFirstGraph(base, region, {
 
 链数据由 `useHypothesisFirstChain(teamId, questionId)`（React Query，questionId 为空不发请求）提供；run SSE 事件经 `useHypothesisFirstChainInvalidation` 防抖失效相关 query。
 
-### 工作区顶栏实验切换（2026-08-19）
+### 工作区顶栏实验切换（2026-08-19 统一选择器）
 
-画布拓扑仍是一张图。顶栏切换的是**已开始的题目实验实例**，不是 125 题目录，也不是 Program 冻结的 `EXP-*` campaign。
+画布拓扑仍是一张图。顶栏切换器列出 **launch-options 全量题目目录**（125 题），不只是已开始的实例：包含无 checkpoint 的题与 `cancelled` checkpoint 的题，目录顺序稳定、当前题置顶。
 
-- 选项来自 `launch-options.questions[].checkpoint`（题目最新 workflow run）。文案：`SCI-096 · 假说摘要`（未选则「尚未选择假说」），description 为题目标题。过滤 `cancelled` checkpoint。
-- 选中一项即写入 URL：`questionId` + `runId` + `node=` 下一步模型算出的当前任务（生成讨论 / 选择 / 已有搜集运行），**不是**盲用 `checkpoint.currentNodeId` 的 `source_finding`。
+- 选项来自 `launch-options.questions[]`（题目最新 workflow run checkpoint）。文案：`SCI-096 · 假说摘要`（未选则「尚未选择假说」）；description = 题目标题 + 可读的 checkpoint 可用性/状态/进度（`当前节点 · 完成/总数 · 状态文案`），无 checkpoint 的题明确写「无 checkpoint」。
+- 选中**有 checkpoint** 的题即写入 URL：`questionId` + `runId` + `node=` 下一步模型算出的当前任务（生成讨论 / 选择 / 已有搜集运行），**不是**盲用 `checkpoint.currentNodeId` 的 `source_finding`。
+- 选中**无 checkpoint** 的题写入无运行 patch：设置 `questionId`、清除旧 `runId`/`node`、`panel=launch` 打开预填该题的启动面板，**不自动创建运行**。
 - 顶栏常驻当前题号、标题与假说摘要（未选则写「尚未选择假说 / 尚未选择实验」）。切换器 aria 为「切换实验」。假说正文仍在赛题详情，不把 125 题假说陈述预拉进切换器。
 - 有 run 时主按钮是「前往…」当前任务；「创建运行 / 新建运行」降为次要并仍打开 launch 面板。
 

@@ -1,7 +1,8 @@
 /**
  * Composition-level behavior tests for ResearchProcessWorkspace: loading /
- * error surfacing and deep-link driven inspector visibility. Hook internals
- * are covered by their own dedicated test files.
+ * error surfacing, deep-link driven inspector visibility, and experiment
+ * switcher selection semantics. Hook internals are covered by their own
+ * dedicated test files.
  * @vitest-environment happy-dom
  */
 import React, { act } from "react";
@@ -11,6 +12,10 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { queryKeys } from "../../../api/queryKeys";
+import type {
+  ResearchWorkflowLaunchOption,
+  WorkflowRunRecord,
+} from "../../../api/researchWorkflow";
 
 const harness = vi.hoisted(() => ({
   location: {
@@ -84,8 +89,71 @@ vi.mock("./useResearchWorkflowCommand", () => ({
 vi.mock("./useResearchWorkflowCommands", () => ({
   useResearchWorkflowCommands: () => harness.commands,
 }));
+vi.mock("./hypothesisFirstFocus", () => ({
+  fetchHypothesisFirstFocusNode: vi.fn(async () => "hf_generation"),
+}));
 
+import { fetchHypothesisFirstFocusNode } from "./hypothesisFirstFocus";
 import { ResearchProcessWorkspace } from "./ResearchProcessWorkspace";
+
+const mockedFocus = vi.mocked(fetchHypothesisFirstFocusNode);
+
+const checkpointQuestion: ResearchWorkflowLaunchOption = {
+  questionId: "SCI-096",
+  title: "What are the coding principles embedded in neuronal spike trains?",
+  scope: "neuroscience",
+  domain: "neuroscience",
+  catalogId: "science-125-questions-2021",
+  reviewRunId: "",
+  artifactSha256: "",
+  source: "catalog",
+  launchable: true,
+  checkpoint: {
+    runId: "run-96",
+    status: "waiting_human",
+    currentNodeId: "knowledge_handoff",
+    currentNodeLabel: "知识包交接",
+    completedCount: 4,
+    totalSteps: 16,
+    resumable: true,
+  },
+};
+
+const restoreQuestion: ResearchWorkflowLaunchOption = {
+  ...checkpointQuestion,
+  questionId: "SCI-003",
+  title: "Is the Riemann hypothesis true?",
+  scope: "mathematical_sciences",
+  domain: "mathematical_sciences",
+  checkpoint: {
+    runId: "run-3",
+    status: "running",
+    currentNodeId: "protocol_design",
+    currentNodeLabel: "协议设计",
+    completedCount: 6,
+    totalSteps: 16,
+    resumable: true,
+  },
+};
+
+const freshQuestion: ResearchWorkflowLaunchOption = {
+  ...checkpointQuestion,
+  questionId: "SCI-005",
+  title: "Fresh question",
+  checkpoint: null,
+};
+
+const currentRun = {
+  runId: "run-96",
+  questionId: "SCI-096",
+  runVersion: 1,
+  status: "waiting_human",
+  workflowId: "challenge-cup-research",
+  workflowVersionId: "v1",
+  teamId: "research-team",
+  projectId: "project-x",
+  runtimeCurrentNodeIds: ["knowledge_handoff"],
+} as WorkflowRunRecord;
 
 async function renderWorkspace() {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -107,6 +175,26 @@ async function renderWorkspace() {
   return { container, root };
 }
 
+async function openSwitchSelect(trigger: HTMLElement): Promise<NodeListOf<Element>> {
+  await act(async () => {
+    trigger.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+  let options = document.body.querySelectorAll('[role="option"]');
+  if (!options.length) {
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 }));
+    });
+    options = document.body.querySelectorAll('[role="option"]');
+  }
+  return options;
+}
+
+async function pickSwitchOption(option: HTMLElement): Promise<void> {
+  await act(async () => {
+    option.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+}
+
 describe("ResearchProcessWorkspace", () => {
   let root: Root | null = null;
 
@@ -119,6 +207,7 @@ describe("ResearchProcessWorkspace", () => {
     vi.clearAllMocks();
     harness.location.runId = "";
     harness.location.selectedNodeId = null;
+    harness.location.questionId = "";
     harness.location.panel = "";
     harness.runState.error = null;
     harness.commands.error = null;
@@ -164,5 +253,52 @@ describe("ResearchProcessWorkspace", () => {
     root = rendered.root;
 
     expect(rendered.container.querySelector('[data-vui="canvas-workbench-inspector"]')).not.toBeNull();
+  });
+
+  it("applies the launch patch directly when switching to a checkpoint-less question", async () => {
+    harness.catalog.questions = [checkpointQuestion, restoreQuestion, freshQuestion];
+    harness.runState.run = currentRun;
+    const rendered = await renderWorkspace();
+    root = rendered.root;
+
+    const trigger = rendered.container.querySelector('[data-vui-select-trigger="true"]') as HTMLElement | null;
+    expect(trigger).toBeTruthy();
+    const options = await openSwitchSelect(trigger!);
+    const fresh = Array.from(options).find((option) => option.textContent?.includes("SCI-005")) as HTMLElement | undefined;
+    expect(fresh).toBeTruthy();
+    await pickSwitchOption(fresh!);
+
+    expect(mockedFocus).not.toHaveBeenCalled();
+    expect(harness.location.replaceParams).toHaveBeenCalledWith({
+      questionId: "SCI-005",
+      runId: "",
+      node: null,
+      panel: "launch",
+    });
+  });
+
+  it("restores a checkpoint question through the hypothesis-first focus node", async () => {
+    harness.catalog.questions = [checkpointQuestion, restoreQuestion, freshQuestion];
+    harness.runState.run = currentRun;
+    const rendered = await renderWorkspace();
+    root = rendered.root;
+
+    const trigger = rendered.container.querySelector('[data-vui-select-trigger="true"]') as HTMLElement | null;
+    expect(trigger).toBeTruthy();
+    const options = await openSwitchSelect(trigger!);
+    const restore = Array.from(options).find((option) => option.textContent?.includes("SCI-003")) as HTMLElement | undefined;
+    expect(restore).toBeTruthy();
+    await pickSwitchOption(restore!);
+
+    expect(mockedFocus).toHaveBeenCalledWith("research-team", "SCI-003");
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(harness.location.replaceParams).toHaveBeenCalledWith({
+      questionId: "SCI-003",
+      runId: "run-3",
+      node: "hf_generation",
+      panel: "node",
+    });
   });
 });

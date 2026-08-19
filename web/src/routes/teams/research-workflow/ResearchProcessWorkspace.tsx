@@ -125,27 +125,31 @@ export function ResearchProcessWorkspace({
   });
   const experimentOptions = useMemo(() => {
     const currentRun = runState.run;
-    if (!currentRun) {
+    if (!chainQuestionId) {
       return buildExperimentSwitchOptions({ questions: catalog.questions });
     }
-    const currentNodeId = currentRun.runtimeCurrentNodeIds?.[0] ?? "";
+    const currentNodeId = currentRun?.runtimeCurrentNodeIds?.[0] ?? "";
     const currentTitle = catalog.questions.find(
-      (question) => question.questionId.toUpperCase() === currentRun.questionId.toUpperCase(),
+      (question) => question.questionId.toUpperCase() === chainQuestionId.toUpperCase(),
     )?.title;
     return buildExperimentSwitchOptions({
       questions: catalog.questions,
       current: {
-        questionId: currentRun.questionId,
+        questionId: chainQuestionId,
         title: currentTitle,
-        runId: currentRun.runId,
+        runId: currentRun?.runId ?? "",
         currentNodeId,
         selectedCandidateIds: hypothesisFirstChain.selection?.selectedCandidateIds,
       },
     });
-  }, [catalog.questions, hypothesisFirstChain.selection?.selectedCandidateIds, runState.run]);
+  }, [catalog.questions, chainQuestionId, hypothesisFirstChain.selection?.selectedCandidateIds, runState.run]);
   const selectExperiment = useCallback((questionId: string) => {
     const patch = resolveExperimentSwitch(experimentOptions, questionId);
     if (!patch) return;
+    if (patch.panel !== "node") {
+      location.replaceParams(patch);
+      return;
+    }
     void fetchHypothesisFirstFocusNode(teamId, patch.questionId).then((node) => {
       location.replaceParams({ ...patch, node });
     });
