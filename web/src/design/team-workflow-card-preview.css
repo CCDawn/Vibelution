@@ -17,7 +17,7 @@ body {
 }
 
 .twc-header {
-  max-width: 1180px;
+  max-width: 1240px;
   margin: 0 auto 22px;
 }
 
@@ -51,7 +51,7 @@ body {
 }
 
 .twc-note {
-  max-width: 1180px;
+  max-width: 1240px;
   margin: 18px auto 0;
   color: var(--fg-tertiary);
   font-size: var(--vui-font-xs);
@@ -59,12 +59,56 @@ body {
 }
 
 .twc-compare {
-  max-width: 1180px;
+  max-width: 1240px;
   margin: 0 auto;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 20px;
+  gap: 24px;
   align-items: start;
+}
+
+.twc-column[data-side="proposed"] .twc-stage {
+  border-color: color-mix(in srgb, var(--accent-cool) 10%, var(--vui-border-subtle));
+  background:
+    radial-gradient(color-mix(in srgb, var(--fg-tertiary) 22%, transparent) 1px, transparent 1.5px),
+    var(--vui-surface-workspace);
+  background-size: 18px 18px, auto;
+}
+
+.twc-column[data-side="proposed"] .twc-stage-index {
+  border: 0;
+  background: var(--accent-cool);
+  color: var(--accent-cool-contrast);
+}
+
+.twc-column[data-side="proposed"] .twc-flow {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 0;
+}
+
+.twc-column[data-side="proposed"] .twc-step {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  width: 100%;
+}
+
+.twc-column[data-side="proposed"] .twc-arrow {
+  width: 2px;
+  height: 16px;
+  flex: 0 0 16px;
+  margin: 0 0 0 33px;
+  background: color-mix(in srgb, var(--fg-tertiary) 45%, transparent);
+}
+
+.twc-column[data-side="proposed"] .twc-arrow::after {
+  right: auto;
+  left: 50%;
+  top: auto;
+  bottom: -2px;
+  transform: translateX(-50%) rotate(45deg);
 }
 
 @media (max-width: 980px) {
@@ -171,7 +215,7 @@ body {
 }
 
 .twc-gallery {
-  max-width: 1180px;
+  max-width: 1240px;
   margin: 28px auto 0;
   display: grid;
   gap: 10px;
@@ -185,7 +229,7 @@ body {
 }
 
 .twc-borrow {
-  max-width: 1180px;
+  max-width: 1240px;
   margin: 22px auto 0;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -355,82 +399,88 @@ body {
   white-space: nowrap;
 }
 
-/* —— Proposed card —— */
+/* —— Proposed n8n/Dify module card —— */
 .twc-proposed {
   position: relative;
-  width: 268px;
-  min-height: 84px;
-  display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) auto;
-  grid-template-rows: auto auto;
-  column-gap: 10px;
-  row-gap: 4px;
+  width: min(300px, 100%);
+  height: 72px;
+  display: flex;
   align-items: center;
-  padding: 12px 14px 12px 16px;
-  overflow: hidden;
+  gap: 12px;
+  padding: 0 16px 0 12px;
+  overflow: visible;
   border: 1px solid var(--vui-border-subtle);
-  border-radius: 14px;
+  border-radius: 16px;
   background: var(--vui-surface-panel);
-  box-shadow: var(--vui-elevation-1);
+  box-shadow: var(--vui-elevation-2);
   color: var(--fg-primary);
   text-align: left;
   cursor: pointer;
 }
 
-.twc-proposed::before {
-  content: "";
-  position: absolute;
-  top: 10px;
-  bottom: 10px;
-  left: 0;
-  width: 3px;
-  border-radius: 0 3px 3px 0;
-  background: var(--twc-status, var(--vui-border-subtle));
-}
-
 .twc-port {
   position: absolute;
   top: 50%;
-  width: 8px;
-  height: 8px;
-  border: 1.5px solid var(--vui-border-strong);
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--vui-border-strong);
   border-radius: 999px;
   background: var(--vui-surface-panel);
   transform: translateY(-50%);
 }
 
 .twc-port-in {
-  left: -5px;
+  left: -6px;
 }
 
 .twc-port-out {
-  right: -5px;
+  right: -6px;
 }
 
 .twc-proposed-icon {
-  grid-row: 1 / 3;
+  position: relative;
   display: grid;
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
   place-items: center;
-  border-radius: 10px;
-  background: var(--twc-kind-bg);
-  color: var(--twc-kind-fg);
+  border-radius: 12px;
+  background: var(--twc-kind-fill);
+  color: var(--accent-cool-contrast);
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--fg-primary) 12%, transparent);
+}
+
+.twc-proposed-mark {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border: 2px solid var(--vui-surface-panel);
+  border-radius: 999px;
+  background: var(--twc-status, var(--fg-tertiary));
+  color: var(--accent-cool-contrast);
+}
+
+.twc-proposed[data-status="pending"] .twc-proposed-mark {
+  display: none;
 }
 
 .twc-proposed-copy {
-  grid-column: 2;
-  grid-row: 1 / 3;
   min-width: 0;
+  flex: 1;
   display: grid;
-  gap: 3px;
+  gap: 2px;
 }
 
 .twc-proposed-title {
   overflow: hidden;
-  font-size: var(--vui-font-xs);
-  font-weight: 650;
-  line-height: 1.25;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -438,88 +488,30 @@ body {
 .twc-proposed-sub {
   overflow: hidden;
   color: var(--fg-secondary);
-  font-size: var(--vui-font-2xs);
-  line-height: 1.3;
+  font-size: 12px;
+  line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.twc-proposed-aside {
-  grid-column: 3;
-  grid-row: 1 / 3;
-  display: grid;
-  justify-items: end;
-  align-content: center;
-  gap: 6px;
-}
-
-.twc-proposed-kind {
-  display: none;
-  height: 20px;
-  align-items: center;
-  padding: 0 7px;
-  border: 1px solid var(--vui-border-subtle);
-  border-radius: 999px;
-  background: var(--vui-surface-row);
-  color: var(--fg-secondary);
-  font-size: 11px;
-  font-weight: 650;
-}
-
-.twc-proposed[data-kind="start"] .twc-proposed-kind,
-.twc-proposed[data-kind="human"] .twc-proposed-kind,
-.twc-proposed[data-kind="system"] .twc-proposed-kind,
-.twc-proposed[data-kind="decision"] .twc-proposed-kind {
-  display: inline-flex;
-}
-
-.twc-proposed[data-kind="human"] .twc-proposed-kind {
-  border-color: color-mix(in srgb, var(--state-warning) 38%, var(--vui-border-subtle));
-  background: color-mix(in srgb, var(--state-warning) 10%, transparent);
-  color: var(--state-warning);
-}
-
-.twc-proposed-status {
-  display: inline-flex;
-  max-width: 88px;
-  align-items: center;
-  gap: 5px;
-  color: var(--fg-tertiary);
-  font-size: 11px;
-  font-weight: 650;
-  line-height: 1;
-}
-
-.twc-proposed-status-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--twc-status, var(--fg-tertiary));
-}
-
 .twc-proposed[data-kind="start"] {
-  --twc-kind-bg: color-mix(in srgb, var(--fg-tertiary) 12%, var(--vui-surface-row));
-  --twc-kind-fg: var(--fg-secondary);
+  --twc-kind-fill: var(--fg-secondary);
 }
 
 .twc-proposed[data-kind="agent"] {
-  --twc-kind-bg: color-mix(in srgb, var(--accent-cool) 12%, var(--vui-surface-row));
-  --twc-kind-fg: var(--accent-cool);
+  --twc-kind-fill: var(--accent-cool);
 }
 
 .twc-proposed[data-kind="human"] {
-  --twc-kind-bg: color-mix(in srgb, var(--state-warning) 14%, var(--vui-surface-row));
-  --twc-kind-fg: var(--state-warning);
+  --twc-kind-fill: var(--state-warning);
 }
 
 .twc-proposed[data-kind="system"] {
-  --twc-kind-bg: color-mix(in srgb, var(--fg-secondary) 12%, var(--vui-surface-row));
-  --twc-kind-fg: var(--fg-secondary);
+  --twc-kind-fill: var(--fg-primary);
 }
 
 .twc-proposed[data-kind="decision"] {
-  --twc-kind-bg: color-mix(in srgb, var(--accent-warm) 14%, var(--vui-surface-row));
-  --twc-kind-fg: var(--accent-warm);
+  --twc-kind-fill: var(--accent-warm);
 }
 
 .twc-current[data-status="pending"],
@@ -530,13 +522,11 @@ body {
 .twc-current[data-status="running"],
 .twc-proposed[data-status="running"] {
   --twc-status: var(--accent-cool);
-  border-color: color-mix(in srgb, var(--accent-cool) 48%, var(--vui-border-subtle));
 }
 
 .twc-current[data-status="waiting_human"],
 .twc-proposed[data-status="waiting_human"] {
   --twc-status: var(--state-warning);
-  border-color: color-mix(in srgb, var(--state-warning) 42%, var(--vui-border-subtle));
 }
 
 .twc-current[data-status="succeeded"],
@@ -547,27 +537,41 @@ body {
 .twc-current[data-status="failed"],
 .twc-proposed[data-status="failed"] {
   --twc-status: var(--state-error);
-  border-color: color-mix(in srgb, var(--state-error) 48%, var(--vui-border-subtle));
 }
 
-.twc-proposed[data-status="running"] .twc-proposed-status,
-.twc-proposed[data-status="waiting_human"] .twc-proposed-status,
-.twc-proposed[data-status="failed"] .twc-proposed-status {
-  color: var(--twc-status);
+.twc-current[data-status="running"],
+.twc-current[data-status="waiting_human"],
+.twc-current[data-status="failed"] {
+  border-color: color-mix(in srgb, var(--twc-status) 48%, var(--vui-border-subtle));
+}
+
+.twc-proposed[data-status="running"] {
+  border-color: color-mix(in srgb, var(--accent-cool) 70%, var(--vui-border-subtle));
+  box-shadow:
+    var(--vui-elevation-2),
+    0 0 0 3px color-mix(in srgb, var(--accent-cool) 18%, transparent);
+}
+
+.twc-proposed[data-status="waiting_human"] {
+  border-color: color-mix(in srgb, var(--state-warning) 70%, var(--vui-border-subtle));
+}
+
+.twc-proposed[data-status="failed"] {
+  border-color: color-mix(in srgb, var(--state-error) 70%, var(--vui-border-subtle));
+}
+
+.twc-proposed[data-status="running"] .twc-proposed-mark svg {
+  animation: twc-spin 1s linear infinite;
 }
 
 .twc-proposed[data-selected="true"] {
   outline: 2px solid var(--accent-cool);
-  outline-offset: 2px;
+  outline-offset: 3px;
 }
 
 .twc-current[data-selected="true"] {
   outline: 2px solid var(--accent-cool);
   outline-offset: 2px;
-}
-
-.twc-proposed[data-status="running"] .twc-proposed-icon {
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-cool) 16%, transparent);
 }
 
 @keyframes twc-spin {
@@ -583,6 +587,6 @@ body {
 
   .twc-current,
   .twc-proposed {
-    width: min(268px, 100%);
+    width: min(300px, 100%);
   }
 }

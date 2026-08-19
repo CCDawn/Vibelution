@@ -91,20 +91,20 @@ function sceneStatus(scene: SceneId, node: FlowNode, index: number): StatusId {
   return "pending";
 }
 
-function KindIcon({ kind }: { kind: KindId }) {
-  if (kind === "start") return <Play size={16} aria-hidden />;
-  if (kind === "human") return <User size={16} aria-hidden />;
-  if (kind === "system") return <Package size={16} aria-hidden />;
-  if (kind === "decision") return <GitBranch size={16} aria-hidden />;
-  return <Bot size={16} aria-hidden />;
+function KindIcon({ kind, size = 16 }: { kind: KindId; size?: number }) {
+  if (kind === "start") return <Play size={size} aria-hidden />;
+  if (kind === "human") return <User size={size} aria-hidden />;
+  if (kind === "system") return <Package size={size} aria-hidden />;
+  if (kind === "decision") return <GitBranch size={size} aria-hidden />;
+  return <Bot size={size} aria-hidden />;
 }
 
-function StatusGlyph({ status }: { status: StatusId }) {
-  if (status === "running") return <Loader2 size={12} aria-hidden />;
-  if (status === "succeeded") return <Check size={12} aria-hidden />;
-  if (status === "failed") return <X size={12} aria-hidden />;
-  if (status === "waiting_human") return <AlertTriangle size={12} aria-hidden />;
-  return <Circle size={12} aria-hidden />;
+function StatusGlyph({ status, size = 12 }: { status: StatusId; size?: number }) {
+  if (status === "running") return <Loader2 size={size} aria-hidden />;
+  if (status === "succeeded") return <Check size={size} aria-hidden />;
+  if (status === "failed") return <X size={size} aria-hidden />;
+  if (status === "waiting_human") return <AlertTriangle size={size} aria-hidden />;
+  return <Circle size={size} aria-hidden />;
 }
 
 function currentMeta(node: FlowNode): string {
@@ -187,18 +187,14 @@ function ProposedCard({
       <span className="twc-port twc-port-in" aria-hidden />
       <span className="twc-port twc-port-out" aria-hidden />
       <span className="twc-proposed-icon">
-        <KindIcon kind={node.kind} />
+        <KindIcon kind={node.kind} size={22} />
+        <span className="twc-proposed-mark" aria-label={STATUS_LABEL[status]}>
+          <StatusGlyph status={status} size={10} />
+        </span>
       </span>
       <span className="twc-proposed-copy">
         <span className="twc-proposed-title">{node.title}</span>
         <span className="twc-proposed-sub">{proposedSub(node)}</span>
-      </span>
-      <span className="twc-proposed-aside">
-        <span className="twc-proposed-kind">{KIND_LABEL[node.kind]}</span>
-        <span className="twc-proposed-status">
-          <span className="twc-proposed-status-dot" aria-hidden />
-          {STATUS_LABEL[status]}
-        </span>
       </span>
     </div>
   );
@@ -274,10 +270,9 @@ export function TeamWorkflowCardPreviewApp() {
     <main className={styles.page}>
       <header className={styles.header}>
         <p className={styles.eyebrow}>科研流程画布</p>
-        <h1>卡片先让人看懂这一步是谁、在干什么</h1>
+        <h1>上一版只是加大字号，这一版换成模块卡</h1>
         <p className={styles.subtitle}>
-          现在的卡把类型、状态、绑定、角色拆成三行 8–10px 字。建议改成 Dify 式身份图标 + n8n
-          式一行副标题：类型靠图标认，状态靠左边条和描边认，细节进右侧面板。
+          现网仍是三行挤卡、横排蛇形。建议侧改成 n8n 式模块：实心类型色块、标题加一行说明、状态叠在图标角上；流程改竖排，不再跟左边长得一样。
         </p>
         <div className={styles.scenes} role="tablist" aria-label="运行状态">
           {(Object.keys(SCENE_COPY) as SceneId[]).map((id) => (
@@ -296,8 +291,8 @@ export function TeamWorkflowCardPreviewApp() {
       </header>
 
       <div className={styles.compare}>
-        <section className={styles.column}>
-          <div className={styles.columnLabel}>现在 · 244×102 · 8px 脚注</div>
+        <section className={styles.column} data-side="current">
+          <div className={styles.columnLabel}>现在 · 横排挤卡 · 244×102</div>
           <StageBand index="1" title="知识搜集" chip="进行中">
             <FlowStrip
               nodes={KNOWLEDGE_NODES}
@@ -317,8 +312,8 @@ export function TeamWorkflowCardPreviewApp() {
             />
           </StageBand>
         </section>
-        <section className={styles.column}>
-          <div className={styles.columnLabel}>建议 · 268×84 · 14/12px</div>
+        <section className={styles.column} data-side="proposed">
+          <div className={styles.columnLabel}>建议 · 竖排模块卡 · 实心色块</div>
           <StageBand index="1" title="知识搜集" chip="进行中">
             <FlowStrip
               nodes={KNOWLEDGE_NODES}
@@ -341,7 +336,7 @@ export function TeamWorkflowCardPreviewApp() {
       </div>
 
       <section className={styles.gallery} aria-label="类型识别">
-        <div className={styles.galleryLabel}>建议卡 · 类型只靠图标，例外才打标签</div>
+        <div className={styles.galleryLabel}>建议卡 · 类型只靠实心色块，状态只靠图标角标</div>
         <div className={styles.flow}>
           {gallery.map((node) => (
             <ProposedCard key={node.id} node={node} status="pending" />
@@ -352,11 +347,11 @@ export function TeamWorkflowCardPreviewApp() {
       <aside className={styles.borrow} aria-label="借鉴来源">
         <div className={styles.borrowItem}>
           <strong>Dify 节点</strong>
-          <span>彩色类型图标做第一扫描目标；运行态走描边和左边条，不给整张卡染色。</span>
+          <span>彩色实心类型图标做第一扫描目标；运行态走描边和角标，不给整张卡染色。</span>
         </div>
         <div className={styles.borrowItem}>
           <strong>n8n 节点</strong>
-          <span>标题下一行副标题就够：角色 · 绑定人。状态用角标，不再做第三行脚注。</span>
+          <span>标题下一行副标题就够：角色 · 绑定人。状态叠在图标角上，不再做第三行脚注。</span>
         </div>
         <div className={styles.borrowItem}>
           <strong>本项目保留</strong>
