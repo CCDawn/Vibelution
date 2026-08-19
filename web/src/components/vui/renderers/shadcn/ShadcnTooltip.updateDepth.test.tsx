@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
 /**
  * Regression for workbench React #185 (Maximum update depth exceeded) inside
- * Radix overlay `setRef`. Chat/index chrome mounts many VTooltip / VButton
- * tooltip instances; React 19 re-attaches composed refs when the callback
- * identity churns, and state-setter refs then loop until React bails out.
+ * Radix overlay `setRef`. Chat session rows each wrap two VTooltip hosts;
+ * mounting Radix Trigger/Popper on every idle row calls state-setter refs
+ * during the same commit, and ~25 sessions already exceed React 19's nested
+ * update limit. Idle tips stay host-only until pointer/focus intent.
  */
 import React, { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -51,10 +52,11 @@ function DenseTooltipHost({ count }: { count: number }) {
 }
 
 describe("ShadcnTooltip React 19 update depth", () => {
-  it("does not loop when a dense tooltip list rerenders", () => {
-    mount(<DenseTooltipHost count={32} />);
+  it("does not loop when a dense idle tooltip list rerenders", () => {
+    mount(<DenseTooltipHost count={64} />);
     const bump = container.querySelector("[data-testid='bump']");
     expect(bump).toBeTruthy();
+    expect(document.querySelectorAll("[data-vui='tooltip-content']").length).toBe(0);
     expect(() => {
       act(() => {
         for (let i = 0; i < 8; i += 1) {
@@ -64,5 +66,33 @@ describe("ShadcnTooltip React 19 update depth", () => {
     }).not.toThrow();
     expect(container.querySelector("[data-testid='bump']")?.textContent).toContain("bump 8");
     expect(container.querySelector("button")?.textContent).toBeTruthy();
+    expect(document.querySelectorAll("[data-vui='tooltip-content']").length).toBe(0);
+  });
+
+  it("keeps the trigger slot on the idle host and mounts overlay after pointer intent", () => {
+    mount(
+      <VuiProvider>
+        <VTooltip content="hello-tip">
+          <button type="button">host</button>
+        </VTooltip>
+      </VuiProvider>,
+    );
+
+    const host = container.querySelector("button");
+    expect(host?.getAttribute("data-slot")).toBe("tooltip-trigger");
+    expect(document.querySelector("[data-vui='tooltip-content']")).toBeNull();
+
+    expect(() => {
+      act(() => {
+        // React maps onPointerEnter to bubbling pointerover, not pointerenter.
+        host?.dispatchEvent(new MouseEvent("pointerover", { bubbles: true }));
+        host?.focus();
+      });
+    }).not.toThrow();
+
+    const trigger = container.querySelector("[data-slot='tooltip-trigger']");
+    expect(trigger?.getAttribute("data-state")).toBeTruthy();
+    const tip = document.querySelector("[data-vui='tooltip-content']");
+    expect(tip?.textContent ?? "").toContain("hello-tip");
   });
 });

@@ -73,26 +73,31 @@ export function WorkflowStageRegionNode(props: NodeProps) {
   return (
     <div
       className={cn(
-        "h-full w-full rounded-2xl border",
-        spacious && (tone === "idle" || tone === "done") ? "border-dashed" : "",
-        STAGE_FILL[tone] ?? STAGE_FILL_IDLE,
-        STAGE_BORDER[tone] ?? STAGE_BORDER_IDLE,
+        "h-full w-full",
+        spacious
+          ? "pointer-events-none"
+          : cn(
+            "rounded-2xl border",
+            (tone === "idle" || tone === "done") ? "border-dashed" : "",
+            STAGE_FILL[tone] ?? STAGE_FILL_IDLE,
+            STAGE_BORDER[tone] ?? STAGE_BORDER_IDLE,
+          ),
       )}
       data-vui="workflow-stage-region"
       data-stage-tone={tone}
       data-layout-mode={spacious ? "serpentine" : "stage-columns"}
     >
-      <div className={cn("flex items-center gap-2", spacious ? "px-4 pt-3 pb-1" : "px-3.5 pt-3 pb-1")}>
+      <div className={cn("flex items-center gap-2", spacious ? "px-1 pt-1" : "px-3.5 pt-3 pb-1")}>
         <span
           className={cn(
             "inline-flex items-center justify-center border font-semibold tabular-nums",
-            spacious ? "size-[30px] rounded-lg px-1.5 text-[9px] shadow-[0_2px_7px_rgba(15,23,42,0.05)]" : "h-5 min-w-5 rounded-full px-1.5 text-[10px]",
+            spacious ? "h-5 min-w-5 rounded-full px-1.5 text-[10px]" : "h-5 min-w-5 rounded-full px-1.5 text-[10px]",
             meta.indexBadge,
           )}
         >
           {index}
         </span>
-        <div className="truncate text-[12px] font-semibold tracking-wide text-[var(--fg-secondary)]">
+        <div className={cn("truncate font-semibold tracking-wide text-[var(--fg-secondary)]", spacious ? "text-[11px]" : "text-[12px]")}>
           {label}
         </div>
         {meta.Icon ? (

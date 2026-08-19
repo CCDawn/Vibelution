@@ -108,6 +108,32 @@ describe("ShadcnWorkflowCanvas structure (P1-1)", () => {
     expect(typeof controlsElement.props.onFitAll).toBe("function");
   });
 
+  it("enables the approved 16px manual-layout controls only for serpentine canvases", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root: Root = createRoot(container);
+    await act(async () => {
+      root.render(<ShadcnWorkflowCanvas graph={emptyGraph()} layoutMode="serpentine" />);
+    });
+
+    const rfProps = rfCalls[0];
+    expect(rfProps.nodesDraggable).toBe(true);
+    expect(rfProps.snapToGrid).toBe(true);
+    expect(rfProps.snapGrid).toEqual([16, 16]);
+    const controlsElement = (Array.isArray(rfProps.children) ? rfProps.children : [rfProps.children]).find(
+      (child: React.ReactElement) => child.type === WorkflowCanvasControls,
+    );
+    expect(controlsElement.props.manualLayout).toEqual(expect.objectContaining({
+      canUndo: false,
+      locked: false,
+    }));
+
+    await act(async () => {
+      root.unmount();
+      container.remove();
+    });
+  });
+
   it("deletes the legacy fitView-only control wiring so onFitAll is the single explicit path", async () => {
     const container = document.createElement("div");
     document.body.appendChild(container);

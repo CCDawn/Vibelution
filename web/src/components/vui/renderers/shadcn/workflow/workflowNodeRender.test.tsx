@@ -304,7 +304,7 @@ describe("WorkflowStageRegionNode render (P1-5)", () => {
     expect(markup).toContain("/ 5");
   });
 
-  it("uses a solid workspace-tinted fill so cards can sit on a darker stage band", () => {
+  it("removes the large serpentine stage background and leaves a non-interactive heading", () => {
     const idle = renderNode(WorkflowStageRegionNode, {
       label: "知识搜集",
       stageTone: "idle",
@@ -312,18 +312,10 @@ describe("WorkflowStageRegionNode render (P1-5)", () => {
       layoutMode: "serpentine",
     });
     expect(idle).not.toContain("linear-gradient");
-    expect(idle).not.toContain("--vui-surface-region");
-    expect(idle).toContain("accent-cool)_8%,var(--vui-surface-workspace)");
-    expect(idle).toContain("accent-cool)_10%,var(--vui-border-subtle)");
-    expect(idle).toContain("border-dashed");
-
-    const active = renderNode(WorkflowStageRegionNode, {
-      label: "知识搜集",
-      stageTone: "active",
-      stageIndex: 0,
-      layoutMode: "serpentine",
-    });
-    expect(active).toContain("accent-cool)_12%,var(--vui-surface-workspace)");
+    expect(idle).not.toContain("accent-cool)_8%,var(--vui-surface-workspace)");
+    expect(idle).not.toContain("accent-cool)_10%,var(--vui-border-subtle)");
+    expect(idle).not.toContain("border-dashed");
+    expect(idle).toContain("pointer-events-none");
   });
 
   it("lifts serpentine task cards with an opaque panel and elevation token", () => {

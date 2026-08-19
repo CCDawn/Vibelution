@@ -23,6 +23,7 @@ type BaseEdgeStub = {
   interactionWidth?: number;
   "data-section-fault"?: string;
   "data-label-fault"?: string;
+  "data-manual-route"?: string;
 };
 
 const baseEdgeCalls: BaseEdgeStub[] = vi.hoisted(() => []);
@@ -91,6 +92,25 @@ describe("WorkflowSemanticEdge render (P1-3)", () => {
     expect(call.path).toBe("M 10 20 L 60 20 L 90 90 L 120 90");
     expect(call.id).toBe("e1");
     expect(call.interactionWidth).toBe(20);
+  });
+
+  it("switches to a live orthogonal route and midpoint label after a manual move", () => {
+    const markup = renderEdge(
+      {
+        sections,
+        label: "人工确认",
+        labelAlwaysVisible: true,
+        semanticKind: "human_gate",
+        gateKind: "knowledge_package",
+        pathState: "idle",
+        manualRouteActive: true,
+      },
+      { sourceX: 10, sourceY: 20, targetX: 130, targetY: 80 },
+    );
+    expect(baseEdgeCalls[0]?.path).toBe("M 10 20 L 70 20 L 70 80 L 130 80");
+    expect(baseEdgeCalls[0]?.["data-manual-route"]).toBe("true");
+    expect(baseEdgeCalls[0]?.["data-label-fault"]).toBeUndefined();
+    expect(markup).toContain('translate(70px,50px)');
   });
 
   it("uses dashed semantic colors for idle rerun/revise/rollback instead of a shared grey", () => {

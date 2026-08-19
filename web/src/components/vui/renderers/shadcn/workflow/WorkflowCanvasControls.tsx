@@ -1,16 +1,24 @@
 import { useReactFlow } from "@xyflow/react";
-import { Focus, Maximize2, Minus, Plus } from "lucide-react";
+import { Focus, LayoutDashboard, Lock, Maximize2, Minus, Plus, Undo2, Unlock } from "lucide-react";
 
 export type WorkflowCanvasControlsProps = {
   runtimeCurrentNodeIds?: string[];
   onFitAll?: () => void;
   onFocusCurrent?: () => void;
+  manualLayout?: {
+    canUndo: boolean;
+    locked: boolean;
+    onAutoArrange: () => void;
+    onUndo: () => void;
+    onToggleLock: () => void;
+  };
 };
 
 export function WorkflowCanvasControls({
   runtimeCurrentNodeIds = [],
   onFitAll,
   onFocusCurrent,
+  manualLayout,
 }: WorkflowCanvasControlsProps) {
   const { zoomIn, zoomOut, fitView, setCenter, getNode } = useReactFlow();
 
@@ -77,6 +85,40 @@ export function WorkflowCanvasControls({
       >
         <Focus className="h-4 w-4" aria-hidden />
       </button>
+      {manualLayout ? (
+        <>
+          <span className="mx-0.5 my-1 w-px bg-[var(--vui-border-subtle)]" aria-hidden />
+          <button
+            type="button"
+            className={btn}
+            aria-label="自动整理画布"
+            title="自动整理"
+            onClick={manualLayout.onAutoArrange}
+          >
+            <LayoutDashboard className="h-4 w-4" aria-hidden />
+          </button>
+          <button
+            type="button"
+            className={btn}
+            aria-label="撤销布局调整"
+            title="撤销布局调整"
+            onClick={manualLayout.onUndo}
+            disabled={!manualLayout.canUndo}
+          >
+            <Undo2 className="h-4 w-4" aria-hidden />
+          </button>
+          <button
+            type="button"
+            className={btn}
+            aria-label={manualLayout.locked ? "解锁布局" : "锁定布局"}
+            aria-pressed={manualLayout.locked}
+            title={manualLayout.locked ? "解锁布局" : "锁定布局"}
+            onClick={manualLayout.onToggleLock}
+          >
+            {manualLayout.locked ? <Lock className="h-4 w-4" aria-hidden /> : <Unlock className="h-4 w-4" aria-hidden />}
+          </button>
+        </>
+      ) : null}
     </div>
   );
 }
