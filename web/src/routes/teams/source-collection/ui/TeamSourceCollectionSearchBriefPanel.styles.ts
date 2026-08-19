@@ -33,9 +33,9 @@ const styles = {
     "w-5 shrink-0 select-none text-center [font-size:var(--vui-font-2xs)] font-[700] tabular-nums text-[var(--fg-tertiary)]",
   queryInputWrap:
     "min-w-0 flex-1",
-  /** Kill VNativeInput card chrome inside the list. */
+  /** Kill VNativeInput card chrome inside the list; keep the default focus ring. */
   queryInput:
-    "!h-8 !min-h-8 !w-full !min-w-0 !rounded-none !border-0 !bg-transparent !px-1 !py-0 ![font-size:var(--vui-font-xs)] !shadow-none !ring-0 hover:!border-0 focus-visible:!border-0 focus-visible:!ring-0 focus-visible:!ring-offset-0",
+    "!h-8 !min-h-8 !w-full !min-w-0 !rounded-none !border-0 !bg-transparent !px-1 !py-0 ![font-size:var(--vui-font-xs)] !shadow-none hover:!border-0 focus-visible:!border-0",
   removeButton:
     "inline-flex !size-7 !min-w-7 shrink-0 items-center justify-center !p-0 text-[var(--fg-tertiary)] hover:!bg-[color:color-mix(in_srgb,var(--state-danger)_10%,transparent)] hover:!text-[var(--state-danger)]",
   emptyQueries:

@@ -67,10 +67,19 @@ export type NodeInspectorOpsCardProps = {
 };
 
 function BudgetMeter(props: NodeInspectorBudgetMeter) {
+  const percent = Math.max(0, Math.min(100, Math.round(props.percent)));
   return (
     <VTooltip content={props.detail}>
-      <div className={`${styles.meter} ${props.warn ? styles.meterWarn : ""}`}>
-        <div className={styles.meterHead}>
+      <div
+        className={`${styles.meter} ${props.warn ? styles.meterWarn : ""}`}
+        role="progressbar"
+        aria-label={props.label}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={percent}
+        aria-valuetext={`${props.label} ${percent}%`}
+      >
+        <div className={styles.meterHead} aria-hidden="true">
           <span>{props.label}</span>
           <span>{props.percent}%</span>
         </div>

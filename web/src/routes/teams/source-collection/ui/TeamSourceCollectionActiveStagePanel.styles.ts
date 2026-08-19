@@ -38,7 +38,7 @@ const styles = {
   sourceCollectionStageFlowSteps:
     "sourceCollectionStageFlowSteps m-0 flex list-none flex-wrap gap-1 p-0",
   sourceCollectionStageFlowStep:
-    "sourceCollectionStageFlowStep inline-flex max-w-full items-center rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-0.5 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-tertiary)]",
+    "sourceCollectionStageFlowStep inline-flex max-w-full items-center gap-1 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-2 py-0.5 [font-size:var(--vui-font-xs)] font-semibold leading-none text-[var(--fg-tertiary)]",
   sourceCollectionStageFlowStepCurrent:
     "sourceCollectionStageFlowStepCurrent border-[color-mix(in_srgb,var(--accent-cool)_48%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_16%,var(--vui-surface-panel))] text-[var(--fg-primary)]",
   sourceCollectionStageFlowStepDone:

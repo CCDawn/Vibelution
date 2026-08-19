@@ -1,4 +1,4 @@
-import { Eye } from "lucide-react";
+import { CircleDot, Eye } from "lucide-react";
 
 import { VNativeButton, VSurface } from "../../components/vui";
 import type { ResearchBoardColumn } from "./researchBoardModel";
@@ -123,13 +123,22 @@ export function ResearchBoardKanban({
                   card.active ? "border-[var(--fg-primary)] shadow-[inset_0_0_0_1px_var(--fg-primary)]" : "",
                 ].filter(Boolean).join(" ")}
                 data-active={card.active ? "true" : "false"}
+                aria-current={card.active ? "true" : undefined}
               >
-                <strong
-                  className="min-w-0 truncate [font-size:var(--vui-font-xs)] font-[740] leading-snug text-[var(--fg-primary)]"
-                  title={card.title}
-                >
-                  {card.title}
-                </strong>
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <strong
+                    className="min-w-0 flex-1 truncate [font-size:var(--vui-font-xs)] font-[740] leading-snug text-[var(--fg-primary)]"
+                    title={card.title}
+                  >
+                    {card.title}
+                  </strong>
+                  {card.active ? (
+                    <span className="inline-flex shrink-0 items-center gap-1 rounded-md border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-1.5 py-0.5 [font-size:var(--vui-font-2xs)] font-[700] text-[var(--fg-primary)]">
+                      <CircleDot size={11} aria-hidden="true" />
+                      {lang === "zh" ? "进行中" : "Active"}
+                    </span>
+                  ) : null}
+                </div>
                 <p
                   className="m-0 line-clamp-2 min-w-0 [font-size:var(--vui-font-2xs)] leading-snug text-[var(--fg-secondary)]"
                   title={card.body}
