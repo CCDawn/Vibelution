@@ -29,10 +29,10 @@ describe("AgentResponseSectionView", () => {
     expect(html).toContain('aria-controls="agent-response-assistant-1-answer"');
     expect(html).toContain('aria-label="收起回答"');
     expect(html).toContain('id="agent-response-assistant-1-answer"');
-    // The lazy tooltip renderer resolves on the client; SSR must retain the
-    // native button and its accessible label without depending on wrapper DOM.
+    // Ordinary button titles remain native so transcript disclosure controls
+    // do not add an implicit Radix overlay during startup restoration.
     expect(html).toContain('data-vui="button"');
-    expect(html).not.toContain('title="收起回答"');
+    expect(html).toContain('title="收起回答"');
     expect(html).toContain('aria-hidden="true"');
     expect(html).toContain("回答");
     expect(html).toContain("最终回答内容");
@@ -63,7 +63,7 @@ describe("AgentResponseSectionView", () => {
     expect(html).toContain('aria-controls="agent-response-assistant-2-answer"');
     expect(html).toContain('aria-label="Show response"');
     expect(html).not.toContain('id="agent-response-assistant-2-answer"');
-    expect(html).not.toContain('title="Show response"');
+    expect(html).toContain('title="Show response"');
     expect(html).toContain("responseToggleStatus");
     expect(html).not.toContain("statusSpinner");
     expect(html).not.toContain("Hidden response body");
@@ -88,7 +88,7 @@ describe("AgentResponseSectionView", () => {
 
     expect(html).toContain('aria-expanded="true"');
     expect(html).toContain('aria-label="收起回答"');
-    expect(html).not.toContain('title="收起回答"');
+    expect(html).toContain('title="收起回答"');
     expect(html).toContain("正在实时输出的回答");
     expect(html).toContain("responseBody");
     expect(html).toContain('id="agent-response-assistant-live-answer"');

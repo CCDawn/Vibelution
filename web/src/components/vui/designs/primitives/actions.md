@@ -33,7 +33,8 @@ import { VButton } from "@/components/vui";
 | `variant` | primary / secondary / ghost / danger | 一页一个 primary 焦点 |
 | `density` | 高度/内边距密度 | 工具条可 compact |
 | `isDisabled` / `isPending` | 禁用 / 异步中 | pending 自带 spinner，勿只改文案 |
-| `icon` / `tooltip` / `disabledReason` | 图标与说明 | disabled 要能说清原因 |
+| `icon` / `title` | 图标与原生短提示 | `title` 不创建 overlay，适合已有可见文案的轻量补充 |
+| `tooltip` / `disabledReason` | 显式浮层说明 | 只有这两个契约创建 Radix tooltip；disabled 要能说清原因 |
 
 ### 非职责
 - 不负责路由导航语义；不做纯图标方钮；不做密集零浮层命中条。

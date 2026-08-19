@@ -227,8 +227,8 @@ describe("VUI foundation primitives", () => {
     expect(markup).toContain('data-slot="vui-button-icon"');
     expect(markup).toContain('data-slot="vui-button-label"');
     expect(markup).toContain('data-slot="vui-button-trailing-icon"');
-    expect(markup).toContain('data-slot="tooltip-trigger"');
-    expect(markup).not.toContain('title="Search docs"');
+    expect(markup).not.toContain('data-slot="tooltip-trigger"');
+    expect(markup).toContain('title="Search docs"');
     expect(markup).toContain(
       'class="inline-flex min-w-0 max-w-full items-center justify-center gap-1.5"',
     );
