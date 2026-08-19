@@ -27,7 +27,7 @@ import {
   overlayCleanupMetadata,
   paginateItems,
   type InstanceListFilters,
-  type InstancePendingOperation,
+  type LifecyclePendingInput,
   type InstanceRuntimeState,
 } from "./LauncherBranchInstancesPanel.model";
 import styles from "./LauncherBranchInstancesPanel.styles";
@@ -50,7 +50,7 @@ type LauncherBranchInstancesPanelProps = {
   items: LauncherBranchInstance[];
   selectedId: string;
   onSelect: (id: string) => void;
-  pendingOperation?: InstancePendingOperation;
+  pendingOperation?: LifecyclePendingInput;
   launcherTitle?: string;
   launcherOnline?: boolean;
   launcherReading?: boolean;
@@ -435,13 +435,14 @@ export function LauncherBranchInstancesPanel({
   const renderLifecycleActions = (item: LauncherBranchInstance) => {
     const state = instanceRuntimeState(item, pendingOperation);
     const windowOpen = instanceWindowOpen(item);
-    const inFlight = ["starting", "stopping", "restarting"].includes(state);
+    const startBusy = state === "starting" || state === "restarting" || state === "stopping";
+    const stopBusy = state === "stopping";
     const openLabel = state === "starting" || state === "restarting"
       ? instanceRuntimeStateLabel(state, zh)
       : state === "failed" ? labels.retryStart : windowOpen ? labels.focusWindow : labels.openWindow;
     const showOpen = canRequestOpenInstance(item, pendingOperation) || state === "starting" || state === "restarting";
     const requestOpen = () => {
-      if (clickGuardRef.current || lifecyclePending || inFlight) {
+      if (clickGuardRef.current || startBusy) {
         return;
       }
       clickGuardRef.current = true;
@@ -454,7 +455,7 @@ export function LauncherBranchInstancesPanel({
             type="button"
             variant="primary"
             density="compact"
-            isDisabled={lifecyclePending || inFlight}
+            isDisabled={startBusy}
             isPending={state === "starting" || state === "restarting"}
             onPress={requestOpen}
           >
@@ -466,13 +467,12 @@ export function LauncherBranchInstancesPanel({
             type="button"
             variant="secondary"
             density="compact"
-            isDisabled={lifecyclePending || inFlight}
+            isDisabled={stopBusy}
             isPending={state === "stopping"}
             onPress={() => {
-              if (clickGuardRef.current || lifecyclePending || inFlight) {
+              if (stopBusy) {
                 return;
               }
-              clickGuardRef.current = true;
               onLifecycle?.(item.id, "stop");
             }}
           >
@@ -708,7 +708,7 @@ export function LauncherBranchInstancesPanel({
                       type="button"
                       density="compact"
                       variant="secondary"
-                      isDisabled={lifecyclePending || grouped.running.every((item) => !canStopInstance(item, pendingOperation))}
+                      isDisabled={grouped.running.every((item) => !canStopInstance(item, pendingOperation))}
                       onPress={() => askBatchStop(grouped.running.map((item) => item.id), "stop")}
                     >
                       {labels.stopAll}
@@ -719,7 +719,7 @@ export function LauncherBranchInstancesPanel({
                       type="button"
                       density="compact"
                       variant="secondary"
-                      isDisabled={lifecyclePending || grouped.attention.every((item) => !canStopInstance(item, pendingOperation))}
+                      isDisabled={grouped.attention.every((item) => !canStopInstance(item, pendingOperation))}
                       onPress={() => askBatchStop(grouped.attention.map((item) => item.id), "close")}
                     >
                       {labels.closeAll}

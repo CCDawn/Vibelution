@@ -188,11 +188,19 @@ describe("LauncherRoute layout contract", () => {
     expect(branchInstancesPanelSource).toContain("onLifecycle");
     expect(branchInstancesPanelSource).toContain("onStopMany");
     expect(branchInstancesPanelSource).toContain('onLifecycle?.(item.id, "start")');
-    expect(routeSource).toContain("optimisticBranchOperation");
-    expect(routeSource).toContain("resolveActivePendingOperation");
-    expect(routeSource).toContain("lifecyclePending={Boolean(pendingBranchOperation) || controlMutation.isPending}");
+    expect(routeSource).toContain("lifecycleIntents");
+    expect(routeSource).toContain("acceptLifecycleIntent");
+    expect(routeSource).toContain("shouldApplyLifecycleMutationFeedback");
+    expect(routeSource).toContain("requestInstanceLifecycle");
+    expect(routeSource).toContain("onSettled:");
+    expect(routeSource).not.toContain("lifecycleInFlightRef");
+    expect(routeSource).not.toContain("optimisticBranchOperation");
+    expect(routeSource).toContain("lifecyclePending={controlMutation.isPending}");
+    expect(routeSource.match(/shouldApplyLifecycleMutationFeedback/g)?.length ?? 0).toBeGreaterThanOrEqual(4);
     expect(branchInstancesPanelSource).toContain("isPending={state === \"starting\" || state === \"restarting\"}");
     expect(branchInstancesPanelSource).toContain("clickGuardRef");
+    expect(branchInstancesPanelSource).toContain("const startBusy");
+    expect(branchInstancesPanelSource).toContain("isDisabled={stopBusy}");
   });
 
   it("renders a dense lifecycle console rather than a landing page", () => {
@@ -550,7 +558,7 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("launcher.lifecycle_control.${status}");
     expect(routeSource).toContain('status: "requested" | "accepted" | "rejected" | "request_failed"');
     expect(routeSource).toContain('response.accepted ? "accepted" : "rejected"');
-    expect(routeSource).toContain('postLauncherLifecycleControlTelemetry(resolveControlRequest(input).operation, "request_failed"');
+    expect(routeSource).toContain('postLauncherLifecycleControlTelemetry(request.operation, "request_failed"');
     expect(routeSource).toContain('source: "lifecycle-control"');
     expect(routeSource).toContain("launcherOperationSettledByStatus");
     expect(routeSource).toContain("trackedCommandSettledByStatus");
@@ -581,7 +589,9 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).not.toContain('controlMutation.mutate("stop")');
     expect(routeSource).not.toContain('controlMutation.mutate("force-stop")');
     expect(routeSource).not.toContain('controlMutation.mutate("restart")');
-    expect(routeSource).toContain("controlMutation.mutate({ operation, instanceId })");
+    expect(routeSource).toContain("controlMutation.mutate({");
+    expect(routeSource).toContain("requestId: accepted.intent.requestId");
+    expect(routeSource).toContain("localRevision: accepted.intent.localRevision");
     expect(startupSettingsPanelSource).toContain('id: "fullscreen"');
     expect(startupSettingsPanelSource).toContain('id: "windowed"');
     expect(startupSettingsPanelSource).toContain("saveWindowMode({ windowMode: value })");
