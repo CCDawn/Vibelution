@@ -62,6 +62,12 @@ function pickReview(
   return reviews.at(-1) ?? null;
 }
 
+function inspectorNodeOwnsCurrentStep(nodeId: string, targetNodeId: string | null): boolean {
+  if (!targetNodeId) return true;
+  if (nodeId === targetNodeId) return true;
+  return nodeId.startsWith("hf_collection_") && targetNodeId === "source_finding";
+}
+
 export function HypothesisFirstNodeInspector({
   teamId,
   questionId,
@@ -95,6 +101,7 @@ export function HypothesisFirstNodeInspector({
     collectionChildStatus,
     selectedNodeId: nodeId,
   });
+  const nodeOwnsCurrentStep = inspectorNodeOwnsCurrentStep(nodeId, nextAction.targetNodeId);
 
   if (!questionId) {
     return <VEmptyState title="缺少题目上下文">该卡片需要题目上下文才能继续当前任务。</VEmptyState>;
@@ -116,22 +123,42 @@ export function HypothesisFirstNodeInspector({
         <div className={styles.stage}>假说先行</div>
         <h3 className={styles.title}>{inspectorTitle(nodeId)}</h3>
       </header>
-      {nextAction.statusMessage ? (
+      {nodeOwnsCurrentStep && nextAction.statusMessage ? (
         <div role="status" className={styles.status}>{nextAction.statusMessage}</div>
       ) : null}
-      {nextAction.disabledReason ? (
+      {nodeOwnsCurrentStep && nextAction.disabledReason ? (
         <VStateRow tone="warning">{nextAction.disabledReason}</VStateRow>
       ) : null}
-      <InspectorBody
-        teamId={teamId}
-        questionId={questionId}
-        nodeId={nodeId}
-        liveMeetingRoundId={activeMeeting?.meetingRoundId || nextAction.meetingRoundId || ""}
-        nextAction={nextAction}
-        onRetryCollection={onRetryCollection}
-        onNavigateToNode={onNavigateToNode}
-        onOpenQuestion={onOpenQuestion}
-      />
+      {nodeOwnsCurrentStep ? (
+        <InspectorBody
+          teamId={teamId}
+          questionId={questionId}
+          nodeId={nodeId}
+          liveMeetingRoundId={activeMeeting?.meetingRoundId || nextAction.meetingRoundId || ""}
+          nextAction={nextAction}
+          onRetryCollection={onRetryCollection}
+          onNavigateToNode={onNavigateToNode}
+          onOpenQuestion={onOpenQuestion}
+        />
+      ) : (
+        <div className={styles.task} data-testid="hypothesis-first-previous-step-pending">
+          <VStateRow tone="warning">
+            {nodeId === HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID
+              ? "前序任务尚未完成，请先处理当前步骤。"
+              : "当前任务在其他步骤，请前往当前步骤。"}
+          </VStateRow>
+          {nextAction.targetNodeId && onNavigateToNode ? (
+            <VButton
+              type="button"
+              variant="primary"
+              density="compact"
+              onPress={() => onNavigateToNode(nextAction.targetNodeId || HYPOTHESIS_FIRST_GENERATION_NODE_ID)}
+            >
+              前往当前步骤
+            </VButton>
+          ) : null}
+        </div>
+      )}
       <div className={styles.secondary}>
         <VButton type="button" variant="ghost" density="compact" onClick={() => onOpenQuestion(questionId)}>
           打开赛题详情

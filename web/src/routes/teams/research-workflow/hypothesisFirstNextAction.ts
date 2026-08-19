@@ -188,9 +188,9 @@ export function hasValidEvidenceRequestKeywords(
 }
 
 export function reviewDigestConfirmBlocker(draft: MeetingDigestDraft | null | undefined): string | undefined {
-  if (!draft) return "还没有可确认的评审纪要";
+  if (!draft) return "还没有可确认的评审结论";
   if (!hasValidEvidenceRequestKeywords(draft.evidenceRequests)) {
-    return "本轮纪要没有有效搜集关键词，请拒绝后重新生成纪要";
+    return "本轮结论没有有效搜集关键词，请退回后重新整理";
   }
   return undefined;
 }
@@ -247,7 +247,10 @@ function meetingStage(
       targetNodeId: nodeId,
       navigationLabel: generation ? "前往候选生成" : "前往评审讨论",
       command: "draft_summary",
-      commandLabel: "生成纪要",
+      commandLabel: generation ? "整理候选清单" : "整理本轮结论",
+      statusMessage: generation
+        ? "团队讨论已结束，系统正在整理候选清单"
+        : "本轮评审已结束，系统正在整理结论",
       meetingRoundId: roundId,
     });
   }
@@ -259,10 +262,10 @@ function meetingStage(
         navigationLabel: generation ? "前往候选生成" : "前往评审讨论",
         recovery: {
           command: "retry_draft_summary",
-          label: "重试生成纪要",
-          reason: meeting.summaryError?.trim() || "纪要生成失败",
+          label: generation ? "重试整理候选清单" : "重试整理本轮结论",
+          reason: "自动整理未完成",
         },
-        statusMessage: "纪要生成失败，可重试",
+        statusMessage: "自动整理失败，可手动重试",
         meetingRoundId: roundId,
       });
     }
@@ -270,7 +273,9 @@ function meetingStage(
       stage: generation ? "generation_summarizing" : "review_summarizing",
       targetNodeId: nodeId,
       navigationLabel: generation ? "查看候选生成" : "查看评审讨论",
-      statusMessage: "正在生成纪要",
+      statusMessage: generation
+        ? "团队讨论已结束，系统正在整理候选清单"
+        : "本轮评审已结束，系统正在整理结论",
       meetingRoundId: roundId,
     });
   }

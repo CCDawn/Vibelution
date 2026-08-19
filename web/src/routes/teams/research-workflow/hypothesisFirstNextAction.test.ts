@@ -151,7 +151,7 @@ describe("resolveHypothesisFirstNextAction", () => {
     expect(next.statusMessage).toBe("讨论进行中");
   });
 
-  it("offers 生成纪要 only after bound chat rounds are terminal", () => {
+  it("starts automatic candidate-list organization only after bound chat rounds are terminal", () => {
     const next = resolveHypothesisFirstNextAction({
       run: { runId: "run-1" },
       meetings: [meeting({
@@ -163,7 +163,9 @@ describe("resolveHypothesisFirstNextAction", () => {
     });
     expect(next.stage).toBe("generation_ready_to_summarize");
     expect(next.command).toBe("draft_summary");
-    expect(next.commandLabel).toBe("生成纪要");
+    expect(next.commandLabel).toBe("整理候选清单");
+    expect(next.statusMessage).toBe("团队讨论已结束，系统正在整理候选清单");
+    expect(next.statusMessage).not.toContain("纪要");
     expect(next.navigationLabel).toBe("前往候选生成");
     expect(next.navigationLabel).not.toBe(next.commandLabel);
   });
@@ -178,7 +180,7 @@ describe("resolveHypothesisFirstNextAction", () => {
     });
     expect(waiting.stage).toBe("generation_summarizing");
     expect(waiting.command).toBeUndefined();
-    expect(waiting.statusMessage).toBe("正在生成纪要");
+    expect(waiting.statusMessage).toBe("团队讨论已结束，系统正在整理候选清单");
 
     const failed = resolveHypothesisFirstNextAction({
       run: { runId: "run-1" },
@@ -189,8 +191,9 @@ describe("resolveHypothesisFirstNextAction", () => {
       })],
     });
     expect(failed.recovery?.command).toBe("retry_draft_summary");
-    expect(failed.recovery?.label).toBe("重试生成纪要");
-    expect(failed.recovery?.reason).toContain("drafter timeout");
+    expect(failed.recovery?.label).toBe("重试整理候选清单");
+    expect(failed.recovery?.reason).toBe("自动整理未完成");
+    expect(failed.statusMessage).toBe("自动整理失败，可手动重试");
   });
 
   it("confirms the generation candidate list at awaiting_approval", () => {
@@ -250,13 +253,15 @@ describe("resolveHypothesisFirstNextAction", () => {
       boundChatRoundsTerminal: true,
     });
     expect(ready.stage).toBe("review_ready_to_summarize");
-    expect(ready.commandLabel).toBe("生成纪要");
+    expect(ready.commandLabel).toBe("整理本轮结论");
+    expect(ready.statusMessage).toBe("本轮评审已结束，系统正在整理结论");
 
     const summarizing = resolveHypothesisFirstNextAction({
       ...base,
       meetings: [meeting({ status: "summarizing" })],
     });
     expect(summarizing.stage).toBe("review_summarizing");
+    expect(summarizing.statusMessage).toBe("本轮评审已结束，系统正在整理结论");
 
     const approval = resolveHypothesisFirstNextAction({
       ...base,

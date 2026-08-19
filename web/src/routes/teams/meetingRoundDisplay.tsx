@@ -12,9 +12,9 @@ import css from "./meetingRoundDisplay.styles";
 
 export const MEETING_STATUS_LABELS: Record<string, string> = {
   open: "讨论中",
-  summarizing: "纪要生成中",
+  summarizing: "正在整理",
   awaiting_approval: "待人工确认",
-  closed: "已关门",
+  closed: "已结束",
 };
 
 export function meetingStatusTone(status: string): VStatusTone {
@@ -35,7 +35,7 @@ function markerText(value: Record<string, unknown>): string {
 function validationErrorMessage(error: MeetingDigestValidationError): string {
   const message = error.message?.trim();
   if (message) return message;
-  return "纪要校验失败，请重新生成纪要";
+  return "整理结果校验失败，请重新整理";
 }
 
 export function DigestDraftView({
@@ -55,7 +55,7 @@ export function DigestDraftView({
   return (
     <div className={css.digestGrid} data-testid="meeting-digest-draft">
       <article className={css.digestCard}>
-        <span>纪要摘要</span>
+        <span>讨论结论</span>
         <p>{summary}</p>
       </article>
       {proposed.length ? (
@@ -75,7 +75,7 @@ export function DigestDraftView({
       ) : null}
       {draft.validationErrors?.length ? (
         <article className={css.digestCard} data-testid="meeting-digest-validation-errors">
-          <span>纪要校验（{draft.validationErrors.length}）</span>
+          <span>结果校验（{draft.validationErrors.length}）</span>
           <ul className={css.digestList}>
             {draft.validationErrors.map((error, index) => (
               <li key={`${error.code || "validation"}-${index}`}>{validationErrorMessage(error)}</li>
@@ -85,7 +85,7 @@ export function DigestDraftView({
       ) : null}
       {compact ? (
         <details>
-          <summary>完整纪要</summary>
+          <summary>完整讨论结果</summary>
           <DigestDraftChapters
             agreements={agreements}
             disagreements={disagreements}
@@ -242,22 +242,33 @@ export function MeetingRoundDisplay({
 }) {
   const status = round.status;
   const digestDraft = round.digestDraft;
+  const organizationFailed = status === "summarizing"
+    && (Boolean(round.summaryError?.trim()) || Boolean(digestDraft?.validationErrors?.length));
   return (
     <div data-testid="meeting-round-display">
       <div className={css.heading}>
         <div>
           <h3>{round.meetingType === "hypothesis_candidate_generation" ? "候选生成讨论" : "评审讨论"}</h3>
           <p>
-            {round.meetingRoundId} · 参与者 {round.participants.length} 人 · 房间{" "}
-            {round.linkedChatRoomId || "—"}
+            {compact
+              ? `参与者 ${round.participants.length} 人`
+              : `${round.meetingRoundId} · 参与者 ${round.participants.length} 人 · 房间 ${round.linkedChatRoomId || "—"}`}
           </p>
         </div>
         <div className={css.headingActions}>
-          <VStatusChip tone={meetingStatusTone(status)} data-testid="meeting-round-status">
-            {MEETING_STATUS_LABELS[status] ?? status}
+          <VStatusChip tone={organizationFailed ? "danger" : meetingStatusTone(status)} data-testid="meeting-round-status">
+            {organizationFailed ? "整理失败" : (MEETING_STATUS_LABELS[status] ?? status)}
           </VStatusChip>
         </div>
       </div>
+      {compact ? (
+        <details>
+          <summary>运行详情</summary>
+          <p className={css.hint}>
+            讨论轮次 {round.meetingRoundId} · 房间 {round.linkedChatRoomId || "—"}
+          </p>
+        </details>
+      ) : null}
       {(round.agendaQuestions ?? []).length ? (
         <article className={css.digestCard}>
           <span>议程序列</span>
@@ -284,7 +295,7 @@ export function MeetingRoundDisplay({
       ) : null}
       {status === "closed" ? (
         <p className={css.hint}>
-          已于 {round.closedAt || "—"} 由 {round.closedBy || "unknown"} 确认关门。
+          已于 {round.closedAt || "—"} 由 {round.closedBy || "unknown"} 确认结束。
         </p>
       ) : null}
     </div>

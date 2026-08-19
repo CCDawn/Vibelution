@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
 
 import { fetchChatRoomDetail } from "../../../api/chat";
 import {
@@ -95,6 +96,16 @@ export function HypothesisFirstMeetingOps(props: {
     mutationFn: () => draftMeetingSummary(props.teamId, props.meetingRoundId, { actor: "operator", force: false }),
     onSuccess: invalidate,
   });
+  const autoDraftedMeetingIds = useRef(new Set<string>());
+  const roundStatus = roundQuery.data?.meetingRound?.status ?? "";
+  const shouldAutoDraft = props.nextAction.command === "draft_summary"
+    && props.nextAction.meetingRoundId === props.meetingRoundId
+    && roundStatus === "open";
+  useEffect(() => {
+    if (!shouldAutoDraft || autoDraftedMeetingIds.current.has(props.meetingRoundId)) return;
+    autoDraftedMeetingIds.current.add(props.meetingRoundId);
+    draftMutation.mutate();
+  }, [draftMutation.mutate, props.meetingRoundId, shouldAutoDraft]);
   const approveMutation = useMutation({
     mutationFn: () => {
       const hash = roundQuery.data?.meetingRound?.digestDraft?.contentHash || "";
@@ -140,8 +151,17 @@ export function HypothesisFirstMeetingOps(props: {
   }
 
   const commandEnabled = props.nextAction.meetingRoundId === props.meetingRoundId;
-  const command = commandEnabled ? (props.nextAction.recovery?.command || props.nextAction.command) : undefined;
-  const commandLabel = commandEnabled ? (props.nextAction.recovery?.label || props.nextAction.commandLabel) : undefined;
+  const autoDraftFailed = commandEnabled
+    && props.nextAction.command === "draft_summary"
+    && draftMutation.isError;
+  const command = autoDraftFailed
+    ? "retry_draft_summary"
+    : (commandEnabled ? (props.nextAction.recovery?.command || props.nextAction.command) : undefined);
+  const commandLabel = autoDraftFailed
+    ? (roundQuery.data.meetingRound.meetingType === "hypothesis_candidate_generation"
+      ? "重试整理候选清单"
+      : "重试整理本轮结论")
+    : (commandEnabled ? (props.nextAction.recovery?.label || props.nextAction.commandLabel) : undefined);
   const commandDisabledReason = props.nextAction.disabledReason
     || (command === "retry_handoff" && !canHandoff
       ? "缺少资料搜集运行标识，无法重试自动交接"
@@ -157,6 +177,14 @@ export function HypothesisFirstMeetingOps(props: {
     || rejectMutation.error
     || generationMutation.error
     || handoffMutation.error;
+  const displayRound = props.nextAction.command === "draft_summary"
+    && roundQuery.data.meetingRound.status === "open"
+    ? {
+        ...roundQuery.data.meetingRound,
+        status: "summarizing" as const,
+        summaryError: autoDraftFailed ? "automatic_organization_failed" : undefined,
+      }
+    : roundQuery.data.meetingRound;
 
   const runCommand = (next: HypothesisFirstCommand) => {
     if (next === "draft_summary" || next === "retry_draft_summary") {
@@ -183,7 +211,7 @@ export function HypothesisFirstMeetingOps(props: {
   return (
     <div className={styles.task}>
       <MeetingRoundDisplay
-        round={roundQuery.data.meetingRound}
+        round={displayRound}
         messages={messagesQuery.data?.messages ?? []}
         compact={props.compact}
       />
@@ -194,7 +222,7 @@ export function HypothesisFirstMeetingOps(props: {
         />
       ) : null}
       <div className={styles.actions}>
-        {command && commandLabel && command !== "record_selection" && command !== "create_run" && command !== "human_adjudication" ? (
+        {command && commandLabel && command !== "draft_summary" && command !== "record_selection" && command !== "create_run" && command !== "human_adjudication" ? (
           <VButton
             type="button"
             variant="primary"
@@ -215,7 +243,7 @@ export function HypothesisFirstMeetingOps(props: {
             isPending={rejectMutation.isPending}
             onPress={() => rejectMutation.mutate()}
           >
-            拒绝纪要
+            退回重新整理
           </VButton>
         ) : null}
       </div>

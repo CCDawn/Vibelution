@@ -437,6 +437,35 @@ describe("HypothesisFirstNodeInspector", () => {
     expect(container.querySelector('[role="status"]')).toBeTruthy();
   });
 
+  it("keeps future-node inspectors scoped and routes back to the actual current step", async () => {
+    mockedChain.mockReturnValue(chainData({
+      meetings: [scopeMeeting({ status: "open" })],
+      chainState: { candidateCount: 0 } as HypothesisFirstChainData["chainState"],
+    }));
+    const onNavigateToNode = vi.fn();
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_convergence_gate"
+        runId="run-1"
+        onOpenQuestion={() => {}}
+        onNavigateToNode={onNavigateToNode}
+      />,
+    );
+    expect(container.textContent).toContain("假说收敛门");
+    expect(container.textContent).toContain("前序任务尚未完成");
+    expect(container.textContent).toContain("前往当前步骤");
+    expect(container.textContent).not.toContain("讨论进行中");
+    expect(container.querySelector('[data-testid="meeting-ops"]')).toBeNull();
+
+    const button = [...container.querySelectorAll("button")].find((item) => item.textContent?.includes("前往当前步骤"));
+    await act(async () => {
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(onNavigateToNode).toHaveBeenCalledWith("hf_generation");
+  });
+
   it("shows the loading surface while the chain is loading", () => {
     mockedChain.mockReturnValue(chainData({ loading: true }));
     render(
