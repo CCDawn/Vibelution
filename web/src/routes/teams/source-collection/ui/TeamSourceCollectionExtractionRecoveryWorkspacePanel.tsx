@@ -9,10 +9,12 @@ import { VButton } from "../../../../components/vui";
 import {
   buildExtractionRecoveryViewModel,
 } from "../extractionRecoveryViewModel";
-import type { SourceCollectionStageCardProjection, SourceCollectionStageModuleId } from "../stageProjection";
+import type { SourceCollectionActionReadiness, SourceCollectionStageCardProjection, SourceCollectionStageModuleId } from "../stageProjection";
 import { TeamSourceCollectionExtractionRecoveryPanel } from "./TeamSourceCollectionExtractionRecoveryPanel";
 
 type Lang = "zh" | "en";
+
+type ExtractionRecoveryViewModelInput = Parameters<typeof buildExtractionRecoveryViewModel>[0];
 
 export type TeamSourceCollectionExtractionRecoveryWorkspacePanelProps = {
   candidateProjection: SourceCollectionStageCardProjection | null | undefined;
@@ -22,22 +24,16 @@ export type TeamSourceCollectionExtractionRecoveryWorkspacePanelProps = {
   sourceCollectionDisplayedCandidateCount: number;
   sourceCollectionPrimaryDataLoading: boolean;
   sourceCollectionLoadingText: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionCandidateStepState: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionExtractionExcludedRecoveryState: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionActionDisabledTitle: (readiness: any, label: string) => string | undefined;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionStageActionReadinessFor: (stageId: SourceCollectionStageModuleId) => any;
+  sourceCollectionCandidateStepState: ExtractionRecoveryViewModelInput["sourceCollectionCandidateStepState"];
+  sourceCollectionExtractionExcludedRecoveryState: ExtractionRecoveryViewModelInput["sourceCollectionExtractionExcludedRecoveryState"];
+  sourceCollectionActionDisabledTitle: (readiness: SourceCollectionActionReadiness, label: string) => string | undefined;
+  sourceCollectionStageActionReadinessFor: (stageId: SourceCollectionStageModuleId) => SourceCollectionActionReadiness;
   openSourceCollectionStageAgentChat: (stageId: SourceCollectionStageModuleId) => void;
   startSourceCollectionStageSessionTask: (stageId: SourceCollectionStageModuleId) => void;
   runSourceCollectionCandidateExtractionAction: () => void;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionCandidateExtractionActionReadiness: any;
+  sourceCollectionCandidateExtractionActionReadiness: SourceCollectionActionReadiness;
   runSourceCollectionScreeningAction: () => void;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionScreeningActionReadiness: any;
+  sourceCollectionScreeningActionReadiness: SourceCollectionActionReadiness;
   sourceCollectionScreeningButtonText: string;
   sourceCollectionScreeningButtonTitle?: string;
   sourceCollectionRunPendingScreeningCountText: string;

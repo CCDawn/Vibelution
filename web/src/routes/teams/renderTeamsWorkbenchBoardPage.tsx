@@ -30,6 +30,73 @@ export type TeamsWorkbenchBoardPageProps = {
   onToggleInspectorOverlay?: () => void;
 };
 
+type TeamsInspectorOverlayProps = {
+  styles: Record<string, string>;
+  label: string;
+  dismissLabel: string;
+  onDismiss?: () => void;
+  children: ReactNode;
+};
+
+/**
+ * Narrow-viewport inspector drawer. The backdrop is a real focusable dismiss
+ * control (role=button + Enter/Space) and Escape closes from anywhere inside
+ * the drawer via the bubbled keydown at the backdrop layer.
+ */
+export function TeamsWorkbenchInspectorOverlay({
+  styles,
+  label,
+  dismissLabel,
+  onDismiss,
+  children,
+}: TeamsInspectorOverlayProps) {
+  return (
+    <div
+      className={styles.boardInspectorOverlayBackdrop}
+      data-vui-region="teams-inspector-overlay-backdrop"
+      role="button"
+      tabIndex={0}
+      aria-label={dismissLabel}
+      onClick={onDismiss}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          onDismiss?.();
+          return;
+        }
+        if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
+          event.preventDefault();
+          onDismiss?.();
+        }
+      }}
+    >
+      <div
+        className={styles.boardInspectorOverlayPanel}
+        role="region"
+        aria-label={label}
+        data-vui-region="teams-inspector-overlay"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className={styles.boardInspectorOverlayHeader}>
+          <strong>{label}</strong>
+          <VButton
+            type="button"
+            variant="secondary"
+            isIconOnly
+            aria-label={dismissLabel}
+            title={dismissLabel}
+            icon={<X size={15} />}
+            onPress={onDismiss}
+          />
+        </div>
+        <div className={styles.boardInspectorOverlayBody}>
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function renderTeamsWorkbenchBoardPage(props: TeamsWorkbenchBoardPageProps) {
   const p = props;
   const inspectorVisible = p.showBoardInspectorAside;
@@ -115,35 +182,14 @@ export function renderTeamsWorkbenchBoardPage(props: TeamsWorkbenchBoardPageProp
         </div>
       ) : null}
       {overlayActive ? (
-        <div
-          className={p.styles.boardInspectorOverlayBackdrop}
-          data-vui-region="teams-inspector-overlay-backdrop"
-          onClick={p.onToggleInspectorOverlay}
+        <TeamsWorkbenchInspectorOverlay
+          styles={p.styles}
+          label={inspectorOverlayLabel}
+          dismissLabel={toggleLabel}
+          onDismiss={p.onToggleInspectorOverlay}
         >
-          <div
-            className={p.styles.boardInspectorOverlayPanel}
-            role="region"
-            aria-label={inspectorOverlayLabel}
-            data-vui-region="teams-inspector-overlay"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className={p.styles.boardInspectorOverlayHeader}>
-              <strong>{inspectorOverlayLabel}</strong>
-              <VButton
-                type="button"
-                variant="secondary"
-                isIconOnly
-                aria-label={toggleLabel}
-                title={toggleLabel}
-                icon={<X size={15} />}
-                onPress={p.onToggleInspectorOverlay}
-              />
-            </div>
-            <div className={p.styles.boardInspectorOverlayBody}>
-              {p.inspectorBody}
-            </div>
-          </div>
-        </div>
+          {p.inspectorBody}
+        </TeamsWorkbenchInspectorOverlay>
       ) : null}
     </>
   );

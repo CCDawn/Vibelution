@@ -3,34 +3,15 @@
  * Phase 4: collapse repetitive pending/error/result flags so the route keeps less derived ctx.
  */
 
-import type {
-  TeamWorkflowSourceCollectionPromptCachePolicy,
-  TeamWorkflowSourceCollectionRunStartPayload,
-  WorkRunSnapshot,
-} from "../../api/types";
+import type { TeamWorkflowSourceCollectionRunStartPayload } from "../../api/types";
+import type { ResearchStageRoundStartPayload } from "./workflowStartMutationModel";
+import type { TeamWorkflowSourceCollectionSearchExecutionPayload } from "./sourceCollectionMutationModel";
 
-/** Partial view of research stage start payload used by SC presentation. */
-export type ResearchStageRoundStartResultView = {
-  promptCachePolicy?: TeamWorkflowSourceCollectionPromptCachePolicy;
-  sourceCollectionRun?: {
-    promptCachePolicy?: TeamWorkflowSourceCollectionPromptCachePolicy;
-  };
-  searchPlan?: {
-    promptCachePolicy?: TeamWorkflowSourceCollectionPromptCachePolicy;
-    queryCount?: number;
-  };
-  stageRound?: {
-    promptCachePolicy?: TeamWorkflowSourceCollectionPromptCachePolicy;
-  };
-  sourceCollectionSearchExecution?: SourceCollectionSearchExecutionResultView;
-};
+/** Result view of research stage start mutation used by SC presentation. */
+export type ResearchStageRoundStartResultView = ResearchStageRoundStartPayload;
 
-/** Partial view of SC search execution mutation/result. */
-export type SourceCollectionSearchExecutionResultView = {
-  accepted?: boolean;
-  storageArtifacts?: Record<string, string>;
-  activeWorkRun?: WorkRunSnapshot;
-};
+/** Result view of SC search execution mutation. */
+export type SourceCollectionSearchExecutionResultView = TeamWorkflowSourceCollectionSearchExecutionPayload;
 
 export type TeamScopedMutationLike<
   TData = unknown,

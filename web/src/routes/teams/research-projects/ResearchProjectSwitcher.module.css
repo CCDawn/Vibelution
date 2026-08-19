@@ -24,7 +24,7 @@
   gap: 10px;
   align-items: center;
   min-width: 0;
-  color: var(--vui-fg-muted);
+  color: var(--fg-muted);
 }
 
 .hero .identity {
@@ -41,13 +41,13 @@
 }
 
 .identity span {
-  font-size: 12px;
+  font-size: var(--vui-font-2xs);
 }
 
 .identity strong {
   overflow: hidden;
-  color: var(--vui-fg);
-  font-size: 14px;
+  color: var(--fg-primary);
+  font-size: var(--vui-font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -60,21 +60,21 @@
 }
 
 .hero .titleLine strong {
-  color: var(--vui-fg);
+  color: var(--fg-primary);
   font-size: clamp(18px, 1.35vw, 23px);
   line-height: 1.2;
 }
 
 .titleLine small {
-  color: var(--vui-fg-muted);
-  font-size: 11px;
+  color: var(--fg-muted);
+  font-size: var(--vui-font-2xs);
   font-style: normal;
 }
 
 .status {
   min-height: 23px !important;
   padding: 2px 8px;
-  font-size: 11px !important;
+  font-size: var(--vui-font-2xs) !important;
   font-style: normal;
   font-weight: 760;
   white-space: nowrap;
@@ -83,8 +83,8 @@
 .identity p {
   margin: 5px 0 0;
   overflow: hidden;
-  color: var(--vui-fg-muted);
-  font-size: 12px;
+  color: var(--fg-muted);
+  font-size: var(--vui-font-2xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -93,8 +93,8 @@
   display: grid;
   gap: 5px;
   min-width: 0;
-  color: var(--vui-fg-muted);
-  font-size: 11px;
+  color: var(--fg-muted);
+  font-size: var(--vui-font-2xs);
 }
 
 .projectSelect select {
@@ -120,8 +120,8 @@
   padding: 0 14px;
   border: 1px solid var(--accent-cool);
   border-radius: var(--radius-control);
-  color: var(--vui-fg-on-accent, white);
-  font-size: 12px;
+  color: var(--accent-cool-contrast);
+  font-size: var(--vui-font-2xs);
   font-weight: 780;
   text-decoration: none;
   white-space: nowrap;
@@ -142,15 +142,15 @@
 .error {
   grid-column: 1 / -1;
   margin: -4px 0 0;
-  font-size: 12px;
+  font-size: var(--vui-font-2xs);
 }
 
 .message {
-  color: var(--vui-fg-success);
+  color: var(--state-success);
 }
 
 .error {
-  color: var(--vui-fg-danger);
+  color: var(--state-danger);
 }
 
 .form {
@@ -161,8 +161,8 @@
 .form label {
   display: grid;
   gap: 6px;
-  color: var(--vui-fg-muted);
-  font-size: 12px;
+  color: var(--fg-muted);
+  font-size: var(--vui-font-2xs);
 }
 
 @media (max-width: 1100px) {

@@ -4,6 +4,7 @@
  */
 import type { ReactNode } from "react";
 
+import type { TeamWorkflowCandidate, TeamWorkflowCandidateGraphPayload } from "../../../../api/types";
 import { TeamCandidateCard } from "../../../../components/vui/product/team-management";
 import {
   sourceCollectionCandidateProvenance,
@@ -17,8 +18,9 @@ import {
   sourceCollectionSourceFilterLabel,
   sourceCollectionSourceTypeLabel,
 } from "../evidenceModel";
+import type { SourceCollectionSourceFilter } from "../evidenceModel";
 import { sourceCollectionResultTone } from "../presentationModel";
-import type { SourceCollectionStageModuleId } from "../stageProjection";
+import type { SourceCollectionStageCardProjection, SourceCollectionStageModuleId } from "../stageProjection";
 import { workflowGraphLayout } from "../../../TeamWorkflowGraphLayout";
 import { TeamWorkflowGraphView } from "../../../TeamWorkflowGraphView";
 import { workflowStateLabel } from "../../workflowPresentation";
@@ -33,33 +35,24 @@ type Lang = "zh" | "en";
 export type TeamSourceCollectionGraphWorkspacePanelProps = {
   lang: Lang;
   selectedSourceCollectionRunEffectiveId: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionGraphProjection: any;
+  sourceCollectionGraphProjection: SourceCollectionStageCardProjection | null | undefined;
   sourceCollectionProjectedGraphNodeCount: number;
   sourceCollectionProjectedGraphEdgeCount: number;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  teamWorkflowCandidateGraph: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  teamWorkflowCandidatesById: Map<string, any>;
-  sourceCollectionSourceFilter: string;
+  teamWorkflowCandidateGraph: TeamWorkflowCandidateGraphPayload | null | undefined;
+  teamWorkflowCandidatesById: Map<string, TeamWorkflowCandidate>;
+  sourceCollectionSourceFilter: SourceCollectionSourceFilter;
   sourceCollectionFocusedPanelId: string;
   selectedSourceCollectionStageId: string;
   sourceCollectionExpandedPanelId: string;
   setSourceCollectionExpandedPanelId: (id: string) => void;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionGraphStepState: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  renderSourceCollectionFilterBar: (...args: any[]) => ReactNode;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionPageItems: (stageId: SourceCollectionStageModuleId, items: any[]) => { items: any[]; start: number; end: number };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sourceCollectionGraphStepState: string | null | undefined;
+  renderSourceCollectionFilterBar: (counts: ReturnType<typeof sourceCollectionFilterCounts>, label: string) => ReactNode;
+  sourceCollectionPageItems: <T>(stageId: SourceCollectionStageModuleId, items: T[]) => { items: T[]; start: number; end: number };
   renderSourceCollectionPagination: (stageId: SourceCollectionStageModuleId, total: number) => ReactNode;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   teamWorkflowCandidateGraphQuery: { isPending: boolean; error?: unknown };
   selectedTeamBuildCandidateGraphError: Error | null;
   selectedSourceCollectionCandidateId: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  selectSourceCollectionCandidate: (candidate: any) => void;
+  selectSourceCollectionCandidate: (candidate: TeamWorkflowCandidate) => void;
 };
 
 export function TeamSourceCollectionGraphWorkspacePanel(props: TeamSourceCollectionGraphWorkspacePanelProps) {
@@ -91,31 +84,31 @@ export function TeamSourceCollectionGraphWorkspacePanel(props: TeamSourceCollect
       selectedSourceCollectionRunEffectiveId && sourceCollectionGraphProjection
         ? sourceCollectionProjectedGraphNodeCount > 0 ? teamWorkflowCandidateGraph : null
         : teamWorkflowCandidateGraph;
-    const graphNodeSourceCategories = (graphForSelectedSourceRun?.nodes ?? []).map((node: any) => {
+    const graphNodeSourceCategories = (graphForSelectedSourceRun?.nodes ?? []).map((node) => {
       const candidate = teamWorkflowCandidatesById.get(node.candidateId);
       return candidate ? sourceCollectionCandidateSourceCategory(candidate, lang) : "missing";
     });
     const graphFilterCounts = sourceCollectionFilterCounts(graphNodeSourceCategories);
     const visibleGraphNodeIds = new Set(
       (teamWorkflowCandidateGraph?.nodes ?? [])
-        .filter((node: any) => {
+        .filter((node) => {
           const candidate = teamWorkflowCandidatesById.get(node.candidateId);
           const category = candidate ? sourceCollectionCandidateSourceCategory(candidate, lang) : "missing";
-          return sourceCollectionFilterMatches(sourceCollectionSourceFilter as any, category);
+          return sourceCollectionFilterMatches(sourceCollectionSourceFilter, category);
         })
-        .map((node: any) => node.candidateId),
+        .map((node) => node.candidateId),
     );
     const visibleGraph = graphForSelectedSourceRun
       ? {
           ...graphForSelectedSourceRun,
-          nodes: graphForSelectedSourceRun.nodes.filter((node: any) => visibleGraphNodeIds.has(node.candidateId)),
-          edges: graphForSelectedSourceRun.edges.filter((edge: any) =>
+          nodes: graphForSelectedSourceRun.nodes.filter((node) => visibleGraphNodeIds.has(node.candidateId)),
+          edges: graphForSelectedSourceRun.edges.filter((edge) =>
             visibleGraphNodeIds.has(edge.sourceCandidateId) && visibleGraphNodeIds.has(edge.targetCandidateId),
           ),
-          missingLinks: graphForSelectedSourceRun.missingLinks.filter((edge: any) =>
+          missingLinks: graphForSelectedSourceRun.missingLinks.filter((edge) =>
             visibleGraphNodeIds.has(edge.sourceCandidateId) || visibleGraphNodeIds.has(edge.targetCandidateId),
           ),
-          unreviewedNodes: graphForSelectedSourceRun.unreviewedNodes.filter((node: any) => visibleGraphNodeIds.has(node.candidateId)),
+          unreviewedNodes: graphForSelectedSourceRun.unreviewedNodes.filter((node) => visibleGraphNodeIds.has(node.candidateId)),
         }
       : null;
     const visibleGraphSummary = visibleGraph
@@ -127,7 +120,7 @@ export function TeamSourceCollectionGraphWorkspacePanel(props: TeamSourceCollect
         }
       : null;
     const visibleGraphMissingEvidenceAnchorCount = visibleGraph
-      ? visibleGraph.nodes.filter((node: any) => {
+      ? visibleGraph.nodes.filter((node) => {
           const candidate = teamWorkflowCandidatesById.get(node.candidateId);
           return candidate ? Boolean(sourceCollectionEvidenceLedgerSummary(candidate)?.missingAnchor) : false;
         }).length
@@ -176,7 +169,7 @@ export function TeamSourceCollectionGraphWorkspacePanel(props: TeamSourceCollect
           />
         ) : null}
         nodeListAriaLabel={lang === "zh" ? "入库关系节点列表，可滚动查看" : "Ingestion map nodes, scroll to review"}
-        nodeListItems={visibleGraph?.nodes.length ? pagedGraphNodes.items.map((node: any) => {
+        nodeListItems={visibleGraph?.nodes.length ? pagedGraphNodes.items.map((node) => {
           const candidate = teamWorkflowCandidatesById.get(node.candidateId) ?? null;
           const provenance = candidate ? sourceCollectionCandidateProvenance(candidate, lang) : null;
           const evidenceLedgerSummary = candidate ? sourceCollectionEvidenceLedgerSummary(candidate) : null;

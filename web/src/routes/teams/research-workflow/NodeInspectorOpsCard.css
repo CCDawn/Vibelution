@@ -21,7 +21,7 @@
 .nio-title {
   margin: 0;
   min-width: 0;
-  font-size: 1.05rem;
+  font-size: var(--vui-font-chat);
   font-weight: 700;
 }
 
@@ -40,7 +40,7 @@
   display: grid;
   place-items: center;
   font-family: var(--font-display);
-  font-size: 0.78rem;
+  font-size: var(--vui-font-2xs);
   font-weight: 800;
 }
 
@@ -126,7 +126,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.98rem;
+  font-size: var(--vui-font-md);
   font-weight: 800;
   letter-spacing: -0.02em;
 }
@@ -205,7 +205,7 @@
   display: grid;
   place-items: center;
   background: color-mix(in srgb, var(--accent-cool) 18%, var(--vui-control-muted));
-  font-size: 0.72rem;
+  font-size: var(--vui-font-2xs);
   font-weight: 800;
 }
 

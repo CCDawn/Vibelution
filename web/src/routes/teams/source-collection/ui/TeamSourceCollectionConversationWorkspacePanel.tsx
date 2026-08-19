@@ -2,10 +2,10 @@
  * Source-collection conversation / raw-records workspace body.
  * Wave 8K: extracted from TeamsRoute.tsx for domain componentization.
  */
-import type { ReactNode } from "react";
+import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { RefreshCw, Search } from "lucide-react";
 
-import type { Team } from "../../../../api/types";
+import type { DataProcessingRecord, DataProcessingRun, Team, TeamWorkflowCandidate } from "../../../../api/types";
 import { VButton } from "../../../../components/vui";
 import {
   TeamSourceEmptyState,
@@ -17,6 +17,7 @@ import {
   sourceCollectionRecordProvenance,
   sourceCollectionSourceTypeLabel,
 } from "../evidenceModel";
+import type { SourceCollectionSourceFilter } from "../evidenceModel";
 import {
   candidateSourceQualityAssessmentSummary,
   sourceCollectionResultTone,
@@ -35,44 +36,32 @@ type Lang = "zh" | "en";
 
 export type TeamSourceCollectionConversationWorkspacePanelProps = {
   lang: Lang;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionPageItems: (stageId: SourceCollectionStageModuleId, items: any[]) => { items: any[]; start: number; end: number };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionFilteredRecords: any[];
+  sourceCollectionPageItems: <T>(stageId: SourceCollectionStageModuleId, items: T[]) => { items: T[]; start: number; end: number };
+  sourceCollectionFilteredRecords: DataProcessingRecord[];
   sourceCollectionRecordsDataLoading: boolean;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionRecords: any[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  selectedSourceCollectionRun: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionHistoricalRunWithRecords: any;
+  sourceCollectionRecords: DataProcessingRecord[];
+  selectedSourceCollectionRun: DataProcessingRun | null | undefined;
+  sourceCollectionHistoricalRunWithRecords: DataProcessingRun | null | undefined;
   sourceCollectionLoadingText: string;
   sourceCollectionRawRecordCount: number;
   sourceCollectionRecordClickableSourceCount: number;
   sourceCollectionRecordLocalFileCount: number;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   sourceCollectionDraft: { title: string };
   sourceCollectionCollectedCountLabel: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  selectedSourceCollectionStorageArtifacts: any;
+  selectedSourceCollectionStorageArtifacts: Record<string, string> | null | undefined;
   sourceCollectionBoardNextStepLabel: string;
   sourceCollectionSourceFilter: string;
-  setSourceCollectionSourceFilter: (value: any) => void;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionRecordFilterCounts: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  renderSourceCollectionFilterBar: (...args: any[]) => ReactNode;
+  setSourceCollectionSourceFilter: Dispatch<SetStateAction<SourceCollectionSourceFilter>>;
+  sourceCollectionRecordFilterCounts: Record<SourceCollectionSourceFilter, number>;
+  renderSourceCollectionFilterBar: (counts: Record<SourceCollectionSourceFilter, number>, label: string, loading?: boolean) => ReactNode;
   sourceCollectionCollectedCountText: string;
   sourceCollectionDisplayedCandidateCountText: string;
   sourceCollectionPendingCandidateImportCount: number;
   sourceCollectionRecordMissingSourceCount: number;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   renderSourceCollectionPagination: (stageId: SourceCollectionStageModuleId, total: number) => ReactNode;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionCandidatesByRecordId: Map<string, any>;
+  sourceCollectionCandidatesByRecordId: Map<string, TeamWorkflowCandidate>;
   selectedSourceCollectionCandidateId: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  selectSourceCollectionCandidate: (candidate: any) => void;
+  selectSourceCollectionCandidate: (candidate: TeamWorkflowCandidate) => void;
   setSelectedSourceCollectionRunId: (runId: string) => void;
 };
 
@@ -210,7 +199,7 @@ export function TeamSourceCollectionConversationWorkspacePanel(props: TeamSource
       >
           {sourceCollectionConversationHasVisibleResults ? (
             <TeamSourceResultList ariaLabel={lang === "zh" ? "原始资料记录" : "Raw source records"}>
-              {visibleResults.map((record: any) => {
+              {visibleResults.map((record) => {
                 const linkedCandidate = sourceCollectionCandidatesByRecordId.get(record.recordId) ?? null;
                 const sourceQualitySummary = linkedCandidate ? candidateSourceQualityAssessmentSummary(linkedCandidate) : null;
                 const provenance = sourceCollectionRecordProvenance(record, lang);

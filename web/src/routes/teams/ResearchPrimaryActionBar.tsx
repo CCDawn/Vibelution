@@ -175,7 +175,7 @@ export function ResearchPrimaryActionBar({
           </>
         ) : (
           <>
-            <h3 className="m-0 text-[1.125rem] font-[820] leading-snug tracking-tight text-[var(--fg-primary)]">
+            <h3 className="m-0 [font-size:var(--vui-font-lg)] font-[820] leading-snug tracking-tight text-[var(--fg-primary)]">
               {title}
             </h3>
             <p className="m-0 max-w-[40rem] [font-size:var(--vui-type-body-size)] leading-[var(--vui-type-body-line)] text-[var(--fg-secondary)]">
@@ -187,7 +187,7 @@ export function ResearchPrimaryActionBar({
 
       {!loading && handoff ? (
         <div
-          className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-3 py-2 text-[12.5px] text-[var(--fg-primary)]"
+          className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-3 py-2 [font-size:var(--vui-font-2xs)] text-[var(--fg-primary)]"
           role="status"
           data-testid="research-stage-handoff-banner"
         >
@@ -220,8 +220,8 @@ export function ResearchPrimaryActionBar({
               key={chip.key}
               className="inline-flex items-center gap-1.5 rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-2.5 py-1"
             >
-              <dt className="m-0 text-[11px] font-semibold text-[var(--fg-tertiary)]">{chip.label}</dt>
-              <dd className="m-0 text-[12px] font-semibold text-[var(--fg-primary)]">
+              <dt className="m-0 [font-size:var(--vui-font-2xs)] font-semibold text-[var(--fg-tertiary)]">{chip.label}</dt>
+              <dd className="m-0 [font-size:var(--vui-font-2xs)] font-semibold text-[var(--fg-primary)]">
                 <MetricValue value={chip.value} loading={chip.loading} lang={lang} />
               </dd>
             </div>

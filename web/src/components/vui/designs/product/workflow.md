@@ -164,6 +164,15 @@ const graph = composeHypothesisFirstGraph(base, region); // region 为 null 时�
 
 链数据由 `useHypothesisFirstChain(teamId, questionId)`（React Query，questionId 为空不发请求）提供；run SSE 事件经 `useHypothesisFirstChainInvalidation` 防抖失效相关 query。
 
+### 工作区顶栏实验切换（2026-08-19）
+
+画布拓扑仍是一张图。顶栏切换的是**已开始的题目实验实例**，不是 125 题目录，也不是 Program 冻结的 `EXP-*` campaign。
+
+- 选项来自 `launch-options.questions[].checkpoint`（题目最新 workflow run）。文案：`SCI-096 · 当前节点 · 进度 · 状态`，description 为题目标题。
+- 选中一项即写入 URL：`questionId` + `runId` + `node=checkpoint.currentNodeId`。画布加载该 run 的投影（LangGraph/n8n/AutoGen Studio 的 thread/execution/session 切换语义）。
+- 顶栏常驻当前题号、标题与假说摘要（未选则写「尚未选择假说 / 尚未选择实验」）。假说正文仍在赛题详情，不把 125 题假说陈述预拉进切换器。
+- 「创建运行 / 新建运行」仍打开 launch 面板；切换器只列出已有 checkpoint 的实验。
+
 ### 渲染契约补丁（2026-08-19 修复）
 
 - 「首轮搜集范围就绪」边指向主图起点 `source_finding`（visualKind `start`）。`WorkflowStartEndNode` 的默认极性仍是「start 无 target 把手」；但当布局给 start 节点分配了真实 target 端口（`portSides.target` 非空）时，渲染器必须镜像该端口——否则 React Flow 因找不到 target handle 静默丢边。既有契约测试（无入边 fixture 下 start 无 target 把手）不受影响。

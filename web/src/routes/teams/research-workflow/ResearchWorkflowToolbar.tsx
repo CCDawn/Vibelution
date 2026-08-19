@@ -1,8 +1,9 @@
 import { VButton, VSelect } from "../../../components/vui";
 import { useShellI18n } from "../../../i18n/useShellI18n";
+import type { ExperimentChromeIdentity, ExperimentSwitchOption } from "./researchExperimentSwitchModel";
 import type { ResearchProcessPanel } from "./researchProcessPanelSelection";
-import { researchRunStatusLabel, type ResearchRunOption } from "./researchRunPresentation";
 import type { ResearchWorkflowEventStreamState } from "./useResearchWorkflowEventStream";
+import { researchRunStatusLabel } from "./researchRunPresentation";
 import styles from "./ResearchWorkflowToolbar.styles";
 
 function streamStateLabel(state: ResearchWorkflowEventStreamState, isZh: boolean): string {
@@ -26,27 +27,37 @@ function streamStateLabel(state: ResearchWorkflowEventStreamState, isZh: boolean
 
 export function ResearchWorkflowToolbar(props: {
   teamName: string;
-  questionId: string;
+  identity: ExperimentChromeIdentity | null;
   runId: string;
   runStatus: string;
   nextAction: string;
   streamState: ResearchWorkflowEventStreamState;
-  runOptions: ResearchRunOption[];
+  experimentOptions: ExperimentSwitchOption[];
   panel: ResearchProcessPanel;
   hasRuntimeNode: boolean;
   createDisabled: boolean;
   createDisabledReason?: string;
-  onSelectRun: (runId: string) => void;
+  onSelectExperiment: (questionId: string) => void;
   onOpenPanel: (panel: ResearchProcessPanel) => void;
   onJumpToRuntime: () => void;
 }) {
   const { lang } = useShellI18n();
   const isZh = lang === "zh";
+  const selectedQuestionId = props.identity?.questionId || null;
   return (
     <div className={styles.root}>
       <div className={styles.context}>
         <strong className={styles.primary}>{props.teamName}</strong>
-        {props.questionId ? <span className={styles.truncated}>{props.questionId}</span> : null}
+        {props.identity ? (
+          <span className={styles.truncated} title={`${props.identity.questionId} · ${props.identity.title}`}>
+            {props.identity.questionId} · {props.identity.title}
+          </span>
+        ) : (
+          <span className={styles.truncated}>{isZh ? "尚未选择实验" : "No experiment selected"}</span>
+        )}
+        {props.identity?.hypothesisSummary ? (
+          <span className={styles.truncated}>{props.identity.hypothesisSummary}</span>
+        ) : null}
         {props.runId ? <span className={styles.truncated}>{researchRunStatusLabel(props.runStatus)}</span> : null}
         {props.runId ? (
           <span aria-label={isZh ? "事件连接状态" : "Event stream state"}>
@@ -69,18 +80,22 @@ export function ResearchWorkflowToolbar(props: {
         ) : null}
       </div>
       <div className={styles.actions}>
-        {props.runOptions.length > 0 ? (
+        {props.experimentOptions.length > 0 ? (
           <VSelect
             density="compact"
             className={styles.select}
-            aria-label={isZh ? "运行切换" : "Switch run"}
-            placeholder={isZh ? "切换运行" : "Switch run"}
-            selectedKey={props.runId || null}
-            options={props.runOptions.map((item) => ({
-              id: item.runId,
+            aria-label={isZh ? "切换实验" : "Switch experiment"}
+            placeholder={isZh ? "切换实验" : "Switch experiment"}
+            selectedKey={selectedQuestionId}
+            options={props.experimentOptions.map((item) => ({
+              id: item.questionId,
               label: item.label,
+              description: item.description,
             }))}
-            onSelectionChange={(key) => props.onSelectRun(key == null ? "" : String(key))}
+            onSelectionChange={(key) => {
+              if (key == null) return;
+              props.onSelectExperiment(String(key));
+            }}
           />
         ) : null}
         <VButton type="button" variant={props.panel === "agents" ? "secondary" : "ghost"} onClick={() => props.onOpenPanel("agents")}>Agent</VButton>

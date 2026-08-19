@@ -275,6 +275,7 @@ export function TeamOrganizationCanvasSurface(props: TeamOrganizationCanvasSurfa
               const functionLabel = teamNodeFunctionLabel(node, display?.functionLabel, lang);
               const agentLine = canvasNodeAgentLine(node, display?.name, lang);
               const purpose = String(node.purpose || "").trim();
+              const nodeSelected = selectedNodeId === node.id;
               return (
                 <VNativeButton
                   key={node.id}
@@ -282,10 +283,12 @@ export function TeamOrganizationCanvasSurface(props: TeamOrganizationCanvasSurfa
                   className={[
                     styles.node,
                     nodeToneClass(node),
-                    selectedNodeId === node.id ? nodeActiveClassName : "",
+                    nodeSelected ? nodeActiveClassName : "",
                     researchCanvasReadOnly ? nodeReadOnlyClassName : "",
                   ].filter(Boolean).join(" ")}
                   style={teamCanvasNodeStyle(node)}
+                  aria-label={`${node.label}, ${functionLabel}, ${agentLine}`}
+                  aria-pressed={nodeSelected}
                   title={
                     researchCanvasReadOnly
                       ? (lang === "zh" ? "点击查看节点详情" : "Click to inspect node")

@@ -309,6 +309,63 @@ describe("systemStatus", () => {
     ).toBe("unmanaged");
   });
 
+  it("treats an Electron-managed open window as hosted when legacy browserManaged is false", () => {
+    expect(
+      deriveRuntimeControllerState({
+        runtimeManager: {
+          running: true,
+          runtimeState: "running",
+          managerPid: 1001,
+          stateVersion: 3,
+        },
+        workbench: {
+          ...runtimeWorkbenchBase,
+          desiredState: "open",
+          observedState: "open",
+          phase: "steady",
+          backendPid: 222,
+          browserWindowPid: 333,
+          windowProvider: "electron",
+          windowManaged: true,
+          browserManaged: false,
+          url: "http://127.0.0.1:8000",
+          lastReason: "",
+          statusLine: "Workbench is open.",
+          failureMessage: "",
+        },
+      }),
+    ).toBe("managed");
+  });
+
+  it("flags a missing Electron-owned window as failed even without the Edge browserManaged alias", () => {
+    expect(
+      deriveRuntimeControllerState({
+        runtimeManager: {
+          running: true,
+          runtimeState: "running",
+          managerPid: 1001,
+          stateVersion: 3,
+        },
+        workbench: {
+          ...runtimeWorkbenchBase,
+          browserWindowAlive: false,
+          desiredState: "open",
+          observedState: "partial",
+          phase: "steady",
+          backendPid: 222,
+          browserWindowPid: 0,
+          windowProvider: "electron",
+          windowManaged: true,
+          browserManaged: false,
+          url: "http://127.0.0.1:8000",
+          lastReason: "",
+          statusLine: "Workbench window is closed; backend is still running.",
+          failureMessage: "",
+        },
+      }),
+    ).toBe("failed");
+  });
+
   it("maps system states to stable visual tones", () => {
     expect(frontendSystemTone("connected")).toBe("running");
     expect(frontendSystemTone("background")).toBe("idle");

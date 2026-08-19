@@ -100,7 +100,7 @@ export function ResearchOverviewSurface({
           />
           {notice ? (
             <div
-              className="rounded-lg border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-3 py-2 text-[12.5px] text-[var(--fg-primary)]"
+              className="rounded-lg border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-row)] px-3 py-2 [font-size:var(--vui-font-2xs)] text-[var(--fg-primary)]"
               role="status"
               aria-live="polite"
               data-testid="research-advance-notice"

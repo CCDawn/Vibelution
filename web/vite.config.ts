@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const webRoot = fileURLToPath(new URL(".", import.meta.url));
+const radixComposeRefsEntry = resolve(webRoot, "src/vendor/radixComposeRefs.ts");
 /** SSR tests use a sync re-export so renderToStaticMarkup sees full markdown sanitization. */
 const lazyConversationMarkdownEntry = resolve(
   webRoot,
@@ -134,6 +135,16 @@ export default defineConfig({
     __VIBELUTION_BUILD_ID__: JSON.stringify(buildStamp),
   },
   plugins: [lazyMarkdownTestShimPlugin(), tailwindcss(), react()],
+  resolve: {
+    alias: {
+      // React 19 re-attaches composed refs when callback identity churns.
+      // Alias Radix compose-refs to a stable-callback shim (primitives#3963).
+      "@radix-ui/react-compose-refs": radixComposeRefsEntry,
+    },
+  },
+  optimizeDeps: {
+    exclude: ["@radix-ui/react-compose-refs"],
+  },
   test: {
     environment: "node",
     include: ["src/**/*.test.ts", "src/**/*.test.tsx", "*.test.ts"],

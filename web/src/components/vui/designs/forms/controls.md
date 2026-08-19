@@ -165,7 +165,9 @@ import { VSelect } from "@/components/vui";
 | Prop | 说明 | 设计注意 |
 | --- | --- | --- |
 | selectedKey / onSelectionChange | 选中态 | 与 form name 可联动 hidden input |
-| items | 选项 | 可含 description |
+| options | 选项 | 可含 `description`；有描述时下拉行为**两行自动高度**，不得压成单行控件高 |
+
+带 `description` 的选项：标题一行、描述一行，行高随内容增高（`h-auto` / `shrink-0`）。不要把选项钉在 `--vui-control-height-*` 上，否则长列表里描述会叠到下一题。触发器仍只显示 `label`。
 
 ### 实现落点
 - `forms/VSelect.tsx` → `ShadcnSelect`

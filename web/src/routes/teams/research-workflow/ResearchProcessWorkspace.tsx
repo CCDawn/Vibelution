@@ -4,6 +4,11 @@ import { WORKBENCH_LAYOUT_IDS } from "../../../components/layout/workbenchLayout
 import { VCanvasWorkbenchPage } from "../../../components/vui";
 import { buildHypothesisFirstCanvasRegion } from "./hypothesisFirstCanvasRegion";
 import {
+  buildExperimentChromeIdentity,
+  buildExperimentSwitchOptions,
+  resolveExperimentSwitch,
+} from "./researchExperimentSwitchModel";
+import {
   composeHypothesisFirstGraph,
   definitionToCanvasGraph,
   projectionToCanvasGraph,
@@ -108,6 +113,42 @@ export function ResearchProcessWorkspace({
     if (current) location.replaceParams({ node: current, panel: "node" });
   }, [location, runState.projection]);
 
+  const experimentIdentity = buildExperimentChromeIdentity({
+    questionId: chainQuestionId,
+    title: catalog.questions.find(
+      (question) => question.questionId.toUpperCase() === chainQuestionId.toUpperCase(),
+    )?.title ?? chainQuestionId,
+    selectedCandidateIds: hypothesisFirstChain.selection?.selectedCandidateIds,
+  });
+  const experimentOptions = useMemo(() => {
+    const currentRun = runState.run;
+    if (!currentRun) {
+      return buildExperimentSwitchOptions({ questions: catalog.questions });
+    }
+    const currentNodeId = currentRun.runtimeCurrentNodeIds?.[0] ?? "";
+    const currentNodeLabel =
+      runState.projection?.definition.nodes.find((node) => node.nodeId === currentNodeId)?.label ?? "";
+    const currentTitle = catalog.questions.find(
+      (question) => question.questionId.toUpperCase() === currentRun.questionId.toUpperCase(),
+    )?.title;
+    return buildExperimentSwitchOptions({
+      questions: catalog.questions,
+      current: {
+        questionId: currentRun.questionId,
+        title: currentTitle,
+        runId: currentRun.runId,
+        currentNodeId,
+        currentNodeLabel,
+        status: currentRun.status,
+      },
+    });
+  }, [catalog.questions, runState.run, runState.projection]);
+  const selectExperiment = useCallback((questionId: string) => {
+    const patch = resolveExperimentSwitch(experimentOptions, questionId);
+    if (!patch) return;
+    location.replaceParams(patch);
+  }, [experimentOptions, location]);
+
   const runtimeNodeId = runState.projection?.run.runtimeCurrentNodeIds?.[0] ?? "";
   const nextAction = runState.projection?.definition.nodes.find(
     (node) => node.nodeId === runtimeNodeId,
@@ -135,16 +176,16 @@ export function ResearchProcessWorkspace({
         toolbar={(
           <ResearchWorkflowToolbar
             teamName={teamName || teamId}
-            questionId={runState.run?.questionId || ""}
+            identity={experimentIdentity}
             runId={location.runId}
             runStatus={runState.run?.status || runState.projection?.run.status || ""}
             nextAction={nextAction}
             streamState={runState.streamState}
-            runOptions={catalog.runOptions}
+            experimentOptions={experimentOptions}
             panel={location.panel}
             hasRuntimeNode={Boolean(runtimeNodeId)}
             createDisabled={runState.busy}
-            onSelectRun={(runId) => location.replaceParams({ runId: runId || null, node: null, panel: "node" })}
+            onSelectExperiment={selectExperiment}
             onOpenPanel={location.openPanel}
             onJumpToRuntime={jumpToRuntime}
           />

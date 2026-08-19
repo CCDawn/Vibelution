@@ -67,7 +67,10 @@ export function ChallengeQuestionAnalysisSection({ output, lang = "zh" }: Challe
                     key={`${review.hypothesis_id}-${review.dimension}`}
                     width="wide"
                   >
-                    <div>
+                    <div
+                      tabIndex={0}
+                      className="focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-cool)]"
+                    >
                       <span>{challengeDimensionLabel(review.dimension, lang)}</span>
                       <strong>{challengeRatingLabel(review.rating, lang)}</strong>
                     </div>

@@ -1,4 +1,5 @@
 import { type ReactNode } from "react";
+import { Check, ChevronRight } from "lucide-react";
 
 import { WORKBENCH_LAYOUT_IDS } from "../../../../components/layout/workbenchLayoutIds";
 import { VButton, VNativeButton, VSplitWorkspace } from "../../../../components/vui";
@@ -127,6 +128,13 @@ export function TeamSourceCollectionActiveStagePanel({
                 ].filter(Boolean).join(" ")}
                 aria-current={step.state === "current" ? "step" : undefined}
               >
+                {step.state === "done" ? (
+                  <>
+                    <Check size={11} aria-hidden="true" />
+                    <span className="sr-only">{lang === "zh" ? "已完成：" : "Done: "}</span>
+                  </>
+                ) : null}
+                {step.state === "current" ? <ChevronRight size={11} aria-hidden="true" /> : null}
                 {step.label}
               </li>
             ))}

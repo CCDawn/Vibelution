@@ -83,7 +83,7 @@ export function renderTeamsShellToolbar(args: Pick<
       />
       {args.teamsFetching ? (
         <span
-          className="flex shrink-0 items-center gap-2 text-[11px] text-[var(--fg-secondary)]"
+          className="flex shrink-0 items-center gap-2 [font-size:var(--vui-font-2xs)] text-[var(--fg-secondary)]"
           role="status"
           aria-live="polite"
         >

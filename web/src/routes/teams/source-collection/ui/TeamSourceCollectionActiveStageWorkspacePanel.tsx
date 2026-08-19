@@ -16,8 +16,11 @@ import type { SourceCollectionExtractionRecoveryBag } from "../extractionRecover
 import {
   pickSourceCollectionPipelineModule,
   type SourceCollectionPipelineGraphHealth,
+  type SourceCollectionStageModule,
 } from "../stageModulesModel";
-import type { SourceCollectionStageModuleId } from "../stageProjection";
+import type { SourceCollectionActionReadiness, SourceCollectionStageModuleId } from "../stageProjection";
+import type { createSourceCollectionStageAgentHelpers } from "../../createSourceCollectionStageAgentHelpers";
+import type { useTeamShellMutations } from "../../useTeamShellMutations";
 import { TeamSourceCollectionActiveStagePanel } from "./TeamSourceCollectionActiveStagePanel";
 import { TeamSourceCollectionExtractionRecoveryWorkspacePanel } from "./TeamSourceCollectionExtractionRecoveryWorkspacePanel";
 import { TeamSourceCollectionStageActionIcon } from "./TeamSourceCollectionStandaloneStagePanel";
@@ -28,26 +31,21 @@ const styles = { ...shellStyles, ...workflowStyles } as Record<string, string>;
 
 type Lang = "zh" | "en";
 
+type SourceCollectionStageAgentHelpers = ReturnType<typeof createSourceCollectionStageAgentHelpers>;
+
 export type { SourceCollectionExtractionRecoveryBag };
 
 export type TeamSourceCollectionActiveStageWorkspacePanelProps = {
   lang: Lang;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionStageModules: any[];
+  sourceCollectionStageModules: SourceCollectionStageModule[];
   selectedSourceCollectionStageId: SourceCollectionStageModuleId | string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionStageAgentChatState: (stageId: any) => any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  repairChallengeCupTeamAgentsMutation: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionActionDisabledTitle: (readiness: any, label: string) => string | undefined;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionStageActionReadinessFor: (stageId: any) => any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionStagePrimaryAgentBinding: (stageId: any) => any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sourceCollectionStageAgentChatState: SourceCollectionStageAgentHelpers["sourceCollectionStageAgentChatState"];
+  repairChallengeCupTeamAgentsMutation: ReturnType<typeof useTeamShellMutations>["repairChallengeCupTeamAgentsMutation"];
+  sourceCollectionActionDisabledTitle: (readiness: SourceCollectionActionReadiness, label: string) => string | undefined;
+  sourceCollectionStageActionReadinessFor: (stageId: SourceCollectionStageModuleId) => SourceCollectionActionReadiness;
+  sourceCollectionStagePrimaryAgentBinding: SourceCollectionStageAgentHelpers["sourceCollectionStagePrimaryAgentBinding"];
   stageChatLabels: Record<string, { zh: string; en: string }>;
-  openSourceCollectionStageAgentChat: (stageId: any) => void;
+  openSourceCollectionStageAgentChat: (stageId: SourceCollectionStageModuleId) => void;
   /** Current-stage Agent cards stay visible beside the operational CTA. */
   agentConfiguration?: ReactNode;
   startSourceCollectionStageSessionTask?: (
@@ -61,13 +59,9 @@ export type TeamSourceCollectionActiveStageWorkspacePanelProps = {
   sourceCollectionStageAdvanceFailure?: string;
   /** Graph health so primary CTA never says "retry ingest" while relations still block. */
   pipelineGraphHealth?: SourceCollectionPipelineGraphHealth | null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   renderSourceCollectionConversation: () => ReactNode;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   renderSourceCollectionScreeningPanel: () => ReactNode;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   renderSourceCollectionGraphPanel: () => ReactNode;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   renderSourceCollectionMemoryPanel: () => ReactNode;
   /** Extraction recovery inputs — when set, merge into extraction stage card. */
   extractionRecovery?: SourceCollectionExtractionRecoveryBag;
@@ -110,12 +104,12 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
   } = props;
 
   const activeModule =
-    sourceCollectionStageModules.find((module: any) => module.id === selectedSourceCollectionStageId)
+    sourceCollectionStageModules.find((module) => module.id === selectedSourceCollectionStageId)
     ?? sourceCollectionStageModules[0];
   // Fixed right-rail CTA follows pipeline recommendation, not merely the open card.
   // Graph health forces relations while ingestion preflight would fail (e.g. missing links 60).
   const pipelineModule =
-    pickSourceCollectionPipelineModule(sourceCollectionStageModules as any[], pipelineGraphHealth)
+    pickSourceCollectionPipelineModule(sourceCollectionStageModules, pipelineGraphHealth)
     ?? activeModule;
   const primaryStageAgentChatState = sourceCollectionStageAgentChatState(activeModule.id);
   const primaryStageAgentChatRoute = primaryStageAgentChatState.route;
@@ -232,7 +226,7 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
     }
   };
 
-  const pipelineProjectionEarly = (pipelineModule as { projection?: any })?.projection;
+  const pipelineProjectionEarly = pipelineModule.projection;
   const pipelineLatestTaskEarly = pipelineProjectionEarly?.latestTask;
   const pipelineClosureEarly = pipelineLatestTaskEarly?.closureSummary;
   const pipelineTaskBlocked = Boolean(

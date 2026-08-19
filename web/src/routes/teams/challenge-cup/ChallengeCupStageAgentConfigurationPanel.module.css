@@ -17,7 +17,7 @@
 .header h3 {
   margin: 0;
   color: var(--fg-primary);
-  font-size: 0.9rem;
+  font-size: var(--vui-font-xs);
 }
 
 .cards {

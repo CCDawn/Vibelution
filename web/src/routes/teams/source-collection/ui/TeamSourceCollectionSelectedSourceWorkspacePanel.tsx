@@ -2,6 +2,7 @@
  * Source-collection selected-source detail workspace.
  * Wave 8M: extracted from TeamsRoute.tsx for domain componentization.
  */
+import type { TeamWorkflowCandidate } from "../../../../api/types";
 import {
   sourceCollectionCandidateOpenLabel,
   sourceCollectionCandidateProvenance,
@@ -10,6 +11,7 @@ import {
   sourceCollectionEvidenceLedgerSummary,
   sourceCollectionSourceTypeLabel,
 } from "../evidenceModel";
+import type { SourceCollectionCandidateTrace } from "../evidenceModel";
 import {
   candidateSourceQualityAssessmentSummary,
   sourceCollectionEvidenceLedgerDetailItems,
@@ -17,6 +19,7 @@ import {
   sourceCollectionStorageTargetForRef,
   sourceCollectionStorageTargetLabel,
   workflowIngestionStatusLabel,
+  type SourceCollectionStorageArtifacts,
   type SourceCollectionStorageOpenTarget,
 } from "../presentationModel";
 import { sourceCollectionRunLabel, translateResearchPhrase } from "../runModel";
@@ -33,13 +36,10 @@ type Lang = "zh" | "en";
 
 export type TeamSourceCollectionSelectedSourceWorkspacePanelProps = {
   lang: Lang;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  selectedSourceCollectionCandidate: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  selectedSourceCollectionCandidateTrace: any;
+  selectedSourceCollectionCandidate: TeamWorkflowCandidate | null | undefined;
+  selectedSourceCollectionCandidateTrace: SourceCollectionCandidateTrace | null | undefined;
   selectedSourceCollectionRunEffectiveId: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  selectedSourceCollectionCandidateStorageArtifacts: any;
+  selectedSourceCollectionCandidateStorageArtifacts: SourceCollectionStorageArtifacts | null | undefined;
   workflowQualityTone: (value: string) => string;
   selectedSourceCollectionStorageOpenPending: boolean;
   openSourceCollectionStorageTarget: (target: SourceCollectionStorageOpenTarget, runId?: string) => void;
@@ -90,7 +90,7 @@ export function TeamSourceCollectionSelectedSourceWorkspacePanel(props: TeamSour
         }]
       : [];
     const storageActions: TeamSourceCollectionSourceDetailAction[] = runId
-      ? storageTargets.map((target: any) => ({
+      ? storageTargets.map((target) => ({
           id: `${selectedSourceCollectionCandidate.candidateId}-${target}`,
           target,
           runId,

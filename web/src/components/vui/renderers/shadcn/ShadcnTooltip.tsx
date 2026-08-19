@@ -1,6 +1,5 @@
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import {
-  cloneElement,
   isValidElement,
   type ReactElement,
   type ReactNode,
@@ -44,17 +43,17 @@ const widthClassName: Record<ShadcnTooltipWidth, string> = {
   wide: "max-w-[min(26rem,calc(100vw-1.5rem))]",
 };
 
-function withTriggerSlot(node: ReactElement): ReactElement {
-  const existing = (node.props as { "data-slot"?: string })["data-slot"];
-  return cloneElement(node, {
-    "data-slot": existing ?? "tooltip-trigger",
-    "data-renderer": "radix",
-  } as never);
-}
+const triggerSlotProps = {
+  "data-slot": "tooltip-trigger",
+  "data-renderer": "radix",
+} as const;
 
 /**
  * Radix/shadcn-style tooltip renderer.
  * Pages must not import this — only VUI primitives consume it.
+ *
+ * Do not cloneElement the trigger on every render: a fresh element identity
+ * makes Slot recompose refs, and React 19 then loops through overlay setRef.
  */
 export function ShadcnTooltip({
   delay = 320,
@@ -74,17 +73,12 @@ export function ShadcnTooltip({
   const controlledOpen = open ?? isOpen;
   let trigger: ReactElement;
   if (renderTrigger) {
-    trigger = withTriggerSlot(
-      renderTrigger({
-        "data-slot": "tooltip-trigger",
-        "data-renderer": "radix",
-      }),
-    );
+    trigger = renderTrigger({ ...triggerSlotProps });
   } else if (isValidElement(children)) {
-    trigger = withTriggerSlot(children as ReactElement);
+    trigger = children as ReactElement;
   } else {
     trigger = (
-      <span data-slot="tooltip-trigger" data-renderer="radix" tabIndex={0} className="inline-flex max-w-full">
+      <span {...triggerSlotProps} tabIndex={0} className="inline-flex max-w-full">
         {children}
       </span>
     );
@@ -93,11 +87,14 @@ export function ShadcnTooltip({
   return (
     <TooltipPrimitive.Provider delayDuration={delay} skipDelayDuration={closeDelay}>
       <TooltipPrimitive.Root
+        delayDuration={delay}
         open={controlledOpen}
         defaultOpen={defaultOpen}
         onOpenChange={onOpenChange}
       >
-        <TooltipPrimitive.Trigger asChild>{trigger}</TooltipPrimitive.Trigger>
+        <TooltipPrimitive.Trigger asChild {...triggerSlotProps}>
+          {trigger}
+        </TooltipPrimitive.Trigger>
         <TooltipPrimitive.Portal>
           <TooltipPrimitive.Content
             data-vui="tooltip-content"

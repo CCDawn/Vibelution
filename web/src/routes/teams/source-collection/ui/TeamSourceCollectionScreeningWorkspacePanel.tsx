@@ -5,7 +5,7 @@
 import type { ReactNode } from "react";
 import { AlertTriangle, CheckCircle2, Eye, Plus, RefreshCw } from "lucide-react";
 
-import type { Team } from "../../../../api/types";
+import type { Team, TeamWorkflowCandidate } from "../../../../api/types";
 import { VButton, VNativeButton } from "../../../../components/vui";
 import { TeamCandidateCard } from "../../../../components/vui/product/team-management";
 import {
@@ -18,13 +18,20 @@ import {
   sourceCollectionEvidenceLedgerTone,
   sourceCollectionSourceFilterLabel,
 } from "../evidenceModel";
+import type { SourceCollectionSourceFilter } from "../evidenceModel";
 import {
   candidateSourceQualityAssessmentSummary,
   formatTime,
   sourceCollectionResultTone,
   sourceCollectionSimpleCandidateStatusPresentation,
 } from "../presentationModel";
-import type { SourceCollectionStageModuleId } from "../stageProjection";
+import type { SourceCollectionActionReadiness, SourceCollectionStageModuleId } from "../stageProjection";
+import type { TeamWorkflowSourceQualityStatus } from "../../useResearchWorkflowResources";
+import type { useTeamSourceCollectionMutations } from "../../useTeamSourceCollectionMutations";
+import type {
+  candidatePaperNoteChunkPlanSummary as candidatePaperNoteChunkPlanSummaryFn,
+  sourceCandidateHasCompletedExtraction as sourceCandidateHasCompletedExtractionFn,
+} from "../../teamRouteShellModel";
 import { TeamSourceCollectionScreeningPanel } from "./TeamSourceCollectionScreeningPanel";
 import shellStyles from "../../../TeamsRoute.styles";
 import workflowStyles from "../../../TeamsRoute.workflow.styles";
@@ -33,12 +40,12 @@ const styles = { ...shellStyles, ...workflowStyles } as Record<string, string>;
 
 type Lang = "zh" | "en";
 
+type SourceCollectionMutations = ReturnType<typeof useTeamSourceCollectionMutations>;
+
 export type TeamSourceCollectionScreeningWorkspacePanelProps = {
   lang: Lang;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionFilteredRunCandidates: any[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionPageItems: (stageId: SourceCollectionStageModuleId, items: any[]) => { items: any[]; start: number; end: number };
+  sourceCollectionFilteredRunCandidates: TeamWorkflowCandidate[];
+  sourceCollectionPageItems: <T>(stageId: SourceCollectionStageModuleId, items: T[]) => { items: T[]; start: number; end: number };
   sourceCollectionSourceFilter: string;
   sourceCollectionDisplayedCandidateCount: number;
   sourceCollectionCountText: (loading: boolean, count: number) => string;
@@ -50,10 +57,8 @@ export type TeamSourceCollectionScreeningWorkspacePanelProps = {
   setSourceCollectionExpandedPanelId: (id: string) => void;
   sourceCollectionExtractionDefaultPanelId: string;
   sourceCollectionScreeningStepState: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionDisplayedCandidateFilterCounts: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  renderSourceCollectionFilterBar: (...args: any[]) => ReactNode;
+  sourceCollectionDisplayedCandidateFilterCounts: Record<SourceCollectionSourceFilter, number>;
+  renderSourceCollectionFilterBar: (counts: Record<SourceCollectionSourceFilter, number>, label: string, loading?: boolean) => ReactNode;
   sourceCollectionDisplayedCandidateCountText: string;
   sourceCollectionProjectedAssessedCountText: string;
   sourceCollectionProjectedApprovedCountText: string;
@@ -63,10 +68,8 @@ export type TeamSourceCollectionScreeningWorkspacePanelProps = {
   runSourceCollectionScreeningAction: () => void;
   sourceCollectionScreeningDisabled: boolean;
   selectedTeamSourceQualityPending: boolean;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionActionDisabledTitle: (readiness: any, label: string) => string | undefined;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionScreeningActionReadiness: any;
+  sourceCollectionActionDisabledTitle: (readiness: SourceCollectionActionReadiness, label: string) => string | undefined;
+  sourceCollectionScreeningActionReadiness: SourceCollectionActionReadiness;
   sourceCollectionScreeningButtonText: string;
   sourceCollectionScreeningButtonTitle?: string;
   sourceCollectionScreeningStatusText?: string | null;
@@ -75,28 +78,20 @@ export type TeamSourceCollectionScreeningWorkspacePanelProps = {
   sourceCollectionQualityReviewIsSecondary?: boolean;
   sourceCollectionRecommendedNextHint?: string | null;
   openSourceCollectionScreeningPanel: () => void;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   renderSourceCollectionPagination: (stageId: SourceCollectionStageModuleId, total: number) => ReactNode;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  teamWorkflowSourceQualityStatus: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  teamWorkflowSourceQualityStatus: TeamWorkflowSourceQualityStatus | null | undefined;
   teamWorkflowSourceQualityStatusQuery: { error?: unknown };
   workflowIngestionTone: (value: string) => string;
   selectedTeamSourceQualityError: Error | null;
   selectedSourceCollectionCandidateId: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  selectSourceCollectionCandidate: (candidate: any) => void;
+  selectSourceCollectionCandidate: (candidate: TeamWorkflowCandidate) => void;
   selectedTeam: Team | null | undefined;
   selectedTeamAssessSourceQualityPending: boolean;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  assessSourceQualityMutation: any;
+  assessSourceQualityMutation: SourceCollectionMutations["assessSourceQualityMutation"];
   selectedTeamPlanPaperNoteChunksPending: boolean;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  planPaperNoteChunksMutation: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCandidateHasCompletedExtraction: (candidate: any) => boolean;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  candidatePaperNoteChunkPlanSummary: (candidate: any) => any;
+  planPaperNoteChunksMutation: SourceCollectionMutations["planPaperNoteChunksMutation"];
+  sourceCandidateHasCompletedExtraction: typeof sourceCandidateHasCompletedExtractionFn;
+  candidatePaperNoteChunkPlanSummary: typeof candidatePaperNoteChunkPlanSummaryFn;
 };
 
 export function TeamSourceCollectionScreeningWorkspacePanel(props: TeamSourceCollectionScreeningWorkspacePanelProps) {
@@ -261,7 +256,7 @@ export function TeamSourceCollectionScreeningWorkspacePanel(props: TeamSourceCol
           ) : null}
         </>}
       >
-        {screeningCandidates.map((candidate: any) => {
+        {screeningCandidates.map((candidate) => {
                 const chunkPlanSummary = candidatePaperNoteChunkPlanSummary(candidate);
                 const sourceQualitySummary = candidateSourceQualityAssessmentSummary(candidate);
                 const qualityPresentation = sourceQualitySummary

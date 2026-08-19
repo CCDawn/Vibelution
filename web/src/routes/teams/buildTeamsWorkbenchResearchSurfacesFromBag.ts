@@ -5,9 +5,10 @@
  * experiment drafts / workspace actions (e.g. experimentBaselineArtifactDraft),
  * which crashed the experiment ledger on `.artifactPath`.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { createTeamsWorkbenchResearchSurfaces } from "./createTeamsWorkbenchResearchSurfaces";
 
-export function buildTeamsWorkbenchResearchSurfacesFromBag(d: any) {
+export function buildTeamsWorkbenchResearchSurfacesFromBag(
+  d: Parameters<typeof createTeamsWorkbenchResearchSurfaces>[0],
+) {
   return createTeamsWorkbenchResearchSurfaces(d);
 }

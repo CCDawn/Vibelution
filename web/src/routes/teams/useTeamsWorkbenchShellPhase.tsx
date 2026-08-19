@@ -1,7 +1,6 @@
 /**
  * R2-r: shell surface bags + research surfaces + page returns.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { RefreshCw } from "lucide-react";
@@ -43,6 +42,8 @@ import {
 import { TeamCanvasReadOnlyInspector } from "./TeamCanvasReadOnlyInspector";
 import { TeamNodeBindingPanel } from "./TeamNodeBindingPanel";
 
+// Foundation bag boundary: the 328-field workbench bag stays any until Phase 9+ foundation typing.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
   const {
     effectiveTeamId,
