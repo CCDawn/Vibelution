@@ -4,11 +4,17 @@ import { describe, expect, it, vi } from "vitest";
 
 import type {
   AgentEffectiveConfigurationField,
+  AgentMemoryPolicyOption,
+  AgentModelChoice,
   AgentRunSnapshot,
+  AgentToolPolicyOption,
+  AgentToolPolicySource,
+  PromptTemplate,
 } from "../api/types";
 import { VuiProvider } from "../components/vui/VuiProvider";
 import {
   AgentFocusedOverviewPanel,
+  effectiveConfigurationSourceLabel,
   focusedEffectiveValue,
   summarizeAgentRuns,
   type AgentFocusedOverviewPanelProps,
@@ -106,13 +112,111 @@ describe("AgentFocusedOverviewPanel", () => {
   });
 
   it("formats effective values as concise summaries instead of raw JSON", () => {
-    expect(focusedEffectiveValue({ key: "enabled", effectiveValue: true }, "zh")).toBe("已启用");
+    expect(focusedEffectiveValue({ key: "enabled", effectiveValue: true }, "zh"))
+      .toEqual({ primary: "已启用" });
     expect(focusedEffectiveValue({
       key: "contextCompression",
       effectiveValue: { mode: "custom", maxTokenLimit: 12_000 },
-    }, "en")).toBe("custom · 12,000 tokens");
+    }, "en")).toEqual({
+      primary: "12K tokens before compression",
+      secondary: "Custom threshold",
+    });
     expect(focusedEffectiveValue({ key: "secret", effectiveValue: { token: "hidden" } }, "zh"))
-      .toBe("已配置");
+      .toEqual({ primary: "已配置" });
+  });
+
+  it("maps effective IDs to real names and behavior summaries", () => {
+    const dialogueModel = {
+      label: "Llama 3.2",
+      providerLabel: "本地 OpenAI-compatible",
+      providerKind: "openai-compatible",
+      contextWindow: 1_000_000,
+    } as AgentModelChoice;
+    const promptTemplate = {
+      promptTemplateId: "prompt-challenge-cup-experiment-planner",
+      name: "Challenge Cup Experiment Planner",
+      category: "research",
+      sourceType: "workspace_file",
+    } as PromptTemplate;
+    const toolPolicy = {
+      policyId: "tool-agent-internal",
+      allowedToolCount: 12,
+      blockedToolCount: 2,
+      preferredToolCount: 1,
+      networkAccess: "controlled",
+      mutationAccess: "restricted",
+      maxCallsPerTurn: 20,
+    } as AgentToolPolicyOption;
+    const memoryPolicy = {
+      policyId: "memory-agent-internal",
+      privateMemoryRoot: "workspace/agent/memory",
+      readSharedGroupCount: 2,
+      writeSharedGroupCount: 1,
+      readKnowledgeBaseCount: 3,
+      proposeKnowledgeBaseCount: 1,
+      reviewKnowledgeBaseCount: 0,
+      hasInboxPath: true,
+    } as AgentMemoryPolicyOption;
+
+    expect(focusedEffectiveValue(
+      { key: "dialogueModel", effectiveValue: "local_main/llama3.2" },
+      "zh",
+      { dialogueModel },
+    )).toEqual({
+      primary: "Llama 3.2",
+      secondary: "本地 OpenAI-compatible · 上下文 100 万 tokens",
+      rawId: "local_main/llama3.2",
+    });
+    expect(focusedEffectiveValue(
+      { key: "promptTemplate", effectiveValue: "prompt-challenge-cup-experiment-planner" },
+      "zh",
+      { promptTemplate },
+    )).toEqual({
+      primary: "Challenge Cup Experiment Planner",
+      secondary: "科研模板 · 工作区文件",
+      rawId: "prompt-challenge-cup-experiment-planner",
+    });
+    expect(focusedEffectiveValue(
+      { key: "toolPolicy", effectiveValue: "tool-agent-internal" },
+      "zh",
+      { toolPolicy, toolPolicySource: { mutatingToolCount: 3 } as AgentToolPolicySource },
+    )).toEqual({
+      primary: "12 个工具可用",
+      secondary: "3 个可写/命令工具 · 受控网络 · 每轮最多 20 次",
+      rawId: "tool-agent-internal",
+    });
+    expect(focusedEffectiveValue(
+      { key: "memoryPolicy", effectiveValue: "memory-agent-internal" },
+      "zh",
+      { memoryPolicy },
+    )).toEqual({
+      primary: "私有记忆已配置",
+      secondary: "共享组：读 2 / 写 1 · 知识库：读 3 / 提议 1 / 评审 0 · 含收件箱",
+      rawId: "memory-agent-internal",
+    });
+  });
+
+  it("does not invent names from internal slugs and translates policy semantics", () => {
+    expect(focusedEffectiveValue({
+      key: "promptTemplate",
+      effectiveValue: "prompt-unknown-slug",
+    }, "zh")).toEqual({
+      primary: "prompt-unknown-slug",
+      secondary: "仅有内部标识",
+    });
+    expect(focusedEffectiveValue({
+      key: "delegation",
+      effectiveValue: { allowSubagents: false, maxConcurrent: 0, maxDepth: 0 },
+    }, "zh")).toEqual({ primary: "未启用" });
+    expect(focusedEffectiveValue({
+      key: "supervision",
+      effectiveValue: {
+        supervisionEnabled: true,
+        reviewMode: "advisory",
+        evidenceLevel: "standard",
+      },
+    }, "zh")).toEqual({ primary: "建议评审，不阻断", secondary: "标准证据" });
+    expect(effectiveConfigurationSourceLabel("shared_policy", "zh")).toBe("共享策略");
   });
 
   it("renders the approved dense overview and caps the two scan lists", () => {
@@ -126,6 +230,8 @@ describe("AgentFocusedOverviewPanel", () => {
     expect(markup).toContain("gpt-test");
     expect(markup).toContain("r17");
     expect(markup).toContain("有效配置");
+    expect(markup).toContain("已生效");
+    expect(markup).not.toContain(">可用<");
     expect(markup).toContain("配置项 7");
     expect(markup).not.toContain("配置项 8");
     expect(markup).toContain("活动 5");
@@ -135,6 +241,38 @@ describe("AgentFocusedOverviewPanel", () => {
     expect(markup).toContain("需要关注");
     expect(markup).toContain("证据团队");
     expect(markup).toContain("工具审批待处理");
+  });
+
+  it("renders readable primary and supporting values while retaining the raw ID as trace metadata", () => {
+    const markup = renderToStaticMarkup(
+      <VuiProvider>
+        <AgentFocusedOverviewPanel
+          {...props({
+            effectiveFields: [{
+              key: "dialogueModel",
+              label: "对话模型",
+              effectiveValue: "local_main/llama3.2",
+              source: { kind: "agent", id: "a1", label: "Agent 模型绑定" },
+              inheritanceChain: [],
+              status: "ready",
+            }],
+            effectiveResources: {
+              dialogueModel: {
+                label: "Llama 3.2",
+                providerLabel: "本地 OpenAI-compatible",
+                providerKind: "openai-compatible",
+                contextWindow: 1_000_000,
+              } as AgentModelChoice,
+            },
+          })}
+        />
+      </VuiProvider>,
+    );
+
+    expect(markup).toContain("Llama 3.2");
+    expect(markup).toContain("本地 OpenAI-compatible");
+    expect(markup).toContain('data-effective-value-id="local_main/llama3.2"');
+    expect(markup).toContain("此 Agent");
   });
 
   it("keeps real configuration and identity visible when activity fails", () => {

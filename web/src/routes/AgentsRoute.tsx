@@ -2227,6 +2227,17 @@ export function AgentsRoute() {
         ),
       },
       effectiveFields: effectiveConfigurationFields,
+      effectiveResources: {
+        dialogueModel: selectedAgent.dialogueModel,
+        promptTemplate: selectedAgent.promptTemplate,
+        toolPolicy: (workspace?.toolPolicies ?? []).find(
+          (policy) => policy.policyId === selectedAgent.toolPolicyId,
+        ),
+        toolPolicySource: selectedAgent.toolPolicySource,
+        memoryPolicy: (workspace?.memoryPolicies ?? []).find(
+          (policy) => policy.policyId === selectedAgent.memoryPolicyId,
+        ),
+      },
       activities: overviewOperations?.activities ?? [],
       activityState: overviewOperations?.state ?? "ready",
       activityError: overviewOperations?.errorMessage,

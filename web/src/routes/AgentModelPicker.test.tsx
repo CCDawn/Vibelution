@@ -6,6 +6,7 @@ import type { AgentModelChoice } from "../api/types";
 import {
   AgentModelPicker,
   agentModelChoiceDisabledReason,
+  expandedAgentModelProviderIds,
   groupAgentModelCandidates,
 } from "./AgentModelPicker";
 import pickerSource from "./AgentModelPicker.tsx?raw";
@@ -110,6 +111,27 @@ describe("AgentModelPicker", () => {
     expect(groups[0]?.items.map((item) => item.modelRef)).toEqual([
       "ai-pixel/gpt-5.6-terra",
     ]);
+  });
+
+  it("starts provider groups collapsed and gives search a temporary disclosure state", () => {
+    const groups = groupAgentModelCandidates(candidates, "dialogue", "");
+    expect([...expandedAgentModelProviderIds(groups, "", new Set(), new Set())]).toEqual([]);
+    expect([...expandedAgentModelProviderIds(groups, "", new Set(["ai-pixel"]), new Set())])
+      .toEqual(["ai-pixel"]);
+    expect([...expandedAgentModelProviderIds(groups, "luna", new Set(), new Set())])
+      .toEqual(["ai-pixel"]);
+    expect([...expandedAgentModelProviderIds(groups, "luna", new Set(["ai-pixel"]), new Set(["ai-pixel"]))])
+      .toEqual([]);
+    expect([...expandedAgentModelProviderIds(groups, "", new Set(["ai-pixel"]), new Set(["ai-pixel"]))])
+      .toEqual(["ai-pixel"]);
+  });
+
+  it("uses accessible provider disclosure controls and visible-only keyboard candidates", () => {
+    expect(pickerSource).toContain("aria-expanded={groupExpanded}");
+    expect(pickerSource).toContain("aria-controls={groupPanelId}");
+    expect(pickerSource).toContain("hidden={!groupExpanded}");
+    expect(pickerSource).toContain(".filter((group) => expandedProviderIds.has(group.providerId))");
+    expect(pickerSource).toContain("setManuallyExpandedProviderIds(new Set())");
   });
 
   it("blocks promotion while either owning draft is dirty", () => {
