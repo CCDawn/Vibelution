@@ -437,7 +437,10 @@ def resolve_desktop_shell_launch_roots(project_root: Path | str) -> tuple[Path, 
     """
 
     requested = Path(project_root)
-    from core.infrastructure.branch_workspace import BranchWorkspaceError, resolve_branch_workspace
+    from core.infrastructure.branch_workspace import (
+        BranchWorkspaceError,
+        resolve_branch_workspace,
+    )
 
     try:
         layout = resolve_branch_workspace(requested)

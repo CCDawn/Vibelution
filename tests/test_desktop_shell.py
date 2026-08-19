@@ -4,7 +4,11 @@ import json
 import types
 from pathlib import Path
 
-import core.launcher.desktop_shell as desktop_shell
+from core.infrastructure.branch_workspace import (
+    BranchWorkspaceError,
+    BranchWorkspaceLayout,
+)
+from core.launcher import desktop_shell
 
 
 def _write_packaged_shell(root: Path, *, tree_hash: str, asar_mtime: float | None = None) -> None:
@@ -248,6 +252,9 @@ def test_resolve_desktop_shell_launch_prefers_current_packaged(tmp_path, monkeyp
     spec = desktop_shell.resolve_desktop_shell_launch(tmp_path, then_lifecycle="start", open_workbench=True)
     assert spec["kind"] == "packaged"
     assert spec["args"][0] == str(desktop_shell.packaged_desktop_exe(tmp_path))
+    assert spec["cwd"] == str(tmp_path)
+    assert spec["args"][spec["args"].index("--workspace") + 1] == str(tmp_path)
+    assert "--project" not in spec["args"]
     assert "--open-workbench" in spec["args"]
     assert spec["args"][-1] == "start"
 
@@ -259,7 +266,9 @@ def test_resolve_desktop_shell_launch_uses_unpackaged_when_packaged_missing(tmp_
     spec = desktop_shell.resolve_desktop_shell_launch(tmp_path, open_workbench=True)
     assert spec["kind"] == "unpackaged"
     assert spec["args"][:2] == [str(electron_exe), str(desktop_shell.unpackaged_main_js(tmp_path))]
-    assert "--workspace" in spec["args"]
+    assert spec["cwd"] == str(tmp_path)
+    assert spec["args"][spec["args"].index("--workspace") + 1] == str(tmp_path)
+    assert "--project" not in spec["args"]
     assert "--open-workbench" in spec["args"]
 
 
@@ -302,6 +311,14 @@ def test_launch_desktop_shell_does_not_hide_unpackaged_gui(tmp_path, monkeypatch
 
     monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
     monkeypatch.setattr(desktop_shell.subprocess, "Popen", FakePopen)
+
+    def missing_git(_requested):
+        raise BranchWorkspaceError("not a git checkout")
+
+    monkeypatch.setattr(
+        "core.infrastructure.branch_workspace.resolve_branch_workspace",
+        missing_git,
+    )
     result = desktop_shell.launch_desktop_shell(project_root=tmp_path, open_workbench=True)
     assert result["kind"] == "unpackaged"
     assert captured["args"][0] == str(electron_exe)
@@ -310,3 +327,54 @@ def test_launch_desktop_shell_does_not_hide_unpackaged_gui(tmp_path, monkeypatch
     flags = int(captured["kwargs"].get("creationflags") or 0)
     assert flags & int(getattr(desktop_shell.subprocess, "CREATE_NO_WINDOW", 0x08000000)) == 0
     assert result["pid"] == 88
+
+
+def _task_workspace_layout(*, checkout: Path, integration: Path, worktree: Path) -> BranchWorkspaceLayout:
+    return BranchWorkspaceLayout(
+        checkout=checkout,
+        worktree_root=worktree,
+        integration_root=integration,
+        git_common_dir=integration / ".git",
+        branch_pool=integration / ".worktrees",
+        retired_pool=integration / ".worktrees" / "_retired",
+        legacy_siblings=(),
+        role="task",
+        slug="task",
+    )
+
+
+def test_resolve_desktop_shell_launch_roots_falls_back_without_git(tmp_path):
+    shell_root, slot_root = desktop_shell.resolve_desktop_shell_launch_roots(tmp_path)
+    assert shell_root == tmp_path
+    assert slot_root is None
+
+
+def test_resolve_desktop_shell_launch_forwards_worktree_as_project_slot(tmp_path, monkeypatch):
+    integration = tmp_path / "repo"
+    worktree = integration / ".worktrees" / "task"
+    worktree.mkdir(parents=True)
+    tree = "a" * 40
+    _write_packaged_shell(integration, tree_hash=tree, asar_mtime=2_000_000_000)
+    monkeypatch.setattr(desktop_shell, "_git_tree_hash", lambda root, spec: tree)
+    monkeypatch.setattr(
+        "core.infrastructure.branch_workspace.resolve_branch_workspace",
+        lambda requested: _task_workspace_layout(
+            checkout=Path(requested),
+            integration=integration,
+            worktree=worktree,
+        ),
+    )
+
+    shell_root, slot_root = desktop_shell.resolve_desktop_shell_launch_roots(worktree)
+    assert shell_root == integration
+    assert slot_root == worktree
+
+    spec = desktop_shell.resolve_desktop_shell_launch(worktree, then_lifecycle="start", open_workbench=True)
+    args = spec["args"]
+    assert spec["kind"] == "packaged"
+    assert spec["cwd"] == str(integration)
+    assert args[0] == str(desktop_shell.packaged_desktop_exe(integration))
+    assert args[args.index("--workspace") + 1] == str(integration)
+    assert args[args.index("--project") + 1] == str(worktree)
+    assert "--open-workbench" in args
+    assert args[-1] == "start"

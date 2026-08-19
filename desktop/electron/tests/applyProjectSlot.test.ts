@@ -88,6 +88,20 @@ describe("planProjectSlot", () => {
     ).toThrow("找不到对应工作区");
   });
 
+  it("rejects an empty project path", () => {
+    expect(() => planProjectSlot({ items, projectRoot: "   " })).toThrow("未指定要应用的工作区路径");
+  });
+
+  it("does not treat a worktree start plan as the main slot", () => {
+    expect(
+      planProjectSlot({
+        items,
+        projectRoot: "C:/repo/.worktrees/task",
+        lifecycleCommand: "start"
+      }).isMain
+    ).toBe(false);
+  });
+
   it("builds a loopback workbench URL from the reserved port", () => {
     expect(instanceWorkbenchUrl({ url: "", port: 8002 })).toBe("http://127.0.0.1:8002/");
   });
