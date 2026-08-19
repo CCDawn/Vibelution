@@ -9,6 +9,7 @@ const isolatedReferenceArtifacts = new Set([
   "chat-selection-persistence-preview.css",
   "research-overview-preview.css",
   "research-process-flow-preview.css",
+  "team-workflow-card-preview.css",
   "vui-reference-lab.css",
 ]);
 
