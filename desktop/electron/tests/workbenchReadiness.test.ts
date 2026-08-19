@@ -64,6 +64,26 @@ describe("waitForWorkbenchLifecycleReady", () => {
     expect(readStatus).toHaveBeenCalledTimes(2);
   });
 
+  it("does not open the window when the matching result has the wrong generation", async () => {
+    const readStatus = vi.fn(async () => ({
+      overallState: "ready",
+      observedState: "partial",
+      lifecycleConsistency: "browser_missing",
+      backendHealthy: true,
+      backendPortListening: true,
+      lifecycleResults: [{ commandId: "cmd-1", completed: true, ok: true, generation: 2 }]
+    }));
+    await expect(
+      waitForWorkbenchLifecycleReady({
+        commandId: "cmd-1",
+        expectedGeneration: 3,
+        readStatus,
+        timeoutMs: 20,
+        pollIntervalMs: 0
+      })
+    ).rejects.toThrow("workbench lifecycle readiness timed out");
+  });
+
   it("fails immediately when the matching lifecycle result is terminal and unsuccessful", async () => {
     const readStatus = vi.fn(async () => ({
       overallState: "error",

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from core.launcher.state_refresh import bounded_source_error_message
+
 
 def test_state_refresh_maps_electron_window_truth_and_keeps_cleanup_dry_run(monkeypatch):
     from core.launcher import service as launcher_service
@@ -32,12 +34,13 @@ def test_state_refresh_maps_electron_window_truth_and_keeps_cleanup_dry_run(monk
         ],
     }
     seen = {}
+    list_kwargs = {}
 
-    monkeypatch.setattr(
-        launcher_service,
-        "list_launcher_branch_instances",
-        lambda *, include_cleanup_metadata=False: branch_instances,
-    )
+    def fake_list(*, include_cleanup_metadata=False):
+        list_kwargs["include_cleanup_metadata"] = include_cleanup_metadata
+        return branch_instances
+
+    monkeypatch.setattr(launcher_service, "list_launcher_branch_instances", fake_list)
     monkeypatch.setattr(launcher_service, "get_launcher_status", lambda: {"status": "ok"})
     monkeypatch.setattr(launcher_service, "get_launcher_freshness", lambda: {"current": True})
 
@@ -45,6 +48,7 @@ def test_state_refresh_maps_electron_window_truth_and_keeps_cleanup_dry_run(monk
         seen.update(kwargs)
         return {
             "observedAt": "2026-08-19T07:00:00Z",
+            "nextReconcileAt": "2026-08-19T07:00:10Z",
             "instances": [
                 {
                     "instanceId": "worktree:external",
@@ -76,15 +80,92 @@ def test_state_refresh_maps_electron_window_truth_and_keeps_cleanup_dry_run(monk
         electron_window_instance_ids=["main", "worktree:isolated"],
     )
 
+    assert list_kwargs["include_cleanup_metadata"] is False
     assert seen["git_worktree_roots"] == ["C:/repo/current", "C:/repo/old"]
     assert seen["electron_window_instance_ids"] == ["worktree:current", "worktree:isolated"]
-    assert payload["status"] == {"status": "ok"}
-    assert payload["cleanup"]["instances"][0]["classification"] == "conflict"
-    assert payload["cleanup"]["instances"][0]["ports"] == [8765]
-    assert payload["cleanup"]["removedInstanceIds"] == []
-    assert [item["instanceId"] for item in payload["cleanup"]["worktreeDryRun"]] == [
+    assert payload["status"] == {"ok": True, "value": {"status": "ok"}}
+    assert payload["nextReconcileAt"] == "2026-08-19T07:00:10Z"
+    assert payload["branchInstances"]["ok"] is True
+    cleanup = payload["cleanup"]["value"]
+    assert cleanup["instances"][0]["classification"] == "conflict"
+    assert cleanup["instances"][0]["ports"] == [8765]
+    assert cleanup["removedInstanceIds"] == []
+    assert [item["instanceId"] for item in cleanup["worktreeDryRun"]] == [
         "worktree:missing",
         "worktree:old",
     ]
-    assert all(item["action"] == "dry_run_only" for item in payload["cleanup"]["worktreeDryRun"])
-    assert "two_identical_observations_at_least_10_seconds_apart" in payload["cleanup"]["orphanCriteria"]
+    assert all(item["action"] == "dry_run_only" for item in cleanup["worktreeDryRun"])
+    assert "two_identical_observations_at_least_10_seconds_apart" in cleanup["orphanCriteria"]
+
+
+def test_cleanup_timeout_still_returns_status_and_bounds_error(monkeypatch):
+    from core.launcher import service as launcher_service
+    from core.launcher import state_refresh
+    from core.runtime_manager import instances_registry
+
+    monkeypatch.setattr(
+        launcher_service,
+        "list_launcher_branch_instances",
+        lambda *, include_cleanup_metadata=False: {"currentId": "main", "items": []},
+    )
+    monkeypatch.setattr(launcher_service, "get_launcher_status", lambda: {"status": "running"})
+    monkeypatch.setattr(launcher_service, "get_launcher_freshness", lambda: {"current": True})
+
+    def boom(**_kwargs):
+        raise TimeoutError("git merge-base timed out stdout=" + ("OUT" * 400) + " stderr=" + ("ERR" * 400))
+
+    monkeypatch.setattr(instances_registry, "reconcile_registry", boom)
+
+    payload = state_refresh.build_launcher_state_refresh(electron_window_instance_ids=["main"])
+
+    assert payload["status"] == {"ok": True, "value": {"status": "running"}}
+    assert payload["branchInstances"]["ok"] is True
+    assert payload["cleanup"]["ok"] is False
+    assert payload["cleanup"]["errorType"] == "TimeoutError"
+    message = payload["cleanup"]["message"]
+    assert "stdout" not in message.lower()
+    assert "stderr" not in message.lower()
+    assert "OUT" not in message
+    assert "ERR" not in message
+    assert len(message) <= state_refresh.SOURCE_ERROR_LIMIT
+
+
+def test_status_failure_keeps_branch_success_envelope(monkeypatch):
+    from core.launcher import service as launcher_service
+    from core.launcher import state_refresh
+    from core.runtime_manager import instances_registry
+
+    monkeypatch.setattr(
+        launcher_service,
+        "list_launcher_branch_instances",
+        lambda *, include_cleanup_metadata=False: {"currentId": "main", "items": [{"id": "worktree:ok"}]},
+    )
+
+    def boom_status():
+        raise RuntimeError("status probe failed")
+
+    monkeypatch.setattr(launcher_service, "get_launcher_status", boom_status)
+    monkeypatch.setattr(launcher_service, "get_launcher_freshness", lambda: {"current": False})
+    monkeypatch.setattr(
+        instances_registry,
+        "reconcile_registry",
+        lambda **_kwargs: {"instances": [], "removedInstanceIds": [], "worktreeDryRun": []},
+    )
+    monkeypatch.setattr(instances_registry, "load_registry", lambda: {"instances": {}})
+
+    payload = state_refresh.build_launcher_state_refresh()
+
+    assert payload["status"]["ok"] is False
+    assert payload["status"]["errorType"] == "RuntimeError"
+    assert payload["branchInstances"]["ok"] is True
+    assert payload["branchInstances"]["value"]["items"][0]["id"] == "worktree:ok"
+    assert payload["cleanup"]["ok"] is True
+
+
+def test_bounded_source_error_message_strips_stdio_dumps():
+    err = TimeoutError("cleanup failed stdout=secret-out stderr=secret-err")
+    message = bounded_source_error_message(err)
+    assert "stdout" not in message.lower()
+    assert "stderr" not in message.lower()
+    assert "secret-out" not in message
+    assert len(message) <= 180

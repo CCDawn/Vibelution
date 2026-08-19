@@ -66,6 +66,7 @@ import {
   type OrchestratedLifecycleResult
 } from "./protocol/launcherIpcHost.js";
 import { createLocalLauncherStatusSnapshot } from "./protocol/launcherStatusSnapshot.js";
+import { createReconcileDeadlineScheduler } from "./state/reconcileDeadlineScheduler.js";
 import { LauncherStateStore, type LauncherWindowTruth } from "./state/launcherStateStore.js";
 import {
   LAUNCHER_APP_PROTOCOL,
@@ -260,7 +261,8 @@ const launcherStateStore = new LauncherStateStore(
       status: state.status,
       branchInstances: state.branchInstances,
       freshness: state.freshness,
-      cleanup: state.cleanup
+      cleanup: state.cleanup,
+      nextReconcileAt: state.nextReconcileAt
     };
   },
   {
@@ -512,7 +514,14 @@ function updateLauncherWindowTruth(): void {
   launcherStateStore.updateWindowTruth(currentLauncherWindowTruth());
 }
 
+const reconcileDeadlineScheduler = createReconcileDeadlineScheduler({
+  onDue: () => {
+    void launcherStateStore.refresh("reconcile_deadline");
+  }
+});
+
 launcherStateStore.subscribe((snapshot) => {
+  reconcileDeadlineScheduler.schedule(snapshot.nextReconcileAt);
   windowProvider?.sendToLauncher(IPC_CHANNELS.launcherStateChanged, snapshot);
 });
 
@@ -2742,7 +2751,8 @@ async function openWorkbenchAfterLifecycleReady(
 ): Promise<void> {
   await waitForWorkbenchLifecycleReady({
     commandId: lease.commandId,
-    readStatus: async () => readRuntimeManagerLauncherStatusSummary(paths.workspaceRoot),
+    expectedGeneration: lease.generation,
+    readStatus: async () => readRuntimeManagerLauncherStatusSummary(paths.workspaceRoot, lease.commandId),
     timeoutMs,
     signal: lease.signal
   });
@@ -3074,6 +3084,7 @@ function stopLauncherStateFileHints(): void {
     clearInterval(launcherStateStatTimer);
     launcherStateStatTimer = null;
   }
+  reconcileDeadlineScheduler.clear();
   for (const watcher of launcherStateWatchers) {
     watcher.close();
   }

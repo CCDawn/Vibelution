@@ -709,8 +709,18 @@ internal static class VibelutionLauncher
 
         private FileSystemWatcher WatchElectronTrayOwner()
         {
-            string ownerDir = Path.Combine(projectDir, ".runtime", "launcher");
-            Directory.CreateDirectory(ownerDir);
+            string canonical = ResolveCanonicalDesktopShellOwnerPath(projectDir);
+            string ownerDir = !string.IsNullOrEmpty(canonical)
+                ? Path.GetDirectoryName(canonical)
+                : Path.Combine(projectDir, ".runtime", "launcher");
+            if (!string.IsNullOrEmpty(canonical))
+            {
+                Directory.CreateDirectory(ownerDir);
+            }
+            else if (!Directory.Exists(ownerDir))
+            {
+                return null;
+            }
             var watcher = new FileSystemWatcher(ownerDir, "desktop_shell_owner.json");
             watcher.NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.CreationTime;
             FileSystemEventHandler onOwnerChanged = delegate { YieldTrayIfElectronOwns(); };
@@ -743,12 +753,95 @@ internal static class VibelutionLauncher
         }
     }
 
+    private static string ResolveProjectsHome()
+    {
+        string overrideHome = Environment.GetEnvironmentVariable("VIBELUTION_PROJECTS_HOME");
+        if (!string.IsNullOrWhiteSpace(overrideHome))
+        {
+            return Path.GetFullPath(overrideHome.Trim());
+        }
+        string localAppData = Environment.GetEnvironmentVariable("LOCALAPPDATA");
+        if (string.IsNullOrWhiteSpace(localAppData))
+        {
+            localAppData = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "AppData", "Local");
+        }
+        return Path.Combine(localAppData, "Vibelution", "projects");
+    }
+
+    private static string ReadProjectId(string projectDir)
+    {
+        try
+        {
+            string identityPath = Path.Combine(projectDir, ".vibelution", "project.json");
+            if (!File.Exists(identityPath))
+            {
+                return "";
+            }
+            string text = File.ReadAllText(identityPath);
+            Match match = Regex.Match(text, "\"projectId\"\\s*:\\s*\"([^\"]+)\"");
+            return match.Success ? match.Groups[1].Value.Trim().ToLowerInvariant() : "";
+        }
+        catch
+        {
+            return "";
+        }
+    }
+
+    private static string InstanceIdForProject(string projectDir)
+    {
+        string resolved = Path.GetFullPath(projectDir.Trim());
+        string key = Environment.OSVersion.Platform == PlatformID.Win32NT ? resolved.ToLowerInvariant() : resolved;
+        uint digest = 2166136261;
+        unchecked
+        {
+            foreach (byte value in Encoding.UTF8.GetBytes(key))
+            {
+                digest ^= value;
+                digest *= 16777619;
+            }
+        }
+        return digest.ToString("x8");
+    }
+
+    private static string ResolveCanonicalDesktopShellOwnerPath(string projectDir)
+    {
+        string projectId = ReadProjectId(projectDir);
+        if (string.IsNullOrEmpty(projectId))
+        {
+            return "";
+        }
+        return Path.Combine(
+            ResolveProjectsHome(),
+            projectId,
+            "instances",
+            InstanceIdForProject(projectDir),
+            "runtime",
+            "launcher",
+            "desktop_shell_owner.json"
+        );
+    }
+
+    private static string ResolveDesktopShellOwnerPath(string projectDir)
+    {
+        string canonical = ResolveCanonicalDesktopShellOwnerPath(projectDir);
+        if (!string.IsNullOrEmpty(canonical) && File.Exists(canonical))
+        {
+            return canonical;
+        }
+        string checkout = Path.Combine(projectDir, ".runtime", "launcher", "desktop_shell_owner.json");
+        if (File.Exists(checkout))
+        {
+            return checkout;
+        }
+        return string.IsNullOrEmpty(canonical) ? checkout : canonical;
+    }
+
     private static bool ElectronOwnsDesktopTray(string projectDir)
     {
         try
         {
-            string path = Path.Combine(projectDir, ".runtime", "launcher", "desktop_shell_owner.json");
-            if (!File.Exists(path))
+            string path = ResolveDesktopShellOwnerPath(projectDir);
+            if (string.IsNullOrEmpty(path) || !File.Exists(path))
             {
                 return false;
             }
@@ -763,8 +856,40 @@ internal static class VibelutionLauncher
             {
                 return false;
             }
+            Match createTimeMatch = Regex.Match(text, "\"createTime\"\\s*:\\s*([0-9]+(?:\\.[0-9]+)?)");
+            Match exeMatch = Regex.Match(text, "\"executable\"\\s*:\\s*\"([^\"]*)\"");
+            double expectedCreateTime = 0;
+            if (createTimeMatch.Success)
+            {
+                double.TryParse(createTimeMatch.Groups[1].Value, out expectedCreateTime);
+            }
+            string expectedExe = exeMatch.Success ? exeMatch.Groups[1].Value.Trim() : "";
             Process process = Process.GetProcessById(pid);
-            return process != null && !process.HasExited;
+            if (process == null || process.HasExited)
+            {
+                return false;
+            }
+            if (expectedCreateTime <= 0 || string.IsNullOrEmpty(expectedExe))
+            {
+                return true;
+            }
+            DateTime epoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            double actualCreateTime = (process.StartTime.ToUniversalTime() - epoch).TotalSeconds;
+            if (Math.Abs(actualCreateTime - expectedCreateTime) > 2.0)
+            {
+                return false;
+            }
+            string actualExe = "";
+            try
+            {
+                actualExe = process.MainModule != null ? process.MainModule.FileName : "";
+            }
+            catch
+            {
+                return true;
+            }
+            return !string.IsNullOrEmpty(actualExe)
+                && string.Equals(actualExe, expectedExe, StringComparison.OrdinalIgnoreCase);
         }
         catch (ArgumentException)
         {

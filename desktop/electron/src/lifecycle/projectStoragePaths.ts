@@ -30,7 +30,7 @@ export function readProjectId(projectRoot: string): string {
     if (!isRecord(payload)) {
       return "";
     }
-    return typeof payload.projectId === "string" ? payload.projectId.trim() : "";
+    return typeof payload.projectId === "string" ? payload.projectId.trim().toLowerCase() : "";
   } catch {
     return "";
   }
@@ -63,4 +63,29 @@ export function resolveRuntimeManagerDir(workspaceRoot: string): string {
     return checkoutDir;
   }
   return existsSync(migratedDir) ? migratedDir : checkoutDir;
+}
+
+export const DESKTOP_SHELL_OWNER_FILE = "desktop_shell_owner.json";
+
+export function resolveCanonicalRuntimeHome(workspaceRoot: string): string | null {
+  const projectId = readProjectId(workspaceRoot);
+  if (!projectId) {
+    return null;
+  }
+  return join(resolveProjectsHome(), projectId, "instances", instanceIdForProject(workspaceRoot), "runtime");
+}
+
+export function resolveCheckoutRuntimeHome(workspaceRoot: string): string {
+  return join(resolve(workspaceRoot), ".runtime");
+}
+
+export function resolveDesktopShellOwnerPaths(workspaceRoot: string): {
+  canonical: string | null;
+  checkout: string;
+} {
+  const canonicalHome = resolveCanonicalRuntimeHome(workspaceRoot);
+  return {
+    canonical: canonicalHome ? join(canonicalHome, "launcher", DESKTOP_SHELL_OWNER_FILE) : null,
+    checkout: join(resolveCheckoutRuntimeHome(workspaceRoot), "launcher", DESKTOP_SHELL_OWNER_FILE),
+  };
 }

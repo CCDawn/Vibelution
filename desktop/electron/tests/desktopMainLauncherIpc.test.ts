@@ -50,8 +50,12 @@ describe("Electron main Launcher IPC facade", () => {
     expect(mainSource).toContain("resolveLocalStatus");
     expect(mainSource).toContain("launcherStateStore.projectStatus()");
     expect(mainSource).toContain("launcherStateStore.projectBranchInstances()");
+    expect(mainSource).toContain("return launcherStateStore.snapshot()");
     expect(mainSource).toContain('orchestrateLauncherApi("state-refresh"');
     expect(mainSource).toContain("body: { electronWindowInstanceIds }");
+    expect(mainSource).toContain("nextReconcileAt: state.nextReconcileAt");
+    expect(mainSource).toContain('refresh("reconcile_deadline")');
+    expect(mainSource).toContain("reconcileDeadlineScheduler.clear()");
     expect(mainSource).not.toContain('orchestrateLauncherApi("branch-instances?cleanupMetadata=1"');
     const storeStart = mainSource.indexOf("const launcherStateStore = new LauncherStateStore(");
     const storeEnd = mainSource.indexOf("const WORKBENCH_CLOSE_BACKEND_WAIT_MS", storeStart);
@@ -104,9 +108,13 @@ describe("Electron main Launcher IPC facade", () => {
     expect(lifecycleBody).toContain("signal: intentLease.signal");
 
     const readyStart = mainSource.indexOf("async function openWorkbenchAfterLifecycleReady");
-    const readyBody = mainSource.slice(readyStart, readyStart + 1400);
+    const readyBody = mainSource.slice(readyStart, readyStart + 1800);
     expect(readyBody).toContain("waitForWorkbenchLifecycleReady");
     expect(readyBody).toContain("signal: lease.signal");
+    expect(readyBody).toContain("expectedGeneration: lease.generation");
+    expect(readyBody).toContain("readRuntimeManagerLauncherStatusSummary(paths.workspaceRoot, lease.commandId)");
+    expect(readyBody).toContain("expectedGeneration: lease.generation");
+    expect(readyBody).toContain("readRuntimeManagerLauncherStatusSummary(paths.workspaceRoot, lease.commandId)");
     expect(readyBody).toContain("launcherLifecycleSupervisor.isCurrent(lease)");
     expect(readyBody).toContain("launcherLifecycleSupervisor.claimReady(lease)");
     expect(readyBody).toContain("launcherLifecycleSupervisor.completeReady(lease)");

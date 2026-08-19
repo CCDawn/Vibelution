@@ -44,6 +44,7 @@ export type LauncherLifecycleResultSummary = {
   completed: boolean;
   ok: boolean;
   message?: string;
+  generation?: number;
 };
 
 function launcherOriginBase(launcherOrigin: string): string {

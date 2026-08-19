@@ -85,6 +85,11 @@ function launcherApiRoute(path: string): string {
   return String(path || "").trim().split("?")[0].split("#")[0];
 }
 
+function wantsCleanupMetadata(path: string): boolean {
+  const query = String(path || "").trim().split("?")[1] || "";
+  return /(^|&)cleanupMetadata=1(?:&|$)/.test(query);
+}
+
 function isLauncherApiPath(path: string): boolean {
   const raw = launcherApiRoute(path);
   if (!raw) {
@@ -204,7 +209,7 @@ export function createLauncherIpcHost(input: {
           payload: overlayLauncherWindowTruth(apiRoute, input.resolveLocalStatus(), resolveWindowTruth())
         };
       }
-      if (apiRoute === "branch-instances" && input.resolveLocalBranchInstances) {
+      if (apiRoute === "branch-instances" && input.resolveLocalBranchInstances && !wantsCleanupMetadata(normalized.path)) {
         return {
           ok: true,
           payload: overlayLauncherWindowTruth(apiRoute, input.resolveLocalBranchInstances(), resolveWindowTruth())
