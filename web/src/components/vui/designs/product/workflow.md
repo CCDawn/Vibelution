@@ -37,13 +37,13 @@ const graph: WorkflowLayoutInput = projectionToCanvasGraph(projection);
 
 `stage-columns` 保留为默认兼容模式；调用方不得自行复制 renderer 或直接引入 `@xyflow/react` 来实现另一套几何。
 
-节点在 `serpentine` 模式下使用约 `300 × 72` 的模块卡：左侧实心类型色块（Agent 蓝 / 人工琥珀 / 起点灰 / 系统深色 / 决策暖色）加白图标，标题 15px、下一行按种类写副标题（决策「晋升 / 回滚 / 停止」、系统「受控执行」、人工「角色 · 待确认」、Agent「角色 · 已绑定/未绑定」）12px。状态叠在图标右下角标（待运行隐藏角标；运行中为旋转标记），不再铺三行脚注、类型胶囊或顶部强调条。长描述、输入/输出、检查项与技术 `agentId` 不在画布常驻，完整信息进入节点 tooltip 与 Inspector。卡片用实底 `--vui-surface-panel` 加 `--vui-elevation-2`；状态按四桶经**边框 + 类型色块旁角标**表达：完成（`--state-success` 绿）、进行（`--accent-cool` 蓝）、等待/关注（`--state-warning` 琥珀）、失败（`--state-error` 红）、待运行（最淡描边）；选中另用细蓝色 outline，不与状态色冲突。
+节点在 `serpentine` 模式下使用约 `300 × 72` 的模块卡：左侧实心类型色块（Agent 蓝 / 人工琥珀 / 起点灰 / 系统深色 / 决策暖色）加白图标，标题 15px、下一行按种类写副标题（决策「晋升 / 回滚 / 停止」、系统「受控执行」、人工优先用节点 description（当前 HITL 任务说明）；缺省时按 status 写副标题，不再写死「角色 · 待确认」、Agent「角色 · 已绑定/未绑定」）12px。状态叠在图标右下角标（待运行隐藏角标；运行中为旋转标记），不再铺三行脚注、类型胶囊或顶部强调条。长描述、输入/输出、检查项与技术 `agentId` 不在画布常驻，完整信息进入节点 tooltip 与 Inspector。卡片用实底 `--vui-surface-panel` 加 `--vui-elevation-2`；状态按四桶经**边框 + 类型色块旁角标**表达：完成（`--state-success` 绿）、进行（`--accent-cool` 蓝）、等待/关注（`--state-warning` 琥珀）、失败（`--state-error` 红）、待运行（最淡描边）；选中另用细蓝色 outline，不与状态色冲突。
 
 该模式用三枚紧凑阶段标签分组，不绘制包住成员节点的大背景框。阶段标签包含编号、名称、完成计数与小面积 tone chip（done 绿、active 蓝、attention 琥珀）；颜色只表达聚合运行状态，不给阶段分配不同身份色。标签默认锚定在该阶段成员任务包围盒左上方，成员节点移动时跟随，也允许单独拖拽微调。不得改全局 `--vui-surface-region`（浅色 rail 等于侧栏白底）。普通相邻边默认不常驻标签；只有 `knowledge_package`、`smoke`、`promotion` 和决策/回路语义常显，其他标签仅在 hover 或 active/attention 状态出现。跨阶段交接使用对齐节点之间的一条短叙事桥；同协议重跑沿所在阶段底部的局部反馈轨道返回，禁止绕画布或阶段绘制大矩形回路。ELK 仍负责初始节点顺序、阶段位置与空间预算；手动调整后由 renderer 的受控位置与智能正交路由接管显示几何。
 
 画布必须提供平移、缩放、适应全部和定位当前工作；页面本身不得产生横向滚动。
 
-`VCanvasWorkbenchPage` 的 inspector 列只在选中节点或打开 Agent / 时间线 / 团队 / 题目进度 / 创建运行 等工具面板时挂载。未选节点时不要用「选择流程节点」空状态占住 300–520px 白列，让画布吃满主区。点击节点或工具按钮后再展开 inspector。
+`VCanvasWorkbenchPage` 的 inspector 列在选中节点、当前 HITL 任务（下一步 `targetNodeId` 视为已选）或打开 Agent / 时间线 / 团队 / 题目进度 / 创建运行 等工具面板时挂载。不要用「选择流程节点」空状态占住 300–520px 白列；当前人工门会打开操作栏。工具面板（agents/team/timeline/progress/launch）打开时不抢回 node inspector。
 
 ### 节点视觉种类
 
@@ -157,7 +157,7 @@ pathState：`idle | traversed | active | attention | danger` — 仅由 nodeRuns
 
 - 仅假说先行题目（存在选择记录或 scoped 会议/搜集请求）的科研流程工作区画布；定义视图与运行视图同样合成。
 - 区域卡片无后端 node detail：画布右侧 Inspector 是该阶段的**活操作面**（看讨论、生成纪要、确认、勾选假说、看搜集进度与恢复）。赛题详情只当验收档案；目录题无审核工件时详情 fail-soft，选择和会议仍可操作。`useNodeDetailState` 对 `hf_` 前缀节点直接返回 empty。
-- 顶栏只做「前往/查看」导航（`navigationLabel`）；Inspector 才执行写命令（`commandLabel`）。禁止同名按钮既导航又写入。有 run 时顶栏主按钮是前往当前任务，「新建运行」为次要。切换器文案为「切换实验」。
+- 顶栏只做「前往/查看」导航（`navigationLabel`）；Inspector 才执行写命令（`commandLabel`）。禁止同名按钮既导航又写入。有 run 时顶栏主按钮是前往当前任务；URL 已指向该任务时弱化为「当前任务」。等待人工确认时工作区把 `node` 写入 URL 并打开操作栏。「新建运行」为次要。切换器文案为「切换实验」。
 - 创建/切换实验后按下一步模型定位 `hf_generation` / `hf_selection` / 已有搜集运行的 `source_finding`，不得默认落到被锁住的资料寻找。`collectionReady` 只表示搜集决策已成立；ensure 成功后 Inspector 显示「资料搜集中」，不再提供第二个「开始资料搜集」。
 - 轮次增加 = 拓扑变化 → 结构 hash 变化 → 自动重排；状态翻转不重排。
 

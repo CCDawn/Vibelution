@@ -244,7 +244,7 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
 
   const activeWorkflowItemCount = teamWorkflow?.activeWorkflowItems.length ?? 0;
   /** Shell mode owns left/right IA: board = full team workbench, canvas = org graph. */
-  const researchCanvasVisible = teamShellMode === "canvas";
+  const researchCanvasVisible = teamShellMode === "canvas" && !researchWorkflowTeamSelected;
   // Board/Canvas page recipes own split geometry; rail + inspector widths persist via layoutId.
   const teamsRailResize = useMemo(
     () => ({
@@ -395,11 +395,10 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
   const boardPrimaryMode =
     !researchWorkflowTeamSelected || researchCanvasVisible
       ? "hidden" as const
-      : isProcessWorkflowView
+      : challengeCupResearchTeamSelected || isProcessWorkflowView
+        || researchWorkspaceView === "experiment" || researchWorkspaceView === "iteration"
         ? "overview" as const
-        : researchWorkspaceView === "experiment" || researchWorkspaceView === "iteration"
-          ? "overview" as const
-          : "launcher" as const;
+        : "launcher" as const;
   const teamWorkflowCandidatePreviewItems = buildTeamWorkflowCandidatePreviewItems({
     lang,
     teamWorkflowCandidates,

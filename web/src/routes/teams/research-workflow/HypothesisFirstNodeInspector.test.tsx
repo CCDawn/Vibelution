@@ -25,10 +25,14 @@ import { recordCollectionHandoff } from "../../../api/hypothesisFirst";
 const mockedRecordCollectionHandoff = vi.mocked(recordCollectionHandoff);
 
 vi.mock("./HypothesisFirstMeetingOps", () => ({
-  HypothesisFirstMeetingOps: (props: { nextAction: { commandLabel?: string; stage: string; disabledReason?: string } }) => (
+  HypothesisFirstMeetingOps: (props: {
+    meetingRoundId?: string;
+    nextAction: { commandLabel?: string; stage: string; disabledReason?: string };
+  }) => (
     <div data-testid="meeting-ops">
       {props.nextAction.commandLabel || props.nextAction.stage}
       {props.nextAction.disabledReason ? <span>{props.nextAction.disabledReason}</span> : null}
+      {props.meetingRoundId ? <span data-testid="meeting-round-id">{props.meetingRoundId}</span> : null}
     </div>
   ),
 }));
@@ -147,6 +151,62 @@ describe("HypothesisFirstNodeInspector", () => {
     );
     expect(container.textContent).toContain("确认候选清单");
     expect(container.textContent).not.toContain("前往确认候选");
+  });
+
+  it("offers regeneration when the confirmed generation meeting produced no candidates", () => {
+    mockedChain.mockReturnValue(chainData({
+      meetings: [scopeMeeting({
+        status: "closed",
+        closedAt: "2026-08-19T02:00:00Z",
+        digestDraft: { summary: "空候选清单", proposedCandidates: [], contentHash: "h-empty" },
+      })],
+      chainState: { candidateCount: 0 } as HypothesisFirstChainData["chainState"],
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_generation"
+        runId="run-1"
+        onOpenQuestion={() => {}}
+      />,
+    );
+    expect(container.textContent).toContain("重新生成候选假说");
+    expect(container.querySelector('[data-testid="meeting-ops"]')).toBeNull();
+  });
+
+  it("binds generation ops to the latest attempt after a stale failed/open one", () => {
+    mockedChain.mockReturnValue(chainData({
+      meetings: [
+        scopeMeeting({
+          meetingRoundId: "hf-gen-stale",
+          roundIndex: 0,
+          startedAt: "2026-08-19T01:00:00Z",
+          status: "open",
+        }),
+        scopeMeeting({
+          meetingRoundId: "hf-gen-current",
+          roundIndex: 1,
+          startedAt: "2026-08-19T02:00:00Z",
+          status: "awaiting_approval",
+          digestDraft: { summary: "候选清单", proposedCandidates: [{ candidateId: "c2" }], contentHash: "h2" },
+        }),
+      ],
+      chainState: { candidateCount: 0 } as HypothesisFirstChainData["chainState"],
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_generation"
+        runId="run-1"
+        onOpenQuestion={() => {}}
+      />,
+    );
+    const ops = container.querySelector('[data-testid="meeting-ops"]');
+    expect(ops).toBeTruthy();
+    expect(ops?.querySelector('[data-testid="meeting-round-id"]')?.textContent).toBe("hf-gen-current");
+    expect(container.textContent).toContain("确认候选清单");
   });
 
   it("embeds the selection list on the selection card", () => {
