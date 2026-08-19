@@ -76,29 +76,45 @@ def _normalized_artifact_digest(value: Any) -> str:
     return f"sha256:{digest.lower()}"
 
 
-def _formal_runner_artifact_digests(result: dict[str, Any]) -> list[str]:
+def _formal_runner_artifact_digests(
+    plan: dict[str, Any],
+    preparation: dict[str, Any],
+    result: dict[str, Any],
+) -> list[str]:
     s = _service()
+    contract = plan.get("experimentContract") if isinstance(plan.get("experimentContract"), dict) else {}
+    method_config = contract.get("methodConfig") if isinstance(contract.get("methodConfig"), dict) else {}
+    try:
+        plan_seeds = [int(seed) for seed in list(method_config.get("seeds") or [])]
+        preparation_seeds = [int(seed) for seed in list(preparation.get("seeds") or [])]
+        result_seeds = [int(seed) for seed in list(result.get("seeds") or [])]
+    except (TypeError, ValueError):
+        raise s.TeamWorkflowOrchestrationError("Canonical formal runner receipt has an invalid seed contract.")
+    if not plan_seeds or plan_seeds != preparation_seeds or plan_seeds != result_seeds:
+        raise s.TeamWorkflowOrchestrationError(
+            "Canonical formal runner receipt seeds do not match the plan and preparation contract."
+        )
     runs = result.get("runs")
-    seeds = result.get("seeds")
-    if not isinstance(runs, list) or not runs or not isinstance(seeds, list) or not seeds:
+    if not isinstance(runs, list) or not runs:
         raise s.TeamWorkflowOrchestrationError(
             "Canonical formal runner receipt requires one result artifact for every declared seed."
         )
     try:
         seed_count = int(result.get("seedCount"))
-        declared_seeds = [int(seed) for seed in seeds]
     except (TypeError, ValueError):
         raise s.TeamWorkflowOrchestrationError("Canonical formal runner receipt has an invalid seed contract.")
     if (
         seed_count != len(runs)
-        or len(declared_seeds) != seed_count
-        or len(set(declared_seeds)) != seed_count
+        or len(plan_seeds) != seed_count
+        or len(set(plan_seeds)) != seed_count
     ):
         raise s.TeamWorkflowOrchestrationError(
             "Canonical formal runner receipt seed count does not match the completed run artifacts."
-        )
+    )
     digests: list[str] = []
     observed_seeds: set[int] = set()
+    observed_seed_order: list[int] = []
+    artifact_paths: set[str] = set()
     for run in runs:
         if not isinstance(run, dict):
             raise s.TeamWorkflowOrchestrationError("Canonical formal runner receipt contains an invalid run record.")
@@ -107,16 +123,31 @@ def _formal_runner_artifact_digests(result: dict[str, Any]) -> list[str]:
         except (TypeError, ValueError):
             raise s.TeamWorkflowOrchestrationError("Canonical formal runner receipt contains an invalid run seed.")
         digest = _normalized_artifact_digest(run.get("artifactHash"))
-        if not str(run.get("resultPath") or "").strip() or not digest:
+        result_path = str(run.get("resultPath") or "").strip()
+        if not result_path or not digest:
             raise s.TeamWorkflowOrchestrationError(
                 "Canonical formal runner receipt requires a result path and valid artifact digest for every seed."
             )
-        if seed in observed_seeds or seed not in declared_seeds:
+        artifact_path = Path(result_path).expanduser()
+        try:
+            artifact_key = str(artifact_path.resolve()).casefold()
+            actual_digest = f"sha256:{hashlib.sha256(artifact_path.read_bytes()).hexdigest()}"
+        except (OSError, ValueError) as exc:
+            raise s.TeamWorkflowOrchestrationError(
+                "Canonical formal runner receipt requires readable seed artifact files."
+            ) from exc
+        if artifact_key in artifact_paths:
+            raise s.TeamWorkflowOrchestrationError("Canonical formal runner receipt artifact paths must be unique.")
+        if actual_digest != digest:
+            raise s.TeamWorkflowOrchestrationError("Canonical formal runner receipt artifact digest is invalid.")
+        artifact_paths.add(artifact_key)
+        if seed in observed_seeds or seed not in plan_seeds:
             raise s.TeamWorkflowOrchestrationError("Canonical formal runner receipt has duplicate or undeclared seeds.")
         observed_seeds.add(seed)
+        observed_seed_order.append(seed)
         if digest not in digests:
             digests.append(digest)
-    if observed_seeds != set(declared_seeds):
+    if observed_seed_order != plan_seeds or observed_seeds != set(plan_seeds):
         raise s.TeamWorkflowOrchestrationError(
             "Canonical formal runner receipt does not cover every declared seed."
         )
@@ -142,7 +173,7 @@ def _build_formal_runner_receipt(
     s = _service()
     result_path = s._trim_text(result.get("resultPath"), max_length=500)
     log_ref = s._trim_text(result.get("logRef"), max_length=500)
-    artifact_digests = _formal_runner_artifact_digests(result)
+    artifact_digests = _formal_runner_artifact_digests(plan, preparation, result)
     if str(result.get("status") or "").strip().lower() != "completed":
         raise s.TeamWorkflowOrchestrationError("Canonical formal runner receipt requires a completed runner result.")
     if not result_path or not log_ref or not artifact_digests:
@@ -469,6 +500,7 @@ def _record_formal_full_run_execution(
     preparation: dict[str, Any] | None = None,
     plan_revision: int | None = None,
     execution_config: dict[str, Any] | None = None,
+    method_config: dict[str, Any] | None = None,
     method_config_digest: str = "",
 ) -> dict[str, Any]:
     s = _service()
@@ -497,6 +529,7 @@ def _record_formal_full_run_execution(
                 "experimentContract": {
                     "revision": execution_record["planRevision"],
                     "adapterSelection": {"resolvedAdapterId": adapter_id},
+                    "methodConfig": dict(method_config or {}),
                 },
             },
             execution_id=execution_id,

@@ -273,6 +273,7 @@ def execute_experiment_full_run(team_id: str, plan_id: str, payload: dict[str, A
             preparation=preparation_snapshot,
             plan_revision=plan_revision,
             execution_config=execution_config,
+            method_config=method_config,
             method_config_digest=method_config_digest,
         )
         raise s.TeamWorkflowOrchestrationError(str(exc)) from exc
@@ -289,6 +290,7 @@ def execute_experiment_full_run(team_id: str, plan_id: str, payload: dict[str, A
         preparation=preparation_snapshot,
         plan_revision=plan_revision,
         execution_config=execution_config,
+        method_config=method_config,
         method_config_digest=method_config_digest,
     )
     with s._WORKFLOW_LOCK:
@@ -367,7 +369,18 @@ def register_experiment_full_run_result(team_id: str, plan_id: str, payload: dic
             full_run_result = existing_result
         else:
             full_run_results.append(full_run_result)
-        plan["fullRunResults"] = full_run_results[-12:]
+        if evidence_kind == _experiment_kernel._FORMAL_RUN_EXTERNAL_EVIDENCE_KIND:
+            external_results = [
+                item for item in full_run_results
+                if item.get("evidenceKind") == _experiment_kernel._FORMAL_RUN_EXTERNAL_EVIDENCE_KIND
+            ]
+            retained_results = [
+                item for item in full_run_results
+                if item.get("evidenceKind") != _experiment_kernel._FORMAL_RUN_EXTERNAL_EVIDENCE_KIND
+            ]
+            plan["fullRunResults"] = retained_results + external_results[-12:]
+        else:
+            plan["fullRunResults"] = full_run_results
         plan["activeFullRunResultId"] = full_run_result["fullRunResultId"]
         plan["activeFullRunResult"] = full_run_result
         plan["status"] = "full_run_passed" if full_run_result["status"] == "passed" else f"full_run_{full_run_result['status']}"

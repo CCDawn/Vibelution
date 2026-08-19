@@ -85,7 +85,9 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(team_workflow_orchestration_service, "load_public_config", _fake_local_research_public_config)
 
 
-def _register_canonical_full_run_route(client, team_id, plan_id, monkeypatch, *, result_name="route"):
+def _register_canonical_full_run_route(tmp_path, client, team_id, plan_id, monkeypatch, *, result_name="route"):
+    import hashlib
+
     from core.research import formal_runner
 
     plan_store = team_workflow_orchestration_service._load_experiment_plan_store(team_id)
@@ -104,10 +106,30 @@ def _register_canonical_full_run_route(client, team_id, plan_id, monkeypatch, *,
         team_workflow_orchestration_service._experiment_plan_store_path(team_id),
         plan_store,
     )
+    artifact_root = tmp_path / f"formal-artifacts-{result_name}"
+    artifact_root.mkdir()
+    runs = []
+    for seed in seeds:
+        artifact_path = artifact_root / f"seed-{seed}.json"
+        artifact_bytes = f"{result_name}-artifact-{seed}".encode("utf-8")
+        artifact_path.write_bytes(artifact_bytes)
+        runs.append(
+            {
+                "seed": seed,
+                "resultPath": str(artifact_path),
+                "artifactHash": f"sha256:{hashlib.sha256(artifact_bytes).hexdigest()}",
+                "decision": {"status": "support"},
+                "metrics": {"delta": {"mse_improvement": 0.02}},
+            }
+        )
+    aggregate_result_path = artifact_root / "formal-run-result.json"
+    aggregate_log_path = artifact_root / "formal-run-log.json"
+    aggregate_result_path.write_text("{}", encoding="utf-8")
+    aggregate_log_path.write_text("{}", encoding="utf-8")
     config = {
         "pythonExecutable": "C:/runner/python.exe",
         "dataRoot": "C:/data/fashionmnist",
-        "outputRoot": "C:/experiments/out",
+        "outputRoot": str(tmp_path / f"formal-output-{result_name}"),
     }
     monkeypatch.setattr(
         team_workflow_orchestration_service.formal_runner,
@@ -129,18 +151,9 @@ def _register_canonical_full_run_route(client, team_id, plan_id, monkeypatch, *,
         "executionMode": "local_process",
         "seedCount": len(seeds),
         "seeds": seeds,
-        "resultPath": f"C:/experiments/out/{result_name}-result.json",
-        "logRef": f"C:/experiments/out/{result_name}-log.json",
-        "runs": [
-            {
-                "seed": seed,
-                "resultPath": f"C:/experiments/out/{result_name}/seed-{seed}/result.json",
-                "artifactHash": "sha256:" + ("a" * 64),
-                "decision": {"status": "support"},
-                "metrics": {"delta": {"mse_improvement": 0.02}},
-            }
-            for seed in seeds
-        ],
+        "resultPath": str(aggregate_result_path),
+        "logRef": str(aggregate_log_path),
+        "runs": runs,
         "aggregate": {"mseImprovement": {"mean": 0.02}, "supportCount": len(seeds)},
         "requiresResultReview": True,
         "automaticPromotion": False,
@@ -2120,7 +2133,7 @@ def test_team_workflow_routes_request_experiment_result_knowledge_ingestion(tmp_
         json={"status": "passed", "metricValue": "0.75", "resultPath": "workspace/experiments/smoke/result.json"},
     )
     full_run_response = _register_canonical_full_run_route(
-        client, team["teamId"], plan_id, monkeypatch, result_name="knowledge"
+        tmp_path, client, team["teamId"], plan_id, monkeypatch, result_name="knowledge"
     )
 
     response = client.post(
