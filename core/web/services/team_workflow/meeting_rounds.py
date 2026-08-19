@@ -51,7 +51,15 @@ DEFAULT_MODE = "formal"
 _LOCK = threading.RLock()
 _SCOPE_FIELDS = ("program", "theme", "campaign", "question", "branch", "workflow")
 
-_MARKER_PREFIXES = ("AGREE", "DISAGREE", "RISK", "ACTION", "KNOWLEDGE", "CANDIDATE")
+_MARKER_PREFIXES = (
+    "AGREE",
+    "DISAGREE",
+    "RISK",
+    "ACTION",
+    "KNOWLEDGE",
+    "CANDIDATE",
+    "EVIDENCE_REQUEST",
+)
 _PASS_TOKENS = {"pass", "pass.", "pass。"}
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -195,7 +203,6 @@ def _meeting_definition(record: Mapping[str, Any]) -> dict[str, Any]:
             "meetingType",
             "participants",
             "discussionItemRefs",
-            "status",
             "stage",
             "roundType",
             "agenda",
@@ -459,6 +466,8 @@ def extract_discussion_markers(messages: Sequence[Mapping[str, Any]]) -> dict[st
         "actionItems": [],
         "knowledgeCandidates": [],
         "proposedCandidates": [],
+        "evidenceRequests": [],
+        "evidenceRequestErrors": [],
     }
     for message in messages:
         if str(message.get("status") or "").strip().lower() != "completed":
@@ -522,7 +531,95 @@ def extract_discussion_markers(messages: Sequence[Mapping[str, Any]]) -> dict[st
                         "proposedBy": speaker,
                     }
                 )
+            elif marker == "EVIDENCE_REQUEST":
+                try:
+                    parsed = json.loads(value)
+                except json.JSONDecodeError:
+                    extracted["evidenceRequestErrors"].append(
+                        {
+                            "code": "evidence_request_json_invalid",
+                            "message": "EVIDENCE_REQUEST marker is not valid JSON",
+                        }
+                    )
+                    continue
+                if not isinstance(parsed, dict):
+                    extracted["evidenceRequestErrors"].append(
+                        {
+                            "code": "evidence_request_invalid",
+                            "message": "EVIDENCE_REQUEST JSON must be an object",
+                        }
+                    )
+                    continue
+                extracted["evidenceRequests"].append(parsed)
     return extracted
+
+
+def source_message_content_hash(messages: Sequence[Mapping[str, Any]]) -> str:
+    """Stable hash of bound discussion message content used for draft reuse."""
+
+    return _stable_hash(
+        [
+            {
+                "ref": message_source_ref(message),
+                "content": str(message.get("content") or ""),
+                "status": str(message.get("status") or "").strip().lower(),
+            }
+            for message in list(messages or [])
+            if isinstance(message, Mapping)
+        ]
+    )
+
+
+def running_bound_round_ids(meeting_round: Mapping[str, Any]) -> list[str]:
+    """Return bound chat-room round ids that are still in a running status."""
+
+    from core.web.services import chat_room_service
+
+    bound_rounds = _load_bound_room_rounds(meeting_round)
+    return [
+        round_id
+        for round_id, room_round in bound_rounds.items()
+        if str(room_round.get("status") or "").strip().lower()
+        in chat_room_service.RUNNING_ROUND_STATUSES
+    ]
+
+
+def record_meeting_summary_draft_error(
+    team_id: str,
+    meeting_round_id: str,
+    error: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Persist a structured draft failure while keeping ``summarizing``."""
+
+    from core.web.services.team_service import assert_team_exists
+
+    normalized_team_id = assert_team_exists(team_id)
+    normalized_round_id = str(meeting_round_id or "").strip()
+    if not normalized_round_id:
+        raise ResearchMeetingRoundError("Meeting round id is required.")
+    with _LOCK:
+        meeting_round = _load_meeting_round(normalized_team_id, normalized_round_id)
+        updated = dict(meeting_round)
+        if str(updated.get("status") or "").strip().lower() == "open":
+            updated["status"] = "summarizing"
+            updated["summaryStartedAt"] = _utc_now()
+        updated["summaryDraftError"] = {
+            "code": str(error.get("code") or "summary_draft_failed").strip()
+            or "summary_draft_failed",
+            "message": str(error.get("message") or "").strip(),
+            "remediationLabel": str(error.get("remediationLabel") or "重试生成纪要").strip()
+            or "重试生成纪要",
+        }
+        updated["updatedAt"] = _utc_now()
+        _append_round_record(normalized_team_id, updated)
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "status": str(updated.get("status") or "summarizing"),
+        "meetingRound": updated,
+        "summaryDraftError": updated["summaryDraftError"],
+        "storagePath": str(_rounds_path(normalized_team_id)),
+    }
 
 
 def begin_meeting_summary(
@@ -645,6 +742,7 @@ def submit_meeting_digest_draft(
         updated = dict(meeting_round)
         updated["status"] = "awaiting_approval"
         updated["digestDraft"] = normalized_draft
+        updated.pop("summaryDraftError", None)
         updated["updatedAt"] = _utc_now()
         _append_round_record(normalized_team_id, updated)
     return {
@@ -703,6 +801,8 @@ def _digest_content_hash(payload: Mapping[str, Any]) -> str:
             "blockers": _normalized_str_list(payload.get("blockers")),
             "knowledgeCandidates": _normalized_str_list(payload.get("knowledgeCandidates")),
             "sourceMessageRefs": _normalized_str_list(payload.get("sourceMessageRefs")),
+            "proposedCandidates": list(payload.get("proposedCandidates") or []),
+            "evidenceRequests": list(payload.get("evidenceRequests") or []),
         }
     )
 
@@ -746,6 +846,8 @@ def _build_digest_v2(
         "blockers",
         "knowledgeCandidates",
         "sourceMessageRefs",
+        "proposedCandidates",
+        "evidenceRequests",
     ):
         if key in request and request.get(key) is not None:
             merged[key] = request.get(key)

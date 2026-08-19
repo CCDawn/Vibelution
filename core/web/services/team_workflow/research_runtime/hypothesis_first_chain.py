@@ -70,6 +70,16 @@ class HypothesisFirstChainNotFoundError(HypothesisFirstChainError):
     """Raised when a chain record (collection request / link) does not exist."""
 
 
+class StaleDigestError(HypothesisFirstChainError):
+    """Raised when approve-digest receives a stale digest content hash."""
+
+    def __init__(self, message: str, *, expected: str = "", actual: str = ""):
+        super().__init__(message)
+        self.code = "stale_digest"
+        self.expected = expected
+        self.actual = actual
+
+
 # ---------------------------------------------------------------------------
 # storage primitives (same discipline as hypothesis_selection)
 
@@ -572,7 +582,8 @@ def open_candidate_generation_meeting(
         (
             meeting
             for meeting in meetings
-            if str(meeting.get("status") or "") == "open"
+            if str(meeting.get("status") or "")
+            in {"open", "summarizing", "awaiting_approval"}
         ),
         None,
     )
@@ -884,9 +895,11 @@ def _append_collection_request(
         "requirements": dict(requirements),
         "writebackPolicy": dict(writeback_policy),
         "collectionRunId": str(collection_run_id or ""),
+        "collectionRunStatus": "",
         "createdAt": _utc_now(),
         "handedOffAt": "",
         "handoffRef": "",
+        "handoffError": {},
     }
     with _LOCK:
         records = _read_jsonl(_storage_path(team_id))
@@ -1026,18 +1039,29 @@ def _build_round_candidates(
     question_id = str(meeting_round.get("question") or "").strip()
     detail = question_launch._approved_details(team_id).get(question_id.upper())
     if detail is None:
-        raise HypothesisFirstChainError(
-            f"question {question_id} has no approved v2 question artifact"
-        )
-    output = detail.get("output") if isinstance(detail.get("output"), Mapping) else {}
-    hypotheses = [
-        item
-        for item in list(output.get("hypotheses") or [])
-        if isinstance(item, Mapping)
-    ]
-    artifact_by_id = {
-        str(item.get("hypothesis_id") or "").strip(): item for item in hypotheses
-    }
+        ledger_candidates = list_hypothesis_candidates(team_id, question_id=question_id)[
+            "candidates"
+        ]
+        artifact_by_id = {
+            str(item.get("candidateId") or "").strip(): {
+                "hypothesis_id": str(item.get("candidateId") or "").strip(),
+                "statement": str(item.get("statement") or item.get("claim") or "").strip(),
+                "mechanism": str(item.get("rationale") or "").strip(),
+                "novelty_basis": str(item.get("differenceFromAlternatives") or "").strip(),
+            }
+            for item in ledger_candidates
+            if isinstance(item, Mapping)
+        }
+    else:
+        output = detail.get("output") if isinstance(detail.get("output"), Mapping) else {}
+        hypotheses = [
+            item
+            for item in list(output.get("hypotheses") or [])
+            if isinstance(item, Mapping)
+        ]
+        artifact_by_id = {
+            str(item.get("hypothesis_id") or "").strip(): item for item in hypotheses
+        }
     candidates: list[dict[str, Any]] = []
     for candidate_id in candidate_ids:
         artifact = artifact_by_id.get(candidate_id) or {}
@@ -1116,6 +1140,289 @@ def _generate_hypothesis_round(
             "error": str(exc),
             "errorType": type(exc).__name__,
         }
+
+
+def _update_collection_request(
+    team_id: str, request_id: str, **fields: Any
+) -> dict[str, Any]:
+    with _LOCK:
+        records = _read_jsonl(_storage_path(team_id))
+        latest = _latest_by_id(
+            [item for item in records if item.get("recordKind") == COLLECTION_REQUEST_KIND],
+            "requestId",
+            request_id,
+        )
+        if latest is None:
+            raise HypothesisFirstChainNotFoundError(
+                f"Collection request {request_id} not found."
+            )
+        updated = {**latest, **fields}
+        _append_jsonl(_storage_path(team_id), updated)
+        return updated
+
+
+def _requests_for_collection_run(
+    team_id: str, collection_run_id: str
+) -> list[dict[str, Any]]:
+    run_id = str(collection_run_id or "").strip()
+    if not run_id:
+        return []
+    return [
+        record
+        for record in _collection_requests(_records(team_id))
+        if str(record.get("collectionRunId") or "") == run_id
+    ]
+
+
+def _merge_evidence_requests(
+    requests: list[Mapping[str, Any]],
+    *,
+    closed_by: str,
+    meeting_round_id: str,
+) -> dict[str, Any]:
+    keywords: list[str] = []
+    source_types: list[str] = []
+    evidence_levels: list[str] = []
+    candidate_refs: list[str] = []
+    evidence_refs: list[str] = []
+    rationales: list[str] = []
+    requirements: dict[str, Any] = {}
+    writeback_policy: dict[str, Any] = {}
+
+    def _extend_unique(target: list[str], values: Any) -> None:
+        for item in _normalized_str_list(values):
+            if item not in target:
+                target.append(item)
+
+    for raw in requests:
+        envelope = raw.get("searchEnvelope") if isinstance(raw.get("searchEnvelope"), Mapping) else {}
+        _extend_unique(keywords, envelope.get("keywords"))
+        _extend_unique(source_types, envelope.get("sourceTypes"))
+        _extend_unique(evidence_levels, envelope.get("evidenceLevels"))
+        _extend_unique(candidate_refs, raw.get("candidateRefs"))
+        _extend_unique(evidence_refs, raw.get("evidenceRefs"))
+        rationale = str(raw.get("rationale") or "").strip()
+        if rationale:
+            rationales.append(rationale)
+        if isinstance(raw.get("requirements"), Mapping):
+            requirements.update(dict(raw.get("requirements") or {}))
+        if isinstance(raw.get("writebackPolicy"), Mapping):
+            writeback_policy.update(dict(raw.get("writebackPolicy") or {}))
+    return {
+        "decision": REQUEST_EVIDENCE_DECISION,
+        "rationale": "；".join(rationales) or "确认本轮搜集范围",
+        "decidedBy": closed_by,
+        "candidateRefs": candidate_refs,
+        "evidenceRefs": evidence_refs or [f"meeting_round:{meeting_round_id}"],
+        "status": "adopted",
+        "searchEnvelope": {
+            "keywords": keywords,
+            "sourceTypes": source_types,
+            "evidenceLevels": evidence_levels,
+        },
+        "requirements": requirements,
+        "writebackPolicy": writeback_policy,
+    }
+
+
+def approve_meeting_digest(
+    team_id: str,
+    meeting_round_id: str,
+    *,
+    closed_by: str,
+    expected_digest_content_hash: str,
+    runtime: Any = None,
+) -> dict[str, Any]:
+    """Confirm the current digest draft and apply generation/review side effects."""
+
+    from core.web.services import team_service
+    from core.web.services.team_workflow import meeting_rounds
+    from core.web.services.team_workflow import meeting_runtime
+
+    normalized_team_id = team_service.assert_team_exists(team_id)
+    normalized_round_id = str(meeting_round_id or "").strip()
+    if not normalized_round_id:
+        raise HypothesisFirstChainError("Meeting round id is required.")
+    closed_by_id = str(closed_by or "").strip()
+    if not closed_by_id:
+        raise HypothesisFirstChainError("closedBy is required.")
+    expected_hash = str(expected_digest_content_hash or "").strip()
+    if not expected_hash:
+        raise HypothesisFirstChainError("expectedDigestContentHash is required.")
+    meeting_round = meeting_rounds.get_meeting_round(normalized_team_id, normalized_round_id)[
+        "meetingRound"
+    ]
+    draft = (
+        dict(meeting_round.get("digestDraft"))
+        if isinstance(meeting_round.get("digestDraft"), Mapping)
+        else {}
+    )
+    actual_hash = str(draft.get("contentHash") or "").strip()
+    if not draft or str(meeting_round.get("status") or "") != "awaiting_approval":
+        raise HypothesisFirstChainError(
+            "approve-digest requires a meeting in awaiting_approval with a digest draft"
+        )
+    if actual_hash != expected_hash:
+        raise StaleDigestError(
+            "digest content hash is stale; reload the draft and confirm again",
+            expected=expected_hash,
+            actual=actual_hash,
+        )
+    meeting_type = str(meeting_round.get("meetingType") or "")
+    if meeting_type == CANDIDATE_GENERATION_MEETING_TYPE:
+        return _close_generation_meeting(
+            normalized_team_id,
+            meeting_round,
+            {"closedBy": closed_by_id, "decisions": []},
+        )
+    if meeting_type != HYPOTHESIS_REVIEW_MEETING_TYPE:
+        raise HypothesisFirstChainError(
+            "approve-digest only handles hypothesis review or candidate generation meetings"
+        )
+    source_refs = _normalized_str_list(draft.get("sourceMessageRefs"))
+    raw_requests = [
+        item for item in list(draft.get("evidenceRequests") or []) if isinstance(item, Mapping)
+    ]
+    validation_errors = [
+        dict(item)
+        for item in list(draft.get("validationErrors") or [])
+        if isinstance(item, Mapping)
+    ]
+    valid_requests: list[dict[str, Any]] = []
+    for raw in raw_requests:
+        normalized, errors = meeting_runtime.validate_evidence_request_draft(
+            raw, meeting_round, source_refs=source_refs
+        )
+        validation_errors.extend(errors)
+        if normalized is not None:
+            valid_requests.append(normalized)
+    attempted = bool(raw_requests) or bool(draft.get("validationErrors"))
+    if attempted and not valid_requests:
+        return {
+            "schemaVersion": SCHEMA_VERSION,
+            "teamId": normalized_team_id,
+            "status": "awaiting_approval",
+            "closed": False,
+            "meetingRound": meeting_round,
+            "digestDraft": draft,
+            "validationErrors": validation_errors,
+        }
+    if valid_requests:
+        decisions = [
+            _merge_evidence_requests(
+                valid_requests,
+                closed_by=closed_by_id,
+                meeting_round_id=normalized_round_id,
+            )
+        ]
+    else:
+        decisions = [
+            {
+                "decision": "confirm_round_conclusion",
+                "rationale": "本轮评审确认现有结论，不再启动新的资料搜集",
+                "decidedBy": closed_by_id,
+                "candidateRefs": [
+                    ref.split(":", 1)[-1]
+                    for ref in _normalized_str_list(meeting_round.get("discussionItemRefs"))
+                    if ref.startswith("hypothesis_candidate:")
+                ],
+                "evidenceRefs": source_refs[:1] or [f"meeting_round:{normalized_round_id}"],
+                "status": "adopted",
+            }
+        ]
+    return close_review_meeting(
+        normalized_team_id,
+        normalized_round_id,
+        {"closedBy": closed_by_id, "decisions": decisions},
+        runtime=runtime,
+    )
+
+
+def notify_collection_run_terminal(
+    team_id: str,
+    collection_run_id: str,
+    terminal_status: str,
+) -> dict[str, Any]:
+    """Bridge a source-collection terminal status into the hypothesis-first chain.
+
+    Must be called outside workflow/ledger writer locks. Only ``completed``
+    handoffs; ``failed`` / ``needs_continue`` stay in collection recovery.
+    """
+    from core.web.services import team_service
+
+    normalized_team_id = team_service.assert_team_exists(team_id)
+    run_id = str(collection_run_id or "").strip()
+    status = str(terminal_status or "").strip().lower()
+    if not run_id:
+        return {"status": "ignored", "reason": "missing_collection_run_id"}
+    requests = _requests_for_collection_run(normalized_team_id, run_id)
+    if not requests:
+        return {"status": "ignored", "reason": "no_bound_request"}
+    if status in {"failed", "needs_continue"}:
+        updated = [
+            _update_collection_request(
+                normalized_team_id,
+                str(record.get("requestId") or ""),
+                collectionRunStatus=status,
+            )
+            for record in requests
+        ]
+        return {
+            "status": "collection_recovery",
+            "requests": updated,
+            "request": updated[-1] if updated else {},
+        }
+    if status != "completed":
+        return {"status": "ignored", "reason": "non_completed"}
+    last: dict[str, Any] = {"status": "ignored"}
+    for record in requests:
+        request_id = str(record.get("requestId") or "")
+        if not request_id:
+            continue
+        if str(record.get("status") or "") == "handed_off":
+            last = record_collection_handoff(
+                normalized_team_id,
+                request_id,
+                handoff_ref=str(record.get("handoffRef") or f"source_collection_run:{run_id}"),
+            )
+            last["status"] = "reused"
+            continue
+        try:
+            last = record_collection_handoff(
+                normalized_team_id,
+                request_id,
+                handoff_ref=f"source_collection_run:{run_id}",
+            )
+            _update_collection_request(
+                normalized_team_id,
+                request_id,
+                collectionRunStatus="completed",
+                handoffError={},
+            )
+            last["request"] = {
+                **dict(last.get("request") or {}),
+                "collectionRunStatus": "completed",
+                "handoffError": {},
+            }
+        except Exception as exc:
+            updated = _update_collection_request(
+                normalized_team_id,
+                request_id,
+                status="handoff_pending",
+                collectionRunStatus="completed",
+                handoffError={
+                    "code": "handoff_failed",
+                    "message": str(exc),
+                },
+            )
+            last = {
+                "schemaVersion": SCHEMA_VERSION,
+                "teamId": normalized_team_id,
+                "status": "handoff_pending",
+                "request": updated,
+                "error": str(exc),
+            }
+    return last
 
 
 def close_review_meeting(

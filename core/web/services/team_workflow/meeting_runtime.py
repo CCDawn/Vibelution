@@ -22,6 +22,7 @@ orchestration batch.  No real model is called unless the caller injects one.
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
@@ -67,6 +68,7 @@ _GENERATION_AGENDA_RULES = (
 )
 
 _SCOPE_FIELDS = ("program", "theme", "campaign", "question", "branch", "workflow")
+_DISCUSSION_DRIVER = threading.local()
 
 
 class ResearchMeetingRuntimeError(RuntimeError):
@@ -192,6 +194,7 @@ def _round_config(
     selection: Mapping[str, Any],
     *,
     discussion_round_index: int,
+    team_id: str = "",
 ) -> dict[str, Any]:
     return {
         "source": MEETING_SOURCE,
@@ -204,6 +207,7 @@ def _round_config(
         **{field: str(meeting_round.get(field) or "") for field in _SCOPE_FIELDS},
         "agentId": str(meeting_round.get("agentId") or ""),
         "mode": str(meeting_round.get("mode") or ""),
+        "teamId": str(team_id or meeting_round.get("teamId") or "").strip(),
         "discussionRoundIndex": discussion_round_index,
         "agenda": list(meeting_round.get("agenda") or []),
         "agendaQuestions": list(meeting_round.get("agendaQuestions") or []),
@@ -323,7 +327,9 @@ def open_hypothesis_review_meeting(
         room_id,
         topic,
         purpose="meeting",
-        config=_round_config(meeting_round, selection, discussion_round_index=1),
+        config=_round_config(
+            meeting_round, selection, discussion_round_index=1, team_id=str(team_id or "")
+        ),
         agent_runner=agent_runner,
         background=background,
         lightweight_response=background,
@@ -445,7 +451,12 @@ def open_candidate_generation_meeting(
         room_id,
         topic,
         purpose="meeting",
-        config=_round_config(meeting_round, selection_shim, discussion_round_index=1),
+        config=_round_config(
+            meeting_round,
+            selection_shim,
+            discussion_round_index=1,
+            team_id=str(team_id or ""),
+        ),
         agent_runner=agent_runner,
         background=background,
         lightweight_response=background,
@@ -513,6 +524,27 @@ def run_meeting_discussion(
     """
     from core.web.services import chat_room_service, team_service
 
+    _DISCUSSION_DRIVER.active = True
+    try:
+        return _run_meeting_discussion_impl(
+            team_id,
+            meeting_round_id,
+            agent_runner=agent_runner,
+            max_messages=max_messages,
+        )
+    finally:
+        _DISCUSSION_DRIVER.active = False
+
+
+def _run_meeting_discussion_impl(
+    team_id: str,
+    meeting_round_id: str,
+    *,
+    agent_runner: Callable[..., dict[str, Any]] | None = None,
+    max_messages: int | None = None,
+) -> dict[str, Any]:
+    from core.web.services import chat_room_service, team_service
+
     normalized_team_id = team_service.assert_team_exists(team_id)
     normalized_round_id = str(meeting_round_id or "").strip()
     if not normalized_round_id:
@@ -567,7 +599,10 @@ def run_meeting_discussion(
             _follow_up_topic(discussion_round_index),
             purpose="meeting",
             config=_round_config(
-                meeting_round, selection, discussion_round_index=discussion_round_index
+                meeting_round,
+                selection,
+                discussion_round_index=discussion_round_index,
+                team_id=normalized_team_id,
             ),
             agent_runner=agent_runner,
             background=False,
@@ -587,6 +622,13 @@ def run_meeting_discussion(
         for message in all_messages
         if str(message.get("status") or "").strip().lower() == "completed"
     )
+    try:
+        drafted = prepare_meeting_summary_draft(
+            normalized_team_id, normalized_round_id, actor="system", force=False
+        )
+        meeting_round = drafted.get("meetingRound") or meeting_round
+    except Exception:
+        drafted = None
     return {
         "schemaVersion": meeting_rounds.SCHEMA_VERSION,
         "teamId": normalized_team_id,
@@ -600,6 +642,7 @@ def run_meeting_discussion(
         "messageCount": len(all_messages),
         "completedMessageCount": completed_count,
         "stopReason": stop_reason,
+        "summaryDraft": drafted,
     }
 
 
@@ -638,6 +681,9 @@ def build_meeting_digest_draft(
         f"{len(markers['disagreements'])} 条分歧、{len(markers['actionItems'])} 条行动项、"
         f"{len(markers['risks'])} 条未解决风险。"
     )
+    evidence_requests, validation_errors = _collect_evidence_requests(
+        meeting_round, markers, source_refs
+    )
     return {
         "summary": summary,
         "agendaSummary": "；".join(agenda),
@@ -649,6 +695,8 @@ def build_meeting_digest_draft(
         "blockers": [],
         "knowledgeCandidates": list(markers["knowledgeCandidates"]),
         "proposedCandidates": list(markers["proposedCandidates"]),
+        "evidenceRequests": evidence_requests,
+        "validationErrors": validation_errors,
         "sourceMessageRefs": source_refs,
     }
 
@@ -671,6 +719,351 @@ def draft_meeting_digest(
     ]
     source_messages = meeting_rounds.meeting_source_messages(meeting_round)
     draft = build_meeting_digest_draft(meeting_round, source_messages, drafter=drafter)
+    draft["sourceMessageContentHash"] = meeting_rounds.source_message_content_hash(
+        source_messages
+    )
     return meeting_rounds.submit_meeting_digest_draft(
         normalized_team_id, normalized_round_id, draft
+    )
+
+
+def discussion_driver_active() -> bool:
+    return bool(getattr(_DISCUSSION_DRIVER, "active", False))
+
+
+def _allowed_candidate_ids(meeting_round: Mapping[str, Any]) -> set[str]:
+    allowed: set[str] = set()
+    for ref in _normalized_str_list(meeting_round.get("discussionItemRefs")):
+        allowed.add(ref)
+        if ":" in ref:
+            allowed.add(ref.split(":", 1)[-1].strip())
+    for item in _normalized_str_list(meeting_round.get("selectedCandidateIds")):
+        allowed.add(item)
+    return {item for item in allowed if item}
+
+
+def validate_evidence_request_draft(
+    raw: Mapping[str, Any] | None,
+    meeting_round: Mapping[str, Any],
+    *,
+    source_refs: Sequence[str] | None = None,
+) -> tuple[dict[str, Any] | None, list[dict[str, str]]]:
+    """Validate one untrusted evidence request. Invalid items never enter closure."""
+
+    from core.web.services.team_workflow.source_collection import facade
+
+    errors: list[dict[str, str]] = []
+    if not isinstance(raw, Mapping):
+        return None, [
+            {
+                "code": "evidence_request_invalid",
+                "message": "evidence request must be an object",
+            }
+        ]
+    rationale = str(raw.get("rationale") or "").strip()
+    if len(rationale) > 10000:
+        errors.append(
+            {"code": "rationale_too_long", "message": "rationale exceeds 10000 characters"}
+        )
+    candidate_refs = _normalized_str_list(raw.get("candidateRefs"))
+    allowed = _allowed_candidate_ids(meeting_round)
+    if allowed:
+        unknown = [
+            item
+            for item in candidate_refs
+            if item not in allowed and item.split(":")[-1] not in allowed
+        ]
+        if unknown:
+            errors.append(
+                {
+                    "code": "candidate_ref_unbound",
+                    "message": "candidateRefs are not bound to this meeting: "
+                    + ", ".join(unknown),
+                }
+            )
+    evidence_refs = _normalized_str_list(raw.get("evidenceRefs"))
+    allowed_refs = {str(item) for item in list(source_refs or []) if str(item)}
+    for ref in evidence_refs:
+        if ref.startswith("evidence:"):
+            continue
+        if allowed_refs and ref not in allowed_refs:
+            errors.append(
+                {
+                    "code": "evidence_ref_unbound",
+                    "message": f"evidenceRefs are not bound to source messages: {ref}",
+                }
+            )
+            break
+    try:
+        envelope = facade._normalize_search_envelope(
+            raw.get("searchEnvelope"), require_keywords=True
+        )
+    except Exception as exc:
+        errors.append(
+            {
+                "code": str(getattr(exc, "code", "") or "search_envelope_invalid"),
+                "message": str(exc),
+            }
+        )
+        envelope = None
+    try:
+        requirements = facade._normalize_requirements(raw.get("requirements"))
+        writeback_policy = facade._normalize_writeback_policy(raw.get("writebackPolicy"))
+    except Exception as exc:
+        errors.append(
+            {
+                "code": str(getattr(exc, "code", "") or "collection_payload_invalid"),
+                "message": str(exc),
+            }
+        )
+        requirements = {}
+        writeback_policy = {}
+    if errors or envelope is None:
+        return None, errors
+    return {
+        "rationale": rationale,
+        "candidateRefs": candidate_refs,
+        "evidenceRefs": evidence_refs,
+        "searchEnvelope": {
+            "keywords": list(envelope.get("keywords") or []),
+            "sourceTypes": list(envelope.get("sourceTypes") or []),
+            "evidenceLevels": list(envelope.get("evidenceLevels") or []),
+        },
+        "requirements": requirements,
+        "writebackPolicy": writeback_policy,
+    }, []
+
+
+def _collect_evidence_requests(
+    meeting_round: Mapping[str, Any],
+    markers: Mapping[str, Any],
+    source_refs: Sequence[str],
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    validation_errors = [
+        dict(item)
+        for item in list(markers.get("evidenceRequestErrors") or [])
+        if isinstance(item, Mapping)
+    ]
+    collected: list[dict[str, Any]] = []
+    for raw in list(markers.get("evidenceRequests") or []):
+        normalized, errors = validate_evidence_request_draft(
+            raw if isinstance(raw, Mapping) else None,
+            meeting_round,
+            source_refs=source_refs,
+        )
+        validation_errors.extend(errors)
+        if normalized is not None:
+            collected.append(normalized)
+        elif isinstance(raw, Mapping):
+            collected.append(dict(raw))
+    return collected, validation_errors
+
+
+def prepare_meeting_summary_draft(
+    team_id: str,
+    meeting_round_id: str,
+    *,
+    actor: str = "",
+    force: bool = False,
+    drafter: Callable[[dict[str, Any], list[dict[str, Any]]], Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Idempotent open → summarizing → awaiting_approval summary-draft action."""
+
+    from core.web.services import team_service
+
+    normalized_team_id = team_service.assert_team_exists(team_id)
+    normalized_round_id = str(meeting_round_id or "").strip()
+    if not normalized_round_id:
+        raise ResearchMeetingRuntimeError("Meeting round id is required.")
+    meeting_round = meeting_rounds.get_meeting_round(normalized_team_id, normalized_round_id)[
+        "meetingRound"
+    ]
+    status = str(meeting_round.get("status") or "").strip().lower()
+    source_messages = meeting_rounds.meeting_source_messages(meeting_round)
+    source_hash = meeting_rounds.source_message_content_hash(source_messages)
+    existing_draft = (
+        dict(meeting_round.get("digestDraft"))
+        if isinstance(meeting_round.get("digestDraft"), Mapping)
+        else {}
+    )
+    if status == "closed":
+        return {
+            "schemaVersion": meeting_rounds.SCHEMA_VERSION,
+            "teamId": normalized_team_id,
+            "status": "closed",
+            "meetingRound": meeting_round,
+            "digestDraft": existing_draft or None,
+            "storagePath": str(meeting_rounds._rounds_path(normalized_team_id)),
+        }
+    if status == "awaiting_approval":
+        return {
+            "schemaVersion": meeting_rounds.SCHEMA_VERSION,
+            "teamId": normalized_team_id,
+            "status": "awaiting_approval",
+            "meetingRound": meeting_round,
+            "digestDraft": existing_draft or None,
+            "boundChatRoundsTerminal": not meeting_rounds.running_bound_round_ids(
+                meeting_round
+            ),
+            "storagePath": str(meeting_rounds._rounds_path(normalized_team_id)),
+        }
+    if status == "open":
+        running = [] if force else meeting_rounds.running_bound_round_ids(meeting_round)
+        if running:
+            return {
+                "schemaVersion": meeting_rounds.SCHEMA_VERSION,
+                "teamId": normalized_team_id,
+                "status": "blocked",
+                "blocker": {
+                    "code": "discussion_round_running",
+                    "message": "讨论回合仍在进行，全部结束后才能生成纪要",
+                    "runningRoundIds": running,
+                },
+                "meetingRound": meeting_round,
+                "boundChatRoundsTerminal": False,
+                "storagePath": str(meeting_rounds._rounds_path(normalized_team_id)),
+            }
+        meeting_rounds.begin_meeting_summary(
+            normalized_team_id,
+            normalized_round_id,
+            actor=actor,
+            human_triggered=bool(force),
+        )
+        meeting_round = meeting_rounds.get_meeting_round(
+            normalized_team_id, normalized_round_id
+        )["meetingRound"]
+        status = "summarizing"
+        existing_draft = (
+            dict(meeting_round.get("digestDraft"))
+            if isinstance(meeting_round.get("digestDraft"), Mapping)
+            else {}
+        )
+    if status != "summarizing":
+        raise ResearchMeetingRuntimeError(
+            f"meeting status {status or '<unknown>'} cannot generate a summary draft"
+        )
+    if (
+        existing_draft
+        and str(existing_draft.get("sourceMessageContentHash") or "") == source_hash
+    ):
+        return meeting_rounds.submit_meeting_digest_draft(
+            normalized_team_id, normalized_round_id, existing_draft
+        )
+    try:
+        return draft_meeting_digest(
+            normalized_team_id, normalized_round_id, drafter=drafter
+        )
+    except Exception as exc:
+        error = {
+            "code": "summary_draft_failed",
+            "message": str(exc),
+            "remediationLabel": "重试生成纪要",
+        }
+        persisted = meeting_rounds.record_meeting_summary_draft_error(
+            normalized_team_id, normalized_round_id, error
+        )
+        return {
+            **persisted,
+            "status": "summarizing",
+            "summaryDraftError": error,
+        }
+
+
+def _team_id_for_auto_draft(
+    room: Mapping[str, Any], round_payload: Mapping[str, Any]
+) -> str:
+    config = (
+        round_payload.get("config")
+        if isinstance(round_payload.get("config"), Mapping)
+        else {}
+    )
+    team_id = str(config.get("teamId") or "").strip()
+    if team_id:
+        return team_id
+    room_config = room.get("config") if isinstance(room.get("config"), Mapping) else {}
+    team_id = str(room_config.get("teamId") or room.get("teamId") or "").strip()
+    if team_id:
+        return team_id
+    for participant in list(room.get("participants") or []):
+        if isinstance(participant, Mapping):
+            team_id = str(participant.get("teamId") or "").strip()
+            if team_id:
+                return team_id
+    room_id = str(room.get("roomId") or "").strip()
+    if not room_id:
+        return ""
+    from core.web.services import team_service
+
+    try:
+        listed = team_service.list_teams()
+    except Exception:
+        return ""
+    teams = listed.get("teams") if isinstance(listed, Mapping) else listed
+    for team in list(teams or []):
+        if isinstance(team, Mapping) and str(team.get("linkedChatRoomId") or "") == room_id:
+            return str(team.get("teamId") or "").strip()
+    return ""
+
+
+def maybe_auto_draft_meeting(
+    team_id: str,
+    meeting_round_id: str,
+    *,
+    required_round_id: str = "",
+) -> dict[str, Any] | None:
+    """Draft only when every bound chat round is terminal and will not follow-up."""
+
+    if discussion_driver_active():
+        return None
+    normalized_team_id = str(team_id or "").strip()
+    normalized_round_id = str(meeting_round_id or "").strip()
+    if not normalized_team_id or not normalized_round_id:
+        return None
+    try:
+        meeting_round = meeting_rounds.get_meeting_round(
+            normalized_team_id, normalized_round_id
+        )["meetingRound"]
+    except Exception:
+        return None
+    if str(meeting_round.get("status") or "").strip().lower() != "open":
+        return None
+    bound_ids = _normalized_str_list(meeting_round.get("chatRoomRoundIds"))
+    if not bound_ids:
+        return None
+    required = str(required_round_id or "").strip()
+    if required and required not in bound_ids:
+        return None
+    if meeting_rounds.running_bound_round_ids(meeting_round):
+        return None
+    try:
+        return prepare_meeting_summary_draft(
+            normalized_team_id, normalized_round_id, actor="system", force=False
+        )
+    except Exception:
+        return None
+
+
+def maybe_auto_draft_after_chat_round(
+    room: Mapping[str, Any] | None,
+    round_payload: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    """P1 hook: draft after a meeting-bound chat round reaches a terminal status."""
+
+    if not isinstance(room, Mapping) or not isinstance(round_payload, Mapping):
+        return None
+    config = (
+        round_payload.get("config")
+        if isinstance(round_payload.get("config"), Mapping)
+        else {}
+    )
+    meeting_round_id = str(config.get("meetingRoundId") or "").strip()
+    if not meeting_round_id:
+        return None
+    team_id = _team_id_for_auto_draft(room, round_payload)
+    if not team_id:
+        return None
+    return maybe_auto_draft_meeting(
+        team_id,
+        meeting_round_id,
+        required_round_id=str(round_payload.get("roundId") or "").strip(),
     )
