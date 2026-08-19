@@ -119,11 +119,12 @@ def _team_detail_to_api(
     team: dict[str, Any],
     *,
     agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
+    already_repaired: bool = False,
 ) -> dict[str, Any]:
     s = _service()
     agent_refs = agent_refs or s._agent_reference_maps()
     return {
-        **s._team_to_api_without_canvas_summary(team, agent_refs=agent_refs),
+        **s._team_to_api_without_canvas_summary(team, agent_refs=agent_refs, already_repaired=already_repaired),
         "canvas": s._team_canvas_with_validation(
             team,
             agents_by_id=agent_refs["by_id"],
@@ -136,10 +137,12 @@ def _team_to_api_without_canvas_summary(
     team: dict[str, Any],
     *,
     agent_refs: dict[str, dict[str, dict[str, Any]]] | None = None,
+    already_repaired: bool = False,
 ) -> dict[str, Any]:
     s = _service()
     repaired = dict(team)
-    s._repair_team(repaired, agent_refs=agent_refs)
+    if not already_repaired:
+        s._repair_team(repaired, agent_refs=agent_refs)
     repaired["members"] = s._members_to_api(repaired.get("members"))
     team_id = str(repaired.get("teamId") or "").strip()
     linked_room_id = str(repaired.get("linkedChatRoomId") or "").strip()
