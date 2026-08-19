@@ -1,4 +1,7 @@
 import type { TeamWorkflowSourceCollectionRunStartPayload } from "../../../api/types";
+import type { SourceCollectionMaterializedKnowledgeIngestion } from "../../../api/sourceCollection";
+
+export type { SourceCollectionMaterializedKnowledgeIngestion } from "../../../api/sourceCollection";
 
 import type { SourceCollectionStepState } from "./runModel";
 
@@ -119,6 +122,7 @@ export type SourceCollectionStageCardProjection = {
     completionGate?: SourceCollectionStageCompletionGate;
     materializedSources?: Record<string, unknown>;
     materializedContentExtraction?: Record<string, unknown>;
+    materializedKnowledgeIngestion?: SourceCollectionMaterializedKnowledgeIngestion;
   };
   resultKeys?: string[];
   nextActions?: string[];

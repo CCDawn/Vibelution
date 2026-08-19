@@ -29,6 +29,14 @@ const styles = {
     "sourceCollectionStageMoreActionsBody min-w-0 grid grid-cols-1 gap-1.5 border-t border-[var(--vui-border-subtle)] p-1.5 [&_a]:inline-flex [&_a]:w-full [&_a]:items-center [&_a]:justify-center [&_a]:gap-1.5 [&_a]:min-h-[30px] [&_a]:px-2 [&_a]:rounded-[7px] [&_a]:border [&_a]:border-[var(--vui-border-subtle)] [&_a]:bg-[var(--vui-control-muted)] [&_a]:text-[var(--fg-secondary)] [&_a]:[font-size:var(--vui-font-xs)] [&_a]:no-underline [&_[data-vui=native-button]]:w-full [&_[data-vui=native-button]]:min-h-[30px] [&_[data-vui=native-button]]:justify-center [&_[data-vui=native-button]]:text-[var(--fg-secondary)]",
   sourceCollectionStageErrors:
     "sourceCollectionStageErrors min-w-0 grid min-h-0 content-start gap-1.5 overflow-auto empty:hidden",
+  sourceCollectionKnowledgeIngestionStatus:
+    "sourceCollectionKnowledgeIngestionStatus min-w-0 grid gap-1.5 border-[color-mix(in_srgb,var(--accent-cool)_28%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--accent-cool)_5%,var(--vui-surface-row))]",
+  sourceCollectionKnowledgeIngestionHeader:
+    "sourceCollectionKnowledgeIngestionHeader min-w-0 flex items-center justify-between gap-2 [&>strong]:min-w-0 [&>strong]:truncate [font-size:var(--vui-font-xs)] text-[var(--fg-primary)]",
+  sourceCollectionKnowledgeIngestionMetrics:
+    "sourceCollectionKnowledgeIngestionMetrics min-w-0 flex flex-wrap items-center gap-1.5",
+  sourceCollectionKnowledgeIngestionMessage:
+    "sourceCollectionKnowledgeIngestionMessage min-w-0 [font-size:var(--vui-font-xs)] leading-snug",
   sourceCollectionStageHandoff:
     "sourceCollectionStageHandoff min-w-0 grid gap-0.5 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-secondary)] [&>span]:min-w-0 [&>span]:grid [&>span]:grid-cols-[minmax(64px,0.7fr)_minmax(0,1fr)] [&>span]:gap-2 [&>span]:break-words [&>span]:[overflow-wrap:anywhere] [&>span]:border-b [&>span]:border-[var(--vui-border-subtle)] [&>span]:py-1.5 [&>span:last-child]:border-b-0 [&_b]:text-[var(--fg-tertiary)]",
   sourceCollectionStageHandoffNext:

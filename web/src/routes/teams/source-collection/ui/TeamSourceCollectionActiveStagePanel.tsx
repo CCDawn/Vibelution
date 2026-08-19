@@ -2,8 +2,18 @@ import { type ReactNode } from "react";
 import { Check, ChevronRight } from "lucide-react";
 
 import { WORKBENCH_LAYOUT_IDS } from "../../../../components/layout/workbenchLayoutIds";
-import { VButton, VNativeButton, VSplitWorkspace } from "../../../../components/vui";
+import {
+  VButton,
+  VMetricChip,
+  VNativeButton,
+  VSplitWorkspace,
+  VStateRow,
+  VStatusChip,
+  VSurface,
+  type VStatusTone,
+} from "../../../../components/vui";
 import type { ExtractionFlowStep } from "../extractionStageFlowGuide";
+import type { SourceCollectionMaterializedKnowledgeIngestion } from "../stageProjection";
 import styles from "./TeamSourceCollectionActiveStagePanel.styles";
 import {
   TeamSourceCollectionStageActionIcon,
@@ -29,6 +39,7 @@ type TeamSourceCollectionActiveStagePanelProps = {
   stageId: TeamSourceCollectionActiveStageId;
   title: ReactNode;
   status: ReactNode;
+  materializedKnowledgeIngestion?: SourceCollectionMaterializedKnowledgeIngestion | null;
   /** Extraction micro-flow step chips when provided. */
   flowSteps?: ExtractionFlowStep[] | null;
   primaryAction: TeamSourceCollectionActiveStageAction;
@@ -67,6 +78,7 @@ export function TeamSourceCollectionActiveStagePanel({
   stageId,
   title,
   status,
+  materializedKnowledgeIngestion = null,
   flowSteps = null,
   primaryAction,
   secondaryActions = null,
@@ -115,6 +127,12 @@ export function TeamSourceCollectionActiveStagePanel({
         <span>{status}</span>
       </div>
       {agentConfiguration}
+      {stageId === "ingestion" ? (
+        <SourceCollectionKnowledgeIngestionStatus
+          lang={lang}
+          payload={materializedKnowledgeIngestion}
+        />
+      ) : null}
       {hasFlowGuide ? (
         <div className={styles.sourceCollectionStageFlowGuide} role="region" aria-label={lang === "zh" ? "当前推荐流程" : "Recommended flow"}>
           <ol className={styles.sourceCollectionStageFlowSteps}>
@@ -225,5 +243,92 @@ export function TeamSourceCollectionActiveStagePanel({
         )}
       />
     </section>
+  );
+}
+
+type SourceCollectionKnowledgeIngestionStatusProps = {
+  lang: "zh" | "en";
+  payload: SourceCollectionMaterializedKnowledgeIngestion | null | undefined;
+};
+
+type SourceCollectionKnowledgeIngestionDisplayState = "pending" | "completed" | "failed";
+
+function SourceCollectionKnowledgeIngestionStatus({
+  lang,
+  payload,
+}: SourceCollectionKnowledgeIngestionStatusProps) {
+  if (!payload || Object.keys(payload).length === 0) {
+    return null;
+  }
+
+  const failedCount = Number(payload.failedCount || 0);
+  const statusText = [
+    payload.status,
+    payload.sourceReviewStatus,
+    payload.knowledgeSubmissionStatus,
+    payload.knowledgeReviewStatus,
+  ]
+    .map((value) => String(value || "").trim().toLowerCase())
+    .filter(Boolean);
+  const hasFailure = failedCount > 0
+    || statusText.some((value) => value === "failed" || value === "error" || value === "blocked" || value.includes("failed"));
+  const formalCount = Number.isFinite(Number(payload.formalKnowledgeItemCount))
+    ? Math.max(0, Number(payload.formalKnowledgeItemCount))
+    : null;
+  const hasFormalSync = formalCount !== null && formalCount > 0;
+  const state: SourceCollectionKnowledgeIngestionDisplayState = hasFailure
+    ? "failed"
+    : payload.status === "completed" && hasFormalSync
+      ? "completed"
+      : "pending";
+  const stateLabel = state === "failed"
+    ? (lang === "zh" ? "入库失败" : "Ingestion failed")
+    : state === "completed"
+      ? (lang === "zh" ? "已正式同步" : "Officially synced")
+      : (lang === "zh" ? "等待正式同步" : "Awaiting official sync");
+  const stateTone: VStatusTone = state === "failed"
+    ? "danger"
+    : state === "completed"
+      ? "success"
+      : "warning";
+  const reasonCode = state === "failed"
+    ? "official_sync_failed"
+    : state === "completed"
+      ? "official_sync_completed"
+      : "official_sync_pending";
+
+  return (
+    <VSurface
+      as="section"
+      tone="row"
+      padding="compact"
+      className={styles.sourceCollectionKnowledgeIngestionStatus}
+      data-testid="source-collection-knowledge-ingestion-status"
+      data-ingestion-state={state}
+      data-ingestion-reason-code={reasonCode}
+      aria-label={lang === "zh" ? "正式知识入库状态" : "Formal knowledge ingestion status"}
+    >
+      <div className={styles.sourceCollectionKnowledgeIngestionHeader}>
+        <strong>{lang === "zh" ? "正式知识入库" : "Formal knowledge ingestion"}</strong>
+        <VStatusChip tone={stateTone}>{stateLabel}</VStatusChip>
+      </div>
+      <div className={styles.sourceCollectionKnowledgeIngestionMetrics}>
+        {formalCount !== null ? (
+          <VMetricChip
+            label={lang === "zh" ? "正式知识" : "Formal items"}
+            value={lang === "zh" ? `${formalCount} 条` : formalCount}
+          />
+        ) : null}
+      </div>
+      {state === "failed" ? (
+        <VStateRow tone="danger" role="alert" className={styles.sourceCollectionKnowledgeIngestionMessage}>
+          {lang === "zh" ? "正式知识同步失败；请修复后重试资料入库。" : "Official knowledge sync failed; fix the issue and retry ingestion."}
+        </VStateRow>
+      ) : state === "pending" ? (
+        <VStateRow tone="warning" role="status" className={styles.sourceCollectionKnowledgeIngestionMessage}>
+          {lang === "zh" ? "当前结果仍在等待审核或正式知识同步。" : "The result is still awaiting review or official knowledge sync."}
+        </VStateRow>
+      ) : null}
+    </VSurface>
   );
 }

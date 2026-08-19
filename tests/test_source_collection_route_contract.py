@@ -51,9 +51,44 @@ def test_source_collection_summary_keeps_unknown_fields() -> None:
             "runId": "run-1",
             "stageCards": [{"stageId": "search", "status": "ready"}],
         }
-    ).model_dump()
+    ).model_dump(exclude_unset=True, exclude_none=True)
 
     assert payload["stageCards"] == [{"stageId": "search", "status": "ready"}]
+
+
+def test_source_collection_summary_drops_nested_unknowns_and_raw_ingestion_errors() -> None:
+    payload = SourceCollectionSummaryResponse.model_validate(
+        {
+            "stageCards": [
+                {
+                    "stageId": "ingestion",
+                    "latestTask": {
+                        "taskId": "task-1",
+                        "storagePath": "C:/private/source-collection/run.json",
+                        "materializedKnowledgeIngestion": {
+                            "status": "failed",
+                            "formalKnowledgeItemCount": 0,
+                            "failed": [
+                                {
+                                    "reason": "knowledge_ingestion_failed",
+                                    "error": "C:/private/source-collection/private-error.txt",
+                                    "storagePath": "C:/private/source-collection/private-error.txt",
+                                }
+                            ],
+                            "unknownDiagnostic": "must not cross the catalog boundary",
+                        },
+                    },
+                }
+            ]
+        }
+    ).model_dump(exclude_unset=True, exclude_none=True)
+
+    latest_task = payload["stageCards"][0]["latestTask"]
+    assert "storagePath" not in latest_task
+    ingestion = latest_task["materializedKnowledgeIngestion"]
+    assert "unknownDiagnostic" not in ingestion
+    assert "error" not in ingestion["failed"][0]
+    assert "storagePath" not in ingestion["failed"][0]
 
 
 def test_source_collection_summary_keeps_unknown_fields_without_injecting_defaults() -> None:
