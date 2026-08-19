@@ -62,6 +62,59 @@ class ChallengeQuestionRunStatusResponse(BaseModel):
     storePath: str = ""
 
 
+class SubmissionReadinessAction(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    kind: str = ""
+    target: str = ""
+    label: str = ""
+    questionId: str | None = None
+
+
+class SubmissionReadinessArtifact(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    key: str = ""
+    label: str = ""
+    required: bool = False
+    status: str = ""
+    detail: str = ""
+    blocker: str = ""
+    primaryAction: SubmissionReadinessAction = Field(default_factory=SubmissionReadinessAction)
+
+
+class SubmissionReadinessBlocker(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    code: str = ""
+    label: str = ""
+    action: SubmissionReadinessAction = Field(default_factory=SubmissionReadinessAction)
+
+
+class SubmissionReadinessProgramSummary(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    title: str = ""
+    questionCount: int = 0
+    approvedQuestionCount: int = 0
+    deepExperimentCount: int = 0
+    approvedDeepExperimentCount: int = 0
+
+
+class ChallengeSubmissionReadinessResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    schemaVersion: int = 0
+    teamId: str = ""
+    status: str = ""
+    readyCount: int = 0
+    requiredCount: int = 0
+    blockerCount: int = 0
+    artifacts: list[SubmissionReadinessArtifact] = Field(default_factory=list)
+    blockers: list[SubmissionReadinessBlocker] = Field(default_factory=list)
+    programSummary: SubmissionReadinessProgramSummary = Field(default_factory=SubmissionReadinessProgramSummary)
+
+
 class CandidateStoreListResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 

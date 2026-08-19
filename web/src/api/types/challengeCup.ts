@@ -105,6 +105,51 @@ export type CompetitionProgramProjection = {
   };
 };
 
+export type ChallengeSubmissionReadinessAction = {
+  kind: "repair" | "inspect" | "export" | string;
+  target: string;
+  label: string;
+  questionId?: string;
+};
+
+export type ChallengeDeliverablesInspection = {
+  status: "ready" | "blocked" | string;
+  blockers: Array<{ code: string; message: string }>;
+  deliverableManifest?: { status: "ready" | "blocked" | string };
+};
+
+export type ChallengeSubmissionReadinessArtifact = {
+  key: string;
+  label: string;
+  required: boolean;
+  status: "ready" | "blocked" | "optional" | string;
+  detail: string;
+  blocker: string;
+  primaryAction: ChallengeSubmissionReadinessAction;
+};
+
+export type ChallengeSubmissionReadiness = {
+  schemaVersion: number;
+  teamId: string;
+  status: "ready" | "blocked" | string;
+  readyCount: number;
+  requiredCount: number;
+  blockerCount: number;
+  artifacts: ChallengeSubmissionReadinessArtifact[];
+  blockers: Array<{
+    code: string;
+    label: string;
+    action: ChallengeSubmissionReadinessAction;
+  }>;
+  programSummary: {
+    title: string;
+    questionCount: number;
+    approvedQuestionCount: number;
+    deepExperimentCount: number;
+    approvedDeepExperimentCount: number;
+  };
+};
+
 /** Known legal next actions of the DEV-only Challenge Cup control surface. */
 export type ChallengeCupDevNextLegalAction =
   | "run_dev_readiness"

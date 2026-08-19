@@ -43,6 +43,7 @@ import {
 import type { ExperimentPlanningStatusPayload } from "../experimentLoopModel";
 import { experimentPlanningStatusQueryKey } from "../experimentLoopModel";
 import { ChallengeQuestionRegisterDialog } from "../challenge-cup/ChallengeQuestionRegisterDialog";
+import { ChallengeSubmissionReadinessPanel } from "./ChallengeSubmissionReadinessPanel";
 import { useShellI18n } from "../../../i18n/useShellI18n";
 import styles from "./ChallengeMvpProgressPanel.styles";
 
@@ -129,7 +130,6 @@ export function ChallengeMvpProgressPanel({
     enabled: Boolean(teamId.trim()),
     staleTime: 30_000,
   });
-
   const devControlsKey = queryKeys.challengeCupDevControlsSnapshot(teamId);
   const devControlsQuery = useQuery({
     queryKey: devControlsKey,
@@ -190,7 +190,6 @@ export function ChallengeMvpProgressPanel({
     mutationFn: repairDev5,
     onSuccess: () => refreshDevControls(),
   });
-
   const program = experimentStatusQuery.data?.competitionProgramProjection;
   const summary = questionStatusQuery.data?.summary;
   const results = summary?.validatedQuestionResults ?? [];
@@ -320,6 +319,8 @@ export function ChallengeMvpProgressPanel({
           {zh ? "后端尚未提供 competitionProgramProjection。" : "competitionProgramProjection is not available."}
         </VEmptyState>
       )}
+
+      <ChallengeSubmissionReadinessPanel teamId={teamId} lang={lang} onOpenQuestion={onOpenQuestion} />
 
       {import.meta.env.DEV ? (
       <section className={styles.devControls} aria-label={zh ? "开发态就绪与批次控制" : "DEV readiness and batch control"}>

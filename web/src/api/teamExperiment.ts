@@ -162,6 +162,16 @@ export function fetchExperimentPlanningStatus<T>(
   );
 }
 
+export function fetchChallengeSubmissionReadiness<T>(
+  teamId: string,
+  options?: { signal?: AbortSignal },
+): Promise<T> {
+  return fetchJson<T>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/challenge-program/submission-readiness`,
+    { signal: options?.signal },
+  );
+}
+
 export function fetchExperimentMethodCatalog<T>(
   teamId: string,
   options?: { signal?: AbortSignal },

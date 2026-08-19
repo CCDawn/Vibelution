@@ -42,6 +42,7 @@ MVP_TOTAL_QUESTION_COUNT = MVP_GOLDEN_SAMPLE_COUNT + MVP_TRIAL_QUESTION_COUNT
 REQUIRED_REPRESENTATIVE_CASES = 3
 COMPATIBILITY_CASE_REGISTRY_KIND = "challenge_program_representative_cases"
 DOCUMENTED_CASE_STATUSES = {"accepted_for_writeup", "validated", "promoted"}
+SUBMISSION_READINESS_SCHEMA_VERSION = 1
 
 INDEPENDENT_EVALUATION_DIMENSIONS = [
     "evidence_support",
@@ -615,5 +616,183 @@ def build_competition_program_projection(
             "separateThemeContracts": _mapping(program.get("isolationPolicy")).get("separateThemeContracts") is True,
             "separateCampaigns": _mapping(program.get("isolationPolicy")).get("separateCampaigns") is True,
             "separateTeams": _mapping(program.get("isolationPolicy")).get("separateTeams") is True,
+        },
+    }
+
+
+def build_challenge_submission_readiness(
+    *,
+    team_id: str,
+    competition_program_projection: dict[str, Any],
+) -> dict[str, Any]:
+    """Build the single user-facing Challenge Cup submission readiness view.
+
+    The projection is deliberately conservative: only the canonical program
+    result counts can make the two computational packages ready.  The PDF,
+    video, API and source-code submission artifacts have no tracked canonical
+    package receipt yet, so they stay blocked/optional instead of being
+    inferred from repository paths or implementation routes.
+    """
+    projection = _mapping(competition_program_projection)
+    program = _mapping(projection.get("program"))
+    result_set = _mapping(projection.get("fullCatalogResultSet"))
+    deep_experiments = [
+        item for item in projection.get("requiredDeepExperiments") or []
+        if isinstance(item, dict)
+    ]
+    approved_count = int(result_set.get("approvedQuestionCount") or 0)
+    required_count = int(result_set.get("requiredApprovedQuestionCount") or CATALOG_QUESTION_COUNT)
+    full_catalog_ready = result_set.get("complete") is True
+    approved_question_ids = {
+        _text(item)
+        for item in result_set.get("approvedQuestionIds") or []
+        if _text(item)
+    }
+    catalog_questions = _mapping(projection.get("questionCatalog")).get("questions") or []
+    first_missing_question_id = next(
+        (
+            _text(item.get("questionId"))
+            for item in catalog_questions
+            if isinstance(item, dict)
+            and _text(item.get("questionId"))
+            and _text(item.get("questionId")) not in approved_question_ids
+        ),
+        "",
+    )
+    approved_deep_count = sum(1 for item in deep_experiments if item.get("approved") is True)
+    required_deep_count = sum(1 for item in deep_experiments if item.get("required") is True)
+    first_missing_deep_question_id = next(
+        (
+            _text(item.get("questionId"))
+            for item in deep_experiments
+            if item.get("required") is True and item.get("approved") is not True and _text(item.get("questionId"))
+        ),
+        "",
+    )
+    deep_ready = bool(deep_experiments) and all(
+        item.get("required") is True and item.get("approved") is True
+        for item in deep_experiments
+    )
+    direction_requirement = _mapping(projection.get("directionSubmissionRequirement"))
+    artifacts = [
+        {
+            "key": "full_catalog_results",
+            "label": "125 题结果包",
+            "required": True,
+            "status": "ready" if full_catalog_ready else "blocked",
+            "detail": f"{approved_count}/{required_count} 题已通过提交门。",
+            "blocker": "full_catalog_results_incomplete" if not full_catalog_ready else "",
+            "primaryAction": {
+                "kind": "repair" if not full_catalog_ready else "export",
+                "target": "full-catalog-results",
+                "label": "修复缺失结果" if not full_catalog_ready else "导出结果包",
+                **({"questionId": first_missing_question_id} if first_missing_question_id else {}),
+            },
+        },
+        {
+            "key": "deep_experiment_suite",
+            "label": "两个深实验包",
+            "required": True,
+            "status": "ready" if deep_ready else "blocked",
+            "detail": f"{approved_deep_count}/{required_deep_count or 2} 个独立深实验已通过提交门。",
+            "blocker": "deep_experiment_suite_incomplete" if not deep_ready else "",
+            "primaryAction": {
+                "kind": "repair" if not deep_ready else "export",
+                "target": "deep-experiment-suite",
+                "label": "修复深实验" if not deep_ready else "导出深实验包",
+                **({"questionId": first_missing_deep_question_id} if first_missing_deep_question_id else {}),
+            },
+        },
+        {
+            "key": "technical_proposal_pdf",
+            "label": "20 页以内技术方案 PDF",
+            "required": True,
+            "status": "blocked",
+            "detail": "尚无服务端确认的 PDF 提交包收据。",
+            "blocker": "technical_proposal_pdf_not_packaged",
+            "primaryAction": {
+                "kind": "inspect",
+                "target": "submission-package",
+                "label": "检查交付材料",
+            },
+        },
+        {
+            "key": "demo_video",
+            "label": "10 分钟以内演示视频",
+            "required": False,
+            "status": "optional",
+            "detail": "可选附件尚无服务端确认收据。",
+            "blocker": "",
+            "primaryAction": {
+                "kind": "inspect",
+                "target": "submission-package",
+                "label": "检查交付材料",
+            },
+        },
+        {
+            "key": "test_api",
+            "label": "稳定测试 API",
+            "required": True,
+            "status": "blocked",
+            "detail": "尚无可提交 API 入口与演练收据。",
+            "blocker": "test_api_not_packaged",
+            "primaryAction": {
+                "kind": "inspect",
+                "target": "submission-package",
+                "label": "检查交付材料",
+            },
+        },
+        {
+            "key": "source_code",
+            "label": "源码与复现说明",
+            "required": True,
+            "status": "blocked",
+            "detail": "尚无干净克隆复现与源码提交包收据。",
+            "blocker": "source_code_not_packaged",
+            "primaryAction": {
+                "kind": "inspect",
+                "target": "submission-package",
+                "label": "检查交付材料",
+            },
+        },
+    ]
+    blockers = [
+        {
+            "code": artifact["blocker"],
+            "label": artifact["label"],
+            "action": artifact["primaryAction"],
+        }
+        for artifact in artifacts
+        if artifact["required"] and artifact["status"] == "blocked"
+    ]
+    if direction_requirement.get("blocksSubmissionReady") is True:
+        blockers.append(
+            {
+                "code": "submission_direction_requirements_not_captured",
+                "label": "方向专属提交要求",
+                "action": {
+                    "kind": "repair",
+                    "target": "submission-requirements",
+                    "label": "重新核对提交要求",
+                },
+            }
+        )
+    required_artifacts = [artifact for artifact in artifacts if artifact["required"]]
+    ready_count = sum(1 for artifact in required_artifacts if artifact["status"] == "ready")
+    return {
+        "schemaVersion": SUBMISSION_READINESS_SCHEMA_VERSION,
+        "teamId": str(team_id),
+        "status": "ready" if not blockers else "blocked",
+        "readyCount": ready_count,
+        "requiredCount": len(required_artifacts),
+        "blockerCount": len(blockers),
+        "artifacts": artifacts,
+        "blockers": blockers,
+        "programSummary": {
+            "title": _text(program.get("title")),
+            "questionCount": required_count,
+            "approvedQuestionCount": approved_count,
+            "deepExperimentCount": required_deep_count or 2,
+            "approvedDeepExperimentCount": approved_deep_count,
         },
     }

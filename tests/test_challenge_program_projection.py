@@ -10,6 +10,7 @@ _MODULE = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_MODULE)
 build_challenge_program_projection = _MODULE.build_challenge_program_projection
 build_competition_program_projection = _MODULE.build_competition_program_projection
+build_challenge_submission_readiness = _MODULE.build_challenge_submission_readiness
 _COMPATIBILITY_CASE_REGISTRY = json.loads(
     (
         Path(__file__).parents[1]
@@ -415,3 +416,44 @@ def test_active_competition_projection_is_full_catalog_ab_and_deep_experiment_fa
     assert complete["fullCatalogResultSet"]["complete"] is True
     assert complete["allRequiredDeepExperimentsApproved"] is True
     assert complete["program"]["completed"] is True
+
+
+def test_submission_readiness_is_one_conservative_artifact_contract():
+    readiness = build_challenge_submission_readiness(
+        team_id="research-team",
+        competition_program_projection=build_competition_program_projection(question_run_summary={}),
+    )
+
+    assert readiness["status"] == "blocked"
+    assert [item["key"] for item in readiness["artifacts"]] == [
+        "full_catalog_results",
+        "deep_experiment_suite",
+        "technical_proposal_pdf",
+        "demo_video",
+        "test_api",
+        "source_code",
+    ]
+    assert readiness["artifacts"][0]["detail"] == "0/125 题已通过提交门。"
+    assert readiness["artifacts"][0]["primaryAction"]["questionId"] == "SCI-001"
+    assert readiness["artifacts"][1]["primaryAction"]["questionId"] == "SCI-091"
+    assert readiness["artifacts"][3]["status"] == "optional"
+    assert all("path" not in item and "id" not in item for item in readiness["artifacts"])
+    assert {item["code"] for item in readiness["blockers"]} >= {
+        "full_catalog_results_incomplete",
+        "deep_experiment_suite_incomplete",
+        "technical_proposal_pdf_not_packaged",
+        "test_api_not_packaged",
+        "source_code_not_packaged",
+        "submission_direction_requirements_not_captured",
+    }
+
+
+def test_submission_readiness_uses_first_unapproved_question_ids_from_projection():
+    projection = build_competition_program_projection(question_run_summary={
+        "completedQuestionIds": ["SCI-001", "SCI-091"],
+        "approvedDeepExperimentQuestionIds": ["SCI-091"],
+    })
+    readiness = build_challenge_submission_readiness(team_id="research-team", competition_program_projection=projection)
+
+    assert readiness["artifacts"][0]["primaryAction"]["questionId"] == "SCI-002"
+    assert readiness["artifacts"][1]["primaryAction"]["questionId"] == "SCI-096"
