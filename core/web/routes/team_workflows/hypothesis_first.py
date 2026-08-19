@@ -14,7 +14,7 @@ from typing import Any, NoReturn
 
 from fastapi import Query, status
 
-from core.research.workflow.contracts import ContractValidationError
+from core.research.workflow.contracts import ContractValidationError, scope_hash_for
 from core.web.services.team_service import TeamNotFoundError, TeamServiceError
 from core.web.services.team_workflow import (
     hypothesis_rounds,
@@ -67,6 +67,63 @@ from .hypothesis_first_models import (
 _HYPOTHESIS_FIRST_WORKFLOW = "hypothesis_first"
 _DEFAULT_BRANCH = "main"
 _OPERATOR_AGENT_ID = "operator"
+
+
+def _selection_scope(team_id: str, question_id: str) -> dict[str, str]:
+    """Derive the server-authoritative scope shared by context and latest reads."""
+    normalized_question_id = str(question_id or "").strip().upper()
+    registry = frozen_theme_registry()
+    theme_record = next(
+        (
+            record
+            for record in registry.values()
+            if str(record.get("questionId") or "").upper() == normalized_question_id
+        ),
+        None,
+    )
+    if theme_record is not None:
+        contract = resolve_theme_contract(
+            team_id,
+            theme_id=str(theme_record.get("themeId") or ""),
+            campaign_id=str(theme_record.get("campaignId") or ""),
+        )
+    else:
+        contract = resolve_theme_contract(
+            team_id,
+            theme_id=f"dev-{normalized_question_id.lower()}",
+            campaign_id="dev-campaign",
+        )
+    if contract.is_dev_theme():
+        mode = "dev"
+    elif contract.is_activated():
+        mode = "formal"
+    else:
+        mode = "platform"
+    return {
+        "program": str(contract.programId),
+        "theme": str(contract.themeId),
+        "campaign": str(contract.campaignId),
+        "question": normalized_question_id,
+        "branch": _DEFAULT_BRANCH,
+        "workflow": _HYPOTHESIS_FIRST_WORKFLOW,
+        "agentId": _OPERATOR_AGENT_ID,
+        "mode": mode,
+    }
+
+
+def _selection_read_scope(team_id: str, question_id: str) -> dict[str, str]:
+    scope = _selection_scope(team_id, question_id)
+    scope["scopeHash"] = scope_hash_for(
+        program=scope["program"],
+        theme=scope["theme"],
+        campaign=scope["campaign"],
+        question=scope["question"],
+        branch=scope["branch"],
+        workflow=scope["workflow"],
+        agent_id=scope["agentId"],
+        mode=scope["mode"],
+    )
+    return scope
 
 
 def _map_domain_error(action: str, team_id: str, exc: Exception) -> NoReturn:
@@ -161,6 +218,7 @@ def team_workflow_hypothesis_selection_latest(
         return hypothesis_selection.get_latest_hypothesis_selection(
             team_id,
             question_id,
+            scope=_selection_read_scope(team_id, question_id),
         )
     except _DOMAIN_ERRORS as exc:
         _map_domain_error("hypothesis_first.selection.latest", team_id, exc)
@@ -243,39 +301,27 @@ def team_workflow_hypothesis_selection_context(
             for item in ledger_candidates
         ]
 
-    registry = frozen_theme_registry()
-    theme_record = next(
-        (
-            record
-            for record in registry.values()
-            if str(record.get("questionId") or "").upper() == normalized_question_id
-        ),
-        None,
-    )
-    if theme_record is not None:
-        contract = resolve_theme_contract(
-            team_id,
-            theme_id=str(theme_record.get("themeId") or ""),
-            campaign_id=str(theme_record.get("campaignId") or ""),
-        )
-    else:
-        contract = resolve_theme_contract(
-            team_id,
-            theme_id=f"dev-{normalized_question_id.lower()}",
-            campaign_id="dev-campaign",
-        )
-    if contract.is_dev_theme():
-        mode = "dev"
-    elif contract.is_activated():
-        mode = "formal"
-    else:
-        mode = "platform"
+    scope = _selection_scope(team_id, normalized_question_id)
+    mode = scope["mode"]
 
     latest_selection: dict[str, Any] | None = None
     try:
         latest_selection = hypothesis_selection.get_latest_hypothesis_selection(
             team_id,
             normalized_question_id,
+            scope={
+                **scope,
+                "scopeHash": scope_hash_for(
+                    program=scope["program"],
+                    theme=scope["theme"],
+                    campaign=scope["campaign"],
+                    question=scope["question"],
+                    branch=scope["branch"],
+                    workflow=scope["workflow"],
+                    agent_id=scope["agentId"],
+                    mode=scope["mode"],
+                ),
+            },
         )["selection"]
     except hypothesis_selection.ResearchHypothesisSelectionNotFoundError:
         latest_selection = None
@@ -302,13 +348,8 @@ def team_workflow_hypothesis_selection_context(
         "teamId": team_id,
         "questionId": normalized_question_id,
         "scope": {
-            "program": contract.programId,
-            "theme": contract.themeId,
-            "campaign": contract.campaignId,
-            "question": normalized_question_id,
-            "branch": _DEFAULT_BRANCH,
-            "workflow": _HYPOTHESIS_FIRST_WORKFLOW,
-            "agentId": _OPERATOR_AGENT_ID,
+            key: scope[key]
+            for key in ("program", "theme", "campaign", "question", "branch", "workflow", "agentId")
         },
         "mode": mode,
         "candidates": candidates,

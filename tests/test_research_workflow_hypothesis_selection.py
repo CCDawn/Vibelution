@@ -123,6 +123,21 @@ def _selection(**overrides):
     return payload
 
 
+def _read_scope(**overrides):
+    scope = _scope(**overrides)
+    scope["scopeHash"] = scope_hash_for(
+        program=scope["program"],
+        theme=scope["theme"],
+        campaign=scope["campaign"],
+        question=scope["question"],
+        branch=scope["branch"],
+        workflow=scope["workflow"],
+        agent_id=scope["agentId"],
+        mode=scope["mode"],
+    )
+    return scope
+
+
 def test_record_single_selection_persists_append_only_record(tmp_path, monkeypatch):
     team_id = _team(tmp_path, monkeypatch)
     _patch_approved_question(monkeypatch)
@@ -152,7 +167,9 @@ def test_record_single_selection_persists_append_only_record(tmp_path, monkeypat
     assert listed["selectionCount"] == 1
     fetched = selections.get_hypothesis_selection(team_id, record["selectionId"])
     assert fetched["selection"]["selectionId"] == record["selectionId"]
-    latest = selections.get_latest_hypothesis_selection(team_id, "SCI-096")
+    latest = selections.get_latest_hypothesis_selection(
+        team_id, "SCI-096", scope=_read_scope()
+    )
     assert latest["selection"]["selectedCandidateIds"] == ["hyp-a"]
 
 
@@ -378,7 +395,9 @@ def test_reselection_chains_and_latest_tracks_newest(tmp_path, monkeypatch):
 
     assert first["previousSelectionId"] == ""
     assert second["previousSelectionId"] == first["selectionId"]
-    latest = selections.get_latest_hypothesis_selection(team_id, "SCI-096")
+    latest = selections.get_latest_hypothesis_selection(
+        team_id, "SCI-096", scope=_read_scope()
+    )
     assert latest["selection"]["selectionId"] == second["selectionId"]
     assert latest["selection"]["selectedCandidateIds"] == ["hyp-b", "hyp-c"]
 
@@ -436,3 +455,53 @@ def test_contract_round_trip_and_defaults():
     assert parsed.previousSelectionId == ""
     assert parsed.selectedCandidateIds == ("hyp-a",)
     assert HypothesisSelectionRecord.from_dict(parsed.to_dict()) == parsed
+
+
+def test_latest_selection_requires_a_complete_scope_and_verified_scope_hash(tmp_path, monkeypatch):
+    team_id = _team(tmp_path, monkeypatch)
+    _patch_approved_question(monkeypatch)
+    selections.record_hypothesis_selection(team_id, _selection())
+
+    with pytest.raises(ContractValidationError, match="scope"):
+        selections.get_latest_hypothesis_selection(team_id, "SCI-096")
+
+    bad_scope = _read_scope()
+    bad_scope["scopeHash"] = "0" * 64
+    with pytest.raises(ContractValidationError, match="scopeHash"):
+        selections.get_latest_hypothesis_selection(
+            team_id, "SCI-096", scope=bad_scope
+        )
+
+
+def test_latest_selection_isolated_when_scopes_are_interleaved(tmp_path, monkeypatch):
+    team_id = _team(tmp_path, monkeypatch)
+    _patch_approved_question(monkeypatch)
+    scope_a = _scope(branch="branch-a", agentId="agent-a")
+    scope_b = _scope(branch="branch-b", agentId="agent-b")
+    selections.record_hypothesis_selection(
+        team_id,
+        _selection(**scope_a, selectedCandidateIds=["hyp-a"]),
+    )
+    selections.record_hypothesis_selection(
+        team_id,
+        _selection(**scope_b, selectedCandidateIds=["hyp-b"]),
+    )
+    selections.record_hypothesis_selection(
+        team_id,
+        _selection(
+            **scope_a,
+            selectedCandidateIds=["hyp-c"],
+            previousSelectionId=selections.get_latest_hypothesis_selection(
+                team_id, "SCI-096", scope=_read_scope(**scope_a)
+            )["selection"]["selectionId"],
+        ),
+    )
+
+    latest_a = selections.get_latest_hypothesis_selection(
+        team_id, "SCI-096", scope=_read_scope(**scope_a)
+    )
+    latest_b = selections.get_latest_hypothesis_selection(
+        team_id, "SCI-096", scope=_read_scope(**scope_b)
+    )
+    assert latest_a["selection"]["selectedCandidateIds"] == ["hyp-c"]
+    assert latest_b["selection"]["selectedCandidateIds"] == ["hyp-b"]
