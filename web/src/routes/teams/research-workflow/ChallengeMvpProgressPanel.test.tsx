@@ -78,6 +78,7 @@ const mutationState = vi.hoisted(() => {
     runDevReadiness: blank(),
     runDev1: blank(),
     runDev5: blank(),
+    inspectSubmissionDeliverables: blank(),
     default: blank(),
   };
   return {
@@ -118,7 +119,7 @@ vi.mock("@tanstack/react-query", () => ({
         void (async () => {
           Object.assign(mock, { isPending: true, isIdle: false, isError: false, isSuccess: false });
           mock.mutate(variables);
-          const onSuccessResult = options?.onSuccess?.({}, variables, undefined);
+          const onSuccessResult = options?.onSuccess?.(mock.data ?? {}, variables, undefined);
           await onSuccessResult;
           Object.assign(mock, { isPending: false, isIdle: false, isSuccess: true });
         })();
@@ -470,14 +471,14 @@ function submissionReadiness() {
     requiredCount: 5,
     blockerCount: 5,
     artifacts: [
-      { key: "full_catalog_results", label: "125 题结果包", required: true, status: "blocked", detail: "0/125 题已通过提交门。", blocker: "full_catalog_results_incomplete", primaryAction: { kind: "repair", target: "full-catalog-results", label: "修复缺失结果" } },
-      { key: "deep_experiment_suite", label: "两个深实验包", required: true, status: "blocked", detail: "0/2 个独立深实验已通过提交门。", blocker: "deep_experiment_suite_incomplete", primaryAction: { kind: "repair", target: "deep-experiment-suite", label: "修复深实验" } },
-      { key: "technical_proposal_pdf", label: "20 页以内技术方案 PDF", required: true, status: "blocked", detail: "尚无服务端确认的 PDF 提交包收据。", blocker: "technical_proposal_pdf_not_packaged", primaryAction: { kind: "export", target: "submission-package", label: "生成提交清单" } },
-      { key: "demo_video", label: "10 分钟以内演示视频", required: false, status: "optional", detail: "可选附件尚无服务端确认收据。", blocker: "", primaryAction: { kind: "export", target: "submission-package", label: "查看交付清单" } },
-      { key: "test_api", label: "稳定测试 API", required: true, status: "blocked", detail: "尚无可提交 API 入口与演练收据。", blocker: "test_api_not_packaged", primaryAction: { kind: "export", target: "submission-package", label: "生成提交清单" } },
-      { key: "source_code", label: "源码与复现说明", required: true, status: "blocked", detail: "尚无干净克隆复现与源码提交包收据。", blocker: "source_code_not_packaged", primaryAction: { kind: "export", target: "submission-package", label: "生成提交清单" } },
+      { key: "full_catalog_results", label: "125 题结果包", required: true, status: "blocked", detail: "0/125 题已通过提交门。", blocker: "full_catalog_results_incomplete", primaryAction: { kind: "repair", target: "full-catalog-results", label: "修复缺失结果", questionId: "SCI-042" } },
+      { key: "deep_experiment_suite", label: "两个深实验包", required: true, status: "blocked", detail: "0/2 个独立深实验已通过提交门。", blocker: "deep_experiment_suite_incomplete", primaryAction: { kind: "repair", target: "deep-experiment-suite", label: "修复深实验", questionId: "SCI-097" } },
+      { key: "technical_proposal_pdf", label: "20 页以内技术方案 PDF", required: true, status: "blocked", detail: "尚无服务端确认的 PDF 提交包收据。", blocker: "technical_proposal_pdf_not_packaged", primaryAction: { kind: "inspect", target: "submission-package", label: "检查交付材料" } },
+      { key: "demo_video", label: "10 分钟以内演示视频", required: false, status: "optional", detail: "可选附件尚无服务端确认收据。", blocker: "", primaryAction: { kind: "inspect", target: "submission-package", label: "检查交付材料" } },
+      { key: "test_api", label: "稳定测试 API", required: true, status: "blocked", detail: "尚无可提交 API 入口与演练收据。", blocker: "test_api_not_packaged", primaryAction: { kind: "inspect", target: "submission-package", label: "检查交付材料" } },
+      { key: "source_code", label: "源码与复现说明", required: true, status: "blocked", detail: "尚无干净克隆复现与源码提交包收据。", blocker: "source_code_not_packaged", primaryAction: { kind: "inspect", target: "submission-package", label: "检查交付材料" } },
     ],
-    blockers: [{ code: "full_catalog_results_incomplete", label: "125 题结果包", action: { kind: "repair", target: "full-catalog-results", label: "修复缺失结果" } }],
+    blockers: [{ code: "full_catalog_results_incomplete", label: "125 题结果包", action: { kind: "repair", target: "full-catalog-results", label: "修复缺失结果", questionId: "SCI-042" } }],
     programSummary: { title: "Challenge Cup", questionCount: 125, approvedQuestionCount: 0, deepExperimentCount: 2, approvedDeepExperimentCount: 0 },
   };
 }
@@ -516,6 +517,57 @@ describe("ChallengeMvpProgressPanel", () => {
     expect(markup).toContain("查看阻塞项");
     expect(markup).not.toContain("themeId");
     expect(markup).not.toContain("campaignId");
+  });
+
+  it("opens the canonical first missing question instead of a hard-coded question", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const onOpenQuestion = vi.fn();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={onOpenQuestion} />);
+    });
+    const button = findButton(container, "修复缺失结果");
+    expect(button).toBeTruthy();
+    await act(async () => {
+      button!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(onOpenQuestion).toHaveBeenCalledWith("SCI-042");
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("localizes action and artifact labels without rendering backend labels", () => {
+    const markup = renderToStaticMarkup(
+      <ChallengeMvpProgressPanel teamId="team-1" lang="en" onOpenQuestion={vi.fn()} />,
+    );
+    expect(markup).toContain("125-question results");
+    expect(markup).toContain("Fix missing results");
+    expect(markup).not.toContain("125 题结果包");
+    expect(markup).not.toContain("修复缺失结果");
+  });
+
+  it("reports the returned deliverables inspection status and blocker count", async () => {
+    const readiness = submissionReadiness();
+    readiness.blockers = [{ code: "technical_proposal_pdf_not_packaged", label: "后端标签", action: { kind: "inspect", target: "submission-package", label: "后端动作" } }];
+    setSubmissionReadiness(readiness);
+    const inspectionSpy = vi.fn();
+    mutationState.set("inspectSubmissionDeliverables", {
+      mutate: inspectionSpy,
+      data: { status: "blocked", blockers: [{ code: "one", message: "one" }, { code: "two", message: "two" }] },
+    });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />));
+    const button = findButton(container, "检查交付材料");
+    expect(button).toBeTruthy();
+    await act(async () => button!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(inspectionSpy).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain("交付材料检查：有阻塞，2 项阻塞");
+    await act(async () => root.unmount());
+    container.remove();
   });
 
   it("renders Program v2, question rows, and real DEV readiness/boundary data", () => {

@@ -108,11 +108,13 @@ def test_get_challenge_submission_readiness_returns_single_typed_artifact_list(m
                         "kind": "repair",
                         "target": "full-catalog-results",
                         "label": "修复缺失结果",
+                        "questionId": "SCI-042",
                     },
                 }
             ],
-            "blockers": [],
-            "programSummary": {},
+            "blockers": [{"code": "full_catalog_results_incomplete", "label": "ignored", "action": {"kind": "repair", "target": "full-catalog-results", "label": "ignored"}}],
+            "programSummary": {"title": "ignored", "questionCount": 125, "approvedQuestionCount": 0, "deepExperimentCount": 2, "approvedDeepExperimentCount": 0},
+            "unexpected": "ignored by bounded response model",
         },
     )
 
@@ -122,3 +124,6 @@ def test_get_challenge_submission_readiness_returns_single_typed_artifact_list(m
 
     assert response.status_code == 200
     assert response.json()["artifacts"][0]["primaryAction"]["kind"] == "repair"
+    assert response.json()["artifacts"][0]["primaryAction"]["questionId"] == "SCI-042"
+    assert response.json()["blockers"][0]["code"] == "full_catalog_results_incomplete"
+    assert "unexpected" not in response.json()

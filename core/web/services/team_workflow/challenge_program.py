@@ -643,8 +643,32 @@ def build_challenge_submission_readiness(
     approved_count = int(result_set.get("approvedQuestionCount") or 0)
     required_count = int(result_set.get("requiredApprovedQuestionCount") or CATALOG_QUESTION_COUNT)
     full_catalog_ready = result_set.get("complete") is True
+    approved_question_ids = {
+        _text(item)
+        for item in result_set.get("approvedQuestionIds") or []
+        if _text(item)
+    }
+    catalog_questions = _mapping(projection.get("questionCatalog")).get("questions") or []
+    first_missing_question_id = next(
+        (
+            _text(item.get("questionId"))
+            for item in catalog_questions
+            if isinstance(item, dict)
+            and _text(item.get("questionId"))
+            and _text(item.get("questionId")) not in approved_question_ids
+        ),
+        "",
+    )
     approved_deep_count = sum(1 for item in deep_experiments if item.get("approved") is True)
     required_deep_count = sum(1 for item in deep_experiments if item.get("required") is True)
+    first_missing_deep_question_id = next(
+        (
+            _text(item.get("questionId"))
+            for item in deep_experiments
+            if item.get("required") is True and item.get("approved") is not True and _text(item.get("questionId"))
+        ),
+        "",
+    )
     deep_ready = bool(deep_experiments) and all(
         item.get("required") is True and item.get("approved") is True
         for item in deep_experiments
@@ -662,6 +686,7 @@ def build_challenge_submission_readiness(
                 "kind": "repair" if not full_catalog_ready else "export",
                 "target": "full-catalog-results",
                 "label": "修复缺失结果" if not full_catalog_ready else "导出结果包",
+                **({"questionId": first_missing_question_id} if first_missing_question_id else {}),
             },
         },
         {
@@ -675,6 +700,7 @@ def build_challenge_submission_readiness(
                 "kind": "repair" if not deep_ready else "export",
                 "target": "deep-experiment-suite",
                 "label": "修复深实验" if not deep_ready else "导出深实验包",
+                **({"questionId": first_missing_deep_question_id} if first_missing_deep_question_id else {}),
             },
         },
         {
@@ -685,9 +711,9 @@ def build_challenge_submission_readiness(
             "detail": "尚无服务端确认的 PDF 提交包收据。",
             "blocker": "technical_proposal_pdf_not_packaged",
             "primaryAction": {
-                "kind": "export",
+                "kind": "inspect",
                 "target": "submission-package",
-                "label": "生成提交清单",
+                "label": "检查交付材料",
             },
         },
         {
@@ -698,9 +724,9 @@ def build_challenge_submission_readiness(
             "detail": "可选附件尚无服务端确认收据。",
             "blocker": "",
             "primaryAction": {
-                "kind": "export",
+                "kind": "inspect",
                 "target": "submission-package",
-                "label": "查看交付清单",
+                "label": "检查交付材料",
             },
         },
         {
@@ -711,9 +737,9 @@ def build_challenge_submission_readiness(
             "detail": "尚无可提交 API 入口与演练收据。",
             "blocker": "test_api_not_packaged",
             "primaryAction": {
-                "kind": "export",
+                "kind": "inspect",
                 "target": "submission-package",
-                "label": "生成提交清单",
+                "label": "检查交付材料",
             },
         },
         {
@@ -724,9 +750,9 @@ def build_challenge_submission_readiness(
             "detail": "尚无干净克隆复现与源码提交包收据。",
             "blocker": "source_code_not_packaged",
             "primaryAction": {
-                "kind": "export",
+                "kind": "inspect",
                 "target": "submission-package",
-                "label": "生成提交清单",
+                "label": "检查交付材料",
             },
         },
     ]

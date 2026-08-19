@@ -106,9 +106,16 @@ export type CompetitionProgramProjection = {
 };
 
 export type ChallengeSubmissionReadinessAction = {
-  kind: "repair" | "export" | string;
+  kind: "repair" | "inspect" | "export" | string;
   target: string;
   label: string;
+  questionId?: string;
+};
+
+export type ChallengeDeliverablesInspection = {
+  status: "ready" | "blocked" | string;
+  blockers: Array<{ code: string; message: string }>;
+  deliverableManifest?: { status: "ready" | "blocked" | string };
 };
 
 export type ChallengeSubmissionReadinessArtifact = {

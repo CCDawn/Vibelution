@@ -434,6 +434,8 @@ def test_submission_readiness_is_one_conservative_artifact_contract():
         "source_code",
     ]
     assert readiness["artifacts"][0]["detail"] == "0/125 题已通过提交门。"
+    assert readiness["artifacts"][0]["primaryAction"]["questionId"] == "SCI-001"
+    assert readiness["artifacts"][1]["primaryAction"]["questionId"] == "SCI-091"
     assert readiness["artifacts"][3]["status"] == "optional"
     assert all("path" not in item and "id" not in item for item in readiness["artifacts"])
     assert {item["code"] for item in readiness["blockers"]} >= {
@@ -444,3 +446,14 @@ def test_submission_readiness_is_one_conservative_artifact_contract():
         "source_code_not_packaged",
         "submission_direction_requirements_not_captured",
     }
+
+
+def test_submission_readiness_uses_first_unapproved_question_ids_from_projection():
+    projection = build_competition_program_projection(question_run_summary={
+        "completedQuestionIds": ["SCI-001", "SCI-091"],
+        "approvedDeepExperimentQuestionIds": ["SCI-091"],
+    })
+    readiness = build_challenge_submission_readiness(team_id="research-team", competition_program_projection=projection)
+
+    assert readiness["artifacts"][0]["primaryAction"]["questionId"] == "SCI-002"
+    assert readiness["artifacts"][1]["primaryAction"]["questionId"] == "SCI-096"

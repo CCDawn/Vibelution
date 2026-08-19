@@ -31,6 +31,7 @@ import {
 } from "../../../api/teamExperiment";
 import { exportResearchDeliverables } from "../../../api/teamResearchOps";
 import type {
+  ChallengeDeliverablesInspection,
   ChallengeSubmissionReadiness,
   ChallengeCupDevBatchProjection,
   ChallengeCupDevReadinessProjection,
@@ -57,6 +58,38 @@ export type ChallengeMvpProgressPanelProps = {
 
 function errorMessage(reason: unknown): string {
   return reason instanceof Error ? reason.message : String(reason || "unavailable");
+}
+
+const submissionArtifactLabels: Record<string, { zh: string; en: string }> = {
+  full_catalog_results: { zh: "125 题结果包", en: "125-question results" },
+  deep_experiment_suite: { zh: "两个深实验包", en: "Two deep experiment packages" },
+  technical_proposal_pdf: { zh: "20 页以内技术方案 PDF", en: "Technical proposal PDF (20 pages max)" },
+  demo_video: { zh: "10 分钟以内演示视频", en: "Demo video (10 minutes max)" },
+  test_api: { zh: "稳定测试 API", en: "Stable test API" },
+  source_code: { zh: "源码与复现说明", en: "Source and reproduction notes" },
+};
+
+const submissionBlockerLabels: Record<string, { zh: string; en: string }> = {
+  full_catalog_results_incomplete: { zh: "125 题结果仍有未完成项", en: "Some 125-question results are incomplete" },
+  deep_experiment_suite_incomplete: { zh: "深实验仍有未完成项", en: "Some deep experiments are incomplete" },
+  technical_proposal_pdf_not_packaged: { zh: "技术方案 PDF 尚未确认", en: "Technical proposal PDF is not confirmed" },
+  test_api_not_packaged: { zh: "测试 API 尚未确认", en: "Test API is not confirmed" },
+  source_code_not_packaged: { zh: "源码提交包尚未确认", en: "Source package is not confirmed" },
+  submission_direction_requirements_not_captured: { zh: "方向专属提交要求尚未核对", en: "Direction-specific requirements are not confirmed" },
+};
+
+function submissionActionLabel(action: { kind: string; target: string }, zh: boolean): string {
+  if (action.kind === "repair" && action.target === "full-catalog-results") return zh ? "修复缺失结果" : "Fix missing results";
+  if (action.kind === "repair" && action.target === "deep-experiment-suite") return zh ? "修复深实验" : "Fix deep experiment";
+  return zh ? "检查交付材料" : "Inspect deliverables";
+}
+
+function localizedArtifactLabel(key: string, fallback: string, zh: boolean): string {
+  return submissionArtifactLabels[key]?.[zh ? "zh" : "en"] ?? (key || fallback);
+}
+
+function localizedBlockerLabel(code: string, fallback: string, zh: boolean): string {
+  return submissionBlockerLabels[code]?.[zh ? "zh" : "en"] ?? (code || fallback);
 }
 
 function readinessLabel(
@@ -199,9 +232,13 @@ export function ChallengeMvpProgressPanel({
     mutationFn: repairDev5,
     onSuccess: () => refreshDevControls(),
   });
+  const [deliverablesInspection, setDeliverablesInspection] = useState<ChallengeDeliverablesInspection | null>(null);
+  async function inspectSubmissionDeliverables(): Promise<ChallengeDeliverablesInspection> {
+    return exportResearchDeliverables<ChallengeDeliverablesInspection>(teamId, { requestedByAgent: "Challenge Cup Delivery" });
+  }
   const exportMutation = useMutation({
-    mutationFn: () => exportResearchDeliverables(teamId, { requestedByAgent: "Challenge Cup Delivery" }),
-    onSuccess: () => void submissionReadinessQuery.refetch(),
+    mutationFn: inspectSubmissionDeliverables,
+    onSuccess: (result) => setDeliverablesInspection(result),
   });
 
   const program = experimentStatusQuery.data?.competitionProgramProjection;
@@ -232,21 +269,17 @@ export function ChallengeMvpProgressPanel({
   const submissionReadiness = submissionReadinessQuery.data;
   const submissionBlocker = submissionReadiness?.blockers[0];
   const submissionAction = submissionBlocker?.action ?? {
-    kind: "export",
+    kind: "inspect",
     target: "submission-package",
     label: zh ? "导出提交清单" : "Export submission checklist",
   };
   const submissionActionPending = exportMutation.isPending || submissionReadinessQuery.isPending;
   const runSubmissionAction = () => {
-    if (submissionAction.kind === "repair" && submissionAction.target === "full-catalog-results") {
-      onOpenQuestion("SCI-001");
+    if (submissionAction.kind === "repair" && submissionAction.questionId) {
+      onOpenQuestion(submissionAction.questionId);
       return;
     }
-    if (submissionAction.kind === "repair" && submissionAction.target === "deep-experiment-suite") {
-      onOpenQuestion("SCI-091");
-      return;
-    }
-    exportMutation.mutate();
+    if (submissionAction.kind === "inspect" || submissionAction.kind === "export") exportMutation.mutate();
   };
 
   const programRetry = (
@@ -381,7 +414,7 @@ export function ChallengeMvpProgressPanel({
           <div className={styles.submissionGrid}>
             {submissionReadiness.artifacts.map((artifact) => (
               <div className={styles.submissionItem} key={artifact.key}>
-                <span className={styles.submissionItemLabel}>{artifact.label}</span>
+                <span className={styles.submissionItemLabel}>{localizedArtifactLabel(artifact.key, artifact.label, zh)}</span>
                 <VStatusChip tone={artifact.status === "ready" ? "success" : artifact.status === "optional" ? "neutral" : "warning"}>
                   {artifact.status === "ready" ? (zh ? "已就绪" : "Ready") : artifact.status === "optional" ? (zh ? "可选" : "Optional") : (zh ? "待处理" : "Blocked")}
                 </VStatusChip>
@@ -390,17 +423,24 @@ export function ChallengeMvpProgressPanel({
           </div>
           <div className={styles.submissionActionRow}>
             <VButton type="button" variant="primary" isPending={submissionActionPending} isDisabled={submissionActionPending} onClick={runSubmissionAction}>
-              {submissionAction.label}
+              {submissionActionLabel(submissionAction, zh)}
             </VButton>
             <VButton type="button" variant="ghost" onClick={() => void submissionReadinessQuery.refetch()}>
               {zh ? "刷新" : "Refresh"}
             </VButton>
           </div>
+          {deliverablesInspection ? (
+            <div className={styles.submissionSummary} role="status">
+              {zh
+                ? `交付材料检查：${deliverablesInspection.status === "ready" ? "可用" : "有阻塞"}，${deliverablesInspection.blockers.length} 项阻塞`
+                : `Deliverables inspection: ${deliverablesInspection.status === "ready" ? "ready" : "blocked"}, ${deliverablesInspection.blockers.length} blockers`}
+            </div>
+          ) : null}
           {submissionReadiness.blockers.length > 0 ? (
             <details className={styles.submissionDetails}>
               <summary>{zh ? "查看阻塞项" : "View blockers"}</summary>
               <ul className={styles.submissionBlockers}>
-                {submissionReadiness.blockers.map((blocker) => <li key={blocker.code}>{blocker.label}</li>)}
+                {submissionReadiness.blockers.map((blocker) => <li key={blocker.code}>{localizedBlockerLabel(blocker.code, blocker.label, zh)}</li>)}
               </ul>
             </details>
           ) : null}
