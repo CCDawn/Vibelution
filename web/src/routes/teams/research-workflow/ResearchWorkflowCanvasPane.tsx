@@ -1,9 +1,14 @@
+import { memo } from "react";
+
 import type { WorkflowLayoutInput } from "../../../components/vui";
 import { VStateSurface, VWorkflowCanvas } from "../../../components/vui";
 import { useShellI18n } from "../../../i18n/useShellI18n";
 import styles from "./ResearchWorkflowCanvasPane.styles";
 
-export function ResearchWorkflowCanvasPane(props: {
+// Memoized: the canvas subtree is expensive (ELK layout + node rendering) and
+// must not re-render on unrelated workspace polls; graph identity is already
+// stabilized by useMemo in ResearchProcessWorkspace.
+export const ResearchWorkflowCanvasPane = memo(function ResearchWorkflowCanvasPane(props: {
   graph: WorkflowLayoutInput | null;
   selectedNodeId: string | null;
   runtimeCurrentNodeIds: string[];
@@ -48,4 +53,4 @@ export function ResearchWorkflowCanvasPane(props: {
       </div>
     </div>
   );
-}
+});

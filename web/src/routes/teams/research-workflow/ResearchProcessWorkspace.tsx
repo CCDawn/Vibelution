@@ -31,6 +31,10 @@ export type ResearchProcessWorkspaceProps = {
   linkedChatRoomId?: string;
 };
 
+// Stable identity so the memoized canvas pane does not re-render when no run
+// projection is loaded yet.
+const EMPTY_RUNTIME_NODE_IDS: string[] = [];
+
 export function ResearchProcessWorkspace({
   teamId,
   teamName = "",
@@ -151,7 +155,7 @@ export function ResearchProcessWorkspace({
           <ResearchWorkflowCanvasPane
             graph={graph}
             selectedNodeId={location.selectedNodeId}
-            runtimeCurrentNodeIds={runState.projection?.run.runtimeCurrentNodeIds ?? []}
+            runtimeCurrentNodeIds={runState.projection?.run.runtimeCurrentNodeIds ?? EMPTY_RUNTIME_NODE_IDS}
             error={displayError}
             onSelectNode={location.selectNode}
           />
