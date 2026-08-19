@@ -187,11 +187,11 @@ describe("ResearchRunLaunchPanel", () => {
     queryClientMock.invalidateQueries.mockReset();
   });
 
-  it("waits for the canonical launch list instead of exposing manual contract fields", () => {
+  it("waits for the catalog instead of exposing manual contract fields", () => {
     Object.assign(queryState.current, { isPending: true });
     const markup = renderPanel();
 
-    expect(markup).toContain("加载可启动题目");
+    expect(markup).toContain("加载 125 题目录");
     expect(markup).not.toContain("高级运行合同");
     expect(markup).not.toContain("研究简报 Hash");
     expect(markup).not.toContain("数据集引用");
@@ -207,77 +207,161 @@ describe("ResearchRunLaunchPanel", () => {
     });
     const markup = renderPanel();
 
-    expect(markup).toContain("题目加载失败");
-    expect(markup).toContain("暂时无法读取题目审核结果");
+    expect(markup).toContain("题目目录加载失败");
+    expect(markup).toContain("暂时无法读取 125 题目录");
     expect(markup).toContain("重试");
     expect(markup).toContain("技术细节");
     expect(markup).toContain("<details");
-    // The raw backend message only survives inside the collapsed details.
     expect(markup).toContain("TypeError: fetch failed at /api/launch-options");
   });
 
-  it("keeps experiments visible when the approved-question list is empty", () => {
-    Object.assign(queryState.current, { data: launchOptions({ questions: [] }) });
-    const markup = renderPanel();
-
-    expect(markup).not.toContain("暂无可启动题目");
-    expect(markup).toContain("选择深度实验");
-    expect(markup).toContain("创建运行");
-  });
-
-  it("starts with the explicit empty experiment state and never auto-selects", () => {
+  it("lists catalog questions without requiring prior approval", () => {
     Object.assign(queryState.current, {
       data: launchOptions({
         questions: [
           {
-            questionId: "SCI-091",
-            title: "GPU 算子实验",
-            scope: "scope",
+            questionId: "SCI-003",
+            title: "Is the Riemann hypothesis true?",
+            scope: "mathematical_sciences",
+            domain: "mathematical_sciences",
             catalogId: "science-125-questions-2021",
-            reviewRunId: "stage1-sci-091-v1",
-            artifactSha256: "b".repeat(64),
+            reviewRunId: "",
+            artifactSha256: "",
+            source: "catalog",
+            launchable: true,
           },
         ],
+        experiments: [],
       }),
     });
     const markup = renderPanel();
 
-    expect(markup).toContain("不选择深度实验");
-    expect(markup).toContain("不选择已审核题目");
-    expect(markup).toContain("选择深度实验");
+    expect(markup).toContain("选择题目并开始实验");
+    expect(markup).toContain("SCI-003");
+    expect(markup).toContain("开始实验");
+    expect(markup).not.toContain("选择深度实验");
     expect(markup).not.toContain("激活正式 Campaign");
-    expect(markup).not.toContain("EXP-GPU-OPERATOR-001");
   });
 
-  it("renders the empty state only when both questions and experiments are absent", () => {
+  it("shows the selected question checkpoint immediately", () => {
+    Object.assign(queryState.current, {
+      data: launchOptions({
+        questions: [
+          {
+            questionId: "SCI-003",
+            title: "Is the Riemann hypothesis true?",
+            scope: "mathematical_sciences",
+            domain: "mathematical_sciences",
+            catalogId: "science-125-questions-2021",
+            reviewRunId: "",
+            artifactSha256: "",
+            source: "catalog",
+            launchable: true,
+            checkpoint: {
+              runId: "run-3",
+              status: "waiting_human",
+              currentNodeId: "protocol_design",
+              currentNodeLabel: "协议设计",
+              completedCount: 6,
+              totalSteps: 16,
+              resumable: true,
+            },
+          },
+        ],
+        experiments: [],
+      }),
+    });
+    const markup = renderToStaticMarkup(
+      <ResearchRunLaunchPanel
+        teamId="team-1"
+        busy={false}
+        initialQuestionId="SCI-003"
+        onSubmit={async () => undefined}
+        onCancel={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain("当前 checkpoint：协议设计");
+    expect(markup).toContain("6/16");
+    expect(markup).toContain("继续运行");
+  });
+
+  it("shows checkpoint progress and continues the existing run", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const onContinueRun = vi.fn();
+    Object.assign(queryState.current, {
+      data: launchOptions({
+        questions: [
+          {
+            questionId: "SCI-003",
+            title: "Is the Riemann hypothesis true?",
+            scope: "mathematical_sciences",
+            domain: "mathematical_sciences",
+            catalogId: "science-125-questions-2021",
+            reviewRunId: "",
+            artifactSha256: "",
+            source: "catalog",
+            launchable: true,
+            checkpoint: {
+              runId: "run-3",
+              status: "waiting_human",
+              currentNodeId: "protocol_design",
+              currentNodeLabel: "协议设计",
+              completedCount: 7,
+              totalSteps: 16,
+              resumable: true,
+            },
+          },
+        ],
+        experiments: [],
+      }),
+    });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <ResearchRunLaunchPanel
+          teamId="team-1"
+          busy={false}
+          onSubmit={async () => undefined}
+          onCancel={() => undefined}
+          onContinueRun={onContinueRun}
+        />,
+      );
+    });
+
+    const trigger = container.querySelector('[aria-label="选择 125 题"]') as HTMLElement | null;
+    expect(trigger).toBeTruthy();
+    const options = await openExperimentSelect(trigger!);
+    const questionOption = Array.from(options).find((option) => option.textContent?.includes("SCI-003")) as HTMLElement | undefined;
+    expect(questionOption).toBeTruthy();
+    await act(async () => {
+      questionOption!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(container.textContent).toContain("当前 checkpoint：协议设计");
+    expect(container.textContent).toContain("7/16");
+    const continueButton = findButton(container, "继续运行");
+    expect(continueButton).toBeTruthy();
+    await act(async () => {
+      continueButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(onContinueRun).toHaveBeenCalledWith({ runId: "run-3", nodeId: "protocol_design" });
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it("renders the empty catalog state when no questions are available", () => {
     Object.assign(queryState.current, {
       data: launchOptions({ questions: [], experiments: [] }),
     });
     const markup = renderPanel();
 
-    expect(markup).toContain("暂无可启动题目");
-  });
-
-  it("renders the experiment selector before the approved-question selector", () => {
-    Object.assign(queryState.current, {
-      data: launchOptions({
-        questions: [
-          {
-            questionId: "SCI-042",
-            title: "Ordinary approved question",
-            scope: "scope",
-            catalogId: "science-125-questions-2021",
-            reviewRunId: "stage1-sci-042-v1",
-            artifactSha256: "a".repeat(64),
-          },
-        ],
-      }),
-    });
-    const markup = renderPanel();
-
-    expect(markup).toContain("选择深度实验");
-    expect(markup).toContain("选择已审核题目");
-    expect(markup.indexOf("选择深度实验")).toBeLessThan(markup.indexOf("选择已审核题目"));
+    expect(markup).toContain("暂无题目目录");
   });
 
   it("shows activation CTA and next action when the experiment may be activated", () => {
@@ -465,83 +549,5 @@ describe("ResearchRunLaunchPanel", () => {
     expect(
       isLaunchBlockedByExperiment([deep], "SCI-091", "EXP-GPU-OPERATOR-001"),
     ).toBe(false);
-  });
-
-  it("activates a deep experiment through the rendered panel and invalidates launch options", async () => {
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-    Object.assign(queryState.current, {
-      data: launchOptions({
-        questions: [
-          {
-            questionId: "SCI-091",
-            title: "GPU 算子实验",
-            scope: "scope",
-            catalogId: "science-125-questions-2021",
-            reviewRunId: "stage1-sci-091-v1",
-            artifactSha256: "b".repeat(64),
-          },
-        ],
-      }),
-    });
-
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-
-    await act(async () => {
-      root.render(
-        <ResearchRunLaunchPanel
-          teamId="team-1"
-          busy={false}
-          onSubmit={async () => undefined}
-          onCancel={() => undefined}
-        />,
-      );
-    });
-
-    expect(container.textContent).toContain("不选择深度实验");
-    expect(container.textContent).not.toContain("激活正式 Campaign");
-
-    const experimentTrigger = container.querySelector(
-      '[aria-label="选择深度实验"]',
-    ) as HTMLButtonElement | null;
-    expect(experimentTrigger).toBeTruthy();
-    const options = await openExperimentSelect(experimentTrigger!);
-
-    const experimentOption = Array.from(options)
-      .find((option) => option.textContent?.includes("EXP-GPU-OPERATOR-001")) as HTMLElement | undefined;
-    expect(experimentOption).toBeTruthy();
-    await act(async () => {
-      experimentOption!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-
-    const activateButton = findButton(container, "激活正式 Campaign");
-    expect(activateButton).toBeTruthy();
-    await act(async () => {
-      activateButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-
-    const confirmButton = findButton(document.body, "确认激活");
-    expect(confirmButton).toBeTruthy();
-    await act(async () => {
-      confirmButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-
-    expect(queryClientMock.invalidateQueries).toHaveBeenCalledWith({
-      queryKey: [
-        "research-workflow",
-        "challenge-cup-research",
-        "team-1",
-        "launch-options",
-      ],
-    });
-    expect(mutationState.get("default").isSuccess).toBe(true);
-    expect(container.textContent).toContain("EXP-GPU-OPERATOR-001");
-    expect(document.body.textContent).not.toContain("确认激活");
-
-    await act(async () => {
-      root.unmount();
-    });
-    container.remove();
   });
 });

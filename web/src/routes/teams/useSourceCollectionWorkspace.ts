@@ -53,6 +53,44 @@ const EMPTY_OUTPUT_DRAFT: SourceCollectionOutputDraft = {
   notes: "",
 };
 
+// Panel expand/focus is a per-session UI preference, not layout memory (pane
+// sizes stay on WORKBENCH_LAYOUT_IDS) and not deep-link state, so it lives in
+// sessionStorage keyed by team.
+const SC_PANEL_STATE_STORAGE_PREFIX = "vibelution.sc-workspace-panels.";
+
+type SourceCollectionPanelStateSnapshot = {
+  expandedPanelId: string;
+  focusedPanelId: string;
+};
+
+export function readSourceCollectionPanelState(teamId: string): SourceCollectionPanelStateSnapshot | null {
+  if (!teamId || typeof window === "undefined" || typeof window.sessionStorage === "undefined") {
+    return null;
+  }
+  try {
+    const raw = window.sessionStorage.getItem(SC_PANEL_STATE_STORAGE_PREFIX + teamId);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<SourceCollectionPanelStateSnapshot> | null;
+    return {
+      expandedPanelId: typeof parsed?.expandedPanelId === "string" ? parsed.expandedPanelId : "",
+      focusedPanelId: typeof parsed?.focusedPanelId === "string" ? parsed.focusedPanelId : "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function writeSourceCollectionPanelState(teamId: string, snapshot: SourceCollectionPanelStateSnapshot) {
+  if (!teamId || typeof window === "undefined" || typeof window.sessionStorage === "undefined") {
+    return;
+  }
+  try {
+    window.sessionStorage.setItem(SC_PANEL_STATE_STORAGE_PREFIX + teamId, JSON.stringify(snapshot));
+  } catch {
+    // Storage blocked/full: panel recovery is a convenience, never fatal.
+  }
+}
+
 export function useSourceCollectionWorkspace(input: UseSourceCollectionWorkspaceInput) {
   const {
     effectiveTeamId,
@@ -88,8 +126,12 @@ export function useSourceCollectionWorkspace(input: UseSourceCollectionWorkspace
     relations: 1,
     ingestion: 1,
   });
-  const [sourceCollectionExpandedPanelId, setSourceCollectionExpandedPanelId] = useState("");
-  const [sourceCollectionFocusedPanelId, setSourceCollectionFocusedPanelId] = useState("");
+  const [sourceCollectionExpandedPanelId, setSourceCollectionExpandedPanelId] = useState(
+    () => readSourceCollectionPanelState(effectiveTeamId)?.expandedPanelId ?? "",
+  );
+  const [sourceCollectionFocusedPanelId, setSourceCollectionFocusedPanelId] = useState(
+    () => readSourceCollectionPanelState(effectiveTeamId)?.focusedPanelId ?? "",
+  );
   const [sourceCollectionSourceFilter, setSourceCollectionSourceFilter] = useState<SourceCollectionSourceFilter>("all");
   const [selectedSourceCollectionCandidateId, setSelectedSourceCollectionCandidateId] = useState("");
 
@@ -99,6 +141,27 @@ export function useSourceCollectionWorkspace(input: UseSourceCollectionWorkspace
       setSelectedSourceCollectionStageId(initialStageId);
     }
   }, [initialStageId]);
+
+  // Hydrate panel expand/focus once the team id resolves (it may arrive async
+  // after refresh); only fill still-untouched state so user actions win.
+  const sourceCollectionPanelStateHydratedTeamRef = useRef("");
+  useEffect(() => {
+    if (!effectiveTeamId || sourceCollectionPanelStateHydratedTeamRef.current === effectiveTeamId) {
+      return;
+    }
+    sourceCollectionPanelStateHydratedTeamRef.current = effectiveTeamId;
+    const snapshot = readSourceCollectionPanelState(effectiveTeamId);
+    if (!snapshot) return;
+    setSourceCollectionExpandedPanelId((current) => current || snapshot.expandedPanelId);
+    setSourceCollectionFocusedPanelId((current) => current || snapshot.focusedPanelId);
+  }, [effectiveTeamId]);
+
+  useEffect(() => {
+    writeSourceCollectionPanelState(effectiveTeamId, {
+      expandedPanelId: sourceCollectionExpandedPanelId,
+      focusedPanelId: sourceCollectionFocusedPanelId,
+    });
+  }, [effectiveTeamId, sourceCollectionExpandedPanelId, sourceCollectionFocusedPanelId]);
 
   const sourceCollectionRunsQueryEnabled = resolveSourceCollectionRunsQueryEnabled({
     effectiveTeamId,

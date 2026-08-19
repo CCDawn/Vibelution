@@ -1,7 +1,9 @@
+import { memo, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
   VDenseTable,
+  VEmptyState,
   VRouteLinkButton,
   VStatusChip,
   type VDenseTableColumn,
@@ -37,17 +39,16 @@ type TeamSourceCollectionStageAgentsPanelProps = {
   layout?: "inline" | "stacked";
 };
 
-export function TeamSourceCollectionStageAgentsPanel({
+// Memoized: the table re-renders on every SC summary poll otherwise; agents
+// identity is stabilized by useMemo in the inject layer.
+export const TeamSourceCollectionStageAgentsPanel = memo(function TeamSourceCollectionStageAgentsPanel({
   lang,
   agents,
   layout = "inline",
 }: TeamSourceCollectionStageAgentsPanelProps) {
   const navigate = useNavigate();
-  if (!agents.length) {
-    return null;
-  }
   const isZh = lang === "zh";
-  const columns: Array<VDenseTableColumn<TeamSourceCollectionStageAgentCard>> = [
+  const columns = useMemo<Array<VDenseTableColumn<TeamSourceCollectionStageAgentCard>>>(() => [
     {
       id: "role",
       header: isZh ? "职责" : "Role",
@@ -87,7 +88,34 @@ export function TeamSourceCollectionStageAgentsPanel({
         <VStatusChip tone={statusTone(agent.tone)}>{agent.statusLabel}</VStatusChip>
       ),
     },
-  ];
+  ], [isZh]);
+
+  if (!agents.length) {
+    return (
+      <section
+        className={styles.sourceCollectionStageAgentPanel}
+        aria-label={isZh ? "当前步骤 Agent 配置" : "Current step Agent configuration"}
+        data-layout={layout}
+      >
+        <div className={styles.sourceCollectionStageAgentHeader}>
+          <strong>{isZh ? "Agent 配置" : "Agent configuration"}</strong>
+        </div>
+        <VEmptyState
+          align="start"
+          title={isZh ? "尚未绑定 Agent" : "No agents bound"}
+          actions={(
+            <VRouteLinkButton chrome="shell-nav" to="/agents">
+              {isZh ? "前往 Agent 中心绑定" : "Bind an Agent in Agent Center"}
+            </VRouteLinkButton>
+          )}
+        >
+          {isZh
+            ? "当前步骤没有可用的 Agent，绑定后才能运行。"
+            : "No agent is available for this step yet; bind one before running."}
+        </VEmptyState>
+      </section>
+    );
+  }
 
   return (
     <section
@@ -111,4 +139,4 @@ export function TeamSourceCollectionStageAgentsPanel({
       />
     </section>
   );
-}
+});

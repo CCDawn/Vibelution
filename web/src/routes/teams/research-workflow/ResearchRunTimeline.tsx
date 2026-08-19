@@ -2,6 +2,7 @@ import type { WorkflowRunRecord } from "../../../api/researchWorkflow";
 import type { WorkflowCanvasProjection } from "../../../api/types/researchWorkflow";
 import type { WorkflowEventEnvelope } from "../../../api/types/research-workflow/events";
 import { VEmptyState, VPanelHeader, VSurface } from "../../../components/vui";
+import { useShellI18n } from "../../../i18n/useShellI18n";
 import { buildResearchTimelineGroups } from "./researchWorkflowTimelineModel";
 import { ResearchWorkflowInsightsPanel } from "./ResearchWorkflowInsightsPanel";
 import { ResearchCriticalPathPanel } from "./ResearchCriticalPathPanel";
@@ -13,6 +14,8 @@ export function ResearchRunTimeline(props: {
   projection: WorkflowCanvasProjection | null;
   insights: ResearchWorkflowInsights;
 }) {
+  const { lang } = useShellI18n();
+  const isZh = lang === "zh";
   const groups = buildResearchTimelineGroups(
     (props.run?.events ?? []) as WorkflowEventEnvelope[],
     {
@@ -22,10 +25,10 @@ export function ResearchRunTimeline(props: {
   );
   return (
     <div className={styles.root}>
-      <ResearchCriticalPathPanel projection={props.projection} insights={props.insights} />
-      <ResearchWorkflowInsightsPanel insights={props.insights} />
+      <ResearchCriticalPathPanel projection={props.projection} insights={props.insights} lang={lang} />
+      <ResearchWorkflowInsightsPanel insights={props.insights} lang={lang} />
       <VSurface tone="panel" className={styles.surface}>
-        <VPanelHeader title="运行时间线" headingLevel={3} />
+        <VPanelHeader title={isZh ? "运行时间线" : "Run timeline"} headingLevel={3} />
         {groups.length ? (
           <ol className={styles.groups}>
             {groups.map((group) => (
@@ -36,7 +39,7 @@ export function ResearchRunTimeline(props: {
                     <li key={item.key} className={styles.item}>
                       <span>{item.label}</span>
                       <span className={styles.status} title={item.occurredAt || undefined}>
-                        {item.status || "完成"}
+                        {item.status || (isZh ? "完成" : "Done")}
                       </span>
                     </li>
                   ))}
@@ -45,7 +48,7 @@ export function ResearchRunTimeline(props: {
             ))}
           </ol>
         ) : (
-          <VEmptyState title="暂无运行事件" className={styles.empty} />
+          <VEmptyState title={isZh ? "暂无运行事件" : "No run events yet"} className={styles.empty} />
         )}
       </VSurface>
     </div>

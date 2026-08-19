@@ -15,6 +15,7 @@ import {
   VStateSurface,
   VSurface,
 } from "../../../components/vui";
+import { useShellI18n } from "../../../i18n/useShellI18n";
 import styles from "./EvidenceGraphView.styles";
 
 export type EvidenceGraphViewProps = {
@@ -45,9 +46,14 @@ type LoadState =
   | { kind: "ready"; graph: EvidenceGraphDto }
   | { kind: "error"; message: string };
 
-const KIND_LABELS: Record<string, string> = {
+const KIND_LABELS_ZH: Record<string, string> = {
   supports: "支持",
   derives: "推导",
+};
+
+const KIND_LABELS_EN: Record<string, string> = {
+  supports: "supports",
+  derives: "derives",
 };
 
 function nodeTitle(node: EvidenceGraphDto["nodes"][number]): string {
@@ -67,16 +73,18 @@ function nodeDetail(node: EvidenceGraphDto["nodes"][number]): string {
 }
 
 /** Pure graph-content renderer (separate from fetch state for testability). */
-export function EvidenceGraphContent({ graph }: { graph: EvidenceGraphDto }) {
+export function EvidenceGraphContent({ graph, lang = "zh" }: { graph: EvidenceGraphDto; lang?: "zh" | "en" }) {
+  const isZh = lang === "zh";
+  const kindLabels = isZh ? KIND_LABELS_ZH : KIND_LABELS_EN;
   const { nodes, edges } = graph;
   const byType = (type: string) => nodes.filter((node) => node.type === type);
   const sections: Array<{ key: string; label: string; items: EvidenceGraphDto["nodes"] }> = [
-    { key: "evidence", label: "证据", items: byType("evidence") },
-    { key: "claim", label: "声明", items: byType("claim") },
-    { key: "source", label: "来源", items: byType("source") },
+    { key: "evidence", label: isZh ? "证据" : "Evidence", items: byType("evidence") },
+    { key: "claim", label: isZh ? "声明" : "Claims", items: byType("claim") },
+    { key: "source", label: isZh ? "来源" : "Sources", items: byType("source") },
     {
       key: "other",
-      label: "其他节点",
+      label: isZh ? "其他节点" : "Other nodes",
       items: nodes.filter((n) => !["evidence", "claim", "source"].includes(n.type)),
     },
   ].filter((section) => section.items.length > 0);
@@ -85,12 +93,16 @@ export function EvidenceGraphContent({ graph }: { graph: EvidenceGraphDto }) {
     <>
       <div className={styles.header}>
         <div className={styles.eyebrow}>
-          证据关系图 · {nodes.length} 节点 / {edges.length} 关系
+          {isZh
+            ? `证据关系图 · ${nodes.length} 节点 / ${edges.length} 关系`
+            : `Evidence graph · ${nodes.length} nodes / ${edges.length} edges`}
         </div>
       </div>
       {nodes.length === 0 ? (
-        <VEmptyState title="暂无图数据" className={styles.empty}>
-          后端投影未返回节点；先完成证据卡与关系图产出。
+        <VEmptyState title={isZh ? "暂无图数据" : "No graph data"} className={styles.empty}>
+          {isZh
+            ? "后端投影未返回节点；先完成证据卡与关系图产出。"
+            : "The backend projection returned no nodes; produce evidence cards and the relation graph first."}
         </VEmptyState>
       ) : (
         <>
@@ -118,10 +130,10 @@ export function EvidenceGraphContent({ graph }: { graph: EvidenceGraphDto }) {
           ))}
           <div className={styles.section}>
             <div className={styles.eyebrow}>
-              关系
+              {isZh ? "关系" : "Edges"}
             </div>
             {edges.length === 0 ? (
-              <p className={styles.relationEmpty}>暂无关系边</p>
+              <p className={styles.relationEmpty}>{isZh ? "暂无关系边" : "No edges yet"}</p>
             ) : (
               <ul className={styles.list}>
                 {edges.map((edge) => (
@@ -129,7 +141,7 @@ export function EvidenceGraphContent({ graph }: { graph: EvidenceGraphDto }) {
                     key={`${edge.source}->${edge.target}:${edge.kind}`}
                     className={styles.relation}
                   >
-                    {edge.source} —{KIND_LABELS[edge.kind] ?? edge.kind}→ {edge.target}
+                    {edge.source} —{kindLabels[edge.kind] ?? edge.kind}→ {edge.target}
                   </li>
                 ))}
               </ul>
@@ -143,6 +155,8 @@ export function EvidenceGraphContent({ graph }: { graph: EvidenceGraphDto }) {
 
 export function EvidenceGraphView({ runId, teamId }: EvidenceGraphViewProps) {
   const [state, setState] = useState<LoadState>({ kind: "idle" });
+  const { lang } = useShellI18n();
+  const isZh = lang === "zh";
 
   const loadGraph = useCallback(() => {
     setState({ kind: "loading" });
@@ -166,15 +180,17 @@ export function EvidenceGraphView({ runId, teamId }: EvidenceGraphViewProps) {
     return (
       <VSurface tone="panel" className={styles.root} data-vui="evidence-graph-view">
         <VEmptyState
-          title="证据关系图"
+          title={isZh ? "证据关系图" : "Evidence graph"}
           className={styles.empty}
           actions={
             <VButton type="button" variant="secondary" onClick={() => void loadGraph()}>
-              生成证据图
+              {isZh ? "生成证据图" : "Build evidence graph"}
             </VButton>
           }
         >
-          从运行记录与证据记录投影证据/来源/声明关系。
+          {isZh
+            ? "从运行记录与证据记录投影证据/来源/声明关系。"
+            : "Projects evidence/source/claim relations from run and evidence records."}
         </VEmptyState>
       </VSurface>
     );
@@ -183,7 +199,7 @@ export function EvidenceGraphView({ runId, teamId }: EvidenceGraphViewProps) {
   if (state.kind === "loading") {
     return (
       <VSurface tone="panel" className={styles.root}>
-        <VStateSurface tone="loading" title="生成证据图" fill className={styles.fill} />
+        <VStateSurface tone="loading" title={isZh ? "生成证据图" : "Building evidence graph"} fill className={styles.fill} />
       </VSurface>
     );
   }
@@ -198,7 +214,7 @@ export function EvidenceGraphView({ runId, teamId }: EvidenceGraphViewProps) {
           {state.message}
         </div>
         <VButton type="button" variant="secondary" onClick={() => void loadGraph()}>
-          重试
+          {isZh ? "重试" : "Retry"}
         </VButton>
       </VSurface>
     );
@@ -207,7 +223,7 @@ export function EvidenceGraphView({ runId, teamId }: EvidenceGraphViewProps) {
   const { nodes, edges } = state.graph;
   return (
     <VSurface tone="panel" className={styles.root} data-vui="evidence-graph-view">
-      <EvidenceGraphContent graph={{ nodes, edges }} />
+      <EvidenceGraphContent graph={{ nodes, edges }} lang={lang} />
     </VSurface>
   );
 }

@@ -5,12 +5,12 @@ import { VButton } from "../../../components/vui";
 import { researchWorkflowErrorInlineText } from "../researchWorkflowErrorModel";
 import styles from "./NodeCommandSection.styles";
 
-function offerReason(offer: CommandOffer): string {
+function offerReason(offer: CommandOffer, isZh: boolean): string {
   if (offer.available) return "";
   const code = offer.reasonCode || offer.blockerIds[0] || "command_unavailable";
-  if (code === "retry_owns_recovery") return "当前节点已阻塞，请使用重试";
-  if (code === "node_in_flight") return "当前节点已在执行";
-  if (code === "node_already_succeeded") return "当前节点已完成";
+  if (code === "retry_owns_recovery") return isZh ? "当前节点已阻塞，请使用重试" : "Node is blocked; use retry";
+  if (code === "node_in_flight") return isZh ? "当前节点已在执行" : "Node is already running";
+  if (code === "node_already_succeeded") return isZh ? "当前节点已完成" : "Node already completed";
   return code;
 }
 
@@ -18,15 +18,17 @@ export function NodeCommandSection(props: {
   offers: CommandOffer[];
   busy: boolean;
   onOffer: (offer: CommandOffer) => Promise<void>;
+  lang?: "zh" | "en";
 }) {
   const [actionError, setActionError] = useState<string | null>(null);
+  const isZh = props.lang !== "en";
   if (!props.offers.length) return null;
   return (
     <section data-vui="node-commands">
-      <h4 className={styles.title}>操作</h4>
+      <h4 className={styles.title}>{isZh ? "操作" : "Actions"}</h4>
       <div className={styles.actions}>
         {props.offers.map((offer) => {
-          const reason = offerReason(offer);
+          const reason = offerReason(offer, isZh);
           return (
             <VButton
               key={`${offer.command}:${offer.idempotencyKey}`}

@@ -13,7 +13,9 @@ export function NodeAgentSection(props: {
   primaryOffer: CommandOffer | null;
   busy: boolean;
   onOffer: (offer: CommandOffer) => Promise<void>;
+  lang?: "zh" | "en";
 }) {
+  const isZh = props.lang !== "en";
   const agentId = String(props.detail.agentId || "");
   const canOpen = Boolean(
     props.detail.sessionId
@@ -36,7 +38,7 @@ export function NodeAgentSection(props: {
         runtimeCurrent={props.detail.runtimeCurrent}
         status={props.detail.status}
         canRebindAgent={false}
-        agentSwitchReason="运行快照已锁定，换绑请用操作区命令"
+        agentSwitchReason={isZh ? "运行快照已锁定，换绑请用操作区命令" : "Run snapshot is locked; rebind via run commands"}
         effectiveBindings={props.effectiveBindings}
         budget={props.budget}
         primaryOffer={props.primaryOffer}
@@ -44,8 +46,11 @@ export function NodeAgentSection(props: {
         onOffer={props.onOffer}
         sessionHref={canOpen ? props.detail.chatDeepLink ?? null : null}
         sessionDisabledReason={
-          props.detail.sessionAnchorDegraded ? "会话锚点不完整" : "尚未绑定精确会话"
+          props.detail.sessionAnchorDegraded
+            ? (isZh ? "会话锚点不完整" : "Session anchor is incomplete")
+            : (isZh ? "尚未绑定精确会话" : "No precise session bound yet")
         }
+        lang={props.lang}
       />
     </section>
   );

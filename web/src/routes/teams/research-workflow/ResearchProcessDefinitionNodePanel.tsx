@@ -1,5 +1,6 @@
 import type { EffectiveAgentBinding, ResearchBudgetProjection, WorkflowDefinition } from "../../../api/types/researchWorkflow";
 import { VEmptyState, VSurface } from "../../../components/vui";
+import { useShellI18n } from "../../../i18n/useShellI18n";
 import { DefinitionNodeAgentSection } from "./DefinitionNodeAgentSection";
 import { getNodeAdapter } from "./nodeAdapterModel";
 import { researchStageLabel } from "./researchNodePresentation";
@@ -20,9 +21,14 @@ export function ResearchProcessDefinitionNodePanel({
   effectiveBindings,
   budget = null,
 }: ResearchProcessDefinitionNodePanelProps) {
+  const { lang } = useShellI18n();
   const node = definition.nodes.find((item) => item.nodeId === nodeId);
   if (!node) {
-    return <VEmptyState title="节点不存在">工作流定义中没有找到该节点。</VEmptyState>;
+    return (
+      <VEmptyState title={lang === "zh" ? "节点不存在" : "Node not found"}>
+        {lang === "zh" ? "工作流定义中没有找到该节点。" : "The workflow definition does not include this node."}
+      </VEmptyState>
+    );
   }
   const adapter = getNodeAdapter(nodeId);
   const binding = effectiveBindings?.find((item) => item.nodeId === nodeId) ?? null;
@@ -39,6 +45,7 @@ export function ResearchProcessDefinitionNodePanel({
           binding={binding}
           effectiveBindings={effectiveBindings}
           budget={budget}
+          lang={lang}
         />
       ) : (
         <header>

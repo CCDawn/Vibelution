@@ -31,9 +31,11 @@ export type NodeInspectorOpsSectionProps = {
   onOffer?: (offer: CommandOffer) => Promise<void>;
   sessionHref: string | null;
   sessionDisabledReason?: string;
+  lang?: "zh" | "en";
 };
 
 export function NodeInspectorOpsSection(props: NodeInspectorOpsSectionProps) {
+  const isZh = props.lang !== "en";
   const resources = useNodeInspectorOpsResources(props.agentId);
   const meters = nodeInspectorBudgetMeters(ledgerForStage(props.budget?.budgetLedgers, props.stageId));
   const status = nodeInspectorStatus({
@@ -48,10 +50,10 @@ export function NodeInspectorOpsSection(props: NodeInspectorOpsSectionProps) {
     || resources.agent?.llmBindings?.dialogue?.modelId
     || (resources.modelPending ? "…" : "—");
   const modelMeta = props.unbound
-    ? "指定 Agent 后可切换"
+    ? (isZh ? "指定 Agent 后可切换" : "Selectable after binding an Agent")
     : model
       ? (model.providerLabel || model.providerId)
-      : "未配置模型";
+      : (isZh ? "未配置模型" : "No model configured");
 
   return (
     <NodeInspectorOpsCard
@@ -91,6 +93,7 @@ export function NodeInspectorOpsSection(props: NodeInspectorOpsSectionProps) {
       onSelectPinned={resources.selectPinned}
       onPromote={resources.promote}
       notice={resources.notice}
+      lang={props.lang}
     />
   );
 }

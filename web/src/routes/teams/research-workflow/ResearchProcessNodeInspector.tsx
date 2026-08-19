@@ -1,6 +1,7 @@
 import type { NodeHandoffRecord, ResearchBudgetProjection, EffectiveAgentBinding } from "../../../api/types/researchWorkflow";
 import type { ResearchWorkflowNodeDetail } from "../../../api/types/research-workflow/core";
 import { VEmptyState, VSurface } from "../../../components/vui";
+import { useShellI18n } from "../../../i18n/useShellI18n";
 import type { NodeAdapterSpec } from "./nodeAdapterModel";
 import { NodeAgentSection } from "./NodeAgentSection";
 import { NodeCommandSection } from "./NodeCommandSection";
@@ -24,11 +25,15 @@ export type ResearchProcessNodeInspectorProps = {
 };
 
 export function ResearchProcessNodeInspector(props: ResearchProcessNodeInspectorProps) {
+  const { lang } = useShellI18n();
+  const isZh = lang === "zh";
   if (!props.adapter || !props.nodeId) {
     return (
       <div className={styles.centered} data-vui="node-inspector-empty">
-        <VEmptyState title="选择流程节点" className={styles.empty}>
-          在画布上点击任务节点，查看绑定、会话与运行命令。
+        <VEmptyState title={isZh ? "选择流程节点" : "Select a workflow node"} className={styles.empty}>
+          {isZh
+            ? "在画布上点击任务节点，查看绑定、会话与运行命令。"
+            : "Click a task node on the canvas to inspect bindings, sessions, and run commands."}
         </VEmptyState>
       </div>
     );
@@ -36,7 +41,7 @@ export function ResearchProcessNodeInspector(props: ResearchProcessNodeInspector
   if (!props.detail) {
     return (
       <div className={styles.centered}>
-        <VEmptyState title="暂无节点运行数据" className={styles.empty} />
+        <VEmptyState title={isZh ? "暂无节点运行数据" : "No node run data yet"} className={styles.empty} />
       </div>
     );
   }
@@ -62,6 +67,7 @@ export function ResearchProcessNodeInspector(props: ResearchProcessNodeInspector
           primaryOffer={primaryOffer}
           busy={props.busy}
           onOffer={props.onOffer}
+          lang={lang}
         />
       ) : (
         <header>
@@ -74,11 +80,13 @@ export function ResearchProcessNodeInspector(props: ResearchProcessNodeInspector
         handoffs={props.handoffs ?? []}
         pending={props.handoffPending}
         blockedReason={detail.blockedReason || ""}
+        lang={lang}
       />
       <NodeCommandSection
         offers={restOffers}
         busy={props.busy}
         onOffer={props.onOffer}
+        lang={lang}
       />
     </VSurface>
   );

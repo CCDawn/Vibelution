@@ -1,21 +1,20 @@
 """Canonical Challenge Cup question-to-workflow launch contract.
 
-The approved question artifact is the only source for a new workflow's
-identity and immutable research contract.  Operators may set safety ceilings,
-but they never supply a parallel project, rules, evidence hash, or model
-contract.
+Operators pick a question from the frozen 125-question catalog and either
+resume its latest workflow checkpoint or start a new run.  An approved v2
+question artifact remains the identity source for submission-eligible runs;
+catalog-seeded runs are operator experiments and never mark formalWrites.
 
-The two frozen deep experiments (SCI-091, SCI-096) are governed separately:
-their launch options derive only from the frozen Program core, the existing
-campaign activation ledger, approved formal v2 question artifacts, and the
-persisted DEV control snapshot.  A DEV fixture result is never formal
-approval; DEV readiness only unlocks the ability to activate the real
-campaign.
+Clients still cannot author project, rules, evidence hash, or model contract
+fields.  SCI-091 / SCI-096 campaign activation stays a separate governed
+path for formal deep-experiment packages; catalog launch does not wait on it.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import hashlib
+from collections.abc import Mapping, Sequence
+from datetime import datetime
 from typing import Any
 
 from core.research.competition.resources import (
@@ -30,6 +29,7 @@ from core.research.competition.resources import (
     load_science_question_catalog,
 )
 from core.research.workflow.contracts import DEFAULT_PROGRAM_ID
+from core.research.workflow.definition import build_challenge_cup_workflow_definition
 from core.web.services.team_workflow.challenge_question_runs import (
     REQUIRED_HUMAN_GATE_KEYS,
     challenge_question_run_summary,
@@ -58,6 +58,8 @@ _MAX_STAGE_TOKENS = 500_000
 _MAX_TOOL_CALLS = 600
 _MAX_WALL_CLOCK_SECONDS = 12 * 60 * 60
 _MAX_RETRIES = 5
+_CATALOG_SEED_REVIEW_RUN_ID = "catalog-seed"
+_TERMINAL_RUN_STATUSES = frozenset({"succeeded", "failed", "cancelled"})
 
 
 class QuestionLaunchError(ValueError):
@@ -330,23 +332,175 @@ def activate_experiment_campaign(
 
 
 def list_question_launch_options(team_id: str) -> dict[str, Any]:
-    """Return only fully approved questions that may start a workflow run."""
+    """Return all 125 catalog questions; overlay approved artifacts when present."""
 
+    try:
+        catalog = load_science_question_catalog()
+    except CompetitionResourceError as exc:
+        raise QuestionLaunchError(
+            "The frozen competition catalog is unavailable or drifted.",
+            code="challenge_competition_snapshot_invalid",
+        ) from exc
+    approved = _approved_details(team_id)
     questions: list[dict[str, Any]] = []
-    for question_id, detail in _approved_details(team_id).items():
+    for item in catalog.get("questions") or []:
+        if not isinstance(item, dict):
+            continue
+        question_id = _text(item.get("id")).upper()
+        if not question_id:
+            continue
+        domain = _text(item.get("domain"))
+        detail = approved.get(question_id)
+        if detail is None:
+            questions.append(
+                {
+                    "questionId": question_id,
+                    "title": _text(item.get("question_en")) or question_id,
+                    "scope": domain,
+                    "domain": domain,
+                    "catalogId": CATALOG_ID,
+                    "reviewRunId": "",
+                    "artifactSha256": "",
+                    "source": "catalog",
+                    "launchable": True,
+                }
+            )
+            continue
         output = _mapping(detail.get("output"))
         artifact = _mapping(detail.get("artifact"))
         questions.append(
             {
                 "questionId": question_id,
                 "title": _question_title(output, question_id),
-                "scope": _question_scope(output),
-                "catalogId": _text(_output_identity(output).get("catalog_id")),
+                "scope": _question_scope(output) or domain,
+                "domain": domain,
+                "catalogId": CATALOG_ID,
                 "reviewRunId": _text(detail.get("selectedRunId")),
                 "artifactSha256": _text(artifact.get("sha256")),
+                "source": "approved_artifact",
+                "launchable": True,
             }
         )
     return {"teamId": _text(team_id), "questions": questions}
+
+
+def _iso_to_ms(value: str) -> int:
+    if not value:
+        return 0
+    try:
+        return int(datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp() * 1000)
+    except ValueError:
+        return 0
+
+
+def _run_timestamp_ms(run: Mapping[str, Any]) -> int:
+    try:
+        ms = int(run.get("updatedAtMs") or run.get("createdAtMs") or 0)
+    except (TypeError, ValueError):
+        ms = 0
+    if ms:
+        return ms
+    return _iso_to_ms(_text(run.get("updatedAt"))) or _iso_to_ms(_text(run.get("createdAt")))
+
+
+def _run_current_node_id(run: Mapping[str, Any]) -> str:
+    current_ids = run.get("runtimeCurrentNodeIds")
+    if isinstance(current_ids, list) and current_ids:
+        return _text(current_ids[0])
+    return _text(run.get("activeNodeId"))
+
+
+def attach_question_run_checkpoints(
+    questions: Sequence[Mapping[str, Any]],
+    runs: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Attach the latest workflow checkpoint for each catalog question."""
+
+    definition = build_challenge_cup_workflow_definition()
+    node_ids = [node.nodeId for node in definition.nodes]
+    labels = {node.nodeId: node.label for node in definition.nodes}
+    index_by_id = {node_id: index for index, node_id in enumerate(node_ids)}
+    total_steps = len(node_ids)
+    latest_by_question: dict[str, Mapping[str, Any]] = {}
+    for run in runs:
+        question_id = _text(run.get("questionId")).upper()
+        run_id = _text(run.get("runId"))
+        if not question_id or not run_id:
+            continue
+        previous = latest_by_question.get(question_id)
+        if previous is None or _run_timestamp_ms(run) >= _run_timestamp_ms(previous):
+            latest_by_question[question_id] = run
+    attached: list[dict[str, Any]] = []
+    for question in questions:
+        record = dict(question)
+        run = latest_by_question.get(_text(record.get("questionId")).upper())
+        if run is None:
+            record["checkpoint"] = None
+            attached.append(record)
+            continue
+        node_id = _run_current_node_id(run)
+        status = _text(run.get("status")) or "queued"
+        node_index = index_by_id.get(node_id, 0)
+        completed = total_steps if status == "succeeded" else node_index
+        record["checkpoint"] = {
+            "runId": _text(run.get("runId")),
+            "status": status,
+            "currentNodeId": node_id,
+            "currentNodeLabel": labels.get(node_id, ""),
+            "completedCount": completed,
+            "totalSteps": total_steps,
+            "resumable": status not in _TERMINAL_RUN_STATUSES,
+        }
+        attached.append(record)
+    return attached
+
+
+def _catalog_seed_hash(question_id: str) -> str:
+    payload = f"{CATALOG_SHA256}:{question_id}:{_CATALOG_SEED_REVIEW_RUN_ID}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _competition_program_snapshot() -> tuple[dict[str, Any], dict[str, Any]]:
+    try:
+        program = load_competition_program_core()
+        policy = load_full_catalog_execution_core()
+        catalog = load_science_question_catalog()
+    except CompetitionResourceError as exc:
+        raise QuestionLaunchError(
+            "The frozen competition Program, Policy, or catalog resource is unavailable or drifted.",
+            code="challenge_competition_snapshot_invalid",
+        ) from exc
+    program_body = _mapping(program.get("program"))
+    directions = [_text(item) for item in program_body.get("dimensions") or [] if _text(item)]
+    snapshot = {
+        "programContractVersion": _text(program.get("contractVersion")),
+        "programCoreBehaviorHash": CORE_BEHAVIOR_HASH,
+        "fullCatalogPolicyVersion": _text(policy.get("version")),
+        "fullCatalogCorePolicyHash": CORE_POLICY_HASH,
+        "catalogId": CATALOG_ID,
+        "catalogQuestionCount": CATALOG_QUESTION_COUNT,
+        "catalogSha256": CATALOG_SHA256,
+        "questionSchemaVersion": 2,
+        "directionMode": "a_plus_b",
+        "directions": directions,
+    }
+    if catalog.get("catalog_id") != CATALOG_ID or len(directions) != 2:
+        raise QuestionLaunchError(
+            "The frozen competition Program, Policy, catalog, or A+B direction snapshot is invalid.",
+            code="challenge_competition_snapshot_invalid",
+        )
+    return snapshot, program_body
+
+
+def _catalog_question(question_id: str) -> dict[str, Any] | None:
+    try:
+        catalog = load_science_question_catalog()
+    except CompetitionResourceError:
+        return None
+    for item in catalog.get("questions") or []:
+        if isinstance(item, dict) and _text(item.get("id")).upper() == question_id:
+            return item
+    return None
 
 
 def _positive_int(value: Any, *, field: str, maximum: int) -> int:
@@ -405,20 +559,119 @@ def build_safety_budget_policy(safety_limits: Mapping[str, Any]) -> dict[str, An
     }
 
 
+def _hypothesis_first_flag(team_id: str, question_id: str) -> bool:
+    try:
+        from core.web.services.team_workflow import hypothesis_selection
+
+        return bool(
+            hypothesis_selection.get_latest_hypothesis_selection(team_id, question_id).get(
+                "selection"
+            )
+        )
+    except Exception:
+        return False
+
+
+def _build_catalog_seed_run_input(
+    team_id: str,
+    *,
+    question_id: str,
+    catalog_item: Mapping[str, Any],
+    safety_limits: Mapping[str, Any],
+) -> dict[str, Any]:
+    title = _text(catalog_item.get("question_en")) or question_id
+    scope = _text(catalog_item.get("domain"))
+    try:
+        project = ensure_challenge_question_project(
+            team_id,
+            question_id=question_id,
+            title=title,
+            topic=scope,
+        )["project"]
+    except ResearchProjectError as exc:
+        raise QuestionLaunchError(
+            str(exc),
+            code=getattr(exc, "code", "challenge_project_resolution_failed"),
+        ) from exc
+    competition_program_snapshot, program_body = _competition_program_snapshot()
+    artifact_sha256 = _catalog_seed_hash(question_id)
+    artifact_ref = (
+        f"challenge-question-catalog://{CATALOG_ID}/{question_id}/"
+        f"{_CATALOG_SEED_REVIEW_RUN_ID}/{artifact_sha256}"
+    )
+    directions = [_text(item) for item in program_body.get("dimensions") or [] if _text(item)]
+    return {
+        "teamId": _text(team_id),
+        "projectId": _text(project.get("projectId")),
+        "questionId": question_id,
+        "researchBriefHash": artifact_sha256,
+        "datasetRefs": [artifact_ref],
+        "metricContract": {
+            "primary": "evidence_coverage",
+            "direction": "maximize",
+            "source": artifact_ref,
+        },
+        "constraintSnapshot": {
+            "formalWrites": False,
+            "challengeQuestionArtifact": artifact_ref,
+            "questionReviewRunId": _CATALOG_SEED_REVIEW_RUN_ID,
+            "launchSource": "catalog",
+            "competitionProgramSnapshot": competition_program_snapshot,
+        },
+        "competitionProgramSnapshot": competition_program_snapshot,
+        "competitionRuleRef": CATALOG_ID,
+        "competitionRuleVersion": "catalog-seed-v1",
+        "trackAndRubricSnapshot": {
+            "track": _text(program_body.get("track")),
+            "directionMode": "a_plus_b",
+            "directions": directions,
+            "blockingRules": [
+                "catalog_seed_not_submission_eligible",
+                "program_policy_catalog_snapshot_required",
+            ],
+        },
+        "researchObjectiveContract": {
+            "question": title,
+            "scope": scope,
+            "falsifiableOutcome": "",
+            "hypothesisFirst": _hypothesis_first_flag(team_id, question_id),
+        },
+        "sourcePolicy": {"minimumPrimarySources": 3, "requireCounterEvidence": True},
+        "budgetPolicy": build_safety_budget_policy(safety_limits),
+        "stopPolicy": {"maxNoImprovementRounds": 2, "stopOnBudgetExhaustion": True},
+        "environmentSnapshotRef": artifact_ref,
+        "modelRoutingPolicy": {purpose: _MODEL_REF for purpose in _MODEL_PURPOSES},
+        "evaluationContract": {
+            "minimumClaimEvidenceCoverage": 0.9,
+            "requiredSeeds": [11, 29, 47],
+            "questionArtifactSha256": artifact_sha256,
+        },
+        "createdBy": "operator",
+    }
+
+
 def build_question_run_input(
     team_id: str,
     *,
     question_id: str,
     safety_limits: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Derive the complete immutable run input from one approved question."""
+    """Derive immutable run input from an approved artifact or the catalog seed."""
 
     normalized_question_id = _text(question_id).upper()
     detail = _approved_details(team_id).get(normalized_question_id)
     if detail is None:
-        raise QuestionLaunchError(
-            "The selected question is not approved for workflow launch.",
-            code="challenge_question_not_launchable",
+        catalog_item = _catalog_question(normalized_question_id)
+        if catalog_item is None:
+            raise QuestionLaunchError(
+                "The selected question is not in the frozen 125-question catalog.",
+                code="challenge_question_not_launchable",
+            )
+        return _build_catalog_seed_run_input(
+            team_id,
+            question_id=normalized_question_id,
+            catalog_item=catalog_item,
+            safety_limits=safety_limits,
         )
     deep_record = next(
         (
@@ -461,46 +714,10 @@ def build_question_run_input(
 
     final_summary = _mapping(_output_result_classification(output).get("final_summary"))
     research_plan = _mapping(output.get("research_plan"))
-    try:
-        program = load_competition_program_core()
-        policy = load_full_catalog_execution_core()
-        catalog = load_science_question_catalog()
-    except CompetitionResourceError as exc:
-        raise QuestionLaunchError(
-            "The frozen competition Program, Policy, or catalog resource is unavailable or drifted.",
-            code="challenge_competition_snapshot_invalid",
-        ) from exc
-    program_body = _mapping(program.get("program"))
+    competition_program_snapshot, program_body = _competition_program_snapshot()
     directions = [_text(item) for item in program_body.get("dimensions") or [] if _text(item)]
-    competition_program_snapshot = {
-        "programContractVersion": _text(program.get("contractVersion")),
-        "programCoreBehaviorHash": CORE_BEHAVIOR_HASH,
-        "fullCatalogPolicyVersion": _text(policy.get("version")),
-        "fullCatalogCorePolicyHash": CORE_POLICY_HASH,
-        "catalogId": CATALOG_ID,
-        "catalogQuestionCount": CATALOG_QUESTION_COUNT,
-        "catalogSha256": CATALOG_SHA256,
-        "questionSchemaVersion": 2,
-        "directionMode": "a_plus_b",
-        "directions": directions,
-    }
-    if catalog.get("catalog_id") != CATALOG_ID or len(directions) != 2:
-        raise QuestionLaunchError(
-            "The frozen competition Program, Policy, catalog, or A+B direction snapshot is invalid.",
-            code="challenge_competition_snapshot_invalid",
-        )
     artifact_ref = f"challenge-question-artifact://{catalog_id}/{normalized_question_id}/{review_run_id}/{artifact_sha256}"
-    hypothesis_first = False
-    try:
-        from core.web.services.team_workflow import hypothesis_selection
-
-        hypothesis_first = bool(
-            hypothesis_selection.get_latest_hypothesis_selection(
-                team_id, normalized_question_id
-            ).get("selection")
-        )
-    except Exception:
-        hypothesis_first = False
+    hypothesis_first = _hypothesis_first_flag(team_id, normalized_question_id)
     return {
         "teamId": _text(team_id),
         "projectId": _text(project.get("projectId")),

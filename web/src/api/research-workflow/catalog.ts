@@ -41,13 +41,27 @@ export type CreateResearchWorkflowRunInput = {
   idempotencyKey: string;
 };
 
+export type ResearchWorkflowLaunchCheckpoint = {
+  runId: string;
+  status: string;
+  currentNodeId: string;
+  currentNodeLabel: string;
+  completedCount: number;
+  totalSteps: number;
+  resumable: boolean;
+};
+
 export type ResearchWorkflowLaunchOption = {
   questionId: string;
   title: string;
   scope: string;
+  domain?: string;
   catalogId: string;
   reviewRunId: string;
   artifactSha256: string;
+  source?: "catalog" | "approved_artifact" | string;
+  launchable?: boolean;
+  checkpoint?: ResearchWorkflowLaunchCheckpoint | null;
 };
 
 export type ResearchWorkflowExperimentOption = {

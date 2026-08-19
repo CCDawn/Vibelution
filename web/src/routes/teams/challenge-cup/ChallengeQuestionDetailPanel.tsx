@@ -12,6 +12,7 @@ import {
 import { TeamHypothesisRoundTimeline } from "../TeamHypothesisRoundTimeline";
 import { TeamMeetingRoundPanel } from "../TeamMeetingRoundPanel";
 import { researchWorkflowErrorInlineText } from "../researchWorkflowErrorModel";
+import { useShellI18n } from "../../../i18n/useShellI18n";
 import { ChallengeQuestionAnalysisSection } from "./ChallengeQuestionAnalysisSection";
 import { ChallengeQuestionEvidenceSection } from "./ChallengeQuestionEvidenceSection";
 import { ChallengeQuestionPlanSection } from "./ChallengeQuestionPlanSection";
@@ -27,7 +28,7 @@ export type ChallengeQuestionDetailPanelProps = {
   onClose: () => void;
 };
 
-const DETAIL_ANCHORS = [
+const DETAIL_ANCHORS_ZH = [
   ["question-agent", "题目与接单"],
   ["sources", "来源与证据"],
   ["hypotheses", "候选假设"],
@@ -41,6 +42,20 @@ const DETAIL_ANCHORS = [
   ["artifact", "最终工件"],
 ] as const;
 
+const DETAIL_ANCHORS_EN = [
+  ["question-agent", "Question & agent"],
+  ["sources", "Sources & evidence"],
+  ["hypotheses", "Candidate hypotheses"],
+  ["reviews", "Seven-dim review"],
+  ["selection", "Selection"],
+  ["hypothesis-first-selection", "Hypothesis selection"],
+  ["hypothesis-first-meeting", "Review discussion"],
+  ["hypothesis-first-rounds", "Review rounds"],
+  ["plan", "Research plan"],
+  ["feedback", "Human review"],
+  ["artifact", "Final artifact"],
+] as const;
+
 const RECORD_STATUS_LABELS: Record<string, string> = {
   approved: "正式批准",
   pending_review: "待审核",
@@ -48,8 +63,15 @@ const RECORD_STATUS_LABELS: Record<string, string> = {
   rejected: "已驳回",
 };
 
-function recordStatusLabel(status: string): string {
-  return RECORD_STATUS_LABELS[status] ?? status;
+const RECORD_STATUS_LABELS_EN: Record<string, string> = {
+  approved: "Approved",
+  pending_review: "Pending review",
+  needs_revision: "Needs revision",
+  rejected: "Rejected",
+};
+
+function recordStatusLabel(status: string, isZh: boolean): string {
+  return (isZh ? RECORD_STATUS_LABELS : RECORD_STATUS_LABELS_EN)[status] ?? status;
 }
 
 export function ChallengeQuestionDetailPanel({
@@ -60,29 +82,39 @@ export function ChallengeQuestionDetailPanel({
   onClose,
 }: ChallengeQuestionDetailPanelProps) {
   const [reviseDialogOpen, setReviseDialogOpen] = useState(false);
+  const { lang } = useShellI18n();
+  const isZh = lang === "zh";
+  const detailAnchors = isZh ? DETAIL_ANCHORS_ZH : DETAIL_ANCHORS_EN;
 
   if (isLoading) {
     return (
       <VSurface className={css.state} tone="workspace">
-        <VStateSurface title={`正在读取 ${requestedQuestionId} 的审核工件`} tone="loading" />
+        <VStateSurface
+          title={isZh ? `正在读取 ${requestedQuestionId} 的审核工件` : `Loading review artifacts for ${requestedQuestionId}`}
+          tone="loading"
+        />
       </VSurface>
     );
   }
   if (errorMessage || !detail) {
     return (
       <VSurface className={css.state} tone="workspace">
-        <VEmptyState title={`${requestedQuestionId || "该题"} 的审核工件不可用`} />
+        <VEmptyState
+          title={isZh
+            ? `${requestedQuestionId || "该题"} 的审核工件不可用`
+            : `Review artifacts unavailable for ${requestedQuestionId || "this question"}`}
+        />
         {errorMessage ? (
           <>
             <p>{researchWorkflowErrorInlineText(errorMessage)}</p>
             <details className={css.techDetails}>
-              <summary>技术细节</summary>
+              <summary>{isZh ? "技术细节" : "Technical details"}</summary>
               <code>{errorMessage}</code>
             </details>
           </>
         ) : null}
         <VButton density="compact" onPress={onClose} variant="secondary">
-          返回题目列表
+          {isZh ? "返回题目列表" : "Back to question list"}
         </VButton>
       </VSurface>
     );
@@ -91,40 +123,40 @@ export function ChallengeQuestionDetailPanel({
   const { output, record } = detail;
 
   return (
-    <main className={css.workspace} aria-label={`${detail.questionId} 单题验收`}>
+    <main className={css.workspace} aria-label={isZh ? `${detail.questionId} 单题验收` : `${detail.questionId} acceptance`}>
       <header className={css.header}>
         <div>
-          <span className={css.eyebrow}>单题验收</span>
+          <span className={css.eyebrow}>{isZh ? "单题验收" : "Question acceptance"}</span>
           <h2>{detail.questionId}: {output.question_en}</h2>
           {output.question_zh ? <p className={css.questionZh}>{output.question_zh}</p> : null}
         </div>
         <div className={css.headerActions}>
           <VStatusChip tone={record.status === "approved" ? "accent" : "warning"}>
-            {recordStatusLabel(record.status)}
+            {recordStatusLabel(record.status, isZh)}
           </VStatusChip>
           {record.status === "needs_revision" ? (
             <VButton density="compact" variant="primary" onPress={() => setReviseDialogOpen(true)}>
-              登记修订产出
+              {isZh ? "登记修订产出" : "Register revision output"}
             </VButton>
           ) : null}
           <VButton density="compact" icon={<ArrowLeft size={15} aria-hidden="true" />} onPress={onClose} variant="secondary">
-            返回题目列表
+            {isZh ? "返回题目列表" : "Back to question list"}
           </VButton>
         </div>
       </header>
 
-      <nav className={css.anchorNav} aria-label="单题验收章节">
-        {DETAIL_ANCHORS.map(([id, label], index) => (
+      <nav className={css.anchorNav} aria-label={isZh ? "单题验收章节" : "Acceptance sections"}>
+        {detailAnchors.map(([id, label], index) => (
           <a href={`#${id}`} key={id}><span>{index + 1}</span>{label}</a>
         ))}
       </nav>
 
-      <ChallengeQuestionEvidenceSection detail={detail} />
-      <ChallengeQuestionAnalysisSection output={output} />
-      <HypothesisSelectionPanel teamId={detail.teamId} questionId={detail.questionId} />
+      <ChallengeQuestionEvidenceSection detail={detail} lang={lang} />
+      <ChallengeQuestionAnalysisSection output={output} lang={lang} />
+      <HypothesisSelectionPanel teamId={detail.teamId} questionId={detail.questionId} lang={lang} />
       <TeamMeetingRoundPanel teamId={detail.teamId} questionId={detail.questionId} />
       <TeamHypothesisRoundTimeline teamId={detail.teamId} questionId={detail.questionId} />
-      <ChallengeQuestionPlanSection detail={detail} />
+      <ChallengeQuestionPlanSection detail={detail} lang={lang} />
 
       {reviseDialogOpen ? (
         <ChallengeQuestionRegisterDialog
@@ -133,6 +165,7 @@ export function ChallengeQuestionDetailPanel({
           parentRunId={record.runId}
           questionIdHint={detail.questionId}
           onClose={() => setReviseDialogOpen(false)}
+          lang={lang}
         />
       ) : null}
     </main>

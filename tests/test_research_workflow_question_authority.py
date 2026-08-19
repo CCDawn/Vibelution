@@ -162,16 +162,21 @@ def test_launch_options_and_frozen_input_derive_from_one_approved_question(
         safety_limits=_safety_limits(),
     )
 
-    assert options["questions"] == [
-        {
-            "questionId": "SCI-096",
-            "title": "How does the brain retrieve memories?",
-            "scope": "只讨论可证伪的记忆提取机制。",
-            "catalogId": "science-125-questions-2021",
-            "reviewRunId": "stage1-sci-096-v3",
-            "artifactSha256": "a" * 64,
-        }
-    ]
+    by_id = {item["questionId"]: item for item in options["questions"]}
+    assert len(options["questions"]) == 125
+    assert by_id["SCI-001"]["source"] == "catalog"
+    assert by_id["SCI-001"]["launchable"] is True
+    assert by_id["SCI-096"] == {
+        "questionId": "SCI-096",
+        "title": "How does the brain retrieve memories?",
+        "scope": "只讨论可证伪的记忆提取机制。",
+        "domain": "neuroscience",
+        "catalogId": "science-125-questions-2021",
+        "reviewRunId": "stage1-sci-096-v3",
+        "artifactSha256": "a" * 64,
+        "source": "approved_artifact",
+        "launchable": True,
+    }
     assert run_input["projectId"] == "challenge-sci-096"
     assert run_input["researchBriefHash"] == "a" * 64
     assert run_input["datasetRefs"] == [
@@ -190,15 +195,20 @@ def test_launch_options_and_frozen_input_derive_from_one_approved_question(
     assert "projectId" not in options["questions"][0]
 
 
-def test_question_launch_rejects_unapproved_questions_and_invalid_limits(
+def test_question_launch_rejects_unknown_questions_and_invalid_limits(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch_approved_question(monkeypatch)
 
+    catalog_seed = question_launch.build_question_run_input(
+        "research-team",
+        question_id="SCI-097",
+        safety_limits=_safety_limits(),
+    )
     with pytest.raises(question_launch.QuestionLaunchError) as missing_question:
         question_launch.build_question_run_input(
             "research-team",
-            question_id="SCI-097",
+            question_id="SCI-999",
             safety_limits=_safety_limits(),
         )
     with pytest.raises(question_launch.QuestionLaunchError) as unsafe_budget:
@@ -206,8 +216,102 @@ def test_question_launch_rejects_unapproved_questions_and_invalid_limits(
             {**_safety_limits(), "toolCalls": 601}
         )
 
+    assert catalog_seed["questionId"] == "SCI-097"
+    assert catalog_seed["constraintSnapshot"]["launchSource"] == "catalog"
+    assert catalog_seed["constraintSnapshot"]["formalWrites"] is False
+    assert "catalog_seed_not_submission_eligible" in catalog_seed["trackAndRubricSnapshot"]["blockingRules"]
     assert missing_question.value.code == "challenge_question_not_launchable"
     assert unsafe_budget.value.code == "invalid_safety_limits"
+
+
+def test_attach_question_run_checkpoints_uses_latest_run() -> None:
+    questions = [
+        {"questionId": "SCI-003", "title": "Is the Riemann hypothesis true?"},
+        {"questionId": "SCI-004", "title": "Are there more color pigments to discover?"},
+    ]
+    attached = question_launch.attach_question_run_checkpoints(
+        questions,
+        [
+            {
+                "runId": "run-old",
+                "questionId": "SCI-003",
+                "status": "blocked",
+                "activeNodeId": "source_finding",
+                "updatedAtMs": 1,
+            },
+            {
+                "runId": "run-new",
+                "questionId": "SCI-003",
+                "status": "waiting_human",
+                "runtimeCurrentNodeIds": ["protocol_design"],
+                "updatedAtMs": 9,
+            },
+        ],
+    )
+
+    assert attached[0]["checkpoint"]["runId"] == "run-new"
+    assert attached[0]["checkpoint"]["currentNodeId"] == "protocol_design"
+    assert attached[0]["checkpoint"]["currentNodeLabel"] == "协议设计"
+    assert attached[0]["checkpoint"]["completedCount"] == 6
+    assert attached[0]["checkpoint"]["resumable"] is True
+    assert attached[0]["checkpoint"]["totalSteps"] == 16
+    assert attached[1]["checkpoint"] is None
+
+    finished = question_launch.attach_question_run_checkpoints(
+        [{"questionId": "SCI-003"}],
+        [
+            {
+                "runId": "run-iso",
+                "questionId": "SCI-003",
+                "status": "succeeded",
+                "runtimeCurrentNodeIds": ["result_package"],
+                "updatedAt": "2026-08-19T01:00:00Z",
+            }
+        ],
+    )
+    assert finished[0]["checkpoint"]["runId"] == "run-iso"
+    assert finished[0]["checkpoint"]["resumable"] is False
+    assert finished[0]["checkpoint"]["completedCount"] == 16
+
+
+def test_launch_options_overlay_live_checkpoints(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _patch_approved_question(monkeypatch)
+    service = reset_research_workflow_runtime_service_for_tests(
+        run_store=WorkflowRunStore(tmp_path / "runs"),
+        checkpoint_path=str(tmp_path / "checkpoints.sqlite"),
+    )
+
+    class _Query:
+        def list_runs(self, *, team_id: str, workflow_id: str) -> dict:
+            assert team_id == "research-team"
+            assert workflow_id == CHALLENGE_CUP_WORKFLOW_ID
+            return {
+                "runs": [
+                    {
+                        "runId": "run-live",
+                        "questionId": "SCI-001",
+                        "status": "running",
+                        "runtimeCurrentNodeIds": ["source_finding"],
+                        "updatedAtMs": 42,
+                    }
+                ]
+            }
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.formal_read_runtime.get_query_service",
+        lambda: _Query(),
+    )
+
+    payload = service.get_question_launch_options(team_id="research-team")
+    by_id = {item["questionId"]: item for item in payload["questions"]}
+    assert len(payload["questions"]) == 125
+    assert by_id["SCI-001"]["checkpoint"]["runId"] == "run-live"
+    assert by_id["SCI-001"]["checkpoint"]["currentNodeLabel"] == "资料寻找"
+    assert by_id["SCI-001"]["checkpoint"]["resumable"] is True
+    assert by_id["SCI-002"]["checkpoint"] is None
 
 
 def test_canonical_question_project_collision_fails_loudly(
@@ -291,7 +395,10 @@ def test_create_endpoint_forbids_client_authored_contract_fields(
     )
 
     assert options.status_code == 200
-    assert options.json()["questions"][0]["questionId"] == "SCI-096"
+    question_ids = [item["questionId"] for item in options.json()["questions"]]
+    assert "SCI-001" in question_ids
+    assert "SCI-096" in question_ids
+    assert len(question_ids) == 125
     assert rejected.status_code == 422
     assert accepted.status_code == 201
     body = accepted.json()

@@ -10,6 +10,7 @@ export function DefinitionNodeAgentSection(props: {
   binding: EffectiveAgentBinding | null;
   effectiveBindings: EffectiveAgentBinding[] | null;
   budget?: ResearchBudgetProjection | null;
+  lang?: "zh" | "en";
 }) {
   const agentId = String(props.binding?.agentId || "");
   return (
@@ -29,6 +30,7 @@ export function DefinitionNodeAgentSection(props: {
         primaryOffer={null}
         busy={false}
         sessionHref={null}
+        lang={props.lang}
       />
     </section>
   );

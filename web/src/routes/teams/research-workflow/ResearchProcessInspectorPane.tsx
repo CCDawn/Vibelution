@@ -91,9 +91,14 @@ export function ResearchProcessInspectorPane(props: {
       <ResearchRunLaunchPanel
         teamId={scope.teamId}
         busy={state.busy}
+        initialQuestionId={scope.questionId}
         onSubmit={actions.submitRun}
         onCancel={() => actions.replaceParams({ panel: "node" })}
-        onOpenProgress={() => actions.replaceParams({ panel: "progress" })}
+        onContinueRun={({ runId, nodeId }) => actions.replaceParams({
+          runId,
+          node: nodeId,
+          panel: "node",
+        })}
       />
     );
   }

@@ -1,6 +1,8 @@
 /**
  * SC inject: stage agent cards for the controls rail.
  */
+import { useMemo } from "react";
+
 import { TeamSourceCollectionStageAgentsPanel } from "./teamLazyPanels";
 import {
   buildSourceCollectionStageAgentCards,
@@ -29,18 +31,32 @@ export function TeamSourceCollectionStageAgentsInject({
   teamId,
   returnTo,
 }: TeamSourceCollectionStageAgentsInjectProps) {
+  // Memoized so the memoized panel below keeps a stable agents identity across
+  // unrelated SC polls (bindings come from React Query structural sharing).
+  const agents = useMemo(
+    () => buildSourceCollectionStageAgentCards({
+      stageId,
+      bindings,
+      lang,
+      agentSummaryPending,
+      agentSummaryFetching,
+      agentSummaryError,
+      teamId,
+      returnTo,
+    }),
+    [
+      stageId,
+      bindings,
+      lang,
+      agentSummaryPending,
+      agentSummaryFetching,
+      agentSummaryError,
+      teamId,
+      returnTo,
+    ],
+  );
   if (!bindings.length) {
     return null;
   }
-  const agents = buildSourceCollectionStageAgentCards({
-    stageId,
-    bindings,
-    lang,
-    agentSummaryPending,
-    agentSummaryFetching,
-    agentSummaryError,
-    teamId,
-    returnTo,
-  });
   return <TeamSourceCollectionStageAgentsPanel lang={lang} agents={agents} />;
 }

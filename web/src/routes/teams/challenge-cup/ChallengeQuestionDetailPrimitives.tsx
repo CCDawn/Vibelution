@@ -11,14 +11,42 @@ const DIMENSION_LABELS: Record<string, string> = {
   counterexample_coverage: "反例覆盖",
 };
 
-export function challengeGateLabel(decision: string) {
+const DIMENSION_LABELS_EN: Record<string, string> = {
+  evidence_support: "Evidence support",
+  factual_accuracy: "Factual accuracy",
+  novelty: "Novelty",
+  falsifiability: "Falsifiability",
+  plan_feasibility: "Plan feasibility",
+  risk_and_ethics: "Risk & ethics",
+  counterexample_coverage: "Counterexample coverage",
+};
+
+export function challengeGateLabel(decision: string, lang: "zh" | "en" = "zh") {
+  if (lang === "en") {
+    if (decision === "approved") return "Approved";
+    if (decision === "revision_requested") return "Revision requested";
+    if (decision === "rejected") return "Rejected";
+    return "Pending review";
+  }
   if (decision === "approved") return "已批准";
   if (decision === "revision_requested") return "需修订";
   if (decision === "rejected") return "已拒绝";
   return "待审核";
 }
 
-export function challengeRatingLabel(rating: ChallengeQuestionDimensionReview["rating"]) {
+export function challengeRatingLabel(
+  rating: ChallengeQuestionDimensionReview["rating"],
+  lang: "zh" | "en" = "zh",
+) {
+  if (lang === "en") {
+    return {
+      insufficient: "Insufficient",
+      weak: "Weak",
+      mixed: "Mixed",
+      adequate: "Adequate",
+      strong: "Strong",
+    }[rating];
+  }
   return {
     insufficient: "不足",
     weak: "较弱",
@@ -28,8 +56,9 @@ export function challengeRatingLabel(rating: ChallengeQuestionDimensionReview["r
   }[rating];
 }
 
-export function challengeDimensionLabel(dimension: string) {
-  return DIMENSION_LABELS[dimension] || dimension;
+export function challengeDimensionLabel(dimension: string, lang: "zh" | "en" = "zh") {
+  const table = lang === "en" ? DIMENSION_LABELS_EN : DIMENSION_LABELS;
+  return table[dimension] || dimension;
 }
 
 export function ChallengeQuestionSectionHeading({ index, title }: { index: string; title: string }) {
@@ -41,9 +70,9 @@ export function ChallengeQuestionSectionHeading({ index, title }: { index: strin
   );
 }
 
-export function ChallengeStringList({ values }: { values: string[] }) {
+export function ChallengeStringList({ values, lang = "zh" }: { values: string[]; lang?: "zh" | "en" }) {
   if (!values.length) {
-    return <span className={css.missing}>未登记</span>;
+    return <span className={css.missing}>{lang === "en" ? "Not registered" : "未登记"}</span>;
   }
   return (
     <ul className={css.compactList}>

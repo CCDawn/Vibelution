@@ -7,7 +7,9 @@ import styles from "./ResearchCriticalPathPanel.styles";
 export function ResearchCriticalPathPanel(props: {
   projection: WorkflowCanvasProjection | null;
   insights: ResearchWorkflowInsights;
+  lang?: "zh" | "en";
 }) {
+  const isZh = props.lang !== "en";
   const path = props.projection
     ? buildResearchCriticalPath(
         props.projection.definition,
@@ -17,7 +19,7 @@ export function ResearchCriticalPathPanel(props: {
     : [];
   return (
     <VSurface tone="panel" className={styles.root} data-vui="research-critical-path">
-      <VPanelHeader title="当前关键路径" headingLevel={3} />
+      <VPanelHeader title={isZh ? "当前关键路径" : "Current critical path"} headingLevel={3} />
       {path.length ? (
         <ol className={styles.list}>
           {path.map((item, index) => (
@@ -26,7 +28,7 @@ export function ResearchCriticalPathPanel(props: {
             </li>
           ))}
         </ol>
-      ) : <VEmptyState title="暂无已确认路径" />}
+      ) : <VEmptyState title={isZh ? "暂无已确认路径" : "No confirmed path yet"} />}
     </VSurface>
   );
 }

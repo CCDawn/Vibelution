@@ -63,6 +63,7 @@ export type NodeInspectorOpsCardProps = {
   onSelectPinned: (modelRef: string) => void;
   onPromote: (candidate: AgentModelChoice) => void;
   notice?: string | null;
+  lang?: "zh" | "en";
 };
 
 function BudgetMeter(props: NodeInspectorBudgetMeter) {
@@ -90,6 +91,7 @@ export function NodeInspectorOpsCard(props: NodeInspectorOpsCardProps) {
   const [query, setQuery] = useState("");
   const [pendingPromote, setPendingPromote] = useState<AgentModelChoice | null>(null);
   const [offerError, setOfferError] = useState<string | null>(null);
+  const isZh = props.lang !== "en";
   const modelDisabled = props.unbound || props.modelPending;
   const groups = useMemo(
     () => groupAgentModelCandidates(props.candidates, "dialogue", query),
@@ -125,15 +127,15 @@ export function NodeInspectorOpsCard(props: NodeInspectorOpsCardProps) {
           {props.unbound ? "?" : props.agentInitial}
         </span>
         <div className={styles.identityCopy}>
-          <strong className={styles.name}>{props.unbound ? "未指定 Agent" : props.agentName}</strong>
+          <strong className={styles.name}>{props.unbound ? (isZh ? "未指定 Agent" : "No agent assigned") : props.agentName}</strong>
         </div>
         {props.agentSwitchDisabled || !props.agents.length ? (
           <VIconButton
-            label="更换 Agent"
+            label={isZh ? "更换 Agent" : "Change agent"}
             icon={<Users size={15} />}
             variant="ghost"
             isDisabled
-            disabledReason={props.agentSwitchReason || "暂无可更换 Agent"}
+            disabledReason={props.agentSwitchReason || (isZh ? "暂无可更换 Agent" : "No alternative agent available")}
           />
         ) : (
           <VPopover
@@ -146,12 +148,12 @@ export function NodeInspectorOpsCard(props: NodeInspectorOpsCardProps) {
                 type="button"
                 variant="ghost"
                 isIconOnly
-                aria-label="更换 Agent"
+                aria-label={isZh ? "更换 Agent" : "Change agent"}
                 icon={<Users size={15} />}
               />
             )}
           >
-            <div className={styles.pickerList} role="listbox" aria-label="更换 Agent">
+            <div className={styles.pickerList} role="listbox" aria-label={isZh ? "更换 Agent" : "Change agent"}>
               {props.agents.map((agent) => {
                 const active = agent.id === props.agentId && !props.unbound;
                 return (
@@ -191,11 +193,11 @@ export function NodeInspectorOpsCard(props: NodeInspectorOpsCardProps) {
             data-empty={props.unbound ? "true" : "false"}
             data-testid="node-inspector-model-trigger"
             disabled={modelDisabled}
-            aria-label={props.unbound ? "先指定 Agent 再换模型" : `当前模型 ${props.modelLabel}`}
+            aria-label={props.unbound ? (isZh ? "先指定 Agent 再换模型" : "Assign an agent before changing the model") : (isZh ? `当前模型 ${props.modelLabel}` : `Current model ${props.modelLabel}`)}
           >
             <span className={styles.modelRail} aria-hidden="true" />
             <span className={styles.modelBody}>
-              <span className={styles.modelKicker}>模型</span>
+              <span className={styles.modelKicker}>{isZh ? "模型" : "Model"}</span>
               <span className={styles.modelName}>{props.unbound ? "—" : props.modelLabel}</span>
               <span className={styles.modelMeta}>{props.modelMeta}</span>
             </span>
@@ -205,13 +207,13 @@ export function NodeInspectorOpsCard(props: NodeInspectorOpsCardProps) {
       >
         <div className={styles.pickerSearch}>
           <VNativeInput
-            aria-label="搜索模型"
-            placeholder="搜索模型"
+            aria-label={isZh ? "搜索模型" : "Search models"}
+            placeholder={isZh ? "搜索模型" : "Search models"}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
         </div>
-        <div className={styles.pickerList} role="listbox" aria-label="模型">
+        <div className={styles.pickerList} role="listbox" aria-label={isZh ? "模型" : "Models"}>
           {groups.flatMap((group) => group.items).map((candidate) => {
             const active = candidate.modelRef === props.selectedModelRef;
             const reason = agentModelChoiceDisabledReason(candidate, "dialogue", false);
@@ -231,7 +233,7 @@ export function NodeInspectorOpsCard(props: NodeInspectorOpsCardProps) {
                   <strong className={styles.modelName}>{candidate.label || candidate.modelRef}</strong>
                   <span className={styles.modelMeta}>
                     {pending
-                      ? "处理中…"
+                      ? (isZh ? "处理中…" : "Applying…")
                       : `${candidate.providerLabel || candidate.providerId}${reason ? ` · ${reason}` : ""}`}
                   </span>
                 </span>
@@ -241,7 +243,7 @@ export function NodeInspectorOpsCard(props: NodeInspectorOpsCardProps) {
         </div>
       </VPopover>
 
-      <section className={styles.budget} aria-label="节点预算">
+      <section className={styles.budget} aria-label={isZh ? "节点预算" : "Node budget"}>
         {props.meters.map((meter) => (
           <BudgetMeter
             key={meter.key}
@@ -284,34 +286,34 @@ export function NodeInspectorOpsCard(props: NodeInspectorOpsCardProps) {
           <VRouteLinkButton
             to={props.sessionHref}
             variant="ghost"
-            aria-label="打开会话"
+            aria-label={isZh ? "打开会话" : "Open session"}
             className={styles.iconLink}
             icon={<MessageSquare size={15} />}
           />
         ) : (
           <VIconButton
-            label="打开会话"
+            label={isZh ? "打开会话" : "Open session"}
             icon={<MessageSquare size={15} />}
             variant="ghost"
             isDisabled
-            disabledReason={props.sessionDisabledReason || "尚未绑定精确会话"}
+            disabledReason={props.sessionDisabledReason || (isZh ? "尚未绑定精确会话" : "No precise session bound yet")}
           />
         )}
         {props.configHref ? (
           <VRouteLinkButton
             to={props.configHref}
             variant="ghost"
-            aria-label="源配置"
+            aria-label={isZh ? "源配置" : "Agent config"}
             className={styles.iconLink}
             icon={<Settings2 size={15} />}
           />
         ) : (
           <VIconButton
-            label="源配置"
+            label={isZh ? "源配置" : "Agent config"}
             icon={<Settings2 size={15} />}
             variant="ghost"
             isDisabled
-            disabledReason="先指定 Agent"
+            disabledReason={isZh ? "先指定 Agent" : "Assign an agent first"}
           />
         )}
       </div>
@@ -327,11 +329,13 @@ export function NodeInspectorOpsCard(props: NodeInspectorOpsCardProps) {
         onOpenChange={(open) => {
           if (!open) setPendingPromote(null);
         }}
-        title="固定后使用模型"
-        description="此操作将修改 operator config，并只更新当前 Agent 的对话模型。"
+        title={isZh ? "固定后使用模型" : "Pin and use model"}
+        description={isZh
+          ? "此操作将修改 operator config，并只更新当前 Agent 的对话模型。"
+          : "This updates the operator config and changes only the dialogue model of the current agent."}
         tone="neutral"
-        confirmLabel="固定并绑定"
-        cancelLabel="取消"
+        confirmLabel={isZh ? "固定并绑定" : "Pin and bind"}
+        cancelLabel={isZh ? "取消" : "Cancel"}
         confirmPending={Boolean(
           pendingPromote && props.pendingModelRef && pendingPromote.modelRef === props.pendingModelRef,
         )}
