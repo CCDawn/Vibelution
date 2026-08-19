@@ -2,17 +2,29 @@
  * Source-collection controls / side-rail workspace body.
  * Wave 8M: extracted from TeamsRoute.tsx for domain componentization.
  */
-import type { ReactNode, Ref } from "react";
+import type { Dispatch, ReactNode, Ref, SetStateAction } from "react";
 
-import type { Team } from "../../../../api/types";
+import type { DataProcessingRun, Team } from "../../../../api/types";
 import { TeamSourceCollectionControlsPanel } from "./TeamSourceCollectionControlsPanel";
 import { TeamSourceCollectionRunSettingsPanel } from "./TeamSourceCollectionRunSettingsPanel";
 import { TeamSourceCollectionFindingDetailsPanel } from "./TeamSourceCollectionFindingDetailsPanel";
+import type {
+  TeamSourceCollectionFindingAssignment,
+  TeamSourceCollectionFindingQuery,
+  TeamSourceCollectionFindingRunOption,
+} from "./TeamSourceCollectionFindingDetailsPanel";
 import {
   sourceCollectionStatusLabel,
 } from "../presentationModel";
+import type { SourceCollectionDraft } from "../presentationModel";
 import { sourceCollectionRunLabel } from "../runModel";
 import type { SourceCollectionStageModuleId } from "../stageProjection";
+import type { SourceCollectionStageModule } from "../stageModulesModel";
+import type { SourceCollectionSearchExecutionResultView } from "../../teamMutationSurface";
+import type { SourceCollectionOutputDraft } from "../../sourceCollectionMutationModel";
+import type { useSourceCollectionRunQueries } from "../../useSourceCollectionRunQueries";
+import type { useTeamSourceCollectionMutations } from "../../useTeamSourceCollectionMutations";
+import type { useTeamWorkflowStartMutations } from "../../useTeamWorkflowStartMutations";
 import shellStyles from "../../../TeamsRoute.styles";
 import workflowStyles from "../../../TeamsRoute.workflow.styles";
 
@@ -20,43 +32,33 @@ const styles = { ...shellStyles, ...workflowStyles } as Record<string, string>;
 
 type Lang = "zh" | "en";
 
+type SourceCollectionMutations = ReturnType<typeof useTeamSourceCollectionMutations>;
+type SourceCollectionRunStatusData = ReturnType<typeof useSourceCollectionRunQueries>["sourceCollectionRunStatusQuery"]["data"];
+
 export type TeamSourceCollectionControlsWorkspacePanelProps = {
   lang: Lang;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionControlPanelRef: Ref<any>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionStageModules: any[];
+  sourceCollectionControlPanelRef: Ref<HTMLElement>;
+  sourceCollectionStageModules: SourceCollectionStageModule[];
   selectedSourceCollectionStageId: SourceCollectionStageModuleId | string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  selectedSourceCollectionRun: any;
+  selectedSourceCollectionRun: DataProcessingRun | null | undefined;
   sourceCollectionStageFocusLabel: string;
   workflowIngestionTone: (value: string) => string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionRunStatus: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sourceCollectionRunStatus: SourceCollectionRunStatusData;
   renderSourceCollectionSelectedSourcePanel: () => ReactNode;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionDraft: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sourceCollectionDraft: SourceCollectionDraft;
   renderSourceCollectionModeFields: () => ReactNode;
   sourceCollectionCanStart: boolean;
   selectedTeamStartSourceCollectionPending: boolean;
-  setSourceCollectionDraft: (updater: (current: any) => any) => void;
+  setSourceCollectionDraft: Dispatch<SetStateAction<SourceCollectionDraft>>;
   selectedTeam: Team | null | undefined;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  startSourceCollectionRunMutation: any;
+  startSourceCollectionRunMutation: ReturnType<typeof useTeamWorkflowStartMutations>["startSourceCollectionRunMutation"];
   selectedSourceCollectionRunEffectiveId: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionFindingRunOptions: any[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionFindingAssignments: any[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionFindingQueries: any[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sourceCollectionFindingRunOptions: TeamSourceCollectionFindingRunOption[];
+  sourceCollectionFindingAssignments: TeamSourceCollectionFindingAssignment[];
+  sourceCollectionFindingQueries: TeamSourceCollectionFindingQuery[];
   renderSourceCollectionStorageActions: () => ReactNode;
   setSelectedSourceCollectionRunId: (runId: string) => void;
-  setSourceCollectionOutputDraft: (updater: (current: any) => any) => void;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  setSourceCollectionOutputDraft: Dispatch<SetStateAction<SourceCollectionOutputDraft>>;
   renderSourceCollectionManualWritebackPanel: () => ReactNode;
   sourceCollectionDisplayedCandidateCountText: string;
   sourceCollectionProjectedAssessedCountText: string;
@@ -67,19 +69,15 @@ export type TeamSourceCollectionControlsWorkspacePanelProps = {
   sourceCollectionPrecheckCandidateCount: number | string;
   knowledgePendingReviewCount: number | string;
   formalKnowledgeItemCount: number | string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  selectedTeamKnowledgeCollectionIngestResult: any;
+  selectedTeamKnowledgeCollectionIngestResult: SourceCollectionMutations["runKnowledgeCollectionCompletionMutation"]["data"];
   selectedTeamKnowledgeCollectionIngestError: Error | null;
   selectedTeamStartSourceCollectionError: Error | null;
   selectedTeamRecordSourceCollectionOutputError: Error | null;
   selectedTeamExecuteSourceCollectionSearchError: Error | null;
   selectedTeamStartSourceCollectionStageTaskError: Error | null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  selectedTeamExecuteSourceCollectionSearchResult: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  selectedTeamRecordSourceCollectionOutputResult: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  renderSourceCollectionStageAgents: (stageId: any) => ReactNode;
+  selectedTeamExecuteSourceCollectionSearchResult: SourceCollectionSearchExecutionResultView | null | undefined;
+  selectedTeamRecordSourceCollectionOutputResult: SourceCollectionMutations["recordSourceCollectionOutputMutation"]["data"];
+  renderSourceCollectionStageAgents: (stageId: SourceCollectionStageModuleId) => ReactNode;
 };
 
 export function TeamSourceCollectionControlsWorkspacePanel(props: TeamSourceCollectionControlsWorkspacePanelProps) {
@@ -130,7 +128,7 @@ export function TeamSourceCollectionControlsWorkspacePanel(props: TeamSourceColl
 
 
     const activeModule =
-      sourceCollectionStageModules.find((module: any) => module.id === selectedSourceCollectionStageId)
+      sourceCollectionStageModules.find((module) => module.id === selectedSourceCollectionStageId)
       ?? sourceCollectionStageModules[0];
     return (
       <TeamSourceCollectionControlsPanel

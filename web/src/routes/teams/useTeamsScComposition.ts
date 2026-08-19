@@ -2,23 +2,28 @@
  * R1-a / R2-o/p: SC composition for Teams workbench.
  * Owns presentation + stage surfaces; bag passthrough via spread (no flat re-list).
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import type { RuntimeSummary } from "../../api/types";
 import { useSourceCollectionPresentation } from "./useSourceCollectionPresentation";
+import type { UseSourceCollectionPresentationInput } from "./useSourceCollectionPresentationTypes";
 import { composeSourceCollectionStageSurfaces } from "./composeSourceCollectionStageSurfaces";
+import type { ComposeSourceCollectionStageSurfacesInput } from "./composeSourceCollectionStageSurfaces";
 import { sourceCollectionStageUserSummary } from "./source-collection/stageProjection";
 
-/** Loose bag for SC composition; keys are presentation + stage-shell deps. */
+/**
+ * Loose bag for SC composition; keys are presentation + stage-shell deps.
+ * Foundation bag boundary: the 328-field workbench bag stays `unknown`-keyed
+ * here; precise contracts are enforced at the presentation/compose casts below
+ * (and by the key-list contract tests), not by re-listing the bag statically.
+ */
 export type TeamsScCompositionContext = {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  [key: string]: any;
+  [key: string]: unknown;
   lang?: "zh" | "en";
   selectedTeam?: unknown;
   effectiveTeamId?: string;
 };
 
-function pickCtx(ctx: TeamsScCompositionContext, keys: readonly string[]) {
-  const out: Record<string, any> = {};
+function pickCtx(ctx: TeamsScCompositionContext, keys: readonly string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
   for (const key of keys) {
     if (key in ctx) out[key] = ctx[key];
   }
@@ -36,15 +41,18 @@ export function useTeamsScComposition(ctx: TeamsScCompositionContext) {
   const presentation = useSourceCollectionPresentation({
     ...pickCtx(ctx, PRESENTATION_CTX_KEYS),
     runtimeSummaryQuery,
-    requestedSourceCollectionStage: ctx.requestedSourceCollectionStage ?? null,
-  } as any);
+    requestedSourceCollectionStage: (ctx.requestedSourceCollectionStage ?? null) as UseSourceCollectionPresentationInput["requestedSourceCollectionStage"],
+  } as unknown as UseSourceCollectionPresentationInput);
 
   // R2-k/R2-o: shell + presentation bag → stage modules / board chrome / controller.
+  // The pickCtx spread drops index keys at the type level (TS limitation), so the
+  // precise compose contract is asserted through unknown; key lists are enforced
+  // by the composition contract tests.
   const stageSurfaces = composeSourceCollectionStageSurfaces({
     ...presentation,
     ...pickCtx(ctx, STAGE_SHELL_CTX_KEYS),
     sourceCollectionStageUserSummary,
-  });
+  } as unknown as ComposeSourceCollectionStageSurfacesInput);
 
   return {
     ...presentation,

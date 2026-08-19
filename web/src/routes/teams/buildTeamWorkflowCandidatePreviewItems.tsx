@@ -1,11 +1,12 @@
 /**
  * R2-b: Team workflow candidate preview cards (quality / chunk actions).
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { AlertTriangle, CheckCircle2, Plus, RefreshCw } from "lucide-react";
 
 import { VNativeButton } from "../../components/vui";
+import type { TeamWorkflowCandidate } from "../../api/types";
 import type { TeamWorkflowCandidatePreviewItem } from "../TeamWorkflowCandidatePreviewPanel";
+import type { useTeamSourceCollectionMutations } from "./useTeamSourceCollectionMutations";
 import {
   candidateSourceQualityAssessmentSummary,
   formatTime,
@@ -22,15 +23,17 @@ import {
 } from "./teamRouteShellModel";
 import { workflowStateLabel } from "./workflowPresentation";
 
+type SourceCollectionMutations = ReturnType<typeof useTeamSourceCollectionMutations>;
+
 export type BuildTeamWorkflowCandidatePreviewArgs = {
   lang: "zh" | "en";
-  teamWorkflowCandidates: any[];
+  teamWorkflowCandidates: TeamWorkflowCandidate[];
   selectedTeam: { teamId?: string } | null | undefined;
   selectedTeamAssessSourceQualityPending: boolean;
   selectedTeamPlanPaperNoteChunksPending: boolean;
   selectedTeamSourceQualityPending: boolean;
-  assessSourceQualityMutation: any;
-  planPaperNoteChunksMutation: any;
+  assessSourceQualityMutation: SourceCollectionMutations["assessSourceQualityMutation"];
+  planPaperNoteChunksMutation: SourceCollectionMutations["planPaperNoteChunksMutation"];
 };
 
 export function buildTeamWorkflowCandidatePreviewItems(

@@ -1,10 +1,10 @@
 /**
  * R2-s close-out: SC composition layer for workbench foundation.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useTeamsScComposition } from "./useTeamsScComposition";
+import type { buildTeamsScLayerInput } from "./buildTeamsScLayerInput";
 
-export function useTeamsWorkbenchScLayer(ctx: any) {
+export function useTeamsWorkbenchScLayer(ctx: ReturnType<typeof buildTeamsScLayerInput>) {
   const scComposition = useTeamsScComposition({
     ...ctx.sourceCollectionWorkspace,
     ...ctx.mutationBundle,

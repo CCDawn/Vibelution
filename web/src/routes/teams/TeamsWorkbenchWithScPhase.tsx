@@ -3,7 +3,6 @@
  * Loaded as a separate chunk so Mid/Tail presentation + compose/inject leave the
  * eager TeamsRoute/foundation graph.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import type { ReactNode } from "react";
 
 import { useTeamsWorkbenchScLayer } from "./useTeamsWorkbenchScLayer";
@@ -11,6 +10,8 @@ import { useTeamsWorkbenchShellPhase } from "./useTeamsWorkbenchShellPhase";
 
 export type TeamsWorkbenchWithScPhaseProps = {
   /** Foundation bag without SC composition fields (includes scLayerInput + launch guard ref). */
+  // Foundation bag boundary: stays any until Phase 9+ foundation typing.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   base: Record<string, any>;
 };
 

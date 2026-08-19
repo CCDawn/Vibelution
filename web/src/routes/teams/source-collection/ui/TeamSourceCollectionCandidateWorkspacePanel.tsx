@@ -4,6 +4,7 @@
  */
 import { memo, useCallback, useEffect, useRef, type ReactNode } from "react";
 
+import type { TeamWorkflowCandidate } from "../../../../api/types";
 import { TeamCandidateCard } from "../../../../components/vui/product/team-management";
 import {
   sourceCollectionCandidateProvenance,
@@ -14,18 +15,18 @@ import {
   sourceCollectionSourceFilterLabel,
   sourceCollectionCandidateEmptyStateText,
 } from "../evidenceModel";
+import type { SourceCollectionSourceFilter } from "../evidenceModel";
 import {
   candidateSourceQualityAssessmentSummary,
   sourceCollectionResultTone,
   sourceCollectionSimpleCandidateStatusPresentation,
 } from "../presentationModel";
-import type { SourceCollectionStageModuleId } from "../stageProjection";
+import type { SourceCollectionStageCardProjection, SourceCollectionStageModuleId } from "../stageProjection";
 import { TeamSourceCollectionCandidatePanel } from "./TeamSourceCollectionCandidatePanel";
 
 type Lang = "zh" | "en";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type CandidateRow = any;
+type CandidateRow = TeamWorkflowCandidate;
 
 type SourceCollectionCandidateCardProps = {
   candidate: CandidateRow;
@@ -83,12 +84,9 @@ const SourceCollectionCandidateCard = memo(function SourceCollectionCandidateCar
 
 export type TeamSourceCollectionCandidateWorkspacePanelProps = {
   lang: Lang;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionFilteredRunCandidates: any[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionPageItems: (stageId: SourceCollectionStageModuleId, items: any[]) => { items: any[]; start: number; end: number };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionCandidateProjection: any;
+  sourceCollectionFilteredRunCandidates: TeamWorkflowCandidate[];
+  sourceCollectionPageItems: <T>(stageId: SourceCollectionStageModuleId, items: T[]) => { items: T[]; start: number; end: number };
+  sourceCollectionCandidateProjection: SourceCollectionStageCardProjection | null;
   sourceCollectionSourceFilter: string;
   sourceCollectionDisplayedCandidateCount: number;
   sourceCollectionCountText: (loading: boolean, count: number) => string;
@@ -100,12 +98,9 @@ export type TeamSourceCollectionCandidateWorkspacePanelProps = {
   sourceCollectionExpandedPanelId: string;
   setSourceCollectionExpandedPanelId: (id: string) => void;
   sourceCollectionExtractionDefaultPanelId: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionCandidateStepState: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionDisplayedCandidateFilterCounts: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  renderSourceCollectionFilterBar: (...args: any[]) => ReactNode;
+  sourceCollectionCandidateStepState: string;
+  sourceCollectionDisplayedCandidateFilterCounts: Record<SourceCollectionSourceFilter, number>;
+  renderSourceCollectionFilterBar: (counts: Record<SourceCollectionSourceFilter, number>, label: string, loading?: boolean) => ReactNode;
   sourceCollectionDisplayedCandidateCountText: string;
   sourceCollectionProjectedAssessedCountText: string;
   sourceCollectionProjectedApprovedCountText: string;
@@ -113,11 +108,9 @@ export type TeamSourceCollectionCandidateWorkspacePanelProps = {
   sourceCollectionEvidenceReadyCandidateCount: number | string;
   sourceCollectionMissingEvidenceAnchorCount: number | string;
   sourceCollectionProjectedCollectedCount: number;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   renderSourceCollectionPagination: (stageId: SourceCollectionStageModuleId, total: number) => ReactNode;
   selectedSourceCollectionCandidateId: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  selectSourceCollectionCandidate: (candidate: any) => void;
+  selectSourceCollectionCandidate: (candidate: TeamWorkflowCandidate) => void;
 };
 
 export function TeamSourceCollectionCandidateWorkspacePanel(props: TeamSourceCollectionCandidateWorkspacePanelProps) {

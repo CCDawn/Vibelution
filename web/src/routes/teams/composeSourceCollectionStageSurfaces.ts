@@ -2,25 +2,32 @@
  * Compose SC stage modules, board chrome, and inject controller after presentation.
  * Phase R2-k extract from useTeamsScComposition (behavior-conserving).
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import {
   buildSourceCollectionBoardChrome,
   buildSourceCollectionCompletionFlowNodes,
   buildSourceCollectionStageModules,
   buildSourceCollectionStandaloneStageModules,
 } from "./source-collection/stageModulesModel";
+import type { BuildSourceCollectionStageModulesInput } from "./source-collection/stageModulesModel";
 import {
   createSourceCollectionController,
   createSourceCollectionStageAdvance,
 } from "./source-collection/createSourceCollectionController";
+import type { SourceCollectionControllerContext } from "./source-collection/createSourceCollectionController";
 import { sourceCollectionPageSlice } from "./teamSourceCollectionShellModel";
 
-export type ComposeSourceCollectionStageSurfacesInput = {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  [key: string]: any;
-  lang?: "zh" | "en";
-  selectedTeam?: unknown;
-};
+/** Keys compose creates internally before feeding the builders/controller. */
+type ComposeInternallyCreatedKeys =
+  | "startSourceCollectionStageSessionTask"
+  | "sourceCollectionStageModules"
+  | "sourceCollectionBoardNextStepLabel"
+  | "sourceCollectionPipelineGraphHealth"
+  | "sourceCollectionFindingStageCompact";
+
+export type ComposeSourceCollectionStageSurfacesInput = Omit<
+  SourceCollectionControllerContext & BuildSourceCollectionStageModulesInput,
+  ComposeInternallyCreatedKeys
+>;
 
 /** Merge presentation bag + shell helpers, then build stage chrome/controller surfaces. */
 export function composeSourceCollectionStageSurfaces(input: ComposeSourceCollectionStageSurfacesInput) {
@@ -343,7 +350,7 @@ export function composeSourceCollectionStageSurfaces(input: ComposeSourceCollect
     selectedTeamSourceQualityPending,
     sourceCollectionExperimentPlanningRoute,
     sourceCollectionStageFocusLabel,
-    selectedTeamKnowledgeCollectionWorkRun: selectedTeamKnowledgeCollectionWorkRun as any,
+    selectedTeamKnowledgeCollectionWorkRun,
     sourceCollectionStageLaunchActive,
     sourceCollectionStageLaunchSummary,
     sourceCollectionStageUserSummary,
@@ -386,7 +393,7 @@ export function composeSourceCollectionStageSurfaces(input: ComposeSourceCollect
   });
   const sourceCollectionCompletionFlow = selectedTeamKnowledgeCollectionWorkRun?.flowVisualization ?? null;
   const sourceCollectionCompletionFlowNodes = buildSourceCollectionCompletionFlowNodes({
-    selectedTeamKnowledgeCollectionWorkRun: selectedTeamKnowledgeCollectionWorkRun as any,
+    selectedTeamKnowledgeCollectionWorkRun,
     sourceCollectionStageModules,
   });
   const sourceCollectionStandaloneStageModules = buildSourceCollectionStandaloneStageModules({

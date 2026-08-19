@@ -940,8 +940,8 @@ export function useTeamsWorkbenchFoundation({
   );
   // SC composition runs in lazy TeamsWorkbenchWithScPhase (secondary chunk).
   const scLayerInput = buildTeamsScLayerInput({
-    sourceCollectionWorkspace: sourceCollectionWorkspace as Record<string, any>,
-    mutationBundle: mutationBundle as Record<string, any>,
+    sourceCollectionWorkspace,
+    mutationBundle,
     shell: {
       lang,
       selectedTeam,

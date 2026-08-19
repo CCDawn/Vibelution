@@ -56,6 +56,8 @@ export type SourceCollectionStageActionReadinessProjection = {
 export type SourceCollectionStageClosureSummary = {
   userStatus?: "success" | "partial" | "failed" | string;
   artifactStatus?: string;
+  /** Legacy defensive field: no current backend producer, kept for payload compat. */
+  advanceOutcome?: string;
   agentTurnStatus?: string;
   targetLabel?: string;
   message?: string;

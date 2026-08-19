@@ -1,7 +1,10 @@
 /**
  * R2-b: Source-collection overview summary/stats/plan bags for research surfaces.
  */
-/* eslint-disable @typescript-eslint/no-explicit-any */
+import type {
+  DataProcessingCollectionOutputPayload,
+  TeamWorkflowSourceCollectionRunStartPayload,
+} from "../../api/types";
 import type {
   TeamSourceCollectionOverviewPlan,
   TeamSourceCollectionOverviewResult,
@@ -23,13 +26,16 @@ export type BuildSourceCollectionOverviewBagArgs = {
   sourceCollectionSearchOpenAssignmentCountText: string;
   sourceCollectionDownstreamOpenAssignmentCountText: string;
   sourceCollectionQueryCountText: string;
-  sourceCollectionPromptCacheStatus: any;
+  sourceCollectionPromptCacheStatus: string;
   sourceCollectionPromptCacheMode: string | null | undefined;
-  selectedTeamStartSourceCollectionResult: any;
+  selectedTeamStartSourceCollectionResult: TeamWorkflowSourceCollectionRunStartPayload | null | undefined;
   sourceCollectionAssignmentsQueryPending: boolean;
   selectedTeamStartSourceCollectionError: { message?: string } | null | undefined;
   selectedTeamRecordSourceCollectionOutputError: { message?: string } | null | undefined;
-  selectedTeamRecordSourceCollectionOutputResult: any;
+  selectedTeamRecordSourceCollectionOutputResult: {
+    output: DataProcessingCollectionOutputPayload;
+    imported: unknown[];
+  } | null | undefined;
 };
 
 export function buildSourceCollectionOverviewBag(args: BuildSourceCollectionOverviewBagArgs) {
@@ -52,7 +58,7 @@ export function buildSourceCollectionOverviewBag(args: BuildSourceCollectionOver
       value: `${sourceCollectionPromptCacheStatusLabel(args.sourceCollectionPromptCacheStatus, lang)}${args.sourceCollectionPromptCacheMode ? ` · ${args.sourceCollectionPromptCacheMode}` : ""}`,
     },
   ];
-  const sourceCollectionStartResult = args.selectedTeamStartSourceCollectionResult as any;
+  const sourceCollectionStartResult = args.selectedTeamStartSourceCollectionResult;
   const sourceCollectionOverviewPlan: TeamSourceCollectionOverviewPlan | null = sourceCollectionStartResult ? {
     planId: sourceCollectionStartResult.searchPlan.planId,
     seeds: sourceCollectionStartResult.searchPlan.querySeeds.join(" / "),
@@ -71,7 +77,7 @@ export function buildSourceCollectionOverviewBag(args: BuildSourceCollectionOver
     args.selectedTeamStartSourceCollectionError?.message,
     args.selectedTeamRecordSourceCollectionOutputError?.message,
   ].filter((message): message is string => Boolean(message));
-  const sourceCollectionOutputResult = args.selectedTeamRecordSourceCollectionOutputResult as any;
+  const sourceCollectionOutputResult = args.selectedTeamRecordSourceCollectionOutputResult;
   const sourceCollectionOverviewResult: TeamSourceCollectionOverviewResult | null = sourceCollectionOutputResult ? {
     title: lang === "zh" ? "已回写" : "Written",
     detail: `${sourceCollectionOutputResult.output.createdRecords.length} DataRecord / ${sourceCollectionOutputResult.imported.length} candidate`,

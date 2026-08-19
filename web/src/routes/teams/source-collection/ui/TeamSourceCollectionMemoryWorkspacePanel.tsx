@@ -4,12 +4,18 @@
  */
 import type { ReactNode } from "react";
 
+import type {
+  TeamWorkflowCandidate,
+  TeamWorkflowKnowledgeIngestionActionItem,
+  TeamWorkflowKnowledgeIngestionStatus,
+} from "../../../../api/types";
 import { TeamCandidateCard } from "../../../../components/vui/product/team-management";
 import {
   sourceCollectionCandidateProvenance,
   sourceCollectionCandidateSourceCategory,
   sourceCollectionSourceFilterLabel,
 } from "../evidenceModel";
+import type { SourceCollectionSourceFilter } from "../evidenceModel";
 import {
   candidateSourceQualityAssessmentSummary,
   formatTime,
@@ -29,35 +35,25 @@ type Lang = "zh" | "en";
 
 export type TeamSourceCollectionMemoryWorkspacePanelProps = {
   lang: Lang;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  teamWorkflowKnowledgeIngestionStatus: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionFilteredRunCandidates: any[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionPageItems: (stageId: SourceCollectionStageModuleId, items: any[]) => { items: any[]; start: number; end: number };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  teamWorkflowCandidatesById: Map<string, any>;
+  teamWorkflowKnowledgeIngestionStatus: TeamWorkflowKnowledgeIngestionStatus | null | undefined;
+  sourceCollectionFilteredRunCandidates: TeamWorkflowCandidate[];
+  sourceCollectionPageItems: <T>(stageId: SourceCollectionStageModuleId, items: T[]) => { items: T[]; start: number; end: number };
+  teamWorkflowCandidatesById: Map<string, TeamWorkflowCandidate>;
   sourceCollectionFocusedPanelId: string;
   selectedSourceCollectionStageId: string;
   sourceCollectionExpandedPanelId: string;
   setSourceCollectionExpandedPanelId: (id: string) => void;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionMemoryStepState: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  sourceCollectionCandidateFilterCounts: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  renderSourceCollectionFilterBar: (...args: any[]) => ReactNode;
+  sourceCollectionMemoryStepState: string | null | undefined;
+  sourceCollectionCandidateFilterCounts: Record<SourceCollectionSourceFilter, number>;
+  renderSourceCollectionFilterBar: (counts: Record<SourceCollectionSourceFilter, number>, label: string) => ReactNode;
   knowledgePendingReviewCount: number | string;
   formalKnowledgeItemCount: number | string;
   sourceCollectionApprovedCount: number | string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   renderSourceCollectionPagination: (stageId: SourceCollectionStageModuleId, total: number) => ReactNode;
   workflowIngestionTone: (value: string) => string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   teamWorkflowKnowledgeIngestionStatusQuery: { error?: unknown };
   selectedSourceCollectionCandidateId: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  selectSourceCollectionCandidate: (candidate: any) => void;
+  selectSourceCollectionCandidate: (candidate: TeamWorkflowCandidate) => void;
 };
 
 export function TeamSourceCollectionMemoryWorkspacePanel(props: TeamSourceCollectionMemoryWorkspacePanelProps) {
@@ -86,9 +82,8 @@ export function TeamSourceCollectionMemoryWorkspacePanel(props: TeamSourceCollec
 
 
     const actionItems = teamWorkflowKnowledgeIngestionStatus?.actionItems ?? [];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const actionItemsByCandidateId = new Map<string, any[]>();
-    actionItems.forEach((item: any) => {
+    const actionItemsByCandidateId = new Map<string, TeamWorkflowKnowledgeIngestionActionItem[]>();
+    actionItems.forEach((item) => {
       if (!item.candidateId) {
         return;
       }
@@ -96,12 +91,12 @@ export function TeamSourceCollectionMemoryWorkspacePanel(props: TeamSourceCollec
       current.push(item);
       actionItemsByCandidateId.set(item.candidateId, current);
     });
-    const memoryCandidates = sourceCollectionFilteredRunCandidates.filter((candidate: any) =>
+    const memoryCandidates = sourceCollectionFilteredRunCandidates.filter((candidate) =>
       sourceCollectionCandidateQualityState(candidate).approved || actionItemsByCandidateId.has(candidate.candidateId),
     );
     const visibleMemoryCandidates = memoryCandidates;
     const pagedMemoryCandidates = sourceCollectionPageItems("ingestion", visibleMemoryCandidates);
-    const orphanActionItems = actionItems.filter((item: any) => !item.candidateId || !teamWorkflowCandidatesById.has(item.candidateId));
+    const orphanActionItems = actionItems.filter((item) => !item.candidateId || !teamWorkflowCandidatesById.has(item.candidateId));
     return (
       <TeamSourceCollectionMemoryPanel
         lang={lang}
@@ -128,7 +123,7 @@ export function TeamSourceCollectionMemoryWorkspacePanel(props: TeamSourceCollec
         emptyMessage={lang === "zh" ? "当前过滤条件下没有入库资料。" : "No ingestion items match this filter."}
         pagination={renderSourceCollectionPagination("ingestion", visibleMemoryCandidates.length)}
         statusItems={orphanActionItems.length
-          ? orphanActionItems.map((item: any) => (
+          ? orphanActionItems.map((item) => (
             <span key={`${item.code}-${item.message}`} className={workflowIngestionTone(item.severity)}>
               {workflowIngestionStatusLabel(item.severity, lang)} · {item.message}
             </span>
@@ -138,7 +133,7 @@ export function TeamSourceCollectionMemoryWorkspacePanel(props: TeamSourceCollec
           <div className={styles.messageError}>{teamWorkflowKnowledgeIngestionStatusQuery.error.message}</div>
         ) : null}
       >
-        {pagedMemoryCandidates.items.map((candidate: any) => {
+        {pagedMemoryCandidates.items.map((candidate) => {
               const provenance = sourceCollectionCandidateProvenance(candidate, lang);
               const sourceQualitySummary = candidateSourceQualityAssessmentSummary(candidate);
               const candidateActionItems = actionItemsByCandidateId.get(candidate.candidateId) ?? [];
@@ -172,7 +167,7 @@ export function TeamSourceCollectionMemoryWorkspacePanel(props: TeamSourceCollec
                   onActivate={() => selectSourceCollectionCandidate(candidate)}
                   actions={candidateActionItems.length ? (
                     <div className={styles.workflowIngestionActions}>
-                      {candidateActionItems.map((item: any) => (
+                      {candidateActionItems.map((item) => (
                         <span key={`${item.code}-${item.message}`} className={workflowIngestionTone(item.severity)}>
                           {workflowIngestionStatusLabel(item.severity, lang)} · {item.message}
                         </span>
