@@ -81,6 +81,12 @@ export type WorkflowCanvasStageInput = {
   index?: number;
   /** Derived stage tone from member node statuses (not a second write authority). */
   stageTone?: "idle" | "active" | "done" | "attention";
+  /**
+   * Optional stage-header progress override ("completed / total"). When absent
+   * the header counts succeeded member nodes; the hypothesis-first region uses
+   * this to show 已闭环轮次/预算 instead of card counts.
+   */
+  progress?: { completed: number; total: number };
 };
 
 export type WorkflowCanvasRunMeta = {

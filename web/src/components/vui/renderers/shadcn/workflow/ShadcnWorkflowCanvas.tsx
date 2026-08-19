@@ -219,6 +219,7 @@ function WorkflowCanvasInner({
     () =>
       layout.nodes.map((node) => {
         if (node.kind === "stage") {
+          const stageInput = graph.stages.find((stage) => stage.stageId === node.stageId);
           return {
             id: node.id,
             type: "stageRegion",
@@ -227,8 +228,10 @@ function WorkflowCanvasInner({
               label: node.label,
               stageTone: node.stageTone,
               stageIndex: stageIndexById.get(node.stageId) ?? 0,
-              taskCount: graph.stages.find((stage) => stage.stageId === node.stageId)?.nodeIds.length ?? 0,
-              completedCount: graph.nodes.filter(
+              // Stage input may override the header counter (e.g. the
+              // hypothesis-first region shows 已闭环轮次/预算, not card counts).
+              taskCount: stageInput?.progress?.total ?? stageInput?.nodeIds.length ?? 0,
+              completedCount: stageInput?.progress?.completed ?? graph.nodes.filter(
                 (task) => task.stageId === node.stageId && task.status === "succeeded",
               ).length,
               layoutMode,
