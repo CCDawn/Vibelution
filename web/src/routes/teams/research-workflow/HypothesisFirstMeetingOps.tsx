@@ -116,9 +116,13 @@ export function HypothesisFirstMeetingOps(props: {
     mutationFn: () => openHypothesisCandidateGeneration(props.teamId, props.questionId),
     onSuccess: invalidate,
   });
+  const collectionRunId = props.nextAction.collectionRunId || "";
+  const canHandoff = props.nextAction.command === "retry_handoff"
+    && Boolean(props.nextAction.collectionRequestId)
+    && Boolean(collectionRunId);
   const handoffMutation = useMutation({
     mutationFn: () => recordCollectionHandoff(props.teamId, props.nextAction.collectionRequestId || "", {
-      handoffRef: `source_collection_run:${props.nextAction.collectionRequestId || "unknown"}`,
+      handoffRef: `source_collection_run:${collectionRunId}`,
     }),
     onSuccess: invalidate,
   });
@@ -138,6 +142,10 @@ export function HypothesisFirstMeetingOps(props: {
   const commandEnabled = props.nextAction.meetingRoundId === props.meetingRoundId;
   const command = commandEnabled ? (props.nextAction.recovery?.command || props.nextAction.command) : undefined;
   const commandLabel = commandEnabled ? (props.nextAction.recovery?.label || props.nextAction.commandLabel) : undefined;
+  const commandDisabledReason = props.nextAction.disabledReason
+    || (command === "retry_handoff" && !canHandoff
+      ? "缺少资料搜集运行标识，无法重试自动交接"
+      : undefined);
   const pending = draftMutation.isPending
     || approveMutation.isPending
     || rejectMutation.isPending
@@ -164,7 +172,7 @@ export function HypothesisFirstMeetingOps(props: {
       return;
     }
     if (next === "retry_handoff") {
-      handoffMutation.mutate();
+      if (canHandoff) handoffMutation.mutate();
       return;
     }
     if (next === "retry_collection" || next === "continue_collection") {
@@ -192,8 +200,8 @@ export function HypothesisFirstMeetingOps(props: {
             variant="primary"
             density="compact"
             isPending={pending}
-            isDisabled={Boolean(props.nextAction.disabledReason)}
-            disabledReason={props.nextAction.disabledReason}
+            isDisabled={Boolean(commandDisabledReason)}
+            disabledReason={commandDisabledReason}
             onPress={() => runCommand(command)}
           >
             {commandLabel}

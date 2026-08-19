@@ -352,6 +352,56 @@ describe("resolveHypothesisFirstNextAction", () => {
     expect(next.navigationLabel).not.toBe(next.commandLabel);
   });
 
+  it("carries the real collectionRunId through recovery and handoff states", () => {
+    const failed = resolveHypothesisFirstNextAction({
+      run: { runId: "run-1" },
+      selection: selection(),
+      meetings: [meeting({ status: "closed" })],
+      collectionRequests: [request({ status: "failed", collectionRunId: "run-collect-99" })],
+      collectionChildStatus: "failed",
+    });
+    expect(failed.stage).toBe("collection_recovery");
+    expect(failed.collectionRunId).toBe("run-collect-99");
+    expect(failed.collectionRunId).not.toBe(failed.collectionRequestId);
+    expect(failed.collectionRunId).not.toBe("unknown");
+
+    const handoff = resolveHypothesisFirstNextAction({
+      run: { runId: "run-1" },
+      selection: selection(),
+      meetings: [meeting({ status: "closed" })],
+      collectionRequests: [request({ status: "completed", collectionRunId: "run-collect-99" })],
+      collectionChildStatus: "completed",
+    });
+    expect(handoff.stage).toBe("handoff_pending");
+    expect(handoff.collectionRunId).toBe("run-collect-99");
+    expect(handoff.collectionRunId).not.toBe(handoff.collectionRequestId);
+
+    const collecting = resolveHypothesisFirstNextAction({
+      run: { runId: "run-1" },
+      selection: selection(),
+      chainState: chain({ selectionId: "sel-1", collectionReady: true }),
+      meetings: [meeting({ status: "closed" })],
+      collectionRequests: [request({ status: "running", collectionRunId: "run-collect-99" })],
+      collectionChildStatus: "running",
+    });
+    expect(collecting.stage).toBe("collecting");
+    expect(collecting.collectionRunId).toBe("run-collect-99");
+  });
+
+  it("blocks handoff with a human-readable reason when the request has no bound run", () => {
+    const next = resolveHypothesisFirstNextAction({
+      run: { runId: "run-1" },
+      selection: selection(),
+      meetings: [meeting({ status: "closed" })],
+      collectionRequests: [request({ status: "completed", collectionRunId: "" })],
+      collectionChildStatus: "completed",
+    });
+    expect(next.stage).toBe("blocked");
+    expect(next.collectionRunId).toBeUndefined();
+    expect(next.command).toBeUndefined();
+    expect(next.disabledReason).toContain("缺少子运行标识");
+  });
+
   it("navigates to the next review after handoff", () => {
     const next = resolveHypothesisFirstNextAction({
       run: { runId: "run-1" },

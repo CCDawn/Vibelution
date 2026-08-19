@@ -16,6 +16,14 @@ vi.mock("../../../api/chat", () => ({
   fetchChatRoomDetail: vi.fn().mockResolvedValue({ rounds: [] }),
 }));
 
+vi.mock("../../../api/hypothesisFirst", () => ({
+  recordCollectionHandoff: vi.fn().mockResolvedValue({}),
+  openHypothesisCandidateGeneration: vi.fn().mockResolvedValue({}),
+}));
+
+import { recordCollectionHandoff } from "../../../api/hypothesisFirst";
+const mockedRecordCollectionHandoff = vi.mocked(recordCollectionHandoff);
+
 vi.mock("./HypothesisFirstMeetingOps", () => ({
   HypothesisFirstMeetingOps: (props: { nextAction: { commandLabel?: string; stage: string; disabledReason?: string } }) => (
     <div data-testid="meeting-ops">
@@ -266,6 +274,127 @@ describe("HypothesisFirstNodeInspector", () => {
       />,
     );
     expect(container.textContent).toContain("重试自动交接");
+  });
+
+  it("builds retry handoff ref from the real collectionRunId, never requestId or unknown", async () => {
+    mockedChain.mockReturnValue(chainData({
+      selection: {
+        program: "p", theme: "t", campaign: "c", question: "Q-01", branch: "b", workflow: "w", agentId: "a",
+        schemaVersion: 1,
+        selectionId: "sel-1",
+        selectionHash: "h",
+        mode: "manual",
+        scopeHash: "sh",
+        questionId: "Q-01",
+        selectedCandidateIds: ["cand-1"],
+        previousSelectionId: "",
+        decidedBy: "leader",
+        createdAt: "2026-08-19T00:00:00Z",
+      },
+      meetings: [scopeMeeting({
+        meetingRoundId: "hf-review-1",
+        meetingType: "hypothesis_review",
+        status: "closed",
+        roundIndex: 1,
+      })],
+      collectionRequests: [{
+        program: "p", theme: "t", campaign: "c", question: "Q-01", branch: "b", workflow: "w", agentId: "a",
+        schemaVersion: 1,
+        recordKind: "hypothesis_first_collection_request",
+        requestId: "req-1",
+        requestHash: "rh",
+        status: "completed",
+        meetingRoundId: "hf-review-1",
+        decisionId: "dec-1",
+        questionId: "Q-01",
+        mode: "review",
+        scopeHash: "sh",
+        searchEnvelope: {},
+        requirements: {},
+        writebackPolicy: {},
+        collectionRunId: "run-collect-99",
+        createdAt: "2026-08-19T02:00:00Z",
+      }],
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_collection_req-1"
+        runId="run-1"
+        collectionChildStatus="completed"
+        onOpenQuestion={() => {}}
+      />,
+    );
+    const button = [...container.querySelectorAll("button")].find((el) => el.textContent?.includes("重试自动交接"));
+    expect(button).toBeTruthy();
+    await act(async () => {
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(mockedRecordCollectionHandoff).toHaveBeenCalledTimes(1);
+    const [teamId, requestId, body] = mockedRecordCollectionHandoff.mock.calls[0];
+    expect(teamId).toBe("team-1");
+    expect(requestId).toBe("req-1");
+    expect(body.handoffRef).toBe("source_collection_run:run-collect-99");
+    expect(body.handoffRef).not.toContain("req-1");
+    expect(body.handoffRef).not.toContain("unknown");
+  });
+
+  it("does not issue a misleading handoff when no collection run is bound", () => {
+    mockedChain.mockReturnValue(chainData({
+      selection: {
+        program: "p", theme: "t", campaign: "c", question: "Q-01", branch: "b", workflow: "w", agentId: "a",
+        schemaVersion: 1,
+        selectionId: "sel-1",
+        selectionHash: "h",
+        mode: "manual",
+        scopeHash: "sh",
+        questionId: "Q-01",
+        selectedCandidateIds: ["cand-1"],
+        previousSelectionId: "",
+        decidedBy: "leader",
+        createdAt: "2026-08-19T00:00:00Z",
+      },
+      meetings: [scopeMeeting({
+        meetingRoundId: "hf-review-1",
+        meetingType: "hypothesis_review",
+        status: "closed",
+        roundIndex: 1,
+      })],
+      collectionRequests: [{
+        program: "p", theme: "t", campaign: "c", question: "Q-01", branch: "b", workflow: "w", agentId: "a",
+        schemaVersion: 1,
+        recordKind: "hypothesis_first_collection_request",
+        requestId: "req-1",
+        requestHash: "rh",
+        status: "completed",
+        meetingRoundId: "hf-review-1",
+        decisionId: "dec-1",
+        questionId: "Q-01",
+        mode: "review",
+        scopeHash: "sh",
+        searchEnvelope: {},
+        requirements: {},
+        writebackPolicy: {},
+        collectionRunId: "",
+        createdAt: "2026-08-19T02:00:00Z",
+      }],
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_collection_req-1"
+        runId="run-1"
+        collectionChildStatus="completed"
+        onOpenQuestion={() => {}}
+      />,
+    );
+    const button = [...container.querySelectorAll("button")].find((el) => el.textContent?.includes("重试自动交接"));
+    expect(button).toBeUndefined();
+    expect(container.textContent).toContain("缺少子运行标识");
+    expect(mockedRecordCollectionHandoff).not.toHaveBeenCalled();
   });
 
   it("surfaces human adjudication on the convergence gate", () => {

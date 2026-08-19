@@ -1,5 +1,6 @@
 import type {
   MeetingDigestDraft,
+  MeetingDigestValidationError,
   MeetingEvidenceRequestDraft,
   MeetingProposedCandidate,
   MeetingRoundRecord,
@@ -29,6 +30,12 @@ function markerText(value: Record<string, unknown>): string {
   if (typeof issue === "string" && issue.trim()) return issue;
   if (typeof action === "string" && action.trim()) return action;
   return JSON.stringify(value);
+}
+
+function validationErrorMessage(error: MeetingDigestValidationError): string {
+  const message = error.message?.trim();
+  if (message) return message;
+  return "纪要校验失败，请重新生成纪要";
 }
 
 export function DigestDraftView({
@@ -65,6 +72,16 @@ export function DigestDraftView({
       ) : null}
       {evidenceRequests.length ? (
         <EvidenceRequestList requests={evidenceRequests} />
+      ) : null}
+      {draft.validationErrors?.length ? (
+        <article className={css.digestCard} data-testid="meeting-digest-validation-errors">
+          <span>纪要校验（{draft.validationErrors.length}）</span>
+          <ul className={css.digestList}>
+            {draft.validationErrors.map((error, index) => (
+              <li key={`${error.code || "validation"}-${index}`}>{validationErrorMessage(error)}</li>
+            ))}
+          </ul>
+        </article>
       ) : null}
       {compact ? (
         <details>

@@ -111,6 +111,12 @@ export type MeetingSearchEnvelope = {
   evidenceLevels?: string[];
 };
 
+/** Server-authored structured digest validation error (HF digest contract). */
+export type MeetingDigestValidationError = {
+  code: string;
+  message: string;
+};
+
 /** Server-authored typed evidence request on a review digest (HF digest contract). */
 export type MeetingEvidenceRequestDraft = {
   rationale?: string;
@@ -135,7 +141,7 @@ export type MeetingDigestDraft = {
   contentHash?: string;
   proposedCandidates?: MeetingProposedCandidate[];
   evidenceRequests?: MeetingEvidenceRequestDraft[];
-  validationErrors?: string[];
+  validationErrors?: MeetingDigestValidationError[];
 };
 
 export type MeetingRoundRecord = HypothesisFirstScope & {

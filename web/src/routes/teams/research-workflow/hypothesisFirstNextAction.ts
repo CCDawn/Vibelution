@@ -68,6 +68,7 @@ export type HypothesisFirstNextAction = {
   statusMessage?: string;
   meetingRoundId?: string;
   collectionRequestId?: string;
+  collectionRunId?: string;
 };
 
 export type HypothesisFirstNextActionInput = {
@@ -384,6 +385,7 @@ export function resolveHypothesisFirstNextAction(
 
   if (request && request.status !== "handed_off" && !request.handoffRef) {
     const status = childStatus(request, input.collectionChildStatus);
+    const collectionRunId = String(request.collectionRunId || "").trim() || undefined;
     if (RECOVERY_CHILD.has(status)) {
       return action({
         stage: "collection_recovery",
@@ -397,9 +399,20 @@ export function resolveHypothesisFirstNextAction(
           reason: "资料搜集未完成",
         },
         collectionRequestId: request.requestId,
+        collectionRunId,
       });
     }
     if (COMPLETED_CHILD.has(status) || status === "completed") {
+      if (!collectionRunId) {
+        return action({
+          stage: "blocked",
+          targetNodeId: collectionNodeId(request),
+          navigationLabel: "查看资料搜集",
+          disabledReason: "资料搜集已完成，但缺少子运行标识，无法自动交接",
+          statusMessage: "自动交接缺少资料搜集运行标识",
+          collectionRequestId: request.requestId,
+        });
+      }
       return action({
         stage: "handoff_pending",
         targetNodeId: collectionNodeId(request),
@@ -412,6 +425,7 @@ export function resolveHypothesisFirstNextAction(
           reason: "搜集已完成但尚未交接下一轮",
         },
         collectionRequestId: request.requestId,
+        collectionRunId,
       });
     }
     if (request.collectionRunId || COLLECTING_CHILD.has(status) || state?.collectionReady) {
@@ -421,6 +435,7 @@ export function resolveHypothesisFirstNextAction(
         navigationLabel: "查看资料搜集",
         statusMessage: "资料搜集中",
         collectionRequestId: request.requestId,
+        collectionRunId,
       });
     }
     return action({
@@ -429,6 +444,7 @@ export function resolveHypothesisFirstNextAction(
       navigationLabel: "查看资料搜集",
       disabledReason: "搜集请求已记录，但还没有子运行",
       collectionRequestId: request.requestId,
+      collectionRunId,
     });
   }
 

@@ -279,9 +279,13 @@ function CollectionTaskBody(props: {
 }) {
   const queryClient = useQueryClient();
   const requestId = props.nextAction.collectionRequestId || "";
+  const collectionRunId = props.nextAction.collectionRunId || "";
+  const canHandoff = props.nextAction.command === "retry_handoff"
+    && Boolean(requestId)
+    && Boolean(collectionRunId);
   const handoff = useMutation({
     mutationFn: () => recordCollectionHandoff(props.teamId, requestId, {
-      handoffRef: `source_collection_run:${requestId}`,
+      handoffRef: `source_collection_run:${collectionRunId}`,
     }),
     onSuccess: () => invalidateHypothesisFirstQueries(queryClient, props.teamId, props.questionId),
   });
@@ -298,7 +302,7 @@ function CollectionTaskBody(props: {
           summary={handoff.error instanceof Error ? handoff.error.message : "handoff_failed"}
         />
       ) : null}
-      {props.nextAction.command === "retry_handoff" && requestId ? (
+      {props.nextAction.command === "retry_handoff" && canHandoff ? (
         <VButton
           type="button"
           variant="primary"
