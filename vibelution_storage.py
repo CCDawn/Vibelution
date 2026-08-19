@@ -11,6 +11,7 @@ import importlib.util
 import json
 import os
 import re
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
@@ -27,6 +28,48 @@ _PROJECT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{2,63}$")
 _FNV32_OFFSET = 2166136261
 _FNV32_PRIME = 16777619
 _CONFIG_PATHS_MODULE: ModuleType | None = None
+
+# 进程内缓存：路径解析在 Windows 上每次 resolve()/stat 都是内核调用，
+# 热路径单请求可达数万次。缓存一律以「输入参数 + 环境变量」为 key、
+# 以依赖文件签名 (path, exists, mtime_ns, size) 为校验值，失效正确性优先于命中率。
+_STORAGE_CACHE_LOCK = threading.RLock()
+_CACHE_ENTRY_LIMIT = 256
+_RESOLVED_ROOT_CACHE: dict[str, Path] = {}
+_IDENTITY_CACHE: dict[
+    str, tuple[tuple[str, bool, int, int], ProjectIdentity | ProjectIdentityError]
+] = {}
+_STORAGE_PATHS_CACHE: dict[
+    tuple[object, ...], tuple[tuple[str, bool, int, int], ProjectStoragePaths]
+] = {}
+_ACTIVE_PATHS_CACHE: dict[
+    tuple[object, ...],
+    tuple[
+        tuple[str, bool, int, int],
+        tuple[str, bool, int, int],
+        ProjectStoragePaths | ProjectStorageMigrationStateError,
+    ],
+] = {}
+_RESOLVED_CONFIG_PATH_CACHE: dict[tuple[object, ...], Path] = {}
+_DATA_HOME_CACHE: dict[tuple[object, ...], tuple[tuple[object, ...], Path]] = {}
+_WORKSPACE_HOME_CACHE: dict[tuple[object, ...], tuple[tuple[object, ...], Path]] = {}
+
+
+def _file_signature(path: Path) -> tuple[str, bool, int, int]:
+    try:
+        stat = path.stat()
+    except OSError:
+        return (str(path), False, 0, 0)
+    return (str(path), True, int(stat.st_mtime_ns), int(stat.st_size))
+
+
+def _cache_put(cache: dict[Any, Any], key: Any, value: Any) -> None:
+    if len(cache) >= _CACHE_ENTRY_LIMIT:
+        cache.clear()
+    cache[key] = value
+
+
+def _env_fingerprint(*names: str) -> tuple[str, ...]:
+    return tuple(str(os.environ.get(name) or "") for name in names)
 
 
 class ProjectIdentityError(ValueError):
@@ -99,6 +142,29 @@ def resolve_projects_home(value: str | os.PathLike[str] | None = None) -> Path:
 def load_project_identity(project_root: str | os.PathLike[str]) -> ProjectIdentity:
     root = _resolve_project_root(project_root)
     source_path = root / PROJECT_IDENTITY_RELATIVE_PATH
+    signature = _file_signature(source_path)
+    cache_key = str(root)
+    with _STORAGE_CACHE_LOCK:
+        cached = _IDENTITY_CACHE.get(cache_key)
+        if cached is not None and cached[0] == signature:
+            outcome = cached[1]
+            if isinstance(outcome, ProjectIdentityError):
+                raise outcome
+            return outcome
+    try:
+        outcome: ProjectIdentity | ProjectIdentityError = _load_project_identity(
+            root, source_path
+        )
+    except ProjectIdentityError as exc:
+        outcome = exc
+    with _STORAGE_CACHE_LOCK:
+        _cache_put(_IDENTITY_CACHE, cache_key, (signature, outcome))
+    if isinstance(outcome, ProjectIdentityError):
+        raise outcome
+    return outcome
+
+
+def _load_project_identity(root: Path, source_path: Path) -> ProjectIdentity:
     try:
         payload: Any = json.loads(source_path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
@@ -139,7 +205,28 @@ def resolve_project_storage_paths(
     *,
     projects_home: str | os.PathLike[str] | None = None,
 ) -> ProjectStoragePaths:
+    cache_key = (
+        str(project_root),
+        None if projects_home is None else str(projects_home),
+        _env_fingerprint(PROJECTS_HOME_ENV, "LOCALAPPDATA"),
+    )
     root = _resolve_project_root(project_root)
+    identity_signature = _file_signature(root / PROJECT_IDENTITY_RELATIVE_PATH)
+    with _STORAGE_CACHE_LOCK:
+        cached = _STORAGE_PATHS_CACHE.get(cache_key)
+        if cached is not None and cached[0] == identity_signature:
+            return cached[1]
+    paths = _resolve_project_storage_paths(root, projects_home=projects_home)
+    with _STORAGE_CACHE_LOCK:
+        _cache_put(_STORAGE_PATHS_CACHE, cache_key, (identity_signature, paths))
+    return paths
+
+
+def _resolve_project_storage_paths(
+    root: Path,
+    *,
+    projects_home: str | os.PathLike[str] | None = None,
+) -> ProjectStoragePaths:
     identity = load_project_identity(root)
     resolved_projects_home = resolve_projects_home(projects_home)
     project_home = resolved_projects_home / identity.project_id
@@ -280,15 +367,93 @@ def resolve_active_project_storage_paths(
     fail closed instead of silently routing writes back into checkout storage.
     """
 
-    target = resolve_project_storage_paths(project_root, projects_home=projects_home)
-    marker_path = storage_migration_state_path(target)
-    if marker_path.exists():
-        if not storage_migration_complete(target):
-            raise ProjectStorageMigrationStateError("storage_migration_marker_invalid")
-        return target
+    root = _resolve_project_root(project_root)
+    identity_signature = _file_signature(root / PROJECT_IDENTITY_RELATIVE_PATH)
+    target = resolve_project_storage_paths(root, projects_home=projects_home)
+    marker_signature = _file_signature(storage_migration_state_path(target))
+    if marker_signature[1]:
+        # marker 存在即迁移定界：结果只依赖 identity/marker 内容，可安全缓存。
+        cache_key = (
+            str(project_root),
+            None if projects_home is None else str(projects_home),
+            _env_fingerprint(PROJECTS_HOME_ENV, "LOCALAPPDATA"),
+        )
+        with _STORAGE_CACHE_LOCK:
+            cached = _ACTIVE_PATHS_CACHE.get(cache_key)
+            if (
+                cached is not None
+                and cached[0] == identity_signature
+                and cached[1] == marker_signature
+            ):
+                outcome = cached[2]
+                if isinstance(outcome, ProjectStorageMigrationStateError):
+                    raise outcome
+                return outcome
+        if storage_migration_complete(target):
+            outcome = target
+        else:
+            outcome = ProjectStorageMigrationStateError("storage_migration_marker_invalid")
+        with _STORAGE_CACHE_LOCK:
+            _cache_put(
+                _ACTIVE_PATHS_CACHE,
+                cache_key,
+                (identity_signature, marker_signature, outcome),
+            )
+        if isinstance(outcome, ProjectStorageMigrationStateError):
+            raise outcome
+        return outcome
+    # marker 缺失：可能处于迁移前/迁移中，legacy 判定保持实时，不缓存。
     if not legacy_project_state_present(target):
         return target
-    return legacy_project_storage_paths(project_root, target=target, config_path=config_path)
+    return legacy_project_storage_paths(root, target=target, config_path=config_path)
+
+
+def _resolve_config_path_cached(
+    paths_mod: ModuleType,
+    config_path: str | os.PathLike[str] | None,
+) -> Path:
+    raw_value = (
+        config_path
+        if config_path is not None
+        else str(os.environ.get(paths_mod.CONFIG_PATH_ENV) or "")
+    )
+    cacheable = True
+    if raw_value:
+        raw_text = str(raw_value).strip()
+        # 相对路径依赖 cwd、~ 依赖 HOME/USERPROFILE，保守起见不缓存。
+        cacheable = not raw_text.startswith("~") and Path(raw_text).expanduser().is_absolute()
+    cache_key = (
+        None if config_path is None else str(config_path),
+        _env_fingerprint(paths_mod.CONFIG_PATH_ENV, paths_mod.CONFIG_HOME_ENV, "USERPROFILE"),
+    )
+    if cacheable:
+        with _STORAGE_CACHE_LOCK:
+            cached = _RESOLVED_CONFIG_PATH_CACHE.get(cache_key)
+            if cached is not None:
+                return cached
+    resolved = paths_mod.resolve_config_path(config_path)
+    if cacheable:
+        with _STORAGE_CACHE_LOCK:
+            _cache_put(_RESOLVED_CONFIG_PATH_CACHE, cache_key, resolved)
+    return resolved
+
+
+def _data_home_fingerprint(
+    root: Path,
+    paths_mod: ModuleType,
+    *,
+    projects_home: str | os.PathLike[str] | None,
+    config_path: str | os.PathLike[str] | None,
+) -> tuple[object, ...]:
+    identity_signature = _file_signature(root / PROJECT_IDENTITY_RELATIVE_PATH)
+    config_signature = _file_signature(_resolve_config_path_cached(paths_mod, config_path))
+    try:
+        target = resolve_project_storage_paths(root, projects_home=projects_home)
+    except ProjectIdentityError:
+        marker_signature: tuple[str, bool, int, int] | None = None
+    else:
+        marker_signature = _file_signature(storage_migration_state_path(target))
+    return (identity_signature, config_signature, marker_signature)
 
 
 def resolve_project_data_home(
@@ -299,13 +464,48 @@ def resolve_project_data_home(
 ) -> Path:
     """Resolve active project data while preserving explicit operator overrides."""
 
+    paths_mod = _load_config_paths_stdlib()
+    cache_key = (
+        str(project_root),
+        None if projects_home is None else str(projects_home),
+        None if config_path is None else str(config_path),
+        _env_fingerprint(
+            paths_mod.DATA_HOME_ENV,
+            PROJECTS_HOME_ENV,
+            "LOCALAPPDATA",
+            "USERPROFILE",
+            paths_mod.CONFIG_PATH_ENV,
+            paths_mod.CONFIG_HOME_ENV,
+        ),
+    )
     root = _resolve_project_root(project_root)
+    fingerprint = _data_home_fingerprint(
+        root, paths_mod, projects_home=projects_home, config_path=config_path
+    )
+    with _STORAGE_CACHE_LOCK:
+        cached = _DATA_HOME_CACHE.get(cache_key)
+        if cached is not None and cached[0] == fingerprint:
+            return cached[1]
+    result = _resolve_project_data_home(
+        root, paths_mod, projects_home=projects_home, config_path=config_path
+    )
+    with _STORAGE_CACHE_LOCK:
+        _cache_put(_DATA_HOME_CACHE, cache_key, (fingerprint, result))
+    return result
+
+
+def _resolve_project_data_home(
+    root: Path,
+    paths_mod: ModuleType,
+    *,
+    projects_home: str | os.PathLike[str] | None,
+    config_path: str | os.PathLike[str] | None,
+) -> Path:
     try:
         load_project_identity(root)
     except ProjectIdentityError:
         return root
 
-    paths_mod = _load_config_paths_stdlib()
     if str(os.environ.get(paths_mod.DATA_HOME_ENV) or "").strip():
         return paths_mod.resolve_data_home(config_path=config_path)
     if paths_mod.resolve_configured_data_home(config_path=config_path) is not None:
@@ -323,14 +523,39 @@ def resolve_project_workspace_home(
     projects_home: str | os.PathLike[str] | None = None,
     config_path: str | os.PathLike[str] | None = None,
 ) -> Path:
-    return (
+    paths_mod = _load_config_paths_stdlib()
+    cache_key = (
+        str(project_root),
+        None if projects_home is None else str(projects_home),
+        None if config_path is None else str(config_path),
+        _env_fingerprint(
+            paths_mod.DATA_HOME_ENV,
+            PROJECTS_HOME_ENV,
+            "LOCALAPPDATA",
+            "USERPROFILE",
+            paths_mod.CONFIG_PATH_ENV,
+            paths_mod.CONFIG_HOME_ENV,
+        ),
+    )
+    root = _resolve_project_root(project_root)
+    fingerprint = _data_home_fingerprint(
+        root, paths_mod, projects_home=projects_home, config_path=config_path
+    )
+    with _STORAGE_CACHE_LOCK:
+        cached = _WORKSPACE_HOME_CACHE.get(cache_key)
+        if cached is not None and cached[0] == fingerprint:
+            return cached[1]
+    result = (
         resolve_project_data_home(
-            project_root,
+            root,
             projects_home=projects_home,
             config_path=config_path,
         )
         / "workspace"
     ).resolve()
+    with _STORAGE_CACHE_LOCK:
+        _cache_put(_WORKSPACE_HOME_CACHE, cache_key, (fingerprint, result))
+    return result
 
 
 def resolve_project_runtime_home(project_root: str | os.PathLike[str]) -> Path:
@@ -394,7 +619,17 @@ def _resolve_project_root(project_root: str | os.PathLike[str]) -> Path:
     raw = str(project_root or "").strip()
     if not raw:
         raise ValueError("project_root must not be empty")
-    return Path(raw).expanduser().resolve()
+    path = Path(raw).expanduser()
+    if not path.is_absolute() or raw.startswith("~"):
+        # 相对路径依赖进程 cwd、~ 依赖 HOME/USERPROFILE，不进缓存。
+        return path.resolve()
+    with _STORAGE_CACHE_LOCK:
+        cached = _RESOLVED_ROOT_CACHE.get(raw)
+        if cached is not None:
+            return cached
+        resolved = path.resolve()
+        _cache_put(_RESOLVED_ROOT_CACHE, raw, resolved)
+        return resolved
 
 
 def _directory_has_entries(path: Path) -> bool:
