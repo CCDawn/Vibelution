@@ -209,6 +209,15 @@ function InspectorBody(props: {
         </div>
       );
     }
+    if (nextAction.stage === "generation_missing") {
+      return (
+        <OpenGenerationButton
+          teamId={teamId}
+          questionId={questionId}
+          label={nextAction.commandLabel || "生成候选假说"}
+        />
+      );
+    }
     if (nextAction.meetingRoundId || liveMeetingRoundId) {
       return (
         <HypothesisFirstMeetingOps
