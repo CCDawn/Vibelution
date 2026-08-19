@@ -145,6 +145,19 @@ describe("WorkflowDecisionNode render (P1-4)", () => {
     expect(countHandles(markup)).toBe(5);
   });
 
+  it("uses outcome language instead of 未绑定 on serpentine decision cards", () => {
+    const markup = renderNode(WorkflowDecisionNode, {
+      label: "迭代规划",
+      status: "pending",
+      primaryRoleKey: "iteration_planner",
+      layoutMode: "serpentine",
+      sourceHandleIds: ["rerun", "promote", "rollback", "stop"],
+    });
+    expect(markup).toContain("晋升 / 回滚 / 停止");
+    expect(markup).not.toContain("迭代规划 · 未绑定");
+    expect(markup).not.toContain("角色待确认 · 未绑定");
+  });
+
   it("renders no source handles when the run has no current-run decision edges", () => {
     const markup = renderNode(WorkflowDecisionNode, {
       label: "结果判定",
@@ -214,6 +227,16 @@ describe("WorkflowSystemTaskNode render (P1-4)", () => {
     expect(markup).toContain('data-visual-kind="system_task"');
     expect(markup).toContain("系统执行");
     expect(markup).toContain("失败");
+  });
+
+  it("uses 受控执行 on serpentine system cards instead of 未绑定", () => {
+    const markup = renderNode(WorkflowSystemTaskNode, {
+      label: "受控运行",
+      status: "pending",
+      layoutMode: "serpentine",
+    });
+    expect(markup).toContain("受控执行");
+    expect(markup).not.toContain("角色待确认 · 未绑定");
   });
 });
 
@@ -291,7 +314,8 @@ describe("WorkflowStageRegionNode render (P1-5)", () => {
     expect(idle).not.toContain("linear-gradient");
     expect(idle).not.toContain("--vui-surface-region");
     expect(idle).toContain("accent-cool)_8%,var(--vui-surface-workspace)");
-    expect(idle).toContain("accent-cool)_18%,var(--vui-border-subtle)");
+    expect(idle).toContain("accent-cool)_10%,var(--vui-border-subtle)");
+    expect(idle).toContain("border-dashed");
 
     const active = renderNode(WorkflowStageRegionNode, {
       label: "知识搜集",

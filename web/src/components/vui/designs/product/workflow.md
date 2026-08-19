@@ -37,7 +37,7 @@ const graph: WorkflowLayoutInput = projectionToCanvasGraph(projection);
 
 `stage-columns` 保留为默认兼容模式；调用方不得自行复制 renderer 或直接引入 `@xyflow/react` 来实现另一套几何。
 
-节点在 `serpentine` 模式下使用约 `300 × 72` 的模块卡：左侧实心类型色块（Agent 蓝 / 人工琥珀 / 起点灰 / 系统深色 / 决策暖色）加白图标，标题 15px、下一行 `角色 · 绑定摘要` 12px。状态叠在图标右下角标（待运行隐藏角标；运行中为旋转标记），不再铺三行脚注、类型胶囊或顶部强调条。长描述、输入/输出、检查项与技术 `agentId` 不在画布常驻，完整信息进入节点 tooltip 与 Inspector。卡片用实底 `--vui-surface-panel` 加 `--vui-elevation-2`；状态按四桶经**边框 + 类型色块旁角标**表达：完成（`--state-success` 绿）、进行（`--accent-cool` 蓝）、等待/关注（`--state-warning` 琥珀）、失败（`--state-error` 红）、待运行（最淡描边）；选中另用细蓝色 outline，不与状态色冲突。
+节点在 `serpentine` 模式下使用约 `300 × 72` 的模块卡：左侧实心类型色块（Agent 蓝 / 人工琥珀 / 起点灰 / 系统深色 / 决策暖色）加白图标，标题 15px、下一行按种类写副标题（决策「晋升 / 回滚 / 停止」、系统「受控执行」、人工「角色 · 待确认」、Agent「角色 · 已绑定/未绑定」）12px。状态叠在图标右下角标（待运行隐藏角标；运行中为旋转标记），不再铺三行脚注、类型胶囊或顶部强调条。长描述、输入/输出、检查项与技术 `agentId` 不在画布常驻，完整信息进入节点 tooltip 与 Inspector。卡片用实底 `--vui-surface-panel` 加 `--vui-elevation-2`；状态按四桶经**边框 + 类型色块旁角标**表达：完成（`--state-success` 绿）、进行（`--accent-cool` 蓝）、等待/关注（`--state-warning` 琥珀）、失败（`--state-error` 红）、待运行（最淡描边）；选中另用细蓝色 outline，不与状态色冲突。
 
 该模式使用三条阶段带做分组：实底为 `accent-cool` 混入 `--vui-surface-workspace`（idle 8% / active 12% / done 4%；attention 用 warning 10%），描边略强于 `border-subtle`。禁止洗白渐变、白色内高光，也禁止三阶段带换色相（蓝/琥珀/红留给运行状态）。阶段头包含编号、名称、完成计数和短进度条；**阶段头的小面积聚合指示器例外于换色相禁令**：编号徽章与进度条按 tone 着色（done 绿、active 蓝、attention 琥珀），并附状态 chip（已完成/进行中/需关注），让阶段完成度不依赖逐节点扫读。不得改全局 `--vui-surface-region`（浅色 rail 等于侧栏白底）。普通相邻边默认不常驻标签；只有 `knowledge_package`、`smoke`、`promotion` 和决策/回路语义常显，其他标签仅在 hover 或 active/attention 状态出现。跨阶段交接使用对齐节点之间的一条短叙事桥；同协议重跑沿所在阶段底部的局部反馈轨道返回，禁止绕画布或阶段绘制大矩形回路。ELK 仍负责节点顺序、阶段位置与空间预算，renderer 只收敛这两类叙事边的可见几何。
 
@@ -74,25 +74,26 @@ const graph: WorkflowLayoutInput = projectionToCanvasGraph(projection);
 | `human_gate` | 人工门禁边，标签常显 |
 | `decision_branch` / `rerun` / `revise` / `promote` / `rollback` / `stop` | 条件与回路；决策节点多 Handle 出边；标签常显；回路外侧 routing |
 
-pathState：`idle | traversed | active | attention | danger` — 仅由 nodeRuns + runtimeCurrent 推导，**不猜测**未观测的决策分支选择。所有有向边带箭头 marker。
+pathState：`idle | traversed | active | attention | danger` — 仅由 nodeRuns + runtimeCurrent 推导，**不猜测**未观测的决策分支选择。pathState 优先于语义色；idle 决策扇出按 semanticKind 上色并降低不透明度（promote 绿实线、rollback/revise 琥珀虚线、rerun 蓝虚线、stop 红虚线），箭头颜色与描边同源。所有有向边带箭头 marker。
 
 #### 边几何（引擎所有权，T3）
 
 - 边路径由 `workflowElkEdgePath.sectionsToSvgPath` 从引擎 `WorkflowEdgeSection[]` 直接生成（绝对坐标正交 section，无重复与虚假连接线）；生产源码禁止 smooth-step 重路由（`getSmoothStepPath`），有契约测试断言源码不含该符号。
-- 标签锚点由引擎 `labelBounds`（中心）决定，缺失时回退首 section 中点；三阶段统一 viewport，跨阶段边同坐标空间。
+- 标签锚点由引擎 `labelBounds`（中心）决定，缺失时不渲染标签；三阶段统一 viewport，跨阶段边同坐标空间。蛇形跨阶段标签在 **layout composer** 里把 `labelBounds` 放到竖线右侧（回路标签放到横轨上方），禁止渲染后再用 CSS transform 挪开。
+- 画布短名：定义协议仍可保留 `Knowledge Package`；`resolveEdgeLabelSpec` 映射为「知识包」并用中英混排字宽计量，避免把 ASCII 当 CJK 截成 `Knowledge Pa…`。tooltip `title` 保留原文。
 - z-index 层级固定：stageRegion `0` < edge `1` < task node `2`；**边不浮在节点上方**，选中/hover 不抬升 zIndex，用描边加粗与变色表达。
+- 标签契约：`workflowEdgeLabelGeometry` 是唯一几何权威——布局 spacer 尺寸与渲染 label box 完全一致（同宽高、同截断策略）；长标签截断后矩形仍参与布局；禁止渲染后 transform 移动。标签胶囊用不透明 panel 底 + workspace halo 盖住穿过的线。
 
 ### 布局与 fit 协议（T4 + 两级布局 2026-08-08 + 外层真实 ELK 2026-08-08b）
 
 - 布局：`useWorkflowAutoLayout(graph, createWorkflowLayoutEngine)` 内部走**两级布局**（`layoutTwoLevel`）。默认 `stage-columns` 为阶段 A 各自 ELK DOWN、阶段 B 外层 ELK RIGHT；`serpentine` 为阶段 A 依次 RIGHT / LEFT / RIGHT、阶段 B 外层 ELK DOWN。两种模式都只包含真实 edges；跨阶段边通过 label spacer 交给 ELK 分配通道，任务绝对坐标 = meta 位置 + 阶段本地坐标，结构 hash 包含 layout mode 并避免重复布局。
-- 标签契约：`workflowEdgeLabelGeometry` 是唯一几何权威——布局 spacer 尺寸与渲染 label box 完全一致（同宽高、同截断策略）；长标签截断后矩形仍参与布局；禁止渲染后 transform 移动。
 - 目标：默认模式阶段内主链单列；蛇形模式阶段内横向铺开、阶段纵向延展；gap 由 ELK 按内容自动决定（非固定值）。
 - fit：`useWorkflowInitialFit` 编排——`initialFitRevision` 只在 **settled 布局**提交后设置；等待节点进入 React Flow 内部（`useNodesInitialized`）并在下一帧执行**仅一次**；校准重排不取消 pending fit，拓扑切换（structureKey 变化）取消并重新武装；`acknowledgeInitialFit()` 后 status-only 更新不再 fit。`<ReactFlow>` 不设隐式 `fitView`；「适应全部」经 `onFitAll` 显式 fit。
 
 ### 阶段分区
 
 - 阶段为 React Flow 父节点（`parentId` + 相对坐标）
-- 分组靠明度（workspace 实底 + 不透明卡片），编号标题不抢节点层级；状态色不用于阶段带身份，仅出现在阶段头的小型聚合指示器（编号徽章 / 状态 chip / 进度条）
+- 分组靠明度（workspace 实底 + 不透明卡片），编号标题不抢节点层级；状态色不用于阶段带身份，仅出现在阶段头的小型聚合指示器（编号徽章 / 状态 chip / 进度条）。蛇形 idle/done 阶段带用更淡虚线边，避免和交接竖线抢层级。
 - stageTone：`idle | active | done | attention`
 
 ### 状态/交互约束

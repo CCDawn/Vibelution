@@ -177,7 +177,15 @@ export function challengeCupDefinition(): WorkflowLayoutInput {
     edge("e_version_promotion", "version_governance", "candidate_promotion", "晋升提案"),
     edge("e_version_package", "version_governance", "result_package", "停止并打包"),
     edge("e_promo_package", "candidate_promotion", "result_package", "确认晋升/回滚"),
-  ];
+  ].map((item) => {
+    if (item.edgeId === "e_kc_hypothesis") {
+      return { ...item, gateKind: "knowledge_package", labelAlwaysVisible: true };
+    }
+    if (item.edgeId === "e_smoke_run") {
+      return { ...item, gateKind: "smoke", labelAlwaysVisible: true };
+    }
+    return item;
+  });
 
   return { stages, nodes, edges };
 }

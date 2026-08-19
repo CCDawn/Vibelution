@@ -93,12 +93,32 @@ describe("WorkflowSemanticEdge render (P1-3)", () => {
     expect(call.interactionWidth).toBe(20);
   });
 
-  it("uses dashed muted stroke for rerun/revise/rollback semantic kinds", () => {
+  it("uses dashed semantic colors for idle rerun/revise/rollback instead of a shared grey", () => {
     renderEdge({ sections, semanticKind: "rerun", pathState: "idle" });
     const { stroke, dasharray } = resolveEdgeStroke("idle", "rerun");
     expect(baseEdgeCalls[0]?.style?.stroke).toBe(stroke);
     expect(baseEdgeCalls[0]?.style?.strokeDasharray).toBe(dasharray);
     expect(dasharray).toBe("6 4");
+    expect(stroke).toContain("accent-cool");
+    expect(stroke).toContain("40%");
+  });
+
+  it("renders Knowledge Package as a short Chinese pill on an opaque workspace halo", () => {
+    const markup = renderEdge({
+      sections,
+      label: "Knowledge Package",
+      labelAlwaysVisible: true,
+      labelBounds: { x: 40, y: 10, width: 45, height: 20 },
+      pathState: "idle",
+      semanticKind: "human_gate",
+      gateKind: "knowledge_package",
+    });
+    expect(markup).toContain('data-vui="workflow-edge-label"');
+    expect(markup).toContain("知识包");
+    expect(markup).toContain('title="Knowledge Package"');
+    expect(markup).not.toContain("Knowledge Pa…");
+    expect(markup).toContain("var(--vui-surface-panel)");
+    expect(markup).toContain("var(--vui-surface-workspace)");
   });
 
   it("marks active edges animated and colored with accent-cool", () => {

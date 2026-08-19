@@ -191,7 +191,7 @@ function serpentineNarrativeRoute(
     ]);
     return {
       sections: sectionsFromPoints(edge.edgeId, points),
-      labelBounds: centeredLabelBounds(edge.label, (source.x + target.x) / 2, channelY),
+      labelBounds: besideVerticalStrokeLabelBounds(edge.label, Math.max(source.x, target.x), channelY),
     };
   }
 
@@ -217,7 +217,7 @@ function serpentineNarrativeRoute(
   ]);
   return {
     sections: sectionsFromPoints(edge.edgeId, points),
-    labelBounds: centeredLabelBounds(edge.label, (source.x + target.x) / 2, railY),
+    labelBounds: aboveHorizontalStrokeLabelBounds(edge.label, (source.x + target.x) / 2, railY),
   };
 }
 
@@ -238,16 +238,33 @@ function sectionsFromPoints(
   return linkSections(sections);
 }
 
-function centeredLabelBounds(
+/** Sit the pill to the right of a vertical handoff so the stroke does not bisect the text. */
+function besideVerticalStrokeLabelBounds(
   label: string,
-  centerX: number,
+  strokeX: number,
   centerY: number,
 ): WorkflowLayoutResult["edges"][number]["labelBounds"] {
   if (!label) return undefined;
   const spec = resolveEdgeLabelSpec(label);
   return {
-    x: centerX - spec.width / 2,
+    x: strokeX + 10,
     y: centerY - spec.height / 2,
+    width: spec.width,
+    height: spec.height,
+  };
+}
+
+/** Sit the pill above a horizontal feedback rail so the stroke does not bisect the text. */
+function aboveHorizontalStrokeLabelBounds(
+  label: string,
+  centerX: number,
+  strokeY: number,
+): WorkflowLayoutResult["edges"][number]["labelBounds"] {
+  if (!label) return undefined;
+  const spec = resolveEdgeLabelSpec(label);
+  return {
+    x: centerX - spec.width / 2,
+    y: strokeY - spec.height - 4,
     width: spec.width,
     height: spec.height,
   };

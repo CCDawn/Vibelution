@@ -13,8 +13,15 @@ export const EDGE_LABEL_MAX_WIDTH = 152;
 /** Compact single-line control height; shared by ELK reservation and the DOM. */
 export const EDGE_LABEL_HEIGHT = 20;
 
-/** Approximate glyph advance for CJK/ASCII mixed text at 11px. */
-const CHAR_ADVANCE = 11;
+const CJK_ADVANCE = 11;
+const ASCII_ADVANCE = 6.5;
+
+/** Protocol / English definition labels that must stay short on the canvas. */
+const CANVAS_EDGE_LABEL_ALIASES: Record<string, string> = {
+  "Knowledge Package": "知识包",
+  "knowledge package": "知识包",
+  "Smoke 放行": "冒烟放行",
+};
 
 export type EdgeLabelSpec = {
   text: string;
@@ -25,16 +32,50 @@ export type EdgeLabelSpec = {
   height: number;
 };
 
+export function canvasEdgeDisplayLabel(raw: string): string {
+  const trimmed = String(raw ?? "").trim();
+  return CANVAS_EDGE_LABEL_ALIASES[trimmed] ?? CANVAS_EDGE_LABEL_ALIASES[trimmed.toLowerCase()] ?? trimmed;
+}
+
+function glyphAdvance(char: string): number {
+  return /[\u3400-\u9fff]/.test(char) ? CJK_ADVANCE : ASCII_ADVANCE;
+}
+
+function measureText(text: string): number {
+  let width = 0;
+  for (const char of text) {
+    width += glyphAdvance(char);
+  }
+  return width;
+}
+
+function truncateToWidth(text: string, maxInner: number): string {
+  if (measureText(text) <= maxInner) return text;
+  const ellipsis = "…";
+  const budget = maxInner - measureText(ellipsis);
+  let used = 0;
+  let cut = "";
+  for (const char of text) {
+    const next = used + glyphAdvance(char);
+    if (next > budget) break;
+    used = next;
+    cut += char;
+  }
+  return `${cut || text.slice(0, 1)}${ellipsis}`;
+}
+
 /**
  * Computes the label geometry for a given text. Width is capped at
  * EDGE_LABEL_MAX_WIDTH; longer text is truncated with an ellipsis but the box
  * stays at the declared width (truncation never changes layout).
  */
 export function resolveEdgeLabelSpec(text: string): EdgeLabelSpec {
-  const trimmed = String(text ?? "").trim();
-  const natural = trimmed.length * CHAR_ADVANCE + EDGE_LABEL_PADDING_X * 2;
-  const width = Math.min(EDGE_LABEL_MAX_WIDTH, Math.max(24, natural));
-  const truncated = trimmed.length * CHAR_ADVANCE > EDGE_LABEL_MAX_WIDTH - EDGE_LABEL_PADDING_X * 2 - 8;
-  const displayText = truncated ? `${trimmed.slice(0, Math.max(1, Math.floor((EDGE_LABEL_MAX_WIDTH - EDGE_LABEL_PADDING_X * 2 - 8) / CHAR_ADVANCE)))}…` : trimmed;
-  return { text: trimmed, displayText, width, height: EDGE_LABEL_HEIGHT };
+  const source = String(text ?? "").trim();
+  const display = canvasEdgeDisplayLabel(source);
+  const innerMax = EDGE_LABEL_MAX_WIDTH - EDGE_LABEL_PADDING_X * 2;
+  const natural = measureText(display);
+  const truncated = natural > innerMax;
+  const displayText = truncated ? truncateToWidth(display, innerMax) : display;
+  const width = Math.min(EDGE_LABEL_MAX_WIDTH, Math.max(24, measureText(displayText) + EDGE_LABEL_PADDING_X * 2));
+  return { text: source, displayText, width, height: EDGE_LABEL_HEIGHT };
 }

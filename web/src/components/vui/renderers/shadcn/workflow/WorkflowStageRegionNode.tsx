@@ -59,7 +59,7 @@ const STAGE_BORDER: Record<string, string> = {
   done: "border-[color-mix(in_srgb,var(--accent-cool)_14%,var(--vui-border-subtle))] opacity-95",
 };
 
-const STAGE_BORDER_IDLE = "border-[color-mix(in_srgb,var(--accent-cool)_18%,var(--vui-border-subtle))]";
+const STAGE_BORDER_IDLE = "border-[color-mix(in_srgb,var(--accent-cool)_10%,var(--vui-border-subtle))]";
 
 export function WorkflowStageRegionNode(props: NodeProps) {
   const label = String(props.data.label ?? "");
@@ -73,8 +73,8 @@ export function WorkflowStageRegionNode(props: NodeProps) {
   return (
     <div
       className={cn(
-        "h-full w-full border",
-        spacious ? "rounded-2xl border-t-2" : "rounded-2xl",
+        "h-full w-full rounded-2xl border",
+        spacious && (tone === "idle" || tone === "done") ? "border-dashed" : "",
         STAGE_FILL[tone] ?? STAGE_FILL_IDLE,
         STAGE_BORDER[tone] ?? STAGE_BORDER_IDLE,
       )}

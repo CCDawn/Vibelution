@@ -116,11 +116,13 @@ export function WorkflowSemanticEdge({ id, data, markerEnd, style }: EdgeProps) 
               pointerEvents: "all",
               width: labelSpec.width,
               height: labelSpec.height,
+              backgroundColor: "var(--vui-surface-panel)",
+              boxShadow: "0 0 0 3px var(--vui-surface-workspace)",
             }}
             className={cn(
-              "truncate rounded-md border text-center text-[11px] font-medium leading-tight shadow-sm",
+              "truncate rounded-md border text-center text-[11px] font-medium leading-tight",
               "flex items-center justify-center px-1.5",
-              "border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] text-[var(--fg-secondary)]",
+              "border-[var(--vui-border-subtle)] text-[var(--fg-secondary)]",
               pathState === "active" ? "border-[color-mix(in_srgb,var(--accent-cool)_40%,var(--vui-border-subtle))] text-[var(--accent-cool)]" : "",
               pathState === "attention" ? "border-[color-mix(in_srgb,var(--state-warning)_40%,var(--vui-border-subtle))] text-[var(--state-warning)]" : "",
               pathState === "danger" ? "border-[color-mix(in_srgb,var(--state-error)_40%,var(--vui-border-subtle))] text-[var(--state-error)]" : "",
