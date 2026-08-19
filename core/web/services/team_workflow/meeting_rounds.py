@@ -440,6 +440,99 @@ def meeting_source_messages(meeting_round: Mapping[str, Any]) -> list[dict[str, 
     return messages
 
 
+def completed_meeting_source_messages(
+    meeting_round: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Return successful, non-pass discussion messages that a digest may cite."""
+
+    return [
+        message
+        for message in meeting_source_messages(meeting_round)
+        if str(message.get("status") or "").strip().lower() == "completed"
+        and not is_pass_message(message)
+    ]
+
+
+def supersede_empty_candidate_generation_meeting(
+    team_id: str,
+    meeting_round_id: str,
+    *,
+    actor: str = "system:failed-discussion-recovery",
+) -> dict[str, Any]:
+    """Close one terminal candidate attempt that produced no citable message.
+
+    This recovery record deliberately carries no digest or decisions: it is an
+    abandoned generation attempt, not an approved research conclusion.  A new
+    per-attempt meeting can then be opened without rewriting the append-only
+    history of the failed attempt.
+    """
+
+    from core.web.services.team_service import assert_team_exists
+
+    normalized_team_id = assert_team_exists(team_id)
+    normalized_round_id = str(meeting_round_id or "").strip()
+    if not normalized_round_id:
+        raise ResearchMeetingRoundError("Meeting round id is required.")
+    with _LOCK:
+        meeting_round = _load_meeting_round(normalized_team_id, normalized_round_id)
+    status = str(meeting_round.get("status") or "").strip().lower()
+    if status == "closed" and str(meeting_round.get("recoveryReason") or "") == (
+        "discussion_has_no_completed_messages"
+    ):
+        return {
+            "schemaVersion": SCHEMA_VERSION,
+            "teamId": normalized_team_id,
+            "status": "reused",
+            "meetingRound": meeting_round,
+            "storagePath": str(_rounds_path(normalized_team_id)),
+        }
+    if str(meeting_round.get("meetingType") or "").strip().lower() != (
+        "hypothesis_candidate_generation"
+    ):
+        raise ResearchMeetingRoundError(
+            "only a candidate-generation meeting may use empty-discussion recovery"
+        )
+    if status not in {"open", "summarizing"}:
+        raise ResearchMeetingRoundError(
+            f"meeting status {status or '<unknown>'} cannot be superseded"
+        )
+    if running_bound_round_ids(meeting_round):
+        raise ResearchMeetingRoundError(
+            "discussion round is still running and cannot be superseded"
+        )
+    if completed_meeting_source_messages(meeting_round):
+        raise ResearchMeetingRoundError(
+            "discussion produced completed messages and cannot be superseded"
+        )
+
+    now = _utc_now()
+    closed_record = dict(meeting_round)
+    closed_record["status"] = "closed"
+    closed_record["closedAt"] = now
+    closed_record["closedBy"] = str(actor or "").strip() or "system:failed-discussion-recovery"
+    closed_record["recoveryReason"] = "discussion_has_no_completed_messages"
+    closed_record["summaryDraftError"] = {
+        "code": "discussion_has_no_completed_messages",
+        "message": "讨论未产出可引用的成功发言，已结束本次失败尝试",
+        "remediationLabel": "重新发起讨论",
+    }
+    closed_record["updatedAt"] = now
+    with _LOCK:
+        latest = _load_meeting_round(normalized_team_id, normalized_round_id)
+        if str(latest.get("status") or "").strip().lower() != status:
+            raise ResearchMeetingRoundError(
+                "meeting status changed while failed-discussion recovery was running"
+            )
+        _append_round_record(normalized_team_id, closed_record)
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "status": "superseded",
+        "meetingRound": closed_record,
+        "storagePath": str(_rounds_path(normalized_team_id)),
+    }
+
+
 def message_source_ref(message: Mapping[str, Any]) -> str:
     """Stable digest -> room message backlink: ``roomId/roundId/messageId``."""
 

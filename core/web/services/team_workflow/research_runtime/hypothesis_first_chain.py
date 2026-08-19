@@ -563,11 +563,12 @@ def open_candidate_generation_meeting(
     instead of duplicating the discussion, and a closed attempt that already
     registered candidates is reused as-is.  Only a closed attempt that
     produced nothing rolls to a fresh per-attempt id so regeneration stays
-    possible.  Participants come from the team's linked chat room, same as
-    review meetings.
+    possible.  A terminal attempt with no successful discussion evidence is
+    superseded before the next attempt opens.  Participants come from the
+    team's linked chat room, same as review meetings.
     """
     from core.web.services import team_service
-    from core.web.services.team_workflow import meeting_runtime
+    from core.web.services.team_workflow import meeting_rounds, meeting_runtime
 
     normalized_team_id = team_service.assert_team_exists(team_id)
     scope = _question_scope_envelope(normalized_team_id, question_id)
@@ -587,6 +588,22 @@ def open_candidate_generation_meeting(
         ),
         None,
     )
+    if (
+        open_meeting is not None
+        and str(open_meeting.get("status") or "").strip().lower()
+        in {"open", "summarizing"}
+        and _normalized_str_list(open_meeting.get("chatRoomRoundIds"))
+        and not meeting_rounds.running_bound_round_ids(open_meeting)
+        and not meeting_rounds.completed_meeting_source_messages(open_meeting)
+    ):
+        meeting_rounds.supersede_empty_candidate_generation_meeting(
+            normalized_team_id,
+            str(open_meeting.get("meetingRoundId") or ""),
+        )
+        meetings = _question_generation_meetings(
+            normalized_team_id, normalized_question_id
+        )
+        open_meeting = None
     if open_meeting is None and meetings:
         # All attempts are closed.  When candidates were registered the latest
         # closed meeting is the answer and replays reuse it; a closed attempt

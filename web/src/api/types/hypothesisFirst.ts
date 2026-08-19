@@ -177,6 +177,12 @@ export type MeetingRoundRecord = HypothesisFirstScope & {
   summaryStartedAt?: string;
   summaryHumanTriggered?: boolean;
   summaryError?: string;
+  summaryDraftError?: {
+    code?: string;
+    message?: string;
+    remediationLabel?: string;
+  };
+  recoveryReason?: string;
   boundChatRoundsTerminal?: boolean;
   draftRejectedBy?: string;
   draftRejectedReason?: string;
@@ -215,6 +221,7 @@ export type MeetingSourceMessage = {
   createdAt?: string;
   roomId?: string;
   roundId?: string;
+  status?: string;
 } & Record<string, unknown>;
 
 export type MeetingSourceMessagesResponse = {

@@ -880,6 +880,9 @@ def prepare_meeting_summary_draft(
     ]
     status = str(meeting_round.get("status") or "").strip().lower()
     source_messages = meeting_rounds.meeting_source_messages(meeting_round)
+    completed_source_messages = meeting_rounds.completed_meeting_source_messages(
+        meeting_round
+    )
     source_hash = meeting_rounds.source_message_content_hash(source_messages)
     existing_draft = (
         dict(meeting_round.get("digestDraft"))
@@ -923,6 +926,20 @@ def prepare_meeting_summary_draft(
                 "boundChatRoundsTerminal": False,
                 "storagePath": str(meeting_rounds._rounds_path(normalized_team_id)),
             }
+        if not completed_source_messages:
+            return {
+                "schemaVersion": meeting_rounds.SCHEMA_VERSION,
+                "teamId": normalized_team_id,
+                "status": "blocked",
+                "blocker": {
+                    "code": "discussion_has_no_completed_messages",
+                    "message": "讨论未产出可引用的成功发言，不能生成纪要",
+                    "remediationLabel": "重新发起讨论",
+                },
+                "meetingRound": meeting_round,
+                "boundChatRoundsTerminal": True,
+                "storagePath": str(meeting_rounds._rounds_path(normalized_team_id)),
+            }
         meeting_rounds.begin_meeting_summary(
             normalized_team_id,
             normalized_round_id,
@@ -938,6 +955,22 @@ def prepare_meeting_summary_draft(
             if isinstance(meeting_round.get("digestDraft"), Mapping)
             else {}
         )
+    if status == "summarizing" and not completed_source_messages:
+        return {
+            "schemaVersion": meeting_rounds.SCHEMA_VERSION,
+            "teamId": normalized_team_id,
+            "status": "blocked",
+            "blocker": {
+                "code": "discussion_has_no_completed_messages",
+                "message": "讨论未产出可引用的成功发言，不能生成纪要",
+                "remediationLabel": "重新发起讨论",
+            },
+            "meetingRound": meeting_round,
+            "boundChatRoundsTerminal": not meeting_rounds.running_bound_round_ids(
+                meeting_round
+            ),
+            "storagePath": str(meeting_rounds._rounds_path(normalized_team_id)),
+        }
     if status != "summarizing":
         raise ResearchMeetingRuntimeError(
             f"meeting status {status or '<unknown>'} cannot generate a summary draft"
