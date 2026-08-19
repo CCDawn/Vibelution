@@ -230,6 +230,17 @@ describe("WorkflowStartEndNode render (P1-4)", () => {
     expect(markup).not.toContain('data-handle="target:left"');
   });
 
+  it("start node mirrors an assigned target port for display-layer incoming edges", () => {
+    const markup = renderNode(WorkflowStartEndNode, {
+      label: "资料寻找",
+      visualKind: "start",
+      status: "pending",
+      portSides: { source: {}, target: { "in:west": "WEST" } },
+    });
+    expect(countHandles(markup, "in:west")).toBe(1);
+    expect(markup).toContain('data-handle="target:left"');
+  });
+
   it("end node has no source handle and only a target handle", () => {
     const markup = renderNode(WorkflowStartEndNode, {
       label: "完成",

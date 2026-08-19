@@ -163,6 +163,10 @@ const graph = composeHypothesisFirstGraph(base, region); // region 为 null 时�
 
 链数据由 `useHypothesisFirstChain(teamId, questionId)`（React Query，questionId 为空不发请求）提供；run SSE 事件经 `useHypothesisFirstChainInvalidation` 防抖失效相关 query。
 
+### 渲染契约补丁（2026-08-19 修复）
+
+- 「首轮搜集范围就绪」边指向主图起点 `source_finding`（visualKind `start`）。`WorkflowStartEndNode` 的默认极性仍是「start 无 target 把手」；但当布局给 start 节点分配了真实 target 端口（`portSides.target` 非空）时，渲染器必须镜像该端口——否则 React Flow 因找不到 target handle 静默丢边。既有契约测试（无入边 fixture 下 start 无 target 把手）不受影响。
+
 ### 限制
 
 - 不接真实 node command adapters（Inspector 仍走现有 ops）
