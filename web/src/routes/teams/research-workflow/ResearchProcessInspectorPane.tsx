@@ -14,6 +14,8 @@ import { VButton, VStateSurface, VSurface } from "../../../components/vui";
 import { ChallengeQuestionDetailPanel } from "../challenge-cup/ChallengeQuestionDetailPanel";
 import { ChallengeMvpProgressPanel } from "./ChallengeMvpProgressPanel";
 import { EvidenceGraphView } from "./EvidenceGraphView";
+import { HypothesisFirstNodeInspector } from "./HypothesisFirstNodeInspector";
+import { isHypothesisFirstCanvasNode } from "./hypothesisFirstCanvasRegion";
 import { getNodeAdapter } from "./nodeAdapterModel";
 import { ResearchAgentBindingPanel } from "./ResearchAgentBindingPanel";
 import { ResearchCenteredEmptyState } from "./ResearchCenteredEmptyState";
@@ -105,6 +107,17 @@ export function ResearchProcessInspectorPane(props: {
   }
   if (scope.panel === "team") {
     return <ResearchTeamPanel teamId={scope.teamId} teamName={scope.teamName} linkedChatRoomId={scope.linkedChatRoomId} run={state.run} projection={state.projection} effectiveBindings={state.effectiveBindings} />;
+  }
+  // Hypothesis-first region cards: summary + deep link, in definition and run views alike.
+  if (scope.selectedNodeId && isHypothesisFirstCanvasNode(scope.selectedNodeId)) {
+    return (
+      <HypothesisFirstNodeInspector
+        teamId={scope.teamId}
+        questionId={scope.questionId || state.run?.questionId || ""}
+        nodeId={scope.selectedNodeId}
+        onOpenQuestion={(questionId) => actions.replaceParams({ panel: "question", questionId })}
+      />
+    );
   }
   if (scope.selectedNodeId && !scope.runId && state.projection) {
     return <ResearchProcessDefinitionNodePanel teamId={scope.teamId} nodeId={scope.selectedNodeId} definition={state.projection.definition} effectiveBindings={state.effectiveBindings} />;

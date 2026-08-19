@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import type { WorkflowCanvasProjection, WorkflowDefinition } from "../../../api/types/researchWorkflow";
 import {
+  buildHypothesisFirstCanvasRegion,
+  type HypothesisFirstCanvasRegionInput,
+} from "./hypothesisFirstCanvasRegion";
+import {
+  composeHypothesisFirstGraph,
   definitionToCanvasGraph,
   mergeSelectionAndRuntime,
   projectionToCanvasGraph,
@@ -248,5 +253,174 @@ describe("researchProcessGraphModel", () => {
     expect(merged.selectedNodeId).toBe("hypothesis_design");
     expect(merged.runtimeCurrentNodeIds).toEqual(["knowledge_handoff"]);
     expect(merged.selectedNodeId).not.toBe(merged.runtimeCurrentNodeIds[0]);
+  });
+});
+
+describe("composeHypothesisFirstGraph", () => {
+  const hfScope = {
+    program: "p",
+    theme: "t",
+    campaign: "c",
+    question: "Q-01",
+    branch: "b",
+    workflow: "w",
+    agentId: "a",
+  };
+
+  function regionInput(overrides: Partial<HypothesisFirstCanvasRegionInput> = {}): HypothesisFirstCanvasRegionInput {
+    return {
+      chainState: {
+        schemaVersion: 1,
+        teamId: "team-1",
+        questionId: "Q-01",
+        selectionId: "sel-1",
+        meetingCount: 1,
+        firstMeetingId: "hf-review-sel-1-r1",
+        firstMeetingClosed: true,
+        openMeetingIds: [],
+        collectionRequests: [],
+        collectionRequestCount: 0,
+        pendingCollectionCount: 0,
+        collectionReady: false,
+        hypothesisRoundCount: 0,
+        latestHypothesisRoundId: "",
+        hypothesisConverged: false,
+        convergenceDetail: "",
+        roundBudget: 3,
+        budgetExhausted: false,
+        templateBaselineExists: false,
+        templateBaselineIds: [],
+      },
+      meetings: [
+        {
+          ...hfScope,
+          schemaVersion: 1,
+          meetingRoundId: "hf-review-sel-1-r1",
+          meetingType: "hypothesis_review",
+          mode: "review",
+          scopeHash: "sh",
+          participants: ["agent-1"],
+          status: "closed",
+          startedAt: "2026-08-19T01:00:00Z",
+          closedAt: "2026-08-19T02:00:00Z",
+          digestRef: "digest-1",
+          roundIndex: 1,
+        },
+      ],
+      collectionRequests: [],
+      reviewRoundLinks: [],
+      selection: {
+        ...hfScope,
+        schemaVersion: 1,
+        selectionId: "sel-1",
+        selectionHash: "h",
+        mode: "manual",
+        scopeHash: "sh",
+        questionId: "Q-01",
+        selectedCandidateIds: ["cand-1"],
+        previousSelectionId: "",
+        decidedBy: "leader",
+        createdAt: "2026-08-19T00:00:00Z",
+      },
+      ...overrides,
+    };
+  }
+
+  it("returns the base graph untouched when the region is null", () => {
+    const base = definitionToCanvasGraph(definition);
+    const composed = composeHypothesisFirstGraph(base, null);
+    expect(composed).toBe(base);
+    expect(composed.stages.map((stage) => stage.stageId)).toEqual([
+      "knowledge_collection",
+      "experiment_design",
+      "execution_iteration",
+    ]);
+  });
+
+  it("inserts the region stage at index 0 and shifts existing stages", () => {
+    const base = definitionToCanvasGraph(definition);
+    const region = buildHypothesisFirstCanvasRegion(regionInput())!;
+    const composed = composeHypothesisFirstGraph(base, region);
+
+    expect(composed.stages.map((stage) => stage.stageId)).toEqual([
+      "hypothesis_first",
+      "knowledge_collection",
+      "experiment_design",
+      "execution_iteration",
+    ]);
+    expect(composed.stages.map((stage) => stage.index)).toEqual([0, 1, 2, 3]);
+    expect(composed.stages[0]).toMatchObject({ label: "假说先行", progress: { completed: 1, total: 3 } });
+
+    // Region cards come first; base nodes keep their identity.
+    expect(composed.nodes.map((node) => node.nodeId)).toEqual([
+      "hf_selection",
+      "hf_meeting_1",
+      "hf_convergence_gate",
+      ...base.nodes.map((node) => node.nodeId),
+    ]);
+    expect(composed.nodes.find((node) => node.nodeId === "hf_meeting_1")?.status).toBe("succeeded");
+
+    // Gate edges land on the main graph entry points.
+    const stage1 = composed.edges.find((edge) => edge.edgeId === "hf_e_m1_stage1")!;
+    expect(stage1).toMatchObject({
+      fromNodeId: "hf_meeting_1",
+      toNodeId: "source_finding",
+      label: "首轮搜集范围就绪",
+      semanticKind: "human_gate",
+    });
+    const stage2 = composed.edges.find((edge) => edge.edgeId === "hf_e_gate_stage2")!;
+    expect(stage2).toMatchObject({
+      fromNodeId: "hf_convergence_gate",
+      toNodeId: "hypothesis_design",
+      label: "假说集就绪",
+      semanticKind: "human_gate",
+    });
+    // Base edges stay intact after the region edges.
+    expect(composed.edges.slice(region.edges.length)).toEqual(base.edges);
+  });
+
+  it("re-resolves gate edge pathState against the full graph (traversed needs both sides)", () => {
+    const projection: WorkflowCanvasProjection = {
+      definition,
+      run: {
+        runId: "run-hf",
+        status: "running",
+        runtimeCurrentNodeIds: ["source_finding"],
+        nodeRuns: {
+          source_finding: { nodeId: "source_finding", status: "running", attempt: 1, actorKind: "agent" },
+        },
+        pendingHumanTasks: [],
+        blockedReason: null,
+        completionKind: "",
+        parentRunId: null,
+        childRunIds: [],
+      },
+    };
+    const base = projectionToCanvasGraph(projection);
+    const region = buildHypothesisFirstCanvasRegion(regionInput())!;
+
+    // Inside the isolated fragment the external endpoint is unknown (pending),
+    // so a succeeded meeting alone cannot mark the gate edge traversed.
+    const isolated = region.edges.find((edge) => edge.edgeId === "hf_e_m1_stage1")!;
+    expect(isolated.pathState).toBe("idle");
+
+    const composed = composeHypothesisFirstGraph(base, region);
+    const gateEdge = composed.edges.find((edge) => edge.edgeId === "hf_e_m1_stage1")!;
+    // source_finding is runtime-current → the readiness edge turns active.
+    expect(gateEdge.pathState).toBe("active");
+  });
+
+  it("drops region edges whose endpoints are missing from the base graph", () => {
+    const base = definitionToCanvasGraph({
+      ...definition,
+      nodes: definition.nodes.filter((node) => node.nodeId !== "hypothesis_design"),
+      stages: definition.stages.map((stage) =>
+        stage.stageId === "experiment_design" ? { ...stage, nodeIds: [] } : stage),
+      edges: definition.edges.filter((edge) => edge.toNodeId !== "hypothesis_design"),
+    });
+    const region = buildHypothesisFirstCanvasRegion(regionInput())!;
+    const composed = composeHypothesisFirstGraph(base, region);
+    expect(composed.edges.some((edge) => edge.edgeId === "hf_e_gate_stage2")).toBe(false);
+    expect(composed.edges.some((edge) => edge.edgeId === "hf_e_m1_stage1")).toBe(true);
   });
 });

@@ -2,11 +2,20 @@ import { useCallback, useMemo } from "react";
 
 import { WORKBENCH_LAYOUT_IDS } from "../../../components/layout/workbenchLayoutIds";
 import { VCanvasWorkbenchPage } from "../../../components/vui";
-import { definitionToCanvasGraph, projectionToCanvasGraph } from "./researchProcessGraphModel";
+import { buildHypothesisFirstCanvasRegion } from "./hypothesisFirstCanvasRegion";
+import {
+  composeHypothesisFirstGraph,
+  definitionToCanvasGraph,
+  projectionToCanvasGraph,
+} from "./researchProcessGraphModel";
 import { shouldShowResearchProcessInspector } from "./researchProcessPanelSelection";
 import { ResearchProcessInspectorPane } from "./ResearchProcessInspectorPane";
 import { ResearchWorkflowCanvasPane } from "./ResearchWorkflowCanvasPane";
 import { ResearchWorkflowToolbar } from "./ResearchWorkflowToolbar";
+import {
+  useHypothesisFirstChain,
+  useHypothesisFirstChainInvalidation,
+} from "./useHypothesisFirstChain";
 import { useNodeDetailState } from "./useNodeDetailState";
 import { useResearchWorkflowCatalog } from "./useResearchWorkflowCatalog";
 import { useResearchWorkflowCommand } from "./useResearchWorkflowCommand";
@@ -30,6 +39,9 @@ export function ResearchProcessWorkspace({
   const location = useResearchWorkflowWorkspace(teamId);
   const runState = useResearchWorkflowRun(teamId, location.runId);
   const catalog = useResearchWorkflowCatalog(teamId, runState.run?.runVersion ?? null);
+  const chainQuestionId = location.questionId || runState.run?.questionId || "";
+  const hypothesisFirstChain = useHypothesisFirstChain(teamId, chainQuestionId);
+  useHypothesisFirstChainInvalidation(teamId, chainQuestionId, runState.lastSequence);
   const nodeDetail = useNodeDetailState(
     teamId,
     location.runId,
@@ -63,13 +75,29 @@ export function ResearchProcessWorkspace({
         .filter((binding) => Boolean(binding.agentId))
         .map((binding) => [binding.nodeId, binding.agentId]),
     );
-    if (location.runId) {
-      return projectionToCanvasGraph(runState.projection, { primaryAgentIdByNode });
-    }
-    return definitionToCanvasGraph(runState.projection.definition, {
-      primaryAgentIdByNode,
+    const base = location.runId
+      ? projectionToCanvasGraph(runState.projection, { primaryAgentIdByNode })
+      : definitionToCanvasGraph(runState.projection.definition, {
+          primaryAgentIdByNode,
+        });
+    const region = buildHypothesisFirstCanvasRegion({
+      chainState: hypothesisFirstChain.chainState,
+      meetings: hypothesisFirstChain.meetings,
+      collectionRequests: hypothesisFirstChain.collectionRequests,
+      reviewRoundLinks: hypothesisFirstChain.reviewRoundLinks,
+      selection: hypothesisFirstChain.selection,
     });
-  }, [catalog.effectiveBindings, location.runId, runState.projection]);
+    return composeHypothesisFirstGraph(base, region);
+  }, [
+    catalog.effectiveBindings,
+    location.runId,
+    runState.projection,
+    hypothesisFirstChain.chainState,
+    hypothesisFirstChain.meetings,
+    hypothesisFirstChain.collectionRequests,
+    hypothesisFirstChain.reviewRoundLinks,
+    hypothesisFirstChain.selection,
+  ]);
 
   const jumpToRuntime = useCallback(() => {
     const current = runState.projection?.run.runtimeCurrentNodeIds?.[0];
@@ -81,7 +109,11 @@ export function ResearchProcessWorkspace({
     (node) => node.nodeId === runtimeNodeId,
   )?.label ?? (location.runId ? "等待运行更新" : "创建运行");
   const displayError =
-    commands.error || formalCommand.commandError || runState.error || catalog.error;
+    commands.error
+    || formalCommand.commandError
+    || runState.error
+    || catalog.error
+    || hypothesisFirstChain.error;
   const commandBusy = runState.busy || commands.busy || formalCommand.busy;
   const showInspector = shouldShowResearchProcessInspector({
     panel: location.panel,
