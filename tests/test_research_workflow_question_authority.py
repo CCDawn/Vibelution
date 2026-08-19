@@ -150,6 +150,13 @@ def _patch_approved_question(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+def _patch_team_exists(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "core.web.services.team_service.assert_team_exists",
+        lambda team_id: str(team_id or "").strip(),
+    )
+
+
 def test_launch_options_and_frozen_input_derive_from_one_approved_question(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -279,6 +286,22 @@ def test_launch_options_overlay_live_checkpoints(
     tmp_path: Path,
 ) -> None:
     _patch_approved_question(monkeypatch)
+    _patch_team_exists(monkeypatch)
+    detail_calls: list[tuple[str, str]] = []
+    original_detail = question_launch.get_challenge_question_run_detail
+
+    def _count_detail(team_id: str, question_id: str, *, run_id: str = "") -> dict:
+        detail_calls.append((team_id, question_id))
+        return original_detail(team_id, question_id, run_id=run_id)
+
+    monkeypatch.setattr(question_launch, "get_challenge_question_run_detail", _count_detail)
+    monkeypatch.setattr(
+        question_launch,
+        "list_experiment_launch_options",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("launch-options must not load deep-experiment snapshots")
+        ),
+    )
     service = reset_research_workflow_runtime_service_for_tests(
         run_store=WorkflowRunStore(tmp_path / "runs"),
         checkpoint_path=str(tmp_path / "checkpoints.sqlite"),
@@ -308,6 +331,9 @@ def test_launch_options_overlay_live_checkpoints(
     payload = service.get_question_launch_options(team_id="research-team")
     by_id = {item["questionId"]: item for item in payload["questions"]}
     assert len(payload["questions"]) == 125
+    assert payload["experiments"] == []
+    assert detail_calls == []
+    assert by_id["SCI-096"]["source"] == "catalog"
     assert by_id["SCI-001"]["checkpoint"]["runId"] == "run-live"
     assert by_id["SCI-001"]["checkpoint"]["currentNodeLabel"] == "资料寻找"
     assert by_id["SCI-001"]["checkpoint"]["resumable"] is True
@@ -357,6 +383,7 @@ def test_create_endpoint_forbids_client_authored_contract_fields(
     request.addfinalizer(formal_runtime.close)
     canonical_input = question_launch.build_question_run_input
     _patch_approved_question(monkeypatch)
+    _patch_team_exists(monkeypatch)
     monkeypatch.setattr(
         runtime_service_module,
         "build_question_run_input",
@@ -399,6 +426,7 @@ def test_create_endpoint_forbids_client_authored_contract_fields(
     assert "SCI-001" in question_ids
     assert "SCI-096" in question_ids
     assert len(question_ids) == 125
+    assert options.json()["experiments"] == []
     assert rejected.status_code == 422
     assert accepted.status_code == 201
     body = accepted.json()

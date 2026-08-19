@@ -72,8 +72,7 @@ from .question_launch import (
     activate_experiment_campaign,
     attach_question_run_checkpoints,
     build_question_run_input,
-    list_experiment_launch_options,
-    list_question_launch_options,
+    list_catalog_question_launch_options,
 )
 from .research_ledger import project_research_ledger
 from .run_access import RunAccessError, require_run_access
@@ -191,15 +190,21 @@ class ResearchWorkflowRuntimeService:
     ) -> dict[str, Any]:
         self.get_definition(workflow_id)
         try:
-            options = list_question_launch_options(team_id)
-            options["experiments"] = list_experiment_launch_options(team_id)["experiments"]
+            from core.web.services.team_service import TeamNotFoundError, assert_team_exists
+
+            try:
+                scoped_team_id = assert_team_exists(team_id)
+            except TeamNotFoundError as exc:
+                raise ResearchWorkflowError(str(exc), code="unknown_team") from exc
+            options = list_catalog_question_launch_options(scoped_team_id)
+            options["experiments"] = []
             try:
                 from .formal_read_runtime import FormalReadRuntimeUnavailable, get_query_service
                 from .formal_write_runtime import WorkflowMigrationRequired
                 from .query_service import WorkflowQueryError
 
                 runs = get_query_service().list_runs(
-                    team_id=team_id,
+                    team_id=scoped_team_id,
                     workflow_id=workflow_id,
                 )["runs"]
                 options["questions"] = attach_question_run_checkpoints(

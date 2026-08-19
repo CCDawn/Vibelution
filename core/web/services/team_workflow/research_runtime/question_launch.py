@@ -331,9 +331,25 @@ def activate_experiment_campaign(
     return {"experimentId": normalized_experiment_id, **activation}
 
 
-def list_question_launch_options(team_id: str) -> dict[str, Any]:
-    """Return all 125 catalog questions; overlay approved artifacts when present."""
+def _catalog_question_option(item: Mapping[str, Any]) -> dict[str, Any] | None:
+    question_id = _text(item.get("id")).upper()
+    if not question_id:
+        return None
+    domain = _text(item.get("domain"))
+    return {
+        "questionId": question_id,
+        "title": _text(item.get("question_en")) or question_id,
+        "scope": domain,
+        "domain": domain,
+        "catalogId": CATALOG_ID,
+        "reviewRunId": "",
+        "artifactSha256": "",
+        "source": "catalog",
+        "launchable": True,
+    }
 
+
+def _load_catalog_question_options() -> list[dict[str, Any]]:
     try:
         catalog = load_science_question_catalog()
     except CompetitionResourceError as exc:
@@ -341,39 +357,43 @@ def list_question_launch_options(team_id: str) -> dict[str, Any]:
             "The frozen competition catalog is unavailable or drifted.",
             code="challenge_competition_snapshot_invalid",
         ) from exc
-    approved = _approved_details(team_id)
     questions: list[dict[str, Any]] = []
     for item in catalog.get("questions") or []:
-        if not isinstance(item, dict):
+        if not isinstance(item, Mapping):
             continue
-        question_id = _text(item.get("id")).upper()
-        if not question_id:
-            continue
-        domain = _text(item.get("domain"))
-        detail = approved.get(question_id)
+        option = _catalog_question_option(item)
+        if option is not None:
+            questions.append(option)
+    return questions
+
+
+def list_catalog_question_launch_options(team_id: str) -> dict[str, Any]:
+    """Picker summary: frozen 125 catalog titles, no approved-artifact hydration."""
+
+    return {"teamId": _text(team_id), "questions": _load_catalog_question_options()}
+
+
+def list_question_launch_options(team_id: str) -> dict[str, Any]:
+    """Return all 125 catalog questions; overlay approved artifacts when present."""
+
+    questions = _load_catalog_question_options()
+    approved = _approved_details(team_id)
+    if not approved:
+        return {"teamId": _text(team_id), "questions": questions}
+    overlaid: list[dict[str, Any]] = []
+    for row in questions:
+        detail = approved.get(row["questionId"])
         if detail is None:
-            questions.append(
-                {
-                    "questionId": question_id,
-                    "title": _text(item.get("question_en")) or question_id,
-                    "scope": domain,
-                    "domain": domain,
-                    "catalogId": CATALOG_ID,
-                    "reviewRunId": "",
-                    "artifactSha256": "",
-                    "source": "catalog",
-                    "launchable": True,
-                }
-            )
+            overlaid.append(row)
             continue
         output = _mapping(detail.get("output"))
         artifact = _mapping(detail.get("artifact"))
-        questions.append(
+        overlaid.append(
             {
-                "questionId": question_id,
-                "title": _question_title(output, question_id),
-                "scope": _question_scope(output) or domain,
-                "domain": domain,
+                "questionId": row["questionId"],
+                "title": _question_title(output, row["questionId"]),
+                "scope": _question_scope(output) or row["domain"],
+                "domain": row["domain"],
                 "catalogId": CATALOG_ID,
                 "reviewRunId": _text(detail.get("selectedRunId")),
                 "artifactSha256": _text(artifact.get("sha256")),
@@ -381,7 +401,7 @@ def list_question_launch_options(team_id: str) -> dict[str, Any]:
                 "launchable": True,
             }
         )
-    return {"teamId": _text(team_id), "questions": questions}
+    return {"teamId": _text(team_id), "questions": overlaid}
 
 
 def _iso_to_ms(value: str) -> int:

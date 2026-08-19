@@ -1,4 +1,6 @@
 import React from "react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
@@ -65,6 +67,22 @@ describe("VUI form primitives", () => {
     expect(markup).toContain('type="checkbox"');
     expect(markup).toContain("MiMo V2.5");
     expect(markup).toContain("Running only");
+  });
+
+  it("keeps described select options as two auto-height rows", () => {
+    const source = readFileSync(
+      resolve(import.meta.dirname, "renderers/shadcn/ShadcnSelect.tsx"),
+      "utf8",
+    );
+
+    expect(source).toContain('data-slot="select-item"');
+    expect(source).toContain('data-slot="select-item-description"');
+    expect(source).toContain("h-auto");
+    expect(source).toContain("shrink-0");
+    expect(source).toContain("leading-5");
+    expect(source).toContain("leading-4");
+    expect(source).toContain("auto-rows-max");
+    expect(source).not.toContain("top-1/2 -translate-y-1/2");
   });
 
   it("exports Radix tabs list chrome", () => {

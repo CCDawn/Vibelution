@@ -204,17 +204,20 @@ export const ShadcnSelect = forwardRef<HTMLButtonElement, ShadcnSelectProps>(
               data-vui="select-content"
               data-renderer="radix"
             >
-              <SelectPrimitive.Viewport className="grid max-h-[inherit] gap-0.5 overflow-y-auto p-1">
+              <SelectPrimitive.Viewport className="grid max-h-[inherit] auto-rows-max gap-1 overflow-y-auto p-1">
                 {options.map((option) => {
                   const key = String(option.id);
+                  const hasDescription = Boolean(option.description);
                   return (
                     <SelectPrimitive.Item
                       key={key}
                       value={optionValue(key)}
                       disabled={option.disabled}
+                      data-slot="select-item"
                       className={cn(
-                        "relative flex w-full cursor-default select-none items-start gap-2 rounded-[calc(var(--radius-control)-2px)]",
-                        "py-1.5 pl-2 pr-8 text-left outline-none",
+                        "relative flex h-auto w-full shrink-0 cursor-default select-none items-start gap-2 overflow-visible rounded-[calc(var(--radius-control)-2px)]",
+                        "pl-2 pr-8 text-left outline-none",
+                        hasDescription ? "py-2" : "py-1.5",
                         "data-[highlighted]:bg-[color-mix(in_srgb,var(--accent-cool)_10%,transparent)]",
                         "data-[disabled]:pointer-events-none data-[disabled]:opacity-45",
                         vuiControlDensityClass(density).includes("md")
@@ -223,17 +226,22 @@ export const ShadcnSelect = forwardRef<HTMLButtonElement, ShadcnSelectProps>(
                       )}
                       title={typeof option.description === "string" ? option.description : undefined}
                     >
-                      <span className="grid min-w-0 flex-1 gap-0.5">
-                        <SelectPrimitive.ItemText className="block min-w-0 truncate text-sm font-medium text-[var(--fg-primary)]">
-                          {option.label}
+                      <span className="flex min-w-0 flex-1 flex-col justify-center gap-1 overflow-visible">
+                        <SelectPrimitive.ItemText>
+                          <span className="block min-w-0 truncate text-sm font-medium leading-5 text-[var(--fg-primary)]">
+                            {option.label}
+                          </span>
                         </SelectPrimitive.ItemText>
-                        {option.description ? (
-                          <span className="block min-w-0 truncate text-[11px] text-[var(--fg-tertiary)]">
+                        {hasDescription ? (
+                          <span
+                            data-slot="select-item-description"
+                            className="block min-w-0 truncate text-[11px] leading-4 text-[var(--fg-tertiary)]"
+                          >
                             {option.description}
                           </span>
                         ) : null}
                       </span>
-                      <SelectPrimitive.ItemIndicator className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--fg-primary)]">
+                      <SelectPrimitive.ItemIndicator className="absolute right-2 top-2 text-[var(--fg-primary)]">
                         <Check size={14} strokeWidth={2.25} aria-hidden="true" />
                       </SelectPrimitive.ItemIndicator>
                     </SelectPrimitive.Item>
