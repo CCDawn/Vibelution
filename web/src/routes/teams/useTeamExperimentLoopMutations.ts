@@ -403,6 +403,7 @@ export function useTeamExperimentLoopMutations(options: UseTeamExperimentLoopMut
         payload.teamId,
         payload.plan.planId,
         {
+          evidenceKind: "external_manual",
           recordedByAgent: options.sourceCollectionOwnerAgentId,
           status: payload.draft.status,
           metricName: payload.plan.experimentPlan.metric || "",

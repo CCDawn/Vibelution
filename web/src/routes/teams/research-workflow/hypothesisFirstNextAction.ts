@@ -17,6 +17,7 @@ import {
   HYPOTHESIS_FIRST_GENERATION_NODE_ID,
   HYPOTHESIS_FIRST_SELECTION_NODE_ID,
 } from "./hypothesisFirstCanvasRegion";
+import { getNodeAdapter } from "./nodeAdapterModel";
 
 export type HypothesisFirstStage =
   | "no_run"
@@ -72,7 +73,10 @@ export type HypothesisFirstNextAction = {
 };
 
 export type HypothesisFirstNextActionInput = {
-  run?: { runId?: string | null } | null;
+  run?: {
+    runId?: string | null;
+    runtimeCurrentNodeIds?: readonly string[] | null;
+  } | null;
   chainState?: HypothesisFirstChainState | null;
   meetings?: readonly MeetingRoundRecord[] | null;
   selection?: HypothesisSelectionRecord | null;
@@ -151,6 +155,14 @@ function hasSelection(input: HypothesisFirstNextActionInput): boolean {
 function meetingSummaryFailed(meeting: MeetingRoundRecord): boolean {
   return Boolean(meeting.summaryError?.trim())
     || Boolean(meeting.digestDraft?.validationErrors?.length);
+}
+
+function formalRuntimeNode(input: HypothesisFirstNextActionInput) {
+  for (const nodeId of input.run?.runtimeCurrentNodeIds ?? []) {
+    const adapter = getNodeAdapter(String(nodeId || "").trim());
+    if (adapter) return adapter;
+  }
+  return null;
 }
 
 export function chatRoundIsTerminal(status: string | null | undefined): boolean {
@@ -318,9 +330,9 @@ export function resolveHypothesisFirstNextAction(
     return action({
       stage: "no_run",
       targetNodeId: null,
-      navigationLabel: "创建运行",
+      navigationLabel: "选择题目开始研究",
       command: "create_run",
-      commandLabel: "创建运行",
+      commandLabel: "选择题目开始研究",
     });
   }
 
@@ -332,10 +344,11 @@ export function resolveHypothesisFirstNextAction(
   const state = input.chainState;
 
   if (state?.hypothesisConverged) {
+    const runtimeNode = formalRuntimeNode(input);
     return action({
       stage: "converged",
-      targetNodeId: HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID,
-      navigationLabel: "查看假说收敛",
+      targetNodeId: runtimeNode?.nodeId ?? HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID,
+      navigationLabel: runtimeNode ? `前往${runtimeNode.label}` : "查看假说收敛",
       statusMessage: "假说先行闭环已完成",
     });
   }

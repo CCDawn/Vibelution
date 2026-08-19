@@ -30,6 +30,430 @@ def _load_challenge_program_case_registry() -> dict[str, Any]:
     return load_legacy_representative_cases()
 
 
+_FORMAL_RUN_CANONICAL_EVIDENCE_KIND = "canonical_runner"
+_FORMAL_RUN_EXTERNAL_EVIDENCE_KIND = "external_manual"
+_FORMAL_RUN_RECEIPT_PREDICATE_TYPE = "https://vibelution.dev/experiment/full-run-receipt/v1"
+
+
+def _canonical_experiment_digest(value: Any) -> str:
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
+
+
+def _experiment_method_config_digest(plan: dict[str, Any] | None) -> str:
+    contract = (plan or {}).get("experimentContract") if isinstance((plan or {}).get("experimentContract"), dict) else {}
+    method_config = contract.get("methodConfig") if isinstance(contract.get("methodConfig"), dict) else {}
+    return _canonical_experiment_digest(method_config)
+
+
+def _full_run_execution_config_digest(config: dict[str, Any] | None) -> str:
+    return _canonical_experiment_digest(config if isinstance(config, dict) else {})
+
+
+def _digest_hex(value: str) -> str:
+    text = str(value or "").strip()
+    return text.split(":", 1)[1] if text.startswith("sha256:") else text
+
+
+def _normalized_artifact_digest(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text.startswith("sha256:"):
+        return ""
+    digest = text.split(":", 1)[1]
+    if len(digest) != 64:
+        return ""
+    try:
+        if len(bytes.fromhex(digest)) != 32:
+            return ""
+    except ValueError:
+        return ""
+    return f"sha256:{digest.lower()}"
+
+
+def _formal_runner_artifact_digests(
+    plan: dict[str, Any],
+    preparation: dict[str, Any],
+    result: dict[str, Any],
+) -> list[str]:
+    s = _service()
+    contract = plan.get("experimentContract") if isinstance(plan.get("experimentContract"), dict) else {}
+    method_config = contract.get("methodConfig") if isinstance(contract.get("methodConfig"), dict) else {}
+    try:
+        plan_seeds = [int(seed) for seed in list(method_config.get("seeds") or [])]
+        preparation_seeds = [int(seed) for seed in list(preparation.get("seeds") or [])]
+        result_seeds = [int(seed) for seed in list(result.get("seeds") or [])]
+    except (TypeError, ValueError):
+        raise s.TeamWorkflowOrchestrationError("Canonical formal runner receipt has an invalid seed contract.")
+    if not plan_seeds or plan_seeds != preparation_seeds or plan_seeds != result_seeds:
+        raise s.TeamWorkflowOrchestrationError(
+            "Canonical formal runner receipt seeds do not match the plan and preparation contract."
+        )
+    runs = result.get("runs")
+    if not isinstance(runs, list) or not runs:
+        raise s.TeamWorkflowOrchestrationError(
+            "Canonical formal runner receipt requires one result artifact for every declared seed."
+        )
+    try:
+        seed_count = int(result.get("seedCount"))
+    except (TypeError, ValueError):
+        raise s.TeamWorkflowOrchestrationError("Canonical formal runner receipt has an invalid seed contract.")
+    if (
+        seed_count != len(runs)
+        or len(plan_seeds) != seed_count
+        or len(set(plan_seeds)) != seed_count
+    ):
+        raise s.TeamWorkflowOrchestrationError(
+            "Canonical formal runner receipt seed count does not match the completed run artifacts."
+    )
+    digests: list[str] = []
+    observed_seeds: set[int] = set()
+    observed_seed_order: list[int] = []
+    artifact_paths: set[str] = set()
+    for run in runs:
+        if not isinstance(run, dict):
+            raise s.TeamWorkflowOrchestrationError("Canonical formal runner receipt contains an invalid run record.")
+        try:
+            seed = int(run.get("seed"))
+        except (TypeError, ValueError):
+            raise s.TeamWorkflowOrchestrationError("Canonical formal runner receipt contains an invalid run seed.")
+        digest = _normalized_artifact_digest(run.get("artifactHash"))
+        result_path = str(run.get("resultPath") or "").strip()
+        if not result_path or not digest:
+            raise s.TeamWorkflowOrchestrationError(
+                "Canonical formal runner receipt requires a result path and valid artifact digest for every seed."
+            )
+        artifact_path = Path(result_path).expanduser()
+        try:
+            artifact_key = str(artifact_path.resolve()).casefold()
+            actual_digest = f"sha256:{hashlib.sha256(artifact_path.read_bytes()).hexdigest()}"
+        except (OSError, ValueError) as exc:
+            raise s.TeamWorkflowOrchestrationError(
+                "Canonical formal runner receipt requires readable seed artifact files."
+            ) from exc
+        if artifact_key in artifact_paths:
+            raise s.TeamWorkflowOrchestrationError("Canonical formal runner receipt artifact paths must be unique.")
+        if actual_digest != digest:
+            raise s.TeamWorkflowOrchestrationError("Canonical formal runner receipt artifact digest is invalid.")
+        artifact_paths.add(artifact_key)
+        if seed in observed_seeds or seed not in plan_seeds:
+            raise s.TeamWorkflowOrchestrationError("Canonical formal runner receipt has duplicate or undeclared seeds.")
+        observed_seeds.add(seed)
+        observed_seed_order.append(seed)
+        if digest not in digests:
+            digests.append(digest)
+    if observed_seed_order != plan_seeds or observed_seeds != set(plan_seeds):
+        raise s.TeamWorkflowOrchestrationError(
+            "Canonical formal runner receipt does not cover every declared seed."
+        )
+    return digests
+
+
+def _build_formal_runner_receipt(
+    plan: dict[str, Any],
+    *,
+    execution_id: str,
+    preparation: dict[str, Any],
+    execution_config: dict[str, Any],
+    method_config_digest: str,
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    """Build the immutable, project-local attestation for a completed runner.
+
+    The shape deliberately borrows only the useful in-toto/SLSA ideas: a
+    digest-bound subject, invocation identity, and material digests.  It is
+    not a signed external attestation and therefore remains review evidence.
+    """
+
+    s = _service()
+    result_path = s._trim_text(result.get("resultPath"), max_length=500)
+    log_ref = s._trim_text(result.get("logRef"), max_length=500)
+    artifact_digests = _formal_runner_artifact_digests(plan, preparation, result)
+    if str(result.get("status") or "").strip().lower() != "completed":
+        raise s.TeamWorkflowOrchestrationError("Canonical formal runner receipt requires a completed runner result.")
+    if not result_path or not log_ref or not artifact_digests:
+        raise s.TeamWorkflowOrchestrationError(
+            "Canonical formal runner receipt requires result path, log reference, and artifact digests."
+        )
+    adapter_id = s._trim_text(result.get("adapterId"), max_length=200)
+    preparation_id = s._trim_text(preparation.get("preparationId"), max_length=200)
+    plan_id = s._trim_text(plan.get("planId"), max_length=200)
+    plan_revision = s._experiment_plan_revision(plan)
+    config_digest = _full_run_execution_config_digest(execution_config)
+    result_digest = _canonical_experiment_digest(result)
+    subject = [
+        {
+            "name": str(run.get("resultPath") or ""),
+            "digest": {"sha256": _digest_hex(_normalized_artifact_digest(run.get("artifactHash")))},
+            "seed": run.get("seed"),
+        }
+        for run in list(result.get("runs") or [])
+        if isinstance(run, dict) and str(run.get("resultPath") or "").strip()
+    ]
+    subject.append({"name": result_path, "digest": {"sha256": _digest_hex(result_digest)}})
+    predicate = {
+        "planId": plan_id,
+        "planRevision": plan_revision,
+        "adapterId": adapter_id,
+        "preparationId": preparation_id,
+        "executionId": execution_id,
+        "configDigest": config_digest,
+        "methodConfigDigest": method_config_digest,
+        "artifactDigests": artifact_digests,
+        "materials": [
+            {
+                "uri": f"vibelution://experiment-plan/{plan_id}/revision/{plan_revision}",
+                "digest": {"sha256": _digest_hex(_canonical_experiment_digest({"planId": plan_id, "revision": plan_revision}))},
+            },
+            {
+                "uri": f"vibelution://experiment-preparation/{preparation_id}",
+                "digest": {
+                    "sha256": _digest_hex(
+                        _canonical_experiment_digest(
+                            {
+                                "preparationId": preparation_id,
+                                "planId": plan_id,
+                                "planRevision": plan_revision,
+                                "adapterId": adapter_id,
+                                "configDigest": config_digest,
+                                "methodConfigDigest": method_config_digest,
+                            }
+                        )
+                    )
+                },
+            },
+        ],
+        "invocation": {
+            "id": execution_id,
+            "adapterId": adapter_id,
+            "configDigest": config_digest,
+            "planRevision": plan_revision,
+        },
+        "logRef": log_ref,
+        "resultDigest": result_digest,
+    }
+    statement = {
+        "_type": "https://in-toto.io/Statement/v1",
+        "subject": subject,
+        "predicateType": _FORMAL_RUN_RECEIPT_PREDICATE_TYPE,
+        "predicate": predicate,
+    }
+    return {
+        "receiptId": _canonical_experiment_digest(statement),
+        **statement,
+        "immutable": True,
+    }
+
+
+def _find_formal_full_run_record(records: Any, record_id: str, id_key: str) -> dict[str, Any] | None:
+    for record in list(records or []):
+        if isinstance(record, dict) and str(record.get(id_key) or "") == record_id:
+            return record
+    return None
+
+
+def _validate_formal_runner_receipt(
+    plan: dict[str, Any],
+    *,
+    execution_id: str,
+    preparation_id: str,
+    receipt_id: str = "",
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    s = _service()
+    normalized_execution_id = s._trim_text(execution_id, max_length=200)
+    normalized_preparation_id = s._trim_text(preparation_id, max_length=200)
+    if not normalized_execution_id or not normalized_preparation_id:
+        raise s.TeamWorkflowOrchestrationError(
+            "Canonical formal full-run registration requires executionId and preparationId."
+        )
+    execution = _find_formal_full_run_record(plan.get("fullRunExecutions"), normalized_execution_id, "executionId")
+    preparation = _find_formal_full_run_record(plan.get("fullRunPreparations"), normalized_preparation_id, "preparationId")
+    if execution is None or preparation is None:
+        raise s.TeamWorkflowOrchestrationError(
+            "Canonical completed execution and preparation are required before formal full-run registration."
+        )
+    current_plan_id = str(plan.get("planId") or "")
+    if str(execution.get("planId") or "") != current_plan_id:
+        raise s.TeamWorkflowOrchestrationError("Formal execution belongs to a different experiment plan.")
+    if str(preparation.get("planId") or "") != current_plan_id:
+        raise s.TeamWorkflowOrchestrationError("Formal preparation belongs to a different experiment plan.")
+    if str(plan.get("activeFullRunExecutionId") or "") != normalized_execution_id:
+        raise s.TeamWorkflowOrchestrationError("The selected formal execution is not the plan's active execution.")
+    if str(plan.get("activeFullRunPreparationId") or "") != normalized_preparation_id:
+        raise s.TeamWorkflowOrchestrationError("The selected formal preparation is not the plan's active preparation.")
+    if str(execution.get("status") or "").strip().lower() != "completed":
+        raise s.TeamWorkflowOrchestrationError("Canonical formal registration requires a completed execution.")
+    if str(preparation.get("status") or "").strip().lower() != "prepared":
+        raise s.TeamWorkflowOrchestrationError("Canonical formal registration requires a completed preparation.")
+    current_revision = s._experiment_plan_revision(plan)
+    try:
+        execution_revision = int(execution.get("planRevision"))
+        preparation_revision = int(preparation.get("planRevision"))
+    except (TypeError, ValueError):
+        raise s.TeamWorkflowOrchestrationError("Formal execution plan revision is invalid.")
+    if execution_revision != current_revision:
+        raise s.TeamWorkflowOrchestrationError("Formal execution plan revision does not match the current plan revision.")
+    if preparation_revision != current_revision:
+        raise s.TeamWorkflowOrchestrationError("Formal preparation plan revision does not match the current plan revision.")
+    if str(execution.get("preparationId") or "") != normalized_preparation_id:
+        raise s.TeamWorkflowOrchestrationError("Formal execution is bound to a different preparation.")
+    expected_adapter = s._trim_text(
+        ((plan.get("experimentContract") or {}).get("adapterSelection") or {}).get("resolvedAdapterId"),
+        max_length=200,
+    )
+    execution_result = execution.get("result") if isinstance(execution.get("result"), dict) else {}
+    if expected_adapter != s._trim_text(execution.get("adapterId"), max_length=200):
+        raise s.TeamWorkflowOrchestrationError("Formal execution adapter does not match the plan adapter.")
+    if expected_adapter != s._trim_text(preparation.get("adapterId"), max_length=200):
+        raise s.TeamWorkflowOrchestrationError("Formal preparation adapter does not match the plan adapter.")
+    if expected_adapter != s._trim_text(execution_result.get("adapterId"), max_length=200):
+        raise s.TeamWorkflowOrchestrationError("Runner receipt adapter does not match the plan adapter.")
+    execution_config = execution.get("executionConfig") if isinstance(execution.get("executionConfig"), dict) else {}
+    preparation_config = preparation.get("executionConfig") if isinstance(preparation.get("executionConfig"), dict) else {}
+    execution_config_digest = _full_run_execution_config_digest(execution_config)
+    preparation_config_digest = _full_run_execution_config_digest(preparation_config)
+    if execution_config_digest != preparation_config_digest:
+        raise s.TeamWorkflowOrchestrationError("Formal execution config does not match the preparation config.")
+    if str(execution.get("executionConfigDigest") or "") != execution_config_digest:
+        raise s.TeamWorkflowOrchestrationError("Formal execution config digest is invalid.")
+    if str(preparation.get("executionConfigDigest") or "") != preparation_config_digest:
+        raise s.TeamWorkflowOrchestrationError("Formal preparation config digest is invalid.")
+    method_config_digest = _experiment_method_config_digest(plan)
+    if str(execution.get("methodConfigDigest") or "") != method_config_digest:
+        raise s.TeamWorkflowOrchestrationError("Formal execution method config digest is invalid.")
+    if str(preparation.get("methodConfigDigest") or "") != method_config_digest:
+        raise s.TeamWorkflowOrchestrationError("Formal preparation method config digest is invalid.")
+    receipt = execution.get("runnerReceipt") if isinstance(execution.get("runnerReceipt"), dict) else None
+    if receipt is None:
+        raise s.TeamWorkflowOrchestrationError("A canonical completed runner receipt is required for formal pass.")
+    expected_receipt = _build_formal_runner_receipt(
+        plan,
+        execution_id=normalized_execution_id,
+        preparation=preparation,
+        execution_config=execution_config,
+        method_config_digest=method_config_digest,
+        result=execution_result,
+    )
+    if receipt != expected_receipt:
+        raise s.TeamWorkflowOrchestrationError("Formal runner receipt digest or attestation is invalid.")
+    normalized_receipt_id = s._trim_text(receipt_id, max_length=200)
+    if normalized_receipt_id and normalized_receipt_id != str(receipt.get("receiptId") or ""):
+        raise s.TeamWorkflowOrchestrationError("Formal runner receipt id does not match the completed execution.")
+    return execution, preparation, receipt
+
+
+def _formal_runner_result_status(result: dict[str, Any]) -> str:
+    if str(result.get("status") or "").strip().lower() != "completed":
+        return "failed"
+    runs = [item for item in list(result.get("runs") or []) if isinstance(item, dict)]
+    decisions = [str((item.get("decision") or {}).get("status") or "").strip().lower() for item in runs]
+    if decisions and all(item == "support" for item in decisions):
+        return "passed"
+    if any(item in {"failed", "fail", "reject", "rejected"} for item in decisions):
+        return "failed"
+    return "needs_review"
+
+
+def _canonical_formal_full_run_result_record(
+    plan: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    recorded_by_agent: str,
+) -> dict[str, Any]:
+    s = _service()
+    execution_id = s._trim_text(payload.get("executionId"), max_length=200)
+    preparation_id = s._trim_text(payload.get("preparationId"), max_length=200)
+    execution, preparation, receipt = _validate_formal_runner_receipt(
+        plan,
+        execution_id=execution_id,
+        preparation_id=preparation_id,
+        receipt_id=s._trim_text(payload.get("receiptId"), max_length=200),
+    )
+    result = execution.get("result") if isinstance(execution.get("result"), dict) else {}
+    status = _formal_runner_result_status(result)
+    experiment_plan = plan.get("experimentPlan") if isinstance(plan.get("experimentPlan"), dict) else {}
+    contract = plan.get("experimentContract") if isinstance(plan.get("experimentContract"), dict) else {}
+    metric_contract = contract.get("metricContract") if isinstance(contract.get("metricContract"), dict) else {}
+    metric_name = s._trim_text(
+        metric_contract.get("primaryMetric") or experiment_plan.get("metric"),
+        max_length=500,
+    )
+    aggregate = result.get("aggregate") if isinstance(result.get("aggregate"), dict) else {}
+    mse_summary = aggregate.get("mseImprovement") if isinstance(aggregate.get("mseImprovement"), dict) else {}
+    metric_value = str(mse_summary.get("mean") or "")
+    if not metric_value:
+        metric_value = json.dumps(aggregate, ensure_ascii=False, sort_keys=True)
+    baseline_selection = plan.get("baselineSelection") if isinstance(plan.get("baselineSelection"), dict) else {}
+    active_baseline = baseline_selection.get("activeBaselineArtifact") if isinstance(baseline_selection.get("activeBaselineArtifact"), dict) else {}
+    active_smoke = plan.get("activeSmokeResult") if isinstance(plan.get("activeSmokeResult"), dict) else {}
+    gate_decision = {
+        "passed": "ready_for_knowledge_review",
+        "failed": "reject_or_repair",
+        "needs_review": "needs_more_evidence",
+    }[status]
+    artifact_digests = list(((receipt.get("predicate") or {}).get("artifactDigests") or []))
+    now = s.utc_now_iso()
+    return {
+        "fullRunResultId": s._new_record_id("full-run-result"),
+        "status": status,
+        "submittedStatus": status,
+        "gateDecision": gate_decision,
+        "evidenceKind": _FORMAL_RUN_CANONICAL_EVIDENCE_KIND,
+        "planId": str(plan.get("planId") or ""),
+        "planRevision": s._experiment_plan_revision(plan),
+        "smokeResultId": str(active_smoke.get("smokeResultId") or ""),
+        "baselineArtifactId": str(active_baseline.get("artifactId") or ""),
+        "baselineMetricValue": s._first_non_empty_text(active_baseline.get("metricValue")),
+        "smokeMetricValue": s._first_non_empty_text(active_smoke.get("metricValue")),
+        "metricName": metric_name,
+        "metricValue": metric_value,
+        "delta": "",
+        "resultPath": s._trim_text(result.get("resultPath"), max_length=500),
+        "logRef": s._trim_text(result.get("logRef"), max_length=500),
+        "configPath": "",
+        "reproductionCommand": "",
+        "evaluationCommand": "",
+        "executionId": execution_id,
+        "preparationId": preparation_id,
+        "receiptId": str(receipt.get("receiptId") or ""),
+        "runnerResultDigest": str(((receipt.get("predicate") or {}).get("resultDigest")) or ""),
+        "artifactDigests": artifact_digests,
+        "runnerReceipt": receipt,
+        "sourceRefs": s._normalize_ref_list(payload.get("sourceRefs"), max_items=12),
+        "evidenceRefs": s._normalize_ref_list(payload.get("evidenceRefs"), max_items=12),
+        "notes": s._trim_text(payload.get("notes"), max_length=4000),
+        "metadata": {
+            **(payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}),
+            "formalExecution": True,
+            "canonicalReceipt": True,
+            "preparationId": preparation_id,
+            "executionId": execution_id,
+        },
+        "recordedByAgent": recorded_by_agent,
+        "recordedAt": now,
+    }
+
+
+def _formal_full_run_result_is_canonical(plan: dict[str, Any], result: dict[str, Any] | None) -> bool:
+    if not isinstance(result, dict) or result.get("evidenceKind") != _FORMAL_RUN_CANONICAL_EVIDENCE_KIND:
+        return False
+    try:
+        _validate_formal_runner_receipt(
+            plan,
+            execution_id=str(result.get("executionId") or ""),
+            preparation_id=str(result.get("preparationId") or ""),
+            receipt_id=str(result.get("receiptId") or ""),
+        )
+    except Exception:
+        return False
+    return str(result.get("status") or "").strip().lower() == "passed"
+
+
 def _require_formal_full_run_ready(plan: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     s = _service()
     contract = plan.get("experimentContract") if isinstance(plan.get("experimentContract"), dict) else {}
@@ -73,20 +497,47 @@ def _record_formal_full_run_execution(
     started_at: str,
     status: str,
     result: dict[str, Any],
+    preparation: dict[str, Any] | None = None,
+    plan_revision: int | None = None,
+    execution_config: dict[str, Any] | None = None,
+    method_config: dict[str, Any] | None = None,
+    method_config_digest: str = "",
 ) -> dict[str, Any]:
     s = _service()
     finished_at = s.utc_now_iso()
     execution_record = {
         "executionId": execution_id,
+        "planId": plan_id,
         "status": status,
         "adapterId": adapter_id,
         "recordedByAgent": recorded_by_agent,
         "startedAt": started_at,
         "finishedAt": finished_at,
         "result": result,
+        "preparationId": str((preparation or {}).get("preparationId") or ""),
+        "planRevision": int(plan_revision if plan_revision is not None else s._experiment_plan_revision({})),
+        "executionConfig": dict(execution_config or {}),
+        "executionConfigDigest": _full_run_execution_config_digest(execution_config),
+        "methodConfigDigest": method_config_digest,
         "requiresResultReview": True,
         "automaticPromotion": False,
     }
+    if status == "completed" and isinstance(preparation, dict):
+        execution_record["runnerReceipt"] = _build_formal_runner_receipt(
+            {
+                "planId": plan_id,
+                "experimentContract": {
+                    "revision": execution_record["planRevision"],
+                    "adapterSelection": {"resolvedAdapterId": adapter_id},
+                    "methodConfig": dict(method_config or {}),
+                },
+            },
+            execution_id=execution_id,
+            preparation=preparation,
+            execution_config=execution_config or {},
+            method_config_digest=method_config_digest,
+            result=result,
+        )
     with s._WORKFLOW_LOCK:
         plan_store = s._load_experiment_plan_store(team_id)
         plan = s._find_experiment_plan(plan_store, plan_id)
@@ -760,7 +1211,10 @@ def _best_validated_experiment_plan(
     for plan in plans:
         full_run = plan.get("activeFullRunResult") if isinstance(plan.get("activeFullRunResult"), dict) else {}
         ingestion = plan.get("knowledgeIngestion") if isinstance(plan.get("knowledgeIngestion"), dict) else {}
-        if str(full_run.get("status") or "").lower() == "passed" or str(ingestion.get("status") or "").lower() == "ingested":
+        if (
+            _formal_full_run_result_is_canonical(plan, full_run)
+            or str(ingestion.get("status") or "").lower() == "ingested"
+        ):
             validated.append(plan)
     if not validated:
         return None
@@ -2162,9 +2616,15 @@ def _experiment_full_run_result_record(
         raise s.TeamWorkflowOrchestrationError("Record a passing smoke result before recording full-run results.")
     if not bool((plan.get("readiness") or {}).get("readyForFullRun")):
         raise s.TeamWorkflowOrchestrationError("Experiment plan is not ready for full-run result recording.")
-    status = s._trim_text(payload.get("status"), max_length=80).lower() or "needs_review"
-    if status not in s.EXPERIMENT_FULL_RUN_RESULT_STATUSES:
-        raise s.TeamWorkflowOrchestrationError(f"Unsupported full-run result status: {status}")
+    evidence_kind = s._trim_text(payload.get("evidenceKind"), max_length=80).lower()
+    if evidence_kind != _FORMAL_RUN_EXTERNAL_EVIDENCE_KIND:
+        raise s.TeamWorkflowOrchestrationError(
+            "Manual full-run evidence must declare evidenceKind=external_manual."
+        )
+    submitted_status = s._trim_text(payload.get("status"), max_length=80).lower() or "needs_review"
+    if submitted_status not in s.EXPERIMENT_FULL_RUN_RESULT_STATUSES:
+        raise s.TeamWorkflowOrchestrationError(f"Unsupported full-run result status: {submitted_status}")
+    status = "needs_review" if submitted_status == "passed" else submitted_status
     metric_value = s._trim_text(payload.get("metricValue"), max_length=240)
     result_path = s._trim_text(payload.get("resultPath") or payload.get("artifactPath"), max_length=500)
     log_ref = s._trim_text(payload.get("logRef") or payload.get("evidenceRef"), max_length=500)
@@ -2181,15 +2641,18 @@ def _experiment_full_run_result_record(
     experiment_plan = plan.get("experimentPlan") if isinstance(plan.get("experimentPlan"), dict) else {}
     now = s.utc_now_iso()
     gate_decision = {
-        "passed": "ready_for_knowledge_review",
+        "passed": "external_manual_review",
         "failed": "reject_or_repair",
         "needs_review": "needs_more_evidence",
-    }[status]
+    }[submitted_status]
     return {
         "fullRunResultId": s._new_record_id("full-run-result"),
         "status": status,
+        "submittedStatus": submitted_status,
         "gateDecision": gate_decision,
+        "evidenceKind": _FORMAL_RUN_EXTERNAL_EVIDENCE_KIND,
         "planId": str(plan.get("planId") or ""),
+        "planRevision": s._experiment_plan_revision(plan),
         "smokeResultId": str(active_smoke_result.get("smokeResultId") or ""),
         "baselineArtifactId": str(active_baseline_artifact.get("artifactId") or ""),
         "baselineMetricValue": s._first_non_empty_text(payload.get("baselineMetricValue"), active_baseline_artifact.get("metricValue")),
@@ -2205,7 +2668,11 @@ def _experiment_full_run_result_record(
         "sourceRefs": s._normalize_ref_list(payload.get("sourceRefs"), max_items=12),
         "evidenceRefs": s._normalize_ref_list(payload.get("evidenceRefs"), max_items=12),
         "notes": s._trim_text(payload.get("notes"), max_length=4000),
-        "metadata": payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {},
+        "metadata": {
+            **(payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}),
+            "externalManualEvidence": True,
+            "formalExecution": False,
+        },
         "recordedByAgent": recorded_by_agent,
         "recordedAt": now,
     }
@@ -2221,8 +2688,10 @@ def _experiment_result_ingestion_pack_record(
 ) -> dict[str, Any]:
     s = _service()
     active_full_run = plan.get("activeFullRunResult") if isinstance(plan.get("activeFullRunResult"), dict) else None
-    if not active_full_run or str(active_full_run.get("status") or "").strip().lower() != "passed":
-        raise s.TeamWorkflowOrchestrationError("Record a passing full-run result before requesting knowledge ingestion.")
+    if not _formal_full_run_result_is_canonical(plan, active_full_run):
+        raise s.TeamWorkflowOrchestrationError(
+            "A canonical completed formal runner receipt is required before requesting knowledge ingestion."
+        )
     experiment_plan = plan.get("experimentPlan") if isinstance(plan.get("experimentPlan"), dict) else {}
     baseline_selection = plan.get("baselineSelection") if isinstance(plan.get("baselineSelection"), dict) else {}
     active_baseline_artifact = (
@@ -2559,7 +3028,7 @@ def _refresh_experiment_plan_readiness(plan: dict[str, Any]) -> None:
         full_run_blockers = []
     else:
         full_run_blockers = ["smoke_result"]
-    knowledge_blockers = [] if active_full_run_status == "passed" else ["full_run_result"]
+    knowledge_blockers = [] if _formal_full_run_result_is_canonical(plan, active_full_run_result) else ["full_run_result"]
     plan["readinessChecklist"] = checklist
     ready_for_plan_review = all(
         item["status"] == "pass"

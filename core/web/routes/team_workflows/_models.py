@@ -358,6 +358,10 @@ class ExperimentSmokeRunPayload(BaseModel):
 
 
 class ExperimentFullRunResultPayload(BaseModel):
+    evidenceKind: str = Field("", max_length=80)
+    executionId: str = Field("", max_length=200)
+    preparationId: str = Field("", max_length=200)
+    receiptId: str = Field("", max_length=200)
     recordedByAgent: str = Field("", max_length=160)
     status: str = Field("needs_review", max_length=80)
     metricName: str = Field("", max_length=500)

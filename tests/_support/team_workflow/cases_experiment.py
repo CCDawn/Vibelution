@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+from pathlib import Path
+
 from tests._support.team_workflow.helpers import *  # noqa: F403
 
 
@@ -997,6 +1000,413 @@ def test_execute_experiment_full_run_stores_review_only_artifacts_without_auto_p
     assert response["plan"]["status"] == "smoke_passed"
     assert response["plan"]["activeFullRunExecution"]["automaticPromotion"] is False
     assert response["plan"].get("activeFullRunResult") is None
+
+
+def test_formal_full_run_pass_rejects_manual_payload_without_canonical_runner_receipt(
+    tmp_path,
+    monkeypatch,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    prepared = _create_experiment_plan_with_active_baseline(team["teamId"])
+    smoke = team_workflow_orchestration_service.register_experiment_smoke_result(
+        team["teamId"],
+        prepared["baseline"]["plan"]["planId"],
+        {
+            "status": "passed",
+            "metricValue": "0.75 validation accuracy",
+            "resultPath": "workspace/experiments/smoke/result.json",
+        },
+    )
+
+    with pytest.raises(
+        team_workflow_orchestration_service.TeamWorkflowOrchestrationError,
+        match="canonical|receipt|execution",
+    ):
+        team_workflow_orchestration_service.register_experiment_full_run_result(
+            team["teamId"],
+            smoke["plan"]["planId"],
+            {
+                "status": "passed",
+                "metricValue": "forged metric",
+                "resultPath": "workspace/forged/result.json",
+                "logRef": "logs/forged.log",
+            },
+        )
+
+
+def test_external_manual_full_run_is_explicit_and_does_not_unlock_knowledge_readiness(
+    tmp_path,
+    monkeypatch,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    prepared = _create_experiment_plan_with_active_baseline(team["teamId"])
+    smoke = team_workflow_orchestration_service.register_experiment_smoke_result(
+        team["teamId"],
+        prepared["baseline"]["plan"]["planId"],
+        {
+            "status": "passed",
+            "metricValue": "0.75 validation accuracy",
+            "resultPath": "workspace/experiments/smoke/result.json",
+        },
+    )
+
+    registered = team_workflow_orchestration_service.register_experiment_full_run_result(
+        team["teamId"],
+        smoke["plan"]["planId"],
+        {
+            "evidenceKind": "external_manual",
+            "status": "passed",
+            "metricValue": "0.79 validation accuracy",
+            "resultPath": "workspace/experiments/external/result.json",
+            "logRef": "logs/external.log",
+        },
+    )
+
+    assert registered["fullRunResult"]["evidenceKind"] == "external_manual"
+    assert registered["fullRunResult"]["status"] == "needs_review"
+    assert registered["fullRunResult"]["submittedStatus"] == "passed"
+    assert registered["plan"]["readiness"]["readyForKnowledgeIngestion"] is False
+    assert registered["plan"]["readiness"]["knowledgeBlockers"] == ["full_run_result"]
+
+
+def test_canonical_runner_receipt_overrides_manual_fields_and_replays_idempotently(
+    tmp_path,
+    monkeypatch,
+):
+    from core.research import formal_runner
+
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    team_workflow_orchestration_service.ensure_team_workflow_orchestration(team["teamId"])
+    plan_id = _seed_formal_full_run_plan(team["teamId"])
+    plan_store = team_workflow_orchestration_service._load_experiment_plan_store(team["teamId"])
+    plan = team_workflow_orchestration_service._find_experiment_plan(plan_store, plan_id)
+    assert plan is not None
+    plan["experimentContract"]["revision"] = 3
+    plan["experimentContract"]["methodConfig"] = {"seeds": [17, 42, 101]}
+    plan["activeSmokeResult"] = {
+        "smokeResultId": "smoke-canonical-1",
+        "status": "passed",
+        "metricName": "validation accuracy",
+        "metricValue": "0.75",
+    }
+    plan["readiness"]["readyForFullRun"] = True
+    team_workflow_orchestration_service._write_json(
+        team_workflow_orchestration_service._experiment_plan_store_path(team["teamId"]),
+        plan_store,
+    )
+
+    execution_config = {
+        "pythonExecutable": "C:/runner/python.exe",
+        "dataRoot": "C:/data/fashionmnist",
+        "outputRoot": str(tmp_path / "formal-output"),
+    }
+    artifact_root = tmp_path / "formal-artifacts"
+    artifact_root.mkdir()
+    runs = []
+    for seed in (17, 42, 101):
+        artifact_path = artifact_root / f"seed-{seed}.json"
+        artifact_bytes = f"artifact-{seed}".encode("utf-8")
+        artifact_path.write_bytes(artifact_bytes)
+        runs.append(
+            {
+                "seed": seed,
+                "resultPath": str(artifact_path),
+                "artifactHash": f"sha256:{hashlib.sha256(artifact_bytes).hexdigest()}",
+                "decision": {"status": "support"},
+                "metrics": {"delta": {"mse_improvement": 0.02}},
+            }
+        )
+    aggregate_result_path = artifact_root / "formal-run-result.json"
+    aggregate_log_path = artifact_root / "formal-run-log.json"
+    aggregate_result_path.write_text("{}", encoding="utf-8")
+    aggregate_log_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        team_workflow_orchestration_service.formal_runner,
+        "prepare_full_run",
+        lambda *args, **kwargs: {
+            "adapterId": args[0],
+            "status": "prepared",
+            "executionMode": "local_process",
+            "seedCount": 3,
+            "seeds": [17, 42, 101],
+            "runOptions": {"epochs": 2},
+            "environment": {
+                **execution_config,
+            },
+            "boundaries": ["user_triggered_only", "manual_result_review_required"],
+        },
+    )
+    runner_result = {
+        "adapterId": formal_runner.FASHION_MNIST_MULTI_SEED_ADAPTER,
+        "status": "completed",
+        "executionMode": "local_process",
+        "seedCount": 3,
+        "seeds": [17, 42, 101],
+        "resultPath": str(aggregate_result_path),
+        "logRef": str(aggregate_log_path),
+        "runs": runs,
+        "aggregate": {
+            "mseImprovement": {"mean": 0.02},
+            "supportCount": 3,
+            "inconclusiveCount": 0,
+        },
+        "requiresResultReview": True,
+        "automaticPromotion": False,
+    }
+    monkeypatch.setattr(
+        team_workflow_orchestration_service.formal_runner,
+        "run_full_run",
+        lambda *args, **kwargs: runner_result,
+    )
+
+    preparation_response = team_workflow_orchestration_service.prepare_experiment_full_run(
+        team["teamId"],
+        plan_id,
+        {
+            "executionConfig": execution_config
+        },
+    )
+    execution_response = team_workflow_orchestration_service.execute_experiment_full_run(
+        team["teamId"],
+        plan_id,
+        {},
+    )
+    execution = execution_response["execution"]
+    preparation = preparation_response["preparation"]
+    payload = {
+        "evidenceKind": "canonical_runner",
+        "executionId": execution["executionId"],
+        "preparationId": preparation["preparationId"],
+        "status": "passed",
+        "metricValue": "forged metric",
+        "resultPath": "workspace/forged/result.json",
+        "logRef": "logs/forged.log",
+    }
+
+    registered = team_workflow_orchestration_service.register_experiment_full_run_result(
+        team["teamId"], plan_id, payload
+    )
+    replayed = team_workflow_orchestration_service.register_experiment_full_run_result(
+        team["teamId"],
+        plan_id,
+        {**payload, "metricValue": "different forged metric", "resultPath": "workspace/other.json"},
+    )
+
+    result = registered["fullRunResult"]
+    assert result["evidenceKind"] == "canonical_runner"
+    assert result["status"] == "passed"
+    assert result["resultPath"] == runner_result["resultPath"]
+    assert result["logRef"] == runner_result["logRef"]
+    assert result["executionId"] == execution["executionId"]
+    assert result["preparationId"] == preparation["preparationId"]
+    assert result["planRevision"] == 3
+    assert result["artifactDigests"] == [run["artifactHash"] for run in runs]
+    assert registered["plan"]["readiness"]["readyForKnowledgeIngestion"] is True
+    assert replayed["fullRunResult"]["fullRunResultId"] == result["fullRunResultId"]
+    assert len(replayed["plan"]["fullRunResults"]) == 1
+
+
+def _register_canonical_formal_full_run(
+    tmp_path,
+    team_id,
+    plan_id,
+    monkeypatch,
+    *,
+    result_name="canonical",
+    runner_result_mutator=None,
+):
+    from core.research import formal_runner
+
+    plan_store = team_workflow_orchestration_service._load_experiment_plan_store(team_id)
+    plan = team_workflow_orchestration_service._find_experiment_plan(plan_store, plan_id)
+    assert plan is not None
+    adapter_id = formal_runner.FASHION_MNIST_MULTI_SEED_ADAPTER
+    seeds = [17, 42, 101]
+    contract = plan.setdefault("experimentContract", {})
+    contract["adapterSelection"] = {"resolvedAdapterId": adapter_id}
+    contract["methodConfig"] = {"seeds": seeds}
+    contract["revision"] = int(contract.get("revision") or 0)
+    plan["contractValidation"] = {"valid": True, "missingFields": []}
+    plan["designGate"] = {"status": "frozen"}
+    plan.setdefault("readiness", {})["readyForFullRun"] = True
+    team_workflow_orchestration_service._write_json(
+        team_workflow_orchestration_service._experiment_plan_store_path(team_id),
+        plan_store,
+    )
+    artifact_root = tmp_path / f"formal-artifacts-{result_name}"
+    artifact_root.mkdir()
+    runs = []
+    for seed in seeds:
+        artifact_path = artifact_root / f"seed-{seed}.json"
+        artifact_bytes = f"{result_name}-artifact-{seed}".encode("utf-8")
+        artifact_path.write_bytes(artifact_bytes)
+        runs.append(
+            {
+                "seed": seed,
+                "resultPath": str(artifact_path),
+                "artifactHash": f"sha256:{hashlib.sha256(artifact_bytes).hexdigest()}",
+                "decision": {"status": "support"},
+                "metrics": {"delta": {"mse_improvement": 0.02}},
+            }
+        )
+    aggregate_result_path = artifact_root / "formal-run-result.json"
+    aggregate_log_path = artifact_root / "formal-run-log.json"
+    aggregate_result_path.write_text("{}", encoding="utf-8")
+    aggregate_log_path.write_text("{}", encoding="utf-8")
+    config = {
+        "pythonExecutable": "C:/runner/python.exe",
+        "dataRoot": "C:/data/fashionmnist",
+        "outputRoot": str(tmp_path / f"formal-output-{result_name}"),
+    }
+    monkeypatch.setattr(
+        team_workflow_orchestration_service.formal_runner,
+        "prepare_full_run",
+        lambda *args, **kwargs: {
+            "adapterId": adapter_id,
+            "status": "prepared",
+            "executionMode": "local_process",
+            "seedCount": len(seeds),
+            "seeds": seeds,
+            "runOptions": {"epochs": 2},
+            "environment": config,
+            "boundaries": ["user_triggered_only", "manual_result_review_required"],
+        },
+    )
+    runner_result = {
+        "adapterId": adapter_id,
+        "status": "completed",
+        "executionMode": "local_process",
+        "seedCount": len(seeds),
+        "seeds": seeds,
+        "resultPath": str(aggregate_result_path),
+        "logRef": str(aggregate_log_path),
+        "runs": runs,
+        "aggregate": {
+            "mseImprovement": {"mean": 0.02},
+            "supportCount": len(seeds),
+            "inconclusiveCount": 0,
+        },
+        "requiresResultReview": True,
+        "automaticPromotion": False,
+    }
+    if runner_result_mutator is not None:
+        runner_result_mutator(runner_result, runs)
+    monkeypatch.setattr(
+        team_workflow_orchestration_service.formal_runner,
+        "run_full_run",
+        lambda *args, **kwargs: runner_result,
+    )
+    preparation = team_workflow_orchestration_service.prepare_experiment_full_run(
+        team_id,
+        plan_id,
+        {"executionConfig": config},
+    )["preparation"]
+    execution = team_workflow_orchestration_service.execute_experiment_full_run(
+        team_id,
+        plan_id,
+        {},
+    )["execution"]
+    return team_workflow_orchestration_service.register_experiment_full_run_result(
+        team_id,
+        plan_id,
+        {
+            "evidenceKind": "canonical_runner",
+            "executionId": execution["executionId"],
+            "preparationId": preparation["preparationId"],
+        },
+    )
+
+
+@pytest.mark.parametrize("mutation", [
+    lambda result, runs: result.__setitem__("seeds", [1, 2, 3]),
+    lambda result, runs: runs[1].__setitem__("seed", runs[0]["seed"]),
+    lambda result, runs: runs[1].__setitem__("resultPath", runs[0]["resultPath"]),
+    lambda result, runs: Path(runs[0]["resultPath"]).write_text("tampered", encoding="utf-8"),
+])
+def test_canonical_runner_receipt_rejects_seed_or_artifact_binding_tampering(
+    tmp_path, monkeypatch, mutation
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    prepared = _create_experiment_plan_with_active_baseline(team["teamId"])
+    smoke = team_workflow_orchestration_service.register_experiment_smoke_result(
+        team["teamId"],
+        prepared["baseline"]["plan"]["planId"],
+        {"status": "passed", "metricValue": "0.75", "resultPath": "workspace/experiments/smoke/result.json"},
+    )
+
+    with pytest.raises(team_workflow_orchestration_service.TeamWorkflowOrchestrationError, match="seed|artifact|digest"):
+        _register_canonical_formal_full_run(
+            tmp_path,
+            team["teamId"],
+            smoke["plan"]["planId"],
+            monkeypatch,
+            result_name="tampered",
+            runner_result_mutator=mutation,
+        )
+
+
+def test_canonical_receipt_replays_after_external_manual_history_window(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    team = team_service.create_team(name="挑战杯科研团队")
+    prepared = _create_experiment_plan_with_active_baseline(team["teamId"])
+    smoke = team_workflow_orchestration_service.register_experiment_smoke_result(
+        team["teamId"],
+        prepared["baseline"]["plan"]["planId"],
+        {"status": "passed", "metricValue": "0.75", "resultPath": "workspace/experiments/smoke/result.json"},
+    )
+    plan_id = smoke["plan"]["planId"]
+    canonical = _register_canonical_formal_full_run(tmp_path, team["teamId"], plan_id, monkeypatch, result_name="history")
+    canonical_result = canonical["fullRunResult"]
+    canonical_run_id = f"run:{canonical_result['fullRunResultId']}"
+    graph_before = canonical["plan"].get("outcomeGraph") or {}
+    related_edges_before = sorted(
+        (edge["edgeId"], edge["relation"])
+        for edge in graph_before.get("edges", [])
+        if edge.get("fromId") == canonical_run_id
+        and edge.get("relation") in {"supports", "falsifies"}
+    )
+    replay_payload = {
+        "evidenceKind": "canonical_runner",
+        "executionId": canonical_result["executionId"],
+        "preparationId": canonical_result["preparationId"],
+    }
+    for index in range(13):
+        team_workflow_orchestration_service.register_experiment_full_run_result(
+            team["teamId"],
+            plan_id,
+            {
+                "evidenceKind": "external_manual",
+                "status": "passed",
+                "metricValue": f"manual-{index}",
+                "resultPath": f"workspace/experiments/external/{index}.json",
+                "logRef": f"logs/external-{index}.log",
+            },
+        )
+
+    replayed = team_workflow_orchestration_service.register_experiment_full_run_result(
+        team["teamId"], plan_id, replay_payload
+    )
+    assert replayed["fullRunResult"]["fullRunResultId"] == canonical_result["fullRunResultId"]
+    canonical_receipts = [
+        item
+        for item in replayed["plan"]["fullRunResults"]
+        if item.get("fullRunResultId") == canonical_result["fullRunResultId"]
+        and item.get("evidenceKind") == "canonical_runner"
+    ]
+    assert len(canonical_receipts) == 1
+    graph_after = replayed["plan"].get("outcomeGraph") or {}
+    related_edges_after = sorted(
+        (edge["edgeId"], edge["relation"])
+        for edge in graph_after.get("edges", [])
+        if edge.get("fromId") == canonical_run_id
+        and edge.get("relation") in {"supports", "falsifies"}
+    )
+    assert related_edges_after == related_edges_before
+
 
 def test_start_experiment_stage_builds_bounded_memory_context_with_negative_shields(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
@@ -2244,6 +2654,7 @@ def test_experiment_full_run_result_registration_tracks_ledger_without_official_
         team["teamId"],
         smoke["plan"]["planId"],
         {
+            "evidenceKind": "external_manual",
             "status": "passed",
             "metricName": "validation accuracy",
             "metricValue": "0.79 validation accuracy",
@@ -2258,21 +2669,29 @@ def test_experiment_full_run_result_registration_tracks_ledger_without_official_
     )
     status = team_workflow_orchestration_service.get_experiment_planning_status(team["teamId"])
 
-    assert registered["fullRunResult"]["status"] == "passed"
-    assert registered["fullRunResult"]["gateDecision"] == "ready_for_knowledge_review"
+    assert registered["fullRunResult"]["evidenceKind"] == "external_manual"
+    assert registered["fullRunResult"]["status"] == "needs_review"
+    assert registered["fullRunResult"]["gateDecision"] == "external_manual_review"
     assert registered["fullRunResult"]["smokeResultId"] == smoke["smokeResult"]["smokeResultId"]
-    assert registered["plan"]["status"] == "full_run_passed"
+    assert registered["plan"]["status"] == "full_run_needs_review"
     assert registered["plan"]["experimentContract"]["status"] == "result_review"
     assert registered["plan"]["activeFullRunResultId"] == registered["fullRunResult"]["fullRunResultId"]
     assert registered["plan"]["readiness"]["readyForFullRun"] is True
-    assert registered["plan"]["readiness"]["readyForKnowledgeIngestion"] is True
-    assert registered["plan"]["readiness"]["knowledgeBlockers"] == []
-    assert registered["stageRoundStatus"]["phases"][1]["latestRound"]["planningContract"]["readyForKnowledgeIngestion"] is True
-    assert status["status"] == "ready_for_knowledge_ingestion"
+    assert registered["plan"]["readiness"]["readyForKnowledgeIngestion"] is False
+    assert registered["plan"]["readiness"]["knowledgeBlockers"] == ["full_run_result"]
+    assert registered["stageRoundStatus"]["phases"][1]["latestRound"]["planningContract"]["readyForKnowledgeIngestion"] is False
+    assert status["status"] != "ready_for_knowledge_ingestion"
     assert status["summary"]["activeFullRunResultId"] == registered["fullRunResult"]["fullRunResultId"]
     assert status["boundaries"]["writesFormalKnowledge"] is False
     assert status["boundaries"]["writesRag"] is False
     assert status["boundaries"]["writesOfficialGraph"] is False
+    outcome_graph = registered["plan"].get("outcomeGraph") or {}
+    assert not [
+        edge
+        for edge in outcome_graph.get("edges", [])
+        if edge.get("fromId") == f"run:{registered['fullRunResult']['fullRunResultId']}"
+        and edge.get("relation") in {"supports", "falsifies"}
+    ]
 
 def test_experiment_full_run_result_requires_passing_smoke_result(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
@@ -2284,6 +2703,7 @@ def test_experiment_full_run_result_requires_passing_smoke_result(tmp_path, monk
             team["teamId"],
             prepared["baseline"]["plan"]["planId"],
             {
+                "evidenceKind": "external_manual",
                 "status": "passed",
                 "metricValue": "0.79 validation accuracy",
                 "resultPath": "workspace/experiments/full_run/context-gated-routing.json",
@@ -2316,10 +2736,8 @@ def test_experiment_result_knowledge_ingestion_request_notifies_steward_agent(tm
         prepared["baseline"]["plan"]["planId"],
         {"status": "passed", "metricValue": "0.75", "resultPath": "workspace/experiments/smoke/result.json"},
     )
-    full_run = team_workflow_orchestration_service.register_experiment_full_run_result(
-        team["teamId"],
-        smoke["plan"]["planId"],
-        {"status": "passed", "metricValue": "0.79", "resultPath": "workspace/experiments/full_run/result.json"},
+    full_run = _register_canonical_formal_full_run(
+        tmp_path, team["teamId"], smoke["plan"]["planId"], monkeypatch, result_name="notify"
     )
 
     requested = team_workflow_orchestration_service.request_experiment_result_knowledge_ingestion(
@@ -2430,10 +2848,8 @@ def test_direct_experiment_ingestion_reconciles_plan_ledger_once(tmp_path, monke
         prepared["baseline"]["plan"]["planId"],
         {"status": "passed", "metricValue": "0.75", "resultPath": "workspace/experiments/smoke/result.json"},
     )
-    full_run = team_workflow_orchestration_service.register_experiment_full_run_result(
-        team["teamId"],
-        smoke["plan"]["planId"],
-        {"status": "passed", "metricValue": "0.79", "resultPath": "workspace/experiments/full_run/result.json"},
+    full_run = _register_canonical_formal_full_run(
+        tmp_path, team["teamId"], smoke["plan"]["planId"], monkeypatch, result_name="accepted"
     )
     requested = team_workflow_orchestration_service.request_experiment_result_knowledge_ingestion(
         team["teamId"],
@@ -2532,10 +2948,8 @@ def test_experiment_ingestion_reconciliation_rejects_partial_evidence(tmp_path, 
         prepared["baseline"]["plan"]["planId"],
         {"status": "passed", "metricValue": "0.75", "resultPath": "workspace/experiments/smoke/result.json"},
     )
-    full_run = team_workflow_orchestration_service.register_experiment_full_run_result(
-        team["teamId"],
-        smoke["plan"]["planId"],
-        {"status": "passed", "metricValue": "0.79", "resultPath": "workspace/experiments/full_run/result.json"},
+    full_run = _register_canonical_formal_full_run(
+        tmp_path, team["teamId"], smoke["plan"]["planId"], monkeypatch, result_name="partial"
     )
     requested = team_workflow_orchestration_service.request_experiment_result_knowledge_ingestion(
         team["teamId"],
@@ -2685,15 +3099,8 @@ def test_experiment_full_run_pass_writes_working_supports_without_qualifying_cla
             "recordedByAgent": "Experiment Planning Agent",
         },
     )
-    registered = team_workflow_orchestration_service.register_experiment_full_run_result(
-        team["teamId"],
-        smoke["plan"]["planId"],
-        {
-            "status": "passed",
-            "metricValue": "0.79 validation accuracy",
-            "resultPath": "workspace/experiments/full_run/context-gated-routing.json",
-            "recordedByAgent": "Experiment Planning Agent",
-        },
+    registered = _register_canonical_formal_full_run(
+        tmp_path, team["teamId"], smoke["plan"]["planId"], monkeypatch, result_name="supports"
     )
     live = [edge for edge in registered["plan"]["outcomeGraph"]["edges"] if not edge.get("validUntil")]
     supports = [edge for edge in live if edge["relation"] == "supports"]
@@ -2832,19 +3239,8 @@ def test_hypothesis_progress_checkpoints_track_experiment_lifecycle(tmp_path, mo
     smoke_step = next(item for item in entry["steps"] if item["step"] == "smoke")
     assert smoke_step["refs"]["resultId"] == smoke["smokeResult"]["smokeResultId"]
 
-    full_run = team_workflow_orchestration_service.register_experiment_full_run_result(
-        team["teamId"],
-        plan["planId"],
-        {
-            "status": "passed",
-            "metricName": "validation accuracy",
-            "metricValue": "0.79 validation accuracy",
-            "baselineMetricValue": "0.71 validation accuracy",
-            "smokeMetricValue": "0.75 validation accuracy",
-            "delta": "+0.08 accuracy",
-            "resultPath": "workspace/experiments/full_run/context-gated-routing.json",
-            "recordedByAgent": "Experiment Planning Agent",
-        },
+    full_run = _register_canonical_formal_full_run(
+        tmp_path, team["teamId"], plan["planId"], monkeypatch, result_name="progress"
     )
     entry = _progress_entry(full_run["plan"], candidate_id)
     steps = _step_statuses(entry)
@@ -3056,10 +3452,8 @@ def test_outcome_graph_writes_claim_per_selected_hypothesis(tmp_path, monkeypatc
         baseline["plan"]["planId"],
         {"status": "passed", "metricValue": "0.75", "resultPath": "workspace/experiments/smoke/multi.json"},
     )
-    full_run = team_workflow_orchestration_service.register_experiment_full_run_result(
-        team["teamId"],
-        smoke["plan"]["planId"],
-        {"status": "passed", "metricValue": "0.79", "resultPath": "workspace/experiments/full_run/multi.json"},
+    full_run = _register_canonical_formal_full_run(
+        tmp_path, team["teamId"], smoke["plan"]["planId"], monkeypatch, result_name="multi"
     )
 
     from core.web.services.team_workflow.outcome_graph import (

@@ -4,16 +4,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
 from typing import Any
+from urllib.parse import quote, unquote, urlparse
 
 from jsonschema import Draft202012Validator, FormatChecker
 
 from core.research.competition.resources import (
-    CATALOG_ID,
     CATALOG_SHA256,
     QUESTION_CATALOG_PATH,
     load_science_question_catalog,
@@ -24,7 +25,6 @@ from core.web.services.team_workflow.research_projects import (
     resolve_research_project_workspace_root,
     resolve_team_program_root,
 )
-
 
 STORE_SCHEMA_VERSION = 1
 STORE_KIND = "challenge_question_run_store"
@@ -116,6 +116,175 @@ def _output_sha256(output: dict[str, Any]) -> str:
     audit["output_sha256"] = "0" * 64
     encoded = json.dumps(hashable, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return _sha256_bytes(encoded)
+
+
+_SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+_CANONICAL_OUTPUT_REF_SCHEME = "turn-journal"
+
+
+def _canonical_output_ref(
+    session_id: str,
+    source_run_id: str,
+    task_id: str,
+    turn_id: str,
+) -> str:
+    """Build a server-owned reference to one canonical final turn artifact."""
+    return (
+        f"{_CANONICAL_OUTPUT_REF_SCHEME}://{quote(session_id, safe='')}"
+        f"/{quote(source_run_id, safe='')}/{quote(task_id, safe='')}/{quote(turn_id, safe='')}"
+    )
+
+
+def _parse_canonical_output_ref(output_ref: str) -> dict[str, str] | None:
+    parsed = urlparse(str(output_ref or "").strip())
+    if parsed.scheme != _CANONICAL_OUTPUT_REF_SCHEME or not parsed.netloc:
+        return None
+    parts = [unquote(item) for item in parsed.path.split("/") if item]
+    if len(parts) != 3 or parsed.query or parsed.fragment:
+        return None
+    session_id = unquote(parsed.netloc)
+    source_run_id, task_id, turn_id = parts
+    if not all((session_id, source_run_id, task_id, turn_id)):
+        return None
+    return {
+        "sessionId": session_id,
+        "sourceRunId": source_run_id,
+        "taskId": task_id,
+        "turnId": turn_id,
+    }
+
+
+def _json_object_from_turn_text(value: Any) -> dict[str, Any] | None:
+    text = str(value or "").strip()
+    if text.startswith("```") and text.endswith("```"):
+        lines = text.splitlines()
+        text = "\n".join(lines[1:-1]).strip()
+        if text.lower().startswith("json\n"):
+            text = text[5:].lstrip()
+    try:
+        payload = json.loads(text)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _read_canonical_turn_output(
+    *,
+    session_id: str,
+    source_run_id: str,
+    task_id: str,
+    turn_id: str,
+    output_ref: str = "",
+) -> dict[str, Any] | None:
+    """Read and hash the actual server-committed final assistant artifact.
+
+    Task/result dictionaries and request payloads are not output authorities.
+    Only an assistant item committed by ``canonical_turn_outcome`` can bind a
+    Challenge output.  The reference is checked against all four immutable
+    identities before the journal is read.
+    """
+    normalized = {
+        "sessionId": str(session_id or "").strip(),
+        "sourceRunId": str(source_run_id or "").strip(),
+        "taskId": str(task_id or "").strip(),
+        "turnId": str(turn_id or "").strip(),
+    }
+    if not all(normalized.values()):
+        return None
+    expected_ref = _canonical_output_ref(
+        normalized["sessionId"],
+        normalized["sourceRunId"],
+        normalized["taskId"],
+        normalized["turnId"],
+    )
+    if output_ref and str(output_ref).strip() != expected_ref:
+        return None
+    try:
+        from core.chat.turn_journal import EVENT_ASSISTANT_ITEM_COMMITTED, load_turn_events
+
+        events = load_turn_events(_project_root(), normalized["sessionId"])
+    except (OSError, ValueError):
+        return None
+    for event in reversed(events):
+        if str(getattr(event, "turn_id", "") or "").strip() != normalized["turnId"]:
+            continue
+        if str(getattr(event, "event_type", "") or "").strip() != EVENT_ASSISTANT_ITEM_COMMITTED:
+            continue
+        if str(getattr(event, "source", "") or "").strip() != "canonical_turn_outcome":
+            continue
+        payload = getattr(event, "payload", {})
+        if not isinstance(payload, dict):
+            continue
+        if (
+            str(payload.get("kind") or "").strip() != "assistant_message"
+            or str(payload.get("channel") or "").strip().lower() != "answer"
+            or str(payload.get("phase") or "").strip().lower() != "final_answer"
+            or not bool(payload.get("terminal"))
+        ):
+            continue
+        output = _json_object_from_turn_text(payload.get("text"))
+        if output is None:
+            continue
+        output_run = output.get("run") if isinstance(output.get("run"), dict) else {}
+        if str(output_run.get("run_id") or "").strip() != normalized["sourceRunId"]:
+            continue
+        return {
+            **normalized,
+            "output": output,
+            "outputSha256": _output_sha256(output),
+            "outputRef": expected_ref,
+        }
+    return None
+
+
+def _canonical_evidence_output_binding(evidence: dict[str, Any]) -> dict[str, str]:
+    """Read the immutable output binding carried by a project evidence row.
+
+    Evidence written before the canonical output binding existed is deliberately
+    not upgraded in place.  Such rows remain readable, but publishing through
+    them fails closed and asks the producer to record a fresh evidence row.
+    """
+    source_run_id = str(evidence.get("sourceRunId") or "").strip()
+    task_id = str(evidence.get("taskId") or "").strip()
+    turn_id = str(evidence.get("turnId") or "").strip()
+    if not all((source_run_id, task_id, turn_id)):
+        raise ValueError(
+            "challenge_question_publish_legacy_evidence_unusable: project evidence "
+            "must carry canonical sourceRunId, taskId and turnId; re-record canonical evidence."
+        )
+    metadata = evidence.get("metadata") if isinstance(evidence.get("metadata"), dict) else {}
+    hash_value = ""
+    ref_value = ""
+    for container in (evidence, metadata):
+        if not hash_value:
+            for key in ("outputSha256", "outputHash", "output_sha256"):
+                value = str(container.get(key) or "").strip()
+                if value:
+                    hash_value = value.removeprefix("sha256:").strip()
+                    break
+        if not ref_value:
+            for key in ("outputRef", "outputReference", "output_ref"):
+                value = str(container.get(key) or "").strip()
+                if value:
+                    ref_value = value
+                    break
+    if hash_value and not _SHA256_RE.fullmatch(hash_value):
+        raise ValueError(
+            "challenge_question_publish_evidence_output_binding_invalid: canonical output hash "
+            "must be a 64-character SHA-256 value; re-record canonical evidence."
+        )
+    if not hash_value and not ref_value:
+        raise ValueError(
+            "challenge_question_publish_legacy_evidence_unusable: project evidence lacks a "
+            "canonical output hash/ref; re-record canonical evidence before publishing."
+        )
+    return {
+        "sourceRunId": source_run_id,
+        "taskId": task_id,
+        "turnId": turn_id,
+        "outputSha256": hash_value.lower(),
+        "outputRef": ref_value,
+    }
 
 
 def _output_schema_version(output: dict[str, Any]) -> int:
@@ -540,7 +709,17 @@ def register_challenge_task_model_evidence(
     turn_id = str(turn.get("turnId") or "").strip()
     if not all((research_project_id, question_id, task_id, turn_id)):
         return None
-    identity = "|".join((team_id, research_project_id, question_id, task_id, turn_id, expected_model_ref))
+    source_session_id = str(task.get("sessionId") or turn.get("sessionId") or "").strip()
+    source_run_id = str(task.get("runId") or "").strip()
+    source_binding = _read_canonical_turn_output(
+        session_id=source_session_id,
+        source_run_id=source_run_id,
+        task_id=task_id,
+        turn_id=turn_id,
+    )
+    if source_binding is None:
+        return None
+    identity = f"{team_id}|{research_project_id}|{question_id}|{task_id}|{turn_id}|{expected_model_ref}"
     evidence_id = f"model-evidence-{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:20]}"
     path = _evidence_store_path(resolve_research_project_workspace_root(team_id, research_project_id))
     with _STORE_LOCK:
@@ -548,6 +727,18 @@ def register_challenge_task_model_evidence(
         evidence = [item for item in store.get("evidence", []) if isinstance(item, dict)]
         existing = next((item for item in evidence if str(item.get("evidenceId") or "") == evidence_id), None)
         if existing is not None:
+            if (
+                str(existing.get("sourceSessionId") or "").strip() != source_binding["sessionId"]
+                or str(existing.get("sourceRunId") or "").strip() != source_binding["sourceRunId"]
+                or str(existing.get("taskId") or "").strip() != source_binding["taskId"]
+                or str(existing.get("turnId") or "").strip() != source_binding["turnId"]
+                or str(existing.get("outputSha256") or "").strip().lower() != source_binding["outputSha256"]
+                or str(existing.get("outputRef") or "").strip() != source_binding["outputRef"]
+            ):
+                raise ValueError(
+                    "challenge_task_model_evidence_provenance_conflict: existing evidence "
+                    "does not match the canonical server turn artifact."
+                )
             return deepcopy(existing)
         now = _utc_now()
         record = {
@@ -556,7 +747,8 @@ def register_challenge_task_model_evidence(
             "teamId": team_id,
             "researchProjectId": research_project_id,
             "questionId": question_id,
-            "sourceRunId": str(task.get("runId") or ""),
+            "sourceRunId": source_binding["sourceRunId"],
+            "sourceSessionId": source_binding["sessionId"],
             "taskId": task_id,
             "turnId": turn_id,
             "taskType": str(task.get("agentRole") or task.get("stageId") or ""),
@@ -584,6 +776,8 @@ def register_challenge_task_model_evidence(
             "createdAt": now,
             "updatedAt": now,
         }
+        record["outputSha256"] = source_binding["outputSha256"]
+        record["outputRef"] = source_binding["outputRef"]
         evidence.append(record)
         store["evidence"] = evidence
         store["updatedAt"] = now
@@ -630,6 +824,34 @@ def publish_research_project_challenge_question_output(
         raise ValueError("challenge_question_publish_evidence_mismatch: evidence binding does not match the publish request.")
     if str(project_evidence.get("status") or "") != "canonical_success":
         raise ValueError("challenge_question_publish_evidence_invalid: only canonical successful calls can be published.")
+    canonical_binding = _canonical_evidence_output_binding(project_evidence)
+    source_session_id = str(project_evidence.get("sourceSessionId") or "").strip()
+    parsed_ref = _parse_canonical_output_ref(canonical_binding["outputRef"])
+    if parsed_ref is None or parsed_ref.get("sessionId") != source_session_id:
+        raise ValueError(
+            "challenge_question_publish_evidence_output_ref_invalid: project evidence outputRef "
+            "must be a server-issued canonical turn-journal reference."
+        )
+    canonical_artifact = _read_canonical_turn_output(
+        session_id=source_session_id,
+        source_run_id=canonical_binding["sourceRunId"],
+        task_id=canonical_binding["taskId"],
+        turn_id=canonical_binding["turnId"],
+        output_ref=canonical_binding["outputRef"],
+    )
+    if canonical_artifact is None:
+        raise ValueError(
+            "challenge_question_publish_canonical_artifact_missing: canonical turn output "
+            "could not be read from the server journal."
+        )
+    if (
+        canonical_artifact["outputSha256"] != canonical_binding["outputSha256"]
+        or canonical_artifact["outputRef"] != canonical_binding["outputRef"]
+    ):
+        raise ValueError(
+            "challenge_question_publish_provenance_conflict: project evidence binding does "
+            "not match the canonical server turn artifact."
+        )
 
     raw_output = payload.get("output")
     if not isinstance(raw_output, dict):
@@ -639,6 +861,12 @@ def publish_research_project_challenge_question_output(
     if _output_question_id(output) != question_id:
         raise ValueError("challenge_question_publish_question_mismatch: output.question_id must match questionId.")
     run = output.get("run") if isinstance(output.get("run"), dict) else {}
+    output_run_id = str(run.get("run_id") or "").strip()
+    if output_run_id != canonical_binding["sourceRunId"]:
+        raise ValueError(
+            "challenge_question_publish_source_run_mismatch: output.run.run_id must match "
+            "the canonical project evidence sourceRunId."
+        )
     if (
         str(run.get("model_provider") or "").strip().lower() not in OFFICIAL_PROVIDERS
         or str(run.get("model_id") or "").strip().lower()
@@ -650,9 +878,29 @@ def publish_research_project_challenge_question_output(
         raise ValueError("challenge_question_publish_model_mismatch: output model does not match canonical evidence.")
     invocation_refs = _normalized_string_list(run.get("invocation_evidence_refs"), max_items=64)
     if evidence_id not in invocation_refs:
-        invocation_refs.append(evidence_id)
-    run["invocation_evidence_refs"] = invocation_refs
-    output["run"] = run
+        raise ValueError(
+            "challenge_question_publish_evidence_ref_mismatch: output.run.invocation_evidence_refs "
+            "must explicitly contain projectEvidenceId."
+        )
+    output_hash = _output_sha256(output)
+    if output_hash != canonical_artifact["outputSha256"]:
+        raise ValueError(
+            "challenge_question_publish_output_hash_mismatch: output does not match the "
+            "canonical server turn artifact."
+        )
+    raw_lineage_refs = payload.get("lineageRefs")
+    lineage_refs = list(
+        dict.fromkeys(
+            str(item).strip()
+            for item in (raw_lineage_refs if isinstance(raw_lineage_refs, list) else [])
+            if str(item).strip()
+        )
+    )
+    if canonical_binding["outputRef"] and canonical_binding["outputRef"] not in lineage_refs:
+        raise ValueError(
+            "challenge_question_publish_output_ref_mismatch: lineageRefs must explicitly "
+            "carry the canonical project evidence outputRef."
+        )
 
     preview = deepcopy(output)
     _set_pending_human_gates(preview)
@@ -674,7 +922,22 @@ def publish_research_project_challenge_question_output(
         program_store = _load_evidence_store(program_evidence_path, team_id)
         program_evidence = [item for item in program_store.get("evidence", []) if isinstance(item, dict)]
         promoted = next((item for item in program_evidence if str(item.get("evidenceId") or "") == evidence_id), None)
-        if promoted is None:
+        if promoted is not None:
+            promoted_binding = _canonical_evidence_output_binding(promoted)
+            if any(
+                promoted_binding.get(key) != canonical_binding.get(key)
+                for key in ("sourceRunId", "taskId", "turnId", "outputSha256", "outputRef")
+            ):
+                raise ValueError(
+                    "challenge_question_publish_provenance_conflict: published evidence id is "
+                    "already bound to different canonical provenance."
+                )
+            if str(promoted.get("sourceSessionId") or "").strip() != source_session_id:
+                raise ValueError(
+                    "challenge_question_publish_provenance_conflict: published evidence id is "
+                    "already bound to a different canonical session."
+                )
+        else:
             promoted = {
                 **deepcopy(project_evidence),
                 "status": "published_to_challenge_program",
@@ -697,7 +960,7 @@ def publish_research_project_challenge_question_output(
                 "citationChecks": citation_checks,
                 "registeredBy": str(payload.get("registeredBy") or ""),
                 "parentRunId": str(payload.get("parentRunId") or ""),
-                "lineageRefs": payload.get("lineageRefs") if isinstance(payload.get("lineageRefs"), list) else [],
+                "lineageRefs": lineage_refs,
             },
         )
     return {

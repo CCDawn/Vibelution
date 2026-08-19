@@ -113,8 +113,8 @@ describe("resolveHypothesisFirstNextAction", () => {
     const next = resolveHypothesisFirstNextAction({ run: null });
     expect(next.stage).toBe("no_run");
     expect(next.command).toBe("create_run");
-    expect(next.commandLabel).toBe("创建运行");
-    expect(next.navigationLabel).toBe("创建运行");
+    expect(next.commandLabel).toBe("选择题目开始研究");
+    expect(next.navigationLabel).toBe("选择题目开始研究");
     expect(next.targetNodeId).toBeNull();
   });
 
@@ -434,16 +434,26 @@ describe("resolveHypothesisFirstNextAction", () => {
     expect(next.command).toBeUndefined();
   });
 
-  it("shows convergence and budget-exhausted adjudication", () => {
+  it("follows the canonical runtime node after hypothesis convergence", () => {
     const converged = resolveHypothesisFirstNextAction({
-      run: { runId: "run-1" },
+      run: { runId: "run-1", runtimeCurrentNodeIds: ["protocol_design"] },
       chainState: chain({ hypothesisConverged: true, selectionId: "sel-1" }),
       selection: selection(),
     });
     expect(converged.stage).toBe("converged");
-    expect(converged.targetNodeId).toBe("hf_convergence_gate");
+    expect(converged.targetNodeId).toBe("protocol_design");
+    expect(converged.navigationLabel).toBe("前往协议设计");
     expect(converged.command).toBeUndefined();
     expect(converged.statusMessage).toContain("闭环已完成");
+  });
+
+  it("keeps the convergence gate as fallback until a formal runtime node is projected", () => {
+    const converged = resolveHypothesisFirstNextAction({
+      run: { runId: "run-1", runtimeCurrentNodeIds: [] },
+      chainState: chain({ hypothesisConverged: true, selectionId: "sel-1" }),
+      selection: selection(),
+    });
+    expect(converged.targetNodeId).toBe("hf_convergence_gate");
 
     const exhausted = resolveHypothesisFirstNextAction({
       run: { runId: "run-1" },
