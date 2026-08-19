@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { WORKBENCH_LAYOUT_IDS } from "../../../components/layout/workbenchLayoutIds";
 import { VCanvasWorkbenchPage } from "../../../components/vui";
@@ -18,7 +18,10 @@ import {
   definitionToCanvasGraph,
   projectionToCanvasGraph,
 } from "./researchProcessGraphModel";
-import { shouldShowResearchProcessInspector } from "./researchProcessPanelSelection";
+import {
+  resolveResearchProcessAutofocus,
+  shouldShowResearchProcessInspector,
+} from "./researchProcessPanelSelection";
 import { ResearchProcessInspectorPane } from "./ResearchProcessInspectorPane";
 import { ResearchWorkflowCanvasPane } from "./ResearchWorkflowCanvasPane";
 import { ResearchWorkflowToolbar } from "./ResearchWorkflowToolbar";
@@ -183,10 +186,29 @@ export function ResearchProcessWorkspace({
     || catalog.error
     || hypothesisFirstChain.error;
   const commandBusy = runState.busy || commands.busy || formalCommand.busy;
+  const previousNextTargetRef = useRef<string | null>(null);
+  useEffect(() => {
+    const patch = resolveResearchProcessAutofocus({
+      panel: location.panel,
+      selectedNodeId: location.selectedNodeId,
+      nextTarget: nextAction.targetNodeId,
+      previousNextTarget: previousNextTargetRef.current,
+    });
+    previousNextTargetRef.current = nextAction.targetNodeId ?? null;
+    if (patch) location.replaceParams(patch);
+  }, [location.panel, location.selectedNodeId, location.replaceParams, nextAction.targetNodeId]);
+
   const showInspector = shouldShowResearchProcessInspector({
     panel: location.panel,
     selectedNodeId: location.selectedNodeId,
+    nextTarget: nextAction.targetNodeId,
   });
+  const atCurrentTask = Boolean(
+    location.runId
+    && location.panel === "node"
+    && location.selectedNodeId
+    && location.selectedNodeId === nextAction.targetNodeId,
+  );
 
   return (
     <div data-fill="true" data-vui="research-process-workspace-host" className={styles.host}>
@@ -207,6 +229,7 @@ export function ResearchProcessWorkspace({
             onSelectExperiment={selectExperiment}
             onOpenPanel={location.openPanel}
             navigationLabel={location.runId ? nextAction.navigationLabel : undefined}
+            atCurrentTask={atCurrentTask}
             onNavigateCurrent={
               nextAction.targetNodeId
                 ? () => location.replaceParams({ node: nextAction.targetNodeId, panel: "node" })
