@@ -28,6 +28,9 @@ const productSharedParentStyleConsumers = [
   "routes/chat/ChatStatusRail.tsx",
   "routes/chat/TokenCoreStatusPanel.tsx",
   "routes/chat/useChatWorkbenchLayout.ts",
+  // Known Launcher surface subcomponent sharing the parent placement style
+  // (the owning LauncherRoute passes className down) instead of owning one.
+  "routes/LauncherRegistryDiagnosticsBanner.tsx",
   "routes/TeamAiSearchWorkspacePanel.tsx",
   "routes/TeamExperimentPlanningLedgerPanel.tsx",
   "routes/TeamKnowledgeCollectionCompletionFlowPanel.tsx",
