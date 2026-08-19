@@ -10,6 +10,7 @@ describe("research workflow workspace responsibility contract", () => {
     const requiredFiles = [
       "useResearchWorkflowWorkspace.ts",
       "useResearchWorkflowCatalog.ts",
+      "researchExperimentSwitchModel.ts",
       "useResearchWorkflowCommands.ts",
       "useHypothesisFirstChain.ts",
       "hypothesisFirstCanvasRegion.ts",
@@ -38,6 +39,7 @@ describe("research workflow workspace responsibility contract", () => {
     expect(source).not.toContain("useEffect(");
     expect(source).not.toContain("fetchEffectiveAgentBindings");
     expect(source).not.toContain("listResearchWorkflowRuns");
+    expect(source).not.toContain("fetchResearchWorkflowLaunchOptions");
     expect(source).not.toContain("executeNodeCommand");
     expect(source).toContain("useResearchWorkflowWorkspace");
     expect(source).toContain("ResearchProcessInspectorPane");

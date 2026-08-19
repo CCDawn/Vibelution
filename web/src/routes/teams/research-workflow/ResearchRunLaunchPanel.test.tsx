@@ -347,7 +347,11 @@ describe("ResearchRunLaunchPanel", () => {
     await act(async () => {
       continueButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
-    expect(onContinueRun).toHaveBeenCalledWith({ runId: "run-3", nodeId: "protocol_design" });
+    expect(onContinueRun).toHaveBeenCalledWith({
+      runId: "run-3",
+      nodeId: "protocol_design",
+      questionId: "SCI-003",
+    });
 
     await act(async () => {
       root.unmount();

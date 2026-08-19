@@ -183,7 +183,7 @@ export function ResearchRunLaunchPanel(props: {
   initialQuestionId?: string;
   onSubmit: (input: CreateResearchWorkflowRunInput) => Promise<void>;
   onCancel: () => void;
-  onContinueRun?: (input: { runId: string; nodeId: string }) => void;
+  onContinueRun?: (input: { runId: string; nodeId: string; questionId: string }) => void;
 }) {
   const { teamId, busy, initialQuestionId, onSubmit, onCancel, onContinueRun } = props;
   // Per-team session draft restores the form after panel switches; an explicit
@@ -328,6 +328,7 @@ export function ResearchRunLaunchPanel(props: {
               onContinueRun({
                 runId: checkpoint.runId,
                 nodeId: checkpoint.currentNodeId || "source_finding",
+                questionId,
               });
               return;
             }

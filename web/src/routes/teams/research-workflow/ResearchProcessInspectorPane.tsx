@@ -98,9 +98,10 @@ export function ResearchProcessInspectorPane(props: {
         initialQuestionId={scope.questionId}
         onSubmit={actions.submitRun}
         onCancel={() => actions.replaceParams({ panel: "node" })}
-        onContinueRun={({ runId, nodeId }) => actions.replaceParams({
+        onContinueRun={({ runId, nodeId, questionId }) => actions.replaceParams({
           runId,
           node: nodeId,
+          questionId: questionId || scope.questionId,
           panel: "node",
         })}
       />
