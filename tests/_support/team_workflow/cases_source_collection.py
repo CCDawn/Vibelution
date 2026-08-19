@@ -7623,6 +7623,56 @@ def test_source_collection_stage_card_projection_preserves_verified_success_afte
     assert card["latestTask"]["taskId"] == "task-ingestion-duplicate-retry"
     assert card["agentTaskStatus"] == "blocked"
 
+
+def test_source_collection_stage_card_projection_exposes_structured_knowledge_ingestion_payload():
+    from core.web.routes.team_workflows.source_collection_catalog_models import (
+        SourceCollectionStageCardResponse,
+        SourceCollectionSummaryResponse,
+    )
+
+    materialized = {
+        "status": "completed",
+        "stewardPackCandidateId": "pack-ingestion-1",
+        "knowledgeBaseId": "kb-ingestion-1",
+        "approvedCandidateCount": 1,
+        "approvedCandidateIds": ["candidate-1"],
+        "formalKnowledgeItemCount": 1,
+        "formalKnowledgeItemIds": ["knowledge-1"],
+        "writesFormalKnowledge": True,
+        "confidence": 0.94,
+        "knowledgeSubmissionStatus": "completed",
+        "knowledgeReviewStatus": "completed",
+        "createdKnowledgeBaseId": "kb-ingestion-1",
+        "skippedCount": 0,
+        "failedCount": 0,
+        "failed": [],
+    }
+    card = team_workflow_orchestration_service._source_collection_stage_card_projection(
+        "ingestion",
+        [
+            {
+                "taskId": "task-ingestion-structured",
+                "stageId": "ingestion",
+                "status": "completed",
+                "updatedAt": "2026-07-24T12:00:00Z",
+                "completionGate": {"passed": True},
+                "writeback": {"materializedKnowledgeIngestion": materialized},
+            },
+        ],
+        artifact_count=1,
+        input_count=1,
+        output_count=1,
+        pending_count=0,
+        artifact_status="ready",
+        artifact_summary="1 formal knowledge item synchronized.",
+    )
+
+    assert card["latestTask"]["materializedKnowledgeIngestion"] == materialized
+    response = SourceCollectionSummaryResponse.model_validate({"stageCards": [card]})
+    assert isinstance(response.stageCards[0], SourceCollectionStageCardResponse)
+    assert response.stageCards[0].latestTask.materializedKnowledgeIngestion.formalKnowledgeItemCount == 1
+    assert response.stageCards[0].latestTask.materializedKnowledgeIngestion.formalKnowledgeItemIds == ["knowledge-1"]
+
 def test_load_source_collection_work_run_summary_cleanses_invalid_storage_path(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_fake_local_research_config(monkeypatch)

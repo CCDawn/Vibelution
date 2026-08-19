@@ -4,8 +4,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from .source_collection_common import normalize_metadata, source_collection_count, trim_text
-from .source_collection_stage_tasks import SOURCE_COLLECTION_STAGE_SESSION_TASK_ACTIVE_STATUSES
+from pydantic import ValidationError
+
+from .source_collection_common import (
+    normalize_metadata,
+    source_collection_count,
+    trim_text,
+)
+from .source_collection_stage_tasks import (
+    SOURCE_COLLECTION_STAGE_SESSION_TASK_ACTIVE_STATUSES,
+)
 
 
 def source_collection_summary_payload_status(
@@ -229,6 +237,7 @@ def source_collection_stage_task_card_summary(task: dict[str, Any]) -> dict[str,
     result = task.get("result") if isinstance(task.get("result"), dict) else {}
     evidence_refs = task.get("evidenceRefs") if isinstance(task.get("evidenceRefs"), list) else []
     next_actions = task.get("nextActions") if isinstance(task.get("nextActions"), list) else []
+    materialized_knowledge_ingestion = source_collection_stage_task_materialized_knowledge_ingestion(task)
     return {
         "taskId": trim_text(task.get("taskId"), max_length=160),
         "stageId": trim_text(task.get("stageId"), max_length=80),
@@ -274,8 +283,37 @@ def source_collection_stage_task_card_summary(task: dict[str, Any]) -> dict[str,
         ),
         "materializedSources": writeback.get("materializedSources") if isinstance(writeback.get("materializedSources"), dict) else {},
         "materializedContentExtraction": writeback.get("materializedContentExtraction") if isinstance(writeback.get("materializedContentExtraction"), dict) else {},
-        "materializedKnowledgeIngestion": writeback.get("materializedKnowledgeIngestion") if isinstance(writeback.get("materializedKnowledgeIngestion"), dict) else {},
+        "materializedKnowledgeIngestion": materialized_knowledge_ingestion,
     }
+
+
+def source_collection_stage_task_materialized_knowledge_ingestion(
+    task: dict[str, Any],
+) -> dict[str, Any]:
+    """Normalize the dynamic official-sync child payload at the projection boundary."""
+
+    writeback = task.get("writeback") if isinstance(task.get("writeback"), dict) else {}
+    result = task.get("result") if isinstance(task.get("result"), dict) else {}
+    raw = writeback.get("materializedKnowledgeIngestion")
+    if not isinstance(raw, dict) or not raw:
+        raw = result.get("materializedKnowledgeIngestion")
+    if not isinstance(raw, dict) or not raw:
+        return {}
+    try:
+        # Import lazily: the team_workflows route package imports the service
+        # facade, so importing its DTO at module load would create a cycle.
+        from core.web.routes.team_workflows.source_collection_catalog_models import (
+            SourceCollectionMaterializedKnowledgeIngestion,
+        )
+
+        return SourceCollectionMaterializedKnowledgeIngestion.model_validate(raw).model_dump(
+            exclude_unset=True,
+            exclude_none=True,
+        )
+    except ValidationError:
+        # An old or malformed child payload must not break the whole summary.
+        # The route still exposes the remaining stage card fields.
+        return {}
 
 
 def source_collection_stage_task_coverage_summary(task: dict[str, Any]) -> dict[str, Any]:

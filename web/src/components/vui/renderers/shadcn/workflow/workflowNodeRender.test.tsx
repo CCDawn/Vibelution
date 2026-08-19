@@ -127,6 +127,18 @@ describe("WorkflowHumanGateNode render (P1-4)", () => {
     expect(markup).toContain("人工门禁");
     expect(markup).not.toContain("需人工确认");
   });
+
+  it("prefers description subtitle on serpentine human gates", () => {
+    const markup = renderNode(WorkflowHumanGateNode, {
+      label: "确认候选",
+      status: "waiting_human",
+      hasPendingHumanTask: true,
+      description: "等待人工确认闭环",
+      layoutMode: "serpentine",
+    });
+    expect(markup).toContain("等待人工确认闭环");
+    expect(markup).not.toContain("角色待确认 · 待确认");
+  });
 });
 
 describe("WorkflowDecisionNode render (P1-4)", () => {

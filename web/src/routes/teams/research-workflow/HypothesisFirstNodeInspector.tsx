@@ -47,7 +47,15 @@ export type HypothesisFirstNodeInspectorProps = {
 };
 
 function pickGeneration(meetings: ReturnType<typeof useHypothesisFirstChain>["meetings"]) {
-  return meetings.find((item) => item.meetingType === "hypothesis_candidate_generation") ?? null;
+  const sorted = [...meetings]
+    .filter((item) => item.meetingType === "hypothesis_candidate_generation")
+    .sort((left, right) => {
+      const leftIndex = left.roundIndex ?? 0;
+      const rightIndex = right.roundIndex ?? 0;
+      if (leftIndex !== rightIndex) return leftIndex - rightIndex;
+      return String(left.startedAt ?? "").localeCompare(String(right.startedAt ?? ""));
+    });
+  return sorted[sorted.length - 1] ?? null;
 }
 
 function pickReview(

@@ -31,6 +31,7 @@ import { useResearchWorkflowCatalog } from "./useResearchWorkflowCatalog";
 import { useResearchWorkflowCommand } from "./useResearchWorkflowCommand";
 import { useResearchWorkflowCommands } from "./useResearchWorkflowCommands";
 import { useResearchWorkflowInsights } from "./useResearchWorkflowInsights";
+import { useResearchProcessAutofocus } from "./useResearchProcessAutofocus";
 import { useResearchWorkflowRun } from "./useResearchWorkflowRun";
 import { useResearchWorkflowWorkspace } from "./useResearchWorkflowWorkspace";
 import styles from "./ResearchProcessWorkspace.styles";
@@ -183,10 +184,24 @@ export function ResearchProcessWorkspace({
     || catalog.error
     || hypothesisFirstChain.error;
   const commandBusy = runState.busy || commands.busy || formalCommand.busy;
+  useResearchProcessAutofocus({
+    panel: location.panel,
+    selectedNodeId: location.selectedNodeId,
+    nextTarget: nextAction.targetNodeId,
+    replaceParams: location.replaceParams,
+  });
+
   const showInspector = shouldShowResearchProcessInspector({
     panel: location.panel,
     selectedNodeId: location.selectedNodeId,
+    nextTarget: nextAction.targetNodeId,
   });
+  const atCurrentTask = Boolean(
+    location.runId
+    && location.panel === "node"
+    && location.selectedNodeId
+    && location.selectedNodeId === nextAction.targetNodeId,
+  );
 
   return (
     <div data-fill="true" data-vui="research-process-workspace-host" className={styles.host}>
@@ -207,6 +222,7 @@ export function ResearchProcessWorkspace({
             onSelectExperiment={selectExperiment}
             onOpenPanel={location.openPanel}
             navigationLabel={location.runId ? nextAction.navigationLabel : undefined}
+            atCurrentTask={atCurrentTask}
             onNavigateCurrent={
               nextAction.targetNodeId
                 ? () => location.replaceParams({ node: nextAction.targetNodeId, panel: "node" })
