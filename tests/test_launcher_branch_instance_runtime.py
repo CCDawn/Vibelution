@@ -481,8 +481,9 @@ def test_service_cleanup_metadata_annotation_is_opt_in(monkeypatch):
     annotated = {"items": [{"id": "worktree:task", "mergedToMain": False}]}
     seen: dict[str, object] = {}
 
-    def fake_annotate(payload):
+    def fake_annotate(payload, *, git_timeout):
         seen["payload"] = payload
+        seen["git_timeout"] = git_timeout
         return annotated
 
     monkeypatch.setattr(branch_instance_cleanup, "annotate_cleanup_metadata", fake_annotate)
@@ -491,6 +492,7 @@ def test_service_cleanup_metadata_annotation_is_opt_in(monkeypatch):
     assert seen == {}
     assert launcher_service.list_launcher_branch_instances(include_cleanup_metadata=True) == annotated
     assert seen["payload"] == {"items": [{"id": "worktree:task"}]}
+    assert seen["git_timeout"] == 2.0
 
 
 def test_overlay_prefers_registry_starting_over_stale_worktree_failure(tmp_path, monkeypatch):
