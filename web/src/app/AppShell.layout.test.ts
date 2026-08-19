@@ -713,9 +713,32 @@ describe("AppShell layout contract", () => {
     expect(indexHtml).toContain('name="theme-color" content="#f7f8fa"');
     expect(indexHtml).toContain('name="color-scheme" content="light dark"');
     expect(indexHtml).toContain('rel="manifest" href="/manifest.webmanifest"');
+    expect(indexHtml).toContain('rel="icon" href="/favicon.ico" sizes="any"');
+    expect(indexHtml).toContain('rel="icon" type="image/png" href="/vibelution-icon.png"');
+    expect(indexHtml).toContain('rel="apple-touch-icon" href="/vibelution-icon-192.png"');
     expect(manifest.theme_color).toBe("#f7f8fa");
     expect(manifest.background_color).toBe("#f7f8fa");
     expect(manifest.display).toBe("standalone");
+    expect(manifest.icons).toEqual([
+      {
+        src: "/vibelution-icon-192.png",
+        sizes: "192x192",
+        type: "image/png",
+        purpose: "any",
+      },
+      {
+        src: "/vibelution-icon.png",
+        sizes: "512x512",
+        type: "image/png",
+        purpose: "any",
+      },
+      {
+        src: "/vibelution-icon-maskable-512.png",
+        sizes: "512x512",
+        type: "image/png",
+        purpose: "maskable",
+      },
+    ]);
     expect(shellSource).toContain("syncWorkbenchThemeRoot(theme)");
     expect(shellSource).toContain("isElectronDesktopShell()");
     expect(shellSource).toContain('data-desktop-shell={desktopShell ? "electron" : "browser"}');
