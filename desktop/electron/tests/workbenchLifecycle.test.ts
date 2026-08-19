@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
+import { PythonJsonBridgeError } from "../src/process/pythonJsonBridge.js";
 import {
   runWorkbenchLifecycle,
   parseWorkbenchLifecycleResult,
@@ -146,6 +147,53 @@ describe("runWorkbenchLifecycle", () => {
       })
     ).rejects.toThrow("lifecycle bridge exited with code 1");
   });
+
+  it("classifies malformed bridge output through the shared invalid-payload path", async () => {
+    const spawnImpl = fakeSpawnWithOutput("{not json");
+    const call = runWorkbenchLifecycle({
+      workspaceRoot: "C:/repo",
+      pythonPath: "python",
+      operatorConfigPath: "",
+      operation: "start",
+      spawnImpl,
+    });
+    await expect(call).rejects.toBeInstanceOf(PythonJsonBridgeError);
+    await expect(call).rejects.toMatchObject({ code: "invalid_payload" });
+  });
+
+  it("rejects a result that is valid JSON but not the lifecycle schema", async () => {
+    const spawnImpl = fakeSpawnWithOutput(
+      JSON.stringify({ schemaVersion: 1, accepted: "yes", operation: "start" })
+    );
+    await expect(
+      runWorkbenchLifecycle({
+        workspaceRoot: "C:/repo",
+        pythonPath: "python",
+        operatorConfigPath: "",
+        operation: "start",
+        spawnImpl,
+      })
+    ).rejects.toMatchObject({ code: "invalid_payload" });
+  });
+
+  it("rejects with the bounded-helper abort classification before spawning", async () => {
+    const spawnImpl = fakeSpawnWithOutput(
+      JSON.stringify({ schemaVersion: 1, accepted: true, operation: "start" })
+    );
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      runWorkbenchLifecycle({
+        workspaceRoot: "C:/repo",
+        pythonPath: "python",
+        operatorConfigPath: "",
+        operation: "start",
+        spawnImpl,
+        signal: controller.signal,
+      })
+    ).rejects.toMatchObject({ code: "aborted" });
+    expect(spawnImpl).not.toHaveBeenCalled();
+  });
 });
 
 describe("parseWorkbenchLifecycleResult", () => {
@@ -154,6 +202,7 @@ describe("parseWorkbenchLifecycleResult", () => {
     expect(() =>
       parseWorkbenchLifecycleResult(JSON.stringify({ schemaVersion: 2, accepted: true, operation: "start" }))
     ).toThrow();
+    expect(() => parseWorkbenchLifecycleResult("{}")).toThrow(PythonJsonBridgeError);
   });
 
   it("returns the normalized lifecycle result", () => {

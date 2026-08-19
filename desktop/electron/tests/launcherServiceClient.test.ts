@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { PythonJsonBridgeError } from "../src/process/pythonJsonBridge.js";
 import { stopPythonLauncherService } from "../src/process/launcherServiceClient.js";
 
 describe("stopPythonLauncherService", () => {
@@ -31,7 +32,7 @@ describe("stopPythonLauncherService", () => {
         "utf8"
       )
     );
-    child.emit("exit", 0);
+    child.emit("close", 0);
 
     await expect(stopPromise).resolves.toEqual({
       schemaVersion: 1,
@@ -90,7 +91,7 @@ describe("stopPythonLauncherService", () => {
         "utf8"
       )
     );
-    child.emit("exit", 0);
+    child.emit("close", 0);
 
     await expect(stopPromise).resolves.toEqual({
       schemaVersion: 1,
@@ -119,6 +120,54 @@ describe("stopPythonLauncherService", () => {
       cwd: "C:/repo",
       windowsHide: true
     });
+  });
+
+  it("classifies malformed stop output through the shared invalid-payload path", async () => {
+    const child = fakeChildProcess();
+    const stopPromise = stopPythonLauncherService({
+      workspaceRoot: "C:/repo",
+      pythonPath: "C:/Python/python.exe",
+      operatorConfigPath: "C:/operator/config.toml",
+      spawnImpl: () => child
+    });
+
+    child.stdout.emit("data", Buffer.from("{not json", "utf8"));
+    child.emit("close", 0);
+
+    await expect(stopPromise).rejects.toBeInstanceOf(PythonJsonBridgeError);
+    await expect(stopPromise).rejects.toMatchObject({ code: "invalid_payload" });
+  });
+
+  it("classifies a null stop result as an invalid payload", async () => {
+    const child = fakeChildProcess();
+    const stopPromise = stopPythonLauncherService({
+      workspaceRoot: "C:/repo",
+      pythonPath: "C:/Python/python.exe",
+      operatorConfigPath: "C:/operator/config.toml",
+      spawnImpl: () => child
+    });
+
+    child.stdout.emit("data", Buffer.from("null", "utf8"));
+    child.emit("close", 0);
+
+    await expect(stopPromise).rejects.toMatchObject({ code: "invalid_payload" });
+  });
+
+  it("honors abort before spawning the stop bridge", async () => {
+    const spawnImpl = vi.fn();
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      stopPythonLauncherService({
+        workspaceRoot: "C:/repo",
+        pythonPath: "C:/Python/python.exe",
+        operatorConfigPath: "C:/operator/config.toml",
+        spawnImpl,
+        signal: controller.signal
+      })
+    ).rejects.toMatchObject({ code: "aborted" });
+    expect(spawnImpl).not.toHaveBeenCalled();
   });
 });
 

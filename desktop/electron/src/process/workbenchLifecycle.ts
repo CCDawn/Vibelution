@@ -1,7 +1,12 @@
-import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 
-import { pythonBridgeEnv } from "./pythonBridgeEnv.js";
+import {
+  invalidPythonJsonBridgePayload,
+  parsePythonJsonBridgePayload,
+  PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS,
+  runPythonJsonBridge,
+  type PythonJsonBridgeSpawn
+} from "./pythonJsonBridge.js";
 
 export type WorkbenchLifecycleOperation = "start" | "stop" | "force-stop" | "restart" | "rebuild-and-start" | "shutdown";
 
@@ -15,22 +20,10 @@ export type WorkbenchLifecycleResult = {
   activeWorkRuns?: unknown[];
 };
 
-type LifecycleChild = Pick<ReturnType<typeof spawn>, "kill" | "once" | "stdout" | "stderr">;
-type LifecycleSpawn = (
-  command: string,
-  args: string[],
-  options: {
-    cwd: string;
-    windowsHide: boolean;
-    stdio: ["ignore", "pipe", "pipe"];
-    env: NodeJS.ProcessEnv;
-  }
-) => LifecycleChild;
-
 export function parseWorkbenchLifecycleResult(raw: string): WorkbenchLifecycleResult {
-  const parsed = JSON.parse(raw) as WorkbenchLifecycleResult;
+  const parsed = parsePythonJsonBridgePayload<WorkbenchLifecycleResult>(raw, "workbench lifecycle bridge");
   if (!parsed || parsed.schemaVersion !== 1 || typeof parsed.accepted !== "boolean") {
-    throw new Error("invalid workbench lifecycle bridge result");
+    throw invalidPythonJsonBridgePayload("workbench lifecycle bridge", "returned an invalid result shape");
   }
   return {
     schemaVersion: 1,
@@ -48,70 +41,32 @@ export async function runWorkbenchLifecycle(input: {
   pythonPath: string;
   operatorConfigPath: string;
   operation: WorkbenchLifecycleOperation;
-  spawnImpl?: LifecycleSpawn;
+  spawnImpl?: PythonJsonBridgeSpawn;
+  signal?: AbortSignal;
 }): Promise<WorkbenchLifecycleResult> {
-  const spawnImpl = input.spawnImpl ?? spawn;
-  const args = [
-    resolve(input.workspaceRoot, "scripts", "vibelution_desktop_entry.py"),
-    "--action",
-    "lifecycle",
-    "--lifecycle-operation",
-    input.operation,
-    "--output",
-    "json",
-    "--workspace",
-    input.workspaceRoot,
-    "--config",
-    input.operatorConfigPath,
-    "--no-browser"
-  ];
-  const child = spawnImpl(input.pythonPath, args, {
+  const raw = await runPythonJsonBridge({
+    pythonPath: input.pythonPath,
+    args: [
+      resolve(input.workspaceRoot, "scripts", "vibelution_desktop_entry.py"),
+      "--action",
+      "lifecycle",
+      "--lifecycle-operation",
+      input.operation,
+      "--output",
+      "json",
+      "--workspace",
+      input.workspaceRoot,
+      "--config",
+      input.operatorConfigPath,
+      "--no-browser"
+    ],
     cwd: input.workspaceRoot,
-    windowsHide: true,
-    stdio: ["ignore", "pipe", "pipe"],
-    env: pythonBridgeEnv()
+    spawnImpl: input.spawnImpl,
+    failureLabel: "workbench lifecycle bridge",
+    timeoutMs: PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS,
+    signal: input.signal,
+    killPolicy: "child",
+    mutation: true
   });
-  const stdout = await readBoundedLifecycleStdout(child, 64_000);
-  return parseWorkbenchLifecycleResult(stdout);
-}
-
-async function readBoundedLifecycleStdout(child: LifecycleChild, maxBytes: number): Promise<string> {
-  return await new Promise((resolveOutput, reject) => {
-    const chunks: Buffer[] = [];
-    let total = 0;
-    let settled = false;
-
-    const rejectOnce = (error: Error): void => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      reject(error);
-    };
-
-    child.stdout?.on("data", (chunk: Buffer) => {
-      total += chunk.length;
-      if (total > maxBytes) {
-        child.kill();
-        rejectOnce(new Error("workbench lifecycle bridge output exceeded limit"));
-        return;
-      }
-      chunks.push(chunk);
-    });
-    child.stderr?.on("data", () => {
-      // Drain stderr so stdio pipes cannot deadlock; detailed logs stay in Python launcher log files.
-    });
-    child.once("error", rejectOnce);
-    child.once("exit", (code) => {
-      if (settled) {
-        return;
-      }
-      if (code !== 0) {
-        rejectOnce(new Error(`workbench lifecycle bridge exited with code ${code ?? "unknown"}`));
-        return;
-      }
-      settled = true;
-      resolveOutput(Buffer.concat(chunks).toString("utf8"));
-    });
-  });
+  return parseWorkbenchLifecycleResult(raw);
 }
