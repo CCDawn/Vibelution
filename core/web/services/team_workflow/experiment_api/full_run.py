@@ -9,6 +9,8 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from core.web.services.team_workflow import experiment_kernel as _experiment_kernel
+
 _FORMAL_EXECUTION_PATH_KEYS = ("pythonExecutable", "dataRoot", "outputRoot")
 _FORMAL_ENV_OPTIONAL_INTS = (
     ("VIBELUTION_FORMAL_TIMEOUT_SECONDS", "timeoutSeconds"),
@@ -134,6 +136,11 @@ def prepare_experiment_full_run(team_id: str, plan_id: str, payload: dict[str, A
     preparation_record = {
         **preparation,
         "preparationId": s._new_record_id("full-run-preparation"),
+        "planId": normalized_plan_id,
+        "planRevision": s._experiment_plan_revision(plan_snapshot),
+        "adapterId": adapter_id,
+        "methodConfigDigest": _experiment_kernel._experiment_method_config_digest(plan_snapshot),
+        "executionConfigDigest": _experiment_kernel._full_run_execution_config_digest(execution_config),
         "recordedByAgent": recorded_by_agent,
         "preparedAt": now,
         "executionConfig": execution_config,
@@ -201,6 +208,13 @@ def execute_experiment_full_run(team_id: str, plan_id: str, payload: dict[str, A
 
     adapter_id, method_config = s._require_formal_full_run_ready(plan_snapshot)
     execution_config = resolve_formal_execution_config(plan_snapshot, request_payload)
+    preparation_snapshot = (
+        s.deepcopy(plan_snapshot.get("activeFullRunPreparation"))
+        if isinstance(plan_snapshot.get("activeFullRunPreparation"), dict)
+        else None
+    )
+    plan_revision = s._experiment_plan_revision(plan_snapshot)
+    method_config_digest = _experiment_kernel._experiment_method_config_digest(plan_snapshot)
     started_at = s.utc_now_iso()
     execution_id = s._new_record_id("full-run-execution")
     with s._WORKFLOW_LOCK:
@@ -212,7 +226,13 @@ def execute_experiment_full_run(team_id: str, plan_id: str, payload: dict[str, A
         plan["activeFullRunExecution"] = {
             "executionId": execution_id,
             "status": "running",
+            "planId": normalized_plan_id,
+            "planRevision": plan_revision,
             "adapterId": adapter_id,
+            "preparationId": str((preparation_snapshot or {}).get("preparationId") or ""),
+            "executionConfig": execution_config,
+            "executionConfigDigest": _experiment_kernel._full_run_execution_config_digest(execution_config),
+            "methodConfigDigest": method_config_digest,
             "recordedByAgent": recorded_by_agent,
             "startedAt": started_at,
         }
@@ -250,6 +270,10 @@ def execute_experiment_full_run(team_id: str, plan_id: str, payload: dict[str, A
             started_at=started_at,
             status="failed",
             result={"error": str(exc)},
+            preparation=preparation_snapshot,
+            plan_revision=plan_revision,
+            execution_config=execution_config,
+            method_config_digest=method_config_digest,
         )
         raise s.TeamWorkflowOrchestrationError(str(exc)) from exc
 
@@ -262,6 +286,10 @@ def execute_experiment_full_run(team_id: str, plan_id: str, payload: dict[str, A
         started_at=started_at,
         status="completed",
         result=runner_result,
+        preparation=preparation_snapshot,
+        plan_revision=plan_revision,
+        execution_config=execution_config,
+        method_config_digest=method_config_digest,
     )
     with s._WORKFLOW_LOCK:
         plan_store = s._load_experiment_plan_store(normalized_team_id)
@@ -289,6 +317,14 @@ def register_experiment_full_run_result(team_id: str, plan_id: str, payload: dic
     team = s.team_service.get_team(normalized_team_id)
     request_payload = payload if isinstance(payload, dict) else {}
     recorded_by_agent = s._trim_text(request_payload.get("recordedByAgent"), max_length=160) or s.DEFAULT_OWNER_AGENT_ID
+    evidence_kind = s._trim_text(request_payload.get("evidenceKind"), max_length=80).lower()
+    if evidence_kind not in {
+        _experiment_kernel._FORMAL_RUN_CANONICAL_EVIDENCE_KIND,
+        _experiment_kernel._FORMAL_RUN_EXTERNAL_EVIDENCE_KIND,
+    }:
+        raise s.TeamWorkflowOrchestrationError(
+            "Full-run result evidenceKind must be explicit: canonical_runner or external_manual."
+        )
     with s._WORKFLOW_LOCK:
         workflow = s._load_or_create_workflow(normalized_team_id)
         stage_store = s._load_stage_round_store(normalized_team_id)
@@ -299,9 +335,38 @@ def register_experiment_full_run_result(team_id: str, plan_id: str, payload: dic
         if plan is None:
             raise s.TeamWorkflowOrchestrationError("Experiment plan not found.")
         s._require_explicit_experiment_design_frozen(plan)
-        full_run_result = s._experiment_full_run_result_record(plan, request_payload, recorded_by_agent=recorded_by_agent)
+        if evidence_kind == _experiment_kernel._FORMAL_RUN_CANONICAL_EVIDENCE_KIND:
+            full_run_result = _experiment_kernel._canonical_formal_full_run_result_record(
+                plan,
+                request_payload,
+                recorded_by_agent=recorded_by_agent,
+            )
+        else:
+            full_run_result = s._experiment_full_run_result_record(
+                plan,
+                request_payload,
+                recorded_by_agent=recorded_by_agent,
+            )
         full_run_results = [item for item in list(plan.get("fullRunResults") or []) if isinstance(item, dict)]
-        full_run_results.append(full_run_result)
+        existing_result = (
+            next(
+                (
+                    item
+                    for item in full_run_results
+                    if isinstance(item, dict)
+                    and full_run_result.get("receiptId")
+                    and item.get("receiptId") == full_run_result.get("receiptId")
+                ),
+                None,
+            )
+            if evidence_kind == _experiment_kernel._FORMAL_RUN_CANONICAL_EVIDENCE_KIND
+            else None
+        )
+        is_replay = existing_result is not None
+        if is_replay:
+            full_run_result = existing_result
+        else:
+            full_run_results.append(full_run_result)
         plan["fullRunResults"] = full_run_results[-12:]
         plan["activeFullRunResultId"] = full_run_result["fullRunResultId"]
         plan["activeFullRunResult"] = full_run_result
@@ -310,12 +375,13 @@ def register_experiment_full_run_result(team_id: str, plan_id: str, payload: dic
         s._refresh_experiment_plan_readiness(plan)
         from core.web.services.team_workflow.outcome_graph import merge_registered_result
 
-        merge_registered_result(
-            plan,
-            full_run_result,
-            extra=request_payload,
-            peer_plans=[item for item in list(plan_store.get("plans") or []) if isinstance(item, dict)],
-        )
+        if not is_replay:
+            merge_registered_result(
+                plan,
+                full_run_result,
+                extra=request_payload,
+                peer_plans=[item for item in list(plan_store.get("plans") or []) if isinstance(item, dict)],
+            )
         s._refresh_hypothesis_progress(plan)
         plan_store["activePlanId"] = plan["planId"]
         plan_store["updatedAt"] = full_run_result["recordedAt"]
@@ -329,6 +395,8 @@ def register_experiment_full_run_result(team_id: str, plan_id: str, payload: dic
                 "fullRunResultRef": {
                     "fullRunResultId": full_run_result["fullRunResultId"],
                     "status": full_run_result["status"],
+                    "evidenceKind": full_run_result.get("evidenceKind", ""),
+                    "receiptId": full_run_result.get("receiptId", ""),
                     "resultPath": full_run_result["resultPath"],
                     "logRef": full_run_result["logRef"],
                 },
