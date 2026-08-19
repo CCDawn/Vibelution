@@ -156,11 +156,16 @@ export function ResearchProcessWorkspace({
     });
   }, [experimentOptions, location, teamId]);
 
+  const formalRuntimeActive = Boolean(hypothesisFirstChain.chainState?.hypothesisConverged);
+  const formalRuntimeCurrentNodeIds = formalRuntimeActive
+    ? (runState.projection?.run.runtimeCurrentNodeIds ?? EMPTY_RUNTIME_NODE_IDS)
+    : EMPTY_RUNTIME_NODE_IDS;
+
   const nextAction = useMemo(() => resolveHypothesisFirstNextAction({
     run: runState.run
       ? {
           runId: runState.run.runId,
-          runtimeCurrentNodeIds: runState.projection?.run.runtimeCurrentNodeIds ?? [],
+          runtimeCurrentNodeIds: formalRuntimeCurrentNodeIds,
         }
       : null,
     chainState: hypothesisFirstChain.chainState,
@@ -175,6 +180,7 @@ export function ResearchProcessWorkspace({
     hypothesisFirstChain.meetings,
     hypothesisFirstChain.selection,
     location.selectedNodeId,
+    formalRuntimeCurrentNodeIds,
     runState.projection?.run.nodeRuns.source_finding?.status,
     runState.run,
   ]);
@@ -227,7 +233,8 @@ export function ResearchProcessWorkspace({
             onSelectExperiment={selectExperiment}
             onOpenPanel={location.openPanel}
             navigationLabel={location.runId ? nextAction.navigationLabel : undefined}
-            runtimeCurrentNodeIds={runState.projection?.run.runtimeCurrentNodeIds ?? []}
+            runtimeCurrentNodeIds={formalRuntimeCurrentNodeIds}
+            formalRuntimeActive={formalRuntimeActive}
             atCurrentTask={atCurrentTask}
             onNavigateCurrent={
               nextAction.targetNodeId

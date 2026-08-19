@@ -159,6 +159,50 @@ describe("ResearchWorkflowToolbar", () => {
     expect(running).toContain("前往协议设计");
   });
 
+  it("keeps hypothesis preparation ahead of convergence even when runtime starts at source finding", () => {
+    const beforeConvergence = renderToolbar({
+      ...BASE_PROPS,
+      runId: "run-5e4fbe6e18f2",
+      runStatus: "running",
+      experimentOptions: [EXPERIMENT],
+      navigationLabel: "前往候选生成",
+      runtimeCurrentNodeIds: ["source_finding"],
+      formalRuntimeActive: false,
+      onSelectExperiment: vi.fn(),
+      onOpenPanel: vi.fn(),
+    } as React.ComponentProps<typeof ResearchWorkflowToolbar>);
+    expect(beforeConvergence).toContain("假说准备 · 1/5");
+    expect(beforeConvergence).not.toContain("资料搜集 · 资料寻找");
+
+    const afterConvergence = renderToolbar({
+      ...BASE_PROPS,
+      runId: "run-5e4fbe6e18f2",
+      runStatus: "running",
+      experimentOptions: [EXPERIMENT],
+      navigationLabel: "前往协议设计",
+      runtimeCurrentNodeIds: ["protocol_design"],
+      formalRuntimeActive: true,
+      onSelectExperiment: vi.fn(),
+      onOpenPanel: vi.fn(),
+    } as React.ComponentProps<typeof ResearchWorkflowToolbar>);
+    expect(afterConvergence).toContain("实验设计 · 协议设计");
+  });
+
+  it("uses an English node label when the shell language is en", () => {
+    const running = renderToolbar({
+      ...BASE_PROPS,
+      runId: "run-5e4fbe6e18f2",
+      runStatus: "running",
+      experimentOptions: [EXPERIMENT],
+      navigationLabel: "前往协议设计",
+      runtimeCurrentNodeIds: ["protocol_design"],
+      formalRuntimeActive: true,
+      onSelectExperiment: vi.fn(),
+      onOpenPanel: vi.fn(),
+    } as React.ComponentProps<typeof ResearchWorkflowToolbar>, "en");
+    expect(running).toContain('data-vui="research-workflow-phase">Experiment design · Protocol design');
+  });
+
   it("says no experiment is selected when chrome identity is missing", () => {
     const empty = renderToolbar({
       ...BASE_PROPS,

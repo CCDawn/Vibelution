@@ -26,10 +26,13 @@ type WorkflowPhase = {
 export function researchWorkflowPhase(
   navigationLabel?: string,
   runtimeCurrentNodeIds?: readonly string[] | null,
+  formalRuntimeActive = true,
 ): WorkflowPhase {
-  const runtimeNode = (runtimeCurrentNodeIds ?? [])
-    .map((nodeId) => getNodeAdapter(String(nodeId || "").trim()))
-    .find(Boolean);
+  const runtimeNode = formalRuntimeActive
+    ? (runtimeCurrentNodeIds ?? [])
+      .map((nodeId) => getNodeAdapter(String(nodeId || "").trim()))
+      .find(Boolean)
+    : null;
   if (runtimeNode) {
     const stage = {
       knowledge_collection: { zh: "资料搜集", en: "Knowledge collection" },
@@ -43,7 +46,7 @@ export function researchWorkflowPhase(
       stageZh: stage.zh,
       stageEn: stage.en,
       currentNodeZh: runtimeNode.label,
-      currentNodeEn: runtimeNode.label,
+      currentNodeEn: runtimeNode.labelEn,
     };
   }
   const label = String(navigationLabel || "").trim();
@@ -67,6 +70,7 @@ export function ResearchWorkflowToolbar(props: {
   createDisabledReason?: string;
   navigationLabel?: string;
   runtimeCurrentNodeIds?: readonly string[] | null;
+  formalRuntimeActive?: boolean;
   atCurrentTask?: boolean;
   onNavigateCurrent?: () => void;
   onSelectExperiment: (questionId: string) => void;
@@ -78,7 +82,11 @@ export function ResearchWorkflowToolbar(props: {
   const emptySwitcherLabel = props.identity
     ? formatExperimentSwitchLabel(props.identity.questionId, props.identity.hypothesisSummary)
     : (isZh ? "尚未选择实验" : "No experiment selected");
-  const phase = researchWorkflowPhase(props.navigationLabel, props.runtimeCurrentNodeIds);
+  const phase = researchWorkflowPhase(
+    props.navigationLabel,
+    props.runtimeCurrentNodeIds,
+    props.formalRuntimeActive,
+  );
   const detailsPanel = props.panel === "question" ? "progress" : (
     props.panel === "agents"
     || props.panel === "timeline"
