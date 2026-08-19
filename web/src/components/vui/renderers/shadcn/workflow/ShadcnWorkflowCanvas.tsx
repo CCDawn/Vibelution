@@ -21,7 +21,16 @@ import {
   type EdgeTypes,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { useCallback, useLayoutEffect, useMemo, useRef, type ReactElement, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 
 import { cn } from "../../../lib/cn";
 import type { WorkflowLayoutInput } from "../../../product/workflow/workflowCanvasTypes";
@@ -41,6 +50,14 @@ import { WorkflowSystemTaskNode } from "./WorkflowSystemTaskNode";
 import { useWorkflowInitialFit } from "./useWorkflowInitialFit";
 import { resolveEdgeStroke } from "./workflowCanvasState";
 import type { WorkflowCanvasLayoutMode } from "./workflowElkOptions";
+import {
+  cloneWorkflowManualPositions,
+  persistWorkflowManualLayout,
+  readWorkflowManualLayout,
+  snapWorkflowManualPosition,
+  type WorkflowManualLayoutScope,
+  type WorkflowManualPositions,
+} from "./workflowManualLayout";
 
 export type ShadcnWorkflowCanvasProps = {
   graph: WorkflowLayoutInput;
@@ -162,6 +179,8 @@ function visualToRfType(visualKind: string): string {
   }
 }
 
+const MANUAL_LAYOUT_HISTORY_LIMIT = 20;
+
 function WorkflowCanvasInner({
   graph,
   selectedNodeId = null,
@@ -181,6 +200,134 @@ function WorkflowCanvasInner({
   const layout = useWorkflowAutoLayout(graph, createWorkflowLayoutEngine, { layoutMode });
   const currentSet = useMemo(() => new Set(runtimeCurrentNodeIds), [runtimeCurrentNodeIds]);
   const nodesInitialized = useNodesInitialized();
+  const manualLayoutEnabled = layoutMode === "serpentine";
+  const manualNodeIdsKey = useMemo(
+    () => layout.nodes.filter((node) => node.kind === "task").map((node) => node.id).sort().join("\u0001"),
+    [layout.nodes],
+  );
+  const manualScope = useMemo<WorkflowManualLayoutScope>(
+    () => ({
+      structureKey: layout.structureKey,
+      runId: graph.run?.runId ?? null,
+      nodeIds: manualNodeIdsKey ? manualNodeIdsKey.split("\u0001") : [],
+    }),
+    [graph.run?.runId, layout.structureKey, manualNodeIdsKey],
+  );
+  const [manualPositions, setManualPositions] = useState<WorkflowManualPositions>({});
+  const [manualLayoutLocked, setManualLayoutLocked] = useState(false);
+  const [manualHistory, setManualHistory] = useState<WorkflowManualPositions[]>([]);
+  const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
+  const manualPositionsRef = useRef<WorkflowManualPositions>({});
+  const manualLockedRef = useRef(false);
+  const manualHistoryRef = useRef<WorkflowManualPositions[]>([]);
+  const manualDragFrameRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const saved = manualLayoutEnabled
+      ? readWorkflowManualLayout(manualScope)
+      : { positions: {}, locked: false };
+    manualPositionsRef.current = saved.positions;
+    manualLockedRef.current = saved.locked;
+    manualHistoryRef.current = [];
+    setManualPositions(saved.positions);
+    setManualLayoutLocked(saved.locked);
+    setManualHistory([]);
+    setDraggingNodeId(null);
+  }, [manualLayoutEnabled, manualScope]);
+
+  useEffect(() => {
+    manualPositionsRef.current = manualPositions;
+  }, [manualPositions]);
+
+  useEffect(() => {
+    manualLockedRef.current = manualLayoutLocked;
+  }, [manualLayoutLocked]);
+
+  useEffect(() => {
+    manualHistoryRef.current = manualHistory;
+  }, [manualHistory]);
+
+  useEffect(() => () => {
+    if (manualDragFrameRef.current !== null) {
+      cancelAnimationFrame(manualDragFrameRef.current);
+    }
+  }, []);
+
+  const commitManualLayout = useCallback((positions: WorkflowManualPositions, locked = manualLockedRef.current) => {
+    const nextPositions = cloneWorkflowManualPositions(positions);
+    manualPositionsRef.current = nextPositions;
+    manualLockedRef.current = locked;
+    setManualPositions(nextPositions);
+    setManualLayoutLocked(locked);
+    persistWorkflowManualLayout(manualScope, { positions: nextPositions, locked });
+  }, [manualScope]);
+
+  const rememberManualLayout = useCallback(() => {
+    const next = [
+      ...manualHistoryRef.current,
+      cloneWorkflowManualPositions(manualPositionsRef.current),
+    ].slice(-MANUAL_LAYOUT_HISTORY_LIMIT);
+    manualHistoryRef.current = next;
+    setManualHistory(next);
+  }, []);
+
+  const onNodeDragStart = useCallback((_event: unknown, node: Node) => {
+    if (!manualLayoutEnabled || manualLockedRef.current || node.type === "stageRegion") return;
+    rememberManualLayout();
+    setDraggingNodeId(node.id);
+  }, [manualLayoutEnabled, rememberManualLayout]);
+
+  const onNodeDrag = useCallback((_event: unknown, node: Node) => {
+    if (!manualLayoutEnabled || manualLockedRef.current || node.type === "stageRegion") return;
+    const next = {
+      ...manualPositionsRef.current,
+      [node.id]: snapWorkflowManualPosition(node.position),
+    };
+    manualPositionsRef.current = next;
+    if (manualDragFrameRef.current !== null) return;
+    manualDragFrameRef.current = requestAnimationFrame(() => {
+      manualDragFrameRef.current = null;
+      setManualPositions(cloneWorkflowManualPositions(manualPositionsRef.current));
+    });
+  }, [manualLayoutEnabled]);
+
+  const onNodeDragStop = useCallback((_event: unknown, node: Node) => {
+    if (!manualLayoutEnabled || node.type === "stageRegion") return;
+    if (manualDragFrameRef.current !== null) {
+      cancelAnimationFrame(manualDragFrameRef.current);
+      manualDragFrameRef.current = null;
+    }
+    const next = {
+      ...manualPositionsRef.current,
+      [node.id]: snapWorkflowManualPosition(node.position),
+    };
+    commitManualLayout(next);
+    setDraggingNodeId(null);
+  }, [commitManualLayout, manualLayoutEnabled]);
+
+  const undoManualLayout = useCallback(() => {
+    const previous = manualHistoryRef.current.at(-1);
+    if (!previous) return;
+    const nextHistory = manualHistoryRef.current.slice(0, -1);
+    manualHistoryRef.current = nextHistory;
+    setManualHistory(nextHistory);
+    commitManualLayout(previous);
+  }, [commitManualLayout]);
+
+  const autoArrangeManualLayout = useCallback(() => {
+    if (Object.keys(manualPositionsRef.current).length > 0) {
+      rememberManualLayout();
+      commitManualLayout({});
+    }
+    requestAnimationFrame(() => fitAll());
+  }, [commitManualLayout, fitAll, rememberManualLayout]);
+
+  const toggleManualLayoutLock = useCallback(() => {
+    commitManualLayout(manualPositionsRef.current, !manualLockedRef.current);
+  }, [commitManualLayout]);
+
+  const manualRouteActive = manualLayoutEnabled
+    && (draggingNodeId !== null || Object.keys(manualPositions).length > 0);
 
   // P1-5: measured node types report rendered DOM sizes back to the layout
   // hook so the second pass of the layout uses real geometry.
@@ -237,22 +384,27 @@ function WorkflowCanvasInner({
               ).length,
               layoutMode,
             },
-            style: { width: node.width, height: node.height },
+            style: {
+              width: node.width,
+              height: node.height,
+              pointerEvents: manualLayoutEnabled ? "none" : undefined,
+            },
             selectable: false,
             draggable: false,
             zIndex: 0,
           } satisfies Node;
         }
         const parentId = node.parentStageId;
+        const manualPosition = manualLayoutEnabled ? manualPositions[node.id] : undefined;
         return {
           id: node.id,
           type: visualToRfType(node.visualKind),
           position: {
-            x: parentId != null ? (node.relativeX ?? 0) : node.x,
-            y: parentId != null ? (node.relativeY ?? 0) : node.y,
+            x: manualPosition?.x ?? (manualLayoutEnabled ? node.x : parentId != null ? (node.relativeX ?? 0) : node.x),
+            y: manualPosition?.y ?? (manualLayoutEnabled ? node.y : parentId != null ? (node.relativeY ?? 0) : node.y),
           },
-          parentId,
-          extent: parentId ? ("parent" as const) : undefined,
+          parentId: manualLayoutEnabled ? undefined : parentId,
+          extent: manualLayoutEnabled ? undefined : parentId ? ("parent" as const) : undefined,
           data: {
             label: node.label,
             actorKind: node.actorKind,
@@ -272,12 +424,23 @@ function WorkflowCanvasInner({
           },
           style: { width: node.width, height: node.height },
           selectable: true,
-          draggable: false,
+          draggable: manualLayoutEnabled && !manualLayoutLocked,
           selected: node.id === selectedNodeId,
           zIndex: 2,
         } satisfies Node;
       }),
-    [layout.nodes, currentSet, graph.nodes, graph.stages, layoutMode, selectedNodeId, stageIndexById],
+    [
+      layout.nodes,
+      currentSet,
+      graph.nodes,
+      graph.stages,
+      layoutMode,
+      manualLayoutEnabled,
+      manualLayoutLocked,
+      manualPositions,
+      selectedNodeId,
+      stageIndexById,
+    ],
   );
 
   const edges: Edge[] = useMemo(
@@ -304,10 +467,11 @@ function WorkflowCanvasInner({
           gateKind: edge.gateKind,
           sections: edge.sections,
           labelBounds: edge.labelBounds,
+          manualRouteActive,
         },
         zIndex: 1,
       })),
-    [layout.edges],
+    [layout.edges, manualRouteActive],
   );
 
   const onNodeClick = useCallback(
@@ -345,14 +509,19 @@ function WorkflowCanvasInner({
           edgeTypes={edgeTypes}
           minZoom={layoutMode === "serpentine" ? 0.28 : 0.35}
           maxZoom={1.6}
-          nodesDraggable={false}
+          nodesDraggable={manualLayoutEnabled && !manualLayoutLocked}
           nodesConnectable={false}
           elementsSelectable
+          snapToGrid={manualLayoutEnabled}
+          snapGrid={[16, 16]}
           panOnDrag
           panOnScroll
           zoomOnScroll
           zoomOnPinch
           onNodeClick={onNodeClick}
+          onNodeDragStart={onNodeDragStart}
+          onNodeDrag={onNodeDrag}
+          onNodeDragStop={onNodeDragStop}
           onPaneClick={onPaneClick}
           proOptions={{ hideAttribution: true }}
           style={{ width: "100%", height: "100%" }}
@@ -367,6 +536,13 @@ function WorkflowCanvasInner({
           <WorkflowCanvasControls
             runtimeCurrentNodeIds={runtimeCurrentNodeIds}
             onFitAll={fitAll}
+            manualLayout={manualLayoutEnabled ? {
+              canUndo: manualHistory.length > 0,
+              locked: manualLayoutLocked,
+              onAutoArrange: autoArrangeManualLayout,
+              onUndo: undoManualLayout,
+              onToggleLock: toggleManualLayoutLock,
+            } : undefined}
           />
           {showLegend ? <WorkflowCanvasLegend /> : null}
           {showMiniMap ? (

@@ -1,7 +1,8 @@
 /**
  * Workflow edge: renders the engine-owned ORTHOGONAL section geometry
- * (data.sections) with path-state colors and label bounds. It never re-routes
- * the edge itself; a smooth-step approximation is forbidden in production.
+ * (data.sections) until a manual visual node position is active. During that
+ * local override it uses a small live orthogonal route from React Flow's
+ * current endpoints; a smooth-step approximation is forbidden in production.
  *
  * Diagnostics (P1-3/P1-5): a section chain that is not well-formed (cycles,
  * branches, orphans, geometrically broken links) or a label without engine
@@ -30,6 +31,7 @@ import {
   sectionsToSvgPath,
 } from "./workflowElkEdgePath";
 import { workflowEdgeKeepsNarrativeLabel } from "./workflowElkOptions";
+import { resolveWorkflowManualEdgeGeometry } from "./workflowManualLayout";
 
 export type WorkflowSemanticEdgeData = {
   label?: string;
@@ -41,9 +43,20 @@ export type WorkflowSemanticEdgeData = {
   sections?: WorkflowEdgeSection[];
   /** Engine-owned label anchor; without it the label is not rendered. */
   labelBounds?: WorkflowLabelBounds;
+  /** True once a manual visual position is active or a task is being dragged. */
+  manualRouteActive?: boolean;
 };
 
-export function WorkflowSemanticEdge({ id, data, markerEnd, style }: EdgeProps) {
+export function WorkflowSemanticEdge({
+  id,
+  data,
+  markerEnd,
+  style,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+}: EdgeProps) {
   const [hovered, setHovered] = useState(false);
   const edgeData = data as WorkflowSemanticEdgeData | undefined;
   const semanticKind = edgeData?.semanticKind ?? "main";
@@ -54,16 +67,28 @@ export function WorkflowSemanticEdge({ id, data, markerEnd, style }: EdgeProps) 
   const stroke = resolveEdgeStroke(pathState, semanticKind);
 
   const sections = edgeData?.sections;
-  const edgePath = useMemo(() => sectionsToSvgPath(sections ?? []), [sections]);
+  const liveGeometry = useMemo(() => {
+    if (!edgeData?.manualRouteActive || !areFinite(sourceX, sourceY, targetX, targetY)) {
+      return null;
+    }
+    return resolveWorkflowManualEdgeGeometry(
+      { x: sourceX, y: sourceY },
+      { x: targetX, y: targetY },
+    );
+  }, [edgeData?.manualRouteActive, sourceX, sourceY, targetX, targetY]);
+  const edgePath = useMemo(
+    () => liveGeometry?.path ?? sectionsToSvgPath(sections ?? []),
+    [liveGeometry, sections],
+  );
   const sectionFault = useMemo(
-    () => (sections && sections.length > 0 ? !analyzeEdgeSections(sections).wellFormed : false),
-    [sections],
+    () => (!liveGeometry && sections && sections.length > 0 ? !analyzeEdgeSections(sections).wellFormed : false),
+    [liveGeometry, sections],
   );
   const labelAnchor = useMemo(
-    () => resolveEdgeLabelAnchor(edgeData?.labelBounds),
-    [edgeData?.labelBounds],
+    () => liveGeometry?.labelAnchor ?? resolveEdgeLabelAnchor(edgeData?.labelBounds),
+    [edgeData?.labelBounds, liveGeometry],
   );
-  const labelFault = Boolean(label) && !edgeData?.labelBounds;
+  const labelFault = Boolean(label) && !liveGeometry && !edgeData?.labelBounds;
   // Shared label geometry contract: the rendered box is exactly the box the
   // layout claimed (spacer size), and long text is truncated the same way in
   // layout and render.
@@ -89,6 +114,7 @@ export function WorkflowSemanticEdge({ id, data, markerEnd, style }: EdgeProps) 
         markerEnd={markerEnd}
         data-section-fault={sectionFault ? "true" : undefined}
         data-label-fault={labelFault ? "true" : undefined}
+        data-manual-route={liveGeometry ? "true" : undefined}
         style={{
           ...style,
           stroke: stroke.stroke,
@@ -141,4 +167,8 @@ export function WorkflowSemanticEdge({ id, data, markerEnd, style }: EdgeProps) 
       ) : null}
     </>
   );
+}
+
+function areFinite(...values: number[]): boolean {
+  return values.every((value) => Number.isFinite(value));
 }
