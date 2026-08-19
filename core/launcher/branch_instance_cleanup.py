@@ -13,6 +13,7 @@ import logging
 import os
 import shutil
 import stat
+import time
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -47,6 +48,7 @@ def annotate_cleanup_metadata(
     payload: dict[str, Any],
     *,
     integration_root: Path | str | None = None,
+    git_timeout: float = 15.0,
 ) -> dict[str, Any]:
     """Attach cleanup eligibility and risk codes to a branch-instance list."""
 
@@ -55,7 +57,7 @@ def annotate_cleanup_metadata(
         return payload
     root = Path(integration_root or payload.get("integrationRoot") or PROJECT_ROOT)
     heads = [str(item.get("head") or "").strip() for item in items if isinstance(item, dict)]
-    merged_by_head = _merged_to_main_lookup(root, heads)
+    merged_by_head = _merged_to_main_lookup(root, heads, timeout=git_timeout)
     for item in items:
         if not isinstance(item, dict):
             continue
@@ -289,7 +291,12 @@ def _merged_to_main(root: Path, head: str) -> bool:
     return bool(_merged_to_main_lookup(root, [commit]).get(commit))
 
 
-def _merged_to_main_lookup(root: Path, heads: Iterable[str]) -> dict[str, bool]:
+def _merged_to_main_lookup(
+    root: Path,
+    heads: Iterable[str],
+    *,
+    timeout: float = 15.0,
+) -> dict[str, bool]:
     unique: list[str] = []
     seen: set[str] = set()
     for raw in heads:
@@ -303,7 +310,11 @@ def _merged_to_main_lookup(root: Path, heads: Iterable[str]) -> dict[str, bool]:
     if not root.exists():
         return {commit: False for commit in unique}
 
-    merged_tips = _merged_main_tip_names(root)
+    deadline = time.monotonic() + max(0.0, float(timeout))
+    remaining_timeout = deadline - time.monotonic()
+    if remaining_timeout <= 0:
+        return {commit: False for commit in unique}
+    merged_tips = _merged_main_tip_names(root, timeout=remaining_timeout)
     found: dict[str, bool] = {}
     remaining: list[str] = []
     for commit in unique:
@@ -311,19 +322,29 @@ def _merged_to_main_lookup(root: Path, heads: Iterable[str]) -> dict[str, bool]:
             found[commit] = True
         else:
             remaining.append(commit)
-    if remaining:
-        found.update(_unique_commits_merged_to_main(root, remaining))
+    remaining_timeout = deadline - time.monotonic()
+    if remaining and remaining_timeout > 0:
+        found.update(
+            _unique_commits_merged_to_main(
+                root,
+                remaining,
+                timeout=remaining_timeout,
+            )
+        )
+    else:
+        for commit in remaining:
+            found.setdefault(commit, False)
     return found
 
 
-def _merged_main_tip_names(root: Path) -> set[str]:
+def _merged_main_tip_names(root: Path, *, timeout: float = 15.0) -> set[str]:
     result = _run_git(
         root,
         "for-each-ref",
         "--format=%(objectname)%09%(objectname:short)",
         "--merged=main",
         "refs/heads",
-        timeout=15.0,
+        timeout=timeout,
     )
     names: set[str] = set()
     if result.returncode != 0:
@@ -354,22 +375,30 @@ def _head_matches_merged_tip(head: str, names: set[str]) -> bool:
     return False
 
 
-def _commit_is_ancestor_of_main(root: Path, commit: str) -> bool:
+def _commit_is_ancestor_of_main(root: Path, commit: str, *, timeout: float = 15.0) -> bool:
     try:
-        result = _run_git(root, "merge-base", "--is-ancestor", commit, "main", timeout=15.0)
+        result = _run_git(root, "merge-base", "--is-ancestor", commit, "main", timeout=timeout)
     except Exception:
         return False
     return result.returncode == 0
 
 
-def _unique_commits_merged_to_main(root: Path, commits: list[str]) -> dict[str, bool]:
+def _unique_commits_merged_to_main(
+    root: Path,
+    commits: list[str],
+    *,
+    timeout: float = 15.0,
+) -> dict[str, bool]:
     if len(commits) <= 1:
-        return {commit: _commit_is_ancestor_of_main(root, commit) for commit in commits}
+        return {commit: _commit_is_ancestor_of_main(root, commit, timeout=timeout) for commit in commits}
 
     found: dict[str, bool] = {}
     workers = min(8, len(commits))
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(_commit_is_ancestor_of_main, root, commit): commit for commit in commits}
+        futures = {
+            pool.submit(_commit_is_ancestor_of_main, root, commit, timeout=timeout): commit
+            for commit in commits
+        }
         for future in as_completed(futures):
             commit = futures[future]
             try:

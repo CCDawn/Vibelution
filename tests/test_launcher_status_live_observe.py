@@ -35,8 +35,37 @@ def test_status_live_observes_when_runtime_still_says_closed(monkeypatch):
         "_observed_workbench",
         lambda: calls.append(1) or {"observedState": "open"},
     )
+    monkeypatch.setattr(launcher_service, "_has_young_processing_open_command", lambda: False)
 
     observed = launcher_service._status_observed_workbench(runtime_state)
 
     assert calls == [1]
     assert observed["observedState"] == "open"
+
+
+def test_status_skips_live_observe_while_start_is_in_flight(monkeypatch):
+    from core.launcher import service as launcher_service
+
+    calls: list[int] = []
+    monkeypatch.setattr(
+        launcher_service,
+        "_observed_workbench",
+        lambda: calls.append(1) or {"observedState": "open"},
+    )
+    monkeypatch.setattr(launcher_service, "_has_young_processing_open_command", lambda: False)
+
+    observed = launcher_service._status_observed_workbench(
+        {
+            "daemonRunning": True,
+            "updatedAt": "2099-01-01T00:00:00+00:00",
+            "workbench": {
+                "observedState": "closed",
+                "desiredState": "open",
+                "phase": "starting",
+                "backendPort": 8002,
+            },
+        }
+    )
+
+    assert calls == []
+    assert observed == {}

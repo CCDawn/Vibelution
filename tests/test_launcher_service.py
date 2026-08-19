@@ -4463,6 +4463,33 @@ def test_status_watchdog_does_not_start_daemon_without_stuck_open_command(monkey
     assert recovered is False
 
 
+def test_status_watchdog_does_not_restart_daemon_for_fresh_open_command(monkeypatch):
+    from datetime import datetime, timezone
+
+    monkeypatch.setattr(
+        launcher_service,
+        "_recent_command_files",
+        lambda path, *, limit: [
+            {
+                "commandId": "cmd-fresh-open",
+                "type": "open_workbench",
+                "requestedAt": datetime.now(timezone.utc).isoformat(),
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        launcher_service,
+        "ensure_runtime_manager_daemon_alive",
+        lambda: (_ for _ in ()).throw(AssertionError("watchdog must not run for a fresh start")),
+    )
+
+    recovered = launcher_service._recover_stale_open_command_when_manager_offline(
+        {"daemonRunning": False}
+    )
+
+    assert recovered is False
+
+
 def test_ensure_runtime_manager_daemon_alive_records_recovery_failure_but_still_restarts(monkeypatch):
     calls = []
 
