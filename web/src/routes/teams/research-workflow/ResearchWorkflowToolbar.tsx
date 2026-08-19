@@ -1,91 +1,54 @@
-import { VButton, VSelect } from "../../../components/vui";
+import {
+  VActionGroup,
+  VButton,
+  VSelect,
+  VStatusChip,
+  VToolbar,
+  type VStatusTone,
+} from "../../../components/vui";
 import { useShellI18n } from "../../../i18n/useShellI18n";
-import type { ExperimentChromeIdentity, ExperimentSwitchOption } from "./researchExperimentSwitchModel";
+import {
+  formatExperimentSwitchLabel,
+  type ExperimentChromeIdentity,
+  type ExperimentSwitchOption,
+} from "./researchExperimentSwitchModel";
 import type { ResearchProcessPanel } from "./researchProcessPanelSelection";
-import type { ResearchWorkflowEventStreamState } from "./useResearchWorkflowEventStream";
 import { researchRunStatusLabel } from "./researchRunPresentation";
 import styles from "./ResearchWorkflowToolbar.styles";
 
-function streamStateLabel(state: ResearchWorkflowEventStreamState, isZh: boolean): string {
-  if (isZh) {
-    const zh: Record<ResearchWorkflowEventStreamState, string> = {
-      idle: "未连接",
-      connecting: "连接中",
-      connected: "实时",
-      reconnecting: "重连中",
-    };
-    return zh[state];
-  }
-  const en: Record<ResearchWorkflowEventStreamState, string> = {
-    idle: "Offline",
-    connecting: "Connecting",
-    connected: "Live",
-    reconnecting: "Reconnecting",
-  };
-  return en[state];
+function runStatusTone(status: string): VStatusTone {
+  if (status === "waiting_human" || status === "blocked") return "warning";
+  if (status === "running") return "accent";
+  if (status === "succeeded") return "success";
+  if (status === "failed") return "danger";
+  return "neutral";
 }
 
 export function ResearchWorkflowToolbar(props: {
-  teamName: string;
   identity: ExperimentChromeIdentity | null;
   runId: string;
   runStatus: string;
-  nextAction: string;
-  streamState: ResearchWorkflowEventStreamState;
   experimentOptions: ExperimentSwitchOption[];
   panel: ResearchProcessPanel;
-  hasRuntimeNode: boolean;
   createDisabled: boolean;
   createDisabledReason?: string;
   onSelectExperiment: (questionId: string) => void;
   onOpenPanel: (panel: ResearchProcessPanel) => void;
-  onJumpToRuntime: () => void;
 }) {
   const { lang } = useShellI18n();
   const isZh = lang === "zh";
   const selectedQuestionId = props.identity?.questionId || null;
+  const emptySwitcherLabel = props.identity
+    ? formatExperimentSwitchLabel(props.identity.questionId, props.identity.hypothesisSummary)
+    : (isZh ? "尚未选择实验" : "No experiment selected");
   return (
-    <div className={styles.root}>
-      <div className={styles.context}>
-        <strong className={styles.primary}>{props.teamName}</strong>
-        {props.identity ? (
-          <span className={styles.truncated} title={`${props.identity.questionId} · ${props.identity.title}`}>
-            {props.identity.questionId} · {props.identity.title}
-          </span>
-        ) : (
-          <span className={styles.truncated}>{isZh ? "尚未选择实验" : "No experiment selected"}</span>
-        )}
-        {props.identity?.hypothesisSummary ? (
-          <span className={styles.truncated}>{props.identity.hypothesisSummary}</span>
-        ) : null}
-        {props.runId ? <span className={styles.truncated}>{researchRunStatusLabel(props.runStatus)}</span> : null}
-        {props.runId ? (
-          <span aria-label={isZh ? "事件连接状态" : "Event stream state"}>
-            {streamStateLabel(props.streamState, isZh)}
-          </span>
-        ) : null}
-        {props.nextAction && props.hasRuntimeNode ? (
-          <VButton
-            type="button"
-            variant="ghost"
-            className={styles.nextAction}
-            data-vui="research-next-action"
-            title={isZh ? "跳到当前节点处理下一步" : "Jump to the current node for the next step"}
-            onClick={props.onJumpToRuntime}
-          >
-            {isZh ? `下一步：${props.nextAction}` : `Next: ${props.nextAction}`}
-          </VButton>
-        ) : props.nextAction ? (
-          <span className={styles.next}>{isZh ? `下一步：${props.nextAction}` : `Next: ${props.nextAction}`}</span>
-        ) : null}
-      </div>
-      <div className={styles.actions}>
+    <VToolbar ariaLabel={isZh ? "科研流程" : "Research workflow"} className={styles.root}>
+      <div className={styles.switcher}>
         {props.experimentOptions.length > 0 ? (
           <VSelect
             density="compact"
-            className={styles.select}
-            aria-label={isZh ? "切换实验" : "Switch experiment"}
-            placeholder={isZh ? "切换实验" : "Switch experiment"}
+            aria-label={isZh ? "切换假说" : "Switch hypothesis"}
+            placeholder={isZh ? "选择假说" : "Select hypothesis"}
             selectedKey={selectedQuestionId}
             options={props.experimentOptions.map((item) => ({
               id: item.questionId,
@@ -97,13 +60,30 @@ export function ResearchWorkflowToolbar(props: {
               props.onSelectExperiment(String(key));
             }}
           />
-        ) : null}
-        <VButton type="button" variant={props.panel === "agents" ? "secondary" : "ghost"} onClick={() => props.onOpenPanel("agents")}>Agent</VButton>
-        <VButton type="button" variant={props.panel === "timeline" ? "secondary" : "ghost"} onClick={() => props.onOpenPanel("timeline")}>{isZh ? "时间线" : "Timeline"}</VButton>
-        <VButton type="button" variant={props.panel === "team" ? "secondary" : "ghost"} onClick={() => props.onOpenPanel("team")}>{isZh ? "团队" : "Team"}</VButton>
-        <VButton type="button" variant={props.panel === "progress" || props.panel === "question" ? "secondary" : "ghost"} onClick={() => props.onOpenPanel("progress")}>{isZh ? "题目进度" : "Progress"}</VButton>
+        ) : (
+          <span className={styles.empty}>{emptySwitcherLabel}</span>
+        )}
+      </div>
+      <div className={styles.status}>
+        <span className={styles.statusLabel}>{isZh ? "状态" : "Status"}</span>
+        {props.runId ? (
+          <VStatusChip tone={runStatusTone(props.runStatus)}>
+            {researchRunStatusLabel(props.runStatus)}
+          </VStatusChip>
+        ) : (
+          <span className={styles.statusEmpty}>—</span>
+        )}
+      </div>
+      <div className={styles.actions}>
+        <VActionGroup ariaLabel={isZh ? "工具面板" : "Tool panels"} className={styles.nav}>
+          <VButton type="button" density="compact" variant={props.panel === "agents" ? "secondary" : "ghost"} onClick={() => props.onOpenPanel("agents")}>Agent</VButton>
+          <VButton type="button" density="compact" variant={props.panel === "timeline" ? "secondary" : "ghost"} onClick={() => props.onOpenPanel("timeline")}>{isZh ? "时间线" : "Timeline"}</VButton>
+          <VButton type="button" density="compact" variant={props.panel === "team" ? "secondary" : "ghost"} onClick={() => props.onOpenPanel("team")}>{isZh ? "团队" : "Team"}</VButton>
+          <VButton type="button" density="compact" variant={props.panel === "progress" || props.panel === "question" ? "secondary" : "ghost"} onClick={() => props.onOpenPanel("progress")}>{isZh ? "题目进度" : "Progress"}</VButton>
+        </VActionGroup>
         <VButton
           type="button"
+          density="compact"
           variant={props.panel === "launch" ? "secondary" : "primary"}
           onClick={() => props.onOpenPanel("launch")}
           isDisabled={props.createDisabled}
@@ -112,6 +92,6 @@ export function ResearchWorkflowToolbar(props: {
           {props.runId ? (isZh ? "新建运行" : "New run") : (isZh ? "创建运行" : "Create run")}
         </VButton>
       </div>
-    </div>
+    </VToolbar>
   );
 }

@@ -55,10 +55,10 @@ describe("researchExperimentSwitchModel", () => {
     });
 
     expect(options.map((item) => item.questionId)).toEqual(["SCI-096", "SCI-003"]);
-    expect(options[0].label).toContain("SCI-096");
-    expect(options[0].label).toContain("知识包交接");
-    expect(options[0].label).toContain("4/16");
-    expect(options[0].label).toContain("等待确认");
+    expect(options[0].label).toBe("SCI-096 · 尚未选择假说");
+    expect(options[0].label).not.toContain("知识包交接");
+    expect(options[0].label).not.toContain("4/16");
+    expect(options[0].label).not.toContain("等待确认");
     expect(options[0].label).not.toContain("run-96");
     expect(options[0].description).toContain("coding principles");
 
@@ -78,10 +78,7 @@ describe("researchExperimentSwitchModel", () => {
         title: "A current experiment",
         runId: "run-current",
         currentNodeId: "source_finding",
-        currentNodeLabel: "资料寻找",
-        status: "running",
-        completedCount: 0,
-        totalSteps: 16,
+        selectedCandidateIds: ["hyp-a"],
       },
     });
 
@@ -91,7 +88,8 @@ describe("researchExperimentSwitchModel", () => {
       runId: "run-current",
       currentNodeId: "source_finding",
     });
-    expect(options[0].label).toContain("资料寻找");
+    expect(options[0].label).toBe("SCI-091 · 假说 hyp-a");
+    expect(options[0].label).not.toContain("资料寻找");
   });
 
   it("surfaces question identity and hypothesis count for chrome, not a run id", () => {

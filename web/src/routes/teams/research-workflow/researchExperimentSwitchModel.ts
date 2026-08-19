@@ -11,7 +11,6 @@
 import type {
   ResearchWorkflowLaunchOption,
 } from "../../../api/researchWorkflow";
-import { researchRunStatusLabel } from "./researchRunPresentation";
 
 export type ExperimentSwitchOption = {
   questionId: string;
@@ -34,8 +33,6 @@ export type ExperimentChromeIdentity = {
   title: string;
   hypothesisSummary: string;
 };
-
-type LaunchCheckpoint = NonNullable<ResearchWorkflowLaunchOption["checkpoint"]>;
 
 function normalizeQuestionId(value: string): string {
   return value.trim().toUpperCase();
@@ -60,13 +57,31 @@ export function formatHypothesisSummary(
 
 export function formatExperimentSwitchLabel(
   questionId: string,
-  checkpoint: Pick<LaunchCheckpoint, "currentNodeLabel" | "currentNodeId" | "completedCount" | "totalSteps" | "status">,
+  hypothesisSummary: string,
 ): string {
-  const node = checkpoint.currentNodeLabel.trim() || checkpoint.currentNodeId.trim() || "起点";
-  return `${normalizeQuestionId(questionId)} · ${node} · ${checkpoint.completedCount}/${checkpoint.totalSteps} · ${researchRunStatusLabel(checkpoint.status)}`;
+  return `${normalizeQuestionId(questionId)} · ${hypothesisSummary.trim() || "尚未选择假说"}`;
 }
 
-function optionFromQuestion(question: ResearchWorkflowLaunchOption): ExperimentSwitchOption | null {
+function hypothesisForQuestion(
+  questionId: string,
+  current?: {
+    questionId: string;
+    selectedCandidateIds?: readonly string[] | null;
+  },
+): string {
+  if (current && normalizeQuestionId(current.questionId) === questionId) {
+    return formatHypothesisSummary(current.selectedCandidateIds, questionId);
+  }
+  return formatHypothesisSummary([], questionId);
+}
+
+function optionFromQuestion(
+  question: ResearchWorkflowLaunchOption,
+  current?: {
+    questionId: string;
+    selectedCandidateIds?: readonly string[] | null;
+  },
+): ExperimentSwitchOption | null {
   const questionId = normalizeQuestionId(question.questionId);
   const checkpoint = question.checkpoint;
   if (!questionId || !checkpoint?.runId) return null;
@@ -75,7 +90,7 @@ function optionFromQuestion(question: ResearchWorkflowLaunchOption): ExperimentS
     title: question.title.trim() || questionId,
     runId: checkpoint.runId,
     currentNodeId: checkpoint.currentNodeId.trim(),
-    label: formatExperimentSwitchLabel(questionId, checkpoint),
+    label: formatExperimentSwitchLabel(questionId, hypothesisForQuestion(questionId, current)),
     description: truncateTitle(question.title.trim() || questionId),
   };
 }
@@ -87,15 +102,12 @@ export function buildExperimentSwitchOptions(input: {
     title?: string;
     runId: string;
     currentNodeId?: string;
-    currentNodeLabel?: string;
-    status?: string;
-    completedCount?: number;
-    totalSteps?: number;
+    selectedCandidateIds?: readonly string[] | null;
   };
 }): ExperimentSwitchOption[] {
   const byQuestion = new Map<string, ExperimentSwitchOption>();
   for (const question of input.questions) {
-    const option = optionFromQuestion(question);
+    const option = optionFromQuestion(question, input.current);
     if (option) byQuestion.set(option.questionId, option);
   }
   const currentQuestionId = normalizeQuestionId(input.current?.questionId ?? "");
@@ -107,13 +119,10 @@ export function buildExperimentSwitchOptions(input: {
       title: input.current?.title?.trim() || currentQuestionId,
       runId: currentRunId,
       currentNodeId,
-      label: formatExperimentSwitchLabel(currentQuestionId, {
-        currentNodeLabel: input.current?.currentNodeLabel ?? "",
-        currentNodeId,
-        completedCount: input.current?.completedCount ?? 0,
-        totalSteps: input.current?.totalSteps ?? 16,
-        status: input.current?.status ?? "",
-      }),
+      label: formatExperimentSwitchLabel(
+        currentQuestionId,
+        hypothesisForQuestion(currentQuestionId, input.current),
+      ),
       description: truncateTitle(input.current?.title?.trim() || currentQuestionId),
     });
   }
