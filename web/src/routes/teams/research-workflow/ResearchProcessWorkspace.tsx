@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useMemo } from "react";
 
 import { WORKBENCH_LAYOUT_IDS } from "../../../components/layout/workbenchLayoutIds";
 import { VCanvasWorkbenchPage } from "../../../components/vui";
@@ -18,10 +18,7 @@ import {
   definitionToCanvasGraph,
   projectionToCanvasGraph,
 } from "./researchProcessGraphModel";
-import {
-  resolveResearchProcessAutofocus,
-  shouldShowResearchProcessInspector,
-} from "./researchProcessPanelSelection";
+import { shouldShowResearchProcessInspector } from "./researchProcessPanelSelection";
 import { ResearchProcessInspectorPane } from "./ResearchProcessInspectorPane";
 import { ResearchWorkflowCanvasPane } from "./ResearchWorkflowCanvasPane";
 import { ResearchWorkflowToolbar } from "./ResearchWorkflowToolbar";
@@ -34,6 +31,7 @@ import { useResearchWorkflowCatalog } from "./useResearchWorkflowCatalog";
 import { useResearchWorkflowCommand } from "./useResearchWorkflowCommand";
 import { useResearchWorkflowCommands } from "./useResearchWorkflowCommands";
 import { useResearchWorkflowInsights } from "./useResearchWorkflowInsights";
+import { useResearchProcessAutofocus } from "./useResearchProcessAutofocus";
 import { useResearchWorkflowRun } from "./useResearchWorkflowRun";
 import { useResearchWorkflowWorkspace } from "./useResearchWorkflowWorkspace";
 import styles from "./ResearchProcessWorkspace.styles";
@@ -186,17 +184,12 @@ export function ResearchProcessWorkspace({
     || catalog.error
     || hypothesisFirstChain.error;
   const commandBusy = runState.busy || commands.busy || formalCommand.busy;
-  const previousNextTargetRef = useRef<string | null>(null);
-  useEffect(() => {
-    const patch = resolveResearchProcessAutofocus({
-      panel: location.panel,
-      selectedNodeId: location.selectedNodeId,
-      nextTarget: nextAction.targetNodeId,
-      previousNextTarget: previousNextTargetRef.current,
-    });
-    previousNextTargetRef.current = nextAction.targetNodeId ?? null;
-    if (patch) location.replaceParams(patch);
-  }, [location.panel, location.selectedNodeId, location.replaceParams, nextAction.targetNodeId]);
+  useResearchProcessAutofocus({
+    panel: location.panel,
+    selectedNodeId: location.selectedNodeId,
+    nextTarget: nextAction.targetNodeId,
+    replaceParams: location.replaceParams,
+  });
 
   const showInspector = shouldShowResearchProcessInspector({
     panel: location.panel,
