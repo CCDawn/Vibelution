@@ -134,6 +134,9 @@ def _attach_instance_runtime(
 ) -> None:
     runtime = _instance_runtime_projection(item, entry=entry, current_bundle=current_bundle)
     item["runtime"] = runtime
+    lease = str((entry or {}).get("portLeaseStatus") or "").strip()
+    if lease:
+        item["portLeaseStatus"] = lease
     block_reason = _instance_start_block_reason(item, runtime)
     item["startable"] = not block_reason
     item["startBlockReason"] = block_reason
@@ -281,6 +284,20 @@ def _instance_runtime_projection(
             "code": error_code or "runtime_error",
             "message": failure_message,
         }
+    observation = (entry or {}).get("cleanupObservation") if isinstance(entry, dict) else None
+    observation = observation if isinstance(observation, dict) else {}
+    lease = str((entry or {}).get("portLeaseStatus") or "").strip()
+    if lease:
+        runtime["portLeaseStatus"] = lease
+    classification = str(observation.get("classification") or "").strip()
+    if classification:
+        runtime["registryClassification"] = classification
+    next_reconcile_at = str(observation.get("nextReconcileAt") or "").strip()
+    if next_reconcile_at:
+        runtime["nextReconcileAt"] = next_reconcile_at
+    first_observed_at = str(observation.get("firstObservedAt") or "").strip()
+    if first_observed_at:
+        runtime["firstObservedAt"] = first_observed_at
     return runtime
 
 
@@ -1112,6 +1129,15 @@ def _claim_isolated_start(
     slot_fields = _slot_fields_for_path(worktree)
 
     def mutator(payload: dict[str, Any]) -> dict[str, Any]:
+        registry._reconcile_payload(
+            payload,
+            git_worktree_roots=None,
+            electron_window_instance_ids=(),
+            now=datetime.now(timezone.utc),
+            identity_inspector=registry.inspect_process_identity,
+            listener_inspector=registry.inspect_listener_identity,
+            pid_existence_inspector=registry._pid_is_present,
+        )
         entry = registry._ensure_entry(payload, instance_id)
         current_status = str(entry.get("status") or "").strip().lower()
         if current_status in registry.IN_FLIGHT_STATUSES:
@@ -1135,6 +1161,7 @@ def _claim_isolated_start(
             extra_used=set(extra_used) | {int(backend)},
         )
         generation = int(entry.get("generation") or 0) + 1
+        owner_pid = os.getpid()
         entry.update(
             {
                 "projectRoot": str(worktree),
@@ -1148,13 +1175,17 @@ def _claim_isolated_start(
                 "generation": generation,
                 "commandId": command_id,
                 "deadlineAt": deadline_at,
+                "inFlightDeadlineAt": deadline_at,
                 "failureMessage": "",
                 "spawnPid": 0,
                 "windowPid": 0,
+                "ownerPid": owner_pid,
                 "startedAt": _now_iso(),
                 **slot_fields,
             }
         )
+        registry._capture_entry_identities(entry, {"ownerPid": owner_pid})
+        registry._touch_entry(entry)
         return dict(entry)
 
     return registry.mutate_registry(mutator)

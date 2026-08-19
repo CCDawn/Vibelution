@@ -843,3 +843,38 @@ def test_loopback_http_ready_rejects_server_error_and_closed_port():
     unused_port = int(closed.getsockname()[1])
     closed.close()
     assert lifecycle._loopback_http_ready(unused_port) is False
+
+
+def test_overlay_exposes_quarantine_lease_fields_from_registry(tmp_path, monkeypatch):
+    path = tmp_path / "gone"
+    monkeypatch.setattr(lifecycle, "_slot_fields_for_path", lambda _path: {})
+    monkeypatch.setattr(
+        lifecycle.registry,
+        "list_instances",
+        lambda: [
+            {
+                "instanceId": "worktree:feature",
+                "projectRoot": str(path),
+                "port": 8765,
+                "controlPort": 9001,
+                "portLeaseStatus": "reclaimable",
+                "cleanupObservation": {
+                    "classification": "unknown",
+                    "firstObservedAt": "2026-08-19T06:00:00Z",
+                    "nextReconcileAt": "2026-08-19T06:00:10Z",
+                },
+            }
+        ],
+    )
+
+    payload = lifecycle.overlay_instance_ports(
+        {"items": [_item(path)]},
+        launcher_state={},
+    )
+    item = payload["items"][0]
+    runtime = item["runtime"]
+    assert item["portLeaseStatus"] == "reclaimable"
+    assert runtime["portLeaseStatus"] == "reclaimable"
+    assert runtime["registryClassification"] == "unknown"
+    assert runtime["nextReconcileAt"] == "2026-08-19T06:00:10Z"
+    assert runtime["firstObservedAt"] == "2026-08-19T06:00:00Z"

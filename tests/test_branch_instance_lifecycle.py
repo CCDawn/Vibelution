@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -160,6 +161,9 @@ def test_isolated_start_allocates_ports_and_spawns_without_touching_current(regi
     assert stored["commandId"]
     assert stored["port"] == 8001
     assert stored["controlPort"] == 8766
+    assert stored["inFlightDeadlineAt"] == stored["deadlineAt"]
+    assert stored["updatedAt"]
+    assert int(stored.get("ownerPid") or 0) == os.getpid()
     assert stored["slotId"] == slot_id_for_project(worktree)
     assert stored["dataHome"] == str(data_home_for_project(worktree))
     assert response["generation"] == 1
@@ -621,3 +625,74 @@ def test_launcher_script_resolves_workspace_env_before_sys_path():
     text = Path(__file__).resolve().parents[1].joinpath("scripts", "vibelution_launcher.py").read_text(encoding="utf-8")
     assert text.index("VIBELUTION_WORKSPACE_ROOT") < text.index("sys.path.insert")
     assert "SUPERVISOR_ROOT" in text
+
+
+def test_concurrent_isolated_start_only_one_cas_claim_succeeds(registry_path, tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "_port_is_free", lambda port, host: True)
+    monkeypatch.setattr(lifecycle, "current_live_ports", lambda launcher_state=None: {8000, 8765})
+    worktree = tmp_path / "task"
+    worktree.mkdir()
+    barrier = threading.Barrier(2)
+    successes: list[dict] = []
+    errors: list[lifecycle.BranchInstanceLifecycleError] = []
+    lock = threading.Lock()
+
+    def fake_spawn(*args, **kwargs):
+        return {"returncode": 0, "pid": 11}
+
+    def worker() -> None:
+        barrier.wait(timeout=5)
+        try:
+            result = lifecycle.run_isolated_operation(
+                _item(path=str(worktree)),
+                "start",
+                runner=fake_spawn,
+            )
+        except lifecycle.BranchInstanceLifecycleError as exc:
+            with lock:
+                errors.append(exc)
+            return
+        with lock:
+            successes.append(result)
+
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert len(successes) == 1
+    assert len(errors) == 1
+    assert errors[0].code == "instance_busy"
+    assert registry.get_instance("worktree:task")["status"] == "starting"
+    assert registry.get_instance("worktree:task")["generation"] == 1
+
+
+def test_isolated_start_reconciles_reclaimable_ports_inside_claim_lock(registry_path, tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "_port_is_free", lambda port, host: True)
+    monkeypatch.setattr(registry, "inspect_listener_identity", lambda _port, _identities: {"status": "none"})
+    monkeypatch.setattr(registry, "inspect_process_identity", lambda _identity: {"status": "dead"})
+    monkeypatch.setattr(registry, "_pid_is_present", lambda _pid: False)
+    monkeypatch.setattr(lifecycle, "current_live_ports", lambda launcher_state=None: set())
+    worktree = tmp_path / "task"
+    worktree.mkdir()
+    registry.upsert_instance(
+        "legacy",
+        projectRoot="C:/missing/legacy",
+        spawnPid=999,
+        port=8000,
+        controlPort=8765,
+        deadlineAt="2026-08-19T05:00:00Z",
+        portLeaseStatus="reclaimable",
+    )
+
+    response = lifecycle.run_isolated_operation(
+        _item(path=str(worktree)),
+        "start",
+        runner=lambda *args, **kwargs: {"returncode": 0, "pid": 9},
+    )
+
+    assert response["port"] == 8000
+    assert response["controlPort"] == 8765
+    assert registry.get_instance("legacy")["portLeaseStatus"] == "reclaimable"
+    assert registry.get_instance("worktree:task")["port"] == 8000

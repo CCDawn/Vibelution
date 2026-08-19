@@ -20,7 +20,7 @@ import tempfile
 import time
 from collections.abc import Callable, Iterable
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
 from typing import Any, TypeVar
@@ -36,6 +36,7 @@ DEFAULT_BASE_PORT = 8000
 DEFAULT_CONTROL_PORT = 8765
 PORT_SCAN_LIMIT = 64
 IN_FLIGHT_STATUSES = frozenset({"starting", "restarting", "stopping"})
+PORT_LEASE_RECLAIMABLE = frozenset({"quarantined", "reclaimable"})
 _READ_RETRY_ATTEMPTS = 3
 _READ_RETRY_DELAY_SECONDS = 0.05
 _LOCK_TIMEOUT_SECONDS = 5.0
@@ -102,6 +103,7 @@ def _touch_registry(payload: dict[str, Any], *, now: datetime | None = None) -> 
 
 
 def _touch_entry(entry: dict[str, Any], *, now: datetime | None = None) -> None:
+    entry["schemaVersion"] = REGISTRY_SCHEMA_VERSION
     entry["updatedAt"] = _iso_timestamp(now)
 
 
@@ -249,7 +251,7 @@ def upsert_instance(instance_id: str, **fields: Any) -> dict[str, Any]:
 def _capture_entry_identities(entry: dict[str, Any], changed_fields: dict[str, Any]) -> None:
     pid_fields = (
         ("ownerPid", "owner"),
-        ("spawnPid", "owner"),
+        ("spawnPid", "spawn"),
         ("backendPid", "backend"),
         ("controlPid", "control"),
     )
@@ -262,8 +264,19 @@ def _capture_entry_identities(entry: dict[str, Any], changed_fields: dict[str, A
             pid = 0
         if pid <= 0:
             continue
-        entry[f"{prefix}Pid"] = pid
         captured = capture_process_identity(pid)
+        if pid_field == "spawnPid":
+            entry["spawnPid"] = pid
+            if captured:
+                entry["spawnCreateTime"] = captured["createTime"]
+                entry["spawnExecutable"] = captured["executable"]
+            if int(entry.get("ownerPid") or 0) <= 0:
+                entry["ownerPid"] = pid
+                if captured:
+                    entry["ownerCreateTime"] = captured["createTime"]
+                    entry["ownerExecutable"] = captured["executable"]
+            continue
+        entry[f"{prefix}Pid"] = pid
         if captured:
             entry[f"{prefix}CreateTime"] = captured["createTime"]
             entry[f"{prefix}Executable"] = captured["executable"]
@@ -331,13 +344,45 @@ def _port_is_free(port: int, host: str = "127.0.0.1") -> bool:
         probe.close()
 
 
+def _entry_raw_pids(entry: dict[str, Any]) -> list[int]:
+    pids: list[int] = []
+    seen: set[int] = set()
+    for key in ("ownerPid", "spawnPid", "backendPid", "controlPid"):
+        try:
+            pid = int(entry.get(key) or 0)
+        except (TypeError, ValueError):
+            pid = 0
+        if pid <= 0 or pid in seen:
+            continue
+        seen.add(pid)
+        pids.append(pid)
+    return pids
+
+
+def _pid_is_present(pid: int) -> bool:
+    """Fail-closed: unknown presence is treated as still occupied."""
+    try:
+        import psutil
+    except ImportError:
+        return True
+    try:
+        return bool(psutil.pid_exists(int(pid)))
+    except (psutil.Error, OSError, TypeError, ValueError):
+        return True
+
+
+def _entry_holds_port_lease(entry: dict[str, Any]) -> bool:
+    status = str(entry.get("portLeaseStatus") or "").strip().lower()
+    return status not in PORT_LEASE_RECLAIMABLE
+
+
 def _entry_identities(entry: dict[str, Any]) -> tuple[list[dict[str, Any]], bool]:
     identities: list[dict[str, Any]] = []
     complete = True
     seen_pids: set[int] = set()
     fields = (
         ("ownerPid", "ownerCreateTime", "ownerExecutable"),
-        ("spawnPid", "ownerCreateTime", "ownerExecutable"),
+        ("spawnPid", "spawnCreateTime", "spawnExecutable"),
         ("backendPid", "backendCreateTime", "backendExecutable"),
         ("controlPid", "controlCreateTime", "controlExecutable"),
     )
@@ -349,11 +394,16 @@ def _entry_identities(entry: dict[str, Any]) -> tuple[list[dict[str, Any]], bool
         if pid <= 0 or pid in seen_pids:
             continue
         seen_pids.add(pid)
+        created_value = entry.get(created_field)
+        executable_value = entry.get(executable_field)
+        if pid_field == "spawnPid":
+            created_value = created_value or entry.get("ownerCreateTime")
+            executable_value = executable_value or entry.get("ownerExecutable")
         try:
-            create_time = float(entry.get(created_field) or 0)
+            create_time = float(created_value or 0)
         except (TypeError, ValueError):
             create_time = 0
-        executable = str(entry.get(executable_field) or "").strip()
+        executable = str(executable_value or "").strip()
         if create_time <= 0 or not executable:
             complete = False
             continue
@@ -374,6 +424,9 @@ def _cleanup_fingerprint(instance_id: str, entry: dict[str, Any], identities: li
         "projectRoot": _norm_path(str(entry.get("projectRoot") or "")),
         "ports": sorted(_entry_ports(entry)),
         "identities": sorted(identities, key=lambda item: int(item.get("pid") or 0)),
+        "rawPids": sorted(_entry_raw_pids(entry)),
+        "generation": int(entry.get("generation") or 0),
+        "commandId": str(entry.get("commandId") or ""),
         "deadline": str(entry.get("inFlightDeadlineAt") or entry.get("deadlineAt") or ""),
     }
     return sha256(json.dumps(facts, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
@@ -387,6 +440,7 @@ def _reconcile_payload(
     now: datetime,
     identity_inspector: Callable[[dict[str, Any]], dict[str, Any]],
     listener_inspector: Callable[[int, Iterable[dict[str, Any]]], dict[str, Any]],
+    pid_existence_inspector: Callable[[int], bool] = _pid_is_present,
 ) -> tuple[dict[str, Any], bool]:
     inventory = None if git_worktree_roots is None else {_norm_path(root) for root in git_worktree_roots}
     window_ids = {str(instance_id) for instance_id in electron_window_instance_ids}
@@ -398,6 +452,7 @@ def _reconcile_payload(
     removed: list[str] = []
     projections: list[dict[str, Any]] = []
     worktree_dry_run: list[dict[str, Any]] = []
+    pending_next: list[datetime] = []
 
     for raw_instance_id, raw_entry in list(instances.items()):
         instance_id = str(raw_instance_id)
@@ -426,6 +481,8 @@ def _reconcile_payload(
         all_inactive = bool(identity_results) and identity_statuses.issubset({"dead", "mismatch"})
         any_active = "match" in identity_statuses
         any_identity_unknown = "unknown" in identity_statuses
+        raw_pids = _entry_raw_pids(entry)
+        pids_all_missing = all(not pid_existence_inspector(pid) for pid in raw_pids)
 
         listener_results = [listener_inspector(port, identities) for port in sorted(_entry_ports(entry))]
         listener_statuses = {str(result.get("status") or "unknown") for result in listener_results}
@@ -434,6 +491,7 @@ def _reconcile_payload(
         listener_unknown = "unknown" in listener_statuses
         window_open = instance_id in window_ids
         deadline_expired = _deadline_expired(entry, now)
+        lease_status = str(entry.get("portLeaseStatus") or "").strip().lower()
 
         reasons: list[str] = []
         if has_external_listener:
@@ -455,55 +513,135 @@ def _reconcile_payload(
             classification = "stale"
             reasons.append("inactive_but_not_safe_to_remove")
 
-        safe_to_observe = classification == "orphan" and not window_open
+        observation_kind = ""
+        if classification == "orphan" and not window_open:
+            observation_kind = "orphan"
+        elif (
+            classification == "unknown"
+            and worktree_candidate
+            and deadline_expired
+            and not window_open
+            and not has_owned_listener
+            and not has_external_listener
+            and not listener_unknown
+            and not any_active
+            and pids_all_missing
+        ):
+            observation_kind = "quarantine_candidate"
+
         observation = entry.get("cleanupObservation")
-        if safe_to_observe:
-            fingerprint = _cleanup_fingerprint(instance_id, entry, identities)
+        instance_next_reconcile_at = ""
+        first_observed_at_text = ""
+        fingerprint = _cleanup_fingerprint(instance_id, entry, identities)
+        if observation_kind:
+            stored_kind = ""
+            if isinstance(observation, dict):
+                stored_kind = str(observation.get("kind") or "")
+                if not stored_kind and str(observation.get("classification") or "") == "orphan":
+                    stored_kind = "orphan"
             first_observed_at = _parse_timestamp(
                 observation.get("firstObservedAt") if isinstance(observation, dict) else None
             )
             same_observation = bool(
-                isinstance(observation, dict)
-                and observation.get("classification") == "orphan"
+                stored_kind == observation_kind
+                and isinstance(observation, dict)
                 and observation.get("fingerprint") == fingerprint
                 and first_observed_at is not None
             )
-            if same_observation and (now - first_observed_at).total_seconds() >= _CLEANUP_OBSERVATION_GRACE_SECONDS:
-                instances.pop(instance_id, None)
-                removed.append(instance_id)
-                changed = True
+            grace_elapsed = bool(
+                same_observation
+                and first_observed_at is not None
+                and (now - first_observed_at).total_seconds() >= _CLEANUP_OBSERVATION_GRACE_SECONDS
+            )
+            if grace_elapsed:
+                if observation_kind == "orphan":
+                    instances.pop(instance_id, None)
+                    removed.append(instance_id)
+                    changed = True
+                elif lease_status not in PORT_LEASE_RECLAIMABLE:
+                    entry["portLeaseStatus"] = "reclaimable"
+                    entry["portLease"] = {
+                        "status": "reclaimable",
+                        "reason": "legacy_unknown_idle",
+                        "quarantinedAt": _iso_timestamp(now),
+                    }
+                    if isinstance(observation, dict):
+                        stored_observation = dict(observation)
+                        stored_observation["confirmedAt"] = _iso_timestamp(now)
+                        entry["cleanupObservation"] = stored_observation
+                    lease_status = "reclaimable"
+                    _touch_entry(entry, now=now)
+                    changed = True
             elif not same_observation:
+                next_at = now + timedelta(seconds=_CLEANUP_OBSERVATION_GRACE_SECONDS)
+                public_classification = "orphan" if observation_kind == "orphan" else "unknown"
                 entry["cleanupObservation"] = {
-                    "classification": "orphan",
+                    "kind": observation_kind,
+                    "classification": public_classification,
                     "fingerprint": fingerprint,
                     "firstObservedAt": _iso_timestamp(now),
+                    "nextReconcileAt": _iso_timestamp(next_at),
                 }
                 _touch_entry(entry, now=now)
                 changed = True
-        elif isinstance(observation, dict):
-            entry.pop("cleanupObservation", None)
-            _touch_entry(entry, now=now)
-            changed = True
+                instance_next_reconcile_at = _iso_timestamp(next_at)
+                first_observed_at_text = _iso_timestamp(now)
+            elif first_observed_at is not None:
+                instance_next_reconcile_at = _iso_timestamp(
+                    first_observed_at + timedelta(seconds=_CLEANUP_OBSERVATION_GRACE_SECONDS)
+                )
+                first_observed_at_text = _iso_timestamp(first_observed_at)
+        else:
+            if isinstance(observation, dict):
+                entry.pop("cleanupObservation", None)
+                _touch_entry(entry, now=now)
+                changed = True
+            keep_reclaimable = (
+                lease_status in PORT_LEASE_RECLAIMABLE
+                and classification == "unknown"
+                and worktree_candidate
+                and not window_open
+                and not has_owned_listener
+                and not has_external_listener
+                and not any_active
+            )
+            if lease_status in PORT_LEASE_RECLAIMABLE and not keep_reclaimable:
+                entry.pop("portLeaseStatus", None)
+                entry.pop("portLease", None)
+                _touch_entry(entry, now=now)
+                changed = True
+                lease_status = ""
 
-        projections.append(
-            {
-                "instanceId": instance_id,
-                "classification": classification,
-                "reasons": reasons,
-                "windowOpen": window_open,
-                "listener": sorted(listener_statuses) or ["none"],
-            }
-        )
+        if instance_next_reconcile_at:
+            parsed_next = _parse_timestamp(instance_next_reconcile_at)
+            if parsed_next is not None:
+                pending_next.append(parsed_next)
+        if not first_observed_at_text and isinstance(entry.get("cleanupObservation"), dict):
+            first_observed_at_text = str(entry["cleanupObservation"].get("firstObservedAt") or "")
 
-    return (
-        {
-            "observedAt": _iso_timestamp(now),
-            "instances": projections,
-            "removedInstanceIds": removed,
-            "worktreeDryRun": worktree_dry_run,
-        },
-        changed,
-    )
+        projection: dict[str, Any] = {
+            "instanceId": instance_id,
+            "classification": classification,
+            "reasons": reasons,
+            "windowOpen": window_open,
+            "listener": sorted(listener_statuses) or ["none"],
+            "portLeaseStatus": lease_status or "held",
+        }
+        if first_observed_at_text:
+            projection["firstObservedAt"] = first_observed_at_text
+        if instance_next_reconcile_at:
+            projection["nextReconcileAt"] = instance_next_reconcile_at
+        projections.append(projection)
+
+    summary: dict[str, Any] = {
+        "observedAt": _iso_timestamp(now),
+        "instances": projections,
+        "removedInstanceIds": removed,
+        "worktreeDryRun": worktree_dry_run,
+    }
+    if pending_next:
+        summary["nextReconcileAt"] = _iso_timestamp(min(pending_next))
+    return summary, changed
 
 
 def reconcile_registry(
@@ -513,6 +651,7 @@ def reconcile_registry(
     now: datetime | None = None,
     identity_inspector: Callable[[dict[str, Any]], dict[str, Any]] = inspect_process_identity,
     listener_inspector: Callable[[int, Iterable[dict[str, Any]]], dict[str, Any]] = inspect_listener_identity,
+    pid_existence_inspector: Callable[[int], bool] = _pid_is_present,
 ) -> dict[str, Any]:
     """Reconcile registry metadata; worktrees and processes are always read-only."""
     observed_at = _as_utc(now)
@@ -525,6 +664,7 @@ def reconcile_registry(
             now=observed_at,
             identity_inspector=identity_inspector,
             listener_inspector=listener_inspector,
+            pid_existence_inspector=pid_existence_inspector,
         )
         if changed:
             _touch_registry(payload, now=observed_at)
@@ -552,7 +692,7 @@ def _registered_ports(registry: dict[str, Any], *, exclude_id: str = "") -> set[
     for instance_id, entry in instances.items():
         if exclude_id and str(instance_id) == exclude_id:
             continue
-        if isinstance(entry, dict):
+        if isinstance(entry, dict) and _entry_holds_port_lease(entry):
             used.update(_entry_ports(entry))
     return used
 
@@ -697,21 +837,22 @@ def allocate_instance_ports(
     reconcile_now: datetime | None = None,
     identity_inspector: Callable[[dict[str, Any]], dict[str, Any]] = inspect_process_identity,
     listener_inspector: Callable[[int, Iterable[dict[str, Any]]], dict[str, Any]] = inspect_listener_identity,
+    pid_existence_inspector: Callable[[int], bool] = _pid_is_present,
 ) -> tuple[int, int]:
     """Reconcile safely, then reserve a disjoint port pair under one lock."""
     instance_id = _normalize_instance_id(instance_id)
     extra = {int(port) for port in (extra_used or []) if int(port or 0) > 0}
 
     def mutator(payload: dict[str, Any]) -> tuple[int, int]:
-        if git_worktree_roots is not None:
-            _reconcile_payload(
-                payload,
-                git_worktree_roots=git_worktree_roots,
-                electron_window_instance_ids=electron_window_instance_ids,
-                now=_as_utc(reconcile_now),
-                identity_inspector=identity_inspector,
-                listener_inspector=listener_inspector,
-            )
+        _reconcile_payload(
+            payload,
+            git_worktree_roots=git_worktree_roots,
+            electron_window_instance_ids=electron_window_instance_ids,
+            now=_as_utc(reconcile_now),
+            identity_inspector=identity_inspector,
+            listener_inspector=listener_inspector,
+            pid_existence_inspector=pid_existence_inspector,
+        )
         backend = _allocate_backend_locked(
             payload,
             instance_id,
