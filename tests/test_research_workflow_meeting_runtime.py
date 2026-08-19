@@ -176,6 +176,8 @@ def test_candidate_generation_prompt_includes_canonical_question_context(
     assert prompts
     assert all(str(catalog_question["question_en"]) in prompt for prompt in prompts)
     assert all(str(catalog_question["domain"]) in prompt for prompt in prompts)
+    assert all("每位参与者必须直接提出至少一个可证伪候选" in prompt for prompt in prompts)
+    assert all("不得等待其他角色代为提出" in prompt for prompt in prompts)
 
 
 def _closure_payload(agent_ids, **overrides):
