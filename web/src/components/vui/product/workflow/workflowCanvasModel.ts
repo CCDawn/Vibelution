@@ -104,11 +104,11 @@ export function resolveEdgePathState(options: {
 export function stageToneFromNodes(
   nodes: Array<{ status: WorkflowNodeRunStatus; isRuntimeCurrent?: boolean }>,
 ): "idle" | "active" | "done" | "attention" {
+  // isRuntimeCurrent is a cursor, not in-flight work; only node status drives tone.
   if (
     nodes.some(
       (n) =>
-        n.isRuntimeCurrent
-        || n.status === "running"
+        n.status === "running"
         || n.status === "waiting_human"
         || n.status === "blocked"
         || n.status === "failed",

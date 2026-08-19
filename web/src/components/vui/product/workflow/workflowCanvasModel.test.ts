@@ -159,6 +159,7 @@ describe("workflowCanvasModel", () => {
   it("computes stage tone", () => {
     expect(stageToneFromNodes([{ status: "succeeded" }, { status: "succeeded" }])).toBe("done");
     expect(stageToneFromNodes([{ status: "running", isRuntimeCurrent: true }])).toBe("active");
+    expect(stageToneFromNodes([{ status: "pending", isRuntimeCurrent: true }])).toBe("idle");
     expect(stageToneFromNodes([{ status: "waiting_human" }])).toBe("attention");
     expect(stageToneFromNodes([{ status: "pending" }])).toBe("idle");
   });
