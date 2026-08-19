@@ -1,4 +1,4 @@
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown, ChevronRight } from "lucide-react";
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import type { AgentLlmSlotDefinition, AgentModelChoice } from "../api/types";
@@ -10,6 +10,22 @@ export type AgentModelCandidateGroup = {
   providerLabel: string;
   items: AgentModelChoice[];
 };
+
+export function expandedAgentModelProviderIds(
+  groups: AgentModelCandidateGroup[],
+  query: string,
+  manuallyExpandedProviderIds: ReadonlySet<string>,
+  searchCollapsedProviderIds: ReadonlySet<string>,
+): Set<string> {
+  const searching = Boolean(query.trim());
+  return new Set(
+    groups
+      .filter((group) => searching
+        ? !searchCollapsedProviderIds.has(group.providerId)
+        : manuallyExpandedProviderIds.has(group.providerId))
+      .map((group) => group.providerId),
+  );
+}
 
 type AgentModelPickerProps = {
   candidates: AgentModelChoice[];
@@ -143,14 +159,31 @@ export function AgentModelPicker({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeModelRef, setActiveModelRef] = useState("");
+  const [manuallyExpandedProviderIds, setManuallyExpandedProviderIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [searchCollapsedProviderIds, setSearchCollapsedProviderIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [pendingPromote, setPendingPromote] = useState<AgentModelChoice | null>(null);
   const groups = useMemo(
     () => groupAgentModelCandidates(candidates, slot.slot, query),
     [candidates, query, slot.slot],
   );
+  const expandedProviderIds = useMemo(
+    () => expandedAgentModelProviderIds(
+      groups,
+      query,
+      manuallyExpandedProviderIds,
+      searchCollapsedProviderIds,
+    ),
+    [groups, manuallyExpandedProviderIds, query, searchCollapsedProviderIds],
+  );
   const visibleCandidates = useMemo(
-    () => groups.flatMap((group) => group.items),
-    [groups],
+    () => groups
+      .filter((group) => expandedProviderIds.has(group.providerId))
+      .flatMap((group) => group.items),
+    [expandedProviderIds, groups],
   );
   const selected = candidates.find((candidate) => candidate.modelRef === selectedModelRef);
   const draftsDirty = configDraftDirty || agentDraftDirty;
@@ -159,14 +192,29 @@ export function AgentModelPicker({
     return agentModelChoiceDisabledReason(candidate, slot.slot, draftsDirty);
   }
 
-  const enabledCandidates = visibleCandidates.filter((candidate) => !disabledReason(candidate));
+  const enabledCandidates = useMemo(
+    () => visibleCandidates.filter((candidate) => !agentModelChoiceDisabledReason(
+      candidate,
+      slot.slot,
+      draftsDirty,
+    )),
+    [draftsDirty, slot.slot, visibleCandidates],
+  );
 
   useEffect(() => {
     if (!open) return;
     const first = enabledCandidates[0]?.modelRef ?? "";
     setActiveModelRef((current) => enabledCandidates.some((item) => item.modelRef === current) ? current : first);
-    requestAnimationFrame(() => searchRef.current?.focus());
   }, [enabledCandidates, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    requestAnimationFrame(() => searchRef.current?.focus());
+  }, [open]);
+
+  useEffect(() => {
+    setSearchCollapsedProviderIds(new Set());
+  }, [query]);
 
   function restoreTriggerFocus() {
     requestAnimationFrame(() => triggerRef.current?.focus());
@@ -175,12 +223,23 @@ export function AgentModelPicker({
   function closePicker() {
     setOpen(false);
     setQuery("");
+    setManuallyExpandedProviderIds(new Set());
+    setSearchCollapsedProviderIds(new Set());
+    setActiveModelRef("");
     restoreTriggerFocus();
+  }
+
+  function openPicker() {
+    setQuery("");
+    setManuallyExpandedProviderIds(new Set());
+    setSearchCollapsedProviderIds(new Set());
+    setActiveModelRef("");
+    setOpen(true);
   }
 
   function handleOpenChange(nextOpen: boolean) {
     if (nextOpen) {
-      setOpen(true);
+      openPicker();
       return;
     }
     closePicker();
@@ -214,6 +273,20 @@ export function AgentModelPicker({
     requestAnimationFrame(() => optionRefs.current.get(next.modelRef)?.focus());
   }
 
+  function toggleProvider(providerId: string) {
+    const update = (current: Set<string>) => {
+      const next = new Set(current);
+      if (next.has(providerId)) next.delete(providerId);
+      else next.add(providerId);
+      return next;
+    };
+    if (query.trim()) {
+      setSearchCollapsedProviderIds(update);
+      return;
+    }
+    setManuallyExpandedProviderIds(update);
+  }
+
   function handlePanelKeyDown(event: KeyboardEvent) {
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
@@ -243,7 +316,7 @@ export function AgentModelPicker({
           isDisabled={disabled}
           aria-haspopup="dialog"
           aria-expanded={open}
-          onPress={() => setOpen(true)}
+          onPress={openPicker}
         >
           <span className={styles.triggerCopy}>
             <span className={styles.triggerLabel}>
@@ -280,14 +353,36 @@ export function AgentModelPicker({
               placeholder="快速过滤：模型名 / gpt-5 / luna / Provider"
               onChange={(event) => setQuery(event.target.value)}
             />
-            <div className={styles.list} role="listbox" aria-label={`${slot.label}模型候选`}>
-              {groups.map((group) => (
-                <section key={group.providerId} className={styles.group} aria-label={group.providerLabel}>
-                  <header className={styles.groupHeader}>
-                    <span>{group.providerLabel}</span>
-                    <span className={styles.groupCount}>{group.items.length} 个模型</span>
-                  </header>
-                  {group.items.map((candidate) => {
+            <div className={styles.list} aria-label={`${slot.label}模型候选`}>
+              {groups.map((group, groupIndex) => {
+                const groupExpanded = expandedProviderIds.has(group.providerId);
+                const groupPanelId = `agent-model-provider-${groupIndex}-${group.providerId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+                return (
+                  <section key={group.providerId} className={styles.group} aria-label={group.providerLabel}>
+                    <VButton
+                      type="button"
+                      contentLayout="plain"
+                      className={styles.groupHeader}
+                      aria-expanded={groupExpanded}
+                      aria-controls={groupPanelId}
+                      onPress={() => toggleProvider(group.providerId)}
+                    >
+                      <span className={styles.groupTitle}>
+                        {groupExpanded
+                          ? <ChevronDown className={styles.groupChevron} size={14} aria-hidden="true" />
+                          : <ChevronRight className={styles.groupChevron} size={14} aria-hidden="true" />}
+                        <span>{group.providerLabel}</span>
+                      </span>
+                      <span className={styles.groupCount}>{group.items.length} 个模型</span>
+                    </VButton>
+                    <div
+                      id={groupPanelId}
+                      className={styles.groupItems}
+                      role="listbox"
+                      aria-label={`${group.providerLabel} ${slot.label}模型`}
+                      hidden={!groupExpanded}
+                    >
+                    {group.items.map((candidate) => {
                     const reason = disabledReason(candidate);
                     const compatibility = slotCompatibility(candidate, slot.slot);
                     const selectedRow = candidate.modelRef === selectedModelRef;
@@ -329,9 +424,11 @@ export function AgentModelPicker({
                         {reason ? <span className={styles.reason}>{reason}</span> : null}
                       </VButton>
                     );
-                  })}
-                </section>
-              ))}
+                    })}
+                    </div>
+                  </section>
+                );
+              })}
               {!groups.length ? <VStateSurface tone="empty" title="没有匹配的模型" /> : null}
             </div>
           </div>
