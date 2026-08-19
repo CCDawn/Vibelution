@@ -1975,6 +1975,8 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
     timings["agentDirectorySyncMs"] = _elapsed_ms(stage_started_at)
     agent_id = str(participant.get("agentId") or "").strip()
     round_id = str(context.get("roundId") or "").strip()
+    participant_id = str(participant.get("participantId") or agent_id or session_id).strip()
+    turn_identity = f"chat-room:{round_id}:{participant_id}"
     stage_started_at = _perf_counter()
     agent = agent_directory_service.get_agent(agent_id, include_archived=False) if agent_id else None
     if agent_id and not agent:
@@ -2026,9 +2028,21 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
         resolved_agent_llm = _resolve_chat_room_agent_llm(agent)
         agent_config = resolved_agent_llm.config
         timings["agentConfigMs"] = _elapsed_ms(stage_started_at)
+        stage_started_at = _perf_counter()
+        ledger_events = load_conversation_events(PROJECT_ROOT, session_id) if session_id else []
+        history_assembly = session_service.assemble_conversation_context(
+            [],
+            session_id=session_id,
+            current_turn_id=turn_identity,
+            ledger_events=ledger_events or None,
+            recent_message_limit=None,
+        )
+        canonical_chat_history = list(history_assembly.history_messages or [])
+        timings["ledgerHistoryMs"] = _elapsed_ms(stage_started_at)
         with active_agent_runtime(
             agent_id,
             session_id=session_id,
+            turn_id=turn_identity,
             room_id=str(context.get("roomId") or "").strip(),
             round_id=round_id,
         ), session_service._session_tool_workspace_override(workspace):
@@ -2051,8 +2065,9 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
             stage_started_at = _perf_counter()
             prepare_agent_turn(
                 agent_runtime,
+                turn_identity=turn_identity,
                 interrupt_checker=lambda: _chat_room_round_stop_reason(round_id),
-                chat_history=participant.get("recentMessages") or [],
+                chat_history=canonical_chat_history,
                 runtime_context=agent_context.context_block if agent_context is not None else "",
                 static_runtime_context=(
                     getattr(agent_context, "static_context_block", "") if agent_context is not None else ""
@@ -2064,7 +2079,14 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
             timings["agentSeedMs"] = _elapsed_ms(stage_started_at)
             timings["totalPrepareMs"] = _elapsed_ms(prepare_started_at)
             stage_started_at = _perf_counter()
-            result = run_existing_agent_single_turn(agent_runtime, initial_prompt=prompt, disable_tools=True)
+            result = run_existing_agent_single_turn(
+                agent_runtime,
+                initial_prompt=prompt,
+                disable_tools=True,
+                turn_identity=turn_identity,
+                interrupt_checker=lambda: _chat_room_round_stop_reason(round_id),
+                chat_history=canonical_chat_history,
+            )
             timings["llmElapsedMs"] = _elapsed_ms(stage_started_at)
     if agent_context is not None and agent_context.agent_id:
         stage_started_at = _perf_counter()

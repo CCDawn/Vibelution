@@ -1053,6 +1053,44 @@ def _empty_generation_runner(participant, prompt, context):
     }
 
 
+def _failed_generation_runner(participant, prompt, context):
+    return {
+        "status": "failed",
+        "errorType": "protocol_error",
+        "summary": "speaker failed before producing discussion evidence",
+    }
+
+
+def test_failed_generation_attempt_can_be_superseded_and_restarted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    team_id, _agents = _hf_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        question_launch,
+        "challenge_question_run_summary",
+        lambda _team_id: {"completedQuestionIds": [], "completedQuestionResults": []},
+    )
+
+    with server_operator_scope("u-1", roles=("operator",)):
+        failed = chain.open_candidate_generation_meeting(
+            team_id, _QUESTION_ID, agent_runner=_failed_generation_runner
+        )
+        first_id = failed["meetingRound"]["meetingRoundId"]
+
+        restarted = chain.open_candidate_generation_meeting(
+            team_id, _QUESTION_ID, agent_runner=_candidate_generation_runner
+        )
+
+    second_id = restarted["meetingRound"]["meetingRoundId"]
+    assert second_id != first_id
+    assert second_id.endswith("-a2")
+    first = meetings.get_meeting_round(team_id, first_id)["meetingRound"]
+    assert first["status"] == "closed"
+    assert first["recoveryReason"] == "discussion_has_no_completed_messages"
+    assert first["summaryDraftError"]["code"] == "discussion_has_no_completed_messages"
+    assert restarted["status"] == "opened"
+
+
 def test_closed_generation_without_candidates_allows_a_fresh_attempt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

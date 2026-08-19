@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 import pytest
 
+from agent import SelfEvolvingAgent
 from core.agent_kernel import service as agent_kernel_service
 from core.chat.conversation_ledger import (
     EVENT_ASSISTANT_MESSAGE,
@@ -1891,6 +1892,9 @@ def test_chat_room_participant_runner_reuses_session_workspace_and_agent_llm_bin
             captured["workspace_path"] = str(workspace_path or "")
             captured["primary_model"] = config.llm.get_profile(role="primary").model
 
+        def set_turn_identity(self, turn_identity):
+            captured["turn_identity"] = str(turn_identity or "")
+
         def seed_chat_history(self, messages):
             captured["history"] = list(messages)
 
@@ -1904,6 +1908,7 @@ def test_chat_room_participant_runner_reuses_session_workspace_and_agent_llm_bin
             captured["runtime_context_seeded_by_host"] = True
 
         def run_single_turn(self, initial_prompt=None, disable_tools=False):
+            captured["active_runtime"] = agent_directory_service.current_agent_runtime()
             return {
                 "status": "completed",
                 "raw_output": "beta 发言",
@@ -1931,6 +1936,8 @@ def test_chat_room_participant_runner_reuses_session_workspace_and_agent_llm_bin
     assert f"AgentId: {agent_id}" in captured["static_runtime_context"]
     assert captured["runtime_context_seeded_by_host"] is True
     assert captured["history"]
+    assert captured["turn_identity"].startswith("chat-room:")
+    assert captured["active_runtime"]["turnId"] == captured["turn_identity"]
     assert turn_results[-1]["agentId"] == agent_id
     assert turn_results[-1]["status"] == "completed"
     assert detail["rounds"][-1]["messages"][0]["status"] == "completed"
@@ -1940,6 +1947,35 @@ def test_chat_room_participant_runner_reuses_session_workspace_and_agent_llm_bin
     assert latest_message["timings"]["agentCreateMs"] >= 0
     assert latest_message["timings"]["agentSeedMs"] >= 0
     assert latest_message["timings"]["llmElapsedMs"] >= 0
+
+
+def test_chat_room_real_agent_reaches_llm_with_bound_turn_identity(tmp_path, monkeypatch):
+    _isolate_chat_room_kernel(tmp_path, monkeypatch)
+    monkeypatch.setattr(session_service, "build_agent_context", _lightweight_agent_context)
+    monkeypatch.setattr(chat_room_service, "build_agent_context", _lightweight_agent_context)
+    llm_bindings = _install_chat_room_test_llm_config(monkeypatch)
+    alpha = session_service.create_chat_session(title="Alpha Agent", llm_bindings=llm_bindings)
+    beta = session_service.create_chat_session(title="Beta Agent", llm_bindings=llm_bindings)
+    room = chat_room_service.create_chat_room(
+        title="真实 Agent 身份群聊",
+        participant_agent_ids=[alpha["agentId"], beta["agentId"]],
+        config={"maxSpeakers": 1},
+    )
+    invocations = []
+
+    def fake_invoke_llm(self, messages, *, replay_state=None):
+        invocations.append(agent_directory_service.current_agent_runtime())
+        return None
+
+    monkeypatch.setattr(SelfEvolvingAgent, "_invoke_llm", fake_invoke_llm)
+
+    detail = chat_room_service.start_chat_room_round(room["roomId"], "检查群聊 turn identity")
+
+    assert invocations
+    assert invocations[0]["sessionId"]
+    assert invocations[0]["turnId"].startswith("chat-room:")
+    latest_message = detail["rounds"][-1]["messages"][0]
+    assert "ledger identity" not in str(latest_message.get("content") or "").lower()
 
 
 def test_chat_room_participant_runner_rejects_archived_agent_before_runtime(tmp_path, monkeypatch):

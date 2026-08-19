@@ -20,6 +20,7 @@ import {
   draftMeetingSummary,
   fetchMeetingRound,
   fetchMeetingRoundSourceMessages,
+  openHypothesisCandidateGeneration,
 } from "../../../api/hypothesisFirst";
 import { HypothesisFirstMeetingOps } from "./HypothesisFirstMeetingOps";
 import type { HypothesisFirstNextAction } from "./hypothesisFirstNextAction";
@@ -29,6 +30,7 @@ import type { HypothesisFirstNextAction } from "./hypothesisFirstNextAction";
 const mockedDraftMeetingSummary = vi.mocked(draftMeetingSummary);
 const mockedFetchMeetingRound = vi.mocked(fetchMeetingRound);
 const mockedFetchMessages = vi.mocked(fetchMeetingRoundSourceMessages);
+const mockedOpenGeneration = vi.mocked(openHypothesisCandidateGeneration);
 
 function meetingRound(status: string) {
   return {
@@ -93,8 +95,8 @@ describe("HypothesisFirstMeetingOps automatic organization", () => {
       schemaVersion: 1,
       teamId: "team-1",
       meetingRoundId: "meeting-1",
-      messageCount: 0,
-      messages: [],
+      messageCount: 1,
+      messages: [{ messageId: "m-ok", status: "completed", content: "CANDIDATE: c1 | claim" }],
     });
     mockedDraftMeetingSummary.mockResolvedValue({
       schemaVersion: 1,
@@ -165,6 +167,40 @@ describe("HypothesisFirstMeetingOps automatic organization", () => {
       await Promise.resolve();
     });
     expect(mockedDraftMeetingSummary).toHaveBeenCalledTimes(1);
+  });
+
+  it("restarts a candidate discussion when every speaker failed", async () => {
+    mockedFetchMeetingRound.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      meetingRound: meetingRound("summarizing"),
+    });
+    mockedFetchMessages.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      meetingRoundId: "meeting-1",
+      messageCount: 1,
+      messages: [{ messageId: "m-1", status: "failed", content: "protocol_error" }],
+    });
+
+    render({
+      ...AUTO_ACTION,
+      stage: "generation_summarizing",
+      command: undefined,
+      commandLabel: undefined,
+    });
+    await act(async () => {
+      await vi.waitFor(() => expect(container.textContent).toContain("重新发起候选讨论"));
+    });
+    expect(mockedDraftMeetingSummary).not.toHaveBeenCalled();
+
+    const restart = [...container.querySelectorAll("button")]
+      .find((button) => button.textContent?.includes("重新发起候选讨论"));
+    await act(async () => {
+      restart?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await vi.waitFor(() => expect(mockedOpenGeneration).toHaveBeenCalledTimes(1));
+    });
+    expect(mockedOpenGeneration).toHaveBeenCalledWith("team-1", "Q-01");
   });
 
   it("does not auto-loop when the request fails and exposes one manual retry", async () => {

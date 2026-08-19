@@ -98,9 +98,24 @@ export function HypothesisFirstMeetingOps(props: {
   });
   const autoDraftedMeetingIds = useRef(new Set<string>());
   const roundStatus = roundQuery.data?.meetingRound?.status ?? "";
+  const sourceMessages = messagesQuery.data?.messages ?? [];
+  const completedSourceMessageCount = sourceMessages.filter((message) => {
+    const content = String(message.content ?? "").trim().toLowerCase();
+    return String(message.status ?? "").trim().toLowerCase() === "completed"
+      && content !== "pass"
+      && content !== "pass."
+      && content !== "pass。";
+  }).length;
+  const failedCandidateDiscussion = messagesQuery.isSuccess
+    && sourceMessages.length > 0
+    && completedSourceMessageCount === 0
+    && roundQuery.data?.meetingRound?.meetingType === "hypothesis_candidate_generation"
+    && (roundStatus === "open" || roundStatus === "summarizing");
   const shouldAutoDraft = props.nextAction.command === "draft_summary"
     && props.nextAction.meetingRoundId === props.meetingRoundId
-    && roundStatus === "open";
+    && roundStatus === "open"
+    && messagesQuery.isSuccess
+    && completedSourceMessageCount > 0;
   useEffect(() => {
     if (!shouldAutoDraft || autoDraftedMeetingIds.current.has(props.meetingRoundId)) return;
     autoDraftedMeetingIds.current.add(props.meetingRoundId);
@@ -154,13 +169,17 @@ export function HypothesisFirstMeetingOps(props: {
   const autoDraftFailed = commandEnabled
     && props.nextAction.command === "draft_summary"
     && draftMutation.isError;
-  const command = autoDraftFailed
-    ? "retry_draft_summary"
+  const command = failedCandidateDiscussion
+    ? "open_generation"
+    : autoDraftFailed
+      ? "retry_draft_summary"
     : (commandEnabled ? (props.nextAction.recovery?.command || props.nextAction.command) : undefined);
-  const commandLabel = autoDraftFailed
-    ? (roundQuery.data.meetingRound.meetingType === "hypothesis_candidate_generation"
-      ? "重试整理候选清单"
-      : "重试整理本轮结论")
+  const commandLabel = failedCandidateDiscussion
+    ? "重新发起候选讨论"
+    : autoDraftFailed
+      ? (roundQuery.data.meetingRound.meetingType === "hypothesis_candidate_generation"
+        ? "重试整理候选清单"
+        : "重试整理本轮结论")
     : (commandEnabled ? (props.nextAction.recovery?.label || props.nextAction.commandLabel) : undefined);
   const commandDisabledReason = props.nextAction.disabledReason
     || (command === "retry_handoff" && !canHandoff
@@ -212,7 +231,7 @@ export function HypothesisFirstMeetingOps(props: {
     <div className={styles.task}>
       <MeetingRoundDisplay
         round={displayRound}
-        messages={messagesQuery.data?.messages ?? []}
+        messages={sourceMessages}
         compact={props.compact}
       />
       {error ? (

@@ -113,6 +113,14 @@ def _content_runner(participant, prompt, context):
     }
 
 
+def _failed_runner(participant, prompt, context):
+    return {
+        "status": "failed",
+        "errorType": "protocol_error",
+        "summary": "speaker failed before producing discussion evidence",
+    }
+
+
 def _open_meeting(tmp_path, monkeypatch, *, runner=None, background=False, **overrides):
     team_id, agents = _team_with_room(tmp_path, monkeypatch)
     opened = meeting_runtime.open_hypothesis_review_meeting(
@@ -531,6 +539,29 @@ def test_discussion_driver_enforces_max_messages_cap(tmp_path, monkeypatch):
         meeting_runtime.run_meeting_discussion(
             team_id, meeting_round_id, agent_runner=_content_runner, max_messages=0
         )
+
+
+def test_failed_discussion_does_not_advance_to_summary(tmp_path, monkeypatch):
+    team_id, _agents, opened = _open_meeting(
+        tmp_path,
+        monkeypatch,
+        runner=_failed_runner,
+    )
+    meeting_round_id = opened["meetingRound"]["meetingRoundId"]
+
+    result = meeting_runtime.run_meeting_discussion(
+        team_id,
+        meeting_round_id,
+        agent_runner=_failed_runner,
+    )
+
+    assert result["completedMessageCount"] == 0
+    assert result["stopReason"] == "no_progress"
+    assert result["summaryDraft"]["status"] == "blocked"
+    assert result["summaryDraft"]["blocker"]["code"] == "discussion_has_no_completed_messages"
+    persisted = meetings.get_meeting_round(team_id, meeting_round_id)["meetingRound"]
+    assert persisted["status"] == "open"
+    assert "summaryDraftError" not in persisted
 
 
 def test_run_meeting_discussion_requires_open_bound_meeting(tmp_path, monkeypatch):
