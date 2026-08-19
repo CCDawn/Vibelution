@@ -1806,8 +1806,19 @@ def chain_state(team_id: str, question_id: str) -> dict[str, Any]:
         selection_id = str(links[-1].get("selectionId") or "")
     if not selection_id:
         try:
+            scope = _question_scope_envelope(
+                normalized_team_id,
+                normalized_question_id,
+            )
+            scope["scopeHash"] = scope_hash_for(
+                **{field: scope[field] for field in _SCOPE_FIELDS},
+                agent_id=scope["agentId"],
+                mode=scope["mode"],
+            )
             latest_selection = selections.get_latest_hypothesis_selection(
-                normalized_team_id, normalized_question_id
+                normalized_team_id,
+                normalized_question_id,
+                scope=scope,
             )
         except selections.ResearchHypothesisSelectionError:
             latest_selection = {}

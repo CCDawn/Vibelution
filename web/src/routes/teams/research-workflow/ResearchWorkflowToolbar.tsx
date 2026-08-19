@@ -10,15 +10,45 @@ import {
   type ExperimentSwitchOption,
 } from "./researchExperimentSwitchModel";
 import type { ResearchProcessPanel } from "./researchProcessPanelSelection";
+import { getNodeAdapter } from "./nodeAdapterModel";
 import styles from "./ResearchWorkflowToolbar.styles";
 
 type WorkflowPhase = {
   step: number | null;
   zh: string;
   en: string;
+  currentNodeZh?: string;
+  currentNodeEn?: string;
+  stageZh?: string;
+  stageEn?: string;
 };
 
-export function researchWorkflowPhase(navigationLabel?: string): WorkflowPhase {
+export function researchWorkflowPhase(
+  navigationLabel?: string,
+  runtimeCurrentNodeIds?: readonly string[] | null,
+  formalRuntimeActive = true,
+): WorkflowPhase {
+  const runtimeNode = formalRuntimeActive
+    ? (runtimeCurrentNodeIds ?? [])
+      .map((nodeId) => getNodeAdapter(String(nodeId || "").trim()))
+      .find(Boolean)
+    : null;
+  if (runtimeNode) {
+    const stage = {
+      knowledge_collection: { zh: "资料搜集", en: "Knowledge collection" },
+      experiment_design: { zh: "实验设计", en: "Experiment design" },
+      execution_iteration: { zh: "执行迭代", en: "Execution & iteration" },
+    }[runtimeNode.stageId];
+    return {
+      step: null,
+      zh: stage.zh,
+      en: stage.en,
+      stageZh: stage.zh,
+      stageEn: stage.en,
+      currentNodeZh: runtimeNode.label,
+      currentNodeEn: runtimeNode.labelEn,
+    };
+  }
   const label = String(navigationLabel || "").trim();
   if (label.includes("假说收敛")) return { step: 5, zh: "假说收敛", en: "Convergence" };
   if (label.includes("资料搜集")) return { step: 4, zh: "资料搜集", en: "Evidence collection" };
@@ -39,6 +69,8 @@ export function ResearchWorkflowToolbar(props: {
   createDisabled: boolean;
   createDisabledReason?: string;
   navigationLabel?: string;
+  runtimeCurrentNodeIds?: readonly string[] | null;
+  formalRuntimeActive?: boolean;
   atCurrentTask?: boolean;
   onNavigateCurrent?: () => void;
   onSelectExperiment: (questionId: string) => void;
@@ -50,7 +82,11 @@ export function ResearchWorkflowToolbar(props: {
   const emptySwitcherLabel = props.identity
     ? formatExperimentSwitchLabel(props.identity.questionId, props.identity.hypothesisSummary)
     : (isZh ? "尚未选择实验" : "No experiment selected");
-  const phase = researchWorkflowPhase(props.navigationLabel);
+  const phase = researchWorkflowPhase(
+    props.navigationLabel,
+    props.runtimeCurrentNodeIds,
+    props.formalRuntimeActive,
+  );
   const detailsPanel = props.panel === "question" ? "progress" : (
     props.panel === "agents"
     || props.panel === "timeline"
@@ -102,9 +138,11 @@ export function ResearchWorkflowToolbar(props: {
       </div>
       {props.runId ? (
         <div className={styles.phase} data-vui="research-workflow-phase">
-          {phase.step
-            ? (isZh ? `第 ${phase.step}/5 步 · ${phase.zh}` : `Step ${phase.step}/5 · ${phase.en}`)
-            : (isZh ? phase.zh : phase.en)}
+          {phase.stageZh && phase.currentNodeZh
+            ? (isZh ? `${phase.stageZh} · ${phase.currentNodeZh}` : `${phase.stageEn} · ${phase.currentNodeEn}`)
+            : phase.step
+              ? (isZh ? `假说准备 · ${phase.step}/5` : `Hypothesis prep · ${phase.step}/5`)
+              : (isZh ? phase.zh : phase.en)}
         </div>
       ) : <span />}
       <div className={styles.actions}>
@@ -142,7 +180,7 @@ export function ResearchWorkflowToolbar(props: {
             isDisabled={props.createDisabled}
             disabledReason={props.createDisabledReason}
           >
-            {isZh ? "创建运行" : "Create run"}
+            {isZh ? "选择题目开始研究" : "Choose a question to start research"}
           </VButton>
         ) : null}
       </div>

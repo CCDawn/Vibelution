@@ -140,6 +140,45 @@ def _resolve_scope(payload: Mapping[str, Any]) -> dict[str, str]:
     return {**identity, "agentId": agent_id, "mode": mode, "scopeHash": scope_hash}
 
 
+def _resolve_read_scope(payload: Mapping[str, Any] | None) -> dict[str, str]:
+    """Validate the complete scope supplied to a scoped latest read.
+
+    ``_resolve_scope`` intentionally derives ``scopeHash`` for write requests.
+    A read must carry the hash as an explicit, independently verifiable
+    selector; deriving it from a partial request would let a caller silently
+    broaden a question read across branches, agents, or modes.
+    """
+    if not isinstance(payload, Mapping):
+        raise ContractValidationError(
+            "get_latest_hypothesis_selection requires a complete scope including scopeHash"
+        )
+    required_fields = (*_SCOPE_FIELDS, "agentId", "mode", "scopeHash")
+    missing = [field for field in required_fields if not str(payload.get(field) or "").strip()]
+    if missing:
+        raise ContractValidationError(
+            "get_latest_hypothesis_selection requires a complete scope including "
+            + ", ".join(missing)
+        )
+    identity = {
+        field: str(payload.get(field) or "").strip() for field in _SCOPE_FIELDS
+    }
+    agent_id = str(payload.get("agentId") or "").strip()
+    mode = str(payload.get("mode") or "").strip().lower()
+    if mode not in {"formal", "dev", "platform"}:
+        raise ContractValidationError(f"unsupported scope mode: {mode}")
+    supplied_hash = str(payload.get("scopeHash") or "").strip().lower()
+    expected_hash = scope_hash_for(
+        **identity,
+        agent_id=agent_id,
+        mode=mode,
+    )
+    if supplied_hash != expected_hash:
+        raise ContractValidationError(
+            "scopeHash does not match the selection scope identity"
+        )
+    return {**identity, "agentId": agent_id, "mode": mode, "scopeHash": supplied_hash}
+
+
 def _latest_by_id(records: list[dict[str, Any]], field: str, record_id: str) -> dict[str, Any] | None:
     matched = [record for record in records if str(record.get(field) or "") == record_id]
     return matched[-1] if matched else None
@@ -461,11 +500,18 @@ def get_hypothesis_selection(team_id: str, selection_id: str) -> dict[str, Any]:
     }
 
 
-def get_latest_hypothesis_selection(team_id: str, question_id: str) -> dict[str, Any]:
+def get_latest_hypothesis_selection(
+    team_id: str,
+    question_id: str,
+    *,
+    scope: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     """Return the current base hypothesis set of one question.
 
-    The current set is the latest appended selection record for the question
-    in the team's selection ledger.
+    The current set is the latest appended selection record for the exact
+    question and complete scope in the team's selection ledger.  Scope is
+    mandatory on reads so a same-question record from another branch, agent,
+    or mode can never be selected by fallback.
     """
     from core.web.services.team_service import assert_team_exists
 
@@ -473,12 +519,19 @@ def get_latest_hypothesis_selection(team_id: str, question_id: str) -> dict[str,
     normalized_question_id = str(question_id or "").strip()
     if not normalized_question_id:
         raise ResearchHypothesisSelectionError("Question id is required.")
+    resolved_scope = _resolve_read_scope(scope)
     with _LOCK:
         records = _read_jsonl(_storage_path(normalized_team_id))
     matched = [
         record
         for record in records
         if str(record.get("questionId") or "").upper() == normalized_question_id.upper()
+        and str(record.get("scopeHash") or "").strip().lower()
+        == resolved_scope["scopeHash"]
+        and all(
+            str(record.get(field) or "").strip() == resolved_scope[field]
+            for field in (*_SCOPE_FIELDS, "agentId", "mode")
+        )
     ]
     if not matched:
         raise ResearchHypothesisSelectionNotFoundError(
