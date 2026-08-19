@@ -218,7 +218,7 @@ describe("researchExperimentSwitchModel", () => {
     });
 
     expect(options.map((item) => item.questionId)).toEqual(["SCI-003", "SCI-001", "SCI-096", "SCI-002"]);
-    expect(options[0].label).toBe("SCI-003 · 假说 hyp-a");
+    expect(options[0].label).toBe("SCI-003 · 已选 1 个假说");
   });
 
   it("keeps the current run visible even if launch-options omitted it", () => {
@@ -239,14 +239,14 @@ describe("researchExperimentSwitchModel", () => {
       runId: "run-current",
       currentNodeId: "source_finding",
     });
-    expect(options[0].label).toBe("SCI-091 · 假说 hyp-a");
+    expect(options[0].label).toBe("SCI-091 · 已选 1 个假说");
     expect(options[0].label).not.toContain("资料寻找");
   });
 
   it("surfaces question identity and hypothesis count for chrome, not a run id", () => {
     expect(formatHypothesisSummary(null, "")).toBe("");
     expect(formatHypothesisSummary([], "SCI-096")).toBe("尚未选择假说");
-    expect(formatHypothesisSummary(["hyp-a", "hyp-b"], "SCI-096")).toBe("假说 hyp-a、hyp-b");
+    expect(formatHypothesisSummary(["hyp-a", "hyp-b"], "SCI-096")).toBe("已选 2 个假说");
     expect(formatHypothesisSummary(["a", "b", "c"], "SCI-096")).toBe("已选 3 个假说");
 
     const chrome = buildExperimentChromeIdentity({
@@ -256,8 +256,35 @@ describe("researchExperimentSwitchModel", () => {
     });
     expect(chrome).toMatchObject({
       questionId: "SCI-096",
-      hypothesisSummary: "假说 hyp-a",
+      hypothesisSummary: "已选 1 个假说",
     });
     expect(chrome?.title).not.toContain("run-");
+  });
+
+  it("never renders raw candidate ids, even for long or duplicate ids", () => {
+    const longId = `candidate-${"a".repeat(200)}`;
+    expect(formatHypothesisSummary([longId], "SCI-096")).toBe("已选 1 个假说");
+    expect(formatHypothesisSummary(["hyp-a", longId], "SCI-096")).toBe("已选 2 个假说");
+    expect(formatHypothesisSummary(["hyp-a", "hyp-a"], "SCI-096")).toBe("已选 2 个假说");
+
+    const chrome = buildExperimentChromeIdentity({
+      questionId: "sci-096",
+      title: "What are the coding principles embedded in neuronal spike trains?",
+      selectedCandidateIds: [longId],
+    });
+    expect(chrome?.hypothesisSummary).toBe("已选 1 个假说");
+    expect(chrome?.hypothesisSummary).not.toContain("candidate-");
+
+    const options = buildExperimentSwitchOptions({
+      questions: [question()],
+      current: {
+        questionId: "SCI-096",
+        title: "What are the coding principles embedded in neuronal spike trains?",
+        runId: "",
+        selectedCandidateIds: [longId],
+      },
+    });
+    expect(options[0].label).toBe("SCI-096 · 已选 1 个假说");
+    expect(options[0].label).not.toContain("candidate-");
   });
 });

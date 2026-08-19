@@ -56,11 +56,7 @@ export function formatHypothesisSummary(
 ): string {
   if (!normalizeQuestionId(questionId)) return "";
   const ids = (selectedCandidateIds ?? []).map((item) => item.trim()).filter(Boolean);
-  const base = !ids.length
-    ? "尚未选择假说"
-    : ids.length <= 2
-      ? `假说 ${ids.join("、")}`
-      : `已选 ${ids.length} 个假说`;
+  const base = !ids.length ? "尚未选择假说" : `已选 ${ids.length} 个假说`;
   if (!chain || !ids.length) return base;
   if (chain.hypothesisConverged) return `${base} · 已收敛`;
   const round = Number(chain.meetingCount ?? 0);

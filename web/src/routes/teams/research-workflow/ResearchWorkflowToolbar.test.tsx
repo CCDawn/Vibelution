@@ -62,11 +62,11 @@ describe("ResearchWorkflowToolbar", () => {
       ...BASE_PROPS,
       runId: "run-5e4fbe6e18f2",
       runStatus: "waiting_human",
-      experimentOptions: [{ ...EXPERIMENT, label: "SCI-096 · 假说 hyp-a" }],
+      experimentOptions: [{ ...EXPERIMENT, label: "SCI-096 · 已选 1 个假说" }],
       identity: {
         questionId: "SCI-096",
         title: "What are the coding principles embedded in neuronal spike trains?",
-        hypothesisSummary: "假说 hyp-a",
+        hypothesisSummary: "已选 1 个假说",
       },
       navigationLabel: "前往确认候选",
       onSelectExperiment: vi.fn(),
@@ -75,7 +75,7 @@ describe("ResearchWorkflowToolbar", () => {
     expect(running).toContain("第 1/5 步 · 候选形成");
     expect(running).toContain("切换实验");
     expect(running).not.toContain("切换假说");
-    expect(running).toContain("SCI-096 · 假说 hyp-a");
+    expect(running).toContain("SCI-096 · 已选 1 个假说");
     expect(running).not.toContain('data-vui="status-chip"');
     expect(running).not.toContain("waiting_human");
     expect(running).not.toContain("第 1 次运行");
@@ -158,5 +158,42 @@ describe("ResearchWorkflowToolbar", () => {
     expect(researchWorkflowPhase("前往下一轮讨论")).toMatchObject({ step: 3, zh: "团队评审" });
     expect(researchWorkflowPhase("查看资料搜集")).toMatchObject({ step: 4, zh: "资料搜集" });
     expect(researchWorkflowPhase("前往假说收敛")).toMatchObject({ step: 5, zh: "假说收敛" });
+  });
+
+  it("keeps the toolbar compact with a capped switcher and retains details plus primary action", () => {
+    const markup = renderToolbar({
+      ...BASE_PROPS,
+      runId: "run-5e4fbe6e18f2",
+      runStatus: "running",
+      experimentOptions: [EXPERIMENT],
+      panel: "node",
+      navigationLabel: "前往确认候选",
+      onSelectExperiment: vi.fn(),
+      onOpenPanel: vi.fn(),
+      onNavigateCurrent: vi.fn(),
+    } as React.ComponentProps<typeof ResearchWorkflowToolbar>);
+
+    expect(markup).toContain("max-w-[24rem]");
+    expect(markup).toContain("md:ms-auto");
+    expect(markup).toContain("查看详情");
+    expect(markup).toContain("前往确认候选");
+    expect(markup).toContain("data-vui=\"research-workflow-phase\"");
+    expect(markup).not.toContain("grid-cols-[minmax(10rem,1fr)");
+    expect(markup).not.toContain("grid-cols-[minmax(12rem,1fr)");
+  });
+
+  it("keeps the details and create-run action on narrow layouts when no run exists", () => {
+    const empty = renderToolbar({
+      ...BASE_PROPS,
+      runId: "",
+      onSelectExperiment: vi.fn(),
+      onOpenPanel: vi.fn(),
+    } as React.ComponentProps<typeof ResearchWorkflowToolbar>);
+
+    expect(empty).toContain("创建运行");
+    expect(empty).toContain("查看详情");
+    expect(empty).toContain("尚未选择假说");
+    expect(empty).toContain("flex-wrap");
+    expect(empty).toContain("max-w-[24rem]");
   });
 });
