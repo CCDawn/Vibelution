@@ -369,8 +369,9 @@ export function instanceErrorMessage(item: LauncherBranchInstance): string {
 
 export function formatAttentionReason(item: LauncherBranchInstance, isZh: boolean): string {
   const error = instanceErrorMessage(item);
+  const registryReason = formatRegistryLeaseReason(item, isZh);
   if (error) {
-    return error;
+    return registryReason ? `${error} · ${registryReason}` : error;
   }
   const bits: string[] = [];
   const backend = item.runtime.backend;
@@ -386,6 +387,9 @@ export function formatAttentionReason(item: LauncherBranchInstance, isZh: boolea
   }
   if (!instanceWindowOpen(item)) {
     bits.push(isZh ? "窗口未打开" : "Window closed");
+  }
+  if (registryReason) {
+    bits.push(registryReason);
   }
   return bits.join(" · ") || (isZh ? "运行状态异常" : "Runtime needs attention");
 }
@@ -524,13 +528,44 @@ export function canStartInstance(item: LauncherBranchInstance, pending?: Lifecyc
     || (canRequestOpenInstance(item, pending) && !instanceWindowOpen(item));
 }
 
+export function registryClassificationOf(item: LauncherBranchInstance): string {
+  return String(item.runtime.registryClassification || "").trim().toLowerCase();
+}
+
+export function isUnknownRegistryInstance(item: LauncherBranchInstance): boolean {
+  return registryClassificationOf(item) === "unknown";
+}
+
+export function formatRegistryLeaseReason(item: LauncherBranchInstance, isZh: boolean): string {
+  const bits: string[] = [];
+  if (isUnknownRegistryInstance(item)) {
+    bits.push(isZh ? "身份未知，仅可诊断" : "Unknown identity, diagnosis only");
+  }
+  const lease = String(item.runtime.portLeaseStatus || item.portLeaseStatus || "").trim();
+  if (lease) {
+    bits.push(isZh ? `端口租约 ${lease}` : `port lease ${lease}`);
+  }
+  const firstObservedAt = String(item.runtime.firstObservedAt || "").trim();
+  if (firstObservedAt) {
+    bits.push(isZh ? `首次观察 ${firstObservedAt}` : `first observed ${firstObservedAt}`);
+  }
+  const nextReconcileAt = String(item.runtime.nextReconcileAt || "").trim();
+  if (nextReconcileAt) {
+    bits.push(isZh ? `下次核对 ${nextReconcileAt}` : `next check ${nextReconcileAt}`);
+  }
+  return bits.join(" · ");
+}
+
 export function canStopInstance(item: LauncherBranchInstance, pending?: LifecyclePendingInput): boolean {
   const state = instanceRuntimeState(item, pending);
   if (state === "stopping") {
     return false;
   }
-  const failedLeftover = (state === "failed" || state === "partial") && !instanceHasLiveRuntime(item);
   const startingOrRestarting = state === "starting" || state === "restarting";
+  if (isUnknownRegistryInstance(item) && !instanceHasLiveRuntime(item) && !startingOrRestarting) {
+    return false;
+  }
+  const failedLeftover = (state === "failed" || state === "partial") && !instanceHasLiveRuntime(item);
   return (isOperableInstance(item) || failedLeftover)
     && item.startBlockReason !== "launcher_refresh_required"
     && (instanceHasLiveRuntime(item) || state === "failed" || state === "partial" || startingOrRestarting);

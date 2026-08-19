@@ -336,6 +336,34 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(canStartInstance(retiredFailed)).toBe(false);
   });
 
+  it("keeps unknown leftover diagnostic-only and still lets stop cancel an in-flight start", () => {
+    const unknownLeftover = instance({
+      id: "worktree:legacy",
+      startable: false,
+      runtime: {
+        ...instance().runtime,
+        lifecycleState: "error",
+        registryClassification: "unknown",
+        portLeaseStatus: "reclaimable",
+        firstObservedAt: "2026-08-19T06:00:00Z",
+        nextReconcileAt: "2026-08-19T06:00:10Z",
+        error: { code: "missing_identity", message: "缺少进程身份字段" },
+      },
+    });
+    const unknownStarting = instance({
+      id: "worktree:legacy-start",
+      runtime: {
+        ...instance().runtime,
+        registryClassification: "unknown",
+      },
+    });
+
+    expect(canStopInstance(unknownLeftover)).toBe(false);
+    expect(formatAttentionReason(unknownLeftover, true)).toContain("身份未知，仅可诊断");
+    expect(formatAttentionReason(unknownLeftover, true)).toContain("端口租约 reclaimable");
+    expect(canStopInstance(unknownStarting, { instanceId: unknownStarting.id, operation: "start" })).toBe(true);
+  });
+
   it("does not present a reserved port as a running backend", () => {
     const stopped = instance({
       port: 8005,

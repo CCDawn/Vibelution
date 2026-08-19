@@ -28,6 +28,9 @@ export type LauncherRegistryReconciliationItem = {
   windowOpen: boolean;
   listener: string[];
   ports: number[];
+  portLeaseStatus?: string;
+  firstObservedAt?: string;
+  nextReconcileAt?: string;
 };
 
 export type LauncherWorktreeDryRunItem = {
@@ -182,6 +185,9 @@ function registryItems(value: unknown): LauncherRegistryReconciliationItem[] {
     if (!instanceId || !REGISTRY_CLASSIFICATIONS.has(classification)) {
       return [];
     }
+    const portLeaseStatus = text(item.portLeaseStatus).trim();
+    const firstObservedAt = text(item.firstObservedAt).trim();
+    const nextReconcileAt = nextReconcileAtFrom(item.nextReconcileAt);
     return [{
       instanceId,
       classification,
@@ -189,6 +195,9 @@ function registryItems(value: unknown): LauncherRegistryReconciliationItem[] {
       windowOpen: boolean(item.windowOpen),
       listener: stringArray(item.listener),
       ports: numberArray(item.ports),
+      ...(portLeaseStatus ? { portLeaseStatus } : {}),
+      ...(firstObservedAt ? { firstObservedAt } : {}),
+      ...(nextReconcileAt ? { nextReconcileAt } : {}),
     }];
   });
 }

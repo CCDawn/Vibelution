@@ -629,12 +629,18 @@ describe("LauncherRoute layout contract", () => {
 
   it("shows registry reconciliation evidence without adding a force-kill control", () => {
     expect(routeSource).toContain("Registry 判定");
+    expect(routeSource).toContain("身份未知 / 租约");
+    expect(routeSource).toContain("下次核对");
+    expect(routeSource).toContain("portLeaseStatus");
+    expect(routeSource).toContain("formatUnknownLeaseDiagnostics");
     expect(routeSource).toContain("端口冲突");
     expect(routeSource).toContain("最近自动清理");
     expect(routeSource).toContain("Worktree dry-run");
     expect(routeSource).toContain("Orphan 判据");
     expect(routeSource).toContain("worktree 仅 dry-run");
     expect(routeSource).not.toContain("taskkill");
+    expect(routeSource).not.toContain("复制诊断");
+    expect(routeSource).not.toContain("force-kill");
   });
 
   it("lets Launcher own startup settings without restarting immediately", () => {

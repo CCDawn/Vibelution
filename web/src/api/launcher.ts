@@ -97,6 +97,9 @@ export type LauncherRegistryReconciliationItem = {
   windowOpen: boolean;
   listener: string[];
   ports: number[];
+  portLeaseStatus?: string;
+  firstObservedAt?: string;
+  nextReconcileAt?: string;
 };
 
 export type LauncherWorktreeDryRunItem = {
@@ -116,6 +119,7 @@ export type LauncherStateSnapshotV1 = {
   observedAt: string;
   freshness: LauncherStateFreshness;
   staleReason?: string;
+  nextReconcileAt?: string;
   main: {
     id: string;
     observedState: string;
@@ -267,6 +271,10 @@ export type LauncherBranchInstanceRuntime = {
     code: string;
     message: string;
   };
+  registryClassification?: "healthy" | "stale" | "orphan" | "conflict" | "unknown";
+  portLeaseStatus?: string;
+  firstObservedAt?: string;
+  nextReconcileAt?: string;
 };
 
 export type LauncherBranchInstance = {
@@ -303,6 +311,7 @@ export type LauncherBranchInstance = {
   runtime: LauncherBranchInstanceRuntime;
   startable: boolean;
   startBlockReason?: string;
+  portLeaseStatus?: string;
 };
 
 export type LauncherBranchInstanceCleanupResult = {

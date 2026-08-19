@@ -118,6 +118,46 @@ describe("LauncherStateStore", () => {
     });
   });
 
+  it("projects unknown quarantine lease fields onto registry classifications", async () => {
+    const store = new LauncherStateStore(async () => ({
+      ...initial,
+      cleanup: {
+        observedAt: "2026-08-19T07:00:00Z",
+        nextReconcileAt: "2026-08-19T07:00:10Z",
+        instances: [
+          {
+            instanceId: "worktree:legacy",
+            classification: "unknown",
+            reasons: ["missing_identity_fields"],
+            windowOpen: false,
+            listener: ["none"],
+            ports: [8765],
+            portLeaseStatus: "reclaimable",
+            firstObservedAt: "2026-08-19T06:59:50Z",
+            nextReconcileAt: "2026-08-19T07:00:10Z",
+          },
+        ],
+      },
+    }), initial);
+
+    await store.refresh("startup");
+
+    expect(store.snapshot().nextReconcileAt).toBe("2026-08-19T07:00:10.000Z");
+    expect(store.snapshot().cleanup.classifications).toEqual([
+      {
+        instanceId: "worktree:legacy",
+        classification: "unknown",
+        reasons: ["missing_identity_fields"],
+        windowOpen: false,
+        listener: ["none"],
+        ports: [8765],
+        portLeaseStatus: "reclaimable",
+        firstObservedAt: "2026-08-19T06:59:50Z",
+        nextReconcileAt: "2026-08-19T07:00:10.000Z",
+      },
+    ]);
+  });
+
   it("projects nextReconcileAt from a successful cleanup source", async () => {
     const store = new LauncherStateStore(async () => ({
       ...initial,

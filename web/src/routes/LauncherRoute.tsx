@@ -9,6 +9,7 @@ import {
   hasLauncherStateBridge,
   onLauncherStateChanged,
   requestBranchInstanceLifecycle,
+  type LauncherRegistryReconciliationItem,
   getLauncherStatus,
   getLauncherDeveloperNoiseOverview,
   getLauncherMaintenanceSummary,
@@ -410,6 +411,30 @@ function compactDate(value: string, locale: string) {
     minute: "2-digit",
     second: "2-digit",
   }).format(date);
+}
+
+function formatUnknownLeaseDiagnostics(
+  items: LauncherRegistryReconciliationItem[],
+  uiLang: string,
+  locale: string,
+): string {
+  const rows = items
+    .filter((item) => {
+      const lease = String(item.portLeaseStatus || "").trim().toLowerCase();
+      return item.classification === "unknown" || lease === "quarantined" || lease === "reclaimable";
+    })
+    .map((item) => [
+      item.instanceId,
+      item.classification,
+      item.portLeaseStatus,
+      item.reasons.slice(0, 4).join("/"),
+      item.firstObservedAt ? compactDate(item.firstObservedAt, locale) : "",
+      item.nextReconcileAt ? compactDate(item.nextReconcileAt, locale) : "",
+    ].filter(Boolean).join(" · "));
+  if (rows.length === 0) {
+    return uiLang === "zh" ? "无" : "None";
+  }
+  return rows.slice(0, 6).join("; ");
 }
 
 function stateTone(state: string, ok = true) {
@@ -2262,6 +2287,10 @@ export function LauncherRoute() {
       ? "路径脱离 Git、PID 身份失活、无窗口、无 owned listener、deadline 已过，且两次同结论间隔至少 10 秒"
       : "Outside Git, inactive PID identities, no window, no owned listener, expired deadline, and two identical observations at least 10 seconds apart")
     : "-";
+  const unknownLeaseSummary = formatUnknownLeaseDiagnostics(registryClassifications, uiLang, locale);
+  const nextReconcileSummary = stateQuery.data?.nextReconcileAt
+    ? compactDate(stateQuery.data.nextReconcileAt, locale)
+    : "-";
   const controlPlaneSpecs = [
     {
       label: uiLang === "zh" ? "快照时间" : "Snapshot time",
@@ -2280,6 +2309,8 @@ export function LauncherRoute() {
         : (uiLang === "zh" ? "空闲" : "Idle"),
     },
     { label: uiLang === "zh" ? "Registry 判定" : "Registry classes", value: registryClassificationSummary },
+    { label: uiLang === "zh" ? "身份未知 / 租约" : "Unknown / lease", value: unknownLeaseSummary },
+    { label: uiLang === "zh" ? "下次核对" : "Next reconcile", value: nextReconcileSummary },
     { label: uiLang === "zh" ? "端口冲突" : "Port conflicts", value: portConflictSummary },
     { label: uiLang === "zh" ? "最近自动清理" : "Recent automatic cleanup", value: automaticCleanupSummary },
     { label: uiLang === "zh" ? "Worktree dry-run" : "Worktree dry-run", value: worktreeDryRunSummary },
@@ -2540,6 +2571,8 @@ export function LauncherRoute() {
           title={[
             uiLang === "zh" ? "Registry 与残留治理" : "Registry and residue governance",
             registryClassificationSummary,
+            `${uiLang === "zh" ? "身份未知 / 租约" : "unknown / lease"}: ${unknownLeaseSummary}`,
+            `${uiLang === "zh" ? "下次核对" : "next reconcile"}: ${nextReconcileSummary}`,
             `${uiLang === "zh" ? "端口冲突" : "port conflicts"}: ${portConflictSummary}`,
             `${uiLang === "zh" ? "自动清理 metadata" : "metadata auto-cleaned"}: ${cleanupSnapshot.cleanedCount}`,
             `${uiLang === "zh" ? "worktree 仅 dry-run" : "worktree dry-run only"}: ${cleanupSnapshot.worktreeDryRun.length}`,
