@@ -11,6 +11,7 @@ import type {
   WorkflowCanvasProjection,
 } from "../../../api/types/researchWorkflow";
 import { VButton, VStateSurface, VSurface } from "../../../components/vui";
+import { useShellI18n } from "../../../i18n/useShellI18n";
 import {
   ChallengeMvpProgressPanel,
   ChallengeQuestionDetailPanel,
@@ -61,6 +62,7 @@ export function ResearchProcessInspectorPane(props: {
   };
 }) {
   const { scope, state, actions } = props;
+  const { lang } = useShellI18n();
   const questionDetail = useQuery({
     queryKey: queryKeys.challengeQuestionRunDetail(scope.teamId, scope.questionId),
     queryFn: () => getChallengeQuestionRunDetail(scope.teamId, scope.questionId),
@@ -86,7 +88,7 @@ export function ResearchProcessInspectorPane(props: {
     );
   }
   if (scope.panel === "agents") {
-    return <ResearchAgentBindingPanel teamId={scope.teamId} run={state.run} effectiveBindings={state.effectiveBindings} lang="zh" />;
+    return <ResearchAgentBindingPanel teamId={scope.teamId} run={state.run} effectiveBindings={state.effectiveBindings} lang={lang} />;
   }
   if (scope.panel === "launch") {
     return (
