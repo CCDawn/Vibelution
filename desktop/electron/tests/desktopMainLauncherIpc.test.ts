@@ -33,6 +33,8 @@ describe("Electron main Launcher IPC facade", () => {
     expect(preloadSource).toContain('process.argv.includes("--vibelution-window-role=launcher-control")');
     expect(preloadSource).toContain("launcherInvoke");
     expect(preloadSource).toContain("getLauncherState");
+    expect(preloadSource).toContain("refreshLauncherState");
+    expect(preloadSource).toContain("IPC_CHANNELS.refreshLauncherState");
     expect(preloadSource).toContain("onLauncherStateChanged");
     expect(preloadSource).toContain("removeListener(IPC_CHANNELS.launcherStateChanged, wrapped)");
     expect(launcherWindowSource).toContain('additionalArguments: ["--vibelution-window-role=launcher-control"]');
@@ -55,6 +57,8 @@ describe("Electron main Launcher IPC facade", () => {
     expect(mainSource).toContain("body: { electronWindowInstanceIds }");
     expect(mainSource).toContain("nextReconcileAt: state.nextReconcileAt");
     expect(mainSource).toContain('refresh("reconcile_deadline")');
+    expect(mainSource).toContain('refresh("user_recheck")');
+    expect(mainSource).toContain("IPC_CHANNELS.refreshLauncherState");
     expect(mainSource).toContain("reconcileDeadlineScheduler.clear()");
     expect(mainSource).not.toContain('orchestrateLauncherApi("branch-instances?cleanupMetadata=1"');
     const storeStart = mainSource.indexOf("const launcherStateStore = new LauncherStateStore(");

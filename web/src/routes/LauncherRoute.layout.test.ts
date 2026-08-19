@@ -19,6 +19,8 @@ import processMonitorPanelStyles from "./LauncherProcessMonitorPanel.styles";
 import branchInstancesPanelSource from "./LauncherBranchInstancesPanel.tsx?raw";
 import branchInstancesPanelStylesSource from "./LauncherBranchInstancesPanel.styles.ts?raw";
 import branchInstancesPanelStyles from "./LauncherBranchInstancesPanel.styles";
+import registryDiagnosticsSource from "./launcherRegistryDiagnostics.ts?raw";
+import registryBannerSource from "./LauncherRegistryDiagnosticsBanner.tsx?raw";
 import stylesSource from "./LauncherRoute.styles.ts?raw";
 import { launcherRouteStyles as styles } from "./LauncherRoute.styles";
 import launcherApiSource from "../api/launcher.ts?raw";
@@ -631,7 +633,13 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("Registry 判定");
     expect(routeSource).toContain("身份未知 / 租约");
     expect(routeSource).toContain("下次核对");
-    expect(routeSource).toContain("portLeaseStatus");
+    expect(routeSource).toContain("LauncherRegistryDiagnosticsBanner");
+    expect(registryBannerSource).toContain("复制诊断");
+    expect(registryBannerSource).toContain("再核对");
+    expect(registryBannerSource).toContain("<VButton");
+    expect(routeSource).toContain("refreshLauncherState");
+    expect(registryBannerSource).toContain("copyLauncherRegistryDiagnostics");
+    expect(registryDiagnosticsSource).toContain("portLeaseStatus");
     expect(routeSource).toContain("formatUnknownLeaseDiagnostics");
     expect(routeSource).toContain("端口冲突");
     expect(routeSource).toContain("最近自动清理");
@@ -639,7 +647,6 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("Orphan 判据");
     expect(routeSource).toContain("worktree 仅 dry-run");
     expect(routeSource).not.toContain("taskkill");
-    expect(routeSource).not.toContain("复制诊断");
     expect(routeSource).not.toContain("force-kill");
   });
 

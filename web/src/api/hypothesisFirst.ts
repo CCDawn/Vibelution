@@ -19,12 +19,14 @@ import type {
   HypothesisSelectionListResponse,
   HypothesisSelectionRecordPayload,
   HypothesisSelectionRecordResponse,
+  MeetingApproveDigestRequest,
   MeetingClosureApprovePayload,
   MeetingDigestDraft,
   MeetingRoundGetResponse,
   MeetingRoundListResponse,
   MeetingRoundMutationResponse,
   MeetingSourceMessagesResponse,
+  MeetingSummaryDraftRequest,
   ReviewRoundLinkListResponse,
 } from "./types/hypothesisFirst";
 
@@ -158,6 +160,35 @@ export function beginMeetingSummary(
     `${teamPrefix(teamId)}/meeting-rounds/${encodeURIComponent(meetingRoundId)}/summary`,
     "POST",
     body,
+  );
+}
+
+/** P0/P1 managed digest: UI sends only `{ actor, force: false }`. */
+export function draftMeetingSummary(
+  teamId: string,
+  meetingRoundId: string,
+  body: MeetingSummaryDraftRequest = { actor: "operator", force: false },
+): Promise<MeetingRoundMutationResponse> {
+  return writeJson<MeetingRoundMutationResponse>(
+    `${teamPrefix(teamId)}/meeting-rounds/${encodeURIComponent(meetingRoundId)}/summary-draft`,
+    "POST",
+    { actor: body.actor, force: false },
+  );
+}
+
+/** Chain-aware confirm: UI sends only `{ closedBy, expectedDigestContentHash }`. */
+export function approveHypothesisDigest(
+  teamId: string,
+  meetingRoundId: string,
+  body: MeetingApproveDigestRequest,
+): Promise<CloseReviewMeetingResponse> {
+  return writeJson<CloseReviewMeetingResponse>(
+    `${teamPrefix(teamId)}/hypothesis-first/chain/meetings/${encodeURIComponent(meetingRoundId)}/approve-digest`,
+    "POST",
+    {
+      closedBy: body.closedBy,
+      expectedDigestContentHash: body.expectedDigestContentHash,
+    },
   );
 }
 

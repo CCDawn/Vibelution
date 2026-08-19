@@ -6,6 +6,7 @@ export const IPC_CHANNELS = {
   notifyConversationCompleted: "launcher:notify-conversation-completed",
   conversationNotificationOpened: "launcher:conversation-notification-opened",
   getLauncherState: "launcher:get-state",
+  refreshLauncherState: "launcher:refresh-state",
   launcherStateChanged: "launcher:state-changed",
   launcherInvoke: "launcher:invoke"
 } as const;

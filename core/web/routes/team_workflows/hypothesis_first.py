@@ -20,6 +20,7 @@ from core.web.services.team_workflow import (
     hypothesis_rounds,
     hypothesis_selection,
     meeting_rounds,
+    meeting_runtime,
 )
 from core.web.services.team_workflow.challenge_question_runs import (
     get_challenge_question_run_detail,
@@ -49,6 +50,7 @@ from .hypothesis_first_models import (
     HypothesisSelectionRecordPayload,
     HypothesisSelectionRecordResponse,
     HypothesisSelectionResponse,
+    MeetingApproveDigestPayload,
     MeetingClosureApprovePayload,
     MeetingDigestDraftPayload,
     MeetingDigestRejectPayload,
@@ -57,6 +59,7 @@ from .hypothesis_first_models import (
     MeetingRoundResponse,
     MeetingSourceMessagesResponse,
     MeetingSummaryBeginPayload,
+    MeetingSummaryDraftRequest,
     ReviewRoundLinkListResponse,
     SelectionContextResponse,
 )
@@ -70,6 +73,8 @@ def _map_domain_error(action: str, team_id: str, exc: Exception) -> NoReturn:
     """Map service exceptions to HTTP errors with route-error diagnostics."""
     if isinstance(exc, TeamNotFoundError):
         status_code = 404
+    elif isinstance(exc, hypothesis_first_chain.StaleDigestError):
+        status_code = 409
     elif isinstance(
         exc,
         (
@@ -95,6 +100,7 @@ _DOMAIN_ERRORS = (
     ContractValidationError,
     hypothesis_selection.ResearchHypothesisSelectionError,
     meeting_rounds.ResearchMeetingRoundError,
+    meeting_runtime.ResearchMeetingRuntimeError,
     hypothesis_rounds.ResearchHypothesisRoundError,
     hypothesis_first_chain.HypothesisFirstChainError,
 )
@@ -419,6 +425,27 @@ def team_workflow_meeting_round_begin_summary(
 
 
 @router.post(
+    "/teams/{team_id}/workflow-orchestration/meeting-rounds/{meeting_round_id}/summary-draft",
+    response_model=MeetingRoundMutationResponse,
+    response_model_exclude_unset=True,
+)
+def team_workflow_meeting_round_summary_draft(
+    team_id: str,
+    meeting_round_id: str,
+    payload: MeetingSummaryDraftRequest,
+) -> dict:
+    try:
+        return meeting_runtime.prepare_meeting_summary_draft(
+            team_id,
+            meeting_round_id,
+            actor=payload.actor,
+            force=payload.force,
+        )
+    except _DOMAIN_ERRORS as exc:
+        _map_domain_error("meeting_round.summary_draft", team_id, exc)
+
+
+@router.post(
     "/teams/{team_id}/workflow-orchestration/meeting-rounds/{meeting_round_id}/digest-draft",
     response_model=MeetingRoundMutationResponse,
     response_model_exclude_unset=True,
@@ -585,6 +612,28 @@ def team_workflow_hypothesis_first_close_review_meeting(
         )
     except _DOMAIN_ERRORS as exc:
         _map_domain_error("hypothesis_first.chain.close_review_meeting", team_id, exc)
+
+
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/hypothesis-first/chain/meetings/{meeting_round_id}/approve-digest",
+    response_model=CloseReviewMeetingResponse,
+    response_model_exclude_unset=True,
+)
+def team_workflow_hypothesis_first_approve_digest(
+    team_id: str,
+    meeting_round_id: str,
+    payload: MeetingApproveDigestPayload,
+) -> dict:
+    try:
+        return hypothesis_first_chain.approve_meeting_digest(
+            team_id,
+            meeting_round_id,
+            closed_by=payload.closedBy,
+            expected_digest_content_hash=payload.expectedDigestContentHash,
+            runtime=production_workflow_runtime(),
+        )
+    except _DOMAIN_ERRORS as exc:
+        _map_domain_error("hypothesis_first.chain.approve_digest", team_id, exc)
 
 
 @router.post(

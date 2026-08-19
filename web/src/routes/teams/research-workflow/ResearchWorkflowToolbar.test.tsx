@@ -53,6 +53,7 @@ describe("ResearchWorkflowToolbar", () => {
     expect(empty).toContain("状态");
     expect(empty).not.toContain("科研团队");
     expect(empty).not.toContain("切换假说");
+    expect(empty).not.toContain("切换实验");
     expect(empty).not.toContain("下一步");
     expect(empty).not.toContain('data-vui="research-next-action"');
 
@@ -70,7 +71,8 @@ describe("ResearchWorkflowToolbar", () => {
       onOpenPanel: vi.fn(),
     } as React.ComponentProps<typeof ResearchWorkflowToolbar>);
     expect(running).toContain("等待确认");
-    expect(running).toContain("切换假说");
+    expect(running).toContain("切换实验");
+    expect(running).not.toContain("切换假说");
     expect(running).toContain("SCI-096 · 假说 hyp-a");
     expect(running).toContain('data-vui="status-chip"');
     expect(running).not.toContain("waiting_human");
@@ -92,7 +94,8 @@ describe("ResearchWorkflowToolbar", () => {
       onOpenPanel: vi.fn(),
     } as React.ComponentProps<typeof ResearchWorkflowToolbar>);
     expect(running).toContain("新建运行");
-    expect(running).toContain("切换假说");
+    expect(running).toContain("切换实验");
+    expect(running).toContain("前往当前任务");
   });
 
   it("renders English chrome when the shell language is en", () => {
@@ -107,8 +110,26 @@ describe("ResearchWorkflowToolbar", () => {
     expect(running).toContain("New run");
     expect(running).toContain("Status");
     expect(running).toContain("Timeline");
-    expect(running).toContain("Switch hypothesis");
+    expect(running).toContain("Switch experiment");
+    expect(running).not.toContain("Switch hypothesis");
     expect(running).not.toContain("Reconnecting");
+  });
+
+  it("uses navigation copy as the primary action when a run exists", () => {
+    const running = renderToolbar({
+      ...BASE_PROPS,
+      runId: "run-5e4fbe6e18f2",
+      runStatus: "running",
+      experimentOptions: [EXPERIMENT],
+      navigationLabel: "前往确认候选",
+      onSelectExperiment: vi.fn(),
+      onOpenPanel: vi.fn(),
+      onNavigateCurrent: vi.fn(),
+    } as React.ComponentProps<typeof ResearchWorkflowToolbar>);
+    expect(running).toContain("前往确认候选");
+    expect(running).toContain("新建运行");
+    expect(running).not.toContain("生成纪要");
+    expect(running).not.toContain("确认并结束本轮");
   });
 
   it("says no experiment is selected when chrome identity is missing", () => {

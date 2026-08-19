@@ -22,6 +22,7 @@ import css from "./ChallengeQuestionDetailPanel.styles";
 
 export type ChallengeQuestionDetailPanelProps = {
   requestedQuestionId: string;
+  teamId?: string;
   detail?: ChallengeQuestionRunDetailPayload;
   isLoading: boolean;
   errorMessage?: string;
@@ -76,6 +77,7 @@ function recordStatusLabel(status: string, isZh: boolean): string {
 
 export function ChallengeQuestionDetailPanel({
   requestedQuestionId,
+  teamId = "",
   detail,
   isLoading,
   errorMessage = "",
@@ -97,6 +99,7 @@ export function ChallengeQuestionDetailPanel({
     );
   }
   if (errorMessage || !detail) {
+    const operableTeamId = detail?.teamId || teamId;
     return (
       <VSurface className={css.state} tone="workspace">
         <VEmptyState
@@ -112,6 +115,12 @@ export function ChallengeQuestionDetailPanel({
               <code>{errorMessage}</code>
             </details>
           </>
+        ) : null}
+        {operableTeamId && requestedQuestionId ? (
+          <div className={css.section} data-testid="question-detail-fail-soft-ops">
+            <HypothesisSelectionPanel teamId={operableTeamId} questionId={requestedQuestionId} lang={lang} />
+            <TeamMeetingRoundPanel teamId={operableTeamId} questionId={requestedQuestionId} />
+          </div>
         ) : null}
         <VButton density="compact" onPress={onClose} variant="secondary">
           {isZh ? "返回题目列表" : "Back to question list"}

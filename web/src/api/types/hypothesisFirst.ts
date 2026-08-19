@@ -98,6 +98,29 @@ export type MeetingRoundStatus =
   | "closed"
   | (string & {});
 
+export type MeetingProposedCandidate = {
+  candidateId: string;
+  statement: string;
+  rationale?: string;
+  proposedBy?: string;
+};
+
+export type MeetingSearchEnvelope = {
+  keywords?: string[];
+  sourceTypes?: string[];
+  evidenceLevels?: string[];
+};
+
+/** Server-authored typed evidence request on a review digest (HF digest contract). */
+export type MeetingEvidenceRequestDraft = {
+  rationale?: string;
+  candidateRefs?: string[];
+  evidenceRefs?: string[];
+  searchEnvelope?: MeetingSearchEnvelope | null;
+  requirements?: Record<string, unknown>;
+  writebackPolicy?: Record<string, unknown> | null;
+};
+
 export type MeetingDigestDraft = {
   summary: string;
   discussionTopics?: string[];
@@ -110,6 +133,9 @@ export type MeetingDigestDraft = {
   knowledgeCandidates?: string[];
   sourceMessageRefs?: string[];
   contentHash?: string;
+  proposedCandidates?: MeetingProposedCandidate[];
+  evidenceRequests?: MeetingEvidenceRequestDraft[];
+  validationErrors?: string[];
 };
 
 export type MeetingRoundRecord = HypothesisFirstScope & {
@@ -144,6 +170,8 @@ export type MeetingRoundRecord = HypothesisFirstScope & {
   summarizedBy?: string;
   summaryStartedAt?: string;
   summaryHumanTriggered?: boolean;
+  summaryError?: string;
+  boundChatRoundsTerminal?: boolean;
   draftRejectedBy?: string;
   draftRejectedReason?: string;
   updatedAt?: string;
@@ -199,8 +227,18 @@ export type MeetingDecisionInput = {
   evidenceRefs?: string[];
   status?: string;
   searchEnvelope?: Record<string, unknown> | null;
-  requirements?: string[];
+  requirements?: Record<string, unknown>;
   writebackPolicy?: Record<string, unknown> | null;
+};
+
+export type MeetingSummaryDraftRequest = {
+  actor: string;
+  force: false;
+};
+
+export type MeetingApproveDigestRequest = {
+  closedBy: string;
+  expectedDigestContentHash: string;
 };
 
 export type MeetingClosureApprovePayload = {

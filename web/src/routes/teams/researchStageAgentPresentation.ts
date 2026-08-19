@@ -121,7 +121,12 @@ export function researchStageSessionChatRoute(
   return `/chat?${params.toString()}`;
 }
 
-export function teamChatRoomRoute(roomId: string, returnTo?: string, returnLabel?: string) {
+export function teamChatRoomRoute(
+  roomId: string,
+  returnTo?: string,
+  returnLabel?: string,
+  meetingRoundId?: string,
+) {
   const normalizedRoomId = String(roomId || "").trim();
   if (!normalizedRoomId) {
     return "";
@@ -129,11 +134,15 @@ export function teamChatRoomRoute(roomId: string, returnTo?: string, returnLabel
   const params = new URLSearchParams({ room: normalizedRoomId });
   const normalizedReturnTo = String(returnTo || "").trim();
   const normalizedReturnLabel = String(returnLabel || "").trim();
+  const normalizedMeetingRound = String(meetingRoundId || "").trim();
   if (normalizedReturnTo) {
     params.set("returnTo", normalizedReturnTo);
   }
   if (normalizedReturnLabel) {
     params.set("returnLabel", normalizedReturnLabel);
+  }
+  if (normalizedMeetingRound) {
+    params.set("meetingRound", normalizedMeetingRound);
   }
   return `/chat?${params.toString()}`;
 }

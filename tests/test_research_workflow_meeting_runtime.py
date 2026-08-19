@@ -490,7 +490,7 @@ def test_discussion_driver_stops_on_convergence_signal(tmp_path, monkeypatch):
     assert result["stopReason"] == "converged"
     assert result["roundsRun"] == 2
     assert result["roundBudget"] == 3
-    assert result["meetingRound"]["status"] == "open"
+    assert result["meetingRound"]["status"] == "awaiting_approval"
     assert len(result["chatRoomRoundIds"]) == 2
     room_detail = chat_room_service.get_chat_room_detail(result["roomId"])
     for round_id in result["chatRoomRoundIds"]:

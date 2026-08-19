@@ -5,8 +5,11 @@ const styles = {
   description: "m-0 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)]",
   facts: "flex flex-col gap-1.5",
   factLabel: "text-[var(--fg-tertiary)]",
-  envelope: "m-0 max-h-32 overflow-auto whitespace-pre-wrap break-all [font-size:var(--vui-font-2xs)] text-[var(--fg-secondary)]",
-  actions: "mt-auto pt-2",
+  envelope: "m-0 whitespace-pre-wrap break-all [font-size:var(--vui-font-2xs)] text-[var(--fg-secondary)]",
+  actions: "flex flex-wrap items-center gap-2 pt-1",
+  secondary: "mt-auto flex flex-wrap items-center gap-2 pt-2",
+  status: "m-0 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)]",
+  task: "flex min-h-0 flex-col gap-3",
   fill: "h-full",
 } as const;
 

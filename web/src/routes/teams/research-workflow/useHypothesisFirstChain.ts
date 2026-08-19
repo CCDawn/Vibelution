@@ -8,7 +8,7 @@
  * meeting closure, handoff) refresh the canvas region.
  */
 import { useEffect } from "react";
-import { useQueries, useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   fetchCollectionRequests,
@@ -30,6 +30,9 @@ const EMPTY_MEETINGS: MeetingRoundRecord[] = [];
 const EMPTY_REQUESTS: CollectionRequestRecord[] = [];
 const EMPTY_LINKS: ReviewRoundLinkRecord[] = [];
 
+const LIVE_MEETING = new Set(["open", "summarizing"]);
+const BOUNDED_POLL_MS = 4_000;
+
 // queryKeys.ts is read-only in this lane; the two chain list keys follow the
 // established hypothesis-first key shape so invalidation by prefix works.
 export const hypothesisFirstChainCollectionRequestsKey = (teamId: string, questionId: string) =>
@@ -48,36 +51,66 @@ export type HypothesisFirstChainData = {
   error: string | null;
 };
 
+export function invalidateHypothesisFirstQueries(
+  queryClient: QueryClient,
+  teamId: string,
+  questionId: string,
+): void {
+  void queryClient.invalidateQueries({ queryKey: ["teams", teamId, "hypothesis-first"] });
+  void queryClient.invalidateQueries({ queryKey: queryKeys.teamMeetingRounds(teamId) });
+  void queryClient.invalidateQueries({ queryKey: queryKeys.teamHypothesisRounds(teamId) });
+  void queryClient.invalidateQueries({
+    queryKey: queryKeys.hypothesisFirstSelectionContext(teamId, questionId),
+  });
+}
+
+function shouldPollMeetings(meetings: MeetingRoundRecord[] | undefined): boolean {
+  return (meetings ?? []).some((meeting) => LIVE_MEETING.has(String(meeting.status)));
+}
+
+function shouldPollCollections(
+  state: HypothesisFirstChainState | undefined,
+  requests: CollectionRequestRecord[] | undefined,
+): boolean {
+  if (state?.collectionReady && state.pendingCollectionCount > 0) return true;
+  return (requests ?? []).some((request) => {
+    const status = String(request.status || "");
+    return status !== "handed_off" && !request.handoffRef;
+  });
+}
+
 export function useHypothesisFirstChain(teamId: string, questionId: string): HypothesisFirstChainData {
   const enabled = Boolean(teamId.trim() && questionId.trim());
-  const [chainState, selections, meetings, requests, links] = useQueries({
-    queries: [
-      {
-        queryKey: queryKeys.hypothesisFirstChainState(teamId, questionId),
-        queryFn: ({ signal }) => fetchHypothesisFirstChainState(teamId, questionId, { signal }),
-        enabled,
-      },
-      {
-        queryKey: queryKeys.hypothesisFirstSelections(teamId, questionId),
-        queryFn: ({ signal }) => fetchHypothesisSelections(teamId, questionId, { signal }),
-        enabled,
-      },
-      {
-        queryKey: queryKeys.teamMeetingRounds(teamId),
-        queryFn: ({ signal }) => fetchMeetingRounds(teamId, { signal }),
-        enabled,
-      },
-      {
-        queryKey: hypothesisFirstChainCollectionRequestsKey(teamId, questionId),
-        queryFn: ({ signal }) => fetchCollectionRequests(teamId, questionId, { signal }),
-        enabled,
-      },
-      {
-        queryKey: hypothesisFirstChainReviewRoundLinksKey(teamId, questionId),
-        queryFn: ({ signal }) => fetchReviewRoundLinks(teamId, questionId, { signal }),
-        enabled,
-      },
-    ],
+  const chainState = useQuery({
+    queryKey: queryKeys.hypothesisFirstChainState(teamId, questionId),
+    queryFn: ({ signal }) => fetchHypothesisFirstChainState(teamId, questionId, { signal }),
+    enabled,
+    refetchInterval: (query) =>
+      shouldPollCollections(query.state.data, undefined) ? BOUNDED_POLL_MS : false,
+  });
+  const selections = useQuery({
+    queryKey: queryKeys.hypothesisFirstSelections(teamId, questionId),
+    queryFn: ({ signal }) => fetchHypothesisSelections(teamId, questionId, { signal }),
+    enabled,
+  });
+  const meetings = useQuery({
+    queryKey: queryKeys.teamMeetingRounds(teamId),
+    queryFn: ({ signal }) => fetchMeetingRounds(teamId, { signal }),
+    enabled,
+    refetchInterval: (query) =>
+      shouldPollMeetings(query.state.data?.meetings) ? BOUNDED_POLL_MS : false,
+  });
+  const requests = useQuery({
+    queryKey: hypothesisFirstChainCollectionRequestsKey(teamId, questionId),
+    queryFn: ({ signal }) => fetchCollectionRequests(teamId, questionId, { signal }),
+    enabled,
+    refetchInterval: (query) =>
+      shouldPollCollections(undefined, query.state.data?.requests) ? BOUNDED_POLL_MS : false,
+  });
+  const links = useQuery({
+    queryKey: hypothesisFirstChainReviewRoundLinksKey(teamId, questionId),
+    queryFn: ({ signal }) => fetchReviewRoundLinks(teamId, questionId, { signal }),
+    enabled,
   });
 
   const selectionList = selections.data?.selections;
@@ -117,8 +150,7 @@ export function useHypothesisFirstChainInvalidation(
       return;
     }
     const timer = setTimeout(() => {
-      void queryClient.invalidateQueries({ queryKey: ["teams", teamId, "hypothesis-first"] });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.teamMeetingRounds(teamId) });
+      invalidateHypothesisFirstQueries(queryClient, teamId, questionId);
     }, 250);
     return () => clearTimeout(timer);
   }, [queryClient, teamId, questionId, lastSequence]);

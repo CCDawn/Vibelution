@@ -156,6 +156,7 @@ import { VStateSurface } from "@/components/vui";
 | tone | loading/error/empty/unavailable | 与文案匹配 |
 | fill | 占满父级区域 | 无业务几何时用 |
 | density / facts | compact 横幅；键值 facts | 中断横幅用 compact |
+| actions | 诊断恢复等次要操作 | 用 `VButton` compact/secondary；不要把杀进程放进状态面 |
 
 ### 实现落点
 - `layout/VStateSurface.tsx`

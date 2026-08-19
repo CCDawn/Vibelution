@@ -992,6 +992,7 @@ describe("IPC channels", () => {
       "launcherInvoke",
       "launcherStateChanged",
       "notifyConversationCompleted",
+      "refreshLauncherState",
       "requestDesktopShellExit"
     ]);
   });

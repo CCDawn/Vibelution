@@ -651,64 +651,74 @@ def _sync_source_collection_stage_round_after_search(
                 and normalized_run_id in {str(source_run_id) for source_run_id in list(item.get("sourceRunIds") or [])}
             ]
         )
-        if stage_round is None:
-            return None
-        workflow = s._load_or_create_workflow(normalized_team_id)
-        workflow_id = str(workflow.get("workflowId") or "")
-        previous_execution = stage_round.get("sourceCollectionSearchExecution") if isinstance(stage_round.get("sourceCollectionSearchExecution"), dict) else {}
-        stage_round["sourceCollectionSearchExecution"] = {
-            **previous_execution,
-            "runId": normalized_run_id,
-            "status": terminal_status,
-            "resultStatus": s._trim_text(result.get("status"), max_length=80),
-            "executionMode": previous_execution.get("executionMode") or "background",
-            "accepted": bool(previous_execution.get("accepted")),
-            "provider": s._trim_text(result.get("provider"), max_length=80) or previous_execution.get("provider") or s.SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF,
-            "executedQueryCount": s._source_collection_count(result.get("executedQueryCount")),
-            "failedQueryCount": s._source_collection_count(result.get("failedQueryCount")),
-            "recordCount": s._source_collection_count(run_status_summary.get("recordCount") or result.get("recordCount")),
-            "importedCount": s._source_collection_count(result.get("importedCount")),
-            "skippedDuplicateCount": s._source_collection_count(result.get("skippedDuplicateCount")),
-            "remainingQueryCount": s._source_collection_count(result.get("remainingQueryCount")),
-            "hasMore": bool(result.get("hasMore")),
-            "activeWorkRunId": "",
-            "summary": s._trim_text(terminal_summary, max_length=500),
-            "updatedAt": now,
-        }
-        stage_round["sourceCollectionSummary"] = {
-            **source_collection_summary,
-            "recordCount": s._source_collection_count(run_status_summary.get("recordCount")),
-            "candidateCount": run_candidate_count,
-        }
-        stage_round["status"] = stage_status
-        stage_round["updatedAt"] = now
-        stage_round["teamMemoryRecord"] = s._stage_memory_record(stage_round, workflow)
-        stage_round["teamMemoryRecordId"] = stage_round["teamMemoryRecord"]["recordId"]
-        workflow["activeWorkflowItems"] = s._upsert_active_item(
-            workflow.get("activeWorkflowItems"),
-            candidate_id=normalized_run_id,
-            current_node="knowledge_collection",
-            status=f"source_collection_{stage_status}",
-            transfer_id="",
+        if stage_round is not None:
+            workflow = s._load_or_create_workflow(normalized_team_id)
+            workflow_id = str(workflow.get("workflowId") or "")
+            previous_execution = stage_round.get("sourceCollectionSearchExecution") if isinstance(stage_round.get("sourceCollectionSearchExecution"), dict) else {}
+            stage_round["sourceCollectionSearchExecution"] = {
+                **previous_execution,
+                "runId": normalized_run_id,
+                "status": terminal_status,
+                "resultStatus": s._trim_text(result.get("status"), max_length=80),
+                "executionMode": previous_execution.get("executionMode") or "background",
+                "accepted": bool(previous_execution.get("accepted")),
+                "provider": s._trim_text(result.get("provider"), max_length=80) or previous_execution.get("provider") or s.SOURCE_COLLECTION_SEARCH_PROVIDER_CROSSREF,
+                "executedQueryCount": s._source_collection_count(result.get("executedQueryCount")),
+                "failedQueryCount": s._source_collection_count(result.get("failedQueryCount")),
+                "recordCount": s._source_collection_count(run_status_summary.get("recordCount") or result.get("recordCount")),
+                "importedCount": s._source_collection_count(result.get("importedCount")),
+                "skippedDuplicateCount": s._source_collection_count(result.get("skippedDuplicateCount")),
+                "remainingQueryCount": s._source_collection_count(result.get("remainingQueryCount")),
+                "hasMore": bool(result.get("hasMore")),
+                "activeWorkRunId": "",
+                "summary": s._trim_text(terminal_summary, max_length=500),
+                "updatedAt": now,
+            }
+            stage_round["sourceCollectionSummary"] = {
+                **source_collection_summary,
+                "recordCount": s._source_collection_count(run_status_summary.get("recordCount")),
+                "candidateCount": run_candidate_count,
+            }
+            stage_round["status"] = stage_status
+            stage_round["updatedAt"] = now
+            stage_round["teamMemoryRecord"] = s._stage_memory_record(stage_round, workflow)
+            stage_round["teamMemoryRecordId"] = stage_round["teamMemoryRecord"]["recordId"]
+            workflow["activeWorkflowItems"] = s._upsert_active_item(
+                workflow.get("activeWorkflowItems"),
+                candidate_id=normalized_run_id,
+                current_node="knowledge_collection",
+                status=f"source_collection_{stage_status}",
+                transfer_id="",
+            )
+            workflow["updatedAt"] = now
+            store["updatedAt"] = now
+            s._write_json(s._stage_round_store_path(normalized_team_id), store)
+            s._write_json(s._workflow_path(normalized_team_id), workflow)
+            synced_round = dict(stage_round)
+    if synced_round is not None:
+        s._record_workflow_event(
+            "research_stage_round.source_collection_search_synced",
+            normalized_team_id,
+            fields={
+                "workflowId": workflow_id,
+                "runId": normalized_run_id,
+                "stageRoundId": synced_round.get("stageRoundId", "") if synced_round else "",
+                "status": stage_status,
+                "searchStatus": terminal_status,
+                "recordCount": s._source_collection_count(run_status_summary.get("recordCount")),
+                "candidateCount": run_candidate_count,
+            },
         )
-        workflow["updatedAt"] = now
-        store["updatedAt"] = now
-        s._write_json(s._stage_round_store_path(normalized_team_id), store)
-        s._write_json(s._workflow_path(normalized_team_id), workflow)
-        synced_round = dict(stage_round)
-    s._record_workflow_event(
-        "research_stage_round.source_collection_search_synced",
-        normalized_team_id,
-        fields={
-            "workflowId": workflow_id,
-            "runId": normalized_run_id,
-            "stageRoundId": synced_round.get("stageRoundId", "") if synced_round else "",
-            "status": stage_status,
-            "searchStatus": terminal_status,
-            "recordCount": s._source_collection_count(run_status_summary.get("recordCount")),
-            "candidateCount": run_candidate_count,
-        },
-    )
+    try:
+        from core.web.services.team_workflow.research_runtime import hypothesis_first_chain
+
+        hypothesis_first_chain.notify_collection_run_terminal(
+            normalized_team_id,
+            normalized_run_id,
+            terminal_status,
+        )
+    except Exception:
+        pass
     return synced_round
 
 

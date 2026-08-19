@@ -51,6 +51,38 @@ class MeetingSummaryBeginPayload(BaseModel):
     humanTriggered: bool = False
 
 
+class MeetingSummaryDraftRequest(BaseModel):
+    """Payload for ``POST /meeting-rounds/{meeting_round_id}/summary-draft``."""
+
+    actor: str = Field("", max_length=200)
+    force: bool = False
+
+
+class MeetingSearchEnvelopeDraft(BaseModel):
+    """Typed search envelope inside a digest evidence request."""
+
+    model_config = ConfigDict(extra="allow")
+
+    keywords: list[str] = Field(default_factory=list)
+    sourceTypes: list[str] = Field(default_factory=list)
+    evidenceLevels: list[str] = Field(default_factory=list)
+
+
+class MeetingEvidenceRequestDraft(BaseModel):
+    """Typed evidence-request row on a meeting digest draft."""
+
+    model_config = ConfigDict(extra="allow")
+
+    rationale: str = Field("", max_length=10000)
+    candidateRefs: list[str] = Field(default_factory=list)
+    evidenceRefs: list[str] = Field(default_factory=list)
+    searchEnvelope: MeetingSearchEnvelopeDraft = Field(
+        default_factory=MeetingSearchEnvelopeDraft
+    )
+    requirements: dict[str, Any] = Field(default_factory=dict)
+    writebackPolicy: dict[str, Any] = Field(default_factory=dict)
+
+
 class MeetingDigestDraftPayload(BaseModel):
     """Payload for ``POST /meeting-rounds/{meeting_round_id}/digest-draft``.
 
@@ -67,7 +99,11 @@ class MeetingDigestDraftPayload(BaseModel):
     risks: list[str] = Field(default_factory=list)
     blockers: list[str] = Field(default_factory=list)
     knowledgeCandidates: list[str] = Field(default_factory=list)
+    proposedCandidates: list[dict[str, Any]] = Field(default_factory=list)
+    evidenceRequests: list[MeetingEvidenceRequestDraft] = Field(default_factory=list)
+    validationErrors: list[dict[str, Any]] = Field(default_factory=list)
     sourceMessageRefs: list[str] = Field(..., min_length=1)
+    sourceMessageContentHash: str = Field("", max_length=200)
     contentHash: str = Field("", max_length=200)
 
 
@@ -98,8 +134,15 @@ class MeetingDecisionPayload(BaseModel):
     evidenceRefs: list[str] = Field(default_factory=list)
     status: str = Field("adopted", max_length=50)
     searchEnvelope: dict[str, Any] | None = None
-    requirements: list[str] = Field(default_factory=list)
+    requirements: dict[str, Any] = Field(default_factory=dict)
     writebackPolicy: dict[str, Any] | None = None
+
+
+class MeetingApproveDigestPayload(BaseModel):
+    """Payload for ``POST .../chain/meetings/{id}/approve-digest``."""
+
+    closedBy: str = Field(..., min_length=1, max_length=200)
+    expectedDigestContentHash: str = Field(..., min_length=1, max_length=200)
 
 
 class MeetingClosureApprovePayload(BaseModel):
