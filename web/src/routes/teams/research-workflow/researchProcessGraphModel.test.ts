@@ -379,7 +379,7 @@ describe("composeHypothesisFirstGraph", () => {
       "execution_iteration",
     ]);
     expect(composed.stages.map((stage) => stage.index)).toEqual([0, 1, 2, 3]);
-    expect(composed.stages[0]).toMatchObject({ label: "假说先行", progress: { completed: 1, total: 3 } });
+    expect(composed.stages[0]).toMatchObject({ label: "假说先行", progress: { completed: 2, total: 3 } });
 
     // Region cards come first; base nodes keep their identity.
     expect(composed.nodes.map((node) => node.nodeId)).toEqual([
@@ -490,5 +490,40 @@ describe("composeHypothesisFirstGraph", () => {
     expect(composed.stages[0]?.stageId).toBe("hypothesis_first");
     expect(composed.stages[0]?.stageTone).toBe("active");
     expect(composed.stages.filter((stage) => stage.stageId !== "hypothesis_first").every((stage) => stage.stageTone === "idle")).toBe(true);
+  });
+
+  it("omits the idle 16-node pipeline until a review round has closed", () => {
+    const base = definitionToCanvasGraph(definition);
+    const region = buildHypothesisFirstCanvasRegion(regionInput({
+      meetings: [],
+      chainState: {
+        schemaVersion: 1,
+        teamId: "team-1",
+        questionId: "Q-01",
+        selectionId: "sel-1",
+        meetingCount: 0,
+        firstMeetingId: "",
+        firstMeetingClosed: false,
+        openMeetingIds: [],
+        collectionRequests: [],
+        collectionRequestCount: 0,
+        pendingCollectionCount: 0,
+        collectionReady: false,
+        hypothesisRoundCount: 0,
+        latestHypothesisRoundId: "",
+        hypothesisConverged: false,
+        convergenceDetail: "",
+        roundBudget: 3,
+        budgetExhausted: false,
+        templateBaselineExists: false,
+        templateBaselineIds: [],
+      },
+    }))!;
+    expect(region.showDownstreamPipeline).toBe(false);
+    const composed = composeHypothesisFirstGraph(base, region, { demotePipelineStages: true });
+    expect(composed.stages.map((stage) => stage.stageId)).toEqual(["hypothesis_first"]);
+    expect(composed.nodes.map((node) => node.nodeId)).toEqual(["hf_selection"]);
+    expect(composed.edges).toEqual([]);
+    expect(composed.stages[0]?.stageTone).toBe("done");
   });
 });

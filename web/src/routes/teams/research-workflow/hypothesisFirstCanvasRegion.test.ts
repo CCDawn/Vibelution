@@ -162,10 +162,15 @@ describe("hypothesisFirstCanvasRegion", () => {
     )!;
     expect(selectionNode.status).toBe("pending");
     expect(selectionNode.description).toBe("等待生成候选假说");
-    // No generation meeting yet → no generation card.
     expect(region.nodes.some((node) => node.nodeId === HYPOTHESIS_FIRST_GENERATION_NODE_ID)).toBe(
       false,
     );
+    expect(region.nodes.some((node) => node.nodeId === HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID)).toBe(
+      false,
+    );
+    expect(region.showDownstreamPipeline).toBe(false);
+    expect(region.stage.progress).toEqual({ completed: 0, total: 1 });
+    expect(region.stage.stageTone).toBe("idle");
   });
 
   it("open generation meeting renders the generation card before selection", () => {
@@ -227,33 +232,39 @@ describe("hypothesisFirstCanvasRegion", () => {
     expect(selectionNode.description).toBe("已产出 3 条候选，等待人工选择");
   });
 
-  it("selection only: selection card succeeded, gate pending, no meeting edges", () => {
+  it("selection only: selection card succeeded, no future gate, no pipeline", () => {
     const region = regionOf({ selection: selection() })!;
     expect(region).not.toBeNull();
     expect(region.stage.stageId).toBe(HYPOTHESIS_FIRST_STAGE_ID);
     expect(region.stage.label).toBe("假说先行");
     expect(region.stage.index).toBe(0);
-    expect(region.stage.progress).toEqual({ completed: 0, total: 3 });
+    expect(region.stage.progress).toEqual({ completed: 1, total: 1 });
+    expect(region.stage.stageTone).toBe("done");
+    expect(region.showDownstreamPipeline).toBe(false);
 
     const ids = region.nodes.map((node) => node.nodeId);
-    expect(ids).toEqual([HYPOTHESIS_FIRST_SELECTION_NODE_ID, HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID]);
+    expect(ids).toEqual([HYPOTHESIS_FIRST_SELECTION_NODE_ID]);
     const selectionNode = region.nodes[0]!;
     expect(selectionNode.visualKind).toBe("human_gate");
     expect(selectionNode.status).toBe("succeeded");
     expect(selectionNode.description).toContain("3 个候选");
-    const gate = region.nodes[1]!;
-    expect(gate.visualKind).toBe("human_gate");
-    expect(gate.status).toBe("pending");
+    expect(region.edges).toEqual([]);
+  });
 
-    // Only the gate → hypothesis_design readiness edge exists.
-    expect(region.edges.map((edge) => edge.edgeId)).toEqual(["hf_e_gate_stage2"]);
-    expect(region.edges[0]).toMatchObject({
-      fromNodeId: HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID,
-      toNodeId: "hypothesis_design",
-      label: "假说集就绪",
-      semanticKind: "human_gate",
-      labelAlwaysVisible: true,
-    });
+  it("candidates without a generation meeting still show a completed generation card", () => {
+    const region = regionOf({
+      chainState: chainState({ candidateCount: 4 }),
+    })!;
+    const generationNode = region.nodes.find(
+      (node) => node.nodeId === HYPOTHESIS_FIRST_GENERATION_NODE_ID,
+    )!;
+    expect(generationNode.status).toBe("succeeded");
+    expect(generationNode.description).toBe("已产出 4 条候选假说");
+    expect(region.nodes.find((node) => node.nodeId === HYPOTHESIS_FIRST_SELECTION_NODE_ID)?.status).toBe(
+      "waiting_human",
+    );
+    expect(region.stage.progress).toEqual({ completed: 1, total: 2 });
+    expect(region.showDownstreamPipeline).toBe(false);
   });
 
   it("without candidates the selection card stays pending even if a review meeting exists", () => {
@@ -274,7 +285,7 @@ describe("hypothesisFirstCanvasRegion", () => {
     expect(region.edges.some((edge) => edge.edgeId === "hf_e_sel_m1")).toBe(false);
   });
 
-  it("first round open: meeting card running with selection and gate edges", () => {
+  it("first round open: meeting card running, no future gate or pipeline", () => {
     const region = regionOf({
       selection: selection(),
       meetings: [meeting(1, "open")],
@@ -285,7 +296,9 @@ describe("hypothesisFirstCanvasRegion", () => {
     expect(meetingNode.visualKind).toBe("agent_task");
 
     const edgeIds = region.edges.map((edge) => edge.edgeId);
-    expect(edgeIds).toEqual(["hf_e_sel_m1", "hf_e_m1_gate", "hf_e_m1_stage1", "hf_e_gate_stage2"]);
+    expect(edgeIds).toEqual(["hf_e_sel_m1"]);
+    expect(region.nodes.some((node) => node.nodeId === HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID)).toBe(false);
+    expect(region.showDownstreamPipeline).toBe(false);
     const entry = region.edges[0]!;
     expect(entry).toMatchObject({
       fromNodeId: HYPOTHESIS_FIRST_SELECTION_NODE_ID,
@@ -293,17 +306,6 @@ describe("hypothesisFirstCanvasRegion", () => {
       label: "选定假说",
       // decision_branch keeps the label narrative-visible in serpentine mode.
       semanticKind: "decision_branch",
-      labelAlwaysVisible: true,
-    });
-    // running source → active path into the gate.
-    expect(region.edges[1]!.pathState).toBe("active");
-    const stage1 = region.edges[2]!;
-    expect(stage1).toMatchObject({
-      fromNodeId: "hf_meeting_1",
-      toNodeId: "source_finding",
-      label: "首轮搜集范围就绪",
-      semanticKind: "human_gate",
-      gateKind: "knowledge_package",
       labelAlwaysVisible: true,
     });
   });
@@ -353,10 +355,11 @@ describe("hypothesisFirstCanvasRegion", () => {
     // No handoff yet → no 知识包交接 edge, no second round.
     expect(region.edges.some((edge) => edge.label === "知识包交接")).toBe(false);
     expect(region.nodes.some((node) => node.nodeId === "hf_meeting_2")).toBe(false);
-    expect(region.stage.progress).toEqual({ completed: 1, total: 3 });
+    expect(region.stage.progress).toEqual({ completed: 2, total: 4 });
+    expect(region.showDownstreamPipeline).toBe(true);
   });
 
-  it("two closed rounds: handoff edge bridges collection to round 2 and progress counts closed rounds", () => {
+  it("two closed rounds: handoff edge bridges collection to round 2 and progress counts completed cards", () => {
     const region = regionOf({
       selection: selection(),
       meetings: [
@@ -392,7 +395,7 @@ describe("hypothesisFirstCanvasRegion", () => {
     expect(region.edges.some((edge) => edge.edgeId === "hf_e_m1_m2")).toBe(false);
     // Latest meeting feeds the convergence gate.
     expect(region.edges.some((edge) => edge.edgeId === "hf_e_m2_gate")).toBe(true);
-    expect(region.stage.progress).toEqual({ completed: 2, total: 3 });
+    expect(region.stage.progress).toEqual({ completed: 4, total: 5 });
     // All cards succeeded except the pending gate → no active/attention signal.
     expect(region.stage.stageTone).toBe("idle");
   });
@@ -406,7 +409,7 @@ describe("hypothesisFirstCanvasRegion", () => {
     const gate = region.nodes.find((node) => node.nodeId === HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID)!;
     expect(gate.status).toBe("blocked");
     expect(gate.description).toContain("预算耗尽");
-    expect(region.stage.progress).toEqual({ completed: 1, total: 1 });
+    expect(region.stage.progress).toEqual({ completed: 2, total: 3 });
   });
 
   it("converged chain marks the gate succeeded and uses the convergence detail", () => {
@@ -438,7 +441,6 @@ describe("hypothesisFirstCanvasRegion", () => {
     expect(region.nodes.map((node) => node.nodeId)).toEqual([
       HYPOTHESIS_FIRST_SELECTION_NODE_ID,
       "hf_meeting_1",
-      HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID,
     ]);
   });
 
