@@ -1,6 +1,10 @@
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import {
+  cloneElement,
   isValidElement,
+  useState,
+  type FocusEvent,
+  type PointerEvent,
   type ReactElement,
   type ReactNode,
 } from "react";
@@ -48,12 +52,55 @@ const triggerSlotProps = {
   "data-renderer": "radix",
 } as const;
 
+type IntentTriggerProps = {
+  onPointerEnter?: (event: PointerEvent<HTMLElement>) => void;
+  onFocus?: (event: FocusEvent<HTMLElement>) => void;
+};
+
+function resolveTrigger(
+  children: ReactNode,
+  renderTrigger: ShadcnTooltipTriggerRender | undefined,
+): ReactElement {
+  if (renderTrigger) {
+    return renderTrigger({ ...triggerSlotProps });
+  }
+  if (isValidElement(children)) {
+    return children as ReactElement;
+  }
+  return (
+    <span {...triggerSlotProps} tabIndex={0} className="inline-flex max-w-full">
+      {children}
+    </span>
+  );
+}
+
+function withIdleIntent(trigger: ReactElement, onIntent: () => void): ReactElement {
+  const prev = trigger.props as IntentTriggerProps;
+  return cloneElement(trigger, {
+    ...triggerSlotProps,
+    onPointerEnter: (event: PointerEvent<HTMLElement>) => {
+      prev.onPointerEnter?.(event);
+      onIntent();
+    },
+    onFocus: (event: FocusEvent<HTMLElement>) => {
+      prev.onFocus?.(event);
+      onIntent();
+    },
+  } as Partial<typeof trigger.props>);
+}
+
 /**
  * Radix/shadcn-style tooltip renderer.
  * Pages must not import this — only VUI primitives consume it.
  *
- * Do not cloneElement the trigger on every render: a fresh element identity
- * makes Slot recompose refs, and React 19 then loops through overlay setRef.
+ * Idle tooltips must not mount Radix Root/Trigger/Popper. Each instance
+ * calls `setTrigger` / `setAnchor` from composed refs during commit;
+ * a chat session list of ~25 rows (2 tips each) already reaches React 19's
+ * nested-update limit of 50 and crashes the workbench as #185.
+ *
+ * Do not cloneElement the trigger on the armed Radix path: a fresh element
+ * identity makes Slot recompose refs, and React 19 then loops through overlay
+ * setRef. Cloning is only used on the idle host, which has no Slot.
  */
 export function ShadcnTooltip({
   delay = 320,
@@ -71,17 +118,12 @@ export function ShadcnTooltip({
   onOpenChange,
 }: ShadcnTooltipProps) {
   const controlledOpen = open ?? isOpen;
-  let trigger: ReactElement;
-  if (renderTrigger) {
-    trigger = renderTrigger({ ...triggerSlotProps });
-  } else if (isValidElement(children)) {
-    trigger = children as ReactElement;
-  } else {
-    trigger = (
-      <span {...triggerSlotProps} tabIndex={0} className="inline-flex max-w-full">
-        {children}
-      </span>
-    );
+  const eager = controlledOpen !== undefined || Boolean(defaultOpen);
+  const [overlayMounted, setOverlayMounted] = useState(eager);
+  const trigger = resolveTrigger(children, renderTrigger);
+
+  if (!overlayMounted) {
+    return withIdleIntent(trigger, () => setOverlayMounted(true));
   }
 
   return (
@@ -89,7 +131,7 @@ export function ShadcnTooltip({
       <TooltipPrimitive.Root
         delayDuration={delay}
         open={controlledOpen}
-        defaultOpen={defaultOpen}
+        defaultOpen={eager ? defaultOpen : true}
         onOpenChange={onOpenChange}
       >
         <TooltipPrimitive.Trigger asChild {...triggerSlotProps}>
