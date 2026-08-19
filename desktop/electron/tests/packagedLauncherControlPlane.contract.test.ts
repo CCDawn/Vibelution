@@ -5,14 +5,20 @@ import { createDesktopLaunchProfile, serializeDesktopLaunchProfile } from "../sr
 
 const mainSourcePath = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 const clientSourcePath = fileURLToPath(new URL("../src/process/launcherServiceClient.ts", import.meta.url));
+const resolveWorkbenchBridgeSourcePath = fileURLToPath(
+  new URL("../src/process/resolveWorkbenchBridge.ts", import.meta.url)
+);
 const launcherApiSourcePath = fileURLToPath(new URL("../../../web/src/api/launcher.ts", import.meta.url));
 
 describe("packaged Launcher control plane", () => {
   it("does not spawn or attach Python :8765 from Electron main", () => {
     const source = readFileSync(mainSourcePath, "utf8");
+    const bridgeSource = readFileSync(resolveWorkbenchBridgeSourcePath, "utf8");
 
     expect(source).toContain("bootstrapMainOwnedLauncher(paths)");
-    expect(source).toContain("resolve-workbench");
+    expect(source).toContain("resolveWorkbenchUrlFromBridge({");
+    expect(bridgeSource).toContain('"resolve-workbench"');
+    expect(bridgeSource).toContain("runPythonJsonBridge({");
     expect(source).not.toContain("bootstrapPythonLauncherService(");
     expect(source).not.toContain("--attach-healthy-launcher");
     expect(source).not.toMatch(/127\.0\.0\.1:8765/);
