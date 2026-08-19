@@ -13,11 +13,12 @@ describe("team workflow card preview", () => {
         <TeamWorkflowCardPreviewApp />
       </VuiProvider>,
     );
-    expect(markup).toContain("现在 · 244×102 · 8px 脚注");
-    expect(markup).toContain("建议 · 268×84 · 14/12px");
+    expect(markup).toContain("现在 · 横排挤卡 · 244×102");
+    expect(markup).toContain("建议 · 竖排模块卡 · 实心色块");
     expect(markup).toContain('data-testid="current-find"');
     expect(markup).toContain('data-testid="proposed-find"');
     expect(markup).toContain("资料搜集 · 白望舒");
-    expect(markup).toContain("类型只靠图标，例外才打标签");
+    expect(markup).toContain("类型只靠实心色块，状态只靠图标角标");
+    expect(markup).toContain("twc-proposed-mark");
   });
 });
