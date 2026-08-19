@@ -422,6 +422,21 @@ def test_selection_record_route_rejects_incomplete_payload() -> None:
 
 def test_selection_query_routes(monkeypatch) -> None:
     monkeypatch.setattr(
+        hf_routes,
+        "_selection_read_scope",
+        lambda team_id, question_id: {
+            "program": "test-program",
+            "theme": "test-theme",
+            "campaign": "test-campaign",
+            "question": question_id,
+            "branch": "main",
+            "workflow": "hypothesis_first",
+            "agentId": "operator",
+            "mode": "dev",
+            "scopeHash": "test-scope-hash",
+        },
+    )
+    monkeypatch.setattr(
         hypothesis_selection,
         "list_hypothesis_selections",
         lambda team_id, question_id="": {
@@ -435,7 +450,7 @@ def test_selection_query_routes(monkeypatch) -> None:
     monkeypatch.setattr(
         hypothesis_selection,
         "get_latest_hypothesis_selection",
-        lambda team_id, question_id: {
+        lambda team_id, question_id, *, scope=None: {
             "schemaVersion": 1,
             "teamId": team_id,
             "selection": {"selectionId": "hsel-2", "questionId": question_id},
@@ -476,7 +491,7 @@ def test_selection_query_routes(monkeypatch) -> None:
 
 
 def test_selection_latest_maps_not_found_to_404(monkeypatch) -> None:
-    def fake_latest(team_id, question_id):
+    def fake_latest(team_id, question_id, *, scope=None):
         raise hypothesis_selection.ResearchHypothesisSelectionNotFoundError(
             "No hypothesis selection recorded for this question."
         )
@@ -564,7 +579,7 @@ def test_selection_context_derives_scope_from_frozen_registry(monkeypatch) -> No
     monkeypatch.setattr(
         hypothesis_selection,
         "get_latest_hypothesis_selection",
-        lambda team_id, question_id: {
+        lambda team_id, question_id, *, scope=None: {
             "schemaVersion": 1,
             "teamId": team_id,
             "selection": {"selectionId": "hsel-1"},
@@ -655,7 +670,7 @@ def test_selection_context_falls_back_to_dev_scope(monkeypatch) -> None:
         lambda team_id, *, theme_id, campaign_id="": _DevContract(),
     )
 
-    def fake_latest(team_id, question_id):
+    def fake_latest(team_id, question_id, *, scope=None):
         raise hypothesis_selection.ResearchHypothesisSelectionNotFoundError("none")
 
     monkeypatch.setattr(
@@ -726,7 +741,7 @@ def test_selection_context_cold_start_uses_ledger_candidates(monkeypatch) -> Non
         },
     )
 
-    def fake_latest(team_id, question_id):
+    def fake_latest(team_id, question_id, *, scope=None):
         raise hypothesis_selection.ResearchHypothesisSelectionNotFoundError("none")
 
     monkeypatch.setattr(
@@ -799,7 +814,7 @@ def test_selection_context_unknown_question_falls_back_to_dev_mode(monkeypatch) 
         },
     )
 
-    def fake_latest(team_id, question_id):
+    def fake_latest(team_id, question_id, *, scope=None):
         raise hypothesis_selection.ResearchHypothesisSelectionNotFoundError("none")
 
     monkeypatch.setattr(
