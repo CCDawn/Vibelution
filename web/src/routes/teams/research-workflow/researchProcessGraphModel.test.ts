@@ -453,4 +453,42 @@ describe("composeHypothesisFirstGraph", () => {
     expect(composed.edges.some((edge) => edge.edgeId === "hf_e_gate_stage2")).toBe(false);
     expect(composed.edges.some((edge) => edge.edgeId === "hf_e_m1_stage1")).toBe(true);
   });
+
+  it("demotes 16-node stage tones while a hypothesis-first discussion is live", () => {
+    const projection: WorkflowCanvasProjection = {
+      definition,
+      run: {
+        runId: "run-hf",
+        status: "running",
+        runtimeCurrentNodeIds: ["source_finding"],
+        nodeRuns: {
+          source_finding: { nodeId: "source_finding", status: "running", attempt: 1, actorKind: "agent" },
+        },
+        pendingHumanTasks: [],
+        blockedReason: null,
+        completionKind: "",
+        parentRunId: null,
+        childRunIds: [],
+      },
+    };
+    const base = projectionToCanvasGraph(projection);
+    const region = buildHypothesisFirstCanvasRegion(regionInput({
+      meetings: [{
+        ...hfScope,
+        schemaVersion: 1,
+        meetingRoundId: "hf-review-sel-1-r1",
+        meetingType: "hypothesis_review",
+        mode: "review",
+        scopeHash: "sh",
+        participants: ["agent-1"],
+        status: "open",
+        startedAt: "2026-08-19T01:00:00Z",
+        roundIndex: 1,
+      }],
+    }))!;
+    const composed = composeHypothesisFirstGraph(base, region, { demotePipelineStages: true });
+    expect(composed.stages[0]?.stageId).toBe("hypothesis_first");
+    expect(composed.stages[0]?.stageTone).toBe("active");
+    expect(composed.stages.filter((stage) => stage.stageId !== "hypothesis_first").every((stage) => stage.stageTone === "idle")).toBe(true);
+  });
 });

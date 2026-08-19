@@ -236,6 +236,7 @@ export function mergeSelectionAndRuntime(options: {
 export function composeHypothesisFirstGraph(
   base: WorkflowLayoutInput,
   region: HypothesisFirstCanvasRegion | null,
+  options?: { demotePipelineStages?: boolean },
 ): WorkflowLayoutInput {
   if (!region) {
     return base;
@@ -251,11 +252,19 @@ export function composeHypothesisFirstGraph(
     nodeById,
     runtimeCurrent,
   );
+  const demotePipeline = Boolean(options?.demotePipelineStages);
   return {
     ...base,
     stages: [
-      region.stage,
-      ...base.stages.map((stage, position) => ({ ...stage, index: position + 1 })),
+      {
+        ...region.stage,
+        stageTone: demotePipeline ? "active" : region.stage.stageTone,
+      },
+      ...base.stages.map((stage, position) => ({
+        ...stage,
+        index: position + 1,
+        stageTone: demotePipeline ? "idle" as const : stage.stageTone,
+      })),
     ],
     nodes: [...region.nodes, ...base.nodes],
     edges: [...regionEdges, ...base.edges],

@@ -251,10 +251,11 @@ describe("ChallengeQuestionDetailPanel", () => {
     expect(approvedMarkup).not.toContain("登记修订产出");
   });
 
-  it("fails closed when the requested question artifact is unavailable", () => {
+  it("fails closed on artifacts but still mounts selection and meeting ops", () => {
     const markup = renderPanel(
       <ChallengeQuestionDetailPanel
         requestedQuestionId="SCI-999"
+        teamId="research-team"
         isLoading={false}
         errorMessage="challenge_question_run_not_found"
         onClose={() => undefined}
@@ -264,6 +265,9 @@ describe("ChallengeQuestionDetailPanel", () => {
     expect(markup).toContain("SCI-999");
     expect(markup).toContain("审核工件不可用");
     expect(markup).toContain("返回题目列表");
+    expect(markup).toContain("question-detail-fail-soft-ops");
+    expect(markup).toContain("正在读取假说选择上下文");
+    expect(markup).toContain("正在解析讨论入口");
     expect(markup).not.toContain("当前研究项目或其他题目的资料");
   });
 

@@ -8,10 +8,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-import type { WorkflowRunRecord } from "../../../api/researchWorkflow";
+import type { CreateResearchWorkflowRunInput, WorkflowRunRecord } from "../../../api/researchWorkflow";
 import type { CommandOffer } from "../../../api/types/research-workflow/commands";
 import type { ResearchWorkflowNodeDetail } from "../../../api/types/research-workflow/core";
+import { fetchHypothesisFirstFocusNode } from "./hypothesisFirstFocus";
 import { useResearchWorkflowCommands } from "./useResearchWorkflowCommands";
+
+vi.mock("./hypothesisFirstFocus", () => ({
+  fetchHypothesisFirstFocusNode: vi.fn(),
+}));
+
+const mockedFocus = vi.mocked(fetchHypothesisFirstFocusNode);
 
 const offer: CommandOffer = {
   command: "start_node",
@@ -30,6 +37,8 @@ type HookValue = ReturnType<typeof useResearchWorkflowCommands>;
 function Probe(props: {
   submitFormalOffer?: (next: CommandOffer) => Promise<unknown>;
   refresh: () => Promise<void>;
+  createRun?: (input: CreateResearchWorkflowRunInput) => Promise<WorkflowRunRecord>;
+  replaceParams?: (patch: Record<string, string | null | undefined>) => void;
   onValue: (value: HookValue) => void;
 }) {
   const value = useResearchWorkflowCommands({
@@ -47,9 +56,9 @@ function Probe(props: {
     } as ResearchWorkflowNodeDetail,
     commandOffers: [offer],
     submitFormalOffer: props.submitFormalOffer,
-    createRun: vi.fn(),
+    createRun: props.createRun ?? vi.fn(),
     refresh: props.refresh,
-    replaceParams: vi.fn(),
+    replaceParams: props.replaceParams ?? vi.fn(),
   });
   props.onValue(value);
   return null;
@@ -121,5 +130,50 @@ describe("useResearchWorkflowCommands", () => {
     expect((captured as Error).message).toContain("正式命令通道未就绪");
     expect(refresh).not.toHaveBeenCalled();
     expect(latest!.error).toContain("正式命令通道未就绪");
+  });
+
+  it("focuses the typed next-action node after create-run instead of source_finding", async () => {
+    mockedFocus.mockResolvedValue("hf_generation");
+    const replaceParams = vi.fn();
+    const createRun = vi.fn().mockResolvedValue({
+      runId: "run-new",
+      questionId: "SCI-002",
+      runtimeCurrentNodeIds: ["source_finding"],
+    });
+    await act(async () => {
+      root.render(
+        <Probe
+          refresh={vi.fn().mockResolvedValue(undefined)}
+          createRun={createRun}
+          replaceParams={replaceParams}
+          onValue={(value) => {
+            latest = value;
+          }}
+        />,
+      );
+    });
+
+    await act(async () => {
+      await latest!.submitRun({
+        teamId: "research-team",
+        questionId: "SCI-002",
+        safetyLimits: {
+          stageTokens: { knowledge_collection: 1, experiment_design: 1, execution_iteration: 1 },
+          toolCalls: 1,
+          wallClockSeconds: 1,
+          maxRetries: 1,
+        },
+        idempotencyKey: "create-1",
+      });
+    });
+
+    expect(mockedFocus).toHaveBeenCalledWith("research-team", "SCI-002");
+    expect(replaceParams).toHaveBeenCalledWith({
+      runId: "run-new",
+      questionId: "SCI-002",
+      node: "hf_generation",
+      panel: "node",
+    });
+    expect(replaceParams.mock.calls[0][0].node).not.toBe("source_finding");
   });
 });

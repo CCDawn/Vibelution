@@ -68,6 +68,33 @@ describe("researchExperimentSwitchModel", () => {
       node: "protocol_design",
       panel: "node",
     });
+    expect(resolveExperimentSwitch(options, "sci-003", "hf_generation")).toEqual({
+      questionId: "SCI-003",
+      runId: "run-3",
+      node: "hf_generation",
+      panel: "node",
+    });
+  });
+
+  it("omits cancelled checkpoints from the switcher", () => {
+    const options = buildExperimentSwitchOptions({
+      questions: [
+        question(),
+        question({
+          questionId: "SCI-004",
+          checkpoint: {
+            runId: "run-4",
+            status: "cancelled",
+            currentNodeId: "source_finding",
+            currentNodeLabel: "资料寻找",
+            completedCount: 0,
+            totalSteps: 16,
+            resumable: false,
+          },
+        }),
+      ],
+    });
+    expect(options.map((item) => item.questionId)).toEqual(["SCI-096"]);
   });
 
   it("keeps the current run visible even if launch-options omitted it", () => {

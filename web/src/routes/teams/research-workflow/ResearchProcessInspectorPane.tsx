@@ -25,7 +25,12 @@ import {
   ResearchTeamPanel,
 } from "../teamLazyPanels";
 import { isHypothesisFirstCanvasNode } from "./hypothesisFirstCanvasRegion";
+import {
+  shouldHideSourceFindingStart,
+  type HypothesisFirstNextAction,
+} from "./hypothesisFirstNextAction";
 import { getNodeAdapter } from "./nodeAdapterModel";
+import type { CommandOffer } from "../../../api/types/research-workflow/commands";
 import { ResearchCenteredEmptyState } from "./ResearchCenteredEmptyState";
 import type { ResearchProcessPanel } from "./researchProcessPanelSelection";
 import { handoffsForNode } from "./researchNodeHandoffModel";
@@ -60,8 +65,10 @@ export function ResearchProcessInspectorPane(props: {
     pendingTaskId: (nodeId: string) => string | null;
     submitOffer: (offer: import("../../../api/types/research-workflow/commands").CommandOffer) => Promise<void>;
   };
+  nextAction?: HypothesisFirstNextAction;
+  retryCollectionOffer?: CommandOffer | null;
 }) {
-  const { scope, state, actions } = props;
+  const { scope, state, actions, nextAction, retryCollectionOffer = null } = props;
   const { lang } = useShellI18n();
   const questionDetail = useQuery({
     queryKey: queryKeys.challengeQuestionRunDetail(scope.teamId, scope.questionId),
@@ -79,6 +86,7 @@ export function ResearchProcessInspectorPane(props: {
       <div className={styles.question}>
         <ChallengeQuestionDetailPanel
           requestedQuestionId={scope.questionId}
+          teamId={scope.teamId}
           detail={questionDetail.data}
           isLoading={questionDetail.isPending}
           errorMessage={questionDetail.error instanceof Error ? questionDetail.error.message : questionDetail.isError ? "challenge_question_run_unavailable" : ""}
@@ -116,7 +124,7 @@ export function ResearchProcessInspectorPane(props: {
     return <ResearchRunTimeline run={state.run} projection={state.projection} insights={state.insights} />;
   }
   if (scope.panel === "team") {
-    return <ResearchTeamPanel teamId={scope.teamId} teamName={scope.teamName} linkedChatRoomId={scope.linkedChatRoomId} run={state.run} projection={state.projection} effectiveBindings={state.effectiveBindings} />;
+    return <ResearchTeamPanel teamId={scope.teamId} teamName={scope.teamName} linkedChatRoomId={scope.linkedChatRoomId} run={state.run} projection={state.projection} effectiveBindings={state.effectiveBindings} meetingRoundId={nextAction?.meetingRoundId || ""} />;
   }
   // Hypothesis-first region cards: summary + deep link, in definition and run views alike.
   if (scope.selectedNodeId && isHypothesisFirstCanvasNode(scope.selectedNodeId)) {
@@ -125,7 +133,11 @@ export function ResearchProcessInspectorPane(props: {
         teamId={scope.teamId}
         questionId={scope.questionId || state.run?.questionId || ""}
         nodeId={scope.selectedNodeId}
+        runId={scope.runId}
+        collectionChildStatus={state.projection?.run.nodeRuns.source_finding?.status ?? null}
         onOpenQuestion={(questionId) => actions.replaceParams({ panel: "question", questionId })}
+        onNavigateToNode={(nodeId) => actions.replaceParams({ node: nodeId, panel: "node" })}
+        onRetryCollection={retryCollectionOffer ? () => actions.submitOffer(retryCollectionOffer) : undefined}
       />
     );
   }
@@ -145,6 +157,7 @@ export function ResearchProcessInspectorPane(props: {
     );
   }
   if (state.nodeDetail.kind === "empty") return <ResearchCenteredEmptyState title="暂无节点详情" />;
+  if (state.nodeDetail.kind !== "ready") return <ResearchCenteredEmptyState title="暂无节点详情" />;
   return (
     <ResearchProcessNodeInspector
       teamId={scope.teamId}
@@ -157,6 +170,22 @@ export function ResearchProcessInspectorPane(props: {
       handoffPending={Boolean(actions.pendingTaskId(scope.selectedNodeId))}
       busy={state.busy}
       onOffer={actions.submitOffer}
+      hideStartOffer={Boolean(nextAction && shouldHideSourceFindingStart(nextAction.stage) && scope.selectedNodeId === "source_finding")}
+      statusBanner={
+        nextAction && shouldHideSourceFindingStart(nextAction.stage) && scope.selectedNodeId === "source_finding"
+          ? (nextAction.statusMessage || nextAction.recovery?.reason || (nextAction.stage === "collecting" ? "资料搜集中" : ""))
+          : null
+      }
+      hypothesisNavLabel={
+        nextAction && nextAction.stage !== "collecting" && nextAction.targetNodeId?.startsWith("hf_")
+          ? nextAction.navigationLabel
+          : null
+      }
+      onNavigateHypothesis={
+        nextAction?.targetNodeId
+          ? () => actions.replaceParams({ node: nextAction.targetNodeId, panel: "node" })
+          : undefined
+      }
     />
   );
 }

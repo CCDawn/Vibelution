@@ -164,6 +164,39 @@ export function remainingCommandOffers(
   return list.filter((offer) => offer.idempotencyKey !== primary.idempotencyKey);
 }
 
+export function withoutStartNodeOffers(
+  offers: CommandOffer[] | null | undefined,
+): CommandOffer[] {
+  return (offers ?? []).filter((offer) => offer.command !== "start_node");
+}
+
+function payloadRemediationLabel(payload: Record<string, unknown> | null | undefined): string {
+  if (!payload) return "";
+  const label = payload.remediation_label ?? payload.remediationLabel;
+  return typeof label === "string" ? label.trim() : "";
+}
+
+export function commandOfferUnavailableReason(offer: CommandOffer, isZh: boolean): string {
+  if (offer.available) return "";
+  const remediation = payloadRemediationLabel(offer.payload);
+  if (remediation) return remediation;
+  const code = offer.reasonCode || offer.blockerIds[0] || "command_unavailable";
+  if (code === "hypothesis_first_meeting_open") {
+    return isZh ? "前往闭环首轮假说讨论" : "Go to the first hypothesis discussion";
+  }
+  if (code === "retry_owns_recovery") return isZh ? "当前节点已阻塞，请使用重试" : "Node is blocked; use retry";
+  if (code === "node_in_flight") return isZh ? "当前节点已在执行" : "Node is already running";
+  if (code === "node_already_succeeded") return isZh ? "当前节点已完成" : "Node already completed";
+  return code;
+}
+
+export function isHypothesisFirstMeetingBlocker(offer: CommandOffer): boolean {
+  if (offer.available) return false;
+  const code = offer.reasonCode || offer.blockerIds[0] || "";
+  return code === "hypothesis_first_meeting_open"
+    || payloadRemediationLabel(offer.payload).includes("假说讨论");
+}
+
 export function researchAgentConfigRoute(agentId: string): string | null {
   const trimmed = agentId.trim();
   if (!trimmed) return null;

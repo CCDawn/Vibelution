@@ -46,4 +46,26 @@ describe("ResearchTeamPanel", () => {
     expect(html).toContain("No run yet");
     expect(html).toContain("No chat room is linked to this team yet");
   });
+
+  it("opens team chat with this round meetingRoundId", () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData(queryKeys.configPublic(), { language: "zh" });
+    const html = renderToStaticMarkup(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <ResearchTeamPanel
+            teamId="research-team"
+            teamName="科研团队"
+            linkedChatRoomId="room-1"
+            run={null}
+            projection={null}
+            effectiveBindings={null}
+            meetingRoundId="hf-review-1"
+          />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(html).toContain("meetingRound=hf-review-1");
+    expect(html).toContain("打开团队讨论");
+  });
 });
