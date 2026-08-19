@@ -47,8 +47,17 @@ export function createTeamsResearchNavigation(options: CreateTeamsResearchNaviga
       nextParams.delete("team_id");
       nextParams.set("teamId", effectiveTeamId);
     }
-    // overview / legacy canvas → single team home; stage pages → board workbench.
+    // Research teams always land on the process workspace (board + workflow).
+    // Non-research teams keep org-canvas home for overview/canvas.
     if (view === "overview" || view === "canvas") {
+      if (researchWorkflowTeamSelected) {
+        setResearchWorkspaceView("workflow");
+        setTeamShellMode("board");
+        const params = new URLSearchParams(teamWorkspaceRoute(effectiveTeamId).split("?")[1] || "");
+        params.set("teamMode", "board");
+        setSearchParams(params, { replace: true });
+        return;
+      }
       setResearchWorkspaceView("overview");
       nextParams.set("researchView", "overview");
       setTeamShellMode("canvas");
@@ -67,7 +76,14 @@ export function createTeamsResearchNavigation(options: CreateTeamsResearchNaviga
   function selectTeamRecord(team: Team) {
     setSelectedTeamId(team.teamId);
     setSelectedNodeId("");
-    // Always open the canonical home (flow + canvas); stage destinations use selectResearchWorkspaceView.
+    if (isResearchWorkflowTeam(team)) {
+      setResearchWorkspaceView("workflow");
+      setTeamShellMode("board");
+      const params = new URLSearchParams(teamWorkspaceRoute(team.teamId).split("?")[1] || "");
+      params.set("teamMode", "board");
+      setSearchParams(params);
+      return;
+    }
     setResearchWorkspaceView("overview");
     setTeamShellMode("canvas");
     const query = teamWorkspaceRoute(team.teamId).split("?")[1] || "";
@@ -80,9 +96,12 @@ export function createTeamsResearchNavigation(options: CreateTeamsResearchNaviga
     nextParams.set("teamMode", mode);
     if (mode === "canvas") {
       if (researchWorkflowTeamSelected) {
-        // Canvas shell always lands on the single team home (overview + flow + graph).
-        setResearchWorkspaceView("overview");
-        nextParams.set("researchView", "overview");
+        setResearchWorkspaceView("workflow");
+        setTeamShellMode("board");
+        const params = new URLSearchParams(teamWorkspaceRoute(effectiveTeamId).split("?")[1] || "");
+        params.set("teamMode", "board");
+        setSearchParams(params, { replace: true });
+        return;
       }
     } else if (
       researchWorkspaceView === "canvas"
