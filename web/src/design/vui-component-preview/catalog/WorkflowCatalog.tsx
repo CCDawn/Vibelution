@@ -1,5 +1,10 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+
+import { queryKeys } from "../../../api/queryKeys";
+import type { ChallengeSubmissionReadiness } from "../../../api/types/challengeCup";
 import { VWorkflowCanvas } from "../../../components/vui";
 import type { WorkflowLayoutInput } from "../../../components/vui/product/workflow/workflowCanvasTypes";
+import { ChallengeSubmissionReadinessPanel } from "../../../routes/teams/research-workflow/ChallengeSubmissionReadinessPanel";
 import { VuiPreviewCard } from "../VuiPreviewCard";
 import { VuiPreviewSection } from "../VuiPreviewSection";
 import { workflowCatalogClasses } from "./WorkflowCatalog.styles";
@@ -92,6 +97,71 @@ const demoGraph: WorkflowLayoutInput = {
   },
 };
 
+const previewTeamId = "challenge-readiness-preview";
+const challengeReadinessPreview: ChallengeSubmissionReadiness = {
+  schemaVersion: 1,
+  teamId: previewTeamId,
+  status: "blocked",
+  readyCount: 3,
+  requiredCount: 5,
+  blockerCount: 2,
+  artifacts: [
+    {
+      key: "full_catalog_results",
+      label: "Full catalog results",
+      required: true,
+      status: "blocked",
+      detail: "122/125",
+      blocker: "full_catalog_results_incomplete",
+      primaryAction: { kind: "repair", target: "full-catalog-results", label: "Repair", questionId: "SCI-124" },
+    },
+    {
+      key: "technical_proposal_pdf",
+      label: "Technical proposal PDF",
+      required: true,
+      status: "ready",
+      detail: "confirmed",
+      blocker: "",
+      primaryAction: { kind: "inspect", target: "submission-package", label: "Inspect" },
+    },
+    {
+      key: "demo_video",
+      label: "Demo video",
+      required: false,
+      status: "optional",
+      detail: "optional",
+      blocker: "",
+      primaryAction: { kind: "inspect", target: "submission-package", label: "Inspect" },
+    },
+  ],
+  blockers: [
+    {
+      code: "full_catalog_results_incomplete",
+      label: "Full catalog results incomplete",
+      action: { kind: "repair", target: "full-catalog-results", label: "Repair", questionId: "SCI-124" },
+    },
+    {
+      code: "source_code_not_packaged",
+      label: "Source package not confirmed",
+      action: { kind: "inspect", target: "submission-package", label: "Inspect" },
+    },
+  ],
+  programSummary: {
+    title: "Challenge Cup Research",
+    questionCount: 125,
+    approvedQuestionCount: 122,
+    deepExperimentCount: 2,
+    approvedDeepExperimentCount: 2,
+  },
+};
+const challengeReadinessQueryClient = new QueryClient({
+  defaultOptions: { queries: { staleTime: Infinity, retry: false } },
+});
+challengeReadinessQueryClient.setQueryData(
+  queryKeys.challengeSubmissionReadiness(previewTeamId),
+  challengeReadinessPreview,
+);
+
 const serpentineStatusGraph: WorkflowLayoutInput = {
   stages: [
     {
@@ -157,6 +227,11 @@ const serpentineStatusGraph: WorkflowLayoutInput = {
 export function WorkflowCatalog() {
   return (
     <VuiPreviewSection title="Workflow">
+      <VuiPreviewCard name="ChallengeSubmissionReadiness" className={workflowCatalogClasses.card}>
+        <QueryClientProvider client={challengeReadinessQueryClient}>
+          <ChallengeSubmissionReadinessPanel teamId={previewTeamId} onOpenQuestion={() => undefined} />
+        </QueryClientProvider>
+      </VuiPreviewCard>
       <VuiPreviewCard name="VWorkflowCanvas" className={workflowCatalogClasses.card}>
         <div className={workflowCatalogClasses.host}>
           <VWorkflowCanvas graph={demoGraph} height="100%" />
