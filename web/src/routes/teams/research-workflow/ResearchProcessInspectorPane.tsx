@@ -11,20 +11,22 @@ import type {
   WorkflowCanvasProjection,
 } from "../../../api/types/researchWorkflow";
 import { VButton, VStateSurface, VSurface } from "../../../components/vui";
-import { ChallengeQuestionDetailPanel } from "../challenge-cup/ChallengeQuestionDetailPanel";
-import { ChallengeMvpProgressPanel } from "./ChallengeMvpProgressPanel";
-import { EvidenceGraphView } from "./EvidenceGraphView";
-import { HypothesisFirstNodeInspector } from "./HypothesisFirstNodeInspector";
+import {
+  ChallengeMvpProgressPanel,
+  ChallengeQuestionDetailPanel,
+  EvidenceGraphView,
+  HypothesisFirstNodeInspector,
+  ResearchAgentBindingPanel,
+  ResearchProcessDefinitionNodePanel,
+  ResearchProcessNodeInspector,
+  ResearchRunLaunchPanel,
+  ResearchRunTimeline,
+  ResearchTeamPanel,
+} from "../teamLazyPanels";
 import { isHypothesisFirstCanvasNode } from "./hypothesisFirstCanvasRegion";
 import { getNodeAdapter } from "./nodeAdapterModel";
-import { ResearchAgentBindingPanel } from "./ResearchAgentBindingPanel";
 import { ResearchCenteredEmptyState } from "./ResearchCenteredEmptyState";
-import { ResearchProcessDefinitionNodePanel } from "./ResearchProcessDefinitionNodePanel";
-import { ResearchProcessNodeInspector } from "./ResearchProcessNodeInspector";
 import type { ResearchProcessPanel } from "./researchProcessPanelSelection";
-import { ResearchRunLaunchPanel } from "./ResearchRunLaunchPanel";
-import { ResearchRunTimeline } from "./ResearchRunTimeline";
-import { ResearchTeamPanel } from "./ResearchTeamPanel";
 import { handoffsForNode } from "./researchNodeHandoffModel";
 import type { NodeDetailState } from "./useNodeDetailState";
 import type { ResearchWorkflowInsights } from "./useResearchWorkflowInsights";

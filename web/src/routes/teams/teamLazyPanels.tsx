@@ -6,11 +6,12 @@
 import { createLazyNamedTeamPanel } from "./lazyTeamPanel";
 import type { TeamsPanelPackLoaders } from "./teamPanelPrefetch";
 
-/** Path-scoped packs: shared | research core | research experiment | research search | SC. */
+/** Path-scoped packs: shared | research core | research experiment | research search | research workflow inspector | SC. */
 export const loadTeamSharedPanels = () => import("./teamSharedPanels");
 export const loadTeamResearchPanels = () => import("./teamResearchPanels");
 export const loadTeamResearchExperimentPanels = () => import("./teamResearchExperimentPanels");
 export const loadTeamResearchSearchPanels = () => import("./teamResearchSearchPanels");
+export const loadTeamResearchWorkflowPanels = () => import("./teamResearchWorkflowPanels");
 export const loadTeamSourceCollectionPanels = () => import("./teamSourceCollectionPanels");
 
 export const teamsPanelPackLoaders: TeamsPanelPackLoaders = {
@@ -18,6 +19,7 @@ export const teamsPanelPackLoaders: TeamsPanelPackLoaders = {
   research: loadTeamResearchPanels,
   research_experiment: loadTeamResearchExperimentPanels,
   research_search: loadTeamResearchSearchPanels,
+  research_workflow: loadTeamResearchWorkflowPanels,
   source_collection: loadTeamSourceCollectionPanels,
 };
 
@@ -67,3 +69,14 @@ export const TeamWorkflowKnowledgeIngestionStatusPanel = createLazyNamedTeamPane
 export const TeamWorkflowModelEvidenceStatusPanel = createLazyNamedTeamPanel(loadTeamResearchExperimentPanels, "TeamWorkflowModelEvidenceStatusPanel");
 export const TeamWorkflowPaperNoteChunkStatusPanel = createLazyNamedTeamPanel(loadTeamResearchExperimentPanels, "TeamWorkflowPaperNoteChunkStatusPanel");
 export const TeamWorkflowSourceQualityStatusPanel = createLazyNamedTeamPanel(loadTeamResearchExperimentPanels, "TeamWorkflowSourceQualityStatusPanel");
+// Research process-canvas inspector leaves (panel=-driven + node-driven).
+export const ChallengeQuestionDetailPanel = createLazyNamedTeamPanel(loadTeamResearchWorkflowPanels, "ChallengeQuestionDetailPanel");
+export const ChallengeMvpProgressPanel = createLazyNamedTeamPanel(loadTeamResearchWorkflowPanels, "ChallengeMvpProgressPanel");
+export const EvidenceGraphView = createLazyNamedTeamPanel(loadTeamResearchWorkflowPanels, "EvidenceGraphView");
+export const HypothesisFirstNodeInspector = createLazyNamedTeamPanel(loadTeamResearchWorkflowPanels, "HypothesisFirstNodeInspector");
+export const ResearchAgentBindingPanel = createLazyNamedTeamPanel(loadTeamResearchWorkflowPanels, "ResearchAgentBindingPanel");
+export const ResearchProcessDefinitionNodePanel = createLazyNamedTeamPanel(loadTeamResearchWorkflowPanels, "ResearchProcessDefinitionNodePanel");
+export const ResearchProcessNodeInspector = createLazyNamedTeamPanel(loadTeamResearchWorkflowPanels, "ResearchProcessNodeInspector");
+export const ResearchRunLaunchPanel = createLazyNamedTeamPanel(loadTeamResearchWorkflowPanels, "ResearchRunLaunchPanel");
+export const ResearchRunTimeline = createLazyNamedTeamPanel(loadTeamResearchWorkflowPanels, "ResearchRunTimeline");
+export const ResearchTeamPanel = createLazyNamedTeamPanel(loadTeamResearchWorkflowPanels, "ResearchTeamPanel");

@@ -42,4 +42,14 @@ describe("research workflow workspace responsibility contract", () => {
     expect(source).toContain("useResearchWorkflowWorkspace");
     expect(source).toContain("ResearchProcessInspectorPane");
   });
+
+  it("mounts inspector panel leaves through the research workflow lazy pack", () => {
+    const source = readFileSync(resolve(root, "ResearchProcessInspectorPane.tsx"), "utf8");
+    expect(source).toContain('from "../teamLazyPanels"');
+    expect(source).not.toContain('from "./ResearchRunLaunchPanel"');
+    expect(source).not.toContain('from "./ChallengeMvpProgressPanel"');
+    expect(source).not.toContain('from "./ResearchProcessNodeInspector"');
+    expect(source).not.toContain('from "./ResearchAgentBindingPanel"');
+    expect(source).not.toContain('from "../challenge-cup/ChallengeQuestionDetailPanel"');
+  });
 });
