@@ -1,7 +1,9 @@
 export type BootstrapOwnershipMode = "attached" | "started";
 
+export type ActiveWorkProbeState = "active" | "idle" | "unknown";
+
 export type ActiveWorkStatus = {
-  active: boolean;
+  state: ActiveWorkProbeState;
   message: string;
 };
 
@@ -29,7 +31,14 @@ export async function decideShutdown(input: {
       message: ACTIVE_WORK_STATUS_UNAVAILABLE_MESSAGE
     };
   }
-  if (activeWork.active) {
+  if (activeWork.state === "unknown") {
+    return {
+      allowed: false,
+      reason: "active_work_status_unavailable",
+      message: activeWork.message || ACTIVE_WORK_STATUS_UNAVAILABLE_MESSAGE
+    };
+  }
+  if (activeWork.state === "active") {
     return {
       allowed: false,
       reason: "active_work_running",
@@ -93,13 +102,19 @@ export async function resolveQuitActiveWorkStatus(input: {
         return await input.recoverAndRetry();
       } catch (retryError) {
         if (isActiveWorkProbeAuthFailure(retryError)) {
-          return { active: false, message: "" };
+          return {
+            state: "unknown",
+            message: "launcher active-work status remained unauthorized after control recovery"
+          };
         }
         throw retryError;
       }
     }
     if (isActiveWorkProbeAuthFailure(error)) {
-      return { active: false, message: "" };
+      return {
+        state: "unknown",
+        message: "launcher active-work status is unauthorized"
+      };
     }
     throw error;
   }
@@ -121,23 +136,32 @@ export async function fetchLauncherActiveWorkStatus(input: {
   }
   const payload = (await response.json()) as Record<string, unknown>;
   const activeWorkCount = readActiveWorkCount(payload);
+  if (activeWorkCount === null) {
+    return {
+      state: "unknown",
+      message: "launcher status did not contain a valid active-work projection"
+    };
+  }
   return {
-    active: activeWorkCount > 0,
+    state: activeWorkCount > 0 ? "active" : "idle",
     message: activeWorkCount > 0 ? `${activeWorkCount} active work item(s) block lifecycle commands.` : ""
   };
 }
 
-function readActiveWorkCount(payload: Record<string, unknown>): number {
+function readActiveWorkCount(payload: Record<string, unknown>): number | null {
   const lifecycleProof = payload.lifecycleProof;
   if (!isRecord(lifecycleProof)) {
-    return 0;
+    return null;
   }
   const activeWorkRuns = lifecycleProof.activeWorkRuns;
   if (!isRecord(activeWorkRuns)) {
-    return 0;
+    return null;
   }
-  const count = Number(activeWorkRuns.count ?? 0);
-  return Number.isFinite(count) && count > 0 ? count : 0;
+  const count = activeWorkRuns.count;
+  if (typeof count !== "number" || !Number.isFinite(count) || count < 0 || !Number.isInteger(count)) {
+    return null;
+  }
+  return count;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

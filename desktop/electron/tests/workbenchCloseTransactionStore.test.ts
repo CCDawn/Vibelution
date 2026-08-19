@@ -3,20 +3,26 @@ import { describe, expect, it } from "vitest";
 import { MainWorkbenchCloseTransactionStore } from "../src/lifecycle/workbenchCloseTransactionStore.js";
 
 describe("MainWorkbenchCloseTransactionStore", () => {
-  it("requires confirmation only for normal closes with active work", () => {
+  it("requires confirmation for normal closes with active or unknown work state", () => {
     const store = new MainWorkbenchCloseTransactionStore();
-    const needsConfirm = store.submit({ mode: "normal", reason: "close", activeWork: true });
+    const needsConfirm = store.submit({ mode: "normal", reason: "close", activeWorkState: "active" });
     expect(needsConfirm.phase).toBe("confirmation_required");
+    expect(needsConfirm.requestId).toBeTruthy();
 
-    const straight = new MainWorkbenchCloseTransactionStore().submit({ mode: "force", reason: "close", activeWork: true });
-    expect(straight.phase).toBe("backend_closing");
+    const unknown = new MainWorkbenchCloseTransactionStore().submit({
+      mode: "normal",
+      reason: "close",
+      activeWorkState: "unknown"
+    });
+    expect(unknown.phase).toBe("confirmation_required");
   });
 
   it("walks the close lifecycle from confirmation to success", () => {
     const store = new MainWorkbenchCloseTransactionStore();
-    const submitted = store.submit({ mode: "normal", reason: "close", activeWork: true });
-    const closing = store.confirm(submitted.closeId);
+    const submitted = store.submit({ mode: "normal", reason: "close", activeWorkState: "active" });
+    const closing = store.confirm(submitted.closeId, submitted.requestId!);
     expect(closing.phase).toBe("backend_closing");
+    expect(closing.mode).toBe("force");
     const authorized = store.backendStopped(submitted.closeId);
     expect(authorized.phase).toBe("window_close_authorized");
     const done = store.windowClosed(submitted.closeId);
@@ -25,27 +31,51 @@ describe("MainWorkbenchCloseTransactionStore", () => {
 
   it("rejects double submits while a transaction is in flight", () => {
     const store = new MainWorkbenchCloseTransactionStore();
-    store.submit({ mode: "normal", reason: "close", activeWork: false });
-    expect(() => store.submit({ mode: "normal", reason: "close", activeWork: false })).toThrow(
+    store.submit({ mode: "normal", reason: "close", activeWorkState: "idle" });
+    expect(() => store.submit({ mode: "normal", reason: "close", activeWorkState: "idle" })).toThrow(
       "already in flight"
     );
   });
 
   it("rejects out-of-order phase transitions", () => {
     const store = new MainWorkbenchCloseTransactionStore();
-    const submitted = store.submit({ mode: "force", reason: "close", activeWork: false });
+    const submitted = store.submit({
+      mode: "force",
+      reason: "close",
+      activeWorkState: "idle",
+      requestId: "force-request"
+    });
     expect(() => store.windowClosed(submitted.closeId)).toThrow("not authorized");
-    expect(() => store.confirm(submitted.closeId)).toThrow("not awaiting confirmation");
+    expect(() => store.confirm(submitted.closeId, "force-request")).toThrow("not awaiting confirmation");
+  });
+
+  it("rejects force close without an explicit request id and mismatched confirmation", () => {
+    const store = new MainWorkbenchCloseTransactionStore();
+    expect(() => store.submit({ mode: "force", reason: "close", activeWorkState: "active" })).toThrow(
+      "requestId"
+    );
+    const submitted = store.submit({ mode: "normal", reason: "close", activeWorkState: "active" });
+    expect(() => store.confirm(submitted.closeId, "wrong-request")).toThrow("request id");
   });
 
   it("records failures with a code and message", () => {
     const store = new MainWorkbenchCloseTransactionStore();
-    const submitted = store.submit({ mode: "force", reason: "close", activeWork: false });
+    const submitted = store.submit({
+      mode: "force",
+      reason: "close",
+      activeWorkState: "idle",
+      requestId: "force-request"
+    });
     const failed = store.fail(submitted.closeId, "backend_stop_timeout", "backend did not stop");
     expect(failed.phase).toBe("failed");
     expect(failed.failureCode).toBe("backend_stop_timeout");
     // A failed transaction allows a fresh submit.
-    const next = store.submit({ mode: "force", reason: "close", activeWork: false });
+    const next = store.submit({
+      mode: "force",
+      reason: "close",
+      activeWorkState: "idle",
+      requestId: "force-request-next"
+    });
     expect(next.phase).toBe("backend_closing");
   });
 });

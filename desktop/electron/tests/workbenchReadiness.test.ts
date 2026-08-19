@@ -83,4 +83,34 @@ describe("waitForWorkbenchLifecycleReady", () => {
     ).rejects.toThrow("build failed");
     expect(readStatus).toHaveBeenCalledTimes(1);
   });
+
+  it("aborts a superseded observer without waiting for the readiness timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      const readStatus = vi.fn(async () => ({
+        overallState: "starting",
+        observedState: "closed",
+        lifecycleConsistency: "consistent",
+        backendHealthy: false,
+        backendPortListening: false,
+        lifecycleResults: []
+      }));
+      const pending = waitForWorkbenchLifecycleReady({
+        commandId: "cmd-old",
+        readStatus,
+        timeoutMs: 90_000,
+        pollIntervalMs: 5_000,
+        signal: controller.signal
+      });
+
+      await vi.advanceTimersByTimeAsync(0);
+      controller.abort(new Error("lifecycle observer superseded"));
+
+      await expect(pending).rejects.toThrow("lifecycle observer superseded");
+      expect(readStatus).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

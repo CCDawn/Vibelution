@@ -37,6 +37,7 @@ export type OrchestratedLifecycleResult = {
   accepted: boolean;
   operation: string;
   commandId?: string;
+  requestId?: string;
   message?: string;
   code?: string;
   activeWorkRuns?: unknown[];
@@ -51,6 +52,7 @@ export type OrchestratedBranchInstanceResult = {
   controlPort?: number;
   generation?: number;
   commandId?: string;
+  requestId?: string;
   message?: string;
   code?: string;
   activeWorkRuns?: unknown[];

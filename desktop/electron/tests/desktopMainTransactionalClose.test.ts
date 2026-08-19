@@ -38,13 +38,23 @@ describe("Electron main transactional Workbench close", () => {
     expect(closeStoreSource).toContain("window_close_authorized");
   });
 
-  it("stops the backend through the Python lifecycle bridge before authorizing the window close", () => {
+  it("stops the backend through the lifecycle supervisor before authorizing the window close", () => {
     const source = readFileSync(mainSourcePath, "utf8");
+    const stopStart = source.indexOf("async function stopWorkbenchBackend(");
+    const stopEnd = source.indexOf("\nasync function ", stopStart + 1);
+    const stopSource = source.slice(stopStart, stopEnd);
 
     expect(source).toContain("electron.workbench_close.backend_stopping");
-    expect(source).toContain("stopWorkbenchBackend(paths, bootstrap)");
-    expect(source).toContain("runWorkbenchLifecycle({");
-    expect(source).toContain('operation: "stop"');
+    expect(source).toContain("stopWorkbenchBackend(paths, bootstrap, transaction)");
+    expect(source).toContain('let activeWorkState: ActiveWorkProbeState = "unknown"');
+    expect(source).toContain("activeWorkState = status.state");
+    expect(source).toContain("mainWorkbenchCloseStore.confirm(transaction.closeId, transaction.requestId!)");
+    expect(stopSource).toContain("orchestrateLauncherLifecycle(operation");
+    expect(stopSource).toContain("requestId: transaction.requestId");
+    expect(stopSource).toContain("closeId: transaction.closeId");
+    expect(stopSource).toContain("deferWindowClose: true");
+    expect(stopSource).not.toContain("runWorkbenchLifecycle({");
+    expect(source).toContain("!shouldDeferOrchestratedWindowClose(payload)");
     expect(source).toContain('from "./lifecycle/workbenchBackendCloseReadiness.js"');
     expect(source).toContain("waitForWorkbenchBackendSettledForWindowClose({");
     expect(source).toContain("timeoutMs: WORKBENCH_CLOSE_BACKEND_WAIT_MS");

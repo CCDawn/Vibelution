@@ -48,23 +48,70 @@ describe("Electron main Launcher IPC facade", () => {
     expect(mainSource).toContain("scheduleStatusRefresh");
   });
 
-  it("opens the current workbench window after start even without an isolated port", () => {
-    expect(mainSource).toContain("openOrchestratedWorkbenchWindow");
+  it("routes the current checkout through the main supervisor and keeps isolated READY guarded", () => {
     expect(mainSource).toContain("isCurrentCheckoutInstance(instanceId)");
-    expect(mainSource).toContain("provider.openOrFocusWorkbench(url)");
-    expect(mainSource).toContain("await waitForWorkbenchHttp({ url, timeoutMs: WORKBENCH_START_READY_WAIT_MS })");
+    expect(mainSource).toContain("provider.openOrFocusWorkbench(workbenchUrl)");
     expect(mainSource).toContain("refreshLiveWorkbenchUrl");
     expect(mainSource).toContain("resolveWorkbenchUrlFromBridge");
     expect(mainSource).toContain("return workbenchLoopbackUrl();");
     const branchStart = mainSource.indexOf("async function orchestrateBranchInstanceLifecycle");
-    const branchBody = mainSource.slice(branchStart, branchStart + 2800);
+    const branchBody = mainSource.slice(branchStart, mainSource.indexOf("async function orchestrateLauncherApi"));
     expect(branchBody).toContain('operation === "start" || operation === "restart"');
     expect(branchBody).toContain("isCurrentCheckoutInstance(instanceId)");
+    expect(branchBody).toContain("orchestrateLauncherLifecycle(operation, payload)");
     expect(branchBody).toContain("superviseIsolatedInstanceStart");
     expect(branchBody).toContain("ISOLATED_INSTANCE_READY_WAIT_MS");
     expect(branchBody).toContain('operation: "observe-error"');
     expect(branchBody).toContain('operation: "observe-ready"');
     expect(mainSource).toContain("from \"./process/isolatedInstanceSupervisor.js\"");
+  });
+
+  it("owns main and isolated lifecycle observers through one revisioned supervisor", () => {
+    expect(mainSource).toContain('from "./lifecycle/launcherLifecycleSupervisor.js"');
+    expect(mainSource).toContain("const launcherLifecycleSupervisor = new LauncherLifecycleSupervisor()");
+    const lifecycleStart = mainSource.indexOf("async function orchestrateLauncherLifecycle");
+    const lifecycleBody = mainSource.slice(lifecycleStart, mainSource.indexOf("async function orchestrateBranchInstanceLifecycle"));
+    expect(lifecycleBody).toContain("launcherLifecycleSupervisor.beginIntent");
+    expect(lifecycleBody).toContain("launcherLifecycleSupervisor.executeMutation");
+    expect(lifecycleBody).toContain("launcherLifecycleSupervisor.bindCommand");
+    expect(lifecycleBody).toContain("scheduleLauncherStatusCliRefresh");
+    expect(lifecycleBody).toContain("signal: intentLease.signal");
+
+    const readyStart = mainSource.indexOf("async function openWorkbenchAfterLifecycleReady");
+    const readyBody = mainSource.slice(readyStart, readyStart + 1400);
+    expect(readyBody).toContain("waitForWorkbenchLifecycleReady");
+    expect(readyBody).toContain("signal: lease.signal");
+    expect(readyBody).toContain("launcherLifecycleSupervisor.isCurrent(lease)");
+    expect(readyBody).toContain("launcherLifecycleSupervisor.claimReady(lease)");
+    expect(readyBody).toContain("launcherLifecycleSupervisor.completeReady(lease)");
+    expect(readyBody).not.toContain("waitForWorkbenchHttp");
+
+    const branchStart = mainSource.indexOf("async function orchestrateBranchInstanceLifecycle");
+    const branchBody = mainSource.slice(branchStart, branchStart + 4200);
+    expect(branchBody).toContain("launcherLifecycleSupervisor.beginIntent");
+    expect(branchBody).toContain("launcherLifecycleSupervisor.bindCommand");
+    expect(branchBody).toContain("lease,");
+    expect(branchBody).toContain("isCurrent:");
+    expect(branchBody).toContain("claimReady:");
+    expect(branchBody).toContain("completeReady:");
+    expect(branchBody).toContain("signal: intentLease.signal");
+  });
+
+  it("authorizes every main and isolated force operation before creating its lifecycle intent", () => {
+    expect(mainSource).toContain('from "./lifecycle/forceLifecycleAuthorization.js"');
+    const lifecycleStart = mainSource.indexOf("async function orchestrateLauncherLifecycle");
+    const lifecycleBody = mainSource.slice(lifecycleStart, mainSource.indexOf("async function orchestrateBranchInstanceLifecycle"));
+    expect(lifecycleBody.indexOf("authorizeLauncherForceLifecycle")).toBeGreaterThanOrEqual(0);
+    expect(lifecycleBody.indexOf("authorizeLauncherForceLifecycle")).toBeLessThan(
+      lifecycleBody.indexOf("launcherLifecycleSupervisor.beginIntent")
+    );
+
+    const branchStart = mainSource.indexOf("async function orchestrateBranchInstanceLifecycle");
+    const branchBody = mainSource.slice(branchStart, mainSource.indexOf("async function orchestrateLauncherApi"));
+    expect(branchBody).toContain("authorizeLauncherForceLifecycle");
+    expect(mainSource).toContain("electron.lifecycle.force_authorized");
+    expect(mainSource).toContain("requestId: authorization.requestId");
+    expect(mainSource).toContain("activeWorkState: authorization.probeState");
   });
 
   it("closes Electron workbench windows on stop instead of waiting for Python to own them", () => {
@@ -73,8 +120,36 @@ describe("Electron main Launcher IPC facade", () => {
     const lifecycleStart = mainSource.indexOf("async function orchestrateLauncherLifecycle");
     const lifecycleBody = mainSource.slice(lifecycleStart, mainSource.indexOf("async function orchestrateBranchInstanceLifecycle"));
     expect(lifecycleBody).toContain("shouldRefreshBeforeLifecycle");
-    expect(lifecycleBody).toContain('operation === "stop" || operation === "force-stop"');
+    expect(lifecycleBody).toContain('desiredState === "closed"');
+    expect(lifecycleBody).toContain("launcherLifecycleSupervisor.isCurrent(lease)");
     expect(lifecycleBody).toContain("approveWorkbenchCloseOnce");
+  });
+
+  it("routes approved desktop shutdown through the same lifecycle supervisor", () => {
+    const shutdownStart = mainSource.indexOf("async function stopMainRuntimeForApprovedShutdown");
+    const shutdownBody = mainSource.slice(shutdownStart, mainSource.indexOf("async function requestDesktopShellExit", shutdownStart));
+    expect(shutdownBody).toContain('orchestrateLauncherLifecycle("shutdown"');
+    expect(mainSource).toContain("stopManagedRuntime: stopMainRuntimeForApprovedShutdown");
+    const managedStart = mainSource.indexOf("async function stopManagedRuntime()");
+    const managedBody = mainSource.slice(managedStart, mainSource.indexOf("\nfunction desktopPythonPath", managedStart));
+    expect(managedBody).toContain("launcherLifecycleSupervisor.executeMutation");
+    expect(managedBody).toContain('operation: "shutdown"');
+  });
+
+  it("restores tray instances through the main and isolated lifecycle supervisors", () => {
+    const restoreStart = mainSource.indexOf("async function restoreTrayRestartAllPending");
+    const restoreBody = mainSource.slice(restoreStart, mainSource.indexOf("async function maybeRestoreTrayRestartAllPending", restoreStart));
+    expect(restoreBody).toContain('orchestrateLauncherLifecycle("start"');
+    expect(restoreBody).toContain('orchestrateBranchInstanceLifecycle("start"');
+    expect(restoreBody).not.toContain("runWorkbenchLifecycle({");
+    expect(restoreBody).not.toContain("runBranchInstanceBridge({");
+  });
+
+  it("routes the first product-entry open through the supervised live-or-start path", () => {
+    const startupOpen = mainSource.indexOf("if (pendingOpenWorkbenchRequest &&");
+    const startupBody = mainSource.slice(startupOpen, startupOpen + 500);
+    expect(startupBody).toContain("await startOrFocusWorkbenchFromProductEntryOnShell()");
+    expect(startupBody).not.toContain("windowProvider.openOrFocusWorkbench()");
   });
 
   it("refreshes the live workbench URL after start instead of waiting on a stale bootstrap port", () => {

@@ -71,4 +71,27 @@ describe("waitForWorkbenchHttp", () => {
       })
     ).rejects.toThrow(/not reachable/);
   });
+
+  it("aborts a superseded HTTP observer during its polling delay", async () => {
+    vi.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      const fetchImpl = vi.fn(async () => ({ status: 503 }));
+      const pending = waitForWorkbenchHttp({
+        url: "http://127.0.0.1:8002/",
+        timeoutMs: 90_000,
+        pollIntervalMs: 5_000,
+        fetchImpl,
+        signal: controller.signal
+      });
+
+      await vi.advanceTimersByTimeAsync(0);
+      controller.abort(new Error("isolated observer superseded"));
+
+      await expect(pending).rejects.toThrow("isolated observer superseded");
+      expect(fetchImpl).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

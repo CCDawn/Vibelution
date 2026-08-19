@@ -19,6 +19,18 @@ import {
 } from "./launch/desktopLaunchSettings.js";
 import { RuntimeSceneBridge, type RuntimeSceneElectronEvent } from "./lifecycle/runtimeSceneBridge.js";
 import {
+  LauncherLifecycleSupervisor,
+  type LauncherDesiredState,
+  type LauncherLifecycleLease,
+  type LauncherLifecycleOperation as SupervisedLifecycleOperation
+} from "./lifecycle/launcherLifecycleSupervisor.js";
+import { waitForWorkbenchLifecycleReady } from "./lifecycle/workbenchReadiness.js";
+import {
+  authorizeForceLifecycleOperation,
+  type ForceLifecycleAuthorization,
+  type PreconfirmedForceLifecycleAuthorization
+} from "./lifecycle/forceLifecycleAuthorization.js";
+import {
   DesktopLifecycleCoordinator,
   DesktopSessionMutationQueue,
   type DesktopCloseReason
@@ -122,6 +134,7 @@ import {
   executeShutdownAuthorizationBoundary,
   fetchLauncherActiveWorkStatus,
   resolveQuitActiveWorkStatus,
+  type ActiveWorkProbeState,
   type ShutdownDecision
 } from "./shutdown/shutdownCoordinator.js";
 import {
@@ -166,7 +179,10 @@ import {
 import { startOrFocusWorkbenchFromProductEntry } from "./windows/productEntryWorkbench.js";
 import { waitForWorkbenchHttp, workbenchLoopbackUrl } from "./windows/workbenchHttpReady.js";
 import { installBrokenPipeGuards } from "./runtime/brokenPipeGuard.js";
-import { MainWorkbenchCloseTransactionStore } from "./lifecycle/workbenchCloseTransactionStore.js";
+import {
+  MainWorkbenchCloseTransactionStore,
+  type MainWorkbenchCloseTransaction
+} from "./lifecycle/workbenchCloseTransactionStore.js";
 
 installBrokenPipeGuards();
 
@@ -212,6 +228,7 @@ let launcherStatusCliCache: unknown = null;
 let launcherStatusCliRefresh: Promise<void> | null = null;
 const inProcessDesktopSessionStore = new InProcessDesktopSessionStore();
 const mainWorkbenchCloseStore = new MainWorkbenchCloseTransactionStore();
+const launcherLifecycleSupervisor = new LauncherLifecycleSupervisor();
 const WORKBENCH_CLOSE_BACKEND_WAIT_MS = 30_000;
 const WORKBENCH_START_READY_WAIT_MS = 90_000;
 const WORKBENCH_REBUILD_READY_WAIT_MS = 300_000;
@@ -407,6 +424,7 @@ function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapR
         acknowledgeTransactionalWorkbenchClose(paths, bootstrap).catch((error: unknown) => {
           console.warn(error instanceof Error ? error.message : String(error));
         }),
+      onWorkbenchOpenRequest: () => startOrFocusWorkbenchFromProductEntryOnShell(),
       onWorkbenchFocusAttentionClear: () => {
         conversationNotificationService?.clearAttention();
       },
@@ -955,33 +973,39 @@ async function requestTransactionalWorkbenchClose(
   }
   await desktopLifecycleCoordinator.request("workbench_window_close", async () => {
     const context = await resolveDesktopActionLoopContext(bootstrap);
-    let activeWork = false;
+    let activeWorkState: ActiveWorkProbeState = "unknown";
     try {
       const status = await withDesktopShellExitTimeout(
         fetchLauncherActiveWorkStatus(context),
         ACTIVE_WORK_STATUS_TIMEOUT_MS,
         "resolve launcher active work status for workbench close"
       );
-      activeWork = status.active;
+      activeWorkState = status.state;
     } catch {
-      activeWork = false;
+      activeWorkState = "unknown";
     }
     let transaction = mainWorkbenchCloseStore.submit({
       mode: "normal",
       reason: "workbench_window_close",
-      activeWork
+      activeWorkState
     });
     if (transaction.phase === "confirmation_required") {
-      const confirmed = await confirmWorkbenchForceClose(provider);
+      const confirmed = await confirmWorkbenchForceClose(provider, transaction.activeWorkState);
       if (!confirmed) {
         await recordElectronSupervisorEvent(bootstrap, {
           eventCode: "electron.workbench_close.cancelled_active_work",
           message: "Workbench close was cancelled while active work was present.",
-          fields: { closeId: transaction.closeId, desktopSessionId: context.desktopSessionId }
+          fields: {
+            closeId: transaction.closeId,
+            requestId: transaction.requestId ?? "",
+            desktopSessionId: context.desktopSessionId,
+            operatorIntent: "keep_running",
+            activeWorkState: transaction.activeWorkState
+          }
         });
         return;
       }
-      transaction = mainWorkbenchCloseStore.confirm(transaction.closeId);
+      transaction = mainWorkbenchCloseStore.confirm(transaction.closeId, transaction.requestId!);
     }
     pendingWorkbenchCloseAck = {
       closeId: transaction.closeId,
@@ -990,9 +1014,16 @@ async function requestTransactionalWorkbenchClose(
     await recordElectronSupervisorEvent(bootstrap, {
       eventCode: "electron.workbench_close.backend_stopping",
       message: "Electron is stopping the workbench backend through the Python lifecycle bridge.",
-      fields: { closeId: transaction.closeId, desktopSessionId: context.desktopSessionId }
+      fields: {
+        closeId: transaction.closeId,
+        requestId: transaction.requestId ?? "",
+        desktopSessionId: context.desktopSessionId,
+        operatorIntent: transaction.mode === "force" ? "force_close" : "close",
+        activeWorkState: transaction.activeWorkState,
+        mode: transaction.mode
+      }
     });
-    await stopWorkbenchBackend(paths, bootstrap);
+    await stopWorkbenchBackend(paths, bootstrap, transaction);
     const backendStopped = await waitForWorkbenchBackendSettledForWindowClose({
       readStatus: async () => {
         try {
@@ -1027,20 +1058,30 @@ async function requestTransactionalWorkbenchClose(
 
 async function stopWorkbenchBackend(
   paths: DesktopPaths,
-  bootstrap: LauncherBootstrapResult
+  bootstrap: LauncherBootstrapResult,
+  transaction: MainWorkbenchCloseTransaction
 ): Promise<void> {
-  const desktopEnv = desktopEnvironment();
-  const pythonPath = String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
-  if (!pythonPath) {
-    throw new Error("VIBELUTION_PYTHON_PATH or PYTHON is required to stop the workbench backend");
-  }
-  await runWorkbenchLifecycle({
-    workspaceRoot: paths.workspaceRoot,
-    pythonPath,
-    operatorConfigPath:
-      bootstrap.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
-    operation: "stop"
+  void paths;
+  void bootstrap;
+  const operation = transaction.mode === "force" ? "force-stop" : "stop";
+  const result = await orchestrateLauncherLifecycle(operation, {
+    schemaVersion: 1,
+    path: operation,
+    init: {
+      method: "POST",
+      body: {
+        requestId: transaction.requestId,
+        closeId: transaction.closeId,
+        deferWindowClose: true,
+        confirmed: transaction.mode === "force",
+        operatorIntent: transaction.mode === "force" ? "force_close" : "close",
+        activeWorkState: transaction.activeWorkState
+      }
+    }
   });
+  if (!result.accepted) {
+    throw new Error(result.message || result.code || `Workbench ${operation} was not accepted.`);
+  }
 }
 
 function isRecoverableDesktopControlError(error: unknown): boolean {
@@ -1200,12 +1241,18 @@ async function handleTransactionalWorkbenchCloseFailure(
   }, 0);
 }
 
-async function confirmWorkbenchForceClose(provider: ElectronWindowProvider): Promise<boolean> {
+async function confirmWorkbenchForceClose(
+  provider: ElectronWindowProvider,
+  activeWorkState: ActiveWorkProbeState
+): Promise<boolean> {
+  const statusUnknown = activeWorkState === "unknown";
   const options = {
     type: "warning" as const,
-    title: "仍有进行中的任务",
-    message: "关闭工作台会中断正在运行的任务。",
-    detail: "选择“继续运行”会保留窗口、后端和当前任务。",
+    title: statusUnknown ? "无法确认任务状态" : "仍有进行中的任务",
+    message: statusUnknown
+      ? "当前无法确认是否有任务运行，强制关闭可能中断任务。"
+      : "关闭工作台会中断正在运行的任务。",
+    detail: "选择“继续运行”会保留窗口、后端和当前任务；只有再次确认才会强制关闭。",
     buttons: ["继续运行", "停止任务并关闭"],
     defaultId: 0,
     cancelId: 0,
@@ -1214,6 +1261,112 @@ async function confirmWorkbenchForceClose(provider: ElectronWindowProvider): Pro
   const parent = provider.workbenchDialogParent() as unknown as BrowserWindow | null;
   const response = parent === null ? await dialog.showMessageBox(options) : await dialog.showMessageBox(parent, options);
   return response.response === 1;
+}
+
+function launcherLifecyclePayloadBody(payload: LauncherIpcInvokePayload): Record<string, unknown> {
+  const body = payload.init?.body;
+  return typeof body === "object" && body !== null && !Array.isArray(body)
+    ? body as Record<string, unknown>
+    : {};
+}
+
+function preconfirmedCloseAuthorization(
+  instanceId: string,
+  payload: LauncherIpcInvokePayload
+): PreconfirmedForceLifecycleAuthorization | undefined {
+  if (instanceId !== "main") {
+    return undefined;
+  }
+  const body = launcherLifecyclePayloadBody(payload);
+  const requestId = String(body.requestId ?? "").trim();
+  const transaction = mainWorkbenchCloseStore.currentTransaction();
+  if (
+    !requestId
+    || transaction === null
+    || transaction.phase !== "backend_closing"
+    || transaction.mode !== "force"
+    || transaction.requestId !== requestId
+  ) {
+    return undefined;
+  }
+  return {
+    requestId,
+    probeState: transaction.activeWorkState,
+    probeMessage: `Workbench close transaction observed ${transaction.activeWorkState} active-work state.`
+  };
+}
+
+async function confirmLauncherForceLifecycle(
+  authorization: ForceLifecycleAuthorization
+): Promise<boolean> {
+  const stateDetail = authorization.probeState === "active"
+    ? "检测到进行中的任务。"
+    : authorization.probeState === "unknown"
+      ? "当前无法确认是否有任务运行。"
+      : "当前未检测到活动任务，但强制操作仍可能中断正在收口的进程。";
+  const options = {
+    type: "warning" as const,
+    title: "确认强制停止",
+    message: `${stateDetail} 是否继续强制停止 ${authorization.instanceId === "main" ? "主工作台" : "隔离实例"}？`,
+    detail: `请求 ${authorization.requestId}。取消会保留当前窗口、运行时和任务。`,
+    buttons: ["取消", "确认强制停止"],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true
+  };
+  const parent = windowProvider?.workbenchDialogParent() as unknown as BrowserWindow | null | undefined;
+  const response = parent
+    ? await dialog.showMessageBox(parent, options)
+    : await dialog.showMessageBox(options);
+  return response.response === 1;
+}
+
+async function authorizeLauncherForceLifecycle(input: {
+  operation: string;
+  instanceId: string;
+  payload: LauncherIpcInvokePayload;
+  operatorIntent: string;
+}): Promise<ForceLifecycleAuthorization | null> {
+  const body = launcherLifecyclePayloadBody(input.payload);
+  const operatorIntent = String(body.operatorIntent ?? input.operatorIntent).trim() || input.operation;
+  return await authorizeForceLifecycleOperation({
+    operation: input.operation,
+    instanceId: input.instanceId,
+    operatorIntent,
+    preconfirmed: preconfirmedCloseAuthorization(input.instanceId, input.payload),
+    probe: async () => {
+      if (input.instanceId !== "main") {
+        return {
+          state: "unknown",
+          message: "isolated instance active-work projection is unavailable before force authorization"
+        };
+      }
+      if (launcherBootstrap === null) {
+        return { state: "unknown", message: "Launcher bootstrap is not available." };
+      }
+      const context = await resolveDesktopActionLoopContext(launcherBootstrap);
+      return await withDesktopShellExitTimeout(
+        fetchLauncherActiveWorkStatus(context),
+        ACTIVE_WORK_STATUS_TIMEOUT_MS,
+        "resolve launcher active work for force authorization"
+      );
+    },
+    confirm: confirmLauncherForceLifecycle,
+    record: async (authorization) => {
+      await recordElectronSupervisorEvent(launcherBootstrap, {
+        eventCode: "electron.lifecycle.force_authorized",
+        message: "Operator confirmed a force Launcher lifecycle operation.",
+        fields: {
+          requestId: authorization.requestId,
+          instanceId: authorization.instanceId,
+          operation: authorization.operation,
+          operatorIntent: authorization.operatorIntent,
+          activeWorkState: authorization.probeState,
+          activeWorkMessage: authorization.probeMessage.slice(0, 300)
+        }
+      });
+    }
+  });
 }
 
 async function confirmWorkbenchCloseRetry(provider: ElectronWindowProvider, detail: string): Promise<boolean> {
@@ -1291,13 +1444,37 @@ async function stopManagedRuntime(): Promise<void> {
     throw new Error("VIBELUTION_PYTHON_PATH or PYTHON is required to stop managed project processes");
   }
   const paths = createDesktopPathsForApp();
-  await runWorkbenchLifecycle({
-    workspaceRoot: paths.workspaceRoot,
-    pythonPath,
-    operatorConfigPath:
-      launcherBootstrap?.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
-    operation: "shutdown"
+  const lease = launcherLifecycleSupervisor.beginIntent({
+    instanceId: "main",
+    operation: "shutdown",
+    desiredState: "closed"
   });
+  const mutation = await launcherLifecycleSupervisor.executeMutation({
+    lease,
+    mutate: async () => await runWorkbenchLifecycle({
+      workspaceRoot: paths.workspaceRoot,
+      pythonPath,
+      operatorConfigPath:
+        launcherBootstrap?.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
+      operation: "shutdown",
+      signal: lease.signal
+    }),
+    reconcile: async () => {
+      scheduleLauncherStatusCliRefresh();
+    }
+  });
+  if (mutation.outcome === "failed") {
+    throw mutation.error;
+  }
+  if (mutation.outcome === "uncertain") {
+    throw new Error("Managed runtime shutdown outcome is uncertain; reconciliation started.");
+  }
+  if (mutation.outcome === "ignored" || mutation.outcome === "superseded") {
+    return;
+  }
+  if (!mutation.value.accepted) {
+    throw new Error(mutation.value.message || mutation.value.code || "Managed runtime shutdown was not accepted.");
+  }
 }
 
 function desktopPythonPath(): string {
@@ -1525,6 +1702,20 @@ function trustedIpcOrigins(): string[] {
   );
 }
 
+async function stopMainRuntimeForApprovedShutdown(): Promise<void> {
+  const result = await orchestrateLauncherLifecycle("shutdown", {
+    schemaVersion: 1,
+    path: "desktop-shell-shutdown",
+    init: {
+      method: "POST",
+      body: { operatorIntent: "desktop_shell_shutdown" }
+    }
+  });
+  if (!result.accepted) {
+    throw new Error(result.message || result.code || "Launcher shutdown was not accepted.");
+  }
+}
+
 async function requestDesktopShellExit(
   closeReason: DesktopCloseReason = "desktop_shell_quit"
 ): Promise<ShutdownDecision> {
@@ -1537,7 +1728,7 @@ async function requestDesktopShellExit(
         activeWorkStatus: async () => {
           const bootstrap = launcherBootstrap;
           if (bootstrap === null) {
-            return { active: false, message: "" };
+            return { state: "unknown", message: "Launcher bootstrap is not available." };
           }
           const probeQuitActiveWork = async (forceControlTokenRefresh: boolean) => {
             const context = await resolveDesktopActionLoopContext(bootstrap, {
@@ -1574,7 +1765,7 @@ async function requestDesktopShellExit(
                 }
               });
             },
-            stopManagedRuntime,
+            stopManagedRuntime: stopMainRuntimeForApprovedShutdown,
             stopPythonLauncher: stopOwnedPythonLauncherService,
             approveShutdown: () => {
               shutdownApproved = true;
@@ -1602,7 +1793,7 @@ async function requestDesktopShellExit(
         // Best-effort stop managed runtime and owned Python before force quit so orphans are less likely.
         try {
           await withDesktopShellExitTimeout(
-            stopManagedRuntime(),
+            stopMainRuntimeForApprovedShutdown(),
             Math.min(3_000, DESKTOP_SHELL_EXIT_STEP_TIMEOUT_MS),
             "stop managed runtime on exit budget fail-open"
           );
@@ -1679,7 +1870,7 @@ async function resolveInterruptedActiveWorkCount(): Promise<number> {
       ACTIVE_WORK_STATUS_TIMEOUT_MS,
       "resolve launcher active work for tray force action"
     );
-    return status.active ? 1 : 0;
+    return status.state === "active" ? 1 : 0;
   } catch {
     return 0;
   }
@@ -1792,23 +1983,12 @@ async function restoreTrayRestartAllPending(workspaceRoot: string): Promise<Tray
   if (!pending.instanceIds.length) {
     return result;
   }
-  const paths = createDesktopPathsForApp();
-  const desktopEnv = desktopEnvironment();
-  const pythonPath = String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
-  const operatorConfigPath =
-    launcherBootstrap?.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim();
-  if (!pythonPath) {
-    result.failed.push({ instanceId: "*", message: "缺少 Python 路径，无法恢复运行集合。" });
-    return result;
-  }
   for (const instanceId of pending.instanceIds) {
     try {
       if (instanceId === "main") {
-        const lifecycle = await runWorkbenchLifecycle({
-          workspaceRoot: paths.workspaceRoot,
-          pythonPath,
-          operatorConfigPath,
-          operation: "start"
+        const lifecycle = await orchestrateLauncherLifecycle("start", {
+          schemaVersion: 1,
+          path: "tray-restart-all-restore"
         });
         if (!lifecycle.accepted) {
           result.failed.push({
@@ -1818,12 +1998,13 @@ async function restoreTrayRestartAllPending(workspaceRoot: string): Promise<Tray
           continue;
         }
       } else {
-        const branch = await runBranchInstanceBridge({
-          workspaceRoot: paths.workspaceRoot,
-          pythonPath,
-          operatorConfigPath,
-          operation: "start",
-          instanceId
+        const branch = await orchestrateBranchInstanceLifecycle("start", {
+          schemaVersion: 1,
+          path: "branch-instances/start",
+          init: {
+            method: "POST",
+            body: { instanceId }
+          }
         });
         if (!branch.accepted) {
           result.failed.push({
@@ -2167,22 +2348,41 @@ function launcherIpcTrustedOrigins(): string[] {
 
 async function orchestrateLauncherLifecycle(
   operation: string,
-  _payload: LauncherIpcInvokePayload
+  payload: LauncherIpcInvokePayload
 ): Promise<OrchestratedLifecycleResult> {
   if (launcherBootstrap === null) {
     throw new Error("Launcher backend is not available.");
   }
+  const forceAuthorization = await authorizeLauncherForceLifecycle({
+    operation,
+    instanceId: "main",
+    payload,
+    operatorIntent: payload.path || operation
+  });
   const desktopEnv = desktopEnvironment();
   const pythonPath = String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
   if (!pythonPath) {
     throw new Error("VIBELUTION_PYTHON_PATH or PYTHON is required to orchestrate the workbench lifecycle");
   }
+  const supervisedOperation = normalizeSupervisedLifecycleOperation(operation);
+  const desiredState = desiredStateForLifecycleOperation(supervisedOperation);
+  const intentLease = launcherLifecycleSupervisor.beginIntent({
+    instanceId: "main",
+    operation: supervisedOperation,
+    desiredState
+  });
   if (app.isPackaged) {
     try {
       const status = await inspectCurrentDesktopShell();
+      if (!launcherLifecycleSupervisor.isCurrent(intentLease)) {
+        return supersededLifecycleResult(operation);
+      }
       if (shouldRefreshBeforeLifecycle(operation, { isPackaged: true, stale: status.stale })) {
         notifyDesktopTray("Vibelution", "桌面壳不是当前代码，Launcher 正在自行更新后再执行…");
         await scheduleCurrentDesktopShellRefresh(operation);
+        if (!launcherLifecycleSupervisor.isCurrent(intentLease)) {
+          return supersededLifecycleResult(operation);
+        }
         try {
           await stopManagedRuntime();
         } catch (error: unknown) {
@@ -2203,26 +2403,60 @@ async function orchestrateLauncherLifecycle(
     }
   }
   const paths = createDesktopPathsForApp();
-  const result = await runWorkbenchLifecycle({
-    workspaceRoot: paths.workspaceRoot,
-    pythonPath,
-    operatorConfigPath:
-      launcherBootstrap.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
-    operation: operation as WorkbenchLifecycleOperation
+  const mutation = await launcherLifecycleSupervisor.executeMutation({
+    lease: intentLease,
+    mutate: async () => await runWorkbenchLifecycle({
+      workspaceRoot: paths.workspaceRoot,
+      pythonPath,
+      operatorConfigPath:
+        launcherBootstrap?.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
+      operation: operation as WorkbenchLifecycleOperation,
+      signal: intentLease.signal
+    }),
+    reconcile: async () => {
+      scheduleLauncherStatusCliRefresh();
+    }
   });
+  if (mutation.outcome === "failed") {
+    throw mutation.error;
+  }
+  if (mutation.outcome === "uncertain") {
+    throw new Error(`Launcher lifecycle ${operation} outcome is uncertain; reconciliation started.`);
+  }
+  if (mutation.outcome === "ignored") {
+    return supersededLifecycleResult(operation);
+  }
+  const result = mutation.value;
+  if (mutation.outcome === "superseded") {
+    return supersededLifecycleResult(operation, result.commandId);
+  }
+  const lease = result.accepted && result.commandId
+    ? launcherLifecycleSupervisor.bindCommand(intentLease, { commandId: result.commandId })
+    : intentLease;
+  if (lease === null || !launcherLifecycleSupervisor.isCurrent(lease)) {
+    return supersededLifecycleResult(operation, result.commandId);
+  }
   if (result.accepted && (operation === "start" || operation === "restart" || operation === "rebuild-and-start")) {
     const provider = windowProvider;
     if (provider !== null && result.commandId) {
       const readyWaitMs = operation === "rebuild-and-start"
         ? WORKBENCH_REBUILD_READY_WAIT_MS
         : WORKBENCH_START_READY_WAIT_MS;
-      void openWorkbenchAfterLifecycleReady(paths, launcherBootstrap, provider, result.commandId, readyWaitMs)
+      void openWorkbenchAfterLifecycleReady(paths, launcherBootstrap, provider, lease, readyWaitMs)
         .catch((error: unknown) => {
-          console.warn(error instanceof Error ? error.message : String(error));
+          if (!lease.signal.aborted) {
+            console.warn(error instanceof Error ? error.message : String(error));
+          }
         });
     }
   }
-  if (result.accepted && (operation === "stop" || operation === "force-stop")) {
+  if (
+    result.accepted
+    && desiredState === "closed"
+    && result.commandId
+    && launcherLifecycleSupervisor.isCurrent(lease)
+    && !shouldDeferOrchestratedWindowClose(payload)
+  ) {
     const provider = windowProvider;
     if (provider !== null) {
       void provider.approveWorkbenchCloseOnce().catch((error: unknown) => {
@@ -2230,7 +2464,60 @@ async function orchestrateLauncherLifecycle(
       });
     }
   }
-  return result;
+  return {
+    ...result,
+    ...(forceAuthorization ? { requestId: forceAuthorization.requestId } : {})
+  };
+}
+
+function normalizeSupervisedLifecycleOperation(operation: string): SupervisedLifecycleOperation {
+  const normalized = operation.trim().toLowerCase();
+  if (
+    normalized === "start"
+    || normalized === "stop"
+    || normalized === "force-stop"
+    || normalized === "restart"
+    || normalized === "rebuild-and-start"
+    || normalized === "shutdown"
+    || normalized === "close"
+  ) {
+    return normalized;
+  }
+  throw new Error(`unsupported Launcher lifecycle operation: ${operation}`);
+}
+
+function desiredStateForLifecycleOperation(operation: SupervisedLifecycleOperation): LauncherDesiredState {
+  return operation === "start" || operation === "restart" || operation === "rebuild-and-start"
+    ? "open"
+    : "closed";
+}
+
+function shouldDeferOrchestratedWindowClose(payload: LauncherIpcInvokePayload): boolean {
+  const body = payload.init?.body;
+  if (typeof body !== "object" || body === null) {
+    return false;
+  }
+  const record = body as Record<string, unknown>;
+  if (record.deferWindowClose !== true) {
+    return false;
+  }
+  const closeId = String(record.closeId ?? "").trim();
+  const transaction = closeId ? mainWorkbenchCloseStore.get(closeId) : null;
+  if (transaction === null || transaction.phase !== "backend_closing") {
+    return false;
+  }
+  return String(transaction.requestId ?? "") === String(record.requestId ?? "").trim();
+}
+
+function supersededLifecycleResult(operation: string, commandId = ""): OrchestratedLifecycleResult {
+  return {
+    schemaVersion: 1,
+    accepted: false,
+    operation,
+    ...(commandId ? { commandId } : {}),
+    code: "lifecycle_intent_superseded",
+    message: "A newer Launcher lifecycle intent superseded this command."
+  };
 }
 
 function isCurrentCheckoutInstance(instanceId: string): boolean {
@@ -2287,30 +2574,6 @@ function resolveOrchestratedWorkbenchUrl(port?: number): string {
   }
 }
 
-function openOrchestratedWorkbenchWindow(instanceId: string, port?: number): void {
-  void (async () => {
-    const provider = windowProvider;
-    if (provider === null) {
-      return;
-    }
-    const url =
-      typeof port === "number" && Number.isFinite(port) && port > 0
-        ? workbenchLoopbackUrl(port)
-        : await refreshLiveWorkbenchUrl(createDesktopPathsForApp());
-    if (isCurrentCheckoutInstance(instanceId) && typeof port === "number" && port > 0) {
-      rememberLiveWorkbenchUrl(url);
-    }
-    await waitForWorkbenchHttp({ url, timeoutMs: WORKBENCH_START_READY_WAIT_MS });
-    if (isCurrentCheckoutInstance(instanceId)) {
-      await provider.openOrFocusWorkbench(url);
-      return;
-    }
-    await provider.openOrFocusInstanceWorkbench({ instanceId, url });
-  })().catch((error: unknown) => {
-    console.warn(error instanceof Error ? error.message : String(error));
-  });
-}
-
 function closeOrchestratedWorkbenchWindow(instanceId: string): void {
   const provider = windowProvider;
   if (provider === null) {
@@ -2324,6 +2587,21 @@ function closeOrchestratedWorkbenchWindow(instanceId: string): void {
   });
 }
 
+async function closeWindowIfSupersededByClosedIntent(instanceId: string): Promise<void> {
+  if (launcherLifecycleSupervisor.snapshot(instanceId)?.desiredState !== "closed") {
+    return;
+  }
+  const provider = windowProvider;
+  if (provider === null) {
+    return;
+  }
+  if (isCurrentCheckoutInstance(instanceId)) {
+    await provider.approveWorkbenchCloseOnce();
+    return;
+  }
+  await provider.closeInstanceWorkbench(instanceId);
+}
+
 async function openWorkbenchForCloseCanary(
   paths: DesktopPaths,
   bootstrap: LauncherBootstrapResult,
@@ -2334,39 +2612,94 @@ async function openWorkbenchForCloseCanary(
   const desktopEnv = desktopEnvironment();
   const pythonPath = String(desktopEnv.VIBELUTION_PYTHON_PATH || desktopEnv.PYTHON || "").trim();
   if (!pythonPath) {
-    await provider.openOrFocusWorkbench();
+    throw new Error("Workbench close canary requires a managed Python lifecycle bridge.");
+  }
+  const intentLease = launcherLifecycleSupervisor.beginIntent({
+    instanceId: "main",
+    operation: "start",
+    desiredState: "open"
+  });
+  const mutation = await launcherLifecycleSupervisor.executeMutation({
+    lease: intentLease,
+    mutate: async () => await runWorkbenchLifecycle({
+      workspaceRoot: paths.workspaceRoot,
+      pythonPath,
+      operatorConfigPath:
+        bootstrap.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
+      operation: "start",
+      signal: intentLease.signal
+    }),
+    reconcile: async () => {
+      scheduleLauncherStatusCliRefresh();
+    }
+  });
+  if (mutation.outcome === "failed") {
+    throw mutation.error;
+  }
+  if (mutation.outcome === "uncertain") {
+    throw new Error("Workbench close canary start outcome is uncertain; reconciliation started.");
+  }
+  if (mutation.outcome === "ignored" || mutation.outcome === "superseded") {
     return;
   }
-  const startResult = await runWorkbenchLifecycle({
-    workspaceRoot: paths.workspaceRoot,
-    pythonPath,
-    operatorConfigPath:
-      bootstrap.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
-    operation: "start"
-  });
+  const startResult = mutation.value;
   if (startResult.accepted) {
+    const lease = startResult.commandId
+      ? launcherLifecycleSupervisor.bindCommand(intentLease, { commandId: startResult.commandId })
+      : null;
+    if (lease === null) {
+      throw new Error("Workbench close canary start did not return a current command id.");
+    }
     await openWorkbenchAfterLifecycleReady(
       paths,
       bootstrap,
       provider,
-      startResult.commandId ?? "",
+      lease,
       WORKBENCH_START_READY_WAIT_MS
     );
     return;
   }
-  await provider.openOrFocusWorkbench();
+  throw new Error(startResult.message || startResult.code || "Workbench close canary start was not accepted.");
 }
 
 async function openWorkbenchAfterLifecycleReady(
   paths: DesktopPaths,
   bootstrap: LauncherBootstrapResult,
   provider: ElectronWindowProvider,
-  _commandId: string,
+  lease: LauncherLifecycleLease,
   timeoutMs: number
 ): Promise<void> {
+  await waitForWorkbenchLifecycleReady({
+    commandId: lease.commandId,
+    readStatus: async () => readRuntimeManagerLauncherStatusSummary(paths.workspaceRoot),
+    timeoutMs,
+    signal: lease.signal
+  });
+  if (!launcherLifecycleSupervisor.isCurrent(lease)) {
+    return;
+  }
   const url = await refreshLiveWorkbenchUrl(paths);
-  await waitForWorkbenchHttp({ url, timeoutMs });
-  await openWorkbenchAtCurrentLauncherUrl(paths, bootstrap, provider, { workbenchUrl: url });
+  if (!launcherLifecycleSupervisor.isCurrent(lease) || !launcherLifecycleSupervisor.claimReady(lease)) {
+    return;
+  }
+  try {
+    await openWorkbenchAtCurrentLauncherUrl(paths, bootstrap, provider, { workbenchUrl: url });
+  } catch (error: unknown) {
+    launcherLifecycleSupervisor.releaseReadyClaim(lease);
+    throw error;
+  }
+  if (!launcherLifecycleSupervisor.isCurrent(lease)) {
+    await closeWindowIfSupersededByClosedIntent(lease.instanceId);
+    return;
+  }
+  if (!launcherLifecycleSupervisor.completeReady(lease)) {
+    if (launcherLifecycleSupervisor.isCurrent(lease)) {
+      launcherLifecycleSupervisor.releaseReadyClaim(lease);
+      await provider.approveWorkbenchCloseOnce();
+      throw new Error(`Launcher lifecycle READY completion failed for ${lease.instanceId}.`);
+    }
+    await closeWindowIfSupersededByClosedIntent(lease.instanceId);
+  }
 }
 
 async function orchestrateBranchInstanceLifecycle(
@@ -2389,35 +2722,90 @@ async function orchestrateBranchInstanceLifecycle(
   if (!instanceId) {
     throw new Error("branch instance id is required");
   }
-  const paths = createDesktopPathsForApp();
-  const result = await runBranchInstanceBridge({
-    workspaceRoot: paths.workspaceRoot,
-    pythonPath,
-    operatorConfigPath:
-      launcherBootstrap.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
-    operation: operation as BranchInstanceOperation,
-    instanceId
+  if (isCurrentCheckoutInstance(instanceId)) {
+    const mainResult = await orchestrateLauncherLifecycle(operation, payload);
+    return { ...mainResult, instanceId };
+  }
+  const forceAuthorization = await authorizeLauncherForceLifecycle({
+    operation,
+    instanceId,
+    payload,
+    operatorIntent: payload.path || operation
   });
+  const supervisedOperation = normalizeSupervisedLifecycleOperation(operation);
+  const desiredState = desiredStateForLifecycleOperation(supervisedOperation);
+  const intentLease = launcherLifecycleSupervisor.beginIntent({
+    instanceId,
+    operation: supervisedOperation,
+    desiredState
+  });
+  const paths = createDesktopPathsForApp();
+  const mutation = await launcherLifecycleSupervisor.executeMutation({
+    lease: intentLease,
+    mutate: async () => await runBranchInstanceBridge({
+      workspaceRoot: paths.workspaceRoot,
+      pythonPath,
+      operatorConfigPath:
+        launcherBootstrap?.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
+      operation: operation as BranchInstanceOperation,
+      instanceId,
+      signal: intentLease.signal
+    }),
+    reconcile: async () => {
+      scheduleLauncherStatusCliRefresh();
+    }
+  });
+  if (mutation.outcome === "failed") {
+    throw mutation.error;
+  }
+  if (mutation.outcome === "uncertain") {
+    throw new Error(`Branch lifecycle ${operation} outcome is uncertain; reconciliation started.`);
+  }
+  if (mutation.outcome === "ignored") {
+    return supersededBranchLifecycleResult(operation, instanceId);
+  }
+  const result = mutation.value;
+  if (mutation.outcome === "superseded") {
+    return supersededBranchLifecycleResult(operation, instanceId, result.commandId);
+  }
+  const lease = result.accepted && result.commandId
+    ? launcherLifecycleSupervisor.bindCommand(intentLease, {
+        commandId: result.commandId,
+        generation: result.generation
+      })
+    : intentLease;
+  if (lease === null || !launcherLifecycleSupervisor.isCurrent(lease)) {
+    return supersededBranchLifecycleResult(operation, instanceId, result.commandId);
+  }
   if (result.accepted && (operation === "start" || operation === "restart")) {
-    if (isCurrentCheckoutInstance(instanceId)) {
-      openOrchestratedWorkbenchWindow(instanceId, result.port);
-    } else if (result.port && result.port > 0) {
+    if (result.port && result.port > 0 && result.commandId) {
       const url = workbenchLoopbackUrl(result.port);
-      const generation = Number(result.generation || 0);
       const provider = windowProvider;
       const operatorConfigPath =
         launcherBootstrap.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim();
       void superviseIsolatedInstanceStart({
         instanceId,
         url,
-        generation,
+        lease,
+        isCurrent: (candidate) => launcherLifecycleSupervisor.isCurrent(candidate),
+        claimReady: (candidate) => launcherLifecycleSupervisor.claimReady(candidate),
+        completeReady: (candidate) => launcherLifecycleSupervisor.completeReady(candidate),
+        releaseReadyClaim: (candidate) => launcherLifecycleSupervisor.releaseReadyClaim(candidate),
         timeoutMs: ISOLATED_INSTANCE_READY_WAIT_MS,
-        waitForHttp: (target, timeoutMs) => waitForWorkbenchHttp({ url: target, timeoutMs }),
+        waitForHttp: (target, timeoutMs, signal) => waitForWorkbenchHttp({ url: target, timeoutMs, signal }),
         openWindow: async () => {
           if (provider === null) {
             throw new Error("window provider is unavailable");
           }
           await provider.openOrFocusInstanceWorkbench({ instanceId, url });
+        },
+        closeWindowIfSuperseded: async () => {
+          await closeWindowIfSupersededByClosedIntent(instanceId);
+        },
+        closeWindowAfterReadyFailure: async () => {
+          if (provider !== null) {
+            await provider.closeInstanceWorkbench(instanceId);
+          }
         },
         markReady: async (observedGeneration) => {
           await runBranchInstanceBridge({
@@ -2426,7 +2814,8 @@ async function orchestrateBranchInstanceLifecycle(
             operatorConfigPath,
             operation: "observe-ready",
             instanceId,
-            generation: observedGeneration
+            generation: observedGeneration,
+            signal: lease.signal
           });
         },
         markError: async (observedGeneration, message) => {
@@ -2437,7 +2826,8 @@ async function orchestrateBranchInstanceLifecycle(
             operation: "observe-error",
             instanceId,
             generation: observedGeneration,
-            message
+            message,
+            signal: lease.signal
           });
         }
       }).catch((error: unknown) => {
@@ -2445,10 +2835,34 @@ async function orchestrateBranchInstanceLifecycle(
       });
     }
   }
-  if (result.accepted && (operation === "stop" || operation === "force-stop")) {
+  if (
+    result.accepted
+    && desiredState === "closed"
+    && result.commandId
+    && launcherLifecycleSupervisor.isCurrent(lease)
+  ) {
     closeOrchestratedWorkbenchWindow(instanceId);
   }
-  return result;
+  return {
+    ...result,
+    ...(forceAuthorization ? { requestId: forceAuthorization.requestId } : {})
+  };
+}
+
+function supersededBranchLifecycleResult(
+  operation: string,
+  instanceId: string,
+  commandId = ""
+): OrchestratedBranchInstanceResult {
+  return {
+    schemaVersion: 1,
+    accepted: false,
+    operation,
+    instanceId,
+    ...(commandId ? { commandId } : {}),
+    code: "lifecycle_intent_superseded",
+    message: "A newer Launcher lifecycle intent superseded this command."
+  };
 }
 
 async function orchestrateLauncherApi(
@@ -2577,19 +2991,6 @@ ipcMain.handle(IPC_CHANNELS.launcherInvoke, async (event, payload: LauncherIpcIn
   return await resolveLauncherIpcHost().invoke(payload);
 });
 
-function requestOpenWorkbench(): void {
-  const provider = windowProvider;
-  if (provider === null) {
-    pendingOpenWorkbenchRequest = true;
-    return;
-  }
-  pendingOpenWorkbenchRequest = false;
-  markWorkbenchOpenRequested();
-  void provider.openOrFocusWorkbench().catch((error: unknown) => {
-    console.warn(error instanceof Error ? error.message : String(error));
-  });
-}
-
 async function startOrFocusWorkbenchFromProductEntryOnShell(): Promise<void> {
   const provider = windowProvider;
   if (provider === null) {
@@ -2607,9 +3008,7 @@ async function startOrFocusWorkbenchFromProductEntryOnShell(): Promise<void> {
       url,
       waitForHttp: (opts) => waitForWorkbenchHttp(opts),
       openOrFocus: (target) => provider.openOrFocusWorkbench(target),
-      startLifecycle: () => orchestrateLauncherLifecycle("start", { schemaVersion: 1, path: "open" }),
-      resolveReadyUrl: () => refreshLiveWorkbenchUrl(paths),
-      readyTimeoutMs: WORKBENCH_START_READY_WAIT_MS
+      startLifecycle: () => orchestrateLauncherLifecycle("start", { schemaVersion: 1, path: "open" })
     });
   } finally {
     scheduleLauncherStatusCliRefresh();
@@ -2775,10 +3174,8 @@ app.whenReady()
     const firstLifecycle = String(desktopCliArgs.lifecycleCommand || "").trim().toLowerCase();
     const deferWorkbenchOpen = shouldDeferWorkbenchOpenUntilLifecycleStart(firstLifecycle);
     if (pendingOpenWorkbenchRequest && !desktopCliArgs.workbenchCloseCanary && !deferWorkbenchOpen) {
-      pendingOpenWorkbenchRequest = false;
       electronStartupStage = "workbench_window_ready";
-      markWorkbenchOpenRequested();
-      await windowProvider.openOrFocusWorkbench();
+      await startOrFocusWorkbenchFromProductEntryOnShell();
     } else if (!desktopCliArgs.workbenchCloseCanary && !desktopCliArgs.projectRoot) {
       await windowProvider.openLauncher();
     }

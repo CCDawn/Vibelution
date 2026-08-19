@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { ActiveWorkProbeState } from "../shutdown/shutdownCoordinator.js";
 
 export type MainWorkbenchClosePhase =
   | "confirmation_required"
@@ -12,6 +13,8 @@ export type MainWorkbenchCloseTransaction = {
   phase: MainWorkbenchClosePhase;
   mode: "normal" | "force";
   reason: string;
+  activeWorkState: ActiveWorkProbeState;
+  requestId?: string;
   failureCode?: string;
   message?: string;
 };
@@ -22,27 +25,43 @@ export class MainWorkbenchCloseTransactionStore {
   submit(input: {
     mode: "normal" | "force";
     reason: string;
-    activeWork: boolean;
+    activeWorkState: ActiveWorkProbeState;
+    requestId?: string;
   }): MainWorkbenchCloseTransaction {
     const active = this.current;
     if (active !== null && active.phase !== "succeeded" && active.phase !== "failed") {
       throw new Error("a workbench close transaction is already in flight");
     }
+    const suppliedRequestId = String(input.requestId ?? "").trim();
+    if (input.mode === "force" && !suppliedRequestId) {
+      throw new Error("force workbench close requires requestId");
+    }
+    const requiresConfirmation = input.mode === "normal" && input.activeWorkState !== "idle";
     const transaction: MainWorkbenchCloseTransaction = {
       closeId: randomUUID(),
-      phase: input.activeWork && input.mode === "normal" ? "confirmation_required" : "backend_closing",
+      phase: requiresConfirmation ? "confirmation_required" : "backend_closing",
       mode: input.mode,
-      reason: input.reason
+      reason: input.reason,
+      activeWorkState: input.activeWorkState,
+      ...(requiresConfirmation
+        ? { requestId: randomUUID() }
+        : suppliedRequestId
+          ? { requestId: suppliedRequestId }
+          : {})
     };
     this.current = transaction;
     return transaction;
   }
 
-  confirm(closeId: string): MainWorkbenchCloseTransaction {
+  confirm(closeId: string, requestId: string): MainWorkbenchCloseTransaction {
     const transaction = this.requireOpen(closeId);
     if (transaction.phase !== "confirmation_required") {
       throw new Error(`workbench close transaction ${closeId} is not awaiting confirmation`);
     }
+    if (!transaction.requestId || transaction.requestId !== requestId.trim()) {
+      throw new Error(`workbench close transaction ${closeId} request id does not match`);
+    }
+    transaction.mode = "force";
     transaction.phase = "backend_closing";
     return transaction;
   }

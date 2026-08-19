@@ -65,6 +65,7 @@ export type ElectronWindowProviderOptions = {
   shouldInterceptWorkbenchClose?: () => boolean;
   onWorkbenchCloseRequest?: () => void | Promise<void>;
   onWorkbenchClosed?: () => void | Promise<void>;
+  onWorkbenchOpenRequest?: () => void | Promise<void>;
   onWorkbenchFocusAttentionClear?: () => void;
   onOsSessionEnd?: (event: "query-session-end" | "session-end", role: ElectronWindowRole) => void;
   hungCloseDestroyAfterMs?: number;
@@ -123,6 +124,7 @@ export class ElectronWindowProvider {
   private readonly shouldInterceptWorkbenchClose: () => boolean;
   private readonly onWorkbenchCloseRequest: () => void | Promise<void>;
   private readonly onWorkbenchClosed: () => void | Promise<void>;
+  private readonly onWorkbenchOpenRequest: () => void | Promise<void>;
   private readonly onWorkbenchFocusAttentionClear: () => void;
   private readonly onOsSessionEnd: (event: "query-session-end" | "session-end", role: ElectronWindowRole) => void;
   private workbenchUrl: string;
@@ -152,6 +154,9 @@ export class ElectronWindowProvider {
     this.shouldInterceptWorkbenchClose = options.shouldInterceptWorkbenchClose ?? (() => false);
     this.onWorkbenchCloseRequest = options.onWorkbenchCloseRequest ?? (() => undefined);
     this.onWorkbenchClosed = options.onWorkbenchClosed ?? (() => undefined);
+    this.onWorkbenchOpenRequest = options.onWorkbenchOpenRequest ?? (async () => {
+      await this.openOrFocusWorkbench();
+    });
     this.onWorkbenchFocusAttentionClear = options.onWorkbenchFocusAttentionClear ?? (() => undefined);
     this.onOsSessionEnd = options.onOsSessionEnd ?? (() => undefined);
     this.hungCloseDestroyAfterMs =
@@ -637,7 +642,7 @@ export class ElectronWindowProvider {
     const workbenchOrigin = new URL(this.workbenchUrl).origin;
     window.webContents.setWindowOpenHandler((details) => {
       if (isManagedWorkbenchUrl(details.url, workbenchOrigin)) {
-        void this.openOrFocusWorkbench().catch(() => undefined);
+        void Promise.resolve(this.onWorkbenchOpenRequest()).catch(() => undefined);
       }
       return { action: "deny" };
     });
@@ -650,7 +655,7 @@ export class ElectronWindowProvider {
     const workbenchOrigin = new URL(this.workbenchUrl).origin;
     window.webContents.setWindowOpenHandler((details) => {
       if (isManagedWorkbenchUrl(details.url, workbenchOrigin)) {
-        void this.openOrFocusWorkbench().catch(() => undefined);
+        void Promise.resolve(this.onWorkbenchOpenRequest()).catch(() => undefined);
       }
       return { action: "deny" };
     });

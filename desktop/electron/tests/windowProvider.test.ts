@@ -854,6 +854,27 @@ describe("Launcher new-window requests", () => {
     expect(provider.isWorkbenchFocused()).toBe(true);
   });
 
+  it("delegates managed workbench links to the lifecycle-owned open request", async () => {
+    const launcherWindow = new FakeWindow(7, "http://127.0.0.1:8765/launcher", 7070);
+    const createWorkbenchWindow = vi.fn();
+    const onWorkbenchOpenRequest = vi.fn(async () => undefined);
+    const provider = new ElectronWindowProvider(
+      desktopPaths,
+      "http://127.0.0.1:8765/launcher",
+      "http://127.0.0.1:8000",
+      {
+        createLauncherWindow: () => launcherWindow,
+        createWorkbenchWindow,
+        onWorkbenchOpenRequest
+      }
+    );
+    await provider.openLauncher();
+
+    expect(launcherWindow.openRequest("http://127.0.0.1:8000/")).toEqual({ action: "deny" });
+    await vi.waitFor(() => expect(onWorkbenchOpenRequest).toHaveBeenCalledOnce());
+    expect(createWorkbenchWindow).not.toHaveBeenCalled();
+  });
+
   it("reuses the managed workbench window for repeated workbench-origin requests", async () => {
     const launcherWindow = new FakeWindow(7, "http://127.0.0.1:8765/launcher", 7070);
     const workbenchWindows: FakeWindow[] = [];

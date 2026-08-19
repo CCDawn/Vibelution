@@ -25,7 +25,7 @@ export async function prepareDesktopSmokeShutdown(input: DesktopSmokeShutdownInp
 
   const decision = await decideShutdown({
     ownershipMode: input.bootstrap.mode,
-    activeWorkStatus: async () => ({ active: false, message: "" })
+    activeWorkStatus: async () => ({ state: "idle", message: "" })
   });
   const result = await executeApprovedDesktopShellShutdown({
     decision,

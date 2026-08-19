@@ -13,7 +13,7 @@ describe("decideShutdown", () => {
     await expect(
       decideShutdown({
         ownershipMode: "started",
-        activeWorkStatus: async () => ({ active: true, message: "running" })
+        activeWorkStatus: async () => ({ state: "active", message: "running" })
       })
     ).resolves.toEqual({
       allowed: false,
@@ -26,7 +26,7 @@ describe("decideShutdown", () => {
     await expect(
       decideShutdown({
         ownershipMode: "attached",
-        activeWorkStatus: async () => ({ active: false, message: "" })
+        activeWorkStatus: async () => ({ state: "idle", message: "" })
       })
     ).resolves.toEqual({
       allowed: true,
@@ -39,7 +39,7 @@ describe("decideShutdown", () => {
     await expect(
       decideShutdown({
         ownershipMode: "started",
-        activeWorkStatus: async () => ({ active: false, message: "" })
+        activeWorkStatus: async () => ({ state: "idle", message: "" })
       })
     ).resolves.toEqual({
       allowed: true,
@@ -122,10 +122,23 @@ describe("decideShutdown", () => {
     expect(sideEffects).toEqual(["denied"]);
     vi.useRealTimers();
   });
+
+  it("fails closed when the active-work probe explicitly returns unknown", async () => {
+    await expect(
+      decideShutdown({
+        ownershipMode: "started",
+        activeWorkStatus: async () => ({ state: "unknown", message: "status payload is incomplete" })
+      })
+    ).resolves.toEqual({
+      allowed: false,
+      reason: "active_work_status_unavailable",
+      message: "status payload is incomplete"
+    });
+  });
 });
 
 describe("resolveQuitActiveWorkStatus", () => {
-  it("treats a stale 403 control token as idle after a recovered retry still fails auth", async () => {
+  it("treats a stale 403 control token as unknown after a recovered retry still fails auth", async () => {
     const calls: string[] = [];
     await expect(
       resolveQuitActiveWorkStatus({
@@ -138,7 +151,10 @@ describe("resolveQuitActiveWorkStatus", () => {
           throw new Error("launcher active-work status request failed: 403");
         }
       })
-    ).resolves.toEqual({ active: false, message: "" });
+    ).resolves.toEqual({
+      state: "unknown",
+      message: "launcher active-work status remained unauthorized after control recovery"
+    });
     expect(calls).toEqual(["probe", "retry"]);
   });
 
@@ -148,10 +164,10 @@ describe("resolveQuitActiveWorkStatus", () => {
         probe: async () => {
           throw new Error("launcher active-work status request failed: 401");
         },
-        recoverAndRetry: async () => ({ active: true, message: "1 active work item(s) block lifecycle commands." })
+        recoverAndRetry: async () => ({ state: "active", message: "1 active work item(s) block lifecycle commands." })
       })
     ).resolves.toEqual({
-      active: true,
+      state: "active",
       message: "1 active work item(s) block lifecycle commands."
     });
   });
@@ -199,12 +215,30 @@ describe("fetchLauncherActiveWorkStatus", () => {
         fetchImpl
       })
     ).resolves.toEqual({
-      active: true,
+      state: "active",
       message: "2 active work item(s) block lifecycle commands."
     });
     expect(requests[0].url).toBe("http://127.0.0.1:8765/api/launcher/status");
     expect(requests[0].init.headers).toMatchObject({
       "X-Vibelution-Control-Token": "token"
+    });
+  });
+
+  it("returns unknown when the active-work projection is missing or invalid", async () => {
+    const fetchImpl = async () => new Response(JSON.stringify({ lifecycleProof: {} }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
+
+    await expect(
+      fetchLauncherActiveWorkStatus({
+        launcherOrigin: "http://127.0.0.1:8765/launcher",
+        controlToken: "token",
+        fetchImpl
+      })
+    ).resolves.toEqual({
+      state: "unknown",
+      message: "launcher status did not contain a valid active-work projection"
     });
   });
 });

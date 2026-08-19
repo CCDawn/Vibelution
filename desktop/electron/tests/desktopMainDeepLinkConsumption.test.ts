@@ -23,7 +23,8 @@ describe("Electron main public deep-link consumption", () => {
     expect(source).toContain("resolveSecondInstanceIntent({");
     expect(source).toContain("applyPendingProjectSlot(intent.projectRoot)");
     expect(source).toContain("secondCli.openWorkbench");
-    expect(source).toContain("await windowProvider.openOrFocusWorkbench()");
+    expect(source).toContain("await startOrFocusWorkbenchFromProductEntryOnShell()");
+    expect(source).not.toContain("await windowProvider.openOrFocusWorkbench()");
     expect(source).toContain("windowProvider?.openLauncher()");
     expect(source).not.toContain("void windowProvider?.openLauncher();");
   });
