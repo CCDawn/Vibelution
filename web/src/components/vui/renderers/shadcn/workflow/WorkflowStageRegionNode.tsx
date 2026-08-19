@@ -73,9 +73,9 @@ export function WorkflowStageRegionNode(props: NodeProps) {
   return (
     <div
       className={cn(
-        "h-full w-full",
+        "h-full w-full select-none",
         spacious
-          ? "pointer-events-none"
+          ? "cursor-grab active:cursor-grabbing"
           : cn(
             "rounded-2xl border",
             (tone === "idle" || tone === "done") ? "border-dashed" : "",
@@ -116,13 +116,7 @@ export function WorkflowStageRegionNode(props: NodeProps) {
           </span>
         ) : null}
         {spacious && taskCount > 0 ? (
-          <div className="ml-auto flex items-center gap-2 text-[9px] tabular-nums text-[var(--fg-tertiary)]">
-            <span className="h-1.5 w-[96px] overflow-hidden rounded-full bg-[var(--vui-border-subtle)]">
-              <span
-                className={cn("block h-full rounded-full transition-[width]", meta.progress)}
-                style={{ width: `${Math.min(100, (completedCount / taskCount) * 100)}%` }}
-              />
-            </span>
+          <div className="ml-auto shrink-0 text-[9px] tabular-nums text-[var(--fg-tertiary)]">
             <span><strong className="font-semibold text-[var(--fg-secondary)]">{completedCount} / {taskCount}</strong></span>
           </div>
         ) : null}

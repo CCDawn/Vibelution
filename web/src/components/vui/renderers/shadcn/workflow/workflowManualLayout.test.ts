@@ -5,6 +5,7 @@ import {
   persistWorkflowManualLayout,
   readWorkflowManualLayout,
   resolveWorkflowManualEdgeGeometry,
+  resolveWorkflowStageLabelPosition,
   snapWorkflowManualPosition,
   workflowManualLayoutStorageKey,
   type WorkflowManualLayoutScope,
@@ -26,6 +27,7 @@ const scope: WorkflowManualLayoutScope = {
   structureKey: "graph:challenge-cup",
   runId: "run-42",
   nodeIds: ["collect", "design"],
+  stageIds: ["research", "experiment"],
 };
 
 describe("workflowManualLayout", () => {
@@ -36,32 +38,65 @@ describe("workflowManualLayout", () => {
 
   it("persists only a matching structure/run and ignores malformed storage", () => {
     const storage = memoryStorage();
-    persistWorkflowManualLayout(scope, { positions: { collect: { x: 41, y: 71 } }, locked: true }, storage);
+    persistWorkflowManualLayout(scope, {
+      positions: { collect: { x: 41, y: 71 } },
+      stageLabelOffsets: { research: { x: 17, y: -17 } },
+      locked: true,
+    }, storage);
     expect(readWorkflowManualLayout(scope, storage)).toEqual({
       positions: { collect: { x: 48, y: 64 } },
+      stageLabelOffsets: { research: { x: 16, y: -16 } },
       locked: true,
     });
 
     storage.setItem(workflowManualLayoutStorageKey(scope), "{invalid");
-    expect(readWorkflowManualLayout(scope, storage)).toEqual({ positions: {}, locked: false });
+    expect(readWorkflowManualLayout(scope, storage)).toEqual({ positions: {}, stageLabelOffsets: {}, locked: false });
   });
 
   it("does not reuse a saved arrangement after the graph node set changes", () => {
     const storage = memoryStorage();
-    persistWorkflowManualLayout(scope, { positions: { collect: { x: 32, y: 64 } }, locked: false }, storage);
+    persistWorkflowManualLayout(scope, { positions: { collect: { x: 32, y: 64 } }, stageLabelOffsets: {}, locked: false }, storage);
     expect(readWorkflowManualLayout({ ...scope, nodeIds: ["collect", "review"] }, storage)).toEqual({
       positions: {},
+      stageLabelOffsets: {},
       locked: false,
     });
   });
 
+  it("reads legacy v1 positions and initializes stage label offsets", () => {
+    const storage = memoryStorage();
+    storage.setItem(workflowManualLayoutStorageKey(scope), JSON.stringify({
+      version: 1,
+      structureKey: scope.structureKey,
+      runId: scope.runId,
+      nodeIds: [...scope.nodeIds],
+      positions: { collect: { x: 32, y: 64 } },
+      locked: false,
+    }));
+    expect(readWorkflowManualLayout(scope, storage)).toEqual({
+      positions: { collect: { x: 32, y: 64 } },
+      stageLabelOffsets: {},
+      locked: false,
+    });
+  });
+
+  it("anchors a stage label above its declared members and applies its own offset", () => {
+    expect(resolveWorkflowStageLabelPosition(
+      [
+        { x: 120, y: 160, width: 200, height: 96 },
+        { x: 400, y: 224, width: 200, height: 96 },
+      ],
+      { x: 16, y: -16 },
+    )).toEqual({ x: 136, y: 92 });
+  });
+
   it("uses a deterministic orthogonal live edge with a midpoint label anchor", () => {
     expect(resolveWorkflowManualEdgeGeometry({ x: 0, y: 0 }, { x: 120, y: 40 })).toEqual({
-      path: "M 0 0 L 60 0 L 60 40 L 120 40",
+      path: "M 0 0 L 32 0 L 60 0 L 60 40 L 88 40 L 120 40",
       labelAnchor: { x: 60, y: 20 },
     });
     expect(resolveWorkflowManualEdgeGeometry({ x: 0, y: 0 }, { x: 40, y: 120 })).toEqual({
-      path: "M 0 0 L 0 60 L 40 60 L 40 120",
+      path: "M 0 0 L 32 0 L 32 60 L 8 60 L 8 120 L 40 120",
       labelAnchor: { x: 20, y: 60 },
     });
   });

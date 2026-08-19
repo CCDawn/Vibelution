@@ -138,12 +138,8 @@ export function fromElkLayout(layouted: ElkNode, input: WorkflowLayoutInput): Wo
       }
       const rx = taskNode.x ?? 0;
       const ry = taskNode.y ?? 0;
-      const uniqueHandles: string[] = [];
-      for (const edge of input.edges) {
-        if (edge.fromNodeId === taskNode.id && edge.sourceHandle && !uniqueHandles.includes(edge.sourceHandle)) {
-          uniqueHandles.push(edge.sourceHandle);
-        }
-      }
+      const portSides = portSidesOf(taskNode.id);
+      const uniqueHandles = Object.keys(portSides?.source ?? {});
       nodes.push({
         id: taskNode.id,
         stageId,
@@ -168,7 +164,7 @@ export function fromElkLayout(layouted: ElkNode, input: WorkflowLayoutInput): Wo
         primaryRoleKey: metaNode.primaryRoleKey,
         sourceHandleIds: uniqueHandles.length > 0 ? uniqueHandles : undefined,
         decisionOutcomeIds: metaNode.visualKind === "decision" ? [...DECISION_OUTCOME_IDS] : undefined,
-        portSides: portSidesOf(taskNode.id),
+        portSides,
       });
     }
   }
@@ -211,7 +207,9 @@ export function fromElkLayout(layouted: ElkNode, input: WorkflowLayoutInput): Wo
       semanticKind: inputEdge.semanticKind,
       pathState: inputEdge.pathState,
       labelAlwaysVisible: inputEdge.labelAlwaysVisible,
-      sourceHandle: inputEdge.sourceHandle,
+      sourceHandle: assignment
+        ? (handleIdOfSourcePort.get(assignment.sourcePortId) ?? assignment.sourcePortId)
+        : inputEdge.sourceHandle,
       targetHandle: assignment ? shortNameOfTargetPort(assignment.targetPortId) : undefined,
       gateKind: inputEdge.gateKind,
       requiresHumanAccept: inputEdge.requiresHumanAccept,

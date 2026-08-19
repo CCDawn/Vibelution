@@ -1,7 +1,7 @@
 /**
  * Shared chrome for workflow task nodes (status icon, selection, runtime current).
  */
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { Handle, Position } from "@xyflow/react";
 import {
   AlertTriangle,
@@ -80,13 +80,13 @@ function firstSideOf(map: Record<string, WorkflowPortSide> | undefined): Workflo
  * handles never stack on the node midpoint (P1-4). Left/right handles spread
  * vertically; top/bottom handles spread horizontally.
  */
-function sideOffset(index: number, total: number, side: WorkflowPortSide): Record<string, number> {
+export function workflowHandleSideOffset(index: number, total: number, side: WorkflowPortSide): CSSProperties {
   if (total <= 1) {
     return {};
   }
-  const t = total > 1 ? index / (total - 1) : 0.5;
-  const percent = 12 + t * 76; // keep inside the node's visible band
-  return side === "WEST" || side === "EAST" ? { top: percent } : { left: percent };
+  const offset = (index - (total - 1) / 2) * 16;
+  const value = `calc(50% + ${offset}px)`;
+  return side === "WEST" || side === "EAST" ? { top: value } : { left: value };
 }
 
 function StatusIcon({
@@ -224,6 +224,9 @@ export function WorkflowNodeChrome({
   // renderer mirrors every one so multi-entry nodes keep edge endpoints
   // visually aligned with the engine (P1-4).
   const targetHandleIds = portSides?.target ? Object.keys(portSides.target) : [];
+  const sourceHandleIds = portSides?.source
+    ? Object.keys(portSides.source)
+    : (sourceHandles?.map((handle) => handle.id) ?? []);
   const spacious = layoutMode === "serpentine";
   const handleClass = spacious
     ? "!h-2.5 !w-2.5 !border-2 !border-[var(--vui-border-strong)] !bg-[var(--vui-surface-panel)]"
@@ -259,13 +262,18 @@ export function WorkflowNodeChrome({
         targetHandleIds.length > 0 ? (
           targetHandleIds.map((id, index) => {
             const side = sideOfTargetHandle(id);
+            const sameSideHandles = targetHandleIds.filter((handleId) => sideOfTargetHandle(handleId) === side);
             return (
               <Handle
                 key={id}
                 id={id}
                 type="target"
                 position={sideToPosition(side)}
-                style={sideOffset(index, targetHandleIds.length, side)}
+                style={workflowHandleSideOffset(
+                  sameSideHandles.indexOf(id),
+                  sameSideHandles.length,
+                  side,
+                )}
                 className={handleClass}
               />
             );
@@ -341,31 +349,22 @@ export function WorkflowNodeChrome({
         </>
       )}
 
-      {decisionLayout && sourceHandles?.length ? (
+      {sourceHandleIds.length > 0 ? (
         <>
           {(["WEST", "EAST", "NORTH", "SOUTH"] as const).map((side) => {
-            const handles = sourceHandles.filter((h) => sideOfSourceHandle(h.id) === side);
+            const handles = sourceHandleIds.filter((id) => sideOfSourceHandle(id) === side);
             if (handles.length === 0) {
               return null;
             }
-            const vertical = side === "WEST" || side === "EAST";
             return (
-              <div
-                key={side}
-                className="pointer-events-none absolute flex justify-evenly"
-                style={
-                  vertical
-                    ? { top: 0, bottom: 0, [side === "WEST" ? "left" : "right"]: 0, flexDirection: "column", paddingBlock: 12 }
-                    : { left: 0, right: 0, [side === "NORTH" ? "top" : "bottom"]: 0, flexDirection: "row", paddingInline: 12 }
-                }
-              >
-                {handles.map((h, index) => (
+              <div key={side}>
+                {handles.map((handleId, index) => (
                   <Handle
-                    key={h.id}
-                    id={h.id}
+                    key={handleId}
+                    id={handleId}
                     type="source"
                     position={sideToPosition(side)}
-                    style={sideOffset(index, handles.length, side)}
+                    style={workflowHandleSideOffset(index, handles.length, side)}
                     className={cn(handleClass, "!border-[var(--accent-cool,#2563eb)]")}
                   />
                 ))}

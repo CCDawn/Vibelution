@@ -41,6 +41,7 @@ export const ResearchWorkflowCanvasPane = memo(function ResearchWorkflowCanvasPa
             className={styles.canvas}
             layoutMode="serpentine"
             showMiniMap
+            showLegend={false}
           />
         ) : (
           <VStateSurface

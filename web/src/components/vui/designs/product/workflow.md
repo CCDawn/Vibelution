@@ -39,7 +39,7 @@ const graph: WorkflowLayoutInput = projectionToCanvasGraph(projection);
 
 节点在 `serpentine` 模式下使用约 `300 × 72` 的模块卡：左侧实心类型色块（Agent 蓝 / 人工琥珀 / 起点灰 / 系统深色 / 决策暖色）加白图标，标题 15px、下一行按种类写副标题（决策「晋升 / 回滚 / 停止」、系统「受控执行」、人工「角色 · 待确认」、Agent「角色 · 已绑定/未绑定」）12px。状态叠在图标右下角标（待运行隐藏角标；运行中为旋转标记），不再铺三行脚注、类型胶囊或顶部强调条。长描述、输入/输出、检查项与技术 `agentId` 不在画布常驻，完整信息进入节点 tooltip 与 Inspector。卡片用实底 `--vui-surface-panel` 加 `--vui-elevation-2`；状态按四桶经**边框 + 类型色块旁角标**表达：完成（`--state-success` 绿）、进行（`--accent-cool` 蓝）、等待/关注（`--state-warning` 琥珀）、失败（`--state-error` 红）、待运行（最淡描边）；选中另用细蓝色 outline，不与状态色冲突。
 
-该模式使用三条阶段带做分组：实底为 `accent-cool` 混入 `--vui-surface-workspace`（idle 8% / active 12% / done 4%；attention 用 warning 10%），描边略强于 `border-subtle`。禁止洗白渐变、白色内高光，也禁止三阶段带换色相（蓝/琥珀/红留给运行状态）。阶段头包含编号、名称、完成计数和短进度条；**阶段头的小面积聚合指示器例外于换色相禁令**：编号徽章与进度条按 tone 着色（done 绿、active 蓝、attention 琥珀），并附状态 chip（已完成/进行中/需关注），让阶段完成度不依赖逐节点扫读。不得改全局 `--vui-surface-region`（浅色 rail 等于侧栏白底）。普通相邻边默认不常驻标签；只有 `knowledge_package`、`smoke`、`promotion` 和决策/回路语义常显，其他标签仅在 hover 或 active/attention 状态出现。跨阶段交接使用对齐节点之间的一条短叙事桥；同协议重跑沿所在阶段底部的局部反馈轨道返回，禁止绕画布或阶段绘制大矩形回路。ELK 仍负责节点顺序、阶段位置与空间预算，renderer 只收敛这两类叙事边的可见几何。
+该模式用三枚紧凑阶段标签分组，不绘制包住成员节点的大背景框。阶段标签包含编号、名称、完成计数与小面积 tone chip（done 绿、active 蓝、attention 琥珀）；颜色只表达聚合运行状态，不给阶段分配不同身份色。标签默认锚定在该阶段成员任务包围盒左上方，成员节点移动时跟随，也允许单独拖拽微调。不得改全局 `--vui-surface-region`（浅色 rail 等于侧栏白底）。普通相邻边默认不常驻标签；只有 `knowledge_package`、`smoke`、`promotion` 和决策/回路语义常显，其他标签仅在 hover 或 active/attention 状态出现。跨阶段交接使用对齐节点之间的一条短叙事桥；同协议重跑沿所在阶段底部的局部反馈轨道返回，禁止绕画布或阶段绘制大矩形回路。ELK 仍负责初始节点顺序、阶段位置与空间预算；手动调整后由 renderer 的受控位置与智能正交路由接管显示几何。
 
 画布必须提供平移、缩放、适应全部和定位当前工作；页面本身不得产生横向滚动。
 
@@ -78,10 +78,10 @@ pathState：`idle | traversed | active | attention | danger` — 仅由 nodeRuns
 
 #### 边几何（引擎所有权，T3）
 
-- 边路径由 `workflowElkEdgePath.sectionsToSvgPath` 从引擎 `WorkflowEdgeSection[]` 直接生成（绝对坐标正交 section，无重复与虚假连接线）；生产源码禁止 smooth-step 重路由（`getSmoothStepPath`），有契约测试断言源码不含该符号。
+- 自动布局边由 `workflowElkEdgePath.sectionsToSvgPath` 从引擎 `WorkflowEdgeSection[]` 直接生成（绝对坐标正交 section，无重复与虚假连接线）；生产源码禁止 `getSmoothStepPath`。手动布局激活后改用下方「手动布局与智能连线 v2」契约，不覆盖 ELK 的初始/自动整理结果。
 - 标签锚点由引擎 `labelBounds`（中心）决定，缺失时不渲染标签；三阶段统一 viewport，跨阶段边同坐标空间。蛇形跨阶段标签在 **layout composer** 里把 `labelBounds` 放到竖线右侧（回路标签放到横轨上方），禁止渲染后再用 CSS transform 挪开。
 - 画布短名：定义协议仍可保留 `Knowledge Package`；`resolveEdgeLabelSpec` 映射为「知识包」并用中英混排字宽计量，避免把 ASCII 当 CJK 截成 `Knowledge Pa…`。tooltip `title` 保留原文。
-- z-index 层级固定：stageRegion `0` < edge `1` < task node `2`；**边不浮在节点上方**，选中/hover 不抬升 zIndex，用描边加粗与变色表达。
+- z-index：自动阶段区 `0` < edge `1` < task node `2`；蛇形手动模式的紧凑阶段标签为 `3`，使标签可拖且不被边遮住。**边不浮在任务节点上方**，选中/hover 不抬升 zIndex，用描边加粗与变色表达。
 - 标签契约：`workflowEdgeLabelGeometry` 是唯一几何权威——布局 spacer 尺寸与渲染 label box 完全一致（同宽高、同截断策略）；长标签截断后矩形仍参与布局；禁止渲染后 transform 移动。标签胶囊用不透明 panel 底 + workspace halo 盖住穿过的线。
 
 ### 布局与 fit 协议（T4 + 两级布局 2026-08-08 + 外层真实 ELK 2026-08-08b）
@@ -92,15 +92,24 @@ pathState：`idle | traversed | active | attention | danger` — 仅由 nodeRuns
 
 ### 阶段分区
 
-- 阶段为 React Flow 父节点（`parentId` + 相对坐标）
-- 分组靠明度（workspace 实底 + 不透明卡片），编号标题不抢节点层级；状态色不用于阶段带身份，仅出现在阶段头的小型聚合指示器（编号徽章 / 状态 chip / 进度条）。蛇形 idle/done 阶段带用更淡虚线边，避免和交接竖线抢层级。
+- `stage-columns` 的阶段为 React Flow 父节点（`parentId` + 相对坐标）；`serpentine` 的阶段是独立紧凑标签节点，不再作为成员任务的父级或大背景框。
+- 阶段归属严格来自 `stages[]` 的 `stageId` / `nodeIds` 与节点 `stageId`，不得按屏幕坐标猜测。标签位置只负责展示，不改变阶段数据归属。
+- 分组靠标签 + workspace 实底 + 不透明任务卡；状态色不用于阶段身份，只出现在编号徽章 / 状态 chip。
 - stageTone：`idle | active | done | attention`
+
+### 手动布局与智能连线 v2（serpentine）
+
+- 普通节点与决策节点都按真实 ELK port 为每条出边、入边渲染独立 Handle。决策出边继续用 `rerun/promote/rollback/stop` 等语义 id；普通出边使用完整 ELK port id。相同侧端口中心距至少 `16px`，禁止多条边复用匿名 source Handle。
+- 节点拖动时，边每帧读取 React Flow 当前端点，并使用本地正交回退路线实时跟随；源端和目标端都先沿 Handle 方向保留 `32px` 笔直引线，再进入主体通道，避免线头重合后互相遮挡。
+- 松手后由 `@tisoap/react-flow-smart-edge@5.0.0` 的 `SmartEdgeProvider` / `useSmartEdgePath` 执行避障正交路由；provider 使用 step preset，节点净空 `12px`、栅格通道约 `12px`，阶段标签也作为障碍。Worker 等待、失败或正在拖动时必须回退到上述本地路线，不得让边消失或停留在旧端点。
+- 阶段标签默认位置 = 成员任务包围盒左上角上方（标签 `240 × 32px`，间距 `20px`）+ 用户偏移。拖任务时默认锚点随成员更新；拖标签时只更新该阶段的偏移，不移动任务，也不改变阶段归属。
+- 浏览器本地布局状态统一为 v2：`positions + stageLabelOffsets + locked + structureKey + runId + nodeIds + stageIds`。读取兼容 v1（旧节点位置保留、标签偏移为空）；自动整理同时清空节点位置和标签偏移；撤销以同一 snapshot 恢复两者，锁定同时禁止任务和阶段标签拖动。
 
 ### 状态/交互约束
 
 - `@xyflow/react` 仅允许在 `renderers/shadcn/workflow/**`（入口 `ShadcnWorkflowCanvas.tsx`）
 - 业务路由禁止 import renderer 或 xyflow
-- 默认不可拖节点、不可连线（运行态，非编辑器）
+- `stage-columns` 默认不可拖；`serpentine` 允许任务节点和阶段标签做浏览器本地展示调整，但仍不可连线、不可修改运行图拓扑
 - MiniMap 默认关闭；长流程由生产工作台显式 `showMiniMap` 开启
 - 单击节点 → 选中；点空白 → 取消；键盘可聚焦节点（aria-label 含名称/类型/状态）
 - 控件：放大、缩小、适应全部、定位当前工作
@@ -169,12 +178,13 @@ const graph = composeHypothesisFirstGraph(base, region, {
 
 链数据由 `useHypothesisFirstChain(teamId, questionId)`（React Query，questionId 为空不发请求）提供；run SSE 事件经 `useHypothesisFirstChainInvalidation` 防抖失效相关 query。
 
-### 工作区顶栏实验切换（2026-08-19）
+### 工作区顶栏实验切换（2026-08-19 统一选择器）
 
-画布拓扑仍是一张图。顶栏切换的是**已开始的题目实验实例**，不是 125 题目录，也不是 Program 冻结的 `EXP-*` campaign。
+画布拓扑仍是一张图。顶栏切换器列出 **launch-options 全量题目目录**（125 题），不只是已开始的实例：包含无 checkpoint 的题与 `cancelled` checkpoint 的题，目录顺序稳定、当前题置顶。
 
-- 选项来自 `launch-options.questions[].checkpoint`（题目最新 workflow run）。文案：`SCI-096 · 假说摘要`（未选则「尚未选择假说」），description 为题目标题。过滤 `cancelled` checkpoint。
-- 选中一项即写入 URL：`questionId` + `runId` + `node=` 下一步模型算出的当前任务（生成讨论 / 选择 / 已有搜集运行），**不是**盲用 `checkpoint.currentNodeId` 的 `source_finding`。
+- 选项来自 `launch-options.questions[]`（题目最新 workflow run checkpoint）。文案：`SCI-096 · 假说摘要`（未选则「尚未选择假说」）；description = 题目标题 + 可读的 checkpoint 可用性/状态/进度（`当前节点 · 完成/总数 · 状态文案`），无 checkpoint 的题明确写「无 checkpoint」。
+- 选中**有 checkpoint** 的题即写入 URL：`questionId` + `runId` + `node=` 下一步模型算出的当前任务（生成讨论 / 选择 / 已有搜集运行），**不是**盲用 `checkpoint.currentNodeId` 的 `source_finding`。
+- 选中**无 checkpoint** 的题写入无运行 patch：设置 `questionId`、清除旧 `runId`/`node`、`panel=launch` 打开预填该题的启动面板，**不自动创建运行**。
 - 顶栏常驻当前题号、标题与假说摘要（未选则写「尚未选择假说 / 尚未选择实验」）。切换器 aria 为「切换实验」。假说正文仍在赛题详情，不把 125 题假说陈述预拉进切换器。
 - 有 run 时主按钮是「前往…」当前任务；「创建运行 / 新建运行」降为次要并仍打开 launch 面板。
 

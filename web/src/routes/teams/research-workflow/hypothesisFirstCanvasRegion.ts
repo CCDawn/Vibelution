@@ -52,6 +52,11 @@ export type HypothesisFirstCanvasRegion = {
   stage: WorkflowCanvasStageInput;
   nodes: WorkflowCanvasNodeInput[];
   edges: WorkflowCanvasEdgeInput[];
+  /**
+   * Downstream 16-node pipeline is noise until the first review round has
+   * actually closed or a collection request exists. Compose hides it until then.
+   */
+  showDownstreamPipeline: boolean;
 };
 
 /** Canvas node ids of the hypothesis-first region always carry the `hf_` prefix. */
@@ -121,6 +126,16 @@ function convergenceNodeStatus(chainState: HypothesisFirstChainState): WorkflowN
   return "pending";
 }
 
+function cardProgress(nodes: WorkflowCanvasNodeInput[]): { completed: number; total: number } {
+  const total = nodes.length;
+  const completed = nodes.filter((node) => node.status === "succeeded" || node.status === "skipped").length;
+  return { completed, total };
+}
+
+function hasClosedReviewRound(meetings: MeetingRoundRecord[]): boolean {
+  return meetings.some((meeting) => meeting.status === "closed");
+}
+
 function sortMeetings(meetings: MeetingRoundRecord[]): MeetingRoundRecord[] {
   return [...meetings].sort((left, right) => {
     const leftIndex = left.roundIndex ?? Number.MAX_SAFE_INTEGER;
@@ -182,23 +197,26 @@ export function buildHypothesisFirstCanvasRegion(
   const edges: Array<Omit<WorkflowCanvasEdgeInput, "pathState"> & { pathState?: WorkflowCanvasEdgeInput["pathState"] }> = [];
 
   // --- cards ---------------------------------------------------------------
+  const candidateCount = chainState.candidateCount ?? 0;
   const generationMeeting = generationMeetings[generationMeetings.length - 1];
-  if (generationMeeting) {
+  if (generationMeeting || candidateCount > 0) {
+    const generationStatus = generationMeeting
+      ? meetingNodeStatus(generationMeeting)
+      : "succeeded";
     nodes.push({
       nodeId: HYPOTHESIS_FIRST_GENERATION_NODE_ID,
       stageId: HYPOTHESIS_FIRST_STAGE_ID,
       label: "候选假说生成",
       actorKind: "agent",
       visualKind: "agent_task",
-      status: meetingNodeStatus(generationMeeting),
-      description:
-        generationMeeting.status === "closed"
-          ? `已产出 ${chainState.candidateCount ?? 0} 条候选假说`
-          : meetingNodeDescription(generationMeeting),
+      status: generationStatus,
+      description: generationMeeting
+        ? generationMeeting.status === "closed"
+          ? `已产出 ${candidateCount} 条候选假说`
+          : meetingNodeDescription(generationMeeting)
+        : `已产出 ${candidateCount} 条候选假说`,
     });
   }
-
-  const candidateCount = chainState.candidateCount ?? 0;
   nodes.push({
     nodeId: HYPOTHESIS_FIRST_SELECTION_NODE_ID,
     stageId: HYPOTHESIS_FIRST_STAGE_ID,
@@ -215,7 +233,7 @@ export function buildHypothesisFirstCanvasRegion(
           : "等待生成候选假说",
   });
 
-  if (generationMeeting) {
+  if (generationMeeting || candidateCount > 0) {
     edges.push({
       edgeId: "hf_e_gen_sel",
       fromNodeId: HYPOTHESIS_FIRST_GENERATION_NODE_ID,
@@ -268,24 +286,35 @@ export function buildHypothesisFirstCanvasRegion(
     });
   }
 
-  nodes.push({
-    nodeId: HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID,
-    stageId: HYPOTHESIS_FIRST_STAGE_ID,
-    label: "假说收敛门",
-    actorKind: "human",
-    // human_gate, not decision: the VUI decision kind is hardwired to the
-    // iteration decision's five-outcome port/handle contract (workflowElkPorts
-    // fail-fast), while this gate has a single proceed exit and a human
-    // decision semantic when blocked — same shape as candidate_promotion.
-    visualKind: "human_gate",
-    status: convergenceNodeStatus(chainState),
-    description: chainState.convergenceDetail
-      || (chainState.hypothesisConverged
-        ? "假说集已收敛"
-        : chainState.budgetExhausted
-          ? "轮次预算耗尽，等待人工决策"
-          : "待收敛"),
-  });
+  const showConvergence = chainState.hypothesisConverged
+    || chainState.budgetExhausted
+    || hasClosedReviewRound(meetings);
+  const showDownstreamPipeline = chainState.firstMeetingClosed
+    || chainState.collectionReady
+    || chainState.hypothesisConverged
+    || requests.length > 0
+    || hasClosedReviewRound(meetings);
+
+  if (showConvergence) {
+    nodes.push({
+      nodeId: HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID,
+      stageId: HYPOTHESIS_FIRST_STAGE_ID,
+      label: "假说收敛门",
+      actorKind: "human",
+      // human_gate, not decision: the VUI decision kind is hardwired to the
+      // iteration decision's five-outcome port/handle contract (workflowElkPorts
+      // fail-fast), while this gate has a single proceed exit and a human
+      // decision semantic when blocked — same shape as candidate_promotion.
+      visualKind: "human_gate",
+      status: convergenceNodeStatus(chainState),
+      description: chainState.convergenceDetail
+        || (chainState.hypothesisConverged
+          ? "假说集已收敛"
+          : chainState.budgetExhausted
+            ? "轮次预算耗尽，等待人工决策"
+            : "待收敛"),
+    });
+  }
 
   // --- edges (only associations that really exist in the ledger) -----------
   const firstMeeting = meetings[0];
@@ -364,7 +393,7 @@ export function buildHypothesisFirstCanvasRegion(
     });
   }
 
-  if (lastMeeting) {
+  if (lastMeeting && showConvergence) {
     edges.push({
       edgeId: `hf_e_m${roundIndexByMeetingId.get(lastMeeting.meetingRoundId)}_gate`,
       fromNodeId: meetingNodeId(lastMeeting.meetingRoundId),
@@ -374,6 +403,8 @@ export function buildHypothesisFirstCanvasRegion(
       semanticKind: "main",
       labelAlwaysVisible: false,
     });
+  }
+  if (lastMeeting && showDownstreamPipeline) {
     edges.push({
       edgeId: HYPOTHESIS_FIRST_STAGE1_EDGE_ID,
       fromNodeId: meetingNodeId(firstMeeting!.meetingRoundId),
@@ -384,33 +415,29 @@ export function buildHypothesisFirstCanvasRegion(
       labelAlwaysVisible: true,
     });
   }
-  edges.push({
-    edgeId: HYPOTHESIS_FIRST_STAGE2_EDGE_ID,
-    fromNodeId: HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID,
-    toNodeId: "hypothesis_design",
-    label: "假说集就绪",
-    gateKind: "knowledge_package",
-    semanticKind: "human_gate",
-    labelAlwaysVisible: true,
-  });
+  if (showConvergence) {
+    edges.push({
+      edgeId: HYPOTHESIS_FIRST_STAGE2_EDGE_ID,
+      fromNodeId: HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID,
+      toNodeId: "hypothesis_design",
+      label: "假说集就绪",
+      gateKind: "knowledge_package",
+      semanticKind: "human_gate",
+      labelAlwaysVisible: true,
+    });
+  }
 
   const nodeById = new Map(nodes.map((node) => [node.nodeId, node] as const));
   const resolvedEdges = buildEdgePathStates(edges, nodeById, new Set());
 
-  const closedRoundCount = meetings.filter(
-    (meeting) => meeting.status === "closed" && Boolean(meeting.digestRef),
-  ).length;
   const stage: WorkflowCanvasStageInput = {
     stageId: HYPOTHESIS_FIRST_STAGE_ID,
     label: HYPOTHESIS_FIRST_STAGE_LABEL,
     nodeIds: nodes.map((node) => node.nodeId),
     index: 0,
     stageTone: stageToneFromNodes(nodes),
-    progress: {
-      completed: closedRoundCount,
-      total: chainState.roundBudget,
-    },
+    progress: cardProgress(nodes),
   };
 
-  return { stage, nodes, edges: resolvedEdges };
+  return { stage, nodes, edges: resolvedEdges, showDownstreamPipeline };
 }
