@@ -57,7 +57,7 @@ export function ResearchWorkflowErrorSurface({
         {researchWorkflowErrorBody(presented, lang)}
       </p>
       {message && message !== researchWorkflowErrorBody(presented, lang) ? (
-        <p className="m-0 mt-2 text-[11px] leading-snug text-[var(--fg-tertiary)]">
+        <p className="m-0 mt-2 [font-size:var(--vui-font-2xs)] leading-snug text-[var(--fg-tertiary)]">
           {message}
         </p>
       ) : null}

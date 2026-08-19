@@ -76,7 +76,7 @@ export function ResearchBoardKanban({
     >
       {showSectionLabel ? (
         <div className="flex min-w-0 items-baseline justify-between gap-3 px-0.5">
-          <h3 className="m-0 text-[13px] font-[740] text-[var(--fg-primary)]">
+          <h3 className="m-0 [font-size:var(--vui-font-xs)] font-[740] text-[var(--fg-primary)]">
             {lang === "zh" ? "阶段看板" : "Stage board"}
           </h3>
         </div>
@@ -96,13 +96,13 @@ export function ResearchBoardKanban({
             data-testid={`research-board-column-${column.id}`}
           >
             <div className="flex min-w-0 items-center justify-between gap-2">
-              <h4 className="m-0 truncate text-[13px] font-[760] text-[var(--fg-primary)]">
+              <h4 className="m-0 truncate [font-size:var(--vui-font-xs)] font-[760] text-[var(--fg-primary)]">
                 {lang === "zh" ? column.titleZh : column.titleEn}
               </h4>
               {loading ? (
                 <span className={`${pulseClass} size-[22px] shrink-0 rounded-full`} aria-hidden="true" />
               ) : (
-                <span className="inline-grid h-[22px] min-w-[22px] place-items-center rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-1.5 text-[11px] font-[740] text-[var(--fg-secondary)]">
+                <span className="inline-grid h-[22px] min-w-[22px] place-items-center rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] px-1.5 [font-size:var(--vui-font-2xs)] font-[740] text-[var(--fg-secondary)]">
                   {column.cards.length}
                 </span>
               )}
@@ -125,13 +125,13 @@ export function ResearchBoardKanban({
                 data-active={card.active ? "true" : "false"}
               >
                 <strong
-                  className="min-w-0 truncate text-[13px] font-[740] leading-snug text-[var(--fg-primary)]"
+                  className="min-w-0 truncate [font-size:var(--vui-font-xs)] font-[740] leading-snug text-[var(--fg-primary)]"
                   title={card.title}
                 >
                   {card.title}
                 </strong>
                 <p
-                  className="m-0 line-clamp-2 min-w-0 text-[12px] leading-snug text-[var(--fg-secondary)]"
+                  className="m-0 line-clamp-2 min-w-0 [font-size:var(--vui-font-2xs)] leading-snug text-[var(--fg-secondary)]"
                   title={card.body}
                 >
                   {card.body}
@@ -149,11 +149,11 @@ export function ResearchBoardKanban({
                     ))}
                   </div>
                 ) : null}
-                <div className="flex min-w-0 items-center justify-between gap-2 text-[11px] text-[var(--fg-tertiary)]">
+                <div className="flex min-w-0 items-center justify-between gap-2 [font-size:var(--vui-font-2xs)] text-[var(--fg-tertiary)]">
                   <span className="min-w-0 truncate" title={card.foot}>{card.foot}</span>
                   <VNativeButton
                     type="button"
-                    className="!min-h-7 shrink-0 !gap-1 !border-transparent !bg-transparent !px-2 !text-[12px] !text-[var(--fg-secondary)]"
+                    className="!min-h-7 shrink-0 !gap-1 !border-transparent !bg-transparent !px-2 ![font-size:var(--vui-font-2xs)] !text-[var(--fg-secondary)]"
                     onClick={() => onOpenCard?.(column.id, card.id)}
                   >
                     <Eye size={13} />
@@ -162,7 +162,7 @@ export function ResearchBoardKanban({
                 </div>
               </VSurface>
             )) : (
-              <p className="m-0 text-[12px] text-[var(--fg-tertiary)]">
+              <p className="m-0 [font-size:var(--vui-font-2xs)] text-[var(--fg-tertiary)]">
                 {lang === "zh" ? "本列暂无卡片" : "No cards in this column"}
               </p>
             )}

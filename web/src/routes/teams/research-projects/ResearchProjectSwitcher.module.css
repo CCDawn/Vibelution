@@ -41,13 +41,13 @@
 }
 
 .identity span {
-  font-size: 12px;
+  font-size: var(--vui-font-2xs);
 }
 
 .identity strong {
   overflow: hidden;
   color: var(--vui-fg);
-  font-size: 14px;
+  font-size: var(--vui-font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -67,14 +67,14 @@
 
 .titleLine small {
   color: var(--vui-fg-muted);
-  font-size: 11px;
+  font-size: var(--vui-font-2xs);
   font-style: normal;
 }
 
 .status {
   min-height: 23px !important;
   padding: 2px 8px;
-  font-size: 11px !important;
+  font-size: var(--vui-font-2xs) !important;
   font-style: normal;
   font-weight: 760;
   white-space: nowrap;
@@ -84,7 +84,7 @@
   margin: 5px 0 0;
   overflow: hidden;
   color: var(--vui-fg-muted);
-  font-size: 12px;
+  font-size: var(--vui-font-2xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -94,7 +94,7 @@
   gap: 5px;
   min-width: 0;
   color: var(--vui-fg-muted);
-  font-size: 11px;
+  font-size: var(--vui-font-2xs);
 }
 
 .projectSelect select {
@@ -121,7 +121,7 @@
   border: 1px solid var(--accent-cool);
   border-radius: var(--radius-control);
   color: var(--vui-fg-on-accent, white);
-  font-size: 12px;
+  font-size: var(--vui-font-2xs);
   font-weight: 780;
   text-decoration: none;
   white-space: nowrap;
@@ -142,7 +142,7 @@
 .error {
   grid-column: 1 / -1;
   margin: -4px 0 0;
-  font-size: 12px;
+  font-size: var(--vui-font-2xs);
 }
 
 .message {
@@ -162,7 +162,7 @@
   display: grid;
   gap: 6px;
   color: var(--vui-fg-muted);
-  font-size: 12px;
+  font-size: var(--vui-font-2xs);
 }
 
 @media (max-width: 1100px) {

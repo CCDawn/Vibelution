@@ -84,10 +84,10 @@ export function TeamShellRail({
       aria-label={lang === "zh" ? "团队列表" : "Team list"}
     >
       <div className="flex min-w-0 items-center justify-between gap-2 px-0.5">
-        <h2 className="m-0 text-[13px] font-[760] text-[var(--fg-primary)]">
+        <h2 className="m-0 [font-size:var(--vui-font-xs)] font-[760] text-[var(--fg-primary)]">
           {lang === "zh" ? "团队" : "Teams"}
         </h2>
-        <span className="text-[11px] text-[var(--fg-tertiary)]">{teams.length}</span>
+        <span className="[font-size:var(--vui-font-2xs)] text-[var(--fg-tertiary)]">{teams.length}</span>
       </div>
       <VInput
         type="search"
@@ -122,14 +122,14 @@ export function TeamShellRail({
               onClick={() => onSelectTeam(team)}
             >
               <span className="flex min-w-0 items-center justify-between gap-2">
-                <span className="min-w-0 truncate text-[13px] font-[720]">{item.name}</span>
+                <span className="min-w-0 truncate [font-size:var(--vui-font-xs)] font-[720]">{item.name}</span>
                 <VChip>
                   {item.status}
                 </VChip>
               </span>
               <span
                 className={[
-                  "flex min-w-0 flex-wrap gap-x-2 gap-y-0.5 text-[11px]",
+                  "flex min-w-0 flex-wrap gap-x-2 gap-y-0.5 [font-size:var(--vui-font-2xs)]",
                   active ? "text-[var(--fg-secondary)]" : "text-[var(--fg-tertiary)]",
                 ].join(" ")}
               >
@@ -138,13 +138,13 @@ export function TeamShellRail({
                   {item.memberCount} {lang === "zh" ? "成员" : "members"}
                 </span>
               </span>
-              <span className="line-clamp-2 text-[11px] leading-snug text-[var(--fg-secondary)]">
+              <span className="line-clamp-2 [font-size:var(--vui-font-2xs)] leading-snug text-[var(--fg-secondary)]">
                 {item.purpose}
               </span>
             </VNativeButton>
           );
         }) : (
-          <p className="m-0 px-1 text-[12px] text-[var(--fg-tertiary)]">
+          <p className="m-0 px-1 [font-size:var(--vui-font-2xs)] text-[var(--fg-tertiary)]">
             {lang === "zh" ? "没有匹配的团队" : "No matching teams"}
           </p>
         )}

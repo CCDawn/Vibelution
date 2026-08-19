@@ -1,6 +1,6 @@
 export default {
   root: "flex min-w-0 flex-wrap items-center justify-between gap-2",
-  context: "flex min-w-0 items-center gap-2 text-xs text-[var(--fg-secondary)]",
+  context: "flex min-w-0 items-center gap-2 [font-size:var(--vui-font-2xs)] text-[var(--fg-secondary)]",
   primary: "truncate text-[var(--fg-primary)]",
   truncated: "truncate",
   next: "truncate text-[var(--fg-primary)]",
