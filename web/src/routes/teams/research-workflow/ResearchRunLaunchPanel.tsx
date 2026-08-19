@@ -1,19 +1,19 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 
 import {
-  activateResearchWorkflowExperiment,
   fetchResearchWorkflowLaunchOptions,
   type CreateResearchWorkflowRunInput,
   type ResearchWorkflowExperimentOption,
+  type ResearchWorkflowLaunchOption,
 } from "../../../api/researchWorkflow";
 import { queryKeys } from "../../../api/queryKeys";
 import { CHALLENGE_CUP_WORKFLOW_ID } from "../../../api/types/researchWorkflow";
 import {
   VButton,
-  VConfirmDialog,
   VFieldRow,
+  VInput,
   VPanelHeader,
   VSelect,
   VStateSurface,
@@ -21,11 +21,11 @@ import {
   VSurface,
 } from "../../../components/vui";
 import { buildResearchRunInput } from "./researchRunLaunchContract";
+import { researchRunStatusLabel } from "./researchRunPresentation";
 import { ResearchRunSafetyLimitPanel } from "./ResearchRunSafetyLimitPanel";
 import { createResearchRunSafetyBudget } from "./researchRunSafetyBudget";
 import styles from "./ResearchRunLaunchPanel.styles";
 
-const EXPERIMENT_EMPTY_KEY = "__experiment_empty__";
 const QUESTION_EMPTY_KEY = "__question_empty__";
 
 function nextActionLabel(experiment: ResearchWorkflowExperimentOption): string {
@@ -141,20 +141,49 @@ export function ExperimentLaunchStatus(props: {
   );
 }
 
+const DOMAIN_LABELS: Record<string, string> = {
+  mathematical_sciences: "数学",
+  chemistry: "化学",
+  medicine_and_health: "医学与健康",
+  biology: "生物学",
+  astronomy: "天文学",
+  physics: "物理学",
+  engineering_and_materials_science: "工程与材料",
+  information_science: "信息科学",
+  neuroscience: "神经科学",
+  ecology: "生态学",
+  energy_science: "能源",
+  artificial_intelligence: "人工智能",
+};
+
+function domainLabel(domain: string): string {
+  return DOMAIN_LABELS[domain] || domain;
+}
+
+function questionMatchesQuery(question: ResearchWorkflowLaunchOption, query: string): boolean {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return true;
+  return [
+    question.questionId,
+    question.title,
+    question.domain || "",
+    domainLabel(question.domain || ""),
+  ].some((value) => value.toLowerCase().includes(needle));
+}
+
 export function ResearchRunLaunchPanel(props: {
   teamId: string;
   busy: boolean;
+  initialQuestionId?: string;
   onSubmit: (input: CreateResearchWorkflowRunInput) => Promise<void>;
   onCancel: () => void;
-  onOpenProgress?: () => void;
+  onContinueRun?: (input: { runId: string; nodeId: string }) => void;
 }) {
-  const { teamId, busy, onSubmit, onCancel, onOpenProgress } = props;
-  const [questionId, setQuestionId] = useState("");
-  const [experimentId, setExperimentId] = useState("");
-  const [confirmOpen, setConfirmOpen] = useState(false);
+  const { teamId, busy, initialQuestionId, onSubmit, onCancel, onContinueRun } = props;
+  const [questionId, setQuestionId] = useState(initialQuestionId || "");
+  const [query, setQuery] = useState("");
   const [safetyBudget, setSafetyBudget] = useState(createResearchRunSafetyBudget);
   const [error, setError] = useState<string | null>(null);
-  const queryClient = useQueryClient();
   const launchOptionsKey = queryKeys.researchWorkflowLaunchOptions(
     CHALLENGE_CUP_WORKFLOW_ID,
     teamId,
@@ -165,127 +194,89 @@ export function ResearchRunLaunchPanel(props: {
     enabled: Boolean(teamId),
     staleTime: 60_000,
   });
-  const experiments = launchOptions.data?.experiments ?? [];
   const questions = launchOptions.data?.questions ?? [];
-  const selectedExperiment = experiments.find(
-    (experiment) => experiment.experimentId === experimentId,
-  ) ?? null;
   const selectedQuestion = questions.find((question) => question.questionId === questionId) ?? null;
-  const launchBlockedByExperiment = selectedQuestion
-    ? isLaunchBlockedByExperiment(experiments, selectedQuestion.questionId, experimentId)
-    : false;
-
-  const activateMutation = useMutation({
-    mutationFn: (input: { experimentId: string; teamId: string }) =>
-      activateResearchWorkflowExperiment(CHALLENGE_CUP_WORKFLOW_ID, input.experimentId, {
-        teamId: input.teamId,
-        confirmed: true,
-      }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: launchOptionsKey });
-      setConfirmOpen(false);
-    },
-    onError: (reason: unknown) => {
-      setError(reason instanceof Error ? reason.message : String(reason));
-      setConfirmOpen(false);
-    },
-  });
+  const checkpoint = selectedQuestion?.checkpoint ?? null;
+  const filteredQuestions = useMemo(
+    () => questions.filter((question) => questionMatchesQuery(question, query)),
+    [questions, query],
+  );
+  const visibleQuestions = selectedQuestion && !filteredQuestions.some((item) => item.questionId === questionId)
+    ? [selectedQuestion, ...filteredQuestions]
+    : filteredQuestions;
 
   if (launchOptions.isPending) {
-    return <VStateSurface tone="loading" title="加载可启动题目" fill className={styles.state} />;
+    return <VStateSurface tone="loading" title="加载 125 题目录" fill className={styles.state} />;
   }
   if (launchOptions.isError) {
     return (
-      <VStateSurface tone="error" title="题目加载失败" fill className={styles.state}>
-        {launchOptions.error instanceof Error ? launchOptions.error.message : "暂时无法读取题目审核结果"}
+      <VStateSurface tone="error" title="题目目录加载失败" fill className={styles.state}>
+        {launchOptions.error instanceof Error ? launchOptions.error.message : "暂时无法读取 125 题目录"}
       </VStateSurface>
     );
   }
-  if (!questions.length && !experiments.length) {
-    return <VStateSurface tone="empty" title="暂无可启动题目" fill className={styles.state} />;
+  if (!questions.length) {
+    return <VStateSurface tone="empty" title="暂无题目目录" fill className={styles.state} />;
   }
+
+  const primaryLabel = checkpoint
+    ? (checkpoint.resumable ? "继续运行" : "查看进展")
+    : "开始实验";
 
   return (
     <VSurface tone="panel" className={styles.root}>
-      <VPanelHeader title="创建科研运行" headingLevel={3} />
-      {experiments.length ? (
-        <VFieldRow
-          label="深度实验"
-          description="两个必须的独立实验。选择后不会自动创建运行；正式 campaign 激活前不会启动 Qwen / 网络 / GPU 任务。"
-        >
-          <VSelect
-            aria-label="选择深度实验"
-            placeholder="选择深度实验"
-            selectedKey={experimentId || EXPERIMENT_EMPTY_KEY}
-            options={[
-              { id: EXPERIMENT_EMPTY_KEY, label: "不选择深度实验" },
-              ...experiments.map((experiment) => ({
-                id: experiment.experimentId,
-                label: `${experiment.experimentId} · ${experiment.name}`,
-              })),
-            ]}
-            onSelectionChange={(key) => {
-              const next = key == null ? "" : String(key);
-              setExperimentId(next === EXPERIMENT_EMPTY_KEY ? "" : next);
-              setError(null);
-              if (next && next !== EXPERIMENT_EMPTY_KEY) {
-                const matching = experiments.find((experiment) => experiment.experimentId === next);
-                setQuestionId(
-                  matching
-                  && questions.some((question) => question.questionId === matching.questionId)
-                    ? matching.questionId
-                    : "",
-                );
-              }
-            }}
-            isDisabled={busy || activateMutation.isPending}
-          />
-        </VFieldRow>
-      ) : null}
-      {selectedExperiment ? (
-        <ExperimentLaunchStatus
-          experiment={selectedExperiment}
-          busy={busy}
-          activationPending={activateMutation.isPending}
-          onActivate={() => {
-            setError(null);
-            setConfirmOpen(true);
-          }}
-          onOpenProgress={onOpenProgress}
+      <VPanelHeader title="选择题目并开始实验" headingLevel={3} />
+      <VFieldRow label="搜索题目" description="题号、英文问题或学科">
+        <VInput
+          aria-label="搜索 125 题"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="SCI-003 或 Riemann"
+          isDisabled={busy}
         />
-      ) : null}
-      {questions.length ? (
-        <>
-          <VFieldRow label="研究命题">
-            <VSelect
-              aria-label="选择已审核题目"
-              placeholder="选择已审核题目"
-              selectedKey={questionId || QUESTION_EMPTY_KEY}
-              options={[
-                { id: QUESTION_EMPTY_KEY, label: "不选择已审核题目" },
-                ...questions.map((question) => ({
-                  id: question.questionId,
-                  label: `${question.questionId} · ${question.title}`,
-                })),
-              ]}
-              onSelectionChange={(key) => {
-                setQuestionId(
-                  key == null || key === QUESTION_EMPTY_KEY ? "" : String(key),
-                );
-                setError(null);
-              }}
-              isDisabled={busy}
-            />
-          </VFieldRow>
-          {selectedQuestion ? (
-            <VSurface tone="inset" padding="compact" className={styles.selectedQuestion}>
-              <strong className={styles.questionTitle}>{selectedQuestion.title}</strong>
-              {selectedQuestion.scope ? (
-                <span className={styles.questionScope}>{selectedQuestion.scope}</span>
-              ) : null}
-            </VSurface>
-          ) : null}
-        </>
+      </VFieldRow>
+      <VFieldRow label="研究问题">
+        <VSelect
+          aria-label="选择 125 题"
+          placeholder="选择一道题目"
+          selectedKey={questionId || QUESTION_EMPTY_KEY}
+          options={[
+            { id: QUESTION_EMPTY_KEY, label: "请选择题目" },
+            ...visibleQuestions.map((question) => ({
+              id: question.questionId,
+              label: `${question.questionId} · ${question.title}`,
+              description: [
+                domainLabel(question.domain || question.scope),
+                question.checkpoint
+                  ? `${question.checkpoint.currentNodeLabel || "未开始"} · ${question.checkpoint.completedCount}/${question.checkpoint.totalSteps}`
+                  : "尚未开始",
+              ].filter(Boolean).join(" · "),
+            })),
+          ]}
+          onSelectionChange={(key) => {
+            setQuestionId(key == null || key === QUESTION_EMPTY_KEY ? "" : String(key));
+            setError(null);
+          }}
+          isDisabled={busy}
+        />
+      </VFieldRow>
+      {selectedQuestion ? (
+        <VSurface tone="inset" padding="compact" className={styles.selectedQuestion}>
+          <strong className={styles.questionTitle}>{selectedQuestion.questionId} · {selectedQuestion.title}</strong>
+          <span className={styles.questionScope}>{domainLabel(selectedQuestion.domain || selectedQuestion.scope)}</span>
+          {checkpoint ? (
+            <div className={styles.checkpoint} data-testid="question-checkpoint">
+              <VStatusChip tone={checkpoint.resumable ? "warning" : checkpoint.status === "succeeded" ? "success" : "neutral"}>
+                {researchRunStatusLabel(checkpoint.status)}
+              </VStatusChip>
+              <p>
+                当前 checkpoint：{checkpoint.currentNodeLabel || checkpoint.currentNodeId || "起点"} · {checkpoint.completedCount}/{checkpoint.totalSteps}
+              </p>
+            </div>
+          ) : (
+            <p className={styles.questionScope}>尚无运行记录，开始后会从资料寻找进入流程并保存 checkpoint。</p>
+          )}
+        </VSurface>
       ) : null}
       <ResearchRunSafetyLimitPanel
         budget={safetyBudget}
@@ -297,9 +288,20 @@ export function ResearchRunLaunchPanel(props: {
         <VButton variant="ghost" onClick={onCancel} isDisabled={busy}>取消</VButton>
         <VButton
           isPending={busy}
-          isDisabled={!selectedQuestion || launchBlockedByExperiment}
+          isDisabled={!selectedQuestion}
           onClick={() => {
             setError(null);
+            if (checkpoint && onContinueRun) {
+              onContinueRun({
+                runId: checkpoint.runId,
+                nodeId: checkpoint.currentNodeId || "source_finding",
+              });
+              return;
+            }
+            if (checkpoint && !onContinueRun) {
+              setError("当前运行无法在此面板继续，请从运行列表打开。");
+              return;
+            }
             try {
               const input = buildResearchRunInput({ teamId, questionId, safetyBudget });
               void onSubmit(input).catch((reason: unknown) => {
@@ -310,29 +312,9 @@ export function ResearchRunLaunchPanel(props: {
             }
           }}
         >
-          创建运行
+          {primaryLabel}
         </VButton>
       </div>
-      <VConfirmDialog
-        open={confirmOpen}
-        onOpenChange={setConfirmOpen}
-        title="激活正式 Campaign"
-        description="激活只会启用正式 Campaign 的受管运行；不会启动 Qwen / 网络采集 / GPU 任务。"
-        confirmLabel="确认激活"
-        cancelLabel="取消"
-        confirmPending={activateMutation.isPending}
-        onConfirm={() => {
-          if (selectedExperiment) {
-            activateMutation.mutate({
-              experimentId: selectedExperiment.experimentId,
-              teamId,
-            });
-          }
-        }}
-        onCancel={() => {
-          setError(null);
-        }}
-      />
     </VSurface>
   );
 }

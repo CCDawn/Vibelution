@@ -70,6 +70,7 @@ from .node_recovery import reconcile_expired_execution, retry_node_execution
 from .question_launch import (
     QuestionLaunchError,
     activate_experiment_campaign,
+    attach_question_run_checkpoints,
     build_question_run_input,
     list_experiment_launch_options,
     list_question_launch_options,
@@ -192,6 +193,21 @@ class ResearchWorkflowRuntimeService:
         try:
             options = list_question_launch_options(team_id)
             options["experiments"] = list_experiment_launch_options(team_id)["experiments"]
+            try:
+                from .formal_read_runtime import FormalReadRuntimeUnavailable, get_query_service
+                from .formal_write_runtime import WorkflowMigrationRequired
+                from .query_service import WorkflowQueryError
+
+                runs = get_query_service().list_runs(
+                    team_id=team_id,
+                    workflow_id=workflow_id,
+                )["runs"]
+                options["questions"] = attach_question_run_checkpoints(
+                    options["questions"],
+                    runs,
+                )
+            except (FormalReadRuntimeUnavailable, WorkflowMigrationRequired, WorkflowQueryError):
+                pass
             return {"workflowId": workflow_id, **options}
         except QuestionLaunchError as exc:
             raise ResearchWorkflowError(str(exc), code=exc.code) from exc

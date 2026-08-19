@@ -16,6 +16,7 @@ describe("researchWorkflowNoDuplicateSurface", () => {
     expect(canvasSource).toContain('layoutMode="serpentine"');
     expect(canvasSource).toContain("showMiniMap");
     expect(inspectorSource).toContain("ResearchProcessNodeInspector");
+    expect(inspectorSource).toContain("onContinueRun");
     expect(workspaceSource).toContain("useResearchWorkflowRun");
     expect(workspaceSource).not.toContain("ChallengeCupStageRail");
     expect(workspaceSource).not.toContain("ResearchStageNav");

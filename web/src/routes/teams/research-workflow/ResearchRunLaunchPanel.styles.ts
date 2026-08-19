@@ -11,6 +11,7 @@ export default {
   experimentStatus: "text-xs font-medium text-vui-fg-primary",
   experimentBlockerText: "text-xs leading-relaxed text-[var(--state-warning)]",
   blockers: "grid min-w-0 list-disc gap-0.5 pl-4 text-xs leading-relaxed text-vui-fg-secondary",
+  checkpoint: "grid min-w-0 gap-1 text-xs leading-relaxed text-vui-fg-secondary",
   error: "text-sm text-[var(--state-error)]",
   actions: "flex justify-end gap-2",
 } as const;
