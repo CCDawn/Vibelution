@@ -82,3 +82,50 @@ import { ConversationFollowupQueueBar } from "../../conversation/ConversationFol
 - 由 `ChatComposerPlusMenu` 的二级菜单直接打开，不再经过第三级菜单。
 - 右栏仅保留群资料与状态，只读展示不承载管理按钮。
 - 团队关联群聊仍由团队页维护成员和角色。
+
+## ChatGroupMessageStream
+
+### 功能
+群聊房间的主阅读面：把多 Agent 发言排成可扫读的连续消息流。长文截断仍露出前几行，思考/工具收成一行，轮次纪要才用一张卡片。
+
+### 适用范围
+- **适用**：`/chat?room=` 群聊时间线、操作员观看的团队讨论。
+- **不适用**：一对一 Agent 回答（继续 `ConversationView`）；研究画布会议纪要（继续 meeting digest）；设置列表行（继续 `vuiOpaqueRowClass`）。
+
+| 场景 | 选择 |
+| --- | --- |
+| 群聊发言、内部 discuss | `ChatGroupMessageStream` |
+| 思考/工具过程 | 挂在该条发言下的 disclosure，结束后收成一行 |
+| 一轮结束后的结论 | 轮次末一块 digest，不包每条发言 |
+| 1:1 最终回答 | 不折叠正文 |
+
+### 使用方式
+```tsx
+// 隔离预览：web/src/design/team-conversation-stream-preview.tsx
+// 批准后迁入 ChatGroupCenterSurface，不要新做一套气泡。
+```
+
+| Prop / 槽位 | 说明 | 设计注意 |
+| --- | --- | --- |
+| 消息流 | 左对齐连续文本；同说话人合并头像/名字 | 不要每条 `vuiOpaqueRowClass` |
+| 长文 | `line-clamp` 约 8 行 +「展开全文」 | 禁止用 `hidden` 整段藏正文 |
+| 内部讨论 | 操作员时间线默认可读 | `collapsed_by_default` 不表示房间里看不见 |
+| 纪要 | 轮次发丝分割线 + 末尾一块玻璃面板 | 唯一允许的卡片 |
+
+### 非职责
+- 不改房间协议、SSE、visibility 字段写入。
+- 不引入 Stream Chat / Discord 组件。
+- 不做左右气泡，不把群聊改成看板或节点图。
+
+### 视觉与状态
+- 组内紧、组间松；失败/待发送才保留描边。
+- 超长正文截断可展开；过程默认收起。
+
+### 实现落点
+- 预览：`web/src/design/team-conversation-stream-preview.tsx`
+- 模型：`web/src/design/teamConversationStreamModel.ts`
+- 现网对照：`web/src/routes/chat/ChatGroupCenterSurface.tsx`（批准前不改）
+
+### 反冗余
+- 不替代 `ConversationProcessDisclosure` 或 `ConversationFollowupQueueBar`。
+- 禁止再做第二套群聊卡片列表。
