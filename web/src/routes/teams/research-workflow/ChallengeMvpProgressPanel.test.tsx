@@ -504,108 +504,9 @@ describe("ChallengeMvpProgressPanel", () => {
     queryClientMock.invalidateQueries.mockClear();
   });
 
-  it("keeps submission readiness as one low-density source with a single primary action", () => {
+  it("composes the standalone submission readiness panel", () => {
     const markup = renderToStaticMarkup(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />);
-
     expect(markup).toContain('data-vui="challenge-submission-readiness"');
-    expect(markup).toContain("125 题结果包");
-    expect(markup).toContain("两个深实验包");
-    expect(markup).toContain("20 页以内技术方案 PDF");
-    expect(markup).toContain("10 分钟以内演示视频");
-    expect(markup).toContain("稳定测试 API");
-    expect(markup).toContain("源码与复现说明");
-    expect(markup).toContain("查看阻塞项");
-    expect(markup).not.toContain("themeId");
-    expect(markup).not.toContain("campaignId");
-  });
-
-  it("opens the canonical first missing question instead of a hard-coded question", async () => {
-    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-    const onOpenQuestion = vi.fn();
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-    await act(async () => {
-      root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={onOpenQuestion} />);
-    });
-    const button = findButton(container, "修复缺失结果");
-    expect(button).toBeTruthy();
-    await act(async () => {
-      button!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-    expect(onOpenQuestion).toHaveBeenCalledWith("SCI-042");
-    await act(async () => root.unmount());
-    container.remove();
-  });
-
-  it("localizes action and artifact labels without rendering backend labels", () => {
-    const markup = renderToStaticMarkup(
-      <ChallengeMvpProgressPanel teamId="team-1" lang="en" onOpenQuestion={vi.fn()} />,
-    );
-    expect(markup).toContain("125-question results");
-    expect(markup).toContain("Fix missing results");
-    expect(markup).not.toContain("125 题结果包");
-    expect(markup).not.toContain("修复缺失结果");
-  });
-
-  it("reports the returned deliverables inspection status and blocker count", async () => {
-    const readiness = submissionReadiness();
-    readiness.blockers = [{ code: "technical_proposal_pdf_not_packaged", label: "后端标签", action: { kind: "inspect", target: "submission-package", label: "后端动作" } }];
-    setSubmissionReadiness(readiness);
-    const inspectionSpy = vi.fn();
-    mutationState.set("inspectSubmissionDeliverables", {
-      mutate: inspectionSpy,
-      data: { status: "blocked", blockers: [{ code: "one", message: "one" }, { code: "two", message: "two" }] },
-    });
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-    await act(async () => root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />));
-    const button = findButton(container, "检查交付材料");
-    expect(button).toBeTruthy();
-    await act(async () => button!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
-    expect(inspectionSpy).toHaveBeenCalledTimes(1);
-    expect(container.textContent).toContain("交付材料检查：有阻塞，2 项阻塞");
-    await act(async () => root.unmount());
-    container.remove();
-  });
-
-  it("falls back to inspection for a repair action without a navigable question", async () => {
-    const readiness = submissionReadiness();
-    readiness.blockers = [{
-      code: "submission_direction_requirements_not_captured",
-      label: "后端标签",
-      action: { kind: "repair", target: "submission-requirements", label: "后端动作" },
-    }];
-    setSubmissionReadiness(readiness);
-    const inspectionSpy = vi.fn();
-    mutationState.set("inspectSubmissionDeliverables", {
-      mutate: inspectionSpy,
-      data: { status: "blocked", blockers: [] },
-    });
-    const container = document.createElement("div");
-    document.body.appendChild(container);
-    const root = createRoot(container);
-    await act(async () => root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />));
-    const button = findButton(container, "检查交付材料");
-    expect(button).toBeTruthy();
-    await act(async () => button!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
-    expect(inspectionSpy).toHaveBeenCalledTimes(1);
-    await act(async () => root.unmount());
-    container.remove();
-  });
-
-  it("uses generic localized labels for unknown artifact keys and blocker codes", () => {
-    const readiness = submissionReadiness();
-    readiness.artifacts = [{ ...readiness.artifacts[0], key: "internal_unknown_artifact" }];
-    readiness.blockers = [{ code: "internal_unknown_blocker", label: "后端内部标签", action: { kind: "inspect", target: "submission-package", label: "后端动作" } }];
-    setSubmissionReadiness(readiness);
-    const markup = renderToStaticMarkup(<ChallengeMvpProgressPanel teamId="team-1" lang="en" onOpenQuestion={vi.fn()} />);
-    expect(markup).toContain("Submission item");
-    expect(markup).toContain("Pending blocker");
-    expect(markup).not.toContain("internal_unknown_artifact");
-    expect(markup).not.toContain("internal_unknown_blocker");
-    expect(markup).not.toContain("后端内部标签");
   });
 
   it("renders Program v2, question rows, and real DEV readiness/boundary data", () => {
@@ -888,7 +789,6 @@ describe("ChallengeMvpProgressPanel", () => {
   it("uses the canonical query keys so the planning status dedupes with other panels", () => {
     expect(panelSource).toContain("queryKeys.challengeQuestionRunStatus(teamId)");
     expect(panelSource).toContain("experimentPlanningStatusQueryKey(teamId)");
-    expect(panelSource).toContain("queryKeys.challengeSubmissionReadiness(teamId)");
     expect(panelSource).not.toContain('"program-v2"');
   });
 
