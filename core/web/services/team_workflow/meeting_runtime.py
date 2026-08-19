@@ -26,6 +26,10 @@ import threading
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
+from core.research.competition.resources import (
+    CompetitionResourceError,
+    load_science_question_catalog,
+)
 from core.research.workflow.contracts import ContractValidationError
 from core.web.services.team_workflow import meeting_rounds
 
@@ -172,13 +176,50 @@ def _opening_topic(meeting_round_id: str, selection: Mapping[str, Any], agenda: 
     return "\n".join(lines)
 
 
-def _generation_opening_topic(meeting_round_id: str, question_id: str, agenda: Sequence[str]) -> str:
+def _catalog_question_context(question_id: str) -> dict[str, str]:
+    """Return the frozen catalog context needed by a generation discussion."""
+
+    normalized_question_id = str(question_id or "").strip().upper()
+    try:
+        catalog = load_science_question_catalog()
+    except CompetitionResourceError:
+        return {}
+    for item in catalog.get("questions") or []:
+        if not isinstance(item, Mapping):
+            continue
+        if str(item.get("id") or "").strip().upper() != normalized_question_id:
+            continue
+        return {
+            "questionText": str(item.get("question_en") or "").strip(),
+            "domain": str(item.get("domain") or "").strip(),
+        }
+    return {}
+
+
+def _generation_opening_topic(
+    meeting_round_id: str,
+    question_id: str,
+    agenda: Sequence[str],
+    *,
+    question_context: Mapping[str, str] | None = None,
+) -> str:
+    context = question_context or {}
     lines = [
         f"候选假说生成讨论开幕（{meeting_round_id}）：{question_id or '未命名赛题'}",
-        "议程：" + "；".join(str(item) for item in agenda),
-        "规则：" + "；".join(_GENERATION_AGENDA_RULES),
-        "Coordinator 主持开场，成员按轮回应，无新内容回复 pass。",
     ]
+    question_text = str(context.get("questionText") or "").strip()
+    domain = str(context.get("domain") or "").strip()
+    if question_text:
+        lines.append("赛题正文：" + question_text)
+    if domain:
+        lines.append("赛题领域：" + domain)
+    lines.extend(
+        [
+            "议程：" + "；".join(str(item) for item in agenda),
+            "规则：" + "；".join(_GENERATION_AGENDA_RULES),
+            "Coordinator 主持开场，成员按轮回应，无新内容回复 pass。",
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -440,7 +481,10 @@ def open_candidate_generation_meeting(
             }
 
     topic = str(request.get("topic") or "").strip() or _generation_opening_topic(
-        meeting_round_id, question_id, agenda
+        meeting_round_id,
+        question_id,
+        agenda,
+        question_context=_catalog_question_context(question_id),
     )
     selection_shim = {
         "selectionId": "",

@@ -21,6 +21,7 @@ from pathlib import Path
 
 import pytest
 
+from core.research.competition.resources import load_science_question_catalog
 from core.research.workflow.contracts import (
     ContractValidationError,
     MeetingDigest,
@@ -130,6 +131,51 @@ def _open_meeting(tmp_path, monkeypatch, *, runner=None, background=False, **ove
         background=background,
     )
     return team_id, agents, opened
+
+
+def test_candidate_generation_prompt_includes_canonical_question_context(
+    tmp_path, monkeypatch
+):
+    team_id, agents = _team_with_room(tmp_path, monkeypatch)
+    prompts: list[str] = []
+
+    def capture_runner(participant, prompt, context):
+        prompts.append(str(prompt))
+        return {
+            "status": "completed",
+            "raw_output": "CANDIDATE: cand-a | 可证伪机制 | 来自赛题正文",
+            "summary": "ok",
+        }
+
+    catalog_question = next(
+        item
+        for item in load_science_question_catalog()["questions"]
+        if item["id"] == "SCI-001"
+    )
+    agent_ids = list(agents.values())
+    meeting_runtime.open_candidate_generation_meeting(
+        team_id,
+        {
+            "questionId": "SCI-001",
+            "meetingRoundId": "meeting-hf2-generation-context",
+            "program": "XH-202619",
+            "theme": "cc-catalog-001",
+            "campaign": "cc-campaign-001",
+            "question": "SCI-001",
+            "branch": "main",
+            "workflow": "hypothesis_first",
+            "agentId": agent_ids[0],
+            "mode": "dev",
+            "participants": agent_ids,
+            "participantRoleIds": list(_ROLES),
+        },
+        agent_runner=capture_runner,
+        background=False,
+    )
+
+    assert prompts
+    assert all(str(catalog_question["question_en"]) in prompt for prompt in prompts)
+    assert all(str(catalog_question["domain"]) in prompt for prompt in prompts)
 
 
 def _closure_payload(agent_ids, **overrides):
