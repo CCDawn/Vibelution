@@ -84,12 +84,12 @@ function submissionActionLabel(action: { kind: string; target: string }, zh: boo
   return zh ? "检查交付材料" : "Inspect deliverables";
 }
 
-function localizedArtifactLabel(key: string, fallback: string, zh: boolean): string {
-  return submissionArtifactLabels[key]?.[zh ? "zh" : "en"] ?? (key || fallback);
+function localizedArtifactLabel(key: string, _fallback: string, zh: boolean): string {
+  return submissionArtifactLabels[key]?.[zh ? "zh" : "en"] ?? (zh ? "提交材料" : "Submission item");
 }
 
-function localizedBlockerLabel(code: string, fallback: string, zh: boolean): string {
-  return submissionBlockerLabels[code]?.[zh ? "zh" : "en"] ?? (code || fallback);
+function localizedBlockerLabel(code: string, _fallback: string, zh: boolean): string {
+  return submissionBlockerLabels[code]?.[zh ? "zh" : "en"] ?? (zh ? "待处理阻塞项" : "Pending blocker");
 }
 
 function readinessLabel(
@@ -271,7 +271,7 @@ export function ChallengeMvpProgressPanel({
   const submissionAction = submissionBlocker?.action ?? {
     kind: "inspect",
     target: "submission-package",
-    label: zh ? "导出提交清单" : "Export submission checklist",
+    label: zh ? "检查交付材料" : "Inspect deliverables",
   };
   const submissionActionPending = exportMutation.isPending || submissionReadinessQuery.isPending;
   const runSubmissionAction = () => {
@@ -279,7 +279,7 @@ export function ChallengeMvpProgressPanel({
       onOpenQuestion(submissionAction.questionId);
       return;
     }
-    if (submissionAction.kind === "inspect" || submissionAction.kind === "export") exportMutation.mutate();
+    exportMutation.mutate();
   };
 
   const programRetry = (

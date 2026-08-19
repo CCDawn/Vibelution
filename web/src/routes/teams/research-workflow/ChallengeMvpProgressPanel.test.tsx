@@ -570,6 +570,44 @@ describe("ChallengeMvpProgressPanel", () => {
     container.remove();
   });
 
+  it("falls back to inspection for a repair action without a navigable question", async () => {
+    const readiness = submissionReadiness();
+    readiness.blockers = [{
+      code: "submission_direction_requirements_not_captured",
+      label: "后端标签",
+      action: { kind: "repair", target: "submission-requirements", label: "后端动作" },
+    }];
+    setSubmissionReadiness(readiness);
+    const inspectionSpy = vi.fn();
+    mutationState.set("inspectSubmissionDeliverables", {
+      mutate: inspectionSpy,
+      data: { status: "blocked", blockers: [] },
+    });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />));
+    const button = findButton(container, "检查交付材料");
+    expect(button).toBeTruthy();
+    await act(async () => button!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(inspectionSpy).toHaveBeenCalledTimes(1);
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("uses generic localized labels for unknown artifact keys and blocker codes", () => {
+    const readiness = submissionReadiness();
+    readiness.artifacts = [{ ...readiness.artifacts[0], key: "internal_unknown_artifact" }];
+    readiness.blockers = [{ code: "internal_unknown_blocker", label: "后端内部标签", action: { kind: "inspect", target: "submission-package", label: "后端动作" } }];
+    setSubmissionReadiness(readiness);
+    const markup = renderToStaticMarkup(<ChallengeMvpProgressPanel teamId="team-1" lang="en" onOpenQuestion={vi.fn()} />);
+    expect(markup).toContain("Submission item");
+    expect(markup).toContain("Pending blocker");
+    expect(markup).not.toContain("internal_unknown_artifact");
+    expect(markup).not.toContain("internal_unknown_blocker");
+    expect(markup).not.toContain("后端内部标签");
+  });
+
   it("renders Program v2, question rows, and real DEV readiness/boundary data", () => {
     setMainData({
       questionStatus: questionStatus([{
