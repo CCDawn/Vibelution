@@ -16,8 +16,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from config.paths import resolve_workspace_home as resolve_operator_workspace_home
+from config.paths import (
+    CONFIG_HOME_ENV,
+    CONFIG_PATH_ENV,
+    DATA_HOME_ENV,
+    resolve_workspace_home as resolve_operator_workspace_home,
+)
 from vibelution_storage import (
+    PROJECTS_HOME_ENV,
     ProjectIdentityError,
     load_project_identity,
     resolve_active_project_storage_paths,
@@ -111,6 +117,14 @@ _SANDBOXED_SURFACE_DEFAULTS = {
 }
 _CONFIG_CACHE_LOCK = RLock()
 _CONFIG_CACHE: dict[tuple[str, int | None, int | None], tuple[dict[str, Any], str]] = {}
+_CONFIG_CACHE_LIMIT = 64
+# 路径/状态解析缓存：热路径上 is_developer_mode_enabled / route_workspace_path
+# 每次调用都会重复 resolve + stat + 读 active.json。缓存以输入参数为 key、
+# 以依赖文件签名做校验，写入点显式失效；全部在同一把锁下读写保证线程安全。
+_RESOLVED_ROOT_CACHE: dict[str, Path] = {}
+_RESOLVED_CONFIG_PATH_CACHE: dict[tuple[str | None, str], Path] = {}
+_ACTIVE_STATE_CACHE: dict[str, tuple[tuple[str, int | None, int | None], dict[str, Any]]] = {}
+_PATH_CACHE_LIMIT = 256
 
 
 class DeveloperSandboxConfigConflict(ValueError):
@@ -295,7 +309,9 @@ def update_developer_mode_status(
 
 
 def is_developer_mode_enabled(*, config_path: Path | None = None) -> bool:
-    return bool(get_developer_mode_status(config_path=config_path).get("enabled"))
+    # 直接走签名缓存的配置读取，避免为取一个布尔值组装完整 status（含状态文件解析）。
+    public_config, _config_hash, _resolved_path = _load_public_config_with_hash(config_path)
+    return bool(_raw_setting(public_config).get("enabled", False))
 
 
 def active_sandbox_id(*, project_root: Path | None = None, config_path: Path | None = None) -> str:
@@ -383,6 +399,7 @@ def clear_active_sandbox(*, project_root: Path | None = None) -> dict[str, Any]:
         _active_state_path(root).unlink()
     except OSError:
         pass
+    _invalidate_active_state_cache(root)
     return {
         "ok": True,
         "sandboxId": sandbox_id,
@@ -429,8 +446,23 @@ def enrich_debug_fields(fields: dict[str, Any] | None, *, project_root: Path | N
 
 
 def _project_root(project_root: Path | None) -> Path:
-    root = Path(project_root or PROJECT_ROOT).resolve()
-    return root.parent if root.name.lower() == "workspace" else root
+    raw = str(project_root or PROJECT_ROOT)
+    expanded = Path(raw).expanduser()
+    cacheable = expanded.is_absolute() and not raw.startswith("~")
+    cache_key = raw
+    if cacheable:
+        with _CONFIG_CACHE_LOCK:
+            cached = _RESOLVED_ROOT_CACHE.get(cache_key)
+            if cached is not None:
+                return cached
+    root = expanded.resolve()
+    result = root.parent if root.name.lower() == "workspace" else root
+    if cacheable:
+        with _CONFIG_CACHE_LOCK:
+            if len(_RESOLVED_ROOT_CACHE) >= _PATH_CACHE_LIMIT:
+                _RESOLVED_ROOT_CACHE.clear()
+            _RESOLVED_ROOT_CACHE[cache_key] = result
+    return result
 
 
 def _formal_runtime_root(project_root: Path) -> Path:
@@ -458,17 +490,34 @@ def _sandbox_root(project_root: Path, sandbox_id: str) -> Path:
 
 def _read_active_state(project_root: Path) -> dict[str, Any]:
     path = _active_state_path(project_root)
+    signature = _file_signature(path)
+    cache_key = str(project_root)
+    with _CONFIG_CACHE_LOCK:
+        cached = _ACTIVE_STATE_CACHE.get(cache_key)
+        if cached is not None and cached[0] == signature:
+            return dict(cached[1])
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return {}
-    return payload if isinstance(payload, dict) else {}
+        payload = None
+    state = payload if isinstance(payload, dict) else {}
+    with _CONFIG_CACHE_LOCK:
+        if len(_ACTIVE_STATE_CACHE) >= _PATH_CACHE_LIMIT:
+            _ACTIVE_STATE_CACHE.clear()
+        _ACTIVE_STATE_CACHE[cache_key] = (signature, dict(state))
+    return state
+
+
+def _invalidate_active_state_cache(project_root: Path) -> None:
+    with _CONFIG_CACHE_LOCK:
+        _ACTIVE_STATE_CACHE.pop(str(project_root), None)
 
 
 def _write_active_state(project_root: Path, payload: dict[str, Any]) -> None:
     path = _active_state_path(project_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _invalidate_active_state_cache(project_root)
 
 
 def _ensure_active_state(project_root: Path) -> dict[str, Any]:
@@ -484,8 +533,10 @@ def _ensure_active_state(project_root: Path) -> dict[str, Any]:
         }
         _write_active_state(project_root, state)
     root = _sandbox_root(project_root, sandbox_id)
-    root.mkdir(parents=True, exist_ok=True)
-    (root / "workspace").mkdir(parents=True, exist_ok=True)
+    workspace_dir = root / "workspace"
+    if not workspace_dir.is_dir():
+        # 目录已存在时跳过重复的 mkdir 系统调用（热路径每次调用都会走到这里）。
+        workspace_dir.mkdir(parents=True, exist_ok=True)
     return state
 
 
@@ -510,6 +561,8 @@ def _load_public_config_with_hash(config_path: Path | None) -> tuple[dict[str, A
     config_hash = public_config_hash(public_config)
     refreshed_signature = _file_signature(resolved_path)
     with _CONFIG_CACHE_LOCK:
+        if len(_CONFIG_CACHE) >= _CONFIG_CACHE_LIMIT:
+            _CONFIG_CACHE.clear()
         _CONFIG_CACHE[refreshed_signature] = (public_config, config_hash)
     return public_config, config_hash, resolved_path
 
@@ -517,10 +570,49 @@ def _load_public_config_with_hash(config_path: Path | None) -> tuple[dict[str, A
 def _clear_developer_mode_config_cache() -> None:
     with _CONFIG_CACHE_LOCK:
         _CONFIG_CACHE.clear()
+        _RESOLVED_ROOT_CACHE.clear()
+        _RESOLVED_CONFIG_PATH_CACHE.clear()
+        _ACTIVE_STATE_CACHE.clear()
 
 
 def _resolved_config_path(config_path: Path | None) -> Path:
-    return Path(config_path or CONFIG_PATH).expanduser().resolve()
+    raw = config_path or CONFIG_PATH
+    cache_key = (None if config_path is None else str(config_path), str(CONFIG_PATH))
+    expanded = Path(raw).expanduser()
+    cacheable = expanded.is_absolute() and not str(raw).startswith("~")
+    if cacheable:
+        with _CONFIG_CACHE_LOCK:
+            cached = _RESOLVED_CONFIG_PATH_CACHE.get(cache_key)
+            if cached is not None:
+                return cached
+    resolved = expanded.resolve()
+    if cacheable:
+        with _CONFIG_CACHE_LOCK:
+            if len(_RESOLVED_CONFIG_PATH_CACHE) >= _PATH_CACHE_LIMIT:
+                _RESOLVED_CONFIG_PATH_CACHE.clear()
+            _RESOLVED_CONFIG_PATH_CACHE[cache_key] = resolved
+    return resolved
+
+
+def workspace_routing_fingerprint(project_root: Path | None = None) -> tuple[Any, ...]:
+    """给上层调用方缓存路由结果用的依赖指纹（只读 stat，不写文件）。
+
+    覆盖 route_workspace_path 族的全部可变输入：开发者模式配置文件、
+    活跃沙箱状态文件，以及影响存储/工作区解析的环境变量。任一变化都会
+    改变指纹，调用方应把它作为缓存校验值（失效正确性优先于命中率）。
+    """
+
+    root = _project_root(project_root)
+    return (
+        _file_signature(_resolved_config_path(None)),
+        _file_signature(_active_state_path(root)),
+        str(os.environ.get(DATA_HOME_ENV) or ""),
+        str(os.environ.get(PROJECTS_HOME_ENV) or ""),
+        str(os.environ.get(CONFIG_PATH_ENV) or ""),
+        str(os.environ.get(CONFIG_HOME_ENV) or ""),
+        str(os.environ.get("LOCALAPPDATA") or ""),
+        str(os.environ.get("USERPROFILE") or ""),
+    )
 
 
 def _file_signature(path: Path) -> tuple[str, int | None, int | None]:

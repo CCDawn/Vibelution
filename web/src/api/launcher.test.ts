@@ -8,6 +8,8 @@ import {
   requestBranchInstanceCleanup,
   requestBranchInstanceLifecycle,
   getLauncherStatus,
+  getLauncherState,
+  onLauncherStateChanged,
   getRuntimeSummary,
   isLauncherControlPlaneNotReady,
   launcherEndpoint,
@@ -731,6 +733,37 @@ describe("launcher api IPC transport", () => {
     expect(request.schemaVersion).toBe(1);
     expect(request.path).toBe("status");
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("reads state snapshots and returns the preload listener disposer", async () => {
+    vi.stubGlobal("window", { location: { href: "http://127.0.0.1:8765/launcher" } });
+    const snapshot = {
+      schemaVersion: 1 as const,
+      revision: 3,
+      observedAt: "2026-08-19T00:00:00.000Z",
+      freshness: "fresh" as const,
+      main: { id: "main" },
+      instances: [],
+      cleanup: { reconciliation: { active: false, reason: "" }, cleanedCount: 0, skippedCount: 0, failedCount: 0 },
+    };
+    const disposer = vi.fn();
+    let stateListener: ((payload: typeof snapshot) => void) | undefined;
+    vi.stubGlobal("vibelutionLauncher", {
+      launcherInvoke: vi.fn(),
+      getLauncherState: vi.fn().mockResolvedValue(snapshot),
+      onLauncherStateChanged: vi.fn((listener: (payload: typeof snapshot) => void) => {
+        stateListener = listener;
+        return disposer;
+      }),
+    });
+    const listener = vi.fn();
+
+    expect(await getLauncherState()).toBe(snapshot);
+    const dispose = onLauncherStateChanged(listener);
+    stateListener?.(snapshot);
+    expect(listener).toHaveBeenCalledWith(snapshot);
+    dispose();
+    expect(disposer).toHaveBeenCalledTimes(1);
   });
 
   it("sends the cleanup-metadata query over the preload bridge", async () => {

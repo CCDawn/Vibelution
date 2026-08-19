@@ -5,6 +5,9 @@ import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState }
 
 import {
   getLauncherBranchInstances,
+  getLauncherState,
+  hasLauncherStateBridge,
+  onLauncherStateChanged,
   requestBranchInstanceLifecycle,
   getLauncherStatus,
   getLauncherDeveloperNoiseOverview,
@@ -33,7 +36,6 @@ import type {
   WorkbenchWindowMode,
 } from "../api/types";
 import { collectBrowserPageSnapshot, postBrowserTelemetry } from "../app/browserTelemetry";
-import { resolveLauncherStatusPollingInterval, resolvePollingInterval, usePageVisibility, useStartupWarmup } from "../app/pollingPolicy";
 import {
   applyBeforeUnloadProjectCloseGuard,
   buildProjectWindowCloseBlockedTelemetry,
@@ -910,39 +912,9 @@ function controlPlaneHasCommandType(
   });
 }
 
-function launcherStatusCommandActive(status: LauncherStatusWithGuardian | undefined): boolean {
-  const evidence = status?.controlPlaneEvidence;
-  if (!evidence) {
-    return false;
-  }
-  return Boolean(
-    evidence.state.activeCommand?.commandId
-    || evidence.queue.pendingCount > 0
-    || evidence.queue.processingCount > 0
-    || evidence.restartQueue?.active
-    || evidence.restartQueue?.pending
-    || evidence.recovery?.active,
-  );
-}
-
-function launcherStatusLifecycleChanging(status: LauncherStatusWithGuardian | undefined): boolean {
-  const bundle = status?.projectBundle;
-  const phase = String(bundle?.phase || status?.launcher.phase || "").toLowerCase();
-  const overall = String(status?.lifecycleProof?.overallState || bundle?.overallState || "").toLowerCase();
-  const desired = String(bundle?.desiredState || "").toLowerCase();
-  const observed = String(bundle?.observedState || "").toLowerCase();
-  return (
-    includesAny(phase, ["start", "open", "queue", "processing", "stop", "close", "restart"])
-    || includesAny(overall, ["starting", "closing", "stopping", "restarting"])
-    || (desired !== "" && observed !== "" && desired !== observed)
-  );
-}
-
 export function LauncherRoute() {
   const { lang } = useShellI18n({ configEnabled: false });
   const queryClient = useQueryClient();
-  const pageVisible = usePageVisibility();
-  const launcherOpenWarmup = useStartupWarmup(false);
   const { request: requestLifecycle } = useWorkbenchLifecycleActions("launcher_route");
   const locale = lang === "zh" ? "zh-CN" : "en-US";
   const copy = lang === "zh"
@@ -1485,28 +1457,31 @@ export function LauncherRoute() {
   const [maintenanceProfile, setMaintenanceProfile] = useState<LauncherMaintenanceProfileId>("clean_start");
   const [maintenancePlansByProfile, setMaintenancePlansByProfile] = useState<Partial<Record<LauncherMaintenanceProfileId, LauncherMaintenancePlan>>>({});
   const maintenancePlan = maintenancePlansByProfile[maintenanceProfile] ?? null;
+  const stateBridgeAvailable = hasLauncherStateBridge();
+  const stateQuery = useQuery({
+    queryKey: queryKeys.launcherState(),
+    queryFn: getLauncherState,
+    enabled: stateBridgeAvailable,
+    staleTime: Number.POSITIVE_INFINITY,
+  });
   const statusQuery = useQuery({
     queryKey: queryKeys.launcherStatus(),
     queryFn: getLauncherStatus,
-    refetchInterval: (query) => {
-      const status = query.state.data as LauncherStatusWithGuardian | undefined;
-      return resolveLauncherStatusPollingInterval(pageVisible, {
-        commandActive: launcherStatusCommandActive(status),
-        lifecycleChanging: launcherStatusLifecycleChanging(status),
-      });
-    },
-    refetchIntervalInBackground: true,
   });
   const branchInstancesQuery = useQuery({
     queryKey: queryKeys.launcherBranchInstances(),
     queryFn: () => getLauncherBranchInstances(),
-    refetchInterval: resolvePollingInterval(
-      pageVisible,
-      launcherOpenWarmup ? 4_000 : 20_000,
-      { backgroundMs: launcherOpenWarmup ? 4_000 : 15_000 },
-    ),
-    refetchIntervalInBackground: true,
   });
+  useEffect(() => {
+    if (!stateBridgeAvailable) {
+      return;
+    }
+    return onLauncherStateChanged((snapshot) => {
+      queryClient.setQueryData(queryKeys.launcherState(), snapshot);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });
+      void queryClient.invalidateQueries({ queryKey: ["launcher", "branch-instances"] });
+    });
+  }, [queryClient, stateBridgeAvailable]);
   const [selectedInstanceId, setSelectedInstanceId] = useState("");
   const branchItems = branchInstancesQuery.data?.items ?? [];
   const currentInstanceId = branchInstancesQuery.data?.currentId || "main";
@@ -2214,6 +2189,22 @@ export function LauncherRoute() {
   const recentResults = (evidence?.results.recent ?? []).slice(0, 3);
   const recentEvents = (evidence?.events.recent ?? []).slice(0, 3);
   const controlPlaneSpecs = [
+    {
+      label: uiLang === "zh" ? "快照时间" : "Snapshot time",
+      value: stateQuery.data?.observedAt ? compactDate(stateQuery.data.observedAt, locale) : "-",
+    },
+    {
+      label: uiLang === "zh" ? "快照状态" : "Snapshot freshness",
+      value: stateQuery.data
+        ? [stateQuery.data.freshness, stateQuery.data.staleReason].filter(Boolean).join(" · ")
+        : stateBridgeAvailable ? "-" : (uiLang === "zh" ? "浏览器兼容模式" : "Browser compatibility mode"),
+    },
+    {
+      label: uiLang === "zh" ? "状态协调" : "Reconciliation",
+      value: stateQuery.data?.cleanup.reconciliation.active
+        ? stateQuery.data.cleanup.reconciliation.reason || (uiLang === "zh" ? "进行中" : "In progress")
+        : (uiLang === "zh" ? "空闲" : "Idle"),
+    },
     { label: copy.overall, value: launcherSummary },
     { label: copy.guardian, value: guardianProgress },
     { label: copy.reason, value: bundle?.lastOperation.reason || bundle?.lastReason || "-" },
@@ -2452,6 +2443,22 @@ export function LauncherRoute() {
           </Suspense>
         </aside>
       </div>
+
+      {stateBridgeAvailable && stateQuery.data ? (
+        <VStateSurface
+          className={styles.notice}
+          tone={stateQuery.data.freshness === "stale" ? "unavailable" : stateQuery.data.freshness === "refreshing" ? "loading" : "info"}
+          title={[
+            uiLang === "zh" ? "Launcher 状态快照" : "Launcher state snapshot",
+            compactDate(stateQuery.data.observedAt, locale),
+            stateQuery.data.freshness,
+            stateQuery.data.cleanup.reconciliation.active
+              ? `${uiLang === "zh" ? "协调中" : "reconciling"}: ${stateQuery.data.cleanup.reconciliation.reason || "-"}`
+              : "",
+            stateQuery.data.staleReason || "",
+          ].filter(Boolean).join(" · ")}
+        />
+      ) : null}
 
       {statusQuery.isError && !launcherControlPlaneStarting ? (
         <VStateSurface

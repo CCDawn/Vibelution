@@ -342,6 +342,15 @@ export class ElectronWindowProvider {
     return true;
   }
 
+  sendToLauncher(channel: string, payload: unknown): boolean {
+    const window = this.launcherWindow;
+    if (!window || window.isDestroyed() || typeof window.webContents.send !== "function") {
+      return false;
+    }
+    window.webContents.send(channel, payload);
+    return true;
+  }
+
   setWorkbenchAttention(options: WorkbenchAttentionOptions): void {
     if (!this.workbenchWindow || this.workbenchWindow.isDestroyed() || this.workbenchReadyUrl === null) {
       return;

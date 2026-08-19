@@ -17,6 +17,14 @@ contextBridge.exposeInMainWorld("vibelutionLauncher", {
       ipcRenderer.removeListener(IPC_CHANNELS.conversationNotificationOpened, wrapped);
     };
   },
+  getLauncherState: () => ipcRenderer.invoke(IPC_CHANNELS.getLauncherState),
+  onLauncherStateChanged: (listener: (payload: unknown) => void) => {
+    const wrapped = (_event: unknown, payload: unknown) => listener(payload);
+    ipcRenderer.on(IPC_CHANNELS.launcherStateChanged, wrapped);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.launcherStateChanged, wrapped);
+    };
+  },
   ...(isLauncherControlWindow
     ? {
         launcherInvoke: (payload: unknown) => ipcRenderer.invoke(IPC_CHANNELS.launcherInvoke, payload)

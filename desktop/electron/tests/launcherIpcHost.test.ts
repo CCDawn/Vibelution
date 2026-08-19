@@ -64,7 +64,6 @@ describe("createLauncherIpcHost", () => {
   it("returns a local status snapshot without waiting for the CLI orchestrator", async () => {
     const fetchImpl = vi.fn();
     const orchestrate = vi.fn().mockImplementation(() => new Promise(() => undefined));
-    const refresh = vi.fn();
     const host = createLauncherIpcHost({
       resolveContext: async () => ({ launcherOrigin: "http://127.0.0.1:8002", controlToken: "t" }),
       resolveWindowTruth: () => ({ workbench: { open: true, rendererProcessId: 7070 }, instances: [] }),
@@ -77,7 +76,6 @@ describe("createLauncherIpcHost", () => {
           components: [],
         },
       }),
-      scheduleStatusRefresh: refresh,
       orchestrateLauncherApi: orchestrate,
       fetchImpl,
     });
@@ -88,7 +86,6 @@ describe("createLauncherIpcHost", () => {
       expect(bundle.observedState).toBe("partial");
       expect(bundle.lifecycleConsistency).toBe("backend_missing");
     }
-    expect(refresh).toHaveBeenCalledTimes(1);
     expect(orchestrate).not.toHaveBeenCalled();
     expect(fetchImpl).not.toHaveBeenCalled();
   });
@@ -224,7 +221,7 @@ describe("createLauncherIpcHost", () => {
     const host = createLauncherIpcHost({
       resolveContext: async () => ({ launcherOrigin: "http://127.0.0.1:8002", controlToken: "t" }),
       resolveWindowTruth: () => ({ workbench: { open: true, rendererProcessId: 7070 }, instances: [] }),
-      orchestrateLauncherApi: async () => ({
+      resolveLocalStatus: () => ({
         projectBundle: {
           observedState: "closed",
           lifecycleConsistency: "",
@@ -250,7 +247,7 @@ describe("createLauncherIpcHost", () => {
     const host = createLauncherIpcHost({
       resolveContext: async () => ({ launcherOrigin: "http://127.0.0.1:8002", controlToken: "t" }),
       resolveWindowTruth: () => ({ workbench: { open: true, rendererProcessId: 7070 }, instances: [] }),
-      orchestrateLauncherApi: async () => ({
+      resolveLocalBranchInstances: () => ({
         items: [
           { id: "main", current: true, alive: false, startable: true, runtime: { window: { open: false, pid: 0 } } },
         ],
@@ -269,7 +266,7 @@ describe("createLauncherIpcHost", () => {
 
   it("keeps window overlay when branch-instances carries a cleanupMetadata query", async () => {
     const fetchImpl = vi.fn();
-    const orchestrate = vi.fn().mockResolvedValue({
+    const resolveLocalBranchInstances = vi.fn().mockReturnValue({
       items: [
         { id: "main", current: true, alive: false, startable: true, runtime: { window: { open: false, pid: 0 } } },
       ],
@@ -277,15 +274,12 @@ describe("createLauncherIpcHost", () => {
     const host = createLauncherIpcHost({
       resolveContext: async () => ({ launcherOrigin: "http://127.0.0.1:8002", controlToken: "t" }),
       resolveWindowTruth: () => ({ workbench: { open: true, rendererProcessId: 7070 }, instances: [] }),
-      orchestrateLauncherApi: orchestrate,
+      resolveLocalBranchInstances,
       fetchImpl,
     });
     const result = await host.invoke(validPayload({ path: "branch-instances?cleanupMetadata=1" }));
     expect(result.ok).toBe(true);
-    expect(orchestrate).toHaveBeenCalledWith(
-      "branch-instances?cleanupMetadata=1",
-      expect.objectContaining({ path: "branch-instances?cleanupMetadata=1" }),
-    );
+    expect(resolveLocalBranchInstances).toHaveBeenCalledTimes(1);
     if (result.ok) {
       const item = ((result.payload as Record<string, unknown>).items as Record<string, unknown>[])[0];
       expect(item.startable).toBe(false);

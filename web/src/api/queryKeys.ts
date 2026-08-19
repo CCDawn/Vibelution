@@ -4,6 +4,7 @@ export const queryKeys = {
   usageSummary: (scope = "global", sessionId = "", agentId = "", provider = "", model = "") =>
     ["usage", "summary", scope, sessionId, agentId, provider, model] as const,
   launcherStatus: () => ["launcher", "status"] as const,
+  launcherState: () => ["launcher", "state"] as const,
   launcherBranchInstances: (cleanupMetadata = false) =>
     ["launcher", "branch-instances", cleanupMetadata] as const,
   launcherDeveloperNoiseOverview: () => ["launcher", "developer-mode", "noise-overview"] as const,
@@ -73,8 +74,6 @@ export const queryKeys = {
     ["teams", teamId, "meeting-rounds", meetingRoundId, "source-messages"] as const,
   teamHypothesisRounds: (teamId: string) =>
     ["teams", teamId, "hypothesis-rounds"] as const,
-  researchWorkflowRuns: (workflowId: string, teamId: string) =>
-    ["research-workflow", workflowId, teamId, "runs"] as const,
   researchWorkflowLaunchOptions: (workflowId: string, teamId: string) =>
     ["research-workflow", workflowId, teamId, "launch-options"] as const,
   researchWorkflowBindings: (workflowId: string, teamId: string) =>

@@ -15,10 +15,38 @@ import re
 import shutil
 import stat
 import tempfile
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
+
+# _workspace_path / load_state 进程内缓存：
+# - _workspace_path 以 (PROJECT_ROOT, parts, intent, seed) 为 key，以
+#   developer_sandbox.workspace_routing_fingerprint（配置/活跃沙箱/环境变量签名）
+#   为校验值；仅缓存 dev mode 关闭时的正式路由结果，dev 模式下 seeded 语义
+#   依赖实时文件存在性，保持实时计算。
+# - load_state 在 _STATE_LOCK 内以注册表文件签名 (path, exists, mtime_ns, size)
+#   校验；读取前后签名一致才缓存，写入点经 _invalidate_repaired_state_cache 显式失效。
+_WORKSPACE_PATH_CACHE_LOCK = threading.RLock()
+_WORKSPACE_PATH_CACHE: dict[tuple[object, ...], tuple[tuple[object, ...], Path]] = {}
+_WORKSPACE_PATH_CACHE_LIMIT = 512
+_LOAD_STATE_CACHE_SIGNATURE: tuple[str, bool, int, int] | None = None
+_LOAD_STATE_CACHE_STATE: dict[str, Any] | None = None
+
+
+def _copy_json_value(value: Any) -> Any:
+    """Deep-copy plain JSON values without copy.deepcopy's memo bookkeeping.
+
+    注册表状态只含 JSON 类型（dict/list/标量），无共享引用、无循环；
+    直接递归拷贝比 copy.deepcopy 快数倍，且保持「每次调用返回独立副本」的契约。
+    """
+
+    if isinstance(value, dict):
+        return {key: _copy_json_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_copy_json_value(item) for item in value]
+    return value
 
 
 def _service():
@@ -839,9 +867,14 @@ def _infer_agent_role_key(agent: dict[str, Any]) -> str:
 
 
 def _invalidate_repaired_state_cache() -> None:
+    global _LOAD_STATE_CACHE_SIGNATURE, _LOAD_STATE_CACHE_STATE
     s = _service()
     s._REPAIRED_STATE_CACHE = None
     s._REPAIRED_STATE_CACHE_SIGNATURE = None
+    _LOAD_STATE_CACHE_SIGNATURE = None
+    _LOAD_STATE_CACHE_STATE = None
+    with _WORKSPACE_PATH_CACHE_LOCK:
+        _WORKSPACE_PATH_CACHE.clear()
 
 
 def _is_agent_private_workspace_path(path_value: str, agent_id: str) -> bool:
@@ -1811,13 +1844,27 @@ def _with_functional_display_name(metadata: dict[str, Any], title: str) -> dict[
 
 def _workspace_path(*parts: str, intent: str = "state", seed: bool = True) -> Path:
     s = _service()
-    return s._developer_sandbox_module().route_workspace_path(
-        s._project_root(),
+    sandbox = s._developer_sandbox_module()
+    root = s._project_root()
+    fingerprint = sandbox.workspace_routing_fingerprint(root)
+    cache_key = (str(s.PROJECT_ROOT), tuple(str(part) for part in parts), str(intent), bool(seed))
+    with _WORKSPACE_PATH_CACHE_LOCK:
+        cached = _WORKSPACE_PATH_CACHE.get(cache_key)
+        if cached is not None and cached[0] == fingerprint:
+            return cached[1]
+    path = sandbox.route_workspace_path(
+        root,
         "agent_directory",
         *parts,
         intent=intent,
         seed=seed,
     )
+    if not sandbox.is_developer_mode_enabled():
+        with _WORKSPACE_PATH_CACHE_LOCK:
+            if len(_WORKSPACE_PATH_CACHE) >= _WORKSPACE_PATH_CACHE_LIMIT:
+                _WORKSPACE_PATH_CACHE.clear()
+            _WORKSPACE_PATH_CACHE[cache_key] = (fingerprint, path)
+    return path
 
 
 def default_state() -> dict[str, Any]:
@@ -1834,17 +1881,28 @@ def default_state() -> dict[str, Any]:
 
 
 def load_state() -> dict[str, Any]:
+    global _LOAD_STATE_CACHE_SIGNATURE, _LOAD_STATE_CACHE_STATE
     s = _service()
     with s._STATE_LOCK:
+        before = s._registry_state_signature()
+        if _LOAD_STATE_CACHE_STATE is not None and _LOAD_STATE_CACHE_SIGNATURE == before:
+            # 缓存保存的是规范化后的快照；返回独立副本，调用方（如 repair）可自由修改。
+            return _copy_json_value(_LOAD_STATE_CACHE_STATE)
         path = s.registry_path()
         if not path.exists():
-            return s.default_state()
-        payload = s._load_existing_registry_payload_or_raise(path)
-        state = s.default_state()
-        state.update(payload)
-        state["agents"] = list(state.get("agents") or []) if isinstance(state.get("agents"), list) else []
-        state["toolPolicies"] = s._tool_policies(state)
-        state["memoryPolicies"] = s._memory_policies(state)
+            state = s.default_state()
+        else:
+            payload = s._load_existing_registry_payload_or_raise(path)
+            state = s.default_state()
+            state.update(payload)
+            state["agents"] = list(state.get("agents") or []) if isinstance(state.get("agents"), list) else []
+            state["toolPolicies"] = s._tool_policies(state)
+            state["memoryPolicies"] = s._memory_policies(state)
+        after = s._registry_state_signature()
+        if before == after:
+            # 读取期间签名未变，缓存内容与磁盘严格对应；否则放弃本次缓存。
+            _LOAD_STATE_CACHE_SIGNATURE = after
+            _LOAD_STATE_CACHE_STATE = _copy_json_value(state)
         return state
 
 

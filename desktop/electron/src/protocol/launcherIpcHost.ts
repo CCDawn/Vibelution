@@ -167,7 +167,7 @@ export function createLauncherIpcHost(input: {
   orchestrateBranchInstance?: (operation: string, payload: LauncherIpcInvokePayload) => Promise<OrchestratedBranchInstanceResult>;
   orchestrateLauncherApi?: (path: string, payload: LauncherIpcInvokePayload) => Promise<unknown>;
   resolveLocalStatus?: () => unknown;
-  scheduleStatusRefresh?: () => void;
+  resolveLocalBranchInstances?: () => unknown;
   fetchImpl?: typeof fetch;
   requestTimeoutMs?: number;
 }) {
@@ -199,10 +199,15 @@ export function createLauncherIpcHost(input: {
         }
       }
       if (apiRoute === "status" && input.resolveLocalStatus) {
-        input.scheduleStatusRefresh?.();
         return {
           ok: true,
           payload: overlayLauncherWindowTruth(apiRoute, input.resolveLocalStatus(), resolveWindowTruth())
+        };
+      }
+      if (apiRoute === "branch-instances" && input.resolveLocalBranchInstances) {
+        return {
+          ok: true,
+          payload: overlayLauncherWindowTruth(apiRoute, input.resolveLocalBranchInstances(), resolveWindowTruth())
         };
       }
       if (BRANCH_INSTANCE_PATHS.has(apiRoute) && input.orchestrateBranchInstance) {
