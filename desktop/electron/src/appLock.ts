@@ -6,7 +6,8 @@ export type SingleInstanceDecision =
 
 export type SecondInstanceIntent =
   | { action: "handle_deep_link"; rawUrl: string }
-  | { action: "apply_project"; projectRoot: string }
+  | { action: "apply_project"; projectRoot: string; lifecycleCommand: string }
+  | { action: "lifecycle"; command: string }
   | { action: "open_workbench" }
   | { action: "focus_existing_shell" };
 
@@ -73,17 +74,26 @@ export function resolveSecondInstanceIntent(input: {
   deepLinkUrl?: string;
   projectRoot?: string;
   openWorkbench?: boolean;
+  lifecycleCommand?: string;
 }): SecondInstanceIntent {
   const deepLinkUrl = String(input.deepLinkUrl || "").trim();
   if (deepLinkUrl) {
     return { action: "handle_deep_link", rawUrl: deepLinkUrl };
   }
   const projectRoot = String(input.projectRoot || "").trim();
+  const lifecycleCommand = String(input.lifecycleCommand || "").trim().toLowerCase();
   if (projectRoot) {
-    return { action: "apply_project", projectRoot };
+    return {
+      action: "apply_project",
+      projectRoot,
+      lifecycleCommand: lifecycleCommand === "open" ? "" : lifecycleCommand
+    };
   }
-  if (input.openWorkbench) {
+  if (lifecycleCommand === "open" || input.openWorkbench) {
     return { action: "open_workbench" };
+  }
+  if (lifecycleCommand) {
+    return { action: "lifecycle", command: lifecycleCommand };
   }
   return { action: "focus_existing_shell" };
 }

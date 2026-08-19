@@ -135,8 +135,8 @@ def test_native_launcher_python_bridge_uses_no_console_outer_runtime():
         "private static string ResolvePython", maxsplit=1
     )[0]
 
-    assert "string pythonPath = ResolvePython(projectDir, useNoConsole: true);" in bridge_source
-    assert 'Quote(ResolvePython(projectDir, useNoConsole: false))' in bridge_source
+    assert "string pythonPath = ResolvePython(shellRoot, useNoConsole: true);" in bridge_source
+    assert 'Quote(ResolvePython(shellRoot, useNoConsole: false))' in bridge_source
     assert 'useNoConsole ? "pythonw.exe" : "python.exe"' in source
     assert 'string.Equals(action, "stop-launcher", StringComparison.OrdinalIgnoreCase)' in bridge_source
     assert 'string.Equals(action, "launch-desktop-shell", StringComparison.OrdinalIgnoreCase)' in bridge_source

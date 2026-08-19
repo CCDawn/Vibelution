@@ -13,7 +13,7 @@ describe("Electron main tray integration", () => {
     expect(mainSource).toContain("runTrayRestartLauncher");
     expect(mainSource).toContain("stopAllManagedRuntimeTrees");
     expect(mainSource).toContain("exitAndRelaunchLauncherShell");
-    expect(mainSource).toContain("runTrayLauncherPost");
+    expect(mainSource).toContain("runTrayBranchInstance");
     expect(mainSource).toContain("runTrayStopAll");
     const trayStart = mainSource.indexOf("desktopTray = createDesktopTray(paths,");
     const trayEnd = mainSource.indexOf("startPeriodicShellFreshnessWatch", trayStart);

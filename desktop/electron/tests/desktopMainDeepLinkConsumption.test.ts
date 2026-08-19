@@ -21,7 +21,9 @@ describe("Electron main public deep-link consumption", () => {
     expect(source).toContain("let pendingOpenWorkbenchRequest = desktopCliArgs.openWorkbench");
     expect(source).toContain("const secondCli = parseDesktopCliArgs(argv)");
     expect(source).toContain("resolveSecondInstanceIntent({");
-    expect(source).toContain("applyPendingProjectSlot(intent.projectRoot)");
+    expect(source).toContain("applyPendingProjectSlot(intent.projectRoot, intent.lifecycleCommand)");
+    expect(source).toContain("lifecycleCommand: secondCli.lifecycleCommand");
+    expect(source).not.toContain('if (secondCli.lifecycleCommand && secondCli.lifecycleCommand !== "open")');
     expect(source).toContain("secondCli.openWorkbench");
     expect(source).toContain("await startOrFocusWorkbenchFromProductEntryOnShell()");
     expect(source).not.toContain("await windowProvider.openOrFocusWorkbench()");

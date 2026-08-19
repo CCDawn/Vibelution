@@ -1113,6 +1113,24 @@ internal static class VibelutionLauncher
         }
     }
 
+    private static string ResolveDesktopShellWorkspace(string projectDir)
+    {
+        string path = Path.GetFullPath(string.IsNullOrWhiteSpace(projectDir) ? "." : projectDir);
+        string[] parts = path.Replace('/', Path.DirectorySeparatorChar).Split(Path.DirectorySeparatorChar);
+        for (int index = 0; index < parts.Length; index++)
+        {
+            if (string.Equals(parts[index], ".worktrees", StringComparison.OrdinalIgnoreCase))
+            {
+                if (index == 0)
+                {
+                    return path;
+                }
+                return string.Join(Path.DirectorySeparatorChar.ToString(), parts, 0, index);
+            }
+        }
+        return path;
+    }
+
     private static void LaunchCurrentElectronMain(string projectDir, string thenLifecycle, bool openWorkbench)
     {
         RunPythonBridge(projectDir, "launch-desktop-shell", true, true, thenLifecycle, openWorkbench, 120000);
@@ -1167,20 +1185,22 @@ internal static class VibelutionLauncher
         bool openWorkbench,
         int timeoutMs)
     {
-        string bridgePath = Path.Combine(projectDir, "scripts", "vibelution_desktop_entry.py");
+        string requestedRoot = Path.GetFullPath(projectDir);
+        string shellRoot = ResolveDesktopShellWorkspace(requestedRoot);
+        string bridgePath = Path.Combine(shellRoot, "scripts", "vibelution_desktop_entry.py");
         if (!File.Exists(bridgePath))
         {
             throw new FileNotFoundException("Desktop entry Python bridge was not found.", bridgePath);
         }
 
-        string pythonPath = ResolvePython(projectDir, useNoConsole: true);
+        string pythonPath = ResolvePython(shellRoot, useNoConsole: true);
         var arguments = new List<string>
         {
             Quote(bridgePath),
             "--action",
             action,
             "--python-exe",
-            Quote(ResolvePython(projectDir, useNoConsole: false))
+            Quote(ResolvePython(shellRoot, useNoConsole: false))
         };
         if (outputJson)
         {
@@ -1195,7 +1215,10 @@ internal static class VibelutionLauncher
             || string.Equals(action, "launch-desktop-shell", StringComparison.OrdinalIgnoreCase))
         {
             arguments.Add("--workspace");
-            arguments.Add(Quote(projectDir));
+            arguments.Add(Quote(
+                string.Equals(action, "launch-desktop-shell", StringComparison.OrdinalIgnoreCase)
+                    ? requestedRoot
+                    : shellRoot));
         }
         if (string.Equals(action, "stop-launcher", StringComparison.OrdinalIgnoreCase))
         {
@@ -1215,7 +1238,7 @@ internal static class VibelutionLauncher
         {
             FileName = pythonPath,
             Arguments = string.Join(" ", arguments.ToArray()),
-            WorkingDirectory = projectDir,
+            WorkingDirectory = shellRoot,
             UseShellExecute = false,
             CreateNoWindow = true,
             WindowStyle = ProcessWindowStyle.Hidden,

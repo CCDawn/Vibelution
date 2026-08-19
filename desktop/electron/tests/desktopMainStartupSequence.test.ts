@@ -31,6 +31,7 @@ describe("Electron main startup sequence", () => {
 
     expect(deferIndex).toBeGreaterThan(0);
     expect(openIfIndex).toBeGreaterThan(deferIndex);
-    expect(lifecycleIndex).toBeGreaterThan(openIfIndex);
+    expect(source).toContain("await applyPendingProjectSlot(pendingProjectRoot, firstLifecycle)");
+    expect(lifecycleIndex).toBeGreaterThan(source.indexOf("await applyPendingProjectSlot(pendingProjectRoot, firstLifecycle)"));
   });
 });

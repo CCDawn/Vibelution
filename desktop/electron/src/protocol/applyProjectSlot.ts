@@ -1,22 +1,24 @@
 import {
-  fetchLauncherBranchInstanceRecords,
   matchBranchInstanceByProjectRoot,
-  postLauncherControl,
   type BranchInstanceRecord
 } from "./launcherControlClient.js";
 
-export type ApplyProjectSlotInput = {
-  projectRoot: string;
-  launcherOrigin: string;
-  controlToken: string;
-  fetchImpl?: typeof fetch;
-  requestTimeoutMs?: number;
-};
+export const PROJECT_SLOT_LIFECYCLE_COMMANDS = new Set([
+  "start",
+  "stop",
+  "force-stop",
+  "restart",
+  "rebuild-and-start"
+]);
 
-export type ApplyProjectSlotResult = {
+export type ProjectSlotPlan = {
   instanceId: string;
   url: string;
-  started: boolean;
+  kind: string;
+  current: boolean;
+  alive: boolean;
+  isMain: boolean;
+  operation: "" | "start" | "stop" | "force-stop" | "restart" | "rebuild-and-start";
 };
 
 export function instanceWorkbenchUrl(item: Pick<BranchInstanceRecord, "url" | "port">): string {
@@ -31,41 +33,44 @@ export function instanceWorkbenchUrl(item: Pick<BranchInstanceRecord, "url" | "p
   return "";
 }
 
-export async function applyProjectSlot(input: ApplyProjectSlotInput): Promise<ApplyProjectSlotResult> {
+export function isMainProjectSlot(item: Pick<BranchInstanceRecord, "id" | "current" | "kind">): boolean {
+  return item.id === "main" || item.current === true || item.kind === "main";
+}
+
+export function planProjectSlot(input: {
+  items: BranchInstanceRecord[];
+  projectRoot: string;
+  lifecycleCommand?: string;
+}): ProjectSlotPlan {
   const projectRoot = String(input.projectRoot || "").trim();
   if (!projectRoot) {
     throw new Error("未指定要应用的工作区路径。");
   }
-  const listed = await fetchLauncherBranchInstanceRecords(input);
-  let matched = matchBranchInstanceByProjectRoot(listed, projectRoot);
+  const matched = matchBranchInstanceByProjectRoot(input.items, projectRoot);
   if (matched === null) {
     throw new Error(`找不到对应工作区：${projectRoot}`);
   }
   if (!matched.checkedOut) {
     throw new Error("该工作区未打开，无法应用。");
   }
-  let started = false;
-  if (!matched.alive) {
-    await postLauncherControl({
-      launcherOrigin: input.launcherOrigin,
-      controlToken: input.controlToken,
-      path: "/api/launcher/branch-instances/start",
-      trigger: "electron_project_apply",
-      body: { instanceId: matched.id },
-      fetchImpl: input.fetchImpl,
-      requestTimeoutMs: input.requestTimeoutMs
-    });
-    started = true;
-    const refreshed = await fetchLauncherBranchInstanceRecords(input);
-    matched = matchBranchInstanceByProjectRoot(refreshed, projectRoot) ?? matched;
+  const requested = String(input.lifecycleCommand || "").trim().toLowerCase();
+  let operation: ProjectSlotPlan["operation"] = "";
+  if (PROJECT_SLOT_LIFECYCLE_COMMANDS.has(requested)) {
+    operation = requested as ProjectSlotPlan["operation"];
+  } else if (requested !== "status" && requested !== "toggle" && !matched.alive) {
+    operation = "start";
   }
   const url = instanceWorkbenchUrl(matched);
-  if (!url) {
+  if (!url && operation !== "start" && operation !== "restart" && operation !== "rebuild-and-start") {
     throw new Error(`工作区已匹配但没有可打开的地址：${matched.id}`);
   }
   return {
     instanceId: matched.id,
     url,
-    started
+    kind: matched.kind,
+    current: matched.current,
+    alive: matched.alive,
+    isMain: isMainProjectSlot(matched),
+    operation
   };
 }

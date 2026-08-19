@@ -428,6 +428,51 @@ def ensure_unpackaged_electron(project_root: Path | str = PROJECT_ROOT) -> dict[
     return {"ensured": True, "rebuilt": True, **status}
 
 
+def resolve_desktop_shell_launch_roots(project_root: Path | str) -> tuple[Path, Path | None]:
+    """Map a requested --project path onto the integration shell and optional slot.
+
+    Task worktrees do not own packaged/unpackaged Electron. The desktop shell
+    always launches from the Git integration root; the worktree is forwarded as
+    ``--project`` so an existing shell can apply the isolated slot.
+    """
+
+    requested = Path(project_root)
+    from core.infrastructure.branch_workspace import BranchWorkspaceError, resolve_branch_workspace
+
+    try:
+        layout = resolve_branch_workspace(requested)
+    except (OSError, BranchWorkspaceError):
+        return requested, None
+    shell_root = Path(layout.integration_root)
+    slot_root = Path(layout.worktree_root)
+    try:
+        if slot_root.resolve() != shell_root.resolve():
+            return shell_root, slot_root
+    except OSError:
+        if str(slot_root) != str(shell_root):
+            return shell_root, slot_root
+    return shell_root, None
+
+
+def _desktop_shell_electron_args(
+    executable: str,
+    prefix: list[str],
+    *,
+    shell_root: Path,
+    slot_root: Path | None,
+    open_workbench: bool,
+    lifecycle: str,
+) -> list[str]:
+    args = [executable, *prefix, "--workspace", str(shell_root)]
+    if slot_root is not None:
+        args.extend(["--project", str(slot_root)])
+    if open_workbench:
+        args.append("--open-workbench")
+    if lifecycle:
+        args.append(lifecycle)
+    return args
+
+
 def resolve_desktop_shell_launch(
     project_root: Path | str = PROJECT_ROOT,
     *,
@@ -436,38 +481,44 @@ def resolve_desktop_shell_launch(
 ) -> dict[str, Any]:
     """Choose the current checkout's Electron main: packaged if current, else unpackaged."""
 
-    root = Path(project_root)
+    shell_root, slot_root = resolve_desktop_shell_launch_roots(project_root)
     lifecycle = str(then_lifecycle or "").strip().lower()
-    packaged_status = inspect_desktop_shell(root)
+    packaged_status = inspect_desktop_shell(shell_root)
     if not packaged_status.get("stale") and packaged_status.get("reason") == "current":
-        args = [str(packaged_desktop_exe(root)), "--workspace", str(root)]
-        if open_workbench:
-            args.append("--open-workbench")
-        if lifecycle:
-            args.append(lifecycle)
+        args = _desktop_shell_electron_args(
+            str(packaged_desktop_exe(shell_root)),
+            [],
+            shell_root=shell_root,
+            slot_root=slot_root,
+            open_workbench=open_workbench,
+            lifecycle=lifecycle,
+        )
         return {
             "schemaVersion": 1,
             "kind": "packaged",
             "args": args,
-            "cwd": str(root),
+            "cwd": str(shell_root),
             "reason": "current",
             "currentElectronTree": str(packaged_status.get("currentElectronTree") or ""),
         }
-    unpackaged = ensure_unpackaged_electron(root)
-    electron_bin = unpackaged_electron_executable(root)
-    main_js = unpackaged_main_js(root)
+    unpackaged = ensure_unpackaged_electron(shell_root)
+    electron_bin = unpackaged_electron_executable(shell_root)
+    main_js = unpackaged_main_js(shell_root)
     if electron_bin is None or not main_js.is_file():
         raise RuntimeError("checkout Electron main is not launchable after ensure")
-    args = [str(electron_bin), str(main_js), "--workspace", str(root)]
-    if open_workbench:
-        args.append("--open-workbench")
-    if lifecycle:
-        args.append(lifecycle)
+    args = _desktop_shell_electron_args(
+        str(electron_bin),
+        [str(main_js)],
+        shell_root=shell_root,
+        slot_root=slot_root,
+        open_workbench=open_workbench,
+        lifecycle=lifecycle,
+    )
     return {
         "schemaVersion": 1,
         "kind": "unpackaged",
         "args": args,
-        "cwd": str(root),
+        "cwd": str(shell_root),
         "reason": str(unpackaged.get("reason") or "current"),
         "currentElectronTree": str(unpackaged.get("currentElectronTree") or ""),
         "rebuilt": bool(unpackaged.get("rebuilt")),
