@@ -486,7 +486,6 @@ function WorkflowCanvasInner({
             },
             selectable: false,
             draggable: manualLayoutEnabled && !manualLayoutLocked,
-            dragging: draggingNodeId === node.id,
             zIndex: manualLayoutEnabled ? 3 : 0,
           } satisfies Node;
         }
@@ -521,7 +520,6 @@ function WorkflowCanvasInner({
           style: { width: node.width, height: node.height },
           selectable: true,
           draggable: manualLayoutEnabled && !manualLayoutLocked,
-          dragging: draggingNodeId === node.id,
           selected: node.id === selectedNodeId,
           zIndex: 2,
         } satisfies Node;
@@ -535,7 +533,6 @@ function WorkflowCanvasInner({
       manualLayoutEnabled,
       manualLayoutLocked,
       manualPositions,
-      draggingNodeId,
       selectedNodeId,
       stageIndexById,
       stageAnchorById,
@@ -547,11 +544,13 @@ function WorkflowCanvasInner({
     () => nodes.map((node) => {
       const width = typeof node.style?.width === "number" ? node.style.width : undefined;
       const height = typeof node.style?.height === "number" ? node.style.height : undefined;
-      return width && height && !node.measured
-        ? { ...node, measured: { width, height } }
-        : node;
+      return {
+        ...node,
+        dragging: node.id === draggingNodeId,
+        ...(width && height && !node.measured ? { measured: { width, height } } : {}),
+      };
     }),
-    [nodes],
+    [draggingNodeId, nodes],
   );
 
   const edges: Edge[] = useMemo(
