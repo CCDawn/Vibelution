@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from copy import deepcopy
 import json
+from copy import deepcopy
 
 import pytest
 
@@ -705,20 +705,45 @@ def test_publish_promotes_only_bound_project_evidence_and_keeps_human_gates_pend
         encoding="utf-8",
     )
     output = _output()
-    output["run"]["invocation_evidence_refs"] = []
+    output["run"]["run_id"] = "source-run-sci-096"
+    output["run"]["invocation_evidence_refs"] = ["model-evidence-project-qwen"]
+    output_hash = challenge_question_runs._output_sha256(output)
+    project_evidence = {
+        "evidenceId": "model-evidence-project-qwen",
+        "teamId": "research-team",
+        "researchProjectId": "research-project-1",
+        "questionId": "SCI-096",
+        "sourceRunId": "source-run-sci-096",
+        "taskId": "stagetask-1",
+        "turnId": "turn-1",
+        "modelProvider": "dashscope",
+        "providerId": "dashscope_main",
+        "modelId": "qwen3.6-plus",
+        "modelRef": "dashscope_main/qwen3.6-plus",
+        "status": "canonical_success",
+        "outputSha256": output_hash,
+        "outputRef": "challenge-output://research-project-1/source-run-sci-096",
+    }
+    project_store = json.loads(project_evidence_path.read_text(encoding="utf-8"))
+    project_store["evidence"] = [project_evidence]
+    project_evidence_path.write_text(json.dumps(project_store), encoding="utf-8")
 
+    publish_payload = {
+        "researchProjectId": "research-project-1",
+        "questionId": "SCI-096",
+        "taskId": "stagetask-1",
+        "turnId": "turn-1",
+        "projectEvidenceId": "model-evidence-project-qwen",
+        "output": output,
+        "citationChecks": _citation_checks(output),
+        "registeredBy": "publisher-agent",
+        "lineageRefs": ["challenge-output://research-project-1/source-run-sci-096"],
+    }
     response = challenge_question_runs.publish_research_project_challenge_question_output(
-        "research-team",
-        {
-            "researchProjectId": "research-project-1",
-            "questionId": "SCI-096",
-            "taskId": "stagetask-1",
-            "turnId": "turn-1",
-            "projectEvidenceId": "model-evidence-project-qwen",
-            "output": output,
-            "citationChecks": _citation_checks(output),
-            "registeredBy": "publisher-agent",
-        },
+        "research-team", publish_payload
+    )
+    replayed = challenge_question_runs.publish_research_project_challenge_question_output(
+        "research-team", publish_payload
     )
 
     assert response["record"]["validation"]["schemaValidation"] == "passed"
@@ -728,6 +753,7 @@ def test_publish_promotes_only_bound_project_evidence_and_keeps_human_gates_pend
     assert response["record"]["humanGates"]["approvedCount"] == 0
     assert response["humanReviewRequired"] is True
     assert response["projectEvidenceId"] == "model-evidence-project-qwen"
+    assert replayed["idempotent"] is True
     program_store = json.loads(
         (program_root / "official_model_evidence" / "index.json").read_text(encoding="utf-8")
     )
@@ -748,6 +774,10 @@ def test_publish_rejects_project_evidence_bound_to_another_turn(tmp_path, monkey
     monkeypatch.setattr(challenge_question_runs.team_service, "get_team", lambda team_id: {"teamId": team_id})
     evidence_path = project_root / "official_model_evidence" / "index.json"
     evidence_path.parent.mkdir(parents=True, exist_ok=True)
+    output = _output()
+    output["run"]["run_id"] = "source-run-sci-096"
+    output["run"]["invocation_evidence_refs"] = ["model-evidence-project-qwen"]
+    output_hash = challenge_question_runs._output_sha256(output)
     evidence_path.write_text(
         json.dumps(
             {
@@ -759,19 +789,21 @@ def test_publish_rejects_project_evidence_bound_to_another_turn(tmp_path, monkey
                         "evidenceId": "model-evidence-project-qwen",
                         "researchProjectId": "research-project-1",
                         "questionId": "SCI-096",
+                        "sourceRunId": "source-run-sci-096",
                         "taskId": "stagetask-1",
                         "turnId": "different-turn",
                         "modelProvider": "dashscope",
+                        "providerId": "dashscope_main",
                         "modelId": "qwen3.6-plus",
+                        "modelRef": "dashscope_main/qwen3.6-plus",
                         "status": "canonical_success",
+                        "outputSha256": output_hash,
                     }
                 ],
             }
         ),
         encoding="utf-8",
     )
-
-    output = _output()
     with pytest.raises(ValueError, match="evidence_mismatch"):
         challenge_question_runs.publish_research_project_challenge_question_output(
             "research-team",
@@ -786,4 +818,189 @@ def test_publish_rejects_project_evidence_bound_to_another_turn(tmp_path, monkey
             },
         )
 
+    with pytest.raises(ValueError, match="evidence_mismatch"):
+        challenge_question_runs.publish_research_project_challenge_question_output(
+            "research-team",
+            {
+                "researchProjectId": "research-project-1",
+                "questionId": "SCI-096",
+                "taskId": "different-task",
+                "turnId": "turn-1",
+                "projectEvidenceId": "model-evidence-project-qwen",
+                "output": output,
+                "citationChecks": _citation_checks(output),
+            },
+        )
+
     assert not (program_root / "official_model_evidence" / "index.json").exists()
+
+
+def test_publish_rejects_legacy_project_evidence_without_canonical_output_binding(tmp_path, monkeypatch):
+    program_root = tmp_path / "program"
+    project_root = tmp_path / "project"
+    monkeypatch.setattr(challenge_question_runs, "_workflow_root", lambda _team_id: program_root)
+    monkeypatch.setattr(
+        challenge_question_runs,
+        "resolve_research_project_workspace_root",
+        lambda _team_id, _project_id: project_root,
+    )
+    monkeypatch.setattr(challenge_question_runs.team_service, "get_team", lambda team_id: {"teamId": team_id})
+    evidence_path = project_root / "official_model_evidence" / "index.json"
+    evidence_path.parent.mkdir(parents=True, exist_ok=True)
+    evidence_path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "storeKind": "official_model_evidence_store",
+                "teamId": "research-team",
+                "evidence": [
+                    {
+                        "evidenceId": "legacy-evidence",
+                        "researchProjectId": "research-project-1",
+                        "questionId": "SCI-096",
+                        "taskId": "stagetask-1",
+                        "turnId": "turn-1",
+                        "modelProvider": "dashscope",
+                        "providerId": "dashscope_main",
+                        "modelId": "qwen3.6-plus",
+                        "modelRef": "dashscope_main/qwen3.6-plus",
+                        "status": "canonical_success",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="legacy.*re-record|canonical output binding"):
+        challenge_question_runs.publish_research_project_challenge_question_output(
+            "research-team",
+            {
+                "researchProjectId": "research-project-1",
+                "questionId": "SCI-096",
+                "taskId": "stagetask-1",
+                "turnId": "turn-1",
+                "projectEvidenceId": "legacy-evidence",
+                "output": _output(),
+                "citationChecks": _citation_checks(_output()),
+            },
+        )
+
+
+def test_publish_rejects_output_hash_mismatch_even_when_question_and_model_match(tmp_path, monkeypatch):
+    program_root = tmp_path / "program"
+    project_root = tmp_path / "project"
+    monkeypatch.setattr(challenge_question_runs, "_workflow_root", lambda _team_id: program_root)
+    monkeypatch.setattr(
+        challenge_question_runs,
+        "resolve_research_project_workspace_root",
+        lambda _team_id, _project_id: project_root,
+    )
+    monkeypatch.setattr(challenge_question_runs.team_service, "get_team", lambda team_id: {"teamId": team_id})
+    evidence_path = project_root / "official_model_evidence" / "index.json"
+    evidence_path.parent.mkdir(parents=True, exist_ok=True)
+    canonical_output = _output()
+    canonical_output["run"]["run_id"] = "source-run-sci-096"
+    canonical_output["run"]["invocation_evidence_refs"] = ["bound-evidence"]
+    different_output = deepcopy(canonical_output)
+    different_output["hypotheses"][0]["statement"] = "A different same-model output."
+    evidence_path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "storeKind": "official_model_evidence_store",
+                "teamId": "research-team",
+                "evidence": [
+                    {
+                        "evidenceId": "bound-evidence",
+                        "researchProjectId": "research-project-1",
+                        "questionId": "SCI-096",
+                        "sourceRunId": "source-run-sci-096",
+                        "taskId": "stagetask-1",
+                        "turnId": "turn-1",
+                        "modelProvider": "dashscope",
+                        "providerId": "dashscope_main",
+                        "modelId": "qwen3.6-plus",
+                        "modelRef": "dashscope_main/qwen3.6-plus",
+                        "status": "canonical_success",
+                        "outputSha256": challenge_question_runs._output_sha256(canonical_output),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="output_hash_mismatch"):
+        challenge_question_runs.publish_research_project_challenge_question_output(
+            "research-team",
+            {
+                "researchProjectId": "research-project-1",
+                "questionId": "SCI-096",
+                "taskId": "stagetask-1",
+                "turnId": "turn-1",
+                "projectEvidenceId": "bound-evidence",
+                "output": different_output,
+                "citationChecks": _citation_checks(different_output),
+            },
+        )
+
+
+def test_publish_requires_canonical_output_ref_even_when_hash_matches(tmp_path, monkeypatch):
+    program_root = tmp_path / "program"
+    project_root = tmp_path / "project"
+    monkeypatch.setattr(challenge_question_runs, "_workflow_root", lambda _team_id: program_root)
+    monkeypatch.setattr(
+        challenge_question_runs,
+        "resolve_research_project_workspace_root",
+        lambda _team_id, _project_id: project_root,
+    )
+    monkeypatch.setattr(challenge_question_runs.team_service, "get_team", lambda team_id: {"teamId": team_id})
+    evidence_path = project_root / "official_model_evidence" / "index.json"
+    evidence_path.parent.mkdir(parents=True, exist_ok=True)
+    output = _output()
+    output["run"]["run_id"] = "source-run-sci-096"
+    output["run"]["invocation_evidence_refs"] = ["bound-evidence"]
+    output_ref = "challenge-output://research-project-1/source-run-sci-096"
+    evidence_path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "storeKind": "official_model_evidence_store",
+                "teamId": "research-team",
+                "evidence": [
+                    {
+                        "evidenceId": "bound-evidence",
+                        "researchProjectId": "research-project-1",
+                        "questionId": "SCI-096",
+                        "sourceRunId": "source-run-sci-096",
+                        "taskId": "stagetask-1",
+                        "turnId": "turn-1",
+                        "modelProvider": "dashscope",
+                        "providerId": "dashscope_main",
+                        "modelId": "qwen3.6-plus",
+                        "modelRef": "dashscope_main/qwen3.6-plus",
+                        "status": "canonical_success",
+                        "outputSha256": challenge_question_runs._output_sha256(output),
+                        "outputRef": output_ref,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="output_ref_mismatch"):
+        challenge_question_runs.publish_research_project_challenge_question_output(
+            "research-team",
+            {
+                "researchProjectId": "research-project-1",
+                "questionId": "SCI-096",
+                "taskId": "stagetask-1",
+                "turnId": "turn-1",
+                "projectEvidenceId": "bound-evidence",
+                "output": output,
+                "citationChecks": _citation_checks(output),
+                "lineageRefs": [],
+            },
+        )

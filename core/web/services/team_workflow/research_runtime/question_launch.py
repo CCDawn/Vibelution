@@ -28,7 +28,7 @@ from core.research.competition.resources import (
     load_full_catalog_execution_core,
     load_science_question_catalog,
 )
-from core.research.workflow.contracts import DEFAULT_PROGRAM_ID
+from core.research.workflow.contracts import DEFAULT_PROGRAM_ID, scope_hash_for
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
 from core.web.services.team_workflow.challenge_question_runs import (
     REQUIRED_HUMAN_GATE_KEYS,
@@ -579,7 +579,25 @@ def build_safety_budget_policy(safety_limits: Mapping[str, Any]) -> dict[str, An
     }
 
 
-def _hypothesis_first_flag(team_id: str, question_id: str) -> bool:
+def _hypothesis_first_scope(team_id: str, question_id: str) -> dict[str, str]:
+    """Resolve the server-authoritative full scope used by latest reads."""
+    from core.web.services.team_workflow.research_runtime import hypothesis_first_chain
+
+    scope = hypothesis_first_chain._question_scope_envelope(team_id, question_id)
+    scope["scopeHash"] = scope_hash_for(
+        **{field: scope[field] for field in hypothesis_first_chain._SCOPE_FIELDS},
+        agent_id=scope["agentId"],
+        mode=scope["mode"],
+    )
+    return scope
+
+
+def _hypothesis_first_flag(
+    team_id: str,
+    question_id: str,
+    *,
+    scope: Mapping[str, Any],
+) -> bool:
     """Challenge Cup catalog questions are hypothesis-first by design.
 
     The flag must not depend on an already-recorded selection: the selection
@@ -592,13 +610,15 @@ def _hypothesis_first_flag(team_id: str, question_id: str) -> bool:
     try:
         from core.web.services.team_workflow import hypothesis_selection
 
-        if hypothesis_selection.get_latest_hypothesis_selection(team_id, question_id).get(
-            "selection"
-        ):
+        if hypothesis_selection.get_latest_hypothesis_selection(
+            team_id,
+            question_id,
+            scope=scope,
+        ).get("selection"):
             return True
-    except Exception:
-        pass
-    return _catalog_question(question_id) is not None
+    except hypothesis_selection.ResearchHypothesisSelectionNotFoundError:
+        return _catalog_question(question_id) is not None
+    return False
 
 
 def _build_catalog_seed_run_input(
@@ -629,6 +649,7 @@ def _build_catalog_seed_run_input(
         f"{_CATALOG_SEED_REVIEW_RUN_ID}/{artifact_sha256}"
     )
     directions = [_text(item) for item in program_body.get("dimensions") or [] if _text(item)]
+    hypothesis_scope = _hypothesis_first_scope(team_id, question_id)
     return {
         "teamId": _text(team_id),
         "projectId": _text(project.get("projectId")),
@@ -663,7 +684,11 @@ def _build_catalog_seed_run_input(
             "question": title,
             "scope": scope,
             "falsifiableOutcome": "",
-            "hypothesisFirst": _hypothesis_first_flag(team_id, question_id),
+            "hypothesisFirst": _hypothesis_first_flag(
+                team_id,
+                question_id,
+                scope=hypothesis_scope,
+            ),
         },
         "sourcePolicy": {"minimumPrimarySources": 3, "requireCounterEvidence": True},
         "budgetPolicy": build_safety_budget_policy(safety_limits),
@@ -746,7 +771,11 @@ def build_question_run_input(
     competition_program_snapshot, program_body = _competition_program_snapshot()
     directions = [_text(item) for item in program_body.get("dimensions") or [] if _text(item)]
     artifact_ref = f"challenge-question-artifact://{catalog_id}/{normalized_question_id}/{review_run_id}/{artifact_sha256}"
-    hypothesis_first = _hypothesis_first_flag(team_id, normalized_question_id)
+    hypothesis_first = _hypothesis_first_flag(
+        team_id,
+        normalized_question_id,
+        scope=_hypothesis_first_scope(team_id, normalized_question_id),
+    )
     return {
         "teamId": _text(team_id),
         "projectId": _text(project.get("projectId")),

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,7 +14,6 @@ from typing import Any
 from jsonschema import Draft202012Validator, FormatChecker
 
 from core.research.competition.resources import (
-    CATALOG_ID,
     CATALOG_SHA256,
     QUESTION_CATALOG_PATH,
     load_science_question_catalog,
@@ -24,7 +24,6 @@ from core.web.services.team_workflow.research_projects import (
     resolve_research_project_workspace_root,
     resolve_team_program_root,
 )
-
 
 STORE_SCHEMA_VERSION = 1
 STORE_KIND = "challenge_question_run_store"
@@ -116,6 +115,88 @@ def _output_sha256(output: dict[str, Any]) -> str:
     audit["output_sha256"] = "0" * 64
     encoded = json.dumps(hashable, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return _sha256_bytes(encoded)
+
+
+_SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+
+
+def _canonical_evidence_output_binding(evidence: dict[str, Any]) -> dict[str, str]:
+    """Read the immutable output binding carried by a project evidence row.
+
+    Evidence written before the canonical output binding existed is deliberately
+    not upgraded in place.  Such rows remain readable, but publishing through
+    them fails closed and asks the producer to record a fresh evidence row.
+    """
+    source_run_id = str(evidence.get("sourceRunId") or "").strip()
+    task_id = str(evidence.get("taskId") or "").strip()
+    turn_id = str(evidence.get("turnId") or "").strip()
+    if not all((source_run_id, task_id, turn_id)):
+        raise ValueError(
+            "challenge_question_publish_legacy_evidence_unusable: project evidence "
+            "must carry canonical sourceRunId, taskId and turnId; re-record canonical evidence."
+        )
+    metadata = evidence.get("metadata") if isinstance(evidence.get("metadata"), dict) else {}
+    hash_value = ""
+    ref_value = ""
+    for container in (evidence, metadata):
+        if not hash_value:
+            for key in ("outputSha256", "outputHash", "output_sha256"):
+                value = str(container.get(key) or "").strip()
+                if value:
+                    hash_value = value.removeprefix("sha256:").strip()
+                    break
+        if not ref_value:
+            for key in ("outputRef", "outputReference", "output_ref"):
+                value = str(container.get(key) or "").strip()
+                if value:
+                    ref_value = value
+                    break
+    if hash_value and not _SHA256_RE.fullmatch(hash_value):
+        raise ValueError(
+            "challenge_question_publish_evidence_output_binding_invalid: canonical output hash "
+            "must be a 64-character SHA-256 value; re-record canonical evidence."
+        )
+    if not hash_value and not ref_value:
+        raise ValueError(
+            "challenge_question_publish_legacy_evidence_unusable: project evidence lacks a "
+            "canonical output hash/ref; re-record canonical evidence before publishing."
+        )
+    return {
+        "sourceRunId": source_run_id,
+        "taskId": task_id,
+        "turnId": turn_id,
+        "outputSha256": hash_value.lower(),
+        "outputRef": ref_value,
+    }
+
+
+def _source_output_binding(task: dict[str, Any], usage: dict[str, Any]) -> dict[str, str]:
+    """Extract optional output binding supplied by the canonical task result."""
+    containers: list[dict[str, Any]] = [task, usage]
+    for container in (task, usage):
+        nested = container.get("result") if isinstance(container.get("result"), dict) else {}
+        if nested:
+            containers.append(nested)
+    output_hash = ""
+    output_ref = ""
+    for container in containers:
+        if not output_hash:
+            for key in ("outputSha256", "outputHash", "output_sha256"):
+                value = str(container.get(key) or "").strip()
+                if value:
+                    output_hash = value.removeprefix("sha256:").strip().lower()
+                    break
+        if not output_ref:
+            for key in ("outputRef", "outputReference", "output_ref"):
+                value = str(container.get(key) or "").strip()
+                if value:
+                    output_ref = value
+                    break
+    if output_hash and not _SHA256_RE.fullmatch(output_hash):
+        raise ValueError(
+            "challenge_task_model_evidence_output_binding_invalid: output hash must be a 64-character SHA-256 value."
+        )
+    return {"outputSha256": output_hash, "outputRef": output_ref}
 
 
 def _output_schema_version(output: dict[str, Any]) -> int:
@@ -540,7 +621,8 @@ def register_challenge_task_model_evidence(
     turn_id = str(turn.get("turnId") or "").strip()
     if not all((research_project_id, question_id, task_id, turn_id)):
         return None
-    identity = "|".join((team_id, research_project_id, question_id, task_id, turn_id, expected_model_ref))
+    source_binding = _source_output_binding(task, usage)
+    identity = f"{team_id}|{research_project_id}|{question_id}|{task_id}|{turn_id}|{expected_model_ref}"
     evidence_id = f"model-evidence-{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:20]}"
     path = _evidence_store_path(resolve_research_project_workspace_root(team_id, research_project_id))
     with _STORE_LOCK:
@@ -584,6 +666,10 @@ def register_challenge_task_model_evidence(
             "createdAt": now,
             "updatedAt": now,
         }
+        if source_binding["outputSha256"]:
+            record["outputSha256"] = source_binding["outputSha256"]
+        if source_binding["outputRef"]:
+            record["outputRef"] = source_binding["outputRef"]
         evidence.append(record)
         store["evidence"] = evidence
         store["updatedAt"] = now
@@ -630,6 +716,7 @@ def publish_research_project_challenge_question_output(
         raise ValueError("challenge_question_publish_evidence_mismatch: evidence binding does not match the publish request.")
     if str(project_evidence.get("status") or "") != "canonical_success":
         raise ValueError("challenge_question_publish_evidence_invalid: only canonical successful calls can be published.")
+    canonical_binding = _canonical_evidence_output_binding(project_evidence)
 
     raw_output = payload.get("output")
     if not isinstance(raw_output, dict):
@@ -639,6 +726,12 @@ def publish_research_project_challenge_question_output(
     if _output_question_id(output) != question_id:
         raise ValueError("challenge_question_publish_question_mismatch: output.question_id must match questionId.")
     run = output.get("run") if isinstance(output.get("run"), dict) else {}
+    output_run_id = str(run.get("run_id") or "").strip()
+    if output_run_id != canonical_binding["sourceRunId"]:
+        raise ValueError(
+            "challenge_question_publish_source_run_mismatch: output.run.run_id must match "
+            "the canonical project evidence sourceRunId."
+        )
     if (
         str(run.get("model_provider") or "").strip().lower() not in OFFICIAL_PROVIDERS
         or str(run.get("model_id") or "").strip().lower()
@@ -650,9 +743,29 @@ def publish_research_project_challenge_question_output(
         raise ValueError("challenge_question_publish_model_mismatch: output model does not match canonical evidence.")
     invocation_refs = _normalized_string_list(run.get("invocation_evidence_refs"), max_items=64)
     if evidence_id not in invocation_refs:
-        invocation_refs.append(evidence_id)
-    run["invocation_evidence_refs"] = invocation_refs
-    output["run"] = run
+        raise ValueError(
+            "challenge_question_publish_evidence_ref_mismatch: output.run.invocation_evidence_refs "
+            "must explicitly contain projectEvidenceId."
+        )
+    output_hash = _output_sha256(output)
+    if canonical_binding["outputSha256"] and output_hash != canonical_binding["outputSha256"]:
+        raise ValueError(
+            "challenge_question_publish_output_hash_mismatch: output does not match the "
+            "canonical project evidence outputSha256."
+        )
+    raw_lineage_refs = payload.get("lineageRefs")
+    lineage_refs = list(
+        dict.fromkeys(
+            str(item).strip()
+            for item in (raw_lineage_refs if isinstance(raw_lineage_refs, list) else [])
+            if str(item).strip()
+        )
+    )
+    if canonical_binding["outputRef"] and canonical_binding["outputRef"] not in lineage_refs:
+        raise ValueError(
+            "challenge_question_publish_output_ref_mismatch: lineageRefs must explicitly "
+            "carry the canonical project evidence outputRef."
+        )
 
     preview = deepcopy(output)
     _set_pending_human_gates(preview)
@@ -674,7 +787,17 @@ def publish_research_project_challenge_question_output(
         program_store = _load_evidence_store(program_evidence_path, team_id)
         program_evidence = [item for item in program_store.get("evidence", []) if isinstance(item, dict)]
         promoted = next((item for item in program_evidence if str(item.get("evidenceId") or "") == evidence_id), None)
-        if promoted is None:
+        if promoted is not None:
+            promoted_binding = _canonical_evidence_output_binding(promoted)
+            if any(
+                promoted_binding.get(key) != canonical_binding.get(key)
+                for key in ("sourceRunId", "taskId", "turnId", "outputSha256", "outputRef")
+            ):
+                raise ValueError(
+                    "challenge_question_publish_provenance_conflict: published evidence id is "
+                    "already bound to different canonical provenance."
+                )
+        else:
             promoted = {
                 **deepcopy(project_evidence),
                 "status": "published_to_challenge_program",
@@ -697,7 +820,7 @@ def publish_research_project_challenge_question_output(
                 "citationChecks": citation_checks,
                 "registeredBy": str(payload.get("registeredBy") or ""),
                 "parentRunId": str(payload.get("parentRunId") or ""),
-                "lineageRefs": payload.get("lineageRefs") if isinstance(payload.get("lineageRefs"), list) else [],
+                "lineageRefs": lineage_refs,
             },
         )
     return {
