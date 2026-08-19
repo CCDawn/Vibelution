@@ -93,7 +93,8 @@ function mapNodes(
       collaboratorRoleKeys: node.collaboratorRoleKeys,
       producesArtifactKinds: node.producesArtifactKinds,
       acceptsGateKinds: node.acceptsGateKinds,
-      status: isRuntimeCurrent && effectiveStatus === "pending" ? "running" : effectiveStatus,
+      // runtimeCurrent is a cursor (where the run will continue), not in-flight work.
+      status: effectiveStatus,
       attempt: run?.attempt,
       primaryAgentId: run?.primaryAgentId || options.primaryAgentIdByNode?.get(node.nodeId),
       isRuntimeCurrent,

@@ -5,14 +5,13 @@ import {
   AgentDetailHeaderPanel,
   type AgentDetailHeaderPaneView,
 } from "./AgentDetailHeaderPanel";
+import { AgentFocusedOverviewPanel } from "./AgentFocusedOverviewPanel";
 import { AgentManagementBriefPanel } from "./AgentManagementBriefPanel";
-import { AgentOverviewPanel } from "./AgentOverviewPanel";
-import { AgentOverviewOperationsPanel } from "./AgentOverviewOperationsPanel";
 import { AgentOverviewResourcesPanel } from "./AgentOverviewResourcesPanel";
 import styles from "./AgentSelectedDetailContentPanel.styles";
 import { ProgressiveRegionSkeleton } from "./shared/ProgressiveRegionSkeleton";
 
-export type AgentSelectedDetailPaneId = "overview" | "effective" | "relations" | "config" | "changes" | "activity";
+export type AgentSelectedDetailPaneId = "overview" | "config" | "activity";
 
 export type AgentConfigSectionId = "basic" | "profile" | "capability" | "ops";
 
@@ -32,12 +31,6 @@ const AgentConfigReferencesPanePanel = lazy(() =>
 const AgentConfigChangeHistoryPanel = lazy(() =>
   import("./AgentConfigChangeHistoryPanel").then((m) => ({ default: m.AgentConfigChangeHistoryPanel })),
 );
-const AgentEffectiveConfigurationPanel = lazy(() =>
-  import("./AgentEffectiveConfigurationPanel").then((m) => ({ default: m.AgentEffectiveConfigurationPanel })),
-);
-const AgentTeamRelationsPanel = lazy(() =>
-  import("./AgentTeamRelationsPanel").then((m) => ({ default: m.AgentTeamRelationsPanel })),
-);
 
 type AgentSelectedDetailHeaderProps = Omit<
   ComponentProps<typeof AgentDetailHeaderPanel>,
@@ -52,11 +45,8 @@ export type AgentSelectedDetailContentPanelProps = {
   activePane: AgentSelectedDetailPaneId;
   header: AgentSelectedDetailHeaderProps;
   brief: ComponentProps<typeof AgentManagementBriefPanel>;
-  overview: ComponentProps<typeof AgentOverviewPanel> | null;
-  operations: ComponentProps<typeof AgentOverviewOperationsPanel> | null;
+  overview: ComponentProps<typeof AgentFocusedOverviewPanel> | null;
   resources: ComponentProps<typeof AgentOverviewResourcesPanel> | null;
-  effectiveConfiguration: ComponentProps<typeof AgentEffectiveConfigurationPanel>;
-  teamRelations: ComponentProps<typeof AgentTeamRelationsPanel>;
   configChanges: ComponentProps<typeof AgentConfigChangeHistoryPanel>;
   configPrimary: ComponentProps<typeof AgentConfigPrimaryPanePanel>;
   configPolicies: ComponentProps<typeof AgentConfigPolicyPanePanel>;
@@ -64,11 +54,6 @@ export type AgentSelectedDetailContentPanelProps = {
   activity: ComponentProps<typeof AgentActivityPanePanel>;
   /** Prefer opening ops when agent has health issues. */
   preferOpsSection?: boolean;
-  /**
-   * When true, brief/resources render in workspace inspector rail instead of
-   * nested overview aside (overall three-column layout).
-   */
-  inspectorInWorkspaceRail?: boolean;
 };
 
 function configSectionLabels(lang: "zh" | "en") {
@@ -109,19 +94,13 @@ function PaneSuspense({ children, lang }: { children: ReactNode; lang: "zh" | "e
 export function AgentSelectedDetailContentPanel({
   activePane,
   header,
-  brief,
   overview,
-  operations,
-  resources,
-  effectiveConfiguration,
-  teamRelations,
   configChanges,
   configPrimary,
   configPolicies,
   configReferences,
   activity,
   preferOpsSection = false,
-  inspectorInWorkspaceRail = true,
 }: AgentSelectedDetailContentPanelProps) {
   const [configSection, setConfigSection] = useState<AgentConfigSectionId>(
     preferOpsSection ? "ops" : "basic",
@@ -140,8 +119,6 @@ export function AgentSelectedDetailContentPanel({
     return health?.hasIssues ? (health.issues?.length ?? 1) : 0;
   }, [configPrimary.healthMaintenance]);
 
-  const showNestedAside = !inspectorInWorkspaceRail;
-
   return (
     <div className={styles.selectedDetailFrame}>
       <div className={styles.detailHeaderRegion}>
@@ -149,39 +126,8 @@ export function AgentSelectedDetailContentPanel({
       </div>
       {activePane === "overview" && overview ? (
         <div className={styles.overviewLayout}>
-          <div className={styles.overviewMain}>
-            <AgentOverviewPanel {...overview}>
-              {operations ? <AgentOverviewOperationsPanel {...operations} /> : null}
-            </AgentOverviewPanel>
-          </div>
-          {showNestedAside ? (
-            <aside className={styles.overviewAside}>
-              <AgentManagementBriefPanel {...brief} />
-              {resources ? <AgentOverviewResourcesPanel {...resources} /> : null}
-            </aside>
-          ) : null}
+          <AgentFocusedOverviewPanel {...overview} />
         </div>
-      ) : null}
-      {activePane === "effective" ? (
-        <PaneSuspense lang={header.lang}>
-          <div className={styles.paneContent}>
-            <AgentEffectiveConfigurationPanel {...effectiveConfiguration} lang={header.lang} />
-          </div>
-        </PaneSuspense>
-      ) : null}
-      {activePane === "relations" ? (
-        <PaneSuspense lang={header.lang}>
-          <div className={styles.paneContent}>
-            <AgentTeamRelationsPanel {...teamRelations} />
-          </div>
-        </PaneSuspense>
-      ) : null}
-      {activePane === "changes" ? (
-        <PaneSuspense lang={header.lang}>
-          <div className={styles.paneContent}>
-            <AgentConfigChangeHistoryPanel {...configChanges} lang={header.lang} />
-          </div>
-        </PaneSuspense>
       ) : null}
       {activePane === "config" ? (
         <PaneSuspense lang={header.lang}>
@@ -244,6 +190,7 @@ export function AgentSelectedDetailContentPanel({
         <PaneSuspense lang={header.lang}>
           <div className={styles.paneContent}>
             <AgentActivityPanePanel {...activity} />
+            <AgentConfigChangeHistoryPanel {...configChanges} lang={header.lang} />
           </div>
         </PaneSuspense>
       ) : null}

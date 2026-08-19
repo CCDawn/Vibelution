@@ -193,6 +193,45 @@ describe("Agent Management VUI product components", () => {
     expect(markup).not.toContain("model-x");
     expect(markup).not.toContain("核验证据");
     expect(markup).not.toContain("运行中");
+    expect(markup).not.toContain('type="checkbox"');
+  });
+
+  it("shows row checkboxes only after the caller enters bulk selection", () => {
+    const markup = renderToStaticMarkup(
+      <VuiProvider>
+        <AgentDenseList
+          bulkSelectionVisible
+          columns={[{
+            id: "research",
+            label: "科研执行",
+            count: 1,
+            rows: [{
+              id: "evidence",
+              name: "证据 Agent",
+              roleLabel: "证据边界",
+              roleTone: "research",
+              avatarInitials: "证",
+              modelLabel: "model-x",
+              promptLabel: "核验证据",
+              runtimeLabel: "空闲",
+              runtimeTone: "idle",
+              modes: [],
+              issueLabel: "正常",
+              issueTone: "ok",
+              active: false,
+              bulkSelected: true,
+              selectLabel: "选择证据 Agent",
+            }],
+          }]}
+          columnLabels={{ agent: "Agent", model: "模型", prompt: "提示词", runtime: "运行", modes: "模式", reminders: "提醒" }}
+          onSelectRow={() => undefined}
+          onToggleBulk={() => undefined}
+        />
+      </VuiProvider>,
+    );
+
+    expect(markup).toContain('type="checkbox"');
+    expect(markup).toContain('aria-label="选择证据 Agent"');
   });
 
   it("renders bulk actions as a dense product toolbar without inline prose", () => {

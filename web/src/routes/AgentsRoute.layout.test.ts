@@ -62,6 +62,7 @@ import toolGovernanceStyles from "./AgentToolGovernancePanel.styles";
 import toolSummaryStyles from "./AgentToolSummaryPanel.styles";
 import returnBannerStyles from "./AgentReturnBannerPanel.styles";
 import selectedDetailContentStyles from "./AgentSelectedDetailContentPanel.styles";
+import focusedOverviewStyles from "./AgentFocusedOverviewPanel.styles";
 import effectiveConfigurationStyles from "./AgentEffectiveConfigurationPanel.styles";
 import workspaceLayoutStyles from "./AgentWorkspaceLayoutPanel.styles";
 import agentCreateDialogStyles from "./agent-create/AgentCreateWizardDialog.styles";
@@ -199,6 +200,10 @@ const detailWorkspacePanelSource = readFileSync(
 );
 const selectedDetailContentPanelSource = readFileSync(
   new URL("./AgentSelectedDetailContentPanel.tsx", import.meta.url),
+  "utf-8",
+);
+const focusedOverviewPanelSource = readFileSync(
+  new URL("./AgentFocusedOverviewPanel.tsx", import.meta.url),
   "utf-8",
 );
 const effectiveConfigurationPanelSource = readFileSync(
@@ -538,7 +543,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain('searchParams.get("create") === "1"');
     expect(routeSource).toContain("const createOpen = requestedCreate");
     expect(routeSource).toContain("setCreateWizardOpen(false)");
-    expect(routeSource).toContain('const fullWorkspaceNeeded = Boolean(activePane === "effective" || activePane === "relations" || activePane === "config" || activePane === "activity" || requestedAgentId)');
+    expect(routeSource).toContain('const fullWorkspaceNeeded = Boolean(selectedAgentId || activePane === "config" || activePane === "activity" || requestedAgentId)');
     expect(routeSource).toContain("<AgentCreateWizardDialog");
     expect(routeSource).toContain("triggerRef={agentCreateTriggerRef}");
     expect(agentCreateDialogSource).toContain('enabled: open');
@@ -1061,8 +1066,8 @@ describe("AgentsRoute layout contract", () => {
     expect(agentRouteManagementModelSource).toContain("route: agent?.agentId ? `/teams?agent=${encodeURIComponent(agent.agentId)}` : \"/teams\"");
     expect(routeSource).toContain("void navigate(route)");
     expect(managementBriefPanelSource).toContain("onOpenRoute(action.route)");
-    expect(routeSource).toContain("onSelectPane: setActivePane");
-    expect(selectedDetailContentPanelSource).toContain("<AgentManagementBriefPanel");
+    expect(routeSource).toContain("onSelectPane: (pane) => setActivePane(normalizeAgentConfigPane(pane))");
+    expect(routeSource).toContain("brief: selectedAgentDetailContent.brief");
     expect(managementBriefPanelSource).toContain("onSelectPane(action.pane)");
     expect(agentsRouteCopySource).toContain("nextSetupMembership:");
   });
@@ -1555,13 +1560,17 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("AgentManagementBrief");
     expect(routeSource).toContain("buildAgentManagementBrief(selectedAgent, copy, lang)");
     expect(selectedDetailContentPanelSource).toContain("AgentManagementBriefPanel");
-    expect(selectedDetailContentPanelSource).toContain("AgentOverviewPanel");
-    expect(selectedDetailContentPanelSource).toContain("AgentEffectiveConfigurationPanel");
-    expect(selectedDetailContentPanelSource).toContain('activePane === "effective"');
-    expect(selectedDetailContentPanelSource).toContain("AgentTeamRelationsPanel");
-    expect(selectedDetailContentPanelSource).toContain('activePane === "relations"');
+    expect(selectedDetailContentPanelSource).toContain("AgentFocusedOverviewPanel");
+    expect(selectedDetailContentPanelSource).not.toContain('activePane === "effective"');
+    expect(selectedDetailContentPanelSource).not.toContain('activePane === "relations"');
     expect(selectedDetailContentPanelSource).toContain("AgentConfigChangeHistoryPanel");
-    expect(selectedDetailContentPanelSource).toContain('activePane === "changes"');
+    expect(selectedDetailContentPanelSource).not.toContain('activePane === "changes"');
+    expect(selectedDetailContentPanelSource).toContain('<AgentConfigChangeHistoryPanel {...configChanges} lang={header.lang} />');
+    expect(agentRouteManagementModelSource).toContain('if (normalized === "changes")');
+    expect(agentRouteManagementModelSource).toContain('normalized === "effective" || normalized === "relations"');
+    expect(agentsRouteCopySource).toContain('{ id: "overview", label: copy.overviewPane, count: 0 }');
+    expect(agentsRouteCopySource).toContain('{ id: "config", label: copy.configTitle, count: configIssueCount }');
+    expect(agentsRouteCopySource).toContain('{ id: "activity", label: copy.activityPane, count: activityCount }');
     expect(routeSource).toContain("config-changes");
     expect(routeSource).toContain("fetchAgentConfigChanges(");
     expect(routeSource).toContain("copy.managementBriefTitle");
@@ -1593,7 +1602,8 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toContain("summary?.runningAgentCount");
     expect(routeSource).not.toContain("summary?.blockedAgentCount");
     expect(routeSource).toContain("inspectorOpen");
-    expect(routeSource).toContain("AgentEffectiveConfigurationInspectorPanel");
+    expect(routeSource).not.toContain("AgentEffectiveConfigurationInspectorPanel");
+    expect(routeSource).toContain("focusedOverview");
     expect(configDraftMutationsSource).toContain("expectedUpdatedAt: payload.agent.updatedAt");
     expect(runtimeFocusPanelSource).toContain("styles.runtimePill");
     expect(runtimeFocusPanelSource).toContain("styles.runtimeFocusPanel");
@@ -1621,8 +1631,9 @@ describe("AgentsRoute layout contract", () => {
     expect(inspectorRailPanelSource).not.toContain("emptyHint");
     expect(overviewStyles.factGrid).toContain("min-[1540px]:[grid-template-columns:repeat(3,_minmax(0,_1fr))]");
     expect(overviewStyles.policyGrid).toContain("min-[1540px]:[grid-template-columns:repeat(4,_minmax(0,_1fr))]");
-    expect(selectedDetailContentPanelSource).toContain("styles.overviewMain");
-    expect(selectedDetailContentPanelSource).toContain("styles.overviewAside");
+    expect(selectedDetailContentPanelSource).toContain("<AgentFocusedOverviewPanel {...overview} />");
+    expect(focusedOverviewPanelSource).toContain("styles.mainColumn");
+    expect(focusedOverviewPanelSource).toContain("styles.sideColumn");
     expect(effectiveConfigurationPanelSource).toContain("当前有效配置");
     expect(effectiveConfigurationPanelSource).toContain("inheritanceChain");
     expect(effectiveConfigurationStyles.configurationTable).toContain("max-[860px]");
@@ -1761,13 +1772,14 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain('refetchInterval: activePane === "activity" ? resolvePollingInterval(pageVisible, 12_000) : false');
     expect(routeSource).toContain('refetchInterval: activePane === "activity" ? resolvePollingInterval(pageVisible, 20_000) : false');
     expect(routeSource).toContain("overviewOperations");
-    expect(selectedDetailContentPanelSource).toContain('from "./AgentOverviewOperationsPanel"');
-    expect(selectedDetailContentPanelSource).toContain("<AgentOverviewOperationsPanel");
-    expect(selectedDetailContentPanelSource).toContain('from "./AgentOverviewResourcesPanel"');
-    expect(selectedDetailContentPanelSource).toContain("<AgentOverviewResourcesPanel");
-    expect(overviewOperationsPanelSource).toContain("copy.noActivity");
-    expect(overviewOperationsPanelSource).toContain('role="alert"');
-    expect(overviewOperationsStyles.state).toContain("min-h-[132px]");
+    expect(selectedDetailContentPanelSource).toContain('from "./AgentFocusedOverviewPanel"');
+    expect(selectedDetailContentPanelSource).toContain("<AgentFocusedOverviewPanel");
+    expect(focusedOverviewPanelSource).toContain("effectiveFields.slice(0, 8)");
+    expect(focusedOverviewPanelSource).toContain("activities.slice(0, 6)");
+    expect(focusedOverviewPanelSource).toContain("<VMetricStrip");
+    expect(focusedOverviewPanelSource).toContain("<VSurface");
+    expect(focusedOverviewPanelSource).toContain("<VStatusChip");
+    expect(routeSource).toContain("resources: selectedAgentDetailContent.resources");
     expect(overviewResourcesPanelSource).toContain("resources.slice(0, 4)");
     expect(overviewResourcesStyles.item).toBeTruthy();
   });
@@ -1936,6 +1948,8 @@ describe("AgentsRoute layout contract", () => {
     expect(workspaceLayoutPanelSource).toContain("styles.directory");
     expect(workspaceLayoutStyles.workspace).toContain("h-full");
     expect(workspaceLayoutStyles.workspace).toContain("overflow-hidden");
+    expect(workspaceLayoutStyles.workspace).toContain("[data-vui=split-aside]]:!absolute");
+    expect(workspaceLayoutStyles.workspace).toContain("[data-vui=split-aside]]:z-40");
     expect(workspaceLayoutStyles.directory).toContain("grid-rows-[auto_minmax(0,1fr)]");
     expect(workspaceLayoutPanelSource).toContain("VListDetailPage");
     expect(workspaceLayoutPanelSource).toContain("layoutId={LAYOUT_ID}");
@@ -1954,7 +1968,11 @@ describe("AgentsRoute layout contract", () => {
     expect(detailWorkspaceStyles.detailPanel).not.toContain("max-[860px]:hidden");
     expect(detailWorkspacePanelSource).not.toContain("detailPanelCreating");
     expect(selectedDetailContentPanelSource).toContain("styles.overviewLayout");
-    expect(selectedDetailContentPanelSource).toContain("<aside className={styles.overviewAside}>");
+    expect(selectedDetailContentPanelSource).not.toContain("<aside className={styles.overviewAside}>");
+    expect(routeSource).toContain("const [inspectorOpen, setInspectorOpen] = useState(false)");
+    expect(routeSource).toContain("selectedAgentDetailContent && inspectorOpen ? {");
+    expect(focusedOverviewStyles.workspace).toContain("grid-cols-[minmax(0,_1.6fr)_minmax(280px,_0.85fr)]");
+    expect(focusedOverviewStyles.workspace).toContain("max-[1180px]:grid-cols-1");
   });
 
   it("uses semantic opaque workspace and rail surfaces without legacy card walls", () => {
@@ -1973,7 +1991,9 @@ describe("AgentsRoute layout contract", () => {
     expect(workspaceLayoutStyles.workspace).not.toContain("var(--surface-card)");
     expect(workspaceLayoutStyles.workspace).not.toContain("var(--surface-panel-strong)");
     expect(workspaceLayoutStyles.workspace).not.toContain("box-shadow");
-    expect(workspaceLayoutStyles.workspace).toContain("max-[860px]:overflow-auto");
+    expect(workspaceLayoutStyles.workspace).not.toContain("overflow-auto");
+    expect(workspaceLayoutStyles.workspaceNarrowDirectory).toContain("[data-vui=split-main]]:!hidden");
+    expect(workspaceLayoutStyles.workspaceNarrowDetail).toContain("[data-vui=split-sidebar]]:!hidden");
     expect(workspaceLayoutStyles.directory).toContain("max-[860px]:min-h-[320px]");
   });
 
@@ -2241,12 +2261,19 @@ describe("AgentsRoute layout contract", () => {
     expect(styles.toolBundleActions).toContain("[grid-row:1_/_3]");
   });
 
-  it("keeps the narrow Agent management stack compact enough to preserve list and detail context", () => {
-    expect(workspaceLayoutStyles.directory).toContain("max-[860px]:min-h-[320px]");
-    expect(workspaceLayoutStyles.workspace).toContain("max-[860px]:overflow-auto");
-    expect(styles.filterPanel).toContain("max-[860px]:[min-height:150px]");
-    expect(listWorkspaceStyles.agentPanel).toContain("max-[860px]:[min-height:240px]");
-    expect(detailWorkspaceStyles.detailPanel).toContain("max-[860px]:[min-height:420px]");
+  it("switches narrow Agent management between full-width directory and detail panes", () => {
+    expect(routeSource).toContain("narrowDetailTarget={requestedAgentId}");
+    expect(routeSource).toContain('narrowBackLabel={lang === "zh" ? "返回 Agent 列表"');
+    expect(workspaceLayoutPanelSource).toContain("const [narrowDetailVisible, setNarrowDetailVisible]");
+    expect(workspaceLayoutPanelSource).toContain("setNarrowDetailVisible(true)");
+    expect(workspaceLayoutPanelSource).toContain("setNarrowDetailVisible(false)");
+    expect(workspaceLayoutPanelSource).toContain("styles.narrowDetailBar");
+    expect(workspaceLayoutStyles.workspaceNarrowDirectory).toContain("[data-vui=split-sidebar]]:!w-full");
+    expect(workspaceLayoutStyles.workspaceNarrowDirectory).toContain("[data-vui=split-main]]:!hidden");
+    expect(workspaceLayoutStyles.workspaceNarrowDetail).toContain("[data-vui=split-sidebar]]:!hidden");
+    expect(workspaceLayoutStyles.workspaceNarrowDetail).toContain("[data-vui=split-main]]:!w-full");
+    expect(workspaceLayoutStyles.workspaceNarrowDetail).toContain("[role=separator]]:!hidden");
+    expect(workspaceLayoutStyles.narrowDetailBar).toContain("max-[680px]:flex");
   });
 
   it("fills the Agent detail empty state so the right pane does not look abandoned", () => {

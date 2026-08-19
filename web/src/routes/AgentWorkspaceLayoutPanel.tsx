@@ -1,5 +1,7 @@
+import { ArrowLeft } from "lucide-react";
 import {
   useEffect,
+  useState,
   type ComponentProps,
   type ReactNode,
 } from "react";
@@ -10,7 +12,7 @@ import {
 } from "../components/layout/paneLayoutPersistence";
 import { WORKBENCH_LAYOUT_IDS } from "../components/layout/workbenchLayoutIds";
 import { AgentFilterRail } from "../components/vui/product/agent-management";
-import { VListDetailPage, VNativeButton } from "../components/vui";
+import { VButton, VListDetailPage, VNativeButton } from "../components/vui";
 import { AgentDetailWorkspacePanel } from "./AgentDetailWorkspacePanel";
 import { AgentInspectorRailPanel } from "./AgentInspectorRailPanel";
 import { AgentListWorkspacePanel } from "./AgentListWorkspacePanel";
@@ -40,6 +42,8 @@ type AgentWorkspaceLayoutPanelProps = {
   filterRail: ComponentProps<typeof AgentFilterRail>;
   listWorkspace: ComponentProps<typeof AgentListWorkspacePanel>;
   inspectorRail?: ComponentProps<typeof AgentInspectorRailPanel> | null;
+  narrowDetailTarget?: string;
+  narrowBackLabel?: string;
   className?: string;
   ariaLabel?: string;
   title?: string;
@@ -75,15 +79,24 @@ export function AgentWorkspaceLayoutPanel({
   filterRail,
   listWorkspace,
   inspectorRail = null,
+  narrowDetailTarget = "",
+  narrowBackLabel = "Back to Agent list",
   className,
   ariaLabel = "Agents",
   title = "Agents",
 }: AgentWorkspaceLayoutPanelProps) {
   const hasInspector = Boolean(inspectorRail);
+  const [narrowDetailVisible, setNarrowDetailVisible] = useState(Boolean(narrowDetailTarget));
 
   useEffect(() => {
     migrateLegacyAgentWidths();
   }, []);
+
+  useEffect(() => {
+    if (narrowDetailTarget) {
+      setNarrowDetailVisible(true);
+    }
+  }, [narrowDetailTarget]);
 
   return (
     <div
@@ -104,7 +117,10 @@ export function AgentWorkspaceLayoutPanel({
           sidebar: LEFT_SIDEBAR,
           ...(hasInspector ? { aside: RIGHT_ASIDE } : {}),
         }}
-        workspaceClassName={styles.workspace}
+        workspaceClassName={[
+          styles.workspace,
+          narrowDetailVisible ? styles.workspaceNarrowDetail : styles.workspaceNarrowDirectory,
+        ].join(" ")}
         columnsClassName=""
         toolbar={toolbar}
         list={(
@@ -117,12 +133,34 @@ export function AgentWorkspaceLayoutPanel({
               <AgentFilterRail {...filterRail} />
             </div>
             <div className={styles.directoryList}>
-              <AgentListWorkspacePanel {...listWorkspace} />
+              <AgentListWorkspacePanel
+                {...listWorkspace}
+                listState={{
+                  ...listWorkspace.listState,
+                  onSelectRow: (rowId, event) => {
+                    listWorkspace.listState.onSelectRow(rowId, event);
+                    setNarrowDetailVisible(true);
+                  },
+                }}
+              />
             </div>
           </div>
         )}
         detail={(
           <div className={styles.main} data-agent-pane="main" data-vui-region="agents-detail">
+            <div className={styles.narrowDetailBar}>
+              <VButton
+                type="button"
+                variant="secondary"
+                icon={<ArrowLeft size={14} />}
+                onPress={() => {
+                  inspectorRail?.onClose?.();
+                  setNarrowDetailVisible(false);
+                }}
+              >
+                {narrowBackLabel}
+              </VButton>
+            </div>
             <AgentDetailWorkspacePanel {...detailWorkspace} />
           </div>
         )}

@@ -9,6 +9,7 @@ Retired shells and not-checked-out refs cannot be started.
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import subprocess
@@ -25,10 +26,21 @@ from core.launcher.isolated_workbench_window import (
     open_isolated_workbench_window,
     overlay_instance_window_pid,
 )
-from core.launcher.slot_identity import apply_slot_spawn_environment, slot_fields_for_project
+from core.launcher.slot_identity import (
+    apply_slot_spawn_environment,
+    slot_fields_for_project,
+)
 from core.runtime_manager import instances_registry as registry
-from core.runtime_manager.constants import LAUNCHER_STATE_PATH, PROJECT_ROOT, PYTHON_LAUNCHER_SCRIPT_PATH
-from scripts.windowless_subprocess import detached_no_console_popen_kwargs, no_window_subprocess_kwargs
+from core.runtime_manager.constants import (
+    LAUNCHER_STATE_PATH,
+    PROJECT_ROOT,
+    PYTHON_LAUNCHER_SCRIPT_PATH,
+)
+from scripts.windowless_subprocess import (
+    detached_no_console_popen_kwargs,
+    no_window_subprocess_kwargs,
+)
+from vibelution_storage import resolve_project_runtime_home
 
 SpawnRunner = Callable[..., dict[str, Any]]
 
@@ -195,6 +207,19 @@ def _instance_runtime_projection(
             failure_message = registry_failure
         else:
             failure_message = registry_failure or workbench_failure
+
+    if (
+        not bundle
+        and backend_alive
+        and backend_port > 0
+        and not backend_conflict
+        and not (backend_healthy and backend_listening)
+        and _loopback_http_ready(backend_port)
+    ):
+        # Isolated slot state is often flat and omits nested listening/healthy
+        # flags. Match Electron waitForWorkbenchHttp: GET / with status 1-499.
+        backend_listening = True
+        backend_healthy = True
 
     start_supervisor_lost = not bundle and _registry_entry_stale_in_flight_start(
         entry,
@@ -454,9 +479,30 @@ def _workbench_state_for_item(item: dict[str, Any]) -> dict[str, Any]:
     path = str(item.get("path") or "").strip()
     if not path:
         return {}
-    payload = _read_json_file(Path(path) / ".runtime" / "launcher" / "state.json")
-    workbench = payload.get("workbench") if isinstance(payload.get("workbench"), dict) else {}
-    return dict(workbench)
+    worktree = Path(path)
+    slot_payload = _read_json_file(resolve_project_runtime_home(worktree) / "launcher" / "state.json")
+    worktree_payload = _read_json_file(worktree / ".runtime" / "launcher" / "state.json")
+    payload = slot_payload or worktree_payload
+    nested = payload.get("workbench") if isinstance(payload.get("workbench"), dict) else {}
+    if nested:
+        return dict(nested)
+    if not payload:
+        return {}
+    lifted: dict[str, Any] = {}
+    for key in (
+        "desiredState",
+        "observedState",
+        "phase",
+        "failureMessage",
+        "frontendMode",
+        "frontendReady",
+        "backendHealthy",
+        "backendPortListening",
+        "backendPortConflict",
+    ):
+        if key in payload:
+            lifted[key] = payload[key]
+    return lifted
 
 
 def _clear_isolated_workbench_runtime(item: dict[str, Any]) -> None:
@@ -854,6 +900,35 @@ def _current_control_plane_ports(state: dict[str, Any]) -> tuple[int, int, str]:
 
 def _loopback_url(port: int) -> str:
     return f"http://127.0.0.1:{int(port)}"
+
+
+def _loopback_http_ready(port: int, *, timeout_seconds: float = 0.4) -> bool:
+    """One-shot loopback probe matching Electron ``waitForWorkbenchHttp``.
+
+    GET ``http://127.0.0.1:<port>/`` is ready when the status is in ``1..499``.
+    Isolated list projection uses this when the backend pid is alive but disk
+    nested ``backendPortListening`` / ``backendHealthy`` flags are missing.
+    """
+
+    normalized = _positive_int(port)
+    if normalized <= 0:
+        return False
+    connection: http.client.HTTPConnection | None = None
+    try:
+        connection = http.client.HTTPConnection("127.0.0.1", normalized, timeout=timeout_seconds)
+        connection.request("GET", "/", headers={"Accept": "*/*"})
+        response = connection.getresponse()
+        status = int(response.status or 0)
+        response.read()
+        return 0 < status < 500
+    except (OSError, TimeoutError, ValueError, http.client.HTTPException):
+        return False
+    finally:
+        if connection is not None:
+            try:
+                connection.close()
+            except OSError:
+                pass
 
 
 def _positive_int(value: Any) -> int:

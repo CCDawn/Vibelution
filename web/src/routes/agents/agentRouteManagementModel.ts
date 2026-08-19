@@ -22,10 +22,7 @@ import {
 
 export type AgentConfigPaneId =
   | "overview"
-  | "effective"
-  | "relations"
   | "config"
-  | "changes"
   | "activity";
 
 export type AgentManagementAction = {
@@ -349,12 +346,13 @@ export function buildVisibleAgentColumns(
 
 export function normalizeAgentConfigPane(value: string | null | undefined): AgentConfigPaneId {
   const normalized = String(value || "").trim();
-  return normalized === "effective"
-    || normalized === "relations"
-    || normalized === "config"
-    || normalized === "changes"
-    || normalized === "activity"
-    || normalized === "overview"
+  if (normalized === "changes") {
+    return "activity";
+  }
+  if (normalized === "effective" || normalized === "relations") {
+    return "overview";
+  }
+  return normalized === "config" || normalized === "activity" || normalized === "overview"
     ? normalized
     : "overview";
 }
