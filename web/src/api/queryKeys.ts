@@ -74,8 +74,6 @@ export const queryKeys = {
     ["teams", teamId, "meeting-rounds", meetingRoundId, "source-messages"] as const,
   teamHypothesisRounds: (teamId: string) =>
     ["teams", teamId, "hypothesis-rounds"] as const,
-  researchWorkflowRuns: (workflowId: string, teamId: string) =>
-    ["research-workflow", workflowId, teamId, "runs"] as const,
   researchWorkflowLaunchOptions: (workflowId: string, teamId: string) =>
     ["research-workflow", workflowId, teamId, "launch-options"] as const,
   researchWorkflowBindings: (workflowId: string, teamId: string) =>
