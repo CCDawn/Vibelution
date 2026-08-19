@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 import os
+import socket
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 import pytest
@@ -651,3 +654,190 @@ def test_runtime_lifecycle_projection_lost_supervisor_does_not_override_live_win
     )
     assert state == "partial"
     assert code == ""
+
+
+def test_overlay_promotes_starting_to_partial_when_isolated_backend_http_ready(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "task"
+    path.mkdir()
+    _prepare_bundled_frontend(path)
+    seen_ports: list[int] = []
+
+    def fake_ready(port: int, *, timeout_seconds: float = 0.4) -> bool:
+        seen_ports.append(int(port))
+        return True
+
+    monkeypatch.setattr(lifecycle, "_slot_fields_for_path", lambda _path: {})
+    monkeypatch.setattr(lifecycle, "_loopback_http_ready", fake_ready)
+    monkeypatch.setattr(
+        lifecycle.registry,
+        "list_instances",
+        lambda: [_stale_starting_entry(path, deadlineAt="2999-01-01T00:00:00Z", port=8007)],
+    )
+
+    payload = lifecycle.overlay_instance_ports(
+        {
+            "items": [
+                _item(
+                    path,
+                    alive=True,
+                    port=8007,
+                    pids={"backend": os.getpid(), "window": 0, "manager": 0},
+                )
+            ]
+        },
+        launcher_state={},
+    )
+
+    runtime = payload["items"][0]["runtime"]
+    assert seen_ports == [8007]
+    assert runtime["lifecycleState"] == "partial"
+    assert runtime["backend"]["alive"] is True
+    assert runtime["backend"]["listening"] is True
+    assert runtime["backend"]["healthy"] is True
+    assert runtime["window"]["open"] is False
+    assert "error" not in runtime
+
+
+def test_overlay_keeps_starting_when_alive_backend_http_is_not_ready(tmp_path, monkeypatch):
+    path = tmp_path / "task"
+    path.mkdir()
+    _prepare_bundled_frontend(path)
+    monkeypatch.setattr(lifecycle, "_slot_fields_for_path", lambda _path: {})
+    monkeypatch.setattr(lifecycle, "_loopback_http_ready", lambda _port, **_: False)
+    monkeypatch.setattr(
+        lifecycle.registry,
+        "list_instances",
+        lambda: [_stale_starting_entry(path, deadlineAt="2999-01-01T00:00:00Z", port=8007)],
+    )
+
+    payload = lifecycle.overlay_instance_ports(
+        {
+            "items": [
+                _item(
+                    path,
+                    alive=True,
+                    port=8007,
+                    pids={"backend": os.getpid(), "window": 0, "manager": 0},
+                )
+            ]
+        },
+        launcher_state={},
+    )
+
+    runtime = payload["items"][0]["runtime"]
+    assert runtime["lifecycleState"] == "starting"
+    assert runtime["backend"]["listening"] is False
+    assert "error" not in runtime
+
+
+def test_overlay_does_not_probe_http_when_backend_is_not_alive(tmp_path, monkeypatch):
+    path = tmp_path / "task"
+    path.mkdir()
+    _prepare_bundled_frontend(path)
+
+    def boom(_port: int, **_kwargs: object) -> bool:
+        raise AssertionError("dead isolated backends must not be live-probed")
+
+    monkeypatch.setattr(lifecycle, "_slot_fields_for_path", lambda _path: {})
+    monkeypatch.setattr(lifecycle, "_loopback_http_ready", boom)
+    monkeypatch.setattr(lifecycle, "_pid_alive", lambda _pid: False)
+    monkeypatch.setattr(
+        lifecycle.registry,
+        "list_instances",
+        lambda: [_stale_starting_entry(path)],
+    )
+
+    payload = lifecycle.overlay_instance_ports(
+        {"items": [_item(path)]},
+        launcher_state={},
+    )
+
+    runtime = payload["items"][0]["runtime"]
+    assert runtime["lifecycleState"] == "error"
+    assert runtime["error"]["code"] == "start_supervisor_lost"
+
+
+def test_overlay_skips_http_probe_when_disk_already_marks_backend_ready(tmp_path, monkeypatch):
+    path = tmp_path / "task"
+    path.mkdir()
+    _prepare_bundled_frontend(path)
+    _write_workbench_state(
+        path,
+        desiredState="open",
+        observedState="open",
+        phase="steady",
+        backendHealthy=True,
+        backendPortListening=True,
+    )
+
+    def boom(_port: int, **_kwargs: object) -> bool:
+        raise AssertionError("disk-ready backends must not be live-probed")
+
+    monkeypatch.setattr(lifecycle, "_slot_fields_for_path", lambda _path: {})
+    monkeypatch.setattr(lifecycle, "_loopback_http_ready", boom)
+    monkeypatch.setattr(
+        lifecycle.registry,
+        "list_instances",
+        lambda: [_stale_starting_entry(path, deadlineAt="2999-01-01T00:00:00Z", port=8007)],
+    )
+
+    payload = lifecycle.overlay_instance_ports(
+        {
+            "items": [
+                _item(
+                    path,
+                    alive=True,
+                    port=8007,
+                    pids={"backend": os.getpid(), "window": 0, "manager": 0},
+                )
+            ]
+        },
+        launcher_state={},
+    )
+
+    runtime = payload["items"][0]["runtime"]
+    assert runtime["lifecycleState"] == "partial"
+    assert runtime["backend"]["listening"] is True
+    assert runtime["window"]["open"] is False
+
+
+def _serve_loopback(status: int) -> tuple[HTTPServer, int]:
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            self.send_response(status)
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, _format: str, *_args: object) -> None:
+            return
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, int(server.server_address[1])
+
+
+def test_loopback_http_ready_accepts_non_server_error_status():
+    server, port = _serve_loopback(200)
+    try:
+        assert lifecycle._loopback_http_ready(port) is True
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_loopback_http_ready_rejects_server_error_and_closed_port():
+    server, port = _serve_loopback(503)
+    try:
+        assert lifecycle._loopback_http_ready(port) is False
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    closed = socket.socket()
+    closed.bind(("127.0.0.1", 0))
+    unused_port = int(closed.getsockname()[1])
+    closed.close()
+    assert lifecycle._loopback_http_ready(unused_port) is False

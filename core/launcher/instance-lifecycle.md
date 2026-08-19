@@ -43,7 +43,7 @@ P0 只修 **生命周期内核**：一个监督者、一套 READY、desired/obse
 | 事实 | Canonical | 唯一写入者 |
 | --- | --- | --- |
 | `desiredState` + `generation` + 端口 + `spawnPid` + `deadlineAt` + `commandId` | `%LOCALAPPDATA%\Vibelution\instances.json` | **当前壳** Python CLI（经 Electron IPC） |
-| 后端 READY | 目标树 `.runtime/launcher/state.json` + 活探测 | 该树 Runtime Manager / launcher 子进程 |
+| 后端 READY | 隔离 slot `launcher/state.json` 或目标树 `.runtime/launcher/state.json`，加上列表投影的 loopback HTTP 活探测 | 该树 Runtime Manager / launcher 子进程写 state；列表投影只读探测，不写 READY |
 | 窗口是否 open | Electron `windowProvider` | Electron main（`VIBELUTION_ELECTRON_MAIN_ORCHESTRATES_WINDOWS=1`） |
 | `lifecycleState` | **投影**（desired + 后端 READY + 窗口） | 无独立写入者 |
 
@@ -51,6 +51,7 @@ Python `_instance_lifecycle_state` 与 Electron `composeInstanceLifecycleState` 
 
 `instances.json` 的 desired / phase / generation / status **优先于** 目标树 `state.json`。
 `registry.status == "running"` **不是** READY。窗口真相只来自 Electron overlay。
+隔离行列表投影：后端 PID 仍活、端口已知、磁盘 `backendPortListening`/`backendHealthy` 缺失时，对 `http://127.0.0.1:<port>/` 做一次短超时 GET（与 Electron `waitForWorkbenchHttp` 相同：status 1–499）。成功则视为后端 READY；窗口未开时投影为 `partial`，不得停在 `starting`。
 
 ---
 
@@ -165,6 +166,7 @@ Electron overlay 在写入 `window.open` 后必须用同一函数重算 `lifecyc
 6. 并发 start / 并发端口分配：端口不重复。
 7. 监督死亡（`deadlineAt` 过 + `spawnPid` 死 + 无活信号）的 `starting` → `error` / `start_supervisor_lost`，且重试 start 在锁内回收旧 claim 后放行；监督仍活或期限未到的 in-flight 仍 409。
 8. Electron-owned close 后端验证关闭后立即清 launcher `state.json`（同 fast path），不等窗口 ack；ack 缺失不得留下 `open/steady` + 死 `backendPid` 的残留。
+9. in-flight `starting` + 后端 PID 活 + loopback HTTP READY + 窗口未开 → `partial`，不是 `starting`。
 
 ---
 
