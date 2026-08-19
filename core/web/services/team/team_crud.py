@@ -217,7 +217,7 @@ def get_team(team_id: str) -> dict[str, Any]:
             s._save_index(state)
     if pending_agent_ids:
         s._cascade_archive_member_agents_unlocked(pending_agent_ids, reason="s.get_team")
-    detail = s._team_detail_to_api(team, agent_refs=agent_refs)
+    detail = s._team_detail_to_api(team, agent_refs=agent_refs, already_repaired=True)
     s._record_team_detail_loaded(detail, started_at)
     return detail
 

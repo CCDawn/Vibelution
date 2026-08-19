@@ -18,7 +18,7 @@ def _service():
 def get_experiment_planning_status(team_id: str) -> dict[str, Any]:
     s = _service()
     normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
-    s.team_service.get_team(normalized_team_id)
+    s.team_service.assert_team_exists(normalized_team_id)
     with s._WORKFLOW_LOCK:
         store = s._load_stage_round_store(normalized_team_id)
         rounds = s._stage_rounds(store)
