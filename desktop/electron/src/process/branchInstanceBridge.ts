@@ -1,5 +1,12 @@
 import { resolve } from "node:path";
-import { runPythonJsonBridge, type PythonJsonBridgeSpawn } from "./pythonJsonBridge.js";
+import {
+  invalidPythonJsonBridgePayload,
+  parsePythonJsonBridgePayload,
+  PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS,
+  PYTHON_JSON_BRIDGE_ISOLATED_STOP_TIMEOUT_MS,
+  runPythonJsonBridge,
+  type PythonJsonBridgeSpawn
+} from "./pythonJsonBridge.js";
 
 export type BranchInstanceOperation =
   | "start"
@@ -24,9 +31,9 @@ export type BranchInstanceBridgeResult = {
 };
 
 export function parseBranchInstanceBridgeResult(raw: string): BranchInstanceBridgeResult {
-  const parsed = JSON.parse(raw) as BranchInstanceBridgeResult;
+  const parsed = parsePythonJsonBridgePayload<BranchInstanceBridgeResult>(raw, "branch instance bridge");
   if (!parsed || parsed.schemaVersion !== 1 || typeof parsed.accepted !== "boolean") {
-    throw new Error("invalid branch instance bridge result");
+    throw invalidPythonJsonBridgePayload("branch instance bridge", "returned an invalid result shape");
   }
   return {
     schemaVersion: 1,
@@ -52,6 +59,7 @@ export async function runBranchInstanceBridge(input: {
   generation?: number;
   message?: string;
   spawnImpl?: PythonJsonBridgeSpawn;
+  signal?: AbortSignal;
 }): Promise<BranchInstanceBridgeResult> {
   const args = [
     resolve(input.workspaceRoot, "scripts", "vibelution_desktop_entry.py"),
@@ -80,7 +88,14 @@ export async function runBranchInstanceBridge(input: {
     args,
     cwd: input.workspaceRoot,
     spawnImpl: input.spawnImpl,
-    failureLabel: "branch instance bridge"
+    failureLabel: "branch instance bridge",
+    timeoutMs:
+      input.operation === "stop" || input.operation === "force-stop"
+        ? PYTHON_JSON_BRIDGE_ISOLATED_STOP_TIMEOUT_MS
+        : PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS,
+    signal: input.signal,
+    killPolicy: "child",
+    mutation: true
   });
   return parseBranchInstanceBridgeResult(raw);
 }

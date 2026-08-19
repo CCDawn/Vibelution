@@ -87,7 +87,15 @@ import {
   ISOLATED_INSTANCE_READY_WAIT_MS,
   superviseIsolatedInstanceStart
 } from "./process/isolatedInstanceSupervisor.js";
-import { LAUNCHER_API_JSON_BRIDGE_MAX_BYTES, runPythonJsonBridge } from "./process/pythonJsonBridge.js";
+import {
+  invalidPythonJsonBridgePayload,
+  LAUNCHER_API_JSON_BRIDGE_MAX_BYTES,
+  parsePythonJsonBridgePayload,
+  PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS,
+  PYTHON_JSON_BRIDGE_MAINTENANCE_TIMEOUT_MS,
+  PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS,
+  runPythonJsonBridge
+} from "./process/pythonJsonBridge.js";
 import { resolveWorkbenchUrlFromBridge } from "./process/resolveWorkbenchBridge.js";
 import {
   decideLauncherShellRestart,
@@ -494,27 +502,11 @@ async function bootstrapMainOwnedLauncher(paths: DesktopPaths): Promise<Launcher
   let workbenchUrl = "";
   if (pythonPath) {
     try {
-      const raw = await runPythonJsonBridge({
+      workbenchUrl = await resolveWorkbenchUrlFromBridge({
+        workspaceRoot: paths.workspaceRoot,
         pythonPath,
-        args: [
-          resolve(paths.workspaceRoot, "scripts", "vibelution_desktop_entry.py"),
-          "--action",
-          "resolve-workbench",
-          "--output",
-          "json",
-          "--workspace",
-          paths.workspaceRoot,
-          "--config",
-          String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
-          "--no-browser"
-        ],
-        cwd: paths.workspaceRoot,
-        failureLabel: "resolve workbench bridge"
+        operatorConfigPath: String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim()
       });
-      const parsed = JSON.parse(raw) as { schemaVersion?: number; workbenchUrl?: string };
-      if (parsed.schemaVersion === 1 && typeof parsed.workbenchUrl === "string" && parsed.workbenchUrl.trim()) {
-        workbenchUrl = parsed.workbenchUrl.trim();
-      }
     } catch (error: unknown) {
       console.warn(error instanceof Error ? error.message : String(error));
     }
@@ -2496,9 +2488,23 @@ async function orchestrateLauncherApi(
     args,
     cwd: paths.workspaceRoot,
     failureLabel: "launcher api bridge",
-    maxBytes: LAUNCHER_API_JSON_BRIDGE_MAX_BYTES
+    maxBytes: LAUNCHER_API_JSON_BRIDGE_MAX_BYTES,
+    timeoutMs:
+      path === "maintenance/reset/apply"
+        ? PYTHON_JSON_BRIDGE_MAINTENANCE_TIMEOUT_MS
+        : method === "GET"
+          ? PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS
+          : PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS,
+    killPolicy: "child",
+    mutation: method !== "GET"
   });
-  const parsed = JSON.parse(raw) as { ok?: boolean; payload?: unknown; message?: string };
+  const parsed = parsePythonJsonBridgePayload<{ ok?: boolean; payload?: unknown; message?: string }>(
+    raw,
+    "launcher api bridge"
+  );
+  if (!parsed || typeof parsed.ok !== "boolean") {
+    throw invalidPythonJsonBridgePayload("launcher api bridge", "returned an invalid result shape");
+  }
   if (parsed.ok !== true) {
     throw new Error(parsed.message || "launcher api bridge failed");
   }

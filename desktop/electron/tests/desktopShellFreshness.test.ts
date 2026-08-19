@@ -188,7 +188,9 @@ describe("desktop shell freshness", () => {
   });
 
   it("rejects a status payload without schemaVersion", () => {
-    expect(() => parseDesktopShellStatus(JSON.stringify({ stale: true }))).toThrow("invalid desktop shell status");
+    expect(() => parseDesktopShellStatus(JSON.stringify({ stale: true }))).toThrow(
+      "desktop shell status returned an invalid result shape"
+    );
   });
 
   it("formats tray launcher version from desktop shell status, not workbench HTTP", () => {

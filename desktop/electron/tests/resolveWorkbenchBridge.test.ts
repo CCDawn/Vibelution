@@ -76,6 +76,6 @@ describe("resolveWorkbenchUrlFromBridge", () => {
         operatorConfigPath: "C:/Users/op/config.toml",
         spawnImpl,
       })
-    ).rejects.toThrow("resolve-workbench did not return a workbenchUrl");
+    ).rejects.toThrow("resolve workbench bridge did not return a workbenchUrl");
   });
 });

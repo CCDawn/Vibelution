@@ -1,6 +1,13 @@
 import { resolve } from "node:path";
 
-import { runPythonJsonBridge, type PythonJsonBridgeSpawn } from "./pythonJsonBridge.js";
+import {
+  invalidPythonJsonBridgePayload,
+  parsePythonJsonBridgePayload,
+  PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS,
+  PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS,
+  runPythonJsonBridge,
+  type PythonJsonBridgeSpawn
+} from "./pythonJsonBridge.js";
 
 const REFRESH_BEFORE_LIFECYCLE = new Set(["start", "restart", "rebuild-and-start"]);
 const FIRST_INSTANCE_LIFECYCLE = new Set(["start", "stop", "force-stop", "restart", "rebuild-and-start", "open"]);
@@ -137,9 +144,9 @@ export function shouldRefreshBeforeLifecycle(
 }
 
 export function parseDesktopShellStatus(raw: string): DesktopShellStatus {
-  const parsed = JSON.parse(raw) as DesktopShellStatus;
+  const parsed = parsePythonJsonBridgePayload<DesktopShellStatus>(raw, "desktop shell status");
   if (!parsed || parsed.schemaVersion !== 1 || typeof parsed.stale !== "boolean") {
-    throw new Error("invalid desktop shell status");
+    throw invalidPythonJsonBridgePayload("desktop shell status", "returned an invalid result shape");
   }
   return {
     schemaVersion: 1,
@@ -157,9 +164,9 @@ export function parseDesktopShellStatus(raw: string): DesktopShellStatus {
 }
 
 export function parseDesktopShellRefreshSchedule(raw: string): DesktopShellRefreshSchedule {
-  const parsed = JSON.parse(raw) as DesktopShellRefreshSchedule;
+  const parsed = parsePythonJsonBridgePayload<DesktopShellRefreshSchedule>(raw, "desktop shell refresh schedule");
   if (!parsed || parsed.schemaVersion !== 1 || typeof parsed.scheduled !== "boolean") {
-    throw new Error("invalid desktop shell refresh schedule");
+    throw invalidPythonJsonBridgePayload("desktop shell refresh schedule", "returned an invalid result shape");
   }
   return {
     schemaVersion: 1,
@@ -175,13 +182,17 @@ export async function inspectDesktopShell(input: {
   workspaceRoot: string;
   pythonPath: string;
   spawnImpl?: PythonJsonBridgeSpawn;
+  signal?: AbortSignal;
 }): Promise<DesktopShellStatus> {
   const raw = await runPythonJsonBridge({
     pythonPath: input.pythonPath,
     args: desktopShellBridgeArgs(input.workspaceRoot, input.pythonPath, "desktop-shell-status"),
     cwd: input.workspaceRoot,
     spawnImpl: input.spawnImpl,
-    failureLabel: "desktop shell status"
+    failureLabel: "desktop shell status",
+    timeoutMs: PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS,
+    signal: input.signal,
+    killPolicy: "child"
   });
   return parseDesktopShellStatus(raw);
 }
@@ -193,6 +204,7 @@ export async function scheduleDesktopShellRefresh(input: {
   thenLifecycle?: string;
   force?: boolean;
   spawnImpl?: PythonJsonBridgeSpawn;
+  signal?: AbortSignal;
 }): Promise<DesktopShellRefreshSchedule> {
   const extra = ["--wait-pid", String(Math.max(0, Math.round(input.waitPid)))];
   const lifecycle = String(input.thenLifecycle || "").trim().toLowerCase();
@@ -207,7 +219,11 @@ export async function scheduleDesktopShellRefresh(input: {
     args: desktopShellBridgeArgs(input.workspaceRoot, input.pythonPath, "schedule-desktop-shell-refresh", extra),
     cwd: input.workspaceRoot,
     spawnImpl: input.spawnImpl,
-    failureLabel: "desktop shell refresh schedule"
+    failureLabel: "desktop shell refresh schedule",
+    timeoutMs: PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS,
+    signal: input.signal,
+    killPolicy: "child",
+    mutation: true
   });
   return parseDesktopShellRefreshSchedule(raw);
 }
