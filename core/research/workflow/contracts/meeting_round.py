@@ -26,6 +26,7 @@ from .research_scope import REQUIRED_SCOPE_FIELDS, scope_hash_for
 
 MEETING_TYPES = {
     "hypothesis_review",
+    "hypothesis_candidate_generation",
     "plan_review",
     "result_review",
     "iteration_review",
@@ -46,6 +47,7 @@ MEETING_ROUND_TYPES = {
     "evidence_closure",
     "decision_gate",
     "risk_escalation",
+    "generation",
 }
 DEFAULT_MEETING_ROUNDS = 3
 MEETING_STATUS_TRANSITIONS = {

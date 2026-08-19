@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   fetchHypothesisSelectionContext,
+  openHypothesisCandidateGeneration,
   recordHypothesisSelection,
 } from "../../../api/hypothesisFirst";
 import { queryKeys } from "../../../api/queryKeys";
@@ -96,6 +97,19 @@ export function HypothesisSelectionPanel({ teamId, questionId, lang = "zh" }: Hy
     },
   });
 
+  const generationMutation = useMutation({
+    mutationFn: () => openHypothesisCandidateGeneration(teamId, questionId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.hypothesisFirstSelectionContext(teamId, questionId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.hypothesisFirstChainState(teamId, questionId),
+      });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.teamMeetingRounds(teamId) });
+    },
+  });
+
   if (contextQuery.isPending) {
     return <VStateSurface title={isZh ? "正在读取假说选择上下文" : "Loading hypothesis selection context"} tone="loading" />;
   }
@@ -111,6 +125,10 @@ export function HypothesisSelectionPanel({ teamId, questionId, lang = "zh" }: Hy
   const latestSelection = context.latestSelection;
   const reviewMeeting = context.reviewMeeting ?? null;
   const reviewMeetingId = reviewMeeting?.meetingRoundId ?? "";
+  const generationMeeting = context.generationMeeting ?? null;
+  const generationOpen = Boolean(
+    generationMeeting && generationMeeting.status !== "closed",
+  );
   const dirty = !sameIdSet(selectedIds, serverBaseline);
   const withinBounds =
     selectedIds.length >= HYPOTHESIS_SELECTION_MIN &&
@@ -181,6 +199,55 @@ export function HypothesisSelectionPanel({ teamId, questionId, lang = "zh" }: Hy
       )}
 
       <div className={css.candidateList}>
+        {candidates.length === 0 ? (
+          <VEmptyState
+            title={
+              generationOpen
+                ? (isZh ? "候选假说生成讨论进行中" : "Candidate generation discussion in progress")
+                : (isZh ? "尚无候选假说" : "No candidate hypotheses yet")
+            }
+          >
+            <div className={css.generationState}>
+              {generationMeeting ? (
+                <VStatusChip tone={meetingStatusTone(generationMeeting.status)}>
+                  {(isZh ? MEETING_STATUS_LABELS : MEETING_STATUS_LABELS_EN)[generationMeeting.status]
+                    ?? generationMeeting.status}
+                </VStatusChip>
+              ) : null}
+              <p>
+                {generationOpen
+                  ? (isZh
+                    ? "团队正在讨论并生成候选假说，闭环后此处会出现可选择列表。"
+                    : "The team is discussing candidate hypotheses; the selectable list appears after closure.")
+                  : (isZh
+                    ? "该题目还没有候选假说。先让团队开启一轮候选生成讨论，闭环产出候选后再人工选择。"
+                    : "No candidates yet. Start a candidate-generation discussion first, then select after closure.")}
+              </p>
+              {!generationOpen ? (
+                <VButton
+                  density="compact"
+                  isPending={generationMutation.isPending}
+                  onPress={() => generationMutation.mutate()}
+                  variant="primary"
+                >
+                  {generationMeeting
+                    ? (isZh ? "重新生成候选假说" : "Regenerate candidates")
+                    : (isZh ? "生成候选假说" : "Generate candidates")}
+                </VButton>
+              ) : null}
+              {generationMutation.isError ? (
+                <VErrorSummary
+                  label={isZh ? "候选生成失败" : "Candidate generation failed"}
+                  summary={
+                    generationMutation.error instanceof Error
+                      ? generationMutation.error.message
+                      : "open_candidate_generation_failed"
+                  }
+                />
+              ) : null}
+            </div>
+          </VEmptyState>
+        ) : null}
         {candidates.map((candidate) => {
           const checked = selectedIds.includes(candidate.hypothesis_id);
           const checkDisabled =

@@ -961,3 +961,139 @@ def test_close_reports_failed_hypothesis_round_without_rollback(
             assert "hypothesis_round_unconverged" in _blocker_codes(design)
     finally:
         runtime.close()
+
+
+def _candidate_generation_runner(participant, prompt, context):
+    """Round-0 discussion fixture: the coordinator proposes CANDIDATE markers."""
+    role = str(participant.get("teamRole") or "participant")
+    if role == "coordinator":
+        content = (
+            "CANDIDATE: cand-a | 睡眠剥夺通过腺苷积累损害记忆巩固 | 腺苷受体机制明确\n"
+            "CANDIDATE: cand-b | 睡眠剥夺通过突触稳态失衡损害记忆巩固 | 突触稳态假说"
+        )
+    else:
+        content = "AGREE: cand-a 的检验路径更直接"
+    return {"status": "completed", "raw_output": content, "summary": "ok"}
+
+
+def test_candidate_generation_cold_start_registers_ledger_candidates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catalog cold start: round-0 generation discussion -> ledger candidates.
+
+    No approved v2 artifact exists, so the selection candidate source is the
+    generation meeting's digest proposals recorded in the chain ledger.
+    """
+    team_id, agents = _hf_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        question_launch,
+        "challenge_question_run_summary",
+        lambda _team_id: {"completedQuestionIds": [], "completedQuestionResults": []},
+    )
+
+    assert chain.needs_candidate_generation(team_id, _QUESTION_ID) is True
+
+    with server_operator_scope("u-1", roles=("operator",)):
+        opened = chain.open_candidate_generation_meeting(
+            team_id, _QUESTION_ID, agent_runner=_candidate_generation_runner
+        )
+        assert opened["status"] == "opened"
+        meeting = opened["meetingRound"]
+        assert meeting["meetingType"] == "hypothesis_candidate_generation"
+        meeting_round_id = meeting["meetingRoundId"]
+
+        # Reopening while open reuses the same discussion (deterministic id).
+        reused = chain.open_candidate_generation_meeting(
+            team_id, _QUESTION_ID, agent_runner=_candidate_generation_runner
+        )
+        assert reused["meetingRound"]["meetingRoundId"] == meeting_round_id
+
+        agent_ids = [agents[role] for role in _ROLES]
+        _drive_to_awaiting_approval(team_id, meeting_round_id, agent_ids[0])
+        closed = chain.close_review_meeting(
+            team_id,
+            meeting_round_id,
+            _closure_payload(agent_ids, []),
+        )
+        assert closed["meetingRound"]["status"] == "closed"
+        assert closed["candidateCount"] == 2
+        statements = {item["statement"] for item in closed["candidates"]}
+        assert "睡眠剥夺通过腺苷积累损害记忆巩固" in statements
+        assert "睡眠剥夺通过突触稳态失衡损害记忆巩固" in statements
+
+        candidates = chain.list_hypothesis_candidates(team_id, question_id=_QUESTION_ID)[
+            "candidates"
+        ]
+        assert len(candidates) == 2
+        assert chain.needs_candidate_generation(team_id, _QUESTION_ID) is False
+
+        # A closed generation meeting is never reopened; replays reuse it.
+        replayed = chain.open_candidate_generation_meeting(
+            team_id, _QUESTION_ID, agent_runner=_candidate_generation_runner
+        )
+        assert replayed["status"] == "reused"
+        assert replayed["meetingRound"]["meetingRoundId"] == meeting_round_id
+
+        state = chain.chain_state(team_id, _QUESTION_ID)
+        assert state["candidateCount"] == 2
+        assert state["generationMeetingId"] == meeting_round_id
+        assert state["generationMeetingStatus"] == "closed"
+        # The generation round is not a review round: it does not count into
+        # the discussion-round budget.
+        assert state["meetingCount"] == 0
+
+
+def _empty_generation_runner(participant, prompt, context):
+    """Discussion happens but nobody proposes a CANDIDATE marker."""
+    return {
+        "status": "completed",
+        "raw_output": "AGREE: 现有证据不足以提出可证伪候选",
+        "summary": "ok",
+    }
+
+
+def test_closed_generation_without_candidates_allows_a_fresh_attempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A closed generation attempt with zero proposals must not deadlock the
+    cold start: the next open rolls to a new per-attempt meeting id."""
+    team_id, agents = _hf_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        question_launch,
+        "challenge_question_run_summary",
+        lambda _team_id: {"completedQuestionIds": [], "completedQuestionResults": []},
+    )
+
+    with server_operator_scope("u-1", roles=("operator",)):
+        opened = chain.open_candidate_generation_meeting(
+            team_id, _QUESTION_ID, agent_runner=_empty_generation_runner
+        )
+        first_id = opened["meetingRound"]["meetingRoundId"]
+        agent_ids = [agents[role] for role in _ROLES]
+        # The discussion yields no CANDIDATE markers; closing it records the
+        # empty outcome as a fact (the digest carries zero proposals).
+        _drive_to_awaiting_approval(team_id, first_id, agent_ids[0])
+        closed = chain.close_review_meeting(
+            team_id,
+            first_id,
+            _closure_payload(agent_ids, []),
+        )
+        assert closed["meetingRound"]["status"] == "closed"
+        assert closed["candidateCount"] == 0
+        assert chain.needs_candidate_generation(team_id, _QUESTION_ID) is False
+
+        regenerated = chain.open_candidate_generation_meeting(
+            team_id, _QUESTION_ID, agent_runner=_candidate_generation_runner
+        )
+        assert regenerated["status"] == "opened"
+        second_id = regenerated["meetingRound"]["meetingRoundId"]
+        assert second_id != first_id
+
+        _drive_to_awaiting_approval(team_id, second_id, agent_ids[0])
+        closed_second = chain.close_review_meeting(
+            team_id,
+            second_id,
+            _closure_payload(agent_ids, []),
+        )
+        assert closed_second["candidateCount"] == 2
+        assert chain.needs_candidate_generation(team_id, _QUESTION_ID) is False

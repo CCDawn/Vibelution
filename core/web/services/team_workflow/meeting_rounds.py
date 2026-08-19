@@ -51,7 +51,7 @@ DEFAULT_MODE = "formal"
 _LOCK = threading.RLock()
 _SCOPE_FIELDS = ("program", "theme", "campaign", "question", "branch", "workflow")
 
-_MARKER_PREFIXES = ("AGREE", "DISAGREE", "RISK", "ACTION", "KNOWLEDGE")
+_MARKER_PREFIXES = ("AGREE", "DISAGREE", "RISK", "ACTION", "KNOWLEDGE", "CANDIDATE")
 _PASS_TOKENS = {"pass", "pass.", "pass。"}
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -458,6 +458,7 @@ def extract_discussion_markers(messages: Sequence[Mapping[str, Any]]) -> dict[st
         "risks": [],
         "actionItems": [],
         "knowledgeCandidates": [],
+        "proposedCandidates": [],
     }
     for message in messages:
         if str(message.get("status") or "").strip().lower() != "completed":
@@ -502,6 +503,23 @@ def extract_discussion_markers(messages: Sequence[Mapping[str, Any]]) -> dict[st
                         "ownerRoleId": owner.strip(),
                         "action": (action if separator else owner).strip(),
                         "dueGate": "",
+                    }
+                )
+            elif marker == "CANDIDATE":
+                # CANDIDATE: <id> | <statement> | <rationale> — one proposed
+                # hypothesis per line from a candidate-generation discussion.
+                parts = [part.strip() for part in value.split("|")]
+                if len(parts) >= 2:
+                    candidate_id, statement = parts[0], parts[1]
+                    rationale = parts[2] if len(parts) >= 3 else ""
+                else:
+                    candidate_id, statement, rationale = "", parts[0], ""
+                extracted["proposedCandidates"].append(
+                    {
+                        "candidateId": candidate_id,
+                        "statement": statement,
+                        "rationale": rationale,
+                        "proposedBy": speaker,
                     }
                 )
     return extracted

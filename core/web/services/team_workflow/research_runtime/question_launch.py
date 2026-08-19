@@ -580,16 +580,25 @@ def build_safety_budget_policy(safety_limits: Mapping[str, Any]) -> dict[str, An
 
 
 def _hypothesis_first_flag(team_id: str, question_id: str) -> bool:
+    """Challenge Cup catalog questions are hypothesis-first by design.
+
+    The flag must not depend on an already-recorded selection: the selection
+    is recorded *after* the run exists (chicken-and-egg), and the readiness
+    gates (source_finding / hypothesis_design) only engage when the frozen
+    input snapshot carries ``hypothesisFirst: true``.  Every catalog launch —
+    seed or approved-artifact — therefore freezes the marker so a fresh
+    question starts at hypothesis selection, not at source finding.
+    """
     try:
         from core.web.services.team_workflow import hypothesis_selection
 
-        return bool(
-            hypothesis_selection.get_latest_hypothesis_selection(team_id, question_id).get(
-                "selection"
-            )
-        )
+        if hypothesis_selection.get_latest_hypothesis_selection(team_id, question_id).get(
+            "selection"
+        ):
+            return True
     except Exception:
-        return False
+        pass
+    return _catalog_question(question_id) is not None
 
 
 def _build_catalog_seed_run_input(

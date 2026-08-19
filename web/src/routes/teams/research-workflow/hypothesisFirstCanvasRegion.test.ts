@@ -10,6 +10,7 @@ import type {
 import {
   buildHypothesisFirstCanvasRegion,
   HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID,
+  HYPOTHESIS_FIRST_GENERATION_NODE_ID,
   HYPOTHESIS_FIRST_SELECTION_NODE_ID,
   HYPOTHESIS_FIRST_STAGE_ID,
   isHypothesisFirstCanvasNode,
@@ -149,9 +150,81 @@ function regionOf(input: Partial<HypothesisFirstCanvasRegionInput>) {
 }
 
 describe("hypothesisFirstCanvasRegion", () => {
-  it("returns null for an empty chain (no selection, no meetings, no requests)", () => {
-    expect(regionOf({})).toBeNull();
+  it("returns null only when the chain has no question identity", () => {
     expect(regionOf({ chainState: null })).toBeNull();
+  });
+
+  it("empty chain still renders the region: selection card waits for candidate generation", () => {
+    const region = regionOf({})!;
+    expect(region).not.toBeNull();
+    const selectionNode = region.nodes.find(
+      (node) => node.nodeId === HYPOTHESIS_FIRST_SELECTION_NODE_ID,
+    )!;
+    expect(selectionNode.status).toBe("pending");
+    expect(selectionNode.description).toBe("等待生成候选假说");
+    // No generation meeting yet → no generation card.
+    expect(region.nodes.some((node) => node.nodeId === HYPOTHESIS_FIRST_GENERATION_NODE_ID)).toBe(
+      false,
+    );
+  });
+
+  it("open generation meeting renders the generation card before selection", () => {
+    const generation = {
+      ...meeting(1, "open"),
+      meetingRoundId: "hf-gen-1",
+      meetingType: "hypothesis_candidate_generation",
+    };
+    const region = regionOf({
+      meetings: [generation],
+      chainState: chainState({
+        generationMeetingId: "hf-gen-1",
+        generationMeetingStatus: "open",
+      }),
+    })!;
+    const ids = region.nodes.map((node) => node.nodeId);
+    expect(ids[0]).toBe(HYPOTHESIS_FIRST_GENERATION_NODE_ID);
+    const generationNode = region.nodes[0]!;
+    expect(generationNode.status).toBe("running");
+    expect(generationNode.label).toBe("候选假说生成");
+    const selectionNode = region.nodes.find(
+      (node) => node.nodeId === HYPOTHESIS_FIRST_SELECTION_NODE_ID,
+    )!;
+    expect(selectionNode.status).toBe("pending");
+    expect(selectionNode.description).toBe("候选生成讨论进行中，产出后可选择");
+    expect(
+      region.edges.some(
+        (edge) =>
+          edge.edgeId === "hf_e_gen_sel"
+          && edge.fromNodeId === HYPOTHESIS_FIRST_GENERATION_NODE_ID
+          && edge.toNodeId === HYPOTHESIS_FIRST_SELECTION_NODE_ID,
+      ),
+    ).toBe(true);
+  });
+
+  it("closed generation meeting with candidates makes selection wait for a human", () => {
+    const generation = {
+      ...meeting(1, "closed"),
+      meetingRoundId: "hf-gen-1",
+      meetingType: "hypothesis_candidate_generation",
+      digestRef: "digest/hf-gen-1",
+    };
+    const region = regionOf({
+      meetings: [generation],
+      chainState: chainState({
+        candidateCount: 3,
+        generationMeetingId: "hf-gen-1",
+        generationMeetingStatus: "closed",
+      }),
+    })!;
+    const generationNode = region.nodes.find(
+      (node) => node.nodeId === HYPOTHESIS_FIRST_GENERATION_NODE_ID,
+    )!;
+    expect(generationNode.status).toBe("succeeded");
+    const selectionNode = region.nodes.find(
+      (node) => node.nodeId === HYPOTHESIS_FIRST_SELECTION_NODE_ID,
+    )!;
+    expect(selectionNode.status).toBe("waiting_human");
+    expect(selectionNode.description).toBe("已产出 3 条候选，等待人工选择");
   });
 
   it("selection only: selection card succeeded, gate pending, no meeting edges", () => {
@@ -183,11 +256,21 @@ describe("hypothesisFirstCanvasRegion", () => {
     });
   });
 
-  it("without a selection the selection card waits for a human", () => {
+  it("without candidates the selection card stays pending even if a review meeting exists", () => {
     const region = regionOf({ meetings: [meeting(1, "open")] })!;
     const selectionNode = region.nodes.find((node) => node.nodeId === HYPOTHESIS_FIRST_SELECTION_NODE_ID)!;
-    expect(selectionNode.status).toBe("waiting_human");
+    expect(selectionNode.status).toBe("pending");
     // No selection → no 选定假说 edge.
+    expect(region.edges.some((edge) => edge.edgeId === "hf_e_sel_m1")).toBe(false);
+  });
+
+  it("with candidates but no selection the selection card waits for a human", () => {
+    const region = regionOf({
+      meetings: [meeting(1, "open")],
+      chainState: chainState({ candidateCount: 2 }),
+    })!;
+    const selectionNode = region.nodes.find((node) => node.nodeId === HYPOTHESIS_FIRST_SELECTION_NODE_ID)!;
+    expect(selectionNode.status).toBe("waiting_human");
     expect(region.edges.some((edge) => edge.edgeId === "hf_e_sel_m1")).toBe(false);
   });
 

@@ -44,9 +44,14 @@ DEFAULT_ROUND_BUDGET = 3
 MAX_ROUND_BUDGET = 5
 COLLECTION_REQUEST_KIND = "collection_request"
 REVIEW_ROUND_LINK_KIND = "review_round_link"
+CANDIDATE_KIND = "hypothesis_candidate"
 REQUEST_EVIDENCE_DECISION = "request_new_evidence"
 HYPOTHESIS_REVIEW_MEETING_TYPE = "hypothesis_review"
+CANDIDATE_GENERATION_MEETING_TYPE = "hypothesis_candidate_generation"
 HYPOTHESIS_DESIGN_NODE_ID = "hypothesis_design"
+_HYPOTHESIS_FIRST_WORKFLOW = "hypothesis_first"
+_DEFAULT_BRANCH = "main"
+_OPERATOR_AGENT_ID = "operator"
 _SCOPE_FIELDS = ("program", "theme", "campaign", "question", "branch", "workflow")
 _TERMINAL_RUN_STATUSES = frozenset({"succeeded", "failed", "cancelled", "archived"})
 _ACTIVE_ATTEMPT_STATUSES = frozenset(
@@ -388,6 +393,308 @@ def _selection_id_from_meeting(meeting_round: Mapping[str, Any]) -> str:
         if ref.startswith("hypothesis_selection:"):
             return ref.split(":", 1)[-1].strip()
     return ""
+
+
+# ---------------------------------------------------------------------------
+# round-0 candidate generation (cold start for catalog questions)
+# ---------------------------------------------------------------------------
+
+
+def _question_scope_envelope(team_id: str, question_id: str) -> dict[str, str]:
+    """Derive the server-authoritative scope envelope for one catalog question.
+
+    Mirrors the selection-context route: the frozen program registry supplies
+    theme/campaign when the question is registered; otherwise a dev theme is
+    resolved so DEV teams can still run the hypothesis-first chain.
+    """
+    from core.web.services.team_workflow.research_scope import (
+        frozen_theme_registry,
+        resolve_theme_contract,
+    )
+
+    normalized_question_id = str(question_id or "").strip().upper()
+    theme_record = next(
+        (
+            record
+            for record in frozen_theme_registry().values()
+            if str(record.get("questionId") or "").upper() == normalized_question_id
+        ),
+        None,
+    )
+    if theme_record is not None:
+        contract = resolve_theme_contract(
+            team_id,
+            theme_id=str(theme_record.get("themeId") or ""),
+            campaign_id=str(theme_record.get("campaignId") or ""),
+        )
+    else:
+        contract = resolve_theme_contract(
+            team_id,
+            theme_id=f"dev-{normalized_question_id.lower()}",
+            campaign_id="dev-campaign",
+        )
+    if contract.is_dev_theme():
+        mode = "dev"
+    elif contract.is_activated():
+        mode = "formal"
+    else:
+        mode = "platform"
+    return {
+        "program": contract.programId,
+        "theme": contract.themeId,
+        "campaign": contract.campaignId,
+        "question": normalized_question_id,
+        "branch": _DEFAULT_BRANCH,
+        "workflow": _HYPOTHESIS_FIRST_WORKFLOW,
+        "agentId": _OPERATOR_AGENT_ID,
+        "mode": mode,
+    }
+
+
+def _question_generation_meetings(team_id: str, question_id: str) -> list[dict[str, Any]]:
+    from core.web.services.team_workflow import meeting_rounds
+
+    meetings = meeting_rounds.list_meeting_rounds(team_id)["meetings"]
+    return [
+        meeting
+        for meeting in meetings
+        if str(meeting.get("meetingType") or "") == CANDIDATE_GENERATION_MEETING_TYPE
+        and str(meeting.get("question") or "").upper() == question_id.upper()
+    ]
+
+
+def list_hypothesis_candidates(team_id: str, *, question_id: str = "") -> dict[str, Any]:
+    """List ledger-registered hypothesis candidates (round-0 output)."""
+    from core.web.services import team_service
+
+    normalized_team_id = team_service.assert_team_exists(team_id)
+    normalized_question_id = str(question_id or "").strip().upper()
+    candidates = [
+        record
+        for record in _records(normalized_team_id)
+        if str(record.get("recordKind") or "") == CANDIDATE_KIND
+        and (
+            not normalized_question_id
+            or str(record.get("questionId") or "").upper() == normalized_question_id
+        )
+    ]
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "candidateCount": len(candidates),
+        "candidates": candidates,
+        "storagePath": str(_storage_path(normalized_team_id)),
+    }
+
+
+def _candidate_id_for(question_id: str, meeting_round_id: str, statement: str) -> str:
+    digest = _stable_hash(
+        {
+            "questionId": question_id,
+            "meetingRoundId": meeting_round_id,
+            "statement": statement,
+        }
+    )
+    return f"{question_id.lower()}-c{digest[:8]}"
+
+
+def _append_generation_candidates(
+    team_id: str,
+    meeting_round: Mapping[str, Any],
+    proposals: list[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Register digest proposals as selectable candidates (idempotent)."""
+    meeting_round_id = str(meeting_round.get("meetingRoundId") or "")
+    question_id = str(meeting_round.get("question") or "").strip().upper()
+    appended: list[dict[str, Any]] = []
+    with _LOCK:
+        records = _read_jsonl(_storage_path(team_id))
+        existing_by_id = {
+            str(record.get("candidateId") or ""): record
+            for record in records
+            if str(record.get("recordKind") or "") == CANDIDATE_KIND
+        }
+        for proposal in proposals:
+            statement = str(proposal.get("statement") or "").strip()
+            if not statement:
+                continue
+            candidate_id = _candidate_id_for(question_id, meeting_round_id, statement)
+            existing = existing_by_id.get(candidate_id)
+            if existing is not None:
+                appended.append(existing)
+                continue
+            record = {
+                "schemaVersion": SCHEMA_VERSION,
+                "recordKind": CANDIDATE_KIND,
+                "candidateId": candidate_id,
+                "questionId": question_id,
+                "statement": statement,
+                "rationale": str(proposal.get("rationale") or "").strip(),
+                "proposedBy": str(proposal.get("proposedBy") or "").strip(),
+                "meetingRoundId": meeting_round_id,
+                "createdAt": _utc_now(),
+            }
+            _append_jsonl(_storage_path(team_id), record)
+            existing_by_id[candidate_id] = record
+            appended.append(record)
+    return appended
+
+
+def open_candidate_generation_meeting(
+    team_id: str,
+    question_id: str,
+    *,
+    agent_runner: Any = None,
+    background: bool = True,
+) -> dict[str, Any]:
+    """Open (or reuse) the round-0 candidate-generation discussion.
+
+    Deterministic per scope/question/attempt: replays reuse the open meeting
+    instead of duplicating the discussion, and a closed attempt that already
+    registered candidates is reused as-is.  Only a closed attempt that
+    produced nothing rolls to a fresh per-attempt id so regeneration stays
+    possible.  Participants come from the team's linked chat room, same as
+    review meetings.
+    """
+    from core.web.services import team_service
+    from core.web.services.team_workflow import meeting_runtime
+
+    normalized_team_id = team_service.assert_team_exists(team_id)
+    scope = _question_scope_envelope(normalized_team_id, question_id)
+    normalized_question_id = scope["question"]
+    scope_hash = scope_hash_for(
+        **{field: scope[field] for field in _SCOPE_FIELDS},
+        agent_id=scope["agentId"],
+        mode=scope["mode"],
+    )
+    meetings = _question_generation_meetings(normalized_team_id, normalized_question_id)
+    open_meeting = next(
+        (
+            meeting
+            for meeting in meetings
+            if str(meeting.get("status") or "") == "open"
+        ),
+        None,
+    )
+    if open_meeting is None and meetings:
+        # All attempts are closed.  When candidates were registered the latest
+        # closed meeting is the answer and replays reuse it; a closed attempt
+        # that produced nothing must not block a fresh attempt, so the new
+        # meeting gets a deterministic per-attempt id instead of reopening the
+        # closed record.
+        has_candidates = bool(
+            list_hypothesis_candidates(
+                normalized_team_id, question_id=normalized_question_id
+            )["candidates"]
+        )
+        if has_candidates:
+            existing = meetings[-1]
+            return {
+                "schemaVersion": SCHEMA_VERSION,
+                "teamId": normalized_team_id,
+                "status": "reused",
+                "meetingRound": existing,
+                "roomId": str(existing.get("linkedChatRoomId") or ""),
+                "chatRoomRoundIds": _normalized_str_list(existing.get("chatRoomRoundIds")),
+            }
+    base_id = f"hf-candgen-{scope_hash[:16]}"
+    if open_meeting is not None:
+        meeting_round_id = str(open_meeting.get("meetingRoundId") or "")
+    else:
+        attempt = len(meetings) + 1
+        meeting_round_id = base_id if attempt == 1 else f"{base_id}-a{attempt}"
+    _team, room_id = meeting_runtime._ensure_linked_room(normalized_team_id)
+    participants = _room_participants(room_id)
+    if not participants:
+        raise ContractValidationError(
+            "opening a candidate generation meeting requires at least one participant"
+        )
+    role_by_agent = _team_role_by_agent(normalized_team_id)
+    payload = {
+        **scope,
+        "questionId": normalized_question_id,
+        "meetingRoundId": meeting_round_id,
+        "participants": participants,
+        "participantRoleIds": [
+            role_by_agent.get(agent_id) or "member" for agent_id in participants
+        ],
+    }
+    opened = meeting_runtime.open_candidate_generation_meeting(
+        normalized_team_id,
+        payload,
+        agent_runner=agent_runner,
+        background=background,
+    )
+    return {
+        **opened,
+        "questionId": normalized_question_id,
+    }
+
+
+def needs_candidate_generation(team_id: str, question_id: str) -> bool:
+    """True when the question has no selectable candidates and no generation meeting."""
+    from core.web.services.team_workflow import hypothesis_selection
+
+    # _approved_candidate_ids already unions the approved artifact and the
+    # chain-ledger candidates, so a non-empty set means selection can start.
+    if hypothesis_selection._approved_candidate_ids(team_id, question_id):
+        return False
+    return not _question_generation_meetings(team_id, question_id)
+
+
+def _close_generation_meeting(
+    team_id: str,
+    meeting_round: Mapping[str, Any],
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Approve a candidate-generation closure and register its proposals."""
+    from core.web.services.team_workflow import meeting_rounds
+
+    normalized_team_id = team_id
+    normalized_round_id = str(meeting_round.get("meetingRoundId") or "")
+    request = dict(payload)
+    digest_draft = (
+        dict(meeting_round.get("digestDraft"))
+        if isinstance(meeting_round.get("digestDraft"), Mapping)
+        else {}
+    )
+    proposals = [
+        item
+        for item in list(digest_draft.get("proposedCandidates") or [])
+        if isinstance(item, Mapping)
+    ]
+    if not [item for item in list(request.get("decisions") or []) if isinstance(item, Mapping)]:
+        # The §15.4 closure gate requires at least one decision; for a
+        # generation round the decision IS the proposed candidate list, so
+        # synthesize it from the digest when the approver did not pass one.
+        candidate_refs = [
+            str(item.get("candidateId") or "").strip()
+            for item in proposals
+            if str(item.get("candidateId") or "").strip()
+        ]
+        source_refs = _normalized_str_list(digest_draft.get("sourceMessageRefs"))
+        request["decisions"] = [
+            {
+                "decision": "propose_candidates",
+                "rationale": f"第 0 轮候选生成讨论产出 {len(proposals)} 条候选假说",
+                "decidedBy": str(request.get("closedBy") or "").strip() or _OPERATOR_AGENT_ID,
+                "candidateRefs": candidate_refs,
+                "evidenceRefs": source_refs[:1] or [f"meeting_round:{normalized_round_id}"],
+                "status": "adopted",
+            }
+        ]
+    result = meeting_rounds.approve_meeting_closure(
+        normalized_team_id, normalized_round_id, request
+    )
+    closed_record = result["meetingRound"]
+    candidates = _append_generation_candidates(
+        normalized_team_id, closed_record, proposals
+    )
+    return {
+        **result,
+        "candidates": candidates,
+        "candidateCount": len(candidates),
+    }
 
 
 def _normalize_budget(budget: Any) -> int:
@@ -843,11 +1150,14 @@ def close_review_meeting(
     meeting_round = meeting_rounds.get_meeting_round(normalized_team_id, normalized_round_id)[
         "meetingRound"
     ]
-    if str(meeting_round.get("meetingType") or "") != HYPOTHESIS_REVIEW_MEETING_TYPE:
+    request = dict(payload) if isinstance(payload, Mapping) else {}
+    meeting_type = str(meeting_round.get("meetingType") or "")
+    if meeting_type == CANDIDATE_GENERATION_MEETING_TYPE:
+        return _close_generation_meeting(normalized_team_id, meeting_round, request)
+    if meeting_type != HYPOTHESIS_REVIEW_MEETING_TYPE:
         raise HypothesisFirstChainError(
             "close_review_meeting only handles hypothesis_review rounds."
         )
-    request = dict(payload) if isinstance(payload, Mapping) else {}
     result = meeting_rounds.approve_meeting_closure(
         normalized_team_id, normalized_round_id, request
     )
@@ -1243,6 +1553,16 @@ def chain_state(team_id: str, question_id: str) -> dict[str, Any]:
 
     baselines = _question_template_baselines(normalized_team_id, normalized_question_id)
     budget = DEFAULT_ROUND_BUDGET
+    candidates = [
+        record
+        for record in records
+        if str(record.get("recordKind") or "") == CANDIDATE_KIND
+        and str(record.get("questionId") or "").upper() == normalized_question_id
+    ]
+    generation_meetings = _question_generation_meetings(
+        normalized_team_id, normalized_question_id
+    )
+    generation_meeting = generation_meetings[-1] if generation_meetings else {}
     return {
         "schemaVersion": SCHEMA_VERSION,
         "teamId": normalized_team_id,
@@ -1266,4 +1586,7 @@ def chain_state(team_id: str, question_id: str) -> dict[str, Any]:
         "templateBaselineIds": [
             str(item.get("baselineId") or "") for item in baselines
         ],
+        "candidateCount": len(candidates),
+        "generationMeetingId": str(generation_meeting.get("meetingRoundId") or ""),
+        "generationMeetingStatus": str(generation_meeting.get("status") or ""),
     }

@@ -17,6 +17,8 @@ const styles: Record<string, string> = {
   summary:
     "grid gap-1.5 rounded-[var(--vui-radius-control)] bg-[var(--vui-surface-inset)] p-2.5 [&>span]:[font-size:var(--vui-font-2xs)] [&>span]:font-[650] [&>span]:tracking-[0.02em] [&>span]:text-[var(--fg-secondary)] [&_p]:[font-size:var(--vui-font-2xs)]",
   actions: "flex flex-wrap items-center gap-2",
+  generationState:
+    "grid justify-items-start gap-2 [&_p]:[font-size:var(--vui-font-2xs)] [&_p]:text-[var(--fg-secondary)]",
   hint: "m-0 [font-size:var(--vui-font-2xs)] text-[var(--fg-secondary)]",
   errorText: "m-0 [font-size:var(--vui-font-2xs)] text-[var(--state-danger,var(--state-warning))]",
 };

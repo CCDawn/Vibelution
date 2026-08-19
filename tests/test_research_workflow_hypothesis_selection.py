@@ -14,7 +14,10 @@ from core.research.workflow.contracts import (
 )
 from core.web.services import team_service
 from core.web.services.team_workflow import hypothesis_selection as selections
-from core.web.services.team_workflow.research_runtime import question_launch
+from core.web.services.team_workflow.research_runtime import (
+    hypothesis_first_chain,
+    question_launch,
+)
 
 _APPROVED_GATE_KEYS = (
     "H1_problem_understanding",
@@ -243,7 +246,42 @@ def test_record_selection_rejects_unapproved_question(tmp_path, monkeypatch):
         selections.ResearchHypothesisSelectionError,
         match="not an approved formal v2 question artifact",
     ):
-        selections.record_hypothesis_selection(team_id, _selection(questionId="SCI-097"))
+        selections.record_hypothesis_selection(team_id, _selection(questionId="NOPE-001"))
+
+
+def test_record_selection_catalog_cold_start_uses_ledger_candidates(tmp_path, monkeypatch):
+    """Catalog question without an approved artifact selects from ledger candidates."""
+    team_id = _team(tmp_path, monkeypatch)
+    _patch_approved_question(monkeypatch)
+    monkeypatch.setattr(
+        question_launch,
+        "_catalog_question",
+        lambda question_id: {"id": question_id} if question_id == "SCI-097" else None,
+    )
+    monkeypatch.setattr(
+        hypothesis_first_chain,
+        "list_hypothesis_candidates",
+        lambda team_id, question_id="": {
+            "schemaVersion": 1,
+            "teamId": team_id,
+            "candidates": [
+                {"candidateId": "cand-1", "statement": "s", "rationale": "r"},
+            ],
+        },
+    )
+
+    created = selections.record_hypothesis_selection(
+        team_id,
+        _selection(questionId="SCI-097", selectedCandidateIds=["cand-1"]),
+    )
+    assert created["status"] == "created"
+    assert created["selection"]["selectedCandidateIds"] == ["cand-1"]
+
+    with pytest.raises(ContractValidationError, match="must exist in the approved"):
+        selections.record_hypothesis_selection(
+            team_id,
+            _selection(questionId="SCI-097", selectedCandidateIds=["hyp-a"]),
+        )
 
 
 def test_reselection_requires_resolvable_previous_selection(tmp_path, monkeypatch):

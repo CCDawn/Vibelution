@@ -609,6 +609,15 @@ def test_selection_context_falls_back_to_dev_scope(monkeypatch) -> None:
     monkeypatch.setattr(
         hypothesis_selection, "get_latest_hypothesis_selection", fake_latest
     )
+    monkeypatch.setattr(
+        hypothesis_first_chain,
+        "list_hypothesis_candidates",
+        lambda team_id, question_id="": {
+            "schemaVersion": 1,
+            "teamId": team_id,
+            "candidates": [],
+        },
+    )
 
     client = _client()
     response = client.get(
@@ -624,16 +633,136 @@ def test_selection_context_falls_back_to_dev_scope(monkeypatch) -> None:
     assert data["reviewMeeting"] is None
 
 
-def test_selection_context_maps_unknown_question_to_404(monkeypatch) -> None:
+def test_selection_context_cold_start_uses_ledger_candidates(monkeypatch) -> None:
+    """Catalog question without an approved artifact: no 404, ledger candidates."""
+
     def fake_detail(team_id, question_id):
         raise ValueError("challenge_question_run_not_found")
 
     monkeypatch.setattr(hf_routes, "get_challenge_question_run_detail", fake_detail)
+    monkeypatch.setattr(hf_routes, "frozen_theme_registry", lambda: {})
+
+    class _DevContract:
+        programId = "dev-program"
+        themeId = "dev-sci-002"
+        campaignId = "dev-campaign"
+
+        def is_dev_theme(self):
+            return True
+
+        def is_activated(self):
+            return False
+
+    monkeypatch.setattr(
+        hf_routes,
+        "resolve_theme_contract",
+        lambda team_id, *, theme_id, campaign_id="": _DevContract(),
+    )
+    monkeypatch.setattr(
+        hypothesis_first_chain,
+        "list_hypothesis_candidates",
+        lambda team_id, question_id="": {
+            "schemaVersion": 1,
+            "teamId": team_id,
+            "candidates": [
+                {
+                    "candidateId": "cand-1",
+                    "statement": "睡眠剥夺通过腺苷积累损害记忆巩固",
+                    "rationale": "腺苷假说",
+                },
+            ],
+        },
+    )
+
+    def fake_latest(team_id, question_id):
+        raise hypothesis_selection.ResearchHypothesisSelectionNotFoundError("none")
+
+    monkeypatch.setattr(
+        hypothesis_selection, "get_latest_hypothesis_selection", fake_latest
+    )
+    monkeypatch.setattr(
+        meeting_rounds,
+        "list_meeting_rounds",
+        lambda team_id: {
+            "schemaVersion": 1,
+            "teamId": team_id,
+            "meetingCount": 1,
+            "meetings": [
+                {
+                    "meetingRoundId": "mr-gen-1",
+                    "meetingType": "hypothesis_candidate_generation",
+                    "question": "SCI-002",
+                    "status": "closed",
+                },
+            ],
+            "storagePath": "x",
+        },
+    )
+
+    client = _client()
+    response = client.get(
+        "/api/teams/team-1/workflow-orchestration/hypothesis-first/questions/SCI-002/selection-context"
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert [item["hypothesis_id"] for item in data["candidates"]] == ["cand-1"]
+    assert data["candidates"][0]["statement"] == "睡眠剥夺通过腺苷积累损害记忆巩固"
+    assert data["generationMeeting"]["meetingRoundId"] == "mr-gen-1"
+    assert data["reviewMeeting"] is None
+
+
+def test_selection_context_unknown_question_falls_back_to_dev_mode(monkeypatch) -> None:
+    """Unknown/catalog-cold-start questions no longer 404: dev-mode context."""
+
+    def fake_detail(team_id, question_id):
+        raise ValueError("challenge_question_run_not_found")
+
+    monkeypatch.setattr(hf_routes, "get_challenge_question_run_detail", fake_detail)
+    monkeypatch.setattr(hf_routes, "frozen_theme_registry", lambda: {})
+
+    class _DevContract:
+        programId = "dev-program"
+        themeId = "dev-sci-404"
+        campaignId = "dev-campaign"
+
+        def is_dev_theme(self):
+            return True
+
+        def is_activated(self):
+            return False
+
+    monkeypatch.setattr(
+        hf_routes,
+        "resolve_theme_contract",
+        lambda team_id, *, theme_id, campaign_id="": _DevContract(),
+    )
+    monkeypatch.setattr(
+        hypothesis_first_chain,
+        "list_hypothesis_candidates",
+        lambda team_id, question_id="": {
+            "schemaVersion": 1,
+            "teamId": team_id,
+            "candidates": [],
+        },
+    )
+
+    def fake_latest(team_id, question_id):
+        raise hypothesis_selection.ResearchHypothesisSelectionNotFoundError("none")
+
+    monkeypatch.setattr(
+        hypothesis_selection, "get_latest_hypothesis_selection", fake_latest
+    )
+
     client = _client()
     response = client.get(
         "/api/teams/team-1/workflow-orchestration/hypothesis-first/questions/SCI-404/selection-context"
     )
-    assert response.status_code == 404
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["mode"] == "dev"
+    assert data["candidates"] == []
+    assert data["generationMeeting"] is None
 
 
 def test_meeting_round_read_routes(monkeypatch) -> None:

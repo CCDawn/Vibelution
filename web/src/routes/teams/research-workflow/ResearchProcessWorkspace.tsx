@@ -114,6 +114,7 @@ export function ResearchProcessWorkspace({
       (question) => question.questionId.toUpperCase() === chainQuestionId.toUpperCase(),
     )?.title ?? chainQuestionId,
     selectedCandidateIds: hypothesisFirstChain.selection?.selectedCandidateIds,
+    chain: hypothesisFirstChain.chainState,
   });
   const experimentOptions = useMemo(() => {
     const currentRun = runState.run;

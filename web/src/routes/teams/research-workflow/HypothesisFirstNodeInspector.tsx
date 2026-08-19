@@ -15,6 +15,7 @@ import {
 } from "../../../components/vui";
 import {
   HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID,
+  HYPOTHESIS_FIRST_GENERATION_NODE_ID,
   HYPOTHESIS_FIRST_SELECTION_NODE_ID,
 } from "./hypothesisFirstCanvasRegion";
 import { useHypothesisFirstChain } from "./useHypothesisFirstChain";
@@ -76,8 +77,34 @@ export function HypothesisFirstNodeInspector({
     </VButton>
   );
 
+  if (nodeId === HYPOTHESIS_FIRST_GENERATION_NODE_ID) {
+    const generation = chain.meetings.find(
+      (item) => item.meetingType === "hypothesis_candidate_generation",
+    );
+    return (
+      <VSurface tone="panel" className={styles.panel} data-vui="hypothesis-first-node-detail">
+        <header>
+          <div className={styles.stage}>假说先行</div>
+          <h3 className={styles.title}>候选假说生成</h3>
+        </header>
+        <div className={styles.facts}>
+          <VStateRow tone={generation?.status === "closed" ? "success" : "accent"}>
+            状态：{generation ? (MEETING_STATUS_LABEL[generation.status] ?? generation.status) : "未找到生成讨论"}
+          </VStateRow>
+          <VStateRow>已产出候选：{chain.chainState?.candidateCount ?? 0} 条</VStateRow>
+          {generation ? (
+            <VStateRow>开始时间：{formatTime(generation.startedAt)}</VStateRow>
+          ) : null}
+        </div>
+        <p className={styles.description}>团队讨论产出候选假说，闭环后即可在赛题详情中人工选择。</p>
+        <div className={styles.actions}>{openQuestion}</div>
+      </VSurface>
+    );
+  }
+
   if (nodeId === HYPOTHESIS_FIRST_SELECTION_NODE_ID) {
     const selection = chain.selection;
+    const candidateCount = chain.chainState?.candidateCount ?? 0;
     return (
       <VSurface tone="panel" className={styles.panel} data-vui="hypothesis-first-node-detail">
         <header>
@@ -85,8 +112,12 @@ export function HypothesisFirstNodeInspector({
           <h3 className={styles.title}>假说选择</h3>
         </header>
         <div className={styles.facts}>
-          <VStateRow tone={selection ? "success" : "warning"}>
-            {selection ? "已完成人工选择" : "等待人工选择候选假说"}
+          <VStateRow tone={selection ? "success" : candidateCount > 0 ? "warning" : "neutral"}>
+            {selection
+              ? "已完成人工选择"
+              : candidateCount > 0
+                ? `已产出 ${candidateCount} 条候选，等待人工选择`
+                : "等待候选假说生成"}
           </VStateRow>
           {selection ? (
             <>

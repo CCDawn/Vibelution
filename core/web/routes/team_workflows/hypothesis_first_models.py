@@ -176,6 +176,7 @@ class SelectionContextResponse(BaseModel):
     defaultSelectedCandidateIds: list[str] = Field(default_factory=list)
     latestSelection: dict[str, Any] | None = None
     reviewMeeting: dict[str, Any] | None = None
+    generationMeeting: dict[str, Any] | None = None
 
 
 class MeetingRoundResponse(BaseModel):

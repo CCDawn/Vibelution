@@ -103,6 +103,17 @@ export function fetchHypothesisSelectionContext(
   );
 }
 
+export function openHypothesisCandidateGeneration(
+  teamId: string,
+  questionId: string,
+): Promise<MeetingRoundMutationResponse> {
+  return writeJson<MeetingRoundMutationResponse>(
+    `${teamPrefix(teamId)}/hypothesis-first/candidate-generation`,
+    "POST",
+    { questionId },
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Meeting rounds (HF-2)
 // ---------------------------------------------------------------------------

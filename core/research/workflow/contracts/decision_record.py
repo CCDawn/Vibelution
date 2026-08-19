@@ -20,6 +20,7 @@ DECISION_KINDS = {
     "repair_and_repeat",
     "close_round",
     "request_new_evidence",
+    "propose_candidates",
 }
 DECISION_STATUSES = {"pending", "adopted", "rejected"}
 

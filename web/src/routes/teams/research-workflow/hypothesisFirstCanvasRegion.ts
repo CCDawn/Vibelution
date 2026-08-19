@@ -29,6 +29,7 @@ import {
 export const HYPOTHESIS_FIRST_NODE_PREFIX = "hf_";
 export const HYPOTHESIS_FIRST_STAGE_ID = "hypothesis_first";
 export const HYPOTHESIS_FIRST_STAGE_LABEL = "假说先行";
+export const HYPOTHESIS_FIRST_GENERATION_NODE_ID = "hf_generation";
 export const HYPOTHESIS_FIRST_SELECTION_NODE_ID = "hf_selection";
 export const HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID = "hf_convergence_gate";
 export const HYPOTHESIS_FIRST_STAGE1_EDGE_ID = "hf_e_m1_stage1";
@@ -36,6 +37,8 @@ export const HYPOTHESIS_FIRST_STAGE2_EDGE_ID = "hf_e_gate_stage2";
 
 /** Review meetings of the hypothesis-first chain carry this meetingType. */
 const HYPOTHESIS_REVIEW_MEETING_TYPE = "hypothesis_review";
+/** Round-0 candidate-generation discussions carry this meetingType. */
+const CANDIDATE_GENERATION_MEETING_TYPE = "hypothesis_candidate_generation";
 
 export type HypothesisFirstCanvasRegionInput = {
   chainState: HypothesisFirstChainState | null;
@@ -138,9 +141,11 @@ function sortRequests(requests: CollectionRequestRecord[]): CollectionRequestRec
 }
 
 /**
- * Builds the hypothesis-first stage fragment, or null when the question has no
- * chain activity at all (no selection, no scoped meeting, no scoped request) —
- * in that case the canvas keeps the plain definition shape (§3.5).
+ * Builds the hypothesis-first stage fragment.  The region renders whenever the
+ * question has a chain state (i.e. a catalog question is in view): with no
+ * ledger activity yet the selection card still shows as the pending entry
+ * point, so the canvas never falls back to a source-finding-first shape for a
+ * hypothesis-first question (§3.5 cold start).
  */
 export function buildHypothesisFirstCanvasRegion(
   input: HypothesisFirstCanvasRegionInput,
@@ -151,6 +156,13 @@ export function buildHypothesisFirstCanvasRegion(
   }
   const questionId = chainState.questionId;
 
+  const generationMeetings = sortMeetings(
+    input.meetings.filter(
+      (meeting) =>
+        meeting.meetingType === CANDIDATE_GENERATION_MEETING_TYPE
+        && sameQuestion(meeting.question, questionId),
+    ),
+  );
   const meetings = sortMeetings(
     input.meetings.filter(
       (meeting) =>
@@ -166,32 +178,61 @@ export function buildHypothesisFirstCanvasRegion(
     ? input.selection
     : null;
 
-  if (!selection && meetings.length === 0 && requests.length === 0) {
-    return null;
-  }
-
   const nodes: WorkflowCanvasNodeInput[] = [];
   const edges: Array<Omit<WorkflowCanvasEdgeInput, "pathState"> & { pathState?: WorkflowCanvasEdgeInput["pathState"] }> = [];
 
   // --- cards ---------------------------------------------------------------
-  const roundIndexByMeetingId = new Map<string, number>();
-  meetings.forEach((meeting, position) => {
-    roundIndexByMeetingId.set(meeting.meetingRoundId, meeting.roundIndex ?? position + 1);
-  });
-  const meetingNodeId = (meetingRoundId: string): string =>
-    `hf_meeting_${roundIndexByMeetingId.get(meetingRoundId) ?? 0}`;
+  const generationMeeting = generationMeetings[generationMeetings.length - 1];
+  if (generationMeeting) {
+    nodes.push({
+      nodeId: HYPOTHESIS_FIRST_GENERATION_NODE_ID,
+      stageId: HYPOTHESIS_FIRST_STAGE_ID,
+      label: "候选假说生成",
+      actorKind: "agent",
+      visualKind: "agent_task",
+      status: meetingNodeStatus(generationMeeting),
+      description:
+        generationMeeting.status === "closed"
+          ? `已产出 ${chainState.candidateCount ?? 0} 条候选假说`
+          : meetingNodeDescription(generationMeeting),
+    });
+  }
 
+  const candidateCount = chainState.candidateCount ?? 0;
   nodes.push({
     nodeId: HYPOTHESIS_FIRST_SELECTION_NODE_ID,
     stageId: HYPOTHESIS_FIRST_STAGE_ID,
     label: "假说选择",
     actorKind: "human",
     visualKind: "human_gate",
-    status: selection ? "succeeded" : "waiting_human",
+    status: selection ? "succeeded" : candidateCount > 0 ? "waiting_human" : "pending",
     description: selection
       ? `已选 ${selection.selectedCandidateIds.length} 个候选假说`
-      : "等待人工选择候选假说",
+      : candidateCount > 0
+        ? `已产出 ${candidateCount} 条候选，等待人工选择`
+        : generationMeeting
+          ? "候选生成讨论进行中，产出后可选择"
+          : "等待生成候选假说",
   });
+
+  if (generationMeeting) {
+    edges.push({
+      edgeId: "hf_e_gen_sel",
+      fromNodeId: HYPOTHESIS_FIRST_GENERATION_NODE_ID,
+      toNodeId: HYPOTHESIS_FIRST_SELECTION_NODE_ID,
+      label: "产出候选",
+      gateKind: "auto",
+      semanticKind: "main",
+      labelAlwaysVisible: true,
+    });
+  }
+
+  const roundIndexByMeetingId = new Map<string, number>();
+  meetings.forEach((meeting, position) => {
+    roundIndexByMeetingId.set(meeting.meetingRoundId, meeting.roundIndex ?? position + 1);
+  });
+  const meetingNodeId = (meetingRoundId: string): string =>
+    `hf_meeting_${roundIndexByMeetingId.get(meetingRoundId) ?? 0}`;
 
   for (const meeting of meetings) {
     const roundIndex = roundIndexByMeetingId.get(meeting.meetingRoundId)!;

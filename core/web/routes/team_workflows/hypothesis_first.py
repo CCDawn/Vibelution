@@ -188,22 +188,26 @@ def team_workflow_hypothesis_selection_context(
 
     scope 六元组由冻结节目核心（questionId → theme/campaign）与 theme 激活
     台账推导；候选假说来自赛题 artifact。UI 回显该 scope 提交选择，不在
-    客户端自行拼装。
+    客户端自行拼装。目录种子题没有 approved artifact 时不 404：候选回落到
+    第 0 轮候选生成讨论写入链条台账的 proposedCandidates。
     """
     normalized_question_id = question_id.strip().upper()
+    detail: dict[str, Any] | None = None
     try:
         detail = get_challenge_question_run_detail(team_id, normalized_question_id)
     except TeamNotFoundError as exc:
         _map_domain_error("hypothesis_first.selection.context", team_id, exc)
     except ValueError as exc:
-        _raise_team_workflow_route_error(
-            "hypothesis_first.selection.context",
-            team_id,
-            exc,
-            status_code=404,
-            fields={"questionId": normalized_question_id},
-        )
-    output = detail.get("output") if isinstance(detail.get("output"), dict) else {}
+        if not str(exc).startswith("challenge_question_run_not_found"):
+            _raise_team_workflow_route_error(
+                "hypothesis_first.selection.context",
+                team_id,
+                exc,
+                status_code=404,
+                fields={"questionId": normalized_question_id},
+            )
+        detail = None
+    output = detail.get("output") if isinstance(detail, dict) and isinstance(detail.get("output"), dict) else {}
     hypotheses = output.get("hypotheses") if isinstance(output.get("hypotheses"), list) else []
     candidates = [
         item
@@ -212,6 +216,26 @@ def team_workflow_hypothesis_selection_context(
     ]
     selection_section = output.get("selection") if isinstance(output.get("selection"), dict) else {}
     default_selected = str(selection_section.get("selected_hypothesis_id") or "").strip()
+    if not candidates:
+        # Catalog cold start: candidates proposed by the round-0 generation
+        # discussion, projected into the artifact hypothesis shape.
+        ledger_candidates = hypothesis_first_chain.list_hypothesis_candidates(
+            team_id, question_id=normalized_question_id
+        )["candidates"]
+        candidates = [
+            {
+                "hypothesis_id": str(item.get("candidateId") or ""),
+                "statement": str(item.get("statement") or ""),
+                "mechanism": str(item.get("rationale") or ""),
+                "novelty_basis": "",
+                "falsifiability": "",
+                "predictions": [],
+                "supporting_evidence_refs": [],
+                "challenging_evidence_refs": [],
+                "boundary_conditions": [],
+            }
+            for item in ledger_candidates
+        ]
 
     registry = frozen_theme_registry()
     theme_record = next(
@@ -251,6 +275,7 @@ def team_workflow_hypothesis_selection_context(
         latest_selection = None
 
     review_meeting: dict[str, Any] | None = None
+    generation_meeting: dict[str, Any] | None = None
     try:
         meetings = meeting_rounds.list_meeting_rounds(team_id)["meetings"]
     except _DOMAIN_ERRORS:
@@ -258,11 +283,13 @@ def team_workflow_hypothesis_selection_context(
     for meeting in meetings:
         if not isinstance(meeting, dict):
             continue
-        if str(meeting.get("meetingType") or "") != "hypothesis_review":
-            continue
         if str(meeting.get("question") or "").strip().upper() != normalized_question_id:
             continue
-        review_meeting = meeting
+        meeting_type = str(meeting.get("meetingType") or "")
+        if meeting_type == "hypothesis_review":
+            review_meeting = meeting
+        elif meeting_type == "hypothesis_candidate_generation":
+            generation_meeting = meeting
 
     return {
         "schemaVersion": 1,
@@ -282,7 +309,38 @@ def team_workflow_hypothesis_selection_context(
         "defaultSelectedCandidateIds": [default_selected] if default_selected else [],
         "latestSelection": latest_selection,
         "reviewMeeting": review_meeting,
+        "generationMeeting": generation_meeting,
     }
+
+
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/hypothesis-first/candidate-generation",
+    status_code=status.HTTP_201_CREATED,
+    response_model=MeetingRoundMutationResponse,
+    response_model_exclude_unset=True,
+)
+def team_workflow_hypothesis_candidate_generation_open(
+    team_id: str,
+    payload: dict[str, Any] | None = None,
+) -> dict:
+    """Open (or reuse) the round-0 candidate-generation discussion."""
+    request = payload if isinstance(payload, dict) else {}
+    question_id = str(request.get("questionId") or "").strip()
+    if not question_id:
+        _raise_team_workflow_route_error(
+            "hypothesis_first.candidate_generation.open",
+            team_id,
+            ContractValidationError("questionId is required"),
+            status_code=422,
+            fields={"questionId": question_id},
+        )
+    try:
+        return hypothesis_first_chain.open_candidate_generation_meeting(
+            team_id,
+            question_id,
+        )
+    except _DOMAIN_ERRORS as exc:
+        _map_domain_error("hypothesis_first.candidate_generation.open", team_id, exc)
 
 
 # ---------------------------------------------------------------------------

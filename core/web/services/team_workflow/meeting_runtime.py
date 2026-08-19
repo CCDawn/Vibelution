@@ -48,6 +48,24 @@ _DEFAULT_AGENDA_RULES = (
     "分歧必须显式记录，不得省略",
 )
 
+CANDIDATE_GENERATION_MEETING_TYPE = "hypothesis_candidate_generation"
+_GENERATION_AGENDA = (
+    "围绕赛题提出可证伪的候选假说",
+    "逐一评估候选的机制合理性与检验路径",
+    "收敛出供人工选择的候选清单",
+)
+_GENERATION_AGENDA_QUESTIONS = (
+    "这个赛题最可能的机制解释有哪些？",
+    "每个候选假说的可检验预测是什么？",
+    "哪些候选应该进入人工选择清单？",
+)
+_GENERATION_AGENDA_RULES = (
+    "每个候选假说独占一行，格式：CANDIDATE: <候选编号> | <假说陈述> | <提出理由>",
+    "结论必须引用证据或消息来源",
+    "没有新内容时回复 pass",
+    "分歧必须显式记录，不得省略",
+)
+
 _SCOPE_FIELDS = ("program", "theme", "campaign", "question", "branch", "workflow")
 
 
@@ -147,6 +165,16 @@ def _opening_topic(meeting_round_id: str, selection: Mapping[str, Any], agenda: 
         "议程：" + "；".join(str(item) for item in agenda),
         "入选候选：" + ", ".join(candidates),
         "规则：" + "；".join(_DEFAULT_AGENDA_RULES),
+        "Coordinator 主持开场，成员按轮回应，无新内容回复 pass。",
+    ]
+    return "\n".join(lines)
+
+
+def _generation_opening_topic(meeting_round_id: str, question_id: str, agenda: Sequence[str]) -> str:
+    lines = [
+        f"候选假说生成讨论开幕（{meeting_round_id}）：{question_id or '未命名赛题'}",
+        "议程：" + "；".join(str(item) for item in agenda),
+        "规则：" + "；".join(_GENERATION_AGENDA_RULES),
         "Coordinator 主持开场，成员按轮回应，无新内容回复 pass。",
     ]
     return "\n".join(lines)
@@ -296,6 +324,128 @@ def open_hypothesis_review_meeting(
         topic,
         purpose="meeting",
         config=_round_config(meeting_round, selection, discussion_round_index=1),
+        agent_runner=agent_runner,
+        background=background,
+        lightweight_response=background,
+    )
+    round_id = _round_id_from_start_result(result, meeting_round_id)
+    bound = meeting_rounds.bind_meeting_chat_room_round(
+        team["teamId"], meeting_round_id, room_id, round_id
+    )
+    return {
+        "schemaVersion": meeting_rounds.SCHEMA_VERSION,
+        "teamId": team["teamId"],
+        "status": "opened",
+        "meetingRound": bound["meetingRound"],
+        "roomId": room_id,
+        "roundId": round_id,
+        "chatRoomRoundIds": _normalized_str_list(bound["meetingRound"].get("chatRoomRoundIds")),
+        "discussion": {
+            "background": bool(background),
+            "roundStatus": str(result.get("status") or ""),
+        },
+        "storagePath": bound["storagePath"],
+    }
+
+
+def open_candidate_generation_meeting(
+    team_id: str,
+    payload: Mapping[str, Any] | None = None,
+    *,
+    agent_runner: Callable[..., dict[str, Any]] | None = None,
+    background: bool = True,
+) -> dict[str, Any]:
+    """Open the round-0 candidate-generation discussion for a question.
+
+    Cold-start counterpart to ``open_hypothesis_review_meeting``: catalog
+    questions without an approved v2 artifact have no selectable candidates,
+    so the team's first discussion proposes them.  Participants answer with
+    ``CANDIDATE:`` marker lines; the closure digest carries the structured
+    ``proposedCandidates`` that the selection UI then offers.  The meeting id
+    is deterministic per scope/question so replays reuse instead of
+    duplicating.
+    """
+    from core.web.services import chat_room_service
+
+    request = dict(payload) if isinstance(payload, Mapping) else {}
+    question_id = str(request.get("questionId") or "").strip().upper()
+    if not question_id:
+        raise ContractValidationError(
+            "opening a candidate generation meeting requires a questionId"
+        )
+    participants = _normalized_str_list(request.get("participants"))
+    if not participants:
+        raise ContractValidationError(
+            "opening a candidate generation meeting requires at least one participant"
+        )
+    team, room_id = _ensure_linked_room(str(team_id or "").strip())
+    _assert_participants_in_room(room_id, participants)
+
+    agenda = _normalized_str_list(request.get("agenda")) or list(_GENERATION_AGENDA)
+    agenda_questions = _normalized_str_list(request.get("agendaQuestions")) or list(
+        _GENERATION_AGENDA_QUESTIONS
+    )
+    agenda_rules = _normalized_str_list(request.get("agendaRules")) or list(
+        _GENERATION_AGENDA_RULES
+    )
+    create_request = {
+        key: request.get(key)
+        for key in (
+            *_SCOPE_FIELDS,
+            "agentId",
+            "mode",
+            "meetingRoundId",
+            "rounds",
+            "startedAt",
+        )
+        if key in request and request.get(key) is not None
+    }
+    created = meeting_rounds.create_meeting_round(
+        team["teamId"],
+        {
+            **create_request,
+            "meetingType": CANDIDATE_GENERATION_MEETING_TYPE,
+            "stage": "hypothesis",
+            "roundType": "generation",
+            "participants": participants,
+            "participantRoleIds": _normalized_str_list(request.get("participantRoleIds")),
+            "discussionItemRefs": [],
+            "inputArtifactRefs": _normalized_str_list(request.get("inputArtifactRefs")),
+            "agenda": agenda,
+            "agendaQuestions": agenda_questions,
+            "agendaRules": agenda_rules,
+            "linkedChatRoomId": room_id,
+        },
+    )
+    meeting_round = created["meetingRound"]
+    meeting_round_id = str(meeting_round.get("meetingRoundId") or "")
+    if created["status"] == "reused":
+        bound_round_ids = _normalized_str_list(meeting_round.get("chatRoomRoundIds"))
+        if bound_round_ids:
+            return {
+                "schemaVersion": meeting_rounds.SCHEMA_VERSION,
+                "teamId": team["teamId"],
+                "status": "reused",
+                "meetingRound": meeting_round,
+                "roomId": room_id,
+                "roundId": bound_round_ids[-1],
+                "chatRoomRoundIds": bound_round_ids,
+                "storagePath": created["storagePath"],
+            }
+
+    topic = str(request.get("topic") or "").strip() or _generation_opening_topic(
+        meeting_round_id, question_id, agenda
+    )
+    selection_shim = {
+        "selectionId": "",
+        "questionId": question_id,
+        "selectedCandidateIds": [],
+    }
+    result = chat_room_service.start_chat_room_round(
+        room_id,
+        topic,
+        purpose="meeting",
+        config=_round_config(meeting_round, selection_shim, discussion_round_index=1),
         agent_runner=agent_runner,
         background=background,
         lightweight_response=background,
@@ -498,6 +648,7 @@ def build_meeting_digest_draft(
         "risks": list(markers["risks"]),
         "blockers": [],
         "knowledgeCandidates": list(markers["knowledgeCandidates"]),
+        "proposedCandidates": list(markers["proposedCandidates"]),
         "sourceMessageRefs": source_refs,
     }
 

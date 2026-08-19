@@ -47,12 +47,20 @@ function truncateTitle(title: string, limit = 48): string {
 export function formatHypothesisSummary(
   selectedCandidateIds: readonly string[] | null | undefined,
   questionId: string,
+  chain?: { meetingCount?: number; roundBudget?: number; hypothesisConverged?: boolean } | null,
 ): string {
   if (!normalizeQuestionId(questionId)) return "";
   const ids = (selectedCandidateIds ?? []).map((item) => item.trim()).filter(Boolean);
-  if (!ids.length) return "尚未选择假说";
-  if (ids.length <= 2) return `假说 ${ids.join("、")}`;
-  return `已选 ${ids.length} 个假说`;
+  const base = !ids.length
+    ? "尚未选择假说"
+    : ids.length <= 2
+      ? `假说 ${ids.join("、")}`
+      : `已选 ${ids.length} 个假说`;
+  if (!chain || !ids.length) return base;
+  if (chain.hypothesisConverged) return `${base} · 已收敛`;
+  const round = Number(chain.meetingCount ?? 0);
+  if (round > 0) return `${base} · 第 ${round} 轮讨论`;
+  return base;
 }
 
 export function formatExperimentSwitchLabel(
@@ -154,12 +162,13 @@ export function buildExperimentChromeIdentity(input: {
   questionId: string;
   title?: string;
   selectedCandidateIds?: readonly string[] | null;
+  chain?: { meetingCount?: number; roundBudget?: number; hypothesisConverged?: boolean } | null;
 }): ExperimentChromeIdentity | null {
   const questionId = normalizeQuestionId(input.questionId);
   if (!questionId) return null;
   return {
     questionId,
     title: truncateTitle(input.title?.trim() || questionId, 64),
-    hypothesisSummary: formatHypothesisSummary(input.selectedCandidateIds, questionId),
+    hypothesisSummary: formatHypothesisSummary(input.selectedCandidateIds, questionId, input.chain),
   };
 }

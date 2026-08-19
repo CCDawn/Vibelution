@@ -150,18 +150,34 @@ def _storage_path(team_id: str) -> Path:
 
 
 def _approved_candidate_ids(team_id: str, question_id: str) -> set[str]:
-    """Return the candidate ids of the approved formal v2 question artifact.
+    """Return the selectable candidate ids for one question.
 
-    Reuses the question launch approval read path so "approved" never drifts
-    between launching a run and selecting hypotheses for it.
+    Primary source is the approved formal v2 question artifact, reusing the
+    question launch approval read path so "approved" never drifts between
+    launching a run and selecting hypotheses for it.  Catalog-seeded questions
+    have no approved artifact; their candidates come from the round-0
+    candidate-generation discussion recorded in the hypothesis-first chain
+    ledger.
     """
     from core.web.services.team_workflow.research_runtime import question_launch
 
     detail = question_launch._approved_details(team_id).get(question_id.upper())
     if detail is None:
-        raise ResearchHypothesisSelectionError(
-            f"Question {question_id} is not an approved formal v2 question artifact."
+        if question_launch._catalog_question(question_id.upper()) is None:
+            raise ResearchHypothesisSelectionError(
+                f"Question {question_id} is not an approved formal v2 question artifact."
+            )
+        from core.web.services.team_workflow.research_runtime import (
+            hypothesis_first_chain,
         )
+
+        return {
+            str(record.get("candidateId") or "").strip()
+            for record in hypothesis_first_chain.list_hypothesis_candidates(
+                team_id, question_id=question_id
+            )["candidates"]
+            if str(record.get("candidateId") or "").strip()
+        }
     output = detail.get("output") if isinstance(detail.get("output"), Mapping) else {}
     hypotheses = output.get("hypotheses") if isinstance(output.get("hypotheses"), list) else []
     return {

@@ -84,6 +84,7 @@ export type HypothesisSelectionContext = {
   defaultSelectedCandidateIds: string[];
   latestSelection: HypothesisSelectionRecord | null;
   reviewMeeting?: MeetingRoundRecord | null;
+  generationMeeting?: MeetingRoundRecord | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -346,6 +347,9 @@ export type HypothesisFirstChainState = {
   budgetExhausted: boolean;
   templateBaselineExists: boolean;
   templateBaselineIds: string[];
+  candidateCount?: number;
+  generationMeetingId?: string;
+  generationMeetingStatus?: string;
 };
 
 export type CollectionRequestListResponse = {

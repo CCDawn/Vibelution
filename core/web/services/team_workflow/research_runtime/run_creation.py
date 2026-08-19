@@ -37,6 +37,43 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def _auto_open_candidate_generation(run_input: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Best-effort round-0 candidate generation for hypothesis-first launches.
+
+    The run is already persisted, so a meeting failure is reported
+    structurally instead of rolling the run back.  Only fires when the frozen
+    input is hypothesis-first and the question has no selectable candidates
+    yet; replays reuse the deterministic meeting id.
+    """
+    try:
+        objective = run_input.get("researchObjectiveContract")
+        if not (isinstance(objective, Mapping) and objective.get("hypothesisFirst") is True):
+            return None
+        from core.web.services.team_workflow.research_runtime import (
+            hypothesis_first_chain,
+        )
+
+        team_id = str(run_input.get("teamId") or "").strip()
+        question_id = str(run_input.get("questionId") or "").strip()
+        if not team_id or not question_id:
+            return None
+        if not hypothesis_first_chain.needs_candidate_generation(team_id, question_id):
+            return None
+        opened = hypothesis_first_chain.open_candidate_generation_meeting(
+            team_id,
+            question_id,
+            background=True,
+        )
+        return {
+            "status": str(opened.get("status") or ""),
+            "meetingRoundId": str(
+                (opened.get("meetingRound") or {}).get("meetingRoundId") or ""
+            ),
+        }
+    except Exception as exc:  # run fact stays; report the side effect
+        return {"status": "failed", "error": str(exc), "errorType": type(exc).__name__}
+
+
 def create_question_run(
     workflow_id: str,
     *,
@@ -56,7 +93,11 @@ def create_question_run(
         )
     except QuestionLaunchError as exc:
         raise ResearchWorkflowError(str(exc), code=exc.code) from exc
-    return create_run(workflow_id, run_input=run_input, idempotency_key=idempotency_key)
+    created = create_run(workflow_id, run_input=run_input, idempotency_key=idempotency_key)
+    generation = _auto_open_candidate_generation(run_input)
+    if generation is not None:
+        created = {**created, "candidateGeneration": generation}
+    return created
 
 
 def create_run(
