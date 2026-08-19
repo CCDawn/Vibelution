@@ -39,6 +39,7 @@ export function ResearchWorkflowToolbar(props: {
   createDisabled: boolean;
   createDisabledReason?: string;
   navigationLabel?: string;
+  atCurrentTask?: boolean;
   onNavigateCurrent?: () => void;
   onSelectExperiment: (questionId: string) => void;
   onOpenPanel: (panel: ResearchProcessPanel) => void;
@@ -123,10 +124,13 @@ export function ResearchWorkflowToolbar(props: {
           <VButton
             type="button"
             density="compact"
-            variant="primary"
+            variant={props.atCurrentTask ? "ghost" : "primary"}
+            isDisabled={props.atCurrentTask}
             onClick={() => props.onNavigateCurrent?.()}
           >
-            {props.navigationLabel || (isZh ? "前往当前任务" : "Go to current task")}
+            {props.atCurrentTask
+              ? (isZh ? "当前任务" : "Current task")
+              : (props.navigationLabel || (isZh ? "前往当前任务" : "Go to current task"))}
           </VButton>
         ) : null}
         {!props.runId ? (

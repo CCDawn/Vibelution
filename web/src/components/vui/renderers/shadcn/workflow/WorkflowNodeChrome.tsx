@@ -164,15 +164,25 @@ function kindFillClass(kind: WorkflowNodeVisualKind): string {
   return "bg-[var(--accent-cool)]";
 }
 
+function humanGateFallbackSubtitle(role: string, status: WorkflowNodeRunStatus | undefined): string {
+  if (status === "waiting_human") return `${role} · 等待确认`;
+  if (status === "succeeded") return `${role} · 已确认`;
+  if (status === "failed") return `${role} · 未通过`;
+  if (status === "blocked") return `${role} · 受阻`;
+  if (status === "running") return `${role} · 审查中`;
+  return `${role} · 人工审查`;
+}
+
 function moduleSubtitle(
   kind: WorkflowNodeVisualKind,
   roleKey: string | undefined,
   agentId: string | undefined,
+  status?: WorkflowNodeRunStatus,
 ): string {
   if (kind === "decision") return "晋升 / 回滚 / 停止";
   if (kind === "system_task") return "受控执行";
   const role = roleLabel(roleKey);
-  if (kind === "human_gate") return `${role} · 待确认`;
+  if (kind === "human_gate") return humanGateFallbackSubtitle(role, status);
   if (kind === "start") return `${role} · 流程入口`;
   if (kind === "end") return `${role} · 流程出口`;
   if (agentId) return `${role} · Agent 已绑定`;
@@ -317,7 +327,7 @@ export function WorkflowNodeChrome({
               {label}
             </span>
             <span className="truncate text-[12px] leading-[1.35] text-[var(--fg-secondary)]">
-              {moduleSubtitle(visualKind, primaryRoleKey, primaryAgentId)}
+              {visualKind === "human_gate" ? (subtitle?.trim() || moduleSubtitle(visualKind, primaryRoleKey, primaryAgentId, status)) : moduleSubtitle(visualKind, primaryRoleKey, primaryAgentId, status)}
             </span>
           </span>
         </div>

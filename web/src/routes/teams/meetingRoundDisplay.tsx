@@ -106,9 +106,7 @@ export function DigestDraftView({
 }
 
 function formatProposedCandidate(item: MeetingProposedCandidate): string {
-  const id = item.candidateId?.trim();
-  const statement = item.statement?.trim() || "（无陈述）";
-  return id ? `${id} · ${statement}` : statement;
+  return item.statement?.trim() || "（无陈述）";
 }
 
 function DigestDraftChapters(props: {

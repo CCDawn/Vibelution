@@ -10,6 +10,20 @@ const canvasSource = readFileSync(resolve(import.meta.dirname, "ResearchWorkflow
 const inspectorSource = readFileSync(resolve(import.meta.dirname, "ResearchProcessInspectorPane.tsx"), "utf8");
 const commandSource = readFileSync(resolve(import.meta.dirname, "useResearchWorkflowCommands.ts"), "utf8");
 
+const navigationSource = readFileSync(
+  resolve(import.meta.dirname, "../createTeamsResearchNavigation.ts"),
+  "utf8",
+);
+const shellSource = readFileSync(
+  resolve(import.meta.dirname, "../useTeamsWorkbenchShellPhase.tsx"),
+  "utf8",
+);
+const primarySource = readFileSync(
+  resolve(import.meta.dirname, "../teamResearchPrimarySurfaceRenderers.tsx"),
+  "utf8",
+);
+
+
 describe("researchWorkflowNoDuplicateSurface", () => {
   it("workspace uses VWorkflowCanvas and does not mount stage rail", () => {
     expect(canvasSource).toContain("VWorkflowCanvas");
@@ -22,6 +36,24 @@ describe("researchWorkflowNoDuplicateSurface", () => {
     expect(workspaceSource).not.toContain("ResearchStageNav");
     expect(workspaceSource).not.toContain("TeamKnowledgeCollectionCompletionFlowPanel");
     expect(workspaceSource).not.toContain("ChallengeCupOperationsWorkspace");
+  });
+
+  it("autofocuses the current HITL task from the process workspace", () => {
+    expect(workspaceSource).toContain("resolveResearchProcessAutofocus");
+    expect(workspaceSource).toContain("atCurrentTask");
+  });
+
+  it("keeps challenge-cup primary column on ResearchProcessWorkspace", () => {
+    expect(primarySource).toContain("ResearchProcessWorkspace");
+    expect(primarySource).toContain("challengeCupResearchTeamSelected && researchWorkspaceView === \"overview\"");
+    expect(primarySource).toContain("renderResearchProcessWorkflowSurface");
+  });
+
+  it("research teams never land on org canvas or challenge launcher", () => {
+    expect(navigationSource).toContain("isResearchWorkflowTeam(team)");
+    expect(navigationSource).toContain("setTeamShellMode(\"board\")");
+    expect(shellSource).toContain("teamShellMode === \"canvas\" && !researchWorkflowTeamSelected");
+    expect(shellSource).toContain("challengeCupResearchTeamSelected || isProcessWorkflowView");
   });
 
   it("selection updates URL node without claiming runtime authority in comments/code", () => {

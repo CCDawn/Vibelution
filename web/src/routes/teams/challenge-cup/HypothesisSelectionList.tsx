@@ -41,7 +41,6 @@ export function HypothesisSelectionList({
   teamId,
   questionId,
   lang = "zh",
-  compact = false,
   hideSubmit = false,
 }: HypothesisSelectionListProps) {
   const isZh = lang === "zh";
@@ -117,12 +116,13 @@ export function HypothesisSelectionList({
 
   return (
     <div data-testid="hypothesis-selection-list">
-      {latestSelection && !compact ? (
+      {latestSelection ? (
         <div className={css.summary}>
           <span>{isZh ? "当前生效选择" : "Current effective selection"}</span>
           <p>
-            {latestSelection.selectionId} · {latestSelection.selectedCandidateIds.join("、")} ·{" "}
-            {latestSelection.decidedBy || "unknown"} · {latestSelection.createdAt || "—"}
+            {isZh
+              ? `已选 ${latestSelection.selectedCandidateIds.length} 条假说`
+              : `${latestSelection.selectedCandidateIds.length} hypotheses selected`}
           </p>
         </div>
       ) : null}
@@ -151,17 +151,15 @@ export function HypothesisSelectionList({
                   onChange={(next) => toggleCandidate(candidate.hypothesis_id, next)}
                 >
                   <span>
-                    <strong>{candidate.hypothesis_id} · {candidate.statement}</strong>
-                    {compact ? null : <small>{candidate.mechanism}</small>}
+                    <strong>{candidate.statement}</strong>
+                    {candidate.mechanism ? <small>{candidate.mechanism}</small> : null}
                   </span>
                 </VCheckbox>
               </div>
-              {compact ? null : (
-                <div className={css.candidateMeta}>
+              <div className={css.candidateMeta}>
                   <span>{isZh ? `预测 ${candidate.predictions.length} 条` : `${candidate.predictions.length} predictions`}</span>
                   <span>{isZh ? `支持证据 ${candidate.supporting_evidence_refs.length} 条` : `${candidate.supporting_evidence_refs.length} supporting evidence`}</span>
                 </div>
-              )}
             </article>
           );
         })}
