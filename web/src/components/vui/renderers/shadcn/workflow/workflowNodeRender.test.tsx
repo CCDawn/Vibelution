@@ -87,7 +87,7 @@ describe("WorkflowAgentTaskNode render (P1-4)", () => {
     expect(markup).toContain("待运行");
   });
 
-  it("uses the approved compact card hierarchy in serpentine mode", () => {
+  it("uses the approved module card hierarchy in serpentine mode", () => {
     const markup = renderNode(WorkflowAgentTaskNode, {
       label: "协议设计",
       status: "ready",
@@ -98,10 +98,13 @@ describe("WorkflowAgentTaskNode render (P1-4)", () => {
     });
     expect(markup).toContain('data-layout-mode="serpentine"');
     expect(markup).toContain("Agent 任务");
-    expect(markup).toContain("实验规划");
-    expect(markup).toContain("Agent 已绑定");
+    expect(markup).toContain("实验规划 · Agent 已绑定");
+    expect(markup).toContain("size-11");
+    expect(markup).toContain("data-status-badge");
     expect(markup).not.toContain("冻结变量、数据切分、预算和停止条件。");
     expect(markup).not.toContain(">agent-technical-id<");
+    expect(markup).not.toContain("text-[8px]");
+    expect(markup).not.toContain("text-[8.5px]");
   });
 });
 
@@ -295,7 +298,7 @@ describe("WorkflowStageRegionNode render (P1-5)", () => {
       layoutMode: "serpentine",
     });
     expect(markup).toContain("bg-[var(--vui-surface-panel)]");
-    expect(markup).toContain("shadow-[var(--vui-elevation-1)]");
+    expect(markup).toContain("shadow-[var(--vui-elevation-2)]");
     expect(markup).not.toContain("rgba(15,23,42,0.05)");
   });
 
