@@ -44,6 +44,7 @@ export type AgentDenseListColumnLabels = {
 export type AgentDenseListProps = {
   columns: AgentDenseColumn[];
   columnLabels: AgentDenseListColumnLabels;
+  bulkSelectionVisible?: boolean;
   onSelectRow: (rowId: string, event: React.MouseEvent<HTMLButtonElement>) => void;
   onToggleBulk: (rowId: string, checked: boolean, shiftKey: boolean) => void;
 };
@@ -75,10 +76,12 @@ function issueToneClass(tone: string): string {
 
 function AgentRow({
   row,
+  bulkSelectionVisible,
   onSelectRow,
   onToggleBulk,
 }: {
   row: AgentDenseRow;
+  bulkSelectionVisible: boolean;
   onSelectRow: AgentDenseListProps["onSelectRow"];
   onToggleBulk: AgentDenseListProps["onToggleBulk"];
 }) {
@@ -92,7 +95,8 @@ function AgentRow({
     </span>
   );
   const rowClass = [
-    "w-full min-h-[46px] p-1.5 border border-[var(--vui-border-hairline)] rounded-[var(--radius-control)] bg-[var(--vui-surface-row)] text-[var(--fg-primary)] min-w-0 grid grid-cols-[28px_minmax(0,1fr)] items-center gap-1.5",
+    "w-full min-h-[46px] p-1.5 border border-[var(--vui-border-hairline)] rounded-[var(--radius-control)] bg-[var(--vui-surface-row)] text-[var(--fg-primary)] min-w-0 grid items-center gap-1.5",
+    bulkSelectionVisible ? "grid-cols-[28px_minmax(0,1fr)]" : "grid-cols-[minmax(0,1fr)]",
     "transition-[border-color,background] duration-150 hover:bg-[var(--vui-surface-row-hover)]",
     row.active
       ? "border-[color-mix(in_srgb,var(--accent-warm)_48%,var(--vui-border-hairline))] bg-[color-mix(in_srgb,var(--accent-warm)_9%,var(--vui-surface-row))]"
@@ -156,13 +160,19 @@ function AgentRow({
 
   return (
     <div className={rowClass}>
-      <VTooltip content={row.selectLabel}>{selectionControl}</VTooltip>
+      {bulkSelectionVisible ? <VTooltip content={row.selectLabel}>{selectionControl}</VTooltip> : null}
       <VTooltip content={rowTooltip} width="wide">{agentCard}</VTooltip>
     </div>
   );
 }
 
-export function AgentDenseList({ columns, columnLabels, onSelectRow, onToggleBulk }: AgentDenseListProps) {
+export function AgentDenseList({
+  columns,
+  columnLabels,
+  bulkSelectionVisible = false,
+  onSelectRow,
+  onToggleBulk,
+}: AgentDenseListProps) {
   // Card rows carry their own visible hierarchy; keep the shared label contract for callers.
   void columnLabels;
 
@@ -193,7 +203,13 @@ export function AgentDenseList({ columns, columnLabels, onSelectRow, onToggleBul
           </div>
           <div className="grid content-start gap-1 min-h-0">
             {column.rows.map((row) => (
-              <AgentRow key={row.id} row={row} onSelectRow={onSelectRow} onToggleBulk={onToggleBulk} />
+              <AgentRow
+                key={row.id}
+                row={row}
+                bulkSelectionVisible={bulkSelectionVisible}
+                onSelectRow={onSelectRow}
+                onToggleBulk={onToggleBulk}
+              />
             ))}
           </div>
         </section>

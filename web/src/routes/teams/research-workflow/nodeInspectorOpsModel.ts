@@ -103,9 +103,6 @@ export function nodeInspectorStatus(input: {
     return { tone: "neutral", label: "待指定" };
   }
   const status = String(input.status || "").trim().toLowerCase();
-  if (input.runtimeCurrent || status === "running" || status === "in_flight") {
-    return { tone: "accent", label: "运行中" };
-  }
   if (status === "failed") {
     return { tone: "danger", label: "失败" };
   }
@@ -114,6 +111,15 @@ export function nodeInspectorStatus(input: {
   }
   if (status === "blocked") {
     return { tone: "warning", label: "阻塞" };
+  }
+  if (status === "waiting_human") {
+    return { tone: "warning", label: "等待确认" };
+  }
+  if (status === "running" || status === "in_flight") {
+    return { tone: "accent", label: "运行中" };
+  }
+  if (input.runtimeCurrent && (status === "" || status === "pending" || status === "ready" || status === "queued")) {
+    return { tone: "neutral", label: "待启动" };
   }
   if (input.budgetWarn) {
     return { tone: "warning", label: "将尽" };

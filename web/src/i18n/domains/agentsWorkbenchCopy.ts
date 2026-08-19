@@ -21,15 +21,10 @@ export function agentConfigPanes(copy: AgentsRouteCopy, agent: AgentConfigWorksp
 }> {
   // Badge = actionable signals only (not panel/field cardinality).
   const configIssueCount = agent?.health.length ?? 0;
-  const effectiveIssueCount = agent?.effectiveConfiguration?.fields.some((field) => field.status !== "ready") ? 1 : 0;
-  const relationCount = agent?.references.filter((reference) => reference.kind === "team").length ?? 0;
   const activityCount = (agent?.agentInboxPendingCount ?? 0) + (agent?.groupContextEvents?.length ?? 0);
   return [
     { id: "overview", label: copy.overviewPane, count: 0 },
-    { id: "effective", label: copy.effectiveConfiguration, count: effectiveIssueCount },
-    { id: "relations", label: copy.teamRelations, count: relationCount },
     { id: "config", label: copy.configTitle, count: configIssueCount },
-    { id: "changes", label: copy.configChanges, count: 0 },
     { id: "activity", label: copy.activityPane, count: activityCount },
   ];
 }

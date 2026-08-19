@@ -32,6 +32,7 @@ type AgentListStatePanelProps = {
   isPending: boolean;
   isFetching: boolean;
   hasWorkspace: boolean;
+  bulkSelectionVisible?: boolean;
   onRetry: () => void;
   onSelectRow: AgentDenseListProps["onSelectRow"];
   onToggleBulk: AgentDenseListProps["onToggleBulk"];
@@ -65,6 +66,7 @@ export function AgentListStatePanel({
   isPending,
   isFetching,
   hasWorkspace,
+  bulkSelectionVisible = false,
   onRetry,
   onSelectRow,
   onToggleBulk,
@@ -115,6 +117,7 @@ export function AgentListStatePanel({
       {backgroundStatus}
       <AgentDenseList
         columns={columns}
+        bulkSelectionVisible={bulkSelectionVisible}
         columnLabels={{
           agent: "Agent",
           model: copy.model,

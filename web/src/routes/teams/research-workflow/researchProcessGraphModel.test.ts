@@ -130,6 +130,36 @@ describe("researchProcessGraphModel", () => {
     expect(rerun?.sourceHandle).toBe("rerun");
   });
 
+  it("keeps a queued run cursor as pending instead of painting it running", () => {
+    const projection: WorkflowCanvasProjection = {
+      definition,
+      run: {
+        runId: "run-queued",
+        status: "queued",
+        runtimeCurrentNodeIds: ["source_finding"],
+        nodeRuns: {
+          source_finding: {
+            nodeId: "source_finding",
+            status: "pending",
+            attempt: 0,
+            actorKind: "agent",
+          },
+        },
+        pendingHumanTasks: [],
+        blockedReason: null,
+        completionKind: "",
+        parentRunId: null,
+        childRunIds: [],
+        iterationBudgetMax: 3,
+      },
+    };
+    const graph = projectionToCanvasGraph(projection);
+    const finding = graph.nodes.find((n) => n.nodeId === "source_finding");
+    expect(finding?.status).toBe("pending");
+    expect(finding?.isRuntimeCurrent).toBe(true);
+    expect(graph.stages.find((stage) => stage.stageId === "knowledge_collection")?.stageTone).toBe("idle");
+  });
+
   it("projects effective Agent bindings before a run exists", () => {
     const graph = definitionToCanvasGraph(definition, {
       primaryAgentIdByNode: new Map([["source_finding", "agent-finder"]]),

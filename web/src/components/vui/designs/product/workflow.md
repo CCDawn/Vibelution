@@ -63,8 +63,8 @@ const graph: WorkflowLayoutInput = projectionToCanvasGraph(projection);
 - `waiting_human`：琥珀 + 人工图标
 - `succeeded`：`--state-success` 绿边框 + 绿角标 check（与 pending 在边框、角标两通道拉开；沿用 VUI 既有 success token，与 VDenseTable 等一致）
 - `failed` vs `blocked`：不同图标（x / ban）与文案
-- selected：细蓝色 outline；runtime current：独立运行态标识；二者不得互相覆盖
-- 阶段头：`done` 绿实心编号 + 对勾徽章，`active` 蓝实心编号 + 旋转进行中徽章，`attention` 琥珀实心编号 + 需关注徽章；进度条随 tone 着色
+- selected：细蓝色 outline；runtime current：独立游标（下一处会继续的节点），**不得**把 `pending`/`ready` 的 current 节点改画成 `running`
+- 阶段头：`done` 绿实心编号 + 对勾徽章，`active` 仅当成员节点 status 为 `running`（蓝实心编号 + 旋转进行中徽章），`attention` 琥珀实心编号 + 需关注徽章；进度条随 tone 着色。queued 运行的 current 节点只保留游标 ring，阶段保持 `idle`
 
 ### 边语义
 
