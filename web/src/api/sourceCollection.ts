@@ -12,8 +12,6 @@ export type SourceCollectionKnowledgeIngestionIssue = {
   confidence?: number;
   candidateIds?: string[];
   errorType?: string;
-  error?: string;
-  [key: string]: unknown;
 };
 
 /** Backend-shaped official knowledge sync child payload on the stage card. */
@@ -37,7 +35,6 @@ export type SourceCollectionMaterializedKnowledgeIngestion = {
   failedCount?: number;
   skipped?: SourceCollectionKnowledgeIngestionIssue[];
   failed?: SourceCollectionKnowledgeIngestionIssue[];
-  [key: string]: unknown;
 };
 
 function writeJson<T>(url: string, method: string, body?: unknown): Promise<T> {

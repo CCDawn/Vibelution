@@ -1820,8 +1820,9 @@ describe("TeamsRoute layout contract", () => {
     });
     expect(completed).toContain('data-testid="source-collection-knowledge-ingestion-status"');
     expect(completed).toContain('data-ingestion-state="completed"');
+    expect(completed).toContain('data-ingestion-reason-code="official_sync_completed"');
     expect(completed).toContain("1 条");
-    expect(completed).toContain("正式知识 ID: knowledge-1");
+    expect(completed).not.toContain("knowledge-1");
 
     const pending = renderSourceCollectionKnowledgeIngestionStatus({
       status: "pending_review",
@@ -1830,8 +1831,9 @@ describe("TeamsRoute layout contract", () => {
       skippedCount: 1,
     });
     expect(pending).toContain('data-ingestion-state="pending"');
+    expect(pending).toContain('data-ingestion-reason-code="official_sync_pending"');
     expect(pending).toContain("等待正式同步");
-    expect(pending).toContain("知识库 ID: kb-pending");
+    expect(pending).not.toContain("kb-pending");
 
     const failed = renderSourceCollectionKnowledgeIngestionStatus({
       status: "completed",
@@ -1841,8 +1843,11 @@ describe("TeamsRoute layout contract", () => {
       failed: [{ reason: "knowledge review rejected" }],
     });
     expect(failed).toContain('data-ingestion-state="failed"');
+    expect(failed).toContain('data-ingestion-reason-code="official_sync_failed"');
     expect(failed).not.toContain('data-ingestion-state="completed"');
-    expect(failed).toContain("失败不会计为正式知识");
+    expect(failed).toContain("正式知识同步失败");
+    expect(failed).not.toContain("knowledge-stale");
+    expect(failed).not.toContain("knowledge review rejected");
 
     const empty = renderSourceCollectionKnowledgeIngestionStatus({});
     expect(empty).not.toContain("source-collection-knowledge-ingestion-status");

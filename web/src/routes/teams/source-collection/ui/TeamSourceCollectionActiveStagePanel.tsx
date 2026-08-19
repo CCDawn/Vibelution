@@ -261,7 +261,6 @@ function SourceCollectionKnowledgeIngestionStatus({
     return null;
   }
 
-  const failedItems = Array.isArray(payload.failed) ? payload.failed : [];
   const failedCount = Number(payload.failedCount || 0);
   const statusText = [
     payload.status,
@@ -272,15 +271,11 @@ function SourceCollectionKnowledgeIngestionStatus({
     .map((value) => String(value || "").trim().toLowerCase())
     .filter(Boolean);
   const hasFailure = failedCount > 0
-    || failedItems.length > 0
     || statusText.some((value) => value === "failed" || value === "error" || value === "blocked" || value.includes("failed"));
-  const formalIds = Array.isArray(payload.formalKnowledgeItemIds)
-    ? payload.formalKnowledgeItemIds.filter((value): value is string => Boolean(String(value || "").trim())).slice(0, 4)
-    : [];
   const formalCount = Number.isFinite(Number(payload.formalKnowledgeItemCount))
     ? Math.max(0, Number(payload.formalKnowledgeItemCount))
     : null;
-  const hasFormalSync = formalIds.length > 0 || (formalCount !== null && formalCount > 0);
+  const hasFormalSync = formalCount !== null && formalCount > 0;
   const state: SourceCollectionKnowledgeIngestionDisplayState = hasFailure
     ? "failed"
     : payload.status === "completed" && hasFormalSync
@@ -296,14 +291,11 @@ function SourceCollectionKnowledgeIngestionStatus({
     : state === "completed"
       ? "success"
       : "warning";
-  const officialId = formalIds.length > 0
-    ? `${lang === "zh" ? "正式知识 ID" : "Formal knowledge IDs"}: ${formalIds.join(", ")}`
-    : String(payload.createdKnowledgeBaseId || payload.knowledgeBaseId || "").trim()
-      ? `${lang === "zh" ? "知识库 ID" : "Knowledge base ID"}: ${String(payload.createdKnowledgeBaseId || payload.knowledgeBaseId).trim()}`
-      : "";
-  const firstFailure = failedItems.find((item) => item && typeof item === "object") as Record<string, unknown> | undefined;
-  const failureReason = String(firstFailure?.error || firstFailure?.reason || "").trim()
-    || (lang === "zh" ? "正式知识同步没有完成。" : "Official knowledge sync did not complete.");
+  const reasonCode = state === "failed"
+    ? "official_sync_failed"
+    : state === "completed"
+      ? "official_sync_completed"
+      : "official_sync_pending";
 
   return (
     <VSurface
@@ -313,6 +305,7 @@ function SourceCollectionKnowledgeIngestionStatus({
       className={styles.sourceCollectionKnowledgeIngestionStatus}
       data-testid="source-collection-knowledge-ingestion-status"
       data-ingestion-state={state}
+      data-ingestion-reason-code={reasonCode}
       aria-label={lang === "zh" ? "正式知识入库状态" : "Formal knowledge ingestion status"}
     >
       <div className={styles.sourceCollectionKnowledgeIngestionHeader}>
@@ -326,17 +319,10 @@ function SourceCollectionKnowledgeIngestionStatus({
             value={lang === "zh" ? `${formalCount} 条` : formalCount}
           />
         ) : null}
-        {officialId ? (
-          <span className={styles.sourceCollectionKnowledgeIngestionId} title={officialId}>
-            {officialId}
-          </span>
-        ) : null}
       </div>
       {state === "failed" ? (
         <VStateRow tone="danger" role="alert" className={styles.sourceCollectionKnowledgeIngestionMessage}>
-          {lang === "zh"
-            ? `${failureReason} 失败不会计为正式知识；请修复后重试资料入库。`
-            : `${failureReason} Failed items are not counted as formal knowledge; fix the issue and retry ingestion.`}
+          {lang === "zh" ? "正式知识同步失败；请修复后重试资料入库。" : "Official knowledge sync failed; fix the issue and retry ingestion."}
         </VStateRow>
       ) : state === "pending" ? (
         <VStateRow tone="warning" role="status" className={styles.sourceCollectionKnowledgeIngestionMessage}>

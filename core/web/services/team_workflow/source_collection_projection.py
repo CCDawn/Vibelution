@@ -308,6 +308,7 @@ def source_collection_stage_task_materialized_knowledge_ingestion(
 
         return SourceCollectionMaterializedKnowledgeIngestion.model_validate(raw).model_dump(
             exclude_unset=True,
+            exclude_none=True,
         )
     except ValidationError:
         # An old or malformed child payload must not break the whole summary.

@@ -35,8 +35,6 @@ const styles = {
     "sourceCollectionKnowledgeIngestionHeader min-w-0 flex items-center justify-between gap-2 [&>strong]:min-w-0 [&>strong]:truncate [font-size:var(--vui-font-xs)] text-[var(--fg-primary)]",
   sourceCollectionKnowledgeIngestionMetrics:
     "sourceCollectionKnowledgeIngestionMetrics min-w-0 flex flex-wrap items-center gap-1.5",
-  sourceCollectionKnowledgeIngestionId:
-    "sourceCollectionKnowledgeIngestionId min-w-0 max-w-full truncate [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)]",
   sourceCollectionKnowledgeIngestionMessage:
     "sourceCollectionKnowledgeIngestionMessage min-w-0 [font-size:var(--vui-font-xs)] leading-snug",
   sourceCollectionStageHandoff:

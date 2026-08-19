@@ -1,7 +1,8 @@
 """Public contracts for source-collection catalog read routes.
 
-Summary views publish their stable top-level fields. Nested run, card, and
-gate payloads still evolve, so extras pass through. Routes must use
+Summary views publish their stable top-level fields. The stage-card and
+official-ingestion payloads are bounded read models so unknown storage or
+diagnostic fields do not cross the catalog boundary. Routes must use
 response_model_exclude_unset=True so missing optional fields stay absent
 instead of being filled with defaults.
 """
@@ -16,14 +17,13 @@ from pydantic import BaseModel, ConfigDict, Field
 class SourceCollectionKnowledgeIngestionIssue(BaseModel):
     """Bounded issue details returned by the formal-knowledge materializer."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="ignore")
 
     reason: str | None = None
     decision: str | None = None
     confidence: float | None = None
     candidateIds: list[str] | None = None
     errorType: str | None = None
-    error: str | None = None
 
 
 class SourceCollectionMaterializedKnowledgeIngestion(BaseModel):
@@ -33,7 +33,7 @@ class SourceCollectionMaterializedKnowledgeIngestion(BaseModel):
     readable while making the fields used by the catalog and UI explicit.
     """
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="ignore")
 
     status: str | None = None
     stewardPackCandidateId: str | None = None
@@ -59,7 +59,7 @@ class SourceCollectionMaterializedKnowledgeIngestion(BaseModel):
 class SourceCollectionStageTaskResponse(BaseModel):
     """Read-model shape for the latest task embedded in a stage card."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="ignore")
 
     taskId: str | None = None
     stageId: str | None = None
@@ -88,7 +88,7 @@ class SourceCollectionStageTaskResponse(BaseModel):
 class SourceCollectionStageCardResponse(BaseModel):
     """Read-model shape for one source-collection stage card."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="ignore")
 
     stageId: str | None = None
     status: str | None = None
