@@ -124,18 +124,23 @@ export function deriveBackendSystemState({
   return "unhealthy";
 }
 
+function workbenchWindowOwned(workbench: RuntimeSnapshot["workbench"] | null | undefined): boolean {
+  // browserManaged is the Edge-app alias; Electron projects windowManaged and forces browserManaged false.
+  return Boolean(workbench?.windowManaged) || Boolean(workbench?.browserManaged);
+}
+
 export function deriveRuntimeControllerState(runtime: RuntimeSnapshot | null | undefined): RuntimeControllerState {
   const managerRunning = Boolean(runtime?.runtimeManager?.running);
   const desiredState = String(runtime?.workbench?.desiredState ?? "closed").trim().toLowerCase();
   const observedState = String(runtime?.workbench?.observedState ?? "closed").trim().toLowerCase();
   const phase = String(runtime?.workbench?.phase ?? "").trim().toLowerCase();
   const failureMessage = String(runtime?.workbench?.failureMessage ?? "").trim();
-  const browserManaged = Boolean(runtime?.workbench?.browserManaged);
+  const windowOwned = workbenchWindowOwned(runtime?.workbench);
   const browserWindowAlive = Boolean(runtime?.workbench?.browserWindowAlive);
   const lifecycleConsistency = String(runtime?.workbench?.lifecycleConsistency ?? "").trim().toLowerCase();
   const frontendOrphaned = Boolean(runtime?.workbench?.frontendOrphaned) || lifecycleConsistency === "orphaned_browser";
   const browserMissing = lifecycleConsistency === "browser_missing"
-    || (browserManaged && observedState === "partial" && !browserWindowAlive);
+    || (windowOwned && observedState === "partial" && !browserWindowAlive);
 
   if (frontendOrphaned || browserMissing || phase === "failed" || failureMessage) {
     return "failed";
@@ -146,7 +151,7 @@ export function deriveRuntimeControllerState(runtime: RuntimeSnapshot | null | u
   if (desiredState === "closed" && observedState !== "closed") {
     return "closing";
   }
-  if (managerRunning && browserManaged && observedState === "open") {
+  if (managerRunning && windowOwned && observedState === "open") {
     return "managed";
   }
   return "unmanaged";
