@@ -18,13 +18,14 @@ import socket
 import subprocess
 import sys
 import time
-import uuid
 import urllib.error
 import urllib.request
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 import tomllib
+
 
 def _supervisor_root() -> Path:
     return Path(__file__).resolve().parent.parent
@@ -67,6 +68,7 @@ _LOG_ROTATION = _load_log_rotation_stdlib()
 DEFAULT_LOG_BACKUP_COUNT = _LOG_ROTATION.DEFAULT_LOG_BACKUP_COUNT
 DEFAULT_LOG_MAX_BYTES = _LOG_ROTATION.DEFAULT_LOG_MAX_BYTES
 rotate_log_file = _LOG_ROTATION.rotate_log_file
+append_rotating_text = _LOG_ROTATION.append_rotating_text
 write_log_tail_copy = _LOG_ROTATION.write_log_tail_copy
 
 PROJECT_STORAGE = resolve_active_project_storage_paths(PROJECT_ROOT)
@@ -156,6 +158,10 @@ def _write_state(state: dict) -> None:
 
 
 def _start_runtime_scene(trigger: str) -> dict[str, str]:
+    _seal_active_runtime_scene(
+        "orphan_reconciled",
+        "Previous active scene was superseded by a fresh Launcher start.",
+    )
     started_at = datetime.now(timezone.utc)
     scene_id = uuid.uuid4().hex[:12]
     directory_name = f"{started_at.strftime('%Y%m%dT%H%M%SZ')}__{scene_id}"
@@ -192,6 +198,57 @@ def _sync_launcher_logs_to_scene_raw(scene_dir: Path) -> None:
         return
     for launcher_name, scene_relative in LAUNCHER_SCENE_RAW_MAP:
         write_log_tail_copy(RUNTIME_DIR / launcher_name, scene_dir / scene_relative)
+
+
+def _seal_active_runtime_scene(result: str, stop_reason: str) -> dict[str, object]:
+    """Idempotently seal the active scene without clearing its current pointer."""
+    try:
+        reference = json.loads(ACTIVE_RUNTIME_SCENE_PATH.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        return {"sealed": False, "reason": "active_scene_unavailable"}
+    if not isinstance(reference, dict):
+        return {"sealed": False, "reason": "active_scene_invalid"}
+    scene_dir_text = str(reference.get("runtimeSceneDir") or "").strip()
+    if not scene_dir_text:
+        return {"sealed": False, "reason": "scene_dir_missing"}
+    try:
+        scene_dir = Path(scene_dir_text).resolve()
+        scene_dir.relative_to(RUNTIME_SCENE_ROOT.resolve())
+    except (OSError, ValueError):
+        return {"sealed": False, "reason": "scene_dir_outside_root"}
+    if not scene_dir.is_dir():
+        return {"sealed": False, "reason": "scene_dir_unavailable"}
+
+    _sync_launcher_logs_to_scene_raw(scene_dir)
+    manifest_path = scene_dir / "manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        manifest = {}
+    if not isinstance(manifest, dict):
+        manifest = {}
+    if str(manifest.get("ended_at") or "").strip():
+        return {"sealed": False, "reason": "already_sealed", "sceneDir": str(scene_dir)}
+
+    ended_at = _now_iso()
+    manifest.update(
+        {
+            "schema_version": int(manifest.get("schema_version") or 2),
+            "runtime_scene_id": str(
+                manifest.get("runtime_scene_id") or reference.get("runtimeSceneId") or scene_dir.name
+            ),
+            "started_at": str(manifest.get("started_at") or reference.get("startedAt") or ended_at),
+            "ended_at": ended_at,
+            "status": "stopped",
+            "result": str(result or "orphan_reconciled"),
+            "stop_reason": str(stop_reason or "Runtime scene reconciled closed."),
+            "project_root": str(manifest.get("project_root") or PROJECT_ROOT),
+        }
+    )
+    temp_path = manifest_path.with_suffix(".json.tmp")
+    temp_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    temp_path.replace(manifest_path)
+    return {"sealed": True, "reason": manifest["result"], "sceneDir": str(scene_dir)}
 
 
 def _pid_probe(pid: int) -> str:
@@ -935,8 +992,12 @@ def _append_frontend_build_log(payload: dict) -> None:
         "timestamp": _now_iso(),
         **payload,
     }
-    with FRONTEND_BUILD_LOG_PATH.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(event, ensure_ascii=False, separators=(",", ":")) + "\n")
+    result = append_rotating_text(
+        FRONTEND_BUILD_LOG_PATH,
+        json.dumps(event, ensure_ascii=False, separators=(",", ":")) + "\n",
+    )
+    if result.get("errorType"):
+        raise OSError(str(result.get("errorMessage") or "frontend build log append failed"))
 
 
 def _host_is_wildcard(host: str) -> bool:
@@ -2560,6 +2621,7 @@ def _stop_backend() -> dict:
         "updatedAt": _now_iso(),
     }
     _write_state(next_state)
+    _seal_active_runtime_scene("explicit_stop", "Workbench processes confirmed closed.")
     return next_state
 
 

@@ -7,7 +7,6 @@ from pathlib import Path
 from config.workbench import DEFAULT_WORKBENCH_HOST, configured_backend_port
 from vibelution_storage import resolve_active_project_storage_paths
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_STORAGE = resolve_active_project_storage_paths(PROJECT_ROOT)
 RUNTIME_ROOT = PROJECT_STORAGE.runtime
@@ -24,7 +23,7 @@ DAEMON_LOCK_PATH = RUNTIME_MANAGER_DIR / "daemon.lock"
 EVENTS_PATH = RUNTIME_MANAGER_DIR / "events.jsonl"
 DAEMON_STDOUT_PATH = RUNTIME_MANAGER_DIR / "daemon.out.log"
 DAEMON_STDERR_PATH = RUNTIME_MANAGER_DIR / "daemon.err.log"
-DAEMON_LOG_MAX_BYTES = 16 * 1024 * 1024
+DAEMON_LOG_MAX_BYTES = 64 * 1024 * 1024
 DAEMON_LOG_BACKUP_COUNT = 3
 
 LAUNCHER_SCRIPT_PATH = PROJECT_ROOT / "scripts" / "vibelution_launcher.ps1"

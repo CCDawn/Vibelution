@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from core.logging import debug as _debug_logger
+from core.logging.log_rotation import append_rotating_text
 
 from .constants import EVENTS_PATH, ensure_runtime_manager_dirs
 
@@ -45,8 +46,9 @@ def append_runtime_manager_file_event(
             "at": event_at,
             "payload": payload,
         }
-        with target_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(event, ensure_ascii=False) + "\n")
+        result = append_rotating_text(target_path, json.dumps(event, ensure_ascii=False) + "\n")
+        if result.get("errorType"):
+            raise OSError(str(result.get("errorMessage") or "runtime manager log append failed"))
     except OSError:
         if not suppress_io_errors:
             raise

@@ -19,6 +19,7 @@ def rotate_log_file(
     *,
     max_bytes: int | None = None,
     backup_count: int | None = None,
+    force: bool = False,
 ) -> dict[str, Any]:
     effective_max_bytes = DEFAULT_LOG_MAX_BYTES if max_bytes is None else max_bytes
     effective_backup_count = DEFAULT_LOG_BACKUP_COUNT if backup_count is None else backup_count
@@ -38,7 +39,7 @@ def rotate_log_file(
             return payload
         size_bytes = int(path.stat().st_size)
         payload["sizeBytes"] = size_bytes
-        if size_bytes <= int(effective_max_bytes):
+        if size_bytes <= int(effective_max_bytes) and not force:
             return payload
         path.parent.mkdir(parents=True, exist_ok=True)
         if int(effective_backup_count) <= 0:
@@ -61,6 +62,53 @@ def rotate_log_file(
     except Exception as exc:  # pragma: no cover - platform-specific filesystem race
         payload.update({"errorType": type(exc).__name__, "errorMessage": str(exc)})
     return payload
+
+
+def append_rotating_text(
+    path: Path,
+    text: str,
+    *,
+    max_bytes: int = DEFAULT_LOG_MAX_BYTES,
+    backup_count: int = DEFAULT_LOG_BACKUP_COUNT,
+    encoding: str = "utf-8",
+) -> dict[str, Any]:
+    """Rotate before a controlled append would exceed the configured limit."""
+    encoded = str(text).encode(encoding)
+    current_size = 0
+    try:
+        if path.is_file():
+            current_size = int(path.stat().st_size)
+    except OSError:
+        current_size = 0
+    result: dict[str, Any] = {
+        "path": str(path),
+        "maxBytes": int(max_bytes),
+        "backupCount": int(backup_count),
+        "rotated": False,
+        "writtenBytes": 0,
+        "errorType": "",
+        "errorMessage": "",
+    }
+    if int(max_bytes) <= 0 or len(encoded) > int(max_bytes):
+        result.update(
+            {
+                "errorType": "OutputLimitError",
+                "errorMessage": "single log append exceeds the configured current-file limit",
+            }
+        )
+        return result
+    if current_size > 0 and current_size + len(encoded) > int(max_bytes):
+        result.update(rotate_log_file(path, max_bytes=max_bytes, backup_count=backup_count, force=True))
+        if result.get("errorType"):
+            return result
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding=encoding) as handle:
+            handle.write(str(text))
+        result["writtenBytes"] = len(encoded)
+    except OSError as exc:
+        result.update({"errorType": type(exc).__name__, "errorMessage": str(exc)})
+    return result
 
 
 def read_log_tail_bytes(path: Path, *, max_bytes: int = DEFAULT_SCENE_RAW_TAIL_MAX_BYTES) -> bytes:
