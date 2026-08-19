@@ -10,6 +10,7 @@ import {
   getLauncherStatus,
   getLauncherState,
   onLauncherStateChanged,
+  refreshLauncherState,
   getRuntimeSummary,
   isLauncherControlPlaneNotReady,
   launcherEndpoint,
@@ -751,6 +752,7 @@ describe("launcher api IPC transport", () => {
     vi.stubGlobal("vibelutionLauncher", {
       launcherInvoke: vi.fn(),
       getLauncherState: vi.fn().mockResolvedValue(snapshot),
+      refreshLauncherState: vi.fn().mockResolvedValue({ ...snapshot, revision: 4 }),
       onLauncherStateChanged: vi.fn((listener: (payload: typeof snapshot) => void) => {
         stateListener = listener;
         return disposer;
@@ -759,6 +761,7 @@ describe("launcher api IPC transport", () => {
     const listener = vi.fn();
 
     expect(await getLauncherState()).toBe(snapshot);
+    expect((await refreshLauncherState()).revision).toBe(4);
     const dispose = onLauncherStateChanged(listener);
     stateListener?.(snapshot);
     expect(listener).toHaveBeenCalledWith(snapshot);

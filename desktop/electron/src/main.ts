@@ -3151,6 +3151,11 @@ ipcMain.handle(IPC_CHANNELS.getLauncherState, (event) => {
   return launcherStateStore.snapshot();
 });
 
+ipcMain.handle(IPC_CHANNELS.refreshLauncherState, async (event) => {
+  assertTrustedIpcSender(event, launcherIpcTrustedOrigins());
+  return await launcherStateStore.refresh("user_recheck");
+});
+
 async function startOrFocusWorkbenchFromProductEntryOnShell(): Promise<void> {
   const provider = windowProvider;
   if (provider === null) {

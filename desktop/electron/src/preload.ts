@@ -27,7 +27,8 @@ contextBridge.exposeInMainWorld("vibelutionLauncher", {
   },
   ...(isLauncherControlWindow
     ? {
-        launcherInvoke: (payload: unknown) => ipcRenderer.invoke(IPC_CHANNELS.launcherInvoke, payload)
+        launcherInvoke: (payload: unknown) => ipcRenderer.invoke(IPC_CHANNELS.launcherInvoke, payload),
+        refreshLauncherState: () => ipcRenderer.invoke(IPC_CHANNELS.refreshLauncherState)
       }
     : {})
 });

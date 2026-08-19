@@ -58,6 +58,7 @@ type LauncherIpcInvokePayload = {
 type LauncherIpcBridge = {
   launcherInvoke: (payload: LauncherIpcInvokePayload) => Promise<LauncherIpcInvokeResult>;
   getLauncherState?: () => Promise<LauncherStateSnapshotV1>;
+  refreshLauncherState?: () => Promise<LauncherStateSnapshotV1>;
   onLauncherStateChanged?: (listener: (snapshot: LauncherStateSnapshotV1) => void) => () => void;
 };
 
@@ -78,6 +79,9 @@ function launcherIpcBridge(): LauncherIpcBridge | null {
   return {
     launcherInvoke,
     ...(typeof stateBridge.getLauncherState === "function" ? { getLauncherState: stateBridge.getLauncherState } : {}),
+    ...(typeof stateBridge.refreshLauncherState === "function"
+      ? { refreshLauncherState: stateBridge.refreshLauncherState }
+      : {}),
     ...(typeof stateBridge.onLauncherStateChanged === "function"
       ? { onLauncherStateChanged: stateBridge.onLauncherStateChanged }
       : {}),
@@ -162,6 +166,18 @@ export function getLauncherState(): Promise<LauncherStateSnapshotV1> {
     throw new Error("Launcher state snapshot bridge is not available.");
   }
   return bridge.getLauncherState();
+}
+
+export function hasLauncherStateRefreshBridge() {
+  return typeof launcherIpcBridge()?.refreshLauncherState === "function";
+}
+
+export function refreshLauncherState(): Promise<LauncherStateSnapshotV1> {
+  const bridge = launcherIpcBridge();
+  if (typeof bridge?.refreshLauncherState !== "function") {
+    throw new Error("Launcher state refresh bridge is not available.");
+  }
+  return bridge.refreshLauncherState();
 }
 
 export function onLauncherStateChanged(listener: (snapshot: LauncherStateSnapshotV1) => void): () => void {

@@ -7,9 +7,10 @@ import {
   getLauncherBranchInstances,
   getLauncherState,
   hasLauncherStateBridge,
+  hasLauncherStateRefreshBridge,
   onLauncherStateChanged,
+  refreshLauncherState,
   requestBranchInstanceLifecycle,
-  type LauncherRegistryReconciliationItem,
   getLauncherStatus,
   getLauncherDeveloperNoiseOverview,
   getLauncherMaintenanceSummary,
@@ -62,6 +63,8 @@ import {
   shouldApplyLifecycleMutationFeedback,
   type LifecycleIntentTable,
 } from "./LauncherBranchInstancesPanel.model";
+import { formatUnknownLeaseDiagnostics } from "./launcherRegistryDiagnostics";
+import { LauncherRegistryDiagnosticsBanner } from "./LauncherRegistryDiagnosticsBanner";
 import { buildAllInstanceMonitorRows } from "./LauncherProcessMonitor.binding";
 import { LauncherProcessMonitorPanel, type LauncherProcessRow } from "./LauncherProcessMonitorPanel";
 
@@ -411,30 +414,6 @@ function compactDate(value: string, locale: string) {
     minute: "2-digit",
     second: "2-digit",
   }).format(date);
-}
-
-function formatUnknownLeaseDiagnostics(
-  items: LauncherRegistryReconciliationItem[],
-  uiLang: string,
-  locale: string,
-): string {
-  const rows = items
-    .filter((item) => {
-      const lease = String(item.portLeaseStatus || "").trim().toLowerCase();
-      return item.classification === "unknown" || lease === "quarantined" || lease === "reclaimable";
-    })
-    .map((item) => [
-      item.instanceId,
-      item.classification,
-      item.portLeaseStatus,
-      item.reasons.slice(0, 4).join("/"),
-      item.firstObservedAt ? compactDate(item.firstObservedAt, locale) : "",
-      item.nextReconcileAt ? compactDate(item.nextReconcileAt, locale) : "",
-    ].filter(Boolean).join(" · "));
-  if (rows.length === 0) {
-    return uiLang === "zh" ? "无" : "None";
-  }
-  return rows.slice(0, 6).join("; ");
 }
 
 function stateTone(state: string, ok = true) {
@@ -1491,6 +1470,23 @@ export function LauncherRoute() {
     enabled: stateBridgeAvailable,
     staleTime: Number.POSITIVE_INFINITY,
   });
+  const stateRefreshAvailable = hasLauncherStateRefreshBridge();
+  const recheckRegistryMutation = useMutation({
+    mutationFn: refreshLauncherState,
+    onSuccess: (snapshot) => {
+      queryClient.setQueryData(queryKeys.launcherState(), snapshot);
+      setNotice({
+        tone: "success",
+        text: lang === "zh" ? "已重新核对 registry。" : "Registry rechecked.",
+      });
+    },
+    onError: (error) => {
+      setNotice({
+        tone: "error",
+        text: error instanceof Error ? error.message : String(error),
+      });
+    },
+  });
   const statusQuery = useQuery({
     queryKey: queryKeys.launcherStatus(),
     queryFn: getLauncherStatus,
@@ -2545,18 +2541,16 @@ export function LauncherRoute() {
       </div>
 
       {stateBridgeAvailable && stateQuery.data ? (
-        <VStateSurface
+        <LauncherRegistryDiagnosticsBanner
           className={styles.notice}
-          tone={stateQuery.data.freshness === "stale" ? "unavailable" : stateQuery.data.freshness === "refreshing" ? "loading" : "info"}
-          title={[
-            uiLang === "zh" ? "Launcher 状态快照" : "Launcher state snapshot",
-            compactDate(stateQuery.data.observedAt, locale),
-            stateQuery.data.freshness,
-            stateQuery.data.cleanup.reconciliation.active
-              ? `${uiLang === "zh" ? "协调中" : "reconciling"}: ${stateQuery.data.cleanup.reconciliation.reason || "-"}`
-              : "",
-            stateQuery.data.staleReason || "",
-          ].filter(Boolean).join(" · ")}
+          uiLang={uiLang}
+          locale={locale}
+          snapshot={stateQuery.data}
+          classifications={registryClassifications}
+          canRecheck={stateRefreshAvailable}
+          rechecking={recheckRegistryMutation.isPending}
+          onRecheck={() => recheckRegistryMutation.mutate()}
+          onNotice={(next) => setNotice(next)}
         />
       ) : null}
 
