@@ -77,6 +77,13 @@ export function claimElectronDesktopShellOwner(
     updatedAt: new Date().toISOString(),
   };
   atomicWriteJson(paths.canonical, record);
+  if (paths.checkout && paths.checkout !== paths.canonical && existsSync(paths.checkout)) {
+    try {
+      unlinkSync(paths.checkout);
+    } catch {
+      // Stale checkout owner is compatibility residue, not a claim failure.
+    }
+  }
   return record;
 }
 

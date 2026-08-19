@@ -148,6 +148,9 @@ def test_native_launcher_python_bridge_uses_no_console_outer_runtime():
     assert ": shellRoot));" in bridge_source
     assert "WorkingDirectory = shellRoot" in bridge_source
     assert "Quote(projectDir)" not in bridge_source
+    assert "process.StandardOutput.ReadToEnd()" not in bridge_source
+    assert "process.BeginOutputReadLine();" in bridge_source
+    assert "process.BeginErrorReadLine();" in bridge_source
 
 
 def test_native_launcher_resolves_desktop_shell_workspace_from_worktrees():

@@ -444,7 +444,27 @@ export function instanceMatchesQuery(item: LauncherBranchInstance, query: string
   return haystack.includes(needle);
 }
 
-export function instanceMatchesFilters(item: LauncherBranchInstance, filters: InstanceListFilters): boolean {
+export function instanceMustRemainVisible(
+  item: LauncherBranchInstance,
+  pending?: LifecyclePendingInput,
+): boolean {
+  if (item.kind === "main" || item.current || item.id === "main") {
+    return true;
+  }
+  if (instanceHasLiveRuntime(item)) {
+    return true;
+  }
+  return instanceRuntimeState(item, pending) !== "stopped";
+}
+
+export function instanceMatchesFilters(
+  item: LauncherBranchInstance,
+  filters: InstanceListFilters,
+  pending?: LifecyclePendingInput,
+): boolean {
+  if (instanceMustRemainVisible(item, pending)) {
+    return true;
+  }
   if (filters.dirty && !item.dirty) {
     return false;
   }
@@ -458,8 +478,9 @@ export function filterBranchInstances(
   items: readonly LauncherBranchInstance[],
   query: string,
   filters: InstanceListFilters = {},
+  pending?: LifecyclePendingInput,
 ): LauncherBranchInstance[] {
-  return items.filter((item) => instanceMatchesQuery(item, query) && instanceMatchesFilters(item, filters));
+  return items.filter((item) => instanceMatchesQuery(item, query) && instanceMatchesFilters(item, filters, pending));
 }
 
 function withPort(label: string, port: number): string {

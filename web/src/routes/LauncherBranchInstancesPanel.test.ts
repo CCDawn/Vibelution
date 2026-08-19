@@ -454,6 +454,45 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(filterBranchInstances([dirty, unmerged, clean], "", { unmerged: true }).map((item) => item.id)).toEqual(["worktree:unmerged"]);
   });
 
+  it("keeps main and live rows visible when git hygiene filters are on", () => {
+    const main = instance({
+      id: "main",
+      kind: "main",
+      branch: "main",
+      shortName: "main",
+      mergedToMain: true,
+      runtime: {
+        ...instance().runtime,
+        lifecycleState: "running",
+        window: { open: true, pid: 42, title: "main 台", titleObserved: true },
+      },
+    });
+    const runningMerged = instance({
+      id: "worktree:live",
+      mergedToMain: true,
+      runtime: {
+        ...instance().runtime,
+        lifecycleState: "running",
+        backend: { ...instance().runtime.backend, alive: true, listening: true, pid: 88 },
+      },
+    });
+    const startingMerged = instance({
+      id: "worktree:starting",
+      mergedToMain: true,
+      runtime: { ...instance().runtime, lifecycleState: "starting" },
+    });
+    const stoppedMerged = instance({ id: "worktree:merged", mergedToMain: true });
+    const unmerged = instance({ id: "worktree:unmerged", mergedToMain: false });
+
+    expect(
+      filterBranchInstances(
+        [main, runningMerged, startingMerged, stoppedMerged, unmerged],
+        "",
+        { unmerged: true },
+      ).map((item) => item.id),
+    ).toEqual(["main", "worktree:live", "worktree:starting", "worktree:unmerged"]);
+  });
+
   it("pages startable or maintenance lists at 8 rows", () => {
     const items = Array.from({ length: 11 }, (_, index) => instance({ id: `worktree:${index + 1}` }));
     expect(paginateItems(items, 1).items).toHaveLength(8);

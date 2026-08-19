@@ -290,8 +290,8 @@ export function LauncherBranchInstancesPanel({
   );
 
   const visibleItems = useMemo(
-    () => filterBranchInstances(annotatedItems, query, filters),
-    [annotatedItems, filters, query],
+    () => filterBranchInstances(annotatedItems, query, filters, pendingOperation),
+    [annotatedItems, filters, pendingOperation, query],
   );
   const grouped = useMemo(() => groupBranchInstances(visibleItems, pendingOperation), [pendingOperation, visibleItems]);
   const allItems = useMemo(

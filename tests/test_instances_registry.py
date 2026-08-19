@@ -571,6 +571,94 @@ def test_reconcile_legacy_unknown_quarantines_port_but_keeps_metadata(registry_p
     assert registry.get_instance("replacement")["port"] == 8765
 
 
+def test_reconcile_missing_path_closes_leftover_open_claim_without_deleting_unknown(registry_path):
+    registry.upsert_instance(
+        "ghost-start",
+        projectRoot="C:/missing/ghost-start",
+        spawnPid=999,
+        port=8004,
+        desiredState="open",
+        status="starting",
+        phase="starting",
+        generation=1,
+        commandId="cmd-ghost",
+        deadlineAt="2026-08-18T04:52:41Z",
+    )
+    summary = registry.reconcile_registry(
+        git_worktree_roots=[],
+        electron_window_instance_ids=[],
+        now=datetime(2026, 8, 19, 6, tzinfo=UTC),
+        identity_inspector=lambda _identity: {"status": "dead"},
+        listener_inspector=lambda _port, _identities: {"status": "none"},
+        pid_existence_inspector=lambda _pid: False,
+    )
+    stored = registry.get_instance("ghost-start")
+
+    assert summary["removedInstanceIds"] == []
+    assert summary["instances"][0]["classification"] == "unknown"
+    assert "closed_missing_worktree_claim" in summary["instances"][0]["reasons"]
+    assert stored["desiredState"] == "closed"
+    assert stored["status"] == "closed"
+    assert stored["phase"] == "failed"
+    assert stored["failureMessage"] == "worktree_path_missing"
+    assert stored["port"] == 8004
+
+
+def test_reconcile_legacy_running_without_deadline_closes_when_path_missing(registry_path):
+    registry.upsert_instance(
+        "ghost-running",
+        projectRoot="C:/missing/ghost-running",
+        port=8000,
+        status="running",
+    )
+    summary = registry.reconcile_registry(
+        git_worktree_roots=[],
+        electron_window_instance_ids=[],
+        now=datetime(2026, 8, 19, 6, tzinfo=UTC),
+        identity_inspector=lambda _identity: {"status": "dead"},
+        listener_inspector=lambda _port, _identities: {"status": "external", "pid": 1},
+        pid_existence_inspector=lambda _pid: False,
+    )
+    stored = registry.get_instance("ghost-running")
+
+    assert summary["removedInstanceIds"] == []
+    assert stored["status"] == "closed"
+    assert stored.get("portLeaseStatus") not in {"quarantined", "reclaimable"}
+
+
+def test_reconcile_missing_path_is_orphan_before_deadline(registry_path):
+    registry.upsert_instance(
+        "orphan",
+        **{
+            **_safe_orphan_entry("C:/missing/orphan"),
+            "deadlineAt": "2026-08-19T07:00:00Z",
+            "inFlightDeadlineAt": "2026-08-19T07:00:00Z",
+        },
+    )
+    first_at = datetime(2026, 8, 19, 6, tzinfo=UTC)
+    inspect_dead = lambda _identity: {"status": "dead"}
+    inspect_none = lambda _port, _identities: {"status": "none"}
+    first = registry.reconcile_registry(
+        git_worktree_roots=[],
+        electron_window_instance_ids=[],
+        now=first_at,
+        identity_inspector=inspect_dead,
+        listener_inspector=inspect_none,
+    )
+    confirmed = registry.reconcile_registry(
+        git_worktree_roots=[],
+        electron_window_instance_ids=[],
+        now=first_at + timedelta(seconds=10),
+        identity_inspector=inspect_dead,
+        listener_inspector=inspect_none,
+    )
+
+    assert first["instances"][0]["classification"] == "orphan"
+    assert first["removedInstanceIds"] == []
+    assert confirmed["removedInstanceIds"] == ["orphan"]
+    assert registry.get_instance("orphan") == {}
+
+
 def test_reconcile_legacy_unknown_does_not_quarantine_when_pid_still_exists(registry_path):
     registry.upsert_instance(
         "legacy",

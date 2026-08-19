@@ -196,6 +196,12 @@ def write_desktop_shell_owner(
     from core.infrastructure.atomic_io import atomic_write_json
 
     atomic_write_json(path, record)
+    checkout = checkout_desktop_shell_owner_path(project_root)
+    if checkout != path:
+        try:
+            checkout.unlink()
+        except OSError:
+            pass
     return record
 
 

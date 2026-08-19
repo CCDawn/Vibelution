@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { resolveDesktopShellOwnerPaths } from "../src/lifecycle/projectStoragePaths.js";
@@ -47,6 +47,14 @@ describe("desktopShellOwner", () => {
       const written = JSON.parse(readFileSync(paths.canonical!, "utf8")) as { pid: number; createTime: number };
       expect(written.pid).toBe(4242);
       expect(written.createTime).toBe(100);
+      expect(existsSync(paths.checkout)).toBe(false);
+      mkdirSync(dirname(paths.checkout), { recursive: true });
+      writeFileSync(paths.checkout, JSON.stringify({ schemaVersion: 1, owner: "electron", pid: 37812 }), "utf8");
+      claimElectronDesktopShellOwner(root, {
+        pid: 4242,
+        createTime: 100,
+        executable: "C:/electron.exe"
+      });
       expect(existsSync(paths.checkout)).toBe(false);
       releaseElectronDesktopShellOwner(root, { pid: 4242, createTime: 100, executable: "C:/electron.exe" });
       expect(existsSync(paths.canonical!)).toBe(false);

@@ -418,6 +418,33 @@ def _deadline_expired(entry: dict[str, Any], now: datetime) -> bool:
     return bool(deadline is not None and deadline <= now)
 
 
+_OPEN_REGISTRY_STATUSES = frozenset({"starting", "restarting", "running", "steady", "stopping"})
+_OPEN_DESIRED_STATES = frozenset({"open", "opening"})
+_OPEN_PHASES = frozenset({"starting", "restarting", "opening", "stopping", "steady"})
+
+
+def _close_leftover_open_claim(entry: dict[str, Any], now: datetime) -> bool:
+    """Close desired/status leftovers for a missing worktree without deleting metadata."""
+    changed = False
+    status = str(entry.get("status") or "").strip().lower()
+    desired = str(entry.get("desiredState") or "").strip().lower()
+    phase = str(entry.get("phase") or "").strip().lower()
+    if status in _OPEN_REGISTRY_STATUSES:
+        entry["status"] = "closed"
+        changed = True
+    if desired in _OPEN_DESIRED_STATES:
+        entry["desiredState"] = "closed"
+        changed = True
+    if phase in _OPEN_PHASES:
+        entry["phase"] = "failed"
+        changed = True
+    if changed and not str(entry.get("failureMessage") or "").strip():
+        entry["failureMessage"] = "worktree_path_missing"
+    if changed:
+        _touch_entry(entry, now=now)
+    return changed
+
+
 def _cleanup_fingerprint(instance_id: str, entry: dict[str, Any], identities: list[dict[str, Any]]) -> str:
     facts = {
         "instanceId": instance_id,
@@ -506,12 +533,23 @@ def _reconcile_payload(
         elif window_open:
             classification = "stale"
             reasons.append("electron_window_open")
-        elif worktree_candidate and all_inactive and not has_owned_listener and deadline_expired:
+        elif worktree_candidate and all_inactive and not has_owned_listener and (deadline_expired or root_missing):
             classification = "orphan"
             reasons.append("safe_metadata_cleanup_candidate")
         else:
             classification = "stale"
             reasons.append("inactive_but_not_safe_to_remove")
+
+        if (
+            root_missing
+            and not window_open
+            and not any_active
+            and not has_owned_listener
+            and pids_all_missing
+            and _close_leftover_open_claim(entry, now)
+        ):
+            changed = True
+            reasons.append("closed_missing_worktree_claim")
 
         observation_kind = ""
         if classification == "orphan" and not window_open:
@@ -519,7 +557,7 @@ def _reconcile_payload(
         elif (
             classification == "unknown"
             and worktree_candidate
-            and deadline_expired
+            and (deadline_expired or root_missing)
             and not window_open
             and not has_owned_listener
             and not has_external_listener
@@ -558,20 +596,23 @@ def _reconcile_payload(
                     instances.pop(instance_id, None)
                     removed.append(instance_id)
                     changed = True
-                elif lease_status not in PORT_LEASE_RECLAIMABLE:
-                    entry["portLeaseStatus"] = "reclaimable"
-                    entry["portLease"] = {
-                        "status": "reclaimable",
-                        "reason": "legacy_unknown_idle",
-                        "quarantinedAt": _iso_timestamp(now),
-                    }
-                    if isinstance(observation, dict):
-                        stored_observation = dict(observation)
-                        stored_observation["confirmedAt"] = _iso_timestamp(now)
-                        entry["cleanupObservation"] = stored_observation
-                    lease_status = "reclaimable"
-                    _touch_entry(entry, now=now)
-                    changed = True
+                else:
+                    if lease_status not in PORT_LEASE_RECLAIMABLE:
+                        entry["portLeaseStatus"] = "reclaimable"
+                        entry["portLease"] = {
+                            "status": "reclaimable",
+                            "reason": "legacy_unknown_idle",
+                            "quarantinedAt": _iso_timestamp(now),
+                        }
+                        if isinstance(observation, dict):
+                            stored_observation = dict(observation)
+                            stored_observation["confirmedAt"] = _iso_timestamp(now)
+                            entry["cleanupObservation"] = stored_observation
+                        lease_status = "reclaimable"
+                        _touch_entry(entry, now=now)
+                        changed = True
+                    if _close_leftover_open_claim(entry, now):
+                        changed = True
             elif not same_observation:
                 next_at = now + timedelta(seconds=_CLEANUP_OBSERVATION_GRACE_SECONDS)
                 public_classification = "orphan" if observation_kind == "orphan" else "unknown"

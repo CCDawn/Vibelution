@@ -1252,17 +1252,25 @@ internal static class VibelutionLauncher
             {
                 throw new InvalidOperationException("Failed to start desktop entry Python bridge.");
             }
-            string stdout = process.StandardOutput.ReadToEnd();
-            string stderr = process.StandardError.ReadToEnd();
+            // Drain stdout/stderr asynchronously. ReadToEnd() before WaitForExit
+            // deadlocks when a grandchild (Electron) inherits the redirected pipe.
+            var stdout = new StringBuilder();
+            var stderr = new StringBuilder();
+            process.OutputDataReceived += (sender, e) => { if (e.Data != null) stdout.AppendLine(e.Data); };
+            process.ErrorDataReceived += (sender, e) => { if (e.Data != null) stderr.AppendLine(e.Data); };
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
             int waitMs = timeoutMs > 0 ? timeoutMs : 45000;
             if (!process.WaitForExit(waitMs))
             {
                 try { process.Kill(); } catch { }
+                try { process.WaitForExit(2000); } catch { }
                 throw new TimeoutException("Desktop entry Python bridge timed out.");
             }
+            process.WaitForExit();
             if (process.ExitCode != 0)
             {
-                throw new InvalidOperationException("Desktop entry Python bridge failed: " + ShortMessage(stderr + " " + stdout));
+                throw new InvalidOperationException("Desktop entry Python bridge failed: " + ShortMessage(stderr.ToString() + " " + stdout.ToString()));
             }
         }
     }

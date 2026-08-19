@@ -80,7 +80,7 @@ def test_checkout_owner_is_compat_read_only(tmp_path: Path, monkeypatch) -> None
     assert written is not None
     canonical = canonical_desktop_shell_owner_path(root)
     assert canonical is not None and canonical.is_file()
-    assert checkout.is_file()
+    assert not checkout.exists()
     assert json.loads(canonical.read_text(encoding="utf-8"))["pid"] == os.getpid()
     assert json.loads(canonical.read_text(encoding="utf-8")).get("updatedAt")
 
