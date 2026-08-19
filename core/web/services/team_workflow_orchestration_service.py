@@ -523,6 +523,7 @@ from core.web.services.team_workflow.experiment import (
     run_experiment_smoke_run,
 )
 from core.web.services.team_workflow.challenge_question_runs import (
+    challenge_question_run_summary,
     bind_challenge_research_task_model,
     derive_challenge_required_model_policy,
     get_challenge_question_run_detail,
@@ -532,6 +533,10 @@ from core.web.services.team_workflow.challenge_question_runs import (
     register_challenge_task_model_evidence,
     register_challenge_question_output,
     review_challenge_question_output,
+)
+from core.web.services.team_workflow.challenge_program import (
+    build_competition_program_projection,
+    build_challenge_submission_readiness,
 )
 from core.web.services.team_workflow.challenge_cup_dev_controls import (
     ChallengeCupDevControlsError,
@@ -1250,3 +1255,15 @@ _SOURCE_COLLECTION_QUERY_TERM_TRANSLATIONS = {
     "注意": ("attention",),
     "机制": ("mechanism",),
 }
+
+
+def get_challenge_submission_readiness(team_id: str) -> dict[str, Any]:
+    """Return the canonical, user-facing Challenge Cup submission readiness."""
+    team_service.get_team(team_id)
+    projection = build_competition_program_projection(
+        question_run_summary=challenge_question_run_summary(team_id),
+    )
+    return build_challenge_submission_readiness(
+        team_id=team_id,
+        competition_program_projection=projection,
+    )

@@ -53,6 +53,16 @@ const devControlsQueryState = vi.hoisted((): { current: QueryState } => ({
   },
 }));
 
+const submissionReadinessQueryState = vi.hoisted((): { current: QueryState } => ({
+  current: {
+    isPending: false,
+    isError: false,
+    error: null,
+    data: undefined,
+    refetch: () => {},
+  },
+}));
+
 const mutationState = vi.hoisted(() => {
   const blank = (): MutationMock => ({
     isPending: false,
@@ -90,6 +100,9 @@ vi.mock("@tanstack/react-query", () => ({
     const key = (options?.queryKey ?? []) as readonly unknown[];
     if (key.includes("dev-controls")) {
       return devControlsQueryState.current;
+    }
+    if (key.includes("submission-readiness")) {
+      return submissionReadinessQueryState.current;
     }
     if (key.includes("question-runs")) {
       return questionQueryState.current;
@@ -145,6 +158,16 @@ function setMainData(data: { questionStatus: unknown; experimentStatus: unknown 
 
 function setDevControls(data: unknown) {
   Object.assign(devControlsQueryState.current, {
+    isPending: false,
+    isError: false,
+    error: null,
+    data,
+    refetch: () => {},
+  });
+}
+
+function setSubmissionReadiness(data: unknown) {
+  Object.assign(submissionReadinessQueryState.current, {
     isPending: false,
     isError: false,
     error: null,
@@ -438,6 +461,27 @@ function emptyMainData() {
   };
 }
 
+function submissionReadiness() {
+  return {
+    schemaVersion: 1,
+    teamId: "team-1",
+    status: "blocked",
+    readyCount: 0,
+    requiredCount: 5,
+    blockerCount: 5,
+    artifacts: [
+      { key: "full_catalog_results", label: "125 题结果包", required: true, status: "blocked", detail: "0/125 题已通过提交门。", blocker: "full_catalog_results_incomplete", primaryAction: { kind: "repair", target: "full-catalog-results", label: "修复缺失结果" } },
+      { key: "deep_experiment_suite", label: "两个深实验包", required: true, status: "blocked", detail: "0/2 个独立深实验已通过提交门。", blocker: "deep_experiment_suite_incomplete", primaryAction: { kind: "repair", target: "deep-experiment-suite", label: "修复深实验" } },
+      { key: "technical_proposal_pdf", label: "20 页以内技术方案 PDF", required: true, status: "blocked", detail: "尚无服务端确认的 PDF 提交包收据。", blocker: "technical_proposal_pdf_not_packaged", primaryAction: { kind: "export", target: "submission-package", label: "生成提交清单" } },
+      { key: "demo_video", label: "10 分钟以内演示视频", required: false, status: "optional", detail: "可选附件尚无服务端确认收据。", blocker: "", primaryAction: { kind: "export", target: "submission-package", label: "查看交付清单" } },
+      { key: "test_api", label: "稳定测试 API", required: true, status: "blocked", detail: "尚无可提交 API 入口与演练收据。", blocker: "test_api_not_packaged", primaryAction: { kind: "export", target: "submission-package", label: "生成提交清单" } },
+      { key: "source_code", label: "源码与复现说明", required: true, status: "blocked", detail: "尚无干净克隆复现与源码提交包收据。", blocker: "source_code_not_packaged", primaryAction: { kind: "export", target: "submission-package", label: "生成提交清单" } },
+    ],
+    blockers: [{ code: "full_catalog_results_incomplete", label: "125 题结果包", action: { kind: "repair", target: "full-catalog-results", label: "修复缺失结果" } }],
+    programSummary: { title: "Challenge Cup", questionCount: 125, approvedQuestionCount: 0, deepExperimentCount: 2, approvedDeepExperimentCount: 0 },
+  };
+}
+
 function findButton(container: HTMLElement, text: string): HTMLButtonElement | undefined {
   return Array.from(container.querySelectorAll("button"))
     .find((button) => button.textContent?.includes(text)) as HTMLButtonElement | undefined;
@@ -445,7 +489,7 @@ function findButton(container: HTMLElement, text: string): HTMLButtonElement | u
 
 describe("ChallengeMvpProgressPanel", () => {
   beforeEach(() => {
-    for (const state of [questionQueryState.current, experimentQueryState.current, devControlsQueryState.current]) {
+    for (const state of [questionQueryState.current, experimentQueryState.current, devControlsQueryState.current, submissionReadinessQueryState.current]) {
       Object.assign(state, {
         isPending: false,
         isError: false,
@@ -454,8 +498,24 @@ describe("ChallengeMvpProgressPanel", () => {
         refetch: () => {},
       });
     }
+    setSubmissionReadiness(submissionReadiness());
     mutationState.reset();
     queryClientMock.invalidateQueries.mockClear();
+  });
+
+  it("keeps submission readiness as one low-density source with a single primary action", () => {
+    const markup = renderToStaticMarkup(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />);
+
+    expect(markup).toContain('data-vui="challenge-submission-readiness"');
+    expect(markup).toContain("125 题结果包");
+    expect(markup).toContain("两个深实验包");
+    expect(markup).toContain("20 页以内技术方案 PDF");
+    expect(markup).toContain("10 分钟以内演示视频");
+    expect(markup).toContain("稳定测试 API");
+    expect(markup).toContain("源码与复现说明");
+    expect(markup).toContain("查看阻塞项");
+    expect(markup).not.toContain("themeId");
+    expect(markup).not.toContain("campaignId");
   });
 
   it("renders Program v2, question rows, and real DEV readiness/boundary data", () => {
@@ -738,6 +798,7 @@ describe("ChallengeMvpProgressPanel", () => {
   it("uses the canonical query keys so the planning status dedupes with other panels", () => {
     expect(panelSource).toContain("queryKeys.challengeQuestionRunStatus(teamId)");
     expect(panelSource).toContain("experimentPlanningStatusQueryKey(teamId)");
+    expect(panelSource).toContain("queryKeys.challengeSubmissionReadiness(teamId)");
     expect(panelSource).not.toContain('"program-v2"');
   });
 

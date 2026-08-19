@@ -17,6 +17,7 @@ describe("team experiment API", () => {
 
   it("owns experiment status, catalog, candidate, and write transports", () => {
     expect(apiSource).toContain("export function fetchExperimentPlanningStatus");
+    expect(apiSource).toContain("export function fetchChallengeSubmissionReadiness");
     expect(apiSource).toContain("export function fetchExperimentMethodCatalog");
     expect(apiSource).toContain("export function fetchTeamWorkflowCandidates");
     expect(apiSource).toContain("export function createTeamExperimentPlan");
@@ -71,6 +72,7 @@ describe("team experiment API", () => {
     expect(apiSource).toContain("export function runChallengeCupDevReadiness");
     expect(apiSource).toContain("export function runChallengeCupDevBatch");
     expect(apiSource).toContain("workflow-orchestration/challenge-program/dev-controls");
+    expect(apiSource).toContain("workflow-orchestration/challenge-program/submission-readiness");
     expect(apiSource).toContain("workflow-orchestration/challenge-program/dev-controls/readiness");
     expect(apiSource).toContain("workflow-orchestration/challenge-program/dev-controls/batches/");
     expect(apiSource).toContain("dev-controls/batches/${encodeURIComponent(planId)}");

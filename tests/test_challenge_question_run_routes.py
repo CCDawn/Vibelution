@@ -83,3 +83,42 @@ def test_get_challenge_question_detail_fails_closed_instead_of_loading_active_pr
 
     assert response.status_code == 404
     assert "challenge_question_run_not_found" in response.json()["detail"]
+
+
+def test_get_challenge_submission_readiness_returns_single_typed_artifact_list(monkeypatch):
+    monkeypatch.setattr(
+        team_workflows_experiment,
+        "get_challenge_submission_readiness",
+        lambda team_id: {
+            "schemaVersion": 1,
+            "teamId": team_id,
+            "status": "blocked",
+            "readyCount": 0,
+            "requiredCount": 5,
+            "blockerCount": 5,
+            "artifacts": [
+                {
+                    "key": "full_catalog_results",
+                    "label": "125 题结果包",
+                    "required": True,
+                    "status": "blocked",
+                    "detail": "0/125 题已通过提交门。",
+                    "blocker": "full_catalog_results_incomplete",
+                    "primaryAction": {
+                        "kind": "repair",
+                        "target": "full-catalog-results",
+                        "label": "修复缺失结果",
+                    },
+                }
+            ],
+            "blockers": [],
+            "programSummary": {},
+        },
+    )
+
+    response = _client().get(
+        "/api/teams/research-team/workflow-orchestration/challenge-program/submission-readiness"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["artifacts"][0]["primaryAction"]["kind"] == "repair"

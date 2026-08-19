@@ -62,6 +62,36 @@ class ChallengeQuestionRunStatusResponse(BaseModel):
     storePath: str = ""
 
 
+class SubmissionReadinessAction(BaseModel):
+    kind: str = ""
+    target: str = ""
+    label: str = ""
+
+
+class SubmissionReadinessArtifact(BaseModel):
+    key: str = ""
+    label: str = ""
+    required: bool = False
+    status: str = ""
+    detail: str = ""
+    blocker: str = ""
+    primaryAction: SubmissionReadinessAction = Field(default_factory=SubmissionReadinessAction)
+
+
+class ChallengeSubmissionReadinessResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    schemaVersion: int = 0
+    teamId: str = ""
+    status: str = ""
+    readyCount: int = 0
+    requiredCount: int = 0
+    blockerCount: int = 0
+    artifacts: list[SubmissionReadinessArtifact] = Field(default_factory=list)
+    blockers: list[dict[str, Any]] = Field(default_factory=list)
+    programSummary: dict[str, Any] = Field(default_factory=dict)
+
+
 class CandidateStoreListResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 

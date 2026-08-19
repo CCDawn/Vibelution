@@ -9,6 +9,7 @@ from ._router import router
 from .experiment_models import (
     CandidateStoreListResponse,
     CandidateStoreValidationResponse,
+    ChallengeSubmissionReadinessResponse,
     ChallengeQuestionRunStatusResponse,
     ExperimentMethodCatalogResponse,
     ExperimentPlanningStatusResponse,
@@ -39,6 +40,20 @@ def team_workflow_challenge_question_run_status(team_id: str) -> dict:
         return get_challenge_question_run_status(team_id)
     except TeamNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get(
+    "/teams/{team_id}/workflow-orchestration/challenge-program/submission-readiness",
+    response_model=ChallengeSubmissionReadinessResponse,
+    response_model_exclude_unset=True,
+)
+def team_workflow_challenge_submission_readiness(team_id: str) -> dict:
+    try:
+        return get_challenge_submission_readiness(team_id)
+    except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (TeamServiceError, TeamWorkflowOrchestrationError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get(

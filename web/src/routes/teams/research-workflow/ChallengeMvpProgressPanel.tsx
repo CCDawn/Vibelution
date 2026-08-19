@@ -23,12 +23,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getChallengeQuestionRunStatus } from "../../../api/challengeQuestionRuns";
 import { queryKeys } from "../../../api/queryKeys";
 import {
+  fetchChallengeSubmissionReadiness,
   fetchChallengeCupDevControlSnapshot,
   fetchExperimentPlanningStatus,
   runChallengeCupDevBatch,
   runChallengeCupDevReadiness,
 } from "../../../api/teamExperiment";
+import { exportResearchDeliverables } from "../../../api/teamResearchOps";
 import type {
+  ChallengeSubmissionReadiness,
   ChallengeCupDevBatchProjection,
   ChallengeCupDevReadinessProjection,
 } from "../../../api/types/challengeCup";
@@ -129,6 +132,12 @@ export function ChallengeMvpProgressPanel({
     enabled: Boolean(teamId.trim()),
     staleTime: 30_000,
   });
+  const submissionReadinessQuery = useQuery({
+    queryKey: queryKeys.challengeSubmissionReadiness(teamId),
+    queryFn: () => fetchChallengeSubmissionReadiness<ChallengeSubmissionReadiness>(teamId),
+    enabled: Boolean(teamId.trim()),
+    staleTime: 30_000,
+  });
 
   const devControlsKey = queryKeys.challengeCupDevControlsSnapshot(teamId);
   const devControlsQuery = useQuery({
@@ -190,6 +199,10 @@ export function ChallengeMvpProgressPanel({
     mutationFn: repairDev5,
     onSuccess: () => refreshDevControls(),
   });
+  const exportMutation = useMutation({
+    mutationFn: () => exportResearchDeliverables(teamId, { requestedByAgent: "Challenge Cup Delivery" }),
+    onSuccess: () => void submissionReadinessQuery.refetch(),
+  });
 
   const program = experimentStatusQuery.data?.competitionProgramProjection;
   const summary = questionStatusQuery.data?.summary;
@@ -215,6 +228,26 @@ export function ChallengeMvpProgressPanel({
     ?? dev5Mutation.error
     ?? repairDev1Mutation.error
     ?? repairDev5Mutation.error;
+
+  const submissionReadiness = submissionReadinessQuery.data;
+  const submissionBlocker = submissionReadiness?.blockers[0];
+  const submissionAction = submissionBlocker?.action ?? {
+    kind: "export",
+    target: "submission-package",
+    label: zh ? "导出提交清单" : "Export submission checklist",
+  };
+  const submissionActionPending = exportMutation.isPending || submissionReadinessQuery.isPending;
+  const runSubmissionAction = () => {
+    if (submissionAction.kind === "repair" && submissionAction.target === "full-catalog-results") {
+      onOpenQuestion("SCI-001");
+      return;
+    }
+    if (submissionAction.kind === "repair" && submissionAction.target === "deep-experiment-suite") {
+      onOpenQuestion("SCI-091");
+      return;
+    }
+    exportMutation.mutate();
+  };
 
   const programRetry = (
     <VButton type="button" variant="secondary" onClick={() => void experimentStatusQuery.refetch()}>
@@ -319,6 +352,59 @@ export function ChallengeMvpProgressPanel({
         <VEmptyState title={zh ? "Program v2 状态不可用" : "Program v2 unavailable"} className={styles.empty} actions={programRetry}>
           {zh ? "后端尚未提供 competitionProgramProjection。" : "competitionProgramProjection is not available."}
         </VEmptyState>
+      )}
+
+      {submissionReadinessQuery.isPending ? (
+        <VStateSurface tone="loading" title={zh ? "读取提交包就绪状态" : "Loading submission readiness"} className={styles.fill} />
+      ) : submissionReadinessQuery.isError || !submissionReadiness ? (
+        <VStateSurface
+          tone="error"
+          title={zh ? "提交包状态不可用" : "Submission readiness unavailable"}
+          className={styles.fill}
+          actions={<VButton type="button" variant="secondary" onClick={() => void submissionReadinessQuery.refetch()}>{zh ? "重试" : "Retry"}</VButton>}
+        />
+      ) : (
+        <section className={styles.submissionReadiness} aria-label={zh ? "挑战杯提交包就绪状态" : "Challenge Cup submission readiness"} data-vui="challenge-submission-readiness">
+          <div className={styles.sectionHeader}>
+            <div>
+              <strong>{zh ? "提交包" : "Submission package"}</strong>
+              <div className={styles.submissionSummary}>
+                {zh
+                  ? `${submissionReadiness.readyCount}/${submissionReadiness.requiredCount} 项必需材料就绪`
+                  : `${submissionReadiness.readyCount}/${submissionReadiness.requiredCount} required items ready`}
+              </div>
+            </div>
+            <VStatusChip tone={submissionReadiness.status === "ready" ? "success" : "warning"}>
+              {submissionReadiness.status === "ready" ? (zh ? "可提交" : "Ready") : (zh ? `${submissionReadiness.blockerCount} 项待处理` : `${submissionReadiness.blockerCount} blockers`)}
+            </VStatusChip>
+          </div>
+          <div className={styles.submissionGrid}>
+            {submissionReadiness.artifacts.map((artifact) => (
+              <div className={styles.submissionItem} key={artifact.key}>
+                <span className={styles.submissionItemLabel}>{artifact.label}</span>
+                <VStatusChip tone={artifact.status === "ready" ? "success" : artifact.status === "optional" ? "neutral" : "warning"}>
+                  {artifact.status === "ready" ? (zh ? "已就绪" : "Ready") : artifact.status === "optional" ? (zh ? "可选" : "Optional") : (zh ? "待处理" : "Blocked")}
+                </VStatusChip>
+              </div>
+            ))}
+          </div>
+          <div className={styles.submissionActionRow}>
+            <VButton type="button" variant="primary" isPending={submissionActionPending} isDisabled={submissionActionPending} onClick={runSubmissionAction}>
+              {submissionAction.label}
+            </VButton>
+            <VButton type="button" variant="ghost" onClick={() => void submissionReadinessQuery.refetch()}>
+              {zh ? "刷新" : "Refresh"}
+            </VButton>
+          </div>
+          {submissionReadiness.blockers.length > 0 ? (
+            <details className={styles.submissionDetails}>
+              <summary>{zh ? "查看阻塞项" : "View blockers"}</summary>
+              <ul className={styles.submissionBlockers}>
+                {submissionReadiness.blockers.map((blocker) => <li key={blocker.code}>{blocker.label}</li>)}
+              </ul>
+            </details>
+          ) : null}
+        </section>
       )}
 
       {import.meta.env.DEV ? (
