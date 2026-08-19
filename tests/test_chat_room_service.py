@@ -1433,6 +1433,107 @@ def test_start_chat_room_round_revalidates_participant_snapshot_before_persist(t
     assert detail["rounds"][-1]["speakerOrder"] == ["session-session-alpha"]
 
 
+def test_start_chat_room_round_aborts_after_bounded_participant_snapshot_retries(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    room = chat_room_service.create_chat_room(
+        title="成员持续更新群聊",
+        participant_session_ids=["session-alpha", "session-beta"],
+    )
+    chat_room_service._clear_participant_refresh_index_cache()
+
+    refresh_started = threading.Event()
+    refresh_releases = [
+        threading.Event() for _ in range(chat_room_service._CHAT_ROOM_PARTICIPANT_REFRESH_MAX_ATTEMPTS)
+    ]
+    refresh_calls = 0
+    real_refresh = chat_room_service._refresh_chat_room_round_participants
+    real_get_session_detail = session_service.get_session_detail
+    real_list_sessions = session_service.list_sessions
+    detail_lock_states = []
+    list_lock_states = []
+
+    def tracked_get_session_detail(session_id):
+        detail_lock_states.append(chat_room_service._chat_room_lock_owned_by_current_thread())
+        return real_get_session_detail(session_id)
+
+    def tracked_list_sessions(*args, **kwargs):
+        list_lock_states.append(chat_room_service._chat_room_lock_owned_by_current_thread())
+        return real_list_sessions(*args, **kwargs)
+
+    monkeypatch.setattr(session_service, "get_session_detail", tracked_get_session_detail)
+    monkeypatch.setattr(session_service, "list_sessions", tracked_list_sessions)
+
+    def blocking_refresh(participants):
+        nonlocal refresh_calls
+        attempt = refresh_calls
+        refresh_calls += 1
+        assert attempt < len(refresh_releases)
+        refresh_started.set()
+        assert refresh_releases[attempt].wait(timeout=5)
+        return real_refresh(participants)
+
+    monkeypatch.setattr(
+        chat_room_service,
+        "_refresh_chat_room_round_participants",
+        blocking_refresh,
+    )
+
+    participant_by_session_id = {
+        str(item["sessionId"]): dict(item)
+        for item in room["participants"]
+    }
+
+    def overwrite_room_participants(session_ids):
+        with chat_room_service._CHAT_ROOM_LOCK:
+            state = chat_room_service._store().load()
+            stored_room = chat_room_service._find_room(state, room["roomId"])
+            assert stored_room is not None
+            stored_room["participants"] = [dict(participant_by_session_id[session_id]) for session_id in session_ids]
+            chat_room_service._store().save(state)
+
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pytest-chat-room-bounded-retry")
+    future = executor.submit(
+        chat_room_service.start_chat_room_round,
+        room["roomId"],
+        "持续更新时应明确失败",
+        agent_runner=lambda participant, prompt, context: {
+            "status": "completed",
+            "raw_output": f"{participant['title']} 发言",
+            "summary": "ok",
+        },
+    )
+    participant_updates = [
+        ["session-alpha"],
+        ["session-beta"],
+        ["session-alpha"],
+    ]
+    try:
+        for attempt, session_ids in enumerate(participant_updates):
+            assert refresh_started.wait(timeout=5)
+            refresh_started.clear()
+            overwrite_room_participants(session_ids)
+            refresh_releases[attempt].set()
+
+        with pytest.raises(chat_room_service.ChatRoomBusyError, match="群聊成员正在更新"):
+            future.result(timeout=10)
+    finally:
+        for release in refresh_releases:
+            release.set()
+        executor.shutdown(wait=True)
+
+    assert refresh_calls == chat_room_service._CHAT_ROOM_PARTICIPANT_REFRESH_MAX_ATTEMPTS
+    assert detail_lock_states
+    assert all(not owned for owned in detail_lock_states)
+    assert all(not owned for owned in list_lock_states)
+    detail = chat_room_service.get_chat_room_detail(room["roomId"])
+    assert detail["status"] == "ready"
+    assert detail["activeRoundId"] == ""
+    assert detail["rounds"] == []
+
+
 def test_start_chat_room_round_preserves_structured_runner_failure(tmp_path, monkeypatch):
     _seed_chat_sessions(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)

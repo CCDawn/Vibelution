@@ -105,6 +105,7 @@ CHAT_ROOM_PURPOSES = [
 ]
 RUNNING_ROUND_STATUSES = {"queued", "running", "stopping"}
 _CHAT_ROOM_LOCK = threading.RLock()
+_CHAT_ROOM_PARTICIPANT_REFRESH_MAX_ATTEMPTS = 3
 _CHAT_ROOM_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="web-chat-room")
 _CHAT_ROOM_STREAM_SUBSCRIBERS_LOCK = threading.Lock()
 _CHAT_ROOM_STREAM_SUBSCRIBERS: dict[str, set[queue.Queue[dict[str, Any]]]] = {}
@@ -855,7 +856,7 @@ def start_chat_room_round(
         raise ChatRoomValidationError(text_for(lang, zh="请输入本轮群聊议题。", en="Enter a room topic."))
 
     runner = agent_runner or _run_participant_agent
-    while True:
+    for refresh_attempt in range(_CHAT_ROOM_PARTICIPANT_REFRESH_MAX_ATTEMPTS):
         with _CHAT_ROOM_LOCK:
             stage_started_at = _perf_counter()
             state = _store().load()
@@ -894,6 +895,14 @@ def start_chat_room_round(
                 raise ChatRoomNotFoundError(text_for(lang, zh="未找到群聊。", en="Chat room not found."))
             _raise_if_room_busy(room)
             if list(room.get("participants") or []) != participant_seed:
+                if refresh_attempt == _CHAT_ROOM_PARTICIPANT_REFRESH_MAX_ATTEMPTS - 1:
+                    raise ChatRoomBusyError(
+                        text_for(
+                            lang,
+                            zh="群聊成员正在更新，请重试",
+                            en="Chat room members are being updated; please try again.",
+                        )
+                    )
                 continue
 
             round_mode = _normalize_mode(mode or room.get("mode") or DEFAULT_MODE)

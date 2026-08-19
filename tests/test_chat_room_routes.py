@@ -9,6 +9,7 @@ from tests.helpers.chat_turn_harness import wait_for_chat_room_round_completed
 from core.ui.chat_state import save_chat_state
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
+from core.web.routes import chat_rooms as chat_rooms_route
 from core.web.services import agent_directory_service, chat_room_service, session_service
 
 
@@ -390,3 +391,20 @@ def test_chat_room_api_rejects_stop_when_no_round_is_running(tmp_path, monkeypat
     stop_response = client.post(f"/api/chat-rooms/{room['roomId']}/stop")
 
     assert stop_response.status_code == 409
+
+
+def test_chat_room_api_maps_participant_update_busy_to_conflict(monkeypatch):
+    error_message = "群聊成员正在更新，请重试"
+
+    def raise_participant_update_busy(*args, **kwargs):
+        raise chat_room_service.ChatRoomBusyError(error_message)
+
+    monkeypatch.setattr(chat_rooms_route, "start_chat_room_round", raise_participant_update_busy)
+
+    response = client.post(
+        "/api/chat-rooms/room-members-updating/rounds",
+        json={"topic": "验证成员更新错误映射"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == error_message
