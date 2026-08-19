@@ -165,12 +165,31 @@ def _assert_participants_in_room(room_id: str, participants: Sequence[str]) -> N
         )
 
 
-def _opening_topic(meeting_round_id: str, selection: Mapping[str, Any], agenda: Sequence[str]) -> str:
+def _opening_topic(
+    meeting_round_id: str,
+    selection: Mapping[str, Any],
+    agenda: Sequence[str],
+    candidate_contexts: Sequence[Mapping[str, Any]] = (),
+) -> str:
     candidates = list(selection.get("selectedCandidateIds") or [])
+    candidate_contexts = {
+        str(item.get("candidateId") or "").strip(): item
+        for item in candidate_contexts
+        if isinstance(item, Mapping) and str(item.get("candidateId") or "").strip()
+    }
     lines = [
         f"假说评审会议开幕（{meeting_round_id}）：{str(selection.get('questionId') or '').strip() or '未命名赛题'}",
         "议程：" + "；".join(str(item) for item in agenda),
-        "入选候选：" + ", ".join(candidates),
+        "入选候选详情：",
+        *[
+            (
+                f"- {candidate_id} | 陈述："
+                f"{str((candidate_contexts.get(candidate_id) or {}).get('claim') or '').strip() or '[缺少候选正文]'}"
+                " | 机制："
+                f"{str((candidate_contexts.get(candidate_id) or {}).get('rationale') or '').strip() or '[缺少机制理由]'}"
+            )
+            for candidate_id in candidates
+        ],
         "规则：" + "；".join(_DEFAULT_AGENDA_RULES),
         "Coordinator 主持开场，成员按轮回应，无新内容回复 pass。",
     ]
@@ -285,6 +304,7 @@ def open_hypothesis_review_meeting(
     *,
     agent_runner: Callable[..., dict[str, Any]] | None = None,
     background: bool = True,
+    candidate_contexts: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Open a hypothesis-review meeting from a hypothesis selection payload.
 
@@ -363,7 +383,7 @@ def open_hypothesis_review_meeting(
             }
 
     topic = str(request.get("topic") or "").strip() or _opening_topic(
-        meeting_round_id, selection, agenda
+        meeting_round_id, selection, agenda, candidate_contexts
     )
     result = chat_room_service.start_chat_room_round(
         room_id,

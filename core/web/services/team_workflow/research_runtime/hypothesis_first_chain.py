@@ -376,11 +376,22 @@ def open_review_meeting_for_selection(
             "inputArtifactRefs": extra_refs,
         }
     )
+    candidate_contexts = _build_round_candidates(
+        normalized_team_id,
+        {
+            "question": question_id,
+            "discussionItemRefs": [
+                f"hypothesis_candidate:{candidate_id}"
+                for candidate_id in payload["selectedCandidateIds"]
+            ],
+        },
+    )
     opened = meeting_runtime.open_hypothesis_review_meeting(
         normalized_team_id,
         payload,
         agent_runner=agent_runner,
         background=background,
+        candidate_contexts=candidate_contexts,
     )
     link = _record_review_round_link(
         normalized_team_id,

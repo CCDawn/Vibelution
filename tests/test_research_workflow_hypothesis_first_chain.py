@@ -461,6 +461,45 @@ def _open_first_meeting(team_id: str, agent_ids: list[str]) -> dict:
     return recorded
 
 
+def test_selection_review_prompt_hydrates_canonical_candidate_content(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    team_id, agents = _hf_env(tmp_path, monkeypatch)
+    _patch_approved_question(
+        monkeypatch,
+        hypotheses=[
+            {
+                "hypothesis_id": "hyp-a",
+                "statement": "canonical statement a",
+                "mechanism": "canonical mechanism a",
+            },
+            {
+                "hypothesis_id": "hyp-b",
+                "statement": "canonical statement b",
+                "mechanism": "canonical mechanism b",
+            },
+        ],
+    )
+    prompts: list[str] = []
+
+    def capture_runner(participant, prompt, context):
+        prompts.append(str(prompt))
+        return {"status": "completed", "raw_output": "pass", "summary": "pass"}
+
+    recorded = selections.record_hypothesis_selection(
+        team_id,
+        _selection_payload(agents["coordinator"]),
+        agent_runner=capture_runner,
+    )
+
+    assert recorded["reviewMeeting"]["status"] == "opened"
+    assert prompts
+    assert all("canonical statement a" in prompt for prompt in prompts)
+    assert all("canonical mechanism a" in prompt for prompt in prompts)
+    assert all("canonical statement b" in prompt for prompt in prompts)
+    assert all("canonical mechanism b" in prompt for prompt in prompts)
+
+
 def _close_first_meeting_with_envelope(
     team_id: str, agent_ids: list[str], meeting_round_id: str, runtime
 ) -> dict:

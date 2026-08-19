@@ -180,6 +180,38 @@ def test_candidate_generation_prompt_includes_canonical_question_context(
     assert all("不得等待其他角色代为提出" in prompt for prompt in prompts)
 
 
+def test_review_prompt_includes_selected_candidate_content(tmp_path, monkeypatch):
+    team_id, agents = _team_with_room(tmp_path, monkeypatch)
+    prompts: list[str] = []
+
+    def capture_runner(participant, prompt, context):
+        prompts.append(str(prompt))
+        return {"status": "completed", "raw_output": "pass", "summary": "pass"}
+
+    agent_ids = list(agents.values())
+    meeting_runtime.open_hypothesis_review_meeting(
+        team_id,
+        _selection_payload(
+            agent_ids,
+            selectedCandidateIds=["cand-a"],
+        ),
+        agent_runner=capture_runner,
+        background=False,
+        candidate_contexts=[
+            {
+                "candidateId": "cand-a",
+                "claim": "素数是整数乘法的原子单元",
+                "rationale": "算术基本定理保证唯一分解",
+            }
+        ],
+    )
+
+    assert prompts
+    assert all("cand-a" in prompt for prompt in prompts)
+    assert all("素数是整数乘法的原子单元" in prompt for prompt in prompts)
+    assert all("算术基本定理保证唯一分解" in prompt for prompt in prompts)
+
+
 def _closure_payload(agent_ids, **overrides):
     payload = {
         "decisions": [
