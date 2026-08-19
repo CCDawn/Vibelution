@@ -12,5 +12,7 @@ export default {
   experimentBlockerText: "text-xs leading-relaxed text-[var(--state-warning)]",
   blockers: "grid min-w-0 list-disc gap-0.5 pl-4 text-xs leading-relaxed text-vui-fg-secondary",
   error: "text-sm text-[var(--state-error)]",
+  techDetails:
+    "grid max-w-full gap-1 text-xs text-[var(--vui-fg-secondary)] [&>summary]:w-fit [&>summary]:cursor-pointer [&_code]:wrap-anywhere [&_code]:text-[10px]",
   actions: "flex justify-end gap-2",
 } as const;

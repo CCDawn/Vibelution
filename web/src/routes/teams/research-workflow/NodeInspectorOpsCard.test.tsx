@@ -1,9 +1,12 @@
-import React from "react";
+/** @vitest-environment happy-dom */
+import React, { act } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 
 import type { AgentModelChoice } from "../../../api/types";
+import type { CommandOffer } from "../../../api/types/research-workflow/commands";
 import { NodeInspectorOpsCard } from "./NodeInspectorOpsCard";
 
 function candidate(modelRef: string, label: string, overrides: Partial<AgentModelChoice> = {}): AgentModelChoice {
@@ -80,5 +83,69 @@ describe("NodeInspectorOpsCard", () => {
     expect(markup).toContain("nio-icon-link");
     expect(markup).not.toContain("source_ingestor");
     expect(markup).not.toContain("执行者");
+  });
+
+  it("surfaces a productized inline error when the primary offer fails", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const primaryOffer = {
+      command: "start_node",
+      idempotencyKey: "key-ops",
+      label: "启动节点",
+      available: true,
+      reasonCode: "",
+      blockerIds: [],
+    } as unknown as CommandOffer;
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <MemoryRouter>
+          <NodeInspectorOpsCard
+            stageLabel="知识搜集"
+            title="知识入库"
+            status={{ tone: "success", label: "待运行" }}
+            unbound={false}
+            agentId="agent-ingestor"
+            agentName="资料入库"
+            agentInitial="资"
+            modelLabel="qwen-plus"
+            modelMeta="通义"
+            providerVisual="qwen"
+            selectedModelRef="qwen-plus"
+            candidates={[candidate("qwen-plus", "qwen-plus")]}
+            pendingModelRef=""
+            modelPending={false}
+            meters={[]}
+            primaryOffer={primaryOffer}
+            busy={false}
+            onOffer={async () => {
+              throw new Error("source search is still running");
+            }}
+            sessionHref={null}
+            configHref={null}
+            agents={[]}
+            agentSwitchDisabled
+            onSelectPinned={() => undefined}
+            onPromote={() => undefined}
+          />
+        </MemoryRouter>,
+      );
+    });
+
+    const button = Array.from(container.querySelectorAll("button"))
+      .find((item) => item.textContent?.includes("启动节点"));
+    expect(button).toBeTruthy();
+    await act(async () => {
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    const alert = container.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain("资料搜索仍在进行");
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
   });
 });

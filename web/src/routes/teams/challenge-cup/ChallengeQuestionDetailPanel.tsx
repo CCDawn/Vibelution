@@ -11,6 +11,7 @@ import {
 } from "../../../components/vui";
 import { TeamHypothesisRoundTimeline } from "../TeamHypothesisRoundTimeline";
 import { TeamMeetingRoundPanel } from "../TeamMeetingRoundPanel";
+import { researchWorkflowErrorInlineText } from "../researchWorkflowErrorModel";
 import { ChallengeQuestionAnalysisSection } from "./ChallengeQuestionAnalysisSection";
 import { ChallengeQuestionEvidenceSection } from "./ChallengeQuestionEvidenceSection";
 import { ChallengeQuestionPlanSection } from "./ChallengeQuestionPlanSection";
@@ -40,6 +41,17 @@ const DETAIL_ANCHORS = [
   ["artifact", "最终工件"],
 ] as const;
 
+const RECORD_STATUS_LABELS: Record<string, string> = {
+  approved: "正式批准",
+  pending_review: "待审核",
+  needs_revision: "待修订",
+  rejected: "已驳回",
+};
+
+function recordStatusLabel(status: string): string {
+  return RECORD_STATUS_LABELS[status] ?? status;
+}
+
 export function ChallengeQuestionDetailPanel({
   requestedQuestionId,
   detail,
@@ -60,7 +72,15 @@ export function ChallengeQuestionDetailPanel({
     return (
       <VSurface className={css.state} tone="workspace">
         <VEmptyState title={`${requestedQuestionId || "该题"} 的审核工件不可用`} />
-        {errorMessage ? <code>{errorMessage}</code> : null}
+        {errorMessage ? (
+          <>
+            <p>{researchWorkflowErrorInlineText(errorMessage)}</p>
+            <details className={css.techDetails}>
+              <summary>技术细节</summary>
+              <code>{errorMessage}</code>
+            </details>
+          </>
+        ) : null}
         <VButton density="compact" onPress={onClose} variant="secondary">
           返回题目列表
         </VButton>
@@ -80,7 +100,7 @@ export function ChallengeQuestionDetailPanel({
         </div>
         <div className={css.headerActions}>
           <VStatusChip tone={record.status === "approved" ? "accent" : "warning"}>
-            {record.status === "approved" ? "正式批准" : record.status}
+            {recordStatusLabel(record.status)}
           </VStatusChip>
           {record.status === "needs_revision" ? (
             <VButton density="compact" variant="primary" onPress={() => setReviseDialogOpen(true)}>

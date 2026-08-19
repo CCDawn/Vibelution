@@ -9,11 +9,13 @@
  * never advance to the next stage. No real experiment, Qwen, CUDA/GPU, DANDI,
  * network collection or formal submission is ever started.
  *
- * The program/question combined query degrades independently from the DEV
- * controls: while it is pending or failing the DEV snapshot section stays
- * fully visible and operable. After a mutation, actions stay pending/disabled
- * until the snapshot refetch completes so a delayed refetch cannot trigger a
- * duplicate POST.
+ * The question-status and experiment-planning queries are separate and share
+ * the canonical keys (queryKeys.challengeQuestionRunStatus /
+ * experimentPlanningStatusQueryKey) so they dedupe with the other panels and
+ * degrade independently from the DEV controls: while either is pending or
+ * failing the DEV snapshot section stays fully visible and operable. After a
+ * mutation, actions stay pending/disabled until the snapshot refetch completes
+ * so a delayed refetch cannot trigger a duplicate POST.
  */
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -39,6 +41,7 @@ import {
   type VStatusTone,
 } from "../../../components/vui";
 import type { ExperimentPlanningStatusPayload } from "../experimentLoopModel";
+import { experimentPlanningStatusQueryKey } from "../experimentLoopModel";
 import { ChallengeQuestionRegisterDialog } from "../challenge-cup/ChallengeQuestionRegisterDialog";
 import styles from "./ChallengeMvpProgressPanel.styles";
 
@@ -106,23 +109,18 @@ export function ChallengeMvpProgressPanel({
   onOpenQuestion,
 }: ChallengeMvpProgressPanelProps) {
   const zh = lang === "zh";
-  const statusQuery = useQuery({
-    queryKey: [...queryKeys.challengeQuestionRunStatus(teamId), "program-v2"],
-    queryFn: async () => {
-      const [questionResult, experimentResult] = await Promise.allSettled([
-        getChallengeQuestionRunStatus(teamId),
-        fetchExperimentPlanningStatus<ExperimentPlanningStatusPayload>(teamId),
-      ]);
-      if (questionResult.status === "rejected" && experimentResult.status === "rejected") {
-        throw new Error(`${errorMessage(questionResult.reason)}; ${errorMessage(experimentResult.reason)}`);
-      }
-      return {
-        questionStatus: questionResult.status === "fulfilled" ? questionResult.value : null,
-        experimentStatus: experimentResult.status === "fulfilled" ? experimentResult.value : null,
-        questionError: questionResult.status === "rejected" ? errorMessage(questionResult.reason) : "",
-        programError: experimentResult.status === "rejected" ? errorMessage(experimentResult.reason) : "",
-      };
-    },
+  // Canonical keys: the question run status and the experiment planning status
+  // are shared with the other team panels, so React Query dedupes the requests
+  // and mutation invalidations reach this panel.
+  const questionStatusQuery = useQuery({
+    queryKey: queryKeys.challengeQuestionRunStatus(teamId),
+    queryFn: () => getChallengeQuestionRunStatus(teamId),
+    enabled: Boolean(teamId.trim()),
+    staleTime: 30_000,
+  });
+  const experimentStatusQuery = useQuery({
+    queryKey: experimentPlanningStatusQueryKey(teamId),
+    queryFn: () => fetchExperimentPlanningStatus<ExperimentPlanningStatusPayload>(teamId),
     enabled: Boolean(teamId.trim()),
     staleTime: 30_000,
   });
@@ -131,7 +129,7 @@ export function ChallengeMvpProgressPanel({
   const devControlsQuery = useQuery({
     queryKey: devControlsKey,
     queryFn: () => fetchChallengeCupDevControlSnapshot(teamId),
-    enabled: Boolean(teamId.trim()),
+    enabled: import.meta.env.DEV && Boolean(teamId.trim()),
     staleTime: 15_000,
   });
 
@@ -188,8 +186,8 @@ export function ChallengeMvpProgressPanel({
     onSuccess: () => refreshDevControls(),
   });
 
-  const program = statusQuery.data?.experimentStatus?.competitionProgramProjection;
-  const summary = statusQuery.data?.questionStatus?.summary;
+  const program = experimentStatusQuery.data?.competitionProgramProjection;
+  const summary = questionStatusQuery.data?.summary;
   const results = summary?.validatedQuestionResults ?? [];
   const approvedDeepExperimentCount = program?.requiredDeepExperiments.filter((item) => item.approved).length ?? 0;
 
@@ -214,7 +212,12 @@ export function ChallengeMvpProgressPanel({
     ?? repairDev5Mutation.error;
 
   const programRetry = (
-    <VButton type="button" variant="secondary" onClick={() => void statusQuery.refetch()}>
+    <VButton type="button" variant="secondary" onClick={() => void experimentStatusQuery.refetch()}>
+      {zh ? "重试" : "Retry"}
+    </VButton>
+  );
+  const questionRetry = (
+    <VButton type="button" variant="secondary" onClick={() => void questionStatusQuery.refetch()}>
       {zh ? "重试" : "Retry"}
     </VButton>
   );
@@ -226,16 +229,23 @@ export function ChallengeMvpProgressPanel({
           <div className={styles.eyebrow}>Challenge Cup Program v2</div>
           <strong className={styles.title}>{program?.program.title || (zh ? "比赛状态尚未投影" : "Program projection unavailable")}</strong>
         </div>
-        <VButton type="button" variant="ghost" onClick={() => void statusQuery.refetch()}>
+        <VButton
+          type="button"
+          variant="ghost"
+          onClick={() => {
+            void questionStatusQuery.refetch();
+            void experimentStatusQuery.refetch();
+          }}
+        >
           {zh ? "刷新" : "Refresh"}
         </VButton>
       </div>
 
-      {statusQuery.isPending ? (
-        <VStateSurface tone="loading" title={zh ? "读取比赛与题目进度" : "Loading program and question progress"} className={styles.fill} />
-      ) : statusQuery.isError ? (
-        <VStateSurface tone="error" title={zh ? "比赛与题目状态加载失败" : "Program and question status failed"} className={styles.fill} actions={programRetry}>
-          {statusQuery.error instanceof Error ? statusQuery.error.message : String(statusQuery.error)}
+      {experimentStatusQuery.isPending ? (
+        <VStateSurface tone="loading" title={zh ? "读取比赛进度" : "Loading program progress"} className={styles.fill} />
+      ) : experimentStatusQuery.isError ? (
+        <VStateSurface tone="error" title={zh ? "比赛状态加载失败" : "Program status failed"} className={styles.fill} actions={programRetry}>
+          {experimentStatusQuery.error instanceof Error ? experimentStatusQuery.error.message : String(experimentStatusQuery.error)}
         </VStateSurface>
       ) : program ? (
         <section className={styles.program} aria-label={zh ? "比赛总合同" : "Program contract"}>
@@ -302,10 +312,11 @@ export function ChallengeMvpProgressPanel({
         </section>
       ) : (
         <VEmptyState title={zh ? "Program v2 状态不可用" : "Program v2 unavailable"} className={styles.empty} actions={programRetry}>
-          {statusQuery.data?.programError || (zh ? "后端尚未提供 competitionProgramProjection。" : "competitionProgramProjection is not available.")}
+          {zh ? "后端尚未提供 competitionProgramProjection。" : "competitionProgramProjection is not available."}
         </VEmptyState>
       )}
 
+      {import.meta.env.DEV ? (
       <section className={styles.devControls} aria-label={zh ? "开发态就绪与批次控制" : "DEV readiness and batch control"}>
         <div className={styles.sectionHeader}>
           <strong>{zh ? "开发态就绪 / 批次 / 证据 locator" : "DEV readiness / batches / locators"}</strong>
@@ -552,6 +563,7 @@ export function ChallengeMvpProgressPanel({
           </div>
         ) : null}
       </section>
+      ) : null}
 
       <section className={styles.questionSection} aria-label={zh ? "单题结果" : "Question results"}>
         <div className={styles.sectionHeader}>
@@ -563,15 +575,14 @@ export function ChallengeMvpProgressPanel({
             </VButton>
           </div>
         </div>
-        {statusQuery.isPending ? (
+        {questionStatusQuery.isPending ? (
           <VStateSurface tone="loading" title={zh ? "读取题目结果" : "Loading question results"} className={styles.fill} />
-        ) : statusQuery.isError ? (
-          <VStateSurface tone="error" title={zh ? "题目结果加载失败" : "Question results failed"} className={styles.fill} actions={programRetry}>
-            {statusQuery.error instanceof Error ? statusQuery.error.message : String(statusQuery.error)}
+        ) : questionStatusQuery.isError ? (
+          <VStateSurface tone="error" title={zh ? "题目结果加载失败" : "Question results failed"} className={styles.fill} actions={questionRetry}>
+            {questionStatusQuery.error instanceof Error ? questionStatusQuery.error.message : String(questionStatusQuery.error)}
           </VStateSurface>
         ) : (
           <>
-            {statusQuery.data?.questionError ? <div className={styles.error} role="alert">{statusQuery.data.questionError}</div> : null}
             {!summary || results.length === 0 ? (
               <VEmptyState title={zh ? "暂无已验证题目" : "No validated questions"} className={styles.empty}>
                 {zh ? "完成受控运行与候选晋升后，题目结果会出现在这里。" : "Question results appear here after controlled runs and candidate promotion."}

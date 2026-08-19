@@ -120,9 +120,18 @@ export function challengeQuestionDetailRoute(
   runId = "",
 ) {
   if (!teamId.trim()) throw new Error("teamId 不能为空");
-  const params = new URLSearchParams({ teamId, challengeQuestion: questionId });
+  // Canonical workflow-canvas params consumed by parseResearchProcessLocation;
+  // the legacy challengeQuestion/challengeRun params were never parsed and
+  // produced a dead link (question panel never opened).
+  const params = new URLSearchParams({
+    teamId,
+    researchView: "workflow",
+    workflowId: "challenge-cup-research",
+    panel: "question",
+    questionId,
+  });
   if (runId) {
-    params.set("challengeRun", runId);
+    params.set("runId", runId);
   }
   return `/teams?${params.toString()}`;
 }

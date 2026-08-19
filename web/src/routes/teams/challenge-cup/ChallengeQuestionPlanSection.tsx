@@ -64,8 +64,11 @@ export function ChallengeQuestionPlanSection({ detail }: ChallengeQuestionPlanSe
           <FileCheck2 size={20} aria-hidden="true" />
           <div>
             <strong>{artifact.immutable ? "不可变审核工件" : "可变工件"}</strong>
-            <code>{artifact.path}</code>
-            <code>SHA256 {artifact.sha256}</code>
+            <details className={css.techDetails}>
+              <summary>技术细节</summary>
+              <code>{artifact.path}</code>
+              <code>SHA256 {artifact.sha256}</code>
+            </details>
           </div>
         </VSurface>
       </section>

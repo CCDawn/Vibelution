@@ -1,4 +1,6 @@
-import React from "react";
+/** @vitest-environment happy-dom */
+import React, { act } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
@@ -117,5 +119,43 @@ describe("ResearchProjectAgentTaskPanel", () => {
     expect(markup).toContain("版本治理");
     expect(markup).toContain("请先选择研究项目");
     expect(markup).toContain("disabled");
+  });
+
+  it("surfaces an inline error when starting a task fails instead of swallowing it", async () => {
+    expect(panelSource).not.toContain(".catch(() => undefined)");
+
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <ResearchProjectAgentTaskPanel
+          stage="experiment"
+          activeProjectId="project-a"
+          tasks={[]}
+          isLoading={false}
+          isStarting={false}
+          onStartTask={async () => {
+            throw new Error("backend unavailable");
+          }}
+        />,
+      );
+    });
+
+    const startButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("启动任务"));
+    expect(startButton).toBeTruthy();
+    await act(async () => {
+      startButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    const alert = container.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain("操作未完成");
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
   });
 });

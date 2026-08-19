@@ -12,6 +12,18 @@ type ChallengeQuestionEvidenceSectionProps = {
   detail: ChallengeQuestionRunDetailPayload;
 };
 
+const EVIDENCE_RELATION_LABELS: Record<string, string> = {
+  supports: "支持",
+  challenges: "质疑",
+  context: "背景",
+  method: "方法",
+  boundary: "边界",
+};
+
+function evidenceRelationLabel(relation: string): string {
+  return EVIDENCE_RELATION_LABELS[relation] ?? relation;
+}
+
 export function ChallengeQuestionEvidenceSection({ detail }: ChallengeQuestionEvidenceSectionProps) {
   const { output, record } = detail;
 
@@ -44,7 +56,7 @@ export function ChallengeQuestionEvidenceSection({ detail }: ChallengeQuestionEv
               <div className={css.cardTopline}>
                 <strong>{evidence.evidence_id} · {evidence.title}</strong>
                 <VStatusChip tone={evidence.relation === "challenges" ? "warning" : "neutral"}>
-                  {evidence.relation}
+                  {evidenceRelationLabel(evidence.relation)}
                 </VStatusChip>
               </div>
               <div className={css.metadata}>

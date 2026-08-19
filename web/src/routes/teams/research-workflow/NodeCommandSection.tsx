@@ -1,5 +1,8 @@
+import { useState } from "react";
+
 import type { CommandOffer } from "../../../api/types/research-workflow/commands";
 import { VButton } from "../../../components/vui";
+import { researchWorkflowErrorInlineText } from "../researchWorkflowErrorModel";
 import styles from "./NodeCommandSection.styles";
 
 function offerReason(offer: CommandOffer): string {
@@ -16,6 +19,7 @@ export function NodeCommandSection(props: {
   busy: boolean;
   onOffer: (offer: CommandOffer) => Promise<void>;
 }) {
+  const [actionError, setActionError] = useState<string | null>(null);
   if (!props.offers.length) return null;
   return (
     <section data-vui="node-commands">
@@ -36,7 +40,10 @@ export function NodeCommandSection(props: {
               disabledReason={reason || undefined}
               aria-label={reason ? `${offer.label}：${reason}` : undefined}
               onClick={() => {
-                void props.onOffer(offer).catch(() => undefined);
+                setActionError(null);
+                void props.onOffer(offer).catch((error: unknown) => {
+                  setActionError(error instanceof Error ? error.message : String(error));
+                });
               }}
             >
               {offer.label}
@@ -44,6 +51,11 @@ export function NodeCommandSection(props: {
           );
         })}
       </div>
+      {actionError ? (
+        <p className={styles.error} role="alert">
+          {researchWorkflowErrorInlineText(actionError)}
+        </p>
+      ) : null}
     </section>
   );
 }

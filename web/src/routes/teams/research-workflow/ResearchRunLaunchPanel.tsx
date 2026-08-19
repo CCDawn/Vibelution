@@ -20,6 +20,7 @@ import {
   VStatusChip,
   VSurface,
 } from "../../../components/vui";
+import { researchWorkflowErrorInlineText } from "../researchWorkflowErrorModel";
 import { buildResearchRunInput } from "./researchRunLaunchContract";
 import { ResearchRunSafetyLimitPanel } from "./ResearchRunSafetyLimitPanel";
 import { createResearchRunSafetyBudget } from "./researchRunSafetyBudget";
@@ -195,9 +196,30 @@ export function ResearchRunLaunchPanel(props: {
     return <VStateSurface tone="loading" title="加载可启动题目" fill className={styles.state} />;
   }
   if (launchOptions.isError) {
+    const rawMessage = launchOptions.error instanceof Error
+      ? launchOptions.error.message
+      : String(launchOptions.error ?? "");
     return (
-      <VStateSurface tone="error" title="题目加载失败" fill className={styles.state}>
-        {launchOptions.error instanceof Error ? launchOptions.error.message : "暂时无法读取题目审核结果"}
+      <VStateSurface
+        tone="error"
+        title="题目加载失败"
+        fill
+        className={styles.state}
+        actions={(
+          <VButton type="button" variant="secondary" onClick={() => void launchOptions.refetch()}>
+            重试
+          </VButton>
+        )}
+      >
+        <p className={styles.error}>
+          {researchWorkflowErrorInlineText(rawMessage, "暂时无法读取题目审核结果，请稍后重试。")}
+        </p>
+        {rawMessage ? (
+          <details className={styles.techDetails}>
+            <summary>技术细节</summary>
+            <code>{rawMessage}</code>
+          </details>
+        ) : null}
       </VStateSurface>
     );
   }

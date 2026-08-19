@@ -61,15 +61,20 @@ export function createResearchStageLaunchHandlers(options: CreateResearchStageLa
     setResearchAdvanceNotice,
   } = options;
 
+  /**
+   * Launch a stage round. Returns whether the launch completed so callers can
+   * keep the user on the initiating surface (where the mutation's typed error
+   * state is rendered) instead of navigating away from the failure.
+   */
   async function launchResearchStage(
     stageType: ResearchStageType,
     mode: "continue_or_start" | "new_round" = "continue_or_start",
-  ) {
+  ): Promise<"failed" | "launched" | "navigated"> {
     if (!selectedTeam?.teamId || getSelectedTeamStartResearchStagePending()) {
-      return;
+      return "failed";
     }
     if (stageType === "knowledge_collection" && !getResearchStageCanLaunch()) {
-      return;
+      return "failed";
     }
     try {
       await startResearchStageRoundMutation.mutateAsync({
@@ -86,28 +91,44 @@ export function createResearchStageLaunchHandlers(options: CreateResearchStageLa
         });
         if (agentTask.chatRoute) {
           navigate(agentTask.chatRoute);
+          return "navigated";
         }
       }
+      return "launched";
     } catch {
-      // Both mutations expose their typed error state to the stage panel.
+      // Both mutations expose their typed error state to the stage panel and
+      // the overview error slot; the false-y result keeps callers from
+      // navigating away or showing a success notice.
+      return "failed";
     }
   }
 
-  async function handleResearchPrimaryAction(action: ResearchPrimaryAction) {
+  async function handleResearchPrimaryAction(action: ResearchPrimaryAction): Promise<boolean> {
     if (action.blocked || !selectedTeam?.teamId) {
-      return;
+      return false;
+    }
+    if (action.launchStageType) {
+      const result = await launchResearchStage(action.launchStageType, action.launchMode || "continue_or_start");
+      if (result === "failed") {
+        // Stay on the current surface so the launch error stays visible at the action site.
+        return false;
+      }
+      if (result === "navigated") {
+        return true;
+      }
     }
     selectResearchWorkspaceView(action.navigateView);
-    if (action.launchStageType) {
-      await launchResearchStage(action.launchStageType, action.launchMode || "continue_or_start");
-    }
+    return true;
   }
 
   async function handleResearchAdvanceAction(action: ResearchPrimaryAction) {
     if (action.blocked || !selectedTeam?.teamId) {
       return;
     }
-    await handleResearchPrimaryAction(action);
+    const completed = await handleResearchPrimaryAction(action);
+    if (!completed) {
+      return;
+    }
     setResearchAdvanceNotice(researchAdvanceSuccessMessage(action, lang));
     window.setTimeout(() => {
       setResearchAdvanceNotice((current) => (

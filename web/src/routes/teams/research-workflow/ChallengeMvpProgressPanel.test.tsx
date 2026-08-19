@@ -23,7 +23,17 @@ type MutationMock = {
   reset: () => void;
 };
 
-const queryState = vi.hoisted((): { current: QueryState } => ({
+const questionQueryState = vi.hoisted((): { current: QueryState } => ({
+  current: {
+    isPending: false,
+    isError: false,
+    error: null,
+    data: undefined,
+    refetch: () => {},
+  },
+}));
+
+const experimentQueryState = vi.hoisted((): { current: QueryState } => ({
   current: {
     isPending: false,
     isError: false,
@@ -81,7 +91,10 @@ vi.mock("@tanstack/react-query", () => ({
     if (key.includes("dev-controls")) {
       return devControlsQueryState.current;
     }
-    return queryState.current;
+    if (key.includes("question-runs")) {
+      return questionQueryState.current;
+    }
+    return experimentQueryState.current;
   },
   useMutation: (options?: { mutationFn?: { name?: string }; onSuccess?: (...args: unknown[]) => unknown }) => {
     const name = options?.mutationFn?.name ?? "default";
@@ -105,14 +118,29 @@ vi.mock("@tanstack/react-query", () => ({
 import { ChallengeMvpProgressPanel } from "./ChallengeMvpProgressPanel";
 import panelSource from "./ChallengeMvpProgressPanel.tsx?raw";
 
-function setMainData(data: unknown) {
-  Object.assign(queryState.current, {
+function setQuestionData(data: unknown) {
+  Object.assign(questionQueryState.current, {
     isPending: false,
     isError: false,
     error: null,
     data,
     refetch: () => {},
   });
+}
+
+function setExperimentData(data: unknown) {
+  Object.assign(experimentQueryState.current, {
+    isPending: false,
+    isError: false,
+    error: null,
+    data,
+    refetch: () => {},
+  });
+}
+
+function setMainData(data: { questionStatus: unknown; experimentStatus: unknown }) {
+  setQuestionData(data.questionStatus);
+  setExperimentData(data.experimentStatus);
 }
 
 function setDevControls(data: unknown) {
@@ -407,8 +435,6 @@ function emptyMainData() {
   return {
     questionStatus: questionStatus(),
     experimentStatus: experimentStatus(),
-    questionError: "",
-    programError: "",
   };
 }
 
@@ -419,20 +445,15 @@ function findButton(container: HTMLElement, text: string): HTMLButtonElement | u
 
 describe("ChallengeMvpProgressPanel", () => {
   beforeEach(() => {
-    Object.assign(queryState.current, {
-      isPending: false,
-      isError: false,
-      error: null,
-      data: undefined,
-      refetch: () => {},
-    });
-    Object.assign(devControlsQueryState.current, {
-      isPending: false,
-      isError: false,
-      error: null,
-      data: undefined,
-      refetch: () => {},
-    });
+    for (const state of [questionQueryState.current, experimentQueryState.current, devControlsQueryState.current]) {
+      Object.assign(state, {
+        isPending: false,
+        isError: false,
+        error: null,
+        data: undefined,
+        refetch: () => {},
+      });
+    }
     mutationState.reset();
     queryClientMock.invalidateQueries.mockClear();
   });
@@ -449,8 +470,6 @@ describe("ChallengeMvpProgressPanel", () => {
         artifactPath: "artifact",
       }]),
       experimentStatus: experimentStatus(),
-      questionError: "",
-      programError: "",
     });
     setDevControls(devSnapshot());
     const markup = renderToStaticMarkup(
@@ -492,18 +511,35 @@ describe("ChallengeMvpProgressPanel", () => {
   it("shows Program v2 unavailable independently from available question results", () => {
     setMainData({
       questionStatus: questionStatus(),
-      experimentStatus: null,
-      questionError: "",
-      programError: "program projection unavailable",
+      experimentStatus: {},
     });
     setDevControls(devSnapshot());
     const markup = renderToStaticMarkup(
       <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />,
     );
     expect(markup).toContain("Program v2 状态不可用");
-    expect(markup).toContain("program projection unavailable");
+    expect(markup).toContain("competitionProgramProjection");
     expect(markup).toContain("单题结果与审核");
     expect(markup).toContain("运行 DEV readiness");
+  });
+
+  it("shows the program error independently from available question results", () => {
+    setQuestionData(questionStatus());
+    Object.assign(experimentQueryState.current, {
+      isPending: false,
+      isError: true,
+      error: new Error("program projection unavailable"),
+      data: undefined,
+      refetch: vi.fn(),
+    });
+    setDevControls(devSnapshot());
+    const markup = renderToStaticMarkup(
+      <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />,
+    );
+    expect(markup).toContain("比赛状态加载失败");
+    expect(markup).toContain("program projection unavailable");
+    expect(markup).toContain("单题结果与审核");
+    expect(markup).toContain("暂无已验证题目");
   });
 
   it("offers a register/publish entry that opens the question-write dialog", async () => {
@@ -536,13 +572,15 @@ describe("ChallengeMvpProgressPanel", () => {
   });
 
   it("surfaces a total load error with a retry action", () => {
-    Object.assign(queryState.current, {
-      isPending: false,
-      isError: true,
-      error: new Error("program and question status unavailable"),
-      data: undefined,
-      refetch: vi.fn(),
-    });
+    for (const state of [questionQueryState.current, experimentQueryState.current]) {
+      Object.assign(state, {
+        isPending: false,
+        isError: true,
+        error: new Error("program and question status unavailable"),
+        data: undefined,
+        refetch: vi.fn(),
+      });
+    }
     const markup = renderToStaticMarkup(
       <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />,
     );
@@ -695,6 +733,18 @@ describe("ChallengeMvpProgressPanel", () => {
     expect(panelSource).toMatch(/async function runDev5[\s\S]*?retryFailed: false/);
     expect(panelSource).toMatch(/async function repairDev1[\s\S]*?retryFailed: true/);
     expect(panelSource).toMatch(/async function repairDev5[\s\S]*?retryFailed: true/);
+  });
+
+  it("uses the canonical query keys so the planning status dedupes with other panels", () => {
+    expect(panelSource).toContain("queryKeys.challengeQuestionRunStatus(teamId)");
+    expect(panelSource).toContain("experimentPlanningStatusQueryKey(teamId)");
+    expect(panelSource).not.toContain('"program-v2"');
+  });
+
+  it("gates the DEV readiness/fixture/repair controls behind import.meta.env.DEV", () => {
+    expect(panelSource).toContain("import.meta.env.DEV");
+    expect(panelSource).toMatch(/import\.meta\.env\.DEV && Boolean\(teamId/);
+    expect(panelSource).toMatch(/\{import\.meta\.env\.DEV \?\s*\(\s*<section className=\{styles\.devControls\}/);
   });
 
   it("clicks the full readiness → dev-1 → dev-5(maxItems=2) → resume(null) loop", async () => {
@@ -920,13 +970,15 @@ describe("ChallengeMvpProgressPanel", () => {
   });
 
   it("keeps DEV controls operable when the program/question query fails entirely", () => {
-    Object.assign(queryState.current, {
-      isPending: false,
-      isError: true,
-      error: new Error("program and question boom"),
-      data: undefined,
-      refetch: vi.fn(),
-    });
+    for (const state of [questionQueryState.current, experimentQueryState.current]) {
+      Object.assign(state, {
+        isPending: false,
+        isError: true,
+        error: new Error("program and question boom"),
+        data: undefined,
+        refetch: vi.fn(),
+      });
+    }
     setDevControls(devSnapshot());
     const markup = renderToStaticMarkup(
       <ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} />,
@@ -939,13 +991,15 @@ describe("ChallengeMvpProgressPanel", () => {
 
   it("executes DEV actions even when the program/question query failed", async () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-    Object.assign(queryState.current, {
-      isPending: false,
-      isError: true,
-      error: new Error("program and question boom"),
-      data: undefined,
-      refetch: vi.fn(),
-    });
+    for (const state of [questionQueryState.current, experimentQueryState.current]) {
+      Object.assign(state, {
+        isPending: false,
+        isError: true,
+        error: new Error("program and question boom"),
+        data: undefined,
+        refetch: vi.fn(),
+      });
+    }
     setDevControls(devSnapshot());
     const readinessSpy = vi.fn();
     mutationState.set("runDevReadiness", { mutate: readinessSpy });

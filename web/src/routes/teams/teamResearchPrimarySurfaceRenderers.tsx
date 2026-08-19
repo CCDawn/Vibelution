@@ -316,7 +316,12 @@ export function createResearchPrimarySurfaceRenderers(ctx: ResearchPrimarySurfac
         }}
         notice={researchAdvanceNotice || undefined}
         errorSlot={
-          selectedResearchProjectSourceCollectionResetError ? (
+          selectedTeamStartResearchStageError ? (
+            <ResearchWorkflowErrorSurface
+              lang={lang}
+              message={selectedTeamStartResearchStageError.message}
+            />
+          ) : selectedResearchProjectSourceCollectionResetError ? (
             <ResearchWorkflowErrorSurface
               lang={lang}
               message={selectedResearchProjectSourceCollectionResetError.message}
