@@ -157,7 +157,12 @@ export function ResearchProcessWorkspace({
   }, [experimentOptions, location, teamId]);
 
   const nextAction = useMemo(() => resolveHypothesisFirstNextAction({
-    run: runState.run,
+    run: runState.run
+      ? {
+          runId: runState.run.runId,
+          runtimeCurrentNodeIds: runState.projection?.run.runtimeCurrentNodeIds ?? [],
+        }
+      : null,
     chainState: hypothesisFirstChain.chainState,
     meetings: hypothesisFirstChain.meetings,
     selection: hypothesisFirstChain.selection,
@@ -222,6 +227,7 @@ export function ResearchProcessWorkspace({
             onSelectExperiment={selectExperiment}
             onOpenPanel={location.openPanel}
             navigationLabel={location.runId ? nextAction.navigationLabel : undefined}
+            runtimeCurrentNodeIds={runState.projection?.run.runtimeCurrentNodeIds ?? []}
             atCurrentTask={atCurrentTask}
             onNavigateCurrent={
               nextAction.targetNodeId

@@ -48,7 +48,7 @@ describe("ResearchWorkflowToolbar", () => {
       onSelectExperiment: vi.fn(),
       onOpenPanel: vi.fn(),
     } as React.ComponentProps<typeof ResearchWorkflowToolbar>);
-    expect(empty).toContain("创建运行");
+    expect(empty).toContain("选择题目开始研究");
     expect(empty).toContain("SCI-096 · 尚未选择假说");
     expect(empty).toContain("查看详情");
     expect(empty).not.toContain("状态");
@@ -72,7 +72,8 @@ describe("ResearchWorkflowToolbar", () => {
       onSelectExperiment: vi.fn(),
       onOpenPanel: vi.fn(),
     } as React.ComponentProps<typeof ResearchWorkflowToolbar>);
-    expect(running).toContain("第 1/5 步 · 候选形成");
+    expect(running).toContain("假说准备 · 1/5");
+    expect(running).not.toContain("第 1/5 步");
     expect(running).toContain("切换实验");
     expect(running).not.toContain("切换假说");
     expect(running).toContain("SCI-096 · 已选 1 个假说");
@@ -100,7 +101,7 @@ describe("ResearchWorkflowToolbar", () => {
     expect(running).toContain("新建运行");
     expect(running).toContain("切换实验");
     expect(running).toContain("前往假说选择");
-    expect(running).toContain("第 2/5 步 · 假说选择");
+    expect(running).toContain("假说准备 · 2/5");
   });
 
   it("renders English chrome when the shell language is en", () => {
@@ -115,7 +116,7 @@ describe("ResearchWorkflowToolbar", () => {
       onOpenPanel: vi.fn(),
     } as React.ComponentProps<typeof ResearchWorkflowToolbar>, "en");
     expect(running).toContain("Run history");
-    expect(running).toContain("Step 3/5 · Team review");
+    expect(running).toContain("Hypothesis prep · 3/5");
     expect(running).not.toContain("Status");
     expect(running).not.toContain("Timeline");
     expect(running).toContain("Switch experiment");
@@ -139,6 +140,23 @@ describe("ResearchWorkflowToolbar", () => {
     expect(running).not.toContain("新建运行");
     expect(running).not.toContain("生成纪要");
     expect(running).not.toContain("确认并结束本轮");
+  });
+
+  it("shows the canonical formal stage and runtime node", () => {
+    const running = renderToolbar({
+      ...BASE_PROPS,
+      runId: "run-5e4fbe6e18f2",
+      runStatus: "running",
+      experimentOptions: [EXPERIMENT],
+      navigationLabel: "前往协议设计",
+      runtimeCurrentNodeIds: ["protocol_design"],
+      onSelectExperiment: vi.fn(),
+      onOpenPanel: vi.fn(),
+      onNavigateCurrent: vi.fn(),
+    } as React.ComponentProps<typeof ResearchWorkflowToolbar>);
+    expect(running).toContain("实验设计 · 协议设计");
+    expect(running).not.toContain("假说准备");
+    expect(running).toContain("前往协议设计");
   });
 
   it("says no experiment is selected when chrome identity is missing", () => {
@@ -190,7 +208,7 @@ describe("ResearchWorkflowToolbar", () => {
       onOpenPanel: vi.fn(),
     } as React.ComponentProps<typeof ResearchWorkflowToolbar>);
 
-    expect(empty).toContain("创建运行");
+    expect(empty).toContain("选择题目开始研究");
     expect(empty).toContain("查看详情");
     expect(empty).toContain("尚未选择假说");
     expect(empty).toContain("flex-wrap");
