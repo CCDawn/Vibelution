@@ -74,6 +74,9 @@ def _team_detail_log_signature(fields: dict[str, Any]) -> tuple[Any, ...]:
 
 def _emit_team_detail_loaded(fields: dict[str, Any], *, reason: str) -> None:
     s = _service()
+    # Pure telemetry: keep the event append, but do not synchronously refresh the
+    # scene package diagnostics on the request path (that refresh re-runs scene
+    # diagnosis and disproportionately amplifies already-slow detail reads).
     s.record_runtime_scene_event(
         "team_service",
         "team_detail",
@@ -81,6 +84,7 @@ def _emit_team_detail_loaded(fields: dict[str, Any], *, reason: str) -> None:
         message="Team detail loaded.",
         outcome="observed",
         fields={**fields, "logReason": reason},
+        refresh_package_if_due=False,
     )
 
 
@@ -96,6 +100,7 @@ def _emit_team_detail_rollup(team_id: str, state: dict[str, Any], *, now: float)
         "team.detail.loaded_rollup",
         message="Repeated team detail loads suppressed.",
         outcome="observed",
+        refresh_package_if_due=False,
         fields={
             "teamId": team_id,
             "teamName": str(fields.get("teamName") or ""),

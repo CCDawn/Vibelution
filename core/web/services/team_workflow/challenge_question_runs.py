@@ -798,7 +798,7 @@ def challenge_question_run_summary(team_id: str) -> dict[str, Any]:
 
 
 def get_challenge_question_run_status(team_id: str) -> dict[str, Any]:
-    team_service.get_team(team_id)
+    team_service.assert_team_exists(team_id)
     return {
         "teamId": team_id,
         "summary": challenge_question_run_summary(team_id),

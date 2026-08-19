@@ -575,7 +575,7 @@ def resolve_research_project_workspace_root(team_id: str, project_id: str) -> Pa
 
 def resolve_team_program_root(team_id: str) -> Path:
     """Return the stable team-level root for cross-project program ledgers."""
-    team_service.get_team(team_id)
+    team_service.assert_team_exists(team_id)
     return team_workspace_root(team_id)
 
 
