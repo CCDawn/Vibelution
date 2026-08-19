@@ -113,6 +113,56 @@ pathState：`idle | traversed | active | attention | danger` — 仅由 nodeRuns
 - product：`VWorkflowCanvas.tsx`、`workflowCanvasTypes.ts`、`workflowCanvasModel.ts`
 - renderer：`renderers/shadcn/workflow/*`（节点/边/布局/状态/控件各一文件）
 
+## 假说先行区域
+
+### 功能
+
+科研流程画布的**显示层第一类区域**：把假说先行链（选假说 → 讨论·评审 → 资料搜集 → 再讨论 → 收敛）合成为 `stages[0]` 的「假说先行」阶段带，由链台账状态驱动，不改动任何执行拓扑。区域由路由层纯函数 `buildHypothesisFirstCanvasRegion`（`routes/teams/research-workflow/hypothesisFirstCanvasRegion.ts`）从链状态 + 会议轮 + 搜集请求 + 续轮台账 + 选择记录产出 `{ stage, nodes, edges }` 片段，再经 `composeHypothesisFirstGraph` 插入主图；无链活动时区域不合成，画布保持原 16 节点形态。
+
+卡片映射（nodeId 均以 `hf_` 前缀，Inspector 据此路由到链摘要面板）：
+
+| 卡片 | nodeId | visualKind | 状态事实源 |
+| --- | --- | --- | --- |
+| 假说选择 | `hf_selection` | `human_gate` | 最新选择记录存在→`succeeded`，否则 `waiting_human` |
+| 第 N 轮讨论·评审 | `hf_meeting_<roundIndex>` | `agent_task` | 会议 `open→running`、`summarizing/awaiting_approval→waiting_human`、`closed` 有纪要→`succeeded`、无纪要→`blocked`（fail-closed） |
+| 资料搜集 · 缺口 j | `hf_collection_<requestId>` | `system_task` | 请求 `pending→pending`、`handed_off`/有交接引用→`succeeded`、`failed→failed` |
+| 假说收敛门 | `hf_convergence_gate` | `human_gate`（单出口门，非迭代决策五出口 `decision`） | `hypothesisConverged→succeeded`；预算耗尽未收敛→`blocked`；否则 `pending` |
+
+边语义（只画台账里真实存在的关联；常显复用现有叙事标签过滤 `workflowEdgeKeepsNarrativeLabel`——只有叙事语义/门禁种类的边在蛇形模式保留标签，`main`+`auto` 边标签始终 hover 才显示，不为区域开口子）：
+
+| 边 | 语义 | 标签 |
+| --- | --- | --- |
+| `hf_e_sel_m1` 选择→首轮会议 | `decision_branch`（人工选定即分支决策） | 常显「选定假说」 |
+| `hf_e_m{i}_c{j}` 会议→其触发的搜集请求 | `decision_branch` | 常显「搜集决策」 |
+| `hf_e_c{j}_m{i+1}` 已交接搜集→续轮会议 | `main`（gateKind `knowledge_package`，交接内容即知识包） | 常显「知识包交接」 |
+| `hf_e_m{i}_m{i+1}` 无搜集直接续轮 | `main` | 「再讨论」（hover 显示） |
+| `hf_e_m{last}_gate` 最新会议→收敛门 | `main` | 无标签 |
+| `hf_e_m1_stage1` 首轮会议→`source_finding` | `human_gate`（gateKind `knowledge_package`） | 常显「首轮搜集范围就绪」 |
+| `hf_e_gate_stage2` 收敛门→`hypothesis_design` | `human_gate`（gateKind `knowledge_package`） | 常显「假说集就绪」 |
+
+阶段头计数：区域 stage 通过 `WorkflowCanvasStageInput.progress = { completed: 已闭环轮次, total: 轮次预算 }` 覆盖默认的「成功卡数/卡数」，显示「已闭环轮次/预算」（如 2/3）；stageTone 仍复用成员卡聚合规则。`progress` 是可选字段，不进入结构 hash，更新不触发重排。
+
+### 适用范围
+
+- 仅假说先行题目（存在选择记录或 scoped 会议/搜集请求）的科研流程工作区画布；定义视图与运行视图同样合成。
+- 区域卡片无后端 node detail：Inspector 显示链摘要 + 深链赛题详情对应面板（选择 / 团队讨论 / 假说轮次时间线），`useNodeDetailState` 对 `hf_` 前缀节点直接返回 empty。
+- 轮次增加 = 拓扑变化 → 结构 hash 变化 → 自动重排；状态翻转不重排。
+
+### 使用方式
+
+```tsx
+import { buildHypothesisFirstCanvasRegion } from "./hypothesisFirstCanvasRegion";
+import { composeHypothesisFirstGraph } from "./researchProcessGraphModel";
+
+const base = projectionToCanvasGraph(projection);
+const region = buildHypothesisFirstCanvasRegion({
+  chainState, meetings, collectionRequests, reviewRoundLinks, selection,
+});
+const graph = composeHypothesisFirstGraph(base, region); // region 为 null 时原样返回 base
+```
+
+链数据由 `useHypothesisFirstChain(teamId, questionId)`（React Query，questionId 为空不发请求）提供；run SSE 事件经 `useHypothesisFirstChainInvalidation` 防抖失效相关 query。
+
 ### 限制
 
 - 不接真实 node command adapters（Inspector 仍走现有 ops）

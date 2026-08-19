@@ -12,6 +12,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { fetchResearchWorkflowNodeDetail } from "../../../api/research-workflow/runs";
 import type { ResearchWorkflowNodeDetail } from "../../../api/types/research-workflow/core";
+import { isHypothesisFirstCanvasNode } from "./hypothesisFirstCanvasRegion";
 
 export type NodeDetailState =
   | { kind: "idle" }
@@ -69,6 +70,12 @@ export function useNodeDetailState(
     fetchGenRef.current += 1;
     if (!runId || !nodeId) {
       setState({ kind: "idle" });
+      return;
+    }
+    // Hypothesis-first region cards are display-layer constructs: they have no
+    // backend node detail endpoint, so skip the fetch and report empty.
+    if (isHypothesisFirstCanvasNode(nodeId)) {
+      setState({ kind: "empty", nodeId });
       return;
     }
     void load(runId, nodeId);

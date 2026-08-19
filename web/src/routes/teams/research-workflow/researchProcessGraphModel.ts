@@ -24,6 +24,7 @@ import {
   resolveNodeVisualKind,
   stageToneFromNodes,
 } from "../../../components/vui/product/workflow/workflowCanvasModel";
+import type { HypothesisFirstCanvasRegion } from "./hypothesisFirstCanvasRegion";
 
 function asActorKind(value: string | undefined | null): ActorKind {
   if (value === "human" || value === "system" || value === "agent") return value;
@@ -220,5 +221,42 @@ export function mergeSelectionAndRuntime(options: {
   return {
     selectedNodeId: options.selectedNodeId,
     runtimeCurrentNodeIds: [...options.runtimeCurrentNodeIds],
+  };
+}
+
+/**
+ * Prepends the hypothesis-first region (display layer only) to a base canvas
+ * graph: the region stage becomes stages[0] and existing stages shift one
+ * position. Region gate edges point at main-graph nodes (`source_finding` /
+ * `hypothesis_design`), so their pathState is re-resolved here against the
+ * full node set — the region fragment only sees its own cards. A null region
+ * returns the base graph untouched (field-for-field identical).
+ */
+export function composeHypothesisFirstGraph(
+  base: WorkflowLayoutInput,
+  region: HypothesisFirstCanvasRegion | null,
+): WorkflowLayoutInput {
+  if (!region) {
+    return base;
+  }
+  const nodeById = new Map(
+    [...base.nodes, ...region.nodes].map((node) => [node.nodeId, node] as const),
+  );
+  const runtimeCurrent = new Set(base.run?.runtimeCurrentNodeIds ?? []);
+  const regionEdges = buildEdgePathStates(
+    region.edges
+      .filter((edge) => nodeById.has(edge.fromNodeId) && nodeById.has(edge.toNodeId))
+      .map((edge) => ({ ...edge, pathState: undefined })),
+    nodeById,
+    runtimeCurrent,
+  );
+  return {
+    ...base,
+    stages: [
+      region.stage,
+      ...base.stages.map((stage, position) => ({ ...stage, index: position + 1 })),
+    ],
+    nodes: [...region.nodes, ...base.nodes],
+    edges: [...regionEdges, ...base.edges],
   };
 }

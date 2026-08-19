@@ -95,11 +95,13 @@ export function consumeStageLayout(
     x: 0,
     y: 0,
     width: Math.max(STAGE_MIN_WIDTH, content.width + STAGE_HORIZONTAL_PADDING * 2),
-    // content already includes the reserved title band (tasks are offset by
-    // WORKFLOW_STAGE_TITLE_HEIGHT); only the bottom padding is added here.
+    // Height must reach the lowest card bottom (content.y + content.height),
+    // not just the content span: when ELK pushes the first row below the title
+    // band (e.g. LEFT-direction stages with a feedback rail), the span alone
+    // under-heights the box and bottom-row cards poke out of the stage region.
     height: Math.max(
       STAGE_MIN_HEIGHT,
-      content.height + STAGE_VERTICAL_PADDING_BOTTOM,
+      content.y + content.height + STAGE_VERTICAL_PADDING_BOTTOM,
     ),
   };
 
