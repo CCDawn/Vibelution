@@ -6,6 +6,40 @@ import type {
   TeamWorkflowSourceCollectionStageSessionTaskPayload,
 } from "./types";
 
+export type SourceCollectionKnowledgeIngestionIssue = {
+  reason?: string;
+  decision?: string;
+  confidence?: number;
+  candidateIds?: string[];
+  errorType?: string;
+  error?: string;
+  [key: string]: unknown;
+};
+
+/** Backend-shaped official knowledge sync child payload on the stage card. */
+export type SourceCollectionMaterializedKnowledgeIngestion = {
+  status?: string;
+  stewardPackCandidateId?: string;
+  knowledgeBaseId?: string;
+  scopedKnowledgeBaseId?: string;
+  approvedCandidateCount?: number;
+  approvedCandidateIds?: string[];
+  formalKnowledgeItemCount?: number;
+  formalKnowledgeItemIds?: string[];
+  writesFormalKnowledge?: boolean;
+  reusedOfficialSync?: boolean;
+  confidence?: number;
+  sourceReviewStatus?: string;
+  knowledgeSubmissionStatus?: string;
+  knowledgeReviewStatus?: string;
+  createdKnowledgeBaseId?: string;
+  skippedCount?: number;
+  failedCount?: number;
+  skipped?: SourceCollectionKnowledgeIngestionIssue[];
+  failed?: SourceCollectionKnowledgeIngestionIssue[];
+  [key: string]: unknown;
+};
+
 function writeJson<T>(url: string, method: string, body?: unknown): Promise<T> {
   return fetchJson<T>(url, {
     method,

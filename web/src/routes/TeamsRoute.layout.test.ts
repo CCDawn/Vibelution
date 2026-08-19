@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
 import sourceCollectionApiSource from "../api/sourceCollection.ts?raw";
+import type { SourceCollectionMaterializedKnowledgeIngestion } from "../api/sourceCollection";
 import dataProcessingApiSource from "../api/dataProcessing.ts?raw";
 import stageRoundsApiSource from "../api/stageRounds.ts?raw";
 import teamWorkflowApiSource from "../api/teamWorkflow.ts?raw";
@@ -91,6 +94,7 @@ import presentationActionReadinessSource from "./teams/source-collection/present
 import presentationStepStatesSource from "./teams/source-collection/presentationStepStates.ts?raw";
 import presentationExtractionMetricsSource from "./teams/source-collection/presentationExtractionMetrics.ts?raw";
 import presentationCountTextSource from "./teams/source-collection/presentationCountText.ts?raw";
+import { TeamSourceCollectionActiveStagePanel } from "./teams/source-collection/ui/TeamSourceCollectionActiveStagePanel";
 
 /** Route + extracted shell modules (layout contracts may live in either). */
 const routeSourceParts = [
@@ -214,6 +218,33 @@ const routeSource = [
 ].join("\n");
 
 const routeAndPureSource = `${routeSource}\n${canvasGeometrySource}\n${researchWorkspaceModelSource}\n${teamKindModelSource}\n${presentationModelSource}\n${experimentLoopModelSource}\n${aiSearchPresentationSource}\n${workflowPresentationSource}\n${researchStageRolesSource}\n${teamWorkflowQueryKeysSource}\n${researchStageAgentPresentationSource}\n${teamRouteShellModelSource}\n${teamSourceCollectionShellModelSource}`;
+
+function renderSourceCollectionKnowledgeIngestionStatus(
+  payload: SourceCollectionMaterializedKnowledgeIngestion | null,
+) {
+  return renderToStaticMarkup(createElement(TeamSourceCollectionActiveStagePanel, {
+    lang: "zh",
+    stageId: "ingestion",
+    title: "资料入库",
+    status: "当前阶段",
+    materializedKnowledgeIngestion: payload,
+    primaryAction: {
+      tone: "primary",
+      disabled: false,
+      title: "开始入库",
+      label: "开始入库",
+      icon: "play",
+      onAction: () => undefined,
+    },
+    agentChatAction: createElement("span", null, "Agent 私聊"),
+    agentConfigAction: createElement("span", null, "配置 Agent"),
+    errors: null,
+    renderConversationPanel: () => createElement("span", null, "conversation"),
+    renderScreeningPanel: () => createElement("span", null, "screening"),
+    renderGraphPanel: () => createElement("span", null, "graph"),
+    renderMemoryPanel: () => createElement("span", null, "memory"),
+  }));
+}
 
 describe("research project workspace", () => {
   it("never routes an active source-collection batch to a legacy direct Agent session", () => {
@@ -1778,6 +1809,43 @@ describe("TeamsRoute layout contract", () => {
     expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionIngestionPanels).toContain("overflow-hidden");
     expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionIngestionPanels).toContain("min-h-0");
     expect(teamSourceCollectionActiveStagePanelStyles.sourceCollectionIngestionPanels).toContain("max-[860px]:min-h-[560px]");
+
+    const completed = renderSourceCollectionKnowledgeIngestionStatus({
+      status: "completed",
+      formalKnowledgeItemCount: 1,
+      formalKnowledgeItemIds: ["knowledge-1"],
+      knowledgeBaseId: "kb-1",
+      failedCount: 0,
+      failed: [],
+    });
+    expect(completed).toContain('data-testid="source-collection-knowledge-ingestion-status"');
+    expect(completed).toContain('data-ingestion-state="completed"');
+    expect(completed).toContain("1 条");
+    expect(completed).toContain("正式知识 ID: knowledge-1");
+
+    const pending = renderSourceCollectionKnowledgeIngestionStatus({
+      status: "pending_review",
+      formalKnowledgeItemCount: 0,
+      knowledgeBaseId: "kb-pending",
+      skippedCount: 1,
+    });
+    expect(pending).toContain('data-ingestion-state="pending"');
+    expect(pending).toContain("等待正式同步");
+    expect(pending).toContain("知识库 ID: kb-pending");
+
+    const failed = renderSourceCollectionKnowledgeIngestionStatus({
+      status: "completed",
+      formalKnowledgeItemCount: 1,
+      formalKnowledgeItemIds: ["knowledge-stale"],
+      failedCount: 1,
+      failed: [{ reason: "knowledge review rejected" }],
+    });
+    expect(failed).toContain('data-ingestion-state="failed"');
+    expect(failed).not.toContain('data-ingestion-state="completed"');
+    expect(failed).toContain("失败不会计为正式知识");
+
+    const empty = renderSourceCollectionKnowledgeIngestionStatus({});
+    expect(empty).not.toContain("source-collection-knowledge-ingestion-status");
     // Wave 6E: graph node list height is shared PaneHeight, not fixed max-h.
     expect(teamSourceCollectionGraphPanelStyles.sourceCollectionGraphNodeListShell).not.toContain("max-h-[28vh]");
     expect(teamSourceCollectionGraphPanelStyles.sourceCollectionGraphNodeListShell).toContain("[scrollbar-gutter:stable]");

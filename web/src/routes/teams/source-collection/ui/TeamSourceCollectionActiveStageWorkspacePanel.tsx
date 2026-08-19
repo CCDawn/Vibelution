@@ -155,6 +155,9 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
     : (lang === "zh" ? "绑定 Agent" : "Bind Agent");
   const sourceCollectionActiveStageCompact =
     activeModule.id === "finding" && sourceCollectionFindingStageCompact;
+  const materializedKnowledgeIngestion = activeModule.id === "ingestion"
+    ? activeModule.projection?.latestTask?.materializedKnowledgeIngestion
+    : null;
 
   const extractionReadiness = sourceCollectionStageActionReadinessFor("extraction");
   const recoveryViewModel = activeModule.id === "extraction" && extractionRecovery
@@ -483,6 +486,7 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
       compact={sourceCollectionActiveStageCompact}
       title={activeModule.label}
       status={recoveryViewModel ? recoveryViewModel.statusLabel : activeModule.status}
+      materializedKnowledgeIngestion={materializedKnowledgeIngestion}
       flowSteps={useExtractionGuidePrimary ? extractionFlowGuide?.steps : null}
       primaryAction={{
         ...primaryAction,
