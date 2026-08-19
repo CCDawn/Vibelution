@@ -11,18 +11,25 @@ import {
 } from "./researchRunSafetyBudget";
 import styles from "./ResearchRunSafetyLimitPanel.styles";
 
-const STAGES: Array<{ id: ResearchRunSafetyStageId; label: string }> = [
-  { id: "knowledge_collection", label: "知识搜集" },
-  { id: "experiment_design", label: "实验设计" },
-  { id: "execution_iteration", label: "执行迭代" },
+const STAGES: Array<{ id: ResearchRunSafetyStageId; label: string; labelEn: string }> = [
+  { id: "knowledge_collection", label: "知识搜集", labelEn: "Knowledge collection" },
+  { id: "experiment_design", label: "实验设计", labelEn: "Experiment design" },
+  { id: "execution_iteration", label: "执行迭代", labelEn: "Execution & iteration" },
 ];
 
-function formatInteger(value: number): string {
-  return new Intl.NumberFormat("zh-CN").format(value);
+const PRESET_LABEL_EN: Record<ResearchRunSafetyPresetId, string> = {
+  steady: "Steady",
+  recommended: "Recommended",
+  extended: "Extended",
+};
+
+function formatInteger(value: number, isZh: boolean): string {
+  return new Intl.NumberFormat(isZh ? "zh-CN" : "en-US").format(value);
 }
 
-function formatDuration(seconds: number): string {
-  return `${Math.round(seconds / 3600)} 小时`;
+function formatDuration(seconds: number, isZh: boolean): string {
+  const hours = Math.round(seconds / 3600);
+  return isZh ? `${hours} 小时` : `${hours} h`;
 }
 
 function nextPositiveInteger(value: string): number | null {
@@ -34,8 +41,10 @@ export function ResearchRunSafetyLimitPanel(props: {
   budget: ResearchRunSafetyBudget;
   isDisabled?: boolean;
   onChange: (budget: ResearchRunSafetyBudget) => void;
+  lang?: "zh" | "en";
 }) {
   const { budget, isDisabled = false, onChange } = props;
+  const isZh = props.lang !== "en";
   const activePreset = matchingResearchRunSafetyPreset(budget);
   const totalTokens = totalResearchRunSafetyTokens(budget);
   const update = (patch: Partial<ResearchRunSafetyBudget>) => onChange({ ...budget, ...patch });
@@ -54,12 +63,12 @@ export function ResearchRunSafetyLimitPanel(props: {
   };
 
   return (
-    <VSurface tone="inset" padding="compact" className={styles.root} ariaLabel="运行安全上限">
+    <VSurface tone="inset" padding="compact" className={styles.root} ariaLabel={isZh ? "运行安全上限" : "Run safety limits"}>
       <div className={styles.header}>
-        <h4 className={styles.title}>运行安全上限</h4>
-        <span className={styles.total}>{formatInteger(totalTokens)} tokens</span>
+        <h4 className={styles.title}>{isZh ? "运行安全上限" : "Run safety limits"}</h4>
+        <span className={styles.total}>{formatInteger(totalTokens, isZh)} tokens</span>
       </div>
-      <div className={styles.presets} role="group" aria-label="运行安全上限预设">
+      <div className={styles.presets} role="group" aria-label={isZh ? "运行安全上限预设" : "Run safety presets"}>
         {(Object.keys(RESEARCH_RUN_SAFETY_PRESETS) as ResearchRunSafetyPresetId[]).map((presetId) => (
           <VButton
             key={presetId}
@@ -71,16 +80,16 @@ export function ResearchRunSafetyLimitPanel(props: {
             className={styles.preset}
             onClick={() => onChange(createResearchRunSafetyBudget(presetId))}
           >
-            {RESEARCH_RUN_SAFETY_PRESETS[presetId].label}
+            {isZh ? RESEARCH_RUN_SAFETY_PRESETS[presetId].label : PRESET_LABEL_EN[presetId]}
           </VButton>
         ))}
       </div>
       <div className={styles.stages}>
         {STAGES.map((stage) => (
           <label key={stage.id} className={styles.stage}>
-            <span className={styles.stageName}>{stage.label}</span>
+            <span className={styles.stageName}>{isZh ? stage.label : stage.labelEn}</span>
             <VInput
-              aria-label={`${stage.label} 阶段 token 上限`}
+              aria-label={isZh ? `${stage.label} 阶段 token 上限` : `${stage.labelEn} stage token limit`}
               type="number"
               min={1}
               step={1000}
@@ -93,13 +102,15 @@ export function ResearchRunSafetyLimitPanel(props: {
         ))}
       </div>
       <div className={styles.summary}>
-        三阶段合计 · {formatDuration(budget.wallClockSeconds)} · {formatInteger(budget.toolCalls)} 次调用 · {budget.maxRetries} 次重试
+        {isZh
+          ? `三阶段合计 · ${formatDuration(budget.wallClockSeconds, isZh)} · ${formatInteger(budget.toolCalls, isZh)} 次调用 · ${budget.maxRetries} 次重试`
+          : `Three-stage total · ${formatDuration(budget.wallClockSeconds, isZh)} · ${formatInteger(budget.toolCalls, isZh)} calls · ${budget.maxRetries} retries`}
       </div>
       <div className={styles.advanced}>
         <label className={styles.advancedField}>
-          工具调用上限
+          {isZh ? "工具调用上限" : "Tool call limit"}
           <VInput
-            aria-label="工具调用上限"
+            aria-label={isZh ? "工具调用上限" : "Tool call limit"}
             type="number"
             min={1}
             value={String(budget.toolCalls)}
@@ -109,9 +120,9 @@ export function ResearchRunSafetyLimitPanel(props: {
           />
         </label>
         <label className={styles.advancedField}>
-          运行时间（小时）
+          {isZh ? "运行时间（小时）" : "Wall clock (hours)"}
           <VInput
-            aria-label="运行时间上限（小时）"
+            aria-label={isZh ? "运行时间上限（小时）" : "Wall clock limit (hours)"}
             type="number"
             min={1}
             step={1}
@@ -122,9 +133,9 @@ export function ResearchRunSafetyLimitPanel(props: {
           />
         </label>
         <label className={styles.advancedField}>
-          节点重试次数
+          {isZh ? "节点重试次数" : "Node retries"}
           <VInput
-            aria-label="节点重试次数"
+            aria-label={isZh ? "节点重试次数" : "Node retries"}
             type="number"
             min={1}
             value={String(budget.maxRetries)}

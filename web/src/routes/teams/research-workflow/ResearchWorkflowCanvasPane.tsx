@@ -1,5 +1,6 @@
 import type { WorkflowLayoutInput } from "../../../components/vui";
 import { VStateSurface, VWorkflowCanvas } from "../../../components/vui";
+import { useShellI18n } from "../../../i18n/useShellI18n";
 import styles from "./ResearchWorkflowCanvasPane.styles";
 
 export function ResearchWorkflowCanvasPane(props: {
@@ -9,6 +10,7 @@ export function ResearchWorkflowCanvasPane(props: {
   error: string | null;
   onSelectNode: (nodeId: string | null) => void;
 }) {
+  const { lang } = useShellI18n();
   return (
     <div
       className={styles.root}
@@ -36,7 +38,12 @@ export function ResearchWorkflowCanvasPane(props: {
             showMiniMap
           />
         ) : (
-          <VStateSurface tone="loading" title="加载流程定义" fill className={styles.loading} />
+          <VStateSurface
+            tone="loading"
+            title={lang === "zh" ? "加载流程定义" : "Loading workflow definition"}
+            fill
+            className={styles.loading}
+          />
         )}
       </div>
     </div>

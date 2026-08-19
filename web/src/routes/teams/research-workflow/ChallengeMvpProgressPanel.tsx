@@ -43,6 +43,7 @@ import {
 import type { ExperimentPlanningStatusPayload } from "../experimentLoopModel";
 import { experimentPlanningStatusQueryKey } from "../experimentLoopModel";
 import { ChallengeQuestionRegisterDialog } from "../challenge-cup/ChallengeQuestionRegisterDialog";
+import { useShellI18n } from "../../../i18n/useShellI18n";
 import styles from "./ChallengeMvpProgressPanel.styles";
 
 export type ChallengeMvpProgressPanelProps = {
@@ -105,9 +106,13 @@ function actionLabel(zh: boolean, action: string): string {
 
 export function ChallengeMvpProgressPanel({
   teamId,
-  lang = "zh",
+  lang: langProp,
   onOpenQuestion,
 }: ChallengeMvpProgressPanelProps) {
+  // The inspector mount point cannot thread lang yet (claimed by another task);
+  // self-serve the shell language and let an explicit prop win.
+  const { lang: shellLang } = useShellI18n();
+  const lang = langProp ?? shellLang;
   const zh = lang === "zh";
   // Canonical keys: the question run status and the experiment planning status
   // are shared with the other team panels, so React Query dedupes the requests
@@ -609,6 +614,7 @@ export function ChallengeMvpProgressPanel({
       {registerDialogOpen ? (
         <ChallengeQuestionRegisterDialog
           teamId={teamId}
+          lang={lang}
           onClose={() => setRegisterDialogOpen(false)}
           onOpenQuestion={(questionId) => {
             setRegisterDialogOpen(false);

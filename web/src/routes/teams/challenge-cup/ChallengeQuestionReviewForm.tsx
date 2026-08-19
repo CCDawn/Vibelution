@@ -16,34 +16,40 @@ import {
 import css from "./ChallengeQuestionDetailPanel.styles";
 
 const GATES = [
-  { key: "H1_problem_understanding", label: "H1 问题理解" },
-  { key: "H2_hypothesis_selection", label: "H2 假设选择" },
-  { key: "H3_research_plan", label: "H3 研究计划" },
-  { key: "H4_external_output", label: "H4 外部产出" },
+  { key: "H1_problem_understanding", label: "H1 问题理解", labelEn: "H1 Problem understanding" },
+  { key: "H2_hypothesis_selection", label: "H2 假设选择", labelEn: "H2 Hypothesis selection" },
+  { key: "H3_research_plan", label: "H3 研究计划", labelEn: "H3 Research plan" },
+  { key: "H4_external_output", label: "H4 外部产出", labelEn: "H4 External output" },
 ] as const;
 
 type GateKey = (typeof GATES)[number]["key"];
 type GateDecision = "approved" | "revision_requested" | "rejected";
 
-const DECISION_OPTIONS: Array<{ id: GateDecision; label: string }> = [
+const DECISION_OPTIONS_ZH: Array<{ id: GateDecision; label: string }> = [
   { id: "approved", label: "通过" },
   { id: "revision_requested", label: "要求修改" },
   { id: "rejected", label: "驳回" },
 ];
 
+const DECISION_OPTIONS_EN: Array<{ id: GateDecision; label: string }> = [
+  { id: "approved", label: "Approve" },
+  { id: "revision_requested", label: "Request changes" },
+  { id: "rejected", label: "Reject" },
+];
+
 const REVIEWER_STORAGE_KEY = "vibelution.challenge-question-reviewer";
 
-function decisionLabel(decision: string): string {
+function decisionLabel(decision: string, isZh: boolean): string {
   switch (decision) {
     case "approved":
     case "passed":
-      return "已通过";
+      return isZh ? "已通过" : "Approved";
     case "revision_requested":
-      return "要求修改";
+      return isZh ? "要求修改" : "Changes requested";
     case "rejected":
-      return "已驳回";
+      return isZh ? "已驳回" : "Rejected";
     default:
-      return "待审核";
+      return isZh ? "待审核" : "Pending review";
   }
 }
 
@@ -83,8 +89,10 @@ function reviewField(detail: ChallengeQuestionRunDetailPayload, field: string): 
 
 export function ChallengeQuestionReviewForm(props: {
   detail: ChallengeQuestionRunDetailPayload;
+  lang?: "zh" | "en";
 }) {
   const { detail } = props;
+  const isZh = props.lang !== "en";
   const queryClient = useQueryClient();
   const [decisions, setDecisions] = useState<Record<GateKey, GateDecision>>({
     H1_problem_understanding: "approved",
@@ -127,11 +135,11 @@ export function ChallengeQuestionReviewForm(props: {
     return (
       <VSurface tone="card" className={css.reviewSummary} data-vui="question-review-summary">
         <div className={css.cardTopline}>
-          <strong>审核结论</strong>
-          <VStatusChip tone="accent">已正式批准</VStatusChip>
+          <strong>{isZh ? "审核结论" : "Review outcome"}</strong>
+          <VStatusChip tone="accent">{isZh ? "已正式批准" : "Formally approved"}</VStatusChip>
         </div>
         <div className={css.metadata}>
-          {reviewField(detail, "reviewer") ? <span>审核人 {reviewField(detail, "reviewer")}</span> : null}
+          {reviewField(detail, "reviewer") ? <span>{isZh ? `审核人 ${reviewField(detail, "reviewer")}` : `Reviewer ${reviewField(detail, "reviewer")}`}</span> : null}
           {reviewField(detail, "decided_at") ? <span>{reviewField(detail, "decided_at")}</span> : null}
         </div>
         {reviewField(detail, "rationale") ? <p>{reviewField(detail, "rationale")}</p> : null}
@@ -146,15 +154,16 @@ export function ChallengeQuestionReviewForm(props: {
       <div className={css.gateList}>
         {GATES.map((gate) => {
           const current = currentGateDecision(detail, gate.key);
+          const gateLabel = isZh ? gate.label : gate.labelEn;
           return (
             <div className={css.gateRow} key={gate.key}>
-              <span>{gate.label}</span>
-              <VStatusChip tone={decisionTone(current)}>{decisionLabel(current)}</VStatusChip>
+              <span>{gateLabel}</span>
+              <VStatusChip tone={decisionTone(current)}>{decisionLabel(current, isZh)}</VStatusChip>
               <VSelect
-                aria-label={`${gate.label} 审核结论`}
+                aria-label={isZh ? `${gateLabel} 审核结论` : `${gateLabel} review decision`}
                 density="compact"
                 selectedKey={decisions[gate.key]}
-                options={DECISION_OPTIONS}
+                options={isZh ? DECISION_OPTIONS_ZH : DECISION_OPTIONS_EN}
                 onSelectionChange={(key) => {
                   if (key == null) return;
                   setDecisions((prev) => ({ ...prev, [gate.key]: String(key) as GateDecision }));
@@ -166,29 +175,29 @@ export function ChallengeQuestionReviewForm(props: {
         })}
       </div>
       <label className={css.field}>
-        <span>审核人</span>
+        <span>{isZh ? "审核人" : "Reviewer"}</span>
         <VInput
-          aria-label="审核人"
+          aria-label={isZh ? "审核人" : "Reviewer"}
           value={reviewer}
           onChange={(event) => setReviewer(event.currentTarget.value)}
-          placeholder="你的名字"
+          placeholder={isZh ? "你的名字" : "Your name"}
           isDisabled={mutation.isPending}
         />
       </label>
       <label className={css.field}>
-        <span>审核意见</span>
+        <span>{isZh ? "审核意见" : "Review rationale"}</span>
         <VTextarea
-          aria-label="审核意见"
+          aria-label={isZh ? "审核意见" : "Review rationale"}
           value={rationale}
           onChange={(event) => setRationale(event.currentTarget.value)}
-          placeholder="通过 / 要求修改的理由"
+          placeholder={isZh ? "通过 / 要求修改的理由" : "Rationale for approve / request changes"}
           minRows={2}
           isDisabled={mutation.isPending}
         />
       </label>
       {mutation.isError ? (
         <div role="alert" className={css.missingLine}>
-          {mutation.error instanceof Error ? mutation.error.message : "提交失败，请重试"}
+          {mutation.error instanceof Error ? mutation.error.message : (isZh ? "提交失败，请重试" : "Submit failed; please retry")}
         </div>
       ) : null}
       <div>
@@ -197,10 +206,10 @@ export function ChallengeQuestionReviewForm(props: {
           variant="primary"
           isPending={mutation.isPending}
           isDisabled={!canSubmit}
-          disabledReason={!reviewer.trim() || !rationale.trim() ? "先填审核人和审核意见" : undefined}
+          disabledReason={!reviewer.trim() || !rationale.trim() ? (isZh ? "先填审核人和审核意见" : "Fill in reviewer and rationale first") : undefined}
           onClick={() => mutation.mutate()}
         >
-          提交审核结论
+          {isZh ? "提交审核结论" : "Submit review"}
         </VButton>
       </div>
     </VSurface>

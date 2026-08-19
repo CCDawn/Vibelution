@@ -26,6 +26,7 @@ export const HYPOTHESIS_SELECTION_MAX = 16;
 export type HypothesisSelectionPanelProps = {
   teamId: string;
   questionId: string;
+  lang?: "zh" | "en";
 };
 
 function sameIdSet(left: string[], right: string[]): boolean {
@@ -48,7 +49,15 @@ const MEETING_STATUS_LABELS: Record<string, string> = {
   closed: "已关门",
 };
 
-export function HypothesisSelectionPanel({ teamId, questionId }: HypothesisSelectionPanelProps) {
+const MEETING_STATUS_LABELS_EN: Record<string, string> = {
+  open: "Discussing",
+  summarizing: "Summarizing",
+  awaiting_approval: "Awaiting approval",
+  closed: "Closed",
+};
+
+export function HypothesisSelectionPanel({ teamId, questionId, lang = "zh" }: HypothesisSelectionPanelProps) {
+  const isZh = lang === "zh";
   const queryClient = useQueryClient();
   const contextQuery = useQuery({
     queryKey: queryKeys.hypothesisFirstSelectionContext(teamId, questionId),
@@ -88,11 +97,11 @@ export function HypothesisSelectionPanel({ teamId, questionId }: HypothesisSelec
   });
 
   if (contextQuery.isPending) {
-    return <VStateSurface title="正在读取假说选择上下文" tone="loading" />;
+    return <VStateSurface title={isZh ? "正在读取假说选择上下文" : "Loading hypothesis selection context"} tone="loading" />;
   }
   if (contextQuery.isError || !context) {
     return (
-      <VEmptyState title="假说选择上下文不可用">
+      <VEmptyState title={isZh ? "假说选择上下文不可用" : "Hypothesis selection context unavailable"}>
         {contextQuery.error instanceof Error ? <code>{contextQuery.error.message}</code> : null}
       </VEmptyState>
     );
@@ -141,33 +150,34 @@ export function HypothesisSelectionPanel({ teamId, questionId }: HypothesisSelec
     <section className={css.section} id="hypothesis-first-selection">
       <div className={css.heading}>
         <div>
-          <h3>假说选择（假说先行）</h3>
+          <h3>{isZh ? "假说选择（假说先行）" : "Hypothesis selection (hypothesis-first)"}</h3>
           <p>
-            已选 {selectedIds.length} / {candidates.length} 条候选（{HYPOTHESIS_SELECTION_MIN}–
-            {HYPOTHESIS_SELECTION_MAX}）
+            {isZh
+              ? `已选 ${selectedIds.length} / ${candidates.length} 条候选（${HYPOTHESIS_SELECTION_MIN}–${HYPOTHESIS_SELECTION_MAX}）`
+              : `Selected ${selectedIds.length} / ${candidates.length} candidates (${HYPOTHESIS_SELECTION_MIN}–${HYPOTHESIS_SELECTION_MAX})`}
           </p>
         </div>
         <div className={css.headingActions}>
           {reviewMeeting ? (
             <VStatusChip tone={meetingStatusTone(reviewMeeting.status)}>
-              {MEETING_STATUS_LABELS[reviewMeeting.status] ?? reviewMeeting.status}
+              {(isZh ? MEETING_STATUS_LABELS : MEETING_STATUS_LABELS_EN)[reviewMeeting.status] ?? reviewMeeting.status}
             </VStatusChip>
           ) : (
-            <VStatusChip tone="neutral">未开启评审</VStatusChip>
+            <VStatusChip tone="neutral">{isZh ? "未开启评审" : "Review not started"}</VStatusChip>
           )}
         </div>
       </div>
 
       {latestSelection ? (
         <div className={css.summary}>
-          <span>当前生效选择</span>
+          <span>{isZh ? "当前生效选择" : "Current effective selection"}</span>
           <p>
             {latestSelection.selectionId} · {latestSelection.selectedCandidateIds.join("、")} ·{" "}
             {latestSelection.decidedBy || "unknown"} · {latestSelection.createdAt || "—"}
           </p>
         </div>
       ) : (
-        <p className={css.hint}>尚未记录选择，默认勾选赛题 artifact 的已选假说集合。</p>
+        <p className={css.hint}>{isZh ? "尚未记录选择，默认勾选赛题 artifact 的已选假说集合。" : "No selection recorded yet; the artifact's selected hypothesis set is pre-checked."}</p>
       )}
 
       <div className={css.candidateList}>
@@ -185,7 +195,7 @@ export function HypothesisSelectionPanel({ teamId, questionId }: HypothesisSelec
             >
               <div className={css.candidateTopline}>
                 <VCheckbox
-                  aria-label={`选择假说 ${candidate.hypothesis_id}`}
+                  aria-label={isZh ? `选择假说 ${candidate.hypothesis_id}` : `Select hypothesis ${candidate.hypothesis_id}`}
                   className={css.candidateLabel}
                   isDisabled={checkDisabled}
                   isSelected={checked}
@@ -198,8 +208,8 @@ export function HypothesisSelectionPanel({ teamId, questionId }: HypothesisSelec
                 </VCheckbox>
               </div>
               <div className={css.candidateMeta}>
-                <span>预测 {candidate.predictions.length} 条</span>
-                <span>支持证据 {candidate.supporting_evidence_refs.length} 条</span>
+                <span>{isZh ? `预测 ${candidate.predictions.length} 条` : `${candidate.predictions.length} predictions`}</span>
+                <span>{isZh ? `支持证据 ${candidate.supporting_evidence_refs.length} 条` : `${candidate.supporting_evidence_refs.length} supporting evidence`}</span>
               </div>
             </article>
           );
@@ -208,7 +218,7 @@ export function HypothesisSelectionPanel({ teamId, questionId }: HypothesisSelec
 
       {recordMutation.isError ? (
         <VErrorSummary
-          label="选择记录失败"
+          label={isZh ? "选择记录失败" : "Failed to record selection"}
           summary={
             recordMutation.error instanceof Error
               ? recordMutation.error.message
@@ -222,9 +232,11 @@ export function HypothesisSelectionPanel({ teamId, questionId }: HypothesisSelec
           density="compact"
           disabledReason={
             !withinBounds
-              ? `选择数量需在 ${HYPOTHESIS_SELECTION_MIN}–${HYPOTHESIS_SELECTION_MAX} 之间`
+              ? (isZh
+                ? `选择数量需在 ${HYPOTHESIS_SELECTION_MIN}–${HYPOTHESIS_SELECTION_MAX} 之间`
+                : `Select between ${HYPOTHESIS_SELECTION_MIN} and ${HYPOTHESIS_SELECTION_MAX}`)
               : !dirty
-                ? "选择未发生变化"
+                ? (isZh ? "选择未发生变化" : "Selection unchanged")
                 : undefined
           }
           isDisabled={!withinBounds || !dirty}
@@ -232,16 +244,16 @@ export function HypothesisSelectionPanel({ teamId, questionId }: HypothesisSelec
           onPress={submitSelection}
           variant="primary"
         >
-          记录选择并开启评审
+          {isZh ? "记录选择并开启评审" : "Record selection & start review"}
         </VButton>
         <VButton
           density="compact"
-          disabledReason="记录选择并开启评审讨论后可用"
+          disabledReason={isZh ? "记录选择并开启评审讨论后可用" : "Available after recording a selection and starting the review"}
           isDisabled={!reviewMeetingId}
           onPress={openMeetingSection}
           variant="secondary"
         >
-          查看评审讨论
+          {isZh ? "查看评审讨论" : "View review discussion"}
         </VButton>
       </div>
     </section>
