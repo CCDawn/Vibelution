@@ -32,6 +32,9 @@ describe("Electron main Launcher IPC facade", () => {
     expect(launcherWindowSource).toContain('"--vibelution-window-role=launcher-control"');
     expect(preloadSource).toContain('process.argv.includes("--vibelution-window-role=launcher-control")');
     expect(preloadSource).toContain("launcherInvoke");
+    expect(preloadSource).toContain("getLauncherState");
+    expect(preloadSource).toContain("onLauncherStateChanged");
+    expect(preloadSource).toContain("removeListener(IPC_CHANNELS.launcherStateChanged, wrapped)");
     expect(launcherWindowSource).toContain('additionalArguments: ["--vibelution-window-role=launcher-control"]');
     expect(mainSource).toContain("launcherIpcTrustedOrigins");
   });
@@ -45,7 +48,19 @@ describe("Electron main Launcher IPC facade", () => {
     expect(statusApi).toBeLessThan(contextStart);
     expect(mainSource).toContain("createLocalLauncherStatusSnapshot");
     expect(mainSource).toContain("resolveLocalStatus");
-    expect(mainSource).toContain("scheduleStatusRefresh");
+    expect(mainSource).toContain("launcherStateStore.projectStatus()");
+    expect(mainSource).toContain("launcherStateStore.projectBranchInstances()");
+  });
+
+  it("refreshes state from debounced file hints and stat-only safety checks", () => {
+    expect(mainSource).toContain("scheduleLauncherStateFileHint");
+    expect(mainSource).toContain("}, 200)");
+    expect(mainSource).toContain("statSync(path)");
+    expect(mainSource).toContain("state.json");
+    expect(mainSource).toContain("ports.json");
+    expect(mainSource).toContain("instances.json");
+    expect(mainSource).toContain('app.on("will-quit"');
+    expect(mainSource).toContain("stopLauncherStateFileHints()");
   });
 
   it("routes the current checkout through the main supervisor and keeps isolated READY guarded", () => {

@@ -5,6 +5,8 @@ export const IPC_CHANNELS = {
   requestDesktopShellExit: "launcher:request-desktop-shell-exit",
   notifyConversationCompleted: "launcher:notify-conversation-completed",
   conversationNotificationOpened: "launcher:conversation-notification-opened",
+  getLauncherState: "launcher:get-state",
+  launcherStateChanged: "launcher:state-changed",
   launcherInvoke: "launcher:invoke"
 } as const;
 

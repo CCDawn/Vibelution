@@ -1,6 +1,6 @@
 import { BrowserWindow, Notification, app, dialog, ipcMain, nativeImage, nativeTheme, protocol } from "electron";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, statSync, watch, writeFileSync, type FSWatcher } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import {
@@ -52,8 +52,8 @@ import { createDesktopPaths, resolveDesktopEntryCatalogPath, type DesktopPaths }
 import { fetchLauncherControlToken, runDesktopActionOnce } from "./protocol/desktopActionClient.js";
 import { applyProjectSlot } from "./protocol/applyProjectSlot.js";
 import {
+  classifyTrayBranchInstances,
   fetchLauncherBranchInstances,
-  fetchLauncherFreshness,
   fetchLauncherStatusSummary,
   formatLauncherStatusSummary,
   postLauncherControl,
@@ -66,6 +66,7 @@ import {
   type OrchestratedLifecycleResult
 } from "./protocol/launcherIpcHost.js";
 import { createLocalLauncherStatusSnapshot } from "./protocol/launcherStatusSnapshot.js";
+import { LauncherStateStore, type LauncherWindowTruth } from "./state/launcherStateStore.js";
 import {
   LAUNCHER_APP_PROTOCOL,
   launcherAppOriginFor,
@@ -224,11 +225,46 @@ let desktopSessionRevision = 0;
 let desktopControlRecoveryPromise: Promise<void> | null = null;
 let shutdownApproved = false;
 let launcherIpcHost: ReturnType<typeof createLauncherIpcHost> | null = null;
-let launcherStatusCliCache: unknown = null;
-let launcherStatusCliRefresh: Promise<void> | null = null;
+let launcherStateWatchers: FSWatcher[] = [];
+let launcherStateHintTimer: ReturnType<typeof setTimeout> | null = null;
+let launcherStateStatTimer: ReturnType<typeof setInterval> | null = null;
+const launcherStateStatSignatures = new Map<string, string>();
 const inProcessDesktopSessionStore = new InProcessDesktopSessionStore();
 const mainWorkbenchCloseStore = new MainWorkbenchCloseTransactionStore();
 const launcherLifecycleSupervisor = new LauncherLifecycleSupervisor();
+const launcherStateStore = new LauncherStateStore(
+  async () => {
+    const [statusPayload, branchInstancesPayload, freshnessPayload] = await Promise.all([
+      orchestrateLauncherApi("status", {
+        schemaVersion: 1,
+        path: "status",
+        init: { method: "GET" }
+      }),
+      orchestrateLauncherApi("branch-instances?cleanupMetadata=1", {
+        schemaVersion: 1,
+        path: "branch-instances?cleanupMetadata=1",
+        init: { method: "GET" }
+      }),
+      orchestrateLauncherApi("freshness", {
+        schemaVersion: 1,
+        path: "freshness",
+        init: { method: "GET" }
+      })
+    ]);
+    return { status: statusPayload, branchInstances: branchInstancesPayload, freshness: freshnessPayload };
+  },
+  {
+    status: createLocalLauncherStatusSnapshot(),
+    branchInstances: {
+      schemaVersion: 1,
+      integrationRoot: "",
+      branchPool: "",
+      currentId: "main",
+      items: []
+    },
+    freshness: { current: null, label: "Launcher 代码版本：未知" }
+  }
+);
 const WORKBENCH_CLOSE_BACKEND_WAIT_MS = 30_000;
 const WORKBENCH_START_READY_WAIT_MS = 90_000;
 const WORKBENCH_REBUILD_READY_WAIT_MS = 300_000;
@@ -413,7 +449,10 @@ function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapR
             return false;
           }
         }),
-      reportState: (state) => reportManagedWindowState(paths, bootstrap, state),
+      reportState: async (state) => {
+        await reportManagedWindowState(paths, bootstrap, state);
+        updateLauncherWindowTruth();
+      },
       shouldInterceptLauncherClose: () => !shutdownApproved,
       shouldInterceptWorkbenchClose: () => !shutdownApproved,
       onWorkbenchCloseRequest: () =>
@@ -444,6 +483,28 @@ function createWindowProvider(paths: DesktopPaths, bootstrap: LauncherBootstrapR
     }
   );
 }
+
+function currentLauncherWindowTruth(): LauncherWindowTruth {
+  const provider = windowProvider;
+  const snapshot = provider?.snapshot();
+  return {
+    workbench: snapshot
+      ? {
+          open: snapshot.workbench.open === true,
+          rendererProcessId: snapshot.workbench.rendererProcessId
+        }
+      : null,
+    instances: provider ? provider.instanceWindowStates() : []
+  };
+}
+
+function updateLauncherWindowTruth(): void {
+  launcherStateStore.updateWindowTruth(currentLauncherWindowTruth());
+}
+
+launcherStateStore.subscribe((snapshot) => {
+  windowProvider?.sendToLauncher(IPC_CHANNELS.launcherStateChanged, snapshot);
+});
 
 function createConversationBadgeIcon(count: number) {
   const safeCount = Math.max(1, Math.min(9, Math.round(count)));
@@ -2926,23 +2987,88 @@ async function orchestrateLauncherApi(
 }
 
 function scheduleLauncherStatusCliRefresh(): void {
-  if (launcherStatusCliRefresh !== null || launcherBootstrap === null) {
+  if (launcherBootstrap === null) {
     return;
   }
-  launcherStatusCliRefresh = orchestrateLauncherApi("status", {
-    schemaVersion: 1,
-    path: "status",
-    init: { method: "GET" }
-  })
-    .then((payload) => {
-      launcherStatusCliCache = payload;
-    })
-    .catch((error: unknown) => {
-      console.warn(error instanceof Error ? error.message : String(error));
-    })
-    .finally(() => {
-      launcherStatusCliRefresh = null;
-    });
+  void launcherStateStore.refresh("launcher_status_refresh");
+}
+
+function launcherStateStatSignature(path: string): string {
+  try {
+    const stat = statSync(path);
+    return `${stat.mtimeMs}:${stat.size}`;
+  } catch {
+    return "missing";
+  }
+}
+
+function scheduleLauncherStateFileHint(): void {
+  if (launcherStateHintTimer !== null) {
+    clearTimeout(launcherStateHintTimer);
+  }
+  launcherStateHintTimer = setTimeout(() => {
+    launcherStateHintTimer = null;
+    void launcherStateStore.refresh("file_change");
+  }, 200);
+}
+
+function startLauncherStateFileHints(paths: DesktopPaths): void {
+  stopLauncherStateFileHints();
+  const localAppData = String(desktopEnvironment().LOCALAPPDATA || "").trim();
+  const runtimeDir = resolve(paths.workspaceRoot, ".runtime", "launcher");
+  const statTargets = [
+    resolve(runtimeDir, "state.json"),
+    resolve(runtimeDir, "ports.json"),
+    resolve(paths.workspaceRoot, ".git"),
+    ...(localAppData ? [resolve(localAppData, "Vibelution", "instances.json")] : [])
+  ];
+  const watchTargets = [
+    runtimeDir,
+    resolve(paths.workspaceRoot, ".git"),
+    ...(localAppData ? [resolve(localAppData, "Vibelution")] : [])
+  ];
+  for (const target of statTargets) {
+    launcherStateStatSignatures.set(target, launcherStateStatSignature(target));
+  }
+  for (const target of watchTargets) {
+    try {
+      const watcher = watch(target, { persistent: false }, () => scheduleLauncherStateFileHint());
+      watcher.on("error", () => undefined);
+      launcherStateWatchers.push(watcher);
+    } catch {
+      // Missing runtime paths are covered by the stat-only safety check below.
+    }
+  }
+  launcherStateStatTimer = setInterval(() => {
+    let changed = false;
+    for (const target of statTargets) {
+      const next = launcherStateStatSignature(target);
+      if (launcherStateStatSignatures.get(target) !== next) {
+        launcherStateStatSignatures.set(target, next);
+        changed = true;
+      }
+    }
+    if (changed) {
+      scheduleLauncherStateFileHint();
+    }
+  }, 30_000);
+  launcherStateStatTimer.unref?.();
+}
+
+function stopLauncherStateFileHints(): void {
+  if (launcherStateHintTimer !== null) {
+    clearTimeout(launcherStateHintTimer);
+    launcherStateHintTimer = null;
+  }
+  if (launcherStateStatTimer !== null) {
+    clearInterval(launcherStateStatTimer);
+    launcherStateStatTimer = null;
+  }
+  for (const watcher of launcherStateWatchers) {
+    watcher.close();
+  }
+  launcherStateWatchers = [];
+  launcherStateStatSignatures.clear();
 }
 
 function resolveLauncherIpcHost() {
@@ -2964,24 +3090,32 @@ function resolveLauncherIpcHost() {
         return null;
       }
     },
-    resolveWindowTruth: () => {
-      const provider = windowProvider;
-      const snapshot = provider?.snapshot();
-      return {
-        workbench: snapshot
-          ? {
-              open: snapshot.workbench.open === true,
-              rendererProcessId: snapshot.workbench.rendererProcessId
-            }
-          : null,
-        instances: provider ? provider.instanceWindowStates() : []
-      };
+    resolveWindowTruth: currentLauncherWindowTruth,
+    orchestrateLifecycle: async (operation, payload) => {
+      launcherStateStore.markReconciliation(`lifecycle:${operation}`);
+      try {
+        return await orchestrateLauncherLifecycle(operation, payload);
+      } finally {
+        scheduleLauncherStatusCliRefresh();
+      }
     },
-    orchestrateLifecycle: orchestrateLauncherLifecycle,
-    orchestrateBranchInstance: orchestrateBranchInstanceLifecycle,
-    orchestrateLauncherApi,
-    resolveLocalStatus: () => launcherStatusCliCache ?? createLocalLauncherStatusSnapshot(),
-    scheduleStatusRefresh: scheduleLauncherStatusCliRefresh
+    orchestrateBranchInstance: async (operation, payload) => {
+      launcherStateStore.markReconciliation(`branch_lifecycle:${operation}`);
+      try {
+        return await orchestrateBranchInstanceLifecycle(operation, payload);
+      } finally {
+        scheduleLauncherStatusCliRefresh();
+      }
+    },
+    orchestrateLauncherApi: async (path, payload) => {
+      const result = await orchestrateLauncherApi(path, payload);
+      if (String(payload.init?.method ?? "GET").toUpperCase() !== "GET") {
+        scheduleLauncherStatusCliRefresh();
+      }
+      return result;
+    },
+    resolveLocalStatus: () => launcherStateStore.projectStatus(),
+    resolveLocalBranchInstances: () => launcherStateStore.projectBranchInstances()
   });
   return launcherIpcHost;
 }
@@ -2989,6 +3123,11 @@ function resolveLauncherIpcHost() {
 ipcMain.handle(IPC_CHANNELS.launcherInvoke, async (event, payload: LauncherIpcInvokePayload) => {
   assertTrustedIpcSender(event, launcherIpcTrustedOrigins());
   return await resolveLauncherIpcHost().invoke(payload);
+});
+
+ipcMain.handle(IPC_CHANNELS.getLauncherState, (event) => {
+  assertTrustedIpcSender(event, launcherIpcTrustedOrigins());
+  return launcherStateStore.snapshot();
 });
 
 async function startOrFocusWorkbenchFromProductEntryOnShell(): Promise<void> {
@@ -3087,6 +3226,9 @@ app.whenReady()
     electronStartupStage = "tray_ready";
     const trayStartedAtMs = performance.now();
     windowProvider = createWindowProvider(paths, launcherBootstrap);
+    updateLauncherWindowTruth();
+    startLauncherStateFileHints(paths);
+    scheduleLauncherStatusCliRefresh();
     desktopTray = createDesktopTray(paths, {
       openLauncher: () => {
         void windowProvider?.openLauncher().catch((error: unknown) => {
@@ -3094,16 +3236,17 @@ app.whenReady()
         });
       },
       listInstances: async () => {
-        return fetchLauncherBranchInstances({
-          ...(await resolveTrayControlContextOrLoopback()),
-          requestTimeoutMs: 20_000
-        });
+        return classifyTrayBranchInstances(launcherStateStore.projectBranchInstances());
       },
       getFreshness: async () => {
-        return fetchLauncherFreshness({
-          ...(await resolveTrayControlContextOrLoopback()),
-          requestTimeoutMs: 20_000
-        });
+        const raw = launcherStateStore.projectFreshness();
+        const freshness = typeof raw === "object" && raw !== null ? raw as Record<string, unknown> : {};
+        return {
+          current: freshness.current === true ? true : freshness.current === false ? false : null,
+          label: typeof freshness.label === "string" && freshness.label.trim()
+            ? freshness.label.trim()
+            : "Launcher 代码版本：未知"
+        };
       },
       restartLauncher: () => {
         void runTrayRestartLauncher();
@@ -3308,6 +3451,7 @@ app.on("open-url", (event, rawUrl) => {
 app.on("before-quit", (event) => {
   if (shutdownApproved) {
     releaseElectronDesktopShellOwner(createDesktopPathsForApp().workspaceRoot);
+    stopLauncherStateFileHints();
     desktopTray?.destroy();
     desktopTray = null;
     stopDesktopActionLoop();
@@ -3321,4 +3465,8 @@ app.on("before-quit", (event) => {
 
 app.on("window-all-closed", () => {
   // Keep the lightweight tray app running after the Launcher/workbench windows close.
+});
+
+app.on("will-quit", () => {
+  stopLauncherStateFileHints();
 });

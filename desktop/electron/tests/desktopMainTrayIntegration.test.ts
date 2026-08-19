@@ -19,6 +19,10 @@ describe("Electron main tray integration", () => {
     const trayEnd = mainSource.indexOf("startPeriodicShellFreshnessWatch", trayStart);
     const traySource = mainSource.slice(trayStart, trayEnd);
     expect(traySource).toContain("stopAll:");
+    expect(traySource).toContain("classifyTrayBranchInstances(launcherStateStore.projectBranchInstances())");
+    expect(traySource).toContain("launcherStateStore.projectFreshness()");
+    expect(traySource).not.toContain("fetchLauncherBranchInstances");
+    expect(traySource).not.toContain("fetchLauncherFreshness");
     expect(traySource).not.toContain("quit:");
     expect(traySource).not.toContain("requestDesktopShellExit");
     expect(mainSource).not.toContain("restartProject:");

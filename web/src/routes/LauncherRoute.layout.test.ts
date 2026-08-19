@@ -151,14 +151,14 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("queryKeys.runtimeSummary()");
   });
 
-  it("keeps launcher polling responsive during lifecycle work and slower once settled", () => {
+  it("uses the Electron state event instead of periodic launcher polling", () => {
     expect(routeSource).toContain("isControlPlaneIdle");
-    expect(routeSource).toContain("resolveLauncherStatusPollingInterval");
-    expect(routeSource).toContain("launcherStatusCommandActive(status)");
-    expect(routeSource).toContain("launcherStatusLifecycleChanging(status)");
-    expect(routeSource).toContain("refetchIntervalInBackground: true");
-    expect(routeSource).toContain("launcherOpenWarmup");
-    expect(routeSource).toContain("resolvePollingInterval");
+    expect(routeSource).toContain("onLauncherStateChanged");
+    expect(routeSource).toContain("queryClient.setQueryData(queryKeys.launcherState(), snapshot)");
+    expect(routeSource).toContain('queryKey: ["launcher", "branch-instances"]');
+    expect(routeSource).not.toContain("refetchIntervalInBackground");
+    expect(routeSource).not.toContain("resolvePollingInterval");
+    expect(routeSource).not.toContain("resolveLauncherStatusPollingInterval");
     expect(routeSource).toContain("const controlPlaneIdle = isControlPlaneIdle(evidence)");
     expect(routeSource).toContain("const controlBusy = controlMutation.isPending && !(controlPlaneIdle && lifecycleSettled)");
     expect(routeSource).toContain("const busy = controlBusy || supervisorMutation.isPending");

@@ -57,6 +57,8 @@ type LauncherIpcInvokePayload = {
 
 type LauncherIpcBridge = {
   launcherInvoke: (payload: LauncherIpcInvokePayload) => Promise<LauncherIpcInvokeResult>;
+  getLauncherState?: () => Promise<LauncherStateSnapshotV1>;
+  onLauncherStateChanged?: (listener: (snapshot: LauncherStateSnapshotV1) => void) => () => void;
 };
 
 function launcherIpcBridge(): LauncherIpcBridge | null {
@@ -72,11 +74,73 @@ function launcherIpcBridge(): LauncherIpcBridge | null {
   if (typeof launcherInvoke !== "function") {
     return null;
   }
-  return { launcherInvoke };
+  const stateBridge = bridge as Partial<LauncherIpcBridge>;
+  return {
+    launcherInvoke,
+    ...(typeof stateBridge.getLauncherState === "function" ? { getLauncherState: stateBridge.getLauncherState } : {}),
+    ...(typeof stateBridge.onLauncherStateChanged === "function"
+      ? { onLauncherStateChanged: stateBridge.onLauncherStateChanged }
+      : {}),
+  };
 }
 
 export function hasLauncherIpcBridge() {
   return launcherIpcBridge() !== null;
+}
+
+export type LauncherStateFreshness = "fresh" | "refreshing" | "stale";
+
+export type LauncherStateSnapshotV1 = {
+  schemaVersion: 1;
+  revision: number;
+  observedAt: string;
+  freshness: LauncherStateFreshness;
+  staleReason?: string;
+  main: {
+    id: string;
+    observedState: string;
+    desiredState: string;
+    phase: string;
+    commandId: string;
+    generation: number;
+    window: { open: boolean; rendererProcessId: number };
+  };
+  instances: Array<{
+    id: string;
+    observedState: string;
+    desiredState: string;
+    phase: string;
+    commandId: string;
+    generation: number;
+    window: { open: boolean; rendererProcessId: number };
+  }>;
+  cleanup: {
+    reconciliation: { active: boolean; reason: string; startedAt?: string };
+    lastCompletedAt?: string;
+    cleanedCount: number;
+    skippedCount: number;
+    failedCount: number;
+  };
+};
+
+export function hasLauncherStateBridge() {
+  return typeof launcherIpcBridge()?.getLauncherState === "function";
+}
+
+export function getLauncherState(): Promise<LauncherStateSnapshotV1> {
+  const bridge = launcherIpcBridge();
+  if (typeof bridge?.getLauncherState !== "function") {
+    throw new Error("Launcher state snapshot bridge is not available.");
+  }
+  return bridge.getLauncherState();
+}
+
+export function onLauncherStateChanged(listener: (snapshot: LauncherStateSnapshotV1) => void): () => void {
+  const bridge = launcherIpcBridge();
+  if (typeof bridge?.onLauncherStateChanged !== "function") {
+    return () => undefined;
+  }
+  return bridge.onLauncherStateChanged(listener);
 }
 
 function ipcInitForRequest(init?: RequestInit): LauncherIpcInvokePayload["init"] | undefined {

@@ -987,8 +987,10 @@ describe("IPC channels", () => {
       "conversationNotificationOpened",
       "focusWorkbenchWindow",
       "getDesktopShellSummary",
+      "getLauncherState",
       "getVersion",
       "launcherInvoke",
+      "launcherStateChanged",
       "notifyConversationCompleted",
       "requestDesktopShellExit"
     ]);
