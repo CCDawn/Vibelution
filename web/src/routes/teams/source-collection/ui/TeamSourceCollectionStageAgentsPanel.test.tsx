@@ -46,4 +46,25 @@ describe("TeamSourceCollectionStageAgentsPanel", () => {
     expect(inline).not.toContain("Agent 记忆");
     expect(stacked).toContain('data-vui="dense-table"');
   });
+
+  it("renders an actionable empty state instead of a blank surface", () => {
+    const empty = renderToStaticMarkup(
+      <MemoryRouter>
+        <TeamSourceCollectionStageAgentsPanel lang="zh" agents={[]} />
+      </MemoryRouter>,
+    );
+    expect(empty).toContain('data-vui="empty-state"');
+    expect(empty).toContain("尚未绑定 Agent");
+    expect(empty).toContain("前往 Agent 中心绑定");
+    expect(empty).toContain('href="/agents"');
+    expect(empty).not.toContain('data-vui="dense-table"');
+
+    const emptyEn = renderToStaticMarkup(
+      <MemoryRouter>
+        <TeamSourceCollectionStageAgentsPanel lang="en" agents={[]} />
+      </MemoryRouter>,
+    );
+    expect(emptyEn).toContain("No agents bound");
+    expect(emptyEn).toContain("Bind an Agent in Agent Center");
+  });
 });

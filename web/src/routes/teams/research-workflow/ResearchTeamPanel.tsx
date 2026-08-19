@@ -4,9 +4,16 @@ import type {
   WorkflowCanvasProjection,
 } from "../../../api/types/researchWorkflow";
 import { VPanelHeader, VRouteLinkButton, VSurface } from "../../../components/vui";
+import { useShellI18n } from "../../../i18n/useShellI18n";
+import { ResearchProjectSwitcher } from "../research-projects/ResearchProjectSwitcher";
 import { teamChatRoomRoute } from "../researchStageAgentPresentation";
 import { teamWorkspaceRoute } from "../researchWorkspaceModel";
 import styles from "./ResearchTeamPanel.styles";
+
+function noopProjectActivated() {
+  // Project activation propagates through researchProjectQueryKey invalidation;
+  // this panel holds no local project draft to update.
+}
 
 export function ResearchTeamPanel(props: {
   teamId: string;
@@ -16,6 +23,8 @@ export function ResearchTeamPanel(props: {
   projection: WorkflowCanvasProjection | null;
   effectiveBindings: EffectiveAgentBinding[] | null;
 }) {
+  const { lang } = useShellI18n();
+  const isZh = lang === "zh";
   const agentNodeIds = props.projection?.definition.nodes
     .filter((node) => node.actorKind === "agent")
     .map((node) => node.nodeId) ?? [];
@@ -28,7 +37,7 @@ export function ResearchTeamPanel(props: {
     .map((node) => ({
       nodeId: node.nodeId,
       label: props.projection?.definition.nodes.find((item) => item.nodeId === node.nodeId)?.label || node.nodeId,
-      owner: node.primaryAgentId || bindingByNode.get(node.nodeId)?.agentId || "人工处理",
+      owner: node.primaryAgentId || bindingByNode.get(node.nodeId)?.agentId || (isZh ? "人工处理" : "Manual follow-up"),
     }));
   const coordinatorAgentId = props.effectiveBindings?.find(
     (binding) => binding.roleKey === "research_coordinator",
@@ -37,26 +46,37 @@ export function ResearchTeamPanel(props: {
     runId: props.run?.runId,
     panel: "team",
   });
-  const roomRoute = teamChatRoomRoute(props.linkedChatRoomId, returnTo, "返回科研流程");
+  const roomRoute = teamChatRoomRoute(
+    props.linkedChatRoomId,
+    returnTo,
+    isZh ? "返回科研流程" : "Back to research workflow",
+  );
 
   return (
     <VSurface tone="panel" className={styles.root}>
-      <VPanelHeader title="团队治理" headingLevel={3} />
+      <VPanelHeader title={isZh ? "团队治理" : "Team governance"} headingLevel={3} />
+      <ResearchProjectSwitcher
+        teamId={props.teamId}
+        lang={lang}
+        currentTopic=""
+        currentExperimentMethod=""
+        onProjectActivated={noopProjectActivated}
+      />
       <dl className={styles.details}>
-        <dt className={styles.label}>团队</dt>
+        <dt className={styles.label}>{isZh ? "团队" : "Team"}</dt>
         <dd className={styles.valueBreak}>{props.teamName || props.teamId}</dd>
-        <dt className={styles.label}>协调 Agent</dt>
-        <dd className={styles.valueBreak}>{coordinatorAgentId || "未绑定"}</dd>
-        <dt className={styles.label}>绑定覆盖</dt>
+        <dt className={styles.label}>{isZh ? "协调 Agent" : "Coordinator agent"}</dt>
+        <dd className={styles.valueBreak}>{coordinatorAgentId || (isZh ? "未绑定" : "Not bound")}</dd>
+        <dt className={styles.label}>{isZh ? "绑定覆盖" : "Binding coverage"}</dt>
         <dd className={styles.value}>{boundCount}/{agentNodeIds.length}</dd>
-        <dt className={styles.label}>流程版本</dt>
-        <dd className={styles.valueBreak}>{props.run?.workflowVersionId || "未创建运行"}</dd>
-        <dt className={styles.label}>运行版本</dt>
+        <dt className={styles.label}>{isZh ? "流程版本" : "Workflow version"}</dt>
+        <dd className={styles.valueBreak}>{props.run?.workflowVersionId || (isZh ? "未创建运行" : "No run yet")}</dd>
+        <dt className={styles.label}>{isZh ? "运行版本" : "Run version"}</dt>
         <dd className={styles.value}>{props.run?.runVersion ?? "—"}</dd>
       </dl>
       {blockers.length ? (
         <section>
-          <h4 className={styles.sectionTitle}>当前阻塞</h4>
+          <h4 className={styles.sectionTitle}>{isZh ? "当前阻塞" : "Current blockers"}</h4>
           <ul className={styles.blockers}>
             {blockers.map((blocker) => (
               <li key={blocker.nodeId} className={styles.blocker}>
@@ -68,10 +88,10 @@ export function ResearchTeamPanel(props: {
         </section>
       ) : null}
       {roomRoute ? (
-        <VRouteLinkButton to={roomRoute} variant="secondary">打开团队讨论</VRouteLinkButton>
+        <VRouteLinkButton to={roomRoute} variant="secondary">{isZh ? "打开团队讨论" : "Open team chat"}</VRouteLinkButton>
       ) : (
         <div className={styles.roomMissing} role="status">
-          团队尚未关联讨论会话
+          {isZh ? "团队尚未关联讨论会话" : "No chat room is linked to this team yet"}
         </div>
       )}
     </VSurface>

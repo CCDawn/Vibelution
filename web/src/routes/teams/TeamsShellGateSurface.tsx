@@ -7,6 +7,7 @@ import { RefreshCw } from "lucide-react";
 import {
   VButton,
   VDenseOpsPage,
+  VRouteLinkButton,
   VStateSurface,
 } from "../../components/vui";
 
@@ -79,20 +80,32 @@ export function TeamsShellGateSurface(props: TeamsShellGateSurfaceProps) {
               { key: "source", label: lang === "zh" ? "来源" : "Source", value: "Agent Center" },
             ]}
             actions={(
-              <VButton
-                type="button"
-                variant="secondary"
-                onPress={props.onRefreshTeams}
-                isDisabled={props.teamsFetching}
-                icon={<RefreshCw size={14} />}
-              >
-                {props.teamsFetching
-                  ? (lang === "zh" ? "刷新中" : "Refreshing")
-                  : (lang === "zh" ? "刷新" : "Refresh")}
-              </VButton>
+              <>
+                <VButton
+                  type="button"
+                  variant="secondary"
+                  onPress={props.onRefreshTeams}
+                  isDisabled={props.teamsFetching}
+                  icon={<RefreshCw size={14} />}
+                >
+                  {props.teamsFetching
+                    ? (lang === "zh" ? "刷新中" : "Refreshing")
+                    : (lang === "zh" ? "刷新" : "Refresh")}
+                </VButton>
+                <VRouteLinkButton to="/agents" variant="primary">
+                  {lang === "zh" ? "前往 Agent Center 创建团队" : "Create a team in Agent Center"}
+                </VRouteLinkButton>
+              </>
             )}
           >
             {props.unavailableDetail || props.unavailableMessage}
+            {!props.listUnavailable ? (
+              <span>
+                {lang === "zh"
+                  ? "团队由 Agent Center 统一创建与管理，创建后此处会自动列出。"
+                  : "Teams are created and managed in Agent Center; they appear here once created."}
+              </span>
+            ) : null}
           </VStateSurface>
         </main>
       ) : (

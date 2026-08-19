@@ -2,6 +2,7 @@ import { useNavigate } from "react-router-dom";
 
 import {
   VDenseTable,
+  VEmptyState,
   VRouteLinkButton,
   VStatusChip,
   type VDenseTableColumn,
@@ -43,10 +44,33 @@ export function TeamSourceCollectionStageAgentsPanel({
   layout = "inline",
 }: TeamSourceCollectionStageAgentsPanelProps) {
   const navigate = useNavigate();
-  if (!agents.length) {
-    return null;
-  }
   const isZh = lang === "zh";
+  if (!agents.length) {
+    return (
+      <section
+        className={styles.sourceCollectionStageAgentPanel}
+        aria-label={isZh ? "当前步骤 Agent 配置" : "Current step Agent configuration"}
+        data-layout={layout}
+      >
+        <div className={styles.sourceCollectionStageAgentHeader}>
+          <strong>{isZh ? "Agent 配置" : "Agent configuration"}</strong>
+        </div>
+        <VEmptyState
+          align="start"
+          title={isZh ? "尚未绑定 Agent" : "No agents bound"}
+          actions={(
+            <VRouteLinkButton chrome="shell-nav" to="/agents">
+              {isZh ? "前往 Agent 中心绑定" : "Bind an Agent in Agent Center"}
+            </VRouteLinkButton>
+          )}
+        >
+          {isZh
+            ? "当前步骤没有可用的 Agent，绑定后才能运行。"
+            : "No agent is available for this step yet; bind one before running."}
+        </VEmptyState>
+      </section>
+    );
+  }
   const columns: Array<VDenseTableColumn<TeamSourceCollectionStageAgentCard>> = [
     {
       id: "role",
