@@ -551,3 +551,157 @@ describe("ResearchRunLaunchPanel", () => {
     ).toBe(false);
   });
 });
+
+describe("ResearchRunLaunchPanel session draft", () => {
+  const DRAFT_KEY = "vibelution.research-run-launch.team-1";
+
+  const catalogQuestion = (questionId: string, title: string) => ({
+    questionId,
+    title,
+    scope: "mathematical_sciences",
+    domain: "mathematical_sciences",
+    catalogId: "science-125-questions-2021",
+    reviewRunId: "",
+    artifactSha256: "",
+    source: "catalog",
+    launchable: true,
+  });
+
+  beforeEach(() => {
+    window.sessionStorage.clear();
+    Object.assign(queryState.current, {
+      isPending: false,
+      isError: false,
+      error: null,
+      data: launchOptions({
+        questions: [
+          catalogQuestion("SCI-003", "Is the Riemann hypothesis true?"),
+          catalogQuestion("SCI-007", "What is the Navier-Stokes existence problem?"),
+        ],
+        experiments: [],
+      }),
+      refetch: () => {},
+    });
+  });
+
+  it("restores the remembered question and search query when no deep-link is given", () => {
+    window.sessionStorage.setItem(
+      DRAFT_KEY,
+      JSON.stringify({
+        questionId: "SCI-003",
+        query: "Riemann",
+        safetyBudget: {
+          stageTokens: {
+            knowledge_collection: 250000,
+            experiment_design: 250000,
+            execution_iteration: 250000,
+          },
+          toolCalls: 300,
+          wallClockSeconds: 21600,
+          maxRetries: 2,
+        },
+      }),
+    );
+    const markup = renderToStaticMarkup(
+      <ResearchRunLaunchPanel
+        teamId="team-1"
+        busy={false}
+        onSubmit={async () => undefined}
+        onCancel={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain("SCI-003 · Is the Riemann hypothesis true?");
+    expect(markup).toContain('value="Riemann"');
+  });
+
+  it("prefers the explicit deep-link question over the remembered draft", () => {
+    window.sessionStorage.setItem(
+      DRAFT_KEY,
+      JSON.stringify({ questionId: "SCI-003", query: "", safetyBudget: null }),
+    );
+    const markup = renderToStaticMarkup(
+      <ResearchRunLaunchPanel
+        teamId="team-1"
+        busy={false}
+        initialQuestionId="SCI-007"
+        onSubmit={async () => undefined}
+        onCancel={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain("SCI-007 · What is the Navier-Stokes existence problem?");
+    expect(markup).not.toContain("SCI-003 · Is the Riemann hypothesis true?");
+  });
+
+  it("persists selection changes into the per-team draft", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <ResearchRunLaunchPanel
+          teamId="team-1"
+          busy={false}
+          onSubmit={async () => undefined}
+          onCancel={() => undefined}
+        />,
+      );
+    });
+
+    const trigger = container.querySelector('[aria-label="选择 125 题"]') as HTMLElement | null;
+    expect(trigger).toBeTruthy();
+    const options = await openExperimentSelect(trigger!);
+    const questionOption = Array.from(options).find((option) => option.textContent?.includes("SCI-007")) as HTMLElement | undefined;
+    expect(questionOption).toBeTruthy();
+    await act(async () => {
+      questionOption!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    const stored = window.sessionStorage.getItem(DRAFT_KEY);
+    expect(stored).toBeTruthy();
+    expect(JSON.parse(stored!)).toMatchObject({ questionId: "SCI-007" });
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it("clears the remembered draft after a run is created successfully", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    window.sessionStorage.setItem(
+      DRAFT_KEY,
+      JSON.stringify({ questionId: "SCI-003", query: "", safetyBudget: null }),
+    );
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <ResearchRunLaunchPanel
+          teamId="team-1"
+          busy={false}
+          onSubmit={async () => undefined}
+          onCancel={() => undefined}
+        />,
+      );
+    });
+    // Mount persists the restored draft; it must still be there before submit.
+    expect(window.sessionStorage.getItem(DRAFT_KEY)).toBeTruthy();
+
+    const submitButton = findButton(container, "开始实验");
+    expect(submitButton).toBeTruthy();
+    await act(async () => {
+      submitButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(window.sessionStorage.getItem(DRAFT_KEY)).toBeNull();
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  });
+});
