@@ -64,6 +64,40 @@ function ChatChromeHost({ count }: { count: number }) {
 }
 
 describe("VButton tooltip React 19 update depth", () => {
+  it("keeps ordinary title hints out of the Radix overlay graph", () => {
+    mount(
+      <VuiProvider>
+        <VPopover
+          trigger={(
+            <VButton type="button" title="model reference">
+              model
+            </VButton>
+          )}
+        >
+          <div>model options</div>
+        </VPopover>
+      </VuiProvider>,
+    );
+
+    const button = container.querySelector('button[data-vui="button"]');
+    expect(button?.getAttribute("title")).toBe("model reference");
+    expect(button?.getAttribute("data-slot")).not.toBe("tooltip-trigger");
+  });
+
+  it("retains the explicit tooltip overlay contract", () => {
+    mount(
+      <VuiProvider>
+        <VButton type="button" tooltip="explicit hint">
+          inspect
+        </VButton>
+      </VuiProvider>,
+    );
+
+    const button = container.querySelector('button[data-vui="button"]');
+    expect(button?.getAttribute("data-slot")).toBe("tooltip-trigger");
+    expect(button?.getAttribute("title")).toBeNull();
+  });
+
   it("does not loop when dense titled buttons and a popover trigger rerender", () => {
     mount(<ChatChromeHost count={32} />);
     const bump = container.querySelector("[data-testid='bump']");

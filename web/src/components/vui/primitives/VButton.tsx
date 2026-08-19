@@ -78,7 +78,12 @@ export const VButton = forwardRef<HTMLButtonElement, VButtonProps>(function VBut
   ref,
 ) {
   const blocked = Boolean(isDisabled || isPending);
-  const tooltipContent = isDisabled && disabledReason ? disabledReason : tooltip ?? title;
+  // `title` is a native, zero-state hint. Only the explicit `tooltip` and
+  // disabled reason contracts should mount a Radix overlay. Treating every
+  // title as VTooltip nests tooltip triggers inside popover/menu triggers and
+  // can make startup session restoration recompose state-setting refs until
+  // React aborts with #185.
+  const tooltipContent = isDisabled && disabledReason ? disabledReason : tooltip;
   const hasTooltip = tooltipContent !== undefined && tooltipContent !== null && tooltipContent !== "";
   const titleProps = title && !hasTooltip ? ({ title } as Record<string, string>) : undefined;
   const iconOnly = Boolean(isIconOnly);
@@ -123,7 +128,6 @@ export const VButton = forwardRef<HTMLButtonElement, VButtonProps>(function VBut
       ) : (
         <span
           data-slot="vui-button-content"
-          title={hasTooltip ? undefined : title}
           className="inline-flex min-w-0 max-w-full items-center justify-center gap-1.5"
         >
           {isPending ? (
