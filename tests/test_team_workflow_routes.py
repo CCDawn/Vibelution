@@ -85,6 +85,87 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(team_workflow_orchestration_service, "load_public_config", _fake_local_research_public_config)
 
 
+def _register_canonical_full_run_route(client, team_id, plan_id, monkeypatch, *, result_name="route"):
+    from core.research import formal_runner
+
+    plan_store = team_workflow_orchestration_service._load_experiment_plan_store(team_id)
+    plan = team_workflow_orchestration_service._find_experiment_plan(plan_store, plan_id)
+    assert plan is not None
+    adapter_id = formal_runner.FASHION_MNIST_MULTI_SEED_ADAPTER
+    seeds = [17, 42, 101]
+    contract = plan.setdefault("experimentContract", {})
+    contract["adapterSelection"] = {"resolvedAdapterId": adapter_id}
+    contract["methodConfig"] = {"seeds": seeds}
+    contract["revision"] = int(contract.get("revision") or 0)
+    plan["contractValidation"] = {"valid": True, "missingFields": []}
+    plan["designGate"] = {"status": "frozen"}
+    plan.setdefault("readiness", {})["readyForFullRun"] = True
+    team_workflow_orchestration_service._write_json(
+        team_workflow_orchestration_service._experiment_plan_store_path(team_id),
+        plan_store,
+    )
+    config = {
+        "pythonExecutable": "C:/runner/python.exe",
+        "dataRoot": "C:/data/fashionmnist",
+        "outputRoot": "C:/experiments/out",
+    }
+    monkeypatch.setattr(
+        team_workflow_orchestration_service.formal_runner,
+        "prepare_full_run",
+        lambda *args, **kwargs: {
+            "adapterId": adapter_id,
+            "status": "prepared",
+            "executionMode": "local_process",
+            "seedCount": len(seeds),
+            "seeds": seeds,
+            "runOptions": {"epochs": 2},
+            "environment": config,
+            "boundaries": ["user_triggered_only", "manual_result_review_required"],
+        },
+    )
+    runner_result = {
+        "adapterId": adapter_id,
+        "status": "completed",
+        "executionMode": "local_process",
+        "seedCount": len(seeds),
+        "seeds": seeds,
+        "resultPath": f"C:/experiments/out/{result_name}-result.json",
+        "logRef": f"C:/experiments/out/{result_name}-log.json",
+        "runs": [
+            {
+                "seed": seed,
+                "resultPath": f"C:/experiments/out/{result_name}/seed-{seed}/result.json",
+                "artifactHash": "sha256:" + ("a" * 64),
+                "decision": {"status": "support"},
+                "metrics": {"delta": {"mse_improvement": 0.02}},
+            }
+            for seed in seeds
+        ],
+        "aggregate": {"mseImprovement": {"mean": 0.02}, "supportCount": len(seeds)},
+        "requiresResultReview": True,
+        "automaticPromotion": False,
+    }
+    monkeypatch.setattr(
+        team_workflow_orchestration_service.formal_runner,
+        "run_full_run",
+        lambda *args, **kwargs: runner_result,
+    )
+    preparation = team_workflow_orchestration_service.prepare_experiment_full_run(
+        team_id, plan_id, {"executionConfig": config}
+    )["preparation"]
+    execution = team_workflow_orchestration_service.execute_experiment_full_run(
+        team_id, plan_id, {}
+    )["execution"]
+    return client.post(
+        f"/api/teams/{team_id}/workflow-orchestration/experiments/plans/{plan_id}/full-run-result",
+        json={
+            "evidenceKind": "canonical_runner",
+            "executionId": execution["executionId"],
+            "preparationId": preparation["preparationId"],
+        },
+    )
+
+
 def _stub_source_collection_search_background(monkeypatch):
     calls = []
 
@@ -1879,6 +1960,7 @@ def test_team_workflow_routes_register_experiment_full_run_result(tmp_path, monk
     response = client.post(
         f"/api/teams/{team['teamId']}/workflow-orchestration/experiments/plans/{plan_response.json()['plan']['planId']}/full-run-result",
         json={
+            "evidenceKind": "external_manual",
             "status": "passed",
             "metricName": "validation accuracy",
             "metricValue": "0.79 validation accuracy",
@@ -1895,12 +1977,25 @@ def test_team_workflow_routes_register_experiment_full_run_result(tmp_path, monk
     assert smoke_response.status_code == 201, smoke_response.text
     assert response.status_code == 201, response.text
     payload = response.json()
-    assert payload["fullRunResult"]["status"] == "passed"
-    assert payload["fullRunResult"]["gateDecision"] == "ready_for_knowledge_review"
-    assert payload["plan"]["readiness"]["readyForKnowledgeIngestion"] is True
-    assert payload["status"]["status"] == "ready_for_knowledge_ingestion"
+    assert payload["fullRunResult"]["evidenceKind"] == "external_manual"
+    assert payload["fullRunResult"]["status"] == "needs_review"
+    assert payload["fullRunResult"]["gateDecision"] == "external_manual_review"
+    assert payload["plan"]["readiness"]["readyForKnowledgeIngestion"] is False
+    assert payload["status"]["status"] != "ready_for_knowledge_ingestion"
     assert payload["status"]["summary"]["activeFullRunResultId"] == payload["fullRunResult"]["fullRunResultId"]
     assert payload["boundaries"]["writesFormalKnowledge"] is False
+    assert not [
+        edge
+        for edge in (payload["plan"].get("outcomeGraph") or {}).get("edges", [])
+        if edge.get("fromId") == f"run:{payload['fullRunResult']['fullRunResultId']}"
+        and edge.get("relation") in {"supports", "falsifies"}
+    ]
+    ingestion = client.post(
+        f"/api/teams/{team['teamId']}/workflow-orchestration/experiments/plans/{plan_response.json()['plan']['planId']}/knowledge-ingestion-request",
+        json={"wakeStewardAgent": False},
+    )
+    assert ingestion.status_code == 422, ingestion.text
+    assert "canonical" in ingestion.json()["detail"].lower()
 
 
 def test_team_workflow_routes_delegate_explicit_formal_run_prepare_and_execute(tmp_path, monkeypatch):
@@ -2024,9 +2119,8 @@ def test_team_workflow_routes_request_experiment_result_knowledge_ingestion(tmp_
         f"/api/teams/{team['teamId']}/workflow-orchestration/experiments/plans/{plan_id}/smoke-result",
         json={"status": "passed", "metricValue": "0.75", "resultPath": "workspace/experiments/smoke/result.json"},
     )
-    full_run_response = client.post(
-        f"/api/teams/{team['teamId']}/workflow-orchestration/experiments/plans/{plan_id}/full-run-result",
-        json={"status": "passed", "metricValue": "0.79", "resultPath": "workspace/experiments/full_run/result.json"},
+    full_run_response = _register_canonical_full_run_route(
+        client, team["teamId"], plan_id, monkeypatch, result_name="knowledge"
     )
 
     response = client.post(

@@ -373,9 +373,9 @@ def register_experiment_full_run_result(team_id: str, plan_id: str, payload: dic
         plan["status"] = "full_run_passed" if full_run_result["status"] == "passed" else f"full_run_{full_run_result['status']}"
         plan["updatedAt"] = full_run_result["recordedAt"]
         s._refresh_experiment_plan_readiness(plan)
-        from core.web.services.team_workflow.outcome_graph import merge_registered_result
+        if not is_replay and evidence_kind == _experiment_kernel._FORMAL_RUN_CANONICAL_EVIDENCE_KIND:
+            from core.web.services.team_workflow.outcome_graph import merge_registered_result
 
-        if not is_replay:
             merge_registered_result(
                 plan,
                 full_run_result,
