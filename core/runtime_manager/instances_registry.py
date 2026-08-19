@@ -20,10 +20,18 @@ import tempfile
 import time
 from collections.abc import Callable, Iterable
 from contextlib import contextmanager
+from datetime import UTC, datetime
+from hashlib import sha256
 from pathlib import Path
 from typing import Any, TypeVar
 
-REGISTRY_SCHEMA_VERSION = 1
+from core.runtime_manager.process_identity import (
+    capture_process_identity,
+    inspect_listener_identity,
+    inspect_process_identity,
+)
+
+REGISTRY_SCHEMA_VERSION = 2
 DEFAULT_BASE_PORT = 8000
 DEFAULT_CONTROL_PORT = 8765
 PORT_SCAN_LIMIT = 64
@@ -32,6 +40,7 @@ _READ_RETRY_ATTEMPTS = 3
 _READ_RETRY_DELAY_SECONDS = 0.05
 _LOCK_TIMEOUT_SECONDS = 5.0
 _LOCK_POLL_SECONDS = 0.01
+_CLEANUP_OBSERVATION_GRACE_SECONDS = 10.0
 
 T = TypeVar("T")
 
@@ -59,6 +68,41 @@ def instances_registry_path() -> Path:
 
 def empty_registry() -> dict[str, Any]:
     return {"schemaVersion": REGISTRY_SCHEMA_VERSION, "instances": {}}
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _as_utc(value: datetime | None) -> datetime:
+    current = value or _utc_now()
+    if current.tzinfo is None:
+        return current.replace(tzinfo=UTC)
+    return current.astimezone(UTC)
+
+
+def _iso_timestamp(value: datetime | None = None) -> str:
+    return _as_utc(value).isoformat().replace("+00:00", "Z")
+
+
+def _parse_timestamp(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return _as_utc(parsed)
+
+
+def _touch_registry(payload: dict[str, Any], *, now: datetime | None = None) -> None:
+    payload["schemaVersion"] = REGISTRY_SCHEMA_VERSION
+    payload["updatedAt"] = _iso_timestamp(now)
+
+
+def _touch_entry(entry: dict[str, Any], *, now: datetime | None = None) -> None:
+    entry["updatedAt"] = _iso_timestamp(now)
 
 
 def load_registry() -> dict[str, Any]:
@@ -124,6 +168,7 @@ def mutate_registry(mutator: Callable[[dict[str, Any]], T]) -> T:
     with registry_lock():
         payload = load_registry()
         result = mutator(payload)
+        _touch_registry(payload)
         save_registry(payload)
         return result
 
@@ -190,9 +235,38 @@ def upsert_instance(instance_id: str, **fields: Any) -> dict[str, Any]:
     def mutator(payload: dict[str, Any]) -> dict[str, Any]:
         entry = _ensure_entry(payload, instance_id)
         entry.update(fields)
+        if "deadlineAt" in fields and "inFlightDeadlineAt" not in fields:
+            entry["inFlightDeadlineAt"] = fields.get("deadlineAt")
+        elif "inFlightDeadlineAt" in fields and "deadlineAt" not in fields:
+            entry["deadlineAt"] = fields.get("inFlightDeadlineAt")
+        _capture_entry_identities(entry, fields)
+        _touch_entry(entry)
         return dict(entry)
 
     return mutate_registry(mutator)
+
+
+def _capture_entry_identities(entry: dict[str, Any], changed_fields: dict[str, Any]) -> None:
+    pid_fields = (
+        ("ownerPid", "owner"),
+        ("spawnPid", "owner"),
+        ("backendPid", "backend"),
+        ("controlPid", "control"),
+    )
+    for pid_field, prefix in pid_fields:
+        if pid_field not in changed_fields:
+            continue
+        try:
+            pid = int(changed_fields.get(pid_field) or 0)
+        except (TypeError, ValueError):
+            pid = 0
+        if pid <= 0:
+            continue
+        entry[f"{prefix}Pid"] = pid
+        captured = capture_process_identity(pid)
+        if captured:
+            entry[f"{prefix}CreateTime"] = captured["createTime"]
+            entry[f"{prefix}Executable"] = captured["executable"]
 
 
 def list_instances() -> list[dict[str, Any]]:
@@ -255,6 +329,207 @@ def _port_is_free(port: int, host: str = "127.0.0.1") -> bool:
         return False
     finally:
         probe.close()
+
+
+def _entry_identities(entry: dict[str, Any]) -> tuple[list[dict[str, Any]], bool]:
+    identities: list[dict[str, Any]] = []
+    complete = True
+    seen_pids: set[int] = set()
+    fields = (
+        ("ownerPid", "ownerCreateTime", "ownerExecutable"),
+        ("spawnPid", "ownerCreateTime", "ownerExecutable"),
+        ("backendPid", "backendCreateTime", "backendExecutable"),
+        ("controlPid", "controlCreateTime", "controlExecutable"),
+    )
+    for pid_field, created_field, executable_field in fields:
+        try:
+            pid = int(entry.get(pid_field) or 0)
+        except (TypeError, ValueError):
+            pid = 0
+        if pid <= 0 or pid in seen_pids:
+            continue
+        seen_pids.add(pid)
+        try:
+            create_time = float(entry.get(created_field) or 0)
+        except (TypeError, ValueError):
+            create_time = 0
+        executable = str(entry.get(executable_field) or "").strip()
+        if create_time <= 0 or not executable:
+            complete = False
+            continue
+        identities.append({"pid": pid, "createTime": create_time, "executable": executable})
+    if not seen_pids:
+        complete = False
+    return identities, complete and len(identities) == len(seen_pids)
+
+
+def _deadline_expired(entry: dict[str, Any], now: datetime) -> bool:
+    deadline = _parse_timestamp(entry.get("inFlightDeadlineAt") or entry.get("deadlineAt"))
+    return bool(deadline is not None and deadline <= now)
+
+
+def _cleanup_fingerprint(instance_id: str, entry: dict[str, Any], identities: list[dict[str, Any]]) -> str:
+    facts = {
+        "instanceId": instance_id,
+        "projectRoot": _norm_path(str(entry.get("projectRoot") or "")),
+        "ports": sorted(_entry_ports(entry)),
+        "identities": sorted(identities, key=lambda item: int(item.get("pid") or 0)),
+        "deadline": str(entry.get("inFlightDeadlineAt") or entry.get("deadlineAt") or ""),
+    }
+    return sha256(json.dumps(facts, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _reconcile_payload(
+    payload: dict[str, Any],
+    *,
+    git_worktree_roots: Iterable[str | Path] | None,
+    electron_window_instance_ids: Iterable[str],
+    now: datetime,
+    identity_inspector: Callable[[dict[str, Any]], dict[str, Any]],
+    listener_inspector: Callable[[int, Iterable[dict[str, Any]]], dict[str, Any]],
+) -> tuple[dict[str, Any], bool]:
+    inventory = None if git_worktree_roots is None else {_norm_path(root) for root in git_worktree_roots}
+    window_ids = {str(instance_id) for instance_id in electron_window_instance_ids}
+    instances = payload.get("instances")
+    if not isinstance(instances, dict):
+        instances = {}
+        payload["instances"] = instances
+    changed = False
+    removed: list[str] = []
+    projections: list[dict[str, Any]] = []
+    worktree_dry_run: list[dict[str, Any]] = []
+
+    for raw_instance_id, raw_entry in list(instances.items()):
+        instance_id = str(raw_instance_id)
+        if not isinstance(raw_entry, dict):
+            projections.append({"instanceId": instance_id, "classification": "unknown", "reasons": ["invalid_entry"]})
+            continue
+        entry = raw_entry
+        project_root = str(entry.get("projectRoot") or "").strip()
+        normalized_root = _norm_path(project_root)
+        root_missing = bool(normalized_root) and not Path(project_root).exists()
+        outside_inventory = inventory is not None and bool(normalized_root) and normalized_root not in inventory
+        worktree_candidate = bool(normalized_root) and (root_missing or outside_inventory)
+        if worktree_candidate:
+            worktree_dry_run.append(
+                {
+                    "instanceId": instance_id,
+                    "projectRoot": project_root,
+                    "reason": "path_missing" if root_missing else "not_in_git_registry",
+                    "action": "dry_run_only",
+                }
+            )
+
+        identities, identities_complete = _entry_identities(entry)
+        identity_results = [identity_inspector(identity) for identity in identities]
+        identity_statuses = {str(result.get("status") or "unknown") for result in identity_results}
+        all_inactive = bool(identity_results) and identity_statuses.issubset({"dead", "mismatch"})
+        any_active = "match" in identity_statuses
+        any_identity_unknown = "unknown" in identity_statuses
+
+        listener_results = [listener_inspector(port, identities) for port in sorted(_entry_ports(entry))]
+        listener_statuses = {str(result.get("status") or "unknown") for result in listener_results}
+        has_external_listener = "external" in listener_statuses
+        has_owned_listener = "owned" in listener_statuses
+        listener_unknown = "unknown" in listener_statuses
+        window_open = instance_id in window_ids
+        deadline_expired = _deadline_expired(entry, now)
+
+        reasons: list[str] = []
+        if has_external_listener:
+            classification = "conflict"
+            reasons.append("external_listener")
+        elif not identities_complete or any_identity_unknown or listener_unknown:
+            classification = "unknown"
+            reasons.append("identity_or_listener_unverified")
+        elif any_active or has_owned_listener:
+            classification = "healthy"
+            reasons.append("owned_runtime_active")
+        elif window_open:
+            classification = "stale"
+            reasons.append("electron_window_open")
+        elif worktree_candidate and all_inactive and not has_owned_listener and deadline_expired:
+            classification = "orphan"
+            reasons.append("safe_metadata_cleanup_candidate")
+        else:
+            classification = "stale"
+            reasons.append("inactive_but_not_safe_to_remove")
+
+        safe_to_observe = classification == "orphan" and not window_open
+        observation = entry.get("cleanupObservation")
+        if safe_to_observe:
+            fingerprint = _cleanup_fingerprint(instance_id, entry, identities)
+            first_observed_at = _parse_timestamp(
+                observation.get("firstObservedAt") if isinstance(observation, dict) else None
+            )
+            same_observation = bool(
+                isinstance(observation, dict)
+                and observation.get("classification") == "orphan"
+                and observation.get("fingerprint") == fingerprint
+                and first_observed_at is not None
+            )
+            if same_observation and (now - first_observed_at).total_seconds() >= _CLEANUP_OBSERVATION_GRACE_SECONDS:
+                instances.pop(instance_id, None)
+                removed.append(instance_id)
+                changed = True
+            elif not same_observation:
+                entry["cleanupObservation"] = {
+                    "classification": "orphan",
+                    "fingerprint": fingerprint,
+                    "firstObservedAt": _iso_timestamp(now),
+                }
+                _touch_entry(entry, now=now)
+                changed = True
+        elif isinstance(observation, dict):
+            entry.pop("cleanupObservation", None)
+            _touch_entry(entry, now=now)
+            changed = True
+
+        projections.append(
+            {
+                "instanceId": instance_id,
+                "classification": classification,
+                "reasons": reasons,
+                "windowOpen": window_open,
+                "listener": sorted(listener_statuses) or ["none"],
+            }
+        )
+
+    return (
+        {
+            "observedAt": _iso_timestamp(now),
+            "instances": projections,
+            "removedInstanceIds": removed,
+            "worktreeDryRun": worktree_dry_run,
+        },
+        changed,
+    )
+
+
+def reconcile_registry(
+    *,
+    git_worktree_roots: Iterable[str | Path] | None,
+    electron_window_instance_ids: Iterable[str] = (),
+    now: datetime | None = None,
+    identity_inspector: Callable[[dict[str, Any]], dict[str, Any]] = inspect_process_identity,
+    listener_inspector: Callable[[int, Iterable[dict[str, Any]]], dict[str, Any]] = inspect_listener_identity,
+) -> dict[str, Any]:
+    """Reconcile registry metadata; worktrees and processes are always read-only."""
+    observed_at = _as_utc(now)
+    with registry_lock():
+        payload = load_registry()
+        summary, changed = _reconcile_payload(
+            payload,
+            git_worktree_roots=git_worktree_roots,
+            electron_window_instance_ids=electron_window_instance_ids,
+            now=observed_at,
+            identity_inspector=identity_inspector,
+            listener_inspector=listener_inspector,
+        )
+        if changed:
+            _touch_registry(payload, now=observed_at)
+            save_registry(payload)
+        return summary
 
 
 def _entry_ports(entry: dict[str, Any]) -> set[int]:
@@ -340,6 +615,7 @@ def _allocate_backend_locked(
     stored = _ensure_entry(payload, instance_id)
     stored["port"] = int(chosen)
     stored["host"] = host
+    _touch_entry(stored)
     return int(chosen)
 
 
@@ -366,6 +642,7 @@ def _allocate_control_locked(
     stored = _ensure_entry(payload, instance_id)
     stored["controlPort"] = int(chosen)
     stored["host"] = host
+    _touch_entry(stored)
     return int(chosen)
 
 
@@ -415,12 +692,26 @@ def allocate_instance_ports(
     preferred_control: int = DEFAULT_CONTROL_PORT,
     host: str = "127.0.0.1",
     extra_used: Iterable[int] | None = None,
+    git_worktree_roots: Iterable[str | Path] | None = None,
+    electron_window_instance_ids: Iterable[str] = (),
+    reconcile_now: datetime | None = None,
+    identity_inspector: Callable[[dict[str, Any]], dict[str, Any]] = inspect_process_identity,
+    listener_inspector: Callable[[int, Iterable[dict[str, Any]]], dict[str, Any]] = inspect_listener_identity,
 ) -> tuple[int, int]:
-    """Reserve a disjoint backend + control port pair for one instance."""
+    """Reconcile safely, then reserve a disjoint port pair under one lock."""
     instance_id = _normalize_instance_id(instance_id)
     extra = {int(port) for port in (extra_used or []) if int(port or 0) > 0}
 
     def mutator(payload: dict[str, Any]) -> tuple[int, int]:
+        if git_worktree_roots is not None:
+            _reconcile_payload(
+                payload,
+                git_worktree_roots=git_worktree_roots,
+                electron_window_instance_ids=electron_window_instance_ids,
+                now=_as_utc(reconcile_now),
+                identity_inspector=identity_inspector,
+                listener_inspector=listener_inspector,
+            )
         backend = _allocate_backend_locked(
             payload,
             instance_id,
