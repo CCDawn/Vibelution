@@ -135,8 +135,8 @@ def test_native_launcher_python_bridge_uses_no_console_outer_runtime():
         "private static string ResolvePython", maxsplit=1
     )[0]
 
-    assert "string pythonPath = ResolvePython(projectDir, useNoConsole: true);" in bridge_source
-    assert 'Quote(ResolvePython(projectDir, useNoConsole: false))' in bridge_source
+    assert "string pythonPath = ResolvePython(shellRoot, useNoConsole: true);" in bridge_source
+    assert 'Quote(ResolvePython(shellRoot, useNoConsole: false))' in bridge_source
     assert 'useNoConsole ? "pythonw.exe" : "python.exe"' in source
     assert 'string.Equals(action, "stop-launcher", StringComparison.OrdinalIgnoreCase)' in bridge_source
     assert 'string.Equals(action, "launch-desktop-shell", StringComparison.OrdinalIgnoreCase)' in bridge_source
@@ -144,7 +144,25 @@ def test_native_launcher_python_bridge_uses_no_console_outer_runtime():
     assert 'arguments.Add("--workspace")' in bridge_source
     assert 'arguments.Add("--then-lifecycle")' in bridge_source
     assert 'arguments.Add("--open-workbench")' in bridge_source
-    assert "Quote(projectDir)" in bridge_source
+    assert "? requestedRoot" in bridge_source
+    assert ": shellRoot));" in bridge_source
+    assert "WorkingDirectory = shellRoot" in bridge_source
+    assert "Quote(projectDir)" not in bridge_source
+
+
+def test_native_launcher_resolves_desktop_shell_workspace_from_worktrees():
+    source = _source()
+    assert "private static string ResolveDesktopShellWorkspace(string projectDir)" in source
+    resolver = source.split("private static string ResolveDesktopShellWorkspace", 1)[1].split(
+        "private static void LaunchCurrentElectronMain", 1
+    )[0]
+    assert 'string.Equals(parts[index], ".worktrees", StringComparison.OrdinalIgnoreCase)' in resolver
+    assert "return string.Join(Path.DirectorySeparatorChar.ToString(), parts, 0, index);" in resolver
+    assert "string requestedRoot = Path.GetFullPath(projectDir);" in source
+    assert "string shellRoot = ResolveDesktopShellWorkspace(requestedRoot);" in source
+    assert "? requestedRoot" in source
+    assert 'string.Equals(action, "launch-desktop-shell", StringComparison.OrdinalIgnoreCase)' in source
+    assert 'string.Equals(action, "stop-launcher", StringComparison.OrdinalIgnoreCase)' in source
 
 
 def test_native_launcher_build_references_windows_forms_and_icon():

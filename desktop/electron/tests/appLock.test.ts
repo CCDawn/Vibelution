@@ -121,7 +121,8 @@ describe("resolveSecondInstanceIntent", () => {
     });
     expect(resolveSecondInstanceIntent({ projectRoot: "C:/repo" })).toEqual({
       action: "apply_project",
-      projectRoot: "C:/repo"
+      projectRoot: "C:/repo",
+      lifecycleCommand: ""
     });
     expect(resolveSecondInstanceIntent({ openWorkbench: true })).toEqual({ action: "open_workbench" });
   });
@@ -130,6 +131,23 @@ describe("resolveSecondInstanceIntent", () => {
     expect(resolveSecondInstanceIntent({})).toEqual({ action: "focus_existing_shell" });
     expect(resolveSecondInstanceIntent({ deepLinkUrl: "   ", projectRoot: "", openWorkbench: false })).toEqual({
       action: "focus_existing_shell"
+    });
+  });
+
+  it("applies --project before start instead of forwarding start to main", () => {
+    expect(
+      resolveSecondInstanceIntent({
+        projectRoot: "C:/repo/.worktrees/task",
+        lifecycleCommand: "start"
+      })
+    ).toEqual({
+      action: "apply_project",
+      projectRoot: "C:/repo/.worktrees/task",
+      lifecycleCommand: "start"
+    });
+    expect(resolveSecondInstanceIntent({ lifecycleCommand: "start" })).toEqual({
+      action: "lifecycle",
+      command: "start"
     });
   });
 });

@@ -27,10 +27,30 @@ describe("Electron main startup sequence", () => {
     const openIfIndex = source.indexOf(
       "if (pendingOpenWorkbenchRequest && !desktopCliArgs.workbenchCloseCanary && !deferWorkbenchOpen)"
     );
-    const lifecycleIndex = source.indexOf("void handleSecondInstanceLifecycleCommand(firstLifecycle)");
+    const pendingProjectIndex = source.indexOf("if (pendingProjectRoot)");
+    const applySlotIndex = source.indexOf(
+      "await applyPendingProjectSlot(pendingProjectRoot, firstLifecycle)"
+    );
+    const noProjectLifecycleIndex = source.indexOf(
+      'else if (firstLifecycle && firstLifecycle !== "status" && windowProvider !== null)'
+    );
+    const noProjectHandleIndex = source.indexOf(
+      "void handleSecondInstanceLifecycleCommand(firstLifecycle)"
+    );
 
     expect(deferIndex).toBeGreaterThan(0);
     expect(openIfIndex).toBeGreaterThan(deferIndex);
-    expect(lifecycleIndex).toBeGreaterThan(openIfIndex);
+    expect(pendingProjectIndex).toBeGreaterThan(openIfIndex);
+    expect(applySlotIndex).toBeGreaterThan(pendingProjectIndex);
+    expect(noProjectLifecycleIndex).toBeGreaterThan(applySlotIndex);
+    expect(noProjectHandleIndex).toBeGreaterThan(noProjectLifecycleIndex);
+    expect(source.slice(pendingProjectIndex, noProjectHandleIndex)).toContain(
+      "await applyPendingProjectSlot(pendingProjectRoot, firstLifecycle)"
+    );
+    expect(source.slice(pendingProjectIndex, noProjectHandleIndex)).toContain(
+      "} else if (firstLifecycle && firstLifecycle !== \"status\" && windowProvider !== null)"
+    );
+    expect(source).toContain("if (deferWorkbenchOpen)");
+    expect(source).toContain('else if (!desktopCliArgs.workbenchCloseCanary && !desktopCliArgs.projectRoot)');
   });
 });

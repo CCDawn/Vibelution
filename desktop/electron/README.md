@@ -15,6 +15,7 @@
 | --- | --- | --- |
 | Launcher 窗口 / 遗留窗口 adopt | `src/windows/electronWindowProvider.ts` | 把 OS 上任意窗口当成 running；拆掉 isolated instance 窗口当 leftover |
 | 托盘 / 单实例 / 退出 | `src/tray/desktopTray.ts` · `src/main.ts` | 与 WinForms 同时显示 NotifyIcon；用 `taskkill` 清 Electron；托盘「Launcher 代码版本」去打工作台 HTTP `/api/launcher/freshness` |
+| `--project` 槽位 | `src/protocol/applyProjectSlot.ts` · `src/appLock.ts` · `src/main.ts` | 把 worktree 当成第二套 DesktopShell；未登记路径静默 start 当前 main |
 | Launcher 控制命令（目标） | `src/ipc.ts` · `src/preload.ts` · 新 IPC host | 控制窗口 `fetch` `:8765` 当产品路径 |
 | 工作台 URL / 安全 | `src/windows/windowUrlResolver.ts` · `src/security/urlPolicy.ts` | 工作台改走 IPC 替代 FastAPI |
 | Python 子进程 spawn | `src/process/launcherServiceClient.ts` | 可见控制台；`windowsHide: false` |
@@ -34,7 +35,7 @@ Electron 主进程（TS）= Launcher 服务
      打开/退出时还要 `stop-launcher --use-state-owned-backend-pid` 清掉 leftover Python `:8765`，不得把它当成第二控制面 attach
 
 VibelutionLauncher.exe = 无控制台薄 shim
-  → Electron 已在：转发 start|stop|restart
+  → Electron 已在：转发 start|stop|restart；`--project` 作用在已有壳的 isolated slot 上，不是第二套 Electron workspace / userData
   → Electron 不在：启动当前 checkout 的 Electron main
      （packaged 且 provenance 对应当前 `HEAD:desktop/electron` 时用 `Vibelution.exe`；
       否则编译并启动 unpackaged `desktop/electron` 的 `electron dist/main.js`）

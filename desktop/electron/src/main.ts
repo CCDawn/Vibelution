@@ -50,14 +50,13 @@ import {
 } from "./notifications/conversationNotifications.js";
 import { createDesktopPaths, resolveDesktopEntryCatalogPath, type DesktopPaths } from "./paths.js";
 import { fetchLauncherControlToken, runDesktopActionOnce } from "./protocol/desktopActionClient.js";
-import { applyProjectSlot } from "./protocol/applyProjectSlot.js";
+import { planProjectSlot } from "./protocol/applyProjectSlot.js";
 import {
   classifyTrayBranchInstances,
   fetchLauncherBranchInstances,
   fetchLauncherStatusSummary,
   formatLauncherStatusSummary,
-  postLauncherControl,
-  type LauncherControlPostPath
+  parseBranchInstanceRecords
 } from "./protocol/launcherControlClient.js";
 import {
   createLauncherIpcHost,
@@ -2337,20 +2336,15 @@ function startPeriodicShellFreshnessWatch(): void {
   void periodicShellFreshnessTimer;
 }
 
-async function runTrayLauncherPost(
-  path: LauncherControlPostPath,
-  label: string,
-  trigger?: string,
-  body?: Record<string, unknown>
-): Promise<void> {
+async function runTrayBranchInstance(operation: string, instanceId: string, label: string): Promise<void> {
   try {
-    const context = await resolveTrayLauncherControlContext();
-    await postLauncherControl({
-      launcherOrigin: context.launcherOrigin,
-      controlToken: context.controlToken,
-      path,
-      trigger,
-      body
+    await orchestrateBranchInstanceLifecycle(operation, {
+      schemaVersion: 1,
+      path: `branch-instances/${operation}`,
+      init: {
+        method: "POST",
+        body: { instanceId }
+      }
     });
     notifyDesktopTray("Vibelution", `${label}请求已发送。`);
   } catch (error: unknown) {
@@ -3194,7 +3188,7 @@ async function requestOpenWorkbenchFromSecondInstance(): Promise<void> {
   await startOrFocusWorkbenchFromProductEntryOnShell();
 }
 
-async function applyPendingProjectSlot(projectRoot: string): Promise<void> {
+async function applyPendingProjectSlot(projectRoot: string, lifecycleCommand = ""): Promise<void> {
   const wanted = projectRoot.trim();
   if (!wanted) {
     return;
@@ -3206,15 +3200,67 @@ async function applyPendingProjectSlot(projectRoot: string): Promise<void> {
   }
   pendingProjectRoot = "";
   try {
-    const context = await resolveTrayLauncherControlContext();
-    const result = await applyProjectSlot({
+    await launcherStateStore.refresh("project_slot");
+    let items = parseBranchInstanceRecords(launcherStateStore.projectBranchInstances());
+    const needsLookup = () => {
+      try {
+        planProjectSlot({ items, projectRoot: wanted, lifecycleCommand: "status" });
+        return false;
+      } catch {
+        return true;
+      }
+    };
+    if (needsLookup()) {
+      items = parseBranchInstanceRecords(
+        await orchestrateLauncherApi("branch-instances", {
+          schemaVersion: 1,
+          path: "branch-instances",
+          init: { method: "GET" }
+        })
+      );
+    }
+    const plan = planProjectSlot({
+      items,
       projectRoot: wanted,
-      launcherOrigin: context.launcherOrigin,
-      controlToken: context.controlToken
+      lifecycleCommand
     });
-    currentWorkbenchUrl = result.url;
+    if (plan.operation) {
+      if (plan.isMain) {
+        await orchestrateLauncherLifecycle(plan.operation, {
+          schemaVersion: 1,
+          path: "project-slot"
+        });
+      } else {
+        await orchestrateBranchInstanceLifecycle(plan.operation, {
+          schemaVersion: 1,
+          path: `branch-instances/${plan.operation}`,
+          init: {
+            method: "POST",
+            body: { instanceId: plan.instanceId }
+          }
+        });
+      }
+    }
+    if (plan.operation === "stop" || plan.operation === "force-stop") {
+      return;
+    }
+    let url = plan.url;
+    try {
+      await launcherStateStore.refresh("project_slot");
+      url = planProjectSlot({
+        items: parseBranchInstanceRecords(launcherStateStore.projectBranchInstances()),
+        projectRoot: wanted,
+        lifecycleCommand: "status"
+      }).url || url;
+    } catch {
+      // Keep the planned URL when the refreshed list is still settling.
+    }
+    if (!url) {
+      throw new Error(`工作区已匹配但没有可打开的地址：${plan.instanceId}`);
+    }
+    currentWorkbenchUrl = url;
     markWorkbenchOpenRequested();
-    await provider.openOrFocusWorkbench(result.url);
+    await provider.openOrFocusWorkbench(url);
   } catch (error: unknown) {
     const detail = error instanceof Error ? error.message : String(error);
     notifyDesktopTray("Vibelution", `应用工作区失败：${detail.slice(0, 300)}`, "warning");
@@ -3278,20 +3324,10 @@ app.whenReady()
         void runTrayRestartLauncher();
       },
       startInstance: (instanceId, label) => {
-        void runTrayLauncherPost(
-          "/api/launcher/branch-instances/start",
-          `启动 ${label}`,
-          "electron_tray_start_instance",
-          { instanceId }
-        );
+        void runTrayBranchInstance("start", instanceId, `启动 ${label}`);
       },
       stopInstance: (instanceId, label) => {
-        void runTrayLauncherPost(
-          "/api/launcher/branch-instances/stop",
-          `停止 ${label}`,
-          "electron_tray_stop_instance",
-          { instanceId }
-        );
+        void runTrayBranchInstance("stop", instanceId, `停止 ${label}`);
       },
       stopAll: () => {
         void runTrayStopAll();
@@ -3337,9 +3373,6 @@ app.whenReady()
       await handlePublicDeepLinkUrl(rawUrl, "startup");
     }
     await flushPendingPublicDeepLinks();
-    if (pendingProjectRoot) {
-      await applyPendingProjectSlot(pendingProjectRoot);
-    }
     const firstLifecycle = String(desktopCliArgs.lifecycleCommand || "").trim().toLowerCase();
     const deferWorkbenchOpen = shouldDeferWorkbenchOpenUntilLifecycleStart(firstLifecycle);
     if (pendingOpenWorkbenchRequest && !desktopCliArgs.workbenchCloseCanary && !deferWorkbenchOpen) {
@@ -3358,7 +3391,9 @@ app.whenReady()
       await openWorkbenchForCloseCanary(paths, launcherBootstrap, windowProvider);
       return;
     }
-    if (firstLifecycle && firstLifecycle !== "status" && windowProvider !== null) {
+    if (pendingProjectRoot) {
+      await applyPendingProjectSlot(pendingProjectRoot, firstLifecycle);
+    } else if (firstLifecycle && firstLifecycle !== "status" && windowProvider !== null) {
       if (firstLifecycle === "open") {
         pendingOpenWorkbenchRequest = false;
         markWorkbenchOpenRequested();
@@ -3405,26 +3440,21 @@ app.on("second-instance", (_event, argv) => {
   const intent = resolveSecondInstanceIntent({
     deepLinkUrl: findVibelutionDeepLinkArg(argv) ?? "",
     projectRoot: secondCli.projectRoot,
-    openWorkbench: secondCli.openWorkbench
+    openWorkbench: secondCli.openWorkbench,
+    lifecycleCommand: secondCli.lifecycleCommand
   });
-  if (secondCli.lifecycleCommand === "open") {
-    void requestOpenWorkbenchFromSecondInstance().catch((error: unknown) => {
-      console.warn(error instanceof Error ? error.message : String(error));
-    });
-    return;
-  }
-  if (secondCli.lifecycleCommand && secondCli.lifecycleCommand !== "open") {
-    void handleSecondInstanceLifecycleCommand(secondCli.lifecycleCommand).catch((error: unknown) => {
-      console.warn(error instanceof Error ? error.message : String(error));
-    });
-    return;
-  }
   if (intent.action === "handle_deep_link") {
     void handlePublicDeepLinkUrl(intent.rawUrl, "second_instance");
     return;
   }
   if (intent.action === "apply_project") {
-    void applyPendingProjectSlot(intent.projectRoot);
+    void applyPendingProjectSlot(intent.projectRoot, intent.lifecycleCommand);
+    return;
+  }
+  if (intent.action === "lifecycle") {
+    void handleSecondInstanceLifecycleCommand(intent.command).catch((error: unknown) => {
+      console.warn(error instanceof Error ? error.message : String(error));
+    });
     return;
   }
   if (intent.action === "open_workbench") {
