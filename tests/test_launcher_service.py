@@ -3902,6 +3902,7 @@ def test_terminate_managed_launcher_subtree_uses_known_pids_without_inventory_sc
     monkeypatch.setattr(launcher_service, "_observed_workbench", lambda: workbench)
     monkeypatch.setattr(launcher_service, "_workbench_payload", lambda **_kwargs: workbench)
     monkeypatch.setattr(launcher_service, "_collect_trusted_launcher_cleanup_pids", lambda **_kwargs: {4242})
+    monkeypatch.setattr(launcher_service, "_launcher_backend_port_still_listening", lambda _workbench: False)
     monkeypatch.setattr(process_inventory, "list_repo_runtime_processes", fail_inventory)
     monkeypatch.setattr(process_inventory, "terminate_workbench_processes", fake_terminate)
     monkeypatch.setattr(
