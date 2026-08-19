@@ -39,7 +39,7 @@ describe("researchWorkflowNoDuplicateSurface", () => {
   });
 
   it("autofocuses the current HITL task from the process workspace", () => {
-    expect(workspaceSource).toContain("resolveResearchProcessAutofocus");
+    expect(workspaceSource).toContain("useResearchProcessAutofocus");
     expect(workspaceSource).toContain("atCurrentTask");
   });
 
