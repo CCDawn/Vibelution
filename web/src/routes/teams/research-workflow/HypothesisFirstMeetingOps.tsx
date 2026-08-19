@@ -111,6 +111,11 @@ export function HypothesisFirstMeetingOps(props: {
     && completedSourceMessageCount === 0
     && roundQuery.data?.meetingRound?.meetingType === "hypothesis_candidate_generation"
     && (roundStatus === "open" || roundStatus === "summarizing");
+  const interruptedCandidateDiscussion = messagesQuery.isSuccess
+    && sourceMessages.length === 0
+    && roundQuery.data?.meetingRound?.meetingType === "hypothesis_candidate_generation"
+    && (roundQuery.data.meetingRound.chatRoomRoundIds?.length ?? 0) === 0
+    && (roundStatus === "open" || roundStatus === "summarizing");
   const shouldAutoDraft = props.nextAction.command === "draft_summary"
     && props.nextAction.meetingRoundId === props.meetingRoundId
     && roundStatus === "open"
@@ -169,12 +174,16 @@ export function HypothesisFirstMeetingOps(props: {
   const autoDraftFailed = commandEnabled
     && props.nextAction.command === "draft_summary"
     && draftMutation.isError;
-  const command = failedCandidateDiscussion
+  const command = interruptedCandidateDiscussion
+    ? "open_generation"
+    : failedCandidateDiscussion
     ? "open_generation"
     : autoDraftFailed
       ? "retry_draft_summary"
     : (commandEnabled ? (props.nextAction.recovery?.command || props.nextAction.command) : undefined);
-  const commandLabel = failedCandidateDiscussion
+  const commandLabel = interruptedCandidateDiscussion
+    ? "重试启动候选讨论"
+    : failedCandidateDiscussion
     ? "重新发起候选讨论"
     : autoDraftFailed
       ? (roundQuery.data.meetingRound.meetingType === "hypothesis_candidate_generation"
