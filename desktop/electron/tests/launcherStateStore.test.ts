@@ -42,6 +42,37 @@ describe("LauncherStateStore", () => {
     });
   });
 
+  it("projects registry classifications, external conflicts, and worktree dry-run", async () => {
+    const store = new LauncherStateStore(async () => ({
+      ...initial,
+      cleanup: {
+        observedAt: "2026-08-19T07:00:00Z",
+        instances: [
+          { instanceId: "worktree:healthy", classification: "healthy", reasons: ["owned_runtime_active"], windowOpen: true, listener: ["owned"], ports: [8000] },
+          { instanceId: "worktree:external", classification: "conflict", reasons: ["external_listener"], windowOpen: false, listener: ["external"], ports: [8765] },
+        ],
+        removedInstanceIds: ["worktree:orphan"],
+        worktreeDryRun: [
+          { instanceId: "worktree:dirty", projectRoot: "C:/repo/dirty", branch: "codex/dirty", reason: "branch_cleanup_preview", action: "dry_run_only", dirty: true, mergedToMain: false, risks: ["delete_unmerged"] },
+        ],
+        orphanCriteria: ["no_electron_window"],
+      },
+    }), initial);
+
+    await store.refresh("startup");
+
+    expect(store.snapshot().cleanup).toMatchObject({
+      lastCompletedAt: "2026-08-19T07:00:00Z",
+      cleanedCount: 1,
+      skippedCount: 1,
+      failedCount: 0,
+      removedInstanceIds: ["worktree:orphan"],
+      orphanCriteria: ["no_electron_window"],
+      portConflicts: [{ instanceId: "worktree:external", classification: "conflict", ports: [8765] }],
+      worktreeDryRun: [{ instanceId: "worktree:dirty", action: "dry_run_only" }],
+    });
+  });
+
   it("updates window truth without invoking the loader", () => {
     const loader = vi.fn(async () => initial);
     const store = new LauncherStateStore(loader, {

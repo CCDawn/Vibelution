@@ -617,6 +617,16 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource.slice(pageStart, branchIndex)).not.toContain("title={copy.title}");
   });
 
+  it("shows registry reconciliation evidence without adding a force-kill control", () => {
+    expect(routeSource).toContain("Registry 判定");
+    expect(routeSource).toContain("端口冲突");
+    expect(routeSource).toContain("最近自动清理");
+    expect(routeSource).toContain("Worktree dry-run");
+    expect(routeSource).toContain("Orphan 判据");
+    expect(routeSource).toContain("worktree 仅 dry-run");
+    expect(routeSource).not.toContain("taskkill");
+  });
+
   it("lets Launcher own startup settings without restarting immediately", () => {
     expect(routeSource).toContain("LauncherStartupSettingsPanel");
     expect(startupSettingsPanelSource).toContain("export function LauncherStartupSettingsPanel");

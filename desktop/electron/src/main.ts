@@ -234,24 +234,34 @@ const mainWorkbenchCloseStore = new MainWorkbenchCloseTransactionStore();
 const launcherLifecycleSupervisor = new LauncherLifecycleSupervisor();
 const launcherStateStore = new LauncherStateStore(
   async () => {
-    const [statusPayload, branchInstancesPayload, freshnessPayload] = await Promise.all([
-      orchestrateLauncherApi("status", {
-        schemaVersion: 1,
-        path: "status",
-        init: { method: "GET" }
-      }),
-      orchestrateLauncherApi("branch-instances?cleanupMetadata=1", {
-        schemaVersion: 1,
-        path: "branch-instances?cleanupMetadata=1",
-        init: { method: "GET" }
-      }),
-      orchestrateLauncherApi("freshness", {
-        schemaVersion: 1,
-        path: "freshness",
-        init: { method: "GET" }
-      })
-    ]);
-    return { status: statusPayload, branchInstances: branchInstancesPayload, freshness: freshnessPayload };
+    const truth = currentLauncherWindowTruth();
+    const electronWindowInstanceIds = truth.instances
+      .filter((item) => item.open)
+      .map((item) => item.instanceId);
+    if (truth.workbench?.open) {
+      electronWindowInstanceIds.push("main");
+    }
+    const payload = await orchestrateLauncherApi("state-refresh", {
+      schemaVersion: 1,
+      path: "state-refresh",
+      init: {
+        method: "POST",
+        body: { electronWindowInstanceIds }
+      }
+    });
+    if (typeof payload !== "object" || payload === null) {
+      throw new Error("launcher state refresh returned an invalid payload");
+    }
+    const state = payload as Record<string, unknown>;
+    if (!("status" in state) || !("branchInstances" in state)) {
+      throw new Error("launcher state refresh omitted required state sources");
+    }
+    return {
+      status: state.status,
+      branchInstances: state.branchInstances,
+      freshness: state.freshness,
+      cleanup: state.cleanup
+    };
   },
   {
     status: createLocalLauncherStatusSnapshot(),

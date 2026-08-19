@@ -2188,6 +2188,34 @@ export function LauncherRoute() {
   const recovery = evidence?.recovery;
   const recentResults = (evidence?.results.recent ?? []).slice(0, 3);
   const recentEvents = (evidence?.events.recent ?? []).slice(0, 3);
+  const cleanupSnapshot = stateQuery.data?.cleanup;
+  const registryClassifications = cleanupSnapshot?.classifications ?? [];
+  const registryClassificationSummary = (["healthy", "stale", "orphan", "conflict", "unknown"] as const)
+    .map((classification) => {
+      const count = registryClassifications.filter((item) => item.classification === classification).length;
+      return count > 0 ? `${classification} ${count}` : "";
+    })
+    .filter(Boolean)
+    .join(" · ") || "-";
+  const portConflictSummary = cleanupSnapshot?.portConflicts.length
+    ? cleanupSnapshot.portConflicts
+      .map((item) => `${item.instanceId}${item.ports.length ? `:${item.ports.join("/")}` : ""}`)
+      .join(", ")
+    : (uiLang === "zh" ? "无" : "None");
+  const automaticCleanupSummary = cleanupSnapshot?.lastCompletedAt
+    ? `${cleanupSnapshot.cleanedCount} · ${compactDate(cleanupSnapshot.lastCompletedAt, locale)}`
+    : "-";
+  const worktreeDryRunSummary = cleanupSnapshot?.worktreeDryRun.length
+    ? cleanupSnapshot.worktreeDryRun
+      .map((item) => item.branch || item.instanceId)
+      .slice(0, 3)
+      .join(", ")
+    : (uiLang === "zh" ? "无" : "None");
+  const orphanCriteriaSummary = cleanupSnapshot?.orphanCriteria.length
+    ? (uiLang === "zh"
+      ? "路径脱离 Git、PID 身份失活、无窗口、无 owned listener、deadline 已过，且两次同结论间隔至少 10 秒"
+      : "Outside Git, inactive PID identities, no window, no owned listener, expired deadline, and two identical observations at least 10 seconds apart")
+    : "-";
   const controlPlaneSpecs = [
     {
       label: uiLang === "zh" ? "快照时间" : "Snapshot time",
@@ -2205,6 +2233,11 @@ export function LauncherRoute() {
         ? stateQuery.data.cleanup.reconciliation.reason || (uiLang === "zh" ? "进行中" : "In progress")
         : (uiLang === "zh" ? "空闲" : "Idle"),
     },
+    { label: uiLang === "zh" ? "Registry 判定" : "Registry classes", value: registryClassificationSummary },
+    { label: uiLang === "zh" ? "端口冲突" : "Port conflicts", value: portConflictSummary },
+    { label: uiLang === "zh" ? "最近自动清理" : "Recent automatic cleanup", value: automaticCleanupSummary },
+    { label: uiLang === "zh" ? "Worktree dry-run" : "Worktree dry-run", value: worktreeDryRunSummary },
+    { label: uiLang === "zh" ? "Orphan 判据" : "Orphan criteria", value: orphanCriteriaSummary },
     { label: copy.overall, value: launcherSummary },
     { label: copy.guardian, value: guardianProgress },
     { label: copy.reason, value: bundle?.lastOperation.reason || bundle?.lastReason || "-" },
@@ -2457,6 +2490,25 @@ export function LauncherRoute() {
               : "",
             stateQuery.data.staleReason || "",
           ].filter(Boolean).join(" · ")}
+        />
+      ) : null}
+
+      {stateBridgeAvailable && cleanupSnapshot && (
+        cleanupSnapshot.classifications.length > 0
+        || cleanupSnapshot.worktreeDryRun.length > 0
+        || cleanupSnapshot.removedInstanceIds.length > 0
+      ) ? (
+        <VStateSurface
+          className={styles.notice}
+          tone={cleanupSnapshot.portConflicts.length > 0 ? "error" : "info"}
+          title={[
+            uiLang === "zh" ? "Registry 与残留治理" : "Registry and residue governance",
+            registryClassificationSummary,
+            `${uiLang === "zh" ? "端口冲突" : "port conflicts"}: ${portConflictSummary}`,
+            `${uiLang === "zh" ? "自动清理 metadata" : "metadata auto-cleaned"}: ${cleanupSnapshot.cleanedCount}`,
+            `${uiLang === "zh" ? "worktree 仅 dry-run" : "worktree dry-run only"}: ${cleanupSnapshot.worktreeDryRun.length}`,
+            `${uiLang === "zh" ? "orphan 判据" : "orphan criteria"}: ${orphanCriteriaSummary}`,
+          ].join(" · ")}
         />
       ) : null}
 

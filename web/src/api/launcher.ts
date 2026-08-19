@@ -90,6 +90,26 @@ export function hasLauncherIpcBridge() {
 
 export type LauncherStateFreshness = "fresh" | "refreshing" | "stale";
 
+export type LauncherRegistryReconciliationItem = {
+  instanceId: string;
+  classification: "healthy" | "stale" | "orphan" | "conflict" | "unknown";
+  reasons: string[];
+  windowOpen: boolean;
+  listener: string[];
+  ports: number[];
+};
+
+export type LauncherWorktreeDryRunItem = {
+  instanceId: string;
+  projectRoot: string;
+  branch: string;
+  reason: string;
+  action: "dry_run_only";
+  dirty: boolean;
+  mergedToMain: boolean;
+  risks: string[];
+};
+
 export type LauncherStateSnapshotV1 = {
   schemaVersion: 1;
   revision: number;
@@ -120,6 +140,11 @@ export type LauncherStateSnapshotV1 = {
     cleanedCount: number;
     skippedCount: number;
     failedCount: number;
+    classifications: LauncherRegistryReconciliationItem[];
+    portConflicts: LauncherRegistryReconciliationItem[];
+    removedInstanceIds: string[];
+    worktreeDryRun: LauncherWorktreeDryRunItem[];
+    orphanCriteria: string[];
   };
 };
 

@@ -50,6 +50,12 @@ describe("Electron main Launcher IPC facade", () => {
     expect(mainSource).toContain("resolveLocalStatus");
     expect(mainSource).toContain("launcherStateStore.projectStatus()");
     expect(mainSource).toContain("launcherStateStore.projectBranchInstances()");
+    expect(mainSource).toContain('orchestrateLauncherApi("state-refresh"');
+    expect(mainSource).toContain("body: { electronWindowInstanceIds }");
+    expect(mainSource).not.toContain('orchestrateLauncherApi("branch-instances?cleanupMetadata=1"');
+    const storeStart = mainSource.indexOf("const launcherStateStore = new LauncherStateStore(");
+    const storeEnd = mainSource.indexOf("const WORKBENCH_CLOSE_BACKEND_WAIT_MS", storeStart);
+    expect(mainSource.slice(storeStart, storeEnd).match(/orchestrateLauncherApi\(/g)).toHaveLength(1);
   });
 
   it("refreshes state from debounced file hints and stat-only safety checks", () => {
@@ -59,6 +65,11 @@ describe("Electron main Launcher IPC facade", () => {
     expect(mainSource).toContain("state.json");
     expect(mainSource).toContain("ports.json");
     expect(mainSource).toContain("instances.json");
+    const statLoopStart = mainSource.indexOf("launcherStateStatTimer = setInterval");
+    const statLoopEnd = mainSource.indexOf("}, 30_000);", statLoopStart);
+    const statLoop = mainSource.slice(statLoopStart, statLoopEnd);
+    expect(statLoop).toContain("if (changed)");
+    expect(statLoop).not.toContain("orchestrateLauncherApi");
     expect(mainSource).toContain('app.on("will-quit"');
     expect(mainSource).toContain("stopLauncherStateFileHints()");
   });
