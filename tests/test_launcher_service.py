@@ -4079,6 +4079,7 @@ def test_terminate_managed_launcher_subtree_falls_back_for_stale_partial_known_p
     monkeypatch.setattr(launcher_service, "_observed_workbench", lambda: workbench)
     monkeypatch.setattr(launcher_service, "_workbench_payload", lambda **_kwargs: workbench)
     monkeypatch.setattr(launcher_service, "_collect_trusted_launcher_cleanup_pids", lambda **_kwargs: {4242})
+    monkeypatch.setattr(launcher_service, "_launcher_backend_port_still_listening", lambda _workbench: False)
     monkeypatch.setattr(process_inventory, "terminate_workbench_processes", fake_terminate)
     monkeypatch.setattr(daemon, "_mark_persistent_active_work_runs_force_stopped", lambda _reason: [])
     monkeypatch.setattr(launcher_service, "load_pid", lambda: 0)
