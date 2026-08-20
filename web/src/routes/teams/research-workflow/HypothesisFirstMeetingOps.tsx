@@ -282,7 +282,10 @@ export function HypothesisFirstMeetingOps(props: {
             isPending={pending}
             isDisabled={Boolean(commandDisabledReason)}
             disabledReason={commandDisabledReason}
-            onPress={() => runCommand(command)}
+            onPress={() => {
+              if (!command) return;
+              runCommand(command);
+            }}
           >
             {commandLabel}
           </VButton>
