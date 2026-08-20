@@ -684,10 +684,10 @@ describe("LauncherBranchInstancesPanel contracts", () => {
   it("does not globally disable stop while a start is in flight", () => {
     expect(panelSource).toContain("const startBusy");
     expect(panelSource).toContain("const stopBusy");
-    expect(panelSource).toContain("isDisabled={startBusy}");
+    expect(panelSource).toContain("isDisabled={startBusy || admissionBlocked}");
     expect(panelSource).toContain("isDisabled={stopBusy}");
     expect(panelSource).not.toContain("isDisabled={lifecyclePending || inFlight}");
-    expect(panelSource).toContain("if (startBusy || openClickGuardsRef.current.has(item.id))");
+    expect(panelSource).toContain("if (startBusy || admissionBlocked || openClickGuardsRef.current.has(item.id))");
     expect(panelSource).not.toContain("if (clickGuardRef.current || startBusy)");
     expect(panelSource).not.toContain("if (clickGuardRef.current || lifecyclePending || inFlight)");
   });

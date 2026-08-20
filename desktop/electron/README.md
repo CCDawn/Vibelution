@@ -17,6 +17,7 @@
 | 隔离实例生命周期投影 | `src/lifecycle/instanceLifecycleProjection.ts` + `__fixtures__/instanceLifecycleProjection.cases.json` | 在 overlay 里手写第二套状态规则；改 D1 语义先改计划 I1 再改 fixture |
 | 隔离实例 registry CAS | `src/lifecycle/instanceRegistryStore.ts` + `__fixtures__/instanceRegistryCas.cases.json` | 无 generation 盲写 `instances.json`；stop 在锁外读 spawnPid；改 D2 语义先改计划 I2 再改 fixture |
 | 隔离实例监督 / `ownerLease` | `src/process/isolatedInstanceSupervisor.ts` + `__fixtures__/instanceOwnerLease.cases.json` | observe 再 spawn Python bridge；HTTP 等待另开 180s；hang 回收仍要求 spawnPid 已死；改 D3 语义先改计划 I3 |
+| 生命周期准入 / 冷却 | `src/lifecycle/instanceAdmissionControl.ts` + `instanceAdmissionStore.ts` + `__fixtures__/instanceAdmission.cases.json` | 把冷却写入 `instances.json`；挡 stop/force-stop；在 `main.ts` 再写一套限流；改 burst/冷却先改计划 I4a |
 | main 行 open/close/restart 队列 | `src/lifecycle/mainLine/` + `src/process/workbenchLifecycle.ts` | 在 `main.ts` 再写第二套 join；把准入控制（I4a）或杀树（I5）塞进本增量；改 join 语义先改计划 I4b |
 | 托盘 / 单实例 / 退出 | `src/tray/desktopTray.ts` · `src/main.ts` | 与 WinForms 同时显示 NotifyIcon；用 `taskkill` 清 Electron；托盘「Launcher 代码版本」去打工作台 HTTP `/api/launcher/freshness` |
 | `--project` 槽位 | `src/protocol/applyProjectSlot.ts` · `src/appLock.ts` · `src/main.ts` | 把 worktree 当成第二套 DesktopShell；未登记路径静默 start 当前 main |
