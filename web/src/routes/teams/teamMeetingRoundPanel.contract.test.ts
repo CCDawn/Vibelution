@@ -39,6 +39,9 @@ describe("TeamMeetingRoundPanel contract (HF-6)", () => {
     expect(displaySource).toContain("knowledgeCandidates");
     expect(displaySource).toContain("decisionRefs");
     expect(displaySource).toContain("evidenceRequests");
+    expect(displaySource).toContain("条发言");
+    expect(displaySource).toContain("meetingSpeakerLabel");
+    expect(displaySource).not.toContain("更早的");
   });
 
   it("derives the four-state status from the server projection only", () => {

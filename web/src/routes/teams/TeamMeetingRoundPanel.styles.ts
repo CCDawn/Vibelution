@@ -9,6 +9,10 @@ const styles: Record<string, string> = {
   messageList: "grid gap-[9px]",
   messageCard:
     "grid gap-1.5 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-card)] p-3 [&_p]:[font-size:var(--vui-font-xs)] [&_p]:leading-[1.5]",
+  messagePreview:
+    "m-0 min-w-0 line-clamp-2 [overflow-wrap:anywhere]",
+  messageFull:
+    "m-0 min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]",
   messageMeta:
     "flex flex-wrap items-center gap-x-3 gap-y-1 [font-size:var(--vui-font-2xs)] text-[var(--fg-secondary)]",
   digestGrid: "grid gap-[9px]",

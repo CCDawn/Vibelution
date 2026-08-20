@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type {
   MeetingDigestDraft,
   MeetingDigestValidationError,
@@ -8,6 +9,11 @@ import type {
 } from "../../api/types/hypothesisFirst";
 import { VStatusChip, type VStatusTone } from "../../components/vui";
 import { evidenceRequestKeywords } from "./research-workflow/hypothesisFirstNextAction";
+import {
+  displayMeetingMessageText,
+  meetingMessageNeedsFullText,
+  meetingSpeakerLabel,
+} from "./meetingRoundDisplayModel";
 import css from "./meetingRoundDisplay.styles";
 
 export const MEETING_STATUS_LABELS: Record<string, string> = {
@@ -184,35 +190,32 @@ export function EvidenceRequestList({
 export function MeetingMessageList({
   messages,
   compact = false,
-  recentLimit = 3,
 }: {
   messages: MeetingSourceMessage[];
   compact?: boolean;
-  recentLimit?: number;
 }) {
   if (!messages.length) {
     return <p className={css.hint}>房间内尚无讨论消息。</p>;
   }
-  const recent = compact ? messages.slice(-Math.max(1, recentLimit)) : messages;
-  const hidden = compact ? messages.slice(0, Math.max(0, messages.length - recent.length)) : [];
-  return (
-    <div data-testid="meeting-source-messages">
-      {hidden.length ? (
-        <details>
-          <summary>更早的 {hidden.length} 条消息</summary>
-          <div className={css.messageList}>
-            {hidden.map((message, index) => (
-              <MeetingMessageCard key={message.messageId || `hidden-${index}`} message={message} />
-            ))}
-          </div>
-        </details>
-      ) : null}
-      <div className={css.messageList}>
-        {recent.map((message, index) => (
-          <MeetingMessageCard key={message.messageId || `recent-${index}`} message={message} />
-        ))}
-      </div>
+  const list = (
+    <div className={css.messageList}>
+      {messages.map((message, index) => (
+        <MeetingMessageCard
+          key={message.messageId || `message-${index}`}
+          message={message}
+          compact={compact}
+        />
+      ))}
     </div>
+  );
+  if (!compact) {
+    return <div data-testid="meeting-source-messages">{list}</div>;
+  }
+  return (
+    <details data-testid="meeting-source-messages">
+      <summary>{messages.length} 条发言</summary>
+      {list}
+    </details>
   );
 }
 
@@ -230,20 +233,30 @@ function failedMessageReason(content: string): string {
   return "Agent 发言失败 · 未产生有效发言，可重新发起讨论后重试";
 }
 
-function MeetingMessageCard({ message }: { message: MeetingSourceMessage }) {
+function MeetingMessageCard({
+  message,
+  compact = false,
+}: {
+  message: MeetingSourceMessage;
+  compact?: boolean;
+}) {
   const status = String(message.status ?? "").trim().toLowerCase();
   const failed = status === "failed" || status === "error";
   const content = String(message.content ?? "");
+  const preview = failed
+    ? failedMessageReason(content)
+    : displayMeetingMessageText(content, { collapseWhitespace: compact });
+  const fullText = failed ? content : displayMeetingMessageText(content);
+  const showFull = compact && !failed && meetingMessageNeedsFullText(content);
   return (
     <article className={css.messageCard} data-failed={failed ? "true" : "false"}>
       <div className={css.messageMeta}>
-        <span>{message.agentId || "unknown"}</span>
-        {message.role ? <span>{message.role}</span> : null}
-        <span>{message.createdAt || "—"}</span>
+        <span>{meetingSpeakerLabel(message)}</span>
+        {compact ? null : <span>{message.createdAt || "—"}</span>}
       </div>
       {failed ? (
         <>
-          <p>{failedMessageReason(content)}</p>
+          <p className={compact ? css.messagePreview : undefined}>{preview}</p>
           {content ? (
             <details>
               <summary>技术详情</summary>
@@ -251,8 +264,18 @@ function MeetingMessageCard({ message }: { message: MeetingSourceMessage }) {
             </details>
           ) : null}
         </>
+      ) : compact ? (
+        <>
+          <p className={css.messagePreview}>{preview}</p>
+          {showFull ? (
+            <details>
+              <summary>全文</summary>
+              <p className={css.messageFull}>{fullText}</p>
+            </details>
+          ) : null}
+        </>
       ) : (
-        <p>{content}</p>
+        <p className={css.messageFull}>{fullText}</p>
       )}
     </article>
   );
@@ -262,15 +285,46 @@ export function MeetingRoundDisplay({
   round,
   messages,
   compact = false,
+  actions,
 }: {
   round: MeetingRoundRecord;
   messages: MeetingSourceMessage[];
   compact?: boolean;
+  actions?: ReactNode;
 }) {
   const status = round.status;
   const digestDraft = round.digestDraft;
   const organizationFailed = status === "summarizing"
     && (Boolean(round.summaryError?.trim()) || Boolean(digestDraft?.validationErrors?.length));
+  const agenda = (round.agendaQuestions ?? []).length ? (
+    <article className={css.digestCard}>
+      <span>议程序列</span>
+      <ul className={css.digestList}>
+        {(round.agendaQuestions ?? []).map((question, index) => (
+          <li key={`agenda-${index}`}>{question}</li>
+        ))}
+      </ul>
+    </article>
+  ) : null;
+  const digest = digestDraft ? <DigestDraftView draft={digestDraft} compact={compact} /> : null;
+  const decisions = (round.decisionRefs ?? []).length ? (
+    <article className={css.digestCard}>
+      <span>决策记录（{(round.decisionRefs ?? []).length}）</span>
+      <div className={css.decisionList}>
+        {(round.decisionRefs ?? []).map((ref) => (
+          <div key={ref}>
+            <code>{ref}</code>
+          </div>
+        ))}
+      </div>
+    </article>
+  ) : null;
+  const closedHint = status === "closed" ? (
+    <p className={css.hint}>
+      已于 {round.closedAt || "—"} 由 {round.closedBy || "unknown"} 确认结束。
+    </p>
+  ) : null;
+  const messageList = <MeetingMessageList messages={messages} compact={compact} />;
   return (
     <div data-testid="meeting-round-display">
       <div className={css.heading}>
@@ -296,35 +350,24 @@ export function MeetingRoundDisplay({
           </p>
         </details>
       ) : null}
-      {(round.agendaQuestions ?? []).length ? (
-        <article className={css.digestCard}>
-          <span>议程序列</span>
-          <ul className={css.digestList}>
-            {(round.agendaQuestions ?? []).map((question, index) => (
-              <li key={`agenda-${index}`}>{question}</li>
-            ))}
-          </ul>
-        </article>
-      ) : null}
-      <MeetingMessageList messages={messages} compact={compact} />
-      {digestDraft ? <DigestDraftView draft={digestDraft} compact={compact} /> : null}
-      {(round.decisionRefs ?? []).length ? (
-        <article className={css.digestCard}>
-          <span>决策记录（{(round.decisionRefs ?? []).length}）</span>
-          <div className={css.decisionList}>
-            {(round.decisionRefs ?? []).map((ref) => (
-              <div key={ref}>
-                <code>{ref}</code>
-              </div>
-            ))}
-          </div>
-        </article>
-      ) : null}
-      {status === "closed" ? (
-        <p className={css.hint}>
-          已于 {round.closedAt || "—"} 由 {round.closedBy || "unknown"} 确认结束。
-        </p>
-      ) : null}
+      {agenda}
+      {compact ? (
+        <>
+          {digest}
+          {decisions}
+          {closedHint}
+          {actions}
+          {messageList}
+        </>
+      ) : (
+        <>
+          {messageList}
+          {digest}
+          {decisions}
+          {closedHint}
+          {actions}
+        </>
+      )}
     </div>
   );
 }

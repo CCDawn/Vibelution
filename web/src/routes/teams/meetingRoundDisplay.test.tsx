@@ -197,3 +197,78 @@ describe("MeetingMessageCard failure rendering", () => {
     expect(container.textContent).toContain("本轮评审确认 cand-a 机制证据最完整。");
   });
 });
+
+describe("MeetingRoundDisplay compact inspector chrome", () => {
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it("keeps digest and actions above a collapsed speech list", () => {
+    act(() => {
+      root.render(
+        <MeetingRoundDisplay
+          compact
+          round={{
+            program: "p",
+            theme: "t",
+            campaign: "c",
+            question: "Q-01",
+            branch: "b",
+            workflow: "w",
+            agentId: "a",
+            meetingRoundId: "meeting-1",
+            meetingType: "hypothesis_review",
+            mode: "review",
+            scopeHash: "scope",
+            participants: ["a", "b", "c"],
+            status: "awaiting_approval",
+            startedAt: "2026-08-19T01:00:00Z",
+            agendaQuestions: ["每个候选的核心机制是什么？"],
+            digestDraft: {
+              summary: "本轮没有有效搜集关键词",
+              agreements: [],
+              disagreements: [],
+              actionItems: [],
+              knowledgeCandidates: [],
+            },
+          }}
+          messages={[
+            {
+              messageId: "m-ledger",
+              agentId: "agent-20260722-220514-082385",
+              role: "评审",
+              status: "completed",
+              content: "确认：本轮评审输入已闭合。\n**分布/密度组** artifactPath（素数计数数据集） metricValue 与 reproductionCommand。",
+            },
+          ]}
+          actions={<button type="button">退回重新整理</button>}
+        />,
+      );
+    });
+    const rootEl = container.querySelector('[data-testid="meeting-round-display"]');
+    const html = rootEl?.innerHTML ?? "";
+    const digestAt = html.indexOf("讨论结论");
+    const actionsAt = html.indexOf("退回重新整理");
+    const speechesAt = html.indexOf("1 条发言");
+    expect(digestAt).toBeGreaterThan(-1);
+    expect(actionsAt).toBeGreaterThan(digestAt);
+    expect(speechesAt).toBeGreaterThan(actionsAt);
+    expect(container.querySelector('[data-testid="meeting-source-messages"]')?.getAttribute("open")).toBeNull();
+    expect(container.textContent).not.toContain("更早的");
+    expect(container.textContent).not.toContain("agent-20260722-220514-082385");
+    expect(container.textContent).toContain("评审");
+    expect(container.textContent).toContain("分布/密度组");
+    expect(container.textContent).not.toContain("**分布/密度组**");
+    expect(html).toContain("line-clamp-2");
+    expect(container.textContent).toContain("全文");
+  });
+});

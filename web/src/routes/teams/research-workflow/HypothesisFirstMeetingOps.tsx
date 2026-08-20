@@ -261,48 +261,62 @@ export function HypothesisFirstMeetingOps(props: {
     }
   };
 
+  const showPrimaryCommand = Boolean(
+    command
+    && commandLabel
+    && command !== "draft_summary"
+    && command !== "record_selection"
+    && command !== "create_run"
+    && command !== "human_adjudication",
+  );
+  const showReject = commandEnabled
+    && (props.nextAction.stage === "review_awaiting_approval" || props.nextAction.stage === "generation_awaiting_approval");
+  const actionBar = (showPrimaryCommand || showReject) ? (
+    <div className={styles.actions} data-testid="meeting-round-actions">
+      {showPrimaryCommand ? (
+        <div className={styles.commandWrap}>
+          <VButton
+            type="button"
+            variant="primary"
+            density="compact"
+            isPending={pending}
+            isDisabled={Boolean(commandDisabledReason)}
+            disabledReason={commandDisabledReason}
+            onPress={() => runCommand(command)}
+          >
+            {commandLabel}
+          </VButton>
+          {commandDetail ? <span className={styles.commandDetail}>{commandDetail}</span> : null}
+        </div>
+      ) : null}
+      {showReject ? (
+        <VButton
+          type="button"
+          variant="ghost"
+          density="compact"
+          isPending={rejectMutation.isPending}
+          onPress={() => rejectMutation.mutate()}
+        >
+          退回重新整理
+        </VButton>
+      ) : null}
+    </div>
+  ) : undefined;
+
   return (
     <div className={styles.task}>
-      <MeetingRoundDisplay
-        round={displayRound}
-        messages={sourceMessages}
-        compact={props.compact}
-      />
       {error ? (
         <VErrorSummary
           label="操作未完成"
           summary={error instanceof Error ? error.message : String(error)}
         />
       ) : null}
-      <div className={styles.actions}>
-        {command && commandLabel && command !== "draft_summary" && command !== "record_selection" && command !== "create_run" && command !== "human_adjudication" ? (
-          <div className={styles.commandWrap}>
-            <VButton
-              type="button"
-              variant="primary"
-              density="compact"
-              isPending={pending}
-              isDisabled={Boolean(commandDisabledReason)}
-              disabledReason={commandDisabledReason}
-              onPress={() => runCommand(command)}
-            >
-              {commandLabel}
-            </VButton>
-            {commandDetail ? <span className={styles.commandDetail}>{commandDetail}</span> : null}
-          </div>
-        ) : null}
-        {commandEnabled && (props.nextAction.stage === "review_awaiting_approval" || props.nextAction.stage === "generation_awaiting_approval") ? (
-          <VButton
-            type="button"
-            variant="ghost"
-            density="compact"
-            isPending={rejectMutation.isPending}
-            onPress={() => rejectMutation.mutate()}
-          >
-            退回重新整理
-          </VButton>
-        ) : null}
-      </div>
+      <MeetingRoundDisplay
+        round={displayRound}
+        messages={sourceMessages}
+        compact={props.compact}
+        actions={actionBar}
+      />
     </div>
   );
 }
