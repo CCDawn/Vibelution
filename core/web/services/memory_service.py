@@ -1705,7 +1705,7 @@ def _github_projects_memory_section(root: Path) -> dict[str, Any]:
                 in_prompt=False,
                 used_by=["github_project_library_search_tool", "显式读取"],
                 channels=["explicit_read"],
-                summary="由 registry.json 生成的开源项目索引表；未命中时先全量克隆再调研本地仓。",
+                summary="由 registry.json 生成的开源项目索引表；未命中时先克隆默认主干最新提交再调研本地仓。",
             )
         )
     if registry_path.exists():
@@ -1762,7 +1762,7 @@ def _github_projects_memory_section(root: Path) -> dict[str, Any]:
         "agent 可通过索引卡片发现本地仓；不要把整仓正文注入 prompt 或正式知识库。",
         _rel(root, library_root),
         "/api/memory/github-projects",
-        f"记忆库中的公开 GitHub 全量克隆，当前就绪 {len(ready)} 个。",
+        f"记忆库中的公开 GitHub 浅克隆（默认主干最新提交），当前就绪 {len(ready)} 个。",
         items,
     )
 

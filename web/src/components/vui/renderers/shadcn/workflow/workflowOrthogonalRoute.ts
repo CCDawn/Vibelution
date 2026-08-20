@@ -11,8 +11,9 @@
  *    cards are ignored unless that simple elbow actually crosses their
  *    interior; only then take a lane around the blocking card, not around
  *    the union of every card in the source–target hull (R7);
- *  - same-side edges use relative magnets (R4): project the far card, snap
- *    to 3/5 slots, keep opposite order so stubs do not cross on the box.
+ *  - same-side ends (incoming and outgoing) share one magnet set (R4):
+ *    project the far card, snap to 3/5 slots, keep opposite order so
+ *    stubs do not cross or stack on the box.
  *
  * Not a port of mxGraph. Only those side-selection, magnet, and obstacle
  * rules are reused; output is the existing WorkflowEdgeSection polyline.
@@ -66,7 +67,8 @@ export function projectedSnapFraction(
 /**
  * Assign unique magnets on one side. k=1 snaps to the nearest slot of the
  * far card; k>1 keeps draw.io R4 order (sort by opposite coordinate) so
- * stubs do not cross on the box edge.
+ * stubs do not cross or stack on the box edge. Incoming and outgoing ends
+ * on the same side must share this assignment.
  */
 export function assignSnapFractions(
   items: ReadonlyArray<{ id: string; preferred: number }>,

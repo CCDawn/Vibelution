@@ -159,6 +159,18 @@ describe("workflowOrthogonalRoute", () => {
     expect(highStart.y).toBeLessThan(lowStart.y);
   });
 
+  it("splits an incoming and outgoing claim that prefer the same slot", () => {
+    const assigned = assignSnapFractions(
+      [
+        { id: "in", preferred: 0.5 },
+        { id: "out", preferred: 0.5 },
+      ],
+      snapSlotsForSide("right"),
+    );
+    expect(assigned.get("in")).not.toBe(assigned.get("out"));
+    expect(new Set(assigned.values()).size).toBe(2);
+  });
+
   it("routes from the chosen magnet instead of the side midpoint", () => {
     const source = card(0, 80);
     const target = card(360, 200);

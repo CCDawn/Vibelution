@@ -169,6 +169,31 @@ describe("workflow serpentine layout", () => {
     }
   });
 
+  it("keeps incoming and outgoing handles from sharing a magnet on the same side", async () => {
+    for (const result of [await layoutSerpentine(), await layoutHypothesisFirstSerpentine(1)]) {
+      for (const node of result.nodes) {
+        if (node.kind !== "task" || !node.portSides) continue;
+        const grouped = new Map<string, number[]>();
+        const add = (side: string | undefined, fraction: number | undefined) => {
+          if (!side || typeof fraction !== "number") return;
+          const list = grouped.get(side) ?? [];
+          list.push(fraction);
+          grouped.set(side, list);
+        };
+        for (const [handleId, side] of Object.entries(node.portSides.source ?? {})) {
+          add(side, node.portSides.sourceAnchor?.[handleId]);
+        }
+        for (const [handleId, side] of Object.entries(node.portSides.target ?? {})) {
+          add(side, node.portSides.targetAnchor?.[handleId]);
+        }
+        for (const [side, fractions] of grouped) {
+          const unique = new Set(fractions.map((value) => value.toFixed(4)));
+          expect(unique.size, `${node.id}:${side}`).toBe(fractions.length);
+        }
+      }
+    }
+  });
+
   it("keeps rerun feedback on one local bottom rail", async () => {
     const result = await layoutSerpentine();
     const rerun = result.edges.find((edge) => edge.id === "e_decision_rerun")!;
