@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import {
   VButton,
   VSelect,
+  VTabs,
   VToolbar,
 } from "../../../components/vui";
 import { useShellI18n } from "../../../i18n/useShellI18n";
@@ -99,23 +100,18 @@ export function ResearchWorkflowToolbar(props: {
       ? props.panel
       : null
   );
-  const detailOptions: Array<{
-    id: ResearchProcessPanel;
-    label: string;
-    description?: string;
-    disabled?: boolean;
-  }> = [
+  // Navigation tabs for the inspector pane: views only. Actions never live
+  // here — 新建运行 stays a button so navigation and actions stay separable
+  // (GitHub Actions keeps view switches and run actions apart).
+  const detailTabs = [
+    { id: "progress", label: isZh ? "题目进度" : "Progress" },
+    { id: "team", label: isZh ? "成员与讨论" : "Members" },
     { id: "agents", label: "Agent" },
-    { id: "team", label: isZh ? "成员与讨论" : "Members & discussion" },
-    { id: "timeline", label: isZh ? "运行记录" : "Run history" },
-    { id: "progress", label: isZh ? "题目进度" : "Question progress" },
-    ...(props.runId ? [{
-      id: "launch" as const,
-      label: isZh ? "新建运行" : "New run",
-      description: props.createDisabled ? props.createDisabledReason : undefined,
-      disabled: props.createDisabled,
-    }] : []),
+    { id: "timeline", label: isZh ? "运行记录" : "History" },
   ];
+  const activeDetailTab = detailTabs.some((tab) => tab.id === detailsPanel)
+    ? String(detailsPanel ?? "")
+    : undefined;
   return (
     <VToolbar ariaLabel={isZh ? "科研流程" : "Research workflow"} wrap={false} className={styles.root}>
       <div className={styles.context}>
@@ -152,18 +148,29 @@ export function ResearchWorkflowToolbar(props: {
         ) : null}
       </div>
       <div className={styles.actions}>
-        <VSelect
+        <VTabs
           density="compact"
           className={styles.details}
-          aria-label={isZh ? "查看详情" : "View details"}
-          placeholder={isZh ? "查看详情" : "Details"}
-          selectedKey={detailsPanel}
-          options={detailOptions}
-          onSelectionChange={(key) => {
-            if (key == null) return;
-            props.onOpenPanel(String(key) as ResearchProcessPanel);
+          listClassName="flex-nowrap overflow-x-auto"
+          aria-label={isZh ? "检查器视图" : "Inspector views"}
+          items={detailTabs}
+          value={activeDetailTab}
+          onValueChange={(key) => {
+            props.onOpenPanel(key as ResearchProcessPanel);
           }}
         />
+        {props.runId ? (
+          <VButton
+            type="button"
+            density="compact"
+            variant="ghost"
+            isDisabled={props.createDisabled}
+            disabledReason={props.createDisabledReason}
+            onClick={() => props.onOpenPanel("launch")}
+          >
+            {isZh ? "新建运行" : "New run"}
+          </VButton>
+        ) : null}
         {props.runId ? (
           <VButton
             type="button"

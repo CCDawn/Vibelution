@@ -7,7 +7,14 @@ export function isMachineAgentId(value: string): boolean {
   return MACHINE_AGENT_ID.test(value.trim());
 }
 
-export function meetingSpeakerLabel(message: Pick<MeetingSourceMessage, "agentId" | "role">): string {
+export function meetingSpeakerLabel(
+  message: Pick<MeetingSourceMessage, "agentId" | "role" | "speakerTitle">,
+): string {
+  // The room already carries the human-facing identity (interface code +
+  // Chinese post title, e.g. 「A014 · 科研协调」); prefer it over machine
+  // agent ids and English role keys that users cannot map to a teammate.
+  const title = String(message.speakerTitle ?? "").trim();
+  if (title && !isMachineAgentId(title)) return title;
   const role = String(message.role ?? "").trim();
   if (role && !isMachineAgentId(role)) return role;
   const agentId = String(message.agentId ?? "").trim();

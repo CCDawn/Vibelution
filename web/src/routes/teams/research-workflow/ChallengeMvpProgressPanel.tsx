@@ -55,6 +55,8 @@ export type ChallengeMvpProgressPanelProps = {
   teamId: string;
   lang?: "zh" | "en";
   onOpenQuestion: (questionId: string) => void;
+  /** Dev-phase sessions may start expanded; product default stays collapsed. */
+  defaultDevControlsOpen?: boolean;
 };
 
 function errorMessage(reason: unknown): string {
@@ -113,6 +115,7 @@ export function ChallengeMvpProgressPanel({
   teamId,
   lang: langProp,
   onOpenQuestion,
+  defaultDevControlsOpen = false,
 }: ChallengeMvpProgressPanelProps) {
   // The inspector mount point cannot thread lang yet (claimed by another task);
   // self-serve the shell language and let an explicit prop win.
@@ -152,6 +155,7 @@ export function ChallengeMvpProgressPanel({
   const queryClient = useQueryClient();
   const [snapshotRefreshing, setSnapshotRefreshing] = useState(false);
   const [registerDialogOpen, setRegisterDialogOpen] = useState(false);
+  const [devControlsOpen, setDevControlsOpen] = useState(defaultDevControlsOpen);
   const refreshDevControls = async () => {
     setSnapshotRefreshing(true);
     try {
@@ -347,11 +351,23 @@ export function ChallengeMvpProgressPanel({
       <section className={styles.devControls} aria-label={zh ? "开发态就绪与批次控制" : "DEV readiness and batch control"}>
         <div className={styles.sectionHeader}>
           <strong>{zh ? "开发态就绪 / 批次 / 证据 locator" : "DEV readiness / batches / locators"}</strong>
-          <VStatusChip tone={report?.status === "READY" ? "success" : report ? "danger" : "neutral"}>
-            {zh ? "DEV-only" : "DEV-only"}
-          </VStatusChip>
+          <div className={styles.sectionHeaderActions}>
+            <VStatusChip tone={report?.status === "READY" ? "success" : report ? "danger" : "neutral"}>
+              {zh ? "DEV-only" : "DEV-only"}
+            </VStatusChip>
+            <VButton
+              type="button"
+              variant="ghost"
+              density="compact"
+              aria-expanded={devControlsOpen}
+              onPress={() => setDevControlsOpen((open) => !open)}
+            >
+              {devControlsOpen ? (zh ? "收起" : "Collapse") : (zh ? "展开" : "Expand")}
+            </VButton>
+          </div>
         </div>
-
+        {devControlsOpen ? (
+          <>
         {devControlsQuery.isPending ? (
           <VStateSurface tone="loading" title={zh ? "读取 DEV 控制快照" : "Loading DEV control snapshot"} fill className={styles.fill} />
         ) : devControlsQuery.isError || !snapshot ? (
@@ -589,6 +605,14 @@ export function ChallengeMvpProgressPanel({
               : `DEV action failed: ${errorMessage(activeMutationError)} (retry is safe)`}
           </div>
         ) : null}
+          </>
+        ) : (
+          <p className={styles.devCollapsedHint}>
+            {zh
+              ? "开发态控制已折叠；批量运行的日常操作在上方题目总览，fixture 控制展开后可见。"
+              : "DEV controls collapsed; daily batch operations live in the catalog overview above."}
+          </p>
+        )}
       </section>
 
       <section className={styles.questionSection} aria-label={zh ? "单题结果" : "Question results"}>

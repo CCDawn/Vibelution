@@ -18,6 +18,11 @@ describe("meetingRoundDisplayModel", () => {
     })).toBe("评审");
     expect(meetingSpeakerLabel({
       agentId: "agent-20260722-220514-082385",
+      role: "source_ingestor",
+      speakerTitle: "A014 · 科研协调",
+    })).toBe("A014 · 科研协调");
+    expect(meetingSpeakerLabel({
+      agentId: "agent-20260722-220514-082385",
     })).toBe("发言人");
     expect(meetingSpeakerLabel({ agentId: "白望舒" })).toBe("白望舒");
   });
