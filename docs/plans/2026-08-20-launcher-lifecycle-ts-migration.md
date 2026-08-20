@@ -1,6 +1,6 @@
 # Launcher 生命周期 TS 化迁移（绞杀者增量 I0–I6）
 
-Status: **Active**（2026-08-20 立项，未开工）
+Status: **Active**（2026-08-20 立项；I0 锁协议 v2 已实现）
 Authority: [ADR 0009](../adr/0009-launcher-control-plane-lives-in-electron-main.md)（由本计划 I0 增补）· 前置执行账本 [CONTROL_PLANE_MIGRATION](../archive/plans/2026-08/CONTROL_PLANE_MIGRATION.md)（已关闭，其关闭条件只覆盖「编排权归 main + :8765 退役」，未覆盖「逻辑本体 TS 化」——本计划补齐这一段）。
 验收总则：每个增量独立 worktree、独立合入、独立可回退；全部完成后，**launcher 生命周期逻辑（状态机、registry 写入、命令队列、监督循环、进程收割编排）全部运行在 Electron main（TS）内**；Python 只保留 workbench 后端本体与 git/文件维护 CLI。
 
@@ -53,7 +53,7 @@ VibelutionLauncher.exe（薄 shim，转发）
 ### I0 · ADR 0009 增补 + 锁协议 v2（双语言互操作）
 
 - ADR 0009 增补（Status 行 + Decision 5 收窄）：Python 产品路径合法角色收敛为 (a) workbench 后端本体；(b) git/worktree/文件维护 CLI；(c) 过渡期 lifecycle CLI（按本计划逐增量退役）。生命周期状态机与 instances.json 写入权威 = Electron main。引用本计划。
-- 锁协议 v2（替换 `instances_registry.py:143-214` 的 msvcrt/fcntl 字节锁）：`instances.json.lockdir` 目录锁。claim = `mkdir`（原子）+ 写入 `{pid, startedAt}`；轮询 10ms、超时 5s；stale（>10s）可破锁并记录事件 `launcher.registry.lock_stale_broken`；release = 递归删除 lockdir。Python 与 TS 各实现一份，互操作。
+- 锁协议 v2（替换 `instances_registry.py` 的 msvcrt/fcntl 字节锁）：`instances.json.lockdir` 目录锁。claim = `mkdir`（原子）+ 写入 `holder.json` `{pid, startedAt}`；轮询 10ms、超时 5s；stale（holder `startedAt` >10s，或 lockdir 存在但无合法 holder 超过 100ms）可破锁并记录事件 `launcher.registry.lock_stale_broken`；release = 仅在仍持有时递归删除 lockdir。Python 与 TS 各实现一份，互操作。共享常量见 `tests/fixtures/launcher/instance_lock_protocol.json`。
 - TS 侧新 `desktop/electron/src/lifecycle/instanceLock.ts`。
 - 验收：互操作测试（Python 持锁时 TS 写等待、反之、双方 stale 破锁各一例）；`pytest tests/test_instances_registry.py -q` 全绿；锁开销不明显回退（<50ms 量级）。
 

@@ -1,0 +1,11 @@
+{
+  "protocolVersion": 2,
+  "lockdirSuffix": ".lockdir",
+  "holderFileName": "holder.json",
+  "holderKeys": ["pid", "startedAt"],
+  "pollMs": 10,
+  "timeoutMs": 5000,
+  "staleMs": 10000,
+  "missingHolderGraceMs": 100,
+  "staleBrokenEvent": "launcher.registry.lock_stale_broken"
+}

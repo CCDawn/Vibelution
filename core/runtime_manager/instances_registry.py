@@ -6,9 +6,9 @@ point: it maps instance ids to backend and control ports so separate worktrees
 can run side by side without port collisions.
 
 Writers: Launcher lifecycle actions. Readers: daemon observation, tray, CLI.
-All writes take ``instances.json.lock`` then replace the payload atomically so
-concurrent allocators and generation CAS cannot interleave. The registry does
-not decide which checkout is main.
+All writes take the ``instances.json.lockdir`` protocol v2 lock then replace
+the payload atomically so concurrent allocators and generation CAS cannot
+interleave. The registry does not decide which checkout is main.
 """
 
 from __future__ import annotations
@@ -25,6 +25,11 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any, TypeVar
 
+from core.runtime_manager.instance_lock import (
+    LOCK_TIMEOUT_SECONDS,
+    InstanceLockTimeoutError,
+    hold_instance_lock,
+)
 from core.runtime_manager.process_identity import (
     capture_process_identity,
     inspect_listener_identity,
@@ -39,8 +44,7 @@ IN_FLIGHT_STATUSES = frozenset({"starting", "restarting", "stopping"})
 PORT_LEASE_RECLAIMABLE = frozenset({"quarantined", "reclaimable"})
 _READ_RETRY_ATTEMPTS = 3
 _READ_RETRY_DELAY_SECONDS = 0.05
-_LOCK_TIMEOUT_SECONDS = 5.0
-_LOCK_POLL_SECONDS = 0.01
+_LOCK_TIMEOUT_SECONDS = LOCK_TIMEOUT_SECONDS
 _CLEANUP_OBSERVATION_GRACE_SECONDS = 10.0
 
 T = TypeVar("T")
@@ -143,25 +147,11 @@ def save_registry(registry: dict[str, Any]) -> None:
 def registry_lock(*, timeout: float = _LOCK_TIMEOUT_SECONDS):
     """Serialize one registry read-modify-write cycle across processes."""
 
-    path = instances_registry_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path = path.with_name(f"{path.name}.lock")
-    with lock_path.open("a+b") as handle:
-        handle.seek(0, os.SEEK_END)
-        if handle.tell() == 0:
-            handle.write(b"\0")
-            handle.flush()
-        deadline = time.monotonic() + max(0.0, float(timeout))
-        while True:
-            if _try_lock_handle(handle):
-                break
-            if time.monotonic() >= deadline:
-                raise TimeoutError(f"Timed out acquiring instance registry lock: {lock_path}")
-            time.sleep(_LOCK_POLL_SECONDS)
-        try:
+    try:
+        with hold_instance_lock(instances_registry_path(), timeout_seconds=timeout):
             yield
-        finally:
-            _unlock_handle(handle)
+    except InstanceLockTimeoutError as exc:
+        raise TimeoutError(str(exc)) from exc
 
 
 def mutate_registry(mutator: Callable[[dict[str, Any]], T]) -> T:
@@ -173,45 +163,6 @@ def mutate_registry(mutator: Callable[[dict[str, Any]], T]) -> T:
         _touch_registry(payload)
         save_registry(payload)
         return result
-
-
-def _try_lock_handle(handle: Any) -> bool:
-    handle.seek(0)
-    if os.name == "nt":
-        import msvcrt
-
-        try:
-            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-        except OSError:
-            return False
-        return True
-
-    import fcntl
-
-    try:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except (BlockingIOError, OSError):
-        return False
-    return True
-
-
-def _unlock_handle(handle: Any) -> None:
-    handle.seek(0)
-    if os.name == "nt":
-        import msvcrt
-
-        try:
-            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-        except OSError:
-            pass
-        return
-
-    import fcntl
-
-    try:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-    except OSError:
-        pass
 
 
 def _normalize_instance_id(instance_id: str) -> str:

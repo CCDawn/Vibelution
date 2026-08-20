@@ -136,7 +136,10 @@ Electron overlay 在写入 `window.open` 后必须用同一函数重算 `lifecyc
 
 ## 7. `instances.json` 原子性
 
-- 旁路锁：`instances.json.lock`（Windows `msvcrt.locking`，POSIX `fcntl.flock`），超时 5s。
+- 旁路锁协议 v2：`instances.json.lockdir` 目录锁（Python `core/runtime_manager/instance_lock.py` 与 TS `desktop/electron/src/lifecycle/instanceLock.ts` 同一协议）。
+- claim：原子 `mkdir` + `holder.json` `{pid, startedAt}`；轮询 10ms，超时 5s。
+- stale：holder `startedAt` 超过 10s，或 lockdir 存在但无合法 holder 超过 100ms，可破锁并写事件 `launcher.registry.lock_stale_broken`。
+- release：仅当 holder 仍是本进程本次 claim 时递归删除 lockdir。
 - 所有读-改-写（upsert、端口分配、claim、observe-error）走同一把锁。
 - `allocate_instance_ports`：**一次** lock 内选互斥的 backend+control，**一次** `save_registry`。禁止两次 upsert 之间被并发插入。
 - 锁不可重入：锁内不得再调用会取锁的 `upsert_instance`。
