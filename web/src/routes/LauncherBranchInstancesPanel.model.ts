@@ -81,10 +81,40 @@ export function toPendingBranchOperation(input: {
   };
 }
 
+export type LifecycleIntentRejectReason = "duplicate" | "blocked";
+
+export type LifecycleRequestOutcome =
+  | { accepted: true }
+  | { accepted: false; reason: LifecycleIntentRejectReason };
+
 export function isLifecycleIntentTable(
   pending?: LifecyclePendingInput,
 ): pending is LifecycleIntentTable {
   return Boolean(pending) && !("operation" in (pending as InstancePendingOperation));
+}
+
+export function hasActiveLifecyclePending(pending?: LifecyclePendingInput): boolean {
+  if (!pending) {
+    return false;
+  }
+  if (isLifecycleIntentTable(pending)) {
+    return Object.keys(pending).length > 0;
+  }
+  return Boolean(pending.instanceId || pending.instanceIds?.length);
+}
+
+export function lifecycleIntentRejectMessage(
+  reason: LifecycleIntentRejectReason,
+  isZh: boolean,
+  operation: "start" | "stop" | "restart" = "start",
+): string {
+  if (reason === "duplicate") {
+    if (operation === "stop") {
+      return isZh ? "停止已在进行中" : "Stop is already in progress";
+    }
+    return isZh ? "启动已在进行中" : "Start is already in progress";
+  }
+  return isZh ? "请等当前操作结束后再启动" : "Wait for the current operation to finish before starting";
 }
 
 export function pendingIntentToOperation(intent: PendingLifecycleIntent): InstancePendingOperation {

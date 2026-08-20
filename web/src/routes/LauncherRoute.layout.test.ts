@@ -194,6 +194,10 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("acceptLifecycleIntent");
     expect(routeSource).toContain("shouldApplyLifecycleMutationFeedback");
     expect(routeSource).toContain("requestInstanceLifecycle");
+    expect(routeSource).toContain("lifecycleIntentRejectMessage");
+    expect(routeSource).toContain("lifecycle_intent_duplicate");
+    expect(routeSource).toContain("return { accepted: false, reason }");
+    expect(routeSource).toContain("return { accepted: true }");
     expect(routeSource).toContain("onSettled:");
     expect(routeSource).not.toContain("lifecycleInFlightRef");
     expect(routeSource).not.toContain("optimisticBranchOperation");

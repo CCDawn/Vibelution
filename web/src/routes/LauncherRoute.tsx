@@ -59,9 +59,11 @@ import { LauncherBranchInstancesPanel } from "./LauncherBranchInstancesPanel";
 import { pinLauncherDocumentViewport } from "./pinLauncherDocumentViewport";
 import {
   acceptLifecycleIntent,
+  lifecycleIntentRejectMessage,
   settleLifecycleIntentTable,
   shouldApplyLifecycleMutationFeedback,
   type LifecycleIntentTable,
+  type LifecycleRequestOutcome,
 } from "./LauncherBranchInstancesPanel.model";
 import { formatUnknownLeaseDiagnostics } from "./launcherRegistryDiagnostics";
 import { LauncherRegistryDiagnosticsBanner } from "./LauncherRegistryDiagnosticsBanner";
@@ -1672,7 +1674,10 @@ export function LauncherRoute() {
       }
     },
   });
-  const requestInstanceLifecycle = (instanceId: string, operation: Extract<LauncherOperation, "start" | "stop" | "restart">) => {
+  const requestInstanceLifecycle = (
+    instanceId: string,
+    operation: Extract<LauncherOperation, "start" | "stop" | "restart">,
+  ): LifecycleRequestOutcome => {
     const item = branchItems.find((candidate) => candidate.id === instanceId);
     const requestId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
       ? crypto.randomUUID()
@@ -1684,7 +1689,17 @@ export function LauncherRoute() {
       baselineLifecycleState: item?.runtime.lifecycleState,
     });
     if (!accepted.accepted || !accepted.intent) {
-      return;
+      const reason = accepted.reason === "duplicate" ? "duplicate" : "blocked";
+      postLauncherLifecycleControlTelemetry(operation, "rejected", {
+        code: reason === "duplicate" ? "lifecycle_intent_duplicate" : "lifecycle_intent_blocked",
+        instanceId,
+      });
+      setNotice({
+        tone: "warning",
+        text: lifecycleIntentRejectMessage(reason, lang === "zh", operation),
+        source: "lifecycle-control",
+      });
+      return { accepted: false, reason };
     }
     lifecycleIntentsRef.current = accepted.table;
     setLifecycleIntents(accepted.table);
@@ -1695,6 +1710,7 @@ export function LauncherRoute() {
       requestId: accepted.intent.requestId,
       localRevision: accepted.intent.localRevision,
     });
+    return { accepted: true };
   };
   const supervisorMutation = useMutation({
     mutationFn: reattachLauncherSupervisor,
@@ -2509,9 +2525,7 @@ export function LauncherRoute() {
             )}
             pendingOperation={pendingBranchOperation}
             lifecyclePending={controlMutation.isPending}
-            onLifecycle={(instanceId, operation) => {
-              requestInstanceLifecycle(instanceId, operation);
-            }}
+            onLifecycle={(instanceId, operation) => requestInstanceLifecycle(instanceId, operation)}
             onStopMany={(instanceIds) => {
               instanceIds.forEach((instanceId) => {
                 requestInstanceLifecycle(instanceId, "stop");

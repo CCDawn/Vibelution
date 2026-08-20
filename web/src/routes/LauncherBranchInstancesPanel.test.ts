@@ -24,6 +24,8 @@ import {
   paginateItems,
   resolveActivePendingOperation,
   acceptLifecycleIntent,
+  hasActiveLifecyclePending,
+  lifecycleIntentRejectMessage,
   shouldApplyLifecycleMutationFeedback,
   settleLifecycleIntentTable,
 } from "./LauncherBranchInstancesPanel.model";
@@ -665,5 +667,30 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).not.toContain("isDisabled={lifecyclePending || inFlight}");
     expect(panelSource).toContain("if (clickGuardRef.current || startBusy)");
     expect(panelSource).not.toContain("if (clickGuardRef.current || lifecyclePending || inFlight)");
+  });
+
+  it("treats an empty intent table as not pending so Open window can retry after a rejected start", () => {
+    const startable = instance({ id: "main", kind: "main", branch: "main", current: true });
+    expect(hasActiveLifecyclePending(undefined)).toBe(false);
+    expect(hasActiveLifecyclePending({})).toBe(false);
+    expect(hasActiveLifecyclePending({
+      instanceId: startable.id,
+      operation: "start",
+      baselineLifecycleState: "closed",
+    })).toBe(true);
+    const started = acceptLifecycleIntent({}, {
+      instanceId: startable.id,
+      operation: "start",
+      requestId: "req-start-guard",
+      baselineLifecycleState: "closed",
+    });
+    expect(started.accepted).toBe(true);
+    expect(hasActiveLifecyclePending(started.table)).toBe(true);
+    expect(hasActiveLifecyclePending(settleLifecycleIntentTable({}, [startable]))).toBe(false);
+    expect(lifecycleIntentRejectMessage("duplicate", true)).toBe("启动已在进行中");
+    expect(lifecycleIntentRejectMessage("blocked", false)).toBe("Wait for the current operation to finish before starting");
+    expect(panelSource).toContain("hasActiveLifecyclePending(pendingOperation)");
+    expect(panelSource).toContain("outcome.accepted === false");
+    expect(panelSource).toContain("lifecycleIntentRejectMessage");
   });
 });

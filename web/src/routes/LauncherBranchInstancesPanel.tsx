@@ -26,8 +26,11 @@ import {
   isCleanupEligible,
   overlayCleanupMetadata,
   paginateItems,
+  hasActiveLifecyclePending,
+  lifecycleIntentRejectMessage,
   type InstanceListFilters,
   type LifecyclePendingInput,
+  type LifecycleRequestOutcome,
   type InstanceRuntimeState,
 } from "./LauncherBranchInstancesPanel.model";
 import styles from "./LauncherBranchInstancesPanel.styles";
@@ -56,7 +59,10 @@ type LauncherBranchInstancesPanelProps = {
   launcherReading?: boolean;
   listLoading?: boolean;
   lifecyclePending?: boolean;
-  onLifecycle?: (instanceId: string, operation: Extract<LauncherOperation, "start" | "stop">) => void;
+  onLifecycle?: (
+    instanceId: string,
+    operation: Extract<LauncherOperation, "start" | "stop">,
+  ) => LifecycleRequestOutcome | void;
   onStopMany?: (instanceIds: string[]) => void;
 };
 
@@ -274,6 +280,7 @@ export function LauncherBranchInstancesPanel({
   const [batchStopKind, setBatchStopKind] = useState<"stop" | "close">("stop");
   const [notice, setNotice] = useState("");
   const [noticeTone, setNoticeTone] = useState<"neutral" | "error">("neutral");
+  const [openReject, setOpenReject] = useState<{ id: string; reason: "duplicate" | "blocked" } | null>(null);
   const clickGuardRef = useRef(false);
   const needsCleanupMetadata = Boolean(filters.unmerged || (pendingIds && pendingIds.length > 0));
   const cleanupMetadataQuery = useQuery({
@@ -328,10 +335,19 @@ export function LauncherBranchInstancesPanel({
     }
   }, [maintenancePage, pagedMaintenance.page]);
   useEffect(() => {
-    if (!lifecyclePending && !pendingOperation) {
+    if (!lifecyclePending && !hasActiveLifecyclePending(pendingOperation)) {
       clickGuardRef.current = false;
     }
   }, [lifecyclePending, pendingOperation]);
+  useEffect(() => {
+    if (!openReject) {
+      return;
+    }
+    const item = annotatedItems.find((candidate) => candidate.id === openReject.id);
+    if (item && instanceRuntimeState(item, pendingOperation) === "starting") {
+      setOpenReject(null);
+    }
+  }, [annotatedItems, openReject, pendingOperation]);
   useEffect(() => {
     const allIndex = allItems.findIndex((item) => item.id === selectedId);
     if (allIndex >= 0) {
@@ -446,7 +462,13 @@ export function LauncherBranchInstancesPanel({
         return;
       }
       clickGuardRef.current = true;
-      onLifecycle?.(item.id, "start");
+      const outcome = onLifecycle?.(item.id, "start");
+      if (outcome && outcome.accepted === false) {
+        clickGuardRef.current = false;
+        setOpenReject({ id: item.id, reason: outcome.reason });
+        return;
+      }
+      setOpenReject((current) => (current?.id === item.id ? null : current));
     };
     return (
       <span className={styles.actionButtons} onClick={(event) => event.stopPropagation()}>
@@ -461,6 +483,9 @@ export function LauncherBranchInstancesPanel({
           >
             {openLabel}
           </VButton>
+        ) : null}
+        {showOpen && openReject?.id === item.id ? (
+          <span className={styles.errorReason}>{lifecycleIntentRejectMessage(openReject.reason, zh)}</span>
         ) : null}
         {canStopInstance(item, pendingOperation) || state === "stopping" ? (
           <VButton
