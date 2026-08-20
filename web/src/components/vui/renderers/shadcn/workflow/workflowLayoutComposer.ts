@@ -226,28 +226,29 @@ function applySerpentineOrthogonalRoutes(
     item,
     routed: routeOrthogonalConnector({ source: item.source, target: item.target, obstacles }),
   }));
-  const sourceFractionByEdge = sameSideFractions(
-    firstPass.map(({ item, routed }) => ({
-      edgeId: item.edgeId,
+  // Incoming and outgoing on the same card side share one magnet set
+  // (draw.io exclusive connection points). Assigning source/target
+  // separately let both snap to 0.5 and paint two stacked handles.
+  const fractionsByEnd = sameSideFractions([
+    ...firstPass.map(({ item, routed }) => ({
+      id: `source:${item.edgeId}`,
       nodeId: item.fromNodeId,
       side: routed.sourceSide,
       rect: item.source,
       far: item.target,
     })),
-  );
-  const targetFractionByEdge = sameSideFractions(
-    firstPass.map(({ item, routed }) => ({
-      edgeId: item.edgeId,
+    ...firstPass.map(({ item, routed }) => ({
+      id: `target:${item.edgeId}`,
       nodeId: item.toNodeId,
       side: routed.targetSide,
       rect: item.target,
       far: item.source,
     })),
-  );
+  ]);
 
   for (const { item, routed: first } of firstPass) {
-    const sourceFraction = sourceFractionByEdge.get(item.edgeId) ?? 0.5;
-    const targetFraction = targetFractionByEdge.get(item.edgeId) ?? 0.5;
+    const sourceFraction = fractionsByEnd.get(`source:${item.edgeId}`) ?? 0.5;
+    const targetFraction = fractionsByEnd.get(`target:${item.edgeId}`) ?? 0.5;
     const routed = routeOrthogonalConnector({
       source: item.source,
       target: item.target,
@@ -283,7 +284,7 @@ function applySerpentineOrthogonalRoutes(
 
 function sameSideFractions(
   items: Array<{
-    edgeId: string;
+    id: string;
     nodeId: string;
     side: OrthogonalSide;
     rect: OrthogonalRect;
@@ -301,13 +302,13 @@ function sameSideFractions(
   for (const list of groups.values()) {
     const assigned = assignSnapFractions(
       list.map((item) => ({
-        id: item.edgeId,
+        id: item.id,
         preferred: projectedSnapFraction(item.rect, item.side, item.far),
       })),
       snapSlotsForSide(list[0]!.side),
     );
-    for (const [edgeId, fraction] of assigned) {
-      fractions.set(edgeId, fraction);
+    for (const [id, fraction] of assigned) {
+      fractions.set(id, fraction);
     }
   }
   return fractions;

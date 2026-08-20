@@ -232,7 +232,7 @@ describe("WorkflowDecisionNode render (P1-4)", () => {
     expect(workflowHandleSideOffset(1, 2, "EAST")).toEqual({ top: "66.6667%" });
   });
 
-  it("shows unused serpentine magnets on a used side so the edge can change snap point", () => {
+  it("does not paint unused serpentine magnets because the canvas is not connectable", () => {
     const markup = renderNode(WorkflowAgentTaskNode, {
       label: "执行",
       status: "pending",
@@ -243,10 +243,8 @@ describe("WorkflowDecisionNode render (P1-4)", () => {
         sourceAnchor: { "out:east:one": 0.5 },
       },
     });
-    expect(markup).toContain('data-workflow-snap="EAST"');
-    expect(markup).toContain('data-snap-fraction="0.25"');
-    expect(markup).toContain('data-snap-fraction="0.75"');
-    expect(markup).not.toContain('data-snap-fraction="0.5"');
+    expect(markup).not.toContain("data-workflow-snap");
+    expect(markup).toContain('data-snap="50%"');
   });
 
   it("mirrors every real ELK target port as an id-bearing handle (P1-4)", () => {
