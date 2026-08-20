@@ -11,7 +11,7 @@
  */
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -126,9 +126,18 @@ function idleLayoutHook(nodes: WorkflowLayoutNode[] = []) {
 }
 
 describe("ShadcnWorkflowCanvas structure (P1-1)", () => {
+  beforeEach(() => {
+    vi.stubGlobal("ResizeObserver", class {
+      observe() {}
+      disconnect() {}
+      unobserve() {}
+    });
+  });
+
   afterEach(() => {
     rfCalls.length = 0;
     vi.clearAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("does not pass implicit fitView / fitViewOptions to ReactFlow", async () => {
@@ -147,6 +156,7 @@ describe("ShadcnWorkflowCanvas structure (P1-1)", () => {
     expect(rfProps).toBeDefined();
     expect(rfProps.fitView).toBeUndefined();
     expect(rfProps.fitViewOptions).toBeUndefined();
+    expect(typeof rfProps.onMoveStart).toBe("function");
   });
 
   it("wires WorkflowCanvasControls with an explicit onFitAll (not implicit fitView)", async () => {

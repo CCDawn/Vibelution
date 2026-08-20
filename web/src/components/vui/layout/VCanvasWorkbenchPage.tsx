@@ -97,7 +97,7 @@ export function VCanvasWorkbenchPage({
         {toolbar ? (
           <div
             data-vui="canvas-workbench-toolbar"
-            className={cn(VUI_PAGE_TOOLBAR_STRIP_CLASS, "shrink-0", toolbarClassName)}
+            className={cn(VUI_PAGE_TOOLBAR_STRIP_CLASS, "relative z-20 shrink-0 overflow-hidden", toolbarClassName)}
           >
             {toolbar}
           </div>
@@ -107,7 +107,7 @@ export function VCanvasWorkbenchPage({
           toolbar strip and clips the canvas. flex-1 min-h-0 fills the remainder.
         */}
         <VSplitWorkspace
-          className={cn("min-h-0 min-w-0 flex-1 overflow-hidden", workspaceClassName)}
+          className={cn("min-h-0 min-w-0 flex-1 overflow-hidden !h-auto", workspaceClassName)}
           data-testid={shellTestId}
           data-team-shell-mode={shellMode}
           data-vui-layout-id={layoutId}

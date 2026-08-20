@@ -264,6 +264,7 @@ describe("VUI workbench layout templates", () => {
         ariaLabel="Org canvas"
         title="Canvas"
         hideHeader
+        toolbar={<div>Canvas tools</div>}
         rail={<nav>Layers</nav>}
         canvas={<div>Graph</div>}
         inspector={<div>Node</div>}
@@ -275,6 +276,10 @@ describe("VUI workbench layout templates", () => {
     expect(canvasMarkup).toContain("Graph");
     expect(canvasMarkup).toContain("Node");
     expect(canvasMarkup).toContain('data-fill-layout="stack"');
+    expect(canvasMarkup).toContain('data-vui="canvas-workbench-toolbar"');
+    expect(canvasMarkup).toContain("relative z-20 shrink-0 overflow-hidden");
+    expect(canvasMarkup).toContain("!h-auto");
+    expect(canvasMarkup).toContain("Canvas tools");
   });
 
   it("fill workbench strips route grid geometry that would collapse hideHeader body", () => {

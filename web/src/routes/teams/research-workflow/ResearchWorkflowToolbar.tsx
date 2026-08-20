@@ -163,6 +163,7 @@ export function ResearchWorkflowToolbar(props: {
             type="button"
             density="compact"
             variant={props.atCurrentTask ? "ghost" : "primary"}
+            className={styles.primary}
             isDisabled={props.atCurrentTask}
             onClick={() => props.onNavigateCurrent?.()}
           >
@@ -176,6 +177,7 @@ export function ResearchWorkflowToolbar(props: {
             type="button"
             density="compact"
             variant="primary"
+            className={styles.primary}
             onClick={() => props.onOpenPanel("launch")}
             isDisabled={props.createDisabled}
             disabledReason={props.createDisabledReason}
