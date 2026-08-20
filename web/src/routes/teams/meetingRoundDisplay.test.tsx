@@ -271,4 +271,19 @@ describe("MeetingRoundDisplay compact inspector chrome", () => {
     expect(html).toContain("line-clamp-2");
     expect(container.textContent).toContain("全文");
   });
+
+  it("renders unstructured speech summaries without claiming marker consensus", () => {
+    renderDraft({
+      summary: "从自由格式发言生成摘要条目",
+      agreements: [
+        {
+          text: "hyp-a 的机制更完整",
+          derivedFrom: "unstructured",
+          sourceMessageRefs: ["room-1/round-1/msg-1"],
+        },
+      ],
+    });
+    expect(container.textContent).toContain("发言摘要：hyp-a 的机制更完整");
+    expect(container.textContent).not.toContain("[object Object]");
+  });
 });

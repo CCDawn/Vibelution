@@ -655,6 +655,132 @@ def extract_discussion_markers(messages: Sequence[Mapping[str, Any]]) -> dict[st
     return extracted
 
 
+UNSTRUCTURED_DERIVED_FROM = "unstructured"
+EMPTY_DIGEST_CAPTURE_MESSAGE = "纪要未捕获讨论内容"
+_UNSTRUCTURED_SUMMARY_MAX_CHARS = 240
+_STRUCTURED_MARKER_KEYS = (
+    "agreements",
+    "disagreements",
+    "risks",
+    "actionItems",
+    "knowledgeCandidates",
+    "proposedCandidates",
+    "evidenceRequests",
+)
+_DIGEST_CAPTURE_KEYS = (
+    "agreements",
+    "disagreements",
+    "actionItems",
+    "knowledgeCandidates",
+    "evidenceRequests",
+)
+
+
+def digest_agreement_texts(value: Any) -> list[str]:
+    """Normalize marker strings and unstructured objects into digest texts."""
+
+    texts: list[str] = []
+    for item in list(value or []):
+        if isinstance(item, Mapping):
+            text = str(
+                item.get("text") or item.get("issue") or item.get("summary") or ""
+            ).strip()
+        else:
+            text = str(item or "").strip()
+        if text:
+            texts.append(text)
+    return texts
+
+
+def structured_marker_item_count(markers: Mapping[str, Any]) -> int:
+    return sum(len(list(markers.get(key) or [])) for key in _STRUCTURED_MARKER_KEYS)
+
+
+def digest_draft_captured_discussion(draft: Mapping[str, Any]) -> bool:
+    return any(list(draft.get(key) or []) for key in _DIGEST_CAPTURE_KEYS)
+
+
+def _unstructured_summary_text(content: str) -> str:
+    collapsed = " ".join(str(content or "").split())
+    if len(collapsed) <= _UNSTRUCTURED_SUMMARY_MAX_CHARS:
+        return collapsed
+    return collapsed[: _UNSTRUCTURED_SUMMARY_MAX_CHARS - 1].rstrip() + "…"
+
+
+def derive_unstructured_digest_entries(
+    messages: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Turn free-form completed speeches into cited summary entries.
+
+    These are not fabricated consensus: each item is a speech excerpt marked
+    ``derivedFrom=unstructured`` and linked back to the source message.
+    """
+
+    entries: list[dict[str, Any]] = []
+    for message in messages:
+        if str(message.get("status") or "").strip().lower() != "completed":
+            continue
+        if is_pass_message(message):
+            continue
+        content = str(message.get("content") or "").strip()
+        if not content:
+            continue
+        message_id = str(message.get("messageId") or "").strip()
+        if not message_id:
+            continue
+        speaker = (
+            str(message.get("speakerTitle") or "").strip()
+            or str(message.get("participantId") or "").strip()
+            or "participant"
+        )
+        entries.append(
+            {
+                "text": _unstructured_summary_text(content),
+                "speaker": speaker,
+                "derivedFrom": UNSTRUCTURED_DERIVED_FROM,
+                "sourceMessageRefs": [message_source_ref(message)],
+            }
+        )
+    return entries
+
+
+def apply_unstructured_digest_fallback(
+    markers: Mapping[str, list[Any]],
+    messages: Sequence[Mapping[str, Any]],
+) -> dict[str, list[Any]]:
+    """Fill agreements with cited speech summaries when marker extraction is empty."""
+
+    merged = {str(key): list(value) for key, value in dict(markers).items()}
+    if structured_marker_item_count(merged):
+        return merged
+    entries = derive_unstructured_digest_entries(messages)
+    if entries:
+        merged["agreements"] = entries
+    return merged
+
+
+def assert_review_digest_captured_discussion(
+    meeting_round: Mapping[str, Any],
+    draft: Mapping[str, Any],
+    source_messages: Sequence[Mapping[str, Any]],
+) -> None:
+    """Fail-closed: a review with completed speech cannot approve an empty digest."""
+
+    if str(meeting_round.get("meetingType") or "").strip().lower() != "hypothesis_review":
+        return
+    completed = [
+        message
+        for message in source_messages
+        if str(message.get("status") or "").strip().lower() == "completed"
+        and not is_pass_message(message)
+        and str(message.get("content") or "").strip()
+    ]
+    if not completed:
+        return
+    if not digest_draft_captured_discussion(draft):
+        raise ContractValidationError(EMPTY_DIGEST_CAPTURE_MESSAGE)
+
+
 def source_message_content_hash(messages: Sequence[Mapping[str, Any]]) -> str:
     """Stable hash of bound discussion message content used for draft reuse."""
 
@@ -829,7 +955,7 @@ def submit_meeting_digest_draft(
             "closedBy": "draft-probe",
             "createdAt": _utc_now(),
             "agendaSummary": str(normalized_draft.get("agendaSummary") or "").strip(),
-            "agreements": list(normalized_draft.get("agreements") or []),
+            "agreements": digest_agreement_texts(normalized_draft.get("agreements")),
             "disagreements": list(normalized_draft.get("disagreements") or []),
             "actionItems": list(normalized_draft.get("actionItems") or []),
             "risks": list(normalized_draft.get("risks") or []),
@@ -895,7 +1021,7 @@ def _digest_content_hash(payload: Mapping[str, Any]) -> str:
             "summary": str(payload.get("summary") or "").strip(),
             "agendaSummary": str(payload.get("agendaSummary") or "").strip(),
             "discussionTopics": _normalized_str_list(payload.get("discussionTopics")),
-            "agreements": _normalized_str_list(payload.get("agreements")),
+            "agreements": digest_agreement_texts(payload.get("agreements")),
             "disagreements": list(payload.get("disagreements") or []),
             "actionItems": list(payload.get("actionItems") or []),
             "risks": _normalized_str_list(payload.get("risks")),
@@ -968,7 +1094,7 @@ def _build_digest_v2(
         "closedBy": str(request.get("closedBy") or "").strip(),
         "createdAt": now,
         "agendaSummary": str(merged.get("agendaSummary") or "").strip(),
-        "agreements": _normalized_str_list(merged.get("agreements")),
+        "agreements": digest_agreement_texts(merged.get("agreements")),
         "disagreements": list(merged.get("disagreements") or []),
         "actionItems": list(merged.get("actionItems") or []),
         "risks": _normalized_str_list(merged.get("risks")),
@@ -1259,6 +1385,8 @@ def approve_meeting_closure(
             raise ResearchMeetingRoundError(
                 "meeting round has no digest draft; submit one before approval"
             )
+    source_messages = meeting_source_messages(meeting_round)
+    assert_review_digest_captured_discussion(meeting_round, digest_draft, source_messages)
     now = _utc_now()
     digest = _build_digest_v2(meeting_round, digest_draft, request, now)
     raw_decisions = [item for item in list(request.get("decisions") or []) if isinstance(item, Mapping)]
@@ -1270,7 +1398,6 @@ def approve_meeting_closure(
     for decision in decisions:
         DecisionRecord.from_dict(decision)
     digest["decisionRefs"] = [str(item.get("decisionId") or "") for item in decisions]
-    source_messages = meeting_source_messages(meeting_round)
     _assert_closure_conditions(meeting_round, digest, decisions, raw_decisions, source_messages)
     MeetingDigest.from_dict(digest)
     digest, decisions, memory_result = _persist_closure_artifacts(

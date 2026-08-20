@@ -545,8 +545,17 @@ describe("evidence request helpers", () => {
     expect(hasValidEvidenceRequestKeywords([{ searchEnvelope: { keywords: ["EEG"] } }])).toBe(true);
     expect(reviewDigestConfirmBlocker({
       summary: "x",
+      agreements: ["marker consensus"],
       evidenceRequests: [{ searchEnvelope: { keywords: [] } }],
     })).toContain("有效搜集关键词");
+    expect(reviewDigestConfirmBlocker({
+      summary: "x",
+      agreements: [],
+      disagreements: [],
+      actionItems: [],
+      knowledgeCandidates: [],
+      evidenceRequests: [],
+    })).toBe("纪要未捕获讨论内容");
   });
 });
 

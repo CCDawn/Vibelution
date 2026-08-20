@@ -131,7 +131,7 @@ export type MeetingDigestDraft = {
   summary: string;
   discussionTopics?: string[];
   agendaSummary?: string;
-  agreements?: string[];
+  agreements?: Array<string | Record<string, unknown>>;
   disagreements?: Array<Record<string, unknown>>;
   actionItems?: Array<Record<string, unknown>>;
   risks?: string[];

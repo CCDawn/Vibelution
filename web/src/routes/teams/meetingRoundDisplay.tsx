@@ -33,9 +33,20 @@ export function meetingStatusTone(status: string): VStatusTone {
 function markerText(value: Record<string, unknown>): string {
   const issue = value.issue;
   const action = value.action;
+  const text = value.text;
   if (typeof issue === "string" && issue.trim()) return issue;
   if (typeof action === "string" && action.trim()) return action;
+  if (typeof text === "string" && text.trim()) return text;
   return JSON.stringify(value);
+}
+
+function agreementText(value: string | Record<string, unknown>): string {
+  if (typeof value === "string") return value;
+  const text = markerText(value);
+  if (value.derivedFrom === "unstructured") {
+    return `发言摘要：${text}`;
+  }
+  return text;
 }
 
 function validationErrorMessage(error: MeetingDigestValidationError): string {
@@ -116,7 +127,7 @@ function formatProposedCandidate(item: MeetingProposedCandidate): string {
 }
 
 function DigestDraftChapters(props: {
-  agreements: string[];
+  agreements: Array<string | Record<string, unknown>>;
   disagreements: Array<Record<string, unknown>>;
   actionItems: Array<Record<string, unknown>>;
   knowledgeCandidates: string[];
@@ -127,7 +138,7 @@ function DigestDraftChapters(props: {
         <span>共识（{props.agreements.length}）</span>
         <ul className={css.digestList}>
           {props.agreements.map((item, index) => (
-            <li key={`agreement-${index}`}>{item}</li>
+            <li key={`agreement-${index}`}>{agreementText(item)}</li>
           ))}
         </ul>
       </article>
