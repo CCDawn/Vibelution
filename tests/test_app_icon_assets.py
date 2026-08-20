@@ -86,14 +86,12 @@ def test_vibelution_ico_includes_taskbar_and_dpi_sizes() -> None:
         assert (edge, edge) in sizes
 
 
-def test_taskbar_frames_use_filled_v_silhouette() -> None:
+def test_taskbar_frames_keep_nested_outline() -> None:
     frame = _ico_png_frame(ICO, 24)
     assert frame.size == (24, 24)
-    # viewBox (24, 32) sits in the V body; taskbar frames fill that slab.
-    pixel = frame.getpixel((12, 16))
-    assert pixel[:3] == (0, 0, 0)
-    assert pixel[3] > 200
     assert frame.getpixel((0, 0))[3] == 0
+    # Left-arm counter of the outline V; a filled silhouette would be opaque here.
+    assert frame.getpixel((4, 3))[3] < 40
     alphas = np.array(frame)[:, :, 3]
     assert int(np.unique(alphas).size) > 8
     assert int(((alphas > 8) & (alphas < 247)).sum()) > 20
@@ -101,7 +99,6 @@ def test_taskbar_frames_use_filled_v_silhouette() -> None:
 
 def test_large_icon_keeps_nested_outline_counter() -> None:
     image = Image.open(PNG).convert("RGBA")
-    # viewBox (24, 38) is inside the outline hole, below the inner V.
     assert image.getpixel((256, 405))[3] < 40
     large = _ico_png_frame(ICO, 256)
     assert large.getpixel((128, 203))[3] < 40
