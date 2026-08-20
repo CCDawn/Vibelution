@@ -771,11 +771,67 @@ def _port_is_listening_socket(port: int) -> bool:
 def _listening_pid_for_port(port: int) -> int:
     if port <= 0:
         return 0
+    if os.name == "nt":
+        win32_pid = _listening_pid_for_port_win32(port)
+        if win32_pid > 0:
+            return win32_pid
     psutil_pid = _listening_pid_for_port_psutil(port)
     if psutil_pid > 0:
         return psutil_pid
     if os.name == "nt":
         return _listening_pid_for_port_windows(port)
+    return 0
+
+
+def _listening_pid_for_port_win32(port: int) -> int:
+    """Targeted LISTEN-owner lookup via GetExtendedTcpTable.
+
+    psutil.net_connections scans the whole TCP table with per-connection
+    process metadata (seconds on a busy host) and this runs inside every
+    workbench observation, so ask iphlpapi for the owner-pid listener table
+    directly and fall back to the slower paths on any failure.
+    """
+
+    if port <= 0 or os.name != "nt":
+        return 0
+    try:
+        import ctypes
+        from ctypes import wintypes
+    except Exception:
+        return 0
+
+    class _TcpOwnerRow(ctypes.Structure):
+        _fields_ = [
+            ("dwState", wintypes.DWORD),
+            ("dwLocalAddr", wintypes.DWORD),
+            ("dwLocalPort", wintypes.DWORD),
+            ("dwRemoteAddr", wintypes.DWORD),
+            ("dwRemotePort", wintypes.DWORD),
+            ("dwOwningPid", wintypes.DWORD),
+        ]
+
+    AF_INET = 2
+    TCP_TABLE_OWNER_PID_LISTENER = 5
+    try:
+        iphlpapi = ctypes.windll.iphlpapi
+        size = wintypes.ULONG(0)
+        if iphlpapi.GetExtendedTcpTable(None, ctypes.byref(size), False, AF_INET, TCP_TABLE_OWNER_PID_LISTENER, 0) == 0:
+            return 0
+        buffer = (ctypes.c_char * size.value)()
+        if iphlpapi.GetExtendedTcpTable(buffer, ctypes.byref(size), False, AF_INET, TCP_TABLE_OWNER_PID_LISTENER, 0) != 0:
+            return 0
+        row_count = int(ctypes.cast(buffer, ctypes.POINTER(wintypes.DWORD)).contents.value)
+        rows = ctypes.cast(
+            ctypes.byref(buffer, ctypes.sizeof(wintypes.DWORD)),
+            ctypes.POINTER(_TcpOwnerRow),
+        )
+        network_order_port = socket.htons(int(port)) & 0xFFFF
+        for index in range(row_count):
+            row = rows[index]
+            if int(row.dwLocalPort & 0xFFFF) == network_order_port and int(row.dwOwningPid) > 0:
+                return int(row.dwOwningPid)
+    except Exception:
+        return 0
     return 0
 
 

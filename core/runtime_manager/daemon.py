@@ -5102,7 +5102,9 @@ class RuntimeManagerDaemon:
                 build_preflight = _preflight_frontend_build_for_restart(command_id)
             lifecycle_timings_ms["build_preflight_ms"] = _elapsed_monotonic_ms(build_preflight_started)
         initial_observation_started = time.monotonic()
-        initial_observation = observe_workbench()
+        # Restart closes everything next; browser-window recovery probing is
+        # wasted work here, so observe with the same light variant close uses.
+        initial_observation = _observe_workbench_for_close()
         lifecycle_timings_ms["restart_initial_observation_ms"] = _elapsed_monotonic_ms(initial_observation_started)
         if requested_no_browser and _restart_should_preserve_visible_browser(initial_observation):
             effective_no_browser = False
