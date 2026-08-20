@@ -65,6 +65,9 @@ export type HypothesisFirstNextAction = {
   navigationLabel: string;
   command?: HypothesisFirstCommand;
   commandLabel?: string;
+  /** Consequence line rendered beside the command label (Stripe-style
+   *  action + reason + expectation) so users know what clicking does. */
+  commandDetail?: string;
   disabledReason?: string;
   recovery?: HypothesisFirstRecovery | null;
   statusMessage?: string;
@@ -300,6 +303,7 @@ function meetingStage(
         navigationLabel: "前往确认候选",
         command: "approve_generation_digest",
         commandLabel: "确认候选清单",
+        commandDetail: "确认后候选进入假说选择，由你决定送审哪些",
         meetingRoundId: roundId,
       });
     }
@@ -310,6 +314,7 @@ function meetingStage(
       navigationLabel: "前往确认本轮",
       command: "approve_review_digest",
       commandLabel: "确认并结束本轮",
+      commandDetail: "归档本轮评审纪要，流程将自动继续下一步",
       disabledReason,
       meetingRoundId: roundId,
     });
@@ -374,6 +379,9 @@ export function resolveHypothesisFirstNextAction(
       targetNodeId: runtimeNode?.nodeId ?? HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID,
       navigationLabel: runtimeNode ? `前往${runtimeNode.label}` : "查看假说收敛",
       statusMessage: "假说先行闭环已完成",
+      commandDetail: runtimeNode
+        ? "假说阶段完成，无需再操作假说；查看下一步研究任务"
+        : undefined,
     });
   }
   if (state?.budgetExhausted) {

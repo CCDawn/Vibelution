@@ -434,6 +434,20 @@ describe("resolveHypothesisFirstNextAction", () => {
     expect(next.command).toBeUndefined();
   });
 
+  it("explains the consequence of confirming a review round", () => {
+    const next = resolveHypothesisFirstNextAction({
+      run: { runId: "run-1" },
+      chainState: chain({ selectionId: "sel-1" }),
+      selection: selection(),
+      meetings: [meeting({
+        status: "awaiting_approval",
+        digestDraft: { contentHash: "hash-1", agendaSummary: "s", agreements: [], disagreements: [], blockers: [], actionItems: [], decisionRefs: [], sourceMessageRefs: [] },
+      })],
+    });
+    expect(next.commandLabel).toBe("确认并结束本轮");
+    expect(next.commandDetail).toContain("归档本轮评审纪要");
+  });
+
   it("keeps an awaiting-approval review gate ahead of converged navigation", () => {
     const next = resolveHypothesisFirstNextAction({
       run: { runId: "run-1", runtimeCurrentNodeIds: ["source_finding"] },

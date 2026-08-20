@@ -204,6 +204,11 @@ export function HypothesisFirstMeetingOps(props: {
         ? "重试整理候选清单"
         : "重试整理本轮结论")
     : (commandEnabled ? (props.nextAction.recovery?.label || props.nextAction.commandLabel) : undefined);
+  const commandDetail = failedCandidateDiscussion || failedReviewDiscussion
+    ? "放弃本轮失败尝试，以同一批假说开启下一轮"
+    : autoDraftFailed
+      ? undefined
+      : (commandEnabled ? props.nextAction.commandDetail : undefined);
   const commandDisabledReason = props.nextAction.disabledReason
     || (command === "retry_handoff" && !canHandoff
       ? "缺少资料搜集运行标识，无法重试自动交接"
@@ -271,17 +276,20 @@ export function HypothesisFirstMeetingOps(props: {
       ) : null}
       <div className={styles.actions}>
         {command && commandLabel && command !== "draft_summary" && command !== "record_selection" && command !== "create_run" && command !== "human_adjudication" ? (
-          <VButton
-            type="button"
-            variant="primary"
-            density="compact"
-            isPending={pending}
-            isDisabled={Boolean(commandDisabledReason)}
-            disabledReason={commandDisabledReason}
-            onPress={() => runCommand(command)}
-          >
-            {commandLabel}
-          </VButton>
+          <div className={styles.commandWrap}>
+            <VButton
+              type="button"
+              variant="primary"
+              density="compact"
+              isPending={pending}
+              isDisabled={Boolean(commandDisabledReason)}
+              disabledReason={commandDisabledReason}
+              onPress={() => runCommand(command)}
+            >
+              {commandLabel}
+            </VButton>
+            {commandDetail ? <span className={styles.commandDetail}>{commandDetail}</span> : null}
+          </div>
         ) : null}
         {commandEnabled && (props.nextAction.stage === "review_awaiting_approval" || props.nextAction.stage === "generation_awaiting_approval") ? (
           <VButton
