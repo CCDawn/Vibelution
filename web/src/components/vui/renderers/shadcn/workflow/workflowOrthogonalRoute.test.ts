@@ -43,6 +43,31 @@ describe("workflowOrthogonalRoute", () => {
     });
   });
 
+  it("uses a one-bend L when the neighbor is below-right and the corridor is empty", () => {
+    const source = card(0, 0);
+    const target = card(360, 160);
+    const route = routeOrthogonalConnector({ source, target });
+    expect(route.sourceSide).toBe("right");
+    expect(route.targetSide).toBe("left");
+    expect(route.points.length).toBeLessThanOrEqual(5);
+    const xs = new Set(route.points.map((point) => Math.round(point.x)));
+    expect(xs.size).toBeLessThanOrEqual(3);
+  });
+
+  it("keeps the simple L when another card sits in the hull but not on the elbow", () => {
+    const source = card(0, 0);
+    const target = card(400, 200);
+    const spectator = card(330, 80);
+    const route = routeOrthogonalConnector({
+      source,
+      target,
+      obstacles: [spectator],
+    });
+    expect(route.points.length).toBeLessThanOrEqual(5);
+    const maxX = Math.max(...route.points.map((point) => point.x));
+    expect(maxX).toBeLessThan(spectator.x + spectator.width);
+  });
+
   it("routes a short orthogonal bridge instead of a south-north detour", () => {
     const source = card(0, 80);
     const target = card(360, 80);

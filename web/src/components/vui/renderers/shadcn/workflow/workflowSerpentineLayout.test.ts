@@ -95,6 +95,13 @@ describe("workflow serpentine layout", () => {
     }
   });
 
+  it("keeps protocol_review to protocol_freeze as a short elbow, not a staircase", async () => {
+    for (const result of [await layoutSerpentine(), await layoutHypothesisFirstSerpentine(1)]) {
+      const edge = result.edges.find((item) => item.id === "e_review_freeze")!;
+      expect(edge.sections.length, `${edge.sections.length} sections`).toBeLessThanOrEqual(4);
+    }
+  });
+
   it("uses a short facing-side orthogonal bridge for cross-stage handoffs", async () => {
     const result = await layoutSerpentine();
     for (const edgeId of ["e_kc_hypothesis", "e_smoke_run"]) {
