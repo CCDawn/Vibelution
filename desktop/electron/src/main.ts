@@ -24,7 +24,6 @@ import {
   type LauncherLifecycleLease,
   type LauncherLifecycleOperation as SupervisedLifecycleOperation
 } from "./lifecycle/launcherLifecycleSupervisor.js";
-import { waitForWorkbenchLifecycleReady } from "./lifecycle/workbenchReadiness.js";
 import {
   authorizeForceLifecycleOperation,
   type ForceLifecycleAuthorization,
@@ -96,7 +95,7 @@ import {
 import {
   type BranchInstanceOperation
 } from "./process/branchInstanceBridge.js";
-import { spawnWorkbenchBackend } from "./process/workbenchBackend.js";
+import { spawnWorkbenchBackend, mainLineBackendIsReachable } from "./process/workbenchBackend.js";
 import { waitForBackendHealthy } from "./process/workbenchBackendHealth.js";
 import { retireRegisteredHandles } from "./process/workbenchBackendRetire.js";
 import { resolveConfigHome, resolveDataHomeForProject } from "./lifecycle/projectStoragePaths.js";
@@ -2527,6 +2526,21 @@ async function orchestrateLauncherLifecycle(
   }
   const supervisedOperation = normalizeSupervisedLifecycleOperation(operation);
   const desiredState = desiredStateForLifecycleOperation(supervisedOperation);
+  const paths = createDesktopPathsForApp();
+  if (supervisedOperation === "start" && windowProvider !== null) {
+    if (await mainLineBackendIsReachable(paths.workspaceRoot)) {
+      const url = await refreshLiveWorkbenchUrl(paths);
+      await openWorkbenchAtCurrentLauncherUrl(paths, launcherBootstrap, windowProvider, { workbenchUrl: url });
+      scheduleLauncherStatusCliRefresh();
+      return {
+        schemaVersion: 1,
+        accepted: true,
+        operation,
+        ...(forceAuthorization ? { requestId: forceAuthorization.requestId } : {}),
+        message: "已打开工作台窗口。"
+      };
+    }
+  }
   const intentLease = launcherLifecycleSupervisor.beginIntent({
     instanceId: "main",
     operation: supervisedOperation,
@@ -2563,7 +2577,6 @@ async function orchestrateLauncherLifecycle(
       console.warn(error instanceof Error ? error.message : String(error));
     }
   }
-  const paths = createDesktopPathsForApp();
   const mutation = await launcherLifecycleSupervisor.executeMutation({
     lease: intentLease,
     mutate: async () => await runWorkbenchLifecycle({
@@ -2828,15 +2841,11 @@ async function openWorkbenchAfterLifecycleReady(
   bootstrap: LauncherBootstrapResult,
   provider: ElectronWindowProvider,
   lease: LauncherLifecycleLease,
-  timeoutMs: number
+  _timeoutMs: number
 ): Promise<void> {
-  await waitForWorkbenchLifecycleReady({
-    commandId: lease.commandId,
-    expectedGeneration: lease.generation,
-    readStatus: async () => readRuntimeManagerLauncherStatusSummary(paths.workspaceRoot, lease.commandId),
-    timeoutMs,
-    signal: lease.signal
-  });
+  // I4b already waited for backend health before returning. Do not poll Python
+  // runtime-manager result files: Electron main-line never writes them, so a
+  // 90s wait used to block the workbench window after a successful start.
   if (!launcherLifecycleSupervisor.isCurrent(lease)) {
     return;
   }
