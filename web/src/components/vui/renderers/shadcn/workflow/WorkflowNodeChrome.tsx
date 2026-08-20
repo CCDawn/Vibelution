@@ -356,7 +356,9 @@ export function WorkflowNodeChrome({
               {label}
             </span>
             <span className="truncate text-[12px] leading-[1.35] text-[var(--fg-secondary)]">
-              {visualKind === "human_gate" ? (subtitle?.trim() || moduleSubtitle(visualKind, primaryRoleKey, primaryAgentId, status)) : moduleSubtitle(visualKind, primaryRoleKey, primaryAgentId, status)}
+              {visualKind === "human_gate" || (visualKind === "agent_task" && !primaryRoleKey)
+                ? (subtitle?.trim() || moduleSubtitle(visualKind, primaryRoleKey, primaryAgentId, status))
+                : moduleSubtitle(visualKind, primaryRoleKey, primaryAgentId, status)}
             </span>
           </span>
         </div>

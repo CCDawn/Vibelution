@@ -504,4 +504,40 @@ describe("superseded review attempts fold into the next round (GitHub Actions at
     const round2 = region!.nodes.find((node) => node.label === "第 2 轮讨论·评审")!;
     expect(round2.description).not.toContain("失败重试");
   });
+
+  it("treats digestId (the real ledger field) as a closed round's digest", () => {
+    const region = regionOf({
+      meetings: [meeting(1, "closed", { digestId: "digest-2323357103026cb8", closedAt: "2026-08-20T03:41:47Z" })],
+    });
+    const round1 = region!.nodes.find((node) => node.label === "第 1 轮讨论·评审")!;
+    expect(round1.status).toBe("succeeded");
+    expect(round1.description).toContain("已闭环");
+  });
+
+  it("folds a closed round without any digest into the successor as a failed attempt", () => {
+    const region = regionOf({
+      meetings: [
+        meeting(1, "closed", { closedAt: "2026-08-20T07:56:48Z" }),
+        meeting(2, "closed", { recoveryReason: "discussion_has_no_completed_messages" }),
+        meeting(3, "summarizing"),
+      ],
+    });
+    const labels = region!.nodes.map((node) => node.label);
+    expect(labels).not.toContain("第 1 轮讨论·评审");
+    expect(labels).not.toContain("第 2 轮讨论·评审");
+    expect(labels).toContain("第 3 轮讨论·评审");
+    const round3 = region!.nodes.find((node) => node.label === "第 3 轮讨论·评审")!;
+    expect(round3.description).toContain("含 2 次失败重试");
+    expect(round3.status).toBe("waiting_human");
+  });
+
+  it("keeps a trailing closed round without a digest visible as blocked", () => {
+    const region = regionOf({
+      meetings: [meeting(1, "closed", { closedAt: "2026-08-20T07:56:48Z" })],
+    });
+    const round1 = region!.nodes.find((node) => node.label === "第 1 轮讨论·评审");
+    expect(round1).toBeDefined();
+    expect(round1!.status).toBe("blocked");
+    expect(round1!.description).toContain("已关闭但缺少纪要");
+  });
 });

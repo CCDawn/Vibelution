@@ -68,6 +68,13 @@ function sameQuestion(left: string | undefined, right: string): boolean {
   return String(left ?? "").trim().toUpperCase() === right.trim().toUpperCase();
 }
 
+// The ledger writes `digestId`; `digestRef` only ever existed in this
+// frontend's type and stayed undefined, which made every closed review round
+// render as a blocked "missing digest" card.
+function meetingHasDigest(meeting: MeetingRoundRecord): boolean {
+  return Boolean(meeting.digestId || meeting.digestRef);
+}
+
 function meetingNodeStatus(meeting: MeetingRoundRecord): WorkflowNodeRunStatus {
   switch (meeting.status) {
     case "open":
@@ -77,7 +84,7 @@ function meetingNodeStatus(meeting: MeetingRoundRecord): WorkflowNodeRunStatus {
       return "waiting_human";
     case "closed":
       // fail-closed: a closed round without a digest is NOT a success.
-      return meeting.digestRef ? "succeeded" : "blocked";
+      return meetingHasDigest(meeting) ? "succeeded" : "blocked";
     default:
       return "pending";
   }
@@ -92,7 +99,7 @@ function meetingNodeDescription(meeting: MeetingRoundRecord): string {
     case "awaiting_approval":
       return "等待人工确认闭环";
     case "closed":
-      return meeting.digestRef ? "已闭环" : "已关闭但缺少纪要（fail-closed）";
+      return meetingHasDigest(meeting) ? "已闭环" : "已关闭但缺少纪要（fail-closed）";
     default:
       return "待开始";
   }
@@ -252,14 +259,15 @@ export function buildHypothesisFirstCanvasRegion(
   const meetingNodeId = (meetingRoundId: string): string =>
     `hf_meeting_${roundIndexByMeetingId.get(meetingRoundId) ?? 0}`;
 
-  // GitHub Actions / Temporal attempt pattern: a discussion round abandoned
-  // with zero successful speeches is a failed *attempt* of the review, not a
-  // peer round. Fold such rounds into the next effective round's node as a
-  // retry count instead of stacking them as parallel canvas cards.
-  const isSupersededEmpty = (meeting: MeetingRoundRecord): boolean =>
+  // GitHub Actions / Temporal attempt pattern: a discussion round that never
+  // produced a usable outcome — abandoned with zero completed speeches, or
+  // closed without a digest — is a failed *attempt* of the review, not a peer
+  // round. Fold such rounds into the next effective round's node as a retry
+  // count instead of stacking error-state cards on the canvas.
+  const isSupersededAttempt = (meeting: MeetingRoundRecord): boolean =>
     meeting.status === "closed"
-    && meeting.recoveryReason === "discussion_has_no_completed_messages";
-  const effectiveMeetings = meetings.filter((meeting) => !isSupersededEmpty(meeting));
+    && (meeting.recoveryReason === "discussion_has_no_completed_messages" || !meetingHasDigest(meeting));
+  const effectiveMeetings = meetings.filter((meeting) => !isSupersededAttempt(meeting));
   const lastEffectiveRound = effectiveMeetings.reduce(
     (max, meeting) => Math.max(max, roundIndexByMeetingId.get(meeting.meetingRoundId) ?? 0),
     0,
@@ -270,7 +278,7 @@ export function buildHypothesisFirstCanvasRegion(
     ...effectiveMeetings,
     ...meetings.filter(
       (meeting) =>
-        isSupersededEmpty(meeting)
+        isSupersededAttempt(meeting)
         && (roundIndexByMeetingId.get(meeting.meetingRoundId) ?? 0) > lastEffectiveRound,
     ),
   ].sort(
@@ -280,21 +288,21 @@ export function buildHypothesisFirstCanvasRegion(
   );
   const retryCountByMeetingId = new Map<string, number>();
   for (const meeting of visibleMeetings) {
-    if (isSupersededEmpty(meeting)) continue;
+    if (isSupersededAttempt(meeting)) continue;
     const roundIndex = roundIndexByMeetingId.get(meeting.meetingRoundId) ?? 0;
     const previousVisibleRound = Math.max(
       0,
       ...visibleMeetings
         .filter(
           (other) =>
-            !isSupersededEmpty(other)
+            !isSupersededAttempt(other)
             && (roundIndexByMeetingId.get(other.meetingRoundId) ?? 0) < roundIndex,
         )
         .map((other) => roundIndexByMeetingId.get(other.meetingRoundId) ?? 0),
     );
     const absorbed = meetings.filter(
       (other) =>
-        isSupersededEmpty(other)
+        isSupersededAttempt(other)
         && (roundIndexByMeetingId.get(other.meetingRoundId) ?? 0) < roundIndex
         && (roundIndexByMeetingId.get(other.meetingRoundId) ?? 0) > previousVisibleRound,
     ).length;
@@ -304,8 +312,10 @@ export function buildHypothesisFirstCanvasRegion(
   for (const meeting of visibleMeetings) {
     const roundIndex = roundIndexByMeetingId.get(meeting.meetingRoundId)!;
     const retries = retryCountByMeetingId.get(meeting.meetingRoundId) ?? 0;
-    const baseDescription = isSupersededEmpty(meeting)
-      ? "发言失败已跳过，等待重试"
+    const baseDescription = isSupersededAttempt(meeting)
+      ? (meeting.recoveryReason === "discussion_has_no_completed_messages"
+        ? "发言失败已跳过，等待重试"
+        : "已关闭但缺少纪要，等待重试")
       : meetingNodeDescription(meeting);
     nodes.push({
       nodeId: `hf_meeting_${roundIndex}`,
@@ -313,7 +323,7 @@ export function buildHypothesisFirstCanvasRegion(
       label: `第 ${roundIndex} 轮讨论·评审`,
       actorKind: "agent",
       visualKind: "agent_task",
-      status: isSupersededEmpty(meeting) ? "blocked" : meetingNodeStatus(meeting),
+      status: isSupersededAttempt(meeting) ? "blocked" : meetingNodeStatus(meeting),
       description: retries > 0 ? `含 ${retries} 次失败重试 · ${baseDescription}` : baseDescription,
     });
   }
