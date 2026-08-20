@@ -60,6 +60,7 @@ from .hypothesis_first_models import (
     MeetingSourceMessagesResponse,
     MeetingSummaryBeginPayload,
     MeetingSummaryDraftRequest,
+    ReviewReopenPayload,
     ReviewRoundLinkListResponse,
     SelectionContextResponse,
 )
@@ -663,12 +664,14 @@ def team_workflow_hypothesis_first_close_review_meeting(
 def team_workflow_hypothesis_first_reopen_review_meeting(
     team_id: str,
     meeting_round_id: str,
+    payload: ReviewReopenPayload | None = None,
 ) -> dict:
     """Restart one review round whose discussion produced no successful speech."""
     try:
         return hypothesis_first_chain.reopen_failed_review_meeting(
             team_id,
             meeting_round_id,
+            budget=payload.budget if payload is not None else None,
         )
     except _DOMAIN_ERRORS as exc:
         _map_domain_error("hypothesis_first.chain.reopen_review_meeting", team_id, exc)
