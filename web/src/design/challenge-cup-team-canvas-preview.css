@@ -1,0 +1,480 @@
+html,
+body,
+#root {
+  min-height: 100%;
+  height: auto;
+  margin: 0;
+  overflow: auto;
+}
+
+body {
+  background: var(--vui-surface-workspace);
+  color: var(--fg-primary);
+}
+
+.tcc-page {
+  min-height: 100vh;
+  padding: 24px 24px 48px;
+}
+
+.tcc-header {
+  max-width: 1280px;
+  margin: 0 auto 16px;
+}
+
+.tcc-eyebrow {
+  margin: 0 0 6px;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.tcc-header h1 {
+  margin: 0;
+  font-size: var(--vui-font-xl);
+  letter-spacing: -0.03em;
+}
+
+.tcc-subtitle {
+  margin: 8px 0 0;
+  max-width: 46rem;
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-sm);
+  line-height: var(--vui-line-readable);
+}
+
+.tcc-analogs {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  max-width: 52rem;
+}
+
+.tcc-analog {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+  line-height: var(--vui-line-readable);
+}
+
+.tcc-analog-rank {
+  color: var(--fg-tertiary);
+  font-weight: 760;
+}
+
+.tcc-scenes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.tcc-note {
+  max-width: 1280px;
+  margin: 14px auto 0;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  line-height: var(--vui-line-readable);
+}
+
+.tcc-frame,
+.tcc-frame-narrow {
+  max-width: 1280px;
+  margin: 0 auto;
+  height: 720px;
+  overflow: hidden;
+  border: 1px solid var(--vui-border-subtle);
+  border-radius: var(--vui-radius-panel-soft);
+  background: var(--vui-surface-workspace);
+  --vui-workspace-sidebar: 17.5rem;
+  --vui-workspace-aside: 20rem;
+}
+
+.tcc-frame-narrow {
+  max-width: 980px;
+  height: 640px;
+  --vui-workspace-sidebar: 14.75rem;
+  --vui-workspace-aside: 16.5rem;
+}
+
+.tcc-frame [data-vui-recipe="canvas-workbench-page"],
+.tcc-frame-narrow [data-vui-recipe="canvas-workbench-page"] {
+  height: 100%;
+}
+
+.tcc-current {
+  display: grid;
+  grid-template-columns: 17.5rem minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+}
+
+.tcc-current-rail {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+  height: 100%;
+  overflow: auto;
+  padding: 10px;
+  border-right: 1px solid var(--vui-border-subtle);
+  background: var(--vui-surface-rail);
+}
+
+.tcc-current-team,
+.tcc-current-team-active {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--vui-border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--vui-surface-row);
+  text-align: left;
+}
+
+.tcc-current-team strong,
+.tcc-current-team-active strong {
+  font-size: var(--vui-font-sm);
+}
+
+.tcc-current-team span,
+.tcc-current-team-active span {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+.tcc-current-team-active {
+  border-color: color-mix(in srgb, var(--fg-primary) 28%, var(--vui-border-subtle));
+  box-shadow: var(--vui-shadow-inset-accent);
+}
+
+.tcc-current-main {
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+}
+
+.tcc-current-toolbar {
+  display: grid;
+  gap: 2px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--vui-border-subtle);
+  background: var(--vui-surface-toolbar);
+}
+
+.tcc-current-toolbar span {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+.tcc-current-flow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--vui-border-subtle);
+  background: var(--vui-surface-panel);
+}
+
+.tcc-current-flow p {
+  margin: 4px 0 0;
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+  line-height: var(--vui-line-readable);
+}
+
+.tcc-current-flow-cta {
+  align-self: center;
+}
+
+.tcc-current-stages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: start;
+}
+
+.tcc-current-stage {
+  min-width: 7.5rem;
+  padding: 6px 8px;
+  border: 1px solid var(--vui-border-subtle);
+  border-radius: var(--radius-control);
+  background: var(--vui-surface-row);
+  font-size: var(--vui-font-xs);
+}
+
+.tcc-current-canvas-hint {
+  margin: 0;
+  padding: 8px 12px 0;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+.tcc-toolbar {
+  padding-inline: 10px;
+  min-height: 40px;
+}
+
+.tcc-toolbar-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  white-space: nowrap;
+}
+
+.tcc-rail {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px;
+}
+
+.tcc-next-card {
+  display: grid;
+  gap: 6px;
+}
+
+.tcc-next-kicker {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.tcc-next-title {
+  margin: 0;
+  font-size: var(--vui-font-sm);
+  font-weight: 760;
+}
+
+.tcc-next-body {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-xs);
+  line-height: var(--vui-line-readable);
+}
+
+.tcc-stage-list,
+.tcc-node-index {
+  display: grid;
+  gap: 6px;
+}
+
+.tcc-stage-item,
+.tcc-node-index-item,
+.tcc-stage-item-active,
+.tcc-node-index-item-active {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  text-align: left;
+}
+
+.tcc-stage-item strong,
+.tcc-node-index-item strong,
+.tcc-stage-item-active strong,
+.tcc-node-index-item-active strong {
+  font-size: var(--vui-font-sm);
+}
+
+.tcc-stage-item span,
+.tcc-node-index-item span,
+.tcc-stage-item-active span,
+.tcc-node-index-item-active span {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+.tcc-stage-item-active,
+.tcc-node-index-item-active {
+  border-color: var(--vui-border-subtle);
+  background: var(--vui-surface-row);
+}
+
+.tcc-canvas-host {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  background:
+    radial-gradient(var(--vui-border-subtle) 1px, transparent 1px);
+  background-size: 16px 16px;
+  background-color: var(--vui-surface-base);
+}
+
+.tcc-canvas {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 320px;
+}
+
+.tcc-edges {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.tcc-edges path {
+  fill: none;
+  stroke: color-mix(in srgb, var(--fg-tertiary) 55%, var(--vui-border-subtle));
+  stroke-width: 1.5;
+}
+
+.tcc-node,
+.tcc-node-active {
+  position: absolute;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  grid-template-rows: auto auto auto auto;
+  align-items: center;
+  gap: 2px 8px;
+  width: 172px;
+  height: 108px;
+  padding: 8px;
+  border: 1px solid var(--vui-border-subtle);
+  border-radius: var(--radius-control);
+  overflow: hidden;
+  box-sizing: border-box;
+  background: var(--vui-surface-row);
+  text-align: left;
+  color: var(--fg-primary);
+}
+
+.tcc-node-active {
+  border-color: color-mix(in srgb, var(--fg-primary) 32%, var(--vui-border-subtle));
+  box-shadow: var(--vui-shadow-inset-accent);
+}
+
+.tcc-node strong,
+.tcc-node-active strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--vui-font-sm);
+}
+
+.tcc-node small,
+.tcc-node-active small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+.tcc-node-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  grid-row: 1 / span 4;
+  width: 20px;
+  height: 20px;
+  color: var(--fg-tertiary);
+}
+
+.tcc-role {
+  justify-self: start;
+  max-width: 128px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid var(--node-role-border, var(--vui-border-subtle));
+  border-radius: 999px;
+  background: var(--node-role-bg, var(--vui-control-muted));
+  padding: 0 6px;
+  color: var(--node-role-fg, var(--fg-secondary));
+  font-size: var(--vui-font-xs);
+  font-weight: 650;
+  line-height: 18px;
+}
+
+.tcc-role-lead {
+  --node-role-bg: color-mix(in srgb, var(--state-success) 11%, var(--vui-surface-row));
+  --node-role-border: color-mix(in srgb, var(--state-success) 38%, var(--vui-border-subtle));
+  --node-role-fg: var(--state-success);
+}
+
+.tcc-role-research {
+  --node-role-bg: color-mix(in srgb, var(--accent-warm) 10%, var(--vui-surface-row));
+  --node-role-border: color-mix(in srgb, var(--accent-warm) 34%, var(--vui-border-subtle));
+  --node-role-fg: var(--accent-warm);
+}
+
+.tcc-role-advisor {
+  --node-role-bg: color-mix(in srgb, var(--accent-cool) 12%, var(--vui-surface-row));
+  --node-role-border: color-mix(in srgb, var(--accent-cool) 42%, var(--vui-border-subtle));
+  --node-role-fg: var(--accent-cool);
+}
+
+.tcc-role-open {
+  --node-role-fg: var(--fg-tertiary);
+}
+
+.tcc-inspector {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 12px;
+}
+
+.tcc-inspector-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tcc-inspector-empty {
+  color: var(--fg-secondary);
+  font-size: var(--vui-font-sm);
+  line-height: var(--vui-line-readable);
+}
+
+.tcc-inspector-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.tcc-inspector-grid div {
+  display: grid;
+  gap: 2px;
+}
+
+.tcc-inspector-grid span {
+  color: var(--fg-tertiary);
+  font-size: var(--vui-font-xs);
+}
+
+.tcc-issue {
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--state-error) 35%, var(--vui-border-subtle));
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--state-error) 8%, var(--vui-surface-row));
+  font-size: var(--vui-font-xs);
+}

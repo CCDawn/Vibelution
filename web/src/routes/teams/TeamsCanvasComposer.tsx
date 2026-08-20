@@ -19,15 +19,15 @@ export type TeamsCanvasComposerProps = {
   toolbar: ReactNode;
   canvas: ReactNode;
   /**
-   * Research end-user strip (stage rail + next-step CTA) stacked above the org canvas.
-   * When set, main column is flow + canvas only.
+   * Optional research strip stacked above the org canvas.
+   * Status / next-step now live in the left rail; keep this slot for compatibility.
    */
   researchFlowSlot?: ReactNode;
   inspectorTitle: string;
   inspectorBody: ReactNode;
   researchWorkflowTeamSelected?: boolean;
   researchCanvasReadOnly?: boolean;
-  /** Hide right inspector for pure flow+canvas end-user density. */
+  /** Hide right inspector only when the caller explicitly opts out. */
   hideInspector?: boolean;
   styles: Record<string, string>;
   validationValid?: boolean;

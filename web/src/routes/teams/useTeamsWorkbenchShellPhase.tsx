@@ -3,8 +3,6 @@
  */
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
-import { RefreshCw } from "lucide-react";
-import { VNativeButton, VTooltip } from "../../components/vui";
 import { buildTeamsWorkbenchResearchSurfacesFromBag } from "./buildTeamsWorkbenchResearchSurfacesFromBag";
 import { renderTeamsWorkbenchCanvasPage } from "./renderTeamsWorkbenchCanvasPage";
 import { renderTeamsWorkbenchBoardPage } from "./renderTeamsWorkbenchBoardPage";
@@ -34,11 +32,18 @@ import { ResearchStageNav } from "./ResearchStageNav";
 import { ResearchProjectSwitcher } from "./research-projects/ResearchProjectSwitcher";
 import { buildResearchBoardColumns } from "./researchBoardModel";
 import {
+  researchPrimaryActionDetail,
+  researchPrimaryActionLabel,
   resolveResearchAdvanceAction,
   resolveResearchPrimaryAction,
   resolveResearchStageHandoff,
   resolveResearchStageUnlock,
 } from "./researchPrimaryActionModel";
+import {
+  teamShellKindLabel,
+  teamShellNodesFromCanvas,
+  teamShellStagesFromBoardColumns,
+} from "./teamShellStatusModel";
 import { TeamCanvasReadOnlyInspector } from "./TeamCanvasReadOnlyInspector";
 import { TeamNodeBindingPanel } from "./TeamNodeBindingPanel";
 
@@ -451,16 +456,6 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     : teamListInitialLoading
       ? (lang === "zh" ? "正在读取团队索引。" : "Loading the team index.")
       : (lang === "zh" ? "仅显示 AI 搜索、知识库扩充和挑战杯科研团队。" : "Only AI search, knowledge expansion, and research teams are shown.");
-  const visibleTeamOptions = visibleTeams.length
-    ? visibleTeams.map((team: { teamId: string; name: string; purpose?: string }) => ({
-      id: team.teamId,
-      label: team.name,
-      description: team.purpose || team.teamId,
-    }))
-    : [{
-      id: "",
-      label: lang === "zh" ? "正在读取团队" : "Loading teams",
-    }];
 
   // P5/F1: SC full-page workbench via domain controller (no team rail).
   if (sourceCollectionStandalone) {
@@ -502,22 +497,54 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     return <TeamsLoadingShell lang={lang} />;
   }
 
+  const statusStages = researchWorkflowTeamSelected
+    ? teamShellStagesFromBoardColumns(researchBoardColumns, lang)
+    : [];
+  const statusNodes = researchCanvasVisible
+    ? teamShellNodesFromCanvas(displayCanvasNodes ?? [], lang)
+    : [];
+  const statusNextTitle = researchWorkflowTeamSelected && researchPrimaryAction
+    ? researchPrimaryActionLabel(researchPrimaryAction, lang)
+    : (selectedTeam?.purpose || (lang === "zh" ? "组织画布" : "Organization canvas"));
+  const statusNextBody = researchWorkflowTeamSelected && researchPrimaryAction
+    ? researchPrimaryActionDetail(researchPrimaryAction, lang)
+    : (lang === "zh"
+      ? "点节点看执行者。切团队用顶栏，不要在左栏找名单。"
+      : "Select a node to inspect the assignee. Switch teams in the toolbar.");
+  const statusCta = researchWorkflowTeamSelected && researchPrimaryAction
+    ? researchPrimaryActionLabel(researchPrimaryAction, lang)
+    : undefined;
+
   const teamShellRail = renderTeamsShellRail({
     lang,
-    visibleTeams,
-    effectiveTeamId,
-    onSelectTeam: selectTeamRecord,
+    statusNextTitle,
+    statusNextBody,
+    statusCta,
+    statusCtaDisabled: Boolean(researchPrimaryAction?.blocked),
+    onStatusCta: researchPrimaryAction
+      ? () => {
+        void handleResearchPrimaryAction(researchPrimaryAction);
+      }
+      : undefined,
+    statusStages,
+    statusNodes,
+    selectedNodeId,
+    onSelectNode: setSelectedNodeId,
   });
 
   const teamShellToolbar = renderTeamsShellToolbar({
     lang,
     teamName: selectedTeam?.name ?? "",
     purpose: selectedTeam?.purpose ?? "",
+    kindLabel: teamShellKindLabel(selectedTeam, lang),
     teamShellMode,
     onModeChange: selectTeamShellMode,
     onRefreshTeams: () => void teamsQuery.refetch(),
     teamsFetching: teamsQuery.isFetching && Boolean(teamsQuery.data),
     styles,
+    visibleTeams,
+    effectiveTeamId,
+    onSelectTeam: selectTeamRecord,
   });
 
   const shellGate = renderTeamsShellGate({
@@ -528,9 +555,19 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     onSelectTeam: selectTeamRecord,
     teamName: selectedTeam?.name ?? "",
     purpose: selectedTeam?.purpose ?? "",
+    kindLabel: teamShellKindLabel(selectedTeam, lang),
     teamShellMode,
     onModeChange: selectTeamShellMode,
     onRefreshTeams: () => void teamsQuery.refetch(),
+    statusNextTitle,
+    statusNextBody,
+    statusCta,
+    statusCtaDisabled: Boolean(researchPrimaryAction?.blocked),
+    onStatusCta: undefined,
+    statusStages,
+    statusNodes,
+    selectedNodeId,
+    onSelectNode: setSelectedNodeId,
     showGate: showTeamUnavailableSurface || showTeamDetailUnavailableSurface,
     ariaLabel: selectedTeamContextTitle,
     meta: teamContextMeta,
@@ -610,44 +647,8 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
   } = researchSurfaces;
 
   if (researchCanvasVisible) {
-    // End-user research home: flow strip (next step + layout tools) + organization canvas.
-    // No path / edge / room status chrome on the canvas itself.
-    const showResearchFlowHome =
-      researchWorkflowTeamSelected
-      && (researchWorkspaceView === "overview" || researchWorkspaceView === "canvas");
-    // Four stage cards live INSIDE the next-step card (right half), not a second row below.
-    const researchFlowSlot = showResearchFlowHome
-      ? renderResearchOverviewSurface({
-          trailingActions: (
-            <div
-              className="inline-flex items-center gap-1"
-              role="group"
-              aria-label={lang === "zh" ? "画布排版" : "Canvas layout"}
-            >
-              <VTooltip content={lang === "zh" ? "自动排版只改变当前显示，不保存坐标" : "Auto layout only changes the current view"}>
-                <VNativeButton
-                  type="button"
-                  className={researchCanvasAutoLayoutActive ? styles.layerButtonActive : ""}
-                  onClick={() => setResearchCanvasLayoutMode("auto")}
-                >
-                  <RefreshCw size={14} />
-                  {lang === "zh" ? "自动排版" : "Auto layout"}
-                </VNativeButton>
-              </VTooltip>
-              <VTooltip content={lang === "zh" ? "显示画布文件中的原始坐标" : "Show original coordinates from the canvas file"}>
-                <VNativeButton
-                  type="button"
-                  className={!researchCanvasAutoLayoutActive ? styles.layerButtonActive : ""}
-                  onClick={() => setResearchCanvasLayoutMode("source")}
-                >
-                  {lang === "zh" ? "原始坐标" : "Original"}
-                </VNativeButton>
-              </VTooltip>
-            </div>
-          ),
-          sideSlot: renderKnowledgeCollectionCompletionFlowPanel({ presentation: "rail" }),
-        })
-      : null;
+    // Next-step / stage index live in the left status rail; inspector stays for node details.
+    const researchFlowSlot = null;
     return renderTeamsWorkbenchCanvasPage({
       lang,
       styles,
@@ -658,9 +659,8 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
       researchWorkflowTeamSelected,
       researchCanvasReadOnly,
       researchFlowSlot,
-      hideCanvasToolbar: Boolean(showResearchFlowHome && researchCanvasReadOnly),
-      // Flow+canvas density: inspector only when user is binding nodes (non-research editable).
-      hideInspector: Boolean(researchFlowSlot && researchCanvasReadOnly),
+      hideCanvasToolbar: false,
+      hideInspector: false,
       validationValid: !(validation && !validation.valid),
       inspectorBody: renderTeamsInspectorSharedPanels(),
       selectedTeam,
@@ -698,8 +698,7 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
       canvasFrameRef,
       nodeToneClass: nodeTone,
       roleBadgeToneClass: roleBadgeTone,
-      // Cards live in the hero split on research home — not under the org graph.
-      completionFlowSlot: showResearchFlowHome ? null : renderKnowledgeCollectionCompletionFlowPanel(),
+      completionFlowSlot: renderKnowledgeCollectionCompletionFlowPanel(),
       onSelectNode: setSelectedNodeId,
       onLayoutModeChange: setResearchCanvasLayoutMode,
       onToggleCommunicationEdges: () => setShowCommunicationEdges((current: boolean) => !current),

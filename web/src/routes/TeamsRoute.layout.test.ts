@@ -527,15 +527,13 @@ describe("TeamsRoute layout contract", () => {
 
   it("keeps canvas action labels compact and exposes non-critical explanations through VUI tooltips", () => {
     expect(routeSource).toContain("VTooltip");
-    // Research home: layout tools live on the flow strip (shell phase), not a second canvas chrome row.
-    expect(routeSource).toContain("自动排版只改变当前显示，不保存坐标");
-    expect(routeSource).toContain("原始坐标");
-    expect(routeSource).toContain("trailingActions");
+    // Status/next-step live in the left rail; org-canvas layout chrome stays on the canvas toolbar.
+    expect(routeSource).toContain("TeamShellStatusRail");
     expect(routeSource).toContain("hideCanvasToolbar");
+    expect(teamShellToolbarSource).toContain("VSelect");
     // Wave 8M: stage-agent config tooltip lives on active-stage workspace panel.
     expect(teamSourceCollectionActiveStageWorkspacePanelSource).toContain('content={lang === "zh" ? "当前阶段 Agent 配置"');
     expect(routeSource).toContain('content={lang === "zh" ? "到 AgentDirectory 源配置修改"');
-    expect(routeSource).not.toContain('title={lang === "zh" ? "自动排版只改变当前显示，不保存坐标"');
     expect(teamSourceCollectionActiveStageWorkspacePanelSource).not.toContain('title={lang === "zh" ? "当前阶段 Agent 配置"');
     expect(routeSource).not.toContain('title={lang === "zh" ? "到 AgentDirectory 源配置修改"');
   });
@@ -1008,8 +1006,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("const hasTeams = visibleTeams.length > 0");
     expect(routeSource).toContain("visibleTeamSummary.activeTeamCount");
     expect(routeSource).toMatch(/visibleTeams\.map\(\(team(?::[^\)]*)?\) => \(/);
-    expect(routeSource).toContain("TeamShellRail");
-    expect(routeSource).toContain("visibleTeams.find((team) => team.teamId === effectiveTeamId)");
+    expect(routeSource).toContain("TeamShellStatusRail");
+    expect(routeSource).toContain("visibleTeams.find((item) => item.teamId === teamId)");
     expect(routeSource).not.toContain("{teams.map((team) => (");
     expect(routeSource).not.toContain("teams[0]?.teamId");
   });
@@ -1024,8 +1022,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toMatch(/<textarea\b/);
     expect(routeSource).toContain("challengeWorkspaceContextHidden");
     expect(routeStyles.teamContextBar).toBeTypeOf("string");
-    // Team pick lives in TeamShellRail (left list), not dense header select.
-    expect(routeSource).toContain("TeamShellRail");
+    // Team pick lives in TeamShellToolbar VSelect, not a left-rail team list.
+    expect(teamShellToolbarSource).toContain("VSelect");
+    expect(routeSource).toContain("TeamShellStatusRail");
     expect(routeSource).toContain("teamRefreshButton");
     expect(routeSource).toContain("selectedTeamContextTitle");
     expect(routeSource).toContain("成员源");
@@ -1035,7 +1034,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).not.toContain("teamPickerLabel");
     expect(routeSource).not.toContain("teamPickerSummary");
     expect(routeSource).not.toContain("summaryBar");
-    expect(routeSource).toContain("TeamShellRail");
+    expect(routeSource).toContain("TeamShellStatusRail");
     expect(routeSource).not.toContain("<select\n            value={selectedTeam?.teamId ?? effectiveTeamId}");
     expect(routeSource).not.toContain("className={styles.teamPanel}");
     expect(routeSource).toContain("canvasPanel");
@@ -1212,7 +1211,7 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("VBoardWorkbenchPage");
     expect(routeSource).toContain("VCanvasWorkbenchPage");
     expect(routeSource).toContain("teamsRailResize");
-    expect(routeSource).toContain("TeamShellRail");
+    expect(routeSource).toContain("TeamShellStatusRail");
     expect(routeSource).toContain("TeamShellToolbar");
     expect(routeSource).not.toContain("<TeamShellModeSwitch");
     expect(routeSource).toContain("selectTeamShellMode");
@@ -1872,7 +1871,7 @@ describe("TeamsRoute layout contract", () => {
     expect(teamResearchStageLauncherPanelSource).toContain("启动执行迭代");
     expect(routeSource).not.toContain("{researchWorkflowTeamSelected ? renderResearchWorkspaceNav() : null}");
     expect(routeSource).toContain("onSelectTeam: selectTeamRecord");
-    expect(routeSource).toContain("onSelectTeam={args.onSelectTeam}");
+    expect(routeSource).toContain("args.onSelectTeam(team)");
     expect(createTeamsResearchNavigationSource).toContain("function selectTeamRecord");
     expect(createTeamsResearchNavigationSource).toContain("setResearchWorkspaceView(\"overview\")");
     expect(routeSource).toContain("createTeamsResearchNavigation({");
@@ -1980,8 +1979,6 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("autoLayoutResearchCanvasNodes(canvasNodes, organizationEdges)");
     expect(routeSource).toContain("const researchCanvasAutoLayoutActive = researchCanvasReadOnly && researchCanvasLayoutMode === \"auto\"");
     expect(routeSource).toContain("const displayCanvasNodes = researchCanvasAutoLayoutActive ? autoLayoutCanvasNodes : canvasNodes");
-    expect(routeSource).toContain("自动排版只改变当前显示，不保存坐标");
-    expect(routeSource).toContain("原始坐标");
     expect(routeSource).toContain("hideCanvasToolbar");
     expect(routeSource).toContain("trailingActions");
     expect(canvasGeometrySource).toContain("RESEARCH_CANVAS_AUTO_LAYOUT_LAYER_GAP");

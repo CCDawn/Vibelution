@@ -60,7 +60,7 @@ Contracts: `composers.contract.test.ts`, `source-collection/createSourceCollecti
 | Design acceptance preview (static) | `web/research-overview-preview-standalone.html` + `design/research-overview-preview.*` | production routes |
 | Process-flow single-page workspace preview (static) | 私密副本见桌面 `挑战杯/03-工程合同/` | production multi-page stage routes as primary nav; board/canvas dual shell as primary IA |
 | Process-flow single-page workspace **PRD** | 私密副本见桌面 `挑战杯/03-工程合同/` | treating preview alone as implementation authority |
-| Teams shell (left team list + board/canvas mode) | `teamShellModel.ts` + `TeamShellRail.tsx` + `TeamShellModeSwitch.tsx` + `TeamShellToolbar.tsx` + VUI `VBoardWorkbenchPage` / `VCanvasWorkbenchPage` | burying team pick in dense header only |
+| Teams shell (toolbar team VSelect + left status rail + board/canvas) | `teamShellModel.ts` + `TeamShellStatusRail.tsx` + `TeamShellToolbar.tsx` + VUI `VBoardWorkbenchPage` / `VCanvasWorkbenchPage` | putting the team list back in the left rail |
 | Organization canvas surface | `TeamOrganizationCanvasSurface.tsx` | inlining graph/drag chrome in TeamsRoute |
 | Canvas node binding inspector | `TeamNodeBindingPanel.tsx` | duplicating bind form in board/canvas |
 | Read-only canvas inspector | `TeamCanvasReadOnlyInspector.tsx` | ad-hoc read-only blocks in route |

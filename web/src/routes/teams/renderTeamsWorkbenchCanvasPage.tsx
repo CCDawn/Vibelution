@@ -23,7 +23,7 @@ export type TeamsWorkbenchCanvasPageProps = {
   researchWorkflowTeamSelected: boolean;
   researchCanvasReadOnly: boolean;
   validationValid: boolean;
-  /** Stage rail + next-step CTA above the org canvas (research end-user home). */
+  /** Optional stage rail above the org canvas. Status now lives in the left rail. */
   researchFlowSlot?: ReactNode;
   /** When true, hide canvas-local path/stats/actions chrome. */
   hideCanvasToolbar?: boolean;

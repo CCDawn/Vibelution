@@ -117,9 +117,9 @@ export function renderTeamsWorkbenchBoardPage(props: TeamsWorkbenchBoardPageProp
           ...p.teamsRailResize,
           collapse: {
             sidebar: {
-              separatorLabel: p.lang === "zh" ? "调整团队栏宽度" : "Resize team rail",
-              collapseLabel: p.lang === "zh" ? "收起团队栏" : "Collapse team rail",
-              expandLabel: p.lang === "zh" ? "展开团队栏" : "Expand team rail",
+              separatorLabel: p.lang === "zh" ? "调整状态栏宽度" : "Resize status rail",
+              collapseLabel: p.lang === "zh" ? "收起状态栏" : "Collapse status rail",
+              expandLabel: p.lang === "zh" ? "展开状态栏" : "Expand status rail",
             },
           },
         }}
@@ -128,7 +128,7 @@ export function renderTeamsWorkbenchBoardPage(props: TeamsWorkbenchBoardPageProp
         ariaLabel={p.selectedTeamContextTitle}
         title={p.lang === "zh" ? "团队工作台" : "Team workbench"}
         rail={p.teamShellRail}
-        toolbar={p.challengeCupResearchTeamSelected ? undefined : p.teamShellToolbar}
+        toolbar={p.teamShellToolbar}
         // Process / challenge board: pure fill host (no pad/scroll/content-start floor).
         // Absolute children (ResearchProcessWorkspace) pin to this cell.
         boardClassName={

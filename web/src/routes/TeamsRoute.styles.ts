@@ -231,7 +231,9 @@ const styles: Record<string, string> = {
   teamShellToolbar:
     "teamShellToolbar min-w-0 shrink-0 flex flex-wrap items-center justify-between gap-2 border-b border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] px-3 py-2",
   teamShellToolbarIdentity:
-    "teamShellToolbarIdentity min-w-0 grid gap-0.5 [&>strong]:text-[14px] [&>strong]:font-[760] [&>strong]:text-[var(--fg-primary)] [&>span]:text-[12px] [&>span]:text-[var(--fg-secondary)]",
+    "teamShellToolbarIdentity min-w-0 flex flex-1 items-center gap-3 [&>strong]:text-[14px] [&>strong]:font-[760] [&>strong]:text-[var(--fg-primary)] [&>span]:text-[12px] [&>span]:text-[var(--fg-secondary)]",
+  teamShellToolbarSwitch:
+    "teamShellToolbarSwitch min-w-0 flex-1 basis-[12rem] max-w-[22rem] [&_[data-vui=select-shell]]:w-full [&_[data-vui=select-shell]]:min-w-0 [&_[data-vui=select]]:w-full [&_[data-vui=select]]:min-w-0",
   teamShellToolbarActions:
     "teamShellToolbarActions min-w-0 flex flex-wrap items-center justify-end gap-2",
   teamShellContent:

@@ -4,10 +4,12 @@
 import type { ReactNode } from "react";
 import { LoaderCircle } from "lucide-react";
 
-import { TeamShellRail } from "./TeamShellRail";
+import type { Team } from "../../api/types";
+import { TeamShellStatusRail } from "./TeamShellStatusRail";
 import { TeamShellToolbar } from "./TeamShellToolbar";
 import { TeamsShellGateSurface } from "./TeamsShellGateSurface";
 import type { TeamShellMode } from "./teamShellModel";
+import type { TeamShellStatusNode, TeamShellStatusStage } from "./teamShellStatusModel";
 
 type Lang = "zh" | "en";
 
@@ -15,16 +17,24 @@ export type TeamsShellFrameArgs = {
   lang: Lang;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   styles: Record<string, string>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  visibleTeams: any[];
+  visibleTeams: Team[];
   effectiveTeamId: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  onSelectTeam: (team: any) => void;
+  onSelectTeam: (team: Team) => void;
   teamName: string;
   purpose: string;
+  kindLabel?: string;
   teamShellMode: TeamShellMode;
   onModeChange: (mode: TeamShellMode) => void;
   onRefreshTeams: () => void;
+  statusNextTitle: string;
+  statusNextBody: string;
+  statusCta?: string;
+  statusCtaDisabled?: boolean;
+  onStatusCta?: () => void;
+  statusStages: TeamShellStatusStage[];
+  statusNodes?: TeamShellStatusNode[];
+  selectedNodeId?: string | null;
+  onSelectNode?: (nodeId: string) => void;
   // gate
   showGate: boolean;
   ariaLabel: string;
@@ -50,15 +60,30 @@ export type TeamsShellFrameArgs = {
 
 export function renderTeamsShellRail(args: Pick<
   TeamsShellFrameArgs,
-  "lang" | "visibleTeams" | "effectiveTeamId" | "onSelectTeam"
+  | "lang"
+  | "statusNextTitle"
+  | "statusNextBody"
+  | "statusCta"
+  | "statusCtaDisabled"
+  | "onStatusCta"
+  | "statusStages"
+  | "statusNodes"
+  | "selectedNodeId"
+  | "onSelectNode"
 >): ReactNode {
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden" data-vui-region="teams-sidebar">
-      <TeamShellRail
+      <TeamShellStatusRail
         lang={args.lang}
-        teams={args.visibleTeams}
-        selectedTeamId={args.effectiveTeamId}
-        onSelectTeam={args.onSelectTeam}
+        nextTitle={args.statusNextTitle}
+        nextBody={args.statusNextBody}
+        cta={args.statusCta}
+        ctaDisabled={args.statusCtaDisabled}
+        onCta={args.onStatusCta}
+        stages={args.statusStages}
+        nodes={args.statusNodes}
+        selectedNodeId={args.selectedNodeId}
+        onSelectNode={args.onSelectNode}
       />
     </div>
   );
@@ -66,7 +91,18 @@ export function renderTeamsShellRail(args: Pick<
 
 export function renderTeamsShellToolbar(args: Pick<
   TeamsShellFrameArgs,
-  "lang" | "teamName" | "purpose" | "teamShellMode" | "onModeChange" | "onRefreshTeams" | "styles" | "teamsFetching"
+  | "lang"
+  | "teamName"
+  | "purpose"
+  | "kindLabel"
+  | "teamShellMode"
+  | "onModeChange"
+  | "onRefreshTeams"
+  | "styles"
+  | "teamsFetching"
+  | "visibleTeams"
+  | "effectiveTeamId"
+  | "onSelectTeam"
 >): ReactNode {
   return (
     <div className="flex w-full min-w-0 items-center justify-between gap-3">
@@ -74,12 +110,26 @@ export function renderTeamsShellToolbar(args: Pick<
         lang={args.lang}
         teamName={args.teamName}
         purpose={args.purpose}
+        kindLabel={args.kindLabel}
         mode={args.teamShellMode}
         onModeChange={args.onModeChange}
         onRefresh={args.onRefreshTeams}
         identityClassName={args.styles.teamShellToolbarIdentity}
+        switchClassName={args.styles.teamShellToolbarSwitch}
         actionsClassName={args.styles.teamShellToolbarActions}
         refreshButtonClassName={args.styles.teamRefreshButton}
+        teamOptions={args.visibleTeams.map((team) => ({
+          id: team.teamId,
+          label: team.name,
+          description: team.purpose || team.teamId,
+        }))}
+        selectedTeamId={args.effectiveTeamId}
+        onSelectTeamId={(teamId) => {
+          const team = args.visibleTeams.find((item) => item.teamId === teamId);
+          if (team) {
+            args.onSelectTeam(team);
+          }
+        }}
       />
       {args.teamsFetching ? (
         <span

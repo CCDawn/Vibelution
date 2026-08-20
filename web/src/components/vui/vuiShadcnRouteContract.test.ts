@@ -83,7 +83,7 @@ describe("VUI shadcn route contract", () => {
     expect(canvasComposer).toContain("VCanvasWorkbenchPage");
     expect(chrome).toContain("WORKBENCH_LAYOUT_IDS.teams");
     expect(canvasComposer).toContain('domainRecipe="teams-organization-workbench"');
-    expect(shellFrame).toContain("TeamShellRail");
+    expect(shellFrame).toContain("TeamShellStatusRail");
     expect(workbenchEntry).not.toMatch(/from\s+["']@heroui\/react["']/);
     expect(workbenchEntry).not.toMatch(/renderers\/shadcn/);
     expect(boardPage).not.toMatch(/from\s+["']@heroui\/react["']/);
