@@ -368,6 +368,20 @@ def test_lifecycle_bridge_refuses_product_writes(monkeypatch):
         assert payload["schemaVersion"] == 1
 
 
+def test_direct_lifecycle_actions_return_electron_takeover_error(monkeypatch, capsys):
+    entry = _load_desktop_entry_py()
+    monkeypatch.setattr(entry, "_append_log", lambda *a, **k: None)
+
+    code = entry.main(["--action", "start", "--output", "json"])
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert code == 2
+    assert payload["accepted"] is False
+    assert payload["code"] == "control_plane_is_electron"
+    assert "Electron main" in payload["message"]
+
+
 def test_lifecycle_bridge_rejects_unknown_operation():
     entry = _load_desktop_entry_py()
     with pytest.raises(ValueError):

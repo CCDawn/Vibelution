@@ -314,26 +314,20 @@ def test_resolve_no_console_python_prefers_supervisor_over_worktree_venv(tmp_pat
     assert resolved != leftover.resolve()
 
 
-def test_current_row_delegates_to_existing_start(monkeypatch):
-    calls: list[str] = []
+def test_current_row_refuses_python_lifecycle_writes(monkeypatch):
     monkeypatch.setattr(
         lifecycle,
         "resolve_branch_instance",
         lambda instance_id: _item(id="main", kind="main", current=True, path=r"C:\repo"),
     )
-    monkeypatch.setattr(
-        launcher_service,
-        "request_launcher_start",
-        lambda: calls.append("start")
-        or {"accepted": True, "operation": "start", "mode": "runtime_manager", "commandId": "cmd-1"},
-    )
 
     response = launcher_service.request_branch_instance_operation("main", "start")
 
-    assert calls == ["start"]
+    assert response["accepted"] is False
+    assert response["code"] == "control_plane_is_electron"
     assert response["operation"] == "start"
     assert response["instanceId"] == "main"
-    assert response["mode"] == "runtime_manager"
+    assert "Electron main" in str(response["message"])
 
 
 def test_standalone_launcher_exposes_branch_instance_lifecycle_routes(monkeypatch):

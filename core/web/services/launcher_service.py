@@ -17,10 +17,6 @@ from core.launcher.service import (
     launcher_active_work_runs,
     list_launcher_branch_instances,
     request_branch_instance_operation,
-    request_launcher_restart,
-    request_launcher_start,
-    request_launcher_stop,
-    request_launcher_supervisor_reattach,
 )
 
 __all__ = [
@@ -33,8 +29,4 @@ __all__ = [
     "launcher_active_work_runs",
     "list_launcher_branch_instances",
     "request_branch_instance_operation",
-    "request_launcher_restart",
-    "request_launcher_start",
-    "request_launcher_stop",
-    "request_launcher_supervisor_reattach",
 ]
