@@ -5,17 +5,17 @@ Pure contract layer: no routes, runtime managers, models, or network access.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from functools import lru_cache
-from typing import Any, Callable
+from typing import Any
 
 from .resources import load_full_catalog_execution_core, load_science_question_catalog
 from .result_set import (
     CatalogScope,
     FullCatalogResultSet,
     QuestionResult,
-    ResultSetContractError,
     official_question_ids,
 )
 
@@ -97,6 +97,18 @@ def dev_plan(plan_id: str) -> CatalogExecutionPlan:
     )
 
 
+def catalog_plan(plan_id: str, gate_id: str) -> CatalogExecutionPlan:
+    """Build a named plan over one progressive gate's frozen question ids."""
+    normalized_plan_id = str(plan_id or "").strip()
+    if not normalized_plan_id:
+        raise CatalogExecutionError("Plan id must not be empty.")
+    return CatalogExecutionPlan(
+        plan_id=normalized_plan_id,
+        gate_id=gate_id,
+        question_ids=_gate_question_ids(gate_id),
+    )
+
+
 def dev_plans() -> tuple[CatalogExecutionPlan, ...]:
     return tuple(dev_plan(plan_id) for plan_id in DEV_PLAN_IDS)
 
@@ -121,7 +133,7 @@ class QuestionRunRecord:
         }
 
     @classmethod
-    def from_checkpoint(cls, data: dict[str, Any]) -> "QuestionRunRecord":
+    def from_checkpoint(cls, data: dict[str, Any]) -> QuestionRunRecord:
         try:
             record = cls(
                 question_id=str(data["question_id"]),
@@ -266,7 +278,7 @@ class CatalogExecutionState:
         }
 
     @classmethod
-    def from_checkpoint(cls, data: dict[str, Any]) -> "CatalogExecutionState":
+    def from_checkpoint(cls, data: dict[str, Any]) -> CatalogExecutionState:
         try:
             plan_data = data["plan"]
             plan = CatalogExecutionPlan(
