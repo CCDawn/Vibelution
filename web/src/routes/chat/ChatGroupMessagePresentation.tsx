@@ -7,7 +7,6 @@ import {
 import styles from "./ChatGroupMessagePresentation.styles";
 import {
   shouldCollapseGroupMessage,
-  shouldDefaultCollapseGroupMessage,
   stripGroupSpeakerPrefix,
 } from "./chatRoutePresentation";
 
@@ -74,12 +73,9 @@ export function ChatGroupMessageBody({
 }: ChatGroupMessageBodyProps) {
   const content = stripGroupSpeakerPrefix(message, identityName);
   const expanded = expandedMessageIds.includes(message.messageId);
-  const defaultCollapsed = shouldDefaultCollapseGroupMessage(message);
-  const collapsible = defaultCollapsed || shouldCollapseGroupMessage(content);
+  const collapsible = shouldCollapseGroupMessage(content);
   const collapsed = collapsible && !expanded;
-  const collapseLabel = defaultCollapsed
-    ? (lang === "zh" ? "展开讨论" : "Show discussion")
-    : (lang === "zh" ? "展开全文" : "Show full");
+  const collapseLabel = lang === "zh" ? "展开全文" : "Show full";
 
   return (
     <>

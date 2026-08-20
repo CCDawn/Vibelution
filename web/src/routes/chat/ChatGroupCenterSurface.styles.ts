@@ -5,19 +5,26 @@ import {
 import {
   vuiFlatPanelClass,
   vuiGlassPanelClass,
-  vuiOpaqueRowClass,
   vuiStateDangerSoftClass,
 } from "../../design/vuiSurfaceRecipes";
 
 const styles = {
   groupBubble: "vui-routes-chatcodingroute groupBubble min-w-0",
   groupBubbleAvatar:
-    "vui-routes-chatcodingroute groupBubbleAvatar min-w-0 inline-grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)]",
-  groupBubbleHeader: "vui-routes-chatcodingroute groupBubbleHeader min-w-0 flex flex-wrap items-center gap-1.5",
-  groupBubbleMeta: "vui-routes-chatcodingroute groupBubbleMeta min-w-0 flex flex-wrap items-center gap-1.5",
-  groupBubbleRow: `vui-routes-chatcodingroute groupBubbleRow min-w-0 ${vuiOpaqueRowClass} p-2 !grid grid-cols-[30px_minmax(0,1fr)] items-start gap-[7px]`,
-  groupBubbleRowFailed: `vui-routes-chatcodingroute groupBubbleRowFailed min-w-0 ${vuiOpaqueRowClass} p-2 ${vuiStateDangerSoftClass}`,
-  groupBubbleRowPending: `vui-routes-chatcodingroute groupBubbleRowPending min-w-0 ${vuiOpaqueRowClass} p-2`,
+    "vui-routes-chatcodingroute groupBubbleAvatar inline-grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] text-[11px] font-semibold text-[var(--fg-secondary)]",
+  groupBubbleHeader: "vui-routes-chatcodingroute groupBubbleHeader flex min-w-0 flex-wrap items-baseline gap-1.5",
+  groupBubbleMeta: "vui-routes-chatcodingroute groupBubbleMeta text-[10px] leading-tight text-[var(--fg-tertiary)]",
+  groupBubbleRow:
+    "vui-routes-chatcodingroute groupBubbleRow grid min-w-0 gap-0.5 border-0 bg-transparent p-0 shadow-none",
+  groupBubbleRowFailed: `vui-routes-chatcodingroute groupBubbleRowFailed min-w-0 ${vuiStateDangerSoftClass} rounded-[var(--radius-control)] p-1`,
+  groupBubbleRowPending: "vui-routes-chatcodingroute groupBubbleRowPending min-w-0",
+  groupStreamIdentity:
+    "vui-routes-chatcodingroute groupStreamIdentity flex min-w-0 flex-nowrap items-center gap-2.5",
+  groupStreamCopy: "vui-routes-chatcodingroute groupStreamCopy grid min-w-0 gap-0.5 pl-[46px]",
+  groupStreamCluster:
+    "vui-routes-chatcodingroute groupStreamCluster grid min-w-0 content-start gap-1 pt-3 first:pt-0",
+  groupStreamName:
+    "vui-routes-chatcodingroute groupStreamName [font-size:var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-primary)]",
   groupComposerBar:
     "vui-routes-chatcodingroute groupComposerBar min-w-0 !grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 border-t border-[var(--vui-border-subtle)] !bg-[var(--vui-surface-panel)] p-2",
   groupConversationFrame: `vui-routes-chatcodingroute groupConversationFrame grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden ${vuiFlatPanelClass} shadow-[var(--vui-shadow-hairline)]`,
@@ -33,11 +40,12 @@ const styles = {
   groupRefreshButton:
     `vui-routes-chatcodingroute groupRefreshButton min-w-0 ${vuiControlQuietClass}`,
   groupRoundBlock: "vui-routes-chatcodingroute groupRoundBlock min-w-0",
-  groupRoundDivider: "vui-routes-chatcodingroute groupRoundDivider min-w-0",
+  groupRoundDivider:
+    "vui-routes-chatcodingroute groupRoundDivider flex min-w-0 items-center gap-2 py-2 text-[10px] font-semibold tracking-wide text-[var(--fg-tertiary)] before:h-px before:flex-1 before:bg-[var(--vui-border-subtle)] after:h-px after:flex-1 after:bg-[var(--vui-border-subtle)]",
   groupRoundSummary: `vui-routes-chatcodingroute groupRoundSummary min-w-0 ${vuiGlassPanelClass} p-2`,
   groupStopButton:
     `vui-routes-chatcodingroute groupStopButton min-w-0 ${vuiControlQuietClass}`,
-  groupTopicBubble: "vui-routes-chatcodingroute groupTopicBubble min-w-0",
+  groupTopicBubble: "vui-routes-chatcodingroute groupTopicBubble min-w-0 grid gap-0.5",
   groupTopicMessage:
     "vui-routes-chatcodingroute groupTopicMessage min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)]",
   groupTypingDots: "vui-routes-chatcodingroute groupTypingDots min-w-0",

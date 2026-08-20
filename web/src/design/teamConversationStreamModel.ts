@@ -1,4 +1,4 @@
-import { shouldCollapseGroupMessage } from "../routes/chat/chatRoutePresentation";
+import { groupConsecutiveBy, shouldCollapseGroupMessage } from "../routes/chat/chatRoutePresentation";
 
 export type StreamAudience = "user" | "internal";
 export type StreamVisibility = "default" | "collapsed_by_default";
@@ -46,16 +46,7 @@ export function shouldClampStreamBody(content: string) {
 }
 
 export function groupConsecutiveSpeakers<T extends { speakerId: string }>(messages: readonly T[]): T[][] {
-  const groups: T[][] = [];
-  for (const message of messages) {
-    const current = groups.at(-1);
-    if (current && current[0]?.speakerId === message.speakerId) {
-      current.push(message);
-      continue;
-    }
-    groups.push([message]);
-  }
-  return groups;
+  return groupConsecutiveBy(messages, (message) => message.speakerId);
 }
 
 export const LONG_INTERNAL_DISCUSSION =

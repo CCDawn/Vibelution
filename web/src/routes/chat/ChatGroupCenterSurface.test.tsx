@@ -200,6 +200,91 @@ describe("ChatGroupCenterSurface hand-test substitutes", () => {
     expect(html).toContain("请讨论拆分风险");
     expect(html).toContain("风险可控");
     expect(html).toContain("结论：可控");
+    expect(html).toContain("本轮纪要");
+    expect(html).toContain("group-stream-identity");
+    expect(html).toContain("group-stream-topic-identity");
+    expect(html).not.toContain("!bg-vui-surface-row");
+  });
+
+  it("shows one identity row for consecutive messages from the same speaker", () => {
+    const html = renderToStaticMarkup(
+      <ChatGroupCenterSurface
+        {...baseProps({
+          activeGroupRoom: {
+            roomId: "room-1",
+            title: "研究组",
+            mode: "round_robin",
+            purpose: "discussion",
+            status: "ready",
+            participants: [
+              {
+                participantId: "p1",
+                kind: "session_agent",
+                agentId: "a1",
+                agentCode: "A01",
+                sessionId: "s1",
+                title: "分析员",
+                enabled: true,
+                status: "ready",
+              },
+            ],
+            rounds: [
+              {
+                roundId: "r1",
+                status: "completed",
+                mode: "round_robin",
+                purpose: "discussion",
+                topic: "连续发言",
+                startedAt: "2026-07-20T00:00:00Z",
+                updatedAt: "2026-07-20T00:01:00Z",
+                speakerOrder: ["p1"],
+                messages: [
+                  {
+                    messageId: "msg-1",
+                    participantId: "p1",
+                    agentId: "a1",
+                    speakerCode: "A01",
+                    speakerTitle: "分析员",
+                    status: "completed",
+                    content: "第一条",
+                    timestamp: "2026-07-20T00:00:30Z",
+                  },
+                  {
+                    messageId: "msg-2",
+                    participantId: "p1",
+                    agentId: "a1",
+                    speakerCode: "A01",
+                    speakerTitle: "分析员",
+                    status: "completed",
+                    content: "第二条",
+                    timestamp: "2026-07-20T00:00:40Z",
+                  },
+                ],
+                summary: "",
+              },
+            ],
+          } as never,
+          activeGroupParticipantById: new Map([
+            [
+              "p1",
+              {
+                participantId: "p1",
+                kind: "session_agent",
+                agentId: "a1",
+                agentCode: "A01",
+                sessionId: "s1",
+                title: "分析员",
+                enabled: true,
+                status: "ready",
+              } as never,
+            ],
+          ]),
+        })}
+      />,
+    );
+    expect(html).toContain("第一条");
+    expect(html).toContain("第二条");
+    expect(html.split("group-stream-identity").length - 1).toBe(1);
   });
 
   it("shows stop control while a group round is active", () => {

@@ -17,6 +17,7 @@ import { ProgressiveRegionSkeleton } from "../shared/ProgressiveRegionSkeleton";
 import styles from "./ChatGroupCenterSurface.styles";
 import { ChatGroupMessageBody, ChatMentionedText } from "./ChatGroupMessagePresentation";
 import { ChatMessageChromeHeader } from "./ChatMessageChromeHeader";
+import { groupConsecutiveBy } from "./chatRoutePresentation";
 
 export type GroupParticipantIdentity = {
   name: string;
@@ -137,8 +138,15 @@ function GroupRoundsTimeline({
             </div>
             <article className={styles.groupTopicMessage}>
               <div className={styles.groupTopicBubble}>
-                <span>{userDisplayName}</span>
-                <p>
+                <div className={styles.groupStreamIdentity} data-testid="group-stream-topic-identity">
+                  {renderAgentAvatar(
+                    styles.groupBubbleAvatar,
+                    undefined,
+                    avatarInitials("", userDisplayName, lang === "zh" ? "你" : "You"),
+                  )}
+                  <span className={styles.groupStreamName}>{userDisplayName}</span>
+                </div>
+                <p className={styles.groupStreamCopy}>
                   <ChatMentionedText
                     content={round.topic}
                     lang={lang}
@@ -149,76 +157,98 @@ function GroupRoundsTimeline({
               </div>
             </article>
             <div className={styles.groupMessageList}>
-              {(round.messages ?? []).map((message: ChatRoomMessage) => {
-                const speakerParticipant = activeGroupParticipantById.get(String(message.participantId ?? "").trim());
-                const speakerIdentity = groupParticipantIdentity(speakerParticipant, {
-                  agentId: message.agentId,
-                  agentCode: message.speakerCode,
-                  title: message.speakerTitle,
-                  participantId: message.participantId,
-                });
-                return (
-                  <article
-                    key={message.messageId}
-                    className={
-                      message.status === "failed"
-                        ? `${styles.groupBubbleRow} ${styles.groupBubbleRowFailed}`
-                        : styles.groupBubbleRow
-                    }
-                  >
-                    {renderAgentAvatar(
-                      styles.groupBubbleAvatar,
-                      speakerIdentity.avatarImageUrl || undefined,
-                      avatarInitials(message.speakerCode, speakerIdentity.name, "AI"),
-                    )}
-                    <div className={styles.groupBubble}>
-                      <ChatMessageChromeHeader
-                        className={styles.groupBubbleHeader}
-                        density="bubble"
-                        title={(
-                          <strong title={speakerIdentity.fullIdentityLabel}>{speakerIdentity.identityLabel}</strong>
-                        )}
-                        trailing={message.status !== "completed" ? <span>{statusLabel(message.status)}</span> : null}
-                      />
-                      <ChatGroupMessageBody
-                        message={message}
-                        identityName={speakerIdentity.name}
-                        lang={lang}
-                        expandedMessageIds={expandedGroupMessageIds}
-                        mentionTargets={chatMentionTargets}
-                        onOpenMentionTarget={onOpenMentionTarget}
-                        onToggleExpanded={onToggleExpandedGroupMessage}
-                      />
-                      <time className={styles.groupBubbleMeta}>{formatTime(message.timestamp || round.updatedAt)}</time>
-                    </div>
-                  </article>
-                );
-              })}
+              {groupConsecutiveBy(
+                round.messages ?? [],
+                (message: ChatRoomMessage) => String(message.participantId ?? "").trim(),
+              ).map((cluster) => (
+                <div key={cluster[0].messageId} className={styles.groupStreamCluster}>
+                  {cluster.map((message: ChatRoomMessage, index) => {
+                    const speakerParticipant = activeGroupParticipantById.get(String(message.participantId ?? "").trim());
+                    const speakerIdentity = groupParticipantIdentity(speakerParticipant, {
+                      agentId: message.agentId,
+                      agentCode: message.speakerCode,
+                      title: message.speakerTitle,
+                      participantId: message.participantId,
+                    });
+                    const showIdentity = index === 0;
+                    const messageTime = formatTime(message.timestamp || round.updatedAt);
+                    return (
+                      <article
+                        key={message.messageId}
+                        className={
+                          message.status === "failed"
+                            ? `${styles.groupBubbleRow} ${styles.groupBubbleRowFailed}`
+                            : styles.groupBubbleRow
+                        }
+                      >
+                        {showIdentity ? (
+                          <div className={styles.groupStreamIdentity} data-testid="group-stream-identity">
+                            {renderAgentAvatar(
+                              styles.groupBubbleAvatar,
+                              speakerIdentity.avatarImageUrl || undefined,
+                              avatarInitials(message.speakerCode, speakerIdentity.name, "AI"),
+                            )}
+                            <ChatMessageChromeHeader
+                              className={styles.groupBubbleHeader}
+                              density="bubble"
+                              title={(
+                                <strong className={styles.groupStreamName} title={speakerIdentity.fullIdentityLabel}>
+                                  {speakerIdentity.identityLabel}
+                                </strong>
+                              )}
+                              trailing={(
+                                <>
+                                  {message.status !== "completed" ? <span>{statusLabel(message.status)}</span> : null}
+                                  <time className={styles.groupBubbleMeta}>{messageTime}</time>
+                                </>
+                              )}
+                            />
+                          </div>
+                        ) : null}
+                        <div className={styles.groupStreamCopy}>
+                          {showIdentity ? null : <time className={styles.groupBubbleMeta}>{messageTime}</time>}
+                          <ChatGroupMessageBody
+                            message={message}
+                            identityName={speakerIdentity.name}
+                            lang={lang}
+                            expandedMessageIds={expandedGroupMessageIds}
+                            mentionTargets={chatMentionTargets}
+                            onOpenMentionTarget={onOpenMentionTarget}
+                            onToggleExpanded={onToggleExpandedGroupMessage}
+                          />
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              ))}
               {roundRunning && nextParticipant ? (
                 <article className={`${styles.groupBubbleRow} ${styles.groupBubbleRowPending}`}>
                   {(() => {
                     const nextIdentity = groupParticipantIdentity(nextParticipant);
                     return (
                       <>
-                        {renderAgentAvatar(
-                          styles.groupBubbleAvatar,
-                          nextIdentity.avatarImageUrl || undefined,
-                          avatarInitials(nextParticipant.agentCode, nextIdentity.name, "AI"),
-                        )}
-                        <div className={styles.groupBubble}>
+                        <div className={styles.groupStreamIdentity} data-testid="group-stream-identity">
+                          {renderAgentAvatar(
+                            styles.groupBubbleAvatar,
+                            nextIdentity.avatarImageUrl || undefined,
+                            avatarInitials(nextParticipant.agentCode, nextIdentity.name, "AI"),
+                          )}
                           <ChatMessageChromeHeader
                             className={styles.groupBubbleHeader}
                             density="bubble"
                             title={(
-                              <strong title={nextIdentity.fullIdentityLabel}>{nextIdentity.identityLabel}</strong>
+                              <strong className={styles.groupStreamName} title={nextIdentity.fullIdentityLabel}>
+                                {nextIdentity.identityLabel}
+                              </strong>
                             )}
                             trailing={<span>{lang === "zh" ? "正在输入" : "typing"}</span>}
                           />
-                          <div className={styles.groupTypingDots} aria-label={lang === "zh" ? "正在输入" : "Typing"}>
-                            <span />
-                            <span />
-                            <span />
-                          </div>
+                        </div>
+                        <div className={`${styles.groupStreamCopy} ${styles.groupTypingDots}`} aria-label={lang === "zh" ? "正在输入" : "Typing"}>
+                          <span />
+                          <span />
+                          <span />
                         </div>
                       </>
                     );
@@ -226,7 +256,12 @@ function GroupRoundsTimeline({
                 </article>
               ) : null}
             </div>
-            {round.summary && !roundRunning ? <p className={styles.groupRoundSummary}>{round.summary}</p> : null}
+            {round.summary && !roundRunning ? (
+              <article className={styles.groupRoundSummary}>
+                <strong>{lang === "zh" ? "本轮纪要" : "Round digest"}</strong>
+                <p>{round.summary}</p>
+              </article>
+            ) : null}
           </section>
         );
       })}
