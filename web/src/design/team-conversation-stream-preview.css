@@ -136,6 +136,79 @@ body {
   color: var(--fg-tertiary);
 }
 
+/*
+ * Isolated preview layout lives here. team-conversation-stream-preview.styles.ts
+ * is not in design/tailwind.css @source, so grid-cols-[36px_minmax(0,1fr)] never
+ * ships and the avatar stacks above the name.
+ */
+.tcs-stream-row {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  box-shadow: none;
+}
+
+.tcs-stream-identity {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.tcs-stream-avatar {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-radius: 999px;
+  border: 1px solid var(--vui-border-subtle);
+  background: var(--vui-control-muted);
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--fg-secondary);
+}
+
+.tcs-stream-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.tcs-stream-name {
+  font-size: var(--vui-font-sm);
+  font-weight: 650;
+  line-height: 1.2;
+  color: var(--fg-primary);
+}
+
+.tcs-stream-role,
+.tcs-stream-time {
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--fg-tertiary);
+}
+
+.tcs-stream-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding-left: 46px;
+}
+
+.tcs-topic .tcs-stream-copy {
+  padding-left: 46px;
+}
+
 .tcs-note {
   max-width: 1280px;
   margin: 16px auto 0;

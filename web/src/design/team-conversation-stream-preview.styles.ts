@@ -21,16 +21,14 @@ export const teamConversationStreamPreviewStyles = {
     "vui-design-team-conversation-stream roundHairline flex min-w-0 items-center gap-2 py-2 text-[10px] font-semibold tracking-wide text-[var(--fg-tertiary)] before:h-px before:flex-1 before:bg-[var(--vui-border-subtle)] after:h-px after:flex-1 after:bg-[var(--vui-border-subtle)]",
   streamList: "vui-design-team-conversation-stream streamList grid min-w-0 content-start gap-0",
   streamCluster: "vui-design-team-conversation-stream streamCluster grid min-w-0 content-start gap-1 pt-4 first:pt-0",
-  streamRow:
-    "vui-design-team-conversation-stream streamRow min-w-0 !grid grid-cols-[36px_minmax(0,1fr)] items-start gap-2.5 border-0 bg-transparent p-0 shadow-none",
-  streamAvatar:
-    "vui-design-team-conversation-stream streamAvatar inline-grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-full border border-[var(--vui-border-subtle)] bg-[var(--vui-control-muted)] text-[11px] font-semibold text-[var(--fg-secondary)]",
-  streamAvatarSpacer: "vui-design-team-conversation-stream streamAvatarSpacer h-9 w-9 shrink-0",
-  streamCopy: "vui-design-team-conversation-stream streamCopy grid min-w-0 content-start gap-0.5",
-  streamHeader: "vui-design-team-conversation-stream streamHeader flex min-w-0 flex-wrap items-baseline gap-1.5",
-  streamName: "vui-design-team-conversation-stream streamName [font-size:var(--vui-font-sm)] font-semibold leading-tight text-[var(--fg-primary)]",
-  streamRole: "vui-design-team-conversation-stream streamRole text-[10px] font-medium leading-tight text-[var(--fg-tertiary)]",
-  streamTime: "vui-design-team-conversation-stream streamTime text-[10px] leading-tight text-[var(--fg-tertiary)]",
+  streamRow: "tcs-stream-row",
+  streamIdentity: "tcs-stream-identity",
+  streamAvatar: "tcs-stream-avatar",
+  streamCopy: "tcs-stream-copy",
+  streamHeader: "tcs-stream-header",
+  streamName: "tcs-stream-name",
+  streamRole: "tcs-stream-role",
+  streamTime: "tcs-stream-time",
   streamBody:
     "vui-design-team-conversation-stream streamBody m-0 min-w-0 [font-size:var(--vui-font-sm)] leading-[var(--vui-line-readable)] text-[var(--fg-secondary)] [overflow-wrap:anywhere]",
   streamBodyClamp:

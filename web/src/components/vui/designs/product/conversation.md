@@ -119,7 +119,8 @@ import { ConversationFollowupQueueBar } from "../../conversation/ConversationFol
 
 ### 视觉与状态
 - 组内紧、组间松；失败/待发送才保留描边。
-- 超长正文截断可展开；过程默认收起。
+- 头像与名字同一行（flex 横排，正文缩进对齐名字）；过程默认收起。
+- 超长正文截断可展开。
 
 ### 实现落点
 - 预览：`web/src/design/team-conversation-stream-preview.tsx`

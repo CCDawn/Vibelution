@@ -183,8 +183,11 @@ function ProposedTimeline({
         {round.title} · {round.mode} · {round.status}
       </div>
       <div className={styles.topic}>
-        <span className={styles.topicAuthor}>{round.topicAuthor}</span>
-        <p>{round.topic}</p>
+        <div className={styles.streamIdentity} data-testid="stream-topic-identity">
+          <span className={styles.streamAvatar} aria-hidden="true">{round.topicAuthor.slice(0, 1)}</span>
+          <span className={styles.streamName}>{round.topicAuthor}</span>
+        </div>
+        <p className={styles.streamCopy}>{round.topic}</p>
       </div>
       <div className={styles.streamList}>
         {clusters.map((cluster) => (
@@ -198,18 +201,17 @@ function ProposedTimeline({
                   data-testid={`proposed-message-${message.id}`}
                 >
                   {showIdentity ? (
-                    <span className={styles.streamAvatar} aria-hidden="true">{message.initials}</span>
-                  ) : (
-                    <span className={styles.streamAvatarSpacer} aria-hidden="true" />
-                  )}
-                  <div className={styles.streamCopy}>
-                    {showIdentity ? (
+                    <div className={styles.streamIdentity} data-testid="stream-identity-row">
+                      <span className={styles.streamAvatar} aria-hidden="true">{message.initials}</span>
                       <div className={styles.streamHeader} data-testid="stream-speaker-header">
                         <span className={styles.streamName}>{message.speakerName}</span>
                         <span className={styles.streamRole}>{message.speakerRole}</span>
                         <time className={styles.streamTime}>{message.time}</time>
                       </div>
-                    ) : (
+                    </div>
+                  ) : null}
+                  <div className={styles.streamCopy}>
+                    {showIdentity ? null : (
                       <time className={styles.streamTime}>{message.time}</time>
                     )}
                     <ProposedMessageBody

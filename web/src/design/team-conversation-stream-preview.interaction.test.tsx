@@ -83,6 +83,28 @@ describe("team conversation stream preview", () => {
     expect(host.querySelector(".groupBubbleBodyCollapsed")).toBeTruthy();
   });
 
+  it("keeps proposed avatar and speaker name as siblings on one identity row", async () => {
+    const host = await mountPreview();
+    const previewSource = readFileSync(
+      resolve(import.meta.dirname, "team-conversation-stream-preview.tsx"),
+      "utf8",
+    );
+    const previewCss = readFileSync(
+      resolve(import.meta.dirname, "team-conversation-stream-preview.css"),
+      "utf8",
+    );
+    const identity = host.querySelector('[data-testid="stream-identity-row"]');
+    const avatar = identity?.querySelector(".tcs-stream-avatar");
+    const header = identity?.querySelector('[data-testid="stream-speaker-header"]');
+    expect(identity?.className).toContain("tcs-stream-identity");
+    expect(avatar?.textContent).toBe("顾");
+    expect(header?.textContent).toContain("顾言初");
+    expect(avatar?.nextElementSibling).toBe(header);
+    expect(previewSource).toContain('data-testid="stream-identity-row"');
+    expect(previewCss).toMatch(/\.tcs-stream-identity\s*\{[^}]*display:\s*flex/s);
+    expect(previewCss).toMatch(/flex-direction:\s*row/);
+  });
+
   it("groups consecutive same-speaker rows in the proposed column", async () => {
     const host = await mountPreview();
     const consecutive = Array.from(host.querySelectorAll("button")).find((button) => button.textContent === "连续同说话人");
