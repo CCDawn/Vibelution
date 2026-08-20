@@ -149,11 +149,17 @@ export type WorkflowLayoutNode = {
    * ELK port sides for this node's handles (source/target), keyed by handle
    * id, so the renderer can place React Flow Handles on the same side the
    * engine routes the edge from/to (P1-4). Absent when the node has no ports.
+   * Optional anchors are 0–1 positions along that side (draw.io-style magnets).
    */
-  portSides?: {
-    source: Record<string, WorkflowPortSide>;
-    target: Record<string, WorkflowPortSide>;
-  };
+  portSides?: WorkflowPortSides;
+};
+
+/** Side plus relative snap fraction for each handle id. */
+export type WorkflowPortSides = {
+  source: Record<string, WorkflowPortSide>;
+  target: Record<string, WorkflowPortSide>;
+  sourceAnchor?: Record<string, number>;
+  targetAnchor?: Record<string, number>;
 };
 
 /** Edge-port side used by the layout engine and mirroring on canvas handles. */

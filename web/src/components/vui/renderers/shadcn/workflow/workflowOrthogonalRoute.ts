@@ -8,10 +8,12 @@
  *  - arrive on the facing side (R3);
  *  - keep a straight stub before the first bend (R1);
  *  - prefer L/Z; if that crosses a card, take the other elbow or a lane
- *    around the blocking cluster (R7).
+ *    around the blocking cluster (R7);
+ *  - same-side edges use relative magnets (R4): project the far card, snap
+ *    to 3/5 slots, keep opposite order so stubs do not cross on the box.
  *
- * Not a port of mxGraph. Only those side-selection and obstacle-pick rules
- * are reused; output is the existing WorkflowEdgeSection polyline.
+ * Not a port of mxGraph. Only those side-selection, magnet, and obstacle
+ * rules are reused; output is the existing WorkflowEdgeSection polyline.
  */
 import type {
   WorkflowLayoutPoint,
@@ -24,7 +26,11 @@ export type OrthogonalRect = { x: number; y: number; width: number; height: numb
 
 export const WORKFLOW_ORTHOGONAL_STUB = 20;
 export const WORKFLOW_ORTHOGONAL_PADDING = 8;
-export const WORKFLOW_HANDLE_SAME_SIDE_GAP = 16;
+/** Left/right sides of a 72px serpentine card: three magnets. */
+export const WORKFLOW_SNAP_SLOTS_SHORT = [0.25, 0.5, 0.75] as const;
+/** Top/bottom of a wide card: five magnets, draw.io relative 1/6…5/6. */
+export const WORKFLOW_SNAP_SLOTS_LONG = [1 / 6, 2 / 6, 3 / 6, 4 / 6, 5 / 6] as const;
+const SNAP_INSET = 0.18;
 
 export function elkSideFromOrthogonal(side: OrthogonalSide): WorkflowPortSide {
   if (side === "left") return "WEST";
@@ -33,9 +39,68 @@ export function elkSideFromOrthogonal(side: OrthogonalSide): WorkflowPortSide {
   return "SOUTH";
 }
 
-export function sameSideHandleOffset(index: number, total: number): number {
-  if (total <= 1) return 0;
-  return (index - (total - 1) / 2) * WORKFLOW_HANDLE_SAME_SIDE_GAP;
+export function orthogonalFromElkSide(side: WorkflowPortSide): OrthogonalSide {
+  if (side === "WEST") return "left";
+  if (side === "EAST") return "right";
+  if (side === "NORTH") return "top";
+  return "bottom";
+}
+
+export function snapSlotsForSide(side: OrthogonalSide): readonly number[] {
+  return side === "left" || side === "right" ? WORKFLOW_SNAP_SLOTS_SHORT : WORKFLOW_SNAP_SLOTS_LONG;
+}
+
+export function projectedSnapFraction(
+  rect: OrthogonalRect,
+  side: OrthogonalSide,
+  far: OrthogonalRect,
+): number {
+  const raw = side === "left" || side === "right"
+    ? (centerY(far) - rect.y) / Math.max(rect.height, 1)
+    : (centerX(far) - rect.x) / Math.max(rect.width, 1);
+  return Math.min(1 - SNAP_INSET, Math.max(SNAP_INSET, raw));
+}
+
+/**
+ * Assign unique magnets on one side. k=1 snaps to the nearest slot of the
+ * far card; k>1 keeps draw.io R4 order (sort by opposite coordinate) so
+ * stubs do not cross on the box edge.
+ */
+export function assignSnapFractions(
+  items: ReadonlyArray<{ id: string; preferred: number }>,
+  slots: readonly number[],
+): Map<string, number> {
+  const result = new Map<string, number>();
+  if (items.length === 0 || slots.length === 0) return result;
+  const sorted = [...items].sort((a, b) => a.preferred - b.preferred || a.id.localeCompare(b.id));
+  if (sorted.length === 1) {
+    result.set(sorted[0]!.id, nearestSlot(sorted[0]!.preferred, slots));
+    return result;
+  }
+  if (sorted.length <= slots.length) {
+    const used = new Set<number>();
+    let last = Number.NEGATIVE_INFINITY;
+    for (const item of sorted) {
+      const remaining = slots.filter((slot) => !used.has(slot) && slot + 1e-9 >= last);
+      const pool = remaining.length > 0 ? remaining : slots.filter((slot) => !used.has(slot));
+      const chosen = nearestSlot(item.preferred, pool);
+      used.add(chosen);
+      last = chosen;
+      result.set(item.id, chosen);
+    }
+    return result;
+  }
+  sorted.forEach((item, index) => {
+    result.set(item.id, (index + 1) / (sorted.length + 1));
+  });
+  return result;
+}
+
+function nearestSlot(preferred: number, slots: readonly number[]): number {
+  return slots.reduce(
+    (best, slot) => (Math.abs(slot - preferred) < Math.abs(best - preferred) - 1e-9 ? slot : best),
+    slots[0]!,
+  );
 }
 
 export function facingOrthogonalSides(
@@ -72,12 +137,13 @@ export function facingOrthogonalSides(
 export function portPointOnRect(
   rect: OrthogonalRect,
   side: OrthogonalSide,
-  axisOffset = 0,
+  fraction = 0.5,
 ): WorkflowLayoutPoint {
-  if (side === "left") return { x: rect.x, y: centerY(rect) + axisOffset };
-  if (side === "right") return { x: rect.x + rect.width, y: centerY(rect) + axisOffset };
-  if (side === "top") return { x: centerX(rect) + axisOffset, y: rect.y };
-  return { x: centerX(rect) + axisOffset, y: rect.y + rect.height };
+  const t = Math.min(1, Math.max(0, fraction));
+  if (side === "left") return { x: rect.x, y: rect.y + rect.height * t };
+  if (side === "right") return { x: rect.x + rect.width, y: rect.y + rect.height * t };
+  if (side === "top") return { x: rect.x + rect.width * t, y: rect.y };
+  return { x: rect.x + rect.width * t, y: rect.y + rect.height };
 }
 
 export function orthogonalLead(
@@ -96,8 +162,8 @@ export function routeOrthogonalConnector(input: {
   target: OrthogonalRect;
   sourceSide?: OrthogonalSide;
   targetSide?: OrthogonalSide;
-  sourceAxisOffset?: number;
-  targetAxisOffset?: number;
+  sourceFraction?: number;
+  targetFraction?: number;
   obstacles?: readonly OrthogonalRect[];
   stub?: number;
   padding?: number;
@@ -124,8 +190,8 @@ export function routeOrthogonalConnector(input: {
     targetSide: OrthogonalSide;
   }> = [];
   for (const sides of preferred) {
-    const start = portPointOnRect(input.source, sides.source, input.sourceAxisOffset ?? 0);
-    const end = portPointOnRect(input.target, sides.target, input.targetAxisOffset ?? 0);
+    const start = portPointOnRect(input.source, sides.source, input.sourceFraction ?? 0.5);
+    const end = portPointOnRect(input.target, sides.target, input.targetFraction ?? 0.5);
     const sourceLead = orthogonalLead(start, sides.source, stub);
     const targetLead = orthogonalLead(end, sides.target, stub);
     for (const body of connectorCandidates(sourceLead, targetLead, input.source, input.target, stub, padding, obstacles)) {
@@ -145,8 +211,8 @@ export function routeOrthogonalConnector(input: {
   const winner = scored[0];
   if (!winner) {
     const sides = preferred[0]!;
-    const start = portPointOnRect(input.source, sides.source, input.sourceAxisOffset ?? 0);
-    const end = portPointOnRect(input.target, sides.target, input.targetAxisOffset ?? 0);
+    const start = portPointOnRect(input.source, sides.source, input.sourceFraction ?? 0.5);
+    const end = portPointOnRect(input.target, sides.target, input.targetFraction ?? 0.5);
     return {
       points: compactPoints([start, orthogonalLead(start, sides.source, stub), orthogonalLead(end, sides.target, stub), end]),
       sourceSide: sides.source,

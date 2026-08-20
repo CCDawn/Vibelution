@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  assignSnapFractions,
   facingOrthogonalSides,
   longestStrokeIsVertical,
   portPointOnRect,
+  projectedSnapFraction,
   routeOrthogonalConnector,
-  sameSideHandleOffset,
+  snapSlotsForSide,
 } from "./workflowOrthogonalRoute";
 
 const card = (x: number, y: number): { x: number; y: number; width: number; height: number } => ({
@@ -103,9 +105,47 @@ describe("workflowOrthogonalRoute", () => {
     expect(hits).toBe(false);
   });
 
-  it("spreads same-side handles around the center", () => {
-    expect(sameSideHandleOffset(0, 1)).toBe(0);
-    expect(sameSideHandleOffset(0, 2)).toBe(-8);
-    expect(sameSideHandleOffset(1, 2)).toBe(8);
+  it("snaps a single edge to the magnet facing the other card", () => {
+    const source = card(0, 80);
+    const lower = card(360, 200);
+    const assigned = assignSnapFractions(
+      [{ id: "e1", preferred: projectedSnapFraction(source, "right", lower) }],
+      snapSlotsForSide("right"),
+    );
+    expect(assigned.get("e1")).toBe(0.75);
+    expect(portPointOnRect(source, "right", 0.75).y).toBe(source.y + source.height * 0.75);
+  });
+
+  it("gives two same-side edges distinct magnets that follow the far cards", () => {
+    const source = card(0, 80);
+    const high = card(360, 0);
+    const low = card(360, 180);
+    const assigned = assignSnapFractions(
+      [
+        { id: "high", preferred: projectedSnapFraction(source, "right", high) },
+        { id: "low", preferred: projectedSnapFraction(source, "right", low) },
+      ],
+      snapSlotsForSide("right"),
+    );
+    expect(assigned.get("high")).toBe(0.25);
+    expect(assigned.get("low")).toBe(0.75);
+    const highStart = portPointOnRect(source, "right", assigned.get("high"));
+    const lowStart = portPointOnRect(source, "right", assigned.get("low"));
+    expect(highStart.y).toBeLessThan(lowStart.y);
+  });
+
+  it("routes from the chosen magnet instead of the side midpoint", () => {
+    const source = card(0, 80);
+    const target = card(360, 200);
+    const route = routeOrthogonalConnector({
+      source,
+      target,
+      sourceSide: "right",
+      targetSide: "left",
+      sourceFraction: 0.75,
+      targetFraction: 0.25,
+    });
+    expect(route.points[0]).toEqual(portPointOnRect(source, "right", 0.75));
+    expect(route.points[route.points.length - 1]).toEqual(portPointOnRect(target, "left", 0.25));
   });
 });

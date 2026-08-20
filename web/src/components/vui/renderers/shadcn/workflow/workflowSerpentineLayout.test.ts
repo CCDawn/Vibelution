@@ -104,6 +104,65 @@ describe("workflow serpentine layout", () => {
     }
   });
 
+  it("records a snap magnet for every auto-routed serpentine edge", async () => {
+    const result = await layoutSerpentine();
+    const nodeById = new Map(result.nodes.map((node) => [node.id, node]));
+    for (const edge of result.edges) {
+      if (edge.semanticKind === "rerun") continue;
+      const source = nodeById.get(edge.source);
+      const target = nodeById.get(edge.target);
+      if (edge.sourceHandle) {
+        const fraction = source?.portSides?.sourceAnchor?.[edge.sourceHandle];
+        expect(fraction, `${edge.id} source magnet`).toEqual(expect.any(Number));
+        expect(fraction).toBeGreaterThan(0);
+        expect(fraction).toBeLessThan(1);
+      }
+      if (edge.targetHandle) {
+        const fraction = target?.portSides?.targetAnchor?.[edge.targetHandle];
+        expect(fraction, `${edge.id} target magnet`).toEqual(expect.any(Number));
+        expect(fraction).toBeGreaterThan(0);
+        expect(fraction).toBeLessThan(1);
+      }
+    }
+  });
+
+  it("orders same-side magnets so stubs do not cross on the card", async () => {
+    const result = await layoutSerpentine();
+    const nodeById = new Map(result.nodes.map((node) => [node.id, node]));
+    const groups = new Map<string, typeof result.edges>();
+    for (const edge of result.edges) {
+      if (edge.semanticKind === "rerun" || !edge.sourceHandle) continue;
+      const node = nodeById.get(edge.source);
+      const side = node?.portSides?.source[edge.sourceHandle];
+      if (!node || !side) continue;
+      const key = `${node.id}:${side}`;
+      const list = groups.get(key) ?? [];
+      list.push(edge);
+      groups.set(key, list);
+    }
+    for (const [key, edges] of groups) {
+      if (edges.length < 2) continue;
+      const [nodeId, side] = key.split(":") as [string, "NORTH" | "EAST" | "SOUTH" | "WEST"];
+      const node = nodeById.get(nodeId)!;
+      const sorted = [...edges].sort((left, right) => {
+        const a = node.portSides!.sourceAnchor![left.sourceHandle!]!;
+        const b = node.portSides!.sourceAnchor![right.sourceHandle!]!;
+        return a - b || left.id.localeCompare(right.id);
+      });
+      const fractions = sorted.map((edge) => node.portSides!.sourceAnchor![edge.sourceHandle!]!);
+      expect(new Set(fractions).size, key).toBe(sorted.length);
+      if (side === "EAST" || side === "WEST") {
+        for (let index = 0; index + 1 < sorted.length; index += 1) {
+          const firstTarget = nodeById.get(sorted[index]!.target)!;
+          const nextTarget = nodeById.get(sorted[index + 1]!.target)!;
+          expect(firstTarget.y + firstTarget.height / 2).toBeLessThanOrEqual(
+            nextTarget.y + nextTarget.height / 2 + 1e-3,
+          );
+        }
+      }
+    }
+  });
+
   it("keeps rerun feedback on one local bottom rail", async () => {
     const result = await layoutSerpentine();
     const rerun = result.edges.find((edge) => edge.id === "e_decision_rerun")!;

@@ -20,10 +20,11 @@ vi.mock("@xyflow/react", async () => {
   const Position = { Left: "left", Right: "right", Top: "top", Bottom: "bottom" };
   return {
     Position,
-    Handle: ({ type, position, id }: { type?: string; position?: string; id?: string }) =>
+    Handle: ({ type, position, id, style }: { type?: string; position?: string; id?: string; style?: { top?: string; left?: string } }) =>
       React.createElement("span", {
         "data-handle": `${type}:${position}`,
         "data-handle-id": id ?? "",
+        "data-snap": style?.top ?? style?.left ?? "",
       }),
   };
 });
@@ -213,19 +214,39 @@ describe("WorkflowDecisionNode render (P1-4)", () => {
     expect(markup).toContain('data-handle="source:right"');
   });
 
-  it("gives ordinary outgoing edges unique handles with 16px same-side spacing", () => {
+  it("gives ordinary outgoing edges unique handles on relative snap magnets", () => {
     const markup = renderNode(WorkflowAgentTaskNode, {
       label: "执行",
       status: "pending",
       portSides: {
         source: { "out:east:one": "EAST", "out:east:two": "EAST" },
         target: {},
+        sourceAnchor: { "out:east:one": 0.25, "out:east:two": 0.75 },
       },
     });
     expect(countHandles(markup, "out:east:one")).toBe(1);
     expect(countHandles(markup, "out:east:two")).toBe(1);
-    expect(workflowHandleSideOffset(0, 2, "EAST")).toEqual({ top: "calc(50% + -8px)" });
-    expect(workflowHandleSideOffset(1, 2, "EAST")).toEqual({ top: "calc(50% + 8px)" });
+    expect(markup).toContain('data-snap="25%"');
+    expect(markup).toContain('data-snap="75%"');
+    expect(workflowHandleSideOffset(0, 2, "EAST")).toEqual({ top: "33.3333%" });
+    expect(workflowHandleSideOffset(1, 2, "EAST")).toEqual({ top: "66.6667%" });
+  });
+
+  it("shows unused serpentine magnets on a used side so the edge can change snap point", () => {
+    const markup = renderNode(WorkflowAgentTaskNode, {
+      label: "执行",
+      status: "pending",
+      layoutMode: "serpentine",
+      portSides: {
+        source: { "out:east:one": "EAST" },
+        target: {},
+        sourceAnchor: { "out:east:one": 0.5 },
+      },
+    });
+    expect(markup).toContain('data-workflow-snap="EAST"');
+    expect(markup).toContain('data-snap-fraction="0.25"');
+    expect(markup).toContain('data-snap-fraction="0.75"');
+    expect(markup).not.toContain('data-snap-fraction="0.5"');
   });
 
   it("mirrors every real ELK target port as an id-bearing handle (P1-4)", () => {

@@ -6,7 +6,8 @@
  *  - serpentine auto-layout edges use a facing-side orthogonal connector
  *    after ELK places the cards; rerun keeps a local bottom rail;
  *  - stage-columns cross-stage edges keep outer ELK sections plus gateway stubs;
- *  - port sides / handles follow the chosen orthogonal sides.
+ *  - port sides / handles follow the chosen orthogonal sides and snap
+ *    fractions along that side.
  *
  * React Flow consumes ONLY this final projection — no geometry is invented
  * here beyond the offset composition and the serpentine orthogonal connector.
@@ -26,11 +27,13 @@ import type { Rect } from "./workflowLayoutGeometry";
 import type { WorkflowCanvasLayoutMode } from "./workflowElkOptions";
 import { workflowEdgeKeepsNarrativeLabel } from "./workflowElkOptions";
 import {
+  assignSnapFractions,
   elkSideFromOrthogonal,
   longestStrokeIsVertical,
   longestStrokeLabelAnchor,
+  projectedSnapFraction,
   routeOrthogonalConnector,
-  sameSideHandleOffset,
+  snapSlotsForSide,
   type OrthogonalRect,
   type OrthogonalSide,
 } from "./workflowOrthogonalRoute";
@@ -223,39 +226,53 @@ function applySerpentineOrthogonalRoutes(
     item,
     routed: routeOrthogonalConnector({ source: item.source, target: item.target, obstacles }),
   }));
-  const sourceOffsetByEdge = sameSideOffsets(
+  const sourceFractionByEdge = sameSideFractions(
     firstPass.map(({ item, routed }) => ({
       edgeId: item.edgeId,
       nodeId: item.fromNodeId,
       side: routed.sourceSide,
+      rect: item.source,
       far: item.target,
     })),
   );
-  const targetOffsetByEdge = sameSideOffsets(
+  const targetFractionByEdge = sameSideFractions(
     firstPass.map(({ item, routed }) => ({
       edgeId: item.edgeId,
       nodeId: item.toNodeId,
       side: routed.targetSide,
+      rect: item.target,
       far: item.source,
     })),
   );
 
   for (const { item, routed: first } of firstPass) {
-    const sourceAxisOffset = sourceOffsetByEdge.get(item.edgeId) ?? 0;
-    const targetAxisOffset = targetOffsetByEdge.get(item.edgeId) ?? 0;
-    const routed = sourceAxisOffset === 0 && targetAxisOffset === 0
-      ? first
-      : routeOrthogonalConnector({
-          source: item.source,
-          target: item.target,
-          sourceSide: first.sourceSide,
-          targetSide: first.targetSide,
-          sourceAxisOffset,
-          targetAxisOffset,
-          obstacles,
-        });
-    assignPortSide(ctx.portSidesByNode, item.fromNodeId, "source", item.sourceHandle, elkSideFromOrthogonal(routed.sourceSide));
-    assignPortSide(ctx.portSidesByNode, item.toNodeId, "target", item.targetHandle, elkSideFromOrthogonal(routed.targetSide));
+    const sourceFraction = sourceFractionByEdge.get(item.edgeId) ?? 0.5;
+    const targetFraction = targetFractionByEdge.get(item.edgeId) ?? 0.5;
+    const routed = routeOrthogonalConnector({
+      source: item.source,
+      target: item.target,
+      sourceSide: first.sourceSide,
+      targetSide: first.targetSide,
+      sourceFraction,
+      targetFraction,
+      obstacles,
+    });
+    assignPortSide(
+      ctx.portSidesByNode,
+      item.fromNodeId,
+      "source",
+      item.sourceHandle,
+      elkSideFromOrthogonal(routed.sourceSide),
+      sourceFraction,
+    );
+    assignPortSide(
+      ctx.portSidesByNode,
+      item.toNodeId,
+      "target",
+      item.targetHandle,
+      elkSideFromOrthogonal(routed.targetSide),
+      targetFraction,
+    );
     routes.set(item.edgeId, {
       sections: sectionsFromPoints(item.edgeId, routed.points),
       labelBounds: orthogonalLabelBounds(item.label, routed.points),
@@ -264,10 +281,16 @@ function applySerpentineOrthogonalRoutes(
   return routes;
 }
 
-function sameSideOffsets(
-  items: Array<{ edgeId: string; nodeId: string; side: OrthogonalSide; far: OrthogonalRect }>,
+function sameSideFractions(
+  items: Array<{
+    edgeId: string;
+    nodeId: string;
+    side: OrthogonalSide;
+    rect: OrthogonalRect;
+    far: OrthogonalRect;
+  }>,
 ): Map<string, number> {
-  const offsets = new Map<string, number>();
+  const fractions = new Map<string, number>();
   const groups = new Map<string, typeof items>();
   for (const item of items) {
     const key = `${item.nodeId}:${item.side}`;
@@ -276,17 +299,18 @@ function sameSideOffsets(
     groups.set(key, list);
   }
   for (const list of groups.values()) {
-    const axis = list[0]!.side === "left" || list[0]!.side === "right" ? "y" : "x";
-    list.sort((a, b) => {
-      const av = axis === "y" ? a.far.y + a.far.height / 2 : a.far.x + a.far.width / 2;
-      const bv = axis === "y" ? b.far.y + b.far.height / 2 : b.far.x + b.far.width / 2;
-      return av - bv;
-    });
-    list.forEach((item, index) => {
-      offsets.set(item.edgeId, sameSideHandleOffset(index, list.length));
-    });
+    const assigned = assignSnapFractions(
+      list.map((item) => ({
+        id: item.edgeId,
+        preferred: projectedSnapFraction(item.rect, item.side, item.far),
+      })),
+      snapSlotsForSide(list[0]!.side),
+    );
+    for (const [edgeId, fraction] of assigned) {
+      fractions.set(edgeId, fraction);
+    }
   }
-  return offsets;
+  return fractions;
 }
 
 function assignPortSide(
@@ -295,13 +319,24 @@ function assignPortSide(
   role: "source" | "target",
   handleId: string,
   side: WorkflowPortSide,
+  fraction: number,
 ): void {
   const current = portSidesByNode.get(nodeId) ?? { source: {}, target: {} };
   if (role === "source") {
-    portSidesByNode.set(nodeId, { source: { ...current.source, [handleId]: side }, target: { ...current.target } });
+    portSidesByNode.set(nodeId, {
+      source: { ...current.source, [handleId]: side },
+      target: { ...current.target },
+      sourceAnchor: { ...current.sourceAnchor, [handleId]: fraction },
+      targetAnchor: current.targetAnchor,
+    });
     return;
   }
-  portSidesByNode.set(nodeId, { source: { ...current.source }, target: { ...current.target, [handleId]: side } });
+  portSidesByNode.set(nodeId, {
+    source: { ...current.source },
+    target: { ...current.target, [handleId]: side },
+    sourceAnchor: current.sourceAnchor,
+    targetAnchor: { ...current.targetAnchor, [handleId]: fraction },
+  });
 }
 
 function orthogonalLabelBounds(
