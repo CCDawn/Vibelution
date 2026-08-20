@@ -492,6 +492,14 @@ describe("composeHypothesisFirstGraph", () => {
     expect(composed.stages.filter((stage) => stage.stageId !== "hypothesis_first").every((stage) => stage.stageTone === "idle")).toBe(true);
   });
 
+  it("annotates pending pipeline nodes with a wait reason while demoted", () => {
+    const base = definitionToCanvasGraph(definition);
+    const region = buildHypothesisFirstCanvasRegion(regionInput())!;
+    const composed = composeHypothesisFirstGraph(base, region, { demotePipelineStages: true });
+    const pending = composed.nodes.find((node) => node.nodeId === "source_finding");
+    expect(pending?.description).toContain("评审讨论进行中，完成后此步骤自动开启");
+  });
+
   it("omits the idle 16-node pipeline until a review round has closed", () => {
     const base = definitionToCanvasGraph(definition);
     const region = buildHypothesisFirstCanvasRegion(regionInput({

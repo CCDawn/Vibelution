@@ -54,49 +54,112 @@ describe("workflow serpentine layout", () => {
     expect(ports.byNodeId.get("controlled_run")?.find((port) => port.id === rerun.targetPortId)?.side).toBe("EAST");
   });
 
-  it("places cross-stage labels inside the vertical channel between territories", async () => {
+  it("places a cross-stage label beside the dominant stroke, not inside a card", async () => {
     const input = challengeCupDefinition();
     const result = await layoutSerpentine();
-    const stageOf = new Map(input.nodes.map((node) => [node.nodeId, node.stageId] as const));
-    const stageById = new Map(
-      result.nodes.filter((node) => node.kind === "stage").map((stage) => [stage.stageId, stage] as const),
-    );
+    const tasks = result.nodes.filter((node) => node.kind === "task");
 
     for (const edge of result.edges) {
-      const sourceStageId = stageOf.get(edge.source);
-      const targetStageId = stageOf.get(edge.target);
+      const sourceStageId = input.nodes.find((node) => node.nodeId === edge.source)?.stageId;
+      const targetStageId = input.nodes.find((node) => node.nodeId === edge.target)?.stageId;
       if (!sourceStageId || !targetStageId || sourceStageId === targetStageId) continue;
-      const sourceStage = stageById.get(sourceStageId)!;
-      const targetStage = stageById.get(targetStageId)!;
       const label = edge.labelBounds;
-      expect(label, edge.id).toBeDefined();
-      expect(label!.y, edge.id).toBeGreaterThanOrEqual(sourceStage.y + sourceStage.height);
-      expect(label!.y + label!.height, edge.id).toBeLessThanOrEqual(targetStage.y);
+      if (!label || !edge.label) continue;
+      for (const task of tasks) {
+        expect(
+          label.x < task.x + task.width
+            && task.x < label.x + label.width
+            && label.y < task.y + task.height
+            && task.y < label.y + label.height,
+          `${edge.id} label inside ${task.id}`,
+        ).toBe(false);
+      }
     }
   });
 
-  it("places the knowledge-package label beside the vertical handoff", async () => {
+  it("places the knowledge-package label beside the dominant handoff stroke", async () => {
     const result = await layoutSerpentine();
     const edge = result.edges.find((item) => item.id === "e_kc_hypothesis")!;
     const label = edge.labelBounds!;
     expect(edge.label).toBe("Knowledge Package");
     expect(label.width).toBe(resolveEdgeLabelSpec("Knowledge Package").width);
     expect(edge.sections.length).toBeGreaterThan(0);
-    const strokeX = Math.max(
-      ...edge.sections
-        .filter((section) => Math.abs(section.start.x - section.end.x) < 1e-3)
-        .map((section) => section.start.x),
-    );
-    expect(Number.isFinite(strokeX)).toBe(true);
-    expect(label.x).toBeGreaterThan(strokeX);
+    const vertical = edge.sections.filter((section) => Math.abs(section.start.x - section.end.x) < 1e-3);
+    const horizontal = edge.sections.filter((section) => Math.abs(section.start.y - section.end.y) < 1e-3);
+    if (vertical.length > 0 && (horizontal.length === 0 || Math.max(...vertical.map((section) => Math.abs(section.end.y - section.start.y))) >= Math.max(...horizontal.map((section) => Math.abs(section.end.x - section.start.x))))) {
+      const strokeX = Math.max(...vertical.map((section) => section.start.x));
+      expect(label.x).toBeGreaterThan(strokeX);
+    } else {
+      const strokeY = horizontal[0]!.start.y;
+      expect(label.y + label.height).toBeLessThanOrEqual(strokeY + 1e-3);
+    }
   });
 
-  it("uses a short narrative bridge for cross-stage handoffs", async () => {
+  it("uses a short facing-side orthogonal bridge for cross-stage handoffs", async () => {
     const result = await layoutSerpentine();
     for (const edgeId of ["e_kc_hypothesis", "e_smoke_run"]) {
       const edge = result.edges.find((item) => item.id === edgeId)!;
-      expect(edge.sections.length, edgeId).toBeLessThanOrEqual(3);
+      expect(edge.sections.length, edgeId).toBeLessThanOrEqual(5);
       expect(edge.sections.every((section) => section.bendPoints.length === 0), edgeId).toBe(true);
+    }
+  });
+
+  it("records a snap magnet for every auto-routed serpentine edge", async () => {
+    const result = await layoutSerpentine();
+    const nodeById = new Map(result.nodes.map((node) => [node.id, node]));
+    for (const edge of result.edges) {
+      if (edge.semanticKind === "rerun") continue;
+      const source = nodeById.get(edge.source);
+      const target = nodeById.get(edge.target);
+      if (edge.sourceHandle) {
+        const fraction = source?.portSides?.sourceAnchor?.[edge.sourceHandle];
+        expect(fraction, `${edge.id} source magnet`).toEqual(expect.any(Number));
+        expect(fraction).toBeGreaterThan(0);
+        expect(fraction).toBeLessThan(1);
+      }
+      if (edge.targetHandle) {
+        const fraction = target?.portSides?.targetAnchor?.[edge.targetHandle];
+        expect(fraction, `${edge.id} target magnet`).toEqual(expect.any(Number));
+        expect(fraction).toBeGreaterThan(0);
+        expect(fraction).toBeLessThan(1);
+      }
+    }
+  });
+
+  it("orders same-side magnets so stubs do not cross on the card", async () => {
+    const result = await layoutSerpentine();
+    const nodeById = new Map(result.nodes.map((node) => [node.id, node]));
+    const groups = new Map<string, typeof result.edges>();
+    for (const edge of result.edges) {
+      if (edge.semanticKind === "rerun" || !edge.sourceHandle) continue;
+      const node = nodeById.get(edge.source);
+      const side = node?.portSides?.source[edge.sourceHandle];
+      if (!node || !side) continue;
+      const key = `${node.id}:${side}`;
+      const list = groups.get(key) ?? [];
+      list.push(edge);
+      groups.set(key, list);
+    }
+    for (const [key, edges] of groups) {
+      if (edges.length < 2) continue;
+      const [nodeId, side] = key.split(":") as [string, "NORTH" | "EAST" | "SOUTH" | "WEST"];
+      const node = nodeById.get(nodeId)!;
+      const sorted = [...edges].sort((left, right) => {
+        const a = node.portSides!.sourceAnchor![left.sourceHandle!]!;
+        const b = node.portSides!.sourceAnchor![right.sourceHandle!]!;
+        return a - b || left.id.localeCompare(right.id);
+      });
+      const fractions = sorted.map((edge) => node.portSides!.sourceAnchor![edge.sourceHandle!]!);
+      expect(new Set(fractions).size, key).toBe(sorted.length);
+      if (side === "EAST" || side === "WEST") {
+        for (let index = 0; index + 1 < sorted.length; index += 1) {
+          const firstTarget = nodeById.get(sorted[index]!.target)!;
+          const nextTarget = nodeById.get(sorted[index + 1]!.target)!;
+          expect(firstTarget.y + firstTarget.height / 2).toBeLessThanOrEqual(
+            nextTarget.y + nextTarget.height / 2 + 1e-3,
+          );
+        }
+      }
     }
   });
 
@@ -285,24 +348,32 @@ describe("hypothesis-first region serpentine layout (HFC-5)", () => {
     expect(xOf("controlled_run")).toBeGreaterThan(xOf("iteration_decision"));
   });
 
-  it("routes region gate edges across stages with labels inside the vertical channel", async () => {
-    const input = composedHypothesisFirstGraph(1);
+  it("routes region gate edges around cards instead of a forced vertical channel", async () => {
     const result = await layoutHypothesisFirstSerpentine(1);
-    const stageOf = new Map(input.nodes.map((node) => [node.nodeId, node.stageId] as const));
-    const stageById = new Map(
-      result.nodes.filter((node) => node.kind === "stage").map((stage) => [stage.stageId, stage] as const),
-    );
+    const tasks = result.nodes.filter((node) => node.kind === "task");
 
     for (const edgeId of ["hf_e_m1_stage1", "hf_e_gate_stage2"]) {
       const edge = result.edges.find((item) => item.id === edgeId)!;
       expect(edge, edgeId).toBeDefined();
       expect(edge.sections.length, edgeId).toBeGreaterThan(0);
-      const sourceStage = stageById.get(stageOf.get(edge.source)!)!;
-      const targetStage = stageById.get(stageOf.get(edge.target)!)!;
       const label = edge.labelBounds;
       expect(label, edgeId).toBeDefined();
-      expect(label!.y, edgeId).toBeGreaterThanOrEqual(sourceStage.y + sourceStage.height);
-      expect(label!.y + label!.height, edgeId).toBeLessThanOrEqual(targetStage.y);
+      const source = tasks.find((task) => task.id === edge.source)!;
+      const target = tasks.find((task) => task.id === edge.target)!;
+      for (const task of tasks) {
+        if (task.id === source.id || task.id === target.id) continue;
+        for (const section of edge.sections) {
+          const minX = Math.min(section.start.x, section.end.x);
+          const maxX = Math.max(section.start.x, section.end.x);
+          const minY = Math.min(section.start.y, section.end.y);
+          const maxY = Math.max(section.start.y, section.end.y);
+          const cutsThrough = maxX > task.x + 8
+            && minX < task.x + task.width - 8
+            && maxY > task.y + 8
+            && minY < task.y + task.height - 8;
+          expect(cutsThrough, `${edgeId} cuts through ${task.id}`).toBe(false);
+        }
+      }
     }
   });
 

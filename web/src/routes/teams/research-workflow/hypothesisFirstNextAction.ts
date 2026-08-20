@@ -65,6 +65,9 @@ export type HypothesisFirstNextAction = {
   navigationLabel: string;
   command?: HypothesisFirstCommand;
   commandLabel?: string;
+  /** Consequence line rendered beside the command label (Stripe-style
+   *  action + reason + expectation) so users know what clicking does. */
+  commandDetail?: string;
   disabledReason?: string;
   recovery?: HypothesisFirstRecovery | null;
   statusMessage?: string;
@@ -300,6 +303,7 @@ function meetingStage(
         navigationLabel: "前往确认候选",
         command: "approve_generation_digest",
         commandLabel: "确认候选清单",
+        commandDetail: "确认后候选进入假说选择，由你决定送审哪些",
         meetingRoundId: roundId,
       });
     }
@@ -310,6 +314,7 @@ function meetingStage(
       navigationLabel: "前往确认本轮",
       command: "approve_review_digest",
       commandLabel: "确认并结束本轮",
+      commandDetail: "归档本轮评审纪要，流程将自动继续下一步",
       disabledReason,
       meetingRoundId: roundId,
     });
@@ -344,6 +349,29 @@ export function resolveHypothesisFirstNextAction(
   const terminal = Boolean(input.boundChatRoundsTerminal);
   const state = input.chainState;
 
+  // Meeting gates come before the converged navigation: a round still walking
+  // its four-state gate is the actionable step, and the formal-pipeline
+  // navigation must not mask it (observed live: a chain already marked
+  // converged while its final review round sat in awaiting_approval offered
+  // only 前往资料搜集, hiding 确认并结束本轮).
+  if (generation && generation.status !== "closed") {
+    return meetingStage("generation", generation, terminal);
+  }
+
+  if (review && review.status !== "closed") {
+    const followUp = Boolean(review.previousMeetingRoundId);
+    if (review.status === "open" && !terminal && followUp) {
+      return action({
+        stage: "next_review",
+        targetNodeId: reviewMeetingNodeId(review),
+        navigationLabel: "前往下一轮讨论",
+        statusMessage: "下一轮讨论已开启",
+        meetingRoundId: review.meetingRoundId,
+      });
+    }
+    return meetingStage("review", review, terminal);
+  }
+
   if (state?.hypothesisConverged) {
     const runtimeNode = formalRuntimeNode(input);
     return action({
@@ -351,6 +379,9 @@ export function resolveHypothesisFirstNextAction(
       targetNodeId: runtimeNode?.nodeId ?? HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID,
       navigationLabel: runtimeNode ? `前往${runtimeNode.label}` : "查看假说收敛",
       statusMessage: "假说先行闭环已完成",
+      commandDetail: runtimeNode
+        ? "假说阶段完成，无需再操作假说；查看下一步研究任务"
+        : undefined,
     });
   }
   if (state?.budgetExhausted) {
@@ -362,10 +393,6 @@ export function resolveHypothesisFirstNextAction(
       commandLabel: "人工裁决",
       statusMessage: "轮次预算已耗尽，需要人工裁决",
     });
-  }
-
-  if (generation && generation.status !== "closed") {
-    return meetingStage("generation", generation, terminal);
   }
 
   if (!hasSelection(input) && candidateCount(input) === 0) {
@@ -386,20 +413,6 @@ export function resolveHypothesisFirstNextAction(
       command: "record_selection",
       commandLabel: "记录选择并开启评审",
     });
-  }
-
-  if (review && review.status !== "closed") {
-    const followUp = Boolean(review.previousMeetingRoundId);
-    if (review.status === "open" && !terminal && followUp) {
-      return action({
-        stage: "next_review",
-        targetNodeId: reviewMeetingNodeId(review),
-        navigationLabel: "前往下一轮讨论",
-        statusMessage: "下一轮讨论已开启",
-        meetingRoundId: review.meetingRoundId,
-      });
-    }
-    return meetingStage("review", review, terminal);
   }
 
   if (request && request.status !== "handed_off" && !request.handoffRef) {

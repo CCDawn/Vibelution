@@ -3,13 +3,14 @@
  * result into the public `WorkflowLayoutResult`.
  *
  *  - task absolute = outer stage position + internal local position;
- *  - internal edge sections = local sections offset by the stage position;
- *  - cross-stage edges = outer ELK leg sections (spacer-node routed), label
- *    rect from the spacer position;
- *  - port sides / target handles derived from the port assignments.
+ *  - serpentine auto-layout edges use a facing-side orthogonal connector
+ *    after ELK places the cards; rerun keeps a local bottom rail;
+ *  - stage-columns cross-stage edges keep outer ELK sections plus gateway stubs;
+ *  - port sides / handles follow the chosen orthogonal sides and snap
+ *    fractions along that side.
  *
  * React Flow consumes ONLY this final projection — no geometry is invented
- * here beyond the offset composition.
+ * here beyond the offset composition and the serpentine orthogonal connector.
  */
 import type {
   WorkflowLayoutInput,
@@ -25,6 +26,17 @@ import type { OuterLayoutResult } from "./workflowOuterElkLayout";
 import type { Rect } from "./workflowLayoutGeometry";
 import type { WorkflowCanvasLayoutMode } from "./workflowElkOptions";
 import { workflowEdgeKeepsNarrativeLabel } from "./workflowElkOptions";
+import {
+  assignSnapFractions,
+  elkSideFromOrthogonal,
+  longestStrokeIsVertical,
+  longestStrokeLabelAnchor,
+  projectedSnapFraction,
+  routeOrthogonalConnector,
+  snapSlotsForSide,
+  type OrthogonalRect,
+  type OrthogonalSide,
+} from "./workflowOrthogonalRoute";
 
 export type ComposerInput = {
   input: WorkflowLayoutInput;
@@ -32,6 +44,7 @@ export type ComposerInput = {
   outer: OuterLayoutResult;
   stageBoxes: Map<string, Rect>;
   portSidesByNode: Map<string, WorkflowLayoutNode["portSides"]>;
+  sourceHandleByEdge?: Map<string, string>;
   targetHandleByEdge: Map<string, string>;
   layoutMode?: WorkflowCanvasLayoutMode;
 };
@@ -41,6 +54,10 @@ export function composeFinalLayout(ctx: ComposerInput): WorkflowLayoutResult {
   const nodes: WorkflowLayoutNode[] = [];
   const stageById = new Map(input.stages.map((s) => [s.stageId, s] as const));
   const nodeById = new Map(input.nodes.map((n) => [n.nodeId, n] as const));
+  const taskBoxes = collectTaskBoxes(ctx);
+  const orthogonalRoutes = ctx.layoutMode === "serpentine"
+    ? applySerpentineOrthogonalRoutes(ctx, taskBoxes)
+    : new Map<string, OrthogonalEdgeRoute>();
 
   for (const stage of input.stages) {
     const pos = outer.stagePositions.get(stage.stageId);
@@ -104,17 +121,22 @@ export function composeFinalLayout(ctx: ComposerInput): WorkflowLayoutResult {
   }
 
   const edges: WorkflowLayoutResult["edges"] = input.edges.map((edge) => {
+    const orthogonal = orthogonalRoutes.get(edge.edgeId);
     const internal = collectInternalSections(input, localLayouts, edge.edgeId, outer);
-    const narrative = serpentineNarrativeRoute(edge, ctx);
-    let sections = narrative?.sections ?? internal ?? outer.edgeSections.get(edge.edgeId) ?? [];
-    if (!internal && !narrative) {
+    const narrative = orthogonal ? null : serpentineNarrativeRoute(edge, ctx);
+    let sections = orthogonal?.sections
+      ?? narrative?.sections
+      ?? internal
+      ?? outer.edgeSections.get(edge.edgeId)
+      ?? [];
+    if (!internal && !narrative && !orthogonal) {
       // Cross-stage edges: the outer ELK sections start/end at the stage
       // gateway ports; append the internal legs from the source task's right
       // edge to the source gateway and from the target gateway to the target
       // task's left edge, so the final polyline is continuous node-to-node.
       sections = withGatewayStubs(edge, sections, ctx);
     }
-    const labelBounds = narrative?.labelBounds ?? (internal
+    const labelBounds = orthogonal?.labelBounds ?? narrative?.labelBounds ?? (internal
       ? internalLabelBounds(localLayouts, input, edge.edgeId, outer)
       : outer.labelPositions.get(edge.edgeId));
     const visibleLabel = ctx.layoutMode === "serpentine" && !workflowEdgeKeepsNarrativeLabel(edge)
@@ -128,7 +150,7 @@ export function composeFinalLayout(ctx: ComposerInput): WorkflowLayoutResult {
       semanticKind: edge.semanticKind,
       pathState: edge.pathState,
       labelAlwaysVisible: edge.labelAlwaysVisible,
-      sourceHandle: edge.sourceHandle,
+      sourceHandle: ctx.sourceHandleByEdge?.get(edge.edgeId) ?? edge.sourceHandle,
       targetHandle: targetHandleByEdge.get(edge.edgeId),
       gateKind: edge.gateKind,
       requiresHumanAccept: edge.requiresHumanAccept,
@@ -140,10 +162,212 @@ export function composeFinalLayout(ctx: ComposerInput): WorkflowLayoutResult {
   return { nodes, edges, width: outer.size.width, height: outer.size.height };
 }
 
+type OrthogonalEdgeRoute = {
+  sections: WorkflowLayoutResult["edges"][number]["sections"];
+  labelBounds?: WorkflowLayoutResult["edges"][number]["labelBounds"];
+};
+
+function collectTaskBoxes(ctx: ComposerInput): Map<string, OrthogonalRect> {
+  const boxes = new Map<string, OrthogonalRect>();
+  for (const stage of ctx.input.stages) {
+    const pos = ctx.outer.stagePositions.get(stage.stageId);
+    const local = ctx.localLayouts.get(stage.stageId);
+    if (!pos || !local) continue;
+    for (const task of local.tasks) {
+      boxes.set(task.id, {
+        x: pos.x + task.x,
+        y: pos.y + task.y,
+        width: task.width,
+        height: task.height,
+      });
+    }
+  }
+  return boxes;
+}
+
+function applySerpentineOrthogonalRoutes(
+  ctx: ComposerInput,
+  boxes: Map<string, OrthogonalRect>,
+): Map<string, OrthogonalEdgeRoute> {
+  const routes = new Map<string, OrthogonalEdgeRoute>();
+  const planned: Array<{
+    edgeId: string;
+    fromNodeId: string;
+    toNodeId: string;
+    label: string;
+    sourceHandle: string;
+    targetHandle: string;
+    source: OrthogonalRect;
+    target: OrthogonalRect;
+  }> = [];
+
+  for (const edge of ctx.input.edges) {
+    if (edge.semanticKind === "rerun") continue;
+    const source = boxes.get(edge.fromNodeId);
+    const target = boxes.get(edge.toNodeId);
+    if (!source || !target) continue;
+    const sourceHandle = ctx.sourceHandleByEdge?.get(edge.edgeId) ?? edge.sourceHandle;
+    const targetHandle = ctx.targetHandleByEdge.get(edge.edgeId);
+    if (!sourceHandle || !targetHandle) continue;
+    planned.push({
+      edgeId: edge.edgeId,
+      fromNodeId: edge.fromNodeId,
+      toNodeId: edge.toNodeId,
+      label: edge.label,
+      sourceHandle,
+      targetHandle,
+      source,
+      target,
+    });
+  }
+
+  const obstacles = [...boxes.values()];
+  const firstPass = planned.map((item) => ({
+    item,
+    routed: routeOrthogonalConnector({ source: item.source, target: item.target, obstacles }),
+  }));
+  const sourceFractionByEdge = sameSideFractions(
+    firstPass.map(({ item, routed }) => ({
+      edgeId: item.edgeId,
+      nodeId: item.fromNodeId,
+      side: routed.sourceSide,
+      rect: item.source,
+      far: item.target,
+    })),
+  );
+  const targetFractionByEdge = sameSideFractions(
+    firstPass.map(({ item, routed }) => ({
+      edgeId: item.edgeId,
+      nodeId: item.toNodeId,
+      side: routed.targetSide,
+      rect: item.target,
+      far: item.source,
+    })),
+  );
+
+  for (const { item, routed: first } of firstPass) {
+    const sourceFraction = sourceFractionByEdge.get(item.edgeId) ?? 0.5;
+    const targetFraction = targetFractionByEdge.get(item.edgeId) ?? 0.5;
+    const routed = routeOrthogonalConnector({
+      source: item.source,
+      target: item.target,
+      sourceSide: first.sourceSide,
+      targetSide: first.targetSide,
+      sourceFraction,
+      targetFraction,
+      obstacles,
+    });
+    assignPortSide(
+      ctx.portSidesByNode,
+      item.fromNodeId,
+      "source",
+      item.sourceHandle,
+      elkSideFromOrthogonal(routed.sourceSide),
+      sourceFraction,
+    );
+    assignPortSide(
+      ctx.portSidesByNode,
+      item.toNodeId,
+      "target",
+      item.targetHandle,
+      elkSideFromOrthogonal(routed.targetSide),
+      targetFraction,
+    );
+    routes.set(item.edgeId, {
+      sections: sectionsFromPoints(item.edgeId, routed.points),
+      labelBounds: orthogonalLabelBounds(item.label, routed.points),
+    });
+  }
+  return routes;
+}
+
+function sameSideFractions(
+  items: Array<{
+    edgeId: string;
+    nodeId: string;
+    side: OrthogonalSide;
+    rect: OrthogonalRect;
+    far: OrthogonalRect;
+  }>,
+): Map<string, number> {
+  const fractions = new Map<string, number>();
+  const groups = new Map<string, typeof items>();
+  for (const item of items) {
+    const key = `${item.nodeId}:${item.side}`;
+    const list = groups.get(key) ?? [];
+    list.push(item);
+    groups.set(key, list);
+  }
+  for (const list of groups.values()) {
+    const assigned = assignSnapFractions(
+      list.map((item) => ({
+        id: item.edgeId,
+        preferred: projectedSnapFraction(item.rect, item.side, item.far),
+      })),
+      snapSlotsForSide(list[0]!.side),
+    );
+    for (const [edgeId, fraction] of assigned) {
+      fractions.set(edgeId, fraction);
+    }
+  }
+  return fractions;
+}
+
+function assignPortSide(
+  portSidesByNode: Map<string, WorkflowLayoutNode["portSides"]>,
+  nodeId: string,
+  role: "source" | "target",
+  handleId: string,
+  side: WorkflowPortSide,
+  fraction: number,
+): void {
+  const current = portSidesByNode.get(nodeId) ?? { source: {}, target: {} };
+  if (role === "source") {
+    portSidesByNode.set(nodeId, {
+      source: { ...current.source, [handleId]: side },
+      target: { ...current.target },
+      sourceAnchor: { ...current.sourceAnchor, [handleId]: fraction },
+      targetAnchor: current.targetAnchor,
+    });
+    return;
+  }
+  portSidesByNode.set(nodeId, {
+    source: { ...current.source },
+    target: { ...current.target, [handleId]: side },
+    sourceAnchor: current.sourceAnchor,
+    targetAnchor: { ...current.targetAnchor, [handleId]: fraction },
+  });
+}
+
+function orthogonalLabelBounds(
+  label: string,
+  points: WorkflowLayoutPoint[],
+): WorkflowLayoutResult["edges"][number]["labelBounds"] {
+  if (!label) return undefined;
+  const spec = resolveEdgeLabelSpec(label);
+  const anchor = longestStrokeLabelAnchor(points);
+  if (!anchor) return undefined;
+  if (longestStrokeIsVertical(points)) {
+    return {
+      x: anchor.x + 10,
+      y: anchor.y - spec.height / 2,
+      width: spec.width,
+      height: spec.height,
+    };
+  }
+  return {
+    x: anchor.x - spec.width / 2,
+    y: anchor.y - spec.height - 4,
+    width: spec.width,
+    height: spec.height,
+  };
+}
+
 /**
  * Serpentine presentation uses two deterministic narrative routes instead of
  * exposing ELK gateway drift to users:
- *  - cross-stage handoffs use one short bridge between the aligned cards;
+ *  - ordinary edges use the facing-side orthogonal connector after ELK places
+ *    the cards;
  *  - rerun feedback hugs the bottom of its stage rather than encircling the
  *    whole stage graph.
  * ELK still owns task order, stage positions and the space budget.
@@ -156,6 +380,7 @@ function serpentineNarrativeRoute(
   labelBounds?: WorkflowLayoutResult["edges"][number]["labelBounds"];
 } | null {
   if (ctx.layoutMode !== "serpentine") return null;
+  if (edge.semanticKind !== "rerun") return null;
   const sourceMeta = ctx.input.nodes.find((node) => node.nodeId === edge.fromNodeId);
   const targetMeta = ctx.input.nodes.find((node) => node.nodeId === edge.toNodeId);
   if (!sourceMeta || !targetMeta) return null;
@@ -169,33 +394,6 @@ function serpentineNarrativeRoute(
     return null;
   }
 
-  const crossStage = sourceMeta.stageId !== targetMeta.stageId;
-  if (crossStage) {
-    const source = offset(
-      { x: sourceTask.x + sourceTask.width / 2, y: sourceTask.y + sourceTask.height },
-      sourceStagePosition,
-    );
-    const target = offset(
-      { x: targetTask.x + targetTask.width / 2, y: targetTask.y },
-      targetStagePosition,
-    );
-    const sourceBox = ctx.stageBoxes.get(sourceMeta.stageId);
-    const channelY = sourceBox
-      ? (sourceStagePosition.y + sourceBox.height + targetStagePosition.y) / 2
-      : (source.y + target.y) / 2;
-    const points = compactPoints([
-      source,
-      { x: source.x, y: channelY },
-      { x: target.x, y: channelY },
-      target,
-    ]);
-    return {
-      sections: sectionsFromPoints(edge.edgeId, points),
-      labelBounds: besideVerticalStrokeLabelBounds(edge.label, Math.max(source.x, target.x), channelY),
-    };
-  }
-
-  if (edge.semanticKind !== "rerun") return null;
   const stageBox = ctx.stageBoxes.get(sourceMeta.stageId);
   if (!stageBox) return null;
   const source = offset(
@@ -236,22 +434,6 @@ function sectionsFromPoints(
     section(`${edgeId}_narrative_${index}`, point, points[index + 1]!),
   );
   return linkSections(sections);
-}
-
-/** Sit the pill to the right of a vertical handoff so the stroke does not bisect the text. */
-function besideVerticalStrokeLabelBounds(
-  label: string,
-  strokeX: number,
-  centerY: number,
-): WorkflowLayoutResult["edges"][number]["labelBounds"] {
-  if (!label) return undefined;
-  const spec = resolveEdgeLabelSpec(label);
-  return {
-    x: strokeX + 10,
-    y: centerY - spec.height / 2,
-    width: spec.width,
-    height: spec.height,
-  };
 }
 
 /** Sit the pill above a horizontal feedback rail so the stroke does not bisect the text. */

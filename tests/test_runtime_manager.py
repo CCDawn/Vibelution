@@ -437,6 +437,18 @@ def test_backend_health_probe_treats_connection_reset_as_unhealthy(monkeypatch):
     assert workbench_controller._is_backend_healthy("http://127.0.0.1:8000") is False
 
 
+def test_backend_health_probe_skips_http_when_port_has_no_listener(monkeypatch):
+    monkeypatch.setattr(workbench_controller, "_listening_pid_for_port_win32", lambda _port: 0)
+    monkeypatch.setattr(workbench_controller, "_port_is_listening_socket", lambda _port: False)
+
+    def fail_if_http_attempted(*_args, **_kwargs):
+        raise AssertionError("HTTP probe must not run when no listener owns the port")
+
+    monkeypatch.setattr(workbench_controller, "_open_backend_health_url", fail_if_http_attempted)
+
+    assert workbench_controller._is_backend_healthy("http://127.0.0.1:8000") is False
+
+
 def test_backend_health_probe_treats_http_protocol_error_as_unhealthy(monkeypatch):
     def fake_open_backend_health_url(*args, **kwargs):
         raise workbench_controller.http.client.HTTPException("bad status line")
@@ -470,6 +482,8 @@ def test_backend_health_probe_bypasses_environment_proxies(monkeypatch):
     monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:7890")
     monkeypatch.setenv("ALL_PROXY", "socks5://127.0.0.1:7890")
     monkeypatch.setattr(workbench_controller.urllib.request, "build_opener", fake_build_opener)
+    # The dead-port gate must yield to a live listener before the HTTP leg.
+    monkeypatch.setattr(workbench_controller, "_listening_pid_for_port_win32", lambda _port: 32168)
 
     assert workbench_controller._is_backend_healthy("http://127.0.0.1:8000") is True
 

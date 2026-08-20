@@ -260,6 +260,22 @@ export function composeHypothesisFirstGraph(
     runtimeCurrent,
   );
   const demotePipeline = Boolean(options?.demotePipelineStages) && includePipeline;
+  // While the hypothesis-first discussion owns the flow, the downstream
+  // pipeline renders as an idle preview. Give its not-yet-started nodes an
+  // explicit wait reason instead of dead pixels (GitHub Actions shows pending
+  // checks as "queued, waiting on …").
+  const annotatedPipelineNodes = demotePipeline
+    ? pipelineNodes.map((node) =>
+        node.status === "pending"
+          ? {
+              ...node,
+              description: node.description?.trim()
+                ? `${node.description} · 评审讨论进行中，完成后此步骤自动开启`
+                : "评审讨论进行中，完成后此步骤自动开启",
+            }
+          : node,
+      )
+    : pipelineNodes;
   return {
     ...base,
     stages: [
@@ -275,7 +291,7 @@ export function composeHypothesisFirstGraph(
           stageTone: demotePipeline ? "idle" as const : stage.stageTone,
         })),
     ],
-    nodes: [...region.nodes, ...pipelineNodes],
+    nodes: [...region.nodes, ...annotatedPipelineNodes],
     edges: [...regionEdges, ...pipelineEdges],
   };
 }

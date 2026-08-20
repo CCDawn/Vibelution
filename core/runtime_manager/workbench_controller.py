@@ -653,6 +653,15 @@ def _open_backend_health_url(url: str, *, timeout: float):
 
 
 def _is_backend_healthy(url: str) -> bool:
+    # Local proxy/TUN filters can make a dead loopback port pay the full HTTP
+    # timeout; prove a listener exists before paying for HTTP. The owner-pid
+    # table answers without touching the network stack, the connect probe
+    # covers the IPv6/API-failure edge of the table lookup.
+    port = _port_for_url(url)
+    if port > 0 and os.name == "nt":
+        owner_pid = _listening_pid_for_port_win32(port)
+        if owner_pid == 0 and not _port_is_listening_socket(port):
+            return False
     try:
         with _open_backend_health_url(_health_url_for(url), timeout=2.0) as response:
             return int(getattr(response, "status", 0) or 0) == 200
@@ -771,11 +780,72 @@ def _port_is_listening_socket(port: int) -> bool:
 def _listening_pid_for_port(port: int) -> int:
     if port <= 0:
         return 0
+    if os.name == "nt":
+        win32_pid = _listening_pid_for_port_win32(port)
+        if win32_pid > 0:
+            return win32_pid
     psutil_pid = _listening_pid_for_port_psutil(port)
     if psutil_pid > 0:
         return psutil_pid
     if os.name == "nt":
+        # The PowerShell probe costs seconds of cold-start per call, and a
+        # closed port used to pay it anyway after both table lookups missed.
+        # Only spawn it when a connect probe proves a listener exists.
+        if not _port_is_listening_socket(port):
+            return 0
         return _listening_pid_for_port_windows(port)
+    return 0
+
+
+def _listening_pid_for_port_win32(port: int) -> int:
+    """Targeted LISTEN-owner lookup via GetExtendedTcpTable.
+
+    psutil.net_connections scans the whole TCP table with per-connection
+    process metadata (seconds on a busy host) and this runs inside every
+    workbench observation, so ask iphlpapi for the owner-pid listener table
+    directly and fall back to the slower paths on any failure.
+    """
+
+    if port <= 0 or os.name != "nt":
+        return 0
+    try:
+        import ctypes
+        from ctypes import wintypes
+    except Exception:
+        return 0
+
+    class _TcpOwnerRow(ctypes.Structure):
+        _fields_ = [
+            ("dwState", wintypes.DWORD),
+            ("dwLocalAddr", wintypes.DWORD),
+            ("dwLocalPort", wintypes.DWORD),
+            ("dwRemoteAddr", wintypes.DWORD),
+            ("dwRemotePort", wintypes.DWORD),
+            ("dwOwningPid", wintypes.DWORD),
+        ]
+
+    AF_INET = 2
+    TCP_TABLE_OWNER_PID_LISTENER = 5
+    try:
+        iphlpapi = ctypes.windll.iphlpapi
+        size = wintypes.ULONG(0)
+        if iphlpapi.GetExtendedTcpTable(None, ctypes.byref(size), False, AF_INET, TCP_TABLE_OWNER_PID_LISTENER, 0) == 0:
+            return 0
+        buffer = (ctypes.c_char * size.value)()
+        if iphlpapi.GetExtendedTcpTable(buffer, ctypes.byref(size), False, AF_INET, TCP_TABLE_OWNER_PID_LISTENER, 0) != 0:
+            return 0
+        row_count = int(ctypes.cast(buffer, ctypes.POINTER(wintypes.DWORD)).contents.value)
+        rows = ctypes.cast(
+            ctypes.byref(buffer, ctypes.sizeof(wintypes.DWORD)),
+            ctypes.POINTER(_TcpOwnerRow),
+        )
+        network_order_port = socket.htons(int(port)) & 0xFFFF
+        for index in range(row_count):
+            row = rows[index]
+            if int(row.dwLocalPort & 0xFFFF) == network_order_port and int(row.dwOwningPid) > 0:
+                return int(row.dwOwningPid)
+    except Exception:
+        return 0
     return 0
 
 
@@ -882,11 +952,37 @@ def _with_active_electron_window_projection(observation: dict[str, Any]) -> dict
     return with_window_provider_projection(payload)
 
 
+def _finalize_observe_timings(
+    observation: dict[str, Any],
+    timings: dict[str, float],
+    *,
+    stage: str,
+    started_at: float,
+) -> dict[str, Any]:
+    timings["totalS"] = time.monotonic() - started_at
+    observation["observeTimings"] = {"stage": stage, **{key: round(value, 3) for key, value in timings.items()}}
+    if timings["totalS"] >= 1.0:
+        try:
+            from core.runtime_manager.scene_logging import append_runtime_manager_file_event
+
+            append_runtime_manager_file_event(
+                "workbench.observe.slow",
+                {"stage": stage, "timingsS": {key: round(value, 3) for key, value in timings.items()}},
+                suppress_io_errors=True,
+            )
+        except Exception:
+            pass
+    return observation
+
+
 def observe_workbench(
     *,
     recover_browser_window: bool = True,
     recover_browser_window_for_backend_observed: bool = True,
 ) -> dict[str, Any]:
+    observe_started = time.monotonic()
+    timings: dict[str, float] = {}
+    section_started = time.monotonic()
     launcher_state = _load_launcher_state()
     url = str(launcher_state.get("url") or DEFAULT_URL).strip() or DEFAULT_URL
     state_backend_pid = int(launcher_state.get("backendPid") or 0)
@@ -919,6 +1015,8 @@ def observe_workbench(
     # state.json url can lag behind a relocated listener (e.g. :8000 url vs :8002 ports.json).
     url, port = _reconcile_workbench_endpoint(url, port, launcher_state)
     launcher_browser_window_alive = _is_browser_window_alive(launcher_browser_window_pid)
+    timings["stateProjectionS"] = time.monotonic() - section_started
+    section_started = time.monotonic()
     if (
         session_role == "launcher_control_surface"
         and state_backend_pid <= 0
@@ -927,7 +1025,8 @@ def observe_workbench(
         and browser_window_pid <= 0
         and not _port_is_listening_socket(port)
     ):
-        return _with_active_electron_window_projection({
+        return _finalize_observe_timings(
+            _with_active_electron_window_projection({
             "launcherStatePresent": bool(launcher_state),
             "sessionId": str(launcher_state.get("sessionId") or "").strip(),
             "sessionRole": session_role,
@@ -960,7 +1059,11 @@ def observe_workbench(
             "frontendOrphaned": False,
             "lifecycleConsistency": "consistent",
             "observationFastPath": "launcher_control_surface_no_workbench_pids",
-        })
+        }),
+        timings,
+        stage="launcher_control_surface_fast_path",
+        started_at=observe_started,
+    )
 
     state_backend_alive = _is_process_alive(state_backend_pid)
     browser_window_converge: dict[str, Any] = {
@@ -972,6 +1075,8 @@ def observe_workbench(
         "changed": False,
     }
     browser_window_alive = _is_browser_window_alive(browser_window_pid)
+    timings["livenessConvergeS"] = time.monotonic() - section_started
+    section_started = time.monotonic()
     if (
         browser_window_alive
         and browser_window_pid > 0
@@ -994,7 +1099,8 @@ def observe_workbench(
         and not browser_window_alive
         and not _port_is_listening_socket(port)
     ):
-        return _with_active_electron_window_projection({
+        return _finalize_observe_timings(
+            _with_active_electron_window_projection({
             "launcherStatePresent": bool(launcher_state),
             "sessionId": str(launcher_state.get("sessionId") or "").strip(),
             "sessionRole": "launcher_control_surface" if launcher_browser_window_alive else session_role,
@@ -1028,7 +1134,11 @@ def observe_workbench(
             "frontendOrphaned": False,
             "lifecycleConsistency": "consistent",
             "observationFastPath": "stale_workbench_pids_closed",
-        })
+        }),
+            timings,
+            stage="stale_pids_fast_path",
+            started_at=observe_started,
+        )
     health_probe_url = url if launcher_state else DEFAULT_URL
     healthy = _is_backend_healthy(health_probe_url)
     port_owner_pid = _listening_pid_for_port(port)
@@ -1055,6 +1165,8 @@ def observe_workbench(
     )
     backend_observed = (backend_alive and not port_conflict) or port_owner_trusted or trusted_health
     backend_pid = state_backend_pid if state_backend_alive else port_owner_pid if port_owner_trusted else 0
+    timings["healthPortS"] = time.monotonic() - section_started
+    section_started = time.monotonic()
     observed_session_role = (
         "workbench"
         if session_role == "launcher_control_surface" and (backend_observed or browser_window_alive)
@@ -1081,6 +1193,7 @@ def observe_workbench(
                         or bool(_visible_top_level_window_handles(browser_window_pid))
                     )
     launcher_browser_window_alive = _is_browser_window_alive(launcher_browser_window_pid)
+    timings["recoveryS"] = time.monotonic() - section_started
     window_provider = str(window_projection.get("windowProvider") or "").strip().lower()
     electron_window_missing = bool(
         observed_session_role != "launcher_control_surface"
@@ -1117,7 +1230,8 @@ def observe_workbench(
     else:
         lifecycle_consistency = "consistent"
 
-    return _with_active_electron_window_projection({
+    return _finalize_observe_timings(
+        _with_active_electron_window_projection({
         "launcherStatePresent": bool(launcher_state),
         "sessionId": str(launcher_state.get("sessionId") or "").strip(),
         "sessionRole": observed_session_role,
@@ -1153,7 +1267,11 @@ def observe_workbench(
         "backendMissing": backend_missing,
         "frontendOrphaned": frontend_orphaned,
         "lifecycleConsistency": lifecycle_consistency,
-    })
+    }),
+    timings,
+    stage="full",
+    started_at=observe_started,
+    )
 
 
 def _creation_flag_names(*, detach: bool = False) -> tuple[str, ...]:

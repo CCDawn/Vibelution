@@ -110,6 +110,20 @@ export function HypothesisFirstNodeInspector({
     selectedNodeId: nodeId,
   });
   const nodeOwnsCurrentStep = inspectorNodeOwnsCurrentStep(nodeId, nextAction.targetNodeId);
+  const reviewMeetings = chain.meetings.filter(
+    (meeting) => meeting.meetingType === "hypothesis_review",
+  );
+  const stageSummary = chain.chainState?.hypothesisConverged && reviewMeetings.length > 0
+    ? {
+        rounds: reviewMeetings.filter((meeting) => meeting.status === "closed").length,
+        retries: reviewMeetings.filter(
+          (meeting) =>
+            meeting.status === "closed"
+            && meeting.recoveryReason === "discussion_has_no_completed_messages",
+        ).length,
+        kept: chain.selection?.selectedCandidateIds.length ?? 0,
+      }
+    : null;
 
   if (!questionId) {
     return <VEmptyState title="缺少题目上下文">该卡片需要题目上下文才能继续当前任务。</VEmptyState>;
@@ -144,6 +158,7 @@ export function HypothesisFirstNodeInspector({
           nodeId={nodeId}
           liveMeetingRoundId={activeMeeting?.meetingRoundId || nextAction.meetingRoundId || ""}
           nextAction={nextAction}
+          stageSummary={stageSummary}
           onRetryCollection={onRetryCollection}
           onNavigateToNode={onNavigateToNode}
           onOpenQuestion={onOpenQuestion}
@@ -191,6 +206,7 @@ function InspectorBody(props: {
   nodeId: string;
   liveMeetingRoundId: string;
   nextAction: HypothesisFirstNextAction;
+  stageSummary?: { rounds: number; retries: number; kept: number } | null;
   onRetryCollection?: () => Promise<void>;
   onNavigateToNode?: (nodeId: string) => void;
   onOpenQuestion: (questionId: string) => void;
@@ -272,11 +288,25 @@ function InspectorBody(props: {
     );
   }
   if (nodeId === HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID) {
+    const summary = props.stageSummary;
     return (
       <div className={styles.task}>
         <VStateRow tone={nextAction.stage === "converged" ? "success" : "warning"}>
           {nextAction.statusMessage || nextAction.disabledReason || "待收敛"}
         </VStateRow>
+        {nextAction.stage === "converged" && summary ? (
+          <div className={styles.stageSummary} data-testid="hypothesis-stage-summary">
+            <strong>✓ 假说阶段完成</strong>
+            <p className={styles.status}>
+              {summary.rounds} 轮评审
+              {summary.retries > 0 ? `（含 ${summary.retries} 次失败重试）` : ""}
+              {" "}· 保留 {summary.kept} 条假说进入正式研究
+            </p>
+          </div>
+        ) : null}
+        {nextAction.stage === "converged" && nextAction.commandDetail ? (
+          <p className={styles.status}>{nextAction.commandDetail}</p>
+        ) : null}
         {nextAction.command === "human_adjudication" ? (
           <VButton type="button" variant="primary" density="compact" onClick={() => props.onOpenQuestion(questionId)}>
             {nextAction.commandLabel}
