@@ -237,13 +237,15 @@ describe("ResearchWorkflowToolbar", () => {
 
     expect(markup).toContain("max-w-[24rem]");
     expect(markup).toContain("ms-auto");
-    expect(markup).toContain("shrink-0");
+    expect(markup).toContain("max-w-full");
+    expect(markup).toContain("overflow-hidden");
     expect(markup).toContain("查看详情");
     expect(markup).toContain("前往确认候选");
     expect(markup).toContain("data-vui=\"research-workflow-phase\"");
     expect(markup).not.toContain("grid-cols-[minmax(10rem,1fr)");
     expect(markup).not.toContain("grid-cols-[minmax(12rem,1fr)");
     expect(markup).not.toContain("md:ms-auto");
+    expect(markup).not.toContain("shrink-0 flex-nowrap");
   });
 
   it("keeps the details and create-run action on narrow layouts when no run exists", () => {
@@ -259,6 +261,7 @@ describe("ResearchWorkflowToolbar", () => {
     expect(empty).toContain("假说待生成");
     expect(empty).toContain("flex-wrap");
     expect(empty).toContain("max-w-[24rem]");
-    expect(empty).toContain("shrink-0");
+    expect(empty).toContain("overflow-hidden");
+    expect(empty).not.toContain("shrink-0 flex-nowrap");
   });
 });

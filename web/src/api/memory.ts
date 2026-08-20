@@ -6,6 +6,8 @@ import type {
   MemoryMutationResponse,
   MemoryOverview,
   MemoryUsageContractPayload,
+  GithubProjectLibraryMutationResponse,
+  GithubProjectLibraryPayload,
 } from "./types";
 
 function sendJson<T>(url: string, method: string, body?: unknown): Promise<T> {
@@ -170,4 +172,28 @@ export function executeMemoryCleanup<T = MemoryCleanupExecuteResponse>(body: {
   previewToken: string;
 }): Promise<T> {
   return sendJson<T>("/api/memory/cleanup/execute", "POST", body);
+}
+
+export function fetchGithubProjectLibrary<T = GithubProjectLibraryPayload>(options?: {
+  query?: string;
+  includeArchived?: boolean;
+  signal?: AbortSignal;
+}): Promise<T> {
+  const params = new URLSearchParams();
+  if (options?.query?.trim()) {
+    params.set("query", options.query.trim());
+  }
+  if (options?.includeArchived) {
+    params.set("includeArchived", "true");
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return fetchJson<T>(`/api/memory/github-projects${suffix}`, { signal: options?.signal });
+}
+
+export function cloneGithubProject<T = GithubProjectLibraryMutationResponse>(body: {
+  spec: string;
+  confirm?: boolean;
+  action?: "clone" | "fetch";
+}): Promise<T> {
+  return sendJson<T>("/api/memory/github-projects", "POST", body);
 }

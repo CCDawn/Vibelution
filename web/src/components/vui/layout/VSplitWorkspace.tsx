@@ -150,7 +150,7 @@ function ResizableSplitWorkspace({
       data-vui-collapsible={resize.collapse ? "true" : undefined}
       data-vui-layout-id={resize.layoutId}
       className={[
-        "flex h-full min-h-0 min-w-0 items-stretch gap-0 overflow-hidden",
+        "flex min-h-0 min-w-0 flex-1 items-stretch gap-0 overflow-hidden",
         stripGridLayoutClasses(className),
       ]
         .filter(Boolean)

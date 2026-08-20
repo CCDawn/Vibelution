@@ -23,7 +23,7 @@ Model 可见性
   → tools/* 实现 或 Key_Tools 包装体
 
 注册 SSOT
-  → tools/Key_Tools.py :: create_key_tools()（95 个 canonical 名）
+  → tools/Key_Tools.py :: create_key_tools()（canonical 名以该函数返回值为准）
   → 新工具：实现模块 + Key_Tools 导入/包装 + tool_catalog 条目 + 聚焦 pytest
 ```
 
@@ -47,6 +47,7 @@ Model 可见性
 | `session_reference_tools.py` | `session_reference_query_tool` | `test_agent_protocol.py` |
 | `team_knowledge_tools.py` | `unified_memory_search_tool` · `knowledge_proposal_tool` · `knowledge_ingestion_tool` · `knowledge_governance_*` · `knowledge_steward_*` · `knowledge_rating_suggestion_tool` · `knowledge_operations_health_tool` | `test_team_knowledge_tools.py` · `test_agent_tool_contracts.py` |
 | `skill_library_tools.py` | `skill_library_search_tool` | `test_agent_tool_contracts.py` |
+| `github_project_library_tools.py` | `github_project_library_search_tool` · `github_project_library_clone_tool` | `test_github_project_library_tools.py` |
 | `git_tools.py` | `get_git_status_summary_tool` · `get_recent_changes_tool` · `get_entity_history_tool` · `explain_current_worktree_tool` · `open_evolution_transaction_tool` · `close_evolution_transaction_tool` · `get_evolution_fitness_tool` | `test_agent_protocol.py` |
 | `source_collection_stage_tools.py` | `source_collection_context_tool` · `source_collection_stage_writeback_tool` | `test_agent_tool_contracts.py` |
 | `challenge_cup_operations_tools.py` | `challenge_cup_experiment_*` · `challenge_cup_iteration_*` · `challenge_cup_versioning_*`（context/writeback 各 3） | `test_challenge_cup_operations_tools.py` |

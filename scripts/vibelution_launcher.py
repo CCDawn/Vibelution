@@ -308,7 +308,7 @@ def _wait_for_health(port: int, host: str, timeout_seconds: float = 45.0) -> boo
     while time.monotonic() < deadline:
         if _backend_healthy(port, host):
             return True
-        time.sleep(0.35)
+        time.sleep(0.1)
     return False
 
 
@@ -602,7 +602,7 @@ def _wait_for_port_release(port: int, timeout_seconds: float = 8.0) -> bool:
     while time.monotonic() < deadline:
         if _listening_pid_for_port(port) <= 0:
             return True
-        time.sleep(0.2)
+        time.sleep(0.1)
     return _listening_pid_for_port(port) <= 0
 
 
@@ -614,13 +614,13 @@ def _wait_for_started_backend(process: subprocess.Popen[bytes], port: int, host:
         if process.poll() is not None:
             return 0
         if not _backend_healthy(port, host):
-            time.sleep(0.35)
+            time.sleep(0.1)
             continue
         owner_pid = _listening_pid_for_port(port)
         if owner_pid > 0:
             if _pid_belongs_to_process_tree(owner_pid, int(process.pid)):
                 return owner_pid
-            time.sleep(0.35)
+            time.sleep(0.1)
             continue
         # Fresh Linux clones often run the launcher with system Python: no
         # psutil, and `ss` may be absent. Health is already 200 and this spawn

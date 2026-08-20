@@ -38,6 +38,8 @@ import itemListPanelSource from "./MemoryItemListPanel.tsx?raw";
 import itemListPanelStyles from "./MemoryItemListPanel.styles";
 import overviewPanelSource from "./MemoryOverviewPanel.tsx?raw";
 import overviewPanelStyles from "./MemoryOverviewPanel.styles";
+import githubProjectIndexPanelSource from "./MemoryGithubProjectIndexPanel.tsx?raw";
+import githubProjectIndexPanelStyles from "./MemoryGithubProjectIndexPanel.styles";
 import projectMemoryQueuePanelSource from "./MemoryProjectMemoryQueuePanel.tsx?raw";
 import reviewQueuePanelSource from "./MemoryReviewQueuePanel.tsx?raw";
 import selectedConfigPanelSource from "./MemorySelectedConfigPanel.tsx?raw";
@@ -101,6 +103,7 @@ const memoryCssSource = [
     managementActionPreviewPanelStyles,
     matrixPanelStyles,
     overviewPanelStyles,
+    githubProjectIndexPanelStyles,
     projectMemoryQueuePanelStyles,
     reviewQueuePanelStyles,
     selectedConfigPanelStyles,
@@ -335,6 +338,22 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("isPersonalMemoryView(forcedView)");
     expect(routeSource).toContain("isTeamMemoryView(forcedView)");
     expect(routeSource).toContain("isLibraryMemoryView(forcedView)");
+  });
+
+  it("reads the GitHub project library index through the shared query key", () => {
+    expect(routeSource).toContain('from "./MemoryGithubProjectIndexPanel"');
+    expect(routeSource).toContain("<MemoryGithubProjectIndexPanel");
+    expect(routeSource).toContain("githubProjectLibraryQuery");
+    expect(workbenchQueriesSource).toContain("queryKeys.githubProjectLibrary()");
+    expect(workbenchQueriesSource).toContain("fetchGithubProjectLibrary<GithubProjectLibraryPayload>({ signal })");
+    expect(workbenchQueriesSource).toContain("enabled: isLibraryMemoryView(forcedView)");
+    expect(memoryApiSource).toContain("/api/memory/github-projects");
+    expect(queryKeysSource).toContain("githubProjectLibrary:");
+    expect(githubProjectIndexPanelSource).toContain("cloneGithubProject<GithubProjectLibraryMutationResponse>");
+    expect(githubProjectIndexPanelSource).toContain("styles.githubProjectsPanel");
+    expect(memoryCssSource).toContain(".githubProjectsPanel");
+    expect(memoryCssSource).toContain(".libraryBrowseFill");
+    expect(routeSource).not.toContain("/api/memory/github-projects");
   });
 
   it("does not expose the removed workspace migration compatibility controls", () => {

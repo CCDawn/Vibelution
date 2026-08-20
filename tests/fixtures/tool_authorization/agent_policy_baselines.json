@@ -31,7 +31,21 @@
         "explain_current_worktree_tool",
         "conversation_log_inspect_tool",
         "append_personal_memory_tool",
-        "supersede_personal_memory_tool"
+        "supersede_personal_memory_tool",
+        "agent_create_tool",
+        "agent_update_tool",
+        "agent_archive_tool",
+        "agent_reset_tool",
+        "session_create_tool",
+        "session_update_tool",
+        "session_stop_tool",
+        "session_delete_tool",
+        "agent_inbox_list_tool",
+        "agent_message_consume_tool",
+        "agent_messages_consume_all_tool",
+        "knowledge_base_acl_grant_tool",
+        "github_project_library_search_tool",
+        "github_project_library_clone_tool"
       ],
       "expected_preferred_tools": [
         "exec_command",
@@ -41,7 +55,8 @@
         "apply_patch_tool",
         "run_test_for_tool",
         "cli_tool",
-        "conversation_log_inspect_tool"
+        "conversation_log_inspect_tool",
+        "github_project_library_search_tool"
       ],
       "expected_forbidden_tools": [],
       "migration_expectation": "preserve_exact_assignment",

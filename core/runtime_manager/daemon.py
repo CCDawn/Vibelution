@@ -2481,7 +2481,7 @@ def _preflight_frontend_build_for_restart(command_id: str, *, force: bool = Fals
                 "Frontend dependencies are still missing after automatic restore: "
                 + ", ".join(entry["path"] for entry in missing_after_restore)
             )
-    for label, command in commands:
+    def _run_preflight_step(label: str, command: list[str]) -> tuple[str, dict[str, Any]]:
         try:
             result = subprocess.run(
                 command,
@@ -2496,41 +2496,61 @@ def _preflight_frontend_build_for_restart(command_id: str, *, force: bool = Fals
                 **_subprocess_text_kwargs(),
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
+            return label, {"returnCode": -1, "stdout": "", "stderr": "", "errorType": type(exc).__name__, "message": str(exc), "result": None}
+        return label, {
+            "returnCode": int(result.returncode),
+            "stdout": str(result.stdout or ""),
+            "stderr": str(result.stderr or ""),
+            "errorType": "",
+            "message": "",
+            "result": result,
+        }
+
+    # tsc -b and vite build write disjoint outputs (tsbuildinfo vs dist), so
+    # run them concurrently instead of paying both legs back to back.
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=len(commands)) as executor:
+        step_results = list(executor.map(lambda item: _run_preflight_step(item[0], item[1]), commands))
+
+    for label, outcome in step_results:
+        if outcome["stdout"]:
+            stdout_parts.append(outcome["stdout"])
+        if outcome["stderr"]:
+            stderr_parts.append(outcome["stderr"])
+        if int(outcome["returnCode"]) == 0:
+            completed_steps.append(label)
+    failed_step = next(((label, outcome) for label, outcome in step_results if int(outcome["returnCode"]) != 0), None)
+    if failed_step is not None:
+        label, outcome = failed_step
+        if outcome["result"] is None:
             payload = {
                 "commandId": command_id,
                 "ok": False,
                 "startedAt": started_at,
                 "step": label,
-                "errorType": type(exc).__name__,
-                "message": str(exc),
+                "errorType": outcome["errorType"],
+                "message": outcome["message"],
             }
             _append_event("workbench.restart.build_preflight_failed", payload)
             raise RuntimeError(
-                f"Restart preflight failed before closing the workbench during {label}: {type(exc).__name__}: {exc}"
-            ) from exc
-        stdout = str(result.stdout or "")
-        stderr = str(result.stderr or "")
-        if stdout:
-            stdout_parts.append(stdout)
-        if stderr:
-            stderr_parts.append(stderr)
-        completed_steps.append(label)
-        if result.returncode != 0:
-            payload = {
-                "commandId": command_id,
-                "ok": False,
-                "returnCode": int(result.returncode),
-                "startedAt": started_at,
-                "step": label,
-                "completedSteps": completed_steps,
-                "stdoutTail": "\n".join(stdout_parts)[-1000:],
-                "stderrTail": "\n".join(stderr_parts)[-1000:],
-            }
-            _append_event("workbench.restart.build_preflight_failed", payload)
-            raise RuntimeError(
-                "Restart preflight failed before closing the workbench.\n"
-                + _launcher_error_detail(result, f"Frontend build preflight failed during {label}.")
+                f"Restart preflight failed before closing the workbench during {label}: {outcome['errorType']}: {outcome['message']}"
             )
+        payload = {
+            "commandId": command_id,
+            "ok": False,
+            "returnCode": int(outcome["returnCode"]),
+            "startedAt": started_at,
+            "step": label,
+            "completedSteps": completed_steps,
+            "stdoutTail": "\n".join(stdout_parts)[-1000:],
+            "stderrTail": "\n".join(stderr_parts)[-1000:],
+        }
+        _append_event("workbench.restart.build_preflight_failed", payload)
+        raise RuntimeError(
+            "Restart preflight failed before closing the workbench.\n"
+            + _launcher_error_detail(outcome["result"], f"Frontend build preflight failed during {label}.")
+        )
     provenance = _write_frontend_build_provenance_after_preflight(
         rebuilt=True,
         force_requested=bool(force),
@@ -5081,7 +5101,11 @@ class RuntimeManagerDaemon:
             else:
                 build_preflight = _preflight_frontend_build_for_restart(command_id)
             lifecycle_timings_ms["build_preflight_ms"] = _elapsed_monotonic_ms(build_preflight_started)
-        initial_observation = observe_workbench()
+        initial_observation_started = time.monotonic()
+        # Restart closes everything next; browser-window recovery probing is
+        # wasted work here, so observe with the same light variant close uses.
+        initial_observation = _observe_workbench_for_close()
+        lifecycle_timings_ms["restart_initial_observation_ms"] = _elapsed_monotonic_ms(initial_observation_started)
         if requested_no_browser and _restart_should_preserve_visible_browser(initial_observation):
             effective_no_browser = False
             _append_event(
@@ -5257,6 +5281,7 @@ class RuntimeManagerDaemon:
         }
 
     def _handle_restart_workbench(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
+        guard_started = time.monotonic()
         if not bool(args.get("skipActiveWorkGuard")):
             blocked = self._block_lifecycle_command_if_active_work(
                 command_id=command_id,
@@ -5265,6 +5290,14 @@ class RuntimeManagerDaemon:
             )
             if blocked is not None:
                 return blocked
+        _append_event(
+            "workbench.restart.guard_timings",
+            {
+                "commandId": command_id,
+                "activeWorkGuardMs": _elapsed_monotonic_ms(guard_started),
+                "guardSkipped": bool(args.get("skipActiveWorkGuard")),
+            },
+        )
 
         result_data = self._perform_restart_workbench(command_id=command_id, args=args)
         if bool(result_data.get("interruptedByClose")):

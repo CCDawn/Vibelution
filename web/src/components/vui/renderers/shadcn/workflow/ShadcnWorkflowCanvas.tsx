@@ -51,6 +51,7 @@ import { WorkflowSystemTaskNode } from "./WorkflowSystemTaskNode";
 import { useWorkflowInitialFit } from "./useWorkflowInitialFit";
 import { resolveEdgeStroke } from "./workflowCanvasState";
 import type { WorkflowCanvasLayoutMode } from "./workflowElkOptions";
+import { shouldRefitOnContainerResize } from "./workflowFitOnResize";
 import {
   cloneWorkflowManualLayoutSnapshot,
   cloneWorkflowManualPositions,
@@ -207,9 +208,20 @@ function WorkflowCanvasInner({
   showMiniMap = false,
 }: ShadcnWorkflowCanvasProps) {
   const rf = useReactFlow();
-  const fitAll = useCallback(() => {
-    void rf.fitView({ padding: 0.1, duration: 200 });
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const userMovedViewportRef = useRef(false);
+  const programmaticFitRef = useRef(false);
+  const lastHostSizeRef = useRef({ width: 0, height: 0 });
+  const fitCanvas = useCallback((padding: number, duration = 0) => {
+    programmaticFitRef.current = true;
+    void Promise.resolve(rf.fitView({ padding, duration })).finally(() => {
+      programmaticFitRef.current = false;
+    });
   }, [rf]);
+  const fitAll = useCallback(() => {
+    userMovedViewportRef.current = false;
+    fitCanvas(0.1, 200);
+  }, [fitCanvas]);
 
   const layout = useWorkflowAutoLayout(graph, createWorkflowLayoutEngine, { layoutMode });
   const currentSet = useMemo(() => new Set(runtimeCurrentNodeIds), [runtimeCurrentNodeIds]);
@@ -419,10 +431,46 @@ function WorkflowCanvasInner({
     structureKey: layout.structureKey,
     nodesInitialized,
     fit: () => {
-      void rf.fitView({ padding: 0.08 });
+      fitCanvas(0.08);
     },
     acknowledgeInitialFit: layout.acknowledgeInitialFit,
   });
+
+  useEffect(() => {
+    userMovedViewportRef.current = false;
+    lastHostSizeRef.current = { width: 0, height: 0 };
+  }, [layout.structureKey]);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host || typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const observer = new ResizeObserver((entries) => {
+      const box = entries[0]?.contentRect;
+      if (!box) return;
+      const previous = lastHostSizeRef.current;
+      if (!shouldRefitOnContainerResize({
+        width: box.width,
+        height: box.height,
+        previousWidth: previous.width,
+        previousHeight: previous.height,
+        userMovedViewport: userMovedViewportRef.current,
+      })) {
+        return;
+      }
+      lastHostSizeRef.current = { width: box.width, height: box.height };
+      fitCanvas(0.08);
+    });
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, [fitCanvas]);
+
+  const markUserMovedViewport = useCallback(() => {
+    if (!programmaticFitRef.current) {
+      userMovedViewportRef.current = true;
+    }
+  }, []);
 
   const stageIndexById = useMemo(() => {
     const map = new Map<string, number>();
@@ -602,6 +650,7 @@ function WorkflowCanvasInner({
 
   return (
     <div
+      ref={hostRef}
       className={cn(
         "relative min-h-0 w-full overflow-hidden rounded-xl border border-vui-border bg-vui-surface-workspace",
         fillHost ? "h-full min-h-0 w-full flex-1" : null,
@@ -637,6 +686,7 @@ function WorkflowCanvasInner({
           onNodeDrag={onNodeDrag}
           onNodeDragStop={onNodeDragStop}
           onPaneClick={onPaneClick}
+          onMoveStart={markUserMovedViewport}
           proOptions={{ hideAttribution: true }}
           style={{ width: "100%", height: "100%" }}
           className={fillHost ? "h-full w-full" : undefined}

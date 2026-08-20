@@ -51,7 +51,8 @@ describe("researchWorkspaceRouteContract", () => {
     expect(workspaceSource).toContain("research-process-workspace-host");
     expect(workspaceStylesSource).toContain("h-full min-h-0 w-full min-w-0 flex-1");
     expect(canvasSource).toContain('height="100%"');
-    expect(canvasStylesSource).toContain("!absolute !inset-0");
+    expect(canvasStylesSource).toContain("relative h-full min-h-0 w-full");
+    expect(canvasStylesSource).not.toContain("!absolute !inset-0");
     expect(workspaceSource).not.toContain("height={440}");
     expect(workspaceSource).not.toContain("height={420}");
   });

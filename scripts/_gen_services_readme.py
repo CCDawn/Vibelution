@@ -50,6 +50,7 @@ def domain(stem: str) -> str:
         ("conversation", "chat"),
         ("rag_", "knowledge"),
         ("unified_knowledge", "knowledge"),
+        ("github_project_library", "memory"),
         ("memory_", "memory"),
         ("research_", "research"),
         ("challenge_cup", "research"),

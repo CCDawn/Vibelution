@@ -6,6 +6,23 @@ from fastapi import APIRouter, HTTPException, Response, status
 from pydantic import BaseModel, Field
 
 from core.web.routes.memory_models import MemoryRouteResponse
+from core.web.services.github_project_library_service import (
+    GithubProjectLibraryError,
+    clone_github_project,
+    fetch_github_project,
+    list_github_projects,
+)
+from core.web.services.memory_cleanup_service import (
+    MemoryCleanupError,
+    execute_memory_cleanup,
+    preview_memory_cleanup,
+)
+from core.web.services.memory_graph_service import (
+    MemoryKnowledgeGraphAmbiguousNodeError,
+    get_memory_knowledge_graph,
+    get_memory_knowledge_graph_node_detail,
+    record_memory_knowledge_graph_blocked,
+)
 from core.web.services.memory_service import (
     create_user_memory_item,
     delete_memory_item,
@@ -16,18 +33,6 @@ from core.web.services.memory_service import (
     restore_memory_item,
     update_memory_item,
 )
-from core.web.services.memory_graph_service import (
-    MemoryKnowledgeGraphAmbiguousNodeError,
-    get_memory_knowledge_graph,
-    get_memory_knowledge_graph_node_detail,
-    record_memory_knowledge_graph_blocked,
-)
-from core.web.services.memory_cleanup_service import (
-    MemoryCleanupError,
-    execute_memory_cleanup,
-    preview_memory_cleanup,
-)
-
 
 router = APIRouter(tags=["memory"])
 
@@ -57,6 +62,12 @@ class MemoryCleanupExecutePayload(MemoryCleanupPreviewPayload):
     previewToken: str = Field("", max_length=160)
 
 
+class GithubProjectLibraryWritePayload(BaseModel):
+    spec: str = Field("", max_length=400)
+    confirm: bool = False
+    action: str = Field("clone", max_length=16)
+
+
 @router.get(
     "/memory/overview",
     response_model=MemoryRouteResponse,
@@ -73,6 +84,30 @@ def memory_overview(includeContent: bool = True) -> dict:
 )
 def memory_usage_contract() -> dict:
     return get_memory_usage_contract()
+
+
+@router.get(
+    "/memory/github-projects",
+    response_model=MemoryRouteResponse,
+    response_model_exclude_unset=True,
+)
+def memory_github_projects(query: str = "", includeArchived: bool = False) -> dict:
+    return list_github_projects(query=query, include_archived=includeArchived)
+
+
+@router.post(
+    "/memory/github-projects",
+    response_model=MemoryRouteResponse,
+    response_model_exclude_unset=True,
+)
+def memory_github_projects_write(payload: GithubProjectLibraryWritePayload) -> dict:
+    action = str(payload.action or "clone").strip().lower() or "clone"
+    try:
+        if action == "fetch":
+            return fetch_github_project(payload.spec)
+        return clone_github_project(payload.spec, confirm=bool(payload.confirm))
+    except GithubProjectLibraryError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get(

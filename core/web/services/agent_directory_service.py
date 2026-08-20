@@ -472,10 +472,19 @@ DEFAULT_SESSION_AGENT_ALLOWED_TOOLS = tuple(
         PERSONAL_MEMORY_APPEND_TOOL_NAME,
         PERSONAL_MEMORY_SUPERSEDE_TOOL_NAME,
         *PROJECT_OPERATION_TOOL_NAMES,
+        "github_project_library_search_tool",
+        "github_project_library_clone_tool",
     ]
 )
 DEFAULT_SESSION_AGENT_PREFERRED_TOOLS = tuple(
-    name for name in SESSION_PROTOCOL_PREFERRED_TOOLS if name not in GENERATION_HANDOFF_MEMORY_TOOLS
+    [
+        *[
+            name
+            for name in SESSION_PROTOCOL_PREFERRED_TOOLS
+            if name not in GENERATION_HANDOFF_MEMORY_TOOLS
+        ],
+        "github_project_library_search_tool",
+    ]
 )
 
 

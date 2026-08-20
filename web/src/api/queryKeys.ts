@@ -99,6 +99,7 @@ export const queryKeys = {
   fileContent: (path: string) => ["files", "content", path] as const,
   // Memory workbench — web/src/api/memory.ts / /api/memory/*
   memoryOverview: () => ["memory", "overview"] as const,
+  githubProjectLibrary: () => ["memory", "github-projects"] as const,
   memoryItemDetails: () => ["memory", "item-detail"] as const,
   memoryItemDetail: (sectionId: string, itemId: string) => ["memory", "item-detail", sectionId, itemId] as const,
   memoryUsageContract: () => ["memory", "usage-contract"] as const,

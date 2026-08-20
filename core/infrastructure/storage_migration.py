@@ -1974,6 +1974,10 @@ def _log_storage_migration_step(
         return
 
 
+_READINESS_BLOCKED_LOG_INTERVAL_SECONDS = 300.0
+_readiness_blocked_log_state: dict[str, tuple[float, int]] = {}
+
+
 def _log_readiness_blocked(
     project_root: Path,
     payload: dict[str, object],
@@ -1992,6 +1996,18 @@ def _log_readiness_blocked(
         project_id = target.project_id
     except Exception:
         project_id = ""
+    # A looping readiness probe once flooded events.jsonl with tens of
+    # thousands of identical lines; keep one line per signature per interval.
+    signature = f"{action}:{','.join(codes[:8])}"
+    now = time.monotonic()
+    previous = _readiness_blocked_log_state.get(signature)
+    if previous is not None:
+        last_logged_at, suppressed = previous
+        if now - last_logged_at < _READINESS_BLOCKED_LOG_INTERVAL_SECONDS:
+            _readiness_blocked_log_state[signature] = (last_logged_at, suppressed + 1)
+            return
+    suppressed_count = previous[1] if previous is not None else 0
+    _readiness_blocked_log_state[signature] = (now, 0)
     try:
         from core.runtime_manager.scene_logging import append_runtime_manager_file_event
 
@@ -2002,6 +2018,7 @@ def _log_readiness_blocked(
                 "reasonCodes": codes[:8],
                 "blockerCount": len(codes),
                 "projectId": project_id,
+                "suppressedRepeatCount": suppressed_count,
             },
             suppress_io_errors=True,
         )

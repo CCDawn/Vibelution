@@ -103,6 +103,10 @@ from tools.team_knowledge_tools import (
     unified_memory_search_tool as _unified_memory_search_impl,
 )
 from tools.skill_library_tools import skill_library_search_tool as _skill_library_search_impl
+from tools.github_project_library_tools import (
+    github_project_library_clone_tool as _github_project_library_clone_impl,
+    github_project_library_search_tool as _github_project_library_search_impl,
+)
 from tools.token_manager import compress_context_tool as _compress_context_impl
 from tools.python_intelligence_tools import (
     code_symbol_tool as _code_symbol_impl,
@@ -2538,6 +2542,45 @@ def _build_key_tools() -> List[BaseTool]:
         )
 
     @tool
+    def github_project_library_search_tool(query: str = "", limit: int = 12) -> str:
+        """
+        【开源项目索引】只读检索记忆库中已落盘的 GitHub 项目卡片。
+
+        命中后请读取 localPath/absolutePath 下的本地仓再调研，不要把网页或 API 摘要当结论。
+        未命中时改用 github_project_library_clone_tool 全量克隆公开仓。
+
+        Args:
+            query: 按名字、描述、fullName、语言或许可过滤；空则列出当前索引
+            limit: 最多返回结果数，范围 1-25
+
+        Returns:
+            JSON 格式的本地开源项目索引卡片
+        """
+        return _github_project_library_search_impl(query=query, limit=limit)
+
+    @tool
+    def github_project_library_clone_tool(
+        repo: str,
+        confirm: bool = False,
+        action: str = "clone",
+    ) -> str:
+        """
+        【开源项目落盘】把高价值公开 GitHub 仓全量克隆进记忆库，或对已有本地仓执行 fetch。
+
+        只克隆公开仓，默认不拉子模块。单仓约 1GB 或可见项目达到 20 个时返回 confirmation_required，
+        需用户确认后再带 confirm=true 重试。禁止把整仓正文写入正式知识库。
+
+        Args:
+            repo: GitHub URL、owner/repo，或已有项目的 projectId
+            confirm: 突破数量/体积闸门时必须为 true
+            action: clone（默认）或 fetch
+
+        Returns:
+            JSON 格式的克隆/更新结果；confirmation_required 时先问用户
+        """
+        return _github_project_library_clone_impl(repo=repo, confirm=confirm, action=action)
+
+    @tool
     def knowledge_proposal_tool(
         knowledge_base_id: str,
         source_type: str,
@@ -2952,6 +2995,8 @@ def _build_key_tools() -> List[BaseTool]:
         research_knowledge_query_tool,
         unified_memory_search_tool,
         skill_library_search_tool,
+        github_project_library_search_tool,
+        github_project_library_clone_tool,
         knowledge_proposal_tool,
         knowledge_ingestion_tool,
         knowledge_governance_tasks_tool,

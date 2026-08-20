@@ -88,6 +88,7 @@ import { MemoryManagePanel } from "./MemoryManagePanel";
 import { MemoryMatrixPanel } from "./MemoryMatrixPanel";
 import { MemoryItemListPanel } from "./MemoryItemListPanel";
 import { MemoryContentBrowsePanel } from "./MemoryContentBrowsePanel";
+import { MemoryGithubProjectIndexPanel } from "./MemoryGithubProjectIndexPanel";
 import { MemoryProjectMemoryQueuePanel } from "./MemoryProjectMemoryQueuePanel";
 import { MemoryReviewQueuePanel } from "./MemoryReviewQueuePanel";
 import { MemorySelectedConfigPanel } from "./MemorySelectedConfigPanel";
@@ -253,6 +254,13 @@ type Copy = {
   personalSubtitle: string;
   teamSubtitle: string;
   librarySubtitle: string;
+  githubProjectsTitle: string;
+  githubProjectsHint: string;
+  githubProjectsEmpty: string;
+  githubProjectsClonePlaceholder: string;
+  githubProjectsClone: string;
+  githubProjectsConfirm: string;
+  githubProjectsReady: string;
   effectiveSubtitle: string;
   agentMemorySubtitle: string;
   manageSubtitle: string;
@@ -773,7 +781,14 @@ const COPY: Record<"zh" | "en", Copy> = {
     overviewSubtitle: "先看 Agent 正在用哪些记忆，再处理需要你确认的条目。",
     personalSubtitle: "点一张 Agent 卡片，查看它现在有的记忆。",
     teamSubtitle: "点一个知识库，查看团队现在有的记忆。",
-    librarySubtitle: "项目里当前存在的共享记忆。",
+    librarySubtitle: "项目里当前存在的共享记忆，以及已落盘的开源项目索引。",
+    githubProjectsTitle: "开源项目索引",
+    githubProjectsHint: "先查本地索引；未命中再全量克隆公开仓，然后读本地路径。不要把整仓写入正式知识库。",
+    githubProjectsEmpty: "还没有落盘的开源项目。",
+    githubProjectsClonePlaceholder: "owner/repo 或 GitHub URL",
+    githubProjectsClone: "克隆到记忆库",
+    githubProjectsConfirm: "确认克隆",
+    githubProjectsReady: "已就绪",
     effectiveSubtitle: "按对话、自进化、监督进化和显式读取说明哪些记忆会被 agent 感知。",
     agentMemorySubtitle: "逐个查看 Agent 私有 workspace 记忆文件与正式私有知识库，点击文件读取内容。",
     manageSubtitle: "集中管理可覆盖、可禁用和用户手动新增的来源，不代表单个 Agent 的私有记忆。",
@@ -1190,7 +1205,14 @@ const COPY: Record<"zh" | "en", Copy> = {
     overviewSubtitle: "See which memories the Agent is using, then handle anything that needs your confirmation.",
     personalSubtitle: "Open an Agent card to read the memories it currently has.",
     teamSubtitle: "Open a knowledge base to read the team's current memories.",
-    librarySubtitle: "Shared project memories that currently exist.",
+    librarySubtitle: "Shared project memories, plus the local GitHub project index.",
+    githubProjectsTitle: "Open-source project index",
+    githubProjectsHint: "Search the local index first. If it misses, clone the public repo here, then read the local path. Do not dump clone bodies into formal knowledge.",
+    githubProjectsEmpty: "No cloned open-source projects yet.",
+    githubProjectsClonePlaceholder: "owner/repo or GitHub URL",
+    githubProjectsClone: "Clone into library",
+    githubProjectsConfirm: "Confirm clone",
+    githubProjectsReady: "Ready",
     effectiveSubtitle: "Shows how conversation, self-evolution, supervised evolution, and explicit-read memory can be perceived.",
     agentMemorySubtitle: "Inspect each Agent private workspace memory file and formal private knowledge base, then open files to read their content.",
     manageSubtitle: "Manage overridable, disable-able, and user-created source records. This is not a single Agent private memory view.",
@@ -2261,6 +2283,7 @@ function invalidateKnowledgeDashboard(queryClient: ReturnType<typeof useQueryCli
 function invalidateMemoryQueries(queryClient: ReturnType<typeof useQueryClient>) {
   void queryClient.invalidateQueries({ queryKey: queryKeys.memoryOverview() });
   void queryClient.invalidateQueries({ queryKey: queryKeys.memoryItemDetails() });
+  void queryClient.invalidateQueries({ queryKey: queryKeys.githubProjectLibrary() });
   void queryClient.invalidateQueries({ queryKey: ["memory", "agents"] });
 }
 
@@ -2341,6 +2364,7 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
     knowledgeDashboardSnapshotQuery,
     memoryKnowledgeGraphQuery,
     memoryKnowledgeGraphNodeDetailQuery,
+    githubProjectLibraryQuery,
     knowledgeActorAgents,
     agentMemoryInventoryAgents,
     selectedAgentMemoryAgentId,
@@ -3797,6 +3821,21 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
       .filter((group) => group.items.length);
     const selectedGroup = libraryGroups.find((group) => group.section.id === activeSectionId) ?? null;
     return (
+      <>
+        <MemoryGithubProjectIndexPanel
+          copy={{
+            title: copy.githubProjectsTitle,
+            hint: copy.githubProjectsHint,
+            empty: copy.githubProjectsEmpty,
+            clonePlaceholder: copy.githubProjectsClonePlaceholder,
+            cloneAction: copy.githubProjectsClone,
+            confirmAction: copy.githubProjectsConfirm,
+            ready: copy.githubProjectsReady,
+          }}
+          library={githubProjectLibraryQuery.data}
+          loading={githubProjectLibraryQuery.isPending}
+        />
+        <div className={styles.libraryBrowseFill}>
       <MemoryContentBrowsePanel
         copy={{
           loading: copy.loading,
@@ -3847,6 +3886,8 @@ export function MemoryRoute({ forcedView = "personal" }: MemoryRouteProps) {
             : ""
         }
       />
+        </div>
+      </>
     );
   };
 

@@ -126,6 +126,10 @@ class TestToolExecutorInit:
         assert "unified_memory_search_tool" in llm_names
         assert "skill_library_search_tool" in canonical_names
         assert "skill_library_search_tool" in llm_names
+        assert "github_project_library_search_tool" in canonical_names
+        assert "github_project_library_search_tool" in llm_names
+        assert "github_project_library_clone_tool" in canonical_names
+        assert "github_project_library_clone_tool" in llm_names
         assert "knowledge_query_tool" not in canonical_names
         assert "knowledge_rag_retrieve_tool" not in canonical_names
         assert "unified_knowledge_search_tool" not in canonical_names

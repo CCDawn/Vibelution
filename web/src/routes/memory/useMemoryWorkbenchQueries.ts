@@ -26,6 +26,7 @@ import {
   fetchMemoryKnowledgeGraphNodeDetail,
   fetchMemoryOverview,
   fetchMemoryUsageContract,
+  fetchGithubProjectLibrary,
 } from "../../api/memory";
 import { queryKeys } from "../../api/queryKeys";
 import type {
@@ -47,6 +48,7 @@ import type {
   MemoryKnowledgeGraphPayload,
   MemoryOverview,
   MemoryUsageContractPayload,
+  GithubProjectLibraryPayload,
 } from "../../api/types";
 import { resolvePollingInterval } from "../../app/pollingPolicy";
 import type { MemoryKnowledgeSearchDraft } from "../MemoryKnowledgeSearchPanel";
@@ -218,6 +220,13 @@ export function useMemoryCoreQueries(options: UseMemoryCoreQueriesOptions) {
     refetchInterval: false,
     enabled: forcedView === "graph" && Boolean(selectedGraphNodeId) && Boolean(fallbackKnowledgeActorAgentId),
   });
+  const githubProjectLibraryQuery = useQuery({
+    queryKey: queryKeys.githubProjectLibrary(),
+    queryFn: ({ signal }) => fetchGithubProjectLibrary<GithubProjectLibraryPayload>({ signal }),
+    refetchInterval: resolvePollingInterval(pageVisible, 60_000),
+    refetchIntervalInBackground: false,
+    enabled: isLibraryMemoryView(forcedView),
+  });
 
   return {
     overviewQuery,
@@ -229,6 +238,7 @@ export function useMemoryCoreQueries(options: UseMemoryCoreQueriesOptions) {
     knowledgeDashboardSnapshotQuery,
     memoryKnowledgeGraphQuery,
     memoryKnowledgeGraphNodeDetailQuery,
+    githubProjectLibraryQuery,
     knowledgeActorAgents,
     agentMemoryInventoryAgents,
     selectedAgentMemoryAgentId,

@@ -30,6 +30,9 @@ describe("memory catalog API", () => {
     expect(apiSource).toContain('"/api/memory/items"');
     expect(apiSource).toContain('"/api/memory/cleanup/preview"');
     expect(apiSource).toContain('"/api/memory/cleanup/execute"');
+    expect(apiSource).toContain("export function fetchGithubProjectLibrary");
+    expect(apiSource).toContain("export function cloneGithubProject");
+    expect(apiSource).toContain("/api/memory/github-projects");
   });
 
   it("keeps Memory workbench queries free of memory transport paths", () => {
@@ -39,6 +42,7 @@ describe("memory catalog API", () => {
     expect(workbenchQueriesSource).toContain("fetchMemoryAgentDetail<");
     expect(workbenchQueriesSource).toContain("fetchMemoryKnowledgeGraph<");
     expect(workbenchQueriesSource).toContain("fetchMemoryKnowledgeGraphNodeDetail<");
+    expect(workbenchQueriesSource).toContain("fetchGithubProjectLibrary<GithubProjectLibraryPayload>({ signal })");
     expect(workbenchQueriesSource).not.toContain("/api/memory/");
   });
 

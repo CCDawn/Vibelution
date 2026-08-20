@@ -16,6 +16,8 @@ import {
 const styles = {
   browseViewStack:
     "browseViewStack min-w-0 h-full min-h-0 flex flex-col overflow-hidden",
+  libraryBrowseFill:
+    "libraryBrowseFill min-h-0 min-w-0 flex-1 overflow-hidden",
   controlStrip:
     "controlStrip min-w-0 flex items-center gap-1.5 overflow-x-auto overflow-y-hidden px-2 pb-1",
   graphViewStack:
@@ -56,7 +58,7 @@ const styles = {
   subnavLinkActive:
     `subnavLinkActive min-w-0 ${vuiStateSelectedRowClass}`,
   viewStack:
-    "viewStack min-w-0 flex h-full min-h-0 flex-col overflow-hidden [&>.workspace]:flex-1 [&>.workspace]:min-h-0 [&>.cleanupWorkspace]:flex-1 [&>.cleanupWorkspace]:min-h-0 [&>.overviewStack]:flex-1 [&>.overviewStack]:min-h-0 [&>.overviewGrid]:flex-1 [&>.overviewGrid]:min-h-0 [&>.effectiveGrid]:flex-1 [&>.effectiveGrid]:min-h-0 [&>.summaryGrid]:shrink-0",
+    "viewStack min-w-0 flex h-full min-h-0 flex-col overflow-hidden [&>.workspace]:flex-1 [&>.workspace]:min-h-0 [&>.cleanupWorkspace]:flex-1 [&>.cleanupWorkspace]:min-h-0 [&>.overviewStack]:flex-1 [&>.overviewStack]:min-h-0 [&>.overviewGrid]:flex-1 [&>.overviewGrid]:min-h-0 [&>.effectiveGrid]:flex-1 [&>.effectiveGrid]:min-h-0 [&>.summaryGrid]:shrink-0 [&>.githubProjectsPanel]:shrink-0 [&>.libraryBrowseFill]:flex-1 [&>.libraryBrowseFill]:min-h-0",
   // Width ownership: VSplitWorkspace + WORKBENCH_LAYOUT_IDS.memory (left/right pane ids).
   workspace:
     `workspace min-w-0 h-full min-h-0 flex-1 overflow-hidden p-2 ${vuiWorkspaceFillClass}`,

@@ -29,9 +29,9 @@
 
 ## 统计
 
-- Facade `*_service.py`：**69**
+- Facade `*_service.py`：**70**
 - 有 pack README：**7**
-- 仅单文件 facade：**63**
+- 仅单文件 facade：**64**
 
 ## Domain 速查
 
@@ -43,7 +43,7 @@
 | Agent directory / config (`agent`) | 15 |
 | Chat room / conversation index (`chat`) | 3 |
 | Knowledge / RAG (`knowledge`) | 4 |
-| Memory (`memory`) | 3 |
+| Memory (`memory`) | 4 |
 | Research / Challenge Cup (`research`) | 5 |
 | Self / Supervised evolution (`evolution`) | 10 |
 | Runtime / runtime scene (`runtime`) | 3 |
@@ -128,6 +128,7 @@
 | `memory_cleanup_service.py` | Hard-delete cleanup helpers for Memory Library targets. | — | `memory.py` | `test_memory_cleanup_service.py`, `test_select_tests.py`, `test_web_memory_routes.py` |
 | `memory_graph_service.py` | Read-only project memory knowledge graph service. | — | `memory.py` | `test_team_knowledge_service.py`, `test_web_memory_routes.py` |
 | `memory_service.py` | Agent memory overview and user management service. | — | `memory.py` | `test_agent_protocol.py`, `test_agent_tool_contracts.py`, `test_codebase_map_builder.py` |
+| `github_project_library_service.py` | Persistent public GitHub clones under project memory, with a generated index. | — | `memory.py` | `test_github_project_library_service.py` |
 
 ## Research / Challenge Cup
 

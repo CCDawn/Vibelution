@@ -252,16 +252,69 @@ export function buildHypothesisFirstCanvasRegion(
   const meetingNodeId = (meetingRoundId: string): string =>
     `hf_meeting_${roundIndexByMeetingId.get(meetingRoundId) ?? 0}`;
 
-  for (const meeting of meetings) {
+  // GitHub Actions / Temporal attempt pattern: a discussion round abandoned
+  // with zero successful speeches is a failed *attempt* of the review, not a
+  // peer round. Fold such rounds into the next effective round's node as a
+  // retry count instead of stacking them as parallel canvas cards.
+  const isSupersededEmpty = (meeting: MeetingRoundRecord): boolean =>
+    meeting.status === "closed"
+    && meeting.recoveryReason === "discussion_has_no_completed_messages";
+  const effectiveMeetings = meetings.filter((meeting) => !isSupersededEmpty(meeting));
+  const lastEffectiveRound = effectiveMeetings.reduce(
+    (max, meeting) => Math.max(max, roundIndexByMeetingId.get(meeting.meetingRoundId) ?? 0),
+    0,
+  );
+  // A trailing superseded round (reopen failed / not yet run) stays visible so
+  // the chain keeps a tail to act on; only rounds absorbed by a successor fold.
+  const visibleMeetings = [
+    ...effectiveMeetings,
+    ...meetings.filter(
+      (meeting) =>
+        isSupersededEmpty(meeting)
+        && (roundIndexByMeetingId.get(meeting.meetingRoundId) ?? 0) > lastEffectiveRound,
+    ),
+  ].sort(
+    (left, right) =>
+      (roundIndexByMeetingId.get(left.meetingRoundId) ?? 0)
+      - (roundIndexByMeetingId.get(right.meetingRoundId) ?? 0),
+  );
+  const retryCountByMeetingId = new Map<string, number>();
+  for (const meeting of visibleMeetings) {
+    if (isSupersededEmpty(meeting)) continue;
+    const roundIndex = roundIndexByMeetingId.get(meeting.meetingRoundId) ?? 0;
+    const previousVisibleRound = Math.max(
+      0,
+      ...visibleMeetings
+        .filter(
+          (other) =>
+            !isSupersededEmpty(other)
+            && (roundIndexByMeetingId.get(other.meetingRoundId) ?? 0) < roundIndex,
+        )
+        .map((other) => roundIndexByMeetingId.get(other.meetingRoundId) ?? 0),
+    );
+    const absorbed = meetings.filter(
+      (other) =>
+        isSupersededEmpty(other)
+        && (roundIndexByMeetingId.get(other.meetingRoundId) ?? 0) < roundIndex
+        && (roundIndexByMeetingId.get(other.meetingRoundId) ?? 0) > previousVisibleRound,
+    ).length;
+    if (absorbed > 0) retryCountByMeetingId.set(meeting.meetingRoundId, absorbed);
+  }
+
+  for (const meeting of visibleMeetings) {
     const roundIndex = roundIndexByMeetingId.get(meeting.meetingRoundId)!;
+    const retries = retryCountByMeetingId.get(meeting.meetingRoundId) ?? 0;
+    const baseDescription = isSupersededEmpty(meeting)
+      ? "发言失败已跳过，等待重试"
+      : meetingNodeDescription(meeting);
     nodes.push({
       nodeId: `hf_meeting_${roundIndex}`,
       stageId: HYPOTHESIS_FIRST_STAGE_ID,
       label: `第 ${roundIndex} 轮讨论·评审`,
       actorKind: "agent",
       visualKind: "agent_task",
-      status: meetingNodeStatus(meeting),
-      description: meetingNodeDescription(meeting),
+      status: isSupersededEmpty(meeting) ? "blocked" : meetingNodeStatus(meeting),
+      description: retries > 0 ? `含 ${retries} 次失败重试 · ${baseDescription}` : baseDescription,
     });
   }
 
@@ -271,8 +324,10 @@ export function buildHypothesisFirstCanvasRegion(
     requestIndexById.set(request.requestId, position + 1);
   });
   // Only ledger-consistent requests get a card: the triggering meeting must be
-  // in scope, otherwise the card would dangle without its decision edge.
-  const cardedRequests = requests.filter((request) => roundIndexByMeetingId.has(request.meetingRoundId));
+  // a visible round in scope (superseded attempts never trigger collection),
+  // otherwise the card would dangle without its decision edge.
+  const cardedRequests = requests.filter((request) =>
+    visibleMeetings.some((meeting) => meeting.meetingRoundId === request.meetingRoundId));
   for (const request of cardedRequests) {
     const gapIndex = requestIndexById.get(request.requestId)!;
     nodes.push({
@@ -317,8 +372,8 @@ export function buildHypothesisFirstCanvasRegion(
   }
 
   // --- edges (only associations that really exist in the ledger) -----------
-  const firstMeeting = meetings[0];
-  const lastMeeting = meetings[meetings.length - 1];
+  const firstMeeting = visibleMeetings[0];
+  const lastMeeting = visibleMeetings[visibleMeetings.length - 1];
   if (selection && firstMeeting) {
     edges.push({
       edgeId: "hf_e_sel_m1",
@@ -347,13 +402,14 @@ export function buildHypothesisFirstCanvasRegion(
     });
   }
 
+  const visibleMeetingIds = new Set(visibleMeetings.map((meeting) => meeting.meetingRoundId));
   const linkByTargetMeetingId = new Map<string, ReviewRoundLinkRecord>();
   for (const link of links) {
     linkByTargetMeetingId.set(link.meetingRoundId, link);
   }
   for (const link of links) {
     // A recorded link IS the handoff fact: draw collection → next meeting.
-    if (!roundIndexByMeetingId.has(link.meetingRoundId) || !cardedRequestIds.has(link.collectionRequestId)) {
+    if (!visibleMeetingIds.has(link.meetingRoundId) || !cardedRequestIds.has(link.collectionRequestId)) {
       continue;
     }
     edges.push({
@@ -369,16 +425,18 @@ export function buildHypothesisFirstCanvasRegion(
     });
   }
 
-  for (const meeting of meetings) {
+  for (const meeting of visibleMeetings) {
     if (meeting.meetingRoundId === firstMeeting?.meetingRoundId) {
       continue;
     }
     if (linkByTargetMeetingId.has(meeting.meetingRoundId)) {
       continue; // collection-bridged continuation already drawn
     }
-    const previousId = meeting.previousMeetingRoundId && roundIndexByMeetingId.has(meeting.previousMeetingRoundId)
+    // The lineage ref may point at a folded (superseded) attempt; hop over it
+    // to the nearest visible predecessor so the edge always binds two cards.
+    const previousId = meeting.previousMeetingRoundId && visibleMeetingIds.has(meeting.previousMeetingRoundId)
       ? meeting.previousMeetingRoundId
-      : meetings[meetings.indexOf(meeting) - 1]?.meetingRoundId;
+      : visibleMeetings[visibleMeetings.indexOf(meeting) - 1]?.meetingRoundId;
     if (!previousId) {
       continue;
     }
