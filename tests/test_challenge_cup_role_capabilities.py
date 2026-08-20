@@ -21,6 +21,7 @@ def test_collection_role_sees_only_the_single_facade_tool():
     assert "batch_web_search_tool" in profile["forbiddenTools"]
     assert "source_collection_stage_writeback_tool" in profile["forbiddenTools"]
     assert "web_fetch_tool" in profile["forbiddenTools"]
+    assert "research_knowledge_request_tool" in profile["forbiddenTools"]
     assert not (set(profile["allowedTools"]) & set(svc.ALL_INTERNAL_PROVIDER_WRITEBACK_TOOLS))
 
 
@@ -56,7 +57,11 @@ def test_experiment_revision_execution_evaluation_roles_are_minimal_and_deny_int
     cases = {
         "challenge_cup_experiment_planner": {
             "promptTemplateId": "prompt-challenge-cup-experiment-planner",
-            "allowed": {"challenge_cup_experiment_context_tool", "challenge_cup_experiment_writeback_tool"},
+            "allowed": {
+                "challenge_cup_experiment_context_tool",
+                "challenge_cup_experiment_writeback_tool",
+                "research_knowledge_request_tool",
+            },
         },
         "challenge_cup_experiment_ledger": {
             "promptTemplateId": "prompt-challenge-cup-experiment-ledger",
@@ -105,6 +110,32 @@ def test_experiment_revision_execution_evaluation_roles_are_minimal_and_deny_int
         assert policy["networkAccess"] == "none"
 
 
+def test_hypothesis_knowledge_request_tool_is_planner_only():
+    request_tool = "research_knowledge_request_tool"
+    assert (
+        svc.role_capability_contract_allows("challenge_cup_experiment_planner", request_tool)
+        is True
+    )
+    assert (
+        svc.role_capability_contract_denies("challenge_cup_experiment_planner", "research_knowledge_collection_tool")
+        is True
+    )
+    for role_key in (
+        "challenge_cup_experiment_ledger",
+        "challenge_cup_iteration_planner",
+        "challenge_cup_versioning",
+        "research_knowledge_collector",
+    ):
+        assert svc.role_capability_contract_denies(role_key, request_tool) is True, role_key
+        assert svc.role_capability_contract_allows(role_key, request_tool) is False, role_key
+        policy = svc.resolve_role_tool_policy(
+            role_key=role_key,
+            primary_mode="research",
+            policy_id=f"tool-{role_key}",
+        )
+        assert request_tool not in set(policy["allowedTools"]), role_key
+
+
 def test_unknown_role_has_no_capability_contract():
     assert svc.role_capability_contract_for_role("unknown_role") is None
     assert svc.role_capability_contract_allows("unknown_role", "research_knowledge_collection_tool") is False
@@ -115,4 +146,4 @@ def test_role_capability_contract_snapshot_is_stable():
     snapshot = svc.role_capability_contract_snapshot()
     assert [item["roleKey"] for item in snapshot] == sorted(item["roleKey"] for item in snapshot)
     assert set(item["roleKey"] for item in snapshot) == set(svc.ROLE_CAPABILITY_CONTRACTS)
-    assert svc.role_capability_contract_fingerprint() == "67e6d460f4fc4f94d9365710eb16c3fa111cb2e82d359a0b9661b42bcd2af907"
+    assert svc.role_capability_contract_fingerprint() == "9dfd9d935ecb76d04d57f77aa6005e687fd77f7c20dd3d19517172f21be4bfb9"

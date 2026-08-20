@@ -91,6 +91,9 @@ from tools.computer_use_tools import (
     computer_use_task_tool as _computer_use_task_impl,
 )
 from tools.research_knowledge_tools import research_knowledge_query_tool as _research_knowledge_query_impl
+from tools.research_knowledge_request_tools import (
+    research_knowledge_request_tool as _research_knowledge_request_impl,
+)
 from tools.team_knowledge_tools import (
     knowledge_governance_plan_tool as _knowledge_governance_plan_impl,
     knowledge_governance_tasks_tool as _knowledge_governance_tasks_impl,
@@ -2456,6 +2459,51 @@ def _build_key_tools() -> List[BaseTool]:
         )
 
     @tool
+    def research_knowledge_request_tool(
+        team_id: str = "research-team",
+        action: str = "status",
+        keywords: str = "",
+        preview_query: str = "",
+        preview_kind: str = "paper",
+        preview_limit: int = 5,
+        research_project_id: str = "",
+        task_id: str = "",
+    ) -> str:
+        """
+        【假说侧知识请求】为当前绑定的研究问题按需触发受控知识搜集或做 advisory 检索预览。
+
+        只服务实验规划 Agent 的假设/实验/协议任务；scope 由服务端从当前绑定任务解析，不能指定其他问题。
+        - action=request：按关键词为本题确保一个受控搜集 run（幂等、不阻断假说节点、不写正式知识）。
+        - action=status：只读查看本题搜集 run 状态与候选摘要。
+        - action=preview：有界 metadata 检索预览；结果仅供 advisory 参考，绝不能作为 allowedEvidenceRefs 引用。
+
+        正式证据仍需阶段一链路和人类知识包交接；平台授权前 preview 对正式 scope 保持关闭。
+
+        Args:
+            team_id: 团队 ID，默认 research-team
+            action: request / status / preview
+            keywords: request 的检索关键词，逗号或换行分隔（1-8 条）
+            preview_query: preview 的检索词
+            preview_kind: preview 来源类型：paper / web / dataset / github
+            preview_limit: preview 返回条数上限，1-8，默认 5
+            research_project_id: 可选，显式绑定项目 ID（默认从当前运行时解析）
+            task_id: 可选，显式绑定任务 ID（与 research_project_id 成对提供）
+
+        Returns:
+            JSON 格式的 scope、collection 摘要或 advisory 预览结果与边界说明
+        """
+        return _research_knowledge_request_impl(
+            team_id=team_id,
+            action=action,
+            keywords=keywords,
+            preview_query=preview_query,
+            preview_kind=preview_kind,
+            preview_limit=preview_limit,
+            research_project_id=research_project_id,
+            task_id=task_id,
+        )
+
+    @tool
     def unified_memory_search_tool(
         query: str = "",
         query_mode: str = "auto",
@@ -2993,6 +3041,7 @@ def _build_key_tools() -> List[BaseTool]:
         computer_use_task_tool,
         computer_use_session_tool,
         research_knowledge_query_tool,
+        research_knowledge_request_tool,
         unified_memory_search_tool,
         skill_library_search_tool,
         github_project_library_search_tool,

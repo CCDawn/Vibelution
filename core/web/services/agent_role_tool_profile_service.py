@@ -88,6 +88,10 @@ CHALLENGE_CUP_OPERATION_FORBIDDEN_TOOLS = (
     *FETCH_TOOLS,
 )
 KNOWLEDGE_COLLECTION_FACADE_TOOL = "research_knowledge_collection_tool"
+# Narrow hypothesis-side knowledge provisioning wrapper over the same facade:
+# request/status/preview with advisory, non-blocking semantics. Only the
+# experiment planner role may see it; the raw facade stays collector-only.
+HYPOTHESIS_KNOWLEDGE_REQUEST_TOOL = "research_knowledge_request_tool"
 # Internal provider/writeback tools are never exposed to any fixed role; they are
 # explicitly denied below and only reachable through the single facade.
 INTERNAL_PROVIDER_TOOLS = (*SEARCH_TOOLS, *FETCH_TOOLS)
@@ -444,12 +448,13 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
     ),
     "challenge_cup_experiment_planner": _profile(
         "challenge_cup_experiment_planner",
-        allowed_tools=CHALLENGE_CUP_EXPERIMENT_TOOLS,
+        allowed_tools=(*CHALLENGE_CUP_EXPERIMENT_TOOLS, HYPOTHESIS_KNOWLEDGE_REQUEST_TOOL),
         preferred_tools=(
             "challenge_cup_experiment_context_tool",
             "challenge_cup_experiment_writeback_tool",
             "unified_memory_search_tool",
             "research_knowledge_query_tool",
+            "research_knowledge_request_tool",
             "agent_message_tool",
         ),
         forbidden_tools=CHALLENGE_CUP_OPERATION_FORBIDDEN_TOOLS,
@@ -468,7 +473,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
             "research_knowledge_query_tool",
             "agent_message_tool",
         ),
-        forbidden_tools=CHALLENGE_CUP_OPERATION_FORBIDDEN_TOOLS,
+        forbidden_tools=(*CHALLENGE_CUP_OPERATION_FORBIDDEN_TOOLS, HYPOTHESIS_KNOWLEDGE_REQUEST_TOOL),
         write_scopes=("team_workflow_ledger",),
         network_access="none",
         mutation_access="restricted",
@@ -485,7 +490,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
             "research_knowledge_query_tool",
             "agent_message_tool",
         ),
-        forbidden_tools=CHALLENGE_CUP_OPERATION_FORBIDDEN_TOOLS,
+        forbidden_tools=(*CHALLENGE_CUP_OPERATION_FORBIDDEN_TOOLS, HYPOTHESIS_KNOWLEDGE_REQUEST_TOOL),
         write_scopes=("team_workflow_ledger",),
         network_access="none",
         mutation_access="restricted",
@@ -502,7 +507,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
             "research_knowledge_query_tool",
             "agent_message_tool",
         ),
-        forbidden_tools=CHALLENGE_CUP_OPERATION_FORBIDDEN_TOOLS,
+        forbidden_tools=(*CHALLENGE_CUP_OPERATION_FORBIDDEN_TOOLS, HYPOTHESIS_KNOWLEDGE_REQUEST_TOOL),
         write_scopes=("team_workflow_ledger",),
         network_access="none",
         mutation_access="restricted",
@@ -514,6 +519,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
         forbidden_tools=(
             *CHALLENGE_CUP_OPERATION_FORBIDDEN_TOOLS,
             *INTERNAL_SOURCE_COLLECTION_TOOLS,
+            HYPOTHESIS_KNOWLEDGE_REQUEST_TOOL,
             "unified_memory_search_tool",
             "research_knowledge_query_tool",
             "challenge_cup_experiment_context_tool",
@@ -702,6 +708,7 @@ ROLE_CAPABILITY_CONTRACTS: dict[str, dict[str, Any]] = {
             *INTERNAL_PROVIDER_TOOLS,
             *INTERNAL_SOURCE_COLLECTION_TOOLS,
             *KNOWLEDGE_STEWARD_TOOLS,
+            HYPOTHESIS_KNOWLEDGE_REQUEST_TOOL,
             "unified_memory_search_tool",
             "research_knowledge_query_tool",
             "challenge_cup_experiment_context_tool",
@@ -720,10 +727,11 @@ ROLE_CAPABILITY_CONTRACTS: dict[str, dict[str, Any]] = {
         "roleKey": "challenge_cup_experiment_planner",
         "promptTemplateId": "prompt-challenge-cup-experiment-planner",
         "promptResponsibility": (
-            "实验修订：基于已审资料修订实验计划与协议；只见实验账本上下文/回写最小工具，"
-            "不接触知识搜集 facade，不执行训练或联网检索。"
+            "实验修订：基于已审资料修订实验计划与协议；只见实验账本上下文/回写最小工具与"
+            "假说侧知识请求工具（advisory、不阻断、不作为正式证据），不直接接触知识搜集 "
+            "facade，不执行训练或联网检索。"
         ),
-        "allowedTools": CHALLENGE_CUP_EXPERIMENT_TOOLS,
+        "allowedTools": (*CHALLENGE_CUP_EXPERIMENT_TOOLS, HYPOTHESIS_KNOWLEDGE_REQUEST_TOOL),
         "deniedTools": (
             *CHALLENGE_CUP_OPERATION_FORBIDDEN_TOOLS,
             KNOWLEDGE_COLLECTION_FACADE_TOOL,
@@ -741,12 +749,13 @@ ROLE_CAPABILITY_CONTRACTS: dict[str, dict[str, Any]] = {
         "promptTemplateId": "prompt-challenge-cup-experiment-ledger",
         "promptResponsibility": (
             "实验执行：登记实验执行证据（baseline/smoke/full-run）与入库申请；只见实验账本"
-            "最小工具，不接触知识搜集 facade，不执行训练或联网检索。"
+            "最小工具，不接触知识搜集 facade 与假说侧知识请求工具，不执行训练或联网检索。"
         ),
         "allowedTools": CHALLENGE_CUP_EXPERIMENT_TOOLS,
         "deniedTools": (
             *CHALLENGE_CUP_OPERATION_FORBIDDEN_TOOLS,
             KNOWLEDGE_COLLECTION_FACADE_TOOL,
+            HYPOTHESIS_KNOWLEDGE_REQUEST_TOOL,
             *INTERNAL_SOURCE_COLLECTION_TOOLS,
             "challenge_cup_iteration_writeback_tool",
             "challenge_cup_versioning_writeback_tool",
@@ -761,12 +770,13 @@ ROLE_CAPABILITY_CONTRACTS: dict[str, dict[str, Any]] = {
         "promptTemplateId": "prompt-challenge-cup-iteration-planner",
         "promptResponsibility": (
             "实验评估：基于证据记录 Research Loop 决策与迭代规划；只见迭代/实验上下文最小"
-            "工具，不接触知识搜集 facade，不执行训练或联网检索。"
+            "工具，不接触知识搜集 facade 与假说侧知识请求工具，不执行训练或联网检索。"
         ),
         "allowedTools": (*CHALLENGE_CUP_ITERATION_TOOLS, "challenge_cup_experiment_context_tool"),
         "deniedTools": (
             *CHALLENGE_CUP_OPERATION_FORBIDDEN_TOOLS,
             KNOWLEDGE_COLLECTION_FACADE_TOOL,
+            HYPOTHESIS_KNOWLEDGE_REQUEST_TOOL,
             *INTERNAL_SOURCE_COLLECTION_TOOLS,
             "challenge_cup_experiment_writeback_tool",
             "challenge_cup_versioning_writeback_tool",
@@ -781,12 +791,13 @@ ROLE_CAPABILITY_CONTRACTS: dict[str, dict[str, Any]] = {
         "promptTemplateId": "prompt-challenge-cup-versioning",
         "promptResponsibility": (
             "候选版本治理：登记候选版本历史与关系；只见版本/迭代上下文最小工具，"
-            "不接触知识搜集 facade，不执行训练或联网检索。"
+            "不接触知识搜集 facade 与假说侧知识请求工具，不执行训练或联网检索。"
         ),
         "allowedTools": (*CHALLENGE_CUP_VERSIONING_TOOLS, "challenge_cup_iteration_context_tool"),
         "deniedTools": (
             *CHALLENGE_CUP_OPERATION_FORBIDDEN_TOOLS,
             KNOWLEDGE_COLLECTION_FACADE_TOOL,
+            HYPOTHESIS_KNOWLEDGE_REQUEST_TOOL,
             *INTERNAL_SOURCE_COLLECTION_TOOLS,
             "challenge_cup_experiment_writeback_tool",
             "challenge_cup_iteration_writeback_tool",

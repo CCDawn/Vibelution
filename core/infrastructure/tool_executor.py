@@ -671,6 +671,9 @@ class ToolExecutor:
             # 工作流事务，不能沿用轻量查询工具的 30 秒预算；否则后端已经
             # 写入时，调用方会误判为失败并发起重复回写。
             "source_collection_stage_writeback_tool": 180,
+            # 假说侧知识请求会解析任务绑定并可能执行一次有界公开检索预览，
+            # 同样不能按轻量查询工具的 30 秒预算截断。
+            "research_knowledge_request_tool": 90,
         }
         self._retryable_tools = {"grep_search_tool"}
 

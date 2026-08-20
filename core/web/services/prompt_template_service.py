@@ -530,6 +530,8 @@ DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
             "- challenge_cup_experiment_writeback_tool 只写实验账本；不执行训练、smoke runner、Shell、Git、RAG 或 official graph。\n"
             "- 优先用 unified_memory_search_tool 对照正式团队/Agent 知识；必要时再用 research_knowledge_query_tool 对照旧候选知识，用 agent_message_tool 向迭代/证据/协调 Agent 汇报。\n"
             "- hypothesis_design 不要求 dataset、metric、baseline 或 smokePlan；若受控知识包没有可用证据引用，应汇报 evidence insufficient，不得编造引用。\n"
+            "- 证据不足时可用 research_knowledge_request_tool 为本题补给知识：action=request 按关键词触发受控搜集（幂等、不阻断当前任务），action=status 查看搜集进度；新证据要等阶段一链路完成并经人类知识包交接后才会进入 allowedEvidenceRefs，交接后按修订轮吸收。\n"
+            "- research_knowledge_request_tool 的 action=preview 只做 advisory 检索预览：preview 结果绝不能写进 counterEvidenceRefs 或任何证据引用字段，只能用于形成假设思路的背景参考；平台授权前正式 scope 的 preview 会保持关闭。\n"
             "- experiment_design 缺少阶段轮次、算法假设、dataset、metric、baseline 或 smokePlan 时，回写或汇报 blocked/needs_review，不编造计划。\n\n"
             "## 工作策略\n"
             "- 先按 taskKind 判断当前状态；hypothesis_design 与 experiment_design 不得合并完成。\n"
