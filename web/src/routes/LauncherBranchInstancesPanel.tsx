@@ -1,10 +1,10 @@
-import { GitBranch } from "lucide-react";
+import { GitBranch, LoaderCircle } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { getLauncherBranchInstances, requestBranchInstanceCleanup, type LauncherBranchInstance } from "../api/launcher";
 import { queryKeys } from "../api/queryKeys";
-import { VButton, VCheckbox, VConfirmDialog, VDenseTable, VEmptyState, VNativeInput, VStateSurface, VStatusChip, VTabs, VToolbar, VTooltip, type VDenseTableColumn } from "../components/vui";
+import { VActionGroup, VButton, VCheckbox, VConfirmDialog, VDenseTable, VEmptyState, VNativeInput, VStateSurface, VStatusChip, VTabs, VToolbar, VTooltip, type VDenseTableColumn } from "../components/vui";
 import type { LauncherOperation } from "../api/types";
 import { LauncherBranchStatusHelp } from "./LauncherBranchStatusHelp";
 import {
@@ -457,10 +457,10 @@ export function LauncherBranchInstancesPanel({
     const windowOpen = instanceWindowOpen(item);
     const startBusy = shouldHoldOpenClickGuard(state);
     const stopBusy = state === "stopping";
-    const openLabel = state === "starting" || state === "restarting"
-      ? instanceRuntimeStateLabel(state, zh)
-      : state === "failed" ? labels.retryStart : windowOpen ? labels.focusWindow : labels.openWindow;
-    const showOpen = canRequestOpenInstance(item, pendingOperation) || state === "starting" || state === "restarting";
+    const startingOrRestarting = state === "starting" || state === "restarting";
+    const openLabel = state === "failed" ? labels.retryStart : windowOpen ? labels.focusWindow : labels.openWindow;
+    const showOpen = canRequestOpenInstance(item, pendingOperation);
+    const showStop = canStopInstance(item, pendingOperation) || stopBusy;
     const requestOpen = () => {
       if (startBusy || openClickGuardsRef.current.has(item.id)) {
         return;
@@ -480,14 +480,18 @@ export function LauncherBranchInstancesPanel({
       }
     };
     return (
-      <span className={styles.actionButtons} onClick={(event) => event.stopPropagation()}>
+      <VActionGroup
+        ariaLabel={labels.actions}
+        aria-busy={startingOrRestarting || stopBusy || undefined}
+        className={styles.actionButtons}
+        onClick={(event) => event.stopPropagation()}
+      >
         {showOpen ? (
           <VButton
             type="button"
             variant="primary"
             density="compact"
             isDisabled={startBusy}
-            isPending={state === "starting" || state === "restarting"}
             onPress={requestOpen}
           >
             {openLabel}
@@ -496,13 +500,26 @@ export function LauncherBranchInstancesPanel({
         {showOpen && openReject?.id === item.id ? (
           <span className={styles.errorReason}>{lifecycleIntentRejectMessage(openReject.reason, zh)}</span>
         ) : null}
-        {canStopInstance(item, pendingOperation) || state === "stopping" ? (
+        {showStop ? (
           <VButton
             type="button"
-            variant="secondary"
+            variant={startingOrRestarting ? "primary" : "secondary"}
             density="compact"
             isDisabled={stopBusy}
-            isPending={state === "stopping"}
+            isPending={stopBusy}
+            icon={startingOrRestarting ? (
+              <LoaderCircle
+                size={14}
+                strokeWidth={2.25}
+                className="animate-spin motion-reduce:animate-none"
+                aria-hidden="true"
+              />
+            ) : undefined}
+            tooltip={startingOrRestarting
+              ? (state === "restarting"
+                ? (zh ? "正在重启，点击可停止" : "Restarting — click to stop")
+                : (zh ? "正在启动，点击可停止" : "Starting — click to stop"))
+              : undefined}
             onPress={() => {
               if (stopBusy) {
                 return;
@@ -510,10 +527,10 @@ export function LauncherBranchInstancesPanel({
               onLifecycle?.(item.id, "stop");
             }}
           >
-            {state === "stopping" ? instanceRuntimeStateLabel(state, zh) : instanceStopLabel(item, zh, pendingOperation)}
+            {stopBusy ? instanceRuntimeStateLabel(state, zh) : instanceStopLabel(item, zh, pendingOperation)}
           </VButton>
         ) : null}
-      </span>
+      </VActionGroup>
     );
   };
 
