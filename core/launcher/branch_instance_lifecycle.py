@@ -604,6 +604,7 @@ def run_isolated_operation(
     runner: SpawnRunner | None = None,
     extra_used: Iterable[int] | None = None,
     terminate_pid: Callable[[int], dict[str, Any]] | None = None,
+    claimed_generation: int | None = None,
 ) -> dict[str, Any]:
     """Start/stop/restart a non-current checked-out worktree on isolated ports."""
 
@@ -655,18 +656,20 @@ def run_isolated_operation(
                 command_id=str(existing.get("commandId") or ""),
                 message="已打开该分支工作台窗口。",
             )
-        try:
-            claimed = _claim_isolated_start(
-                item,
-                operation,
-                extra_used=used,
-            )
-        except registry.InstanceBusyError as exc:
-            raise BranchInstanceLifecycleError(
-                "instance_busy",
-                "该分支实例正在执行生命周期操作。",
-                status_code=409,
-            ) from exc
+        claimed = _existing_matching_start_claim(instance_id, claimed_generation)
+        if claimed is None:
+            try:
+                claimed = _claim_isolated_start(
+                    item,
+                    operation,
+                    extra_used=used,
+                )
+            except registry.InstanceBusyError as exc:
+                raise BranchInstanceLifecycleError(
+                    "instance_busy",
+                    "该分支实例正在执行生命周期操作。",
+                    status_code=409,
+                ) from exc
         backend_port = _positive_int(claimed.get("port"))
         control_port = _positive_int(claimed.get("controlPort"))
         generation = _positive_int(claimed.get("generation"))
@@ -690,7 +693,10 @@ def run_isolated_operation(
             raise
         spawn_pid = _positive_int((spawned or {}).get("pid"))
         if spawn_pid > 0:
-            registry.upsert_instance(instance_id, spawnPid=spawn_pid)
+            applied = registry.record_spawn_pid(instance_id, spawn_pid, generation)
+            if not applied:
+                killer = terminate_pid or terminate_pid_tree
+                killer(spawn_pid)
         return _isolated_response(
             operation,
             instance_id=instance_id,
@@ -709,8 +715,10 @@ def run_isolated_operation(
         or _positive_int(item.get("controlPort"))
         or registry.DEFAULT_CONTROL_PORT
     )
-    _claim_isolated_stop(instance_id, item, existing)
-    spawn_pid = _positive_int(existing.get("spawnPid"))
+    claimed_stop = _existing_matching_stop_claim(instance_id, claimed_generation)
+    if claimed_stop is None:
+        claimed_stop = _claim_isolated_stop(instance_id, item, existing)
+    spawn_pid = _positive_int(claimed_stop.get("spawnPid"))
     killer = terminate_pid or terminate_pid_tree
     if spawn_pid > 0:
         killer(spawn_pid)
@@ -737,6 +745,7 @@ def run_isolated_operation(
         spawn_pid=0,
         failure_message="",
         window_pid=0,
+        expected_generation=_positive_int(claimed_stop.get("generation")),
     )
     _clear_isolated_workbench_runtime(item)
     return _isolated_response(
@@ -1046,27 +1055,14 @@ def observe_isolated_transition(
     expected = int(generation or 0)
 
     def mutator(payload: dict[str, Any]) -> dict[str, Any]:
-        instances = payload.setdefault("instances", {})
-        entry = instances.get(wanted)
-        if not isinstance(entry, dict):
-            return {}
-        status = str(entry.get("status") or "").strip().lower()
-        current_generation = int(entry.get("generation") or 0)
-        if expected > 0 and current_generation != expected:
-            return dict(entry)
-        if status not in {"starting", "restarting"}:
-            return dict(entry)
-        if operation == "observe-error":
-            entry["status"] = "failed"
-            entry["phase"] = "failed"
-            entry["desiredState"] = str(entry.get("desiredState") or "open")
-            entry["failureMessage"] = str(message or "隔离实例启动超时或 HTTP 未就绪。")
-        else:
-            entry["status"] = "steady"
-            entry["phase"] = "steady"
-            entry["desiredState"] = "open"
-            entry["failureMessage"] = ""
-        return dict(entry)
+        _applied, entry = registry.apply_observe(
+            payload,
+            instance_id=wanted,
+            operation=operation,
+            expected_generation=expected,
+            message=message,
+        )
+        return entry
 
     stored = registry.mutate_registry(mutator)
     return {
@@ -1119,6 +1115,30 @@ def terminate_pid_tree(pid: int, *, timeout_seconds: float = 5.0) -> dict[str, A
     return {"supported": True, "rootPid": target, "requested": requested, "terminated": requested}
 
 
+def _existing_matching_start_claim(instance_id: str, claimed_generation: int | None) -> dict[str, Any] | None:
+    expected = int(claimed_generation or 0)
+    if expected <= 0:
+        return None
+    existing = registry.get_instance(instance_id)
+    if int(existing.get("generation") or 0) != expected:
+        return None
+    if str(existing.get("status") or "").strip().lower() not in {"starting", "restarting"}:
+        return None
+    return existing
+
+
+def _existing_matching_stop_claim(instance_id: str, claimed_generation: int | None) -> dict[str, Any] | None:
+    expected = int(claimed_generation or 0)
+    if expected <= 0:
+        return None
+    existing = registry.get_instance(instance_id)
+    if int(existing.get("generation") or 0) != expected:
+        return None
+    if str(existing.get("status") or "").strip().lower() != "stopping":
+        return None
+    return existing
+
+
 def _claim_isolated_start(
     item: dict[str, Any],
     operation: str,
@@ -1129,8 +1149,6 @@ def _claim_isolated_start(
     worktree = Path(str(item.get("path")))
     preferred_backend = _positive_int(item.get("port")) or registry.DEFAULT_BASE_PORT
     preferred_control = _positive_int(item.get("controlPort")) or registry.DEFAULT_CONTROL_PORT
-    status = "restarting" if operation == "restart" else "starting"
-    phase = status
     command_id = str(uuid4())
     deadline_at = _deadline_iso(_ISOLATED_START_TIMEOUT_SECONDS)
     slot_fields = _slot_fields_for_path(worktree)
@@ -1145,55 +1163,21 @@ def _claim_isolated_start(
             listener_inspector=registry.inspect_listener_identity,
             pid_existence_inspector=registry._pid_is_present,
         )
-        entry = registry._ensure_entry(payload, instance_id)
-        current_status = str(entry.get("status") or "").strip().lower()
-        if current_status in registry.IN_FLIGHT_STATUSES:
-            raise registry.InstanceBusyError(
-                instance_id,
-                status=current_status,
-                generation=int(entry.get("generation") or 0),
-            )
-        backend = registry._allocate_backend_locked(
+        return registry.apply_claim_start(
             payload,
-            instance_id,
-            preferred_backend,
-            host="127.0.0.1",
+            instance_id=instance_id,
+            project_root=str(worktree),
+            branch=str(item.get("branch") or ""),
+            operation=operation,
+            command_id=command_id,
+            deadline_at=deadline_at,
+            owner_pid=os.getpid(),
             extra_used=set(extra_used),
+            preferred_backend=preferred_backend,
+            preferred_control=preferred_control,
+            started_at=_now_iso(),
+            slot_fields=slot_fields,
         )
-        control = registry._allocate_control_locked(
-            payload,
-            instance_id,
-            preferred_control,
-            host="127.0.0.1",
-            extra_used=set(extra_used) | {int(backend)},
-        )
-        generation = int(entry.get("generation") or 0) + 1
-        owner_pid = os.getpid()
-        entry.update(
-            {
-                "projectRoot": str(worktree),
-                "branch": str(item.get("branch") or ""),
-                "port": int(backend),
-                "controlPort": int(control),
-                "url": _loopback_url(backend),
-                "status": status,
-                "desiredState": "open",
-                "phase": phase,
-                "generation": generation,
-                "commandId": command_id,
-                "deadlineAt": deadline_at,
-                "inFlightDeadlineAt": deadline_at,
-                "failureMessage": "",
-                "spawnPid": 0,
-                "windowPid": 0,
-                "ownerPid": owner_pid,
-                "startedAt": _now_iso(),
-                **slot_fields,
-            }
-        )
-        registry._capture_entry_identities(entry, {"ownerPid": owner_pid})
-        registry._touch_entry(entry)
-        return dict(entry)
 
     return registry.mutate_registry(mutator)
 
@@ -1206,16 +1190,11 @@ def _claim_isolated_stop(
     worktree = Path(str(item.get("path") or existing.get("projectRoot") or ""))
 
     def mutator(payload: dict[str, Any]) -> dict[str, Any]:
-        entry = registry._ensure_entry(payload, instance_id)
-        generation = int(entry.get("generation") or 0) + 1
-        entry["status"] = "stopping"
-        entry["phase"] = "stopping"
-        entry["desiredState"] = "closed"
-        entry["generation"] = generation
-        entry["failureMessage"] = ""
-        if worktree.as_posix() not in {".", ""}:
-            entry["projectRoot"] = str(worktree)
-        return dict(entry)
+        return registry.apply_claim_stop(
+            payload,
+            instance_id=instance_id,
+            project_root=str(worktree),
+        )
 
     return registry.mutate_registry(mutator)
 
@@ -1239,6 +1218,7 @@ def _upsert_instance_with_slot(
     desired_state: str | None = None,
     phase: str | None = None,
     generation: int | None = None,
+    expected_generation: int | None = None,
     command_id: str | None = None,
     spawn_pid: int | None = None,
     deadline_at: str | None = None,
@@ -1273,7 +1253,8 @@ def _upsert_instance_with_slot(
         fields["deadlineAt"] = str(deadline_at)
     if failure_message is not None:
         fields["failureMessage"] = str(failure_message)
-    registry.upsert_instance(instance_id, **fields)
+    cas_generation = expected_generation if expected_generation is not None else generation
+    registry.upsert_instance(instance_id, expected_generation=cas_generation, **fields)
 
 
 def _slot_fields_for_path(project_root: Path | str) -> dict[str, Any]:

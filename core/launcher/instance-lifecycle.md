@@ -42,7 +42,7 @@ P0 只修 **生命周期内核**：一个监督者、一套 READY、desired/obse
 
 | 事实 | Canonical | 唯一写入者 |
 | --- | --- | --- |
-| `desiredState` + `generation` + 端口 + `spawnPid` + `deadlineAt` + `commandId` | `%LOCALAPPDATA%\Vibelution\instances.json` | **当前壳** Python CLI（经 Electron IPC） |
+| `desiredState` + `generation` + 端口 + `spawnPid` + `deadlineAt` + `commandId` | `%LOCALAPPDATA%\Vibelution\instances.json` | Electron `instanceRegistryStore`（产品路径 claim/observe）；Python CLI 为迁移期双实现，行为由 `instanceRegistryCas.cases.json` 锁死 |
 | 后端 READY | 隔离 slot `launcher/state.json` 或目标树 `.runtime/launcher/state.json`，加上列表投影的 loopback HTTP 活探测 | 该树 Runtime Manager / launcher 子进程写 state；列表投影只读探测，不写 READY |
 | 窗口是否 open | Electron `windowProvider` | Electron main（`VIBELUTION_ELECTRON_MAIN_ORCHESTRATES_WINDOWS=1`） |
 | `lifecycleState` | **投影**（desired + 后端 READY + 窗口） | 无独立写入者 |
@@ -106,6 +106,8 @@ Registry 字段（隔离行）：
 | `deadlineAt` | start 观察截止（隔离 **180s**） |
 | `failureMessage` | 仅当前 generation 的失败文案 |
 | `port` / `controlPort` | 一次加锁事务内同时分配 |
+
+`claimStop` 在同一把锁内先 `generation+1` 再快照 `spawnPid`；之后旧 start 的 `spawnPid` / observe 回写必须按 generation CAS 丢弃，禁止复活。
 
 `observe-error`（Electron 监督回写）：仅当 `status ∈ {starting, restarting}` 且 `generation` 匹配（或调用方未传 generation）时写成 `failed`。过期 generation **静默 no-op**。
 

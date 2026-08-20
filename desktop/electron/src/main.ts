@@ -102,6 +102,13 @@ import {
   superviseIsolatedInstanceStart
 } from "./process/isolatedInstanceSupervisor.js";
 import {
+  claimIsolatedStart,
+  claimIsolatedStop,
+  observeIsolatedError,
+  observeIsolatedReady,
+  resolveIsolatedClaimTarget
+} from "./lifecycle/isolatedInstanceRegistryHost.js";
+import {
   invalidPythonJsonBridgePayload,
   LAUNCHER_API_JSON_BRIDGE_MAX_BYTES,
   parsePythonJsonBridgePayload,
@@ -2830,6 +2837,76 @@ async function openWorkbenchAfterLifecycleReady(
   }
 }
 
+async function runIsolatedRegistryMutation(input: {
+  operation: BranchInstanceOperation;
+  instanceId: string;
+  workspaceRoot: string;
+  pythonPath: string;
+  operatorConfigPath: string;
+  signal?: AbortSignal;
+}): Promise<OrchestratedBranchInstanceResult> {
+  const payload = launcherStateStore.projectBranchInstances();
+  const target = resolveIsolatedClaimTarget(payload, input.instanceId);
+  const spawn = async (generation?: number): Promise<OrchestratedBranchInstanceResult> =>
+    runBranchInstanceBridge({
+      workspaceRoot: input.workspaceRoot,
+      pythonPath: input.pythonPath,
+      operatorConfigPath: input.operatorConfigPath,
+      operation: input.operation,
+      instanceId: input.instanceId,
+      ...(typeof generation === "number" && generation > 0 ? { generation } : {}),
+      signal: input.signal
+    });
+
+  if (input.operation === "start" || input.operation === "restart") {
+    if (input.operation === "start" && target?.alive) {
+      return spawn();
+    }
+    if (target) {
+      const claimed = await claimIsolatedStart({
+        instanceId: input.instanceId,
+        branchInstances: payload,
+        operation: input.operation,
+        commandId: randomUUID()
+      });
+      if (!claimed.ok) {
+        return {
+          schemaVersion: 1,
+          accepted: false,
+          operation: input.operation,
+          instanceId: input.instanceId,
+          generation: claimed.generation,
+          code: "instance_busy",
+          message: "该分支实例正在执行生命周期操作。"
+        };
+      }
+      const spawned = await spawn(Number(claimed.entry.generation || 0));
+      return {
+        ...spawned,
+        generation: spawned.generation || Number(claimed.entry.generation || 0),
+        commandId: spawned.commandId || String(claimed.entry.commandId || ""),
+        port: spawned.port || Number(claimed.entry.port || 0),
+        controlPort: spawned.controlPort || Number(claimed.entry.controlPort || 0)
+      };
+    }
+    return spawn();
+  }
+
+  if (input.operation === "stop" || input.operation === "force-stop") {
+    const claimed = await claimIsolatedStop({
+      instanceId: input.instanceId,
+      branchInstances: payload
+    });
+    const stopped = await spawn(Number(claimed.entry.generation || 0));
+    return {
+      ...stopped,
+      generation: stopped.generation || Number(claimed.entry.generation || 0)
+    };
+  }
+
+  return spawn();
+}
+
 async function orchestrateBranchInstanceLifecycle(
   operation: string,
   payload: LauncherIpcInvokePayload
@@ -2870,13 +2947,13 @@ async function orchestrateBranchInstanceLifecycle(
   const paths = createDesktopPathsForApp();
   const mutation = await launcherLifecycleSupervisor.executeMutation({
     lease: intentLease,
-    mutate: async () => await runBranchInstanceBridge({
+    mutate: async () => await runIsolatedRegistryMutation({
+      operation: operation as BranchInstanceOperation,
+      instanceId,
       workspaceRoot: paths.workspaceRoot,
       pythonPath,
       operatorConfigPath:
         launcherBootstrap?.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim(),
-      operation: operation as BranchInstanceOperation,
-      instanceId,
       signal: intentLease.signal
     }),
     reconcile: async () => {
@@ -2909,8 +2986,6 @@ async function orchestrateBranchInstanceLifecycle(
     if (result.port && result.port > 0 && result.commandId) {
       const url = workbenchLoopbackUrl(result.port);
       const provider = windowProvider;
-      const operatorConfigPath =
-        launcherBootstrap.operatorConfigPath || String(desktopEnv.VIBELUTION_CONFIG_PATH || "").trim();
       void superviseIsolatedInstanceStart({
         instanceId,
         url,
@@ -2936,26 +3011,16 @@ async function orchestrateBranchInstanceLifecycle(
           }
         },
         markReady: async (observedGeneration) => {
-          await runBranchInstanceBridge({
-            workspaceRoot: paths.workspaceRoot,
-            pythonPath,
-            operatorConfigPath,
-            operation: "observe-ready",
+          await observeIsolatedReady({
             instanceId,
-            generation: observedGeneration,
-            signal: lease.signal
+            expectedGeneration: observedGeneration
           });
         },
         markError: async (observedGeneration, message) => {
-          await runBranchInstanceBridge({
-            workspaceRoot: paths.workspaceRoot,
-            pythonPath,
-            operatorConfigPath,
-            operation: "observe-error",
+          await observeIsolatedError({
             instanceId,
-            generation: observedGeneration,
-            message,
-            signal: lease.signal
+            expectedGeneration: observedGeneration,
+            message
           });
         }
       }).catch((error: unknown) => {

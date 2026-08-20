@@ -181,20 +181,216 @@ def _ensure_entry(registry: dict[str, Any], instance_id: str) -> dict[str, Any]:
     return entry
 
 
-def upsert_instance(instance_id: str, **fields: Any) -> dict[str, Any]:
+def apply_upsert(
+    payload: dict[str, Any],
+    instance_id: str,
+    fields: dict[str, Any],
+    *,
+    expected_generation: int | None = None,
+    now: datetime | None = None,
+) -> tuple[bool, dict[str, Any]]:
+    """Apply a field patch. Generation CAS silently discards stale writers."""
+
+    wanted = _normalize_instance_id(instance_id)
+    entry = _ensure_entry(payload, wanted)
+    if expected_generation is not None and int(entry.get("generation") or 0) != int(expected_generation):
+        return False, dict(entry)
+    entry.update(fields)
+    if "deadlineAt" in fields and "inFlightDeadlineAt" not in fields:
+        entry["inFlightDeadlineAt"] = fields.get("deadlineAt")
+    elif "inFlightDeadlineAt" in fields and "deadlineAt" not in fields:
+        entry["deadlineAt"] = fields.get("inFlightDeadlineAt")
+    _capture_entry_identities(entry, fields)
+    _touch_entry(entry, now=now)
+    return True, dict(entry)
+
+
+def apply_record_spawn_pid(
+    payload: dict[str, Any],
+    instance_id: str,
+    spawn_pid: int,
+    expected_generation: int,
+    *,
+    now: datetime | None = None,
+) -> tuple[bool, dict[str, Any]]:
+    return apply_upsert(
+        payload,
+        instance_id,
+        {"spawnPid": int(spawn_pid)},
+        expected_generation=int(expected_generation),
+        now=now,
+    )
+
+
+def apply_claim_start(
+    payload: dict[str, Any],
+    *,
+    instance_id: str,
+    project_root: str,
+    branch: str = "",
+    operation: str = "start",
+    command_id: str,
+    deadline_at: str,
+    owner_pid: int,
+    extra_used: set[int] | None = None,
+    preferred_backend: int = DEFAULT_BASE_PORT,
+    preferred_control: int = DEFAULT_CONTROL_PORT,
+    host: str = "127.0.0.1",
+    started_at: str | None = None,
+    slot_fields: dict[str, Any] | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """In-flight 409 + generation+1 + disjoint ports in one payload transaction."""
+
+    wanted = _normalize_instance_id(instance_id)
+    extra = {int(port) for port in (extra_used or set()) if int(port or 0) > 0}
+    entry = _ensure_entry(payload, wanted)
+    current_status = str(entry.get("status") or "").strip().lower()
+    if current_status in IN_FLIGHT_STATUSES:
+        raise InstanceBusyError(
+            wanted,
+            status=current_status,
+            generation=int(entry.get("generation") or 0),
+        )
+    backend = _allocate_backend_locked(
+        payload,
+        wanted,
+        preferred_backend,
+        host=host,
+        extra_used=extra,
+    )
+    control = _allocate_control_locked(
+        payload,
+        wanted,
+        preferred_control,
+        host=host,
+        extra_used=extra | {int(backend)},
+    )
+    status = "restarting" if operation == "restart" else "starting"
+    generation = int(entry.get("generation") or 0) + 1
+    owner = int(owner_pid or 0)
+    entry.update(
+        {
+            "projectRoot": str(project_root or ""),
+            "branch": str(branch or ""),
+            "port": int(backend),
+            "controlPort": int(control),
+            "host": host,
+            "url": f"http://127.0.0.1:{int(backend)}",
+            "status": status,
+            "desiredState": "open",
+            "phase": status,
+            "generation": generation,
+            "commandId": str(command_id or ""),
+            "deadlineAt": str(deadline_at),
+            "inFlightDeadlineAt": str(deadline_at),
+            "failureMessage": "",
+            "spawnPid": 0,
+            "windowPid": 0,
+            "ownerPid": owner,
+            "startedAt": str(started_at or deadline_at),
+            **dict(slot_fields or {}),
+        }
+    )
+    if owner > 0:
+        _capture_entry_identities(entry, {"ownerPid": owner})
+    _touch_entry(entry, now=now)
+    return dict(entry)
+
+
+def apply_claim_stop(
+    payload: dict[str, Any],
+    *,
+    instance_id: str,
+    project_root: str = "",
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Bump generation first so in-flight start observers cannot write back."""
+
+    wanted = _normalize_instance_id(instance_id)
+    entry = _ensure_entry(payload, wanted)
+    generation = int(entry.get("generation") or 0) + 1
+    entry["status"] = "stopping"
+    entry["phase"] = "stopping"
+    entry["desiredState"] = "closed"
+    entry["generation"] = generation
+    entry["failureMessage"] = ""
+    root = str(project_root or "").strip()
+    if root not in {"", "."}:
+        entry["projectRoot"] = root
+    _touch_entry(entry, now=now)
+    return dict(entry)
+
+
+def apply_observe(
+    payload: dict[str, Any],
+    *,
+    instance_id: str,
+    operation: str,
+    expected_generation: int = 0,
+    message: str = "",
+    now: datetime | None = None,
+) -> tuple[bool, dict[str, Any]]:
+    """Generation CAS for supervisor observe-ready / observe-error."""
+
+    wanted = str(instance_id or "").strip()
+    instances = payload.setdefault("instances", {})
+    entry = instances.get(wanted)
+    if not isinstance(entry, dict):
+        return False, {}
+    expected = int(expected_generation or 0)
+    current_generation = int(entry.get("generation") or 0)
+    status = str(entry.get("status") or "").strip().lower()
+    if expected > 0 and current_generation != expected:
+        return False, dict(entry)
+    if status not in {"starting", "restarting"}:
+        return False, dict(entry)
+    if operation == "observe-error":
+        entry["status"] = "failed"
+        entry["phase"] = "failed"
+        entry["desiredState"] = str(entry.get("desiredState") or "open")
+        entry["failureMessage"] = str(message or "隔离实例启动超时或 HTTP 未就绪。")
+    else:
+        entry["status"] = "steady"
+        entry["phase"] = "steady"
+        entry["desiredState"] = "open"
+        entry["failureMessage"] = ""
+    _touch_entry(entry, now=now)
+    return True, dict(entry)
+
+
+def upsert_instance(
+    instance_id: str,
+    *,
+    expected_generation: int | None = None,
+    **fields: Any,
+) -> dict[str, Any]:
     """Create or update one instance entry, preserving unknown fields."""
     instance_id = _normalize_instance_id(instance_id)
 
     def mutator(payload: dict[str, Any]) -> dict[str, Any]:
-        entry = _ensure_entry(payload, instance_id)
-        entry.update(fields)
-        if "deadlineAt" in fields and "inFlightDeadlineAt" not in fields:
-            entry["inFlightDeadlineAt"] = fields.get("deadlineAt")
-        elif "inFlightDeadlineAt" in fields and "deadlineAt" not in fields:
-            entry["deadlineAt"] = fields.get("inFlightDeadlineAt")
-        _capture_entry_identities(entry, fields)
-        _touch_entry(entry)
-        return dict(entry)
+        _applied, entry = apply_upsert(
+            payload,
+            instance_id,
+            fields,
+            expected_generation=expected_generation,
+        )
+        return entry
+
+    return mutate_registry(mutator)
+
+
+def record_spawn_pid(instance_id: str, spawn_pid: int, expected_generation: int) -> bool:
+    """Write spawnPid only when generation still matches the claiming start."""
+
+    def mutator(payload: dict[str, Any]) -> bool:
+        applied, _entry = apply_record_spawn_pid(
+            payload,
+            instance_id,
+            spawn_pid,
+            expected_generation,
+        )
+        return applied
 
     return mutate_registry(mutator)
 

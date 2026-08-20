@@ -593,6 +593,41 @@ def test_stop_reaps_spawn_pid_before_stop_script(registry_path, tmp_path):
     assert registry.get_instance("worktree:task")["spawnPid"] == 0
 
 
+def test_stop_during_start_discards_stale_spawn_pid(registry_path, tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "_port_is_free", lambda port, host: True)
+    monkeypatch.setattr(lifecycle, "current_live_ports", lambda launcher_state=None: {8000, 8765})
+    worktree = tmp_path / "task"
+    worktree.mkdir()
+    claimed = lifecycle._claim_isolated_start(
+        _item(path=str(worktree), port=8001, controlPort=8766),
+        "start",
+        extra_used={8000, 8765},
+    )
+    generation = int(claimed["generation"])
+    assert generation == 1
+    assert registry.record_spawn_pid("worktree:task", 4242, generation) is True
+
+    reaped: list[int] = []
+    lifecycle.run_isolated_operation(
+        _item(path=str(worktree), port=8001, controlPort=8766),
+        "stop",
+        runner=lambda *args, **kwargs: {"returncode": 0},
+        terminate_pid=lambda pid: reaped.append(pid) or {"supported": True, "rootPid": pid},
+    )
+    assert reaped == [4242]
+    assert registry.record_spawn_pid("worktree:task", 9999, generation) is False
+    stored = registry.get_instance("worktree:task")
+    assert stored["status"] == "closed"
+    assert stored["generation"] == 2
+    assert stored["spawnPid"] == 0
+    stale = lifecycle.observe_isolated_transition(
+        "worktree:task",
+        "observe-ready",
+        generation=generation,
+    )
+    assert stale["status"] == "closed"
+
+
 def test_spawn_detached_start_uses_current_supervisor_script(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "AppData" / "Local"))
     worktree = tmp_path / "task"

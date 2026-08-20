@@ -95,9 +95,11 @@ describe("Electron main Launcher IPC facade", () => {
     expect(branchBody).toContain("orchestrateLauncherLifecycle(operation, payload)");
     expect(branchBody).toContain("superviseIsolatedInstanceStart");
     expect(branchBody).toContain("ISOLATED_INSTANCE_READY_WAIT_MS");
-    expect(branchBody).toContain('operation: "observe-error"');
-    expect(branchBody).toContain('operation: "observe-ready"');
+    expect(branchBody).toContain("runIsolatedRegistryMutation");
+    expect(branchBody).toContain("observeIsolatedReady");
+    expect(branchBody).toContain("observeIsolatedError");
     expect(mainSource).toContain("from \"./process/isolatedInstanceSupervisor.js\"");
+    expect(mainSource).toContain("from \"./lifecycle/isolatedInstanceRegistryHost.js\"");
   });
 
   it("owns main and isolated lifecycle observers through one revisioned supervisor", () => {

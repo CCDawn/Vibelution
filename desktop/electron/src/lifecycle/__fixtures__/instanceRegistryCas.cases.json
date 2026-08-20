@@ -1,0 +1,596 @@
+{
+  "schemaVersion": 1,
+  "protocol": {
+    "registrySchemaVersion": 2,
+    "defaultBackendPort": 8000,
+    "defaultControlPort": 8765,
+    "portScanLimit": 64,
+    "inFlightStatuses": ["starting", "restarting", "stopping"],
+    "isolatedStartTimeoutSeconds": 180
+  },
+  "cases": [
+    {
+      "id": "claim-start-from-empty",
+      "op": "claimStart",
+      "registry": { "schemaVersion": 2, "instances": {} },
+      "input": {
+        "instanceId": "worktree:task",
+        "projectRoot": "C:/wt/task",
+        "branch": "task",
+        "operation": "start",
+        "commandId": "cmd-1",
+        "deadlineAt": "2026-08-20T12:03:00Z",
+        "startedAt": "2026-08-20T12:00:00Z",
+        "ownerPid": 111,
+        "preferredBackend": 8001,
+        "preferredControl": 8766,
+        "extraUsed": [8000, 8765],
+        "busyPorts": []
+      },
+      "expected": {
+        "ok": true,
+        "generation": 1,
+        "status": "starting",
+        "phase": "starting",
+        "desiredState": "open",
+        "port": 8001,
+        "controlPort": 8766,
+        "spawnPid": 0,
+        "commandId": "cmd-1",
+        "failureMessage": "",
+        "ownerPid": 111
+      }
+    },
+    {
+      "id": "claim-start-restart-status",
+      "op": "claimStart",
+      "registry": { "schemaVersion": 2, "instances": {} },
+      "input": {
+        "instanceId": "worktree:task",
+        "projectRoot": "C:/wt/task",
+        "branch": "task",
+        "operation": "restart",
+        "commandId": "cmd-restart",
+        "deadlineAt": "2026-08-20T12:04:00Z",
+        "startedAt": "2026-08-20T12:00:00Z",
+        "ownerPid": 111,
+        "preferredBackend": 8001,
+        "preferredControl": 8766,
+        "extraUsed": [8000, 8765],
+        "busyPorts": []
+      },
+      "expected": {
+        "ok": true,
+        "generation": 1,
+        "status": "restarting",
+        "phase": "restarting",
+        "desiredState": "open",
+        "port": 8001,
+        "controlPort": 8766,
+        "spawnPid": 0,
+        "commandId": "cmd-restart"
+      }
+    },
+    {
+      "id": "claim-start-busy-starting",
+      "op": "claimStart",
+      "registry": {
+        "schemaVersion": 2,
+        "instances": {
+          "worktree:task": {
+            "status": "starting",
+            "phase": "starting",
+            "generation": 3,
+            "desiredState": "open"
+          }
+        }
+      },
+      "input": {
+        "instanceId": "worktree:task",
+        "projectRoot": "C:/wt/task",
+        "operation": "start",
+        "commandId": "cmd-2",
+        "deadlineAt": "2026-08-20T12:03:00Z",
+        "startedAt": "2026-08-20T12:00:00Z",
+        "ownerPid": 111,
+        "preferredBackend": 8001,
+        "preferredControl": 8766,
+        "extraUsed": [],
+        "busyPorts": []
+      },
+      "expected": {
+        "ok": false,
+        "code": "instance_busy",
+        "generation": 3,
+        "status": "starting"
+      }
+    },
+    {
+      "id": "claim-start-busy-stopping",
+      "op": "claimStart",
+      "registry": {
+        "schemaVersion": 2,
+        "instances": {
+          "worktree:task": {
+            "status": "stopping",
+            "phase": "stopping",
+            "generation": 5,
+            "desiredState": "closed"
+          }
+        }
+      },
+      "input": {
+        "instanceId": "worktree:task",
+        "projectRoot": "C:/wt/task",
+        "operation": "start",
+        "commandId": "cmd-3",
+        "deadlineAt": "2026-08-20T12:03:00Z",
+        "startedAt": "2026-08-20T12:00:00Z",
+        "ownerPid": 111,
+        "preferredBackend": 8001,
+        "preferredControl": 8766,
+        "extraUsed": [],
+        "busyPorts": []
+      },
+      "expected": {
+        "ok": false,
+        "code": "instance_busy",
+        "generation": 5,
+        "status": "stopping"
+      }
+    },
+    {
+      "id": "claim-start-skips-registered-and-live-ports",
+      "op": "claimStart",
+      "registry": {
+        "schemaVersion": 2,
+        "instances": {
+          "other": { "port": 8001, "controlPort": 8766, "status": "steady" }
+        }
+      },
+      "input": {
+        "instanceId": "worktree:task",
+        "projectRoot": "C:/wt/task",
+        "operation": "start",
+        "commandId": "cmd-ports",
+        "deadlineAt": "2026-08-20T12:03:00Z",
+        "startedAt": "2026-08-20T12:00:00Z",
+        "ownerPid": 111,
+        "preferredBackend": 8000,
+        "preferredControl": 8765,
+        "extraUsed": [8000, 8765],
+        "busyPorts": [8002]
+      },
+      "expected": {
+        "ok": true,
+        "generation": 1,
+        "status": "starting",
+        "port": 8003,
+        "controlPort": 8767,
+        "spawnPid": 0
+      }
+    },
+    {
+      "id": "claim-start-reuses-own-free-ports",
+      "op": "claimStart",
+      "registry": {
+        "schemaVersion": 2,
+        "instances": {
+          "worktree:task": {
+            "port": 8004,
+            "controlPort": 8768,
+            "status": "closed",
+            "generation": 2
+          }
+        }
+      },
+      "input": {
+        "instanceId": "worktree:task",
+        "projectRoot": "C:/wt/task",
+        "operation": "start",
+        "commandId": "cmd-reuse",
+        "deadlineAt": "2026-08-20T12:03:00Z",
+        "startedAt": "2026-08-20T12:00:00Z",
+        "ownerPid": 111,
+        "preferredBackend": 8000,
+        "preferredControl": 8765,
+        "extraUsed": [8000, 8765],
+        "busyPorts": []
+      },
+      "expected": {
+        "ok": true,
+        "generation": 3,
+        "status": "starting",
+        "port": 8004,
+        "controlPort": 8768,
+        "spawnPid": 0
+      }
+    },
+    {
+      "id": "claim-start-skips-reclaimable-foreign-ports",
+      "op": "claimStart",
+      "registry": {
+        "schemaVersion": 2,
+        "instances": {
+          "legacy": {
+            "port": 8000,
+            "controlPort": 8765,
+            "status": "closed",
+            "portLeaseStatus": "reclaimable"
+          }
+        }
+      },
+      "input": {
+        "instanceId": "worktree:task",
+        "projectRoot": "C:/wt/task",
+        "operation": "start",
+        "commandId": "cmd-reclaim",
+        "deadlineAt": "2026-08-20T12:03:00Z",
+        "startedAt": "2026-08-20T12:00:00Z",
+        "ownerPid": 111,
+        "preferredBackend": 8000,
+        "preferredControl": 8765,
+        "extraUsed": [],
+        "busyPorts": []
+      },
+      "expected": {
+        "ok": true,
+        "generation": 1,
+        "status": "starting",
+        "port": 8000,
+        "controlPort": 8765,
+        "spawnPid": 0
+      }
+    },
+    {
+      "id": "claim-start-clears-failure-message",
+      "op": "claimStart",
+      "registry": {
+        "schemaVersion": 2,
+        "instances": {
+          "worktree:task": {
+            "status": "failed",
+            "phase": "failed",
+            "generation": 4,
+            "failureMessage": "HTTP timeout",
+            "desiredState": "open"
+          }
+        }
+      },
+      "input": {
+        "instanceId": "worktree:task",
+        "projectRoot": "C:/wt/task",
+        "operation": "start",
+        "commandId": "cmd-retry",
+        "deadlineAt": "2026-08-20T12:03:00Z",
+        "startedAt": "2026-08-20T12:00:00Z",
+        "ownerPid": 111,
+        "preferredBackend": 8001,
+        "preferredControl": 8766,
+        "extraUsed": [8000, 8765],
+        "busyPorts": []
+      },
+      "expected": {
+        "ok": true,
+        "generation": 5,
+        "status": "starting",
+        "failureMessage": "",
+        "port": 8001,
+        "controlPort": 8766,
+        "spawnPid": 0
+      }
+    },
+    {
+      "id": "claim-stop-bumps-generation-and-snapshots-spawn-pid",
+      "op": "claimStop",
+      "registry": {
+        "schemaVersion": 2,
+        "instances": {
+          "worktree:task": {
+            "status": "starting",
+            "phase": "starting",
+            "generation": 1,
+            "desiredState": "open",
+            "spawnPid": 4242,
+            "port": 8001,
+            "controlPort": 8766,
+            "projectRoot": "C:/wt/task"
+          }
+        }
+      },
+      "input": {
+        "instanceId": "worktree:task",
+        "projectRoot": "C:/wt/task"
+      },
+      "expected": {
+        "ok": true,
+        "generation": 2,
+        "status": "stopping",
+        "phase": "stopping",
+        "desiredState": "closed",
+        "spawnPid": 4242,
+        "failureMessage": "",
+        "port": 8001,
+        "controlPort": 8766
+      }
+    },
+    {
+      "id": "claim-stop-zero-spawn-pid",
+      "op": "claimStop",
+      "registry": {
+        "schemaVersion": 2,
+        "instances": {
+          "worktree:task": {
+            "status": "steady",
+            "generation": 8,
+            "desiredState": "open",
+            "spawnPid": 0
+          }
+        }
+      },
+      "input": { "instanceId": "worktree:task", "projectRoot": "C:/wt/task" },
+      "expected": {
+        "ok": true,
+        "generation": 9,
+        "status": "stopping",
+        "desiredState": "closed",
+        "spawnPid": 0
+      }
+    },
+    {
+      "id": "observe-error-matching-generation",
+      "op": "observeError",
+      "registry": {
+        "schemaVersion": 2,
+        "instances": {
+          "worktree:task": {
+            "status": "starting",
+            "phase": "starting",
+            "generation": 4,
+            "desiredState": "open"
+          }
+        }
+      },
+      "input": {
+        "instanceId": "worktree:task",
+        "expectedGeneration": 4,
+        "message": "HTTP timeout"
+      },
+      "expected": {
+        "applied": true,
+        "generation": 4,
+        "status": "failed",
+        "phase": "failed",
+        "desiredState": "open",
+        "failureMessage": "HTTP timeout"
+      }
+    },
+    {
+      "id": "observe-error-stale-generation-discarded",
+      "op": "observeError",
+      "registry": {
+        "schemaVersion": 2,
+        "instances": {
+          "worktree:task": {
+            "status": "starting",
+            "phase": "starting",
+            "generation": 4,
+            "desiredState": "open",
+            "failureMessage": ""
+          }
+        }
+      },
+      "input": {
+        "instanceId": "worktree:task",
+        "expectedGeneration": 3,
+        "message": "stale"
+      },
+      "expected": {
+        "applied": false,
+        "generation": 4,
+        "status": "starting",
+        "failureMessage": ""
+      }
+    },
+    {
+      "id": "observe-ready-matching-generation",
+      "op": "observeReady",
+      "registry": {
+        "schemaVersion": 2,
+        "instances": {
+          "worktree:task": {
+            "status": "starting",
+            "phase": "starting",
+            "generation": 2,
+            "desiredState": "open",
+            "failureMessage": "leftover"
+          }
+        }
+      },
+      "input": { "instanceId": "worktree:task", "expectedGeneration": 2 },
+      "expected": {
+        "applied": true,
+        "generation": 2,
+        "status": "steady",
+        "phase": "steady",
+        "desiredState": "open",
+        "failureMessage": ""
+      }
+    },
+    {
+      "id": "observe-ready-not-inflight-discarded",
+      "op": "observeReady",
+      "registry": {
+        "schemaVersion": 2,
+        "instances": {
+          "worktree:task": {
+            "status": "stopping",
+            "phase": "stopping",
+            "generation": 6,
+            "desiredState": "closed"
+          }
+        }
+      },
+      "input": { "instanceId": "worktree:task", "expectedGeneration": 6 },
+      "expected": {
+        "applied": false,
+        "generation": 6,
+        "status": "stopping",
+        "desiredState": "closed"
+      }
+    },
+    {
+      "id": "record-spawn-pid-matching-generation",
+      "op": "recordSpawnPid",
+      "registry": {
+        "schemaVersion": 2,
+        "instances": {
+          "worktree:task": {
+            "status": "starting",
+            "generation": 1,
+            "spawnPid": 0
+          }
+        }
+      },
+      "input": {
+        "instanceId": "worktree:task",
+        "spawnPid": 4242,
+        "expectedGeneration": 1
+      },
+      "expected": {
+        "applied": true,
+        "generation": 1,
+        "status": "starting",
+        "spawnPid": 4242
+      }
+    },
+    {
+      "id": "upsert-generation-mismatch-discarded",
+      "op": "upsert",
+      "registry": {
+        "schemaVersion": 2,
+        "instances": {
+          "worktree:task": {
+            "status": "stopping",
+            "generation": 2,
+            "spawnPid": 11,
+            "failureMessage": ""
+          }
+        }
+      },
+      "input": {
+        "instanceId": "worktree:task",
+        "expectedGeneration": 1,
+        "fields": { "status": "steady", "spawnPid": 99 }
+      },
+      "expected": {
+        "applied": false,
+        "generation": 2,
+        "status": "stopping",
+        "spawnPid": 11
+      }
+    },
+    {
+      "id": "stop-during-start-old-spawn-pid-cannot-revive",
+      "steps": [
+        {
+          "op": "claimStart",
+          "input": {
+            "instanceId": "worktree:task",
+            "projectRoot": "C:/wt/task",
+            "branch": "task",
+            "operation": "start",
+            "commandId": "cmd-start",
+            "deadlineAt": "2026-08-20T12:03:00Z",
+            "startedAt": "2026-08-20T12:00:00Z",
+            "ownerPid": 111,
+            "preferredBackend": 8001,
+            "preferredControl": 8766,
+            "extraUsed": [8000, 8765],
+            "busyPorts": []
+          }
+        },
+        {
+          "op": "recordSpawnPid",
+          "input": {
+            "instanceId": "worktree:task",
+            "spawnPid": 4242,
+            "expectedGeneration": 1
+          }
+        },
+        {
+          "op": "claimStop",
+          "input": { "instanceId": "worktree:task", "projectRoot": "C:/wt/task" }
+        },
+        {
+          "op": "recordSpawnPid",
+          "input": {
+            "instanceId": "worktree:task",
+            "spawnPid": 9999,
+            "expectedGeneration": 1
+          },
+          "expected": {
+            "applied": false,
+            "generation": 2,
+            "status": "stopping",
+            "desiredState": "closed",
+            "spawnPid": 4242
+          }
+        },
+        {
+          "op": "observeReady",
+          "input": { "instanceId": "worktree:task", "expectedGeneration": 1 },
+          "expected": {
+            "applied": false,
+            "generation": 2,
+            "status": "stopping",
+            "desiredState": "closed"
+          }
+        }
+      ]
+    },
+    {
+      "id": "rapid-second-claim-start-stays-busy",
+      "steps": [
+        {
+          "op": "claimStart",
+          "input": {
+            "instanceId": "worktree:task",
+            "projectRoot": "C:/wt/task",
+            "operation": "start",
+            "commandId": "cmd-a",
+            "deadlineAt": "2026-08-20T12:03:00Z",
+            "startedAt": "2026-08-20T12:00:00Z",
+            "ownerPid": 111,
+            "preferredBackend": 8001,
+            "preferredControl": 8766,
+            "extraUsed": [8000, 8765],
+            "busyPorts": []
+          }
+        },
+        {
+          "op": "claimStart",
+          "input": {
+            "instanceId": "worktree:task",
+            "projectRoot": "C:/wt/task",
+            "operation": "start",
+            "commandId": "cmd-b",
+            "deadlineAt": "2026-08-20T12:03:00Z",
+            "startedAt": "2026-08-20T12:00:00Z",
+            "ownerPid": 222,
+            "preferredBackend": 8001,
+            "preferredControl": 8766,
+            "extraUsed": [8000, 8765],
+            "busyPorts": []
+          },
+          "expected": {
+            "ok": false,
+            "code": "instance_busy",
+            "generation": 1,
+            "status": "starting"
+          }
+        }
+      ]
+    }
+  ]
+}

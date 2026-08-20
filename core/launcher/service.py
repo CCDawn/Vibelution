@@ -411,7 +411,7 @@ def request_branch_instance_operation(
         response = _current_branch_instance_operation(operation, request_audit)
         response["instanceId"] = str(item.get("id") or instance_id)
         return response
-    return run_isolated_operation(item, operation)
+    return run_isolated_operation(item, operation, claimed_generation=generation)
 
 
 def _current_branch_instance_operation(
