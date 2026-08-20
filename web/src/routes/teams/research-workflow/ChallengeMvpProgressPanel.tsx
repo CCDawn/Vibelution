@@ -27,6 +27,7 @@ import {
   fetchExperimentPlanningStatus,
   runChallengeCupDevBatch,
   runChallengeCupDevReadiness,
+  fetchChallengeCupTokenUsage,
 } from "../../../api/teamExperiment";
 import type {
   ChallengeCupDevBatchProjection,
@@ -44,6 +45,8 @@ import type { ExperimentPlanningStatusPayload } from "../experimentLoopModel";
 import { experimentPlanningStatusQueryKey } from "../experimentLoopModel";
 import { ChallengeQuestionRegisterDialog } from "../challenge-cup/ChallengeQuestionRegisterDialog";
 import { ChallengeCatalogOverview } from "../challenge-cup/ChallengeCatalogOverview";
+import { ChallengeTokenUsageStrip } from "../challenge-cup/ChallengeTokenUsageStrip";
+import { isTokenUsageOverview } from "../challenge-cup/challengeTokenUsageModel";
 import { ChallengeSubmissionReadinessPanel } from "./ChallengeSubmissionReadinessPanel";
 import { useShellI18n } from "../../../i18n/useShellI18n";
 import styles from "./ChallengeMvpProgressPanel.styles";
@@ -137,6 +140,13 @@ export function ChallengeMvpProgressPanel({
     queryFn: () => fetchChallengeCupDevControlSnapshot(teamId),
     enabled: import.meta.env.DEV && Boolean(teamId.trim()),
     staleTime: 15_000,
+  });
+  const tokenUsageQuery = useQuery({
+    queryKey: queryKeys.challengeCupTokenUsage(teamId),
+    queryFn: () => fetchChallengeCupTokenUsage(teamId),
+    enabled: Boolean(teamId.trim()),
+    staleTime: 15_000,
+    retry: false,
   });
 
   const queryClient = useQueryClient();
@@ -322,6 +332,16 @@ export function ChallengeMvpProgressPanel({
       )}
 
       <ChallengeSubmissionReadinessPanel teamId={teamId} lang={lang} onOpenQuestion={onOpenQuestion} />
+      {isTokenUsageOverview(tokenUsageQuery.data) ? (
+        <ChallengeTokenUsageStrip
+          lang={lang}
+          title={zh ? "Program token 消耗" : "Program token usage"}
+          totalTokens={tokenUsageQuery.data.program.totalTokens}
+          callCount={tokenUsageQuery.data.program.callCount}
+          inputTokens={tokenUsageQuery.data.program.inputTokens}
+          outputTokens={tokenUsageQuery.data.program.outputTokens}
+        />
+      ) : null}
       <ChallengeCatalogOverview teamId={teamId} lang={lang} onOpenQuestion={onOpenQuestion} />
 
       {import.meta.env.DEV ? (

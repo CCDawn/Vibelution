@@ -71,10 +71,12 @@ describe("team experiment API", () => {
   it("exposes typed Challenge Cup DEV control transports with canonical URLs", () => {
     expect(apiSource).toContain("export function fetchChallengeCupDevControlSnapshot");
     expect(apiSource).toContain("export function fetchChallengeCupCatalogOverview");
+    expect(apiSource).toContain("export function fetchChallengeCupTokenUsage");
     expect(apiSource).toContain("export function runChallengeCupDevReadiness");
     expect(apiSource).toContain("export function runChallengeCupDevBatch");
     expect(apiSource).toContain("workflow-orchestration/challenge-program/dev-controls");
     expect(apiSource).toContain("workflow-orchestration/challenge-program/catalog-overview");
+    expect(apiSource).toContain("workflow-orchestration/challenge-program/token-usage");
     expect(apiSource).toContain("workflow-orchestration/challenge-program/submission-readiness");
     expect(apiSource).toContain("workflow-orchestration/challenge-program/dev-controls/readiness");
     expect(apiSource).toContain("workflow-orchestration/challenge-program/dev-controls/batches/");

@@ -33,6 +33,10 @@ from core.research.competition.dev_control_batch import (
     validate_dev_batch_plan,
 )
 from core.research.competition.platform_flow_ready import REPORT_KIND
+from core.research.workflow.contracts.model_invocation_receipt import (
+    ModelInvocationReceipt,
+    ModelInvocationStatus,
+)
 from core.infrastructure.no_console_git import no_console_subprocess_kwargs
 from core.web.routes.team_workflows import challenge_cup_dev_controls as dev_controls_routes
 from core.web.services import team_service
@@ -670,6 +674,119 @@ def test_get_catalog_overview_http_contract(monkeypatch: pytest.MonkeyPatch) -> 
     assert body["questionCount"] == 125
     assert body["questions"][0]["questionId"] == "SCI-001"
     assert body["questions"][0]["blocker"] is None
+
+
+def _receipt_payload(receipt_id: str, question_id: str, stage: str, total_tokens: int) -> dict:
+    return ModelInvocationReceipt.from_invocation(
+        receipt_id=receipt_id,
+        run_id=f"run-{question_id}",
+        node_run_id=f"nr-{receipt_id}",
+        scope={"teamId": "team-1", "questionId": question_id, "nodeId": stage},
+        provider="offline-fake",
+        model="fake-model",
+        model_version="1",
+        requested_model="fake-model",
+        status=ModelInvocationStatus.SUCCEEDED,
+        request_content="prompt",
+        response_content="answer",
+        started_at_ms=1000,
+        finished_at_ms=1100,
+        token_usage={
+            "inputTokens": max(total_tokens - 1, 0),
+            "outputTokens": min(total_tokens, 1),
+            "totalTokens": total_tokens,
+        },
+        cost={"currency": "USD", "totalCost": 9.99},
+        evidence_locator={"kind": "runtime_scene", "sceneId": "scene-1"},
+    ).to_dict()
+
+
+def _persist_receipts(controls_root: Path, team_id: str, receipts: list[dict]) -> None:
+    path = controls_root / team_id / "challenge_cup_dev_controls" / "model_invocation_receipts.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"schemaVersion": 1, "receipts": receipts}, sort_keys=True),
+        encoding="utf-8",
+    )
+
+
+def test_token_usage_is_zero_when_no_receipts(controls_root: Path) -> None:
+    overview = dev_controls_service.get_challenge_cup_token_usage("team-1")
+    assert overview["schemaVersion"] == 1
+    assert overview["priced"] is False
+    assert overview["unit"] == "tokens"
+    assert overview["program"] == {"totalTokens": 0, "callCount": 0, "inputTokens": 0, "outputTokens": 0}
+    assert overview["questions"] == []
+    assert "totalCost" not in overview
+    assert "amount" not in overview
+
+
+def test_token_usage_skips_malformed_receipts_and_omits_invented_cost(
+    controls_root: Path,
+) -> None:
+    good = _receipt_payload("inv-1", "SCI-001", "hypothesis_design", 12)
+    _persist_receipts(
+        controls_root,
+        "team-1",
+        [good, {"receiptId": "broken"}, {"tokenUsage": {"totalTokens": 99}}],
+    )
+    overview = dev_controls_service.get_challenge_cup_token_usage("team-1")
+    assert overview["program"]["callCount"] == 1
+    assert overview["program"]["totalTokens"] == 12
+    assert overview["questions"][0]["questionId"] == "SCI-001"
+    assert overview["priced"] is False
+    assert "totalCost" not in overview
+    assert overview["questions"][0]["anomaly"] is None
+
+
+def test_token_usage_warns_when_one_question_exceeds_stage_median(
+    controls_root: Path,
+) -> None:
+    receipts = [
+        _receipt_payload("inv-a", "SCI-001", "hypothesis_design", 10),
+        _receipt_payload("inv-b", "SCI-002", "hypothesis_design", 10),
+        _receipt_payload("inv-c", "SCI-003", "hypothesis_design", 40),
+    ]
+    _persist_receipts(controls_root, "team-1", receipts)
+    overview = dev_controls_service.get_challenge_cup_token_usage("team-1")
+    by_id = {row["questionId"]: row for row in overview["questions"]}
+    assert by_id["SCI-001"]["anomaly"] is None
+    assert by_id["SCI-002"]["anomaly"] is None
+    assert by_id["SCI-003"]["anomaly"]["stageId"] == "hypothesis_design"
+    assert "3" in by_id["SCI-003"]["anomaly"]["message"]
+
+
+def test_token_usage_stays_silent_when_median_samples_are_insufficient(
+    controls_root: Path,
+) -> None:
+    receipts = [
+        _receipt_payload("inv-a", "SCI-001", "hypothesis_design", 10),
+        _receipt_payload("inv-b", "SCI-002", "hypothesis_design", 40),
+    ]
+    _persist_receipts(controls_root, "team-1", receipts)
+    overview = dev_controls_service.get_challenge_cup_token_usage("team-1")
+    assert all(row["anomaly"] is None for row in overview["questions"])
+
+
+def test_get_token_usage_http_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = {
+        "schemaVersion": 1,
+        "teamId": "research-team",
+        "generatedAt": "2026-08-20T00:00:00Z",
+        "unit": "tokens",
+        "priced": False,
+        "program": {"totalTokens": 0, "callCount": 0, "inputTokens": 0, "outputTokens": 0},
+        "questions": [],
+    }
+    monkeypatch.setattr(dev_controls_routes, "get_challenge_cup_token_usage", lambda team_id: payload)
+    response = _client().get(
+        "/api/teams/research-team/workflow-orchestration/challenge-program/token-usage"
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["priced"] is False
+    assert body["unit"] == "tokens"
+    assert "totalCost" not in body
 
 
 def test_post_readiness_http_contract(monkeypatch: pytest.MonkeyPatch) -> None:

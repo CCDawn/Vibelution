@@ -154,3 +154,43 @@ class ChallengeCupCatalogOverviewResponse(BaseModel):
         default_factory=ChallengeCupCatalogCountsResponse
     )
     questions: list[ChallengeCupCatalogQuestionResponse] = Field(default_factory=list)
+
+
+class ChallengeCupTokenUsageTotalsResponse(BaseModel):
+    totalTokens: int = 0
+    callCount: int = 0
+    inputTokens: int = 0
+    outputTokens: int = 0
+
+
+class ChallengeCupTokenUsageStageResponse(BaseModel):
+    stageId: str = ""
+    totalTokens: int = 0
+    callCount: int = 0
+
+
+class ChallengeCupTokenUsageAnomalyResponse(BaseModel):
+    stageId: str = ""
+    message: str = ""
+
+
+class ChallengeCupTokenUsageQuestionResponse(BaseModel):
+    questionId: str = ""
+    totalTokens: int = 0
+    callCount: int = 0
+    inputTokens: int = 0
+    outputTokens: int = 0
+    stages: list[ChallengeCupTokenUsageStageResponse] = Field(default_factory=list)
+    anomaly: ChallengeCupTokenUsageAnomalyResponse | None = None
+
+
+class ChallengeCupTokenUsageResponse(BaseModel):
+    schemaVersion: int = 1
+    teamId: str = ""
+    generatedAt: str = ""
+    unit: Literal["tokens"] = "tokens"
+    priced: Literal[False] = False
+    program: ChallengeCupTokenUsageTotalsResponse = Field(
+        default_factory=ChallengeCupTokenUsageTotalsResponse
+    )
+    questions: list[ChallengeCupTokenUsageQuestionResponse] = Field(default_factory=list)

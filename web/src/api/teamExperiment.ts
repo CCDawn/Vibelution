@@ -6,6 +6,7 @@ import type {
   ChallengeCupDevControlSnapshot,
   ChallengeCupDevReadinessRunRequest,
   ChallengeCupDevReadinessRunResponse,
+  ChallengeCupTokenUsage,
 } from "./types/challengeCup";
 
 export type TeamExperimentSmokeRunRequest = {
@@ -362,6 +363,16 @@ export function fetchChallengeCupCatalogOverview(
 ): Promise<ChallengeCupCatalogOverview> {
   return fetchJson<ChallengeCupCatalogOverview>(
     `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/challenge-program/catalog-overview`,
+    { signal: options?.signal },
+  );
+}
+
+export function fetchChallengeCupTokenUsage(
+  teamId: string,
+  options?: { signal?: AbortSignal },
+): Promise<ChallengeCupTokenUsage> {
+  return fetchJson<ChallengeCupTokenUsage>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/challenge-program/token-usage`,
     { signal: options?.signal },
   );
 }

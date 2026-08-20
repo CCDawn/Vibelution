@@ -1,5 +1,9 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
+
+import { queryKeys } from "../../../api/queryKeys";
+import { fetchChallengeCupTokenUsage } from "../../../api/teamExperiment";
 
 import type { ChallengeQuestionRunDetailPayload } from "../../../api/types";
 import {
@@ -18,6 +22,8 @@ import { ChallengeQuestionEvidenceSection } from "./ChallengeQuestionEvidenceSec
 import { ChallengeQuestionPlanSection } from "./ChallengeQuestionPlanSection";
 import { ChallengeQuestionRegisterDialog } from "./ChallengeQuestionRegisterDialog";
 import { HypothesisSelectionPanel } from "./HypothesisSelectionPanel";
+import { ChallengeQuestionTokenUsage } from "./ChallengeTokenUsageStrip";
+import { isTokenUsageOverview, questionTokenUsage } from "./challengeTokenUsageModel";
 import css from "./ChallengeQuestionDetailPanel.styles";
 
 export type ChallengeQuestionDetailPanelProps = {
@@ -87,6 +93,16 @@ export function ChallengeQuestionDetailPanel({
   const { lang } = useShellI18n();
   const isZh = lang === "zh";
   const detailAnchors = isZh ? DETAIL_ANCHORS_ZH : DETAIL_ANCHORS_EN;
+  const tokenUsageQuery = useQuery({
+    queryKey: queryKeys.challengeCupTokenUsage(teamId),
+    queryFn: () => fetchChallengeCupTokenUsage(teamId),
+    enabled: Boolean(teamId.trim()),
+    staleTime: 15_000,
+    retry: false,
+  });
+  const questionUsage = isTokenUsageOverview(tokenUsageQuery.data)
+    ? questionTokenUsage(tokenUsageQuery.data, requestedQuestionId)
+    : null;
 
   if (isLoading) {
     return (
@@ -159,6 +175,8 @@ export function ChallengeQuestionDetailPanel({
           <a href={`#${id}`} key={id}><span>{index + 1}</span>{label}</a>
         ))}
       </nav>
+
+      {teamId ? <ChallengeQuestionTokenUsage lang={lang} usage={questionUsage} /> : null}
 
       <ChallengeQuestionEvidenceSection detail={detail} lang={lang} />
       <ChallengeQuestionAnalysisSection output={output} lang={lang} />

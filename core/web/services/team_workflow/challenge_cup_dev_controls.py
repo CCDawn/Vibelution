@@ -58,6 +58,8 @@ from core.research.competition.resources import (
 )
 from core.research.competition.result_set import CatalogScope, ResultSetContractError
 from core.research.competition.source_boundary import git_is_dirty, git_output
+from core.research.workflow.contracts._validation import ContractValidationError
+from core.research.workflow.contracts.model_invocation_receipt import ModelInvocationReceipt
 from core.web.services import team_service
 from core.web.services.runtime_scene_service import record_runtime_scene_event
 from core.web.services.team_workflow.research_projects import team_workspace_root
@@ -70,6 +72,8 @@ BATCH_ENVELOPE_SCHEMA_VERSION = 2
 REPORT_SCHEMA_VERSION = 1
 SNAPSHOT_SCHEMA_VERSION = 1
 CATALOG_OVERVIEW_SCHEMA_VERSION = 1
+TOKEN_USAGE_SCHEMA_VERSION = 1
+RECEIPTS_FILENAME = "model_invocation_receipts.json"
 DEV_ONLY_MODE = "dev"
 READINESS_MAX_AGE_SECONDS = 24 * 60 * 60
 REPORT_STATUSES = frozenset({"READY", "NOT_READY", "BLOCKED"})
@@ -155,6 +159,10 @@ def _report_path(team_id: str) -> Path:
 
 def _batch_path(team_id: str, plan_id: str) -> Path:
     return _controls_root(team_id) / BATCH_DIRNAME / f"{plan_id}.json"
+
+
+def _receipts_path(team_id: str) -> Path:
+    return _controls_root(team_id) / RECEIPTS_FILENAME
 
 
 def _team_lock_path(team_id: str) -> Path:
@@ -859,6 +867,171 @@ def _catalog_overview_row(
         "action": action,
         "blocker": blocker,
     }
+
+
+def get_challenge_cup_token_usage(team_id: str) -> dict[str, Any]:
+    """Read-only token aggregation over persisted ModelInvocationReceipt payloads.
+
+    Missing or malformed receipts are skipped. Amounts are omitted unless a
+    trusted unit price is configured; this surface never invents a price.
+    """
+    authoritative_team_id = _require_team(team_id)
+    with _team_transaction(authoritative_team_id):
+        return _get_challenge_cup_token_usage_transaction(authoritative_team_id)
+
+
+def _get_challenge_cup_token_usage_transaction(authoritative_team_id: str) -> dict[str, Any]:
+    receipts = _load_model_invocation_receipts(authoritative_team_id)
+    program = {"totalTokens": 0, "callCount": 0, "inputTokens": 0, "outputTokens": 0}
+    per_question: dict[str, dict[str, Any]] = {}
+    stage_samples: dict[str, list[int]] = {}
+    for receipt in receipts:
+        tokens = _receipt_token_counts(receipt)
+        program["callCount"] += 1
+        program["totalTokens"] += tokens["totalTokens"]
+        program["inputTokens"] += tokens["inputTokens"]
+        program["outputTokens"] += tokens["outputTokens"]
+        question_id = _receipt_question_id(receipt)
+        if not question_id:
+            continue
+        row = per_question.setdefault(
+            question_id,
+            {
+                "questionId": question_id,
+                "totalTokens": 0,
+                "callCount": 0,
+                "inputTokens": 0,
+                "outputTokens": 0,
+                "stages": {},
+            },
+        )
+        row["callCount"] += 1
+        row["totalTokens"] += tokens["totalTokens"]
+        row["inputTokens"] += tokens["inputTokens"]
+        row["outputTokens"] += tokens["outputTokens"]
+        stage_id = _receipt_stage_id(receipt)
+        stage = row["stages"].setdefault(
+            stage_id,
+            {"stageId": stage_id, "totalTokens": 0, "callCount": 0},
+        )
+        stage["callCount"] += 1
+        stage["totalTokens"] += tokens["totalTokens"]
+        stage_samples.setdefault(stage_id, []).append(tokens["totalTokens"])
+    questions = []
+    for question_id in sorted(per_question):
+        row = per_question[question_id]
+        stages = [row["stages"][key] for key in sorted(row["stages"])]
+        questions.append(
+            {
+                "questionId": question_id,
+                "totalTokens": row["totalTokens"],
+                "callCount": row["callCount"],
+                "inputTokens": row["inputTokens"],
+                "outputTokens": row["outputTokens"],
+                "stages": stages,
+                "anomaly": _token_usage_anomaly(row["stages"], stage_samples),
+            }
+        )
+    return {
+        "schemaVersion": TOKEN_USAGE_SCHEMA_VERSION,
+        "teamId": authoritative_team_id,
+        "generatedAt": _utc_now(),
+        "unit": "tokens",
+        "priced": False,
+        "program": program,
+        "questions": questions,
+    }
+
+
+def _load_model_invocation_receipts(team_id: str) -> list[ModelInvocationReceipt]:
+    path = _receipts_path(team_id)
+    if not path.exists():
+        return []
+    try:
+        payload = _read_strict_json(path)
+    except DevControlsStorageError:
+        return []
+    raw_items = payload.get("receipts")
+    if not isinstance(raw_items, list):
+        return []
+    receipts: list[ModelInvocationReceipt] = []
+    for raw in raw_items:
+        if not isinstance(raw, dict):
+            continue
+        try:
+            receipts.append(ModelInvocationReceipt.from_dict(raw))
+        except (ContractValidationError, TypeError, ValueError, KeyError):
+            continue
+    return receipts
+
+
+def _receipt_question_id(receipt: ModelInvocationReceipt) -> str:
+    scope = dict(receipt.scope or {})
+    for key in ("questionId", "question", "question_id"):
+        value = str(scope.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _receipt_stage_id(receipt: ModelInvocationReceipt) -> str:
+    scope = dict(receipt.scope or {})
+    for key in ("nodeId", "stageId", "stage"):
+        value = str(scope.get(key) or "").strip()
+        if value:
+            return value
+    return "unspecified"
+
+
+def _receipt_token_counts(receipt: ModelInvocationReceipt) -> dict[str, int]:
+    usage = dict(receipt.token_usage or {})
+    input_tokens = _nonneg_int(usage.get("inputTokens") or usage.get("input_tokens"))
+    output_tokens = _nonneg_int(usage.get("outputTokens") or usage.get("output_tokens"))
+    total_tokens = _nonneg_int(usage.get("totalTokens") or usage.get("total_tokens"))
+    if total_tokens <= 0:
+        total_tokens = input_tokens + output_tokens
+    return {
+        "inputTokens": input_tokens,
+        "outputTokens": output_tokens,
+        "totalTokens": total_tokens,
+    }
+
+
+def _nonneg_int(value: Any) -> int:
+    try:
+        number = int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    return number if number > 0 else 0
+
+
+def _token_usage_anomaly(
+    stages: dict[str, dict[str, Any]],
+    stage_samples: dict[str, list[int]],
+) -> dict[str, str] | None:
+    for stage_id, stage in stages.items():
+        samples = [item for item in stage_samples.get(stage_id, []) if item > 0]
+        if len(samples) < 3:
+            continue
+        median = _median(samples)
+        if median <= 0:
+            continue
+        total = int(stage.get("totalTokens") or 0)
+        if total > median * 3:
+            return {
+                "stageId": stage_id,
+                "message": f"{stage_id} token 消耗超过同阶段中位数 3 倍",
+            }
+    return None
+
+
+def _median(values: list[int]) -> float:
+    ordered = sorted(values)
+    count = len(ordered)
+    middle = count // 2
+    if count % 2:
+        return float(ordered[middle])
+    return (ordered[middle - 1] + ordered[middle]) / 2.0
 
 
 def _persist_report(team_id: str, report: dict[str, Any]) -> dict[str, Any]:

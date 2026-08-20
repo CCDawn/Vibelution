@@ -73,6 +73,16 @@ const catalogOverviewQueryState = vi.hoisted((): { current: QueryState } => ({
   },
 }));
 
+const tokenUsageQueryState = vi.hoisted((): { current: QueryState } => ({
+  current: {
+    isPending: false,
+    isError: false,
+    error: null,
+    data: undefined,
+    refetch: () => {},
+  },
+}));
+
 const mutationState = vi.hoisted(() => {
   const blank = (): MutationMock => ({
     isPending: false,
@@ -114,6 +124,9 @@ vi.mock("@tanstack/react-query", () => ({
     }
     if (key.includes("catalog-overview")) {
       return catalogOverviewQueryState.current;
+    }
+    if (key.includes("token-usage")) {
+      return tokenUsageQueryState.current;
     }
     if (key.includes("submission-readiness")) {
       return submissionReadinessQueryState.current;
@@ -513,7 +526,7 @@ function findButton(container: HTMLElement, text: string): HTMLButtonElement | u
 
 describe("ChallengeMvpProgressPanel", () => {
   beforeEach(() => {
-    for (const state of [questionQueryState.current, experimentQueryState.current, devControlsQueryState.current, submissionReadinessQueryState.current, catalogOverviewQueryState.current]) {
+    for (const state of [questionQueryState.current, experimentQueryState.current, devControlsQueryState.current, submissionReadinessQueryState.current, catalogOverviewQueryState.current, tokenUsageQueryState.current]) {
       Object.assign(state, {
         isPending: false,
         isError: false,

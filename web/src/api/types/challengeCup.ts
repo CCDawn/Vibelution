@@ -298,3 +298,39 @@ export type ChallengeCupCatalogOverview = {
   };
   questions: ChallengeCupCatalogOverviewQuestion[];
 };
+
+export type ChallengeCupTokenUsageStage = {
+  stageId: string;
+  totalTokens: number;
+  callCount: number;
+};
+
+export type ChallengeCupTokenUsageAnomaly = {
+  stageId: string;
+  message: string;
+};
+
+export type ChallengeCupTokenUsageQuestion = {
+  questionId: string;
+  totalTokens: number;
+  callCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  stages: ChallengeCupTokenUsageStage[];
+  anomaly: ChallengeCupTokenUsageAnomaly | null;
+};
+
+export type ChallengeCupTokenUsage = {
+  schemaVersion: number;
+  teamId: string;
+  generatedAt: string;
+  unit: "tokens";
+  priced: boolean;
+  program: {
+    totalTokens: number;
+    callCount: number;
+    inputTokens: number;
+    outputTokens: number;
+  };
+  questions: ChallengeCupTokenUsageQuestion[];
+};

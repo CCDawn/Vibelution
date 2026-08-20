@@ -18,6 +18,7 @@ from core.web.services.team_workflow_orchestration_service import (
     DevFlowConflict,
     get_challenge_cup_catalog_overview,
     get_challenge_cup_dev_control_snapshot,
+    get_challenge_cup_token_usage,
     run_challenge_cup_dev_batch,
     run_challenge_cup_dev_readiness,
 )
@@ -30,6 +31,7 @@ from .challenge_cup_dev_controls_models import (
     ChallengeCupDevControlSnapshotResponse,
     ChallengeCupDevReadinessRunRequest,
     ChallengeCupDevReadinessRunResponse,
+    ChallengeCupTokenUsageResponse,
 )
 
 _DEV_CONTROL_CONTRACT_ERRORS = (
@@ -77,6 +79,26 @@ def challenge_cup_catalog_overview(team_id: str) -> dict:
     except _DEV_CONTROL_CONTRACT_ERRORS as exc:
         _raise_team_workflow_route_error(
             "challenge_cup_dev_controls.catalog_overview", team_id, exc, status_code=422
+        )
+
+
+@router.get(
+    "/teams/{team_id}/workflow-orchestration/challenge-program/token-usage",
+    response_model=ChallengeCupTokenUsageResponse,
+    response_model_exclude_unset=True,
+)
+def challenge_cup_token_usage(team_id: str) -> dict:
+    try:
+        return get_challenge_cup_token_usage(team_id)
+    except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except DevFlowConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except DevControlsStorageError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except _DEV_CONTROL_CONTRACT_ERRORS as exc:
+        _raise_team_workflow_route_error(
+            "challenge_cup_dev_controls.token_usage", team_id, exc, status_code=422
         )
 
 
