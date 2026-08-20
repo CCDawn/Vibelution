@@ -26,8 +26,8 @@ import {
   isCleanupEligible,
   overlayCleanupMetadata,
   paginateItems,
-  hasActiveLifecyclePending,
   lifecycleIntentRejectMessage,
+  shouldHoldOpenClickGuard,
   type InstanceListFilters,
   type LifecyclePendingInput,
   type LifecycleRequestOutcome,
@@ -281,7 +281,7 @@ export function LauncherBranchInstancesPanel({
   const [notice, setNotice] = useState("");
   const [noticeTone, setNoticeTone] = useState<"neutral" | "error">("neutral");
   const [openReject, setOpenReject] = useState<{ id: string; reason: "duplicate" | "blocked" } | null>(null);
-  const clickGuardRef = useRef(false);
+  const openClickGuardsRef = useRef(new Set<string>());
   const needsCleanupMetadata = Boolean(filters.unmerged || (pendingIds && pendingIds.length > 0));
   const cleanupMetadataQuery = useQuery({
     queryKey: queryKeys.launcherBranchInstances(true),
@@ -335,10 +335,14 @@ export function LauncherBranchInstancesPanel({
     }
   }, [maintenancePage, pagedMaintenance.page]);
   useEffect(() => {
-    if (!lifecyclePending && !hasActiveLifecyclePending(pendingOperation)) {
-      clickGuardRef.current = false;
+    const guards = openClickGuardsRef.current;
+    for (const id of [...guards]) {
+      const item = annotatedItems.find((candidate) => candidate.id === id);
+      if (!item || !shouldHoldOpenClickGuard(instanceRuntimeState(item, pendingOperation))) {
+        guards.delete(id);
+      }
     }
-  }, [lifecyclePending, pendingOperation]);
+  }, [annotatedItems, pendingOperation]);
   useEffect(() => {
     if (!openReject) {
       return;
@@ -451,24 +455,29 @@ export function LauncherBranchInstancesPanel({
   const renderLifecycleActions = (item: LauncherBranchInstance) => {
     const state = instanceRuntimeState(item, pendingOperation);
     const windowOpen = instanceWindowOpen(item);
-    const startBusy = state === "starting" || state === "restarting" || state === "stopping";
+    const startBusy = shouldHoldOpenClickGuard(state);
     const stopBusy = state === "stopping";
     const openLabel = state === "starting" || state === "restarting"
       ? instanceRuntimeStateLabel(state, zh)
       : state === "failed" ? labels.retryStart : windowOpen ? labels.focusWindow : labels.openWindow;
     const showOpen = canRequestOpenInstance(item, pendingOperation) || state === "starting" || state === "restarting";
     const requestOpen = () => {
-      if (clickGuardRef.current || startBusy) {
+      if (startBusy || openClickGuardsRef.current.has(item.id)) {
         return;
       }
-      clickGuardRef.current = true;
-      const outcome = onLifecycle?.(item.id, "start");
-      if (outcome && outcome.accepted === false) {
-        clickGuardRef.current = false;
-        setOpenReject({ id: item.id, reason: outcome.reason });
-        return;
+      openClickGuardsRef.current.add(item.id);
+      try {
+        const outcome = onLifecycle?.(item.id, "start");
+        if (outcome && outcome.accepted === false) {
+          openClickGuardsRef.current.delete(item.id);
+          setOpenReject({ id: item.id, reason: outcome.reason });
+          return;
+        }
+        setOpenReject((current) => (current?.id === item.id ? null : current));
+      } catch (error) {
+        openClickGuardsRef.current.delete(item.id);
+        throw error;
       }
-      setOpenReject((current) => (current?.id === item.id ? null : current));
     };
     return (
       <span className={styles.actionButtons} onClick={(event) => event.stopPropagation()}>

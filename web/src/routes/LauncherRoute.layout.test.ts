@@ -204,7 +204,7 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("lifecyclePending={controlMutation.isPending}");
     expect(routeSource.match(/shouldApplyLifecycleMutationFeedback/g)?.length ?? 0).toBeGreaterThanOrEqual(4);
     expect(branchInstancesPanelSource).toContain("isPending={state === \"starting\" || state === \"restarting\"}");
-    expect(branchInstancesPanelSource).toContain("clickGuardRef");
+    expect(branchInstancesPanelSource).toContain("openClickGuardsRef");
     expect(branchInstancesPanelSource).toContain("const startBusy");
     expect(branchInstancesPanelSource).toContain("isDisabled={stopBusy}");
   });
