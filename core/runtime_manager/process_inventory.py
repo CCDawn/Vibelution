@@ -70,6 +70,46 @@ class BrowserProcessSnapshot:
         }
 
 
+def _repo_runtime_process_name_candidate(name: object) -> bool:
+    lowered = str(name or "").strip().lower()
+    if not lowered:
+        return False
+    # Every classifier match needs script tokens (web_workbench.py / vite /
+    # runtime_manager.cli) that only python/node-family hosts can carry, so
+    # non-candidate names can never classify as repo runtime processes.
+    return (
+        lowered.startswith("python")
+        or lowered.startswith("node")
+        or lowered.startswith("bun")
+        or lowered in {"py", "py.exe"}
+    )
+
+
+def _snapshot_process_names() -> list[dict[str, Any]]:
+    """Cheap full-process snapshot: pid/ppid/name only, no cmdline/cwd reads."""
+
+    if psutil is None:
+        return []
+    snapshots: list[dict[str, Any]] = []
+    for proc in psutil.process_iter(["pid", "ppid", "name"]):
+        try:
+            snapshots.append(dict(proc.info))
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return snapshots
+
+
+def _fetch_process_details(snapshot: dict[str, Any], attributes: list[str]) -> dict[str, Any]:
+    pid = int(snapshot.get("pid") or 0)
+    if pid <= 0:
+        return {**snapshot}
+    try:
+        detail = psutil.Process(pid).as_dict(attributes)
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return {**snapshot}
+    return {**snapshot, **detail}
+
+
 def list_repo_runtime_processes(
     *,
     project_root: Path | str = PROJECT_ROOT,
@@ -82,17 +122,16 @@ def list_repo_runtime_processes(
 
     root = _resolve_project_root(project_root)
     excluded = {int(pid) for pid in (exclude_pids or []) if int(pid) > 0}
+    name_snapshots = _snapshot_process_names()
     raw_processes: list[dict[str, Any]] = []
     processes: list[RuntimeProcess] = []
 
-    for proc in psutil.process_iter(["pid", "ppid", "name", "cmdline", "cwd"]):
-        try:
-            info = proc.info
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
+    for snapshot in name_snapshots:
+        if not _repo_runtime_process_name_candidate(snapshot.get("name")):
             continue
-        raw_processes.append(dict(info))
+        raw_processes.append(_fetch_process_details(snapshot, ["cmdline", "cwd"]))
 
-    excluded = _expand_excluded_process_tree(raw_processes, excluded)
+    excluded = _expand_excluded_process_tree(name_snapshots, excluded)
 
     for info in raw_processes:
         pid = int(info.get("pid") or 0)
@@ -164,24 +203,26 @@ def managed_browser_process_payload(
         }
 
     profile_marker = _profile_marker_text(profile_dir)
+    name_snapshots = _snapshot_process_names()
     raw_processes: list[dict[str, Any]] = []
-    for proc in psutil.process_iter(["pid", "ppid", "name", "cmdline", "memory_info"]):
-        try:
-            raw_processes.append(dict(proc.info))
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
+    for snapshot in name_snapshots:
+        if not _looks_like_edge_process(snapshot):
             continue
+        raw_processes.append(_fetch_process_details(snapshot, ["cmdline", "memory_info"]))
 
     children_by_parent: dict[int, list[int]] = {}
     by_pid: dict[int, dict[str, Any]] = {}
     managed_seed_pids: set[int] = set()
+    for snapshot in name_snapshots:
+        pid = int(snapshot.get("pid") or 0)
+        parent_pid = int(snapshot.get("ppid") or 0)
+        if pid > 0 and parent_pid > 0:
+            children_by_parent.setdefault(parent_pid, []).append(pid)
     for info in raw_processes:
         pid = int(info.get("pid") or 0)
-        parent_pid = int(info.get("ppid") or 0)
         if pid <= 0:
             continue
         by_pid[pid] = info
-        if parent_pid > 0:
-            children_by_parent.setdefault(parent_pid, []).append(pid)
         command_line = _command_line_text(info.get("cmdline"))
         if _looks_like_edge_process(info) and _command_line_has_profile_marker(command_line, profile_marker):
             managed_seed_pids.add(pid)
