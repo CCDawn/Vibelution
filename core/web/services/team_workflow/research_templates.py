@@ -52,13 +52,9 @@ def _project_root() -> Path:
 
 
 def _safe_team_id(team_id: str) -> str:
-    return (
-        "".join(
-            character if character.isalnum() or character in "._-" else "_"
-            for character in str(team_id or "")
-        )[:96]
-        or "team"
-    )
+    from core.web.services.team_workflow.storage_ids import safe_storage_component
+
+    return safe_storage_component(team_id, fallback="team")
 
 
 def _team_workspace_root(team_id: str) -> Path:

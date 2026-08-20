@@ -16,7 +16,6 @@ from core.launcher.service import (
     get_launcher_status,
     launcher_active_work_runs,
     list_launcher_branch_instances,
-    request_branch_instance_operation,
 )
 
 __all__ = [
@@ -28,5 +27,4 @@ __all__ = [
     "get_launcher_status",
     "launcher_active_work_runs",
     "list_launcher_branch_instances",
-    "request_branch_instance_operation",
 ]

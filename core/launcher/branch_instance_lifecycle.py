@@ -601,7 +601,7 @@ def run_isolated_operation(
     if operation in {"observe-error", "observe-ready"}:
         raise BranchInstanceLifecycleError(
             "invalid_instance_operation",
-            f"观察回调请使用 observe_isolated_transition：{operation}",
+            "观察回调由 Electron instanceRegistryStore 拥有，Python 不再受理。",
             status_code=400,
         )
     assert_instance_operable(item, operation)
@@ -673,13 +673,8 @@ def run_isolated_operation(
                 short_name=str(item.get("shortName") or ""),
                 detach=True,
             )
-        except BranchInstanceLifecycleError as exc:
-            observe_isolated_transition(
-                instance_id,
-                "observe-error",
-                generation=generation,
-                message=exc.message,
-            )
+        except BranchInstanceLifecycleError:
+            # observe-error write-back is owned by Electron instanceRegistryStore.
             raise
         spawn_pid = _positive_int((spawned or {}).get("pid"))
         if spawn_pid > 0:
@@ -1022,47 +1017,6 @@ def _resolve_registry_instance_id(item: dict[str, Any]) -> str:
     found = registry.find_instance_by_project_root(str(item.get("path") or ""))
     found_id = str(found.get("instanceId") or "").strip()
     return found_id or instance_id
-
-
-def observe_isolated_transition(
-    instance_id: str,
-    operation: str,
-    *,
-    generation: int | None = None,
-    message: str = "",
-) -> dict[str, Any]:
-    """Apply a generation-scoped supervisor observation to one registry row."""
-
-    wanted = str(instance_id or "").strip()
-    if not wanted:
-        raise BranchInstanceLifecycleError("instance_not_found", "未指定分支实例。", status_code=400)
-    if operation not in {"observe-error", "observe-ready"}:
-        raise BranchInstanceLifecycleError(
-            "invalid_instance_operation",
-            f"不支持的实例操作：{operation}",
-            status_code=400,
-        )
-    expected = int(generation or 0)
-
-    def mutator(payload: dict[str, Any]) -> dict[str, Any]:
-        _applied, entry = registry.apply_observe(
-            payload,
-            instance_id=wanted,
-            operation=operation,
-            expected_generation=expected,
-            message=message,
-        )
-        return entry
-
-    stored = registry.mutate_registry(mutator)
-    return {
-        "accepted": True,
-        "operation": operation,
-        "instanceId": wanted,
-        "generation": int(stored.get("generation") or 0),
-        "status": str(stored.get("status") or ""),
-        "message": str(stored.get("failureMessage") or ""),
-    }
 
 
 def terminate_pid_tree(pid: int, *, timeout_seconds: float = 5.0) -> dict[str, Any]:

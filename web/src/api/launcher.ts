@@ -512,7 +512,8 @@ export function requestBranchInstanceLifecycle(
   if (trigger) {
     headers.set("X-Vibelution-Launcher-Trigger", trigger);
   }
-  return fetchLauncherJson<LauncherControlResponse>(`branch-instances/${operation}`, {
+  // Isolated lifecycle writes are Electron-owned; the HTTP endpoints are retired.
+  return invokeLauncherLifecycleJson<LauncherControlResponse>(`branch-instances/${operation}`, {
     method: "POST",
     headers,
     body: JSON.stringify({ instanceId }),

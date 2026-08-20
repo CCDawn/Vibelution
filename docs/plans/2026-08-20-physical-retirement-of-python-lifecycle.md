@@ -1,6 +1,6 @@
 # Python lifecycle 代码物理清理（执行清单）
 
-Status: **Active**（2026-08-20 立项，未开工）
+Status: **Active**（批次 A、B 已合入；批次 C 已执行：C-1 下线 branch-instances/start|stop|force-stop|restart 四端点 + web 客户端 IPC-only + Electron 死桥删除（branchInstanceBridge.ts，类型移入 isolatedInstanceRegistryHost）；C-2 删除孤儿 observe_isolated_transition；整文件删除与 RM 关闭路径归批次 D）
 Authority: [ADR 0009](../adr/0009-launcher-control-plane-lives-in-electron-main.md)（I6 增补已宣告 lifecycle CLI 退役；本计划执行物理删除）· 前置迁移计划（已归档）：`docs/archive/plans/2026-08/2026-08-20-launcher-lifecycle-ts-migration.md`
 目标：把已退役的 Python lifecycle 写路径从仓库物理删除；保留 status/settings/维护/演化意图面。**只做本清单内的事，按批次顺序，每批独立合入。**
 
