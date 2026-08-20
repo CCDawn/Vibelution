@@ -1402,7 +1402,7 @@ def approve_meeting_digest(
     else:
         decisions = [
             {
-                "decision": "confirm_round_conclusion",
+                "decision": "close_round",
                 "rationale": "本轮评审确认现有结论，不再启动新的资料搜集",
                 "decidedBy": closed_by_id,
                 "candidateRefs": [
