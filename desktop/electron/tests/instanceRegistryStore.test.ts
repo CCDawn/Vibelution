@@ -9,8 +9,11 @@ import {
   applyClaimStop,
   applyObserve,
   applyRecordSpawnPid,
+  applyReclaimStaleInFlightStart,
+  applyRenewOwnerLease,
   applyUpsert,
   claimStop,
+  ownerLeaseOf,
   recordSpawnPid,
   type RegistryPayload
 } from "../src/lifecycle/instanceRegistryStore.js";
@@ -24,6 +27,8 @@ type CaseInput = {
   deadlineAt?: string;
   startedAt?: string;
   ownerPid?: number;
+  ownerId?: string;
+  nowMs?: number;
   preferredBackend?: number;
   preferredControl?: number;
   extraUsed?: number[];
@@ -48,6 +53,8 @@ type CaseExpected = {
   commandId?: string;
   failureMessage?: string;
   ownerPid?: number;
+  ownerId?: string;
+  ownerLeaseExpiresAt?: string;
 };
 
 type FixtureCase = {
@@ -90,6 +97,7 @@ function portIsFree(input: CaseInput): (port: number) => boolean {
 }
 
 function snapshot(entry: Record<string, unknown>): CaseExpected {
+  const lease = ownerLeaseOf(entry);
   return {
     generation: Number(entry.generation || 0),
     status: String(entry.status || ""),
@@ -100,7 +108,9 @@ function snapshot(entry: Record<string, unknown>): CaseExpected {
     spawnPid: Number(entry.spawnPid || 0),
     commandId: String(entry.commandId || ""),
     failureMessage: String(entry.failureMessage || ""),
-    ownerPid: Number(entry.ownerPid || 0)
+    ownerPid: Number(entry.ownerPid || 0),
+    ownerId: lease?.ownerId || "",
+    ownerLeaseExpiresAt: lease?.expiresAt || ""
   };
 }
 
@@ -128,6 +138,8 @@ async function runOp(
       deadlineAt: String(input.deadlineAt || ""),
       startedAt: input.startedAt,
       ownerPid: Number(input.ownerPid || 0),
+      ownerId: input.ownerId,
+      nowMs: input.nowMs,
       preferredBackend: input.preferredBackend,
       preferredControl: input.preferredControl,
       extraUsed: input.extraUsed,
@@ -164,6 +176,22 @@ async function runOp(
       instanceId: String(input.instanceId || ""),
       spawnPid: Number(input.spawnPid || 0),
       expectedGeneration: Number(input.expectedGeneration || 0)
+    });
+    return { applied: result.applied, ...snapshot(result.entry) };
+  }
+  if (op === "reclaimStale") {
+    const result = applyReclaimStaleInFlightStart(payload, {
+      instanceId: String(input.instanceId || ""),
+      nowMs: input.nowMs
+    });
+    return { applied: result.applied, ...snapshot(result.entry) };
+  }
+  if (op === "renewOwnerLease") {
+    const result = applyRenewOwnerLease(payload, {
+      instanceId: String(input.instanceId || ""),
+      ownerId: String(input.ownerId || ""),
+      expectedGeneration: input.expectedGeneration,
+      nowMs: input.nowMs
     });
     return { applied: result.applied, ...snapshot(result.entry) };
   }

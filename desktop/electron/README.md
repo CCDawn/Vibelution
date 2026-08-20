@@ -16,6 +16,7 @@
 | Launcher 窗口 / 遗留窗口 adopt | `src/windows/electronWindowProvider.ts` | 把 OS 上任意窗口当成 running；拆掉 isolated instance 窗口当 leftover |
 | 隔离实例生命周期投影 | `src/lifecycle/instanceLifecycleProjection.ts` + `__fixtures__/instanceLifecycleProjection.cases.json` | 在 overlay 里手写第二套状态规则；改 D1 语义先改计划 I1 再改 fixture |
 | 隔离实例 registry CAS | `src/lifecycle/instanceRegistryStore.ts` + `__fixtures__/instanceRegistryCas.cases.json` | 无 generation 盲写 `instances.json`；stop 在锁外读 spawnPid；改 D2 语义先改计划 I2 再改 fixture |
+| 隔离实例监督 / `ownerLease` | `src/process/isolatedInstanceSupervisor.ts` + `__fixtures__/instanceOwnerLease.cases.json` | observe 再 spawn Python bridge；HTTP 等待另开 180s；hang 回收仍要求 spawnPid 已死；改 D3 语义先改计划 I3 |
 | 托盘 / 单实例 / 退出 | `src/tray/desktopTray.ts` · `src/main.ts` | 与 WinForms 同时显示 NotifyIcon；用 `taskkill` 清 Electron；托盘「Launcher 代码版本」去打工作台 HTTP `/api/launcher/freshness` |
 | `--project` 槽位 | `src/protocol/applyProjectSlot.ts` · `src/appLock.ts` · `src/main.ts` | 把 worktree 当成第二套 DesktopShell；未登记路径静默 start 当前 main |
 | Launcher 控制命令（目标） | `src/ipc.ts` · `src/preload.ts` · 新 IPC host | 控制窗口 `fetch` `:8765` 当产品路径 |

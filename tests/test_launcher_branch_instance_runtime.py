@@ -585,7 +585,12 @@ def test_overlay_keeps_starting_when_supervisor_alive_past_deadline(tmp_path, mo
     monkeypatch.setattr(
         lifecycle.registry,
         "list_instances",
-        lambda: [_stale_starting_entry(path)],
+        lambda: [
+            _stale_starting_entry(
+                path,
+                ownerLease={"ownerId": "electron:1", "expiresAt": "2999-01-01T00:00:00Z"},
+            )
+        ],
     )
 
     payload = lifecycle.overlay_instance_ports(
@@ -656,6 +661,34 @@ def test_runtime_lifecycle_projection_lost_supervisor_does_not_override_live_win
     )
     assert state == "partial"
     assert code == ""
+
+
+def test_overlay_collapses_starting_when_lease_expired_even_if_spawn_pid_alive(tmp_path, monkeypatch):
+    path = tmp_path / "task"
+    path.mkdir()
+    _prepare_bundled_frontend(path)
+    monkeypatch.setattr(lifecycle, "_slot_fields_for_path", lambda _path: {})
+    monkeypatch.setattr(lifecycle, "_pid_alive", lambda _pid: True)
+    monkeypatch.setattr(
+        lifecycle.registry,
+        "list_instances",
+        lambda: [
+            _stale_starting_entry(
+                path,
+                spawnPid=424242,
+                ownerLease={"ownerId": "pid:111", "expiresAt": "2026-08-18T04:53:00Z"},
+            )
+        ],
+    )
+
+    payload = lifecycle.overlay_instance_ports(
+        {"items": [_item(path)]},
+        launcher_state={},
+    )
+
+    runtime = payload["items"][0]["runtime"]
+    assert runtime["lifecycleState"] == "error"
+    assert runtime["error"]["code"] == "start_supervisor_lost"
 
 
 def test_overlay_promotes_starting_to_partial_when_isolated_backend_http_ready(
