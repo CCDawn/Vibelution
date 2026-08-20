@@ -3,7 +3,7 @@
 **读者：** coding Agent。
 **Owner：** Electron desktop shell（监督者）+ 当前 checkout 的 Python JSON CLI。
 **非目标（本轮不做）：** checkout / `git worktree add` UI、托盘 HTTP→IPC 迁徙、列表 git-dirty 加速。
-**`main` 行：** 仍走 Runtime Manager 队列；本文件不改变该合同。
+**`main` 行：** open/close/restart 入队与 idle reconcile 由 Electron `lifecycle/mainLine` 拥有（I4b）；执行仍经无控制台 lifecycle CLI → RM daemon handler。隔离行走本文件的 registry claim。
 
 权威交叉引用：`docs/standards/development-standard.md` §8.0 · ADR 0009 · [`launcher_runtime.md`](../web/services/launcher_runtime.md)。
 
@@ -91,7 +91,7 @@ running|starting|partial|error → stopping → closed
 - stop / force-stop 可取消 in-flight start（先 bump `generation`）。
 - 同一实例在 `starting|stopping|restarting` 时第二次 start → **409** `instance_busy`；除非该 in-flight start 已证明死亡（`deadlineAt` 已过、`ownerLease` 过期或缺失、无后端/窗口活信号）→ 先在锁内回收为 `failed` 再放行新 claim。`spawnPid` 仍 hang 不得阻止回收。
 - 无活进程的 `error` leftover **允许再次 start**（新 generation 清掉旧 `failureMessage`）。
-- `main` 行不走本状态机的 registry claim。
+- `main` 行不走本状态机的 registry claim。其命令队列在 Electron `mainLineCommandQueue`：同类型 join、close 取代 pending open、open/restart 取代 pending close；崩溃恢复读 `main_line_intent.json`。
 
 Registry 字段（隔离行）：
 
@@ -161,7 +161,7 @@ Electron overlay 在写入 `window.open` 后必须用同一函数重算 `lifecyc
 4. HTTP 超时 / 非就绪 / 开窗失败 → 对 **同一 generation** 调 `observe-error`。禁止只 `console.warn`。
 5. 监督循环可 fire-and-forget 以免堵住 IPC 202，但失败路径必须写回 registry。
 
-当前 checkout 的窗口等待保持 `WORKBENCH_START_READY_WAIT_MS`（90s），不走 `observe-error`。
+当前 checkout 的窗口等待保持 `WORKBENCH_START_READY_WAIT_MS`（90s），不走 `observe-error`。main 行空闲观测（I4b）用 net.connect 健康门槛 + 已知 pid 存活，投影复用 I1；不查 Win32 端口属主表。
 
 ---
 

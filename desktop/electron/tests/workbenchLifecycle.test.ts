@@ -2,10 +2,10 @@ import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { PythonJsonBridgeError } from "../src/process/pythonJsonBridge.js";
+import { createMainLineCommandQueue } from "../src/lifecycle/mainLine/commandQueue.js";
 import {
   runWorkbenchLifecycle,
   parseWorkbenchLifecycleResult,
-  type WorkbenchLifecycleOperation,
 } from "../src/process/workbenchLifecycle.js";
 
 type SpawnChild = {
@@ -174,6 +174,28 @@ describe("runWorkbenchLifecycle", () => {
         spawnImpl,
       })
     ).rejects.toMatchObject({ code: "invalid_payload" });
+  });
+
+  it("coalesces a 1s restart storm into one lifecycle bridge spawn", async () => {
+    const spawnImpl = fakeSpawnWithOutput(
+      JSON.stringify({ schemaVersion: 1, accepted: true, operation: "restart", commandId: "cmd-storm" }),
+    );
+    const queue = createMainLineCommandQueue();
+    const results = await Promise.all(
+      Array.from({ length: 10 }, () =>
+        runWorkbenchLifecycle({
+          workspaceRoot: "C:/repo",
+          pythonPath: "python",
+          operatorConfigPath: "",
+          operation: "restart",
+          spawnImpl,
+          queue,
+        }),
+      ),
+    );
+    expect(spawnImpl).toHaveBeenCalledTimes(1);
+    expect(new Set(results.map((result) => result.commandId)).size).toBe(1);
+    expect(results.every((result) => result.accepted)).toBe(true);
   });
 
   it("rejects with the bounded-helper abort classification before spawning", async () => {
