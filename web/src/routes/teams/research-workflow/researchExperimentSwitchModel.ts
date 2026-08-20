@@ -56,19 +56,19 @@ export function formatHypothesisSummary(
 ): string {
   if (!normalizeQuestionId(questionId)) return "";
   const ids = (selectedCandidateIds ?? []).map((item) => item.trim()).filter(Boolean);
-  const base = !ids.length ? "尚未选择假说" : `已选 ${ids.length} 个假说`;
-  if (!chain || !ids.length) return base;
-  if (chain.hypothesisConverged) return `${base} · 已收敛`;
-  const round = Number(chain.meetingCount ?? 0);
-  if (round > 0) return `${base} · 第 ${round} 轮讨论`;
-  return base;
+  if (!ids.length) return "假说待生成";
+  const count = ids.length;
+  if (chain?.hypothesisConverged) return `${count} 条假说已收敛`;
+  const round = Number(chain?.meetingCount ?? 0);
+  if (round > 0) return `${count} 条假说评审中 · 第 ${round} 轮`;
+  return `${count} 条假说待评审`;
 }
 
 export function formatExperimentSwitchLabel(
   questionId: string,
   hypothesisSummary: string,
 ): string {
-  return `${normalizeQuestionId(questionId)} · ${hypothesisSummary.trim() || "尚未选择假说"}`;
+  return `${normalizeQuestionId(questionId)} · ${hypothesisSummary.trim() || "假说待生成"}`;
 }
 
 function hypothesisForQuestion(

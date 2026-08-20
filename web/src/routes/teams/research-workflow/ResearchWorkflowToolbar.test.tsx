@@ -22,7 +22,7 @@ const EXPERIMENT: ExperimentSwitchOption = {
   title: "What are the coding principles embedded in neuronal spike trains?",
   runId: "run-5e4fbe6e18f2",
   currentNodeId: "source_finding",
-  label: "SCI-096 · 尚未选择假说",
+  label: "SCI-096 · 假说待生成",
   description: "What are the coding principles embedded in neuronal spike trains?",
 };
 
@@ -30,7 +30,7 @@ const BASE_PROPS = {
   identity: {
     questionId: "SCI-096",
     title: "What are the coding principles embedded in neuronal spike trains?",
-    hypothesisSummary: "尚未选择假说",
+    hypothesisSummary: "假说待生成",
   },
   runStatus: "",
   experimentOptions: [] as ExperimentSwitchOption[],
@@ -49,7 +49,7 @@ describe("ResearchWorkflowToolbar", () => {
       onOpenPanel: vi.fn(),
     } as React.ComponentProps<typeof ResearchWorkflowToolbar>);
     expect(empty).toContain("选择题目开始研究");
-    expect(empty).toContain("SCI-096 · 尚未选择假说");
+    expect(empty).toContain("SCI-096 · 假说待生成");
     expect(empty).toContain("查看详情");
     expect(empty).not.toContain("状态");
     expect(empty).not.toContain("科研团队");
@@ -62,11 +62,11 @@ describe("ResearchWorkflowToolbar", () => {
       ...BASE_PROPS,
       runId: "run-5e4fbe6e18f2",
       runStatus: "waiting_human",
-      experimentOptions: [{ ...EXPERIMENT, label: "SCI-096 · 已选 1 个假说" }],
+      experimentOptions: [{ ...EXPERIMENT, label: "SCI-096 · 1 条假说待评审" }],
       identity: {
         questionId: "SCI-096",
         title: "What are the coding principles embedded in neuronal spike trains?",
-        hypothesisSummary: "已选 1 个假说",
+        hypothesisSummary: "1 条假说待评审",
       },
       navigationLabel: "前往确认候选",
       onSelectExperiment: vi.fn(),
@@ -76,7 +76,7 @@ describe("ResearchWorkflowToolbar", () => {
     expect(running).not.toContain("第 1/5 步");
     expect(running).toContain("切换实验");
     expect(running).not.toContain("切换假说");
-    expect(running).toContain("SCI-096 · 已选 1 个假说");
+    expect(running).toContain("SCI-096 · 1 条假说待评审");
     expect(running).not.toContain('data-vui="status-chip"');
     expect(running).not.toContain("waiting_human");
     expect(running).not.toContain("第 1 次运行");
@@ -256,7 +256,7 @@ describe("ResearchWorkflowToolbar", () => {
 
     expect(empty).toContain("选择题目开始研究");
     expect(empty).toContain("查看详情");
-    expect(empty).toContain("尚未选择假说");
+    expect(empty).toContain("假说待生成");
     expect(empty).toContain("flex-wrap");
     expect(empty).toContain("max-w-[24rem]");
     expect(empty).toContain("shrink-0");
