@@ -35,7 +35,7 @@ import {
 } from "react";
 
 import { cn } from "../../../lib/cn";
-import type { WorkflowLayoutInput } from "../../../product/workflow/workflowCanvasTypes";
+import type { WorkflowLayoutInput, WorkflowLayoutNode } from "../../../product/workflow/workflowCanvasTypes";
 import type { WorkflowNodeSize } from "./workflowLayoutHash";
 import { useWorkflowAutoLayout } from "./useWorkflowAutoLayout";
 import { createWorkflowLayoutEngine } from "./workflowElkClient";
@@ -44,7 +44,9 @@ import { WorkflowCanvasControls } from "./WorkflowCanvasControls";
 import { WorkflowCanvasLegend } from "./WorkflowCanvasLegend";
 import { WorkflowDecisionNode } from "./WorkflowDecisionNode";
 import { WorkflowHumanGateNode } from "./WorkflowHumanGateNode";
+import { WorkflowHelperLinesOverlay } from "./WorkflowHelperLinesOverlay";
 import { WorkflowNodeInteractionBoundary } from "./WorkflowNodeInteractionBoundary";
+import { WorkflowOrthogonalConnectionLine } from "./WorkflowOrthogonalConnectionLine";
 import { WorkflowSemanticEdge } from "./WorkflowSemanticEdge";
 import { WorkflowStageRegionNode } from "./WorkflowStageRegionNode";
 import { WorkflowStartEndNode } from "./WorkflowStartEndNode";
@@ -73,6 +75,13 @@ import {
   type WorkflowEdgeAnchors,
 } from "./workflowEdgeAnchors";
 import type { OrthogonalObstacle } from "./workflowOrthogonalRoute";
+import {
+  resolveWorkflowManualCardDrag,
+  workflowHelperLinesActive,
+  type WorkflowHelperLines,
+  type WorkflowHelperRect,
+  type WorkflowHelperSnapResult,
+} from "./workflowHelperLines";
 
 export type ShadcnWorkflowCanvasProps = {
   graph: WorkflowLayoutInput;
@@ -196,6 +205,32 @@ function visualToRfType(visualKind: string): string {
 
 const MANUAL_LAYOUT_HISTORY_LIMIT = 20;
 
+function resolveDraggedTaskPosition(
+  node: Node,
+  layoutNodes: readonly WorkflowLayoutNode[],
+  positions: WorkflowManualPositions,
+): WorkflowHelperSnapResult {
+  const layoutNode = layoutNodes.find((item) => item.id === node.id);
+  const width = layoutNode?.width
+    ?? (typeof node.measured?.width === "number" ? node.measured.width : undefined)
+    ?? (typeof node.style?.width === "number" ? node.style.width : undefined);
+  const height = layoutNode?.height
+    ?? (typeof node.measured?.height === "number" ? node.measured.height : undefined)
+    ?? (typeof node.style?.height === "number" ? node.style.height : undefined);
+  const others: WorkflowHelperRect[] = [];
+  for (const item of layoutNodes) {
+    if (item.id === node.id || item.kind !== "task") continue;
+    const pos = positions[item.id] ?? { x: item.x, y: item.y };
+    others.push({ x: pos.x, y: pos.y, width: item.width, height: item.height });
+  }
+  return resolveWorkflowManualCardDrag({
+    position: node.position,
+    width: width ?? 0,
+    height: height ?? 0,
+    others,
+  });
+}
+
 function WorkflowCanvasInner({
   graph,
   selectedNodeId = null,
@@ -250,6 +285,7 @@ function WorkflowCanvasInner({
   const [manualLayoutLocked, setManualLayoutLocked] = useState(false);
   const [manualHistory, setManualHistory] = useState<WorkflowManualLayoutSnapshot[]>([]);
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
+  const [helperLines, setHelperLines] = useState<WorkflowHelperLines | null>(null);
   const [reconnectSession, setReconnectSession] = useState<{
     edgeId: string;
     handleType: "source" | "target";
@@ -266,9 +302,11 @@ function WorkflowCanvasInner({
     target: string;
   } | null>(null);
   const stageAnchorByIdRef = useRef<Record<string, { x: number; y: number }>>({});
+  const layoutNodesRef = useRef(layout.nodes);
   const manualLockedRef = useRef(false);
   const manualHistoryRef = useRef<WorkflowManualLayoutSnapshot[]>([]);
   const manualDragFrameRef = useRef<number | null>(null);
+  const helperLinesRef = useRef<WorkflowHelperLines | null>(null);
 
   useEffect(() => {
     const saved = manualLayoutEnabled
@@ -287,6 +325,8 @@ function WorkflowCanvasInner({
     setManualLayoutLocked(saved.locked);
     setManualHistory([]);
     setDraggingNodeId(null);
+    helperLinesRef.current = null;
+    setHelperLines(null);
   }, [manualLayoutEnabled, manualScope]);
 
   useEffect(() => {
@@ -300,6 +340,10 @@ function WorkflowCanvasInner({
   useEffect(() => {
     edgeAnchorsRef.current = edgeAnchors;
   }, [edgeAnchors]);
+
+  useEffect(() => {
+    layoutNodesRef.current = layout.nodes;
+  }, [layout.nodes]);
 
   useEffect(() => {
     manualLockedRef.current = manualLayoutLocked;
@@ -345,6 +389,8 @@ function WorkflowCanvasInner({
     if (!manualLayoutEnabled || manualLockedRef.current) return;
     rememberManualLayout();
     setDraggingNodeId(node.id);
+    helperLinesRef.current = null;
+    setHelperLines(null);
   }, [manualLayoutEnabled, rememberManualLayout]);
 
   const onNodeDrag = useCallback((_event: unknown, node: Node) => {
@@ -357,17 +403,22 @@ function WorkflowCanvasInner({
         ...stageLabelOffsetsRef.current,
         [stageId]: snapWorkflowManualPosition({ x: node.position.x - anchor.x, y: node.position.y - anchor.y }),
       };
+      helperLinesRef.current = null;
     } else {
+      const snapped = resolveDraggedTaskPosition(node, layoutNodesRef.current, manualPositionsRef.current);
+      node.position = snapped.position;
       manualPositionsRef.current = {
         ...manualPositionsRef.current,
-        [node.id]: snapWorkflowManualPosition(node.position),
+        [node.id]: snapped.position,
       };
+      helperLinesRef.current = workflowHelperLinesActive(snapped.lines) ? snapped.lines : null;
     }
     if (manualDragFrameRef.current !== null) return;
     manualDragFrameRef.current = requestAnimationFrame(() => {
       manualDragFrameRef.current = null;
       setManualPositions(cloneWorkflowManualPositions(manualPositionsRef.current));
       setStageLabelOffsets(cloneWorkflowManualPositions(stageLabelOffsetsRef.current));
+      setHelperLines(helperLinesRef.current);
     });
   }, [manualLayoutEnabled]);
 
@@ -387,11 +438,15 @@ function WorkflowCanvasInner({
         };
       }
     } else {
+      const snapped = resolveDraggedTaskPosition(node, layoutNodesRef.current, manualPositionsRef.current);
+      node.position = snapped.position;
       manualPositionsRef.current = {
         ...manualPositionsRef.current,
-        [node.id]: snapWorkflowManualPosition(node.position),
+        [node.id]: snapped.position,
       };
     }
+    setHelperLines(null);
+    helperLinesRef.current = null;
     commitManualLayout({
       positions: manualPositionsRef.current,
       stageLabelOffsets: stageLabelOffsetsRef.current,
@@ -786,8 +841,7 @@ function WorkflowCanvasInner({
           onReconnect={onReconnect}
           onReconnectEnd={onReconnectEnd}
           elementsSelectable
-          snapToGrid={manualLayoutEnabled}
-          snapGrid={[16, 16]}
+          snapToGrid={false}
           panOnDrag
           panOnScroll
           zoomOnScroll
@@ -803,12 +857,14 @@ function WorkflowCanvasInner({
           className={fillHost ? "h-full w-full" : undefined}
           defaultEdgeOptions={{ type: "workflowSemantic" }}
           connectionLineType={ConnectionLineType.Step}
+          connectionLineComponent={WorkflowOrthogonalConnectionLine}
           >
           <Background
             gap={layoutMode === "serpentine" ? 18 : 20}
             size={1}
             color="var(--vui-border, #e4e4e7)"
           />
+          <WorkflowHelperLinesOverlay lines={helperLines} />
           <WorkflowCanvasControls
             runtimeCurrentNodeIds={runtimeCurrentNodeIds}
             onFitAll={fitAll}

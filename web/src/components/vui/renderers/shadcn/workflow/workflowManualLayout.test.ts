@@ -39,13 +39,13 @@ describe("workflowManualLayout", () => {
   it("persists only a matching structure/run and ignores malformed storage", () => {
     const storage = memoryStorage();
     persistWorkflowManualLayout(scope, {
-      positions: { collect: { x: 41, y: 71 } },
+      positions: { collect: { x: 41.4, y: 71.6 } },
       stageLabelOffsets: { research: { x: 17, y: -17 } },
       edgeAnchors: {},
       locked: true,
     }, storage);
     expect(readWorkflowManualLayout(scope, storage)).toEqual({
-      positions: { collect: { x: 48, y: 64 } },
+      positions: { collect: { x: 41, y: 72 } },
       stageLabelOffsets: { research: { x: 16, y: -16 } },
       edgeAnchors: {},
       locked: true,
@@ -57,6 +57,19 @@ describe("workflowManualLayout", () => {
       stageLabelOffsets: {},
       edgeAnchors: {},
       locked: false,
+    });
+  });
+
+  it("keeps helper-aligned card positions that are off the 16px grid", () => {
+    const storage = memoryStorage();
+    persistWorkflowManualLayout(scope, {
+      positions: { collect: { x: 316, y: 40 } },
+      stageLabelOffsets: {},
+      edgeAnchors: {},
+      locked: false,
+    }, storage);
+    expect(readWorkflowManualLayout(scope, storage)?.positions).toEqual({
+      collect: { x: 316, y: 40 },
     });
   });
 
