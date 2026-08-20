@@ -572,6 +572,29 @@ export function formatGitStatus(item: LauncherBranchInstance, isZh: boolean): st
   return states.length > 0 ? states.join(" · ") : (isZh ? "干净" : "Clean");
 }
 
+export const ADMISSION_BLOCK_REASONS = new Set(["rate_limited", "crash_loop_backoff"]);
+
+export function isAdmissionBlocked(item: LauncherBranchInstance): boolean {
+  return ADMISSION_BLOCK_REASONS.has(String(item.startBlockReason || "").trim())
+    || Boolean(String(item.admissionMessage || "").trim());
+}
+
+export function formatAdmissionReason(item: LauncherBranchInstance, isZh: boolean): string {
+  const message = String(item.admissionMessage || "").trim();
+  if (message) {
+    return message;
+  }
+  const reason = String(item.startBlockReason || "").trim();
+  const seconds = Math.max(1, Math.ceil(Math.max(0, Number(item.admissionRetryAfterMs) || 0) / 1000));
+  if (reason === "rate_limited") {
+    return isZh ? `启动过于频繁，请 ${seconds} 秒后再试。` : `Too many starts. Try again in ${seconds}s.`;
+  }
+  if (reason === "crash_loop_backoff") {
+    return isZh ? `连续启动失败，冷却中，请 ${seconds} 秒后再试。` : `Cooling down after repeated failures. Try again in ${seconds}s.`;
+  }
+  return "";
+}
+
 export function canRequestOpenInstance(item: LauncherBranchInstance, pending?: LifecyclePendingInput): boolean {
   if (!isOperableInstance(item) || item.startBlockReason === "launcher_refresh_required") {
     return false;
@@ -580,6 +603,9 @@ export function canRequestOpenInstance(item: LauncherBranchInstance, pending?: L
 }
 
 export function canStartInstance(item: LauncherBranchInstance, pending?: LifecyclePendingInput): boolean {
+  if (isAdmissionBlocked(item)) {
+    return false;
+  }
   return isStartableInstance(item, pending)
     || (canRequestOpenInstance(item, pending) && !instanceWindowOpen(item));
 }

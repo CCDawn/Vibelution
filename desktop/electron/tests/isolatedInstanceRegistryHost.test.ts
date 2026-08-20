@@ -1,9 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 
+import { AdmissionDeniedError } from "../src/lifecycle/instanceAdmissionControl.js";
+import { admitLifecycleCommand, resetAdmissionCacheForTests } from "../src/lifecycle/instanceAdmissionStore.js";
 import {
+  claimIsolatedStart,
   collectExtraUsedPorts,
   resolveIsolatedClaimTarget
 } from "../src/lifecycle/isolatedInstanceRegistryHost.js";
+
+afterEach(() => {
+  resetAdmissionCacheForTests();
+});
 
 const payload = {
   items: [
@@ -36,5 +46,30 @@ describe("isolatedInstanceRegistryHost", () => {
 
   it("returns null when the instance path is missing", () => {
     expect(resolveIsolatedClaimTarget({ items: [{ id: "worktree:task" }] }, "worktree:task")).toBeNull();
+  });
+
+  it("rejects a fourth isolated start inside the burst window", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "vibe-isolated-admission-"));
+    const admissionStorePath = join(dir, "instance-admission.json");
+    const registryPath = join(dir, "instances.json");
+    const nowMs = 1_787_227_200_000;
+    for (let index = 0; index < 3; index += 1) {
+      await admitLifecycleCommand({
+        instanceId: "worktree:task",
+        operation: "start",
+        storePath: admissionStorePath,
+        nowMs: nowMs + index
+      });
+    }
+    await expect(
+      claimIsolatedStart({
+        instanceId: "worktree:task",
+        branchInstances: payload,
+        commandId: "cmd-4",
+        nowMs: nowMs + 10,
+        registryPath,
+        admissionStorePath
+      })
+    ).rejects.toBeInstanceOf(AdmissionDeniedError);
   });
 });

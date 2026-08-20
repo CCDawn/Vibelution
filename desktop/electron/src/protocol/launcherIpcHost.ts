@@ -1,4 +1,14 @@
 import { boundedDesktopControlFetch } from "./boundedFetch.js";
+import {
+  AdmissionDeniedError,
+  MAIN_INSTANCE_ID,
+  deniedLifecycleResult,
+  isStartLikeOperation
+} from "../lifecycle/instanceAdmissionControl.js";
+import {
+  admitLifecycleCommand,
+  ensureAdmissionLoaded
+} from "../lifecycle/instanceAdmissionStore.js";
 import { overlayLauncherWindowTruth, type LauncherWindowTruth } from "../windows/launcherWindowTruthOverlay.js";
 
 export const LAUNCHER_IPC_HOST_NOT_READY = "LAUNCHER_IPC_HOST_NOT_READY";
@@ -40,6 +50,7 @@ export type OrchestratedLifecycleResult = {
   requestId?: string;
   message?: string;
   code?: string;
+  retryAfterMs?: number;
   activeWorkRuns?: unknown[];
 };
 
@@ -56,6 +67,7 @@ export type OrchestratedBranchInstanceResult = {
   deadlineAt?: string;
   message?: string;
   code?: string;
+  retryAfterMs?: number;
   activeWorkRuns?: unknown[];
 };
 
@@ -166,6 +178,44 @@ async function readFailureDetail(response: Response): Promise<string> {
   return `HTTP ${response.status}`;
 }
 
+function instanceIdFromPayload(apiRoute: string, payload: LauncherIpcInvokePayload): string {
+  if (apiRoute.startsWith("branch-instances")) {
+    const body = payload.init?.body;
+    if (typeof body === "object" && body !== null) {
+      return String((body as Record<string, unknown>).instanceId || "").trim();
+    }
+    return "";
+  }
+  return MAIN_INSTANCE_ID;
+}
+
+function lifecycleOperationOf(apiRoute: string): string {
+  if (apiRoute.startsWith("branch-instances/")) {
+    return apiRoute.slice("branch-instances/".length);
+  }
+  return apiRoute;
+}
+
+function deniedAdmissionError(error: unknown): LauncherIpcInvokeResult | null {
+  if (!(error instanceof AdmissionDeniedError)) {
+    return null;
+  }
+  return {
+    ok: true,
+    payload: deniedLifecycleResult({
+      operation: "start",
+      instanceId: error.instanceId,
+      decision: {
+        admitted: false,
+        code: error.code,
+        retryAfterMs: error.retryAfterMs,
+        message: error.message,
+        eventName: error.eventName
+      }
+    })
+  };
+}
+
 export function createLauncherIpcHost(input: {
   resolveContext: () => Promise<LauncherIpcHostContext | null>;
   resolveWindowTruth?: () => LauncherWindowTruth;
@@ -176,9 +226,11 @@ export function createLauncherIpcHost(input: {
   resolveLocalBranchInstances?: () => unknown;
   fetchImpl?: typeof fetch;
   requestTimeoutMs?: number;
+  admissionStorePath?: string;
 }) {
   const fetchImpl = input.fetchImpl ?? fetch;
   const resolveWindowTruth = input.resolveWindowTruth ?? (() => ({ workbench: null, instances: [] }));
+  const admissionStorePath = input.admissionStorePath;
 
   return {
     async invoke(payload: LauncherIpcInvokePayload): Promise<LauncherIpcInvokeResult> {
@@ -195,22 +247,42 @@ export function createLauncherIpcHost(input: {
       const apiRoute = launcherApiRoute(normalized.path);
       if (LIFECYCLE_PATHS.has(apiRoute) && input.orchestrateLifecycle) {
         try {
+          const operation = lifecycleOperationOf(apiRoute);
+          if (isStartLikeOperation(operation)) {
+            const decision = await admitLifecycleCommand({
+              instanceId: instanceIdFromPayload(apiRoute, normalized),
+              operation,
+              storePath: admissionStorePath
+            });
+            if (!decision.admitted) {
+              return {
+                ok: true,
+                payload: deniedLifecycleResult({
+                  operation,
+                  instanceId: MAIN_INSTANCE_ID,
+                  decision
+                })
+              };
+            }
+          }
           const result = await input.orchestrateLifecycle(normalized.path, normalized);
           return { ok: true, payload: result };
         } catch (error: unknown) {
-          return launcherIpcError(
+          return deniedAdmissionError(error) || launcherIpcError(
             LAUNCHER_IPC_LIFECYCLE_ERROR,
             error instanceof Error ? error.message : String(error)
           );
         }
       }
       if (apiRoute === "status" && input.resolveLocalStatus) {
+        await ensureAdmissionLoaded(admissionStorePath);
         return {
           ok: true,
           payload: overlayLauncherWindowTruth(apiRoute, input.resolveLocalStatus(), resolveWindowTruth())
         };
       }
       if (apiRoute === "branch-instances" && input.resolveLocalBranchInstances && !wantsCleanupMetadata(normalized.path)) {
+        await ensureAdmissionLoaded(admissionStorePath);
         return {
           ok: true,
           payload: overlayLauncherWindowTruth(apiRoute, input.resolveLocalBranchInstances(), resolveWindowTruth())
@@ -219,10 +291,17 @@ export function createLauncherIpcHost(input: {
       if (BRANCH_INSTANCE_PATHS.has(apiRoute) && input.orchestrateBranchInstance) {
         try {
           const operation = apiRoute.split("/")[1];
+          const instanceId = instanceIdFromPayload(apiRoute, normalized);
+          if (instanceId === MAIN_INSTANCE_ID && isStartLikeOperation(operation)) {
+            const decision = await admitLifecycleCommand({ instanceId, operation, storePath: admissionStorePath });
+            if (!decision.admitted) {
+              return { ok: true, payload: deniedLifecycleResult({ operation, instanceId, decision }) };
+            }
+          }
           const result = await input.orchestrateBranchInstance(operation, normalized);
           return { ok: true, payload: result };
         } catch (error: unknown) {
-          return launcherIpcError(
+          return deniedAdmissionError(error) || launcherIpcError(
             LAUNCHER_IPC_LIFECYCLE_ERROR,
             error instanceof Error ? error.message : String(error)
           );

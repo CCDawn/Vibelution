@@ -327,6 +327,8 @@ export type LauncherBranchInstance = {
   runtime: LauncherBranchInstanceRuntime;
   startable: boolean;
   startBlockReason?: string;
+  admissionRetryAfterMs?: number;
+  admissionMessage?: string;
   portLeaseStatus?: string;
 };
 

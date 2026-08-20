@@ -1,9 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 
+import { recordAdmissionOutcome, resetAdmissionCacheForTests } from "../src/lifecycle/instanceAdmissionStore.js";
 import {
   overlayLauncherWindowTruth,
   type LauncherWindowTruth,
 } from "../src/windows/launcherWindowTruthOverlay.js";
+
+afterEach(() => {
+  resetAdmissionCacheForTests();
+});
 
 const truth = (overrides: Partial<LauncherWindowTruth> = {}): LauncherWindowTruth => ({
   workbench: null,
@@ -436,5 +444,36 @@ describe("retired launcher control port overlay", () => {
       truth()
     ) as Record<string, unknown>;
     expect(overlaid.launcher).toMatchObject({ controlPort: 0, effectiveControlPort: 0 });
+  });
+
+  it("exposes cooldown reason and remaining time without rewriting lifecycleState", async () => {
+    await recordAdmissionOutcome({
+      instanceId: "worktree:task",
+      outcome: "failure",
+      nowMs: Date.now(),
+      storePath: join(await mkdtemp(join(tmpdir(), "vibe-overlay-admission-")), "instance-admission.json")
+    });
+    const payload = {
+      items: [
+        {
+          id: "worktree:task",
+          startable: true,
+          startBlockReason: "",
+          runtime: {
+            lifecycleState: "closed",
+            window: { open: false, pid: 0 },
+            backend: { alive: false, healthy: false, listening: false, portConflict: false },
+            frontend: { ready: false },
+            error: {},
+          },
+        },
+      ],
+    };
+    const overlaid = overlayLauncherWindowTruth("branch-instances", payload, truth()) as Record<string, unknown>;
+    const item = (overlaid.items as Record<string, unknown>[])[0];
+    expect(item.startBlockReason).toBe("crash_loop_backoff");
+    expect(item.admissionRetryAfterMs).toBeGreaterThan(0);
+    expect(String(item.admissionMessage)).toContain("秒后再试");
+    expect((item.runtime as Record<string, unknown>).lifecycleState).toBe("closed");
   });
 });

@@ -1,3 +1,4 @@
+import { assertLifecycleAdmitted, recordAdmissionOutcome } from "./instanceAdmissionStore.js";
 import {
   claimStart,
   claimStop,
@@ -93,12 +94,19 @@ export async function claimIsolatedStart(input: {
   registryPath?: string;
   nowMs?: number;
   storeOptions?: RegistryStoreOptions;
+  admissionStorePath?: string;
 }): Promise<ClaimStartResult> {
   const target = resolveIsolatedClaimTarget(input.branchInstances, input.instanceId);
   if (!target) {
     throw new Error(`找不到分支实例：${input.instanceId}`);
   }
   const nowMs = input.nowMs ?? Date.now();
+  await assertLifecycleAdmitted({
+    instanceId: target.instanceId,
+    operation: input.operation || "start",
+    nowMs,
+    storePath: input.admissionStorePath
+  });
   const ownerPid = input.ownerPid ?? process.pid;
   return claimStart(
     input.registryPath || instancesRegistryPath(),
@@ -147,12 +155,21 @@ export async function observeIsolatedReady(input: {
   expectedGeneration?: number;
   registryPath?: string;
   storeOptions?: RegistryStoreOptions;
+  admissionStorePath?: string;
 }): Promise<ObserveResult> {
-  return observeReady(
+  const result = await observeReady(
     input.registryPath || instancesRegistryPath(),
     { instanceId: input.instanceId, expectedGeneration: input.expectedGeneration },
     input.storeOptions
   );
+  if (result.applied) {
+    await recordAdmissionOutcome({
+      instanceId: input.instanceId,
+      outcome: "success",
+      storePath: input.admissionStorePath
+    });
+  }
+  return result;
 }
 
 export async function observeIsolatedError(input: {
@@ -161,8 +178,9 @@ export async function observeIsolatedError(input: {
   message?: string;
   registryPath?: string;
   storeOptions?: RegistryStoreOptions;
+  admissionStorePath?: string;
 }): Promise<ObserveResult> {
-  return observeError(
+  const result = await observeError(
     input.registryPath || instancesRegistryPath(),
     {
       instanceId: input.instanceId,
@@ -171,6 +189,14 @@ export async function observeIsolatedError(input: {
     },
     input.storeOptions
   );
+  if (result.applied) {
+    await recordAdmissionOutcome({
+      instanceId: input.instanceId,
+      outcome: "failure",
+      storePath: input.admissionStorePath
+    });
+  }
+  return result;
 }
 
 export async function renewIsolatedOwnerLease(input: {

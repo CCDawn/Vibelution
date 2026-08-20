@@ -13,6 +13,7 @@ import {
   canStopInstance,
   cleanupRiskLabels,
   filterBranchInstances,
+  formatAdmissionReason,
   formatAttentionReason,
   formatBackendStatus,
   formatFrontendStatus,
@@ -23,6 +24,7 @@ import {
   instanceRuntimeStateLabel,
   instanceStopLabel,
   instanceWindowOpen,
+  isAdmissionBlocked,
   isCleanupEligible,
   overlayCleanupMetadata,
   paginateItems,
@@ -459,10 +461,11 @@ export function LauncherBranchInstancesPanel({
     const stopBusy = state === "stopping";
     const startingOrRestarting = state === "starting" || state === "restarting";
     const openLabel = state === "failed" ? labels.retryStart : windowOpen ? labels.focusWindow : labels.openWindow;
+    const admissionBlocked = isAdmissionBlocked(item);
     const showOpen = canRequestOpenInstance(item, pendingOperation);
     const showStop = canStopInstance(item, pendingOperation) || stopBusy;
     const requestOpen = () => {
-      if (startBusy || openClickGuardsRef.current.has(item.id)) {
+      if (startBusy || admissionBlocked || openClickGuardsRef.current.has(item.id)) {
         return;
       }
       openClickGuardsRef.current.add(item.id);
@@ -491,11 +494,14 @@ export function LauncherBranchInstancesPanel({
             type="button"
             variant="primary"
             density="compact"
-            isDisabled={startBusy}
+            isDisabled={startBusy || admissionBlocked}
             onPress={requestOpen}
           >
             {openLabel}
           </VButton>
+        ) : null}
+        {showOpen && admissionBlocked ? (
+          <span className={styles.errorReason}>{formatAdmissionReason(item, zh)}</span>
         ) : null}
         {showOpen && openReject?.id === item.id ? (
           <span className={styles.errorReason}>{lifecycleIntentRejectMessage(openReject.reason, zh)}</span>
