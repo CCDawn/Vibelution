@@ -165,41 +165,15 @@ def _stable_hash(payload: Any) -> str:
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
-    if not path.exists():
-        return []
-    records: list[dict[str, Any]] = []
-    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-        if not line.strip():
-            continue
-        try:
-            payload = json.loads(line)
-        except json.JSONDecodeError as exc:
-            raise HypothesisFirstChainError(
-                f"Invalid hypothesis-first chain JSONL at line {line_number}."
-            ) from exc
-        if not isinstance(payload, dict):
-            raise HypothesisFirstChainError(
-                f"Invalid hypothesis-first chain record at line {line_number}."
-            )
-        records.append(payload)
-    return records
+    from core.web.services.team_workflow.storage_durability import read_jsonl_tolerant
+
+    return read_jsonl_tolerant(path)
 
 
 def _append_jsonl(path: Path, record: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    existing = path.read_text(encoding="utf-8") if path.exists() else ""
-    line = json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
-    fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write(existing)
-            handle.write(line)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary_name, path)
-    finally:
-        if os.path.exists(temporary_name):
-            os.unlink(temporary_name)
+    from core.web.services.team_workflow.storage_durability import append_jsonl_locked
+
+    append_jsonl_locked(path, record)
 
 
 def _latest_by_id(
