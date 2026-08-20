@@ -2,7 +2,8 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { LauncherLifecycleResultSummary, LauncherStatusSummary } from "../protocol/launcherControlClient.js";
-import { resolveRuntimeManagerDir } from "./projectStoragePaths.js";
+import { knownPidIsAlive } from "./mainLine/observation.js";
+import { resolveLauncherRuntimeDir, resolveRuntimeManagerDir } from "./projectStoragePaths.js";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -62,6 +63,59 @@ function readRecentLifecycleResults(runtimeManagerDir: string): LauncherLifecycl
   });
 }
 
+function readJsonRecord(path: string): Record<string, unknown> | null {
+  try {
+    const payload = JSON.parse(readFileSync(path, "utf8")) as unknown;
+    return isRecord(payload) ? payload : null;
+  } catch {
+    return null;
+  }
+}
+
+function readElectronMainLineIntentCommandId(runtimeManagerDir: string): string {
+  const payload = readJsonRecord(join(runtimeManagerDir, "main_line_intent.json"));
+  if (!payload || payload.schemaVersion !== 1) {
+    return "";
+  }
+  const operation = String(payload.operation || "").trim().toLowerCase();
+  const commandId = String(payload.commandId || "").trim();
+  if (payload.desiredState !== "open") {
+    return "";
+  }
+  if (operation !== "start" && operation !== "restart" && operation !== "rebuild-and-start") {
+    return "";
+  }
+  return isSafeRuntimeManagerCommandId(commandId) ? commandId : "";
+}
+
+type ElectronMainLineObservation = {
+  present: boolean;
+  backendAlive: boolean;
+  observedState: string;
+  lifecycleConsistency: string;
+  phase: string;
+};
+
+function readElectronMainLineObservation(workspaceRoot: string): ElectronMainLineObservation {
+  const payload = readJsonRecord(join(resolveLauncherRuntimeDir(workspaceRoot), "state.json"));
+  if (!payload || String(payload.lastSource || "").trim() !== "electron_main") {
+    return {
+      present: false,
+      backendAlive: false,
+      observedState: "",
+      lifecycleConsistency: "",
+      phase: ""
+    };
+  }
+  return {
+    present: true,
+    backendAlive: knownPidIsAlive(Number(payload.backendPid || 0)),
+    observedState: String(payload.observedState || "").trim(),
+    lifecycleConsistency: String(payload.lifecycleConsistency || "").trim(),
+    phase: String(payload.phase || "").trim()
+  };
+}
+
 export function readRuntimeManagerLauncherStatusSummary(
   workspaceRoot: string,
   expectedCommandId?: string
@@ -78,10 +132,21 @@ export function readRuntimeManagerLauncherStatusSummary(
   const recent = readRecentLifecycleResults(runtimeManagerDir);
   const expected = String(expectedCommandId || "").trim();
   const exact = expected ? readExactLifecycleResult(runtimeManagerDir, expected) : null;
-  const lifecycleResults = exact
-    ? [exact, ...recent.filter((item) => item.commandId !== exact.commandId)]
+  const electron = readElectronMainLineObservation(workspaceRoot);
+  const synthesized = (
+    !exact
+    && expected
+    && electron.present
+    && electron.backendAlive
+    && readElectronMainLineIntentCommandId(runtimeManagerDir) === expected
+  )
+    ? { commandId: expected, completed: true, ok: true }
+    : null;
+  const matched = exact ?? synthesized;
+  const lifecycleResults = matched
+    ? [matched, ...recent.filter((item) => item.commandId !== matched.commandId)]
     : recent;
-  return {
+  const summary: LauncherStatusSummary = {
     overallState: runtimeState === "running" ? "ready" : runtimeState || "unknown",
     observedState: String(workbench.observedState || "").trim() || "unknown",
     lifecycleConsistency: String(workbench.lifecycleConsistency || "").trim() || "unknown",
@@ -90,5 +155,19 @@ export function readRuntimeManagerLauncherStatusSummary(
     backendHealthy: workbench.backendHealthy === true,
     backendPortListening: workbench.backendPortListening === true,
     lifecycleResults
+  };
+  if (!electron.present) {
+    return summary;
+  }
+  return {
+    ...summary,
+    overallState: electron.backendAlive ? "ready" : summary.overallState,
+    observedState: electron.observedState || summary.observedState,
+    lifecycleConsistency: electron.backendAlive
+      ? (electron.lifecycleConsistency || "browser_missing")
+      : (electron.lifecycleConsistency || summary.lifecycleConsistency),
+    phase: electron.phase || summary.phase,
+    backendHealthy: electron.backendAlive,
+    backendPortListening: electron.backendAlive
   };
 }
