@@ -1,7 +1,7 @@
 # Launcher 生命周期 TS 化迁移（绞杀者增量 I0–I6）
 
-Status: **Active**（2026-08-20 立项；I0 锁协议 v2 已实现；I1 TS 投影权威 + 双语言 fixture 已实现；I2 TS registry CAS + stop spawnPid 锁内快照已实现；I3 监督循环 TS 化 + `ownerLease` 心跳已实现；I4b main 行 open/close/restart 队列已迁 Electron；I4a 准入控制已实现；I5 产品路径 execute 已改为 Electron 直接 spawn `pythonw scripts/web_workbench.py`）
-Authority: [ADR 0009](../adr/0009-launcher-control-plane-lives-in-electron-main.md)（由本计划 I0 增补）· 前置执行账本 [CONTROL_PLANE_MIGRATION](../archive/plans/2026-08/CONTROL_PLANE_MIGRATION.md)（已关闭，其关闭条件只覆盖「编排权归 main + :8765 退役」，未覆盖「逻辑本体 TS 化」——本计划补齐这一段）。
+Status: **Closed**（2026-08-20 I6 收口：产品路径 lifecycle 写路径已退役；结论已蒸馏进 ADR 0009 / `instance-lifecycle.md` / `desktop/electron/README.md` / `launcher_runtime.md`）
+Authority: [ADR 0009](../../../docs/adr/0009-launcher-control-plane-lives-in-electron-main.md)（由本计划 I0 增补，I6 删除过渡期 lifecycle CLI）。前置执行账本 [CONTROL_PLANE_MIGRATION](CONTROL_PLANE_MIGRATION.md)（已关闭）。
 验收总则：每个增量独立 worktree、独立合入、独立可回退；全部完成后，**launcher 生命周期逻辑（状态机、registry 写入、命令队列、监督循环、进程收割编排）全部运行在 Electron main（TS）内**；Python 只保留 workbench 后端本体与 git/文件维护 CLI。
 
 ---
@@ -108,11 +108,14 @@ VibelutionLauncher.exe（薄 shim，转发）
 
 ### I6 · 收口
 
-- 删除 Python 侧：branch_instance_lifecycle 的 claim/observe 写路径、state_refresh 的 reconcile 写路径、RM daemon 的 workbench 队列（演化循环保留）、锁 v2 简化为 TS-only。
-- 事件统一：TS 成为 events.jsonl 单写者（或保留 TS 独立事件文件 + 工具合并视图，二选一在增量内决策并记录）。
-- 文档同步：`core/launcher/instance-lifecycle.md`、`docs/ops/config/07-launcher-runtime-workbench.md`、`desktop/electron/README.md`、`core/web/services/launcher_runtime.md`、AGENTS §3 路由表；`tests/test_launcher_*.py` 收缩为 child/CLI 契约。
-- 可选增强（独立评审后再做）：子树挂 Windows Job Object（kill-on-close），替代扫描式收割（D5）。
-- 验收：全测试矩阵绿 + e2e + 文档一致性检查（无引用已删符号）。
+- 删除 Python 产品路径：`--action lifecycle` / `--action branch-instance` 写路径返回 `control_plane_is_electron`；`state_refresh` 改走只读 `preview_reconcile_registry`（不 `save_registry`）；RM daemon 在 Electron 拥有 main-line queue 时跳过 open/close/restart/force-close/toggle 文件队列（`hot_restart_workbench` 演化循环保留）。
+- 锁 v2 产品路径 TS-only：Electron `instanceLock.ts` 是 lifecycle 写入的唯一持锁者。Python `instance_lock.py` 只留给测试 / leftover HTTP。
+- 事件统一（本增量决策）：**保留 TS 独立文件 + 工具合并视图**。TS 写 `.runtime/launcher/electron-supervisor-events.jsonl`；RM/演化继续写自己的 `events.jsonl`。不把两个追加器合进同一文件。
+- 文档同步：`core/launcher/instance-lifecycle.md`、`docs/ops/config/07-launcher-runtime-workbench.md`、`desktop/electron/README.md`、`core/web/services/launcher_runtime.md`、AGENTS §3 路由表、ADR 0009 Decision 5 去掉过渡期 (c)。
+- 可选增强（**未做**，需独立评审）：子树挂 Windows Job Object（kill-on-close），替代扫描式收割（D5）。I6 不扩大杀树语义，仍是登记 PID + 端口释放。
+- 验收：全测试矩阵绿 + e2e + 文档一致性检查（无引用已删符号）。产品重启对照 §7 wall-clock ≈7.3s；`restart_initial_observation_ms` 不再是产品路径探针（Electron 在场时 daemon 不执行 restart 队列）。
+
+I6 关闭条件已满足后本文件按 ADR 0005 归档，不再作为现行规范。
 
 ## 4. 明确不做（Out of scope）
 
@@ -145,7 +148,7 @@ VibelutionLauncher.exe（薄 shim，转发）
 | 风险 | 对策 |
 | --- | --- |
 | 迁移期双写竞态 | 锁 v2 + CAS + fixture 等价；每增量后跑风暴回归 |
-| 事件文件跨进程并发追加 | 迁移期 TS 写独立事件文件，I6 统一 |
+| 事件文件跨进程并发追加 | 迁移期 TS 写独立事件文件；I6 决定保持独立文件 + 工具合并，不双写 `events.jsonl` |
 | Electron main 改动需 asar 重建才生效 | 沿用 ADR 0009 既有的打包刷新机制；验收含实测 |
 | daemon 演化循环与 workbench 队列耦合 | I4b 前先做耦合面清单（grep daemon.py 的 workbench 符号引用），拆不干净就再细分增量 |
 | 计时回归 | 埋点口径基线（重启 ≈7.3s）写进每增量验收 |

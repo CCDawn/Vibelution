@@ -69,7 +69,7 @@ def test_state_refresh_maps_electron_window_truth_and_keeps_cleanup_dry_run(monk
             ],
         }
 
-    monkeypatch.setattr(instances_registry, "reconcile_registry", fake_reconcile)
+    monkeypatch.setattr(instances_registry, "preview_reconcile_registry", fake_reconcile)
     monkeypatch.setattr(
         instances_registry,
         "load_registry",
@@ -114,7 +114,7 @@ def test_cleanup_timeout_still_returns_status_and_bounds_error(monkeypatch):
     def boom(**_kwargs):
         raise TimeoutError("git merge-base timed out stdout=" + ("OUT" * 400) + " stderr=" + ("ERR" * 400))
 
-    monkeypatch.setattr(instances_registry, "reconcile_registry", boom)
+    monkeypatch.setattr(instances_registry, "preview_reconcile_registry", boom)
 
     payload = state_refresh.build_launcher_state_refresh(electron_window_instance_ids=["main"])
 
@@ -148,7 +148,7 @@ def test_status_failure_keeps_branch_success_envelope(monkeypatch):
     monkeypatch.setattr(launcher_service, "get_launcher_freshness", lambda: {"current": False})
     monkeypatch.setattr(
         instances_registry,
-        "reconcile_registry",
+        "preview_reconcile_registry",
         lambda **_kwargs: {"instances": [], "removedInstanceIds": [], "worktreeDryRun": []},
     )
     monkeypatch.setattr(instances_registry, "load_registry", lambda: {"instances": {}})
@@ -159,6 +159,33 @@ def test_status_failure_keeps_branch_success_envelope(monkeypatch):
     assert payload["status"]["errorType"] == "RuntimeError"
     assert payload["branchInstances"]["ok"] is True
     assert payload["branchInstances"]["value"]["items"][0]["id"] == "worktree:ok"
+    assert payload["cleanup"]["ok"] is True
+
+
+def test_state_refresh_preview_does_not_write_registry(monkeypatch):
+    from core.launcher import service as launcher_service
+    from core.launcher import state_refresh
+    from core.runtime_manager import instances_registry
+
+    monkeypatch.setattr(
+        launcher_service,
+        "list_launcher_branch_instances",
+        lambda *, include_cleanup_metadata=False: {"currentId": "main", "items": []},
+    )
+    monkeypatch.setattr(launcher_service, "get_launcher_status", lambda: {"status": "ok"})
+    monkeypatch.setattr(launcher_service, "get_launcher_freshness", lambda: {"current": True})
+    monkeypatch.setattr(
+        instances_registry,
+        "preview_reconcile_registry",
+        lambda **_kwargs: {"instances": [], "removedInstanceIds": [], "worktreeDryRun": []},
+    )
+    monkeypatch.setattr(instances_registry, "load_registry", lambda: {"instances": {}})
+
+    def boom_save(_payload):
+        raise AssertionError("state refresh must not save instances.json")
+
+    monkeypatch.setattr(instances_registry, "save_registry", boom_save)
+    payload = state_refresh.build_launcher_state_refresh()
     assert payload["cleanup"]["ok"] is True
 
 

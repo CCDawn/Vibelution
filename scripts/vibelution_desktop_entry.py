@@ -1299,52 +1299,37 @@ def _stop_owned_launcher(args: argparse.Namespace) -> dict[str, object]:
 
 
 def _run_lifecycle_bridge(args: argparse.Namespace) -> dict[str, object]:
-    """Run a managed workbench lifecycle operation in-process on behalf of Electron main."""
+    """Refuse product lifecycle writes; Electron main owns start/stop/restart."""
     operation = str(args.lifecycle_operation or "").strip().lower()
     if operation not in _LIFECYCLE_OPERATIONS:
         raise ValueError(f"Unsupported lifecycle operation: {operation}")
-    from core.launcher import service as launcher_service
-
-    _append_log("desktop_entry_python.lifecycle.started", operation=operation)
-    try:
-        if operation == "start":
-            response = launcher_service.request_launcher_start()
-        elif operation == "stop":
-            response = launcher_service.request_launcher_stop()
-        elif operation == "force-stop":
-            response = launcher_service.request_launcher_force_stop()
-        elif operation == "restart":
-            response = launcher_service.request_launcher_restart(
-                reason="electron_main_restart", source="electron_main"
-            )
-        elif operation == "shutdown":
-            response = launcher_service.request_launcher_runtime_shutdown()
-        else:
-            response = launcher_service.request_launcher_rebuild_and_start()
-    except launcher_service.LauncherActiveWorkBlocked as exc:
-        _append_log(
-            "desktop_entry_python.lifecycle.blocked",
-            level="warning",
-            operation=operation,
-            message=exc.message,
-        )
-        return {
-            "schemaVersion": 1,
-            "accepted": False,
-            "code": "active_work_blocked",
-            "operation": operation,
-            "message": str(exc.message),
-            "activeWorkRuns": list(getattr(exc, "active_work_runs", []) or []),
-        }
     _append_log(
-        "desktop_entry_python.lifecycle.succeeded",
+        "desktop_entry_python.lifecycle.retired",
+        level="warning",
         operation=operation,
-        command_id=str(response.get("commandId") or ""),
+        code=_CONTROL_PLANE_IS_ELECTRON,
     )
-    return {"schemaVersion": 1, **response}
+    return _retired_lifecycle_payload(operation=operation)
 
 
 _LIFECYCLE_OPERATIONS = {"start", "stop", "force-stop", "restart", "rebuild-and-start", "shutdown"}
+_CONTROL_PLANE_IS_ELECTRON = "control_plane_is_electron"
+_CONTROL_PLANE_LIFECYCLE_RETIRED = (
+    "工作台生命周期由 Electron main 拥有，Python --action lifecycle / branch-instance 写路径已退役。"
+)
+
+
+def _retired_lifecycle_payload(*, operation: str, instance_id: str = "") -> dict[str, object]:
+    payload: dict[str, object] = {
+        "schemaVersion": 1,
+        "accepted": False,
+        "code": _CONTROL_PLANE_IS_ELECTRON,
+        "operation": operation,
+        "message": _CONTROL_PLANE_LIFECYCLE_RETIRED,
+    }
+    if instance_id:
+        payload["instanceId"] = instance_id
+    return payload
 
 
 _BRANCH_INSTANCE_OPERATIONS = {
@@ -1358,83 +1343,21 @@ _BRANCH_INSTANCE_OPERATIONS = {
 
 
 def _run_branch_instance_bridge(args: argparse.Namespace) -> dict[str, object]:
-    """Run a branch-instance lifecycle operation in-process on behalf of Electron main."""
+    """Refuse product branch-instance writes; Electron main owns claim/observe."""
     operation = str(args.branch_instance_operation or "").strip().lower()
     instance_id = str(args.instance_id or "").strip()
     if operation not in _BRANCH_INSTANCE_OPERATIONS:
         raise ValueError(f"Unsupported branch instance operation: {operation}")
     if not instance_id:
         raise ValueError("branch instance id is required")
-    from core.launcher import service as launcher_service
-    from core.launcher.branch_instance_lifecycle import BranchInstanceLifecycleError
-
-    generation = int(getattr(args, "branch_instance_generation", 0) or 0)
-    message = str(getattr(args, "branch_instance_message", "") or "")
-    _append_log("desktop_entry_python.branch_instance.started", operation=operation, instance_id=instance_id)
-    try:
-        response = launcher_service.request_branch_instance_operation(
-            instance_id,
-            operation,
-            generation=generation or None,
-            message=message,
-        )
-    except launcher_service.LauncherActiveWorkBlocked as exc:
-        _append_log(
-            "desktop_entry_python.branch_instance.blocked",
-            level="warning",
-            operation=operation,
-            instance_id=instance_id,
-            message=exc.message,
-        )
-        return {
-            "schemaVersion": 1,
-            "accepted": False,
-            "code": "active_work_blocked",
-            "operation": operation,
-            "instanceId": instance_id,
-            "message": str(exc.message),
-            "activeWorkRuns": list(getattr(exc, "active_work_runs", []) or []),
-        }
-    except BranchInstanceLifecycleError as exc:
-        _append_log(
-            "desktop_entry_python.branch_instance.rejected",
-            level="warning",
-            operation=operation,
-            instance_id=instance_id,
-            code=exc.code,
-            message=exc.message,
-        )
-        return {
-            "schemaVersion": 1,
-            "accepted": False,
-            "code": exc.code,
-            "operation": operation,
-            "instanceId": instance_id,
-            "message": str(exc.message),
-        }
-    except Exception as exc:
-        _append_log(
-            "desktop_entry_python.branch_instance.failed",
-            level="error",
-            operation=operation,
-            instance_id=instance_id,
-            error_type=type(exc).__name__,
-            error=str(exc),
-        )
-        return {
-            "schemaVersion": 1,
-            "accepted": False,
-            "code": "branch_instance_operation_failed",
-            "operation": operation,
-            "instanceId": instance_id,
-            "message": str(exc),
-        }
     _append_log(
-        "desktop_entry_python.branch_instance.succeeded",
+        "desktop_entry_python.branch_instance.retired",
+        level="warning",
         operation=operation,
         instance_id=instance_id,
+        code=_CONTROL_PLANE_IS_ELECTRON,
     )
-    return {"schemaVersion": 1, **response}
+    return _retired_lifecycle_payload(operation=operation, instance_id=instance_id)
 
 
 def _split_launcher_api_path(path: str) -> tuple[str, dict[str, str]]:

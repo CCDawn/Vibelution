@@ -1,6 +1,12 @@
-"""Cross-language instances.json lock protocol v2.
+"""instances.json lock protocol v2.
 
-Python and Electron must use the same on-disk shape:
+Product path (I6): Electron ``instanceLock.ts`` is the only lock holder for
+lifecycle writes. This Python module remains for tests and leftover CLI/HTTP
+writers that still call ``mutate_registry``. Status refresh does not take the
+lock.
+
+Python and Electron still share the same on-disk shape so leftover writers
+cannot tear the file:
 
 - lockdir = ``<registry-file-name>.lockdir`` beside the registry
 - claim = atomic ``mkdir`` then ``holder.json`` ``{pid, startedAt}``

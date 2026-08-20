@@ -244,6 +244,26 @@ def test_reconcile_legacy_identity_is_unknown_and_not_removed(registry_path):
     assert registry.get_instance("legacy")
 
 
+def test_preview_reconcile_registry_does_not_save(registry_path, monkeypatch):
+    registry.upsert_instance("legacy", **_safe_orphan_entry("C:/missing/legacy"))
+    before = registry_path.read_text(encoding="utf-8")
+
+    def boom(_payload):
+        raise AssertionError("preview must not save instances.json")
+
+    monkeypatch.setattr(registry, "save_registry", boom)
+    summary = registry.preview_reconcile_registry(
+        git_worktree_roots=[],
+        electron_window_instance_ids=[],
+        now=datetime(2026, 8, 19, 6, tzinfo=UTC),
+        identity_inspector=lambda _identity: {"status": "dead"},
+        listener_inspector=lambda _port, _identities: {"status": "none"},
+    )
+
+    assert summary["instances"][0]["instanceId"] == "legacy"
+    assert registry_path.read_text(encoding="utf-8") == before
+
+
 def test_reconcile_external_listener_is_conflict_and_never_removed(registry_path):
     registry.upsert_instance("external", **_safe_orphan_entry("C:/missing/external"))
 

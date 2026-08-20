@@ -147,7 +147,7 @@ def _build_cleanup(
     *,
     electron_window_instance_ids: Iterable[object],
 ) -> dict[str, Any]:
-    from core.runtime_manager.instances_registry import load_registry, reconcile_registry
+    from core.runtime_manager.instances_registry import load_registry, preview_reconcile_registry
 
     branch_instances = (
         branch_source["value"]
@@ -155,7 +155,7 @@ def _build_cleanup(
         else _empty_branch_instances()
     )
     current_id = str(branch_instances.get("currentId") or "main").strip()
-    registry = reconcile_registry(
+    registry = preview_reconcile_registry(
         git_worktree_roots=_git_worktree_roots(branch_instances),
         electron_window_instance_ids=_window_instance_ids(
             electron_window_instance_ids,
@@ -186,7 +186,7 @@ def _build_cleanup(
 
 
 def build_launcher_state_refresh(*, electron_window_instance_ids: Iterable[object] = ()) -> dict[str, Any]:
-    """Return per-source status, inventory, freshness, and safe registry reconciliation."""
+    """Return per-source status, inventory, freshness, and a read-only cleanup projection."""
 
     from core.launcher import service as launcher_service
 
