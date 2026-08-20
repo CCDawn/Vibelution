@@ -198,35 +198,11 @@ describe("launcher api helpers", () => {
     expect(item.startBlockReason).toBe("launcher_refresh_required");
   });
 
-  it("starts a selected branch instance through the guarded launcher endpoint", async () => {
-    vi.stubGlobal("window", {
-      location: {
-        href: "http://127.0.0.1:8000/chat",
-        origin: "http://127.0.0.1:8000",
-      },
+  it("rejects branch-instance lifecycle writes when the Launcher IPC host is absent", async () => {
+      await expect(requestBranchInstanceLifecycle("worktree:task", "start")).rejects.toBeInstanceOf(
+        LauncherControlPlaneNotReadyError
+      );
     });
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          header: "X-Vibelution-Control-Token",
-          controlToken: "test-token",
-        }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ accepted: true, operation: "start", instanceId: "worktree:task", port: 8001 }),
-      });
-    vi.stubGlobal("fetch", fetchMock);
-
-    const payload = await requestBranchInstanceLifecycle("worktree:task", "start");
-
-    expect(payload.instanceId).toBe("worktree:task");
-    expect(fetchMock.mock.calls[1][0]).toBe("/api/launcher/branch-instances/start");
-    const requestInit = fetchMock.mock.calls[1][1] as RequestInit;
-    expect(requestInit.method).toBe("POST");
-    expect(requestInit.body).toBe(JSON.stringify({ instanceId: "worktree:task" }));
-  });
 
   it("confirms selected branch-instance cleanup through the guarded launcher endpoint", async () => {
     vi.stubGlobal("window", {

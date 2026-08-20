@@ -342,60 +342,6 @@ def cleanup_launcher_branch_instances(
     return cleanup_branch_instances(instance_ids, confirm=confirm)
 
 
-def request_branch_instance_operation(
-    instance_id: str,
-    operation: str,
-    request_audit: LauncherRequestAudit | None = None,
-    *,
-    generation: int | None = None,
-    message: str = "",
-) -> LauncherCommandResponse:
-    """Start/stop/restart an isolated branch instance.
-
-    The current checkout no longer accepts Python lifecycle writes; Electron main
-    owns that path. Other checked-out worktrees still use isolated ports.
-    """
-
-    from core.launcher.branch_instance_lifecycle import (
-        assert_instance_operable,
-        observe_isolated_transition,
-        resolve_branch_instance,
-        run_isolated_operation,
-    )
-
-    if operation in {"observe-error", "observe-ready"}:
-        return observe_isolated_transition(
-            instance_id,
-            operation,
-            generation=generation,
-            message=message,
-        )
-
-    item = resolve_branch_instance(instance_id)
-    assert_instance_operable(item, operation)
-    if item.get("current"):
-        response = _current_branch_instance_operation(operation, request_audit)
-        response["instanceId"] = str(item.get("id") or instance_id)
-        return response
-    return run_isolated_operation(item, operation, claimed_generation=generation)
-
-
-def _current_branch_instance_operation(
-    operation: str,
-    request_audit: LauncherRequestAudit | None,
-) -> LauncherCommandResponse:
-    del request_audit
-    return {
-        "accepted": False,
-        "mode": "runtime_manager",
-        "launcherMode": "standalone_control_plane",
-        "operation": operation,
-        "commandId": "",
-        "message": "工作台生命周期由 Electron main 拥有，Python lifecycle 写路径已退役。",
-        "code": "control_plane_is_electron",
-    }
-
-
 def migrate_launcher_branch_workspaces() -> dict[str, Any]:
     """Move legacy sibling worktrees into the in-repo branch pool."""
 

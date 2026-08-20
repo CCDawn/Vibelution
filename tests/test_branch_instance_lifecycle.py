@@ -314,65 +314,6 @@ def test_resolve_no_console_python_prefers_supervisor_over_worktree_venv(tmp_pat
     assert resolved != leftover.resolve()
 
 
-def test_current_row_refuses_python_lifecycle_writes(monkeypatch):
-    monkeypatch.setattr(
-        lifecycle,
-        "resolve_branch_instance",
-        lambda instance_id: _item(id="main", kind="main", current=True, path=r"C:\repo"),
-    )
-
-    response = launcher_service.request_branch_instance_operation("main", "start")
-
-    assert response["accepted"] is False
-    assert response["code"] == "control_plane_is_electron"
-    assert response["operation"] == "start"
-    assert response["instanceId"] == "main"
-    assert "Electron main" in str(response["message"])
-
-
-def test_standalone_launcher_exposes_branch_instance_lifecycle_routes(monkeypatch):
-    calls: list[tuple[str, str]] = []
-    monkeypatch.setattr(
-        launcher_service,
-        "request_branch_instance_operation",
-        lambda instance_id, operation, request_audit=None: calls.append((instance_id, operation))
-        or {
-            "accepted": True,
-            "operation": operation,
-            "instanceId": instance_id,
-            "mode": "isolated_worktree",
-            "port": 8001,
-        },
-    )
-    client = TestClient(launcher_app.create_launcher_app())
-
-    response = client.post(
-        "/api/launcher/branch-instances/start",
-        json={"instanceId": "worktree:task"},
-    )
-
-    assert response.status_code == 202
-    assert response.json()["instanceId"] == "worktree:task"
-    assert response.json()["port"] == 8001
-    assert calls == [("worktree:task", "start")]
-
-
-def test_standalone_launcher_maps_not_startable_to_409(monkeypatch):
-    def fail(instance_id, operation, request_audit=None):
-        raise lifecycle.BranchInstanceLifecycleError("instance_not_startable", "未打开")
-
-    monkeypatch.setattr(launcher_service, "request_branch_instance_operation", fail)
-    client = TestClient(launcher_app.create_launcher_app())
-
-    response = client.post(
-        "/api/launcher/branch-instances/start",
-        json={"instanceId": "branch:feature"},
-    )
-
-    assert response.status_code == 409
-    assert response.json()["detail"]["code"] == "instance_not_startable"
-
-
 def test_isolated_start_records_named_window_pid(registry_path, tmp_path, monkeypatch):
     monkeypatch.setattr(registry, "_port_is_free", lambda port, host: True)
     monkeypatch.setattr(lifecycle, "current_live_ports", lambda launcher_state=None: {8000, 8765})
@@ -576,18 +517,6 @@ def test_isolated_start_reclaims_stale_in_flight_when_spawn_pid_still_alive(regi
     assert stored["generation"] == 4
 
 
-def test_observe_error_matches_generation(registry_path):
-    registry.upsert_instance("worktree:task", status="starting", generation=4, desiredState="open", phase="starting")
-    stale = lifecycle.observe_isolated_transition("worktree:task", "observe-error", generation=3, message="stale")
-    assert registry.get_instance("worktree:task")["status"] == "starting"
-    assert stale["status"] == "starting"
-
-    lifecycle.observe_isolated_transition("worktree:task", "observe-error", generation=4, message="HTTP timeout")
-    stored = registry.get_instance("worktree:task")
-    assert stored["status"] == "failed"
-    assert stored["failureMessage"] == "HTTP timeout"
-
-
 def test_stop_reaps_spawn_pid_before_stop_script(registry_path, tmp_path):
     worktree = tmp_path / "task"
     worktree.mkdir()
@@ -620,41 +549,6 @@ def test_stop_reaps_spawn_pid_before_stop_script(registry_path, tmp_path):
     assert calls[0][2] is False
     assert registry.get_instance("worktree:task")["status"] == "closed"
     assert registry.get_instance("worktree:task")["spawnPid"] == 0
-
-
-def test_stop_during_start_discards_stale_spawn_pid(registry_path, tmp_path, monkeypatch):
-    monkeypatch.setattr(registry, "_port_is_free", lambda port, host: True)
-    monkeypatch.setattr(lifecycle, "current_live_ports", lambda launcher_state=None: {8000, 8765})
-    worktree = tmp_path / "task"
-    worktree.mkdir()
-    claimed = lifecycle._claim_isolated_start(
-        _item(path=str(worktree), port=8001, controlPort=8766),
-        "start",
-        extra_used={8000, 8765},
-    )
-    generation = int(claimed["generation"])
-    assert generation == 1
-    assert registry.record_spawn_pid("worktree:task", 4242, generation) is True
-
-    reaped: list[int] = []
-    lifecycle.run_isolated_operation(
-        _item(path=str(worktree), port=8001, controlPort=8766),
-        "stop",
-        runner=lambda *args, **kwargs: {"returncode": 0},
-        terminate_pid=lambda pid: reaped.append(pid) or {"supported": True, "rootPid": pid},
-    )
-    assert reaped == [4242]
-    assert registry.record_spawn_pid("worktree:task", 9999, generation) is False
-    stored = registry.get_instance("worktree:task")
-    assert stored["status"] == "closed"
-    assert stored["generation"] == 2
-    assert stored["spawnPid"] == 0
-    stale = lifecycle.observe_isolated_transition(
-        "worktree:task",
-        "observe-ready",
-        generation=generation,
-    )
-    assert stale["status"] == "closed"
 
 
 def test_spawn_detached_start_uses_current_supervisor_script(tmp_path, monkeypatch):

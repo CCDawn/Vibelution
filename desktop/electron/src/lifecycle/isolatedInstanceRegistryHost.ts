@@ -1,4 +1,14 @@
 import { assertLifecycleAdmitted, recordAdmissionOutcome } from "./instanceAdmissionStore.js";
+
+/** Isolated-instance lifecycle operations Electron main owns end to end. */
+export type BranchInstanceOperation =
+  | "start"
+  | "stop"
+  | "force-stop"
+  | "restart"
+  | "observe-error"
+  | "observe-ready";
+
 import {
   claimStart,
   claimStop,

@@ -39,10 +39,6 @@ JSON_ROUTE_FUNCTIONS = {
     "launcher_status",
     "launcher_freshness",
     "launcher_branch_instances",
-    "launcher_branch_instance_start",
-    "launcher_branch_instance_stop",
-    "launcher_branch_instance_force_stop",
-    "launcher_branch_instance_restart",
     "launcher_branch_instances_cleanup",
     "launcher_workbench_window_setting",
     "launcher_startup_settings",
@@ -472,14 +468,7 @@ def test_launcher_lifecycle_json_routes_keep_unknown_fields(monkeypatch) -> None
         "port": 8001,
         "customCommand": True,
     }
-    monkeypatch.setattr(
-        launcher_routes.launcher_service,
-        "request_branch_instance_operation",
-        lambda *_args, **_kwargs: expected_command,
-    )
-    branch_start = client.post("/api/launcher/branch-instances/start", json={"instanceId": "worktree:task"})
-    assert branch_start.status_code == 202
-    assert branch_start.json() == expected_command
+    del expected_command  # branch-instance lifecycle writes are Electron-owned now
 
     expected_cleanup = {"ok": True, "cleaned": [{"id": "branch:task", "customCleaned": True}], "customCleanup": True}
     monkeypatch.setattr(

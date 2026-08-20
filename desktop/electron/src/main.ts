@@ -92,9 +92,6 @@ import {
   runWorkbenchLifecycle,
   type WorkbenchLifecycleOperation
 } from "./process/workbenchLifecycle.js";
-import {
-  type BranchInstanceOperation
-} from "./process/branchInstanceBridge.js";
 import { spawnWorkbenchBackend, mainLineBackendIsReusable } from "./process/workbenchBackend.js";
 import { waitForBackendHealthy } from "./process/workbenchBackendHealth.js";
 import { retireRegisteredHandles } from "./process/workbenchBackendRetire.js";
@@ -104,6 +101,7 @@ import {
   superviseIsolatedInstanceStart
 } from "./process/isolatedInstanceSupervisor.js";
 import {
+  type BranchInstanceOperation,
   claimIsolatedStart,
   claimIsolatedStop,
   observeIsolatedError,
