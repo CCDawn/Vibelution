@@ -177,6 +177,22 @@ export function shouldCollapseGroupMessage(content: string) {
 }
 
 
+export function groupConsecutiveBy<T>(items: readonly T[], keyOf: (item: T) => string): T[][] {
+  const groups: T[][] = [];
+  for (const item of items) {
+    const key = String(keyOf(item) ?? "").trim();
+    const current = groups.at(-1);
+    const currentKey = current ? String(keyOf(current[0]) ?? "").trim() : "";
+    if (current && currentKey && currentKey === key) {
+      current.push(item);
+      continue;
+    }
+    groups.push([item]);
+  }
+  return groups;
+}
+
+
 export function shouldDefaultCollapseGroupMessage(message: ChatRoomMessage) {
   return message.audience === "internal" || message.visibility === "collapsed_by_default";
 }

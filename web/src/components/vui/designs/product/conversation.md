@@ -101,8 +101,8 @@ import { ConversationFollowupQueueBar } from "../../conversation/ConversationFol
 
 ### 使用方式
 ```tsx
-// 隔离预览：web/src/design/team-conversation-stream-preview.tsx
-// 批准后迁入 ChatGroupCenterSurface，不要新做一套气泡。
+// 生产：ChatGroupCenterSurface 群聊时间线
+// 隔离对照仍在：web/src/design/team-conversation-stream-preview.tsx
 ```
 
 | Prop / 槽位 | 说明 | 设计注意 |
@@ -123,9 +123,9 @@ import { ConversationFollowupQueueBar } from "../../conversation/ConversationFol
 - 超长正文截断可展开。
 
 ### 实现落点
-- 预览：`web/src/design/team-conversation-stream-preview.tsx`
-- 模型：`web/src/design/teamConversationStreamModel.ts`
-- 现网对照：`web/src/routes/chat/ChatGroupCenterSurface.tsx`（批准前不改）
+- 生产：`web/src/routes/chat/ChatGroupCenterSurface.tsx`
+- 正文截断：`web/src/routes/chat/ChatGroupMessagePresentation.tsx`
+- 对照预览：`web/src/design/team-conversation-stream-preview.tsx`
 
 ### 反冗余
 - 不替代 `ConversationProcessDisclosure` 或 `ConversationFollowupQueueBar`。

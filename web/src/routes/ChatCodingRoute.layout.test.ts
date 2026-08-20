@@ -2043,12 +2043,14 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeAndGroupPresentationSource).toContain("shouldCollapseGroupMessage");
     expect(routeAndGroupPresentationSource).toContain("shouldDefaultCollapseGroupMessage");
     expect(routeAndHelpersSource).toContain("message.audience === \"internal\"");
-    expect(routeAndGroupPresentationSource).toContain("展开讨论");
+    expect(routeAndGroupPresentationSource).not.toContain("展开讨论");
     expect(routeSource).toContain("expandedGroupMessageIds");
     expect(routeAndGroupPresentationSource).toContain("stripGroupSpeakerPrefix(message, identityName)");
     expect(routeAndGroupCenterSource).toContain("<ChatGroupMessageBody");
     expect(routeAndGroupCenterSource).toContain("identityName={speakerIdentity.name}");
     expect(routeAndGroupCenterSource).toContain("title={speakerIdentity.fullIdentityLabel}");
+    expect(routeAndGroupCenterSource).toContain("data-testid=\"group-stream-identity\"");
+    expect(routeAndGroupCenterSource).toContain("groupConsecutiveBy");
     expect(routeAndGroupPresentationSource).toContain("展开全文");
     expect(routeAndGroupPresentationSource).toContain("收起");
     expect(routeAndGroupCenterSource).toContain("message.status !== \"completed\" ? <span>{statusLabel(message.status)}</span> : null");
@@ -2072,6 +2074,11 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.groupBubbleAvatar).toBeTypeOf("string");
     expect(routeStyles.groupBubble).toBeTypeOf("string");
     expect(routeStyles.groupBubbleBodyCollapsed).toBeTypeOf("string");
+    expect(routeStyles.groupBubbleBodyCollapsed).toContain("[-webkit-line-clamp:8]");
+    expect(routeStyles.groupBubbleBodyCollapsed).not.toMatch(/(?:^|\s)hidden(?:\s|$)/);
+    expect(routeStyles.groupStreamIdentity).toContain("flex");
+    expect(routeStyles.groupStreamIdentity).toContain("items-center");
+    expect(routeStyles.groupBubbleRow).not.toContain("!bg-vui-surface-row");
     expect(routeStyles.groupBubbleToggle).toBeTypeOf("string");
     expect(routeStyles.groupTypingDots).toBeTypeOf("string");
     expect(routeStyles.groupComposerBar).toBeTypeOf("string");
@@ -2100,7 +2107,6 @@ describe("ChatCodingRoute layout contract", () => {
       [routeStyles.groupManagementActions, "grid-cols-[repeat(2,minmax(0,1fr))]"],
       [routeStyles.groupManagementControls, "grid-cols-[minmax(0,1fr)_auto]"],
       [routeStyles.groupMemberChip, "grid-cols-[18px_26px_minmax(0,1fr)_auto]"],
-      [routeStyles.groupBubbleRow, "grid-cols-[30px_minmax(0,1fr)]"],
       [routeStyles.groupComposerBar, "grid-cols-[minmax(0,1fr)_auto_auto]"],
     ];
 

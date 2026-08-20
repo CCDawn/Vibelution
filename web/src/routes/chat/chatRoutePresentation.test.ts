@@ -5,6 +5,7 @@ import {
   chatRoomModeLabel,
   compactAgentRoleLabel,
   formatAgentIdentityWithRole,
+  groupConsecutiveBy,
   shouldCollapseGroupMessage,
 } from "./chatRoutePresentation";
 
@@ -30,5 +31,13 @@ describe("chatRoutePresentation", () => {
     expect(shouldCollapseGroupMessage("short")).toBe(false);
     expect(shouldCollapseGroupMessage("x".repeat(261))).toBe(true);
     expect(shouldCollapseGroupMessage("a\n".repeat(9))).toBe(true);
+  });
+
+  it("groups consecutive items that share a speaker key", () => {
+    const groups = groupConsecutiveBy(
+      [{ id: "a", speaker: "p1" }, { id: "b", speaker: "p1" }, { id: "c", speaker: "p2" }],
+      (item) => item.speaker,
+    );
+    expect(groups.map((group) => group.map((item) => item.id))).toEqual([["a", "b"], ["c"]]);
   });
 });

@@ -4,6 +4,7 @@ import type { LauncherRegistryReconciliationItem, LauncherStateSnapshotV1 } from
 import { VButton, VStateSurface } from "../components/vui";
 import {
   buildLauncherRegistryDiagnosticText,
+  buildLauncherRegistryNoticeFacts,
   copyLauncherRegistryDiagnostics,
 } from "./launcherRegistryDiagnostics";
 
@@ -50,7 +51,15 @@ export function LauncherRegistryDiagnosticsBanner({
 }: LauncherRegistryDiagnosticsBannerProps) {
   const copyDiagnosticsLabel = uiLang === "zh" ? "复制诊断" : "Copy diagnostics";
   const recheckLabel = uiLang === "zh" ? "再核对" : "Recheck";
-  const tone = snapshot.freshness === "stale" ? "unavailable" : snapshot.freshness === "refreshing" ? "loading" : "info";
+  const hasPortConflict = snapshot.cleanup.portConflicts.length > 0;
+  const tone = hasPortConflict
+    ? "error"
+    : snapshot.freshness === "stale"
+      ? "unavailable"
+      : snapshot.freshness === "refreshing"
+        ? "loading"
+        : "info";
+  const facts = buildLauncherRegistryNoticeFacts({ uiLang, cleanup: snapshot.cleanup });
 
   const copyDiagnostics = () => {
     const text = buildLauncherRegistryDiagnosticText({
@@ -81,12 +90,15 @@ export function LauncherRegistryDiagnosticsBanner({
       title={[
         uiLang === "zh" ? "Launcher 状态快照" : "Launcher state snapshot",
         compactDate(snapshot.observedAt, locale),
-        snapshot.freshness,
+        snapshot.freshness === "fresh" ? "" : snapshot.freshness,
         snapshot.cleanup.reconciliation.active
-          ? `${uiLang === "zh" ? "协调中" : "reconciling"}: ${snapshot.cleanup.reconciliation.reason || "-"}`
+          ? `${uiLang === "zh" ? "协调中" : "reconciling"}${
+            snapshot.cleanup.reconciliation.reason ? `: ${snapshot.cleanup.reconciliation.reason}` : ""
+          }`
           : "",
         snapshot.staleReason || "",
       ].filter(Boolean).join(" · ")}
+      facts={facts}
       actions={(
         <>
           <VButton
