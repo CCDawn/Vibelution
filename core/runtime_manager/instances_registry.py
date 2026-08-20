@@ -5,10 +5,10 @@ state under its directory. This registry is the only cross-project coordination
 point: it maps instance ids to backend and control ports so separate worktrees
 can run side by side without port collisions.
 
-Writers: Launcher lifecycle actions. Readers: daemon observation, tray, CLI.
-All writes take the ``instances.json.lockdir`` protocol v2 lock then replace
-the payload atomically so concurrent allocators and generation CAS cannot
-interleave. The registry does not decide which checkout is main.
+Product writer: Electron ``instanceRegistryStore`` (lock protocol v2).
+Python ``mutate_registry`` / ``reconcile_registry`` remain for tests and leftover
+HTTP. Status refresh must call ``preview_reconcile_registry`` and must not save.
+The registry does not decide which checkout is main.
 """
 
 from __future__ import annotations
@@ -969,6 +969,34 @@ def _reconcile_payload(
     return summary, changed
 
 
+def preview_reconcile_registry(
+    *,
+    git_worktree_roots: Iterable[str | Path] | None,
+    electron_window_instance_ids: Iterable[str] = (),
+    now: datetime | None = None,
+    identity_inspector: Callable[[dict[str, Any]], dict[str, Any]] = inspect_process_identity,
+    listener_inspector: Callable[[int, Iterable[dict[str, Any]]], dict[str, Any]] = inspect_listener_identity,
+    pid_existence_inspector: Callable[[int], bool] = _pid_is_present,
+) -> dict[str, Any]:
+    """Classify registry rows without writing ``instances.json``.
+
+    Product status refresh is not a second registry writer. Electron
+    ``instanceRegistryStore`` owns durable claim/observe/CAS updates.
+    """
+    observed_at = _as_utc(now)
+    payload = load_registry()
+    summary, _changed = _reconcile_payload(
+        payload,
+        git_worktree_roots=git_worktree_roots,
+        electron_window_instance_ids=electron_window_instance_ids,
+        now=observed_at,
+        identity_inspector=identity_inspector,
+        listener_inspector=listener_inspector,
+        pid_existence_inspector=pid_existence_inspector,
+    )
+    return summary
+
+
 def reconcile_registry(
     *,
     git_worktree_roots: Iterable[str | Path] | None,
@@ -978,7 +1006,7 @@ def reconcile_registry(
     listener_inspector: Callable[[int, Iterable[dict[str, Any]]], dict[str, Any]] = inspect_listener_identity,
     pid_existence_inspector: Callable[[int], bool] = _pid_is_present,
 ) -> dict[str, Any]:
-    """Reconcile registry metadata; worktrees and processes are always read-only."""
+    """Reconcile registry metadata and persist; leftover/test writer only."""
     observed_at = _as_utc(now)
     with registry_lock():
         payload = load_registry()

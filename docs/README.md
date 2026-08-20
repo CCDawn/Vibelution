@@ -71,6 +71,7 @@
 | `docs/plans/*` | `archive/plans/2026-06-07/`（及既有 `2026-05/`） |
 | `docs/plans/2026-08-11-vui-wave-migration-backlog.md` | `archive/plans/2026-08-11/` |
 | `docs/plans/2026-08-16-compat-ssot-closeout-plan.md` | `archive/plans/2026-08/`（Implemented；长期规则 [development-standard §25](standards/development-standard.md)） |
+| `docs/plans/2026-08-20-launcher-lifecycle-ts-migration.md` | `archive/plans/2026-08/`（Closed；长期规则 [ADR 0009](adr/0009-launcher-control-plane-lives-in-electron-main.md)） |
 | `docs/ops/2026-05-*`、efficiency-baselines | `archive/ops/` |
 | `docs/frontend/*` | `archive/frontend/` |
 | `docs/superpowers/*` | `archive/superpowers/` |

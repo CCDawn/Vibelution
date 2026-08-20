@@ -1,9 +1,9 @@
 # 隔离分支实例生命周期（P0 合同）
 
 **读者：** coding Agent。
-**Owner：** Electron desktop shell（监督者）+ 当前 checkout 的 Python JSON CLI。
+**Owner：** Electron desktop shell（监督者）。Python 只保留 workbench 后端本体与 git/文件维护 CLI。
 **非目标（本轮不做）：** checkout / `git worktree add` UI、托盘 HTTP→IPC 迁徙、列表 git-dirty 加速。
-**`main` 行：** open/close/restart 入队与 idle reconcile 由 Electron `lifecycle/mainLine` 拥有（I4b）；执行仍经无控制台 lifecycle CLI → RM daemon handler。隔离行走本文件的 registry claim。
+**`main` 行：** open/close/restart 入队与 idle reconcile 由 Electron `lifecycle/mainLine` 拥有；execute 由 Electron 直接 spawn `pythonw scripts/web_workbench.py`（CREATE_NO_WINDOW / `windowsHide` + `pythonw`），健康等待 net.connect + HTTP `/api/health`。隔离行走本文件的 registry claim（Electron `instanceRegistryStore`）；backend spawn 同样走 `pythonw scripts/web_workbench.py`，stop 收割登记的 `spawnPid` 后等端口释放。Python 产品路径不再写 `instances.json`、不再执行 workbench 命令队列。
 
 权威交叉引用：`docs/standards/development-standard.md` §8.0 · ADR 0009 · [`launcher_runtime.md`](../web/services/launcher_runtime.md)。
 
@@ -42,12 +42,12 @@ P0 只修 **生命周期内核**：一个监督者、一套 READY、desired/obse
 
 | 事实 | Canonical | 唯一写入者 |
 | --- | --- | --- |
-| `desiredState` + `generation` + 端口 + `spawnPid` + `deadlineAt` + `commandId` + `ownerLease` | `%LOCALAPPDATA%\Vibelution\instances.json` | Electron `instanceRegistryStore`（产品路径 claim/observe/租约心跳）；Python CLI 为迁移期双实现，行为由 `instanceRegistryCas.cases.json` 与 `instanceOwnerLease.cases.json` 锁死 |
+| `desiredState` + `generation` + 端口 + `spawnPid` + `deadlineAt` + `commandId` + `ownerLease` | `%LOCALAPPDATA%\Vibelution\instances.json` | Electron `instanceRegistryStore`（产品路径唯一写入者）。Python `mutate_registry` / `reconcile_registry` 只留给测试与 leftover HTTP；状态刷新走只读 `preview_reconcile_registry`。 |
 | 后端 READY | 隔离 slot `launcher/state.json` 或目标树 `.runtime/launcher/state.json`，加上列表投影的 loopback HTTP 活探测 | 该树 Runtime Manager / launcher 子进程写 state；列表投影只读探测，不写 READY |
 | 窗口是否 open | Electron `windowProvider` | Electron main（`VIBELUTION_ELECTRON_MAIN_ORCHESTRATES_WINDOWS=1`） |
 | `lifecycleState` | **投影**（desired + 后端 READY + 窗口） | 无独立写入者 |
 
-Python `_instance_lifecycle_state` 与 Electron `projectInstanceLifecycle`（`desktop/electron/src/lifecycle/instanceLifecycleProjection.ts`）**必须同一套规则**（见 §6）。迁移期 Python 实现标注 deprecated，双语言由共享 fixture 锁死。
+Python `_instance_lifecycle_state` 与 Electron `projectInstanceLifecycle`（`desktop/electron/src/lifecycle/instanceLifecycleProjection.ts`）**必须同一套规则**（见 §6）。Python 投影只用于测试与 leftover HTTP 列表；产品路径投影以 TS 为准，双语言由共享 fixture 锁死。
 
 `instances.json` 的 desired / phase / generation / status **优先于** 目标树 `state.json`。
 `registry.status == "running"` **不是** READY。窗口真相只来自 Electron overlay。
@@ -61,17 +61,16 @@ Python `_instance_lifecycle_state` 与 Electron `projectInstanceLifecycle`（`de
 
 隔离 start/restart：
 
-1. 当前 checkout 的 `PYTHON_LAUNCHER_SCRIPT_PATH`（`core/runtime_manager/constants.py` → `scripts/vibelution_launcher.py`）。
-2. 当前壳 `pythonw`（监督者解释器）。目标树残留的不完整 `.venv` 不得抢先。后端解释器由 launcher 再选：`requirements.txt` 与监督者相同且监督者 `.venv` 可用则复用，禁止往共享环境 `pip install`；只有依赖不同才在目标树建私有 `.venv`。
+1. 当前壳 `pythonw`（监督者解释器）直接 spawn 目标树 `scripts/web_workbench.py`（`--host` / `--port` / `--no-browser` / `--managed-by-launcher`）。禁止产品路径再 spawn `vibelution_launcher.py` 或 `--action lifecycle|branch-instance`。
+2. 目标树残留的不完整 `.venv` 不得抢先。后端解释器复用监督者 `.venv`/`pythonw`。
 3. `cwd` = 目标 worktree。
-4. `apply_slot_spawn_environment`：`VIBELUTION_WORKSPACE_ROOT`、端口、slot data home。
-5. start/restart 额外：`VIBELUTION_ALLOW_DIRTY_LAUNCH=1`、`VIBELUTION_ALLOW_NON_MAIN_LAUNCH=1`、`--no-browser`。
-6. **Popen 分离**（Windows：`DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB` + hidden STARTUPINFO；禁止可见控制台）。父 JSON CLI 在 202 后立即退出，子树必须能活过父进程。
-7. **禁止** `subprocess.run` 等待隔离 start；**禁止** exec 目标树自己的 `vibelution_launcher.py`。
+4. 环境：`VIBELUTION_WORKSPACE_ROOT`、`VIBELUTION_PORT`、`VIBELUTION_DATA_HOME`（slot / 项目 data）、`VIBELUTION_CONFIG_HOME`（共享 operator config）；有 controlPort 时再设 `VIBELUTION_LAUNCHER_PORT`。start/restart 额外 `VIBELUTION_ALLOW_DIRTY_LAUNCH=1`、`VIBELUTION_ALLOW_NON_MAIN_LAUNCH=1`。
+5. **分离**（Windows：`pythonw` + `detached`/`DETACHED_PROCESS` + `windowsHide`；禁止可见控制台）。不要用 `python.exe`+`detached`（Node 会忽略 CREATE_NO_WINDOW）。
+6. **禁止** `subprocess.run` 等待隔离 start；**禁止** exec 目标树自己的 `vibelution_launcher.py`。
 
-`vibelution_launcher.py` 必须在 `sys.path.insert` **之前** 读取 `VIBELUTION_WORKSPACE_ROOT` 作为工作区根（runtime/state/cwd 语义）。Python 包默认复用监督者 `.venv`（requirements 指纹相同）；私有 `.venv` 仅在指纹不同时创建。同时把 **脚本所在 checkout** 插入 `sys.path`，保证跑的是监督者协议代码而非目标树旧模块。工作台进程仍执行目标树的 `scripts/web_workbench.py`（`Path(__file__).parent.parent` 进 `sys.path`），源码来自该 worktree。
+工作台进程执行目标树的 `scripts/web_workbench.py`（`Path(__file__).parent.parent` 进 `sys.path`），源码来自该 worktree。
 
-stop / force-stop：仍 **等待** 目标 stop（超时 60s）；但必须 **先** 用 in-process `psutil` 杀掉登记的 `spawnPid` 进程树（含根进程），再跑 `--action stop`。禁止 `taskkill.exe`。
+stop / force-stop：先 terminate 登记的 `spawnPid` / `backendPid` / `backendLaunchPid`，再等待端口释放。禁止 `taskkill.exe`。扫描式进程表收割与 Windows Job Object **未做**（独立评审后再议，不是本文件的产品默认）。
 
 Electron 编排窗口时，Python **不得** 再 `open_isolated_workbench_window` / `close_isolated_workbench_window`（避免双关窗）。窗口由 Electron 在 HTTP READY 之后打开、在 stop 时关闭。
 
@@ -79,7 +78,7 @@ Electron 编排窗口时，Python **不得** 再 `open_isolated_workbench_window
 
 ## 5. 命令模型与状态机
 
-命令 **202**：CLI 只负责 claim + spawn/reap，不等后端 READY。
+命令 **202**：监督者只负责 claim + spawn/reap，不等后端 READY。产品路径不再经过 Python JSON CLI。
 
 ```text
 closed → starting → (backend READY) partial → (window open) running
@@ -102,7 +101,7 @@ Registry 字段（隔离行）：
 | `phase` | 与 status 对齐的投影提示：`starting` / `restarting` / `stopping` / `failed` / `steady` |
 | `generation` | 每次 start/restart/stop claim +1 |
 | `commandId` | 本次命令 id |
-| `spawnPid` | 分离后的监督者 launcher 子进程 |
+| `spawnPid` | 分离后的 `pythonw scripts/web_workbench.py` 子进程 |
 | `deadlineAt` | start 观察截止（隔离 **180s**，由 claim 写入；HTTP 等待读剩余时间，不再另开 180s） |
 | `ownerLease` | `{ownerId, expiresAt}`；TTL **15s**，监督者每 **5s** 续期；缺字段视为已过期 |
 | `failureMessage` | 仅当前 generation 的失败文案 |
@@ -143,19 +142,20 @@ Electron overlay 在写入 `window.open` 后必须用同一函数重算 `lifecyc
 
 ## 7. `instances.json` 原子性
 
-- 旁路锁协议 v2：`instances.json.lockdir` 目录锁（Python `core/runtime_manager/instance_lock.py` 与 TS `desktop/electron/src/lifecycle/instanceLock.ts` 同一协议）。
+- 产品路径锁协议 v2 只由 TS `desktop/electron/src/lifecycle/instanceLock.ts` 持有。
+- Python `core/runtime_manager/instance_lock.py` 与 TS 仍是同一 on-disk 形状，但只服务于测试 / leftover HTTP 写入；状态刷新不取锁、不 `save_registry`。
 - claim：原子 `mkdir` + `holder.json` `{pid, startedAt}`；轮询 10ms，超时 5s。
 - stale：holder `startedAt` 超过 10s，或 lockdir 存在但无合法 holder 超过 100ms，可破锁并写事件 `launcher.registry.lock_stale_broken`。
 - release：仅当 holder 仍是本进程本次 claim 时递归删除 lockdir。
-- 所有读-改-写（upsert、端口分配、claim、observe-error）走同一把锁。
-- `allocate_instance_ports`：**一次** lock 内选互斥的 backend+control，**一次** `save_registry`。禁止两次 upsert 之间被并发插入。
-- 锁不可重入：锁内不得再调用会取锁的 `upsert_instance`。
+- 所有产品路径读-改-写（upsert、端口分配、claim、observe-error）走 Electron store 的同一把锁。
+- `allocate_instance_ports`：**一次** lock 内选互斥的 backend+control，**一次** save。禁止两次 upsert 之间被并发插入。
+- 锁不可重入：锁内不得再调用会取锁的写入。
 
 ---
 
 ## 8. Electron 监督循环（Critical Path）
 
-隔离 start/restart 在 JSON CLI **202** 之后：
+隔离 start/restart 在 claim **202** 之后：
 
 1. 等待 `http://127.0.0.1:<port>/`，超时 = registry `deadlineAt` 剩余时间（claim 时写入的隔离 **180s**）。当前 checkout `main` 行仍用 90s。
 2. 等待期间按 `ownerLease` TTL **15s** / 心跳 **5s** 续期；observe-ready / observe-error 走 TS store，禁止再 spawn Python markReady/markError bridge。

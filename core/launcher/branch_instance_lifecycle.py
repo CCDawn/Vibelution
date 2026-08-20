@@ -1,10 +1,10 @@
-"""Per-row Launcher start/stop for Git-governed branch instances.
+"""Per-row Launcher start/stop helpers for Git-governed branch instances.
 
-The current checkout keeps the existing Runtime Manager lifecycle. Other
-checked-out worktrees are supervised by the current desktop shell: the current
-``scripts/vibelution_launcher.py`` is spawned against the target cwd/venv.
+Product-path claim/observe/spawn is Electron ``instanceRegistryStore`` plus
+``pythonw scripts/web_workbench.py``. This module keeps list/projection helpers
+and a test/leftover HTTP implementation of claim/observe. The ``--action
+lifecycle`` / ``--action branch-instance`` CLI write paths are retired.
 See ``core/launcher/instance-lifecycle.md``.
-Retired shells and not-checked-out refs cannot be started.
 """
 
 from __future__ import annotations
@@ -301,7 +301,7 @@ def _instance_runtime_projection(
     return runtime
 
 
-# Deprecated by docs/plans/2026-08-20-launcher-lifecycle-ts-migration.md（迁移期保留）
+# Deprecated: product path uses Electron instanceLifecycleProjection.ts. Kept for tests / leftover HTTP.
 def _instance_lifecycle_state(
     *,
     observed_state: str,

@@ -18,3 +18,4 @@
 
 - `2026-08-11-vui-wave-migration-backlog.md` → [archive/plans/2026-08-11/](../archive/plans/2026-08-11/2026-08-11-vui-wave-migration-backlog.md)
 - `2026-08-16-compat-ssot-closeout-plan.md` → [archive/plans/2026-08/](../archive/plans/2026-08/2026-08-16-compat-ssot-closeout-plan.md)（Implemented；长期规则见 [development-standard §25](../standards/development-standard.md)）
+- `2026-08-20-launcher-lifecycle-ts-migration.md` → [archive/plans/2026-08/](../archive/plans/2026-08/2026-08-20-launcher-lifecycle-ts-migration.md)（Closed；长期规则见 [ADR 0009](../adr/0009-launcher-control-plane-lives-in-electron-main.md)）

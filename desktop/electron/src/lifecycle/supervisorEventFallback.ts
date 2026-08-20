@@ -20,9 +20,9 @@ export function supervisorEventFallbackPath(workspaceRoot: string): string {
 
 /**
  * Supervisor events normally reach the runtime scene through the backend bridge.
- * When the bridge is down (the exact failure that needs diagnosing), keep a
- * bounded local trace next to the other launcher runtime artifacts so the
- * failure itself does not erase its own evidence.
+ * I6 decision: keep this independent file instead of appending to Python
+ * ``events.jsonl``. Runtime Manager / evolution keep their own JSONL; tools
+ * merge the two streams. Dual appenders on one file were the original risk.
  */
 export function appendSupervisorEventFallback(
   workspaceRoot: string,

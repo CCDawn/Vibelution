@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   WORKFLOW_HELPER_LINE_THRESHOLD,
+  resolveWorkflowHelperOverlayStroke,
   resolveWorkflowManualCardDrag,
   snapWorkflowNodeToHelpers,
   workflowHelperLineToScreen,
@@ -115,5 +116,16 @@ describe("workflowHelperLines", () => {
 
   it("maps a flow-space guide into screen space with the viewport transform", () => {
     expect(workflowHelperLineToScreen(100, 12, 0.5)).toBe(62);
+  });
+
+  it("keeps overlay strokes one screen pixel after viewport scale", () => {
+    expect(resolveWorkflowHelperOverlayStroke(0.5)).toEqual({
+      strokeWidth: 2,
+      dasharray: "12 8",
+    });
+    expect(resolveWorkflowHelperOverlayStroke(1)).toEqual({
+      strokeWidth: 1,
+      dasharray: "6 4",
+    });
   });
 });

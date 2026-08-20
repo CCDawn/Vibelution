@@ -235,6 +235,8 @@ def test_review_prompt_teaches_evidence_request_marker(tmp_path, monkeypatch):
     assert prompts
     assert all("EVIDENCE_REQUEST" in prompt for prompt in prompts)
     assert all('"searchEnvelope"' in prompt for prompt in prompts)
+    assert all("AGREE:" in prompt for prompt in prompts)
+    assert all("DISAGREE:" in prompt for prompt in prompts)
 
 
 def test_review_prompt_keeps_all_candidate_lines_beyond_generic_topic_cap(

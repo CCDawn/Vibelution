@@ -4,7 +4,7 @@
 
 Launcher 控制面为 **Electron 主进程 IPC**（[ADR 0009](../../adr/0009-launcher-control-plane-lives-in-electron-main.md)），控制窗口不再走 `http://127.0.0.1:8765`；Python `:8765` 控制面已退役。工作台仍为 Python FastAPI + Runtime Manager（常见 `:8000`）。
 
-生命周期命令以开发标准为准：
+生命周期命令以开发标准为准。产品路径由 Electron main 执行 `pythonw scripts/web_workbench.py`，不要再走 Python `--action lifecycle`：
 
 ```text
 %LOCALAPPDATA%\Vibelution\Launcher\VibelutionLauncher.exe --project "<root>" start|stop|restart
@@ -16,7 +16,7 @@ C# shim 在 packaged Electron 存在时把命令转发给 Electron（second-inst
 
 ### 注意
 
-- 有进行中任务时勿强行 restart（active-work guard）。
+- 产品重启 wall-clock 基线约 **7.3s**。Electron 在场时对照墙钟，不要再用 daemon `restart_initial_observation_ms` 当产品口径（该探针只在文件队列仍执行 restart 时出现）。
 - 改 LLM/agent 代码后通常需要 restart 才能进运行时。
 - Windows 禁止可见控制台弹窗路径（见开发标准 §8.0）。
 

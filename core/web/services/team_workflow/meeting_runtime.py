@@ -64,6 +64,7 @@ _DEFAULT_AGENDA_RULES = (
     '"evidenceLevels":["peer_reviewed"]},'
     '"requirements":{"minEvidenceLevel":"medium","completeness":"stage-one"}} '
     "（JSON 字段可按需增删，candidateRefs 用本轮候选 ID）；本轮无资料缺口则不输出该标记",
+    "共识与分歧必须独占一行，格式：AGREE: <一条共识> 或 DISAGREE: <一条分歧>",
 )
 
 CANDIDATE_GENERATION_MEETING_TYPE = "hypothesis_candidate_generation"
@@ -744,7 +745,10 @@ def build_meeting_digest_draft(
         if not isinstance(drafted, Mapping):
             raise ContractValidationError("digest drafter must return a mapping")
         return dict(drafted)
-    markers = meeting_rounds.extract_discussion_markers(source_messages)
+    markers = meeting_rounds.apply_unstructured_digest_fallback(
+        meeting_rounds.extract_discussion_markers(source_messages),
+        source_messages,
+    )
     agenda = _normalized_str_list(meeting_round.get("agenda"))
     discussion_item_refs = _normalized_str_list(meeting_round.get("discussionItemRefs"))
     participants = _normalized_str_list(meeting_round.get("participants"))
@@ -755,13 +759,27 @@ def build_meeting_digest_draft(
         if str(message.get("status") or "").strip().lower() == "completed"
         and not meeting_rounds.is_pass_message(message)
     ]
-    summary = (
-        f"假说评审会议 {str(meeting_round.get('meetingRoundId') or '')}："
-        f"{len(participants)} 位参与者围绕 {len(discussion_item_refs)} 个入选候选完成 "
-        f"{rounds_run} 轮讨论，形成 {len(markers['agreements'])} 条共识、"
-        f"{len(markers['disagreements'])} 条分歧、{len(markers['actionItems'])} 条行动项、"
-        f"{len(markers['risks'])} 条未解决风险。"
-    )
+    unstructured_agreements = [
+        item
+        for item in list(markers.get("agreements") or [])
+        if isinstance(item, Mapping)
+        and str(item.get("derivedFrom") or "") == meeting_rounds.UNSTRUCTURED_DERIVED_FROM
+    ]
+    if unstructured_agreements and not markers.get("disagreements"):
+        summary = (
+            f"假说评审会议 {str(meeting_round.get('meetingRoundId') or '')}："
+            f"{len(participants)} 位参与者围绕 {len(discussion_item_refs)} 个入选候选完成 "
+            f"{rounds_run} 轮讨论，从 {len(unstructured_agreements)} 条自由格式发言生成摘要条目，"
+            "未提取到标记化共识或分歧。"
+        )
+    else:
+        summary = (
+            f"假说评审会议 {str(meeting_round.get('meetingRoundId') or '')}："
+            f"{len(participants)} 位参与者围绕 {len(discussion_item_refs)} 个入选候选完成 "
+            f"{rounds_run} 轮讨论，形成 {len(markers['agreements'])} 条共识、"
+            f"{len(markers['disagreements'])} 条分歧、{len(markers['actionItems'])} 条行动项、"
+            f"{len(markers['risks'])} 条未解决风险。"
+        )
     evidence_requests, validation_errors = _collect_evidence_requests(
         meeting_round, markers, source_refs
     )

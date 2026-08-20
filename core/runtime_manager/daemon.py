@@ -1288,6 +1288,22 @@ def should_run_workbench_idle_reconcile() -> bool:
     return not electron_owns_main_line_queue()
 
 
+def should_execute_workbench_queue_command(command_type: str) -> bool:
+    """Run file-queue workbench commands only when Electron is not the owner.
+
+    Product open/close/restart/force-close/toggle execute in Electron main.
+    Evolution ``hot_restart_workbench`` stays in this daemon. Scan-style kill
+    trees and Job Object are not part of I6.
+    """
+
+    wanted = str(command_type or "").strip()
+    if wanted == "hot_restart_workbench":
+        return True
+    if wanted in _WORKBENCH_LIFECYCLE_COMMANDS and electron_owns_main_line_queue():
+        return False
+    return True
+
+
 def _electron_session_owns_workbench_window(state: dict[str, Any]) -> bool:
     """Return True when Electron, not Edge, owns the workbench window.
 
@@ -3061,6 +3077,32 @@ class RuntimeManagerDaemon:
                     started_at=command_started_at,
                     run_ms=run_ms,
                 )
+            )
+            return result
+
+        if not should_execute_workbench_queue_command(command_type):
+            result = self._finish_command(
+                command_id,
+                ok=False,
+                message="Workbench lifecycle is owned by Electron main.",
+                error_scope="command",
+                error_type="ControlPlaneIsElectron",
+                result_data={"code": "control_plane_is_electron", "skipped": True},
+                reconcile=False,
+            )
+            result = with_timing(result)
+            _append_event(
+                "command.skipped",
+                {
+                    "commandId": command_id,
+                    "type": command_type,
+                    "reason": "control_plane_is_electron",
+                    "requestedAt": result.get("requestedAt", ""),
+                    "claimedAt": result.get("claimedAt", ""),
+                    "startedAt": result.get("startedAt", ""),
+                    "queuedMs": result.get("queuedMs"),
+                    "runMs": result.get("runMs"),
+                },
             )
             return result
 

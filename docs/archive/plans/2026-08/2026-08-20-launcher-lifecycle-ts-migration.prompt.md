@@ -1,6 +1,6 @@
-# 开发提示词 · Launcher 生命周期 TS 化迁移
+# 开发提示词 · Launcher 生命周期 TS 化迁移（历史）
 
-> 把本文件全文作为首条消息投喂给开发 Agent。
+> Status: **Closed**（I6 已收口）。本文件不再投喂执行。现行权威：ADR 0009、`core/launcher/instance-lifecycle.md`、`desktop/electron/README.md`、`core/web/services/launcher_runtime.md`。计划正文见同目录 `2026-08-20-launcher-lifecycle-ts-migration.md`。
 
 ---
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-08-14). Amended 2026-08-17: the packaged product path no longer spawns Python `:8765`. Amended 2026-08-17: Electron start/quit reaps leftover `:8765` via `stop-launcher --use-state-owned-backend-pid` and must not attach to it as a second control plane. Amended 2026-08-20 (I0 of the launcher lifecycle TS migration): Decision 5 is narrowed — Python on the product path may only be (a) the workbench backend, (b) git/worktree/file-maintenance CLI, or (c) transitional lifecycle CLI retired incrementally by that plan. The lifecycle state machine and `instances.json` write authority target Electron main. Lock protocol v2 (`instances.json.lockdir`) is the interop lock while Python and TS coexist.
+Accepted (2026-08-14). Amended 2026-08-17: the packaged product path no longer spawns Python `:8765`. Amended 2026-08-17: Electron start/quit reaps leftover `:8765` via `stop-launcher --use-state-owned-backend-pid` and must not attach to it as a second control plane. Amended 2026-08-20 (I0 of the launcher lifecycle TS migration): Decision 5 is narrowed — Python on the product path may only be (a) the workbench backend, (b) git/worktree/file-maintenance CLI, or (c) transitional lifecycle CLI retired incrementally by that plan. Amended 2026-08-20 (I6 closeout): role (c) is retired. Product lifecycle writes (state machine, `instances.json`, command queue, supervisor, registered-PID reap) run only in Electron main. The dated plan is archived.
 
 ## Context
 
@@ -30,11 +30,10 @@ The Launcher should be an independent product whose **service and frontend stay 
 2. **The Launcher renderer talks to main over IPC**, using the existing `preload.ts` / `IPC_CHANNELS` pattern. The product path must not `fetch` `:8765`. A disconnected empty dashboard is a control-plane failure, not a valid idle UI.
 3. **Workbench remains Python.** Electron opens a separate renderer that loads the workbench origin (typically `:8000` / Runtime Manager + FastAPI + `web/dist`). Isolated branch instances remain extra workbench windows inside the same Electron process, each with its own Python backend.
 4. **`VibelutionLauncher.exe` stays a thin no-console shim.** If an Electron desktop owner is alive, the shim forwards `start|stop|restart|rebuild-and-start` into that process (second-instance argv or an equivalent local command channel). It must not become a second control plane. WinForms NotifyIcon remains last-resort bootstrap only when Electron is not running.
-5. **Python on the product path has three legal roles, and `:8765` is not one of them.** Packaged Electron no longer spawns or proxies Python HTTP as the product control plane (`bootstrapMainOwnedLauncher` + `resolve-workbench`). Unpackaged checkout HTTP (`vibelution_desktop_entry.py --action launcher`) remains for tests and the native shim. Electron start and quit must reap leftover `:8765` (`stop-launcher --use-state-owned-backend-pid` when no owned pid is known); attached bootstrap mode must not leave that HTTP host running as a second control plane. After this amendment, Python may appear on the product path only as:
-   - (a) the workbench backend process;
-   - (b) git / worktree / file-maintenance CLI;
-   - (c) transitional lifecycle CLI, invoked as no-console child processes (`pythonw` + `windowsHide` / `CREATE_NO_WINDOW`) and retired incrementally by [`docs/plans/2026-08-20-launcher-lifecycle-ts-migration.md`](../plans/2026-08-20-launcher-lifecycle-ts-migration.md).
-   The lifecycle state machine and `instances.json` write authority target Electron main. Until later increments move those writes, Python and Electron share lock protocol v2 (`instances.json.lockdir` mkdir lock) so dual-language access cannot tear the registry. `core/launcher/app.py` serving `/launcher` and `/api/launcher/*` is not the packaged control plane.
+5. **Python on the product path has two legal roles, and `:8765` is not one of them.** Packaged Electron no longer spawns or proxies Python HTTP as the product control plane (`bootstrapMainOwnedLauncher` + `resolve-workbench`). Unpackaged checkout HTTP (`vibelution_desktop_entry.py --action launcher`) remains for tests and the native shim. Electron start and quit must reap leftover `:8765` (`stop-launcher --use-state-owned-backend-pid` when no owned pid is known); attached bootstrap mode must not leave that HTTP host running as a second control plane. After this amendment, Python may appear on the product path only as:
+   - (a) the workbench backend process (`pythonw scripts/web_workbench.py`);
+   - (b) git / worktree / file-maintenance CLI, plus leftover no-console JSON CLI for `launcher-api` / `resolve-workbench` / `stop-launcher` / desktop-shell refresh.
+   `--action lifecycle` and `--action branch-instance` write paths are retired (`control_plane_is_electron`). The lifecycle state machine, `instances.json`, main-line command queue, supervisor loop, and registered-PID reap run in Electron main. Product lock protocol v2 is TS-only; Python `instance_lock.py` remains for tests and leftover HTTP writers. `core/launcher/app.py` serving `/launcher` and `/api/launcher/*` is not the packaged control plane. Job Object / scan-style process-table reap is not part of this decision.
 6. **Preserve already-shipped contracts** while moving ownership:
    - leftover workbench windows of the same origin are adopted; extras are destroyed; isolated instance windows are not destroyed as leftovers;
    - Close leftover ≠ 维护与清理; Close does not delete worktrees or uncommitted files;
@@ -53,7 +52,7 @@ The Launcher should be an independent product whose **service and frontend stay 
 ## Related
 
 - `docs/archive/plans/2026-08/CONTROL_PLANE_MIGRATION.md` (historical execution ledger)
-- `docs/plans/2026-08-20-launcher-lifecycle-ts-migration.md` (living TS migration plan; I0 amends this ADR)
+- `docs/archive/plans/2026-08/2026-08-20-launcher-lifecycle-ts-migration.md` (historical TS migration plan; I6 closed it)
 - `desktop/electron/README.md`
 - `core/web/services/launcher_runtime.md`
 - `docs/ops/config/07-launcher-runtime-workbench.md`

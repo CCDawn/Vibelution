@@ -203,8 +203,29 @@ export function hasValidEvidenceRequestKeywords(
   return (requests ?? []).some((request) => evidenceRequestKeywords(request).length > 0);
 }
 
+const DIGEST_CAPTURE_KEYS = [
+  "agreements",
+  "disagreements",
+  "actionItems",
+  "knowledgeCandidates",
+  "evidenceRequests",
+] as const;
+
+export function digestDraftCapturedDiscussion(
+  draft: MeetingDigestDraft | null | undefined,
+): boolean {
+  if (!draft) return false;
+  return DIGEST_CAPTURE_KEYS.some((key) => {
+    const value = draft[key];
+    return Array.isArray(value) && value.length > 0;
+  });
+}
+
 export function reviewDigestConfirmBlocker(draft: MeetingDigestDraft | null | undefined): string | undefined {
   if (!draft) return "还没有可确认的评审结论";
+  if (!digestDraftCapturedDiscussion(draft)) {
+    return "纪要未捕获讨论内容";
+  }
   if (!hasValidEvidenceRequestKeywords(draft.evidenceRequests)) {
     return "本轮结论没有有效搜集关键词，请退回后重新整理";
   }

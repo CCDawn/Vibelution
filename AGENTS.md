@@ -77,6 +77,7 @@
 | 测试命令和矩阵 | [测试指南](tests/README.md) |
 | 前端 UI / 控件 / 页面壳 / 布局（**必读**） | [VUI 实现地图](web/src/components/vui/README.md) + [开发标准 §9.1](docs/standards/development-standard.md) + 门禁 `web/src/components/vui/vuiShadcnRouteContract.test.ts` |
 | 后端服务 ownership | [services 全量索引](core/web/services/README.md) · pack 域再读 `core/web/services/<domain>/README.md` |
+| **Launcher 生命周期（控制面）** | [ADR 0009](docs/adr/0009-launcher-control-plane-lives-in-electron-main.md) · [`instance-lifecycle.md`](core/launcher/instance-lifecycle.md) · [`desktop/electron/README.md`](desktop/electron/README.md) · [`launcher_runtime.md`](core/web/services/launcher_runtime.md) |
 | 运行日志实现 | [日志说明](core/logging/README.md) |
 
 历史计划、报告、`docs/archive/`（含原 `docs/plans/` 与 `docs/superpowers/`）和旧 `.docs/project-memory/` 不得与现行规范竞争权威。
