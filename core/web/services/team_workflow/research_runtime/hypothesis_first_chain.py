@@ -98,12 +98,31 @@ def _safe_team_id(team_id: str) -> str:
     )
 
 
-def _question_requested_evidence(team_id: str) -> bool:
-    """True when any persisted review decision asked for more evidence.
+def _question_requested_evidence(team_id: str, question_id: str) -> bool:
+    """True when this question's persisted review decisions asked for evidence.
 
     A ``request_new_evidence`` decision (valid or not) proves the discussion
-    wanted collection, so the collection-ready waiver must not apply.
+    wanted collection, so the collection-ready waiver must not apply.  Scope
+    by question through the decision's meeting round: decision records carry
+    no question field, and a team-wide scan would let one question's request
+    block every other question's waiver (fatal for the 125-question batch).
     """
+    from core.web.services.team_workflow import meeting_rounds
+
+    normalized_question = str(question_id or "").strip().upper()
+    if not normalized_question:
+        return False
+    try:
+        question_by_meeting = {
+            str(meeting.get("meetingRoundId") or ""): str(
+                meeting.get("question") or ""
+            ).upper()
+            for meeting in meeting_rounds.list_meeting_rounds(team_id)["meetings"]
+        }
+    except Exception:
+        # Unreadable meetings fail closed: cannot prove the request belongs to
+        # another question, so do not waive.
+        return True
     root = developer_sandbox.seeded_sandbox_workspace_path(
         _project_root(),
         "teams",
@@ -118,6 +137,10 @@ def _question_requested_evidence(team_id: str) -> bool:
         return False
     return any(
         str(record.get("decision") or "") == "request_new_evidence"
+        and question_by_meeting.get(
+            str(record.get("meetingRoundId") or ""), normalized_question
+        )
+        == normalized_question
         for record in records
     )
 
@@ -2012,7 +2035,9 @@ def chain_state(team_id: str, question_id: str) -> dict[str, Any]:
             converged
             and not open_meeting_ids
             and first_meeting_closed
-            and not _question_requested_evidence(normalized_team_id)
+            and not _question_requested_evidence(
+                normalized_team_id, normalized_question_id
+            )
         ),
         "hypothesisRoundCount": len(rounds),
         "latestHypothesisRoundId": latest_round_id,
