@@ -301,6 +301,7 @@ def _instance_runtime_projection(
     return runtime
 
 
+# Deprecated by docs/plans/2026-08-20-launcher-lifecycle-ts-migration.md（迁移期保留）
 def _instance_lifecycle_state(
     *,
     observed_state: str,
@@ -356,6 +357,13 @@ def _instance_lifecycle_state(
     if has_runtime_signal:
         return "partial", ""
     return "closed", ""
+
+
+def _lifecycle_projection_is_startable(lifecycle_state: str, has_live_runtime: bool) -> bool:
+    state = str(lifecycle_state or "").strip().lower()
+    if state == "closed":
+        return True
+    return state == "error" and not has_live_runtime
 
 
 def _iso_timestamp_in_past(value: Any) -> bool:
@@ -485,9 +493,7 @@ def _instance_start_block_reason(item: dict[str, Any], runtime: dict[str, Any]) 
     if not path or not Path(path).is_dir():
         return "worktree_missing"
     state = str(runtime.get("lifecycleState") or "closed")
-    if state == "closed":
-        return ""
-    if state == "error" and not _item_has_live_runtime(item):
+    if _lifecycle_projection_is_startable(state, _item_has_live_runtime(item)):
         return ""
     return "runtime_error" if state == "error" else "runtime_active"
 
@@ -544,6 +550,7 @@ def _clear_isolated_workbench_runtime(item: dict[str, Any]) -> None:
 
 
 def _bundled_frontend_ready(item: dict[str, Any]) -> bool:
+    # Transitional dist probe (I1): TS projection does not inspect files.
     path = str(item.get("path") or "").strip()
     return bool(path and (Path(path) / "web" / "dist" / "index.html").is_file())
 

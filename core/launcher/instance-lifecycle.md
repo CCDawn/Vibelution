@@ -47,7 +47,7 @@ P0 只修 **生命周期内核**：一个监督者、一套 READY、desired/obse
 | 窗口是否 open | Electron `windowProvider` | Electron main（`VIBELUTION_ELECTRON_MAIN_ORCHESTRATES_WINDOWS=1`） |
 | `lifecycleState` | **投影**（desired + 后端 READY + 窗口） | 无独立写入者 |
 
-Python `_instance_lifecycle_state` 与 Electron `composeInstanceLifecycleState` **必须同一套规则**（见 §6）。
+Python `_instance_lifecycle_state` 与 Electron `projectInstanceLifecycle`（`desktop/electron/src/lifecycle/instanceLifecycleProjection.ts`）**必须同一套规则**（见 §6）。迁移期 Python 实现标注 deprecated，双语言由共享 fixture 锁死。
 
 `instances.json` 的 desired / phase / generation / status **优先于** 目标树 `state.json`。
 `registry.status == "running"` **不是** READY。窗口真相只来自 Electron overlay。
@@ -125,12 +125,14 @@ Registry 字段（隔离行）：
 3. **in-flight start**：`(desiredState == open 且 registryStatus ∈ {starting, restarting})` 或 `phase ∈ {opening, starting}`，且后端未 READY、窗口未开 → `starting`（**忽略** leftover `failureMessage`）
 4. `backendConflict` → `error` / `backend_port_conflict`
 5. `phase == failed` 或 `registryStatus == failed` 或（有 `failureMessage` 且非步骤 3）→ `error`
-6. 后端 READY 且 `frontendReady !== false` 且 `windowOpen` → `running`
+6. 后端 READY 且 `frontendReady === true` 且 `windowOpen` → `running`。监督者显式提供 build 状态；缺省或 `false` 不得当成 ready。dist 文件探测仅 Python 过渡实现，TS 不做文件探测。
 7. 有活信号（进程/监听/窗口）→ `partial`
    **禁止**把 `registryStatus == running` 或仅磁盘 `observedState ∈ {open, partial, running, healthy}` 当作活信号。列表 overlay 在 daemon 未跑且后端端口未听时，必须把 leftover `opening/open` 收成 `closed`。
 8. 否则 `closed`
 
-Electron overlay 在写入 `window.open` 后必须用同一函数重算 `lifecycleState`，并传入 `desiredState` / `registryStatus`。
+`startable`（投影层）：`lifecycleState == closed`，或 `lifecycleState == error` 且无活信号。失败行在无活进程/窗口时允许重试。
+
+Electron overlay 在写入 `window.open` 后必须用同一函数重算 `lifecycleState`，并传入 `desiredState` / `registryStatus`。窗口开着不得把 `stopping`/`closing`/`force_stopping` 改写为 `steady`。
 
 ---
 

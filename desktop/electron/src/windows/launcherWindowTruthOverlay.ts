@@ -1,63 +1,17 @@
+import {
+  instanceLifecycleIsStartable,
+  projectInstanceLifecycle
+} from "../lifecycle/instanceLifecycleProjection.js";
+
 export type LauncherWindowTruth = {
   workbench: { open: boolean; rendererProcessId: number } | null;
   instances: Array<{ instanceId: string; open: boolean; rendererProcessId: number }>;
 };
 
+export { composeInstanceLifecycleState } from "../lifecycle/instanceLifecycleProjection.js";
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-export function composeInstanceLifecycleState(input: {
-  phase?: string;
-  observedState?: string;
-  desiredState?: string;
-  registryStatus?: string;
-  backendAlive?: boolean;
-  backendHealthy?: boolean;
-  backendListening?: boolean;
-  backendConflict?: boolean;
-  frontendReady?: boolean;
-  windowOpen?: boolean;
-  failureMessage?: string;
-  startSupervisorLost?: boolean;
-}): "starting" | "restarting" | "stopping" | "error" | "running" | "partial" | "closed" {
-  const phase = String(input.phase || "").trim().toLowerCase();
-  const registryStatus = String(input.registryStatus || "").trim().toLowerCase();
-  const desiredState = String(input.desiredState || "").trim().toLowerCase();
-  const backendReady = Boolean(
-    input.backendAlive && input.backendHealthy && input.backendListening && !input.backendConflict
-  );
-  // Python ≡ TS: a start/restart claim whose supervisor died past its own
-  // deadline is an error, not a perpetual starting/restarting row.
-  if (input.startSupervisorLost && !backendReady && !input.windowOpen) {
-    return "error";
-  }
-  if (phase === "restarting" || phase === "restart" || registryStatus === "restarting") {
-    return "restarting";
-  }
-  if (phase === "closing" || phase === "stopping" || phase === "force_stopping" || registryStatus === "stopping") {
-    return "stopping";
-  }
-  const inFlightStart =
-    ((registryStatus === "starting" || registryStatus === "restarting") && desiredState === "open")
-    || phase === "opening"
-    || phase === "starting";
-  if (inFlightStart && !backendReady && !input.windowOpen) {
-    return "starting";
-  }
-  if (input.backendConflict) {
-    return "error";
-  }
-  if (phase === "failed" || registryStatus === "failed" || String(input.failureMessage || "").trim()) {
-    return "error";
-  }
-  if (backendReady && input.frontendReady !== false && input.windowOpen) {
-    return "running";
-  }
-  if (input.backendAlive || input.backendListening || input.windowOpen) {
-    return "partial";
-  }
-  return "closed";
 }
 
 function backendReadyFromBundle(bundle: Record<string, unknown>): boolean {
@@ -169,22 +123,6 @@ function overlayStatusWindowTruth(
   return payload;
 }
 
-function overlayComposePhase(phase: string, windowOpen: boolean): string {
-  const normalized = String(phase || "").trim().toLowerCase();
-  if (windowOpen && ["closing", "stopping", "force_stopping"].includes(normalized)) {
-    return "steady";
-  }
-  return String(phase || "");
-}
-
-function overlayComposeRegistryStatus(status: string, windowOpen: boolean): string {
-  const normalized = String(status || "").trim().toLowerCase();
-  if (windowOpen && normalized === "stopping") {
-    return "";
-  }
-  return String(status || "");
-}
-
 function overlayBranchInstancesWindowTruth(
   payload: Record<string, unknown>,
   truth: LauncherWindowTruth
@@ -227,24 +165,29 @@ function overlayBranchInstancesWindowTruth(
       if (backend) {
         const frontend = isRecord(runtime.frontend) ? runtime.frontend : {};
         const error = isRecord(runtime.error) ? runtime.error : {};
-        const lifecycleState = composeInstanceLifecycleState({
-          phase: overlayComposePhase(String(runtime.phase || ""), windowOpen),
+        const projected = projectInstanceLifecycle({
+          phase: String(runtime.phase || ""),
           observedState: String(runtime.observedState || ""),
           desiredState: String(runtime.desiredState || ""),
-          registryStatus: overlayComposeRegistryStatus(String(runtime.registryStatus || ""), windowOpen),
+          registryStatus: String(runtime.registryStatus || ""),
           backendAlive: backend.alive === true,
           backendHealthy: backend.healthy === true,
           backendListening: backend.listening === true,
           backendConflict: backend.portConflict === true,
-          frontendReady: frontend.ready !== false,
+          frontendReady: frontend.ready === true,
           windowOpen,
           failureMessage: String(error.message || ""),
           startSupervisorLost: String(error.code || "") === "start_supervisor_lost"
         });
-        runtime.lifecycleState = lifecycleState;
+        runtime.lifecycleState = projected.lifecycleState;
         const backendLive = backend.alive === true || backend.listening === true;
         item.alive = windowOpen || backendLive;
-        item.startable = lifecycleState === "closed";
+        item.startable = instanceLifecycleIsStartable({
+          lifecycleState: projected.lifecycleState,
+          backendAlive: backend.alive === true,
+          backendListening: backend.listening === true,
+          windowOpen
+        });
       } else if (windowOpen) {
         item.alive = true;
         item.startable = false;
