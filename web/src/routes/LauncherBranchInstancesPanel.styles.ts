@@ -32,7 +32,7 @@ const styles = {
   selectCell: "w-9 !px-1",
   branchName: "font-medium text-[var(--fg-primary)]",
   actionCell: "z-[1] min-w-0 bg-vui-surface-row",
-  actionButtons: "flex min-w-0 flex-wrap items-center justify-end gap-1",
+  actionButtons: "flex !flex-nowrap items-center justify-end gap-1",
   maintenanceFold:
     "mt-2 shrink-0 overflow-hidden rounded-md border border-vui-border-subtle bg-vui-surface-row [&>summary]:flex [&>summary]:cursor-pointer [&>summary]:list-none [&>summary]:items-center [&>summary]:justify-between [&>summary]:gap-2 [&>summary]:px-2 [&>summary]:py-1.5 [&>summary]:[font-size:var(--vui-font-xs)] [&>summary]:font-medium [&>summary]:text-vui-fg-secondary",
   maintenanceBody: "border-t border-vui-border-subtle px-1 pb-1.5",

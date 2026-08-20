@@ -105,7 +105,10 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain('<VStatusChip tone="success">{labels.ready}</VStatusChip>');
     expect(panelSource).toContain('variant="primary"');
     expect(panelSource).toContain('variant="danger"');
-    expect(panelSource).toContain("isPending={state === \"starting\" || state === \"restarting\"}");
+    expect(panelSource).toContain("<VActionGroup");
+    expect(panelSource).toContain("startingOrRestarting");
+    expect(panelSource).toContain("isPending={stopBusy}");
+    expect(panelSource).not.toContain("isPending={state === \"starting\" || state === \"restarting\"}");
     expect(panelSource).toContain("openClickGuardsRef");
     expect(panelSource).toContain("kind === \"startable\" && state === \"stopped\"");
     expect(panelSource).toContain("resizable");
@@ -152,6 +155,7 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource.slice(workbenchIdx, gitIdx)).not.toContain("fill: true");
     expect(panelStyles.actionCell).not.toContain("sticky");
     expect(panelStyles.actionCell).toContain("min-w-0");
+    expect(panelStyles.actionButtons).toContain("!flex-nowrap");
     expect(panelStyles.actionCell).not.toContain("!overflow-visible");
     expect(panelStyles.statusTable).not.toContain("overflow-auto");
   });
@@ -669,6 +673,20 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain("if (startBusy || openClickGuardsRef.current.has(item.id))");
     expect(panelSource).not.toContain("if (clickGuardRef.current || startBusy)");
     expect(panelSource).not.toContain("if (clickGuardRef.current || lifecyclePending || inFlight)");
+  });
+
+  it("turns the starting control into a clickable Stop instead of a disabled Starting label", () => {
+    const startable = instance({ id: "worktree:startable", shortName: "startable" });
+    expect(panelSource).toContain("const showOpen = canRequestOpenInstance(item, pendingOperation)");
+    expect(panelSource).not.toContain("|| state === \"starting\" || state === \"restarting\"");
+    expect(panelSource).toContain("variant={startingOrRestarting ? \"primary\" : \"secondary\"}");
+    expect(panelSource).toContain("isPending={stopBusy}");
+    expect(panelSource).not.toContain("isPending={state === \"starting\" || state === \"restarting\"}");
+    expect(panelSource).toContain("LoaderCircle");
+    expect(panelSource).toContain("正在启动，点击可停止");
+    expect(panelSource).toContain("正在重启，点击可停止");
+    expect(panelSource).toContain("<VActionGroup");
+    expect(canStopInstance(startable, { instanceId: startable.id, operation: "start" })).toBe(true);
   });
 
   it("releases the Open window click guard when the row is not actually starting", () => {
