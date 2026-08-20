@@ -1338,3 +1338,49 @@ def test_evidence_request_probe_is_scoped_per_question(
     assert chain._question_requested_evidence(team_id, "SCI-001") is False
     assert chain._question_requested_evidence(team_id, "SCI-002") is True
     assert chain._question_requested_evidence(team_id, "") is False
+
+
+def test_candidate_evidence_trail_cites_discussion_messages(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The trail maps each ledger candidate to the speeches that cite it."""
+    team_id, agents = _hf_env(tmp_path, monkeypatch)
+    _patch_approved_question(monkeypatch)
+    agent_ids = [agents[role] for role in _ROLES]
+
+    with server_operator_scope("u-1", roles=("operator",)):
+        _open_first_meeting(team_id, agent_ids)
+        storage = chain._storage_path(team_id)
+        with storage.open("a", encoding="utf-8") as fh:
+            fh.write(
+                json.dumps(
+                    {
+                        "schemaVersion": chain.SCHEMA_VERSION,
+                        "recordKind": chain.CANDIDATE_KIND,
+                        "candidateId": "hyp-a",
+                        "questionId": _QUESTION_ID,
+                        "statement": "hyp-a 陈述",
+                        "rationale": "机制",
+                        "proposedBy": "agent",
+                        "meetingRoundId": "",
+                        "createdAt": "2026-08-20T00:00:00Z",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+
+        result = chain.candidate_evidence_trail(team_id, _QUESTION_ID)
+
+    by_id = {
+        trail["candidateId"]: trail["entries"] for trail in result["trails"]
+    }
+    assert "hyp-a" in by_id
+    entries = by_id["hyp-a"]
+    assert entries, "review speeches citing cand-a must appear in the trail"
+    assert all("hyp-a" in entry["excerpt"] for entry in entries)
+    assert all(entry["meetingLabel"].startswith("评审") for entry in entries)
+    assert all(entry["messageId"] for entry in entries)
+
+    empty = chain.candidate_evidence_trail(team_id, "SCI-999")
+    assert empty["trails"] == []

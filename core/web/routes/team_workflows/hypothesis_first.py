@@ -39,6 +39,7 @@ from core.web.services.team_workflow.research_scope import (
 from ._errors import _raise_team_workflow_route_error
 from ._router import router
 from .hypothesis_first_models import (
+    CandidateEvidenceTrailResponse,
     ChainStateResponse,
     CloseReviewMeetingResponse,
     CollectionHandoffPayload,
@@ -238,6 +239,22 @@ def team_workflow_hypothesis_selection_get(
         return hypothesis_selection.get_hypothesis_selection(team_id, selection_id)
     except _DOMAIN_ERRORS as exc:
         _map_domain_error("hypothesis_first.selection.get", team_id, exc)
+
+
+@router.get(
+    "/teams/{team_id}/workflow-orchestration/hypothesis-first/questions/{question_id}/candidates/evidence-trail",
+    response_model=CandidateEvidenceTrailResponse,
+    response_model_exclude_unset=True,
+)
+def team_workflow_hypothesis_candidate_evidence_trail(
+    team_id: str,
+    question_id: str,
+) -> dict:
+    """Discussion-message evidence trail per candidate (click-through)."""
+    try:
+        return hypothesis_first_chain.candidate_evidence_trail(team_id, question_id)
+    except _DOMAIN_ERRORS as exc:
+        _map_domain_error("hypothesis_first.candidates.evidence_trail", team_id, exc)
 
 
 @router.get(

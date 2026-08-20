@@ -20,6 +20,14 @@ const styles: Record<string, string> = {
   generationState:
     "grid justify-items-start gap-2 [&_p]:[font-size:var(--vui-font-2xs)] [&_p]:text-[var(--fg-secondary)]",
   hint: "m-0 [font-size:var(--vui-font-2xs)] text-[var(--fg-secondary)]",
+  trailToggle:
+    "cursor-pointer rounded-[var(--vui-radius-control)] border border-[var(--vui-border-subtle)] px-2 py-[2px] text-[var(--fg-secondary)] [font-size:var(--vui-font-2xs)] hover:border-[var(--vui-border)]",
+  evidenceTrail:
+    "grid gap-2 rounded-[var(--vui-radius-control)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-inset)] p-2",
+  trailList: "m-0 grid list-none gap-2 p-0",
+  trailSource: "[font-size:var(--vui-font-2xs)] text-[var(--fg-secondary)]",
+  trailExcerpt: "m-0 [font-size:var(--vui-font-xs)] leading-[1.4]",
+  trailHint: "m-0 [font-size:var(--vui-font-2xs)] text-[var(--fg-secondary)]",
   errorText: "m-0 [font-size:var(--vui-font-2xs)] text-[var(--state-danger,var(--state-warning))]",
 };
 

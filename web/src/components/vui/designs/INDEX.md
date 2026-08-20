@@ -13,6 +13,7 @@
 | `ChallengeSubmissionReadiness` | [product/challenge-submission-readiness.md](./product/challenge-submission-readiness.md#challengesubmissionreadiness) |
 | `ChallengeCatalogOverview` | [product/challenge-catalog-overview.md](./product/challenge-catalog-overview.md#challengecatalogoverview) |
 | `ChallengeTokenUsageStrip` | [product/challenge-token-usage.md](./product/challenge-token-usage.md#challengetokenusagestrip) |
+| `VCommandPalette` | [product/command-palette.md](./product/command-palette.md#vcommandpalette) |
 
 ## Primitives
 
