@@ -846,12 +846,13 @@ def start_chat_room_round(
     agent_runner: AgentRunner | None = None,
     background: bool = False,
     lightweight_response: bool = False,
+    max_topic_lines: int = 6,
 ) -> dict[str, Any]:
     submit_started_at = _perf_counter()
     submit_timings: dict[str, Any] = {}
     lang = get_web_language()
     normalized_room_id = str(room_id or "").strip()
-    normalized_topic = trim_lines(topic or "", max_lines=6).strip()
+    normalized_topic = trim_lines(topic or "", max_lines=max_topic_lines).strip()
     if not normalized_topic:
         raise ChatRoomValidationError(text_for(lang, zh="请输入本轮群聊议题。", en="Enter a room topic."))
 

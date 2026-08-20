@@ -212,6 +212,44 @@ def test_review_prompt_includes_selected_candidate_content(tmp_path, monkeypatch
     assert all("算术基本定理保证唯一分解" in prompt for prompt in prompts)
 
 
+def test_review_prompt_keeps_all_candidate_lines_beyond_generic_topic_cap(
+    tmp_path, monkeypatch
+):
+    """The review topic embeds one line per candidate and must not hit the
+    generic chat-room six-line topic cap (observed live: only 3 of 9
+    selected candidates reached the agents)."""
+    team_id, agents = _team_with_room(tmp_path, monkeypatch)
+    prompts: list[str] = []
+
+    def capture_runner(participant, prompt, context):
+        prompts.append(str(prompt))
+        return {"status": "completed", "raw_output": "pass", "summary": "pass"}
+
+    candidate_ids = [f"cand-{index}" for index in range(9)]
+    candidate_contexts = [
+        {
+            "candidateId": candidate_id,
+            "claim": f"{candidate_id} 的可证伪陈述",
+            "rationale": f"{candidate_id} 的机制理由",
+        }
+        for candidate_id in candidate_ids
+    ]
+    agent_ids = list(agents.values())
+    meeting_runtime.open_hypothesis_review_meeting(
+        team_id,
+        _selection_payload(agent_ids, selectedCandidateIds=candidate_ids),
+        agent_runner=capture_runner,
+        background=False,
+        candidate_contexts=candidate_contexts,
+    )
+
+    assert prompts
+    for candidate_id in candidate_ids:
+        assert all(f"{candidate_id} 的可证伪陈述" in prompt for prompt in prompts), (
+            f"{candidate_id} statement was truncated out of the meeting topic"
+        )
+
+
 def _closure_payload(agent_ids, **overrides):
     payload = {
         "decisions": [

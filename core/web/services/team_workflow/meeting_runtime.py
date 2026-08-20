@@ -36,6 +36,10 @@ from core.web.services.team_workflow import meeting_rounds
 DEFAULT_MAX_MESSAGES = 40
 MAX_SELECTED_CANDIDATES = 16
 MEETING_SOURCE = "hypothesis_first_meeting"
+# The opening topic embeds one line per selected candidate (plus header/footer
+# lines), so meeting rounds need a line budget beyond the generic chat-room
+# topic cap: 3 framing lines + rules + host line + one line per candidate.
+MEETING_TOPIC_MAX_LINES = MAX_SELECTED_CANDIDATES + 8
 
 _DEFAULT_AGENDA = (
     "回顾入选假说候选与赛题已有证据",
@@ -395,6 +399,7 @@ def open_hypothesis_review_meeting(
         agent_runner=agent_runner,
         background=background,
         lightweight_response=background,
+        max_topic_lines=MEETING_TOPIC_MAX_LINES,
     )
     round_id = _round_id_from_start_result(result, meeting_round_id)
     bound = meeting_rounds.bind_meeting_chat_room_round(
@@ -525,6 +530,7 @@ def open_candidate_generation_meeting(
         agent_runner=agent_runner,
         background=background,
         lightweight_response=background,
+        max_topic_lines=MEETING_TOPIC_MAX_LINES,
     )
     round_id = _round_id_from_start_result(result, meeting_round_id)
     bound = meeting_rounds.bind_meeting_chat_room_round(
@@ -671,6 +677,7 @@ def _run_meeting_discussion_impl(
             ),
             agent_runner=agent_runner,
             background=False,
+            max_topic_lines=MEETING_TOPIC_MAX_LINES,
         )
         round_id = _round_id_from_start_result(result, normalized_round_id)
         bound = meeting_rounds.bind_meeting_chat_room_round(
