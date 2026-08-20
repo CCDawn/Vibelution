@@ -1,11 +1,23 @@
-import { describe, expect, it, vi } from "vitest";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { resetAdmissionCacheForTests } from "../src/lifecycle/instanceAdmissionStore.js";
 import {
   createLauncherIpcHost,
   LAUNCHER_IPC_HOST_NOT_READY,
   LAUNCHER_IPC_UNSUPPORTED_PATH,
   type LauncherIpcInvokePayload,
 } from "../src/protocol/launcherIpcHost.js";
+
+afterEach(() => {
+  resetAdmissionCacheForTests();
+});
+
+async function tempAdmissionPath(): Promise<string> {
+  return join(await mkdtemp(join(tmpdir(), "vibe-ipc-admission-")), "instance-admission.json");
+}
 
 function jsonResponse(payload: unknown, ok = true, status = 200): Response {
   return {
@@ -305,6 +317,7 @@ describe("createLauncherIpcHost", () => {
       resolveContext: async () => ({ launcherOrigin: "http://127.0.0.1:8765", controlToken: "t" }),
       orchestrateLifecycle: orchestrate,
       fetchImpl,
+      admissionStorePath: await tempAdmissionPath(),
     });
     const result = await host.invoke(
       validPayload({
@@ -331,6 +344,7 @@ describe("createLauncherIpcHost", () => {
       resolveContext: async () => ({ launcherOrigin: "http://127.0.0.1:8765", controlToken: "t" }),
       orchestrateLifecycle: orchestrate,
       fetchImpl,
+      admissionStorePath: await tempAdmissionPath(),
     });
     const result = await host.invoke(validPayload({ path: "restart", init: { method: "POST" } }));
     expect(result.ok).toBe(false);
@@ -407,5 +421,23 @@ describe("createLauncherIpcHost", () => {
     if (!result.ok) {
       expect(result.error.message).toContain("active work blocks reset");
     }
+  });
+
+  it("rejects a main-row start storm without calling the orchestrator after burst", async () => {
+    const orchestrate = vi.fn().mockResolvedValue({ schemaVersion: 1, accepted: true, operation: "restart" });
+    const host = createLauncherIpcHost({
+      resolveContext: async () => ({ launcherOrigin: "http://127.0.0.1:8765", controlToken: "t" }),
+      orchestrateLifecycle: orchestrate,
+      fetchImpl: vi.fn(),
+      admissionStorePath: await tempAdmissionPath(),
+    });
+    const results = [];
+    for (let index = 0; index < 10; index += 1) {
+      results.push(await host.invoke(validPayload({ path: "restart", init: { method: "POST" } })));
+    }
+    expect(orchestrate).toHaveBeenCalledTimes(3);
+    const denied = results.slice(3);
+    expect(denied.every((item) => item.ok && (item.payload as { accepted?: boolean }).accepted === false)).toBe(true);
+    expect((denied[0]?.payload as { code?: string }).code).toBe("rate_limited");
   });
 });

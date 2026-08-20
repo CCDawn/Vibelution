@@ -1,6 +1,6 @@
 # Launcher 生命周期 TS 化迁移（绞杀者增量 I0–I6）
 
-Status: **Active**（2026-08-20 立项；I0 锁协议 v2 已实现；I1 TS 投影权威 + 双语言 fixture 已实现；I2 TS registry CAS + stop spawnPid 锁内快照已实现；I3 监督循环 TS 化 + `ownerLease` 心跳已实现）
+Status: **Active**（2026-08-20 立项；I0 锁协议 v2 已实现；I1 TS 投影权威 + 双语言 fixture 已实现；I2 TS registry CAS + stop spawnPid 锁内快照已实现；I3 监督循环 TS 化 + `ownerLease` 心跳已实现；I4a 准入控制已实现）
 Authority: [ADR 0009](../adr/0009-launcher-control-plane-lives-in-electron-main.md)（由本计划 I0 增补）· 前置执行账本 [CONTROL_PLANE_MIGRATION](../archive/plans/2026-08/CONTROL_PLANE_MIGRATION.md)（已关闭，其关闭条件只覆盖「编排权归 main + :8765 退役」，未覆盖「逻辑本体 TS 化」——本计划补齐这一段）。
 验收总则：每个增量独立 worktree、独立合入、独立可回退；全部完成后，**launcher 生命周期逻辑（状态机、registry 写入、命令队列、监督循环、进程收割编排）全部运行在 Electron main（TS）内**；Python 只保留 workbench 后端本体与 git/文件维护 CLI。
 
@@ -88,7 +88,11 @@ VibelutionLauncher.exe（薄 shim，转发）
 
 ### I4 · 准入控制 + main 行队列 TS 化（修 D4；拆 I4a/I4b）
 
-- **I4a 准入控制**（独立可先行）：per-instance 速率限制（默认 burst 3 / 10s，参照 systemd StartLimitBurst）+ 连续失败指数冷却（10s→20s→40s…封顶 5min，k8s CrashLoopBackOff 语义），冷却中 UI 显示原因与剩余时间；冷却状态持久化（进程重启不重置）。
+- **I4a 准入控制**（独立可先行，已实现）：per-instance 速率限制（默认 burst 3 / 10s，参照 systemd `StartLimitBurst` / `StartLimitIntervalSec`：只计通过条件检查的 start-like 操作，拒绝不计入窗口）+ 连续失败指数冷却（10s→20s→40s…封顶 5min，k8s CrashLoopBackOff 语义；成功 `observeReady` 清零，不借 10min 成功窗）。`stop` / `force-stop` 不限流、不进冷却。冷却中 UI 显示原因与剩余时间；冷却状态持久化到 `%LOCALAPPDATA%\Vibelution\instance-admission.json`（**不**写入 `instances.json`，避免与 I4b intent 抢同一热文件）。
+  - 新文件：`desktop/electron/src/lifecycle/instanceAdmissionControl.ts`、`instanceAdmissionStore.ts`、`__fixtures__/instanceAdmission.cases.json`。
+  - 接入：隔离 `claimIsolatedStart` / `observeIsolatedReady` / `observeIsolatedError`；IPC 对 main 行 `start|restart|rebuild-and-start` 先 `admit`；overlay 写 `startBlockReason` + `admissionMessage` + `admissionRetryAfterMs`。
+  - **不改** `main.ts` 命令队列、`daemon.py`、`instanceRegistryStore.ts`。杀树仍 Python。
+  - 验收：1s 内 10 次 restart，前 3 次放行、后 7 次 `rate_limited`；冷却态重启 Electron 后仍在；列表显示原因与剩余秒数；计时埋点口径不变（本增量不改 wait/observe 路径）。
 - **I4b main 行队列迁移**：open/close/restart 命令队列与 idle reconcile 从 RM daemon 迁 Electron main（进程内队列 + 崩溃恢复用持久化 intent；观测复用 I1 投影）。**边界：daemon.py 中 self/supervised 演化循环、hot-restart 会话、storage migration 不迁**（workbench 域）。main 行观测在 TS 内实现：net.connect 健康门槛 + 已知 pid 存活检查（TS 自己 spawn 的进程，属主信任链简化，不需要 Win32 端口属主表——那是 Python 多进程观测域的需求）。
 - 验收：注入风暴（1s 内 10 次 restart）被合并/拒绝且终态正确；main 行 e2e 启停计时对照埋点基线（`restart_initial_observation_ms` 等口径，当前重启 ≈7.3s）不劣化。
 
@@ -117,10 +121,10 @@ VibelutionLauncher.exe（薄 shim，转发）
 ## 5. 契约冻结清单（改前先改本文档）
 
 - `instances.json` 字段：`schemaVersion`（I3 起为 **3**）, `instances[]{id,branch,desiredState,status,phase,generation,commandId,spawnPid,deadlineAt,failureMessage,port,controlPort,ownerLease{ownerId,expiresAt}}`。
-- 事件名与 payload：`workbench.*` / `launcher.*` / `electron.*`（含本计划新增 `launcher.registry.lock_stale_broken`）。
+- 事件名与 payload：`workbench.*` / `launcher.*` / `electron.*`（含本计划新增 `launcher.registry.lock_stale_broken`、I4a `launcher.admission.rate_limited` / `launcher.admission.cooldown`）。
 - IPC 通道（`preload.ts` IPC_CHANNELS）与 C# shim 转发协议。
 - active-work guard 固定中文文案（AGENTS §4）。
-- 超时常量现值：180/60/240（start/stop/restart）、75/20（bridge）、8（browser-missing 宽限）、30（close tx lease）、**15/5（I3 `ownerLease` TTL/心跳，秒）**——调整需在增量内显式声明并给理由。
+- 超时常量现值：180/60/240（start/stop/restart）、75/20（bridge）、8（browser-missing 宽限）、30（close tx lease）、**15/5（I3 `ownerLease` TTL/心跳，秒）**、**I4a 3/10s burst 与 10s→300s 失败冷却**（systemd StartLimitBurst=3 严于默认 5；冷却公式对齐 kubelet CrashLoopBackOff，成功即清零）——调整需在增量内显式声明并给理由。
 - 无控制台红线与 CREATE_NO_WINDOW 路径。
 
 ## 6. 测试与验证

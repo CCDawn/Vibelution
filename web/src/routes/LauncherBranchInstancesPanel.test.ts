@@ -7,6 +7,8 @@ import {
   BRANCH_INSTANCE_PAGE_SIZE,
   canStartInstance,
   canStopInstance,
+  formatAdmissionReason,
+  isAdmissionBlocked,
   cleanupRiskLabels,
   filterBranchInstances,
   formatAttentionReason,
@@ -111,6 +113,9 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).not.toContain("isPending={state === \"starting\" || state === \"restarting\"}");
     expect(panelSource).toContain("openClickGuardsRef");
     expect(panelSource).toContain("kind === \"startable\" && state === \"stopped\"");
+    expect(panelSource).toContain("isAdmissionBlocked");
+    expect(panelSource).toContain("formatAdmissionReason");
+    expect(panelSource).toContain("isDisabled={startBusy || admissionBlocked}");
     expect(panelSource).toContain("resizable");
     expect(panelSource).not.toMatch(/from\s+["']@heroui\/react["']/);
     expect(panelSource).not.toMatch(/renderers\/shadcn/);
@@ -219,6 +224,18 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(row.cleanupEligible).toBe(true);
     expect(row.cleanupRisks).toEqual(["delete_unmerged"]);
     expect(overlayCleanupMetadata([base], null)).toEqual([base]);
+  });
+
+  it("disables start and shows remaining cooldown time while admission is blocked", () => {
+    const cooled = instance({
+      startable: true,
+      startBlockReason: "crash_loop_backoff",
+      admissionRetryAfterMs: 20_000,
+      admissionMessage: "连续启动失败，冷却中，请 20 秒后再试。",
+    });
+    expect(isAdmissionBlocked(cooled)).toBe(true);
+    expect(canStartInstance(cooled)).toBe(false);
+    expect(formatAdmissionReason(cooled, true)).toContain("20 秒");
   });
 
   it("hides unmerged rows until cleanup metadata marks them unmerged", () => {

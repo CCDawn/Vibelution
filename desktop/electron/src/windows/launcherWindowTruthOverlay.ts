@@ -1,3 +1,4 @@
+import { peekAdmissionDecision } from "../lifecycle/instanceAdmissionStore.js";
 import {
   instanceLifecycleIsStartable,
   projectInstanceLifecycle
@@ -22,6 +23,25 @@ function backendReadyFromBundle(bundle: Record<string, unknown>): boolean {
 function backendLiveFromBundle(bundle: Record<string, unknown>): boolean {
   const backend = isRecord(bundle.backend) ? bundle.backend : {};
   return backend.alive === true || backend.portListening === true;
+}
+
+function applyAdmissionOverlay(
+  item: Record<string, unknown>,
+  instanceId: string,
+  nowMs = Date.now()
+): void {
+  const decision = peekAdmissionDecision(instanceId, nowMs, "start");
+  if (decision.admitted) {
+    if (item.startBlockReason === "rate_limited" || item.startBlockReason === "crash_loop_backoff") {
+      item.startBlockReason = "";
+    }
+    delete item.admissionRetryAfterMs;
+    delete item.admissionMessage;
+    return;
+  }
+  item.startBlockReason = decision.code;
+  item.admissionRetryAfterMs = decision.retryAfterMs;
+  item.admissionMessage = decision.message;
 }
 
 function overlayRetiredControlPort(payload: Record<string, unknown>): Record<string, unknown> {
@@ -106,6 +126,7 @@ function overlayStatusWindowTruth(
     }
   }
 
+  applyAdmissionOverlay(bundle, "main");
   bundle.browser = browser;
   if (Array.isArray(bundle.components)) {
     bundle.components = bundle.components.map((component) => {
@@ -194,6 +215,7 @@ function overlayBranchInstancesWindowTruth(
       }
       item.runtime = runtime;
     }
+    applyAdmissionOverlay(item, String(item.id || ""));
     return item;
   });
   return payload;

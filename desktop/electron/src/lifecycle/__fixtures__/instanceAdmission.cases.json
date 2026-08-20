@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "protocol": {
+    "burst": 3,
+    "windowMs": 10000,
+    "cooldownInitialMs": 10000,
+    "cooldownCapMs": 300000
+  },
+  "nowMs": 1787227200000,
+  "cases": [
+    {
+      "id": "first-start-is-admitted",
+      "record": { "startTimestampsMs": [], "consecutiveFailures": 0, "cooldownUntilMs": 0 },
+      "operation": "start",
+      "expected": { "admitted": true, "code": "", "retryAfterMs": 0 }
+    },
+    {
+      "id": "third-start-in-window-is-admitted",
+      "record": {
+        "startTimestampsMs": [1787227194000, 1787227197000],
+        "consecutiveFailures": 0,
+        "cooldownUntilMs": 0
+      },
+      "operation": "restart",
+      "expected": { "admitted": true, "code": "", "retryAfterMs": 0 }
+    },
+    {
+      "id": "fourth-start-in-10s-is-rate-limited",
+      "record": {
+        "startTimestampsMs": [1787227192000, 1787227195000, 1787227198000],
+        "consecutiveFailures": 0,
+        "cooldownUntilMs": 0
+      },
+      "operation": "start",
+      "expected": { "admitted": false, "code": "rate_limited", "retryAfterMs": 2000 }
+    },
+    {
+      "id": "aged-out-starts-do-not-count",
+      "record": {
+        "startTimestampsMs": [1787227189000, 1787227191000, 1787227193000],
+        "consecutiveFailures": 0,
+        "cooldownUntilMs": 0
+      },
+      "operation": "start",
+      "expected": { "admitted": true, "code": "", "retryAfterMs": 0 }
+    },
+    {
+      "id": "stop-bypasses-rate-limit",
+      "record": {
+        "startTimestampsMs": [1787227192000, 1787227195000, 1787227198000],
+        "consecutiveFailures": 0,
+        "cooldownUntilMs": 0
+      },
+      "operation": "stop",
+      "expected": { "admitted": true, "code": "", "retryAfterMs": 0 }
+    },
+    {
+      "id": "force-stop-bypasses-cooldown",
+      "record": {
+        "startTimestampsMs": [],
+        "consecutiveFailures": 3,
+        "cooldownUntilMs": 1787227500000
+      },
+      "operation": "force-stop",
+      "expected": { "admitted": true, "code": "", "retryAfterMs": 0 }
+    },
+    {
+      "id": "first-failure-cools-10s",
+      "record": { "startTimestampsMs": [1787227198000], "consecutiveFailures": 0, "cooldownUntilMs": 0 },
+      "operation": "start",
+      "apply": "failure",
+      "expectedRecord": { "consecutiveFailures": 1, "cooldownUntilMs": 1787227210000 }
+    },
+    {
+      "id": "second-failure-cools-20s",
+      "record": { "startTimestampsMs": [], "consecutiveFailures": 1, "cooldownUntilMs": 1787227210000 },
+      "operation": "start",
+      "apply": "failure",
+      "expectedRecord": { "consecutiveFailures": 2, "cooldownUntilMs": 1787227220000 }
+    },
+    {
+      "id": "active-cooldown-blocks-start",
+      "record": { "startTimestampsMs": [], "consecutiveFailures": 2, "cooldownUntilMs": 1787227220000 },
+      "operation": "restart",
+      "expected": { "admitted": false, "code": "crash_loop_backoff", "retryAfterMs": 20000 }
+    },
+    {
+      "id": "success-clears-cooldown",
+      "record": { "startTimestampsMs": [1787227198000], "consecutiveFailures": 4, "cooldownUntilMs": 1787227400000 },
+      "apply": "success",
+      "expectedRecord": { "consecutiveFailures": 0, "cooldownUntilMs": 0 }
+    },
+    {
+      "id": "cooldown-caps-at-5min",
+      "record": { "startTimestampsMs": [], "consecutiveFailures": 8, "cooldownUntilMs": 0 },
+      "apply": "failure",
+      "expectedRecord": { "consecutiveFailures": 9, "cooldownUntilMs": 1787227500000 }
+    }
+  ]
+}

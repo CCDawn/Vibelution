@@ -108,6 +108,8 @@ Registry 字段（隔离行）：
 | `failureMessage` | 仅当前 generation 的失败文案 |
 | `port` / `controlPort` | 一次加锁事务内同时分配 |
 
+I4a 准入（Electron，独立于 `instances.json`）：start/restart/rebuild-and-start/open 先过 per-instance 速率限制（burst **3** / **10s**）与连续失败冷却（**10s→20s→40s…封顶 5min**）。拒绝码 `rate_limited` / `crash_loop_backoff`，UI 显示原因与剩余秒数。状态在 `%LOCALAPPDATA%\Vibelution\instance-admission.json`。`stop` / `force-stop` 不挡。隔离成功 `observe-ready` 清零失败计数。
+
 `claimStop` 在同一把锁内先 `generation+1` 再快照 `spawnPid`；之后旧 start 的 `spawnPid` / observe 回写必须按 generation CAS 丢弃，禁止复活。
 
 `observe-error`（Electron 监督回写）：仅当 `status ∈ {starting, restarting}` 且 `generation` 匹配（或调用方未传 generation）时写成 `failed`。过期 generation **静默 no-op**。
