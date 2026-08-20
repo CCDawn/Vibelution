@@ -656,6 +656,25 @@ def team_workflow_hypothesis_first_close_review_meeting(
 
 
 @router.post(
+    "/teams/{team_id}/workflow-orchestration/hypothesis-first/chain/review-meetings/{meeting_round_id}/reopen",
+    response_model=CloseReviewMeetingResponse,
+    response_model_exclude_unset=True,
+)
+def team_workflow_hypothesis_first_reopen_review_meeting(
+    team_id: str,
+    meeting_round_id: str,
+) -> dict:
+    """Restart one review round whose discussion produced no successful speech."""
+    try:
+        return hypothesis_first_chain.reopen_failed_review_meeting(
+            team_id,
+            meeting_round_id,
+        )
+    except _DOMAIN_ERRORS as exc:
+        _map_domain_error("hypothesis_first.chain.reopen_review_meeting", team_id, exc)
+
+
+@router.post(
     "/teams/{team_id}/workflow-orchestration/hypothesis-first/chain/meetings/{meeting_round_id}/approve-digest",
     response_model=CloseReviewMeetingResponse,
     response_model_exclude_unset=True,

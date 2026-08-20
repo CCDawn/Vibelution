@@ -607,7 +607,7 @@ def open_candidate_generation_meeting(
         and not meeting_rounds.running_bound_round_ids(open_meeting)
         and not meeting_rounds.completed_meeting_source_messages(open_meeting)
     ):
-        meeting_rounds.supersede_empty_candidate_generation_meeting(
+        meeting_rounds.supersede_empty_discussion_meeting(
             normalized_team_id,
             str(open_meeting.get("meetingRoundId") or ""),
         )
@@ -748,6 +748,62 @@ def _normalize_budget(budget: Any) -> int:
             f"round budget must stay within 1..{MAX_ROUND_BUDGET}: {normalized}"
         )
     return normalized
+
+
+def reopen_failed_review_meeting(
+    team_id: str,
+    meeting_round_id: str,
+    *,
+    agent_runner: Any = None,
+    background: bool = True,
+    budget: Any = None,
+) -> dict[str, Any]:
+    """Restart one review round whose discussion produced no successful speech.
+
+    The recovery a blocked summarize surfaces as ``重新发起讨论`` for review
+    rounds: the failed attempt is superseded (append-only, no digest) and the
+    next budget-gated round opens with the same selection lineage.  Guards
+    live in ``meeting_rounds.supersede_empty_discussion_meeting`` — only a
+    terminal round with zero completed messages may be recovered this way.
+    """
+    from core.web.services import team_service
+    from core.web.services.team_workflow import meeting_rounds
+
+    normalized_team_id = team_service.assert_team_exists(team_id)
+    normalized_round_id = str(meeting_round_id or "").strip()
+    if not normalized_round_id:
+        raise HypothesisFirstChainError("meeting_round_id is required.")
+    meeting_round = meeting_rounds.get_meeting_round(
+        normalized_team_id, normalized_round_id
+    )["meetingRound"]
+    if str(meeting_round.get("meetingType") or "") != HYPOTHESIS_REVIEW_MEETING_TYPE:
+        raise HypothesisFirstChainError(
+            "reopen-failed-discussion only applies to hypothesis_review meetings."
+        )
+    superseded = meeting_rounds.supersede_empty_discussion_meeting(
+        normalized_team_id,
+        normalized_round_id,
+        actor="operator:failed-discussion-restart",
+    )
+    reopened = open_next_review_meeting(
+        normalized_team_id,
+        previous_meeting_round_id=normalized_round_id,
+        agent_runner=agent_runner,
+        background=background,
+        budget=budget,
+    )
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "status": "reopened",
+        "openStatus": str(reopened.get("status") or ""),
+        "supersededMeetingRound": superseded.get("meetingRound") or {},
+        **{
+            key: value
+            for key, value in reopened.items()
+            if key not in {"schemaVersion", "teamId", "status"}
+        },
+    }
 
 
 def open_next_review_meeting(

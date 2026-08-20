@@ -10,6 +10,7 @@ import {
   openHypothesisCandidateGeneration,
   recordCollectionHandoff,
   rejectMeetingDigestDraft,
+  reopenHypothesisReviewMeeting,
 } from "../../../api/hypothesisFirst";
 import { queryKeys } from "../../../api/queryKeys";
 import { VButton, VErrorSummary, VStateSurface } from "../../../components/vui";
@@ -111,6 +112,11 @@ export function HypothesisFirstMeetingOps(props: {
     && completedSourceMessageCount === 0
     && roundQuery.data?.meetingRound?.meetingType === "hypothesis_candidate_generation"
     && (roundStatus === "open" || roundStatus === "summarizing");
+  const failedReviewDiscussion = messagesQuery.isSuccess
+    && sourceMessages.length > 0
+    && completedSourceMessageCount === 0
+    && roundQuery.data?.meetingRound?.meetingType === "hypothesis_review"
+    && (roundStatus === "open" || roundStatus === "summarizing");
   const interruptedCandidateDiscussion = messagesQuery.isSuccess
     && sourceMessages.length === 0
     && roundQuery.data?.meetingRound?.meetingType === "hypothesis_candidate_generation"
@@ -147,6 +153,10 @@ export function HypothesisFirstMeetingOps(props: {
     mutationFn: () => openHypothesisCandidateGeneration(props.teamId, props.questionId),
     onSuccess: invalidate,
   });
+  const reopenReviewMutation = useMutation({
+    mutationFn: () => reopenHypothesisReviewMeeting(props.teamId, props.meetingRoundId),
+    onSuccess: invalidate,
+  });
   const collectionRunId = props.nextAction.collectionRunId || "";
   const canHandoff = props.nextAction.command === "retry_handoff"
     && Boolean(props.nextAction.collectionRequestId)
@@ -178,6 +188,8 @@ export function HypothesisFirstMeetingOps(props: {
     ? "open_generation"
     : failedCandidateDiscussion
     ? "open_generation"
+    : failedReviewDiscussion
+      ? "reopen_review"
     : autoDraftFailed
       ? "retry_draft_summary"
     : (commandEnabled ? (props.nextAction.recovery?.command || props.nextAction.command) : undefined);
@@ -185,6 +197,8 @@ export function HypothesisFirstMeetingOps(props: {
     ? "重试启动候选讨论"
     : failedCandidateDiscussion
     ? "重新发起候选讨论"
+    : failedReviewDiscussion
+      ? "重新发起评审讨论"
     : autoDraftFailed
       ? (roundQuery.data.meetingRound.meetingType === "hypothesis_candidate_generation"
         ? "重试整理候选清单"
@@ -198,12 +212,14 @@ export function HypothesisFirstMeetingOps(props: {
     || approveMutation.isPending
     || rejectMutation.isPending
     || generationMutation.isPending
+    || reopenReviewMutation.isPending
     || handoffMutation.isPending;
   const error =
     draftMutation.error
     || approveMutation.error
     || rejectMutation.error
     || generationMutation.error
+    || reopenReviewMutation.error
     || handoffMutation.error;
   const displayRound = props.nextAction.command === "draft_summary"
     && roundQuery.data.meetingRound.status === "open"
@@ -225,6 +241,10 @@ export function HypothesisFirstMeetingOps(props: {
     }
     if (next === "open_generation") {
       generationMutation.mutate();
+      return;
+    }
+    if (next === "reopen_review") {
+      reopenReviewMutation.mutate();
       return;
     }
     if (next === "retry_handoff") {

@@ -102,3 +102,98 @@ describe("DigestDraftView validation errors", () => {
     expect(container.textContent).not.toContain("已关门");
   });
 });
+
+describe("MeetingMessageCard failure rendering", () => {
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
+  });
+
+  it("humanizes failed speech and hides the raw error behind details", () => {
+    act(() => {
+      root.render(
+        <MeetingRoundDisplay
+          compact
+          messages={[
+            {
+              messageId: "m-1",
+              agentId: "agent-9",
+              status: "failed",
+              content: "network_error: litellm.InternalServerError: OpenAIException - Connection error.",
+            },
+          ]}
+          round={{
+            program: "p",
+            theme: "t",
+            campaign: "c",
+            question: "Q-01",
+            branch: "b",
+            workflow: "w",
+            agentId: "a",
+            schemaVersion: 1,
+            meetingRoundId: "meeting-1",
+            meetingType: "hypothesis_review",
+            mode: "generation",
+            scopeHash: "scope",
+            participants: ["agent-1"],
+            status: "open",
+            startedAt: "2026-08-19T01:00:00Z",
+            linkedChatRoomId: "room-1",
+          }}
+        />,
+      );
+    });
+    const failedCard = container.querySelector('[data-failed="true"]');
+    expect(failedCard).not.toBeNull();
+    expect(failedCard?.textContent).toContain("Agent 发言失败 · 模型连接错误");
+    const details = failedCard?.querySelector("details");
+    expect(details?.textContent).toContain("技术详情");
+    expect(failedCard?.textContent).toContain("litellm.InternalServerError");
+  });
+
+  it("keeps completed speech rendered as-is", () => {
+    act(() => {
+      root.render(
+        <MeetingRoundDisplay
+          compact
+          messages={[
+            {
+              messageId: "m-2",
+              agentId: "agent-1",
+              status: "completed",
+              content: "本轮评审确认 cand-a 机制证据最完整。",
+            },
+          ]}
+          round={{
+            program: "p",
+            theme: "t",
+            campaign: "c",
+            question: "Q-01",
+            branch: "b",
+            workflow: "w",
+            agentId: "a",
+            schemaVersion: 1,
+            meetingRoundId: "meeting-1",
+            meetingType: "hypothesis_review",
+            mode: "generation",
+            scopeHash: "scope",
+            participants: ["agent-1"],
+            status: "open",
+            startedAt: "2026-08-19T01:00:00Z",
+            linkedChatRoomId: "room-1",
+          }}
+        />,
+      );
+    });
+    expect(container.querySelector('[data-failed="true"]')).toBeNull();
+    expect(container.textContent).toContain("本轮评审确认 cand-a 机制证据最完整。");
+  });
+});

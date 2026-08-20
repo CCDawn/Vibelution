@@ -81,7 +81,14 @@ export function ResearchProcessInspectorPane(props: {
     return <ChallengeMvpProgressPanel teamId={scope.teamId} onOpenQuestion={(questionId) => actions.replaceParams({ panel: "question", questionId })} />;
   }
   if (scope.panel === "question") {
-    if (!scope.questionId) return <ResearchCenteredEmptyState title="单题验收" />;
+    if (!scope.questionId) {
+      return (
+        <ResearchCenteredEmptyState
+          title="单题验收"
+          hint="先在「题目进度」中选择一道题，这里会显示该题的假说、证据与验收状态。"
+        />
+      );
+    }
     return (
       <div className={styles.question}>
         <ChallengeQuestionDetailPanel
