@@ -81,12 +81,15 @@ export async function layoutTwoLevel(
   const outerGraph = buildOuterElkGraph(input, stageBoxes, edgeSpecs, layoutMode);
   const outer = await layoutOuter(outerGraph, engine);
 
-  // Port sides / target handles (same semantics as before).
+  // Port sides / handles (same semantics as before). Serpentine auto-layout
+  // may later rewrite the side of an existing handle to the facing side.
   const portSidesByNode = buildPortSides(input, bundle);
+  const sourceHandleByEdge = new Map<string, string>();
   const targetHandleByEdge = new Map<string, string>();
   for (const edge of input.edges) {
     const assignment = bundle.byEdgeId.get(edge.edgeId);
     if (assignment) {
+      sourceHandleByEdge.set(edge.edgeId, edge.sourceHandle ?? assignment.sourcePortId);
       targetHandleByEdge.set(edge.edgeId, shortNameOfTargetPort(assignment.targetPortId));
     }
   }
@@ -98,6 +101,7 @@ export async function layoutTwoLevel(
     outer,
     stageBoxes,
     portSidesByNode,
+    sourceHandleByEdge,
     targetHandleByEdge,
     layoutMode,
   });
