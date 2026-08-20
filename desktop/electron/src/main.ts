@@ -40,6 +40,7 @@ import {
   isWorkbenchCloseControlFetchFailure,
   shouldNotifyForceStopControlFailure
 } from "./lifecycle/workbenchCloseFailOpen.js";
+import { appendSupervisorEventFallback } from "./lifecycle/supervisorEventFallback.js";
 import { waitForWorkbenchBackendSettledForWindowClose } from "./lifecycle/workbenchBackendCloseReadiness.js";
 import { readRuntimeManagerLauncherStatusSummary } from "./lifecycle/runtimeManagerStatusSnapshot.js";
 import {
@@ -967,13 +968,46 @@ async function recordElectronSupervisorEvent(
   event: RuntimeSceneElectronEvent
 ): Promise<void> {
   if (bootstrap === null) {
+    recordSupervisorEventFallbackLocally(event);
     return;
   }
   try {
     const bridge = await resolveRuntimeSceneBridge(bootstrap);
     await bridge.record(event);
   } catch (error: unknown) {
+    recordSupervisorEventFallbackLocally(event, error);
     console.warn(error instanceof Error ? error.message : String(error));
+  }
+}
+
+let supervisorEventFallbackWorkspaceRoot: string | null | undefined;
+
+function recordSupervisorEventFallbackLocally(
+  event: RuntimeSceneElectronEvent,
+  error?: unknown
+): void {
+  if (supervisorEventFallbackWorkspaceRoot === undefined) {
+    try {
+      supervisorEventFallbackWorkspaceRoot = createDesktopPathsForApp().workspaceRoot;
+    } catch {
+      supervisorEventFallbackWorkspaceRoot = null;
+    }
+  }
+  const workspaceRoot = supervisorEventFallbackWorkspaceRoot;
+  if (workspaceRoot === null) {
+    console.warn(`supervisor event ${event.eventCode} lost: no workspace root for local fallback`);
+    return;
+  }
+  const recorded = appendSupervisorEventFallback(workspaceRoot, {
+    eventCode: event.eventCode,
+    message: event.message,
+    fields: {
+      ...event.fields,
+      ...(error === undefined ? {} : { fallbackReason: error instanceof Error ? error.message : String(error) })
+    }
+  });
+  if (!recorded) {
+    console.warn(`supervisor event ${event.eventCode} lost: local fallback write failed`);
   }
 }
 
@@ -1227,6 +1261,20 @@ async function acknowledgeTransactionalWorkbenchClose(
 ): Promise<void> {
   const pending = pendingWorkbenchCloseAck;
   if (pending === null || bootstrap === null) {
+    if (pending === null) {
+      // A workbench window closed outside any close transaction (shutdown
+      // approved, authorized leftover, or a bypassed intercept). The backend
+      // keeps running in that case and Launcher will sit on 部分运行 with no
+      // trace unless this is recorded.
+      await recordElectronSupervisorEvent(bootstrap, {
+        eventCode: "electron.workbench_close.untracked_window_closed",
+        message: "Workbench window closed without a close transaction; the backend may keep running.",
+        fields: {
+          shutdownApproved,
+          workspaceRoot: paths.workspaceRoot
+        }
+      });
+    }
     return;
   }
   const transaction = mainWorkbenchCloseStore.get(pending.closeId);
@@ -1310,6 +1358,11 @@ async function handleTransactionalWorkbenchCloseFailure(
   }
   const retry = await confirmWorkbenchCloseRetry(provider, message);
   if (!retry) {
+    await recordElectronSupervisorEvent(bootstrap, {
+      eventCode: "electron.workbench_close.fail_open_user_declined",
+      message: "Workbench close transaction failed and retry was declined; closing the window while the backend may keep running.",
+      fields: { error: message.slice(0, 300), workspaceRoot: paths.workspaceRoot }
+    });
     await provider.approveWorkbenchCloseOnce();
     return;
   }
