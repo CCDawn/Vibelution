@@ -56,7 +56,7 @@ const EXPERIMENTS: ExperimentOption[] = [
   {
     questionId: "SCI-002",
     title: SCI_TITLE,
-    hypothesis: "尚未选择假说",
+    hypothesis: "假说待生成",
     label: "SCI-002 · 资料寻找 · 0/16 · 准备中",
     description: SCI_TITLE,
   },
@@ -76,7 +76,7 @@ const SCENES: Scene[] = [
     teamName: "挑战杯ai科研团队",
     questionId: "SCI-002",
     title: SCI_TITLE,
-    hypothesis: "尚未选择假说",
+    hypothesis: "假说待生成",
     runStatus: "准备中",
     stream: "实时",
     nextAction: "资料寻找",
@@ -145,7 +145,7 @@ const PANELS: Array<{ id: PanelId; label: string }> = [
 ];
 
 function hypothesisSwitchLabel(questionId: string, hypothesis: string): string {
-  return `${questionId} · ${hypothesis.trim() || "尚未选择假说"}`;
+  return `${questionId} · ${hypothesis.trim() || "假说待生成"}`;
 }
 
 function statusTone(status: string): "neutral" | "accent" | "warning" | "success" | "danger" {

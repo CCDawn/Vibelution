@@ -2073,3 +2073,163 @@ def test_runtime_scene_startup_trace_reads_vbs_logs_with_control_chars(tmp_path,
     assert desktop_vbs_step["status"] == "recorded"
     assert desktop_vbs_step["timestamp"] == "2026-05-18T12:00:00Z"
     assert desktop_vbs_step["eventCode"] == "desktop_entry_vbs.started"
+
+
+def test_runtime_scene_startup_trace_ignores_stale_raw_json_outside_scene_window(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    scene_dir = _seed_scene(
+        tmp_path,
+        "scene-stale-launcher-control",
+        [
+            {
+                "runtime_scene_id": "scene-stale-launcher-control",
+                "ts": "2026-08-20T06:03:41Z",
+                "seq": 1,
+                "component": "backend",
+                "phase": "health",
+                "event_code": "backend.health.succeeded",
+                "level": "info",
+                "outcome": "succeeded",
+                "message": "Backend passed health checks.",
+                "fields": {},
+            }
+        ],
+        status="running",
+    )
+    manifest = json.loads((scene_dir / "manifest.json").read_text(encoding="utf-8"))
+    manifest["started_at"] = "2026-08-20T06:03:40Z"
+    manifest["ended_at"] = ""
+    (scene_dir / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+    (scene_dir / "raw" / "launcher-control.log").write_text(
+        '{"ts":"2026-07-11T02:00:00Z","level":"info","event":"launcher.python_runtime.selected","message":"Selected Python runtime for launcher-managed work."}\n',
+        encoding="utf-8",
+    )
+    (scene_dir / "raw" / "desktop-entry-vbs.log").unlink()
+    (scene_dir / "raw" / "desktop-entry.log").unlink()
+
+    detail = runtime_scene_service.get_runtime_scene_detail("scene-stale-launcher-control")
+
+    launcher_step = next(
+        step for step in detail["packageDiagnosis"]["startupTrace"]["steps"] if step["id"] == "launcher_control"
+    )
+    assert launcher_step["status"] == "missing"
+    assert launcher_step["timestamp"] == ""
+    assert launcher_step["eventCode"] == ""
+    assert "launcher_control" in detail["packageDiagnosis"]["startupTrace"]["missingStepIds"]
+
+
+def test_runtime_scene_startup_trace_prefers_in_window_bracket_over_stale_json(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    scene_dir = _seed_scene(
+        tmp_path,
+        "scene-bracket-launcher-control",
+        [
+            {
+                "runtime_scene_id": "scene-bracket-launcher-control",
+                "ts": "2026-08-20T06:03:41Z",
+                "seq": 1,
+                "component": "backend",
+                "phase": "health",
+                "event_code": "backend.health.succeeded",
+                "level": "info",
+                "outcome": "succeeded",
+                "message": "Backend passed health checks.",
+                "fields": {},
+            }
+        ],
+        status="running",
+    )
+    manifest = json.loads((scene_dir / "manifest.json").read_text(encoding="utf-8"))
+    manifest["started_at"] = "2026-08-20T06:03:40Z"
+    manifest["ended_at"] = ""
+    (scene_dir / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+    (scene_dir / "raw" / "launcher-control.log").write_text(
+        '{"ts":"2026-07-11T02:00:00Z","level":"info","event":"launcher.python_runtime.selected","message":"stale runtime"}\n'
+        "[2026-08-20T06:03:46Z] launcher.settings.startup.updated settings saved\n",
+        encoding="utf-8",
+    )
+
+    detail = runtime_scene_service.get_runtime_scene_detail("scene-bracket-launcher-control")
+
+    launcher_step = next(
+        step for step in detail["packageDiagnosis"]["startupTrace"]["steps"] if step["id"] == "launcher_control"
+    )
+    assert launcher_step["status"] == "recorded"
+    assert launcher_step["timestamp"] == "2026-08-20T06:03:46Z"
+    assert launcher_step["eventCode"] == "launcher.settings.startup.updated"
+    assert launcher_step["evidencePath"] == "raw/launcher-control.log"
+
+
+def test_runtime_scene_startup_trace_skips_optional_steps_for_running_electron(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    scene_dir = _seed_scene(
+        tmp_path,
+        "scene-electron-ready",
+        [
+            {
+                "runtime_scene_id": "scene-electron-ready",
+                "ts": "2026-08-20T06:03:41Z",
+                "seq": 1,
+                "component": "launcher",
+                "phase": "session",
+                "event_code": "runtime.scene.created",
+                "level": "info",
+                "outcome": "started",
+                "message": "Created runtime scene bundle.",
+                "fields": {},
+            },
+            {
+                "runtime_scene_id": "scene-electron-ready",
+                "ts": "2026-08-20T06:03:50Z",
+                "seq": 2,
+                "component": "backend",
+                "phase": "health",
+                "event_code": "backend.lifespan.ready_to_serve",
+                "level": "info",
+                "outcome": "succeeded",
+                "message": "Backend ready to serve.",
+                "fields": {},
+            },
+            {
+                "runtime_scene_id": "scene-electron-ready",
+                "ts": "2026-08-20T06:03:55Z",
+                "seq": 3,
+                "component": "browser",
+                "phase": "startup",
+                "event_code": "workbench.open.verification_succeeded",
+                "level": "info",
+                "outcome": "succeeded",
+                "message": "Workbench open verification succeeded.",
+                "fields": {},
+            },
+        ],
+        status="running",
+    )
+    manifest = json.loads((scene_dir / "manifest.json").read_text(encoding="utf-8"))
+    manifest["started_at"] = "2026-08-20T06:03:40Z"
+    manifest["ended_at"] = ""
+    (scene_dir / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+    (scene_dir / "raw" / "desktop-entry-vbs.log").unlink()
+    (scene_dir / "raw" / "desktop-entry.log").unlink()
+    (scene_dir / "raw" / "launcher-control.log").write_text(
+        "[2026-08-20T06:03:46Z] launcher.settings.startup.updated settings saved\n",
+        encoding="utf-8",
+    )
+
+    detail = runtime_scene_service.get_runtime_scene_detail("scene-electron-ready")
+
+    diagnosis = detail["packageDiagnosis"]
+    startup = diagnosis["startupTrace"]
+    steps = {step["id"]: step for step in startup["steps"]}
+    assert steps["desktop_entry_vbs"]["status"] == "skipped"
+    assert steps["desktop_entry"]["status"] == "skipped"
+    assert steps["frontend"]["status"] == "skipped"
+    assert steps["backend_dependencies"]["status"] == "skipped"
+    assert steps["launcher_control"]["status"] == "recorded"
+    assert steps["backend_start"]["status"] == "recorded"
+    assert steps["browser"]["status"] == "recorded"
+    assert steps["supervisor"]["status"] == "recorded"
+    assert steps["ready"]["status"] == "recorded"
+    assert startup["missingStepIds"] == []
+    assert startup["summary"] == "启动流程 10/10，状态 running。"
+    assert "startupTrace.missingStepIds" not in diagnosis["agentNextStep"]

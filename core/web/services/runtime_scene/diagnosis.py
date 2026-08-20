@@ -10,9 +10,15 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+_STARTUP_BRACKET_LOG = re.compile(
+    r"^\[(?P<ts>[^\]]+)\]\s+(?P<event>[A-Za-z0-9_.]+)(?:\s+(?P<rest>.*))?$"
+)
+STARTUP_TRACE_PRE_START_SKEW_SECONDS = 120.0
 
 
 def _service():
@@ -44,7 +50,8 @@ def _count_issue_signals(signals: list[dict[str, Any]], severity: str) -> int:
 def _first_event_by_code(events: list[dict], event_codes: set[str]) -> dict[str, Any] | None:
     s = _service()
     for event in events:
-        if str(event.get("eventCode") or "").strip() in event_codes:
+        code = str(event.get("eventCode") or event.get("event_code") or "").strip()
+        if code in event_codes:
             return event
     return None
 
@@ -123,12 +130,45 @@ def _parse_startup_raw_json_line(text: str) -> dict[str, Any] | None:
     except json.JSONDecodeError:
         sanitized = "".join(char for char in text if char >= " " or char in "\t\r\n")
         if sanitized == text:
-            return None
+            return s._parse_startup_bracket_log_line(text)
         try:
             payload = json.loads(sanitized)
         except json.JSONDecodeError:
-            return None
-    return payload if isinstance(payload, dict) else None
+            return s._parse_startup_bracket_log_line(text)
+    return payload if isinstance(payload, dict) else s._parse_startup_bracket_log_line(text)
+
+
+def _parse_startup_bracket_log_line(text: str) -> dict[str, Any] | None:
+    match = _STARTUP_BRACKET_LOG.match(str(text or "").strip())
+    if match is None:
+        return None
+    rest = str(match.group("rest") or "").strip()
+    return {
+        "ts": str(match.group("ts") or "").strip(),
+        "event": str(match.group("event") or "").strip(),
+        "message": rest or str(text or "").strip(),
+    }
+
+
+def _startup_trace_window(manifest: dict[str, Any]) -> tuple[float | None, float | None]:
+    s = _service()
+    started = s._runtime_scene_event_epoch_seconds({"ts": manifest.get("started_at")})
+    ended = s._runtime_scene_event_epoch_seconds({"ts": manifest.get("ended_at")})
+    return started, ended
+
+
+def _startup_timestamp_in_window(payload: dict[str, Any], started: float | None, ended: float | None) -> bool:
+    s = _service()
+    epoch = s._runtime_scene_event_epoch_seconds(payload)
+    if epoch is None:
+        # Scene-local structured lines without a timestamp still count; stale
+        # live-tailed JSON always carries an older ts and is filtered below.
+        return True
+    if started is not None and epoch < started - STARTUP_TRACE_PRE_START_SKEW_SECONDS:
+        return False
+    if ended is not None and epoch > ended + STARTUP_TRACE_PRE_START_SKEW_SECONDS:
+        return False
+    return True
 
 
 def _runtime_scene_agent_brief(diagnosis: dict[str, Any]) -> dict[str, Any]:
@@ -565,6 +605,7 @@ def _runtime_scene_diagnosis_next_step(
     recommended_order: list[str],
     key_entries: list[dict[str, str]],
     startup_trace: dict[str, Any],
+    scene_status: str = "",
 ) -> str:
     s = _service()
     first_path = recommended_order[0] if recommended_order else key_entries[0]["path"] if key_entries else s.SUMMARY_PATH
@@ -612,7 +653,7 @@ def _runtime_scene_diagnosis_next_step(
             f"再对照主历史簇 {cluster} 与后续恢复事件，避免把已恢复错误当成当前阻塞。"
         )
     missing = startup_trace.get("missingStepIds", []) if isinstance(startup_trace, dict) else []
-    if missing:
+    if missing and (severity in {"error", "warning"} or scene_status != "running"):
         return (
             f"先读 logs/runtime_scenes/{package_anchor}/{first_path}，再对照 startupTrace.missingStepIds "
             "确认启动链路缺口是否属于日志系统问题。"
@@ -756,7 +797,10 @@ def _runtime_scene_event_epoch_seconds(event: dict[str, Any]) -> float | None:
         return None
     try:
         normalized = timestamp.replace("Z", "+00:00")
-        return datetime.fromisoformat(normalized).timestamp()
+        parsed = datetime.fromisoformat(normalized)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.timestamp()
     except ValueError:
         return None
 
@@ -1598,6 +1642,7 @@ def _runtime_scene_package_diagnosis(
             recommended_order=recommended_order,
             key_entries=key_entries,
             startup_trace=startup_trace,
+            scene_status=s._runtime_scene_status(manifest),
         ),
         "issueState": issue_state,
         "firstSignal": s._runtime_scene_diagnosis_signal_payload(first_signal),
@@ -1990,23 +2035,36 @@ def _runtime_scene_startup_trace(
     timeline: list[dict],
 ) -> dict[str, Any]:
     s = _service()
+    window_start, window_end = s._startup_trace_window(manifest)
     steps: list[dict[str, Any]] = []
-    missing: list[str] = []
     for spec in s.STARTUP_TRACE_STEPS:
-        event = s._first_event_by_code(timeline, spec["eventCodes"])
+        event_codes = spec["eventCodes"]
+        event = s._first_event_by_code(timeline, event_codes)
         evidence_path = s._startup_step_evidence_path(scene_dir, event, spec["fallbackPaths"])
-        raw_event = event or s._startup_step_raw_event(scene_dir, evidence_path, spec["eventCodes"])
-        timestamp = s._startup_step_timestamp(raw_event)
+        raw_event, saw_json = (None, False)
+        if event is None:
+            raw_event, saw_json = s._scan_startup_raw_evidence(
+                scene_dir,
+                evidence_path,
+                event_codes,
+                window_start=window_start,
+                window_end=window_end,
+            )
+        matched = event or raw_event
+        timestamp = s._startup_step_timestamp(matched)
         event_code = str(
-            (raw_event or {}).get("eventCode")
-            or (raw_event or {}).get("event_code")
-            or (raw_event or {}).get("event")
+            (matched or {}).get("eventCode")
+            or (matched or {}).get("event_code")
+            or (matched or {}).get("event")
             or ""
         )
-        message = s._truncate_text(str((raw_event or {}).get("message") or (raw_event or {}).get("details") or ""), 240)
-        status = "recorded" if event or evidence_path else "missing"
-        if status == "missing":
-            missing.append(str(spec["id"]))
+        message = s._truncate_text(str((matched or {}).get("message") or (matched or {}).get("details") or ""), 240)
+        if event or raw_event:
+            status = "recorded"
+        elif evidence_path and not (str(evidence_path).startswith("raw/") and saw_json):
+            status = "recorded"
+        else:
+            status = "missing"
         steps.append(
             {
                 "id": str(spec["id"]),
@@ -2015,9 +2073,28 @@ def _runtime_scene_startup_trace(
                 "timestamp": timestamp,
                 "eventCode": event_code,
                 "message": message,
-                "evidencePath": evidence_path,
+                "evidencePath": evidence_path if status == "recorded" else "",
             }
         )
+
+    scene_status = s._runtime_scene_status(manifest)
+    ready_event_recorded = any(
+        str(step.get("id") or "") == "ready"
+        and step.get("status") == "recorded"
+        and str(step.get("eventCode") or "").strip()
+        for step in steps
+    )
+    if scene_status == "running" or ready_event_recorded:
+        optional_ids = {
+            str(spec.get("id") or "")
+            for spec in s.STARTUP_TRACE_STEPS
+            if spec.get("optionalWhenReady")
+        }
+        for step in steps:
+            if step.get("status") == "missing" and str(step.get("id") or "") in optional_ids:
+                step["status"] = "skipped"
+                step["evidencePath"] = ""
+    missing = [str(step.get("id") or "") for step in steps if step.get("status") == "missing"]
 
     return {
         "schemaVersion": 1,
@@ -2033,7 +2110,7 @@ def _runtime_scene_startup_trace_summary(
     missing: list[str],
 ) -> str:
     s = _service()
-    recorded = len([step for step in steps if step.get("status") == "recorded"])
+    recorded = len([step for step in steps if step.get("status") in {"recorded", "skipped"}])
     total = len(steps)
     status = s._runtime_scene_status(manifest)
     if not missing:
@@ -2204,14 +2281,33 @@ def _startup_step_raw_event(
     evidence_path: str,
     event_codes: set[str],
 ) -> dict[str, Any] | None:
+    event, _saw_structured = _scan_startup_raw_evidence(
+        scene_dir,
+        evidence_path,
+        event_codes,
+        window_start=None,
+        window_end=None,
+    )
+    return event
+
+
+def _scan_startup_raw_evidence(
+    scene_dir: Path,
+    evidence_path: str,
+    event_codes: set[str],
+    *,
+    window_start: float | None,
+    window_end: float | None,
+) -> tuple[dict[str, Any] | None, bool]:
     s = _service()
-    if not evidence_path.startswith("raw/"):
-        return None
+    if not str(evidence_path or "").startswith("raw/"):
+        return None, False
     try:
         lines = s._resolve_scene_child(scene_dir, evidence_path).read_text(encoding="utf-8-sig").splitlines()
     except OSError:
-        return None
-    fallback: dict[str, Any] | None = None
+        return None, False
+    saw_structured = False
+    matched: dict[str, Any] | None = None
     for line in lines:
         text = str(line or "").strip()
         if not text:
@@ -2219,12 +2315,16 @@ def _startup_step_raw_event(
         payload = s._parse_startup_raw_json_line(text)
         if not isinstance(payload, dict):
             continue
-        if fallback is None:
-            fallback = payload
-        candidate_code = str(payload.get("event") or payload.get("event_code") or payload.get("eventCode") or "").strip()
-        if candidate_code and candidate_code in event_codes:
-            return payload
-    return fallback
+        saw_structured = True
+        candidate_code = str(
+            payload.get("event") or payload.get("event_code") or payload.get("eventCode") or ""
+        ).strip()
+        if not candidate_code or candidate_code not in event_codes:
+            continue
+        if s._startup_timestamp_in_window(payload, window_start, window_end):
+            matched = payload
+            break
+    return matched, saw_structured
 
 
 def _startup_step_timestamp(event: dict[str, Any] | None) -> str:

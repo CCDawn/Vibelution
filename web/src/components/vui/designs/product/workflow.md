@@ -182,12 +182,12 @@ const graph = composeHypothesisFirstGraph(base, region, {
 
 画布拓扑仍是一张图。顶栏切换器列出 **launch-options 全量题目目录**（125 题），不只是已开始的实例：包含无 checkpoint 的题与 `cancelled` checkpoint 的题，目录顺序稳定、当前题置顶。
 
-- 选项来自 `launch-options.questions[]`（题目最新 workflow run checkpoint）。文案：`SCI-096 · 假说摘要`（未选则「尚未选择假说」）；description = 题目标题 + 可读的 checkpoint 可用性/状态/进度（`当前节点 · 完成/总数 · 状态文案`），无 checkpoint 的题明确写「无 checkpoint」。
-- 触发器只显示紧凑摘要：**未选显示「尚未选择假说」，已选统一显示「已选 N 个假说」**，一律不显示一个或两个原始 candidate ID（即使候选 ID 超长也不外露）；题号前缀仍保留（`SCI-096 · 已选 1 个假说`）。题号、题目标题、checkpoint 节点/进度/状态完整保留在下拉选项的 label 与 description 中，全部 125 题的目录行为不变。
+- 选项来自 `launch-options.questions[]`（题目最新 workflow run checkpoint）。文案：`SCI-096 · 假说摘要`（未选则「假说待生成」）；description = 题目标题 + 可读的 checkpoint 可用性/状态/进度（`当前节点 · 完成/总数 · 状态文案`），无 checkpoint 的题明确写「无 checkpoint」。
+- 触发器只显示紧凑摘要：**未选显示「假说待生成」；已选后按链路状态显示「N 条假说待评审 / N 条假说评审中 · 第 K 轮 / N 条假说已收敛」**，一律不显示一个或两个原始 candidate ID（即使候选 ID 超长也不外露）；题号前缀仍保留（`SCI-096 · 1 条假说待评审`）。题号、题目标题、checkpoint 节点/进度/状态完整保留在下拉选项的 label 与 description 中，全部 125 题的目录行为不变。
 - 切换器宽度有明确上限（桌面 `md:min-w-[12rem] md:max-w-[24rem]`，窄屏 `max-w-[20rem]`），不再用 `1fr` 占满工具栏剩余空间；工具栏为 `flex flex-wrap`，空间不足时布局安全换行，右侧「查看详情」与主操作（前往/创建运行）永远保留、不被挤出。
 - 选中**有 checkpoint** 的题即写入 URL：`questionId` + `runId` + `node=` 下一步模型算出的当前任务（生成讨论 / 选择 / 已有搜集运行），**不是**盲用 `checkpoint.currentNodeId` 的 `source_finding`。
 - 选中**无 checkpoint** 的题写入无运行 patch：设置 `questionId`、清除旧 `runId`/`node`、`panel=launch` 打开预填该题的启动面板，**不自动创建运行**。
-- 顶栏常驻当前题号、标题与假说摘要（未选则写「尚未选择假说 / 尚未选择实验」）。切换器 aria 为「切换实验」。假说正文仍在赛题详情，不把 125 题假说陈述预拉进切换器。
+- 顶栏常驻当前题号、标题与假说摘要（未选则写「假说待生成 / 尚未选择实验」）。切换器 aria 为「切换实验」。假说正文仍在赛题详情，不把 125 题假说陈述预拉进切换器。
 - 有 run 时主按钮是「前往…」当前任务；「创建运行 / 新建运行」降为次要并仍打开 launch 面板。
 
 ### 渲染契约补丁（2026-08-19 修复）

@@ -21,7 +21,7 @@ describe("research workflow toolbar preview", () => {
     expect(markup).toContain("下一步：资料寻找");
     const proposedStart = markup.indexOf('data-testid="proposed-toolbar"');
     const proposedToolbar = markup.slice(proposedStart, proposedStart + 8000);
-    expect(proposedToolbar).toContain("SCI-002 · 尚未选择假说");
+    expect(proposedToolbar).toContain("SCI-002 · 假说待生成");
     expect(proposedToolbar).toContain('data-testid="proposed-status"');
     expect(proposedToolbar).toContain("准备中");
     expect(proposedToolbar).not.toContain("rwt-proposed-identity");

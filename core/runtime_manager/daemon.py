@@ -2799,17 +2799,37 @@ class RuntimeManagerDaemon:
         lifecycle_consistency = str(workbench.get("lifecycleConsistency") or "").strip()
         phase = str(workbench.get("phase") or "").strip()
         active_command_id = str((state.get("command") or {}).get("activeCommandId") or "").strip()
-        if (
-            desired_state != "open"
-            or observed_state != "partial"
-            or lifecycle_consistency != "browser_missing"
-            or phase == "failed"
-            or active_command_id
-            or _electron_session_owns_workbench_window(state)
-        ):
+        browser_missing_episode = (
+            desired_state == "open"
+            and observed_state == "partial"
+            and lifecycle_consistency == "browser_missing"
+            and phase != "failed"
+            and not active_command_id
+        )
+        electron_owned = _electron_session_owns_workbench_window(state)
+        if not browser_missing_episode or electron_owned:
+            # The electron exclusion used to be silent, which left Launcher stuck
+            # on 部分运行 with no trace of why the backend was never reaped.
+            if browser_missing_episode and electron_owned:
+                if not state.get("browserMissingSkipNotified"):
+                    state["browserMissingSkipNotified"] = True
+                    _append_event(
+                        "workbench.auto_close.browser_missing_skipped",
+                        {
+                            "reason": "electron_window_owner",
+                            "desiredState": desired_state,
+                            "observedState": observed_state,
+                            "lifecycleConsistency": lifecycle_consistency,
+                            "windowProvider": str(workbench.get("windowProvider") or ""),
+                            "desktopSessionId": str(workbench.get("desktopSessionId") or ""),
+                        },
+                    )
+            else:
+                state.pop("browserMissingSkipNotified", None)
             if "browserMissingSince" in state:
                 state.pop("browserMissingSince", None)
             return state
+        state.pop("browserMissingSkipNotified", None)
 
         browser_missing_since = state.get("browserMissingSince")
         if not browser_missing_since:
@@ -3445,6 +3465,10 @@ class RuntimeManagerDaemon:
         observed_state = str(observation.get("observedState") or "closed").strip() or "closed"
         session_role = str(observation.get("sessionRole") or "workbench").strip() or "workbench"
         phase = str(workbench.get("phase") or "steady").strip() or "steady"
+        # Idle-reconcile state flips used to be write-only: the user closing the
+        # workbench window left no event, so a stuck 部分运行 had no timeline.
+        previous_observed_state = str(workbench.get("observedState") or "").strip()
+        previous_lifecycle_consistency = str(workbench.get("lifecycleConsistency") or "").strip()
         command_state = state.setdefault("command", {})
         active_command = str(command_state.get("activeCommandId") or "").strip()
         if active_command and _command_result_is_completed(active_command):
@@ -3643,6 +3667,29 @@ class RuntimeManagerDaemon:
                 ),
             }
         )
+        next_lifecycle_consistency = str(consistency_fields["lifecycleConsistency"])
+        if (
+            (previous_observed_state and previous_observed_state != observed_state)
+            or (previous_lifecycle_consistency and previous_lifecycle_consistency != next_lifecycle_consistency)
+        ):
+            _append_event(
+                "workbench.observed_state_changed",
+                {
+                    "previousObservedState": previous_observed_state,
+                    "observedState": observed_state,
+                    "previousLifecycleConsistency": previous_lifecycle_consistency,
+                    "lifecycleConsistency": next_lifecycle_consistency,
+                    "desiredState": desired_state,
+                    "phase": phase,
+                    "backendAlive": bool(observation.get("backendAlive")),
+                    "backendHealthy": bool(observation.get("backendHealthy")),
+                    "backendObserved": bool(observation.get("backendObserved")),
+                    "backendPid": int(observation.get("backendPid") or 0),
+                    "backendPort": int(observation.get("backendPort") or 0),
+                    "browserWindowAlive": bool(observation.get("browserWindowAlive")),
+                    "windowProvider": str(observation.get("windowProvider") or ""),
+                },
+            )
         previous_runtime_state = str(state.get("runtimeState") or "").strip().lower()
         state["runtimeState"] = "stopping" if previous_runtime_state == "stopping" else "running"
         state["managerPid"] = self._pid

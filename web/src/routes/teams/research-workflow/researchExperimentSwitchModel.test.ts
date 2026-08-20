@@ -83,7 +83,7 @@ describe("researchExperimentSwitchModel", () => {
     });
 
     expect(options.map((item) => item.questionId)).toEqual(["SCI-001", "SCI-096", "SCI-003"]);
-    expect(options[1].label).toBe("SCI-096 · 尚未选择假说");
+    expect(options[1].label).toBe("SCI-096 · 假说待生成");
     expect(options[1].label).not.toContain("知识包交接");
     expect(options[1].label).not.toContain("4/16");
     expect(options[1].label).not.toContain("等待确认");
@@ -218,7 +218,7 @@ describe("researchExperimentSwitchModel", () => {
     });
 
     expect(options.map((item) => item.questionId)).toEqual(["SCI-003", "SCI-001", "SCI-096", "SCI-002"]);
-    expect(options[0].label).toBe("SCI-003 · 已选 1 个假说");
+    expect(options[0].label).toBe("SCI-003 · 1 条假说待评审");
   });
 
   it("keeps the current run visible even if launch-options omitted it", () => {
@@ -239,15 +239,15 @@ describe("researchExperimentSwitchModel", () => {
       runId: "run-current",
       currentNodeId: "source_finding",
     });
-    expect(options[0].label).toBe("SCI-091 · 已选 1 个假说");
+    expect(options[0].label).toBe("SCI-091 · 1 条假说待评审");
     expect(options[0].label).not.toContain("资料寻找");
   });
 
   it("surfaces question identity and hypothesis count for chrome, not a run id", () => {
     expect(formatHypothesisSummary(null, "")).toBe("");
-    expect(formatHypothesisSummary([], "SCI-096")).toBe("尚未选择假说");
-    expect(formatHypothesisSummary(["hyp-a", "hyp-b"], "SCI-096")).toBe("已选 2 个假说");
-    expect(formatHypothesisSummary(["a", "b", "c"], "SCI-096")).toBe("已选 3 个假说");
+    expect(formatHypothesisSummary([], "SCI-096")).toBe("假说待生成");
+    expect(formatHypothesisSummary(["hyp-a", "hyp-b"], "SCI-096")).toBe("2 条假说待评审");
+    expect(formatHypothesisSummary(["a", "b", "c"], "SCI-096")).toBe("3 条假说待评审");
 
     const chrome = buildExperimentChromeIdentity({
       questionId: "sci-096",
@@ -256,23 +256,23 @@ describe("researchExperimentSwitchModel", () => {
     });
     expect(chrome).toMatchObject({
       questionId: "SCI-096",
-      hypothesisSummary: "已选 1 个假说",
+      hypothesisSummary: "1 条假说待评审",
     });
     expect(chrome?.title).not.toContain("run-");
   });
 
   it("never renders raw candidate ids, even for long or duplicate ids", () => {
     const longId = `candidate-${"a".repeat(200)}`;
-    expect(formatHypothesisSummary([longId], "SCI-096")).toBe("已选 1 个假说");
-    expect(formatHypothesisSummary(["hyp-a", longId], "SCI-096")).toBe("已选 2 个假说");
-    expect(formatHypothesisSummary(["hyp-a", "hyp-a"], "SCI-096")).toBe("已选 2 个假说");
+    expect(formatHypothesisSummary([longId], "SCI-096")).toBe("1 条假说待评审");
+    expect(formatHypothesisSummary(["hyp-a", longId], "SCI-096")).toBe("2 条假说待评审");
+    expect(formatHypothesisSummary(["hyp-a", "hyp-a"], "SCI-096")).toBe("2 条假说待评审");
 
     const chrome = buildExperimentChromeIdentity({
       questionId: "sci-096",
       title: "What are the coding principles embedded in neuronal spike trains?",
       selectedCandidateIds: [longId],
     });
-    expect(chrome?.hypothesisSummary).toBe("已选 1 个假说");
+    expect(chrome?.hypothesisSummary).toBe("1 条假说待评审");
     expect(chrome?.hypothesisSummary).not.toContain("candidate-");
 
     const options = buildExperimentSwitchOptions({
@@ -284,7 +284,7 @@ describe("researchExperimentSwitchModel", () => {
         selectedCandidateIds: [longId],
       },
     });
-    expect(options[0].label).toBe("SCI-096 · 已选 1 个假说");
+    expect(options[0].label).toBe("SCI-096 · 1 条假说待评审");
     expect(options[0].label).not.toContain("candidate-");
   });
 });
