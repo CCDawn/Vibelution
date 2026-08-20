@@ -238,12 +238,12 @@ describe("ResearchProcessWorkspace", () => {
     expect(rendered.container.querySelector('[role="alert"]')?.textContent).toContain("命令提交被拒绝");
   });
 
-  it("keeps the inspector hidden when the node panel has no selection", async () => {
+  it("keeps the inspector mounted when the node panel has no selection", async () => {
     harness.location.panel = "node";
     const rendered = await renderWorkspace();
     root = rendered.root;
 
-    expect(rendered.container.querySelector('[data-vui="canvas-workbench-inspector"]')).toBeNull();
+    expect(rendered.container.querySelector('[data-vui="canvas-workbench-inspector"]')).not.toBeNull();
   });
 
   it("opens the inspector when the URL deep-links into a node panel", async () => {
