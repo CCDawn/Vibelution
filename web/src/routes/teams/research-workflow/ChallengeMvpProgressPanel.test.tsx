@@ -838,7 +838,7 @@ describe("ChallengeMvpProgressPanel", () => {
 
   it("keeps DEV readiness/fixture/repair controls in the production workbench panel", () => {
     expect(panelSource).not.toContain("import.meta.env.DEV");
-    expect(panelSource).toMatch(/enabled:\s*Boolean\(teamId\.trim\(\)\)/);
+    expect(panelSource).toContain("fetchChallengeCupDevControlSnapshot(teamId)");
     expect(panelSource).toContain('<section className={styles.devControls}');
     expect(panelSource).toContain('data-dev-controls="readiness"');
     expect(panelSource).toContain("data-dev-controls={planId}");
