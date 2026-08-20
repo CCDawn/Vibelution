@@ -34,6 +34,7 @@ vi.mock("@xyflow/react", () => ({
   MarkerType: { ArrowClosed: "arrowclosed" },
   ConnectionLineType: { Step: "step", SmoothStep: "smoothstep", Bezier: "default", Straight: "straight" },
   useViewport: () => ({ x: 0, y: 0, zoom: 1 }),
+  ViewportPortal: ({ children }: { children: unknown }) => children,
   ReactFlow: (props: Record<string, unknown>) => {
     rfCalls.push(props);
     return null;
@@ -410,6 +411,22 @@ describe("ShadcnWorkflowCanvas structure (P1-1)", () => {
       116,
       expect.objectContaining({ zoom: 0.9, duration: 220 }),
     );
+
+    fakeInstance.setCenter.mockClear();
+    const moved = sampleLayoutNodes().map((node) => (
+      node.id === "protocol_design" ? { ...node, x: 400, y: 400 } : node
+    ));
+    vi.mocked(useWorkflowAutoLayout).mockReturnValue(idleLayoutHook(moved));
+    await act(async () => {
+      root.render(
+        <ShadcnWorkflowCanvas
+          graph={sampleGraph()}
+          selectedNodeId="protocol_design"
+          layoutMode="serpentine"
+        />,
+      );
+    });
+    expect(fakeInstance.setCenter).not.toHaveBeenCalled();
 
     await act(async () => {
       root.unmount();

@@ -122,8 +122,20 @@ export function resolveWorkflowManualCardDrag(input: {
   };
 }
 
+/** Flow-space half-extent so portal guides cross the visible canvas at any pan. */
+export const WORKFLOW_HELPER_LINE_SPAN = 100_000;
+
 export function workflowHelperLineToScreen(flowCoord: number, origin: number, zoom: number): number {
   return flowCoord * zoom + origin;
+}
+
+/** Keep helper strokes ~1px on screen after the viewport scale is applied. */
+export function resolveWorkflowHelperOverlayStroke(zoom: number): { strokeWidth: number; dasharray: string } {
+  const safeZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+  return {
+    strokeWidth: 1 / safeZoom,
+    dasharray: `${6 / safeZoom} ${4 / safeZoom}`,
+  };
 }
 
 export function workflowHelperLinesActive(lines: WorkflowHelperLines | null | undefined): boolean {

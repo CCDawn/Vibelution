@@ -702,6 +702,10 @@ function WorkflowCanvasInner({
     ],
   );
 
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
+  const focusableNodeCount = nodes.length;
+
   const obstacleRects = useMemo(() => {
     if (!manualLayoutEnabled) return [] as OrthogonalObstacle[];
     const rects: OrthogonalObstacle[] = [];
@@ -771,9 +775,10 @@ function WorkflowCanvasInner({
     })) {
       return;
     }
-    const node = rf.getNode(selectedNodeId) ?? nodes.find((item) => item.id === selectedNodeId);
+    const currentNodes = nodesRef.current;
+    const node = rf.getNode(selectedNodeId) ?? currentNodes.find((item) => item.id === selectedNodeId);
     if (!node) return;
-    const getNode = (id: string) => rf.getNode(id) ?? nodes.find((item) => item.id === id);
+    const getNode = (id: string) => rf.getNode(id) ?? currentNodes.find((item) => item.id === id);
     const center = resolveWorkflowNodeFocusCenter(node, getNode);
     programmaticFitRef.current = true;
     userMovedViewportRef.current = true;
@@ -784,7 +789,7 @@ function WorkflowCanvasInner({
       programmaticFitRef.current = false;
     });
     lastPannedSelectionRef.current = selectedNodeId;
-  }, [nodes, nodesInitialized, pendingInitialFit, rf, selectedNodeId]);
+  }, [focusableNodeCount, nodesInitialized, pendingInitialFit, rf, selectedNodeId]);
 
   const onNodeClick = useCallback(
     (_event: unknown, node: Node) => {

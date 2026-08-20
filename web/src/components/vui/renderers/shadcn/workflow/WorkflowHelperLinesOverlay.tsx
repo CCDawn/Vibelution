@@ -1,43 +1,51 @@
-import { useViewport } from "@xyflow/react";
+import { ViewportPortal, useViewport } from "@xyflow/react";
 
 import {
-  workflowHelperLineToScreen,
+  WORKFLOW_HELPER_LINE_SPAN,
+  resolveWorkflowHelperOverlayStroke,
   workflowHelperLinesActive,
   type WorkflowHelperLines,
 } from "./workflowHelperLines";
 
 export function WorkflowHelperLinesOverlay({ lines }: { lines: WorkflowHelperLines | null }) {
-  const { x, y, zoom } = useViewport();
+  const { zoom } = useViewport();
   if (!workflowHelperLinesActive(lines) || !lines) return null;
 
+  const stroke = resolveWorkflowHelperOverlayStroke(zoom);
+  const span = WORKFLOW_HELPER_LINE_SPAN;
+
   return (
-    <svg
-      className="pointer-events-none absolute inset-0 z-[5] h-full w-full overflow-visible"
-      data-vui="workflow-helper-lines"
-      aria-hidden
-    >
-      {lines.vertical != null ? (
-        <line
-          x1={workflowHelperLineToScreen(lines.vertical, x, zoom)}
-          x2={workflowHelperLineToScreen(lines.vertical, x, zoom)}
-          y1={0}
-          y2="100%"
-          stroke="var(--accent-cool, #2563eb)"
-          strokeDasharray="6 4"
-          strokeWidth={1}
-        />
-      ) : null}
-      {lines.horizontal != null ? (
-        <line
-          x1={0}
-          x2="100%"
-          y1={workflowHelperLineToScreen(lines.horizontal, y, zoom)}
-          y2={workflowHelperLineToScreen(lines.horizontal, y, zoom)}
-          stroke="var(--accent-cool, #2563eb)"
-          strokeDasharray="6 4"
-          strokeWidth={1}
-        />
-      ) : null}
-    </svg>
+    <ViewportPortal>
+      <svg
+        className="pointer-events-none absolute left-0 top-0 overflow-visible"
+        width={1}
+        height={1}
+        data-vui="workflow-helper-lines"
+        aria-hidden
+      >
+        {lines.vertical != null ? (
+          <line
+            x1={lines.vertical}
+            x2={lines.vertical}
+            y1={-span}
+            y2={span}
+            stroke="var(--accent-cool, #2563eb)"
+            strokeDasharray={stroke.dasharray}
+            strokeWidth={stroke.strokeWidth}
+          />
+        ) : null}
+        {lines.horizontal != null ? (
+          <line
+            x1={-span}
+            x2={span}
+            y1={lines.horizontal}
+            y2={lines.horizontal}
+            stroke="var(--accent-cool, #2563eb)"
+            strokeDasharray={stroke.dasharray}
+            strokeWidth={stroke.strokeWidth}
+          />
+        ) : null}
+      </svg>
+    </ViewportPortal>
   );
 }
