@@ -62,6 +62,7 @@ import {
   readWorkflowManualLayout,
   resolveWorkflowStageLabelPosition,
   snapWorkflowManualPosition,
+  WORKFLOW_MANUAL_LAYOUT_GRID,
   WORKFLOW_STAGE_LABEL_HEIGHT,
   WORKFLOW_STAGE_LABEL_WIDTH,
   type WorkflowManualLayoutScope,
@@ -860,7 +861,7 @@ function WorkflowCanvasInner({
           connectionLineComponent={WorkflowOrthogonalConnectionLine}
           >
           <Background
-            gap={layoutMode === "serpentine" ? 18 : 20}
+            gap={layoutMode === "serpentine" ? WORKFLOW_MANUAL_LAYOUT_GRID : 20}
             size={1}
             color="var(--vui-border, #e4e4e7)"
           />

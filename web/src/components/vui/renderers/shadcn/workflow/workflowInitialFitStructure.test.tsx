@@ -43,6 +43,7 @@ import type { WorkflowLayoutInput, WorkflowLayoutNode } from "../../../product/w
 import { WorkflowCanvasControls } from "./WorkflowCanvasControls";
 import { ShadcnWorkflowCanvas } from "./ShadcnWorkflowCanvas";
 import { WorkflowOrthogonalConnectionLine } from "./WorkflowOrthogonalConnectionLine";
+import { WORKFLOW_MANUAL_LAYOUT_GRID } from "./workflowManualLayout";
 import { useWorkflowAutoLayout } from "./useWorkflowAutoLayout";
 import { useWorkflowInitialFit } from "./useWorkflowInitialFit";
 
@@ -194,6 +195,10 @@ describe("ShadcnWorkflowCanvas structure (P1-1)", () => {
     const rfProps = rfCalls[0];
     expect(rfProps.nodesDraggable).toBe(true);
     expect(rfProps.snapToGrid).toBe(false);
+    const backgroundElement = (Array.isArray(rfProps.children) ? rfProps.children : [rfProps.children]).find(
+      (child: React.ReactElement) => child?.props?.gap != null,
+    );
+    expect(backgroundElement.props.gap).toBe(WORKFLOW_MANUAL_LAYOUT_GRID);
     expect(rfProps.edgesReconnectable).toBe(true);
     expect(rfProps.connectionLineType).toBe("step");
     expect(rfProps.connectionLineComponent).toBe(WorkflowOrthogonalConnectionLine);
@@ -256,6 +261,10 @@ describe("ShadcnWorkflowCanvas structure (P1-1)", () => {
       { id: "stage:experiment", type: "stageRegion" },
       { id: "protocol_design", type: "agentTask" },
     ]);
+    const backgroundElement = (Array.isArray(rfProps.children) ? rfProps.children : [rfProps.children]).find(
+      (child: React.ReactElement) => child?.props?.gap != null,
+    );
+    expect(backgroundElement.props.gap).toBe(20);
 
     await act(async () => {
       root.unmount();
