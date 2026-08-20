@@ -101,6 +101,41 @@ describe("DigestDraftView validation errors", () => {
     expect(container.textContent).toContain("已结束");
     expect(container.textContent).not.toContain("已关门");
   });
+
+  it("shows spoken 3/9 progress while a review discussion is open", () => {
+    act(() => {
+      root.render(
+        <MeetingRoundDisplay
+          compact
+          messages={[
+            { messageId: "m-1", agentId: "agent-1", status: "completed", content: "a" },
+            { messageId: "m-2", agentId: "agent-2", status: "completed", content: "b" },
+            { messageId: "m-3", agentId: "agent-3", status: "completed", content: "c" },
+          ]}
+          round={{
+            program: "p",
+            theme: "t",
+            campaign: "c",
+            question: "Q-01",
+            branch: "b",
+            workflow: "w",
+            agentId: "a",
+            meetingRoundId: "meeting-1",
+            meetingType: "hypothesis_review",
+            mode: "review",
+            scopeHash: "scope",
+            participants: ["agent-1", "agent-2", "agent-3", "agent-4", "agent-5", "agent-6", "agent-7", "agent-8", "agent-9"],
+            status: "open",
+            startedAt: "2026-08-19T01:00:00Z",
+            linkedChatRoomId: "room-1",
+          }}
+        />,
+      );
+    });
+    expect(container.querySelector('[data-testid="meeting-discussion-progress"]')?.textContent).toBe(
+      "已发言 3/9 · 待 A004",
+    );
+  });
 });
 
 describe("MeetingMessageCard failure rendering", () => {

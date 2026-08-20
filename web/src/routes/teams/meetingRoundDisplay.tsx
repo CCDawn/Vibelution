@@ -11,6 +11,7 @@ import { VStatusChip, type VStatusTone } from "../../components/vui";
 import { evidenceRequestKeywords } from "./research-workflow/hypothesisFirstNextAction";
 import {
   displayMeetingMessageText,
+  meetingDiscussionProgress,
   meetingMessageNeedsFullText,
   meetingSpeakerLabel,
 } from "./meetingRoundDisplayModel";
@@ -336,6 +337,13 @@ export function MeetingRoundDisplay({
     </p>
   ) : null;
   const messageList = <MeetingMessageList messages={messages} compact={compact} />;
+  const speakerOrder = (round as unknown as { speakerOrder?: unknown }).speakerOrder;
+  const discussionProgress = meetingDiscussionProgress({
+    participants: round.participants,
+    speakerOrder: Array.isArray(speakerOrder) ? speakerOrder.map((item) => String(item)) : undefined,
+    messages,
+  });
+  const showDiscussionProgress = status === "open" || status === "summarizing";
   return (
     <div data-testid="meeting-round-display">
       <div className={css.heading}>
@@ -346,6 +354,9 @@ export function MeetingRoundDisplay({
               ? `参与者 ${round.participants.length} 人`
               : `${round.meetingRoundId} · 参与者 ${round.participants.length} 人 · 房间 ${round.linkedChatRoomId || "—"}`}
           </p>
+          {showDiscussionProgress ? (
+            <p data-testid="meeting-discussion-progress">{discussionProgress.label}</p>
+          ) : null}
         </div>
         <div className={css.headingActions}>
           <VStatusChip tone={organizationFailed ? "danger" : meetingStatusTone(status)} data-testid="meeting-round-status">
