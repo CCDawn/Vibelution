@@ -95,7 +95,7 @@ import {
 import {
   type BranchInstanceOperation
 } from "./process/branchInstanceBridge.js";
-import { spawnWorkbenchBackend, mainLineBackendIsReachable } from "./process/workbenchBackend.js";
+import { spawnWorkbenchBackend, mainLineBackendIsReusable } from "./process/workbenchBackend.js";
 import { waitForBackendHealthy } from "./process/workbenchBackendHealth.js";
 import { retireRegisteredHandles } from "./process/workbenchBackendRetire.js";
 import { resolveConfigHome, resolveDataHomeForProject } from "./lifecycle/projectStoragePaths.js";
@@ -1637,6 +1637,14 @@ async function inspectCurrentDesktopShell(): Promise<DesktopShellStatus> {
   });
 }
 
+async function packagedDesktopShellIsStale(): Promise<boolean> {
+  try {
+    return (await inspectCurrentDesktopShell()).stale;
+  } catch {
+    return true;
+  }
+}
+
 async function scheduleCurrentDesktopShellRefresh(
   thenLifecycle: string,
   options: { force?: boolean } = {}
@@ -2528,7 +2536,8 @@ async function orchestrateLauncherLifecycle(
   const desiredState = desiredStateForLifecycleOperation(supervisedOperation);
   const paths = createDesktopPathsForApp();
   if (supervisedOperation === "start" && windowProvider !== null) {
-    if (await mainLineBackendIsReachable(paths.workspaceRoot)) {
+    const packagedShellStale = app.isPackaged && await packagedDesktopShellIsStale();
+    if (!packagedShellStale && await mainLineBackendIsReusable(paths.workspaceRoot)) {
       const url = await refreshLiveWorkbenchUrl(paths);
       await openWorkbenchAtCurrentLauncherUrl(paths, launcherBootstrap, windowProvider, { workbenchUrl: url });
       scheduleLauncherStatusCliRefresh();

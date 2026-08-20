@@ -1,4 +1,4 @@
-import { spawn as nodeSpawn } from "node:child_process";
+import { execFileSync, spawn as nodeSpawn } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
@@ -21,6 +21,7 @@ import type { MainLineQueuedCommand } from "../lifecycle/mainLine/commandQueue.j
 export const DEFAULT_WORKBENCH_HOST = "127.0.0.1";
 export const DEFAULT_WORKBENCH_PORT = 8000;
 export const WEB_WORKBENCH_SCRIPT = ["scripts", "web_workbench.py"] as const;
+export const RUNNING_CODE_FINGERPRINT_RELATIVE = [".runtime", "running-code-fingerprint.json"] as const;
 
 export type WorkbenchBackendSpawnChild = {
   pid?: number;
@@ -191,6 +192,79 @@ export async function mainLineBackendIsReachable(
     pidAlive: options?.pidAlive
   });
   return observation.backendListening || observation.backendAlive;
+}
+
+export function runningCodeFingerprintPath(workspaceRoot: string): string {
+  return join(workspaceRoot, ...RUNNING_CODE_FINGERPRINT_RELATIVE);
+}
+
+export function sameProjectRoot(left: string, right: string): boolean {
+  const normalize = (value: string): string => value.trim().replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+  const a = normalize(left);
+  const b = normalize(right);
+  return Boolean(a) && a === b;
+}
+
+export function readRunningCodeFingerprint(workspaceRoot: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(readFileSync(runningCodeFingerprintPath(workspaceRoot), "utf8")) as unknown;
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+export function readWorkspaceGitHead(workspaceRoot: string): string {
+  try {
+    return execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: workspaceRoot,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+      timeout: 10_000
+    }).trim();
+  } catch {
+    return "";
+  }
+}
+
+export function mainLineRunningCodeIsCurrent(input: {
+  workspaceRoot: string;
+  fingerprint?: Record<string, unknown> | null;
+  diskHead?: string;
+}): boolean {
+  const fingerprint = input.fingerprint === undefined
+    ? readRunningCodeFingerprint(input.workspaceRoot)
+    : input.fingerprint;
+  if (!fingerprint || Number(fingerprint.schemaVersion) !== 1) {
+    return false;
+  }
+  const runningHead = String(fingerprint.runningHead || "").trim();
+  const diskHead = String(input.diskHead ?? readWorkspaceGitHead(input.workspaceRoot)).trim();
+  if (!runningHead || !diskHead || runningHead !== diskHead) {
+    return false;
+  }
+  return sameProjectRoot(String(fingerprint.projectRoot || ""), input.workspaceRoot);
+}
+
+export async function mainLineBackendIsReusable(
+  workspaceRoot: string,
+  options?: {
+    readState?: () => WorkbenchBackendState;
+    connect?: (port: number, host: string) => Promise<boolean>;
+    pidAlive?: (pid: number) => boolean;
+    fingerprint?: Record<string, unknown> | null;
+    diskHead?: string;
+  }
+): Promise<boolean> {
+  if (!await mainLineBackendIsReachable(workspaceRoot, options)) {
+    return false;
+  }
+  return mainLineRunningCodeIsCurrent({
+    workspaceRoot,
+    fingerprint: options?.fingerprint,
+    diskHead: options?.diskHead
+  });
 }
 
 export function writeLauncherStateFile(path: string, state: WorkbenchBackendState): void {
