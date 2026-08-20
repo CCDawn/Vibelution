@@ -1,4 +1,8 @@
-"""Rasterize the clipped nested Vibelution mark into PNG/ICO sizes."""
+"""Rasterize the Vibelution mark into PNG/ICO sizes.
+
+Taskbar frames (<=72px) use a filled V silhouette. Nested outline geometry is
+kept for 256px ICO and the web PNGs, where the hole still has enough pixels.
+"""
 
 from __future__ import annotations
 
@@ -22,6 +26,7 @@ INNER = np.array(
 )
 # Exact matches for Windows/Electron DPI (100/125/150/200%) plus 72 for 300%.
 ICO_SIZES = (16, 20, 24, 28, 30, 32, 36, 40, 48, 64, 72, 256)
+FILLED_MAX = 72
 
 
 def _evenodd(xx: np.ndarray, yy: np.ndarray, poly: np.ndarray) -> np.ndarray:
@@ -47,30 +52,40 @@ def _supersample(size: int) -> int:
     return 3
 
 
-def _optical_divide(size: int) -> float:
-    # Taskbar frames are ~24–40px; a 2px outline needs extra weight or diagonals stair-step.
-    if size <= 16:
-        return 0.68
-    if size <= 24:
-        return 0.74
-    if size <= 36:
-        return 0.80
-    return 1.0
+def _map_poly(poly: np.ndarray, size: int, inset: float) -> np.ndarray:
+    usable = 1.0 - 2.0 * inset
+    return poly / VIEW * (size * usable) + (size * inset)
+
+
+def _coverage_mask(size: int, *, inset: float = 0.0, filled: bool) -> np.ndarray:
+    aa = _supersample(size)
+    sample = size * aa
+    in_frame = np.ones((size, size), dtype=bool)
+    if inset > 0:
+        lo = int(np.floor(size * inset))
+        hi = int(np.ceil(size * (1.0 - inset)))
+        in_frame = np.zeros((size, size), dtype=bool)
+        in_frame[lo:hi, lo:hi] = True
+    if filled:
+        poly = np.round(_map_poly(OUTER, size, inset) * 2.0) / 2.0
+        coords = (np.arange(sample, dtype=np.float64) + 0.5) / aa
+        xx, yy = np.meshgrid(coords, coords)
+        mark = _evenodd(xx, yy, poly)
+    else:
+        coords = (np.arange(sample, dtype=np.float64) + 0.5) / sample
+        usable = 1.0 - 2.0 * inset
+        xs = (coords - inset) / usable * VIEW
+        ys = (coords - inset) / usable * VIEW
+        xx, yy = np.meshgrid(xs, ys)
+        mark = _evenodd(xx, yy, OUTER) ^ _evenodd(xx, yy, HOLE) | _evenodd(xx, yy, INNER)
+    coverage = mark.astype(np.float32).reshape(size, aa, size, aa).mean(axis=(1, 3))
+    coverage = np.where(in_frame, coverage, 0.0)
+    return np.clip(coverage, 0.0, 1.0)
 
 
 def render_mark(size: int, *, background: tuple[int, int, int, int] | None = None, inset: float = 0.0) -> Image.Image:
-    aa = _supersample(size)
-    sample = size * aa
-    usable = 1.0 - 2.0 * inset
-    coords = (np.arange(sample, dtype=np.float64) + 0.5) / sample
-    xs = (coords - inset) / usable * VIEW
-    ys = (coords - inset) / usable * VIEW
-    xx, yy = np.meshgrid(xs, ys)
-    in_frame = (coords >= inset) & (coords <= 1.0 - inset)
-    in_x, in_y = np.meshgrid(in_frame, in_frame)
-    mark = (_evenodd(xx, yy, OUTER) ^ _evenodd(xx, yy, HOLE) | _evenodd(xx, yy, INNER)) & in_x & in_y
-    coverage = mark.astype(np.float32).reshape(size, aa, size, aa).mean(axis=(1, 3))
-    coverage = np.clip(coverage / _optical_divide(size), 0.0, 1.0)
+    filled = size <= FILLED_MAX
+    coverage = _coverage_mask(size, inset=inset, filled=filled)
     alpha = np.clip(np.rint(coverage * 255.0), 0, 255).astype(np.uint8)
     alpha_img = Image.fromarray(alpha, mode="L")
     if background is None:
