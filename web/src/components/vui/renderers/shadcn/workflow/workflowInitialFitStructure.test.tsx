@@ -32,6 +32,7 @@ vi.mock("@xyflow/react", () => ({
   MiniMap: () => null,
   MarkerType: { ArrowClosed: "arrowclosed" },
   ConnectionLineType: { Step: "step", SmoothStep: "smoothstep", Bezier: "default", Straight: "straight" },
+  useViewport: () => ({ x: 0, y: 0, zoom: 1 }),
   ReactFlow: (props: Record<string, unknown>) => {
     rfCalls.push(props);
     return null;
@@ -41,6 +42,7 @@ vi.mock("@xyflow/react", () => ({
 import type { WorkflowLayoutInput, WorkflowLayoutNode } from "../../../product/workflow/workflowCanvasTypes";
 import { WorkflowCanvasControls } from "./WorkflowCanvasControls";
 import { ShadcnWorkflowCanvas } from "./ShadcnWorkflowCanvas";
+import { WorkflowOrthogonalConnectionLine } from "./WorkflowOrthogonalConnectionLine";
 import { useWorkflowAutoLayout } from "./useWorkflowAutoLayout";
 import { useWorkflowInitialFit } from "./useWorkflowInitialFit";
 
@@ -191,10 +193,10 @@ describe("ShadcnWorkflowCanvas structure (P1-1)", () => {
 
     const rfProps = rfCalls[0];
     expect(rfProps.nodesDraggable).toBe(true);
-    expect(rfProps.snapToGrid).toBe(true);
-    expect(rfProps.snapGrid).toEqual([16, 16]);
+    expect(rfProps.snapToGrid).toBe(false);
     expect(rfProps.edgesReconnectable).toBe(true);
     expect(rfProps.connectionLineType).toBe("step");
+    expect(rfProps.connectionLineComponent).toBe(WorkflowOrthogonalConnectionLine);
     expect(rfProps.nodesConnectable).toBe(false);
     expect(typeof rfProps.onReconnect).toBe("function");
     expect(typeof rfProps.isValidConnection).toBe("function");

@@ -76,6 +76,12 @@ export function snapWorkflowManualPosition(
   };
 }
 
+export function roundWorkflowManualPosition(
+  position: WorkflowManualPosition,
+): WorkflowManualPosition {
+  return { x: Math.round(position.x), y: Math.round(position.y) };
+}
+
 export function workflowManualLayoutStorageKey(scope: Pick<WorkflowManualLayoutScope, "structureKey" | "runId">): string {
   return `${STORAGE_PREFIX}:${encodeURIComponent(scope.structureKey)}:${encodeURIComponent(scope.runId ?? "definition")}`;
 }
@@ -106,7 +112,7 @@ export function readWorkflowManualLayout(
     const positions: WorkflowManualPositions = {};
     for (const [id, position] of Object.entries(stored.positions)) {
       if (validIds.has(id) && isPosition(position)) {
-        positions[id] = snapWorkflowManualPosition(position);
+        positions[id] = roundWorkflowManualPosition(position);
       }
     }
     const stageLabelOffsets: WorkflowManualPositions = {};
@@ -138,7 +144,7 @@ export function persistWorkflowManualLayout(
   const positions = Object.fromEntries(
     Object.entries(state.positions)
       .filter(([id, position]) => validIds.has(id) && isPosition(position))
-      .map(([id, position]) => [id, snapWorkflowManualPosition(position)]),
+      .map(([id, position]) => [id, roundWorkflowManualPosition(position)]),
   );
   const validStageIds = new Set(scope.stageIds);
   const stageLabelOffsets = Object.fromEntries(

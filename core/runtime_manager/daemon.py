@@ -47,6 +47,7 @@ from .constants import (
     EVENTS_PATH,
     PROJECT_ROOT,
     RESULTS_DIR,
+    RUNTIME_MANAGER_DIR,
     STATE_PATH,
     ensure_runtime_manager_dirs,
 )
@@ -1248,6 +1249,43 @@ def _electron_external_window_pending_ack(workbench: dict[str, Any], observation
         and bool(observation.get("browserWindowAlive"))
         and _backend_close_request_already_satisfied(observation)
     )
+
+
+MAIN_LINE_QUEUE_OWNER_FILE = "main_line_queue_owner.json"
+
+
+def electron_owns_main_line_queue() -> bool:
+    """Return True when Electron main owns the main-line command queue (I4b).
+
+    Marker is written by desktop/electron/src/lifecycle/mainLine/ownerMarker.ts.
+    A dead owner pid does not skip daemon idle reconcile. Evolution /
+    hot-restart / storage migration stay here.
+    """
+
+    path = RUNTIME_MANAGER_DIR / MAIN_LINE_QUEUE_OWNER_FILE
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeError):
+        return False
+    if not isinstance(payload, dict) or str(payload.get("owner") or "").strip() != "electron":
+        return False
+    try:
+        owner_pid = int(payload.get("pid") or 0)
+    except (TypeError, ValueError):
+        return False
+    if owner_pid <= 0:
+        return False
+    try:
+        os.kill(owner_pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def should_run_workbench_idle_reconcile() -> bool:
+    """Workbench idle reconcile stays in the daemon only when Electron is not the queue owner."""
+
+    return not electron_owns_main_line_queue()
 
 
 def _electron_session_owns_workbench_window(state: dict[str, Any]) -> bool:
@@ -2979,6 +3017,11 @@ class RuntimeManagerDaemon:
                     observation = self._idle_reconcile_observation()
                     self._start_idle_reconcile_probe(observation)
                     startup_reconcile_scheduled = True
+                    continue
+
+                if not should_run_workbench_idle_reconcile():
+                    self._process_self_evolution_restart_intent()
+                    time.sleep(DAEMON_LOOP_INTERVAL_SECONDS)
                     continue
 
                 probe = self._take_idle_reconcile_probe()

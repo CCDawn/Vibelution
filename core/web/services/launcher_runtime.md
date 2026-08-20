@@ -14,7 +14,7 @@ Electron 壳：[`desktop/electron/README.md`](../../../desktop/electron/README.m
 
 | 你在改… | 先打开 | 禁止 |
 | --- | --- | --- |
-| start / stop / restart / active-work 拦截 | Electron main（`desktop/electron/src/main.ts` `orchestrateLauncherLifecycle`）→ Python `core/launcher/service.py`（RM 队列） | 在 `runtime_service.py` 再写一套 lifecycle；renderer 直连 :8765 |
+| start / stop / restart / active-work 拦截 | Electron `lifecycle/mainLine` 队列（`runWorkbenchLifecycle`）→ Python lifecycle CLI → daemon handler；active-work 仍在 Python | 在 `runtime_service.py` 再写一套 lifecycle；renderer 直连 :8765；把 I4a 准入或 I5 杀树混进 I4b |
 | 隔离 worktree 启停 / READY / 端口 | [`instance-lifecycle.md`](../../launcher/instance-lifecycle.md) · Electron `instanceRegistryStore.ts` · `isolatedInstanceSupervisor.ts` · `branch_instance_lifecycle.py` · `instances_registry.py` | exec 目标树 `vibelution_launcher.py`；spawn exit 0 当 `running`；无 generation CAS 盲写 `instances.json`；observe/waitForHttp 再 spawn Python bridge；hang 回收仍看 spawnPid |
 | Launcher 窗口真相 / leftover adopt | `desktop/electron/src/windows/electronWindowProvider.ts` | Python overlay 把 live window 标成 closed |
 | Launcher UI 传输 | `web/src/api/launcher.ts`（preload IPC 门面） | 可操作仪表盘在 API 未就绪时画空表 + `未连接` |

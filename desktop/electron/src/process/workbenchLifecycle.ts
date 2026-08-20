@@ -1,6 +1,13 @@
 import { resolve } from "node:path";
 
 import {
+  getSharedMainLineCommandQueue,
+  type MainLineCommandQueue,
+} from "../lifecycle/mainLine/commandQueue.js";
+import { writeMainLineIntent } from "../lifecycle/mainLine/commandIntent.js";
+import { writeMainLineQueueOwnerMarker } from "../lifecycle/mainLine/ownerMarker.js";
+import { resolveRuntimeManagerDir } from "../lifecycle/projectStoragePaths.js";
+import {
   invalidPythonJsonBridgePayload,
   parsePythonJsonBridgePayload,
   PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS,
@@ -36,7 +43,7 @@ export function parseWorkbenchLifecycleResult(raw: string): WorkbenchLifecycleRe
   };
 }
 
-export async function runWorkbenchLifecycle(input: {
+async function spawnWorkbenchLifecycleBridge(input: {
   workspaceRoot: string;
   pythonPath: string;
   operatorConfigPath: string;
@@ -69,4 +76,29 @@ export async function runWorkbenchLifecycle(input: {
     mutation: true
   });
   return parseWorkbenchLifecycleResult(raw);
+}
+
+export async function runWorkbenchLifecycle(input: {
+  workspaceRoot: string;
+  pythonPath: string;
+  operatorConfigPath: string;
+  operation: WorkbenchLifecycleOperation;
+  spawnImpl?: PythonJsonBridgeSpawn;
+  signal?: AbortSignal;
+  queue?: MainLineCommandQueue;
+}): Promise<WorkbenchLifecycleResult> {
+  const runtimeManagerDir = resolveRuntimeManagerDir(input.workspaceRoot);
+  const queue = input.queue ?? getSharedMainLineCommandQueue({
+    persistIntent: (intent) => {
+      void writeMainLineIntent(runtimeManagerDir, intent).catch(() => undefined);
+    },
+    writeOwnerMarker: () => {
+      void writeMainLineQueueOwnerMarker(runtimeManagerDir).catch(() => undefined);
+    },
+  });
+  return queue.submit({
+    operation: input.operation,
+    noBrowser: true,
+    execute: () => spawnWorkbenchLifecycleBridge(input),
+  });
 }

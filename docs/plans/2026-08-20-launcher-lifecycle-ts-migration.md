@@ -1,6 +1,6 @@
 # Launcher 生命周期 TS 化迁移（绞杀者增量 I0–I6）
 
-Status: **Active**（2026-08-20 立项；I0 锁协议 v2 已实现；I1 TS 投影权威 + 双语言 fixture 已实现；I2 TS registry CAS + stop spawnPid 锁内快照已实现；I3 监督循环 TS 化 + `ownerLease` 心跳已实现；I4a 准入控制已实现）
+Status: **Active**（2026-08-20 立项；I0 锁协议 v2 已实现；I1 TS 投影权威 + 双语言 fixture 已实现；I2 TS registry CAS + stop spawnPid 锁内快照已实现；I3 监督循环 TS 化 + `ownerLease` 心跳已实现；I4b main 行 open/close/restart 队列已迁 Electron；I4a 准入控制已实现）
 Authority: [ADR 0009](../adr/0009-launcher-control-plane-lives-in-electron-main.md)（由本计划 I0 增补）· 前置执行账本 [CONTROL_PLANE_MIGRATION](../archive/plans/2026-08/CONTROL_PLANE_MIGRATION.md)（已关闭，其关闭条件只覆盖「编排权归 main + :8765 退役」，未覆盖「逻辑本体 TS 化」——本计划补齐这一段）。
 验收总则：每个增量独立 worktree、独立合入、独立可回退；全部完成后，**launcher 生命周期逻辑（状态机、registry 写入、命令队列、监督循环、进程收割编排）全部运行在 Electron main（TS）内**；Python 只保留 workbench 后端本体与 git/文件维护 CLI。
 
@@ -94,7 +94,10 @@ VibelutionLauncher.exe（薄 shim，转发）
   - **不改** `main.ts` 命令队列、`daemon.py`、`instanceRegistryStore.ts`。杀树仍 Python。
   - 验收：1s 内 10 次 restart，前 3 次放行、后 7 次 `rate_limited`；冷却态重启 Electron 后仍在；列表显示原因与剩余秒数；计时埋点口径不变（本增量不改 wait/observe 路径）。
 - **I4b main 行队列迁移**：open/close/restart 命令队列与 idle reconcile 从 RM daemon 迁 Electron main（进程内队列 + 崩溃恢复用持久化 intent；观测复用 I1 投影）。**边界：daemon.py 中 self/supervised 演化循环、hot-restart 会话、storage migration 不迁**（workbench 域）。main 行观测在 TS 内实现：net.connect 健康门槛 + 已知 pid 存活检查（TS 自己 spawn 的进程，属主信任链简化，不需要 Win32 端口属主表——那是 Python 多进程观测域的需求）。
-- 验收：注入风暴（1s 内 10 次 restart）被合并/拒绝且终态正确；main 行 e2e 启停计时对照埋点基线（`restart_initial_observation_ms` 等口径，当前重启 ≈7.3s）不劣化。
+  - 落点：`desktop/electron/src/lifecycle/mainLine/`（`commandQueue` / `commandIntent` / `observation` / `idleReconcile` / `ownerMarker`）；`runWorkbenchLifecycle` 先入队再 spawn 既有 lifecycle CLI（杀树与 backend spawn 仍 Python，I5 再换）。
+  - 崩溃恢复 intent 写在 `runtime-manager/main_line_intent.json`，**不**改 `instances.json` 契约。Electron 另写 `main_line_queue_owner.json`；daemon 在 owner pid 存活时跳过 workbench idle reconcile / `browser_missing` 自动关，演化循环仍跑。
+  - daemon.py workbench 耦合面（I4b 只停 idle reconcile，不抽执行器）：`_handle_open_workbench` / `_handle_close_workbench` / `_handle_restart_workbench` / `_handle_force_close_workbench` 仍由 lifecycle CLI → 文件队列执行；`hot_restart_workbench`、`_process_self_evolution_restart_intent`、storage migration 不迁。
+- 验收：注入风暴（1s 内 10 次 restart）被合并/拒绝且终态正确；main 行 e2e 启停计时对照埋点基线（`restart_initial_observation_ms` 等口径，当前重启 ≈7.3s）不劣化。I4b 把 join 提到 Electron，不改变 daemon 内 `restart_initial_observation_ms` 探针位置。
 
 ### I5 · action 脚本产品路径退役
 
