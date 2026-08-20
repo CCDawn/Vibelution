@@ -29,6 +29,12 @@ type LauncherIpcInvokeResult =
   | { ok: false; error: { code: string; message: string } };
 
 function stubLauncherIpcBridge(invoke: (payload: unknown) => Promise<LauncherIpcInvokeResult>) {
+  vi.stubGlobal("window", {
+    location: {
+      href: "http://127.0.0.1:8765/launcher",
+      origin: "http://127.0.0.1:8765",
+    },
+  });
   vi.stubGlobal("vibelutionLauncher", {
     launcherInvoke: invoke,
   });
@@ -289,238 +295,155 @@ describe("launcher api helpers", () => {
             },
           },
         }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          header: "X-Vibelution-Control-Token",
-          controlToken: "test-token",
-        }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ accepted: true, operation: "restart", commandId: "cmd-custom-port" }),
       });
     vi.stubGlobal("fetch", fetchMock);
 
     await getLauncherStatus();
-    const payload = await restartLauncherBundle();
+    await expect(restartLauncherBundle()).rejects.toBeInstanceOf(LauncherControlPlaneNotReadyError);
 
-    expect(payload.commandId).toBe("cmd-custom-port");
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
       "/api/launcher/status",
-      "/api/control-token",
-      "/api/launcher/restart",
     ]);
   });
 
-  it("starts the bundle through the guarded launcher endpoint", async () => {
-    vi.stubGlobal("window", {
-      location: {
-        href: "http://127.0.0.1:8000/chat",
-        origin: "http://127.0.0.1:8000",
-      },
-    });
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          header: "X-Vibelution-Control-Token",
-          controlToken: "test-token",
-        }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ accepted: true, operation: "start", launcherMode: "standalone_control_plane" }),
-      });
+  it("starts the bundle through the preload IPC bridge", async () => {
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
+    const invoke = vi.fn().mockResolvedValue({
+      ok: true,
+      payload: { accepted: true, operation: "start", launcherMode: "standalone_control_plane" },
+    });
+    stubLauncherIpcBridge(invoke);
 
     const payload = await startLauncherBundle();
 
     expect(payload.operation).toBe("start");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/control-token");
-    expect(fetchMock.mock.calls[1][0]).toBe("/api/launcher/start");
-    const requestInit = fetchMock.mock.calls[1][1] as RequestInit;
-    expect(requestInit.method).toBe("POST");
-    expect(requestInit.credentials).toBe("same-origin");
-    expect((requestInit.headers as Headers).get("X-Vibelution-Control-Token")).toBe("test-token");
+    expect(fetchMock).not.toHaveBeenCalled();
+    const request = invoke.mock.calls[0][0] as { path: string; init: { method: string } };
+    expect(request.path).toBe("start");
+    expect(request.init.method).toBe("POST");
   });
 
-  it("restarts the bundle through the guarded launcher endpoint", async () => {
-    vi.stubGlobal("window", {
-      location: {
-        href: "http://127.0.0.1:8000/chat",
-        origin: "http://127.0.0.1:8000",
-      },
-    });
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          header: "X-Vibelution-Control-Token",
-          controlToken: "test-token",
-        }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ accepted: true, operation: "restart", commandId: "cmd-1" }),
-      });
+  it("restarts the bundle through the preload IPC bridge", async () => {
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
+    const invoke = vi.fn().mockResolvedValue({
+      ok: true,
+      payload: { accepted: true, operation: "restart", commandId: "cmd-1" },
+    });
+    stubLauncherIpcBridge(invoke);
 
     const payload = await restartLauncherBundle();
 
     expect(payload.commandId).toBe("cmd-1");
-    expect(fetchMock.mock.calls[1][0]).toBe("/api/launcher/restart");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect((invoke.mock.calls[0][0] as { path: string }).path).toBe("restart");
   });
 
-  it("force closes the bundle through the guarded launcher endpoint", async () => {
-    vi.stubGlobal("window", {
-      location: {
-        href: "http://127.0.0.1:8000/chat",
-        origin: "http://127.0.0.1:8000",
-      },
-    });
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          header: "X-Vibelution-Control-Token",
-          controlToken: "test-token",
-        }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ accepted: true, operation: "force-stop", commandId: "cmd-force" }),
-      });
+  it("force closes the bundle through the preload IPC bridge", async () => {
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
+    const invoke = vi.fn().mockResolvedValue({
+      ok: true,
+      payload: { accepted: true, operation: "force-stop", commandId: "cmd-force" },
+    });
+    stubLauncherIpcBridge(invoke);
 
     const payload = await forceStopLauncherBundle();
 
     expect(payload.operation).toBe("force-stop");
     expect(payload.commandId).toBe("cmd-force");
-    expect(fetchMock.mock.calls[1][0]).toBe("/api/launcher/force-stop");
-    const requestInit = fetchMock.mock.calls[1][1] as RequestInit;
-    expect(requestInit.method).toBe("POST");
-    expect((requestInit.headers as Headers).get("X-Vibelution-Launcher-Trigger")).toBe("launcher_route_force_stop_button");
+    expect(fetchMock).not.toHaveBeenCalled();
+    const request = invoke.mock.calls[0][0] as {
+      path: string;
+      init: { method: string; headers: Record<string, string> };
+    };
+    expect(request.path).toBe("force-stop");
+    expect(request.init.method).toBe("POST");
+    expect(request.init.headers["x-vibelution-launcher-trigger"]).toBe("launcher_route_force_stop_button");
   });
 
-  it("marks stop requests with a launcher trigger header", async () => {
-    vi.stubGlobal("window", {
-      location: {
-        href: "http://127.0.0.1:8000/chat",
-        origin: "http://127.0.0.1:8000",
-      },
-    });
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          header: "X-Vibelution-Control-Token",
-          controlToken: "test-token",
-        }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ accepted: true, operation: "stop", commandId: "cmd-stop" }),
-      });
+  it("marks stop requests with a launcher trigger header over IPC", async () => {
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
+    const invoke = vi.fn().mockResolvedValue({
+      ok: true,
+      payload: { accepted: true, operation: "stop", commandId: "cmd-stop" },
+    });
+    stubLauncherIpcBridge(invoke);
 
     const payload = await stopLauncherBundle("app_shell_shutdown_button");
 
     expect(payload.operation).toBe("stop");
-    expect(fetchMock.mock.calls[1][0]).toBe("/api/launcher/stop");
-    const requestInit = fetchMock.mock.calls[1][1] as RequestInit;
-    expect(requestInit.method).toBe("POST");
-    expect((requestInit.headers as Headers).get("X-Vibelution-Launcher-Trigger")).toBe("app_shell_shutdown_button");
+    expect(fetchMock).not.toHaveBeenCalled();
+    const request = invoke.mock.calls[0][0] as {
+      path: string;
+      init: { method: string; headers: Record<string, string> };
+    };
+    expect(request.path).toBe("stop");
+    expect(request.init.method).toBe("POST");
+    expect(request.init.headers["x-vibelution-launcher-trigger"]).toBe("app_shell_shutdown_button");
   });
 
-  it("queues an idle window close through the same-origin adapter with keepalive", () => {
+  it("does not HTTP-fetch window close when the preload bridge is absent", () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal("fetch", fetchMock);
 
-    expect(requestWorkbenchWindowCloseOnPageHide("stop")).toBe(true);
-
-    expect(fetchMock).toHaveBeenCalledOnce();
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/launcher/stop");
-    expect(fetchMock.mock.calls[0][1]).toMatchObject({
-      method: "POST",
-      credentials: "same-origin",
-      keepalive: true,
-    });
-    expect((fetchMock.mock.calls[0][1].headers as Headers).get("X-Vibelution-Launcher-Trigger"))
-      .toBe("app_shell_window_close");
+    expect(requestWorkbenchWindowCloseOnPageHide("stop")).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("queues confirmed active-work closes through guarded force-stop", () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+  it("queues window close over the preload IPC bridge", () => {
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
+    const invoke = vi.fn().mockResolvedValue({ ok: true, payload: { accepted: true } });
+    stubLauncherIpcBridge(invoke);
 
     expect(requestWorkbenchWindowCloseOnPageHide("force-stop")).toBe(true);
 
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/launcher/force-stop");
-    expect((fetchMock.mock.calls[0][1].headers as Headers).get("X-Vibelution-Launcher-Trigger"))
+    expect(fetchMock).not.toHaveBeenCalled();
+    const request = invoke.mock.calls[0][0] as {
+      path: string;
+      init: { method: string; headers: Record<string, string> };
+    };
+    expect(request.path).toBe("force-stop");
+    expect(request.init.headers["x-vibelution-launcher-trigger"])
       .toBe("app_shell_window_close_confirmed_active_work");
   });
 
-  it("uses the same-origin workbench adapter when no preload bridge is present", async () => {
+  it("rejects lifecycle commands without a preload bridge instead of falling back to HTTP", async () => {
     vi.stubGlobal("window", {
       location: {
         href: "http://127.0.0.1:8000/chat",
         origin: "http://127.0.0.1:8000",
       },
     });
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          header: "X-Vibelution-Control-Token",
-          controlToken: "workbench-token",
-        }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ accepted: true, operation: "restart", commandId: "cmd-same-origin" }),
-      });
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    const payload = await restartLauncherBundle();
-
-    expect(payload.commandId).toBe("cmd-same-origin");
-    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
-      "/api/control-token",
-      "/api/launcher/restart",
-    ]);
+    await expect(restartLauncherBundle()).rejects.toBeInstanceOf(LauncherControlPlaneNotReadyError);
+    const error = await startLauncherBundle().catch((caught: unknown) => caught);
+    expect(isLauncherControlPlaneNotReady(error)).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("requests guarded supervisor reattach through the launcher endpoint", async () => {
-    vi.stubGlobal("window", {
-      location: {
-        href: "http://127.0.0.1:8000/chat",
-        origin: "http://127.0.0.1:8000",
-      },
-    });
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          header: "X-Vibelution-Control-Token",
-          controlToken: "test-token",
-        }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ accepted: true, operation: "supervisor_reattach", commandId: "cmd-supervisor" }),
-      });
+  it("requests guarded supervisor reattach through the preload IPC bridge", async () => {
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
+    const invoke = vi.fn().mockResolvedValue({
+      ok: true,
+      payload: { accepted: true, operation: "supervisor_reattach", commandId: "cmd-supervisor" },
+    });
+    stubLauncherIpcBridge(invoke);
 
     const payload = await reattachLauncherSupervisor();
 
     expect(payload.operation).toBe("supervisor_reattach");
     expect(payload.commandId).toBe("cmd-supervisor");
-    expect(fetchMock.mock.calls[1][0]).toBe("/api/launcher/supervisor/reattach");
-    const requestInit = fetchMock.mock.calls[1][1] as RequestInit;
-    expect(requestInit.method).toBe("POST");
+    expect(fetchMock).not.toHaveBeenCalled();
+    const request = invoke.mock.calls[0][0] as { path: string; init: { method: string } };
+    expect(request.path).toBe("supervisor/reattach");
+    expect(request.init.method).toBe("POST");
   });
 
   it("saves workbench window mode through the launcher settings endpoint", async () => {

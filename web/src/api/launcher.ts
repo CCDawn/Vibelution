@@ -472,6 +472,13 @@ async function fetchLauncherJson<T>(path: string, init?: RequestInit): Promise<T
   return fetchJson<T>(relativeLauncherEndpoint(path), init);
 }
 
+async function invokeLauncherLifecycleJson<T>(path: string, init?: RequestInit): Promise<T> {
+  if (launcherIpcBridge() === null) {
+    throw new LauncherControlPlaneNotReadyError("Launcher IPC control plane host is not ready.");
+  }
+  return invokeLauncherJson<T>(path, init);
+}
+
 function isLauncherControlConnectionError(error: unknown) {
   if (error instanceof TypeError) {
     return true;
@@ -521,13 +528,13 @@ export function requestBranchInstanceCleanup(instanceIds: string[], confirm: boo
 }
 
 export function startLauncherBundle() {
-  return fetchLauncherJson<LauncherControlResponse>("start", {
+  return invokeLauncherLifecycleJson<LauncherControlResponse>("start", {
     method: "POST",
   });
 }
 
 export function stopLauncherBundle(trigger = "launcher_route_stop_button") {
-  return fetchLauncherJson<LauncherControlResponse>("stop", {
+  return invokeLauncherLifecycleJson<LauncherControlResponse>("stop", {
     method: "POST",
     headers: { "X-Vibelution-Launcher-Trigger": trigger },
   });
@@ -537,14 +544,14 @@ export function requestWorkbenchWindowCloseOnPageHide(operation: "stop" | "force
   const trigger = operation === "force-stop"
     ? "app_shell_window_close_confirmed_active_work"
     : "app_shell_window_close";
+  if (launcherIpcBridge() === null) {
+    return false;
+  }
   try {
-    const request = globalThis.fetch(relativeLauncherEndpoint(operation), {
+    void invokeLauncherJson<LauncherControlResponse>(operation, {
       method: "POST",
-      credentials: "same-origin",
       headers: new Headers({ "X-Vibelution-Launcher-Trigger": trigger }),
-      keepalive: true,
-    });
-    void request.catch(() => undefined);
+    }).catch(() => undefined);
     return true;
   } catch {
     return false;
@@ -552,14 +559,14 @@ export function requestWorkbenchWindowCloseOnPageHide(operation: "stop" | "force
 }
 
 export function forceStopLauncherBundle(trigger = "launcher_route_force_stop_button") {
-  return fetchLauncherJson<LauncherControlResponse>("force-stop", {
+  return invokeLauncherLifecycleJson<LauncherControlResponse>("force-stop", {
     method: "POST",
     headers: { "X-Vibelution-Launcher-Trigger": trigger },
   });
 }
 
 export function restartLauncherBundle() {
-  return fetchLauncherJson<LauncherControlResponse>("restart", {
+  return invokeLauncherLifecycleJson<LauncherControlResponse>("restart", {
     method: "POST",
   });
 }
@@ -681,7 +688,7 @@ export type LauncherSupervisorControlResponse = Omit<LauncherControlResponse, "o
 };
 
 export function reattachLauncherSupervisor() {
-  return fetchLauncherJson<LauncherSupervisorControlResponse>("supervisor/reattach", {
+  return invokeLauncherLifecycleJson<LauncherSupervisorControlResponse>("supervisor/reattach", {
     method: "POST",
   });
 }

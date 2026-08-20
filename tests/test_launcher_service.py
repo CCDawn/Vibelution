@@ -45,47 +45,6 @@ def isolate_desktop_session_store(tmp_path, monkeypatch):
     )
 
 
-def test_standalone_launcher_app_exposes_project_lifecycle_routes(monkeypatch):
-    calls = []
-    monkeypatch.setattr(
-        launcher_service,
-        "request_launcher_start",
-        lambda: calls.append("start") or {"accepted": True, "operation": "start", "launcherMode": "standalone_control_plane"},
-    )
-    client = TestClient(launcher_app.create_launcher_app())
-
-    response = client.post("/api/project/start")
-
-    assert response.status_code == 202
-    assert response.json()["operation"] == "start"
-    assert calls == ["start"]
-
-
-def test_standalone_launcher_app_exposes_rebuild_and_start_route(monkeypatch):
-    calls = []
-    monkeypatch.setattr(
-        launcher_service,
-        "request_launcher_rebuild_and_start",
-        lambda: calls.append("rebuild-and-start")
-        or {
-            "accepted": True,
-            "operation": "rebuild-and-start",
-            "launcherMode": "standalone_control_plane",
-            "forceFrontendRebuild": True,
-            "message": "rebuilding",
-        },
-    )
-    client = TestClient(launcher_app.create_launcher_app())
-
-    response = client.post("/api/launcher/rebuild-and-start")
-
-    assert response.status_code == 202
-    body = response.json()
-    assert body["operation"] == "rebuild-and-start"
-    assert body["forceFrontendRebuild"] is True
-    assert calls == ["rebuild-and-start"]
-
-
 def test_launcher_payload_contract_is_shared_between_standalone_and_web_routes():
     from core.launcher import api_contract
 
@@ -432,41 +391,6 @@ def test_workbench_close_dispatch_declares_electron_as_external_window_owner(mon
                 "externalWindowOwner": "electron",
             },
         )
-    ]
-
-
-def test_standalone_launcher_app_exposes_force_stop_route(monkeypatch):
-    calls = []
-    monkeypatch.setattr(
-        launcher_service,
-        "request_launcher_force_stop",
-        lambda request_audit=None: calls.append(request_audit)
-        or {"accepted": True, "operation": "force-stop", "launcherMode": "standalone_control_plane"},
-    )
-    client = TestClient(launcher_app.create_launcher_app())
-
-    response = client.post(
-        "/api/project/force-stop",
-        headers={
-            "X-Vibelution-Launcher-Trigger": "pytest_force_stop_button",
-            "Referer": "http://127.0.0.1:8765/launcher?token=secret",
-            "Origin": "http://127.0.0.1:8765",
-        },
-    )
-
-    assert response.status_code == 202
-    assert response.json()["operation"] == "force-stop"
-    assert calls == [
-        {
-            "operation": "force-stop",
-            "trigger": "pytest_force_stop_button",
-            "endpoint": "/api/project/force-stop",
-            "method": "POST",
-            "clientHost": "testclient",
-            "refererPath": "/launcher",
-            "originHost": "127.0.0.1:8765",
-            "userAgent": "testclient",
-        }
     ]
 
 
@@ -1284,37 +1208,6 @@ def test_workbench_launcher_adapter_exposes_workbench_window_setting(monkeypatch
     assert calls == [("windowed", "hash-current")]
 
 
-def test_workbench_launcher_adapter_exposes_force_stop_route(monkeypatch):
-    calls = []
-    monkeypatch.setattr(
-        launcher_service,
-        "request_launcher_force_stop",
-        lambda request_audit=None: calls.append(request_audit)
-        or {"accepted": True, "operation": "force-stop", "launcherMode": "standalone_control_plane"},
-    )
-    app = FastAPI()
-    app.include_router(web_launcher_routes.router, prefix="/api")
-    client = TestClient(app)
-
-    response = client.post(
-        "/api/launcher/force-stop",
-        headers={"X-Vibelution-Launcher-Trigger": "pytest_web_adapter_force_stop"},
-    )
-
-    assert response.status_code == 202
-    assert response.json()["operation"] == "force-stop"
-    assert calls == [
-        {
-            "operation": "force-stop",
-            "trigger": "pytest_web_adapter_force_stop",
-            "endpoint": "/api/launcher/force-stop",
-            "method": "POST",
-            "clientHost": "testclient",
-            "userAgent": "testclient",
-        }
-    ]
-
-
 def test_standalone_launcher_app_serves_health_token_and_launcher_shell(monkeypatch, tmp_path):
     dist = tmp_path / "web" / "dist"
     dist.mkdir(parents=True)
@@ -1343,10 +1236,10 @@ def test_standalone_launcher_app_allows_workbench_origin_for_control_preflight()
     client = TestClient(launcher_app.create_launcher_app())
 
     response = client.options(
-        "/api/launcher/restart",
+        "/api/launcher/status",
         headers={
             "Origin": "http://127.0.0.1:8000",
-            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Method": "GET",
             "Access-Control-Request-Headers": "X-Vibelution-Control-Token",
         },
     )

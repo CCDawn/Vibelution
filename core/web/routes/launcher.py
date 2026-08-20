@@ -313,86 +313,6 @@ def launcher_apply_developer_cleanup(payload: DeveloperCleanupApplyPayload) -> d
 
 
 @router.post(
-    "/launcher/start",
-    status_code=202,
-    response_model=LauncherAcceptedCommandResponse,
-    response_model_exclude_unset=True,
-)
-def launcher_start() -> dict:
-    return launcher_service.request_launcher_start()
-
-
-@router.post(
-    "/launcher/stop",
-    status_code=202,
-    response_model=LauncherAcceptedCommandResponse,
-    response_model_exclude_unset=True,
-)
-def launcher_stop(request: Request) -> dict:
-    try:
-        return launcher_service.request_launcher_stop(_request_audit(request, operation="stop"))
-    except launcher_service.LauncherActiveWorkBlocked as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "active_work_stop_blocked",
-                "message": exc.message,
-                "activeWorkRuns": exc.active_work_runs,
-            },
-        ) from exc
-
-
-@router.post(
-    "/launcher/force-stop",
-    status_code=202,
-    response_model=LauncherAcceptedCommandResponse,
-    response_model_exclude_unset=True,
-)
-def launcher_force_stop(request: Request) -> dict:
-    return launcher_service.request_launcher_force_stop(_request_audit(request, operation="force-stop"))
-
-
-@router.post(
-    "/launcher/restart",
-    status_code=202,
-    response_model=LauncherAcceptedCommandResponse,
-    response_model_exclude_unset=True,
-)
-def launcher_restart() -> dict:
-    try:
-        return launcher_service.request_launcher_restart()
-    except launcher_service.LauncherActiveWorkBlocked as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "active_work_restart_blocked",
-                "message": exc.message,
-                "activeWorkRuns": exc.active_work_runs,
-            },
-        ) from exc
-
-
-@router.post(
-    "/launcher/rebuild-and-start",
-    status_code=202,
-    response_model=LauncherAcceptedCommandResponse,
-    response_model_exclude_unset=True,
-)
-def launcher_rebuild_and_start() -> dict:
-    try:
-        return launcher_service.request_launcher_rebuild_and_start()
-    except launcher_service.LauncherActiveWorkBlocked as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "active_work_restart_blocked",
-                "message": exc.message,
-                "activeWorkRuns": exc.active_work_runs,
-            },
-        ) from exc
-
-
-@router.post(
     "/launcher/lifecycle-intents",
     status_code=202,
     response_model=LauncherLifecycleIntentResponse,
@@ -578,13 +498,3 @@ def _request_audit(request: Request, *, operation: str) -> launcher_service.Laun
         origin=request.headers.get("origin", ""),
         user_agent=request.headers.get("user-agent", ""),
     )
-
-
-@router.post(
-    "/launcher/supervisor/reattach",
-    status_code=202,
-    response_model=LauncherAcceptedCommandResponse,
-    response_model_exclude_unset=True,
-)
-def launcher_supervisor_reattach() -> dict:
-    return launcher_service.request_launcher_supervisor_reattach()

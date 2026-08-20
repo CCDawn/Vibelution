@@ -284,67 +284,6 @@ def apply_launcher_maintenance_reset(payload: LauncherMaintenanceApplyPayload) -
         raise HTTPException(status_code=400, detail={"code": "invalid_launcher_maintenance_apply", "message": str(exc)}) from exc
 
 
-@router.post("/api/launcher/start", status_code=202)
-@router.post("/api/project/start", status_code=202)
-def project_start() -> dict:
-    return launcher_service.request_launcher_start()
-
-
-@router.post("/api/launcher/stop", status_code=202)
-@router.post("/api/project/stop", status_code=202)
-def project_stop(request: Request) -> dict:
-    try:
-        return launcher_service.request_launcher_stop(_request_audit(request, operation="stop"))
-    except launcher_service.LauncherActiveWorkBlocked as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "active_work_stop_blocked",
-                "message": exc.message,
-                "activeWorkRuns": exc.active_work_runs,
-            },
-        ) from exc
-
-
-@router.post("/api/launcher/force-stop", status_code=202)
-@router.post("/api/project/force-stop", status_code=202)
-def project_force_stop(request: Request) -> dict:
-    return launcher_service.request_launcher_force_stop(_request_audit(request, operation="force-stop"))
-
-
-@router.post("/api/launcher/restart", status_code=202)
-@router.post("/api/project/restart", status_code=202)
-def project_restart() -> dict:
-    try:
-        return launcher_service.request_launcher_restart()
-    except launcher_service.LauncherActiveWorkBlocked as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "active_work_restart_blocked",
-                "message": exc.message,
-                "activeWorkRuns": exc.active_work_runs,
-            },
-        ) from exc
-
-
-@router.post("/api/launcher/rebuild-and-start", status_code=202)
-@router.post("/api/project/rebuild-and-start", status_code=202)
-def project_rebuild_and_start() -> dict:
-    """Force-rebuild frontend production assets, then start or restart the workbench."""
-
-    try:
-        return launcher_service.request_launcher_rebuild_and_start()
-    except launcher_service.LauncherActiveWorkBlocked as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "active_work_restart_blocked",
-                "message": exc.message,
-                "activeWorkRuns": exc.active_work_runs,
-            },
-        ) from exc
-
 @router.post("/api/launcher/lifecycle-intents", status_code=202)
 def launcher_submit_lifecycle_intent(request: Request, payload: LifecycleIntentPayload) -> dict:
     _ensure_control_request(request)

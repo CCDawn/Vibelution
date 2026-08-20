@@ -53,11 +53,6 @@ JSON_ROUTE_FUNCTIONS = {
     "launcher_developer_mode_noise_overview",
     "launcher_preview_developer_cleanup",
     "launcher_apply_developer_cleanup",
-    "launcher_start",
-    "launcher_stop",
-    "launcher_force_stop",
-    "launcher_restart",
-    "launcher_rebuild_and_start",
     "launcher_submit_lifecycle_intent",
     "launcher_get_lifecycle_intent",
     "launcher_submit_workbench_close_transaction",
@@ -71,7 +66,6 @@ JSON_ROUTE_FUNCTIONS = {
     "launcher_heartbeat_desktop_session",
     "launcher_close_desktop_session",
     "launcher_runtime_scene_event",
-    "launcher_supervisor_reattach",
 }
 
 
@@ -523,51 +517,6 @@ def test_launcher_lifecycle_json_routes_keep_unknown_fields(monkeypatch) -> None
     assert applied.status_code == 200
     assert applied.json() == expected_apply
 
-    monkeypatch.setattr(
-        launcher_routes.launcher_service,
-        "request_launcher_start",
-        lambda: expected_command,
-    )
-    start = client.post("/api/launcher/start")
-    assert start.status_code == 202
-    assert start.json() == expected_command
-
-    monkeypatch.setattr(
-        launcher_routes.launcher_service,
-        "request_launcher_stop",
-        lambda *_args, **_kwargs: expected_command,
-    )
-    stop = client.post("/api/launcher/stop")
-    assert stop.status_code == 202
-    assert stop.json() == expected_command
-
-    monkeypatch.setattr(
-        launcher_routes.launcher_service,
-        "request_launcher_force_stop",
-        lambda *_args, **_kwargs: expected_command,
-    )
-    force_stop = client.post("/api/launcher/force-stop")
-    assert force_stop.status_code == 202
-    assert force_stop.json() == expected_command
-
-    monkeypatch.setattr(
-        launcher_routes.launcher_service,
-        "request_launcher_restart",
-        lambda: expected_command,
-    )
-    restart = client.post("/api/launcher/restart")
-    assert restart.status_code == 202
-    assert restart.json() == expected_command
-
-    monkeypatch.setattr(
-        launcher_routes.launcher_service,
-        "request_launcher_rebuild_and_start",
-        lambda: expected_command,
-    )
-    rebuild = client.post("/api/launcher/rebuild-and-start")
-    assert rebuild.status_code == 202
-    assert rebuild.json() == expected_command
-
     expected_intent = {"intentId": "intent-1", "status": "accepted", "action": "open_workbench", "customIntent": True}
     monkeypatch.setattr(
         launcher_routes.launcher_service,
@@ -737,12 +686,3 @@ def test_launcher_lifecycle_json_routes_keep_unknown_fields(monkeypatch) -> None
     )
     assert scene.status_code == 202
     assert scene.json() == expected_scene
-
-    monkeypatch.setattr(
-        launcher_routes.launcher_service,
-        "request_launcher_supervisor_reattach",
-        lambda: expected_command,
-    )
-    reattach = client.post("/api/launcher/supervisor/reattach")
-    assert reattach.status_code == 202
-    assert reattach.json() == expected_command
