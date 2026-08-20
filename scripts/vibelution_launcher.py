@@ -296,6 +296,15 @@ def _health_url(port: int, host: str = DEFAULT_HOST) -> str:
 
 
 def _backend_healthy(port: int, host: str = DEFAULT_HOST) -> bool:
+    # Local proxy/TUN filters can make a dead-port HTTP probe pay the full
+    # timeout on every wait poll; prove a listener exists before paying HTTP.
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    probe.settimeout(0.3)
+    try:
+        if probe.connect_ex((host, int(port))) != 0:
+            return False
+    finally:
+        probe.close()
     try:
         with urllib.request.urlopen(_health_url(port, host), timeout=1.5) as response:
             return int(getattr(response, "status", 0) or 0) == 200

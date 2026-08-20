@@ -2296,7 +2296,10 @@ def save_public_config(public_config: dict, config_path: Path | None = None) -> 
 
 
 def _replace_config_file_atomically(temp_path: Path, target_path: Path) -> None:
-    max_attempts = 5
+    # Cross-process savers (Electron settings PUT vs launcher actions) and AV
+    # scanners can hold config.toml past the historical 5-attempt window; a
+    # failed save took down a backend boot during a restart storm.
+    max_attempts = 8
     for attempt in range(max_attempts):
         try:
             temp_path.replace(target_path)
@@ -2304,7 +2307,7 @@ def _replace_config_file_atomically(temp_path: Path, target_path: Path) -> None:
         except PermissionError:
             if attempt == max_attempts - 1:
                 raise
-            time.sleep(0.15 * (attempt + 1))
+            time.sleep(min(1.5, 0.15 * (2**attempt)))
 
 
 @contextmanager

@@ -3083,6 +3083,12 @@ def _recover_stale_close_commands_when_manager_offline(runtime_state: dict[str, 
         return False
     if any(str(command.get("type") or "").strip() not in {"close_workbench", "force_close_workbench"} for command in processing):
         return False
+    # The daemon watchdog restarts (e.g. after a source change) leave a short
+    # offline window; recovering commands from that window re-queues closes
+    # that are still being processed and fed the restart-command storms. Only
+    # recover commands old enough that the daemon genuinely vanished on them.
+    if not all(_open_command_is_old_enough_to_recover(command) for command in processing):
+        return False
     try:
         command_queue.recover_processing_queue()
     except Exception as exc:
