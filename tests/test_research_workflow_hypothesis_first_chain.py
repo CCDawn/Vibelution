@@ -20,6 +20,8 @@ model, network, or research activity is involved.
 from __future__ import annotations
 
 import json
+
+from core.infrastructure import developer_sandbox
 from concurrent.futures import Future
 from pathlib import Path
 
@@ -1234,3 +1236,105 @@ def test_reopen_refuses_review_round_with_successful_speech(
 
         with pytest.raises(meetings.ResearchMeetingRoundError):
             chain.reopen_failed_review_meeting(team_id, meeting_id)
+
+
+def test_converged_chain_without_evidence_requests_is_collection_ready(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A review chain that legitimately concluded "no additional collection"
+    (converged, all rounds closed, zero evidence requests) must not wedge the
+    first source-collection round: the closure decision itself is the scope."""
+    team_id, agents = _hf_env(tmp_path, monkeypatch)
+    _patch_approved_question(monkeypatch)
+    runtime = _build_runtime(tmp_path)
+    try:
+        _seed_parent_run(runtime, team_id, agents["experiment_planner"])
+        agent_ids = [agents[role] for role in _ROLES]
+
+        with server_operator_scope("u-1", roles=("operator",)):
+            recorded = _open_first_meeting(team_id, agent_ids)
+            first_meeting_id = recorded["reviewMeeting"]["meetingRound"]["meetingRoundId"]
+
+            _drive_to_awaiting_approval(team_id, first_meeting_id, agent_ids[0])
+            closed = chain.close_review_meeting(
+                team_id,
+                first_meeting_id,
+                _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
+                runtime=runtime,
+            )
+            assert closed["meetingRound"]["status"] == "closed"
+
+            state = chain.chain_state(team_id, _QUESTION_ID)
+            assert state["hypothesisConverged"] is True
+            assert state["openMeetingIds"] == []
+            assert state["collectionRequestCount"] == 0
+            assert state["collectionReady"] is True
+
+            finding = _evaluate(runtime, team_id, "source_finding")
+            assert "hypothesis_first_meeting_open" not in _blocker_codes(finding)
+    finally:
+        runtime.close()
+
+
+def test_evidence_request_probe_is_scoped_per_question(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One question's evidence request must not block another question's
+    collection-ready waiver (team-wide scans are fatal for the 125-question
+    batch)."""
+    team_id, _agents = _hf_env(tmp_path, monkeypatch)
+    root = (
+        developer_sandbox.seeded_sandbox_workspace_path(
+            chain._project_root(), "teams", chain._safe_team_id(team_id)
+        )
+        / "research_workflow"
+    )
+    root.mkdir(parents=True, exist_ok=True)
+    scope = _scope_fields("agent-1")
+    meetings_path = root / "meeting_rounds.jsonl"
+    with meetings_path.open("w", encoding="utf-8") as fh:
+        for round_id, question in (
+            ("mtg-sci001", "SCI-001"),
+            ("mtg-sci002", "SCI-002"),
+        ):
+            fh.write(
+                json.dumps(
+                    {
+                        **scope,
+                        "schemaVersion": 1,
+                        "meetingRoundId": round_id,
+                        "meetingType": "hypothesis_review",
+                        "question": question,
+                        "status": "closed",
+                        "participants": ["agent-1"],
+                        "startedAt": "2026-08-20T01:00:00Z",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    decisions_path = root / "decision_records.jsonl"
+    with decisions_path.open("w", encoding="utf-8") as fh:
+        fh.write(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "decisionId": "dec-x",
+                    "decision": "request_new_evidence",
+                    "rationale": "SCI-002 需要补充证据",
+                    "decidedBy": "agent-1",
+                    "candidateRefs": [],
+                    "evidenceRefs": [],
+                    "status": "adopted",
+                    "meetingRoundId": "mtg-sci002",
+                    "scopeHash": scope["scopeHash"] if "scopeHash" in scope else "sh",
+                    "createdAt": "2026-08-20T02:00:00Z",
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
+
+    assert chain._question_requested_evidence(team_id, "SCI-001") is False
+    assert chain._question_requested_evidence(team_id, "SCI-002") is True
+    assert chain._question_requested_evidence(team_id, "") is False

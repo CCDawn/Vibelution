@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  WORKFLOW_HELPER_LINE_RELEASE,
   WORKFLOW_HELPER_LINE_THRESHOLD,
   resolveWorkflowHelperOverlayStroke,
   resolveWorkflowManualCardDrag,
@@ -112,6 +113,63 @@ describe("workflowHelperLines", () => {
     });
     expect(result.position).toEqual({ x: 32, y: 64 });
     expect(result.lines).toEqual({});
+  });
+
+  it("holds a snapped axis past the engage threshold until release", () => {
+    const others = [{ x: 400, y: 200, ...card }];
+    const engaged = resolveWorkflowManualCardDrag({
+      position: { x: 40, y: 200 + WORKFLOW_HELPER_LINE_THRESHOLD },
+      ...card,
+      others,
+    });
+    expect(engaged.position.y).toBe(200);
+    expect(engaged.hold.horizontal).toBe(200);
+
+    const stillHeld = resolveWorkflowManualCardDrag({
+      position: { x: 40, y: 200 + WORKFLOW_HELPER_LINE_THRESHOLD + 2 },
+      ...card,
+      others,
+      hold: engaged.hold,
+    });
+    expect(stillHeld.position.y).toBe(200);
+    expect(stillHeld.lines.horizontal).toBe(200);
+
+    const rawReleasedY = 200 + WORKFLOW_HELPER_LINE_RELEASE + 1;
+    const released = resolveWorkflowManualCardDrag({
+      position: { x: 40, y: rawReleasedY },
+      ...card,
+      others,
+      hold: stillHeld.hold,
+    });
+    expect(released.lines.horizontal).toBeUndefined();
+    expect(released.position.y).toBe(Math.round(rawReleasedY / 16) * 16);
+  });
+
+  it("does not chatter between a taller neighbor's top and center while held", () => {
+    const neighbor = { x: 400, y: 100, width: 180, height: 100 };
+    const dragged = { width: 300, height: 72 };
+    const engaged = resolveWorkflowManualCardDrag({
+      position: { x: 40, y: 100 },
+      ...dragged,
+      others: [neighbor],
+    });
+    expect(engaged.position.y).toBe(100);
+
+    const withoutHold = resolveWorkflowManualCardDrag({
+      position: { x: 40, y: 108 },
+      ...dragged,
+      others: [neighbor],
+    });
+    expect(withoutHold.position.y).toBe(114);
+
+    const held = resolveWorkflowManualCardDrag({
+      position: { x: 40, y: 108 },
+      ...dragged,
+      others: [neighbor],
+      hold: engaged.hold,
+    });
+    expect(held.position.y).toBe(100);
+    expect(held.lines.horizontal).toBe(100);
   });
 
   it("maps a flow-space guide into screen space with the viewport transform", () => {

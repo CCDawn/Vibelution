@@ -98,6 +98,53 @@ def _safe_team_id(team_id: str) -> str:
     )
 
 
+def _question_requested_evidence(team_id: str, question_id: str) -> bool:
+    """True when this question's persisted review decisions asked for evidence.
+
+    A ``request_new_evidence`` decision (valid or not) proves the discussion
+    wanted collection, so the collection-ready waiver must not apply.  Scope
+    by question through the decision's meeting round: decision records carry
+    no question field, and a team-wide scan would let one question's request
+    block every other question's waiver (fatal for the 125-question batch).
+    """
+    from core.web.services.team_workflow import meeting_rounds
+
+    normalized_question = str(question_id or "").strip().upper()
+    if not normalized_question:
+        return False
+    try:
+        question_by_meeting = {
+            str(meeting.get("meetingRoundId") or ""): str(
+                meeting.get("question") or ""
+            ).upper()
+            for meeting in meeting_rounds.list_meeting_rounds(team_id)["meetings"]
+        }
+    except Exception:
+        # Unreadable meetings fail closed: cannot prove the request belongs to
+        # another question, so do not waive.
+        return True
+    root = developer_sandbox.seeded_sandbox_workspace_path(
+        _project_root(),
+        "teams",
+        _safe_team_id(team_id),
+    )
+    decisions_path = root / "research_workflow" / "decision_records.jsonl"
+    if not decisions_path.exists():
+        return False
+    try:
+        records = _read_jsonl(decisions_path)
+    except OSError:
+        return False
+    return any(
+        str(record.get("decision") or "") == "request_new_evidence"
+        and question_by_meeting.get(
+            str(record.get("meetingRoundId") or ""), normalized_question
+        )
+        == normalized_question
+        for record in records
+    )
+
+
 def _storage_path(team_id: str) -> Path:
     root = developer_sandbox.seeded_sandbox_workspace_path(
         _project_root(),
@@ -1977,7 +2024,21 @@ def chain_state(team_id: str, question_id: str) -> dict[str, Any]:
         "collectionRequests": requests,
         "collectionRequestCount": len(requests),
         "pendingCollectionCount": len(pending_requests),
-        "collectionReady": bool(first_meeting_closed and requests),
+        # A closed, converged review chain that never asked for more
+        # evidence is itself a discussion decision: "no additional collection
+        # needed". Treating only handed-off requests as ready wedged live
+        # flows whose reviews legitimately concluded the anchors suffice. A
+        # round that DID request evidence (even with an invalid envelope)
+        # keeps blocking — that request must be repaired, not waived.
+        "collectionReady": bool(first_meeting_closed and requests)
+        or bool(
+            converged
+            and not open_meeting_ids
+            and first_meeting_closed
+            and not _question_requested_evidence(
+                normalized_team_id, normalized_question_id
+            )
+        ),
         "hypothesisRoundCount": len(rounds),
         "latestHypothesisRoundId": latest_round_id,
         "hypothesisConverged": converged,

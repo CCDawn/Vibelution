@@ -78,9 +78,11 @@ import {
 import {
   resolveWorkflowManualCardDrag,
   workflowHelperLinesActive,
+  workflowHelperLinesEqual,
   type WorkflowHelperLines,
   type WorkflowHelperRect,
-  type WorkflowHelperSnapResult,
+  type WorkflowHelperSnapHold,
+  type WorkflowManualCardDragResult,
 } from "./workflowHelperLines";
 import {
   resolveWorkflowNodeFocusCenter,
@@ -215,7 +217,8 @@ function resolveDraggedTaskPosition(
   node: Node,
   layoutNodes: readonly WorkflowLayoutNode[],
   positions: WorkflowManualPositions,
-): WorkflowHelperSnapResult {
+  hold?: WorkflowHelperSnapHold | null,
+): WorkflowManualCardDragResult {
   const layoutNode = layoutNodes.find((item) => item.id === node.id);
   const width = layoutNode?.width
     ?? (typeof node.measured?.width === "number" ? node.measured.width : undefined)
@@ -234,6 +237,7 @@ function resolveDraggedTaskPosition(
     width: width ?? 0,
     height: height ?? 0,
     others,
+    hold,
   });
 }
 
@@ -315,6 +319,13 @@ function WorkflowCanvasInner({
   const manualHistoryRef = useRef<WorkflowManualLayoutSnapshot[]>([]);
   const manualDragFrameRef = useRef<number | null>(null);
   const helperLinesRef = useRef<WorkflowHelperLines | null>(null);
+  const helperSnapHoldRef = useRef<WorkflowHelperSnapHold>({});
+  const lastPublishedDragRef = useRef<{
+    id: string;
+    x: number;
+    y: number;
+    lines: WorkflowHelperLines | null;
+  } | null>(null);
 
   useEffect(() => {
     const saved = manualLayoutEnabled
@@ -334,6 +345,8 @@ function WorkflowCanvasInner({
     setManualHistory([]);
     setDraggingNodeId(null);
     helperLinesRef.current = null;
+    helperSnapHoldRef.current = {};
+    lastPublishedDragRef.current = null;
     setHelperLines(null);
   }, [manualLayoutEnabled, manualScope]);
 
@@ -398,6 +411,8 @@ function WorkflowCanvasInner({
     rememberManualLayout();
     setDraggingNodeId(node.id);
     helperLinesRef.current = null;
+    helperSnapHoldRef.current = {};
+    lastPublishedDragRef.current = null;
     setHelperLines(null);
   }, [manualLayoutEnabled, rememberManualLayout]);
 
@@ -412,14 +427,37 @@ function WorkflowCanvasInner({
         [stageId]: snapWorkflowManualPosition({ x: node.position.x - anchor.x, y: node.position.y - anchor.y }),
       };
       helperLinesRef.current = null;
+      helperSnapHoldRef.current = {};
     } else {
-      const snapped = resolveDraggedTaskPosition(node, layoutNodesRef.current, manualPositionsRef.current);
+      const snapped = resolveDraggedTaskPosition(
+        node,
+        layoutNodesRef.current,
+        manualPositionsRef.current,
+        helperSnapHoldRef.current,
+      );
+      helperSnapHoldRef.current = snapped.hold;
       node.position = snapped.position;
       manualPositionsRef.current = {
         ...manualPositionsRef.current,
         [node.id]: snapped.position,
       };
       helperLinesRef.current = workflowHelperLinesActive(snapped.lines) ? snapped.lines : null;
+      const published = lastPublishedDragRef.current;
+      if (
+        published
+        && published.id === node.id
+        && published.x === snapped.position.x
+        && published.y === snapped.position.y
+        && workflowHelperLinesEqual(published.lines, helperLinesRef.current)
+      ) {
+        return;
+      }
+      lastPublishedDragRef.current = {
+        id: node.id,
+        x: snapped.position.x,
+        y: snapped.position.y,
+        lines: helperLinesRef.current,
+      };
     }
     if (manualDragFrameRef.current !== null) return;
     manualDragFrameRef.current = requestAnimationFrame(() => {
@@ -446,7 +484,12 @@ function WorkflowCanvasInner({
         };
       }
     } else {
-      const snapped = resolveDraggedTaskPosition(node, layoutNodesRef.current, manualPositionsRef.current);
+      const snapped = resolveDraggedTaskPosition(
+        node,
+        layoutNodesRef.current,
+        manualPositionsRef.current,
+        helperSnapHoldRef.current,
+      );
       node.position = snapped.position;
       manualPositionsRef.current = {
         ...manualPositionsRef.current,
@@ -455,6 +498,8 @@ function WorkflowCanvasInner({
     }
     setHelperLines(null);
     helperLinesRef.current = null;
+    helperSnapHoldRef.current = {};
+    lastPublishedDragRef.current = null;
     commitManualLayout({
       positions: manualPositionsRef.current,
       stageLabelOffsets: stageLabelOffsetsRef.current,
