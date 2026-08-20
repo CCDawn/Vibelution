@@ -89,13 +89,9 @@ def _project_root() -> Path:
 
 
 def _safe_team_id(team_id: str) -> str:
-    return (
-        "".join(
-            character if character.isalnum() or character in "._-" else "_"
-            for character in str(team_id or "")
-        )[:96]
-        or "team"
-    )
+    from core.web.services.team_workflow.storage_ids import safe_storage_component
+
+    return safe_storage_component(team_id, fallback="team")
 
 
 def _question_requested_evidence(team_id: str, question_id: str) -> bool:
@@ -134,7 +130,10 @@ def _question_requested_evidence(team_id: str, question_id: str) -> bool:
     try:
         records = _read_jsonl(decisions_path)
     except OSError:
-        return False
+        # Unreadable decision store fails closed, matching the unreadable
+        # meetings branch above: an existing evidence request cannot be
+        # disproven, so the waiver must not apply.
+        return True
     return any(
         str(record.get("decision") or "") == "request_new_evidence"
         and question_by_meeting.get(

@@ -857,6 +857,18 @@ def publish_research_project_challenge_question_output(
     if not isinstance(raw_output, dict):
         raise ValueError("output must be an object.")
     output = deepcopy(raw_output)
+    # Artifact filesystem paths are built from client-supplied ids; reject
+    # anything path-shaped (Windows backslashes, "..", separators) before
+    # any other processing — it is a store-escape write primitive.
+    from core.web.services.team_workflow.storage_ids import validate_artifact_component
+
+    _early_run = output.get("run") if isinstance(output.get("run"), dict) else {}
+    _early_question_id = _output_question_id(output)
+    _early_run_id = str(_early_run.get("run_id") or "").strip()
+    if _early_question_id:
+        validate_artifact_component(_early_question_id, field="output.identity.question_id")
+    if _early_run_id:
+        validate_artifact_component(_early_run_id, field="output.run.run_id")
     _require_writable_schema(output)
     if _output_question_id(output) != question_id:
         raise ValueError("challenge_question_publish_question_mismatch: output.question_id must match questionId.")
@@ -1138,6 +1150,18 @@ def register_challenge_question_output(team_id: str, payload: dict[str, Any]) ->
     if not isinstance(raw_output, dict):
         raise ValueError("output must be an object.")
     output = deepcopy(raw_output)
+    # Artifact filesystem paths are built from client-supplied ids; reject
+    # anything path-shaped (Windows backslashes, "..", separators) before
+    # any other processing — it is a store-escape write primitive.
+    from core.web.services.team_workflow.storage_ids import validate_artifact_component
+
+    _early_run = output.get("run") if isinstance(output.get("run"), dict) else {}
+    _early_question_id = _output_question_id(output)
+    _early_run_id = str(_early_run.get("run_id") or "").strip()
+    if _early_question_id:
+        validate_artifact_component(_early_question_id, field="output.identity.question_id")
+    if _early_run_id:
+        validate_artifact_component(_early_run_id, field="output.run.run_id")
     _require_writable_schema(output)
     _set_pending_human_gates(output)
     audit = output.setdefault("audit", {})
