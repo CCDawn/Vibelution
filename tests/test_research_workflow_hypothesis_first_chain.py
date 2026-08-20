@@ -1175,3 +1175,62 @@ def test_closed_generation_without_candidates_allows_a_fresh_attempt(
         )
         assert closed_second["candidateCount"] == 2
         assert chain.needs_candidate_generation(team_id, _QUESTION_ID) is False
+
+
+def test_failed_review_round_can_be_reopened_with_next_budgeted_round(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A review round whose every speaker failed restarts as the next round.
+
+    The blocked summarize path surfaces ``重新发起讨论`` for review rounds;
+    ``reopen_failed_review_meeting`` supersedes the failed attempt
+    (append-only, no digest) and opens round 2 with the same selection
+    lineage and the fixed candidate context in its topic."""
+    team_id, agents = _hf_env(tmp_path, monkeypatch)
+    _patch_approved_question(monkeypatch)
+    agent_ids = [agents[role] for role in _ROLES]
+
+    with server_operator_scope("u-1", roles=("operator",)):
+        failed = selections.record_hypothesis_selection(
+            team_id,
+            _selection_payload(agent_ids[0]),
+            agent_runner=_failed_generation_runner,
+        )
+        assert failed["reviewMeeting"]["status"] == "opened"
+        first_id = failed["reviewMeeting"]["meetingRound"]["meetingRoundId"]
+
+        reopened = chain.reopen_failed_review_meeting(
+            team_id,
+            first_id,
+            agent_runner=_marker_runner,
+        )
+
+    assert reopened["status"] == "reopened"
+    superseded = reopened["supersededMeetingRound"]
+    assert superseded["status"] == "closed"
+    assert superseded["recoveryReason"] == "discussion_has_no_completed_messages"
+    second = reopened["meetingRound"]
+    assert second["meetingRoundId"] != first_id
+    assert second["meetingRoundId"].endswith("-r2")
+    assert second["status"] in {"open", "summarizing"}
+    assert reopened["roundIndex"] == 2
+
+    first = meetings.get_meeting_round(team_id, first_id)["meetingRound"]
+    assert first["status"] == "closed"
+
+
+def test_reopen_refuses_review_round_with_successful_speech(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Rounds with citable completed messages must close through the
+    four-state gate, not the failed-discussion recovery."""
+    team_id, agents = _hf_env(tmp_path, monkeypatch)
+    _patch_approved_question(monkeypatch)
+    agent_ids = [agents[role] for role in _ROLES]
+
+    with server_operator_scope("u-1", roles=("operator",)):
+        recorded = _open_first_meeting(team_id, agent_ids)
+        meeting_id = recorded["reviewMeeting"]["meetingRound"]["meetingRoundId"]
+
+        with pytest.raises(meetings.ResearchMeetingRoundError):
+            chain.reopen_failed_review_meeting(team_id, meeting_id)

@@ -302,6 +302,17 @@ export function closeHypothesisReviewMeeting(
   );
 }
 
+export function reopenHypothesisReviewMeeting(
+  teamId: string,
+  meetingRoundId: string,
+): Promise<CloseReviewMeetingResponse> {
+  return writeJson<CloseReviewMeetingResponse>(
+    `${teamPrefix(teamId)}/hypothesis-first/chain/review-meetings/${encodeURIComponent(meetingRoundId)}/reopen`,
+    "POST",
+    {},
+  );
+}
+
 export function recordCollectionHandoff(
   teamId: string,
   requestId: string,

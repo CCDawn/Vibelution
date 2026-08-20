@@ -216,15 +216,44 @@ export function MeetingMessageList({
   );
 }
 
+function failedMessageReason(content: string): string {
+  const text = content.trim().toLowerCase();
+  if (text.startsWith("network_error") || text.includes("connection error")) {
+    return "Agent 发言失败 · 模型连接错误，可重新发起讨论后重试";
+  }
+  if (text.startsWith("protocol_error")) {
+    return "Agent 发言失败 · 回复格式异常，可重新发起讨论后重试";
+  }
+  if (text.startsWith("timeout") || text.includes("timed out")) {
+    return "Agent 发言失败 · 响应超时，可重新发起讨论后重试";
+  }
+  return "Agent 发言失败 · 未产生有效发言，可重新发起讨论后重试";
+}
+
 function MeetingMessageCard({ message }: { message: MeetingSourceMessage }) {
+  const status = String(message.status ?? "").trim().toLowerCase();
+  const failed = status === "failed" || status === "error";
+  const content = String(message.content ?? "");
   return (
-    <article className={css.messageCard}>
+    <article className={css.messageCard} data-failed={failed ? "true" : "false"}>
       <div className={css.messageMeta}>
         <span>{message.agentId || "unknown"}</span>
         {message.role ? <span>{message.role}</span> : null}
         <span>{message.createdAt || "—"}</span>
       </div>
-      <p>{message.content}</p>
+      {failed ? (
+        <>
+          <p>{failedMessageReason(content)}</p>
+          {content ? (
+            <details>
+              <summary>技术详情</summary>
+              <p className={css.hint}>{content}</p>
+            </details>
+          ) : null}
+        </>
+      ) : (
+        <p>{content}</p>
+      )}
     </article>
   );
 }

@@ -42,6 +42,7 @@ export type HypothesisFirstStage =
 export type HypothesisFirstCommand =
   | "create_run"
   | "open_generation"
+  | "reopen_review"
   | "draft_summary"
   | "retry_draft_summary"
   | "approve_generation_digest"

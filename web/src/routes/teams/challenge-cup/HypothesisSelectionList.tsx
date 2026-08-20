@@ -126,6 +126,33 @@ export function HypothesisSelectionList({
           </p>
         </div>
       ) : null}
+      {candidates.length > 0 ? (
+        <div className={css.summary}>
+          <span>{isZh ? "快捷操作" : "Quick actions"}</span>
+          <p>
+            <VButton
+              density="compact"
+              variant="ghost"
+              isDisabled={
+                recordMutation.isPending
+                || selectedIds.length === candidates.length
+                || candidates.length > HYPOTHESIS_SELECTION_MAX
+              }
+              disabledReason={
+                candidates.length > HYPOTHESIS_SELECTION_MAX
+                  ? (isZh
+                    ? `候选超过上限 ${HYPOTHESIS_SELECTION_MAX} 条，请手动选择`
+                    : `More than ${HYPOTHESIS_SELECTION_MAX} candidates; select manually`)
+                  : undefined
+              }
+              onPress={() =>
+                setSelectedIds(candidates.slice(0, HYPOTHESIS_SELECTION_MAX).map((c) => c.hypothesis_id))}
+            >
+              {isZh ? `全选送审（${Math.min(candidates.length, HYPOTHESIS_SELECTION_MAX)} 条）` : "Select all"}
+            </VButton>
+          </p>
+        </div>
+      ) : null}
       <div className={css.candidateList}>
         {candidates.length === 0 ? (
           <VEmptyState title={isZh ? "尚无候选假说" : "No candidate hypotheses yet"} />

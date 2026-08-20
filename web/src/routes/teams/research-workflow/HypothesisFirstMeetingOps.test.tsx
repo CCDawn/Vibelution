@@ -14,6 +14,7 @@ vi.mock("../../../api/hypothesisFirst", () => ({
   openHypothesisCandidateGeneration: vi.fn().mockResolvedValue({}),
   recordCollectionHandoff: vi.fn().mockResolvedValue({}),
   rejectMeetingDigestDraft: vi.fn().mockResolvedValue({}),
+  reopenHypothesisReviewMeeting: vi.fn().mockResolvedValue({}),
 }));
 
 import {
@@ -21,6 +22,7 @@ import {
   fetchMeetingRound,
   fetchMeetingRoundSourceMessages,
   openHypothesisCandidateGeneration,
+  reopenHypothesisReviewMeeting,
 } from "../../../api/hypothesisFirst";
 import { HypothesisFirstMeetingOps } from "./HypothesisFirstMeetingOps";
 import type { HypothesisFirstNextAction } from "./hypothesisFirstNextAction";
@@ -31,6 +33,7 @@ const mockedDraftMeetingSummary = vi.mocked(draftMeetingSummary);
 const mockedFetchMeetingRound = vi.mocked(fetchMeetingRound);
 const mockedFetchMessages = vi.mocked(fetchMeetingRoundSourceMessages);
 const mockedOpenGeneration = vi.mocked(openHypothesisCandidateGeneration);
+const mockedReopenReview = vi.mocked(reopenHypothesisReviewMeeting);
 
 function meetingRound(status: string) {
   return {
@@ -167,6 +170,43 @@ describe("HypothesisFirstMeetingOps automatic organization", () => {
       await Promise.resolve();
     });
     expect(mockedDraftMeetingSummary).toHaveBeenCalledTimes(1);
+  });
+
+  it("restarts a review discussion when every speaker failed", async () => {
+    mockedFetchMeetingRound.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      meetingRound: { ...meetingRound("open"), meetingType: "hypothesis_review" },
+    });
+    mockedFetchMessages.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      meetingRoundId: "meeting-1",
+      messageCount: 2,
+      messages: [
+        { messageId: "m-1", status: "failed", content: "network_error: litellm.InternalServerError" },
+        { messageId: "m-2", status: "failed", content: "network_error: litellm.InternalServerError" },
+      ],
+    });
+
+    render({
+      ...AUTO_ACTION,
+      stage: "review_ready_to_summarize",
+      command: "draft_summary",
+      commandLabel: "整理本轮结论",
+    });
+    await act(async () => {
+      await vi.waitFor(() => expect(container.textContent).toContain("重新发起评审讨论"));
+    });
+    expect(mockedDraftMeetingSummary).not.toHaveBeenCalled();
+
+    const restart = [...container.querySelectorAll("button")]
+      .find((button) => button.textContent?.includes("重新发起评审讨论"));
+    await act(async () => {
+      restart?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await vi.waitFor(() => expect(mockedReopenReview).toHaveBeenCalledTimes(1));
+    });
+    expect(mockedReopenReview).toHaveBeenCalledWith("team-1", "meeting-1");
   });
 
   it("restarts a candidate discussion when every speaker failed", async () => {

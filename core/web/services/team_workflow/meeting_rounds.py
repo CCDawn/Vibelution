@@ -453,18 +453,25 @@ def completed_meeting_source_messages(
     ]
 
 
-def supersede_empty_candidate_generation_meeting(
+_EMPTY_DISCUSSION_RECOVERY_TYPES = {
+    "hypothesis_candidate_generation",
+    "hypothesis_review",
+}
+
+
+def supersede_empty_discussion_meeting(
     team_id: str,
     meeting_round_id: str,
     *,
     actor: str = "system:failed-discussion-recovery",
 ) -> dict[str, Any]:
-    """Close one terminal candidate attempt that produced no citable message.
+    """Close one terminal discussion attempt that produced no citable message.
 
-    This recovery record deliberately carries no digest or decisions: it is an
-    abandoned generation attempt, not an approved research conclusion.  A new
-    per-attempt meeting can then be opened without rewriting the append-only
-    history of the failed attempt.
+    Applies to candidate-generation and hypothesis-review rounds alike.  This
+    recovery record deliberately carries no digest or decisions: it is an
+    abandoned attempt, not an approved research conclusion.  A follow-up
+    meeting (fresh generation attempt or next review round) can then open
+    without rewriting the append-only history of the failed attempt.
     """
 
     from core.web.services.team_service import assert_team_exists
@@ -486,11 +493,12 @@ def supersede_empty_candidate_generation_meeting(
             "meetingRound": meeting_round,
             "storagePath": str(_rounds_path(normalized_team_id)),
         }
-    if str(meeting_round.get("meetingType") or "").strip().lower() != (
-        "hypothesis_candidate_generation"
+    if (
+        str(meeting_round.get("meetingType") or "").strip().lower()
+        not in _EMPTY_DISCUSSION_RECOVERY_TYPES
     ):
         raise ResearchMeetingRoundError(
-            "only a candidate-generation meeting may use empty-discussion recovery"
+            "only discussion meetings may use empty-discussion recovery"
         )
     if status not in {"open", "summarizing"}:
         raise ResearchMeetingRoundError(
