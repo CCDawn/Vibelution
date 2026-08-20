@@ -41,24 +41,37 @@ describe("workflowManualLayout", () => {
     persistWorkflowManualLayout(scope, {
       positions: { collect: { x: 41, y: 71 } },
       stageLabelOffsets: { research: { x: 17, y: -17 } },
+      edgeAnchors: {},
       locked: true,
     }, storage);
     expect(readWorkflowManualLayout(scope, storage)).toEqual({
       positions: { collect: { x: 48, y: 64 } },
       stageLabelOffsets: { research: { x: 16, y: -16 } },
+      edgeAnchors: {},
       locked: true,
     });
 
     storage.setItem(workflowManualLayoutStorageKey(scope), "{invalid");
-    expect(readWorkflowManualLayout(scope, storage)).toEqual({ positions: {}, stageLabelOffsets: {}, locked: false });
+    expect(readWorkflowManualLayout(scope, storage)).toEqual({
+      positions: {},
+      stageLabelOffsets: {},
+      edgeAnchors: {},
+      locked: false,
+    });
   });
 
   it("does not reuse a saved arrangement after the graph node set changes", () => {
     const storage = memoryStorage();
-    persistWorkflowManualLayout(scope, { positions: { collect: { x: 32, y: 64 } }, stageLabelOffsets: {}, locked: false }, storage);
+    persistWorkflowManualLayout(scope, {
+      positions: { collect: { x: 32, y: 64 } },
+      stageLabelOffsets: {},
+      edgeAnchors: {},
+      locked: false,
+    }, storage);
     expect(readWorkflowManualLayout({ ...scope, nodeIds: ["collect", "review"] }, storage)).toEqual({
       positions: {},
       stageLabelOffsets: {},
+      edgeAnchors: {},
       locked: false,
     });
   });
@@ -76,6 +89,27 @@ describe("workflowManualLayout", () => {
     expect(readWorkflowManualLayout(scope, storage)).toEqual({
       positions: { collect: { x: 32, y: 64 } },
       stageLabelOffsets: {},
+      edgeAnchors: {},
+      locked: false,
+    });
+  });
+
+  it("persists visual edge magnets without changing graph endpoints", () => {
+    const storage = memoryStorage();
+    persistWorkflowManualLayout(scope, {
+      positions: {},
+      stageLabelOffsets: {},
+      edgeAnchors: {
+        "collect->design": { targetSide: "SOUTH", targetFraction: 0.75 },
+      },
+      locked: false,
+    }, storage);
+    expect(readWorkflowManualLayout(scope, storage)).toEqual({
+      positions: {},
+      stageLabelOffsets: {},
+      edgeAnchors: {
+        "collect->design": { targetSide: "SOUTH", targetFraction: 0.75 },
+      },
       locked: false,
     });
   });

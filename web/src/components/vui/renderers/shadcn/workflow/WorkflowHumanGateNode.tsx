@@ -6,6 +6,7 @@ import type {
   WorkflowPortSide,
 } from "../../../product/workflow/workflowCanvasTypes";
 import { workflowNodeTooltip } from "./workflowCanvasAccessibility";
+import { readWorkflowReconnectMagnets } from "./workflowEdgeAnchors";
 import { WorkflowNodeChrome } from "./WorkflowNodeChrome";
 
 export function WorkflowHumanGateNode(props: NodeProps) {
@@ -43,6 +44,7 @@ export function WorkflowHumanGateNode(props: NodeProps) {
         </span>
       }
       layoutMode={layoutMode}
+      reconnectMagnets={readWorkflowReconnectMagnets(props.data)}
     />
   );
 }

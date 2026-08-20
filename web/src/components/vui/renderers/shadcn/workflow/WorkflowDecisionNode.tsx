@@ -6,6 +6,7 @@ import type {
   WorkflowPortSide,
 } from "../../../product/workflow/workflowCanvasTypes";
 import { workflowNodeTooltip } from "./workflowCanvasAccessibility";
+import { readWorkflowReconnectMagnets } from "./workflowEdgeAnchors";
 import { WorkflowNodeChrome } from "./WorkflowNodeChrome";
 
 /** Outcome label map for decision source handles (definition contract). */
@@ -57,6 +58,7 @@ export function WorkflowDecisionNode(props: NodeProps) {
         </span>
       }
       layoutMode={layoutMode}
+      reconnectMagnets={readWorkflowReconnectMagnets(props.data)}
     />
   );
 }

@@ -4,6 +4,12 @@
  * ELK remains the initial / auto-arrange geometry authority.
  */
 
+import {
+  cloneWorkflowEdgeAnchors,
+  parseWorkflowEdgeAnchors,
+  type WorkflowEdgeAnchors,
+} from "./workflowEdgeAnchors";
+
 export const WORKFLOW_MANUAL_LAYOUT_GRID = 16;
 export const WORKFLOW_EDGE_TERMINAL_STUB = 32;
 export const WORKFLOW_STAGE_LABEL_WIDTH = 240;
@@ -24,18 +30,27 @@ export type WorkflowManualLayoutScope = {
 export type WorkflowManualLayoutState = {
   positions: WorkflowManualPositions;
   stageLabelOffsets: WorkflowManualPositions;
+  edgeAnchors: WorkflowEdgeAnchors;
   locked: boolean;
 };
 
-type StoredWorkflowManualLayoutV1 = Omit<WorkflowManualLayoutState, "stageLabelOffsets"> & {
+type StoredWorkflowManualLayoutV1 = Omit<WorkflowManualLayoutState, "stageLabelOffsets" | "edgeAnchors"> & {
   version: 1;
   structureKey: string;
   runId: string | null;
   nodeIds: string[];
 };
 
-type StoredWorkflowManualLayoutV2 = WorkflowManualLayoutState & {
+type StoredWorkflowManualLayoutV2 = Omit<WorkflowManualLayoutState, "edgeAnchors"> & {
   version: 2;
+  structureKey: string;
+  runId: string | null;
+  nodeIds: string[];
+  stageIds: string[];
+};
+
+type StoredWorkflowManualLayoutV3 = WorkflowManualLayoutState & {
+  version: 3;
   structureKey: string;
   runId: string | null;
   nodeIds: string[];
@@ -44,7 +59,12 @@ type StoredWorkflowManualLayoutV2 = WorkflowManualLayoutState & {
 
 type StorageLike = Pick<Storage, "getItem" | "setItem">;
 
-const EMPTY_STATE: WorkflowManualLayoutState = { positions: {}, stageLabelOffsets: {}, locked: false };
+const EMPTY_STATE: WorkflowManualLayoutState = {
+  positions: {},
+  stageLabelOffsets: {},
+  edgeAnchors: {},
+  locked: false,
+};
 
 export function snapWorkflowManualPosition(
   position: WorkflowManualPosition,
@@ -68,9 +88,11 @@ export function readWorkflowManualLayout(
   try {
     const value = storage.getItem(workflowManualLayoutStorageKey(scope));
     if (!value) return EMPTY_STATE;
-    const stored = JSON.parse(value) as Partial<StoredWorkflowManualLayoutV1 | StoredWorkflowManualLayoutV2>;
+    const stored = JSON.parse(value) as Partial<
+      StoredWorkflowManualLayoutV1 | StoredWorkflowManualLayoutV2 | StoredWorkflowManualLayoutV3
+    >;
     if (
-      (stored.version !== 1 && stored.version !== 2)
+      (stored.version !== 1 && stored.version !== 2 && stored.version !== 3)
       || stored.structureKey !== scope.structureKey
       || stored.runId !== scope.runId
       || !Array.isArray(stored.nodeIds)
@@ -88,7 +110,7 @@ export function readWorkflowManualLayout(
       }
     }
     const stageLabelOffsets: WorkflowManualPositions = {};
-    if (stored.version === 2) {
+    if (stored.version === 2 || stored.version === 3) {
       if (!Array.isArray(stored.stageIds) || !sameNodeSet(stored.stageIds, scope.stageIds) || !isRecord(stored.stageLabelOffsets)) {
         return EMPTY_STATE;
       }
@@ -99,7 +121,8 @@ export function readWorkflowManualLayout(
         }
       }
     }
-    return { positions, stageLabelOffsets, locked: stored.locked };
+    const edgeAnchors = stored.version === 3 ? parseWorkflowEdgeAnchors(stored.edgeAnchors) : {};
+    return { positions, stageLabelOffsets, edgeAnchors, locked: stored.locked };
   } catch {
     return EMPTY_STATE;
   }
@@ -123,14 +146,15 @@ export function persistWorkflowManualLayout(
       .filter(([id, position]) => validStageIds.has(id) && isPosition(position))
       .map(([id, position]) => [id, snapWorkflowManualPosition(position)]),
   );
-  const payload: StoredWorkflowManualLayoutV2 = {
-    version: 2,
+  const payload: StoredWorkflowManualLayoutV3 = {
+    version: 3,
     structureKey: scope.structureKey,
     runId: scope.runId,
     nodeIds: [...scope.nodeIds].sort(),
     stageIds: [...scope.stageIds].sort(),
     positions,
     stageLabelOffsets,
+    edgeAnchors: cloneWorkflowEdgeAnchors(state.edgeAnchors ?? {}),
     locked: state.locked,
   };
   try {
@@ -146,12 +170,16 @@ export function cloneWorkflowManualPositions(positions: WorkflowManualPositions)
   );
 }
 
-export type WorkflowManualLayoutSnapshot = Pick<WorkflowManualLayoutState, "positions" | "stageLabelOffsets">;
+export type WorkflowManualLayoutSnapshot = Pick<
+  WorkflowManualLayoutState,
+  "positions" | "stageLabelOffsets" | "edgeAnchors"
+>;
 
 export function cloneWorkflowManualLayoutSnapshot(snapshot: WorkflowManualLayoutSnapshot): WorkflowManualLayoutSnapshot {
   return {
     positions: cloneWorkflowManualPositions(snapshot.positions),
     stageLabelOffsets: cloneWorkflowManualPositions(snapshot.stageLabelOffsets),
+    edgeAnchors: cloneWorkflowEdgeAnchors(snapshot.edgeAnchors ?? {}),
   };
 }
 

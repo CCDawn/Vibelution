@@ -102,14 +102,15 @@ pathState：`idle | traversed | active | attention | danger` — 仅由 nodeRuns
 - 普通节点与决策节点都按真实 ELK port 为每条出边、入边渲染独立 Handle。决策出边继续用 `rerun/promote/rollback/stop` 等语义 id；普通出边使用完整 ELK port id。禁止多条边复用匿名 source Handle。自动布局把同侧 Handle 放到相对磁铁上（短边 `0.25/0.5/0.75`，长边 `1/6…5/6`），入边和出边共用同一侧磁铁集合并按对端卡片位置换点，避免交叉或叠在同一点；画布不可连线，因此不绘制未占用磁铁。没有布局锚点时回退到 `1/(n+1)` 分布。
 - 节点拖动时，边每帧读取 React Flow 当前端点，并使用本地正交回退路线实时跟随；源端和目标端都先沿 Handle 方向保留 `32px` 笔直引线，再进入主体通道，避免线头重合后互相遮挡。
 - 松手后由 `@tisoap/react-flow-smart-edge@5.0.0` 的 `SmartEdgeProvider` / `useSmartEdgePath` 执行避障正交路由；provider 使用 step preset，节点净空 `12px`、栅格通道约 `12px`。Worker 等待、失败或正在拖动时必须回退到上述本地路线，不得让边消失或停留在旧端点。
-- 阶段标签默认不再绘制，也不作为路由障碍。拖任务时边仍实时跟随；自动整理清空节点位置；锁定禁止任务拖动。
-- 浏览器本地布局状态统一为 v2：`positions + stageLabelOffsets + locked + structureKey + runId + nodeIds + stageIds`。读取兼容 v1（旧节点位置保留、标签偏移为空）；自动整理同时清空节点位置和历史标签偏移。锁定只禁止任务拖动。
+- 阶段标签默认不再绘制，也不作为路由障碍。拖任务时边仍实时跟随；自动整理清空节点位置和箭头磁铁覆盖；锁定禁止任务拖动和箭头改挂。
+- 浏览器本地布局状态为 v3：`positions + stageLabelOffsets + edgeAnchors + locked + structureKey + runId + nodeIds + stageIds`。读取兼容 v1/v2（旧节点位置保留，缺省磁铁覆盖为空）。`edgeAnchors` 只改箭头在已连接卡片上的磁铁，不改 source/target。自动整理同时清空节点位置、标签偏移和磁铁覆盖。锁定禁止任务拖动和箭头改挂。
+- 蛇形画布解锁后，可拖现有箭头端点改挂到**同一张卡片**的磁铁；拖向其他卡片会被拒绝。改挂过程中才绘制未占用磁铁。运行图拓扑仍不可编辑。
 
 ### 状态/交互约束
 
 - `@xyflow/react` 仅允许在 `renderers/shadcn/workflow/**`（入口 `ShadcnWorkflowCanvas.tsx`）
 - 业务路由禁止 import renderer 或 xyflow
-- `stage-columns` 默认不可拖；`serpentine` 允许任务节点做浏览器本地展示调整，但仍不可连线、不可修改运行图拓扑
+- `stage-columns` 默认不可拖；`serpentine` 允许任务节点做浏览器本地展示调整，仍不可改运行图拓扑。解锁时可把箭头改挂到同一张卡片的磁铁，不可接到另一张卡片。
 - MiniMap 默认关闭；长流程由生产工作台显式 `showMiniMap` 开启
 - 单击节点 → 选中；点空白 → 取消；键盘可聚焦节点（aria-label 含名称/类型/状态）
 - 控件：放大、缩小、适应全部、定位当前工作

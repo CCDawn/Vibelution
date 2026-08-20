@@ -191,6 +191,16 @@ describe("ShadcnWorkflowCanvas structure (P1-1)", () => {
     expect(rfProps.nodesDraggable).toBe(true);
     expect(rfProps.snapToGrid).toBe(true);
     expect(rfProps.snapGrid).toEqual([16, 16]);
+    expect(rfProps.edgesReconnectable).toBe(true);
+    expect(rfProps.nodesConnectable).toBe(false);
+    expect(typeof rfProps.onReconnect).toBe("function");
+    expect(typeof rfProps.isValidConnection).toBe("function");
+    expect(rfProps.isValidConnection({
+      source: "protocol",
+      target: "review",
+      sourceHandle: null,
+      targetHandle: "workflow-snap:SOUTH:0.5000",
+    })).toBe(false);
     const controlsElement = (Array.isArray(rfProps.children) ? rfProps.children : [rfProps.children]).find(
       (child: React.ReactElement) => child.type === WorkflowCanvasControls,
     );

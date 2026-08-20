@@ -5,6 +5,7 @@ import type {
   WorkflowPortSide,
 } from "../../../product/workflow/workflowCanvasTypes";
 import { workflowNodeTooltip } from "./workflowCanvasAccessibility";
+import { readWorkflowReconnectMagnets } from "./workflowEdgeAnchors";
 import { WorkflowNodeChrome } from "./WorkflowNodeChrome";
 
 export function WorkflowSystemTaskNode(props: NodeProps) {
@@ -30,6 +31,7 @@ export function WorkflowSystemTaskNode(props: NodeProps) {
       title={workflowNodeTooltip({ label, status, attempt })}
       className="bg-[var(--vui-surface-row)]"
       layoutMode={layoutMode}
+      reconnectMagnets={readWorkflowReconnectMagnets(props.data)}
     />
   );
 }

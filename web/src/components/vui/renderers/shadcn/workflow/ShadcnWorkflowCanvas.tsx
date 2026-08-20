@@ -14,6 +14,7 @@ import {
   ReactFlowProvider,
   useNodesInitialized,
   useReactFlow,
+  type Connection,
   type Edge,
   type Node,
   type NodeProps,
@@ -65,6 +66,12 @@ import {
   type WorkflowManualLayoutSnapshot,
   type WorkflowManualPositions,
 } from "./workflowManualLayout";
+import {
+  applyWorkflowEdgeAnchorsToPortSides,
+  resolveWorkflowEdgeAnchorPatch,
+  workflowReconnectKeepsEndpoints,
+  type WorkflowEdgeAnchors,
+} from "./workflowEdgeAnchors";
 
 export type ShadcnWorkflowCanvasProps = {
   graph: WorkflowLayoutInput;
@@ -246,11 +253,25 @@ function WorkflowCanvasInner({
   );
   const [manualPositions, setManualPositions] = useState<WorkflowManualPositions>({});
   const [stageLabelOffsets, setStageLabelOffsets] = useState<WorkflowManualPositions>({});
+  const [edgeAnchors, setEdgeAnchors] = useState<WorkflowEdgeAnchors>({});
   const [manualLayoutLocked, setManualLayoutLocked] = useState(false);
   const [manualHistory, setManualHistory] = useState<WorkflowManualLayoutSnapshot[]>([]);
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
+  const [reconnectSession, setReconnectSession] = useState<{
+    edgeId: string;
+    handleType: "source" | "target";
+    source: string;
+    target: string;
+  } | null>(null);
   const manualPositionsRef = useRef<WorkflowManualPositions>({});
   const stageLabelOffsetsRef = useRef<WorkflowManualPositions>({});
+  const edgeAnchorsRef = useRef<WorkflowEdgeAnchors>({});
+  const reconnectSessionRef = useRef<{
+    edgeId: string;
+    handleType: "source" | "target";
+    source: string;
+    target: string;
+  } | null>(null);
   const stageAnchorByIdRef = useRef<Record<string, { x: number; y: number }>>({});
   const manualLockedRef = useRef(false);
   const manualHistoryRef = useRef<WorkflowManualLayoutSnapshot[]>([]);
@@ -259,13 +280,17 @@ function WorkflowCanvasInner({
   useEffect(() => {
     const saved = manualLayoutEnabled
       ? readWorkflowManualLayout(manualScope)
-      : { positions: {}, stageLabelOffsets: {}, locked: false };
+      : { positions: {}, stageLabelOffsets: {}, edgeAnchors: {}, locked: false };
     manualPositionsRef.current = saved.positions;
     stageLabelOffsetsRef.current = saved.stageLabelOffsets;
+    edgeAnchorsRef.current = saved.edgeAnchors;
+    reconnectSessionRef.current = null;
     manualLockedRef.current = saved.locked;
     manualHistoryRef.current = [];
     setManualPositions(saved.positions);
     setStageLabelOffsets(saved.stageLabelOffsets);
+    setEdgeAnchors(saved.edgeAnchors);
+    setReconnectSession(null);
     setManualLayoutLocked(saved.locked);
     setManualHistory([]);
     setDraggingNodeId(null);
@@ -278,6 +303,10 @@ function WorkflowCanvasInner({
   useEffect(() => {
     stageLabelOffsetsRef.current = stageLabelOffsets;
   }, [stageLabelOffsets]);
+
+  useEffect(() => {
+    edgeAnchorsRef.current = edgeAnchors;
+  }, [edgeAnchors]);
 
   useEffect(() => {
     manualLockedRef.current = manualLayoutLocked;
@@ -297,9 +326,11 @@ function WorkflowCanvasInner({
     const next = cloneWorkflowManualLayoutSnapshot(snapshot);
     manualPositionsRef.current = next.positions;
     stageLabelOffsetsRef.current = next.stageLabelOffsets;
+    edgeAnchorsRef.current = next.edgeAnchors;
     manualLockedRef.current = locked;
     setManualPositions(next.positions);
     setStageLabelOffsets(next.stageLabelOffsets);
+    setEdgeAnchors(next.edgeAnchors);
     setManualLayoutLocked(locked);
     persistWorkflowManualLayout(manualScope, { ...next, locked });
   }, [manualScope]);
@@ -310,6 +341,7 @@ function WorkflowCanvasInner({
       cloneWorkflowManualLayoutSnapshot({
         positions: manualPositionsRef.current,
         stageLabelOffsets: stageLabelOffsetsRef.current,
+        edgeAnchors: edgeAnchorsRef.current,
       }),
     ].slice(-MANUAL_LAYOUT_HISTORY_LIMIT);
     manualHistoryRef.current = next;
@@ -370,6 +402,7 @@ function WorkflowCanvasInner({
     commitManualLayout({
       positions: manualPositionsRef.current,
       stageLabelOffsets: stageLabelOffsetsRef.current,
+      edgeAnchors: edgeAnchorsRef.current,
     });
     setDraggingNodeId(null);
   }, [commitManualLayout, manualLayoutEnabled]);
@@ -387,9 +420,10 @@ function WorkflowCanvasInner({
     if (
       Object.keys(manualPositionsRef.current).length > 0
       || Object.keys(stageLabelOffsetsRef.current).length > 0
+      || Object.keys(edgeAnchorsRef.current).length > 0
     ) {
       rememberManualLayout();
-      commitManualLayout({ positions: {}, stageLabelOffsets: {} });
+      commitManualLayout({ positions: {}, stageLabelOffsets: {}, edgeAnchors: {} });
     }
     requestAnimationFrame(() => fitAll());
   }, [commitManualLayout, fitAll, rememberManualLayout]);
@@ -398,6 +432,7 @@ function WorkflowCanvasInner({
     commitManualLayout({
       positions: manualPositionsRef.current,
       stageLabelOffsets: stageLabelOffsetsRef.current,
+      edgeAnchors: edgeAnchorsRef.current,
     }, !manualLockedRef.current);
   }, [commitManualLayout]);
 
@@ -406,6 +441,7 @@ function WorkflowCanvasInner({
       draggingNodeId !== null
       || Object.keys(manualPositions).length > 0
       || Object.keys(stageLabelOffsets).length > 0
+      || Object.keys(edgeAnchors).length > 0
     );
 
   // P1-5: measured node types report rendered DOM sizes back to the layout
@@ -562,10 +598,21 @@ function WorkflowCanvasInner({
             blockedReason: node.blockedReason,
             description: node.description,
             primaryRoleKey: node.primaryRoleKey,
-            portSides: node.portSides,
+            portSides: applyWorkflowEdgeAnchorsToPortSides(
+              node.id,
+              node.portSides,
+              layout.edges,
+              edgeAnchors,
+            ),
             sourceHandleIds: node.sourceHandleIds,
             decisionOutcomeIds: node.decisionOutcomeIds,
             layoutMode,
+            reconnectMagnets:
+              reconnectSession?.handleType === "target" && reconnectSession.target === node.id
+                ? { type: "target" as const }
+                : reconnectSession?.handleType === "source" && reconnectSession.source === node.id
+                  ? { type: "source" as const }
+                  : undefined,
           },
           style: { width: node.width, height: node.height },
           selectable: true,
@@ -587,6 +634,9 @@ function WorkflowCanvasInner({
       stageIndexById,
       stageAnchorById,
       stageLabelOffsets,
+      edgeAnchors,
+      reconnectSession,
+      layout.edges,
     ],
   );
 
@@ -627,12 +677,12 @@ function WorkflowCanvasInner({
           gateKind: edge.gateKind,
           sections: edge.sections,
           labelBounds: edge.labelBounds,
-          manualRouteActive,
+          manualRouteActive: manualRouteActive || Boolean(edgeAnchors[edge.id]),
           manualDragging: draggingNodeId !== null,
         },
         zIndex: 1,
       })),
-    [draggingNodeId, layout.edges, manualRouteActive],
+    [draggingNodeId, edgeAnchors, layout.edges, manualRouteActive],
   );
 
   const onNodeClick = useCallback(
@@ -645,6 +695,64 @@ function WorkflowCanvasInner({
   const onPaneClick = useCallback(() => {
     onSelectNode?.(null);
   }, [onSelectNode]);
+
+  const edgeReconnectEnabled = manualLayoutEnabled && !manualLayoutLocked;
+
+  const isValidConnection = useCallback((connection: Connection | Edge) => {
+    const session = reconnectSessionRef.current;
+    if (!session) return false;
+    return connection.source === session.source && connection.target === session.target;
+  }, []);
+
+  const onReconnectStart = useCallback((
+    _event: unknown,
+    edge: Edge,
+    handleType: "source" | "target",
+  ) => {
+    if (!edgeReconnectEnabled) return;
+    const session = {
+      edgeId: edge.id,
+      handleType,
+      source: edge.source,
+      target: edge.target,
+    };
+    reconnectSessionRef.current = session;
+    setReconnectSession(session);
+  }, [edgeReconnectEnabled]);
+
+  const onReconnect = useCallback((oldEdge: Edge, connection: Connection) => {
+    const session = reconnectSessionRef.current;
+    if (!session || session.edgeId !== oldEdge.id) return;
+    if (!workflowReconnectKeepsEndpoints(oldEdge, connection)) return;
+    const nodeId = session.handleType === "source" ? oldEdge.source : oldEdge.target;
+    const layoutNode = layout.nodes.find((node) => node.id === nodeId);
+    const portSides = applyWorkflowEdgeAnchorsToPortSides(
+      nodeId,
+      layoutNode?.portSides,
+      layout.edges,
+      edgeAnchorsRef.current,
+    );
+    const patch = resolveWorkflowEdgeAnchorPatch({
+      handleType: session.handleType,
+      connection,
+      portSides,
+    });
+    if (!patch) return;
+    rememberManualLayout();
+    commitManualLayout({
+      positions: manualPositionsRef.current,
+      stageLabelOffsets: stageLabelOffsetsRef.current,
+      edgeAnchors: {
+        ...edgeAnchorsRef.current,
+        [oldEdge.id]: { ...edgeAnchorsRef.current[oldEdge.id], ...patch },
+      },
+    });
+  }, [commitManualLayout, layout.edges, layout.nodes, rememberManualLayout]);
+
+  const onReconnectEnd = useCallback(() => {
+    reconnectSessionRef.current = null;
+    setReconnectSession(null);
+  }, []);
 
   const fillHost = height === "100%";
 
@@ -673,7 +781,13 @@ function WorkflowCanvasInner({
           minZoom={layoutMode === "serpentine" ? 0.28 : 0.35}
           maxZoom={1.6}
           nodesDraggable={manualLayoutEnabled && !manualLayoutLocked}
-          nodesConnectable={false}
+          nodesConnectable={reconnectSession !== null}
+          edgesReconnectable={edgeReconnectEnabled}
+          reconnectRadius={24}
+          isValidConnection={isValidConnection}
+          onReconnectStart={onReconnectStart}
+          onReconnect={onReconnect}
+          onReconnectEnd={onReconnectEnd}
           elementsSelectable
           snapToGrid={manualLayoutEnabled}
           snapGrid={[16, 16]}

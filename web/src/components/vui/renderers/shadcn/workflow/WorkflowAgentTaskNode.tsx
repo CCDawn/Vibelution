@@ -5,6 +5,7 @@ import type {
   WorkflowPortSide,
 } from "../../../product/workflow/workflowCanvasTypes";
 import { workflowNodeTooltip } from "./workflowCanvasAccessibility";
+import { readWorkflowReconnectMagnets } from "./workflowEdgeAnchors";
 import { WorkflowNodeChrome } from "./WorkflowNodeChrome";
 
 export function WorkflowAgentTaskNode(props: NodeProps) {
@@ -32,6 +33,7 @@ export function WorkflowAgentTaskNode(props: NodeProps) {
       portSides={portSides}
       title={workflowNodeTooltip({ label, status, primaryAgentId: agent || undefined, attempt })}
       layoutMode={layoutMode}
+      reconnectMagnets={readWorkflowReconnectMagnets(props.data)}
     />
   );
 }

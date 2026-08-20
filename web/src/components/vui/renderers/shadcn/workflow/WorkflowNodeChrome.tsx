@@ -28,6 +28,12 @@ import type {
 } from "../../../product/workflow/workflowCanvasTypes";
 import { resolveNodeStatusVisual } from "./workflowCanvasState";
 import { workflowNodeAriaLabel } from "./workflowCanvasAccessibility";
+import {
+  WORKFLOW_PORT_SIDES,
+  workflowSnapHandleId,
+  workflowSnapSlotsForPortSide,
+  type WorkflowReconnectMagnets,
+} from "./workflowEdgeAnchors";
 
 export type WorkflowNodeChromeProps = {
   label: string;
@@ -50,6 +56,8 @@ export type WorkflowNodeChromeProps = {
   /** ELK port sides keyed by handle id; drives Handle placement (P1-4). */
   portSides?: WorkflowPortSides;
   layoutMode?: "stage-columns" | "serpentine";
+  /** Temporary magnets while reconnecting an existing edge on this card. */
+  reconnectMagnets?: WorkflowReconnectMagnets;
 };
 
 function sideToPosition(side: WorkflowPortSide): Position {
@@ -229,6 +237,7 @@ export function WorkflowNodeChrome({
   decisionLayout = false,
   portSides,
   layoutMode = "stage-columns",
+  reconnectMagnets,
 }: WorkflowNodeChromeProps) {
   const visual = resolveNodeStatusVisual(status);
   const aria = workflowNodeAriaLabel({
@@ -301,6 +310,7 @@ export function WorkflowNodeChrome({
                 id={id}
                 type="target"
                 position={sideToPosition(side)}
+                isConnectable={false}
                 style={workflowHandleSnapStyle(side, fraction)}
                 className={handleClass}
               />
@@ -310,6 +320,7 @@ export function WorkflowNodeChrome({
           <Handle
             type="target"
             position={sideToPosition(targetSide)}
+            isConnectable={false}
             className={handleClass}
           />
         )
@@ -392,6 +403,7 @@ export function WorkflowNodeChrome({
                     id={handleId}
                     type="source"
                     position={sideToPosition(side)}
+                    isConnectable={false}
                     style={workflowHandleSnapStyle(
                       side,
                       handleFraction(portSides?.sourceAnchor, handleId, index, handles.length),
@@ -407,8 +419,27 @@ export function WorkflowNodeChrome({
         <Handle
           type="source"
           position={sideToPosition(singleSourceSide)}
+          isConnectable={false}
           className={handleClass}
         />
+      ) : null}
+      {reconnectMagnets ? (
+        <>
+          {WORKFLOW_PORT_SIDES.flatMap((side) =>
+            workflowSnapSlotsForPortSide(side).map((fraction) => (
+              <Handle
+                key={workflowSnapHandleId(side, fraction)}
+                id={workflowSnapHandleId(side, fraction)}
+                type={reconnectMagnets.type}
+                position={sideToPosition(side)}
+                isConnectable
+                style={{ ...workflowHandleSnapStyle(side, fraction), zIndex: 5 }}
+                className="!h-2.5 !w-2.5 !border-2 !border-[var(--accent-cool)] !bg-[var(--vui-surface-panel)]"
+                data-workflow-snap="true"
+              />
+            )),
+          )}
+        </>
       ) : null}
     </div>
   );

@@ -20,11 +20,24 @@ vi.mock("@xyflow/react", async () => {
   const Position = { Left: "left", Right: "right", Top: "top", Bottom: "bottom" };
   return {
     Position,
-    Handle: ({ type, position, id, style }: { type?: string; position?: string; id?: string; style?: { top?: string; left?: string } }) =>
+    Handle: ({
+      type,
+      position,
+      id,
+      style,
+      ...rest
+    }: {
+      type?: string;
+      position?: string;
+      id?: string;
+      style?: { top?: string; left?: string };
+      "data-workflow-snap"?: string;
+    }) =>
       React.createElement("span", {
         "data-handle": `${type}:${position}`,
         "data-handle-id": id ?? "",
         "data-snap": style?.top ?? style?.left ?? "",
+        "data-workflow-snap": rest["data-workflow-snap"],
       }),
   };
 });
@@ -245,6 +258,22 @@ describe("WorkflowDecisionNode render (P1-4)", () => {
     });
     expect(markup).not.toContain("data-workflow-snap");
     expect(markup).toContain('data-snap="50%"');
+  });
+
+  it("paints snap magnets only while reconnecting an existing edge", () => {
+    const markup = renderNode(WorkflowAgentTaskNode, {
+      label: "执行",
+      status: "pending",
+      layoutMode: "serpentine",
+      reconnectMagnets: { type: "target" },
+      portSides: {
+        source: { "out:east:one": "EAST" },
+        target: {},
+        sourceAnchor: { "out:east:one": 0.5 },
+      },
+    });
+    expect(markup).toContain("data-workflow-snap");
+    expect(markup).toContain("workflow-snap:EAST:");
   });
 
   it("mirrors every real ELK target port as an id-bearing handle (P1-4)", () => {
