@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "preview:stream": "vite --config vite.design-preview.config.ts --host 127.0.0.1 --port 5179",
     "build": "tsc -b && vite build",
     "build:probe": "node scripts/checkElkWorkerHandshake.mjs --build-only",
     "check:bundle": "node scripts/checkBundleBudget.mjs",
