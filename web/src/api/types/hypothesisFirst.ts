@@ -242,6 +242,8 @@ export type MeetingSourceMessage = {
   messageId?: string;
   agentId?: string;
   role?: string;
+  /** Human-facing identity from the room (e.g. 「A014 · 科研协调」). */
+  speakerTitle?: string;
   content?: string;
   createdAt?: string;
   roomId?: string;

@@ -8,6 +8,6 @@ export default {
   empty: "block min-w-0 truncate [font-size:var(--vui-font-sm)] text-[var(--fg-secondary)]",
   phase: "min-w-0 shrink truncate [font-size:var(--vui-font-xs)] font-semibold text-[var(--fg-secondary)]",
   actions: "ms-auto flex shrink-0 items-center justify-end gap-2",
-  details: "w-[9.5rem] shrink-0",
+  details: "min-w-0 shrink",
   primary: "min-w-0 max-w-[16rem]",
 } as const;

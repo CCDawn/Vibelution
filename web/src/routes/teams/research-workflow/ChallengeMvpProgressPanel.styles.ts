@@ -33,6 +33,8 @@ export default {
   locator: "break-all font-mono text-[10px] text-[var(--fg-secondary)]",
   questionSection: "grid gap-2",
   sectionHeader: "flex flex-wrap items-center justify-between gap-2 [font-size:var(--vui-font-2xs)] text-[var(--fg-secondary)] [&>strong]:text-[var(--fg-primary)]",
+  sectionHeaderActions: "flex shrink-0 items-center gap-2",
+  devCollapsedHint: "m-0 [font-size:var(--vui-font-2xs)] text-[var(--fg-secondary)]",
   empty: "h-auto w-full border-0 bg-transparent",
   list: "m-0 list-none space-y-1 p-0",
   item: "flex items-center justify-between gap-2 rounded border border-[var(--vui-border-subtle)] px-2 py-1.5 [font-size:var(--vui-font-2xs)]",

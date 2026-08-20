@@ -50,7 +50,7 @@ describe("ResearchWorkflowToolbar", () => {
     } as React.ComponentProps<typeof ResearchWorkflowToolbar>);
     expect(empty).toContain("选择题目开始研究");
     expect(empty).toContain("SCI-096 · 假说待生成");
-    expect(empty).toContain("查看详情");
+    expect(empty).toContain("题目进度");
     expect(empty).not.toContain("状态");
     expect(empty).not.toContain("科研团队");
     expect(empty).not.toContain("切换假说");
@@ -100,6 +100,7 @@ describe("ResearchWorkflowToolbar", () => {
     } as React.ComponentProps<typeof ResearchWorkflowToolbar>);
     expect(running).toContain("新建运行");
     expect(running).toContain("切换实验");
+    expect(running).toContain("运行记录");
     expect(running).toContain("前往假说选择");
     expect(running).toContain("假说准备 · 2/5");
   });
@@ -115,7 +116,8 @@ describe("ResearchWorkflowToolbar", () => {
       onSelectExperiment: vi.fn(),
       onOpenPanel: vi.fn(),
     } as React.ComponentProps<typeof ResearchWorkflowToolbar>, "en");
-    expect(running).toContain("Run history");
+    expect(running).toContain("History");
+    expect(running).toContain("Progress");
     expect(running).toContain("Hypothesis prep · 3/5");
     expect(running).not.toContain("Status");
     expect(running).not.toContain("Timeline");
@@ -136,8 +138,8 @@ describe("ResearchWorkflowToolbar", () => {
       onNavigateCurrent: vi.fn(),
     } as React.ComponentProps<typeof ResearchWorkflowToolbar>);
     expect(running).toContain("前往确认候选");
-    expect(running).toContain("查看详情");
-    expect(running).not.toContain("新建运行");
+    expect(running).toContain("题目进度");
+    expect(running).toContain("运行记录");
     expect(running).not.toContain("生成纪要");
     expect(running).not.toContain("确认并结束本轮");
   });
@@ -239,13 +241,14 @@ describe("ResearchWorkflowToolbar", () => {
     expect(markup).toContain("ms-auto");
     expect(markup).toContain("flex-nowrap");
     expect(markup).toContain("overflow-hidden");
-    expect(markup).toContain("查看详情");
+    expect(markup).toContain("data-vui=\"tabs\"");
     expect(markup).toContain("前往确认候选");
     expect(markup).toContain("data-vui=\"research-workflow-phase\"");
     expect(markup).not.toContain("grid-cols-[minmax(10rem,1fr)");
     expect(markup).not.toContain("grid-cols-[minmax(12rem,1fr)");
     expect(markup).not.toContain("md:ms-auto");
-    expect(markup).not.toContain("flex-wrap");
+    const rootClass = markup.match(/data-vui="toolbar"[^>]*class="([^"]*)"/)?.[1] ?? "";
+    expect(rootClass).not.toContain("flex-wrap");
   });
 
   it("keeps the details and create-run action on narrow layouts when no run exists", () => {
@@ -257,12 +260,14 @@ describe("ResearchWorkflowToolbar", () => {
     } as React.ComponentProps<typeof ResearchWorkflowToolbar>);
 
     expect(empty).toContain("选择题目开始研究");
-    expect(empty).toContain("查看详情");
+    expect(empty).toContain("题目进度");
+    expect(empty).toContain("成员与讨论");
     expect(empty).toContain("假说待生成");
     expect(empty).toContain("flex-nowrap");
+    const emptyRootClass = empty.match(/data-vui="toolbar"[^>]*class="([^"]*)"/)?.[1] ?? "";
+    expect(emptyRootClass).not.toContain("flex-wrap");
     expect(empty).toContain("max-w-[24rem]");
     expect(empty).toContain("overflow-hidden");
-    expect(empty).not.toContain("flex-wrap");
   });
 
   it("keeps a leading team switcher on the same row", () => {
