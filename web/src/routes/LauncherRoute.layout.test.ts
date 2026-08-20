@@ -637,6 +637,8 @@ describe("LauncherRoute layout contract", () => {
     expect(registryBannerSource).toContain("复制诊断");
     expect(registryBannerSource).toContain("再核对");
     expect(registryBannerSource).toContain("<VButton");
+    expect(registryBannerSource).toContain("facts={facts}");
+    expect(registryBannerSource).toContain("buildLauncherRegistryNoticeFacts");
     expect(routeSource).toContain("refreshLauncherState");
     expect(registryBannerSource).toContain("copyLauncherRegistryDiagnostics");
     expect(registryDiagnosticsSource).toContain("portLeaseStatus");
@@ -644,8 +646,9 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("端口冲突");
     expect(routeSource).toContain("最近自动清理");
     expect(routeSource).toContain("Worktree dry-run");
-    expect(routeSource).toContain("Orphan 判据");
-    expect(routeSource).toContain("worktree 仅 dry-run");
+    expect(routeSource).not.toContain("Registry 与残留治理");
+    expect(routeSource).not.toContain("orphan 判据");
+    expect(routeSource).not.toContain("worktree 仅 dry-run");
     expect(routeSource).not.toContain("taskkill");
     expect(routeSource).not.toContain("force-kill");
   });

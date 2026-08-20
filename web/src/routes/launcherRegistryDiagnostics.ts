@@ -3,23 +3,7 @@ import type { LauncherRegistryReconciliationItem, LauncherStateSnapshotV1 } from
 export const LAUNCHER_REGISTRY_DIAGNOSTIC_CHAR_LIMIT = 4000;
 export const LAUNCHER_REGISTRY_DIAGNOSTIC_ITEM_LIMIT = 8;
 
-function compactDate(value: string | undefined, locale: string) {
-  const text = String(value || "").trim();
-  if (!text) {
-    return "";
-  }
-  const date = new Date(text);
-  if (Number.isNaN(date.getTime())) {
-    return text.slice(0, 40);
-  }
-  return new Intl.DateTimeFormat(locale, {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).format(date);
-}
+const RESIDUE_CLASSIFICATIONS = ["conflict", "orphan", "stale", "unknown"] as const;
 
 function clip(value: string, limit: number) {
   const text = value.trim();
@@ -29,6 +13,28 @@ function clip(value: string, limit: number) {
   return `${text.slice(0, Math.max(0, limit - 1))}…`;
 }
 
+function classificationLabel(classification: (typeof RESIDUE_CLASSIFICATIONS)[number], uiLang: string): string {
+  if (uiLang !== "zh") {
+    return classification;
+  }
+  switch (classification) {
+    case "conflict":
+      return "冲突";
+    case "orphan":
+      return "孤儿";
+    case "stale":
+      return "过期";
+    case "unknown":
+      return "未知";
+  }
+}
+
+export type LauncherRegistryNoticeFact = {
+  key: string;
+  label: string;
+  value: string;
+};
+
 export function isUnknownOrQuarantinedLease(item: LauncherRegistryReconciliationItem): boolean {
   const lease = String(item.portLeaseStatus || "").trim().toLowerCase();
   return item.classification === "unknown" || lease === "quarantined" || lease === "reclaimable";
@@ -37,22 +43,81 @@ export function isUnknownOrQuarantinedLease(item: LauncherRegistryReconciliation
 export function formatUnknownLeaseDiagnostics(
   items: LauncherRegistryReconciliationItem[],
   uiLang: string,
-  locale: string,
+  _locale?: string,
 ): string {
-  const rows = items
-    .filter(isUnknownOrQuarantinedLease)
-    .map((item) => [
-      item.instanceId,
-      item.classification,
-      item.portLeaseStatus,
-      item.reasons.slice(0, 4).join("/"),
-      item.firstObservedAt ? compactDate(item.firstObservedAt, locale) : "",
-      item.nextReconcileAt ? compactDate(item.nextReconcileAt, locale) : "",
-    ].filter(Boolean).join(" · "));
+  const rows = items.filter(isUnknownOrQuarantinedLease);
   if (rows.length === 0) {
     return uiLang === "zh" ? "无" : "None";
   }
-  return rows.slice(0, 6).join("; ");
+  const reclaimable = rows.filter((item) => String(item.portLeaseStatus || "").toLowerCase() === "reclaimable").length;
+  const quarantined = rows.filter((item) => String(item.portLeaseStatus || "").toLowerCase() === "quarantined").length;
+  const parts = [String(rows.length)];
+  if (reclaimable > 0 && reclaimable !== rows.length) {
+    parts.push(uiLang === "zh" ? `可回收 ${reclaimable}` : `reclaimable ${reclaimable}`);
+  } else if (reclaimable === rows.length) {
+    parts.push(uiLang === "zh" ? "可回收" : "reclaimable");
+  }
+  if (quarantined > 0) {
+    parts.push(uiLang === "zh" ? `隔离 ${quarantined}` : `quarantined ${quarantined}`);
+  }
+  return parts.join(" · ");
+}
+
+export function buildLauncherRegistryNoticeFacts(input: {
+  uiLang: string;
+  cleanup: LauncherStateSnapshotV1["cleanup"];
+}): LauncherRegistryNoticeFact[] {
+  const facts: LauncherRegistryNoticeFact[] = [];
+  const items = input.cleanup.classifications;
+  const residue = RESIDUE_CLASSIFICATIONS
+    .map((classification) => {
+      const count = items.filter((item) => item.classification === classification).length;
+      return count > 0 ? `${classificationLabel(classification, input.uiLang)} ${count}` : "";
+    })
+    .filter(Boolean);
+  if (residue.length) {
+    facts.push({
+      key: "residue",
+      label: input.uiLang === "zh" ? "残留" : "Residue",
+      value: residue.join(" · "),
+    });
+  }
+
+  if (input.cleanup.portConflicts.length) {
+    facts.push({
+      key: "ports",
+      label: input.uiLang === "zh" ? "端口冲突" : "Port conflicts",
+      value: input.cleanup.portConflicts
+        .map((item) => `${item.instanceId}${item.ports.length ? `:${item.ports.join("/")}` : ""}`)
+        .join(", "),
+    });
+  }
+
+  if (input.cleanup.cleanedCount > 0) {
+    facts.push({
+      key: "cleaned",
+      label: input.uiLang === "zh" ? "已清理" : "Cleaned",
+      value: String(input.cleanup.cleanedCount),
+    });
+  }
+
+  if (input.cleanup.removedInstanceIds.length) {
+    facts.push({
+      key: "removed",
+      label: input.uiLang === "zh" ? "已移除" : "Removed",
+      value: String(input.cleanup.removedInstanceIds.length),
+    });
+  }
+
+  if (input.cleanup.worktreeDryRun.length) {
+    facts.push({
+      key: "dry-run",
+      label: "dry-run",
+      value: String(input.cleanup.worktreeDryRun.length),
+    });
+  }
+
+  return facts;
 }
 
 export function buildLauncherRegistryDiagnosticText(input: {
@@ -72,6 +137,10 @@ export function buildLauncherRegistryDiagnosticText(input: {
     if (snapshot.nextReconcileAt) {
       lines.push(`nextReconcileAt=${snapshot.nextReconcileAt}`);
     }
+  }
+  const residue = formatUnknownLeaseDiagnostics(input.items, input.uiLang);
+  if (residue !== "无" && residue !== "None") {
+    lines.push(`unknownOrLease=${residue}`);
   }
   const items = input.items.slice(0, LAUNCHER_REGISTRY_DIAGNOSTIC_ITEM_LIMIT);
   if (items.length === 0) {
