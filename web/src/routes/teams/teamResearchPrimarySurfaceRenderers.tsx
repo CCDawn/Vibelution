@@ -13,6 +13,7 @@ import { createExperimentController } from "./createExperimentController";
 import { workflowStateLabel } from "./workflowPresentation";
 import type { ResearchStageWorkspaceView } from "./researchWorkspaceModel";
 import { ResearchProcessWorkspace } from "./research-workflow/ResearchProcessWorkspace";
+import { TeamShellToolbar } from "./TeamShellToolbar";
 
 /** Loose context bag from TeamsRoute. */
 export type ResearchPrimarySurfaceRenderContext = {
@@ -29,6 +30,9 @@ export function createResearchPrimarySurfaceRenderers(ctx: ResearchPrimarySurfac
     challengeCupResearchTeamSelected,
     knowledgeExpansionWorkflowTeamSelected,
     selectedTeam,
+    visibleTeams,
+    effectiveTeamId,
+    selectTeamRecord,
     selectedTeamMemoryMembers,
     researchTeamDetailDegraded,
     selectedTeamDetailLoading,
@@ -224,6 +228,26 @@ export function createResearchPrimarySurfaceRenderers(ctx: ResearchPrimarySurfac
         teamId={teamId}
         teamName={String(selectedTeam?.name || "")}
         linkedChatRoomId={String(selectedTeam?.linkedChatRoomId || "")}
+        toolbarLeading={(
+          <TeamShellToolbar
+            lang={lang}
+            teamName={String(selectedTeam?.name || "")}
+            purpose={String(selectedTeam?.purpose || "")}
+            teamOptions={(visibleTeams ?? []).map((team: { teamId: string; name: string; purpose?: string }) => ({
+              id: team.teamId,
+              label: team.name,
+              description: team.purpose || team.teamId,
+            }))}
+            selectedTeamId={String(effectiveTeamId || "")}
+            onSelectTeamId={(teamId) => {
+              const team = (visibleTeams ?? []).find((item: { teamId: string }) => item.teamId === teamId);
+              if (team) {
+                selectTeamRecord(team);
+              }
+            }}
+            switchClassName="min-w-0 w-full"
+          />
+        )}
       />
     );
   }

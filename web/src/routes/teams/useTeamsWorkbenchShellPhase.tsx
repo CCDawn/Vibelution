@@ -40,7 +40,6 @@ import {
   resolveResearchStageUnlock,
 } from "./researchPrimaryActionModel";
 import {
-  teamShellKindLabel,
   teamShellNodesFromCanvas,
   teamShellStagesFromBoardColumns,
 } from "./teamShellStatusModel";
@@ -511,9 +510,7 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     : (lang === "zh"
       ? "点节点看执行者。切团队用顶栏，不要在左栏找名单。"
       : "Select a node to inspect the assignee. Switch teams in the toolbar.");
-  const statusCta = researchWorkflowTeamSelected && researchPrimaryAction
-    ? researchPrimaryActionLabel(researchPrimaryAction, lang)
-    : undefined;
+  const statusCta = undefined;
 
   const teamShellRail = renderTeamsShellRail({
     lang,
@@ -536,7 +533,6 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     lang,
     teamName: selectedTeam?.name ?? "",
     purpose: selectedTeam?.purpose ?? "",
-    kindLabel: teamShellKindLabel(selectedTeam, lang),
     teamShellMode,
     onModeChange: selectTeamShellMode,
     onRefreshTeams: () => void teamsQuery.refetch(),
@@ -555,7 +551,6 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     onSelectTeam: selectTeamRecord,
     teamName: selectedTeam?.name ?? "",
     purpose: selectedTeam?.purpose ?? "",
-    kindLabel: teamShellKindLabel(selectedTeam, lang),
     teamShellMode,
     onModeChange: selectTeamShellMode,
     onRefreshTeams: () => void teamsQuery.refetch(),

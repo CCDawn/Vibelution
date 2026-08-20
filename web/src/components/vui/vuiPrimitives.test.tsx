@@ -251,6 +251,14 @@ describe("VUI foundation primitives", () => {
     expect(markup).toContain('data-test-id="plain-card-child"');
   });
 
+  it("keeps a single row when wrap is disabled", () => {
+    const markup = renderToStaticMarkup(
+      <VToolbar ariaLabel="Chrome" wrap={false}>Keep</VToolbar>,
+    );
+    expect(markup).toContain("flex-nowrap");
+    expect(markup).not.toContain("flex-wrap ");
+  });
+
   it("keeps button geometry content-sized unless a caller opts into full width", () => {
     const compactMarkup = renderToStaticMarkup(
       <VToolbar ariaLabel="Button fit">

@@ -59,11 +59,13 @@ describe("TeamResearchBoardPrimarySurface extraction contract", () => {
   });
 
   it("keeps challenge workflow chrome singular and enables the shared VUI rail collapse", () => {
-    expect(boardPageSource).toContain("toolbar={p.teamShellToolbar}");
-    expect(boardPageSource).not.toContain("p.challengeCupResearchTeamSelected ? undefined : p.teamShellToolbar");
+    expect(boardPageSource).toContain("p.challengeCupResearchTeamSelected ? undefined : p.teamShellToolbar");
     expect(boardPageSource).toContain("collapse:");
     expect(boardPageSource).toContain("收起状态栏");
     expect(boardPageSource).toContain("展开状态栏");
+    expect(readFileSync(new URL("./teamResearchPrimarySurfaceRenderers.tsx", import.meta.url), "utf8")).toContain("toolbarLeading");
+    expect(readFileSync(new URL("./research-workflow/ResearchProcessWorkspace.tsx", import.meta.url), "utf8")).toContain("leading={toolbarLeading}");
+    expect(readFileSync(new URL("./useTeamsWorkbenchShellPhase.tsx", import.meta.url), "utf8")).toContain("const statusCta = undefined");
   });
 
   it("surface progressive-fills overview shell; empty only when settled without workflow", () => {

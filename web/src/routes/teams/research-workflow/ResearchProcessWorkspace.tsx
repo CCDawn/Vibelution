@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, type ReactNode } from "react";
 
 import { WORKBENCH_LAYOUT_IDS } from "../../../components/layout/workbenchLayoutIds";
 import { VCanvasWorkbenchPage } from "../../../components/vui";
@@ -40,6 +40,8 @@ export type ResearchProcessWorkspaceProps = {
   teamId: string;
   teamName?: string;
   linkedChatRoomId?: string;
+  /** Team switcher rendered in the process toolbar so chrome stays a single row. */
+  toolbarLeading?: ReactNode;
 };
 
 // Stable identity so the memoized canvas pane does not re-render when no run
@@ -50,6 +52,7 @@ export function ResearchProcessWorkspace({
   teamId,
   teamName = "",
   linkedChatRoomId = "",
+  toolbarLeading,
 }: ResearchProcessWorkspaceProps) {
   const location = useResearchWorkflowWorkspace(teamId);
   const runState = useResearchWorkflowRun(teamId, location.runId);
@@ -222,8 +225,10 @@ export function ResearchProcessWorkspace({
         ariaLabel="科研流程工作区"
         title="科研流程"
         hideHeader
+        toolbarClassName="!flex-nowrap overflow-hidden"
         toolbar={(
           <ResearchWorkflowToolbar
+            leading={toolbarLeading}
             identity={experimentIdentity}
             runId={location.runId}
             runStatus={runState.run?.status || runState.projection?.run.status || ""}
