@@ -1234,3 +1234,41 @@ def test_reopen_refuses_review_round_with_successful_speech(
 
         with pytest.raises(meetings.ResearchMeetingRoundError):
             chain.reopen_failed_review_meeting(team_id, meeting_id)
+
+
+def test_converged_chain_without_evidence_requests_is_collection_ready(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A review chain that legitimately concluded "no additional collection"
+    (converged, all rounds closed, zero evidence requests) must not wedge the
+    first source-collection round: the closure decision itself is the scope."""
+    team_id, agents = _hf_env(tmp_path, monkeypatch)
+    _patch_approved_question(monkeypatch)
+    runtime = _build_runtime(tmp_path)
+    try:
+        _seed_parent_run(runtime, team_id, agents["experiment_planner"])
+        agent_ids = [agents[role] for role in _ROLES]
+
+        with server_operator_scope("u-1", roles=("operator",)):
+            recorded = _open_first_meeting(team_id, agent_ids)
+            first_meeting_id = recorded["reviewMeeting"]["meetingRound"]["meetingRoundId"]
+
+            _drive_to_awaiting_approval(team_id, first_meeting_id, agent_ids[0])
+            closed = chain.close_review_meeting(
+                team_id,
+                first_meeting_id,
+                _closure_payload(agent_ids, [_select_decision(agent_ids[0])]),
+                runtime=runtime,
+            )
+            assert closed["meetingRound"]["status"] == "closed"
+
+            state = chain.chain_state(team_id, _QUESTION_ID)
+            assert state["hypothesisConverged"] is True
+            assert state["openMeetingIds"] == []
+            assert state["collectionRequestCount"] == 0
+            assert state["collectionReady"] is True
+
+            finding = _evaluate(runtime, team_id, "source_finding")
+            assert "hypothesis_first_meeting_open" not in _blocker_codes(finding)
+    finally:
+        runtime.close()
