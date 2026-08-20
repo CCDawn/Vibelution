@@ -2,9 +2,9 @@
  * Program v2 and question-result progress inside the research workflow canvas.
  *
  * The Program v2 / question sections are read-only backend projections. The DEV
- * control section is team-scoped and DEV-only: readiness gates, dev-1/dev-5
- * fixture checkpoints and the legal next action come from the DEV controls
- * snapshot. Mouse actions are strictly gated by the persisted nextLegalAction
+ * control section is team-scoped fixture UI shown on Launcher workbench as well
+ * as Vite dev: readiness gates, dev-1/dev-5 fixture checkpoints and the legal
+ * next action come from the DEV controls snapshot. Mouse actions are strictly gated by the persisted nextLegalAction
  * and mutation pending state; repair states only surface a blocking hint and
  * never advance to the next stage. No real experiment, Qwen, CUDA/GPU, DANDI,
  * network collection or formal submission is ever started.
@@ -138,7 +138,7 @@ export function ChallengeMvpProgressPanel({
   const devControlsQuery = useQuery({
     queryKey: devControlsKey,
     queryFn: () => fetchChallengeCupDevControlSnapshot(teamId),
-    enabled: import.meta.env.DEV && Boolean(teamId.trim()),
+    enabled: Boolean(teamId.trim()),
     staleTime: 15_000,
   });
   const tokenUsageQuery = useQuery({
@@ -344,7 +344,6 @@ export function ChallengeMvpProgressPanel({
       ) : null}
       <ChallengeCatalogOverview teamId={teamId} lang={lang} onOpenQuestion={onOpenQuestion} />
 
-      {import.meta.env.DEV ? (
       <section className={styles.devControls} aria-label={zh ? "开发态就绪与批次控制" : "DEV readiness and batch control"}>
         <div className={styles.sectionHeader}>
           <strong>{zh ? "开发态就绪 / 批次 / 证据 locator" : "DEV readiness / batches / locators"}</strong>
@@ -591,7 +590,6 @@ export function ChallengeMvpProgressPanel({
           </div>
         ) : null}
       </section>
-      ) : null}
 
       <section className={styles.questionSection} aria-label={zh ? "单题结果" : "Question results"}>
         <div className={styles.sectionHeader}>

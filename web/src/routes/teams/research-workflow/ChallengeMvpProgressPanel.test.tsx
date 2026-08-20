@@ -836,10 +836,13 @@ describe("ChallengeMvpProgressPanel", () => {
     expect(panelSource).not.toContain('"program-v2"');
   });
 
-  it("gates the DEV readiness/fixture/repair controls behind import.meta.env.DEV", () => {
-    expect(panelSource).toContain("import.meta.env.DEV");
-    expect(panelSource).toMatch(/import\.meta\.env\.DEV && Boolean\(teamId/);
-    expect(panelSource).toMatch(/\{import\.meta\.env\.DEV \?\s*\(\s*<section className=\{styles\.devControls\}/);
+  it("keeps DEV readiness/fixture/repair controls in the production workbench panel", () => {
+    expect(panelSource).not.toContain("import.meta.env.DEV");
+    expect(panelSource).toMatch(/enabled:\s*Boolean\(teamId\.trim\(\)\)/);
+    expect(panelSource).toContain('<section className={styles.devControls}');
+    expect(panelSource).toContain('data-dev-controls="readiness"');
+    expect(panelSource).toContain("data-dev-controls={planId}");
+    expect(panelSource).toContain('(["dev-1", "dev-5"] as const)');
   });
 
   it("clicks the full readiness → dev-1 → dev-5(maxItems=2) → resume(null) loop", async () => {
