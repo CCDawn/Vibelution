@@ -28,6 +28,7 @@ import type {
   MeetingRoundMutationResponse,
   MeetingSourceMessagesResponse,
   MeetingSummaryDraftRequest,
+  ReviewNextRoundResponse,
   ReviewRoundLinkListResponse,
 } from "./types/hypothesisFirst";
 
@@ -322,6 +323,18 @@ export function reopenHypothesisReviewMeeting(
     `${teamPrefix(teamId)}/hypothesis-first/chain/review-meetings/${encodeURIComponent(meetingRoundId)}/reopen`,
     "POST",
     {},
+  );
+}
+
+export function openNextHypothesisReviewRound(
+  teamId: string,
+  meetingRoundId: string,
+  budget?: number,
+): Promise<ReviewNextRoundResponse> {
+  return writeJson<ReviewNextRoundResponse>(
+    `${teamPrefix(teamId)}/hypothesis-first/chain/review-meetings/${encodeURIComponent(meetingRoundId)}/next-round`,
+    "POST",
+    { budget },
   );
 }
 

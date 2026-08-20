@@ -214,7 +214,7 @@ def test_selection_payload_requires_scope_and_candidates() -> None:
             "question": "SCI-096",
             "agentId": "operator",
             "questionId": "SCI-096",
-            "selectedCandidateIds": ["hyp-a"],
+            "selectedCandidateIds": ["hyp-a", "hyp-b"],
             "decidedBy": "operator",
         }
     )
@@ -524,7 +524,7 @@ def test_selection_routes_map_domain_error_to_422(monkeypatch) -> None:
             "question": "SCI-096",
             "agentId": "operator",
             "questionId": "SCI-096",
-            "selectedCandidateIds": ["hyp-a"],
+            "selectedCandidateIds": ["hyp-a", "hyp-b"],
             "decidedBy": "operator",
         },
     )
@@ -1293,3 +1293,58 @@ def test_routes_map_team_not_found_to_404(monkeypatch) -> None:
     client = _client()
     response = client.get("/api/teams/team-x/workflow-orchestration/meeting-rounds")
     assert response.status_code == 404
+
+
+def test_next_review_round_route_passes_payload_and_maps_domain_error(monkeypatch) -> None:
+    calls: list[dict] = []
+
+    def fake_open(team_id, *, previous_meeting_round_id, budget=None, **_kwargs):
+        calls.append(
+            {
+                "teamId": team_id,
+                "previousMeetingRoundId": previous_meeting_round_id,
+                "budget": budget,
+            }
+        )
+        return {
+            "schemaVersion": 2,
+            "teamId": team_id,
+            "status": "opened",
+            "selectionId": "hsel-1",
+            "previousMeetingRoundId": previous_meeting_round_id,
+            "roundIndex": 2,
+            "budget": 3,
+            "meetingRound": {"meetingRoundId": "mr-next"},
+        }
+
+    monkeypatch.setattr(hypothesis_first_chain, "open_next_review_meeting", fake_open)
+    client = _client()
+    response = client.post(
+        "/api/teams/team-1/workflow-orchestration/hypothesis-first/chain/review-meetings/mr-1/next-round",
+        json={"budget": 4},
+    )
+    assert response.status_code == 200, response.text
+    assert calls == [
+        {"teamId": "team-1", "previousMeetingRoundId": "mr-1", "budget": 4}
+    ]
+    body = response.json()
+    assert body["status"] == "opened"
+    assert body["roundIndex"] == 2
+
+    no_body = client.post(
+        "/api/teams/team-1/workflow-orchestration/hypothesis-first/chain/review-meetings/mr-1/next-round",
+    )
+    assert no_body.status_code == 200
+    assert calls[-1]["budget"] is None
+
+    def failing_open(*_args, **_kwargs):
+        raise hypothesis_first_chain.HypothesisFirstChainError(
+            "previous meeting round is still open"
+        )
+
+    monkeypatch.setattr(hypothesis_first_chain, "open_next_review_meeting", failing_open)
+    blocked = client.post(
+        "/api/teams/team-1/workflow-orchestration/hypothesis-first/chain/review-meetings/mr-1/next-round",
+        json={"budget": 2},
+    )
+    assert blocked.status_code == 422

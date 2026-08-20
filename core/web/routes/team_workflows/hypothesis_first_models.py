@@ -32,7 +32,7 @@ class HypothesisSelectionRecordPayload(BaseModel):
     agentId: str = Field(..., min_length=1, max_length=200)
     mode: str = Field("formal", max_length=50)
     questionId: str = Field(..., min_length=1, max_length=200)
-    selectedCandidateIds: list[str] = Field(..., min_length=1, max_length=16)
+    selectedCandidateIds: list[str] = Field(..., min_length=2, max_length=16)
     previousSelectionId: str = Field("", max_length=200)
     decidedBy: str = Field(..., min_length=1, max_length=200)
     createdAt: str = Field("", max_length=50)
@@ -149,6 +149,32 @@ class ReviewReopenPayload(BaseModel):
     """Payload for ``POST .../chain/review-meetings/{id}/reopen``."""
 
     budget: int = Field(3, ge=1, le=5, description="人工提高的轮次预算，上限 5")
+
+
+class ReviewNextRoundPayload(BaseModel):
+    """Payload for ``POST .../chain/review-meetings/{id}/next-round``."""
+
+    budget: int = Field(3, ge=1, le=5, description="人工提高的轮次预算，上限 5")
+
+
+class ReviewNextRoundResponse(BaseModel):
+    """Result of opening the next review round for a selection.
+
+    ``status`` is ``opened``、``reused`` 或 ``budget_exhausted``；``meetingRound``
+    仅在新开/复用时返回。
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    schemaVersion: int = 0
+    teamId: str = ""
+    status: str = ""
+    selectionId: str = ""
+    previousMeetingRoundId: str = ""
+    collectionRequestId: str = ""
+    roundIndex: int = 0
+    budget: int = 0
+    meetingRound: dict[str, Any] = Field(default_factory=dict)
 
 
 class MeetingClosureApprovePayload(BaseModel):

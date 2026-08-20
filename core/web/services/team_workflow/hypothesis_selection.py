@@ -372,6 +372,13 @@ def record_hypothesis_selection(
             "selectedCandidateIds must exist in the approved question artifact candidates: "
             + ", ".join(unknown)
         )
+    if len(candidates) < 2:
+        raise ContractValidationError(
+            "selectedCandidateIds must keep at least two candidates: the review round "
+            "needs a comparable pair and a single-candidate selection can never "
+            "generate a hypothesis round; reselect with two or more candidates, or "
+            "rerun candidate generation when fewer exist"
+        )
     previous_selection_id = str(request.get("previousSelectionId") or "").strip()
     now = _utc_now()
     record: dict[str, Any] = {

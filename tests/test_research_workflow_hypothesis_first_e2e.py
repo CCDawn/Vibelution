@@ -1004,7 +1004,7 @@ def test_reselection_chain_and_round_lineage_walk(
             with pytest.raises(ResearchHypothesisSelectionError):
                 selections.record_hypothesis_selection(
                     team_id,
-                    _selection_payload(agent_ids[0], selectedCandidateIds=["hyp-c"]),
+                    _selection_payload(agent_ids[0], selectedCandidateIds=["hyp-c", "hyp-b"]),
                     agent_runner=_marker_runner,
                 )
             with pytest.raises(ResearchHypothesisSelectionError):
@@ -1012,7 +1012,7 @@ def test_reselection_chain_and_round_lineage_walk(
                     team_id,
                     _selection_payload(
                         agent_ids[0],
-                        selectedCandidateIds=["hyp-c"],
+                        selectedCandidateIds=["hyp-c", "hyp-b"],
                         previousSelectionId="hfsel-does-not-exist",
                     ),
                     agent_runner=_marker_runner,

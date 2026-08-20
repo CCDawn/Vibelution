@@ -476,6 +476,18 @@ export type CloseReviewMeetingResponse = {
   storagePath?: string;
 };
 
+export type ReviewNextRoundResponse = {
+  schemaVersion: number;
+  teamId: string;
+  status: string;
+  selectionId: string;
+  previousMeetingRoundId: string;
+  collectionRequestId: string;
+  roundIndex: number;
+  budget: number;
+  meetingRound: MeetingRoundRecord;
+};
+
 export type CollectionHandoffResponse = {
   schemaVersion: number;
   teamId: string;

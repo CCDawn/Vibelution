@@ -116,7 +116,7 @@ def _selection(**overrides):
     payload = {
         **_scope(),
         "questionId": "SCI-096",
-        "selectedCandidateIds": ["hyp-a"],
+        "selectedCandidateIds": ["hyp-a", "hyp-b"],
         "decidedBy": "operator",
     }
     payload.update(overrides)
@@ -148,7 +148,7 @@ def test_record_single_selection_persists_append_only_record(tmp_path, monkeypat
     record = created["selection"]
     assert record["selectionId"].startswith("hsel-")
     assert record["questionId"] == "SCI-096"
-    assert record["selectedCandidateIds"] == ["hyp-a"]
+    assert record["selectedCandidateIds"] == ["hyp-a", "hyp-b"]
     assert record["previousSelectionId"] == ""
     assert record["decidedBy"] == "operator"
     assert record["scopeHash"] == scope_hash_for(
@@ -170,7 +170,7 @@ def test_record_single_selection_persists_append_only_record(tmp_path, monkeypat
     latest = selections.get_latest_hypothesis_selection(
         team_id, "SCI-096", scope=_read_scope()
     )
-    assert latest["selection"]["selectedCandidateIds"] == ["hyp-a"]
+    assert latest["selection"]["selectedCandidateIds"] == ["hyp-a", "hyp-b"]
 
 
 def test_record_multi_selection_preserves_candidate_order(tmp_path, monkeypatch):
@@ -215,6 +215,10 @@ def test_record_selection_rejects_empty_and_oversized_candidate_lists(
     with pytest.raises(ContractValidationError, match="empty entries"):
         selections.record_hypothesis_selection(
             team_id, _selection(selectedCandidateIds=["hyp-00", "  "])
+        )
+    with pytest.raises(ContractValidationError, match="at least two candidates"):
+        selections.record_hypothesis_selection(
+            team_id, _selection(selectedCandidateIds=["hyp-00"])
         )
     with pytest.raises(ContractValidationError, match="must be unique"):
         selections.record_hypothesis_selection(
@@ -283,21 +287,22 @@ def test_record_selection_catalog_cold_start_uses_ledger_candidates(tmp_path, mo
             "teamId": team_id,
             "candidates": [
                 {"candidateId": "cand-1", "statement": "s", "rationale": "r"},
+                {"candidateId": "cand-2", "statement": "s2", "rationale": "r2"},
             ],
         },
     )
 
     created = selections.record_hypothesis_selection(
         team_id,
-        _selection(questionId="SCI-097", selectedCandidateIds=["cand-1"]),
+        _selection(questionId="SCI-097", selectedCandidateIds=["cand-1", "cand-2"]),
     )
     assert created["status"] == "created"
-    assert created["selection"]["selectedCandidateIds"] == ["cand-1"]
+    assert created["selection"]["selectedCandidateIds"] == ["cand-1", "cand-2"]
 
     with pytest.raises(ContractValidationError, match="must exist in the approved"):
         selections.record_hypothesis_selection(
             team_id,
-            _selection(questionId="SCI-097", selectedCandidateIds=["hyp-a"]),
+            _selection(questionId="SCI-097", selectedCandidateIds=["hyp-a", "hyp-b"]),
         )
 
 
@@ -311,7 +316,7 @@ def test_reselection_requires_resolvable_previous_selection(tmp_path, monkeypatc
         match="requires previousSelectionId",
     ):
         selections.record_hypothesis_selection(
-            team_id, _selection(selectedCandidateIds=["hyp-b"])
+            team_id, _selection(selectedCandidateIds=["hyp-b", "hyp-c"])
         )
     with pytest.raises(
         selections.ResearchHypothesisSelectionError,
@@ -320,14 +325,14 @@ def test_reselection_requires_resolvable_previous_selection(tmp_path, monkeypatc
         selections.record_hypothesis_selection(
             team_id,
             _selection(
-                selectedCandidateIds=["hyp-b"],
+                selectedCandidateIds=["hyp-b", "hyp-c"],
                 previousSelectionId="hsel-nonexistent",
             ),
         )
 
     other_scope = selections.record_hypothesis_selection(
         team_id,
-        _selection(branch="experiment", selectedCandidateIds=["hyp-b"]),
+        _selection(branch="experiment", selectedCandidateIds=["hyp-b", "hyp-c"]),
     )
     assert other_scope["status"] == "created"
     with pytest.raises(
@@ -337,7 +342,7 @@ def test_reselection_requires_resolvable_previous_selection(tmp_path, monkeypatc
         selections.record_hypothesis_selection(
             team_id,
             _selection(
-                selectedCandidateIds=["hyp-c"],
+                selectedCandidateIds=["hyp-c", "hyp-a"],
                 previousSelectionId=other_scope["selection"]["selectionId"],
             ),
         )
@@ -362,7 +367,7 @@ def test_identical_selection_requests_are_idempotent(tmp_path, monkeypatch):
     reselected = selections.record_hypothesis_selection(
         team_id,
         _selection(
-            selectedCandidateIds=["hyp-c"],
+            selectedCandidateIds=["hyp-c", "hyp-a"],
             previousSelectionId=first["selection"]["selectionId"],
         ),
     )
@@ -370,7 +375,7 @@ def test_identical_selection_requests_are_idempotent(tmp_path, monkeypatch):
     repeated_reselection = selections.record_hypothesis_selection(
         team_id,
         _selection(
-            selectedCandidateIds=["hyp-c"],
+            selectedCandidateIds=["hyp-c", "hyp-a"],
             previousSelectionId=first["selection"]["selectionId"],
         ),
     )
@@ -425,7 +430,7 @@ def test_selection_id_conflict_with_different_content_is_rejected(tmp_path, monk
     ):
         selections.record_hypothesis_selection(
             team_id,
-            _selection(selectionId="hsel-fixed", selectedCandidateIds=["hyp-b"]),
+            _selection(selectionId="hsel-fixed", selectedCandidateIds=["hyp-b", "hyp-c"]),
         )
 
 
@@ -480,17 +485,17 @@ def test_latest_selection_isolated_when_scopes_are_interleaved(tmp_path, monkeyp
     scope_b = _scope(branch="branch-b", agentId="agent-b")
     selections.record_hypothesis_selection(
         team_id,
-        _selection(**scope_a, selectedCandidateIds=["hyp-a"]),
+        _selection(**scope_a, selectedCandidateIds=["hyp-a", "hyp-b"]),
     )
     selections.record_hypothesis_selection(
         team_id,
-        _selection(**scope_b, selectedCandidateIds=["hyp-b"]),
+        _selection(**scope_b, selectedCandidateIds=["hyp-b", "hyp-c"]),
     )
     selections.record_hypothesis_selection(
         team_id,
         _selection(
             **scope_a,
-            selectedCandidateIds=["hyp-c"],
+            selectedCandidateIds=["hyp-c", "hyp-a"],
             previousSelectionId=selections.get_latest_hypothesis_selection(
                 team_id, "SCI-096", scope=_read_scope(**scope_a)
             )["selection"]["selectionId"],
@@ -503,5 +508,5 @@ def test_latest_selection_isolated_when_scopes_are_interleaved(tmp_path, monkeyp
     latest_b = selections.get_latest_hypothesis_selection(
         team_id, "SCI-096", scope=_read_scope(**scope_b)
     )
-    assert latest_a["selection"]["selectedCandidateIds"] == ["hyp-c"]
-    assert latest_b["selection"]["selectedCandidateIds"] == ["hyp-b"]
+    assert latest_a["selection"]["selectedCandidateIds"] == ["hyp-c", "hyp-a"]
+    assert latest_b["selection"]["selectedCandidateIds"] == ["hyp-b", "hyp-c"]
