@@ -1633,6 +1633,7 @@ def main(argv: list[str] | None = None) -> int:
         "refresh-desktop-shell",
         "launch-desktop-shell",
         "ensure-latest-launcher",
+        *_LIFECYCLE_OPERATIONS,
     }:
         raise SystemExit(f"Unsupported desktop-entry Python bridge action: {action}")
     if str(args.output or "").strip().lower() == "json":
@@ -1651,12 +1652,23 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
             else:
                 print(f"Launcher stop {payload['status']}")
+        elif action in _LIFECYCLE_OPERATIONS:
+            args.lifecycle_operation = action
+            payload = _run_lifecycle_bridge(args)
+            if args.output == "json":
+                print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+            else:
+                print(str(payload.get("message") or _CONTROL_PLANE_LIFECYCLE_RETIRED))
+            _append_log("desktop_entry_python.open.succeeded", action=action, run_id=args.run_id)
+            return 2
         elif action == "lifecycle":
             payload = _run_lifecycle_bridge(args)
             if args.output == "json":
                 print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
             else:
-                print(f"Lifecycle {payload.get('operation')} accepted={payload.get('accepted')}")
+                print(str(payload.get("message") or f"Lifecycle {payload.get('operation')} accepted={payload.get('accepted')}"))
+            _append_log("desktop_entry_python.open.succeeded", action=action, run_id=args.run_id)
+            return 0 if payload.get("accepted") else 2
         elif action == "branch-instance":
             payload = _run_branch_instance_bridge(args)
             if args.output == "json":

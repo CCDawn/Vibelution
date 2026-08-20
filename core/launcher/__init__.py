@@ -1,9 +1,9 @@
 """Standalone Launcher control-plane package."""
 
 from .service import (
-    LauncherActiveWorkBlocked,
     DeveloperCleanupPlanError,
     DeveloperModeDisabled,
+    LauncherActiveWorkBlocked,
     apply_launcher_developer_cleanup,
     get_launcher_developer_mode_setting,
     get_launcher_developer_noise_overview,
@@ -11,19 +11,13 @@ from .service import (
     launcher_active_work_runs,
     preview_launcher_developer_cleanup,
     reset_launcher_developer_sandbox,
-    request_launcher_force_stop,
-    request_launcher_restart,
-    request_launcher_runtime_shutdown,
-    request_launcher_start,
-    request_launcher_stop,
-    request_launcher_supervisor_reattach,
     update_launcher_developer_mode,
 )
 
 __all__ = [
-    "LauncherActiveWorkBlocked",
     "DeveloperCleanupPlanError",
     "DeveloperModeDisabled",
+    "LauncherActiveWorkBlocked",
     "apply_launcher_developer_cleanup",
     "get_launcher_developer_mode_setting",
     "get_launcher_developer_noise_overview",
@@ -31,11 +25,5 @@ __all__ = [
     "launcher_active_work_runs",
     "preview_launcher_developer_cleanup",
     "reset_launcher_developer_sandbox",
-    "request_launcher_force_stop",
-    "request_launcher_restart",
-    "request_launcher_runtime_shutdown",
-    "request_launcher_start",
-    "request_launcher_stop",
-    "request_launcher_supervisor_reattach",
     "update_launcher_developer_mode",
 ]
