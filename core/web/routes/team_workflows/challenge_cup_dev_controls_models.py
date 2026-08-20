@@ -116,3 +116,41 @@ class ChallengeCupDevBatchRunResponse(BaseModel):
     checkpoint: ChallengeCupDevBatchProjectionResponse
     persistedAt: str = ""
     persisted: Literal[True]
+
+
+class ChallengeCupCatalogBlockerResponse(BaseModel):
+    code: str = ""
+    message: str = ""
+    remediationLabel: str = ""
+
+
+class ChallengeCupCatalogCountsResponse(BaseModel):
+    queued: int = 0
+    running: int = 0
+    succeeded: int = 0
+    failed: int = 0
+
+
+class ChallengeCupCatalogQuestionResponse(BaseModel):
+    questionId: str = ""
+    title: str = ""
+    domain: str = ""
+    status: Literal["queued", "running", "succeeded", "failed"] = "queued"
+    executionStatus: str = "pending"
+    currentStage: str = ""
+    checkpointProgress: str = "0/1"
+    attempts: int = 0
+    planId: str = ""
+    action: Literal["continue", "retry", "view"] = "view"
+    blocker: ChallengeCupCatalogBlockerResponse | None = None
+
+
+class ChallengeCupCatalogOverviewResponse(BaseModel):
+    schemaVersion: int = 1
+    teamId: str = ""
+    generatedAt: str = ""
+    questionCount: int = 0
+    counts: ChallengeCupCatalogCountsResponse = Field(
+        default_factory=ChallengeCupCatalogCountsResponse
+    )
+    questions: list[ChallengeCupCatalogQuestionResponse] = Field(default_factory=list)

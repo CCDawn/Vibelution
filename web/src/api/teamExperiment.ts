@@ -1,5 +1,6 @@
 import { fetchJson } from "./client";
 import type {
+  ChallengeCupCatalogOverview,
   ChallengeCupDevBatchRunRequest,
   ChallengeCupDevBatchRunResponse,
   ChallengeCupDevControlSnapshot,
@@ -351,6 +352,16 @@ export function fetchChallengeCupDevControlSnapshot(
 ): Promise<ChallengeCupDevControlSnapshot> {
   return fetchJson<ChallengeCupDevControlSnapshot>(
     `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/challenge-program/dev-controls`,
+    { signal: options?.signal },
+  );
+}
+
+export function fetchChallengeCupCatalogOverview(
+  teamId: string,
+  options?: { signal?: AbortSignal },
+): Promise<ChallengeCupCatalogOverview> {
+  return fetchJson<ChallengeCupCatalogOverview>(
+    `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/challenge-program/catalog-overview`,
     { signal: options?.signal },
   );
 }

@@ -197,7 +197,7 @@ def test_challenge_cup_dev_control_routes_declare_response_models() -> None:
     assert _untyped_endpoint_count(
         source, filename="team_workflows/challenge_cup_dev_controls.py"
     ) == 0
-    assert source.count("@router.") == 3
+    assert source.count("@router.") == 4
     assert "workflow-orchestration/challenge-program/dev-controls" in source
     assert "challenge-cup-dev-controls\"" not in source
     assert "team_workflow_orchestration_service" in source

@@ -72,6 +72,7 @@ def test_facade_reexports_challenge_cup_dev_controls() -> None:
         "get_challenge_cup_dev_control_snapshot",
         "run_challenge_cup_dev_readiness",
         "run_challenge_cup_dev_batch",
+        "get_challenge_cup_catalog_overview",
         "ChallengeCupDevControlsError",
     ):
         assert hasattr(facade, name), name

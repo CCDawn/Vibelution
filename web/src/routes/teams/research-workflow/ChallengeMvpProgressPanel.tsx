@@ -43,6 +43,7 @@ import {
 import type { ExperimentPlanningStatusPayload } from "../experimentLoopModel";
 import { experimentPlanningStatusQueryKey } from "../experimentLoopModel";
 import { ChallengeQuestionRegisterDialog } from "../challenge-cup/ChallengeQuestionRegisterDialog";
+import { ChallengeCatalogOverview } from "../challenge-cup/ChallengeCatalogOverview";
 import { ChallengeSubmissionReadinessPanel } from "./ChallengeSubmissionReadinessPanel";
 import { useShellI18n } from "../../../i18n/useShellI18n";
 import styles from "./ChallengeMvpProgressPanel.styles";
@@ -321,6 +322,7 @@ export function ChallengeMvpProgressPanel({
       )}
 
       <ChallengeSubmissionReadinessPanel teamId={teamId} lang={lang} onOpenQuestion={onOpenQuestion} />
+      <ChallengeCatalogOverview teamId={teamId} lang={lang} onOpenQuestion={onOpenQuestion} />
 
       {import.meta.env.DEV ? (
       <section className={styles.devControls} aria-label={zh ? "开发态就绪与批次控制" : "DEV readiness and batch control"}>

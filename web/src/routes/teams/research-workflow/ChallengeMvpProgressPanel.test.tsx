@@ -63,6 +63,16 @@ const submissionReadinessQueryState = vi.hoisted((): { current: QueryState } => 
   },
 }));
 
+const catalogOverviewQueryState = vi.hoisted((): { current: QueryState } => ({
+  current: {
+    isPending: false,
+    isError: false,
+    error: null,
+    data: undefined,
+    refetch: () => {},
+  },
+}));
+
 const mutationState = vi.hoisted(() => {
   const blank = (): MutationMock => ({
     isPending: false,
@@ -101,6 +111,9 @@ vi.mock("@tanstack/react-query", () => ({
     const key = (options?.queryKey ?? []) as readonly unknown[];
     if (key.includes("dev-controls")) {
       return devControlsQueryState.current;
+    }
+    if (key.includes("catalog-overview")) {
+      return catalogOverviewQueryState.current;
     }
     if (key.includes("submission-readiness")) {
       return submissionReadinessQueryState.current;
@@ -169,6 +182,16 @@ function setDevControls(data: unknown) {
 
 function setSubmissionReadiness(data: unknown) {
   Object.assign(submissionReadinessQueryState.current, {
+    isPending: false,
+    isError: false,
+    error: null,
+    data,
+    refetch: () => {},
+  });
+}
+
+function setCatalogOverview(data: unknown) {
+  Object.assign(catalogOverviewQueryState.current, {
     isPending: false,
     isError: false,
     error: null,
@@ -490,7 +513,7 @@ function findButton(container: HTMLElement, text: string): HTMLButtonElement | u
 
 describe("ChallengeMvpProgressPanel", () => {
   beforeEach(() => {
-    for (const state of [questionQueryState.current, experimentQueryState.current, devControlsQueryState.current, submissionReadinessQueryState.current]) {
+    for (const state of [questionQueryState.current, experimentQueryState.current, devControlsQueryState.current, submissionReadinessQueryState.current, catalogOverviewQueryState.current]) {
       Object.assign(state, {
         isPending: false,
         isError: false,
@@ -500,6 +523,14 @@ describe("ChallengeMvpProgressPanel", () => {
       });
     }
     setSubmissionReadiness(submissionReadiness());
+    setCatalogOverview({
+      schemaVersion: 1,
+      teamId: "team-1",
+      generatedAt: "2026-08-20T00:00:00Z",
+      questionCount: 0,
+      counts: { queued: 0, running: 0, succeeded: 0, failed: 0 },
+      questions: [],
+    });
     mutationState.reset();
     queryClientMock.invalidateQueries.mockClear();
   });

@@ -260,3 +260,41 @@ export type ChallengeCupDevBatchRunResponse = {
   persistedAt: string;
   persisted: boolean;
 };
+
+export type ChallengeCupCatalogOverviewStatus = "queued" | "running" | "succeeded" | "failed";
+
+export type ChallengeCupCatalogOverviewAction = "continue" | "retry" | "view";
+
+export type ChallengeCupCatalogOverviewBlocker = {
+  code: string;
+  message: string;
+  remediationLabel: string;
+};
+
+export type ChallengeCupCatalogOverviewQuestion = {
+  questionId: string;
+  title: string;
+  domain: string;
+  status: ChallengeCupCatalogOverviewStatus;
+  executionStatus: string;
+  currentStage: string;
+  checkpointProgress: string;
+  attempts: number;
+  planId: string;
+  action: ChallengeCupCatalogOverviewAction;
+  blocker: ChallengeCupCatalogOverviewBlocker | null;
+};
+
+export type ChallengeCupCatalogOverview = {
+  schemaVersion: number;
+  teamId: string;
+  generatedAt: string;
+  questionCount: number;
+  counts: {
+    queued: number;
+    running: number;
+    succeeded: number;
+    failed: number;
+  };
+  questions: ChallengeCupCatalogOverviewQuestion[];
+};

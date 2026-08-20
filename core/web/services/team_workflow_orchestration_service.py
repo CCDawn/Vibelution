@@ -542,6 +542,7 @@ from core.web.services.team_workflow.challenge_cup_dev_controls import (
     ChallengeCupDevControlsError,
     DevControlsStorageError,
     DevFlowConflict,
+    get_challenge_cup_catalog_overview,
     get_challenge_cup_dev_control_snapshot,
     run_challenge_cup_dev_batch,
     run_challenge_cup_dev_readiness,

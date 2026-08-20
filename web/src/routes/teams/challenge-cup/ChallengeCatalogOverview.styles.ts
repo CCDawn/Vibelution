@@ -1,0 +1,17 @@
+export default {
+  root: "min-h-[32rem]",
+  toolbar: "grid gap-2 px-1 py-1",
+  counts: "flex flex-wrap items-center gap-2 [font-size:var(--vui-font-2xs)] text-[var(--fg-secondary)]",
+  progressTrack: "h-1.5 w-full overflow-hidden rounded bg-[var(--vui-control-muted)]",
+  progressFill: "h-full rounded bg-[var(--vui-accent)]",
+  filter: "max-w-48",
+  listPane: "max-h-[32rem] min-h-0 overflow-y-auto",
+  detail: "grid gap-2 p-2",
+  detailTitle: "[font-size:var(--vui-font-xs)] font-medium text-[var(--fg-primary)]",
+  detailMeta: "font-mono text-[10px] text-[var(--fg-secondary)]",
+  blocker: "grid gap-1 rounded border border-[var(--vui-border-subtle)] px-2 py-1.5 [font-size:var(--vui-font-2xs)]",
+  blockerMessage: "text-[var(--fg-primary)]",
+  blockerRemediation: "text-[var(--fg-secondary)]",
+  questionId: "font-mono text-[10px] text-[var(--fg-secondary)]",
+  title: "min-w-0 truncate text-[var(--fg-primary)]",
+} as const;

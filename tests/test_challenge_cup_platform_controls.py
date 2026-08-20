@@ -586,6 +586,92 @@ def test_get_dev_control_snapshot_http_contract(monkeypatch: pytest.MonkeyPatch)
     assert body["boundary"]["fixtureOnly"] is True
 
 
+def test_catalog_overview_lists_all_questions_when_unrun(controls_root: Path) -> None:
+    overview = dev_controls_service.get_challenge_cup_catalog_overview("team-1")
+    assert overview["schemaVersion"] == 1
+    assert overview["teamId"] == "team-1"
+    assert overview["questionCount"] == 125
+    assert overview["counts"] == {"queued": 125, "running": 0, "succeeded": 0, "failed": 0}
+    assert overview["questions"][0]["questionId"] == "SCI-001"
+    assert overview["questions"][-1]["questionId"] == "SCI-125"
+    assert all(row["status"] == "queued" for row in overview["questions"])
+    assert all(row["action"] == "view" for row in overview["questions"])
+    assert all(row["blocker"] is None for row in overview["questions"])
+    assert overview["questions"][0]["title"]
+
+
+def test_catalog_overview_projects_failed_dev_1_row(controls_root: Path) -> None:
+    _persist_readiness_report(controls_root, "team-1")
+    state = new_dev_batch_state("dev-1")
+    failed_id = state.plan.question_ids[0]
+    state.mark_running(failed_id)
+    state.record_failure(failed_id, "fixture rejected")
+    _persist_batch_checkpoint(controls_root, "team-1", "dev-1", state.to_checkpoint())
+
+    overview = dev_controls_service.get_challenge_cup_catalog_overview("team-1")
+    failed_row = next(row for row in overview["questions"] if row["questionId"] == failed_id)
+    assert failed_row["status"] == "failed"
+    assert failed_row["action"] == "retry"
+    assert failed_row["planId"] == "dev-1"
+    assert failed_row["blocker"]["code"] == "question_failed"
+    assert failed_row["blocker"]["message"] == "fixture rejected"
+    assert failed_row["blocker"]["remediationLabel"]
+    assert overview["counts"]["failed"] == 1
+    assert overview["counts"]["queued"] == 124
+
+
+def test_catalog_overview_row_maps_running_to_continue() -> None:
+    row = dev_controls_service._catalog_overview_row(
+        {"id": "SCI-010", "question_en": "running question", "domain": "physics"},
+        {
+            "executionStatus": "running",
+            "attempts": 1,
+            "planId": "dev-5",
+            "lastError": "",
+        },
+    )
+    assert row["status"] == "running"
+    assert row["action"] == "continue"
+    assert row["currentStage"] == "catalog_execution"
+    assert row["blocker"] is None
+
+
+def test_get_catalog_overview_http_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = {
+        "schemaVersion": 1,
+        "teamId": "research-team",
+        "generatedAt": "2026-08-20T00:00:00Z",
+        "questionCount": 125,
+        "counts": {"queued": 125, "running": 0, "succeeded": 0, "failed": 0},
+        "questions": [
+            {
+                "questionId": "SCI-001",
+                "title": "Sample question",
+                "domain": "physics",
+                "status": "queued",
+                "executionStatus": "pending",
+                "currentStage": "queued",
+                "checkpointProgress": "0/1",
+                "attempts": 0,
+                "planId": "",
+                "action": "view",
+                "blocker": None,
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        dev_controls_routes, "get_challenge_cup_catalog_overview", lambda team_id: payload
+    )
+    response = _client().get(
+        "/api/teams/research-team/workflow-orchestration/challenge-program/catalog-overview"
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["questionCount"] == 125
+    assert body["questions"][0]["questionId"] == "SCI-001"
+    assert body["questions"][0]["blocker"] is None
+
+
 def test_post_readiness_http_contract(monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_run(team_id: str, *, mode: str = "dev") -> dict:
         assert mode == "dev"

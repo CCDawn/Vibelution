@@ -2,6 +2,7 @@ import { describe, beforeEach, expect, it, vi } from "vitest";
 
 import { resetControlTokenForTests } from "./client";
 import {
+  fetchChallengeCupCatalogOverview,
   fetchChallengeCupDevControlSnapshot,
   runChallengeCupDevBatch,
   runChallengeCupDevReadiness,
@@ -69,9 +70,11 @@ describe("team experiment API", () => {
 
   it("exposes typed Challenge Cup DEV control transports with canonical URLs", () => {
     expect(apiSource).toContain("export function fetchChallengeCupDevControlSnapshot");
+    expect(apiSource).toContain("export function fetchChallengeCupCatalogOverview");
     expect(apiSource).toContain("export function runChallengeCupDevReadiness");
     expect(apiSource).toContain("export function runChallengeCupDevBatch");
     expect(apiSource).toContain("workflow-orchestration/challenge-program/dev-controls");
+    expect(apiSource).toContain("workflow-orchestration/challenge-program/catalog-overview");
     expect(apiSource).toContain("workflow-orchestration/challenge-program/submission-readiness");
     expect(apiSource).toContain("workflow-orchestration/challenge-program/dev-controls/readiness");
     expect(apiSource).toContain("workflow-orchestration/challenge-program/dev-controls/batches/");
@@ -94,6 +97,22 @@ describe("team experiment API", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/teams/team%20a%2Fb/workflow-orchestration/challenge-program/dev-controls",
+      expect.objectContaining({ signal: undefined }),
+    );
+    vi.unstubAllGlobals();
+  });
+
+  it("fetches the catalog overview with team segment encoded", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ schemaVersion: 1, teamId: "team a/b", questions: [] }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchChallengeCupCatalogOverview("team a/b");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/teams/team%20a%2Fb/workflow-orchestration/challenge-program/catalog-overview",
       expect.objectContaining({ signal: undefined }),
     );
     vi.unstubAllGlobals();

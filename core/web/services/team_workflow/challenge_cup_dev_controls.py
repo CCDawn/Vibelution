@@ -51,7 +51,11 @@ from core.research.competition.platform_flow_ready import (
     build_platform_flow_readiness_report,
     overall_status,
 )
-from core.research.competition.resources import CORE_BEHAVIOR_HASH, CORE_POLICY_HASH
+from core.research.competition.resources import (
+    CORE_BEHAVIOR_HASH,
+    CORE_POLICY_HASH,
+    load_science_question_catalog,
+)
 from core.research.competition.result_set import CatalogScope, ResultSetContractError
 from core.research.competition.source_boundary import git_is_dirty, git_output
 from core.web.services import team_service
@@ -65,6 +69,7 @@ REPORT_ENVELOPE_SCHEMA_VERSION = 1
 BATCH_ENVELOPE_SCHEMA_VERSION = 2
 REPORT_SCHEMA_VERSION = 1
 SNAPSHOT_SCHEMA_VERSION = 1
+CATALOG_OVERVIEW_SCHEMA_VERSION = 1
 DEV_ONLY_MODE = "dev"
 READINESS_MAX_AGE_SECONDS = 24 * 60 * 60
 REPORT_STATUSES = frozenset({"READY", "NOT_READY", "BLOCKED"})
@@ -721,6 +726,138 @@ def _get_challenge_cup_dev_control_snapshot_transaction(
         "report": report,
         "batches": batches,
         "boundary": _boundary_fields(),
+    }
+
+
+def get_challenge_cup_catalog_overview(team_id: str) -> dict[str, Any]:
+    """Read-only 125-question catalog projection for the Program overview list.
+
+    Merges the frozen question catalog with persisted DEV fixture checkpoints.
+    Does not start batches or invent a second lifecycle.
+    """
+    authoritative_team_id = _require_team(team_id)
+    with _team_transaction(authoritative_team_id):
+        return _get_challenge_cup_catalog_overview_transaction(authoritative_team_id)
+
+
+def _get_challenge_cup_catalog_overview_transaction(
+    authoritative_team_id: str,
+) -> dict[str, Any]:
+    report_state = _read_report_state(authoritative_team_id)
+    readiness_evidence = report_state[1] if report_state is not None else None
+    records: dict[str, dict[str, Any]] = {}
+    for plan_id in ALLOWED_DEV_BATCH_PLAN_IDS:
+        present, checkpoint, _, _ = _load_batch_checkpoint(
+            authoritative_team_id, plan_id, readiness_evidence
+        )
+        if not present:
+            continue
+        try:
+            state = CatalogExecutionState.from_checkpoint(checkpoint)
+        except (CatalogExecutionError, KeyError, ResultSetContractError, TypeError, ValueError):
+            continue
+        for question_id in state.plan.question_ids:
+            status = state.status(question_id)
+            merged = records.get(question_id)
+            if merged and _execution_status_rank(str(merged["executionStatus"])) <= _execution_status_rank(
+                status.value
+            ):
+                continue
+            records[question_id] = {
+                "executionStatus": status.value,
+                "attempts": state.attempts(question_id),
+                "planId": plan_id,
+                "lastError": _catalog_last_error(state, question_id),
+            }
+    catalog = load_science_question_catalog()
+    questions = [
+        _catalog_overview_row(item, records.get(str(item.get("id") or "")))
+        for item in list(catalog.get("questions") or [])
+        if isinstance(item, dict)
+    ]
+    counts = {"queued": 0, "running": 0, "succeeded": 0, "failed": 0}
+    for row in questions:
+        counts[str(row["status"])] = counts.get(str(row["status"]), 0) + 1
+    return {
+        "schemaVersion": CATALOG_OVERVIEW_SCHEMA_VERSION,
+        "teamId": authoritative_team_id,
+        "generatedAt": _utc_now(),
+        "questionCount": len(questions),
+        "counts": counts,
+        "questions": questions,
+    }
+
+
+def _execution_status_rank(status: str) -> int:
+    return {
+        "failed": 0,
+        "blocked": 0,
+        "running": 1,
+        "succeeded": 2,
+        "pending": 3,
+    }.get(str(status or "").strip().lower(), 4)
+
+
+def _catalog_last_error(state: CatalogExecutionState, question_id: str) -> str:
+    record = state._records.get(question_id)
+    if record is None:
+        return ""
+    return str(record.last_error or "").strip()
+
+
+def _catalog_display_status(execution_status: str) -> str:
+    normalized = str(execution_status or "").strip().lower()
+    if normalized in {"failed", "blocked"}:
+        return "failed"
+    if normalized == "running":
+        return "running"
+    if normalized == "succeeded":
+        return "succeeded"
+    return "queued"
+
+
+def _catalog_overview_row(
+    item: dict[str, Any],
+    record: dict[str, Any] | None,
+) -> dict[str, Any]:
+    question_id = str(item.get("id") or "").strip()
+    execution_status = str((record or {}).get("executionStatus") or "pending")
+    display_status = _catalog_display_status(execution_status)
+    attempts = int((record or {}).get("attempts") or 0)
+    plan_id = str((record or {}).get("planId") or "")
+    last_error = str((record or {}).get("lastError") or "").strip()
+    stage = {
+        "queued": "queued",
+        "running": "catalog_execution",
+        "succeeded": "complete",
+        "failed": "blocked",
+    }[display_status]
+    checkpoint_done = 1 if display_status == "succeeded" or attempts > 0 else 0
+    if display_status == "failed" and plan_id:
+        action = "retry"
+    elif display_status == "running" and plan_id:
+        action = "continue"
+    else:
+        action = "view"
+    blocker = None
+    if display_status == "failed":
+        blocker = {
+            "code": "question_blocked" if execution_status == "blocked" else "question_failed",
+            "message": last_error or "本题执行失败",
+            "remediationLabel": "单行重试已有 DEV fixture 命令" if plan_id else "打开题目查看阻塞原因",
+        }
+    return {
+        "questionId": question_id,
+        "title": str(item.get("question_en") or "").strip(),
+        "domain": str(item.get("domain") or "").strip(),
+        "status": display_status,
+        "executionStatus": execution_status,
+        "currentStage": stage,
+        "checkpointProgress": f"{checkpoint_done}/1",
+        "attempts": attempts,
+        "planId": plan_id,
+        "action": action,
+        "blocker": blocker,
     }
 
 
