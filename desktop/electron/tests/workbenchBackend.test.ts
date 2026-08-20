@@ -8,6 +8,7 @@ import {
 } from "../src/process/workbenchBackendRetire.js";
 import {
   executeMainLineWorkbench,
+  mainLineBackendIsReachable,
   resolveNoConsolePython,
   resolveNodeExecutable,
   workbenchBackendArgs,
@@ -299,6 +300,35 @@ describe("runWorkbenchLifecycle", () => {
       })
     ).rejects.toMatchObject({ code: "aborted" });
     expect(spawnImpl).not.toHaveBeenCalled();
+  });
+});
+
+describe("mainLineBackendIsReachable", () => {
+  it("reuses a live backend when the known pid is alive or the port listens", async () => {
+    await expect(
+      mainLineBackendIsReachable("C:/repo", {
+        readState: () => ({ backendPid: 4242, backendPort: 8002, host: "127.0.0.1" }),
+        pidAlive: (pid) => pid === 4242,
+        connect: async () => false
+      })
+    ).resolves.toBe(true);
+    await expect(
+      mainLineBackendIsReachable("C:/repo", {
+        readState: () => ({ backendPid: 9, backendPort: 8002 }),
+        pidAlive: () => false,
+        connect: async () => true
+      })
+    ).resolves.toBe(true);
+  });
+
+  it("does not reuse a dead backend with a closed port", async () => {
+    await expect(
+      mainLineBackendIsReachable("C:/repo", {
+        readState: () => ({ backendPid: 9, backendPort: 8002 }),
+        pidAlive: () => false,
+        connect: async () => false
+      })
+    ).resolves.toBe(false);
   });
 });
 

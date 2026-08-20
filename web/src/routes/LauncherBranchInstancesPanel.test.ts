@@ -340,6 +340,27 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(canStartInstance(startable, pending)).toBe(false);
   });
 
+  it("does not freeze start pending on 正在启动 when the instance is already partial", () => {
+    const partial = instance({
+      id: "main",
+      kind: "main",
+      branch: "main",
+      current: true,
+      runtime: { ...instance().runtime, lifecycleState: "partial" },
+    });
+    const accepted = acceptLifecycleIntent({}, {
+      instanceId: partial.id,
+      operation: "start",
+      requestId: "open-window",
+      baselineLifecycleState: "partial",
+    });
+    const settled = settleLifecycleIntentTable(accepted.table, [partial]);
+
+    expect(settled).toEqual({});
+    expect(instanceRuntimeState(partial, settled)).toBe("partial");
+    expect(canRequestOpenInstance(partial, settled)).toBe(true);
+  });
+
   it("lets a retired failed leftover close without restart", () => {
     const retiredFailed = instance({
       id: "retired:fix-composer",
