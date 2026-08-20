@@ -128,7 +128,7 @@ export function renderTeamsWorkbenchBoardPage(props: TeamsWorkbenchBoardPageProp
         ariaLabel={p.selectedTeamContextTitle}
         title={p.lang === "zh" ? "团队工作台" : "Team workbench"}
         rail={p.teamShellRail}
-        toolbar={p.teamShellToolbar}
+        toolbar={p.challengeCupResearchTeamSelected ? undefined : p.teamShellToolbar}
         // Process / challenge board: pure fill host (no pad/scroll/content-start floor).
         // Absolute children (ResearchProcessWorkspace) pin to this cell.
         boardClassName={

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import {
   VButton,
   VSelect,
@@ -75,6 +76,8 @@ export function ResearchWorkflowToolbar(props: {
   onNavigateCurrent?: () => void;
   onSelectExperiment: (questionId: string) => void;
   onOpenPanel: (panel: ResearchProcessPanel) => void;
+  /** Workspace switcher (team) — same row as experiment, not a second chrome strip. */
+  leading?: ReactNode;
 }) {
   const { lang } = useShellI18n();
   const isZh = lang === "zh";
@@ -114,37 +117,40 @@ export function ResearchWorkflowToolbar(props: {
     }] : []),
   ];
   return (
-    <VToolbar ariaLabel={isZh ? "科研流程" : "Research workflow"} className={styles.root}>
-      <div className={styles.switcher}>
-        {props.experimentOptions.length > 0 ? (
-          <VSelect
-            density="compact"
-            aria-label={isZh ? "切换实验" : "Switch experiment"}
-            placeholder={isZh ? "选择实验" : "Select experiment"}
-            selectedKey={selectedQuestionId}
-            options={props.experimentOptions.map((item) => ({
-              id: item.questionId,
-              label: item.label,
-              description: item.description,
-            }))}
-            onSelectionChange={(key) => {
-              if (key == null) return;
-              props.onSelectExperiment(String(key));
-            }}
-          />
-        ) : (
-          <span className={styles.empty}>{emptySwitcherLabel}</span>
-        )}
-      </div>
-      {props.runId ? (
-        <div className={styles.phase} data-vui="research-workflow-phase">
-          {phase.stageZh && phase.currentNodeZh
-            ? (isZh ? `${phase.stageZh} · ${phase.currentNodeZh}` : `${phase.stageEn} · ${phase.currentNodeEn}`)
-            : phase.step
-              ? (isZh ? `假说准备 · ${phase.step}/5` : `Hypothesis prep · ${phase.step}/5`)
-              : (isZh ? phase.zh : phase.en)}
+    <VToolbar ariaLabel={isZh ? "科研流程" : "Research workflow"} wrap={false} className={styles.root}>
+      <div className={styles.context}>
+        {props.leading ? <div className={styles.leading}>{props.leading}</div> : null}
+        <div className={styles.switcher}>
+          {props.experimentOptions.length > 0 ? (
+            <VSelect
+              density="compact"
+              aria-label={isZh ? "切换实验" : "Switch experiment"}
+              placeholder={isZh ? "选择实验" : "Select experiment"}
+              selectedKey={selectedQuestionId}
+              options={props.experimentOptions.map((item) => ({
+                id: item.questionId,
+                label: item.label,
+                description: item.description,
+              }))}
+              onSelectionChange={(key) => {
+                if (key == null) return;
+                props.onSelectExperiment(String(key));
+              }}
+            />
+          ) : (
+            <span className={styles.empty}>{emptySwitcherLabel}</span>
+          )}
         </div>
-      ) : <span />}
+        {props.runId ? (
+          <div className={styles.phase} data-vui="research-workflow-phase">
+            {phase.stageZh && phase.currentNodeZh
+              ? (isZh ? `${phase.stageZh} · ${phase.currentNodeZh}` : `${phase.stageEn} · ${phase.currentNodeEn}`)
+              : phase.step
+                ? (isZh ? `假说准备 · ${phase.step}/5` : `Hypothesis prep · ${phase.step}/5`)
+                : (isZh ? phase.zh : phase.en)}
+          </div>
+        ) : null}
+      </div>
       <div className={styles.actions}>
         <VSelect
           density="compact"

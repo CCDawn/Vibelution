@@ -148,6 +148,7 @@ import { VToolbar, VButton } from "@/components/vui";
 | Prop | 说明 | 设计注意 |
 | --- | --- | --- |
 | ariaLabel / children | 分组与操作 | 子节点用 V* 控件 |
+| `wrap` | 默认 `true`（`flex-wrap`） | 单行密集 chrome 传 `false`，用截断而不是折行 |
 
 ### 实现落点
 - `layout/VToolbar.tsx`

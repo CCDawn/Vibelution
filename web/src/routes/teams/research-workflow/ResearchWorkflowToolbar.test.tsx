@@ -237,7 +237,7 @@ describe("ResearchWorkflowToolbar", () => {
 
     expect(markup).toContain("max-w-[24rem]");
     expect(markup).toContain("ms-auto");
-    expect(markup).toContain("max-w-full");
+    expect(markup).toContain("flex-nowrap");
     expect(markup).toContain("overflow-hidden");
     expect(markup).toContain("查看详情");
     expect(markup).toContain("前往确认候选");
@@ -245,7 +245,7 @@ describe("ResearchWorkflowToolbar", () => {
     expect(markup).not.toContain("grid-cols-[minmax(10rem,1fr)");
     expect(markup).not.toContain("grid-cols-[minmax(12rem,1fr)");
     expect(markup).not.toContain("md:ms-auto");
-    expect(markup).not.toContain("shrink-0 flex-nowrap");
+    expect(markup).not.toContain("flex-wrap");
   });
 
   it("keeps the details and create-run action on narrow layouts when no run exists", () => {
@@ -259,9 +259,22 @@ describe("ResearchWorkflowToolbar", () => {
     expect(empty).toContain("选择题目开始研究");
     expect(empty).toContain("查看详情");
     expect(empty).toContain("假说待生成");
-    expect(empty).toContain("flex-wrap");
+    expect(empty).toContain("flex-nowrap");
     expect(empty).toContain("max-w-[24rem]");
     expect(empty).toContain("overflow-hidden");
-    expect(empty).not.toContain("shrink-0 flex-nowrap");
+    expect(empty).not.toContain("flex-wrap");
+  });
+
+  it("keeps a leading team switcher on the same row", () => {
+    const markup = renderToolbar({
+      ...BASE_PROPS,
+      runId: "",
+      leading: <span data-testid="team-leading">挑战杯ai科研团队</span>,
+      onSelectExperiment: vi.fn(),
+      onOpenPanel: vi.fn(),
+    } as React.ComponentProps<typeof ResearchWorkflowToolbar>);
+    expect(markup).toContain("挑战杯ai科研团队");
+    expect(markup).toContain("选择题目开始研究");
+    expect(markup).toContain("flex-nowrap");
   });
 });
