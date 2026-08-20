@@ -37,6 +37,7 @@ RESEARCH_FORBIDDEN_TOOLS = KNOWLEDGE_STEWARD_TOOLS
 RESEARCH_STAGE_TOOLS = (
     "agent_message_tool",
     "unified_memory_search_tool",
+    "github_project_library_search_tool",
     "research_knowledge_query_tool",
     "task_list_tool",
     "task_create_tool",
@@ -306,7 +307,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
     ),
     "source_finder": _profile(
         "source_finder",
-        allowed_tools=(*RESEARCH_STAGE_TOOLS, *SEARCH_TOOLS, *FETCH_TOOLS),
+        allowed_tools=(*RESEARCH_STAGE_TOOLS, *SEARCH_TOOLS, *FETCH_TOOLS, "github_project_library_clone_tool"),
         preferred_tools=(
             "task_list_tool",
             "task_create_tool",
@@ -314,6 +315,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
             "source_collection_context_tool",
             "source_collection_stage_writeback_tool",
             "unified_memory_search_tool",
+            "github_project_library_search_tool",
             "batch_web_search_tool",
             "paper_search_tool",
             "project_search_tool",
@@ -555,6 +557,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
             "source_collection_context_tool",
             "source_collection_stage_writeback_tool",
             "skill_library_search_tool",
+            "github_project_library_search_tool",
             "unified_memory_search_tool",
             *KNOWLEDGE_STEWARD_TOOLS,
         ),
@@ -567,6 +570,7 @@ ROLE_TOOL_PROFILES: dict[str, dict[str, Any]] = {
             "knowledge_steward_workbench_tool",
             "knowledge_steward_recommendations_tool",
             "skill_library_search_tool",
+            "github_project_library_search_tool",
             "unified_memory_search_tool",
             "knowledge_rating_suggestion_tool",
         ),

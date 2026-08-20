@@ -143,6 +143,14 @@ def _memory_overview_section_signature(root: Path, section_id: str) -> str | Non
         )
     if normalized == "runtime-scene-evidence":
         return _dir_signature(resolve_project_logs_home(root) / "runtime_scenes")
+    if normalized == "github-projects":
+        memory_dir = resolve_project_memory_home(root) / "github-projects"
+        return "|".join(
+            [
+                _path_signature(memory_dir / "registry.json"),
+                _path_signature(memory_dir / "INDEX.md"),
+            ]
+        )
     return None
 
 
@@ -837,6 +845,7 @@ def _base_memory_section_specs(root: Path, warnings: list[str]):
         ("self-evolution-memory", lambda section_warnings, sub_timings: _self_evolution_memory_section(root, sub_timings=sub_timings)),
         ("supervised-evolution-memory", lambda section_warnings, sub_timings: _supervised_evolution_memory_section(root, sub_timings=sub_timings)),
         ("runtime-scene-evidence", lambda section_warnings, sub_timings: _runtime_scene_memory_section(root, sub_timings=sub_timings)),
+        ("github-projects", lambda section_warnings, sub_timings: _github_projects_memory_section(root)),
     ]
 
 
@@ -1669,6 +1678,91 @@ def _runtime_scene_memory_section(root: Path, sub_timings: list[dict[str, Any]] 
         _rel(root, scene_root),
         "/api/logs/runtime-scenes",
         "用于重构失败轮次、工具序列和收束原因的证据包。",
+        items,
+    )
+
+
+def _github_projects_memory_section(root: Path) -> dict[str, Any]:
+    from core.web.services import github_project_library_service as library
+
+    library_root = library.github_project_library_root(project_root=root)
+    registry = library._read_registry(library_root)
+    index_path = library_root / library.INDEX_NAME
+    registry_path = library_root / library.REGISTRY_NAME
+    projects = [item for item in list(registry.get("projects") or []) if isinstance(item, dict)]
+    ready = [item for item in projects if str(item.get("status") or "") == "ready"]
+    items: list[dict[str, Any]] = []
+    if index_path.exists():
+        items.append(
+            _file_item(
+                root,
+                index_path,
+                item_id="github-projects-index",
+                title="INDEX.md",
+                kind="github_project_index",
+                source="开源项目索引",
+                agent_visible=True,
+                in_prompt=False,
+                used_by=["github_project_library_search_tool", "显式读取"],
+                channels=["explicit_read"],
+                summary="由 registry.json 生成的开源项目索引表；未命中时先全量克隆再调研本地仓。",
+            )
+        )
+    if registry_path.exists():
+        items.append(
+            _file_item(
+                root,
+                registry_path,
+                item_id="github-projects-registry",
+                title="registry.json",
+                kind="github_project_registry",
+                source="开源项目登记",
+                agent_visible=True,
+                in_prompt=False,
+                used_by=["github_project_library_service", "显式读取"],
+                channels=["explicit_read"],
+                summary=f"机器源：{len(ready)} 个已就绪项目。",
+            )
+        )
+    for project in ready:
+        project_id = str(project.get("projectId") or "").strip()
+        dest = library_root / library.REPOS_DIRNAME / project_id
+        description = str(project.get("description") or "").strip()
+        items.append(
+            _data_item(
+                root,
+                item_id=f"github-project-{project_id}",
+                title=str(project.get("name") or project.get("fullName") or project_id).strip(),
+                kind="github_project_card",
+                source="开源项目索引",
+                path=_rel(root, dest),
+                updated_at=str(project.get("updatedAt") or ""),
+                agent_visible=True,
+                in_prompt=False,
+                used_by=["github_project_library_search_tool", "显式读取"],
+                channels=["explicit_read"],
+                summary=description or str(project.get("fullName") or project_id),
+                content={
+                    "fullName": str(project.get("fullName") or ""),
+                    "description": description,
+                    "githubUrl": str(project.get("githubUrl") or ""),
+                    "localPath": f"{library.REPOS_DIRNAME}/{project_id}",
+                    "headSha": str(project.get("headSha") or ""),
+                    "license": str(project.get("license") or ""),
+                    "status": str(project.get("status") or ""),
+                },
+                content_type="json",
+            )
+        )
+    return _section(
+        "github-projects",
+        "开源项目索引",
+        "github_project_library",
+        "explicit_read",
+        "agent 可通过索引卡片发现本地仓；不要把整仓正文注入 prompt 或正式知识库。",
+        _rel(root, library_root),
+        "/api/memory/github-projects",
+        f"记忆库中的公开 GitHub 全量克隆，当前就绪 {len(ready)} 个。",
         items,
     )
 

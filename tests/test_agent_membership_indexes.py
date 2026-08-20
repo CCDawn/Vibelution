@@ -60,6 +60,7 @@ def test_repair_agent_directory_creates_protected_knowledge_steward_agent(tmp_pa
     required_allowed_tools = {
         "agent_message_tool",
         "skill_library_search_tool",
+        "github_project_library_search_tool",
         "unified_memory_search_tool",
         "knowledge_proposal_tool",
         "knowledge_ingestion_tool",
@@ -77,6 +78,7 @@ def test_repair_agent_directory_creates_protected_knowledge_steward_agent(tmp_pa
         "knowledge_steward_workbench_tool",
         "knowledge_steward_recommendations_tool",
         "skill_library_search_tool",
+        "github_project_library_search_tool",
         "unified_memory_search_tool",
         "knowledge_rating_suggestion_tool",
     }
@@ -88,6 +90,7 @@ def test_repair_agent_directory_creates_protected_knowledge_steward_agent(tmp_pa
     assert "research_proposal_apply_tool" not in tool_policy["allowedTools"]
     assert "cli_tool" not in tool_policy["allowedTools"]
     assert "apply_patch_tool" not in tool_policy["allowedTools"]
+    assert "github_project_library_clone_tool" not in tool_policy["allowedTools"]
 
     memory_policy = steward["memoryPolicy"]
     assert memory_policy["readSharedGroups"] == ["project"]

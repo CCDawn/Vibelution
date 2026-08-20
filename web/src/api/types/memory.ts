@@ -55,6 +55,54 @@ export type MemoryOverview = {
   sections: MemorySection[];
 };
 
+export type GithubProjectLibraryProject = {
+  projectId: string;
+  name: string;
+  fullName: string;
+  description: string;
+  githubUrl: string;
+  localPath: string;
+  absolutePath: string;
+  defaultBranch: string;
+  headSha: string;
+  license: string;
+  language: string;
+  stars: number;
+  hasSubmodules: boolean;
+  status: string;
+  clonedAt: string;
+  updatedAt: string;
+  error: string;
+};
+
+export type GithubProjectLibraryPayload = {
+  schemaVersion: number;
+  root: string;
+  indexPath: string;
+  registryPath: string;
+  reposPath: string;
+  summary: {
+    projectCount: number;
+    readyCount: number;
+    archivedCount: number;
+    maxProjects: number;
+    maxRepoSizeKb: number;
+  };
+  projects: GithubProjectLibraryProject[];
+  updatedAt: string;
+  request?: { query: string; includeArchived: boolean };
+};
+
+export type GithubProjectLibraryMutationResponse = {
+  ok: boolean;
+  status: string;
+  message?: string;
+  reason?: string;
+  project?: GithubProjectLibraryProject;
+  library?: GithubProjectLibraryPayload;
+  metadata?: Record<string, unknown>;
+};
+
 export type MemoryMutationResponse = {
   ok: boolean;
   action: string;

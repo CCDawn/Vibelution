@@ -13,6 +13,7 @@ const coreOwners = [
   "knowledgeDashboardSnapshotQuery",
   "memoryKnowledgeGraphQuery",
   "memoryKnowledgeGraphNodeDetailQuery",
+  "githubProjectLibraryQuery",
 ] as const;
 
 const knowledgeOwners = [

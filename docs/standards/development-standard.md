@@ -75,7 +75,7 @@ Before writing changes to code, behavior, architecture, or validation boundaries
 
 2. **Survey mature external schemes.** Check GitHub, papers, official docs/standards, or equivalent field practice for the same problem class. Collect a small set of candidates; do not stop at the first hit or an unordered link dump.
 
-3. **Rank and extract.** Score local and external candidates by **project fit first** (ownership, VUI, no-console runtime, SSOT, license, maintenance cost), then by the slices actually worth borrowing (mechanism, contract, test idea). Rank them. Reuse only the top-fitting parts, adapting them into the owning surface. Do not clone a whole GitHub repo or paper implementation unchanged.
+3. **Rank and extract.** Score local and external candidates by **project fit first** (ownership, VUI, no-console runtime, SSOT, license, maintenance cost), then by the slices actually worth borrowing (mechanism, contract, test idea). Rank them. Reuse only the top-fitting parts, adapting them into the owning surface. Do not copy a whole GitHub repo or paper implementation into Vibelution product code. For a high-value public GitHub analog, clone it into the project-memory GitHub library (`activePaths.memory/github-projects/`) first, then research the local clone. Do not treat web pages or API payloads as the conclusion, and do not dump clone bodies into formal KnowledgeItem / RAG.
 
 Stop condition: if you cannot name the ranked choice, the parts to borrow, and the reuse / adapt-then-reuse / replace decision, the design is not ready to write. `FAST_PATCH` may use one local owner plus one ranked analog; `STANDARD_TASK` and `HIGH_RISK` must search far enough that a better scheme could still change the path. Use `briefbound-feature-reuse-research` when the reuse decision is still open.
 
@@ -814,6 +814,7 @@ Before `STANDARD_TASK`, `HIGH_RISK`, continuation work, cross-session decisions,
 - `<active-memory>/INDEX.md`;
 - `<active-memory>/memory.json`;
 - `<active-memory>/profile.json`;
+- `<active-memory>/github-projects/INDEX.md` when the task needs an external GitHub analog (generated from `registry.json`; do not hand-edit). Clone into `github-projects/repos/` before treating that code as evidence;
 - the live registry under the Git common dir;
 - relevant lane files under `<active-memory>/lanes/`.
 

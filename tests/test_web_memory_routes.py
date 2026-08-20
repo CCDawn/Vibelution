@@ -220,7 +220,7 @@ def test_memory_overview_endpoint_groups_agent_memory_sources(tmp_path, monkeypa
     sections = {section["id"]: section for section in payload["sections"]}
     assert payload["schemaVersion"] == 3
     assert payload["projectRoot"] == str(tmp_path.resolve())
-    assert payload["summary"]["sectionCount"] == 12
+    assert payload["summary"]["sectionCount"] == 13
     assert set(sections) == {
         "user-managed-memory",
         "project-memory",
@@ -234,6 +234,7 @@ def test_memory_overview_endpoint_groups_agent_memory_sources(tmp_path, monkeypa
         "self-evolution-memory",
         "supervised-evolution-memory",
         "runtime-scene-evidence",
+        "github-projects",
     }
     assert not any("计数不一致" in item for item in payload["summary"]["warnings"])
     assert sections["user-managed-memory"]["sourcePath"] == "workspace/memory/user_memory_overrides.json"
@@ -1288,6 +1289,7 @@ def test_memory_overview_base_sections_reuse_recent_cache(tmp_path, monkeypatch)
     monkeypatch.setattr(memory_service, "_self_evolution_memory_section", lambda root, sub_timings=None: {"id": "self-evolution-memory", "items": []})
     monkeypatch.setattr(memory_service, "_supervised_evolution_memory_section", lambda root, sub_timings=None: {"id": "supervised-evolution-memory", "items": []})
     monkeypatch.setattr(memory_service, "_runtime_scene_memory_section", lambda root, sub_timings=None: {"id": "runtime-scene-evidence", "items": []})
+    monkeypatch.setattr(memory_service, "_github_projects_memory_section", lambda root: {"id": "github-projects", "items": []})
 
     memory_service._clear_memory_overview_section_cache()
     first_warnings: list[str] = []
@@ -1356,6 +1358,7 @@ def test_memory_overview_section_cache_refreshes_only_expired_section(tmp_path, 
     monkeypatch.setattr(memory_service, "_self_evolution_memory_section", lambda root, sub_timings=None: {"id": "self-evolution-memory", "items": []})
     monkeypatch.setattr(memory_service, "_supervised_evolution_memory_section", lambda root, sub_timings=None: {"id": "supervised-evolution-memory", "items": []})
     monkeypatch.setattr(memory_service, "_runtime_scene_memory_section", lambda root, sub_timings=None: {"id": "runtime-scene-evidence", "items": []})
+    monkeypatch.setattr(memory_service, "_github_projects_memory_section", lambda root: {"id": "github-projects", "items": []})
     monkeypatch.setattr(
         memory_service,
         "_memory_overview_section_signature",
@@ -1406,6 +1409,7 @@ def test_memory_overview_section_cache_refreshes_expired_section_when_signature_
     monkeypatch.setattr(memory_service, "_self_evolution_memory_section", lambda root, sub_timings=None: {"id": "self-evolution-memory", "items": []})
     monkeypatch.setattr(memory_service, "_supervised_evolution_memory_section", lambda root, sub_timings=None: {"id": "supervised-evolution-memory", "items": []})
     monkeypatch.setattr(memory_service, "_runtime_scene_memory_section", lambda root, sub_timings=None: {"id": "runtime-scene-evidence", "items": []})
+    monkeypatch.setattr(memory_service, "_github_projects_memory_section", lambda root: {"id": "github-projects", "items": []})
 
     memory_service._clear_memory_overview_section_cache()
     first_sections, _first_timings = memory_service._timed_base_memory_sections(tmp_path, [])

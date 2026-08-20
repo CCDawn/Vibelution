@@ -609,6 +609,9 @@ def test_knowledge_steward_policy_includes_skill_library_search_tool():
 
     assert "skill_library_search_tool" in policy["allowedTools"]
     assert "skill_library_search_tool" in policy["preferredTools"]
+    assert "github_project_library_search_tool" in policy["allowedTools"]
+    assert "github_project_library_search_tool" in policy["preferredTools"]
+    assert "github_project_library_clone_tool" not in policy["allowedTools"]
     assert "source_collection_context_tool" in policy["allowedTools"]
     assert "source_collection_stage_writeback_tool" in policy["allowedTools"]
     assert policy["preferredTools"] == expected_policy["preferredTools"]

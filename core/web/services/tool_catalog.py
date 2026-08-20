@@ -626,6 +626,18 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "riskTags": ["memory_access"],
         "permissionTier": MEDIUM_PERMISSION_TIER,
     },
+    "github_project_library_search_tool": {
+        "category": "memory_context",
+        "capabilityTags": ["github_project_library", "read_only"],
+        "riskTags": ["memory_access"],
+        "permissionTier": MEDIUM_PERMISSION_TIER,
+    },
+    "github_project_library_clone_tool": {
+        "category": "memory_context",
+        "capabilityTags": ["github_project_library", "memory_write", "network_access"],
+        "riskTags": ["memory_write", "network_access"],
+        "permissionTier": HIGH_PERMISSION_TIER,
+    },
     "get_core_context_tool": {
         "category": "memory_context",
         "capabilityTags": ["context", "read_only"],
@@ -985,11 +997,14 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
             "get_git_status_summary_tool",
             "get_recent_changes_tool",
             "explain_current_worktree_tool",
+            "github_project_library_search_tool",
+            "github_project_library_clone_tool",
         ],
         "preferredToolNames": [
             "grep_search_tool",
             "apply_patch_tool",
             "run_test_for_tool",
+            "github_project_library_search_tool",
         ],
     },
     {
@@ -1046,6 +1061,9 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
             "history_timeline_tool",
             "history_checkpoint_tool",
             "unified_memory_search_tool",
+            "skill_library_search_tool",
+            "github_project_library_search_tool",
+            "github_project_library_clone_tool",
             "commit_compressed_memory_tool",
             "record_learning_tool",
             "compress_context_tool",
@@ -1053,6 +1071,8 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
         "preferredToolNames": [
             "get_core_context_tool",
             "unified_memory_search_tool",
+            "skill_library_search_tool",
+            "github_project_library_search_tool",
             "history_search_tool",
             "search_memory_tool",
         ],

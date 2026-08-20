@@ -128,6 +128,7 @@ def search_unified_memory(
         query=normalized_query,
         limit=bounded_limit,
     )
+    github_results = _github_project_results(query=normalized_query, limit=bounded_limit)
     user_results = _user_content_results(
         include_user_content=bool(include_user_content),
         user_id=normalized_user_id,
@@ -136,7 +137,7 @@ def search_unified_memory(
         max_excerpt_chars=max_context_chars,
         allowed_space_ids=normalized_user_content_space_ids,
     )
-    results = _merge_ranked_results([*formal_results, *catalog_results], user_results, limit=bounded_limit)
+    results = _merge_ranked_results([*formal_results, *catalog_results, *github_results], user_results, limit=bounded_limit)
     return _payload(
         agent_id=normalized_agent_id,
         query=normalized_query,
@@ -569,6 +570,23 @@ def _catalog_results(*, agent_id: str, query: str, limit: int) -> list[dict[str,
     except Exception:
         return []
     results = list(payload.get("results") or [])
+    for result in results:
+        result.pop("excerpt", None)
+        result.pop("content", None)
+    return results
+
+
+def _github_project_results(*, query: str, limit: int) -> list[dict[str, Any]]:
+    """Local GitHub library cards: metadata + locator only, no clone body."""
+
+    if not str(query or "").strip():
+        return []
+    try:
+        from core.web.services import github_project_library_service
+
+        results = github_project_library_service.search_github_project_cards(query=query, limit=limit)
+    except Exception:
+        return []
     for result in results:
         result.pop("excerpt", None)
         result.pop("content", None)

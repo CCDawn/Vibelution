@@ -95,3 +95,37 @@ def test_unified_search_can_include_public_catalog_cards_without_bodies(tmp_path
     assert "excerpt" not in hit
     assert hit["locator"] == "docs/guide.md"
     assert hit["summary"] == "Unified search guide summary."
+
+
+def test_unified_search_includes_github_project_cards_without_bodies(monkeypatch):
+    monkeypatch.setattr(
+        unified_knowledge_search_service.team_knowledge_service,
+        "search_knowledge_items",
+        lambda **kwargs: {"summary": {"resultCount": 0, "scannedKnowledgeBaseCount": 0}, "results": []},
+    )
+    monkeypatch.setattr(
+        unified_knowledge_search_service,
+        "_github_project_results",
+        lambda **kwargs: [
+            {
+                "resultId": "github-project:acme__widget:1",
+                "resultType": "github_project_card",
+                "title": "widget",
+                "score": 1.0,
+                "rank": 1,
+                "searchBackend": "github_project_library",
+                "matchReason": "local_github_project_index",
+                "metadata": {
+                    "fullName": "acme/widget",
+                    "absolutePath": "/tmp/repos/acme__widget",
+                },
+            }
+        ],
+    )
+
+    payload = unified_knowledge_search_service.search_unified_memory(agent_id="agent-1", query="widget")
+    hits = [item for item in payload["results"] if item["resultType"] == "github_project_card"]
+    assert len(hits) == 1
+    assert hits[0]["title"] == "widget"
+    assert "excerpt" not in hits[0]
+    assert "content" not in hits[0]
