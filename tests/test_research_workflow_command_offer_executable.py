@@ -255,3 +255,60 @@ def test_offer_builder_covers_required_command_kinds(tmp_path: Path) -> None:
             assert required in kinds
     finally:
         harness.close()
+
+
+def test_start_offer_payload_carries_blocker_wording(tmp_path: Path) -> None:
+    """The UI's disabled reason must come from the blocker itself, not a
+    frontend guess keyed on the coarse reason code."""
+    from types import SimpleNamespace
+
+    from core.research.workflow.contracts.node_readiness import ReadinessBlocker
+    from core.research.workflow.contracts.workflow_problem import (
+        Remediation,
+        RemediationKind,
+    )
+    from core.web.services.team_workflow.research_runtime.command_offers import (
+        start_node as start_offers,
+    )
+
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run(run_id="run-blocker-wording")
+        run = harness.store.get_run("run-blocker-wording")
+        assert run is not None
+
+        blocker = ReadinessBlocker(
+            code="hypothesis_first_meeting_open",
+            title="评审缺少资料缺口请求",
+            detail="假说评审已全部闭环，但没有任何一轮决策携带资料缺口请求",
+            remediation=Remediation(
+                kind=RemediationKind.RESOLVE_HUMAN,
+                label="再开一轮评审，让团队提出资料缺口（证据请求）",
+            ),
+        )
+
+        class _StubReadiness:
+            def evaluate(self, **_kwargs):
+                return SimpleNamespace(ready=False, blockers=(blocker,))
+
+        offers = start_offers.build_start_node_offers(
+            readiness_service=_StubReadiness(),  # type: ignore[arg-type]
+            context=harness.context,
+            team_id=run.team_id,
+            run=run,
+            definition=build_challenge_cup_workflow_definition(),
+        )
+        blocked = next(
+            offer
+            for offer in offers
+            if offer.command == WorkflowCommandKind.START_NODE
+            and offer.node_id == "source_finding"
+        )
+        assert blocked.available is False
+        assert blocked.payload.get("remediation_label") == (
+            "再开一轮评审，让团队提出资料缺口（证据请求）"
+        )
+        assert blocked.payload.get("blocker_title") == "评审缺少资料缺口请求"
+        assert "资料缺口请求" in str(blocked.payload.get("blocker_detail"))
+    finally:
+        harness.close()

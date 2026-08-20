@@ -109,6 +109,18 @@ describe("nodeInspectorOpsModel", () => {
     expect(nodeInspectorStatus({
       unbound: false,
       runtimeCurrent: true,
+      status: "created",
+      budgetWarn: false,
+    })).toEqual({ tone: "neutral", label: "待启动" });
+    expect(nodeInspectorStatus({
+      unbound: false,
+      runtimeCurrent: false,
+      status: "created",
+      budgetWarn: false,
+    })).toEqual({ tone: "neutral", label: "未开始" });
+    expect(nodeInspectorStatus({
+      unbound: false,
+      runtimeCurrent: true,
       status: "waiting_human",
       budgetWarn: false,
     }).label).toBe("等待确认");

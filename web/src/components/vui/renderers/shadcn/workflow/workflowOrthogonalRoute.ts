@@ -7,8 +7,10 @@
  *  - leave toward the target, with a horizontal bias (R2);
  *  - arrive on the facing side (R3);
  *  - keep a straight stub before the first bend (R1);
- *  - prefer L/Z; if that crosses a card, take the other elbow or a lane
- *    around the blocking cluster (R7);
+ *  - prefer a one-bend L, then a two-bend Z (JointJS rightAngle). Other
+ *    cards are ignored unless that simple elbow actually crosses their
+ *    interior; only then take a lane around the blocking card, not around
+ *    the union of every card in the source–target hull (R7);
  *  - same-side edges use relative magnets (R4): project the far card, snap
  *    to 3/5 slots, keep opposite order so stubs do not cross on the box.
  *
@@ -189,25 +191,52 @@ export function routeOrthogonalConnector(input: {
     sourceSide: OrthogonalSide;
     targetSide: OrthogonalSide;
   }> = [];
+
+  const scoreBody = (
+    sides: { source: OrthogonalSide; target: OrthogonalSide },
+    start: WorkflowLayoutPoint,
+    end: WorkflowLayoutPoint,
+    body: WorkflowLayoutPoint[],
+  ) => {
+    const points = compactPoints([start, ...body, end]);
+    if (points.length < 2) return;
+    scored.push({
+      points,
+      // Interior crossings only. A padded graze is not a reason to pick a
+      // six-bend hull skirt the way JointJS rightAngle ignores other nodes.
+      hits: countObstacleHits(points, obstacles, 0, input.source, input.target),
+      length: polylineLength(points),
+      bends: Math.max(0, points.length - 2),
+      sourceSide: sides.source,
+      targetSide: sides.target,
+    });
+  };
+
   for (const sides of preferred) {
     const start = portPointOnRect(input.source, sides.source, input.sourceFraction ?? 0.5);
     const end = portPointOnRect(input.target, sides.target, input.targetFraction ?? 0.5);
     const sourceLead = orthogonalLead(start, sides.source, stub);
     const targetLead = orthogonalLead(end, sides.target, stub);
-    for (const body of connectorCandidates(sourceLead, targetLead, input.source, input.target, stub, padding, obstacles)) {
-      const points = compactPoints([start, ...body, end]);
-      if (points.length < 2) continue;
-      scored.push({
-        points,
-        hits: countObstacleHits(points, obstacles, padding, input.source, input.target),
-        length: polylineLength(points),
-        bends: Math.max(0, points.length - 2),
-        sourceSide: sides.source,
-        targetSide: sides.target,
-      });
+    for (const body of simpleConnectorBodies(sourceLead, targetLead)) {
+      scoreBody(sides, start, end, body);
     }
   }
-  scored.sort((a, b) => a.hits - b.hits || a.length - b.length || a.bends - b.bends);
+  scored.sort(compareOrthogonalScores);
+  const bestSimple = scored[0];
+  if (bestSimple && bestSimple.hits === 0) {
+    return { points: bestSimple.points, sourceSide: bestSimple.sourceSide, targetSide: bestSimple.targetSide };
+  }
+
+  for (const sides of preferred) {
+    const start = portPointOnRect(input.source, sides.source, input.sourceFraction ?? 0.5);
+    const end = portPointOnRect(input.target, sides.target, input.targetFraction ?? 0.5);
+    const sourceLead = orthogonalLead(start, sides.source, stub);
+    const targetLead = orthogonalLead(end, sides.target, stub);
+    for (const body of detourConnectorBodies(sourceLead, targetLead, input.source, input.target, stub, padding, obstacles)) {
+      scoreBody(sides, start, end, body);
+    }
+  }
+  scored.sort(compareOrthogonalScores);
   const winner = scored[0];
   if (!winner) {
     const sides = preferred[0]!;
@@ -220,6 +249,13 @@ export function routeOrthogonalConnector(input: {
     };
   }
   return { points: winner.points, sourceSide: winner.sourceSide, targetSide: winner.targetSide };
+}
+
+function compareOrthogonalScores(
+  a: { hits: number; bends: number; length: number },
+  b: { hits: number; bends: number; length: number },
+): number {
+  return a.hits - b.hits || a.bends - b.bends || a.length - b.length;
 }
 
 function facingSideCandidates(
@@ -267,7 +303,27 @@ export function longestStrokeIsVertical(points: readonly WorkflowLayoutPoint[]):
   return bestVertical;
 }
 
-function connectorCandidates(
+function simpleConnectorBodies(
+  sourceLead: WorkflowLayoutPoint,
+  targetLead: WorkflowLayoutPoint,
+): WorkflowLayoutPoint[][] {
+  const bodies: WorkflowLayoutPoint[][] = [
+    [sourceLead, { x: sourceLead.x, y: targetLead.y }, targetLead],
+    [sourceLead, { x: targetLead.x, y: sourceLead.y }, targetLead],
+  ];
+  if (almostEqual(sourceLead.x, targetLead.x) || almostEqual(sourceLead.y, targetLead.y)) {
+    return bodies;
+  }
+  const midX = sourceLead.x + (targetLead.x - sourceLead.x) / 2;
+  const midY = sourceLead.y + (targetLead.y - sourceLead.y) / 2;
+  bodies.push(
+    [sourceLead, { x: midX, y: sourceLead.y }, { x: midX, y: targetLead.y }, targetLead],
+    [sourceLead, { x: sourceLead.x, y: midY }, { x: targetLead.x, y: midY }, targetLead],
+  );
+  return bodies;
+}
+
+function detourConnectorBodies(
   sourceLead: WorkflowLayoutPoint,
   targetLead: WorkflowLayoutPoint,
   source: OrthogonalRect,
@@ -276,36 +332,20 @@ function connectorCandidates(
   padding: number,
   obstacles: readonly OrthogonalRect[],
 ): WorkflowLayoutPoint[][] {
-  const midX = sourceLead.x + (targetLead.x - sourceLead.x) / 2;
-  const midY = sourceLead.y + (targetLead.y - sourceLead.y) / 2;
-  const candidates: WorkflowLayoutPoint[][] = [
-    [sourceLead, { x: midX, y: sourceLead.y }, { x: midX, y: targetLead.y }, targetLead],
-    [sourceLead, { x: sourceLead.x, y: midY }, { x: targetLead.x, y: midY }, targetLead],
-  ];
-
   const hull = inflate(boundsBetween(source, target), padding + stub);
-  const topY = hull.y;
-  const bottomY = hull.y + hull.height;
-  const leftX = hull.x;
-  const rightX = hull.x + hull.width;
-  candidates.push(
-    [sourceLead, { x: sourceLead.x, y: topY }, { x: targetLead.x, y: topY }, targetLead],
-    [sourceLead, { x: sourceLead.x, y: bottomY }, { x: targetLead.x, y: bottomY }, targetLead],
-    [sourceLead, { x: leftX, y: sourceLead.y }, { x: leftX, y: targetLead.y }, targetLead],
-    [sourceLead, { x: rightX, y: sourceLead.y }, { x: rightX, y: targetLead.y }, targetLead],
-  );
-
-  const blockers = obstacles.filter((rect) => rectsOverlap(hull, inflate(rect, padding)));
-  const cluster = boundsOf(blockers);
-  if (cluster) {
-    const padded = inflate(cluster, padding + stub);
+  const candidates: WorkflowLayoutPoint[][] = [
+    [sourceLead, { x: sourceLead.x, y: hull.y }, { x: targetLead.x, y: hull.y }, targetLead],
+    [sourceLead, { x: sourceLead.x, y: hull.y + hull.height }, { x: targetLead.x, y: hull.y + hull.height }, targetLead],
+    [sourceLead, { x: hull.x, y: sourceLead.y }, { x: hull.x, y: targetLead.y }, targetLead],
+    [sourceLead, { x: hull.x + hull.width, y: sourceLead.y }, { x: hull.x + hull.width, y: targetLead.y }, targetLead],
+  ];
+  for (const blocker of obstacles) {
+    if (!rectsOverlap(hull, inflate(blocker, padding))) continue;
+    const padded = inflate(blocker, padding + stub);
     const laneTop = padded.y;
     const laneBottom = padded.y + padded.height;
     const laneLeft = padded.x;
     const laneRight = padded.x + padded.width;
-    // Skirt the cluster on the outside: reach a clear lane first, then travel
-    // along that lane, then join the target lead. Touching the padded box
-    // edge is not enough — the parallel run must sit fully outside.
     candidates.push(
       [sourceLead, { x: sourceLead.x, y: laneTop }, { x: laneLeft, y: laneTop }, { x: laneLeft, y: targetLead.y }, targetLead],
       [sourceLead, { x: sourceLead.x, y: laneTop }, { x: laneRight, y: laneTop }, { x: laneRight, y: targetLead.y }, targetLead],
@@ -392,15 +432,6 @@ function boundsBetween(a: OrthogonalRect, b: OrthogonalRect): OrthogonalRect {
 
 function inflate(rect: OrthogonalRect, pad: number): OrthogonalRect {
   return { x: rect.x - pad, y: rect.y - pad, width: rect.width + pad * 2, height: rect.height + pad * 2 };
-}
-
-function boundsOf(rects: readonly OrthogonalRect[]): OrthogonalRect | null {
-  if (rects.length === 0) return null;
-  const x = Math.min(...rects.map((rect) => rect.x));
-  const y = Math.min(...rects.map((rect) => rect.y));
-  const right = Math.max(...rects.map((rect) => rect.x + rect.width));
-  const bottom = Math.max(...rects.map((rect) => rect.y + rect.height));
-  return { x, y, width: right - x, height: bottom - y };
 }
 
 function rectsOverlap(a: OrthogonalRect, b: OrthogonalRect): boolean {

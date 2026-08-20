@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any
 
 from core.research.workflow.contracts import CommandOffer, WorkflowCommandKind
 from core.research.workflow.ledger.records import NodeAttemptRecord, RunRecord
@@ -63,6 +64,7 @@ def build_start_node_offers(
             use_cache=True,
             evaluated_at_ms=evaluated_at_ms,
         )
+        payload: dict[str, Any] = {}
         if held_reason:
             available = False
             blocker_ids = (held_reason,)
@@ -73,6 +75,17 @@ def build_start_node_offers(
                 "ready" if readiness.ready else "not_ready"
             )
             available = bool(readiness.ready)
+            # Carry the blocker's own wording to the UI: the offer is the only
+            # channel the node inspector has, and a bare reason code forces the
+            # frontend to guess a remediation that may not match the sub-case.
+            if not available and readiness.blockers:
+                first = readiness.blockers[0]
+                payload = {
+                    "blocker_title": str(first.title or ""),
+                    "blocker_detail": str(first.detail or ""),
+                }
+                if first.remediation is not None and first.remediation.label:
+                    payload["remediation_label"] = str(first.remediation.label)
         offers.append(
             CommandOffer(
                 command=WorkflowCommandKind.START_NODE,
@@ -85,7 +98,7 @@ def build_start_node_offers(
                     f"offer:{run.run_id}:{node.nodeId}:start_node:v{run.run_version}"
                 ),
                 expected_run_version=run.run_version,
-                payload={},
+                payload=payload,
             )
         )
     return offers

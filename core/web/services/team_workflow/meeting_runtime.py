@@ -55,6 +55,15 @@ _DEFAULT_AGENDA_RULES = (
     "结论必须引用证据或消息来源",
     "没有新内容时回复 pass",
     "分歧必须显式记录，不得省略",
+    # The closure digest extracts evidence requests by this marker; without
+    # teaching the format the review can never emit a search envelope and the
+    # first source-collection round stays blocked (observed live on SCI-001).
+    "认为需要补充资料时，必须独占一行输出 "
+    'EVIDENCE_REQUEST: {"rationale":"为何需要","candidateRefs":["候选ID"],'
+    '"searchEnvelope":{"keywords":["检索关键词"],"sourceTypes":["paper"],'
+    '"evidenceLevels":["peer_reviewed"]},'
+    '"requirements":{"minEvidenceLevel":"medium","completeness":"stage-one"}} '
+    "（JSON 字段可按需增删，candidateRefs 用本轮候选 ID）；本轮无资料缺口则不输出该标记",
 )
 
 CANDIDATE_GENERATION_MEETING_TYPE = "hypothesis_candidate_generation"

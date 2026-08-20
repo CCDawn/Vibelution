@@ -95,6 +95,12 @@ describe("workflow serpentine layout", () => {
     }
   });
 
+  it("keeps protocol_review to protocol_freeze as a short elbow, not a staircase", async () => {
+    const result = await layoutSerpentine();
+    const edge = result.edges.find((item) => item.id === "e_review_freeze")!;
+    expect(edge.sections.length, `${edge.sections.length} sections`).toBeLessThanOrEqual(4);
+  });
+
   it("uses a short facing-side orthogonal bridge for cross-stage handoffs", async () => {
     const result = await layoutSerpentine();
     for (const edgeId of ["e_kc_hypothesis", "e_smoke_run"]) {
@@ -320,6 +326,12 @@ function rectsOverlap(
 }
 
 describe("hypothesis-first region serpentine layout (HFC-5)", () => {
+  it("keeps protocol_review outbound as a short elbow, not a staircase", async () => {
+    const result = await layoutHypothesisFirstSerpentine(1);
+    const edge = result.edges.find((item) => item.id === "e_review_freeze")!;
+    expect(edge.sections.length, `${edge.sections.length} sections`).toBeLessThanOrEqual(4);
+  });
+
   it("stacks four stage territories in order and alternates R/L/R/L", async () => {
     const input = composedHypothesisFirstGraph(1);
     const result = await layoutHypothesisFirstSerpentine(1);

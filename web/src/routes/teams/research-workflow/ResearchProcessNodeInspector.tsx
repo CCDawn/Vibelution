@@ -113,8 +113,12 @@ export function ResearchProcessNodeInspector(props: ResearchProcessNodeInspector
         blockedReason={detail.blockedReason || ""}
         lang={lang}
       />
+      {/* When the primary action itself is blocked, secondary run commands
+          (retry/rebind) are noise that buries the blocker reason — hide them
+          until the primary becomes actionable (GitHub Actions shows one
+          disabled primary with its reason, not a row of dead buttons). */}
       <NodeCommandSection
-        offers={restOffers}
+        offers={!primaryOffer || primaryOffer.available ? restOffers : []}
         busy={props.busy}
         onOffer={props.onOffer}
         lang={lang}
