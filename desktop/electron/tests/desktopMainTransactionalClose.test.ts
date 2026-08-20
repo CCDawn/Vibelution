@@ -113,4 +113,13 @@ describe("Electron main transactional Workbench close", () => {
     expect(source).toContain("context = await resolveDesktopActionLoopContext(bootstrap);");
     expect(source).toContain("runtimeSceneBridge = null;");
   });
+
+  it("records supervisor evidence for untracked closes and fail-open paths", () => {
+    const source = readFileSync(mainSourcePath, "utf8");
+
+    expect(source).toContain('from "./lifecycle/supervisorEventFallback.js"');
+    expect(source).toContain("appendSupervisorEventFallback(workspaceRoot, {");
+    expect(source).toContain('"electron.workbench_close.untracked_window_closed"');
+    expect(source).toContain('"electron.workbench_close.fail_open_user_declined"');
+  });
 });

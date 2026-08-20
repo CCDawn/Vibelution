@@ -2530,6 +2530,7 @@ def test_reconcile_observation_cleans_up_orphaned_browser(monkeypatch):
         "workbench.consistency.orphaned_browser_detected",
         "workbench.consistency.orphaned_browser_cleanup_requested",
         "workbench.consistency.orphaned_browser_cleanup_succeeded",
+        "workbench.observed_state_changed",
     ]
     assert events[0][1]["browserWindowPid"] == 12132
 
@@ -2590,7 +2591,9 @@ def test_reconcile_observation_does_not_fail_opening_orphaned_browser(monkeypatc
     assert workbench["frontendOrphaned"] is True
     assert workbench["lifecycleConsistency"] == "orphaned_browser"
     assert workbench["failureMessage"] == ""
-    assert events == []
+    # Only the idle-reconcile transition log may fire here; no cleanup or
+    # failure events are allowed while an open command is still in flight.
+    assert [event_type for event_type, _ in events] == ["workbench.observed_state_changed"]
 
 
 def test_reconcile_observation_gives_up_orphaned_cleanup_after_max_attempts(monkeypatch):
@@ -12639,7 +12642,120 @@ def test_maybe_auto_close_on_browser_missing_skips_when_electron_owns_window(mon
     later = runtime_daemon._maybe_auto_close_on_browser_missing(first)
     assert "browserMissingSince" not in later
     assert submitted == []
-    assert events == []
+    assert events == ["workbench.auto_close.browser_missing_skipped"]
+
+
+def test_maybe_auto_close_on_browser_missing_electron_skip_logged_once_per_episode(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    events = []
+    monkeypatch.delenv("VIBELUTION_ELECTRON_MAIN_ORCHESTRATES_WINDOWS", raising=False)
+    monkeypatch.setattr(daemon, "now_iso", lambda: "2026-08-10T10:00:00+00:00")
+    monkeypatch.setattr(daemon, "submit_command", lambda *a, **k: {"commandId": "cmd"})
+    monkeypatch.setattr(
+        daemon,
+        "_append_event",
+        lambda event_type, payload=None: events.append((event_type, payload)),
+    )
+
+    state = {
+        "command": {},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "partial",
+            "phase": "steady",
+            "lifecycleConsistency": "browser_missing",
+            "windowProvider": "electron",
+        },
+    }
+
+    def skip_event_count():
+        return len([e for e in events if e[0] == "workbench.auto_close.browser_missing_skipped"])
+
+    runtime_daemon._maybe_auto_close_on_browser_missing(state)
+    assert skip_event_count() == 1
+    runtime_daemon._maybe_auto_close_on_browser_missing(state)
+    assert skip_event_count() == 1
+    skip_payload = next(e[1] for e in events if e[0] == "workbench.auto_close.browser_missing_skipped")
+    assert skip_payload["reason"] == "electron_window_owner"
+    assert skip_payload["windowProvider"] == "electron"
+
+    state["workbench"]["observedState"] = "open"
+    state["workbench"]["lifecycleConsistency"] = "consistent"
+    runtime_daemon._maybe_auto_close_on_browser_missing(state)
+    assert "browserMissingSkipNotified" not in state
+
+    state["workbench"]["observedState"] = "partial"
+    state["workbench"]["lifecycleConsistency"] = "browser_missing"
+    runtime_daemon._maybe_auto_close_on_browser_missing(state)
+    assert skip_event_count() == 2
+
+
+def test_reconcile_observation_emits_observed_state_transition_event_once(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    events = []
+    monkeypatch.setattr(
+        daemon,
+        "_append_event",
+        lambda event_type, payload=None: events.append((event_type, payload)),
+    )
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(daemon, "_process_source_signature", lambda: "sig-current")
+
+    observation = {
+        "observedState": "partial",
+        "lifecycleConsistency": "browser_missing",
+        "sessionRole": "workbench",
+        "backendPid": 39428,
+        "backendAlive": True,
+        "backendHealthy": True,
+        "backendObserved": True,
+        "backendPort": 8002,
+        "backendPortListening": True,
+        "backendPortOwnerPid": 39428,
+        "backendPortOwnerTrusted": True,
+        "backendPortConflict": False,
+        "browserWindowAlive": False,
+        "browserManaged": True,
+        "sessionId": "managed-session",
+        "url": "http://127.0.0.1:8002",
+        "windowProvider": "electron",
+    }
+    state = {
+        "runtimeState": "running",
+        "daemonRunning": True,
+        "command": {},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "steady",
+            "lifecycleConsistency": "consistent",
+        },
+    }
+
+    first = runtime_daemon._reconcile_observation(
+        state,
+        observation=observation,
+        residual_processes={"count": 0, "items": []},
+    )
+    transitions = [e for e in events if e[0] == "workbench.observed_state_changed"]
+    assert len(transitions) == 1
+    payload = transitions[0][1]
+    assert payload["previousObservedState"] == "open"
+    assert payload["observedState"] == "partial"
+    assert payload["previousLifecycleConsistency"] == "consistent"
+    assert payload["lifecycleConsistency"] == "browser_missing"
+    assert payload["desiredState"] == "open"
+    assert payload["backendPid"] == 39428
+    assert payload["backendHealthy"] is True
+    assert payload["browserWindowAlive"] is False
+    assert payload["windowProvider"] == "electron"
+
+    runtime_daemon._reconcile_observation(
+        first,
+        observation=observation,
+        residual_processes={"count": 0, "items": []},
+    )
+    assert len([e for e in events if e[0] == "workbench.observed_state_changed"]) == 1
 
 
 def test_maybe_auto_close_on_browser_missing_skips_when_electron_orchestrates(monkeypatch):
