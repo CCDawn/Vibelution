@@ -24,19 +24,10 @@ type BaseEdgeStub = {
   "data-section-fault"?: string;
   "data-label-fault"?: string;
   "data-manual-route"?: string;
-  "data-smart-route"?: string;
+  "data-orthogonal-rest"?: string;
 };
 
 const baseEdgeCalls: BaseEdgeStub[] = vi.hoisted(() => []);
-const useSmartEdgePathMock = vi.hoisted(() => vi.fn(() => ({
-  route: null,
-  isDragging: false,
-  hasProvider: true,
-})));
-
-vi.mock("@tisoap/react-flow-smart-edge", () => ({
-  useSmartEdgePath: useSmartEdgePathMock,
-}));
 
 vi.mock("@xyflow/react", async () => {
   const React = (await import("react")).default;
@@ -52,6 +43,7 @@ vi.mock("@xyflow/react", async () => {
 
 import { WorkflowSemanticEdge, type WorkflowSemanticEdgeData } from "./WorkflowSemanticEdge";
 import { resolveEdgeStroke } from "./workflowCanvasState";
+import { resolveOrthogonalEdgeGeometry } from "./workflowOrthogonalRoute";
 import type { WorkflowEdgeSection } from "../../../product/workflow/workflowCanvasTypes";
 
 const sections: WorkflowEdgeSection[] = [
@@ -96,7 +88,7 @@ function renderEdge(
 
 describe("WorkflowSemanticEdge render (P1-3)", () => {
   beforeEach(() => {
-    useSmartEdgePathMock.mockReturnValue({ route: null, isDragging: false, hasProvider: true });
+    baseEdgeCalls.length = 0;
   });
   it("emits the engine-owned orthogonal path exactly, with marker and hit width", () => {
     renderEdge({ sections });
@@ -108,6 +100,16 @@ describe("WorkflowSemanticEdge render (P1-3)", () => {
   });
 
   it("switches to a live orthogonal route and midpoint label after a manual move", () => {
+    const extra = { sourceX: 10, sourceY: 20, targetX: 130, targetY: 80 };
+    const expected = resolveOrthogonalEdgeGeometry({
+      start: { x: extra.sourceX, y: extra.sourceY },
+      end: { x: extra.targetX, y: extra.targetY },
+      sourceSide: "left",
+      targetSide: "right",
+      sourceId: "a",
+      targetId: "b",
+      stub: 32,
+    });
     const markup = renderEdge(
       {
         sections,
@@ -118,34 +120,53 @@ describe("WorkflowSemanticEdge render (P1-3)", () => {
         pathState: "idle",
         manualRouteActive: true,
       },
-      { sourceX: 10, sourceY: 20, targetX: 130, targetY: 80 },
+      extra,
     );
-    expect(baseEdgeCalls[0]?.path).toBe("M 10 20 L -22 20 L 70 20 L 70 80 L 162 80 L 130 80");
+    expect(baseEdgeCalls[0]?.path).toBe(expected.path);
     expect(baseEdgeCalls[0]?.["data-manual-route"]).toBe("true");
+    expect(baseEdgeCalls[0]?.["data-orthogonal-rest"]).toBe("true");
     expect(baseEdgeCalls[0]?.["data-label-fault"]).toBeUndefined();
-    expect(markup).toContain('translate(70px,50px)');
+    expect(markup).toContain(`translate(${expected.labelAnchor.x}px,${expected.labelAnchor.y}px)`);
   });
 
-  it("uses the settled smart route but keeps the local route while dragging", () => {
-    useSmartEdgePathMock.mockReturnValue({
-      route: {
-        kind: "routed",
-        wasRouted: true,
-        svgPathString: "M 10 20 L 42 20 L 42 120 L 98 120 L 98 80 L 130 80",
-        edgeCenterX: 70,
-        edgeCenterY: 120,
-        points: [],
-      },
-      isDragging: false,
-      hasProvider: true,
+  it("settles onto the shared L/Z orthogonal route and keeps the live route while dragging", () => {
+    const obstacles = [
+      { id: "a", x: 0, y: 0, width: 20, height: 40 },
+      { id: "b", x: 80, y: 200, width: 20, height: 40 },
+      { id: "blocker", x: 20, y: 80, width: 60, height: 40 },
+    ];
+    const extra = {
+      sourceX: 10,
+      sourceY: 40,
+      targetX: 90,
+      targetY: 200,
+      sourcePosition: "bottom" as never,
+      targetPosition: "top" as never,
+    };
+    const expected = resolveOrthogonalEdgeGeometry({
+      start: { x: extra.sourceX, y: extra.sourceY },
+      end: { x: extra.targetX, y: extra.targetY },
+      sourceSide: "bottom",
+      targetSide: "top",
+      sourceId: "a",
+      targetId: "b",
+      obstacles,
+      stub: 32,
     });
-    renderEdge({ sections, manualRouteActive: true });
-    expect(baseEdgeCalls[0]?.path).toContain("L 42 120");
-    expect(baseEdgeCalls[0]?.["data-smart-route"]).toBe("true");
+    renderEdge({ sections, manualRouteActive: true, obstacleRects: obstacles }, extra);
+    expect(baseEdgeCalls[0]?.path).toBe(expected.path);
+    expect(baseEdgeCalls[0]?.["data-orthogonal-rest"]).toBe("true");
+    expect(baseEdgeCalls[0]?.["data-manual-route"]).toBe("true");
 
-    renderEdge({ sections, manualRouteActive: true, manualDragging: true });
-    expect(baseEdgeCalls[0]?.path).not.toContain("L 42 120");
-    expect(baseEdgeCalls[0]?.["data-smart-route"]).toBeUndefined();
+    renderEdge({
+      sections,
+      manualRouteActive: true,
+      manualDragging: true,
+      obstacleRects: obstacles,
+    }, extra);
+    expect(baseEdgeCalls[0]?.path).not.toBe(expected.path);
+    expect(baseEdgeCalls[0]?.["data-orthogonal-rest"]).toBeUndefined();
+    expect(baseEdgeCalls[0]?.["data-manual-route"]).toBe("true");
   });
 
   it("uses dashed semantic colors for idle rerun/revise/rollback instead of a shared grey", () => {
