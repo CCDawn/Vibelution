@@ -128,7 +128,7 @@
 | `memory_cleanup_service.py` | Hard-delete cleanup helpers for Memory Library targets. | — | `memory.py` | `test_memory_cleanup_service.py`, `test_select_tests.py`, `test_web_memory_routes.py` |
 | `memory_graph_service.py` | Read-only project memory knowledge graph service. | — | `memory.py` | `test_team_knowledge_service.py`, `test_web_memory_routes.py` |
 | `memory_service.py` | Agent memory overview and user management service. | — | `memory.py` | `test_agent_protocol.py`, `test_agent_tool_contracts.py`, `test_codebase_map_builder.py` |
-| `github_project_library_service.py` | Persistent public GitHub clones under project memory, with a generated index. | — | `memory.py` | `test_github_project_library_service.py` |
+| `github_project_library_service.py` | Persistent public GitHub clones of the default-branch tip (depth 1) under project memory, with a generated index. | — | `memory.py` | `test_github_project_library_service.py` |
 
 ## Research / Challenge Cup
 

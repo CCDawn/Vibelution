@@ -1,4 +1,4 @@
-"""Persistent GitHub OSS project library under project memory.
+"""Persistent public GitHub clones of the default-branch tip (depth 1) under project memory, with a generated index.
 
 Clones the GitHub default branch at depth 1 (latest tip, no history).
 

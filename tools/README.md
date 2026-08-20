@@ -47,7 +47,7 @@ Model 可见性
 | `session_reference_tools.py` | `session_reference_query_tool` | `test_agent_protocol.py` |
 | `team_knowledge_tools.py` | `unified_memory_search_tool` · `knowledge_proposal_tool` · `knowledge_ingestion_tool` · `knowledge_governance_*` · `knowledge_steward_*` · `knowledge_rating_suggestion_tool` · `knowledge_operations_health_tool` | `test_team_knowledge_tools.py` · `test_agent_tool_contracts.py` |
 | `skill_library_tools.py` | `skill_library_search_tool` | `test_agent_tool_contracts.py` |
-| `github_project_library_tools.py` | `github_project_library_search_tool` · `github_project_library_clone_tool` | `test_github_project_library_tools.py` |
+| `github_project_library_tools.py` | `github_project_library_search_tool` · `github_project_library_clone_tool`（默认主干浅克隆，不拉历史） | `test_github_project_library_tools.py` |
 | `git_tools.py` | `get_git_status_summary_tool` · `get_recent_changes_tool` · `get_entity_history_tool` · `explain_current_worktree_tool` · `open_evolution_transaction_tool` · `close_evolution_transaction_tool` · `get_evolution_fitness_tool` | `test_agent_protocol.py` |
 | `source_collection_stage_tools.py` | `source_collection_context_tool` · `source_collection_stage_writeback_tool` | `test_agent_tool_contracts.py` |
 | `challenge_cup_operations_tools.py` | `challenge_cup_experiment_*` · `challenge_cup_iteration_*` · `challenge_cup_versioning_*`（context/writeback 各 3） | `test_challenge_cup_operations_tools.py` |
@@ -69,6 +69,8 @@ Model 可见性
 | `core/infrastructure/workspace_cleaner.py` | `list_workspace_debris_tool` · `clean_workspace_debris_tool` · `get_session_files_tool` | `test_agent_protocol.py` |
 
 已退役（不得复活）：`knowledge_query_tool` · `knowledge_rag_retrieve_tool` · `unified_knowledge_search_tool` — 见 `tests/test_agent_tool_contracts.py` `RETIRED_TOOL_NAMES`。
+
+开源项目落盘：`github_project_library_clone_tool` 只克隆公开仓的 GitHub 默认主干最新提交（`--depth 1 --single-branch`），默认不拉子模块与历史；命中后读本地路径，不要把网页当结论。
 
 ---
 

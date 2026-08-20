@@ -1,4 +1,7 @@
-"""Agent-facing tools for the memory-library GitHub project index."""
+"""Agent-facing tools for the memory-library GitHub project index.
+
+Clone is the GitHub default-branch tip at depth 1 (no history, no submodules).
+"""
 
 from __future__ import annotations
 
