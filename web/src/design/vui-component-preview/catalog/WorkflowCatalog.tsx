@@ -4,6 +4,9 @@ import { queryKeys } from "../../../api/queryKeys";
 import type { ChallengeSubmissionReadiness } from "../../../api/types/challengeCup";
 import { VWorkflowCanvas } from "../../../components/vui";
 import type { WorkflowLayoutInput } from "../../../components/vui/product/workflow/workflowCanvasTypes";
+import { ChallengeCatalogOverview } from "../../../routes/teams/challenge-cup/ChallengeCatalogOverview";
+import type { CatalogOverview } from "../../../routes/teams/challenge-cup/challengeCatalogOverviewModel";
+import { ChallengeTokenUsageStrip } from "../../../routes/teams/challenge-cup/ChallengeTokenUsageStrip";
 import { ChallengeSubmissionReadinessPanel } from "../../../routes/teams/research-workflow/ChallengeSubmissionReadinessPanel";
 import { VuiPreviewCard } from "../VuiPreviewCard";
 import { VuiPreviewSection } from "../VuiPreviewSection";
@@ -161,6 +164,45 @@ challengeReadinessQueryClient.setQueryData(
   queryKeys.challengeSubmissionReadiness(previewTeamId),
   challengeReadinessPreview,
 );
+const challengeCatalogOverviewPreview: CatalogOverview = {
+  schemaVersion: 1,
+  teamId: previewTeamId,
+  generatedAt: "2026-08-20T00:00:00Z",
+  questionCount: 2,
+  counts: { queued: 0, running: 0, succeeded: 1, failed: 1 },
+  questions: [
+    {
+      questionId: "SCI-001",
+      title: "基线复现",
+      domain: "science",
+      status: "failed",
+      executionStatus: "failed",
+      currentStage: "catalog_execution",
+      checkpointProgress: "1/3",
+      attempts: 1,
+      planId: "plan-preview",
+      action: "retry",
+      blocker: { code: "eval_failed", message: "评测未通过", remediationLabel: "重试失败题" },
+    },
+    {
+      questionId: "SCI-002",
+      title: "对照实验",
+      domain: "science",
+      status: "succeeded",
+      executionStatus: "succeeded",
+      currentStage: "complete",
+      checkpointProgress: "3/3",
+      attempts: 1,
+      planId: "plan-preview",
+      action: "view",
+      blocker: null,
+    },
+  ],
+};
+challengeReadinessQueryClient.setQueryData(
+  queryKeys.challengeCupCatalogOverview(previewTeamId),
+  challengeCatalogOverviewPreview,
+);
 
 const serpentineStatusGraph: WorkflowLayoutInput = {
   stages: [
@@ -230,6 +272,19 @@ export function WorkflowCatalog() {
       <VuiPreviewCard name="ChallengeSubmissionReadiness" className={workflowCatalogClasses.card}>
         <QueryClientProvider client={challengeReadinessQueryClient}>
           <ChallengeSubmissionReadinessPanel teamId={previewTeamId} onOpenQuestion={() => undefined} />
+        </QueryClientProvider>
+      </VuiPreviewCard>
+      <VuiPreviewCard name="ChallengeTokenUsageStrip" className={workflowCatalogClasses.card}>
+        <ChallengeTokenUsageStrip
+          totalTokens={12800}
+          callCount={6}
+          inputTokens={8400}
+          outputTokens={4400}
+        />
+      </VuiPreviewCard>
+      <VuiPreviewCard name="ChallengeCatalogOverview" className={workflowCatalogClasses.card}>
+        <QueryClientProvider client={challengeReadinessQueryClient}>
+          <ChallengeCatalogOverview teamId={previewTeamId} onOpenQuestion={() => undefined} />
         </QueryClientProvider>
       </VuiPreviewCard>
       <VuiPreviewCard name="VWorkflowCanvas" className={workflowCatalogClasses.card}>
