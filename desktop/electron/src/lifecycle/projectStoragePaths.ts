@@ -75,8 +75,50 @@ export function resolveCanonicalRuntimeHome(workspaceRoot: string): string | nul
   return join(resolveProjectsHome(), projectId, "instances", instanceIdForProject(workspaceRoot), "runtime");
 }
 
+export function resolveLocalAppDataRoot(): string {
+  const localAppData = String(process.env.LOCALAPPDATA || "").trim();
+  return localAppData
+    ? resolve(localAppData)
+    : join(resolve(process.env.USERPROFILE || ""), "AppData", "Local");
+}
+
+export function resolveConfigHome(): string {
+  const override = String(process.env.VIBELUTION_CONFIG_HOME || "").trim();
+  if (override) {
+    return resolve(override);
+  }
+  return join(resolve(process.env.USERPROFILE || ""), "Documents", "Vibelution", "config");
+}
+
+export function resolveDataHomeForProject(projectRoot: string): string {
+  const projectId = readProjectId(projectRoot);
+  const instanceId = instanceIdForProject(projectRoot);
+  if (projectId) {
+    return join(resolveProjectsHome(), projectId, "instances", instanceId, "data");
+  }
+  return join(resolveLocalAppDataRoot(), "Vibelution", "slots", instanceId, "data");
+}
+
 export function resolveCheckoutRuntimeHome(workspaceRoot: string): string {
   return join(resolve(workspaceRoot), ".runtime");
+}
+
+export function resolveLauncherRuntimeDir(workspaceRoot: string): string {
+  const checkoutDir = join(resolveCheckoutRuntimeHome(workspaceRoot), "launcher");
+  const canonicalHome = resolveCanonicalRuntimeHome(workspaceRoot);
+  if (!canonicalHome) {
+    return checkoutDir;
+  }
+  const migratedDir = join(canonicalHome, "launcher");
+  const migratedState = join(migratedDir, "state.json");
+  const checkoutState = join(checkoutDir, "state.json");
+  if (existsSync(migratedState)) {
+    return migratedDir;
+  }
+  if (existsSync(checkoutState)) {
+    return checkoutDir;
+  }
+  return existsSync(migratedDir) ? migratedDir : checkoutDir;
 }
 
 export function resolveDesktopShellOwnerPaths(workspaceRoot: string): {

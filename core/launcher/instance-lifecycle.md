@@ -1,9 +1,9 @@
 # 隔离分支实例生命周期（P0 合同）
 
 **读者：** coding Agent。
-**Owner：** Electron desktop shell（监督者）+ 当前 checkout 的 Python JSON CLI。
+**Owner：** Electron desktop shell（监督者）。Python 只保留 workbench 后端本体与 git/文件维护 CLI。
 **非目标（本轮不做）：** checkout / `git worktree add` UI、托盘 HTTP→IPC 迁徙、列表 git-dirty 加速。
-**`main` 行：** open/close/restart 入队与 idle reconcile 由 Electron `lifecycle/mainLine` 拥有（I4b）；执行仍经无控制台 lifecycle CLI → RM daemon handler。隔离行走本文件的 registry claim。
+**`main` 行：** open/close/restart 入队与 idle reconcile 由 Electron `lifecycle/mainLine` 拥有；execute 由 Electron 直接 spawn `pythonw scripts/web_workbench.py`（CREATE_NO_WINDOW / `windowsHide` + `pythonw`），健康等待 net.connect + HTTP `/api/health`。隔离行走本文件的 registry claim；backend spawn 同样走 `pythonw scripts/web_workbench.py`，stop 收割登记的 `spawnPid` 后等端口释放。
 
 权威交叉引用：`docs/standards/development-standard.md` §8.0 · ADR 0009 · [`launcher_runtime.md`](../web/services/launcher_runtime.md)。
 
@@ -61,17 +61,16 @@ Python `_instance_lifecycle_state` 与 Electron `projectInstanceLifecycle`（`de
 
 隔离 start/restart：
 
-1. 当前 checkout 的 `PYTHON_LAUNCHER_SCRIPT_PATH`（`core/runtime_manager/constants.py` → `scripts/vibelution_launcher.py`）。
-2. 当前壳 `pythonw`（监督者解释器）。目标树残留的不完整 `.venv` 不得抢先。后端解释器由 launcher 再选：`requirements.txt` 与监督者相同且监督者 `.venv` 可用则复用，禁止往共享环境 `pip install`；只有依赖不同才在目标树建私有 `.venv`。
+1. 当前壳 `pythonw`（监督者解释器）直接 spawn 目标树 `scripts/web_workbench.py`（`--host` / `--port` / `--no-browser` / `--managed-by-launcher`）。禁止产品路径再 spawn `vibelution_launcher.py` 或 `--action lifecycle|branch-instance`。
+2. 目标树残留的不完整 `.venv` 不得抢先。后端解释器复用监督者 `.venv`/`pythonw`。
 3. `cwd` = 目标 worktree。
-4. `apply_slot_spawn_environment`：`VIBELUTION_WORKSPACE_ROOT`、端口、slot data home。
-5. start/restart 额外：`VIBELUTION_ALLOW_DIRTY_LAUNCH=1`、`VIBELUTION_ALLOW_NON_MAIN_LAUNCH=1`、`--no-browser`。
-6. **Popen 分离**（Windows：`DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB` + hidden STARTUPINFO；禁止可见控制台）。父 JSON CLI 在 202 后立即退出，子树必须能活过父进程。
-7. **禁止** `subprocess.run` 等待隔离 start；**禁止** exec 目标树自己的 `vibelution_launcher.py`。
+4. 环境：`VIBELUTION_WORKSPACE_ROOT`、`VIBELUTION_PORT`、`VIBELUTION_DATA_HOME`（slot / 项目 data）、`VIBELUTION_CONFIG_HOME`（共享 operator config）；有 controlPort 时再设 `VIBELUTION_LAUNCHER_PORT`。start/restart 额外 `VIBELUTION_ALLOW_DIRTY_LAUNCH=1`、`VIBELUTION_ALLOW_NON_MAIN_LAUNCH=1`。
+5. **分离**（Windows：`pythonw` + `detached`/`DETACHED_PROCESS` + `windowsHide`；禁止可见控制台）。不要用 `python.exe`+`detached`（Node 会忽略 CREATE_NO_WINDOW）。
+6. **禁止** `subprocess.run` 等待隔离 start；**禁止** exec 目标树自己的 `vibelution_launcher.py`。
 
-`vibelution_launcher.py` 必须在 `sys.path.insert` **之前** 读取 `VIBELUTION_WORKSPACE_ROOT` 作为工作区根（runtime/state/cwd 语义）。Python 包默认复用监督者 `.venv`（requirements 指纹相同）；私有 `.venv` 仅在指纹不同时创建。同时把 **脚本所在 checkout** 插入 `sys.path`，保证跑的是监督者协议代码而非目标树旧模块。工作台进程仍执行目标树的 `scripts/web_workbench.py`（`Path(__file__).parent.parent` 进 `sys.path`），源码来自该 worktree。
+工作台进程执行目标树的 `scripts/web_workbench.py`（`Path(__file__).parent.parent` 进 `sys.path`），源码来自该 worktree。
 
-stop / force-stop：仍 **等待** 目标 stop（超时 60s）；但必须 **先** 用 in-process `psutil` 杀掉登记的 `spawnPid` 进程树（含根进程），再跑 `--action stop`。禁止 `taskkill.exe`。
+stop / force-stop：先 terminate 登记的 `spawnPid` / `backendPid` / `backendLaunchPid`，再等待端口释放。禁止 `taskkill.exe`。扫描式收割留给 I6。
 
 Electron 编排窗口时，Python **不得** 再 `open_isolated_workbench_window` / `close_isolated_workbench_window`（避免双关窗）。窗口由 Electron 在 HTTP READY 之后打开、在 stop 时关闭。
 
@@ -102,7 +101,7 @@ Registry 字段（隔离行）：
 | `phase` | 与 status 对齐的投影提示：`starting` / `restarting` / `stopping` / `failed` / `steady` |
 | `generation` | 每次 start/restart/stop claim +1 |
 | `commandId` | 本次命令 id |
-| `spawnPid` | 分离后的监督者 launcher 子进程 |
+| `spawnPid` | 分离后的 `pythonw scripts/web_workbench.py` 子进程 |
 | `deadlineAt` | start 观察截止（隔离 **180s**，由 claim 写入；HTTP 等待读剩余时间，不再另开 180s） |
 | `ownerLease` | `{ownerId, expiresAt}`；TTL **15s**，监督者每 **5s** 续期；缺字段视为已过期 |
 | `failureMessage` | 仅当前 generation 的失败文案 |

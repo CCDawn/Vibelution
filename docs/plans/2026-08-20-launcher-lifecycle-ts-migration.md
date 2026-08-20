@@ -1,6 +1,6 @@
 # Launcher 生命周期 TS 化迁移（绞杀者增量 I0–I6）
 
-Status: **Active**（2026-08-20 立项；I0 锁协议 v2 已实现；I1 TS 投影权威 + 双语言 fixture 已实现；I2 TS registry CAS + stop spawnPid 锁内快照已实现；I3 监督循环 TS 化 + `ownerLease` 心跳已实现；I4b main 行 open/close/restart 队列已迁 Electron；I4a 准入控制已实现）
+Status: **Active**（2026-08-20 立项；I0 锁协议 v2 已实现；I1 TS 投影权威 + 双语言 fixture 已实现；I2 TS registry CAS + stop spawnPid 锁内快照已实现；I3 监督循环 TS 化 + `ownerLease` 心跳已实现；I4b main 行 open/close/restart 队列已迁 Electron；I4a 准入控制已实现；I5 产品路径 execute 已改为 Electron 直接 spawn `pythonw scripts/web_workbench.py`）
 Authority: [ADR 0009](../adr/0009-launcher-control-plane-lives-in-electron-main.md)（由本计划 I0 增补）· 前置执行账本 [CONTROL_PLANE_MIGRATION](../archive/plans/2026-08/CONTROL_PLANE_MIGRATION.md)（已关闭，其关闭条件只覆盖「编排权归 main + :8765 退役」，未覆盖「逻辑本体 TS 化」——本计划补齐这一段）。
 验收总则：每个增量独立 worktree、独立合入、独立可回退；全部完成后，**launcher 生命周期逻辑（状态机、registry 写入、命令队列、监督循环、进程收割编排）全部运行在 Electron main（TS）内**；Python 只保留 workbench 后端本体与 git/文件维护 CLI。
 
@@ -102,7 +102,8 @@ VibelutionLauncher.exe（薄 shim，转发）
 ### I5 · action 脚本产品路径退役
 
 - backend spawn / 健康等待 / 端口释放全部 TS：Electron 直接 spawn `pythonw scripts/web_workbench.py`（参数与 `vibelution_launcher.py` 的 `_start_backend` 一致），健康等待 net.connect 门槛 + HTTP /api/health（对齐 2026-08-20 已合入的 health-probe-gate 语义）。
-- `vibelution_launcher.py` / `vibelution_desktop_entry.py` 产品路径退役（unpackaged 测试与原生 shim 路径可保留）。
+- 本增量杀树 = **登记 PID terminate**（`backendPid` / `backendLaunchPid` / `spawnPid`）+ **端口释放等待**；禁止 `taskkill.exe`。扫描式进程表收割与 Job Object 仍留 I6 可选增强。
+- `vibelution_launcher.py` / `vibelution_desktop_entry.py` 产品路径生命周期 execute 退役（unpackaged 测试、原生 shim、`resolve-workbench` / `stop-launcher` leftover `:8765` / `launcher-api` / 桌面壳刷新可保留）。
 - 验收：产品路径生命周期操作 0 个 lifecycle python CLI spawn（backend 本体除外）；冷启/重启计时不劣化；无可见控制台。
 
 ### I6 · 收口

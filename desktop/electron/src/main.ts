@@ -94,9 +94,13 @@ import {
   type WorkbenchLifecycleOperation
 } from "./process/workbenchLifecycle.js";
 import {
-  runBranchInstanceBridge,
   type BranchInstanceOperation
 } from "./process/branchInstanceBridge.js";
+import { spawnWorkbenchBackend } from "./process/workbenchBackend.js";
+import { waitForBackendHealthy } from "./process/workbenchBackendHealth.js";
+import { retireRegisteredHandles } from "./process/workbenchBackendRetire.js";
+import { resolveConfigHome, resolveDataHomeForProject } from "./lifecycle/projectStoragePaths.js";
+import { instancesRegistryPath, recordSpawnPid } from "./lifecycle/instanceRegistryStore.js";
 import {
   superviseIsolatedInstanceStart
 } from "./process/isolatedInstanceSupervisor.js";
@@ -1134,7 +1138,7 @@ async function requestTransactionalWorkbenchClose(
     };
     await recordElectronSupervisorEvent(bootstrap, {
       eventCode: "electron.workbench_close.backend_stopping",
-      message: "Electron is stopping the workbench backend through the Python lifecycle bridge.",
+      message: "Electron is stopping the workbench backend.",
       fields: {
         closeId: transaction.closeId,
         requestId: transaction.requestId ?? "",
@@ -2873,20 +2877,18 @@ async function runIsolatedRegistryMutation(input: {
   }
   const payload = launcherStateStore.projectBranchInstances();
   const target = resolveIsolatedClaimTarget(payload, input.instanceId);
-  const spawn = async (generation?: number): Promise<OrchestratedBranchInstanceResult> =>
-    runBranchInstanceBridge({
-      workspaceRoot: input.workspaceRoot,
-      pythonPath: input.pythonPath,
-      operatorConfigPath: input.operatorConfigPath,
-      operation: input.operation,
-      instanceId: input.instanceId,
-      ...(typeof generation === "number" && generation > 0 ? { generation } : {}),
-      signal: input.signal
-    });
 
   if (input.operation === "start" || input.operation === "restart") {
     if (input.operation === "start" && target?.alive) {
-      return spawn();
+      return {
+        schemaVersion: 1,
+        accepted: true,
+        operation: input.operation,
+        instanceId: input.instanceId,
+        port: target.preferredBackend,
+        controlPort: target.preferredControl,
+        message: "已打开该分支工作台窗口。"
+      };
     }
     if (target) {
       const claimed = await claimIsolatedStart({
@@ -2906,17 +2908,71 @@ async function runIsolatedRegistryMutation(input: {
           message: "该分支实例正在执行生命周期操作。"
         };
       }
-      const spawned = await spawn(Number(claimed.entry.generation || 0));
+      const port = Number(claimed.entry.port || target.preferredBackend || 0);
+      const controlPort = Number(claimed.entry.controlPort || target.preferredControl || 0);
+      const dataHome = String(claimed.entry.dataHome || "").trim() || resolveDataHomeForProject(target.projectRoot);
+      const spawned = spawnWorkbenchBackend({
+        workspaceRoot: target.projectRoot,
+        scriptRoot: target.projectRoot,
+        pythonPath: input.pythonPath,
+        port,
+        controlPort,
+        dataHome,
+        configHome: resolveConfigHome(),
+        allowDirty: true,
+        allowNonMain: true
+      });
+      const spawnPid = Number(spawned.child.pid || 0);
+      const generation = Number(claimed.entry.generation || 0);
+      if (spawnPid > 0 && generation > 0) {
+        const recorded = await recordSpawnPid(instancesRegistryPath(), {
+          instanceId: input.instanceId,
+          spawnPid,
+          expectedGeneration: generation
+        });
+        if (!recorded.applied) {
+          spawned.child.kill();
+          return {
+            schemaVersion: 1,
+            accepted: false,
+            operation: input.operation,
+            instanceId: input.instanceId,
+            generation,
+            code: "spawn_pid_cas_miss",
+            message: "spawn pid CAS missed"
+          };
+        }
+      }
+      try {
+        await waitForBackendHealthy({
+          port,
+          signal: input.signal,
+          childAlive: () => spawned.child.exitCode == null && spawned.child.killed !== true
+        });
+      } catch (error: unknown) {
+        spawned.child.kill();
+        throw error;
+      }
       return {
-        ...spawned,
-        generation: spawned.generation || Number(claimed.entry.generation || 0),
-        commandId: spawned.commandId || String(claimed.entry.commandId || ""),
-        port: spawned.port || Number(claimed.entry.port || 0),
-        controlPort: spawned.controlPort || Number(claimed.entry.controlPort || 0),
+        schemaVersion: 1,
+        accepted: true,
+        operation: input.operation,
+        instanceId: input.instanceId,
+        generation,
+        commandId: String(claimed.entry.commandId || ""),
+        port,
+        controlPort: Number(claimed.entry.controlPort || 0),
         deadlineAt: String(claimed.entry.deadlineAt || "")
       };
     }
-    return spawn();
+    return {
+      schemaVersion: 1,
+      accepted: false,
+      operation: input.operation,
+      instanceId: input.instanceId,
+      code: "instance_not_found",
+      message: `找不到分支实例：${input.instanceId}`
+    };
   }
 
   if (input.operation === "stop" || input.operation === "force-stop") {
@@ -2924,14 +2980,28 @@ async function runIsolatedRegistryMutation(input: {
       instanceId: input.instanceId,
       branchInstances: payload
     });
-    const stopped = await spawn(Number(claimed.entry.generation || 0));
+    await retireRegisteredHandles({
+      pids: [Number(claimed.entry.spawnPid || 0)],
+      port: Number(claimed.entry.port || target?.preferredBackend || 0),
+      signal: input.signal
+    });
     return {
-      ...stopped,
-      generation: stopped.generation || Number(claimed.entry.generation || 0)
+      schemaVersion: 1,
+      accepted: true,
+      operation: input.operation,
+      instanceId: input.instanceId,
+      generation: Number(claimed.entry.generation || 0)
     };
   }
 
-  return spawn();
+  return {
+    schemaVersion: 1,
+    accepted: false,
+    operation: input.operation,
+    instanceId: input.instanceId,
+    code: "unsupported_isolated_operation",
+    message: `Unsupported isolated operation: ${input.operation}`
+  };
 }
 
 async function orchestrateBranchInstanceLifecycle(
