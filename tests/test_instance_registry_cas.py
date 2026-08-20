@@ -7,6 +7,9 @@ import pytest
 
 from core.runtime_manager import instances_registry as registry
 
+from datetime import UTC, datetime
+
+
 FIXTURE_PATH = (
     Path(__file__).resolve().parents[1]
     / "desktop"
@@ -45,6 +48,8 @@ def _snapshot(entry: dict) -> dict:
         "commandId": str(entry.get("commandId") or ""),
         "failureMessage": str(entry.get("failureMessage") or ""),
         "ownerPid": int(entry.get("ownerPid") or 0),
+        "ownerId": str((entry.get("ownerLease") or {}).get("ownerId") or "") if isinstance(entry.get("ownerLease"), dict) else "",
+        "ownerLeaseExpiresAt": str((entry.get("ownerLease") or {}).get("expiresAt") or "") if isinstance(entry.get("ownerLease"), dict) else "",
     }
 
 
@@ -53,6 +58,12 @@ def _assert_expected(actual: dict, expected: dict | None) -> None:
         return
     for key, value in expected.items():
         assert actual.get(key) == value, f"{key}: {actual.get(key)!r} != {value!r}"
+
+
+def _now_from_ms(raw_input: dict) -> datetime | None:
+    if "nowMs" not in raw_input:
+        return None
+    return datetime.fromtimestamp(int(raw_input.get("nowMs") or 0) / 1000, tz=UTC)
 
 
 def _run_op(payload: dict, op: str, raw_input: dict, monkeypatch) -> dict:
@@ -69,10 +80,12 @@ def _run_op(payload: dict, op: str, raw_input: dict, monkeypatch) -> dict:
                 command_id=str(raw_input.get("commandId") or ""),
                 deadline_at=str(raw_input.get("deadlineAt") or ""),
                 owner_pid=int(raw_input.get("ownerPid") or 0),
+                owner_id=str(raw_input.get("ownerId") or ""),
                 extra_used={int(port) for port in (raw_input.get("extraUsed") or [])},
                 preferred_backend=int(raw_input.get("preferredBackend") or registry.DEFAULT_BASE_PORT),
                 preferred_control=int(raw_input.get("preferredControl") or registry.DEFAULT_CONTROL_PORT),
                 started_at=raw_input.get("startedAt"),
+                now=_now_from_ms(raw_input),
             )
         except registry.InstanceBusyError as exc:
             return {
@@ -104,6 +117,22 @@ def _run_op(payload: dict, op: str, raw_input: dict, monkeypatch) -> dict:
             str(raw_input.get("instanceId") or ""),
             int(raw_input.get("spawnPid") or 0),
             int(raw_input.get("expectedGeneration") or 0),
+        )
+        return {"applied": applied, **_snapshot(entry)}
+    if op == "reclaimStale":
+        applied, entry = registry.apply_reclaim_stale_in_flight_start(
+            payload,
+            instance_id=str(raw_input.get("instanceId") or ""),
+            now=_now_from_ms(raw_input),
+        )
+        return {"applied": applied, **_snapshot(entry)}
+    if op == "renewOwnerLease":
+        applied, entry = registry.apply_renew_owner_lease(
+            payload,
+            instance_id=str(raw_input.get("instanceId") or ""),
+            owner_id=str(raw_input.get("ownerId") or ""),
+            expected_generation=int(raw_input.get("expectedGeneration") or 0),
+            now=_now_from_ms(raw_input),
         )
         return {"applied": applied, **_snapshot(entry)}
     if op == "upsert":

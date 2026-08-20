@@ -201,7 +201,7 @@ def test_upsert_migrates_schema_and_captures_owner_identity(registry_path, monke
 
     payload = json.loads(registry_path.read_text(encoding="utf-8"))
     entry = payload["instances"]["worktree:new"]
-    assert payload["schemaVersion"] == 2
+    assert payload["schemaVersion"] == registry.REGISTRY_SCHEMA_VERSION
     assert payload["updatedAt"]
     assert entry["updatedAt"]
     assert entry["ownerPid"] == 4321

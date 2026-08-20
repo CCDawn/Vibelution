@@ -8,6 +8,7 @@
  */
 import {
   Background,
+  ConnectionLineType,
   MarkerType,
   MiniMap,
   ReactFlow,
@@ -21,7 +22,6 @@ import {
   type NodeTypes,
   type EdgeTypes,
 } from "@xyflow/react";
-import { SmartEdgeProvider } from "@tisoap/react-flow-smart-edge";
 import "@xyflow/react/dist/style.css";
 import {
   useCallback,
@@ -72,6 +72,7 @@ import {
   workflowReconnectKeepsEndpoints,
   type WorkflowEdgeAnchors,
 } from "./workflowEdgeAnchors";
+import type { OrthogonalObstacle } from "./workflowOrthogonalRoute";
 
 export type ShadcnWorkflowCanvasProps = {
   graph: WorkflowLayoutInput;
@@ -194,14 +195,6 @@ function visualToRfType(visualKind: string): string {
 }
 
 const MANUAL_LAYOUT_HISTORY_LIMIT = 20;
-const WORKFLOW_SMART_EDGE_OPTIONS = {
-  preset: "step",
-  routeOnlyWhenBlocked: false,
-  routeWhileDragging: false,
-  debounceMs: 90,
-  nodePadding: 12,
-  gridRatio: 12,
-} as const;
 
 function WorkflowCanvasInner({
   graph,
@@ -640,18 +633,22 @@ function WorkflowCanvasInner({
     ],
   );
 
-  const routingNodes = useMemo(
-    () => nodes.map((node) => {
-      const width = typeof node.style?.width === "number" ? node.style.width : undefined;
-      const height = typeof node.style?.height === "number" ? node.style.height : undefined;
-      return {
-        ...node,
-        dragging: node.id === draggingNodeId,
-        ...(width && height && !node.measured ? { measured: { width, height } } : {}),
-      };
-    }),
-    [draggingNodeId, nodes],
-  );
+  const obstacleRects = useMemo(() => {
+    if (!manualLayoutEnabled) return [] as OrthogonalObstacle[];
+    const rects: OrthogonalObstacle[] = [];
+    for (const node of nodes) {
+      if (node.type === "stageRegion") continue;
+      const width = typeof node.measured?.width === "number"
+        ? node.measured.width
+        : typeof node.style?.width === "number" ? node.style.width : undefined;
+      const height = typeof node.measured?.height === "number"
+        ? node.measured.height
+        : typeof node.style?.height === "number" ? node.style.height : undefined;
+      if (!width || !height) continue;
+      rects.push({ id: node.id, x: node.position.x, y: node.position.y, width, height });
+    }
+    return rects;
+  }, [manualLayoutEnabled, nodes]);
 
   const edges: Edge[] = useMemo(
     () =>
@@ -679,10 +676,11 @@ function WorkflowCanvasInner({
           labelBounds: edge.labelBounds,
           manualRouteActive: manualRouteActive || Boolean(edgeAnchors[edge.id]),
           manualDragging: draggingNodeId !== null,
+          obstacleRects,
         },
         zIndex: 1,
       })),
-    [draggingNodeId, edgeAnchors, layout.edges, manualRouteActive],
+    [draggingNodeId, edgeAnchors, layout.edges, manualRouteActive, obstacleRects],
   );
 
   const onNodeClick = useCallback(
@@ -772,7 +770,6 @@ function WorkflowCanvasInner({
         className={fillHost ? "absolute inset-0 min-h-0" : "h-full w-full"}
         style={fillHost ? { width: "100%", height: "100%" } : undefined}
       >
-        <SmartEdgeProvider nodes={manualLayoutEnabled ? routingNodes : []} options={WORKFLOW_SMART_EDGE_OPTIONS}>
           <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -805,6 +802,7 @@ function WorkflowCanvasInner({
           style={{ width: "100%", height: "100%" }}
           className={fillHost ? "h-full w-full" : undefined}
           defaultEdgeOptions={{ type: "workflowSemantic" }}
+          connectionLineType={ConnectionLineType.Step}
           >
           <Background
             gap={layoutMode === "serpentine" ? 18 : 20}
@@ -844,7 +842,6 @@ function WorkflowCanvasInner({
             />
           ) : null}
           </ReactFlow>
-        </SmartEdgeProvider>
       </div>
       {layout.degraded ? (
         <div

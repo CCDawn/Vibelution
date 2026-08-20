@@ -98,7 +98,6 @@ import {
   type BranchInstanceOperation
 } from "./process/branchInstanceBridge.js";
 import {
-  ISOLATED_INSTANCE_READY_WAIT_MS,
   superviseIsolatedInstanceStart
 } from "./process/isolatedInstanceSupervisor.js";
 import {
@@ -106,6 +105,7 @@ import {
   claimIsolatedStop,
   observeIsolatedError,
   observeIsolatedReady,
+  renewIsolatedOwnerLease,
   resolveIsolatedClaimTarget
 } from "./lifecycle/isolatedInstanceRegistryHost.js";
 import {
@@ -2868,6 +2868,9 @@ async function runIsolatedRegistryMutation(input: {
   operatorConfigPath: string;
   signal?: AbortSignal;
 }): Promise<OrchestratedBranchInstanceResult> {
+  if (input.operation === "observe-error" || input.operation === "observe-ready") {
+    throw new Error("isolated observe must use instanceRegistryStore, not the Python bridge");
+  }
   const payload = launcherStateStore.projectBranchInstances();
   const target = resolveIsolatedClaimTarget(payload, input.instanceId);
   const spawn = async (generation?: number): Promise<OrchestratedBranchInstanceResult> =>
@@ -2909,7 +2912,8 @@ async function runIsolatedRegistryMutation(input: {
         generation: spawned.generation || Number(claimed.entry.generation || 0),
         commandId: spawned.commandId || String(claimed.entry.commandId || ""),
         port: spawned.port || Number(claimed.entry.port || 0),
-        controlPort: spawned.controlPort || Number(claimed.entry.controlPort || 0)
+        controlPort: spawned.controlPort || Number(claimed.entry.controlPort || 0),
+        deadlineAt: String(claimed.entry.deadlineAt || "")
       };
     }
     return spawn();
@@ -3017,7 +3021,7 @@ async function orchestrateBranchInstanceLifecycle(
         claimReady: (candidate) => launcherLifecycleSupervisor.claimReady(candidate),
         completeReady: (candidate) => launcherLifecycleSupervisor.completeReady(candidate),
         releaseReadyClaim: (candidate) => launcherLifecycleSupervisor.releaseReadyClaim(candidate),
-        timeoutMs: ISOLATED_INSTANCE_READY_WAIT_MS,
+        deadlineAt: result.deadlineAt,
         waitForHttp: (target, timeoutMs, signal) => waitForWorkbenchHttp({ url: target, timeoutMs, signal }),
         openWindow: async () => {
           if (provider === null) {
@@ -3044,6 +3048,13 @@ async function orchestrateBranchInstanceLifecycle(
             instanceId,
             expectedGeneration: observedGeneration,
             message
+          });
+        },
+        renewLease: async () => {
+          await renewIsolatedOwnerLease({
+            instanceId,
+            ownerId: `pid:${process.pid}`,
+            expectedGeneration: lease.generation
           });
         }
       }).catch((error: unknown) => {

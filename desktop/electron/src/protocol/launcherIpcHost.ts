@@ -53,6 +53,7 @@ export type OrchestratedBranchInstanceResult = {
   generation?: number;
   commandId?: string;
   requestId?: string;
+  deadlineAt?: string;
   message?: string;
   code?: string;
   activeWorkRuns?: unknown[];

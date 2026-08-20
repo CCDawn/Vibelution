@@ -224,7 +224,7 @@ def _instance_runtime_projection(
         backend_listening = True
         backend_healthy = True
 
-    start_supervisor_lost = not bundle and _registry_entry_stale_in_flight_start(
+    start_supervisor_lost = not bundle and registry.is_stale_in_flight_start(
         entry,
         backend_alive=backend_alive,
         backend_listening=backend_listening,
@@ -413,27 +413,19 @@ def _registry_entry_stale_in_flight_start(
     backend_listening: bool,
     window_open: bool,
 ) -> bool:
-    """True when a registry in-flight start outlived its own supervisor.
+    """True when a registry in-flight start outlived its supervisor lease.
 
-    The Electron supervisor promises an ``observe-error`` writeback by
-    ``deadlineAt``; when the deadline passed, the spawned supervisor pid is
-    gone, and no runtime signal materialized, the claim is a leftover and must
-    not keep the row in ``starting``/``restarting`` (or block a retry) forever.
+    Hang recovery is lease-expired + deadlineAt, not spawnPid death. A hung
+    child must not keep the row in ``starting``/``restarting`` forever after
+    Electron dies.
     """
 
-    if not isinstance(entry, dict) or not entry:
-        return False
-    status = str(entry.get("status") or "").strip().lower()
-    if status not in {"starting", "restarting"}:
-        return False
-    if str(entry.get("desiredState") or "").strip().lower() != "open":
-        return False
-    if backend_alive or backend_listening or window_open:
-        return False
-    if not _iso_timestamp_in_past(entry.get("deadlineAt")):
-        return False
-    spawn_pid = _positive_int(entry.get("spawnPid"))
-    return spawn_pid <= 0 or not _pid_alive(spawn_pid)
+    return registry.is_stale_in_flight_start(
+        entry,
+        backend_alive=backend_alive,
+        backend_listening=backend_listening,
+        window_open=window_open,
+    )
 
 
 def _reclaim_stale_in_flight_start(
@@ -470,14 +462,12 @@ def _reclaim_stale_in_flight_start(
             return dict(entry)
         if str(entry.get("desiredState") or "").strip().lower() != "open":
             return dict(entry)
-        if not _iso_timestamp_in_past(entry.get("deadlineAt")):
-            return dict(entry)
-        spawn_pid = _positive_int(entry.get("spawnPid"))
-        if spawn_pid > 0 and _pid_alive(spawn_pid):
+        if not registry.is_stale_in_flight_start(entry):
             return dict(entry)
         entry["status"] = "failed"
         entry["phase"] = "failed"
-        entry["failureMessage"] = "启动监督进程已退出且超过启动期限，启动未完成。"
+        entry["failureMessage"] = registry.START_SUPERVISOR_LOST_MESSAGE
+        entry.pop("ownerLease", None)
         return dict(entry)
 
     stored = registry.mutate_registry(mutator)

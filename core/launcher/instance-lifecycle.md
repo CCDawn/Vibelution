@@ -42,7 +42,7 @@ P0 只修 **生命周期内核**：一个监督者、一套 READY、desired/obse
 
 | 事实 | Canonical | 唯一写入者 |
 | --- | --- | --- |
-| `desiredState` + `generation` + 端口 + `spawnPid` + `deadlineAt` + `commandId` | `%LOCALAPPDATA%\Vibelution\instances.json` | Electron `instanceRegistryStore`（产品路径 claim/observe）；Python CLI 为迁移期双实现，行为由 `instanceRegistryCas.cases.json` 锁死 |
+| `desiredState` + `generation` + 端口 + `spawnPid` + `deadlineAt` + `commandId` + `ownerLease` | `%LOCALAPPDATA%\Vibelution\instances.json` | Electron `instanceRegistryStore`（产品路径 claim/observe/租约心跳）；Python CLI 为迁移期双实现，行为由 `instanceRegistryCas.cases.json` 与 `instanceOwnerLease.cases.json` 锁死 |
 | 后端 READY | 隔离 slot `launcher/state.json` 或目标树 `.runtime/launcher/state.json`，加上列表投影的 loopback HTTP 活探测 | 该树 Runtime Manager / launcher 子进程写 state；列表投影只读探测，不写 READY |
 | 窗口是否 open | Electron `windowProvider` | Electron main（`VIBELUTION_ELECTRON_MAIN_ORCHESTRATES_WINDOWS=1`） |
 | `lifecycleState` | **投影**（desired + 后端 READY + 窗口） | 无独立写入者 |
@@ -89,7 +89,7 @@ running|starting|partial|error → stopping → closed
 
 - 仅 **后端 READY + 前端资产就绪 + 窗口 open** 才是 `running`。
 - stop / force-stop 可取消 in-flight start（先 bump `generation`）。
-- 同一实例在 `starting|stopping|restarting` 时第二次 start → **409** `instance_busy`；除非该 in-flight start 已证明死亡（`deadlineAt` 已过、`spawnPid` 不存在或已死、无后端/窗口活信号）→ 先在锁内回收为 `failed` 再放行新 claim。
+- 同一实例在 `starting|stopping|restarting` 时第二次 start → **409** `instance_busy`；除非该 in-flight start 已证明死亡（`deadlineAt` 已过、`ownerLease` 过期或缺失、无后端/窗口活信号）→ 先在锁内回收为 `failed` 再放行新 claim。`spawnPid` 仍 hang 不得阻止回收。
 - 无活进程的 `error` leftover **允许再次 start**（新 generation 清掉旧 `failureMessage`）。
 - `main` 行不走本状态机的 registry claim。
 
@@ -103,7 +103,8 @@ Registry 字段（隔离行）：
 | `generation` | 每次 start/restart/stop claim +1 |
 | `commandId` | 本次命令 id |
 | `spawnPid` | 分离后的监督者 launcher 子进程 |
-| `deadlineAt` | start 观察截止（隔离 **180s**） |
+| `deadlineAt` | start 观察截止（隔离 **180s**，由 claim 写入；HTTP 等待读剩余时间，不再另开 180s） |
+| `ownerLease` | `{ownerId, expiresAt}`；TTL **15s**，监督者每 **5s** 续期；缺字段视为已过期 |
 | `failureMessage` | 仅当前 generation 的失败文案 |
 | `port` / `controlPort` | 一次加锁事务内同时分配 |
 
@@ -121,7 +122,7 @@ Registry 字段（隔离行）：
 
 顺序：
 
-0. **监督丢失的 in-flight start**（`startSupervisorLost`）：`deadlineAt` 已过、`spawnPid` 缺失或已死、后端未 READY 且窗口未开 → `error` / `start_supervisor_lost`。监督进程承诺在 `deadlineAt` 前写 `observe-error`；它死了就不能让行永远停在 `starting`/`restarting`。
+0. **监督丢失的 in-flight start**（`startSupervisorLost`）：`deadlineAt` 已过、`ownerLease` 过期或缺失、后端未 READY 且窗口未开 → `error` / `start_supervisor_lost`。不再要求 `spawnPid` 已死。监督进程承诺在 `deadlineAt` 前写 `observe-error` 并续租约；它死了就不能让行永远停在 `starting`/`restarting`。
 1. `phase ∈ {restarting, restart}` 或 `registryStatus == restarting` → `restarting`
 2. `phase ∈ {closing, stopping, force_stopping}` 或 `registryStatus == stopping` → `stopping`
 3. **in-flight start**：`(desiredState == open 且 registryStatus ∈ {starting, restarting})` 或 `phase ∈ {opening, starting}`，且后端未 READY、窗口未开 → `starting`（**忽略** leftover `failureMessage`）
@@ -154,10 +155,11 @@ Electron overlay 在写入 `window.open` 后必须用同一函数重算 `lifecyc
 
 隔离 start/restart 在 JSON CLI **202** 之后：
 
-1. 等待 `http://127.0.0.1:<port>/`，超时 **180_000 ms**（`ISOLATED_INSTANCE_READY_WAIT_MS`）。当前 checkout `main` 行仍用 90s。
-2. HTTP 成功 → `openOrFocusInstanceWorkbench` → 对同一 `generation` 调 `observe-ready`。
-3. HTTP 超时 / 非就绪 / 开窗失败 → 对 **同一 generation** 调 `observe-error`。禁止只 `console.warn`。
-4. 监督循环可 fire-and-forget 以免堵住 IPC 202，但失败路径必须写回 registry。
+1. 等待 `http://127.0.0.1:<port>/`，超时 = registry `deadlineAt` 剩余时间（claim 时写入的隔离 **180s**）。当前 checkout `main` 行仍用 90s。
+2. 等待期间按 `ownerLease` TTL **15s** / 心跳 **5s** 续期；observe-ready / observe-error 走 TS store，禁止再 spawn Python markReady/markError bridge。
+3. HTTP 成功 → `openOrFocusInstanceWorkbench` → 对同一 `generation` 调 `observe-ready`。
+4. HTTP 超时 / 非就绪 / 开窗失败 → 对 **同一 generation** 调 `observe-error`。禁止只 `console.warn`。
+5. 监督循环可 fire-and-forget 以免堵住 IPC 202，但失败路径必须写回 registry。
 
 当前 checkout 的窗口等待保持 `WORKBENCH_START_READY_WAIT_MS`（90s），不走 `observe-error`。
 
@@ -171,7 +173,7 @@ Electron overlay 在写入 `window.open` 后必须用同一函数重算 `lifecyc
 4. 窗口未开：不是 `running`。
 5. 第二次 start（in-flight）：409 `instance_busy`。
 6. 并发 start / 并发端口分配：端口不重复。
-7. 监督死亡（`deadlineAt` 过 + `spawnPid` 死 + 无活信号）的 `starting` → `error` / `start_supervisor_lost`，且重试 start 在锁内回收旧 claim 后放行；监督仍活或期限未到的 in-flight 仍 409。
+7. 监督死亡（`deadlineAt` 过 + `ownerLease` 过期 + 无活信号）的 `starting` → `error` / `start_supervisor_lost`，且重试 start 在锁内回收旧 claim 后放行；租约仍有效或期限未到的 in-flight 仍 409。`spawnPid` hang 不得挡住回收。
 8. Electron-owned close 后端验证关闭后立即清 launcher `state.json`（同 fast path），不等窗口 ack；ack 缺失不得留下 `open/steady` + 死 `backendPid` 的残留。
 9. in-flight `starting` + 后端 PID 活 + loopback HTTP READY + 窗口未开 → `partial`，不是 `starting`。
 

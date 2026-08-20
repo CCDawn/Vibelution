@@ -164,6 +164,9 @@ def test_isolated_start_allocates_ports_and_spawns_without_touching_current(regi
     assert stored["inFlightDeadlineAt"] == stored["deadlineAt"]
     assert stored["updatedAt"]
     assert int(stored.get("ownerPid") or 0) == os.getpid()
+    assert isinstance(stored.get("ownerLease"), dict)
+    assert stored["ownerLease"]["ownerId"] == f"pid:{os.getpid()}"
+    assert stored["ownerLease"]["expiresAt"]
     assert stored["slotId"] == slot_id_for_project(worktree)
     assert stored["dataHome"] == str(data_home_for_project(worktree))
     assert response["generation"] == 1
@@ -535,6 +538,7 @@ def test_isolated_start_stays_busy_when_supervisor_alive_past_deadline(registry_
         projectRoot=str(worktree),
         spawnPid=424242,
         deadlineAt="2026-08-18T04:52:41Z",
+        ownerLease={"ownerId": "pid:1", "expiresAt": "2999-01-01T00:00:00Z"},
     )
 
     with pytest.raises(lifecycle.BranchInstanceLifecycleError) as busy:
@@ -545,6 +549,37 @@ def test_isolated_start_stays_busy_when_supervisor_alive_past_deadline(registry_
         )
     assert busy.value.code == "instance_busy"
     assert registry.get_instance("worktree:task")["status"] == "starting"
+
+
+def test_isolated_start_reclaims_stale_in_flight_when_spawn_pid_still_alive(registry_path, tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "_port_is_free", lambda port, host: True)
+    monkeypatch.setattr(lifecycle, "current_live_ports", lambda launcher_state=None: {8000, 8765})
+    monkeypatch.setattr(lifecycle, "_pid_alive", lambda _pid: True)
+    worktree = tmp_path / "task"
+    worktree.mkdir()
+    registry.upsert_instance(
+        "worktree:task",
+        status="starting",
+        desiredState="open",
+        phase="starting",
+        generation=3,
+        projectRoot=str(worktree),
+        spawnPid=424242,
+        deadlineAt="2026-08-18T04:52:41Z",
+        ownerLease={"ownerId": "pid:1", "expiresAt": "2026-08-18T04:53:00Z"},
+    )
+
+    response = lifecycle.run_isolated_operation(
+        _item(path=str(worktree)),
+        "start",
+        runner=lambda *args, **kwargs: {"returncode": 0, "pid": 9},
+    )
+
+    assert response["accepted"] is True
+    assert response["generation"] == 4
+    stored = registry.get_instance("worktree:task")
+    assert stored["status"] == "starting"
+    assert stored["generation"] == 4
 
 
 def test_observe_error_matches_generation(registry_path):
