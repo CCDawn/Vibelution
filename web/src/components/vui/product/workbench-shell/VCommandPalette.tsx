@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { cn } from "../../lib/cn";
-import { VDialog } from "../../primitives/VDialog";
 import { VInput } from "../../forms/VInput";
+import { VDialog } from "../../primitives/VDialog";
+import { VNativeButton } from "../../primitives/VNativeButton";
 
 export type VCommandPaletteItem = {
   id: string;
@@ -150,7 +151,7 @@ export function VCommandPalette({
                       {item.group}
                     </p>
                   ) : null}
-                  <button
+                  <VNativeButton
                     type="button"
                     data-index={index}
                     data-active={active ? "true" : "false"}
@@ -167,7 +168,7 @@ export function VCommandPalette({
                         {item.detail}
                       </span>
                     ) : null}
-                  </button>
+                  </VNativeButton>
                 </div>
               );
             })

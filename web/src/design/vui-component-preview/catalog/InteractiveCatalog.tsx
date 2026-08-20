@@ -3,6 +3,7 @@ import { useState } from "react";
 
 import {
   VButton,
+  VCommandPalette,
   VConfirmDialog,
   VContextualHint,
   VDialog,
@@ -19,6 +20,7 @@ import { VuiPreviewSection } from "../VuiPreviewSection";
 export function InteractiveCatalog() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
   return (
     <VuiPreviewSection title="Interactive">
@@ -70,6 +72,28 @@ export function InteractiveCatalog() {
           variant="labeled"
           triggerIcon={<Power size={15} />}
           onAction={() => undefined}
+        />
+      </VuiPreviewCard>
+      <VuiPreviewCard name="VCommandPalette">
+        <VButton variant="secondary" onPress={() => setPaletteOpen(true)}>打开命令面板</VButton>
+        <VCommandPalette
+          open={paletteOpen}
+          onOpenChange={setPaletteOpen}
+          items={[
+            { id: "cmd:current", group: "命令", label: "前往当前任务", onRun: () => undefined },
+            {
+              id: "question:SCI-001",
+              group: "题目",
+              label: "SCI-001",
+              detail: "What makes prime numbers so special?",
+              onRun: () => undefined,
+            },
+          ]}
+          labels={{
+            searchPlaceholder: "搜索题目或命令…",
+            emptyTitle: "没有匹配项",
+            hint: "↑↓ 选择 · Enter 执行 · Esc 关闭",
+          }}
         />
       </VuiPreviewCard>
     </VuiPreviewSection>
