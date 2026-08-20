@@ -14,8 +14,10 @@ Not borrowed: blobless/partial clone; GitHub zipballs; Zoekt/Sourcegraph; dumpin
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
+import stat
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
@@ -155,7 +157,7 @@ def clone_github_project(
             }
         dest = _repo_dir(root, project_id)
         if dest.exists():
-            shutil.rmtree(dest, ignore_errors=True)
+            _remove_clone_dir(dest)
         record = _project_record(metadata, status="cloning")
         _upsert_project(registry, record)
         _write_registry(root, registry)
@@ -172,8 +174,7 @@ def clone_github_project(
                 timeout=CLONE_TIMEOUT_SECONDS,
             )
             if getattr(completed, "returncode", 1) != 0:
-                stderr = trim_lines(str(getattr(completed, "stderr", "") or ""), max_lines=6).strip()
-                raise GithubProjectLibraryError(stderr or "git clone failed.")
+                raise GithubProjectLibraryError(_git_failure_text(completed, fallback="git clone failed."))
             inspected = _inspect_clone(dest, metadata)
             record.update(inspected)
             record["status"] = "ready"
@@ -181,7 +182,7 @@ def clone_github_project(
             record["updatedAt"] = _utc_now_iso()
         except Exception as exc:
             if dest.exists():
-                shutil.rmtree(dest, ignore_errors=True)
+                _remove_clone_dir(dest)
             record["status"] = "failed"
             record["error"] = trim_lines(str(exc), max_lines=4).strip()[:400]
             record["updatedAt"] = _utc_now_iso()
@@ -222,17 +223,15 @@ def fetch_github_project(project_id: str, *, project_root: Path | None = None) -
             raise GithubProjectLibraryError("Local clone is missing; clone the project again.")
         branch = _default_branch_name(existing.get("defaultBranch"))
         completed = run_git(
-            ["fetch", "--depth", "1", "--no-recurse-submodules", "origin", branch],
+            ["-c", "core.longpaths=true", "fetch", "--depth", "1", "--no-recurse-submodules", "origin", branch],
             cwd=dest,
             timeout=FETCH_TIMEOUT_SECONDS,
         )
         if getattr(completed, "returncode", 1) != 0:
-            stderr = trim_lines(str(getattr(completed, "stderr", "") or ""), max_lines=6).strip()
-            raise GithubProjectLibraryError(stderr or "git fetch failed.")
+            raise GithubProjectLibraryError(_git_failure_text(completed, fallback="git fetch failed."))
         merged = run_git(["merge", "--ff-only", "FETCH_HEAD"], cwd=dest, timeout=30.0)
         if getattr(merged, "returncode", 1) != 0:
-            stderr = trim_lines(str(getattr(merged, "stderr", "") or ""), max_lines=6).strip()
-            raise GithubProjectLibraryError(stderr or "git merge --ff-only failed.")
+            raise GithubProjectLibraryError(_git_failure_text(merged, fallback="git merge --ff-only failed."))
         inspected = _inspect_clone(dest, existing)
         existing.update(inspected)
         existing["status"] = "ready"
@@ -515,6 +514,8 @@ def _confirmation_message(reason: str, metadata: dict[str, Any], visible_count: 
 
 def _clone_git_args(clone_url: str, dest: Path, default_branch: str) -> list[str]:
     return [
+        "-c",
+        "core.longpaths=true",
         "clone",
         "--depth",
         "1",
@@ -532,6 +533,41 @@ def _default_branch_name(value: Any) -> str:
     if not branch or branch.upper() == "HEAD":
         return "main"
     return branch
+
+
+def _remove_clone_dir(dest: Path) -> None:
+    if not dest.exists():
+        return
+
+    def _onexc(func: Any, path: str, _exc: BaseException) -> None:
+        try:
+            os.chmod(path, stat.S_IWRITE)
+            func(path)
+        except OSError:
+            return
+
+    target: Path | str = dest
+    if os.name == "nt":
+        raw = str(dest.resolve())
+        if not raw.startswith("\\\\?\\"):
+            raw = "\\\\?\\" + raw
+        target = raw
+    shutil.rmtree(target, onexc=_onexc)
+
+
+def _git_failure_text(completed: Any, *, fallback: str) -> str:
+    stderr = str(getattr(completed, "stderr", "") or "")
+    stdout = str(getattr(completed, "stdout", "") or "")
+    text = "\n".join(part for part in (stderr, stdout) if part.strip()).strip()
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    interesting = [
+        line
+        for line in lines
+        if line.lower().startswith(("error:", "fatal:", "warning:"))
+        or "filename too long" in line.lower()
+    ]
+    chosen = interesting or lines[-8:]
+    return trim_lines("\n".join(chosen), max_lines=6).strip()[:400] or fallback
 
 
 def _md_cell(value: Any) -> str:
