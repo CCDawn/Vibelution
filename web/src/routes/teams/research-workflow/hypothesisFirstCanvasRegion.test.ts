@@ -453,3 +453,55 @@ describe("hypothesisFirstCanvasRegion", () => {
     expect(isHypothesisFirstCanvasNode(null)).toBe(false);
   });
 });
+
+describe("superseded review attempts fold into the next round (GitHub Actions attempt pattern)", () => {
+  it("folds an empty superseded round into the successor's retry badge", () => {
+    const region = regionOf({
+      meetings: [
+        meeting(1, "closed", { digestRef: "digest-1" }),
+        meeting(2, "closed", { recoveryReason: "discussion_has_no_completed_messages" }),
+        meeting(3, "open"),
+      ],
+    });
+    const labels = region!.nodes.map((node) => node.label);
+    expect(labels).toContain("第 1 轮讨论·评审");
+    expect(labels).not.toContain("第 2 轮讨论·评审");
+    expect(labels).toContain("第 3 轮讨论·评审");
+
+    const round3 = region!.nodes.find((node) => node.label === "第 3 轮讨论·评审")!;
+    expect(round3.description).toContain("含 1 次失败重试");
+    expect(round3.status).toBe("running");
+
+    // The chain edge hops over the folded round: r1 → r3, never a dangling r2.
+    const edgePairs = region!.edges.map((edge) => `${edge.fromNodeId}->${edge.toNodeId}`);
+    expect(edgePairs).toContain("hf_meeting_1->hf_meeting_3");
+    expect(edgePairs.join(" ")).not.toContain("hf_meeting_2");
+  });
+
+  it("keeps a trailing superseded round visible when no successor opened yet", () => {
+    const region = regionOf({
+      meetings: [
+        meeting(1, "closed", { digestRef: "digest-1" }),
+        meeting(2, "closed", { recoveryReason: "discussion_has_no_completed_messages" }),
+      ],
+    });
+    const round2 = region!.nodes.find((node) => node.label === "第 2 轮讨论·评审");
+    expect(round2).toBeDefined();
+    expect(round2!.description).toContain("发言失败已跳过，等待重试");
+    expect(round2!.status).toBe("blocked");
+  });
+
+  it("does not fold normal closed rounds", () => {
+    const region = regionOf({
+      meetings: [
+        meeting(1, "closed", { digestRef: "digest-1" }),
+        meeting(2, "closed", { digestRef: "digest-2" }),
+      ],
+    });
+    const labels = region!.nodes.map((node) => node.label);
+    expect(labels).toContain("第 1 轮讨论·评审");
+    expect(labels).toContain("第 2 轮讨论·评审");
+    const round2 = region!.nodes.find((node) => node.label === "第 2 轮讨论·评审")!;
+    expect(round2.description).not.toContain("失败重试");
+  });
+});
