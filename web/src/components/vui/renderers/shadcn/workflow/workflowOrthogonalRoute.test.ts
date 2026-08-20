@@ -6,7 +6,9 @@ import {
   longestStrokeIsVertical,
   portPointOnRect,
   projectedSnapFraction,
+  resolveOrthogonalEdgeGeometry,
   routeOrthogonalConnector,
+  routeOrthogonalConnectorFromEnds,
   snapSlotsForSide,
 } from "./workflowOrthogonalRoute";
 
@@ -184,5 +186,57 @@ describe("workflowOrthogonalRoute", () => {
     });
     expect(route.points[0]).toEqual(portPointOnRect(source, "right", 0.75));
     expect(route.points[route.points.length - 1]).toEqual(portPointOnRect(target, "left", 0.25));
+  });
+
+  it("keeps already placed handle coordinates when routing after a manual move", () => {
+    const source = card(0, 0);
+    const target = card(360, 40);
+    const start = { x: 300, y: 54 };
+    const end = { x: 360, y: 58 };
+    const route = routeOrthogonalConnectorFromEnds({
+      start,
+      end,
+      sourceSide: "right",
+      targetSide: "left",
+      source,
+      target,
+    });
+    expect(route.points[0]).toEqual(start);
+    expect(route.points[route.points.length - 1]).toEqual(end);
+    expect(longestStrokeIsVertical(route.points)).toBe(false);
+  });
+
+  it("skirts a blocking card after a manual move instead of cutting through it", () => {
+    const source = { id: "a", ...card(0, 0) };
+    const target = { id: "c", ...card(80, 240) };
+    const blocker = { id: "b", ...card(40, 100) };
+    const geometry = resolveOrthogonalEdgeGeometry({
+      start: { x: 150, y: 72 },
+      end: { x: 230, y: 240 },
+      sourceSide: "bottom",
+      targetSide: "top",
+      sourceId: "a",
+      targetId: "c",
+      obstacles: [source, target, blocker],
+    });
+    expect(geometry.path.startsWith("M 150 72")).toBe(true);
+    expect(geometry.path.endsWith("L 230 240")).toBe(true);
+    const parts = geometry.path.split(" ").filter((token) => token !== "M" && token !== "L");
+    const hits = parts.some((_, index) => {
+      if (index % 2 !== 0 || index + 3 >= parts.length) return false;
+      const ax = Number(parts[index]);
+      const ay = Number(parts[index + 1]);
+      const bx = Number(parts[index + 2]);
+      const by = Number(parts[index + 3]);
+      const minX = Math.min(ax, bx);
+      const maxX = Math.max(ax, bx);
+      const minY = Math.min(ay, by);
+      const maxY = Math.max(ay, by);
+      return maxX > blocker.x + 8
+        && minX < blocker.x + blocker.width - 8
+        && maxY > blocker.y + 8
+        && minY < blocker.y + blocker.height - 8;
+    });
+    expect(hits).toBe(false);
   });
 });

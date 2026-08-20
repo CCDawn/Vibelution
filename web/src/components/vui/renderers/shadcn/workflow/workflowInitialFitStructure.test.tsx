@@ -29,7 +29,9 @@ vi.mock("@xyflow/react", () => ({
   useReactFlow: () => fakeInstance,
   useNodesInitialized: () => true,
   Background: () => null,
+  MiniMap: () => null,
   MarkerType: { ArrowClosed: "arrowclosed" },
+  ConnectionLineType: { Step: "step", SmoothStep: "smoothstep", Bezier: "default", Straight: "straight" },
   ReactFlow: (props: Record<string, unknown>) => {
     rfCalls.push(props);
     return null;
@@ -192,6 +194,7 @@ describe("ShadcnWorkflowCanvas structure (P1-1)", () => {
     expect(rfProps.snapToGrid).toBe(true);
     expect(rfProps.snapGrid).toEqual([16, 16]);
     expect(rfProps.edgesReconnectable).toBe(true);
+    expect(rfProps.connectionLineType).toBe("step");
     expect(rfProps.nodesConnectable).toBe(false);
     expect(typeof rfProps.onReconnect).toBe("function");
     expect(typeof rfProps.isValidConnection).toBe("function");

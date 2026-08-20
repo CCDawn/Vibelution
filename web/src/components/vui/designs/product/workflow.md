@@ -101,7 +101,7 @@ pathState：`idle | traversed | active | attention | danger` — 仅由 nodeRuns
 
 - 普通节点与决策节点都按真实 ELK port 为每条出边、入边渲染独立 Handle。决策出边继续用 `rerun/promote/rollback/stop` 等语义 id；普通出边使用完整 ELK port id。禁止多条边复用匿名 source Handle。自动布局把同侧 Handle 放到相对磁铁上（短边 `0.25/0.5/0.75`，长边 `1/6…5/6`），入边和出边共用同一侧磁铁集合并按对端卡片位置换点，避免交叉或叠在同一点；画布不可连线，因此不绘制未占用磁铁。没有布局锚点时回退到 `1/(n+1)` 分布。
 - 节点拖动时，边每帧读取 React Flow 当前端点，并使用本地正交回退路线实时跟随；源端和目标端都先沿 Handle 方向保留 `32px` 笔直引线，再进入主体通道，避免线头重合后互相遮挡。
-- 松手后由 `@tisoap/react-flow-smart-edge@5.0.0` 的 `SmartEdgeProvider` / `useSmartEdgePath` 执行避障正交路由；provider 使用 step preset，节点净空 `12px`、栅格通道约 `12px`。Worker 等待、失败或正在拖动时必须回退到上述本地路线，不得让边消失或停留在旧端点。
+- 松手后继续用自动布局同一套 L/Z 正交连接器（`routeOrthogonalConnectorFromEnds`）：保留已经挂上的磁铁坐标，只在线段真正穿过其他卡片内部时绕开阻挡卡。禁止 A* 迷宫或 smooth-step。拖动中若正交器尚未给出结果，回退到上述本地路线，不得让边消失或停留在旧端点。改挂过程中的预览线使用正交 `Step` 连接线。
 - 阶段标签默认不再绘制，也不作为路由障碍。拖任务时边仍实时跟随；自动整理清空节点位置和箭头磁铁覆盖；锁定禁止任务拖动和箭头改挂。
 - 浏览器本地布局状态为 v3：`positions + stageLabelOffsets + edgeAnchors + locked + structureKey + runId + nodeIds + stageIds`。读取兼容 v1/v2（旧节点位置保留，缺省磁铁覆盖为空）。`edgeAnchors` 只改箭头在已连接卡片上的磁铁，不改 source/target。自动整理同时清空节点位置、标签偏移和磁铁覆盖。锁定禁止任务拖动和箭头改挂。
 - 蛇形画布解锁后，可拖现有箭头端点改挂到**同一张卡片**的磁铁；拖向其他卡片会被拒绝。改挂过程中才绘制未占用磁铁。运行图拓扑仍不可编辑。

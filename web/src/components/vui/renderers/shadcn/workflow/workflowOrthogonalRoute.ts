@@ -161,6 +161,8 @@ export function orthogonalLead(
   return { x: point.x, y: point.y + distance };
 }
 
+export type OrthogonalObstacle = OrthogonalRect & { id?: string };
+
 export function routeOrthogonalConnector(input: {
   source: OrthogonalRect;
   target: OrthogonalRect;
@@ -179,12 +181,118 @@ export function routeOrthogonalConnector(input: {
   const preferred = input.sourceSide && input.targetSide
     ? [{ source: input.sourceSide, target: input.targetSide }]
     : facingSideCandidates(input.source, input.target);
-  const stub = input.stub ?? WORKFLOW_ORTHOGONAL_STUB;
-  const padding = input.padding ?? WORKFLOW_ORTHOGONAL_PADDING;
-  const obstacles = (input.obstacles ?? []).filter(
-    (rect) => rect !== input.source && rect !== input.target && !sameRect(rect, input.source) && !sameRect(rect, input.target),
-  );
+  return pickOrthogonalRoute({
+    preferred,
+    resolveEnds: (sides) => ({
+      start: portPointOnRect(input.source, sides.source, input.sourceFraction ?? 0.5),
+      end: portPointOnRect(input.target, sides.target, input.targetFraction ?? 0.5),
+    }),
+    source: input.source,
+    target: input.target,
+    obstacles: input.obstacles ?? [],
+    stub: input.stub ?? WORKFLOW_ORTHOGONAL_STUB,
+    padding: input.padding ?? WORKFLOW_ORTHOGONAL_PADDING,
+  });
+}
 
+/**
+ * Same L/Z + local-blocker policy as auto-layout, but keep already placed
+ * handle coordinates. Used after the user moves cards or magnets so the
+ * polyline does not jump off the Handle or fall back to an A* maze.
+ */
+export function routeOrthogonalConnectorFromEnds(input: {
+  start: WorkflowLayoutPoint;
+  end: WorkflowLayoutPoint;
+  sourceSide: OrthogonalSide;
+  targetSide: OrthogonalSide;
+  source: OrthogonalRect;
+  target: OrthogonalRect;
+  sourceId?: string;
+  targetId?: string;
+  obstacles?: readonly OrthogonalObstacle[];
+  stub?: number;
+  padding?: number;
+}): {
+  points: WorkflowLayoutPoint[];
+  sourceSide: OrthogonalSide;
+  targetSide: OrthogonalSide;
+} {
+  return pickOrthogonalRoute({
+    preferred: [{ source: input.sourceSide, target: input.targetSide }],
+    resolveEnds: () => ({ start: input.start, end: input.end }),
+    source: input.source,
+    target: input.target,
+    sourceId: input.sourceId,
+    targetId: input.targetId,
+    obstacles: input.obstacles ?? [],
+    stub: input.stub ?? WORKFLOW_ORTHOGONAL_STUB,
+    padding: input.padding ?? WORKFLOW_ORTHOGONAL_PADDING,
+  });
+}
+
+export function pointsToSvgPath(points: readonly WorkflowLayoutPoint[]): string {
+  return points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
+}
+
+export function resolveOrthogonalEdgeGeometry(input: {
+  start: WorkflowLayoutPoint;
+  end: WorkflowLayoutPoint;
+  sourceSide: OrthogonalSide;
+  targetSide: OrthogonalSide;
+  sourceId?: string;
+  targetId?: string;
+  obstacles?: readonly OrthogonalObstacle[];
+  stub?: number;
+}): { path: string; labelAnchor: WorkflowLayoutPoint } {
+  const obstacles = input.obstacles ?? [];
+  const source = rectById(obstacles, input.sourceId) ?? pointRect(input.start);
+  const target = rectById(obstacles, input.targetId) ?? pointRect(input.end);
+  const routed = routeOrthogonalConnectorFromEnds({
+    start: input.start,
+    end: input.end,
+    sourceSide: input.sourceSide,
+    targetSide: input.targetSide,
+    source,
+    target,
+    sourceId: input.sourceId,
+    targetId: input.targetId,
+    obstacles,
+    stub: input.stub,
+  });
+  return {
+    path: pointsToSvgPath(routed.points),
+    labelAnchor: longestStrokeLabelAnchor(routed.points) ?? {
+      x: (input.start.x + input.end.x) / 2,
+      y: (input.start.y + input.end.y) / 2,
+    },
+  };
+}
+
+function pickOrthogonalRoute(input: {
+  preferred: Array<{ source: OrthogonalSide; target: OrthogonalSide }>;
+  resolveEnds: (sides: { source: OrthogonalSide; target: OrthogonalSide }) => {
+    start: WorkflowLayoutPoint;
+    end: WorkflowLayoutPoint;
+  };
+  source: OrthogonalRect;
+  target: OrthogonalRect;
+  sourceId?: string;
+  targetId?: string;
+  obstacles: readonly OrthogonalObstacle[];
+  stub: number;
+  padding: number;
+}): {
+  points: WorkflowLayoutPoint[];
+  sourceSide: OrthogonalSide;
+  targetSide: OrthogonalSide;
+} {
+  const obstacles = excludeEndpointRects(
+    input.obstacles,
+    input.source,
+    input.target,
+    input.sourceId,
+    input.targetId,
+  );
   const scored: Array<{
     points: WorkflowLayoutPoint[];
     hits: number;
@@ -214,11 +322,10 @@ export function routeOrthogonalConnector(input: {
     });
   };
 
-  for (const sides of preferred) {
-    const start = portPointOnRect(input.source, sides.source, input.sourceFraction ?? 0.5);
-    const end = portPointOnRect(input.target, sides.target, input.targetFraction ?? 0.5);
-    const sourceLead = orthogonalLead(start, sides.source, stub);
-    const targetLead = orthogonalLead(end, sides.target, stub);
+  for (const sides of input.preferred) {
+    const { start, end } = input.resolveEnds(sides);
+    const sourceLead = orthogonalLead(start, sides.source, input.stub);
+    const targetLead = orthogonalLead(end, sides.target, input.stub);
     for (const body of simpleConnectorBodies(sourceLead, targetLead)) {
       scoreBody(sides, start, end, body);
     }
@@ -229,23 +336,34 @@ export function routeOrthogonalConnector(input: {
     return { points: bestSimple.points, sourceSide: bestSimple.sourceSide, targetSide: bestSimple.targetSide };
   }
 
-  for (const sides of preferred) {
-    const start = portPointOnRect(input.source, sides.source, input.sourceFraction ?? 0.5);
-    const end = portPointOnRect(input.target, sides.target, input.targetFraction ?? 0.5);
-    const sourceLead = orthogonalLead(start, sides.source, stub);
-    const targetLead = orthogonalLead(end, sides.target, stub);
-    for (const body of detourConnectorBodies(sourceLead, targetLead, input.source, input.target, stub, padding, obstacles)) {
+  for (const sides of input.preferred) {
+    const { start, end } = input.resolveEnds(sides);
+    const sourceLead = orthogonalLead(start, sides.source, input.stub);
+    const targetLead = orthogonalLead(end, sides.target, input.stub);
+    for (const body of detourConnectorBodies(
+      sourceLead,
+      targetLead,
+      input.source,
+      input.target,
+      input.stub,
+      input.padding,
+      obstacles,
+    )) {
       scoreBody(sides, start, end, body);
     }
   }
   scored.sort(compareOrthogonalScores);
   const winner = scored[0];
   if (!winner) {
-    const sides = preferred[0]!;
-    const start = portPointOnRect(input.source, sides.source, input.sourceFraction ?? 0.5);
-    const end = portPointOnRect(input.target, sides.target, input.targetFraction ?? 0.5);
+    const sides = input.preferred[0]!;
+    const { start, end } = input.resolveEnds(sides);
     return {
-      points: compactPoints([start, orthogonalLead(start, sides.source, stub), orthogonalLead(end, sides.target, stub), end]),
+      points: compactPoints([
+        start,
+        orthogonalLead(start, sides.source, input.stub),
+        orthogonalLead(end, sides.target, input.stub),
+        end,
+      ]),
       sourceSide: sides.source,
       targetSide: sides.target,
     };
@@ -438,6 +556,29 @@ function inflate(rect: OrthogonalRect, pad: number): OrthogonalRect {
 
 function rectsOverlap(a: OrthogonalRect, b: OrthogonalRect): boolean {
   return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+}
+
+function excludeEndpointRects(
+  obstacles: readonly OrthogonalObstacle[],
+  source: OrthogonalRect,
+  target: OrthogonalRect,
+  sourceId?: string,
+  targetId?: string,
+): OrthogonalRect[] {
+  return obstacles.filter((rect) => {
+    if (sourceId && rect.id === sourceId) return false;
+    if (targetId && rect.id === targetId) return false;
+    return !sameRect(rect, source) && !sameRect(rect, target);
+  });
+}
+
+function rectById(obstacles: readonly OrthogonalObstacle[], id: string | undefined): OrthogonalRect | undefined {
+  if (!id) return undefined;
+  return obstacles.find((rect) => rect.id === id);
+}
+
+function pointRect(point: WorkflowLayoutPoint): OrthogonalRect {
+  return { x: point.x, y: point.y, width: 1, height: 1 };
 }
 
 function sameRect(a: OrthogonalRect, b: OrthogonalRect): boolean {

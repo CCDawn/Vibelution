@@ -1,8 +1,9 @@
 /**
  * Workflow edge: renders the engine-owned ORTHOGONAL section geometry
  * (data.sections) until a manual visual node position is active. During that
- * local override it uses a small live orthogonal route from React Flow's
- * current endpoints; a smooth-step approximation is forbidden in production.
+ * local override it uses a live L/Z from React Flow's current endpoints, then
+ * the same obstacle-aware orthogonal connector as auto-layout once the drag
+ * settles. A smooth-step or A* maze is forbidden in production.
  *
  * Diagnostics (P1-3/P1-5): a section chain that is not well-formed (cycles,
  * branches, orphans, geometrically broken links) or a label without engine
@@ -14,7 +15,6 @@ import {
   EdgeLabelRenderer,
   type EdgeProps,
 } from "@xyflow/react";
-import { useSmartEdgePath } from "@tisoap/react-flow-smart-edge";
 import { useMemo, useState } from "react";
 
 import { cn } from "../../../lib/cn";
@@ -33,10 +33,15 @@ import {
 } from "./workflowElkEdgePath";
 import { workflowEdgeKeepsNarrativeLabel } from "./workflowElkOptions";
 import {
+  WORKFLOW_EDGE_TERMINAL_STUB,
   resolveWorkflowManualEdgeGeometry,
-  workflowEdgeTerminalLead,
   type WorkflowEdgeTerminalSide,
 } from "./workflowManualLayout";
+import {
+  resolveOrthogonalEdgeGeometry,
+  type OrthogonalObstacle,
+  type OrthogonalSide,
+} from "./workflowOrthogonalRoute";
 
 export type WorkflowSemanticEdgeData = {
   label?: string;
@@ -50,8 +55,10 @@ export type WorkflowSemanticEdgeData = {
   labelBounds?: WorkflowLabelBounds;
   /** True once a manual visual position is active or a task is being dragged. */
   manualRouteActive?: boolean;
-  /** Smart routing pauses during drag; the local terminal-safe path stays live. */
+  /** Obstacle-aware rest routing pauses during drag; the local terminal-safe path stays live. */
   manualDragging?: boolean;
+  /** Task-card boxes used to skirt blockers after a manual move. */
+  obstacleRects?: OrthogonalObstacle[];
 };
 
 export function WorkflowSemanticEdge({
@@ -78,29 +85,6 @@ export function WorkflowSemanticEdge({
   const stroke = resolveEdgeStroke(pathState, semanticKind);
   const sourceSide = sourcePosition as WorkflowEdgeTerminalSide;
   const targetSide = targetPosition as WorkflowEdgeTerminalSide;
-  const smartWaypoints = useMemo(
-    () => areFinite(sourceX, sourceY, targetX, targetY)
-      ? [
-          workflowEdgeTerminalLead({ x: sourceX, y: sourceY }, sourceSide),
-          workflowEdgeTerminalLead({ x: targetX, y: targetY }, targetSide),
-        ]
-      : [],
-    [sourceSide, sourceX, sourceY, targetSide, targetX, targetY],
-  );
-  const smartEdge = useSmartEdgePath({
-    id,
-    source,
-    target,
-    sourceX,
-    sourceY,
-    targetX,
-    targetY,
-    sourcePosition,
-    targetPosition,
-    preset: "step",
-    waypoints: smartWaypoints,
-  });
-
   const sections = edgeData?.sections;
   const liveGeometry = useMemo(() => {
     if (!edgeData?.manualRouteActive || !areFinite(sourceX, sourceY, targetX, targetY)) {
@@ -113,15 +97,38 @@ export function WorkflowSemanticEdge({
       targetSide,
     );
   }, [edgeData?.manualRouteActive, sourceSide, sourceX, sourceY, targetSide, targetX, targetY]);
-  const smartGeometry = edgeData?.manualRouteActive
-    && !edgeData.manualDragging
-    && smartEdge.route?.kind === "routed"
-    ? {
-        path: smartEdge.route.svgPathString,
-        labelAnchor: { x: smartEdge.route.edgeCenterX, y: smartEdge.route.edgeCenterY },
-      }
-    : null;
-  const manualGeometry = smartGeometry ?? liveGeometry;
+  const restGeometry = useMemo(() => {
+    if (
+      !edgeData?.manualRouteActive
+      || edgeData.manualDragging
+      || !areFinite(sourceX, sourceY, targetX, targetY)
+    ) {
+      return null;
+    }
+    return resolveOrthogonalEdgeGeometry({
+      start: { x: sourceX, y: sourceY },
+      end: { x: targetX, y: targetY },
+      sourceSide: sourceSide as OrthogonalSide,
+      targetSide: targetSide as OrthogonalSide,
+      sourceId: source,
+      targetId: target,
+      obstacles: edgeData.obstacleRects,
+      stub: WORKFLOW_EDGE_TERMINAL_STUB,
+    });
+  }, [
+    edgeData?.manualDragging,
+    edgeData?.manualRouteActive,
+    edgeData?.obstacleRects,
+    source,
+    sourceSide,
+    sourceX,
+    sourceY,
+    target,
+    targetSide,
+    targetX,
+    targetY,
+  ]);
+  const manualGeometry = restGeometry ?? liveGeometry;
   const edgePath = useMemo(
     () => manualGeometry?.path ?? sectionsToSvgPath(sections ?? []),
     [manualGeometry, sections],
@@ -161,7 +168,7 @@ export function WorkflowSemanticEdge({
         data-section-fault={sectionFault ? "true" : undefined}
         data-label-fault={labelFault ? "true" : undefined}
         data-manual-route={manualGeometry ? "true" : undefined}
-        data-smart-route={smartGeometry ? "true" : undefined}
+        data-orthogonal-rest={restGeometry ? "true" : undefined}
         style={{
           ...style,
           stroke: stroke.stroke,
