@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   ISOLATED_INSTANCE_READY_WAIT_MS,
+  resolveIsolatedReadyTimeoutMs,
   superviseIsolatedInstanceStart,
 } from "../src/process/isolatedInstanceSupervisor.js";
 import { LauncherLifecycleSupervisor } from "../src/lifecycle/launcherLifecycleSupervisor.js";
@@ -22,8 +23,20 @@ function currentLease(generation: number) {
 }
 
 describe("superviseIsolatedInstanceStart", () => {
-  it("uses a 180s isolated ready wait", () => {
+  it("uses a 180s isolated ready wait only as the claim budget fallback", () => {
     expect(ISOLATED_INSTANCE_READY_WAIT_MS).toBe(180_000);
+    expect(
+      resolveIsolatedReadyTimeoutMs({
+        deadlineAt: "2026-08-20T12:03:00Z",
+        nowMs: Date.parse("2026-08-20T12:00:00Z"),
+      })
+    ).toBe(180_000);
+    expect(
+      resolveIsolatedReadyTimeoutMs({
+        deadlineAt: "2026-08-20T12:00:00Z",
+        nowMs: Date.parse("2026-08-20T12:02:30Z"),
+      })
+    ).toBe(1);
   });
 
   it("opens the window and marks ready after HTTP succeeds", async () => {
@@ -172,5 +185,31 @@ describe("superviseIsolatedInstanceStart", () => {
     expect(result).toBe("error");
     expect(closeWindowAfterReadyFailure).toHaveBeenCalledOnce();
     expect(markError).toHaveBeenCalledWith(10, "isolated lifecycle READY completion failed for worktree:task");
+  });
+
+  it("renews the owner lease while waiting for HTTP", async () => {
+    const { supervisor, lease } = currentLease(11);
+    const renewLease = vi.fn().mockResolvedValue(undefined);
+    await superviseIsolatedInstanceStart({
+      instanceId: "worktree:task",
+      url: "http://127.0.0.1:8003/",
+      lease,
+      isCurrent: (candidate) => supervisor.isCurrent(candidate),
+      claimReady: (candidate) => supervisor.claimReady(candidate),
+      completeReady: (candidate) => supervisor.completeReady(candidate),
+      releaseReadyClaim: (candidate) => supervisor.releaseReadyClaim(candidate),
+      closeWindowIfSuperseded: async () => undefined,
+      closeWindowAfterReadyFailure: async () => undefined,
+      timeoutMs: 40,
+      heartbeatMs: 10,
+      waitForHttp: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 35));
+      },
+      openWindow: async () => undefined,
+      markReady: async () => undefined,
+      markError: async () => undefined,
+      renewLease
+    });
+    expect(renewLease.mock.calls.length).toBeGreaterThan(1);
   });
 });

@@ -36,12 +36,15 @@ from core.runtime_manager.process_identity import (
     inspect_process_identity,
 )
 
-REGISTRY_SCHEMA_VERSION = 2
+REGISTRY_SCHEMA_VERSION = 3
 DEFAULT_BASE_PORT = 8000
 DEFAULT_CONTROL_PORT = 8765
 PORT_SCAN_LIMIT = 64
 IN_FLIGHT_STATUSES = frozenset({"starting", "restarting", "stopping"})
 PORT_LEASE_RECLAIMABLE = frozenset({"quarantined", "reclaimable"})
+OWNER_LEASE_TTL_MS = 15_000
+OWNER_LEASE_HEARTBEAT_MS = 5_000
+START_SUPERVISOR_LOST_MESSAGE = "启动监督进程已退出且超过启动期限，启动未完成。"
 _READ_RETRY_ATTEMPTS = 3
 _READ_RETRY_DELAY_SECONDS = 0.05
 _LOCK_TIMEOUT_SECONDS = LOCK_TIMEOUT_SECONDS
@@ -88,6 +91,10 @@ def _as_utc(value: datetime | None) -> datetime:
 
 def _iso_timestamp(value: datetime | None = None) -> str:
     return _as_utc(value).isoformat().replace("+00:00", "Z")
+
+
+def _iso_timestamp_seconds(value: datetime | None = None) -> str:
+    return _as_utc(value).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _parse_timestamp(value: Any) -> datetime | None:
@@ -238,6 +245,7 @@ def apply_claim_start(
     host: str = "127.0.0.1",
     started_at: str | None = None,
     slot_fields: dict[str, Any] | None = None,
+    owner_id: str = "",
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """In-flight 409 + generation+1 + disjoint ports in one payload transaction."""
@@ -269,6 +277,7 @@ def apply_claim_start(
     status = "restarting" if operation == "restart" else "starting"
     generation = int(entry.get("generation") or 0) + 1
     owner = int(owner_pid or 0)
+    stamp = _as_utc(now)
     entry.update(
         {
             "projectRoot": str(project_root or ""),
@@ -288,6 +297,7 @@ def apply_claim_start(
             "spawnPid": 0,
             "windowPid": 0,
             "ownerPid": owner,
+            "ownerLease": build_owner_lease(owner_id=owner_id, owner_pid=owner, now=stamp),
             "startedAt": str(started_at or deadline_at),
             **dict(slot_fields or {}),
         }
@@ -315,6 +325,7 @@ def apply_claim_stop(
     entry["desiredState"] = "closed"
     entry["generation"] = generation
     entry["failureMessage"] = ""
+    entry.pop("ownerLease", None)
     root = str(project_root or "").strip()
     if root not in {"", "."}:
         entry["projectRoot"] = root
@@ -355,6 +366,68 @@ def apply_observe(
         entry["phase"] = "steady"
         entry["desiredState"] = "open"
         entry["failureMessage"] = ""
+    entry.pop("ownerLease", None)
+    _touch_entry(entry, now=now)
+    return True, dict(entry)
+
+
+def apply_renew_owner_lease(
+    payload: dict[str, Any],
+    *,
+    instance_id: str,
+    owner_id: str,
+    expected_generation: int = 0,
+    now: datetime | None = None,
+) -> tuple[bool, dict[str, Any]]:
+    wanted = str(instance_id or "").strip()
+    instances = payload.setdefault("instances", {})
+    entry = instances.get(wanted)
+    if not isinstance(entry, dict):
+        return False, {}
+    expected = int(expected_generation or 0)
+    if expected > 0 and int(entry.get("generation") or 0) != expected:
+        return False, dict(entry)
+    status = str(entry.get("status") or "").strip().lower()
+    if status not in {"starting", "restarting"}:
+        return False, dict(entry)
+    identity = str(owner_id or "").strip()
+    current = owner_lease_of(entry)
+    if current and current.get("ownerId") and identity and current["ownerId"] != identity:
+        return False, dict(entry)
+    entry["ownerLease"] = build_owner_lease(
+        owner_id=identity or str((current or {}).get("ownerId") or ""),
+        now=now,
+    )
+    _touch_entry(entry, now=now)
+    return True, dict(entry)
+
+
+def apply_reclaim_stale_in_flight_start(
+    payload: dict[str, Any],
+    *,
+    instance_id: str,
+    now: datetime | None = None,
+    backend_alive: bool = False,
+    backend_listening: bool = False,
+    window_open: bool = False,
+) -> tuple[bool, dict[str, Any]]:
+    wanted = str(instance_id or "").strip()
+    instances = payload.setdefault("instances", {})
+    entry = instances.get(wanted)
+    if not isinstance(entry, dict):
+        return False, {}
+    if not is_stale_in_flight_start(
+        entry,
+        now=now,
+        backend_alive=backend_alive,
+        backend_listening=backend_listening,
+        window_open=window_open,
+    ):
+        return False, dict(entry)
+    entry["status"] = "failed"
+    entry["phase"] = "failed"
+    entry["failureMessage"] = START_SUPERVISOR_LOST_MESSAGE
+    entry.pop("ownerLease", None)
     _touch_entry(entry, now=now)
     return True, dict(entry)
 
@@ -563,6 +636,63 @@ def _entry_identities(entry: dict[str, Any]) -> tuple[list[dict[str, Any]], bool
 def _deadline_expired(entry: dict[str, Any], now: datetime) -> bool:
     deadline = _parse_timestamp(entry.get("inFlightDeadlineAt") or entry.get("deadlineAt"))
     return bool(deadline is not None and deadline <= now)
+
+
+def build_owner_lease(
+    *,
+    owner_id: str = "",
+    owner_pid: int = 0,
+    now: datetime | None = None,
+) -> dict[str, str]:
+    identity = str(owner_id or "").strip()
+    if not identity and int(owner_pid or 0) > 0:
+        identity = f"pid:{int(owner_pid)}"
+    expires = _as_utc(now) + timedelta(milliseconds=OWNER_LEASE_TTL_MS)
+    return {"ownerId": identity, "expiresAt": _iso_timestamp_seconds(expires)}
+
+
+def owner_lease_of(entry: dict[str, Any] | None) -> dict[str, str] | None:
+    if not isinstance(entry, dict):
+        return None
+    lease = entry.get("ownerLease")
+    if not isinstance(lease, dict):
+        return None
+    owner_id = str(lease.get("ownerId") or "").strip()
+    expires_at = str(lease.get("expiresAt") or "").strip()
+    if not owner_id and not expires_at:
+        return None
+    return {"ownerId": owner_id, "expiresAt": expires_at}
+
+
+def owner_lease_expired(entry: dict[str, Any] | None, now: datetime | None = None) -> bool:
+    lease = owner_lease_of(entry)
+    if lease is None or not lease.get("expiresAt"):
+        return True
+    expires = _parse_timestamp(lease.get("expiresAt"))
+    if expires is None:
+        return True
+    return expires <= _as_utc(now)
+
+
+def is_stale_in_flight_start(
+    entry: dict[str, Any] | None,
+    *,
+    now: datetime | None = None,
+    backend_alive: bool = False,
+    backend_listening: bool = False,
+    window_open: bool = False,
+) -> bool:
+    if not isinstance(entry, dict) or not entry:
+        return False
+    status = str(entry.get("status") or "").strip().lower()
+    if status not in {"starting", "restarting"}:
+        return False
+    if str(entry.get("desiredState") or "").strip().lower() != "open":
+        return False
+    if backend_alive or backend_listening or window_open:
+        return False
+    stamp = _as_utc(now)
+    return _deadline_expired(entry, stamp) and owner_lease_expired(entry, stamp)
 
 
 _OPEN_REGISTRY_STATUSES = frozenset({"starting", "restarting", "running", "steady", "stopping"})

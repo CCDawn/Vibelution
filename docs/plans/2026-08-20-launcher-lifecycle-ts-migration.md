@@ -1,6 +1,6 @@
 # Launcher 生命周期 TS 化迁移（绞杀者增量 I0–I6）
 
-Status: **Active**（2026-08-20 立项；I0 锁协议 v2 已实现；I1 TS 投影权威 + 双语言 fixture 已实现；I2 TS registry CAS + stop spawnPid 锁内快照已实现）
+Status: **Active**（2026-08-20 立项；I0 锁协议 v2 已实现；I1 TS 投影权威 + 双语言 fixture 已实现；I2 TS registry CAS + stop spawnPid 锁内快照已实现；I3 监督循环 TS 化 + `ownerLease` 心跳已实现）
 Authority: [ADR 0009](../adr/0009-launcher-control-plane-lives-in-electron-main.md)（由本计划 I0 增补）· 前置执行账本 [CONTROL_PLANE_MIGRATION](../archive/plans/2026-08/CONTROL_PLANE_MIGRATION.md)（已关闭，其关闭条件只覆盖「编排权归 main + :8765 退役」，未覆盖「逻辑本体 TS 化」——本计划补齐这一段）。
 验收总则：每个增量独立 worktree、独立合入、独立可回退；全部完成后，**launcher 生命周期逻辑（状态机、registry 写入、命令队列、监督循环、进程收割编排）全部运行在 Electron main（TS）内**；Python 只保留 workbench 后端本体与 git/文件维护 CLI。
 
@@ -81,8 +81,10 @@ VibelutionLauncher.exe（薄 shim，转发）
 ### I3 · 监督循环 TS 化 + 租约心跳（修 D3）
 
 - Electron 直接执行 waitForHttp / observe 回写（删除 markReady/markError 的 python bridge spawn；杀树暂仍走 Python CLI）。
-- instances.json 增 `ownerLease {ownerId, expiresAt}`（schemaVersion+1），Electron 心跳续期；hang 判定 = 租约过期 + deadlineAt；deadline 单源（Electron 不再自带独立 180s 起点，读 registry deadlineAt）。
-- 验收：kill Electron 注入后，行在租约过期 + deadline 后自动回收为 `error/start_supervisor_lost`，不再永久 starting；除 backend 本体外 bridge spawn 数为 0。
+- `instances.json` 增 `ownerLease {ownerId, expiresAt}`，`schemaVersion` 2→3。借 Kubernetes Lease 的 holder + TTL + renew（`coordination/v1.LeaseSpec`：expired = `now >= renewTime + leaseDurationSeconds`），不引入 apiserver / leader election。TTL **15s**，心跳 **5s**（TTL/3，对齐 systemd `WatchdogSec` 续期节奏）。Electron 心跳只续当前 `ownerId` + matching generation。
+- hang 判定 = **租约过期 + `deadlineAt` 已过**（不再要求 `spawnPid` 已死）。缺 `ownerLease` 视为租约已过期。活信号（后端/窗口）仍阻止回收。
+- deadline 单源：隔离 start 的 HTTP 等待读 registry `deadlineAt` 剩余时间，不再从 wait 起点另开 180s。180s 只用于 claim 时写入 `deadlineAt`。
+- 验收：kill Electron 注入后，行在租约过期 + deadline 后投影为 `error/start_supervisor_lost`（即使 spawnPid 仍 hang），不再永久 starting；observe/waitForHttp 产品路径 0 个 lifecycle python CLI spawn（backend 本体与 stop 杀树除外）。
 
 ### I4 · 准入控制 + main 行队列 TS 化（修 D4；拆 I4a/I4b）
 
@@ -114,11 +116,11 @@ VibelutionLauncher.exe（薄 shim，转发）
 
 ## 5. 契约冻结清单（改前先改本文档）
 
-- `instances.json` 字段：`schemaVersion, instances[]{id,branch,desiredState,status,phase,generation,commandId,spawnPid,deadlineAt,failureMessage,port,controlPort}` + I3 增 `ownerLease`。
+- `instances.json` 字段：`schemaVersion`（I3 起为 **3**）, `instances[]{id,branch,desiredState,status,phase,generation,commandId,spawnPid,deadlineAt,failureMessage,port,controlPort,ownerLease{ownerId,expiresAt}}`。
 - 事件名与 payload：`workbench.*` / `launcher.*` / `electron.*`（含本计划新增 `launcher.registry.lock_stale_broken`）。
 - IPC 通道（`preload.ts` IPC_CHANNELS）与 C# shim 转发协议。
 - active-work guard 固定中文文案（AGENTS §4）。
-- 超时常量现值：180/60/240（start/stop/restart）、75/20（bridge）、8（browser-missing 宽限）、30（close tx lease）——调整需在增量内显式声明并给理由。
+- 超时常量现值：180/60/240（start/stop/restart）、75/20（bridge）、8（browser-missing 宽限）、30（close tx lease）、**15/5（I3 `ownerLease` TTL/心跳，秒）**——调整需在增量内显式声明并给理由。
 - 无控制台红线与 CREATE_NO_WINDOW 路径。
 
 ## 6. 测试与验证

@@ -94,7 +94,8 @@ describe("Electron main Launcher IPC facade", () => {
     expect(branchBody).toContain("isCurrentCheckoutInstance(instanceId)");
     expect(branchBody).toContain("orchestrateLauncherLifecycle(operation, payload)");
     expect(branchBody).toContain("superviseIsolatedInstanceStart");
-    expect(branchBody).toContain("ISOLATED_INSTANCE_READY_WAIT_MS");
+    expect(branchBody).toContain("deadlineAt: result.deadlineAt");
+    expect(branchBody).toContain("renewIsolatedOwnerLease");
     expect(branchBody).toContain("runIsolatedRegistryMutation");
     expect(branchBody).toContain("observeIsolatedReady");
     expect(branchBody).toContain("observeIsolatedError");

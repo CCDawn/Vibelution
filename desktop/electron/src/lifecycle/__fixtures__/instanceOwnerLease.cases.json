@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "protocol": {
+    "registrySchemaVersion": 3,
+    "ownerLeaseTtlMs": 15000,
+    "ownerLeaseHeartbeatMs": 5000,
+    "isolatedStartTimeoutSeconds": 180
+  },
+  "nowMs": 1787227200000,
+  "cases": [
+    {
+      "id": "lease-expired-deadline-passed-spawn-alive-is-hang",
+      "entry": {
+        "status": "starting",
+        "desiredState": "open",
+        "phase": "starting",
+        "generation": 3,
+        "spawnPid": 424242,
+        "deadlineAt": "2026-08-18T04:52:41Z",
+        "ownerLease": { "ownerId": "pid:111", "expiresAt": "2026-08-18T04:53:00Z" }
+      },
+      "input": { "backendAlive": false, "backendListening": false, "windowOpen": false },
+      "expected": { "stale": true }
+    },
+    {
+      "id": "missing-lease-deadline-passed-is-hang",
+      "entry": {
+        "status": "starting",
+        "desiredState": "open",
+        "deadlineAt": "2026-08-18T04:52:41Z",
+        "spawnPid": 424242
+      },
+      "input": { "backendAlive": false, "backendListening": false, "windowOpen": false },
+      "expected": { "stale": true }
+    },
+    {
+      "id": "lease-valid-deadline-passed-is-not-hang",
+      "entry": {
+        "status": "starting",
+        "desiredState": "open",
+        "deadlineAt": "2026-08-18T04:52:41Z",
+        "spawnPid": 0,
+        "ownerLease": { "ownerId": "electron:1", "expiresAt": "2999-01-01T00:00:00Z" }
+      },
+      "input": { "backendAlive": false, "backendListening": false, "windowOpen": false },
+      "expected": { "stale": false }
+    },
+    {
+      "id": "lease-expired-deadline-future-is-not-hang",
+      "entry": {
+        "status": "starting",
+        "desiredState": "open",
+        "deadlineAt": "2999-01-01T00:00:00Z",
+        "spawnPid": 0,
+        "ownerLease": { "ownerId": "pid:111", "expiresAt": "2026-08-18T04:53:00Z" }
+      },
+      "input": { "backendAlive": false, "backendListening": false, "windowOpen": false },
+      "expected": { "stale": false }
+    },
+    {
+      "id": "live-backend-is-not-hang",
+      "entry": {
+        "status": "starting",
+        "desiredState": "open",
+        "deadlineAt": "2026-08-18T04:52:41Z",
+        "ownerLease": { "ownerId": "pid:111", "expiresAt": "2026-08-18T04:53:00Z" }
+      },
+      "input": { "backendAlive": true, "backendListening": true, "windowOpen": false },
+      "expected": { "stale": false }
+    },
+    {
+      "id": "live-window-is-not-hang",
+      "entry": {
+        "status": "restarting",
+        "desiredState": "open",
+        "deadlineAt": "2026-08-18T04:52:41Z",
+        "ownerLease": { "ownerId": "pid:111", "expiresAt": "2026-08-18T04:53:00Z" }
+      },
+      "input": { "backendAlive": false, "backendListening": false, "windowOpen": true },
+      "expected": { "stale": false }
+    }
+  ]
+}

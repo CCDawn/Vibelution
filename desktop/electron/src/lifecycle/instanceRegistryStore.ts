@@ -6,13 +6,16 @@ import { createServer } from "node:net";
 
 import { withInstanceLock, type InstanceLockOptions } from "./instanceLock.js";
 
-export const REGISTRY_SCHEMA_VERSION = 2;
+export const REGISTRY_SCHEMA_VERSION = 3;
 export const DEFAULT_BACKEND_PORT = 8000;
 export const DEFAULT_CONTROL_PORT = 8765;
 export const PORT_SCAN_LIMIT = 64;
 export const IN_FLIGHT_STATUSES = new Set(["starting", "restarting", "stopping"]);
 export const PORT_LEASE_RECLAIMABLE = new Set(["quarantined", "reclaimable"]);
 export const ISOLATED_START_TIMEOUT_SECONDS = 180;
+export const OWNER_LEASE_TTL_MS = 15_000;
+export const OWNER_LEASE_HEARTBEAT_MS = 5_000;
+export const START_SUPERVISOR_LOST_MESSAGE = "启动监督进程已退出且超过启动期限，启动未完成。";
 
 export type RegistryPayload = {
   schemaVersion: number;
@@ -40,12 +43,18 @@ export type RegistryEntry = {
   spawnPid?: number;
   windowPid?: number;
   ownerPid?: number;
+  ownerLease?: OwnerLease | Record<string, unknown>;
   startedAt?: string;
   portLeaseStatus?: string;
   slotKey?: string;
   slotId?: string;
   dataHome?: string;
   [key: string]: unknown;
+};
+
+export type OwnerLease = {
+  ownerId: string;
+  expiresAt: string;
 };
 
 export type PortIsFree = (port: number, host: string) => boolean | Promise<boolean>;
@@ -59,6 +68,9 @@ export type ClaimStartInput = {
   deadlineAt: string;
   startedAt?: string;
   ownerPid: number;
+  ownerId?: string;
+  nowMs?: number;
+  alive?: boolean;
   preferredBackend?: number;
   preferredControl?: number;
   extraUsed?: number[];
@@ -121,8 +133,99 @@ export function loopbackUrl(port: number): string {
   return `http://127.0.0.1:${Math.trunc(port)}`;
 }
 
+export function toIsoUtc(nowMs: number): string {
+  return new Date(nowMs).toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
 export function isolatedStartDeadlineAt(nowMs = Date.now()): string {
-  return new Date(nowMs + ISOLATED_START_TIMEOUT_SECONDS * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
+  return toIsoUtc(nowMs + ISOLATED_START_TIMEOUT_SECONDS * 1000);
+}
+
+export function parseTimestampMs(value: unknown): number | null {
+  const text = String(value || "").trim();
+  if (!text) {
+    return null;
+  }
+  const parsed = Date.parse(text);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function remainingDeadlineMs(deadlineAt: string | undefined, nowMs = Date.now()): number {
+  const deadline = parseTimestampMs(deadlineAt);
+  if (deadline === null) {
+    return ISOLATED_START_TIMEOUT_SECONDS * 1000;
+  }
+  return Math.max(0, deadline - nowMs);
+}
+
+export function ownerLeaseOf(entry: RegistryEntry | undefined): OwnerLease | null {
+  const raw = entry?.ownerLease;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  const ownerId = String((raw as { ownerId?: unknown }).ownerId || "").trim();
+  const expiresAt = String((raw as { expiresAt?: unknown }).expiresAt || "").trim();
+  if (!ownerId && !expiresAt) {
+    return null;
+  }
+  return { ownerId, expiresAt };
+}
+
+export function ownerLeaseExpired(entry: RegistryEntry | undefined, nowMs = Date.now()): boolean {
+  const lease = ownerLeaseOf(entry);
+  if (!lease?.expiresAt) {
+    return true;
+  }
+  const expires = parseTimestampMs(lease.expiresAt);
+  if (expires === null) {
+    return true;
+  }
+  return nowMs >= expires;
+}
+
+export function deadlineExpired(entry: RegistryEntry | undefined, nowMs = Date.now()): boolean {
+  const deadline = parseTimestampMs(entry?.inFlightDeadlineAt || entry?.deadlineAt);
+  if (deadline === null) {
+    return false;
+  }
+  return nowMs >= deadline;
+}
+
+export function isStaleInFlightStart(
+  entry: RegistryEntry | undefined,
+  input: {
+    nowMs?: number;
+    backendAlive?: boolean;
+    backendListening?: boolean;
+    windowOpen?: boolean;
+  } = {}
+): boolean {
+  if (!entry) {
+    return false;
+  }
+  const status = statusOf(entry);
+  if (status !== "starting" && status !== "restarting") {
+    return false;
+  }
+  if (String(entry.desiredState || "").trim().toLowerCase() !== "open") {
+    return false;
+  }
+  if (input.backendAlive || input.backendListening || input.windowOpen) {
+    return false;
+  }
+  const nowMs = input.nowMs ?? Date.now();
+  return deadlineExpired(entry, nowMs) && ownerLeaseExpired(entry, nowMs);
+}
+
+export function buildOwnerLease(input: { ownerId?: string; ownerPid?: number; nowMs?: number }): OwnerLease {
+  const ownerId =
+    String(input.ownerId || "").trim() ||
+    (positiveInt(input.ownerPid) > 0 ? `pid:${positiveInt(input.ownerPid)}` : "");
+  const nowMs = input.nowMs ?? Date.now();
+  return {
+    ownerId,
+    expiresAt: toIsoUtc(nowMs + OWNER_LEASE_TTL_MS)
+  };
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -337,6 +440,7 @@ export async function applyClaimStart(
   );
   const status = input.operation === "restart" ? "restarting" : "starting";
   const generation = positiveInt(entry.generation) + 1;
+  const nowMs = input.nowMs ?? Date.now();
   Object.assign(entry, input.slotFields || {}, {
     projectRoot: String(input.projectRoot || ""),
     branch: String(input.branch || ""),
@@ -355,6 +459,7 @@ export async function applyClaimStart(
     spawnPid: 0,
     windowPid: 0,
     ownerPid: Math.trunc(input.ownerPid),
+    ownerLease: buildOwnerLease({ ownerId: input.ownerId, ownerPid: input.ownerPid, nowMs }),
     startedAt: input.startedAt || input.deadlineAt
   });
   return { ok: true, entry: { ...entry } };
@@ -375,6 +480,7 @@ export function applyClaimStop(
   entry.desiredState = "closed";
   entry.generation = generation;
   entry.failureMessage = "";
+  delete entry.ownerLease;
   const projectRoot = String(input.projectRoot || "").trim();
   if (projectRoot && projectRoot !== ".") {
     entry.projectRoot = projectRoot;
@@ -416,6 +522,73 @@ export function applyObserve(
     entry.desiredState = "open";
     entry.failureMessage = "";
   }
+  delete entry.ownerLease;
+  return { applied: true, entry: { ...entry } };
+}
+
+export function applyRenewOwnerLease(
+  payload: RegistryPayload,
+  input: {
+    instanceId: string;
+    ownerId: string;
+    expectedGeneration?: number;
+    nowMs?: number;
+  }
+): ObserveResult {
+  const instanceId = String(input.instanceId || "").trim();
+  const entry = payload.instances[instanceId];
+  if (!entry) {
+    return { applied: false, entry: {} };
+  }
+  const expected = positiveInt(input.expectedGeneration);
+  if (expected > 0 && positiveInt(entry.generation) !== expected) {
+    return { applied: false, entry: { ...entry } };
+  }
+  const status = statusOf(entry);
+  if (status !== "starting" && status !== "restarting") {
+    return { applied: false, entry: { ...entry } };
+  }
+  const ownerId = String(input.ownerId || "").trim();
+  const current = ownerLeaseOf(entry);
+  if (current?.ownerId && ownerId && current.ownerId !== ownerId) {
+    return { applied: false, entry: { ...entry } };
+  }
+  entry.ownerLease = buildOwnerLease({
+    ownerId: ownerId || current?.ownerId || "",
+    nowMs: input.nowMs
+  });
+  return { applied: true, entry: { ...entry } };
+}
+
+export function applyReclaimStaleInFlightStart(
+  payload: RegistryPayload,
+  input: {
+    instanceId: string;
+    nowMs?: number;
+    backendAlive?: boolean;
+    backendListening?: boolean;
+    windowOpen?: boolean;
+  }
+): ObserveResult {
+  const instanceId = String(input.instanceId || "").trim();
+  const entry = payload.instances[instanceId];
+  if (!entry) {
+    return { applied: false, entry: {} };
+  }
+  if (
+    !isStaleInFlightStart(entry, {
+      nowMs: input.nowMs,
+      backendAlive: input.backendAlive,
+      backendListening: input.backendListening,
+      windowOpen: input.windowOpen
+    })
+  ) {
+    return { applied: false, entry: { ...entry } };
+  }
+  entry.status = "failed";
+  entry.phase = "failed";
+  entry.failureMessage = START_SUPERVISOR_LOST_MESSAGE;
+  delete entry.ownerLease;
   return { applied: true, entry: { ...entry } };
 }
 
@@ -500,11 +673,19 @@ export async function claimStart(
 ): Promise<ClaimStartResult> {
   return mutateRegistry(
     registryPath,
-    async (payload) =>
-      applyClaimStart(payload, {
+    async (payload) => {
+      applyReclaimStaleInFlightStart(payload, {
+        instanceId: input.instanceId,
+        nowMs: input.nowMs,
+        backendAlive: input.alive,
+        backendListening: false,
+        windowOpen: false
+      });
+      return applyClaimStart(payload, {
         ...input,
         portIsFree: input.portIsFree || options.portIsFree || defaultPortIsFree
-      }),
+      });
+    },
     options
   );
 }
@@ -539,6 +720,28 @@ export async function observeError(
     (payload) => applyObserve(payload, { ...input, operation: "observe-error" }),
     options
   );
+}
+
+export async function renewOwnerLease(
+  registryPath: string,
+  input: { instanceId: string; ownerId: string; expectedGeneration?: number; nowMs?: number },
+  options: RegistryStoreOptions = {}
+): Promise<ObserveResult> {
+  return mutateRegistry(registryPath, (payload) => applyRenewOwnerLease(payload, input), options);
+}
+
+export async function reclaimStaleInFlightStart(
+  registryPath: string,
+  input: {
+    instanceId: string;
+    nowMs?: number;
+    backendAlive?: boolean;
+    backendListening?: boolean;
+    windowOpen?: boolean;
+  },
+  options: RegistryStoreOptions = {}
+): Promise<ObserveResult> {
+  return mutateRegistry(registryPath, (payload) => applyReclaimStaleInFlightStart(payload, input), options);
 }
 
 export async function upsert(

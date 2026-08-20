@@ -5,6 +5,7 @@ import {
   instancesRegistryPath,
   observeError,
   observeReady,
+  renewOwnerLease,
   type ClaimStartResult,
   type ObserveResult,
   type RegistryEntry,
@@ -88,6 +89,7 @@ export async function claimIsolatedStart(input: {
   operation?: "start" | "restart";
   commandId: string;
   ownerPid?: number;
+  ownerId?: string;
   registryPath?: string;
   nowMs?: number;
   storeOptions?: RegistryStoreOptions;
@@ -97,6 +99,7 @@ export async function claimIsolatedStart(input: {
     throw new Error(`找不到分支实例：${input.instanceId}`);
   }
   const nowMs = input.nowMs ?? Date.now();
+  const ownerPid = input.ownerPid ?? process.pid;
   return claimStart(
     input.registryPath || instancesRegistryPath(),
     {
@@ -107,7 +110,10 @@ export async function claimIsolatedStart(input: {
       commandId: input.commandId,
       deadlineAt: isolatedStartDeadlineAt(nowMs),
       startedAt: new Date(nowMs).toISOString().replace(/\.\d{3}Z$/, "Z"),
-      ownerPid: input.ownerPid ?? process.pid,
+      ownerPid,
+      ownerId: input.ownerId || `pid:${ownerPid}`,
+      nowMs,
+      alive: target.alive,
       preferredBackend: target.preferredBackend,
       preferredControl: target.preferredControl,
       extraUsed: target.extraUsed
@@ -162,6 +168,26 @@ export async function observeIsolatedError(input: {
       instanceId: input.instanceId,
       expectedGeneration: input.expectedGeneration,
       message: input.message
+    },
+    input.storeOptions
+  );
+}
+
+export async function renewIsolatedOwnerLease(input: {
+  instanceId: string;
+  ownerId: string;
+  expectedGeneration?: number;
+  nowMs?: number;
+  registryPath?: string;
+  storeOptions?: RegistryStoreOptions;
+}): Promise<ObserveResult> {
+  return renewOwnerLease(
+    input.registryPath || instancesRegistryPath(),
+    {
+      instanceId: input.instanceId,
+      ownerId: input.ownerId,
+      expectedGeneration: input.expectedGeneration,
+      nowMs: input.nowMs
     },
     input.storeOptions
   );

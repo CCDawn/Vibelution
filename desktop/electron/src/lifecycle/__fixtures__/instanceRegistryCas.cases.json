@@ -1,12 +1,14 @@
 {
   "schemaVersion": 1,
   "protocol": {
-    "registrySchemaVersion": 2,
+    "registrySchemaVersion": 3,
     "defaultBackendPort": 8000,
     "defaultControlPort": 8765,
     "portScanLimit": 64,
     "inFlightStatuses": ["starting", "restarting", "stopping"],
-    "isolatedStartTimeoutSeconds": 180
+    "isolatedStartTimeoutSeconds": 180,
+    "ownerLeaseTtlMs": 15000,
+    "ownerLeaseHeartbeatMs": 5000
   },
   "cases": [
     {
@@ -22,6 +24,7 @@
         "deadlineAt": "2026-08-20T12:03:00Z",
         "startedAt": "2026-08-20T12:00:00Z",
         "ownerPid": 111,
+        "nowMs": 1787227200000,
         "preferredBackend": 8001,
         "preferredControl": 8766,
         "extraUsed": [8000, 8765],
@@ -38,7 +41,9 @@
         "spawnPid": 0,
         "commandId": "cmd-1",
         "failureMessage": "",
-        "ownerPid": 111
+        "ownerPid": 111,
+        "ownerId": "pid:111",
+        "ownerLeaseExpiresAt": "2026-08-20T12:00:15Z"
       }
     },
     {
@@ -591,6 +596,122 @@
           }
         }
       ]
+    },
+    {
+      "id": "reclaim-stale-even-when-spawn-pid-alive",
+      "op": "reclaimStale",
+      "registry": {
+        "schemaVersion": 3,
+        "instances": {
+          "worktree:task": {
+            "status": "starting",
+            "phase": "starting",
+            "desiredState": "open",
+            "generation": 3,
+            "spawnPid": 424242,
+            "deadlineAt": "2026-08-18T04:52:41Z",
+            "ownerLease": { "ownerId": "pid:111", "expiresAt": "2026-08-18T04:53:00Z" }
+          }
+        }
+      },
+      "input": {
+        "instanceId": "worktree:task",
+        "nowMs": 1787227200000
+      },
+      "expected": {
+        "applied": true,
+        "generation": 3,
+        "status": "failed",
+        "phase": "failed",
+        "failureMessage": "启动监督进程已退出且超过启动期限，启动未完成。",
+        "ownerId": ""
+      }
+    },
+    {
+      "id": "reclaim-skips-when-owner-lease-valid",
+      "op": "reclaimStale",
+      "registry": {
+        "schemaVersion": 3,
+        "instances": {
+          "worktree:task": {
+            "status": "starting",
+            "phase": "starting",
+            "desiredState": "open",
+            "generation": 3,
+            "spawnPid": 0,
+            "deadlineAt": "2026-08-18T04:52:41Z",
+            "ownerLease": { "ownerId": "pid:111", "expiresAt": "2999-01-01T00:00:00Z" }
+          }
+        }
+      },
+      "input": {
+        "instanceId": "worktree:task",
+        "nowMs": 1787227200000
+      },
+      "expected": {
+        "applied": false,
+        "generation": 3,
+        "status": "starting",
+        "ownerId": "pid:111"
+      }
+    },
+    {
+      "id": "renew-owner-lease-matching-generation",
+      "op": "renewOwnerLease",
+      "registry": {
+        "schemaVersion": 3,
+        "instances": {
+          "worktree:task": {
+            "status": "starting",
+            "phase": "starting",
+            "desiredState": "open",
+            "generation": 4,
+            "ownerLease": { "ownerId": "pid:111", "expiresAt": "2026-08-20T12:00:10Z" }
+          }
+        }
+      },
+      "input": {
+        "instanceId": "worktree:task",
+        "ownerId": "pid:111",
+        "expectedGeneration": 4,
+        "nowMs": 1787227200000
+      },
+      "expected": {
+        "applied": true,
+        "generation": 4,
+        "status": "starting",
+        "ownerId": "pid:111",
+        "ownerLeaseExpiresAt": "2026-08-20T12:00:15Z"
+      }
+    },
+    {
+      "id": "renew-owner-lease-wrong-owner-discarded",
+      "op": "renewOwnerLease",
+      "registry": {
+        "schemaVersion": 3,
+        "instances": {
+          "worktree:task": {
+            "status": "starting",
+            "phase": "starting",
+            "desiredState": "open",
+            "generation": 4,
+            "ownerLease": { "ownerId": "pid:111", "expiresAt": "2026-08-20T12:00:10Z" }
+          }
+        }
+      },
+      "input": {
+        "instanceId": "worktree:task",
+        "ownerId": "pid:999",
+        "expectedGeneration": 4,
+        "nowMs": 1787227200000
+      },
+      "expected": {
+        "applied": false,
+        "generation": 4,
+        "status": "starting",
+        "ownerId": "pid:111",
+        "ownerLeaseExpiresAt": "2026-08-20T12:00:10Z"
+      }
     }
   ]
 }
