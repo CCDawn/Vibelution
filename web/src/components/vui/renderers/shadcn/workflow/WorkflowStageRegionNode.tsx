@@ -65,39 +65,43 @@ export function WorkflowStageRegionNode(props: NodeProps) {
   const label = String(props.data.label ?? "");
   const index = Number(props.data.stageIndex ?? 0) + 1;
   const tone = asStageTone(String(props.data.stageTone ?? "idle"));
-  const taskCount = Number(props.data.taskCount ?? 0);
-  const completedCount = Number(props.data.completedCount ?? 0);
   const spacious = props.data.layoutMode === "serpentine";
   const meta = STAGE_TONE_META[tone];
+
+  if (spacious) {
+    return (
+      <div
+        aria-hidden="true"
+        className="h-full w-full"
+        data-layout-mode="serpentine"
+        data-stage-tone={tone}
+        data-vui="workflow-stage-region"
+      />
+    );
+  }
 
   return (
     <div
       className={cn(
-        "h-full w-full select-none",
-        spacious
-          ? "cursor-grab active:cursor-grabbing"
-          : cn(
-            "rounded-2xl border",
-            (tone === "idle" || tone === "done") ? "border-dashed" : "",
-            STAGE_FILL[tone] ?? STAGE_FILL_IDLE,
-            STAGE_BORDER[tone] ?? STAGE_BORDER_IDLE,
-          ),
+        "h-full w-full select-none rounded-2xl border",
+        (tone === "idle" || tone === "done") ? "border-dashed" : "",
+        STAGE_FILL[tone] ?? STAGE_FILL_IDLE,
+        STAGE_BORDER[tone] ?? STAGE_BORDER_IDLE,
       )}
       data-vui="workflow-stage-region"
       data-stage-tone={tone}
-      data-layout-mode={spacious ? "serpentine" : "stage-columns"}
+      data-layout-mode="stage-columns"
     >
-      <div className={cn("flex items-center gap-2", spacious ? "px-1 pt-1" : "px-3.5 pt-3 pb-1")}>
+      <div className="flex items-center gap-2 px-3.5 pt-3 pb-1">
         <span
           className={cn(
-            "inline-flex items-center justify-center border font-semibold tabular-nums",
-            spacious ? "h-5 min-w-5 rounded-full px-1.5 text-[10px]" : "h-5 min-w-5 rounded-full px-1.5 text-[10px]",
+            "inline-flex h-5 min-w-5 items-center justify-center rounded-full border px-1.5 text-[10px] font-semibold tabular-nums",
             meta.indexBadge,
           )}
         >
           {index}
         </span>
-        <div className={cn("truncate font-semibold tracking-wide text-[var(--fg-secondary)]", spacious ? "text-[11px]" : "text-[12px]")}>
+        <div className="truncate text-[12px] font-semibold tracking-wide text-[var(--fg-secondary)]">
           {label}
         </div>
         {meta.Icon ? (
@@ -114,11 +118,6 @@ export function WorkflowStageRegionNode(props: NodeProps) {
             />
             {meta.label}
           </span>
-        ) : null}
-        {spacious && taskCount > 0 ? (
-          <div className="ml-auto shrink-0 text-[9px] tabular-nums text-[var(--fg-tertiary)]">
-            <span><strong className="font-semibold text-[var(--fg-secondary)]">{completedCount} / {taskCount}</strong></span>
-          </div>
         ) : null}
       </div>
     </div>

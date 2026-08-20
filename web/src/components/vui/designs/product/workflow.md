@@ -39,7 +39,7 @@ const graph: WorkflowLayoutInput = projectionToCanvasGraph(projection);
 
 节点在 `serpentine` 模式下使用约 `300 × 72` 的模块卡：左侧实心类型色块（Agent 蓝 / 人工琥珀 / 起点灰 / 系统深色 / 决策暖色）加白图标，标题 15px、下一行按种类写副标题（决策「晋升 / 回滚 / 停止」、系统「受控执行」、人工优先用节点 description（当前 HITL 任务说明）；缺省时按 status 写副标题，不再写死「角色 · 待确认」、Agent「角色 · 已绑定/未绑定」）12px。状态叠在图标右下角标（待运行隐藏角标；运行中为旋转标记），不再铺三行脚注、类型胶囊或顶部强调条。长描述、输入/输出、检查项与技术 `agentId` 不在画布常驻，完整信息进入节点 tooltip 与 Inspector。卡片用实底 `--vui-surface-panel` 加 `--vui-elevation-2`；状态按四桶经**边框 + 类型色块旁角标**表达：完成（`--state-success` 绿）、进行（`--accent-cool` 蓝）、等待/关注（`--state-warning` 琥珀）、失败（`--state-error` 红）、待运行（最淡描边）；选中另用细蓝色 outline，不与状态色冲突。
 
-该模式用三枚紧凑阶段标签分组，不绘制包住成员节点的大背景框。阶段标签包含编号、名称、完成计数与小面积 tone chip（done 绿、active 蓝、attention 琥珀）；颜色只表达聚合运行状态，不给阶段分配不同身份色。标签默认锚定在该阶段成员任务包围盒左上方，成员节点移动时跟随，也允许单独拖拽微调。不得改全局 `--vui-surface-region`（浅色 rail 等于侧栏白底）。普通相邻边默认不常驻标签；只有 `knowledge_package`、`smoke`、`promotion` 和决策/回路语义常显，其他标签仅在 hover 或 active/attention 状态出现。跨阶段交接使用对齐节点之间的一条短叙事桥；同协议重跑沿所在阶段底部的局部反馈轨道返回，禁止绕画布或阶段绘制大矩形回路。ELK 仍负责初始节点顺序、阶段位置与空间预算；手动调整后由 renderer 的受控位置与智能正交路由接管显示几何。
+该模式不绘制包住成员节点的大背景框，也不再绘制左上角紧凑阶段标签（编号、名称、0/5）。那些标签不会跟着视口滚动，只占画布空间。阶段分组只靠节点空间排布；不得改全局 `--vui-surface-region`（浅色 rail 等于侧栏白底）。普通相邻边默认不常驻标签；只有 `knowledge_package`、`smoke`、`promotion` 和决策/回路语义常显，其他标签仅在 hover 或 active/attention 状态出现。跨阶段交接使用对齐节点之间的一条短叙事桥；同协议重跑沿所在阶段底部的局部反馈轨道返回，禁止绕画布或阶段绘制大矩形回路。ELK 仍负责初始节点顺序、阶段位置与空间预算；手动调整后由 renderer 的受控位置与智能正交路由接管显示几何。
 
 画布必须提供平移、缩放、适应全部和定位当前工作；页面本身不得产生横向滚动。
 
@@ -64,7 +64,7 @@ const graph: WorkflowLayoutInput = projectionToCanvasGraph(projection);
 - `succeeded`：`--state-success` 绿边框 + 绿角标 check（与 pending 在边框、角标两通道拉开；沿用 VUI 既有 success token，与 VDenseTable 等一致）
 - `failed` vs `blocked`：不同图标（x / ban）与文案
 - selected：细蓝色 outline；runtime current：独立游标（下一处会继续的节点），**不得**把 `pending`/`ready` 的 current 节点改画成 `running`
-- 阶段头：`done` 绿实心编号 + 对勾徽章，`active` 仅当成员节点 status 为 `running`（蓝实心编号 + 旋转进行中徽章），`attention` 琥珀实心编号 + 需关注徽章；进度条随 tone 着色。queued 运行的 current 节点只保留游标 ring，阶段保持 `idle`
+- 阶段头（仅 `stage-columns`）：`done` 绿实心编号 + 对勾徽章，`active` 仅当成员节点 status 为 `running`（蓝实心编号 + 旋转进行中徽章），`attention` 琥珀实心编号 + 需关注徽章；进度条随 tone 着色。queued 运行的 current 节点只保留游标 ring，阶段保持 `idle`。`serpentine` 不绘制阶段头。
 
 ### 边语义
 
@@ -81,7 +81,7 @@ pathState：`idle | traversed | active | attention | danger` — 仅由 nodeRuns
 - 自动布局边由 `workflowElkEdgePath.sectionsToSvgPath` 从引擎 `WorkflowEdgeSection[]` 直接生成（绝对坐标正交 section，无重复与虚假连接线）；生产源码禁止 `getSmoothStepPath`。手动布局激活后改用下方「手动布局与智能连线 v2」契约，不覆盖 ELK 的初始/自动整理结果。
 - 标签锚点由引擎 `labelBounds`（中心）决定，缺失时不渲染标签；三阶段统一 viewport，跨阶段边同坐标空间。蛇形跨阶段标签在 **layout composer** 里把 `labelBounds` 放到竖线右侧（回路标签放到横轨上方），禁止渲染后再用 CSS transform 挪开。
 - 画布短名：定义协议仍可保留 `Knowledge Package`；`resolveEdgeLabelSpec` 映射为「知识包」并用中英混排字宽计量，避免把 ASCII 当 CJK 截成 `Knowledge Pa…`。tooltip `title` 保留原文。
-- z-index：自动阶段区 `0` < edge `1` < task node `2`；蛇形手动模式的紧凑阶段标签为 `3`，使标签可拖且不被边遮住。**边不浮在任务节点上方**，选中/hover 不抬升 zIndex，用描边加粗与变色表达。
+- z-index：自动阶段区 `0` < edge `1` < task node `2`。蛇形模式不渲染阶段标签节点。**边不浮在任务节点上方**，选中/hover 不抬升 zIndex，用描边加粗与变色表达。
 - 标签契约：`workflowEdgeLabelGeometry` 是唯一几何权威——布局 spacer 尺寸与渲染 label box 完全一致（同宽高、同截断策略）；长标签截断后矩形仍参与布局；禁止渲染后 transform 移动。标签胶囊用不透明 panel 底 + workspace halo 盖住穿过的线。
 
 ### 布局与 fit 协议（T4 + 两级布局 2026-08-08 + 外层真实 ELK 2026-08-08b）
@@ -92,24 +92,24 @@ pathState：`idle | traversed | active | attention | danger` — 仅由 nodeRuns
 
 ### 阶段分区
 
-- `stage-columns` 的阶段为 React Flow 父节点（`parentId` + 相对坐标）；`serpentine` 的阶段是独立紧凑标签节点，不再作为成员任务的父级或大背景框。
-- 阶段归属严格来自 `stages[]` 的 `stageId` / `nodeIds` 与节点 `stageId`，不得按屏幕坐标猜测。标签位置只负责展示，不改变阶段数据归属。
-- 分组靠标签 + workspace 实底 + 不透明任务卡；状态色不用于阶段身份，只出现在编号徽章 / 状态 chip。
+- `stage-columns` 的阶段为 React Flow 父节点（`parentId` + 相对坐标）；`serpentine` 不再把阶段标签画成独立节点。
+- 阶段归属严格来自 `stages[]` 的 `stageId` / `nodeIds` 与节点 `stageId`，不得按屏幕坐标猜测。
+- 分组靠 workspace 实底 + 不透明任务卡；状态色不用于阶段身份。
 - stageTone：`idle | active | done | attention`
 
 ### 手动布局与智能连线 v2（serpentine）
 
 - 普通节点与决策节点都按真实 ELK port 为每条出边、入边渲染独立 Handle。决策出边继续用 `rerun/promote/rollback/stop` 等语义 id；普通出边使用完整 ELK port id。相同侧端口中心距至少 `16px`，禁止多条边复用匿名 source Handle。
 - 节点拖动时，边每帧读取 React Flow 当前端点，并使用本地正交回退路线实时跟随；源端和目标端都先沿 Handle 方向保留 `32px` 笔直引线，再进入主体通道，避免线头重合后互相遮挡。
-- 松手后由 `@tisoap/react-flow-smart-edge@5.0.0` 的 `SmartEdgeProvider` / `useSmartEdgePath` 执行避障正交路由；provider 使用 step preset，节点净空 `12px`、栅格通道约 `12px`，阶段标签也作为障碍。Worker 等待、失败或正在拖动时必须回退到上述本地路线，不得让边消失或停留在旧端点。
-- 阶段标签默认位置 = 成员任务包围盒左上角上方（标签 `240 × 32px`，间距 `20px`）+ 用户偏移。拖任务时默认锚点随成员更新；拖标签时只更新该阶段的偏移，不移动任务，也不改变阶段归属。
-- 浏览器本地布局状态统一为 v2：`positions + stageLabelOffsets + locked + structureKey + runId + nodeIds + stageIds`。读取兼容 v1（旧节点位置保留、标签偏移为空）；自动整理同时清空节点位置和标签偏移；撤销以同一 snapshot 恢复两者，锁定同时禁止任务和阶段标签拖动。
+- 松手后由 `@tisoap/react-flow-smart-edge@5.0.0` 的 `SmartEdgeProvider` / `useSmartEdgePath` 执行避障正交路由；provider 使用 step preset，节点净空 `12px`、栅格通道约 `12px`。Worker 等待、失败或正在拖动时必须回退到上述本地路线，不得让边消失或停留在旧端点。
+- 阶段标签默认不再绘制，也不作为路由障碍。拖任务时边仍实时跟随；自动整理清空节点位置；锁定禁止任务拖动。
+- 浏览器本地布局状态统一为 v2：`positions + stageLabelOffsets + locked + structureKey + runId + nodeIds + stageIds`。读取兼容 v1（旧节点位置保留、标签偏移为空）；自动整理同时清空节点位置和历史标签偏移。锁定只禁止任务拖动。
 
 ### 状态/交互约束
 
 - `@xyflow/react` 仅允许在 `renderers/shadcn/workflow/**`（入口 `ShadcnWorkflowCanvas.tsx`）
 - 业务路由禁止 import renderer 或 xyflow
-- `stage-columns` 默认不可拖；`serpentine` 允许任务节点和阶段标签做浏览器本地展示调整，但仍不可连线、不可修改运行图拓扑
+- `stage-columns` 默认不可拖；`serpentine` 允许任务节点做浏览器本地展示调整，但仍不可连线、不可修改运行图拓扑
 - MiniMap 默认关闭；长流程由生产工作台显式 `showMiniMap` 开启
 - 单击节点 → 选中；点空白 → 取消；键盘可聚焦节点（aria-label 含名称/类型/状态）
 - 控件：放大、缩小、适应全部、定位当前工作
@@ -151,7 +151,7 @@ pathState：`idle | traversed | active | attention | danger` — 仅由 nodeRuns
 | `hf_e_m1_stage1` 首轮会议→`source_finding` | `human_gate`（gateKind `knowledge_package`） | 常显「首轮搜集范围就绪」 |
 | `hf_e_gate_stage2` 收敛门→`hypothesis_design` | `human_gate`（gateKind `knowledge_package`） | 常显「假说集就绪」 |
 
-阶段头计数：区域 stage 通过 `WorkflowCanvasStageInput.progress = { completed: 已闭环轮次, total: 轮次预算 }` 覆盖默认的「成功卡数/卡数」，显示「已闭环轮次/预算」（如 2/3）。生成/评审讨论进行中时，`composeHypothesisFirstGraph(..., { demotePipelineStages: true })` 把 16 节点阶段 `stageTone` 降为 `idle`，假说先行阶段为 `active`。`progress` 是可选字段，不进入结构 hash，更新不触发重排。
+阶段头计数：`stage-columns` 区域 stage 可通过 `WorkflowCanvasStageInput.progress = { completed: 已闭环轮次, total: 轮次预算 }` 覆盖默认的「成功卡数/卡数」。`serpentine` 不绘制该计数。生成/评审讨论进行中时，`composeHypothesisFirstGraph(..., { demotePipelineStages: true })` 把 16 节点阶段 `stageTone` 降为 `idle`，假说先行阶段为 `active`。`progress` 是可选字段，不进入结构 hash，更新不触发重排。
 
 ### 适用范围
 

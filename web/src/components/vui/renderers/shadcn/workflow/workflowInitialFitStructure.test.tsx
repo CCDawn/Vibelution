@@ -36,7 +36,7 @@ vi.mock("@xyflow/react", () => ({
   },
 }));
 
-import type { WorkflowLayoutInput } from "../../../product/workflow/workflowCanvasTypes";
+import type { WorkflowLayoutInput, WorkflowLayoutNode } from "../../../product/workflow/workflowCanvasTypes";
 import { WorkflowCanvasControls } from "./WorkflowCanvasControls";
 import { ShadcnWorkflowCanvas } from "./ShadcnWorkflowCanvas";
 import { useWorkflowAutoLayout } from "./useWorkflowAutoLayout";
@@ -62,6 +62,67 @@ vi.mock("./useWorkflowInitialFit", () => ({
 
 function emptyGraph(): WorkflowLayoutInput {
   return { stages: [], nodes: [], edges: [], run: null };
+}
+
+function sampleLayoutNodes(): WorkflowLayoutNode[] {
+  return [
+    {
+      id: "stage:experiment",
+      stageId: "experiment",
+      label: "实验设计",
+      actorKind: "system",
+      visualKind: "stage_region",
+      kind: "stage",
+      x: 0,
+      y: 0,
+      width: 240,
+      height: 32,
+      stageTone: "idle",
+    },
+    {
+      id: "protocol_design",
+      stageId: "experiment",
+      label: "协议设计",
+      actorKind: "agent",
+      visualKind: "agent_task",
+      kind: "task",
+      x: 40,
+      y: 80,
+      width: 300,
+      height: 72,
+      status: "pending",
+    },
+  ];
+}
+
+function sampleGraph(): WorkflowLayoutInput {
+  return {
+    stages: [{ stageId: "experiment", label: "实验设计", nodeIds: ["protocol_design"] }],
+    nodes: [{
+      nodeId: "protocol_design",
+      stageId: "experiment",
+      label: "协议设计",
+      actorKind: "agent",
+      visualKind: "agent_task",
+      status: "pending",
+    }],
+    edges: [],
+    run: null,
+  };
+}
+
+function idleLayoutHook(nodes: WorkflowLayoutNode[] = []) {
+  return {
+    nodes,
+    edges: [],
+    layoutRevision: 1,
+    degraded: null,
+    initialFitRevision: null,
+    structureKey: "structure:empty",
+    acknowledgeInitialFit: vi.fn(),
+    fitAll: vi.fn(),
+    reportMeasuredSize: vi.fn(),
+  };
 }
 
 describe("ShadcnWorkflowCanvas structure (P1-1)", () => {
@@ -132,6 +193,50 @@ describe("ShadcnWorkflowCanvas structure (P1-1)", () => {
       root.unmount();
       container.remove();
     });
+  });
+
+  it("does not paint serpentine stage labels as React Flow nodes", async () => {
+    vi.mocked(useWorkflowAutoLayout).mockReturnValue(idleLayoutHook(sampleLayoutNodes()));
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root: Root = createRoot(container);
+    await act(async () => {
+      root.render(<ShadcnWorkflowCanvas graph={sampleGraph()} layoutMode="serpentine" />);
+    });
+
+    const rfProps = rfCalls[0];
+    const nodes = rfProps.nodes as Array<{ id: string; type?: string }>;
+    expect(nodes.map((node) => node.id)).toEqual(["protocol_design"]);
+    expect(nodes.some((node) => node.type === "stageRegion")).toBe(false);
+
+    await act(async () => {
+      root.unmount();
+      container.remove();
+    });
+    vi.mocked(useWorkflowAutoLayout).mockReturnValue(idleLayoutHook());
+  });
+
+  it("still paints stage-columns region nodes", async () => {
+    vi.mocked(useWorkflowAutoLayout).mockReturnValue(idleLayoutHook(sampleLayoutNodes()));
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root: Root = createRoot(container);
+    await act(async () => {
+      root.render(<ShadcnWorkflowCanvas graph={sampleGraph()} layoutMode="stage-columns" />);
+    });
+
+    const rfProps = rfCalls[0];
+    const nodes = rfProps.nodes as Array<{ id: string; type?: string }>;
+    expect(nodes.map((node) => ({ id: node.id, type: node.type }))).toEqual([
+      { id: "stage:experiment", type: "stageRegion" },
+      { id: "protocol_design", type: "agentTask" },
+    ]);
+
+    await act(async () => {
+      root.unmount();
+      container.remove();
+    });
+    vi.mocked(useWorkflowAutoLayout).mockReturnValue(idleLayoutHook());
   });
 
   it("deletes the legacy fitView-only control wiring so onFitAll is the single explicit path", async () => {

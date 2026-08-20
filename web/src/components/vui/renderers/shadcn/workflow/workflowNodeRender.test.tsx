@@ -318,7 +318,7 @@ describe("WorkflowStageRegionNode render (P1-5)", () => {
     expect(markup).toContain(">1<");
   });
 
-  it("shows compact progress in a serpentine territory", () => {
+  it("does not paint a serpentine stage heading or progress counter", () => {
     const markup = renderNode(WorkflowStageRegionNode, {
       label: "实验设计",
       stageTone: "attention",
@@ -328,11 +328,13 @@ describe("WorkflowStageRegionNode render (P1-5)", () => {
       layoutMode: "serpentine",
     });
     expect(markup).toContain('data-layout-mode="serpentine"');
-    expect(markup).toContain("2");
-    expect(markup).toContain("/ 5");
+    expect(markup).toContain('data-vui="workflow-stage-region"');
+    expect(markup).not.toContain("实验设计");
+    expect(markup).not.toContain("/ 5");
+    expect(markup).not.toContain("需关注");
   });
 
-  it("removes the large serpentine stage background and leaves a draggable heading", () => {
+  it("removes the large serpentine stage background and heading", () => {
     const idle = renderNode(WorkflowStageRegionNode, {
       label: "知识搜集",
       stageTone: "idle",
@@ -343,8 +345,8 @@ describe("WorkflowStageRegionNode render (P1-5)", () => {
     expect(idle).not.toContain("accent-cool)_8%,var(--vui-surface-workspace)");
     expect(idle).not.toContain("accent-cool)_10%,var(--vui-border-subtle)");
     expect(idle).not.toContain("border-dashed");
-    expect(idle).toContain("cursor-grab");
-    expect(idle).not.toContain("pointer-events-none");
+    expect(idle).not.toContain("cursor-grab");
+    expect(idle).not.toContain("知识搜集");
   });
 
   it("lifts serpentine task cards with an opaque panel and elevation token", () => {

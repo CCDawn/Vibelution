@@ -456,7 +456,9 @@ function WorkflowCanvasInner({
 
   const nodes: Node[] = useMemo(
     () =>
-      layout.nodes.map((node) => {
+      layout.nodes
+        .filter((node) => !(layoutMode === "serpentine" && node.kind === "stage"))
+        .map((node) => {
         if (node.kind === "stage") {
           const stageInput = graph.stages.find((stage) => stage.stageId === node.stageId);
           const stageAnchor = stageAnchorById[node.stageId] ?? { x: node.x, y: node.y };
