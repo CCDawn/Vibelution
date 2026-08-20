@@ -1,8 +1,6 @@
-import { resolve } from "node:path";
-
 import {
   getSharedMainLineCommandQueue,
-  type MainLineCommandQueue,
+  type MainLineCommandQueue
 } from "../lifecycle/mainLine/commandQueue.js";
 import { writeMainLineIntent } from "../lifecycle/mainLine/commandIntent.js";
 import { writeMainLineQueueOwnerMarker } from "../lifecycle/mainLine/ownerMarker.js";
@@ -10,10 +8,13 @@ import { resolveRuntimeManagerDir } from "../lifecycle/projectStoragePaths.js";
 import {
   invalidPythonJsonBridgePayload,
   parsePythonJsonBridgePayload,
-  PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS,
-  runPythonJsonBridge,
-  type PythonJsonBridgeSpawn
+  PythonJsonBridgeError
 } from "./pythonJsonBridge.js";
+import {
+  executeMainLineWorkbench,
+  type ExecuteMainLineWorkbenchInput,
+  type WorkbenchBackendSpawn
+} from "./workbenchBackend.js";
 
 export type WorkbenchLifecycleOperation = "start" | "stop" | "force-stop" | "restart" | "rebuild-and-start" | "shutdown";
 
@@ -43,50 +44,20 @@ export function parseWorkbenchLifecycleResult(raw: string): WorkbenchLifecycleRe
   };
 }
 
-async function spawnWorkbenchLifecycleBridge(input: {
+export type RunWorkbenchLifecycleInput = {
   workspaceRoot: string;
   pythonPath: string;
   operatorConfigPath: string;
   operation: WorkbenchLifecycleOperation;
-  spawnImpl?: PythonJsonBridgeSpawn;
-  signal?: AbortSignal;
-}): Promise<WorkbenchLifecycleResult> {
-  const raw = await runPythonJsonBridge({
-    pythonPath: input.pythonPath,
-    args: [
-      resolve(input.workspaceRoot, "scripts", "vibelution_desktop_entry.py"),
-      "--action",
-      "lifecycle",
-      "--lifecycle-operation",
-      input.operation,
-      "--output",
-      "json",
-      "--workspace",
-      input.workspaceRoot,
-      "--config",
-      input.operatorConfigPath,
-      "--no-browser"
-    ],
-    cwd: input.workspaceRoot,
-    spawnImpl: input.spawnImpl,
-    failureLabel: "workbench lifecycle bridge",
-    timeoutMs: PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS,
-    signal: input.signal,
-    killPolicy: "child",
-    mutation: true
-  });
-  return parseWorkbenchLifecycleResult(raw);
-}
-
-export async function runWorkbenchLifecycle(input: {
-  workspaceRoot: string;
-  pythonPath: string;
-  operatorConfigPath: string;
-  operation: WorkbenchLifecycleOperation;
-  spawnImpl?: PythonJsonBridgeSpawn;
+  spawnImpl?: WorkbenchBackendSpawn;
   signal?: AbortSignal;
   queue?: MainLineCommandQueue;
-}): Promise<WorkbenchLifecycleResult> {
+} & Pick<
+  ExecuteMainLineWorkbenchInput,
+  "fileExists" | "readState" | "writeState" | "listActiveWork" | "ensureFrontend" | "connect" | "fetchHealth" | "pidAlive" | "killPid"
+>;
+
+export async function runWorkbenchLifecycle(input: RunWorkbenchLifecycleInput): Promise<WorkbenchLifecycleResult> {
   const runtimeManagerDir = resolveRuntimeManagerDir(input.workspaceRoot);
   const queue = input.queue ?? getSharedMainLineCommandQueue({
     persistIntent: (intent) => {
@@ -99,6 +70,27 @@ export async function runWorkbenchLifecycle(input: {
   return queue.submit({
     operation: input.operation,
     noBrowser: true,
-    execute: () => spawnWorkbenchLifecycleBridge(input),
+    execute: async (command) => {
+      if (input.signal?.aborted) {
+        throw new PythonJsonBridgeError("aborted", "workbench lifecycle was aborted before spawn");
+      }
+      return executeMainLineWorkbench({
+        workspaceRoot: input.workspaceRoot,
+        pythonPath: input.pythonPath,
+        operation: input.operation,
+        command,
+        signal: input.signal,
+        spawnImpl: input.spawnImpl,
+        fileExists: input.fileExists,
+        readState: input.readState,
+        writeState: input.writeState,
+        listActiveWork: input.listActiveWork,
+        ensureFrontend: input.ensureFrontend,
+        connect: input.connect,
+        fetchHealth: input.fetchHealth,
+        pidAlive: input.pidAlive,
+        killPid: input.killPid
+      });
+    },
   });
 }

@@ -14,8 +14,8 @@ Electron 壳：[`desktop/electron/README.md`](../../../desktop/electron/README.m
 
 | 你在改… | 先打开 | 禁止 |
 | --- | --- | --- |
-| start / stop / restart / active-work 拦截 | Electron `lifecycle/mainLine` 队列（`runWorkbenchLifecycle`）→ Python lifecycle CLI → daemon handler；active-work 仍在 Python | 在 `runtime_service.py` 再写一套 lifecycle；renderer 直连 :8765；把 I4a 准入或 I5 杀树混进 I4b |
-| 隔离 worktree 启停 / READY / 端口 | [`instance-lifecycle.md`](../../launcher/instance-lifecycle.md) · Electron `instanceRegistryStore.ts` · `isolatedInstanceSupervisor.ts` · `instanceAdmissionControl.ts` · `branch_instance_lifecycle.py` · `instances_registry.py` | exec 目标树 `vibelution_launcher.py`；spawn exit 0 当 `running`；无 generation CAS 盲写 `instances.json`；observe/waitForHttp 再 spawn Python bridge；hang 回收仍看 spawnPid；把 I4a 冷却写进 `instances.json` |
+| start / stop / restart / active-work 拦截 | Electron `lifecycle/mainLine` 队列 → `runWorkbenchLifecycle` → 直接 `pythonw scripts/web_workbench.py`；active-work 读 work_runs / evolution 快照 | 在 `runtime_service.py` 再写一套 lifecycle；renderer 直连 :8765；产品路径再 spawn `--action lifecycle` |
+| 隔离 worktree 启停 / READY / 端口 | [`instance-lifecycle.md`](../../launcher/instance-lifecycle.md) · Electron `instanceRegistryStore.ts` · `isolatedInstanceSupervisor.ts` · `instanceAdmissionControl.ts` · `workbenchBackend.ts` | exec 目标树 `vibelution_launcher.py`；spawn exit 0 当 `running`；无 generation CAS 盲写 `instances.json`；observe/waitForHttp 再 spawn Python bridge；hang 回收仍看 spawnPid；把 I4a 冷却写进 `instances.json` |
 | Launcher 窗口真相 / leftover adopt | `desktop/electron/src/windows/electronWindowProvider.ts` | Python overlay 把 live window 标成 closed |
 | Launcher UI 传输 | `web/src/api/launcher.ts`（preload IPC 门面） | 可操作仪表盘在 API 未就绪时画空表 + `未连接` |
 | Web 路由 import 稳定面 | `launcher_service.py`（re-export only） | 往 facade 加业务体 |
@@ -38,8 +38,9 @@ Electron main (TS) = Launcher 控制面（ADR 0009 已落地）
   → pin userData to %LOCALAPPDATA%\Vibelution\DesktopShell before requestSingleInstanceLock
   → 控制窗口 renderer 只走 IPC（launcher:invoke）；不 fetch :8765
   → 工作台 renderer 加载工作台 origin（通常 :8000）
-  → lifecycle / 分支实例 / settings / maintenance 由 main 编排，经无控制台 Python JSON CLI
-    （vibelution_desktop_entry.py --action lifecycle|branch-instance|launcher-api|resolve-workbench）
+  → lifecycle 启停由 main 直接 spawn `pythonw scripts/web_workbench.py`（无 `--action lifecycle` CLI）
+    settings / maintenance / leftover `:8765` 仍可走无控制台 Python JSON CLI
+    （vibelution_desktop_entry.py --action launcher-api|resolve-workbench|stop-launcher）
   → Python 子进程：Runtime Manager + FastAPI 工作台（packaged/product 不占用 :8765）
   → 关闭桌面壳 / 重启 Launcher 必须先停掉 RM daemon 及其工作台/隔离实例进程树
   → 打开桌面壳时必须先清掉上一轮托管进程树，不能 attach 到已无父进程的 RM/工作台；点启动/重启也会先杀掉遗留工作台再拉当前 checkout

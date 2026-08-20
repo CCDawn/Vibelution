@@ -18,7 +18,8 @@
 | 隔离实例 registry CAS | `src/lifecycle/instanceRegistryStore.ts` + `__fixtures__/instanceRegistryCas.cases.json` | 无 generation 盲写 `instances.json`；stop 在锁外读 spawnPid；改 D2 语义先改计划 I2 再改 fixture |
 | 隔离实例监督 / `ownerLease` | `src/process/isolatedInstanceSupervisor.ts` + `__fixtures__/instanceOwnerLease.cases.json` | observe 再 spawn Python bridge；HTTP 等待另开 180s；hang 回收仍要求 spawnPid 已死；改 D3 语义先改计划 I3 |
 | 生命周期准入 / 冷却 | `src/lifecycle/instanceAdmissionControl.ts` + `instanceAdmissionStore.ts` + `__fixtures__/instanceAdmission.cases.json` | 把冷却写入 `instances.json`；挡 stop/force-stop；在 `main.ts` 再写一套限流；改 burst/冷却先改计划 I4a |
-| main 行 open/close/restart 队列 | `src/lifecycle/mainLine/` + `src/process/workbenchLifecycle.ts` | 在 `main.ts` 再写第二套 join；把准入控制（I4a）或杀树（I5）塞进本增量；改 join 语义先改计划 I4b |
+| main 行 open/close/restart 队列 | `src/lifecycle/mainLine/` + `src/process/workbenchLifecycle.ts` | 在 `main.ts` 再写第二套 join；把准入控制（I4a）塞进队列模块；改 join 语义先改计划 I4b |
+| workbench backend spawn / 健康等待 / 端口释放 | `src/process/workbenchBackend.ts` + `workbenchBackendHealth.ts` + `workbenchBackendRetire.ts` | 产品路径再 spawn `--action lifecycle` / `vibelution_launcher.py`；用 `python.exe`+`detached` 闪控制台；用 `taskkill.exe`；扫描式杀树（I6 Job Object）
 | 托盘 / 单实例 / 退出 | `src/tray/desktopTray.ts` · `src/main.ts` | 与 WinForms 同时显示 NotifyIcon；用 `taskkill` 清 Electron；托盘「Launcher 代码版本」去打工作台 HTTP `/api/launcher/freshness` |
 | `--project` 槽位 | `src/protocol/applyProjectSlot.ts` · `src/appLock.ts` · `src/main.ts` | 把 worktree 当成第二套 DesktopShell；未登记路径静默 start 当前 main |
 | Launcher 控制命令（目标） | `src/ipc.ts` · `src/preload.ts` · 新 IPC host | 控制窗口 `fetch` `:8765` 当产品路径 |
