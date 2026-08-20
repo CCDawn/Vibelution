@@ -25,6 +25,7 @@ type BaseEdgeStub = {
   "data-label-fault"?: string;
   "data-manual-route"?: string;
   "data-orthogonal-rest"?: string;
+  "data-related"?: string;
 };
 
 const baseEdgeCalls: BaseEdgeStub[] = vi.hoisted(() => []);
@@ -42,7 +43,7 @@ vi.mock("@xyflow/react", async () => {
 });
 
 import { WorkflowSemanticEdge, type WorkflowSemanticEdgeData } from "./WorkflowSemanticEdge";
-import { resolveEdgeStroke } from "./workflowCanvasState";
+import { resolveEdgeStroke, resolveRelatedEdgeStroke } from "./workflowCanvasState";
 import { resolveOrthogonalEdgeGeometry } from "./workflowOrthogonalRoute";
 import type { WorkflowEdgeSection } from "../../../product/workflow/workflowCanvasTypes";
 
@@ -202,6 +203,22 @@ describe("WorkflowSemanticEdge render (P1-3)", () => {
     const { stroke } = resolveEdgeStroke("active", "main");
     expect(baseEdgeCalls[0]?.style?.stroke).toBe(stroke);
     expect(baseEdgeCalls[0]?.className).toBe("workflow-edge-active");
+  });
+
+  it("lights related idle edges and keeps the active accent hue", () => {
+    renderEdge({ sections, pathState: "idle", semanticKind: "main", relatedToSelection: true });
+    const relatedIdle = resolveRelatedEdgeStroke("idle", "main", true);
+    expect(baseEdgeCalls[0]?.["data-related"]).toBe("true");
+    expect(baseEdgeCalls[0]?.style?.stroke).toBe(relatedIdle.stroke);
+    expect(baseEdgeCalls[0]?.style?.strokeWidth).toBe(relatedIdle.strokeWidth);
+    expect(relatedIdle.stroke).toContain("accent-cool");
+    expect(relatedIdle.strokeWidth).toBeGreaterThan(resolveEdgeStroke("idle", "main").strokeWidth);
+
+    renderEdge({ sections, pathState: "active", semanticKind: "main", relatedToSelection: true });
+    const relatedActive = resolveRelatedEdgeStroke("active", "main", true);
+    expect(baseEdgeCalls[0]?.style?.stroke).toBe(relatedActive.stroke);
+    expect(relatedActive.stroke).toBe(resolveEdgeStroke("active", "main").stroke);
+    expect(relatedActive.strokeWidth).toBeGreaterThan(resolveEdgeStroke("active", "main").strokeWidth);
   });
 
   it("does not render a label for idle auto edges without always-visible", () => {

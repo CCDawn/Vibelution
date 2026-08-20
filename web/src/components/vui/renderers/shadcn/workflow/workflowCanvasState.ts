@@ -253,3 +253,34 @@ export function resolveEdgeStroke(pathState: WorkflowEdgePathState, semanticKind
     animated: false,
   };
 }
+
+const RELATED_EDGE_MIN_STROKE_WIDTH = 2.5;
+const RELATED_IDLE_OPACITY_BOOST = 40;
+
+/**
+ * Light up edges that touch the selected card. Keep semantic hue (except idle
+ * main, which is too faint to read as "on") and never raise z-index here.
+ */
+export function resolveRelatedEdgeStroke(
+  pathState: WorkflowEdgePathState,
+  semanticKind: WorkflowEdgeSemanticKind,
+  related: boolean,
+): EdgeStrokeVisual {
+  const base = resolveEdgeStroke(pathState, semanticKind);
+  if (!related) return base;
+  const strokeWidth = Math.max(base.strokeWidth, RELATED_EDGE_MIN_STROKE_WIDTH);
+  if (pathState === "idle" && semanticKind === "main") {
+    return { ...base, stroke: "var(--accent-cool, #2563eb)", strokeWidth };
+  }
+  if (pathState === "idle" || pathState === "traversed") {
+    return { ...base, stroke: boostColorMixOpacity(base.stroke, RELATED_IDLE_OPACITY_BOOST), strokeWidth };
+  }
+  return { ...base, strokeWidth };
+}
+
+function boostColorMixOpacity(stroke: string, extraPercent: number): string {
+  return stroke.replace(/(\d+(?:\.\d+)?)%(?=\s*,\s*transparent\s*\))/, (_match, value: string) => {
+    const next = Math.min(100, Number(value) + extraPercent);
+    return `${next}%`;
+  });
+}

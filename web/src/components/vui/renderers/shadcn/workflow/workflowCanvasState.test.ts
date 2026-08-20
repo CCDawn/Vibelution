@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { WorkflowNodeRunStatus } from "../../../product/workflow/workflowCanvasTypes";
-import { nodeStatusLabel, resolveEdgeStroke, resolveNodeStatusVisual } from "./workflowCanvasState";
+import { nodeStatusLabel, resolveEdgeStroke, resolveNodeStatusVisual, resolveRelatedEdgeStroke } from "./workflowCanvasState";
 import { workflowNodeAriaLabel } from "./workflowCanvasAccessibility";
 
 const ALL_STATUSES: WorkflowNodeRunStatus[] = [
@@ -80,5 +80,24 @@ describe("workflowCanvasState visuals", () => {
     expect(stop.stroke).toContain("state-error");
     expect(promote.stroke).toContain("42%");
     expect(rerun.stroke).toContain("40%");
+  });
+
+  it("lights related idle main edges without recoloring an already-active accent", () => {
+    const idle = resolveEdgeStroke("idle", "main");
+    const relatedIdle = resolveRelatedEdgeStroke("idle", "main", true);
+    expect(relatedIdle.stroke).toContain("accent-cool");
+    expect(relatedIdle.strokeWidth).toBeGreaterThan(idle.strokeWidth);
+
+    const promote = resolveEdgeStroke("idle", "promote");
+    const relatedPromote = resolveRelatedEdgeStroke("idle", "promote", true);
+    expect(relatedPromote.stroke).toContain("state-success");
+    expect(relatedPromote.stroke).toContain("82%");
+    expect(relatedPromote.dasharray).toBeUndefined();
+
+    const active = resolveEdgeStroke("active", "main");
+    const relatedActive = resolveRelatedEdgeStroke("active", "main", true);
+    expect(relatedActive.stroke).toBe(active.stroke);
+    expect(relatedActive.strokeWidth).toBeGreaterThan(active.strokeWidth);
+    expect(resolveRelatedEdgeStroke("idle", "main", false)).toEqual(idle);
   });
 });

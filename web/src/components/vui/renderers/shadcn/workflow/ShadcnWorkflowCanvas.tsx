@@ -52,7 +52,7 @@ import { WorkflowStageRegionNode } from "./WorkflowStageRegionNode";
 import { WorkflowStartEndNode } from "./WorkflowStartEndNode";
 import { WorkflowSystemTaskNode } from "./WorkflowSystemTaskNode";
 import { useWorkflowInitialFit } from "./useWorkflowInitialFit";
-import { resolveEdgeStroke } from "./workflowCanvasState";
+import { resolveRelatedEdgeStroke } from "./workflowCanvasState";
 import type { WorkflowCanvasLayoutMode } from "./workflowElkOptions";
 import { shouldRefitOnContainerResize } from "./workflowFitOnResize";
 import {
@@ -75,7 +75,6 @@ import {
   workflowReconnectKeepsEndpoints,
   type WorkflowEdgeAnchors,
 } from "./workflowEdgeAnchors";
-import type { OrthogonalObstacle } from "./workflowOrthogonalRoute";
 import {
   resolveWorkflowManualCardDrag,
   workflowHelperLinesActive,
@@ -83,6 +82,12 @@ import {
   type WorkflowHelperRect,
   type WorkflowHelperSnapResult,
 } from "./workflowHelperLines";
+import {
+  resolveWorkflowNodeFocusCenter,
+  shouldPanWorkflowSelectionIntoView,
+  workflowEdgeTouchesNode,
+} from "./workflowSelectionFocus";
+import type { OrthogonalObstacle } from "./workflowOrthogonalRoute";
 
 export type ShadcnWorkflowCanvasProps = {
   graph: WorkflowLayoutInput;
@@ -247,6 +252,8 @@ function WorkflowCanvasInner({
   const hostRef = useRef<HTMLDivElement | null>(null);
   const userMovedViewportRef = useRef(false);
   const programmaticFitRef = useRef(false);
+  const canvasOriginSelectionRef = useRef<string | null>(null);
+  const lastPannedSelectionRef = useRef<string | null>(null);
   const lastHostSizeRef = useRef({ width: 0, height: 0 });
   const fitCanvas = useCallback((padding: number, duration = 0) => {
     programmaticFitRef.current = true;
@@ -493,24 +500,29 @@ function WorkflowCanvasInner({
       || Object.keys(edgeAnchors).length > 0
     );
 
+  const selectFromCanvas = useCallback((id: string | null) => {
+    canvasOriginSelectionRef.current = id;
+    onSelectNode?.(id);
+  }, [onSelectNode]);
+
   // P1-5: measured node types report rendered DOM sizes back to the layout
   // hook so the second pass of the layout uses real geometry.
   const measuredNodeTypes: NodeTypes = useMemo(
     () => ({
       stageRegion: wrapNodeForMeasurement(WorkflowStageRegionNode, layout.reportMeasuredSize),
-      agentTask: wrapInteractiveNodeForMeasurement(WorkflowAgentTaskNode, layout.reportMeasuredSize, onSelectNode),
-      humanGate: wrapInteractiveNodeForMeasurement(WorkflowHumanGateNode, layout.reportMeasuredSize, onSelectNode),
-      systemTask: wrapInteractiveNodeForMeasurement(WorkflowSystemTaskNode, layout.reportMeasuredSize, onSelectNode),
-      decision: wrapInteractiveNodeForMeasurement(WorkflowDecisionNode, layout.reportMeasuredSize, onSelectNode),
-      startEnd: wrapInteractiveNodeForMeasurement(WorkflowStartEndNode, layout.reportMeasuredSize, onSelectNode),
+      agentTask: wrapInteractiveNodeForMeasurement(WorkflowAgentTaskNode, layout.reportMeasuredSize, selectFromCanvas),
+      humanGate: wrapInteractiveNodeForMeasurement(WorkflowHumanGateNode, layout.reportMeasuredSize, selectFromCanvas),
+      systemTask: wrapInteractiveNodeForMeasurement(WorkflowSystemTaskNode, layout.reportMeasuredSize, selectFromCanvas),
+      decision: wrapInteractiveNodeForMeasurement(WorkflowDecisionNode, layout.reportMeasuredSize, selectFromCanvas),
+      startEnd: wrapInteractiveNodeForMeasurement(WorkflowStartEndNode, layout.reportMeasuredSize, selectFromCanvas),
     }),
-    [layout.reportMeasuredSize, onSelectNode],
+    [layout.reportMeasuredSize, selectFromCanvas],
   );
 
   // Fit protocol: fit exactly once when the first layout commits AND the committed
   // nodes have entered React Flow internals. Never re-fit for runtime-only updates
   // (status/selection/run events). `fitAll` from controls stays explicit.
-  useWorkflowInitialFit({
+  const { pendingInitialFit } = useWorkflowInitialFit({
     initialFitRevision: layout.initialFitRevision,
     layoutRevision: layout.layoutRevision,
     structureKey: layout.structureKey,
@@ -524,6 +536,7 @@ function WorkflowCanvasInner({
   useEffect(() => {
     userMovedViewportRef.current = false;
     lastHostSizeRef.current = { width: 0, height: 0 };
+    lastPannedSelectionRef.current = null;
   }, [layout.structureKey]);
 
   useEffect(() => {
@@ -708,47 +721,81 @@ function WorkflowCanvasInner({
 
   const edges: Edge[] = useMemo(
     () =>
-      layout.edges.map((edge) => ({
-        id: edge.id,
-        source: edge.source,
-        target: edge.target,
-        sourceHandle: edge.sourceHandle,
-        targetHandle: edge.targetHandle,
-        type: "workflowSemantic",
-        animated: edge.pathState === "active" || edge.pathState === "attention",
-        markerEnd: {
-          type: MarkerType.ArrowClosed,
-          width: 16,
-          height: 16,
-          color: resolveEdgeStroke(edge.pathState, edge.semanticKind).stroke,
-        },
-        data: {
-          label: edge.label,
-          semanticKind: edge.semanticKind,
-          pathState: edge.pathState,
-          labelAlwaysVisible: edge.labelAlwaysVisible,
-          gateKind: edge.gateKind,
-          sections: edge.sections,
-          labelBounds: edge.labelBounds,
-          manualRouteActive: manualRouteActive || Boolean(edgeAnchors[edge.id]),
-          manualDragging: draggingNodeId !== null,
-          obstacleRects,
-        },
-        zIndex: 1,
-      })),
-    [draggingNodeId, edgeAnchors, layout.edges, manualRouteActive, obstacleRects],
+      layout.edges.map((edge) => {
+        const relatedToSelection = workflowEdgeTouchesNode(edge.source, edge.target, selectedNodeId);
+        const stroke = resolveRelatedEdgeStroke(edge.pathState, edge.semanticKind, relatedToSelection);
+        return {
+          id: edge.id,
+          source: edge.source,
+          target: edge.target,
+          sourceHandle: edge.sourceHandle,
+          targetHandle: edge.targetHandle,
+          type: "workflowSemantic",
+          animated: edge.pathState === "active" || edge.pathState === "attention",
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            width: 16,
+            height: 16,
+            color: stroke.stroke,
+          },
+          data: {
+            label: edge.label,
+            semanticKind: edge.semanticKind,
+            pathState: edge.pathState,
+            labelAlwaysVisible: edge.labelAlwaysVisible,
+            gateKind: edge.gateKind,
+            sections: edge.sections,
+            labelBounds: edge.labelBounds,
+            manualRouteActive: manualRouteActive || Boolean(edgeAnchors[edge.id]),
+            manualDragging: draggingNodeId !== null,
+            obstacleRects,
+            relatedToSelection,
+          },
+          zIndex: 1,
+        };
+      }),
+    [draggingNodeId, edgeAnchors, layout.edges, manualRouteActive, obstacleRects, selectedNodeId],
   );
+
+  useEffect(() => {
+    if (!selectedNodeId) {
+      lastPannedSelectionRef.current = null;
+      return;
+    }
+    if (!shouldPanWorkflowSelectionIntoView({
+      selectedNodeId,
+      canvasOriginNodeId: canvasOriginSelectionRef.current,
+      lastPannedNodeId: lastPannedSelectionRef.current,
+      pendingInitialFit,
+      nodesInitialized,
+    })) {
+      return;
+    }
+    const node = rf.getNode(selectedNodeId) ?? nodes.find((item) => item.id === selectedNodeId);
+    if (!node) return;
+    const getNode = (id: string) => rf.getNode(id) ?? nodes.find((item) => item.id === id);
+    const center = resolveWorkflowNodeFocusCenter(node, getNode);
+    programmaticFitRef.current = true;
+    userMovedViewportRef.current = true;
+    void Promise.resolve(rf.setCenter(center.x, center.y, {
+      zoom: rf.getZoom(),
+      duration: 220,
+    })).finally(() => {
+      programmaticFitRef.current = false;
+    });
+    lastPannedSelectionRef.current = selectedNodeId;
+  }, [nodes, nodesInitialized, pendingInitialFit, rf, selectedNodeId]);
 
   const onNodeClick = useCallback(
     (_event: unknown, node: Node) => {
-      if (node.type !== "stageRegion") onSelectNode?.(node.id);
+      if (node.type !== "stageRegion") selectFromCanvas(node.id);
     },
-    [onSelectNode],
+    [selectFromCanvas],
   );
 
   const onPaneClick = useCallback(() => {
-    onSelectNode?.(null);
-  }, [onSelectNode]);
+    selectFromCanvas(null);
+  }, [selectFromCanvas]);
 
   const edgeReconnectEnabled = manualLayoutEnabled && !manualLayoutLocked;
 

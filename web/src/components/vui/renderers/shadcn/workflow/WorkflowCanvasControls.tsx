@@ -1,6 +1,8 @@
 import { useReactFlow } from "@xyflow/react";
 import { Focus, LayoutDashboard, Lock, Maximize2, Minus, Plus, Undo2, Unlock } from "lucide-react";
 
+import { resolveWorkflowNodeFocusCenter } from "./workflowSelectionFocus";
+
 export type WorkflowCanvasControlsProps = {
   runtimeCurrentNodeIds?: string[];
   onFitAll?: () => void;
@@ -42,18 +44,7 @@ export function WorkflowCanvasControls({
       fitAll();
       return;
     }
-    const w = typeof node.width === "number" ? node.width : 240;
-    const h = typeof node.height === "number" ? node.height : 88;
-    // Account for parent stage offset when parented.
-    let x = node.position.x + w / 2;
-    let y = node.position.y + h / 2;
-    if (node.parentId) {
-      const parent = getNode(node.parentId);
-      if (parent) {
-        x += parent.position.x;
-        y += parent.position.y;
-      }
-    }
+    const { x, y } = resolveWorkflowNodeFocusCenter(node, getNode);
     void setCenter(x, y, { zoom: 1.05, duration: 220 });
     onFocusCurrent?.();
   };

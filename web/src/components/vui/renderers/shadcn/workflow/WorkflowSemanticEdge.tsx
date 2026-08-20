@@ -24,7 +24,7 @@ import type {
   WorkflowEdgeSection,
   WorkflowLabelBounds,
 } from "../../../product/workflow/workflowCanvasTypes";
-import { resolveEdgeStroke } from "./workflowCanvasState";
+import { resolveRelatedEdgeStroke } from "./workflowCanvasState";
 import { resolveEdgeLabelSpec } from "./workflowEdgeLabelGeometry";
 import {
   analyzeEdgeSections,
@@ -59,6 +59,8 @@ export type WorkflowSemanticEdgeData = {
   manualDragging?: boolean;
   /** Task-card boxes used to skirt blockers after a manual move. */
   obstacleRects?: OrthogonalObstacle[];
+  /** True when this edge's source or target is the selected observer card. */
+  relatedToSelection?: boolean;
 };
 
 export function WorkflowSemanticEdge({
@@ -82,7 +84,8 @@ export function WorkflowSemanticEdge({
   const label = String(edgeData?.label ?? "");
   const always = Boolean(edgeData?.labelAlwaysVisible);
   const gateKind = String(edgeData?.gateKind ?? "");
-  const stroke = resolveEdgeStroke(pathState, semanticKind);
+  const relatedToSelection = Boolean(edgeData?.relatedToSelection);
+  const stroke = resolveRelatedEdgeStroke(pathState, semanticKind, relatedToSelection);
   const sourceSide = sourcePosition as WorkflowEdgeTerminalSide;
   const targetSide = targetPosition as WorkflowEdgeTerminalSide;
   const sections = edgeData?.sections;
@@ -169,6 +172,7 @@ export function WorkflowSemanticEdge({
         data-label-fault={labelFault ? "true" : undefined}
         data-manual-route={manualGeometry ? "true" : undefined}
         data-orthogonal-rest={restGeometry ? "true" : undefined}
+        data-related={relatedToSelection ? "true" : undefined}
         style={{
           ...style,
           stroke: stroke.stroke,

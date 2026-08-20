@@ -21,6 +21,7 @@ const fakeInstance = vi.hoisted(() => ({
   zoomIn: vi.fn(),
   zoomOut: vi.fn(),
   setCenter: vi.fn(),
+  getZoom: vi.fn(() => 1),
   getNode: vi.fn(() => null),
 }));
 
@@ -62,7 +63,7 @@ vi.mock("./useWorkflowAutoLayout", () => ({
 }));
 
 vi.mock("./useWorkflowInitialFit", () => ({
-  useWorkflowInitialFit: () => ({ pendingInitialFit: false }),
+  useWorkflowInitialFit: vi.fn(() => ({ pendingInitialFit: false })),
 }));
 
 function emptyGraph(): WorkflowLayoutInput {
@@ -116,10 +117,22 @@ function sampleGraph(): WorkflowLayoutInput {
   };
 }
 
-function idleLayoutHook(nodes: WorkflowLayoutNode[] = []) {
+function idleLayoutHook(
+  nodes: WorkflowLayoutNode[] = [],
+  edges: Array<{
+    id: string;
+    source: string;
+    target: string;
+    label: string;
+    semanticKind: "main";
+    pathState: "idle" | "active";
+    labelAlwaysVisible: boolean;
+    sections: [];
+  }> = [],
+) {
   return {
     nodes,
-    edges: [],
+    edges,
     layoutRevision: 1,
     degraded: null,
     initialFitRevision: null,
@@ -128,6 +141,31 @@ function idleLayoutHook(nodes: WorkflowLayoutNode[] = []) {
     fitAll: vi.fn(),
     reportMeasuredSize: vi.fn(),
   };
+}
+
+function sampleLayoutEdges() {
+  return [
+    {
+      id: "e-protocol-review",
+      source: "protocol_design",
+      target: "review",
+      label: "",
+      semanticKind: "main" as const,
+      pathState: "idle" as const,
+      labelAlwaysVisible: false,
+      sections: [] as [],
+    },
+    {
+      id: "e-review-end",
+      source: "review",
+      target: "end",
+      label: "",
+      semanticKind: "main" as const,
+      pathState: "idle" as const,
+      labelAlwaysVisible: false,
+      sections: [] as [],
+    },
+  ];
 }
 
 describe("ShadcnWorkflowCanvas structure (P1-1)", () => {
@@ -142,6 +180,9 @@ describe("ShadcnWorkflowCanvas structure (P1-1)", () => {
   afterEach(() => {
     rfCalls.length = 0;
     vi.clearAllMocks();
+    fakeInstance.getZoom.mockReturnValue(1);
+    vi.mocked(useWorkflowInitialFit).mockReturnValue({ pendingInitialFit: false });
+    vi.mocked(useWorkflowAutoLayout).mockReturnValue(idleLayoutHook());
     vi.unstubAllGlobals();
   });
 
@@ -313,6 +354,139 @@ describe("ShadcnWorkflowCanvas structure (P1-1)", () => {
       root.unmount();
       container.remove();
     });
+  });
+
+  it("marks only incident edges as related to the selected card", async () => {
+    vi.mocked(useWorkflowAutoLayout).mockReturnValue(
+      idleLayoutHook(sampleLayoutNodes(), sampleLayoutEdges()),
+    );
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root: Root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <ShadcnWorkflowCanvas
+          graph={sampleGraph()}
+          selectedNodeId="protocol_design"
+          layoutMode="serpentine"
+        />,
+      );
+    });
+
+    const edges = rfCalls[0].edges as Array<{
+      id: string;
+      data?: { relatedToSelection?: boolean };
+      markerEnd?: { color?: string };
+    }>;
+    expect(edges.find((edge) => edge.id === "e-protocol-review")?.data?.relatedToSelection).toBe(true);
+    expect(edges.find((edge) => edge.id === "e-review-end")?.data?.relatedToSelection).toBe(false);
+    expect(edges.find((edge) => edge.id === "e-protocol-review")?.markerEnd?.color).toContain("accent-cool");
+
+    await act(async () => {
+      root.unmount();
+      container.remove();
+    });
+    vi.mocked(useWorkflowAutoLayout).mockReturnValue(idleLayoutHook());
+  });
+
+  it("pans an externally selected card into view after the initial fit", async () => {
+    fakeInstance.getZoom.mockReturnValue(0.9);
+    vi.mocked(useWorkflowAutoLayout).mockReturnValue(idleLayoutHook(sampleLayoutNodes()));
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root: Root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <ShadcnWorkflowCanvas
+          graph={sampleGraph()}
+          selectedNodeId="protocol_design"
+          layoutMode="serpentine"
+        />,
+      );
+    });
+
+    expect(fakeInstance.setCenter).toHaveBeenCalledWith(
+      190,
+      116,
+      expect.objectContaining({ zoom: 0.9, duration: 220 }),
+    );
+
+    await act(async () => {
+      root.unmount();
+      container.remove();
+    });
+    vi.mocked(useWorkflowAutoLayout).mockReturnValue(idleLayoutHook());
+  });
+
+  it("does not pan while the first fit is still pending", async () => {
+    vi.mocked(useWorkflowInitialFit).mockReturnValue({ pendingInitialFit: true });
+    vi.mocked(useWorkflowAutoLayout).mockReturnValue(idleLayoutHook(sampleLayoutNodes()));
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root: Root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <ShadcnWorkflowCanvas
+          graph={sampleGraph()}
+          selectedNodeId="protocol_design"
+          layoutMode="serpentine"
+        />,
+      );
+    });
+
+    expect(fakeInstance.setCenter).not.toHaveBeenCalled();
+
+    await act(async () => {
+      root.unmount();
+      container.remove();
+    });
+    vi.mocked(useWorkflowInitialFit).mockReturnValue({ pendingInitialFit: false });
+    vi.mocked(useWorkflowAutoLayout).mockReturnValue(idleLayoutHook());
+  });
+
+  it("does not pan when the user clicked a card on the canvas", async () => {
+    vi.mocked(useWorkflowAutoLayout).mockReturnValue(idleLayoutHook(sampleLayoutNodes()));
+    const onSelectNode = vi.fn();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root: Root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <ShadcnWorkflowCanvas
+          graph={sampleGraph()}
+          selectedNodeId={null}
+          onSelectNode={onSelectNode}
+          layoutMode="serpentine"
+        />,
+      );
+    });
+
+    const rfProps = rfCalls[0];
+    (rfProps.onNodeClick as (event: unknown, node: { id: string; type?: string }) => void)(
+      {},
+      { id: "protocol_design", type: "agentTask" },
+    );
+    expect(onSelectNode).toHaveBeenCalledWith("protocol_design");
+    fakeInstance.setCenter.mockClear();
+
+    await act(async () => {
+      root.render(
+        <ShadcnWorkflowCanvas
+          graph={sampleGraph()}
+          selectedNodeId="protocol_design"
+          onSelectNode={onSelectNode}
+          layoutMode="serpentine"
+        />,
+      );
+    });
+
+    expect(fakeInstance.setCenter).not.toHaveBeenCalled();
+
+    await act(async () => {
+      root.unmount();
+      container.remove();
+    });
+    vi.mocked(useWorkflowAutoLayout).mockReturnValue(idleLayoutHook());
   });
 
   it("does not expose React Flow selection-change callbacks that can replay stale nodes", async () => {

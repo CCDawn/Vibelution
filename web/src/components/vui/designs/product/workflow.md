@@ -81,7 +81,7 @@ pathState：`idle | traversed | active | attention | danger` — 仅由 nodeRuns
 - 自动布局边由 `workflowElkEdgePath.sectionsToSvgPath` 从引擎 `WorkflowEdgeSection[]` 直接生成（绝对坐标正交 section，无重复与虚假连接线）；生产源码禁止 `getSmoothStepPath`。手动布局激活后改用下方「手动布局与智能连线 v2」契约，不覆盖 ELK 的初始/自动整理结果。
 - 标签锚点由引擎 `labelBounds`（中心）决定，缺失时不渲染标签；三阶段统一 viewport，跨阶段边同坐标空间。蛇形跨阶段标签在 **layout composer** 里把 `labelBounds` 放到竖线右侧（回路标签放到横轨上方），禁止渲染后再用 CSS transform 挪开。
 - 画布短名：定义协议仍可保留 `Knowledge Package`；`resolveEdgeLabelSpec` 映射为「知识包」并用中英混排字宽计量，避免把 ASCII 当 CJK 截成 `Knowledge Pa…`。tooltip `title` 保留原文。
-- z-index：自动阶段区 `0` < edge `1` < task node `2`。蛇形模式不渲染阶段标签节点。**边不浮在任务节点上方**，选中/hover 不抬升 zIndex，用描边加粗与变色表达。
+- z-index：自动阶段区 `0` < edge `1` < task node `2`。蛇形模式不渲染阶段标签节点。**边不浮在任务节点上方**，选中/hover 不抬升 zIndex，用描边加粗与变色表达。选中卡片只点亮碰到该卡的入出边，不压暗其余边。
 - 标签契约：`workflowEdgeLabelGeometry` 是唯一几何权威——布局 spacer 尺寸与渲染 label box 完全一致（同宽高、同截断策略）；长标签截断后矩形仍参与布局；禁止渲染后 transform 移动。标签胶囊用不透明 panel 底 + workspace halo 盖住穿过的线。
 
 ### 布局与 fit 协议（T4 + 两级布局 2026-08-08 + 外层真实 ELK 2026-08-08b）
@@ -113,6 +113,8 @@ pathState：`idle | traversed | active | attention | danger` — 仅由 nodeRuns
 - `stage-columns` 默认不可拖；`serpentine` 允许任务节点做浏览器本地展示调整，仍不可改运行图拓扑。解锁时可把箭头改挂到同一张卡片的磁铁，不可接到另一张卡片。
 - MiniMap 默认关闭；长流程由生产工作台显式 `showMiniMap` 开启
 - 单击节点 → 选中；点空白 → 取消；键盘可聚焦节点（aria-label 含名称/类型/状态）
+- 选中卡片时点亮其入边和出边：描边加粗/提亮（idle 主路径改用 `--accent-cool`），箭头颜色跟描边；不抬 `zIndex`，也不因此展开标签
+- 状态栏、Inspector 或 URL `node=` 选中时，等首次 fit 结束后把该卡平移进视口（保持当前缩放）；画布上点击同一张卡不平移
 - 控件：放大、缩小、适应全部、定位当前工作
 - loading/empty：由调用方 `VStateSurface` / `VEmptyState` 处理
 - **页面壳**：`VCanvasWorkbenchPage`，`layoutId` = `WORKBENCH_LAYOUT_IDS.researchFlow`
