@@ -60,12 +60,40 @@ def test_inner_v_is_clipped_to_hole_not_fully_inset() -> None:
     assert not render._evenodd(np.array([[24.0]]), np.array([[20.44]]), render.INNER)[0, 0]
 
 
-def test_vibelution_ico_includes_taskbar_and_large_sizes() -> None:
+def _ico_png_frame(path: Path, size: int) -> Image.Image:
+    from io import BytesIO
+
+    data = path.read_bytes()
+    _reserved, itype, count = unpack("<HHH", data[:6])
+    assert itype == 1
+    offset = 6
+    for _ in range(count):
+        width, height, _colors, _reserved2, _planes, _bitcount, nbytes, blob_off = unpack(
+            "<BBBBHHII", data[offset : offset + 16]
+        )
+        width = width or 256
+        height = height or 256
+        if width == size and height == size:
+            blob = data[blob_off : blob_off + nbytes]
+            return Image.open(BytesIO(blob)).convert("RGBA")
+        offset += 16
+    raise AssertionError(f"missing {size}x{size} ICO frame")
+
+
+def test_vibelution_ico_includes_taskbar_and_dpi_sizes() -> None:
     sizes = set(_ico_sizes(ICO))
-    assert (16, 16) in sizes
-    assert (24, 24) in sizes
-    assert (32, 32) in sizes
-    assert (256, 256) in sizes
+    for edge in (16, 20, 24, 28, 30, 32, 36, 40, 48, 64, 72, 256):
+        assert (edge, edge) in sizes
+
+
+def test_taskbar_frames_keep_coverage_antialias() -> None:
+    frame = _ico_png_frame(ICO, 24)
+    assert frame.size == (24, 24)
+    alphas = np.array(frame)[:, :, 3]
+    mid = ((alphas > 8) & (alphas < 247)).sum()
+    assert int(np.unique(alphas).size) > 16
+    assert int(mid) > 80
+    assert int(alphas[0, 0]) == 0
 
 
 def test_icon_png_keeps_transparent_field_and_solid_mark() -> None:
