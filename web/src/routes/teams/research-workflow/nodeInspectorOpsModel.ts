@@ -118,8 +118,11 @@ export function nodeInspectorStatus(input: {
   if (status === "running" || status === "in_flight") {
     return { tone: "accent", label: "运行中" };
   }
-  if (input.runtimeCurrent && (status === "" || status === "pending" || status === "ready" || status === "queued")) {
+  if (input.runtimeCurrent && (status === "" || status === "pending" || status === "ready" || status === "queued" || status === "created")) {
     return { tone: "neutral", label: "待启动" };
+  }
+  if (status === "created" || status === "pending") {
+    return { tone: "neutral", label: "未开始" };
   }
   if (input.budgetWarn) {
     return { tone: "warning", label: "将尽" };

@@ -45,24 +45,30 @@ def evaluate_source_finding(
             first_meeting_id = str(state.get("firstMeetingId") or "")
             if open_ids:
                 detail = (
-                    f"首轮假说讨论 {open_ids[-1]} 尚未 closed；"
-                    "首轮搜集范围只能来自讨论闭环后的搜集决策"
+                    f"假说评审 {open_ids[-1]} 尚未闭环；"
+                    "首轮搜集范围只能来自评审闭环时的搜集决策"
                 )
+                title = "假说评审尚未闭环"
+                remediation_label = "前往确认并结束当前评审轮"
             elif first_meeting_id:
                 detail = (
-                    f"首轮假说讨论 {first_meeting_id} 已 closed，但决策未携带有效 "
-                    "searchEnvelope；首轮搜集范围只能来自讨论决策"
+                    f"假说评审已全部闭环，但没有任何一轮决策携带资料缺口请求；"
+                    "首轮搜集范围只能来自评审的证据请求决策"
                 )
+                title = "评审缺少资料缺口请求"
+                remediation_label = "再开一轮评审，让团队提出资料缺口（证据请求）"
             else:
-                detail = "首轮假说讨论尚未开启；首轮搜集范围只能来自讨论决策"
+                detail = "假说评审尚未开启；首轮搜集范围只能来自评审的证据请求决策"
+                title = "假说评审尚未开启"
+                remediation_label = "开启首轮假说评审"
             blockers.append(
                 blocker(
                     "hypothesis_first_meeting_open",
-                    "首轮假说讨论未闭环",
+                    title,
                     detail,
                     category="evidence_insufficient",
                     remediation_kind=RemediationKind.RESOLVE_HUMAN,
-                    remediation_label="前往闭环首轮假说讨论",
+                    remediation_label=remediation_label,
                 )
             )
     return DomainVerdict(

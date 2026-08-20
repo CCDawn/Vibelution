@@ -606,6 +606,14 @@ def test_end_to_end_fixture_chain_with_ledger_audit(
             finding = _evaluate(runtime, team_id, "source_finding")
             assert not finding.ready
             assert "hypothesis_first_meeting_open" in _blocker_codes(finding)
+            meeting_blocker = next(
+                blocker
+                for blocker in finding.blockers
+                if blocker.code == "hypothesis_first_meeting_open"
+            )
+            assert meeting_blocker.remediation is not None
+            assert "开启首轮假说评审" in meeting_blocker.remediation.label
+            assert "尚未开启" in meeting_blocker.title or "未闭环" in meeting_blocker.title
             design = _evaluate(runtime, team_id, "hypothesis_design")
             design_codes = _blocker_codes(design)
             assert "hypothesis_round_unconverged" in design_codes
