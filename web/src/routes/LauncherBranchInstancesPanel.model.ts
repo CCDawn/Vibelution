@@ -103,6 +103,11 @@ export function hasActiveLifecyclePending(pending?: LifecyclePendingInput): bool
   return Boolean(pending.instanceId || pending.instanceIds?.length);
 }
 
+/** Double-click guard may stay only while this row is actually in a lifecycle transition. */
+export function shouldHoldOpenClickGuard(state: InstanceRuntimeState): boolean {
+  return state === "starting" || state === "restarting" || state === "stopping";
+}
+
 export function lifecycleIntentRejectMessage(
   reason: LifecycleIntentRejectReason,
   isZh: boolean,

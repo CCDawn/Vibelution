@@ -27,6 +27,7 @@ import {
   hasActiveLifecyclePending,
   lifecycleIntentRejectMessage,
   shouldApplyLifecycleMutationFeedback,
+  shouldHoldOpenClickGuard,
   settleLifecycleIntentTable,
 } from "./LauncherBranchInstancesPanel.model";
 
@@ -105,7 +106,7 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain('variant="primary"');
     expect(panelSource).toContain('variant="danger"');
     expect(panelSource).toContain("isPending={state === \"starting\" || state === \"restarting\"}");
-    expect(panelSource).toContain("clickGuardRef");
+    expect(panelSource).toContain("openClickGuardsRef");
     expect(panelSource).toContain("kind === \"startable\" && state === \"stopped\"");
     expect(panelSource).toContain("resizable");
     expect(panelSource).not.toMatch(/from\s+["']@heroui\/react["']/);
@@ -665,8 +666,21 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(panelSource).toContain("isDisabled={startBusy}");
     expect(panelSource).toContain("isDisabled={stopBusy}");
     expect(panelSource).not.toContain("isDisabled={lifecyclePending || inFlight}");
-    expect(panelSource).toContain("if (clickGuardRef.current || startBusy)");
+    expect(panelSource).toContain("if (startBusy || openClickGuardsRef.current.has(item.id))");
+    expect(panelSource).not.toContain("if (clickGuardRef.current || startBusy)");
     expect(panelSource).not.toContain("if (clickGuardRef.current || lifecyclePending || inFlight)");
+  });
+
+  it("releases the Open window click guard when the row is not actually starting", () => {
+    expect(shouldHoldOpenClickGuard("starting")).toBe(true);
+    expect(shouldHoldOpenClickGuard("restarting")).toBe(true);
+    expect(shouldHoldOpenClickGuard("stopping")).toBe(true);
+    expect(shouldHoldOpenClickGuard("stopped")).toBe(false);
+    expect(shouldHoldOpenClickGuard("failed")).toBe(false);
+    expect(shouldHoldOpenClickGuard("running")).toBe(false);
+    expect(panelSource).toContain("shouldHoldOpenClickGuard(instanceRuntimeState(item, pendingOperation))");
+    expect(panelSource).not.toContain("if (!lifecyclePending && !hasActiveLifecyclePending(pendingOperation))");
+    expect(panelSource).toContain("openClickGuardsRef.current.delete(item.id)");
   });
 
   it("treats an empty intent table as not pending so Open window can retry after a rejected start", () => {
@@ -689,7 +703,7 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(hasActiveLifecyclePending(settleLifecycleIntentTable({}, [startable]))).toBe(false);
     expect(lifecycleIntentRejectMessage("duplicate", true)).toBe("启动已在进行中");
     expect(lifecycleIntentRejectMessage("blocked", false)).toBe("Wait for the current operation to finish before starting");
-    expect(panelSource).toContain("hasActiveLifecyclePending(pendingOperation)");
+    expect(panelSource).toContain("shouldHoldOpenClickGuard");
     expect(panelSource).toContain("outcome.accepted === false");
     expect(panelSource).toContain("lifecycleIntentRejectMessage");
   });
