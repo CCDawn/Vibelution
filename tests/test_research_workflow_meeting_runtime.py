@@ -212,6 +212,31 @@ def test_review_prompt_includes_selected_candidate_content(tmp_path, monkeypatch
     assert all("算术基本定理保证唯一分解" in prompt for prompt in prompts)
 
 
+def test_review_prompt_teaches_evidence_request_marker(tmp_path, monkeypatch):
+    """Reviews must know the EVIDENCE_REQUEST format: the closure digest only
+    extracts requests from that marker, and an untaught format wedges the
+    first source-collection round (no envelope -> collectionReady stays
+    false forever)."""
+    team_id, agents = _team_with_room(tmp_path, monkeypatch)
+    prompts: list[str] = []
+
+    def capture_runner(participant, prompt, context):
+        prompts.append(str(prompt))
+        return {"status": "completed", "raw_output": "pass", "summary": "pass"}
+
+    agent_ids = list(agents.values())
+    meeting_runtime.open_hypothesis_review_meeting(
+        team_id,
+        _selection_payload(agent_ids),
+        agent_runner=capture_runner,
+        background=False,
+    )
+
+    assert prompts
+    assert all("EVIDENCE_REQUEST" in prompt for prompt in prompts)
+    assert all('"searchEnvelope"' in prompt for prompt in prompts)
+
+
 def test_review_prompt_keeps_all_candidate_lines_beyond_generic_topic_cap(
     tmp_path, monkeypatch
 ):
