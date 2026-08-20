@@ -269,3 +269,97 @@ def test_keyword_split_is_bounded_and_deduplicated():
     assert len(keywords) <= request_tools._MAX_KEYWORDS
     assert len(set(keywords)) == len(keywords)
     assert all(len(item) <= request_tools._MAX_KEYWORD_LENGTH for item in keywords)
+
+
+def test_request_status_through_real_facade_and_scope(tmp_path, monkeypatch):
+    """Composition test mirroring the hypothesis-first e2e pattern.
+
+    Only the task-anchoring seams (project task binding, workflow run lookup)
+    and the data-processing run layer are faked; the scope seed, envelope
+    resolution, facade normalization, and scope-hash idempotency all run the
+    real production code. SCI-099 is not in the frozen theme registry, so the
+    real resolution takes the dev-theme fallback without touching storage.
+    """
+
+    from core.web.services import data_processing_service
+    from core.web.services.team_workflow.source_collection import runs as collection_runs
+
+    monkeypatch.setenv("VIBELUTION_DATA_HOME", str(tmp_path))
+
+    def fake_binding(workflow_service, **kwargs):
+        return {
+            "task": {
+                "taskId": "task-9",
+                "taskKind": "hypothesis_design",
+                "workflowRunId": "run-9",
+            }
+        }
+
+    class FakeRunService:
+        def get_run(self, run_id: str) -> dict:
+            assert run_id == "run-9"
+            return {"runId": "run-9", "teamId": "research-team", "questionId": "SCI-099"}
+
+    monkeypatch.setattr(
+        "tools.challenge_cup_operations_tools._project_task_binding", fake_binding
+    )
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_runtime.get_research_workflow_runtime_service",
+        lambda: FakeRunService(),
+    )
+
+    created: list[dict] = []
+
+    def fake_start(team_id, payload=None):
+        created.append(dict(payload or {}))
+        return {"runId": f"dprun-kr-{len(created)}", "status": "accepted"}
+
+    def fake_list_runs(*, limit=200, metadata_filters=None, scope_filters=None, **_):
+        scope_hash = str((scope_filters or {}).get("researchScopeHash") or "")
+        runs = [
+            {
+                "runId": f"dprun-kr-{index + 1}",
+                "createdAt": "2026-08-21T00:00:00Z",
+                "updatedAt": "2026-08-21T00:00:00Z",
+            }
+            for index, item in enumerate(created)
+            if not scope_hash
+            or str(item.get("scope", {}).get("researchScopeHash") or "") == scope_hash
+        ]
+        return {"runs": runs}
+
+    def fake_summary(team_id, run_id=""):
+        return {
+            "status": "accepted",
+            "runId": run_id,
+            "run": {"runId": run_id, "status": "accepted"},
+            "runStatus": {"status": "accepted", "currentPhase": "queued"},
+            "summary": {"recordCount": 0, "sourceCandidateCount": 0},
+            "stageCards": [],
+        }
+
+    monkeypatch.setattr(collection_runs, "start_source_collection_run", fake_start)
+    monkeypatch.setattr(collection_runs, "get_source_collection_summary", fake_summary)
+    monkeypatch.setattr(data_processing_service, "list_processing_runs", fake_list_runs)
+
+    first = _parse(
+        request_tools.research_knowledge_request_tool(action="request", keywords="spike coding")
+    )
+    second = _parse(
+        request_tools.research_knowledge_request_tool(action="request", keywords="spike coding")
+    )
+    status = _parse(request_tools.research_knowledge_request_tool(action="status"))
+
+    assert first["ok"] is True
+    assert first["collection"]["created"] is True
+    assert first["scope"]["questionId"] == "SCI-099"
+    assert first["scope"]["mode"] == "dev"
+    assert first["scope"]["themeId"].startswith("dev-")
+    assert second["ok"] is True
+    assert second["collection"]["idempotent"] is True
+    assert second["collection"]["runId"] == first["collection"]["runId"]
+    assert len(created) == 1
+    assert created[0]["scope"]["researchScopeHash"] == first["scope"]["scopeHash"]
+    assert status["ok"] is True
+    assert status["collection"]["facadeStatus"] == "ok"
+    assert status["collection"]["runId"] == first["collection"]["runId"]
