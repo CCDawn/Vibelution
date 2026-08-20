@@ -289,11 +289,14 @@ export function pendingLifecycleReflected(
   pending: InstancePendingOperation,
 ): boolean {
   const state = item.runtime.lifecycleState;
+  if (pending.operation === "start") {
+    // Start is done once the instance is no longer closed. Do not require a
+    // baseline change: opening a window from partial recycles start but stays
+    // partial until the window appears, which used to freeze the row on 正在启动.
+    return state !== "closed";
+  }
   if (pending.baselineLifecycleState) {
     return state !== pending.baselineLifecycleState;
-  }
-  if (pending.operation === "start") {
-    return state !== "closed";
   }
   if (pending.operation === "stop") {
     return state === "closed" || state === "stopping" || state === "error";

@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 
 import { pythonBridgeEnv } from "./pythonBridgeEnv.js";
 import { resolveLauncherRuntimeDir, resolveRuntimeManagerDir } from "../lifecycle/projectStoragePaths.js";
-import { probeTcpConnect } from "../lifecycle/mainLine/observation.js";
+import { observeMainLineWorkbench, probeTcpConnect } from "../lifecycle/mainLine/observation.js";
 import { waitForBackendHealthy } from "./workbenchBackendHealth.js";
 import {
   collectRegisteredHandles,
@@ -166,6 +166,31 @@ export function readLauncherStateFile(path: string): WorkbenchBackendState {
   } catch {
     return {};
   }
+}
+
+export async function mainLineBackendIsReachable(
+  workspaceRoot: string,
+  options?: {
+    readState?: () => WorkbenchBackendState;
+    connect?: (port: number, host: string) => Promise<boolean>;
+    pidAlive?: (pid: number) => boolean;
+  }
+): Promise<boolean> {
+  const state = (options?.readState ?? (() => readLauncherStateFile(launcherStatePath(workspaceRoot))))();
+  const port = Number(state.backendPort || state.port || 0);
+  const host = String(state.host || DEFAULT_WORKBENCH_HOST);
+  const pid = Number(state.backendPid || 0);
+  const observation = await observeMainLineWorkbench({
+    port,
+    host,
+    knownPids: [pid],
+    desiredState: "open",
+    frontendReady: true,
+    windowOpen: false,
+    connect: options?.connect,
+    pidAlive: options?.pidAlive
+  });
+  return observation.backendListening || observation.backendAlive;
 }
 
 export function writeLauncherStateFile(path: string, state: WorkbenchBackendState): void {

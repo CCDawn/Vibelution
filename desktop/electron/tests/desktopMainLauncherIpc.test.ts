@@ -116,16 +116,14 @@ describe("Electron main Launcher IPC facade", () => {
 
     const readyStart = mainSource.indexOf("async function openWorkbenchAfterLifecycleReady");
     const readyBody = mainSource.slice(readyStart, readyStart + 1800);
-    expect(readyBody).toContain("waitForWorkbenchLifecycleReady");
-    expect(readyBody).toContain("signal: lease.signal");
-    expect(readyBody).toContain("expectedGeneration: lease.generation");
-    expect(readyBody).toContain("readRuntimeManagerLauncherStatusSummary(paths.workspaceRoot, lease.commandId)");
-    expect(readyBody).toContain("expectedGeneration: lease.generation");
-    expect(readyBody).toContain("readRuntimeManagerLauncherStatusSummary(paths.workspaceRoot, lease.commandId)");
+    expect(readyBody).not.toContain("waitForWorkbenchLifecycleReady");
+    expect(readyBody).not.toContain("readRuntimeManagerLauncherStatusSummary(paths.workspaceRoot, lease.commandId)");
     expect(readyBody).toContain("launcherLifecycleSupervisor.isCurrent(lease)");
     expect(readyBody).toContain("launcherLifecycleSupervisor.claimReady(lease)");
     expect(readyBody).toContain("launcherLifecycleSupervisor.completeReady(lease)");
     expect(readyBody).not.toContain("waitForWorkbenchHttp");
+    expect(lifecycleBody).toContain("mainLineBackendIsReachable");
+    expect(lifecycleBody).toContain("已打开工作台窗口。");
 
     const branchStart = mainSource.indexOf("async function orchestrateBranchInstanceLifecycle");
     const branchBody = mainSource.slice(branchStart, branchStart + 4200);
