@@ -4,6 +4,7 @@ import {
   invalidPythonJsonBridgePayload,
   parsePythonJsonBridgePayload,
   PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS,
+  PYTHON_JSON_BRIDGE_MAINTENANCE_TIMEOUT_MS,
   PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS,
   runPythonJsonBridge,
   type PythonJsonBridgeSpawn
@@ -111,9 +112,13 @@ export function decidePeriodicDesktopShellRefresh(input: {
 export function decideLauncherShellRestart(input: {
   isPackaged: boolean;
   stale: boolean;
-}): "relaunch" | "rebuild-and-exit" {
-  if (input.isPackaged && input.stale) {
+  forceRefresh?: boolean;
+}): "relaunch" | "rebuild-and-exit" | "ensure-and-relaunch" {
+  if (input.isPackaged && (input.stale || input.forceRefresh)) {
     return "rebuild-and-exit";
+  }
+  if (!input.isPackaged && input.forceRefresh) {
+    return "ensure-and-relaunch";
   }
   return "relaunch";
 }
@@ -226,6 +231,41 @@ export async function scheduleDesktopShellRefresh(input: {
     mutation: true
   });
   return parseDesktopShellRefreshSchedule(raw);
+}
+
+export type LatestLauncherEnsureResult = {
+  schemaVersion: 1;
+  ok: boolean;
+  electron?: { rebuilt?: boolean; reason?: string };
+  frontend?: { skipped?: boolean; ok?: boolean; reason?: string };
+};
+
+export function parseLatestLauncherEnsureResult(raw: string): LatestLauncherEnsureResult {
+  const parsed = parsePythonJsonBridgePayload<LatestLauncherEnsureResult>(raw, "latest launcher ensure");
+  if (!parsed || parsed.schemaVersion !== 1 || parsed.ok !== true) {
+    throw invalidPythonJsonBridgePayload("latest launcher ensure", "returned an invalid result shape");
+  }
+  return parsed;
+}
+
+export async function ensureLatestLauncher(input: {
+  workspaceRoot: string;
+  pythonPath: string;
+  spawnImpl?: PythonJsonBridgeSpawn;
+  signal?: AbortSignal;
+}): Promise<LatestLauncherEnsureResult> {
+  const raw = await runPythonJsonBridge({
+    pythonPath: input.pythonPath,
+    args: desktopShellBridgeArgs(input.workspaceRoot, input.pythonPath, "ensure-latest-launcher"),
+    cwd: input.workspaceRoot,
+    spawnImpl: input.spawnImpl,
+    failureLabel: "latest launcher ensure",
+    timeoutMs: PYTHON_JSON_BRIDGE_MAINTENANCE_TIMEOUT_MS,
+    signal: input.signal,
+    killPolicy: "child",
+    mutation: true
+  });
+  return parseLatestLauncherEnsureResult(raw);
 }
 
 function desktopShellBridgeArgs(

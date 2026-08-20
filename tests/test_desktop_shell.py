@@ -298,6 +298,40 @@ def test_ensure_unpackaged_electron_rebuilds_stale_bundle(tmp_path, monkeypatch)
     assert result["reason"] == "current"
 
 
+def test_ensure_latest_launcher_rebuilds_electron_and_frontend(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        desktop_shell,
+        "ensure_unpackaged_electron",
+        lambda root: {"ensured": True, "rebuilt": False, "reason": "current"},
+    )
+    monkeypatch.setattr(
+        "core.runtime_manager.daemon._preflight_frontend_build_for_restart",
+        lambda command_id: {"ok": True, "skipped": True, "reason": "frontend build is current"},
+    )
+    result = desktop_shell.ensure_latest_launcher(tmp_path)
+    assert result["ok"] is True
+    assert result["electron"]["rebuilt"] is False
+    assert result["frontend"]["skipped"] is True
+
+
+def test_ensure_latest_launcher_raises_when_frontend_preflight_fails(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        desktop_shell,
+        "ensure_unpackaged_electron",
+        lambda root: {"ensured": True, "rebuilt": True, "reason": "current"},
+    )
+    monkeypatch.setattr(
+        "core.runtime_manager.daemon._preflight_frontend_build_for_restart",
+        lambda command_id: {"ok": False, "skipped": False, "reason": "tsc failed"},
+    )
+    try:
+        desktop_shell.ensure_latest_launcher(tmp_path)
+    except RuntimeError as exc:
+        assert "tsc failed" in str(exc)
+    else:
+        raise AssertionError("expected frontend preflight failure to raise")
+
+
 def test_launch_desktop_shell_does_not_hide_unpackaged_gui(tmp_path, monkeypatch):
     tree = "a" * 40
     electron_exe = _write_unpackaged_electron(tmp_path, tree_hash=tree, main_mtime=2_000_000_000)

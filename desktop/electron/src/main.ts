@@ -124,6 +124,7 @@ import {
   decidePeriodicDesktopShellRefresh,
   inspectDesktopShell,
   scheduleDesktopShellRefresh,
+  ensureLatestLauncher,
   shouldDeferWorkbenchOpenUntilLifecycleStart,
   shouldRefreshBeforeLifecycle,
   thenLifecycleFromDesktopCli,
@@ -2057,6 +2058,7 @@ async function stopAllManagedRuntimeTrees(): Promise<void> {
 }
 
 async function exitAndRelaunchLauncherShell(options: { forceShellRefresh?: boolean } = {}): Promise<void> {
+  const forceRefresh = options.forceShellRefresh === true;
   let stale = false;
   if (app.isPackaged) {
     try {
@@ -2065,10 +2067,15 @@ async function exitAndRelaunchLauncherShell(options: { forceShellRefresh?: boole
       stale = false;
     }
   }
-  if (decideLauncherShellRestart({ isPackaged: app.isPackaged, stale }) === "rebuild-and-exit") {
+  const decision = decideLauncherShellRestart({
+    isPackaged: app.isPackaged,
+    stale,
+    forceRefresh
+  });
+  if (decision === "rebuild-and-exit") {
     shellRefreshInFlight = true;
     try {
-      await scheduleCurrentDesktopShellRefresh("", { force: options.forceShellRefresh === true });
+      await scheduleCurrentDesktopShellRefresh("", { force: forceRefresh });
     } catch (error: unknown) {
       shellRefreshInFlight = false;
       const detail = error instanceof Error ? error.message : String(error);
@@ -2081,6 +2088,22 @@ async function exitAndRelaunchLauncherShell(options: { forceShellRefresh?: boole
     shutdownApproved = true;
     app.exit(0);
     return;
+  }
+  if (decision === "ensure-and-relaunch") {
+    notifyDesktopTray("Vibelution", "正在构建最新 Launcher…");
+    try {
+      const pythonPath = desktopPythonPath();
+      if (!pythonPath) {
+        throw new Error("VIBELUTION_PYTHON_PATH or PYTHON is required to ensure the latest launcher");
+      }
+      await ensureLatestLauncher({
+        workspaceRoot: createDesktopPathsForApp().workspaceRoot,
+        pythonPath
+      });
+    } catch (error: unknown) {
+      const detail = error instanceof Error ? error.message : String(error);
+      notifyDesktopTray("Vibelution", `无法重建最新前端，仍将重启当前壳：${detail.slice(0, 220)}`, "warning");
+    }
   }
   app.relaunch();
   shutdownApproved = true;

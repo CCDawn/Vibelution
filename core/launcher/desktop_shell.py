@@ -428,6 +428,35 @@ def ensure_unpackaged_electron(project_root: Path | str = PROJECT_ROOT) -> dict[
     return {"ensured": True, "rebuilt": True, **status}
 
 
+def ensure_latest_launcher(project_root: Path | str = PROJECT_ROOT) -> dict[str, Any]:
+    """Rebuild unpackaged Electron and web/dist when they lag the current checkout.
+
+    Tray "启动最新 Launcher" on an unpackaged shell relaunches the same process;
+    without this step it keeps serving a stale ``web/dist`` even after HEAD:web moves.
+    """
+
+    root = Path(project_root)
+    electron = ensure_unpackaged_electron(root)
+    from core.runtime_manager.daemon import _preflight_frontend_build_for_restart
+
+    frontend = _preflight_frontend_build_for_restart("ensure-latest-launcher")
+    if not bool(frontend.get("ok", True)):
+        raise RuntimeError(str(frontend.get("reason") or "frontend ensure failed"))
+    return {
+        "schemaVersion": 1,
+        "ok": True,
+        "electron": {
+            "rebuilt": bool(electron.get("rebuilt")),
+            "reason": str(electron.get("reason") or ""),
+        },
+        "frontend": {
+            "skipped": bool(frontend.get("skipped")),
+            "ok": True,
+            "reason": str(frontend.get("reason") or ""),
+        },
+    }
+
+
 def resolve_desktop_shell_launch_roots(project_root: Path | str) -> tuple[Path, Path | None]:
     """Map a requested --project path onto the integration shell and optional slot.
 

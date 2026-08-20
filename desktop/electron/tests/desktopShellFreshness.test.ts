@@ -9,6 +9,7 @@ import {
   inspectDesktopShell,
   parseDesktopShellStatus,
   scheduleDesktopShellRefresh,
+  ensureLatestLauncher,
   shouldDeferWorkbenchOpenUntilLifecycleStart,
   shouldRefreshBeforeLifecycle,
   thenLifecycleFromDesktopCli
@@ -104,6 +105,8 @@ describe("desktop shell freshness", () => {
     expect(decideLauncherShellRestart({ isPackaged: true, stale: true })).toBe("rebuild-and-exit");
     expect(decideLauncherShellRestart({ isPackaged: true, stale: false })).toBe("relaunch");
     expect(decideLauncherShellRestart({ isPackaged: false, stale: true })).toBe("relaunch");
+    expect(decideLauncherShellRestart({ isPackaged: true, stale: false, forceRefresh: true })).toBe("rebuild-and-exit");
+    expect(decideLauncherShellRestart({ isPackaged: false, stale: false, forceRefresh: true })).toBe("ensure-and-relaunch");
   });
 
   it("keeps start/restart/rebuild-and-start on a stale packaged shell", () => {
@@ -185,6 +188,26 @@ describe("desktop shell freshness", () => {
     });
     const [, args] = spawnImpl.mock.calls[0] as [string, string[], Record<string, unknown>];
     expect(args).toContain("--force-refresh");
+  });
+
+  it("ensures unpackaged launcher assets through the Python JSON bridge", async () => {
+    const spawnImpl = fakeSpawnWithOutput(
+      JSON.stringify({
+        schemaVersion: 1,
+        ok: true,
+        electron: { rebuilt: false, reason: "current" },
+        frontend: { skipped: true, ok: true, reason: "frontend build is current" }
+      })
+    );
+    const result = await ensureLatestLauncher({
+      workspaceRoot: "C:/repo",
+      pythonPath: "C:/repo/.venv/Scripts/python.exe",
+      spawnImpl
+    });
+    expect(result.ok).toBe(true);
+    expect(result.frontend?.skipped).toBe(true);
+    const [, args] = spawnImpl.mock.calls[0] as [string, string[], Record<string, unknown>];
+    expect(args).toContain("ensure-latest-launcher");
   });
 
   it("rejects a status payload without schemaVersion", () => {

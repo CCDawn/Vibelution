@@ -755,6 +755,27 @@ def test_launch_desktop_shell_action_dispatches_to_desktop_shell(monkeypatch, ca
     assert payload["pid"] == 9
 
 
+def test_ensure_latest_launcher_action_dispatches_to_desktop_shell(monkeypatch, capsys):
+    captured: dict[str, object] = {}
+
+    def fake_ensure(root):
+        captured["root"] = root
+        return {
+            "schemaVersion": 1,
+            "ok": True,
+            "electron": {"rebuilt": False, "reason": "current"},
+            "frontend": {"skipped": True, "ok": True, "reason": "frontend build is current"},
+        }
+
+    monkeypatch.setattr("core.launcher.desktop_shell.ensure_latest_launcher", fake_ensure)
+    result = desktop_entry.main(["--action", "ensure-latest-launcher", "--output", "json"])
+    assert result == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+    assert payload["frontend"]["skipped"] is True
+    assert captured["root"] is not None
+
+
 def test_parse_args_accepts_state_owned_backend_pid_flag():
     args = desktop_entry.parse_args(
         ["--action", "stop-launcher", "--use-state-owned-backend-pid", "--workspace", r"C:\repo"]

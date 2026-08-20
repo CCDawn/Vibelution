@@ -1628,6 +1628,21 @@ def _launch_desktop_shell_bridge(args: argparse.Namespace) -> dict[str, object]:
     return payload
 
 
+def _ensure_latest_launcher_bridge(args: argparse.Namespace) -> dict[str, object]:
+    from core.launcher.desktop_shell import ensure_latest_launcher
+
+    payload = ensure_latest_launcher(_workspace_root(args))
+    electron = payload.get("electron") if isinstance(payload.get("electron"), dict) else {}
+    frontend = payload.get("frontend") if isinstance(payload.get("frontend"), dict) else {}
+    _append_log(
+        "desktop_entry_python.desktop_shell.ensure_latest",
+        electron_rebuilt=bool(electron.get("rebuilt")),
+        frontend_skipped=bool(frontend.get("skipped")),
+        frontend_reason=str(frontend.get("reason") or ""),
+    )
+    return payload
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Open the Vibelution Launcher without a console window.")
     parser.add_argument("--action", default="launcher")
@@ -1694,6 +1709,7 @@ def main(argv: list[str] | None = None) -> int:
         "schedule-desktop-shell-refresh",
         "refresh-desktop-shell",
         "launch-desktop-shell",
+        "ensure-latest-launcher",
     }:
         raise SystemExit(f"Unsupported desktop-entry Python bridge action: {action}")
     if str(args.output or "").strip().lower() == "json":
@@ -1761,6 +1777,15 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print(
                     f"Desktop shell launched kind={payload.get('kind')} pid={payload.get('pid')}"
+                )
+        elif action == "ensure-latest-launcher":
+            payload = _ensure_latest_launcher_bridge(args)
+            if args.output == "json":
+                print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+            else:
+                print(
+                    f"Latest launcher ensured electronRebuilt={payload.get('electron', {}).get('rebuilt')} "
+                    f"frontendSkipped={payload.get('frontend', {}).get('skipped')}"
                 )
         else:
             _open_launcher(args)
