@@ -28,10 +28,6 @@ import type {
 } from "../../../product/workflow/workflowCanvasTypes";
 import { resolveNodeStatusVisual } from "./workflowCanvasState";
 import { workflowNodeAriaLabel } from "./workflowCanvasAccessibility";
-import {
-  orthogonalFromElkSide,
-  snapSlotsForSide,
-} from "./workflowOrthogonalRoute";
 
 export type WorkflowNodeChromeProps = {
   label: string;
@@ -87,63 +83,6 @@ function handleFraction(
   return typeof value === "number" ? value : workflowHandleFallbackFraction(index, total);
 }
 
-function occupancyBySide(
-  ids: readonly string[],
-  sideOf: (id: string) => WorkflowPortSide,
-  anchors: Record<string, number> | undefined,
-): Map<WorkflowPortSide, number[]> {
-  const handlesBySide = new Map<WorkflowPortSide, string[]>();
-  for (const id of ids) {
-    const side = sideOf(id);
-    const list = handlesBySide.get(side) ?? [];
-    list.push(id);
-    handlesBySide.set(side, list);
-  }
-  const occupancy = new Map<WorkflowPortSide, number[]>();
-  for (const [side, handles] of handlesBySide) {
-    occupancy.set(
-      side,
-      handles.map((id, index) => handleFraction(anchors, id, index, handles.length)),
-    );
-  }
-  return occupancy;
-}
-
-function mergeOccupancy(
-  left: Map<WorkflowPortSide, number[]>,
-  right: Map<WorkflowPortSide, number[]>,
-): Map<WorkflowPortSide, number[]> {
-  const merged = new Map(left);
-  for (const [side, values] of right) {
-    merged.set(side, [...(merged.get(side) ?? []), ...values]);
-  }
-  return merged;
-}
-
-function WorkflowSnapMarks({ occupancy }: { occupancy: Map<WorkflowPortSide, number[]> }) {
-  return (
-    <>
-      {[...occupancy.entries()].flatMap(([side, occupied]) =>
-        snapSlotsForSide(orthogonalFromElkSide(side)).flatMap((fraction) => {
-          if (occupied.some((value) => Math.abs(value - fraction) < 1e-3)) {
-            return [];
-          }
-          return [
-            <span
-              key={`${side}:${fraction}`}
-              data-workflow-snap={side}
-              data-snap-fraction={String(fraction)}
-              aria-hidden
-              className="pointer-events-none absolute z-0 block size-1.5 rounded-full bg-[var(--vui-border-strong)] opacity-40"
-              style={workflowSnapMarkStyle(side, fraction)}
-            />,
-          ];
-        }),
-      )}
-    </>
-  );
-}
-
 /**
  * Places a handle at a 0–1 magnet along its side. Left/right use `top`;
  * top/bottom use `left`. React Flow still owns the edge of the card.
@@ -164,14 +103,6 @@ export function workflowHandleFallbackFraction(index: number, total: number): nu
  */
 export function workflowHandleSideOffset(index: number, total: number, side: WorkflowPortSide): CSSProperties {
   return workflowHandleSnapStyle(side, workflowHandleFallbackFraction(index, total));
-}
-
-function workflowSnapMarkStyle(side: WorkflowPortSide, fraction: number): CSSProperties {
-  const along = `${Number((fraction * 100).toFixed(4))}%`;
-  if (side === "WEST") return { left: 0, top: along, transform: "translate(-50%, -50%)" };
-  if (side === "EAST") return { right: 0, top: along, transform: "translate(50%, -50%)" };
-  if (side === "NORTH") return { top: 0, left: along, transform: "translate(-50%, -50%)" };
-  return { bottom: 0, left: along, transform: "translate(-50%, 50%)" };
 }
 
 function StatusIcon({
@@ -326,9 +257,6 @@ export function WorkflowNodeChrome({
   const handleClass = spacious
     ? "!h-2.5 !w-2.5 !border-2 !border-[var(--vui-border-strong)] !bg-[var(--vui-surface-panel)]"
     : "!h-2 !w-2 !border-[1.5px] !border-[var(--vui-border-strong)] !bg-[var(--vui-surface-panel)]";
-  const sourceOccupancy = occupancyBySide(sourceHandleIds, sideOfSourceHandle, portSides?.sourceAnchor);
-  const targetOccupancy = occupancyBySide(targetHandleIds, sideOfTargetHandle, portSides?.targetAnchor);
-  const snapOccupancy = mergeOccupancy(targetOccupancy, sourceOccupancy);
 
   return (
     <div
@@ -356,7 +284,6 @@ export function WorkflowNodeChrome({
       aria-label={aria}
       title={title}
     >
-      {spacious ? <WorkflowSnapMarks occupancy={snapOccupancy} /> : null}
       {showTargetHandle ? (
         targetHandleIds.length > 0 ? (
           targetHandleIds.map((id) => {
