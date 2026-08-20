@@ -248,6 +248,14 @@ export function ResearchProcessWorkspace({
             onSelectExperiment={selectExperiment}
             onOpenPanel={location.openPanel}
             navigationLabel={location.runId ? nextAction.navigationLabel : undefined}
+            chainRound={
+              location.runId && !formalRuntimeActive && hypothesisFirstChain.chainState
+                ? {
+                    current: hypothesisFirstChain.chainState.meetingCount ?? 0,
+                    budget: hypothesisFirstChain.chainState.roundBudget ?? 3,
+                  }
+                : null
+            }
             runtimeCurrentNodeIds={formalRuntimeCurrentNodeIds}
             formalRuntimeActive={formalRuntimeActive}
             atCurrentTask={atCurrentTask}

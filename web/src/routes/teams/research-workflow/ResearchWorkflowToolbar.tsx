@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import {
   VButton,
   VSelect,
+  VStatusChip,
   VTabs,
   VToolbar,
 } from "../../../components/vui";
@@ -74,6 +75,8 @@ export function ResearchWorkflowToolbar(props: {
   runtimeCurrentNodeIds?: readonly string[] | null;
   formalRuntimeActive?: boolean;
   atCurrentTask?: boolean;
+  /** Review-round progress for the hypothesis-first chain (K of budget). */
+  chainRound?: { current: number; budget: number } | null;
   onNavigateCurrent?: () => void;
   onSelectExperiment: (questionId: string) => void;
   onOpenPanel: (panel: ResearchProcessPanel) => void;
@@ -141,8 +144,12 @@ export function ResearchWorkflowToolbar(props: {
           <div className={styles.phase} data-vui="research-workflow-phase">
             {phase.stageZh && phase.currentNodeZh
               ? (isZh ? `${phase.stageZh} · ${phase.currentNodeZh}` : `${phase.stageEn} · ${phase.currentNodeEn}`)
+              : phase.step === 3 && props.chainRound && props.chainRound.current > 0
+                ? (isZh
+                  ? `假说评审 · 第 ${Math.min(props.chainRound.current, props.chainRound.budget)}/${props.chainRound.budget} 轮`
+                  : `Hypothesis review · round ${Math.min(props.chainRound.current, props.chainRound.budget)}/${props.chainRound.budget}`)
               : phase.step
-                ? (isZh ? `假说准备 · ${phase.step}/5` : `Hypothesis prep · ${phase.step}/5`)
+                ? (isZh ? `假说准备 · ${phase.step}/5` : "Hypothesis prep · " + phase.step + "/5")
                 : (isZh ? phase.zh : phase.en)}
           </div>
         ) : null}
@@ -171,18 +178,22 @@ export function ResearchWorkflowToolbar(props: {
             {isZh ? "新建运行" : "New run"}
           </VButton>
         ) : null}
-        {props.runId ? (
+        {props.runId && props.atCurrentTask ? (
+          // Position indicator, not a dead button: a disabled ghost labeled
+          // 当前任务 reads as broken while adding no action (audit #7).
+          <VStatusChip tone="accent" className={styles.primary}>
+            {isZh ? "当前任务" : "Current task"}
+          </VStatusChip>
+        ) : null}
+        {props.runId && !props.atCurrentTask ? (
           <VButton
             type="button"
             density="compact"
-            variant={props.atCurrentTask ? "ghost" : "primary"}
+            variant="primary"
             className={styles.primary}
-            isDisabled={props.atCurrentTask}
             onClick={() => props.onNavigateCurrent?.()}
           >
-            {props.atCurrentTask
-              ? (isZh ? "当前任务" : "Current task")
-              : (props.navigationLabel || (isZh ? "前往当前任务" : "Go to current task"))}
+            {(props.navigationLabel || (isZh ? "前往当前任务" : "Go to current task"))}
           </VButton>
         ) : null}
         {!props.runId ? (
