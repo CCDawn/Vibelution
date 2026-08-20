@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  composeInstanceLifecycleState,
   overlayLauncherWindowTruth,
   type LauncherWindowTruth,
 } from "../src/windows/launcherWindowTruthOverlay.js";
@@ -182,7 +181,7 @@ describe("launcher branch-instances window truth overlay", () => {
     expect((item.runtime as Record<string, unknown>).window).toMatchObject({ open: false, pid: 0 });
   });
 
-  it("does not keep a live workbench startable when Python reports closed backend and a leftover closing phase", () => {
+  it("keeps leftover closing as stopping even when the workbench window is still open", () => {
     const payload = {
       items: [
         {
@@ -211,7 +210,7 @@ describe("launcher branch-instances window truth overlay", () => {
     const item = (overlaid.items as Record<string, unknown>[])[0];
     const runtime = item.runtime as Record<string, unknown>;
     expect((runtime.window as Record<string, unknown>).open).toBe(true);
-    expect(runtime.lifecycleState).toBe("partial");
+    expect(runtime.lifecycleState).toBe("stopping");
     expect(item.alive).toBe(true);
     expect(item.startable).toBe(false);
   });
@@ -342,78 +341,70 @@ describe("launcher branch-instances window truth overlay", () => {
     const item = (overlaid.items as Record<string, unknown>[])[0];
     const runtime = item.runtime as Record<string, unknown>;
     expect(runtime.lifecycleState).toBe("error");
-  });
-});
-
-describe("composeInstanceLifecycleState", () => {
-  it("ignores leftover failure while an isolated start is in flight", () => {
-    expect(
-      composeInstanceLifecycleState({
-        phase: "starting",
-        desiredState: "open",
-        registryStatus: "starting",
-        failureMessage: "上次启动失败",
-        frontendReady: true,
-        windowOpen: false,
-      })
-    ).toBe("starting");
+    expect(item.startable).toBe(true);
   });
 
-  it("does not mark running when the window is closed", () => {
-    expect(
-      composeInstanceLifecycleState({
-        phase: "steady",
-        desiredState: "open",
-        registryStatus: "steady",
-        backendAlive: true,
-        backendHealthy: true,
-        backendListening: true,
-        frontendReady: true,
-        windowOpen: false,
-      })
-    ).toBe("partial");
+  it("keeps a failed leftover without live signals startable", () => {
+    const payload = {
+      items: [
+        {
+          id: "worktree:failed",
+          current: false,
+          alive: false,
+          startable: false,
+          runtime: {
+            lifecycleState: "error",
+            desiredState: "closed",
+            registryStatus: "failed",
+            phase: "failed",
+            observedState: "closed",
+            backend: { alive: false, healthy: false, listening: false, portConflict: false },
+            frontend: { ready: true },
+            window: { open: false, pid: 0 },
+            error: { code: "registry_failed", message: "该分支上次启动失败。" },
+          },
+        },
+      ],
+    };
+    const overlaid = overlayLauncherWindowTruth(
+      "branch-instances",
+      payload,
+      truth({ instances: [{ instanceId: "worktree:failed", open: false, rendererProcessId: 0 }] })
+    ) as Record<string, unknown>;
+    const item = (overlaid.items as Record<string, unknown>[])[0];
+    expect((item.runtime as Record<string, unknown>).lifecycleState).toBe("error");
+    expect(item.startable).toBe(true);
   });
 
-  it("ignores leftover observedState when no process, port, or window is live", () => {
-    expect(
-      composeInstanceLifecycleState({
-        phase: "steady",
-        observedState: "open",
-        desiredState: "open",
-        registryStatus: "running",
-        backendAlive: false,
-        backendHealthy: false,
-        backendListening: false,
-        frontendReady: true,
-        windowOpen: false,
-      })
-    ).toBe("closed");
-  });
-
-  it("marks an in-flight start as error when the supervisor is lost", () => {
-    expect(
-      composeInstanceLifecycleState({
-        phase: "starting",
-        desiredState: "open",
-        registryStatus: "starting",
-        frontendReady: true,
-        windowOpen: false,
-        startSupervisorLost: true,
-      })
-    ).toBe("error");
-  });
-
-  it("keeps restarting when the supervisor is lost but the window is open", () => {
-    expect(
-      composeInstanceLifecycleState({
-        phase: "restarting",
-        desiredState: "open",
-        registryStatus: "restarting",
-        frontendReady: true,
-        windowOpen: true,
-        startSupervisorLost: true,
-      })
-    ).toBe("restarting");
+  it("does not treat missing frontend.ready as running", () => {
+    const payload = {
+      items: [
+        {
+          id: "main",
+          current: true,
+          alive: true,
+          startable: false,
+          runtime: {
+            lifecycleState: "running",
+            phase: "steady",
+            observedState: "open",
+            desiredState: "open",
+            registryStatus: "steady",
+            backend: { alive: true, healthy: true, listening: true, portConflict: false },
+            frontend: {},
+            window: { open: false, pid: 0 },
+          },
+        },
+      ],
+    };
+    const overlaid = overlayLauncherWindowTruth(
+      "branch-instances",
+      payload,
+      truth({ workbench: { open: true, rendererProcessId: 7070 } })
+    ) as Record<string, unknown>;
+    const item = (overlaid.items as Record<string, unknown>[])[0];
+    expect((item.runtime as Record<string, unknown>).lifecycleState).toBe("partial");
+    expect(item.startable).toBe(false);
   });
 });
 

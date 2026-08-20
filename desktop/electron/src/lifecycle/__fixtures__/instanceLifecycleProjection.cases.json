@@ -1,0 +1,676 @@
+{
+  "schemaVersion": 1,
+  "source": "docs/plans/2026-08-20-launcher-lifecycle-ts-migration.md I1",
+  "cases": [
+    {
+      "id": "d1-closed-idle-is-startable",
+      "input": {
+        "observedState": "closed",
+        "phase": "steady",
+        "desiredState": "closed",
+        "registryStatus": "closed",
+        "backendAlive": false,
+        "backendHealthy": false,
+        "backendListening": false,
+        "backendConflict": false,
+        "frontendReady": true,
+        "windowOpen": false,
+        "failureMessage": "",
+        "startSupervisorLost": false
+      },
+      "expected": { "lifecycleState": "closed", "errorCode": "", "startable": true }
+    },
+    {
+      "id": "d1-error-registry-failed-no-live-is-startable",
+      "input": {
+        "observedState": "closed",
+        "phase": "failed",
+        "desiredState": "open",
+        "registryStatus": "failed",
+        "backendAlive": false,
+        "backendHealthy": false,
+        "backendListening": false,
+        "backendConflict": false,
+        "frontendReady": true,
+        "windowOpen": false,
+        "failureMessage": "上次启动失败",
+        "startSupervisorLost": false
+      },
+      "expected": { "lifecycleState": "error", "errorCode": "lifecycle_failed", "startable": true }
+    },
+    {
+      "id": "d1-error-registry-failed-window-open-not-startable",
+      "input": {
+        "observedState": "partial",
+        "phase": "steady",
+        "desiredState": "open",
+        "registryStatus": "failed",
+        "backendAlive": false,
+        "backendHealthy": false,
+        "backendListening": false,
+        "backendConflict": false,
+        "frontendReady": true,
+        "windowOpen": true,
+        "failureMessage": "",
+        "startSupervisorLost": false
+      },
+      "expected": { "lifecycleState": "error", "errorCode": "registry_failed", "startable": false }
+    },
+    {
+      "id": "d1-error-backend-alive-not-startable",
+      "input": {
+        "observedState": "partial",
+        "phase": "steady",
+        "desiredState": "open",
+        "registryStatus": "failed",
+        "backendAlive": true,
+        "backendHealthy": false,
+        "backendListening": false,
+        "backendConflict": false,
+        "frontendReady": true,
+        "windowOpen": false,
+        "failureMessage": "",
+        "startSupervisorLost": false
+      },
+      "expected": { "lifecycleState": "error", "errorCode": "registry_failed", "startable": false }
+    },
+    {
+      "id": "d1-error-failure-message-no-live-is-startable",
+      "input": {
+        "observedState": "closed",
+        "phase": "steady",
+        "desiredState": "closed",
+        "registryStatus": "steady",
+        "backendAlive": false,
+        "backendHealthy": false,
+        "backendListening": false,
+        "backendConflict": false,
+        "frontendReady": true,
+        "windowOpen": false,
+        "failureMessage": "该分支运行状态异常。",
+        "startSupervisorLost": false
+      },
+      "expected": { "lifecycleState": "error", "errorCode": "runtime_error", "startable": true }
+    },
+    {
+      "id": "d1-stopping-window-open-stays-stopping",
+      "input": {
+        "observedState": "open",
+        "phase": "stopping",
+        "desiredState": "closed",
+        "registryStatus": "stopping",
+        "backendAlive": false,
+        "backendHealthy": false,
+        "backendListening": false,
+        "backendConflict": false,
+        "frontendReady": true,
+        "windowOpen": true,
+        "failureMessage": "",
+        "startSupervisorLost": false
+      },
+      "expected": { "lifecycleState": "stopping", "errorCode": "", "startable": false }
+    },
+    {
+      "id": "d1-closing-window-open-stays-stopping",
+      "input": {
+        "observedState": "closed",
+        "phase": "closing",
+        "desiredState": "closed",
+        "registryStatus": "stopping",
+        "backendAlive": false,
+        "backendHealthy": false,
+        "backendListening": false,
+        "backendConflict": false,
+        "frontendReady": true,
+        "windowOpen": true,
+        "failureMessage": "",
+        "startSupervisorLost": false
+      },
+      "expected": { "lifecycleState": "stopping", "errorCode": "", "startable": false }
+    },
+    {
+      "id": "d1-force-stopping-window-open-stays-stopping",
+      "input": {
+        "observedState": "partial",
+        "phase": "force_stopping",
+        "desiredState": "closed",
+        "registryStatus": "stopping",
+        "backendAlive": true,
+        "backendHealthy": true,
+        "backendListening": true,
+        "backendConflict": false,
+        "frontendReady": true,
+        "windowOpen": true,
+        "failureMessage": "",
+        "startSupervisorLost": false
+      },
+      "expected": { "lifecycleState": "stopping", "errorCode": "", "startable": false }
+    },
+    {
+      "id": "d1-frontend-false-all-else-ready-is-partial",
+      "input": {
+        "observedState": "open",
+        "phase": "steady",
+        "desiredState": "open",
+        "registryStatus": "steady",
+        "backendAlive": true,
+        "backendHealthy": true,
+        "backendListening": true,
+        "backendConflict": false,
+        "frontendReady": false,
+        "windowOpen": true,
+        "failureMessage": "",
+        "startSupervisorLost": false
+      },
+      "expected": { "lifecycleState": "partial", "errorCode": "", "startable": false }
+    },
+    {
+      "id": "d1-frontend-true-all-else-ready-is-running",
+      "input": {
+        "observedState": "open",
+        "phase": "steady",
+        "desiredState": "open",
+        "registryStatus": "steady",
+        "backendAlive": true,
+        "backendHealthy": true,
+        "backendListening": true,
+        "backendConflict": false,
+        "frontendReady": true,
+        "windowOpen": true,
+        "failureMessage": "",
+        "startSupervisorLost": false
+      },
+      "expected": { "lifecycleState": "running", "errorCode": "", "startable": false }
+    },
+    {
+      "id": "d1-frontend-omitted-all-else-ready-is-partial",
+      "input": {
+        "observedState": "open",
+        "phase": "steady",
+        "desiredState": "open",
+        "registryStatus": "steady",
+        "backendAlive": true,
+        "backendHealthy": true,
+        "backendListening": true,
+        "backendConflict": false,
+        "windowOpen": true,
+        "failureMessage": "",
+        "startSupervisorLost": false
+      },
+      "expected": { "lifecycleState": "partial", "errorCode": "", "startable": false }
+    },
+    {
+      "id": "inflight-phase-opening-no-ready",
+      "input": {
+        "observedState": "closed",
+        "phase": "opening",
+        "desiredState": "open",
+        "registryStatus": "",
+        "backendAlive": false,
+        "backendHealthy": false,
+        "backendListening": false,
+        "backendConflict": false,
+        "frontendReady": true,
+        "windowOpen": false,
+        "failureMessage": "",
+        "startSupervisorLost": false
+      },
+      "expected": { "lifecycleState": "starting", "errorCode": "", "startable": false }
+    },
+    {
+      "id": "inflight-registry-starting-desired-open",
+      "input": {
+        "observedState": "closed",
+        "phase": "starting",
+        "desiredState": "open",
+        "registryStatus": "starting",
+        "backendAlive": false,
+        "backendHealthy": false,
+        "backendListening": false,
+        "backendConflict": false,
+        "frontendReady": true,
+        "windowOpen": false,
+        "failureMessage": "",
+        "startSupervisorLost": false
+      },
+      "expected": { "lifecycleState": "starting", "errorCode": "", "startable": false }
+    },
+    {
+      "id": "inflight-ignores-leftover-failure-message",
+      "input": {
+        "observedState": "closed",
+        "phase": "starting",
+        "desiredState": "open",
+        "registryStatus": "starting",
+        "backendAlive": false,
+        "backendHealthy": false,
+        "backendListening": false,
+        "backendConflict": false,
+        "frontendReady": true,
+        "windowOpen": false,
+        "failureMessage": "上次启动失败",
+        "startSupervisorLost": false
+      },
+      "expected": { "lifecycleState": "starting", "errorCode": "", "startable": false }
+    },
+    {
+      "id": "inflight-backend-ready-window-closed-is-partial",
+      "input": {
+        "observedState": "open",
+        "phase": "opening",
+        "desiredState": "open",
+        "registryStatus": "starting",
+        "backendAlive": true,
+        "backendHealthy": true,
+        "backendListening": true,
+        "backendConflict": false,
+        "frontendReady": true,
+        "windowOpen": false,
+        "failureMessage": "",
+        "startSupervisorLost": false
+      },
+      "expected": { "lifecycleState": "partial", "errorCode": "", "startable": false }
+    },
+    {
+      "id": "inflight-all-ready-is-running",
+      "input": {
+        "observedState": "open",
+        "phase": "starting",
+        "desiredState": "open",
+        "registryStatus": "starting",
+        "backendAlive": true,
+        "backendHealthy": true,
+        "backendListening": true,
+        "backendConflict": false,
+        "frontendReady": true,
+        "windowOpen": true,
+        "failureMessage": "",
+        "startSupervisorLost": false
+      },
+      "expected": { "lifecycleState": "running", "errorCode": "", "startable": false }
+    },
+    {
+      "id": "inflight-port-conflict-without-window-stays-starting",
+      "input": {
+        "observedState": "closed",
+        "phase": "starting",
+        "desiredState": "open",
+        "registryStatus": "starting",
+        "backendAlive": true,
+        "backendHealthy": false,
+        "backendListening": false,
+        "backendConflict": true,
+        "frontendReady": true,
+        "windowOpen": false,
+        "failureMessage": "",
+        "startSupervisorLost": false
+      },
+      "expected": { "lifecycleState": "starting", "errorCode": "", "startable": false }
+    },
+    {
+      "id": "conflict-not-inflight-is-error",
+      "input": {
+        "observedState": "partial",
+        "phase": "steady",
+        "desiredState": "open",
+        "registryStatus": "steady",
+        "backendAlive": true,
+        "backendHealthy": false,
+        "backendListening": false,
+        "backendConflict": true,
+        "frontendReady": true,
+        "windowOpen": false,
+        "failureMessage": "",
+        "startSupervisorLost": false
+      },
+      "expected": { "lifecycleState": "error", "errorCode": "backend_port_conflict", "startable": false }
+    },
+    {
+      "id": "conflict-no-live-signals-is-startable",
+      "input": {
+        "observedState": "closed",
+        "phase": "steady",
+        "desiredState": "closed",
+        "registryStatus": "steady",
+        "backendAlive": false,
+        "backendHealthy": false,
+        "backendListening": false,
+        "backendConflict": true,
+        "frontendReady": false,
+        "windowOpen": false,
+        "failureMessage": "",
+        "startSupervisorLost": false
+      },
+      "expected": { "lifecycleState": "error", "errorCode": "backend_port_conflict", "startable": true }
+    },
+    {
+      "id": "supervisor-lost-no-live-is-error",
+      "input": {
+        "observedState": "closed",
+        "phase": "starting",
+        "desiredState": "open",
+        "registryStatus": "starting",
+        "backendAlive": false,
+        "backendHealthy": false,
+        "backendListening": false,
+        "backendConflict": false,
+        "frontendReady": true,
+        "windowOpen": false,
+        "failureMessage": "",
+        "startSupervisorLost": true
+      },
+      "expected": { "lifecycleState": "error", "errorCode": "start_supervisor_lost", "startable": true }
+    },
+    {
+      "id": "supervisor-lost-window-open-falls-to-restarting",
+      "input": {
+        "observedState": "open",
+        "phase": "restarting",
+        "desiredState": "open",
+        "registryStatus": "restarting",
+        "backendAlive": false,
+        "backendHealthy": false,
+        "backendListening": false,
+        "backendConflict": false,
+        "frontendReady": true,
+        "windowOpen": true,
+        "failureMessage": "",
+        "startSupervisorLost": true
+      },
+      "expected": { "lifecycleState": "restarting", "errorCode": "", "startable": false }
+    },
+    {
+      "id": "supervisor-lost-backend-ready-skips-step0-to-partial",
+      "input": {
+        "observedState": "open",
+        "phase": "starting",
+        "desiredState": "open",
+        "registryStatus": "starting",
+        "backendAlive": true,
+        "backendHealthy": true,
+        "backendListening": true,
+        "backendConflict": false,
+        "frontendReady": true,
+        "windowOpen": false,
+        "failureMessage": "",
+        "startSupervisorLost": true
+      },
+      "expected": { "lifecycleState": "partial", "errorCode": "", "startable": false }
+    },
+    {
+      "id": "supervisor-lost-false-inflight-stays-starting",
+      "input": {
+        "observedState": "closed",
+        "phase": "starting",
+        "desiredState": "open",
+        "registryStatus": "starting",
+        "backendAlive": false,
+        "backendHealthy": false,
+        "backendListening": false,
+        "backendConflict": false,
+        "frontendReady": true,
+        "windowOpen": false,
+        "failureMessage": "",
+        "startSupervisorLost": false
+      },
+      "expected": { "lifecycleState": "starting", "errorCode": "", "startable": false }
+    },
+    {
+      "id": "restarting-phase",
+      "input": {
+        "observedState": "partial",
+        "phase": "restarting",
+        "desiredState": "open",
+        "registryStatus": "running",
+        "backendAlive": true,
+        "backendHealthy": true,
+        "backendListening": true,
+        "backendConflict": false,
+        "frontendReady": true,
+        "windowOpen": false,
+        "failureMessage": "",
+        "startSupervisorLost": false
+      },
+      "expected": { "lifecycleState": "restarting", "errorCode": "", "startable": false }
+    },
+    {
+      "id": "restart-phase-alias",
+      "input": {
+        "observedState": "partial",
+        "phase": "restart",
+        "desiredState": "open",
+        "registryStatus": "steady",
+        "backendAlive": true,
+        "backendHealthy": true,
+        "backendListening": true,
+        "backendConflict": false,
+        "frontendReady": true,
+        "windowOpen": true,
+        "failureMessage": "",
+        "startSupervisorLost": false
+      },
+      "expected": { "lifecycleState": "restarting", "errorCode": "", "startable": false }
+    },
+    {
+      "id": "registry-status-restarting",
+      "input": {
+        "observedState": "closed",
+        "phase": "steady",
+        "desiredState": "open",
+        "registryStatus": "restarting",
+        "backendAlive": false,
+        "backendHealthy": false,
+        "backendListening": false,
+        "backendConflict": false,
+        "frontendReady": true,
+        "windowOpen": false,
+        "failureMessage": "",
+        "startSupervisorLost": false
+      },
+      "expected": { "lifecycleState": "restarting", "errorCode": "", "startable": false }
+    },
+    {
+      "id": "stopping-phase-no-window",
+      "input": {
+        "observedState": "partial",
+        "phase": "stopping",
+        "desiredState": "closed",
+        "registryStatus": "steady",
+        "backendAlive": true,
+        "backendHealthy": true,
+        "backendListening": true,
+        "backendConflict": false,
+        "frontendReady": true,
+        "windowOpen": false,
+        "failureMessage": "",
+        "startSupervisorLost": false
+      },
+      "expected": { "lifecycleState": "stopping", "errorCode": "", "startable": false }
+    },
+    {
+      "id": "closed-ignores-registry-running",
+      "input": {
+        "observedState": "closed",
+        "phase": "steady",
+        "desiredState": "closed",
+        "registryStatus": "running",
+        "backendAlive": false,
+        "backendHealthy": false,
+        "backendListening": false,
+        "backendConflict": false,
+        "frontendReady": true,
+        "windowOpen": false,
+        "failureMessage": "",
+        "startSupervisorLost": false
+      },
+      "expected": { "lifecycleState": "closed", "errorCode": "", "startable": true }
+    },
+    {
+      "id": "closed-ignores-leftover-observed-open",
+      "input": {
+        "observedState": "open",
+        "phase": "steady",
+        "desiredState": "open",
+        "registryStatus": "running",
+        "backendAlive": false,
+        "backendHealthy": false,
+        "backendListening": false,
+        "backendConflict": false,
+        "frontendReady": true,
+        "windowOpen": false,
+        "failureMessage": "",
+        "startSupervisorLost": false
+      },
+      "expected": { "lifecycleState": "closed", "errorCode": "", "startable": true }
+    },
+    {
+      "id": "partial-window-only",
+      "input": {
+        "observedState": "closed",
+        "phase": "steady",
+        "desiredState": "open",
+        "registryStatus": "steady",
+        "backendAlive": false,
+        "backendHealthy": false,
+        "backendListening": false,
+        "backendConflict": false,
+        "frontendReady": true,
+        "windowOpen": true,
+        "failureMessage": "",
+        "startSupervisorLost": false
+      },
+      "expected": { "lifecycleState": "partial", "errorCode": "", "startable": false }
+    },
+    {
+      "id": "partial-backend-alive-only",
+      "input": {
+        "observedState": "closed",
+        "phase": "steady",
+        "desiredState": "open",
+        "registryStatus": "steady",
+        "backendAlive": true,
+        "backendHealthy": false,
+        "backendListening": false,
+        "backendConflict": false,
+        "frontendReady": true,
+        "windowOpen": false,
+        "failureMessage": "",
+        "startSupervisorLost": false
+      },
+      "expected": { "lifecycleState": "partial", "errorCode": "", "startable": false }
+    },
+    {
+      "id": "partial-listening-only",
+      "input": {
+        "observedState": "closed",
+        "phase": "steady",
+        "desiredState": "open",
+        "registryStatus": "steady",
+        "backendAlive": false,
+        "backendHealthy": false,
+        "backendListening": true,
+        "backendConflict": false,
+        "frontendReady": true,
+        "windowOpen": false,
+        "failureMessage": "",
+        "startSupervisorLost": false
+      },
+      "expected": { "lifecycleState": "partial", "errorCode": "", "startable": false }
+    },
+    {
+      "id": "healthy-not-listening-alive-is-partial",
+      "input": {
+        "observedState": "partial",
+        "phase": "steady",
+        "desiredState": "open",
+        "registryStatus": "steady",
+        "backendAlive": true,
+        "backendHealthy": true,
+        "backendListening": false,
+        "backendConflict": false,
+        "frontendReady": true,
+        "windowOpen": false,
+        "failureMessage": "",
+        "startSupervisorLost": false
+      },
+      "expected": { "lifecycleState": "partial", "errorCode": "", "startable": false }
+    },
+    {
+      "id": "phase-failed-beats-registry-failed",
+      "input": {
+        "observedState": "closed",
+        "phase": "failed",
+        "desiredState": "open",
+        "registryStatus": "failed",
+        "backendAlive": false,
+        "backendHealthy": false,
+        "backendListening": false,
+        "backendConflict": false,
+        "frontendReady": false,
+        "windowOpen": false,
+        "failureMessage": "both failed",
+        "startSupervisorLost": false
+      },
+      "expected": { "lifecycleState": "error", "errorCode": "lifecycle_failed", "startable": true }
+    },
+    {
+      "id": "registry-failed-beats-failure-message",
+      "input": {
+        "observedState": "closed",
+        "phase": "steady",
+        "desiredState": "open",
+        "registryStatus": "failed",
+        "backendAlive": false,
+        "backendHealthy": false,
+        "backendListening": false,
+        "backendConflict": false,
+        "frontendReady": true,
+        "windowOpen": false,
+        "failureMessage": "stale message",
+        "startSupervisorLost": false
+      },
+      "expected": { "lifecycleState": "error", "errorCode": "registry_failed", "startable": true }
+    },
+    {
+      "id": "opening-with-window-is-partial-not-starting",
+      "input": {
+        "observedState": "open",
+        "phase": "opening",
+        "desiredState": "open",
+        "registryStatus": "",
+        "backendAlive": false,
+        "backendHealthy": false,
+        "backendListening": false,
+        "backendConflict": false,
+        "frontendReady": true,
+        "windowOpen": true,
+        "failureMessage": "",
+        "startSupervisorLost": false
+      },
+      "expected": { "lifecycleState": "partial", "errorCode": "", "startable": false }
+    },
+    {
+      "id": "empty-inputs-closed",
+      "input": {},
+      "expected": { "lifecycleState": "closed", "errorCode": "", "startable": true }
+    },
+    {
+      "id": "backend-ready-window-closed-not-running",
+      "input": {
+        "observedState": "partial",
+        "phase": "steady",
+        "desiredState": "open",
+        "registryStatus": "steady",
+        "backendAlive": true,
+        "backendHealthy": true,
+        "backendListening": true,
+        "backendConflict": false,
+        "frontendReady": true,
+        "windowOpen": false,
+        "failureMessage": "",
+        "startSupervisorLost": false
+      },
+      "expected": { "lifecycleState": "partial", "errorCode": "", "startable": false }
+    }
+  ]
+}
