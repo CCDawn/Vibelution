@@ -98,7 +98,7 @@ export function ResearchProcessInspectorPane(props: {
   if (scope.panel === "agents") {
     return <ResearchAgentBindingPanel teamId={scope.teamId} run={state.run} effectiveBindings={state.effectiveBindings} lang={lang} />;
   }
-  if (scope.panel === "launch") {
+  if (scope.panel === "launch" || (scope.panel === "node" && !scope.selectedNodeId && !scope.runId)) {
     return (
       <ResearchRunLaunchPanel
         teamId={scope.teamId}

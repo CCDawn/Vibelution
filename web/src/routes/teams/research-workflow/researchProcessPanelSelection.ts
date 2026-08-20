@@ -27,19 +27,15 @@ export function shouldApplyCanvasNodeSelection({
 }
 
 /**
- * Node inspector is a real column when a tool panel is open, a node is
- * selected, or the current HITL/next-action target counts as selected.
+ * Keep the inspector column mounted. Hiding it lets the canvas eat the
+ * right pane and clips toolbar actions against the window edge.
  */
-export function shouldShowResearchProcessInspector({
-  panel,
-  selectedNodeId,
-  nextTarget = null,
-}: {
+export function shouldShowResearchProcessInspector(_input: {
   panel: ResearchProcessPanel;
   selectedNodeId: string | null;
   nextTarget?: string | null;
 }): boolean {
-  return panel !== "node" || Boolean(selectedNodeId || nextTarget);
+  return true;
 }
 
 export type ResearchProcessAutofocusPatch = {

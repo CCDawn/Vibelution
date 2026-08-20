@@ -279,7 +279,7 @@ import { VCanvasWorkbenchPage } from "@/components/vui";
 
 | Prop / 槽位 | 说明 | 设计注意 |
 | --- | --- | --- |
-| canvas / inspector / rail | 区域 | inspector 宽度走 layoutId |
+| canvas / inspector / rail | 区域 | inspector 宽度走 layoutId；科研流程右栏保持挂载，不因空选中拆列 |
 | domainRecipe | 域标记 | 合约用 |
 
 ### 反冗余

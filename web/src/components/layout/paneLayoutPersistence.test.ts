@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   PANE_LAYOUT_STORAGE_KEY,
+  allocateSidePaneWidths,
   clampPaneWidth,
   migrateLegacyNumericPane,
   persistPaneWidth,
@@ -32,6 +33,22 @@ describe("paneLayoutPersistence", () => {
     expect(clampPaneWidth(100, 200, 400)).toBe(200);
     expect(clampPaneWidth(500, 200, 400)).toBe(400);
     expect(clampPaneWidth(300.6, 200, 400)).toBe(301);
+  });
+
+  it("shrinks a side pane so the main column keeps its minimum width", () => {
+    const inspector = { id: "inspector", defaultWidth: 360, minWidth: 300, maxWidth: 520 };
+    expect(allocateSidePaneWidths({
+      containerWidth: 600,
+      panes: [inspector],
+      current: { inspector: 360 },
+      preserveMainMinWidth: 360,
+    }).inspector).toBe(300);
+    expect(allocateSidePaneWidths({
+      containerWidth: 900,
+      panes: [inspector],
+      current: { inspector: 360 },
+      preserveMainMinWidth: 360,
+    }).inspector).toBe(360);
   });
 
   it("persists layout widths by layoutId for permanent memory", () => {

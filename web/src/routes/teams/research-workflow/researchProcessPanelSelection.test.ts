@@ -22,8 +22,8 @@ describe("researchProcessPanelSelection", () => {
     expect(shouldApplyCanvasNodeSelection({ nodeId: null, panel: "evidence" })).toBe(false);
   });
 
-  it("hides the inspector column until a node is selected, a tool panel is open, or HITL has a current task", () => {
-    expect(shouldShowResearchProcessInspector({ panel: "node", selectedNodeId: null })).toBe(false);
+  it("keeps the inspector column mounted so the canvas cannot swallow the right pane", () => {
+    expect(shouldShowResearchProcessInspector({ panel: "node", selectedNodeId: null })).toBe(true);
     expect(shouldShowResearchProcessInspector({ panel: "node", selectedNodeId: "source_finding" })).toBe(true);
     expect(shouldShowResearchProcessInspector({
       panel: "node",

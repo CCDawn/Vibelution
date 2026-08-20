@@ -10,6 +10,7 @@ import {
 } from "react";
 
 import {
+  allocateSidePaneWidths,
   clampPaneWidth,
   resolvePaneWidths,
   writePaneLayout,
@@ -115,31 +116,18 @@ export function usePersistedPaneResize({
         return;
       }
       setWidths((current) => {
-        let next = { ...current };
-        let changed = false;
-        const handleBudget = panes.length * 6;
-        const sideIds = panes.map((pane) => pane.id);
-        let sideTotal = sideIds.reduce((sum, id) => sum + (next[id] ?? 0), 0);
-        const maxSide = Math.max(preserveMainMinWidth, total - preserveMainMinWidth - handleBudget);
-        if (sideTotal > maxSide && sideTotal > 0) {
-          const scale = maxSide / sideTotal;
-          for (const pane of panes) {
-            const scaled = clampPaneWidth(
-              Math.round((next[pane.id] ?? pane.defaultWidth) * scale),
-              pane.minWidth,
-              pane.maxWidth,
-            );
-            if (scaled !== next[pane.id]) {
-              next[pane.id] = scaled;
-              changed = true;
-            }
-          }
+        const next = allocateSidePaneWidths({
+          containerWidth: total,
+          panes,
+          current,
+          preserveMainMinWidth,
+        });
+        const changed = panes.some((pane) => next[pane.id] !== current[pane.id]);
+        if (!changed) {
+          return current;
         }
-        if (changed) {
-          writePaneLayout(layoutId, next);
-          return next;
-        }
-        return current;
+        writePaneLayout(layoutId, next);
+        return next;
       });
     };
     reclamp();

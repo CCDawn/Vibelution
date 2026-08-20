@@ -43,7 +43,7 @@ const graph: WorkflowLayoutInput = projectionToCanvasGraph(projection);
 
 画布必须提供平移、缩放、适应全部和定位当前工作；页面本身不得产生横向滚动。
 
-`VCanvasWorkbenchPage` 的 inspector 列在选中节点、当前 HITL 任务（下一步 `targetNodeId` 视为已选）或打开 Agent / 时间线 / 团队 / 题目进度 / 创建运行 等工具面板时挂载。不要用「选择流程节点」空状态占住 300–520px 白列；当前人工门会打开操作栏。工具面板（agents/team/timeline/progress/launch）打开时不抢回 node inspector。
+`VCanvasWorkbenchPage` 的 inspector 列始终挂载（默认 360px，下限 300px），避免画布把右栏挤没、工具条「查看详情」贴死窗口边。无运行且未选节点时右栏展示启动面板，而不是拆掉整列。当前人工门会打开操作栏。工具面板（agents/team/timeline/progress/launch）打开时不抢回 node inspector。
 
 ### 节点视觉种类
 

@@ -35,11 +35,45 @@ function notifyPaneLayoutPersist(): void {
   }
 }
 
+export const PANE_RESIZE_HANDLE_WIDTH = 6;
+
 export function clampPaneWidth(value: number, minWidth: number, maxWidth: number): number {
   if (!Number.isFinite(value)) {
     return minWidth;
   }
   return Math.round(Math.min(maxWidth, Math.max(minWidth, value)));
+}
+
+/**
+ * Shrink side panes so `preserveMainMinWidth` remains for the main column.
+ * Floor is still each pane's minWidth; a container smaller than that will clip.
+ */
+export function allocateSidePaneWidths(input: {
+  containerWidth: number;
+  panes: readonly PaneSpec[];
+  current: PaneWidthMap;
+  preserveMainMinWidth: number;
+  handleWidth?: number;
+}): PaneWidthMap {
+  const handleBudget = (input.handleWidth ?? PANE_RESIZE_HANDLE_WIDTH) * input.panes.length;
+  const maxSide = Math.max(0, input.containerWidth - input.preserveMainMinWidth - handleBudget);
+  const next: PaneWidthMap = { ...input.current };
+  const sideTotal = input.panes.reduce(
+    (sum, pane) => sum + (next[pane.id] ?? pane.defaultWidth),
+    0,
+  );
+  if (sideTotal <= maxSide || sideTotal <= 0) {
+    return next;
+  }
+  const scale = maxSide / sideTotal;
+  for (const pane of input.panes) {
+    next[pane.id] = clampPaneWidth(
+      Math.round((next[pane.id] ?? pane.defaultWidth) * scale),
+      pane.minWidth,
+      pane.maxWidth,
+    );
+  }
+  return next;
 }
 
 export function readAllPaneLayouts(): PaneLayoutsMap {
