@@ -434,6 +434,21 @@ describe("resolveHypothesisFirstNextAction", () => {
     expect(next.command).toBeUndefined();
   });
 
+  it("keeps an awaiting-approval review gate ahead of converged navigation", () => {
+    const next = resolveHypothesisFirstNextAction({
+      run: { runId: "run-1", runtimeCurrentNodeIds: ["source_finding"] },
+      chainState: chain({ hypothesisConverged: true, selectionId: "sel-1" }),
+      selection: selection(),
+      meetings: [meeting({
+        status: "awaiting_approval",
+        digestDraft: { contentHash: "hash-1", agendaSummary: "s", agreements: [], disagreements: [], blockers: [], actionItems: [], decisionRefs: [], sourceMessageRefs: [] },
+      })],
+    });
+    expect(next.stage).toBe("review_awaiting_approval");
+    expect(next.command).toBe("approve_review_digest");
+    expect(next.commandLabel).toBe("确认并结束本轮");
+  });
+
   it("follows the canonical runtime node after hypothesis convergence", () => {
     const converged = resolveHypothesisFirstNextAction({
       run: { runId: "run-1", runtimeCurrentNodeIds: ["protocol_design"] },

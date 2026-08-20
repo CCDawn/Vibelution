@@ -435,3 +435,67 @@ def test_auto_draft_runs_only_after_all_bound_rounds_finish(
         meeting = meetings.get_meeting_round(team_id, meeting_id)["meetingRound"]
         assert meeting["status"] == "awaiting_approval"
         assert meeting["digestDraft"]["contentHash"]
+
+
+def test_approve_review_digest_without_evidence_requests_closes_round(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An empty digest (no evidence requests) must close through a legal
+    decision. The UI's 确认并结束本轮 hit an invalid vocabulary word here and
+    always failed while the round sat in awaiting_approval."""
+    team_id, agents = _hf_env(tmp_path, monkeypatch)
+    _patch_approved_question(monkeypatch)
+    from core.web.services.team_workflow import hypothesis_selection as selections
+
+    def _plain_runner(participant, prompt, context):
+        if "批评与修订" in str(prompt):
+            return {"status": "completed", "raw_output": "pass", "summary": "pass"}
+        role = str(participant.get("teamRole") or "participant")
+        if role == "coordinator":
+            return {
+                "status": "completed",
+                "raw_output": "AGREE: 本轮确认现有结论",
+                "summary": "ok",
+            }
+        return {
+            "status": "completed",
+            "raw_output": "AGREE: hyp-a 的机制证据最完整",
+            "summary": "ok",
+        }
+
+    agent_ids = [agents[role] for role in _ROLES]
+    with server_operator_scope("u-1", roles=("operator",)):
+        recorded = selections.record_hypothesis_selection(
+            team_id,
+            {
+                "program": "XH-202619",
+                "theme": "cc-neuro-001",
+                "campaign": "cc-campaign-neuro-001",
+                "question": _QUESTION_ID,
+                "branch": "main",
+                "workflow": "hypothesis_first",
+                "agentId": agent_ids[0],
+                "mode": "dev",
+                "questionId": _QUESTION_ID,
+                "selectedCandidateIds": ["hyp-a", "hyp-b"],
+                "decidedBy": agent_ids[0],
+            },
+            agent_runner=_plain_runner,
+        )
+        meeting_id = recorded["reviewMeeting"]["meetingRound"]["meetingRoundId"]
+        drafted = meeting_runtime.prepare_meeting_summary_draft(
+            team_id, meeting_id, actor=agent_ids[0], force=False
+        )
+        assert drafted["status"] == "awaiting_approval"
+        assert not drafted["digestDraft"].get("evidenceRequests")
+
+        approved = chain.approve_meeting_digest(
+            team_id,
+            meeting_id,
+            closed_by=agent_ids[0],
+            expected_digest_content_hash=drafted["digestDraft"]["contentHash"],
+        )
+        assert approved["meetingRound"]["status"] == "closed"
+        decisions = approved.get("decisions") or []
+        assert decisions, "closure must record the confirm decision"
+        assert decisions[0]["decision"] == "close_round"

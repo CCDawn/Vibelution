@@ -344,6 +344,29 @@ export function resolveHypothesisFirstNextAction(
   const terminal = Boolean(input.boundChatRoundsTerminal);
   const state = input.chainState;
 
+  // Meeting gates come before the converged navigation: a round still walking
+  // its four-state gate is the actionable step, and the formal-pipeline
+  // navigation must not mask it (observed live: a chain already marked
+  // converged while its final review round sat in awaiting_approval offered
+  // only 前往资料搜集, hiding 确认并结束本轮).
+  if (generation && generation.status !== "closed") {
+    return meetingStage("generation", generation, terminal);
+  }
+
+  if (review && review.status !== "closed") {
+    const followUp = Boolean(review.previousMeetingRoundId);
+    if (review.status === "open" && !terminal && followUp) {
+      return action({
+        stage: "next_review",
+        targetNodeId: reviewMeetingNodeId(review),
+        navigationLabel: "前往下一轮讨论",
+        statusMessage: "下一轮讨论已开启",
+        meetingRoundId: review.meetingRoundId,
+      });
+    }
+    return meetingStage("review", review, terminal);
+  }
+
   if (state?.hypothesisConverged) {
     const runtimeNode = formalRuntimeNode(input);
     return action({
@@ -364,10 +387,6 @@ export function resolveHypothesisFirstNextAction(
     });
   }
 
-  if (generation && generation.status !== "closed") {
-    return meetingStage("generation", generation, terminal);
-  }
-
   if (!hasSelection(input) && candidateCount(input) === 0) {
     return action({
       stage: "generation_missing",
@@ -386,20 +405,6 @@ export function resolveHypothesisFirstNextAction(
       command: "record_selection",
       commandLabel: "记录选择并开启评审",
     });
-  }
-
-  if (review && review.status !== "closed") {
-    const followUp = Boolean(review.previousMeetingRoundId);
-    if (review.status === "open" && !terminal && followUp) {
-      return action({
-        stage: "next_review",
-        targetNodeId: reviewMeetingNodeId(review),
-        navigationLabel: "前往下一轮讨论",
-        statusMessage: "下一轮讨论已开启",
-        meetingRoundId: review.meetingRoundId,
-      });
-    }
-    return meetingStage("review", review, terminal);
   }
 
   if (request && request.status !== "handed_off" && !request.handoffRef) {
