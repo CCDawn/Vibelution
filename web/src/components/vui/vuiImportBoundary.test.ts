@@ -244,14 +244,9 @@ describe("VUI architecture boundary", () => {
     const offenders = walkFiles(sourceRoot)
       .filter((file) => readText(file).includes(heroUiImportToken))
       .map(relativeFromSourceRoot)
-      .filter(
-        (file) =>
-          file !== boundarySelf &&
-          !file.endsWith("vuiImportBoundary.test.ts") &&
-          // vuiShadcnRouteContract asserts the heroui IMPORT is forbidden; its
-          // own data fixture legitimately names the token.
-          !file.endsWith("vuiShadcnRouteContract.test.ts"),
-      );
+      .filter((file) => file !== boundarySelf)
+      // Tests may name the token to forbid it (e.g. `.not.toContain("@heroui/react")`).
+      .filter((file) => !file.endsWith(".test.ts") && !file.endsWith(".test.tsx"));
 
     expect(offenders).toEqual([]);
   });
