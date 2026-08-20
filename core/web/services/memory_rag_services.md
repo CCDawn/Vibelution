@@ -21,7 +21,7 @@
 | **统一只读搜索**（Agent/Team memory + 可选 user content） | `unified_knowledge_search_service.py` | unified search 写删除/索引；把 tool 授权塞进来 |
 | 用户 Markdown 空间（import/index/delete 语义） | `user_content_markdown_service.py`（route：`user_content.py`） | 与 formal knowledge JSONL 混写同一 owner 路径 |
 | 外部 Skill Library 索引/搜索 | `skill_library_service.py` | 与 team_knowledge 双写同一路径 |
-| 开源 GitHub 项目索引（全量克隆 + 生成 INDEX） | `github_project_library_service.py` | 把整仓正文写入 KnowledgeItem / RAG；未落盘就把网页当结论 |
+| 开源 GitHub 项目索引（默认主干浅克隆 + 生成 INDEX） | `github_project_library_service.py` | 把整仓正文写入 KnowledgeItem / RAG；未落盘就把网页当结论 |
 | ClaimEvidence（无 formal KB 副作用） | `research_evidence_service.py` | evidence 写入 team knowledge items |
 | HTTP 路由 / DTO | `memory.py` · `knowledge.py` · `user_content.py` | route 业务体；日志输出完整 memory body |
 

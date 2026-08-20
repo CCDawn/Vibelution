@@ -68,7 +68,7 @@ def github_project_library_clone_tool(
     """
     Clone a high-value public GitHub repo into the memory library, or fetch an existing clone.
 
-    Clone first, then research the local copy. Full clone, no submodules.
+    Clone first, then research the local copy. Depth-1 default branch only, no submodules.
     confirmation_required means ask the user before retrying with confirm=true.
     """
 

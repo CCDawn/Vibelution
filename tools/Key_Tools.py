@@ -2547,7 +2547,7 @@ def _build_key_tools() -> List[BaseTool]:
         【开源项目索引】只读检索记忆库中已落盘的 GitHub 项目卡片。
 
         命中后请读取 localPath/absolutePath 下的本地仓再调研，不要把网页或 API 摘要当结论。
-        未命中时改用 github_project_library_clone_tool 全量克隆公开仓。
+        未命中时改用 github_project_library_clone_tool 克隆公开仓的默认主干最新提交。
 
         Args:
             query: 按名字、描述、fullName、语言或许可过滤；空则列出当前索引
@@ -2565,9 +2565,9 @@ def _build_key_tools() -> List[BaseTool]:
         action: str = "clone",
     ) -> str:
         """
-        【开源项目落盘】把高价值公开 GitHub 仓全量克隆进记忆库，或对已有本地仓执行 fetch。
+        【开源项目落盘】把高价值公开 GitHub 仓的默认主干最新提交克隆进记忆库，或对已有本地仓执行 fetch。
 
-        只克隆公开仓，默认不拉子模块。单仓约 1GB 或可见项目达到 20 个时返回 confirmation_required，
+        只克隆公开仓，浅克隆（--depth 1 --single-branch），默认不拉子模块。单仓约 1GB 或可见项目达到 20 个时返回 confirmation_required，
         需用户确认后再带 confirm=true 重试。禁止把整仓正文写入正式知识库。
 
         Args:

@@ -73,7 +73,19 @@ def test_clone_writes_registry_and_generated_index(tmp_path, monkeypatch):
     listed = library.list_github_projects(query="workbench", project_root=tmp_path)
     assert listed["summary"]["readyCount"] == 1
     assert listed["projects"][0]["fullName"] == "acme/widget"
-    assert any(item[:1] == ["clone"] for item in calls)
+    clone_call = next(item for item in calls if item[:1] == ["clone"])
+    assert clone_call[:8] == [
+        "clone",
+        "--depth",
+        "1",
+        "--single-branch",
+        "--branch",
+        "main",
+        "--no-recurse-submodules",
+        "https://github.com/acme/widget.git",
+    ]
+    assert "浅克隆" in index_text
+    assert payload["message"].startswith("已克隆默认主干最新提交")
 
 
 def test_clone_is_idempotent_when_local_copy_exists(tmp_path, monkeypatch):
@@ -201,3 +213,63 @@ def test_rejects_private_repositories(tmp_path, monkeypatch):
     )
     with pytest.raises(library.GithubProjectLibraryError, match="public"):
         library.clone_github_project("acme/secret", project_root=tmp_path)
+
+
+def test_clone_follows_github_default_branch(tmp_path, monkeypatch):
+    calls: list[list[str]] = []
+
+    def fake_run_git(args, *, cwd, timeout=15.0, env=None):
+        calls.append(list(args))
+        dest = tmp_path / ".docs" / "project-memory" / "github-projects" / "repos" / "acme__widget"
+        if args[:1] == ["clone"]:
+            _fake_clone(dest, _metadata(defaultBranch="dev"))
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if args == ["rev-parse", "HEAD"]:
+            return SimpleNamespace(returncode=0, stdout="devtip\n", stderr="")
+        if args == ["rev-parse", "--abbrev-ref", "HEAD"]:
+            return SimpleNamespace(returncode=0, stdout="dev\n", stderr="")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(
+        library,
+        "fetch_github_repo_metadata",
+        lambda owner, repo: _metadata(owner, repo, defaultBranch="dev"),
+    )
+    monkeypatch.setattr(library, "run_git", fake_run_git)
+
+    payload = library.clone_github_project("acme/widget", project_root=tmp_path)
+    clone_call = next(item for item in calls if item[:1] == ["clone"])
+    assert clone_call[5] == "dev"
+    assert payload["project"]["defaultBranch"] == "dev"
+    assert payload["project"]["headSha"] == "devtip"
+
+
+def test_fetch_fast_forwards_default_branch_tip(tmp_path, monkeypatch):
+    calls: list[list[str]] = []
+
+    def fake_run_git(args, *, cwd, timeout=15.0, env=None):
+        calls.append(list(args))
+        dest = tmp_path / ".docs" / "project-memory" / "github-projects" / "repos" / "acme__widget"
+        if args[:1] == ["clone"]:
+            _fake_clone(dest, _metadata())
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if args[:1] == ["fetch"]:
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        if args == ["merge", "--ff-only", "FETCH_HEAD"]:
+            return SimpleNamespace(returncode=0, stdout="Already up to date.\n", stderr="")
+        if args == ["rev-parse", "HEAD"]:
+            return SimpleNamespace(returncode=0, stdout="newsha\n", stderr="")
+        if args == ["rev-parse", "--abbrev-ref", "HEAD"]:
+            return SimpleNamespace(returncode=0, stdout="main\n", stderr="")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(library, "fetch_github_repo_metadata", lambda owner, repo: _metadata(owner, repo))
+    monkeypatch.setattr(library, "run_git", fake_run_git)
+
+    library.clone_github_project("acme/widget", project_root=tmp_path)
+    updated = library.fetch_github_project("acme/widget", project_root=tmp_path)
+
+    assert updated["status"] == "updated"
+    assert updated["project"]["headSha"] == "newsha"
+    assert ["fetch", "--depth", "1", "--no-recurse-submodules", "origin", "main"] in calls
+    assert ["merge", "--ff-only", "FETCH_HEAD"] in calls

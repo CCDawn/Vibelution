@@ -1,11 +1,14 @@
 """Persistent GitHub OSS project library under project memory.
 
+Clones the GitHub default branch at depth 1 (latest tip, no history).
+
 §2.2 ranking (locked alignment):
 - Local: `skill_library_service` registry + generated INDEX — ADAPT.
 - Local: `no_console_git.run_git` for windowless clone/fetch — REUSE.
 - Local: public catalog mixed-read (metadata, then open locator) — ADAPT.
+- External: Git `clone --depth 1 --single-branch --branch <default>` — ADAPT.
 - External: Hugging Face hub cache naming (`owner__name`) — naming only.
-Not borrowed: Zoekt/Sourcegraph engines; dumping clone bodies into RAG.
+Not borrowed: blobless/partial clone; GitHub zipballs; Zoekt/Sourcegraph; dumping clone bodies into RAG.
 """
 
 from __future__ import annotations
@@ -160,7 +163,11 @@ def clone_github_project(
         clone_url = str(metadata.get("cloneUrl") or f"https://github.com/{owner}/{repo}.git")
         try:
             completed = run_git(
-                ["clone", "--no-recurse-submodules", clone_url, str(dest)],
+                _clone_git_args(
+                    clone_url,
+                    dest,
+                    str(metadata.get("defaultBranch") or "main"),
+                ),
                 cwd=root / REPOS_DIRNAME,
                 timeout=CLONE_TIMEOUT_SECONDS,
             )
@@ -188,7 +195,7 @@ def clone_github_project(
         return {
             "ok": True,
             "status": "cloned",
-            "message": "已全量克隆到记忆库。后续调研请读本地路径，不要把网页当结论。",
+            "message": "已克隆默认主干最新提交到记忆库（不含历史）。后续调研请读本地路径，不要把网页当结论。",
             "project": _project_api(root, record),
             "library": _library_payload(root, registry),
         }
@@ -213,10 +220,19 @@ def fetch_github_project(project_id: str, *, project_root: Path | None = None) -
         dest = _repo_dir(root, normalized)
         if not dest.is_dir():
             raise GithubProjectLibraryError("Local clone is missing; clone the project again.")
-        completed = run_git(["fetch", "--no-recurse-submodules", "origin"], cwd=dest, timeout=FETCH_TIMEOUT_SECONDS)
+        branch = _default_branch_name(existing.get("defaultBranch"))
+        completed = run_git(
+            ["fetch", "--depth", "1", "--no-recurse-submodules", "origin", branch],
+            cwd=dest,
+            timeout=FETCH_TIMEOUT_SECONDS,
+        )
         if getattr(completed, "returncode", 1) != 0:
             stderr = trim_lines(str(getattr(completed, "stderr", "") or ""), max_lines=6).strip()
             raise GithubProjectLibraryError(stderr or "git fetch failed.")
+        merged = run_git(["merge", "--ff-only", "FETCH_HEAD"], cwd=dest, timeout=30.0)
+        if getattr(merged, "returncode", 1) != 0:
+            stderr = trim_lines(str(getattr(merged, "stderr", "") or ""), max_lines=6).strip()
+            raise GithubProjectLibraryError(stderr or "git merge --ff-only failed.")
         inspected = _inspect_clone(dest, existing)
         existing.update(inspected)
         existing["status"] = "ready"
@@ -227,7 +243,7 @@ def fetch_github_project(project_id: str, *, project_root: Path | None = None) -
         return {
             "ok": True,
             "status": "updated",
-            "message": "已 fetch 远程并刷新索引 SHA。",
+            "message": "已把默认主干快进到最新提交并刷新索引 SHA。",
             "project": _project_api(root, existing),
             "library": _library_payload(root, registry),
         }
@@ -417,7 +433,7 @@ def _write_index(root: Path, registry: dict[str, Any]) -> None:
         [
             "# 开源项目索引",
             "",
-            "借鉴外部 GitHub 项目时：先查本表 → 未命中则全量克隆到本目录 → 再对本地仓调研。",
+            "借鉴外部 GitHub 项目时：先查本表 → 未命中则克隆默认主干最新提交到本目录（浅克隆，不拉历史）→ 再对本地仓调研。",
             "不要把整仓正文写入正式知识库或 RAG。子模块默认不拉。",
             "",
             "路径解析：`python scripts/migrate_project_storage.py inventory` 的 `activePaths.memory/github-projects/`。",
@@ -494,7 +510,28 @@ def _confirmation_message(reason: str, metadata: dict[str, Any], visible_count: 
     if reason == "repo_count_limit":
         return f"记忆库已有 {visible_count} 个开源项目（上限 {MAX_PROJECTS}）。确认后再克隆 {full_name}。"
     size_kb = int(metadata.get("sizeKb") or 0)
-    return f"{full_name} 约 {size_kb} KiB，超过单仓约 1GB 上限。确认后再全量克隆。"
+    return f"{full_name} 约 {size_kb} KiB，超过单仓约 1GB 上限。确认后再克隆默认主干最新提交。"
+
+
+def _clone_git_args(clone_url: str, dest: Path, default_branch: str) -> list[str]:
+    return [
+        "clone",
+        "--depth",
+        "1",
+        "--single-branch",
+        "--branch",
+        _default_branch_name(default_branch),
+        "--no-recurse-submodules",
+        clone_url,
+        str(dest),
+    ]
+
+
+def _default_branch_name(value: Any) -> str:
+    branch = str(value or "main").strip()
+    if not branch or branch.upper() == "HEAD":
+        return "main"
+    return branch
 
 
 def _md_cell(value: Any) -> str:
