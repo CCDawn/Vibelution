@@ -8,6 +8,7 @@
 
 import { fetchJson } from "./client";
 import type {
+  CandidateEvidenceTrailResponse,
   CloseReviewMeetingResponse,
   CollectionHandoffResponse,
   CollectionRequestListResponse,
@@ -101,6 +102,17 @@ export function fetchHypothesisSelectionContext(
 ): Promise<HypothesisSelectionContext> {
   return fetchJson<HypothesisSelectionContext>(
     `${teamPrefix(teamId)}/hypothesis-first/questions/${encodeURIComponent(questionId)}/selection-context`,
+    { signal: options?.signal },
+  );
+}
+
+export function fetchCandidateEvidenceTrail(
+  teamId: string,
+  questionId: string,
+  options?: { signal?: AbortSignal },
+): Promise<CandidateEvidenceTrailResponse> {
+  return fetchJson<CandidateEvidenceTrailResponse>(
+    `${teamPrefix(teamId)}/hypothesis-first/questions/${encodeURIComponent(questionId)}/candidates/evidence-trail`,
     { signal: options?.signal },
   );
 }

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
+  fetchCandidateEvidenceTrail,
   fetchHypothesisSelectionContext,
   recordHypothesisSelection,
 } from "../../../api/hypothesisFirst";
@@ -71,6 +72,17 @@ export function HypothesisSelectionList({
       invalidateHypothesisFirstQueries(queryClient, teamId, questionId);
     },
   });
+
+  const [expandedCandidateId, setExpandedCandidateId] = useState<string | null>(null);
+  const trailQuery = useQuery({
+    queryKey: ["hypothesis-first", "candidate-evidence-trail", teamId, questionId],
+    queryFn: ({ signal }) => fetchCandidateEvidenceTrail(teamId, questionId, { signal }),
+    enabled: Boolean(teamId && questionId && expandedCandidateId),
+    staleTime: 30_000,
+  });
+  const trailByCandidate = new Map(
+    (trailQuery.data?.trails ?? []).map((trail) => [trail.candidateId, trail.entries]),
+  );
 
   if (contextQuery.isPending) {
     return <VStateSurface title={isZh ? "正在读取假说选择上下文" : "Loading hypothesis selection context"} tone="loading" />;
@@ -185,8 +197,50 @@ export function HypothesisSelectionList({
               </div>
               <div className={css.candidateMeta}>
                   <span>{isZh ? `预测 ${candidate.predictions.length} 条` : `${candidate.predictions.length} predictions`}</span>
-                  <span>{isZh ? `支持证据 ${candidate.supporting_evidence_refs.length} 条` : `${candidate.supporting_evidence_refs.length} supporting evidence`}</span>
+                  <VButton
+                    density="compact"
+                    variant="ghost"
+                    className={css.trailToggle}
+                    aria-expanded={expandedCandidateId === candidate.hypothesis_id}
+                    onPress={() =>
+                      setExpandedCandidateId((current) =>
+                        current === candidate.hypothesis_id ? null : candidate.hypothesis_id,
+                      )
+                    }
+                  >
+                    {expandedCandidateId === candidate.hypothesis_id
+                      ? (isZh ? "收起证据轨迹" : "Hide evidence trail")
+                      : (isZh ? "查看证据轨迹" : "View evidence trail")}
+                  </VButton>
                 </div>
+                {expandedCandidateId === candidate.hypothesis_id ? (
+                  <div className={css.evidenceTrail} data-testid="candidate-evidence-trail">
+                    {trailQuery.isPending ? (
+                      <p className={css.trailHint}>{isZh ? "正在读取证据轨迹…" : "Loading evidence trail…"}</p>
+                    ) : trailQuery.isError ? (
+                      <p className={css.trailHint}>
+                        {isZh ? "证据轨迹暂不可用" : "Evidence trail unavailable"}
+                      </p>
+                    ) : (trailByCandidate.get(candidate.hypothesis_id)?.length ?? 0) === 0 ? (
+                      <p className={css.trailHint}>
+                        {isZh
+                          ? "尚无讨论发言引用该候选；证据锚点会在评审讨论后出现在这里。"
+                          : "No discussion speech cites this candidate yet."}
+                      </p>
+                    ) : (
+                      <ul className={css.trailList}>
+                        {(trailByCandidate.get(candidate.hypothesis_id) ?? []).map((entry) => (
+                          <li key={`${entry.meetingRoundId}:${entry.messageId}`}>
+                            <span className={css.trailSource}>
+                              {entry.meetingLabel} · {entry.speaker}
+                            </span>
+                            <p className={css.trailExcerpt}>{entry.excerpt}</p>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                ) : null}
             </article>
           );
         })}

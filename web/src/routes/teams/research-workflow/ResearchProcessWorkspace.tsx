@@ -3,6 +3,7 @@ import { useCallback, useMemo, type ReactNode } from "react";
 import { WORKBENCH_LAYOUT_IDS } from "../../../components/layout/workbenchLayoutIds";
 import { VCanvasWorkbenchPage } from "../../../components/vui";
 import { buildHypothesisFirstCanvasRegion } from "./hypothesisFirstCanvasRegion";
+import { ResearchCommandPalette } from "./ResearchCommandPalette";
 import { fetchHypothesisFirstFocusNode } from "./hypothesisFirstFocus";
 import {
   isHypothesisFirstDiscussionActive,
@@ -159,6 +160,7 @@ export function ResearchProcessWorkspace({
     });
   }, [experimentOptions, location, teamId]);
 
+
   const formalRuntimeActive = Boolean(hypothesisFirstChain.chainState?.hypothesisConverged);
   const formalRuntimeCurrentNodeIds = formalRuntimeActive
     ? (runState.projection?.run.runtimeCurrentNodeIds ?? EMPTY_RUNTIME_NODE_IDS)
@@ -219,6 +221,14 @@ export function ResearchProcessWorkspace({
 
   return (
     <div data-fill="true" data-vui="research-process-workspace-host" className={styles.host}>
+      <ResearchCommandPalette
+        questions={catalog.questions}
+        nextAction={nextAction}
+        hasRun={Boolean(location.runId)}
+        onSelectExperiment={selectExperiment}
+        onOpenPanel={(panel) => location.openPanel(panel)}
+        onNavigateNode={(nodeId) => location.replaceParams({ node: nodeId, panel: "node" })}
+      />
       <VCanvasWorkbenchPage
         data-vui="research-process-workspace"
         domainRecipe="research-process-workflow"

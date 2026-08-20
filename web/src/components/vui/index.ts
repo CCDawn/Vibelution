@@ -148,6 +148,12 @@ export { VTabs, type VTabsItem, type VTabsProps } from "./layout/VTabs";
 export { VToolbar, type VToolbarProps } from "./layout/VToolbar";
 export { VWorkbenchPage, type VWorkbenchPageProps } from "./layout/VWorkbenchPage";
 export {
+  VCommandPalette,
+  type VCommandPaletteItem,
+  type VCommandPaletteLabels,
+  type VCommandPaletteProps,
+} from "./product/workbench-shell";
+export {
   VWorkbenchPowerMenu,
   type VWorkbenchPowerMenuAction,
   type VWorkbenchPowerMenuLabels,

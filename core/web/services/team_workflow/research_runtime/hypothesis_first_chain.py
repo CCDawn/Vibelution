@@ -531,6 +531,97 @@ def _question_generation_meetings(team_id: str, question_id: str) -> list[dict[s
     ]
 
 
+def candidate_evidence_trail(
+    team_id: str,
+    question_id: str,
+    *,
+    excerpt_chars: int = 240,
+) -> dict[str, Any]:
+    """Per-candidate trail of discussion messages that cite it.
+
+    Cold-start candidates carry no structured ``supporting_evidence_refs``;
+    their real evidence lives in the generation and review speeches that
+    mention the candidate id alongside literature anchors (PaperQA2-style
+    click-through, built on data that exists). Each trail entry is a cited
+    excerpt: meeting label, speaker, message id, and a window around the
+    candidate mention.
+    """
+    from core.web.services import team_service
+    from core.web.services.team_workflow import meeting_rounds
+
+    normalized_team_id = team_service.assert_team_exists(team_id)
+    normalized_question_id = str(question_id or "").strip().upper()
+    if not normalized_question_id:
+        raise ContractValidationError("questionId is required")
+
+    candidates = [
+        record
+        for record in _records(normalized_team_id)
+        if str(record.get("recordKind") or "") == CANDIDATE_KIND
+        and str(record.get("questionId") or "").upper() == normalized_question_id
+    ]
+    candidate_ids = [
+        str(record.get("candidateId") or "").strip()
+        for record in candidates
+        if str(record.get("candidateId") or "").strip()
+    ]
+
+    trail: dict[str, list[dict[str, Any]]] = {cid: [] for cid in candidate_ids}
+    meetings = meeting_rounds.list_meeting_rounds(normalized_team_id)["meetings"]
+    question_meetings = [
+        meeting
+        for meeting in meetings
+        if str(meeting.get("question") or "").upper() == normalized_question_id
+        and str(meeting.get("meetingType") or "")
+        in {CANDIDATE_GENERATION_MEETING_TYPE, HYPOTHESIS_REVIEW_MEETING_TYPE}
+    ]
+    for meeting in question_meetings:
+        meeting_round_id = str(meeting.get("meetingRoundId") or "")
+        label = (
+            "候选生成"
+            if str(meeting.get("meetingType") or "") == CANDIDATE_GENERATION_MEETING_TYPE
+            else f"评审 {meeting_round_id.rsplit('-', 1)[-1]}"
+        )
+        for message in meeting_rounds.completed_meeting_source_messages(meeting):
+            content = str(message.get("content") or "")
+            message_id = str(message.get("messageId") or "")
+            speaker = (
+                str(message.get("speakerTitle") or "").strip()
+                or str(message.get("participantId") or "").strip()
+                or "participant"
+            )
+            for cid in candidate_ids:
+                index = content.find(cid)
+                if index < 0:
+                    continue
+                start = max(0, index - excerpt_chars // 3)
+                excerpt = content[start : start + excerpt_chars].strip()
+                trail[cid].append(
+                    {
+                        "meetingRoundId": meeting_round_id,
+                        "meetingLabel": label,
+                        "messageId": message_id,
+                        "speaker": speaker,
+                        "excerpt": excerpt,
+                        "createdAt": str(message.get("createdAt") or ""),
+                    }
+                )
+
+    for entries in trail.values():
+        entries.sort(key=lambda item: str(item.get("createdAt") or ""))
+
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "questionId": normalized_question_id,
+        "trails": [
+            {"candidateId": cid, "entries": trail[cid]}
+            for cid in candidate_ids
+        ],
+        "storagePath": str(_storage_path(normalized_team_id)),
+    }
+
+
 def list_hypothesis_candidates(team_id: str, *, question_id: str = "") -> dict[str, Any]:
     """List ledger-registered hypothesis candidates (round-0 output)."""
     from core.web.services import team_service

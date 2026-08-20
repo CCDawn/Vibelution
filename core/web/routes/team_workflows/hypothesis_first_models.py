@@ -211,6 +211,34 @@ class HypothesisSelectionListResponse(BaseModel):
     storagePath: str = ""
 
 
+class CandidateEvidenceEntry(BaseModel):
+    """One cited discussion excerpt for a candidate (PaperQA2-style trail)."""
+
+    meetingRoundId: str = ""
+    meetingLabel: str = ""
+    messageId: str = ""
+    speaker: str = ""
+    excerpt: str = ""
+    createdAt: str = ""
+
+
+class CandidateEvidenceTrail(BaseModel):
+    candidateId: str
+    entries: list[CandidateEvidenceEntry] = Field(default_factory=list)
+
+
+class CandidateEvidenceTrailResponse(BaseModel):
+    """Result of ``GET .../candidates/evidence-trail``."""
+
+    model_config = ConfigDict(extra="allow")
+
+    schemaVersion: int = 0
+    teamId: str = ""
+    questionId: str = ""
+    trails: list[CandidateEvidenceTrail] = Field(default_factory=list)
+    storagePath: str = ""
+
+
 class SelectionContextResponse(BaseModel):
     """Server-derived scope + candidate context for the selection UI."""
 

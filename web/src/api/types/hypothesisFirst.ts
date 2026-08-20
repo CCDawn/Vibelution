@@ -74,6 +74,28 @@ export type HypothesisSelectionListResponse = {
   storagePath?: string;
 };
 
+export type CandidateEvidenceEntry = {
+  meetingRoundId: string;
+  meetingLabel: string;
+  messageId: string;
+  speaker: string;
+  excerpt: string;
+  createdAt: string;
+};
+
+export type CandidateEvidenceTrail = {
+  candidateId: string;
+  entries: CandidateEvidenceEntry[];
+};
+
+export type CandidateEvidenceTrailResponse = {
+  schemaVersion: number;
+  teamId: string;
+  questionId: string;
+  trails: CandidateEvidenceTrail[];
+  storagePath?: string;
+};
+
 export type HypothesisSelectionContext = {
   schemaVersion: number;
   teamId: string;
