@@ -599,9 +599,37 @@ def test_reconcile_missing_path_closes_leftover_open_claim_without_deleting_unkn
     assert "closed_missing_worktree_claim" in summary["instances"][0]["reasons"]
     assert stored["desiredState"] == "closed"
     assert stored["status"] == "closed"
-    assert stored["phase"] == "failed"
-    assert stored["failureMessage"] == "worktree_path_missing"
+    assert stored["phase"] == "steady"
+    assert stored.get("failureMessage") in {"", None}
     assert stored["port"] == 8004
+
+
+def test_reconcile_missing_path_clears_sticky_worktree_path_missing_failure(registry_path):
+    registry.upsert_instance(
+        "ghost-stuck",
+        projectRoot="C:/missing/ghost-stuck",
+        port=8004,
+        desiredState="closed",
+        status="closed",
+        phase="failed",
+        failureMessage="worktree_path_missing",
+    )
+    summary = registry.reconcile_registry(
+        git_worktree_roots=[],
+        electron_window_instance_ids=[],
+        now=datetime(2026, 8, 19, 6, tzinfo=UTC),
+        identity_inspector=lambda _identity: {"status": "dead"},
+        listener_inspector=lambda _port, _identities: {"status": "none"},
+        pid_existence_inspector=lambda _pid: False,
+    )
+    stored = registry.get_instance("ghost-stuck")
+
+    assert summary["removedInstanceIds"] == []
+    assert "closed_missing_worktree_claim" in summary["instances"][0]["reasons"]
+    assert stored["desiredState"] == "closed"
+    assert stored["status"] == "closed"
+    assert stored["phase"] == "steady"
+    assert stored.get("failureMessage") in {"", None}
 
 
 def test_reconcile_legacy_running_without_deadline_closes_when_path_missing(registry_path):

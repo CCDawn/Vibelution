@@ -364,6 +364,27 @@ describe("LauncherBranchInstancesPanel contracts", () => {
     expect(canStopInstance(unknownStarting, { instanceId: unknownStarting.id, operation: "start" })).toBe(true);
   });
 
+  it("lets an unknown missing-worktree leftover close without cleanup", () => {
+    const missing = instance({
+      id: "retired:agent-config-focused-implementation",
+      kind: "retired",
+      checkedOut: false,
+      startable: false,
+      startBlockReason: "unsupported_kind",
+      runtime: {
+        ...instance().runtime,
+        lifecycleState: "error",
+        registryClassification: "unknown",
+        error: { code: "runtime_error", message: "worktree_path_missing" },
+      },
+    });
+
+    expect(canStopInstance(missing)).toBe(true);
+    expect(instanceStopLabel(missing, true)).toBe("关闭");
+    expect(canRequestOpenInstance(missing)).toBe(false);
+    expect(canStartInstance(missing)).toBe(false);
+  });
+
   it("does not present a reserved port as a running backend", () => {
     const stopped = instance({
       port: 8005,

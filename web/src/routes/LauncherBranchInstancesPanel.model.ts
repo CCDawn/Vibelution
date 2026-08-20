@@ -584,7 +584,10 @@ export function canStopInstance(item: LauncherBranchInstance, pending?: Lifecycl
   }
   const startingOrRestarting = state === "starting" || state === "restarting";
   if (isUnknownRegistryInstance(item) && !instanceHasLiveRuntime(item) && !startingOrRestarting) {
-    return false;
+    const dismissableMissingWorktree = state === "failed" && instanceErrorMessage(item) === "worktree_path_missing";
+    if (!dismissableMissingWorktree) {
+      return false;
+    }
   }
   const failedLeftover = (state === "failed" || state === "partial") && !instanceHasLiveRuntime(item);
   return (isOperableInstance(item) || failedLeftover)

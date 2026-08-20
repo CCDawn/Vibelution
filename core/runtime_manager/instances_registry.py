@@ -420,26 +420,33 @@ def _deadline_expired(entry: dict[str, Any], now: datetime) -> bool:
 
 _OPEN_REGISTRY_STATUSES = frozenset({"starting", "restarting", "running", "steady", "stopping"})
 _OPEN_DESIRED_STATES = frozenset({"open", "opening"})
-_OPEN_PHASES = frozenset({"starting", "restarting", "opening", "stopping", "steady"})
+_LEFTOVER_OPEN_PHASES = frozenset({"starting", "restarting", "opening", "stopping", "failed"})
 
 
 def _close_leftover_open_claim(entry: dict[str, Any], now: datetime) -> bool:
-    """Close desired/status leftovers for a missing worktree without deleting metadata."""
+    """Close leftover claims for a missing worktree without deleting metadata.
+
+    A missing path is already a completed close. Do not leave ``phase=failed``
+    plus ``failureMessage=worktree_path_missing``: that projects as 需要处理,
+    while unknown leftovers are diagnostic-only and have no Close action.
+    """
     changed = False
     status = str(entry.get("status") or "").strip().lower()
     desired = str(entry.get("desiredState") or "").strip().lower()
     phase = str(entry.get("phase") or "").strip().lower()
-    if status in _OPEN_REGISTRY_STATUSES:
+    failure = str(entry.get("failureMessage") or "").strip()
+    if status in _OPEN_REGISTRY_STATUSES or status == "failed":
         entry["status"] = "closed"
         changed = True
     if desired in _OPEN_DESIRED_STATES:
         entry["desiredState"] = "closed"
         changed = True
-    if phase in _OPEN_PHASES:
-        entry["phase"] = "failed"
+    if phase in _LEFTOVER_OPEN_PHASES:
+        entry["phase"] = "steady"
         changed = True
-    if changed and not str(entry.get("failureMessage") or "").strip():
-        entry["failureMessage"] = "worktree_path_missing"
+    if failure:
+        entry["failureMessage"] = ""
+        changed = True
     if changed:
         _touch_entry(entry, now=now)
     return changed
