@@ -9,8 +9,11 @@ import {
 import {
   executeMainLineWorkbench,
   mainLineBackendIsReachable,
+  mainLineBackendIsReusable,
+  mainLineRunningCodeIsCurrent,
   resolveNoConsolePython,
   resolveNodeExecutable,
+  sameProjectRoot,
   workbenchBackendArgs,
   workbenchBackendEnv
 } from "../src/process/workbenchBackend.js";
@@ -329,6 +332,68 @@ describe("mainLineBackendIsReachable", () => {
         connect: async () => false
       })
     ).resolves.toBe(false);
+  });
+});
+
+describe("mainLineBackendIsReusable", () => {
+  const live = {
+    readState: () => ({ backendPid: 4242, backendPort: 8002, host: "127.0.0.1" }),
+    pidAlive: (pid: number) => pid === 4242,
+    connect: async () => true
+  };
+  const fingerprint = {
+    schemaVersion: 1,
+    projectRoot: "C:/repo",
+    runningHead: "abc123def456"
+  };
+
+  it("reuses only when the live backend was started from this checkout HEAD", async () => {
+    await expect(
+      mainLineBackendIsReusable("C:/repo", {
+        ...live,
+        fingerprint,
+        diskHead: "abc123def456"
+      })
+    ).resolves.toBe(true);
+  });
+
+  it("does not reuse a live backend from another project root", async () => {
+    await expect(
+      mainLineBackendIsReusable("C:/repo", {
+        ...live,
+        fingerprint: { ...fingerprint, projectRoot: "D:/other" },
+        diskHead: "abc123def456"
+      })
+    ).resolves.toBe(false);
+  });
+
+  it("does not reuse a live backend that is behind disk HEAD", async () => {
+    await expect(
+      mainLineBackendIsReusable("C:/repo", {
+        ...live,
+        fingerprint,
+        diskHead: "fff000111222"
+      })
+    ).resolves.toBe(false);
+  });
+
+  it("does not reuse when the running-code fingerprint is missing", async () => {
+    await expect(
+      mainLineBackendIsReusable("C:/repo", {
+        ...live,
+        fingerprint: null,
+        diskHead: "abc123def456"
+      })
+    ).resolves.toBe(false);
+  });
+
+  it("treats slash and case differences as the same Windows project root", () => {
+    expect(sameProjectRoot("C:\\repo\\", "c:/repo")).toBe(true);
+    expect(mainLineRunningCodeIsCurrent({
+      workspaceRoot: "C:\\repo",
+      fingerprint: { schemaVersion: 1, projectRoot: "c:/repo", runningHead: "abc" },
+      diskHead: "abc"
+    })).toBe(true);
   });
 });
 
