@@ -168,6 +168,9 @@ export type MeetingRoundRecord = HypothesisFirstScope & {
   chatRoomRoundIds?: string[];
   digestDraft?: MeetingDigestDraft | null;
   decisionRefs?: string[];
+  /** Ledger field for the closed meeting digest; `digestRef` never existed server-side. */
+  digestId?: string;
+  /** @deprecated legacy frontend-only name; kept only so old snapshots still parse. */
   digestRef?: string;
   closureHash?: string;
   roundIndex?: number;
