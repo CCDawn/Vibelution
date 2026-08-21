@@ -53,6 +53,7 @@ export type NodeInspectorOpsCardProps = {
   meters: NodeInspectorBudgetMeter[];
   primaryOffer: CommandOffer | null;
   busy: boolean;
+  readOnly?: boolean;
   onOffer?: (offer: CommandOffer) => Promise<void>;
   sessionHref: string | null;
   sessionDisabledReason?: string;
@@ -102,7 +103,7 @@ export function NodeInspectorOpsCard(props: NodeInspectorOpsCardProps) {
   const [pendingPromote, setPendingPromote] = useState<AgentModelChoice | null>(null);
   const [offerError, setOfferError] = useState<string | null>(null);
   const isZh = props.lang !== "en";
-  const modelDisabled = props.unbound || props.modelPending;
+  const modelDisabled = props.readOnly || props.unbound || props.modelPending;
   const groups = useMemo(
     () => groupAgentModelCandidates(props.candidates, "dialogue", query),
     [props.candidates, query],
@@ -139,7 +140,7 @@ export function NodeInspectorOpsCard(props: NodeInspectorOpsCardProps) {
         <div className={styles.identityCopy}>
           <strong className={styles.name}>{props.unbound ? (isZh ? "未指定 Agent" : "No agent assigned") : props.agentName}</strong>
         </div>
-        {props.agentSwitchDisabled || !props.agents.length ? (
+        {props.readOnly || props.agentSwitchDisabled || !props.agents.length ? (
           <VIconButton
             label={isZh ? "更换 Agent" : "Change agent"}
             icon={<Users size={15} />}

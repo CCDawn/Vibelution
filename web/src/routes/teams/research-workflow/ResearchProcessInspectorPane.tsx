@@ -41,6 +41,15 @@ import styles from "./ResearchProcessInspectorPane.styles";
 
 type ReplaceParams = (patch: Record<string, string | null | undefined>) => void;
 
+export function ownsResearchCurrentTask(
+  selectedNodeId: string | null | undefined,
+  currentTaskNodeId: string | null | undefined,
+): boolean {
+  const selected = selectedNodeId?.trim();
+  const current = currentTaskNodeId?.trim();
+  return Boolean(selected && current && selected === current);
+}
+
 export function ResearchProcessInspectorPane(props: {
   lang?: "zh" | "en";
   scope: {
@@ -97,7 +106,7 @@ export function ResearchProcessInspectorPane(props: {
       );
     }
     return (
-      <div className={styles.question}>
+      <div className={styles.question} data-vui="research-question-archive">
         <ChallengeQuestionDetailPanel
           requestedQuestionId={scope.questionId}
           teamId={scope.teamId}
@@ -179,6 +188,7 @@ export function ResearchProcessInspectorPane(props: {
   }
   if (state.nodeDetail.kind === "empty") return <ResearchCenteredEmptyState title={isZh ? "暂无节点详情" : "No node details yet"} />;
   if (state.nodeDetail.kind !== "ready") return <ResearchCenteredEmptyState title={isZh ? "暂无节点详情" : "No node details yet"} />;
+  const isCurrentTask = ownsResearchCurrentTask(scope.selectedNodeId, nextAction?.targetNodeId);
   return (
     <ResearchProcessNodeInspector
       teamId={scope.teamId}
@@ -190,6 +200,7 @@ export function ResearchProcessInspectorPane(props: {
       handoffs={handoffsForNode(state.insights.handoffs?.handoffs ?? [], scope.selectedNodeId)}
       handoffPending={Boolean(actions.pendingTaskId(scope.selectedNodeId))}
       busy={state.busy}
+      isCurrentTask={isCurrentTask}
       onOffer={actions.submitOffer}
       hideStartOffer={Boolean(nextAction && shouldHideSourceFindingStart(nextAction.stage) && scope.selectedNodeId === "source_finding")}
       statusBanner={

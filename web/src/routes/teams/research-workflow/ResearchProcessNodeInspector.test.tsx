@@ -67,6 +67,7 @@ function renderInspector(detail: ResearchWorkflowNodeDetail | null, extras: {
   nodeId?: string | null;
   adapter?: ReturnType<typeof getNodeAdapter>;
   handoffPending?: boolean;
+  isCurrentTask?: boolean;
   hideStartOffer?: boolean;
   statusBanner?: string | null;
 } = {}) {
@@ -81,6 +82,7 @@ function renderInspector(detail: ResearchWorkflowNodeDetail | null, extras: {
       handoffs={[]}
       handoffPending={Boolean(extras.handoffPending)}
       busy={false}
+      isCurrentTask={extras.isCurrentTask}
       onOffer={vi.fn()}
       hideStartOffer={extras.hideStartOffer}
       statusBanner={extras.statusBanner}
@@ -106,6 +108,15 @@ describe("ResearchProcessNodeInspector command rendering", () => {
   it("renders backend-declared available CommandOffers as buttons", () => {
     const markup = renderInspector(makeDetail());
     expect(markup).toContain("启动 资料寻找");
+  });
+
+  it("keeps historical formal nodes read-only", () => {
+    const markup = renderInspector(makeDetail(), { isCurrentTask: false });
+    expect(markup).toContain('data-testid="node-inspector-readonly"');
+    expect(markup).toContain("历史节点只读");
+    expect(markup).not.toContain("启动 资料寻找");
+    expect(markup).not.toContain('data-vui="node-commands"');
+    expect(markup).toContain('data-testid="node-inspector-model-trigger" disabled');
   });
 
   it("renders fork_revision from the signed offer label", () => {

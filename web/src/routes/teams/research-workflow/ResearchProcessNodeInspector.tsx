@@ -27,6 +27,8 @@ export type ResearchProcessNodeInspectorProps = {
   handoffs?: NodeHandoffRecord[];
   handoffPending: boolean;
   busy: boolean;
+  /** Historical formal nodes expose evidence only; the current task owns writes. */
+  isCurrentTask?: boolean;
   onOffer: (offer: CommandOffer) => Promise<void>;
   hideStartOffer?: boolean;
   statusBanner?: string | null;
@@ -57,15 +59,16 @@ export function ResearchProcessNodeInspector(props: ResearchProcessNodeInspector
   }
 
   const { adapter, detail } = props;
+  const isCurrentTask = props.isCurrentTask !== false;
   const offers = props.hideStartOffer
     ? withoutStartNodeOffers(detail.commandOffers)
     : (detail.commandOffers ?? []);
-  const primaryOffer = adapter.actorKind === "agent"
+  const primaryOffer = isCurrentTask && adapter.actorKind === "agent"
     ? pickPrimaryCommandOffer(offers)
     : null;
-  const restOffers = adapter.actorKind === "agent"
+  const restOffers = isCurrentTask && adapter.actorKind === "agent"
     ? remainingCommandOffers(offers, primaryOffer)
-    : offers;
+    : isCurrentTask ? offers : [];
   const showHypothesisNav = Boolean(
     props.onNavigateHypothesis
     && (props.hypothesisNavLabel || (primaryOffer && isHypothesisFirstMeetingBlocker(primaryOffer))),
@@ -83,6 +86,7 @@ export function ResearchProcessNodeInspector(props: ResearchProcessNodeInspector
           budget={props.budget}
           primaryOffer={primaryOffer}
           busy={props.busy}
+          readOnly={!isCurrentTask}
           onOffer={props.onOffer}
           lang={lang}
         />
@@ -97,6 +101,11 @@ export function ResearchProcessNodeInspector(props: ResearchProcessNodeInspector
         <div role="status" className={styles.status}>{props.statusBanner}</div>
       ) : null}
       {adapter.actorKind === "agent" ? <NodeSessionSection detail={detail} /> : null}
+      {!isCurrentTask ? (
+        <p className={styles.status} role="note" data-testid="node-inspector-readonly">
+          {isZh ? "历史节点只读；请前往当前任务执行操作。" : "Historical node is read-only; go to the current task to act."}
+        </p>
+      ) : null}
       {showHypothesisNav ? (
         <div className={styles.nav}>
           <VButton

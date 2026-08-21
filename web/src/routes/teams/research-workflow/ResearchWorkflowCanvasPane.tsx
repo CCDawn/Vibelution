@@ -12,10 +12,16 @@ export const ResearchWorkflowCanvasPane = memo(function ResearchWorkflowCanvasPa
   graph: WorkflowLayoutInput | null;
   selectedNodeId: string | null;
   runtimeCurrentNodeIds: string[];
+  /** Hypothesis-first current task, independent from the formal run cursor. */
+  currentTaskNodeId?: string | null;
   error: string | null;
   onSelectNode: (nodeId: string | null) => void;
 }) {
   const { lang } = useShellI18n();
+  const currentNodeIds = resolveCanvasCurrentNodeIds(
+    props.runtimeCurrentNodeIds,
+    props.currentTaskNodeId,
+  );
   return (
     <div
       className={styles.root}
@@ -35,7 +41,7 @@ export const ResearchWorkflowCanvasPane = memo(function ResearchWorkflowCanvasPa
           <VWorkflowCanvas
             graph={props.graph}
             selectedNodeId={props.selectedNodeId}
-            runtimeCurrentNodeIds={props.runtimeCurrentNodeIds}
+            runtimeCurrentNodeIds={currentNodeIds}
             onSelectNode={props.onSelectNode}
             height="100%"
             className={styles.canvas}
@@ -55,3 +61,19 @@ export const ResearchWorkflowCanvasPane = memo(function ResearchWorkflowCanvasPa
     </div>
   );
 });
+
+/**
+ * Keep the formal runtime cursor and the hypothesis-first task cursor as two
+ * inputs while presenting one current marker to the canvas renderer. The
+ * hypothesis-first task owns the marker whenever it exists; the formal cursor
+ * is only a fallback for a converged workflow. Selection remains a separate
+ * prop and is never inferred from this list.
+ */
+export function resolveCanvasCurrentNodeIds(
+  runtimeCurrentNodeIds: readonly string[] | null | undefined,
+  currentTaskNodeId?: string | null,
+): string[] {
+  const taskId = currentTaskNodeId?.trim();
+  if (taskId) return [taskId];
+  return [...(runtimeCurrentNodeIds ?? [])];
+}

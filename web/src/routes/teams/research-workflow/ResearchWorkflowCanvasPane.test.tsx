@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { queryKeys } from "../../../api/queryKeys";
 import type { WorkflowLayoutInput } from "../../../components/vui";
-import { ResearchWorkflowCanvasPane } from "./ResearchWorkflowCanvasPane";
+import { ResearchWorkflowCanvasPane, resolveCanvasCurrentNodeIds } from "./ResearchWorkflowCanvasPane";
 
 function makeQueryClient(language?: "zh" | "en") {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -97,5 +97,19 @@ describe("ResearchWorkflowCanvasPane", () => {
       root?.render(renderWithError(null));
     });
     expect(container.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it("gives the hypothesis-first task cursor sole current-marker ownership", () => {
+    expect(resolveCanvasCurrentNodeIds(["source_finding"], "hf_meeting_1")).toEqual([
+      "hf_meeting_1",
+    ]);
+    expect(resolveCanvasCurrentNodeIds(["source_finding"], "source_finding")).toEqual([
+      "source_finding",
+    ]);
+    expect(resolveCanvasCurrentNodeIds([], null)).toEqual([]);
+    expect(resolveCanvasCurrentNodeIds(["source_finding", "knowledge_handoff"], " ")).toEqual([
+      "source_finding",
+      "knowledge_handoff",
+    ]);
   });
 });

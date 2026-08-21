@@ -160,6 +160,20 @@ describe("ResearchWorkflowToolbar", () => {
     expect(active).not.toContain("选择题目开始研究");
   });
 
+  it("keeps the question archive as its own read-only inspector view", () => {
+    const archive = renderToolbar({
+      ...BASE_PROPS,
+      runId: "",
+      workflowActive: true,
+      panel: "question",
+      onSelectExperiment: vi.fn(),
+      onOpenPanel: vi.fn(),
+    } as React.ComponentProps<typeof ResearchWorkflowToolbar>);
+
+    expect(archive).toContain("题目档案");
+    expect(archive).not.toContain('aria-selected="true">题目进度');
+  });
+
   it("shows the canonical formal stage and runtime node", () => {
     const running = renderToolbar({
       ...BASE_PROPS,

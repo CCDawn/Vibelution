@@ -15,6 +15,7 @@ import type { ResearchProcessPanel } from "./researchProcessPanelSelection";
 import type { NodeDetailState } from "./useNodeDetailState";
 
 type InspectorProps = ComponentProps<typeof ResearchProcessInspectorPane>;
+import { ownsResearchCurrentTask } from "./ResearchProcessInspectorPane";
 
 const BINDINGS: EffectiveAgentBinding[] = [
   { nodeId: "source_finding", roleKey: "source_finder", agentId: "agent-finder", resolvedFrom: "workflow_default" },
@@ -256,5 +257,13 @@ describe("ResearchProcessInspectorPane agents panel language", () => {
       });
       container.remove();
     }
+  });
+});
+
+describe("ResearchProcessInspectorPane current-task ownership", () => {
+  it("keeps selected history separate from the current task", () => {
+    expect(ownsResearchCurrentTask("hf_selection", "hf_meeting_1")).toBe(false);
+    expect(ownsResearchCurrentTask("hf_meeting_1", "hf_meeting_1")).toBe(true);
+    expect(ownsResearchCurrentTask("source_finding", null)).toBe(false);
   });
 });

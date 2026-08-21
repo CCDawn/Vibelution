@@ -115,21 +115,21 @@ export function ResearchWorkflowToolbar(props: {
     props.formalRuntimeActive,
     props.nextActionStage,
   );
-  const detailsPanel = props.panel === "question" ? "progress" : (
-    props.panel === "agents"
+  const detailsPanel = (
+    props.panel === "question"
+    || props.panel === "agents"
     || props.panel === "timeline"
     || props.panel === "evidence"
     || props.panel === "team"
     || props.panel === "progress"
     || props.panel === "launch"
-      ? props.panel
-      : null
-  );
+  ) ? props.panel : null;
   // Navigation tabs for the inspector pane: views only. Actions never live
   // here — 新建运行 stays a button so navigation and actions stay separable
   // (GitHub Actions keeps view switches and run actions apart).
   const detailTabs = [
     { id: "progress", label: isZh ? "题目进度" : "Progress" },
+    { id: "question", label: isZh ? "题目档案" : "Question archive" },
     { id: "team", label: isZh ? "成员与讨论" : "Members" },
     { id: "evidence", label: isZh ? "证据图谱" : "Evidence graph" },
     { id: "agents", label: "Agent" },

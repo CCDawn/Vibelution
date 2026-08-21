@@ -28,6 +28,7 @@ export type NodeInspectorOpsSectionProps = {
   budget: ResearchBudgetProjection | null;
   primaryOffer: CommandOffer | null;
   busy: boolean;
+  readOnly?: boolean;
   onOffer?: (offer: CommandOffer) => Promise<void>;
   sessionHref: string | null;
   sessionDisabledReason?: string;
@@ -74,10 +75,11 @@ export function NodeInspectorOpsSection(props: NodeInspectorOpsSectionProps) {
       meters={meters}
       primaryOffer={props.primaryOffer}
       busy={props.busy}
+      readOnly={props.readOnly}
       onOffer={props.onOffer}
       sessionHref={props.sessionHref}
       sessionDisabledReason={props.sessionDisabledReason}
-      configHref={researchAgentConfigRoute(props.agentId)}
+      configHref={props.readOnly ? null : researchAgentConfigRoute(props.agentId)}
       agents={inspectorAgentOptions(resources.workspace?.agents)}
       agentSwitchDisabled={!props.canRebindAgent}
       agentSwitchReason={props.agentSwitchReason}

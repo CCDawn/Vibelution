@@ -12,6 +12,7 @@ export function NodeAgentSection(props: {
   budget: ResearchBudgetProjection | null;
   primaryOffer: CommandOffer | null;
   busy: boolean;
+  readOnly?: boolean;
   onOffer: (offer: CommandOffer) => Promise<void>;
   lang?: "zh" | "en";
 }) {
@@ -43,6 +44,7 @@ export function NodeAgentSection(props: {
         budget={props.budget}
         primaryOffer={props.primaryOffer}
         busy={props.busy}
+        readOnly={props.readOnly}
         onOffer={props.onOffer}
         sessionHref={canOpen ? props.detail.chatDeepLink ?? null : null}
         sessionDisabledReason={
