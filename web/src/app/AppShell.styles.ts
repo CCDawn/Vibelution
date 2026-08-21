@@ -28,7 +28,7 @@ const styles = {
   actionButton:
     `vui-app-appshell actionButton min-w-0 flex flex-wrap items-center gap-1.5 ${vuiControlQuietChromeClass}`,
   actionIconButton:
-    `vui-app-appshell actionIconButton ${vuiControlIconSmClass}`,
+    `vui-app-appshell actionIconButton !border-0 ${vuiControlIconSmClass}`,
   activeWorkChip:
     `vui-app-appshell activeWorkChip min-w-0 ${vuiControlPillClass} ${vuiStateCoolSoftClass} ` +
     "!inline-flex !h-8 !min-h-8 !max-h-8 max-w-[min(66vw,620px)] flex-nowrap !items-center !gap-1.5 !px-2.5 !py-0 " +
@@ -163,8 +163,8 @@ const styles = {
     "vui-app-appshell statusGuideStateLabel min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)]",
   // Rigid pill geometry: fixed height, zero vertical padding, shared leading-none mid-line.
   statusSummaryChip:
-    `vui-app-appshell statusSummaryChip min-w-0 ${vuiControlPillClass} ${vuiStateSelectedRowClass} ` +
-    "!inline-flex !h-8 !min-h-8 !max-h-8 flex-nowrap !items-center !justify-center !gap-1.5 !px-2.5 !py-0 " +
+    "vui-app-appshell statusSummaryChip min-w-0 " +
+    "!inline-flex !h-8 !min-h-8 !max-h-8 !border-0 flex-nowrap !items-center !justify-center !gap-1.5 !px-2.5 !py-0 " +
     "whitespace-nowrap leading-none [&>*]:!self-center [&>*]:leading-none",
   statusSummaryCount:
     "vui-app-appshell statusSummaryCount inline-flex h-[18px] min-h-[18px] max-h-[18px] shrink-0 items-center justify-center tabular-nums leading-none text-[var(--fg-tertiary)]",
@@ -214,7 +214,7 @@ const styles = {
     "vui-app-appshell status_warn min-w-0",
   status_warning:
     "vui-app-appshell status_warning min-w-0 border-[color-mix(in_srgb,var(--state-warning)_36%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_10%,transparent)] text-[var(--state-warning)]",
-  topActions: `vui-app-appshell topActions min-w-0 flex flex-nowrap items-center gap-1 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] ${vuiToolbarFillClass} p-1 shadow-[var(--vui-elevation-panel)]`,
+  topActions: "vui-app-appshell topActions min-w-0 flex flex-nowrap items-center gap-0.5",
   // Display/layout + Electron drag policy for topBar live in workbench-shell.css.
   // Do not add Tailwind flex/grid or pointer-events here — they fight the fixed 3-column grid / hit targets.
   topBar:
@@ -232,7 +232,7 @@ const styles = {
   utilityCluster:
     "vui-app-appshell utilityCluster relative min-w-0 shrink-0",
   utilityClusterOpen:
-    `vui-app-appshell utilityClusterOpen min-w-0 ${vuiStateCoolSoftClass}`,
+    "vui-app-appshell utilityClusterOpen min-w-0",
   utilityPopoverContent:
     "vui-app-appshell utilityPopoverContent z-[95] w-[min(520px,calc(100vw-40px))] max-h-[min(78vh,760px)] overflow-auto border-[var(--border-strong)] bg-[var(--shell-panel)] p-0 shadow-[var(--vui-shadow-soft)]",
   utilityPopoverBody:
@@ -258,7 +258,7 @@ const styles = {
   utilityPanelHeader:
     "vui-app-appshell utilityPanelHeader min-w-0 flex flex-wrap items-center gap-1.5 px-0.5 pb-1",
   utilityTrigger:
-    `vui-app-appshell utilityTrigger min-w-0 ${vuiControlQuietClass} h-[var(--vui-control-height-sm)] flex-nowrap [&_[data-slot=vui-button-content]]:flex-nowrap [&_[data-slot=vui-button-content]]:whitespace-nowrap [&_[data-slot=vui-button-icon]]:shrink-0 [&_[data-slot=vui-button-label]]:inline-flex [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1.5 [&_[data-slot=vui-button-label]]:whitespace-nowrap [&_[data-slot=vui-button-trailing-icon]]:shrink-0`,
+    "vui-app-appshell utilityTrigger min-w-0 h-[var(--vui-control-height-sm)] !border-0 flex-nowrap [&_[data-slot=vui-button-content]]:flex-nowrap [&_[data-slot=vui-button-content]]:whitespace-nowrap [&_[data-slot=vui-button-icon]]:shrink-0 [&_[data-slot=vui-button-label]]:inline-flex [&_[data-slot=vui-button-label]]:items-center [&_[data-slot=vui-button-label]]:gap-1.5 [&_[data-slot=vui-button-label]]:whitespace-nowrap [&_[data-slot=vui-button-trailing-icon]]:shrink-0",
   utilityTriggerLabel:
     "vui-app-appshell utilityTriggerLabel min-w-0 [font-size:var(--vui-font-xs)] leading-tight text-[var(--fg-tertiary)] whitespace-nowrap",
   versionPill:

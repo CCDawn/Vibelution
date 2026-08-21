@@ -1117,23 +1117,13 @@
   /* Vertical centering comes from fixed height + align-items; avoid asymmetric padding. */
   padding: 0 10px;
   line-height: 1;
-  transition: border-color 140ms ease, background 140ms ease, color 140ms ease, box-shadow 140ms ease;
+  transition: background 140ms ease, color 140ms ease;
 }
 
 :where(.vui-app-appshell).statusCluster:hover .statusSummaryChip,
 :where(.vui-app-appshell).statusCluster:focus-within .statusSummaryChip {
-  border-color: color-mix(in srgb, var(--accent-cool) 34%, var(--vui-border-subtle));
-  background: color-mix(in srgb, var(--accent-cool) 10%, var(--vui-control-muted));
+  background: color-mix(in srgb, var(--accent-cool) 8%, transparent);
   color: var(--fg-primary);
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--accent-cool) 18%, transparent),
-    var(--vui-shadow-hairline);
-}
-
-:where(.vui-app-appshell).statusCluster:focus-visible .statusSummaryChip {
-  box-shadow:
-    0 0 0 2px color-mix(in srgb, var(--accent-cool) 34%, transparent),
-    var(--vui-shadow-hairline);
 }
 
 :where(.vui-app-appshell).statusBadgeLabel {
