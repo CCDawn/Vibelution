@@ -23,6 +23,22 @@ def prepare_initial_checkpoint(checkpoint_path: str, thread_id: str) -> str:
     return checkpoint_id
 
 
+def latest_checkpoint_id(checkpoint_path: str, thread_id: str) -> str:
+    """Latest durable checkpoint id for a thread; empty string when unavailable.
+
+    Offer building must fail soft: an unreadable or missing checkpoint store
+    keeps the revise offer unavailable instead of failing the snapshot read.
+    """
+    try:
+        with open_sqlite_checkpointer(checkpoint_path) as checkpointer:
+            graph = compile_challenge_cup_graph(checkpointer)
+            state = graph.get_state({"configurable": {"thread_id": thread_id}})
+        configurable = state.config.get("configurable") or {}
+        return str(configurable.get("checkpoint_id") or "").strip()
+    except Exception:  # noqa: BLE001 - offer building must fail soft
+        return ""
+
+
 def advance_checkpoint(
     checkpoint_path: str,
     *,

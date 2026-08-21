@@ -79,6 +79,7 @@ export type TeamSourceCollectionActiveStageWorkspacePanelProps = {
 
 export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceCollectionActiveStageWorkspacePanelProps) {
   const [excludeUnverifiableConfirmOpen, setExcludeUnverifiableConfirmOpen] = useState(false);
+  const [excludeUnverifiableFailure, setExcludeUnverifiableFailure] = useState<string | null>(null);
   const {
     lang,
     sourceCollectionStageModules,
@@ -609,12 +610,32 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
       />
       <VConfirmDialog
         open={excludeUnverifiableConfirmOpen}
-        onOpenChange={setExcludeUnverifiableConfirmOpen}
+        onOpenChange={(open) => {
+          setExcludeUnverifiableConfirmOpen(open);
+          if (!open) {
+            setExcludeUnverifiableFailure(null);
+          }
+        }}
         tone="danger"
         title={lang === "zh" ? "排除本轮不可核验来源？" : "Exclude unverifiable sources from this run?"}
-        description={lang === "zh"
-          ? `将把 ${Number(extractionRecovery?.unverifiableCandidateCount || 0)} 条当前无法公开核验的来源标记为“已排除”。不会删除资料，也不会把它们判为通过；标题、DOI、核验失败原因和评审记录都会保留。`
-          : `${Number(extractionRecovery?.unverifiableCandidateCount || 0)} source(s) that cannot currently be publicly verified will be marked as excluded. Nothing is deleted or approved; titles, DOIs, verification failures, and assessment history remain.`}
+        description={<>
+          <span>
+            {lang === "zh"
+              ? `将把 ${Number(extractionRecovery?.unverifiableCandidateCount || 0)} 条当前无法公开核验的来源标记为“已排除”。不会删除资料，也不会把它们判为通过；标题、DOI、核验失败原因和评审记录都会保留。`
+              : `${Number(extractionRecovery?.unverifiableCandidateCount || 0)} source(s) that cannot currently be publicly verified will be marked as excluded. Nothing is deleted or approved; titles, DOIs, verification failures, and assessment history remain.`}
+          </span>
+          {excludeUnverifiableFailure ? (
+            <span
+              role="alert"
+              data-testid="exclude-unverifiable-failure"
+              style={{ display: "block", marginTop: "0.375rem", color: "var(--vui-danger, #d92d20)" }}
+            >
+              {lang === "zh"
+                ? `部分排除操作失败：${excludeUnverifiableFailure}。已成功的条目保持排除状态，可再次点击继续处理剩余条目。`
+                : `Some exclude operations failed: ${excludeUnverifiableFailure}. Succeeded entries stay excluded; click confirm again to continue with the rest.`}
+            </span>
+          ) : null}
+        </>}
         confirmLabel={lang === "zh" ? "确认排除并继续" : "Exclude and continue"}
         cancelLabel={lang === "zh" ? "取消" : "Cancel"}
         confirmPending={Boolean(extractionRecovery?.excludeUnverifiableCandidatesPending)}
@@ -623,9 +644,17 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
           if (!exclude) {
             return;
           }
+          setExcludeUnverifiableFailure(null);
           void exclude().then(
-            () => setExcludeUnverifiableConfirmOpen(false),
-            () => undefined,
+            () => {
+              setExcludeUnverifiableFailure(null);
+              setExcludeUnverifiableConfirmOpen(false);
+            },
+            (error: unknown) => {
+              setExcludeUnverifiableFailure(
+                error instanceof Error ? error.message : String(error),
+              );
+            },
           );
         }}
       />

@@ -379,7 +379,10 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
       ?? latestMutationPayload?.plan
       ?? null;
     const activeBaselineArtifact = activePlan?.baselineSelection.activeBaselineArtifact ?? null;
-    const activeSmokeRun = selectedTeamRunExperimentSmokeResult?.smokeRun ?? activePlan?.activeSmokeRun ?? null;
+    // Plan data (refreshed via invalidate on smoke success) is authoritative; the
+    // mutation echo is only a fallback before the plan query catches up, so a
+    // settled mutation result can never pin stale smoke evidence forever.
+    const activeSmokeRun = activePlan?.activeSmokeRun ?? selectedTeamRunExperimentSmokeResult?.smokeRun ?? null;
     const activeSmokeReviewCopy = activeSmokeRun
       ? boundedSmokeReviewCopy(activeSmokeRun.status, Boolean(activeSmokeRun.proxyOnly), lang)
       : null;

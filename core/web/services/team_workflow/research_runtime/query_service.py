@@ -25,9 +25,9 @@ from core.research.workflow.ledger.errors import (
 )
 from core.research.workflow.ledger.repository import WorkflowLedgerRepository
 
+from .blocked_reason import format_blocked_reason
 from .command_offer_builder import build_command_offers
 from .projection_builder import ProjectionInputs, build_research_workflow_snapshot
-from .blocked_reason import format_blocked_reason
 from .readiness import NodeReadinessService
 from .readiness.common import DomainReadinessContext
 from .run_catalog import catalog_dict_from_run
@@ -80,6 +80,7 @@ class WorkflowQueryService:
         clock_iso: Callable[[], str] | None = None,
         evaluated_at_ms: Callable[[], int] | None = None,
         definition: Any | None = None,
+        revise_checkpoint_resolver: Callable[[str], str] | None = None,
     ) -> None:
         self._store = store
         self._readiness = readiness_service
@@ -87,6 +88,22 @@ class WorkflowQueryService:
         self._clock_iso = clock_iso or _default_iso_clock
         self._evaluated_at_ms = evaluated_at_ms
         self._definition = definition or build_challenge_cup_workflow_definition()
+        self._revise_checkpoint_resolver = revise_checkpoint_resolver
+
+    def _resolve_revise_checkpoint_id(self, run: Any) -> str | None:
+        """Revision offers need a fork base checkpoint.
+
+        Root runs never carry ``forked_from_checkpoint_id``; resolve the
+        thread's latest durable checkpoint instead (fail soft to unavailable).
+        """
+        if str(run.forked_from_checkpoint_id or "").strip():
+            return None
+        if self._revise_checkpoint_resolver is None:
+            return None
+        try:
+            return str(self._revise_checkpoint_resolver(run.thread_id) or "").strip() or None
+        except Exception:  # noqa: BLE001 - snapshot reads must fail soft
+            return None
 
     def list_runs(self, *, team_id: str, workflow_id: str) -> dict[str, Any]:
         scoped_team = _require_team_id(team_id)
@@ -132,6 +149,7 @@ class WorkflowQueryService:
             evaluated_at_ms=(
                 self._evaluated_at_ms() if self._evaluated_at_ms is not None else None
             ),
+            revise_checkpoint_id=self._resolve_revise_checkpoint_id(run),
         )
         return build_research_workflow_snapshot(
             ProjectionInputs(

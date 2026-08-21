@@ -22,16 +22,17 @@ from .action_registry import ActionRegistry
 from .adapter_dispatch_worker import AdapterDispatchWorker
 from .adapters.domain_adapters import register_default_adapters
 from .checkpoint_fork_worker import CheckpointForkWorker
+from .checkpoint_lifecycle import latest_checkpoint_id
 from .command_service import WorkflowCommandService
 from .delivery_worker import DeliveryOrchestrationWorker
 from .formal_read_runtime import configure_formal_read_runtime, wake_stream_readers
 from .formal_write_runtime import configure_formal_write_runtime
 from .graph_dispatch_worker import GraphDispatchWorker
 from .outbox_pump import WorkflowOutboxPump
-from .real_domain_ports import RealDomainPorts
-from .real_readiness_context import RealDomainReadinessContext
 from .readiness import NodeReadinessService
 from .readiness.common import RunSnapshot
+from .real_domain_ports import RealDomainPorts
+from .real_readiness_context import RealDomainReadinessContext
 
 
 @dataclass(frozen=True)
@@ -133,6 +134,9 @@ def build_workflow_runtime(
         store=store,
         readiness_service=readiness,
         readiness_context=lambda: readiness_context,
+        revise_checkpoint_resolver=lambda thread_id: latest_checkpoint_id(
+            str(checkpoint), thread_id
+        ),
     )
 
     def combined_wake() -> None:
@@ -204,7 +208,10 @@ def start_production_workflow_runtime() -> str:
     global _PRODUCTION, _PUMP
     from core.research.workflow.migration.manifest import is_activated
 
-    from .formal_write_runtime import mark_migration_required, reset_formal_write_runtime_for_tests
+    from .formal_write_runtime import (
+        mark_migration_required,
+        reset_formal_write_runtime_for_tests,
+    )
     from .paths import (
         legacy_json_runs_exist,
         research_workflow_data_root,

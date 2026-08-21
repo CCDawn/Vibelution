@@ -136,15 +136,15 @@ export function TeamSourceCollectionOverviewPanel({
       {plan ? (
         <div className={styles.workflowSourceCollectionPlan}>
           <div>
-            <span>plan</span>
+            <span>{isZh ? "检索计划" : "plan"}</span>
             <strong>{plan.planId}</strong>
           </div>
           <div>
-            <span>{isZh ? "seeds" : "seeds"}</span>
+            <span>{isZh ? "检索种子" : "seeds"}</span>
             <strong>{plan.seeds}</strong>
           </div>
           <div>
-            <span>KV</span>
+            <span>{isZh ? "提示词缓存 KV" : "prompt cache KV"}</span>
             <strong>{plan.promptCache}</strong>
           </div>
           <div>

@@ -22,6 +22,7 @@ def build_resolve_human_offers(
     run: RunRecord,
     definition: WorkflowDefinition,
     pending_human_tasks: Sequence[Any] = (),
+    revise_checkpoint_id: str | None = None,
 ) -> list[CommandOffer]:
     offers: list[CommandOffer] = []
     pending_by_node: dict[str, list[Any]] = {}
@@ -53,7 +54,11 @@ def build_resolve_human_offers(
 
         task = tasks[0]
         task_id = _task_field(task, "task_id", "taskId")
-        checkpoint_id = str(run.forked_from_checkpoint_id or "").strip()
+        # Root runs never carry forked_from_checkpoint_id; the caller resolves
+        # the thread's latest durable checkpoint so revise stays available.
+        checkpoint_id = str(
+            run.forked_from_checkpoint_id or revise_checkpoint_id or ""
+        ).strip()
         for decision, label, always_available in _DECISIONS:
             if decision == "revise":
                 available = bool(checkpoint_id)

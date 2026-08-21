@@ -11,8 +11,13 @@ def build_fork_revision_offers(
     *,
     run: RunRecord,
     definition: WorkflowDefinition,
+    revise_checkpoint_id: str | None = None,
 ) -> list[CommandOffer]:
-    checkpoint_id = str(run.forked_from_checkpoint_id or "").strip()
+    # Root runs never carry forked_from_checkpoint_id; the caller resolves
+    # the thread's latest durable checkpoint so fork stays available.
+    checkpoint_id = str(
+        run.forked_from_checkpoint_id or revise_checkpoint_id or ""
+    ).strip()
     # Prefer explicit active node; otherwise first definition node as fromNodeId.
     from_node_id = str(run.active_node_id or "").strip()
     if not from_node_id and definition.nodes:

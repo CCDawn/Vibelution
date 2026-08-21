@@ -32,6 +32,7 @@ def build_command_offers(
     pending_human_tasks: Sequence[Any] = (),
     attempts: Sequence[NodeAttemptRecord] = (),
     evaluated_at_ms: int | None = None,
+    revise_checkpoint_id: str | None = None,
 ) -> list[CommandOffer]:
     offers: list[CommandOffer] = []
     offers.extend(
@@ -50,6 +51,7 @@ def build_command_offers(
             run=run,
             definition=definition,
             pending_human_tasks=pending_human_tasks,
+            revise_checkpoint_id=revise_checkpoint_id,
         )
     )
     offers.extend(
@@ -60,7 +62,13 @@ def build_command_offers(
         )
     )
     offers.extend(build_rebind_node_offers(run=run, definition=definition))
-    offers.extend(build_fork_revision_offers(run=run, definition=definition))
+    offers.extend(
+        build_fork_revision_offers(
+            run=run,
+            definition=definition,
+            revise_checkpoint_id=revise_checkpoint_id,
+        )
+    )
     offers.extend(build_extend_budget_offers(run=run))
     offers.append(build_reconcile_run_offer(run=run))
     offers.append(build_cancel_run_offer(run=run))

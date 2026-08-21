@@ -198,8 +198,8 @@ export function TeamSourceCollectionCandidateWorkspacePanel(props: TeamSourceCol
           { key: "reviewed", label: lang === "zh" ? "已审查" : "reviewed", value: sourceCollectionProjectedAssessedCountText },
           { key: "approved", label: lang === "zh" ? "通过" : "approved", value: sourceCollectionProjectedApprovedCountText },
           { key: "pending", label: lang === "zh" ? "待质量审查" : "pending quality review", value: sourceCollectionRunPendingScreeningCountText },
-          { key: "evidence-ready", label: "evidence_ready", value: sourceCollectionEvidenceReadyCandidateCount },
-          { key: "missing-evidence-anchor", label: "missing_evidence_anchor", value: sourceCollectionMissingEvidenceAnchorCount },
+          { key: "evidence-ready", label: lang === "zh" ? "证据就绪" : "evidence ready", value: sourceCollectionEvidenceReadyCandidateCount },
+          { key: "missing-evidence-anchor", label: lang === "zh" ? "缺证据锚点" : "missing evidence anchor", value: sourceCollectionMissingEvidenceAnchorCount },
         ]}
         loading={sourceCollectionPrimaryDataLoading}
         hasCandidates={Boolean(visibleCandidates.length)}

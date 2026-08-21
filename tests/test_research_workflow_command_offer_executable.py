@@ -57,6 +57,103 @@ def test_cancel_offer_matches_transition_authority(status: str) -> None:
         assert offer.available is True
 
 
+def _seed_waiting_human_run(harness: CommandHarness, run_id: str = "run-revise") -> None:
+    harness.seed_run(run_id=run_id, status="waiting_human", run_version=1)
+
+    def seed_human(uow):
+        uow.repository.insert_command(
+            build_command_record(
+                command_id=f"cmd-{run_id}",
+                run_id=run_id,
+                node_id="knowledge_handoff",
+                command_kind="start_node",
+                idempotency_key=f"seed-{run_id}",
+            )
+        )
+        uow.repository.insert_attempt(
+            build_attempt_record(
+                node_run_id=f"nr-{run_id}-1",
+                run_id=run_id,
+                node_id="knowledge_handoff",
+                actor_kind="human",
+                status="waiting_human",
+                command_id=f"cmd-{run_id}",
+            )
+        )
+        uow.repository.insert_human_task(
+            task_id=f"ht-{run_id}",
+            run_id=run_id,
+            node_run_id=f"nr-{run_id}-1",
+            handoff_id=None,
+            task_kind="knowledge_gate",
+            prompt_json="{}",
+            created_at_ms=FIXED_NOW_MS,
+        )
+
+    harness.store.submit(seed_human, force_flush=True).result(timeout=10)
+
+
+def test_root_run_revise_offer_uses_latest_thread_checkpoint(tmp_path: Path) -> None:
+    """Root runs gain a usable revise decision when the caller resolves the
+    thread's latest checkpoint (P1-4: revise was structurally unavailable)."""
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        _seed_waiting_human_run(harness)
+        query = WorkflowQueryService(
+            store=harness.store,
+            readiness_service=harness.readiness,
+            readiness_context=lambda: harness.context,
+            clock_iso=lambda: FIXED_GENERATED_AT,
+            evaluated_at_ms=lambda: FIXED_NOW_MS,
+            revise_checkpoint_resolver=lambda thread_id: "ckpt-latest-1",
+        )
+        snap = query.get_snapshot(team_id="research-team", run_id="run-revise")
+        revise = [
+            offer
+            for offer in snap.command_offers
+            if offer.command == WorkflowCommandKind.RESOLVE_HUMAN_TASK
+            and offer.payload.get("decision") == "revise"
+        ]
+        assert revise and revise[0].available is True
+        assert revise[0].payload.get("checkpointId") == "ckpt-latest-1"
+        fork = [
+            offer
+            for offer in snap.command_offers
+            if offer.command == WorkflowCommandKind.FORK_REVISION
+        ]
+        assert fork and fork[0].available is True
+        assert fork[0].payload.get("checkpointId") == "ckpt-latest-1"
+    finally:
+        harness.close()
+
+
+def test_revise_checkpoint_resolver_failure_fails_soft(tmp_path: Path) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        _seed_waiting_human_run(harness)
+        query = WorkflowQueryService(
+            store=harness.store,
+            readiness_service=harness.readiness,
+            readiness_context=lambda: harness.context,
+            clock_iso=lambda: FIXED_GENERATED_AT,
+            evaluated_at_ms=lambda: FIXED_NOW_MS,
+            revise_checkpoint_resolver=lambda thread_id: (_ for _ in ()).throw(
+                RuntimeError("checkpoint store unavailable")
+            ),
+        )
+        snap = query.get_snapshot(team_id="research-team", run_id="run-revise")
+        revise = [
+            offer
+            for offer in snap.command_offers
+            if offer.command == WorkflowCommandKind.RESOLVE_HUMAN_TASK
+            and offer.payload.get("decision") == "revise"
+        ]
+        assert revise and revise[0].available is False
+        assert "revise_checkpoint_unavailable" in revise[0].blocker_ids
+    finally:
+        harness.close()
+
+
 def test_human_resolve_offers_are_decision_complete(tmp_path: Path) -> None:
     harness = CommandHarness(tmp_path / "ledger.sqlite3")
     try:

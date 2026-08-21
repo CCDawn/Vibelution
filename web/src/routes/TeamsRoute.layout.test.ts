@@ -1710,7 +1710,7 @@ describe("TeamsRoute layout contract", () => {
     expect(teamKnowledgeCollectionCompletionFlowPanelSource).toContain("一键流程图");
     expect(teamKnowledgeCollectionCompletionFlowPanelSource).toContain("阶段详情");
     expect(teamKnowledgeCollectionCompletionFlowPanelSource).toContain("Agent 私聊");
-    expect(teamKnowledgeCollectionCompletionFlowPanelSource).toContain("重试失败节点");
+    expect(teamKnowledgeCollectionCompletionFlowPanelSource).toContain("重新执行搜集闭环");
     expect(teamKnowledgeCollectionCompletionFlowPanelSource).toContain("openSourceCollectionStageAgentChat(node.stageId)");
     expect(routeSource).toContain("提炼后通知入库 Agent");
     expect(teamSourceCollectionControlsWorkspacePanelSource).toContain("资料已写入团队知识库");

@@ -38,6 +38,7 @@ def configure_formal_read_runtime(
     readiness_context: Any,
     clock_iso: Any | None = None,
     evaluated_at_ms: Any | None = None,
+    revise_checkpoint_resolver: Any | None = None,
 ) -> None:
     global _QUERY, _REPLAY, _STREAM, _STORE
     with _LOCK:
@@ -48,6 +49,7 @@ def configure_formal_read_runtime(
             readiness_context=readiness_context,
             clock_iso=clock_iso,
             evaluated_at_ms=evaluated_at_ms,
+            revise_checkpoint_resolver=revise_checkpoint_resolver,
         )
         _REPLAY = WorkflowEventReplayService(store=store)
         _STREAM = WorkflowEventStreamService(store=store, notifier=LocalStreamNotifier())

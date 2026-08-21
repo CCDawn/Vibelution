@@ -180,10 +180,15 @@ export function TeamKnowledgeCollectionCompletionFlowPanel(props: TeamKnowledgeC
                     type="button"
                     onClick={runKnowledgeCollectionCompletionAction}
                     disabled={sourceCollectionCompletionActionDisabled || selectedTeamKnowledgeCollectionIngestPending}
-                    title={sourceCollectionActionDisabledTitle(sourceCollectionCompletionActionReadiness, lang === "zh" ? "重试失败节点" : "Retry failed node")}
+                    title={
+                      sourceCollectionActionDisabledTitle(sourceCollectionCompletionActionReadiness, lang === "zh" ? "重新执行搜集闭环" : "Rerun collection loop")
+                      ?? (lang === "zh"
+                        ? "会重新执行资料搜集→提炼→证据关系→知识入库整套闭环（含重新检索），不是只重试这一个节点"
+                        : "Reruns the whole search→extract→relations→ingest loop (including fresh searches), not just this node")
+                    }
                   >
                     <RefreshCw size={13} />
-                    {lang === "zh" ? "重试失败节点" : "Retry failed node"}
+                    {lang === "zh" ? "重新执行搜集闭环" : "Rerun collection loop"}
                   </VNativeButton>
                 ) : null}
               </div>

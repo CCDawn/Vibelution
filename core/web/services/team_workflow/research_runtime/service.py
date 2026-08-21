@@ -102,6 +102,24 @@ from .task_bundle_lifecycle import (
 )
 from .team_role_source import effective_binding_layers
 
+_FILE_STORE_TERMINAL_RUN_STATUSES = frozenset(
+    {"succeeded", "failed", "cancelled", "archived"}
+)
+
+
+def _require_non_terminal_run(record: dict[str, Any], *, command: str) -> None:
+    """Legacy file-store commands must not resurrect a terminal run.
+
+    Mirrors RUN_TRANSITIONS authority for the ledger stack: cancelling or
+    retrying a finished/failed/cancelled run is an invalid state change.
+    """
+    status = str(record.get("status") or "").strip()
+    if status in _FILE_STORE_TERMINAL_RUN_STATUSES:
+        raise ResearchWorkflowError(
+            f"{command} not allowed for run in status {status!r}",
+            code="invalid_run_state",
+        )
+
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -190,7 +208,10 @@ class ResearchWorkflowRuntimeService:
     ) -> dict[str, Any]:
         self.get_definition(workflow_id)
         try:
-            from core.web.services.team_service import TeamNotFoundError, assert_team_exists
+            from core.web.services.team_service import (
+                TeamNotFoundError,
+                assert_team_exists,
+            )
 
             try:
                 scoped_team_id = assert_team_exists(team_id)
@@ -199,7 +220,10 @@ class ResearchWorkflowRuntimeService:
             options = list_catalog_question_launch_options(scoped_team_id)
             options["experiments"] = []
             try:
-                from .formal_read_runtime import FormalReadRuntimeUnavailable, get_query_service
+                from .formal_read_runtime import (
+                    FormalReadRuntimeUnavailable,
+                    get_query_service,
+                )
                 from .formal_write_runtime import WorkflowMigrationRequired
                 from .query_service import WorkflowQueryError
 
@@ -718,10 +742,17 @@ class ResearchWorkflowRuntimeService:
         payload = payload or {}
         if command == "cancel":
             self._require_privileged_operator(command="cancel_run")
+            current = self.get_run(run_id)
+            if current is None:
+                raise ResearchWorkflowError(run_id, code="run_not_found")
+            _require_non_terminal_run(current, command="cancel")
             record = self._store.update_run(run_id, {"status": "cancelled", "runtimeCurrentNodeIds": []})
         elif command == "retry_node":
-            record = self.get_run(run_id)
-            attempts = int(record.get("retryCount") or 0) + 1
+            current = self.get_run(run_id)
+            if current is None:
+                raise ResearchWorkflowError(run_id, code="run_not_found")
+            _require_non_terminal_run(current, command="retry_node")
+            attempts = int(current.get("retryCount") or 0) + 1
             record = self._store.update_run(run_id, {"retryCount": attempts, "status": "queued"})
         elif command == "rebind_node":
             self._require_privileged_operator(command="rebind_node")

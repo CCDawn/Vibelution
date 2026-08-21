@@ -8,7 +8,10 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
-from core.research.workflow.bindings import AgentBindingLayers, build_run_binding_snapshots
+from core.research.workflow.bindings import (
+    AgentBindingLayers,
+    build_run_binding_snapshots,
+)
 from core.research.workflow.contracts import ContractValidationError
 from core.research.workflow.definition import (
     CHALLENGE_CUP_WORKFLOW_ID,
@@ -100,6 +103,20 @@ def create_question_run(
     return created
 
 
+def _ensure_create_fingerprint(run: Any, fingerprint: str) -> None:
+    snapshot: dict[str, Any] = {}
+    try:
+        snapshot = json.loads(run.input_snapshot_json)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        snapshot = {}
+    prior = str(snapshot.get("createInputFingerprint") or "")
+    if prior and prior != fingerprint:
+        raise ResearchWorkflowError(
+            "idempotencyKey was already used with different run input",
+            code="idempotency_conflict",
+        )
+
+
 def create_run(
     workflow_id: str,
     *,
@@ -114,17 +131,7 @@ def create_run(
     run_id = run_id_for_create(workflow_id, idempotency_key)
     existing = store.get_run(run_id)
     if existing is not None:
-        snapshot = {}
-        try:
-            snapshot = json.loads(existing.input_snapshot_json)
-        except (TypeError, ValueError, json.JSONDecodeError):
-            snapshot = {}
-        prior = str(snapshot.get("createInputFingerprint") or "")
-        if prior and prior != fingerprint:
-            raise ResearchWorkflowError(
-                "idempotencyKey was already used with different run input",
-                code="idempotency_conflict",
-            )
+        _ensure_create_fingerprint(existing, fingerprint)
         return catalog_dict_from_run(existing)
 
     team_id = str(run_input.get("teamId") or "").strip()
@@ -207,11 +214,18 @@ def create_run(
     )
 
     def mutate(uow) -> None:
+        # Concurrent create with the same key: the single writer serializes
+        # mutations, so the later request sees the winner's row here and
+        # replays idempotently instead of hitting the run_id primary key.
+        if uow.repository.get_run(run_id) is not None:
+            return
         uow.repository.insert_run(record)
         uow.repository.insert_event(event)
 
     store.submit(mutate, force_flush=True).result(timeout=15)
     created = store.get_run(run_id)
+    if created is not None:
+        _ensure_create_fingerprint(created, fingerprint)
     if created is None:
         raise ResearchWorkflowError("created run was not readable", code="workflow_ledger_unavailable")
     return catalog_dict_from_run(created)

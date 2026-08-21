@@ -432,7 +432,7 @@ def research_workflow_node_detail(
 def research_workflow_events(
     run_id: str,
     team_id: str = Query(..., alias="teamId", min_length=1),
-    after_sequence: int = Query(0, alias="afterSequence"),
+    after_sequence: int = Query(0, alias="afterSequence", ge=0),
     limit: int = Query(500, ge=1, le=2000),
 ) -> dict:
     try:
@@ -462,7 +462,7 @@ def research_workflow_events(
 def research_workflow_event_stream(
     run_id: str,
     team_id: str = Query(..., alias="teamId", min_length=1),
-    after_sequence: int | None = Query(None, alias="afterSequence"),
+    after_sequence: int | None = Query(None, alias="afterSequence", ge=0),
     last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
 ) -> StreamingResponse:
     scoped = _canonical_team_id(team_id)

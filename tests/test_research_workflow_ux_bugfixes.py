@@ -126,3 +126,68 @@ def test_resolve_human_task_missing_task_reports_task_not_found(tmp_path: Path) 
             )
     finally:
         harness.close()
+
+
+def test_latest_checkpoint_id_resolves_initial_and_missing_threads(tmp_path: Path) -> None:
+    from core.web.services.team_workflow.research_runtime.checkpoint_lifecycle import (
+        latest_checkpoint_id,
+        prepare_initial_checkpoint,
+    )
+
+    checkpoint_path = str(tmp_path / "checkpoints.sqlite3")
+    thread_id = "thread-latest-1"
+    initial = prepare_initial_checkpoint(checkpoint_path, thread_id)
+    assert initial
+    assert latest_checkpoint_id(checkpoint_path, thread_id) == initial
+    # Unknown thread and unreadable store both fail soft to "".
+    assert latest_checkpoint_id(checkpoint_path, "thread-never-created") == ""
+    assert latest_checkpoint_id(str(tmp_path / "missing.sqlite3"), thread_id) == ""
+
+
+def test_concurrent_create_run_same_key_replays_idempotently(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Two racing creates with one idempotency key must both succeed with the
+    same run (P1-7: the loser used to hit the run_id primary key → HTTP 500)."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from core.research.workflow.definition import CHALLENGE_CUP_WORKFLOW_ID
+    from core.web.services.team_workflow.research_runtime.run_creation import create_run
+    from tests._support.workflow_ledger_http import ledger_http_client
+
+    with ledger_http_client(tmp_path, monkeypatch):
+        run_input = _baseline_run_input()
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [
+                pool.submit(
+                    create_run,
+                    CHALLENGE_CUP_WORKFLOW_ID,
+                    run_input=run_input,
+                    idempotency_key="idem-race-1",
+                )
+                for _ in range(2)
+            ]
+            results = [future.result(timeout=30) for future in futures]
+        assert results[0]["runId"] == results[1]["runId"]
+
+        # Same key with different input must still conflict, including on the
+        # replay path taken by the concurrent loser.
+        divergent = {**run_input, "questionId": "question-divergent"}
+        import pytest as _pytest
+
+        with _pytest.raises(Exception) as exc_info:
+            create_run(
+                CHALLENGE_CUP_WORKFLOW_ID,
+                run_input=divergent,
+                idempotency_key="idem-race-1",
+            )
+        assert "idempotency_conflict" in str(exc_info.value.code)
+
+
+def _baseline_run_input() -> dict:
+    import json as _json
+
+    fixture_path = (
+        Path(__file__).parent / "fixtures" / "research_workflow_v21_baseline_case.json"
+    )
+    return _json.loads(fixture_path.read_text(encoding="utf-8"))["runInput"]
