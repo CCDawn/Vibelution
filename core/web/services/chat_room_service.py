@@ -305,7 +305,16 @@ def get_chat_room_detail(room_id: str) -> dict[str, Any] | None:
     if repaired:
         _clear_participant_refresh_index_cache()
         stage_started_at = _perf_counter()
-        _store().save(state)
+        # Read-modify-write must hold the room lock: this detail read runs on
+        # round worker threads between speakers, and an unlocked save here can
+        # roll back concurrent round writes (lost messages / phantom running).
+        with _CHAT_ROOM_LOCK:
+            fresh_state = _store().load()
+            fresh_room = _find_room(fresh_state, room_id)
+            if fresh_room is not None:
+                fresh_room["participants"] = room["participants"]
+                fresh_room["updatedAt"] = room.get("updatedAt") or utc_now_iso()
+                _store().save(fresh_state)
         _append_chat_room_detail_timing(phase_timings, "state.save_repair", stage_started_at)
     stage_started_at = _perf_counter()
     detail = _room_to_api(
@@ -499,9 +508,10 @@ def remove_agent_from_chat_rooms(
     changed_rooms: list[dict[str, Any]] = []
     restore_rooms: list[dict[str, Any]] = []
     now = utc_now_iso()
+    session_summaries = _session_summary_index()
     with _CHAT_ROOM_LOCK:
         state = _store().load()
-        if _repair_room_participants_in_state(state, session_summaries=_session_summary_index()):
+        if _repair_room_participants_in_state(state, session_summaries=session_summaries):
             _store().save(state)
             state = _store().load()
         rooms = [item for item in list(state.get("rooms") or []) if isinstance(item, dict)]
@@ -980,63 +990,26 @@ def start_chat_room_round(
             submit_timings["chatRoomLockedMs"] = _elapsed_ms_between(lock_acquired_at)
             break
 
-    stage_started_at = _perf_counter()
-    kernel_trace = _create_chat_room_round_kernel_trace(room, round_payload, speakers)
-    if kernel_trace:
-        room, round_payload = _attach_chat_room_round_kernel_trace(
-            normalized_room_id,
-            round_id,
-            kernel_trace,
-            fallback_room=room,
-            fallback_round=round_payload,
-        )
-    submit_timings["kernelTraceMs"] = _elapsed_ms(stage_started_at)
+    try:
+        stage_started_at = _perf_counter()
+        kernel_trace = _create_chat_room_round_kernel_trace(room, round_payload, speakers)
+        if kernel_trace:
+            room, round_payload = _attach_chat_room_round_kernel_trace(
+                normalized_room_id,
+                round_id,
+                kernel_trace,
+                fallback_room=room,
+                fallback_round=round_payload,
+            )
+        submit_timings["kernelTraceMs"] = _elapsed_ms(stage_started_at)
 
-    stage_started_at = _perf_counter()
-    _persist_chat_room_work_run(room, round_payload, status="running", summary="")
-    submit_timings["workRunPersistMs"] = _elapsed_ms(stage_started_at)
-    submit_timings["submitElapsedBeforeStartLogMs"] = _elapsed_ms(submit_started_at)
-    _record_room_event(
-        "round",
-        "chat_room.round.started",
-        room,
-        round_payload,
-        fields={
-            "mode": round_mode,
-            "purpose": round_purpose,
-            "participantCount": len(speakers),
-            "caseIntent": case_state.get("intent") or "",
-            "caseNextAction": case_state.get("nextAction") or "",
-            "caseInformationSufficiency": case_state.get("informationSufficiency") or "",
-            "caseUserFacingMode": case_state.get("userFacingMode") or "",
-            "caseDiscussionVisibility": case_state.get("discussionVisibility") or "",
-            "caseMissingFactCount": len(list(case_state.get("missingFacts") or [])),
-            **submit_timings,
-        },
-        outcome="running",
-        lifecycle=True,
-    )
-    stage_started_at = _perf_counter()
-    _publish_chat_room_detail_snapshot(normalized_room_id)
-    submit_timings["initialSnapshotPublishMs"] = _elapsed_ms(stage_started_at)
-
-    if background:
-        schedule_started_at = _perf_counter()
-        _CHAT_ROOM_EXECUTOR.submit(
-            _run_chat_room_round_background,
-            normalized_room_id,
-            round_id,
-            room,
-            round_payload,
-            speakers,
-            runner,
-            lang,
-            _perf_counter(),
-        )
-        submit_timings["scheduleSubmitMs"] = _elapsed_ms(schedule_started_at)
+        stage_started_at = _perf_counter()
+        _persist_chat_room_work_run(room, round_payload, status="running", summary="")
+        submit_timings["workRunPersistMs"] = _elapsed_ms(stage_started_at)
+        submit_timings["submitElapsedBeforeStartLogMs"] = _elapsed_ms(submit_started_at)
         _record_room_event(
             "round",
-            "chat_room.round.background_started",
+            "chat_room.round.started",
             room,
             round_payload,
             fields={
@@ -1054,26 +1027,77 @@ def start_chat_room_round(
             outcome="running",
             lifecycle=True,
         )
-        if lightweight_response:
-            return _accepted_chat_room_round_payload(room, round_payload)
-        detail_started_at = _perf_counter()
-        detail = get_chat_room_detail(normalized_room_id)
-        submit_timings["returnDetailMs"] = _elapsed_ms(detail_started_at)
-        if detail is None:
-            raise ChatRoomNotFoundError(text_for(lang, zh="未找到群聊。", en="Chat room not found."))
-        return detail
+        stage_started_at = _perf_counter()
+        _publish_chat_room_detail_snapshot(normalized_room_id)
+        submit_timings["initialSnapshotPublishMs"] = _elapsed_ms(stage_started_at)
 
-    return _execute_chat_room_round(
-        normalized_room_id,
-        round_id,
-        room,
-        round_payload,
-        speakers,
-        runner,
-        lang,
-    )
+        if background:
+            schedule_started_at = _perf_counter()
+            _CHAT_ROOM_EXECUTOR.submit(
+                _run_chat_room_round_background,
+                normalized_room_id,
+                round_id,
+                room,
+                round_payload,
+                speakers,
+                runner,
+                lang,
+                _perf_counter(),
+            )
+            submit_timings["scheduleSubmitMs"] = _elapsed_ms(schedule_started_at)
+            _record_room_event(
+                "round",
+                "chat_room.round.background_started",
+                room,
+                round_payload,
+                fields={
+                    "mode": round_mode,
+                    "purpose": round_purpose,
+                    "participantCount": len(speakers),
+                    "caseIntent": case_state.get("intent") or "",
+                    "caseNextAction": case_state.get("nextAction") or "",
+                    "caseInformationSufficiency": case_state.get("informationSufficiency") or "",
+                    "caseUserFacingMode": case_state.get("userFacingMode") or "",
+                    "caseDiscussionVisibility": case_state.get("discussionVisibility") or "",
+                    "caseMissingFactCount": len(list(case_state.get("missingFacts") or [])),
+                    **submit_timings,
+                },
+                outcome="running",
+                lifecycle=True,
+            )
+            if lightweight_response:
+                return _accepted_chat_room_round_payload(room, round_payload)
+            detail_started_at = _perf_counter()
+            detail = get_chat_room_detail(normalized_room_id)
+            submit_timings["returnDetailMs"] = _elapsed_ms(detail_started_at)
+            if detail is None:
+                raise ChatRoomNotFoundError(text_for(lang, zh="未找到群聊。", en="Chat room not found."))
+            return detail
+
+        return _execute_chat_room_round(
+            normalized_room_id,
+            round_id,
+            room,
+            round_payload,
+            speakers,
+            runner,
+            lang,
+        )
 
 
+    except Exception as exc:  # noqa: BLE001 - the round is already durable-running
+        # The launch window between the durable running write and the executor
+        # submission must fail the round on any error, otherwise the control
+        # marker keeps reconcile away and the room stays busy until restart.
+        _fail_chat_room_round(
+            normalized_room_id,
+            round_id,
+            room,
+            round_payload,
+            exc,
+            lang=lang,
+        )
+        raise
 def _create_chat_room_round_kernel_trace(
     room: dict[str, Any],
     round_payload: dict[str, Any],
@@ -1432,6 +1456,18 @@ def _execute_chat_room_round(
                 raise ChatRoomNotFoundError(text_for(lang, zh="未找到群聊轮次。", en="Chat room round not found."))
             if _chat_room_round_is_terminal(live_room, target_round, round_id):
                 _clear_chat_room_round_control(round_id)
+                return _room_to_api(live_room)
+            if _chat_room_round_stop_reason(round_id):
+                # A stop arrived between the outer check and this lock: persist
+                # the latest messages without rewinding the round to running,
+                # then let the shared stop finalizer close the round.
+                target_round["messages"] = [dict(item) for item in messages]
+                target_round["updatedAt"] = message_time
+                _store().save(state)
+                stopped = _stopped_chat_room_round_detail(normalized_room_id, round_id)
+                if stopped is not None:
+                    _clear_chat_room_round_control(round_id)
+                    return stopped
                 return _room_to_api(live_room)
             target_round["messages"] = [dict(item) for item in messages]
             target_round["status"] = "running"

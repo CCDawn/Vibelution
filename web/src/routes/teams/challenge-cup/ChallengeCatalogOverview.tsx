@@ -57,6 +57,7 @@ export function ChallengeCatalogOverviewView({
   selectedId,
   filter,
   actionPending = false,
+  actionError = "",
   onSelect,
   onFilterChange,
   onAction,
@@ -66,6 +67,7 @@ export function ChallengeCatalogOverviewView({
   selectedId: string;
   filter: CatalogOverviewFilter;
   actionPending?: boolean;
+  actionError?: string;
   onSelect: (questionId: string) => void;
   onFilterChange: (filter: CatalogOverviewFilter) => void;
   onAction: (row: CatalogOverviewQuestion) => void;
@@ -197,6 +199,11 @@ export function ChallengeCatalogOverviewView({
               <div className={styles.blockerRemediation}>{selected.blocker.remediationLabel}</div>
             </div>
           ) : null}
+          {actionError ? (
+            <div className={styles.blocker} role="alert" data-testid="catalog-overview-action-error">
+              <div className={styles.blockerMessage}>{actionError}</div>
+            </div>
+          ) : null}
           <VButton
             type="button"
             variant={selected.action === "view" ? "secondary" : "primary"}
@@ -244,6 +251,11 @@ export function ChallengeCatalogOverview({
       ]);
     },
   });
+  const batchErrorText = batchMutation.error instanceof Error
+    ? batchMutation.error.message
+    : batchMutation.error
+      ? String(batchMutation.error)
+      : "";
 
   const handleAction = (row: CatalogOverviewQuestion) => {
     const action: CatalogOverviewAction = row.action;
@@ -285,6 +297,7 @@ export function ChallengeCatalogOverview({
       selectedId={selectedId}
       filter={filter}
       actionPending={batchMutation.isPending}
+      actionError={batchErrorText}
       onSelect={setSelectedId}
       onFilterChange={setFilter}
       onAction={handleAction}

@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 
 import { getChallengeQuestionRunDetail } from "../../../api/challengeQuestionRuns";
 import { queryKeys } from "../../../api/queryKeys";
@@ -70,9 +71,10 @@ export function ResearchProcessInspectorPane(props: {
 }) {
   const { scope, state, actions, nextAction, retryCollectionOffer = null } = props;
   const { lang } = useShellI18n();
+  const [selectedQuestionRunId, setSelectedQuestionRunId] = useState("");
   const questionDetail = useQuery({
     queryKey: queryKeys.challengeQuestionRunDetail(scope.teamId, scope.questionId),
-    queryFn: () => getChallengeQuestionRunDetail(scope.teamId, scope.questionId),
+    queryFn: () => getChallengeQuestionRunDetail(scope.teamId, scope.questionId, selectedQuestionRunId || undefined),
     enabled: Boolean(scope.teamId && scope.questionId && scope.panel === "question"),
     staleTime: 60_000,
   });
@@ -95,6 +97,8 @@ export function ResearchProcessInspectorPane(props: {
           requestedQuestionId={scope.questionId}
           teamId={scope.teamId}
           detail={questionDetail.data}
+          selectedRunId={selectedQuestionRunId}
+          onSelectRunId={setSelectedQuestionRunId}
           isLoading={questionDetail.isPending}
           errorMessage={questionDetail.error instanceof Error ? questionDetail.error.message : questionDetail.isError ? "challenge_question_run_unavailable" : ""}
           onClose={() => actions.replaceParams({ panel: "progress" })}

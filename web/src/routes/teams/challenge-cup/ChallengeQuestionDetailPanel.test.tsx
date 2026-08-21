@@ -175,7 +175,8 @@ describe("ChallengeQuestionDetailPanel", () => {
 
     expect(markup).toContain("SCI-096");
     expect(markup).toContain("证据事实");
-    expect(markup).toContain("证据锚点未登记");
+    // The schema has no anchor field; the old unconditional warning was removed.
+    expect(markup).not.toContain("证据锚点未登记");
     expect(markup).toContain("Hypothesis one");
     expect(markup).toContain("Hypothesis two");
     expect(markup).toContain("收窄论断边界");

@@ -279,9 +279,13 @@ export function ChallengeQuestionRegisterDialog({
         </VStatusChip>
       </div>
       <p className={css.registerHint}>
-        {isZh
-          ? "该题已进入 H1–H4 人工审核流；在题目详情页提交审核结论后才会计入正式批准。"
-          : "The question entered the H1–H4 human review flow; it counts as formally approved only after a review decision on the detail page."}
+        {resultRecord.validation?.officialModelCall
+          ? (isZh
+            ? "该题已进入 H1–H4 人工审核流；在题目详情页提交审核结论后才会计入正式批准。"
+            : "The question entered the H1–H4 human review flow; it counts as formally approved only after a review decision on the detail page.")
+          : (isZh
+            ? "登记已保存，但尚未满足人工审核条件：官方模型证据需先经发布（publish）晋升到团队级。请先发布该 run 的官方模型证据，再回到详情页提交审核。"
+            : "Registration saved, but human review is not available yet: official-model evidence must be published to the team level first. Publish this run's evidence, then submit the review on the detail page.")}
       </p>
       <div className={css.registerActions}>
         {onOpenQuestion && resultQuestionId ? (

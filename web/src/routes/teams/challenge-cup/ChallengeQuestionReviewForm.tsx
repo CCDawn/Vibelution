@@ -147,7 +147,10 @@ export function ChallengeQuestionReviewForm(props: {
     );
   }
 
-  const canSubmit = Boolean(reviewer.trim()) && Boolean(rationale.trim()) && !mutation.isPending;
+  // Human review requires official-model evidence at team level (register
+  // alone never satisfies it; the run must be published first).
+  const officialCallReady = detail.record?.validation?.officialModelCall === true;
+  const canSubmit = Boolean(reviewer.trim()) && Boolean(rationale.trim()) && !mutation.isPending && officialCallReady;
 
   return (
     <VSurface tone="card" className={css.reviewForm} data-vui="question-review-form">
@@ -206,7 +209,11 @@ export function ChallengeQuestionReviewForm(props: {
           variant="primary"
           isPending={mutation.isPending}
           isDisabled={!canSubmit}
-          disabledReason={!reviewer.trim() || !rationale.trim() ? (isZh ? "先填审核人和审核意见" : "Fill in reviewer and rationale first") : undefined}
+          disabledReason={!officialCallReady
+            ? (isZh
+              ? "该 run 尚未满足官方模型调用门（证据需先发布到团队级），提交会被拒绝"
+              : "This run has not passed the official-model-call gate (publish the evidence first); submission would be rejected")
+            : !reviewer.trim() || !rationale.trim() ? (isZh ? "先填审核人和审核意见" : "Fill in reviewer and rationale first") : undefined}
           onClick={() => mutation.mutate()}
         >
           {isZh ? "提交审核结论" : "Submit review"}

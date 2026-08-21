@@ -2,6 +2,8 @@ const styles: Record<string, string> = {
   // The panel lives inside the 300–520px inspector pane, so all multi-column
   // grids below respond to the container (@container), never the viewport.
   workspace: "@container grid gap-4 text-[var(--fg-primary)]",
+  runSwitcher:
+    "flex items-center gap-1 [font-size:var(--vui-font-xs)] text-[var(--fg-secondary)] [&_select]:min-h-[var(--vui-control-height-sm)] [&_select]:max-w-44",
   header:
     "flex flex-wrap items-start justify-between gap-3 [&_h2]:m-0 [&_h2]:mt-1 [&_h2]:[font-size:var(--vui-font-xl)] [&_h2]:leading-[1.3]",
   questionZh: "m-0 text-[var(--fg-secondary)]",

@@ -81,7 +81,6 @@ export function ChallengeQuestionEvidenceSection({ detail, lang = "zh" }: Challe
                 <span>{isZh ? "证据事实" : "Evidence fact"}</span>
                 <p>{evidence.fact}</p>
               </div>
-              <div className={css.missingLine}>{isZh ? "证据锚点未登记" : "Evidence anchor not registered"}</div>
               {evidence.limitations?.length ? (
                 <div><strong>{isZh ? "限制" : "Limitations"}</strong><ChallengeStringList values={evidence.limitations} lang={lang} /></div>
               ) : null}

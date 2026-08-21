@@ -298,6 +298,24 @@ def _project_source_collection_run_ids(team_id: str, research_project_id: str) -
     }
 
 
+def _assert_project_agent_tasks_not_active(team_id: str, project_id: str) -> None:
+    """Resetting mid-task deletes the plan the task is writing back to."""
+    s = _service()
+    try:
+        from core.web.services.team_workflow import research_project_agent_tasks as task_service
+
+        status = task_service.get_research_project_agent_task_status(team_id, project_id)
+    except Exception:  # noqa: BLE001 - guard must fail open on status errors
+        return
+    active = list((status or {}).get("activeTasks") or [])
+    if active:
+        raise s.TeamWorkflowOrchestrationError(
+            "该项目仍有进行中的 Agent 任务（"
+            + ", ".join(str(item.get("taskKind") or item.get("taskId") or "") for item in active[:5])
+            + "）。请等待任务结束或先停止任务，再清空项目进度。"
+        )
+
+
 def _assert_project_source_search_not_active(team_id: str, run_ids: set[str]) -> None:
     s = _service()
     active_snapshot = s._source_collection_work_run_store().load_active_snapshot(s.SOURCE_COLLECTION_WORK_RUN_KIND)
@@ -360,6 +378,7 @@ def reset_research_project_source_collection(team_id: str, project_id: str) -> d
     )
     run_ids = _project_source_collection_run_ids(normalized_team_id, normalized_project_id)
     _assert_project_source_search_not_active(normalized_team_id, run_ids)
+    _assert_project_agent_tasks_not_active(normalized_team_id, normalized_project_id)
 
     removed_candidate_ids: set[str] = set()
     removed_round_ids: set[str] = set()
@@ -501,6 +520,7 @@ def reset_research_project_progress(team_id: str, project_id: str) -> dict[str, 
     )
     run_ids = _project_source_collection_run_ids(normalized_team_id, normalized_project_id)
     _assert_project_source_search_not_active(normalized_team_id, run_ids)
+    _assert_project_agent_tasks_not_active(normalized_team_id, normalized_project_id)
 
     removed_candidate_ids: set[str] = set()
     removed_round_ids: set[str] = set()

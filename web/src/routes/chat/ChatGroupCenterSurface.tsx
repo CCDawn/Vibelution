@@ -1,5 +1,5 @@
 import { BellRing, Square, UsersRound } from "lucide-react";
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 
 import { kernelTaskCenterHref } from "../../api/kernel";
@@ -513,6 +513,19 @@ export function ChatGroupCenterSurface({
   }
 
   const rounds = activeGroupRoom?.rounds ?? [];
+  // Keep the newest message visible: auto-scroll when the reader is already
+  // near the bottom; never yank someone who scrolled up through history.
+  const groupTimelineRef = useRef<HTMLDivElement | null>(null);
+  const lastRound = rounds[rounds.length - 1];
+  const lastMessageKey = `${lastRound?.roundId ?? ""}:${(lastRound?.messages ?? []).length}:${rounds.length}`;
+  useEffect(() => {
+    const element = groupTimelineRef.current;
+    if (!element) return;
+    const nearBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 180;
+    if (nearBottom) {
+      element.scrollTop = element.scrollHeight;
+    }
+  }, [lastMessageKey]);
   return (
     <div className={styles.groupConversationFrame}>
       <ChatMessageChromeHeader
@@ -547,7 +560,7 @@ export function ChatGroupCenterSurface({
       {groupRoomRefreshError ? (
         <div className={styles.inlineNotice} role="alert">{groupRoomRefreshError}</div>
       ) : null}
-      <div className={styles.groupMessageTimeline} aria-live="polite">
+      <div ref={groupTimelineRef} className={styles.groupMessageTimeline} aria-live="polite">
         {rounds.length ? (
           <GroupRoundsTimeline
             rounds={rounds}

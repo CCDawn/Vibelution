@@ -93,8 +93,8 @@ export function catalogOverviewCountLabel(
   zh: boolean,
 ): string {
   return zh
-    ? `${counts.succeeded} 通过 · ${counts.failed} 失败 · ${counts.queued} 排队`
-    : `${counts.succeeded} passed · ${counts.failed} failed · ${counts.queued} queued`;
+    ? `${counts.succeeded} 通过 · ${counts.failed} 失败 · ${counts.running} 进行中 · ${counts.queued} 排队`
+    : `${counts.succeeded} passed · ${counts.failed} failed · ${counts.running} running · ${counts.queued} queued`;
 }
 
 export function catalogOverviewProgressPercent(

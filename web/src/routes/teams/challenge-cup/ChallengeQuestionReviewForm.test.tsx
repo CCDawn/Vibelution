@@ -31,7 +31,13 @@ function pendingDetail(): ChallengeQuestionRunDetailPayload {
     teamId: "research-team",
     questionId: "SCI-096",
     selectedRunId: "stage1-sci-096-v3",
-    record: { recordId: "record-sci-096", questionId: "SCI-096", runId: "stage1-sci-096-v3", status: "pending_review" },
+    record: {
+      recordId: "record-sci-096",
+      questionId: "SCI-096",
+      runId: "stage1-sci-096-v3",
+      status: "pending_review",
+      validation: { officialModelCall: true },
+    },
     output: {
       problem_understanding: { human_gate: gate },
       selection: { human_gate: gate },

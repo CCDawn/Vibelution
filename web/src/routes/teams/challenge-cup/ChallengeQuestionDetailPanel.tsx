@@ -11,6 +11,7 @@ import {
   VEmptyState,
   VStateSurface,
   VStatusChip,
+  VStringSelect,
   VSurface,
 } from "../../../components/vui";
 import { TeamHypothesisRoundTimeline } from "../TeamHypothesisRoundTimeline";
@@ -33,6 +34,9 @@ export type ChallengeQuestionDetailPanelProps = {
   isLoading: boolean;
   errorMessage?: string;
   onClose: () => void;
+  /** Selected historical run id (empty = latest); revisions become reviewable. */
+  selectedRunId?: string;
+  onSelectRunId?: (runId: string) => void;
 };
 
 const DETAIL_ANCHORS_ZH = [
@@ -66,6 +70,7 @@ const DETAIL_ANCHORS_EN = [
 const RECORD_STATUS_LABELS: Record<string, string> = {
   approved: "正式批准",
   pending_review: "待审核",
+  review_required: "待审核",
   needs_revision: "待修订",
   rejected: "已驳回",
 };
@@ -73,6 +78,7 @@ const RECORD_STATUS_LABELS: Record<string, string> = {
 const RECORD_STATUS_LABELS_EN: Record<string, string> = {
   approved: "Approved",
   pending_review: "Pending review",
+  review_required: "Pending review",
   needs_revision: "Needs revision",
   rejected: "Rejected",
 };
@@ -88,6 +94,8 @@ export function ChallengeQuestionDetailPanel({
   isLoading,
   errorMessage = "",
   onClose,
+  selectedRunId = "",
+  onSelectRunId,
 }: ChallengeQuestionDetailPanelProps) {
   const [reviseDialogOpen, setReviseDialogOpen] = useState(false);
   const { lang } = useShellI18n();
@@ -159,6 +167,20 @@ export function ChallengeQuestionDetailPanel({
           <VStatusChip tone={record.status === "approved" ? "accent" : "warning"}>
             {recordStatusLabel(record.status, isZh)}
           </VStatusChip>
+          {onSelectRunId && detail.runs.length > 1 ? (
+            <label className={css.runSwitcher} data-testid="question-run-switcher">
+              <span>{isZh ? "查看 run" : "Run"}</span>
+              <VStringSelect
+                value={selectedRunId || detail.selectedRunId}
+                onValueChange={(value) => onSelectRunId(value)}
+                ariaLabel={isZh ? "选择要查看的 run" : "Select run to view"}
+                options={detail.runs.map((run) => ({
+                  value: run.runId,
+                  label: `${run.runId}${run.runId === detail.selectedRunId ? (isZh ? "（最新）" : " (latest)") : ""}`,
+                }))}
+              />
+            </label>
+          ) : null}
           {record.status === "needs_revision" ? (
             <VButton density="compact" variant="primary" onPress={() => setReviseDialogOpen(true)}>
               {isZh ? "登记修订产出" : "Register revision output"}

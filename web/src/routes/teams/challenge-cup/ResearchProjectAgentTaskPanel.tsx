@@ -40,7 +40,18 @@ const TASKS_BY_STAGE: Record<Stage, TaskDefinition[]> = {
 };
 
 const ACTIVE_STATUSES = new Set(["queued", "running", "in_progress"]);
-const RETRYABLE_STATUSES = new Set(["failed", "blocked", "cancelled"]);
+const RETRYABLE_STATUSES = new Set([
+  "failed",
+  "blocked",
+  "cancelled",
+  "canceled",
+  "stopped",
+  "incomplete",
+  "error",
+  "timeout",
+  "timed_out",
+  "superseded",
+]);
 
 function latestTask(
   tasks: TeamResearchProjectAgentTask[],
@@ -60,6 +71,13 @@ function statusLabel(status: string) {
     failed: "失败",
     blocked: "已阻塞",
     cancelled: "已取消",
+    canceled: "已取消",
+    stopped: "已停止",
+    incomplete: "未完成",
+    error: "出错",
+    timeout: "超时",
+    timed_out: "已超时",
+    superseded: "已被取代",
   }[status] ?? status) || "未开始";
 }
 

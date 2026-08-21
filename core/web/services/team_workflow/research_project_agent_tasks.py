@@ -801,10 +801,7 @@ def research_project_iteration_readiness(
         item
         for item in list(store.get("plans") or [])
         if isinstance(item, dict)
-        and (
-            not _text(item.get("researchProjectId"))
-            or _text(item.get("researchProjectId")) == normalized_project_id
-        )
+        and _text(item.get("researchProjectId")) == normalized_project_id
     ]
     frozen_plan = s._latest_frozen_experiment_design(plans)
     if frozen_plan is None:

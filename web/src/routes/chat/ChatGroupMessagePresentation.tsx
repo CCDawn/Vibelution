@@ -77,12 +77,18 @@ export function ChatGroupMessageBody({
   const collapsed = collapsible && !expanded;
   const collapseLabel = lang === "zh" ? "展开全文" : "Show full";
 
+  const messageStatus = String(message.status ?? "").toLowerCase();
+  const failureReason = messageStatus !== "completed" && !content.trim()
+    ? String(message.summary || message.errorType || "").trim()
+    : "";
   return (
     <>
       <p className={collapsed ? `${styles.groupBubbleBody} ${styles.groupBubbleBodyCollapsed}` : styles.groupBubbleBody}>
         <ChatMentionedText
           content={content}
-          fallback={lang === "zh" ? "暂无内容" : "No content yet"}
+          fallback={failureReason
+            ? (lang === "zh" ? `发言未完成：${failureReason}` : `Message incomplete: ${failureReason}`)
+            : (lang === "zh" ? "暂无内容" : "No content yet")}
           lang={lang}
           mentionTargets={mentionTargets}
           onOpenMentionTarget={onOpenMentionTarget}
