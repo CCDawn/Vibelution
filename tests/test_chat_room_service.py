@@ -3227,3 +3227,129 @@ def test_delete_chat_room_removes_room(tmp_path, monkeypatch):
 
     assert result == {"deleted": True, "roomId": room["roomId"]}
     assert chat_room_service.get_chat_room_detail(room["roomId"]) is None
+
+
+def test_stopped_round_still_syncs_completed_messages_to_participant_sessions(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    room = chat_room_service.create_chat_room(
+        title="停止同步群聊",
+        participant_session_ids=["session-alpha", "session-beta"],
+    )
+
+    second_speaker_started = threading.Event()
+    release_runner = threading.Event()
+
+    def staged_runner(participant, prompt, context):
+        # Speaker one completes and is persisted; speaker two blocks so the
+        # stop lands between turns with one completed message already stored.
+        if participant.get("sessionId") != "session-beta":
+            return {"status": "completed", "raw_output": "停止前的发言", "summary": "ok"}
+        second_speaker_started.set()
+        assert release_runner.wait(10.0)
+        return {"status": "completed", "raw_output": "迟到的发言", "summary": "late"}
+
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pytest-chat-room-stop-sync")
+    monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_EXECUTOR", executor)
+
+    try:
+        started = chat_room_service.start_chat_room_round(
+            room["roomId"],
+            "停止后仍要同步的讨论",
+            agent_runner=staged_runner,
+            background=True,
+        )
+        assert second_speaker_started.wait(1.0)
+        chat_room_service.stop_chat_room_round(room["roomId"], reason="pytest stop sync")
+    finally:
+        release_runner.set()
+        executor.shutdown(wait=True, cancel_futures=True)
+
+    detail = chat_room_service.get_chat_room_detail(room["roomId"])
+    assert detail["rounds"][-1]["status"] == "stopped"
+    for session_id in ("session-alpha", "session-beta"):
+        events = load_conversation_events(tmp_path, session_id)
+        synced = [
+            event
+            for event in events
+            if event.source == "chat_room_round_sync"
+            and started["activeRoundId"] in event.event_id
+        ]
+        assert synced, f"stopped round transcript missing in {session_id}"
+
+
+def test_start_chat_room_round_rejects_when_inflight_cap_reached(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    room = chat_room_service.create_chat_room(title="背压群聊", participant_session_ids=["session-alpha"])
+    monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_MAX_INFLIGHT_ROUNDS", 1)
+    monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_INFLIGHT_COUNT", 1)
+
+    try:
+        chat_room_service.start_chat_room_round(
+            room["roomId"],
+            "应该被背压拒绝的讨论",
+            agent_runner=lambda participant, prompt, context: {"status": "completed", "raw_output": "ok", "summary": "ok"},
+            background=True,
+        )
+    except chat_room_service.ChatRoomBusyError as exc:
+        assert "任务较多" in str(exc)
+    else:
+        raise AssertionError("inflight cap should reject the new background round")
+
+    # The rejection must leave the room clean: no round created, no active id.
+    detail = chat_room_service.get_chat_room_detail(room["roomId"])
+    assert detail["activeRoundId"] == ""
+    assert detail["rounds"] == []
+
+
+def test_room_to_api_truncates_history_round_messages_only(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    room = chat_room_service.create_chat_room(title="截断群聊", participant_session_ids=["session-alpha"])
+    monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_API_HISTORY_MESSAGE_LIMIT", 2)
+
+    def _round(round_id, message_count, status):
+        return {
+            "roundId": round_id,
+            "roomId": room["roomId"],
+            "topic": f"topic-{round_id}",
+            "mode": "round_robin",
+            "purpose": "discussion",
+            "status": status,
+            "speakerOrder": [],
+            "messages": [
+                {
+                    "messageId": f"{round_id}-msg-{index}",
+                    "participantId": "participant-1",
+                    "sessionId": "session-alpha",
+                    "status": "completed",
+                    "content": f"消息 {index}",
+                    "timestamp": f"2026-08-21T00:00:{index:02d}Z",
+                }
+                for index in range(message_count)
+            ],
+            "summary": "",
+            "startedAt": "2026-08-21T00:00:00Z",
+            "updatedAt": "2026-08-21T00:00:30Z",
+            "finishedAt": "2026-08-21T00:00:30Z",
+        }
+
+    state = chat_room_service._store().load()
+    stored_room = next(item for item in state["rooms"] if item["roomId"] == room["roomId"])
+    stored_room["rounds"] = [_round("round-old", 3, "completed"), _round("round-new", 1, "completed")]
+    chat_room_service._store().save(state)
+
+    detail = chat_room_service.get_chat_room_detail(room["roomId"])
+    old_round, new_round = detail["rounds"]
+    assert old_round["roundId"] == "round-old"
+    assert len(old_round["messages"]) == 2
+    assert old_round["messagesTruncated"] is True
+    assert old_round["messagesTotalCount"] == 3
+    assert old_round["messages"][-1]["messageId"] == "round-old-msg-2"
+    assert new_round["roundId"] == "round-new"
+    assert len(new_round["messages"]) == 1
+    assert "messagesTruncated" not in new_round

@@ -859,6 +859,18 @@ def test_research_project_progress_aggregates_active_project_facts(tmp_path, mon
         },
     )
     assert start.status_code == 201, start.text
+    stage_store_path = team_workflow_orchestration_service._stage_round_store_path(team_id)
+    stage_store = team_workflow_orchestration_service._load_stage_round_store(team_id)
+    stage_store.setdefault("rounds", []).append(
+        {
+            "stageRoundId": "round-other-project",
+            "stageType": "experiment",
+            "status": "planning",
+            "researchProjectId": "proj-other",
+            "sourceRunIds": [],
+        }
+    )
+    team_workflow_orchestration_service._write_json(stage_store_path, stage_store)
     progress = client.get(
         f"/api/teams/{team_id}/workflow-orchestration/research-projects/{project['projectId']}/progress",
     )
@@ -868,6 +880,13 @@ def test_research_project_progress_aggregates_active_project_facts(tmp_path, mon
     assert payload["sourceRunCount"] == 1
     assert payload["canResetProgress"] is True
     assert "phases" in payload
+    experiment_phase = next(item for item in payload["phases"] if item["stageType"] == "experiment")
+    assert experiment_phase["roundCount"] == 0
+    assert experiment_phase["activeRoundId"] == ""
+    for item in payload["phases"]:
+        leaked = item.get("latestRound") or {}
+        assert leaked.get("stageRoundId") != "round-other-project"
+    assert payload["stageRoundCounts"]["experiment"] == 0
 
 
 def test_team_workflow_route_starts_knowledge_expansion_local_source_collection(tmp_path, monkeypatch):

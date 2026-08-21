@@ -281,6 +281,85 @@ def test_attach_question_run_checkpoints_uses_latest_run() -> None:
     assert finished[0]["checkpoint"]["completedCount"] == 16
 
 
+def test_attach_question_run_checkpoints_keeps_prior_success() -> None:
+    """A failed retry must not erase an earlier succeeded run's artifacts view."""
+    attached = question_launch.attach_question_run_checkpoints(
+        [{"questionId": "SCI-003"}],
+        [
+            {
+                "runId": "run-won",
+                "questionId": "SCI-003",
+                "status": "succeeded",
+                "runtimeCurrentNodeIds": ["result_package"],
+                "updatedAtMs": 1,
+            },
+            {
+                "runId": "run-retry",
+                "questionId": "SCI-003",
+                "status": "failed",
+                "runtimeCurrentNodeIds": ["source_finding"],
+                "updatedAtMs": 9,
+            },
+        ],
+    )
+    checkpoint = attached[0]["checkpoint"]
+    assert checkpoint["runId"] == "run-won"
+    assert checkpoint["status"] == "succeeded"
+    assert checkpoint["completedCount"] == 16
+    assert checkpoint["resumable"] is False
+
+    # An in-flight retry still surfaces as running/resumable.
+    inflight = question_launch.attach_question_run_checkpoints(
+        [{"questionId": "SCI-003"}],
+        [
+            {
+                "runId": "run-won",
+                "questionId": "SCI-003",
+                "status": "succeeded",
+                "runtimeCurrentNodeIds": ["result_package"],
+                "updatedAtMs": 1,
+            },
+            {
+                "runId": "run-retry",
+                "questionId": "SCI-003",
+                "status": "running",
+                "runtimeCurrentNodeIds": ["protocol_design"],
+                "updatedAtMs": 9,
+            },
+        ],
+    )
+    live = inflight[0]["checkpoint"]
+    assert live["runId"] == "run-retry"
+    assert live["status"] == "running"
+    assert live["resumable"] is True
+
+    # Without any success the latest failure keeps the failed view but the
+    # deepest progress ever reached must not regress.
+    deep = question_launch.attach_question_run_checkpoints(
+        [{"questionId": "SCI-003"}],
+        [
+            {
+                "runId": "run-deep",
+                "questionId": "SCI-003",
+                "status": "failed",
+                "runtimeCurrentNodeIds": ["controlled_run"],
+                "updatedAtMs": 1,
+            },
+            {
+                "runId": "run-shallow",
+                "questionId": "SCI-003",
+                "status": "failed",
+                "runtimeCurrentNodeIds": ["source_finding"],
+                "updatedAtMs": 9,
+            },
+        ],
+    )
+    regressed = deep[0]["checkpoint"]
+    assert regressed["runId"] == "run-shallow"
+    assert regressed["status"] == "failed"
+    assert regressed["completedCount"] > 1
+
+
 def test_launch_options_overlay_live_checkpoints(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

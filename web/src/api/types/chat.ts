@@ -1094,6 +1094,8 @@ export type ChatRoomRound = {
   status: string;
   speakerOrder: string[];
   messages: ChatRoomMessage[];
+  messagesTruncated?: boolean;
+  messagesTotalCount?: number;
   summary: string;
   startedAt: string;
   updatedAt: string;

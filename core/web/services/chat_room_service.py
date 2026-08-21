@@ -104,9 +104,15 @@ CHAT_ROOM_PURPOSES = [
     },
 ]
 RUNNING_ROUND_STATUSES = {"queued", "running", "stopping"}
+_CHAT_ROOM_API_HISTORY_MESSAGE_LIMIT = 50
 _CHAT_ROOM_LOCK = threading.RLock()
 _CHAT_ROOM_PARTICIPANT_REFRESH_MAX_ATTEMPTS = 3
 _CHAT_ROOM_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="web-chat-room")
+# The executor queue is unbounded, so cap submitted-but-not-finished rounds;
+# otherwise N rooms can all flip to durable "running" while queueing forever.
+_CHAT_ROOM_MAX_INFLIGHT_ROUNDS = 16
+_CHAT_ROOM_INFLIGHT_LOCK = threading.Lock()
+_CHAT_ROOM_INFLIGHT_COUNT = 0
 _CHAT_ROOM_STREAM_SUBSCRIBERS_LOCK = threading.Lock()
 _CHAT_ROOM_STREAM_SUBSCRIBERS: dict[str, set[queue.Queue[dict[str, Any]]]] = {}
 _CHAT_ROOM_STREAM_HEARTBEAT_SECONDS = 15.0
@@ -867,6 +873,15 @@ def start_chat_room_round(
         raise ChatRoomValidationError(text_for(lang, zh="请输入本轮群聊议题。", en="Enter a room topic."))
 
     runner = agent_runner or _run_participant_agent
+    if background and not _try_acquire_chat_room_inflight():
+        # Reject before any durable round write so the room stays clean.
+        raise ChatRoomBusyError(
+            text_for(
+                lang,
+                zh="当前群聊讨论任务较多，请稍后再发起。",
+                en="Too many chat room rounds are queued; please retry in a moment.",
+            )
+        )
     for refresh_attempt in range(_CHAT_ROOM_PARTICIPANT_REFRESH_MAX_ATTEMPTS):
         with _CHAT_ROOM_LOCK:
             stage_started_at = _perf_counter()
@@ -874,15 +889,27 @@ def start_chat_room_round(
             submit_timings["storeLoadMs"] = _elapsed_ms(stage_started_at)
             room = _find_room(state, normalized_room_id)
             if room is None:
+                if background:
+                    _release_chat_room_inflight()
                 raise ChatRoomNotFoundError(text_for(lang, zh="未找到群聊。", en="Chat room not found."))
-            _raise_if_room_busy(room)
+            try:
+                _raise_if_room_busy(room)
+            except ChatRoomBusyError:
+                if background:
+                    _release_chat_room_inflight()
+                raise
             round_mode = _normalize_mode(mode or room.get("mode") or DEFAULT_MODE)
             round_purpose = _resolve_round_purpose(
                 normalized_topic,
                 purpose or room.get("purpose") or DEFAULT_PURPOSE,
             )
             stage_started_at = _perf_counter()
-            _require_ready_mode(round_mode)
+            try:
+                _require_ready_mode(round_mode)
+            except ChatRoomValidationError:
+                if background:
+                    _release_chat_room_inflight()
+                raise
             submit_timings["schedulerResolveMs"] = _elapsed_ms(stage_started_at)
             round_config = {**_safe_config(room.get("config")), **_safe_config(config)}
             participant_seed = copy.deepcopy(room.get("participants") or [])
@@ -903,10 +930,19 @@ def start_chat_room_round(
             submit_timings["storeLoadMs"] = _elapsed_ms(stage_started_at)
             room = _find_room(state, normalized_room_id)
             if room is None:
+                if background:
+                    _release_chat_room_inflight()
                 raise ChatRoomNotFoundError(text_for(lang, zh="未找到群聊。", en="Chat room not found."))
-            _raise_if_room_busy(room)
+            try:
+                _raise_if_room_busy(room)
+            except ChatRoomBusyError:
+                if background:
+                    _release_chat_room_inflight()
+                raise
             if list(room.get("participants") or []) != participant_seed:
                 if refresh_attempt == _CHAT_ROOM_PARTICIPANT_REFRESH_MAX_ATTEMPTS - 1:
+                    if background:
+                        _release_chat_room_inflight()
                     raise ChatRoomBusyError(
                         text_for(
                             lang,
@@ -922,7 +958,12 @@ def start_chat_room_round(
                 purpose or room.get("purpose") or DEFAULT_PURPOSE,
             )
             stage_started_at = _perf_counter()
-            scheduler = _require_ready_mode(round_mode)
+            try:
+                scheduler = _require_ready_mode(round_mode)
+            except ChatRoomValidationError:
+                if background:
+                    _release_chat_room_inflight()
+                raise
             submit_timings["schedulerResolveMs"] = _elapsed_ms(stage_started_at)
             round_config = {**_safe_config(room.get("config")), **_safe_config(config)}
             stage_started_at = _perf_counter()
@@ -948,6 +989,8 @@ def start_chat_room_round(
             speakers = _dedupe_chat_room_participants(speakers)
             submit_timings["speakerSelectMs"] = _elapsed_ms(stage_started_at)
             if not speakers:
+                if background:
+                    _release_chat_room_inflight()
                 raise ChatRoomValidationError(
                     text_for(lang, zh="群聊没有可发言的参与者。", en="The chat room has no enabled speakers.")
                 )
@@ -990,6 +1033,7 @@ def start_chat_room_round(
             submit_timings["chatRoomLockedMs"] = _elapsed_ms_between(lock_acquired_at)
             break
 
+    inflight_submitted = False
     try:
         stage_started_at = _perf_counter()
         kernel_trace = _create_chat_room_round_kernel_trace(room, round_payload, speakers)
@@ -1033,8 +1077,7 @@ def start_chat_room_round(
 
         if background:
             schedule_started_at = _perf_counter()
-            _CHAT_ROOM_EXECUTOR.submit(
-                _run_chat_room_round_background,
+            _submit_chat_room_round_background(
                 normalized_room_id,
                 round_id,
                 room,
@@ -1042,8 +1085,8 @@ def start_chat_room_round(
                 speakers,
                 runner,
                 lang,
-                _perf_counter(),
             )
+            inflight_submitted = True
             submit_timings["scheduleSubmitMs"] = _elapsed_ms(schedule_started_at)
             _record_room_event(
                 "round",
@@ -1089,6 +1132,9 @@ def start_chat_room_round(
         # The launch window between the durable running write and the executor
         # submission must fail the round on any error, otherwise the control
         # marker keeps reconcile away and the room stays busy until restart.
+        if background and not inflight_submitted:
+            # submit never enqueued the wrapper, so the slot is still ours.
+            _release_chat_room_inflight()
         _fail_chat_room_round(
             normalized_room_id,
             round_id,
@@ -1098,6 +1144,56 @@ def start_chat_room_round(
             lang=lang,
         )
         raise
+def _try_acquire_chat_room_inflight() -> bool:
+    global _CHAT_ROOM_INFLIGHT_COUNT
+    with _CHAT_ROOM_INFLIGHT_LOCK:
+        if _CHAT_ROOM_INFLIGHT_COUNT >= _CHAT_ROOM_MAX_INFLIGHT_ROUNDS:
+            return False
+        _CHAT_ROOM_INFLIGHT_COUNT += 1
+        return True
+
+
+def _release_chat_room_inflight() -> None:
+    global _CHAT_ROOM_INFLIGHT_COUNT
+    with _CHAT_ROOM_INFLIGHT_LOCK:
+        _CHAT_ROOM_INFLIGHT_COUNT = max(0, _CHAT_ROOM_INFLIGHT_COUNT - 1)
+
+
+def _submit_chat_room_round_background(
+    room_id: str,
+    round_id: str,
+    room: dict[str, Any],
+    round_payload: dict[str, Any],
+    speakers: list[dict[str, Any]],
+    runner: AgentRunner,
+    lang: str,
+) -> None:
+    """Submit the worker; the wrapper always releases the inflight slot.
+
+    A failed ``submit`` never enqueues the wrapper, so the caller's launch
+    window handler stays responsible for the release in that case.
+    """
+
+    _CHAT_ROOM_EXECUTOR.submit(
+        _run_chat_room_round_background_with_release,
+        room_id,
+        round_id,
+        room,
+        round_payload,
+        speakers,
+        runner,
+        lang,
+        _perf_counter(),
+    )
+
+
+def _run_chat_room_round_background_with_release(*args: Any, **kwargs: Any) -> Any:
+    try:
+        return _run_chat_room_round_background(*args, **kwargs)
+    finally:
+        _release_chat_room_inflight()
+
+
 def _create_chat_room_round_kernel_trace(
     room: dict[str, Any],
     round_payload: dict[str, Any],
@@ -2074,6 +2170,10 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
         run_id=round_id,
         session_id=session_id,
         owner="chat_room_round",
+        # A worker (max 2) must not wait forever for the agent slot held by a
+        # long session turn: time out and fail the round instead of stalling
+        # every room.
+        wait_timeout_seconds=900.0,
     ):
         stage_started_at = _perf_counter()
         agent_context = build_agent_context(agent_id, session_id=session_id, run_id=round_id) if agent_id else None
@@ -2698,6 +2798,25 @@ def _sync_group_round_to_participant_sessions(room: dict[str, Any], round_payloa
         outcome="written" if synced_count else "skipped",
         lifecycle=True,
     )
+
+
+def _sync_stopped_round_to_sessions_if_needed(room: dict[str, Any], round_payload: dict[str, Any]) -> None:
+    """Stop/fail closures must still sync completed speaker messages.
+
+    The happy path syncs at round completion; without this the transcript and
+    group-context events for completed messages never reach participant
+    sessions when the round is stopped or fails midway. Both sync helpers are
+    idempotent per room+round, so double closure paths stay safe.
+    """
+
+    has_completed = any(
+        isinstance(item, dict) and str(item.get("status") or "").strip().lower() == "completed"
+        for item in list(round_payload.get("messages") or [])
+    )
+    if not has_completed:
+        return
+    _sync_group_context_events(room, round_payload)
+    _sync_group_round_to_participant_sessions(room, round_payload)
 
 
 def _remove_group_room_transcripts_from_participant_sessions(
@@ -3777,7 +3896,17 @@ def _room_to_api(
     payload["mode"] = str(payload.get("mode") or DEFAULT_MODE).strip() or DEFAULT_MODE
     payload["purpose"] = _normalize_purpose(payload.get("purpose") or DEFAULT_PURPOSE)
     payload["participants"] = [dict(item) for item in list(room.get("participants") or []) if isinstance(item, dict)]
-    payload["rounds"] = [_round_to_api(item, payload) for item in list(room.get("rounds") or []) if isinstance(item, dict)]
+    rounds = [item for item in list(room.get("rounds") or []) if isinstance(item, dict)]
+    # The UI only reads the newest round's transcript; cap older rounds so a
+    # long-lived room does not ship every historical message on each snapshot.
+    payload["rounds"] = [
+        _round_to_api(
+            item,
+            payload,
+            message_limit=None if index == len(rounds) - 1 else _CHAT_ROOM_API_HISTORY_MESSAGE_LIMIT,
+        )
+        for index, item in enumerate(rounds)
+    ]
     payload["availableModes"] = available_modes if available_modes is not None else list_chat_room_modes()
     payload["availablePurposes"] = available_purposes if available_purposes is not None else list_chat_room_purposes()
     return payload
@@ -3801,18 +3930,28 @@ def _room_to_conversation_index_reference(room: dict[str, Any]) -> dict[str, Any
     }
 
 
-def _round_to_api(round_payload: dict[str, Any], room_payload: dict[str, Any]) -> dict[str, Any]:
+def _round_to_api(
+    round_payload: dict[str, Any],
+    room_payload: dict[str, Any],
+    *,
+    message_limit: int | None = None,
+) -> dict[str, Any]:
     payload = dict(round_payload)
     payload["mode"] = str(payload.get("mode") or room_payload.get("mode") or DEFAULT_MODE).strip() or DEFAULT_MODE
     payload["purpose"] = _normalize_purpose(payload.get("purpose") or room_payload.get("purpose") or DEFAULT_PURPOSE)
     case_state = _normalize_case_state_for_api(payload.get("caseState"))
     if case_state:
         payload["caseState"] = case_state
-    payload["messages"] = [
+    messages = [
         _message_to_api(message, case_state)
         for message in list(payload.get("messages") or [])
         if isinstance(message, dict)
     ]
+    if message_limit is not None and len(messages) > message_limit:
+        payload["messagesTruncated"] = True
+        payload["messagesTotalCount"] = len(messages)
+        messages = messages[-message_limit:]
+    payload["messages"] = messages
     return payload
 
 
@@ -4155,6 +4294,7 @@ def _reconcile_chat_room_round_state() -> list[dict[str, Any]]:
                 }
             )
             store.persist_snapshot(RUN_KIND, work_run_payload, active_run_id="")
+        _sync_stopped_round_to_sessions_if_needed(item["room"], item["round"])
         _record_room_event(
             "round",
             "chat_room.round.orphan_reconciled",
@@ -4221,6 +4361,7 @@ def _stopped_chat_room_round_detail(room_id: str, round_id: str) -> dict[str, An
             outcome="stopped",
             lifecycle=True,
         )
+        _sync_stopped_round_to_sessions_if_needed(room, target_round)
         _publish_chat_room_detail_snapshot(room_id)
     return _room_to_api(room)
 
@@ -4455,6 +4596,7 @@ def _fail_chat_room_round(
             _store().save(state)
 
     _persist_chat_room_work_run(live_room, target_round, status="failed", summary=summary)
+    _sync_stopped_round_to_sessions_if_needed(live_room, target_round)
     _record_room_event(
         "round",
         "chat_room.round.background_failed",

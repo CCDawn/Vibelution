@@ -442,6 +442,8 @@ def attach_question_run_checkpoints(
     index_by_id = {node_id: index for index, node_id in enumerate(node_ids)}
     total_steps = len(node_ids)
     latest_by_question: dict[str, Mapping[str, Any]] = {}
+    succeeded_by_question: dict[str, Mapping[str, Any]] = {}
+    max_completed_by_question: dict[str, int] = {}
     for run in runs:
         question_id = _text(run.get("questionId")).upper()
         run_id = _text(run.get("runId"))
@@ -450,26 +452,43 @@ def attach_question_run_checkpoints(
         previous = latest_by_question.get(question_id)
         if previous is None or _run_timestamp_ms(run) >= _run_timestamp_ms(previous):
             latest_by_question[question_id] = run
+        run_status = _text(run.get("status"))
+        if run_status == "succeeded":
+            previous_success = succeeded_by_question.get(question_id)
+            if previous_success is None or _run_timestamp_ms(run) >= _run_timestamp_ms(previous_success):
+                succeeded_by_question[question_id] = run
+        run_node_index = index_by_id.get(_run_current_node_id(run), 0)
+        run_completed = total_steps if run_status == "succeeded" else run_node_index
+        max_completed_by_question[question_id] = max(
+            max_completed_by_question.get(question_id, 0),
+            run_completed,
+        )
     attached: list[dict[str, Any]] = []
     for question in questions:
         record = dict(question)
-        run = latest_by_question.get(_text(record.get("questionId")).upper())
+        question_id = _text(record.get("questionId")).upper()
+        run = latest_by_question.get(question_id)
         if run is None:
             record["checkpoint"] = None
             attached.append(record)
             continue
-        node_id = _run_current_node_id(run)
         status = _text(run.get("status")) or "queued"
-        node_index = index_by_id.get(node_id, 0)
-        completed = total_steps if status == "succeeded" else node_index
+        # A finished retry must not erase a previous success: once any run
+        # succeeded the question keeps its succeeded checkpoint (artifacts
+        # remain usable), while an in-flight newer run still shows as running.
+        status_run = run
+        if status in _TERMINAL_RUN_STATUSES and status != "succeeded":
+            status_run = succeeded_by_question.get(question_id) or run
+            status = _text(status_run.get("status")) or status
+        node_id = _run_current_node_id(status_run)
         record["checkpoint"] = {
-            "runId": _text(run.get("runId")),
+            "runId": _text(status_run.get("runId")),
             "status": status,
             "currentNodeId": node_id,
             "currentNodeLabel": labels.get(node_id, ""),
-            "completedCount": completed,
+            "completedCount": max_completed_by_question.get(question_id, 0),
             "totalSteps": total_steps,
-            "resumable": status not in _TERMINAL_RUN_STATUSES,
+            "resumable": _text(run.get("status")) not in _TERMINAL_RUN_STATUSES,
         }
         attached.append(record)
     return attached

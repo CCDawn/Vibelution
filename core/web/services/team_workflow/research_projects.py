@@ -486,6 +486,7 @@ def get_research_project_progress(team_id: str, project_id: str = "") -> dict[st
         all_rounds = workflow._stage_rounds(stage_store)
         candidate_store = workflow._load_candidate_store(normalized_team_id)
         plan_store = workflow._load_experiment_plan_store(normalized_team_id)
+        workflow_record = workflow._load_or_create_workflow(normalized_team_id)
     project_rounds = [
         item
         for item in all_rounds
@@ -522,7 +523,21 @@ def get_research_project_progress(team_id: str, project_id: str = "") -> dict[st
         for item in project_plans
         if bool(item.get("designFrozen") or item.get("frozen") or str(item.get("status") or "").lower() in {"frozen", "design_frozen"})
     )
-    phases = list(stage_status.get("phases") or [])
+    # Rebuild phases from project-scoped rounds: the team-level stage status
+    # mixes every project's rounds, which would leak other projects' active
+    # rounds and readiness into this project's phase view.
+    team_snapshot = workflow._source_collection_team_identity_snapshot(normalized_team_id)
+    phases = [
+        workflow._stage_phase_status(
+            normalized_team_id,
+            stage_type,
+            project_rounds,
+            workflow=workflow_record,
+            team=team_snapshot,
+        )
+        for stage_type in workflow.RESEARCH_STAGE_TYPES
+    ]
+    current_stage = workflow._current_research_stage(phases, workflow_record)
     return {
         "schemaVersion": SCHEMA_VERSION,
         "teamId": normalized_team_id,
@@ -534,7 +549,7 @@ def get_research_project_progress(team_id: str, project_id: str = "") -> dict[st
         "stageRoundCounts": stage_round_counts,
         "experimentPlanCount": len(project_plans),
         "frozenExperimentPlanCount": frozen_plan_count,
-        "currentStage": str(stage_status.get("currentStage") or ""),
+        "currentStage": current_stage,
         "phases": phases,
         "canResetSourceOnly": len(run_ids) > 0 and stage_round_counts["experiment"] == 0 and stage_round_counts["iteration"] == 0 and downstream_candidate_count == 0,
         "canResetProgress": len(run_ids) > 0 or sum(stage_round_counts.values()) > 0 or len(project_candidates) > 0 or len(project_plans) > 0,
