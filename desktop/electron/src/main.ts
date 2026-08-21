@@ -1015,7 +1015,21 @@ function startDesktopSessionHeartbeatIfNeeded(paths: DesktopPaths, bootstrap: La
       });
     } catch (error: unknown) {
       if (isRecoverableDesktopControlError(error) && windowProvider !== null) {
-        await recoverDesktopControlContext(paths, currentBootstrap, windowProvider, "desktop_session_heartbeat");
+        try {
+          await recoverDesktopControlContext(paths, currentBootstrap, windowProvider, "desktop_session_heartbeat");
+        } catch (recoveryError: unknown) {
+          const detail = recoveryError instanceof Error ? recoveryError.message : String(recoveryError);
+          await recordElectronSupervisorEvent(currentBootstrap, {
+            eventCode: "electron.desktop_session.heartbeat_recovery_failed",
+            message: "Desktop session heartbeat control-context recovery failed; the next heartbeat will retry.",
+            fields: {
+              desktopSessionId: currentDesktopSessionId(currentBootstrap),
+              stage: "desktop_session_heartbeat_recovery",
+              error: detail.slice(0, 300)
+            }
+          });
+          console.warn(detail);
+        }
       } else {
         console.warn(error instanceof Error ? error.message : String(error));
       }
@@ -1023,7 +1037,20 @@ function startDesktopSessionHeartbeatIfNeeded(paths: DesktopPaths, bootstrap: La
       desktopSessionHeartbeatRunning = false;
     }
   };
-  desktopSessionHeartbeatTimer = setInterval(() => void heartbeatOnce(), DESKTOP_SESSION_HEARTBEAT_MS);
+  desktopSessionHeartbeatTimer = setInterval(() => {
+    void heartbeatOnce().catch((error: unknown) => {
+      const detail = error instanceof Error ? error.message : String(error);
+      console.warn(`desktop session heartbeat failed: ${detail}`);
+      void recordElectronSupervisorEvent(launcherBootstrap, {
+        eventCode: "electron.desktop_session.heartbeat_failed",
+        message: "Desktop session heartbeat failed outside the controlled recovery path; the next heartbeat will retry.",
+        fields: {
+          stage: "desktop_session_heartbeat",
+          error: detail.slice(0, 300)
+        }
+      });
+    });
+  }, DESKTOP_SESSION_HEARTBEAT_MS);
 }
 
 function stopDesktopSessionHeartbeat(): void {
@@ -1392,8 +1419,22 @@ async function acknowledgeTransactionalWorkbenchClose(
   if (transaction === null) {
     return;
   }
-  mainWorkbenchCloseStore.windowClosed(transaction.closeId);
+  const settled = mainWorkbenchCloseStore.windowClosed(transaction.closeId);
   const context = await resolveDesktopActionLoopContext(bootstrap);
+  if (settled.phase === "failed") {
+    await recordElectronSupervisorEvent(bootstrap, {
+      eventCode: "electron.workbench_close.window_closed_after_failure",
+      message: "Workbench window closed after the close transaction failed; backend outcome remains failed.",
+      fields: {
+        closeId: settled.closeId,
+        desktopSessionId: context.desktopSessionId,
+        failureCode: settled.failureCode ?? "",
+        failureMessage: (settled.message ?? "").slice(0, 300),
+        workspaceRoot: paths.workspaceRoot
+      }
+    });
+    return;
+  }
   writeWorkbenchCloseCanarySummary(paths, {
     closeId: transaction.closeId,
     desktopSessionId: context.desktopSessionId,

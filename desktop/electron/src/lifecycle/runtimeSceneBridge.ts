@@ -23,32 +23,77 @@ export function electronEventPayload(event: RuntimeSceneElectronEvent) {
 
 export class RuntimeSceneBridge {
   private readonly queue: RuntimeSceneElectronEvent[] = [];
+  private flushPromise: Promise<void> | null = null;
+  private inFlight: RuntimeSceneElectronEvent | null = null;
 
   constructor(private readonly options: RuntimeSceneBridgeOptions) {}
 
   async record(event: RuntimeSceneElectronEvent): Promise<void> {
     const bounded = this.bound(event);
+    this.queue.push(bounded);
+    this.trimQueue();
     try {
-      await this.post(bounded);
       await this.flush();
     } catch {
-      this.queue.push(bounded);
-      while (this.queue.length > this.options.maxBufferedEvents) {
-        this.queue.shift();
-      }
+      // The failed head remains owned by the queue and will be retried by a
+      // later record/flush call. Do not re-enqueue it here: a concurrent
+      // flush may already have delivered it successfully.
     }
   }
 
   async flush(): Promise<void> {
-    while (this.queue.length > 0) {
-      const next = this.queue[0];
-      await this.post(next);
-      this.queue.shift();
+    if (this.flushPromise !== null) {
+      return this.flushPromise;
+    }
+    const flushPromise = this.flushQueue();
+    this.flushPromise = flushPromise;
+    try {
+      await flushPromise;
+    } finally {
+      if (this.flushPromise === flushPromise) {
+        this.flushPromise = null;
+      }
     }
   }
 
   bufferedCount(): number {
     return this.queue.length;
+  }
+
+  private async flushQueue(): Promise<void> {
+    while (this.queue.length > 0) {
+      const next = this.queue[0];
+      this.inFlight = next;
+      try {
+        await this.post(next);
+      } finally {
+        this.inFlight = null;
+      }
+      // Only the flush that owns this head may remove it. Other records can
+      // append concurrently, but they cannot shift the in-flight event.
+      if (this.queue[0] === next) {
+        this.queue.shift();
+      } else {
+        const index = this.queue.indexOf(next);
+        if (index >= 0) {
+          this.queue.splice(index, 1);
+        }
+      }
+    }
+  }
+
+  private trimQueue(): void {
+    const maxBufferedEvents = Math.max(0, Math.floor(this.options.maxBufferedEvents));
+    while (this.queue.length > maxBufferedEvents) {
+      // Never evict a request while its POST is in flight. If that request
+      // fails, it must remain the retryable queue head; evict the oldest
+      // pending event instead.
+      const protectedHead = this.inFlight !== null && this.queue[0] === this.inFlight;
+      if (protectedHead && this.queue.length === 1) {
+        return;
+      }
+      this.queue.splice(protectedHead ? 1 : 0, 1);
+    }
   }
 
   private async post(event: RuntimeSceneElectronEvent): Promise<void> {

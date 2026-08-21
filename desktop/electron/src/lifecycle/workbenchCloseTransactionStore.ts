@@ -76,7 +76,15 @@ export class MainWorkbenchCloseTransactionStore {
   }
 
   windowClosed(closeId: string): MainWorkbenchCloseTransaction {
-    const transaction = this.requireOpen(closeId);
+    const transaction = this.requireKnown(closeId);
+    // A fail-open close deliberately allows Electron to destroy the window
+    // even though the backend stop transaction failed. The window-closed
+    // callback is still an acknowledgement that must be safe and idempotent;
+    // it must not turn the failed backend outcome into a success or throw from
+    // the Electron event handler.
+    if (transaction.phase === "failed" || transaction.phase === "succeeded") {
+      return transaction;
+    }
     if (transaction.phase !== "window_close_authorized") {
       throw new Error(`workbench close transaction ${closeId} is not authorized to close the window`);
     }
@@ -101,12 +109,17 @@ export class MainWorkbenchCloseTransactionStore {
   }
 
   private requireOpen(closeId: string): MainWorkbenchCloseTransaction {
+    const transaction = this.requireKnown(closeId);
+    if (transaction.phase === "succeeded" || transaction.phase === "failed") {
+      throw new Error(`workbench close transaction ${closeId} already reached ${transaction.phase}`);
+    }
+    return transaction;
+  }
+
+  private requireKnown(closeId: string): MainWorkbenchCloseTransaction {
     const transaction = this.current;
     if (transaction === null || transaction.closeId !== closeId) {
       throw new Error(`unknown workbench close transaction ${closeId}`);
-    }
-    if (transaction.phase === "succeeded" || transaction.phase === "failed") {
-      throw new Error(`workbench close transaction ${closeId} already reached ${transaction.phase}`);
     }
     return transaction;
   }

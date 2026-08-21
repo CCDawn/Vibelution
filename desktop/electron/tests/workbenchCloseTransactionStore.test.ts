@@ -79,6 +79,24 @@ describe("MainWorkbenchCloseTransactionStore", () => {
     expect(next.phase).toBe("backend_closing");
   });
 
+  it("settles a fail-open window acknowledgement without hiding the failed backend outcome", () => {
+    const store = new MainWorkbenchCloseTransactionStore();
+    const submitted = store.submit({
+      mode: "force",
+      reason: "close",
+      activeWorkState: "idle",
+      requestId: "force-request"
+    });
+    store.fail(submitted.closeId, "backend_stop_timeout", "backend did not stop");
+
+    expect(() => store.windowClosed(submitted.closeId)).not.toThrow();
+    expect(store.windowClosed(submitted.closeId)).toMatchObject({
+      closeId: submitted.closeId,
+      phase: "failed",
+      failureCode: "backend_stop_timeout"
+    });
+  });
+
   it("closes the transaction when the user chooses to keep running", () => {
     const store = new MainWorkbenchCloseTransactionStore();
     const submitted = store.submit({ mode: "normal", reason: "close", activeWorkState: "active" });

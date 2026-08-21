@@ -85,6 +85,10 @@ describe("Electron main desktop session heartbeat", () => {
     expect(heartbeatBlock).toContain("isRecoverableDesktopControlError(error)");
     expect(heartbeatBlock).toContain("await recoverDesktopControlContext(");
     expect(heartbeatBlock).toContain("await desktopSessionMirror.mutate(\"heartbeat\"");
+    expect(heartbeatBlock).toContain("try {");
+    expect(heartbeatBlock).toContain('"electron.desktop_session.heartbeat_recovery_failed"');
+    expect(source).toContain("void heartbeatOnce().catch((error: unknown) =>");
+    expect(source).toContain('"electron.desktop_session.heartbeat_failed"');
     expect(actionBlock).toContain("isRecoverableDesktopControlError(error)");
     expect(actionBlock).toContain("await recoverDesktopControlContext(");
     expect(actionBlock).toContain("waitMs: DESKTOP_ACTION_WAIT_MS");

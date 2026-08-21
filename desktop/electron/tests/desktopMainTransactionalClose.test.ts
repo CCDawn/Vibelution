@@ -62,6 +62,8 @@ describe("Electron main transactional Workbench close", () => {
     expect(source).toContain('"backend_stop_timeout"');
     expect(source).toContain("onWorkbenchClosed: () =>");
     expect(source).toContain("mainWorkbenchCloseStore.windowClosed(transaction.closeId)");
+    expect(source).toContain('if (settled.phase === "failed")');
+    expect(source).toContain('"electron.workbench_close.window_closed_after_failure"');
     expect(source).toContain("desktopSessionRevision");
   });
 
