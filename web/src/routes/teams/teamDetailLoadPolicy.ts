@@ -59,6 +59,14 @@ export function resolveSourceCollectionRunsQueryEnabled(options: {
   );
 }
 
+/** Research project metadata drives the team-wide status chrome, including overview. */
+export function resolveResearchProjectsQueryEnabled(options: {
+  effectiveTeamId: string;
+  researchWorkflowTeamSelected: boolean;
+}): boolean {
+  return Boolean(options.effectiveTeamId && options.researchWorkflowTeamSelected);
+}
+
 /**
  * Full linked-room detail is only needed when the communication panel is visible.
  * Team detail already carries a compact room reference for links and status chrome;

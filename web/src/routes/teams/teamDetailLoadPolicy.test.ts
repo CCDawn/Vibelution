@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   isForeignTeamDetailQueryKey,
   resolveLinkedChatRoomQueryEnabled,
+  resolveResearchProjectsQueryEnabled,
   resolveResearchSecondaryStatusQueryEnabled,
   resolveSourceCollectionRunsQueryEnabled,
   resolveTeamCanvasQueryEnabled,
@@ -53,7 +54,26 @@ describe("teamDetailLoadPolicy", () => {
     ).toBe(false);
   });
 
-  it("gates source-collection runs and defers secondary research status outside its active surfaces", () => {
+  it("loads research projects for the team-wide status chrome while gating source-collection runs", () => {
+    expect(
+      resolveResearchProjectsQueryEnabled({
+        effectiveTeamId: "t1",
+        researchWorkflowTeamSelected: true,
+      }),
+    ).toBe(true);
+    expect(
+      resolveResearchProjectsQueryEnabled({
+        effectiveTeamId: "t1",
+        researchWorkflowTeamSelected: false,
+      }),
+    ).toBe(false);
+    expect(
+      resolveResearchProjectsQueryEnabled({
+        effectiveTeamId: "",
+        researchWorkflowTeamSelected: true,
+      }),
+    ).toBe(false);
+
     expect(
       resolveSourceCollectionRunsQueryEnabled({
         effectiveTeamId: "t1",
