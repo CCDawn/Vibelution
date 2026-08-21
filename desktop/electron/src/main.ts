@@ -3509,6 +3509,7 @@ if (runPrimaryWhenReady) {
 app.whenReady()
   .then(async () => {
     const paths = createDesktopPathsForApp();
+    claimElectronDesktopShellOwner(paths.workspaceRoot);
     registerLauncherAppProtocolHandle({
       distRoot: resolveLauncherDistRoot({
         resourcesRoot: paths.resourcesRoot,
@@ -3573,7 +3574,6 @@ app.whenReady()
     });
     startPeriodicShellFreshnessWatch();
     void maybeRestoreTrayRestartAllPending();
-    claimElectronDesktopShellOwner(paths.workspaceRoot);
     await recordElectronSupervisorEvent(launcherBootstrap, {
       eventCode: "electron.tray.created",
       message: "Electron system tray created.",

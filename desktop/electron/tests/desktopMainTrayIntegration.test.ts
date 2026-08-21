@@ -58,6 +58,14 @@ describe("Electron main tray integration", () => {
     expect(mainSource).not.toContain("stopPythonLauncher: ownershipMode === \"started\"");
   });
 
+  it("claims the desktop shell owner before creating the tray", () => {
+    const claimIdx = mainSource.indexOf("claimElectronDesktopShellOwner(paths.workspaceRoot)");
+    const trayIdx = mainSource.indexOf("desktopTray = createDesktopTray(paths,");
+    expect(claimIdx).toBeGreaterThan(-1);
+    expect(trayIdx).toBeGreaterThan(-1);
+    expect(claimIdx).toBeLessThan(trayIdx);
+  });
+
   it("records tray force-interrupt evidence when restart-all runs under FORCE_INTERRUPT", () => {
     expect(mainSource).toContain("ACTIVE_WORK_POLICY_FORCE_INTERRUPT");
     expect(mainSource).toContain("runTrayRestartAll");

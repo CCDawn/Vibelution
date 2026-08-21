@@ -49,6 +49,11 @@ internal static class VibelutionLauncher
                     return 0;
                 }
 
+                if (TryLaunchElectronAndWaitForTrayOwner(projectDir))
+                {
+                    return 0;
+                }
+
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
                 Application.Run(new TrayApplicationContext(projectDir, parsed.FromShortcut));
@@ -77,6 +82,7 @@ internal static class VibelutionLauncher
         private readonly NotifyIcon notifyIcon;
         private readonly SynchronizationContext uiContext;
         private readonly FileSystemWatcher ownerWatcher;
+        private readonly System.Windows.Forms.Timer ownerPollTimer;
 
         public TrayApplicationContext(string projectDir, bool fromShortcut)
         {
@@ -91,6 +97,10 @@ internal static class VibelutionLauncher
             this.notifyIcon.Visible = true;
             this.notifyIcon.DoubleClick += delegate { QueueOpenConsole(); };
             this.ownerWatcher = WatchElectronTrayOwner();
+            this.ownerPollTimer = new System.Windows.Forms.Timer();
+            this.ownerPollTimer.Interval = 1000;
+            this.ownerPollTimer.Tick += delegate { YieldTrayIfElectronOwns(); };
+            this.ownerPollTimer.Start();
             ThreadPool.QueueUserWorkItem(delegate { BootstrapLauncherBackend(); });
         }
 
@@ -696,6 +706,11 @@ internal static class VibelutionLauncher
         {
             if (disposing)
             {
+                if (ownerPollTimer != null)
+                {
+                    ownerPollTimer.Stop();
+                    ownerPollTimer.Dispose();
+                }
                 if (ownerWatcher != null)
                 {
                     ownerWatcher.EnableRaisingEvents = false;
@@ -721,13 +736,44 @@ internal static class VibelutionLauncher
             {
                 return null;
             }
-            var watcher = new FileSystemWatcher(ownerDir, "desktop_shell_owner.json");
-            watcher.NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.CreationTime;
-            FileSystemEventHandler onOwnerChanged = delegate { YieldTrayIfElectronOwns(); };
+            // Watch the directory, not a single filename: atomicWriteJson renames
+            // desktop_shell_owner.json.<pid>.tmp -> desktop_shell_owner.json, and
+            // a filename Filter can drop that Renamed event.
+            var watcher = new FileSystemWatcher(ownerDir);
+            watcher.Filter = "*";
+            watcher.NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.CreationTime | NotifyFilters.DirectoryName;
+            FileSystemEventHandler onOwnerChanged = delegate(object sender, FileSystemEventArgs e)
+            {
+                if (IsDesktopShellOwnerFileName(e == null ? "" : e.Name))
+                {
+                    YieldTrayIfElectronOwns();
+                }
+            };
+            RenamedEventHandler onOwnerRenamed = delegate(object sender, RenamedEventArgs e)
+            {
+                if (IsDesktopShellOwnerFileName(e == null ? "" : e.Name)
+                    || IsDesktopShellOwnerFileName(e == null ? "" : e.OldName))
+                {
+                    YieldTrayIfElectronOwns();
+                }
+            };
             watcher.Created += onOwnerChanged;
             watcher.Changed += onOwnerChanged;
+            watcher.Renamed += onOwnerRenamed;
             watcher.EnableRaisingEvents = true;
             return watcher;
+        }
+
+        private void HideNotifyIconAndExit()
+        {
+            try
+            {
+                notifyIcon.Visible = false;
+            }
+            catch
+            {
+            }
+            ExitThread();
         }
 
         private void YieldTrayIfElectronOwns()
@@ -736,17 +782,15 @@ internal static class VibelutionLauncher
             {
                 return;
             }
+            if (object.ReferenceEquals(SynchronizationContext.Current, this.uiContext))
+            {
+                HideNotifyIconAndExit();
+                return;
+            }
             uiContext.Post(
                 delegate
                 {
-                    try
-                    {
-                        notifyIcon.Visible = false;
-                    }
-                    catch
-                    {
-                    }
-                    ExitThread();
+                    HideNotifyIconAndExit();
                 },
                 null
             );
@@ -836,6 +880,71 @@ internal static class VibelutionLauncher
         return string.IsNullOrEmpty(canonical) ? checkout : canonical;
     }
 
+    private static bool IsDesktopShellOwnerFileName(string name)
+    {
+        if (string.IsNullOrEmpty(name))
+        {
+            return false;
+        }
+        string file = Path.GetFileName(name);
+        return string.Equals(file, "desktop_shell_owner.json", StringComparison.OrdinalIgnoreCase)
+            || file.StartsWith("desktop_shell_owner.json.", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeExecutablePath(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "";
+        }
+        string trimmed = value.Trim().Replace('/', Path.DirectorySeparatorChar);
+        try
+        {
+            return Path.GetFullPath(trimmed);
+        }
+        catch
+        {
+            return trimmed;
+        }
+    }
+
+    private static bool ExecutablesMatch(string actualExe, string expectedExe)
+    {
+        if (string.IsNullOrEmpty(actualExe) || string.IsNullOrEmpty(expectedExe))
+        {
+            return false;
+        }
+        if (string.Equals(NormalizeExecutablePath(actualExe), NormalizeExecutablePath(expectedExe), StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        return string.Equals(Path.GetFileName(actualExe), Path.GetFileName(expectedExe), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TryLaunchElectronAndWaitForTrayOwner(string projectDir)
+    {
+        try
+        {
+            LaunchCurrentElectronMain(projectDir, "open", false);
+        }
+        catch (Exception ex)
+        {
+            WriteNativeEntryLog(projectDir, "native_action.electron_launch_failed", ShortStaticMessage(ex.Message));
+            return false;
+        }
+        for (int attempt = 0; attempt < 40; attempt++)
+        {
+            if (ElectronOwnsDesktopTray(projectDir))
+            {
+                WriteNativeEntryLog(projectDir, "native_action.electron_tray_owned", "waited=" + (attempt * 250).ToString() + "ms");
+                return true;
+            }
+            Thread.Sleep(250);
+        }
+        WriteNativeEntryLog(projectDir, "native_action.winforms_last_resort", "electron_owner_wait_timeout");
+        return ElectronOwnsDesktopTray(projectDir);
+    }
+
     private static bool ElectronOwnsDesktopTray(string projectDir)
     {
         try
@@ -875,10 +984,7 @@ internal static class VibelutionLauncher
             }
             DateTime epoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
             double actualCreateTime = (process.StartTime.ToUniversalTime() - epoch).TotalSeconds;
-            if (Math.Abs(actualCreateTime - expectedCreateTime) > 2.0)
-            {
-                return false;
-            }
+            bool createTimeMatches = Math.Abs(actualCreateTime - expectedCreateTime) <= 5.0;
             string actualExe = "";
             try
             {
@@ -888,8 +994,11 @@ internal static class VibelutionLauncher
             {
                 return true;
             }
-            return !string.IsNullOrEmpty(actualExe)
-                && string.Equals(actualExe, expectedExe, StringComparison.OrdinalIgnoreCase);
+            if (createTimeMatches || ExecutablesMatch(actualExe, expectedExe))
+            {
+                return true;
+            }
+            return false;
         }
         catch (ArgumentException)
         {

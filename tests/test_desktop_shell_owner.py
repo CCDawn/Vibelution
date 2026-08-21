@@ -99,4 +99,7 @@ def test_winforms_and_electron_sources_share_one_resolver() -> None:
     assert "resolveDesktopShellOwnerPaths" in paths
     assert "claimElectronDesktopShellOwner" in main
     assert "releaseElectronDesktopShellOwner" in main
+    assert main.index("claimElectronDesktopShellOwner(paths.workspaceRoot)") < main.index(
+        "desktopTray = createDesktopTray(paths,"
+    )
     assert 'File.WriteAllText(canonical' not in cs

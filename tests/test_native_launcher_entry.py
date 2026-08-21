@@ -23,7 +23,24 @@ def test_native_launcher_default_action_runs_as_tray_app():
     assert "HandleSecondaryTrayLaunch(projectDir)" in source
     assert "EnsureFreshLauncherBackend(projectDir)" in source
     assert "LaunchCurrentElectronMain(projectDir, \"open\", false)" in source
+    assert "TryLaunchElectronAndWaitForTrayOwner(projectDir)" in source
     assert "RunPythonBridge(projectDir, \"bootstrap\", true, true)" in source
+
+
+def test_native_launcher_starts_electron_before_last_resort_winforms_tray():
+    source = _source()
+    default_block = source.split("Application.Run(new TrayApplicationContext", 1)[0]
+    assert "TryLaunchElectronAndWaitForTrayOwner" in default_block
+    assert "native_action.winforms_last_resort" in source
+    assert "watcher.Renamed" in source
+    assert "ownerPollTimer" in source
+    assert "IsDesktopShellOwnerFileName" in source
+    assert "ExecutablesMatch" in source
+    owns = source.split("private static bool ElectronOwnsDesktopTray", 1)[1].split(
+        "private static int HandleSecondaryTrayLaunch", 1
+    )[0]
+    assert "createTimeMatches || ExecutablesMatch" in owns
+    assert "> 2.0" not in owns
 
 
 def test_native_launcher_secondary_shortcut_launch_refreshes_stale_backend_and_opens_console():
