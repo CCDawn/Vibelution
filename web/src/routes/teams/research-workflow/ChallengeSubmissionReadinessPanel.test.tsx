@@ -14,16 +14,25 @@ const queryState = vi.hoisted(() => ({
 const mutationState = vi.hoisted(() => ({
   isPending: false,
   mutate: vi.fn(),
+  shouldFail: false,
+  error: new Error("export failed"),
   result: { status: "blocked", blockers: [] as Array<{ code: string; message: string }> },
 }));
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => queryState,
-  useMutation: (options: { onSuccess?: (result: unknown) => void }) => ({
+  useMutation: (options: {
+    onSuccess?: (result: unknown) => void;
+    onError?: (error: unknown) => void;
+  }) => ({
     isPending: mutationState.isPending,
     mutate: (variables?: unknown) => {
       mutationState.mutate(variables);
-      options.onSuccess?.(mutationState.result);
+      if (mutationState.shouldFail) {
+        options.onError?.(mutationState.error);
+      } else {
+        options.onSuccess?.(mutationState.result);
+      }
     },
   }),
 }));
@@ -57,7 +66,13 @@ function findButton(container: HTMLElement, text: string): HTMLButtonElement | u
 describe("ChallengeSubmissionReadinessPanel", () => {
   beforeEach(() => {
     Object.assign(queryState, { isPending: false, isError: false, error: null, data: readiness(), refetch: vi.fn() });
-    Object.assign(mutationState, { isPending: false, result: { status: "blocked", blockers: [] }, mutate: vi.fn() });
+    Object.assign(mutationState, {
+      isPending: false,
+      shouldFail: false,
+      error: new Error("export failed"),
+      result: { status: "blocked", blockers: [] },
+      mutate: vi.fn(),
+    });
   });
 
   it("renders the low-density readiness surface and localizes unknown values", () => {
@@ -98,6 +113,28 @@ describe("ChallengeSubmissionReadinessPanel", () => {
     await act(async () => root.render(<ChallengeSubmissionReadinessPanel teamId="team-1" onOpenQuestion={vi.fn()} />));
     await act(async () => findButton(container, "检查交付材料")!.click());
     expect(container.textContent).toContain("交付材料检查：有阻塞，2 项阻塞");
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("surfaces export failures and leaves the action retryable", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    mutationState.shouldFail = true;
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<ChallengeSubmissionReadinessPanel teamId="team-1" onOpenQuestion={vi.fn()} />));
+    queryState.data = readiness({
+      blockers: [{
+        code: "submission_direction_requirements_not_captured",
+        label: "内部",
+        action: { kind: "inspect", target: "submission-package", label: "内部" },
+      }],
+    });
+    await act(async () => root.render(<ChallengeSubmissionReadinessPanel teamId="team-1" onOpenQuestion={vi.fn()} />));
+    await act(async () => findButton(container, "检查交付材料")!.click());
+    expect(container.querySelector('[data-testid="submission-export-error"]')?.textContent).toContain("交付材料导出失败");
+    expect(findButton(container, "检查交付材料")).toBeTruthy();
     await act(async () => root.unmount());
     container.remove();
   });

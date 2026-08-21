@@ -6,13 +6,14 @@ const railSource = readFileSync(new URL("./TeamShellRail.tsx", import.meta.url),
 const kanbanSource = readFileSync(new URL("./ResearchBoardKanban.tsx", import.meta.url), "utf8");
 
 describe("Team shell chrome selection + board layout", () => {
-  it("toolbar switches teams with VSelect (no board/canvas switch or refresh)", () => {
+  it("toolbar switches teams with VSelect and exposes the optional refresh action", () => {
     expect(toolbarSource).toContain("team-shell-toolbar-identity");
     expect(toolbarSource).toContain("VSelect");
     expect(toolbarSource).toContain("切换团队");
     expect(toolbarSource).not.toContain("TeamShellModeSwitch");
     expect(toolbarSource).not.toContain("VIconButton");
-    expect(toolbarSource).not.toContain("刷新团队");
+    expect(toolbarSource).toContain("刷新团队");
+    expect(toolbarSource).toContain("onRefresh");
     expect(toolbarSource).toContain("teamName");
   });
 

@@ -62,12 +62,19 @@ export function ChallengeSubmissionReadinessPanel({
     staleTime: 30_000,
   });
   const [deliverablesInspection, setDeliverablesInspection] = useState<ChallengeDeliverablesInspection | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
   async function inspectSubmissionDeliverables(): Promise<ChallengeDeliverablesInspection> {
     return exportResearchDeliverables<ChallengeDeliverablesInspection>(teamId, { requestedByAgent: "Challenge Cup Delivery" });
   }
   const exportMutation = useMutation({
     mutationFn: inspectSubmissionDeliverables,
-    onSuccess: (result) => setDeliverablesInspection(result),
+    onSuccess: (result) => {
+      setExportError(null);
+      setDeliverablesInspection(result);
+    },
+    onError: (reason: unknown) => {
+      setExportError(reason instanceof Error ? reason.message : String(reason));
+    },
   });
   const submissionReadiness = submissionReadinessQuery.data;
   const submissionBlocker = submissionReadiness?.blockers[0];
@@ -82,6 +89,7 @@ export function ChallengeSubmissionReadinessPanel({
       onOpenQuestion(submissionAction.questionId);
       return;
     }
+    setExportError(null);
     exportMutation.mutate();
   };
 
@@ -127,6 +135,15 @@ export function ChallengeSubmissionReadinessPanel({
         </VButton>
         <VButton type="button" variant="ghost" onClick={() => void submissionReadinessQuery.refetch()}>{zh ? "刷新" : "Refresh"}</VButton>
       </div>
+      {exportError ? (
+        <div
+          className="rounded border border-[color-mix(in_srgb,var(--state-error)_35%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-error)_8%,transparent)] px-2 py-1.5 [font-size:var(--vui-font-2xs)] text-[var(--state-error)]"
+          data-testid="submission-export-error"
+          role="alert"
+        >
+          {zh ? `交付材料导出失败：${exportError}，请重试。` : `Deliverables export failed: ${exportError}. Retry the inspection.`}
+        </div>
+      ) : null}
       {deliverablesInspection ? (
         <div className={styles.submissionSummary} role="status">
           {zh ? `交付材料检查：${deliverablesInspection.status === "ready" ? "可用" : "有阻塞"}，${deliverablesInspection.blockers.length} 项阻塞` : `Deliverables inspection: ${deliverablesInspection.status === "ready" ? "ready" : "blocked"}, ${deliverablesInspection.blockers.length} blockers`}

@@ -177,6 +177,17 @@ function questionMatchesQuery(question: ResearchWorkflowLaunchOption, query: str
   ].some((value) => value.toLowerCase().includes(needle));
 }
 
+function isRestartableCheckpoint(checkpoint: ResearchWorkflowLaunchOption["checkpoint"]): boolean {
+  return checkpoint?.status === "failed" || checkpoint?.status === "cancelled";
+}
+
+function freshRunIdempotencyKey(baseKey: string): string {
+  const random = typeof globalThis.crypto?.randomUUID === "function"
+    ? globalThis.crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  return `${baseKey}:fresh:${random}`;
+}
+
 export function ResearchRunLaunchPanel(props: {
   teamId: string;
   busy: boolean;
@@ -209,6 +220,7 @@ export function ResearchRunLaunchPanel(props: {
   const questions = launchOptions.data?.questions ?? [];
   const selectedQuestion = questions.find((question) => question.questionId === questionId) ?? null;
   const checkpoint = selectedQuestion?.checkpoint ?? null;
+  const restartableCheckpoint = isRestartableCheckpoint(checkpoint);
   const filteredQuestions = useMemo(
     () => questions.filter((question) => questionMatchesQuery(question, query)),
     [questions, query],
@@ -253,8 +265,28 @@ export function ResearchRunLaunchPanel(props: {
   }
 
   const primaryLabel = checkpoint
-    ? (checkpoint.resumable ? "继续运行" : "查看进展")
+    ? (checkpoint.resumable ? "继续运行" : restartableCheckpoint ? "新建运行" : "查看进展")
     : "开始实验";
+
+  const submitNewRun = () => {
+    try {
+      const input = buildResearchRunInput({ teamId, questionId, safetyBudget });
+      void onSubmit({
+        ...input,
+        // A failed/cancelled checkpoint must not be replayed by the old
+        // deterministic key; explicitly starting again creates a new run.
+        idempotencyKey: restartableCheckpoint
+          ? freshRunIdempotencyKey(input.idempotencyKey)
+          : input.idempotencyKey,
+      })
+        .then(() => clearResearchRunLaunchDraft(teamId))
+        .catch((reason: unknown) => {
+          setError(reason instanceof Error ? reason.message : String(reason));
+        });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  };
 
   return (
     <VSurface tone="panel" className={styles.root}>
@@ -319,12 +351,25 @@ export function ResearchRunLaunchPanel(props: {
       {error ? <div role="alert" className={styles.error}>{error}</div> : null}
       <div className={styles.actions}>
         <VButton variant="ghost" onClick={onCancel} isDisabled={busy}>取消</VButton>
+        {restartableCheckpoint && onContinueRun ? (
+          <VButton
+            variant="ghost"
+            onClick={() => onContinueRun({
+              runId: checkpoint!.runId,
+              nodeId: checkpoint!.currentNodeId || "source_finding",
+              questionId,
+            })}
+            isDisabled={busy}
+          >
+            查看失败运行
+          </VButton>
+        ) : null}
         <VButton
           isPending={busy}
           isDisabled={!selectedQuestion}
           onClick={() => {
             setError(null);
-            if (checkpoint && onContinueRun) {
+            if (checkpoint?.resumable && onContinueRun) {
               onContinueRun({
                 runId: checkpoint.runId,
                 nodeId: checkpoint.currentNodeId || "source_finding",
@@ -332,20 +377,15 @@ export function ResearchRunLaunchPanel(props: {
               });
               return;
             }
-            if (checkpoint && !onContinueRun) {
+            if (checkpoint?.resumable && !onContinueRun) {
               setError("当前运行无法在此面板继续，请从运行列表打开。");
               return;
             }
-            try {
-              const input = buildResearchRunInput({ teamId, questionId, safetyBudget });
-              void onSubmit(input)
-                .then(() => clearResearchRunLaunchDraft(teamId))
-                .catch((reason: unknown) => {
-                  setError(reason instanceof Error ? reason.message : String(reason));
-                });
-            } catch (reason) {
-              setError(reason instanceof Error ? reason.message : String(reason));
+            if (restartableCheckpoint || !checkpoint) {
+              submitNewRun();
+              return;
             }
+            setError("当前运行已完成，请从运行列表查看进展。");
           }}
         >
           {primaryLabel}

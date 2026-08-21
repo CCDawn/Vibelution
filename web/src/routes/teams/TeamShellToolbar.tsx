@@ -1,5 +1,7 @@
+import { RefreshCw } from "lucide-react";
+
 import type { TeamShellMode } from "./teamShellModel";
-import { VSelect, VStatusChip } from "../../components/vui";
+import { VButton, VSelect, VStatusChip } from "../../components/vui";
 
 export type TeamShellToolbarOption = {
   id: string;
@@ -33,7 +35,10 @@ export function TeamShellToolbar({
   lang,
   teamName,
   purpose,
+  onRefresh,
   identityClassName = "",
+  actionsClassName = "",
+  refreshButtonClassName = "",
   switchClassName = "",
   teamOptions = [],
   selectedTeamId = "",
@@ -70,6 +75,21 @@ export function TeamShellToolbar({
           <span>{purpose || fallbackPurpose}</span>
         </>
       )}
+      {onRefresh ? (
+        <div className={actionsClassName}>
+          <VButton
+            type="button"
+            variant="ghost"
+            density="compact"
+            className={refreshButtonClassName}
+            aria-label={lang === "zh" ? "刷新团队" : "Refresh team"}
+            title={lang === "zh" ? "刷新团队" : "Refresh team"}
+            onClick={onRefresh}
+          >
+            <RefreshCw size={14} aria-hidden="true" />
+          </VButton>
+        </div>
+      ) : null}
     </div>
   );
 }

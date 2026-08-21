@@ -359,6 +359,60 @@ describe("ResearchRunLaunchPanel", () => {
     container.remove();
   });
 
+  it("lets a failed checkpoint create a fresh run instead of reopening the failed run", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const onSubmit = vi.fn(async () => undefined);
+    Object.assign(queryState.current, {
+      data: launchOptions({
+        questions: [{
+          questionId: "SCI-003",
+          title: "Is the Riemann hypothesis true?",
+          scope: "mathematical_sciences",
+          domain: "mathematical_sciences",
+          catalogId: "science-125-questions-2021",
+          reviewRunId: "",
+          artifactSha256: "",
+          source: "catalog",
+          launchable: true,
+          checkpoint: {
+            runId: "run-failed",
+            status: "failed",
+            currentNodeId: "source_finding",
+            currentNodeLabel: "资料寻找",
+            completedCount: 0,
+            totalSteps: 16,
+            resumable: false,
+          },
+        }],
+        experiments: [],
+      }),
+    });
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => root.render(
+      <ResearchRunLaunchPanel
+        teamId="team-1"
+        busy={false}
+        initialQuestionId="SCI-003"
+        onSubmit={onSubmit}
+        onCancel={() => undefined}
+      />,
+    ));
+
+    const createButton = findButton(container, "新建运行");
+    expect(createButton).toBeTruthy();
+    await act(async () => createButton!.click());
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      teamId: "team-1",
+      questionId: "SCI-003",
+      idempotencyKey: expect.stringContaining(":fresh:"),
+    }));
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
   it("renders the empty catalog state when no questions are available", () => {
     Object.assign(queryState.current, {
       data: launchOptions({ questions: [], experiments: [] }),
