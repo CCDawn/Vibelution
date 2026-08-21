@@ -14,6 +14,11 @@ import { dirname, join } from "node:path";
 
 import { pythonBridgeEnv } from "./pythonBridgeEnv.js";
 import {
+  PYTHON_JSON_BRIDGE_MAINTENANCE_TIMEOUT_MS,
+  parsePythonJsonBridgePayload,
+  runPythonJsonBridge
+} from "./pythonJsonBridge.js";
+import {
   resolveCanonicalRuntimeHome,
   resolveCheckoutRuntimeHome,
   resolveLauncherRuntimeDir,
@@ -143,6 +148,24 @@ export type ExecuteMainLineWorkbenchInput = {
   killPid?: (pid: number) => void;
   readDaemonPid?: (workspaceRoot: string) => number;
 };
+
+function isoNow(now?: () => string): string {
+  return now?.() ?? new Date().toISOString();
+}
+
+function accepted(
+  operation: string,
+  commandId: string,
+  extra: Partial<WorkbenchLifecycleResult> = {}
+): WorkbenchLifecycleResult {
+  return {
+    schemaVersion: 1,
+    accepted: true,
+    operation,
+    commandId,
+    ...extra
+  };
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -731,11 +754,46 @@ export async function ensureFrontendBuild(input: {
   });
 }
 
+export async function ensureFrontendRelease(input: {
+  workspaceRoot: string;
+  pythonPath: string;
+  signal?: AbortSignal;
+  runBridge?: typeof runPythonJsonBridge;
+}): Promise<void> {
+  const runBridge = input.runBridge ?? runPythonJsonBridge;
+  const raw = await runBridge({
+    pythonPath: input.pythonPath,
+    args: [
+      join(input.workspaceRoot, "scripts", "vibelution_desktop_entry.py"),
+      "--action",
+      "ensure-frontend-build",
+      "--workspace",
+      input.workspaceRoot,
+      "--output",
+      "json"
+    ],
+    cwd: input.workspaceRoot,
+    failureLabel: "frontend build preflight",
+    timeoutMs: PYTHON_JSON_BRIDGE_MAINTENANCE_TIMEOUT_MS,
+    signal: input.signal,
+    killPolicy: "child",
+    mutation: true
+  });
+  const payload = parsePythonJsonBridgePayload<{ ok?: unknown; reason?: unknown }>(raw, "frontend build preflight");
+  if (payload.ok !== true) {
+    throw new Error(String(payload.reason || "frontend build preflight failed"));
+  }
+}
+
 function defaultEnsureFrontend(
   workspaceRoot: string,
   options: { force: boolean; signal?: AbortSignal },
-  fileExists: (path: string) => boolean
+  fileExists: (path: string) => boolean,
+  pythonPath?: string
 ): Promise<void> {
+  if (pythonPath) {
+    return ensureFrontendRelease({ workspaceRoot, pythonPath, signal: options.signal });
+  }
   return ensureFrontendBuild({
     workspaceRoot,
     force: options.force,
@@ -1028,7 +1086,12 @@ export async function executeMainLineWorkbench(
     }
   }
 
-  await (input.ensureFrontend ?? ((opts) => defaultEnsureFrontend(input.workspaceRoot, opts, fileExists)))({
+  await (input.ensureFrontend ?? ((opts) => defaultEnsureFrontend(
+    input.workspaceRoot,
+    opts,
+    fileExists,
+    input.pythonPath
+  )))({
     force: operation === "rebuild-and-start",
     signal: input.signal
   });

@@ -123,11 +123,14 @@ def test_resolve_backend_missing_snapshot_is_unknown(tmp_path: Path, monkeypatch
 
 
 def test_resolve_frontend_stale_when_tree_differs(tmp_path: Path, monkeypatch) -> None:
-    _write_provenance(tmp_path, built_from="oldhead000000", tree="oldtree000000")
     monkeypatch.setattr(
         code_freshness,
-        "_capture_git_text",
-        lambda root, args: "newtree000000" if args == ["rev-parse", "HEAD:web"] else "",
+        "_inspect_active_frontend_build",
+        lambda root: {
+            "current": False,
+            "reason": "frontend build key differs from active release",
+            "provenance": {"builtFromCommit": "oldhead000000", "frontendTree": "oldtree000000"},
+        },
     )
     result = code_freshness.resolve_frontend_freshness(project_root=tmp_path)
     assert result["available"] is True
@@ -136,11 +139,14 @@ def test_resolve_frontend_stale_when_tree_differs(tmp_path: Path, monkeypatch) -
 
 
 def test_resolve_frontend_current_when_tree_matches(tmp_path: Path, monkeypatch) -> None:
-    _write_provenance(tmp_path, built_from="newhead000000", tree="same-tree-000")
     monkeypatch.setattr(
         code_freshness,
-        "_capture_git_text",
-        lambda root, args: "same-tree-000" if args == ["rev-parse", "HEAD:web"] else "",
+        "_inspect_active_frontend_build",
+        lambda root: {
+            "current": True,
+            "reason": "frontend build is current",
+            "provenance": {"builtFromCommit": "newhead000000", "frontendTree": "same-tree-000", "buildKey": "key"},
+        },
     )
     result = code_freshness.resolve_frontend_freshness(project_root=tmp_path)
     assert result["available"] is True
@@ -150,7 +156,15 @@ def test_resolve_frontend_current_when_tree_matches(tmp_path: Path, monkeypatch)
 def test_resolve_freshness_verdict_combinations(tmp_path: Path, monkeypatch) -> None:
     # current: backend matches + frontend matches
     _write_snapshot(tmp_path, head="head00000000")
-    _write_provenance(tmp_path, built_from="head00000000", tree="tree00000000")
+    monkeypatch.setattr(
+        code_freshness,
+        "_inspect_active_frontend_build",
+        lambda root: {
+            "current": True,
+            "reason": "frontend build is current",
+            "provenance": {"builtFromCommit": "head00000000", "frontendTree": "tree00000000", "buildKey": "key"},
+        },
+    )
 
     def fake_git(root, args):
         if args[:2] == ["rev-parse", "HEAD"]:
@@ -167,7 +181,15 @@ def test_resolve_freshness_verdict_combinations(tmp_path: Path, monkeypatch) -> 
 
     # backend behind + frontend stale
     _write_snapshot(tmp_path, head="oldhead00000")
-    _write_provenance(tmp_path, built_from="oldhead00000", tree="oldtree00000")
+    monkeypatch.setattr(
+        code_freshness,
+        "_inspect_active_frontend_build",
+        lambda root: {
+            "current": False,
+            "reason": "frontend build key differs from active release",
+            "provenance": {"builtFromCommit": "oldhead00000", "frontendTree": "oldtree00000", "buildKey": "key"},
+        },
+    )
 
     def fake_git_behind(root, args):
         if args[:2] == ["rev-parse", "HEAD"]:

@@ -40,7 +40,9 @@ def is_early_ready_path(path: str) -> bool:
 
 
 def _web_dist() -> Path:
-    return Path(__file__).resolve().parents[2] / "web" / "dist"
+    from core.launcher.frontend_build import resolve_active_frontend_dist
+
+    return resolve_active_frontend_dist(Path(__file__).resolve().parents[2])
 
 
 def register_spa_routes(app: FastAPI, web_dist: Path | None = None) -> None:

@@ -418,18 +418,6 @@ describe("resolveNoConsolePython", () => {
   });
 });
 
-describe("resolveNodeExecutable", () => {
-  it("does not treat Electron or Vibelution.exe as node for frontend rebuild", () => {
-    expect(
-      resolveNodeExecutable(
-        (path) => path.toLowerCase().replace(/\\/g, "/").endsWith("/electron.exe"),
-        "C:/app/electron.exe",
-        ""
-      )
-    ).toBe("node");
-  });
-});
-
 describe("workbenchBackendEnv", () => {
   it("injects slot data home and shared operator config", () => {
     const env = workbenchBackendEnv({

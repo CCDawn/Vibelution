@@ -49,6 +49,7 @@ EXCLUDED_PARTS = {
     ".mypy_cache",
     "node_modules",
     "dist",
+    ".vibelution-builds",
     "build",
     ".turbo",
     ".vite",

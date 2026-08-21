@@ -1566,6 +1566,29 @@ def _ensure_latest_launcher_bridge(args: argparse.Namespace) -> dict[str, object
     return payload
 
 
+def _ensure_frontend_build_bridge(args: argparse.Namespace) -> dict[str, object]:
+    from core.launcher.frontend_build import ensure_frontend_build
+
+    root = _workspace_root(args)
+    build = ensure_frontend_build(root)
+    payload = {
+        "schemaVersion": 1,
+        "ok": True,
+        "skipped": bool(build.get("skipped")),
+        "rebuilt": bool(build.get("rebuilt")),
+        "reason": "frontend build is current" if bool(build.get("skipped")) else "frontend build release published",
+        "buildKey": str(build.get("buildKey") or ""),
+        "release": str(build.get("dist") or ""),
+    }
+    _append_log(
+        "desktop_entry_python.frontend_build.ensured",
+        skipped=bool(payload["skipped"]),
+        rebuilt=bool(payload["rebuilt"]),
+        build_key=str(payload["buildKey"]),
+    )
+    return payload
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Open the Vibelution Launcher without a console window.")
     parser.add_argument("--action", default="launcher")
@@ -1633,6 +1656,7 @@ def main(argv: list[str] | None = None) -> int:
         "refresh-desktop-shell",
         "launch-desktop-shell",
         "ensure-latest-launcher",
+        "ensure-frontend-build",
         *_LIFECYCLE_OPERATIONS,
     }:
         raise SystemExit(f"Unsupported desktop-entry Python bridge action: {action}")
@@ -1722,6 +1746,12 @@ def main(argv: list[str] | None = None) -> int:
                     f"Latest launcher ensured electronRebuilt={payload.get('electron', {}).get('rebuilt')} "
                     f"frontendSkipped={payload.get('frontend', {}).get('skipped')}"
                 )
+        elif action == "ensure-frontend-build":
+            payload = _ensure_frontend_build_bridge(args)
+            if args.output == "json":
+                print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+            else:
+                print(f"Frontend build skipped={payload.get('skipped')} rebuilt={payload.get('rebuilt')}")
         else:
             _open_launcher(args)
         _append_log("desktop_entry_python.open.succeeded", action=action, run_id=args.run_id)

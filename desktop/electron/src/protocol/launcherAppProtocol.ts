@@ -1,5 +1,5 @@
 import { readFileSync, existsSync } from "node:fs";
-import { extname, resolve, sep } from "node:path";
+import { basename, extname, resolve, sep } from "node:path";
 import { protocol } from "electron";
 
 export const LAUNCHER_APP_PROTOCOL = "vibelution-launcher";
@@ -55,6 +55,23 @@ export function resolveLauncherDistRoot(input: {
   }
   if (input.packaged) {
     return resolve(input.resourcesRoot, "web-dist");
+  }
+  const releasesRoot = resolve(input.workspaceRoot, "web", ".vibelution-builds");
+  try {
+    const active = JSON.parse(readFileSync(resolve(releasesRoot, "active.json"), "utf8")) as { release?: unknown };
+    const release = String(active.release || "").trim();
+    if (
+      release.startsWith("release-")
+      && basename(release) === release
+      && resolve(releasesRoot, release).startsWith(`${releasesRoot}${sep}`)
+    ) {
+      const candidate = resolve(releasesRoot, release);
+      if (existsSync(resolve(candidate, "index.html"))) {
+        return candidate;
+      }
+    }
+  } catch {
+    // Old workspaces and interrupted builds retain the web/dist compatibility fallback.
   }
   return resolve(input.workspaceRoot, "web", "dist");
 }

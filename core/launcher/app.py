@@ -8,10 +8,17 @@ from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 
+from core.launcher.frontend_build import resolve_active_frontend_dist
 from core.version import get_product_version
-from core.web.control import CONTROL_TOKEN_HEADER, control_token_payload, trusted_control_origins, validate_control_request
+from core.web.control import (
+    CONTROL_TOKEN_HEADER,
+    control_token_payload,
+    trusted_control_origins,
+    validate_control_request,
+)
 from core.web.routes.runtime import BrowserTelemetryPayload
 from core.web.services import runtime_scene_service
+
 from . import service as launcher_service
 from .api_contract import (
     BranchInstanceCleanupPayload,
@@ -35,9 +42,8 @@ from .api_contract import (
 from .desktop_session_store import DesktopSessionClosed, DesktopSessionRevisionConflict
 from .lifecycle_intent_store import WorkbenchCloseTransactionConflict
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-WEB_DIST = PROJECT_ROOT / "web" / "dist"
+WEB_DIST = resolve_active_frontend_dist(PROJECT_ROOT)
 WEB_INDEX = WEB_DIST / "index.html"
 INDEX_CACHE_HEADERS = {
     "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
@@ -419,7 +425,7 @@ def create_launcher_app() -> FastAPI:
         return JSONResponse(
             {
                 "message": "Launcher frontend has not been built yet.",
-                "next": "Build web/dist, then reopen the Launcher.",
+                "next": "Start the Launcher to build the frontend, then reopen it.",
             },
             status_code=503,
         )
@@ -437,7 +443,7 @@ def create_launcher_app() -> FastAPI:
         return JSONResponse(
             {
                 "message": "Launcher frontend has not been built yet.",
-                "next": "Build web/dist, then reopen the Launcher.",
+                "next": "Start the Launcher to build the frontend, then reopen it.",
             },
             status_code=503,
         )

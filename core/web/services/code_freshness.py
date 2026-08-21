@@ -22,7 +22,6 @@ from core.infrastructure.no_console_git import run_git
 
 FINGERPRINT_SCHEMA_VERSION = 1
 FINGERPRINT_RELATIVE = Path(".runtime") / "running-code-fingerprint.json"
-FRONTEND_BUILD_PROVENANCE_RELATIVE = Path("web") / "dist" / ".vibelution-build.json"
 GIT_TIMEOUT_SECONDS = 10
 
 
@@ -50,7 +49,9 @@ def running_code_fingerprint_path(project_root: Path | str) -> Path:
 
 
 def frontend_build_provenance_path(project_root: Path | str) -> Path:
-    return Path(project_root) / FRONTEND_BUILD_PROVENANCE_RELATIVE
+    from core.launcher.frontend_build import resolve_active_frontend_dist
+
+    return resolve_active_frontend_dist(project_root) / ".vibelution-build.json"
 
 
 def write_running_code_fingerprint(
@@ -102,13 +103,17 @@ def read_running_code_fingerprint(project_root: Path | str) -> dict[str, Any] | 
 
 
 def read_frontend_build_provenance(project_root: Path | str) -> dict[str, Any] | None:
-    """Return the dist provenance stamped by the runtime-manager build preflight."""
-    path = frontend_build_provenance_path(project_root)
-    try:
-        parsed = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    return parsed if isinstance(parsed, dict) else None
+    """Return provenance from the atomically activated frontend release."""
+    from core.launcher.frontend_build import read_active_provenance
+
+    parsed = read_active_provenance(project_root)
+    return parsed if parsed else None
+
+
+def _inspect_active_frontend_build(project_root: Path | str) -> dict[str, Any]:
+    from core.launcher.frontend_build import inspect_frontend_build
+
+    return inspect_frontend_build(project_root)
 
 
 def _parse_behind_count(value: str) -> int | None:
@@ -172,40 +177,31 @@ def resolve_backend_freshness(
     }
 
 
-def resolve_frontend_freshness(
-    *,
-    project_root: Path | str,
-) -> dict[str, Any]:
-    """Compare the dist build provenance with the current ``HEAD:web`` tree.
-
-    Mirrors the runtime-manager preflight semantics: a dist that was built from
-    an older tree is stale even when the running backend is current.
-    """
+def resolve_frontend_freshness(*, project_root: Path | str) -> dict[str, Any]:
+    """Compare the active release with the exact inputs that determine its bytes."""
     root = Path(project_root)
-    provenance = read_frontend_build_provenance(root)
+    try:
+        inspection = _inspect_active_frontend_build(root)
+    except OSError:
+        inspection = {}
+    provenance = inspection.get("provenance") if isinstance(inspection.get("provenance"), dict) else {}
     if not provenance:
         return {
             "available": False,
             "reason": "no_provenance",
             "builtFromCommit": "",
             "frontendTree": "",
+            "buildKey": "",
         }
     built_from = str(provenance.get("builtFromCommit") or "").strip()
     frontend_tree = str(provenance.get("frontendTree") or "").strip()
-    disk_tree = _capture_git_text(root, ["rev-parse", "HEAD:web"])
-    if not disk_tree:
-        return {
-            "available": False,
-            "reason": "git_unavailable",
-            "builtFromCommit": built_from,
-            "frontendTree": frontend_tree,
-        }
     return {
         "available": True,
-        "reason": "",
-        "stale": bool(frontend_tree and frontend_tree != disk_tree),
+        "reason": str(inspection.get("reason") or ""),
+        "stale": not bool(inspection.get("current")),
         "builtFromCommit": built_from,
         "frontendTree": frontend_tree,
+        "buildKey": str(provenance.get("buildKey") or ""),
     }
 
 
@@ -247,5 +243,6 @@ def resolve_code_freshness(*, project_root: Path | str) -> dict[str, Any]:
             "reason": frontend.get("reason") or "",
             "builtFromCommit": _short_sha(str(frontend.get("builtFromCommit") or "")),
             "frontendTree": str(frontend.get("frontendTree") or ""),
+            "buildKey": _short_sha(str(frontend.get("buildKey") or "")),
         },
     }

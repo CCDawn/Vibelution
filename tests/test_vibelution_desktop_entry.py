@@ -687,6 +687,31 @@ def test_ensure_latest_launcher_action_dispatches_to_desktop_shell(monkeypatch, 
     assert captured["root"] is not None
 
 
+def test_ensure_frontend_build_action_uses_shared_release_builder(monkeypatch, tmp_path, capsys):
+    captured: dict[str, object] = {}
+
+    def fake_ensure(root):
+        captured["root"] = root
+        return {"skipped": False, "rebuilt": True, "buildKey": "key-1", "dist": str(tmp_path / "release-key-1")}
+
+    monkeypatch.setattr("core.launcher.frontend_build.ensure_frontend_build", fake_ensure)
+    result = desktop_entry.main(
+        ["--action", "ensure-frontend-build", "--workspace", str(tmp_path), "--output", "json"]
+    )
+
+    assert result == 0
+    assert captured["root"] == tmp_path.resolve()
+    assert json.loads(capsys.readouterr().out) == {
+        "schemaVersion": 1,
+        "ok": True,
+        "skipped": False,
+        "rebuilt": True,
+        "reason": "frontend build release published",
+        "buildKey": "key-1",
+        "release": str(tmp_path / "release-key-1"),
+    }
+
+
 def test_parse_args_accepts_state_owned_backend_pid_flag():
     args = desktop_entry.parse_args(
         ["--action", "stop-launcher", "--use-state-owned-backend-pid", "--workspace", r"C:\repo"]

@@ -80,7 +80,6 @@ RUNTIME_SCENE_ROOT = PROJECT_STORAGE.logs / "runtime_scenes"
 BACKEND_STDOUT_PATH = RUNTIME_DIR / "backend.stdout.log"
 BACKEND_STDERR_PATH = RUNTIME_DIR / "backend.stderr.log"
 FRONTEND_BUILD_LOG_PATH = RUNTIME_DIR / "frontend-build.log"
-FRONTEND_BUILD_PROVENANCE_NAME = ".vibelution-build.json"
 WORKBENCH_BROWSER_PROFILE_DIR = RUNTIME_DIR / "workbench-app-profile"
 LAUNCHER_ICON_PATH = PROJECT_ROOT / "assets" / "icons" / "vibelution.ico"
 VENV_DIR = PROJECT_ROOT / ".venv"
@@ -995,21 +994,6 @@ def _assert_runtime_source_identity(
     return current
 
 
-def _read_frontend_build_provenance(path: Path) -> dict[str, object]:
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return payload if isinstance(payload, dict) else {}
-
-
-def _write_frontend_build_provenance(path: Path, payload: dict[str, object]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_suffix(path.suffix + ".tmp")
-    tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp_path.replace(path)
-
-
 def _append_frontend_build_log(payload: dict) -> None:
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
     event = {
@@ -1026,6 +1010,7 @@ def _append_frontend_build_log(payload: dict) -> None:
 
 def _host_is_wildcard(host: str) -> bool:
     return str(host or "").strip() in {"0.0.0.0", "::"}
+
 
 
 def _local_lan_addresses() -> list[str]:
@@ -1058,76 +1043,24 @@ def _backend_environment(host: str) -> dict[str, str]:
     return env
 
 
+
 def _frontend_package_manager() -> str:
     value = os.environ.get(FRONTEND_PACKAGE_MANAGER_ENV, "").strip().lower()
     return "bun" if value == "bun" else "npm"
 
 
 def _node_command() -> str:
-    resolved = shutil.which("node")
-    if resolved:
-        return resolved
-    if os.name == "nt":
-        candidates: list[Path] = []
-        for env_name in ("ProgramFiles", "ProgramFiles(x86)"):
-            root = os.environ.get(env_name, "").strip()
-            if root:
-                candidates.append(Path(root) / "nodejs" / "node.exe")
-        local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
-        if local_app_data:
-            candidates.append(Path(local_app_data) / "Programs" / "nodejs" / "node.exe")
-        for candidate in candidates:
-            if candidate.is_file():
-                return str(candidate)
-    return "node"
+    """Compatibility helper for diagnostics; product builds use frontend_build."""
+    from core.launcher.frontend_build import _node_command as shared_node_command
+
+    return shared_node_command()
 
 
 def _npm_cli_script_for_node(node_command: str) -> str:
-    """Resolve npm-cli.js so we never invoke npm.cmd (console flash on Windows)."""
-    candidates: list[Path] = []
-    for which_name in ("npm", "npm.cmd"):
-        npm_command = shutil.which(which_name)
-        if not npm_command:
-            continue
-        npm_path = Path(npm_command)
-        resolved = npm_path.resolve()
-        if resolved.is_file() and resolved.name == "npm-cli.js":
-            return str(resolved)
-        candidates.extend([npm_path.parent, npm_path.parent.parent])
-    node_path = Path(node_command)
-    candidates.extend([node_path.parent, node_path.parent.parent])
-    relative_cli_paths = (
-        Path("node_modules") / "npm" / "bin" / "npm-cli.js",
-        Path("lib") / "node_modules" / "npm" / "bin" / "npm-cli.js",
-    )
-    for root in candidates:
-        for relative in relative_cli_paths:
-            candidate = root / relative
-            if candidate.is_file():
-                return str(candidate)
-    raise RuntimeError(
-        "npm-cli.js was not found next to Node.js/npm. "
-        "Install Node.js with npm, or repair the Node installation. "
-        "Refusing to run npm.cmd (it opens a visible console on Windows)."
-    )
+    """Compatibility helper for diagnostics; product builds use frontend_build."""
+    from core.launcher.frontend_build import _npm_cli
 
-
-def _npm_install_command() -> tuple[list[str], str]:
-    node_command = _node_command()
-    npm_cli_script = _npm_cli_script_for_node(node_command)
-    # ci keeps package-lock.json untouched so the clean-worktree launch guard
-    # does not fail on a first-run clone after frontend bootstrap.
-    return [node_command, npm_cli_script, "ci"], "node npm-cli.js ci"
-
-
-def _frontend_build_commands(package_manager: str, web_dir: Path) -> list[tuple[list[str], str]]:
-    if package_manager == "bun":
-        return [(["bun", "run", "bun:build"], "bun run bun:build")]
-    node_command = _node_command()
-    return [
-        ([node_command, str(web_dir / "node_modules" / "typescript" / "bin" / "tsc"), "-b"], "node tsc -b"),
-        ([node_command, str(web_dir / "node_modules" / "vite" / "bin" / "vite.js"), "build"], "node vite build"),
-    ]
+    return _npm_cli(node_command)
 
 
 def _operator_config_path() -> Path:
@@ -2107,191 +2040,35 @@ def _select_background_python(executable: str) -> dict[str, object]:
     return result
 
 
-def _frontend_dist_is_servable(web_dir: Path) -> bool:
-    """True when a non-empty production index exists. Does not scan source mtimes."""
-
-    dist_index = web_dir / "dist" / "index.html"
-    try:
-        return dist_index.is_file() and dist_index.stat().st_size > 0
-    except OSError:
-        return False
-
-
-def _reuse_existing_frontend_build(
-    identity: dict[str, object],
-    *,
-    web_dir: Path,
-    skip_reason: str,
-) -> dict[str, object]:
-    """Serve current dist without rebuilding or rewriting artifact identity."""
-
-    provenance_path = web_dir / "dist" / FRONTEND_BUILD_PROVENANCE_NAME
-    previous_provenance = _read_frontend_build_provenance(provenance_path)
-    provenance: dict[str, object] = {
-        "schemaVersion": 1,
-        "projectRoot": identity.get("projectRoot"),
-        "sourceBranch": identity.get("branch"),
-        "sourceCommit": previous_provenance.get("sourceCommit") or identity.get("commit"),
-        "frontendTree": previous_provenance.get("frontendTree") or "",
-        "builtFromCommit": previous_provenance.get("builtFromCommit") or "",
-        "reusedArtifactFromCommit": previous_provenance.get("builtFromCommit")
-        or previous_provenance.get("sourceCommit")
-        or "",
-        "lastValidatedCommit": previous_provenance.get("lastValidatedCommit") or identity.get("commit"),
-        "lastValidatedFrontendTree": previous_provenance.get("lastValidatedFrontendTree")
-        or previous_provenance.get("frontendTree")
-        or "",
-        "rebuilt": False,
-        "skipped": True,
-        "skipReason": skip_reason,
-        "validatedAt": _now_iso(),
-    }
-    _append_frontend_build_log(
-        {
-            "event": "frontend_build.ensure",
-            "packageManager": _frontend_package_manager(),
-            "needsInstall": False,
-            "needsBuild": False,
-            "skipped": True,
-            "skipReason": skip_reason,
-            "sourceCommit": identity.get("commit"),
-            "frontendTree": identity.get("frontendTree"),
-            "previousFrontendTree": previous_provenance.get("frontendTree"),
-            "sourcesNewer": False,
-            "treeMismatch": False,
-        }
-    )
-    _append_frontend_build_log(
-        {
-            "event": "frontend_build.verified",
-            "sourceCommit": provenance["sourceCommit"],
-            "frontendTree": provenance["frontendTree"],
-            "builtFromCommit": provenance["builtFromCommit"],
-            "rebuilt": False,
-            "skipped": True,
-            "skipReason": skip_reason,
-        }
-    )
-    return provenance
-
-
 def _ensure_frontend_build(
     source_identity: dict[str, object] | None = None,
     *,
     require_current: bool = True,
 ) -> dict[str, object]:
-    web_dir = PROJECT_ROOT / "web"
-    if not web_dir.exists():
-        return {}
+    # Keep the command-line launcher on the same content-addressed release
+    # contract as Runtime Manager.  ``require_current`` is retained for callers,
+    # but a usable legacy dist is no longer treated as proof of the latest source.
+    from core.launcher.frontend_build import ensure_frontend_build
+
     identity = source_identity or _runtime_source_identity()
-    # Open/start rebuilds when the artifact is missing or not current.
-    # Restart/force uses the same check; missing dist always falls through to build.
-    if not require_current and _frontend_dist_is_servable(web_dir):
-        return _reuse_existing_frontend_build(
-            identity,
-            web_dir=web_dir,
-            skip_reason="start_reuses_existing_dist",
-        )
-    package_manager = _frontend_package_manager()
-    node_modules = web_dir / "node_modules"
-    needs_install = not node_modules.exists()
-    dist_index = web_dir / "dist" / "index.html"
-    provenance_path = web_dir / "dist" / FRONTEND_BUILD_PROVENANCE_NAME
-    previous_provenance = _read_frontend_build_provenance(provenance_path)
-    sources_newer = _frontend_sources_are_newer_than_dist(web_dir, dist_index)
-    previous_tree = str(previous_provenance.get("frontendTree") or "")
-    identity_tree = str(identity.get("frontendTree") or "")
-    tree_matches = bool(previous_provenance) and previous_tree == identity_tree
-    # Provenance ``frontendTree`` is the tree that *produced* dist. Mismatch means
-    # main moved (even when git commit did not bump file mtimes). Missing stamp with
-    # a live identity tree requires one rebuild so skip-stamps stay honest.
-    tree_mismatch = bool(identity_tree) and (
-        (bool(previous_provenance) and previous_tree != identity_tree)
-        or (not previous_provenance and bool(identity_tree) and dist_index.exists())
-    )
-    # Exception: empty previous provenance + dist fresher than sources was allowed
-    # to avoid double-build after preflight. Keep that only when identity tree is
-    # empty (no git). When git identity is available, require a stamped tree match.
-    if (not previous_provenance) and dist_index.exists() and (not sources_newer) and (not identity_tree):
-        tree_mismatch = False
-    needs_build = (not dist_index.exists()) or sources_newer or tree_mismatch
-    _append_frontend_build_log(
-        {
-            "event": "frontend_build.ensure",
-            "packageManager": package_manager,
-            "needsInstall": needs_install,
-            "needsBuild": needs_build,
-            "sourceCommit": identity.get("commit"),
-            "frontendTree": identity.get("frontendTree"),
-            "previousFrontendTree": previous_provenance.get("frontendTree"),
-            "sourcesNewer": sources_newer,
-            "treeMismatch": tree_mismatch,
-        }
-    )
-    if needs_install:
-        if package_manager == "bun":
-            _run_checked(["bun", "install"], cwd=web_dir, label="bun install")
-        else:
-            install_command, install_label = _npm_install_command()
-            _run_checked(install_command, cwd=web_dir, label=install_label)
-    if needs_build:
-        for build_command, build_label in _frontend_build_commands(package_manager, web_dir):
-            _run_checked(build_command, cwd=web_dir, label=build_label)
+    build = ensure_frontend_build(PROJECT_ROOT, package_manager=_frontend_package_manager())
     _assert_runtime_source_identity(identity)
-    if needs_build:
-        artifact_tree = identity.get("frontendTree")
-        built_from = identity.get("commit")
-        reused_from: object = ""
-    else:
-        # Never rewrite artifact identity to HEAD on a skip — that blocked rebuilds.
-        artifact_tree = previous_provenance.get("frontendTree") or identity.get("frontendTree")
-        built_from = previous_provenance.get("builtFromCommit") or identity.get("commit")
-        reused_from = previous_provenance.get("builtFromCommit") or built_from
-    provenance: dict[str, object] = {
-        "schemaVersion": 1,
+    provenance = dict(build.get("provenance") or {})
+    return {
+        "schemaVersion": 2,
         "projectRoot": identity.get("projectRoot"),
         "sourceBranch": identity.get("branch"),
         "sourceCommit": identity.get("commit"),
-        "frontendTree": artifact_tree,
-        "builtFromCommit": built_from,
-        "reusedArtifactFromCommit": reused_from,
-        "lastValidatedCommit": identity.get("commit"),
-        "lastValidatedFrontendTree": identity.get("frontendTree"),
-        "rebuilt": needs_build,
+        "frontendTree": provenance.get("frontendTree") or identity.get("frontendTree"),
+        "builtFromCommit": provenance.get("builtFromCommit") or identity.get("commit"),
+        "reusedArtifactFromCommit": provenance.get("builtFromCommit") if not bool(build.get("rebuilt")) else "",
+        "buildKey": build.get("buildKey") or provenance.get("buildKey") or "",
+        "buildInputs": provenance.get("buildInputs") or build.get("buildInputs") or {},
+        "release": build.get("dist") or "",
+        "rebuilt": bool(build.get("rebuilt")),
         "validatedAt": _now_iso(),
+        "requireCurrent": bool(require_current),
     }
-    _write_frontend_build_provenance(provenance_path, provenance)
-    _append_frontend_build_log(
-        {
-            "event": "frontend_build.verified",
-            "sourceCommit": provenance["sourceCommit"],
-            "frontendTree": provenance["frontendTree"],
-            "builtFromCommit": provenance["builtFromCommit"],
-            "rebuilt": needs_build,
-        }
-    )
-    return provenance
-
-
-def _frontend_sources_are_newer_than_dist(web_dir: Path, dist_index: Path) -> bool:
-    if not dist_index.exists():
-        return True
-    try:
-        newest_source_mtime = 0.0
-        for source in (web_dir / "src", web_dir / "public"):
-            if source.is_dir():
-                newest_source_mtime = max(
-                    newest_source_mtime,
-                    *(path.stat().st_mtime for path in source.rglob("*") if path.is_file()),
-                )
-        for name in ("index.html", "package.json", "package-lock.json", "tsconfig.json", "vite.config.ts"):
-            candidate = web_dir / name
-            if candidate.is_file():
-                newest_source_mtime = max(newest_source_mtime, candidate.stat().st_mtime)
-        return newest_source_mtime > dist_index.stat().st_mtime
-    except OSError:
-        return True
-
 
 def _start_backend(port: int, host: str, *, no_browser: bool) -> dict:
     """Always start a **fresh** workbench instance for this project.

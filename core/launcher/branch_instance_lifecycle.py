@@ -496,9 +496,13 @@ def _clear_isolated_workbench_runtime(item: dict[str, Any]) -> None:
 
 
 def _bundled_frontend_ready(item: dict[str, Any]) -> bool:
-    # Transitional dist probe (I1): TS projection does not inspect files.
+    # Transitional filesystem probe (I1): TS projection does not inspect files.
     path = str(item.get("path") or "").strip()
-    return bool(path and (Path(path) / "web" / "dist" / "index.html").is_file())
+    if not path:
+        return False
+    from core.launcher.frontend_build import resolve_active_frontend_dist
+
+    return (resolve_active_frontend_dist(Path(path)) / "index.html").is_file()
 
 
 def resolve_branch_instance(instance_id: str) -> dict[str, Any]:

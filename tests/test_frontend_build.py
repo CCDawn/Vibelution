@@ -1,0 +1,264 @@
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+
+import pytest
+
+from core.launcher import frontend_build
+from core.launcher import maintenance_reset
+from core.launcher.branch_instance_lifecycle import _bundled_frontend_ready
+from core.runtime_manager import hot_restart_backup
+from core.runtime_manager import daemon
+import scripts.vibelution_launcher as launcher
+
+
+def _write_project(root: Path, *, source: str = "export const app = 1;\n") -> Path:
+    web = root / "web"
+    (web / "src").mkdir(parents=True)
+    (web / "node_modules").mkdir()
+    (web / "src" / "App.tsx").write_text(source, encoding="utf-8")
+    (web / "index.html").write_text('<div id="root"></div>', encoding="utf-8")
+    (web / "package.json").write_text('{"private":true}', encoding="utf-8")
+    (web / "package-lock.json").write_text('{"lockfileVersion":3}', encoding="utf-8")
+    (web / "tsconfig.json").write_text('{"compilerOptions":{}}', encoding="utf-8")
+    (web / "vite.config.ts").write_text("export default {}", encoding="utf-8")
+    return web
+
+
+def _stub_build_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(frontend_build, "_run_version", lambda _command: "v1")
+    monkeypatch.setattr(frontend_build, "_run_version_command", lambda _command: "v1")
+    monkeypatch.setattr(
+        frontend_build,
+        "_capture_git",
+        lambda _root, args: "a" * 40 if args[-1] == "HEAD" else "tree-a",
+    )
+
+
+def _release(root: Path, name: str, *, schema: int = 2, key: str = "old") -> Path:
+    path = frontend_build.frontend_releases_dir(root) / name
+    path.mkdir(parents=True)
+    (path / "index.html").write_text('<script src="/assets/app.js"></script>', encoding="utf-8")
+    (path / "assets").mkdir()
+    (path / "assets" / "app.js").write_text("old", encoding="utf-8")
+    (path / ".vibelution-build.json").write_text(
+        json.dumps({"schemaVersion": schema, "buildKey": key, "frontendTree": "tree-old"}), encoding="utf-8"
+    )
+    return path
+
+
+def _activate(root: Path, name: str, *, key: str = "old") -> None:
+    path = frontend_build.active_release_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"schemaVersion": 2, "release": name, "buildKey": key}), encoding="utf-8")
+
+
+def _successful_runner(command: list[str], *, cwd: Path, label: str) -> str:
+    if label == "vite build":
+        stage = Path(command[-1])
+        (stage / "assets").mkdir()
+        (stage / "assets" / "app.js").write_text("new", encoding="utf-8")
+        (stage / "index.html").write_text('<script src="/assets/app.js"></script>', encoding="utf-8")
+    return "ok"
+
+
+def test_build_key_tracks_production_inputs_but_not_git_audit(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    _stub_build_identity(monkeypatch)
+
+    before = frontend_build.build_inputs(tmp_path)
+    changed_audit = {**before, "sourceCommit": "b" * 40, "frontendTree": "tree-b"}
+    assert frontend_build.compute_build_key(before) == frontend_build.compute_build_key(changed_audit)
+
+    (tmp_path / "web" / "src" / "App.tsx").write_text("export const app = 2;\n", encoding="utf-8")
+    after_source = frontend_build.build_inputs(tmp_path)
+    assert frontend_build.compute_build_key(after_source) != frontend_build.compute_build_key(before)
+
+    (tmp_path / "web" / "src" / "App.test.ts").write_text("test('x', () => {})\n", encoding="utf-8")
+    after_test = frontend_build.build_inputs(tmp_path)
+    assert frontend_build.compute_build_key(after_test) == frontend_build.compute_build_key(after_source)
+
+    (tmp_path / "web" / "package-lock.json").write_text('{"lockfileVersion":4}', encoding="utf-8")
+    after_lock = frontend_build.build_inputs(tmp_path)
+    assert frontend_build.compute_build_key(after_lock) != frontend_build.compute_build_key(after_test)
+
+
+def test_schema_one_release_is_not_reused(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    _stub_build_identity(monkeypatch)
+    key = frontend_build.compute_build_key(frontend_build.build_inputs(tmp_path))
+    _release(tmp_path, "release-old", schema=1, key=key)
+    _activate(tmp_path, "release-old", key=key)
+
+    assert frontend_build.inspect_frontend_build(tmp_path)["current"] is False
+
+
+def test_failed_build_keeps_previous_active_release(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    _stub_build_identity(monkeypatch)
+    _release(tmp_path, "release-old")
+    _activate(tmp_path, "release-old")
+
+    def fail_vite(command: list[str], *, cwd: Path, label: str) -> str:
+        if label == "vite build":
+            raise RuntimeError("vite failed")
+        return "ok"
+
+    monkeypatch.setattr(frontend_build, "_run_checked", fail_vite)
+    with pytest.raises(RuntimeError, match="vite failed"):
+        frontend_build.ensure_frontend_build(tmp_path)
+
+    assert json.loads(frontend_build.active_release_path(tmp_path).read_text(encoding="utf-8"))["release"] == "release-old"
+    assert frontend_build.resolve_active_frontend_dist(tmp_path).name == "release-old"
+
+
+def test_publish_switches_only_after_complete_staging_release(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    _stub_build_identity(monkeypatch)
+    _release(tmp_path, "release-old")
+    _activate(tmp_path, "release-old")
+    monkeypatch.setattr(frontend_build, "_run_checked", _successful_runner)
+
+    result = frontend_build.ensure_frontend_build(tmp_path)
+
+    assert result["rebuilt"] is True
+    active = json.loads(frontend_build.active_release_path(tmp_path).read_text(encoding="utf-8"))
+    assert active["release"] == f"release-{result['buildKey']}"
+    active_dist = frontend_build.resolve_active_frontend_dist(tmp_path)
+    assert (active_dist / "assets" / "app.js").read_text(encoding="utf-8") == "new"
+    assert frontend_build.inspect_frontend_build(tmp_path)["current"] is True
+
+
+def test_source_change_during_build_does_not_publish_mixed_release(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    web = _write_project(tmp_path)
+    _stub_build_identity(monkeypatch)
+    _release(tmp_path, "release-old")
+    _activate(tmp_path, "release-old")
+
+    def mutate_after_vite(command: list[str], *, cwd: Path, label: str) -> str:
+        result = _successful_runner(command, cwd=cwd, label=label)
+        if label == "vite build":
+            (web / "src" / "App.tsx").write_text("export const app = 99;\n", encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(frontend_build, "_run_checked", mutate_after_vite)
+    with pytest.raises(RuntimeError, match="inputs changed while building"):
+        frontend_build.ensure_frontend_build(tmp_path)
+
+    assert json.loads(frontend_build.active_release_path(tmp_path).read_text(encoding="utf-8"))["release"] == "release-old"
+
+
+def test_save_and_revert_during_build_does_not_publish_transient_release(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    web = _write_project(tmp_path)
+    _stub_build_identity(monkeypatch)
+    _release(tmp_path, "release-old")
+    _activate(tmp_path, "release-old")
+    source = web / "src" / "App.tsx"
+    original = source.read_text(encoding="utf-8")
+    original_mtime = source.stat().st_mtime_ns
+
+    def save_and_revert_after_vite(command: list[str], *, cwd: Path, label: str) -> str:
+        result = _successful_runner(command, cwd=cwd, label=label)
+        if label == "vite build":
+            source.write_text("export const app = 'transient';\n", encoding="utf-8")
+            source.write_text(original, encoding="utf-8")
+            os.utime(source, ns=(original_mtime + 1_000_000_000, original_mtime + 1_000_000_000))
+        return result
+
+    monkeypatch.setattr(frontend_build, "_run_checked", save_and_revert_after_vite)
+    with pytest.raises(RuntimeError, match="inputs changed while building"):
+        frontend_build.ensure_frontend_build(tmp_path)
+
+    assert json.loads(frontend_build.active_release_path(tmp_path).read_text(encoding="utf-8"))["release"] == "release-old"
+
+
+def test_pointer_rejects_path_escape(tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "index.html").write_text("outside", encoding="utf-8")
+    pointer = frontend_build.active_release_path(tmp_path)
+    pointer.parent.mkdir(parents=True)
+    pointer.write_text(json.dumps({"release": "../outside"}), encoding="utf-8")
+
+    assert frontend_build.resolve_active_frontend_dist(tmp_path) == tmp_path / "web" / "dist"
+
+
+def test_branch_instance_readiness_uses_the_active_release(tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    _release(tmp_path, "release-active")
+    _activate(tmp_path, "release-active")
+
+    assert _bundled_frontend_ready({"path": str(tmp_path)}) is True
+
+
+def test_hot_restart_backup_includes_the_active_release_directory() -> None:
+    assert "web/.vibelution-builds" in hot_restart_backup.BACKUP_TARGETS
+
+
+def test_stale_build_lock_is_reclaimed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    lock = frontend_build.frontend_build_lock_path(tmp_path)
+    lock.mkdir(parents=True)
+    (lock / "holder.json").write_text(json.dumps({"pid": 123}), encoding="utf-8")
+    monkeypatch.setattr(frontend_build, "_pid_is_alive", lambda _pid: False)
+
+    with frontend_build.frontend_build_lock(tmp_path) as acquired:
+        assert acquired["waited"] is True
+        assert lock.is_dir()
+    assert not lock.exists()
+
+
+def test_maintenance_reset_treats_active_releases_as_rebuildable_output(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    (tmp_path / "web" / ".vibelution-builds" / "release-key").mkdir(parents=True)
+    monkeypatch.setattr(maintenance_reset, "PROJECT_ROOT", tmp_path)
+
+    candidates = maintenance_reset._collect_web_dist()
+
+    assert {candidate.path for candidate in candidates} == {
+        tmp_path / "web" / "dist",
+        tmp_path / "web" / ".vibelution-builds",
+    }
+    releases = next(candidate for candidate in candidates if candidate.path.name == ".vibelution-builds")
+    assert releases.missing is False
+
+
+def test_python_launcher_and_runtime_manager_delegate_to_the_shared_builder(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    calls: list[tuple[Path, str | None]] = []
+
+    def fake_ensure(root: Path, *, package_manager: str | None = None) -> dict[str, object]:
+        calls.append((Path(root), package_manager))
+        return {
+            "skipped": True,
+            "rebuilt": False,
+            "buildKey": "key-1",
+            "dist": str(tmp_path / "release-key-1"),
+            "provenance": {"schemaVersion": 2, "buildKey": "key-1"},
+        }
+
+    monkeypatch.setattr(frontend_build, "ensure_frontend_build", fake_ensure)
+    monkeypatch.setattr(launcher, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        launcher,
+        "_runtime_source_identity",
+        lambda: {"projectRoot": str(tmp_path), "branch": "main", "commit": "a" * 40, "frontendTree": "tree"},
+    )
+    monkeypatch.setattr(launcher, "_assert_runtime_source_identity", lambda identity: identity)
+    launcher_result = launcher._ensure_frontend_build()
+
+    monkeypatch.setattr(daemon, "PROJECT_ROOT", tmp_path)
+    events: list[str] = []
+    monkeypatch.setattr(daemon, "_append_event", lambda event, payload: events.append(event))
+    runtime_result = daemon._preflight_frontend_build_for_restart("command-1")
+    explicit_root = tmp_path / "explicit-root"
+    explicit_root_result = daemon._preflight_frontend_build_for_restart("command-2", project_root=explicit_root)
+
+    assert launcher_result["buildKey"] == "key-1"
+    assert runtime_result["skipped"] is True
+    assert explicit_root_result["skipped"] is True
+    assert calls == [(tmp_path, "npm"), (tmp_path, None), (explicit_root.resolve(), None)]
+    assert events == [
+        "workbench.restart.build_preflight_skipped_current",
+        "workbench.restart.build_preflight_skipped_current",
+    ]

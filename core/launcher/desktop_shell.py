@@ -625,17 +625,17 @@ def ensure_unpackaged_electron(project_root: Path | str = PROJECT_ROOT) -> dict[
 
 
 def ensure_latest_launcher(project_root: Path | str = PROJECT_ROOT) -> dict[str, Any]:
-    """Rebuild unpackaged Electron and web/dist when they lag the current checkout.
+    """Rebuild unpackaged Electron and ensure the active frontend release is current.
 
     Tray "启动最新 Launcher" on an unpackaged shell relaunches the same process;
-    without this step it keeps serving a stale ``web/dist`` even after HEAD:web moves.
+    without this step it keeps serving a stale frontend release after local sources move.
     """
 
     root = Path(project_root)
     electron = ensure_unpackaged_electron(root)
     from core.runtime_manager.daemon import _preflight_frontend_build_for_restart
 
-    frontend = _preflight_frontend_build_for_restart("ensure-latest-launcher")
+    frontend = _preflight_frontend_build_for_restart("ensure-latest-launcher", project_root=root)
     if not bool(frontend.get("ok", True)):
         raise RuntimeError(str(frontend.get("reason") or "frontend ensure failed"))
     return {

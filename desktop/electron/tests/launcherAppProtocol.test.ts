@@ -1,4 +1,6 @@
-import { resolve } from "node:path";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -113,6 +115,28 @@ describe("launcher app protocol file serving", () => {
         env: {},
       })
     ).toBe(resolve("C:/repo/web/dist"));
+  });
+
+  it("resolves an unpackaged workspace through its atomically active release", () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), "vibelution-release-"));
+    const releasesRoot = join(workspaceRoot, "web", ".vibelution-builds");
+    const release = "release-current";
+    try {
+      mkdirSync(join(releasesRoot, release), { recursive: true });
+      writeFileSync(join(releasesRoot, release, "index.html"), "<!doctype html>", "utf8");
+      writeFileSync(join(releasesRoot, "active.json"), JSON.stringify({ release }), "utf8");
+
+      expect(
+        resolveLauncherDistRoot({
+          resourcesRoot: "C:/app/resources",
+          workspaceRoot,
+          packaged: false,
+          env: {},
+        })
+      ).toBe(resolve(releasesRoot, release));
+    } finally {
+      rmSync(workspaceRoot, { recursive: true, force: true });
+    }
   });
 
   it("registers the scheme handler through the Electron protocol module", () => {

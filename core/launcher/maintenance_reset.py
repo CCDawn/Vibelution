@@ -944,17 +944,17 @@ def _reset_items() -> tuple[ResetItemDefinition, ...]:
             id="web_dist",
             name_zh="可重建前端产物",
             name_en="Rebuildable frontend output",
-            description_zh="删除 web/dist/。单后端静态托管模式需要重新 npm run build，或用 Bun 辅助构建后才能打开前端。",
-            description_en="Delete web/dist/. Single-backend static hosting needs npm run build, or the Bun auxiliary build, before the frontend opens again.",
-            detail_zh="web/dist/",
-            detail_en="web/dist/",
+            description_zh="删除旧版 web/dist/ 与当前原子发布的前端 release。下次通过 Launcher 启动时会按 BuildKey 重新构建。",
+            description_en="Delete legacy web/dist/ and atomically published frontend releases. The next Launcher start rebuilds them from the BuildKey.",
+            detail_zh="web/dist/、web/.vibelution-builds/",
+            detail_en="web/dist/, web/.vibelution-builds/",
             risk="medium",
             default_selected=False,
             category="build_artifacts",
             category_zh="可重建产物",
             category_en="Rebuildable artifacts",
-            rebuild_hint_zh="删除 web/dist/ 后，单后端静态托管模式需要在 web/ 重新执行 npm run build；本地辅助构建可用 bun run bun:build。",
-            rebuild_hint_en="After deleting web/dist/, run npm run build in web/ before using single-backend static hosting; local auxiliary builds can use bun run bun:build.",
+            rebuild_hint_zh="删除后重新启动 Launcher；它会用当前本地源码构建并原子激活新的前端 release。",
+            rebuild_hint_en="Restart the Launcher; it rebuilds and atomically activates a new frontend release from the current local source.",
             collector=_collect_web_dist,
         ),
     )
@@ -1489,8 +1489,8 @@ def _collect_runtime_preview_artifacts() -> list[ResetCandidate]:
 
 
 def _collect_web_dist() -> list[ResetCandidate]:
-    path = PROJECT_ROOT / "web" / "dist"
-    return [_candidate_for_path(path, kind="directory", missing=not path.exists())]
+    paths = (PROJECT_ROOT / "web" / "dist", PROJECT_ROOT / "web" / ".vibelution-builds")
+    return [_candidate_for_path(path, kind="directory", missing=not path.exists()) for path in paths]
 
 
 def _execute_delete_candidate(candidate: ResetCandidate) -> ResetActionResult:

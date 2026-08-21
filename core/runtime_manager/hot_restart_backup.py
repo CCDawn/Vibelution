@@ -38,6 +38,7 @@ BACKUP_TARGETS: tuple[str, ...] = (
     "tools",
     "web/src",
     "web/dist",
+    "web/.vibelution-builds",
     "web/package.json",
     "web/package-lock.json",
     "web/tsconfig.app.json",

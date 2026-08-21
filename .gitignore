@@ -76,6 +76,7 @@ htmlcov/
 
 # --- Web workbench generated outputs ---
 /web/dist/
+/web/.vibelution-builds/
 /web/dist-probe/
 /web/.codex-temp/
 /web/*.tsbuildinfo
