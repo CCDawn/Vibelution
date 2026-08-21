@@ -10,17 +10,18 @@ const steps = [
   { label: "vite build", args: ["node_modules/vite/bin/vite.js", "build"] },
 ];
 
-const children = steps.map((step) => ({
-  step,
-  child: spawn(process.execPath, step.args, { stdio: "inherit", shell: false }),
-}));
+const children = steps.map((step) => {
+  const child = spawn(process.execPath, step.args, { stdio: "inherit", shell: false });
+  const completion = new Promise((resolve) => {
+    child.on("exit", (code) => resolve(code === null ? 1 : code));
+    child.on("error", () => resolve(1));
+  });
+  return { step, completion };
+});
 
 let failedLabel = "";
 for (const entry of children) {
-  const exitCode = await new Promise((resolve) => {
-    entry.child.on("exit", (code) => resolve(code === null ? 1 : code));
-    entry.child.on("error", () => resolve(1));
-  });
+  const exitCode = await entry.completion;
   if (exitCode !== 0 && !failedLabel) {
     failedLabel = entry.step.label;
   }
