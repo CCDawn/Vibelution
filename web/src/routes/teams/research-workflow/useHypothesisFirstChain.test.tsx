@@ -218,6 +218,7 @@ describe("useHypothesisFirstChain", () => {
 
     expect(latest!.loading).toBe(false);
     expect(latest!.questionScopeKey).toBe("team-1::no-question");
+    expect(latest!.questionId).toBe("");
     expect(latest!.scopeMismatch).toBe(false);
     expect(latest!.chainState).toBeNull();
     expect(latest!.selection).toBeNull();
@@ -237,6 +238,7 @@ describe("useHypothesisFirstChain", () => {
     expect(latest!.error).toBeNull();
     expect(latest!.loading).toBe(false);
     expect(latest!.questionScopeKey).toBe("team-1::Q-01");
+    expect(latest!.questionId).toBe("Q-01");
     expect(latest!.scopeMismatch).toBe(false);
     expect(latest!.chainState?.questionId).toBe("Q-01");
     expect(latest!.selection?.selectionId).toBe("sel-2");

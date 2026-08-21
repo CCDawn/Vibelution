@@ -44,6 +44,7 @@ export const hypothesisFirstChainReviewRoundLinksKey = (teamId: string, question
 export type HypothesisFirstChainData = {
   /** Stable identity of the requested read scope. */
   questionScopeKey: string;
+  questionId: string;
   /** True when a question-keyed payload declares a different question. */
   scopeMismatch: boolean;
   chainState: HypothesisFirstChainState | null;
@@ -202,6 +203,7 @@ export function useHypothesisFirstChain(teamId: string, questionId: string): Hyp
   );
   return {
     questionScopeKey: `${teamId.trim()}::${requestedQuestionId || "no-question"}`,
+    questionId: requestedQuestionId,
     scopeMismatch,
     chainState: scopeMismatch ? null : (chainState.data ?? null),
     selection,

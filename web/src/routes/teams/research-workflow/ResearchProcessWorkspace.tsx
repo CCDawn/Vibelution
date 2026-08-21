@@ -1,9 +1,11 @@
 import { useCallback, useMemo, type ReactNode } from "react";
 
+import { CHALLENGE_CUP_WORKFLOW_ID } from "../../../api/types/researchWorkflow";
 import { WORKBENCH_LAYOUT_IDS } from "../../../components/layout/workbenchLayoutIds";
 import { VCanvasWorkbenchPage } from "../../../components/vui";
 import { buildHypothesisFirstCanvasRegion } from "./hypothesisFirstCanvasRegion";
 import { ResearchCommandPalette } from "./ResearchCommandPalette";
+import { ResearchCurrentTaskInspector } from "./ResearchCurrentTaskInspector";
 import { fetchHypothesisFirstFocusNode } from "./hypothesisFirstFocus";
 import {
   isHypothesisFirstDiscussionActive,
@@ -24,6 +26,7 @@ import { shouldShowResearchProcessInspector } from "./researchProcessPanelSelect
 import { ResearchProcessInspectorPane } from "./ResearchProcessInspectorPane";
 import { ResearchWorkflowCanvasPane } from "./ResearchWorkflowCanvasPane";
 import { ResearchWorkflowToolbar } from "./ResearchWorkflowToolbar";
+import { buildResearchWorkflowContext } from "./researchWorkflowContextModel";
 import {
   useHypothesisFirstChain,
   useHypothesisFirstChainInvalidation,
@@ -192,7 +195,7 @@ export function ResearchProcessWorkspace({
     || meetingsForHypothesisFirstQuestion(hypothesisFirstChain.meetings, chainQuestionId).length > 0
     || hypothesisFirstChain.collectionRequests.length > 0,
   );
-  const hypothesisFirstReady = !hypothesisFirstChain.loading;
+  const hypothesisFirstReady = !hypothesisFirstChain.loading && !hypothesisFirstChain.scopeMismatch;
 
   const nextAction = useMemo(() => resolveHypothesisFirstNextAction({
     run: runState.run
@@ -223,6 +226,17 @@ export function ResearchProcessWorkspace({
     runState.run,
     workflowActive,
   ]);
+  const safeNextAction = useMemo(() => {
+    if (!hypothesisFirstChain.scopeMismatch) return nextAction;
+    return {
+      stage: "blocked" as const,
+      targetNodeId: null,
+      navigationLabel: "等待题目切换",
+      disabledReason: "正在切换题目，旧任务和操作已隐藏",
+      statusMessage: "正在切换题目",
+      recovery: null,
+    };
+  }, [hypothesisFirstChain.scopeMismatch, nextAction]);
   const retryCollectionOffer = (runState.commandOffers ?? []).find((offer) => (
     offer.command === "retry_node" && (offer.nodeId === "source_finding" || !offer.nodeId)
   )) ?? null;
@@ -234,35 +248,96 @@ export function ResearchProcessWorkspace({
     || catalog.error
     || hypothesisFirstChain.error;
   const commandBusy = runState.busy || commands.busy || formalCommand.busy;
+  const workflowContext = useMemo(() => buildResearchWorkflowContext({
+    teamId,
+    workflowId: CHALLENGE_CUP_WORKFLOW_ID,
+    questionId: chainQuestionId,
+    runId: location.runId,
+    runVersion: runState.run?.runVersion ?? null,
+    dataTeamId: runState.projection?.run.teamId ?? teamId,
+    dataWorkflowId: runState.run?.workflowId ?? CHALLENGE_CUP_WORKFLOW_ID,
+    dataQuestionId: hypothesisFirstChain.questionId,
+    dataRunId: runState.run?.runId ?? null,
+    dataRunVersion: runState.run?.runVersion ?? null,
+    dataScopeReady: hypothesisFirstReady && Boolean(runState.projection),
+    scopeMismatch: hypothesisFirstChain.scopeMismatch,
+    loading: !hypothesisFirstReady || (!runState.projection && !displayError),
+    error: displayError,
+    nextAction: safeNextAction,
+    selectedNodeId: location.selectedNodeId,
+    panel: location.panel,
+    roundProgress: hypothesisFirstChain.chainState
+      ? {
+          current: hypothesisFirstChain.chainState.meetingCount ?? 0,
+          total: hypothesisFirstChain.chainState.roundBudget ?? 3,
+        }
+      : null,
+  }), [
+    chainQuestionId,
+    displayError,
+    hypothesisFirstChain.chainState,
+    hypothesisFirstChain.questionId,
+    hypothesisFirstChain.scopeMismatch,
+    hypothesisFirstReady,
+    location.panel,
+    location.runId,
+    location.selectedNodeId,
+    runState.projection,
+    runState.run,
+    safeNextAction,
+    teamId,
+  ]);
   useResearchProcessAutofocus({
     panel: location.panel,
     selectedNodeId: location.selectedNodeId,
-    nextTarget: hypothesisFirstReady ? nextAction.targetNodeId : null,
+    nextTarget: hypothesisFirstReady ? safeNextAction.targetNodeId : null,
     replaceParams: location.replaceParams,
   });
 
-  const showInspector = shouldShowResearchProcessInspector({
+  const showInspector = workflowContext.loadState !== "scope_mismatch" && shouldShowResearchProcessInspector({
     panel: location.panel,
     selectedNodeId: location.selectedNodeId,
-    nextTarget: nextAction.targetNodeId,
+    nextTarget: safeNextAction.targetNodeId,
   });
-  const atCurrentTask = Boolean(
-    workflowActive
-    && (
-      !hypothesisFirstReady
-      || (
-        location.panel === "node"
-        && location.selectedNodeId
-        && location.selectedNodeId === nextAction.targetNodeId
-      )
-    ),
-  );
+  const atCurrentTask = Boolean(workflowActive && workflowContext.view.selectedIsCurrentTask);
+
+  const inspectorPane = showInspector ? (
+    <ResearchProcessInspectorPane
+      scope={{
+        teamId,
+        teamName,
+        linkedChatRoomId,
+        runId: location.runId,
+        selectedNodeId: location.selectedNodeId,
+        questionId: location.questionId,
+        panel: location.panel,
+      }}
+      state={{
+        run: runState.run,
+        projection: runState.projection,
+        effectiveBindings: catalog.effectiveBindings,
+        nodeDetail: nodeDetail.state,
+        insights,
+        busy: commandBusy,
+      }}
+      actions={{
+        replaceParams: location.replaceParams,
+        retryNodeDetail: nodeDetail.retry,
+        submitRun: commands.submitRun,
+        pendingTaskId: commands.pendingTaskId,
+        submitOffer: commands.submitOffer,
+      }}
+      nextAction={safeNextAction}
+      retryCollectionOffer={retryCollectionOffer}
+    />
+  ) : null;
+  const archiveOpen = location.panel === "question";
 
   return (
     <div data-fill="true" data-vui="research-process-workspace-host" className={styles.host}>
       <ResearchCommandPalette
         questions={catalog.questions}
-        nextAction={nextAction}
+        nextAction={safeNextAction}
         workflowActive={workflowActive && hypothesisFirstReady}
         onSelectExperiment={selectExperiment}
         onOpenPanel={(panel) => location.openPanel(panel)}
@@ -288,8 +363,8 @@ export function ResearchProcessWorkspace({
             workflowActive={workflowActive}
             onSelectExperiment={selectExperiment}
             onOpenPanel={location.openPanel}
-            navigationLabel={workflowActive && hypothesisFirstReady ? nextAction.navigationLabel : undefined}
-            nextActionStage={workflowActive && hypothesisFirstReady ? nextAction.stage : undefined}
+            navigationLabel={workflowActive && hypothesisFirstReady ? safeNextAction.navigationLabel : undefined}
+            nextActionStage={workflowActive && hypothesisFirstReady ? safeNextAction.stage : undefined}
             chainRound={
               workflowActive && !formalRuntimeActive && hypothesisFirstChain.chainState
                 ? {
@@ -302,8 +377,8 @@ export function ResearchProcessWorkspace({
             formalRuntimeActive={formalRuntimeActive}
             atCurrentTask={atCurrentTask}
             onNavigateCurrent={
-              hypothesisFirstReady && nextAction.targetNodeId
-                ? () => location.replaceParams({ node: nextAction.targetNodeId, panel: "node" })
+              hypothesisFirstReady && safeNextAction.targetNodeId
+                ? () => location.replaceParams({ node: safeNextAction.targetNodeId, panel: "node" })
                 : undefined
             }
           />
@@ -312,48 +387,34 @@ export function ResearchProcessWorkspace({
         resize={{
           aside: { id: "inspector", defaultWidth: 360, minWidth: 300, maxWidth: 520 },
         }}
-        canvas={(
+        canvas={archiveOpen && inspectorPane ? (
+          <div className={styles.archive} data-vui="research-question-archive-workspace">
+            {inspectorPane}
+          </div>
+        ) : (
           <ResearchWorkflowCanvasPane
             graph={graph}
             selectedNodeId={location.selectedNodeId}
-            runtimeCurrentNodeIds={runState.projection?.run.runtimeCurrentNodeIds ?? EMPTY_RUNTIME_NODE_IDS}
+            runtimeCurrentNodeIds={formalRuntimeCurrentNodeIds}
+            currentTaskNodeId={workflowContext.currentTask?.targetNodeId}
             error={displayError}
             onSelectNode={location.selectNode}
           />
         )}
-        inspector={
-          showInspector ? (
-            <ResearchProcessInspectorPane
-              lang={lang}
-              scope={{
-                teamId,
-                teamName,
-                linkedChatRoomId,
-                runId: location.runId,
-                selectedNodeId: location.selectedNodeId,
-                questionId: location.questionId,
-                panel: location.panel,
-              }}
-              state={{
-                run: runState.run,
-                projection: runState.projection,
-                effectiveBindings: catalog.effectiveBindings,
-                nodeDetail: nodeDetail.state,
-                insights,
-                busy: commandBusy,
-              }}
-              actions={{
-                replaceParams: location.replaceParams,
-                retryNodeDetail: nodeDetail.retry,
-                submitRun: commands.submitRun,
-                pendingTaskId: commands.pendingTaskId,
-                submitOffer: commands.submitOffer,
-              }}
-              nextAction={nextAction}
-              retryCollectionOffer={retryCollectionOffer}
-            />
-          ) : undefined
-        }
+        inspector={!archiveOpen && inspectorPane ? (
+          location.panel === "node" ? (
+            <ResearchCurrentTaskInspector
+              context={workflowContext}
+              onReturnCurrentTask={
+                workflowContext.currentTask?.targetNodeId
+                  ? () => location.replaceParams({ node: workflowContext.currentTask?.targetNodeId, panel: "node" })
+                  : undefined
+              }
+            >
+              {inspectorPane}
+            </ResearchCurrentTaskInspector>
+          ) : inspectorPane
+        ) : undefined}
         canvasClassName={styles.canvas}
         inspectorClassName={styles.inspector}
         className={styles.page}

@@ -106,6 +106,7 @@ export type BuildResearchWorkflowContextInput = {
   dataRunVersion?: number | null;
   /** Once true, every requested identity must be present and equal. */
   dataScopeReady?: boolean;
+  scopeMismatch?: boolean;
   loading?: boolean;
   refreshing?: boolean;
   error?: string | null;
@@ -384,7 +385,7 @@ export function buildResearchWorkflowContext(
     runId,
     runVersion: input.runVersion ?? null,
   };
-  const mismatch = researchWorkflowScopeMismatch(input);
+  const mismatch = Boolean(input.scopeMismatch || researchWorkflowScopeMismatch(input));
   const loadState: ResearchWorkflowLoadState = mismatch
     ? "scope_mismatch"
     : input.error

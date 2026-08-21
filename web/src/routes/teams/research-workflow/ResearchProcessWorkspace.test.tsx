@@ -45,6 +45,9 @@ const harness = vi.hoisted(() => ({
     error: null as string | null,
   },
   chain: {
+    questionId: "",
+    questionScopeKey: "research-team::no-question",
+    scopeMismatch: false,
     chainState: null,
     meetings: [] as unknown[],
     collectionRequests: [] as unknown[],
@@ -238,6 +241,8 @@ describe("ResearchProcessWorkspace", () => {
     harness.commands.error = null;
     harness.formalCommand.commandError = null;
     harness.chain.chainState = null;
+    harness.chain.questionId = "";
+    harness.chain.scopeMismatch = false;
     harness.chain.meetings = [];
     harness.chain.collectionRequests = [];
     harness.chain.reviewRoundLinks = [];
@@ -298,6 +303,25 @@ describe("ResearchProcessWorkspace", () => {
     const rendered = await renderWorkspace();
     root = rendered.root;
 
+    expect(harness.location.replaceParams).not.toHaveBeenCalled();
+  });
+
+  it("fails closed and hides stale commands when the chain scope mismatches", async () => {
+    harness.location.panel = "node";
+    harness.location.questionId = "SCI-004";
+    harness.location.selectedNodeId = "hf_selection";
+    harness.chain.questionId = "SCI-004";
+    harness.chain.scopeMismatch = true;
+    harness.runState.projection = {
+      definition: { nodes: [], edges: [], stages: [] },
+      run: { teamId: "research-team", runtimeCurrentNodeIds: [], nodeRuns: {} },
+    } as never;
+    const rendered = await renderWorkspace();
+    root = rendered.root;
+
+    expect(rendered.container.textContent).toContain("正在切换题目");
+    expect(rendered.container.textContent).not.toContain("记录选择并开启评审");
+    expect(rendered.container.querySelector('[data-vui="research-current-task-inspector"]')).toBeNull();
     expect(harness.location.replaceParams).not.toHaveBeenCalled();
   });
 

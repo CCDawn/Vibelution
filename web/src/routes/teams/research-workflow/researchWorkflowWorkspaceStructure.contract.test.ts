@@ -44,6 +44,14 @@ describe("research workflow workspace responsibility contract", () => {
     expect(source).toContain("ResearchProcessInspectorPane");
   });
 
+  it("renders question archives in the wide canvas region instead of the narrow inspector", () => {
+    const source = readFileSync(resolve(root, "ResearchProcessWorkspace.tsx"), "utf8");
+    expect(source).toContain('const archiveOpen = location.panel === "question"');
+    expect(source).toContain('data-vui="research-question-archive-workspace"');
+    expect(source).toContain("canvas={archiveOpen && inspectorPane");
+    expect(source).toContain("inspector={!archiveOpen && inspectorPane");
+  });
+
   it("mounts inspector panel leaves through the research workflow lazy pack", () => {
     const source = readFileSync(resolve(root, "ResearchProcessInspectorPane.tsx"), "utf8");
     expect(source).toContain('from "../teamLazyPanels"');
