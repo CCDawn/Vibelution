@@ -107,6 +107,7 @@ SUPPORTED_RECORDED_COMMAND_KINDS = frozenset(
         "challenge-cup-build",
         "changed-python-ruff",
         "diff-check",
+        "electron-test",
         "prompt-debugger",
         "pytest",
         "selector",

@@ -387,6 +387,27 @@ def test_parse_allowed_command(
     assert spec.cwd == expected_cwd
 
 
+def test_manifest_commands_accept_electron_test(git_repo: Path) -> None:
+    expected = [
+        gate.CommandSpec(
+            "electron-test",
+            ["npm", "--prefix", "desktop/electron", "test"],
+            git_repo,
+        )
+    ]
+    commands = [
+        {
+            "kind": "electron-test",
+            "argv": ["npm", "--prefix", "desktop/electron", "test"],
+            "cwd": str(git_repo),
+            "exitCode": 0,
+            "status": "passed",
+        }
+    ]
+
+    assert gate.manifest_commands_are_valid(commands, expected)
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows launcher resolution")
 def test_materialize_command_resolves_windows_npm_launcher(git_repo: Path) -> None:
     spec = gate.parse_allowed_command("npm --prefix web run build", git_repo)
