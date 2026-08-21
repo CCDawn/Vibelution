@@ -1,5 +1,15 @@
 import { execFileSync, spawn as nodeSpawn } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync
+} from "node:fs";
 import { dirname, join } from "node:path";
 
 import { pythonBridgeEnv } from "./pythonBridgeEnv.js";
@@ -270,9 +280,23 @@ export async function mainLineBackendIsReusable(
 
 export function writeLauncherStateFile(path: string, state: WorkbenchBackendState): void {
   mkdirSync(dirname(path), { recursive: true });
-  const tmp = `${path}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`, "utf8");
-  renameSync(tmp, path);
+  // State is published by more than one lifecycle writer. A fixed sibling
+  // temp name lets concurrent writers overwrite each other's in-progress
+  // document before either rename, which can publish torn or stale JSON.
+  const tmp = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+    renameSync(tmp, path);
+  } finally {
+    try {
+      if (existsSync(tmp)) {
+        unlinkSync(tmp);
+      }
+    } catch {
+      // The successful rename already published the state; a best-effort
+      // cleanup must not turn a successful write into a lifecycle failure.
+    }
+  }
 }
 
 export function preferredWorkbenchPort(input: {

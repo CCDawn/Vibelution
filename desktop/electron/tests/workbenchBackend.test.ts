@@ -1,3 +1,6 @@
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { probeBackendHealthy, waitForBackendHealthy, workbenchHealthUrl } from "../src/process/workbenchBackendHealth.js";
@@ -15,6 +18,7 @@ import {
   resolveNodeExecutable,
   sameProjectRoot,
   spawnWorkbenchBackend,
+  writeLauncherStateFile,
   workbenchBackendArgs,
   workbenchBackendEnv
 } from "../src/process/workbenchBackend.js";
@@ -170,6 +174,26 @@ describe("workbenchBackendEnv", () => {
     expect(env.VIBELUTION_CONFIG_HOME).toBe("C:/Users/op/Documents/Vibelution/config");
     expect(env.VIBELUTION_LAUNCHER_PORT).toBe("8766");
     expect(env.VIBELUTION_ALLOW_DIRTY_LAUNCH).toBe("1");
+  });
+});
+
+describe("writeLauncherStateFile", () => {
+  it("publishes complete JSON without leaving a shared temp file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vibelution-workbench-state-"));
+    try {
+      const path = join(dir, "state.json");
+      const sharedTempPath = `${path}.tmp`;
+      writeFileSync(sharedTempPath, "sentinel", "utf8");
+      writeLauncherStateFile(path, { backendPort: 8011, phase: "steady" });
+
+      expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
+        backendPort: 8011,
+        phase: "steady"
+      });
+      expect(readFileSync(sharedTempPath, "utf8")).toBe("sentinel");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

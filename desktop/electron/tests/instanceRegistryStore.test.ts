@@ -13,6 +13,7 @@ import {
   applyReclaimStaleInFlightStart,
   applyRenewOwnerLease,
   applyUpsert,
+  claimStart,
   claimStop,
   ownerLeaseOf,
   recordSpawnPid,
@@ -300,5 +301,54 @@ describe("instanceRegistryStore shared fixture", () => {
     });
     expect(result.applied).toBe(false);
     expect(result.entry.status).toBe("stopping");
+  });
+
+  it("rejects a persisted start claim while cleanup holds the registry fence", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vibelution-registry-cleanup-fence-"));
+    tempDirs.push(dir);
+    const registryPath = join(dir, "instances.json");
+    const payload = cloneRegistry({
+      schemaVersion: 3,
+      instances: {
+        "worktree:task": {
+          status: "steady",
+          phase: "ready",
+          generation: 7,
+          cleanupInProgress: true,
+          port: 8000,
+          controlPort: 8765
+        }
+      }
+    });
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(registryPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+
+    const result = await claimStart(registryPath, {
+      instanceId: "worktree:task",
+      projectRoot: "C:/worktree/task",
+      commandId: "start-1",
+      deadlineAt: "2026-08-21T12:30:00Z",
+      ownerPid: 1234,
+      nowMs: Date.parse("2026-08-21T12:00:00Z"),
+      portIsFree: () => {
+        throw new Error("cleanup-fenced start must not allocate ports");
+      }
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      code: "instance_busy",
+      instanceId: "worktree:task",
+      status: "cleanup",
+      generation: 7
+    });
+    const persisted = JSON.parse(readFileSync(registryPath, "utf8")) as RegistryPayload;
+    expect(persisted.instances["worktree:task"]).toMatchObject({
+      status: "steady",
+      generation: 7,
+      cleanupInProgress: true,
+      port: 8000,
+      controlPort: 8765
+    });
   });
 });

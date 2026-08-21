@@ -48,6 +48,7 @@ export type RegistryEntry = {
   portLeaseStatus?: string;
   slotKey?: string;
   slotId?: string;
+  cleanupInProgress?: boolean;
   dataHome?: string;
   [key: string]: unknown;
 };
@@ -408,6 +409,15 @@ export async function applyClaimStart(
   }
   const entry = ensureEntry(payload, instanceId);
   const currentStatus = statusOf(entry);
+  if (Boolean(entry.cleanupInProgress)) {
+    return {
+      ok: false,
+      code: "instance_busy",
+      instanceId,
+      status: "cleanup",
+      generation: positiveInt(entry.generation)
+    };
+  }
   if (IN_FLIGHT_STATUSES.has(currentStatus)) {
     return {
       ok: false,
