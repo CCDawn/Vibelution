@@ -11,12 +11,23 @@ const RUN_STATUS_LABELS: Record<string, string> = {
   cancelled: "已取消",
 };
 
+const RUN_STATUS_LABELS_EN: Record<string, string> = {
+  queued: "Preparing",
+  running: "Running",
+  waiting_human: "Waiting for review",
+  blocked: "Needs attention",
+  succeeded: "Completed",
+  failed: "Run failed",
+  cancelled: "Cancelled",
+};
+
 export type ResearchRunOption = {
   runId: string;
   label: string;
 };
 
-export function researchRunStatusLabel(status: string): string {
+export function researchRunStatusLabel(status: string, lang: "zh" | "en" = "zh"): string {
+  if (lang === "en") return RUN_STATUS_LABELS_EN[status] ?? "Status unavailable";
   return RUN_STATUS_LABELS[status] ?? "状态待确认";
 }
 

@@ -197,6 +197,49 @@ describe("ResearchRunLaunchPanel", () => {
     expect(markup).not.toContain("数据集引用");
   });
 
+  it("renders the launch surface in English without Chinese chrome", () => {
+    Object.assign(queryState.current, {
+      data: launchOptions({
+        questions: [{
+          questionId: "SCI-003",
+          title: "Is the Riemann hypothesis true?",
+          scope: "mathematical_sciences",
+          domain: "mathematical_sciences",
+          catalogId: "science-125-questions-2021",
+          reviewRunId: "",
+          artifactSha256: "",
+          source: "catalog",
+          launchable: true,
+          checkpoint: {
+            runId: "run-3",
+            status: "waiting_human",
+            currentNodeId: "protocol_design",
+            currentNodeLabel: "协议设计",
+            completedCount: 6,
+            totalSteps: 16,
+            resumable: true,
+          },
+        }],
+        experiments: [],
+      }),
+    });
+    const markup = renderToStaticMarkup(
+      <ResearchRunLaunchPanel
+        lang="en"
+        teamId="team-1"
+        busy={false}
+        initialQuestionId="SCI-003"
+        onSubmit={async () => undefined}
+        onCancel={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain("Choose a question and start an experiment");
+    expect(markup).toContain("Protocol design");
+    expect(markup).toContain("Continue run");
+    expect(markup).not.toMatch(/[\u4e00-\u9fff]/);
+  });
+
   it("productizes the launch-options load error with retry and collapsible technical details", () => {
     Object.assign(queryState.current, {
       isPending: false,

@@ -20,7 +20,12 @@ import {
   VStatusChip,
   VSurface,
 } from "../../../components/vui";
-import { researchWorkflowErrorInlineText } from "../researchWorkflowErrorModel";
+import {
+  presentResearchWorkflowError,
+  researchWorkflowErrorBody,
+  researchWorkflowErrorInlineText,
+  researchWorkflowErrorTitle,
+} from "../researchWorkflowErrorModel";
 import {
   clearResearchRunLaunchDraft,
   readResearchRunLaunchDraft,
@@ -28,13 +33,29 @@ import {
 } from "./researchRunLaunchDraft";
 import { buildResearchRunInput } from "./researchRunLaunchContract";
 import { researchRunStatusLabel } from "./researchRunPresentation";
+import { getNodeAdapter } from "./nodeAdapterModel";
 import { ResearchRunSafetyLimitPanel } from "./ResearchRunSafetyLimitPanel";
 import { createResearchRunSafetyBudget } from "./researchRunSafetyBudget";
 import styles from "./ResearchRunLaunchPanel.styles";
 
 const QUESTION_EMPTY_KEY = "__question_empty__";
+type Language = "zh" | "en";
 
-function nextActionLabel(experiment: ResearchWorkflowExperimentOption): string {
+function nextActionLabel(experiment: ResearchWorkflowExperimentOption, lang: Language = "zh"): string {
+  if (lang === "en") {
+    switch (experiment.nextAction) {
+      case "create_run":
+        return "Ready to create run";
+      case "activate_campaign":
+        return "Activate formal campaign";
+      case "await_formal_question_approval":
+        return "Waiting for formal question approval";
+      case "await_dev_readiness":
+        return "Waiting for DEV readiness";
+      default:
+        return experiment.nextAction;
+    }
+  }
   switch (experiment.nextAction) {
     case "create_run":
       return "可创建运行";
@@ -53,7 +74,17 @@ function nextActionLabel(experiment: ResearchWorkflowExperimentOption): string {
  * Blocked states get exactly one CTA that navigates to where the task is done
  * (Shopify setup-guide pattern); actionable states keep their local buttons.
  */
-function nextActionCtaLabel(experiment: ResearchWorkflowExperimentOption): string | null {
+function nextActionCtaLabel(experiment: ResearchWorkflowExperimentOption, lang: Language = "zh"): string | null {
+  if (lang === "en") {
+    switch (experiment.nextAction) {
+      case "await_dev_readiness":
+        return "Complete platform readiness checks";
+      case "await_formal_question_approval":
+        return "Review question result";
+      default:
+        return null;
+    }
+  }
   switch (experiment.nextAction) {
     case "await_dev_readiness":
       return "去完成平台准备检查";
@@ -84,6 +115,7 @@ export function isLaunchBlockedByExperiment(
 }
 
 export function ExperimentLaunchStatus(props: {
+  lang?: Language;
   experiment: ResearchWorkflowExperimentOption;
   busy: boolean;
   activationPending: boolean;
@@ -91,27 +123,30 @@ export function ExperimentLaunchStatus(props: {
   onOpenProgress?: () => void;
 }) {
   const { experiment, busy, activationPending, onActivate, onOpenProgress } = props;
-  const navigationCtaLabel = experiment.activationAllowed ? null : nextActionCtaLabel(experiment);
+  const lang = props.lang ?? "zh";
+  const isZh = lang === "zh";
+  const navigationCtaLabel = experiment.activationAllowed ? null : nextActionCtaLabel(experiment, lang);
   return (
     <VSurface tone="inset" padding="compact" className={styles.selectedExperiment}>
       <div className={styles.experimentHeader}>
         <strong className={styles.experimentTitle}>{experiment.name}</strong>
         <VStatusChip tone={experiment.activated ? "success" : "warning"}>
-          {experiment.activated ? "已激活" : "未激活"}
+          {experiment.activated ? (isZh ? "已激活" : "Active") : (isZh ? "未激活" : "Not active")}
         </VStatusChip>
       </div>
       <div className={styles.experimentMeta}>
         <span>{experiment.experimentId}</span>
-        <span>主题 {experiment.themeId}</span>
+        <span>{isZh ? "主题" : "Theme"} {experiment.themeId}</span>
         <span>Campaign {experiment.campaignId}</span>
       </div>
       <div className={styles.experimentStatus}>
-        下一动作：{nextActionLabel(experiment)}
+        {isZh ? "下一动作：" : "Next action: "}{nextActionLabel(experiment, lang)}
       </div>
       {!experiment.activated && !experiment.activationAllowed ? (
         <div className={styles.experimentBlockerText}>
-          完成 DEV readiness / dev-1 / dev-5 fixture 后才能激活正式 campaign。
-          激活不会启动 Qwen / 网络采集 / GPU 任务。
+          {isZh
+            ? "完成 DEV readiness / dev-1 / dev-5 fixture 后才能激活正式 campaign。激活不会启动 Qwen / 网络采集 / GPU 任务。"
+            : "Complete the DEV readiness / dev-1 / dev-5 fixtures before activating the formal campaign. Activation will not start Qwen, network collection, or GPU tasks."}
         </div>
       ) : null}
       {experiment.blockers.length ? (
@@ -140,7 +175,7 @@ export function ExperimentLaunchStatus(props: {
             onActivate();
           }}
         >
-          激活正式 Campaign
+          {isZh ? "激活正式 Campaign" : "Activate formal campaign"}
         </VButton>
       ) : null}
     </VSurface>
@@ -162,8 +197,24 @@ const DOMAIN_LABELS: Record<string, string> = {
   artificial_intelligence: "人工智能",
 };
 
-function domainLabel(domain: string): string {
-  return DOMAIN_LABELS[domain] || domain;
+const DOMAIN_LABELS_EN: Record<string, string> = {
+  mathematical_sciences: "Mathematics",
+  chemistry: "Chemistry",
+  medicine_and_health: "Medicine & health",
+  biology: "Biology",
+  astronomy: "Astronomy",
+  physics: "Physics",
+  engineering_and_materials_science: "Engineering & materials",
+  information_science: "Information science",
+  neuroscience: "Neuroscience",
+  ecology: "Ecology",
+  energy_science: "Energy science",
+  artificial_intelligence: "Artificial intelligence",
+};
+
+function domainLabel(domain: string, lang: Language = "zh"): string {
+  const labels = lang === "zh" ? DOMAIN_LABELS : DOMAIN_LABELS_EN;
+  return labels[domain] || domain;
 }
 
 function questionMatchesQuery(question: ResearchWorkflowLaunchOption, query: string): boolean {
@@ -173,7 +224,8 @@ function questionMatchesQuery(question: ResearchWorkflowLaunchOption, query: str
     question.questionId,
     question.title,
     question.domain || "",
-    domainLabel(question.domain || ""),
+    domainLabel(question.domain || "", "zh"),
+    domainLabel(question.domain || "", "en"),
   ].some((value) => value.toLowerCase().includes(needle));
 }
 
@@ -188,7 +240,28 @@ function freshRunIdempotencyKey(baseKey: string): string {
   return `${baseKey}:fresh:${random}`;
 }
 
+function checkpointNodeLabel(
+  checkpoint: NonNullable<ResearchWorkflowLaunchOption["checkpoint"]>,
+  lang: Language,
+): string {
+  if (lang === "zh") return checkpoint.currentNodeLabel || checkpoint.currentNodeId || "起点";
+  return getNodeAdapter(checkpoint.currentNodeId)?.labelEn || checkpoint.currentNodeId || "Start";
+}
+
+function launchErrorText(rawMessage: string, lang: Language): string {
+  if (lang === "zh") {
+    return researchWorkflowErrorInlineText(rawMessage, "暂时无法读取 125 题目录，请稍后重试。");
+  }
+  const message = rawMessage.trim();
+  if (!message) return "The 125-question catalog is temporarily unavailable. Please try again.";
+  const presentation = presentResearchWorkflowError(message);
+  return presentation.bodyEn === message
+    ? researchWorkflowErrorTitle(presentation, lang)
+    : `${researchWorkflowErrorTitle(presentation, lang)}. ${researchWorkflowErrorBody(presentation, lang)}`;
+}
+
 export function ResearchRunLaunchPanel(props: {
+  lang?: Language;
   teamId: string;
   busy: boolean;
   initialQuestionId?: string;
@@ -197,6 +270,8 @@ export function ResearchRunLaunchPanel(props: {
   onContinueRun?: (input: { runId: string; nodeId: string; questionId: string }) => void;
 }) {
   const { teamId, busy, initialQuestionId, onSubmit, onCancel, onContinueRun } = props;
+  const lang = props.lang ?? "zh";
+  const isZh = lang === "zh";
   // Per-team session draft restores the form after panel switches; an explicit
   // deep-link questionId always wins over the remembered draft.
   const [draft] = useState(() => readResearchRunLaunchDraft(teamId));
@@ -230,7 +305,7 @@ export function ResearchRunLaunchPanel(props: {
     : filteredQuestions;
 
   if (launchOptions.isPending) {
-    return <VStateSurface tone="loading" title="加载 125 题目录" fill className={styles.state} />;
+    return <VStateSurface tone="loading" title={isZh ? "加载 125 题目录" : "Loading 125-question catalog"} fill className={styles.state} />;
   }
   if (launchOptions.isError) {
     const rawMessage = launchOptions.error instanceof Error
@@ -239,21 +314,21 @@ export function ResearchRunLaunchPanel(props: {
     return (
       <VStateSurface
         tone="error"
-        title="题目目录加载失败"
+        title={isZh ? "题目目录加载失败" : "Question catalog failed to load"}
         fill
         className={styles.state}
         actions={(
           <VButton type="button" variant="secondary" onClick={() => void launchOptions.refetch()}>
-            重试
+            {isZh ? "重试" : "Retry"}
           </VButton>
         )}
       >
         <p className={styles.error}>
-          {researchWorkflowErrorInlineText(rawMessage, "暂时无法读取 125 题目录，请稍后重试。")}
+          {launchErrorText(rawMessage, lang)}
         </p>
         {rawMessage ? (
           <details className={styles.techDetails}>
-            <summary>技术细节</summary>
+            <summary>{isZh ? "技术细节" : "Technical details"}</summary>
             <code>{rawMessage}</code>
           </details>
         ) : null}
@@ -261,12 +336,16 @@ export function ResearchRunLaunchPanel(props: {
     );
   }
   if (!questions.length) {
-    return <VStateSurface tone="empty" title="暂无题目目录" fill className={styles.state} />;
+    return <VStateSurface tone="empty" title={isZh ? "暂无题目目录" : "No question catalog yet"} fill className={styles.state} />;
   }
 
   const primaryLabel = checkpoint
-    ? (checkpoint.resumable ? "继续运行" : restartableCheckpoint ? "新建运行" : "查看进展")
-    : "开始实验";
+    ? (checkpoint.resumable
+      ? (isZh ? "继续运行" : "Continue run")
+      : restartableCheckpoint
+        ? (isZh ? "新建运行" : "New run")
+        : (isZh ? "查看进展" : "View progress"))
+    : (isZh ? "开始实验" : "Start experiment");
 
   const submitNewRun = () => {
     try {
@@ -290,31 +369,31 @@ export function ResearchRunLaunchPanel(props: {
 
   return (
     <VSurface tone="panel" className={styles.root}>
-      <VPanelHeader title="选择题目并开始实验" headingLevel={3} />
-      <VFieldRow label="搜索题目" description="题号、英文问题或学科">
+      <VPanelHeader title={isZh ? "选择题目并开始实验" : "Choose a question and start an experiment"} headingLevel={3} />
+      <VFieldRow label={isZh ? "搜索题目" : "Search questions"} description={isZh ? "题号、英文问题或学科" : "Question ID, English question, or field"}>
         <VInput
-          aria-label="搜索 125 题"
+          aria-label={isZh ? "搜索 125 题" : "Search 125 questions"}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="SCI-003 或 Riemann"
+          placeholder={isZh ? "SCI-003 或 Riemann" : "SCI-003 or Riemann"}
           isDisabled={busy}
         />
       </VFieldRow>
-      <VFieldRow label="研究问题">
+      <VFieldRow label={isZh ? "研究问题" : "Research question"}>
         <VSelect
-          aria-label="选择 125 题"
-          placeholder="选择一道题目"
+          aria-label={isZh ? "选择 125 题" : "Choose a question from 125"}
+          placeholder={isZh ? "选择一道题目" : "Choose a question"}
           selectedKey={questionId || QUESTION_EMPTY_KEY}
           options={[
-            { id: QUESTION_EMPTY_KEY, label: "请选择题目" },
+            { id: QUESTION_EMPTY_KEY, label: isZh ? "请选择题目" : "Please choose a question" },
             ...visibleQuestions.map((question) => ({
               id: question.questionId,
               label: `${question.questionId} · ${question.title}`,
               description: [
-                domainLabel(question.domain || question.scope),
+                domainLabel(question.domain || question.scope, lang),
                 question.checkpoint
-                  ? `${question.checkpoint.currentNodeLabel || "未开始"} · ${question.checkpoint.completedCount}/${question.checkpoint.totalSteps}`
-                  : "尚未开始",
+                  ? `${checkpointNodeLabel(question.checkpoint, lang)} · ${question.checkpoint.completedCount}/${question.checkpoint.totalSteps}`
+                  : (isZh ? "尚未开始" : "Not started"),
               ].filter(Boolean).join(" · "),
             })),
           ]}
@@ -328,29 +407,34 @@ export function ResearchRunLaunchPanel(props: {
       {selectedQuestion ? (
         <VSurface tone="inset" padding="compact" className={styles.selectedQuestion}>
           <strong className={styles.questionTitle}>{selectedQuestion.questionId} · {selectedQuestion.title}</strong>
-          <span className={styles.questionScope}>{domainLabel(selectedQuestion.domain || selectedQuestion.scope)}</span>
+          <span className={styles.questionScope}>{domainLabel(selectedQuestion.domain || selectedQuestion.scope, lang)}</span>
           {checkpoint ? (
             <div className={styles.checkpoint} data-testid="question-checkpoint">
               <VStatusChip tone={checkpoint.resumable ? "warning" : checkpoint.status === "succeeded" ? "success" : "neutral"}>
-                {researchRunStatusLabel(checkpoint.status)}
+                {researchRunStatusLabel(checkpoint.status, lang)}
               </VStatusChip>
               <p>
-                当前 checkpoint：{checkpoint.currentNodeLabel || checkpoint.currentNodeId || "起点"} · {checkpoint.completedCount}/{checkpoint.totalSteps}
+                {isZh ? "当前 checkpoint：" : "Current checkpoint: "}{checkpointNodeLabel(checkpoint, lang)} · {checkpoint.completedCount}/{checkpoint.totalSteps}
               </p>
             </div>
           ) : (
-            <p className={styles.questionScope}>尚无运行记录，开始后会从资料寻找进入流程并保存 checkpoint。</p>
+            <p className={styles.questionScope}>
+              {isZh
+                ? "尚无运行记录，开始后会从资料寻找进入流程并保存 checkpoint。"
+                : "No run exists yet. Starting will enter the workflow at source finding and save a checkpoint."}
+            </p>
           )}
         </VSurface>
       ) : null}
       <ResearchRunSafetyLimitPanel
         budget={safetyBudget}
         isDisabled={busy}
+        lang={lang}
         onChange={setSafetyBudget}
       />
       {error ? <div role="alert" className={styles.error}>{error}</div> : null}
       <div className={styles.actions}>
-        <VButton variant="ghost" onClick={onCancel} isDisabled={busy}>取消</VButton>
+        <VButton variant="ghost" onClick={onCancel} isDisabled={busy}>{isZh ? "取消" : "Cancel"}</VButton>
         {restartableCheckpoint && onContinueRun ? (
           <VButton
             variant="ghost"
@@ -361,7 +445,7 @@ export function ResearchRunLaunchPanel(props: {
             })}
             isDisabled={busy}
           >
-            查看失败运行
+            {isZh ? "查看失败运行" : "View failed run"}
           </VButton>
         ) : null}
         <VButton
@@ -378,14 +462,14 @@ export function ResearchRunLaunchPanel(props: {
               return;
             }
             if (checkpoint?.resumable && !onContinueRun) {
-              setError("当前运行无法在此面板继续，请从运行列表打开。");
+              setError(isZh ? "当前运行无法在此面板继续，请从运行列表打开。" : "This run cannot continue here; open it from the run list.");
               return;
             }
             if (restartableCheckpoint || !checkpoint) {
               submitNewRun();
               return;
             }
-            setError("当前运行已完成，请从运行列表查看进展。");
+              setError(isZh ? "当前运行已完成，请从运行列表查看进展。" : "This run is complete; view its progress from the run list.");
           }}
         >
           {primaryLabel}

@@ -335,6 +335,7 @@ export function ResearchProcessWorkspace({
         inspector={
           showInspector ? (
             <ResearchProcessInspectorPane
+              lang={lang}
               scope={{
                 teamId,
                 teamName,

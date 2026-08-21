@@ -25,7 +25,10 @@ import {
 import { invalidateHypothesisFirstQueries } from "./useHypothesisFirstChain";
 import styles from "./HypothesisFirstMeetingOps.styles";
 
+type Language = "zh" | "en";
+
 export function HypothesisFirstMeetingOps(props: {
+  lang?: Language;
   teamId: string;
   questionId: string;
   meetingRoundId: string;
@@ -34,6 +37,8 @@ export function HypothesisFirstMeetingOps(props: {
   onRetryCollection?: () => Promise<void>;
   onApproved?: () => void;
 }) {
+  const lang = props.lang ?? "zh";
+  const isZh = lang === "zh";
   const queryClient = useQueryClient();
   const pageVisible = usePageVisibility();
   const roundQuery = useQuery({
@@ -117,12 +122,16 @@ export function HypothesisFirstMeetingOps(props: {
         setApproveBlockedReason(
           errors.length
             ? errors.join("；")
-            : "本轮结论未通过校验，未被确认；请退回后重新整理",
+            : (isZh
+              ? "本轮结论未通过校验，未被确认；请退回后重新整理"
+              : "The conclusion failed validation and was not confirmed; send it back and organize it again"),
         );
       } else if (payload?.hypothesisRound?.status === "failed") {
         // Confirmed, but the hypothesis-round generation failed downstream.
         setApproveBlockedReason(
-          "本轮已确认，但假说评审轮生成失败；请重新发起评审讨论以重试生成。",
+          isZh
+            ? "本轮已确认，但假说评审轮生成失败；请重新发起评审讨论以重试生成。"
+            : "The round was confirmed, but review-round generation failed; reopen the review discussion to retry generation.",
         );
       } else {
         setApproveBlockedReason(null);
@@ -131,7 +140,9 @@ export function HypothesisFirstMeetingOps(props: {
         const dropped = (payload?.validationErrors ?? []).map((item) => item.message).filter(Boolean);
         setDroppedRequestNotice(
           dropped.length
-            ? `本轮已确认，但 ${dropped.length} 条证据请求因格式无效被跳过：${dropped.join("；")}`
+            ? (isZh
+              ? `本轮已确认，但 ${dropped.length} 条证据请求因格式无效被跳过：${dropped.join("；")}`
+              : `The round was confirmed, but ${dropped.length} invalid evidence requests were skipped: ${dropped.join("; ")}`)
             : null,
         );
       }
@@ -148,7 +159,9 @@ export function HypothesisFirstMeetingOps(props: {
           queryKey: queryKeys.teamMeetingRound(props.teamId, props.meetingRoundId),
         });
         setApproveBlockedReason(
-          "纪要已在其他页面更新，已重新加载最新纪要，请再次确认。",
+          isZh
+            ? "纪要已在其他页面更新，已重新加载最新纪要，请再次确认。"
+            : "The digest changed on another page. The latest version was reloaded; confirm it again.",
         );
       }
     },
@@ -196,7 +209,9 @@ export function HypothesisFirstMeetingOps(props: {
       // the replacement round, say so instead of letting the meeting vanish.
       setReopenBlockedReason(
         payload?.openStatus === "budget_exhausted"
-          ? "失败轮已作废，但轮次预算已耗尽，无法开启新的评审轮；请在假说收敛卡提升预算并发起新一轮评审。"
+          ? (isZh
+            ? "失败轮已作废，但轮次预算已耗尽，无法开启新的评审轮；请在假说收敛卡提升预算并发起新一轮评审。"
+            : "The failed round was voided, but the round budget is exhausted; increase the budget on the convergence card to open another review round.")
           : null,
       );
       invalidate();
@@ -214,12 +229,12 @@ export function HypothesisFirstMeetingOps(props: {
   });
 
   if (roundQuery.isPending) {
-    return <VStateSurface title="正在读取讨论" tone="loading" />;
+    return <VStateSurface title={isZh ? "正在读取讨论" : "Loading discussion"} tone="loading" />;
   }
   if (roundQuery.isError || !roundQuery.data) {
     return (
       <VErrorSummary
-        label="讨论不可用"
+        label={isZh ? "讨论不可用" : "Discussion unavailable"}
         summary={roundQuery.error instanceof Error ? roundQuery.error.message : "meeting_round_unavailable"}
       />
     );
@@ -239,24 +254,24 @@ export function HypothesisFirstMeetingOps(props: {
       ? "retry_draft_summary"
     : (commandEnabled ? (props.nextAction.recovery?.command || props.nextAction.command) : undefined);
   const commandLabel = interruptedCandidateDiscussion
-    ? "重试启动候选讨论"
+    ? (isZh ? "重试启动候选讨论" : "Retry candidate discussion")
     : failedCandidateDiscussion
-    ? "重新发起候选讨论"
+    ? (isZh ? "重新发起候选讨论" : "Reopen candidate discussion")
     : failedReviewDiscussion
-      ? "重新发起评审讨论"
+      ? (isZh ? "重新发起评审讨论" : "Reopen review discussion")
     : autoDraftFailed
       ? (roundQuery.data.meetingRound.meetingType === "hypothesis_candidate_generation"
-        ? "重试整理候选清单"
-        : "重试整理本轮结论")
+        ? (isZh ? "重试整理候选清单" : "Retry candidate list summary")
+        : (isZh ? "重试整理本轮结论" : "Retry round summary"))
     : (commandEnabled ? (props.nextAction.recovery?.label || props.nextAction.commandLabel) : undefined);
   const commandDetail = failedCandidateDiscussion || failedReviewDiscussion
-    ? "放弃本轮失败尝试，以同一批假说开启下一轮"
+    ? (isZh ? "放弃本轮失败尝试，以同一批假说开启下一轮" : "Discard the failed attempt and open the next round with the same hypotheses")
     : autoDraftFailed
       ? undefined
       : (commandEnabled ? props.nextAction.commandDetail : undefined);
   const commandDisabledReason = props.nextAction.disabledReason
     || (command === "retry_handoff" && !canHandoff
-      ? "缺少资料搜集运行标识，无法重试自动交接"
+      ? (isZh ? "缺少资料搜集运行标识，无法重试自动交接" : "The source-collection run ID is missing; automatic handoff cannot be retried")
       : undefined);
   const pending = draftMutation.isPending
     || approveMutation.isPending
@@ -348,7 +363,7 @@ export function HypothesisFirstMeetingOps(props: {
           isDisabled={pending}
           onPress={() => rejectMutation.mutate()}
         >
-          退回重新整理
+          {isZh ? "退回重新整理" : "Send back for revision"}
         </VButton>
       ) : null}
     </div>
@@ -358,13 +373,13 @@ export function HypothesisFirstMeetingOps(props: {
     <div className={styles.task}>
       {error ? (
         <VErrorSummary
-          label="操作未完成"
+          label={isZh ? "操作未完成" : "Action could not finish"}
           summary={error instanceof Error ? error.message : String(error)}
         />
       ) : null}
       {approveBlockedReason ? (
         <VErrorSummary
-          label="本轮结论未被确认"
+          label={isZh ? "本轮结论未被确认" : "Round conclusion was not confirmed"}
           summary={approveBlockedReason}
           data-testid="approve-blocked-reason"
           actions={commandEnabled && (roundStatus === "awaiting_approval") ? (
@@ -376,21 +391,21 @@ export function HypothesisFirstMeetingOps(props: {
               isDisabled={pending}
               onPress={() => closeCorrectionMutation.mutate()}
             >
-              按现有结论关闭本轮（不发起资料搜集）
+              {isZh ? "按现有结论关闭本轮（不发起资料搜集）" : "Close with the current conclusion (do not start collection)"}
             </VButton>
           ) : undefined}
         />
       ) : null}
       {droppedRequestNotice ? (
         <VErrorSummary
-          label="部分证据请求被跳过"
+          label={isZh ? "部分证据请求被跳过" : "Some evidence requests were skipped"}
           summary={droppedRequestNotice}
           data-testid="dropped-request-notice"
         />
       ) : null}
       {reopenBlockedReason ? (
         <VErrorSummary
-          label="评审轮未重开"
+          label={isZh ? "评审轮未重开" : "Review round was not reopened"}
           summary={reopenBlockedReason}
           data-testid="reopen-blocked-reason"
         />
@@ -399,6 +414,7 @@ export function HypothesisFirstMeetingOps(props: {
         round={displayRound}
         messages={sourceMessages}
         compact={props.compact}
+        lang={lang}
         actions={actionBar}
       />
     </div>

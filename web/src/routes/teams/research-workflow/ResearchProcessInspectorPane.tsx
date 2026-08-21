@@ -42,6 +42,7 @@ import styles from "./ResearchProcessInspectorPane.styles";
 type ReplaceParams = (patch: Record<string, string | null | undefined>) => void;
 
 export function ResearchProcessInspectorPane(props: {
+  lang?: "zh" | "en";
   scope: {
     teamId: string;
     teamName: string;
@@ -70,7 +71,8 @@ export function ResearchProcessInspectorPane(props: {
   retryCollectionOffer?: CommandOffer | null;
 }) {
   const { scope, state, actions, nextAction, retryCollectionOffer = null } = props;
-  const { lang } = useShellI18n();
+  const { lang: shellLang } = useShellI18n();
+  const lang = props.lang ?? shellLang;
   const isZh = lang === "zh";
   const [selectedQuestionRunId, setSelectedQuestionRunId] = useState("");
   const questionDetail = useQuery({
@@ -116,6 +118,7 @@ export function ResearchProcessInspectorPane(props: {
   if (scope.panel === "launch" || (scope.panel === "node" && !scope.selectedNodeId && !scope.runId)) {
     return (
       <ResearchRunLaunchPanel
+        lang={lang}
         teamId={scope.teamId}
         busy={state.busy}
         initialQuestionId={scope.questionId}
@@ -145,6 +148,7 @@ export function ResearchProcessInspectorPane(props: {
   if (scope.selectedNodeId && isHypothesisFirstCanvasNode(scope.selectedNodeId)) {
     return (
       <HypothesisFirstNodeInspector
+        lang={lang}
         teamId={scope.teamId}
         questionId={scope.questionId || state.run?.questionId || ""}
         nodeId={scope.selectedNodeId}

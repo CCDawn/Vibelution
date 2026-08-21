@@ -27,11 +27,12 @@ const mockedRecordCollectionHandoff = vi.mocked(recordCollectionHandoff);
 
 vi.mock("./HypothesisFirstMeetingOps", () => ({
   HypothesisFirstMeetingOps: (props: {
+    lang?: "zh" | "en";
     meetingRoundId?: string;
     nextAction: { commandLabel?: string; stage: string; disabledReason?: string };
   }) => (
     <div data-testid="meeting-ops">
-      {props.nextAction.commandLabel || props.nextAction.stage}
+      {props.lang === "en" ? "Review operations" : (props.nextAction.commandLabel || props.nextAction.stage)}
       {props.nextAction.disabledReason ? <span>{props.nextAction.disabledReason}</span> : null}
       {props.meetingRoundId ? <span data-testid="meeting-round-id">{props.meetingRoundId}</span> : null}
     </div>
@@ -39,9 +40,9 @@ vi.mock("./HypothesisFirstMeetingOps", () => ({
 }));
 
 vi.mock("../challenge-cup/HypothesisSelectionList", () => ({
-  HypothesisSelectionList: (props: { compact?: boolean }) => {
+  HypothesisSelectionList: (props: { compact?: boolean; lang?: "zh" | "en" }) => {
     selectionListProps(props);
-    return <div data-testid="selection-list">记录选择并开启评审</div>;
+    return <div data-testid="selection-list">{props.lang === "en" ? "Record selection & start review" : "记录选择并开启评审"}</div>;
   },
 }));
 
@@ -134,6 +135,23 @@ describe("HypothesisFirstNodeInspector", () => {
     expect(container.textContent).toContain("候选假说生成");
     expect(container.textContent).toContain("生成候选假说");
     expect(container.textContent).not.toContain("前往候选生成");
+  });
+
+  it("renders the empty inspector state in English without Chinese chrome", () => {
+    mockedChain.mockReturnValue(chainData());
+    render(
+      <HypothesisFirstNodeInspector
+        lang="en"
+        teamId="team-1"
+        questionId=""
+        nodeId="hf_generation"
+        onOpenQuestion={() => {}}
+      />,
+    );
+
+    expect(container.textContent).toContain("Question context required");
+    expect(container.textContent).toContain("Next: choose a challenge question");
+    expect(container.textContent).not.toMatch(/[\u4e00-\u9fff]/);
   });
 
   it("gives an actionable next step for an empty inspector context", () => {

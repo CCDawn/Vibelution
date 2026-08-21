@@ -307,6 +307,39 @@ describe("MeetingRoundDisplay compact inspector chrome", () => {
     expect(container.textContent).toContain("全文");
   });
 
+  it("renders English meeting chrome without Chinese labels", () => {
+    act(() => {
+      root.render(
+        <MeetingRoundDisplay
+          lang="en"
+          compact
+          round={{
+            program: "p",
+            theme: "t",
+            campaign: "c",
+            question: "Q-01",
+            branch: "b",
+            workflow: "w",
+            agentId: "a",
+            meetingRoundId: "meeting-1",
+            meetingType: "hypothesis_review",
+            mode: "review",
+            scopeHash: "scope",
+            participants: ["a"],
+            status: "closed",
+            startedAt: "2026-08-19T01:00:00Z",
+            linkedChatRoomId: "room-1",
+          }}
+          messages={[]}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain("Review discussion");
+    expect(container.textContent).toContain("No discussion messages in this room yet.");
+    expect(container.textContent).not.toMatch(/[\u4e00-\u9fff]/);
+  });
+
   it("renders unstructured speech summaries without claiming marker consensus", () => {
     renderDraft({
       summary: "从自由格式发言生成摘要条目",
