@@ -46,8 +46,13 @@ $VenvPythonw = Join-Path $VenvDir "Scripts\pythonw.exe"
 $Requirements = Join-Path $ProjectDir "requirements.txt"
 $WebDir = Join-Path $ProjectDir "web"
 $DistIndex = Join-Path $WebDir "dist\index.html"
-$LauncherScript = Join-Path $ProjectDir "scripts\vibelution_launcher.ps1"
 $SyncLauncher = Join-Path $ProjectDir "scripts\windows_launcher_entry\sync_vibelution_launcher_entry.ps1"
+$LocalAppData = [Environment]::GetFolderPath("LocalApplicationData")
+$NativeLauncher = if ($LocalAppData) {
+    Join-Path $LocalAppData "Vibelution\Launcher\VibelutionLauncher.exe"
+} else {
+    ""
+}
 
 function Write-Step {
     param([string]$Message)
@@ -218,7 +223,7 @@ Write-Host "  1. Configure models/keys in: $configHome\config.toml"
 Write-Host "     (created on first Launcher start if missing)"
 Write-Host "  2. Start:"
 Write-Host "       Desktop shortcut: Vibelution Launcher"
-Write-Host "       or: powershell -ExecutionPolicy Bypass -File scripts\vibelution_launcher.ps1 -Action start"
+Write-Host "       or: $NativeLauncher --project `"$ProjectDir`" start"
 Write-Host "  3. Guide: docs\guides\install-windows.md"
 Write-Host ""
 if (Test-Path -LiteralPath $VenvPythonw) {
@@ -227,8 +232,11 @@ if (Test-Path -LiteralPath $VenvPythonw) {
 
 if ($Start) {
     Write-Step "Start Launcher"
-    if (-not (Test-Path -LiteralPath $LauncherScript)) {
-        throw "Launcher script missing: $LauncherScript"
+    if (-not $NativeLauncher -or -not (Test-Path -LiteralPath $NativeLauncher)) {
+        throw "Native Launcher missing after sync: $NativeLauncher"
     }
-    & powershell -NoProfile -ExecutionPolicy Bypass -File $LauncherScript -Action start
+    Invoke-Native `
+        -FilePath $NativeLauncher `
+        -ArgumentList @("--project", $ProjectDir, "start") `
+        -Label "VibelutionLauncher.exe --project <root> start"
 }
