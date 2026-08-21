@@ -26,6 +26,8 @@ export type HypothesisSelectionPanelProps = {
   teamId: string;
   questionId: string;
   lang?: "zh" | "en";
+  /** Opens the selected review round where its live workflow actions are available. */
+  onOpenReviewMeeting?: (nodeId: string) => void;
 };
 
 function meetingStatusTone(status: string): "accent" | "warning" | "neutral" | "success" {
@@ -49,7 +51,12 @@ const MEETING_STATUS_LABELS_EN: Record<string, string> = {
   closed: "Closed",
 };
 
-export function HypothesisSelectionPanel({ teamId, questionId, lang = "zh" }: HypothesisSelectionPanelProps) {
+export function HypothesisSelectionPanel({
+  teamId,
+  questionId,
+  lang = "zh",
+  onOpenReviewMeeting,
+}: HypothesisSelectionPanelProps) {
   const isZh = lang === "zh";
   const queryClient = useQueryClient();
   const contextQuery = useQuery({
@@ -88,17 +95,23 @@ export function HypothesisSelectionPanel({ teamId, questionId, lang = "zh" }: Hy
     []
   ).length;
   const reviewMeeting = context.reviewMeeting ?? null;
-  const reviewMeetingId = reviewMeeting?.meetingRoundId ?? "";
+  const reviewMeetingNodeId = reviewMeeting?.meetingRoundId
+    && Number.isInteger(reviewMeeting.roundIndex)
+    && (reviewMeeting.roundIndex ?? 0) > 0
+    ? `hf_meeting_${reviewMeeting.roundIndex}`
+    : "";
+  const canOpenReviewMeeting = Boolean(reviewMeetingNodeId && onOpenReviewMeeting);
+  const reviewMeetingDisabledReason = !reviewMeeting?.meetingRoundId
+    ? (isZh ? "记录选择并开启评审讨论后可用" : "Available after recording a selection and starting the review")
+    : !reviewMeetingNodeId
+      ? (isZh ? "评审讨论正在建立可操作节点，请稍后重试" : "The review is still preparing its actionable workflow node")
+      : !onOpenReviewMeeting
+        ? (isZh ? "请从研究流程中打开评审讨论" : "Open the review discussion from the research workflow")
+        : undefined;
   const generationMeeting = context.generationMeeting ?? null;
   const generationOpen = Boolean(
     generationMeeting && generationMeeting.status !== "closed",
   );
-
-  const openMeetingSection = () => {
-    document
-      .getElementById("hypothesis-first-meeting")
-      ?.scrollIntoView({ behavior: "smooth", block: "start" });
-  };
 
   return (
     <section className={css.section} id="hypothesis-first-selection">
@@ -181,9 +194,9 @@ export function HypothesisSelectionPanel({ teamId, questionId, lang = "zh" }: Hy
       <div className={css.actions}>
         <VButton
           density="compact"
-          disabledReason={isZh ? "记录选择并开启评审讨论后可用" : "Available after recording a selection and starting the review"}
-          isDisabled={!reviewMeetingId}
-          onPress={openMeetingSection}
+          disabledReason={reviewMeetingDisabledReason}
+          isDisabled={!canOpenReviewMeeting}
+          onPress={() => onOpenReviewMeeting?.(reviewMeetingNodeId)}
           variant="secondary"
         >
           {isZh ? "查看评审讨论" : "View review discussion"}

@@ -1,11 +1,19 @@
-import React from "react";
+// @vitest-environment happy-dom
+
+import React, { act } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../../../api/hypothesisFirst", () => ({
   fetchHypothesisSelectionContext: vi.fn(),
-  fetchCandidateEvidenceTrail: vi.fn(),
+  fetchCandidateEvidenceTrail: vi.fn().mockResolvedValue({
+    schemaVersion: 1,
+    teamId: "team-1",
+    questionId: "SCI-001",
+    trails: [],
+  }),
   openHypothesisCandidateGeneration: vi.fn(),
   recordHypothesisSelection: vi.fn(),
 }));
@@ -43,7 +51,7 @@ function context(status: "open" | "closed") {
     ],
     defaultSelectedCandidateIds: ["candidate-a", "candidate-b"],
     latestSelection: null,
-    reviewMeeting: { meetingRoundId: "review-1", status },
+    reviewMeeting: { meetingRoundId: "review-1", status, roundIndex: 1 },
   } as never;
 }
 
@@ -73,5 +81,47 @@ describe("HypothesisSelectionPanel", () => {
     expect(markup).toContain("已关门");
     expect(markup).toContain("最终采用 2 条");
     expect(markup).not.toContain("记录选择并开启评审");
+  });
+
+  it("routes the review CTA to the actionable workflow node", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(
+      queryKeys.hypothesisFirstSelectionContext("team-1", "SCI-001"),
+      {
+        ...context("open"),
+        reviewMeeting: { meetingRoundId: "review-3", status: "awaiting_approval", roundIndex: 3 },
+      },
+    );
+    const onOpenReviewMeeting = vi.fn();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={client}>
+          <HypothesisSelectionPanel
+            teamId="team-1"
+            questionId="SCI-001"
+            onOpenReviewMeeting={onOpenReviewMeeting}
+          />
+        </QueryClientProvider>,
+      );
+    });
+
+    const button = Array.from(container.querySelectorAll("button"))
+      .find((node) => node.textContent === "查看评审讨论");
+    expect(button).toBeTruthy();
+    expect(button?.disabled).toBe(false);
+    await act(async () => {
+      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(onOpenReviewMeeting).toHaveBeenCalledWith("hf_meeting_3");
+
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
   });
 });

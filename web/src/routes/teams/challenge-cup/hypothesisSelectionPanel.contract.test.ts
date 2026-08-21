@@ -13,6 +13,10 @@ const detailPanelSource = readFileSync(
   new URL("./ChallengeQuestionDetailPanel.tsx", import.meta.url),
   "utf8",
 );
+const inspectorPaneSource = readFileSync(
+  new URL("../research-workflow/ResearchProcessInspectorPane.tsx", import.meta.url),
+  "utf8",
+);
 
 describe("HypothesisSelectionPanel contract (HF-6)", () => {
   it("uses named hypothesisFirst API functions and never raw paths", () => {
@@ -35,13 +39,18 @@ describe("HypothesisSelectionPanel contract (HF-6)", () => {
     expect(listSource).toContain("toggleCandidate");
   });
 
-  it("disables the downstream entry until a review meeting exists server-side", () => {
-    expect(panelSource).toContain("isDisabled={!reviewMeetingId}");
+  it("routes the downstream entry to the operable review node", () => {
+    expect(panelSource).toContain("onOpenReviewMeeting");
+    expect(panelSource).toContain("hf_meeting_${reviewMeeting.roundIndex}");
+    expect(panelSource).toContain("isDisabled={!canOpenReviewMeeting}");
     expect(panelSource).toContain("disabledReason");
     expect(panelSource).toContain("查看评审讨论");
+    expect(panelSource).not.toContain("scrollIntoView");
     // Meeting status chip is a server projection, never a local guess.
     expect(panelSource).toContain("reviewMeeting.status");
     expect(panelSource).toContain("context.reviewMeeting");
+    expect(detailPanelSource).toContain("onOpenReviewMeeting={onNavigateToNode}");
+    expect(inspectorPaneSource).toContain('onNavigateToNode={(nodeId) => actions.replaceParams({ node: nodeId, panel: "node" })}');
   });
 
   it("submits the server-derived scope instead of a client-assembled one", () => {

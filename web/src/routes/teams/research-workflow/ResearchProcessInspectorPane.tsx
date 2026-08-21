@@ -102,6 +102,7 @@ export function ResearchProcessInspectorPane(props: {
           isLoading={questionDetail.isPending}
           errorMessage={questionDetail.error instanceof Error ? questionDetail.error.message : questionDetail.isError ? "challenge_question_run_unavailable" : ""}
           onClose={() => actions.replaceParams({ panel: "progress" })}
+          onNavigateToNode={(nodeId) => actions.replaceParams({ node: nodeId, panel: "node" })}
         />
       </div>
     );

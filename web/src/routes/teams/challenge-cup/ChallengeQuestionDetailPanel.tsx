@@ -38,6 +38,7 @@ export type ChallengeQuestionDetailPanelProps = {
   /** Selected historical run id (empty = latest); revisions become reviewable. */
   selectedRunId?: string;
   onSelectRunId?: (runId: string) => void;
+  onNavigateToNode?: (nodeId: string) => void;
 };
 
 const DETAIL_ANCHORS_ZH = [
@@ -77,6 +78,7 @@ export function ChallengeQuestionDetailPanel({
   onClose,
   selectedRunId = "",
   onSelectRunId,
+  onNavigateToNode,
 }: ChallengeQuestionDetailPanelProps) {
   const [reviseDialogOpen, setReviseDialogOpen] = useState(false);
   const { lang } = useShellI18n();
@@ -149,7 +151,12 @@ export function ChallengeQuestionDetailPanel({
         )}
         {canContinueReview ? (
           <div className={css.section} data-testid="question-detail-fail-soft-ops">
-            <HypothesisSelectionPanel teamId={operableTeamId} questionId={requestedQuestionId} lang={lang} />
+            <HypothesisSelectionPanel
+              teamId={operableTeamId}
+              questionId={requestedQuestionId}
+              lang={lang}
+              onOpenReviewMeeting={onNavigateToNode}
+            />
             <TeamMeetingRoundPanel teamId={operableTeamId} questionId={requestedQuestionId} />
           </div>
         ) : null}
@@ -209,7 +216,12 @@ export function ChallengeQuestionDetailPanel({
 
       <ChallengeQuestionEvidenceSection detail={detail} lang={lang} />
       <ChallengeQuestionAnalysisSection output={output} lang={lang} />
-      <HypothesisSelectionPanel teamId={detail.teamId} questionId={detail.questionId} lang={lang} />
+      <HypothesisSelectionPanel
+        teamId={detail.teamId}
+        questionId={detail.questionId}
+        lang={lang}
+        onOpenReviewMeeting={onNavigateToNode}
+      />
       <TeamMeetingRoundPanel teamId={detail.teamId} questionId={detail.questionId} />
       <TeamHypothesisRoundTimeline teamId={detail.teamId} questionId={detail.questionId} />
       <ChallengeQuestionPlanSection detail={detail} lang={lang} />
