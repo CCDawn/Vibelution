@@ -187,6 +187,35 @@ def test_developer_cleanup_plan_requires_confirm_and_matching_hash(tmp_path):
     assert not cache_dir.exists()
 
 
+def test_developer_quick_clean_continues_after_target_failure(tmp_path, monkeypatch):
+    blocked = tmp_path / "core" / "__pycache__"
+    removed = tmp_path / "web" / "__pycache__"
+    blocked.mkdir(parents=True)
+    removed.mkdir(parents=True)
+    targets = [
+        {"path": str(blocked), "sizeBytes": 11},
+        {"path": str(removed), "sizeBytes": 22},
+    ]
+    real_rmtree = developer_mode.shutil.rmtree
+
+    def flaky_rmtree(path):
+        if Path(path).resolve() == blocked.resolve():
+            raise OSError("locked target")
+        return real_rmtree(path)
+
+    monkeypatch.setattr(developer_mode.shutil, "rmtree", flaky_rmtree)
+
+    applied, failed = developer_mode._apply_targets(
+        {"action": "quick_clean", "targets": targets},
+        tmp_path,
+    )
+
+    assert [item["path"] for item in applied] == [str(removed)]
+    assert failed == [{**targets[0], "status": "failed", "error": "locked target"}]
+    assert blocked.is_dir()
+    assert not removed.exists()
+
+
 def test_developer_cleanup_protects_canonical_standards_paths(tmp_path):
     project_root = tmp_path / "project"
     standards_root = project_root / "docs" / "standards"

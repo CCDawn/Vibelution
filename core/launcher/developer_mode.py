@@ -306,27 +306,30 @@ def apply_cleanup_plan(
     if Path(str(plan.get("projectRoot") or "")).resolve() != root:
         raise DeveloperCleanupPlanError("project_root_mismatch", "清理计划不属于当前项目工作区。")
     _validate_targets_still_safe(plan, root)
-    applied = _apply_targets(plan, root)
+    applied, failed = _apply_targets(plan, root)
+    outcome = "partial" if failed else "succeeded"
     _record_event(
         "launcher.developer_mode.cleanup.applied",
         phase="maintenance",
-        outcome="succeeded",
+        outcome=outcome,
         message="Launcher developer cleanup plan applied.",
         fields={
             "action": normalized,
             "planId": plan["planId"],
             "targetCount": len(applied),
+            "failedCount": len(failed),
             "reclaimedBytes": sum(int(item.get("sizeBytes") or 0) for item in applied),
         },
     )
     return {
-        "ok": True,
+        "ok": not failed,
         "mode": "apply",
         "developerMode": mode,
         "planId": plan["planId"],
         "planHash": plan["planHash"],
         "action": normalized,
         "applied": applied,
+        "failed": failed,
         "reclaimedBytes": sum(int(item.get("sizeBytes") or 0) for item in applied),
         "message": "清理计划已执行。",
     }
@@ -690,19 +693,24 @@ def _validate_targets_still_safe(plan: dict[str, Any], root: Path) -> None:
                 raise DeveloperCleanupPlanError("target_changed", "清理目标已变化，请重新预览。", detail={"path": str(path)})
 
 
-def _apply_targets(plan: dict[str, Any], root: Path) -> list[dict[str, Any]]:
+def _apply_targets(plan: dict[str, Any], root: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     action = _parse_action(str(plan.get("action") or ""))
     targets = [target for target in plan.get("targets", []) if isinstance(target, dict)]
     if action == "db_compact":
-        return [_apply_db_compact(root, targets[0] if targets else {})]
+        return ([_apply_db_compact(root, targets[0] if targets else {})], [])
     applied: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
     for target in targets:
         path = Path(str(target.get("path") or "")).resolve()
         if action == "quick_clean":
-            if path.is_dir():
-                shutil.rmtree(path)
-            elif path.is_file():
-                path.unlink()
+            try:
+                if path.is_dir():
+                    shutil.rmtree(path)
+                elif path.is_file():
+                    path.unlink()
+            except OSError as exc:
+                failed.append({**target, "status": "failed", "error": str(exc)})
+                continue
         elif action == "worktree_cleanup":
             result = run_git(
                 ["-C", str(root), "worktree", "remove", str(path)],
@@ -718,7 +726,7 @@ def _apply_targets(plan: dict[str, Any], root: Path) -> list[dict[str, Any]]:
                     detail={"path": str(path), "stderr": result.stderr[-1000:]},
                 )
         applied.append(target)
-    return applied
+    return applied, failed
 
 
 def _apply_db_compact(root: Path, target: dict[str, Any]) -> dict[str, Any]:

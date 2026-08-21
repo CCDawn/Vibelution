@@ -59,6 +59,98 @@ def test_launcher_payload_contract_is_shared_between_standalone_and_web_routes()
     }
 
 
+@pytest.mark.parametrize("action", ["request_app_exit", "restart_after_apply"])
+def test_runtime_effect_lifecycle_intent_replay_dispatches_once(action, monkeypatch):
+    """The same durable intent must not enqueue a second close or hot restart."""
+    from core.launcher import lifecycle_action_dispatcher
+
+    dispatched: list[dict[str, object]] = []
+    monkeypatch.setattr(launcher_service, "launcher_active_work_runs", lambda: [])
+    monkeypatch.setattr(
+        lifecycle_action_dispatcher,
+        "dispatch_runtime_effect_intent",
+        lambda intent: dispatched.append(intent)
+        or {"dispatched": True, "accepted": True, "commandId": f"cmd-{intent['action']}"},
+    )
+    payload = {
+        "action": action,
+        "reason": "pytest replay protection",
+        "idempotencyKey": f"pytest:{action}:one",
+    }
+
+    first = launcher_service.submit_lifecycle_intent(payload)
+    replay = launcher_service.submit_lifecycle_intent(payload)
+
+    assert first["status"] == "executing"
+    assert replay["intentId"] == first["intentId"]
+    assert replay["commandId"] == first["commandId"]
+    assert [item["action"] for item in dispatched] == [action]
+
+
+def test_launcher_settings_cas_holds_config_lock_through_save(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[workbench]\nwindow_mode = "fullscreen"\n', encoding="utf-8")
+    monkeypatch.setattr(launcher_service, "CONFIG_PATH", config_path)
+    base_hash = launcher_service.get_workbench_window_mode_setting()["configHash"]
+    lock_events: list[str] = []
+    original_save = launcher_service._save_public_config_under_edit_lock
+
+    from contextlib import contextmanager
+
+    @contextmanager
+    def tracking_lock(_path):
+        lock_events.append("enter")
+        try:
+            yield
+        finally:
+            lock_events.append("exit")
+
+    def save_under_lock(public_config, path):
+        assert lock_events[-1] == "enter"
+        return original_save(public_config, path)
+
+    monkeypatch.setattr(launcher_service, "_config_edit_lock", tracking_lock)
+    monkeypatch.setattr(launcher_service, "_save_public_config_under_edit_lock", save_under_lock)
+
+    response = launcher_service.update_workbench_window_mode("windowed", base_hash=base_hash)
+
+    assert response["ok"] is True
+    assert lock_events == ["enter", "exit"]
+
+
+def test_launcher_startup_settings_cas_holds_config_lock_through_save(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[workbench]\nwindow_size = "auto"\n', encoding="utf-8")
+    monkeypatch.setattr(launcher_service, "CONFIG_PATH", config_path)
+    base_hash = launcher_service.get_launcher_startup_settings()["configHash"]
+    lock_events: list[str] = []
+    original_save = launcher_service._save_public_config_under_edit_lock
+
+    from contextlib import contextmanager
+
+    @contextmanager
+    def tracking_lock(_path):
+        lock_events.append("enter")
+        try:
+            yield
+        finally:
+            lock_events.append("exit")
+
+    def save_under_lock(public_config, path):
+        assert lock_events[-1] == "enter"
+        return original_save(public_config, path)
+
+    monkeypatch.setattr(launcher_service, "_config_edit_lock", tracking_lock)
+    monkeypatch.setattr(launcher_service, "_save_public_config_under_edit_lock", save_under_lock)
+
+    response = launcher_service.update_launcher_startup_settings(
+        {"baseHash": base_hash, "workbench": {"windowSize": "1600x900"}}
+    )
+
+    assert response["ok"] is True
+    assert lock_events == ["enter", "exit"]
+
+
 def test_workbench_close_transaction_is_durable_idempotent_and_requires_confirmed_force(tmp_path, monkeypatch):
     """A close command is never a substitute for a durable Electron-close transaction."""
     from core.launcher import lifecycle_action_dispatcher, lifecycle_intent_store
@@ -1465,7 +1557,12 @@ def test_launcher_startup_settings_persist_workbench_window_size(tmp_path, monke
         lambda event_code, payload, **kwargs: events.append((event_code, payload)) or "2026-06-06T00:00:00+00:00",
     )
 
-    response = launcher_service.update_launcher_startup_settings({"workbench": {"windowSize": "1600x900"}})
+    response = launcher_service.update_launcher_startup_settings(
+        {
+            "baseHash": launcher_service.get_launcher_startup_settings()["configHash"],
+            "workbench": {"windowSize": "1600x900"},
+        }
+    )
 
     text = config_path.read_text(encoding="utf-8")
     assert response["ok"] is True
@@ -1489,7 +1586,12 @@ def test_launcher_startup_settings_persist_launcher_control_port(tmp_path, monke
         lambda event_code, payload, **kwargs: events.append((event_code, payload)) or "2026-06-06T00:00:00+00:00",
     )
 
-    response = launcher_service.update_launcher_startup_settings({"launcher": {"controlPort": 8899}})
+    response = launcher_service.update_launcher_startup_settings(
+        {
+            "baseHash": launcher_service.get_launcher_startup_settings()["configHash"],
+            "launcher": {"controlPort": 8899},
+        }
+    )
 
     text = config_path.read_text(encoding="utf-8")
     assert response["ok"] is True
@@ -1498,6 +1600,36 @@ def test_launcher_startup_settings_persist_launcher_control_port(tmp_path, monke
     assert 'control_port = 8899' in text
     assert events[-1][0] == "launcher.settings.startup.updated"
     assert events[-1][1]["fields"]["current"]["controlPort"] == 8899
+
+
+def test_launcher_startup_settings_requires_current_config_hash(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text('[workbench]\nwindow_size = "auto"\n', encoding="utf-8")
+    events = []
+    monkeypatch.setattr(launcher_service, "CONFIG_PATH", config_path)
+    monkeypatch.setattr(
+        launcher_service,
+        "append_runtime_manager_file_event",
+        lambda event_code, payload, **kwargs: events.append((event_code, payload))
+        or "2026-06-06T00:00:00+00:00",
+    )
+    base_hash = launcher_service.get_launcher_startup_settings()["configHash"]
+
+    with pytest.raises(launcher_service.LauncherSettingsConflict, match="缺少配置版本"):
+        launcher_service.update_launcher_startup_settings({"workbench": {"windowSize": "1600x900"}})
+    assert config_path.read_text(encoding="utf-8") == '[workbench]\nwindow_size = "auto"\n'
+
+    config_path.write_text('[workbench]\nwindow_size = "1280x800"\n', encoding="utf-8")
+    with pytest.raises(launcher_service.LauncherSettingsConflict, match="已被其他页面或进程改动"):
+        launcher_service.update_launcher_startup_settings(
+            {"baseHash": base_hash, "workbench": {"windowSize": "1600x900"}}
+        )
+
+    assert config_path.read_text(encoding="utf-8") == '[workbench]\nwindow_size = "1280x800"\n'
+    assert [event[0] for event in events] == [
+        "launcher.settings.startup.conflict",
+        "launcher.settings.startup.conflict",
+    ]
 
 
 def test_launcher_startup_settings_reports_launcher_control_port_env_override(tmp_path, monkeypatch):
@@ -1662,7 +1794,12 @@ def test_launcher_startup_settings_rejects_invalid_workbench_window_size(tmp_pat
     monkeypatch.setattr(launcher_service, "CONFIG_PATH", config_path)
 
     try:
-        launcher_service.update_launcher_startup_settings({"workbench": {"windowSize": "tiny"}})
+        launcher_service.update_launcher_startup_settings(
+            {
+                "baseHash": launcher_service.get_launcher_startup_settings()["configHash"],
+                "workbench": {"windowSize": "tiny"},
+            }
+        )
     except ValueError as exc:
         error = str(exc)
     else:
@@ -1680,7 +1817,12 @@ def test_launcher_startup_settings_rejects_tiny_edge_chrome_window_size(tmp_path
     monkeypatch.delenv("AGENT_WORKBENCH_WINDOW_SIZE", raising=False)
 
     try:
-        launcher_service.update_launcher_startup_settings({"workbench": {"windowSize": "320x240"}})
+        launcher_service.update_launcher_startup_settings(
+            {
+                "baseHash": launcher_service.get_launcher_startup_settings()["configHash"],
+                "workbench": {"windowSize": "320x240"},
+            }
+        )
     except ValueError as exc:
         error = str(exc)
     else:
@@ -1711,7 +1853,10 @@ def test_launcher_startup_settings_persist_workbench_window_position(tmp_path, m
     )
 
     response = launcher_service.update_launcher_startup_settings(
-        {"workbench": {"windowPosition": "120,80"}}
+        {
+            "baseHash": launcher_service.get_launcher_startup_settings()["configHash"],
+            "workbench": {"windowPosition": "120,80"},
+        }
     )
 
     text = config_path.read_text(encoding="utf-8")
@@ -1736,7 +1881,10 @@ def test_launcher_startup_settings_accepts_negative_multi_monitor_position(tmp_p
     )
 
     response = launcher_service.update_launcher_startup_settings(
-        {"workbench": {"windowPosition": "-640,120"}}
+        {
+            "baseHash": launcher_service.get_launcher_startup_settings()["configHash"],
+            "workbench": {"windowPosition": "-640,120"},
+        }
     )
 
     assert response["ok"] is True
@@ -1750,7 +1898,12 @@ def test_launcher_startup_settings_rejects_invalid_workbench_window_position(tmp
     monkeypatch.setattr(launcher_service, "CONFIG_PATH", config_path)
 
     try:
-        launcher_service.update_launcher_startup_settings({"workbench": {"windowPosition": "center"}})
+        launcher_service.update_launcher_startup_settings(
+            {
+                "baseHash": launcher_service.get_launcher_startup_settings()["configHash"],
+                "workbench": {"windowPosition": "center"},
+            }
+        )
     except ValueError as exc:
         error = str(exc)
     else:
@@ -1772,7 +1925,12 @@ def test_launcher_startup_settings_soft_falls_back_extreme_offscreen_position(tm
     assert setting["workbench"]["effectiveWindowPosition"] == "auto"
 
     try:
-        launcher_service.update_launcher_startup_settings({"workbench": {"windowPosition": "-20000,-20000"}})
+        launcher_service.update_launcher_startup_settings(
+            {
+                "baseHash": launcher_service.get_launcher_startup_settings()["configHash"],
+                "workbench": {"windowPosition": "-20000,-20000"},
+            }
+        )
     except ValueError as exc:
         error = str(exc)
     else:
@@ -3343,6 +3501,122 @@ def test_lifecycle_foreign_keys_are_enforced(tmp_path, monkeypatch):
             )
     finally:
         conn.close()
+
+
+def test_lifecycle_terminal_retention_prunes_only_old_terminal_rows(tmp_path, monkeypatch):
+    import sqlite3
+
+    from core.launcher import lifecycle_intent_store
+
+    db_path = tmp_path / "launcher" / "lifecycle.sqlite3"
+    monkeypatch.setattr(lifecycle_intent_store, "LIFECYCLE_DB_PATH", db_path)
+    actor = {
+        "actorType": "pytest",
+        "actorId": "retention",
+        "sourceRunId": "",
+        "sourceTaskId": "",
+        "sourceWorktree": "",
+    }
+    old_terminal = lifecycle_intent_store.submit_lifecycle_intent(
+        {"action": "focus_workbench", "reason": "old", "idempotencyKey": "retention:old-action"},
+        actor_context=actor,
+        active_work_runs=[],
+    )
+    claimed = lifecycle_intent_store.claim_desktop_action(desktop_session_id="desktop-1")
+    lifecycle_intent_store.ack_desktop_action(
+        claimed["actionId"],
+        desktop_session_id="desktop-1",
+        result={"ok": True},
+    )
+    old_runtime = lifecycle_intent_store.submit_lifecycle_intent(
+        {"action": "restart_after_apply", "reason": "old", "idempotencyKey": "retention:old-runtime"},
+        actor_context=actor,
+        active_work_runs=[],
+    )
+    lifecycle_intent_store.record_runtime_dispatch(old_runtime["intentId"], command_id="old-command")
+    lifecycle_intent_store.complete_lifecycle_intent(
+        old_runtime["intentId"], status="succeeded", result={"ok": True}
+    )
+    desktop_session = {
+        "desktopSessionId": "desktop-1",
+        "status": "active",
+        "revision": 1,
+        "capabilities": ["workbench_close.transaction.v1"],
+    }
+    old_transaction = lifecycle_intent_store.submit_workbench_close_transaction(
+        {
+            "desktopSessionId": "desktop-1",
+            "idempotencyKey": "retention:old-close",
+            "mode": "normal",
+        },
+        desktop_session=desktop_session,
+        active_work_runs=[],
+    )
+    lifecycle_intent_store.record_workbench_close_dispatch(old_transaction["closeId"], command_id="close-old")
+    lifecycle_intent_store.authorize_workbench_close_window(
+        old_transaction["closeId"], result={"ok": True}
+    )
+    lifecycle_intent_store.complete_workbench_close_transaction(
+        old_transaction["closeId"], completion_source="pytest"
+    )
+
+    pending = lifecycle_intent_store.submit_lifecycle_intent(
+        {"action": "focus_workbench", "reason": "pending", "idempotencyKey": "retention:pending"},
+        actor_context=actor,
+        active_work_runs=[],
+    )
+    executing = lifecycle_intent_store.submit_lifecycle_intent(
+        {"action": "restart_after_apply", "reason": "executing", "idempotencyKey": "retention:executing"},
+        actor_context=actor,
+        active_work_runs=[],
+    )
+    lifecycle_intent_store.record_runtime_dispatch(executing["intentId"], command_id="live-command")
+    pending_transaction = lifecycle_intent_store.submit_workbench_close_transaction(
+        {
+            "desktopSessionId": "desktop-1",
+            "idempotencyKey": "retention:pending-close",
+            "mode": "normal",
+        },
+        desktop_session=desktop_session,
+        active_work_runs=[{"runId": "active"}],
+    )
+
+    old = (datetime.now(timezone.utc) - timedelta(days=31)).isoformat()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE lifecycle_intents SET updated_at = ?, completed_at = ? WHERE intent_id IN (?, ?)",
+            (old, old, old_terminal["intentId"], old_runtime["intentId"]),
+        )
+        conn.execute(
+            "UPDATE desktop_actions SET updated_at = ? WHERE action_id = ?",
+            (old, claimed["actionId"]),
+        )
+        conn.execute(
+            "UPDATE workbench_close_transactions SET updated_at = ? WHERE close_id = ?",
+            (old, old_transaction["closeId"]),
+        )
+        conn.execute(
+            "UPDATE lifecycle_store_meta SET value = '0' WHERE key = 'terminal_pruned_at'"
+        )
+
+    lifecycle_intent_store.submit_lifecycle_intent(
+        {"action": "focus_workbench", "reason": "trigger", "idempotencyKey": "retention:trigger"},
+        actor_context=actor,
+        active_work_runs=[],
+    )
+
+    with sqlite3.connect(db_path) as conn:
+        intent_ids = {row[0] for row in conn.execute("SELECT intent_id FROM lifecycle_intents")}
+        action_ids = {row[0] for row in conn.execute("SELECT action_id FROM desktop_actions")}
+        close_ids = {row[0] for row in conn.execute("SELECT close_id FROM workbench_close_transactions")}
+
+    assert old_terminal["intentId"] not in intent_ids
+    assert old_runtime["intentId"] not in intent_ids
+    assert claimed["actionId"] not in action_ids
+    assert old_transaction["closeId"] not in close_ids
+    assert pending["intentId"] in intent_ids
+    assert executing["intentId"] in intent_ids
+    assert pending_transaction["closeId"] in close_ids
 
 
 def test_lifecycle_concurrent_first_init_is_idempotent(tmp_path, monkeypatch):

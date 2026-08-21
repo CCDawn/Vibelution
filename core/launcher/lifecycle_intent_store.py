@@ -25,6 +25,8 @@ RUNTIME_EFFECT_ACTIONS = {"restart_after_apply", "resume_self_evolution", "recov
 ALLOWED_ACTIONS = DESKTOP_ACTIONS | RUNTIME_EFFECT_ACTIONS
 TERMINAL_INTENT_STATUSES = {"succeeded", "failed", "superseded"}
 WORKBENCH_CLOSE_MODES = {"normal", "force"}
+TERMINAL_RECORD_RETENTION_SECONDS = 30 * 24 * 60 * 60
+TERMINAL_RECORD_PRUNE_INTERVAL_SECONDS = 60 * 60
 
 _INIT_CACHE_MAX_ENTRIES = 128
 _schema_ready: OrderedDict[str, None] = OrderedDict()
@@ -151,6 +153,10 @@ def _init_schema(conn: sqlite3.Connection) -> None:
           ON workbench_close_transactions(phase, updated_at);
         CREATE INDEX IF NOT EXISTS idx_workbench_close_transactions_session
           ON workbench_close_transactions(desktop_session_id, created_at);
+        CREATE TABLE IF NOT EXISTS lifecycle_store_meta (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        );
         """,
     )
     _ensure_column(conn, "lifecycle_intents", "result_json", "TEXT NOT NULL DEFAULT '{}'")
@@ -178,17 +184,102 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
+def _begin_write_transaction(conn: sqlite3.Connection) -> None:
+    """Start a write transaction and opportunistically prune old terminal rows."""
+
+    conn.execute("BEGIN IMMEDIATE")
+    _maybe_prune_terminal_records_locked(conn)
+
+
+def _maybe_prune_terminal_records_locked(
+    conn: sqlite3.Connection,
+    *,
+    now: datetime | None = None,
+    force: bool = False,
+) -> dict[str, int]:
+    """Bound lifecycle-store growth without touching active or pending state."""
+
+    current = now or datetime.now(timezone.utc)
+    current_timestamp = current.timestamp()
+    if not force:
+        marker = conn.execute(
+            "SELECT value FROM lifecycle_store_meta WHERE key = 'terminal_pruned_at'"
+        ).fetchone()
+        try:
+            last_pruned_at = float(marker[0]) if marker is not None else 0.0
+        except (TypeError, ValueError):
+            last_pruned_at = 0.0
+        if current_timestamp - last_pruned_at < TERMINAL_RECORD_PRUNE_INTERVAL_SECONDS:
+            return {"desktopActions": 0, "lifecycleIntents": 0, "closeTransactions": 0}
+
+    cutoff = (current - timedelta(seconds=TERMINAL_RECORD_RETENTION_SECONDS)).isoformat()
+    actions = conn.execute(
+        """
+        DELETE FROM desktop_actions
+        WHERE status IN ('succeeded', 'failed')
+          AND NULLIF(updated_at, '') < ?
+          AND intent_id IN (
+            SELECT intent_id
+            FROM lifecycle_intents
+            WHERE status IN ('succeeded', 'failed', 'superseded')
+              AND COALESCE(
+                NULLIF(completed_at, ''),
+                NULLIF(updated_at, ''),
+                NULLIF(created_at, '')
+              ) < ?
+          )
+        """,
+        (cutoff, cutoff),
+    ).rowcount
+    intents = conn.execute(
+        """
+        DELETE FROM lifecycle_intents
+        WHERE status IN ('succeeded', 'failed', 'superseded')
+          AND COALESCE(
+            NULLIF(completed_at, ''),
+            NULLIF(updated_at, ''),
+            NULLIF(created_at, '')
+          ) < ?
+          AND NOT EXISTS (
+            SELECT 1 FROM desktop_actions
+            WHERE desktop_actions.intent_id = lifecycle_intents.intent_id
+          )
+        """,
+        (cutoff,),
+    ).rowcount
+    transactions = conn.execute(
+        """
+        DELETE FROM workbench_close_transactions
+        WHERE phase IN ('succeeded', 'failed')
+          AND NULLIF(updated_at, '') < ?
+        """,
+        (cutoff,),
+    ).rowcount
+    conn.execute(
+        """
+        INSERT INTO lifecycle_store_meta(key, value) VALUES ('terminal_pruned_at', ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        """,
+        (str(current_timestamp),),
+    )
+    return {
+        "desktopActions": max(0, int(actions or 0)),
+        "lifecycleIntents": max(0, int(intents or 0)),
+        "closeTransactions": max(0, int(transactions or 0)),
+    }
+
+
 def _row_to_dict(row: sqlite3.Row | None) -> dict[str, Any]:
     return dict(row) if row is not None else {}
 
 
-def submit_lifecycle_intent(
+def submit_lifecycle_intent_with_created(
     payload: dict[str, Any],
     *,
     actor_context: dict[str, Any],
     active_work_runs: list[dict[str, Any]],
     desktop_action_payload: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], bool]:
     action = _safe_text(payload.get("action"), max_length=80)
     if action not in ALLOWED_ACTIONS:
         raise ValueError(f"unsupported lifecycle intent action: {action}")
@@ -218,14 +309,14 @@ def submit_lifecycle_intent(
         "runtimeSceneRef": "",
     }
     with _connect() as conn:
-        conn.execute("BEGIN IMMEDIATE")
+        _begin_write_transaction(conn)
         existing = conn.execute(
             "SELECT * FROM lifecycle_intents WHERE idempotency_key = ?",
             (intent["idempotencyKey"],),
         ).fetchone()
         if existing is not None:
             conn.execute("COMMIT")
-            return _public_intent(_row_to_dict(existing))
+            return _public_intent(_row_to_dict(existing)), False
         conn.execute(
             """
             INSERT INTO lifecycle_intents (
@@ -280,6 +371,24 @@ def submit_lifecycle_intent(
                 ),
             )
         conn.execute("COMMIT")
+    return intent, True
+
+
+def submit_lifecycle_intent(
+    payload: dict[str, Any],
+    *,
+    actor_context: dict[str, Any],
+    active_work_runs: list[dict[str, Any]],
+    desktop_action_payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Submit an intent while preserving the historical dict-only API."""
+
+    intent, _created = submit_lifecycle_intent_with_created(
+        payload,
+        actor_context=actor_context,
+        active_work_runs=active_work_runs,
+        desktop_action_payload=desktop_action_payload,
+    )
     return intent
 
 
@@ -295,7 +404,7 @@ def get_lifecycle_intent(intent_id: str) -> dict[str, Any]:
 def record_runtime_dispatch(intent_id: str, *, command_id: str, runtime_scene_ref: str = "") -> dict[str, Any]:
     now = _now_iso()
     with _connect() as conn:
-        conn.execute("BEGIN IMMEDIATE")
+        _begin_write_transaction(conn)
         conn.execute(
             """
             UPDATE lifecycle_intents
@@ -321,7 +430,7 @@ def complete_lifecycle_intent(intent_id: str, *, status: str, result: dict[str, 
         raise ValueError(f"unsupported lifecycle terminal status: {status}")
     now = _now_iso()
     with _connect() as conn:
-        conn.execute("BEGIN IMMEDIATE")
+        _begin_write_transaction(conn)
         _complete_lifecycle_intent_locked(
             conn,
             intent_id=_safe_text(intent_id, max_length=160),
@@ -440,7 +549,7 @@ def submit_workbench_close_transaction(
         "updatedAt": now,
     }
     with _connect() as conn:
-        conn.execute("BEGIN IMMEDIATE")
+        _begin_write_transaction(conn)
         existing = conn.execute(
             "SELECT * FROM workbench_close_transactions WHERE idempotency_key = ?",
             (idempotency_key,),
@@ -535,7 +644,7 @@ def record_workbench_close_dispatch(close_id: str, *, command_id: str) -> dict[s
         raise ValueError("workbench close transaction dispatch did not return commandId")
     now = _now_iso()
     with _connect() as conn:
-        conn.execute("BEGIN IMMEDIATE")
+        _begin_write_transaction(conn)
         conn.execute(
             """
             UPDATE workbench_close_transactions
@@ -561,7 +670,7 @@ def authorize_workbench_close_window(
     normalized_close_id = _safe_text(close_id, max_length=160)
     now = _now_iso()
     with _connect() as conn:
-        conn.execute("BEGIN IMMEDIATE")
+        _begin_write_transaction(conn)
         conn.execute(
             """
             UPDATE workbench_close_transactions
@@ -600,7 +709,7 @@ def fail_workbench_close_transaction(
     normalized_close_id = _safe_text(close_id, max_length=160)
     now = _now_iso()
     with _connect() as conn:
-        conn.execute("BEGIN IMMEDIATE")
+        _begin_write_transaction(conn)
         conn.execute(
             """
             UPDATE workbench_close_transactions
@@ -636,7 +745,7 @@ def complete_workbench_close_transaction(
     normalized_close_id = _safe_text(close_id, max_length=160)
     now = _now_iso()
     with _connect() as conn:
-        conn.execute("BEGIN IMMEDIATE")
+        _begin_write_transaction(conn)
         conn.execute(
             """
             UPDATE workbench_close_transactions
@@ -779,7 +888,7 @@ def _claim_desktop_action_once(
 ) -> dict[str, Any]:
     now = _now_iso()
     lease_expires_at = datetime.now(timezone.utc).timestamp() + max(1, int(lease_seconds))
-    conn.execute("BEGIN IMMEDIATE")
+    _begin_write_transaction(conn)
     try:
         _fail_exhausted_desktop_actions_locked(conn, now=now)
         row = conn.execute(
@@ -861,7 +970,7 @@ def fail_desktop_action(action_id: str, *, desktop_session_id: str, result: dict
 def _finish_desktop_action(action_id: str, *, desktop_session_id: str, status: str, result: dict[str, Any]) -> dict[str, Any]:
     now = _now_iso()
     with _connect() as conn:
-        conn.execute("BEGIN IMMEDIATE")
+        _begin_write_transaction(conn)
         row = conn.execute(
             "SELECT * FROM desktop_actions WHERE action_id = ? AND status = 'claimed' AND claimed_by = ?",
             (_safe_text(action_id, max_length=160), _safe_text(desktop_session_id, max_length=160)),

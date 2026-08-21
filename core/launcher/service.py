@@ -13,7 +13,19 @@ from pathlib import Path
 from typing import Any, Literal, TypedDict
 from urllib.parse import urlparse
 
-from config.public_config import CONFIG_PATH, load_public_config, public_config_hash, save_public_config
+from config.paths import resolve_config_backup_dir
+from config.public_config import (
+    CONFIG_PATH,
+    HEADER_LINES,
+    _canonicalize_public_config,
+    _config_edit_lock,
+    _legacy_v1_public_payload,
+    _replace_config_file_atomically,
+    load_public_config,
+    public_config_hash,
+    strip_runtime_model_capability_fields,
+)
+from config.toml_writer import dumps_public_config
 from core.runtime_manager import command_queue, ensure_daemon_running, is_daemon_running
 from core.runtime_manager.constants import (
     EVENTS_PATH,
@@ -91,6 +103,32 @@ _IN_FLIGHT_OPEN_PHASES = frozenset({"opening", "starting", "restarting", "restar
 
 def _launcher_elapsed_ms(started_at: float) -> float:
     return round(max(0.0, (time.monotonic() - started_at) * 1000.0), 1)
+
+
+def _save_public_config_under_edit_lock(public_config: dict[str, Any], config_path: Path) -> None:
+    """Persist config while the caller holds the cross-process edit lock."""
+
+    payload = public_config
+    if _legacy_v1_public_payload(public_config):
+        from config.llm_schema_upgrader import convert_legacy_llm_config
+
+        payload = convert_legacy_llm_config(public_config, allow_missing_credentials=True)
+    cleaned_public_config = strip_runtime_model_capability_fields(
+        _canonicalize_public_config(payload)
+    )
+    backup_dir = resolve_config_backup_dir(config_path)
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    backup_path = backup_dir / f"{config_path.name}.bak"
+    backup_path.write_text(config_path.read_text(encoding="utf-8"), encoding="utf-8")
+    temp_path = config_path.with_suffix(config_path.suffix + ".tmp")
+    try:
+        temp_path.write_text(dumps_public_config(cleaned_public_config, HEADER_LINES), encoding="utf-8")
+        _replace_config_file_atomically(temp_path, config_path)
+    finally:
+        try:
+            temp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 
@@ -607,68 +645,69 @@ def update_workbench_window_mode(mode: str, *, base_hash: str = "") -> dict[str,
     """Persist the Workbench window mode used by subsequent Launcher starts."""
 
     normalized = _parse_workbench_window_mode(mode)
-    public_config = load_public_config(CONFIG_PATH)
-    current_hash = public_config_hash(public_config)
     expected_hash = str(base_hash or "").strip()
-    if not expected_hash:
+    with _config_edit_lock(CONFIG_PATH):
+        public_config = load_public_config(CONFIG_PATH)
+        current_hash = public_config_hash(public_config)
+        if not expected_hash:
+            _record_launcher_event(
+                "launcher.settings.workbench_window_mode.conflict",
+                phase="settings",
+                message="Launcher Workbench window mode update missing config base hash.",
+                outcome="conflict",
+                level="warning",
+                fields={
+                    "requestedMode": normalized,
+                    "baseHash": "",
+                    "currentHash": current_hash,
+                    "configPath": str(CONFIG_PATH),
+                },
+            )
+            raise LauncherSettingsConflict("窗口模式保存请求缺少配置版本，请刷新 Launcher 后重试。")
+        if expected_hash != current_hash:
+            _record_launcher_event(
+                "launcher.settings.workbench_window_mode.conflict",
+                phase="settings",
+                message="Launcher Workbench window mode update rejected because the config snapshot is stale.",
+                outcome="conflict",
+                level="warning",
+                fields={
+                    "requestedMode": normalized,
+                    "baseHash": expected_hash,
+                    "currentHash": current_hash,
+                    "configPath": str(CONFIG_PATH),
+                },
+            )
+            raise LauncherSettingsConflict("窗口模式保存前配置已被其他页面或进程改动，请刷新 Launcher 后重试。")
+        workbench = public_config.setdefault("workbench", {})
+        if not isinstance(workbench, dict):
+            workbench = {}
+            public_config["workbench"] = workbench
+        previous = _normalize_workbench_window_mode(workbench.get("window_mode"), default="fullscreen")
+        workbench["window_mode"] = normalized
+        _save_public_config_under_edit_lock(public_config, CONFIG_PATH)
+        setting = get_workbench_window_mode_setting()
         _record_launcher_event(
-            "launcher.settings.workbench_window_mode.conflict",
+            "launcher.settings.workbench_window_mode.updated",
             phase="settings",
-            message="Launcher Workbench window mode update missing config base hash.",
-            outcome="conflict",
-            level="warning",
+            message="Launcher Workbench window mode setting updated.",
+            outcome="succeeded",
             fields={
-                "requestedMode": normalized,
-                "baseHash": "",
-                "currentHash": current_hash,
+                "previousMode": previous,
+                "mode": normalized,
+                "effectiveMode": setting["effectiveMode"],
+                "envOverride": setting["envOverride"],
                 "configPath": str(CONFIG_PATH),
+                "previousHash": current_hash,
+                "configHash": setting.get("configHash"),
             },
         )
-        raise LauncherSettingsConflict("窗口模式保存请求缺少配置版本，请刷新 Launcher 后重试。")
-    if expected_hash != current_hash:
-        _record_launcher_event(
-            "launcher.settings.workbench_window_mode.conflict",
-            phase="settings",
-            message="Launcher Workbench window mode update rejected because the config snapshot is stale.",
-            outcome="conflict",
-            level="warning",
-            fields={
-                "requestedMode": normalized,
-                "baseHash": expected_hash,
-                "currentHash": current_hash,
-                "configPath": str(CONFIG_PATH),
-            },
-        )
-        raise LauncherSettingsConflict("窗口模式保存前配置已被其他页面或进程改动，请刷新 Launcher 后重试。")
-    workbench = public_config.setdefault("workbench", {})
-    if not isinstance(workbench, dict):
-        workbench = {}
-        public_config["workbench"] = workbench
-    previous = _normalize_workbench_window_mode(workbench.get("window_mode"), default="fullscreen")
-    workbench["window_mode"] = normalized
-    save_public_config(public_config, CONFIG_PATH)
-    setting = get_workbench_window_mode_setting()
-    _record_launcher_event(
-        "launcher.settings.workbench_window_mode.updated",
-        phase="settings",
-        message="Launcher Workbench window mode setting updated.",
-        outcome="succeeded",
-        fields={
-            "previousMode": previous,
+        return {
+            "ok": True,
             "mode": normalized,
-            "effectiveMode": setting["effectiveMode"],
-            "envOverride": setting["envOverride"],
-            "configPath": str(CONFIG_PATH),
-            "previousHash": current_hash,
-            "configHash": setting.get("configHash"),
-        },
-    )
-    return {
-        "ok": True,
-        "mode": normalized,
-        "setting": setting,
-        "message": "工作台启动窗口模式已保存；下次启动或重启工作台生效。",
-    }
+            "setting": setting,
+            "message": "工作台启动窗口模式已保存；下次启动或重启工作台生效。",
+        }
 
 
 def update_launcher_startup_settings(payload: dict[str, Any]) -> dict[str, Any]:
@@ -676,10 +715,45 @@ def update_launcher_startup_settings(payload: dict[str, Any]) -> dict[str, Any]:
 
     if not isinstance(payload, dict):
         raise ValueError("startup settings payload must be an object")
+    with _config_edit_lock(CONFIG_PATH):
+        return _update_launcher_startup_settings_locked(payload)
+
+
+def _update_launcher_startup_settings_locked(payload: dict[str, Any]) -> dict[str, Any]:
+    """Apply startup settings while the caller owns the config edit lock."""
+
+    if not isinstance(payload, dict):
+        raise ValueError("startup settings payload must be an object")
     public_config = load_public_config(CONFIG_PATH)
     current_hash = public_config_hash(public_config)
     base_hash = str(payload.get("baseHash") or "").strip()
-    if base_hash and base_hash != current_hash:
+    if not base_hash:
+        _record_launcher_event(
+            "launcher.settings.startup.conflict",
+            phase="settings",
+            message="Launcher startup settings update missing config base hash.",
+            outcome="conflict",
+            level="warning",
+            fields={
+                "baseHash": "",
+                "currentHash": current_hash,
+                "configPath": str(CONFIG_PATH),
+            },
+        )
+        raise LauncherSettingsConflict("启动设置保存请求缺少配置版本，请刷新 Launcher 后重试。")
+    if base_hash != current_hash:
+        _record_launcher_event(
+            "launcher.settings.startup.conflict",
+            phase="settings",
+            message="Launcher startup settings update rejected because the config snapshot is stale.",
+            outcome="conflict",
+            level="warning",
+            fields={
+                "baseHash": base_hash,
+                "currentHash": current_hash,
+                "configPath": str(CONFIG_PATH),
+            },
+        )
         raise LauncherSettingsConflict("启动设置保存前配置已被其他页面或进程改动，请刷新 Launcher 后重试。")
 
     launcher = _ensure_config_section(public_config, "launcher")
@@ -721,7 +795,7 @@ def update_launcher_startup_settings(payload: dict[str, Any]) -> dict[str, Any]:
     if "language" in interface_payload:
         ui["language"] = _parse_ui_language(interface_payload.get("language"))
 
-    save_public_config(public_config, CONFIG_PATH)
+    _save_public_config_under_edit_lock(public_config, CONFIG_PATH)
     setting = get_launcher_startup_settings()
     _record_launcher_event(
         "launcher.settings.startup.updated",
@@ -1218,12 +1292,16 @@ def trusted_lifecycle_actor_context() -> dict[str, str]:
 
 def submit_lifecycle_intent(payload: dict[str, Any], *, actor_context: dict[str, Any] | None = None) -> dict[str, Any]:
     context = actor_context or trusted_lifecycle_actor_context()
-    result = lifecycle_intent_store.submit_lifecycle_intent(
+    result, created = lifecycle_intent_store.submit_lifecycle_intent_with_created(
         payload,
         actor_context=context,
         active_work_runs=launcher_active_work_runs(),
     )
-    if result.get("status") == "accepted" and result.get("action") in lifecycle_intent_store.RUNTIME_EFFECT_ACTIONS:
+    if (
+        created
+        and result.get("status") == "accepted"
+        and result.get("action") in lifecycle_intent_store.RUNTIME_EFFECT_ACTIONS
+    ):
         dispatch_result = lifecycle_action_dispatcher.dispatch_runtime_effect_intent({**context, **payload, **result})
         if dispatch_result.get("commandId"):
             result = lifecycle_intent_store.record_runtime_dispatch(
