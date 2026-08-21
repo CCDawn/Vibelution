@@ -39,6 +39,12 @@ export type ExperimentChromeIdentity = {
   hypothesisSummary: string;
 };
 
+type ExperimentChainSummary = {
+  meetingCount?: number;
+  roundBudget?: number;
+  hypothesisConverged?: boolean;
+};
+
 function normalizeQuestionId(value: string): string {
   return value.trim().toUpperCase();
 }
@@ -52,7 +58,7 @@ function truncateTitle(title: string, limit = 48): string {
 export function formatHypothesisSummary(
   selectedCandidateIds: readonly string[] | null | undefined,
   questionId: string,
-  chain?: { meetingCount?: number; roundBudget?: number; hypothesisConverged?: boolean } | null,
+  chain?: ExperimentChainSummary | null,
 ): string {
   if (!normalizeQuestionId(questionId)) return "";
   const ids = (selectedCandidateIds ?? []).map((item) => item.trim()).filter(Boolean);
@@ -76,10 +82,11 @@ function hypothesisForQuestion(
   current?: {
     questionId: string;
     selectedCandidateIds?: readonly string[] | null;
+    chain?: ExperimentChainSummary | null;
   },
 ): string {
   if (current && normalizeQuestionId(current.questionId) === questionId) {
-    return formatHypothesisSummary(current.selectedCandidateIds, questionId);
+    return formatHypothesisSummary(current.selectedCandidateIds, questionId, current.chain);
   }
   return formatHypothesisSummary([], questionId);
 }
@@ -99,6 +106,7 @@ function optionFromQuestion(
   current?: {
     questionId: string;
     selectedCandidateIds?: readonly string[] | null;
+    chain?: ExperimentChainSummary | null;
   },
 ): ExperimentSwitchOption | null {
   const questionId = normalizeQuestionId(question.questionId);
@@ -123,6 +131,7 @@ export function buildExperimentSwitchOptions(input: {
     runId: string;
     currentNodeId?: string;
     selectedCandidateIds?: readonly string[] | null;
+    chain?: ExperimentChainSummary | null;
   };
 }): ExperimentSwitchOption[] {
   const byQuestion = new Map<string, ExperimentSwitchOption>();
@@ -184,7 +193,7 @@ export function buildExperimentChromeIdentity(input: {
   questionId: string;
   title?: string;
   selectedCandidateIds?: readonly string[] | null;
-  chain?: { meetingCount?: number; roundBudget?: number; hypothesisConverged?: boolean } | null;
+  chain?: ExperimentChainSummary | null;
 }): ExperimentChromeIdentity | null {
   const questionId = normalizeQuestionId(input.questionId);
   if (!questionId) return null;

@@ -206,6 +206,44 @@ describe("ResearchWorkflowToolbar", () => {
     expect(afterConvergence).toContain("实验设计 · 协议设计");
   });
 
+  it("shows the completed hypothesis-first loop when convergence has no formal runtime node", () => {
+    const converged = renderToolbar({
+      ...BASE_PROPS,
+      runId: "",
+      workflowActive: true,
+      navigationLabel: "查看假说收敛",
+      runtimeCurrentNodeIds: [],
+      formalRuntimeActive: true,
+      nextActionStage: "converged",
+      onSelectExperiment: vi.fn(),
+      onOpenPanel: vi.fn(),
+      onNavigateCurrent: vi.fn(),
+    } as React.ComponentProps<typeof ResearchWorkflowToolbar>);
+
+    expect(converged).toContain("假说先行闭环已完成");
+    expect(converged).not.toContain("假说准备 · 5/5");
+  });
+
+  it("prefers the formal runtime node over convergence copy when one is available", () => {
+    const running = renderToolbar({
+      ...BASE_PROPS,
+      runId: "run-5e4fbe6e18f2",
+      runStatus: "running",
+      experimentOptions: [EXPERIMENT],
+      navigationLabel: "查看假说收敛",
+      runtimeCurrentNodeIds: ["source_finding"],
+      formalRuntimeActive: true,
+      nextActionStage: "converged",
+      onSelectExperiment: vi.fn(),
+      onOpenPanel: vi.fn(),
+      onNavigateCurrent: vi.fn(),
+    } as React.ComponentProps<typeof ResearchWorkflowToolbar>);
+
+    expect(running).toContain("资料搜集 · 资料寻找");
+    expect(running).not.toContain("假说先行闭环已完成");
+    expect(running).not.toContain("假说准备 · 5/5");
+  });
+
   it("uses an English node label when the shell language is en", () => {
     const running = renderToolbar({
       ...BASE_PROPS,
