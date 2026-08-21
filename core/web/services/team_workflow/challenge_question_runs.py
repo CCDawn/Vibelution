@@ -17,6 +17,8 @@ from jsonschema import Draft202012Validator, FormatChecker
 from core.research.competition.resources import (
     CATALOG_SHA256,
     QUESTION_CATALOG_PATH,
+    CompetitionResourceError,
+    load_competition_program_core,
     load_science_question_catalog,
 )
 from core.web.services import team_service
@@ -100,6 +102,23 @@ def _sha256_bytes(value: bytes) -> str:
 def _catalog_sha256() -> str:
     load_science_question_catalog()
     return CATALOG_SHA256.lower()
+
+
+def _required_deep_experiment_question_ids() -> set[str]:
+    """Deep-experiment question ids from the frozen competition program.
+
+    Fails closed to an empty set: an unreadable resource keeps deep-experiment
+    readiness blocked instead of failing the whole run summary.
+    """
+    try:
+        program = load_competition_program_core()
+    except CompetitionResourceError:
+        return set()
+    return {
+        str(item.get("questionId") or "")
+        for item in program.get("requiredDeepExperiments") or []
+        if isinstance(item, dict) and str(item.get("questionId") or "")
+    }
 
 
 def _catalog_question(question_id: str) -> dict[str, Any] | None:
@@ -1058,6 +1077,10 @@ def challenge_question_run_summary(team_id: str) -> dict[str, Any]:
         }
         for question_id, record in sorted(latest_validated_by_question.items())
     ]
+    deep_question_ids = _required_deep_experiment_question_ids()
+    approved_deep_experiment_question_ids = [
+        question_id for question_id in completed_question_ids if question_id in deep_question_ids
+    ]
     return {
         "recordCount": len(records),
         "validCandidateCount": len(valid_candidates),
@@ -1068,6 +1091,9 @@ def challenge_question_run_summary(team_id: str) -> dict[str, Any]:
         "completedCount": len(completed_question_ids),
         "completedQuestionIds": completed_question_ids,
         "completedQuestionResults": completed_question_results,
+        # Deep experiments share the per-question submission gate; the explicit
+        # list exists so the program projection can confirm them independently.
+        "approvedDeepExperimentQuestionIds": approved_deep_experiment_question_ids,
         "latestCandidate": deepcopy(valid_candidates[-1]) if valid_candidates else None,
     }
 

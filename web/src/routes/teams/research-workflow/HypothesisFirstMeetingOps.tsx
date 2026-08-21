@@ -160,6 +160,11 @@ export function HypothesisFirstMeetingOps(props: {
             ? errors.join("；")
             : "本轮结论未通过校验，未被确认；请退回后重新整理",
         );
+      } else if (payload?.hypothesisRound?.status === "failed") {
+        // Confirmed, but the hypothesis-round generation failed downstream.
+        setApproveBlockedReason(
+          "本轮已确认，但假说评审轮生成失败；请重新发起评审讨论以重试生成。",
+        );
       } else {
         setApproveBlockedReason(null);
       }
@@ -180,9 +185,19 @@ export function HypothesisFirstMeetingOps(props: {
     mutationFn: () => openHypothesisCandidateGeneration(props.teamId, props.questionId),
     onSuccess: invalidate,
   });
+  const [reopenBlockedReason, setReopenBlockedReason] = useState<string | null>(null);
   const reopenReviewMutation = useMutation({
     mutationFn: () => reopenHypothesisReviewMeeting(props.teamId, props.meetingRoundId),
-    onSuccess: invalidate,
+    onSuccess: (payload) => {
+      // Reopening burns the failed round first; if the budget gate then denies
+      // the replacement round, say so instead of letting the meeting vanish.
+      setReopenBlockedReason(
+        payload?.openStatus === "budget_exhausted"
+          ? "失败轮已作废，但轮次预算已耗尽，无法开启新的评审轮；请在假说收敛卡提升预算并发起新一轮评审。"
+          : null,
+      );
+      invalidate();
+    },
   });
   const collectionRunId = props.nextAction.collectionRunId || "";
   const canHandoff = props.nextAction.command === "retry_handoff"
@@ -346,6 +361,13 @@ export function HypothesisFirstMeetingOps(props: {
           label="本轮结论未被确认"
           summary={approveBlockedReason}
           data-testid="approve-blocked-reason"
+        />
+      ) : null}
+      {reopenBlockedReason ? (
+        <VErrorSummary
+          label="评审轮未重开"
+          summary={reopenBlockedReason}
+          data-testid="reopen-blocked-reason"
         />
       ) : null}
       <MeetingRoundDisplay

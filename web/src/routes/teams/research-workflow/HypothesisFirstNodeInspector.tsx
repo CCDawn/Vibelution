@@ -4,11 +4,13 @@
  * Canvas cards remain a projection. This panel is the current-task surface:
  * discussion, digest confirm, selection, collection progress, and recovery.
  */
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { fetchChatRoomDetail } from "../../../api/chat";
 import {
   openHypothesisCandidateGeneration,
+  openNextHypothesisReviewRound,
   recordCollectionHandoff,
 } from "../../../api/hypothesisFirst";
 import { queryKeys } from "../../../api/queryKeys";
@@ -315,14 +317,67 @@ function InspectorBody(props: {
           <p className={styles.status}>{nextAction.commandDetail}</p>
         ) : null}
         {nextAction.command === "human_adjudication" ? (
-          <VButton type="button" variant="primary" density="compact" onClick={() => props.onOpenQuestion(questionId)}>
-            {nextAction.commandLabel}
-          </VButton>
+          <div className={styles.task}>
+            <NextReviewRoundButton
+              teamId={teamId}
+              questionId={questionId}
+              meetingRoundId={liveMeetingRoundId}
+            />
+            <VButton
+              type="button"
+              variant="ghost"
+              density="compact"
+              onClick={() => props.onOpenQuestion(questionId)}
+            >
+              打开赛题详情
+            </VButton>
+          </div>
         ) : null}
       </div>
     );
   }
   return <VEmptyState title="未知的假说先行卡片" />;
+}
+
+function NextReviewRoundButton(props: { teamId: string; questionId: string; meetingRoundId: string }) {
+  const queryClient = useQueryClient();
+  const [blockedReason, setBlockedReason] = useState<string | null>(null);
+  const mutation = useMutation({
+    mutationFn: () =>
+      openNextHypothesisReviewRound(props.teamId, props.meetingRoundId, 5),
+    onSuccess: (payload) => {
+      setBlockedReason(
+        payload?.status === "budget_exhausted"
+          ? "轮次预算已达上限 5，无法再开启新的评审轮。"
+          : null,
+      );
+      invalidateHypothesisFirstQueries(queryClient, props.teamId, props.questionId);
+    },
+  });
+  return (
+    <div className={styles.task} data-testid="next-review-round-action">
+      {blockedReason ? (
+        <VErrorSummary label="无法开启新评审轮" summary={blockedReason} />
+      ) : null}
+      {mutation.isError ? (
+        <VErrorSummary
+          label="发起下一轮评审失败"
+          summary={mutation.error instanceof Error ? mutation.error.message : "open_next_review_failed"}
+        />
+      ) : null}
+      <VButton
+        type="button"
+        variant="primary"
+        density="compact"
+        isPending={mutation.isPending}
+        isDisabled={!props.meetingRoundId}
+        disabledReason={props.meetingRoundId ? undefined : "缺少上一轮评审标识"}
+        onPress={() => mutation.mutate()}
+      >
+        提升预算并发起新一轮评审
+      </VButton>
+    </div>
+  );
 }
 
 function OpenGenerationButton(props: { teamId: string; questionId: string; label: string }) {

@@ -508,8 +508,11 @@ def build_competition_program_projection(
                 ),
             }
         )
-    all_deep_experiments_approved = bool(deep_experiment_records) and all(
-        item["required"] and item["approved"] for item in deep_experiment_records
+    required_deep_experiment_records = [
+        item for item in deep_experiment_records if item["required"]
+    ]
+    all_deep_experiments_approved = bool(required_deep_experiment_records) and all(
+        item["approved"] for item in required_deep_experiment_records
     )
     completion_contract = _mapping(program.get("completionContract"))
     program_completed = full_result_set_complete and all_deep_experiments_approved
@@ -669,9 +672,10 @@ def build_challenge_submission_readiness(
         ),
         "",
     )
-    deep_ready = bool(deep_experiments) and all(
-        item.get("required") is True and item.get("approved") is True
+    deep_ready = bool(required_deep_count) and all(
+        item.get("approved") is True
         for item in deep_experiments
+        if item.get("required") is True
     )
     direction_requirement = _mapping(projection.get("directionSubmissionRequirement"))
     artifacts = [

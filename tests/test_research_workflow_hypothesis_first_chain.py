@@ -821,6 +821,45 @@ def test_unconverged_round_blocks_hypothesis_design(
         runtime.close()
 
 
+def test_chain_state_budget_tracks_current_selection_not_history(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Budget exhaustion must follow the current selection's rounds; earlier
+    selections and superseded rounds must not fake budget_exhausted."""
+    team_id, agents = _hf_env(tmp_path, monkeypatch)
+    _patch_approved_question(monkeypatch)
+    _fake_collection_runs(monkeypatch)
+    agent_ids = [agents[role] for role in _ROLES]
+
+    recorded = _open_first_meeting(team_id, agent_ids)
+    previous_id = recorded["reviewMeeting"]["meetingRound"]["meetingRoundId"]
+    for _ in range(2):
+        opened = chain.open_next_review_meeting(
+            team_id,
+            previous_meeting_round_id=previous_id,
+            agent_runner=_marker_runner,
+        )
+        assert opened["status"] == "opened"
+        previous_id = opened["meetingRound"]["meetingRoundId"]
+
+    exhausted_state = chain.chain_state(team_id, _QUESTION_ID)
+    assert exhausted_state["budgetExhausted"] is True
+    assert exhausted_state["roundBudget"] == 3
+
+    # Re-selecting candidates starts a fresh selection: its rounds restart at 1
+    # and budget exhaustion must clear even though the question keeps all old
+    # review meetings.
+    reselected = selections.record_hypothesis_selection(
+        team_id,
+        _selection_payload(agent_ids[1]),
+        agent_runner=_marker_runner,
+    )
+    assert reselected["status"] == "created"
+    refreshed_state = chain.chain_state(team_id, _QUESTION_ID)
+    assert refreshed_state["budgetExhausted"] is False
+    assert refreshed_state["roundBudget"] == 3
+
+
 def test_round_budget_exhaustion_requires_manual_decision(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

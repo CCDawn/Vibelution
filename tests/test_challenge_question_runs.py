@@ -588,6 +588,37 @@ def test_revised_question_run_requires_existing_parent(tmp_path, monkeypatch):
         )
 
 
+def test_summary_produces_approved_deep_experiment_ids_from_real_records(tmp_path, monkeypatch):
+    """Production summaries must derive approvedDeepExperimentQuestionIds
+    (the program projection reads it; only tests used to inject it)."""
+    _isolate_store(tmp_path, monkeypatch)
+    for question_number in (1, 91, 96):
+        output = _output(question_number, approved=True)
+        registered = challenge_question_runs.register_challenge_question_output(
+            "research-team",
+            {"output": deepcopy(output), "citationChecks": _citation_checks(output)},
+        )
+        challenge_question_runs.review_challenge_question_output(
+            "research-team",
+            output["identity"]["question_id"],
+            registered["record"]["runId"],
+            {
+                "reviewer": "Human Reviewer",
+                "rationale": "All four gates were explicitly reviewed.",
+                "decisions": {
+                    "H1_problem_understanding": "approved",
+                    "H2_hypothesis_selection": "approved",
+                    "H3_research_plan": "approved",
+                    "H4_external_output": "approved",
+                },
+            },
+        )
+
+    summary = challenge_question_runs.challenge_question_run_summary("research-team")
+    assert summary["completedQuestionIds"] == ["SCI-001", "SCI-091", "SCI-096"]
+    assert summary["approvedDeepExperimentQuestionIds"] == ["SCI-091", "SCI-096"]
+
+
 def test_five_approved_unique_questions_complete_trial_count(tmp_path, monkeypatch):
     _isolate_store(tmp_path, monkeypatch)
     for question_number in range(96, 101):

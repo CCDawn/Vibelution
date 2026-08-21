@@ -295,6 +295,7 @@ def _record_review_round_link(
     collection_request_id: str,
     question_id: str,
     round_index: int,
+    round_budget: int = DEFAULT_ROUND_BUDGET,
 ) -> dict[str, Any]:
     link_id = f"hf-link-{_stable_hash({'meetingRoundId': meeting_round_id, 'roundIndex': round_index})[:16]}"
     record = {
@@ -307,6 +308,9 @@ def _record_review_round_link(
         "collectionRequestId": collection_request_id,
         "questionId": question_id,
         "roundIndex": round_index,
+        # Persist the effective budget so chain_state reads the raised limit
+        # (links written before this field fall back to the default).
+        "roundBudget": int(round_budget or DEFAULT_ROUND_BUDGET),
         "createdAt": _utc_now(),
     }
     with _LOCK:
@@ -317,8 +321,12 @@ def _record_review_round_link(
             meeting_round_id,
         )
         if existing is not None:
-            for key in ("previousMeetingRoundId", "collectionRequestId", "selectionId", "roundIndex"):
-                if existing.get(key) != record.get(key):
+            for key in ("previousMeetingRoundId", "collectionRequestId", "selectionId", "roundIndex", "roundBudget"):
+                existing_value = existing.get(key)
+                # Links written before roundBudget existed replay fine.
+                if key == "roundBudget" and existing_value is None:
+                    continue
+                if existing_value != record.get(key):
                     raise HypothesisFirstChainError(
                         f"review round link for {meeting_round_id} is already bound to different content"
                     )
@@ -337,6 +345,7 @@ def open_review_meeting_for_selection(
     previous_meeting_round_id: str = "",
     collection_request_id: str = "",
     meeting_round_id: str = "",
+    round_budget: int = DEFAULT_ROUND_BUDGET,
 ) -> dict[str, Any]:
     """Open (or reuse) one hypothesis-review meeting for a selection record.
 
@@ -421,6 +430,7 @@ def open_review_meeting_for_selection(
         collection_request_id=normalized_request_id,
         question_id=question_id,
         round_index=normalized_round_index,
+        round_budget=round_budget,
     )
     return {
         **opened,
@@ -1028,6 +1038,7 @@ def open_next_review_meeting(
         round_index=round_index,
         previous_meeting_round_id=previous_id,
         collection_request_id=normalized_request_id,
+        round_budget=effective_budget,
     )
 
 
@@ -2008,8 +2019,18 @@ def chain_state(team_id: str, question_id: str) -> dict[str, Any]:
         str(meeting.get("meetingRoundId") or ""): meeting for meeting in meetings
     }
     selection_id = ""
-    if links:
-        selection_id = str(links[-1].get("selectionId") or "")
+    # links are sorted by roundIndex; the CURRENT selection must come from the
+    # newest appended link record, not the max-roundIndex one (a fresh
+    # selection's round 1 would otherwise lose to the previous selection's
+    # final round).
+    question_links_append_order = [
+        item
+        for item in records
+        if str(item.get("recordKind") or "") == REVIEW_ROUND_LINK_KIND
+        and str(item.get("questionId") or "").upper() == normalized_question_id
+    ]
+    if question_links_append_order:
+        selection_id = str(question_links_append_order[-1].get("selectionId") or "")
     if not selection_id:
         try:
             scope = _question_scope_envelope(
@@ -2093,7 +2114,21 @@ def chain_state(team_id: str, question_id: str) -> dict[str, Any]:
         convergence_detail = "converged"
 
     baselines = _question_template_baselines(normalized_team_id, normalized_question_id)
-    budget = DEFAULT_ROUND_BUDGET
+    # Budget authority lives on the current selection's links: raised limits
+    # are persisted per round, and exhaustion counts only this selection's
+    # rounds (superseded/older selections must not fake budget_exhausted).
+    selection_links = (
+        [item for item in links if str(item.get("selectionId") or "") == selection_id]
+        if selection_id
+        else []
+    )
+    selection_round_index = max(
+        (int(item.get("roundIndex") or 0) for item in selection_links), default=0
+    )
+    budget = max(
+        [int(item.get("roundBudget") or 0) for item in selection_links]
+        + [DEFAULT_ROUND_BUDGET]
+    )
     candidates = [
         record
         for record in records
@@ -2136,7 +2171,7 @@ def chain_state(team_id: str, question_id: str) -> dict[str, Any]:
         "hypothesisConverged": converged,
         "convergenceDetail": convergence_detail,
         "roundBudget": budget,
-        "budgetExhausted": bool(not converged and len(meetings) >= budget),
+        "budgetExhausted": bool(not converged and selection_round_index >= budget),
         "templateBaselineExists": bool(baselines),
         "templateBaselineIds": [
             str(item.get("baselineId") or "") for item in baselines

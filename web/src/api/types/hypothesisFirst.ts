@@ -466,6 +466,8 @@ export type CloseReviewMeetingResponse = {
   closed: boolean;
   /** Present when closed=false: why the digest could not be confirmed. */
   validationErrors?: MeetingDigestValidationError[];
+  /** Reopen path: open status of the replacement round (budget_exhausted, ...). */
+  openStatus?: string;
   meetingRound: MeetingRoundRecord;
   digest: Record<string, unknown>;
   decisions: DecisionRecordView[];

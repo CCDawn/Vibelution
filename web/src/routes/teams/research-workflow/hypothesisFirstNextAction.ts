@@ -171,7 +171,10 @@ function hasSelection(input: HypothesisFirstNextActionInput): boolean {
 }
 
 function meetingSummaryFailed(meeting: MeetingRoundRecord): boolean {
+  // summaryDraftError is the server-persisted failure; summaryError only
+  // exists on client-synthesized display records.
   return Boolean(meeting.summaryError?.trim())
+    || Boolean(meeting.summaryDraftError?.code || meeting.summaryDraftError?.message)
     || Boolean(meeting.digestDraft?.validationErrors?.length);
 }
 
