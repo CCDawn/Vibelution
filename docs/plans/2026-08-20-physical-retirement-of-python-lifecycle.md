@@ -45,6 +45,11 @@ web 客户端（`web/src/api/launcher.ts`）：对应方法改为 IPC-only——
 **D-1 已执行（2026-08-21）**：`run_isolated_operation` 的 start/restart 分支替换为 control_plane_is_electron 拒绝；孤儿 helper（`_open_instance_window`/`_existing_matching_start_claim`/`_reclaim_stale_in_flight_start`/`current_live_ports`）删除；`isolated_workbench_window.py` 的窗口打开机器删除（314→228 行），关窗/回写/标题/overlay 保留。
 **D 剩余**：列表/清理只读面搬迁后整删 `branch_instance_lifecycle.py` 与 `isolated_workbench_window.py`；替换 cleanup stop 与 RM close 的脚本调用后删除 `vibelution_launcher.py`；daemon 逐 handler 切除。
 
+**D-2 提交者清点（2026-08-21 已验证，可直接执行）：**
+- `open_workbench` / `restart_workbench`：**零队列提交者**（window_provider_dispatcher 的同名 desktop action 不是队列命令；演化只派发 hot_restart/close/recover）。daemon 中这两个 handler 及其专属 helper 链（open 的 fast-path/verification 链、restart 的 `_perform_restart_workbench`、build-preflight 家族——确认无 force-rebuild 残留引用后）可整体切除。注意共享面：`_close_workbench_with_fast_path`、`_finish_command`、observe/reconcile 家族被 close/hot_restart 共用，必须保留。
+- 测试规模（实测）：`tests/test_runtime_manager.py` 内 175 处引用，另牵连 5 个测试文件（test_launcher_service / test_launcher_scripts / test_vibelution_desktop_entry / test_web_runtime_routes / test_runtime_scene_package_diagnosis）。收缩按「删 handler 用例、保留 close/hot_restart/演化用例」执行，预期是本计划最大的一次测试手术，建议独立 worktree 单独一批合入。
+- `close_workbench` / `force_close_workbench` / `hot_restart_workbench` / `recover_workbench`：演化意图与关窗事务仍在用，**本轮不切**；它们的最终归宿是随演化热重启通道一起迁移到 Electron（另行评审）。
+
 `core/runtime_manager/daemon.py`（5859 行）中 workbench 命令队列/reconcile/observe 与 `workbench_controller.py` 的 launcher-action 链。**边界：演化循环（self/supervised）、hot-restart 会话、storage migration 必须原样保留。** 先产出 daemon 内 workbench↔evolution 耦合面清单（符号级 grep），耦合拆不干净就再细分批次。本批次不做就不做，禁止半途合入。
 
 ## 2. 测试收缩对照表
