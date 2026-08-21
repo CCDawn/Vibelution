@@ -29,7 +29,7 @@ function Resolve-ProjectDir {
         (Join-Path $here "requirements.txt"),
         (Join-Path $here "scripts\vibelution_launcher.ps1")
     )
-    if (($rootMarkers | Where-Object { Test-Path -LiteralPath $_ }).Count -ge 2) {
+    if (@($rootMarkers | Where-Object { Test-Path -LiteralPath $_ }).Count -ge 2) {
         return (Resolve-Path -LiteralPath $here).Path
     }
     $parent = (Resolve-Path -LiteralPath (Join-Path $here "..")).Path
