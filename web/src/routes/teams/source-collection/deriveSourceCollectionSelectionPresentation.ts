@@ -188,7 +188,11 @@ export function deriveSourceCollectionSelectionPresentation(
     )
     : sourceManifestCandidates;
   const selectedSourceCollectionCandidate =
-    sourceManifestCandidates.find((candidate) => candidate.candidateId === selectedSourceCollectionCandidateId) ?? null;
+    sourceManifestCandidates.find((candidate) => candidate.candidateId === selectedSourceCollectionCandidateId)
+    // Graph nodes are not limited to source_manifest; fall back to the full
+    // candidate set so other node types stay inspectable.
+    ?? teamWorkflowCandidatesById.get(selectedSourceCollectionCandidateId)
+    ?? null;
   const selectedSourceCollectionCandidateTrace = selectedSourceCollectionCandidate
     ? sourceCollectionCandidateTrace(selectedSourceCollectionCandidate)
     : null;

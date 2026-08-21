@@ -23,6 +23,7 @@ type TeamSourceCollectionGraphPanelProps = {
   stats: TeamSourceCollectionGraphPanelStat[];
   hasGraph: boolean;
   emptyMessage: ReactNode;
+  graphNotice?: ReactNode;
   graphView: ReactNode;
   nodeListAriaLabel: string;
   nodeListItems: ReactNode;
@@ -40,6 +41,7 @@ export function TeamSourceCollectionGraphPanel({
   stats,
   hasGraph,
   emptyMessage,
+  graphNotice,
   graphView,
   nodeListAriaLabel,
   nodeListItems,
@@ -74,6 +76,7 @@ export function TeamSourceCollectionGraphPanel({
               </span>
             ))}
           </div>
+          {graphNotice}
           {graphView}
           {nodeListItems ? (
             <PersistedHeightListShell

@@ -14,7 +14,7 @@ from core.web.services.team_workflow.research_runtime.event_stream_service impor
     parse_stream_cursor,
 )
 from tests._support.command_helpers import CommandHarness
-from tests._support.workflow_ledger_helpers import FIXED_NOW_MS, build_event_record
+from tests._support.workflow_ledger_helpers import build_event_record
 
 
 def _seed(harness: CommandHarness, run_id: str = "run-sse") -> None:
@@ -71,6 +71,47 @@ def test_sse_last_event_id_exact_resume_no_dup_no_loss(tmp_path: Path) -> None:
             )
         )
         assert [_decode(frame)[0] for frame in again] == ["run-sse:3"]
+    finally:
+        harness.close()
+
+
+def test_sse_replay_preserves_unknown_event_type(tmp_path: Path) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        _seed(harness)
+
+        def mutate(uow):
+            uow.repository.insert_event(
+                build_event_record(
+                    sequence=4,
+                    run_id="run-sse",
+                    run_version=4,
+                    event_type="future_event",
+                    event_id="evt-future",
+                )
+            )
+            uow.repository.execute(
+                "UPDATE workflow_runs SET last_event_sequence = 4 WHERE run_id = ?",
+                ("run-sse",),
+            )
+
+        harness.store.submit(mutate, force_flush=True).result(timeout=10)
+        stream = WorkflowEventStreamService(store=harness.store)
+
+        frames = list(
+            stream.replay_frames(
+                team_id="research-team",
+                run_id="run-sse",
+                after_sequence=3,
+            )
+        )
+
+        assert len(frames) == 1
+        frame_id, event_type, data = _decode(frames[0])
+        assert frame_id == "run-sse:4"
+        assert event_type == "future_event"
+        assert data["type"] == "future_event"
+        assert data["sequence"] == 4
     finally:
         harness.close()
 

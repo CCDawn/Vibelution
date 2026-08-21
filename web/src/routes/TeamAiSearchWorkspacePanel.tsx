@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Search } from "lucide-react";
 
 import type { AiSearchRun, AiSearchRunSummary, AiSearchSourceScope } from "../api/types";
@@ -71,6 +72,8 @@ export function TeamAiSearchWorkspacePanel({
   onStart,
   teamId,
 }: TeamAiSearchWorkspacePanelProps) {
+  const [showAllCards, setShowAllCards] = useState(false);
+
   const latestRunCounts = latestRun ? aiSearchRunCounts(latestRun) : null;
   const latestRunStatusStyle = runStatusStyle(latestRun?.status);
 
@@ -180,7 +183,7 @@ export function TeamAiSearchWorkspacePanel({
                   <span>{lang === "zh" ? "引用" : "refs"} <strong>{latestRunCounts.referenceCount}</strong></span>
                 </div>
                 <div className={styles.aiSearchRunCards}>
-                  {latestRun.cards.slice(0, 6).map((card) => {
+                  {latestRun.cards.slice(0, showAllCards ? latestRun.cards.length : 6).map((card) => {
                     const cardNeedsReview = card.status === "failed" || aiSearchRunCardUsesFallback(card);
                     const cardModeLabel = aiSearchRunCardModeLabel(card, lang);
                     const fallbackReason = aiSearchRunCardFallbackReason(card);
@@ -240,6 +243,18 @@ export function TeamAiSearchWorkspacePanel({
                       </article>
                     );
                   })}
+                  {latestRun.cards.length > 6 ? (
+                    <VNativeButton
+                      type="button"
+                      className={styles.aiSearchRunStorage}
+                      onClick={() => setShowAllCards((current) => !current)}
+                      data-testid="ai-search-cards-toggle"
+                    >
+                      {showAllCards
+                        ? (lang === "zh" ? "收起卡片" : "Show fewer cards")
+                        : (lang === "zh" ? `还有 ${latestRun.cards.length - 6} 张卡片，点击展开全部` : `+${latestRun.cards.length - 6} more cards`)}
+                    </VNativeButton>
+                  ) : null}
                 </div>
                 <div className={styles.aiSearchRunStorage}>
                   <strong>{lang === "zh" ? "存放位置" : "Stored at"}</strong>

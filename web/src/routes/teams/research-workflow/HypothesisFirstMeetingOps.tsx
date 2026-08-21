@@ -24,48 +24,6 @@ import {
 import { invalidateHypothesisFirstQueries } from "./useHypothesisFirstChain";
 import styles from "./HypothesisFirstMeetingOps.styles";
 
-export function useBoundChatRoundsTerminal(
-  meetingRoundId: string | undefined,
-  linkedChatRoomId: string | undefined,
-  chatRoomRoundIds: string[] | undefined,
-  serverFlag?: boolean,
-): boolean {
-  const pageVisible = usePageVisibility();
-  const roomQuery = useQuery({
-    queryKey: queryKeys.chatRoom(linkedChatRoomId || ""),
-    queryFn: ({ signal }) => fetchChatRoomDetail(linkedChatRoomId || "", { signal }),
-    enabled: Boolean(linkedChatRoomId) && typeof serverFlag !== "boolean",
-    staleTime: 4_000,
-    refetchInterval: typeof serverFlag === "boolean"
-      ? false
-      : resolvePollingInterval(pageVisible, 4_000),
-  });
-  if (typeof serverFlag === "boolean") return serverFlag;
-  return boundChatRoundsAreTerminal({
-    meeting: meetingRoundId
-      ? {
-          meetingRoundId,
-          meetingType: "",
-          mode: "",
-          scopeHash: "",
-          participants: [],
-          status: "open",
-          startedAt: "",
-          program: "",
-          theme: "",
-          campaign: "",
-          question: "",
-          branch: "",
-          workflow: "",
-          agentId: "",
-          chatRoomRoundIds,
-          boundChatRoundsTerminal: serverFlag,
-        }
-      : null,
-    chatRounds: roomQuery.data?.rounds,
-  });
-}
-
 export function HypothesisFirstMeetingOps(props: {
   teamId: string;
   questionId: string;
@@ -173,12 +131,28 @@ export function HypothesisFirstMeetingOps(props: {
         props.onApproved?.();
       }
     },
+    onError: (error) => {
+      // A stale digest hash means another page updated the draft; refetch so
+      // the cached contentHash catches up instead of retrying the old one.
+      if (error instanceof Error && /stale/i.test(error.message)) {
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.teamMeetingRound(props.teamId, props.meetingRoundId),
+        });
+        setApproveBlockedReason(
+          "纪要已在其他页面更新，已重新加载最新纪要，请再次确认。",
+        );
+      }
+    },
   });
   const rejectMutation = useMutation({
     mutationFn: () => rejectMeetingDigestDraft(props.teamId, props.meetingRoundId, { actor: "operator" }),
     onSuccess: () => {
       setApproveBlockedReason(null);
       invalidate();
+      // Reject clears the draft server-side but never re-summarizes; kick the
+      // draft immediately so the round does not sit in summarizing with no
+      // available action.
+      draftMutation.mutate();
     },
   });
   const generationMutation = useMutation({

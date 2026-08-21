@@ -73,10 +73,12 @@ export function workflowGraphEdgePath(
   edge: TeamWorkflowCandidateGraphPayload["edges"][number],
   nodes: TeamWorkflowGraphNodeView[],
   edgeIndex = 0,
+  nodeById?: Map<string, TeamWorkflowGraphNodeView>,
 ) {
   const endpoints = workflowGraphVisualEndpoints(edge);
-  const source = nodes.find((node) => node.candidateId === endpoints.sourceCandidateId);
-  const target = nodes.find((node) => node.candidateId === endpoints.targetCandidateId);
+  const lookup = nodeById ?? new Map(nodes.map((node) => [node.candidateId, node]));
+  const source = lookup.get(endpoints.sourceCandidateId);
+  const target = lookup.get(endpoints.targetCandidateId);
   if (!source || !target) {
     return null;
   }
@@ -196,8 +198,10 @@ export function TeamWorkflowGraphView({
               <path d="M 0 0 L 10 5 L 0 10 z" className={styles.workflowGraphMarkerFillMuted} />
             </marker>
           </defs>
-          {layout.edges.map((edge, edgeIndex) => {
-            const path = workflowGraphEdgePath(edge, layout.nodes, edgeIndex);
+          {(() => {
+            const nodeById = new Map(layout.nodes.map((node) => [node.candidateId, node]));
+            return layout.edges.map((edge, edgeIndex) => {
+            const path = workflowGraphEdgePath(edge, layout.nodes, edgeIndex, nodeById);
             if (!path) {
               return null;
             }
@@ -216,7 +220,8 @@ export function TeamWorkflowGraphView({
                 <title>{edge.relation}</title>
               </path>
             );
-          })}
+            });
+          })()}
         </svg>
         {layout.nodes.map((node) => {
           const isFocus = focus === node.candidateId;

@@ -14,17 +14,9 @@ import type { ResearchWorkflowSnapshot } from "../../../api/types/research-workf
 const api = vi.hoisted(() => ({
   fetchResearchWorkflowSnapshot: vi.fn(),
   replayResearchWorkflowEvents: vi.fn(),
+  consumeResearchWorkflowEventStream: vi.fn(),
   fetchResearchWorkflowDefinition: vi.fn(),
   createResearchWorkflowRun: vi.fn(),
-  researchWorkflowStreamUrl: vi.fn(
-    (options: { runId: string; teamId: string; afterSequence?: number }) => {
-      const qs = new URLSearchParams({ teamId: options.teamId });
-      if (options.afterSequence != null) {
-        qs.set("afterSequence", String(options.afterSequence));
-      }
-      return `/api/research/workflow-runs/${options.runId}/stream?${qs.toString()}`;
-    },
-  ),
 }));
 
 vi.mock("../../../api/research-workflow/runs", () => ({
@@ -33,7 +25,7 @@ vi.mock("../../../api/research-workflow/runs", () => ({
 
 vi.mock("../../../api/research-workflow/events", () => ({
   replayResearchWorkflowEvents: api.replayResearchWorkflowEvents,
-  researchWorkflowStreamUrl: api.researchWorkflowStreamUrl,
+  consumeResearchWorkflowEventStream: api.consumeResearchWorkflowEventStream,
 }));
 
 vi.mock("../../../api/researchWorkflow", () => ({
@@ -125,21 +117,6 @@ function makeEventPage(runId: string, sequence: number) {
 
 type HookValue = ReturnType<typeof useResearchWorkflowRun>;
 
-class FakeEventSource {
-  static instances: FakeEventSource[] = [];
-  readonly url: string;
-  onopen: (() => void) | null = null;
-  onerror: (() => void) | null = null;
-  close = vi.fn();
-
-  constructor(url: string) {
-    this.url = url;
-    FakeEventSource.instances.push(this);
-  }
-
-  addEventListener() {}
-}
-
 function HookProbe({
   runId,
   onValue,
@@ -159,8 +136,6 @@ describe("useResearchWorkflowRun behavior", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    FakeEventSource.instances = [];
-    vi.stubGlobal("EventSource", FakeEventSource);
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
@@ -173,6 +148,16 @@ describe("useResearchWorkflowRun behavior", () => {
     api.replayResearchWorkflowEvents.mockImplementation(async ({ runId }) =>
       makeEventPage(runId, runId === "run-a" ? 3 : 1).events,
     );
+    api.consumeResearchWorkflowEventStream.mockImplementation(async (options) => {
+      options.onOpen?.();
+      await new Promise<void>((_resolve, reject) => {
+        options.signal.addEventListener(
+          "abort",
+          () => reject(new DOMException("aborted", "AbortError")),
+          { once: true },
+        );
+      });
+    });
   });
 
   afterEach(async () => {
@@ -220,7 +205,16 @@ describe("useResearchWorkflowRun behavior", () => {
     expect(api.replayResearchWorkflowEvents).toHaveBeenCalledWith(
       expect.objectContaining({ runId: "run-a", teamId: "research-team" }),
     );
-    expect(FakeEventSource.instances.at(-1)?.url).toContain("afterSequence=3");
+    expect(api.consumeResearchWorkflowEventStream).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        runId: "run-a",
+        teamId: "research-team",
+        afterSequence: 3,
+      }),
+    );
+    expect(
+      api.consumeResearchWorkflowEventStream.mock.calls.at(-1)?.[0].lastEventId,
+    ).toBeUndefined();
   });
 
   it("run switch resets sequence cursor for run B", async () => {
@@ -234,7 +228,16 @@ describe("useResearchWorkflowRun behavior", () => {
     await renderWith("run-b");
     expect(latest?.run?.runId).toBe("run-b");
     expect(latest?.lastSequence).toBe(1);
-    expect(FakeEventSource.instances.at(-1)?.url).toContain("afterSequence=1");
+    expect(api.consumeResearchWorkflowEventStream).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        runId: "run-b",
+        teamId: "research-team",
+        afterSequence: 1,
+      }),
+    );
+    expect(
+      api.consumeResearchWorkflowEventStream.mock.calls.at(-1)?.[0].lastEventId,
+    ).toBeUndefined();
   });
 
   it("slow previous run refresh does not overwrite new run", async () => {

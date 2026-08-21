@@ -119,6 +119,9 @@ function workflowStatusTone(value: string) {
   if (normalized === "needs_review" || normalized === "needs_evidence" || normalized === "needs_screening" || normalized === "pending") {
     return styles.workflowTagWarning;
   }
+  if (normalized === "in_progress" || normalized === "precheck_ready" || normalized === "agent_notified") {
+    return styles.workflowTagWarning;
+  }
   return styles.workflowTagNeutral;
 }
 

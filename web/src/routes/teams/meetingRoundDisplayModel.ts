@@ -28,13 +28,14 @@ export function meetingSpeakerCode(rawId: string, index: number): string {
   return `A${String(index + 1).padStart(3, "0")}`;
 }
 
-function messageSpeakerId(message: MeetingSourceMessage): string {
-  return String(
-    message.participantId
-    || message.agentId
-    || message.role
-    || "",
-  ).trim();
+function messageSpeakerIds(message: MeetingSourceMessage): string[] {
+  // Room messages carry participantId while meeting participants are agentIds;
+  // collect both spaces so speaker matching works regardless of source.
+  return [
+    message.participantId,
+    message.agentId,
+    message.role,
+  ].map((item) => String(item || "").trim()).filter(Boolean);
 }
 
 function isCompletedSpeech(message: MeetingSourceMessage): boolean {
@@ -61,7 +62,7 @@ export function meetingDiscussionProgress(input: {
   ).map((item) => String(item || "").trim()).filter(Boolean);
   const expected = order.length;
   const completed = (input.messages ?? []).filter(isCompletedSpeech);
-  const spokenById = new Set(completed.map(messageSpeakerId).filter(Boolean));
+  const spokenById = new Set(completed.flatMap(messageSpeakerIds));
   let spoken = 0;
   let nextIndex = -1;
   for (let index = 0; index < order.length; index += 1) {
