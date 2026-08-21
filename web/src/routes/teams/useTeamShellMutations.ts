@@ -5,7 +5,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Dispatch, SetStateAction } from "react";
 
-import { startChatRoomRound } from "../../api/chat";
+import { startChatRoomRound, stopChatRoomRound } from "../../api/chat";
 import {
   revokeProjectAgentBusMessage,
   sendTeamProjectBusMessage,
@@ -170,12 +170,21 @@ export function useTeamShellMutations(options: UseTeamShellMutationsOptions) {
     },
   });
 
+  const stopTeamRoundMutation = useMutation({
+    mutationFn: (payload: { roomId: string; teamId: string }) => stopChatRoomRound(payload.roomId),
+    onSuccess: (room, variables) => {
+      queryClient.setQueryData(queryKeys.chatRoom(room.roomId), room);
+      void chatWorkspaceCache.afterTeamRoomMembershipChanged(variables.teamId, room.roomId);
+    },
+  });
+
   return {
     archiveTeamMutation,
     saveCanvasMutation,
     sendTeamMessageMutation,
     revokeTeamMessageMutation,
     syncTeamChatRoomMutation,
+    stopTeamRoundMutation,
     repairChallengeCupTeamAgentsMutation,
     repairKnowledgeExpansionTeamAgentsMutation,
     startTeamRoundMutation,

@@ -105,6 +105,7 @@ export function useTeamsMutationBundle(options: UseTeamsMutationBundleOptions) {
     repairChallengeCupTeamAgentsMutation,
     repairKnowledgeExpansionTeamAgentsMutation,
     startTeamRoundMutation,
+    stopTeamRoundMutation,
   } = useTeamShellMutations({
     selectedTeamId,
     setSelectedTeamId,
@@ -210,6 +211,7 @@ export function useTeamsMutationBundle(options: UseTeamsMutationBundleOptions) {
     repairChallengeCupTeamAgentsMutation,
     repairKnowledgeExpansionTeamAgentsMutation,
     startTeamRoundMutation,
+    stopTeamRoundMutation,
     resetResearchProjectSourceCollectionMutation,
     seedSourceCollectionAgentSessionContextMutation,
     startSourceCollectionStageSessionTaskMutation,

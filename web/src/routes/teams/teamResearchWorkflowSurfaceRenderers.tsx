@@ -102,7 +102,10 @@ export function createResearchWorkflowSurfaceRenderers(ctx: ResearchWorkflowSurf
     selectedTeamStartRoundPending,
     selectedTeamStartRoundResult,
     selectedTeamStartRoundError,
+    selectedTeamStopRoundPending,
+    selectedTeamStopRoundError,
     startTeamRoundMutation,
+    stopTeamRoundMutation,
     teamMessage,
     setTeamMessage,
     teamInterrupt,
@@ -304,6 +307,9 @@ export function createResearchWorkflowSurfaceRenderers(ctx: ResearchWorkflowSurf
         startRoundResult={selectedTeamStartRoundResult}
         startRoundError={selectedTeamStartRoundError}
         onStartTeamRound={(payload) => startTeamRoundMutation.mutate(payload)}
+        stopRoundPending={selectedTeamStopRoundPending}
+        stopRoundError={selectedTeamStopRoundError}
+        onStopTeamRound={(payload) => stopTeamRoundMutation.mutate(payload)}
         teamMessage={teamMessage}
         onTeamMessageChange={setTeamMessage}
         teamInterrupt={teamInterrupt}

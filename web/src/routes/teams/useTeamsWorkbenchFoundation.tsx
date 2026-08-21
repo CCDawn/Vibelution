@@ -539,6 +539,7 @@ export function useTeamsWorkbenchFoundation({
     repairChallengeCupTeamAgentsMutation,
     repairKnowledgeExpansionTeamAgentsMutation,
     startTeamRoundMutation,
+    stopTeamRoundMutation,
     resetResearchProjectSourceCollectionMutation,
     seedSourceCollectionAgentSessionContextMutation,
     startSourceCollectionStageSessionTaskMutation,
@@ -828,6 +829,12 @@ export function useTeamsWorkbenchFoundation({
     startTeamRoundMutation.variables?.teamId === selectedTeam?.teamId && startTeamRoundMutation.error instanceof Error
     ? startTeamRoundMutation.error
     : null;
+  const selectedTeamStopRoundPending = stopTeamRoundMutation.isPending
+    && stopTeamRoundMutation.variables?.teamId === selectedTeam?.teamId;
+  const selectedTeamStopRoundError =
+    stopTeamRoundMutation.variables?.teamId === selectedTeam?.teamId && stopTeamRoundMutation.error instanceof Error
+      ? stopTeamRoundMutation.error
+      : null;
   const selectedTeamMessagePending = sendTeamMessageMutation.isPending && sendTeamMessageMutation.variables?.teamId === selectedTeam?.teamId;
   const selectedTeamMessageResult =
     sendTeamMessageMutation.variables?.teamId === selectedTeam?.teamId ? sendTeamMessageMutation.data : undefined;
@@ -1062,6 +1069,8 @@ export function useTeamsWorkbenchFoundation({
     selectedTeamStartRoundPending,
     selectedTeamStartRoundResult,
     selectedTeamStartRoundError,
+    selectedTeamStopRoundPending,
+    selectedTeamStopRoundError,
     selectedTeamMessagePending,
     selectedTeamMessageResult,
     selectedTeamMessageError,
@@ -1266,6 +1275,7 @@ export function useTeamsWorkbenchFoundation({
     repairChallengeCupTeamAgentsMutation,
     repairKnowledgeExpansionTeamAgentsMutation,
     startTeamRoundMutation,
+    stopTeamRoundMutation,
     resetResearchProjectSourceCollectionMutation,
     seedSourceCollectionAgentSessionContextMutation,
     startSourceCollectionStageSessionTaskMutation,

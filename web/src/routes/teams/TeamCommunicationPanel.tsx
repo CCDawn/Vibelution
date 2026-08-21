@@ -55,6 +55,9 @@ export type TeamCommunicationPanelProps = {
     mode: string;
     purpose: string;
   }) => void;
+  stopRoundPending: boolean;
+  stopRoundError: Error | null;
+  onStopTeamRound: (payload: { roomId: string; teamId: string }) => void;
   teamMessage: string;
   onTeamMessageChange: (value: string) => void;
   teamInterrupt: boolean;
@@ -95,6 +98,9 @@ export function TeamCommunicationPanel({
   startRoundResult,
   startRoundError,
   onStartTeamRound,
+  stopRoundPending,
+  stopRoundError,
+  onStopTeamRound,
   teamMessage,
   onTeamMessageChange,
   teamInterrupt,
@@ -161,6 +167,22 @@ export function TeamCommunicationPanel({
             ? (lang === "zh" ? "启动中" : "Starting")
             : (lang === "zh" ? "启动团队讨论" : "Start team round")}
         </VNativeButton>
+        {linkedChatRoomId && linkedRoomBusy ? (
+          <VNativeButton
+            type="button"
+            disabled={stopRoundPending || linkedRoomDetail?.status === "stopping"}
+            aria-label={lang === "zh" ? "停止当前团队讨论" : "Stop current team round"}
+            onClick={() => {
+              if (selectedTeam?.teamId) {
+                onStopTeamRound({ roomId: linkedChatRoomId, teamId: selectedTeam.teamId });
+              }
+            }}
+          >
+            {stopRoundPending || linkedRoomDetail?.status === "stopping"
+              ? (lang === "zh" ? "停止中" : "Stopping")
+              : (lang === "zh" ? "停止当前讨论" : "Stop current round")}
+          </VNativeButton>
+        ) : null}
         {startRoundResult ? (
           <div className={styles.messageResult}>
             <strong>{startRoundResult.rounds.length}</strong>
@@ -172,6 +194,9 @@ export function TeamCommunicationPanel({
         ) : null}
         {startRoundError ? (
           <div className={styles.messageError}>{startRoundError.message}</div>
+        ) : null}
+        {stopRoundError ? (
+          <div className={styles.messageError} role="alert">{stopRoundError.message}</div>
         ) : null}
         <section className={styles.teamRoundPanel}>
           <div className={styles.sectionTitle}>

@@ -101,8 +101,8 @@ function actionLabel(zh: boolean, action: string): string {
   const labels: Record<string, string> = {
     run_dev_readiness: zh ? "运行 DEV readiness" : "Run DEV readiness",
     run_dev_1_fixture_batch: zh ? "运行 dev-1 fixture" : "Run dev-1 fixture",
-    run_dev_5_fixture_batch: zh ? "运行 dev-5（首次 maxItems=2）" : "Run dev-5 (first maxItems=2)",
-    resume_dev_5_fixture_batch: zh ? "恢复 dev-5" : "Resume dev-5",
+    run_dev_5_fixture_batch: zh ? "开始处理首批题目" : "Process the first question batch",
+    resume_dev_5_fixture_batch: zh ? "继续处理剩余题目" : "Continue with remaining questions",
     repair_failed_platform_gates: zh ? "修复失败的平台门禁" : "Repair failed platform gates",
     repair_dev_1_fixture_batch: zh ? "修复 dev-1 fixture" : "Repair dev-1 fixture",
     repair_dev_5_fixture_batch: zh ? "修复 dev-5 fixture" : "Repair dev-5 fixture",
@@ -229,6 +229,11 @@ export function ChallengeMvpProgressPanel({
     ?? dev5Mutation.error
     ?? repairDev1Mutation.error
     ?? repairDev5Mutation.error;
+  const devNeedsAttention = Boolean(
+    nextLegalAction.startsWith("repair_")
+    || nextLegalAction === "RESEARCH_AUTHORIZATION_REQUIRED"
+    || (report && report.status !== "READY"),
+  );
 
   const programRetry = (
     <VButton type="button" variant="secondary" onClick={() => void experimentStatusQuery.refetch()}>
@@ -446,7 +451,9 @@ export function ChallengeMvpProgressPanel({
                           : `succeeded ${batch.succeededCount}/${batch.questionCount} · pending ${batch.pendingCount} · failed ${batch.failedCount} · blocked ${batch.blockedCount}`}
                       </div>
                       <div className={styles.devMeta}>
-                        attempts={batch.totalAttempts} · canResume={String(batch.canResume)} · updated={batch.lastUpdatedAt || "—"}
+                        {zh
+                          ? `已尝试 ${batch.totalAttempts} 次 · ${batch.canResume ? "可继续" : "无需继续"} · 更新 ${batch.lastUpdatedAt || "—"}`
+                          : `${batch.totalAttempts} attempts · ${batch.canResume ? "can continue" : "no continuation needed"} · updated ${batch.lastUpdatedAt || "—"}`}
                       </div>
                       {batch.completedQuestionIds.length > 0 ? (
                         <div className={styles.devMeta}>
@@ -463,7 +470,7 @@ export function ChallengeMvpProgressPanel({
                     <VEmptyState title={`${planId} ${zh ? "未运行" : "unrun"}`} className={styles.empty}>
                       {planId === "dev-1"
                         ? (zh ? "readiness 通过后运行。" : "Run after readiness passes.")
-                        : (zh ? "dev-1 通过后首次以 maxItems=2 运行，随后恢复。" : "Run first with maxItems=2 after dev-1, then resume.")}
+                        : (zh ? "dev-1 通过后先处理首批题目，完成后可继续剩余题目。" : "After dev-1 passes, process the first batch and continue with the remaining questions.")}
                     </VEmptyState>
                   )}
                 </div>
@@ -501,7 +508,7 @@ export function ChallengeMvpProgressPanel({
                   isPending={dev5Mutation.isPending}
                   onClick={() => dev5Mutation.mutate({ teamId, maxItems: 2 })}
                 >
-                  {zh ? "首次运行 dev-5（maxItems=2）" : "Run dev-5 first (maxItems=2)"}
+                  {zh ? "开始处理首批题目" : "Process the first question batch"}
                 </VButton>
               ) : null}
               {nextLegalAction === "resume_dev_5_fixture_batch" ? (
@@ -512,7 +519,7 @@ export function ChallengeMvpProgressPanel({
                   isPending={dev5Mutation.isPending}
                   onClick={() => dev5Mutation.mutate({ teamId, maxItems: null })}
                 >
-                  {zh ? "恢复 dev-5（maxItems=null）" : "Resume dev-5 (maxItems=null)"}
+                  {zh ? "继续处理剩余题目" : "Continue with remaining questions"}
                 </VButton>
               ) : null}
               {nextLegalAction === "repair_failed_platform_gates" ? (
@@ -612,10 +619,21 @@ export function ChallengeMvpProgressPanel({
         ) : null}
           </>
         ) : (
-          <p className={styles.devCollapsedHint}>
-            {zh
-              ? "开发态控制已折叠；批量运行的日常操作在上方题目总览，fixture 控制展开后可见。"
-              : "DEV controls collapsed; daily batch operations live in the catalog overview above."}
+          <p className={styles.devCollapsedHint} data-dev-controls="collapsed-summary" role={devNeedsAttention ? "status" : undefined}>
+            {devNeedsAttention ? (
+              <>
+                <strong>{zh ? "开发态需要处理" : "DEV action needs attention"}</strong>
+                <span>
+                  {zh
+                    ? `：${actionLabel(zh, nextLegalAction)}。展开控制区查看修复操作。`
+                    : `: ${actionLabel(zh, nextLegalAction)}. Expand the controls to repair or continue.`}
+                </span>
+              </>
+            ) : (
+              zh
+                ? "开发态控制已折叠；批量运行的日常操作在上方题目总览，fixture 控制展开后可见。"
+                : "DEV controls collapsed; daily batch operations live in the catalog overview above."
+            )}
           </p>
         )}
       </section>
