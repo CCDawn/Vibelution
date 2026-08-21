@@ -7,6 +7,7 @@ export const ACTIVE_WORK_BLOCK_MESSAGE_STOP =
   "有进行中的任务，无法停止 Vibelution。请等待任务完成或先停止任务。";
 export const ACTIVE_WORK_BLOCK_MESSAGE_RESTART =
   "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。";
+export const ACTIVE_WORK_STALE_SNAPSHOT_GRACE_MS = 6 * 60 * 60 * 1000;
 
 const BLOCKING_STATUSES = new Set([
   "",
@@ -56,6 +57,11 @@ export type ActiveWorkRun = {
   sessionId: string;
 };
 
+type ActiveWorkPayloadOptions = {
+  ignoreStale?: boolean;
+  nowMs?: number;
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -86,8 +92,28 @@ export function activeWorkStatusBlocks(status: string): boolean {
   return Boolean(normalized);
 }
 
-export function activeWorkPayloadBlocks(payload: Record<string, unknown>): boolean {
+function snapshotTimestampMs(payload: Record<string, unknown>): number | null {
+  const raw = String(payload.updatedAt || payload.startedAt || "").trim();
+  if (!raw) {
+    return null;
+  }
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function snapshotIsStale(payload: Record<string, unknown>, nowMs = Date.now()): boolean {
+  const timestampMs = snapshotTimestampMs(payload);
+  return timestampMs !== null && nowMs - timestampMs > ACTIVE_WORK_STALE_SNAPSHOT_GRACE_MS;
+}
+
+export function activeWorkPayloadBlocks(
+  payload: Record<string, unknown>,
+  options: ActiveWorkPayloadOptions = {}
+): boolean {
   if (String(payload.finishedAt || payload.endedAt || "").trim()) {
+    return false;
+  }
+  if (!options.ignoreStale && snapshotIsStale(payload, options.nowMs)) {
     return false;
   }
   return activeWorkStatusBlocks(payloadStatus(payload));
@@ -136,8 +162,12 @@ export function listActiveWorkRuns(workspaceRoot: string): ActiveWorkRun[] {
   const runtimeManagerDir = resolveRuntimeManagerDir(workspaceRoot);
   const items: ActiveWorkRun[] = [];
   const seen = new Set<string>();
-  const append = (kind: string, payload: Record<string, unknown> | null): void => {
-    if (!payload || !activeWorkPayloadBlocks(payload)) {
+  const append = (
+    kind: string,
+    payload: Record<string, unknown> | null,
+    options: ActiveWorkPayloadOptions = {}
+  ): void => {
+    if (!payload || !activeWorkPayloadBlocks(payload, options)) {
       return;
     }
     const item = snapshotItem(kind, payload);
@@ -159,12 +189,8 @@ export function listActiveWorkRuns(workspaceRoot: string): ActiveWorkRun[] {
     const activeRunId = String(index?.activeRunId || "").trim();
     for (const payload of listRunPayloads(kindDir)) {
       const runId = String(payload.runId || payload.roundId || payload.sessionId || payload.id || "").trim();
-      if (kind === "supervised_worktree_evolution_run") {
-        append(kind, payload);
-        continue;
-      }
       if (activeRunId && runId === activeRunId) {
-        append(kind, payload);
+        append(kind, payload, { ignoreStale: true });
         continue;
       }
       append(kind, payload);
