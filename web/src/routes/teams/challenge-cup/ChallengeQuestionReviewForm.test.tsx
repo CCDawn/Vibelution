@@ -159,13 +159,13 @@ describe("ChallengeQuestionReviewForm", () => {
     container.remove();
   });
 
-  it("maps a gate rejection into the submitted decisions", async () => {
+  it("locks the form after a submitted request for changes", async () => {
     const { container, root } = await renderForm();
 
     await chooseDecision(container, "H1 问题理解 审核结论", "通过");
     await chooseDecision(container, "H2 假设选择 审核结论", "通过");
     await chooseDecision(container, "H3 研究计划 审核结论", "通过");
-    await chooseDecision(container, "H4 外部产出 审核结论", "驳回");
+    await chooseDecision(container, "H4 外部产出 审核结论", "要求修改");
 
     await act(async () => {
       setNativeValue(container.querySelector('input[aria-label="审核人"]') as HTMLInputElement, "Grok");
@@ -179,7 +179,7 @@ describe("ChallengeQuestionReviewForm", () => {
     });
 
     expect(reviewMock).toHaveBeenCalledWith("research-team", "SCI-096", "stage1-sci-096-v3", expect.objectContaining({
-      decisions: expect.objectContaining({ H4_external_output: "rejected" }),
+      decisions: expect.objectContaining({ H4_external_output: "revision_requested" }),
     }));
     await act(async () => {
       await vi.waitFor(() => expect(container.textContent).toContain("审核结论已提交"));
