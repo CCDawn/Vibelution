@@ -31,36 +31,36 @@
 
 ## 3. Start And Routing
 
-### 3.0 默认规划：每次开发先读 BRT 路由技能（强制）
+### 3.0 默认规划：每次开发先读 Briefbound Router（强制）
 
-**凡进入开发、修复、规划、审查或会改代码/行为/验证边界的任务，默认先加载并遵循 `ccdawn-brt` 路由技能**，再选下游 owner / 打开业务文档。用户不必输入 `/brt` 或 `/ccdawn-brt`。
+**凡进入开发、修复、规划、审查或会改代码/行为/验证边界的任务，默认先加载并遵循 `briefbound-router`**，再选下游 owner / 打开业务文档。用户不必输入 skill 名。
 
 | 项 | 约定 |
 | --- | --- |
-| 技能入口 | 本机 `~/.grok/skills/ccdawn-brt/SKILL.md`（或当前 Agent 已安装的同名 skill 路径）；声称“已按最新 skill”前必须重读磁盘上的 `SKILL.md` |
-| 默认动作 | 每条相关用户消息、在首个广扫 / 下游 skill / 写入前：内部 BRT 门（意图、范围、权限、成功证据、流程重量）→ 再 `route` / `ownership` / 实现 |
-| 可静默 | 唯一合理行为的 `FAST_PATCH` 可 silent/micro，**仍按 BRT 最小门**，不整段跳过技能纪律 |
+| 技能入口 | 当前 Agent 已安装的 `briefbound-router/SKILL.md`（Codex 默认：`~/.codex/skills/briefbound-router/SKILL.md`）；声称“已按最新 skill”前必须重读磁盘上的 `SKILL.md` |
+| 默认动作 | 每条相关用户消息、在首个广扫 / 下游 skill / 写入前：内部路由门（意图、范围、权限、成功证据、流程重量）→ 再 `route` / `ownership` / 实现 |
+| 可静默 | 唯一合理行为的 `FAST_PATCH` 可 silent/micro，**仍按最小路由门**，不整段跳过技能纪律 |
 | 必须 ALIGN | 意图不清、多义、改 owning surface / 交互 / 数据 / 兼容 / 验收时：先窄 probe，仍不够则一轮对齐问题，禁止带着高影响假设写入 |
-| 禁止 | 不读 BRT 就广扫全仓、叠 process 框架（superpowers / 无请求 TDD 等）、跳过路由直接改代码、把「仓库里已有」当成已验证最优，或不调研不评估就开写 |
+| 禁止 | 不读 `briefbound-router` 就广扫全仓、叠 process 框架（superpowers / 无请求 TDD 等）、跳过路由直接改代码、把「仓库里已有」当成已验证最优，或不调研不评估就开写 |
 
 细则与分级仍见 [development-standard.md §2](docs/standards/development-standard.md)；加载序见 [docs/guides/README.md](docs/guides/README.md)。
 
 开始非简单任务前：
 
-1. **先 BRT**（本 §3.0）：加载 `ccdawn-brt`，完成意图/分级/owner 选择。
+1. **先 Router**（本 §3.0）：加载 `briefbound-router`，完成意图/分级/owner 选择。
 2. **再调研门**（§2 红线 / [development-standard.md §2.2](docs/standards/development-standard.md)）：同时评估本地复用（能否原样用、是否要改造后再用、要不要换掉）与仓外成熟方案；调研后评估排序，只借最符合项目、最值得借鉴的部分；未闭合前不得写入。
 3. 非平凡任务按 [Agent 开发路由](docs/guides/README.md)：`route.md` 定 READ/EDIT/TEST → `ownership.md` 定落点 → `loop.md` 验证与合入；对用户怎么写见本文件 §5。细则只下钻 [规范索引](docs/standards/README.md) 相关条。
 4. `STANDARD_TASK`、`HIGH_RISK`、续接或记忆敏感任务先运行 `python scripts/migrate_project_storage.py inventory` 解析 `activePaths.memory`，再读取其中 `INDEX.md` 与 `profile.json`；借鉴外部 GitHub 项目时再读同目录 `github-projects/INDEX.md`（由 `registry.json` 生成，勿手改）。`.docs/project-memory/` 仅作迁移前只读兼容，禁止新增写入。
 5. 多会话写入先用项目 guard 执行 `status/check/preflight/claim`；完成后 `release`。
 6. Bug、回归、卡住、运行不一致或异常命令：先 [`agent-log-routing.md`](docs/guides/agent-log-routing.md) 的 **`agent_log_context`**，再按 `agentBrief.evidence_refs` 深读。
-7. 非平凡行为、状态、权限、迁移、Prompt、Agent 或运行时变更：BRT 对齐与调研门未闭合前不得实现。
+7. 非平凡行为、状态、权限、迁移、Prompt、Agent 或运行时变更：Briefbound Router 对齐与调研门未闭合前不得实现。
 8. 执行 Agent、Session、Inbox 或 Knowledge ACL 操作前，必须先读 [docs/agents/project-operation-catalog.md](docs/agents/project-operation-catalog.md)，并优先使用其中登记的标准受管工具，不得自造工具名，也不得通过裸存储写入绕过生命周期或 ACL。
 
 按任务读取：
 
 | 任务 | 文档 |
 | --- | --- |
-| **默认规划 / BRT 路由（每任务）** | 本机 `ccdawn-brt` skill · [development-standard §2](docs/standards/development-standard.md) · [guides 加载序](docs/guides/README.md) |
+| **默认规划 / Router（每任务）** | 本机 `briefbound-router` skill · [development-standard §2](docs/standards/development-standard.md) · [guides 加载序](docs/guides/README.md) |
 | **本地复用评估 + 仓外成熟方案调研（每任务写入前）** | 根 `AGENTS.md` §2 · [development-standard §2.2](docs/standards/development-standard.md) |
 | **开源项目索引（记忆库）** | `python scripts/migrate_project_storage.py inventory` → `activePaths.memory/github-projects/INDEX.md` |
 | **Agent 开发路由（任务→路径/命令）** | [guides/README](docs/guides/README.md) · [route](docs/guides/route.md) · [ownership](docs/guides/ownership.md) · [loop](docs/guides/loop.md) · [playbook](docs/guides/playbook.md) |

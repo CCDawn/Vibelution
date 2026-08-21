@@ -95,7 +95,7 @@ LLM：`core/llm/PROTOCOL.md`
 
 | 需要 | 打开 |
 | --- | --- |
-| 分级/BRT/SSOT/日志/测试策略 | `docs/standards/development-standard.md` |
+| 分级/Router/SSOT/日志/测试策略 | `docs/standards/development-standard.md` |
 | 任务→文件 | `docs/guides/route.md` |
 | 路径 owner | `docs/guides/ownership.md` |
 | 命令/完成块 | `docs/guides/loop.md` |

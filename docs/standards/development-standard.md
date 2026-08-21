@@ -27,20 +27,20 @@ If a task worktree does not contain `AGENTS.md`, read this file directly before 
 - Do not treat passing validation as a new failure to diagnose.
 - Once a fix, validation, commit, or transaction-close cycle is genuinely complete, stop cleanly instead of inventing a side quest.
 
-## 2. Task Intake And BRT Gate
+## 2. Task Intake And Briefbound Router Gate
 
-**Default planning (mandatory for development):** On every development, fix, planning, review, or any task that may change code/behavior/validation boundaries, **load and follow the local `ccdawn-brt` routing skill before** broad repo scans, downstream skill choice, or write actions. Users do not need to invoke `/brt` or `/ccdawn-brt`. Live skill path:
+**Default planning (mandatory for development):** On every development, fix, planning, review, or any task that may change code/behavior/validation boundaries, **load and follow the installed `briefbound-router` before** broad repo scans, downstream skill choice, or write actions. Users do not need to invoke the skill by name. Live skill path:
 
-- Preferred: `%USERPROFILE%\.grok\skills\ccdawn-brt\SKILL.md` (or `$HOME/.grok/skills/ccdawn-brt/SKILL.md`)
-- Fallback: `<codex-skill-root>\ccdawn-brt\SKILL.md` when that is the installed root
+- Codex default: `%USERPROFILE%\.codex\skills\briefbound-router\SKILL.md`
+- Other supported clients: their installed `briefbound-router/SKILL.md`; do not substitute an untracked legacy skill.
 
 Before claiming the conversation uses the latest skill, re-read the on-disk `SKILL.md`. Project load order: root `AGENTS.md` §3.0 → this section → `docs/guides/README.md` step **0b**.
 
 Before choosing tools, worktree shape, validation, or reporting depth, classify the request as `FAST_PATCH`, `STANDARD_TASK`, or `HIGH_RISK`. The tier decides how much process is required; do not run the full ceremony before deciding whether it will add value.
 
-Use BRT on all development paths. Escalate to full alignment when a request involves expected behavior, defaults, restore/memory behavior, permissions, state transitions, edge cases, completion criteria, safety gates, promotion/apply/rollback workflows, persistence, public API behavior, agent workflow, or runtime lifecycle. For `FAST_PATCH`, BRT may stay internal and use a silent or micro intent lock — **do not skip the skill gate entirely**.
+Use Briefbound Router on all development paths. Escalate to full alignment when a request involves expected behavior, defaults, restore/memory behavior, permissions, state transitions, edge cases, completion criteria, safety gates, promotion/apply/rollback workflows, persistence, public API behavior, agent workflow, or runtime lifecycle. For `FAST_PATCH`, it may stay internal and use a silent or micro intent lock — **do not skip the skill gate entirely**.
 
-The BRT checkpoint must lock:
+The Router checkpoint must lock:
 
 - behavior to deliver;
 - observed symptom and suspected or confirmed root cause when the task is a fix;
@@ -51,7 +51,7 @@ The BRT checkpoint must lock:
 - allowed actions;
 - completion report shape.
 
-You may skip the full BRT flow for `FAST_PATCH` work: obvious typos, copy changes, docs-only updates, rule wording updates, mechanical refactors, dependency bumps, tiny internal helpers, small layout/style polish, or focused tests with no behavior ambiguity. If skipped, say why the fast path is safe when the final report would otherwise look under-evidenced. Skipping full BRT does **not** skip §2.2: still evaluate whether local reuse should be as-is, adapted, or replaced, still name one mature analog, and still rank what is worth borrowing.
+You may skip the full Router flow for `FAST_PATCH` work: obvious typos, copy changes, docs-only updates, rule wording updates, mechanical refactors, dependency bumps, tiny internal helpers, small layout/style polish, or focused tests with no behavior ambiguity. If skipped, say why the fast path is safe when the final report would otherwise look under-evidenced. Skipping the full Router flow does **not** skip §2.2: still evaluate whether local reuse should be as-is, adapted, or replaced, still name one mature analog, and still rank what is worth borrowing.
 
 Do not turn broad words such as `all`, `automatic`, `optimize`, `unified`, `smart`, `closed loop`, or `memory` into implementation without translating them into observable behavior first.
 
@@ -61,15 +61,15 @@ Use the lightest tier that protects the user, the repository, and concurrent wor
 
 | Tier | Use when | Required workflow | Validation and closeout |
 | --- | --- | --- | --- |
-| `FAST_PATCH` | Single-surface, reversible, low-risk work such as copy, docs, rule wording, tiny UI style/layout polish, small tests, focused read-only review, or a mechanical helper change. No data migration, API contract, deletion, permissions, runtime lifecycle, release, or shared DTO impact. | Use a task worktree and `codex/<task-slug>` branch exactly like every other write. `FAST_PATCH` only reduces planning and validation weight; it never permits direct writes or commits on `main`. BRT can be silent/micro. No planning/task-splitting/memory sync by default. Hot-file edits need active-claim review, narrow scope, scoped staging, and stronger final evidence. | Run the smallest useful check, or state why no executable check is useful. Review `git status` and the current diff. Commit the task branch, then integrate with `git merge --ff-only` when the merge gates pass. Report refresh/memory/version as `not affected` when true. |
-| `STANDARD_TASK` | Normal feature or bug work, multi-file UI changes, user-visible behavior, component extraction, backend route/service changes, or changes that need focused tests to be trustworthy. | Use a task worktree by default. Run BRT in micro/align mode, claim relevant scopes in multi-session work, and complete §2.2 (evaluate local reuse, survey mature schemes, **rank**, and reuse only the best-fitting slices). | Run focused tests and any required build/typecheck for the affected surface. Make a Launcher refresh decision. Self-review the current-task diff, then merge with `git merge --ff-only` when the merge gates pass, or report an exact blocker. Waiting for the user to request review or merge is not done. Update or propose project memory when the task changes durable project state. |
-| `HIGH_RISK` | Work touching data loss, archive/delete/reset, permissions, secrets, persistence, migrations, public API/DTO contracts, runtime/Launcher lifecycle, LLM/tool routing, memory/RAG, release/versioning, cross-lane coordination, remote publication, or shared hot files. | Full flow: BRT, root-cause or source-of-truth reasoning, explicit guard/claim decision, isolated worktree, plan when useful, no destructive action without explicit confirmation. Remote push/PR/publication may proceed only after the remote sync gate passes. | Add or update tests/logging evidence, run broad enough validation, handle refresh and memory explicitly, judge version impact, self-review diff, and close the claim with evidence. |
+| `FAST_PATCH` | Single-surface, reversible, low-risk work such as copy, docs, rule wording, tiny UI style/layout polish, small tests, focused read-only review, or a mechanical helper change. No data migration, API contract, deletion, permissions, runtime lifecycle, release, or shared DTO impact. | Use a task worktree and `codex/<task-slug>` branch exactly like every other write. `FAST_PATCH` only reduces planning and validation weight; it never permits direct writes or commits on `main`. Briefbound Router can be silent/micro. No planning/task-splitting/memory sync by default. Hot-file edits need active-claim review, narrow scope, scoped staging, and stronger final evidence. | Run the smallest useful check, or state why no executable check is useful. Review `git status` and the current diff. Commit the task branch, then integrate with `git merge --ff-only` when the merge gates pass. Report refresh/memory/version as `not affected` when true. |
+| `STANDARD_TASK` | Normal feature or bug work, multi-file UI changes, user-visible behavior, component extraction, backend route/service changes, or changes that need focused tests to be trustworthy. | Use a task worktree by default. Run Briefbound Router in micro/align mode, claim relevant scopes in multi-session work, and complete §2.2 (evaluate local reuse, survey mature schemes, **rank**, and reuse only the best-fitting slices). | Run focused tests and any required build/typecheck for the affected surface. Make a Launcher refresh decision. Self-review the current-task diff, then merge with `git merge --ff-only` when the merge gates pass, or report an exact blocker. Waiting for the user to request review or merge is not done. Update or propose project memory when the task changes durable project state. |
+| `HIGH_RISK` | Work touching data loss, archive/delete/reset, permissions, secrets, persistence, migrations, public API/DTO contracts, runtime/Launcher lifecycle, LLM/tool routing, memory/RAG, release/versioning, cross-lane coordination, remote publication, or shared hot files. | Full flow: Briefbound Router, root-cause or source-of-truth reasoning, explicit guard/claim decision, isolated worktree, plan when useful, no destructive action without explicit confirmation. Remote push/PR/publication may proceed only after the remote sync gate passes. | Add or update tests/logging evidence, run broad enough validation, handle refresh and memory explicitly, judge version impact, self-review diff, and close the claim with evidence. |
 
 Upgrade the tier when evidence shows hidden risk. Downgrade when the remaining process would only create delay without improving correctness, safety, or handoff quality.
 
 ### 2.2 Local Reuse And Mature-Scheme Research (both required)
 
-Before writing changes to code, behavior, architecture, or validation boundaries, complete **both** gates below. They are complementary, not alternatives. Depth scales with `FAST_PATCH` / `STANDARD_TASK` / `HIGH_RISK`; neither gate may be skipped wholesale. This project red line is stricter than generic BRT wording that treats an existing local pattern as permission to implement immediately.
+Before writing changes to code, behavior, architecture, or validation boundaries, complete **both** gates below. They are complementary, not alternatives. Depth scales with `FAST_PATCH` / `STANDARD_TASK` / `HIGH_RISK`; neither gate may be skipped wholesale. This project red line is stricter than generic routing wording that treats an existing local pattern as permission to implement immediately.
 
 1. **Evaluate local reuse.** Locate the owning surface and any in-repo helper, component, protocol, or lifecycle path that could be reused. Local existence is not proof of quality, and "can be reused" is not "should be copied as-is". Decide explicitly: reuse as-is, **adapt then reuse**, replace, or leave unused. Nearby code that is wrong, stale, over-fitted, or cheaper to improve first must be adapted or replaced rather than cloned.
 

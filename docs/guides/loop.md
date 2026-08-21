@@ -6,7 +6,7 @@
 
 | Tier | IF | THEN |
 | --- | --- | --- |
-| `FAST_PATCH` | 单面、可逆；无 API/权限/删除/迁移/生命周期 | 必须使用任务 worktree 与 `codex/<task-slug>` 分支；仅验证可精简；BRT 可静默 |
+| `FAST_PATCH` | 单面、可逆；无 API/权限/删除/迁移/生命周期 | 必须使用任务 worktree 与 `codex/<task-slug>` 分支；仅验证可精简；Router 可静默 |
 | `STANDARD_TASK` | 功能/Bug/多文件 UI/用户可见 | 默认任务 worktree；claim；聚焦测试；刷新判断 |
 | `HIGH_RISK` | 删档/密钥/迁移/Launcher/LLM 路由/RAG/发布/热文件/共享 DTO | 全证据；隔离；破坏性先确认 |
 

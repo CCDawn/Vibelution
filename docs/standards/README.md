@@ -16,9 +16,9 @@
 
 | 任务或问题 | 权威文档 |
 | --- | --- |
-| **默认规划：每次开发先 BRT** | 本机 `ccdawn-brt` skill · 根 [AGENTS.md §3.0](../../AGENTS.md) · [development-standard.md §2](development-standard.md) · [guides 加载序 0b](../guides/README.md) |
+| **默认规划：每次开发先 Router** | 本机 `briefbound-router` skill · 根 [AGENTS.md §3.0](../../AGENTS.md) · [development-standard.md §2](development-standard.md) · [guides 加载序 0b](../guides/README.md) |
 | **Agent 任务路由（非规则正文）** | [../guides/README.md](../guides/README.md) · [route](../guides/route.md) · [loop](../guides/loop.md) |
-| 开发分级、BRT、来源权威、结构边界、验证、Git、Launcher、发布、完成条件 | [development-standard.md](development-standard.md) · **章节跳转卡见本页 § development-standard** |
+| 开发分级、Briefbound Router、来源权威、结构边界、验证、Git、Launcher、发布、完成条件 | [development-standard.md](development-standard.md) · **章节跳转卡见本页 § development-standard** |
 | Windows 产品运行时禁止 cmd/控制台弹窗（永久红线） | [development-standard.md §8.0](development-standard.md) + 根 `AGENTS.md` §2 |
 | 写入前本地复用评估 + 仓外成熟方案调研（永久红线） | [development-standard.md §2.2](development-standard.md) + 根 `AGENTS.md` §2 |
 | 多 Agent、worktree、claim、merge 协作 | [../agents/worktree-collaboration.md](../agents/worktree-collaboration.md) |

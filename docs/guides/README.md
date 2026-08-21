@@ -8,8 +8,8 @@
 
 | 序 | 文件 | 约行数 | 何时读 | 何时跳过 |
 | --- | --- | --- | --- | --- |
-| 0 | `AGENTS.md` | ~120 | 每任务；红线（含 §3.0 默认 BRT） | 永不跳过 |
-| **0b** | **`ccdawn-brt` skill** | ~150 | 每次开发/修复/规划/会改代码或行为；声称最新前重读磁盘 `SKILL.md` | 纯只读问答且不改验证边界 |
+| 0 | `AGENTS.md` | ~120 | 每任务；红线（含 §3.0 默认 Router） | 永不跳过 |
+| **0b** | **`briefbound-router` skill** | ~120 | 每次开发/修复/规划/会改代码或行为；声称最新前重读磁盘 `SKILL.md` | 纯只读问答且不改验证边界 |
 | 1 | **本文件** | ~70 | 选子文档、查 token 预算 | 已明确只需 `route.md` 一行且不需 budget 表 |
 | 2 | `route.md` | ~45 | 任务类型 → READ/EDIT/TEST | 续接同任务且 route 行未变 |
 | 3 | `ownership.md` | ~90 | **写入前**定 owning surface | 只读审查、纯 docs、或 owner 已在 route 行闭合 |
@@ -17,7 +17,7 @@
 | 5 | `playbook.md` | ~75 | 架构边界/红线速查仍不够时 | route+standards 已答清边界 |
 | 6 | 下表「权威」列 | 不定 | 细则；**禁止**用 archive 当规则 | 子文档 + 模块 README 已足够 |
 
-**默认规划门：** 未完成 0b 的 BRT 意图/分级/owner 选择前，不得广扫全仓、加载无关 process skill、或开始实现写入。`FAST_PATCH` 可 silent/micro，仍服从 BRT 最小门。写入前另须闭合 `AGENTS.md` §2 / `development-standard` §2.2 调研门（本地复用评估含改造后再用，仓外成熟方案对照，**评估排序后只借最符合项目的部分**）。
+**默认规划门：** 未完成 0b 的 Router 意图/分级/owner 选择前，不得广扫全仓、加载无关 process skill、或开始实现写入。`FAST_PATCH` 可 silent/micro，仍服从最小 Router 门。写入前另须闭合 `AGENTS.md` §2 / `development-standard` §2.2 调研门（本地复用评估含改造后再用，仓外成熟方案对照，**评估排序后只借最符合项目的部分**）。
 
 **Token 预算（guides 全目录）：** 若按序全读 §0–§5 约 **~600 行**；常态开发最小集 = `AGENTS.md` + `route.md` 一行 + `ownership.md` 命中段 + `loop.md` §1/§3/§6（约 **~250 行**）。
 
