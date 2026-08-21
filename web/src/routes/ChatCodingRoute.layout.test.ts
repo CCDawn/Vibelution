@@ -2003,7 +2003,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("fetchChatRoomDetail(activeGroupRoomId)");
     expect(chatApiSource).toContain("`/api/chat-rooms/${encodeURIComponent(roomId)}`");
     expect(routeAndStreamSource).toContain("new EventSource(`/api/chat-rooms/${streamRoomId}/events`)");
-    expect(routeAndStreamSource).toContain("syncChatRoomDetail(payload.detail)");
+    expect(routeAndStreamSource).toContain("scheduleChatRoomDetail(payload.detail)");
     expect(routeAndStreamSource).toContain("browser.chat_room_stream.closed");
     expect(routeSource).toContain("useGroupRoomStream");
     expect(routeSource).toContain("handleStartGroupRound");
