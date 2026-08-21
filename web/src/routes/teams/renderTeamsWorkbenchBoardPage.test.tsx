@@ -1,9 +1,34 @@
 /** @vitest-environment happy-dom */
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { TeamsWorkbenchInspectorOverlay } from "./renderTeamsWorkbenchBoardPage";
+vi.mock("../../components/vui", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../components/vui")>();
+  return {
+    ...actual,
+    VBoardWorkbenchPage: (props: {
+      layoutId?: string;
+      rail?: React.ReactNode;
+      railClassName?: string;
+      workspaceClassName?: string;
+    }) => (
+      <div
+        data-testid="mock-board-workbench"
+        data-layout-id={props.layoutId ?? ""}
+        data-rail-present={props.rail ? "true" : "false"}
+        data-rail-class={props.railClassName ?? ""}
+        data-workspace-class={props.workspaceClassName ?? ""}
+      />
+    ),
+  };
+});
+
+import {
+  renderTeamsWorkbenchBoardPage,
+  TeamsWorkbenchInspectorOverlay,
+  type TeamsWorkbenchBoardPageProps,
+} from "./renderTeamsWorkbenchBoardPage";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -12,6 +37,27 @@ const styles: Record<string, string> = {
   boardInspectorOverlayPanel: "panel",
   boardInspectorOverlayHeader: "header",
   boardInspectorOverlayBody: "body",
+};
+
+const baseBoardProps: TeamsWorkbenchBoardPageProps = {
+  lang: "zh",
+  styles: { route: "route" },
+  teamsRailResize: {
+    sidebar: { id: "rail", defaultWidth: 280, minWidth: 240, maxWidth: 360 },
+    aside: { id: "inspector", defaultWidth: 360, minWidth: 300, maxWidth: 520 },
+  },
+  selectedTeamContextTitle: "挑战杯科研团队",
+  teamShellRail: <aside data-testid="team-shell-rail" />,
+  teamShellToolbar: <div data-testid="team-shell-toolbar" />,
+  boardPrimaryMode: "overview",
+  workflowPending: false,
+  workflowReady: true,
+  challengeCupResearchTeamSelected: true,
+  overviewSlot: null,
+  stageSlot: null,
+  launcherSlot: null,
+  showBoardInspectorAside: false,
+  inspectorBody: null,
 };
 
 function keydown(target: Element, key: string) {
@@ -109,5 +155,54 @@ describe("TeamsWorkbenchInspectorOverlay", () => {
     expect(dismissals).toBe(1);
     expect(panel?.getAttribute("role")).toBe("region");
     expect(panel?.getAttribute("aria-label")).toBe("Detail panel");
+  });
+});
+
+describe("renderTeamsWorkbenchBoardPage outer shell chrome", () => {
+  let host: HTMLDivElement | null = null;
+  let root: Root | null = null;
+
+  afterEach(() => {
+    if (root) {
+      act(() => root?.unmount());
+    }
+    host?.remove();
+    host = null;
+    root = null;
+  });
+
+  function renderBoard(overrides: Partial<TeamsWorkbenchBoardPageProps> = {}) {
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    act(() => {
+      root?.render(renderTeamsWorkbenchBoardPage({ ...baseBoardProps, ...overrides }));
+    });
+    const shell = document.body.querySelector<HTMLElement>('[data-testid="mock-board-workbench"]');
+    if (!shell) {
+      throw new Error("board workbench mock not rendered");
+    }
+    return shell;
+  }
+
+  it("removes the generic rail and persisted outer layout for the Challenge Cup workflow", () => {
+    const shell = renderBoard({ suppressOuterShellChrome: true });
+
+    expect(shell.getAttribute("data-layout-id")).toBe("");
+    expect(shell.getAttribute("data-rail-present")).toBe("false");
+    expect(shell.getAttribute("data-rail-class")).toBe("!hidden");
+    expect(shell.getAttribute("data-workspace-class")).toBe("!grid-cols-[minmax(0,1fr)]");
+  });
+
+  it("keeps the generic rail and persisted layout for ordinary Teams surfaces", () => {
+    const shell = renderBoard({
+      challengeCupResearchTeamSelected: false,
+      suppressOuterShellChrome: false,
+    });
+
+    expect(shell.getAttribute("data-layout-id")).toBeTruthy();
+    expect(shell.getAttribute("data-rail-present")).toBe("true");
+    expect(shell.getAttribute("data-rail-class")).toBe("");
+    expect(shell.getAttribute("data-workspace-class")).toBe("");
   });
 });

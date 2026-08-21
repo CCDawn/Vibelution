@@ -19,6 +19,8 @@ export type TeamsWorkbenchBoardPageProps = {
   workflowPending: boolean;
   workflowReady: boolean;
   challengeCupResearchTeamSelected: boolean;
+  /** Challenge Cup workflow owns its own process rail and pane geometry. */
+  suppressOuterShellChrome?: boolean;
   overviewSlot: ReactNode;
   stageSlot: ReactNode;
   launcherSlot: ReactNode;
@@ -99,6 +101,7 @@ export function TeamsWorkbenchInspectorOverlay({
 
 export function renderTeamsWorkbenchBoardPage(props: TeamsWorkbenchBoardPageProps) {
   const p = props;
+  const suppressOuterShellChrome = p.suppressOuterShellChrome === true;
   const inspectorVisible = p.showBoardInspectorAside;
   const overlayActive = Boolean(p.narrowInspector && p.inspectorOverlayOpen && p.inspectorBody);
   const inspectorOverlayLabel = p.lang === "zh" ? "详情面板" : "Detail panel";
@@ -112,8 +115,8 @@ export function renderTeamsWorkbenchBoardPage(props: TeamsWorkbenchBoardPageProp
         className={p.styles.route}
         hideHeader
         domainRecipe="teams-organization-workbench"
-        layoutId={TEAMS_LAYOUT_ID}
-        resize={{
+        layoutId={suppressOuterShellChrome ? undefined : TEAMS_LAYOUT_ID}
+        resize={suppressOuterShellChrome ? undefined : {
           ...p.teamsRailResize,
           collapse: {
             sidebar: {
@@ -123,11 +126,13 @@ export function renderTeamsWorkbenchBoardPage(props: TeamsWorkbenchBoardPageProp
             },
           },
         }}
+        railClassName={suppressOuterShellChrome ? "!hidden" : undefined}
+        workspaceClassName={suppressOuterShellChrome ? "!grid-cols-[minmax(0,1fr)]" : undefined}
         shellTestId="team-shell-workspace"
         shellMode="board"
         ariaLabel={p.selectedTeamContextTitle}
         title={p.lang === "zh" ? "团队工作台" : "Team workbench"}
-        rail={p.teamShellRail}
+        rail={suppressOuterShellChrome ? null : p.teamShellRail}
         toolbar={p.challengeCupResearchTeamSelected ? undefined : p.teamShellToolbar}
         // Process / challenge board: pure fill host (no pad/scroll/content-start floor).
         // Absolute children (ResearchProcessWorkspace) pin to this cell.

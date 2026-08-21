@@ -23,4 +23,11 @@ describe("useTeamsWorkbenchShellPhase hook order", () => {
     expect(shellSource).toContain("researchPrimaryActionLabel(researchPrimaryAction, lang)");
     expect(shellSource).toContain("statusCtaDisabled: Boolean(researchPrimaryAction?.blocked)");
   });
+
+  it("suppresses only the outer team shell chrome for the Challenge Cup workflow", () => {
+    expect(shellSource).toContain(
+      'challengeCupResearchTeamSelected && researchWorkspaceView === "workflow"',
+    );
+    expect(shellSource).toContain("suppressOuterShellChrome: suppressOuterTeamShellChrome");
+  });
 });
