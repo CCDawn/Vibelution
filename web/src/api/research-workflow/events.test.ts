@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { resetControlTokenForTests, seedControlTokenForTests } from "../client";
 import type { WorkflowEventEnvelope } from "../types/research-workflow/events";
 import { replayResearchWorkflowEvents } from "./events";
 
@@ -18,8 +19,14 @@ function envelope(sequence: number): WorkflowEventEnvelope {
 }
 
 describe("replayResearchWorkflowEvents", () => {
+  beforeEach(() => {
+    resetControlTokenForTests();
+    seedControlTokenForTests();
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
+    resetControlTokenForTests();
   });
 
   it("follows EventPage cursors until hasMore is false", async () => {
@@ -64,6 +71,11 @@ describe("replayResearchWorkflowEvents", () => {
     });
     expect(events.map((item) => item.sequence)).toEqual([1, 2, 3]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(new Headers(init?.headers).get("X-Vibelution-Control-Token")).toBe(
+        "test-control-token",
+      );
+    }
   });
 
   it("fails closed when the replay cursor does not advance", async () => {

@@ -2,6 +2,7 @@ import type {
   ResearchWorkflowNodeDetail,
   ResearchWorkflowSnapshot,
 } from "../types/research-workflow/core";
+import { fetchJson } from "../client";
 
 function requireTeamId(teamId: string): string {
   const normalized = String(teamId || "").trim();
@@ -18,14 +19,10 @@ export async function fetchResearchWorkflowSnapshot(options: {
 }): Promise<ResearchWorkflowSnapshot> {
   const teamId = requireTeamId(options.teamId);
   const runId = String(options.runId || "").trim();
-  const response = await fetch(
+  return fetchJson<ResearchWorkflowSnapshot>(
     `/api/research/workflow-runs/${encodeURIComponent(runId)}/snapshot?teamId=${encodeURIComponent(teamId)}`,
-    { signal: options.signal, headers: { Accept: "application/json" } },
+    { signal: options.signal },
   );
-  if (!response.ok) {
-    throw new Error(`snapshot_http_${response.status}`);
-  }
-  return (await response.json()) as ResearchWorkflowSnapshot;
 }
 
 export async function fetchResearchWorkflowNodeDetail(options: {
@@ -37,12 +34,8 @@ export async function fetchResearchWorkflowNodeDetail(options: {
   const teamId = requireTeamId(options.teamId);
   const runId = String(options.runId || "").trim();
   const nodeId = String(options.nodeId || "").trim();
-  const response = await fetch(
+  return fetchJson<ResearchWorkflowNodeDetail>(
     `/api/research/workflow-runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}?teamId=${encodeURIComponent(teamId)}`,
-    { signal: options.signal, headers: { Accept: "application/json" } },
+    { signal: options.signal },
   );
-  if (!response.ok) {
-    throw new Error(`node_detail_http_${response.status}`);
-  }
-  return (await response.json()) as ResearchWorkflowNodeDetail;
 }

@@ -1,4 +1,5 @@
 import type { WorkflowEventEnvelope } from "../types/research-workflow/events";
+import { fetchJson } from "../client";
 
 function requireTeamId(teamId: string): string {
   const normalized = String(teamId || "").trim();
@@ -33,14 +34,10 @@ export async function fetchResearchWorkflowEvents(options: {
     teamId,
     afterSequence: String(Number.isFinite(after) ? after : 0),
   });
-  const response = await fetch(
+  return fetchJson<EventPage>(
     `/api/research/workflow-runs/${encodeURIComponent(runId)}/events?${qs.toString()}`,
-    { signal: options.signal, headers: { Accept: "application/json" } },
+    { signal: options.signal },
   );
-  if (!response.ok) {
-    throw new Error(`events_http_${response.status}`);
-  }
-  return (await response.json()) as EventPage;
 }
 
 const MAX_REPLAY_PAGES = 32;
