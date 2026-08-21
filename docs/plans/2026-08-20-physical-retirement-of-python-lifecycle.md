@@ -37,6 +37,14 @@ web 客户端（`web/src/api/launcher.ts`）：对应方法改为 IPC-only——
 
 ### 批次 D · RM workbench 部分切除（最大手术，单独评审后做）
 
+**D 耦合面清点（2026-08-21 已完成，实测与 grep 证实）：**
+- 主线启停已 Electron 原生：RM 队列最后一次受理 restart 是 2026-08-20T11:52（迁移收口前）；此后重启只产生 settings 事件，无 command_queue 事件。
+- **演化域仍依赖 RM 队列的 workbench handler，不可全删**：`supervised_control_service` 提交 `pause/resume/retry/stop_supervised_run`；`lifecycle_action_dispatcher` 把演化意图映射为 `hot_restart_workbench`（apply 后热重启）、`close_workbench`（request_app_exit）、`recover_workbench`。daemon 切除只能针对确认零提交者的 handler（open_workbench / restart_workbench 待逐个验证），hot_restart/close/recover 必须保留或随演化热重启通道一起迁移。
+- `vibelution_launcher.py` 仍被两处夹持：cleanup 停实例的 `--action stop` 子进程、`workbench_controller.py` 的 RM close 路径。删除该脚本前必须先替换这两条。
+
+**D-1 已执行（2026-08-21）**：`run_isolated_operation` 的 start/restart 分支替换为 control_plane_is_electron 拒绝；孤儿 helper（`_open_instance_window`/`_existing_matching_start_claim`/`_reclaim_stale_in_flight_start`/`current_live_ports`）删除；`isolated_workbench_window.py` 的窗口打开机器删除（314→228 行），关窗/回写/标题/overlay 保留。
+**D 剩余**：列表/清理只读面搬迁后整删 `branch_instance_lifecycle.py` 与 `isolated_workbench_window.py`；替换 cleanup stop 与 RM close 的脚本调用后删除 `vibelution_launcher.py`；daemon 逐 handler 切除。
+
 `core/runtime_manager/daemon.py`（5859 行）中 workbench 命令队列/reconcile/observe 与 `workbench_controller.py` 的 launcher-action 链。**边界：演化循环（self/supervised）、hot-restart 会话、storage migration 必须原样保留。** 先产出 daemon 内 workbench↔evolution 耦合面清单（符号级 grep），耦合拆不干净就再细分批次。本批次不做就不做，禁止半途合入。
 
 ## 2. 测试收缩对照表
