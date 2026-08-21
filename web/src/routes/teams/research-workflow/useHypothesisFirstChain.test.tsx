@@ -22,6 +22,7 @@ import {
 import {
   useHypothesisFirstChain,
   useHypothesisFirstChainInvalidation,
+  shouldPollQuestionScopedChain,
   type HypothesisFirstChainData,
 } from "./useHypothesisFirstChain";
 
@@ -216,7 +217,7 @@ describe("useHypothesisFirstChain", () => {
     await flushQueries();
 
     expect(latest!.loading).toBe(false);
-    expect(latest!.scopeKey).toBe("team-1::no-question");
+    expect(latest!.questionScopeKey).toBe("team-1::no-question");
     expect(latest!.scopeMismatch).toBe(false);
     expect(latest!.chainState).toBeNull();
     expect(latest!.selection).toBeNull();
@@ -235,7 +236,7 @@ describe("useHypothesisFirstChain", () => {
 
     expect(latest!.error).toBeNull();
     expect(latest!.loading).toBe(false);
-    expect(latest!.scopeKey).toBe("team-1::Q-01");
+    expect(latest!.questionScopeKey).toBe("team-1::Q-01");
     expect(latest!.scopeMismatch).toBe(false);
     expect(latest!.chainState?.questionId).toBe("Q-01");
     expect(latest!.selection?.selectionId).toBe("sel-2");
@@ -328,6 +329,31 @@ describe("useHypothesisFirstChain", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("question-scoped hypothesis polling", () => {
+  it("does not poll a chain payload from another question", () => {
+    expect(shouldPollQuestionScopedChain({
+      questionId: "Q-01",
+      state: {
+        ...chainStatePayload(),
+        questionId: "Q-02",
+        collectionReady: true,
+        pendingCollectionCount: 1,
+      },
+    })).toBe(false);
+  });
+
+  it("ignores live collection requests from other questions", () => {
+    expect(shouldPollQuestionScopedChain({
+      questionId: "Q-01",
+      requests: [{ ...requestRecord("other"), questionId: "Q-02" }],
+    })).toBe(false);
+    expect(shouldPollQuestionScopedChain({
+      questionId: "Q-01",
+      requests: [requestRecord("req-1")],
+    })).toBe(true);
   });
 });
 

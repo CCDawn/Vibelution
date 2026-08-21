@@ -101,6 +101,11 @@ export type BuildResearchWorkflowContextInput = {
   runVersion?: number | null;
   dataQuestionId?: string | null;
   dataRunId?: string | null;
+  dataTeamId?: string | null;
+  dataWorkflowId?: string | null;
+  dataRunVersion?: number | null;
+  /** Once true, every requested identity must be present and equal. */
+  dataScopeReady?: boolean;
   loading?: boolean;
   refreshing?: boolean;
   error?: string | null;
@@ -131,28 +136,47 @@ export function buildResearchWorkflowScopeKey(input: {
   workflowId: string;
   questionId?: string | null;
   runId?: string | null;
+  runVersion?: number | null;
 }): string {
   return [
     normalized(input.teamId),
     normalized(input.workflowId),
     normalizedQuestion(input.questionId) || "no-question",
     normalized(input.runId) || "no-run",
+    input.runVersion == null ? "no-version" : String(input.runVersion),
   ].join("::");
 }
 
 export function researchWorkflowScopeMismatch(input: {
   questionId?: string | null;
   runId?: string | null;
+  runVersion?: number | null;
+  teamId?: string | null;
+  workflowId?: string | null;
+  dataTeamId?: string | null;
+  dataWorkflowId?: string | null;
   dataQuestionId?: string | null;
   dataRunId?: string | null;
+  dataRunVersion?: number | null;
+  dataScopeReady?: boolean;
 }): boolean {
-  const requestedQuestion = normalizedQuestion(input.questionId);
-  const resolvedQuestion = normalizedQuestion(input.dataQuestionId);
-  if (requestedQuestion && resolvedQuestion && requestedQuestion !== resolvedQuestion) return true;
-
-  const requestedRun = normalized(input.runId);
-  const resolvedRun = normalized(input.dataRunId);
-  return Boolean(requestedRun && resolvedRun && requestedRun !== resolvedRun);
+  const pairs: Array<[string, string]> = [
+    [normalized(input.teamId), normalized(input.dataTeamId)],
+    [normalized(input.workflowId), normalized(input.dataWorkflowId)],
+    [normalizedQuestion(input.questionId), normalizedQuestion(input.dataQuestionId)],
+    [normalized(input.runId), normalized(input.dataRunId)],
+  ];
+  for (const [requested, resolved] of pairs) {
+    if (requested && resolved && requested !== resolved) return true;
+    if (input.dataScopeReady && requested && !resolved) return true;
+  }
+  if (
+    input.runVersion != null
+    && input.dataRunVersion != null
+    && input.runVersion !== input.dataRunVersion
+  ) return true;
+  if (input.dataScopeReady && input.runVersion != null && input.dataRunVersion == null) return true;
+  return false;
 }
 
 type TaskPresentation = Pick<
@@ -347,7 +371,13 @@ export function buildResearchWorkflowContext(
   const questionId = normalizedQuestion(input.questionId) || null;
   const runId = normalized(input.runId) || null;
   const scope = {
-    key: buildResearchWorkflowScopeKey({ teamId, workflowId, questionId, runId }),
+    key: buildResearchWorkflowScopeKey({
+      teamId,
+      workflowId,
+      questionId,
+      runId,
+      runVersion: input.runVersion,
+    }),
     teamId,
     workflowId,
     questionId,

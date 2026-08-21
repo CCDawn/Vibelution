@@ -24,7 +24,8 @@ describe("researchWorkflowContextModel", () => {
       workflowId: CHALLENGE_CUP_WORKFLOW_ID,
       questionId: "sci-004",
       runId: " run-4 ",
-    })).toContain("research-team::challenge-cup-research::SCI-004::run-4");
+      runVersion: 2,
+    })).toBe("research-team::challenge-cup-research::SCI-004::run-4::2");
     expect(researchWorkflowScopeMismatch({
       questionId: "SCI-004",
       dataQuestionId: "SCI-001",
@@ -35,12 +36,26 @@ describe("researchWorkflowContextModel", () => {
       runId: "run-4",
       dataRunId: "run-4",
     })).toBe(false);
+    expect(researchWorkflowScopeMismatch({
+      teamId: "research-team",
+      workflowId: CHALLENGE_CUP_WORKFLOW_ID,
+      questionId: "SCI-004",
+      runId: "run-4",
+      runVersion: 2,
+      dataTeamId: "research-team",
+      dataWorkflowId: CHALLENGE_CUP_WORKFLOW_ID,
+      dataQuestionId: null,
+      dataRunId: "run-4",
+      dataRunVersion: 2,
+      dataScopeReady: true,
+    })).toBe(true);
   });
 
   it("fails closed while a previous question payload is still visible", () => {
     const context = buildResearchWorkflowContext({
       ...base,
       dataQuestionId: "SCI-001",
+      dataScopeReady: true,
       nextAction: {
         stage: "selection_required",
         targetNodeId: "hf_selection",

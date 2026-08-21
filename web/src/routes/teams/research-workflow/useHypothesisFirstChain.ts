@@ -43,7 +43,7 @@ export const hypothesisFirstChainReviewRoundLinksKey = (teamId: string, question
 
 export type HypothesisFirstChainData = {
   /** Stable identity of the requested read scope. */
-  scopeKey: string;
+  questionScopeKey: string;
   /** True when a question-keyed payload declares a different question. */
   scopeMismatch: boolean;
   chainState: HypothesisFirstChainState | null;
@@ -93,6 +93,21 @@ function recordMatchesQuestion(value: string | null | undefined, questionId: str
   return Boolean(recordQuestion && recordQuestion === questionId);
 }
 
+export function shouldPollQuestionScopedChain(input: {
+  questionId: string;
+  state?: HypothesisFirstChainState;
+  requests?: CollectionRequestRecord[];
+}): boolean {
+  const questionId = normalizedQuestion(input.questionId);
+  const state = input.state && recordMatchesQuestion(input.state.questionId, questionId)
+    ? input.state
+    : undefined;
+  const requests = (input.requests ?? []).filter((request) => (
+    recordMatchesQuestion(request.questionId, questionId)
+  ));
+  return shouldPollCollections(state, requests);
+}
+
 export function useHypothesisFirstChain(teamId: string, questionId: string): HypothesisFirstChainData {
   const requestedQuestionId = normalizedQuestion(questionId);
   const enabled = Boolean(teamId.trim() && requestedQuestionId);
@@ -102,7 +117,10 @@ export function useHypothesisFirstChain(teamId: string, questionId: string): Hyp
     queryFn: ({ signal }) => fetchHypothesisFirstChainState(teamId, questionId, { signal }),
     enabled,
     refetchInterval: (query) =>
-      shouldPollCollections(query.state.data, undefined)
+      shouldPollQuestionScopedChain({
+        questionId: requestedQuestionId,
+        state: query.state.data,
+      })
         ? resolvePollingInterval(pageVisible, BOUNDED_POLL_MS)
         : false,
   });
@@ -127,7 +145,10 @@ export function useHypothesisFirstChain(teamId: string, questionId: string): Hyp
     queryFn: ({ signal }) => fetchCollectionRequests(teamId, questionId, { signal }),
     enabled,
     refetchInterval: (query) =>
-      shouldPollCollections(undefined, query.state.data?.requests)
+      shouldPollQuestionScopedChain({
+        questionId: requestedQuestionId,
+        requests: query.state.data?.requests,
+      })
         ? resolvePollingInterval(pageVisible, BOUNDED_POLL_MS)
         : false,
   });
@@ -180,7 +201,7 @@ export function useHypothesisFirstChain(teamId: string, questionId: string): Hyp
     && resolvedChainQuestionId !== requestedQuestionId,
   );
   return {
-    scopeKey: `${teamId.trim()}::${requestedQuestionId || "no-question"}`,
+    questionScopeKey: `${teamId.trim()}::${requestedQuestionId || "no-question"}`,
     scopeMismatch,
     chainState: scopeMismatch ? null : (chainState.data ?? null),
     selection,
