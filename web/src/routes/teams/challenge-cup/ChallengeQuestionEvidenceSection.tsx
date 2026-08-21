@@ -3,6 +3,8 @@ import { ExternalLink } from "lucide-react";
 import type { ChallengeQuestionRunDetailPayload } from "../../../api/types";
 import { VStatusChip, VSurface } from "../../../components/vui";
 import {
+  challengeEvidenceSourceTypeLabel,
+  challengeEvidenceVerificationStatusLabel,
   ChallengeQuestionSectionHeading,
   ChallengeStringList,
 } from "./ChallengeQuestionDetailPrimitives";
@@ -70,8 +72,8 @@ export function ChallengeQuestionEvidenceSection({ detail, lang = "zh" }: Challe
                 </VStatusChip>
               </div>
               <div className={css.metadata}>
-                <span>{evidence.source_type}</span>
-                <span>{evidence.verification_status}</span>
+                <span>{challengeEvidenceSourceTypeLabel(evidence.source_type, lang)}</span>
+                <span>{challengeEvidenceVerificationStatusLabel(evidence.verification_status, lang)}</span>
                 {evidence.doi ? <span>DOI {evidence.doi}</span> : null}
                 <a href={evidence.source_url} target="_blank" rel="noreferrer noopener">
                   {isZh ? "打开来源" : "Open source"} <ExternalLink size={13} aria-hidden="true" />

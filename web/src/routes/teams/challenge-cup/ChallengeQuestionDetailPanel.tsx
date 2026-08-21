@@ -25,6 +25,7 @@ import { ChallengeQuestionRegisterDialog } from "./ChallengeQuestionRegisterDial
 import { HypothesisSelectionPanel } from "./HypothesisSelectionPanel";
 import { ChallengeQuestionTokenUsage } from "./ChallengeTokenUsageStrip";
 import { isTokenUsageOverview, questionTokenUsage } from "./challengeTokenUsageModel";
+import { challengeRecordStatusLabel } from "./ChallengeQuestionDetailPrimitives";
 import css from "./ChallengeQuestionDetailPanel.styles";
 
 export type ChallengeQuestionDetailPanelProps = {
@@ -67,26 +68,6 @@ const DETAIL_ANCHORS_EN = [
   ["artifact", "Final artifact"],
 ] as const;
 
-const RECORD_STATUS_LABELS: Record<string, string> = {
-  approved: "正式批准",
-  pending_review: "待审核",
-  review_required: "待审核",
-  needs_revision: "待修订",
-  rejected: "已驳回",
-};
-
-const RECORD_STATUS_LABELS_EN: Record<string, string> = {
-  approved: "Approved",
-  pending_review: "Pending review",
-  review_required: "Pending review",
-  needs_revision: "Needs revision",
-  rejected: "Rejected",
-};
-
-function recordStatusLabel(status: string, isZh: boolean): string {
-  return (isZh ? RECORD_STATUS_LABELS : RECORD_STATUS_LABELS_EN)[status] ?? status;
-}
-
 export function ChallengeQuestionDetailPanel({
   requestedQuestionId,
   teamId = "",
@@ -108,9 +89,15 @@ export function ChallengeQuestionDetailPanel({
     staleTime: 15_000,
     retry: false,
   });
-  const questionUsage = isTokenUsageOverview(tokenUsageQuery.data)
+  const tokenUsageOverview = isTokenUsageOverview(tokenUsageQuery.data);
+  const questionUsage = tokenUsageOverview
     ? questionTokenUsage(tokenUsageQuery.data, requestedQuestionId)
     : null;
+  const tokenUsageState = tokenUsageQuery.isPending
+    ? "pending"
+    : tokenUsageQuery.isError || !tokenUsageOverview
+      ? "error"
+      : "success";
 
   if (isLoading) {
     return (
@@ -165,7 +152,7 @@ export function ChallengeQuestionDetailPanel({
         </div>
         <div className={css.headerActions}>
           <VStatusChip tone={record.status === "approved" ? "accent" : "warning"}>
-            {recordStatusLabel(record.status, isZh)}
+            {challengeRecordStatusLabel(record.status, isZh ? "zh" : "en")}
           </VStatusChip>
           {onSelectRunId && detail.runs.length > 1 ? (
             <label className={css.runSwitcher} data-testid="question-run-switcher">
@@ -198,7 +185,7 @@ export function ChallengeQuestionDetailPanel({
         ))}
       </nav>
 
-      {teamId ? <ChallengeQuestionTokenUsage lang={lang} usage={questionUsage} /> : null}
+      {teamId ? <ChallengeQuestionTokenUsage lang={lang} usage={questionUsage} state={tokenUsageState} /> : null}
 
       <ChallengeQuestionEvidenceSection detail={detail} lang={lang} />
       <ChallengeQuestionAnalysisSection output={output} lang={lang} />

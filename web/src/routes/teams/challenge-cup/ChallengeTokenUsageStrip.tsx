@@ -49,11 +49,26 @@ export function ChallengeTokenUsageStrip({
 export function ChallengeQuestionTokenUsage({
   lang = "zh",
   usage,
+  state = "success",
 }: {
   lang?: "zh" | "en";
   usage: TokenUsageQuestion | null;
+  state?: "pending" | "error" | "success";
 }) {
   const zh = lang === "zh";
+  if (state !== "success") {
+    const stateLabel = state === "pending"
+      ? (zh ? "读取中" : "Loading")
+      : (zh ? "不可用" : "Unavailable");
+    return (
+      <details className={styles.details} data-testid="challenge-question-token-usage" open>
+        <summary>{zh ? "本题 token 消耗" : "Question token usage"} · {stateLabel}</summary>
+        <p className={styles.note} role="status" data-testid={`challenge-question-token-usage-${state}`}>
+          {stateLabel}
+        </p>
+      </details>
+    );
+  }
   const stages = usage?.stages ?? [];
   return (
     <details className={styles.details} data-testid="challenge-question-token-usage">

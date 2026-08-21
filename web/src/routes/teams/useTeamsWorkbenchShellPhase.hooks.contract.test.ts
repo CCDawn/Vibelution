@@ -17,4 +17,10 @@ describe("useTeamsWorkbenchShellPhase hook order", () => {
     expect(lastHook).toBeGreaterThan(-1);
     expect(lastHook).toBeLessThan(firstConditionalExit);
   });
+
+  it("wires the research primary action into the left status rail CTA", () => {
+    expect(shellSource).toContain("const statusCta = researchWorkflowTeamSelected && researchPrimaryAction");
+    expect(shellSource).toContain("researchPrimaryActionLabel(researchPrimaryAction, lang)");
+    expect(shellSource).toContain("statusCtaDisabled: Boolean(researchPrimaryAction?.blocked)");
+  });
 });

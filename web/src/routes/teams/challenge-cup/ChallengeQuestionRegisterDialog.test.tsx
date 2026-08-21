@@ -228,9 +228,11 @@ describe("ChallengeQuestionRegisterDialog", () => {
       );
     });
     expect(document.body.textContent).toContain("登记成功");
-    expect(document.body.textContent).toContain("review_required");
-    expect(document.body.textContent).toContain("Schema passed");
-    expect(document.body.textContent).toContain("引用 passed");
+    expect(document.body.textContent).toContain("待审核");
+    expect(document.body.textContent).toContain("结构校验 通过");
+    expect(document.body.textContent).toContain("引用 通过");
+    expect(document.body.textContent).not.toContain("review_required");
+    expect(document.body.textContent).not.toContain("Schema passed");
 
     const openDetail = buttonByText("查看题目详情")!;
     await act(async () => {

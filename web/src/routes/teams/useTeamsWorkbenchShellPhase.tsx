@@ -510,7 +510,9 @@ export function useTeamsWorkbenchShellPhase(d: any): ReactNode {
     : (lang === "zh"
       ? "点节点看执行者。切团队用顶栏，不要在左栏找名单。"
       : "Select a node to inspect the assignee. Switch teams in the toolbar.");
-  const statusCta = undefined;
+  const statusCta = researchWorkflowTeamSelected && researchPrimaryAction
+    ? researchPrimaryActionLabel(researchPrimaryAction, lang)
+    : undefined;
 
   const teamShellRail = renderTeamsShellRail({
     lang,

@@ -50,4 +50,28 @@ describe("ChallengeTokenUsageStrip", () => {
     expect(markup).toContain("hypothesis_design token 消耗超过同阶段中位数 3 倍");
     expect(markup).toContain("hypothesis_design: 40 token");
   });
+
+  it("does not present zeroes while question usage is pending or unavailable", () => {
+    const pendingMarkup = renderToStaticMarkup(
+      <ChallengeQuestionTokenUsage usage={null} state="pending" />,
+    );
+    expect(pendingMarkup).toContain("读取中");
+    expect(pendingMarkup).toContain("open=\"\"");
+    expect(pendingMarkup).not.toContain("0 token");
+
+    const errorMarkup = renderToStaticMarkup(
+      <ChallengeQuestionTokenUsage usage={null} state="error" />,
+    );
+    expect(errorMarkup).toContain("不可用");
+    expect(errorMarkup).toContain("open=\"\"");
+    expect(errorMarkup).not.toContain("0 token");
+  });
+
+  it("shows zeroes only after a successful response with no row for the question", () => {
+    const markup = renderToStaticMarkup(
+      <ChallengeQuestionTokenUsage usage={null} state="success" />,
+    );
+    expect(markup).toContain("0 token");
+    expect(markup).toContain("0 次调用");
+  });
 });

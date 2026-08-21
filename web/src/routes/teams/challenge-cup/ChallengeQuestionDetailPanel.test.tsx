@@ -5,6 +5,11 @@ import { describe, expect, it } from "vitest";
 
 import type { ChallengeQuestionRunDetailPayload } from "../../../api/types";
 import { ChallengeQuestionDetailPanel } from "./ChallengeQuestionDetailPanel";
+import {
+  challengeEvidenceSourceTypeLabel,
+  challengeEvidenceVerificationStatusLabel,
+  challengeRecordStatusLabel,
+} from "./ChallengeQuestionDetailPrimitives";
 
 function renderPanel(ui: React.ReactElement): string {
   return renderToStaticMarkup(
@@ -330,6 +335,19 @@ describe("ChallengeQuestionDetailPanel", () => {
 
     expect(markup).toContain(">支持<");
     expect(markup).not.toContain(">supports<");
+    expect(markup).toContain("同行评审论文");
+    expect(markup).toContain("元数据已核验");
+    expect(markup).not.toContain("peer_reviewed_paper");
+    expect(markup).not.toContain("metadata_checked");
+  });
+
+  it("keeps the shared challenge labels bilingual", () => {
+    expect(challengeRecordStatusLabel("review_required", "zh")).toBe("待审核");
+    expect(challengeRecordStatusLabel("review_required", "en")).toBe("Pending review");
+    expect(challengeEvidenceSourceTypeLabel("peer_reviewed_paper", "zh")).toBe("同行评审论文");
+    expect(challengeEvidenceSourceTypeLabel("peer_reviewed_paper", "en")).toBe("Peer-reviewed paper");
+    expect(challengeEvidenceVerificationStatusLabel("metadata_checked", "zh")).toBe("元数据已核验");
+    expect(challengeEvidenceVerificationStatusLabel("metadata_checked", "en")).toBe("Metadata checked");
   });
 
   it("keeps the artifact path and SHA-256 inside collapsible technical details", () => {

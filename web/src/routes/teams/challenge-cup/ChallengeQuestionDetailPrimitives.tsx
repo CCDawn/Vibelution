@@ -1,6 +1,92 @@
 import type { ChallengeQuestionDimensionReview } from "../../../api/types";
 import css from "./ChallengeQuestionDetailPanel.styles";
 
+const RECORD_STATUS_LABELS: Record<string, string> = {
+  draft: "草稿",
+  approved: "正式批准",
+  pending_review: "待审核",
+  review_required: "待审核",
+  needs_revision: "待修订",
+  rejected: "已驳回",
+  blocked: "已阻塞",
+  failed: "失败",
+};
+
+const RECORD_STATUS_LABELS_EN: Record<string, string> = {
+  draft: "Draft",
+  approved: "Approved",
+  pending_review: "Pending review",
+  review_required: "Pending review",
+  needs_revision: "Needs revision",
+  rejected: "Rejected",
+  blocked: "Blocked",
+  failed: "Failed",
+};
+
+const VALIDATION_STATUS_LABELS: Record<string, string> = {
+  passed: "通过",
+  failed: "失败",
+  pending: "待定",
+  skipped: "已跳过",
+};
+
+const VALIDATION_STATUS_LABELS_EN: Record<string, string> = {
+  passed: "Passed",
+  failed: "Failed",
+  pending: "Pending",
+  skipped: "Skipped",
+};
+
+const EVIDENCE_SOURCE_TYPE_LABELS: Record<string, string> = {
+  peer_reviewed_paper: "同行评审论文",
+  preprint: "预印本",
+  dataset: "数据集",
+  standard: "标准",
+  official_document: "官方文档",
+  book: "书籍",
+  other: "其他",
+};
+
+const EVIDENCE_SOURCE_TYPE_LABELS_EN: Record<string, string> = {
+  peer_reviewed_paper: "Peer-reviewed paper",
+  preprint: "Preprint",
+  dataset: "Dataset",
+  standard: "Standard",
+  official_document: "Official document",
+  book: "Book",
+  other: "Other",
+};
+
+const EVIDENCE_VERIFICATION_STATUS_LABELS: Record<string, string> = {
+  unverified: "未验证",
+  metadata_checked: "元数据已核验",
+  full_text_checked: "全文已核验",
+  human_verified: "人工已核验",
+};
+
+const EVIDENCE_VERIFICATION_STATUS_LABELS_EN: Record<string, string> = {
+  unverified: "Unverified",
+  metadata_checked: "Metadata checked",
+  full_text_checked: "Full text checked",
+  human_verified: "Human verified",
+};
+
+export function challengeRecordStatusLabel(status: string, lang: "zh" | "en" = "zh"): string {
+  return (lang === "en" ? RECORD_STATUS_LABELS_EN : RECORD_STATUS_LABELS)[status] ?? status;
+}
+
+export function challengeValidationStatusLabel(status: string, lang: "zh" | "en" = "zh"): string {
+  return (lang === "en" ? VALIDATION_STATUS_LABELS_EN : VALIDATION_STATUS_LABELS)[status] ?? status;
+}
+
+export function challengeEvidenceSourceTypeLabel(sourceType: string, lang: "zh" | "en" = "zh"): string {
+  return (lang === "en" ? EVIDENCE_SOURCE_TYPE_LABELS_EN : EVIDENCE_SOURCE_TYPE_LABELS)[sourceType] ?? sourceType;
+}
+
+export function challengeEvidenceVerificationStatusLabel(status: string, lang: "zh" | "en" = "zh"): string {
+  return (lang === "en" ? EVIDENCE_VERIFICATION_STATUS_LABELS_EN : EVIDENCE_VERIFICATION_STATUS_LABELS)[status] ?? status;
+}
+
 const DIMENSION_LABELS: Record<string, string> = {
   evidence_support: "证据支持",
   factual_accuracy: "事实准确",

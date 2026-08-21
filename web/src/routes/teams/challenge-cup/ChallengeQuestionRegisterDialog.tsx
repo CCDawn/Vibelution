@@ -28,6 +28,10 @@ import {
   VTabs,
   VTextarea,
 } from "../../../components/vui";
+import {
+  challengeRecordStatusLabel,
+  challengeValidationStatusLabel,
+} from "./ChallengeQuestionDetailPrimitives";
 import css from "./ChallengeQuestionDetailPanel.styles";
 
 type WriteMode = "register" | "publish";
@@ -244,6 +248,7 @@ export function ChallengeQuestionRegisterDialog({
 
   const resultRecord = mutation.isSuccess ? mutation.data?.record : undefined;
   const resultQuestionId = resultRecord?.questionId || (parsed.ok ? parsed.questionId : "");
+  const resultStatus = resultRecord?.status || "review_required";
   const title = isZh ? "登记 / 发布题目产出" : "Register / publish question output";
 
   const resultBlock = resultRecord ? (
@@ -254,7 +259,7 @@ export function ChallengeQuestionRegisterDialog({
           {mutation.data?.idempotent ? (isZh ? "（幂等：相同产出已登记过）" : " (idempotent: identical output already registered)") : ""}
         </strong>
         <VStatusChip tone={resultRecord.status === "approved" ? "accent" : "warning"}>
-          {resultRecord.status || "review_required"}
+          {challengeRecordStatusLabel(resultStatus, isZh ? "zh" : "en")}
         </VStatusChip>
       </div>
       <div className={css.metadata}>
@@ -264,13 +269,19 @@ export function ChallengeQuestionRegisterDialog({
       </div>
       <div className={css.registerResultGrid}>
         <VStatusChip tone={validationTone(resultRecord.validation?.schemaValidation === undefined ? undefined : resultRecord.validation.schemaValidation === "passed")}>
-          Schema {resultRecord.validation?.schemaValidation ?? "—"}
+          {isZh ? "结构校验" : "Schema"} {resultRecord.validation?.schemaValidation
+            ? challengeValidationStatusLabel(resultRecord.validation.schemaValidation, isZh ? "zh" : "en")
+            : "—"}
         </VStatusChip>
         <VStatusChip tone={validationTone(resultRecord.validation?.citationValidation === undefined ? undefined : resultRecord.validation.citationValidation === "passed")}>
-          {isZh ? "引用" : "Citation"} {resultRecord.validation?.citationValidation ?? "—"}
+          {isZh ? "引用" : "Citation"} {resultRecord.validation?.citationValidation
+            ? challengeValidationStatusLabel(resultRecord.validation.citationValidation, isZh ? "zh" : "en")
+            : "—"}
         </VStatusChip>
         <VStatusChip tone={validationTone(resultRecord.validation?.semanticValidation === undefined ? undefined : resultRecord.validation.semanticValidation === "passed")}>
-          {isZh ? "语义" : "Semantic"} {resultRecord.validation?.semanticValidation ?? "—"}
+          {isZh ? "语义" : "Semantic"} {resultRecord.validation?.semanticValidation
+            ? challengeValidationStatusLabel(resultRecord.validation.semanticValidation, isZh ? "zh" : "en")
+            : "—"}
         </VStatusChip>
         <VStatusChip tone={validationTone(resultRecord.validation?.officialModelCall)}>
           {isZh
