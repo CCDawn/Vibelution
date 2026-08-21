@@ -41,6 +41,7 @@ import styles from "./ResearchProcessWorkspace.styles";
 
 export type ResearchProcessWorkspaceProps = {
   teamId: string;
+  lang: "zh" | "en";
   teamName?: string;
   linkedChatRoomId?: string;
   /** Team switcher rendered in the process toolbar so chrome stays a single row. */
@@ -55,11 +56,13 @@ const EMPTY_RUNTIME_NODE_IDS: string[] = [];
 
 export function ResearchProcessWorkspace({
   teamId,
+  lang,
   teamName = "",
   linkedChatRoomId = "",
   toolbarLeading,
   onOpenTeamCommunication,
 }: ResearchProcessWorkspaceProps) {
+  const isZh = lang === "zh";
   const location = useResearchWorkflowWorkspace(teamId);
   const runState = useResearchWorkflowRun(teamId, location.runId);
   const catalog = useResearchWorkflowCatalog(teamId, runState.run?.runVersion ?? null);
@@ -267,8 +270,8 @@ export function ResearchProcessWorkspace({
       <VCanvasWorkbenchPage
         data-vui="research-process-workspace"
         domainRecipe="research-process-workflow"
-        ariaLabel="科研流程工作区"
-        title="科研流程"
+        ariaLabel={isZh ? "科研流程工作区" : "Research workflow workspace"}
+        title={isZh ? "科研流程" : "Research workflow"}
         hideHeader
         toolbarClassName="!flex-nowrap overflow-hidden"
         toolbar={(
@@ -311,6 +314,7 @@ export function ResearchProcessWorkspace({
         }}
         rail={(
           <ResearchProcessRail
+            lang={lang}
             graph={graph}
             selectedNodeId={location.selectedNodeId}
             runtimeCurrentNodeIds={formalRuntimeCurrentNodeIds}

@@ -226,6 +226,7 @@ export function createResearchPrimarySurfaceRenderers(ctx: ResearchPrimarySurfac
     return (
       <ResearchProcessWorkspace
         teamId={teamId}
+        lang={lang}
         teamName={String(selectedTeam?.name || "")}
         linkedChatRoomId={String(selectedTeam?.linkedChatRoomId || "")}
         onOpenTeamCommunication={() => selectResearchWorkspaceView("discussion")}

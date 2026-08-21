@@ -24,7 +24,6 @@ describe("research workflow workspace responsibility contract", () => {
       "NodeAgentSection.tsx",
       "NodeSessionSection.tsx",
       "NodeHandoffSection.tsx",
-      "NodeArtifactSection.tsx",
       "NodeCommandSection.tsx",
     ];
 

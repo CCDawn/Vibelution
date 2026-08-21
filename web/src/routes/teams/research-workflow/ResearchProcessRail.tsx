@@ -5,7 +5,18 @@ import type {
 } from "../../../components/vui";
 import { VButton, VNativeButton, VStatusChip, VSurface } from "../../../components/vui";
 import type { HypothesisFirstNextAction } from "./hypothesisFirstNextAction";
+import { getNodeAdapter } from "./nodeAdapterModel";
 import styles from "./ResearchProcessRail.styles";
+
+type Language = "zh" | "en";
+
+const STAGE_LABELS: Record<string, { zh: string; en: string }> = {
+  hypothesis_first: { zh: "假说先行", en: "Hypothesis first" },
+  knowledge_collection: { zh: "知识搜集", en: "Knowledge collection" },
+  experiment_design: { zh: "实验设计", en: "Experiment design" },
+  execution_iteration: { zh: "执行迭代", en: "Execution & iteration" },
+  unassigned: { zh: "其他节点", en: "Other nodes" },
+};
 
 type StageRow = {
   stageId: string;
@@ -18,6 +29,7 @@ type StageRow = {
 };
 
 export type ResearchProcessRailProps = {
+  lang: Language;
   graph: WorkflowLayoutInput | null;
   selectedNodeId: string | null;
   runtimeCurrentNodeIds: string[];
@@ -68,30 +80,34 @@ function nodeStatusLabel(
   node: WorkflowCanvasNodeInput,
   currentTask: boolean,
   runtimeCurrent: boolean,
+  lang: Language,
 ): string {
-  if (currentTask) return "当前任务";
-  if (runtimeCurrent) return "运行位置";
-  switch (node.status) {
-    case "succeeded":
-    case "skipped":
-      return "已完成";
-    case "running":
-      return "处理中";
-    case "waiting_human":
-      return "待确认";
-    case "failed":
-      return "失败";
-    case "blocked":
-      return "已阻塞";
-    case "ready":
-      return "可开始";
-    case "stale":
-      return "待刷新";
-    case "cancelled":
-      return "已取消";
-    default:
-      return "未开始";
-  }
+  if (currentTask) return lang === "zh" ? "当前任务" : "Current task";
+  if (runtimeCurrent) return lang === "zh" ? "运行位置" : "Runtime position";
+  const labels = lang === "zh"
+    ? {
+        succeeded: "已完成",
+        skipped: "已完成",
+        running: "处理中",
+        waiting_human: "待确认",
+        failed: "失败",
+        blocked: "已阻塞",
+        ready: "可开始",
+        stale: "待刷新",
+        cancelled: "已取消",
+      }
+    : {
+        succeeded: "Completed",
+        skipped: "Skipped",
+        running: "Processing",
+        waiting_human: "Waiting for review",
+        failed: "Failed",
+        blocked: "Blocked",
+        ready: "Ready",
+        stale: "Needs refresh",
+        cancelled: "Cancelled",
+      };
+  return labels[node.status as keyof typeof labels] || (lang === "zh" ? "未开始" : "Not started");
 }
 
 function nodeStatusTone(node: WorkflowCanvasNodeInput): VStatusTone {
@@ -111,34 +127,52 @@ function nodeStatusTone(node: WorkflowCanvasNodeInput): VStatusTone {
   }
 }
 
-function nextStatus(nextAction: HypothesisFirstNextAction): { label: string; tone: VStatusTone } {
+function nextStatus(nextAction: HypothesisFirstNextAction, lang: Language): { label: string; tone: VStatusTone } {
+  const isZh = lang === "zh";
   if (nextAction.recovery || nextAction.stage === "collection_recovery" || nextAction.stage === "budget_exhausted") {
-    return { label: "需要处理", tone: "warning" };
+    return { label: isZh ? "需要处理" : "Needs attention", tone: "warning" };
   }
-  if (nextAction.stage === "blocked") return { label: "已阻塞", tone: "danger" };
-  if (nextAction.command) return { label: "等待你操作", tone: "warning" };
-  if (nextAction.statusMessage) return { label: "系统处理中", tone: "accent" };
-  if (nextAction.stage === "no_run") return { label: "待开始", tone: "neutral" };
-  return { label: "当前任务", tone: "accent" };
+  if (nextAction.stage === "blocked") return { label: isZh ? "已阻塞" : "Blocked", tone: "danger" };
+  if (nextAction.command) return { label: isZh ? "等待你操作" : "Waiting for your action", tone: "warning" };
+  if (nextAction.statusMessage) return { label: isZh ? "系统处理中" : "Processing", tone: "accent" };
+  if (nextAction.stage === "no_run") return { label: isZh ? "待开始" : "Not started", tone: "neutral" };
+  return { label: isZh ? "当前任务" : "Current task", tone: "accent" };
 }
 
-function nextDetail(nextAction: HypothesisFirstNextAction): string {
+function nextDetail(nextAction: HypothesisFirstNextAction, lang: Language): string {
   return nextAction.commandDetail
     || nextAction.recovery?.reason
     || nextAction.statusMessage
     || nextAction.disabledReason
-    || (nextAction.stage === "no_run" ? "选择题目后，研究阶段和可操作任务会显示在这里。" : "从当前任务进入右侧操作面板。");
+    || (nextAction.stage === "no_run"
+      ? (lang === "zh" ? "选择题目后，研究阶段和可操作任务会显示在这里。" : "Choose a question to see research stages and available tasks here.")
+      : (lang === "zh" ? "从当前任务进入右侧操作面板。" : "Open the inspector from the current task."));
 }
 
-function stageStatusLabel(row: StageRow, currentStageId: string | null): string {
-  if (row.stageId === currentStageId) return "当前阶段";
-  if (row.tone === "attention") return "需处理";
-  if (row.tone === "active") return "进行中";
-  if (row.tone === "done") return "已完成";
-  return "未开始";
+function stageStatusLabel(row: StageRow, currentStageId: string | null, lang: Language): string {
+  if (row.stageId === currentStageId) return lang === "zh" ? "当前阶段" : "Current stage";
+  if (row.tone === "attention") return lang === "zh" ? "需处理" : "Needs attention";
+  if (row.tone === "active") return lang === "zh" ? "进行中" : "In progress";
+  if (row.tone === "done") return lang === "zh" ? "已完成" : "Completed";
+  return lang === "zh" ? "未开始" : "Not started";
+}
+
+function stageDisplayLabel(row: StageRow, lang: Language): string {
+  return STAGE_LABELS[row.stageId]?.[lang] || row.label;
+}
+
+function nodeDisplayLabel(node: WorkflowCanvasNodeInput, lang: Language): string {
+  if (lang === "zh") return node.label;
+  return getNodeAdapter(node.nodeId)?.labelEn || node.label;
+}
+
+function nodeDisplayDescription(node: WorkflowCanvasNodeInput, lang: Language): string {
+  if (lang === "zh") return node.description || node.label;
+  return getNodeAdapter(node.nodeId)?.labelEn || node.description || node.label;
 }
 
 export function ResearchProcessRail({
+  lang,
   graph,
   selectedNodeId,
   runtimeCurrentNodeIds,
@@ -146,32 +180,33 @@ export function ResearchProcessRail({
   onSelectNode,
   onNavigateCurrent,
 }: ResearchProcessRailProps) {
+  const isZh = lang === "zh";
   const rows = stageRows(graph);
   const currentTaskId = nextAction.targetNodeId;
   const currentNode = graph?.nodes.find((node) => node.nodeId === currentTaskId) ?? null;
   const currentStage = rows.find((row) => row.nodes.some((node) => node.nodeId === currentTaskId)) ?? null;
-  const currentStatus = nextStatus(nextAction);
+  const currentStatus = nextStatus(nextAction, lang);
 
   return (
     <nav
       className={styles.root}
-      aria-label="研究阶段与任务"
+      aria-label={isZh ? "研究阶段与任务" : "Research stages and tasks"}
       data-testid="research-process-rail"
       data-vui="research-process-rail"
     >
       <div className={styles.body}>
         <VSurface tone="panel" elevation="flat" padding="compact" className={styles.currentCard} data-testid="research-process-rail-current">
-          <span className={styles.kicker}>当前任务</span>
+          <span className={styles.kicker}>{isZh ? "当前任务" : "Current task"}</span>
           <div className={styles.currentMeta}>
-            <strong className={styles.currentTitle}>{currentNode?.label ?? nextAction.navigationLabel}</strong>
+            <strong className={styles.currentTitle}>{currentNode ? nodeDisplayLabel(currentNode, lang) : nextAction.navigationLabel}</strong>
             <VStatusChip tone={currentStatus.tone}>{currentStatus.label}</VStatusChip>
           </div>
           {currentStage ? (
             <span className={styles.currentStage}>
-              第 {currentStage.index} 阶段 · {currentStage.label}
+              {isZh ? `第 ${currentStage.index} 阶段 · ${stageDisplayLabel(currentStage, lang)}` : `Stage ${currentStage.index} · ${stageDisplayLabel(currentStage, lang)}`}
             </span>
           ) : null}
-          <p className={styles.currentDetail}>{nextDetail(nextAction)}</p>
+          <p className={styles.currentDetail}>{nextDetail(nextAction, lang)}</p>
           <VButton
             type="button"
             density="compact"
@@ -183,12 +218,12 @@ export function ResearchProcessRail({
             }}
             data-testid="research-process-rail-current-action"
           >
-            前往当前任务
+            {isZh ? "前往当前任务" : "Go to current task"}
           </VButton>
         </VSurface>
 
         <section className={styles.stageSection} aria-labelledby="research-process-rail-stage-heading">
-          <h2 id="research-process-rail-stage-heading" className={styles.sectionLabel}>研究阶段</h2>
+          <h2 id="research-process-rail-stage-heading" className={styles.sectionLabel}>{isZh ? "研究阶段" : "Research stages"}</h2>
           {rows.length ? (
             <ol className={styles.stageList} data-testid="research-process-rail-stages">
               {rows.map((row) => {
@@ -201,18 +236,24 @@ export function ResearchProcessRail({
                     data-testid={`research-process-rail-stage-${row.stageId}`}
                   >
                     <div className={styles.stageHeader}>
-                      <strong className={styles.stageTitle}>{row.index.toString().padStart(2, "0")} · {row.label}</strong>
+                      <strong className={styles.stageTitle}>{row.index.toString().padStart(2, "0")} · {stageDisplayLabel(row, lang)}</strong>
                       <VStatusChip tone={row.tone === "attention" ? "warning" : row.tone === "active" ? "accent" : row.tone === "done" ? "success" : "neutral"}>
-                        {stageStatusLabel(row, currentStage?.stageId ?? null)}
+                        {stageStatusLabel(row, currentStage?.stageId ?? null, lang)}
                       </VStatusChip>
                     </div>
-                    <span className={styles.stageMeta}>{row.completed}/{row.total} 已完成</span>
+                    <span className={styles.stageMeta}>{row.completed}/{row.total} {isZh ? "已完成" : "completed"}</span>
                     <ul className={styles.nodeList}>
                       {row.nodes.map((node) => {
                         const currentTask = node.nodeId === currentTaskId;
                         const runtimeCurrent = runtimeCurrentNodeIds.includes(node.nodeId);
                         const selected = node.nodeId === selectedNodeId;
-                        const description = node.description || node.label;
+                        const label = nodeDisplayLabel(node, lang);
+                        const description = nodeDisplayDescription(node, lang);
+                        const stateHint = currentTask
+                          ? (isZh ? "，当前任务" : ", current task")
+                          : selected
+                            ? (isZh ? "，正在查看" : ", selected")
+                            : "";
                         return (
                           <li key={node.nodeId}>
                             <VNativeButton
@@ -220,18 +261,18 @@ export function ResearchProcessRail({
                               className={selected ? styles.nodeItemSelected : styles.nodeItem}
                               aria-pressed={selected}
                               aria-current={currentTask ? "step" : undefined}
-                              aria-label={`${node.label}${currentTask ? "，当前任务" : selected ? "，正在查看" : ""}`}
+                              aria-label={`${label}${stateHint}`}
                               data-current-task={currentTask ? "true" : "false"}
                               data-runtime-current={runtimeCurrent ? "true" : "false"}
                               data-testid={`research-process-rail-node-${node.nodeId}`}
                               onClick={() => onSelectNode(node.nodeId)}
                             >
                               <span className={styles.nodeCopy}>
-                                <strong className={styles.nodeTitle}>{node.label}</strong>
+                                <strong className={styles.nodeTitle}>{label}</strong>
                                 <small className={styles.nodeDescription}>{description}</small>
                               </span>
                               <VStatusChip tone={nodeStatusTone(node)}>
-                                {nodeStatusLabel(node, currentTask, runtimeCurrent)}
+                                {nodeStatusLabel(node, currentTask, runtimeCurrent, lang)}
                               </VStatusChip>
                             </VNativeButton>
                           </li>
@@ -243,7 +284,7 @@ export function ResearchProcessRail({
               })}
             </ol>
           ) : (
-            <p className={styles.empty}>流程定义加载后，阶段目录会显示在这里。</p>
+            <p className={styles.empty}>{isZh ? "流程定义加载后，阶段目录会显示在这里。" : "The stage directory will appear after the workflow definition loads."}</p>
           )}
         </section>
       </div>

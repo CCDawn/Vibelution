@@ -27,6 +27,13 @@ describe("research workflow legacy cleanup", () => {
     "teams/research-workflow/TeamsLegacyResearchBoundary.tsx",
     "teams/research-workflow/researchWorkflowPollingController.ts",
     "teams/research-workflow/IterationDecisionPanel.tsx",
+    "teams/research-workflow/NodeExecutionSection.tsx",
+    "teams/research-workflow/NodeExecutionSection.styles.ts",
+    "teams/research-workflow/NodeArtifactSection.tsx",
+    "teams/research-workflow/NodeArtifactSection.styles.ts",
+    "teams/research-workflow/EvidenceRemediationDialog.tsx",
+    "teams/research-workflow/EvidenceRemediationDialog.styles.ts",
+    "teams/research-workflow/EvidenceRemediationDialog.test.tsx",
     "teams/challenge-cup/ChallengeCupOperationsWorkspace.tsx",
     "teams/challenge-cup/ChallengeCupStageRail.tsx",
   ])("physically removes %s", (relativePath) => {

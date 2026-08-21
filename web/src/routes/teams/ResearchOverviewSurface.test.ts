@@ -45,6 +45,12 @@ describe("ResearchOverviewSurface product contract", () => {
     expect(primarySource).not.toContain("accent-cool");
   });
 
+  it("exposes the stage block reason through the disabled CTA contract", () => {
+    expect(primarySource).toContain("const primaryDisabledReason = continueAction.blocked");
+    expect(primarySource).toContain("disabledReason={primaryDisabledReason}");
+    expect(surfaceSource).toContain("{...primary}");
+  });
+
   it("wires production overview through ResearchOverviewSurface only", () => {
     expect(routeSource).toContain("renderResearchOverviewSurface");
     // Composition lives in the extracted primary-surface factory (not inline in TeamsRoute).

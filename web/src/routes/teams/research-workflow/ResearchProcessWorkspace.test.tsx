@@ -193,7 +193,7 @@ async function renderWorkspace() {
     root.render(
       <QueryClientProvider client={queryClient}>
         <MemoryRouter>
-          <ResearchProcessWorkspace teamId="research-team" />
+          <ResearchProcessWorkspace teamId="research-team" lang="zh" />
         </MemoryRouter>
       </QueryClientProvider>,
     );

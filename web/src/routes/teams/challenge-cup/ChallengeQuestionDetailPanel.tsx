@@ -207,8 +207,8 @@ export function ChallengeQuestionDetailPanel({
       </header>
 
       <nav className={css.anchorNav} aria-label={isZh ? "单题验收章节" : "Acceptance sections"}>
-        {detailAnchors.map(([id, label], index) => (
-          <a href={`#${id}`} key={id}><span>{index + 1}</span>{label}</a>
+        {detailAnchors.map(([id, label]) => (
+          <a href={`#${id}`} key={id}>{label}</a>
         ))}
       </nav>
 

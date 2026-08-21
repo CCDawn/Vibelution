@@ -140,6 +140,9 @@ export function ResearchPrimaryActionBar({
     : (lang === "zh" ? "当前科研项目" : "Active project");
   const primaryLabel = continueCtaLabel(continueAction, lang, pending);
   const primaryDisabled = loading || continueAction.blocked || pending;
+  const primaryDisabledReason = continueAction.blocked
+    ? (lang === "zh" ? continueAction.blockReasonZh : continueAction.blockReasonEn)
+    : undefined;
   const showAdvance = Boolean(!loading && advanceAction && !advanceAction.blocked && !continueAction.blocked);
   const advanceLabel = advanceAction ? advanceCtaLabel(advanceAction, lang, pending) : "";
   const title = researchPrimaryActionLabel(continueAction, lang);
@@ -251,6 +254,7 @@ export function ResearchPrimaryActionBar({
               data-testid="research-primary-cta"
               variant={continueAction.blocked ? "secondary" : "primary"}
               isDisabled={primaryDisabled}
+              disabledReason={primaryDisabledReason}
               aria-label={primaryLabel}
               trailingIcon={
                 !pending && !continueAction.blocked

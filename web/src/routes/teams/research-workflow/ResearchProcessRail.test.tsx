@@ -82,7 +82,7 @@ describe("ResearchProcessRail", () => {
     host = null;
   });
 
-  function renderRail(selectedNodeId: string | null = "hf_generation") {
+  function renderRail(selectedNodeId: string | null = "hf_generation", lang: "zh" | "en" = "zh") {
     const onSelectNode = vi.fn();
     const onNavigateCurrent = vi.fn();
     host = document.createElement("div");
@@ -91,6 +91,7 @@ describe("ResearchProcessRail", () => {
     act(() => {
       root?.render(
         <ResearchProcessRail
+          lang={lang}
           graph={graph}
           selectedNodeId={selectedNodeId}
           runtimeCurrentNodeIds={["source_finding"]}
@@ -131,6 +132,20 @@ describe("ResearchProcessRail", () => {
     expect(onNavigateCurrent).toHaveBeenCalledWith("hf_meeting_1");
   });
 
+  it("localizes the rail chrome and known workflow nodes", () => {
+    renderRail("hf_generation", "en");
+
+    expect(document.querySelector('[data-testid="research-process-rail"]')?.getAttribute("aria-label"))
+      .toBe("Research stages and tasks");
+    expect(document.querySelector('[data-testid="research-process-rail-current"]')?.textContent)
+      .toContain("Current task");
+    expect(document.querySelector('[data-testid="research-process-rail-stage-knowledge_collection"]')?.textContent)
+      .toContain("Knowledge collection");
+    expect(document.querySelector('[data-testid="research-process-rail-node-source_finding"]')?.textContent)
+      .toContain("Source finding");
+    expect(document.body.textContent).not.toContain("研究阶段");
+  });
+
   it("renders a safe empty state before the workflow graph is available", () => {
     const onSelectNode = vi.fn();
     const onNavigateCurrent = vi.fn();
@@ -140,6 +155,7 @@ describe("ResearchProcessRail", () => {
     act(() => {
       root?.render(
         <ResearchProcessRail
+          lang="zh"
           graph={null}
           selectedNodeId={null}
           runtimeCurrentNodeIds={[]}

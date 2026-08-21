@@ -374,4 +374,22 @@ describe("ChallengeQuestionDetailPanel", () => {
     expect(artifactSection).toContain("stage1-sci-096-v3.json");
     expect(artifactSection).toContain("SHA256");
   });
+
+  it("keeps section headings as the only numbered source for the anchor navigation", () => {
+    const markup = renderPanel(
+      <ChallengeQuestionDetailPanel
+        requestedQuestionId="SCI-096"
+        detail={detail()}
+        isLoading={false}
+        onClose={() => undefined}
+      />,
+    );
+    const nav = markup.match(/<nav[^>]*aria-label="单题验收章节"[\s\S]*?<\/nav>/)?.[0] || "";
+
+    expect(nav).toContain("题目与接单");
+    expect(nav).toContain("最终工件");
+    expect(nav).not.toMatch(/<span>\d+<\/span>/);
+    expect(markup).toContain(">01</span>");
+    expect(markup).toContain(">08</span>");
+  });
 });
