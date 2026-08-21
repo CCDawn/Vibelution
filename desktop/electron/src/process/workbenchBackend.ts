@@ -32,6 +32,61 @@ export const DEFAULT_WORKBENCH_HOST = "127.0.0.1";
 export const DEFAULT_WORKBENCH_PORT = 8000;
 export const WEB_WORKBENCH_SCRIPT = ["scripts", "web_workbench.py"] as const;
 export const RUNNING_CODE_FINGERPRINT_RELATIVE = [".runtime", "running-code-fingerprint.json"] as const;
+export const FRONTEND_BUILD_TIMEOUT_MS = 120_000;
+
+export type WorkbenchFrontendBuildErrorCode =
+  | "frontend_build_timeout"
+  | "frontend_build_aborted"
+  | "frontend_build_failed";
+
+export type WorkbenchFrontendBuildPhase = "tsc" | "vite";
+
+export class WorkbenchFrontendBuildError extends Error {
+  readonly code: WorkbenchFrontendBuildErrorCode;
+  readonly phase: WorkbenchFrontendBuildPhase;
+  readonly command: string;
+  readonly args: string[];
+  readonly timeoutMs: number;
+  readonly cause?: unknown;
+
+  constructor(
+    code: WorkbenchFrontendBuildErrorCode,
+    message: string,
+    options: {
+      phase: WorkbenchFrontendBuildPhase;
+      command: string;
+      args: string[];
+      timeoutMs: number;
+      cause?: unknown;
+    }
+  ) {
+    super(message);
+    this.name = "WorkbenchFrontendBuildError";
+    this.code = code;
+    this.phase = options.phase;
+    this.command = options.command;
+    this.args = [...options.args];
+    this.timeoutMs = options.timeoutMs;
+    this.cause = options.cause;
+  }
+}
+
+export type WorkbenchFrontendBuildChild = {
+  kill: (signal?: NodeJS.Signals) => boolean;
+  once(event: "error", listener: (error: Error) => void): unknown;
+  once(event: "close", listener: (code: number | null, signal: NodeJS.Signals | null) => void): unknown;
+};
+
+export type WorkbenchFrontendBuildSpawn = (
+  command: string,
+  args: string[],
+  options: {
+    cwd: string;
+    env: NodeJS.ProcessEnv;
+    windowsHide: boolean;
+    stdio: ["ignore", "ignore", "ignore"];
+  }
+) => WorkbenchFrontendBuildChild;
 
 export type WorkbenchBackendSpawnChild = {
   pid?: number;
@@ -67,7 +122,7 @@ export type ExecuteMainLineWorkbenchInput = {
   readState?: () => WorkbenchBackendState;
   writeState?: (state: WorkbenchBackendState) => void;
   listActiveWork?: () => ActiveWorkRun[];
-  ensureFrontend?: (input: { force: boolean }) => Promise<void>;
+  ensureFrontend?: (input: { force: boolean; signal?: AbortSignal }) => Promise<void>;
   now?: () => string;
   connect?: (port: number, host: string) => Promise<boolean>;
   fetchHealth?: (url: string) => Promise<{ status: number }>;
@@ -402,35 +457,160 @@ export function resolveNodeExecutable(
   return "node";
 }
 
-async function defaultEnsureFrontend(workspaceRoot: string, force: boolean, fileExists: (path: string) => boolean): Promise<void> {
-  const distIndex = join(workspaceRoot, "web", "dist", "index.html");
-  if (!shouldRebuildFrontend({ distExists: fileExists(distIndex), force })) {
+export async function ensureFrontendBuild(input: {
+  workspaceRoot: string;
+  force: boolean;
+  fileExists?: (path: string) => boolean;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  spawnImpl?: WorkbenchFrontendBuildSpawn;
+}): Promise<void> {
+  const fileExists = input.fileExists ?? existsSync;
+  const distIndex = join(input.workspaceRoot, "web", "dist", "index.html");
+  if (!shouldRebuildFrontend({ distExists: fileExists(distIndex), force: input.force })) {
     return;
   }
-  const webDir = join(workspaceRoot, "web");
+  const webDir = join(input.workspaceRoot, "web");
   const tsc = join(webDir, "node_modules", "typescript", "bin", "tsc");
   const vite = join(webDir, "node_modules", "vite", "bin", "vite.js");
   const node = resolveNodeExecutable(fileExists);
-  await runWaitable(node, [tsc, "-b"], webDir);
-  await runWaitable(node, [vite, "build"], webDir);
+  await runWaitable(node, [tsc, "-b"], webDir, {
+    phase: "tsc",
+    signal: input.signal,
+    timeoutMs: input.timeoutMs,
+    spawnImpl: input.spawnImpl
+  });
+  await runWaitable(node, [vite, "build"], webDir, {
+    phase: "vite",
+    signal: input.signal,
+    timeoutMs: input.timeoutMs,
+    spawnImpl: input.spawnImpl
+  });
 }
 
-function runWaitable(command: string, args: string[], cwd: string): Promise<void> {
+function defaultEnsureFrontend(
+  workspaceRoot: string,
+  options: { force: boolean; signal?: AbortSignal },
+  fileExists: (path: string) => boolean
+): Promise<void> {
+  return ensureFrontendBuild({
+    workspaceRoot,
+    force: options.force,
+    signal: options.signal,
+    fileExists
+  });
+}
+
+export function runWaitable(
+  command: string,
+  args: string[],
+  cwd: string,
+  options: {
+    phase?: WorkbenchFrontendBuildPhase;
+    signal?: AbortSignal;
+    timeoutMs?: number;
+    spawnImpl?: WorkbenchFrontendBuildSpawn;
+  } = {}
+): Promise<void> {
+  const phase = options.phase ?? "tsc";
+  const timeoutMs = options.timeoutMs ?? FRONTEND_BUILD_TIMEOUT_MS;
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    return Promise.reject(new RangeError("frontend build timeoutMs must be a positive finite number"));
+  }
+  const roundedTimeoutMs = Math.max(1, Math.round(timeoutMs));
+  const spawnImpl = options.spawnImpl ?? (nodeSpawn as unknown as WorkbenchFrontendBuildSpawn);
+  const commandLabel = [command, ...args].join(" ");
+  const createError = (
+    code: WorkbenchFrontendBuildErrorCode,
+    detail: string,
+    cause?: unknown
+  ): WorkbenchFrontendBuildError => new WorkbenchFrontendBuildError(
+    code,
+    `frontend ${phase} ${detail}: ${commandLabel}`,
+    {
+      phase,
+      command,
+      args,
+      timeoutMs: roundedTimeoutMs,
+      cause
+    }
+  );
+
+  if (options.signal?.aborted) {
+    return Promise.reject(createError("frontend_build_aborted", "was aborted before spawn"));
+  }
+
   return new Promise((resolve, reject) => {
-    const child = nodeSpawn(command, args, {
-      cwd,
-      windowsHide: true,
-      stdio: "ignore",
-      env: pythonBridgeEnv()
-    });
-    child.once("error", reject);
-    child.once("exit", (code) => {
-      if (code === 0) {
-        resolve();
+    let child: WorkbenchFrontendBuildChild | null = null;
+    let settled = false;
+    let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const cleanup = (): void => {
+      if (timeoutTimer !== null) {
+        clearTimeout(timeoutTimer);
+        timeoutTimer = null;
+      }
+      options.signal?.removeEventListener("abort", onAbort);
+    };
+    const resolveOnce = (): void => {
+      if (settled) {
         return;
       }
-      reject(new Error(`${command} ${args.join(" ")} exited with code ${code ?? "null"}`));
+      settled = true;
+      cleanup();
+      resolve();
+    };
+    const rejectOnce = (error: WorkbenchFrontendBuildError): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+    const terminate = (): void => {
+      try {
+        child?.kill();
+      } catch {
+        // Keep the timeout/abort/failure as the authoritative error.
+      }
+    };
+    const onAbort = (): void => {
+      terminate();
+      rejectOnce(createError("frontend_build_aborted", "was aborted"));
+    };
+
+    try {
+      child = spawnImpl(command, args, {
+        cwd,
+        windowsHide: true,
+        stdio: ["ignore", "ignore", "ignore"],
+        env: pythonBridgeEnv()
+      });
+    } catch (error: unknown) {
+      rejectOnce(createError("frontend_build_failed", "failed to start", error));
+      return;
+    }
+
+    child.once("error", (error) => {
+      rejectOnce(createError("frontend_build_failed", "failed to start or communicate with the child process", error));
     });
+    child.once("close", (code, signal) => {
+      if (code === 0) {
+        resolveOnce();
+        return;
+      }
+      const status = code === null ? `signal ${signal ?? "unknown"}` : `code ${code}`;
+      rejectOnce(createError("frontend_build_failed", `exited with ${status}`));
+    });
+    options.signal?.addEventListener("abort", onAbort, { once: true });
+    timeoutTimer = setTimeout(() => {
+      terminate();
+      rejectOnce(createError("frontend_build_timeout", `timed out after ${roundedTimeoutMs}ms`));
+    }, roundedTimeoutMs);
+    if (options.signal?.aborted) {
+      onAbort();
+    }
   });
 }
 
@@ -592,8 +772,9 @@ export async function executeMainLineWorkbench(
     }
   }
 
-  await (input.ensureFrontend ?? ((opts) => defaultEnsureFrontend(input.workspaceRoot, opts.force, fileExists)))({
-    force: operation === "rebuild-and-start"
+  await (input.ensureFrontend ?? ((opts) => defaultEnsureFrontend(input.workspaceRoot, opts, fileExists)))({
+    force: operation === "rebuild-and-start",
+    signal: input.signal
   });
 
   const previous = readState();

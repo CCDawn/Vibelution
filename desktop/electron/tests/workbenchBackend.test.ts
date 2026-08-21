@@ -11,13 +11,17 @@ import {
 } from "../src/process/workbenchBackendRetire.js";
 import {
   executeMainLineWorkbench,
+  ensureFrontendBuild,
+  FRONTEND_BUILD_TIMEOUT_MS,
   mainLineBackendIsReachable,
   mainLineBackendIsReusable,
   mainLineRunningCodeIsCurrent,
   resolveNoConsolePython,
   resolveNodeExecutable,
+  runWaitable,
   sameProjectRoot,
   spawnWorkbenchBackend,
+  type WorkbenchFrontendBuildChild,
   writeLauncherStateFile,
   workbenchBackendArgs,
   workbenchBackendEnv
@@ -34,6 +38,31 @@ function fakeBackendChild(pid = 4242) {
     killed: false,
     unref: () => undefined,
     kill: () => true
+  };
+}
+
+function frontendBuildChild(): {
+  child: WorkbenchFrontendBuildChild;
+  close: (code?: number | null, signal?: NodeJS.Signals | null) => void;
+  error: (error: Error) => void;
+} {
+  let errorListener: ((error: Error) => void) | undefined;
+  let closeListener: ((code: number | null, signal: NodeJS.Signals | null) => void) | undefined;
+  const child: WorkbenchFrontendBuildChild = {
+    kill: vi.fn(() => true),
+    once: (event: "error" | "close", listener: ((error: Error) => void) | ((code: number | null, signal: NodeJS.Signals | null) => void)) => {
+      if (event === "error") {
+        errorListener = listener as (error: Error) => void;
+      } else {
+        closeListener = listener as (code: number | null, signal: NodeJS.Signals | null) => void;
+      }
+      return child;
+    }
+  };
+  return {
+    child,
+    close: (code = 0, signal = null) => closeListener?.(code, signal),
+    error: (error) => errorListener?.(error)
   };
 }
 
@@ -194,6 +223,101 @@ describe("writeLauncherStateFile", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("frontend build supervision", () => {
+  it("bounds a stuck frontend build and kills its child", async () => {
+    const harness = frontendBuildChild();
+    await expect(
+      runWaitable("node", ["tsc", "-b"], "C:/repo/web", {
+        phase: "tsc",
+        timeoutMs: 10,
+        spawnImpl: () => harness.child
+      })
+    ).rejects.toMatchObject({
+      name: "WorkbenchFrontendBuildError",
+      code: "frontend_build_timeout",
+      phase: "tsc",
+      timeoutMs: 10
+    });
+    expect(harness.child.kill).toHaveBeenCalledOnce();
+  });
+
+  it("aborts a running build and kills its child", async () => {
+    const harness = frontendBuildChild();
+    const controller = new AbortController();
+    const pending = runWaitable("node", ["vite", "build"], "C:/repo/web", {
+      phase: "vite",
+      signal: controller.signal,
+      timeoutMs: FRONTEND_BUILD_TIMEOUT_MS,
+      spawnImpl: () => harness.child
+    });
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({
+      code: "frontend_build_aborted",
+      phase: "vite"
+    });
+    expect(harness.child.kill).toHaveBeenCalledOnce();
+  });
+
+  it("surfaces child spawn errors with the build phase", async () => {
+    const failure = new Error("spawn ENOENT");
+    await expect(
+      runWaitable("node", ["tsc", "-b"], "C:/repo/web", {
+        phase: "tsc",
+        timeoutMs: 100,
+        spawnImpl: () => {
+          throw failure;
+        }
+      })
+    ).rejects.toMatchObject({
+      code: "frontend_build_failed",
+      phase: "tsc",
+      cause: failure
+    });
+  });
+
+  it("surfaces a child error event without waiting for the timeout", async () => {
+    const harness = frontendBuildChild();
+    const failure = new Error("vite child failed");
+    const pending = runWaitable("node", ["vite", "build"], "C:/repo/web", {
+      phase: "vite",
+      timeoutMs: FRONTEND_BUILD_TIMEOUT_MS,
+      spawnImpl: (_command, _args, options) => {
+        expect(options.windowsHide).toBe(true);
+        expect(options.stdio).toEqual(["ignore", "ignore", "ignore"]);
+        queueMicrotask(() => harness.error(failure));
+        return harness.child;
+      }
+    });
+    await expect(pending).rejects.toMatchObject({
+      code: "frontend_build_failed",
+      phase: "vite",
+      cause: failure
+    });
+    expect(harness.child.kill).not.toHaveBeenCalled();
+  });
+
+  it("does not invoke Vite when tsc exits unsuccessfully", async () => {
+    const harness = frontendBuildChild();
+    const spawnImpl = vi.fn(() => {
+      queueMicrotask(() => harness.close(2, null));
+      return harness.child;
+    });
+    await expect(
+      ensureFrontendBuild({
+        workspaceRoot: "C:/repo",
+        force: true,
+        fileExists: () => false,
+        spawnImpl
+      })
+    ).rejects.toMatchObject({
+      code: "frontend_build_failed",
+      phase: "tsc"
+    });
+    expect(spawnImpl).toHaveBeenCalledOnce();
+    expect(spawnImpl.mock.calls[0]?.[1]?.[0]).toContain("typescript");
   });
 });
 
