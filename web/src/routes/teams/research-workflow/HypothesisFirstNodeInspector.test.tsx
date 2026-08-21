@@ -46,7 +46,10 @@ vi.mock("../challenge-cup/HypothesisSelectionList", () => ({
   },
 }));
 
-import { HypothesisFirstNodeInspector } from "./HypothesisFirstNodeInspector";
+import {
+  HypothesisFirstNodeInspector,
+  inspectorNodeOwnsCurrentStep,
+} from "./HypothesisFirstNodeInspector";
 import {
   useHypothesisFirstChain,
   type HypothesisFirstChainData,
@@ -122,6 +125,12 @@ function render(ui: React.ReactElement) {
 }
 
 describe("HypothesisFirstNodeInspector", () => {
+  it("fails closed when the current task target cannot be resolved", () => {
+    expect(inspectorNodeOwnsCurrentStep("hf_meeting_1", null)).toBe(false);
+    expect(inspectorNodeOwnsCurrentStep("hf_meeting_1", "hf_meeting_1")).toBe(true);
+    expect(inspectorNodeOwnsCurrentStep("hf_meeting_1", "hf_collection_1")).toBe(false);
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     container = document.createElement("div");

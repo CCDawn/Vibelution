@@ -39,7 +39,7 @@ function meetingStatusTone(status: string): "accent" | "warning" | "neutral" | "
 
 const MEETING_STATUS_LABELS: Record<string, string> = {
   open: "讨论中",
-  summarizing: "纪要生成中",
+  summarizing: "正在整理讨论结论",
   awaiting_approval: "待人工确认",
   closed: "已关门",
 };

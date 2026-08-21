@@ -22,6 +22,8 @@ const styles: Record<string, string> = {
   selectionToolbar:
     "flex min-h-8 flex-wrap items-center justify-between gap-2 rounded-[var(--vui-radius-control)] bg-[var(--vui-surface-inset)] px-2.5 py-1.5 [font-size:var(--vui-font-2xs)] text-[var(--fg-secondary)] [&_strong]:text-[var(--fg-primary)]",
   actions: "flex flex-wrap items-center gap-2",
+  stickyActions:
+    "sticky bottom-0 z-10 -mx-1 flex flex-wrap items-center gap-2 border-t border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] px-1 py-3 shadow-[0_-10px_20px_-18px_rgba(15,23,42,0.55)]",
   generationState:
     "grid justify-items-start gap-2 [&_p]:[font-size:var(--vui-font-2xs)] [&_p]:text-[var(--fg-secondary)]",
   hint: "m-0 [font-size:var(--vui-font-2xs)] text-[var(--fg-secondary)]",

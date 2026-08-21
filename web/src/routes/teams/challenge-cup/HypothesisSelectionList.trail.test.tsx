@@ -236,6 +236,7 @@ describe("candidate evidence trail expansion", () => {
     });
 
     expect(container.querySelectorAll('article[data-expanded="true"]')).toHaveLength(1);
+    expect(container.querySelector('[data-current-task-action="true"]')).toBeTruthy();
     expect(container.textContent).toContain("机制 A");
     expect(container.textContent).not.toContain("机制 B");
 

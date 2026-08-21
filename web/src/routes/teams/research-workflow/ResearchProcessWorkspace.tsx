@@ -387,6 +387,10 @@ export function ResearchProcessWorkspace({
         resize={{
           aside: { id: "inspector", defaultWidth: 360, minWidth: 300, maxWidth: 520 },
         }}
+        responsive={{
+          enabled: true,
+          inspector: { label: "当前任务" },
+        }}
         canvas={archiveOpen && inspectorPane ? (
           <div className={styles.archive} data-vui="research-question-archive-workspace">
             {inspectorPane}

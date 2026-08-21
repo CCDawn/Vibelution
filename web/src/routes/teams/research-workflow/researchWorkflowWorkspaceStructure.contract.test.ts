@@ -52,6 +52,13 @@ describe("research workflow workspace responsibility contract", () => {
     expect(source).toContain("inspector={!archiveOpen && inspectorPane");
   });
 
+  it("opts into the approved tablet and compact drawer contract", () => {
+    const source = readFileSync(resolve(root, "ResearchProcessWorkspace.tsx"), "utf8");
+    expect(source).toContain("responsive={{");
+    expect(source).toContain('rail: { label: "研究阶段" }');
+    expect(source).toContain('inspector: { label: "当前任务" }');
+  });
+
   it("mounts inspector panel leaves through the research workflow lazy pack", () => {
     const source = readFileSync(resolve(root, "ResearchProcessInspectorPane.tsx"), "utf8");
     expect(source).toContain('from "../teamLazyPanels"');

@@ -84,8 +84,11 @@ function pickReview(
   return currentProjectedReview(projection)?.meeting ?? null;
 }
 
-function inspectorNodeOwnsCurrentStep(nodeId: string, targetNodeId: string | null): boolean {
-  if (!targetNodeId) return true;
+export function inspectorNodeOwnsCurrentStep(nodeId: string, targetNodeId: string | null): boolean {
+  // A missing target is not proof that this card owns the live command.
+  // Fail closed so stale/history cards never expose write operations while
+  // the chain scope is loading or cannot resolve the current step.
+  if (!targetNodeId) return false;
   if (nodeId === targetNodeId) return true;
   return nodeId.startsWith("hf_collection_") && targetNodeId === "source_finding";
 }
@@ -235,7 +238,9 @@ export function HypothesisFirstNodeInspector({
       ) : (
         <div className={styles.task} data-testid="hypothesis-first-previous-step-pending">
           <VStateRow tone="warning">
-            {nodeId === HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID
+            {!nextAction.targetNodeId
+              ? (isZh ? "当前步骤尚未确定，写操作已暂时隐藏。" : "The current step is unresolved; write actions are temporarily hidden.")
+              : nodeId === HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID
               ? (isZh ? "前序任务尚未完成，请先处理当前步骤。" : "Earlier tasks are not complete; handle the current step first.")
               : (isZh ? "当前任务在其他步骤，请前往当前步骤。" : "The current task is on another step; go to the current step.")}
           </VStateRow>

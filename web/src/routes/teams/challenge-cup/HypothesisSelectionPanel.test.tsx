@@ -21,7 +21,7 @@ vi.mock("../../../api/hypothesisFirst", () => ({
 import { queryKeys } from "../../../api/queryKeys";
 import { HypothesisSelectionPanel } from "./HypothesisSelectionPanel";
 
-function context(status: "open" | "closed") {
+function context(status: "open" | "summarizing" | "closed") {
   const candidate = {
     mechanism: "机制",
     novelty_basis: "",
@@ -55,7 +55,7 @@ function context(status: "open" | "closed") {
   } as never;
 }
 
-function renderPanel(status: "open" | "closed"): string {
+function renderPanel(status: "open" | "summarizing" | "closed"): string {
   const client = new QueryClient();
   client.setQueryData(
     queryKeys.hypothesisFirstSelectionContext("team-1", "SCI-001"),
@@ -81,6 +81,12 @@ describe("HypothesisSelectionPanel", () => {
     expect(markup).toContain("已关门");
     expect(markup).toContain("最终采用 2 条");
     expect(markup).not.toContain("记录选择并开启评审");
+  });
+
+  it("explains the automatic step without the ambiguous minutes wording", () => {
+    const markup = renderPanel("summarizing");
+    expect(markup).toContain("正在整理讨论结论");
+    expect(markup).not.toContain("纪要生成中");
   });
 
   it("routes the review CTA to the actionable workflow node", async () => {
@@ -109,7 +115,6 @@ describe("HypothesisSelectionPanel", () => {
         </QueryClientProvider>,
       );
     });
-
     const button = Array.from(container.querySelectorAll("button"))
       .find((node) => node.textContent === "查看评审讨论");
     expect(button).toBeTruthy();

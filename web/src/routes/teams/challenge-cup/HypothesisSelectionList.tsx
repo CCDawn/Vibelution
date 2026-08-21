@@ -327,7 +327,10 @@ export function HypothesisSelectionList({
         />
       ) : null}
       {hideSubmit || reviewClosed ? null : (
-        <div className={css.actions}>
+        <div
+          className={compact ? css.stickyActions : css.actions}
+          data-current-task-action={compact ? "true" : undefined}
+        >
           <VButton
             density="compact"
             disabledReason={
