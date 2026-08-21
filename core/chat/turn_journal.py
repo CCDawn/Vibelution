@@ -414,6 +414,64 @@ def _refresh_terminal_cache_signature(path: Path) -> None:
             _TERMINAL_SET_CACHE[key] = (cached[0], mtime_ns, size)
 
 
+_TURN_EVENTS_PREFIX_CACHE: dict[str, dict[str, Any]] = {}
+_TURN_EVENTS_PREFIX_CACHE_MAX_ENTRIES = 128
+_TURN_EVENTS_PREFIX_CACHE_GUARD = threading.Lock()
+
+
+def _remember_turn_events_prefix(key: str, value: dict[str, Any]) -> None:
+    with _TURN_EVENTS_PREFIX_CACHE_GUARD:
+        _TURN_EVENTS_PREFIX_CACHE[key] = value
+        while len(_TURN_EVENTS_PREFIX_CACHE) > _TURN_EVENTS_PREFIX_CACHE_MAX_ENTRIES:
+            oldest = next(iter(_TURN_EVENTS_PREFIX_CACHE))
+            _TURN_EVENTS_PREFIX_CACHE.pop(oldest, None)
+
+
+def _forget_turn_events_prefix(key: str) -> None:
+    with _TURN_EVENTS_PREFIX_CACHE_GUARD:
+        _TURN_EVENTS_PREFIX_CACHE.pop(key, None)
+
+
+def _parse_journal_segment(
+    handle: Any,
+    *,
+    start_offset: int,
+) -> tuple[list[TurnJournalEvent], int]:
+    """Parse newline-terminated lines from ``start_offset``.
+
+    Returns the parsed events plus the resumable byte offset — just past the
+    last successfully parsed line.  Malformed or partial trailing lines leave
+    the resumable offset behind them so the next load re-reads them once the
+    writer has completed the append.
+    """
+
+    handle.seek(start_offset)
+    payload = handle.read()
+    complete_end = payload.rfind(b"\n")
+    if complete_end < 0:
+        return [], start_offset
+    events: list[TurnJournalEvent] = []
+    parsed_offset = start_offset
+    cursor = start_offset
+    for raw in payload[:complete_end + 1].split(b"\n")[:-1]:
+        line_end = cursor + len(raw) + 1
+        cursor = line_end
+        text = raw.strip()
+        if not text:
+            parsed_offset = line_end
+            continue
+        try:
+            parsed = json.loads(text)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            continue
+        event = TurnJournalEvent.from_dict(parsed)
+        if event is None:
+            continue
+        events.append(event)
+        parsed_offset = line_end
+    return events, parsed_offset
+
+
 def load_turn_events(project_root: Path, session_id: str) -> list[TurnJournalEvent]:
     path = turn_journal_path(project_root, session_id)
     if not path.exists():
@@ -421,25 +479,55 @@ def load_turn_events(project_root: Path, session_id: str) -> list[TurnJournalEve
     with _journal_thread_lock(path):
         if not path.exists():
             return []
-        events: list[TurnJournalEvent] = []
-        try:
-            with path.open(encoding="utf-8") as handle:
-                lines = handle
-                for line in lines:
-                    raw = line.strip()
-                    if not raw:
-                        continue
-                    try:
-                        parsed = json.loads(raw)
-                    except json.JSONDecodeError:
-                        continue
-                    event = TurnJournalEvent.from_dict(parsed)
-                    if event is not None:
-                        events.append(event)
-        except OSError:
-            return []
-    events.sort(key=lambda item: (item.sequence, item.timestamp, item.event_id))
-    return events
+        events = _load_turn_events_with_prefix_reuse(path)
+    result = list(events)
+    result.sort(key=lambda item: (item.sequence, item.timestamp, item.event_id))
+    return result
+
+
+def _load_turn_events_with_prefix_reuse(path: Path) -> list[TurnJournalEvent]:
+    """Full replay with append-only prefix reuse.
+
+    The journal is strictly append-only and events are frozen, so when the file
+    has only grown since the last read the already-parsed prefix objects can be
+    reused and only the new tail needs parsing.  Anything other than pure
+    growth (shrink, same size with a new mtime) falls back to a full re-read.
+    """
+
+    try:
+        with path.open("rb") as handle:
+            try:
+                stat = path.stat()
+            except OSError:
+                _forget_turn_events_prefix(str(path))
+                return []
+            size = int(stat.st_size)
+            mtime_ns = int(stat.st_mtime_ns)
+            key = str(path)
+            cached = _TURN_EVENTS_PREFIX_CACHE.get(key)
+            if cached is not None:
+                cached_size = int(cached["size"])
+                cached_mtime_ns = int(cached["mtime_ns"])
+                if size == cached_size and mtime_ns == cached_mtime_ns:
+                    return list(cached["events"])
+                if size < cached_size or (size == cached_size and mtime_ns != cached_mtime_ns):
+                    cached = None
+            resume_offset = int(cached["size"]) if cached is not None else 0
+            prefix: list[TurnJournalEvent] = list(cached["events"]) if cached is not None else []
+            tail, parsed_offset = _parse_journal_segment(handle, start_offset=resume_offset)
+            events = [*prefix, *tail]
+            if parsed_offset > 0:
+                _remember_turn_events_prefix(key, {
+                    "size": parsed_offset,
+                    "mtime_ns": mtime_ns,
+                    "events": tuple(events),
+                })
+            else:
+                _forget_turn_events_prefix(key)
+            return events
+    except OSError:
+        _forget_turn_events_prefix(str(path))
+        return []
 
 
 def load_latest_turn_events_for_preview(

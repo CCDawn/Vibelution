@@ -97,6 +97,43 @@ class ContextAssemblyResult:
         }
 
 
+_MISS = object()
+_EMPTY = object()
+
+
+class _IdentityListMemo:
+    """Identity-keyed memo for pure projections over frozen event/message lists.
+
+    Journal loads reuse parsed prefix objects across appends, so an unchanged
+    list (same length and same first/last object identity) is by construction
+    the same sequence of immutable objects.  Entries keep the first/last
+    references alive, which rules out id-reuse collisions.  Any mismatch just
+    misses and recomputes, so this can only trade a recompute for a recompute.
+    """
+
+    def __init__(self) -> None:
+        self._entries: dict[tuple[Any, ...], tuple[Any, Any, int, Any]] = {}
+
+    def lookup(self, scope: tuple[Any, ...], items: list[Any]) -> Any:
+        entry = self._entries.get(scope)
+        if entry is None:
+            return _MISS
+        kept_first, kept_last, length, value = entry
+        first = items[0] if items else _EMPTY
+        last = items[-1] if items else _EMPTY
+        if length == len(items) and kept_first is first and kept_last is last:
+            return value
+        return _MISS
+
+    def store(self, scope: tuple[Any, ...], items: list[Any], value: Any) -> None:
+        first = items[0] if items else _EMPTY
+        last = items[-1] if items else _EMPTY
+        self._entries[scope] = (first, last, len(items), value)
+
+
+_ASSEMBLY_MEMO = _IdentityListMemo()
+
+
 def assemble_conversation_context(
     messages: Iterable[dict[str, Any]] | None,
     *,
@@ -121,11 +158,24 @@ def assemble_conversation_context(
         list(ledger_events or []),
         current_turn_id=current_turn_id,
     )
+    raw_ledger_event_list = list(ledger_events or [])
     ledger_replay_events = apply_context_compression_checkpoints(
         ledger_event_list,
         current_turn_id=current_turn_id,
     )
-    ledger_messages = conversation_model_messages_from_events(ledger_replay_events)
+    memo_scope = (session_id, current_turn_id)
+    memoized_model_messages = _ASSEMBLY_MEMO.lookup(
+        ("conversation_model_messages", *memo_scope),
+        ledger_replay_events,
+    )
+    if memoized_model_messages is _MISS:
+        memoized_model_messages = conversation_model_messages_from_events(ledger_replay_events)
+        _ASSEMBLY_MEMO.store(
+            ("conversation_model_messages", *memo_scope),
+            ledger_replay_events,
+            memoized_model_messages,
+        )
+    ledger_messages = memoized_model_messages
     if enforce_conversation_invariant:
         invariant = check_conversation_payload_invariant(ledger_messages)
         if not invariant.ok:
@@ -134,21 +184,65 @@ def assemble_conversation_context(
                 message=str(invariant.message or "Ledger history seed failed conversation invariant."),
                 details=dict(invariant.details or {}),
             )
-        canonical_history = canonical_conversation_messages_from_events(
-            list(ledger_events or []),
-            current_turn_id=current_turn_id,
+        memoized_canonical = _ASSEMBLY_MEMO.lookup(
+            ("canonical_conversation_messages", *memo_scope),
+            raw_ledger_event_list,
         )
-        if conversation_layer_fingerprint(canonical_history) != conversation_layer_fingerprint(ledger_messages):
+        if memoized_canonical is _MISS:
+            memoized_canonical = canonical_conversation_messages_from_events(
+                raw_ledger_event_list,
+                current_turn_id=current_turn_id,
+            )
+            _ASSEMBLY_MEMO.store(
+                ("canonical_conversation_messages", *memo_scope),
+                raw_ledger_event_list,
+                memoized_canonical,
+            )
+        canonical_history = memoized_canonical
+        memoized_canonical_fingerprint = _ASSEMBLY_MEMO.lookup(
+            ("conversation_layer_fingerprint", *memo_scope),
+            canonical_history,
+        )
+        if memoized_canonical_fingerprint is _MISS:
+            memoized_canonical_fingerprint = conversation_layer_fingerprint(canonical_history)
+            _ASSEMBLY_MEMO.store(
+                ("conversation_layer_fingerprint", *memo_scope),
+                canonical_history,
+                memoized_canonical_fingerprint,
+            )
+        memoized_model_fingerprint = _ASSEMBLY_MEMO.lookup(
+            ("conversation_layer_fingerprint_model", *memo_scope),
+            ledger_messages,
+        )
+        if memoized_model_fingerprint is _MISS:
+            memoized_model_fingerprint = conversation_layer_fingerprint(ledger_messages)
+            _ASSEMBLY_MEMO.store(
+                ("conversation_layer_fingerprint_model", *memo_scope),
+                ledger_messages,
+                memoized_model_fingerprint,
+            )
+        if memoized_canonical_fingerprint != memoized_model_fingerprint:
             raise ConversationSeedInvariantError(
                 error_type="ledger_history_projection_mismatch",
                 message="Ledger history seed projection does not match canonical ConversationLedger replay.",
                 details={
-                    "expectedFingerprint": conversation_layer_fingerprint(canonical_history),
-                    "actualFingerprint": conversation_layer_fingerprint(ledger_messages),
+                    "expectedFingerprint": memoized_canonical_fingerprint,
+                    "actualFingerprint": memoized_model_fingerprint,
                 },
             )
     normalized_messages = list(ledger_messages)
-    events = build_history_events(normalized_messages, session_id=session_id)
+    memoized_history_events = _ASSEMBLY_MEMO.lookup(
+        ("build_history_events", *memo_scope),
+        normalized_messages,
+    )
+    if memoized_history_events is _MISS:
+        memoized_history_events = build_history_events(normalized_messages, session_id=session_id)
+        _ASSEMBLY_MEMO.store(
+            ("build_history_events", *memo_scope),
+            normalized_messages,
+            memoized_history_events,
+        )
+    events = memoized_history_events
     if recent_message_limit is None:
         recent_start_index = 0
     else:

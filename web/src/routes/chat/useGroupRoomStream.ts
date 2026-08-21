@@ -35,6 +35,36 @@ export function useGroupRoomStream({
       return;
     }
     const stream = new EventSource(`/api/chat-rooms/${streamRoomId}/events`);
+    // The backend publishes a full room detail snapshot on every speaker state
+    // transition; coalesce bursts the same way the direct session stream does
+    // (350ms) so a running round does not parse+write the whole room cache per
+    // event.
+    const MIN_APPLY_INTERVAL_MS = 350;
+    let pendingDetail: ChatRoomDetail | null = null;
+    let applyTimer: number | null = null;
+
+    function flushPendingDetail() {
+      if (applyTimer !== null) {
+        window.clearTimeout(applyTimer);
+        applyTimer = null;
+      }
+      const next = pendingDetail;
+      pendingDetail = null;
+      if (!disposed && next) {
+        syncChatRoomDetail(next);
+      }
+    }
+
+    function scheduleChatRoomDetail(detail: ChatRoomDetail) {
+      pendingDetail = detail;
+      if (applyTimer !== null) {
+        return;
+      }
+      applyTimer = window.setTimeout(() => {
+        applyTimer = null;
+        flushPendingDetail();
+      }, MIN_APPLY_INTERVAL_MS);
+    }
 
     stream.onopen = () => {
       if (!disposed) {
@@ -95,7 +125,7 @@ export function useGroupRoomStream({
         return;
       }
       setGroupStreamConnected(true);
-      syncChatRoomDetail(payload.detail);
+      scheduleChatRoomDetail(payload.detail);
     }
 
     stream.addEventListener("chat_room_detail", handleChatRoomDetail as EventListener);
@@ -103,6 +133,7 @@ export function useGroupRoomStream({
     return () => {
       const readyStateBeforeClose = stream.readyState;
       disposed = true;
+      flushPendingDetail();
       setGroupStreamConnected(false);
       stream.removeEventListener("chat_room_detail", handleChatRoomDetail as EventListener);
       stream.close();
