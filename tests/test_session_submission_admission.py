@@ -13,7 +13,7 @@ from core.chat.conversation_ledger import (
     load_conversation_events,
 )
 from core.chat.conversation_store import ConversationStore
-from core.chat.conversation_store.schema import MIGRATIONS
+from core.chat.conversation_store.schema import MIGRATIONS, SCHEMA_VERSION
 from core.web.services.session.admission import SessionSubmissionAdmissionService
 
 
@@ -150,8 +150,8 @@ def test_v1_store_upgrades_to_directory_control_plane_without_creating_transcrip
 
     store = ConversationStore(database_path)
     try:
-        assert store.open()["schemaVersion"] == 3
-        assert store.database.metadata()["schemaVersion"] == 3
+        assert store.open()["schemaVersion"] == SCHEMA_VERSION
+        assert store.database.metadata()["schemaVersion"] == SCHEMA_VERSION
         with sqlite3.connect(database_path) as connection:
             tables = {
                 row[0]
@@ -163,6 +163,7 @@ def test_v1_store_upgrades_to_directory_control_plane_without_creating_transcrip
                 "session_edges",
                 "session_admissions",
                 "session_projection_offsets",
+                "workspace_chat_state",
             }.issubset(tables)
             columns = {
                 row[1]

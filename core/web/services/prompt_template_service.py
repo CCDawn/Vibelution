@@ -936,6 +936,7 @@ def build_agent_prompt_snapshot(
     agent_code: str = "",
     agent_display_name: str = "",
     project_root: Path | None = None,
+    core_prompt_root: Path | None = None,
     include_chat_base: bool = False,
 ) -> dict[str, Any]:
     """Freeze the three core prompts and one role template for a session."""
@@ -986,7 +987,10 @@ def build_agent_prompt_snapshot(
             "reason": "empty_template_content",
         }
     try:
-        core_bundle = load_core_prompt_bundle(Path(project_root or PROJECT_ROOT))
+        # Core prompts are product files shipped with the install; the role
+        # template registry is workspace data. Keep the two roots separate so a
+        # source-tree core root never hijacks workspace template lookups.
+        core_bundle = load_core_prompt_bundle(Path(core_prompt_root or project_root or PROJECT_ROOT))
     except CorePromptSourceError as exc:
         return {
             "schemaVersion": 2,

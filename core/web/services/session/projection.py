@@ -137,6 +137,9 @@ def list_sessions(
         sessions.sort(
             key=lambda item: (
                 -s._timestamp_sort_key(item.get("updatedAt") or item.get("lastActive") or ""),
+                # Same-second timestamps must not depend on input order (view
+                # switching reshuffles the source rows); fall back to a stable id key.
+                str(item.get("id") or ""),
             )
         )
         summary_projection_ms = s._elapsed_ms(summary_projection_started_at)

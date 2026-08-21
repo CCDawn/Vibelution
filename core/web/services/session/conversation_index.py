@@ -1202,7 +1202,9 @@ def select_chat_session(session_id: str, *, lightweight: bool = False) -> dict:
         raise s.SessionNotFoundError("Session not found")
     from . import directory_bridge
 
-    directory_bridge.sync_conversation_record(selected_conversation)
+    # Viewing a session is not session activity: the directory list must keep
+    # ordering by last activity, so a select must not touch recency.
+    directory_bridge.sync_conversation_record(selected_conversation, touch_recency=False)
     s._invalidate_session_list_cache()
     if lightweight:
         normalized = s._normalize_conversation(selected_conversation) or selected_conversation

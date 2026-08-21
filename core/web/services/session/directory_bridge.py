@@ -247,6 +247,7 @@ def sync_conversation_record(
     last_preview: str = "",
     status: str = "",
     wait: bool = True,
+    touch_recency: bool = True,
 ) -> None:
     store = directory_runtime.get_open_directory_store()
     if store is None or not isinstance(conversation, Mapping):
@@ -289,6 +290,7 @@ def sync_conversation_record(
             hidden_from_index=_directory_hidden_from_index(conversation),
             team_id=str(conversation.get("team_id") or conversation.get("teamId") or "").strip(),
             last_preview=str(last_preview or ""),
+            touch_recency=touch_recency,
         )
         if wait:
             future.result(timeout=_SYNC_TIMEOUT_SECONDS)

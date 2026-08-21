@@ -318,7 +318,6 @@ def _ensure_session_agent_prompt_snapshot(
     )
     required_versions = s.prompt_template_service.get_agent_prompt_snapshot_versions(
         prompt_template_id,
-        project_root=Path(__file__).resolve().parents[4],
         include_chat_base=include_chat_base,
     )
     match_kwargs = {
@@ -359,7 +358,7 @@ def _ensure_session_agent_prompt_snapshot(
         agent_id=agent_id,
         agent_code=str(agent.get("agentCode") or "").strip(),
         agent_display_name=str(agent.get("displayName") or "").strip(),
-        project_root=Path(__file__).resolve().parents[4],
+        core_prompt_root=Path(__file__).resolve().parents[4],
         include_chat_base=include_chat_base,
     )
     raise_if_agent_context_interrupted(

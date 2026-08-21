@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 from core.infrastructure import developer_sandbox
 from core.ui.chat_state import load_chat_state
 from core.web.services import agent_directory_service, session_service
@@ -90,6 +92,10 @@ def test_select_only_writes_target_last_viewed_preference_without_touching_other
 def test_session_list_order_is_recency_not_viewing_pointer(tmp_path, monkeypatch) -> None:
     _isolate_session_workspace(tmp_path, monkeypatch)
     older = session_service.create_chat_session(title="Older", lightweight=True)
+    # Session timestamps are second-granular: force the two sessions onto
+    # distinct seconds so list order is pinned by real recency instead of a
+    # same-second tie that a late async directory write can reshuffle.
+    time.sleep(1.1)
     newer = session_service.create_chat_session(title="Newer", lightweight=True)
 
     listed_before = [item["id"] for item in session_service.list_sessions()]
