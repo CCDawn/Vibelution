@@ -117,6 +117,7 @@ import {
   LAUNCHER_API_JSON_BRIDGE_MAX_BYTES,
   parsePythonJsonBridgePayload,
   PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS,
+  PYTHON_JSON_BRIDGE_ISOLATED_STOP_TIMEOUT_MS,
   PYTHON_JSON_BRIDGE_MAINTENANCE_TIMEOUT_MS,
   PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS,
   runPythonJsonBridge
@@ -3357,9 +3358,11 @@ async function orchestrateLauncherApi(
     timeoutMs:
       path === "maintenance/reset/apply"
         ? PYTHON_JSON_BRIDGE_MAINTENANCE_TIMEOUT_MS
-        : method === "GET"
-          ? PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS
-          : PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS,
+        : path === "branch-instances/cleanup"
+          ? PYTHON_JSON_BRIDGE_ISOLATED_STOP_TIMEOUT_MS
+          : method === "GET"
+            ? PYTHON_JSON_BRIDGE_QUERY_TIMEOUT_MS
+            : PYTHON_JSON_BRIDGE_COMMAND_TIMEOUT_MS,
     killPolicy: "child",
     mutation: method !== "GET"
   });

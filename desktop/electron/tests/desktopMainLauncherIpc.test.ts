@@ -66,6 +66,18 @@ describe("Electron main Launcher IPC facade", () => {
     expect(mainSource.slice(storeStart, storeEnd).match(/orchestrateLauncherApi\(/g)).toHaveLength(1);
   });
 
+  it("gives branch cleanup the stop budget and preserves uncertain-mutation handling", () => {
+    const apiStart = mainSource.indexOf("async function orchestrateLauncherApi");
+    const apiEnd = mainSource.indexOf("function scheduleLauncherStatusCliRefresh", apiStart);
+    const apiBody = mainSource.slice(apiStart, apiEnd);
+    const bridgeStart = apiBody.indexOf("const raw = await runPythonJsonBridge");
+    const bridgeBody = apiBody.slice(bridgeStart, apiBody.indexOf("const parsed", bridgeStart));
+
+    expect(bridgeBody).toContain('path === "branch-instances/cleanup"');
+    expect(bridgeBody).toContain("PYTHON_JSON_BRIDGE_ISOLATED_STOP_TIMEOUT_MS");
+    expect(bridgeBody).toContain('mutation: method !== "GET"');
+  });
+
   it("refreshes state from debounced file hints and stat-only safety checks", () => {
     expect(mainSource).toContain("scheduleLauncherStateFileHint");
     expect(mainSource).toContain("}, 200)");
