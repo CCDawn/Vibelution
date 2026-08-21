@@ -130,6 +130,23 @@ describe("ChatGroupCenterSurface hand-test substitutes", () => {
     expect(html).toContain("打断目标助手");
   });
 
+  it("shows the notice-stream skeleton during the initial project-bus load", () => {
+    const html = renderToStaticMarkup(
+      <ChatGroupCenterSurface
+        {...baseProps({
+          projectBusActive: true,
+          standardGroupRoomActive: false,
+          projectBusTimeline: undefined,
+          projectBusRefreshing: true,
+        })}
+      />,
+    );
+
+    expect(html).toContain("正在加载助手通知流");
+    expect(html).toContain('data-testid="progressive-region-skeleton"');
+    expect(html).not.toContain("暂无通知。");
+  });
+
   it("renders a completed group round topic and message bubble", () => {
     const html = renderToStaticMarkup(
       <ChatGroupCenterSurface
@@ -299,5 +316,22 @@ describe("ChatGroupCenterSurface hand-test substitutes", () => {
     );
     expect(html).toContain("讨论中");
     expect(html).toContain("停止");
+  });
+
+  it("shows an explicit stopping state and removes the locked stop control", () => {
+    const html = renderToStaticMarkup(
+      <ChatGroupCenterSurface
+        {...baseProps({
+          groupRoundActive: true,
+          groupRoundStopping: true,
+          groupStopDisabled: true,
+        })}
+      />,
+    );
+
+    expect(html).toContain("正在停止，等待收尾");
+    expect(html).toContain("请点击刷新");
+    expect(html).toContain("等待收尾");
+    expect(html).not.toContain("停止当前群聊轮次");
   });
 });

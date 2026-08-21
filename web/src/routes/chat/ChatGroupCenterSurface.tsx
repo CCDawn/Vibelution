@@ -278,6 +278,7 @@ export function ChatGroupCenterSurface({
   standardGroupRoomActive,
   groupRoomInitialLoading,
   activeGroupRoom,
+  activeGroupRoomId,
   availableGroupParticipantCount,
   activeGroupParticipantById,
   projectBusTimeline,
@@ -318,8 +319,37 @@ export function ChatGroupCenterSurface({
   onOpenMentionTarget,
   onToggleExpandedGroupMessage,
 }: ChatGroupCenterSurfaceProps) {
+  const rounds = activeGroupRoom?.rounds ?? [];
+  const lastRound = rounds[rounds.length - 1];
+  const lastMessageKey = `${lastRound?.roundId ?? ""}:${(lastRound?.messages ?? []).length}:${rounds.length}`;
+  const groupTimelineRef = useRef<HTMLDivElement | null>(null);
+  const groupTimelineOpenedRoomIdRef = useRef<string | null>(null);
+  const projectBusInitialLoading = projectBusRefreshing && !projectBusTimeline;
+
+  useEffect(() => {
+    if (!standardGroupRoomActive || projectBusActive || groupRoomInitialLoading) {
+      if (!standardGroupRoomActive || projectBusActive) {
+        groupTimelineOpenedRoomIdRef.current = null;
+      }
+      return;
+    }
+    const element = groupTimelineRef.current;
+    if (!element) return;
+    const firstOpen = groupTimelineOpenedRoomIdRef.current !== activeGroupRoomId;
+    const nearBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 180;
+    if (firstOpen || nearBottom) {
+      element.scrollTop = element.scrollHeight;
+    }
+    groupTimelineOpenedRoomIdRef.current = activeGroupRoomId;
+  }, [
+    activeGroupRoomId,
+    groupRoomInitialLoading,
+    lastMessageKey,
+    projectBusActive,
+    standardGroupRoomActive,
+  ]);
+
   if (projectBusActive) {
-    const rounds = activeGroupRoom?.rounds ?? [];
     return (
       <div className={styles.groupConversationFrame}>
         <ChatMessageChromeHeader
@@ -370,7 +400,12 @@ export function ChatGroupCenterSurface({
           <div className={styles.inlineNotice} role="alert">{groupRoomActionError}</div>
         ) : null}
         <div className={styles.groupMessageTimeline} aria-live="polite">
-          {projectBusEvents.length ? (
+          {projectBusInitialLoading ? (
+            <ProgressiveRegionSkeleton
+              variant="conversation"
+              label={lang === "zh" ? "正在加载助手通知流" : "Loading Agent notice stream"}
+            />
+          ) : projectBusEvents.length ? (
             projectBusEvents.map((event) => {
               const revoked = isProjectAgentBusEventRevoked(event);
               const targetLabel = event.targetScope === "all"
@@ -512,20 +547,6 @@ export function ChatGroupCenterSurface({
     );
   }
 
-  const rounds = activeGroupRoom?.rounds ?? [];
-  // Keep the newest message visible: auto-scroll when the reader is already
-  // near the bottom; never yank someone who scrolled up through history.
-  const groupTimelineRef = useRef<HTMLDivElement | null>(null);
-  const lastRound = rounds[rounds.length - 1];
-  const lastMessageKey = `${lastRound?.roundId ?? ""}:${(lastRound?.messages ?? []).length}:${rounds.length}`;
-  useEffect(() => {
-    const element = groupTimelineRef.current;
-    if (!element) return;
-    const nearBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 180;
-    if (nearBottom) {
-      element.scrollTop = element.scrollHeight;
-    }
-  }, [lastMessageKey]);
   return (
     <div className={styles.groupConversationFrame}>
       <ChatMessageChromeHeader
@@ -560,6 +581,11 @@ export function ChatGroupCenterSurface({
       {groupRoomRefreshError ? (
         <div className={styles.inlineNotice} role="alert">{groupRoomRefreshError}</div>
       ) : null}
+      {groupRoundStopping ? (
+        <div className={styles.inlineNotice} role="status" aria-live="polite">
+          {lang === "zh" ? "正在停止，等待收尾。请点击刷新查看最新状态。" : "Stopping; waiting for finalization. Refresh to check the latest status."}
+        </div>
+      ) : null}
       <div ref={groupTimelineRef} className={styles.groupMessageTimeline} aria-live="polite">
         {rounds.length ? (
           <GroupRoundsTimeline
@@ -590,7 +616,7 @@ export function ChatGroupCenterSurface({
         <VNativeInput
           value={groupTopicDraft}
           onChange={(event) => onGroupTopicDraftChange(event.target.value)}
-          disabled={startGroupRoundPending}
+          disabled={startGroupRoundPending || groupRoundStopping}
           placeholder={lang === "zh" ? "输入下一轮群聊议题" : "Topic for the next group round"}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
@@ -606,14 +632,17 @@ export function ChatGroupCenterSurface({
             !groupTopicDraft.trim()
             || startGroupRoundPending
             || groupRoundActive
+            || groupRoundStopping
             || !activeGroupRoom
           }
                 icon={<UsersRound size={15} />}><span>
-            {startGroupRoundPending || groupRoundActive
-              ? (groupRoundStopping ? (lang === "zh" ? "停止中" : "Stopping") : (lang === "zh" ? "讨论中" : "Running"))
+            {groupRoundStopping
+              ? (lang === "zh" ? "等待收尾" : "Waiting to finish")
+              : startGroupRoundPending || groupRoundActive
+                ? (groupRoundActive ? (lang === "zh" ? "讨论中" : "Running") : (lang === "zh" ? "启动中" : "Starting"))
               : (lang === "zh" ? "启动一轮" : "Run round")}
           </span></VButton>
-        {groupRoundActive ? (
+        {groupRoundActive && !groupRoundStopping ? (
           <VButton
             type="button"
             className={styles.groupStopButton}
