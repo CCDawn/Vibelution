@@ -238,6 +238,221 @@ def _fake_collection_runs(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
     return calls
 
 
+def _seed_question_reset_artifacts(team_id: str, question_id: str) -> dict[str, str]:
+    """Seed only the durable hypothesis-first artifacts owned by one question."""
+    suffix = question_id.lower()
+    meeting_id = f"meeting-{suffix}"
+    selection_id = f"selection-{suffix}"
+    candidate_id = f"candidate-{suffix}"
+    round_id = f"round-{suffix}"
+    chain._append_jsonl(
+        chain._storage_path(team_id),
+        {
+            "schemaVersion": 1,
+            "recordKind": chain.CANDIDATE_KIND,
+            "candidateId": candidate_id,
+            "questionId": question_id,
+            "statement": f"{question_id} candidate",
+            "meetingRoundId": meeting_id,
+        },
+    )
+    chain._append_jsonl(
+        chain._storage_path(team_id),
+        {
+            "schemaVersion": 1,
+            "recordKind": chain.COLLECTION_REQUEST_KIND,
+            "requestId": f"request-{suffix}",
+            "questionId": question_id,
+            "meetingRoundId": meeting_id,
+            "status": "completed",
+        },
+    )
+    chain._append_jsonl(
+        chain._storage_path(team_id),
+        {
+            "schemaVersion": 1,
+            "recordKind": chain.REVIEW_ROUND_LINK_KIND,
+            "linkId": f"link-{suffix}",
+            "questionId": question_id,
+            "meetingRoundId": meeting_id,
+            "selectionId": selection_id,
+            "roundIndex": 1,
+        },
+    )
+    selections._append_jsonl(
+        selections._storage_path(team_id),
+        {"schemaVersion": 1, "selectionId": selection_id, "questionId": question_id},
+    )
+    meetings._append_jsonl(
+        meetings._rounds_path(team_id),
+        {
+            "schemaVersion": 2,
+            "meetingRoundId": meeting_id,
+            "question": question_id,
+            "meetingType": "hypothesis_review",
+            "status": "closed",
+        },
+    )
+    meetings._append_jsonl(
+        meetings._digests_path(team_id),
+        {"schemaVersion": 2, "digestId": f"digest-{suffix}", "meetingRoundId": meeting_id},
+    )
+    meetings._append_jsonl(
+        meetings._decisions_path(team_id),
+        {"schemaVersion": 2, "decisionId": f"decision-{suffix}", "meetingRoundId": meeting_id},
+    )
+    hrounds._append_jsonl(
+        hrounds._storage_path(team_id),
+        {
+            "schemaVersion": 1,
+            "roundId": round_id,
+            "status": "closed",
+            "meetingRefs": [{"kind": "meeting_round", "id": meeting_id}],
+        },
+    )
+    return {
+        "candidateId": candidate_id,
+        "meetingId": meeting_id,
+        "roundId": round_id,
+        "selectionId": selection_id,
+    }
+
+
+def test_question_reset_clears_only_the_target_questions_closed_hypothesis_chain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    team_id, _agents = _hf_env(tmp_path, monkeypatch)
+    target = _seed_question_reset_artifacts(team_id, _QUESTION_ID)
+    other = _seed_question_reset_artifacts(team_id, "SCI-097")
+
+    preview = chain.preview_question_reset(team_id, _QUESTION_ID)
+
+    assert preview["canReset"] is True
+    assert preview["impact"] == {
+        "candidateCount": 1,
+        "selectionCount": 1,
+        "meetingCount": 1,
+        "hypothesisRoundCount": 1,
+        "collectionRequestCount": 1,
+        "collectionRunCount": 0,
+    }
+
+    result = chain.reset_question_chain(
+        team_id,
+        _QUESTION_ID,
+        confirmation_question_id=_QUESTION_ID,
+    )
+
+    assert result["removed"] == preview["impact"]
+    assert result["nextAction"] == {
+        "targetNodeId": "hf_generation",
+        "label": "生成候选假说",
+    }
+    assert chain.list_hypothesis_candidates(team_id, question_id=_QUESTION_ID)["candidates"] == []
+    assert selections.list_hypothesis_selections(team_id, question_id=_QUESTION_ID)["selections"] == []
+    assert chain.list_collection_requests(team_id, question_id=_QUESTION_ID)["requests"] == []
+    assert [item["meetingRoundId"] for item in meetings.list_meeting_rounds(team_id)["meetings"]] == [other["meetingId"]]
+    assert [item["roundId"] for item in hrounds.list_hypothesis_rounds(team_id)["rounds"]] == [other["roundId"]]
+
+    assert chain.list_hypothesis_candidates(team_id, question_id="SCI-097")["candidates"][0]["candidateId"] == other["candidateId"]
+    assert selections.list_hypothesis_selections(team_id, question_id="SCI-097")["selections"][0]["selectionId"] == other["selectionId"]
+    assert target["meetingId"] != other["meetingId"]
+    assert target["roundId"] != other["roundId"]
+
+
+def test_question_reset_refuses_active_discussion_and_mismatched_confirmation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    team_id, _agents = _hf_env(tmp_path, monkeypatch)
+    target = _seed_question_reset_artifacts(team_id, _QUESTION_ID)
+    meetings._append_jsonl(
+        meetings._rounds_path(team_id),
+        {
+            "schemaVersion": 2,
+            "meetingRoundId": target["meetingId"],
+            "question": _QUESTION_ID,
+            "meetingType": "hypothesis_review",
+            "status": "open",
+        },
+    )
+
+    preview = chain.preview_question_reset(team_id, _QUESTION_ID)
+
+    assert preview["canReset"] is False
+    assert "进行中的讨论" in preview["blockingReason"]
+    with pytest.raises(chain.HypothesisFirstChainError, match="进行中的讨论"):
+        chain.reset_question_chain(
+            team_id,
+            _QUESTION_ID,
+            confirmation_question_id=_QUESTION_ID,
+        )
+    with pytest.raises(chain.HypothesisFirstChainError, match="输入当前题号"):
+        chain.reset_question_chain(
+            team_id,
+            _QUESTION_ID,
+            confirmation_question_id="SCI-097",
+        )
+    assert chain.list_hypothesis_candidates(team_id, question_id=_QUESTION_ID)["candidates"]
+
+
+def test_question_reset_keeps_source_collection_untouched_if_ledger_rewrite_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    team_id, _agents = _hf_env(tmp_path, monkeypatch)
+    _seed_question_reset_artifacts(team_id, _QUESTION_ID)
+    source_cleanup_calls: list[set[str]] = []
+
+    def should_not_run_source_cleanup(_team_id: str, run_ids: set[str]) -> dict[str, object]:
+        source_cleanup_calls.append(set(run_ids))
+        return {}
+
+    monkeypatch.setattr(
+        collection_runs,
+        "reset_source_collection_runs_for_question",
+        should_not_run_source_cleanup,
+    )
+    monkeypatch.setattr(
+        chain,
+        "_rewrite_jsonl",
+        lambda _path, _records: (_ for _ in ()).throw(OSError("disk full")),
+    )
+
+    with pytest.raises(chain.HypothesisFirstChainError, match="原数据已尝试恢复"):
+        chain.reset_question_chain(
+            team_id,
+            _QUESTION_ID,
+            confirmation_question_id=_QUESTION_ID,
+        )
+
+    assert source_cleanup_calls == []
+    assert chain.list_hypothesis_candidates(team_id, question_id=_QUESTION_ID)["candidates"]
+
+
+def test_question_reset_restores_hypothesis_records_if_source_cleanup_late_blocks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    team_id, _agents = _hf_env(tmp_path, monkeypatch)
+    _seed_question_reset_artifacts(team_id, _QUESTION_ID)
+
+    def late_source_blocker(_team_id: str, _run_ids: set[str]) -> dict[str, object]:
+        raise ValueError("资料运行状态已变化")
+
+    monkeypatch.setattr(
+        collection_runs,
+        "reset_source_collection_runs_for_question",
+        late_source_blocker,
+    )
+
+    with pytest.raises(ValueError, match="资料运行状态已变化"):
+        chain.reset_question_chain(
+            team_id,
+            _QUESTION_ID,
+            confirmation_question_id=_QUESTION_ID,
+        )
+
+    assert chain.list_hypothesis_candidates(team_id, question_id=_QUESTION_ID)["candidates"]
+
+
 def _build_runtime(tmp_path: Path):
     return build_workflow_runtime(
         tmp_path / "ledger.sqlite3",

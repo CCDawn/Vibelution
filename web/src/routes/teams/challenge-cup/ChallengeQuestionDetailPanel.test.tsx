@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ChallengeQuestionRunDetailPayload } from "../../../api/types";
 import { ChallengeQuestionDetailPanel } from "./ChallengeQuestionDetailPanel";
+import detailPanelSource from "./ChallengeQuestionDetailPanel.tsx?raw";
 import {
   challengeEvidenceSourceTypeLabel,
   challengeEvidenceVerificationStatusLabel,
@@ -166,6 +167,14 @@ function detail(): ChallengeQuestionRunDetailPayload {
     },
   };
 }
+
+describe("ChallengeQuestionDetailPanel reset entry", () => {
+  it("keeps the destructive action in this question's header menu", () => {
+    expect(detailPanelSource).toContain("本题更多操作");
+    expect(detailPanelSource).toContain("重置本题运行");
+    expect(detailPanelSource).toContain("ChallengeQuestionRunResetDialog");
+  });
+});
 
 describe("ChallengeQuestionDetailPanel", () => {
   it("renders the complete SCI-096 white-box audit chain without inventing missing anchors", () => {

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, MoreHorizontal, RotateCcw } from "lucide-react";
 
 import { queryKeys } from "../../../api/queryKeys";
 import { fetchChallengeCupTokenUsage } from "../../../api/teamExperiment";
@@ -10,6 +10,7 @@ import {
   VButton,
   VEmptyState,
   VErrorSummary,
+  VDropdownMenu,
   VStateSurface,
   VStatusChip,
   VStringSelect,
@@ -22,6 +23,7 @@ import { ChallengeQuestionAnalysisSection } from "./ChallengeQuestionAnalysisSec
 import { ChallengeQuestionEvidenceSection } from "./ChallengeQuestionEvidenceSection";
 import { ChallengeQuestionPlanSection } from "./ChallengeQuestionPlanSection";
 import { ChallengeQuestionRegisterDialog } from "./ChallengeQuestionRegisterDialog";
+import { ChallengeQuestionRunResetDialog } from "./ChallengeQuestionRunResetDialog";
 import { HypothesisSelectionPanel } from "./HypothesisSelectionPanel";
 import { ChallengeQuestionTokenUsage } from "./ChallengeTokenUsageStrip";
 import { isTokenUsageOverview, questionTokenUsage } from "./challengeTokenUsageModel";
@@ -81,6 +83,7 @@ export function ChallengeQuestionDetailPanel({
   onNavigateToNode,
 }: ChallengeQuestionDetailPanelProps) {
   const [reviseDialogOpen, setReviseDialogOpen] = useState(false);
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
   const { lang } = useShellI18n();
   const isZh = lang === "zh";
   const detailAnchors = isZh ? DETAIL_ANCHORS_ZH : DETAIL_ANCHORS_EN;
@@ -200,6 +203,28 @@ export function ChallengeQuestionDetailPanel({
               {isZh ? "登记修订产出" : "Register revision output"}
             </VButton>
           ) : null}
+          <VDropdownMenu
+            aria-label={isZh ? "本题更多操作" : "More actions for this question"}
+            trigger={
+              <VButton
+                density="compact"
+                variant="secondary"
+                icon={<MoreHorizontal size={15} aria-hidden="true" />}
+                aria-label={isZh ? "本题更多操作" : "More actions for this question"}
+              >
+                {isZh ? "更多操作" : "More actions"}
+              </VButton>
+            }
+            items={[
+              {
+                id: "reset-question-run",
+                label: isZh ? "重置本题运行" : "Reset this question run",
+                icon: <RotateCcw size={15} aria-hidden="true" />,
+                danger: true,
+                onSelect: () => setResetDialogOpen(true),
+              },
+            ]}
+          />
           <VButton density="compact" icon={<ArrowLeft size={15} aria-hidden="true" />} onPress={onClose} variant="secondary">
             {isZh ? "返回题目列表" : "Back to question list"}
           </VButton>
@@ -236,6 +261,13 @@ export function ChallengeQuestionDetailPanel({
           lang={lang}
         />
       ) : null}
+      <ChallengeQuestionRunResetDialog
+        open={resetDialogOpen}
+        onOpenChange={setResetDialogOpen}
+        teamId={detail.teamId}
+        questionId={detail.questionId}
+        onCompleted={(targetNodeId) => onNavigateToNode?.(targetNodeId)}
+      />
     </main>
   );
 }

@@ -302,7 +302,9 @@ def _assert_project_agent_tasks_not_active(team_id: str, project_id: str) -> Non
     """Resetting mid-task deletes the plan the task is writing back to."""
     s = _service()
     try:
-        from core.web.services.team_workflow import research_project_agent_tasks as task_service
+        from core.web.services.team_workflow import (
+            research_project_agent_tasks as task_service,
+        )
 
         status = task_service.get_research_project_agent_task_status(team_id, project_id)
     except Exception:  # noqa: BLE001 - guard must fail open on status errors
@@ -344,6 +346,196 @@ def _delete_project_source_collection_runs(team_id: str, run_ids: set[str]) -> l
         s.data_processing_service.delete_processing_run(run_id)
         removed_run_ids.append(run_id)
     return removed_run_ids
+
+
+def _source_collection_reset_context(team_id: str, run_ids: set[str]) -> dict[str, Any]:
+    """Validate exact source runs before a narrower domain owner removes them."""
+    s = _service()
+    normalized_team_id = s._normalize_required_id(team_id, "Team id is required.")
+    normalized_run_ids = {
+        s._trim_text(run_id, max_length=160)
+        for run_id in run_ids
+        if s._trim_text(run_id, max_length=160)
+    }
+    loaded_runs: list[dict[str, Any]] = []
+    missing_run_ids: list[str] = []
+    for run_id in sorted(normalized_run_ids):
+        try:
+            run = s.data_processing_service.get_processing_run(run_id)
+        except s.data_processing_service.DataProcessingNotFoundError:
+            # A prior partial reset may already have removed the physical run.
+            # It is safe to clear the stale chain reference on a retry.
+            missing_run_ids.append(run_id)
+            continue
+        if not s._source_collection_run_belongs_to_team(run, normalized_team_id):
+            raise s.TeamWorkflowOrchestrationError(
+                "资料搜集运行不属于当前团队，不能随本题重置。"
+            )
+        run_status = s._trim_text(run.get("status"), max_length=80).lower()
+        if run_status in {"collecting", "processing"}:
+            raise s.TeamWorkflowOrchestrationError(
+                "本题的资料搜集仍在进行，请等待结束或先停止任务。"
+            )
+        loaded_runs.append(run)
+
+    _assert_project_source_search_not_active(normalized_team_id, normalized_run_ids)
+    return {
+        "teamId": normalized_team_id,
+        "runIds": normalized_run_ids,
+        "runs": loaded_runs,
+        "missingRunIds": missing_run_ids,
+    }
+
+
+def preview_source_collection_runs_reset(team_id: str, run_ids: set[str]) -> dict[str, Any]:
+    """Return the safe-to-delete status for exact source-collection runs.
+
+    The caller has already derived the ids from an owning question's chain
+    records.  This module verifies that those ids are still source-collection
+    runs of the same team; it never broadens the operation to a project.
+    """
+    try:
+        context = _source_collection_reset_context(team_id, run_ids)
+    except ValueError as exc:  # The UI needs a blocker, not a failed preview.
+        return {
+            "canReset": False,
+            "blockingReason": str(exc),
+            "runCount": 0,
+            "missingRunIds": [],
+        }
+    return {
+        "canReset": True,
+        "blockingReason": "",
+        "runCount": len(context["runs"]),
+        "missingRunIds": list(context["missingRunIds"]),
+    }
+
+
+def reset_source_collection_runs_for_question(
+    team_id: str,
+    run_ids: set[str],
+) -> dict[str, Any]:
+    """Remove only the completed source batches directly linked to one question.
+
+    This is deliberately narrower than a research-project reset.  Mixed or
+    downstream artifacts are rejected rather than guessed away, so a question
+    reset cannot delete a sibling question's source records.
+    """
+    context = _source_collection_reset_context(team_id, run_ids)
+    s = _service()
+    normalized_team_id = context["teamId"]
+    target_run_ids = set(context["runIds"])
+    if not target_run_ids:
+        return {
+            "removedRunIds": [],
+            "removedSourceCandidateCount": 0,
+            "removedStageRoundCount": 0,
+            "missingRunIds": [],
+        }
+
+    removed_candidate_ids: set[str] = set()
+    removed_round_ids: set[str] = set()
+    with s._WORKFLOW_LOCK:
+        candidate_store = s._load_candidate_store(normalized_team_id)
+        candidates = [
+            item
+            for item in list(candidate_store.get("candidates") or [])
+            if isinstance(item, dict)
+        ]
+        kept_candidates: list[dict[str, Any]] = []
+        downstream_candidate_ids: list[str] = []
+        for candidate in candidates:
+            metadata = candidate.get("metadata") if isinstance(candidate.get("metadata"), dict) else {}
+            imported = (
+                metadata.get("importedFromDataRecord")
+                if isinstance(metadata.get("importedFromDataRecord"), dict)
+                else {}
+            )
+            source_run_id = s._trim_text(
+                imported.get("runId") or metadata.get("sourceCollectionRunId"),
+                max_length=160,
+            )
+            if source_run_id not in target_run_ids:
+                kept_candidates.append(candidate)
+                continue
+            if str(candidate.get("candidateType") or "") != "source_manifest":
+                downstream_candidate_ids.append(
+                    s._trim_text(candidate.get("candidateId"), max_length=160)
+                )
+                kept_candidates.append(candidate)
+                continue
+            candidate_id = s._trim_text(candidate.get("candidateId"), max_length=160)
+            if candidate_id:
+                removed_candidate_ids.add(candidate_id)
+
+        if downstream_candidate_ids:
+            raise s.TeamWorkflowOrchestrationError(
+                "本题资料已生成下游科研候选，不能在保留下游产物的情况下重置资料运行。"
+            )
+
+        stage_store = s._load_stage_round_store(normalized_team_id)
+        remaining_rounds: list[dict[str, Any]] = []
+        mixed_or_downstream_round_ids: list[str] = []
+        for item in list(stage_store.get("rounds") or []):
+            if not isinstance(item, dict):
+                continue
+            source_run_ids = _stage_round_source_run_ids(item)
+            if not (source_run_ids & target_run_ids):
+                remaining_rounds.append(item)
+                continue
+            stage_round_id = s._trim_text(item.get("stageRoundId"), max_length=160)
+            if (
+                not source_run_ids.issubset(target_run_ids)
+                or str(item.get("stageType") or "") != "knowledge_collection"
+            ):
+                mixed_or_downstream_round_ids.append(stage_round_id)
+                remaining_rounds.append(item)
+                continue
+            if stage_round_id:
+                removed_round_ids.add(stage_round_id)
+
+        if mixed_or_downstream_round_ids:
+            raise s.TeamWorkflowOrchestrationError(
+                "本题资料已进入混合或下游阶段，不能只删除其中一个资料运行。"
+            )
+
+        workflow = s._load_or_create_workflow(normalized_team_id)
+        workflow["activeWorkflowItems"] = [
+            item
+            for item in list(workflow.get("activeWorkflowItems") or [])
+            if isinstance(item, dict)
+            and s._trim_text(item.get("candidateId"), max_length=160)
+            not in (target_run_ids | removed_candidate_ids)
+        ]
+        candidate_store["candidates"] = kept_candidates
+        candidate_store["updatedAt"] = s.utc_now_iso()
+        stage_store["rounds"] = remaining_rounds
+        stage_store["updatedAt"] = s.utc_now_iso()
+        workflow["updatedAt"] = s.utc_now_iso()
+        s._write_json(s._candidate_store_path(normalized_team_id), candidate_store)
+        s._write_json(s._stage_round_store_path(normalized_team_id), stage_store)
+        s._write_json(s._workflow_path(normalized_team_id), workflow)
+
+    removed_run_ids = _delete_project_source_collection_runs(
+        normalized_team_id,
+        {s._trim_text(run.get("runId"), max_length=160) for run in context["runs"]},
+    )
+    s._record_workflow_event(
+        "source_collection.question_run_reset",
+        normalized_team_id,
+        fields={
+            "runIds": removed_run_ids,
+            "missingRunIds": context["missingRunIds"],
+            "removedSourceCandidateCount": len(removed_candidate_ids),
+            "removedStageRoundCount": len(removed_round_ids),
+        },
+    )
+    return {
+        "removedRunIds": removed_run_ids,
+        "removedSourceCandidateCount": len(removed_candidate_ids),
+        "removedStageRoundCount": len(removed_round_ids),
+        "missingRunIds": list(context["missingRunIds"]),
+    }
 
 
 def _require_active_research_project(team_id: str, project_id: str) -> tuple[Any, str, str, dict[str, Any]]:

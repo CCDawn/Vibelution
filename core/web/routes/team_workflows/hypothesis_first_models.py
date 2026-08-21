@@ -194,6 +194,12 @@ class CollectionHandoffPayload(BaseModel):
     handoffRef: str = Field("", max_length=500)
 
 
+class QuestionRunResetPayload(BaseModel):
+    """Typed confirmation for a destructive, question-scoped reset."""
+
+    confirmationQuestionId: str = Field(..., min_length=1, max_length=200)
+
+
 # ---------------------------------------------------------------------------
 # Responses — keys mirror the service return dicts; extra keys pass through.
 # Routes must use response_model_exclude_unset=True so fields the service did
@@ -433,3 +439,28 @@ class CollectionHandoffResponse(BaseModel):
     request: dict[str, Any] = Field(default_factory=dict)
     nextMeeting: dict[str, Any] | None = None
     resume: dict[str, Any] | None = None
+
+
+class QuestionRunResetPreviewResponse(BaseModel):
+    """Read-only impact preview shown before resetting one question's run."""
+
+    model_config = ConfigDict(extra="allow")
+
+    schemaVersion: int = 0
+    teamId: str = ""
+    questionId: str = ""
+    canReset: bool = False
+    blockingReason: str = ""
+    impact: dict[str, int] = Field(default_factory=dict)
+
+
+class QuestionRunResetResponse(BaseModel):
+    """Completed question-scoped reset and its explicit next workflow action."""
+
+    model_config = ConfigDict(extra="allow")
+
+    schemaVersion: int = 0
+    teamId: str = ""
+    questionId: str = ""
+    removed: dict[str, int] = Field(default_factory=dict)
+    nextAction: dict[str, str] = Field(default_factory=dict)

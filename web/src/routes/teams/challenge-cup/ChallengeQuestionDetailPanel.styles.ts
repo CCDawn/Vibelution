@@ -67,6 +67,9 @@ const styles: Record<string, string> = {
     "grid gap-2 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-inset)] p-3",
   registerResultGrid: "flex flex-wrap items-center gap-1.5",
   registerActions: "flex flex-wrap items-center gap-2",
+  resetDialog: "grid gap-3 text-[var(--fg-primary)] [&_p]:m-0",
+  resetImpactList: "m-0 grid list-none gap-1.5 p-0 [&_li]:grid [&_li]:grid-cols-[1fr_auto] [&_li]:items-center [&_li]:gap-3 [&_li]:rounded-[var(--vui-radius-control)] [&_li]:bg-[var(--vui-surface-inset)] [&_li]:px-2.5 [&_li]:py-2 [&_span]:[font-size:var(--vui-font-2xs)] [&_span]:text-[var(--fg-secondary)]",
+  resetWarning: "rounded-[var(--vui-radius-panel-soft)] border border-[color-mix(in_srgb,var(--state-warning)_34%,transparent)] bg-[color-mix(in_srgb,var(--state-warning)_8%,transparent)] px-3 py-2 [font-size:var(--vui-font-2xs)] text-[var(--fg-secondary)]",
   artifact:
     "flex items-start gap-2.5 [&>div]:grid [&>div]:min-w-0 [&>div]:gap-1.25 [&_code]:wrap-anywhere [&_code]:[font-size:var(--vui-font-2xs)] [&_code]:text-[var(--fg-secondary)]",
   state:

@@ -8,8 +8,12 @@ from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.routes.team_workflows import experiment as team_workflow_experiment_routes
 from core.web.routes.team_workflows import knowledge as team_workflow_knowledge_routes
-from core.web.routes.team_workflows import research_ops as team_workflow_research_ops_routes
-from core.web.routes.team_workflows import source_collection as team_workflow_source_collection_routes
+from core.web.routes.team_workflows import (
+    research_ops as team_workflow_research_ops_routes,
+)
+from core.web.routes.team_workflows import (
+    source_collection as team_workflow_source_collection_routes,
+)
 from core.web.services import (
     agent_directory_service,
     chat_room_service,
@@ -20,6 +24,10 @@ from core.web.services import (
     team_service,
     team_workflow_orchestration_service,
 )
+from core.web.services.team_workflow.research_runtime import hypothesis_first_chain
+from core.web.services.team_workflow.source_collection import (
+    runs as source_collection_runs,
+)
 
 
 def _client() -> TestClient:
@@ -27,7 +35,9 @@ def _client() -> TestClient:
 
 
 def test_json_writer_keeps_atomic_temp_path_short_for_long_target_paths(tmp_path):
-    from core.web.services.team_workflow import facade_helpers as team_workflow_facade_helpers
+    from core.web.services.team_workflow import (
+        facade_helpers as team_workflow_facade_helpers,
+    )
 
     leaf_name = "index.json"
     segment_length = max(1, 248 - len(str(tmp_path)) - 2 - len(leaf_name))
@@ -693,6 +703,114 @@ def test_project_source_collection_reset_only_clears_active_project_stage_one_da
     assert missing_run.status_code == 404
     assert remaining_candidates.json()["candidateCount"] == 0
     assert legacy_status.status_code == 200, legacy_status.text
+
+
+def test_question_source_collection_reset_removes_only_the_linked_run(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        team_workflow_orchestration_service,
+        "_write_source_collection_search_plan",
+        lambda _team_id, _run_id, _search_plan: None,
+    )
+    client = _client()
+    team_id = client.post("/api/teams", json={"name": "Question run reset team"}).json()["teamId"]
+
+    target_start = client.post(
+        f"/api/teams/{team_id}/workflow-orchestration/source-collection-runs",
+        json={
+            "title": "SCI-096 stale source batch",
+            "topic": "stale target topic",
+            "querySeeds": ["target query"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    other_start = client.post(
+        f"/api/teams/{team_id}/workflow-orchestration/source-collection-runs",
+        json={
+            "title": "SCI-097 retained source batch",
+            "topic": "retained sibling topic",
+            "querySeeds": ["sibling query"],
+            "promptCachePolicy": {"requirement": "disabled"},
+        },
+    )
+    target_run_id = target_start.json()["run"]["runId"]
+    other_run_id = other_start.json()["run"]["runId"]
+    target_record = client.post(
+        f"/api/data-processing/runs/{target_run_id}/records",
+        json={"sourceType": "url", "sourceRef": "https://example.test/target", "title": "Target source"},
+    ).json()
+    other_record = client.post(
+        f"/api/data-processing/runs/{other_run_id}/records",
+        json={"sourceType": "url", "sourceRef": "https://example.test/other", "title": "Sibling source"},
+    ).json()
+    target_candidate = client.post(
+        f"/api/teams/{team_id}/workflow-orchestration/data-processing/runs/{target_run_id}/records/{target_record['recordId']}/source-candidate",
+        json={"createdByAgent": "source_finder"},
+    ).json()
+    other_candidate = client.post(
+        f"/api/teams/{team_id}/workflow-orchestration/data-processing/runs/{other_run_id}/records/{other_record['recordId']}/source-candidate",
+        json={"createdByAgent": "source_finder"},
+    ).json()
+    active_preview = source_collection_runs.preview_source_collection_runs_reset(
+        team_id,
+        {target_run_id},
+    )
+    data_processing_service._touch_run(target_run_id, status="completed")
+
+    result = source_collection_runs.reset_source_collection_runs_for_question(
+        team_id,
+        {target_run_id},
+    )
+    target_after = client.get(f"/api/data-processing/runs/{target_run_id}")
+    other_after = client.get(f"/api/data-processing/runs/{other_run_id}")
+    candidates_after = client.get(
+        f"/api/teams/{team_id}/workflow-orchestration/candidates",
+        params={"candidateType": "source_manifest"},
+    ).json()["candidates"]
+
+    assert target_start.status_code == 201, target_start.text
+    assert other_start.status_code == 201, other_start.text
+    assert active_preview["canReset"] is False
+    assert "资料搜集仍在进行" in active_preview["blockingReason"]
+    assert result["removedRunIds"] == [target_run_id]
+    assert result["removedSourceCandidateCount"] == 1
+    assert result["removedStageRoundCount"] == 0
+    assert target_after.status_code == 404
+    assert other_after.status_code == 200, other_after.text
+    assert [item["candidateId"] for item in candidates_after] == [other_candidate["candidate"]["candidateId"]]
+    assert target_candidate["candidate"]["candidateId"] != other_candidate["candidate"]["candidateId"]
+
+
+def test_question_run_reset_routes_preview_then_clear_one_question_chain(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(hypothesis_first_chain, "PROJECT_ROOT", tmp_path)
+    client = _client()
+    team_id = client.post("/api/teams", json={"name": "Question reset route team"}).json()["teamId"]
+    hypothesis_first_chain._append_jsonl(
+        hypothesis_first_chain._storage_path(team_id),
+        {
+            "schemaVersion": 1,
+            "recordKind": hypothesis_first_chain.CANDIDATE_KIND,
+            "candidateId": "candidate-sci-096",
+            "questionId": "SCI-096",
+            "statement": "Stale candidate",
+        },
+    )
+
+    preview = client.get(
+        f"/api/teams/{team_id}/workflow-orchestration/hypothesis-first/questions/SCI-096/run-reset-preview",
+    )
+    reset = client.post(
+        f"/api/teams/{team_id}/workflow-orchestration/hypothesis-first/questions/SCI-096/run-reset",
+        json={"confirmationQuestionId": "SCI-096"},
+    )
+
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["canReset"] is True
+    assert preview.json()["impact"]["candidateCount"] == 1
+    assert reset.status_code == 200, reset.text
+    assert reset.json()["nextAction"]["targetNodeId"] == "hf_generation"
+    assert hypothesis_first_chain.list_hypothesis_candidates(team_id, question_id="SCI-096")["candidates"] == []
 
 
 def test_project_source_collection_reset_ignores_other_project_downstream(tmp_path, monkeypatch):

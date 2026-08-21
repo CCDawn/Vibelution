@@ -446,6 +446,35 @@ export type ReviewRoundLinkListResponse = {
   storagePath?: string;
 };
 
+export type QuestionRunResetImpact = {
+  candidateCount: number;
+  selectionCount: number;
+  meetingCount: number;
+  hypothesisRoundCount: number;
+  collectionRequestCount: number;
+  collectionRunCount: number;
+};
+
+export type QuestionRunResetPreview = {
+  schemaVersion: number;
+  teamId: string;
+  questionId: string;
+  canReset: boolean;
+  blockingReason: string;
+  impact: QuestionRunResetImpact;
+};
+
+export type QuestionRunResetResponse = {
+  schemaVersion: number;
+  teamId: string;
+  questionId: string;
+  removed: QuestionRunResetImpact;
+  nextAction: {
+    targetNodeId: string;
+    label: string;
+  };
+};
+
 export type DecisionRecordView = {
   decisionId: string;
   meetingRoundId: string;

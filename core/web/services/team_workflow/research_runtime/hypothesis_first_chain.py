@@ -27,8 +27,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
-import tempfile
 import threading
 from collections.abc import Mapping
 from datetime import datetime, timezone
@@ -45,6 +43,7 @@ MAX_ROUND_BUDGET = 5
 COLLECTION_REQUEST_KIND = "collection_request"
 REVIEW_ROUND_LINK_KIND = "review_round_link"
 CANDIDATE_KIND = "hypothesis_candidate"
+QUESTION_RESET_AUDIT_KIND = "question_reset_audit"
 REQUEST_EVIDENCE_DECISION = "request_new_evidence"
 HYPOTHESIS_REVIEW_MEETING_TYPE = "hypothesis_review"
 CANDIDATE_GENERATION_MEETING_TYPE = "hypothesis_candidate_generation"
@@ -56,6 +55,10 @@ _SCOPE_FIELDS = ("program", "theme", "campaign", "question", "branch", "workflow
 _TERMINAL_RUN_STATUSES = frozenset({"succeeded", "failed", "cancelled", "archived"})
 _ACTIVE_ATTEMPT_STATUSES = frozenset(
     {"starting", "dispatching", "running", "waiting_human"}
+)
+_ACTIVE_MEETING_STATUSES = frozenset({"open", "summarizing", "awaiting_approval"})
+_ACTIVE_COLLECTION_STATUSES = frozenset(
+    {"pending", "queued", "starting", "dispatching", "running", "collecting"}
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[5]
@@ -185,6 +188,326 @@ def _latest_by_id(
 
 def _normalized_str_list(value: Any) -> list[str]:
     return [str(item or "").strip() for item in list(value or []) if str(item or "").strip()]
+
+
+def _rewrite_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
+    """Replace one JSONL ledger atomically after a scoped reset has been checked."""
+    from .atomic_fs import atomic_write_text
+
+    payload = "".join(
+        json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
+        for record in records
+    )
+    atomic_write_text(path, payload)
+
+
+def _latest_records(records: list[dict[str, Any]], field: str) -> dict[str, dict[str, Any]]:
+    latest: dict[str, dict[str, Any]] = {}
+    for record in records:
+        record_id = str(record.get(field) or "").strip()
+        if record_id:
+            latest[record_id] = record
+    return latest
+
+
+def _question_reset_snapshot(team_id: str, question_id: str) -> dict[str, Any]:
+    """Read the exact question-owned artifacts before a guarded reset.
+
+    The question is the ownership boundary. Meeting digests, decisions and
+    hypothesis rounds do not always carry ``questionId`` themselves, so they
+    are reached only through this question's meeting ids.  This prevents one
+    question's cleanup from sweeping unrelated team research.
+    """
+    from core.web.services.team_workflow import (
+        hypothesis_rounds,
+        hypothesis_selection,
+        meeting_rounds,
+    )
+
+    normalized_question_id = str(question_id or "").strip().upper()
+    chain_records = _read_jsonl(_storage_path(team_id))
+    selection_records = hypothesis_selection._read_jsonl(hypothesis_selection._storage_path(team_id))
+    meeting_records = meeting_rounds._read_jsonl(meeting_rounds._rounds_path(team_id))
+    digest_records = meeting_rounds._read_jsonl(meeting_rounds._digests_path(team_id))
+    decision_records = meeting_rounds._read_jsonl(meeting_rounds._decisions_path(team_id))
+    hypothesis_round_records = hypothesis_rounds._read_jsonl(
+        hypothesis_rounds._storage_path(team_id)
+    )
+
+    meeting_latest = _latest_records(meeting_records, "meetingRoundId")
+    chain_links = [
+        record
+        for record in chain_records
+        if str(record.get("recordKind") or "") == REVIEW_ROUND_LINK_KIND
+        and str(record.get("questionId") or "").strip().upper() == normalized_question_id
+    ]
+    linked_meeting_ids = {
+        str(record.get("meetingRoundId") or "").strip()
+        for record in chain_links
+        if str(record.get("meetingRoundId") or "").strip()
+    }
+    target_meeting_ids = {
+        meeting_id
+        for meeting_id, meeting in meeting_latest.items()
+        if str(meeting.get("question") or "").strip().upper() == normalized_question_id
+    } | linked_meeting_ids
+    target_meetings = {
+        meeting_id: meeting_latest[meeting_id]
+        for meeting_id in target_meeting_ids
+        if meeting_id in meeting_latest
+    }
+    target_selection_ids = {
+        str(record.get("selectionId") or "").strip()
+        for record in selection_records
+        if str(record.get("questionId") or "").strip().upper() == normalized_question_id
+        and str(record.get("selectionId") or "").strip()
+    }
+    target_rounds = {
+        round_id: record
+        for round_id, record in _latest_records(hypothesis_round_records, "roundId").items()
+        if str(record.get("question") or "").strip().upper() == normalized_question_id
+        or any(
+            isinstance(ref, Mapping)
+            and str(ref.get("kind") or "") == "meeting_round"
+            and str(ref.get("id") or "").strip() in target_meeting_ids
+            for ref in list(record.get("meetingRefs") or [])
+        )
+    }
+
+    target_chain_records = [
+        record
+        for record in chain_records
+        if str(record.get("recordKind") or "") != QUESTION_RESET_AUDIT_KIND
+        and str(record.get("questionId") or "").strip().upper() == normalized_question_id
+    ]
+    candidate_ids = {
+        str(record.get("candidateId") or "").strip()
+        for record in target_chain_records
+        if str(record.get("recordKind") or "") == CANDIDATE_KIND
+        and str(record.get("candidateId") or "").strip()
+    }
+    target_collection_requests = [
+        record
+        for record in _collection_requests(chain_records)
+        if str(record.get("questionId") or "").strip().upper() == normalized_question_id
+    ]
+    request_ids = {
+        str(record.get("requestId") or "").strip()
+        for record in target_collection_requests
+        if str(record.get("requestId") or "").strip()
+    }
+    collection_run_ids = {
+        str(record.get("collectionRunId") or "").strip()
+        for record in target_collection_requests
+        if str(record.get("collectionRunId") or "").strip()
+    }
+    impact = {
+        "candidateCount": len(candidate_ids),
+        "selectionCount": len(target_selection_ids),
+        "meetingCount": len(target_meetings),
+        "hypothesisRoundCount": len(target_rounds),
+        "collectionRequestCount": len(request_ids),
+        "collectionRunCount": 0,
+    }
+    active_meetings = [
+        meeting_id
+        for meeting_id, meeting in target_meetings.items()
+        if str(meeting.get("status") or "").strip().lower() in _ACTIVE_MEETING_STATUSES
+    ]
+    active_requests = [
+        request_id
+        for request_id, request in _latest_records(
+            [
+                record
+                for record in target_chain_records
+                if str(record.get("recordKind") or "") == COLLECTION_REQUEST_KIND
+            ],
+            "requestId",
+        ).items()
+        if str(request.get("status") or "").strip().lower() in _ACTIVE_COLLECTION_STATUSES
+    ]
+    return {
+        "questionId": normalized_question_id,
+        "chainRecords": chain_records,
+        "selectionRecords": selection_records,
+        "meetingRecords": meeting_records,
+        "digestRecords": digest_records,
+        "decisionRecords": decision_records,
+        "hypothesisRoundRecords": hypothesis_round_records,
+        "targetMeetingIds": target_meeting_ids,
+        "targetRoundIds": set(target_rounds),
+        "collectionRunIds": collection_run_ids,
+        "impact": impact,
+        "activeMeetingIds": active_meetings,
+        "activeRequestIds": active_requests,
+    }
+
+
+def preview_question_reset(team_id: str, question_id: str) -> dict[str, Any]:
+    """Return a non-mutating, question-scoped reset preview for the confirm UI."""
+    from core.web.services.team_service import assert_team_exists
+
+    normalized_team_id = assert_team_exists(team_id)
+    snapshot = _question_reset_snapshot(normalized_team_id, question_id)
+    from core.web.services.team_workflow.source_collection import (
+        runs as source_collection_runs,
+    )
+
+    active_meetings = list(snapshot["activeMeetingIds"])
+    active_requests = list(snapshot["activeRequestIds"])
+    collection_preview = source_collection_runs.preview_source_collection_runs_reset(
+        normalized_team_id,
+        set(snapshot["collectionRunIds"]),
+    )
+    snapshot["impact"]["collectionRunCount"] = int(collection_preview.get("runCount") or 0)
+    if active_meetings:
+        blocking_reason = "本题仍有进行中的讨论，请先结束或停止讨论后再重置。"
+    elif active_requests:
+        blocking_reason = "本题的资料搜集仍在进行，请等待结束或先停止任务。"
+    elif not collection_preview.get("canReset"):
+        blocking_reason = str(collection_preview.get("blockingReason") or "本题资料运行暂不能重置。")
+    else:
+        blocking_reason = ""
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "questionId": snapshot["questionId"],
+        "canReset": not blocking_reason,
+        "blockingReason": blocking_reason,
+        "impact": snapshot["impact"],
+    }
+
+
+def reset_question_chain(
+    team_id: str,
+    question_id: str,
+    *,
+    confirmation_question_id: str,
+) -> dict[str, Any]:
+    """Delete only one question's completed hypothesis-first working artifacts.
+
+    The title/question archive and all other questions are intentionally outside
+    this operation.  A successful reset leaves a compact audit event, then
+    directs the product back to candidate generation.
+    """
+    from core.web.services.team_service import assert_team_exists
+    from core.web.services.team_workflow import (
+        hypothesis_rounds,
+        hypothesis_selection,
+        meeting_rounds,
+    )
+    from core.web.services.team_workflow.source_collection import (
+        runs as source_collection_runs,
+    )
+
+    normalized_team_id = assert_team_exists(team_id)
+    normalized_question_id = str(question_id or "").strip().upper()
+    if not normalized_question_id:
+        raise HypothesisFirstChainError("Question id is required.")
+    if str(confirmation_question_id or "").strip().upper() != normalized_question_id:
+        raise HypothesisFirstChainError("请输入当前题号后再确认重置。")
+
+    with _LOCK, hypothesis_selection._LOCK, meeting_rounds._LOCK, hypothesis_rounds._LOCK:
+        snapshot = _question_reset_snapshot(normalized_team_id, normalized_question_id)
+        if snapshot["activeMeetingIds"]:
+            raise HypothesisFirstChainError("本题仍有进行中的讨论，请先结束或停止讨论后再重置。")
+        if snapshot["activeRequestIds"]:
+            raise HypothesisFirstChainError("本题的资料搜集仍在进行，请等待结束或先停止任务。")
+
+        source_preview = source_collection_runs.preview_source_collection_runs_reset(
+            normalized_team_id,
+            set(snapshot["collectionRunIds"]),
+        )
+        if not source_preview.get("canReset"):
+            raise HypothesisFirstChainError(
+                str(source_preview.get("blockingReason") or "本题资料运行暂不能重置。")
+            )
+        snapshot["impact"]["collectionRunCount"] = int(source_preview.get("runCount") or 0)
+        target_meeting_ids = set(snapshot["targetMeetingIds"])
+        target_round_ids = set(snapshot["targetRoundIds"])
+        chain_records = [
+            record
+            for record in snapshot["chainRecords"]
+            if not (
+                str(record.get("recordKind") or "") != QUESTION_RESET_AUDIT_KIND
+                and str(record.get("questionId") or "").strip().upper() == normalized_question_id
+            )
+        ]
+        audit_record = {
+            "schemaVersion": SCHEMA_VERSION,
+            "recordKind": QUESTION_RESET_AUDIT_KIND,
+            "resetId": f"hf-reset-{_stable_hash({'teamId': normalized_team_id, 'questionId': normalized_question_id, 'at': _utc_now()})[:16]}",
+            "questionId": normalized_question_id,
+            "resetAt": _utc_now(),
+            "removed": dict(snapshot["impact"]),
+        }
+        chain_records.append(audit_record)
+        selection_records = [
+            record
+            for record in snapshot["selectionRecords"]
+            if str(record.get("questionId") or "").strip().upper() != normalized_question_id
+        ]
+        meeting_records = [
+            record
+            for record in snapshot["meetingRecords"]
+            if str(record.get("meetingRoundId") or "").strip() not in target_meeting_ids
+        ]
+        digest_records = [
+            record
+            for record in snapshot["digestRecords"]
+            if str(record.get("meetingRoundId") or "").strip() not in target_meeting_ids
+        ]
+        decision_records = [
+            record
+            for record in snapshot["decisionRecords"]
+            if str(record.get("meetingRoundId") or "").strip() not in target_meeting_ids
+        ]
+        hypothesis_round_records = [
+            record
+            for record in snapshot["hypothesisRoundRecords"]
+            if str(record.get("roundId") or "").strip() not in target_round_ids
+        ]
+        writes = (
+            (_storage_path(normalized_team_id), chain_records),
+            (hypothesis_selection._storage_path(normalized_team_id), selection_records),
+            (meeting_rounds._rounds_path(normalized_team_id), meeting_records),
+            (meeting_rounds._digests_path(normalized_team_id), digest_records),
+            (meeting_rounds._decisions_path(normalized_team_id), decision_records),
+            (hypothesis_rounds._storage_path(normalized_team_id), hypothesis_round_records),
+        )
+        originals = {
+            path: path.read_text(encoding="utf-8") if path.exists() else ""
+            for path, _records_to_write in writes
+        }
+        try:
+            for path, records_to_write in writes:
+                _rewrite_jsonl(path, records_to_write)
+            # Source runs are the final destructive step.  A ledger write
+            # failure must leave the collection data untouched; a late source
+            # guard must restore these ledgers before it is surfaced.
+            source_collection_runs.reset_source_collection_runs_for_question(
+                normalized_team_id,
+                set(snapshot["collectionRunIds"]),
+            )
+        except Exception as exc:
+            for path, original in originals.items():
+                try:
+                    from .atomic_fs import atomic_write_text
+
+                    atomic_write_text(path, original)
+                except OSError:
+                    pass
+            if isinstance(exc, OSError):
+                raise HypothesisFirstChainError("本题运行重置失败，原数据已尝试恢复。") from exc
+            raise
+
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "questionId": normalized_question_id,
+        "removed": dict(snapshot["impact"]),
+        "nextAction": {"targetNodeId": "hf_generation", "label": "生成候选假说"},
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1505,8 +1828,7 @@ def approve_meeting_digest(
     """Confirm the current digest draft and apply generation/review side effects."""
 
     from core.web.services import team_service
-    from core.web.services.team_workflow import meeting_rounds
-    from core.web.services.team_workflow import meeting_runtime
+    from core.web.services.team_workflow import meeting_rounds, meeting_runtime
 
     normalized_team_id = team_service.assert_team_exists(team_id)
     normalized_round_id = str(meeting_round_id or "").strip()

@@ -61,6 +61,9 @@ from .hypothesis_first_models import (
     MeetingSourceMessagesResponse,
     MeetingSummaryBeginPayload,
     MeetingSummaryDraftRequest,
+    QuestionRunResetPayload,
+    QuestionRunResetPreviewResponse,
+    QuestionRunResetResponse,
     ReviewNextRoundPayload,
     ReviewNextRoundResponse,
     ReviewReopenPayload,
@@ -408,6 +411,40 @@ def team_workflow_hypothesis_candidate_generation_open(
         )
     except _DOMAIN_ERRORS as exc:
         _map_domain_error("hypothesis_first.candidate_generation.open", team_id, exc)
+
+
+@router.get(
+    "/teams/{team_id}/workflow-orchestration/hypothesis-first/questions/{question_id}/run-reset-preview",
+    response_model=QuestionRunResetPreviewResponse,
+    response_model_exclude_unset=True,
+)
+def team_workflow_hypothesis_question_reset_preview(team_id: str, question_id: str) -> dict:
+    """Read-only impact and active-work guard for the reset confirmation dialog."""
+    try:
+        return hypothesis_first_chain.preview_question_reset(team_id, question_id)
+    except _DOMAIN_ERRORS as exc:
+        _map_domain_error("hypothesis_first.question_reset.preview", team_id, exc)
+
+
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/hypothesis-first/questions/{question_id}/run-reset",
+    response_model=QuestionRunResetResponse,
+    response_model_exclude_unset=True,
+)
+def team_workflow_hypothesis_question_reset(
+    team_id: str,
+    question_id: str,
+    payload: QuestionRunResetPayload,
+) -> dict:
+    """Reset completed hypothesis-first working artifacts for exactly one question."""
+    try:
+        return hypothesis_first_chain.reset_question_chain(
+            team_id,
+            question_id,
+            confirmation_question_id=payload.confirmationQuestionId,
+        )
+    except _DOMAIN_ERRORS as exc:
+        _map_domain_error("hypothesis_first.question_reset", team_id, exc)
 
 
 # ---------------------------------------------------------------------------

@@ -30,6 +30,8 @@ import type {
   MeetingSummaryDraftRequest,
   ReviewNextRoundResponse,
   ReviewRoundLinkListResponse,
+  QuestionRunResetPreview,
+  QuestionRunResetResponse,
 } from "./types/hypothesisFirst";
 
 function teamPrefix(teamId: string): string {
@@ -126,6 +128,29 @@ export function openHypothesisCandidateGeneration(
     `${teamPrefix(teamId)}/hypothesis-first/candidate-generation`,
     "POST",
     { questionId },
+  );
+}
+
+export function fetchQuestionRunResetPreview(
+  teamId: string,
+  questionId: string,
+  options?: { signal?: AbortSignal },
+): Promise<QuestionRunResetPreview> {
+  return fetchJson<QuestionRunResetPreview>(
+    `${teamPrefix(teamId)}/hypothesis-first/questions/${encodeURIComponent(questionId)}/run-reset-preview`,
+    { signal: options?.signal },
+  );
+}
+
+export function resetQuestionRun(
+  teamId: string,
+  questionId: string,
+  confirmationQuestionId: string,
+): Promise<QuestionRunResetResponse> {
+  return writeJson<QuestionRunResetResponse>(
+    `${teamPrefix(teamId)}/hypothesis-first/questions/${encodeURIComponent(questionId)}/run-reset`,
+    "POST",
+    { confirmationQuestionId },
   );
 }
 
