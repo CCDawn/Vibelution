@@ -997,6 +997,24 @@ function WorkflowCanvasInner({
           ) : null}
           </ReactFlow>
       </div>
+      {graph.nodes.length > 0 && layout.nodes.length === 0 && !layout.degraded ? (
+        <div
+          className="pointer-events-none absolute inset-0 z-10 grid place-items-center bg-[color-mix(in_srgb,var(--vui-surface-workspace)_82%,transparent)] px-6 text-center text-[var(--vui-font-sm)] text-[var(--fg-secondary)]"
+          data-vui="workflow-layout-pending"
+          role="status"
+        >
+          正在整理流程布局…
+        </div>
+      ) : null}
+      {graph.nodes.length === 0 ? (
+        <div
+          className="pointer-events-none absolute inset-0 z-10 grid place-items-center px-6 text-center text-[var(--vui-font-sm)] text-[var(--fg-secondary)]"
+          data-vui="workflow-empty"
+          role="status"
+        >
+          当前流程暂无可显示的任务
+        </div>
+      ) : null}
       {layout.degraded ? (
         <div
           className="absolute right-3 top-3 z-20 max-w-[16rem] rounded-md border border-[var(--state-warning,#d97706)]/50 bg-[var(--vui-surface-panel)] px-2.5 py-1.5 text-[11px] leading-snug text-[var(--state-warning,#d97706)] shadow-sm"

@@ -116,7 +116,8 @@ pathState：`idle | traversed | active | attention | danger` — 仅由 nodeRuns
 - 选中卡片时点亮其入边和出边：描边加粗/提亮（idle 主路径改用 `--accent-cool`），箭头颜色跟描边；不抬 `zIndex`，也不因此展开标签
 - 状态栏、Inspector 或 URL `node=` 选中时，等首次 fit 结束后把该卡平移进视口（保持当前缩放）；画布上点击同一张卡不平移；卡片位置在拖动中变化时不再重复平移
 - 控件：放大、缩小、适应全部、定位当前工作
-- loading/empty：由调用方 `VStateSurface` / `VEmptyState` 处理
+- 数据 loading：由调用方 `VStateSurface` 处理；已有 graph 但 ELK 尚未提交几何时，canvas 显示“正在整理流程布局”；graph 确认无任务时显示明确 empty，不得只留下空网格
+- 布局失败：保留 last-good 几何并显示 `workflow-degraded` 诊断；不得静默清空节点
 - **页面壳**：`VCanvasWorkbenchPage`，`layoutId` = `WORKBENCH_LAYOUT_IDS.researchFlow`
 - 画布默认 `height="100%"`；fill 宿主 absolute inset
 - **禁止**固定 `height={440}` 式死高

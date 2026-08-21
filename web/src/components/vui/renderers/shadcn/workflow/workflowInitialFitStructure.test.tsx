@@ -206,6 +206,39 @@ describe("ShadcnWorkflowCanvas structure (P1-1)", () => {
     expect(typeof rfProps.onMoveStart).toBe("function");
   });
 
+  it("makes initial layout work perceptible instead of showing an empty grid", async () => {
+    vi.mocked(useWorkflowAutoLayout).mockReturnValue(idleLayoutHook());
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root: Root = createRoot(container);
+    await act(async () => {
+      root.render(<ShadcnWorkflowCanvas graph={sampleGraph()} />);
+    });
+
+    expect(container.querySelector('[data-vui="workflow-layout-pending"]')?.textContent)
+      .toContain("正在整理流程布局");
+    expect(container.querySelector('[data-vui="workflow-empty"]')).toBeNull();
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("explains a genuinely empty workflow", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root: Root = createRoot(container);
+    await act(async () => {
+      root.render(<ShadcnWorkflowCanvas graph={emptyGraph()} />);
+    });
+
+    expect(container.querySelector('[data-vui="workflow-empty"]')?.textContent)
+      .toContain("暂无可显示的任务");
+    expect(container.querySelector('[data-vui="workflow-layout-pending"]')).toBeNull();
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
   it("wires WorkflowCanvasControls with an explicit onFitAll (not implicit fitView)", async () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
