@@ -24,14 +24,19 @@ const GATES = [
 
 type GateKey = (typeof GATES)[number]["key"];
 type GateDecision = "approved" | "revision_requested" | "rejected";
+type GateSelection = GateDecision | "pending";
 
-const DECISION_OPTIONS_ZH: Array<{ id: GateDecision; label: string }> = [
+const PENDING_DECISION_OPTION_ZH = { id: "pending" as const, label: "待定" };
+const DECISION_OPTIONS_ZH: Array<{ id: GateSelection; label: string }> = [
+  PENDING_DECISION_OPTION_ZH,
   { id: "approved", label: "通过" },
   { id: "revision_requested", label: "要求修改" },
   { id: "rejected", label: "驳回" },
 ];
 
-const DECISION_OPTIONS_EN: Array<{ id: GateDecision; label: string }> = [
+const PENDING_DECISION_OPTION_EN = { id: "pending" as const, label: "Pending" };
+const DECISION_OPTIONS_EN: Array<{ id: GateSelection; label: string }> = [
+  PENDING_DECISION_OPTION_EN,
   { id: "approved", label: "Approve" },
   { id: "revision_requested", label: "Request changes" },
   { id: "rejected", label: "Reject" },
@@ -87,6 +92,22 @@ function reviewField(detail: ChallengeQuestionRunDetailPayload, field: string): 
   return typeof value === "string" ? value : "";
 }
 
+function formatDecidedAt(value: string, isZh: boolean): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  try {
+    return new Intl.DateTimeFormat(isZh ? "zh-CN" : "en-US", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(date);
+  } catch {
+    return value;
+  }
+}
+
 export function ChallengeQuestionReviewForm(props: {
   detail: ChallengeQuestionRunDetailPayload;
   lang?: "zh" | "en";
@@ -94,11 +115,11 @@ export function ChallengeQuestionReviewForm(props: {
   const { detail } = props;
   const isZh = props.lang !== "en";
   const queryClient = useQueryClient();
-  const [decisions, setDecisions] = useState<Record<GateKey, GateDecision>>({
-    H1_problem_understanding: "approved",
-    H2_hypothesis_selection: "approved",
-    H3_research_plan: "approved",
-    H4_external_output: "approved",
+  const [decisions, setDecisions] = useState<Record<GateKey, GateSelection>>({
+    H1_problem_understanding: "pending",
+    H2_hypothesis_selection: "pending",
+    H3_research_plan: "pending",
+    H4_external_output: "pending",
   });
   const [reviewer, setReviewer] = useState(() => {
     try {
@@ -108,6 +129,9 @@ export function ChallengeQuestionReviewForm(props: {
     }
   });
   const [rationale, setRationale] = useState("");
+  const reviewKey = `${detail.questionId}:${detail.selectedRunId}`;
+  const [submittedReviewKey, setSubmittedReviewKey] = useState<string | null>(null);
+  const isSubmitted = submittedReviewKey === reviewKey;
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -122,6 +146,9 @@ export function ChallengeQuestionReviewForm(props: {
       } catch {
         // 记住审核人只是便利，存储不可用时静默降级
       }
+      if (Object.values(decisions).some((decision) => decision !== "approved")) {
+        setSubmittedReviewKey(reviewKey);
+      }
       await queryClient.invalidateQueries({
         queryKey: queryKeys.challengeQuestionRunDetail(detail.teamId, detail.questionId),
       });
@@ -132,6 +159,7 @@ export function ChallengeQuestionReviewForm(props: {
   });
 
   if (detail.record.status === "approved") {
+    const decidedAt = reviewField(detail, "decided_at");
     return (
       <VSurface tone="card" className={css.reviewSummary} data-vui="question-review-summary">
         <div className={css.cardTopline}>
@@ -140,7 +168,7 @@ export function ChallengeQuestionReviewForm(props: {
         </div>
         <div className={css.metadata}>
           {reviewField(detail, "reviewer") ? <span>{isZh ? `审核人 ${reviewField(detail, "reviewer")}` : `Reviewer ${reviewField(detail, "reviewer")}`}</span> : null}
-          {reviewField(detail, "decided_at") ? <span>{reviewField(detail, "decided_at")}</span> : null}
+          {decidedAt ? <span>{formatDecidedAt(decidedAt, isZh)}</span> : null}
         </div>
         {reviewField(detail, "rationale") ? <p>{reviewField(detail, "rationale")}</p> : null}
       </VSurface>
@@ -150,10 +178,23 @@ export function ChallengeQuestionReviewForm(props: {
   // Human review requires official-model evidence at team level (register
   // alone never satisfies it; the run must be published first).
   const officialCallReady = detail.record?.validation?.officialModelCall === true;
-  const canSubmit = Boolean(reviewer.trim()) && Boolean(rationale.trim()) && !mutation.isPending && officialCallReady;
+  const allGatesDecided = GATES.every(({ key }) => decisions[key] !== "pending");
+  const canSubmit = allGatesDecided
+    && Boolean(reviewer.trim())
+    && Boolean(rationale.trim())
+    && !mutation.isPending
+    && !isSubmitted
+    && officialCallReady;
 
   return (
     <VSurface tone="card" className={css.reviewForm} data-vui="question-review-form">
+      {isSubmitted ? (
+        <div role="status" className={css.reviewSuccess} data-testid="review-success-banner">
+          {isZh
+            ? "审核结论已提交，表单已锁定，避免重复提交。"
+            : "Review submitted. The form is locked to prevent duplicate submissions."}
+        </div>
+      ) : null}
       <div className={css.gateList}>
         {GATES.map((gate) => {
           const current = currentGateDecision(detail, gate.key);
@@ -166,12 +207,13 @@ export function ChallengeQuestionReviewForm(props: {
                 aria-label={isZh ? `${gateLabel} 审核结论` : `${gateLabel} review decision`}
                 density="compact"
                 selectedKey={decisions[gate.key]}
+                placeholder={isZh ? "待定" : "Pending"}
                 options={isZh ? DECISION_OPTIONS_ZH : DECISION_OPTIONS_EN}
                 onSelectionChange={(key) => {
                   if (key == null) return;
-                  setDecisions((prev) => ({ ...prev, [gate.key]: String(key) as GateDecision }));
+                  setDecisions((prev) => ({ ...prev, [gate.key]: String(key) as GateSelection }));
                 }}
-                isDisabled={mutation.isPending}
+                isDisabled={mutation.isPending || isSubmitted}
               />
             </div>
           );
@@ -184,7 +226,7 @@ export function ChallengeQuestionReviewForm(props: {
           value={reviewer}
           onChange={(event) => setReviewer(event.currentTarget.value)}
           placeholder={isZh ? "你的名字" : "Your name"}
-          isDisabled={mutation.isPending}
+          isDisabled={mutation.isPending || isSubmitted}
         />
       </label>
       <label className={css.field}>
@@ -195,7 +237,7 @@ export function ChallengeQuestionReviewForm(props: {
           onChange={(event) => setRationale(event.currentTarget.value)}
           placeholder={isZh ? "通过 / 要求修改的理由" : "Rationale for approve / request changes"}
           minRows={2}
-          isDisabled={mutation.isPending}
+          isDisabled={mutation.isPending || isSubmitted}
         />
       </label>
       {mutation.isError ? (
@@ -209,10 +251,14 @@ export function ChallengeQuestionReviewForm(props: {
           variant="primary"
           isPending={mutation.isPending}
           isDisabled={!canSubmit}
-          disabledReason={!officialCallReady
+          disabledReason={isSubmitted
+            ? (isZh ? "审核结论已提交" : "Review already submitted")
+            : !officialCallReady
             ? (isZh
               ? "该 run 尚未满足官方模型调用门（证据需先发布到团队级），提交会被拒绝"
               : "This run has not passed the official-model-call gate (publish the evidence first); submission would be rejected")
+            : !allGatesDecided
+              ? (isZh ? "请逐项选择四个审核门禁的结论" : "Choose a decision for all four review gates")
             : !reviewer.trim() || !rationale.trim() ? (isZh ? "先填审核人和审核意见" : "Fill in reviewer and rationale first") : undefined}
           onClick={() => mutation.mutate()}
         >

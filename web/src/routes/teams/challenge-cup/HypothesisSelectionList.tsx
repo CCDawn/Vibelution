@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
@@ -61,10 +61,12 @@ export function HypothesisSelectionList({
     [context],
   );
   const [selectedIds, setSelectedIds] = useState<string[]>(serverBaseline);
-  const baselineKey = serverBaseline.join("");
+  const previousServerBaseline = useRef<string[]>(serverBaseline);
   useEffect(() => {
-    setSelectedIds(baselineKey.split("").filter(Boolean));
-  }, [baselineKey]);
+    if (sameIdSet(previousServerBaseline.current, serverBaseline)) return;
+    previousServerBaseline.current = [...serverBaseline];
+    setSelectedIds([...serverBaseline]);
+  }, [serverBaseline]);
 
   const recordMutation = useMutation({
     mutationFn: (input: HypothesisSelectionRecordPayload) =>

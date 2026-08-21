@@ -263,14 +263,16 @@ export function HypothesisFirstMeetingOps(props: {
     || rejectMutation.isPending
     || generationMutation.isPending
     || reopenReviewMutation.isPending
-    || handoffMutation.isPending;
+    || handoffMutation.isPending
+    || closeCorrectionMutation.isPending;
   const error =
     draftMutation.error
     || approveMutation.error
     || rejectMutation.error
     || generationMutation.error
     || reopenReviewMutation.error
-    || handoffMutation.error;
+    || handoffMutation.error
+    || closeCorrectionMutation.error;
   const displayRound = props.nextAction.command === "draft_summary"
     && roundQuery.data.meetingRound.status === "open"
     ? {
@@ -343,6 +345,7 @@ export function HypothesisFirstMeetingOps(props: {
           variant="ghost"
           density="compact"
           isPending={rejectMutation.isPending}
+          isDisabled={pending}
           onPress={() => rejectMutation.mutate()}
         >
           退回重新整理
@@ -370,6 +373,7 @@ export function HypothesisFirstMeetingOps(props: {
               variant="ghost"
               density="compact"
               isPending={closeCorrectionMutation.isPending}
+              isDisabled={pending}
               onPress={() => closeCorrectionMutation.mutate()}
             >
               按现有结论关闭本轮（不发起资料搜集）

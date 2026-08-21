@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../../api/hypothesisFirst", () => ({
   approveHypothesisDigest: vi.fn().mockResolvedValue({}),
+  closeReviewMeeting: vi.fn().mockResolvedValue({}),
   draftMeetingSummary: vi.fn().mockResolvedValue({}),
   fetchMeetingRound: vi.fn(),
   fetchMeetingRoundSourceMessages: vi.fn().mockResolvedValue({ messages: [] }),
@@ -19,6 +20,7 @@ vi.mock("../../../api/hypothesisFirst", () => ({
 
 import {
   approveHypothesisDigest,
+  closeReviewMeeting,
   draftMeetingSummary,
   fetchMeetingRound,
   fetchMeetingRoundSourceMessages,
@@ -35,6 +37,7 @@ const mockedFetchMeetingRound = vi.mocked(fetchMeetingRound);
 const mockedFetchMessages = vi.mocked(fetchMeetingRoundSourceMessages);
 const mockedOpenGeneration = vi.mocked(openHypothesisCandidateGeneration);
 const mockedReopenReview = vi.mocked(reopenHypothesisReviewMeeting);
+const mockedCloseReviewMeeting = vi.mocked(closeReviewMeeting);
 
 function meetingRound(status: string) {
   return {
@@ -170,6 +173,100 @@ describe("HypothesisFirstMeetingOps automatic organization", () => {
     });
     expect(container.textContent).toContain("本轮结论未被确认");
     expect(container.textContent).toContain("证据请求缺少有效搜集关键词");
+  });
+
+  it("surfaces close-correction failures and disables competing actions while closing", async () => {
+    const mockedApprove = vi.mocked(approveHypothesisDigest);
+    mockedApprove.mockResolvedValueOnce({
+      closed: false,
+      validationErrors: [{ code: "invalid_keywords", message: "证据请求缺少有效搜集关键词" }],
+    } as never);
+    mockedCloseReviewMeeting.mockRejectedValueOnce(new Error("close correction failed"));
+    mockedFetchMeetingRound.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      meetingRound: meetingRound("awaiting_approval"),
+    });
+    render({
+      ...AUTO_ACTION,
+      stage: "review_awaiting_approval",
+      command: "approve_review_digest",
+      commandLabel: "确认并结束本轮",
+    });
+
+    await act(async () => {
+      await vi.waitFor(() => {
+        const button = [...container.querySelectorAll("button")]
+          .find((item) => item.textContent?.includes("确认并结束本轮"));
+        expect(button).toBeTruthy();
+        button?.click();
+      });
+      await vi.waitFor(() => expect(mockedApprove).toHaveBeenCalledTimes(1));
+    });
+
+    const close = [...container.querySelectorAll("button")]
+      .find((button) => button.textContent?.includes("按现有结论关闭本轮"));
+    expect(close).toBeTruthy();
+    await act(async () => {
+      close?.click();
+      await vi.waitFor(() => expect(mockedCloseReviewMeeting).toHaveBeenCalledTimes(1));
+    });
+    expect(container.textContent).toContain("close correction failed");
+  });
+
+  it("disables the competing reject action while close correction is pending", async () => {
+    const mockedApprove = vi.mocked(approveHypothesisDigest);
+    mockedApprove.mockResolvedValueOnce({
+      closed: false,
+      validationErrors: [{ code: "invalid_keywords", message: "证据请求缺少有效搜集关键词" }],
+    } as never);
+    let resolveClose: (value: unknown) => void = () => undefined;
+    mockedCloseReviewMeeting.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveClose = resolve; }) as never,
+    );
+    mockedFetchMeetingRound.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      meetingRound: meetingRound("awaiting_approval"),
+    });
+    render({
+      ...AUTO_ACTION,
+      stage: "review_awaiting_approval",
+      command: "approve_review_digest",
+      commandLabel: "确认并结束本轮",
+    });
+
+    await act(async () => {
+      await vi.waitFor(() => {
+        const button = [...container.querySelectorAll("button")]
+          .find((item) => item.textContent?.includes("确认并结束本轮"));
+        expect(button).toBeTruthy();
+        button?.click();
+      });
+      await vi.waitFor(() => expect(mockedApprove).toHaveBeenCalledTimes(1));
+    });
+    const close = [...container.querySelectorAll("button")]
+      .find((button) => button.textContent?.includes("按现有结论关闭本轮"));
+    const reject = [...container.querySelectorAll("button")]
+      .find((button) => button.textContent?.includes("退回重新整理"));
+    expect(close).toBeTruthy();
+    expect(reject).toBeTruthy();
+
+    await act(async () => {
+      close?.click();
+      await vi.waitFor(() => expect(mockedCloseReviewMeeting).toHaveBeenCalledTimes(1));
+    });
+    const pendingClose = [...container.querySelectorAll("button")]
+      .find((button) => button.textContent?.includes("按现有结论关闭本轮"));
+    const pendingReject = [...container.querySelectorAll("button")]
+      .find((button) => button.textContent?.includes("退回重新整理"));
+    expect((pendingClose as HTMLButtonElement).disabled).toBe(true);
+    expect((pendingReject as HTMLButtonElement).disabled).toBe(true);
+
+    await act(async () => {
+      resolveClose({});
+      await Promise.resolve();
+    });
   });
 
   it("keeps retries manual after automatic organization fails", async () => {

@@ -50,6 +50,8 @@ const styles: Record<string, string> = {
     "grid gap-[9px] [&_article]:grid [&_article]:grid-cols-[76px_1fr] [&_article]:gap-3 [&_article]:rounded-[var(--vui-radius-panel-soft)] [&_article]:border [&_article]:border-[var(--vui-border-subtle)] [&_article]:bg-[var(--vui-surface-card)] [&_article]:p-3 [&_article>span]:font-bold [&_article>span]:text-[var(--accent-cool)] [&_small]:text-[var(--state-warning)]",
   reviewForm:
     "grid gap-3 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-card)] p-3",
+  reviewSuccess:
+    "rounded-[var(--vui-radius-panel-soft)] border border-[color-mix(in_srgb,var(--state-success)_32%,transparent)] bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)] px-3 py-2 [font-size:var(--vui-font-2xs)] text-[var(--state-success)]",
   reviewSummary:
     "grid gap-2 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-card)] p-3 [&_p]:[font-size:var(--vui-font-2xs)]",
   gateList: "grid gap-1.5",

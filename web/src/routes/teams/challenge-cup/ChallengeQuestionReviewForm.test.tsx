@@ -47,6 +47,22 @@ function pendingDetail(): ChallengeQuestionRunDetailPayload {
   } as unknown as ChallengeQuestionRunDetailPayload;
 }
 
+function approvedDetail(decidedAt: string): ChallengeQuestionRunDetailPayload {
+  const detail = pendingDetail();
+  return {
+    ...detail,
+    record: { ...detail.record, status: "approved" },
+    output: {
+      ...detail.output,
+      review: {
+        reviewer: "Grok",
+        decided_at: decidedAt,
+        rationale: "已完成审核。",
+      },
+    },
+  } as unknown as ChallengeQuestionRunDetailPayload;
+}
+
 function setNativeValue(element: HTMLInputElement | HTMLTextAreaElement, value: string) {
   const proto = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
   const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
@@ -59,7 +75,27 @@ function findButton(scope: ParentNode, text: string): HTMLButtonElement | undefi
     .find((button) => button.textContent?.includes(text)) as HTMLButtonElement | undefined;
 }
 
-async function renderForm() {
+async function chooseDecision(container: ParentNode, ariaLabel: string, label: string) {
+  const select = container.querySelector(`[aria-label="${ariaLabel}"]`) as HTMLButtonElement;
+  expect(select).toBeTruthy();
+  await act(async () => {
+    select.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 }));
+  });
+  let options = document.body.querySelectorAll('[role="option"]');
+  if (!options.length) {
+    await act(async () => {
+      select.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    options = document.body.querySelectorAll('[role="option"]');
+  }
+  const option = Array.from(options).find((item) => item.textContent?.includes(label)) as HTMLElement | undefined;
+  expect(option).toBeTruthy();
+  await act(async () => {
+    option!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+}
+
+async function renderForm(detail: ChallengeQuestionRunDetailPayload = pendingDetail()) {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -67,7 +103,7 @@ async function renderForm() {
   await act(async () => {
     root.render(
       <QueryClientProvider client={new QueryClient()}>
-        <ChallengeQuestionReviewForm detail={pendingDetail()} />
+        <ChallengeQuestionReviewForm detail={detail} />
       </QueryClientProvider>,
     );
   });
@@ -86,11 +122,18 @@ describe("ChallengeQuestionReviewForm", () => {
     const submit = findButton(container, "提交审核结论");
     expect(submit).toBeTruthy();
     expect(submit!.disabled).toBe(true);
+    expect(container.textContent).toContain("待定");
 
     await act(async () => {
       setNativeValue(container.querySelector('input[aria-label="审核人"]') as HTMLInputElement, "Grok");
       setNativeValue(container.querySelector('textarea[aria-label="审核意见"]') as HTMLTextAreaElement, "边界清晰，可以进入正式流程。");
     });
+
+    expect(findButton(container, "提交审核结论")!.disabled).toBe(true);
+    await chooseDecision(container, "H1 问题理解 审核结论", "通过");
+    await chooseDecision(container, "H2 假设选择 审核结论", "通过");
+    await chooseDecision(container, "H3 研究计划 审核结论", "通过");
+    await chooseDecision(container, "H4 外部产出 审核结论", "通过");
 
     const enabledSubmit = findButton(container, "提交审核结论");
     expect(enabledSubmit!.disabled).toBe(false);
@@ -119,23 +162,10 @@ describe("ChallengeQuestionReviewForm", () => {
   it("maps a gate rejection into the submitted decisions", async () => {
     const { container, root } = await renderForm();
 
-    const h4Select = container.querySelector('[aria-label="H4 外部产出 审核结论"]') as HTMLButtonElement;
-    expect(h4Select).toBeTruthy();
-    await act(async () => {
-      h4Select.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 }));
-    });
-    let options = document.body.querySelectorAll('[role="option"]');
-    if (!options.length) {
-      await act(async () => {
-        h4Select.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      });
-      options = document.body.querySelectorAll('[role="option"]');
-    }
-    const rejectOption = Array.from(options).find((option) => option.textContent?.includes("驳回")) as HTMLElement | undefined;
-    expect(rejectOption).toBeTruthy();
-    await act(async () => {
-      rejectOption!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
+    await chooseDecision(container, "H1 问题理解 审核结论", "通过");
+    await chooseDecision(container, "H2 假设选择 审核结论", "通过");
+    await chooseDecision(container, "H3 研究计划 审核结论", "通过");
+    await chooseDecision(container, "H4 外部产出 审核结论", "驳回");
 
     await act(async () => {
       setNativeValue(container.querySelector('input[aria-label="审核人"]') as HTMLInputElement, "Grok");
@@ -151,10 +181,40 @@ describe("ChallengeQuestionReviewForm", () => {
     expect(reviewMock).toHaveBeenCalledWith("research-team", "SCI-096", "stage1-sci-096-v3", expect.objectContaining({
       decisions: expect.objectContaining({ H4_external_output: "rejected" }),
     }));
+    await act(async () => {
+      await vi.waitFor(() => expect(container.textContent).toContain("审核结论已提交"));
+    });
+    expect(findButton(container, "提交审核结论")!.disabled).toBe(true);
+    await act(async () => {
+      findButton(container, "提交审核结论")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(reviewMock).toHaveBeenCalledTimes(1);
 
     await act(async () => {
       root.unmount();
     });
+    container.remove();
+  });
+
+  it("formats an approved decision timestamp for the active language and locale", async () => {
+    const decidedAt = "2026-08-21T08:15:23.123456+00:00";
+    const { container, root } = await renderForm(approvedDetail(decidedAt));
+
+    expect(container.textContent).toContain("审核人 Grok");
+    expect(container.textContent).toContain("2026");
+    expect(container.textContent).not.toContain(decidedAt);
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it("falls back to the original timestamp when it cannot be parsed", async () => {
+    const decidedAt = "timestamp-not-parseable";
+    const { container, root } = await renderForm(approvedDetail(decidedAt));
+
+    expect(container.textContent).toContain(decidedAt);
+
+    await act(async () => root.unmount());
     container.remove();
   });
 });
