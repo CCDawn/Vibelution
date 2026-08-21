@@ -11,15 +11,14 @@ from __future__ import annotations
 
 import json
 import os
-import time
 from pathlib import Path
-from typing import Any, Callable
 from uuid import uuid4
+from typing import Any, Callable
+from core.launcher import desktop_session_store, lifecycle_intent_store
+from core.runtime_manager.constants import PROJECT_ROOT
 
 from core.infrastructure.instance_display_name import workbench_window_title
-from core.launcher import desktop_session_store, lifecycle_intent_store
 from core.runtime_manager import instances_registry as registry
-from core.runtime_manager.constants import PROJECT_ROOT
 from vibelution_storage import resolve_project_runtime_home
 
 OPEN_INSTANCE_WORKBENCH = "open_instance_workbench"
@@ -77,30 +76,6 @@ def persist_instance_window_from_desktop_action(action: dict[str, Any]) -> None:
         _persist_window_fields(instance_id, window_pid=0)
 
 
-def open_isolated_workbench_window(
-    item: dict[str, Any],
-    *,
-    opener: WindowOpener | None = None,
-) -> dict[str, Any]:
-    """Present a named workbench window for one isolated instance."""
-
-    if _running_under_pytest() and opener is None:
-        return {"provider": "test", "windowPid": 0, "title": instance_workbench_title(item)}
-    runner = opener or _default_open
-    result = runner(item) or {}
-    instance_id = str(item.get("id") or "").strip()
-    title = str(result.get("title") or instance_workbench_title(item))
-    pid = _positive_int(result.get("windowPid"))
-    if instance_id:
-        _persist_window_fields(instance_id, window_pid=pid, window_title=title)
-    return {
-        "provider": str(result.get("provider") or ""),
-        "windowPid": pid,
-        "title": title,
-        "intentId": str(result.get("intentId") or ""),
-    }
-
-
 def close_isolated_workbench_window(
     item: dict[str, Any],
     *,
@@ -118,59 +93,6 @@ def close_isolated_workbench_window(
     if instance_id:
         _persist_window_fields(instance_id, window_pid=0)
     return result
-
-
-def _default_open(item: dict[str, Any]) -> dict[str, Any]:
-    title = instance_workbench_title(item)
-    url = _instance_workbench_url(item)
-    if not url:
-        return {"provider": "", "windowPid": 0, "title": title}
-    if not _electron_desktop_shell_available():
-        raise RuntimeError(_ELECTRON_WINDOW_REQUIRED_MESSAGE)
-    return _open_via_electron(item, url=url, title=title)
-
-
-def _default_close(item: dict[str, Any]) -> dict[str, Any]:
-    if _electron_desktop_shell_available():
-        intent = _submit_instance_window_action(
-            CLOSE_INSTANCE_WORKBENCH,
-            item,
-            reason="isolated_branch_instance_window_close",
-        )
-        return {"provider": "electron", "windowPid": 0, "intentId": str(intent.get("intentId") or "")}
-    _terminate_edge_window_pid(item)
-    return {"provider": "edge_app", "windowPid": 0}
-
-
-def _open_via_electron(item: dict[str, Any], *, url: str, title: str) -> dict[str, Any]:
-    intent = _submit_instance_window_action(
-        OPEN_INSTANCE_WORKBENCH,
-        item,
-        reason="isolated_branch_instance_window",
-        extra_payload={"workbenchUrl": url, "windowTitle": title},
-    )
-    intent_id = str(intent.get("intentId") or "")
-    finished = _wait_for_intent(intent_id) if intent_id else intent
-    result = finished.get("result") if isinstance(finished.get("result"), dict) else {}
-    window_state = result.get("windowState") if isinstance(result.get("windowState"), dict) else {}
-    pid = _positive_int(window_state.get("rendererProcessId"))
-    status = str(finished.get("status") or intent.get("status") or "")
-    if pid > 0 and status == "succeeded":
-        return {
-            "provider": "electron",
-            "windowPid": pid,
-            "title": title,
-            "intentId": intent_id,
-            "status": status,
-        }
-    raise RuntimeError(
-        "Electron did not open the isolated workbench window "
-        f"(status={status or 'unknown'}). Refusing Edge fallback."
-    )
-
-
-def _open_via_named_edge(item: dict[str, Any], *, url: str, title: str) -> dict[str, Any]:
-    raise RuntimeError(_ELECTRON_WINDOW_REQUIRED_MESSAGE)
 
 
 def _submit_instance_window_action(
@@ -202,16 +124,6 @@ def _submit_instance_window_action(
     )
 
 
-def _wait_for_intent(intent_id: str, timeout_seconds: float = _WINDOW_OPEN_WAIT_SECONDS) -> dict[str, Any]:
-    deadline = time.monotonic() + max(0.1, float(timeout_seconds))
-    latest: dict[str, Any] = {}
-    while time.monotonic() < deadline:
-        latest = lifecycle_intent_store.get_lifecycle_intent(intent_id)
-        if str(latest.get("status") or "") in {"succeeded", "failed"}:
-            return latest
-        time.sleep(_WINDOW_OPEN_POLL_SECONDS)
-    return latest
-
 
 def _electron_desktop_shell_available() -> bool:
     try:
@@ -224,14 +136,16 @@ def _electron_desktop_shell_available() -> bool:
     return bool(session)
 
 
-def _instance_workbench_url(item: dict[str, Any]) -> str:
-    url = str(item.get("url") or "").strip()
-    if url:
-        return url if url.endswith("/") else f"{url}/"
-    port = _positive_int(item.get("port"))
-    if port <= 0:
-        return ""
-    return f"http://127.0.0.1:{port}/"
+def _default_close(item: dict[str, Any]) -> dict[str, Any]:
+    if _electron_desktop_shell_available():
+        intent = _submit_instance_window_action(
+            CLOSE_INSTANCE_WORKBENCH,
+            item,
+            reason="isolated_branch_instance_window_close",
+        )
+        return {"provider": "electron", "windowPid": 0, "intentId": str(intent.get("intentId") or "")}
+    _terminate_edge_window_pid(item)
+    return {"provider": "edge_app", "windowPid": 0}
 
 
 def _persist_window_fields(instance_id: str, *, window_pid: int, window_title: str = "") -> None:

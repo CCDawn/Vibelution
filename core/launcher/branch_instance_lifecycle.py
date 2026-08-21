@@ -23,7 +23,6 @@ from uuid import uuid4
 from core.infrastructure.branch_workspace import list_branch_instances
 from core.launcher.isolated_workbench_window import (
     close_isolated_workbench_window,
-    open_isolated_workbench_window,
     overlay_instance_window_pid,
 )
 from core.launcher.slot_identity import (
@@ -428,52 +427,6 @@ def _registry_entry_stale_in_flight_start(
     )
 
 
-def _reclaim_stale_in_flight_start(
-    instance_id: str,
-    item: dict[str, Any],
-    existing: dict[str, Any],
-) -> bool:
-    """Collapse a provably dead in-flight start claim so a retry can proceed.
-
-    Returns True only when the registry row was reclaimed as ``failed`` under
-    the registry lock; live or not-yet-expired claims stay busy (409).
-    """
-
-    wanted = str(instance_id or "").strip()
-    if not wanted or not isinstance(existing, dict) or not existing:
-        return False
-    backend = _runtime_section(item, "backend")
-    window = _runtime_section(item, "window")
-    if not _registry_entry_stale_in_flight_start(
-        existing,
-        backend_alive=bool(item.get("alive")) or bool(backend.get("alive")),
-        backend_listening=bool(backend.get("listening")),
-        window_open=bool(window.get("open")),
-    ):
-        return False
-
-    def mutator(payload: dict[str, Any]) -> dict[str, Any]:
-        instances = payload.setdefault("instances", {})
-        entry = instances.get(wanted)
-        if not isinstance(entry, dict):
-            return {}
-        status = str(entry.get("status") or "").strip().lower()
-        if status not in {"starting", "restarting"}:
-            return dict(entry)
-        if str(entry.get("desiredState") or "").strip().lower() != "open":
-            return dict(entry)
-        if not registry.is_stale_in_flight_start(entry):
-            return dict(entry)
-        entry["status"] = "failed"
-        entry["phase"] = "failed"
-        entry["failureMessage"] = registry.START_SUPERVISOR_LOST_MESSAGE
-        entry.pop("ownerLease", None)
-        return dict(entry)
-
-    stored = registry.mutate_registry(mutator)
-    return str(stored.get("status") or "").strip().lower() == "failed"
-
-
 def _instance_start_block_reason(item: dict[str, Any], runtime: dict[str, Any]) -> str:
     if str(item.get("kind") or "") not in _STARTABLE_KINDS:
         return "unsupported_kind"
@@ -581,12 +534,6 @@ def assert_instance_operable(item: dict[str, Any], operation: str) -> None:
         )
 
 
-def current_live_ports(launcher_state: dict[str, Any] | None = None) -> set[int]:
-    state = launcher_state if launcher_state is not None else _read_current_launcher_state()
-    backend, control, _url = _current_control_plane_ports(state)
-    return {port for port in (backend, control) if port > 0}
-
-
 def run_isolated_operation(
     item: dict[str, Any],
     operation: str,
@@ -607,89 +554,14 @@ def run_isolated_operation(
     assert_instance_operable(item, operation)
     instance_id = str(item.get("id") or "")
     worktree = Path(str(item.get("path")))
-    used = set(current_live_ports())
-    used.update(int(port) for port in (extra_used or []) if int(port or 0) > 0)
     spawn = runner or spawn_worktree_launcher
     if operation in {"start", "restart"}:
-        existing = registry.get_instance(instance_id)
-        if str(existing.get("status") or "").strip().lower() in registry.IN_FLIGHT_STATUSES:
-            if _reclaim_stale_in_flight_start(instance_id, item, existing):
-                existing = registry.get_instance(instance_id)
-            else:
-                raise BranchInstanceLifecycleError(
-                    "instance_busy",
-                    "该分支实例正在执行生命周期操作。",
-                    status_code=409,
-                )
-        if operation == "start" and _isolated_backend_alive(item):
-            backend_port = _positive_int(item.get("port")) or registry.DEFAULT_BASE_PORT
-            control_port = _positive_int(item.get("controlPort")) or registry.DEFAULT_CONTROL_PORT
-            window = _open_instance_window(item, backend_port=backend_port)
-            _upsert_instance_with_slot(
-                instance_id,
-                worktree,
-                branch=str(item.get("branch") or ""),
-                port=backend_port,
-                control_port=control_port,
-                status=str(existing.get("status") or "steady") or "steady",
-                desired_state="open",
-                phase="steady",
-                window_pid=_positive_int(window.get("windowPid")),
-                window_title=str(window.get("title") or ""),
-            )
-            return _isolated_response(
-                operation,
-                instance_id=instance_id,
-                port=backend_port,
-                control_port=control_port,
-                generation=_positive_int(existing.get("generation")),
-                command_id=str(existing.get("commandId") or ""),
-                message="已打开该分支工作台窗口。",
-            )
-        claimed = _existing_matching_start_claim(instance_id, claimed_generation)
-        if claimed is None:
-            try:
-                claimed = _claim_isolated_start(
-                    item,
-                    operation,
-                    extra_used=used,
-                )
-            except registry.InstanceBusyError as exc:
-                raise BranchInstanceLifecycleError(
-                    "instance_busy",
-                    "该分支实例正在执行生命周期操作。",
-                    status_code=409,
-                ) from exc
-        backend_port = _positive_int(claimed.get("port"))
-        control_port = _positive_int(claimed.get("controlPort"))
-        generation = _positive_int(claimed.get("generation"))
-        command_id = str(claimed.get("commandId") or "")
-        try:
-            spawned = spawn(
-                worktree,
-                "restart" if operation == "restart" else "start",
-                backend_port,
-                control_port,
-                short_name=str(item.get("shortName") or ""),
-                detach=True,
-            )
-        except BranchInstanceLifecycleError:
-            # observe-error write-back is owned by Electron instanceRegistryStore.
-            raise
-        spawn_pid = _positive_int((spawned or {}).get("pid"))
-        if spawn_pid > 0:
-            applied = registry.record_spawn_pid(instance_id, spawn_pid, generation)
-            if not applied:
-                killer = terminate_pid or terminate_pid_tree
-                killer(spawn_pid)
-        return _isolated_response(
-            operation,
-            instance_id=instance_id,
-            port=backend_port,
-            control_port=control_port,
-            generation=generation,
-            command_id=command_id,
-            message="已在隔离端口启动选中工作区。" if operation == "start" else "已在隔离端口重启选中工作区。",
+        # Isolated start/restart is Electron-owned (instanceRegistryStore +
+        # spawnWorkbenchBackend); the Python write path is retired.
+        raise BranchInstanceLifecycleError(
+            "control_plane_is_electron",
+            "隔离实例启动由 Electron main 拥有，Python 写路径已退役。",
+            status_code=409,
         )
 
     instance_id = _resolve_registry_instance_id(item) or instance_id
@@ -957,20 +829,6 @@ def _positive_int(value: Any) -> int:
     return max(0, parsed)
 
 
-def _open_instance_window(item: dict[str, Any], *, backend_port: int) -> dict[str, Any]:
-    if _electron_main_orchestrates_windows():
-        # T6: the Electron main opens the isolated window after the backend is live.
-        return {
-            "windowPid": 0,
-            "title": str(item.get("workbenchTitle") or item.get("shortName") or item.get("branch") or ""),
-            "url": _loopback_url(backend_port),
-        }
-    window_item = dict(item)
-    window_item["port"] = int(backend_port)
-    window_item["url"] = _loopback_url(backend_port)
-    return open_isolated_workbench_window(window_item)
-
-
 def _electron_main_orchestrates_windows() -> bool:
     return str(os.environ.get("VIBELUTION_ELECTRON_MAIN_ORCHESTRATES_WINDOWS", "")).strip() == "1"
 
@@ -1057,18 +915,6 @@ def terminate_pid_tree(pid: int, *, timeout_seconds: float = 5.0) -> dict[str, A
         except (OSError, psutil.Error):
             pass
     return {"supported": True, "rootPid": target, "requested": requested, "terminated": requested}
-
-
-def _existing_matching_start_claim(instance_id: str, claimed_generation: int | None) -> dict[str, Any] | None:
-    expected = int(claimed_generation or 0)
-    if expected <= 0:
-        return None
-    existing = registry.get_instance(instance_id)
-    if int(existing.get("generation") or 0) != expected:
-        return None
-    if str(existing.get("status") or "").strip().lower() not in {"starting", "restarting"}:
-        return None
-    return existing
 
 
 def _existing_matching_stop_claim(instance_id: str, claimed_generation: int | None) -> dict[str, Any] | None:
