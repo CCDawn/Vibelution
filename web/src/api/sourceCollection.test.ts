@@ -21,7 +21,7 @@ describe("source-collection catalog API", () => {
 describe("source-collection start/session write API", () => {
   it("owns run start, agent-session context, and stage-session task transports", () => {
     expect(apiSource).toContain("export function startSourceCollectionRun");
-    expect(apiSource).toContain("export function seedSourceCollectionAgentSessionContext");
+    expect(apiSource).toContain("export async function seedSourceCollectionAgentSessionContext");
     expect(apiSource).toContain("export function startSourceCollectionStageSessionTask");
     expect(apiSource).toContain("/workflow-orchestration/source-collection-runs");
     expect(apiSource).toContain("/agent-session-context");

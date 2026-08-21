@@ -135,12 +135,14 @@ def _envelope_from_record(
     workflow_id: str,
     workflow_version_id: str,
 ) -> WorkflowEventEnvelope:
+    event_type: WorkflowEventType | str
     try:
         event_type = WorkflowEventType(record.event_type)
     except ValueError:
-        # Preserve unknown types as NODE_BLOCKED? Better: raise — but tests use
-        # registry types. Fall through via constructing with known values only.
-        event_type = WorkflowEventType(record.event_type)
+        # The ledger is append-only history: replay must keep serving the whole
+        # stream even when a record was written with an event type this build
+        # does not know yet. Keep the raw value instead of failing the request.
+        event_type = str(record.event_type)
     actor = json.loads(record.actor_json or "{}")
     payload = json.loads(record.payload_json or "{}")
     return WorkflowEventEnvelope(

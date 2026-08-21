@@ -177,6 +177,30 @@ describe("TeamExperimentHypothesisGovernancePanel", () => {
     expect(panelSource).toContain("candidate.approvedForExperiment");
   });
 
+  it("renders every candidate beyond the old 8-card cap so none can hide from review", () => {
+    const many = Array.from({ length: 12 }, (_, index) => ({
+      ...proxyCandidate,
+      candidateId: `H-${index + 1}`,
+      title: `候选 ${index + 1}`,
+      approvedForExperiment: false,
+    }));
+    const markup = renderToStaticMarkup(
+      <TeamExperimentHypothesisGovernancePanel
+        lang="zh"
+        activePlan={activePlan}
+        hypotheses={many}
+        materializing={false}
+        reviewingCandidateId=""
+        revisingCandidateId=""
+        onMaterialize={() => undefined}
+        onReview={() => undefined}
+        onCreateRevision={() => undefined}
+      />,
+    );
+    expect(markup).toContain("候选 12");
+    expect(markup).toContain("候选 9");
+  });
+
   it("derives a bounded default draft from the active experiment contract", () => {
     const draft = createEngineeringProxyHypothesisDraft(activePlan);
 

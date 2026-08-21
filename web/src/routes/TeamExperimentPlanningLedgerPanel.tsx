@@ -3,6 +3,7 @@
  * Wave 8J base + product IA: setup → review → freeze → run (one step at a time).
  */
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { AlertTriangle, ArrowRight, CheckCircle2, Play, Save, Send } from "lucide-react";
 
 import type { ExperimentMethodId, Team } from "../api/types";
@@ -42,6 +43,7 @@ import {
 } from "./teams/experimentWorkbenchStepModel";
 import { TeamExperimentHypothesisGovernancePanel } from "./TeamExperimentHypothesisGovernancePanel";
 import { TeamExperimentMethodPanel, type ExperimentPlanMethodRequest } from "./TeamExperimentMethodPanel";
+import { teamWorkspaceRoute } from "./teams/researchWorkspaceModel";
 import experimentStyles from "./TeamsRoute.experiment.styles";
 import researchStyles from "./TeamsRoute.research.styles";
 import workflowStyles from "./TeamsRoute.workflow.styles";
@@ -633,6 +635,26 @@ export function TeamExperimentPlanningLedgerPanel(props: TeamExperimentPlanningL
         </nav>
 
         <div className={styles.experimentWorkbenchStepBody}>
+          {currentStep === "setup" && selectedTeam?.teamId && statusPayload && !statusPayload.latestExperimentRound ? (
+            <div
+              className={styles.experimentLedgerEmpty}
+              data-testid="experiment-round-missing-banner"
+              style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: "0.375rem" }}
+            >
+              <AlertTriangle size={14} />
+              <span>
+                {lang === "zh"
+                  ? "实验阶段轮次尚未启动：保存实验计划前，请先在科研流程总览启动实验阶段。"
+                  : "The experiment stage round has not started yet. Launch the experiment stage from the research workflow overview before saving a plan."}
+              </span>
+              <Link
+                to={teamWorkspaceRoute(selectedTeam.teamId)}
+                className={styles.experimentProtocolChip}
+              >
+                {lang === "zh" ? "前往科研流程总览" : "Open research workflow overview"}
+              </Link>
+            </div>
+          ) : null}
           {currentStep === "setup" ? methodPanel : null}
           {currentStep === "review" ? (
             activePlan ? reviewPanel : (

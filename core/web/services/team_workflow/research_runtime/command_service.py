@@ -95,6 +95,18 @@ class NodeNotReadyError(WorkflowCommandError):
         self.run_version = run_version
 
 
+class InvalidHumanTaskStateError(WorkflowCommandError):
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
+
+
+class HumanTaskNotFoundError(WorkflowCommandError):
+    def __init__(self, task_id: str) -> None:
+        super().__init__(f"human task {task_id} not found")
+        self.task_id = task_id
+
+
 _ATTEMPT_CREATING_COMMANDS = frozenset(
     {WorkflowCommandKind.START_NODE, WorkflowCommandKind.RETRY_NODE}
 )
@@ -518,7 +530,7 @@ class WorkflowCommandService:
             raise WorkflowCommandError("resolve_human_task 需要 taskId 和 decision(accept/reject/revise)")
         row = uow.repository.get_human_task(task_id)
         if row is None:
-            raise RunNotFoundError(task_id)
+            raise HumanTaskNotFoundError(task_id)
         if str(row[1]) != request.run_id:
             raise TeamScopeMismatchError("human task 不属于该 run")
         now_ms = self._clock()
@@ -527,7 +539,12 @@ class WorkflowCommandService:
             "reject": HumanTaskStatus.REJECTED.value,
             "revise": HumanTaskStatus.REVISED.value,
         }[decision]
-        require_human_task_transition(HumanTaskStatus.PENDING, HumanTaskStatus(target))
+        current_status = HumanTaskStatus(str(row[6] or HumanTaskStatus.PENDING.value))
+        if current_status is not HumanTaskStatus.PENDING:
+            raise InvalidHumanTaskStateError(
+                f"human task {task_id} 已处于 {current_status.value} 状态，不能重复决策"
+            )
+        require_human_task_transition(current_status, HumanTaskStatus(target))
         command_id = new_id("cmd")
         bumped = _bump(uow, request, event_count=1, now_ms=now_ms)
         accepted_version, sequence = bumped
@@ -548,9 +565,13 @@ class WorkflowCommandService:
             },
             ensure_ascii=False,
         )
-        uow.repository.update_human_task_decision(
+        if not uow.repository.update_human_task_decision(
             task_id, target, now_ms, decision_json=decision_json
-        )
+        ):
+            # 守卫 UPDATE（WHERE status='pending'）未命中：并发下任务已被解决。
+            raise InvalidHumanTaskStateError(
+                f"human task {task_id} 已被并发决策，本次决策未生效"
+            )
         # 人工决策后通过正式 graph resume 推进（T5 契约：Human 节点可恢复）。
         attempt = uow.repository.get_attempt(str(row[2]))
         pending_action_id = attempt.pending_action_id if attempt else None
@@ -1035,7 +1056,9 @@ def _command_record(
 
 
 def _actor_kind_for_node(node_id: str) -> str:
-    from core.research.workflow.definition import build_challenge_cup_workflow_definition
+    from core.research.workflow.definition import (
+        build_challenge_cup_workflow_definition,
+    )
 
     for node in build_challenge_cup_workflow_definition().nodes:
         if node.nodeId == node_id:
