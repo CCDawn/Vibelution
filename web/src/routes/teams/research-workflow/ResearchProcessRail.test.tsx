@@ -82,7 +82,11 @@ describe("ResearchProcessRail", () => {
     host = null;
   });
 
-  function renderRail(selectedNodeId: string | null = "hf_generation", lang: "zh" | "en" = "zh") {
+  function renderRail(
+    selectedNodeId: string | null = "hf_generation",
+    lang: "zh" | "en" = "zh",
+    options: { graph?: WorkflowLayoutInput; nextAction?: HypothesisFirstNextAction } = {},
+  ) {
     const onSelectNode = vi.fn();
     const onNavigateCurrent = vi.fn();
     host = document.createElement("div");
@@ -92,10 +96,10 @@ describe("ResearchProcessRail", () => {
       root?.render(
         <ResearchProcessRail
           lang={lang}
-          graph={graph}
+          graph={options.graph ?? graph}
           selectedNodeId={selectedNodeId}
           runtimeCurrentNodeIds={["source_finding"]}
-          nextAction={nextAction}
+          nextAction={options.nextAction ?? nextAction}
           onSelectNode={onSelectNode}
           onNavigateCurrent={onNavigateCurrent}
         />,
@@ -144,6 +148,32 @@ describe("ResearchProcessRail", () => {
     expect(document.querySelector('[data-testid="research-process-rail-node-source_finding"]')?.textContent)
       .toContain("Source finding");
     expect(document.body.textContent).not.toContain("研究阶段");
+  });
+
+  it("uses a distinct English description without leaking Chinese graph copy", () => {
+    const englishGraph: WorkflowLayoutInput = {
+      ...graph,
+      stages: [graph.stages[1]],
+      nodes: [graph.nodes[2]],
+    };
+    renderRail(null, "en", {
+      graph: englishGraph,
+      nextAction: {
+        ...nextAction,
+        targetNodeId: "source_finding",
+        navigationLabel: "Source finding",
+        commandDetail: "Review the source-finding task.",
+      },
+    });
+
+    const node = document.querySelector<HTMLButtonElement>('[data-testid="research-process-rail-node-source_finding"]');
+    const title = node?.querySelector("strong")?.textContent;
+    const description = node?.querySelector("small")?.textContent;
+    expect(title).toBe("Source finding");
+    expect(description).toBe("Find relevant sources");
+    expect(description).not.toBe(title);
+    expect(description).not.toMatch(/[\u4e00-\u9fff]/);
+    expect(document.body.textContent).not.toMatch(/[\u4e00-\u9fff]/);
   });
 
   it("renders a safe empty state before the workflow graph is available", () => {

@@ -18,6 +18,28 @@ const STAGE_LABELS: Record<string, { zh: string; en: string }> = {
   unassigned: { zh: "其他节点", en: "Other nodes" },
 };
 
+// The workflow graph currently carries one description field, and that field
+// is authored in Chinese. Keep the English rail copy independent from that
+// payload so a translated node title is not followed by a duplicate title or
+// a Chinese description.
+const NODE_DESCRIPTION_EN: Record<string, string> = {
+  source_finding: "Find relevant sources",
+  source_extraction: "Extract evidence from sources",
+  evidence_relations: "Connect evidence relationships",
+  knowledge_ingestion: "Add knowledge to the workspace",
+  knowledge_handoff: "Review and hand off the knowledge package",
+  hypothesis_design: "Shape the working hypothesis",
+  protocol_design: "Draft the experiment protocol",
+  protocol_review: "Review the experiment protocol",
+  protocol_freeze: "Lock the approved protocol",
+  smoke_gate: "Run the smoke check before execution",
+  controlled_run: "Run the controlled experiment",
+  result_evaluation: "Evaluate the experiment results",
+  iteration_decision: "Choose the next iteration",
+  candidate_promotion: "Approve the candidate for promotion",
+  result_package: "Package the final result",
+};
+
 type StageRow = {
   stageId: string;
   label: string;
@@ -168,7 +190,7 @@ function nodeDisplayLabel(node: WorkflowCanvasNodeInput, lang: Language): string
 
 function nodeDisplayDescription(node: WorkflowCanvasNodeInput, lang: Language): string {
   if (lang === "zh") return node.description || node.label;
-  return getNodeAdapter(node.nodeId)?.labelEn || node.description || node.label;
+  return NODE_DESCRIPTION_EN[node.nodeId] || "Workflow step";
 }
 
 export function ResearchProcessRail({

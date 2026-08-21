@@ -71,6 +71,7 @@ export function ResearchProcessInspectorPane(props: {
 }) {
   const { scope, state, actions, nextAction, retryCollectionOffer = null } = props;
   const { lang } = useShellI18n();
+  const isZh = lang === "zh";
   const [selectedQuestionRunId, setSelectedQuestionRunId] = useState("");
   const questionDetail = useQuery({
     queryKey: queryKeys.challengeQuestionRunDetail(scope.teamId, scope.questionId),
@@ -86,8 +87,10 @@ export function ResearchProcessInspectorPane(props: {
     if (!scope.questionId) {
       return (
         <ResearchCenteredEmptyState
-          title="单题验收"
-          hint="先在「题目进度」中选择一道题，这里会显示该题的假说、证据与验收状态。"
+          title={isZh ? "单题验收" : "Question review"}
+          hint={isZh
+            ? "先在「题目进度」中选择一道题，这里会显示该题的假说、证据与验收状态。"
+            : "Select a question from progress to review its hypotheses, evidence, and acceptance status."}
         />
       );
     }
@@ -130,7 +133,7 @@ export function ResearchProcessInspectorPane(props: {
   if (scope.panel === "evidence") {
     return state.run
       ? <EvidenceGraphView runId={state.run.runId} nodeId="evidence_relations" teamId={scope.teamId} runVersion={state.run.runVersion} />
-      : <ResearchCenteredEmptyState title="证据关系尚不可用" />;
+      : <ResearchCenteredEmptyState title={isZh ? "证据关系尚不可用" : "Evidence relations unavailable"} />;
   }
   if (scope.panel === "timeline") {
     return <ResearchRunTimeline run={state.run} projection={state.projection} insights={state.insights} />;
@@ -156,20 +159,22 @@ export function ResearchProcessInspectorPane(props: {
   if (scope.selectedNodeId && !scope.runId && state.projection) {
     return <ResearchProcessDefinitionNodePanel teamId={scope.teamId} nodeId={scope.selectedNodeId} definition={state.projection.definition} effectiveBindings={state.effectiveBindings} />;
   }
-  if (!scope.selectedNodeId) return <ResearchCenteredEmptyState title="选择流程节点" />;
+  if (!scope.selectedNodeId) return <ResearchCenteredEmptyState title={isZh ? "选择流程节点" : "Select a workflow node"} />;
   if (state.nodeDetail.kind === "loading" || state.nodeDetail.kind === "idle") {
-    return <VStateSurface tone="loading" title="加载节点详情" fill className={styles.fill} />;
+    return <VStateSurface tone="loading" title={isZh ? "加载节点详情" : "Loading node details"} fill className={styles.fill} />;
   }
   if (state.nodeDetail.kind === "error") {
     return (
       <VSurface tone="panel" className={styles.errorSurface} data-vui="node-detail-error">
-        <div className={styles.error} role="alert">节点详情加载失败：{state.nodeDetail.message}</div>
-        <VButton type="button" onClick={actions.retryNodeDetail}>重试</VButton>
+        <div className={styles.error} role="alert">
+          {isZh ? "节点详情加载失败：" : "Node details failed to load: "}{state.nodeDetail.message}
+        </div>
+        <VButton type="button" onClick={actions.retryNodeDetail}>{isZh ? "重试" : "Retry"}</VButton>
       </VSurface>
     );
   }
-  if (state.nodeDetail.kind === "empty") return <ResearchCenteredEmptyState title="暂无节点详情" />;
-  if (state.nodeDetail.kind !== "ready") return <ResearchCenteredEmptyState title="暂无节点详情" />;
+  if (state.nodeDetail.kind === "empty") return <ResearchCenteredEmptyState title={isZh ? "暂无节点详情" : "No node details yet"} />;
+  if (state.nodeDetail.kind !== "ready") return <ResearchCenteredEmptyState title={isZh ? "暂无节点详情" : "No node details yet"} />;
   return (
     <ResearchProcessNodeInspector
       teamId={scope.teamId}
@@ -185,7 +190,7 @@ export function ResearchProcessInspectorPane(props: {
       hideStartOffer={Boolean(nextAction && shouldHideSourceFindingStart(nextAction.stage) && scope.selectedNodeId === "source_finding")}
       statusBanner={
         nextAction && shouldHideSourceFindingStart(nextAction.stage) && scope.selectedNodeId === "source_finding"
-          ? (nextAction.statusMessage || nextAction.recovery?.reason || (nextAction.stage === "collecting" ? "资料搜集中" : ""))
+          ? (nextAction.statusMessage || nextAction.recovery?.reason || (nextAction.stage === "collecting" ? (isZh ? "资料搜集中" : "Collecting sources") : ""))
           : null
       }
       hypothesisNavLabel={
