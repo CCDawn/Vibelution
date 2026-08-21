@@ -68,48 +68,32 @@ def test_launch_vibelution_shortcut_script_builds_content_addressed_entry():
     assert "Repair-DesktopLauncherShortcut" in source
 
 
-def test_native_launcher_tray_menu_exposes_lifecycle_controls():
+def test_native_launcher_last_resort_tray_defers_lifecycle_to_electron():
     source = _source()
+    menu = source.split("private ContextMenuStrip BuildMenu", 1)[1].split(
+        "private static ToolStripMenuItem DisabledMenuItem", 1
+    )[0]
 
-    for label in [
-        "打开控制台",
-        "启动",
-        "停止",
-        "重启 Launcher",
-        "退出 Launcher",
-        "停止全部",
-    ]:
-        assert label in source
-
-    assert "\"/api/launcher/branch-instances/\" + operation" in source
-    assert "\"/api/launcher/force-stop\"" in source
-    assert "PostLauncher(\"/api/launcher/force-stop\")" in source
-    assert "重启当前 main" not in source
-    assert "重建并启动（最新）" not in source
-    assert 'menu.Items.Add(MenuItem("状态"' not in source
+    assert 'menu.Items.Add(MenuItem("打开控制台"' in menu
+    assert "Electron 控制面未接管" in menu
+    assert 'menu.Items.Add(MenuItem("退出 Launcher"' in menu
+    assert "BranchActionMenu" not in menu
+    assert "QueueRestartLauncher" not in menu
+    assert "QueueExitLauncher(true)" not in menu
+    assert "/api/launcher/branch-instances" not in menu
+    assert "/api/launcher/force-stop" not in menu
+    assert "PostLauncher" not in menu
     assert "RunPythonBridge(projectDir, \"stop-launcher\", true, false)" in source
 
 
-def test_native_launcher_tray_menu_refreshes_without_blocking_ui():
+def test_native_launcher_last_resort_tray_bootstraps_electron_without_lifecycle_posts():
     source = _source()
+    bootstrap_block = source.split("private void BootstrapLauncherBackend", 1)[1].split(
+        "private void QueueOpenConsole", 1
+    )[0]
 
-    assert "QueueRefreshFreshnessItem" in source
-    assert "QueuePopulateBranchActionMenu" in source
-    refresh_block = source.split("private void QueueRefreshFreshnessItem", 1)[1].split(
-        "private void QueueRestartLauncher", 1
-    )[0]
-    populate_block = source.split("private void QueuePopulateBranchActionMenu", 1)[1].split(
-        "private void QueueInstanceLifecycle", 1
-    )[0]
-    assert "ThreadPool.QueueUserWorkItem" in refresh_block
-    assert "ThreadPool.QueueUserWorkItem" in populate_block
-    assert "EnsureLauncherBackend" not in refresh_block
-    assert "EnsureFreshLauncherBackend" not in refresh_block
-    assert "EnsureLauncherBackend" not in populate_block
-    assert "EnsureFreshLauncherBackend" not in populate_block
-    assert "uiContext.Post" in refresh_block
-    assert "uiContext.Post" in populate_block
-    assert "正在读取" in populate_block
+    assert "ThreadPool.QueueUserWorkItem(delegate { BootstrapLauncherBackend(); });" in source
+    assert 'LaunchCurrentElectronMain(projectDir, "open", false)' in bootstrap_block
 
 
 def test_native_launcher_non_default_actions_use_console_free_control_api():
@@ -118,7 +102,7 @@ def test_native_launcher_non_default_actions_use_console_free_control_api():
     assert "RunNativeAction(projectDir, parsed.ForwardedArgs)" in source
     assert "RunPythonBridge(projectDir, \"bootstrap\", true, true)" in source
     assert '"/api/launcher/status"' in source
-    assert '"/api/launcher/force-stop"' in source
+    assert 'PostLauncher("/api/launcher/force-stop")' not in source
     assert "launch-desktop-shell" in source
     assert "vibelution_desktop_entry.vbs" not in source
     assert "wscript.exe" not in source

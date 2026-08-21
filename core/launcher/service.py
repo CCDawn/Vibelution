@@ -6,6 +6,7 @@ import json
 from core.logging import debug as _debug_logger
 import os
 import re
+import stat as stat_module
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -2559,10 +2560,23 @@ def _file_count(directory: Path) -> int:
 def _recent_command_files(directory: Path, *, limit: int) -> list[dict[str, Any]]:
     commands: list[dict[str, Any]] = []
     try:
-        files = sorted((path for path in directory.glob("*.json") if path.is_file()), key=lambda path: path.stat().st_mtime, reverse=True)
+        entries = list(directory.glob("*.json"))
     except OSError:
         return commands
-    for path in files[: max(0, limit)]:
+    files: list[tuple[int, Path]] = []
+    for path in entries:
+        try:
+            metadata = path.stat()
+        except OSError:
+            # A command can be atomically renamed or removed between glob and
+            # stat. Ignore that entry instead of failing the whole status
+            # snapshot.
+            continue
+        if not stat_module.S_ISREG(metadata.st_mode):
+            continue
+        files.append((int(metadata.st_mtime_ns), path))
+    files.sort(key=lambda item: item[0], reverse=True)
+    for _mtime_ns, path in files[: max(0, limit)]:
         payload = _load_json_file(path)
         if payload:
             commands.append(_command_summary(payload))

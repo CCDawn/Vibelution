@@ -133,7 +133,7 @@ def get_noise_overview(*, config_path: Path | None = None, project_root: Path | 
     root = _project_root(project_root)
     quick_targets = _quick_clean_targets(root)
     worktree_targets, worktree_skipped = _worktree_cleanup_candidates(root)
-    db_path = developer_sandbox.formal_workspace_path(root, "agent_brain.db")
+    db_path = developer_sandbox.sandboxed_workspace_path(root, "agent_brain.db")
     daemon_log_path = resolve_project_runtime_home(root) / "runtime-manager" / "daemon.out.log"
     items = [
         _overview_item(
@@ -415,7 +415,7 @@ def _targets_for_action(action: DeveloperCleanupAction, root: Path) -> tuple[lis
     if action == "quick_clean":
         return _quick_clean_targets(root), []
     if action == "db_compact":
-        db_path = developer_sandbox.formal_workspace_path(root, "agent_brain.db")
+        db_path = developer_sandbox.sandboxed_workspace_path(root, "agent_brain.db")
         if not db_path.is_file():
             return [], [{"path": str(db_path), "reason": "agent_brain.db 不存在"}]
         return [_target_payload(db_path, root=root, operation="prune_worktree_snapshots_vacuum")], []
@@ -658,7 +658,9 @@ def _validate_targets_still_safe(plan: dict[str, Any], root: Path) -> None:
             raise DeveloperCleanupPlanError("invalid_target", "清理计划包含无效目标。")
         path = Path(str(target.get("path") or "")).resolve()
         if action in {"quick_clean", "db_compact"} and not _is_relative_to(path, root):
-            raise DeveloperCleanupPlanError("target_outside_project", "清理目标不属于当前项目工作区。", detail={"path": str(path)})
+            sandbox_root = developer_sandbox.sandboxed_workspace_path(root).resolve()
+            if not _is_relative_to(path, sandbox_root):
+                raise DeveloperCleanupPlanError("target_outside_project", "清理目标不属于当前项目工作区。", detail={"path": str(path)})
         if action == "quick_clean" and not _is_safe_quick_clean_target(path, root):
             raise DeveloperCleanupPlanError("target_not_whitelisted", "清理目标不在 quick clean 白名单内。", detail={"path": str(path)})
         if action == "worktree_cleanup" and not any(
@@ -720,7 +722,7 @@ def _apply_targets(plan: dict[str, Any], root: Path) -> list[dict[str, Any]]:
 
 
 def _apply_db_compact(root: Path, target: dict[str, Any]) -> dict[str, Any]:
-    db_path = developer_sandbox.formal_workspace_path(root, "agent_brain.db")
+    db_path = developer_sandbox.sandboxed_workspace_path(root, "agent_brain.db")
     before_size = _path_size(db_path)
     try:
         from core.infrastructure.git_memory import prune_worktree_snapshots

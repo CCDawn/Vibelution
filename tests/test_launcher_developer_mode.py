@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import inspect
 import subprocess
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
@@ -236,6 +237,54 @@ def test_developer_db_compact_uses_git_memory_prune_entrypoint(tmp_path, monkeyp
     assert result["ok"] is True
     assert calls == [(developer_mode.WORKTREE_SNAPSHOT_KEEP_LATEST, True)]
     assert result["applied"][0]["dbStats"] == {"deletedSnapshots": 3}
+
+
+def test_developer_db_compact_accepts_sandbox_workspace_target(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[launcher]\n[launcher.developer_mode]\nenabled = true\n", encoding="utf-8")
+    project_root = tmp_path / "project"
+    formal_root = tmp_path / "formal-workspace"
+    sandbox_root = tmp_path / "sandbox-workspace"
+    db_path = sandbox_root / "agent_brain.db"
+    db_path.parent.mkdir(parents=True)
+    db_path.write_bytes(b"sqlite placeholder")
+    plan_dir = tmp_path / "plans"
+    monkeypatch.setattr(
+        developer_mode.developer_sandbox,
+        "formal_workspace_path",
+        lambda _root, *parts: formal_root.joinpath(*parts),
+    )
+    monkeypatch.setattr(
+        developer_mode.developer_sandbox,
+        "sandboxed_workspace_path",
+        lambda _root, *parts: sandbox_root.joinpath(*parts),
+    )
+    monkeypatch.setattr(
+        git_memory,
+        "prune_worktree_snapshots",
+        lambda keep_latest=None, vacuum=False: {"deletedSnapshots": 0},
+    )
+
+    preview = developer_mode.preview_cleanup_plan(
+        "db_compact",
+        config_path=config_path,
+        project_root=project_root,
+        plan_dir=plan_dir,
+    )
+    target = preview["plan"]["targets"][0]
+    assert Path(target["path"]) == db_path.resolve()
+
+    result = developer_mode.apply_cleanup_plan(
+        "db_compact",
+        plan_id=preview["plan"]["planId"],
+        plan_hash=preview["plan"]["planHash"],
+        confirm=True,
+        config_path=config_path,
+        project_root=project_root,
+        plan_dir=plan_dir,
+    )
+
+    assert result["ok"] is True
 
 
 def test_developer_noise_overview_uses_no_console_git_helper(tmp_path, monkeypatch):

@@ -1090,7 +1090,7 @@ def _collect_chat_rooms() -> list[ResetCandidate]:
 
 
 def _collect_memory() -> list[ResetCandidate]:
-    workspace_root = developer_sandbox.formal_workspace_path(PROJECT_ROOT)
+    workspace_root = developer_sandbox.sandboxed_workspace_path(PROJECT_ROOT)
     candidates = [
         _candidate_for_path(
             workspace_root / "agent_brain.db",
@@ -1106,7 +1106,7 @@ def _collect_memory() -> list[ResetCandidate]:
 
 
 def _collect_agents() -> list[ResetCandidate]:
-    path = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "agents")
+    path = developer_sandbox.sandboxed_workspace_path(PROJECT_ROOT, "agents")
     return [_candidate_for_path(path, kind="directory", missing=not path.exists())]
 
 
@@ -1114,7 +1114,7 @@ def _execute_agents(candidate: ResetCandidate) -> ResetActionResult:
     result = _execute_delete_candidate(candidate)
     if result.status != "deleted":
         return result
-    registry_path = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "agents", "agents.json")
+    registry_path = developer_sandbox.sandboxed_workspace_path(PROJECT_ROOT, "agents", "agents.json")
     try:
         registry_path.parent.mkdir(parents=True, exist_ok=True)
         registry_path.write_text(
@@ -1135,7 +1135,7 @@ def _execute_agents(candidate: ResetCandidate) -> ResetActionResult:
 
 
 def _collect_agent_config_state() -> list[ResetCandidate]:
-    workspace_root = developer_sandbox.formal_workspace_path(PROJECT_ROOT)
+    workspace_root = developer_sandbox.sandboxed_workspace_path(PROJECT_ROOT)
     paths = [
         workspace_root / "agent_config" / "mode_bindings.json",
         workspace_root / "agent_config" / "prompt_templates.json",
@@ -1146,17 +1146,17 @@ def _collect_agent_config_state() -> list[ResetCandidate]:
 
 
 def _collect_teams() -> list[ResetCandidate]:
-    path = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "teams")
+    path = developer_sandbox.sandboxed_workspace_path(PROJECT_ROOT, "teams")
     return [_candidate_for_path(path, kind="directory", missing=not path.exists())]
 
 
 def _collect_project_agent_bus() -> list[ResetCandidate]:
-    path = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "project_agent_bus")
+    path = developer_sandbox.sandboxed_workspace_path(PROJECT_ROOT, "project_agent_bus")
     return [_candidate_for_path(path, kind="directory", missing=not path.exists())]
 
 
 def _collect_generated_tools() -> list[ResetCandidate]:
-    path = developer_sandbox.formal_workspace_path(PROJECT_ROOT, "tool_registry", "generated_tools.json")
+    path = developer_sandbox.sandboxed_workspace_path(PROJECT_ROOT, "tool_registry", "generated_tools.json")
     return [
         _candidate_for_path(
             path,
@@ -1376,7 +1376,7 @@ def _collect_browser_profiles() -> list[ResetCandidate]:
 
 
 def _collect_workspace_browser_profiles() -> list[ResetCandidate]:
-    workspace = developer_sandbox.formal_workspace_path(PROJECT_ROOT)
+    workspace = developer_sandbox.sandboxed_workspace_path(PROJECT_ROOT)
     if not workspace.exists():
         return [_candidate_for_path(workspace, kind="directory", missing=True)]
     candidates: list[ResetCandidate] = []
@@ -1390,7 +1390,7 @@ def _collect_workspace_browser_profiles() -> list[ResetCandidate]:
 
 
 def _collect_workspace_service_logs() -> list[ResetCandidate]:
-    workspace = developer_sandbox.formal_workspace_path(PROJECT_ROOT)
+    workspace = developer_sandbox.sandboxed_workspace_path(PROJECT_ROOT)
     if not workspace.exists():
         return [_candidate_for_path(workspace, kind="directory", missing=True)]
     candidates: list[ResetCandidate] = []
@@ -1421,7 +1421,7 @@ def _collect_python_test_caches() -> list[ResetCandidate]:
 
 def _collect_temp_artifacts() -> list[ResetCandidate]:
     candidates: list[ResetCandidate] = []
-    workspace = developer_sandbox.formal_workspace_path(PROJECT_ROOT)
+    workspace = developer_sandbox.sandboxed_workspace_path(PROJECT_ROOT)
     if workspace.exists():
         for path in workspace.glob("tmp-*"):
             if path.exists():
@@ -1495,11 +1495,13 @@ def _collect_web_dist() -> list[ResetCandidate]:
 
 def _execute_delete_candidate(candidate: ResetCandidate) -> ResetActionResult:
     try:
-        if not candidate.path.exists():
+        if not os.path.lexists(str(candidate.path)):
             result = ResetActionResult("skipped", candidate.path, candidate.kind, candidate.action, "missing")
             _record_reset_candidate_event(result)
             return result
-        if candidate.path.is_file() or candidate.path.is_symlink():
+        if _is_reparse_point(candidate.path):
+            _remove_reparse_point(candidate.path)
+        elif candidate.path.is_file():
             candidate.path.unlink()
         elif candidate.path.is_dir():
             shutil.rmtree(candidate.path)
@@ -1574,17 +1576,59 @@ def _candidate_for_path(
         note_zh=note_zh,
         note_en=note_en,
         protected=protected,
-        missing=missing or not resolved.exists(),
+        missing=missing or not os.path.lexists(str(resolved)),
     )
 
 
+def _is_reparse_point(path: Path) -> bool:
+    """Return true for links/junctions without following their target."""
+
+    try:
+        if path.is_symlink():
+            return True
+        is_junction = getattr(path, "is_junction", None)
+        if callable(is_junction) and bool(is_junction()):
+            return True
+        attributes = int(getattr(path.lstat(), "st_file_attributes", 0) or 0)
+        return bool(attributes & 0x400)  # FILE_ATTRIBUTE_REPARSE_POINT
+    except OSError:
+        return False
+
+
+def _remove_reparse_point(path: Path) -> None:
+    """Remove only a symlink/junction entry, never its target."""
+
+    if not os.path.lexists(str(path)):
+        return
+    try:
+        if path.is_symlink():
+            path.unlink()
+        else:
+            os.rmdir(str(path))
+    except (FileNotFoundError, NotADirectoryError):
+        path.unlink(missing_ok=True)
+    except OSError:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+    if os.path.lexists(str(path)):
+        raise RuntimeError(f"无法移除 reset 链接：{path}")
+
+
 def _resolve_project_path(path: Path) -> Path:
-    candidate = path.resolve()
+    lexical = Path(os.path.abspath(str(path)))
+    # Resolve regular paths for containment validation, but preserve a link
+    # itself so a reset can remove only that directory entry.
+    candidate = lexical if _is_reparse_point(lexical) else lexical.resolve()
     root = PROJECT_ROOT.resolve()
-    workspace_root = developer_sandbox.formal_workspace_path(root).resolve()
+    workspace_roots = {
+        developer_sandbox.formal_workspace_path(root).resolve(),
+        developer_sandbox.sandboxed_workspace_path(root).resolve(),
+    }
     allowed_roots = (
         root,
-        workspace_root,
+        *workspace_roots,
         _project_runtime_root(),
         _project_log_root(),
         _project_memory_root(),
@@ -1601,7 +1645,7 @@ def _resolve_project_path(path: Path) -> Path:
 
 
 def _candidate_is_deletable(candidate: ResetCandidate) -> bool:
-    return not candidate.protected and (candidate.path.exists() or candidate.action == "reset")
+    return not candidate.protected and (os.path.lexists(str(candidate.path)) or candidate.action == "reset")
 
 
 def _candidate_payload(candidate: ResetCandidate, lang: str) -> dict:
@@ -1652,12 +1696,16 @@ def _localized_rebuild_hint(definition: ResetItemDefinition, lang: str) -> str:
 
 
 def _relative_path(path: Path) -> str:
-    resolved = path.resolve()
-    workspace_root = developer_sandbox.formal_workspace_path(PROJECT_ROOT).resolve()
-    try:
-        return f"workspace/{resolved.relative_to(workspace_root).as_posix()}"
-    except ValueError:
-        pass
+    resolved = path if _is_reparse_point(path) else path.resolve()
+    workspace_roots = (
+        developer_sandbox.sandboxed_workspace_path(PROJECT_ROOT).resolve(),
+        developer_sandbox.formal_workspace_path(PROJECT_ROOT).resolve(),
+    )
+    for workspace_root in workspace_roots:
+        try:
+            return f"workspace/{resolved.relative_to(workspace_root).as_posix()}"
+        except ValueError:
+            continue
     try:
         return resolved.relative_to(PROJECT_ROOT.resolve()).as_posix()
     except ValueError:

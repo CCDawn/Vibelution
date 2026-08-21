@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from core.chat.conversation_ledger import load_conversation_events
+from core.infrastructure import developer_sandbox
 from core.ui.chat_state import load_chat_state, save_chat_state
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
@@ -102,6 +103,51 @@ def test_reset_path_guard_allows_only_governed_external_roots(
 
     with pytest.raises(ValueError, match="governed Vibelution storage roots"):
         reset_service._resolve_project_path(external_root / "sibling" / "unowned.txt")
+
+
+def test_reset_removes_symlink_entry_without_touching_target(reset_project: Path):
+    target = reset_project.parent / "reset-link-target"
+    target.mkdir(parents=True)
+    sentinel = _write(target / "keep.txt", "keep")
+    link = reset_project / "workspace" / "linked-dir"
+    link.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory symlink unavailable: {exc}")
+
+    candidate = reset_service._candidate_for_path(link, kind="directory")
+    result = reset_service._execute_delete_candidate(candidate)
+
+    assert result.status == "deleted"
+    assert not link.is_symlink()
+    assert sentinel.read_text(encoding="utf-8") == "keep"
+
+
+def test_agent_state_reset_targets_sandbox_workspace(reset_project: Path, monkeypatch: pytest.MonkeyPatch):
+    formal = reset_project / "formal-workspace"
+    sandbox = reset_project / "sandbox-workspace"
+    monkeypatch.setattr(
+        developer_sandbox,
+        "formal_workspace_path",
+        lambda _root, *parts: formal.joinpath(*parts),
+    )
+    monkeypatch.setattr(
+        developer_sandbox,
+        "sandboxed_workspace_path",
+        lambda _root, *parts: sandbox.joinpath(*parts),
+    )
+
+    memory_paths = {candidate.path for candidate in reset_service._collect_memory()}
+    agent_paths = {candidate.path for candidate in reset_service._collect_agents()}
+
+    assert memory_paths == {
+        sandbox / "agent_brain.db",
+        sandbox / "memory",
+        sandbox / "prompts" / "STATE_MEMORY.md",
+    }
+    assert agent_paths == {sandbox / "agents"}
+    assert all(not str(path).startswith(str(formal)) for path in memory_paths | agent_paths)
 
 
 def test_reset_summary_records_timing_event(reset_project: Path, monkeypatch: pytest.MonkeyPatch):
