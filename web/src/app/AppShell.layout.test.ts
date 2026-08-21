@@ -37,17 +37,27 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("structuralSharing: shareRuntimeSummaryIfOnlyVolatileChanged");
   });
 
-  it("exposes three stable desktop top-bar groups with shared soft-layer geometry", () => {
+  it("embeds system actions directly in the desktop top-bar background", () => {
     expect(shellSource).toContain('data-shell-group="brand"');
     expect(shellSource).toContain('data-shell-group="navigation"');
     expect(shellSource).toContain('data-shell-group="system-actions"');
     expect(styles.nav).toContain("rounded-[var(--vui-radius-panel-soft)]");
     expect(styles.nav).toMatch(/bg-vui-surface-toolbar|bg-\[var\(--vui-surface-toolbar\)\]/);
     expect(styles.nav).toContain("shadow-[var(--vui-elevation-panel)]");
-    expect(styles.topActions).toContain("rounded-[var(--vui-radius-panel-soft)]");
-    expect(styles.topActions).toMatch(/bg-vui-surface-toolbar|bg-\[var\(--vui-surface-toolbar\)\]/);
+    expect(styles.topActions).not.toContain("rounded-[var(--vui-radius-panel-soft)]");
+    expect(styles.topActions).not.toMatch(/bg-vui-surface-toolbar|bg-\[var\(--vui-surface-toolbar\)\]/);
+    expect(styles.topActions).not.toContain("border");
+    expect(styles.topActions).not.toContain("shadow-");
     expect(styles.actionIconButton).toContain("h-[var(--vui-control-height-sm)]");
     expect(styles.actionIconButton).toContain("w-[var(--vui-control-height-sm)]");
+    expect(styles.actionIconButton).toContain("!border-0");
+    expect(styles.statusSummaryChip).toContain("!border-0");
+    expect(styles.utilityTrigger).toContain("!border-0");
+    const systemActions = shellSource.slice(
+      shellSource.indexOf('<div className={styles.topActions}'),
+      shellSource.indexOf("</header>"),
+    );
+    expect(systemActions.match(/variant="ghost"/g)).toHaveLength(6);
     expect(shellStyles).toContain("@media (max-width: 1279px)");
   });
 
@@ -166,6 +176,9 @@ describe("AppShell layout contract", () => {
     expect(styles.statusSummaryChip).toContain("whitespace-nowrap");
     expect(styles.statusSummaryChip).toContain("!items-center");
     expect(styles.statusSummaryChip).toContain("!py-0");
+    expect(styles.statusSummaryChip).not.toContain("vuiControlPillClass");
+    expect(styles.statusSummaryChip).not.toContain("vuiStateSelectedRowClass");
+    expect(styles.utilityTrigger).not.toContain("vuiControlQuietClass");
     // Top bar status uses VStatusChip (not hand-rolled statusDot).
     expect(shellSource).toContain("VStatusChip");
     expect(shellSource).toContain("systemToneToStatus");
@@ -199,9 +212,8 @@ describe("AppShell layout contract", () => {
     expect(shellStyles).toContain("word-break: keep-all");
     expect(shellStyles).toContain(":where(.vui-app-appshell).statusCluster:hover .statusSummaryChip");
     expect(shellStyles).toContain(":where(.vui-app-appshell).statusCluster:focus-within .statusSummaryChip");
-    expect(shellStyles).toContain(":where(.vui-app-appshell).statusCluster:focus-visible .statusSummaryChip");
     expect(shellStyles).toContain("cursor: pointer");
-    expect(shellStyles).toContain("transition: border-color 140ms ease, background 140ms ease, color 140ms ease, box-shadow 140ms ease");
+    expect(shellStyles).toContain("transition: background 140ms ease, color 140ms ease");
 
     const compactDesktopBlock = shellStyles.slice(
       shellStyles.indexOf("@media (max-width: 1279px)"),
@@ -253,7 +265,7 @@ describe("AppShell layout contract", () => {
     expect(styles.activeWorkDetailHeader).toContain("text-[var(--accent-cool)]");
   });
 
-  it("routes shell hover states through shared quiet hover tokens", () => {
+  it("routes card-like shell controls through shared quiet hover tokens", () => {
     const loudHoverRecipe =
       "hover:border-[var(--border-strong)] hover:bg-[var(--vui-control-muted-hover)] hover:text-[var(--fg-primary)]";
     const shellControlStyles = [
@@ -263,7 +275,6 @@ describe("AppShell layout contract", () => {
       styles.topBarRestoreButton,
       styles.utilityButton,
       styles.utilityFileButton,
-      styles.utilityTrigger,
       utilityMenuStyles.utilityButton,
       utilityMenuStyles.gitSummaryRow,
     ];
@@ -274,6 +285,8 @@ describe("AppShell layout contract", () => {
       expect(value).toContain("hover:bg-[var(--vui-control-hover-bg)]");
       expect(value).toContain("hover:text-[var(--vui-control-hover-fg)]");
     }
+    expect(styles.utilityTrigger).not.toContain("hover:border-");
+    expect(styles.utilityTrigger).not.toContain("hover:bg-");
   });
 
   it("keeps the light shell top bar on light surfaces with a stable brand stack", () => {

@@ -149,9 +149,16 @@ export function ResearchProcessWorkspace({
         runId: currentRun?.runId ?? "",
         currentNodeId,
         selectedCandidateIds: hypothesisFirstChain.selection?.selectedCandidateIds,
+        chain: hypothesisFirstChain.chainState,
       },
     });
-  }, [catalog.questions, chainQuestionId, hypothesisFirstChain.selection?.selectedCandidateIds, runState.run]);
+  }, [
+    catalog.questions,
+    chainQuestionId,
+    hypothesisFirstChain.chainState,
+    hypothesisFirstChain.selection?.selectedCandidateIds,
+    runState.run,
+  ]);
   const selectExperiment = useCallback((questionId: string) => {
     const patch = resolveExperimentSwitch(experimentOptions, questionId);
     if (!patch) return;
@@ -273,6 +280,7 @@ export function ResearchProcessWorkspace({
             onSelectExperiment={selectExperiment}
             onOpenPanel={location.openPanel}
             navigationLabel={workflowActive && hypothesisFirstReady ? nextAction.navigationLabel : undefined}
+            nextActionStage={workflowActive && hypothesisFirstReady ? nextAction.stage : undefined}
             chainRound={
               workflowActive && !formalRuntimeActive && hypothesisFirstChain.chainState
                 ? {

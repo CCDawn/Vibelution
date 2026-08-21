@@ -13,6 +13,7 @@ import {
   type ExperimentSwitchOption,
 } from "./researchExperimentSwitchModel";
 import type { ResearchProcessPanel } from "./researchProcessPanelSelection";
+import type { HypothesisFirstStage } from "./hypothesisFirstNextAction";
 import { getNodeAdapter } from "./nodeAdapterModel";
 import styles from "./ResearchWorkflowToolbar.styles";
 
@@ -30,6 +31,7 @@ export function researchWorkflowPhase(
   navigationLabel?: string,
   runtimeCurrentNodeIds?: readonly string[] | null,
   formalRuntimeActive = true,
+  nextActionStage?: HypothesisFirstStage,
 ): WorkflowPhase {
   const runtimeNode = formalRuntimeActive
     ? (runtimeCurrentNodeIds ?? [])
@@ -50,6 +52,17 @@ export function researchWorkflowPhase(
       stageEn: stage.en,
       currentNodeZh: runtimeNode.label,
       currentNodeEn: runtimeNode.labelEn,
+    };
+  }
+  // A converged hypothesis-first chain can exist before the formal workflow
+  // run has a current node. The next-action stage is the authoritative state
+  // in that case; do not turn the old navigation label into a misleading
+  // "假说准备 · 5/5" progress marker.
+  if (nextActionStage === "converged") {
+    return {
+      step: null,
+      zh: "假说先行闭环已完成",
+      en: "Hypothesis-first loop complete",
     };
   }
   const label = String(navigationLabel || "").trim();
@@ -76,6 +89,8 @@ export function ResearchWorkflowToolbar(props: {
   navigationLabel?: string;
   runtimeCurrentNodeIds?: readonly string[] | null;
   formalRuntimeActive?: boolean;
+  /** Authoritative hypothesis-first stage when no formal runtime node exists. */
+  nextActionStage?: HypothesisFirstStage;
   atCurrentTask?: boolean;
   /** Review-round progress for the hypothesis-first chain (K of budget). */
   chainRound?: { current: number; budget: number } | null;
@@ -96,6 +111,7 @@ export function ResearchWorkflowToolbar(props: {
     props.navigationLabel,
     props.runtimeCurrentNodeIds,
     props.formalRuntimeActive,
+    props.nextActionStage,
   );
   const detailsPanel = props.panel === "question" ? "progress" : (
     props.panel === "agents"

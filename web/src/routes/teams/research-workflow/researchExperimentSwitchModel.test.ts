@@ -221,6 +221,32 @@ describe("researchExperimentSwitchModel", () => {
     expect(options[0].label).toBe("SCI-003 · 1 条假说待评审");
   });
 
+  it("uses the current chain state for the selected question label", () => {
+    const converged = buildExperimentSwitchOptions({
+      questions: [question({ questionId: "SCI-004", checkpoint: null })],
+      current: {
+        questionId: "SCI-004",
+        runId: "run-4",
+        selectedCandidateIds: ["hyp-a", "hyp-b", "hyp-c", "hyp-d", "hyp-e"],
+        chain: { hypothesisConverged: true, meetingCount: 1 },
+      },
+    });
+
+    expect(converged[0].label).toBe("SCI-004 · 5 条假说已收敛");
+
+    const reviewing = buildExperimentSwitchOptions({
+      questions: [question({ questionId: "SCI-004", checkpoint: null })],
+      current: {
+        questionId: "SCI-004",
+        runId: "run-4",
+        selectedCandidateIds: ["hyp-a", "hyp-b"],
+        chain: { meetingCount: 1 },
+      },
+    });
+
+    expect(reviewing[0].label).toBe("SCI-004 · 2 条假说评审中 · 第 1 轮");
+  });
+
   it("keeps the current run visible even if launch-options omitted it", () => {
     const options = buildExperimentSwitchOptions({
       questions: [question({ checkpoint: null })],

@@ -2405,7 +2405,7 @@ export function AppShell() {
               trigger={(
                 <VButton
                   type="button"
-                  variant="secondary"
+                  variant="ghost"
                   className={styles.utilityTrigger}
                   aria-haspopup="dialog"
                   aria-expanded={utilityOpen}
@@ -2493,7 +2493,7 @@ export function AppShell() {
               trigger={(
                 <VButton
                   type="button"
-                  variant="secondary"
+                  variant="ghost"
                   contentLayout="plain"
                   className={styles.statusSummaryChip}
                   title={statusSummaryTitle}
@@ -2530,6 +2530,7 @@ export function AppShell() {
           </div>
           <VIconButton
             type="button"
+            variant="ghost"
             className={styles.actionIconButton}
             label={themeToggleLabel}
             tooltip={themeToggleLabel}
@@ -2539,6 +2540,7 @@ export function AppShell() {
           />
           <VIconButton
             type="button"
+            variant="ghost"
             className={styles.actionIconButton}
             label={refreshFrontendLabel}
             tooltip={refreshFrontendLabel}
@@ -2549,6 +2551,7 @@ export function AppShell() {
           />
           <VIconButton
             type="button"
+            variant="ghost"
             className={styles.actionIconButton}
             label={hideTopBarLabel}
             tooltip={hideTopBarLabel}
@@ -2558,6 +2561,7 @@ export function AppShell() {
           />
           <VRouteLinkButton
             to="/config"
+            variant="ghost"
             className={styles.actionIconButton}
             aria-label={t("navConfig")}
             title={t("navConfig")}
