@@ -54,7 +54,8 @@ from .constants import (
 from .hot_restart_backup import create_failure_package, create_stable_backup, latest_stable_backup, restore_stable_backup
 from .process_identity import (
     is_runtime_manager_process as _is_runtime_manager_process,
-    runtime_manager_command_line_for_pid as _runtime_manager_command_line_for_pid,
+    # Kept as a module attribute: tests monkeypatch this alias.
+    runtime_manager_command_line_for_pid as _runtime_manager_command_line_for_pid,  # noqa: F401
 )
 from .restart_coordinator import claim_next_restart_intent, complete_restart_intent
 from .scene_logging import append_runtime_manager_file_event, enforce_runtime_scene_retention_on_startup, record_runtime_manager_scene_event, runtime_manager_event_phase
@@ -5364,46 +5365,6 @@ class RuntimeManagerDaemon:
             "closeStrategy": close_strategy,
             "launcherStateSync": launcher_state_sync,
         }
-
-    def _handle_restart_workbench(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
-        guard_started = time.monotonic()
-        if not bool(args.get("skipActiveWorkGuard")):
-            blocked = self._block_lifecycle_command_if_active_work(
-                command_id=command_id,
-                command_type="restart_workbench",
-                args=args,
-            )
-            if blocked is not None:
-                return blocked
-        _append_event(
-            "workbench.restart.guard_timings",
-            {
-                "commandId": command_id,
-                "activeWorkGuardMs": _elapsed_monotonic_ms(guard_started),
-                "guardSkipped": bool(args.get("skipActiveWorkGuard")),
-            },
-        )
-
-        result_data = self._perform_restart_workbench(command_id=command_id, args=args)
-        if bool(result_data.get("interruptedByClose")):
-            interrupt = result_data.pop("interrupt") if isinstance(result_data.get("interrupt"), dict) else {}
-            stage = str(result_data.pop("interruptStage", "") or "restart")
-            launcher_result = result_data.pop("launcherResult", None)
-            return self._finish_interrupted_lifecycle_command(
-                command_id,
-                command_type="restart_workbench",
-                interrupt=interrupt,
-                stage=stage,
-                launcher_result=launcher_result,
-                extra_result_data=result_data,
-            )
-        return self._finish_command(
-            command_id,
-            ok=True,
-            message="Workbench restarted.",
-            result_data=result_data,
-            reconcile=False,
-        )
 
     def _wake_hot_restart_session(
         self,

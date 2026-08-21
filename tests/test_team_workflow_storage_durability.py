@@ -89,3 +89,37 @@ def test_missing_store_reads_empty_and_lock_releases(tmp_path: Path) -> None:
     with inter_process_lock(store):
         pass  # lock acquires and releases cleanly on a fresh path
     assert (tmp_path / "missing.jsonl.lock").exists()
+
+
+def test_evidence_trail_cache_serves_repeated_reads_and_invalidates(tmp_path: Path, monkeypatch) -> None:
+    """P3-8: the trail computation caches per (team, question) on store mtime."""
+    from core.web.services.team_workflow import meeting_rounds
+    from core.web.services.team_workflow.research_runtime import hypothesis_first_chain as chain
+
+    from core.web.services import team_service
+
+    chain._TRAIL_CACHE.clear()
+    monkeypatch.setattr(team_service, "assert_team_exists", lambda _t: "t")
+    monkeypatch.setattr(chain, "_records", lambda _team: [])
+    list_calls = {"count": 0}
+
+    def fake_list_meetings(_team_id):
+        list_calls["count"] += 1
+        return {"meetings": []}
+
+    monkeypatch.setattr(meeting_rounds, "list_meeting_rounds", fake_list_meetings)
+
+    stamps = iter([1.0, 1.0, 2.0])
+    monkeypatch.setattr(chain, "_trail_source_stamp", lambda _team: next(stamps))
+
+    first = chain.candidate_evidence_trail("t", "SCI-001")
+    assert first["trails"] == []
+    assert list_calls["count"] == 1
+
+    # Same store stamp -> served from cache; the meetings store is not re-scanned.
+    chain.candidate_evidence_trail("t", "SCI-001")
+    assert list_calls["count"] == 1
+
+    # Store changed -> recompute.
+    chain.candidate_evidence_trail("t", "SCI-001")
+    assert list_calls["count"] == 2

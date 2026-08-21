@@ -75,7 +75,10 @@ describe("launcher api helpers", () => {
         origin: "http://127.0.0.1:8000",
       },
     });
-    const fetchMock = vi.fn().mockResolvedValueOnce({
+    const fetchMock = vi.fn()      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ header: "X-Vibelution-Control-Token", controlToken: "test-token" }),
+      }).mockResolvedValueOnce({
       ok: true,
       json: async () => ({ launcher: { mode: "standalone_control_plane" } }),
     });
@@ -84,8 +87,8 @@ describe("launcher api helpers", () => {
     const payload = await getLauncherStatus();
 
     expect(payload.launcher.mode).toBe("standalone_control_plane");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/launcher/status");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/launcher/status");
   });
 
   it("keeps published launcher status extras used by tray and control-plane UI", async () => {
@@ -95,7 +98,10 @@ describe("launcher api helpers", () => {
         origin: "http://127.0.0.1:8000",
       },
     });
-    const fetchMock = vi.fn().mockResolvedValueOnce({
+    const fetchMock = vi.fn()      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ header: "X-Vibelution-Control-Token", controlToken: "test-token" }),
+      }).mockResolvedValueOnce({
       ok: true,
       json: async () => ({
         launcher: { mode: "standalone_control_plane" },
@@ -124,7 +130,10 @@ describe("launcher api helpers", () => {
         origin: "http://127.0.0.1:8000",
       },
     });
-    const fetchMock = vi.fn().mockResolvedValueOnce({
+    const fetchMock = vi.fn()      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ header: "X-Vibelution-Control-Token", controlToken: "test-token" }),
+      }).mockResolvedValueOnce({
       ok: true,
       json: async () => ({ schemaVersion: 1, items: [] }),
     });
@@ -133,7 +142,7 @@ describe("launcher api helpers", () => {
     const payload = await getLauncherBranchInstances();
 
     expect(payload.schemaVersion).toBe(1);
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/launcher/branch-instances");
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/launcher/branch-instances");
   });
 
   it("requests cleanup metadata only when the caller opts in", async () => {
@@ -143,7 +152,10 @@ describe("launcher api helpers", () => {
         origin: "http://127.0.0.1:8000",
       },
     });
-    const fetchMock = vi.fn().mockResolvedValue({
+    const fetchMock = vi.fn()      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ header: "X-Vibelution-Control-Token", controlToken: "test-token" }),
+      }).mockResolvedValue({
       ok: true,
       json: async () => ({ schemaVersion: 1, items: [] }),
     });
@@ -151,7 +163,7 @@ describe("launcher api helpers", () => {
 
     await getLauncherBranchInstances({ cleanupMetadata: true });
 
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/launcher/branch-instances?cleanupMetadata=1");
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/launcher/branch-instances?cleanupMetadata=1");
   });
 
   it("normalizes stale flat branch-instance payloads before the Launcher renders them", async () => {
@@ -161,7 +173,10 @@ describe("launcher api helpers", () => {
         origin: "http://127.0.0.1:8765",
       },
     });
-    const fetchMock = vi.fn().mockResolvedValueOnce({
+    const fetchMock = vi.fn()      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ header: "X-Vibelution-Control-Token", controlToken: "test-token" }),
+      }).mockResolvedValueOnce({
       ok: true,
       json: async () => ({
         schemaVersion: 1,
@@ -240,7 +255,10 @@ describe("launcher api helpers", () => {
   });
 
   it("fetches the workbench runtime summary directly instead of through launcher control", async () => {
-    const fetchMock = vi.fn().mockResolvedValueOnce({
+    const fetchMock = vi.fn()      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ header: "X-Vibelution-Control-Token", controlToken: "test-token" }),
+      }).mockResolvedValueOnce({
       ok: true,
       json: async () => ({ status: "ready" }),
     });
@@ -249,8 +267,8 @@ describe("launcher api helpers", () => {
     const payload = await getRuntimeSummary();
 
     expect(payload.status).toBe("ready");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/runtime/summary");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/runtime/summary");
   });
 
   it("uses the reported launcher control origin after status discovery", async () => {
@@ -260,7 +278,10 @@ describe("launcher api helpers", () => {
         origin: "http://127.0.0.1:8000",
       },
     });
-    const fetchMock = vi.fn()
+    const fetchMock = vi.fn()      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ header: "X-Vibelution-Control-Token", controlToken: "test-token" }),
+      })
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -278,6 +299,7 @@ describe("launcher api helpers", () => {
     await expect(restartLauncherBundle()).rejects.toBeInstanceOf(LauncherControlPlaneNotReadyError);
 
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      "/api/control-token",
       "/api/launcher/status",
     ]);
   });
@@ -767,15 +789,20 @@ describe("launcher api IPC transport", () => {
         origin: "http://127.0.0.1:8000",
       },
     });
-    const fetchMock = vi.fn().mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ launcher: { mode: "workbench_adapter" } }),
-    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ header: "X-Vibelution-Control-Token", controlToken: "test-token" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ launcher: { mode: "workbench_adapter" } }),
+      });
     vi.stubGlobal("fetch", fetchMock);
 
     const payload = await getLauncherStatus();
 
     expect(payload.launcher.mode).toBe("workbench_adapter");
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/launcher/status");
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/launcher/status");
   });
 });

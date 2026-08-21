@@ -5,7 +5,6 @@ import {
 
 const CONTROL_TOKEN_ENDPOINT = "/api/control-token";
 const CONTROL_TOKEN_HEADER_FALLBACK = "X-Vibelution-Control-Token";
-const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 const controlTokenPromises = new Map<string, Promise<{ header: string; token: string }>>();
 let fetchJsonFailureReporter: ((report: FetchJsonFailureReport) => void) | null = null;
@@ -20,6 +19,14 @@ export type FetchJsonFailureReport = {
 
 export function resetControlTokenForTests() {
   controlTokenPromises.clear();
+}
+
+/** Pre-seed the control token so tests make no bootstrap fetch. */
+export function seedControlTokenForTests(token = "test-control-token") {
+  controlTokenPromises.set(
+    controlTokenCacheKey(""),
+    Promise.resolve({ header: CONTROL_TOKEN_HEADER_FALLBACK, token }),
+  );
 }
 
 export function clearControlToken(origin?: string) {
@@ -115,10 +122,9 @@ function isLoopbackHost(hostname: string): boolean {
   return host === "localhost" || host === "127.0.0.1" || host === "::1";
 }
 
-function controlOriginForRequest(input: string, method: string): string | null {
-  if (!MUTATING_METHODS.has(method)) {
-    return null;
-  }
+function controlOriginForRequest(input: string): string | null {
+  // The backend now requires the control token on every guarded /api
+  // request, GET included, so attach it regardless of method.
   if (input.startsWith("/api/")) {
     return "";
   }
@@ -163,7 +169,7 @@ export async function fetchJson<T>(input: string, init?: RequestInit): Promise<T
   const method = String(init?.method ?? "GET").toUpperCase();
   const headers = new Headers(init?.headers ?? {});
   headers.set("Accept", headers.get("Accept") ?? "application/json");
-  const controlOrigin = controlOriginForRequest(input, method);
+  const controlOrigin = controlOriginForRequest(input);
   if (controlOrigin !== null) {
     const control = await getControlToken(controlOrigin);
     headers.set(control.header, control.token);

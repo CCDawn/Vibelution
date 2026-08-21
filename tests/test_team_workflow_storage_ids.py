@@ -57,3 +57,34 @@ def test_register_output_rejects_path_shaped_ids(monkeypatch: pytest.MonkeyPatch
     payload["output"]["identity"]["question_id"] = "../../escape"
     with pytest.raises(ValueError, match="output.identity.question_id"):
         challenge_question_runs.register_challenge_question_output("research-team", payload)
+
+
+def test_get_api_requires_control_token_except_exemptions() -> None:
+    from fastapi.testclient import TestClient
+
+    from core.web.app import create_app
+    from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
+
+    client = TestClient(create_app())
+    # Bootstrap endpoints stay open.
+    assert client.get("/api/health").status_code == 200
+    assert client.get("/api/control-token").status_code == 200
+    # Any other guarded GET without a token is refused…
+    unguarded = client.get("/api/agents")
+    assert unguarded.status_code == 403
+    assert "control token" in unguarded.json()["detail"].lower()
+    # …and passes with the token.
+    authorized = TestClient(
+        create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()}
+    )
+    assert authorized.get("/api/agents").status_code != 403
+
+
+def test_evidence_request_marker_size_is_bounded() -> None:
+    from core.web.services.team_workflow.meeting_rounds import extract_discussion_markers
+
+    huge = "EVIDENCE_REQUEST: " + '{"pad": "' + "x" * 70000 + '"}'
+    extracted = extract_discussion_markers([{"content": huge, "status": "completed"}])
+    assert extracted["evidenceRequests"] == []
+    assert extracted["evidenceRequestErrors"]
+    assert extracted["evidenceRequestErrors"][0]["code"] == "evidence_request_too_large"
