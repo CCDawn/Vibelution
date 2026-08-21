@@ -5,6 +5,7 @@ import {
 
 const CONTROL_TOKEN_ENDPOINT = "/api/control-token";
 const CONTROL_TOKEN_HEADER_FALLBACK = "X-Vibelution-Control-Token";
+const INVALID_CONTROL_TOKEN_DETAIL = "Missing or invalid web control token";
 
 const controlTokenPromises = new Map<string, Promise<{ header: string; token: string }>>();
 let fetchJsonFailureReporter: ((report: FetchJsonFailureReport) => void) | null = null;
@@ -170,8 +171,10 @@ export async function fetchJson<T>(input: string, init?: RequestInit): Promise<T
   const headers = new Headers(init?.headers ?? {});
   headers.set("Accept", headers.get("Accept") ?? "application/json");
   const controlOrigin = controlOriginForRequest(input);
+  let controlHeaderName: string | null = null;
   if (controlOrigin !== null) {
     const control = await getControlToken(controlOrigin);
+    controlHeaderName = control.header;
     headers.set(control.header, control.token);
   }
   const clientOperationId = currentClientOperationId();
@@ -179,48 +182,55 @@ export async function fetchJson<T>(input: string, init?: RequestInit): Promise<T
     headers.set(CLIENT_OPERATION_ID_HEADER, clientOperationId);
   }
 
-  let response: Response;
-  try {
-    response = await fetch(input, {
-      ...init,
-      headers,
-      credentials: init?.credentials ?? (controlOrigin ? "include" : "same-origin"),
-    });
-  } catch (error) {
-    if (!isFetchAbortError(error)) {
-      const message = error instanceof Error ? error.message : String(error);
-      reportFetchJsonFailure(input, {
-        method,
-        status: null,
-        message: message || "Network request failed",
-        failureKind: "network",
+  const performFetch = async (): Promise<Response> => {
+    try {
+      return await fetch(input, {
+        ...init,
+        headers,
+        credentials: init?.credentials ?? (controlOrigin ? "include" : "same-origin"),
       });
+    } catch (error) {
+      if (!isFetchAbortError(error)) {
+        const message = error instanceof Error ? error.message : String(error);
+        reportFetchJsonFailure(input, {
+          method,
+          status: null,
+          message: message || "Network request failed",
+          failureKind: "network",
+        });
+      }
+      throw error;
     }
-    throw error;
+  };
+
+  let response = await performFetch();
+  let parsedFailureMessage: string | null = null;
+
+  if (!response.ok && response.status === 403 && controlOrigin !== null) {
+    parsedFailureMessage = await readFailureMessage(response);
+    if (parsedFailureMessage === INVALID_CONTROL_TOKEN_DETAIL) {
+      clearControlToken(controlOrigin);
+      const refreshedControl = await getControlToken(controlOrigin);
+      if (controlHeaderName) {
+        headers.delete(controlHeaderName);
+      }
+      controlHeaderName = refreshedControl.header;
+      headers.set(refreshedControl.header, refreshedControl.token);
+      response = await performFetch();
+      parsedFailureMessage = null;
+    }
   }
 
   if (!response.ok) {
-    if (response.status === 403 && controlOrigin !== null) {
+    const message = parsedFailureMessage ?? await readFailureMessage(response);
+    if (
+      response.status === 403
+      && controlOrigin !== null
+      && message === INVALID_CONTROL_TOKEN_DETAIL
+    ) {
+      // The bounded retry has already been used. Leave the next user action
+      // able to bootstrap again without turning this request into a loop.
       clearControlToken(controlOrigin);
-    }
-    const contentType = response.headers.get("content-type") ?? "";
-    let message = "";
-    if (contentType.includes("application/json")) {
-      try {
-        const payload = (await response.json()) as { detail?: unknown; message?: unknown };
-        if (typeof payload.detail === "string") {
-          message = payload.detail;
-        } else if (payload.detail && typeof payload.detail === "object") {
-          message = JSON.stringify({ detail: payload.detail });
-        } else if (typeof payload.message === "string") {
-          message = payload.message;
-        }
-      } catch {
-        message = "";
-      }
-    }
-    if (!message) {
-      message = await response.text();
     }
     reportFetchJsonFailure(input, {
       method,
@@ -232,4 +242,27 @@ export async function fetchJson<T>(input: string, init?: RequestInit): Promise<T
   }
 
   return (await response.json()) as T;
+}
+
+async function readFailureMessage(response: Response): Promise<string> {
+  const contentType = response.headers.get("content-type") ?? "";
+  let message = "";
+  if (contentType.includes("application/json")) {
+    try {
+      const payload = (await response.json()) as { detail?: unknown; message?: unknown };
+      if (typeof payload.detail === "string") {
+        message = payload.detail;
+      } else if (payload.detail && typeof payload.detail === "object") {
+        message = JSON.stringify({ detail: payload.detail });
+      } else if (typeof payload.message === "string") {
+        message = payload.message;
+      }
+    } catch {
+      message = "";
+    }
+  }
+  if (!message) {
+    message = await response.text();
+  }
+  return message;
 }
