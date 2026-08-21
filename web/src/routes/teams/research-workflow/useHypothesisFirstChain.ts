@@ -42,6 +42,10 @@ export const hypothesisFirstChainReviewRoundLinksKey = (teamId: string, question
   ["teams", teamId, "hypothesis-first", "chain", "review-round-links", questionId] as const;
 
 export type HypothesisFirstChainData = {
+  /** Stable identity of the requested read scope. */
+  scopeKey: string;
+  /** True when a question-keyed payload declares a different question. */
+  scopeMismatch: boolean;
   chainState: HypothesisFirstChainState | null;
   /** Latest selection for the question (server already filters by questionId). */
   selection: HypothesisSelectionRecord | null;
@@ -80,8 +84,18 @@ function shouldPollCollections(
   });
 }
 
+function normalizedQuestion(value: string | null | undefined): string {
+  return String(value || "").trim().toUpperCase();
+}
+
+function recordMatchesQuestion(value: string | null | undefined, questionId: string): boolean {
+  const recordQuestion = normalizedQuestion(value);
+  return Boolean(recordQuestion && recordQuestion === questionId);
+}
+
 export function useHypothesisFirstChain(teamId: string, questionId: string): HypothesisFirstChainData {
-  const enabled = Boolean(teamId.trim() && questionId.trim());
+  const requestedQuestionId = normalizedQuestion(questionId);
+  const enabled = Boolean(teamId.trim() && requestedQuestionId);
   const pageVisible = usePageVisibility();
   const chainState = useQuery({
     queryKey: queryKeys.hypothesisFirstChainState(teamId, questionId),
@@ -102,7 +116,9 @@ export function useHypothesisFirstChain(teamId: string, questionId: string): Hyp
     queryFn: ({ signal }) => fetchMeetingRounds(teamId, { signal }),
     enabled,
     refetchInterval: (query) =>
-      shouldPollMeetings(query.state.data?.meetings)
+      shouldPollMeetings((query.state.data?.meetings ?? []).filter((meeting) => (
+        recordMatchesQuestion(meeting.question, requestedQuestionId)
+      )))
         ? resolvePollingInterval(pageVisible, BOUNDED_POLL_MS)
         : false,
   });
@@ -121,7 +137,9 @@ export function useHypothesisFirstChain(teamId: string, questionId: string): Hyp
     enabled,
   });
 
-  const selectionList = selections.data?.selections;
+  const selectionList = selections.data?.selections.filter((selection) => (
+    recordMatchesQuestion(selection.questionId, requestedQuestionId)
+  ));
   const selection = selectionList?.length
     ? selectionList.reduce((latest, item) =>
         String(item.createdAt ?? "") > String(latest.createdAt ?? "") ? item : latest)
@@ -134,10 +152,15 @@ export function useHypothesisFirstChain(teamId: string, questionId: string): Hyp
   // Meeting records never carry roundIndex server-side; the review-round
   // links are the authority. Decorate review meetings here so node ids,
   // inspectors, and next-action navigation all share one numbering.
+  const scopedLinks = (links.data?.links ?? EMPTY_LINKS).filter((link) => (
+    recordMatchesQuestion(link.questionId, requestedQuestionId)
+  ));
   const linkByMeetingId = new Map(
-    (links.data?.links ?? EMPTY_LINKS).map((link) => [String(link.meetingRoundId || ""), link]),
+    scopedLinks.map((link) => [String(link.meetingRoundId || ""), link]),
   );
-  const decoratedMeetings = (meetings.data?.meetings ?? EMPTY_MEETINGS).map((meeting) => {
+  const decoratedMeetings = (meetings.data?.meetings ?? EMPTY_MEETINGS)
+    .filter((meeting) => recordMatchesQuestion(meeting.question, requestedQuestionId))
+    .map((meeting) => {
     const link = linkByMeetingId.get(String(meeting.meetingRoundId || ""));
     if (!link) return meeting;
     return {
@@ -147,12 +170,23 @@ export function useHypothesisFirstChain(teamId: string, questionId: string): Hyp
         || (String(link.previousMeetingRoundId || "") || undefined),
     };
   });
+  const scopedRequests = (requests.data?.requests ?? EMPTY_REQUESTS).filter((request) => (
+    recordMatchesQuestion(request.questionId, requestedQuestionId)
+  ));
+  const resolvedChainQuestionId = normalizedQuestion(chainState.data?.questionId);
+  const scopeMismatch = Boolean(
+    enabled
+    && resolvedChainQuestionId
+    && resolvedChainQuestionId !== requestedQuestionId,
+  );
   return {
-    chainState: chainState.data ?? null,
+    scopeKey: `${teamId.trim()}::${requestedQuestionId || "no-question"}`,
+    scopeMismatch,
+    chainState: scopeMismatch ? null : (chainState.data ?? null),
     selection,
     meetings: decoratedMeetings,
-    collectionRequests: requests.data?.requests ?? EMPTY_REQUESTS,
-    reviewRoundLinks: links.data?.links ?? EMPTY_LINKS,
+    collectionRequests: scopedRequests,
+    reviewRoundLinks: scopedLinks,
     loading: enabled && [chainState, selections, meetings, requests, links].some((query) => query.isPending),
     error: firstError instanceof Error ? firstError.message : firstError ? String(firstError) : null,
   };

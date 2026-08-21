@@ -216,6 +216,8 @@ describe("useHypothesisFirstChain", () => {
     await flushQueries();
 
     expect(latest!.loading).toBe(false);
+    expect(latest!.scopeKey).toBe("team-1::no-question");
+    expect(latest!.scopeMismatch).toBe(false);
     expect(latest!.chainState).toBeNull();
     expect(latest!.selection).toBeNull();
     expect(mocked.chainState).not.toHaveBeenCalled();
@@ -233,6 +235,8 @@ describe("useHypothesisFirstChain", () => {
 
     expect(latest!.error).toBeNull();
     expect(latest!.loading).toBe(false);
+    expect(latest!.scopeKey).toBe("team-1::Q-01");
+    expect(latest!.scopeMismatch).toBe(false);
     expect(latest!.chainState?.questionId).toBe("Q-01");
     expect(latest!.selection?.selectionId).toBe("sel-2");
     expect(latest!.meetings.map((meeting) => meeting.meetingRoundId)).toEqual(["hf-review-sel-2-r1"]);
@@ -240,6 +244,42 @@ describe("useHypothesisFirstChain", () => {
     expect(latest!.reviewRoundLinks.map((link) => link.linkId)).toEqual(["hf-link-2"]);
     expect(mocked.chainState).toHaveBeenCalledWith("team-1", "Q-01", expect.anything());
     expect(mocked.requests).toHaveBeenCalledWith("team-1", "Q-01", expect.anything());
+  });
+
+  it("filters team-scoped ledgers to the requested question", async () => {
+    mockAllResolved();
+    mocked.meetings.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      meetingCount: 2,
+      meetings: [
+        meetingRecord("hf-review-sel-2-r1"),
+        { ...meetingRecord("hf-review-other-r1"), question: "Q-02" },
+      ],
+    });
+    mocked.links.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      linkCount: 2,
+      links: [linkRecord(), { ...linkRecord(), linkId: "other", questionId: "Q-02" }],
+    });
+    let latest: HypothesisFirstChainData | null = null;
+    render(<Probe teamId="team-1" questionId="Q-01" onResult={(value) => { latest = value; }} />);
+    await flushQueries();
+
+    expect(latest!.meetings.map((meeting) => meeting.meetingRoundId)).toEqual(["hf-review-sel-2-r1"]);
+    expect(latest!.reviewRoundLinks.map((link) => link.linkId)).toEqual(["hf-link-2"]);
+  });
+
+  it("fails closed when a question-keyed chain payload belongs to another question", async () => {
+    mockAllResolved();
+    mocked.chainState.mockResolvedValue({ ...chainStatePayload(), questionId: "Q-02" });
+    let latest: HypothesisFirstChainData | null = null;
+    render(<Probe teamId="team-1" questionId="Q-01" onResult={(value) => { latest = value; }} />);
+    await flushQueries();
+
+    expect(latest!.scopeMismatch).toBe(true);
+    expect(latest!.chainState).toBeNull();
   });
 
   it("surfaces the first query error", async () => {
