@@ -1381,7 +1381,7 @@ def test_canonical_receipt_replays_after_external_manual_history_window(tmp_path
             {
                 "evidenceKind": "external_manual",
                 "status": "passed",
-                "metricValue": f"manual-{index}",
+                "metricValue": f"{index}.0 manual history",
                 "resultPath": f"workspace/experiments/external/{index}.json",
                 "logRef": f"logs/external-{index}.log",
             },
