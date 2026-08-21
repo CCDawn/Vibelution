@@ -1,4 +1,4 @@
-import type { SessionDetail } from "../api/types";
+import type { SessionDetail, SessionTurnItem } from "../api/types";
 import {
   activeTurnLayerTextLength,
   mergeAssistantDeltaIntoActiveTurnLayer,
@@ -201,17 +201,25 @@ export function planAppliedAssistantDeltaDrain(
     dropped: currentStats.dropped + (shouldCommitRender ? 0 : appliedPayloadCount),
   };
   const applyFinishedAtMs = input.applyFinishedAtMs ?? input.nowMs?.() ?? input.applyStartedAtMs;
-  const telemetry = assistantDeltaApplyTelemetry({
-    streamSessionId: input.streamSessionId,
-    reason: input.reason,
-    drain: input.drain,
-    stats: nextStats,
-    appliedPayloadCount,
-    pendingLayer,
-    shouldCommitRender,
-    applyStartedAtMs: input.applyStartedAtMs,
-    applyFinishedAtMs,
-  });
+  const shouldLogApplied = input.reason === "final"
+    || (shouldCommitRender
+      ? nextStats.applied === 1 || nextStats.applied % 50 === 0
+      : nextStats.dropped === 1 || nextStats.dropped % 50 === 0);
+  // Building the telemetry body walks the whole pending layer (full text join +
+  // cell projection); it is only consumed when a log entry is actually emitted.
+  const telemetry = shouldLogApplied
+    ? assistantDeltaApplyTelemetry({
+      streamSessionId: input.streamSessionId,
+      reason: input.reason,
+      drain: input.drain,
+      stats: nextStats,
+      appliedPayloadCount,
+      pendingLayer,
+      shouldCommitRender,
+      applyStartedAtMs: input.applyStartedAtMs,
+      applyFinishedAtMs,
+    })
+    : {};
 
   return {
     applied: true,
@@ -220,10 +228,7 @@ export function planAppliedAssistantDeltaDrain(
     stats: nextStats,
     appliedPayloadCount,
     finalDone,
-    shouldLogApplied: input.reason === "final"
-      || (shouldCommitRender
-        ? nextStats.applied === 1 || nextStats.applied % 50 === 0
-        : nextStats.dropped === 1 || nextStats.dropped % 50 === 0),
+    shouldLogApplied,
     shouldScheduleNextFrame: input.drain.shouldContinue,
     shouldInvalidateSession: input.reason === "final" && (Boolean(input.drain.telemetry.done) || finalDone),
     lastAppliedAtMs: applyFinishedAtMs,
@@ -231,27 +236,42 @@ export function planAppliedAssistantDeltaDrain(
   };
 }
 
-function activeTurnRenderState(layer: ActiveTurnLayerState | undefined) {
-  if (!layer) {
-    return undefined;
-  }
-  return {
-    sessionId: layer.sessionId,
-    turnId: layer.turnId,
-    status: layer.status,
-    processStage: layer.processStage,
-    turnItems: layer.turnItems,
-  };
-}
-
 const activeTurnRenderSignatureCache = new WeakMap<ActiveTurnLayerState, string>();
 
+function turnItemRenderFingerprint(item: SessionTurnItem) {
+  return [
+    item.type,
+    item.itemId,
+    item.status,
+    item.terminal,
+    item.revision,
+    item.sequence,
+    "text" in item ? item.text.length : 0,
+    item.type === "tool_call" ? (item.output?.length ?? 0) : 0,
+    item.summary?.length ?? 0,
+    item.type === "retry" ? (item.reason?.length ?? 0) : 0,
+  ].join(":");
+}
+
+/**
+ * O(item count) fingerprint: text fields enter by length only. Streaming items
+ * are append-revisioned (revision/sequence bumps on every change), so an equal
+ * length with equal revision means the same replayed frame — skipping that
+ * render commit matches the previous full-text JSON comparison semantics
+ * without the O(total stream length) cost per drain.
+ */
 function activeTurnRenderSignature(layer: ActiveTurnLayerState) {
   const cached = activeTurnRenderSignatureCache.get(layer);
   if (cached !== undefined) {
     return cached;
   }
-  const signature = JSON.stringify(activeTurnRenderState(layer));
+  const signature = [
+    layer.sessionId,
+    layer.turnId,
+    layer.status,
+    layer.processStage,
+    layer.turnItems.map(turnItemRenderFingerprint).join("\u001e"),
+  ].join("\u001f");
   activeTurnRenderSignatureCache.set(layer, signature);
   return signature;
 }

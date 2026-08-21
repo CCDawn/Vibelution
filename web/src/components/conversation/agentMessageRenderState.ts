@@ -25,14 +25,21 @@ export type AgentMessageRenderState = {
   toolCalls: AgentToolCallPart[];
 };
 
+/** Reference-stable render state: row memo compares this identity every streaming drain. */
+const agentMessageRenderStateCache = new WeakMap<AgentMessage, AgentMessageRenderState>();
+
 export function buildAgentMessageRenderState(message: AgentMessage): AgentMessageRenderState {
+  const cached = agentMessageRenderStateCache.get(message);
+  if (cached) {
+    return cached;
+  }
   const sectionState = buildAgentMessageSectionState(message);
   const contentSections = agentMessageContentSections(message);
   const contextSections = agentMessageContextSections(message);
   const processSections = agentMessageProcessSections(message);
   const contentParts = contentSections.flatMap((section) => section.parts);
   const processParts = processSections.flatMap((section) => section.parts);
-  return {
+  const renderState: AgentMessageRenderState = {
     sectionState,
     contentSections,
     contextSections,
@@ -46,6 +53,8 @@ export function buildAgentMessageRenderState(message: AgentMessage): AgentMessag
     renderedTextLength: renderedTextLengthForParts(contentParts, processParts),
     toolCalls: processParts.filter(isAgentToolCallPart),
   };
+  agentMessageRenderStateCache.set(message, renderState);
+  return renderState;
 }
 
 function contentSectionIdsForChannel(

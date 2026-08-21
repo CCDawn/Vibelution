@@ -855,7 +855,7 @@ def _append_session_reasoning_item_if_needed(
     if not normalized_session_id or not normalized_turn_id or not thought_text:
         return False
     existing = s.conversation_turn_items_from_events(
-        s.load_conversation_events(s.PROJECT_ROOT, normalized_session_id),
+        s._load_session_conversation_events_cached(normalized_session_id),
         turn_id=normalized_turn_id,
     )
     normalized_feedback_sequence = s._coerce_nonnegative_int(feedback_sequence)

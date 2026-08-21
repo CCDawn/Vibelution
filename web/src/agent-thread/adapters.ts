@@ -10,9 +10,21 @@ import type {
 } from "./types";
 import { isInternalStreamingStatusContent, isInternalStreamingStatusStage } from "../components/conversation/conversationInternalStatus";
 
+/**
+ * Reference-stable adapter output: the timeline projection reruns on every
+ * streaming drain, and downstream operation/timeline-item caches key on the
+ * AgentMessage identity. Unchanged immutable inputs must keep returning the
+ * same object or those caches miss every frame.
+ */
+const agentMessageAdapterCache = new WeakMap<ConversationMessage, AgentMessage>();
+
 export function conversationMessageToAgentMessage(message: ConversationMessage): AgentMessage {
+  const cached = agentMessageAdapterCache.get(message);
+  if (cached) {
+    return cached;
+  }
   const parts = conversationMessageToAgentParts(message);
-  return {
+  const agentMessage: AgentMessage = {
     id: message.id,
     role: message.role,
     createdAt: message.timestamp,
@@ -26,6 +38,8 @@ export function conversationMessageToAgentMessage(message: ConversationMessage):
     parts,
     metadata: message.metadata,
   };
+  agentMessageAdapterCache.set(message, agentMessage);
+  return agentMessage;
 }
 
 export function conversationMessageToAgentParts(message: ConversationMessage): AgentMessagePart[] {

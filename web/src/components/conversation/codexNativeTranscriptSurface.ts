@@ -85,11 +85,20 @@ export function nativeAssistantMarkdownCoversProjectedAnswer(
   );
 }
 
+const codexTranscriptSurfaceCache = new WeakMap<
+  ConversationMessage,
+  { projectedCells: CodexTranscriptCell[]; surface: CodexTranscriptSurface }
+>();
+
 export function resolveCodexTranscriptSurface(
   message: ConversationMessage,
   projectedCells: CodexTranscriptCell[] = [],
 ): CodexTranscriptSurface {
   if (message.role === "assistant" && hasUsableNativeCodexTranscript(message)) {
+    const cached = codexTranscriptSurfaceCache.get(message);
+    if (cached && cached.projectedCells === projectedCells) {
+      return cached.surface;
+    }
     const transcript = codexTranscriptFromTurnItems(message.turnItems);
     const cells = codexNativeTranscriptToCells(transcript, {
       turnStreaming: message.status === "running",
@@ -109,7 +118,7 @@ export function resolveCodexTranscriptSurface(
     // Short orphan fragments (e.g. "存。") must not suppress a long committed content body.
     const suppressProjectedResponse = suppressProjectedError
       || (hasAssistantMarkdown && nativeCoversProjectedAnswer);
-    return {
+    const surface: CodexTranscriptSurface = {
       mode: "native",
       source: "turnItems",
       cells,
@@ -122,6 +131,8 @@ export function resolveCodexTranscriptSurface(
         || suppressProjectedResponse || hasNativeProcessProjection || hasLifecycleHints,
       suppressProjectedError,
     };
+    codexTranscriptSurfaceCache.set(message, { projectedCells, surface });
+    return surface;
   }
   return {
     mode: "empty",

@@ -38,7 +38,7 @@ def _ensure_session_turn_terminal_fallback(
     terminal_event = None
     journal_loaded = False
     try:
-        events = s.load_conversation_events(s.PROJECT_ROOT, session_id)
+        events = s._load_session_conversation_events_cached(session_id)
         journal_loaded = True
         terminal_event = next(
             (
@@ -125,7 +125,7 @@ def _append_missing_canonical_result_items(
         return
 
     existing = s.conversation_turn_items_from_events(
-        s.load_conversation_events(s.PROJECT_ROOT, normalized_session_id),
+        s._load_session_conversation_events_cached(normalized_session_id),
         turn_id=normalized_turn_id,
     )
     base_id = s._session_turn_item_base_id(normalized_session_id, normalized_turn_id)
@@ -864,7 +864,7 @@ def _persist_session_turn_result(
         )
     _append_missing_canonical_result_items(session_id, turn_id, assistant_entry)
     canonical_turn_items = s.conversation_turn_items_from_events(
-        s.load_conversation_events(s.PROJECT_ROOT, session_id),
+        s._load_session_conversation_events_cached(session_id),
         turn_id=turn_id,
     )
     has_canonical_final = any(

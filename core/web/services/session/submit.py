@@ -128,7 +128,7 @@ def _append_initial_session_journal_markers(
             return []
         return [
             event
-            for event in s.load_conversation_events(s.PROJECT_ROOT, normalized_session_id)
+            for event in s._load_session_conversation_events_cached(normalized_session_id)
             if str(getattr(event, "correlation_id", "") or "").strip()
             == normalized_submission_id
             and str(getattr(event, "event_type", "") or "") == event_type

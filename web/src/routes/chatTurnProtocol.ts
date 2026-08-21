@@ -257,11 +257,28 @@ export const hasTerminalCanonicalTurnOutcome = (message: ConversationMessage): b
   ))
 );
 
+/**
+ * Streaming frames recreate the active turn message object every drain; keeping
+ * the projection reference-stable for unchanged (immutable) messages is what
+ * lets downstream row-level memo skip history rows during streaming.
+ */
+const conversationMessageProjectionCache = new WeakMap<ConversationMessage, ConversationMessage>();
+
 /** Normalize only the canonical item sequence; never create legacy display fields. */
 export const projectConversationMessageFromTurnItemsV2 = (
   message: ConversationMessage,
-): ConversationMessage => (
-  message.role === "assistant"
-    ? { ...message, turnItems: consolidateSessionTurnItemsV2(message.turnItems) }
-    : message
-);
+): ConversationMessage => {
+  if (message.role !== "assistant") {
+    return message;
+  }
+  const cached = conversationMessageProjectionCache.get(message);
+  if (cached) {
+    return cached;
+  }
+  const projected: ConversationMessage = {
+    ...message,
+    turnItems: consolidateSessionTurnItemsV2(message.turnItems),
+  };
+  conversationMessageProjectionCache.set(message, projected);
+  return projected;
+};

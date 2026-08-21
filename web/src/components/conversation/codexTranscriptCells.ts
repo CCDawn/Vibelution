@@ -58,6 +58,16 @@ type CodexTranscriptCellReference = {
   cell: CodexTranscriptCell;
 };
 
+const codexTranscriptCellsCache = new WeakMap<
+  AgentMessage,
+  {
+    operations: AgentMessageOperation[] | undefined;
+    timelineItems: AgentMessageTimelineItem[] | undefined;
+    includeStreamTail: boolean | undefined;
+    cells: CodexTranscriptCell[];
+  }
+>();
+
 export function buildCodexTranscriptCells(
   message: AgentMessage,
   options: CodexTranscriptCellBuildOptions = {},
@@ -67,6 +77,16 @@ export function buildCodexTranscriptCells(
   }
   if (message.role !== "assistant") {
     return [];
+  }
+
+  const cached = codexTranscriptCellsCache.get(message);
+  if (
+    cached
+    && cached.operations === options.operations
+    && cached.timelineItems === options.timelineItems
+    && cached.includeStreamTail === options.includeStreamTail
+  ) {
+    return cached.cells;
   }
 
   const cells = compactConsecutiveToolFailures(compactTerminalContinuations((options.timelineItems?.length
@@ -95,9 +115,16 @@ export function buildCodexTranscriptCells(
       tone: "running",
     });
   }
-  return settleCodexTranscriptActiveStatuses(cells, {
+  const settledCells = settleCodexTranscriptActiveStatuses(cells, {
     turnStreaming: Boolean(message.streaming),
   });
+  codexTranscriptCellsCache.set(message, {
+    operations: options.operations,
+    timelineItems: options.timelineItems,
+    includeStreamTail: options.includeStreamTail,
+    cells: settledCells,
+  });
+  return settledCells;
 }
 
 function userTranscriptCells(message: AgentMessage): CodexTranscriptCell[] {

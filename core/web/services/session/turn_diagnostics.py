@@ -35,7 +35,7 @@ def _reconcile_stale_session_ledger(session_id: str, *, active_turn_id: str = ""
     recovered_from_checkpoint_only = False
     event_turn_id = ""
     try:
-        events = s.load_conversation_events(s.PROJECT_ROOT, normalized_session_id)
+        events = s._load_session_conversation_events_cached(normalized_session_id)
         checkpoint = s._load_session_live_output_checkpoint(normalized_session_id)
         turn_id = s.latest_open_turn_id(events)
         checkpoint_turn_id = str(getattr(checkpoint, "turn_id", "") or "").strip() if checkpoint is not None else ""
