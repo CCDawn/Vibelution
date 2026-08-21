@@ -281,6 +281,8 @@ import { VCanvasWorkbenchPage } from "@/components/vui";
 | --- | --- | --- |
 | canvas / inspector / rail | 区域 | inspector 宽度走 layoutId；科研流程右栏保持挂载，不因空选中拆列 |
 | toolbar | 画布顶栏 | 叠在画布之上（`z-20`）；分栏吃剩余高度，不用 `h-full` 盖住顶栏 |
+| `responsive` | 可选响应式抽屉能力 | 默认关闭；`enabled` 后 `>=1280` 保持三栏，`900–1279` 保留 rail、Inspector 进入抽屉，`<900` 两侧均为独立抽屉 |
+| `responsive.rail` / `responsive.inspector` | 抽屉标题、受控/非受控开关与变更回调 | 抽屉使用 `role="dialog"` + `aria-modal="true"`；打开时焦点进入，Escape/关闭后焦点返回触发按钮，并锁定背景滚动 |
 | domainRecipe | 域标记 | 合约用 |
 
 ### 反冗余

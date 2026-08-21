@@ -14,10 +14,7 @@ import { X } from "lucide-react";
 import { cn } from "../lib/cn";
 import { VButton } from "../primitives/VButton";
 import { VRouteHeader } from "./VRouteHeader";
-import {
-  VSplitWorkspace,
-  type VSplitWorkspaceResizeConfig,
-} from "./VSplitWorkspace";
+import { VSplitWorkspace, type VSplitWorkspaceResizeConfig } from "./VSplitWorkspace";
 import { VWorkbenchPage } from "./VWorkbenchPage";
 import {
   VUI_CANVAS_SURFACE_CLASS,
@@ -46,10 +43,7 @@ export type VCanvasWorkbenchResponsiveConfig = {
 
 export type VCanvasWorkbenchResponsiveMode = "wide" | "compact" | "narrow";
 
-export type VCanvasWorkbenchPageProps = Omit<
-  ComponentPropsWithoutRef<"section">,
-  "children"
-> & {
+export type VCanvasWorkbenchPageProps = Omit<ComponentPropsWithoutRef<"section">, "children"> & {
   ariaLabel?: string;
   eyebrow?: ReactNode;
   title: ReactNode;
@@ -386,10 +380,7 @@ export function VCanvasWorkbenchPage({
           actions={actions}
         />
       )}
-      <div
-        data-vui="canvas-workbench-body"
-        className={cn(VUI_PAGE_BODY_FILL_CLASS, "min-h-0 flex-1")}
-      >
+      <div data-vui="canvas-workbench-body" className={cn(VUI_PAGE_BODY_FILL_CLASS, "min-h-0 flex-1")}>
         {responsiveEnabled && (showRailToggle || showInspectorToggle) ? (
           <div
             aria-label="画布工作区面板"
@@ -419,11 +410,7 @@ export function VCanvasWorkbenchPage({
         {toolbar ? (
           <div
             data-vui="canvas-workbench-toolbar"
-            className={cn(
-              VUI_PAGE_TOOLBAR_STRIP_CLASS,
-              "relative z-20 shrink-0 overflow-hidden",
-              toolbarClassName,
-            )}
+            className={cn(VUI_PAGE_TOOLBAR_STRIP_CLASS, "relative z-20 shrink-0 overflow-hidden", toolbarClassName)}
           >
             {toolbar}
           </div>
@@ -433,29 +420,24 @@ export function VCanvasWorkbenchPage({
           toolbar strip and clips the canvas. flex-1 min-h-0 fills the remainder.
         */}
         <VSplitWorkspace
-          className={cn(
-            "min-h-0 min-w-0 flex-1 overflow-hidden !h-auto",
-            workspaceClassName,
-          )}
+          className={cn("min-h-0 min-w-0 flex-1 overflow-hidden !h-auto", workspaceClassName)}
           data-testid={shellTestId}
           data-team-shell-mode={shellMode}
           data-vui-layout-id={layoutId}
           resize={resizeConfig}
           sidebar={
-            visibleRail ? (
-              <div
-                data-vui="canvas-workbench-rail"
-                className={cn(
-                  VUI_RAIL_SURFACE_CLASS,
-                  "flex h-full min-h-0 flex-col",
-                  railClassName,
-                )}
-              >
-                {visibleRail}
-              </div>
-            ) : undefined
+            visibleRail
+              ? (
+                <div
+                  data-vui="canvas-workbench-rail"
+                  className={cn(VUI_RAIL_SURFACE_CLASS, "flex h-full min-h-0 flex-col", railClassName)}
+                >
+                  {visibleRail}
+                </div>
+              )
+              : undefined
           }
-          main={
+          main={(
             <div
               data-vui="canvas-workbench-canvas"
               className={cn(
@@ -467,20 +449,22 @@ export function VCanvasWorkbenchPage({
             >
               {canvas}
             </div>
-          }
+          )}
           aside={
-            visibleInspector ? (
-              <div
-                data-vui="canvas-workbench-inspector"
-                className={cn(
-                  VUI_WORKBENCH_SURFACE_CLASS,
-                  "flex h-full min-h-0 flex-col overflow-hidden",
-                  inspectorClassName,
-                )}
-              >
-                {visibleInspector}
-              </div>
-            ) : undefined
+            visibleInspector
+              ? (
+                <div
+                  data-vui="canvas-workbench-inspector"
+                  className={cn(
+                    VUI_WORKBENCH_SURFACE_CLASS,
+                    "flex h-full min-h-0 flex-col overflow-hidden",
+                    inspectorClassName,
+                  )}
+                >
+                  {visibleInspector}
+                </div>
+              )
+              : undefined
           }
         />
         {showRailDrawer ? (
