@@ -30,7 +30,10 @@ import { sourceCollectionRunListRefetchInterval } from "./workflowPresentation";
 import { useSourceCollectionRunQueries } from "./useSourceCollectionRunQueries";
 import type { SourceCollectionOutputDraft } from "./sourceCollectionMutationModel";
 import { sourceCollectionSummaryQuerySeedText } from "./sourceCollectionRunQueryModel";
-import { resolveSourceCollectionRunsQueryEnabled } from "./teamDetailLoadPolicy";
+import {
+  resolveResearchProjectsQueryEnabled,
+  resolveSourceCollectionRunsQueryEnabled,
+} from "./teamDetailLoadPolicy";
 
 export type UseSourceCollectionWorkspaceInput = {
   effectiveTeamId: string;
@@ -168,12 +171,16 @@ export function useSourceCollectionWorkspace(input: UseSourceCollectionWorkspace
     researchWorkflowTeamSelected,
     sourceCollectionWorkspaceSelected,
   });
+  const researchProjectsQueryEnabled = resolveResearchProjectsQueryEnabled({
+    effectiveTeamId,
+    researchWorkflowTeamSelected,
+  });
 
   const sourceCollectionResearchProjectsQuery = useQuery<TeamResearchProjectListPayload>({
     queryKey: researchProjectQueryKey(effectiveTeamId || "none"),
     queryFn: ({ signal }) =>
       listTeamResearchProjects(effectiveTeamId, { signal }),
-    enabled: sourceCollectionRunsQueryEnabled,
+    enabled: researchProjectsQueryEnabled,
     staleTime: 10_000,
   });
   const activeSourceCollectionResearchProjectId = sourceCollectionResearchProjectsQuery.data?.activeProjectId || "";
