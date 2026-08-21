@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import contextmanager
 from typing import Any
 
 from core.research.competition.resources import (
@@ -88,6 +89,41 @@ _GENERATION_AGENDA_RULES = (
 
 _SCOPE_FIELDS = ("program", "theme", "campaign", "question", "branch", "workflow")
 _DISCUSSION_DRIVER = threading.local()
+_SUMMARY_DRAFT_LOCKS_GUARD = threading.Lock()
+_SUMMARY_DRAFT_LOCKS: dict[tuple[str, str], tuple[Any, int]] = {}
+
+
+@contextmanager
+def _summary_draft_lock(team_id: str, meeting_round_id: str):
+    """Serialize one summary draft per meeting without retaining idle locks."""
+
+    key = (team_id, meeting_round_id)
+    with _SUMMARY_DRAFT_LOCKS_GUARD:
+        entry = _SUMMARY_DRAFT_LOCKS.get(key)
+        if entry is None:
+            lock = threading.RLock()
+            references = 0
+        else:
+            lock, references = entry
+        _SUMMARY_DRAFT_LOCKS[key] = (lock, references + 1)
+
+    acquired = False
+    try:
+        lock.acquire()
+        acquired = True
+        yield
+    finally:
+        try:
+            if acquired:
+                lock.release()
+        finally:
+            with _SUMMARY_DRAFT_LOCKS_GUARD:
+                current = _SUMMARY_DRAFT_LOCKS.get(key)
+                if current is not None and current[0] is lock:
+                    if current[1] <= 1:
+                        _SUMMARY_DRAFT_LOCKS.pop(key, None)
+                    else:
+                        _SUMMARY_DRAFT_LOCKS[key] = (lock, current[1] - 1)
 
 
 class ResearchMeetingRuntimeError(RuntimeError):
@@ -974,6 +1010,27 @@ def prepare_meeting_summary_draft(
     normalized_round_id = str(meeting_round_id or "").strip()
     if not normalized_round_id:
         raise ResearchMeetingRuntimeError("Meeting round id is required.")
+
+    with _summary_draft_lock(normalized_team_id, normalized_round_id):
+        return _prepare_meeting_summary_draft_locked(
+            normalized_team_id,
+            normalized_round_id,
+            actor=actor,
+            force=force,
+            drafter=drafter,
+        )
+
+
+def _prepare_meeting_summary_draft_locked(
+    normalized_team_id: str,
+    normalized_round_id: str,
+    *,
+    actor: str = "",
+    force: bool = False,
+    drafter: Callable[[dict[str, Any], list[dict[str, Any]]], Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Run the summary-draft state machine while its meeting lock is held."""
+
     meeting_round = meeting_rounds.get_meeting_round(normalized_team_id, normalized_round_id)[
         "meetingRound"
     ]
@@ -988,6 +1045,19 @@ def prepare_meeting_summary_draft(
         if isinstance(meeting_round.get("digestDraft"), Mapping)
         else {}
     )
+    stale_generation_draft = (
+        str(meeting_round.get("meetingType") or "") == CANDIDATE_GENERATION_MEETING_TYPE
+        and not [
+            item
+            for item in list(existing_draft.get("proposedCandidates") or [])
+            if isinstance(item, Mapping)
+        ]
+        and bool(
+            meeting_rounds.extract_discussion_markers(completed_source_messages).get(
+                "proposedCandidates"
+            )
+        )
+    )
     if status == "closed":
         return {
             "schemaVersion": meeting_rounds.SCHEMA_VERSION,
@@ -997,7 +1067,19 @@ def prepare_meeting_summary_draft(
             "digestDraft": existing_draft or None,
             "storagePath": str(meeting_rounds._rounds_path(normalized_team_id)),
         }
-    if status == "awaiting_approval":
+    if status == "awaiting_approval" and stale_generation_draft:
+        meeting_rounds.reject_meeting_digest_draft(
+            normalized_team_id,
+            normalized_round_id,
+            actor=actor or "system:summary-repair",
+            reason="recovered candidate markers missing from the stored draft",
+        )
+        meeting_round = meeting_rounds.get_meeting_round(
+            normalized_team_id, normalized_round_id
+        )["meetingRound"]
+        status = "summarizing"
+        existing_draft = {}
+    elif status == "awaiting_approval":
         return {
             "schemaVersion": meeting_rounds.SCHEMA_VERSION,
             "teamId": normalized_team_id,
@@ -1077,6 +1159,7 @@ def prepare_meeting_summary_draft(
     if (
         existing_draft
         and str(existing_draft.get("sourceMessageContentHash") or "") == source_hash
+        and not stale_generation_draft
     ):
         return meeting_rounds.submit_meeting_digest_draft(
             normalized_team_id, normalized_round_id, existing_draft

@@ -95,6 +95,29 @@ def test_close_meeting_emits_digest_decision_and_private_memory_refs(tmp_path, m
     assert beta["candidates"][0]["summary"].startswith("Track compilation")
 
 
+def test_v2_digest_keeps_proposed_candidates():
+    proposals = [
+        {
+            "candidateId": "cand-a",
+            "statement": "候选假说 A",
+            "rationale": "机制理由 A",
+            "proposedBy": "agent-alpha",
+        }
+    ]
+    digest = meetings._build_digest_v2(
+        {
+            "meetingRoundId": "meeting-generation-1",
+            "scopeHash": "scope-generation-1",
+            "participants": ["agent-alpha"],
+        },
+        {"summary": "候选生成完成", "proposedCandidates": proposals},
+        {"closedBy": "agent-alpha"},
+        "2026-08-21T00:00:00+00:00",
+    )
+
+    assert digest["proposedCandidates"] == proposals
+
+
 def test_close_meeting_is_idempotent_but_rejects_conflicting_reuse(tmp_path, monkeypatch):
     team_id = _team(tmp_path, monkeypatch)
     meetings.create_meeting_round(team_id, _meeting())

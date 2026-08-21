@@ -29,6 +29,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import tempfile
 import threading
 from collections.abc import Mapping, Sequence
@@ -61,6 +62,10 @@ _MARKER_PREFIXES = (
     "EVIDENCE_REQUEST",
 )
 _PASS_TOKENS = {"pass", "pass.", "pass。"}
+_MARKER_LINE_PATTERN = re.compile(
+    r"^(?:[-*+]\s+)?(?P<emphasis>\*\*|__)?(?P<marker>[A-Z_]+)\s*:\s*(?P<value>.+)$",
+    re.IGNORECASE,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 
@@ -553,13 +558,18 @@ def extract_discussion_markers(messages: Sequence[Mapping[str, Any]]) -> dict[st
         )
         for line in content.splitlines():
             text = line.strip()
-            if not text or ":" not in text:
+            if not text:
                 continue
-            prefix, _, body = text.partition(":")
-            marker = prefix.strip().upper()
+            match = _MARKER_LINE_PATTERN.match(text)
+            if match is None:
+                continue
+            marker = str(match.group("marker") or "").strip().upper()
             if marker not in _MARKER_PREFIXES:
                 continue
-            value = body.strip()
+            value = str(match.group("value") or "").strip()
+            emphasis = str(match.group("emphasis") or "")
+            if emphasis and emphasis in value:
+                value = value.replace(emphasis, "", 1).strip()
             if not value:
                 continue
             if marker == "AGREE":
@@ -1086,6 +1096,7 @@ def _build_digest_v2(
         "blockers": _normalized_str_list(merged.get("blockers")),
         "knowledgeCandidates": _normalized_str_list(merged.get("knowledgeCandidates")),
         "sourceMessageRefs": _normalized_str_list(merged.get("sourceMessageRefs")),
+        "proposedCandidates": list(merged.get("proposedCandidates") or []),
     }
     digest["contentHash"] = _digest_content_hash(digest)
     return digest

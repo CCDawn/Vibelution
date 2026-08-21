@@ -1176,19 +1176,40 @@ def needs_candidate_generation(team_id: str, question_id: str) -> bool:
     return not _question_generation_meetings(team_id, question_id)
 
 
+def _generation_proposals_from_digest(digest: Any) -> list[dict[str, Any]]:
+    if not isinstance(digest, Mapping):
+        return []
+    return [
+        dict(item)
+        for item in list(digest.get("proposedCandidates") or [])
+        if isinstance(item, Mapping)
+    ]
+
+
+def _generation_proposals_from_messages(
+    meeting_round: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    from core.web.services.team_workflow import meeting_rounds
+
+    markers = meeting_rounds.extract_discussion_markers(
+        meeting_rounds.meeting_source_messages(meeting_round)
+    )
+    return [
+        dict(item)
+        for item in list(markers.get("proposedCandidates") or [])
+        if isinstance(item, Mapping)
+    ]
+
+
 def _heal_generation_candidates(team_id: str, closed_meeting: Mapping[str, Any]) -> None:
     if str(closed_meeting.get("status") or "") != "closed":
         return
     digest = closed_meeting.get("digest")
     if not isinstance(digest, Mapping):
         digest = closed_meeting.get("digestDraft")
-    if not isinstance(digest, Mapping):
-        return
-    proposals = [
-        item
-        for item in list(digest.get("proposedCandidates") or [])
-        if isinstance(item, Mapping)
-    ]
+    proposals = _generation_proposals_from_digest(digest)
+    if not proposals:
+        proposals = _generation_proposals_from_messages(closed_meeting)
     if proposals:
         _append_generation_candidates(team_id, closed_meeting, proposals)
 
@@ -1209,11 +1230,14 @@ def _close_generation_meeting(
         if isinstance(meeting_round.get("digestDraft"), Mapping)
         else {}
     )
-    proposals = [
-        item
-        for item in list(digest_draft.get("proposedCandidates") or [])
-        if isinstance(item, Mapping)
-    ]
+    proposals = _generation_proposals_from_digest(digest_draft)
+    if not proposals:
+        proposals = _generation_proposals_from_messages(meeting_round)
+        if proposals:
+            # A stale or raced summary draft may have dropped this field.  Feed
+            # the recovered proposals into the approved digest as well as the
+            # chain ledger so the closure remains self-describing and replayable.
+            request["proposedCandidates"] = proposals
     if not [item for item in list(request.get("decisions") or []) if isinstance(item, Mapping)]:
         # The §15.4 closure gate requires at least one decision; for a
         # generation round the decision IS the proposed candidate list, so

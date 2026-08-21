@@ -103,7 +103,8 @@ export function renderTeamsWorkbenchBoardPage(props: TeamsWorkbenchBoardPageProp
   const p = props;
   const suppressOuterShellChrome = p.suppressOuterShellChrome === true;
   const inspectorVisible = p.showBoardInspectorAside;
-  const overlayActive = Boolean(p.narrowInspector && p.inspectorOverlayOpen && p.inspectorBody);
+  const outerNarrowInspector = !suppressOuterShellChrome && Boolean(p.narrowInspector);
+  const overlayActive = Boolean(outerNarrowInspector && p.inspectorOverlayOpen && p.inspectorBody);
   const inspectorOverlayLabel = p.lang === "zh" ? "详情面板" : "Detail panel";
   const toggleLabel = overlayActive
     ? (p.lang === "zh" ? "关闭详情面板" : "Close detail panel")
@@ -127,7 +128,7 @@ export function renderTeamsWorkbenchBoardPage(props: TeamsWorkbenchBoardPageProp
           },
         }}
         railClassName={suppressOuterShellChrome ? "!hidden" : undefined}
-        workspaceClassName={suppressOuterShellChrome ? "!grid-cols-[minmax(0,1fr)]" : undefined}
+        workspaceClassName={suppressOuterShellChrome ? "!grid-cols-[0_minmax(0,1fr)] !gap-0" : undefined}
         shellTestId="team-shell-workspace"
         shellMode="board"
         ariaLabel={p.selectedTeamContextTitle}
@@ -173,7 +174,7 @@ export function renderTeamsWorkbenchBoardPage(props: TeamsWorkbenchBoardPageProp
           ) : undefined
         }
       />
-      {p.narrowInspector && p.inspectorBody ? (
+      {outerNarrowInspector && p.inspectorBody ? (
         <div className={p.styles.boardInspectorFloatingToggle}>
           <VButton
             type="button"

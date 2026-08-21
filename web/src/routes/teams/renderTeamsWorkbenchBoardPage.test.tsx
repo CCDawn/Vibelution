@@ -191,7 +191,20 @@ describe("renderTeamsWorkbenchBoardPage outer shell chrome", () => {
     expect(shell.getAttribute("data-layout-id")).toBe("");
     expect(shell.getAttribute("data-rail-present")).toBe("false");
     expect(shell.getAttribute("data-rail-class")).toBe("!hidden");
-    expect(shell.getAttribute("data-workspace-class")).toBe("!grid-cols-[minmax(0,1fr)]");
+    expect(shell.getAttribute("data-workspace-class")).toBe("!grid-cols-[0_minmax(0,1fr)] !gap-0");
+  });
+
+  it("suppresses the generic narrow inspector when the Challenge workflow owns the inner drawer", () => {
+    renderBoard({
+      suppressOuterShellChrome: true,
+      narrowInspector: true,
+      inspectorOverlayOpen: true,
+      inspectorBody: <div data-testid="outer-inspector-body" />,
+    });
+
+    expect(document.querySelector('[data-vui-region="teams-inspector-overlay"]')).toBeNull();
+    expect(document.querySelector('[data-vui-region="teams-inspector-overlay-backdrop"]')).toBeNull();
+    expect(document.querySelector('[data-testid="outer-inspector-body"]')).toBeNull();
   });
 
   it("keeps the generic rail and persisted layout for ordinary Teams surfaces", () => {

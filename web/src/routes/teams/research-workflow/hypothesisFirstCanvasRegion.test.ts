@@ -154,23 +154,30 @@ describe("hypothesisFirstCanvasRegion", () => {
     expect(regionOf({ chainState: null })).toBeNull();
   });
 
-  it("empty chain still renders the region: selection card waits for candidate generation", () => {
+  it("empty chain exposes candidate generation as the clear first step", () => {
     const region = regionOf({})!;
     expect(region).not.toBeNull();
+    const generationNode = region.nodes.find(
+      (node) => node.nodeId === HYPOTHESIS_FIRST_GENERATION_NODE_ID,
+    )!;
+    expect(generationNode.status).toBe("waiting_human");
+    expect(generationNode.description).toBe("尚未生成候选假说，点击卡片打开操作");
     const selectionNode = region.nodes.find(
       (node) => node.nodeId === HYPOTHESIS_FIRST_SELECTION_NODE_ID,
     )!;
     expect(selectionNode.status).toBe("pending");
     expect(selectionNode.description).toBe("等待生成候选假说");
-    expect(region.nodes.some((node) => node.nodeId === HYPOTHESIS_FIRST_GENERATION_NODE_ID)).toBe(
-      false,
-    );
+    expect(region.edges).toContainEqual(expect.objectContaining({
+      edgeId: "hf_e_gen_sel",
+      fromNodeId: HYPOTHESIS_FIRST_GENERATION_NODE_ID,
+      toNodeId: HYPOTHESIS_FIRST_SELECTION_NODE_ID,
+    }));
     expect(region.nodes.some((node) => node.nodeId === HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID)).toBe(
       false,
     );
     expect(region.showDownstreamPipeline).toBe(false);
-    expect(region.stage.progress).toEqual({ completed: 0, total: 1 });
-    expect(region.stage.stageTone).toBe("idle");
+    expect(region.stage.progress).toEqual({ completed: 0, total: 2 });
+    expect(region.stage.stageTone).toBe("attention");
   });
 
   it("open generation meeting renders the generation card before selection", () => {
@@ -319,6 +326,9 @@ describe("hypothesisFirstCanvasRegion", () => {
       ],
     })!;
     expect(region.nodes.find((node) => node.nodeId === "hf_meeting_1")?.status).toBe("waiting_human");
+    expect(region.nodes.find((node) => node.nodeId === "hf_meeting_1")?.description).toBe(
+      "正在整理本轮讨论结论",
+    );
     expect(region.nodes.find((node) => node.nodeId === "hf_meeting_2")?.status).toBe("waiting_human");
     // fail-closed: closed round without digestRef is NOT succeeded.
     expect(region.nodes.find((node) => node.nodeId === "hf_meeting_3")?.status).toBe("blocked");

@@ -9,6 +9,8 @@ evidenceRequests → one collection request.
 from __future__ import annotations
 
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -21,7 +23,9 @@ from core.web.services.team_workflow.research_runtime import (
     hypothesis_first_chain as chain,
 )
 from core.web.services.team_workflow.research_runtime import question_launch
-
+from core.web.services.team_workflow.research_runtime.operator_authorization import (
+    server_operator_scope,
+)
 from tests.test_research_workflow_hypothesis_first_chain import (
     _QUESTION_ID,
     _ROLES,
@@ -32,9 +36,6 @@ from tests.test_research_workflow_hypothesis_first_chain import (
     _open_first_meeting,
     _patch_approved_question,
     _seed_parent_run,
-)
-from core.web.services.team_workflow.research_runtime.operator_authorization import (
-    server_operator_scope,
 )
 
 
@@ -169,6 +170,65 @@ def test_summary_draft_open_to_awaiting_approval_is_idempotent(
         assert build_calls["count"] == 1
 
 
+def test_summary_draft_concurrent_requests_share_one_generation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    team_id, agents = _hf_env(tmp_path, monkeypatch)
+    _patch_approved_question(monkeypatch)
+    monkeypatch.setattr(meeting_runtime, "maybe_auto_draft_meeting", lambda *a, **k: None)
+    agent_ids = [agents[role] for role in _ROLES]
+    original = meeting_runtime.build_meeting_digest_draft
+    build_calls = {"count": 0}
+    caller_count = {"count": 0}
+    build_calls_lock = threading.Lock()
+    caller_count_lock = threading.Lock()
+    both_callers_started = threading.Event()
+    first_builder_started = threading.Event()
+    release_builder = threading.Event()
+
+    def counting_builder(*args, **kwargs):
+        with build_calls_lock:
+            build_calls["count"] += 1
+            call_number = build_calls["count"]
+        if call_number == 1:
+            first_builder_started.set()
+            assert both_callers_started.wait(timeout=5)
+            assert release_builder.wait(timeout=5)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(meeting_runtime, "build_meeting_digest_draft", counting_builder)
+
+    with server_operator_scope("u-1", roles=("operator",)):
+        recorded = _open_first_meeting(team_id, agent_ids)
+    meeting_id = recorded["reviewMeeting"]["meetingRound"]["meetingRoundId"]
+
+    def request_summary_draft() -> dict:
+        with caller_count_lock:
+            caller_count["count"] += 1
+            if caller_count["count"] == 2:
+                both_callers_started.set()
+        with server_operator_scope("u-1", roles=("operator",)):
+            return meeting_runtime.prepare_meeting_summary_draft(
+                team_id, meeting_id, actor=agent_ids[0], force=False
+            )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(request_summary_draft) for _ in range(2)]
+        assert both_callers_started.wait(timeout=5)
+        assert first_builder_started.wait(timeout=5)
+        release_builder.set()
+        results = [future.result(timeout=5) for future in futures]
+
+    assert [result["status"] for result in results] == [
+        "awaiting_approval",
+        "awaiting_approval",
+    ]
+    assert len({result["digestDraft"]["contentHash"] for result in results}) == 1
+    assert build_calls["count"] == 1
+    with meeting_runtime._SUMMARY_DRAFT_LOCKS_GUARD:
+        assert (team_id, meeting_id) not in meeting_runtime._SUMMARY_DRAFT_LOCKS
+
+
 def test_summary_draft_retries_from_summarizing_after_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -257,6 +317,45 @@ def test_approve_generation_registers_ledger_candidates(
         assert approved["candidateCount"] >= 1
         listed = chain.list_hypothesis_candidates(team_id, question_id=_QUESTION_ID)
         assert listed["candidateCount"] >= 1
+
+
+def test_prepare_generation_repairs_stale_empty_candidate_draft(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    team_id, agents = _hf_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        question_launch,
+        "challenge_question_run_summary",
+        lambda _team_id: {"completedQuestionIds": [], "completedQuestionResults": []},
+    )
+    agent_ids = [agents[role] for role in _ROLES]
+
+    def stale_drafter(meeting_round, source_messages):
+        draft = meeting_runtime.build_meeting_digest_draft(meeting_round, source_messages)
+        draft["proposedCandidates"] = []
+        return draft
+
+    with server_operator_scope("u-1", roles=("operator",)):
+        opened = chain.open_candidate_generation_meeting(
+            team_id, _QUESTION_ID, agent_runner=_candidate_generation_runner
+        )
+        meeting_id = opened["meetingRound"]["meetingRoundId"]
+        stale = meeting_runtime.prepare_meeting_summary_draft(
+            team_id,
+            meeting_id,
+            actor=agent_ids[0],
+            force=False,
+            drafter=stale_drafter,
+        )
+        assert stale["digestDraft"]["proposedCandidates"] == []
+
+        repaired = meeting_runtime.prepare_meeting_summary_draft(
+            team_id, meeting_id, actor=agent_ids[0], force=False
+        )
+
+    assert repaired["status"] == "awaiting_approval"
+    assert repaired["digestDraft"]["proposedCandidates"]
+    assert repaired["digestDraft"]["contentHash"] != stale["digestDraft"]["contentHash"]
 
 
 def test_approve_review_digest_starts_one_collection(
@@ -568,6 +667,41 @@ def test_unstructured_fallback_does_not_override_markers() -> None:
     fallback = meetings.apply_unstructured_digest_fallback(extracted, messages)
     assert fallback["agreements"] == ["hyp-a 机制证据最完整"]
     assert fallback["disagreements"][0]["issue"] == "hyp-b 泛化不足"
+
+
+def test_candidate_markers_accept_common_markdown_emphasis() -> None:
+    messages = [
+        {
+            "status": "completed",
+            "content": (
+                "**CANDIDATE: 2 | 极端嗜盐菌可能存在未鉴明的色素合成机制** "
+                "| 宏基因组与基因敲除可证伪\n"
+                "- **CANDIDATE: 3 | 热液嗜热菌可能产生新型热稳定色素 "
+                "| LC-MS 与 P450 敲除可证伪**"
+            ),
+            "roomId": "room-markdown",
+            "roundId": "round-markdown",
+            "messageId": "msg-markdown",
+            "speakerTitle": "A003",
+        }
+    ]
+
+    extracted = meetings.extract_discussion_markers(messages)
+
+    assert extracted["proposedCandidates"] == [
+        {
+            "candidateId": "2",
+            "statement": "极端嗜盐菌可能存在未鉴明的色素合成机制",
+            "rationale": "宏基因组与基因敲除可证伪",
+            "proposedBy": "A003",
+        },
+        {
+            "candidateId": "3",
+            "statement": "热液嗜热菌可能产生新型热稳定色素",
+            "rationale": "LC-MS 与 P450 敲除可证伪",
+            "proposedBy": "A003",
+        },
+    ]
 
 
 def test_empty_digest_with_completed_speech_is_blocked() -> None:

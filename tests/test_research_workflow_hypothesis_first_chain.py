@@ -1509,6 +1509,112 @@ def test_candidate_generation_cold_start_registers_ledger_candidates(
         assert state["meetingCount"] == 0
 
 
+def test_candidate_generation_recovers_empty_digest_proposals_from_source_messages(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stale empty draft must not discard candidate markers at approval."""
+    team_id, agents = _hf_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        question_launch,
+        "challenge_question_run_summary",
+        lambda _team_id: {"completedQuestionIds": [], "completedQuestionResults": []},
+    )
+
+    with server_operator_scope("u-1", roles=("operator",)):
+        opened = chain.open_candidate_generation_meeting(
+            team_id, _QUESTION_ID, agent_runner=_candidate_generation_runner
+        )
+        meeting_round_id = opened["meetingRound"]["meetingRoundId"]
+        agent_ids = [agents[role] for role in _ROLES]
+        _drive_to_awaiting_approval(team_id, meeting_round_id, agent_ids[0])
+
+        stale_draft = dict(
+            meetings.get_meeting_round(team_id, meeting_round_id)["meetingRound"][
+                "digestDraft"
+            ]
+        )
+        stale_draft["proposedCandidates"] = []
+        meetings.reject_meeting_digest_draft(
+            team_id, meeting_round_id, actor=agent_ids[0], reason="重放空草稿"
+        )
+        meetings.submit_meeting_digest_draft(team_id, meeting_round_id, stale_draft)
+
+        closed = chain.close_review_meeting(
+            team_id,
+            meeting_round_id,
+            _closure_payload(agent_ids, []),
+        )
+        replayed = chain.close_review_meeting(
+            team_id,
+            meeting_round_id,
+            _closure_payload(agent_ids, []),
+        )
+
+    assert closed["meetingRound"]["status"] == "closed"
+    assert closed["candidateCount"] == 2
+    assert len(closed["digest"]["proposedCandidates"]) == 2
+    assert replayed["status"] == "reused"
+    assert replayed["candidateCount"] == 2
+    assert chain.chain_state(team_id, _QUESTION_ID)["candidateCount"] == 2
+
+
+def test_closed_generation_heals_candidates_from_source_messages(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A legacy closed empty digest can repopulate the candidate ledger."""
+    team_id, agents = _hf_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        question_launch,
+        "challenge_question_run_summary",
+        lambda _team_id: {"completedQuestionIds": [], "completedQuestionResults": []},
+    )
+
+    with server_operator_scope("u-1", roles=("operator",)):
+        opened = chain.open_candidate_generation_meeting(
+            team_id, _QUESTION_ID, agent_runner=_candidate_generation_runner
+        )
+        meeting_round_id = opened["meetingRound"]["meetingRoundId"]
+        agent_ids = [agents[role] for role in _ROLES]
+        _drive_to_awaiting_approval(team_id, meeting_round_id, agent_ids[0])
+        stale_draft = dict(
+            meetings.get_meeting_round(team_id, meeting_round_id)["meetingRound"][
+                "digestDraft"
+            ]
+        )
+        stale_draft["proposedCandidates"] = []
+        meetings.reject_meeting_digest_draft(
+            team_id, meeting_round_id, actor=agent_ids[0], reason="构造旧空摘要"
+        )
+        meetings.submit_meeting_digest_draft(team_id, meeting_round_id, stale_draft)
+        direct_closed = meetings.approve_meeting_closure(
+            team_id,
+            meeting_round_id,
+            _closure_payload(
+                agent_ids,
+                [
+                    {
+                        "decision": "propose_candidates",
+                        "rationale": "保留旧闭会事实，稍后从讨论消息恢复候选。",
+                        "decidedBy": agent_ids[0],
+                        "candidateRefs": [],
+                        "evidenceRefs": [stale_draft["sourceMessageRefs"][0]],
+                        "status": "adopted",
+                    }
+                ],
+            ),
+        )
+        healed = chain.open_candidate_generation_meeting(
+            team_id, _QUESTION_ID, agent_runner=_candidate_generation_runner
+        )
+
+    assert direct_closed["digest"]["proposedCandidates"] == []
+    assert healed["status"] == "reused"
+    assert healed["meetingRound"]["meetingRoundId"] == meeting_round_id
+    assert chain.list_hypothesis_candidates(team_id, question_id=_QUESTION_ID)[
+        "candidateCount"
+    ] == 2
+
+
 def _empty_generation_runner(participant, prompt, context):
     """Discussion happens but nobody proposes a CANDIDATE marker."""
     return {

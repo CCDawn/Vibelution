@@ -174,7 +174,9 @@ function CanvasWorkbenchDrawer({
   const drawerRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
   const titleId = `canvas-workbench-drawer-title-${id}`;
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!open || !drawerRef.current) return undefined;
@@ -190,7 +192,7 @@ function CanvasWorkbenchDrawer({
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (event.key !== "Tab" || !drawerRef.current) return;
@@ -218,7 +220,7 @@ function CanvasWorkbenchDrawer({
       restoreFocusRef.current?.focus();
       restoreFocusRef.current = null;
     };
-  }, [onClose, open, returnFocusRef]);
+  }, [open, returnFocusRef]);
 
   if (!open) return null;
 

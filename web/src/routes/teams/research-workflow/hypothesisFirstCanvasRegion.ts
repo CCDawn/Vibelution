@@ -95,7 +95,7 @@ function meetingNodeDescription(meeting: MeetingRoundRecord): string {
     case "open":
       return "讨论进行中";
     case "summarizing":
-      return "纪要整理中";
+      return "正在整理本轮讨论结论";
     case "awaiting_approval":
       return "等待人工确认闭环";
     case "closed":
@@ -164,10 +164,11 @@ function sortRequests(requests: CollectionRequestRecord[]): CollectionRequestRec
 
 /**
  * Builds the hypothesis-first stage fragment.  The region renders whenever the
- * question has a chain state (i.e. a catalog question is in view): with no
- * ledger activity yet the selection card still shows as the pending entry
- * point, so the canvas never falls back to a source-finding-first shape for a
- * hypothesis-first question (§3.5 cold start).
+ * question has a chain state (i.e. a catalog question is in view).  Before
+ * any ledger activity exists, the candidate-generation card is the first
+ * card, so the canvas states the real first action instead of asking a user
+ * to infer it from a pending selection card.  Later states keep their compact
+ * historical shape.
  */
 export function buildHypothesisFirstCanvasRegion(
   input: HypothesisFirstCanvasRegionInput,
@@ -206,10 +207,15 @@ export function buildHypothesisFirstCanvasRegion(
   // --- cards ---------------------------------------------------------------
   const candidateCount = chainState.candidateCount ?? 0;
   const generationMeeting = generationMeetings[generationMeetings.length - 1];
-  if (generationMeeting || candidateCount > 0) {
+  const showGenerationCard = Boolean(
+    generationMeeting || candidateCount > 0 || (!selection && meetings.length === 0),
+  );
+  if (showGenerationCard) {
     const generationStatus = generationMeeting
       ? meetingNodeStatus(generationMeeting)
-      : "succeeded";
+      : candidateCount > 0
+        ? "succeeded"
+        : "waiting_human";
     nodes.push({
       nodeId: HYPOTHESIS_FIRST_GENERATION_NODE_ID,
       stageId: HYPOTHESIS_FIRST_STAGE_ID,
@@ -221,7 +227,9 @@ export function buildHypothesisFirstCanvasRegion(
         ? generationMeeting.status === "closed"
           ? `已产出 ${candidateCount} 条候选假说`
           : meetingNodeDescription(generationMeeting)
-        : `已产出 ${candidateCount} 条候选假说`,
+        : candidateCount > 0
+          ? `已产出 ${candidateCount} 条候选假说`
+        : "尚未生成候选假说，点击卡片打开操作",
     });
   }
   nodes.push({
@@ -240,7 +248,7 @@ export function buildHypothesisFirstCanvasRegion(
           : "等待生成候选假说",
   });
 
-  if (generationMeeting || candidateCount > 0) {
+  if (showGenerationCard) {
     edges.push({
       edgeId: "hf_e_gen_sel",
       fromNodeId: HYPOTHESIS_FIRST_GENERATION_NODE_ID,

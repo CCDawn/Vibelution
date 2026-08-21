@@ -20,31 +20,35 @@ function setViewport(width: number) {
   act(() => window.dispatchEvent(new Event("resize")));
 }
 
+function pageElement(responsive = false, title = "Research canvas") {
+  return (
+    <VCanvasWorkbenchPage
+      ariaLabel="Research canvas"
+      canvas={<div data-testid="canvas">Canvas</div>}
+      hideHeader
+      inspector={<button type="button">Inspector action</button>}
+      rail={<button type="button">Rail action</button>}
+      responsive={
+        responsive
+          ? {
+              enabled: true,
+              rail: { label: "阶段栏" },
+              inspector: { label: "检查器" },
+            }
+          : undefined
+      }
+      title={title}
+    />
+  );
+}
+
 function renderPage(width: number, responsive = false) {
   setViewport(width);
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
   act(() => {
-    root?.render(
-      <VCanvasWorkbenchPage
-        ariaLabel="Research canvas"
-        canvas={<div data-testid="canvas">Canvas</div>}
-        hideHeader
-        inspector={<button type="button">Inspector action</button>}
-        rail={<button type="button">Rail action</button>}
-        responsive={
-          responsive
-            ? {
-                enabled: true,
-                rail: { label: "阶段栏" },
-                inspector: { label: "检查器" },
-              }
-            : undefined
-        }
-        title="Research canvas"
-      />,
-    );
+    root?.render(pageElement(responsive));
   });
   return host;
 }
@@ -128,6 +132,11 @@ describe("VCanvasWorkbenchPage responsive contract", () => {
     expect(close).not.toBeNull();
     expect(inner).not.toBeNull();
     inner?.focus();
+    act(() => {
+      root?.render(pageElement(true, "Research canvas updated"));
+    });
+    expect(document.activeElement).toBe(inner);
+    expect(document.body.style.overflow).toBe("hidden");
     act(() =>
       document.dispatchEvent(
         new KeyboardEvent("keydown", {
