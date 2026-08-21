@@ -57,6 +57,7 @@
 
 | 草案 | 说明 |
 | --- | --- |
+| [plans/2026-08-22-challenge-cup-hypothesis-scoped-sessions.md](plans/2026-08-22-challenge-cup-hypothesis-scoped-sessions.md) | user-approved：挑战杯节点根会话、逐假说 Child Session 与结构化聚合 |
 | [plans/2026-08-15-research-graph-outcome-memory.md](plans/2026-08-15-research-graph-outcome-memory.md) | 三层记忆 + 公共结构策展/保鲜 + 研究成败图 v2.3（非正式规范） |
 | [plans/2026-08-15-deep-architecture-decoupling-plan.md](plans/2026-08-15-deep-architecture-decoupling-plan.md) | ACTIVE：Agent / Chat / API 契约分 Gate 解耦 |
 | [plans/2026-08-14-llm-config-runtime-routing-optimization-plan.md](plans/2026-08-14-llm-config-runtime-routing-optimization-plan.md) | active-plan：模型配置与协议路由 |
