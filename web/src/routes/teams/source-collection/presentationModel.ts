@@ -130,7 +130,7 @@ export function workflowIngestionStatusLabel(value: string, lang: "zh" | "en") {
     blocked: "阻塞",
     needs_screening: "待审查",
     needs_plan: "待规划",
-    needs_revision: "需修订",
+    needs_revision: "需修改",
     needs_evidence: "补证据",
     needs_review: "待审核",
     in_progress: "推进中",

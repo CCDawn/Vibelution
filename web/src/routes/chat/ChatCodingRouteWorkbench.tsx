@@ -2790,6 +2790,7 @@ export function ChatCodingRoute() {
         statusRailOverlayOpen={statusRailOverlayOpen}
         standardGroupRoomActive={standardGroupRoomActive}
         groupRoomInitialLoading={groupRoomInitialLoading}
+        groupRoomLoadError={activeGroupRoomQuery.isError ? describeError(activeGroupRoomQuery.error, t("loadFailed")) : ""}
         lang={lang}
         t={t}
         numberFormatter={numberFormatter}
@@ -3220,6 +3221,7 @@ export function ChatCodingRoute() {
         availableGroupParticipants={availableGroupParticipants}
         activeGroupRoom={activeGroupRoom}
         groupRoomInitialLoading={groupRoomInitialLoading}
+        groupRoomLoadError={activeGroupRoomQuery.isError ? describeError(activeGroupRoomQuery.error, t("loadFailed")) : ""}
         expandedGroupAgentSessionIds={expandedGroupAgentSessionIds}
         setExpandedGroupAgentSessionIds={setExpandedGroupAgentSessionIds}
         expandedGroupAgentDetailsBySessionId={expandedGroupAgentDetailsBySessionId}

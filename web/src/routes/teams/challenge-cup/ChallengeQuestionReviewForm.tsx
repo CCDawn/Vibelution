@@ -30,7 +30,7 @@ const PENDING_DECISION_OPTION_ZH = { id: "pending" as const, label: "待定" };
 const DECISION_OPTIONS_ZH: Array<{ id: GateSelection; label: string }> = [
   PENDING_DECISION_OPTION_ZH,
   { id: "approved", label: "通过" },
-  { id: "revision_requested", label: "要求修改" },
+  { id: "revision_requested", label: "需修改" },
   { id: "rejected", label: "驳回" },
 ];
 
@@ -50,7 +50,7 @@ function decisionLabel(decision: string, isZh: boolean): string {
     case "passed":
       return isZh ? "已通过" : "Approved";
     case "revision_requested":
-      return isZh ? "要求修改" : "Changes requested";
+      return isZh ? "需修改" : "Changes requested";
     case "rejected":
       return isZh ? "已驳回" : "Rejected";
     default:
@@ -235,7 +235,7 @@ export function ChallengeQuestionReviewForm(props: {
           aria-label={isZh ? "审核意见" : "Review rationale"}
           value={rationale}
           onChange={(event) => setRationale(event.currentTarget.value)}
-          placeholder={isZh ? "通过 / 要求修改的理由" : "Rationale for approve / request changes"}
+          placeholder={isZh ? "通过 / 需修改的理由" : "Rationale for approve / request changes"}
           minRows={2}
           isDisabled={mutation.isPending || isSubmitted}
         />

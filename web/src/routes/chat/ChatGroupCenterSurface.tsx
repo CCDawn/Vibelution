@@ -320,6 +320,20 @@ export function ChatGroupCenterSurface({
   onToggleExpandedGroupMessage,
 }: ChatGroupCenterSurfaceProps) {
   const rounds = activeGroupRoom?.rounds ?? [];
+  const groupRoomTitle = activeGroupRoom?.title
+    ?? (groupRoomInitialLoading
+      ? (lang === "zh" ? "群聊加载中" : "Loading group")
+      : groupRoomRefreshError
+        ? (lang === "zh" ? "群聊加载失败" : "Group failed to load")
+        : (lang === "zh" ? "暂无群聊" : "No group room"));
+  const groupRoomEyebrow = activeGroupRoom
+    ? `${activeGroupRoom.mode ?? "round_robin"} · ${activeGroupRoom.purpose ?? "discussion"}`
+    : (lang === "zh" ? "群聊状态" : "Group status");
+  const groupRoomMeta = activeGroupRoom
+    ? `${availableGroupParticipantCount} ${lang === "zh" ? "位可用助手" : "available agents"} · ${statusLabel(activeGroupRoom.status ?? "ready")}`
+    : groupRoomRefreshError
+      ? (lang === "zh" ? "读取失败" : "Load failed")
+      : (lang === "zh" ? "尚未关联群聊" : "No room linked");
   const lastRound = rounds[rounds.length - 1];
   const lastMessageKey = `${lastRound?.roundId ?? ""}:${(lastRound?.messages ?? []).length}:${rounds.length}`;
   const groupTimelineRef = useRef<HTMLDivElement | null>(null);
@@ -552,21 +566,9 @@ export function ChatGroupCenterSurface({
       <ChatMessageChromeHeader
         className={styles.groupConversationHeader}
         density="surface"
-        eyebrow={(
-          <p>
-            {activeGroupRoom?.mode ?? "round_robin"}
-            {" · "}
-            {activeGroupRoom?.purpose ?? "discussion"}
-          </p>
-        )}
-        title={<h2>{activeGroupRoom?.title ?? (lang === "zh" ? "群聊加载中" : "Loading group")}</h2>}
-        meta={(
-          <span>
-            {availableGroupParticipantCount} {lang === "zh" ? "位可用助手" : "available agents"}
-            {" · "}
-            {statusLabel(activeGroupRoom?.status ?? "ready")}
-          </span>
-        )}
+        eyebrow={<p>{groupRoomEyebrow}</p>}
+        title={<h2>{groupRoomTitle}</h2>}
+        meta={<span>{groupRoomMeta}</span>}
         trailing={(
           <VButton
             type="button"
@@ -607,7 +609,13 @@ export function ChatGroupCenterSurface({
         ) : (
           <div className={styles.groupEmptyState}>
             <UsersRound size={28} />
-            <p>{lang === "zh" ? "群聊已创建，输入议题后开始第一轮讨论。" : "The group is ready. Enter a topic to start the first round."}</p>
+            <p>
+              {activeGroupRoom
+                ? (lang === "zh" ? "群聊已创建，输入议题后开始第一轮讨论。" : "The group is ready. Enter a topic to start the first round.")
+                : groupRoomRefreshError
+                  ? (lang === "zh" ? "群聊详情读取失败，请点击刷新重试。" : "The group details could not be loaded. Refresh to retry.")
+                  : (lang === "zh" ? "当前没有可用群聊，请先创建或关联群聊。" : "No group room is available. Create or link a room first.")}
+            </p>
           </div>
         )}
       </div>

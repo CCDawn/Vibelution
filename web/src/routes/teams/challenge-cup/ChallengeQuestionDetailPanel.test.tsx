@@ -327,7 +327,7 @@ describe("ChallengeQuestionDetailPanel", () => {
         onClose={() => undefined}
       />,
     );
-    expect(revisionMarkup).toContain("待修订");
+    expect(revisionMarkup).toContain("需修改");
     expect(revisionMarkup).not.toContain(">needs_revision<");
   });
 

@@ -1,5 +1,5 @@
 import type { WorkflowCanvasProjection } from "../../../api/types/researchWorkflow";
-import { VEmptyState, VPanelHeader, VSurface } from "../../../components/vui";
+import { VEmptyState, VPanelHeader, VStateSurface, VSurface } from "../../../components/vui";
 import { buildResearchCriticalPath } from "./researchCriticalPathModel";
 import type { ResearchWorkflowInsights } from "./useResearchWorkflowInsights";
 import styles from "./ResearchCriticalPathPanel.styles";
@@ -17,9 +17,33 @@ export function ResearchCriticalPathPanel(props: {
         props.projection.run.runtimeCurrentNodeIds,
       )
     : [];
+  const header = <VPanelHeader title={isZh ? "当前关键路径" : "Current critical path"} headingLevel={3} />;
+
+  if (props.insights.loading) {
+    return (
+      <VSurface tone="panel" className={styles.root} data-vui="research-critical-path">
+        {header}
+        <VStateSurface
+          tone="loading"
+          title={isZh ? "正在加载关键路径" : "Loading critical path"}
+          skeletonLines={2}
+        />
+      </VSurface>
+    );
+  }
+
+  if (props.insights.error) {
+    return (
+      <VSurface tone="panel" className={styles.root} data-vui="research-critical-path" role="alert">
+        {header}
+        <p>{props.insights.error}</p>
+      </VSurface>
+    );
+  }
+
   return (
     <VSurface tone="panel" className={styles.root} data-vui="research-critical-path">
-      <VPanelHeader title={isZh ? "当前关键路径" : "Current critical path"} headingLevel={3} />
+      {header}
       {path.length ? (
         <ol className={styles.list}>
           {path.map((item, index) => (
@@ -28,7 +52,7 @@ export function ResearchCriticalPathPanel(props: {
             </li>
           ))}
         </ol>
-      ) : <VEmptyState title={isZh ? "暂无已确认路径" : "No confirmed path yet"} />}
+      ) : <VEmptyState title={isZh ? "关键路径尚未形成" : "Critical path not formed yet"} />}
     </VSurface>
   );
 }

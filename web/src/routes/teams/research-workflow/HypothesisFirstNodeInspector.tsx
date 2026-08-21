@@ -139,7 +139,12 @@ export function HypothesisFirstNodeInspector({
     : null;
 
   if (!questionId) {
-    return <VEmptyState title="缺少题目上下文">该卡片需要题目上下文才能继续当前任务。</VEmptyState>;
+    return (
+      <VEmptyState title="缺少题目上下文">
+        <p>该卡片需要题目上下文才能继续当前任务。</p>
+        <p className={styles.description}>下一步：先从题目总览选择一道赛题，再打开假说先行流程。</p>
+      </VEmptyState>
+    );
   }
   if (chain.loading) {
     return <VStateSurface tone="loading" title="加载假说先行任务" fill className={styles.fill} />;
@@ -374,7 +379,11 @@ function InspectorBody(props: {
       </div>
     );
   }
-  return <VEmptyState title="未知的假说先行卡片" />;
+  return (
+    <VEmptyState title="未知的假说先行卡片">
+      <p className={styles.description}>下一步：返回流程画布，选择一个有效的假说先行节点。</p>
+    </VEmptyState>
+  );
 }
 
 function NextReviewRoundButton(props: { teamId: string; questionId: string; meetingRoundId: string }) {

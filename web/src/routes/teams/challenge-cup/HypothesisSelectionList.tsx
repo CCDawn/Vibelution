@@ -128,8 +128,16 @@ export function HypothesisSelectionList({
   const withinBounds =
     selectedIds.length >= HYPOTHESIS_SELECTION_MIN &&
     selectedIds.length <= HYPOTHESIS_SELECTION_MAX;
+  const selectionMinimumHint = selectedIds.length <= HYPOTHESIS_SELECTION_MIN
+    ? (isZh
+      ? `已达到最低选择数（${HYPOTHESIS_SELECTION_MIN} 条）；如需更换，请先勾选另一条，再取消当前选择。`
+      : `The minimum is ${HYPOTHESIS_SELECTION_MIN} selections. To replace one, select another first, then remove the current one.`)
+    : null;
 
   const toggleCandidate = (candidateId: string, next: boolean) => {
+    if (!next && selectedIds.length <= HYPOTHESIS_SELECTION_MIN) {
+      return;
+    }
     setSelectedIds((current) => {
       if (next) {
         if (current.includes(candidateId) || current.length >= HYPOTHESIS_SELECTION_MAX) {
@@ -194,6 +202,11 @@ export function HypothesisSelectionList({
             </VButton>
           ) : null}
         </div>
+      ) : null}
+      {selectionMinimumHint ? (
+        <p className={css.hint} data-testid="hypothesis-selection-minimum-hint" role="status">
+          {selectionMinimumHint}
+        </p>
       ) : null}
       <div className={css.candidateList}>
         {visibleCandidates.length === 0 ? (

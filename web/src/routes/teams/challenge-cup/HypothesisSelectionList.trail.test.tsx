@@ -250,6 +250,41 @@ describe("candidate evidence trail expansion", () => {
     expect(container.textContent).toContain("机制 B");
   });
 
+  it("explains why removing a selection at the minimum is blocked", async () => {
+    const base = candidateContext() as any;
+    mockedContext.mockResolvedValue({
+      ...base,
+      candidates: [
+        { ...base.candidates[0], hypothesis_id: "candidate-a", statement: "候选 A" },
+        { ...base.candidates[0], hypothesis_id: "candidate-b", statement: "候选 B" },
+        { ...base.candidates[0], hypothesis_id: "candidate-c", statement: "候选 C" },
+      ],
+      defaultSelectedCandidateIds: ["candidate-a", "candidate-b"],
+    } as never);
+    mockedTrail.mockResolvedValue({ schemaVersion: 1, teamId: "team-1", questionId: "SCI-001", trails: [] } as never);
+
+    act(() => {
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <HypothesisSelectionList teamId="team-1" questionId="SCI-001" />
+        </QueryClientProvider>,
+      );
+    });
+    await act(async () => {
+      await vi.waitFor(() => expect(container.textContent).toContain("候选 C"));
+    });
+
+    expect(container.querySelector('[data-testid="hypothesis-selection-minimum-hint"]')?.textContent)
+      .toContain("已达到最低选择数");
+    const firstChoice = container.querySelector('input[aria-label="选择假说 candidate-a"]') as HTMLInputElement;
+    expect(firstChoice.disabled).toBe(true);
+    await act(async () => {
+      firstChoice.click();
+    });
+    expect(container.querySelectorAll('article[data-selected="true"]')).toHaveLength(2);
+    expect(container.textContent).toContain("如需更换，请先勾选另一条");
+  });
+
   it("turns a closed review into a read-only final-selection archive", async () => {
     const base = candidateContext() as any;
     mockedContext.mockResolvedValue({

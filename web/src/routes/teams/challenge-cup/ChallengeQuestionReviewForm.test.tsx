@@ -165,7 +165,7 @@ describe("ChallengeQuestionReviewForm", () => {
     await chooseDecision(container, "H1 问题理解 审核结论", "通过");
     await chooseDecision(container, "H2 假设选择 审核结论", "通过");
     await chooseDecision(container, "H3 研究计划 审核结论", "通过");
-    await chooseDecision(container, "H4 外部产出 审核结论", "要求修改");
+    await chooseDecision(container, "H4 外部产出 审核结论", "需修改");
 
     await act(async () => {
       setNativeValue(container.querySelector('input[aria-label="审核人"]') as HTMLInputElement, "Grok");

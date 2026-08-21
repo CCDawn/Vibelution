@@ -104,6 +104,36 @@ describe("ChatGroupCenterSurface hand-test substitutes", () => {
     expect(html).toContain("value=\"下一议题\"");
   });
 
+  it("does not claim a room exists after a settled empty response", () => {
+    const html = renderToStaticMarkup(
+      <ChatGroupCenterSurface
+        {...baseProps({ activeGroupRoom: undefined, activeGroupRoomId: "" })}
+      />,
+    );
+
+    expect(html).toContain("暂无群聊");
+    expect(html).toContain("当前没有可用群聊，请先创建或关联群聊。");
+    expect(html).not.toContain("群聊加载中");
+    expect(html).not.toContain("群聊已创建，输入议题后开始第一轮讨论。");
+  });
+
+  it("distinguishes a room load failure from both loading and an empty room", () => {
+    const html = renderToStaticMarkup(
+      <ChatGroupCenterSurface
+        {...baseProps({
+          activeGroupRoom: undefined,
+          activeGroupRoomId: "room-1",
+          groupRoomRefreshError: "加载失败：网络不可用",
+        })}
+      />,
+    );
+
+    expect(html).toContain("群聊加载失败");
+    expect(html).toContain("群聊详情读取失败，请点击刷新重试。");
+    expect(html).not.toContain("群聊加载中");
+    expect(html).not.toContain("群聊已创建，输入议题后开始第一轮讨论。");
+  });
+
   it("renders the route-owned leading control in the standard group composer", () => {
     const html = renderToStaticMarkup(
       <ChatGroupCenterSurface

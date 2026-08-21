@@ -136,6 +136,21 @@ describe("HypothesisFirstNodeInspector", () => {
     expect(container.textContent).not.toContain("前往候选生成");
   });
 
+  it("gives an actionable next step for an empty inspector context", () => {
+    mockedChain.mockReturnValue(chainData());
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId=""
+        nodeId="hf_generation"
+        onOpenQuestion={() => {}}
+      />,
+    );
+
+    expect(container.textContent).toContain("缺少题目上下文");
+    expect(container.textContent).toContain("下一步：先从题目总览选择一道赛题");
+  });
+
   it("offers an in-place retry when the chain fails to load", async () => {
     const refetchQueries = vi.spyOn(QueryClient.prototype, "refetchQueries").mockResolvedValue([]);
     mockedChain.mockReturnValue(chainData({ error: "network unavailable" }));

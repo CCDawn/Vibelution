@@ -6,7 +6,7 @@ const RECORD_STATUS_LABELS: Record<string, string> = {
   approved: "正式批准",
   pending_review: "待审核",
   review_required: "待审核",
-  needs_revision: "待修订",
+  needs_revision: "需修改",
   rejected: "已驳回",
   blocked: "已阻塞",
   failed: "失败",
@@ -17,7 +17,7 @@ const RECORD_STATUS_LABELS_EN: Record<string, string> = {
   approved: "Approved",
   pending_review: "Pending review",
   review_required: "Pending review",
-  needs_revision: "Needs revision",
+  needs_revision: "Changes requested",
   rejected: "Rejected",
   blocked: "Blocked",
   failed: "Failed",
@@ -110,12 +110,12 @@ const DIMENSION_LABELS_EN: Record<string, string> = {
 export function challengeGateLabel(decision: string, lang: "zh" | "en" = "zh") {
   if (lang === "en") {
     if (decision === "approved") return "Approved";
-    if (decision === "revision_requested") return "Revision requested";
+    if (decision === "revision_requested") return "Changes requested";
     if (decision === "rejected") return "Rejected";
     return "Pending review";
   }
   if (decision === "approved") return "已批准";
-  if (decision === "revision_requested") return "需修订";
+  if (decision === "revision_requested") return "需修改";
   if (decision === "rejected") return "已拒绝";
   return "待审核";
 }

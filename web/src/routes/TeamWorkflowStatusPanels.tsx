@@ -580,7 +580,7 @@ export function TeamWorkflowSourceQualityStatusPanel({
             <span>{lang === "zh" ? "来源" : "sources"} <strong>{status.summary.sourceCandidateCount}</strong></span>
             <span>{lang === "zh" ? "已审查" : "reviewed"} <strong>{status.summary.assessedSourceCandidateCount}</strong></span>
             <span>{lang === "zh" ? "通过" : "approved"} <strong>{status.summary.approvedSourceCandidateCount}</strong></span>
-            <span>{lang === "zh" ? "待修订" : "revision"} <strong>{status.summary.needsRevisionSourceCandidateCount}</strong></span>
+            <span>{lang === "zh" ? "需修改" : "revision"} <strong>{status.summary.needsRevisionSourceCandidateCount}</strong></span>
             <span>{lang === "zh" ? "未审查" : "pending review"} <strong>{status.summary.unassessedSourceCandidateCount}</strong></span>
           </div>
           {status.candidates.length ? (

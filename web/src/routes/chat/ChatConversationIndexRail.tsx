@@ -48,6 +48,7 @@ export type ChatConversationIndexRailProps = {
   availableGroupParticipants: ChatRoomParticipant[];
   activeGroupRoom: ChatRoomDetail | null | undefined;
   groupRoomInitialLoading: boolean;
+  groupRoomLoadError?: string;
   chatRoomModesPending: boolean;
   chatRoomPurposesPending: boolean;
   conversationIndexCollapsed: boolean;
@@ -134,6 +135,7 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
     availableGroupParticipants,
     activeGroupRoom,
     groupRoomInitialLoading,
+    groupRoomLoadError,
     chatRoomModesPending,
     chatRoomPurposesPending,
     conversationIndexCollapsed,
@@ -303,7 +305,12 @@ export function ChatConversationIndexRail(props: ChatConversationIndexRailProps)
                       width="wide"
                     />
                   </div>
-                  <h3 className={routeStyles.sectionTitle}>{activeGroupRoom?.title ?? (lang === "zh" ? "群聊加载中" : "Loading group")}</h3>
+                  <h3 className={routeStyles.sectionTitle}>{activeGroupRoom?.title
+                    ?? (groupRoomInitialLoading
+                      ? (lang === "zh" ? "群聊加载中" : "Loading group")
+                      : groupRoomLoadError
+                        ? (lang === "zh" ? "群聊加载失败" : "Group failed to load")
+                        : (lang === "zh" ? "暂无群聊" : "No group room"))}</h3>
                 </div>
               </div>
               {availableGroupParticipants.length ? (

@@ -28,6 +28,7 @@ export type ChatStatusRailProps = {
   statusRailOverlayOpen: boolean;
   standardGroupRoomActive: boolean;
   groupRoomInitialLoading: boolean;
+  groupRoomLoadError?: string;
   lang: "zh" | "en";
   t: (key: TranslationKey) => string;
   numberFormatter: Intl.NumberFormat;
@@ -72,6 +73,7 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
     statusRailOverlayOpen,
     standardGroupRoomActive,
     groupRoomInitialLoading,
+    groupRoomLoadError,
     lang,
     t,
     numberFormatter,
@@ -110,6 +112,11 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
   } = props;
 
   const sessionBusy = isBusyPhase(sessionStateValue);
+  const groupRoomStatusLabel = activeGroupRoom
+    ? statusLabel(activeGroupRoom.status ?? "ready")
+    : groupRoomLoadError
+      ? (lang === "zh" ? "读取失败" : "Load failed")
+      : (lang === "zh" ? "未关联" : "Not linked");
 
   return (
     <aside
@@ -142,10 +149,15 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
                   width="wide"
                 />
               </div>
-              <h3 className={routeStyles.sectionTitle}>{activeGroupRoom?.title ?? (lang === "zh" ? "群聊加载中" : "Loading group")}</h3>
+              <h3 className={routeStyles.sectionTitle}>{activeGroupRoom?.title
+                ?? (groupRoomInitialLoading
+                  ? (lang === "zh" ? "群聊加载中" : "Loading group")
+                  : groupRoomLoadError
+                    ? (lang === "zh" ? "群聊加载失败" : "Group failed to load")
+                    : (lang === "zh" ? "暂无群聊" : "No group room"))}</h3>
             </div>
-            <span className={`${styles.sessionStatePill} ${styles[`sessionStatePill_${String(activeGroupRoom?.status ?? "ready").trim().toLowerCase()}`]}`}>
-              {statusLabel(activeGroupRoom?.status ?? "ready")}
+            <span className={`${styles.sessionStatePill} ${styles[`sessionStatePill_${String(activeGroupRoom?.status ?? "unlinked").trim().toLowerCase()}`]}`}>
+              {groupRoomStatusLabel}
             </span>
           </div>
           <div className={routeStyles.resourceSplit}>
@@ -155,11 +167,11 @@ export function ChatStatusRail(props: ChatStatusRailProps) {
             </div>
             <div className={routeStyles.resourceMetric}>
               <span>{lang === "zh" ? "调度" : "Mode"}</span>
-              <strong>{activeGroupRoom?.mode ?? "round_robin"}</strong>
+              <strong>{activeGroupRoom?.mode ?? "—"}</strong>
             </div>
             <div className={routeStyles.resourceMetric}>
               <span>{lang === "zh" ? "目的" : "Purpose"}</span>
-              <strong>{activeGroupRoom?.purpose ?? "discussion"}</strong>
+              <strong>{activeGroupRoom?.purpose ?? "—"}</strong>
             </div>
           </div>
         </section>
