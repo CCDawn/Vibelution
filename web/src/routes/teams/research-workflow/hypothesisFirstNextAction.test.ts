@@ -609,6 +609,13 @@ describe("evidence request helpers", () => {
       knowledgeCandidates: [],
       evidenceRequests: [],
     })).toBe("纪要未捕获讨论内容");
+    // Zero requests with captured discussion is the legal convergence close:
+    // the button must stay clickable so the chain can converge via UI.
+    expect(reviewDigestConfirmBlocker({
+      summary: "x",
+      agreements: ["marker consensus"],
+      evidenceRequests: [],
+    })).toBeUndefined();
   });
 });
 

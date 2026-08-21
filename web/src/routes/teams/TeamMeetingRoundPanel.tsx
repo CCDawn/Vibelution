@@ -6,6 +6,7 @@ import {
   fetchMeetingRoundSourceMessages,
 } from "../../api/hypothesisFirst";
 import { queryKeys } from "../../api/queryKeys";
+import { resolvePollingInterval, usePageVisibility } from "../../app/pollingPolicy";
 import {
   VEmptyState,
   VStateSurface,
@@ -29,13 +30,16 @@ export function TeamMeetingRoundPanel({ teamId, questionId }: TeamMeetingRoundPa
   const generationId = contextQuery.data?.generationMeeting?.meetingRoundId ?? "";
   const meetingRoundId = reviewId || generationId;
 
+  const pageVisible = usePageVisibility();
   const roundQuery = useQuery({
     queryKey: queryKeys.teamMeetingRound(teamId, meetingRoundId),
     queryFn: () => fetchMeetingRound(teamId, meetingRoundId),
     enabled: Boolean(teamId && meetingRoundId),
     refetchInterval: (query) => {
       const status = query.state.data?.meetingRound?.status ?? "";
-      return status === "open" || status === "summarizing" ? 5_000 : false;
+      return status === "open" || status === "summarizing"
+        ? resolvePollingInterval(pageVisible, 5_000)
+        : false;
     },
   });
   const messagesQuery = useQuery({
@@ -44,7 +48,9 @@ export function TeamMeetingRoundPanel({ teamId, questionId }: TeamMeetingRoundPa
     enabled: Boolean(teamId && meetingRoundId),
     refetchInterval: () => {
       const status = roundQuery.data?.meetingRound?.status ?? "";
-      return status === "open" || status === "summarizing" ? 5_000 : false;
+      return status === "open" || status === "summarizing"
+        ? resolvePollingInterval(pageVisible, 5_000)
+        : false;
     },
   });
 

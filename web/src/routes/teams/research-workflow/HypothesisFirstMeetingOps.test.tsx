@@ -18,6 +18,7 @@ vi.mock("../../../api/hypothesisFirst", () => ({
 }));
 
 import {
+  approveHypothesisDigest,
   draftMeetingSummary,
   fetchMeetingRound,
   fetchMeetingRoundSourceMessages,
@@ -139,6 +140,36 @@ describe("HypothesisFirstMeetingOps automatic organization", () => {
     expect(mockedDraftMeetingSummary).toHaveBeenCalledTimes(1);
     expect(container.textContent).not.toContain("生成纪要");
     expect([...container.querySelectorAll("button")].some((button) => button.textContent?.includes("整理候选清单"))).toBe(false);
+  });
+
+  it("surfaces approve validation errors when the API keeps the round open", async () => {
+    const mockedApprove = vi.mocked(approveHypothesisDigest);
+    mockedApprove.mockResolvedValueOnce({
+      closed: false,
+      validationErrors: [{ code: "invalid_keywords", message: "证据请求缺少有效搜集关键词" }],
+    } as never);
+    mockedFetchMeetingRound.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      meetingRound: meetingRound("awaiting_approval"),
+    });
+    render({
+      ...AUTO_ACTION,
+      stage: "review_awaiting_approval",
+      command: "approve_review_digest",
+      commandLabel: "确认并结束本轮",
+    });
+    await act(async () => {
+      await vi.waitFor(() => {
+        const button = [...container.querySelectorAll("button")]
+          .find((item) => item.textContent?.includes("确认并结束本轮"));
+        expect(button).toBeTruthy();
+        button?.click();
+      });
+      await vi.waitFor(() => expect(mockedApprove).toHaveBeenCalledTimes(1));
+    });
+    expect(container.textContent).toContain("本轮结论未被确认");
+    expect(container.textContent).toContain("证据请求缺少有效搜集关键词");
   });
 
   it("keeps retries manual after automatic organization fails", async () => {

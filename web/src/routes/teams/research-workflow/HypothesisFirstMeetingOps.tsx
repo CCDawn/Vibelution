@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { fetchChatRoomDetail } from "../../../api/chat";
 import {
@@ -13,6 +13,7 @@ import {
   reopenHypothesisReviewMeeting,
 } from "../../../api/hypothesisFirst";
 import { queryKeys } from "../../../api/queryKeys";
+import { resolvePollingInterval, usePageVisibility } from "../../../app/pollingPolicy";
 import { VButton, VErrorSummary, VStateSurface } from "../../../components/vui";
 import { MeetingRoundDisplay } from "../meetingRoundDisplay";
 import {
@@ -29,12 +30,15 @@ export function useBoundChatRoundsTerminal(
   chatRoomRoundIds: string[] | undefined,
   serverFlag?: boolean,
 ): boolean {
+  const pageVisible = usePageVisibility();
   const roomQuery = useQuery({
     queryKey: queryKeys.chatRoom(linkedChatRoomId || ""),
     queryFn: ({ signal }) => fetchChatRoomDetail(linkedChatRoomId || "", { signal }),
     enabled: Boolean(linkedChatRoomId) && typeof serverFlag !== "boolean",
     staleTime: 4_000,
-    refetchInterval: typeof serverFlag === "boolean" ? false : 4_000,
+    refetchInterval: typeof serverFlag === "boolean"
+      ? false
+      : resolvePollingInterval(pageVisible, 4_000),
   });
   if (typeof serverFlag === "boolean") return serverFlag;
   return boundChatRoundsAreTerminal({
@@ -72,13 +76,16 @@ export function HypothesisFirstMeetingOps(props: {
   onApproved?: () => void;
 }) {
   const queryClient = useQueryClient();
+  const pageVisible = usePageVisibility();
   const roundQuery = useQuery({
     queryKey: queryKeys.teamMeetingRound(props.teamId, props.meetingRoundId),
     queryFn: ({ signal }) => fetchMeetingRound(props.teamId, props.meetingRoundId, { signal }),
     enabled: Boolean(props.teamId && props.meetingRoundId),
     refetchInterval: (query) => {
       const status = query.state.data?.meetingRound?.status ?? "";
-      return status === "open" || status === "summarizing" ? 4_000 : false;
+      return status === "open" || status === "summarizing"
+        ? resolvePollingInterval(pageVisible, 4_000)
+        : false;
     },
   });
   const messagesQuery = useQuery({
@@ -87,7 +94,9 @@ export function HypothesisFirstMeetingOps(props: {
     enabled: Boolean(props.teamId && props.meetingRoundId),
     refetchInterval: () => {
       const status = roundQuery.data?.meetingRound?.status ?? "";
-      return status === "open" || status === "summarizing" ? 4_000 : false;
+      return status === "open" || status === "summarizing"
+        ? resolvePollingInterval(pageVisible, 4_000)
+        : false;
     },
   });
 
@@ -132,6 +141,7 @@ export function HypothesisFirstMeetingOps(props: {
     autoDraftedMeetingIds.current.add(props.meetingRoundId);
     draftMutation.mutate();
   }, [draftMutation.mutate, props.meetingRoundId, shouldAutoDraft]);
+  const [approveBlockedReason, setApproveBlockedReason] = useState<string | null>(null);
   const approveMutation = useMutation({
     mutationFn: () => {
       const hash = roundQuery.data?.meetingRound?.digestDraft?.contentHash || "";
@@ -140,14 +150,31 @@ export function HypothesisFirstMeetingOps(props: {
         expectedDigestContentHash: hash,
       });
     },
-    onSuccess: () => {
+    onSuccess: (payload) => {
+      // The API returns 200 with closed=false + validationErrors when the
+      // digest cannot be confirmed; surface it instead of a silent no-op.
+      if (payload && payload.closed === false) {
+        const errors = (payload.validationErrors ?? []).map((item) => item.message).filter(Boolean);
+        setApproveBlockedReason(
+          errors.length
+            ? errors.join("；")
+            : "本轮结论未通过校验，未被确认；请退回后重新整理",
+        );
+      } else {
+        setApproveBlockedReason(null);
+      }
       invalidate();
-      props.onApproved?.();
+      if (payload && payload.closed !== false) {
+        props.onApproved?.();
+      }
     },
   });
   const rejectMutation = useMutation({
     mutationFn: () => rejectMeetingDigestDraft(props.teamId, props.meetingRoundId, { actor: "operator" }),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      setApproveBlockedReason(null);
+      invalidate();
+    },
   });
   const generationMutation = useMutation({
     mutationFn: () => openHypothesisCandidateGeneration(props.teamId, props.questionId),
@@ -312,6 +339,13 @@ export function HypothesisFirstMeetingOps(props: {
         <VErrorSummary
           label="操作未完成"
           summary={error instanceof Error ? error.message : String(error)}
+        />
+      ) : null}
+      {approveBlockedReason ? (
+        <VErrorSummary
+          label="本轮结论未被确认"
+          summary={approveBlockedReason}
+          data-testid="approve-blocked-reason"
         />
       ) : null}
       <MeetingRoundDisplay

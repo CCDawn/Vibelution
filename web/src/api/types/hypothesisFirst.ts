@@ -464,6 +464,8 @@ export type CloseReviewMeetingResponse = {
   teamId: string;
   status: string;
   closed: boolean;
+  /** Present when closed=false: why the digest could not be confirmed. */
+  validationErrors?: MeetingDigestValidationError[];
   meetingRound: MeetingRoundRecord;
   digest: Record<string, unknown>;
   decisions: DecisionRecordView[];

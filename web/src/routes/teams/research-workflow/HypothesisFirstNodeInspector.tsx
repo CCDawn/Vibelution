@@ -34,6 +34,7 @@ import {
   type HypothesisFirstNextAction,
 } from "./hypothesisFirstNextAction";
 import { invalidateHypothesisFirstQueries, useHypothesisFirstChain } from "./useHypothesisFirstChain";
+import { resolvePollingInterval, usePageVisibility } from "../../../app/pollingPolicy";
 import styles from "./HypothesisFirstNodeInspector.styles";
 
 export type HypothesisFirstNodeInspectorProps = {
@@ -92,11 +93,14 @@ export function HypothesisFirstNodeInspector({
   const generation = pickGeneration(questionMeetings);
   const review = pickReview(questionMeetings, nodeId);
   const activeMeeting = nodeId === HYPOTHESIS_FIRST_GENERATION_NODE_ID ? generation : review;
+  const pageVisible = usePageVisibility();
   const roomQuery = useQuery({
     queryKey: queryKeys.chatRoom(activeMeeting?.linkedChatRoomId || ""),
     queryFn: ({ signal }) => fetchChatRoomDetail(activeMeeting?.linkedChatRoomId || "", { signal }),
     enabled: Boolean(activeMeeting?.linkedChatRoomId) && activeMeeting?.status === "open",
-    refetchInterval: activeMeeting?.status === "open" ? 4_000 : false,
+    refetchInterval: activeMeeting?.status === "open"
+      ? resolvePollingInterval(pageVisible, 4_000)
+      : false,
   });
   const nextAction = resolveHypothesisFirstNextAction({
     run: { runId: runId || (questionId ? "present" : "") },

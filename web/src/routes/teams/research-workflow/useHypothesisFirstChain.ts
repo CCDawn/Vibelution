@@ -18,6 +18,7 @@ import {
   fetchReviewRoundLinks,
 } from "../../../api/hypothesisFirst";
 import { queryKeys } from "../../../api/queryKeys";
+import { resolvePollingInterval, usePageVisibility } from "../../../app/pollingPolicy";
 import type {
   CollectionRequestRecord,
   HypothesisFirstChainState,
@@ -81,12 +82,15 @@ function shouldPollCollections(
 
 export function useHypothesisFirstChain(teamId: string, questionId: string): HypothesisFirstChainData {
   const enabled = Boolean(teamId.trim() && questionId.trim());
+  const pageVisible = usePageVisibility();
   const chainState = useQuery({
     queryKey: queryKeys.hypothesisFirstChainState(teamId, questionId),
     queryFn: ({ signal }) => fetchHypothesisFirstChainState(teamId, questionId, { signal }),
     enabled,
     refetchInterval: (query) =>
-      shouldPollCollections(query.state.data, undefined) ? BOUNDED_POLL_MS : false,
+      shouldPollCollections(query.state.data, undefined)
+        ? resolvePollingInterval(pageVisible, BOUNDED_POLL_MS)
+        : false,
   });
   const selections = useQuery({
     queryKey: queryKeys.hypothesisFirstSelections(teamId, questionId),
@@ -98,14 +102,18 @@ export function useHypothesisFirstChain(teamId: string, questionId: string): Hyp
     queryFn: ({ signal }) => fetchMeetingRounds(teamId, { signal }),
     enabled,
     refetchInterval: (query) =>
-      shouldPollMeetings(query.state.data?.meetings) ? BOUNDED_POLL_MS : false,
+      shouldPollMeetings(query.state.data?.meetings)
+        ? resolvePollingInterval(pageVisible, BOUNDED_POLL_MS)
+        : false,
   });
   const requests = useQuery({
     queryKey: hypothesisFirstChainCollectionRequestsKey(teamId, questionId),
     queryFn: ({ signal }) => fetchCollectionRequests(teamId, questionId, { signal }),
     enabled,
     refetchInterval: (query) =>
-      shouldPollCollections(undefined, query.state.data?.requests) ? BOUNDED_POLL_MS : false,
+      shouldPollCollections(undefined, query.state.data?.requests)
+        ? resolvePollingInterval(pageVisible, BOUNDED_POLL_MS)
+        : false,
   });
   const links = useQuery({
     queryKey: hypothesisFirstChainReviewRoundLinksKey(teamId, questionId),

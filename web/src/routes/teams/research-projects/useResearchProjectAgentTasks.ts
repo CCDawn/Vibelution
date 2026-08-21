@@ -13,6 +13,7 @@ import type {
 } from "../../../api/types";
 import { experimentPlanningStatusQueryKey } from "../experimentLoopModel";
 import { researchStageRoundStatusQueryKey } from "../useResearchWorkflowResources";
+import { resolvePollingInterval, usePageVisibility } from "../../../app/pollingPolicy";
 import { researchProjectQueryKey } from "./ResearchProjectSwitcher";
 
 export type StartResearchProjectAgentTaskOptions = {
@@ -59,13 +60,16 @@ export function useResearchProjectAgentTasks(options: {
     enabled: options.enabled && Boolean(options.teamId),
   });
   const activeProjectId = projectsQuery.data?.activeProjectId || "";
+  const pageVisible = usePageVisibility();
   const statusQuery = useQuery({
     queryKey: researchProjectAgentTaskStatusQueryKey(options.teamId, activeProjectId),
     queryFn: () => getResearchProjectAgentTaskStatus(options.teamId, activeProjectId),
     enabled: options.enabled && Boolean(options.teamId && activeProjectId),
     refetchInterval: (query) => {
       const data = query.state.data as TeamResearchProjectAgentTaskStatusPayload | undefined;
-      return data?.activeTasks.length ? 3_000 : false;
+      return data?.activeTasks.length
+        ? resolvePollingInterval(pageVisible, 3_000, { backgroundMs: 15_000 })
+        : false;
     },
   });
   const lastSettledTaskStampRef = useRef("");

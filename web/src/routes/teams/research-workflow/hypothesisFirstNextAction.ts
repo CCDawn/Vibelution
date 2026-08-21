@@ -240,8 +240,12 @@ export function reviewDigestConfirmBlocker(draft: MeetingDigestDraft | null | un
   if (!digestDraftCapturedDiscussion(draft)) {
     return "纪要未捕获讨论内容";
   }
-  if (!hasValidEvidenceRequestKeywords(draft.evidenceRequests)) {
-    return "本轮结论没有有效搜集关键词，请退回后重新整理";
+  // A round with ZERO evidence requests is the legal convergence close
+  // (backend synthesizes a close_round decision); only requests that exist
+  // but carry no usable keywords must be sent back for rework.
+  const requests = draft.evidenceRequests ?? [];
+  if (requests.length > 0 && !hasValidEvidenceRequestKeywords(requests)) {
+    return "本轮的证据请求都缺少有效搜集关键词，请退回后重新整理";
   }
   return undefined;
 }
