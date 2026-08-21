@@ -11,6 +11,7 @@ import type {
   MeetingDigestDraft,
   MeetingEvidenceRequestDraft,
   MeetingRoundRecord,
+  ReviewRoundLinkRecord,
 } from "../../../api/types/hypothesisFirst";
 import {
   HYPOTHESIS_FIRST_CONVERGENCE_NODE_ID,
@@ -18,6 +19,12 @@ import {
   HYPOTHESIS_FIRST_SELECTION_NODE_ID,
 } from "./hypothesisFirstCanvasRegion";
 import { getNodeAdapter } from "./nodeAdapterModel";
+import {
+  buildHypothesisFirstReviewProjection,
+  currentProjectedReview,
+  type HypothesisFirstReviewProjection,
+  type ProjectedReviewMeeting,
+} from "./hypothesisFirstMeetingProjection";
 
 export type HypothesisFirstStage =
   | "no_run"
@@ -86,6 +93,7 @@ export type HypothesisFirstNextActionInput = {
   questionId?: string | null;
   chainState?: HypothesisFirstChainState | null;
   meetings?: readonly MeetingRoundRecord[] | null;
+  reviewRoundLinks?: readonly ReviewRoundLinkRecord[] | null;
   selection?: HypothesisSelectionRecord | null;
   collectionRequests?: readonly CollectionRequestRecord[] | null;
   boundChatRoundsTerminal?: boolean;
@@ -152,11 +160,6 @@ function latestOf(
 ): MeetingRoundRecord | null {
   const matched = sortMeetings(meetings.filter(predicate));
   return matched[matched.length - 1] ?? null;
-}
-
-function reviewMeetingNodeId(meeting: MeetingRoundRecord | null): string {
-  if (!meeting) return "hf_meeting_1";
-  return `hf_meeting_${meeting.roundIndex ?? 1}`;
 }
 
 function collectionNodeId(request: CollectionRequestRecord | null): string {
@@ -272,26 +275,33 @@ function latestRequest(
 }
 
 function openReviewAfterHandoff(
-  meetings: readonly MeetingRoundRecord[],
+  projection: HypothesisFirstReviewProjection,
   request: CollectionRequestRecord,
-): MeetingRoundRecord | null {
-  const reviews = sortMeetings(meetings.filter(isReviewMeeting));
-  return reviews.find((meeting) => {
-    if (meeting.previousMeetingRoundId && meeting.previousMeetingRoundId === request.meetingRoundId) {
-      return true;
-    }
-    return meeting.status !== "closed" && String(meeting.startedAt ?? "") >= String(request.handedOffAt ?? request.createdAt ?? "");
-  }) ?? reviews[reviews.length - 1] ?? null;
+): ProjectedReviewMeeting | null {
+  const reviews = projection.rounds;
+  return reviews.find((round) =>
+    round.previousMeetingRoundId === request.meetingRoundId
+  ) ?? null;
 }
 
 function meetingStage(
   kind: "generation" | "review",
   meeting: MeetingRoundRecord,
   terminal: boolean,
+  reviewNodeId?: string,
 ): HypothesisFirstNextAction {
   const generation = kind === "generation";
-  const nodeId = generation ? HYPOTHESIS_FIRST_GENERATION_NODE_ID : reviewMeetingNodeId(meeting);
+  const nodeId = generation ? HYPOTHESIS_FIRST_GENERATION_NODE_ID : reviewNodeId;
   const roundId = meeting.meetingRoundId;
+  if (!nodeId) {
+    return action({
+      stage: "blocked",
+      targetNodeId: null,
+      navigationLabel: "等待轮次同步",
+      disabledReason: "当前评审轮次信息待同步，请刷新后重试",
+      meetingRoundId: roundId,
+    });
+  }
   if (meeting.status === "open") {
     if (!terminal) {
       return action({
@@ -391,7 +401,16 @@ export function resolveHypothesisFirstNextAction(
     input.questionId || input.chainState?.questionId,
   );
   const generation = latestOf(meetings, isGenerationMeeting);
-  const review = latestOf(meetings, isReviewMeeting);
+  const currentSelectionId = String(
+    input.selection?.selectionId || input.chainState?.selectionId || "",
+  ).trim();
+  const reviewProjection = buildHypothesisFirstReviewProjection(
+    meetings,
+    input.reviewRoundLinks,
+    currentSelectionId,
+  );
+  const reviewRound = currentProjectedReview(reviewProjection);
+  const review = reviewRound?.meeting ?? null;
   const request = latestRequest(input.collectionRequests);
   const terminal = Boolean(input.boundChatRoundsTerminal);
   const state = input.chainState;
@@ -405,18 +424,36 @@ export function resolveHypothesisFirstNextAction(
     return meetingStage("generation", generation, terminal);
   }
 
-  if (review && review.status !== "closed") {
-    const followUp = Boolean(review.previousMeetingRoundId);
-    if (review.status === "open" && !terminal && followUp) {
+  if (reviewRound && reviewRound.meeting.status !== "closed") {
+    const activeReview = reviewRound.meeting;
+    const followUp = Boolean(reviewRound.previousMeetingRoundId);
+    if (activeReview.status === "open" && !terminal && followUp) {
       return action({
         stage: "next_review",
-        targetNodeId: reviewMeetingNodeId(review),
+        targetNodeId: reviewRound.nodeId,
         navigationLabel: "前往下一轮讨论",
         statusMessage: "下一轮讨论已开启",
-        meetingRoundId: review.meetingRoundId,
+        meetingRoundId: activeReview.meetingRoundId,
       });
     }
-    return meetingStage("review", review, terminal);
+    return meetingStage("review", activeReview, terminal, reviewRound.nodeId);
+  }
+
+  const unresolvedActiveReview = meetings.find(
+    (meeting) => isReviewMeeting(meeting)
+      && meeting.status !== "closed"
+      && reviewProjection.unresolvedMeetingIds.includes(meeting.meetingRoundId),
+  );
+  if (unresolvedActiveReview) {
+    return action({
+      stage: "blocked",
+      targetNodeId: input.selectedNodeId?.startsWith("hf_meeting_")
+        ? input.selectedNodeId
+        : HYPOTHESIS_FIRST_SELECTION_NODE_ID,
+      navigationLabel: "等待轮次同步",
+      disabledReason: "当前评审轮次信息待同步，请刷新后重试",
+      meetingRoundId: unresolvedActiveReview.meetingRoundId,
+    });
   }
 
   if (state?.hypothesisConverged) {
@@ -531,18 +568,18 @@ export function resolveHypothesisFirstNextAction(
   }
 
   if (request && (request.status === "handed_off" || request.handoffRef)) {
-    const next = openReviewAfterHandoff(meetings, request);
-    if (next && next.status !== "closed") {
-      if (next.status === "open" && !terminal) {
+    const next = openReviewAfterHandoff(reviewProjection, request);
+    if (next && next.meeting.status !== "closed") {
+      if (next.meeting.status === "open" && !terminal) {
         return action({
           stage: "next_review",
-          targetNodeId: reviewMeetingNodeId(next),
+          targetNodeId: next.nodeId,
           navigationLabel: "前往下一轮讨论",
           statusMessage: "下一轮讨论已开启",
-          meetingRoundId: next.meetingRoundId,
+          meetingRoundId: next.meeting.meetingRoundId,
         });
       }
-      return meetingStage("review", next, terminal);
+      return meetingStage("review", next.meeting, terminal, next.nodeId);
     }
   }
 

@@ -96,6 +96,21 @@ function scopeMeeting(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function scopeReviewLink(meetingRoundId: string, roundIndex: number) {
+  return {
+    schemaVersion: 1,
+    recordKind: "hypothesis_first_review_round_link",
+    linkId: `link-${meetingRoundId}`,
+    meetingRoundId,
+    previousMeetingRoundId: roundIndex > 1 ? `r${roundIndex - 1}` : "",
+    selectionId: "sel-1",
+    collectionRequestId: "",
+    questionId: "Q-01",
+    roundIndex,
+    createdAt: `2026-08-19T0${roundIndex}:00:01Z`,
+  };
+}
+
 let container: HTMLDivElement;
 let root: Root;
 
@@ -228,11 +243,11 @@ describe("HypothesisFirstNodeInspector", () => {
       } as HypothesisFirstChainData["selection"],
       meetings: [scopeMeeting({
         meetingRoundId: "r5",
-        roundIndex: 5,
         meetingType: "hypothesis_review",
         status: "open",
         boundChatRoundsTerminal: true,
       })],
+      reviewRoundLinks: [scopeReviewLink("r5", 5)],
     }));
     render(
       <HypothesisFirstNodeInspector
@@ -246,6 +261,47 @@ describe("HypothesisFirstNodeInspector", () => {
     expect(container.querySelector('[data-testid="meeting-ops"]')?.textContent).toContain("整理本轮结论");
     expect(container.querySelector('[data-testid="meeting-round-id"]')?.textContent).toBe("r5");
     expect(container.textContent).not.toContain("选择题目开始研究");
+  });
+
+  it("keeps the review inspector on the current selection lineage", () => {
+    mockedChain.mockReturnValue(chainData({
+      chainState: {
+        hypothesisConverged: true,
+        selectionId: "sel-2",
+        candidateCount: 1,
+      } as HypothesisFirstChainData["chainState"],
+      selection: { selectionId: "sel-2", selectedCandidateIds: ["c2"] } as HypothesisFirstChainData["selection"],
+      meetings: [
+        scopeMeeting({
+          meetingRoundId: "old-r9",
+          meetingType: "hypothesis_review",
+          selectionId: "sel-1",
+          roundIndex: 9,
+          status: "open",
+        }),
+        scopeMeeting({
+          meetingRoundId: "current-r2",
+          meetingType: "hypothesis_review",
+          selectionId: "sel-2",
+          roundIndex: 2,
+          status: "open",
+        }),
+      ],
+      reviewRoundLinks: [
+        scopeReviewLink("old-r9", 9),
+        { ...scopeReviewLink("current-r2", 2), selectionId: "sel-2" },
+      ],
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_meeting_2"
+        onOpenQuestion={() => {}}
+      />,
+    );
+
+    expect(container.querySelector('[data-testid="meeting-round-id"]')?.textContent).toBe("current-r2");
   });
 
   it("does not let another question's later meeting mask the current r5 inspector", () => {

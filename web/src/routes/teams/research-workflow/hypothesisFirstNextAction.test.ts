@@ -5,6 +5,7 @@ import type {
   HypothesisFirstChainState,
   HypothesisSelectionRecord,
   MeetingRoundRecord,
+  ReviewRoundLinkRecord,
 } from "../../../api/types/hypothesisFirst";
 import {
   boundChatRoundsAreTerminal,
@@ -104,6 +105,26 @@ function request(overrides: Partial<CollectionRequestRecord> = {}): CollectionRe
     writebackPolicy: {},
     collectionRunId: "run-collect-1",
     createdAt: "2026-08-19T02:00:00Z",
+    ...overrides,
+  };
+}
+
+function reviewLink(
+  meetingRoundId: string,
+  roundIndex: number,
+  overrides: Partial<ReviewRoundLinkRecord> = {},
+): ReviewRoundLinkRecord {
+  return {
+    schemaVersion: 1,
+    recordKind: "hypothesis_first_review_round_link",
+    linkId: `link-${meetingRoundId}`,
+    meetingRoundId,
+    previousMeetingRoundId: roundIndex > 1 ? `r${roundIndex - 1}` : "",
+    selectionId: "sel-1",
+    collectionRequestId: "",
+    questionId: "SCI-002",
+    roundIndex,
+    createdAt: `2026-08-19T0${roundIndex}:00:01Z`,
     ...overrides,
   };
 }
@@ -483,6 +504,59 @@ describe("resolveHypothesisFirstNextAction", () => {
     expect(next.navigationLabel).toBe("查看评审讨论");
     expect(next.command).toBeUndefined();
     expect(next.navigationLabel).not.toBe("选择题目开始研究");
+  });
+
+  it("uses review lineage to target r5 when historical meeting records have no roundIndex", () => {
+    const next = resolveHypothesisFirstNextAction({
+      run: null,
+      workflowActive: true,
+      chainState: chain({ hypothesisConverged: true, selectionId: "sel-1" }),
+      selection: selection(),
+      meetings: [
+        meeting({ meetingRoundId: "r5", roundIndex: undefined, status: "summarizing", startedAt: "2026-08-19T05:00:00Z" }),
+        meeting({ meetingRoundId: "r1", roundIndex: undefined, status: "summarizing", startedAt: "2026-08-19T01:00:00Z" }),
+        meeting({ meetingRoundId: "r3", roundIndex: undefined, status: "closed", startedAt: "2026-08-19T03:00:00Z" }),
+      ],
+      reviewRoundLinks: [reviewLink("r1", 1), reviewLink("r3", 3), reviewLink("r5", 5)],
+    });
+
+    expect(next.stage).toBe("review_summarizing");
+    expect(next.targetNodeId).toBe("hf_meeting_5");
+    expect(next.meetingRoundId).toBe("r5");
+  });
+
+  it("does not let a prior selection's later round mask the current selection", () => {
+    const next = resolveHypothesisFirstNextAction({
+      run: null,
+      workflowActive: true,
+      chainState: chain({ hypothesisConverged: true, selectionId: "sel-2" }),
+      selection: selection({ selectionId: "sel-2" }),
+      meetings: [
+        meeting({
+          meetingRoundId: "old-r9",
+          selectionId: "sel-1",
+          roundIndex: 9,
+          status: "open",
+          startedAt: "2026-08-19T09:00:00Z",
+        }),
+        meeting({
+          meetingRoundId: "current-r2",
+          selectionId: "sel-2",
+          roundIndex: 2,
+          status: "open",
+          startedAt: "2026-08-19T02:00:00Z",
+        }),
+      ],
+      reviewRoundLinks: [
+        reviewLink("old-r9", 9, { selectionId: "sel-1" }),
+        reviewLink("current-r2", 2, { selectionId: "sel-2" }),
+      ],
+      boundChatRoundsTerminal: false,
+    });
+
+    expect(next.stage).toBe("review_running");
+    expect(next.targetNodeId).toBe("hf_meeting_2");
+    expect(next.meetingRoundId).toBe("current-r2");
   });
 
   it("ignores meetings from another question when resolving the active r5 review", () => {

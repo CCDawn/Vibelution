@@ -9,6 +9,7 @@ import {
   fetchHypothesisFirstChainState,
   fetchHypothesisSelections,
   fetchMeetingRounds,
+  fetchReviewRoundLinks,
 } from "../../../api/hypothesisFirst";
 import type { MeetingRoundRecord } from "../../../api/types/hypothesisFirst";
 import { HYPOTHESIS_FIRST_GENERATION_NODE_ID } from "./hypothesisFirstCanvasRegion";
@@ -39,17 +40,19 @@ export async function fetchHypothesisFirstFocusNode(
     return HYPOTHESIS_FIRST_GENERATION_NODE_ID;
   }
   try {
-    const [chainState, meetingList, selectionList, requestList] = await Promise.all([
+    const [chainState, meetingList, selectionList, requestList, reviewLinkList] = await Promise.all([
       fetchHypothesisFirstChainState(trimmedTeam, trimmedQuestion),
       fetchMeetingRounds(trimmedTeam),
       fetchHypothesisSelections(trimmedTeam, trimmedQuestion),
       fetchCollectionRequests(trimmedTeam, trimmedQuestion),
+      fetchReviewRoundLinks(trimmedTeam, trimmedQuestion),
     ]);
     const next = resolveHypothesisFirstNextAction({
       run: { runId: "present" },
       chainState,
       meetings: (meetingList.meetings ?? []).filter((meeting) =>
         meetingMatchesQuestion(meeting, trimmedQuestion)),
+      reviewRoundLinks: reviewLinkList.links,
       selection: latestSelection(selectionList.selections),
       collectionRequests: requestList.requests,
     });

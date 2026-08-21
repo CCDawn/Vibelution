@@ -30,6 +30,10 @@ import {
 } from "./hypothesisFirstCanvasRegion";
 import { HypothesisFirstMeetingOps } from "./HypothesisFirstMeetingOps";
 import {
+  buildHypothesisFirstReviewProjection,
+  currentProjectedReview,
+} from "./hypothesisFirstMeetingProjection";
+import {
   boundChatRoundsAreTerminal,
   meetingsForHypothesisFirstQuestion,
   resolveHypothesisFirstNextAction,
@@ -68,15 +72,16 @@ function pickGeneration(meetings: ReturnType<typeof useHypothesisFirstChain>["me
 function pickReview(
   meetings: ReturnType<typeof useHypothesisFirstChain>["meetings"],
   nodeId: string,
+  reviewRoundLinks: ReturnType<typeof useHypothesisFirstChain>["reviewRoundLinks"],
+  selectionId?: string | null,
 ) {
-  const reviews = meetings.filter((item) => item.meetingType === "hypothesis_review");
+  const projection = buildHypothesisFirstReviewProjection(meetings, reviewRoundLinks, selectionId);
   if (nodeId.startsWith("hf_meeting_")) {
-    const roundIndex = Number(nodeId.slice("hf_meeting_".length));
     // No fallback to the latest round: a future round card must show its
     // "not yet opened" empty state instead of another round's operations.
-    return reviews.find((item) => (item.roundIndex ?? 0) === roundIndex) ?? null;
+    return projection.byNodeId.get(nodeId)?.meeting ?? null;
   }
-  return reviews.at(-1) ?? null;
+  return currentProjectedReview(projection)?.meeting ?? null;
 }
 
 function inspectorNodeOwnsCurrentStep(nodeId: string, targetNodeId: string | null): boolean {
@@ -102,7 +107,8 @@ export function HypothesisFirstNodeInspector({
   const chain = useHypothesisFirstChain(teamId, questionId);
   const questionMeetings = meetingsForHypothesisFirstQuestion(chain.meetings, questionId);
   const generation = pickGeneration(questionMeetings);
-  const review = pickReview(questionMeetings, nodeId);
+  const currentSelectionId = chain.selection?.selectionId || chain.chainState?.selectionId || "";
+  const review = pickReview(questionMeetings, nodeId, chain.reviewRoundLinks, currentSelectionId);
   const activeMeeting = nodeId === HYPOTHESIS_FIRST_GENERATION_NODE_ID ? generation : review;
   const pageVisible = usePageVisibility();
   const roomQuery = useQuery({
@@ -117,6 +123,7 @@ export function HypothesisFirstNodeInspector({
     run: { runId: runId || (questionId ? "present" : "") },
     chainState: chain.chainState,
     meetings: questionMeetings,
+    reviewRoundLinks: chain.reviewRoundLinks,
     questionId,
     selection: chain.selection,
     collectionRequests: chain.collectionRequests,
