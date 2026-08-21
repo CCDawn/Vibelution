@@ -999,7 +999,7 @@ function WorkflowCanvasInner({
       </div>
       {graph.nodes.length > 0 && layout.nodes.length === 0 && !layout.degraded ? (
         <div
-          className="pointer-events-none absolute inset-0 z-10 grid place-items-center bg-[color-mix(in_srgb,var(--vui-surface-workspace)_82%,transparent)] px-6 text-center text-[var(--vui-font-sm)] text-[var(--fg-secondary)]"
+          className="pointer-events-none absolute inset-0 z-10 grid place-items-center bg-[color-mix(in_srgb,var(--vui-surface-workspace)_82%,transparent)] px-6 text-center [font-size:var(--vui-font-sm)] text-[var(--fg-secondary)]"
           data-vui="workflow-layout-pending"
           role="status"
         >
@@ -1008,7 +1008,7 @@ function WorkflowCanvasInner({
       ) : null}
       {graph.nodes.length === 0 ? (
         <div
-          className="pointer-events-none absolute inset-0 z-10 grid place-items-center px-6 text-center text-[var(--vui-font-sm)] text-[var(--fg-secondary)]"
+          className="pointer-events-none absolute inset-0 z-10 grid place-items-center px-6 text-center [font-size:var(--vui-font-sm)] text-[var(--fg-secondary)]"
           data-vui="workflow-empty"
           role="status"
         >

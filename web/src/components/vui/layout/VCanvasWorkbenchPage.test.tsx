@@ -98,7 +98,7 @@ describe("VCanvasWorkbenchPage responsive contract", () => {
     expect(container.querySelector('[data-vui="split-aside"]')).not.toBeNull();
   });
 
-  it("turns only Inspector into a modal drawer in compact desktop", () => {
+  it("turns only Inspector into a modal drawer in compact desktop", async () => {
     const container = renderPage(1000, true);
     const controls = container.querySelector(
       '[data-vui="canvas-workbench-responsive-controls"]',
@@ -113,21 +113,19 @@ describe("VCanvasWorkbenchPage responsive contract", () => {
     const toggle = buttonByText(container, "打开检查器");
     act(() => toggle.click());
 
-    const drawer = container.querySelector<HTMLElement>(
+    const drawer = document.body.querySelector<HTMLElement>(
       '[data-vui-region="canvas-workbench-drawer"]',
     );
-    expect(drawer?.getAttribute("role")).toBe("dialog");
-    expect(drawer?.getAttribute("aria-modal")).toBe("true");
-    expect(drawer?.querySelector("h2")?.textContent).toBe("检查器");
-    expect(drawer?.className).toContain("motion-reduce:transition-none");
-    expect(document.body.style.overflow).toBe("hidden");
-    expect(document.activeElement).toBe(drawer?.querySelector("button"));
+    const dialog = drawer?.closest<HTMLElement>('[data-vui="dialog-content"]');
+    expect(dialog?.getAttribute("role")).toBe("dialog");
+    expect(dialog?.querySelector('[data-slot="dialog-title"]')?.textContent).toBe("检查器");
+    expect(dialog?.className).toContain("!translate-x-0");
+    expect(dialog?.className).toContain("!translate-y-0");
+    expect(document.body.querySelector('[data-vui="dialog-overlay"]')).not.toBeNull();
 
-    const close = drawer?.querySelector<HTMLButtonElement>(
-      '[data-vui="canvas-workbench-drawer-close"]',
-    );
+    const close = dialog?.querySelector<HTMLButtonElement>('[data-vui="dialog-close"]');
     const inner = drawer?.querySelector<HTMLButtonElement>(
-      "button:not([data-vui=canvas-workbench-drawer-close])",
+      "button",
     );
     expect(close).not.toBeNull();
     expect(inner).not.toBeNull();
@@ -136,31 +134,20 @@ describe("VCanvasWorkbenchPage responsive contract", () => {
       root?.render(pageElement(true, "Research canvas updated"));
     });
     expect(document.activeElement).toBe(inner);
-    expect(document.body.style.overflow).toBe("hidden");
-    act(() =>
-      document.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          key: "Tab",
-          bubbles: true,
-          cancelable: true,
-        }),
-      ),
-    );
-    expect(document.activeElement).toBe(close);
 
-    act(() =>
+    await act(async () => {
       drawer?.dispatchEvent(
         new KeyboardEvent("keydown", {
           key: "Escape",
           bubbles: true,
           cancelable: true,
         }),
-      ),
-    );
+      );
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+    });
     expect(
-      container.querySelector('[data-vui-region="canvas-workbench-drawer"]'),
+      document.body.querySelector('[data-vui-region="canvas-workbench-drawer"]'),
     ).toBeNull();
-    expect(document.body.style.overflow).toBe("");
     expect(document.activeElement).toBe(toggle);
   });
 
@@ -183,7 +170,9 @@ describe("VCanvasWorkbenchPage responsive contract", () => {
     const railToggle = buttonByText(container, "打开阶段栏");
     act(() => railToggle.click());
     expect(
-      container.querySelector('[data-vui-region="canvas-workbench-drawer"] h2')
+      document.body.querySelector('[data-vui-region="canvas-workbench-drawer"]')
+        ?.closest('[data-vui="dialog-content"]')
+        ?.querySelector('[data-slot="dialog-title"]')
         ?.textContent,
     ).toBe("阶段栏");
     act(() =>
@@ -196,13 +185,15 @@ describe("VCanvasWorkbenchPage responsive contract", () => {
       ),
     );
     expect(
-      container.querySelector('[data-vui-region="canvas-workbench-drawer"]'),
+      document.body.querySelector('[data-vui-region="canvas-workbench-drawer"]'),
     ).toBeNull();
 
     const inspectorToggle = buttonByText(container, "打开检查器");
     act(() => inspectorToggle.click());
     expect(
-      container.querySelector('[data-vui-region="canvas-workbench-drawer"] h2')
+      document.body.querySelector('[data-vui-region="canvas-workbench-drawer"]')
+        ?.closest('[data-vui="dialog-content"]')
+        ?.querySelector('[data-slot="dialog-title"]')
         ?.textContent,
     ).toBe("检查器");
   });

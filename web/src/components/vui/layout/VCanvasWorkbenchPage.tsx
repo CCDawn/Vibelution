@@ -9,10 +9,10 @@ import {
   useRef,
   useState,
 } from "react";
-import { X } from "lucide-react";
 
 import { cn } from "../lib/cn";
 import { VButton } from "../primitives/VButton";
+import { VDialog } from "../primitives/VDialog";
 import { VRouteHeader } from "./VRouteHeader";
 import { VSplitWorkspace, type VSplitWorkspaceResizeConfig } from "./VSplitWorkspace";
 import { VWorkbenchPage } from "./VWorkbenchPage";
@@ -79,10 +79,6 @@ export type VCanvasWorkbenchPageProps = Omit<ComponentPropsWithoutRef<"section">
 
 const RESPONSIVE_CONTROLS_CLASS =
   "flex min-w-0 shrink-0 flex-wrap items-center gap-1.5 border-b border-[var(--vui-border-subtle)] bg-[var(--vui-surface-panel)] px-2 py-1.5 min-[1280px]:hidden";
-const DRAWER_BACKDROP_CLASS =
-  "fixed inset-0 z-[70] bg-[color-mix(in_srgb,var(--vui-surface-glass)_58%,transparent)] backdrop-blur-[1px] motion-reduce:backdrop-blur-none";
-const DRAWER_PANEL_BASE_CLASS =
-  "fixed inset-y-[var(--shell-topbar-height,0px)] z-[71] flex w-[min(88vw,380px)] min-h-0 flex-col overflow-hidden bg-[var(--vui-surface-rail)] shadow-[var(--vui-shadow-panel)] transition-transform duration-200 ease-out motion-reduce:transition-none";
 
 function viewportMode(): VCanvasWorkbenchResponsiveMode {
   if (typeof window === "undefined") return "wide";
@@ -128,32 +124,6 @@ function useControllableOpen(config: VCanvasWorkbenchDrawerConfig | undefined) {
   return [open, setOpen] as const;
 }
 
-function focusableElements(root: HTMLElement): HTMLElement[] {
-  return Array.from(
-    root.querySelectorAll<HTMLElement>(
-      "button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])",
-    ),
-  );
-}
-
-let bodyScrollLockCount = 0;
-let bodyOverflowBeforeScrollLock = "";
-
-function lockBodyScroll() {
-  if (typeof document === "undefined") return;
-  if (bodyScrollLockCount === 0)
-    bodyOverflowBeforeScrollLock = document.body.style.overflow;
-  bodyScrollLockCount += 1;
-  document.body.style.overflow = "hidden";
-}
-
-function unlockBodyScroll() {
-  if (typeof document === "undefined" || bodyScrollLockCount === 0) return;
-  bodyScrollLockCount -= 1;
-  if (bodyScrollLockCount === 0)
-    document.body.style.overflow = bodyOverflowBeforeScrollLock;
-}
-
 function CanvasWorkbenchDrawer({
   side,
   id,
@@ -171,110 +141,54 @@ function CanvasWorkbenchDrawer({
   returnFocusRef?: RefObject<HTMLElement | null>;
   children: ReactNode;
 }) {
-  const drawerRef = useRef<HTMLDivElement>(null);
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const restoreFocusRef = useRef<HTMLElement | null>(null);
-  const onCloseRef = useRef(onClose);
-  const titleId = `canvas-workbench-drawer-title-${id}`;
-  onCloseRef.current = onClose;
-
+  const shouldRestoreFocusRef = useRef(false);
   useEffect(() => {
-    if (!open || !drawerRef.current) return undefined;
-    restoreFocusRef.current =
-      returnFocusRef?.current ||
-      (document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null);
-    lockBodyScroll();
-    closeButtonRef.current?.focus();
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        onCloseRef.current();
-        return;
-      }
-      if (event.key !== "Tab" || !drawerRef.current) return;
-      const focusable = focusableElements(drawerRef.current);
-      if (focusable.length === 0) {
-        event.preventDefault();
-        drawerRef.current.focus();
-        return;
-      }
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("keydown", onKeyDown);
-      unlockBodyScroll();
-      restoreFocusRef.current?.focus();
-      restoreFocusRef.current = null;
-    };
-  }, [open, returnFocusRef]);
-
-  if (!open) return null;
+    if (open || !shouldRestoreFocusRef.current) return;
+    shouldRestoreFocusRef.current = false;
+    const trigger =
+      returnFocusRef?.current?.isConnected
+        ? returnFocusRef.current
+        : typeof document === "undefined"
+          ? null
+          : Array.from(
+              document.querySelectorAll<HTMLButtonElement>(
+                '[data-vui="canvas-workbench-drawer-toggle"]',
+              ),
+            ).find((button) => button.getAttribute("aria-controls") === id) ?? null;
+    trigger?.focus();
+  }, [id, open, returnFocusRef]);
 
   const panelClassName = cn(
-    DRAWER_PANEL_BASE_CLASS,
+    "!top-[var(--shell-topbar-height,0px)] !bottom-0 !h-auto !max-h-none !w-[min(88vw,380px)] !translate-x-0 !translate-y-0 rounded-none border-y-0 shadow-[var(--vui-shadow-panel)]",
     side === "left"
-      ? "left-0 border-r border-[var(--vui-border-subtle)]"
-      : "right-0 border-l border-[var(--vui-border-subtle)]",
+      ? "!left-0 !right-auto !translate-x-0 border-l-0"
+      : "!left-auto !right-0 !translate-x-0 border-r-0",
   );
 
   return (
-    <>
+    <VDialog
+      contentClassName={panelClassName}
+      onCloseAutoFocus={(event) => {
+        event.preventDefault();
+      }}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) {
+          shouldRestoreFocusRef.current = true;
+          onClose();
+        }
+      }}
+      open={open}
+      size="md"
+      title={title}
+    >
       <div
-        aria-hidden="true"
-        className={DRAWER_BACKDROP_CLASS}
-        data-vui-region="canvas-workbench-drawer-backdrop"
-        onMouseDown={onClose}
-      />
-      <div
-        ref={drawerRef}
-        aria-labelledby={titleId}
-        aria-modal="true"
-        className={panelClassName}
         data-vui-region="canvas-workbench-drawer"
         id={id}
-        role="dialog"
-        tabIndex={-1}
-        onMouseDown={(event) => event.stopPropagation()}
+        className="flex min-h-0 min-w-0 flex-1 flex-col"
       >
-        <header className="flex min-w-0 shrink-0 items-center justify-between gap-2 border-b border-[var(--vui-border-subtle)] px-3 py-2">
-          <h2
-            className="min-w-0 truncate text-[var(--vui-font-sm)] font-semibold text-[var(--fg-primary)]"
-            id={titleId}
-          >
-            {title}
-          </h2>
-          <VButton
-            ref={closeButtonRef}
-            aria-label={`关闭${title}`}
-            data-vui="canvas-workbench-drawer-close"
-            density="compact"
-            isIconOnly
-            title={`关闭${title}`}
-            type="button"
-            variant="secondary"
-            icon={<X size={15} aria-hidden="true" />}
-            onPress={onClose}
-          />
-        </header>
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto [scrollbar-gutter:stable]">
-          {children}
-        </div>
+        {children}
       </div>
-    </>
+    </VDialog>
   );
 }
 
