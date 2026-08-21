@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   fetchJson,
-  getControlToken,
   isFetchAbortError,
   resetControlTokenForTests,
   setFetchJsonFailureReporter,
@@ -193,7 +192,7 @@ describe("fetchJson control token", () => {
     ]);
   });
 
-  it("clears cached control token after a guarded write returns 403", async () => {
+  it("refreshes a rotated control token and retries the guarded request once", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({
         ok: true,
@@ -215,16 +214,78 @@ describe("fetchJson control token", () => {
           header: "X-Vibelution-Control-Token",
           controlToken: "fresh-token",
         }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ ok: true }),
       });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const payload = await fetchJson<{ ok: boolean }>("/api/runtime/shutdown", { method: "POST" });
+
+    expect(payload.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    const retriedRequest = fetchMock.mock.calls[3][1] as RequestInit;
+    expect((retriedRequest.headers as Headers).get("X-Vibelution-Control-Token")).toBe("fresh-token");
+  });
+
+  it("does not refresh or retry a source-policy 403", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          header: "X-Vibelution-Control-Token",
+          controlToken: "current-token",
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        headers: new Headers({ "content-type": "application/json" }),
+        json: async () => ({ detail: "Untrusted web control origin" }),
+        text: async () => "",
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchJson("/api/runtime/shutdown", { method: "POST" })).rejects.toThrow(
+      "Untrusted web control origin",
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops after one rotated-token retry", async () => {
+    const rejected = () => ({
+      ok: false,
+      status: 403,
+      headers: new Headers({ "content-type": "application/json" }),
+      json: async () => ({ detail: "Missing or invalid web control token" }),
+      text: async () => "",
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          header: "X-Vibelution-Control-Token",
+          controlToken: "expired-token",
+        }),
+      })
+      .mockResolvedValueOnce(rejected())
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          header: "X-Vibelution-Control-Token",
+          controlToken: "also-expired-token",
+        }),
+      })
+      .mockResolvedValueOnce(rejected());
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchJson("/api/runtime/shutdown", { method: "POST" })).rejects.toThrow(
       "Missing or invalid web control token",
     );
-    const control = await getControlToken();
 
-    expect(control.token).toBe("fresh-token");
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
   it("reports same-origin API network failures", async () => {
