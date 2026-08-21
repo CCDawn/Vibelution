@@ -50,6 +50,7 @@ const harness = vi.hoisted(() => ({
     collectionRequests: [] as unknown[],
     reviewRoundLinks: [] as unknown[],
     selection: null,
+    loading: false,
     error: null as string | null,
   },
   nodeDetail: { state: { kind: "idle" } as unknown, retry: vi.fn() },
@@ -91,6 +92,29 @@ vi.mock("./useResearchWorkflowCommands", () => ({
 }));
 vi.mock("./hypothesisFirstFocus", () => ({
   fetchHypothesisFirstFocusNode: vi.fn(async () => "hf_generation"),
+}));
+vi.mock("../../../components/vui", async () => {
+  const actual = await vi.importActual<typeof import("../../../components/vui")>("../../../components/vui");
+  return {
+    ...actual,
+    VCanvasWorkbenchPage: (props: {
+      toolbar?: React.ReactNode;
+      canvas?: React.ReactNode;
+      inspector?: React.ReactNode;
+      shellTestId?: string;
+    }) => (
+      <div data-testid={props.shellTestId ?? "research-process-workspace-shell"}>
+        {props.toolbar}
+        {props.canvas}
+        <div data-vui="canvas-workbench-inspector">{props.inspector}</div>
+      </div>
+    ),
+  };
+});
+vi.mock("./ResearchWorkflowCanvasPane", () => ({
+  ResearchWorkflowCanvasPane: (props: { error?: string | null }) => (
+    <div role={props.error ? "alert" : undefined}>{props.error || "加载流程定义"}</div>
+  ),
 }));
 
 import { fetchHypothesisFirstFocusNode } from "./hypothesisFirstFocus";
@@ -212,6 +236,12 @@ describe("ResearchProcessWorkspace", () => {
     harness.runState.error = null;
     harness.commands.error = null;
     harness.formalCommand.commandError = null;
+    harness.chain.chainState = null;
+    harness.chain.meetings = [];
+    harness.chain.collectionRequests = [];
+    harness.chain.reviewRoundLinks = [];
+    harness.chain.selection = null;
+    harness.chain.loading = false;
   });
 
   it("shows the canvas loading state while no projection is available", async () => {
@@ -244,6 +274,21 @@ describe("ResearchProcessWorkspace", () => {
     root = rendered.root;
 
     expect(rendered.container.querySelector('[data-vui="canvas-workbench-inspector"]')).not.toBeNull();
+  });
+
+  it("does not autofocus convergence while the hypothesis chain is still loading", async () => {
+    harness.location.panel = "node";
+    harness.location.questionId = "SCI-096";
+    harness.runState.projection = {
+      definition: { nodes: [], edges: [], stages: [] },
+      run: { runtimeCurrentNodeIds: [], nodeRuns: {} },
+    } as never;
+    harness.chain.chainState = { hypothesisConverged: true } as never;
+    harness.chain.loading = true;
+    const rendered = await renderWorkspace();
+    root = rendered.root;
+
+    expect(harness.location.replaceParams).not.toHaveBeenCalled();
   });
 
   it("opens the inspector when the URL deep-links into a node panel", async () => {

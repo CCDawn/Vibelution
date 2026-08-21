@@ -144,6 +144,22 @@ describe("ResearchWorkflowToolbar", () => {
     expect(running).not.toContain("确认并结束本轮");
   });
 
+  it("keeps the current task action when the hypothesis workflow is active without a formal run id", () => {
+    const active = renderToolbar({
+      ...BASE_PROPS,
+      runId: "",
+      workflowActive: true,
+      navigationLabel: "查看评审讨论",
+      onNavigateCurrent: vi.fn(),
+      onSelectExperiment: vi.fn(),
+      onOpenPanel: vi.fn(),
+    } as React.ComponentProps<typeof ResearchWorkflowToolbar>);
+
+    expect(active).toContain("查看评审讨论");
+    expect(active).toContain('data-vui="research-workflow-phase"');
+    expect(active).not.toContain("选择题目开始研究");
+  });
+
   it("shows the canonical formal stage and runtime node", () => {
     const running = renderToolbar({
       ...BASE_PROPS,

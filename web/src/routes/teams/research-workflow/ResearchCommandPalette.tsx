@@ -16,7 +16,8 @@ import type { HypothesisFirstNextAction } from "./hypothesisFirstNextAction";
 export function ResearchCommandPalette(props: {
   questions: readonly ResearchWorkflowLaunchOption[];
   nextAction: HypothesisFirstNextAction;
-  hasRun: boolean;
+  /** A hypothesis-first chain may be active without a formal run id. */
+  workflowActive: boolean;
   onSelectExperiment: (questionId: string) => void;
   onOpenPanel: (panel: "team" | "progress") => void;
   onNavigateNode: (nodeId: string) => void;
@@ -36,7 +37,7 @@ export function ResearchCommandPalette(props: {
 
   const items = useMemo<VCommandPaletteItem[]>(() => {
     const commands: VCommandPaletteItem[] = [];
-    if (props.hasRun && props.nextAction.targetNodeId) {
+    if (props.workflowActive && props.nextAction.targetNodeId) {
       commands.push({
         id: "cmd:current-task",
         group: "命令",

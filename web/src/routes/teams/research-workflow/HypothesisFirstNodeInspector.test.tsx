@@ -153,6 +153,82 @@ describe("HypothesisFirstNodeInspector", () => {
     expect(container.textContent).not.toContain("前往确认候选");
   });
 
+  it("shows the r5 review operation when no formal run id exists yet", () => {
+    mockedChain.mockReturnValue(chainData({
+      chainState: {
+        hypothesisConverged: true,
+        selectionId: "sel-1",
+        candidateCount: 1,
+      } as HypothesisFirstChainData["chainState"],
+      selection: {
+        selectionId: "sel-1",
+        selectedCandidateIds: ["c1"],
+      } as HypothesisFirstChainData["selection"],
+      meetings: [scopeMeeting({
+        meetingRoundId: "r5",
+        roundIndex: 5,
+        meetingType: "hypothesis_review",
+        status: "open",
+        boundChatRoundsTerminal: true,
+      })],
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_meeting_5"
+        onOpenQuestion={() => {}}
+      />,
+    );
+
+    expect(container.querySelector('[data-testid="meeting-ops"]')?.textContent).toContain("整理本轮结论");
+    expect(container.querySelector('[data-testid="meeting-round-id"]')?.textContent).toBe("r5");
+    expect(container.textContent).not.toContain("选择题目开始研究");
+  });
+
+  it("does not let another question's later meeting mask the current r5 inspector", () => {
+    mockedChain.mockReturnValue(chainData({
+      chainState: {
+        questionId: "Q-01",
+        hypothesisConverged: true,
+        selectionId: "sel-1",
+        candidateCount: 1,
+      } as HypothesisFirstChainData["chainState"],
+      selection: {
+        selectionId: "sel-1",
+        selectedCandidateIds: ["c1"],
+      } as HypothesisFirstChainData["selection"],
+      meetings: [
+        scopeMeeting({
+          question: "Q-01",
+          meetingRoundId: "r5-current",
+          roundIndex: 5,
+          meetingType: "hypothesis_review",
+          status: "open",
+          boundChatRoundsTerminal: true,
+        }),
+        scopeMeeting({
+          question: "Q-02",
+          meetingRoundId: "r6-other-question",
+          roundIndex: 6,
+          meetingType: "hypothesis_review",
+          status: "closed",
+        }),
+      ],
+    }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_meeting_5"
+        onOpenQuestion={() => {}}
+      />,
+    );
+
+    expect(container.querySelector('[data-testid="meeting-ops"]')?.textContent).toContain("整理本轮结论");
+    expect(container.querySelector('[data-testid="meeting-round-id"]')?.textContent).toBe("r5-current");
+  });
+
   it("offers regeneration when the confirmed generation meeting produced no candidates", () => {
     mockedChain.mockReturnValue(chainData({
       meetings: [scopeMeeting({

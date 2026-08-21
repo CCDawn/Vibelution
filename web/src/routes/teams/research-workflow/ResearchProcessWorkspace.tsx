@@ -7,6 +7,7 @@ import { ResearchCommandPalette } from "./ResearchCommandPalette";
 import { fetchHypothesisFirstFocusNode } from "./hypothesisFirstFocus";
 import {
   isHypothesisFirstDiscussionActive,
+  meetingsForHypothesisFirstQuestion,
   resolveHypothesisFirstNextAction,
 } from "./hypothesisFirstNextAction";
 import {
@@ -107,7 +108,9 @@ export function ResearchProcessWorkspace({
       selection: hypothesisFirstChain.selection,
     });
     return composeHypothesisFirstGraph(base, region, {
-      demotePipelineStages: isHypothesisFirstDiscussionActive(hypothesisFirstChain.meetings),
+      demotePipelineStages: isHypothesisFirstDiscussionActive(
+        meetingsForHypothesisFirstQuestion(hypothesisFirstChain.meetings, chainQuestionId),
+      ),
     });
   }, [
     catalog.effectiveBindings,
@@ -118,6 +121,7 @@ export function ResearchProcessWorkspace({
     hypothesisFirstChain.collectionRequests,
     hypothesisFirstChain.reviewRoundLinks,
     hypothesisFirstChain.selection,
+    chainQuestionId,
   ]);
 
   const experimentIdentity = buildExperimentChromeIdentity({
@@ -165,6 +169,17 @@ export function ResearchProcessWorkspace({
   const formalRuntimeCurrentNodeIds = formalRuntimeActive
     ? (runState.projection?.run.runtimeCurrentNodeIds ?? EMPTY_RUNTIME_NODE_IDS)
     : EMPTY_RUNTIME_NODE_IDS;
+  // Hypothesis-first work can be started and progressed from a question deep
+  // link before the formal 16-node workflow run exists. Keep this separate
+  // from location.runId: the latter must remain the real run id.
+  const workflowActive = Boolean(
+    location.runId
+    || hypothesisFirstChain.chainState
+    || hypothesisFirstChain.selection
+    || meetingsForHypothesisFirstQuestion(hypothesisFirstChain.meetings, chainQuestionId).length > 0
+    || hypothesisFirstChain.collectionRequests.length > 0,
+  );
+  const hypothesisFirstReady = !hypothesisFirstChain.loading;
 
   const nextAction = useMemo(() => resolveHypothesisFirstNextAction({
     run: runState.run
@@ -173,6 +188,8 @@ export function ResearchProcessWorkspace({
           runtimeCurrentNodeIds: formalRuntimeCurrentNodeIds,
         }
       : null,
+    workflowActive,
+    questionId: chainQuestionId,
     chainState: hypothesisFirstChain.chainState,
     meetings: hypothesisFirstChain.meetings,
     selection: hypothesisFirstChain.selection,
@@ -184,10 +201,12 @@ export function ResearchProcessWorkspace({
     hypothesisFirstChain.collectionRequests,
     hypothesisFirstChain.meetings,
     hypothesisFirstChain.selection,
+    chainQuestionId,
     location.selectedNodeId,
     formalRuntimeCurrentNodeIds,
     runState.projection?.run.nodeRuns.source_finding?.status,
     runState.run,
+    workflowActive,
   ]);
   const retryCollectionOffer = (runState.commandOffers ?? []).find((offer) => (
     offer.command === "retry_node" && (offer.nodeId === "source_finding" || !offer.nodeId)
@@ -203,7 +222,7 @@ export function ResearchProcessWorkspace({
   useResearchProcessAutofocus({
     panel: location.panel,
     selectedNodeId: location.selectedNodeId,
-    nextTarget: nextAction.targetNodeId,
+    nextTarget: hypothesisFirstReady ? nextAction.targetNodeId : null,
     replaceParams: location.replaceParams,
   });
 
@@ -213,10 +232,15 @@ export function ResearchProcessWorkspace({
     nextTarget: nextAction.targetNodeId,
   });
   const atCurrentTask = Boolean(
-    location.runId
-    && location.panel === "node"
-    && location.selectedNodeId
-    && location.selectedNodeId === nextAction.targetNodeId,
+    workflowActive
+    && (
+      !hypothesisFirstReady
+      || (
+        location.panel === "node"
+        && location.selectedNodeId
+        && location.selectedNodeId === nextAction.targetNodeId
+      )
+    ),
   );
 
   return (
@@ -224,7 +248,7 @@ export function ResearchProcessWorkspace({
       <ResearchCommandPalette
         questions={catalog.questions}
         nextAction={nextAction}
-        hasRun={Boolean(location.runId)}
+        workflowActive={workflowActive && hypothesisFirstReady}
         onSelectExperiment={selectExperiment}
         onOpenPanel={(panel) => location.openPanel(panel)}
         onNavigateNode={(nodeId) => location.replaceParams({ node: nodeId, panel: "node" })}
@@ -245,11 +269,12 @@ export function ResearchProcessWorkspace({
             experimentOptions={experimentOptions}
             panel={location.panel}
             createDisabled={runState.busy}
+            workflowActive={workflowActive}
             onSelectExperiment={selectExperiment}
             onOpenPanel={location.openPanel}
-            navigationLabel={location.runId ? nextAction.navigationLabel : undefined}
+            navigationLabel={workflowActive && hypothesisFirstReady ? nextAction.navigationLabel : undefined}
             chainRound={
-              location.runId && !formalRuntimeActive && hypothesisFirstChain.chainState
+              workflowActive && !formalRuntimeActive && hypothesisFirstChain.chainState
                 ? {
                     current: hypothesisFirstChain.chainState.meetingCount ?? 0,
                     budget: hypothesisFirstChain.chainState.roundBudget ?? 3,
@@ -260,7 +285,7 @@ export function ResearchProcessWorkspace({
             formalRuntimeActive={formalRuntimeActive}
             atCurrentTask={atCurrentTask}
             onNavigateCurrent={
-              nextAction.targetNodeId
+              hypothesisFirstReady && nextAction.targetNodeId
                 ? () => location.replaceParams({ node: nextAction.targetNodeId, panel: "node" })
                 : undefined
             }

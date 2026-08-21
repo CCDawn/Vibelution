@@ -81,6 +81,9 @@ export type HypothesisFirstNextActionInput = {
     runId?: string | null;
     runtimeCurrentNodeIds?: readonly string[] | null;
   } | null;
+  /** A hypothesis-first chain can be active before a formal workflow run exists. */
+  workflowActive?: boolean;
+  questionId?: string | null;
   chainState?: HypothesisFirstChainState | null;
   meetings?: readonly MeetingRoundRecord[] | null;
   selection?: HypothesisSelectionRecord | null;
@@ -105,6 +108,17 @@ const CHAT_TERMINAL = new Set([
   "succeeded",
   "stopped",
 ]);
+
+/** Meeting-round queries are team-scoped; next-action state is question-scoped. */
+export function meetingsForHypothesisFirstQuestion(
+  meetings: readonly MeetingRoundRecord[] | null | undefined,
+  questionId?: string | null,
+): MeetingRoundRecord[] {
+  const list = [...(meetings ?? [])];
+  const needle = String(questionId || "").trim().toUpperCase();
+  if (!needle) return list;
+  return list.filter((meeting) => String(meeting.question || "").trim().toUpperCase() === needle);
+}
 
 function action(partial: HypothesisFirstNextAction): HypothesisFirstNextAction {
   return {
@@ -353,7 +367,7 @@ export function resolveHypothesisFirstNextAction(
   input: HypothesisFirstNextActionInput,
 ): HypothesisFirstNextAction {
   const runId = String(input.run?.runId || "").trim();
-  if (!runId) {
+  if (!runId && !input.workflowActive) {
     return action({
       stage: "no_run",
       targetNodeId: null,
@@ -363,7 +377,10 @@ export function resolveHypothesisFirstNextAction(
     });
   }
 
-  const meetings = input.meetings ?? [];
+  const meetings = meetingsForHypothesisFirstQuestion(
+    input.meetings,
+    input.questionId || input.chainState?.questionId,
+  );
   const generation = latestOf(meetings, isGenerationMeeting);
   const review = latestOf(meetings, isReviewMeeting);
   const request = latestRequest(input.collectionRequests);

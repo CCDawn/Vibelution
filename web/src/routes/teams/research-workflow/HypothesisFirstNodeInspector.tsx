@@ -29,6 +29,7 @@ import {
 import { HypothesisFirstMeetingOps } from "./HypothesisFirstMeetingOps";
 import {
   boundChatRoundsAreTerminal,
+  meetingsForHypothesisFirstQuestion,
   resolveHypothesisFirstNextAction,
   type HypothesisFirstNextAction,
 } from "./hypothesisFirstNextAction";
@@ -87,8 +88,9 @@ export function HypothesisFirstNodeInspector({
   onRetryCollection,
 }: HypothesisFirstNodeInspectorProps) {
   const chain = useHypothesisFirstChain(teamId, questionId);
-  const generation = pickGeneration(chain.meetings);
-  const review = pickReview(chain.meetings, nodeId);
+  const questionMeetings = meetingsForHypothesisFirstQuestion(chain.meetings, questionId);
+  const generation = pickGeneration(questionMeetings);
+  const review = pickReview(questionMeetings, nodeId);
   const activeMeeting = nodeId === HYPOTHESIS_FIRST_GENERATION_NODE_ID ? generation : review;
   const roomQuery = useQuery({
     queryKey: queryKeys.chatRoom(activeMeeting?.linkedChatRoomId || ""),
@@ -99,7 +101,8 @@ export function HypothesisFirstNodeInspector({
   const nextAction = resolveHypothesisFirstNextAction({
     run: { runId: runId || (questionId ? "present" : "") },
     chainState: chain.chainState,
-    meetings: chain.meetings,
+    meetings: questionMeetings,
+    questionId,
     selection: chain.selection,
     collectionRequests: chain.collectionRequests,
     boundChatRoundsTerminal: boundChatRoundsAreTerminal({
@@ -110,7 +113,7 @@ export function HypothesisFirstNodeInspector({
     selectedNodeId: nodeId,
   });
   const nodeOwnsCurrentStep = inspectorNodeOwnsCurrentStep(nodeId, nextAction.targetNodeId);
-  const reviewMeetings = chain.meetings.filter(
+  const reviewMeetings = questionMeetings.filter(
     (meeting) => meeting.meetingType === "hypothesis_review",
   );
   const stageSummary = chain.chainState?.hypothesisConverged && reviewMeetings.length > 0

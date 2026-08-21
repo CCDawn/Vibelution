@@ -71,6 +71,8 @@ export function ResearchWorkflowToolbar(props: {
   panel: ResearchProcessPanel;
   createDisabled: boolean;
   createDisabledReason?: string;
+  /** A hypothesis-first chain may be active without a formal run id. */
+  workflowActive?: boolean;
   navigationLabel?: string;
   runtimeCurrentNodeIds?: readonly string[] | null;
   formalRuntimeActive?: boolean;
@@ -85,6 +87,7 @@ export function ResearchWorkflowToolbar(props: {
 }) {
   const { lang } = useShellI18n();
   const isZh = lang === "zh";
+  const workflowActive = props.workflowActive ?? Boolean(props.runId);
   const selectedQuestionId = props.identity?.questionId || null;
   const emptySwitcherLabel = props.identity
     ? formatExperimentSwitchLabel(props.identity.questionId, props.identity.hypothesisSummary)
@@ -140,7 +143,7 @@ export function ResearchWorkflowToolbar(props: {
             <span className={styles.empty}>{emptySwitcherLabel}</span>
           )}
         </div>
-        {props.runId ? (
+        {workflowActive ? (
           <div className={styles.phase} data-vui="research-workflow-phase">
             {phase.stageZh && phase.currentNodeZh
               ? (isZh ? `${phase.stageZh} · ${phase.currentNodeZh}` : `${phase.stageEn} · ${phase.currentNodeEn}`)
@@ -178,14 +181,14 @@ export function ResearchWorkflowToolbar(props: {
             {isZh ? "新建运行" : "New run"}
           </VButton>
         ) : null}
-        {props.runId && props.atCurrentTask ? (
+        {workflowActive && props.atCurrentTask ? (
           // Position indicator, not a dead button: a disabled ghost labeled
           // 当前任务 reads as broken while adding no action (audit #7).
           <VStatusChip tone="accent" className={styles.primary}>
             {isZh ? "当前任务" : "Current task"}
           </VStatusChip>
         ) : null}
-        {props.runId && !props.atCurrentTask ? (
+        {workflowActive && !props.atCurrentTask ? (
           <VButton
             type="button"
             density="compact"
@@ -196,7 +199,7 @@ export function ResearchWorkflowToolbar(props: {
             {(props.navigationLabel || (isZh ? "前往当前任务" : "Go to current task"))}
           </VButton>
         ) : null}
-        {!props.runId ? (
+        {!workflowActive ? (
           <VButton
             type="button"
             density="compact"

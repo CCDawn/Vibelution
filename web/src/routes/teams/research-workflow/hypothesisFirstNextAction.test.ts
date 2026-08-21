@@ -463,6 +463,59 @@ describe("resolveHypothesisFirstNextAction", () => {
     expect(next.commandLabel).toBe("确认并结束本轮");
   });
 
+  it("keeps an active r5 review ahead of no-run and converged fallbacks", () => {
+    const next = resolveHypothesisFirstNextAction({
+      run: null,
+      workflowActive: true,
+      chainState: chain({ hypothesisConverged: true, selectionId: "sel-1" }),
+      selection: selection(),
+      meetings: [meeting({
+        meetingRoundId: "r5",
+        roundIndex: 5,
+        status: "open",
+      })],
+      boundChatRoundsTerminal: false,
+    });
+
+    expect(next.stage).toBe("review_running");
+    expect(next.targetNodeId).toBe("hf_meeting_5");
+    expect(next.navigationLabel).toBe("查看评审讨论");
+    expect(next.command).toBeUndefined();
+    expect(next.navigationLabel).not.toBe("选择题目开始研究");
+  });
+
+  it("ignores meetings from another question when resolving the active r5 review", () => {
+    const next = resolveHypothesisFirstNextAction({
+      run: null,
+      workflowActive: true,
+      chainState: chain({
+        questionId: "SCI-001",
+        hypothesisConverged: true,
+        selectionId: "sel-1",
+      }),
+      selection: selection({ questionId: "SCI-001" }),
+      meetings: [
+        meeting({
+          question: "SCI-001",
+          meetingRoundId: "r5-current",
+          roundIndex: 5,
+          status: "open",
+        }),
+        meeting({
+          question: "SCI-002",
+          meetingRoundId: "r6-other-question",
+          roundIndex: 6,
+          status: "open",
+        }),
+      ],
+      boundChatRoundsTerminal: false,
+    });
+
+    expect(next.stage).toBe("review_running");
+    expect(next.targetNodeId).toBe("hf_meeting_5");
+    expect(next.meetingRoundId).toBe("r5-current");
+  });
+
   it("follows the canonical runtime node after hypothesis convergence", () => {
     const converged = resolveHypothesisFirstNextAction({
       run: { runId: "run-1", runtimeCurrentNodeIds: ["protocol_design"] },
