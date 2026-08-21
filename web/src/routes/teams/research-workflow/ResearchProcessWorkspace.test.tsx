@@ -106,7 +106,6 @@ vi.mock("../../../components/vui", async () => {
     }) => (
       <div data-testid={props.shellTestId ?? "research-process-workspace-shell"}>
         {props.toolbar}
-        {props.rail ? <div data-vui="canvas-workbench-rail">{props.rail}</div> : null}
         <div data-vui="canvas-workbench-canvas">{props.canvas}</div>
         <div data-vui="canvas-workbench-inspector">{props.inspector}</div>
       </div>
