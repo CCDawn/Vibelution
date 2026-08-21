@@ -12,6 +12,7 @@ const RESEARCH_PROCESS_TOOL_PANELS: ReadonlySet<ResearchProcessPanel> = new Set(
   "agents",
   "team",
   "timeline",
+  "evidence",
   "progress",
   "launch",
 ]);

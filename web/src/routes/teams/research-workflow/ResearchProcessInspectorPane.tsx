@@ -128,8 +128,8 @@ export function ResearchProcessInspectorPane(props: {
     );
   }
   if (scope.panel === "evidence") {
-    return state.run && scope.selectedNodeId === "evidence_relations"
-      ? <EvidenceGraphView runId={state.run.runId} nodeId={scope.selectedNodeId} teamId={scope.teamId} runVersion={state.run.runVersion} />
+    return state.run
+      ? <EvidenceGraphView runId={state.run.runId} nodeId="evidence_relations" teamId={scope.teamId} runVersion={state.run.runVersion} />
       : <ResearchCenteredEmptyState title="证据关系尚不可用" />;
   }
   if (scope.panel === "timeline") {

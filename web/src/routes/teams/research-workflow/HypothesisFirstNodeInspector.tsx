@@ -92,6 +92,8 @@ export function HypothesisFirstNodeInspector({
   onNavigateToNode,
   onRetryCollection,
 }: HypothesisFirstNodeInspectorProps) {
+  const queryClient = useQueryClient();
+  const [retrying, setRetrying] = useState(false);
   const chain = useHypothesisFirstChain(teamId, questionId);
   const questionMeetings = meetingsForHypothesisFirstQuestion(chain.meetings, questionId);
   const generation = pickGeneration(questionMeetings);
@@ -146,6 +148,40 @@ export function HypothesisFirstNodeInspector({
     return (
       <VSurface tone="panel" className={styles.panel} data-vui="hypothesis-first-node-error">
         <div role="alert">假说先行链加载失败：{chain.error}</div>
+        <VButton
+          type="button"
+          variant="secondary"
+          density="compact"
+          isPending={retrying}
+          isDisabled={retrying}
+          onPress={async () => {
+            setRetrying(true);
+            try {
+              await Promise.all([
+                queryClient.refetchQueries({
+                  queryKey: ["teams", teamId, "hypothesis-first"],
+                  type: "active",
+                }),
+                queryClient.refetchQueries({
+                  queryKey: queryKeys.teamMeetingRounds(teamId),
+                  type: "active",
+                }),
+                queryClient.refetchQueries({
+                  queryKey: queryKeys.teamHypothesisRounds(teamId),
+                  type: "active",
+                }),
+                queryClient.refetchQueries({
+                  queryKey: queryKeys.hypothesisFirstSelectionContext(teamId, questionId),
+                  type: "active",
+                }),
+              ]);
+            } finally {
+              setRetrying(false);
+            }
+          }}
+        >
+          重试
+        </VButton>
       </VSurface>
     );
   }

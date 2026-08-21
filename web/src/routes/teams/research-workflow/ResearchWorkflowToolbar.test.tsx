@@ -324,6 +324,21 @@ describe("ResearchWorkflowToolbar", () => {
     expect(empty).toContain("overflow-hidden");
   });
 
+  it("exposes team communication and evidence graph entry points", () => {
+    const markup = renderToolbar({
+      ...BASE_PROPS,
+      runId: "run-5e4fbe6e18f2",
+      panel: "evidence",
+      onOpenTeamCommunication: vi.fn(),
+      onSelectExperiment: vi.fn(),
+      onOpenPanel: vi.fn(),
+    } as React.ComponentProps<typeof ResearchWorkflowToolbar>);
+
+    expect(markup).toContain("团队沟通");
+    expect(markup).toContain("证据图谱");
+    expect(markup).toContain('data-testid="research-open-team-communication"');
+  });
+
   it("keeps a leading team switcher on the same row", () => {
     const markup = renderToolbar({
       ...BASE_PROPS,

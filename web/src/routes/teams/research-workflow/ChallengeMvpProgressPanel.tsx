@@ -346,7 +346,12 @@ export function ChallengeMvpProgressPanel({
           outputTokens={tokenUsageQuery.data.program.outputTokens}
         />
       ) : null}
-      <ChallengeCatalogOverview teamId={teamId} lang={lang} onOpenQuestion={onOpenQuestion} />
+      <ChallengeCatalogOverview
+        teamId={teamId}
+        lang={lang}
+        onOpenQuestion={onOpenQuestion}
+        onRegisterQuestion={() => setRegisterDialogOpen(true)}
+      />
 
       <section className={styles.devControls} aria-label={zh ? "开发态就绪与批次控制" : "DEV readiness and batch control"}>
         <div className={styles.sectionHeader}>

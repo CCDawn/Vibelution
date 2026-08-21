@@ -17,6 +17,7 @@ import {
   VStatusChip,
   type VStatusTone,
 } from "../../../components/vui";
+import { resolvePollingInterval, usePageVisibility } from "../../../app/pollingPolicy";
 import styles from "./ChallengeCatalogOverview.styles";
 import {
   catalogOverviewActionLabel,
@@ -36,6 +37,7 @@ export type ChallengeCatalogOverviewProps = {
   teamId: string;
   lang?: "zh" | "en";
   onOpenQuestion: (questionId: string) => void;
+  onRegisterQuestion?: () => void;
 };
 
 function statusTone(status: CatalogOverviewStatus): VStatusTone {
@@ -225,8 +227,10 @@ export function ChallengeCatalogOverview({
   teamId,
   lang = "zh",
   onOpenQuestion,
+  onRegisterQuestion,
 }: ChallengeCatalogOverviewProps) {
   const zh = lang === "zh";
+  const pageVisible = usePageVisibility();
   const queryClient = useQueryClient();
   const overviewKey = queryKeys.challengeCupCatalogOverview(teamId);
   const overviewQuery = useQuery({
@@ -234,6 +238,14 @@ export function ChallengeCatalogOverview({
     queryFn: () => fetchChallengeCupCatalogOverview(teamId),
     enabled: Boolean(teamId.trim()),
     staleTime: 15_000,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (!isCatalogOverview(data)) return false;
+      const hasActiveWork = data.counts.running > 0 || data.counts.queued > 0;
+      return hasActiveWork
+        ? resolvePollingInterval(pageVisible, 5_000, { backgroundMs: 15_000 })
+        : false;
+    },
   });
   const [filter, setFilter] = useState<CatalogOverviewFilter>("all");
   const [selectedId, setSelectedId] = useState("");
@@ -287,7 +299,19 @@ export function ChallengeCatalogOverview({
     );
   }
   if (overviewQuery.data.questions.length === 0) {
-    return <VEmptyState title={zh ? "暂无题目" : "No questions"} align="start" />;
+    return (
+      <VEmptyState
+        title={zh ? "暂无题目" : "No questions"}
+        align="start"
+        actions={onRegisterQuestion ? (
+          <VButton type="button" variant="primary" onClick={onRegisterQuestion}>
+            {zh ? "登记第一道题" : "Register the first question"}
+          </VButton>
+        ) : undefined}
+      >
+        {zh ? "先登记一道题，题目总览会在这里显示运行状态。" : "Register a question to start tracking its run here."}
+      </VEmptyState>
+    );
   }
 
   return (

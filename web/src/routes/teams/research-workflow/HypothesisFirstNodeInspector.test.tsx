@@ -136,6 +136,31 @@ describe("HypothesisFirstNodeInspector", () => {
     expect(container.textContent).not.toContain("前往候选生成");
   });
 
+  it("offers an in-place retry when the chain fails to load", async () => {
+    const refetchQueries = vi.spyOn(QueryClient.prototype, "refetchQueries").mockResolvedValue([]);
+    mockedChain.mockReturnValue(chainData({ error: "network unavailable" }));
+    render(
+      <HypothesisFirstNodeInspector
+        teamId="team-1"
+        questionId="Q-01"
+        nodeId="hf_generation"
+        runId="run-1"
+        onOpenQuestion={() => {}}
+      />,
+    );
+    expect(container.textContent).toContain("假说先行链加载失败：network unavailable");
+    const retry = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "重试");
+    expect(retry).toBeTruthy();
+    await act(async () => {
+      retry?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(refetchQueries).toHaveBeenCalledWith(expect.objectContaining({
+      queryKey: ["teams", "team-1", "hypothesis-first"],
+      type: "active",
+    }));
+    refetchQueries.mockRestore();
+  });
+
   it("shows meeting ops for a generation round ready to confirm", () => {
     mockedChain.mockReturnValue(chainData({
       meetings: [scopeMeeting({

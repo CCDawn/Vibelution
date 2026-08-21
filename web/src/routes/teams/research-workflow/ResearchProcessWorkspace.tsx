@@ -45,6 +45,8 @@ export type ResearchProcessWorkspaceProps = {
   linkedChatRoomId?: string;
   /** Team switcher rendered in the process toolbar so chrome stays a single row. */
   toolbarLeading?: ReactNode;
+  /** Opens the shared team communication surface without duplicating its mutations. */
+  onOpenTeamCommunication?: () => void;
 };
 
 // Stable identity so the memoized canvas pane does not re-render when no run
@@ -56,6 +58,7 @@ export function ResearchProcessWorkspace({
   teamName = "",
   linkedChatRoomId = "",
   toolbarLeading,
+  onOpenTeamCommunication,
 }: ResearchProcessWorkspaceProps) {
   const location = useResearchWorkflowWorkspace(teamId);
   const runState = useResearchWorkflowRun(teamId, location.runId);
@@ -271,6 +274,7 @@ export function ResearchProcessWorkspace({
         toolbar={(
           <ResearchWorkflowToolbar
             leading={toolbarLeading}
+            onOpenTeamCommunication={onOpenTeamCommunication}
             identity={experimentIdentity}
             runId={location.runId}
             runStatus={runState.run?.status || runState.projection?.run.status || ""}
