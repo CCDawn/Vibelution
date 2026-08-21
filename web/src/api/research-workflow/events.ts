@@ -1,5 +1,5 @@
 import type { WorkflowEventEnvelope } from "../types/research-workflow/events";
-import { fetchJson } from "../client";
+import { fetchJson, fetchWithControl } from "../client";
 
 function requireTeamId(teamId: string): string {
   const normalized = String(teamId || "").trim();
@@ -80,4 +80,89 @@ export function researchWorkflowStreamUrl(options: {
     qs.set("afterSequence", String(options.afterSequence));
   }
   return `/api/research/workflow-runs/${encodeURIComponent(runId)}/stream?${qs.toString()}`;
+}
+
+export type ResearchWorkflowSseFrame = {
+  id: string;
+  event: string;
+  data: string;
+};
+
+export function parseResearchWorkflowSseFrame(rawFrame: string): ResearchWorkflowSseFrame | null {
+  let id = "";
+  let event = "message";
+  const data: string[] = [];
+  for (const line of rawFrame.split(/\r?\n/)) {
+    if (!line || line.startsWith(":")) continue;
+    const separator = line.indexOf(":");
+    const field = separator >= 0 ? line.slice(0, separator) : line;
+    let value = separator >= 0 ? line.slice(separator + 1) : "";
+    if (value.startsWith(" ")) value = value.slice(1);
+    if (field === "id") id = value;
+    else if (field === "event") event = value || "message";
+    else if (field === "data") data.push(value);
+  }
+  if (data.length === 0) return null;
+  return { id, event, data: data.join("\n") };
+}
+
+function splitCompleteSseFrames(buffer: string): { frames: string[]; rest: string } {
+  const frames: string[] = [];
+  let rest = buffer;
+  while (true) {
+    const boundary = /\r?\n\r?\n/.exec(rest);
+    if (!boundary || boundary.index == null) break;
+    frames.push(rest.slice(0, boundary.index));
+    rest = rest.slice(boundary.index + boundary[0].length);
+  }
+  return { frames, rest };
+}
+
+export async function consumeResearchWorkflowEventStream(options: {
+  runId: string;
+  teamId: string;
+  afterSequence: number;
+  lastEventId?: string;
+  signal: AbortSignal;
+  onOpen?: () => void;
+  onFrame: (frame: ResearchWorkflowSseFrame) => void;
+}): Promise<void> {
+  const headers = new Headers({ Accept: "text/event-stream" });
+  const lastEventId = String(options.lastEventId || "").trim();
+  if (lastEventId) headers.set("Last-Event-ID", lastEventId);
+  const response = await fetchWithControl(
+    researchWorkflowStreamUrl({
+      runId: options.runId,
+      teamId: options.teamId,
+      afterSequence: options.afterSequence,
+    }),
+    { headers, signal: options.signal },
+  );
+  if (!response.body) throw new Error("工作流实时连接没有返回事件流");
+  options.onOpen?.();
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parsed = splitCompleteSseFrames(buffer);
+      buffer = parsed.rest;
+      for (const rawFrame of parsed.frames) {
+        const frame = parseResearchWorkflowSseFrame(rawFrame);
+        if (frame) options.onFrame(frame);
+      }
+    }
+    buffer += decoder.decode();
+    const parsed = splitCompleteSseFrames(buffer);
+    for (const rawFrame of parsed.frames) {
+      const frame = parseResearchWorkflowSseFrame(rawFrame);
+      if (frame) options.onFrame(frame);
+    }
+  } finally {
+    reader.releaseLock();
+  }
 }

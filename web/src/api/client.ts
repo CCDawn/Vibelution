@@ -166,7 +166,7 @@ function reportFetchJsonFailure(input: string, report: Omit<FetchJsonFailureRepo
   }
 }
 
-export async function fetchJson<T>(input: string, init?: RequestInit): Promise<T> {
+export async function fetchWithControl(input: string, init?: RequestInit): Promise<Response> {
   const method = String(init?.method ?? "GET").toUpperCase();
   const headers = new Headers(init?.headers ?? {});
   headers.set("Accept", headers.get("Accept") ?? "application/json");
@@ -241,6 +241,11 @@ export async function fetchJson<T>(input: string, init?: RequestInit): Promise<T
     throw new Error(message || `Request failed: ${response.status}`);
   }
 
+  return response;
+}
+
+export async function fetchJson<T>(input: string, init?: RequestInit): Promise<T> {
+  const response = await fetchWithControl(input, init);
   return (await response.json()) as T;
 }
 

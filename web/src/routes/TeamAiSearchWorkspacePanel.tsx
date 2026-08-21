@@ -244,7 +244,7 @@ export function TeamAiSearchWorkspacePanel({
                     );
                   })}
                   {latestRun.cards.length > 6 ? (
-                    <button
+                    <VNativeButton
                       type="button"
                       className={styles.aiSearchRunStorage}
                       onClick={() => setShowAllCards((current) => !current)}
@@ -253,7 +253,7 @@ export function TeamAiSearchWorkspacePanel({
                       {showAllCards
                         ? (lang === "zh" ? "收起卡片" : "Show fewer cards")
                         : (lang === "zh" ? `还有 ${latestRun.cards.length - 6} 张卡片，点击展开全部` : `+${latestRun.cards.length - 6} more cards`)}
-                    </button>
+                    </VNativeButton>
                   ) : null}
                 </div>
                 <div className={styles.aiSearchRunStorage}>

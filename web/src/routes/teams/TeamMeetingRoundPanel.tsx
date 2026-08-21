@@ -8,6 +8,7 @@ import {
 import { queryKeys } from "../../api/queryKeys";
 import { resolvePollingInterval, usePageVisibility } from "../../app/pollingPolicy";
 import {
+  VButton,
   VEmptyState,
   VStateSurface,
 } from "../../components/vui";
@@ -72,9 +73,9 @@ export function TeamMeetingRoundPanel({ teamId, questionId }: TeamMeetingRoundPa
       <section className={css.section} id="hypothesis-first-meeting">
         <VEmptyState title="讨论入口读取失败">
           <p className={css.hint}>请稍后重试。</p>
-          <button type="button" className={css.hint} onClick={() => void contextQuery.refetch()}>
+          <VButton variant="secondary" onClick={() => void contextQuery.refetch()}>
             重试
-          </button>
+          </VButton>
         </VEmptyState>
       </section>
     );
