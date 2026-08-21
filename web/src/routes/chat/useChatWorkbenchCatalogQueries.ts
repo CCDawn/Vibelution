@@ -245,7 +245,7 @@ export function useChatWorkbenchCatalogQueries(input: ChatWorkbenchCatalogQuerie
   });
   const expandedGroupAgentDetailQueries = useQueries({
     queries: expandedGroupAgentSessionIds.map((sessionId) => ({
-      queryKey: queryKeys.session(sessionId || "none"),
+      queryKey: queryKeys.groupExpandedSession(sessionId || "none"),
       queryFn: () => fetchSessionDetailWindow(sessionId, { messageLimit: 20 }),
       enabled: standardGroupRoomActive && Boolean(sessionId),
       // Match group room detail: only poll while SSE is not open (F2).

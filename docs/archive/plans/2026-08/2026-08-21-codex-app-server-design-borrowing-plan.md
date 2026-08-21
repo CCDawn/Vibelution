@@ -6,7 +6,7 @@
 | **Created** | 2026-08-21 |
 | **Decision** | `REFERENCE_ONLY + TASK_GRAPH` |
 | **Priority** | P0：生命周期、安全、恢复、协议治理；P1：上下文、Skills/MCP；P2：多 Agent 设计验证 |
-| **Vibelution baseline** | 本地 `main`：`93aa7e2fb6b8de3b39de6b671e71f05af1511fdc` |
+| **Vibelution baseline** | 本地 `main`：`a941edacf55bd0b3fad1bd936fbd4de06f449ae1` |
 | **Codex source** | `openai/codex` `main` 快照：`536f86e5cc9ec1ff38457d099bf320b9d08eeeba` |
 | **License** | Apache-2.0 |
 | **Close when** | P0/P1 条目分别形成可审查实现或明确拒绝记录；现行架构文档与契约测试已更新；无第二套事实源、Turn 管线或流式连接 |

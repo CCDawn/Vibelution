@@ -458,7 +458,10 @@ export function useChatComposerTurnMutations({
         sessionId: variables.sessionId,
         turnId: variables.turnId,
       });
-      await cancelCongestedQueriesForSessionStop(queryClient, variables.sessionId);
+      // Abort congested in-flight queries without waiting for them: the stop
+      // POST must not queue behind a slow detail/list fetch, and onSuccess
+      // re-syncs the detail afterwards anyway.
+      void cancelCongestedQueriesForSessionStop(queryClient, variables.sessionId);
       return { telemetry };
     },
     onSuccess: (nextDetail, variables, context) => {
