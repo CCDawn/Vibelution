@@ -468,6 +468,11 @@ export function pickSourceCollectionPipelineModule(
   const relations = byId("relations");
   const ingestion = byId("ingestion");
   const graphBlocksIngestion = sourceCollectionGraphBlocksIngestion(graphHealth);
+  // Backend ingestion has no missing-link/edge gate. The frontend gate only
+  // redirects to relations while relations still has work to do; once
+  // relations is done the pipeline must let ingestion run (a failed ingestion
+  // still routes back to relations via the failed-module branch below).
+  const relationsPending = Boolean(relations && relations.state !== "done");
 
   const findingReadyToHandoff = Boolean(
     finding
@@ -490,8 +495,8 @@ export function pickSourceCollectionPipelineModule(
 
   const activeNonFinding = modules.find((module) => module.state === "active" && module.id !== "finding");
   if (activeNonFinding) {
-    if (activeNonFinding.id === "ingestion" && graphBlocksIngestion && relations) {
-      return relations;
+    if (activeNonFinding.id === "ingestion" && graphBlocksIngestion && relationsPending) {
+      return relations || activeNonFinding;
     }
     return activeNonFinding;
   }
@@ -507,19 +512,20 @@ export function pickSourceCollectionPipelineModule(
       if (!stage) {
         continue;
       }
-      if (stage.id === "ingestion" && graphBlocksIngestion) {
+      if (stage.id === "ingestion" && graphBlocksIngestion && relationsPending) {
         return relations || stage;
       }
-      // Relations stays the owner while the graph still fails ingestion preflight,
-      // even if the last relations task wrote "completed" with high missing links.
-      if (stage.id === "relations" && graphBlocksIngestion) {
+      // Relations stays the owner while it is unfinished and the graph still
+      // fails the frontend preflight hint; once relations is done, ingestion
+      // owns the pipeline (the backend has no such gate).
+      if (stage.id === "relations" && graphBlocksIngestion && relationsPending) {
         return relations;
       }
       if (stage.state !== "done") {
         return stage;
       }
     }
-    if (graphBlocksIngestion && relations) {
+    if (graphBlocksIngestion && relationsPending && relations) {
       return relations;
     }
     return ingestion || extraction || finding;

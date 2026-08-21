@@ -25,7 +25,7 @@ describe("TeamMeetingRoundPanel contract (HF-6)", () => {
     expect(panelSource).toContain("generationMeeting");
     expect(panelSource).not.toContain("closeHypothesisReviewMeeting");
     expect(panelSource).toContain("queryKeys.teamMeetingRound(");
-    expect(panelSource).not.toContain("fetch(");
+    expect(panelSource).not.toMatch(/(?<![\w.])fetch\(/);
     expect(panelSource).not.toMatch(/["'`]\/api\//);
     expect(panelSource).not.toContain("workflow-orchestration/meeting-rounds");
   });

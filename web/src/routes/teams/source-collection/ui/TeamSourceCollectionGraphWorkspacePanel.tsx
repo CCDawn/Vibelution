@@ -2,7 +2,7 @@
  * Source-collection ingestion graph workspace body.
  * Wave 8L: extracted from TeamsRoute.tsx for domain componentization.
  */
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import type { TeamWorkflowCandidate, TeamWorkflowCandidateGraphPayload } from "../../../../api/types";
 import { TeamCandidateCard } from "../../../../components/vui/product/team-management";
@@ -79,6 +79,8 @@ export function TeamSourceCollectionGraphWorkspacePanel(props: TeamSourceCollect
     selectSourceCollectionCandidate,
   } = props;
 
+  const [unresolvedNodeNotice, setUnresolvedNodeNotice] = useState<string | null>(null);
+
 
     const graphForSelectedSourceRun =
       selectedSourceCollectionRunEffectiveId && sourceCollectionGraphProjection
@@ -153,6 +155,13 @@ export function TeamSourceCollectionGraphWorkspacePanel(props: TeamSourceCollect
           { key: "evidence-anchor", label: lang === "zh" ? "待补证据" : "missing evidence", value: visibleGraphMissingEvidenceAnchorCount },
         ]}
         hasGraph={Boolean(visibleGraph && visibleGraphLayout && visibleGraphSummary && visibleGraph.nodes.length)}
+        graphNotice={unresolvedNodeNotice ? (
+          <div role="status" data-testid="graph-node-unresolved-notice">
+            {lang === "zh"
+              ? `节点 ${unresolvedNodeNotice} 超出已加载的候选范围，暂无法打开详情；请收窄过滤条件后重试。`
+              : `Node ${unresolvedNodeNotice} is outside the loaded candidate preview; narrow the filter and try again.`}
+          </div>
+        ) : undefined}
         graphView={visibleGraphLayout ? (
           <TeamWorkflowGraphView
             layout={visibleGraphLayout}
@@ -163,8 +172,13 @@ export function TeamSourceCollectionGraphWorkspacePanel(props: TeamSourceCollect
             onFocusCandidate={(candidateId: string) => {
               const candidate = teamWorkflowCandidatesById.get(candidateId);
               if (candidate) {
+                setUnresolvedNodeNotice(null);
                 selectSourceCollectionCandidate(candidate);
+                return;
               }
+              // Beyond the loaded candidate preview — say so instead of a
+              // silent no-op click.
+              setUnresolvedNodeNotice(candidateId);
             }}
           />
         ) : null}

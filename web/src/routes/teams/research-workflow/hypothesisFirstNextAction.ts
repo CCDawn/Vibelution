@@ -107,6 +107,8 @@ const CHAT_TERMINAL = new Set([
   "canceled",
   "succeeded",
   "stopped",
+  // Backend finalizes mixed-success rounds as "partial"; the room is ready.
+  "partial",
 ]);
 
 /** Meeting-round queries are team-scoped; next-action state is question-scoped. */

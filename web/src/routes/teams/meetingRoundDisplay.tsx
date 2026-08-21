@@ -91,6 +91,19 @@ export function DigestDraftView({
       {evidenceRequests.length ? (
         <EvidenceRequestList requests={evidenceRequests} />
       ) : null}
+      {(draft.risks?.length ?? 0) + (draft.blockers?.length ?? 0) > 0 ? (
+        <article className={css.digestCard} data-testid="meeting-digest-risks">
+          <span>风险与阻塞</span>
+          <ul className={css.digestList}>
+            {(draft.risks ?? []).map((item, index) => (
+              <li key={`risk-${index}`}>{`风险：${item}`}</li>
+            ))}
+            {(draft.blockers ?? []).map((item, index) => (
+              <li key={`blocker-${index}`}>{`阻塞：${item}`}</li>
+            ))}
+          </ul>
+        </article>
+      ) : null}
       {draft.validationErrors?.length ? (
         <article className={css.digestCard} data-testid="meeting-digest-validation-errors">
           <span>结果校验（{draft.validationErrors.length}）</span>
