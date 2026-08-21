@@ -68,6 +68,60 @@ def test_inspect_desktop_shell_source_newer_than_asar(tmp_path, monkeypatch):
     assert status["reason"] == "source_newer_than_asar"
 
 
+def test_refresh_lock_reclaims_dead_holder_without_unlink_race(tmp_path, monkeypatch):
+    lock_path = desktop_shell._refresh_lock_path(tmp_path)
+    lock_path.parent.mkdir(parents=True)
+    lock_path.write_text(
+        json.dumps({"pid": 99123, "startedAt": "2026-08-22T00:00:00Z"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(desktop_shell, "_pid_alive", lambda pid: False)
+
+    assert desktop_shell._acquire_desktop_shell_refresh_lock(tmp_path) is True
+    payload = json.loads(lock_path.read_text(encoding="utf-8"))
+    assert payload["pid"] == desktop_shell.os.getpid()
+    assert not list(lock_path.parent.glob(f"{lock_path.name}.stale-*"))
+
+
+def test_refresh_lock_keeps_live_holder_and_foreign_release_is_ignored(tmp_path, monkeypatch):
+    lock_path = desktop_shell._refresh_lock_path(tmp_path)
+    lock_path.parent.mkdir(parents=True)
+    lock_path.write_text(
+        json.dumps({"pid": 99124, "startedAt": "2026-01-01T00:00:00Z"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(desktop_shell, "_pid_alive", lambda pid: True)
+
+    assert desktop_shell._acquire_desktop_shell_refresh_lock(tmp_path) is False
+    desktop_shell._release_desktop_shell_refresh_lock(tmp_path)
+    assert lock_path.is_file()
+
+
+def test_refresh_lock_does_not_quarantine_fresh_lock_after_stale_observation(tmp_path, monkeypatch):
+    lock_path = desktop_shell._refresh_lock_path(tmp_path)
+    lock_path.parent.mkdir(parents=True)
+    lock_path.write_text(
+        json.dumps({"pid": 99125, "startedAt": "2026-01-01T00:00:00Z"}),
+        encoding="utf-8",
+    )
+    calls = 0
+
+    def stale_check_with_racing_fresh_lock(path):
+        nonlocal calls
+        calls += 1
+        path.write_text(
+            json.dumps({"pid": 99126, "startedAt": "2026-08-22T00:00:00Z"}),
+            encoding="utf-8",
+        )
+        return True
+
+    monkeypatch.setattr(desktop_shell, "_refresh_lock_is_stale", stale_check_with_racing_fresh_lock)
+
+    assert desktop_shell._quarantine_stale_refresh_lock(lock_path) is False
+    assert calls == 1
+    assert json.loads(lock_path.read_text(encoding="utf-8"))["pid"] == 99126
+
+
 def test_schedule_desktop_shell_refresh_spawns_pythonw_helper(tmp_path, monkeypatch):
     captured: dict[str, object] = {}
 

@@ -13,10 +13,14 @@ import shutil
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
+from core.infrastructure.atomic_io import atomic_write_json
 from core.infrastructure.no_console_git import run_git
 from core.runtime_manager.constants import PROJECT_ROOT
 from scripts.windowless_subprocess import no_window_subprocess_kwargs
@@ -37,6 +41,10 @@ UNPACKAGED_ELECTRON_BIN_RELATIVE = Path("desktop") / "electron" / "node_modules"
 REFRESH_FAILURE_RELATIVE = Path(".runtime") / "launcher" / "desktop-shell-refresh-failure.json"
 REFRESH_LOCK_RELATIVE = Path(".runtime") / "launcher" / "desktop-shell-refresh.lock"
 REFRESH_COOLDOWN_SECONDS = 900.0
+# A lock without a trustworthy live holder must not block refresh forever after
+# a helper crash. Live holders remain authoritative even when a rebuild is
+# longer than this grace period.
+REFRESH_LOCK_MALFORMED_GRACE_SECONDS = 30.0
 
 CREATE_NEW_PROCESS_GROUP = int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200))
 CREATE_BREAKAWAY_FROM_JOB = 0x01000000
@@ -138,24 +146,205 @@ def recent_desktop_shell_refresh_failure(
 def _acquire_desktop_shell_refresh_lock(project_root: Path | str) -> bool:
     path = _refresh_lock_path(project_root)
     path.parent.mkdir(parents=True, exist_ok=True)
+    for _attempt in range(3):
+        with _refresh_lock_breaker(path) as acquired:
+            if not acquired:
+                return False
+            try:
+                started_at = datetime.now(timezone.utc).isoformat()
+                with path.open("x", encoding="utf-8") as handle:
+                    handle.write(json.dumps({"pid": os.getpid(), "startedAt": started_at}))
+                return True
+            except FileExistsError:
+                # Do not unlink after a separate stale check. Moving the observed
+                # lock to a unique quarantine name is one filesystem operation,
+                # while this process keeps the breaker for the whole check.
+                if not _quarantine_stale_refresh_lock_locked(path):
+                    return False
+            except OSError:
+                return False
+    return False
+
+
+def _assign_desktop_shell_refresh_helper(project_root: Path | str, helper_pid: int) -> None:
+    """Transfer refresh-lock ownership from the scheduler to its helper."""
+
+    path = _refresh_lock_path(project_root)
+    with _refresh_lock_breaker(path) as acquired:
+        if not acquired:
+            raise OSError(f"desktop shell refresh lock is busy: {path}")
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            raise OSError(f"desktop shell refresh lock could not be read: {path}") from exc
+        if not isinstance(payload, dict):
+            raise OSError(f"desktop shell refresh lock is invalid: {path}")
+        started_at = str(payload.get("startedAt") or "").strip() or datetime.now(timezone.utc).isoformat()
+        atomic_write_json(path, {"pid": int(helper_pid), "startedAt": started_at})
+
+
+def _refresh_lock_is_stale(path: Path) -> bool:
+    """Return whether a refresh lock can be reclaimed after helper loss."""
+
+    payload: dict[str, Any] | None = None
     try:
-        with path.open("x", encoding="utf-8") as handle:
-            handle.write(json.dumps({"pid": os.getpid(), "startedAt": datetime.now(timezone.utc).isoformat()}))
-        return True
-    except FileExistsError:
-        return False
+        parsed = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(parsed, dict):
+            payload = parsed
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        payload = None
+
+    pid = 0
+    started_at: datetime | None = None
+    if payload is not None:
+        try:
+            pid = int(payload.get("pid") or 0)
+        except (TypeError, ValueError):
+            pid = 0
+        raw_started_at = str(payload.get("startedAt") or "").strip()
+        if raw_started_at:
+            try:
+                started_at = datetime.fromisoformat(raw_started_at.replace("Z", "+00:00"))
+                if started_at.tzinfo is None:
+                    started_at = started_at.replace(tzinfo=timezone.utc)
+                else:
+                    started_at = started_at.astimezone(timezone.utc)
+            except ValueError:
+                started_at = None
+
+    if pid > 0:
+        # A dead holder is definitive even when its lock file is young. A live
+        # PID remains authoritative: a long rebuild is not stale merely due to
+        # age.
+        return not _pid_alive(pid)
+
+    try:
+        age_anchor = started_at.timestamp() if started_at is not None else path.stat().st_mtime
+        age_seconds = datetime.now(timezone.utc).timestamp() - age_anchor
     except OSError:
         return False
+    return age_seconds >= REFRESH_LOCK_MALFORMED_GRACE_SECONDS
+
+
+def _refresh_lock_snapshot(path: Path) -> tuple[int, int, int, bytes] | None:
+    try:
+        stat = path.stat()
+        return (int(stat.st_ino), int(stat.st_size), int(stat.st_mtime_ns), path.read_bytes())
+    except OSError:
+        return None
+
+
+@contextmanager
+def _refresh_lock_breaker(path: Path) -> Iterator[bool]:
+    """Serialize stale-lock inspection and quarantine across refresh claimants.
+
+    The breaker file is persistent, but its OS-level advisory lock is released
+    automatically when a process exits. That avoids introducing a second stale
+    PID lock while still preventing a check-then-replace race between helpers.
+    """
+
+    breaker_path = path.with_name(f"{path.name}.break")
+    breaker_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = breaker_path.open("a+b")
+    acquired = False
+    try:
+        handle.seek(0, os.SEEK_END)
+        if handle.tell() == 0:
+            handle.write(b"0")
+            handle.flush()
+        handle.seek(0)
+        if os.name == "nt":
+            import msvcrt
+
+            try:
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            except OSError:
+                yield False
+                return
+        else:
+            import fcntl
+
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                yield False
+                return
+        acquired = True
+        yield True
+    finally:
+        if acquired:
+            try:
+                handle.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+        handle.close()
+
+
+def _quarantine_stale_refresh_lock_locked(path: Path) -> bool:
+    """Atomically move a stale lock aside while the breaker is already held."""
+
+    if not path.exists():
+        return True
+    before = _refresh_lock_snapshot(path)
+    if before is None or not _refresh_lock_is_stale(path):
+        return False
+    # A claimant can replace the lock while a stale check is running. Do
+    # not move it unless the exact observed bytes and metadata still match.
+    if _refresh_lock_snapshot(path) != before:
+        return False
+    quarantine = path.with_name(f"{path.name}.stale-{os.getpid()}-{uuid4().hex}")
+    try:
+        os.replace(path, quarantine)
+    except FileNotFoundError:
+        # Another claimant won the race; retry the exclusive create.
+        return True
+    except OSError:
+        return False
+    try:
+        quarantine.unlink()
+    except OSError:
+        # The original lock was moved out of the way. Leaving uniquely named
+        # residue is safer than deleting an unknown target.
+        pass
+    return True
+
+
+def _quarantine_stale_refresh_lock(path: Path) -> bool:
+    """Atomically move a stale lock aside, then let acquisition retry."""
+
+    with _refresh_lock_breaker(path) as acquired:
+        if not acquired:
+            return False
+        return _quarantine_stale_refresh_lock_locked(path)
 
 
 def _release_desktop_shell_refresh_lock(project_root: Path | str) -> None:
     path = _refresh_lock_path(project_root)
-    if not path.is_file():
-        return
-    try:
-        path.unlink()
-    except OSError:
-        return
+    with _refresh_lock_breaker(path) as acquired:
+        if not acquired or not path.is_file():
+            return
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            holder_pid = int(payload.get("pid") or 0) if isinstance(payload, dict) else 0
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            holder_pid = 0
+        # A parent creates the lock and then hands ownership to the detached
+        # helper. Never let late cleanup from an older process remove a newer
+        # helper's lock.
+        if holder_pid > 0 and holder_pid != os.getpid():
+            return
+        try:
+            path.unlink()
+        except OSError:
+            return
 
 
 def inspect_desktop_shell(project_root: Path | str = PROJECT_ROOT) -> dict[str, Any]:
@@ -268,10 +457,17 @@ def schedule_desktop_shell_refresh(
     except OSError as exc:
         _release_desktop_shell_refresh_lock(root)
         raise RuntimeError(f"desktop shell refresh helper did not start: {exc}") from exc
+    helper_pid = int(getattr(process, "pid", 0) or 0)
+    if helper_pid > 0:
+        try:
+            _assign_desktop_shell_refresh_helper(root, helper_pid)
+        except OSError as exc:
+            _release_desktop_shell_refresh_lock(root)
+            raise RuntimeError(f"desktop shell refresh lock could not be transferred: {exc}") from exc
     return {
         "schemaVersion": 1,
         "scheduled": True,
-        "helperPid": int(getattr(process, "pid", 0) or 0),
+        "helperPid": helper_pid,
         "waitPid": int(wait_pid),
         "thenLifecycle": lifecycle,
     }
