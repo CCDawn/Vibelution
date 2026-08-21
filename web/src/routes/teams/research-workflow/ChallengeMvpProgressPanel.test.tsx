@@ -703,15 +703,16 @@ describe("ChallengeMvpProgressPanel", () => {
 
     setDevControls(stateDev1Done());
     markup = renderToStaticMarkup(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />);
-    expect(markup).toContain("首次运行 dev-5（maxItems=2）");
+    expect(markup).toContain("开始处理首批题目");
     expect(markup).toContain("成功 1/1");
 
     setDevControls(stateDev5Paused());
     markup = renderToStaticMarkup(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />);
-    expect(markup).toContain("恢复 dev-5（maxItems=null）");
+    expect(markup).toContain("继续处理剩余题目");
     expect(markup).toContain("暂停可恢复");
     expect(markup).toContain("成功 2/5");
-    expect(markup).toContain("canResume=true");
+    expect(markup).toContain("可继续");
+    expect(markup).not.toContain("canResume=true");
     expect(markup).not.toContain("首次运行 dev-5");
 
     setDevControls(stateDev5Done());
@@ -736,7 +737,7 @@ describe("ChallengeMvpProgressPanel", () => {
       root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />);
     });
     const firstButton = Array.from(container.querySelectorAll("button"))
-      .find((button) => button.textContent?.includes("首次运行 dev-5"));
+      .find((button) => button.textContent?.includes("开始处理首批题目"));
     expect(firstButton).toBeTruthy();
     await act(async () => {
       firstButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -749,7 +750,7 @@ describe("ChallengeMvpProgressPanel", () => {
       root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />);
     });
     const resumeButton = Array.from(container.querySelectorAll("button"))
-      .find((button) => button.textContent?.includes("恢复 dev-5"));
+      .find((button) => button.textContent?.includes("继续处理剩余题目"));
     expect(resumeButton).toBeTruthy();
     await act(async () => {
       resumeButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -887,7 +888,7 @@ describe("ChallengeMvpProgressPanel", () => {
     await act(async () => {
       root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />);
     });
-    let dev5First = findButton(container, "首次运行 dev-5");
+    let dev5First = findButton(container, "开始处理首批题目");
     expect(dev5First).toBeTruthy();
     await act(async () => {
       dev5First!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -898,7 +899,7 @@ describe("ChallengeMvpProgressPanel", () => {
     await act(async () => {
       root.render(<ChallengeMvpProgressPanel teamId="team-1" onOpenQuestion={vi.fn()} defaultDevControlsOpen />);
     });
-    let resumeButton = findButton(container, "恢复 dev-5");
+    let resumeButton = findButton(container, "继续处理剩余题目");
     expect(resumeButton).toBeTruthy();
     await act(async () => {
       resumeButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
