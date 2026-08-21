@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   fetchJson,
+  fetchWithControl,
   isFetchAbortError,
   resetControlTokenForTests,
   setFetchJsonFailureReporter,
@@ -63,6 +64,26 @@ describe("fetchJson control token", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[0][0]).toBe("/api/control-token");
     expect(fetchMock.mock.calls[1][0]).toBe("/api/health");
+  });
+
+  it("returns an unread guarded response for streaming adapters", async () => {
+    const streamResponse = new Response("event: ready\ndata: {}\n\n", {
+      headers: { "Content-Type": "text/event-stream" },
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ header: "X-Vibelution-Control-Token", controlToken: "stream-token" }),
+      })
+      .mockResolvedValueOnce(streamResponse);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await fetchWithControl("/api/research/workflow-runs/run-a/stream");
+
+    expect(response).toBe(streamResponse);
+    expect(response.bodyUsed).toBe(false);
+    const requestInit = fetchMock.mock.calls[1][1] as RequestInit;
+    expect(new Headers(requestInit.headers).get("X-Vibelution-Control-Token")).toBe("stream-token");
   });
 
   it("does not attach the local control token to external writes", async () => {

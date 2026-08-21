@@ -14,7 +14,7 @@ from collections.abc import Iterator
 from typing import Any, Protocol
 
 from .event_replay_service import WorkflowEventReplayService, envelope_api_dict
-from .query_service import TeamScopeMismatchError, WorkflowQueryError
+from .query_service import WorkflowQueryError
 
 
 class StreamNotifier(Protocol):
@@ -173,11 +173,12 @@ class WorkflowEventStreamService:
             after_sequence=cursor,
         )
         for event in page.events:
+            payload = envelope_api_dict(event)
             yield encode_sse_event(
                 run_id=run_id,
                 sequence=event.sequence,
-                event_type=event.event_type.value,
-                payload=envelope_api_dict(event),
+                event_type=str(payload["type"]),
+                payload=payload,
             )
 
     def iter_sse(
@@ -204,11 +205,12 @@ class WorkflowEventStreamService:
             )
             emitted = False
             for event in page.events:
+                payload = envelope_api_dict(event)
                 yield encode_sse_event(
                     run_id=run_id,
                     sequence=event.sequence,
-                    event_type=event.event_type.value,
-                    payload=envelope_api_dict(event),
+                    event_type=str(payload["type"]),
+                    payload=payload,
                 )
                 cursor = event.sequence
                 emitted = True
