@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from core.launcher import app as launcher_app
 from core.launcher import branch_instance_cleanup as cleanup
 from core.launcher import service as launcher_service
+from core.runtime_manager import instances_registry as registry
 
 
 def _git(root: Path, *args: str) -> str:
@@ -271,6 +272,62 @@ def test_cleanup_reports_registry_drop_failure_and_releases_cleanup_fence(tmp_pa
     assert result["cleaned"] == []
     assert result["failed"][0]["code"] == "instance_cleanup_failed"
     assert released == [("worktree:task", "token-1")]
+
+
+def test_cleanup_fence_blocks_claim_start_until_real_registry_release(tmp_path, monkeypatch):
+    registry_path = tmp_path / "Vibelution" / "instances.json"
+    monkeypatch.setattr(registry, "instances_registry_path", lambda: registry_path)
+    monkeypatch.setattr(registry, "_port_is_free", lambda _port, host=None: True)
+    instance_id = "worktree:task"
+
+    registry.mutate_registry(
+        lambda payload: registry.apply_upsert(
+            payload,
+            instance_id,
+            {
+                "projectRoot": str(tmp_path / "repo"),
+                "status": "steady",
+                "phase": "steady",
+                "generation": 4,
+            },
+        )
+    )
+
+    claimed, token = cleanup._claim_cleanup_instance(instance_id)
+
+    assert claimed is True
+    assert token.startswith("cleanup-")
+    fenced = registry.load_registry()["instances"][instance_id]
+    assert fenced["cleanupInProgress"] is True
+    assert fenced["cleanupToken"] == token
+
+    def claim_start(payload):
+        return registry.apply_claim_start(
+            payload,
+            instance_id=instance_id,
+            project_root=str(tmp_path / "repo"),
+            branch="codex/task",
+            command_id="cmd-start",
+            deadline_at="2026-08-22T00:00:00Z",
+            owner_pid=1234,
+            preferred_backend=19000,
+            preferred_control=19001,
+        )
+
+    with pytest.raises(registry.InstanceBusyError) as busy:
+        registry.mutate_registry(claim_start)
+    assert busy.value.code == "instance_busy"
+    assert busy.value.status == "cleanup"
+
+    cleanup._release_cleanup_instance(instance_id, token)
+    released = registry.load_registry()["instances"][instance_id]
+    assert "cleanupInProgress" not in released
+    assert "cleanupToken" not in released
+
+    started = registry.mutate_registry(claim_start)
+    assert started["status"] == "starting"
+    assert started["phase"] == "starting"
+    assert started["generation"] == 5
 
 
 def test_drop_registry_instance_uses_locked_mutation(monkeypatch):
