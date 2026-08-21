@@ -57,6 +57,7 @@ export async function waitForBackendHealthy(input: {
   timeoutMs?: number;
   pollIntervalMs?: number;
   signal?: AbortSignal;
+  childError?: () => Error | null;
   childAlive?: () => boolean;
   now?: () => number;
   delay?: (ms: number) => Promise<void>;
@@ -71,6 +72,10 @@ export async function waitForBackendHealthy(input: {
   let lastError = "";
   while (now() - startedAt < timeoutMs) {
     input.signal?.throwIfAborted();
+    const childError = input.childError?.();
+    if (childError !== null && childError !== undefined) {
+      throw childError;
+    }
     if (input.childAlive && !input.childAlive()) {
       throw new Error(`workbench backend exited before it became healthy at ${workbenchHealthUrl(input.port, input.host)}`);
     }

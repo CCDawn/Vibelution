@@ -71,4 +71,11 @@ describe("Electron desktop window icons", () => {
   it("defaults the desktop shell chrome to the light workbench theme", () => {
     expect(mainSource).toContain('nativeTheme.themeSource = "light"');
   });
+
+  it("renders the conversation badge as a native PNG overlay", () => {
+    expect(mainSource).toContain("function createConversationBadgePng(count: number): Buffer");
+    expect(mainSource).toContain("nativeImage.createFromBuffer(createConversationBadgePng(count))");
+    expect(mainSource).toContain("deflateSync(scanlines)");
+    expect(mainSource).not.toContain("nativeImage.createFromDataURL");
+  });
 });

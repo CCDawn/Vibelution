@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, statSync, watch, writeFileSync, type FSWatcher } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
+import { deflateSync } from "node:zlib";
 import {
   pinSharedDesktopShellUserData,
   resolveSecondInstanceIntent,
@@ -536,13 +537,105 @@ launcherStateStore.subscribe((snapshot) => {
   windowProvider?.sendToLauncher(IPC_CHANNELS.launcherStateChanged, snapshot);
 });
 
-function createConversationBadgeIcon(count: number) {
+const CONVERSATION_BADGE_GLYPHS: Readonly<Record<number, readonly string[]>> = {
+  1: ["  #  ", " ##  ", "  #  ", "  #  ", "  #  ", "  #  ", "#####"],
+  2: [" ### ", "#   #", "    #", "   # ", "  #  ", " #   ", "#####"],
+  3: [" ### ", "#   #", "    #", " ### ", "    #", "#   #", " ### "],
+  4: ["   # ", "  ## ", " # # ", "#  # ", "#####", "   # ", "   # "],
+  5: ["#####", "#    ", "#    ", "#### ", "    #", "#   #", " ### "],
+  6: [" ### ", "#   #", "#    ", "#### ", "#   #", "#   #", " ### "],
+  7: ["#####", "    #", "   # ", "  #  ", " #   ", " #   ", " #   "],
+  8: [" ### ", "#   #", "#   #", " ### ", "#   #", "#   #", " ### "],
+  9: [" ### ", "#   #", "#   #", " ####", "    #", "#   #", " ### "]
+};
+
+function pngCrc32(data: Buffer): number {
+  let crc = 0xffffffff;
+  for (const byte of data) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function pngChunk(type: string, data: Buffer): Buffer {
+  const typeBytes = Buffer.from(type, "ascii");
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(data.length, 0);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(pngCrc32(Buffer.concat([typeBytes, data])), 0);
+  return Buffer.concat([length, typeBytes, data, crc]);
+}
+
+function createConversationBadgePng(count: number): Buffer {
   const safeCount = Math.max(1, Math.min(9, Math.round(count)));
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
-    <circle cx="16" cy="16" r="15" fill="#1f2937"/>
-    <text x="16" y="21" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="18" font-weight="700" fill="#ffffff">${safeCount}</text>
-  </svg>`;
-  return nativeImage.createFromDataURL(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`);
+  const size = 32;
+  const rgba = Buffer.alloc(size * size * 4);
+  const radiusSquared = 15 * 15;
+
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const dx = x - 16;
+      const dy = y - 16;
+      if (dx * dx + dy * dy > radiusSquared) {
+        continue;
+      }
+      const offset = (y * size + x) * 4;
+      rgba[offset] = 0x1f;
+      rgba[offset + 1] = 0x29;
+      rgba[offset + 2] = 0x37;
+      rgba[offset + 3] = 0xff;
+    }
+  }
+
+  const glyph = CONVERSATION_BADGE_GLYPHS[safeCount];
+  const scale = 3;
+  const glyphWidth = glyph[0].length * scale;
+  const glyphHeight = glyph.length * scale;
+  const originX = Math.floor((size - glyphWidth) / 2);
+  const originY = Math.floor((size - glyphHeight) / 2);
+  for (let row = 0; row < glyph.length; row += 1) {
+    for (let column = 0; column < glyph[row].length; column += 1) {
+      if (glyph[row][column] !== "#") {
+        continue;
+      }
+      for (let y = 0; y < scale; y += 1) {
+        for (let x = 0; x < scale; x += 1) {
+          const pixelX = originX + column * scale + x;
+          const pixelY = originY + row * scale + y;
+          const offset = (pixelY * size + pixelX) * 4;
+          rgba[offset] = 0xff;
+          rgba[offset + 1] = 0xff;
+          rgba[offset + 2] = 0xff;
+          rgba[offset + 3] = 0xff;
+        }
+      }
+    }
+  }
+
+  const scanlines = Buffer.alloc(size * (size * 4 + 1));
+  for (let y = 0; y < size; y += 1) {
+    const rowOffset = y * (size * 4 + 1);
+    rgba.copy(scanlines, rowOffset + 1, y * size * 4, (y + 1) * size * 4);
+  }
+
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(size, 0);
+  header.writeUInt32BE(size, 4);
+  header[8] = 8;
+  header[9] = 6;
+  return Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    pngChunk("IHDR", header),
+    pngChunk("IDAT", deflateSync(scanlines)),
+    pngChunk("IEND", Buffer.alloc(0))
+  ]);
+}
+
+function createConversationBadgeIcon(count: number) {
+  return nativeImage.createFromBuffer(createConversationBadgePng(count));
 }
 
 function toRuntimeSceneFieldValue(value: unknown): string | number | boolean {
@@ -2995,7 +3088,13 @@ async function runIsolatedRegistryMutation(input: {
         await waitForBackendHealthy({
           port,
           signal: input.signal,
-          childAlive: () => spawned.child.exitCode == null && spawned.child.killed !== true
+          childError: () => {
+            const spawnError = spawned.spawnError();
+            return spawnError === null ? null : new Error(`isolated workbench backend failed to spawn: ${spawnError.message}`);
+          },
+          childAlive: () => {
+            return spawned.child.exitCode == null && spawned.child.killed !== true;
+          }
         });
       } catch (error: unknown) {
         spawned.child.kill();

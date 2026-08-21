@@ -29,6 +29,7 @@ export type WorkbenchBackendSpawnChild = {
   exitCode?: number | null;
   unref?: () => void;
   kill: (signal?: NodeJS.Signals) => boolean;
+  once?: (event: "error", listener: (error: Error) => void) => unknown;
 };
 
 export type WorkbenchBackendSpawn = (
@@ -409,6 +410,13 @@ function runWaitable(command: string, args: string[], cwd: string): Promise<void
   });
 }
 
+export type SpawnedWorkbenchBackend = {
+  child: WorkbenchBackendSpawnChild;
+  pythonPath: string;
+  args: string[];
+  spawnError: () => Error | null;
+};
+
 export function spawnWorkbenchBackend(input: {
   workspaceRoot: string;
   pythonPath: string;
@@ -423,7 +431,7 @@ export function spawnWorkbenchBackend(input: {
   spawnImpl?: WorkbenchBackendSpawn;
   fileExists?: (path: string) => boolean;
   extraEnv?: NodeJS.ProcessEnv;
-}): { child: WorkbenchBackendSpawnChild; pythonPath: string; args: string[] } {
+}): SpawnedWorkbenchBackend {
   const host = input.host?.trim() || DEFAULT_WORKBENCH_HOST;
   const fileExists = input.fileExists ?? existsSync;
   const pythonPath = resolveNoConsolePython(input.pythonPath, fileExists);
@@ -466,8 +474,12 @@ export function spawnWorkbenchBackend(input: {
       detached: true,
       stdio
     });
+    let spawnError: Error | null = null;
+    child.once?.("error", (error) => {
+      spawnError = error instanceof Error ? error : new Error(String(error));
+    });
     child.unref?.();
-    return { child, pythonPath, args };
+    return { child, pythonPath, args, spawnError: () => spawnError };
   } finally {
     if (stdoutFd !== undefined) {
       closeSync(stdoutFd);
@@ -590,13 +602,23 @@ export async function executeMainLineWorkbench(
       port: resolved.port,
       host,
       signal: input.signal,
-      childAlive: () => spawned.child.exitCode == null && spawned.child.killed !== true,
+      childError: () => {
+        const spawnError = spawned.spawnError();
+        return spawnError === null ? null : new Error(`workbench backend failed to spawn: ${spawnError.message}`);
+      },
+      childAlive: () => {
+        return spawned.child.exitCode == null && spawned.child.killed !== true;
+      },
       connect: input.connect,
       fetchHealth: input.fetchHealth
     });
   } catch (error: unknown) {
     if (spawnPid > 0) {
-      input.killPid?.(spawnPid) ?? spawned.child.kill();
+      if (input.killPid) {
+        input.killPid(spawnPid);
+      } else {
+        spawned.child.kill();
+      }
     }
     throw error;
   }

@@ -14,6 +14,7 @@ import {
   resolveNoConsolePython,
   resolveNodeExecutable,
   sameProjectRoot,
+  spawnWorkbenchBackend,
   workbenchBackendArgs,
   workbenchBackendEnv
 } from "../src/process/workbenchBackend.js";
@@ -80,6 +81,20 @@ describe("workbenchBackendHealth", () => {
       fetchHealth
     });
     expect(fetchHealth).toHaveBeenCalledTimes(2);
+  });
+
+  it("fails immediately when the spawned child reports an error", async () => {
+    const connect = vi.fn(async () => true);
+    await expect(
+      waitForBackendHealthy({
+        port: 8000,
+        timeoutMs: 45_000,
+        childError: () => new Error("spawn ENOENT"),
+        connect,
+        fetchHealth: async () => ({ status: 503 })
+      })
+    ).rejects.toThrow("spawn ENOENT");
+    expect(connect).not.toHaveBeenCalled();
   });
 });
 
@@ -303,6 +318,52 @@ describe("runWorkbenchLifecycle", () => {
       })
     ).rejects.toMatchObject({ code: "aborted" });
     expect(spawnImpl).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a backend spawn error before waiting for health", async () => {
+    const spawnError = new Error("spawn ENOENT");
+    const child = {
+      pid: 5151,
+      exitCode: null as number | null,
+      killed: false,
+      unref: () => undefined,
+      kill: vi.fn(() => true),
+      once: (_event: "error", listener: (error: Error) => void) => {
+        listener(spawnError);
+      }
+    };
+    const spawned = spawnWorkbenchBackend({
+      workspaceRoot: "C:/repo",
+      pythonPath: "C:/repo/.venv/Scripts/python.exe",
+      port: 8000,
+      spawnImpl: () => child,
+      fileExists: (path: string) => path.endsWith("pythonw.exe")
+    });
+    expect(spawned.spawnError()).toBe(spawnError);
+  });
+
+  it("does not double-kill when an injected killPid returns void", async () => {
+    const { spawnImpl, input } = harness();
+    const childKill = vi.fn(() => true);
+    const child = {
+      ...fakeBackendChild(5252),
+      kill: childKill
+    };
+    const killPid = vi.fn(() => undefined);
+    await expect(
+      runWorkbenchLifecycle({
+        ...input,
+        spawnImpl: () => child,
+        connect: async () => {
+          child.exitCode = 1;
+          return false;
+        },
+        fetchHealth: async () => ({ status: 503 }),
+        killPid
+      })
+    ).rejects.toThrow("exited before it became healthy");
+    expect(killPid).toHaveBeenCalledWith(5252);
+    expect(childKill).not.toHaveBeenCalled();
   });
 });
 
