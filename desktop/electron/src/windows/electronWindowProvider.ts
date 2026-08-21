@@ -256,10 +256,10 @@ export class ElectronWindowProvider {
       if (typeof window.setTitle === "function" && title) {
         window.setTitle(title);
       }
-      this.lockInstanceWindowTitle(window, title);
       this.attachInstanceWindowEvents(instanceId, window);
       entry = { instanceId, url: safeUrl, title, window, readyUrl: null };
       this.instanceWindows.set(instanceId, entry);
+      this.lockInstanceWindowTitle(window, instanceId);
     } else if (entry && title) {
       entry.title = title;
       if (typeof window.setTitle === "function") {
@@ -464,11 +464,12 @@ export class ElectronWindowProvider {
     window.on("session-end", () => this.onOsSessionEnd("session-end", "workbench"));
   }
 
-  private lockInstanceWindowTitle(window: ElectronWindowLike, title: string): void {
-    if (!title) {
-      return;
-    }
+  private lockInstanceWindowTitle(window: ElectronWindowLike, instanceId: string): void {
     window.on("page-title-updated", (event) => {
+      const title = this.instanceWindows.get(instanceId)?.title || "";
+      if (!title) {
+        return;
+      }
       preventWindowClose(event);
       if (typeof window.setTitle === "function") {
         window.setTitle(title);

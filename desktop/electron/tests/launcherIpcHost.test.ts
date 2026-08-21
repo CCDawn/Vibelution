@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { resetAdmissionCacheForTests } from "../src/lifecycle/instanceAdmissionStore.js";
+import { AdmissionDeniedError } from "../src/lifecycle/instanceAdmissionControl.js";
 import {
   createLauncherIpcHost,
   LAUNCHER_IPC_HOST_NOT_READY,
@@ -352,6 +353,37 @@ describe("createLauncherIpcHost", () => {
       expect(result.error.code).toBe("LAUNCHER_IPC_LIFECYCLE_ERROR");
       expect(result.error.message).toContain("active work blocks restart");
     }
+  });
+
+  it("preserves the rejected lifecycle operation when admission throws", async () => {
+    const fetchImpl = vi.fn();
+    const denied = new AdmissionDeniedError({
+      instanceId: "main",
+      code: "rate_limited",
+      retryAfterMs: 1000,
+      message: "启动过于频繁，请 1 秒后再试。",
+      eventName: "launcher.admission.rate_limited"
+    });
+    const orchestrate = vi.fn().mockRejectedValue(denied);
+    const host = createLauncherIpcHost({
+      resolveContext: async () => ({ launcherOrigin: "http://127.0.0.1:8765", controlToken: "t" }),
+      orchestrateLifecycle: orchestrate,
+      fetchImpl,
+      admissionStorePath: await tempAdmissionPath()
+    });
+
+    const result = await host.invoke(validPayload({ path: "restart", init: { method: "POST" } }));
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.payload).toMatchObject({
+        accepted: false,
+        operation: "restart",
+        instanceId: "main",
+        code: "rate_limited"
+      });
+    }
+    expect(orchestrate).toHaveBeenCalledTimes(1);
   });
 
   it("routes branch-instance lifecycle commands through the main orchestrator", async () => {

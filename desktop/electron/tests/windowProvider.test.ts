@@ -243,6 +243,32 @@ describe("Electron window provider state", () => {
     expect(provider.snapshot().workbench.open).toBe(true);
   });
 
+  it("keeps the current instance title when a reused window receives a page title update", async () => {
+    const isolated = new FakeWindow(99, "", 9999);
+    const provider = new ElectronWindowProvider(desktopPaths, "http://127.0.0.1:8765/launcher", "http://127.0.0.1:8002", {
+      createLauncherWindow: (url) => new FakeWindow(7, url, 7070),
+      createWorkbenchWindow: () => isolated
+    });
+
+    await provider.openOrFocusInstanceWorkbench({
+      instanceId: "worktree:task",
+      url: "http://127.0.0.1:8004/",
+      title: "首次标题"
+    });
+    const second = await provider.openOrFocusInstanceWorkbench({
+      instanceId: "worktree:task",
+      url: "http://127.0.0.1:8004/",
+      title: "当前标题"
+    });
+
+    const event = { preventDefault: vi.fn() };
+    isolated.emit("page-title-updated", event, "页面标题");
+
+    expect(event.preventDefault).toHaveBeenCalledTimes(1);
+    expect(isolated.title).toBe("当前标题");
+    expect(second).toMatchObject({ instanceId: "worktree:task", title: "当前标题" });
+  });
+
   it("navigates to a refreshed Workbench URL before revealing or reporting the window", async () => {
     const reports: Array<{ open: boolean; url: string }> = [];
     const workbenchWindow = new FakeWindow(42, "", 0);

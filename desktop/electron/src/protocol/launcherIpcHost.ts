@@ -196,14 +196,14 @@ function lifecycleOperationOf(apiRoute: string): string {
   return apiRoute;
 }
 
-function deniedAdmissionError(error: unknown): LauncherIpcInvokeResult | null {
+function deniedAdmissionError(error: unknown, operation: string): LauncherIpcInvokeResult | null {
   if (!(error instanceof AdmissionDeniedError)) {
     return null;
   }
   return {
     ok: true,
     payload: deniedLifecycleResult({
-      operation: "start",
+      operation,
       instanceId: error.instanceId,
       decision: {
         admitted: false,
@@ -246,8 +246,8 @@ export function createLauncherIpcHost(input: {
       }
       const apiRoute = launcherApiRoute(normalized.path);
       if (LIFECYCLE_PATHS.has(apiRoute) && input.orchestrateLifecycle) {
+        const operation = lifecycleOperationOf(apiRoute);
         try {
-          const operation = lifecycleOperationOf(apiRoute);
           if (isStartLikeOperation(operation)) {
             const decision = await admitLifecycleCommand({
               instanceId: instanceIdFromPayload(apiRoute, normalized),
@@ -268,7 +268,7 @@ export function createLauncherIpcHost(input: {
           const result = await input.orchestrateLifecycle(normalized.path, normalized);
           return { ok: true, payload: result };
         } catch (error: unknown) {
-          return deniedAdmissionError(error) || launcherIpcError(
+          return deniedAdmissionError(error, operation) || launcherIpcError(
             LAUNCHER_IPC_LIFECYCLE_ERROR,
             error instanceof Error ? error.message : String(error)
           );
@@ -289,8 +289,8 @@ export function createLauncherIpcHost(input: {
         };
       }
       if (BRANCH_INSTANCE_PATHS.has(apiRoute) && input.orchestrateBranchInstance) {
+        const operation = apiRoute.split("/")[1];
         try {
-          const operation = apiRoute.split("/")[1];
           const instanceId = instanceIdFromPayload(apiRoute, normalized);
           if (instanceId === MAIN_INSTANCE_ID && isStartLikeOperation(operation)) {
             const decision = await admitLifecycleCommand({ instanceId, operation, storePath: admissionStorePath });
@@ -301,7 +301,7 @@ export function createLauncherIpcHost(input: {
           const result = await input.orchestrateBranchInstance(operation, normalized);
           return { ok: true, payload: result };
         } catch (error: unknown) {
-          return deniedAdmissionError(error) || launcherIpcError(
+          return deniedAdmissionError(error, operation) || launcherIpcError(
             LAUNCHER_IPC_LIFECYCLE_ERROR,
             error instanceof Error ? error.message : String(error)
           );
