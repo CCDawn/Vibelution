@@ -241,6 +241,7 @@ describe("ShadcnWorkflowCanvas structure (P1-1)", () => {
       (child: React.ReactElement) => child?.props?.gap != null,
     );
     expect(backgroundElement.props.gap).toBe(WORKFLOW_MANUAL_LAYOUT_GRID);
+    expect(backgroundElement.props.color).toBe("var(--vui-border-strong)");
     expect(rfProps.edgesReconnectable).toBe(true);
     expect(rfProps.connectionLineType).toBe("step");
     expect(rfProps.connectionLineComponent).toBe(WorkflowOrthogonalConnectionLine);

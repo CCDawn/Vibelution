@@ -960,7 +960,7 @@ function WorkflowCanvasInner({
           <Background
             gap={layoutMode === "serpentine" ? WORKFLOW_MANUAL_LAYOUT_GRID : 20}
             size={1}
-            color="var(--vui-border, #e4e4e7)"
+            color="var(--vui-border-strong)"
           />
           <WorkflowHelperLinesOverlay lines={helperLines} />
           <WorkflowCanvasControls
