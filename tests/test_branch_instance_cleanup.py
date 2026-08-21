@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import threading
 import time
@@ -308,6 +309,23 @@ def test_cleanup_removes_retired_leftover_with_windows_long_path(tmp_path):
     assert result["ok"] is True
     assert result["cleaned"][0]["actions"] == ["worktree_removed"]
     assert not leftover.exists()
+
+
+def test_remove_directory_removes_symlink_entry_without_touching_target(tmp_path):
+    target = tmp_path / "target"
+    target.mkdir()
+    sentinel = target / "keep.txt"
+    sentinel.write_text("keep", encoding="utf-8")
+    link = tmp_path / "link"
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory symlink unavailable: {exc}")
+
+    cleanup._remove_directory(link)
+
+    assert not os.path.lexists(str(link))
+    assert sentinel.read_text(encoding="utf-8") == "keep"
 
 
 def test_cleanup_deletes_unmerged_local_branch_without_touching_remote(tmp_path):

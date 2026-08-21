@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import json
 import os
+from contextlib import contextmanager
+from pathlib import Path
 
 import pytest
 
+from core.infrastructure import atomic_io
 from core.infrastructure.instance_display_name import workbench_window_title
 from core.launcher.isolated_workbench_window import (
     instance_workbench_title,
@@ -69,47 +73,69 @@ def test_persist_instance_window_from_desktop_ack(registry_path):
     assert registry.get_instance("worktree:task")["windowPid"] == 0
 
 
-def test_default_open_fails_without_electron_instead_of_edge(monkeypatch):
-    monkeypatch.setattr(isolated, "_electron_desktop_shell_available", lambda: False)
-    monkeypatch.setattr(
-        isolated,
-        "_open_via_named_edge",
-        lambda *_args, **_kwargs: pytest.fail("Edge fallback is forbidden"),
-    )
-    with pytest.raises(RuntimeError, match="Refusing Edge fallback"):
-        isolated._default_open(
-            {"id": "worktree:task", "url": "http://127.0.0.1:8010/", "shortName": "branch+task"}
-        )
+def test_close_isolated_window_uses_test_provider_and_clears_registry(registry_path):
+    registry.upsert_instance("worktree:task", windowPid=4242)
+
+    result = isolated.close_isolated_workbench_window({"id": "worktree:task"})
+
+    assert result == {"provider": "test", "windowPid": 0}
+    assert registry.get_instance("worktree:task")["windowPid"] == 0
 
 
-def test_open_via_electron_fails_when_window_is_unconfirmed(monkeypatch):
+def test_default_close_submits_electron_desktop_action(monkeypatch):
+    monkeypatch.setattr(isolated, "_electron_desktop_shell_available", lambda: True)
     monkeypatch.setattr(
         isolated,
         "_submit_instance_window_action",
-        lambda *_args, **_kwargs: {"intentId": "intent-1", "status": "failed"},
+        lambda *_args, **_kwargs: {"intentId": "intent-close-1"},
     )
-    monkeypatch.setattr(
-        isolated,
-        "_wait_for_intent",
-        lambda *_args, **_kwargs: {"status": "failed", "result": {}},
-    )
-    monkeypatch.setattr(
-        isolated,
-        "_open_via_named_edge",
-        lambda *_args, **_kwargs: pytest.fail("Edge fallback is forbidden"),
-    )
-    with pytest.raises(RuntimeError, match="Refusing Edge fallback"):
-        isolated._open_via_electron(
-            {"id": "worktree:task"},
-            url="http://127.0.0.1:8010/",
-            title="branch+task 台",
-        )
+
+    result = isolated._default_close({"id": "worktree:task"})
+
+    assert result == {"provider": "electron", "windowPid": 0, "intentId": "intent-close-1"}
 
 
-def test_named_edge_opener_is_a_hard_failure():
-    with pytest.raises(RuntimeError, match="Refusing Edge fallback"):
-        isolated._open_via_named_edge(
-            {"id": "worktree:task", "path": "."},
-            url="http://127.0.0.1:8010/",
-            title="branch+task 台",
-        )
+def test_write_worktree_window_pid_preserves_state_and_uses_atomic_writer(tmp_path, monkeypatch):
+    runtime_root = tmp_path / "runtime"
+    state_path = runtime_root / "launcher" / "state.json"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(json.dumps({"backendPid": 123, "status": "open"}), encoding="utf-8")
+    monkeypatch.setattr(isolated, "resolve_project_runtime_home", lambda _worktree: runtime_root)
+    calls: list[tuple[Path, dict]] = []
+
+    def recording_atomic_write(path, payload, **kwargs):
+        calls.append((Path(path), dict(payload)))
+        atomic_io.atomic_write_json(path, payload, **kwargs)
+
+    monkeypatch.setattr(isolated, "atomic_write_json", recording_atomic_write)
+    isolated._write_worktree_window_pid(tmp_path / "worktree", 4242)
+
+    persisted = json.loads(state_path.read_text(encoding="utf-8"))
+    assert persisted == {"backendPid": 123, "status": "open", "browserWindowPid": 4242, "windowPid": 4242}
+    assert calls == [(state_path, persisted)]
+    assert not Path(f"{state_path}.lockdir").exists()
+
+
+def test_write_worktree_window_pid_is_fail_safe_when_state_lock_times_out(tmp_path, monkeypatch):
+    runtime_root = tmp_path / "runtime"
+    state_path = runtime_root / "launcher" / "state.json"
+    state_path.parent.mkdir(parents=True)
+    original = {"backendPid": 123, "windowPid": 7}
+    state_path.write_text(json.dumps(original), encoding="utf-8")
+    monkeypatch.setattr(isolated, "resolve_project_runtime_home", lambda _worktree: runtime_root)
+
+    @contextmanager
+    def timeout_lock(*_args, **_kwargs):
+        raise TimeoutError("state lock busy")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(isolated.instance_lock, "hold_instance_lock", timeout_lock)
+    monkeypatch.setattr(
+        isolated,
+        "atomic_write_json",
+        lambda *_args, **_kwargs: pytest.fail("must not overwrite state when lock cannot be claimed"),
+    )
+
+    isolated._write_worktree_window_pid(tmp_path / "worktree", 4242)
+
+    assert json.loads(state_path.read_text(encoding="utf-8")) == original

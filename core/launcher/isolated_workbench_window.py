@@ -11,10 +11,14 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
-from typing import Any, Callable
+
+from core.infrastructure.atomic_io import atomic_write_json
 from core.launcher import desktop_session_store, lifecycle_intent_store
+from core.runtime_manager import instance_lock
 from core.runtime_manager.constants import PROJECT_ROOT
 
 from core.infrastructure.instance_display_name import workbench_window_title
@@ -162,17 +166,24 @@ def _persist_window_fields(instance_id: str, *, window_pid: int, window_title: s
 def _write_worktree_window_pid(worktree: Path, pid: int) -> None:
     path = resolve_project_runtime_home(worktree) / "launcher" / "state.json"
     try:
-        payload = json.loads(path.read_text(encoding="utf-8-sig"))
-    except (OSError, json.JSONDecodeError, TypeError, ValueError):
-        payload = {}
-    if not isinstance(payload, dict):
-        payload = {}
-    payload["browserWindowPid"] = int(pid)
-    payload["windowPid"] = int(pid)
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    except OSError:
+        # The instance state is shared with the launcher/runtime manager. Keep
+        # the read-modify-write under the same lockdir protocol and publish the
+        # new document atomically so readers cannot observe torn JSON.
+        with instance_lock.hold_instance_lock(path):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8-sig"))
+            except FileNotFoundError:
+                payload = {}
+            except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                # Never replace an unreadable state file with a partial
+                # projection; a later lifecycle observation can repair it.
+                return
+            if not isinstance(payload, dict):
+                return
+            payload["browserWindowPid"] = int(pid)
+            payload["windowPid"] = int(pid)
+            atomic_write_json(path, payload)
+    except (OSError, TimeoutError):
         return
 
 

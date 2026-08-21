@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -47,6 +48,8 @@ _STARTABLE_KINDS = {"main", "worktree"}
 _ISOLATED_START_TIMEOUT_SECONDS = 180
 _ISOLATED_STOP_TIMEOUT_SECONDS = 60
 _ISOLATED_RESTART_TIMEOUT_SECONDS = 240
+
+logger = logging.getLogger(__name__)
 
 
 class BranchInstanceLifecycleError(RuntimeError):
@@ -578,7 +581,27 @@ def run_isolated_operation(
     spawn_pid = _positive_int(claimed_stop.get("spawnPid"))
     killer = terminate_pid or terminate_pid_tree
     if spawn_pid > 0:
-        killer(spawn_pid)
+        identity = registry.inspect_process_identity(
+            {
+                "pid": spawn_pid,
+                "createTime": claimed_stop.get("spawnCreateTime"),
+                "executable": claimed_stop.get("spawnExecutable"),
+            }
+        )
+        identity_status = str(identity.get("status") or "").strip().lower()
+        if identity_status == "match":
+            killer(spawn_pid)
+        elif identity_status == "dead":
+            logger.debug("isolated stop spawnPid=%s is already dead", spawn_pid)
+        else:
+            # PID reuse, an incomplete legacy identity, and probe failures are
+            # all fail-closed. The lifecycle script may still clean its own
+            # state, but this path must never kill an unverified PID.
+            logger.warning(
+                "skip isolated stop kill for unverified spawnPid=%s status=%s",
+                spawn_pid,
+                identity_status or "unknown",
+            )
     if not _electron_main_orchestrates_windows():
         close_item = dict(item)
         close_item["id"] = instance_id

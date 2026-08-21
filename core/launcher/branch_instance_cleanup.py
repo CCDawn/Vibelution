@@ -205,6 +205,12 @@ def _default_stop_runner(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def _remove_worktree(root: Path, worktree: Path) -> None:
+    # A junction/symlink is a directory entry, not the checkout it targets.
+    # Never resolve it before removal: resolving would make rmtree delete data
+    # outside the managed pool and leave the link itself behind.
+    if _is_reparse_point(worktree):
+        _remove_directory(worktree)
+        return
     resolved = worktree.resolve() if worktree.exists() else worktree
     if _is_registered_worktree(root, resolved):
         result = _run_git(root, "worktree", "remove", "--force", str(resolved), timeout=60.0)
@@ -230,19 +236,61 @@ def _remove_worktree(root: Path, worktree: Path) -> None:
 def _remove_directory(path: Path) -> None:
     """Remove leftover checkout dirs, including Windows paths longer than MAX_PATH."""
 
+    if _is_reparse_point(path):
+        _remove_reparse_point(path)
+        return
     target = path.resolve() if path.exists() else path
-    if not target.exists():
+    if not os.path.lexists(str(target)):
         return
     shutil.rmtree(_os_remove_target(target), onexc=_clear_readonly)
-    if target.exists():
+    if os.path.lexists(str(target)):
         raise RuntimeError(f"worktree 目录仍存在：{target}")
 
 
-def _os_remove_target(path: Path) -> str:
+def _is_reparse_point(path: Path) -> bool:
+    """Return true for links/junctions without following their target."""
+
+    try:
+        if path.is_symlink():
+            return True
+        is_junction = getattr(path, "is_junction", None)
+        if callable(is_junction) and bool(is_junction()):
+            return True
+        attributes = int(getattr(path.lstat(), "st_file_attributes", 0) or 0)
+        return bool(attributes & 0x400)  # FILE_ATTRIBUTE_REPARSE_POINT
+    except OSError:
+        return False
+
+
+def _remove_reparse_point(path: Path) -> None:
+    """Remove only a symlink/junction entry, never its target."""
+
+    if not os.path.lexists(str(path)):
+        return
+    raw_target = _os_remove_target(path, resolve=False)
+    try:
+        if path.is_symlink():
+            path.unlink()
+        else:
+            os.rmdir(raw_target)
+    except (FileNotFoundError, NotADirectoryError):
+        path.unlink(missing_ok=True)
+    except OSError:
+        # Some Windows reparse points expose as a file to unlink rather than a
+        # directory to rmdir. Either operation removes only the link itself.
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+    if os.path.lexists(str(path)):
+        raise RuntimeError(f"无法移除 worktree 链接：{path}")
+
+
+def _os_remove_target(path: Path, *, resolve: bool = True) -> str:
     text = str(path)
     if os.name != "nt":
         return text
-    resolved = str(path.resolve())
+    resolved = str(path.resolve()) if resolve else text
     if resolved.startswith("\\\\?\\"):
         return resolved
     if resolved.startswith("\\\\"):

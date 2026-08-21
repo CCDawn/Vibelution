@@ -221,7 +221,7 @@ def test_resolve_no_console_python_prefers_supervisor_over_worktree_venv(tmp_pat
     assert resolved != leftover.resolve()
 
 
-def test_stop_reaps_spawn_pid_before_stop_script(registry_path, tmp_path):
+def test_stop_reaps_spawn_pid_before_stop_script(registry_path, tmp_path, monkeypatch):
     worktree = tmp_path / "task"
     worktree.mkdir()
     registry.upsert_instance(
@@ -240,6 +240,12 @@ def test_stop_reaps_spawn_pid_before_stop_script(registry_path, tmp_path):
         calls.append((action, backend_port, kwargs.get("detach")))
         return {"returncode": 0}
 
+    monkeypatch.setattr(
+        lifecycle.registry,
+        "inspect_process_identity",
+        lambda expected: {"status": "match", "pid": expected["pid"]},
+    )
+
     response = lifecycle.run_isolated_operation(
         _item(path=str(worktree), port=8004, controlPort=8769),
         "stop",
@@ -253,6 +259,36 @@ def test_stop_reaps_spawn_pid_before_stop_script(registry_path, tmp_path):
     assert calls[0][2] is False
     assert registry.get_instance("worktree:task")["status"] == "closed"
     assert registry.get_instance("worktree:task")["spawnPid"] == 0
+
+
+@pytest.mark.parametrize("identity_status", ["mismatch", "unknown"])
+def test_stop_does_not_kill_unverified_spawn_pid(registry_path, tmp_path, monkeypatch, identity_status):
+    worktree = tmp_path / "task"
+    worktree.mkdir()
+    registry.upsert_instance(
+        "worktree:task",
+        port=8004,
+        controlPort=8769,
+        projectRoot=str(worktree),
+        status="starting",
+        generation=2,
+        spawnPid=424242,
+    )
+    reaped: list[int] = []
+    monkeypatch.setattr(lifecycle.registry, "inspect_process_identity", lambda _expected: {"status": identity_status})
+
+    def fake_spawn(root, action, backend_port, control_port, **kwargs):
+        return {"returncode": 0}
+
+    response = lifecycle.run_isolated_operation(
+        _item(path=str(worktree), port=8004, controlPort=8769),
+        "stop",
+        runner=fake_spawn,
+        terminate_pid=lambda pid: reaped.append(pid) or {"supported": True, "rootPid": pid},
+    )
+
+    assert response["accepted"] is True
+    assert reaped == []
 
 
 def test_launcher_script_resolves_workspace_env_before_sys_path():
