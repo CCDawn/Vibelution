@@ -1,0 +1,1395 @@
+from __future__ import annotations
+
+import json
+from dataclasses import replace
+from typing import Any
+
+import pytest
+
+from core.research.workflow.contracts import PendingAction
+from core.research.workflow.models import ActorKind
+from core.web.services.team_workflow.research_runtime import (
+    formal_hypothesis_fanout,
+    hypothesis_fragment_writer,
+    workflow_artifact_store,
+)
+from core.web.services.team_workflow.research_runtime import (
+    real_domain_ports as real_ports_module,
+)
+from core.web.services.team_workflow.research_runtime.domain_ports import (
+    AgentTaskHandle,
+    BindingResolution,
+    ScopedAgentTaskHandle,
+)
+from core.web.services.team_workflow.research_runtime.hypothesis_scope_events import (
+    HypothesisScopeEventConflict,
+    record_hypothesis_scope_event,
+)
+from core.web.services.team_workflow.research_runtime.real_domain_ports import (
+    RealDomainPorts,
+)
+from tests._support.command_helpers import CommandHarness
+from tests._support.workflow_ledger_helpers import (
+    build_attempt_record,
+    build_command_record,
+)
+
+
+def _action(*, attempt: int = 1, node_run_id: str = "node-1") -> PendingAction:
+    return PendingAction(
+        action_id="action-1",
+        run_id="run-1",
+        node_run_id=node_run_id,
+        node_id="hypothesis_design",
+        attempt=attempt,
+        actor_kind=ActorKind.AGENT,
+        action_kind="start_agent_task",
+        input_snapshot_hash="a" * 64,
+        input_artifact_refs=(),
+        binding_snapshot_id="binding-1",
+        budget_policy_hash="budget-1",
+    )
+
+
+def test_formal_selection_prefers_frozen_snapshot_without_legacy_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        formal_hypothesis_fanout,
+        "_selection_from_authority",
+        lambda _snapshot: pytest.fail("authority must not be consulted"),
+    )
+    result = formal_hypothesis_fanout.formal_hypothesis_fan_out_input(
+        action=_action(),
+        snapshot={
+            "teamId": "team-1",
+            "hypothesisSelection": {
+                "selectionId": "selection-1",
+                "selectedCandidateIds": ["H1", "H2"],
+                "candidateSnapshots": [
+                    {"candidateId": "H1", "statement": "claim 1"},
+                    {"candidateId": "H2", "statement": "claim 2"},
+                ],
+            },
+        },
+    )
+    assert result is not None
+    assert result["selectionId"] == "selection-1"
+    assert result["selectedCandidateIds"] == ["H1", "H2"]
+
+
+def test_formal_selection_rejects_duplicate_candidates() -> None:
+    with pytest.raises(RuntimeError, match="duplicate"):
+        formal_hypothesis_fanout.formal_hypothesis_fan_out_input(
+            action=_action(),
+            snapshot={
+                "hypothesisSelection": {
+                    "selectionId": "selection-1",
+                    "selectedCandidateIds": ["H1", "H1"],
+                }
+            },
+        )
+
+
+def test_formal_selection_replay_uses_node_run_bound_selection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: list[str] = []
+    monkeypatch.setattr(
+        formal_hypothesis_fanout,
+        "_selection_from_snapshot",
+        lambda _snapshot: None,
+    )
+
+    def authority(_snapshot, *, bound_selection_id: str = ""):
+        observed.append(bound_selection_id)
+        return {
+            "selectionId": bound_selection_id,
+            "selectedCandidateIds": ["H1"],
+            "candidateSnapshots": [{"candidateId": "H1"}],
+        }
+
+    monkeypatch.setattr(
+        formal_hypothesis_fanout,
+        "_selection_from_authority",
+        authority,
+    )
+    result = formal_hypothesis_fanout.formal_hypothesis_fan_out_input(
+        action=_action(),
+        snapshot={"teamId": "team-1", "questionId": "SCI-096"},
+        bound_selection_id="selection-bound",
+    )
+    assert result is not None
+    assert result["selectionId"] == "selection-bound"
+    assert observed == ["selection-bound"]
+
+
+def test_reusable_fragment_prefers_prior_anchor_lineage_on_continuous_retry() -> None:
+    rows = [
+        {
+            "recordId": "hypothesis_fragment:selection-1:H1:node-1",
+            "payload": {
+                "kind": "hypothesis_fragment",
+                "workflowRunId": "run-1",
+                "nodeRunId": "node-1",
+                "selectionId": "selection-1",
+                "candidateId": "H1",
+                "sessionId": "child-H1",
+                "taskId": "task-H1",
+                "sessionAttempt": 1,
+            },
+        },
+        {
+            "recordId": "hypothesis_fragment:selection-1:H1:node-2",
+            "payload": {
+                "kind": "hypothesis_fragment",
+                "workflowRunId": "run-1",
+                "nodeRunId": "node-2",
+                "selectionId": "selection-1",
+                "candidateId": "H1",
+                "sessionId": "child-H1",
+                "taskId": "task-H1",
+                "sessionAttempt": 1,
+            },
+        },
+    ]
+
+    selected = formal_hypothesis_fanout.load_reusable_formal_hypothesis_fragment(
+        rows,
+        workflow_run_id="run-1",
+        selection_id="selection-1",
+        candidate_id="H1",
+        session_id="child-H1",
+        task_id="task-H1",
+        session_attempt=1,
+        preferred_fragment_refs=(
+            "hypothesis_fragment:selection-1:H1:node-2",
+        ),
+    )
+
+    assert selected is not None
+    assert selected["nodeRunId"] == "node-2"
+
+
+def test_hypothesis_authority_read_failure_is_not_treated_as_absence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class BrokenStore:
+        def list_attempts(self, _run_id: str):
+            raise OSError("ledger unavailable")
+
+    with pytest.raises(
+        formal_hypothesis_fanout.HypothesisAuthorityUnavailable,
+        match="ledger unavailable",
+    ):
+        formal_hypothesis_fanout.previous_hypothesis_anchor(
+            BrokenStore(), _action()
+        )
+
+
+def test_formal_shadow_validates_scope_without_starting_child_tasks(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run(run_id="run-1")
+        harness.service.submit(
+            harness.request(run_id="run-1", idempotency_key="start-shadow")
+        )
+        latest = harness.store.latest_attempt("run-1", "source_finding")
+        assert latest is not None
+        action = _action(node_run_id=latest.node_run_id)
+        fallback = AgentTaskHandle(
+            session_id="legacy-session",
+            session_attempt=1,
+            task_id="legacy-task",
+            turn_id="legacy-turn",
+        )
+        ports = RealDomainPorts(
+            harness.store,
+            agent_task_factory=lambda **_kwargs: fallback,
+        )
+        monkeypatch.setattr(
+            ports,
+            "_run_input_snapshot",
+            lambda _run_id: {
+                "teamId": "team-1",
+                "projectId": "project-1",
+                "workflowSessionScopeV3": {"hypothesis_design": "shadow"},
+                "budgetPolicy": {"maxParallelTasks": 2},
+                "agentBindingSnapshot": [
+                    {
+                        "nodeId": "hypothesis_design",
+                        "agentId": "agent-1",
+                        "roleKey": "hypothesis_designer",
+                    }
+                ],
+            },
+        )
+        monkeypatch.setattr(
+            real_ports_module,
+            "_formal_hypothesis_fan_out_input",
+            lambda **_kwargs: {
+                "selectionId": "selection-1",
+                "selectedCandidateIds": ["H1", "H2"],
+            },
+        )
+        monkeypatch.setattr(
+            ports,
+            "_create_hypothesis_fan_out",
+            lambda **_kwargs: pytest.fail("shadow must not create child tasks"),
+        )
+        monkeypatch.setattr(
+            real_ports_module,
+            "_bounded_agent_node_can_complete",
+            lambda *_args, **_kwargs: False,
+        )
+
+        shadow_handle = ports.create_agent_task(action=action)
+        assert shadow_handle.observation_only is True
+        assert shadow_handle.session_id == ""
+        assert fallback.session_id == "legacy-session"
+        events = harness.store.list_events("run-1")
+        scope_events = [
+            item
+            for item in events
+            if item.event_type == "workflow.session_scope.resolved"
+        ]
+        assert len(scope_events) == 1
+        payload = json.loads(scope_events[0].payload_json)
+        assert payload["mode"] == "shadow"
+        assert payload["candidateCount"] == 2
+        assert len(payload["scopeHash"]) == 64
+    finally:
+        harness.close()
+
+
+def test_formal_non_hypothesis_first_without_selection_uses_bounded_compatibility(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run(run_id="run-1")
+        harness.service.submit(
+            harness.request(run_id="run-1", idempotency_key="start-compatibility")
+        )
+        latest = harness.store.latest_attempt("run-1", "source_finding")
+        assert latest is not None
+        action = _action(node_run_id=latest.node_run_id)
+        fallback = AgentTaskHandle(
+            session_id="legacy-session",
+            session_attempt=1,
+            task_id="legacy-task",
+            turn_id="legacy-turn",
+        )
+        ports = RealDomainPorts(
+            harness.store,
+            agent_task_factory=lambda **_kwargs: fallback,
+        )
+        snapshot = {
+            "teamId": "team-1",
+            "projectId": "project-1",
+            "questionId": "SCI-096",
+            "workflowSessionScopeV3": {"hypothesis_design": "on"},
+            "researchObjectiveContract": {"hypothesisFirst": False},
+        }
+        monkeypatch.setattr(ports, "_run_input_snapshot", lambda _run_id: snapshot)
+        monkeypatch.setattr(ports, "_hypothesis_chain_state", lambda _snapshot: {})
+        monkeypatch.setattr(
+            ports,
+            "resolve_binding",
+            lambda _action: BindingResolution(
+                agent_id="agent-1", role_key="hypothesis_designer"
+            ),
+        )
+        monkeypatch.setattr(
+            real_ports_module,
+            "_bounded_agent_node_can_complete",
+            lambda *_args, **_kwargs: False,
+        )
+        monkeypatch.setattr(
+            real_ports_module,
+            "_formal_hypothesis_fan_out_input",
+            lambda **_kwargs: (_ for _ in ()).throw(
+                RuntimeError(
+                    "hypothesis_design requires a current hypothesis selection"
+                )
+            ),
+        )
+
+        handle = ports.create_agent_task(action=action)
+
+        assert handle == fallback
+        events = harness.store.list_events("run-1")
+        scope_events = [
+            item
+            for item in events
+            if item.event_type == "workflow.session_scope.resolved"
+        ]
+        assert len(scope_events) == 1
+        payload = json.loads(scope_events[0].payload_json)
+        assert payload["mode"] == "on"
+        assert payload["candidateCount"] == 0
+        assert (
+            payload["fallbackReason"]
+            == "legacy_non_hypothesis_first_without_authoritative_selection"
+        )
+    finally:
+        harness.close()
+
+
+def test_formal_hypothesis_first_without_selection_fails_closed(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run(run_id="run-1")
+        harness.service.submit(
+            harness.request(run_id="run-1", idempotency_key="start-hypothesis-missing")
+        )
+        latest = harness.store.latest_attempt("run-1", "source_finding")
+        assert latest is not None
+        action = _action(node_run_id=latest.node_run_id)
+        ports = RealDomainPorts(harness.store)
+        snapshot = {
+            "teamId": "team-1",
+            "projectId": "project-1",
+            "questionId": "SCI-096",
+            "workflowSessionScopeV3": {"hypothesis_design": "on"},
+            "researchObjectiveContract": {"hypothesisFirst": True},
+        }
+        monkeypatch.setattr(ports, "_run_input_snapshot", lambda _run_id: snapshot)
+        monkeypatch.setattr(ports, "_hypothesis_chain_state", lambda _snapshot: {})
+        monkeypatch.setattr(
+            ports,
+            "resolve_binding",
+            lambda _action: BindingResolution(
+                agent_id="agent-1", role_key="hypothesis_designer"
+            ),
+        )
+        monkeypatch.setattr(
+            real_ports_module,
+            "_bounded_agent_node_can_complete",
+            lambda *_args, **_kwargs: False,
+        )
+        monkeypatch.setattr(
+            real_ports_module,
+            "_formal_hypothesis_fan_out_input",
+            lambda **_kwargs: (_ for _ in ()).throw(
+                RuntimeError(
+                    "hypothesis_design requires a current hypothesis selection"
+                )
+            ),
+        )
+
+        with pytest.raises(
+            RuntimeError,
+            match="hypothesis_design requires a current hypothesis selection",
+        ):
+            ports.create_agent_task(action=action)
+    finally:
+        harness.close()
+
+
+def test_formal_live_selection_enables_fan_out_when_snapshot_is_missing_selection(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run(run_id="run-1")
+        harness.service.submit(
+            harness.request(run_id="run-1", idempotency_key="start-live-selection")
+        )
+        latest = harness.store.latest_attempt("run-1", "source_finding")
+        assert latest is not None
+        action = _action(node_run_id=latest.node_run_id)
+        ports = RealDomainPorts(harness.store)
+        snapshot = {
+            "teamId": "team-1",
+            "projectId": "project-1",
+            "questionId": "SCI-096",
+            "workflowSessionScopeV3": {"hypothesis_design": "on"},
+            "researchObjectiveContract": {"hypothesisFirst": False},
+        }
+        fan_out = {
+            "selection": {
+                "selectionId": "selection-live",
+                "selectedCandidateIds": ["H1"],
+            },
+            "selectionId": "selection-live",
+            "selectedCandidateIds": ["H1"],
+            "candidateSnapshots": [{"candidateId": "H1", "statement": "claim"}],
+        }
+        monkeypatch.setattr(ports, "_run_input_snapshot", lambda _run_id: snapshot)
+        monkeypatch.setattr(
+            ports,
+            "_hypothesis_chain_state",
+            lambda _snapshot: {"selectionId": "selection-live"},
+        )
+        monkeypatch.setattr(
+            ports,
+            "resolve_binding",
+            lambda _action: BindingResolution(
+                agent_id="agent-1", role_key="hypothesis_designer"
+            ),
+        )
+        monkeypatch.setattr(
+            real_ports_module,
+            "_bounded_agent_node_can_complete",
+            lambda *_args, **_kwargs: False,
+        )
+        monkeypatch.setattr(
+            real_ports_module,
+            "_formal_hypothesis_fan_out_input",
+            lambda **_kwargs: fan_out,
+        )
+        observed: list[dict[str, Any]] = []
+
+        def create_fan_out(**kwargs):
+            observed.append(dict(kwargs["fan_out"]))
+            return AgentTaskHandle(
+                session_id="root-live",
+                session_attempt=1,
+                task_id="task-live",
+                turn_id="turn-live",
+            )
+
+        monkeypatch.setattr(ports, "_create_hypothesis_fan_out", create_fan_out)
+
+        handle = ports.create_agent_task(action=action)
+
+        assert handle.task_id == "task-live"
+        assert observed and observed[0]["selectionId"] == "selection-live"
+        payload = json.loads(
+            next(
+                item
+                for item in harness.store.list_events("run-1")
+                if item.event_type == "workflow.session_scope.resolved"
+            ).payload_json
+        )
+        assert payload["selectionId"] == "selection-live"
+        assert payload["candidateCount"] == 1
+        assert payload["fallbackReason"] == ""
+    finally:
+        harness.close()
+
+
+def test_parallel_limit_is_frozen_and_fail_closed() -> None:
+    assert formal_hypothesis_fanout.hypothesis_max_parallel(
+        {"budgetPolicy": {"maxParallelTasks": 2}}, 3
+    ) == 2
+    with pytest.raises(RuntimeError, match="positive integer"):
+        formal_hypothesis_fanout.hypothesis_max_parallel(
+            {"budgetPolicy": {"maxParallelTasks": "2"}}, 3
+        )
+
+
+def test_resolve_candidate_reuses_success_and_retries_only_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    statuses = {
+        "H1": {
+            "taskId": "task-H1",
+            "workflowRunId": "run-1",
+            "workflowNodeId": "hypothesis_design",
+            "nodeRunId": "node-2",
+            "selectionId": "selection-1",
+            "candidateId": "H1",
+            "sessionId": "child-H1",
+            "sessionAttempt": 1,
+            "status": "completed",
+            "turn": {"turnId": "turn-H1"},
+        },
+        "H2": {
+            "taskId": "task-H2",
+            "workflowRunId": "run-1",
+            "workflowNodeId": "hypothesis_design",
+            "nodeRunId": "node-2",
+            "selectionId": "selection-1",
+            "candidateId": "H2",
+            "sessionId": "child-H2",
+            "sessionAttempt": 1,
+            "status": "failed",
+            "turn": {"turnId": "turn-H2"},
+        },
+    }
+    starts: list[dict] = []
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_project_agent_tasks.get_research_project_agent_task_status",
+        lambda *_args, **_kwargs: {"tasks": list(statuses.values())},
+    )
+
+    def start(_team: str, _project: str, payload: dict) -> dict:
+        starts.append(dict(payload))
+        return {
+            "task": {
+                "taskId": "task-H2-retry",
+                "sessionId": "child-H2-retry",
+                "sessionAttempt": 2,
+                "status": "running",
+                "turn": {"turnId": "turn-H2-retry"},
+            },
+            "taskId": "task-H2-retry",
+            "sessionId": "child-H2-retry",
+            "sessionAttempt": 2,
+            "startedTurnId": "turn-H2-retry",
+        }
+
+    monkeypatch.setattr(
+        "core.web.services.team_workflow.research_project_agent_tasks.start_research_project_agent_task",
+        start,
+    )
+    common = {
+        "team_id": "team-1",
+        "project_id": "project-1",
+        "action": _action(attempt=2, node_run_id="node-2"),
+        "agent_id": "agent-1",
+        "source_collection_run_id": "source-1",
+        "selection_id": "selection-1",
+        "selected_candidate_ids": ["H1", "H2"],
+        "candidate_context": {"candidateId": "H2"},
+        "subtask_id": "node-2:selection-1:H2",
+        "previous": {},
+    }
+    reused = formal_hypothesis_fanout.resolve_formal_candidate_task(
+        **{**common, "candidate_id": "H1"}
+    )
+    retried = formal_hypothesis_fanout.resolve_formal_candidate_task(
+        **{**common, "candidate_id": "H2"}
+    )
+    assert reused["sessionId"] == "child-H1"
+    assert retried["sessionId"] == "child-H2-retry"
+    assert starts[0]["formalRetry"] is True
+    assert starts[0]["retryTaskId"] == "task-H2"
+    reused_previous = formal_hypothesis_fanout.resolve_formal_candidate_task(
+        **{
+            **common,
+            "action": _action(attempt=3, node_run_id="node-3"),
+            "candidate_id": "H1",
+            "previous": statuses["H1"],
+        }
+    )
+    assert reused_previous["sessionId"] == "child-H1"
+    assert len(starts) == 1
+
+
+def test_fragment_readback_requires_exact_formal_scope() -> None:
+    payload = {
+        "kind": "hypothesis_fragment",
+        "workflowRunId": "run-1",
+        "workflowNodeId": "hypothesis_design",
+        "nodeRunId": "node-1",
+        "selectionId": "selection-1",
+        "candidateId": "H1",
+        "sessionId": "child-H1",
+        "sessionAttempt": 1,
+        "taskId": "task-H1",
+    }
+    row = {"recordId": "hypothesis_fragment:selection-1:H1", "payload": payload}
+    assert formal_hypothesis_fanout.load_formal_hypothesis_fragment(
+        [row],
+        node_run_id="node-1",
+        selection_id="selection-1",
+        candidate_id="H1",
+        session_id="child-H1",
+        task_id="task-H1",
+        session_attempt=1,
+    ) == payload
+    assert formal_hypothesis_fanout.load_formal_hypothesis_fragment(
+        [row],
+        node_run_id="node-2",
+        selection_id="selection-1",
+        candidate_id="H1",
+        session_id="child-H1",
+        task_id="task-H1",
+        session_attempt=1,
+    ) is None
+    assert formal_hypothesis_fanout.load_reusable_formal_hypothesis_fragment(
+        [row],
+        workflow_run_id="run-1",
+        selection_id="selection-1",
+        candidate_id="H1",
+        session_id="child-H1",
+        task_id="task-H1",
+        session_attempt=1,
+    ) == payload
+
+
+def test_scoped_handle_reads_and_requires_canonical_session_lineage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = {
+        "task": {
+            "taskId": "task-H1",
+            "sessionId": "child-H1",
+            "sessionAttempt": 1,
+            "status": "running",
+            "turn": {"turnId": "turn-H1"},
+        }
+    }
+    monkeypatch.setattr(
+        "core.web.services.session_service.get_session_detail",
+        lambda *_args, **_kwargs: {
+            "id": "child-H1",
+            "parentSessionId": "root-1",
+            "rootSessionId": "root-1",
+        },
+    )
+    handle = formal_hypothesis_fanout.scoped_handle_from_started(
+        started,
+        selection_id="selection-1",
+        candidate_id="H1",
+        subtask_id="node-1:selection-1:H1",
+        expected_root_session_id="root-1",
+    )
+    assert handle.parent_session_id == "root-1"
+    assert handle.root_session_id == "root-1"
+
+    with pytest.raises(RuntimeError, match="does not match"):
+        formal_hypothesis_fanout.scoped_handle_from_started(
+            started,
+            selection_id="selection-1",
+            candidate_id="H1",
+            subtask_id="node-1:selection-1:H1",
+            expected_root_session_id="root-other",
+        )
+
+
+def test_formal_live_anchor_is_incremental_and_keeps_failed_placeholder(
+    tmp_path,
+) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run(run_id="run-1")
+        harness.service.submit(
+            harness.request(run_id="run-1", idempotency_key="start-live-anchor")
+        )
+        latest = harness.store.latest_attempt("run-1", "source_finding")
+        assert latest is not None
+        action = _action(node_run_id=latest.node_run_id)
+        ports = RealDomainPorts(harness.store)
+        binding = BindingResolution(agent_id="agent-1", role_key="hypothesis_designer")
+        child = ScopedAgentTaskHandle(
+            selection_id="selection-1",
+            candidate_id="H1",
+            session_id="child-H1",
+            session_attempt=1,
+            task_id="task-H1",
+            turn_id="turn-H1",
+            parent_session_id="root-1",
+            root_session_id="root-1",
+        )
+        ports._persist_hypothesis_anchor_draft(
+            action=action,
+            binding=binding,
+            root_session_id="root-1",
+            root_session_attempt=1,
+            selection_id="selection-1",
+            selected_candidate_ids=["H1", "H2"],
+            handles=[child],
+            candidate_statuses={"H2": "failed"},
+        )
+        row = harness.store.read(
+            lambda repo: repo.get_anchor_by_node_run(latest.node_run_id)
+        )
+        assert row is not None
+        payload = json.loads(row[13])
+        assert payload["rootSession"]["sessionId"] == "root-1"
+        assert [item["candidateId"] for item in payload["scopedSessions"]] == [
+            "H1",
+            "H2",
+        ]
+        assert payload["scopedSessions"][0]["sessionId"] == "child-H1"
+        assert payload["scopedSessions"][1]["sessionId"] is None
+        assert payload["scopedSessions"][1]["status"] == "failed"
+    finally:
+        harness.close()
+
+
+def test_hypothesis_scope_events_are_bounded_and_idempotent(tmp_path) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run(run_id="run-1")
+        harness.service.submit(
+            harness.request(run_id="run-1", idempotency_key="start-events")
+        )
+        latest = harness.store.latest_attempt("run-1", "source_finding")
+        assert latest is not None
+        action = _action(node_run_id=latest.node_run_id)
+        fields = {
+            "mode": "on",
+            "selectionId": "selection-1",
+            "candidateId": "H1",
+            "sessionId": "child-H1",
+            "status": "running",
+            "prompt": "must-not-be-recorded",
+        }
+        first = record_hypothesis_scope_event(
+            harness.store,
+            action=action,
+            event_type="workflow.child_session.created",
+            fields=fields,
+            discriminator="H1:1",
+        )
+        second = record_hypothesis_scope_event(
+            harness.store,
+            action=action,
+            event_type="workflow.child_session.created",
+            fields=fields,
+            discriminator="H1:1",
+        )
+
+        assert first == second
+        matching = [
+            item
+            for item in harness.store.list_events("run-1")
+            if item.event_id == first
+        ]
+        assert len(matching) == 1
+        payload = json.loads(matching[0].payload_json)
+        assert payload["candidateId"] == "H1"
+        assert "prompt" not in payload
+    finally:
+        harness.close()
+
+
+def test_hypothesis_scope_event_id_conflict_is_fail_closed_without_sequence_gap(
+    tmp_path,
+) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run(run_id="run-1")
+        harness.service.submit(
+            harness.request(run_id="run-1", idempotency_key="start-event-conflict")
+        )
+        latest = harness.store.latest_attempt("run-1", "source_finding")
+        assert latest is not None
+        action = _action(node_run_id=latest.node_run_id)
+        first = record_hypothesis_scope_event(
+            harness.store,
+            action=action,
+            event_type="workflow.child_session.created",
+            fields={"candidateId": "H1", "status": "running"},
+            discriminator="H1:1",
+        )
+        sequence_after_first = harness.store.latest_event_sequence("run-1")
+
+        with pytest.raises(HypothesisScopeEventConflict, match=first):
+            record_hypothesis_scope_event(
+                harness.store,
+                action=action,
+                event_type="workflow.child_session.created",
+                fields={"candidateId": "H2", "status": "running"},
+                discriminator="H1:1",
+            )
+
+        matching = [
+            item
+            for item in harness.store.list_events("run-1")
+            if item.event_id == first
+        ]
+        assert len(matching) == 1
+        assert harness.store.latest_event_sequence("run-1") == sequence_after_first
+    finally:
+        harness.close()
+
+
+def test_hypothesis_scope_event_replay_compares_correlation_identity(
+    tmp_path,
+) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run(run_id="run-1")
+        harness.service.submit(
+            harness.request(run_id="run-1", idempotency_key="start-event-correlation")
+        )
+        latest = harness.store.latest_attempt("run-1", "source_finding")
+        assert latest is not None
+        action = _action(node_run_id=latest.node_run_id)
+        first = record_hypothesis_scope_event(
+            harness.store,
+            action=action,
+            event_type="workflow.child_session.created",
+            fields={"candidateId": "H1", "status": "running"},
+            discriminator="H1:correlation",
+        )
+        conflicting_action = replace(action, action_id="action-different")
+
+        with pytest.raises(HypothesisScopeEventConflict, match=first):
+            record_hypothesis_scope_event(
+                harness.store,
+                action=conflicting_action,
+                event_type="workflow.child_session.created",
+                fields={"candidateId": "H1", "status": "running"},
+                discriminator="H1:correlation",
+            )
+    finally:
+        harness.close()
+
+
+def test_formal_child_turn_failure_closes_live_anchor_and_emits_blocked_event(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run(run_id="run-1")
+        harness.service.submit(
+            harness.request(run_id="run-1", idempotency_key="start-turn-failure")
+        )
+        latest = harness.store.latest_attempt("run-1", "source_finding")
+        assert latest is not None
+        action = _action(node_run_id=latest.node_run_id)
+        child = ScopedAgentTaskHandle(
+            selection_id="selection-1",
+            candidate_id="H1",
+            session_id="child-H1",
+            session_attempt=1,
+            task_id="task-H1",
+            turn_id="turn-H1",
+            parent_session_id="root-1",
+            root_session_id="root-1",
+        )
+        handle = AgentTaskHandle(
+            session_id="root-1",
+            session_attempt=1,
+            task_id="",
+            turn_id="",
+            root_session_id="root-1",
+            root_session_attempt=1,
+            scoped_handles=(child,),
+        )
+        binding = BindingResolution(
+            agent_id="agent-1", role_key="hypothesis_designer"
+        )
+        ports = RealDomainPorts(harness.store)
+        monkeypatch.setattr(ports, "resolve_binding", lambda _action: binding)
+        ports._persist_hypothesis_anchor_draft(
+            action=action,
+            binding=binding,
+            root_session_id="root-1",
+            root_session_attempt=1,
+            selection_id="selection-1",
+            selected_candidate_ids=["H1"],
+            handles=[child],
+        )
+        monkeypatch.setattr(
+            real_ports_module,
+            "_formal_hypothesis_fan_out_input",
+            lambda **_kwargs: {
+                "selection": {
+                    "selectionId": "selection-1",
+                    "selectedCandidateIds": ["H1"],
+                },
+                "selectionId": "selection-1",
+                "selectedCandidateIds": ["H1"],
+            },
+        )
+        monkeypatch.setattr(
+            "core.web.services.team_workflow.research_runtime.agent_turn_completion.wait_for_agent_turn_terminal",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                RuntimeError("terminal failed")
+            ),
+        )
+
+        with pytest.raises(RuntimeError, match="terminal failed"):
+            ports._execute_hypothesis_fan_out(
+                action=action,
+                handle=handle,
+                snapshot={"teamId": "team-1", "projectId": "project-1"},
+            )
+
+        row = harness.store.read(
+            lambda repo: repo.get_anchor_by_node_run(latest.node_run_id)
+        )
+        payload = json.loads(row[13])
+        assert payload["rootSession"]["status"] == "failed"
+        assert payload["scopedSessions"][0]["status"] == "failed"
+        assert any(
+            item.event_type == "workflow.hypothesis_aggregation.blocked"
+            and json.loads(item.payload_json).get("errorCode")
+            == "candidate_turn_failed"
+            for item in harness.store.list_events("run-1")
+        )
+    finally:
+        harness.close()
+
+
+def test_formal_execute_rejects_candidate_list_drift_after_anchor_freeze(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run(run_id="run-1")
+        harness.service.submit(
+            harness.request(run_id="run-1", idempotency_key="start-selection-drift")
+        )
+        latest = harness.store.latest_attempt("run-1", "source_finding")
+        assert latest is not None
+        action = _action(node_run_id=latest.node_run_id)
+        binding = BindingResolution(
+            agent_id="agent-1", role_key="hypothesis_designer"
+        )
+        child = ScopedAgentTaskHandle(
+            selection_id="selection-1",
+            candidate_id="H1",
+            session_id="child-H1",
+            session_attempt=1,
+            task_id="task-H1",
+            turn_id="turn-H1",
+            parent_session_id="root-1",
+            root_session_id="root-1",
+        )
+        handle = AgentTaskHandle(
+            session_id="root-1",
+            session_attempt=1,
+            task_id="",
+            turn_id="",
+            root_session_id="root-1",
+            root_session_attempt=1,
+            scoped_handles=(child,),
+        )
+        ports = RealDomainPorts(harness.store)
+        monkeypatch.setattr(ports, "resolve_binding", lambda _action: binding)
+        ports._persist_hypothesis_anchor_draft(
+            action=action,
+            binding=binding,
+            root_session_id="root-1",
+            root_session_attempt=1,
+            selection_id="selection-1",
+            selected_candidate_ids=["H1"],
+            handles=[child],
+        )
+        monkeypatch.setattr(
+            real_ports_module,
+            "_formal_hypothesis_fan_out_input",
+            lambda **_kwargs: {
+                "selection": {
+                    "selectionId": "selection-1",
+                    "selectedCandidateIds": ["H1", "H2"],
+                },
+                "selectionId": "selection-1",
+                "selectedCandidateIds": ["H1", "H2"],
+            },
+        )
+
+        with pytest.raises(RuntimeError, match="scope was frozen"):
+            ports._execute_hypothesis_fan_out(
+                action=action,
+                handle=handle,
+                snapshot={"teamId": "team-1", "projectId": "project-1"},
+            )
+        row = harness.store.read(
+            lambda repo: repo.get_anchor_by_node_run(latest.node_run_id)
+        )
+        assert json.loads(row[13])["rootSession"]["status"] == "failed"
+    finally:
+        harness.close()
+
+
+def test_formal_create_continues_after_one_candidate_start_failure(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run(run_id="run-1")
+        harness.service.submit(
+            harness.request(run_id="run-1", idempotency_key="start-partial")
+        )
+        latest = harness.store.latest_attempt("run-1", "source_finding")
+        assert latest is not None
+        action = _action(node_run_id=latest.node_run_id)
+        started_candidates: list[str] = []
+        monkeypatch.setattr(
+            real_ports_module,
+            "_resolve_formal_node_root_session",
+            lambda **_kwargs: {"sessionId": "root-1", "sessionAttempt": 1},
+        )
+        monkeypatch.setattr(
+            real_ports_module,
+            "_verify_node_root_session",
+            lambda *_args, **_kwargs: None,
+        )
+
+        def start_candidate(**kwargs):
+            candidate_id = kwargs["candidate_id"]
+            started_candidates.append(candidate_id)
+            if candidate_id == "H2":
+                raise RuntimeError("H2 unavailable")
+            return {"candidateId": candidate_id}
+
+        monkeypatch.setattr(
+            real_ports_module,
+            "_resolve_or_start_formal_candidate_task",
+            start_candidate,
+        )
+        monkeypatch.setattr(
+            real_ports_module,
+            "_scoped_handle_from_started",
+            lambda started, **kwargs: ScopedAgentTaskHandle(
+                selection_id=kwargs["selection_id"],
+                candidate_id=kwargs["candidate_id"],
+                session_id=f"child-{started['candidateId']}",
+                session_attempt=1,
+                task_id=f"task-{started['candidateId']}",
+                turn_id=f"turn-{started['candidateId']}",
+                parent_session_id="root-1",
+                root_session_id="root-1",
+            ),
+        )
+        ports = RealDomainPorts(harness.store)
+        handle = ports._create_hypothesis_fan_out(
+            action=action,
+            binding=BindingResolution(
+                agent_id="agent-1", role_key="hypothesis_designer"
+            ),
+            snapshot={
+                "teamId": "research-team",
+                "projectId": "project-1",
+            },
+            fan_out={
+                "selectionId": "selection-1",
+                "selectedCandidateIds": ["H1", "H2", "H3"],
+                "candidateSnapshots": [
+                    {"candidateId": "H1"},
+                    {"candidateId": "H2"},
+                    {"candidateId": "H3"},
+                ],
+            },
+        )
+        assert started_candidates == ["H1", "H2", "H3"]
+        assert [item.candidate_id for item in handle.scoped_handles] == ["H1", "H3"]
+        row = harness.store.read(
+            lambda repo: repo.get_anchor_by_node_run(latest.node_run_id)
+        )
+        payload = json.loads(row[13])
+        assert [item["status"] for item in payload["scopedSessions"]] == [
+            "running",
+            "failed",
+            "running",
+        ]
+    finally:
+        harness.close()
+
+
+def test_formal_retry_reuses_successful_children_and_rebinds_replayed_fragments(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A partial retry opens only the failed child and rebinds sibling output."""
+
+    monkeypatch.setattr(workflow_artifact_store, "PROJECT_ROOT", tmp_path)
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    try:
+        harness.seed_run(run_id="run-1")
+
+        def seed_attempts(uow) -> None:
+            for command_id, node_run_id, attempt, status in (
+                ("cmd-node-1", "node-1", 1, "failed"),
+                ("cmd-node-2", "node-2", 2, "running"),
+            ):
+                uow.repository.insert_command(
+                    build_command_record(
+                        command_id=command_id,
+                        run_id="run-1",
+                        node_id="hypothesis_design",
+                        idempotency_key=command_id,
+                    )
+                )
+                uow.repository.insert_attempt(
+                    build_attempt_record(
+                        node_run_id=node_run_id,
+                        run_id="run-1",
+                        node_id="hypothesis_design",
+                        attempt=attempt,
+                        status=status,
+                        command_id=command_id,
+                    )
+                )
+
+        harness.store.submit(seed_attempts, force_flush=True).result(timeout=10)
+
+        def child_handle(
+            candidate_id: str,
+            *,
+            node_run_id: str,
+            session_attempt: int = 1,
+            status: str = "succeeded",
+            suffix: str = "",
+        ) -> ScopedAgentTaskHandle:
+            token = suffix or candidate_id
+            return ScopedAgentTaskHandle(
+                selection_id="selection-1",
+                candidate_id=candidate_id,
+                session_id=f"child-{token}",
+                session_attempt=session_attempt,
+                task_id=f"task-{token}",
+                turn_id=f"turn-{token}",
+                subtask_id=f"{node_run_id}:selection-1:{candidate_id}",
+                status=status,
+                parent_session_id="root-1",
+                root_session_id="root-1",
+            )
+
+        def fragment_context(child: ScopedAgentTaskHandle, node_run_id: str) -> dict:
+            return {
+                "task": {
+                    "taskKind": "hypothesis_design",
+                    "workflowRunId": "run-1",
+                    "workflowNodeId": "hypothesis_design",
+                    "nodeRunId": node_run_id,
+                    "sourceCollectionRunId": "source-1",
+                    "selectionId": child.selection_id,
+                    "candidateId": child.candidate_id,
+                    "sessionId": child.session_id,
+                    "sessionAttempt": child.session_attempt,
+                    "taskId": child.task_id,
+                    "turn": {"turnId": child.turn_id},
+                },
+                "hypothesisInput": {
+                    "status": "ready",
+                    "allowedEvidenceRefs": ["counter-1"],
+                },
+            }
+
+        def fragment_payload(candidate_id: str) -> dict:
+            return {
+                "statement": f"statement-{candidate_id}",
+                "mechanism": f"mechanism-{candidate_id}",
+                "predictions": [f"prediction-{candidate_id}"],
+                "falsificationCriteria": [f"falsify-{candidate_id}"],
+                "evidenceRefs": ["counter-1"],
+                "counterEvidenceRefs": ["counter-1"],
+                "scores": {
+                    "novelty": 0.8,
+                    "competitionFit": 0.7,
+                    "falsifiability": 0.9,
+                    "evidenceSupport": 0.6,
+                    "feasibility": 0.75,
+                },
+            }
+
+        binding = BindingResolution(
+            agent_id="agent-1",
+            role_key="hypothesis_designer",
+        )
+        old_children = [
+            child_handle("H1", node_run_id="node-1"),
+            child_handle("H2", node_run_id="node-1", status="failed"),
+            child_handle("H3", node_run_id="node-1"),
+        ]
+        ports = RealDomainPorts(harness.store)
+        first_action = _action(attempt=1, node_run_id="node-1")
+        ports._persist_hypothesis_anchor_draft(
+            action=first_action,
+            binding=binding,
+            root_session_id="root-1",
+            root_session_attempt=1,
+            selection_id="selection-1",
+            selected_candidate_ids=["H1", "H2", "H3"],
+            handles=old_children,
+            candidate_statuses={"H2": "failed"},
+            root_status="failed",
+        )
+        for child in (old_children[0], old_children[2]):
+            hypothesis_fragment_writer.record_hypothesis_fragment(
+                team_id="team-1",
+                task_context=fragment_context(child, "node-1"),
+                payload=fragment_payload(child.candidate_id),
+                persist=True,
+                artifact_sink=workflow_artifact_store.put_workflow_artifact,
+            )
+
+        old_tasks = {
+            child.candidate_id: {
+                "taskId": child.task_id,
+                "sessionId": child.session_id,
+                "sessionAttempt": child.session_attempt,
+                "status": "completed" if child.candidate_id != "H2" else "failed",
+                "turn": {"turnId": child.turn_id},
+            }
+            for child in old_children
+        }
+        monkeypatch.setattr(
+            formal_hypothesis_fanout,
+            "_task_from_status",
+            lambda **kwargs: dict(old_tasks[kwargs["candidate_id"]]),
+        )
+        starts: list[dict] = []
+
+        def start_retry(team_id: str, project_id: str, payload: dict) -> dict:
+            _ = team_id, project_id
+            starts.append(dict(payload))
+            return {
+                "task": {
+                    "taskId": "task-H2-retry",
+                    "sessionId": "child-H2-retry",
+                    "sessionAttempt": 2,
+                    "status": "running",
+                    "turn": {"turnId": "turn-H2-retry"},
+                },
+                "taskId": "task-H2-retry",
+                "sessionId": "child-H2-retry",
+                "sessionAttempt": 2,
+                "startedTurnId": "turn-H2-retry",
+            }
+
+        monkeypatch.setattr(
+            "core.web.services.team_workflow.research_project_agent_tasks.start_research_project_agent_task",
+            start_retry,
+        )
+        monkeypatch.setattr(
+            "core.web.services.session_service.get_session_detail",
+            lambda session_id, **_kwargs: {
+                "id": session_id,
+                "parentSessionId": "root-1",
+                "rootSessionId": "root-1",
+                "agentId": "agent-1",
+            },
+        )
+        monkeypatch.setattr(
+            real_ports_module,
+            "_resolve_formal_node_root_session",
+            lambda **_kwargs: {"sessionId": "root-1", "sessionAttempt": 1},
+        )
+        monkeypatch.setattr(
+            real_ports_module,
+            "_verify_node_root_session",
+            lambda *_args, **_kwargs: None,
+        )
+        monkeypatch.setattr(ports, "resolve_binding", lambda _action: binding)
+        monkeypatch.setattr(
+            real_ports_module,
+            "_candidate_hypothesis_task_context",
+            lambda **kwargs: fragment_context(kwargs["child"], "node-2"),
+        )
+        completed: list[dict] = []
+        monkeypatch.setattr(
+            real_ports_module,
+            "_mark_candidate_task_completed",
+            lambda **kwargs: completed.append(dict(kwargs)),
+        )
+        monkeypatch.setattr(
+            "core.web.services.team_workflow.research_runtime.agent_turn_completion.wait_for_agent_turn_terminal",
+            lambda *_args, **_kwargs: {"terminal": True, "terminalStatus": "completed"},
+        )
+
+        second_action = _action(attempt=2, node_run_id="node-2")
+        snapshot = {
+            "teamId": "team-1",
+            "projectId": "project-1",
+            "sourceCollectionRunId": "source-1",
+            "hypothesisSelection": {
+                "selectionId": "selection-1",
+                "selectedCandidateIds": ["H1", "H2", "H3"],
+                "candidateSnapshots": [
+                    {"candidateId": "H1"},
+                    {"candidateId": "H2"},
+                    {"candidateId": "H3"},
+                ],
+            },
+        }
+        handle = ports._create_hypothesis_fan_out(
+            action=second_action,
+            binding=binding,
+            snapshot=snapshot,
+            fan_out=snapshot["hypothesisSelection"],
+        )
+        retry_child = next(
+            item for item in handle.scoped_handles if item.candidate_id == "H2"
+        )
+        hypothesis_fragment_writer.record_hypothesis_fragment(
+            team_id="team-1",
+            task_context=fragment_context(retry_child, "node-2"),
+            payload=fragment_payload("H2"),
+            persist=True,
+            artifact_sink=workflow_artifact_store.put_workflow_artifact,
+        )
+
+        result = ports._execute_hypothesis_fan_out(
+            action=second_action,
+            handle=handle,
+            snapshot=snapshot,
+        )
+
+        by_candidate = {
+            item.candidate_id: item for item in result.handle.scoped_handles
+        }
+        assert (by_candidate["H1"].session_id, by_candidate["H1"].task_id, by_candidate["H1"].turn_id) == (
+            "child-H1",
+            "task-H1",
+            "turn-H1",
+        )
+        assert (by_candidate["H3"].session_id, by_candidate["H3"].task_id, by_candidate["H3"].turn_id) == (
+            "child-H3",
+            "task-H3",
+            "turn-H3",
+        )
+        assert (by_candidate["H2"].session_id, by_candidate["H2"].task_id, by_candidate["H2"].turn_id) == (
+            "child-H2-retry",
+            "task-H2-retry",
+            "turn-H2-retry",
+        )
+        assert len(starts) == 1
+        assert starts[0]["candidateId"] == "H2"
+        assert starts[0]["formalRetry"] is True
+        assert starts[0]["retryTaskId"] == "task-H2"
+        assert {item["task_id"] for item in completed} == {
+            "task-H1",
+            "task-H2-retry",
+            "task-H3",
+        }
+
+        fragment_rows = workflow_artifact_store.list_workflow_artifacts(
+            "team-1",
+            kind="hypothesis_fragment",
+            workflow_run_id="run-1",
+        )
+        current_fragments = {
+            str((row.get("payload") or {}).get("candidateId")): row
+            for row in fragment_rows
+            if isinstance(row.get("payload"), dict)
+            and row["payload"].get("nodeRunId") == "node-2"
+        }
+        assert set(current_fragments) == {"H1", "H2", "H3"}
+        for candidate_id in ("H1", "H3"):
+            provenance = current_fragments[candidate_id]["payload"]["provenance"]
+            assert provenance["nodeRunId"] == "node-2"
+            assert provenance["replayedFromNodeRunId"] == "node-1"
+            assert provenance["replayedFromTaskId"] == f"task-{candidate_id}"
+            assert provenance["replayedFromFragmentRef"].endswith(
+                f":{candidate_id}:node-1"
+            )
+
+        hypothesis_sets = workflow_artifact_store.list_workflow_artifacts(
+            "team-1", kind="hypothesis_set", workflow_run_id="run-1"
+        )
+        assert len(hypothesis_sets) == 1
+        assert [
+            item["candidateId"] for item in hypothesis_sets[0]["payload"]["candidates"]
+        ] == ["H1", "H2", "H3"]
+
+        anchor = harness.store.read(
+            lambda repo: repo.get_anchor_by_node_run("node-2")
+        )
+        assert anchor is not None
+        anchor_payload = json.loads(anchor[13])
+        assert anchor_payload["rootSession"]["status"] == "succeeded"
+        assert anchor_payload["scopedSessions"][0]["fragmentRefs"]
+        assert anchor_payload["scopedSessions"][1]["sessionAttempt"] == 2
+        anchor_count = harness.store.read(
+            lambda repo: repo.execute(
+                "SELECT COUNT(*) FROM execution_anchors WHERE node_run_id = ?",
+                ("node-2",),
+            ).fetchone()[0]
+        )
+        assert anchor_count == 1
+    finally:
+        harness.close()

@@ -16,6 +16,7 @@ import time
 from collections.abc import Callable, Mapping
 from typing import Any
 
+from core.logging import debug
 from core.research.workflow.challenge_cup_runtime import (
     ChallengeCupGraphCoordinator,
     GraphDispatch,
@@ -26,13 +27,12 @@ from core.research.workflow.challenge_cup_runtime import (
     successor_map,
 )
 from core.research.workflow.contracts import ExecutionReceipt
-from core.research.workflow.ledger import WorkflowLedgerStore, outbox as outbox_api
+from core.research.workflow.ledger import WorkflowLedgerStore
+from core.research.workflow.ledger import outbox as outbox_api
 from core.research.workflow.transitions import (
     NodeAttemptStatus,
     can_transition_node_attempt,
 )
-
-from core.logging import debug
 
 from .block_projection import (
     apply_node_run_block,
@@ -1596,7 +1596,7 @@ def _adapter_dispatch_record(
         node_run_id=str(node_run_id or pending.node_run_id),
         action_kind="adapter_dispatch",
         idempotency_key=f"adapter:{pending.action_id}",
-        payload_json=json.dumps(pending.to_dict()),
+        payload_json=json.dumps(pending.to_dict(), ensure_ascii=False),
         status="pending",
         attempt_count=0,
         available_at_ms=now_ms,
@@ -1685,4 +1685,10 @@ def _pending_from_dispatching_row(row: Any) -> PendingAction | None:
         input_artifact_refs=(),
         binding_snapshot_id=row[6],
         budget_policy_hash="",
+        scope={
+            "version": 3,
+            "kind": "workflow_node_root",
+            "workflowRunId": str(row[1]),
+            "workflowNodeId": node_id,
+        },
     )

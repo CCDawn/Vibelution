@@ -114,6 +114,8 @@ class ResearchWorkflowNodeDetailResponse(ResearchRuntimeJsonResponse):
     sessionAttempt: int | None = None
     chatDeepLink: str | None = None
     sessionAnchorDegraded: bool = False
+    rootSession: dict[str, Any] | None = None
+    scopedSessions: list[dict[str, Any]] = Field(default_factory=list)
     blockedReason: str = ""
     nodeAttempt: int = 0
 

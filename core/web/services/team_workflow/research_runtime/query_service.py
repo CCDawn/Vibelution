@@ -7,7 +7,7 @@ fails closed; legacy JSON stores are never consulted.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlencode
@@ -27,6 +27,7 @@ from core.research.workflow.ledger.repository import WorkflowLedgerRepository
 
 from .blocked_reason import format_blocked_reason
 from .command_offer_builder import build_command_offers
+from .node_scoped_session_projection import project_ledger_scoped_sessions
 from .projection_builder import ProjectionInputs, build_research_workflow_snapshot
 from .readiness import NodeReadinessService
 from .readiness.common import DomainReadinessContext
@@ -81,6 +82,7 @@ class WorkflowQueryService:
         evaluated_at_ms: Callable[[], int] | None = None,
         definition: Any | None = None,
         revise_checkpoint_resolver: Callable[[str], str] | None = None,
+        session_detail_reader: Callable[[str], Mapping[str, Any] | None] | None = None,
     ) -> None:
         self._store = store
         self._readiness = readiness_service
@@ -89,6 +91,7 @@ class WorkflowQueryService:
         self._evaluated_at_ms = evaluated_at_ms
         self._definition = definition or build_challenge_cup_workflow_definition()
         self._revise_checkpoint_resolver = revise_checkpoint_resolver
+        self._session_detail_reader = session_detail_reader
 
     def _resolve_revise_checkpoint_id(self, run: Any) -> str | None:
         """Revision offers need a fork base checkpoint.
@@ -199,6 +202,63 @@ class WorkflowQueryService:
             actor_kind=node.actorKind.value,
             frozen=frozen,
         )
+        scoped_session_projection = project_ledger_scoped_sessions(
+            anchor,
+            team_id=team_id,
+            run_id=run_id,
+            node_id=node_id,
+            node_run_id=latest.node_run_id if latest is not None else None,
+            node_status=latest.status if latest is not None else snap.run.status,
+            session_detail_reader=self._session_detail_reader,
+        )
+        formal_projection = bool(
+            scoped_session_projection.get("_formalProjection")
+        )
+        formal_root = scoped_session_projection.get("rootSession")
+        if formal_projection:
+            formal_root_healthy = bool(
+                isinstance(formal_root, Mapping)
+                and not formal_root.get("sessionAnchorDegraded")
+            )
+            if formal_root_healthy:
+                projected_session_id = _optional_session_scalar(
+                    formal_root.get("sessionId")
+                )
+                projected_task_id = _optional_session_scalar(
+                    formal_root.get("taskId")
+                )
+                projected_turn_id = _optional_session_scalar(
+                    formal_root.get("turnId")
+                )
+                projected_session_attempt = formal_root.get("sessionAttempt")
+                projected_chat_deep_link = _optional_session_scalar(
+                    formal_root.get("chatDeepLink")
+                )
+                projected_session_degraded = False
+            else:
+                # A formal payload is authoritative even when its root is
+                # absent or damaged. Do not fall back to the ledger row's
+                # scalar session fields, which may point at a candidate child.
+                projected_session_id = None
+                projected_task_id = None
+                projected_turn_id = None
+                projected_session_attempt = None
+                projected_chat_deep_link = None
+                projected_session_degraded = True
+        else:
+            projected_session_id = session["session_id"]
+            projected_task_id = session["task_id"]
+            projected_turn_id = session["turn_id"]
+            projected_session_attempt = session["session_attempt"]
+            projected_chat_deep_link = _chat_deep_link(
+                team_id=team_id,
+                run_id=run_id,
+                node_id=node_id,
+                session_id=projected_session_id,
+                task_id=projected_task_id,
+                turn_id=projected_turn_id,
+            )
+            projected_session_degraded = session["degraded"]
         return ResearchWorkflowNodeDetail(
             run_id=run_id,
             team_id=team_id,
@@ -221,19 +281,14 @@ class WorkflowQueryService:
             agent_id=session["agent_id"],
             display_name=session["display_name"],
             resolved_from=session["resolved_from"],
-            session_id=session["session_id"],
-            task_id=session["task_id"],
-            turn_id=session["turn_id"],
-            session_attempt=session["session_attempt"],
-            chat_deep_link=_chat_deep_link(
-                team_id=team_id,
-                run_id=run_id,
-                node_id=node_id,
-                session_id=session["session_id"],
-                task_id=session["task_id"],
-                turn_id=session["turn_id"],
-            ),
-            session_anchor_degraded=session["degraded"],
+            session_id=projected_session_id,
+            task_id=projected_task_id,
+            turn_id=projected_turn_id,
+            session_attempt=projected_session_attempt,
+            chat_deep_link=projected_chat_deep_link,
+            session_anchor_degraded=projected_session_degraded,
+            root_session=scoped_session_projection["rootSession"],
+            scoped_sessions=tuple(scoped_session_projection["scopedSessions"]),
             blocked_reason=_node_blocked_reason(latest, snap.run.blocked_reason),
         )
 
@@ -419,8 +474,8 @@ def _agent_display_name(agent_id: str) -> str:
         name = str(lookup_agent_display_name_map().get(agent_id) or "").strip()
         if name:
             return name
-    except Exception:
-        pass
+    except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError):
+        return agent_id
     return agent_id
 
 
@@ -452,6 +507,11 @@ def _session_fields(
         "session_attempt": int(session_attempt) if session_attempt is not None else None,
         "degraded": actor_kind == "agent" and not complete,
     }
+
+
+def _optional_session_scalar(value: Any) -> str | None:
+    normalized = str(value or "").strip()
+    return normalized or None
 
 
 def _chat_deep_link(

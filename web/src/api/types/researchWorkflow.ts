@@ -4,6 +4,10 @@
  * selectedNodeId is UI-only and must not appear on server projections.
  */
 
+import type { NodeSessionAnchor, ScopedSessionAnchor } from "./research-workflow/core";
+
+export type { NodeSessionAnchor, ScopedSessionAnchor } from "./research-workflow/core";
+
 export type ActorKind = "agent" | "system" | "human";
 
 export type WorkflowStageId =
@@ -313,6 +317,8 @@ export type ResearchWorkflowNodeDetail = {
   sessionBinding: NodeAgentSessionBinding | null;
   chatDeepLink: string | null;
   sessionAnchorDegraded: boolean;
+  rootSession?: NodeSessionAnchor | null;
+  scopedSessions?: ScopedSessionAnchor[];
   runtimeCurrent: boolean;
   status: string | null;
   nodeAttempt: number;

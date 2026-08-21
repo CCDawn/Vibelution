@@ -47,6 +47,7 @@ class AdapterResult:
     usage: dict[str, Any] = field(default_factory=dict)
     reserved: dict[str, Any] = field(default_factory=dict)
     problem: dict[str, Any] | None = None
+    observation_only: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -61,6 +62,8 @@ class AdapterResult:
             payload["reserved"] = dict(self.reserved)
         if self.problem:
             payload["problem"] = dict(self.problem)
+        if self.observation_only:
+            payload["observationOnly"] = True
         return payload
 
 

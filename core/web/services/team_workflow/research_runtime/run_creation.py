@@ -103,14 +103,30 @@ def create_question_run(
     return created
 
 
-def _ensure_create_fingerprint(run: Any, fingerprint: str) -> None:
+def _create_request_fingerprints(run_input: Mapping[str, Any]) -> tuple[str, ...]:
+    """Return current and legacy fingerprints for a create request.
+
+    ``workflowSessionScopeV3`` is server-owned by ``freeze_run_input``.  It
+    therefore must not make two requests with the same idempotency key look
+    different merely because a client included (or changed) that field.  Keep
+    the raw request fingerprint as a replay fallback for runs written before
+    this normalization was introduced.
+    """
+    canonical_request = dict(run_input)
+    canonical_request.pop("workflowSessionScopeV3", None)
+    canonical = create_request_fingerprint(canonical_request)
+    legacy = create_request_fingerprint(run_input)
+    return tuple(dict.fromkeys((canonical, legacy)))
+
+
+def _ensure_create_fingerprint(run: Any, fingerprints: tuple[str, ...]) -> None:
     snapshot: dict[str, Any] = {}
     try:
         snapshot = json.loads(run.input_snapshot_json)
     except (TypeError, ValueError, json.JSONDecodeError):
         snapshot = {}
     prior = str(snapshot.get("createInputFingerprint") or "")
-    if prior and prior != fingerprint:
+    if prior and prior not in fingerprints:
         raise ResearchWorkflowError(
             "idempotencyKey was already used with different run input",
             code="idempotency_conflict",
@@ -127,11 +143,12 @@ def create_run(
     store = get_write_store()
     definition = build_challenge_cup_workflow_definition()
     workflow_version_id = f"wv-{definition.structureHash[:12]}"
-    fingerprint = create_request_fingerprint(run_input)
+    fingerprints = _create_request_fingerprints(run_input)
+    fingerprint = fingerprints[0]
     run_id = run_id_for_create(workflow_id, idempotency_key)
     existing = store.get_run(run_id)
     if existing is not None:
-        _ensure_create_fingerprint(existing, fingerprint)
+        _ensure_create_fingerprint(existing, fingerprints)
         return catalog_dict_from_run(existing)
 
     team_id = str(run_input.get("teamId") or "").strip()
@@ -225,7 +242,7 @@ def create_run(
     store.submit(mutate, force_flush=True).result(timeout=15)
     created = store.get_run(run_id)
     if created is not None:
-        _ensure_create_fingerprint(created, fingerprint)
+        _ensure_create_fingerprint(created, fingerprints)
     if created is None:
         raise ResearchWorkflowError("created run was not readable", code="workflow_ledger_unavailable")
     return catalog_dict_from_run(created)

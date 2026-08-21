@@ -27,6 +27,12 @@ from .execution import NodeExecutionEnvelope, TaskLease, TaskLeaseStatus
 from .execution_anchor import ExecutionAnchor
 from .experiment_campaign import ExperimentCampaign, ExperimentCampaignStage
 from .hypothesis import HypothesisCandidate, HypothesisPortfolio
+from .hypothesis_fragment import (
+    HYPOTHESIS_FRAGMENT_KIND,
+    HYPOTHESIS_FRAGMENT_SCHEMA_VERSION,
+    HypothesisFragment,
+    canonical_fragment_payload,
+)
 from .hypothesis_round import (
     COMPARISON_OUTCOMES,
     LINEAGE_KINDS,
@@ -79,6 +85,13 @@ from .research_scope import (
     scope_identity_seed,
 )
 from .run_input import WorkflowRunInputSnapshot
+from .session_scope import (
+    SESSION_SCOPE_KINDS,
+    SESSION_SCOPE_VERSION,
+    WORKFLOW_CANDIDATE_SCOPE_KIND,
+    WORKFLOW_NODE_ROOT_SCOPE_KIND,
+    WorkflowSessionScopeV3,
+)
 from .task_bundle import ResearchSubtask, ResearchTaskBundle
 from .theme_campaign import (
     CampaignActivationStatus,
@@ -158,6 +171,7 @@ __all__ = [
     "HandoffSummary",
     "HumanTaskSummary",
     "HypothesisCandidate",
+    "HypothesisFragment",
     "HypothesisLineageRef",
     "HypothesisMeetingRef",
     "HypothesisMetaReview",
@@ -167,6 +181,8 @@ __all__ = [
     "HypothesisRound",
     "HypothesisRoundCandidate",
     "HypothesisSelectionRecord",
+    "HYPOTHESIS_FRAGMENT_KIND",
+    "HYPOTHESIS_FRAGMENT_SCHEMA_VERSION",
     "LINEAGE_KINDS",
     "MAX_SELECTED_CANDIDATES",
     "MEETING_REF_KINDS",
@@ -193,6 +209,8 @@ __all__ = [
     "ResearchScopeEnvelope",
     "ResearchSubtask",
     "ResearchTaskBundle",
+    "SESSION_SCOPE_KINDS",
+    "SESSION_SCOPE_VERSION",
     "ResearchWorkflowNodeDetail",
     "ResearchWorkflowSnapshot",
     "SCORE_DIMENSIONS",
@@ -211,8 +229,12 @@ __all__ = [
     "WorkflowProblemCategory",
     "WorkflowRunInputSnapshot",
     "WorkflowRunSummary",
+    "WORKFLOW_CANDIDATE_SCOPE_KIND",
+    "WORKFLOW_NODE_ROOT_SCOPE_KIND",
+    "WorkflowSessionScopeV3",
     "activation_scope_hash",
     "build_campaign_activation_payload",
+    "canonical_fragment_payload",
     "canonical_json",
     "parse_scope_mode",
     "scope_hash_for",

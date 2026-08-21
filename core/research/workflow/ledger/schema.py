@@ -20,7 +20,7 @@ class Migration:
         return hashlib.sha256("\n".join(self.statements).encode("utf-8")).hexdigest()
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 MIGRATIONS: tuple[Migration, ...] = (
@@ -409,6 +409,15 @@ MIGRATIONS: tuple[Migration, ...] = (
             CREATE INDEX idx_outbox_ready
             ON outbox_actions(status, available_at_ms, lease_expires_at_ms, action_id)
             """,
+        ),
+    ),
+    Migration(
+        version=4,
+        statements=(
+            (
+                "ALTER TABLE execution_anchors "
+                "ADD COLUMN revision INTEGER NOT NULL DEFAULT 0"
+            ),
         ),
     ),
 )

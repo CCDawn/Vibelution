@@ -5,12 +5,20 @@ from __future__ import annotations
 import urllib.parse
 from typing import Any
 
+from core.research.workflow.contracts import WorkflowSessionScopeV3
 from core.research.workflow.definition import build_challenge_cup_workflow_definition
+from core.research.workflow.models import NodeSessionScopePolicy
 
 from .budget_lifecycle import BudgetLifecycleError, reserve_node_budget
+from .hypothesis_scoped_execution import load_hypothesis_fan_out_input
+from .hypothesis_session_scope_mode import (
+    evaluate_hypothesis_scope_shadow,
+    resolve_hypothesis_scope_activation,
+    resolve_hypothesis_session_scope_mode,
+)
 from .model_routing import ModelRoutingError, select_model_route
 from .node_execution import start_node_execution
-from .node_execution_support import NodeExecutionError, latest_node_run
+from .node_execution_support import NodeExecutionError, latest_node_run, replace_by_id
 from .session_binding_bridge import SessionBindingBridge, SessionBindingError
 from .store import WorkflowRunStore
 from .task_adapter_registry import PROJECT_NODE_TASKS, SOURCE_NODE_TASKS
@@ -19,6 +27,8 @@ from .task_bundle_lifecycle import (
     bind_agent_task_bundle,
     create_agent_task_bundle,
     ensure_task_bundle_capacity,
+    fail_agent_task_bundle_subtask,
+    replace_agent_task_bundle_subtask,
     task_bundle_id,
 )
 
@@ -164,6 +174,23 @@ def _require_canonical_task_session(*, session_id: str, agent_id: str) -> None:
         )
 
 
+def _hypothesis_chain_state(record: dict[str, Any]) -> dict[str, Any]:
+    """Read the existing hypothesis chain state for the frozen run scope."""
+    snapshot = record.get("inputSnapshot")
+    snapshot = snapshot if isinstance(snapshot, dict) else {}
+    team_id = str(record.get("teamId") or snapshot.get("teamId") or "").strip()
+    question_id = str(record.get("questionId") or snapshot.get("questionId") or "").strip()
+    if not team_id or not question_id:
+        return {}
+    try:
+        from core.web.services.team_workflow.research_runtime import hypothesis_first_chain
+
+        state = hypothesis_first_chain.chain_state(team_id, question_id)
+    except Exception:
+        return {}
+    return dict(state) if isinstance(state, dict) else {}
+
+
 def _start_external_task(
     store: WorkflowRunStore,
     record: dict[str, Any],
@@ -233,6 +260,14 @@ def _start_external_task(
             ),
             "workflowRunId": str(record.get("runId") or ""),
             "workflowNodeId": node_id,
+            "nodeRunId": node_run_id,
+            "selectionId": str(payload.get("selectionId") or ""),
+            "candidateId": str(payload.get("candidateId") or ""),
+            "selectedCandidateIds": list(payload.get("selectedCandidateIds") or []),
+            "subtaskId": str(payload.get("subtaskId") or ""),
+            "candidateContext": dict(payload.get("candidateContext") or {}),
+            "formalRetry": bool(payload.get("formalRetry")),
+            "retryTaskId": str(payload.get("retryTaskId") or ""),
             "sourceCollectionRunId": str(
                 record.get("sourceCollectionRunId") or ""
             ),
@@ -241,6 +276,502 @@ def _start_external_task(
         },
     )
     return record, started
+
+
+def _start_candidate_tasks(
+    store: WorkflowRunStore,
+    record: dict[str, Any],
+    *,
+    node_id: str,
+    node_run_id: str,
+    agent_id: str,
+    idempotency_key: str,
+    payload: dict[str, Any],
+    bundle: dict[str, Any],
+    fan_out: dict[str, Any],
+) -> tuple[
+    dict[str, Any],
+    dict[str, Any],
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+]:
+    snapshots = list(fan_out["candidateSnapshots"])
+    subtasks = list(bundle.get("subtasks") or [])
+    if len(subtasks) != len(snapshots):
+        raise AgentNodeExecutionError(
+            "TaskBundle candidate count no longer matches the bound selection",
+            code="hypothesis_selection_replay_conflict",
+        )
+    starts: list[dict[str, Any]] = []
+    anchors: list[dict[str, Any]] = []
+    started_subtasks: list[dict[str, Any]] = []
+    failures: list[dict[str, str]] = []
+    from core.web.services.team_workflow.research_project_agent_tasks import (
+        ResearchProjectAgentTaskError,
+    )
+
+    for subtask, candidate_context in zip(subtasks, snapshots, strict=True):
+        scope = dict(subtask.get("scope") or {})
+        candidate_id = str(scope.get("candidateId") or "").strip()
+        if candidate_id != str(candidate_context.get("candidateId") or "").strip():
+            raise AgentNodeExecutionError(
+                "TaskBundle candidate order conflicts with the bound selection",
+                code="hypothesis_selection_replay_conflict",
+            )
+        if str(subtask.get("taskId") or "").strip():
+            if subtask.get("status") == "failed":
+                raise AgentNodeExecutionError(
+                    f"candidate {candidate_id} requires an explicit retryCandidateId",
+                    code="candidate_retry_required",
+                )
+            anchor = {
+                "agentId": agent_id,
+                "taskId": str(subtask.get("taskId") or ""),
+                "sessionId": str(subtask.get("sessionId") or ""),
+                "sessionAttempt": int(subtask.get("attempt") or 1),
+                "turnId": str(subtask.get("turnId") or ""),
+            }
+            starts.append(
+                {
+                    "taskId": anchor["taskId"],
+                    "sessionId": anchor["sessionId"],
+                    "sessionAttempt": anchor["sessionAttempt"],
+                    "turn": {"turnId": anchor["turnId"]},
+                    "chatRoute": (
+                        f"/chat?session={anchor['sessionId']}"
+                        if anchor["sessionId"]
+                        else ""
+                    ),
+                    "idempotentReplay": True,
+                }
+            )
+            anchors.append(anchor)
+            started_subtasks.append(dict(subtask))
+            continue
+        try:
+            record, started = _start_external_task(
+                store,
+                record,
+                node_id=node_id,
+                node_run_id=node_run_id,
+                agent_id=agent_id,
+                idempotency_key=f"{idempotency_key}:{candidate_id}",
+                payload={
+                    **payload,
+                    "targetRef": f"hypothesis:{fan_out['selectionId']}:{candidate_id}",
+                    "selectionId": fan_out["selectionId"],
+                    "candidateId": candidate_id,
+                    "selectedCandidateIds": list(fan_out["selectedCandidateIds"]),
+                    "subtaskId": str(subtask.get("subtaskId") or ""),
+                    "candidateContext": dict(candidate_context),
+                },
+            )
+            anchor = _task_anchor(started)
+            if str(anchor["agentId"] or "") != agent_id:
+                raise AgentNodeExecutionError(
+                    "started task Agent does not match the frozen NodeRun binding",
+                    code="binding_agent_mismatch",
+                )
+            missing = [
+                key
+                for key in ("taskId", "sessionId", "turnId")
+                if not str(anchor[key] or "")
+            ]
+            if missing:
+                raise AgentNodeExecutionError(
+                    f"Agent task anchor is incomplete: {', '.join(missing)}",
+                    code="incomplete_task_anchor",
+                )
+            _require_canonical_task_session(
+                session_id=str(anchor["sessionId"]),
+                agent_id=agent_id,
+            )
+            bundle = bind_agent_task_bundle(
+                store,
+                run_id=str(record["runId"]),
+                bundle_id=str(bundle["bundleId"]),
+                subtask_id=str(subtask.get("subtaskId") or ""),
+                task_id=str(anchor["taskId"]),
+                session_id=str(anchor["sessionId"]),
+                turn_id=str(anchor["turnId"]),
+            )
+        except (AgentNodeExecutionError, ResearchProjectAgentTaskError, TaskBundleError) as exc:
+            try:
+                fail_agent_task_bundle_subtask(
+                    store,
+                    run_id=str(record["runId"]),
+                    node_run_id=node_run_id,
+                    subtask_id=str(subtask.get("subtaskId") or ""),
+                    failure_code=str(
+                        getattr(exc, "code", "candidate_task_start_failed")
+                    ),
+                    failure_summary=str(exc),
+                    attempt=int(subtask.get("attempt") or 1),
+                )
+            except TaskBundleError:
+                pass
+            failures.append(
+                {
+                    "candidateId": candidate_id,
+                    "code": str(getattr(exc, "code", "candidate_task_start_failed")),
+                    "summary": str(exc),
+                }
+            )
+            record = store.get_run(str(record["runId"])) or record
+            bundle = next(
+                item
+                for item in record.get("taskBundles") or []
+                if item.get("bundleId") == bundle.get("bundleId")
+            )
+            continue
+        record = store.get_run(str(record["runId"])) or record
+        starts.append(started)
+        anchors.append(anchor)
+        started_subtasks.append(dict(subtask))
+    if not anchors:
+        first_failure = failures[0] if failures else {
+            "code": "candidate_task_start_failed",
+            "summary": "No candidate task could be started.",
+        }
+        raise AgentNodeExecutionError(
+            f"all candidate tasks failed to start: {first_failure['summary']}",
+            code="candidate_fan_out_start_failed",
+        )
+    return record, bundle, starts, anchors, started_subtasks
+
+
+def _retry_candidate_task(
+    store: WorkflowRunStore,
+    record: dict[str, Any],
+    *,
+    node_id: str,
+    node_run: dict[str, Any],
+    agent_id: str,
+    idempotency_key: str,
+    payload: dict[str, Any],
+    fan_out: dict[str, Any],
+    retry_candidate_id: str,
+) -> dict[str, Any]:
+    bundle_id = task_bundle_id(str(node_run["nodeRunId"]))
+    bundle = next(
+        (
+            dict(item)
+            for item in record.get("taskBundles") or []
+            if item.get("bundleId") == bundle_id
+        ),
+        None,
+    )
+    if bundle is None:
+        raise AgentNodeExecutionError(
+            "candidate retry requires a persisted TaskBundle",
+            code="candidate_retry_bundle_missing",
+        )
+    if retry_candidate_id not in {
+        str(item) for item in fan_out.get("selectedCandidateIds") or []
+    }:
+        raise AgentNodeExecutionError(
+            f"candidate retry target is outside the selected fan-out: {retry_candidate_id}",
+            code="candidate_retry_not_selected",
+        )
+    target = next(
+        (
+            dict(item)
+            for item in bundle.get("subtasks") or []
+            if str((item.get("scope") or {}).get("candidateId") or "")
+            == retry_candidate_id
+        ),
+        None,
+    )
+    if target is None:
+        raise AgentNodeExecutionError(
+            f"candidate retry target not found: {retry_candidate_id}",
+            code="candidate_retry_target_missing",
+        )
+    target_subtask_id = str(target.get("subtaskId") or "")
+    current_attempt = int(target.get("attempt") or 1)
+    has_previous_task = bool(str(target.get("taskId") or "").strip())
+    retry_key = str(idempotency_key or "").strip() or (
+        f"agent-task:{node_run['nodeRunId']}:retry:{retry_candidate_id}:"
+        f"a{current_attempt + (1 if has_previous_task else 0)}"
+    )
+    if (
+        target.get("status") in {"pending", "queued", "running"}
+        and str(target.get("retryIdempotencyKey") or "") == retry_key
+    ):
+        current = store.get_run(str(record["runId"])) or record
+        route = next(
+            (
+                dict(item)
+                for item in current.get("modelRoutingDecisions") or []
+                if item.get("nodeRunId") == node_run.get("nodeRunId")
+            ),
+            {},
+        )
+        return {
+            "command": "start_agent_task",
+            "taskId": str(target.get("taskId") or ""),
+            "chatRoute": (
+                f"/chat?session={target.get('sessionId')}"
+                if target.get("sessionId")
+                else ""
+            ),
+            "sessionBinding": current.get("sessionBindings", {}).get(node_id, {})
+            if isinstance(current.get("sessionBindings"), dict)
+            else {},
+            "taskBundle": next(
+                item
+                for item in current.get("taskBundles") or []
+                if item.get("bundleId") == bundle_id
+            ),
+            "modelRoute": route,
+            "idempotentReplay": True,
+        }
+    if target.get("status") != "failed":
+        raise AgentNodeExecutionError(
+            f"candidate retry requires failed subtask, got {target.get('status')}",
+            code="candidate_retry_not_failed",
+        )
+    previous_task_id = str(target.get("taskId") or "").strip()
+    candidate_context = next(
+        (
+            dict(item)
+            for item in list(fan_out.get("candidateSnapshots") or [])
+            if str(item.get("candidateId") or "") == retry_candidate_id
+        ),
+        {"candidateId": retry_candidate_id},
+    )
+    retry_payload = {
+        **payload,
+        "targetRef": f"hypothesis:{fan_out['selectionId']}:{retry_candidate_id}",
+        "selectionId": fan_out["selectionId"],
+        "candidateId": retry_candidate_id,
+        "selectedCandidateIds": list(fan_out["selectedCandidateIds"]),
+        "subtaskId": target_subtask_id,
+        "candidateContext": candidate_context,
+    }
+    if previous_task_id:
+        retry_payload.update(
+            {
+                "formalRetry": True,
+                "retryTaskId": previous_task_id,
+            }
+        )
+    record, started = _start_external_task(
+        store,
+        record,
+        node_id=node_id,
+        node_run_id=str(node_run.get("nodeRunId") or ""),
+        agent_id=agent_id,
+        idempotency_key=retry_key,
+        payload=retry_payload,
+    )
+    anchor = _task_anchor(started)
+    if str(anchor["agentId"] or "") != agent_id:
+        raise AgentNodeExecutionError(
+            "started retry task Agent does not match the frozen NodeRun binding",
+            code="binding_agent_mismatch",
+        )
+    missing = [
+        key for key in ("taskId", "sessionId", "turnId") if not str(anchor[key] or "")
+    ]
+    if missing:
+        raise AgentNodeExecutionError(
+            f"Agent retry task anchor is incomplete: {', '.join(missing)}",
+            code="incomplete_task_anchor",
+        )
+    expected_attempt = current_attempt + (1 if previous_task_id else 0)
+    if int(anchor["sessionAttempt"] or 1) != expected_attempt:
+        raise AgentNodeExecutionError(
+            "formal retry session attempt does not increment the candidate attempt",
+            code="candidate_retry_attempt_mismatch",
+        )
+    _require_canonical_task_session(
+        session_id=str(anchor["sessionId"]),
+        agent_id=agent_id,
+    )
+    try:
+        bundle = replace_agent_task_bundle_subtask(
+            store,
+            run_id=str(record["runId"]),
+            bundle_id=bundle_id,
+            subtask_id=target_subtask_id,
+            retry_task_id=previous_task_id,
+            task_id=str(anchor["taskId"]),
+            session_id=str(anchor["sessionId"]),
+            turn_id=str(anchor["turnId"]),
+            attempt=expected_attempt,
+            idempotency_key=retry_key,
+        )
+    except TaskBundleError as exc:
+        raise AgentNodeExecutionError(
+            str(exc),
+            code=str(getattr(exc, "code", "candidate_retry_persistence_failed")),
+        ) from exc
+    record = store.get_run(str(record["runId"])) or record
+
+    def reopen_candidate_node(current: dict[str, Any]) -> dict[str, Any]:
+        node_runs = [dict(item) for item in current.get("nodeRuns") or []]
+        current_node_run = next(
+            (
+                dict(item)
+                for item in node_runs
+                if item.get("nodeRunId") == node_run.get("nodeRunId")
+            ),
+            None,
+        )
+        if current_node_run is None:
+            return current
+        if current_node_run.get("status") == "blocked":
+            current_node_run.update(
+                {
+                    "status": "running",
+                    "finishedAt": "",
+                    "failureCode": "",
+                    "failureSummary": "",
+                }
+            )
+            replace_by_id(
+                node_runs,
+                "nodeRunId",
+                str(node_run["nodeRunId"]),
+                current_node_run,
+            )
+        leases = [dict(item) for item in current.get("taskLeases") or []]
+        for lease in leases:
+            if (
+                lease.get("nodeRunId") == node_run.get("nodeRunId")
+                and lease.get("status") == "failed"
+            ):
+                lease["status"] = "running"
+        return {
+            **current,
+            "status": "running" if current.get("status") == "blocked" else current.get("status"),
+            "blockedReason": "" if current.get("status") == "blocked" else current.get("blockedReason", ""),
+            "nodeRuns": node_runs,
+            "taskLeases": leases,
+        }
+
+    record = store.mutate_run(str(record["runId"]), reopen_candidate_node)
+    first_candidate_id = str(
+        next(
+            iter(fan_out.get("selectedCandidateIds") or []),
+            retry_candidate_id,
+        )
+    )
+    binding = (
+        store.get_session_binding(str(record["runId"]), node_id)
+        or {}
+    )
+    current_node_run = latest_node_run(record, node_id)
+    if retry_candidate_id == first_candidate_id or not current_node_run.get("taskId"):
+        role_key = next(
+            (
+                str(item.get("roleKey") or "")
+                for item in record.get("bindingSnapshots") or []
+                if item.get("nodeId") == node_id
+            ),
+            "",
+        )
+        binding = SessionBindingBridge(store).put(
+            record,
+            node_id,
+            {
+                "agentId": agent_id,
+                "roleKey": role_key,
+                "nodeRunId": str(node_run.get("nodeRunId") or ""),
+                "nodeAttempt": int(node_run.get("attempt") or 1),
+                "sessionId": str(anchor["sessionId"]),
+                "sessionAttempt": int(anchor["sessionAttempt"]),
+                "taskId": str(anchor["taskId"]),
+                "turnId": str(anchor["turnId"]),
+                "checkpointId": str(node_run.get("checkpointId") or ""),
+            },
+        )
+
+        def sync_node_anchor(current: dict[str, Any]) -> dict[str, Any]:
+            node_runs = [dict(item) for item in current.get("nodeRuns") or []]
+            current_node_run = next(
+                (
+                    dict(item)
+                    for item in node_runs
+                    if item.get("nodeRunId") == node_run.get("nodeRunId")
+                ),
+                None,
+            )
+            if current_node_run is None:
+                return current
+            current_node_run.update(
+                {
+                    "taskId": str(anchor["taskId"]),
+                    "sessionId": str(anchor["sessionId"]),
+                    "turnId": str(anchor["turnId"]),
+                    "failureCode": "",
+                    "failureSummary": "",
+                }
+            )
+            replace_by_id(
+                node_runs,
+                "nodeRunId",
+                str(node_run["nodeRunId"]),
+                current_node_run,
+            )
+            return {**current, "nodeRuns": node_runs}
+
+        record = store.mutate_run(str(record["runId"]), sync_node_anchor)
+    route = next(
+        (
+            dict(item)
+            for item in record.get("modelRoutingDecisions") or []
+            if item.get("nodeRunId") == node_run.get("nodeRunId")
+        ),
+        {},
+    )
+    if latest_node_run(record, node_id).get("status") == "ready":
+        target_budget_ref = next(
+            (
+                str(item.get("budgetReservationRef") or "")
+                for item in record.get("taskBundles") or []
+                if item.get("bundleId") == bundle_id
+                for item in item.get("subtasks") or []
+                if str(item.get("subtaskId") or "") == target_subtask_id
+            ),
+            "",
+        )
+        try:
+            start_node_execution(
+                store,
+                run_id=str(record.get("runId") or ""),
+                node_id=node_id,
+                payload={
+                    "idempotencyKey": idempotency_key,
+                    "leaseOwner": f"agent-task:{agent_id}",
+                    "leaseSeconds": int(payload.get("leaseSeconds") or 60),
+                    "deadlineSeconds": int(payload.get("deadlineSeconds") or 1800),
+                    "taskId": str(anchor["taskId"]),
+                    "sessionId": str(anchor["sessionId"]),
+                    "budgetReservationRef": target_budget_ref,
+                    "modelRef": route.get("modelRef", ""),
+                    "modelPurpose": route.get("purpose", ""),
+                    "estimatedCost": route.get("estimatedCost", 0),
+                    "escalationReason": route.get("escalationReason", ""),
+                },
+            )
+        except NodeExecutionError as exc:
+            raise AgentNodeExecutionError(
+                str(exc),
+                code=str(getattr(exc, "code", "candidate_retry_execution_start_failed")),
+            ) from exc
+        record = store.get_run(str(record["runId"])) or record
+    return {
+        "command": "start_agent_task",
+        "taskId": str(anchor["taskId"]),
+        "chatRoute": str(started.get("chatRoute") or ""),
+        "sessionBinding": binding,
+        "taskBundle": bundle,
+        "modelRoute": route,
+        "idempotentReplay": bool(started.get("idempotentReplay")),
+    }
 
 
 def start_agent_node_execution(
@@ -261,7 +792,101 @@ def start_agent_node_execution(
     idempotency_key = str(
         payload.get("idempotencyKey") or f"agent-task:{node_run['nodeRunId']}"
     ).strip()
-    if node_run.get("status") == "running" and node_run.get("taskId"):
+    retry_candidate_id = str(payload.get("retryCandidateId") or "").strip()
+    node_spec = next(
+        item
+        for item in build_challenge_cup_workflow_definition().nodes
+        if item.nodeId == node_id
+    )
+    fan_out = None
+    scope_shadow: dict[str, Any] | None = None
+    scope_fallback: dict[str, str] | None = None
+    candidate_fan_out: dict[str, Any] | None = None
+    scope_mode = resolve_hypothesis_session_scope_mode(
+        record.get("inputSnapshot") or {}
+    )
+    if (
+        node_spec.sessionScopePolicy is NodeSessionScopePolicy.CANDIDATE_FAN_OUT
+        and scope_mode != "off"
+    ):
+        scope_decision = resolve_hypothesis_scope_activation(
+            record,
+            chain_state=_hypothesis_chain_state(record),
+        )
+        if (
+            scope_decision["fanOutEnabled"]
+            or scope_decision["selectionRequired"]
+        ):
+            try:
+                candidate_fan_out = load_hypothesis_fan_out_input(record)
+            except ValueError as exc:
+                raise AgentNodeExecutionError(
+                    str(exc),
+                    code="hypothesis_selection_invalid",
+                ) from exc
+        else:
+            scope_fallback = {
+                "status": "compatibility",
+                "reason": str(scope_decision["fallbackReason"]),
+                "mode": str(scope_decision["mode"]),
+            }
+        if scope_mode == "shadow" and candidate_fan_out is not None:
+            selected_count = len(candidate_fan_out["selectedCandidateIds"])
+            configured_limit = int(payload.get("maxConcurrency") or 3)
+            budget_limit = int(
+                ((record.get("inputSnapshot") or {}).get("budgetPolicy") or {}).get(
+                    "maxParallelTasks"
+                )
+                or configured_limit
+            )
+            try:
+                scope_shadow = evaluate_hypothesis_scope_shadow(
+                    candidate_fan_out,
+                    max_parallel=min(
+                        selected_count,
+                        configured_limit,
+                        budget_limit,
+                    ),
+                )
+            except ValueError as exc:
+                raise AgentNodeExecutionError(
+                    str(exc),
+                    code="hypothesis_scope_shadow_invalid",
+                ) from exc
+            # Shadow is an observation-only contract.  Stop before model
+            # routing, budget reservation, TaskBundle creation, session
+            # binding, or the external task adapter so enabling it cannot
+            # accidentally create the candidate-scoped runtime objects it
+            # is meant to measure.
+            if retry_candidate_id:
+                raise AgentNodeExecutionError(
+                    "retryCandidateId is only valid when candidate fan-out is enabled",
+                    code="candidate_retry_not_supported",
+                )
+            if node_run.get("status") != "ready":
+                raise AgentNodeExecutionError(
+                    f"Agent node must be ready, got {node_run.get('status')}",
+                    code="invalid_node_state",
+                )
+            if not agent_id:
+                raise AgentNodeExecutionError(
+                    "agent node is unbound",
+                    code="agent_unbound",
+                )
+            return {
+                "command": "start_agent_task",
+                "taskId": "",
+                "taskIds": [],
+                "chatRoute": "",
+                "sessionBinding": {},
+                "taskBundle": {},
+                "modelRoute": {},
+                "selection": dict(candidate_fan_out["selection"]),
+                "sessionScopeShadow": scope_shadow,
+                "idempotentReplay": False,
+            }
+        fan_out = candidate_fan_out
+    if node_run.get("status") == "running" and node_run.get("taskId") and not retry_candidate_id:
         binding = store.get_session_binding(str(record.get("runId") or ""), node_id)
         bundle_id = task_bundle_id(str(node_run["nodeRunId"]))
         bundle = next(
@@ -278,15 +903,6 @@ def start_agent_node_execution(
                 "Agent task replay idempotencyKey conflicts with the persisted TaskBundle",
                 code="agent_task_idempotency_conflict",
             )
-        if bundle and bundle.get("status") == "pending" and binding:
-            bundle = bind_agent_task_bundle(
-                store,
-                run_id=str(record["runId"]),
-                bundle_id=bundle_id,
-                task_id=str(node_run["taskId"]),
-                session_id=str(node_run["sessionId"]),
-                turn_id=str(binding.get("focusTurnId") or ""),
-            )
         route = next(
             (
                 item
@@ -295,7 +911,7 @@ def start_agent_node_execution(
             ),
             {},
         )
-        return {
+        replay = {
             "command": "start_agent_task",
             "taskId": str(node_run.get("taskId") or ""),
             "chatRoute": "",
@@ -304,6 +920,33 @@ def start_agent_node_execution(
             "modelRoute": route,
             "idempotentReplay": True,
         }
+        if scope_shadow is not None:
+            replay["sessionScopeShadow"] = scope_shadow
+        if scope_fallback is not None:
+            replay["sessionScopeFallback"] = dict(scope_fallback)
+        return replay
+    if retry_candidate_id:
+        if fan_out is None:
+            raise AgentNodeExecutionError(
+                "retryCandidateId is only valid for candidate fan-out nodes",
+                code="candidate_retry_not_supported",
+            )
+        if not agent_id:
+            raise AgentNodeExecutionError(
+                "agent node is unbound",
+                code="agent_unbound",
+            )
+        return _retry_candidate_task(
+            store,
+            record,
+            node_id=node_id,
+            node_run=node_run,
+            agent_id=agent_id,
+            idempotency_key=idempotency_key,
+            payload=payload,
+            fan_out=fan_out,
+            retry_candidate_id=retry_candidate_id,
+        )
     if node_run.get("status") != "ready":
         raise AgentNodeExecutionError(
             f"Agent node must be ready, got {node_run.get('status')}",
@@ -311,16 +954,58 @@ def start_agent_node_execution(
         )
     if not agent_id:
         raise AgentNodeExecutionError("agent node is unbound", code="agent_unbound")
-    node_spec = next(
-        item
-        for item in build_challenge_cup_workflow_definition().nodes
-        if item.nodeId == node_id
-    )
+    subtask_specs: list[dict[str, Any]] | None = None
+    max_concurrency: int | None = None
+    if fan_out is not None:
+        selected_candidate_ids = list(fan_out["selectedCandidateIds"])
+        raw_configured_limit = payload.get("maxConcurrency", 3)
+        if (
+            isinstance(raw_configured_limit, bool)
+            or not isinstance(raw_configured_limit, int)
+            or raw_configured_limit < 1
+        ):
+            raise AgentNodeExecutionError(
+                "maxConcurrency must be a positive integer",
+                code="invalid_max_concurrency",
+            )
+        configured_limit = raw_configured_limit
+        budget_limit = int(
+            ((record.get("inputSnapshot") or {}).get("budgetPolicy") or {}).get(
+                "maxParallelTasks"
+            )
+            or configured_limit
+        )
+        max_concurrency = min(
+            len(selected_candidate_ids), configured_limit, budget_limit
+        )
+        if len(selected_candidate_ids) > max_concurrency:
+            raise AgentNodeExecutionError(
+                "selected candidate count exceeds the effective maxConcurrency; "
+                "reduce the selection or increase the concurrency limit",
+                code="candidate_fan_out_concurrency_exceeded",
+            )
+        subtask_specs = [
+            {
+                "subtaskId": f"{node_run['nodeRunId']}:{fan_out['selectionId']}:{candidate_id}",
+                "scope": WorkflowSessionScopeV3.candidate(
+                    teamId=str(record.get("teamId") or ""),
+                    researchProjectId=str(record.get("projectId") or ""),
+                    agentId=agent_id,
+                    workflowRunId=str(record.get("runId") or ""),
+                    workflowNodeId=node_id,
+                    selectionId=str(fan_out["selectionId"]),
+                    candidateId=str(candidate_id),
+                ).to_dict(),
+            }
+            for candidate_id in selected_candidate_ids
+        ]
     try:
         model_route = select_model_route(record, node_run, payload)
         ensure_task_bundle_capacity(
             record,
             node_run_id=str(node_run["nodeRunId"]),
+            subtask_count=len(subtask_specs or [{}]),
+            max_concurrency=max_concurrency,
         )
         reservation = reserve_node_budget(
             store,
@@ -340,6 +1025,9 @@ def start_agent_node_execution(
             budget_reservation_ref=str(reservation["reservationId"]),
             idempotency_key=idempotency_key,
             deadline_seconds=int(payload.get("deadlineSeconds") or 1800),
+            subtask_specs=subtask_specs,
+            max_concurrency=max_concurrency,
+            selection_id=str((fan_out or {}).get("selectionId") or ""),
         )
     except (BudgetLifecycleError, ModelRoutingError, TaskBundleError) as exc:
         raise AgentNodeExecutionError(
@@ -347,6 +1035,111 @@ def start_agent_node_execution(
             code=str(getattr(exc, "code", "agent_task_contract_invalid")),
         ) from exc
     record = store.get_run(str(record["runId"])) or record
+    if fan_out is not None:
+        try:
+            record, bundle, starts, anchors, started_subtasks = _start_candidate_tasks(
+                store,
+                record,
+                node_id=node_id,
+                node_run_id=str(node_run.get("nodeRunId") or ""),
+                agent_id=agent_id,
+                idempotency_key=idempotency_key,
+                payload=payload,
+                bundle=bundle,
+                fan_out=fan_out,
+            )
+            primary = anchors[0]
+            binding = SessionBindingBridge(store).put(
+                record,
+                node_id,
+                {
+                    "agentId": agent_id,
+                    "roleKey": next(
+                        (
+                            str(item.get("roleKey") or "")
+                            for item in record.get("bindingSnapshots") or []
+                            if item.get("nodeId") == node_id
+                        ),
+                        "",
+                    ),
+                    "nodeRunId": str(node_run.get("nodeRunId") or ""),
+                    "nodeAttempt": int(node_run.get("attempt") or 1),
+                    "sessionId": str(primary["sessionId"]),
+                    "sessionAttempt": int(primary["sessionAttempt"]),
+                    "taskId": str(primary["taskId"]),
+                    "turnId": str(primary["turnId"]),
+                    "checkpointId": str(node_run.get("checkpointId") or ""),
+                },
+            )
+            start_node_execution(
+                store,
+                run_id=str(record.get("runId") or ""),
+                node_id=node_id,
+                payload={
+                    "idempotencyKey": idempotency_key,
+                    "leaseOwner": f"agent-task:{agent_id}",
+                    "leaseSeconds": int(payload.get("leaseSeconds") or 60),
+                    "deadlineSeconds": int(payload.get("deadlineSeconds") or 1800),
+                    "taskId": str(primary["taskId"]),
+                    "sessionId": str(primary["sessionId"]),
+                    "budgetReservationRef": str(
+                        bundle["subtasks"][0]["budgetReservationRef"]
+                    ),
+                    "modelRef": model_route["modelRef"],
+                    "modelPurpose": model_route["purpose"],
+                    "estimatedCost": model_route["estimatedCost"],
+                    "escalationReason": model_route["escalationReason"],
+                },
+            )
+        except (SessionBindingError, NodeExecutionError, TaskBundleError) as exc:
+            raise AgentNodeExecutionError(
+                str(exc),
+                code=str(getattr(exc, "code", "agent_task_persistence_failed")),
+            ) from exc
+        scoped_sessions = []
+        for started, anchor, subtask in zip(
+            starts, anchors, started_subtasks, strict=True
+        ):
+            detail = None
+            try:
+                from core.web.services import session_service
+
+                detail = session_service.get_session_detail(
+                    str(anchor["sessionId"]),
+                    message_limit=0,
+                    transcript_scope="none",
+                )
+            except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+                detail = None
+            scoped_sessions.append(
+                {
+                    "subtaskId": str(subtask.get("subtaskId") or ""),
+                    "candidateId": str(
+                        (subtask.get("scope") or {}).get("candidateId") or ""
+                    ),
+                    "taskId": str(anchor["taskId"]),
+                    "sessionId": str(anchor["sessionId"]),
+                    "parentSessionId": str(
+                        (detail or {}).get("parentSessionId") or ""
+                    ),
+                    "rootSessionId": str((detail or {}).get("rootSessionId") or ""),
+                    "chatRoute": str(started.get("chatRoute") or ""),
+                }
+            )
+        return {
+            "command": "start_agent_task",
+            "taskId": str(primary["taskId"]),
+            "taskIds": [str(item["taskId"]) for item in anchors],
+            "chatRoute": str(starts[0].get("chatRoute") or ""),
+            "sessionBinding": binding,
+            "scopedSessions": scoped_sessions,
+            "taskBundle": bundle,
+            "modelRoute": model_route,
+            "selection": dict(fan_out["selection"]),
+            "idempotentReplay": all(
+                bool(item.get("idempotentReplay")) for item in starts
+            ),
+        }
     record, started = _start_external_task(
         store,
         record,
@@ -430,7 +1223,7 @@ def start_agent_node_execution(
             str(exc),
             code=str(getattr(exc, "code", "agent_task_persistence_failed")),
         ) from exc
-    return {
+    result = {
         "command": "start_agent_task",
         "taskId": str(anchor["taskId"]),
         "chatRoute": str(started.get("chatRoute") or ""),
@@ -439,3 +1232,8 @@ def start_agent_node_execution(
         "modelRoute": model_route,
         "idempotentReplay": False,
     }
+    if scope_shadow is not None:
+        result["sessionScopeShadow"] = scope_shadow
+    if scope_fallback is not None:
+        result["sessionScopeFallback"] = dict(scope_fallback)
+    return result

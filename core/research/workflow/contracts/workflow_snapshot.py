@@ -5,7 +5,7 @@ UI-only state (selected node, panel, viewport, hover, dialog, URL) is forbidden.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -250,6 +250,8 @@ class ResearchWorkflowNodeDetail:
     session_attempt: int | None = None
     chat_deep_link: str | None = None
     session_anchor_degraded: bool = False
+    root_session: Mapping[str, Any] | None = None
+    scoped_sessions: tuple[Mapping[str, Any], ...] = ()
     blocked_reason: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -280,6 +282,10 @@ class ResearchWorkflowNodeDetail:
             "sessionAttempt": self.session_attempt,
             "chatDeepLink": self.chat_deep_link,
             "sessionAnchorDegraded": self.session_anchor_degraded,
+            "rootSession": (
+                dict(self.root_session) if self.root_session is not None else None
+            ),
+            "scopedSessions": [dict(item) for item in self.scoped_sessions],
             "blockedReason": self.blocked_reason,
             "nodeAttempt": self.latest_attempt.attempt if self.latest_attempt else 0,
         }

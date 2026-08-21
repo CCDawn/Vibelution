@@ -165,6 +165,39 @@ def test_create_run_idempotency_and_restart_preserve_same_initial_facts(tmp_path
     assert reopened["events"] == first["events"]
 
 
+@pytest.mark.parametrize(
+    ("first_mode", "replay_mode"),
+    [(None, "off"), ("off", "on"), ("on", None)],
+)
+def test_create_run_idempotency_ignores_client_authored_scope_mode(
+    tmp_path: Path,
+    first_mode: str | None,
+    replay_mode: str | None,
+) -> None:
+    service = _service(tmp_path)
+    first_input = run_input_request()
+    replay_input = run_input_request()
+    if first_mode is not None:
+        first_input["workflowSessionScopeV3"] = {"hypothesis_design": first_mode}
+    if replay_mode is not None:
+        replay_input["workflowSessionScopeV3"] = {"hypothesis_design": replay_mode}
+
+    first = service.create_run(
+        CHALLENGE_CUP_WORKFLOW_ID,
+        run_input=first_input,
+        idempotency_key="create-v21-scope-mode",
+    )
+    replay = service.create_run(
+        CHALLENGE_CUP_WORKFLOW_ID,
+        run_input=replay_input,
+        idempotency_key="create-v21-scope-mode",
+    )
+
+    assert replay["runId"] == first["runId"]
+    assert replay["inputSnapshot"] == first["inputSnapshot"]
+    assert replay["createInputFingerprint"] == first["createInputFingerprint"]
+
+
 def test_http_create_rejects_client_authored_frozen_contract(tmp_path: Path) -> None:
     store = WorkflowRunStore(tmp_path / "runs")
     reset_research_workflow_runtime_service_for_tests(

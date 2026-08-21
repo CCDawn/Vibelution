@@ -50,6 +50,23 @@ def _row_run(row: Any) -> RunRecord | None:
     )
 
 
+def _row_event(row: Any) -> EventRecord | None:
+    if row is None:
+        return None
+    return EventRecord(
+        run_id=str(row[0]),
+        sequence=int(row[1]),
+        event_id=str(row[2]),
+        run_version=int(row[3]),
+        event_type=str(row[4]),
+        actor_json=str(row[5]),
+        correlation_id=str(row[6]),
+        causation_id=row[7],
+        payload_json=str(row[8]),
+        occurred_at_ms=int(row[9]),
+    )
+
+
 class WorkflowLedgerRepository:
     def __init__(self, connection: Any) -> None:
         self.connection = connection
@@ -522,6 +539,20 @@ class WorkflowLedgerRepository:
             ),
         )
 
+    def event_exists(self, event_id: str) -> bool:
+        return self.get_event_by_id(event_id) is not None
+
+    def get_event_by_id(self, event_id: str) -> EventRecord | None:
+        row = self.execute(
+            """
+            SELECT run_id, sequence, event_id, run_version, event_type, actor_json,
+                   correlation_id, causation_id, payload_json, occurred_at_ms
+            FROM workflow_events WHERE event_id = ? LIMIT 1
+            """,
+            (event_id,),
+        ).fetchone()
+        return _row_event(row)
+
     def list_events(self, run_id: str, after_sequence: int = 0, limit: int = 500) -> list[EventRecord]:
         rows = self.execute(
             """
@@ -533,21 +564,7 @@ class WorkflowLedgerRepository:
             """,
             (run_id, after_sequence, limit),
         ).fetchall()
-        return [
-            EventRecord(
-                run_id=str(row[0]),
-                sequence=int(row[1]),
-                event_id=str(row[2]),
-                run_version=int(row[3]),
-                event_type=str(row[4]),
-                actor_json=str(row[5]),
-                correlation_id=str(row[6]),
-                causation_id=row[7],
-                payload_json=str(row[8]),
-                occurred_at_ms=int(row[9]),
-            )
-            for row in rows
-        ]
+        return [_row_event(row) for row in rows if row is not None]
 
     def latest_event_sequence(self, run_id: str) -> int:
         row = self.execute(
@@ -674,11 +691,34 @@ class WorkflowLedgerRepository:
         cursor = self.execute(
             """
             UPDATE outbox_actions
-            SET status = ?, last_problem_json = COALESCE(?, last_problem_json),
+            SET status = ?, lease_owner = NULL, lease_expires_at_ms = NULL,
+                last_problem_json = COALESCE(?, last_problem_json),
                 updated_at_ms = ?
-            WHERE action_id = ? AND lease_owner = ?
+            WHERE action_id = ? AND status = 'leased' AND lease_owner = ?
+              AND lease_expires_at_ms > ?
             """,
-            (status, problem_json, now_ms, action_id, owner),
+            (status, problem_json, now_ms, action_id, owner, now_ms),
+        )
+        return self.affected() > 0
+
+    def renew_outbox_lease(
+        self,
+        action_id: str,
+        owner: str,
+        now_ms: int,
+        lease_ms: int,
+    ) -> bool:
+        """Extend a live lease only while its current owner still holds it."""
+
+        self.execute(
+            """
+            UPDATE outbox_actions
+            SET lease_expires_at_ms = ?, updated_at_ms = ?
+            WHERE action_id = ? AND status = 'leased' AND lease_owner = ?
+              AND lease_expires_at_ms IS NOT NULL
+              AND lease_expires_at_ms > ?
+            """,
+            (now_ms + lease_ms, now_ms, action_id, owner, now_ms),
         )
         return self.affected() > 0
 
@@ -696,9 +736,10 @@ class WorkflowLedgerRepository:
             UPDATE outbox_actions
             SET status = 'pending', lease_owner = NULL, lease_expires_at_ms = NULL,
                 available_at_ms = ?, last_problem_json = ?, updated_at_ms = ?
-            WHERE action_id = ? AND lease_owner = ?
+            WHERE action_id = ? AND status = 'leased' AND lease_owner = ?
+              AND lease_expires_at_ms > ?
             """,
-            (retry_at_ms, problem_json, now_ms, action_id, owner),
+            (retry_at_ms, problem_json, now_ms, action_id, owner, now_ms),
         )
         return self.affected() > 0
 
@@ -706,10 +747,12 @@ class WorkflowLedgerRepository:
         cursor = self.execute(
             """
             UPDATE outbox_actions
-            SET status = 'failed', last_problem_json = ?, updated_at_ms = ?
-            WHERE action_id = ? AND lease_owner = ?
+            SET status = 'failed', lease_owner = NULL, lease_expires_at_ms = NULL,
+                last_problem_json = ?, updated_at_ms = ?
+            WHERE action_id = ? AND status = 'leased' AND lease_owner = ?
+              AND lease_expires_at_ms > ?
             """,
-            (problem_json, now_ms, action_id, owner),
+            (problem_json, now_ms, action_id, owner, now_ms),
         )
         return self.affected() > 0
 
@@ -860,6 +903,7 @@ class WorkflowLedgerRepository:
         human_task_id: str | None = None,
         checkpoint_id: str | None = None,
         status: str = "bound",
+        revision: int = 0,
     ) -> None:
         self.execute(
             """
@@ -867,8 +911,8 @@ class WorkflowLedgerRepository:
               anchor_id, node_run_id, actor_kind, agent_id, role_key,
               session_id, session_attempt, task_id, turn_id,
               system_action_id, human_task_id, checkpoint_id, status,
-              anchor_json, created_at_ms
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              anchor_json, created_at_ms, revision
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 anchor_id,
@@ -886,6 +930,7 @@ class WorkflowLedgerRepository:
                 status,
                 anchor_json,
                 created_at_ms,
+                int(revision),
             ),
         )
 
@@ -895,11 +940,99 @@ class WorkflowLedgerRepository:
             SELECT anchor_id, node_run_id, actor_kind, agent_id, role_key,
                    session_id, session_attempt, task_id, turn_id,
                    system_action_id, human_task_id, checkpoint_id, status,
-                   anchor_json, created_at_ms
+                   anchor_json, created_at_ms, revision
             FROM execution_anchors WHERE node_run_id = ?
             """,
             (node_run_id,),
         ).fetchone()
+
+    def update_anchor_by_node_run(
+        self,
+        *,
+        node_run_id: str,
+        anchor_json: str,
+        status: str,
+        agent_id: str | None = None,
+        role_key: str | None = None,
+        session_id: str | None = None,
+        session_attempt: int | None = None,
+        task_id: str | None = None,
+        turn_id: str | None = None,
+        system_action_id: str | None = None,
+    ) -> bool:
+        self.execute(
+            """
+            UPDATE execution_anchors
+            SET agent_id = COALESCE(?, agent_id),
+                role_key = COALESCE(?, role_key),
+                session_id = COALESCE(?, session_id),
+                session_attempt = COALESCE(?, session_attempt),
+                task_id = COALESCE(?, task_id),
+                turn_id = COALESCE(?, turn_id),
+                system_action_id = COALESCE(?, system_action_id), status = ?,
+                anchor_json = ?, revision = revision + 1
+            WHERE node_run_id = ?
+            """,
+            (
+                agent_id,
+                role_key,
+                session_id,
+                session_attempt,
+                task_id,
+                turn_id,
+                system_action_id,
+                status,
+                anchor_json,
+                node_run_id,
+            ),
+        )
+        return self.affected() > 0
+
+    def update_anchor_by_node_run_cas(
+        self,
+        *,
+        node_run_id: str,
+        expected_revision: int,
+        anchor_json: str,
+        status: str,
+        agent_id: str | None = None,
+        role_key: str | None = None,
+        session_id: str | None = None,
+        session_attempt: int | None = None,
+        task_id: str | None = None,
+        turn_id: str | None = None,
+        system_action_id: str | None = None,
+    ) -> bool:
+        """Update an execution anchor only if its revision is unchanged."""
+
+        self.execute(
+            """
+            UPDATE execution_anchors
+            SET agent_id = COALESCE(?, agent_id),
+                role_key = COALESCE(?, role_key),
+                session_id = COALESCE(?, session_id),
+                session_attempt = COALESCE(?, session_attempt),
+                task_id = COALESCE(?, task_id),
+                turn_id = COALESCE(?, turn_id),
+                system_action_id = COALESCE(?, system_action_id),
+                status = ?, anchor_json = ?, revision = revision + 1
+            WHERE node_run_id = ? AND revision = ?
+            """,
+            (
+                agent_id,
+                role_key,
+                session_id,
+                session_attempt,
+                task_id,
+                turn_id,
+                system_action_id,
+                status,
+                anchor_json,
+                node_run_id,
+                int(expected_revision),
+            ),
+        )
+        return self.affected() > 0
 
     def insert_artifact_receipt(
         self,

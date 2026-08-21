@@ -63,6 +63,9 @@ class ChallengeCupGraphState(TypedDict, total=False):
     branch_decision: str | None
     blocked_outcome: str | None
     checkpoint_version: int
+    session_scope: dict[str, Any]
+    selection_id: str
+    candidate_id: str
 
 
 @dataclass(frozen=True)
@@ -157,6 +160,27 @@ def build_pending_action(state: ChallengeCupGraphState, node_id: str) -> Pending
             else 1
         )
     actor_kind = _actor_kind_for(node_id)
+    selection_id = str(state.get("selection_id") or "").strip() or None
+    candidate_id = str(state.get("candidate_id") or "").strip() or None
+    if bool(selection_id) != bool(candidate_id):
+        raise ValueError(
+            "candidate-scoped PendingAction requires both selection_id and candidate_id"
+        )
+    raw_scope = state.get("session_scope")
+    scope = (
+        dict(raw_scope)
+        if isinstance(raw_scope, Mapping)
+        else {
+            "version": 3,
+            "kind": "workflow_candidate" if candidate_id else "workflow_node_root",
+            "teamId": str(state.get("team_id") or ""),
+            "workflowRunId": run_id,
+            "workflowNodeId": node_id,
+        }
+    )
+    if candidate_id:
+        scope["selectionId"] = selection_id
+        scope["candidateId"] = candidate_id
     return PendingAction(
         action_id=action_id_for(run_id, node_id, attempt),
         run_id=run_id,
@@ -169,6 +193,9 @@ def build_pending_action(state: ChallengeCupGraphState, node_id: str) -> Pending
         input_artifact_refs=(),
         binding_snapshot_id=state.get("binding_snapshot_id") if state.get("binding_snapshot_id") else None,
         budget_policy_hash=str(state.get("budget_policy_hash") or ""),
+        scope=scope,
+        selection_id=selection_id,
+        candidate_id=candidate_id,
     )
 
 

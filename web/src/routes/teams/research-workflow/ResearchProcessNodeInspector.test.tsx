@@ -163,6 +163,52 @@ describe("ResearchProcessNodeInspector command rendering", () => {
     expect(disabledMarkup).not.toContain('href="/chat?session=s1');
   });
 
+  it("renders the real root session and every ordered candidate child session", () => {
+    const markup = renderInspector(makeDetail({
+      nodeId: "hypothesis_design",
+      label: "假说设计",
+      rootSession: {
+        scopeKind: "workflow_node_root",
+        sessionId: "root-session",
+        status: "running",
+        sessionAttempt: 1,
+        chatDeepLink: null,
+        sessionAnchorDegraded: true,
+      },
+      scopedSessions: [
+        {
+          scopeKind: "workflow_candidate",
+          candidateId: "H2",
+          selectionId: "selection-1",
+          sessionId: "child-H2",
+          sessionAttempt: 2,
+          taskId: "task-H2",
+          status: "running",
+          chatDeepLink: "/chat?session=child-H2&focusTask=task-H2",
+          fragmentRef: null,
+          sessionAnchorDegraded: false,
+        },
+        {
+          scopeKind: "workflow_candidate",
+          candidateId: "H1",
+          selectionId: "selection-1",
+          sessionId: "child-H1",
+          sessionAttempt: 1,
+          taskId: "task-H1",
+          status: "succeeded",
+          chatDeepLink: "/chat?session=child-H1&focusTask=task-H1",
+          fragmentRef: "fragment:H1",
+          sessionAnchorDegraded: false,
+        },
+      ],
+    }), { nodeId: "hypothesis_design", adapter: getNodeAdapter("hypothesis_design") });
+
+    expect(markup).toContain("root-session");
+    expect(markup.indexOf("候选 H2")).toBeLessThan(markup.indexOf("候选 H1"));
+    expect(markup).toContain("fragment:H1");
+    expect(markup).toContain('href="/chat?session=child-H2');
+  });
+
   it("shows handoff pending and blocked reason when present", () => {
     const markup = renderInspector(makeDetail({ blockedReason: "knowledge_package_rejected" }), {
       handoffPending: true,
