@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -18,6 +21,13 @@ from .static_spa import web_index_response
 
 class UTF8JSONResponse(JSONResponse):
     media_type = "application/json; charset=utf-8"
+
+
+def _health_workspace_root() -> str:
+    env_root = str(os.environ.get("VIBELUTION_WORKSPACE_ROOT", "")).strip()
+    if env_root:
+        return env_root
+    return str(Path(__file__).resolve().parents[2])
 
 
 def create_app() -> FastAPI:
@@ -60,6 +70,10 @@ def create_app() -> FastAPI:
         return {
             "status": "ok",
             "routesReady": routes_ready,
+            # Identity lets the launcher distinguish a stale same-project backend
+            # (safe to reclaim) from a foreign process holding the preferred port.
+            "pid": os.getpid(),
+            "workspaceRoot": _health_workspace_root(),
         }
 
     @app.get("/api/control-token")

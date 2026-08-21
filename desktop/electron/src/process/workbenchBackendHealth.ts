@@ -2,11 +2,40 @@ import { probeTcpConnect } from "../lifecycle/mainLine/observation.js";
 
 export const BACKEND_CONNECT_TIMEOUT_MS = 300;
 export const BACKEND_HEALTH_HTTP_TIMEOUT_MS = 1500;
-export const BACKEND_HEALTH_WAIT_MS = 45_000;
+// Route warm-up (33 serial module imports) can outlive the old 45s budget under
+// memory pressure; the backend itself holds non-health requests for 120s, so a
+// readiness-aware wait needs headroom above that before failing the start.
+export const BACKEND_HEALTH_WAIT_MS = 180_000;
 export const BACKEND_HEALTH_POLL_MS = 100;
+
+export type WorkbenchHealthResponse = { status: number; json?: () => Promise<unknown> };
 
 export function workbenchHealthUrl(port: number, host = "127.0.0.1"): string {
   return `http://${host}:${Math.trunc(port)}/api/health`;
+}
+
+export function workbenchHealthPayloadReady(payload: unknown): boolean {
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+    return false;
+  }
+  const body = payload as Record<string, unknown>;
+  return body.status === "ok" && body.routesReady === true;
+}
+
+export function defaultFetchWorkbenchHealth(input: {
+  httpTimeoutMs: number;
+  signal?: AbortSignal;
+}): (url: string) => Promise<WorkbenchHealthResponse> {
+  const signal = input.signal;
+  const httpTimeoutMs = Math.max(1, input.httpTimeoutMs);
+  return (target) =>
+    fetch(target, {
+      method: "GET",
+      redirect: "manual",
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(httpTimeoutMs)])
+        : AbortSignal.timeout(httpTimeoutMs)
+    });
 }
 
 export async function probeBackendHealthy(input: {
@@ -16,7 +45,7 @@ export async function probeBackendHealthy(input: {
   httpTimeoutMs?: number;
   signal?: AbortSignal;
   connect?: (port: number, host: string) => Promise<boolean>;
-  fetchHealth?: (url: string) => Promise<{ status: number }>;
+  fetchHealth?: (url: string) => Promise<WorkbenchHealthResponse>;
 }): Promise<boolean> {
   input.signal?.throwIfAborted();
   const host = input.host?.trim() || "127.0.0.1";
@@ -33,18 +62,18 @@ export async function probeBackendHealthy(input: {
   const url = workbenchHealthUrl(port, host);
   const httpTimeoutMs = Math.max(1, input.httpTimeoutMs ?? BACKEND_HEALTH_HTTP_TIMEOUT_MS);
   const fetchHealth =
-    input.fetchHealth ??
-    ((target) =>
-      fetch(target, {
-        method: "GET",
-        redirect: "manual",
-        signal: input.signal
-          ? AbortSignal.any([input.signal, AbortSignal.timeout(httpTimeoutMs)])
-          : AbortSignal.timeout(httpTimeoutMs)
-      }));
+    input.fetchHealth ?? defaultFetchWorkbenchHealth({ httpTimeoutMs, signal: input.signal });
   try {
     const response = await fetchHealth(url);
-    return response.status === 200;
+    if (response.status !== 200) {
+      return false;
+    }
+    // HTTP 200 alone only proves the process answers; /api/health must also
+    // report routesReady so the window never opens onto a 503 "starting" page.
+    if (typeof response.json !== "function") {
+      return false;
+    }
+    return workbenchHealthPayloadReady(await response.json());
   } catch {
     input.signal?.throwIfAborted();
     return false;
@@ -62,7 +91,7 @@ export async function waitForBackendHealthy(input: {
   now?: () => number;
   delay?: (ms: number) => Promise<void>;
   connect?: (port: number, host: string) => Promise<boolean>;
-  fetchHealth?: (url: string) => Promise<{ status: number }>;
+  fetchHealth?: (url: string) => Promise<WorkbenchHealthResponse>;
 }): Promise<void> {
   const timeoutMs = Math.max(1, input.timeoutMs ?? BACKEND_HEALTH_WAIT_MS);
   const pollIntervalMs = Math.max(0, input.pollIntervalMs ?? BACKEND_HEALTH_POLL_MS);

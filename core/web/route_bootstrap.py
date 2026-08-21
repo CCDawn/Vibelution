@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 import time
 from pathlib import Path
@@ -13,6 +14,8 @@ from fastapi.responses import JSONResponse
 
 from .router_registry import import_web_route_modules, register_web_routers_from_modules
 from .static_spa import web_index_response, web_spa_fallback_response
+
+logger = logging.getLogger("uvicorn.error")
 
 # Paths that must work before API routers / SPA catch-all are mounted.
 EARLY_READY_PATHS = frozenset(
@@ -68,6 +71,35 @@ def _mark_routes_ready(app: FastAPI, *, error: str = "") -> None:
         event.set()
 
 
+def _new_module_timing_sink() -> tuple[list[dict[str, Any]], Any]:
+    timings: list[dict[str, Any]] = []
+
+    def sink(module_name: str, duration_ms: float) -> None:
+        timings.append({"module": module_name, "importMs": round(duration_ms, 1)})
+
+    return timings, sink
+
+
+def _log_routes_bootstrap_summary(payload: dict[str, Any]) -> None:
+    module_imports = payload.get("moduleImports")
+    slowest = ""
+    if isinstance(module_imports, list) and module_imports:
+        entries = [
+            (str(item.get("module", "")), float(item.get("importMs", 0.0) or 0.0))
+            for item in module_imports
+            if isinstance(item, dict)
+        ]
+        top = sorted(entries, key=lambda entry: entry[1], reverse=True)[:5]
+        slowest = "; slowest: " + ", ".join(f"{name} {duration_ms:.1f}ms" for name, duration_ms in top)
+    logger.info(
+        "web routes mounted: %s modules, import %.1fms, mount %.1fms%s",
+        payload.get("routeModuleCount", 0),
+        float(payload.get("importMs", 0.0) or 0.0),
+        float(payload.get("mountMs", 0.0) or 0.0),
+        slowest,
+    )
+
+
 def ensure_web_routes_registered(app: FastAPI, *, web_dist: Path | None = None) -> dict[str, Any]:
     """Idempotently import+mount API routers and SPA. Safe on the main thread."""
 
@@ -86,8 +118,9 @@ def ensure_web_routes_registered(app: FastAPI, *, web_dist: Path | None = None) 
                 "error": str(getattr(app.state, "web_routes_error", "") or ""),
             }
         started = time.perf_counter()
+        module_imports, on_module_imported = _new_module_timing_sink()
         try:
-            modules = import_web_route_modules()
+            modules = import_web_route_modules(on_module_imported=on_module_imported)
             import_ms = max(0.0, (time.perf_counter() - started) * 1000.0)
             mount_started = time.perf_counter()
             register_web_routers_from_modules(app, modules)
@@ -102,8 +135,10 @@ def ensure_web_routes_registered(app: FastAPI, *, web_dist: Path | None = None) 
                 "importMs": round(import_ms, 1),
                 "mountMs": round(mount_ms, 1),
                 "totalMs": round(max(0.0, (time.perf_counter() - started) * 1000.0), 1),
+                "moduleImports": module_imports,
             }
             app.state.web_routes_bootstrap = payload
+            _log_routes_bootstrap_summary(payload)
             return payload
         except Exception as exc:
             # Leave unregistered so a later attempt can retry; expose error for middleware.
@@ -122,8 +157,9 @@ async def warm_web_routes_in_background(app: FastAPI, *, web_dist: Path | None =
         }
 
     started = time.perf_counter()
+    module_imports, on_module_imported = _new_module_timing_sink()
     try:
-        modules = await asyncio.to_thread(import_web_route_modules)
+        modules = await asyncio.to_thread(import_web_route_modules, on_module_imported=on_module_imported)
         import_ms = max(0.0, (time.perf_counter() - started) * 1000.0)
         # include_router must stay on the main thread / event loop.
         with _REGISTER_LOCK:
@@ -145,8 +181,10 @@ async def warm_web_routes_in_background(app: FastAPI, *, web_dist: Path | None =
                 "importMs": round(import_ms, 1),
                 "mountMs": round(mount_ms, 1),
                 "totalMs": round(max(0.0, (time.perf_counter() - started) * 1000.0), 1),
+                "moduleImports": module_imports,
             }
             app.state.web_routes_bootstrap = payload
+            _log_routes_bootstrap_summary(payload)
             _mark_routes_ready(app)
             return payload
     except Exception as exc:

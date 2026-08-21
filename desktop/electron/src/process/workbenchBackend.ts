@@ -14,11 +14,19 @@ import { dirname, join } from "node:path";
 
 import { pythonBridgeEnv } from "./pythonBridgeEnv.js";
 import { resolveLauncherRuntimeDir, resolveRuntimeManagerDir } from "../lifecycle/projectStoragePaths.js";
-import { observeMainLineWorkbench, probeTcpConnect } from "../lifecycle/mainLine/observation.js";
-import { waitForBackendHealthy } from "./workbenchBackendHealth.js";
+import { knownPidIsAlive, observeMainLineWorkbench, probeTcpConnect } from "../lifecycle/mainLine/observation.js";
+import {
+  BACKEND_HEALTH_HTTP_TIMEOUT_MS,
+  defaultFetchWorkbenchHealth,
+  waitForBackendHealthy,
+  workbenchHealthUrl,
+  type WorkbenchHealthResponse
+} from "./workbenchBackendHealth.js";
 import {
   collectRegisteredHandles,
-  retireRegisteredHandles
+  retireRegisteredHandles,
+  terminatePid,
+  waitForPortRelease
 } from "./workbenchBackendRetire.js";
 import {
   blockLifecycleIfActiveWork,
@@ -125,7 +133,7 @@ export type ExecuteMainLineWorkbenchInput = {
   ensureFrontend?: (input: { force: boolean; signal?: AbortSignal }) => Promise<void>;
   now?: () => string;
   connect?: (port: number, host: string) => Promise<boolean>;
-  fetchHealth?: (url: string) => Promise<{ status: number }>;
+  fetchHealth?: (url: string) => Promise<WorkbenchHealthResponse>;
   pidAlive?: (pid: number) => boolean;
   killPid?: (pid: number) => void;
   readDaemonPid?: (workspaceRoot: string) => number;
@@ -375,16 +383,173 @@ export function preferredWorkbenchPort(input: {
   return DEFAULT_WORKBENCH_PORT;
 }
 
+export type WorkbenchPortOccupant =
+  | { kind: "free" }
+  | { kind: "same-project-backend"; pid: number }
+  | { kind: "same-project-legacy-backend" }
+  | { kind: "other-project-backend"; workspaceRoot: string }
+  | { kind: "unknown" };
+
+// A stale backend can hold gigabytes of paged-out private memory; its graceful
+// shutdown needs longer than the normal retire window before it looks stuck.
+export const STALE_BACKEND_PORT_RELEASE_WAIT_MS = 15_000;
+const OCCUPANT_HEALTH_PROBE_ATTEMPTS = 3;
+const OCCUPANT_HEALTH_PROBE_RETRY_MS = 250;
+
+export async function classifyWorkbenchPortOccupant(input: {
+  port: number;
+  host?: string;
+  workspaceRoot: string;
+  signal?: AbortSignal;
+  connect?: (port: number, host: string) => Promise<boolean>;
+  fetchHealth?: (url: string) => Promise<WorkbenchHealthResponse>;
+}): Promise<WorkbenchPortOccupant> {
+  const host = input.host?.trim() || DEFAULT_WORKBENCH_HOST;
+  const port = Math.trunc(input.port);
+  const connect = input.connect ?? ((nextPort, nextHost) => probeTcpConnect(nextPort, nextHost));
+  if (!Number.isFinite(port) || port <= 0 || !(await connect(port, host))) {
+    return { kind: "free" };
+  }
+  const fetchHealth =
+    input.fetchHealth
+    ?? defaultFetchWorkbenchHealth({
+      httpTimeoutMs: BACKEND_HEALTH_HTTP_TIMEOUT_MS,
+      signal: input.signal
+    });
+  let body: Record<string, unknown> | null = null;
+  for (let attempt = 1; attempt <= OCCUPANT_HEALTH_PROBE_ATTEMPTS; attempt += 1) {
+    input.signal?.throwIfAborted();
+    try {
+      const response = await fetchHealth(workbenchHealthUrl(port, host));
+      if (response.status === 200 && typeof response.json === "function") {
+        const parsed: unknown = await response.json();
+        if (isRecord(parsed)) {
+          body = parsed;
+          break;
+        }
+      }
+    } catch {
+      // A booting backend accepts TCP before /api/health answers; retry before
+      // declaring the occupant unknown.
+    }
+    if (attempt < OCCUPANT_HEALTH_PROBE_ATTEMPTS) {
+      await new Promise<void>((resolve) => setTimeout(resolve, OCCUPANT_HEALTH_PROBE_RETRY_MS));
+    }
+  }
+  if (
+    body === null
+    || body.status !== "ok"
+    || typeof body.routesReady !== "boolean"
+    || typeof body.workspaceRoot !== "string"
+  ) {
+    return { kind: "unknown" };
+  }
+  if (!sameProjectRoot(String(body.workspaceRoot), input.workspaceRoot)) {
+    return { kind: "other-project-backend", workspaceRoot: String(body.workspaceRoot) };
+  }
+  const pid = Number(body.pid || 0);
+  if (!Number.isFinite(pid) || pid <= 0) {
+    // Same project, but an older build that does not report its pid.
+    return { kind: "same-project-legacy-backend" };
+  }
+  return { kind: "same-project-backend", pid };
+}
+
+export async function reclaimStaleWorkbenchBackend(input: {
+  port: number;
+  host?: string;
+  workspaceRoot: string;
+  signal?: AbortSignal;
+  connect?: (port: number, host: string) => Promise<boolean>;
+  fetchHealth?: (url: string) => Promise<WorkbenchHealthResponse>;
+  pidAlive?: (pid: number) => boolean;
+  killPid?: (pid: number) => void;
+  now?: () => number;
+  delay?: (ms: number) => Promise<void>;
+}): Promise<{ reclaimed: boolean; reason: string }> {
+  const occupant = await classifyWorkbenchPortOccupant(input);
+  if (occupant.kind !== "same-project-backend") {
+    return { reclaimed: false, reason: `port ${Math.trunc(input.port)} occupant is ${occupant.kind}` };
+  }
+  const pidAlive = input.pidAlive ?? knownPidIsAlive;
+  const killPid = input.killPid ?? terminatePid;
+  if (pidAlive(occupant.pid)) {
+    killPid(occupant.pid);
+  }
+  const released = await waitForPortRelease({
+    port: input.port,
+    host: input.host,
+    signal: input.signal,
+    now: input.now,
+    delay: input.delay,
+    connect: input.connect,
+    timeoutMs: STALE_BACKEND_PORT_RELEASE_WAIT_MS
+  });
+  if (!released) {
+    return {
+      reclaimed: false,
+      reason: `stale backend pid ${occupant.pid} still holds port ${Math.trunc(input.port)}`
+    };
+  }
+  return {
+    reclaimed: true,
+    reason: `reclaimed stale backend pid ${occupant.pid} on port ${Math.trunc(input.port)}`
+  };
+}
+
 export async function resolveBindableWorkbenchPort(input: {
   preferred: number;
+  workspaceRoot: string;
   host?: string;
+  signal?: AbortSignal;
   connect?: (port: number, host: string) => Promise<boolean>;
+  fetchHealth?: (url: string) => Promise<WorkbenchHealthResponse>;
+  pidAlive?: (pid: number) => boolean;
+  killPid?: (pid: number) => void;
+  now?: () => number;
+  delay?: (ms: number) => Promise<void>;
 }): Promise<{ port: number; note: string }> {
   const host = input.host?.trim() || DEFAULT_WORKBENCH_HOST;
   const connect = input.connect ?? ((port, nextHost) => probeTcpConnect(port, nextHost));
   const preferred = Math.trunc(input.preferred) > 0 ? Math.trunc(input.preferred) : DEFAULT_WORKBENCH_PORT;
   if (!(await connect(preferred, host))) {
     return { port: preferred, note: "" };
+  }
+  // Never silently drift to a new port: identify the occupier first. A stale
+  // backend of this project is reclaimed; anything unidentifiable fails loud.
+  const occupant = await classifyWorkbenchPortOccupant({ ...input, port: preferred, host });
+  if (occupant.kind === "free") {
+    // The occupier released the port between the connect probe and the
+    // classification; the preferred port is bindable again.
+    return { port: preferred, note: "" };
+  }
+  if (occupant.kind === "same-project-backend" || occupant.kind === "same-project-legacy-backend") {
+    if (occupant.kind === "same-project-legacy-backend") {
+      throw new Error(
+        `workbench backend port ${preferred} is held by a stale backend of this project that does not report its pid (older build); `
+          + "stop it manually or set VIBELUTION_PORT."
+      );
+    }
+    const reclaim = await reclaimStaleWorkbenchBackend({ ...input, port: preferred, host });
+    if (await connect(preferred, host)) {
+      throw new Error(
+        `workbench backend port ${preferred} is still held by stale backend pid ${occupant.pid} of this project `
+          + `(${reclaim.reason}); it did not stop within ${STALE_BACKEND_PORT_RELEASE_WAIT_MS}ms. `
+          + "Stop it manually or set VIBELUTION_PORT."
+      );
+    }
+    return {
+      port: preferred,
+      note: reclaim.reclaimed
+        ? `port ${preferred} held stale backend pid ${occupant.pid} of this project; reclaimed`
+        : `port ${preferred} released while reclaiming a stale backend of this project`
+    };
+  }
+  if (occupant.kind === "unknown") {
+    throw new Error(
+      `workbench backend port ${preferred} is occupied by an unknown process; `
+        + "stop that process or set VIBELUTION_PORT before starting the workbench."
+    );
   }
   for (let offset = 1; offset <= 48; offset += 1) {
     const candidate = preferred + offset;
@@ -394,7 +559,7 @@ export async function resolveBindableWorkbenchPort(input: {
     if (!(await connect(candidate, host))) {
       return {
         port: candidate,
-        note: `port ${preferred} occupied; auto-bound this project to ${candidate}`
+        note: `port ${preferred} in use by another Vibelution project (${occupant.workspaceRoot}); auto-bound this project to ${candidate}`
       };
     }
   }
@@ -738,6 +903,18 @@ export async function executeMainLineWorkbench(
       killPid: input.killPid,
       connect: input.connect
     });
+    // A stale same-project backend whose pid was lost from state must not
+    // outlive a stop; foreign occupants are intentionally left alone.
+    const staleReclaim = await reclaimStaleWorkbenchBackend({
+      port,
+      host,
+      workspaceRoot: input.workspaceRoot,
+      signal: input.signal,
+      connect: input.connect,
+      fetchHealth: input.fetchHealth,
+      pidAlive: input.pidAlive,
+      killPid: input.killPid
+    });
     writeState({
       ...previous,
       desiredState: "closed",
@@ -747,6 +924,7 @@ export async function executeMainLineWorkbench(
       backendLaunchPid: 0,
       browserLaunchPid: 0,
       browserWindowPid: 0,
+      ...(staleReclaim.reclaimed ? { staleReclaimNote: staleReclaim.reason } : {}),
       lastReason: `electron_main_${operation.replace("-", "_")}`,
       lastSource: "electron_main",
       updatedAt: isoNow(input.now)
@@ -791,7 +969,12 @@ export async function executeMainLineWorkbench(
   const resolved = await resolveBindableWorkbenchPort({
     preferred,
     host,
-    connect: input.connect
+    workspaceRoot: input.workspaceRoot,
+    signal: input.signal,
+    connect: input.connect,
+    fetchHealth: input.fetchHealth,
+    pidAlive: input.pidAlive,
+    killPid: input.killPid
   });
   const spawned = spawnWorkbenchBackend({
     workspaceRoot: input.workspaceRoot,

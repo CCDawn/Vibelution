@@ -3,9 +3,16 @@
 from __future__ import annotations
 
 import importlib
+import logging
+import time
+from collections.abc import Callable
 from typing import Any
 
 from fastapi import FastAPI
+
+# uvicorn.error is configured by the workbench entrypoint, so per-module import
+# timings reach backend.stderr.log even before route modules are mounted.
+logger = logging.getLogger("uvicorn.error")
 
 # Stable include order. Imports stay single-threaded: concurrent importlib of
 # interdependent route/service packages deadlocks on module locks (CPython).
@@ -50,11 +57,24 @@ def _import_route_module(module_name: str) -> Any:
     return importlib.import_module(module_name)
 
 
-def import_web_route_modules(*, max_workers: int = 1) -> list[Any]:
+def import_web_route_modules(
+    *,
+    max_workers: int = 1,
+    on_module_imported: Callable[[str, float], None] | None = None,
+) -> list[Any]:
     """Import route modules in stable order (serial; max_workers kept for API compatibility)."""
 
     del max_workers  # concurrent import is unsafe with circular service packages
-    return [_import_route_module(name) for name in _ROUTE_MODULE_NAMES]
+    modules: list[Any] = []
+    for name in _ROUTE_MODULE_NAMES:
+        started = time.perf_counter()
+        module = _import_route_module(name)
+        duration_ms = max(0.0, (time.perf_counter() - started) * 1000.0)
+        if on_module_imported is not None:
+            on_module_imported(name, duration_ms)
+        logger.info("web route module imported: %s (%.1fms)", name, duration_ms)
+        modules.append(module)
+    return modules
 
 
 def register_web_routers_from_modules(app: FastAPI, modules: list[Any]) -> None:

@@ -3,7 +3,7 @@
 **读者：** coding Agent。
 **Owner：** Electron desktop shell（监督者）。Python 只保留 workbench 后端本体与 git/文件维护 CLI。
 **非目标（本轮不做）：** checkout / `git worktree add` UI、托盘 HTTP→IPC 迁徙、列表 git-dirty 加速。
-**`main` 行：** open/close/restart 入队与 idle reconcile 由 Electron `lifecycle/mainLine` 拥有；execute 由 Electron 直接 spawn `pythonw scripts/web_workbench.py`（CREATE_NO_WINDOW / `windowsHide` + `pythonw`），健康等待 net.connect + HTTP `/api/health`。隔离行走本文件的 registry claim（Electron `instanceRegistryStore`）；backend spawn 同样走 `pythonw scripts/web_workbench.py`，stop 收割登记的 `spawnPid` 后等端口释放。Python 产品路径不再写 `instances.json`、不再执行 workbench 命令队列。
+**`main` 行：** open/close/restart 入队与 idle reconcile 由 Electron `lifecycle/mainLine` 拥有；execute 由 Electron 直接 spawn `pythonw scripts/web_workbench.py`（CREATE_NO_WINDOW / `windowsHide` + `pythonw`），健康等待 net.connect + HTTP `/api/health` 且要求响应体 `routesReady:true`（防止窗口打开后撞 503 starting）。首选端口被占时先按 health 身份分类：本项目残留后端按其上报 pid 回收，他项目后端换端口并记 note，未知占用显式报错，禁止静默漂移。隔离行走本文件的 registry claim（Electron `instanceRegistryStore`）；backend spawn 同样走 `pythonw scripts/web_workbench.py`，stop 收割登记的 `spawnPid` 后等端口释放。Python 产品路径不再写 `instances.json`、不再执行 workbench 命令队列。
 
 权威交叉引用：`docs/standards/development-standard.md` §8.0 · ADR 0009 · [`launcher_runtime.md`](../web/services/launcher_runtime.md)。
 

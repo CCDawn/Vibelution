@@ -10,12 +10,14 @@ import {
   waitForPortRelease
 } from "../src/process/workbenchBackendRetire.js";
 import {
+  classifyWorkbenchPortOccupant,
   executeMainLineWorkbench,
   ensureFrontendBuild,
   FRONTEND_BUILD_TIMEOUT_MS,
   mainLineBackendIsReachable,
   mainLineBackendIsReusable,
   mainLineRunningCodeIsCurrent,
+  resolveBindableWorkbenchPort,
   resolveNoConsolePython,
   resolveNodeExecutable,
   runWaitable,
@@ -79,8 +81,11 @@ describe("workbenchBackendHealth", () => {
     expect(fetchHealth).not.toHaveBeenCalled();
   });
 
-  it("requires /api/health 200 after the TCP gate", async () => {
-    const fetchHealth = vi.fn().mockResolvedValue({ status: 200 });
+  it("requires /api/health 200 with routesReady:true after the TCP gate", async () => {
+    const fetchHealth = vi.fn().mockResolvedValue({
+      status: 200,
+      json: async () => ({ status: "ok", routesReady: true })
+    });
     await expect(
       probeBackendHealthy({
         port: 8011,
@@ -90,6 +95,16 @@ describe("workbenchBackendHealth", () => {
       })
     ).resolves.toBe(true);
     expect(fetchHealth).toHaveBeenCalledWith(workbenchHealthUrl(8011, "127.0.0.1"));
+  });
+
+  it("treats 200 with routesReady:false as not ready so the window never opens early", async () => {
+    await expect(
+      probeBackendHealthy({
+        port: 8000,
+        connect: async () => true,
+        fetchHealth: async () => ({ status: 200, json: async () => ({ status: "ok", routesReady: false }) })
+      })
+    ).resolves.toBe(false);
   });
 
   it("treats a non-200 health response as not ready", async () => {
@@ -102,10 +117,20 @@ describe("workbenchBackendHealth", () => {
     ).resolves.toBe(false);
   });
 
+  it("treats a 200 response without a health payload as not ready", async () => {
+    await expect(
+      probeBackendHealthy({
+        port: 8000,
+        connect: async () => true,
+        fetchHealth: async () => ({ status: 200 })
+      })
+    ).resolves.toBe(false);
+  });
+
   it("waits until the spawned child owns a healthy listener", async () => {
     const fetchHealth = vi.fn()
       .mockResolvedValueOnce({ status: 503 })
-      .mockResolvedValueOnce({ status: 200 });
+      .mockResolvedValueOnce({ status: 200, json: async () => ({ status: "ok", routesReady: true }) });
     await waitForBackendHealthy({
       port: 8000,
       timeoutMs: 50,
@@ -165,6 +190,152 @@ describe("workbenchBackendRetire", () => {
     });
     expect(killed).toEqual([12, 11]);
     await expect(waitForPortRelease({ port: 8000, connect: async () => false })).resolves.toBe(true);
+  });
+});
+
+describe("classifyWorkbenchPortOccupant", () => {
+  it("reports free when nothing listens on the port", async () => {
+    await expect(
+      classifyWorkbenchPortOccupant({
+        port: 8000,
+        workspaceRoot: "C:/repo",
+        connect: async () => false
+      })
+    ).resolves.toEqual({ kind: "free" });
+  });
+
+  it("identifies a same-project stale backend by health identity", async () => {
+    await expect(
+      classifyWorkbenchPortOccupant({
+        port: 8002,
+        workspaceRoot: "C:/repo",
+        connect: async () => true,
+        fetchHealth: async () => ({
+          status: 200,
+          json: async () => ({ status: "ok", routesReady: true, pid: 34652, workspaceRoot: "C:\\repo\\" })
+        })
+      })
+    ).resolves.toEqual({ kind: "same-project-backend", pid: 34652 });
+  });
+
+  it("flags a same-project backend without a reported pid as legacy", async () => {
+    await expect(
+      classifyWorkbenchPortOccupant({
+        port: 8002,
+        workspaceRoot: "C:/repo",
+        connect: async () => true,
+        fetchHealth: async () => ({
+          status: 200,
+          json: async () => ({ status: "ok", routesReady: true, workspaceRoot: "C:/repo" })
+        })
+      })
+    ).resolves.toEqual({ kind: "same-project-legacy-backend" });
+  });
+
+  it("classifies a different workspaceRoot as another project", async () => {
+    await expect(
+      classifyWorkbenchPortOccupant({
+        port: 8000,
+        workspaceRoot: "C:/repo",
+        connect: async () => true,
+        fetchHealth: async () => ({
+          status: 200,
+          json: async () => ({ status: "ok", routesReady: true, pid: 11, workspaceRoot: "D:/other" })
+        })
+      })
+    ).resolves.toEqual({ kind: "other-project-backend", workspaceRoot: "D:/other" });
+  });
+
+  it("classifies a non-Vibelution listener as unknown after bounded retries", async () => {
+    const fetchHealth = vi.fn().mockResolvedValue({ status: 404 });
+    await expect(
+      classifyWorkbenchPortOccupant({
+        port: 8000,
+        workspaceRoot: "C:/repo",
+        connect: async () => true,
+        fetchHealth
+      })
+    ).resolves.toEqual({ kind: "unknown" });
+    expect(fetchHealth).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("resolveBindableWorkbenchPort", () => {
+  it("binds the preferred port when it is free", async () => {
+    await expect(
+      resolveBindableWorkbenchPort({
+        preferred: 8000,
+        workspaceRoot: "C:/repo",
+        connect: async () => false
+      })
+    ).resolves.toEqual({ port: 8000, note: "" });
+  });
+
+  it("reclaims a stale same-project backend and rebinds the preferred port", async () => {
+    const alive = new Set([34652]);
+    let listening = true;
+    const result = await resolveBindableWorkbenchPort({
+      preferred: 8002,
+      workspaceRoot: "C:/repo",
+      connect: async (port) => port === 8002 && listening,
+      fetchHealth: async () => ({
+        status: 200,
+        json: async () => ({ status: "ok", routesReady: true, pid: 34652, workspaceRoot: "C:\\repo" })
+      }),
+      pidAlive: (pid) => alive.has(pid),
+      killPid: (pid) => {
+        alive.delete(pid);
+        listening = false;
+      },
+      delay: async () => undefined
+    });
+    expect(result.port).toBe(8002);
+    expect(result.note).toContain("reclaimed");
+  });
+
+  it("fails loudly when a stale same-project backend does not release the port", async () => {
+    let clock = 0;
+    await expect(
+      resolveBindableWorkbenchPort({
+        preferred: 8002,
+        workspaceRoot: "C:/repo",
+        connect: async () => true,
+        fetchHealth: async () => ({
+          status: 200,
+          json: async () => ({ status: "ok", routesReady: true, pid: 34652, workspaceRoot: "C:/repo" })
+        }),
+        pidAlive: () => true,
+        killPid: () => undefined,
+        now: () => (clock += 10_000),
+        delay: async () => undefined
+      })
+    ).rejects.toThrow("still held by stale backend pid 34652");
+  });
+
+  it("relocates when another Vibelution project holds the preferred port", async () => {
+    const result = await resolveBindableWorkbenchPort({
+      preferred: 8000,
+      workspaceRoot: "C:/repo",
+      connect: async (port) => port === 8000,
+      fetchHealth: async () => ({
+        status: 200,
+        json: async () => ({ status: "ok", routesReady: true, pid: 11, workspaceRoot: "D:/other" })
+      })
+    });
+    expect(result.port).toBe(8001);
+    expect(result.note).toContain("another Vibelution project");
+  });
+
+  it("fails loudly when an unknown process holds the preferred port", async () => {
+    const fetchHealth = vi.fn().mockRejectedValue(new Error("fetch failed"));
+    await expect(
+      resolveBindableWorkbenchPort({
+        preferred: 8000,
+        workspaceRoot: "C:/repo",
+        connect: async () => true,
+        fetchHealth
+      })
+    ).rejects.toThrow("occupied by an unknown process");
   });
 });
 
@@ -355,7 +526,10 @@ describe("runWorkbenchLifecycle", () => {
         listActiveWork: () => [],
         ensureFrontend: async () => undefined,
         connect: async () => spawned,
-        fetchHealth: async () => ({ status: 200 }),
+        fetchHealth: async () => ({
+          status: 200,
+          json: async () => ({ status: "ok", routesReady: true, pid: 4242, workspaceRoot: "C:/repo" })
+        }),
         pidAlive: () => false,
         killPid: () => undefined
       }
