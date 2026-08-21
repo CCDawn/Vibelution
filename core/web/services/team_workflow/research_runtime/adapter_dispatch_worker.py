@@ -28,7 +28,7 @@ from core.research.workflow.models import ActorKind
 from core.research.workflow.transitions import NodeAttemptStatus
 
 from .action_registry import ActionRegistry, VerifiedDomainResult
-from .block_projection import sync_run_succeeded, terminal_facts_for_run
+from .block_projection import sync_run_blocked, sync_run_succeeded, terminal_facts_for_run
 from .domain_ports import DomainPorts
 from .failure_projection import apply_node_run_failure
 from .ids import new_id
@@ -125,7 +125,7 @@ class AdapterDispatchWorker:
 
             if isinstance(exc, TurnNotReadyError):
                 # Turn still running — requeue without failing the attempt.
-                self._requeue_or_fail(outbox, f"turn_not_ready:{exc}")
+                self._requeue_or_fail(outbox, action, f"turn_not_ready:{exc}")
                 return
             # Compensation-void unused reservation if execute reserved then crashed.
             self._void_unused_reservation(
@@ -191,7 +191,7 @@ class AdapterDispatchWorker:
                 )
         except Exception as exc:
             # commit 前 crash：outbox 保留 pending（可重领取），领域侧幂等。
-            self._requeue_or_fail(outbox, str(exc))
+            self._requeue_or_fail(outbox, action, str(exc))
 
     # ------------------------------------------------------------ commits
 
@@ -309,6 +309,19 @@ class AdapterDispatchWorker:
             if routed:
                 successors = routed
             elif action.node_id in {"iteration_decision", "version_governance"}:
+                if not branch:
+                    # Unreadable decision artifact: record the block instead of
+                    # stranding the run as a silent no-successor "success".
+                    sync_run_blocked(
+                        uow,
+                        run_id=action.run_id,
+                        node_id=action.node_id,
+                        problem={
+                            "code": "iteration_branch_unreadable",
+                            "detail": "iteration decision artifact could not be read; manual repair required",
+                        },
+                        now_ms=now_ms,
+                    )
                 successors = ()
             if successors:
                 uow.repository.insert_handoff(
@@ -678,8 +691,19 @@ class AdapterDispatchWorker:
 
         self._store.submit(mutate, force_flush=True).result(timeout=30)
 
-    def _requeue_or_fail(self, outbox: Any, detail: str) -> None:
+    _MAX_TRANSIENT_ATTEMPTS = 5
+
+    def _requeue_or_fail(self, outbox: Any, action: PendingAction, detail: str) -> None:
         now_ms = self._now()
+        if int(getattr(outbox, "attempt_count", 0) or 0) >= self._MAX_TRANSIENT_ATTEMPTS:
+            # Deterministic failures must not retry forever: surface a failed
+            # attempt instead of an endless 5s live-lock with no diagnosis.
+            self._fail_attempt(
+                outbox,
+                action,
+                {"code": "transient_exhausted", "detail": str(detail)[:400]},
+            )
+            return
         outbox_api.requeue_action(
             self._store,
             outbox.action_id,

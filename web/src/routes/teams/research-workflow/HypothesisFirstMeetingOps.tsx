@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { fetchChatRoomDetail } from "../../../api/chat";
 import {
   approveHypothesisDigest,
+  closeReviewMeeting,
   draftMeetingSummary,
   fetchMeetingRound,
   fetchMeetingRoundSourceMessages,
@@ -125,6 +126,14 @@ export function HypothesisFirstMeetingOps(props: {
         );
       } else {
         setApproveBlockedReason(null);
+        // Partially-invalid requests are dropped on a successful close; make
+        // that visible so the affected candidates are not silently waiting.
+        const dropped = (payload?.validationErrors ?? []).map((item) => item.message).filter(Boolean);
+        setDroppedRequestNotice(
+          dropped.length
+            ? `本轮已确认，但 ${dropped.length} 条证据请求因格式无效被跳过：${dropped.join("；")}`
+            : null,
+        );
       }
       invalidate();
       if (payload && payload.closed !== false) {
@@ -160,6 +169,26 @@ export function HypothesisFirstMeetingOps(props: {
     onSuccess: invalidate,
   });
   const [reopenBlockedReason, setReopenBlockedReason] = useState<string | null>(null);
+  const [droppedRequestNotice, setDroppedRequestNotice] = useState<string | null>(null);
+  const closeCorrectionMutation = useMutation({
+    mutationFn: () =>
+      closeReviewMeeting(props.teamId, props.meetingRoundId, {
+        closedBy: "operator",
+        decisions: [
+          {
+            decision: "close_round",
+            rationale: "本轮证据请求均无效，按现有结论关闭，不发起资料搜集",
+            decidedBy: "operator",
+            evidenceRefs: [`meeting_round:${props.meetingRoundId}`],
+            status: "adopted",
+          },
+        ],
+      }),
+    onSuccess: () => {
+      setApproveBlockedReason(null);
+      invalidate();
+    },
+  });
   const reopenReviewMutation = useMutation({
     mutationFn: () => reopenHypothesisReviewMeeting(props.teamId, props.meetingRoundId),
     onSuccess: (payload) => {
@@ -335,6 +364,24 @@ export function HypothesisFirstMeetingOps(props: {
           label="本轮结论未被确认"
           summary={approveBlockedReason}
           data-testid="approve-blocked-reason"
+          actions={commandEnabled && (roundStatus === "awaiting_approval") ? (
+            <VButton
+              type="button"
+              variant="ghost"
+              density="compact"
+              isPending={closeCorrectionMutation.isPending}
+              onPress={() => closeCorrectionMutation.mutate()}
+            >
+              按现有结论关闭本轮（不发起资料搜集）
+            </VButton>
+          ) : undefined}
+        />
+      ) : null}
+      {droppedRequestNotice ? (
+        <VErrorSummary
+          label="部分证据请求被跳过"
+          summary={droppedRequestNotice}
+          data-testid="dropped-request-notice"
         />
       ) : null}
       {reopenBlockedReason ? (

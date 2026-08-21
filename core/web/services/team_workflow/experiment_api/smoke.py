@@ -139,11 +139,21 @@ def run_experiment_smoke_run(team_id: str, plan_id: str, payload: dict[str, Any]
         )
     )
     if isinstance(threshold_raw, dict):
-        threshold_raw = threshold_raw.get("macro_f1_delta") or threshold_raw.get("macro_f1")
+        threshold_raw = (
+            threshold_raw.get("macro_f1_delta")
+            or threshold_raw.get("macro_f1")
+            or threshold_raw.get("mse_improvement")
+        )
     try:
         threshold = float(threshold_raw) if threshold_raw is not None else None
     except (TypeError, ValueError):
         threshold = None
+    if threshold is not None and threshold <= 0:
+        # A non-positive threshold makes every delta "pass"; refuse it so the
+        # decision hint stays meaningful.
+        raise s.TeamWorkflowOrchestrationError(
+            "Smoke successThreshold must be a positive number."
+        )
     try:
         runner_result = s.smoke_runner.run_smoke_adapter(adapter, seed=seed, threshold=threshold)
     except s.smoke_runner.SmokeRunnerError as exc:
@@ -178,6 +188,9 @@ def run_experiment_smoke_run(team_id: str, plan_id: str, payload: dict[str, Any]
         plan = s._find_experiment_plan(plan_store, normalized_plan_id)
         if plan is None:
             raise s.TeamWorkflowOrchestrationError("Experiment plan not found.")
+        # The runner executes outside the lock; re-assert the frozen design so a
+        # result is never recorded against changed terms.
+        s._require_explicit_experiment_design_frozen(plan)
         runs = [item for item in list(plan.get("smokeRunResults") or []) if isinstance(item, dict)]
         runs.append(smoke_record)
         plan["smokeRunResults"] = runs[-12:]

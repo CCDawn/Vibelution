@@ -529,6 +529,16 @@ def _trail_source_stamp(team_id: str) -> float:
             stamp = max(stamp, (root / name).stat().st_mtime)
         except OSError:
             continue
+    # Trail content also comes from bound chat-room rounds; a growing room
+    # without a meeting-record write must still invalidate the trail cache.
+    try:
+        from core.ui.chat_state import chat_state_path
+
+        chat_root = chat_state_path(_project_root()).parent
+        for child in chat_root.glob("*.json"):
+            stamp = max(stamp, child.stat().st_mtime)
+    except Exception:  # noqa: BLE001 - cache stamp must never fail the trail
+        pass
     return stamp
 
 
@@ -770,11 +780,19 @@ def open_candidate_generation_meeting(
         # that produced nothing must not block a fresh attempt, so the new
         # meeting gets a deterministic per-attempt id instead of reopening the
         # closed record.
-        has_candidates = bool(
+        # Crash between the closure write and the candidate registration left
+        # a closed meeting whose proposals never landed; re-register them
+        # (idempotent) instead of forcing a whole new generation discussion.
+        _heal_generation_candidates(normalized_team_id, meetings[-1])
+        candidate_count = len(
             list_hypothesis_candidates(
                 normalized_team_id, question_id=normalized_question_id
             )["candidates"]
         )
+        # A single candidate can never satisfy the >=2 selection floor; reuse
+        # only when the registered set is actually selectable, otherwise let a
+        # fresh generation attempt run instead of dead-locking the question.
+        has_candidates = candidate_count >= 2
         if has_candidates:
             existing = meetings[-1]
             return {
@@ -828,6 +846,23 @@ def needs_candidate_generation(team_id: str, question_id: str) -> bool:
     if hypothesis_selection._approved_candidate_ids(team_id, question_id):
         return False
     return not _question_generation_meetings(team_id, question_id)
+
+
+def _heal_generation_candidates(team_id: str, closed_meeting: Mapping[str, Any]) -> None:
+    if str(closed_meeting.get("status") or "") != "closed":
+        return
+    digest = closed_meeting.get("digest")
+    if not isinstance(digest, Mapping):
+        digest = closed_meeting.get("digestDraft")
+    if not isinstance(digest, Mapping):
+        return
+    proposals = [
+        item
+        for item in list(digest.get("proposedCandidates") or [])
+        if isinstance(item, Mapping)
+    ]
+    if proposals:
+        _append_generation_candidates(team_id, closed_meeting, proposals)
 
 
 def _close_generation_meeting(
@@ -2065,10 +2100,26 @@ def chain_state(team_id: str, question_id: str) -> dict[str, Any]:
         bool(first_meeting)
         and str(first_meeting.get("status") or "") == "closed"
     )
+    selection_links = (
+        [item for item in links if str(item.get("selectionId") or "") == selection_id]
+        if selection_id
+        else []
+    )
+    # Review meetings of superseded selections must not block collection
+    # readiness forever; only the current selection's meetings count (plus
+    # generation meetings, which are per-question and not selection-scoped).
+    current_selection_meeting_ids = {
+        str(link.get("meetingRoundId") or "") for link in selection_links
+    }
     open_meeting_ids = [
         str(meeting.get("meetingRoundId") or "")
         for meeting in meetings
         if str(meeting.get("status") or "") != "closed"
+        and (
+            str(meeting.get("meetingType") or "") != HYPOTHESIS_REVIEW_MEETING_TYPE
+            or not current_selection_meeting_ids
+            or str(meeting.get("meetingRoundId") or "") in current_selection_meeting_ids
+        )
     ]
     pending_requests = [
         request for request in requests if str(request.get("status") or "") != "handed_off"
@@ -2117,11 +2168,6 @@ def chain_state(team_id: str, question_id: str) -> dict[str, Any]:
     # Budget authority lives on the current selection's links: raised limits
     # are persisted per round, and exhaustion counts only this selection's
     # rounds (superseded/older selections must not fake budget_exhausted).
-    selection_links = (
-        [item for item in links if str(item.get("selectionId") or "") == selection_id]
-        if selection_id
-        else []
-    )
     selection_round_index = max(
         (int(item.get("roundIndex") or 0) for item in selection_links), default=0
     )
