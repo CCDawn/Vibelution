@@ -137,7 +137,7 @@ export function ChallengeSubmissionReadinessPanel({
       </div>
       {exportError ? (
         <div
-          className="rounded border border-[color-mix(in_srgb,var(--state-error)_35%,var(--vui-border-subtle))] bg-[color-mix(in_srgb,var(--state-error)_8%,transparent)] px-2 py-1.5 [font-size:var(--vui-font-2xs)] text-[var(--state-error)]"
+          className={styles.submissionExportError}
           data-testid="submission-export-error"
           role="alert"
         >
