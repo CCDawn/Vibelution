@@ -67,6 +67,33 @@ export function resolveResearchProjectsQueryEnabled(options: {
   return Boolean(options.effectiveTeamId && options.researchWorkflowTeamSelected);
 }
 
+/** Team-wide research chrome needs canonical project progress on overview and process-flow home. */
+export function resolveResearchProjectProgressQueryEnabled(options: {
+  effectiveTeamId: string;
+  activeResearchProjectId: string;
+  researchWorkflowTeamSelected: boolean;
+  researchWorkspaceView: ResearchWorkspaceViewLike;
+}): boolean {
+  return Boolean(
+    options.effectiveTeamId
+    && options.activeResearchProjectId
+    && options.researchWorkflowTeamSelected
+    && ["overview", "workflow"].includes(options.researchWorkspaceView),
+  );
+}
+
+/** Disabled React Query observers may retain cache data; only SC surfaces may use that fallback. */
+export function resolveResearchSourceRunCount(options: {
+  projectProgressSourceRunCount?: number | null;
+  sourceCollectionRunCount: number;
+  sourceCollectionWorkspaceSelected: boolean;
+}): number {
+  if (typeof options.projectProgressSourceRunCount === "number") {
+    return options.projectProgressSourceRunCount;
+  }
+  return options.sourceCollectionWorkspaceSelected ? options.sourceCollectionRunCount : 0;
+}
+
 /**
  * Full linked-room detail is only needed when the communication panel is visible.
  * Team detail already carries a compact room reference for links and status chrome;

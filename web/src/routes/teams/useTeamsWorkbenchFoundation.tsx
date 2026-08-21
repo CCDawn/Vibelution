@@ -109,7 +109,9 @@ import {
 } from "./teamWorkflowQueryKeys";
 import {
   resolveLinkedChatRoomQueryEnabled,
+  resolveResearchProjectProgressQueryEnabled,
   resolveResearchSecondaryStatusQueryEnabled,
+  resolveResearchSourceRunCount,
 } from "./teamDetailLoadPolicy";
 import {
   researchStageAgentConfigStatusLabel,
@@ -876,6 +878,12 @@ export function useTeamsWorkbenchFoundation({
   const teamWorkflowPaperNoteChunkStatus = teamWorkflowPaperNoteChunkStatusQuery.data ?? null;
   const researchStageRoundStatus = researchStageRoundStatusQuery.data ?? null;
   const researchStagePhases = researchStageRoundStatus?.phases ?? [];
+  const researchProjectProgressQueryEnabled = resolveResearchProjectProgressQueryEnabled({
+    effectiveTeamId,
+    activeResearchProjectId: activeSourceCollectionResearchProjectId,
+    researchWorkflowTeamSelected,
+    researchWorkspaceView,
+  });
   const researchProjectProgressQuery = useQuery({
     queryKey: [
     "teams",
@@ -888,18 +896,17 @@ export function useTeamsWorkbenchFoundation({
     queryFn: () => getTeamResearchProjectProgress(effectiveTeamId,
     activeSourceCollectionResearchProjectId
     ),
-    enabled: Boolean(researchWorkflowTeamSelected
-    && researchWorkspaceView === "overview"
-    && effectiveTeamId
-    && activeSourceCollectionResearchProjectId
-    ),
+    enabled: researchProjectProgressQueryEnabled,
     staleTime: 5_000,
     });
   const researchProjectProgress = researchProjectProgressQuery.data ?? null;
   const researchPrimaryActionInput = useMemo(() => ({
     hasActiveProject: Boolean(activeSourceCollectionResearchProjectId),
-    sourceRunCount: researchProjectProgress?.sourceRunCount
-    ?? sourceCollectionRuns.length,
+    sourceRunCount: resolveResearchSourceRunCount({
+      projectProgressSourceRunCount: researchProjectProgress?.sourceRunCount,
+      sourceCollectionRunCount: sourceCollectionRuns.length,
+      sourceCollectionWorkspaceSelected,
+    }),
     sourceCandidateCount: researchProjectProgress?.sourceCandidateCount
     ?? teamWorkflow?.candidateStore?.candidateCount
     ?? 0,
@@ -919,6 +926,7 @@ export function useTeamsWorkbenchFoundation({
     researchProjectProgress,
     researchStagePhases,
     researchWorkspaceView,
+    sourceCollectionWorkspaceSelected,
     sourceCollectionRuns.length,
     teamWorkflow?.candidateStore?.candidateCount
     ]);
