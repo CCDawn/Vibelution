@@ -228,6 +228,51 @@ def test_cleanup_does_not_eagerly_annotate_metadata(monkeypatch):
     assert [item["id"] for item in result["cleaned"]] == ["worktree:task"]
 
 
+def test_cleanup_skips_registry_in_flight_instance_without_stopping_or_removing(tmp_path):
+    root = _init_repo(tmp_path / "repo")
+    worktree = root / ".worktrees" / "starting-task"
+    payload = {
+        "integrationRoot": str(root),
+        "items": [_item(id="worktree:starting-task", path=str(worktree), status="starting")],
+    }
+    stops: list[str] = []
+
+    result = cleanup.cleanup_branch_instances(
+        ["worktree:starting-task"],
+        confirm=True,
+        list_payload=payload,
+        stop_runner=lambda item: stops.append(item["id"]) or {},
+    )
+
+    assert result["cleaned"] == []
+    assert result["skipped"][0]["code"] == "instance_in_flight"
+    assert stops == []
+    assert not worktree.exists()
+
+
+def test_cleanup_reports_registry_drop_failure_and_releases_cleanup_fence(tmp_path, monkeypatch):
+    root = _init_repo(tmp_path / "repo")
+    payload = {
+        "integrationRoot": str(root),
+        "items": [_item(id="worktree:task", branch="", checkedOut=False, path="")],
+    }
+    released: list[tuple[str, str]] = []
+    monkeypatch.setattr(cleanup, "_claim_cleanup_instance", lambda _instance_id: (True, "token-1"))
+    monkeypatch.setattr(cleanup, "_drop_registry_instance", lambda _instance_id: False)
+    monkeypatch.setattr(
+        cleanup,
+        "_release_cleanup_instance",
+        lambda instance_id, token: released.append((instance_id, token)),
+    )
+
+    result = cleanup.cleanup_branch_instances(["worktree:task"], confirm=True, list_payload=payload)
+
+    assert result["ok"] is False
+    assert result["cleaned"] == []
+    assert result["failed"][0]["code"] == "instance_cleanup_failed"
+    assert released == [("worktree:task", "token-1")]
+
+
 def test_drop_registry_instance_uses_locked_mutation(monkeypatch):
     calls: list[str] = []
 

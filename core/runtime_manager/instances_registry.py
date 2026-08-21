@@ -254,6 +254,12 @@ def apply_claim_start(
     extra = {int(port) for port in (extra_used or set()) if int(port or 0) > 0}
     entry = _ensure_entry(payload, wanted)
     current_status = str(entry.get("status") or "").strip().lower()
+    if bool(entry.get("cleanupInProgress")):
+        raise InstanceBusyError(
+            wanted,
+            status="cleanup",
+            generation=int(entry.get("generation") or 0),
+        )
     if current_status in IN_FLIGHT_STATUSES:
         raise InstanceBusyError(
             wanted,

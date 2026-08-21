@@ -18,6 +18,7 @@ from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from core.infrastructure import git_process
 from core.runtime_manager import instances_registry as registry
@@ -129,10 +130,32 @@ def cleanup_branch_instances(
         if not cleanup_eligible(item):
             skipped.append(_issue(instance_id, "instance_protected", "主分支和当前工作区不能清理。", item=item))
             continue
+        if _item_is_in_flight(item):
+            skipped.append(
+                _issue(
+                    instance_id,
+                    "instance_in_flight",
+                    "该分支实例正在启动或停止，等待生命周期操作完成后再清理。",
+                    item=item,
+                )
+            )
+            continue
+        claimed, cleanup_token = _claim_cleanup_instance(instance_id)
+        if not claimed:
+            skipped.append(
+                _issue(
+                    instance_id,
+                    "instance_in_flight",
+                    "该分支实例正在启动、停止或被其他清理任务占用。",
+                    item=item,
+                )
+            )
+            continue
         try:
             result = _cleanup_one(item, root=root, stop_runner=stop_runner)
         except (OSError, RuntimeError) as exc:
             logger.warning("branch instance cleanup failed id=%s err=%s", instance_id, exc)
+            _release_cleanup_instance(instance_id, cleanup_token)
             failed.append(_issue(instance_id, "instance_cleanup_failed", str(exc), item=item))
             continue
         cleaned.append(result)
@@ -314,6 +337,59 @@ def _delete_local_branch(root: Path, branch: str) -> None:
     result = _run_git(root, "branch", "-D", branch)
     if result.returncode != 0:
         raise RuntimeError(f"删除本地分支失败：{_git_detail(result) or branch}")
+
+
+def _claim_cleanup_instance(instance_id: str) -> tuple[bool, str]:
+    """Fence cleanup against a concurrent in-flight lifecycle claim."""
+
+    if not instance_id:
+        return True, ""
+    token = f"cleanup-{uuid4().hex}"
+
+    def mutator(payload: dict[str, Any]) -> tuple[bool, str]:
+        instances = payload.setdefault("instances", {})
+        entry = instances.get(instance_id)
+        if not isinstance(entry, dict):
+            return True, ""
+        status = str(entry.get("status") or "").strip().lower()
+        phase = str(entry.get("phase") or "").strip().lower()
+        if status in registry.IN_FLIGHT_STATUSES or phase in {"opening", "starting", "restarting"}:
+            return False, ""
+        if bool(entry.get("cleanupInProgress")):
+            return False, ""
+        entry["cleanupInProgress"] = True
+        entry["cleanupToken"] = token
+        return True, token
+
+    try:
+        return registry.mutate_registry(mutator)
+    except (OSError, TimeoutError, TypeError, ValueError):
+        # Unknown registry state is occupied for safety; do not delete files.
+        logger.warning("failed to claim cleanup registry fence id=%s", instance_id)
+        return False, ""
+
+
+def _release_cleanup_instance(instance_id: str, token: str) -> None:
+    if not instance_id or not token:
+        return
+
+    def mutator(payload: dict[str, Any]) -> None:
+        entry = payload.setdefault("instances", {}).get(instance_id)
+        if isinstance(entry, dict) and str(entry.get("cleanupToken") or "") == token:
+            entry.pop("cleanupInProgress", None)
+            entry.pop("cleanupToken", None)
+
+    try:
+        registry.mutate_registry(mutator)
+    except (OSError, TimeoutError, TypeError, ValueError):
+        logger.warning("failed to release cleanup registry fence id=%s", instance_id)
+
+
+def _item_is_in_flight(item: dict[str, Any]) -> bool:
+    runtime = item.get("runtime") if isinstance(item.get("runtime"), dict) else {}
+    status = str(item.get("status") or runtime.get("registryStatus") or "").strip().lower()
+    phase = str(item.get("phase") or runtime.get("phase") or "").strip().lower()
+    return status in registry.IN_FLIGHT_STATUSES or phase in {"opening", "starting", "restarting"}
 
 
 def _drop_registry_instance(instance_id: str) -> bool:
