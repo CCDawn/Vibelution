@@ -96,6 +96,7 @@ REQUIREMENT_IMPORT_NAME_OVERRIDES = {
 }
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8000
+FRONTEND_BUILD_TIMEOUT_SECONDS = 120.0
 TRUSTED_WEB_HOSTS_ENV = "VIBELUTION_TRUSTED_WEB_HOSTS"
 FRONTEND_PACKAGE_MANAGER_ENV = "VIBELUTION_FRONTEND_PM"
 INTERNAL_LAUNCHER_ENV = "VIBELUTION_RUNTIME_MANAGER_INTERNAL_LAUNCHER"
@@ -676,17 +677,31 @@ def _process_output_tail(value: str, *, max_lines: int = 20, max_chars: int = 40
 
 
 def _run_checked(args: list[str], *, cwd: Path, label: str) -> None:
-    result = subprocess.run(
-        args,
-        cwd=str(cwd),
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        # Waitable + no console: never DETACHED, never npm.cmd shell.
-        creationflags=_windows_creation_flags(detach=False),
-        startupinfo=_hidden_startup_info(),
-        check=False,
-        **_subprocess_text_kwargs(),
-    )
+    try:
+        result = subprocess.run(
+            args,
+            cwd=str(cwd),
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            timeout=FRONTEND_BUILD_TIMEOUT_SECONDS,
+            # Waitable + no console: never DETACHED, never npm.cmd shell.
+            creationflags=_windows_creation_flags(detach=False),
+            startupinfo=_hidden_startup_info(),
+            check=False,
+            **_subprocess_text_kwargs(),
+        )
+    except subprocess.TimeoutExpired as exc:
+        _append_frontend_build_log(
+            {
+                "event": "frontend_build.command_timeout",
+                "command": label,
+                "errorType": type(exc).__name__,
+                "timeoutSeconds": FRONTEND_BUILD_TIMEOUT_SECONDS,
+            }
+        )
+        raise RuntimeError(
+            f"{label} timed out after {FRONTEND_BUILD_TIMEOUT_SECONDS:.0f} seconds."
+        ) from exc
     if result.returncode != 0:
         _append_frontend_build_log(
             {

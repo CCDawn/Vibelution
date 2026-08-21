@@ -198,6 +198,36 @@ def _load_python_launcher():
     return module
 
 
+def test_python_launcher_frontend_command_is_bounded_and_reports_timeout(monkeypatch, tmp_path):
+    launcher = _load_python_launcher()
+    calls: list[dict[str, object]] = []
+    events: list[dict[str, object]] = []
+
+    def timed_out_run(args, **kwargs):
+        calls.append({"args": args, "kwargs": kwargs})
+        raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+
+    monkeypatch.setattr(launcher.subprocess, "run", timed_out_run)
+    monkeypatch.setattr(launcher, "_append_frontend_build_log", lambda payload: events.append(payload))
+
+    with pytest.raises(RuntimeError, match=r"node tsc -b timed out after 120 seconds"):
+        launcher._run_checked(
+            ["node", "node_modules/typescript/bin/tsc", "-b"],
+            cwd=tmp_path,
+            label="node tsc -b",
+        )
+
+    assert calls[0]["kwargs"]["timeout"] == launcher.FRONTEND_BUILD_TIMEOUT_SECONDS
+    assert events == [
+        {
+            "event": "frontend_build.command_timeout",
+            "command": "node tsc -b",
+            "errorType": "TimeoutExpired",
+            "timeoutSeconds": 120.0,
+        }
+    ]
+
+
 def test_npm_cli_follows_unix_symlink_and_lib_prefix_layout(tmp_path, monkeypatch):
     launcher = _load_python_launcher()
     prefix = tmp_path / "node-prefix"
