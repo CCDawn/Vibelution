@@ -121,6 +121,7 @@ def launcher_branch_instances(cleanupMetadata: bool = False) -> dict:
 
 
 
+@router.post("/api/launcher/branch-instances/cleanup")
 def launcher_branch_instances_cleanup(payload: BranchInstanceCleanupPayload) -> dict:
     try:
         return launcher_service.cleanup_launcher_branch_instances(

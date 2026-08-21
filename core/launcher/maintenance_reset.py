@@ -1356,9 +1356,9 @@ def _collect_browser_profiles() -> list[ResetCandidate]:
     runtime_root = _project_runtime_root()
     if not runtime_root.exists():
         return [_candidate_for_path(runtime_root, kind="directory", missing=True)]
-    current_profile = _current_browser_profile_dir()
+    current_profiles = _current_browser_profile_dirs()
     candidates: list[ResetCandidate] = []
-    if current_profile is not None:
+    for current_profile in current_profiles:
         candidates.append(
             _candidate_for_path(
                 current_profile,
@@ -1369,7 +1369,7 @@ def _collect_browser_profiles() -> list[ResetCandidate]:
             )
         )
     for path in _iter_runtime_profile_dirs(runtime_root):
-        if current_profile is not None and (_same_path(path, current_profile) or _is_relative_to(path, current_profile)):
+        if any(_same_path(path, current) or _is_relative_to(path, current) for current in current_profiles):
             continue
         candidates.append(_candidate_for_path(path, kind="directory"))
     return _collapse_nested_candidates(_dedupe_candidates(candidates))
@@ -1464,7 +1464,7 @@ def _collect_runtime_preview_artifacts() -> list[ResetCandidate]:
     runtime_root = _project_runtime_root()
     if not runtime_root.exists():
         return [_candidate_for_path(runtime_root, kind="directory", missing=True)]
-    current_profile = _current_browser_profile_dir()
+    current_profiles = _current_browser_profile_dirs()
     explicit_dirs = [
         runtime_root / "codex-preview",
         runtime_root / "codex-reset-server",
@@ -1480,10 +1480,10 @@ def _collect_runtime_preview_artifacts() -> list[ResetCandidate]:
         for path in runtime_root.glob(pattern):
             if path.is_file():
                 candidates.append(_candidate_for_path(path, kind="file"))
-    if current_profile is not None:
+    if current_profiles:
         candidates = [
             candidate for candidate in candidates
-            if not _same_or_child(candidate.path, current_profile)
+            if not any(_same_or_child(candidate.path, current) for current in current_profiles)
         ]
     return _collapse_nested_candidates(_dedupe_candidates(candidates))
 
@@ -1881,18 +1881,48 @@ def _current_runtime_scene_dir() -> Path | None:
     return path if path.exists() else None
 
 
-def _current_browser_profile_dir() -> Path | None:
-    raw = str(_launcher_state().get("browserProfileDir") or "").strip()
-    if not raw:
-        return None
-    try:
-        path = Path(raw).resolve()
-    except OSError:
-        return None
+def _current_browser_profile_dirs() -> tuple[Path, ...]:
+    """Return every active launcher/workbench profile from launcher state.
+
+    ``browserProfileDir`` is retained as a legacy alias.  The launcher control
+    surface and the workbench may be alive concurrently, so protecting only
+    the alias can delete the other profile while Chromium still owns it.
+    """
+
+    state = _launcher_state()
+    workbench = state.get("workbench") if isinstance(state.get("workbench"), dict) else {}
+    raw_values = (
+        state.get("browserProfileDir"),
+        state.get("launcherBrowserProfileDir"),
+        state.get("workbenchBrowserProfileDir"),
+        workbench.get("browserProfileDir"),
+        workbench.get("workbenchBrowserProfileDir"),
+    )
     runtime_root = _project_runtime_root()
-    if not _is_relative_to(path, runtime_root):
-        return None
-    return path if path.exists() else None
+    found: list[Path] = []
+    seen: set[str] = set()
+    for raw_value in raw_values:
+        raw = str(raw_value or "").strip()
+        if not raw:
+            continue
+        try:
+            path = Path(raw).resolve()
+        except OSError:
+            continue
+        if not _is_relative_to(path, runtime_root) or not path.exists():
+            continue
+        key = str(path).casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append(path)
+    return tuple(found)
+
+
+def _current_browser_profile_dir() -> Path | None:
+    """Backward-compatible singular view of the first active profile."""
+
+    return next(iter(_current_browser_profile_dirs()), None)
 
 
 def _iter_runtime_profile_dirs(runtime_root: Path):

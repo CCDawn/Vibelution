@@ -394,6 +394,37 @@ def test_browser_profile_collection_uses_shallow_runtime_discovery(reset_project
     assert ".runtime/frontend-audit/deep/nested-profile" not in paths
 
 
+def test_browser_profile_cleanup_protects_launcher_and_workbench_profiles(reset_project: Path):
+    launcher_profile = reset_project / ".runtime" / "launcher" / "launcher-control-profile"
+    workbench_profile = reset_project / ".runtime" / "workbench-app-profile"
+    old_profile = reset_project / ".runtime" / "old-test-profile"
+    _write(launcher_profile / "Default" / "LOCK", "locked")
+    _write(workbench_profile / "Default" / "LOCK", "locked")
+    _write(old_profile / "Default" / "Preferences", "{}")
+    _write(
+        reset_project / ".runtime" / "launcher" / "state.json",
+        json.dumps(
+            {
+                "browserProfileDir": str(workbench_profile),
+                "launcherBrowserProfileDir": str(launcher_profile),
+                "workbenchBrowserProfileDir": str(workbench_profile),
+            },
+            ensure_ascii=False,
+        ),
+    )
+
+    candidates = reset_service._collect_browser_profiles()
+
+    protected_paths = {
+        reset_service._relative_path(candidate.path)
+        for candidate in candidates
+        if candidate.protected
+    }
+    assert ".runtime/launcher/launcher-control-profile" in protected_paths
+    assert ".runtime/workbench-app-profile" in protected_paths
+    assert ".runtime/old-test-profile" not in protected_paths
+
+
 def test_python_cache_collection_uses_bounded_code_roots(reset_project: Path):
     _write(reset_project / ".pytest_cache" / "README.md", "cache")
     _write(reset_project / "core" / "feature" / "__pycache__" / "module.pyc", "cache")

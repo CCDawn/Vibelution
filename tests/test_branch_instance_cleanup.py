@@ -208,6 +208,51 @@ def test_cleanup_requires_confirm_and_ids():
     assert missing_ids.value.code == "instance_ids_required"
 
 
+def test_cleanup_does_not_eagerly_annotate_metadata(monkeypatch):
+    payload = {
+        "integrationRoot": ".",
+        "items": [_item(id="worktree:task", branch="", checkedOut=False, path="")],
+    }
+
+    monkeypatch.setattr(
+        cleanup,
+        "annotate_cleanup_metadata",
+        lambda *_args, **_kwargs: pytest.fail("cleanup must not run the metadata Git scan"),
+    )
+    monkeypatch.setattr(cleanup, "_drop_registry_instance", lambda _instance_id: True)
+
+    result = cleanup.cleanup_branch_instances(["worktree:task"], confirm=True, list_payload=payload)
+
+    assert result["ok"] is True
+    assert [item["id"] for item in result["cleaned"]] == ["worktree:task"]
+
+
+def test_drop_registry_instance_uses_locked_mutation(monkeypatch):
+    calls: list[str] = []
+
+    def mutate(mutator):
+        calls.append("mutate")
+        payload = {"instances": {"worktree:task": {"status": "closed"}}}
+        assert mutator(payload) is True
+        assert "worktree:task" not in payload["instances"]
+        return True
+
+    monkeypatch.setattr(cleanup.registry, "mutate_registry", mutate)
+    monkeypatch.setattr(
+        cleanup.registry,
+        "load_registry",
+        lambda: pytest.fail("registry cleanup must not use an unlocked load"),
+    )
+    monkeypatch.setattr(
+        cleanup.registry,
+        "save_registry",
+        lambda *_args, **_kwargs: pytest.fail("registry cleanup must not use an unlocked save"),
+    )
+
+    assert cleanup._drop_registry_instance("worktree:task") is True
+    assert calls == ["mutate"]
+
+
 def test_cleanup_refuses_main_and_current(tmp_path):
     root = _init_repo(tmp_path / "repo")
     payload = {

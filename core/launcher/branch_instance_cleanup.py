@@ -107,8 +107,10 @@ def cleanup_branch_instances(
     if not wanted:
         raise BranchInstanceCleanupError("instance_ids_required", "未指定要清理的分支实例。")
 
+    # The list endpoint already computes optional cleanup metadata when the
+    # caller asks for it.  Re-running the Git ancestry scan here is both
+    # redundant and can exceed the native bridge's bounded request budget.
     payload = dict(list_payload or _list_instances())
-    annotate_cleanup_metadata(payload)
     by_id = {
         str(item.get("id") or ""): dict(item)
         for item in payload.get("items") or []
@@ -179,7 +181,8 @@ def _cleanup_one(
         _delete_local_branch(root, branch)
         actions.append("branch_deleted")
 
-    _drop_registry_instance(instance_id)
+    if not _drop_registry_instance(instance_id):
+        raise RuntimeError(f"清理实例注册表条目失败：{instance_id}")
     return {
         "id": instance_id,
         "branch": branch,
@@ -265,17 +268,24 @@ def _delete_local_branch(root: Path, branch: str) -> None:
         raise RuntimeError(f"删除本地分支失败：{_git_detail(result) or branch}")
 
 
-def _drop_registry_instance(instance_id: str) -> None:
+def _drop_registry_instance(instance_id: str) -> bool:
     if not instance_id:
-        return
-    try:
-        payload = registry.load_registry()
+        return True
+
+    def mutator(payload: dict[str, Any]) -> bool:
         instances = payload.get("instances")
-        if isinstance(instances, dict) and instance_id in instances:
+        if isinstance(instances, dict):
             instances.pop(instance_id, None)
-            registry.save_registry(payload)
-    except (OSError, TypeError, ValueError):
+        return True
+
+    try:
+        # Registry updates must use the lock/CAS writer.  A load -> mutate ->
+        # save sequence can race an Electron lifecycle observation and restore
+        # a stale instance entry after it has been stopped.
+        return bool(registry.mutate_registry(mutator))
+    except (OSError, TimeoutError, TypeError, ValueError):
         logger.warning("failed to drop instance registry entry id=%s", instance_id)
+        return False
 
 
 def _list_instances() -> dict[str, Any]:
