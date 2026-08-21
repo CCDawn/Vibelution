@@ -14,6 +14,7 @@ import {
   LOCK_TIMEOUT_MS,
   MISSING_HOLDER_GRACE_MS,
   InstanceLockTimeoutError,
+  plantLockdir,
   withInstanceLock
 } from "../src/lifecycle/instanceLock.js";
 
@@ -244,6 +245,40 @@ describe("instanceLock protocol", () => {
     expect(events[0]?.reason).toBe("stale_started_at");
     expect(events[0]?.previousPid).toBe(99);
   }, 10000);
+
+  it("does not break an old lock while its holder PID is still alive", async () => {
+    const registryPath = makeRegistryPath();
+    await plantLockdir(registryPath, {
+      pid: 4242,
+      startedAt: new Date(Date.now() - LOCK_STALE_MS - 1).toISOString()
+    });
+
+    await expect(
+      withInstanceLock(registryPath, async () => undefined, {
+        timeoutMs: 80,
+        pollMs: 10,
+        pidAlive: () => true
+      })
+    ).rejects.toBeInstanceOf(InstanceLockTimeoutError);
+  });
+
+  it("rechecks holder PID liveness after stale classification", async () => {
+    const registryPath = makeRegistryPath();
+    await plantLockdir(registryPath, {
+      pid: 4243,
+      startedAt: new Date(Date.now() - LOCK_STALE_MS - 1).toISOString()
+    });
+    let checks = 0;
+
+    await expect(
+      withInstanceLock(registryPath, async () => undefined, {
+        timeoutMs: 80,
+        pollMs: 10,
+        pidAlive: () => checks++ > 0
+      })
+    ).rejects.toBeInstanceOf(InstanceLockTimeoutError);
+    expect(checks).toBeGreaterThan(1);
+  });
 
   it("times out when the lock is already held", async () => {
     const registryPath = makeRegistryPath();

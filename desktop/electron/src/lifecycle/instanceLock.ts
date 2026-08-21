@@ -1,4 +1,5 @@
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 export const LOCKDIR_SUFFIX = ".lockdir";
@@ -36,6 +37,7 @@ export type InstanceLockOptions = {
   pollMs?: number;
   missingHolderGraceMs?: number;
   pid?: number;
+  pidAlive?: (pid: number) => boolean;
   nowMs?: () => number;
   sleep?: (ms: number) => Promise<void>;
   emitEvent?: InstanceLockEventEmitter;
@@ -105,7 +107,16 @@ export async function writeLockHolder(
   lockdir: string,
   holder: InstanceLockHolder
 ): Promise<void> {
-  await writeFile(holderFilePath(lockdir), `${JSON.stringify(holder)}\n`, "utf8");
+  // A contender must not mistake a partially written holder as an abandoned
+  // lock. Publish the complete JSON in one same-directory rename.
+  const target = holderFilePath(lockdir);
+  const temporary = join(lockdir, `.${HOLDER_FILE_NAME}.${randomUUID()}.tmp`);
+  try {
+    await writeFile(temporary, `${JSON.stringify(holder)}\n`, "utf8");
+    await rename(temporary, target);
+  } finally {
+    await rm(temporary, { force: true }).catch(() => undefined);
+  }
 }
 
 export async function plantLockdir(
@@ -127,28 +138,59 @@ async function lockdirAgeMs(lockdir: string, nowMs: number): Promise<number> {
   }
 }
 
+function defaultPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return isNodeError(error) && error.code === "EPERM";
+  }
+}
+
+function sameHolder(left: InstanceLockHolder | null, right: InstanceLockHolder | null): boolean {
+  return Boolean(
+    left
+    && right
+    && left.pid === right.pid
+    && left.startedAt === right.startedAt
+  );
+}
+
+function quarantinePath(lockdir: string, label: "stale" | "release"): string {
+  return `${lockdir}.${label}-${process.pid}-${randomUUID()}`;
+}
+
+type StaleLock = {
+  reason: InstanceLockEventPayload["reason"];
+  holder: InstanceLockHolder | null;
+};
+
 async function staleReason(
   lockdir: string,
   options: {
     nowMs: number;
     staleMs: number;
     missingHolderGraceMs: number;
+    pidAlive: (pid: number) => boolean;
   }
-): Promise<InstanceLockEventPayload["reason"] | null> {
+): Promise<StaleLock | null> {
   const holder = await readLockHolder(lockdir);
   if (!holder) {
     return (await lockdirAgeMs(lockdir, options.nowMs)) >= options.missingHolderGraceMs
-      ? "missing_holder"
+      ? { reason: "missing_holder", holder: null }
       : null;
+  }
+  if (options.pidAlive(holder.pid)) {
+    return null;
   }
   const startedMs = Date.parse(holder.startedAt);
   if (!Number.isFinite(startedMs)) {
     return (await lockdirAgeMs(lockdir, options.nowMs)) >= options.missingHolderGraceMs
-      ? "invalid_holder"
+      ? { reason: "invalid_holder", holder }
       : null;
   }
   if (options.nowMs - startedMs >= options.staleMs) {
-    return "stale_started_at";
+    return { reason: "stale_started_at", holder };
   }
   return null;
 }
@@ -156,18 +198,58 @@ async function staleReason(
 async function breakStaleLockdir(
   lockdir: string,
   nowMs: number,
-  reason: InstanceLockEventPayload["reason"],
+  stale: StaleLock,
+  pidAlive: (pid: number) => boolean,
   emitEvent?: InstanceLockEventEmitter
-): Promise<void> {
-  const holder = await readLockHolder(lockdir);
-  await removeLockdir(lockdir);
+): Promise<boolean> {
+  const current = await readLockHolder(lockdir);
+  if (stale.holder ? !sameHolder(current, stale.holder) : current !== null) {
+    return false;
+  }
+  // Classification and rename are separate filesystem operations. A live
+  // holder must never be quarantined based on an obsolete liveness sample.
+  if (current && pidAlive(current.pid)) {
+    return false;
+  }
+  const quarantinedPath = quarantinePath(lockdir, "stale");
+  try {
+    await rename(lockdir, quarantinedPath);
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
+  await removeLockdir(quarantinedPath);
   emitEvent?.(LOCK_STALE_BROKEN_EVENT, {
     lockdir,
-    previousPid: holder?.pid ?? null,
-    previousStartedAt: holder?.startedAt ?? "",
+    previousPid: stale.holder?.pid ?? null,
+    previousStartedAt: stale.holder?.startedAt ?? "",
     brokenAt: isoTimestamp(nowMs),
-    reason
+    reason: stale.reason
   });
+  return true;
+}
+
+async function releaseOwnedLockdir(
+  lockdir: string,
+  ownerPid: number,
+  startedAt: string
+): Promise<void> {
+  const holder = await readLockHolder(lockdir);
+  if (!holder || holder.pid !== ownerPid || holder.startedAt !== startedAt) {
+    return;
+  }
+  const quarantinedPath = quarantinePath(lockdir, "release");
+  try {
+    await rename(lockdir, quarantinedPath);
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return;
+    }
+    throw error;
+  }
+  await removeLockdir(quarantinedPath);
 }
 
 export async function withInstanceLock<T>(
@@ -180,6 +262,7 @@ export async function withInstanceLock<T>(
   const pollMs = options.pollMs ?? LOCK_POLL_MS;
   const missingHolderGraceMs = options.missingHolderGraceMs ?? MISSING_HOLDER_GRACE_MS;
   const ownerPid = options.pid ?? process.pid;
+  const pidAlive = options.pidAlive ?? defaultPidAlive;
   const nowMs = options.nowMs ?? Date.now;
   const sleep = options.sleep ?? sleepMs;
   const lockdir = instanceLockdirPath(registryPath);
@@ -204,9 +287,8 @@ export async function withInstanceLock<T>(
         continue;
       }
       const now = nowMs();
-      const reason = await staleReason(lockdir, { nowMs: now, staleMs, missingHolderGraceMs });
-      if (reason) {
-        await breakStaleLockdir(lockdir, now, reason, options.emitEvent);
+      const stale = await staleReason(lockdir, { nowMs: now, staleMs, missingHolderGraceMs, pidAlive });
+      if (stale && await breakStaleLockdir(lockdir, now, stale, pidAlive, options.emitEvent)) {
         continue;
       }
       if (Date.now() >= deadline) {
@@ -220,10 +302,7 @@ export async function withInstanceLock<T>(
     return await fn();
   } finally {
     if (owned && startedAt) {
-      const holder = await readLockHolder(lockdir);
-      if (holder && holder.pid === ownerPid && holder.startedAt === startedAt) {
-        await removeLockdir(lockdir);
-      }
+      await releaseOwnedLockdir(lockdir, ownerPid, startedAt);
     }
   }
 }

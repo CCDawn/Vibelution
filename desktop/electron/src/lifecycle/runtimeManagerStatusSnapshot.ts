@@ -13,6 +13,8 @@ export function isSafeRuntimeManagerCommandId(commandId: string): boolean {
   return commandId.length > 0 && /^[A-Za-z0-9_-]+$/.test(commandId);
 }
 
+const CLOSING_PHASES = new Set(["closing", "stopping", "force_stopping"]);
+
 function readLifecycleResult(path: string): LauncherLifecycleResultSummary | null {
   try {
     const payload = JSON.parse(readFileSync(path, "utf8")) as unknown;
@@ -91,10 +93,15 @@ function readElectronMainLineIntentCommandId(runtimeManagerDir: string): string 
 type ElectronMainLineObservation = {
   present: boolean;
   backendAlive: boolean;
+  desiredState: string;
   observedState: string;
   lifecycleConsistency: string;
   phase: string;
 };
+
+function isClosingPhase(value: string): boolean {
+  return CLOSING_PHASES.has(value.trim().toLowerCase());
+}
 
 function readElectronMainLineObservation(workspaceRoot: string): ElectronMainLineObservation {
   const payload = readJsonRecord(join(resolveLauncherRuntimeDir(workspaceRoot), "state.json"));
@@ -102,6 +109,7 @@ function readElectronMainLineObservation(workspaceRoot: string): ElectronMainLin
     return {
       present: false,
       backendAlive: false,
+      desiredState: "",
       observedState: "",
       lifecycleConsistency: "",
       phase: ""
@@ -110,6 +118,7 @@ function readElectronMainLineObservation(workspaceRoot: string): ElectronMainLin
   return {
     present: true,
     backendAlive: knownPidIsAlive(Number(payload.backendPid || 0)),
+    desiredState: String(payload.desiredState || "").trim(),
     observedState: String(payload.observedState || "").trim(),
     lifecycleConsistency: String(payload.lifecycleConsistency || "").trim(),
     phase: String(payload.phase || "").trim()
@@ -159,6 +168,25 @@ export function readRuntimeManagerLauncherStatusSummary(
   if (!electron.present) {
     return summary;
   }
+  // A registered Electron PID can still be alive after the backend has
+  // stopped listening. Runtime Manager remains the health authority while a
+  // close intent is settling.
+  const electronClosingIntent = (
+    electron.desiredState.toLowerCase() === "closed"
+    && electron.observedState.length > 0
+    && electron.observedState.toLowerCase() !== "closed"
+  );
+  const closing = isClosingPhase(summary.phase)
+    || isClosingPhase(electron.phase)
+    || electronClosingIntent;
+  const electronPhase = electron.phase.toLowerCase();
+  const projectedPhase = electronClosingIntent
+    && electronPhase !== "failed"
+    && !isClosingPhase(electronPhase)
+    ? "closing"
+    : electron.phase || summary.phase;
+  const backendHealthy = electron.backendAlive && (!closing || summary.backendHealthy);
+  const backendPortListening = electron.backendAlive && (!closing || summary.backendPortListening);
   return {
     ...summary,
     overallState: electron.backendAlive ? "ready" : summary.overallState,
@@ -166,8 +194,8 @@ export function readRuntimeManagerLauncherStatusSummary(
     lifecycleConsistency: electron.backendAlive
       ? (electron.lifecycleConsistency || "browser_missing")
       : (electron.lifecycleConsistency || summary.lifecycleConsistency),
-    phase: electron.phase || summary.phase,
-    backendHealthy: electron.backendAlive,
-    backendPortListening: electron.backendAlive
+    phase: projectedPhase,
+    backendHealthy,
+    backendPortListening
   };
 }

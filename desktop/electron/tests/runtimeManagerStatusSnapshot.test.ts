@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { readRuntimeManagerLauncherStatusSummary } from "../src/lifecycle/runtimeManagerStatusSnapshot.js";
+import { isWorkbenchBackendSettledForWindowClose } from "../src/lifecycle/workbenchBackendCloseReadiness.js";
 
 describe("readRuntimeManagerLauncherStatusSummary", () => {
   it("maps runtime manager workbench fields into launcher status summary", () => {
@@ -192,5 +193,82 @@ describe("readRuntimeManagerLauncherStatusSummary", () => {
     const summary = readRuntimeManagerLauncherStatusSummary(workspaceRoot, "cmd_dead_backend");
     expect(summary.backendHealthy).toBe(false);
     expect(summary.lifecycleResults.find((item) => item.commandId === "cmd_dead_backend")).toBeUndefined();
+  });
+
+  it("keeps Runtime Manager close health false while Electron's registered PID is still alive", () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), "vibelution-rm-status-"));
+    const stateDir = join(workspaceRoot, ".runtime", "runtime-manager");
+    const launcherDir = join(workspaceRoot, ".runtime", "launcher");
+    mkdirSync(stateDir, { recursive: true });
+    mkdirSync(launcherDir, { recursive: true });
+    writeFileSync(
+      join(stateDir, "state.json"),
+      JSON.stringify({
+        runtimeState: "running",
+        workbench: {
+          observedState: "partial",
+          lifecycleConsistency: "backend_stopping",
+          phase: "closing",
+          backendHealthy: false,
+          backendPortListening: false
+        }
+      }),
+      "utf8"
+    );
+    writeFileSync(
+      join(launcherDir, "state.json"),
+      JSON.stringify({
+        desiredState: "closed",
+        observedState: "partial",
+        phase: "closing",
+        backendPid: process.pid,
+        lastSource: "electron_main"
+      }),
+      "utf8"
+    );
+
+    const summary = readRuntimeManagerLauncherStatusSummary(workspaceRoot);
+    expect(summary.backendHealthy).toBe(false);
+    expect(summary.backendPortListening).toBe(false);
+    expect(isWorkbenchBackendSettledForWindowClose(summary)).toBe(true);
+  });
+
+  it("treats a closed Electron intent with a non-closed observation as closing", () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), "vibelution-rm-status-"));
+    const stateDir = join(workspaceRoot, ".runtime", "runtime-manager");
+    const launcherDir = join(workspaceRoot, ".runtime", "launcher");
+    mkdirSync(stateDir, { recursive: true });
+    mkdirSync(launcherDir, { recursive: true });
+    writeFileSync(
+      join(stateDir, "state.json"),
+      JSON.stringify({
+        runtimeState: "running",
+        workbench: {
+          observedState: "partial",
+          lifecycleConsistency: "backend_stopping",
+          phase: "closing",
+          backendHealthy: false,
+          backendPortListening: false
+        }
+      }),
+      "utf8"
+    );
+    writeFileSync(
+      join(launcherDir, "state.json"),
+      JSON.stringify({
+        desiredState: "closed",
+        observedState: "partial",
+        phase: "steady",
+        backendPid: process.pid,
+        lastSource: "electron_main"
+      }),
+      "utf8"
+    );
+
+    const summary = readRuntimeManagerLauncherStatusSummary(workspaceRoot);
+    expect(summary.phase).toBe("closing");
+    expect(summary.backendHealthy).toBe(false);
+    expect(summary.backendPortListening).toBe(false);
+    expect(isWorkbenchBackendSettledForWindowClose(summary)).toBe(true);
   });
 });
