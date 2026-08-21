@@ -81,13 +81,13 @@ export function TeamShellToolbar({
             type="button"
             variant="ghost"
             density="compact"
+            isIconOnly
             className={refreshButtonClassName}
             aria-label={lang === "zh" ? "刷新团队" : "Refresh team"}
             title={lang === "zh" ? "刷新团队" : "Refresh team"}
+            icon={<RefreshCw size={14} aria-hidden="true" />}
             onClick={onRefresh}
-          >
-            <RefreshCw size={14} aria-hidden="true" />
-          </VButton>
+          />
         </div>
       ) : null}
     </div>
