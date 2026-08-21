@@ -111,6 +111,10 @@ describe("Electron main Launcher IPC facade", () => {
     expect(branchBody).toContain("runIsolatedRegistryMutation");
     expect(branchBody).toContain("observeIsolatedReady");
     expect(branchBody).toContain("observeIsolatedError");
+    const isolatedMutationStart = mainSource.indexOf("async function runIsolatedRegistryMutation");
+    const isolatedMutationBody = mainSource.slice(isolatedMutationStart, branchStart);
+    expect(isolatedMutationBody).toContain("await ensureFrontendRelease({");
+    expect(isolatedMutationBody).toContain("workspaceRoot: target.projectRoot");
     expect(mainSource).toContain("from \"./process/isolatedInstanceSupervisor.js\"");
     expect(mainSource).toContain("from \"./lifecycle/isolatedInstanceRegistryHost.js\"");
   });

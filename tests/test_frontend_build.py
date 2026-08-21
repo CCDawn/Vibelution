@@ -84,6 +84,12 @@ def test_build_key_tracks_production_inputs_but_not_git_audit(monkeypatch: pytes
     after_lock = frontend_build.build_inputs(tmp_path)
     assert frontend_build.compute_build_key(after_lock) != frontend_build.compute_build_key(after_test)
 
+    monkeypatch.setenv("VITE_BUILD_SIGNATURE", "one")
+    after_vite_environment = frontend_build.build_inputs(tmp_path)
+    monkeypatch.setenv("VITE_BUILD_SIGNATURE", "two")
+    changed_vite_environment = frontend_build.build_inputs(tmp_path)
+    assert frontend_build.compute_build_key(after_vite_environment) != frontend_build.compute_build_key(changed_vite_environment)
+
 
 def test_schema_one_release_is_not_reused(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _write_project(tmp_path)
@@ -129,6 +135,24 @@ def test_publish_switches_only_after_complete_staging_release(monkeypatch: pytes
     active_dist = frontend_build.resolve_active_frontend_dist(tmp_path)
     assert (active_dist / "assets" / "app.js").read_text(encoding="utf-8") == "new"
     assert frontend_build.inspect_frontend_build(tmp_path)["current"] is True
+
+
+def test_damaged_matching_release_is_not_reactivated(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    _stub_build_identity(monkeypatch)
+    key = frontend_build.compute_build_key(frontend_build.build_inputs(tmp_path))
+    damaged = _release(tmp_path, f"release-{key}", key=key)
+    (damaged / "assets" / "app.js").unlink()
+    _activate(tmp_path, damaged.name, key=key)
+    monkeypatch.setattr(frontend_build, "_run_checked", _successful_runner)
+
+    result = frontend_build.ensure_frontend_build(tmp_path)
+
+    active = json.loads(frontend_build.active_release_path(tmp_path).read_text(encoding="utf-8"))
+    assert active["release"] != damaged.name
+    assert active["release"].startswith(f"release-{key}-")
+    assert damaged.is_dir()
+    assert (frontend_build.resolve_active_frontend_dist(tmp_path) / "assets" / "app.js").read_text(encoding="utf-8") == "new"
 
 
 def test_source_change_during_build_does_not_publish_mixed_release(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -208,6 +232,35 @@ def test_stale_build_lock_is_reclaimed(monkeypatch: pytest.MonkeyPatch, tmp_path
         assert acquired["waited"] is True
         assert lock.is_dir()
     assert not lock.exists()
+
+
+def test_build_lock_claims_a_newborn_directory_without_removing_it(tmp_path: Path) -> None:
+    lock = frontend_build.frontend_build_lock_path(tmp_path)
+    lock.mkdir(parents=True)
+
+    with frontend_build.frontend_build_lock(tmp_path) as acquired:
+        holder = json.loads((lock / "holder.json").read_text(encoding="utf-8"))
+        assert acquired["waited"] is True
+        assert holder["pid"] == os.getpid()
+    assert not lock.exists()
+
+
+def test_missing_compiler_entries_trigger_dependency_recovery(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _write_project(tmp_path)
+    _stub_build_identity(monkeypatch)
+    calls: list[str] = []
+
+    def runner(command: list[str], *, cwd: Path, label: str) -> str:
+        calls.append(label)
+        return _successful_runner(command, cwd=cwd, label=label)
+
+    monkeypatch.setattr(frontend_build, "_node_command", lambda: "node")
+    monkeypatch.setattr(frontend_build, "_npm_cli", lambda _node: "npm-cli.js")
+    monkeypatch.setattr(frontend_build, "_run_checked", runner)
+
+    frontend_build.ensure_frontend_build(tmp_path)
+
+    assert calls == ["node npm-cli.js ci", "tsc -b", "vite build"]
 
 
 def test_maintenance_reset_treats_active_releases_as_rebuildable_output(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

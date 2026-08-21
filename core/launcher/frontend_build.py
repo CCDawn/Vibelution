@@ -25,6 +25,7 @@ BUILD_SCHEMA_VERSION = 2
 RELEASES_DIR_NAME = ".vibelution-builds"
 ACTIVE_RELEASE_NAME = "active.json"
 LOCK_DIR_NAME = "frontend-build.lockdir"
+LOCK_INITIALIZATION_GRACE_SECONDS = 5.0
 _BUILD_INPUT_FILES = (
     "index.html",
     "package.json",
@@ -40,7 +41,8 @@ _BUILD_INPUT_FILES = (
     ".env.production",
     ".env.production.local",
 )
-_BUILD_ENV_NAMES = ("VIBELUTION_PROBE_BUILD",)
+_BUILD_ENV_NAMES = ("VIBELUTION_PROBE_BUILD", "NODE_ENV")
+_VITE_ENV_PREFIX = "VITE_"
 _AUDIT_INPUT_NAMES = frozenset(("sourceCommit", "frontendTree"))
 _TRANSIENT_INPUT_NAMES = frozenset(("productionInputStateDigest",))
 FRONTEND_PACKAGE_MANAGER_ENV = "VIBELUTION_FRONTEND_PM"
@@ -60,6 +62,29 @@ def frontend_build_lock_path(project_root: Path | str) -> Path:
 
 def legacy_frontend_dist(project_root: Path | str) -> Path:
     return Path(project_root) / "web" / "dist"
+
+
+def _validate_release_assets(path: Path) -> None:
+    index = path / "index.html"
+    if not index.is_file() or index.stat().st_size <= 0:
+        raise RuntimeError("Frontend release did not produce a usable index.html.")
+    content = index.read_text(encoding="utf-8", errors="replace")
+    assets = re.findall(r"(?:src|href)=[\"']/assets/([^\"']+)[\"']", content)
+    for asset in assets:
+        candidate = path / "assets" / asset
+        if not candidate.is_file():
+            raise RuntimeError("Frontend release references a missing asset.")
+
+
+def _is_complete_release(path: Path, *, build_key: str | None = None) -> bool:
+    try:
+        _validate_release_assets(path)
+        provenance = json.loads((path / ".vibelution-build.json").read_text(encoding="utf-8"))
+    except (OSError, RuntimeError, ValueError, TypeError):
+        return False
+    if not isinstance(provenance, dict) or int(provenance.get("schemaVersion") or 0) != BUILD_SCHEMA_VERSION:
+        return False
+    return build_key is None or str(provenance.get("buildKey") or "") == build_key
 
 
 def frontend_package_manager(package_manager: str | None = None) -> str:
@@ -82,10 +107,14 @@ def resolve_active_frontend_dist(project_root: Path | str) -> Path:
     except (OSError, ValueError, TypeError):
         payload = {}
     release_name = str(payload.get("release") or "").strip() if isinstance(payload, dict) else ""
+    build_key = str(payload.get("buildKey") or "").strip() if isinstance(payload, dict) else ""
     if release_name and Path(release_name).name == release_name and release_name.startswith("release-"):
         candidate = releases / release_name
         try:
-            if (candidate / "index.html").is_file() and candidate.resolve().is_relative_to(releases.resolve()):
+            if (
+                candidate.resolve().is_relative_to(releases.resolve())
+                and _is_complete_release(candidate, build_key=build_key or None)
+            ):
                 return candidate
         except OSError:
             pass
@@ -143,6 +172,19 @@ def _input_state_digest(web_dir: Path) -> str:
         digest.update(str(stat.st_mtime_ns).encode("ascii"))
         digest.update(b"\0")
     return digest.hexdigest()
+
+
+def _build_environment_inputs() -> dict[str, Any]:
+    values = {name: str(os.environ.get(name) or "") for name in _BUILD_ENV_NAMES}
+    values.update(
+        {
+            name: str(value)
+            for name, value in os.environ.items()
+            if name.startswith(_VITE_ENV_PREFIX)
+        }
+    )
+    canonical = json.dumps(values, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return {"names": sorted(values), "digest": hashlib.sha256(canonical.encode("utf-8")).hexdigest()}
 
 
 def _run_version_command(command: list[str]) -> str:
@@ -216,7 +258,7 @@ def build_inputs(project_root: Path | str, *, package_manager: str | None = None
             if manager == "bun"
             else "node tsc -b && node vite build --outDir <staging>"
         ),
-        "environment": {name: str(os.environ.get(name) or "") for name in _BUILD_ENV_NAMES},
+        "environment": _build_environment_inputs(),
         "sourceCommit": _capture_git(root, ["rev-parse", "HEAD"]),
         "frontendTree": _capture_git(root, ["rev-parse", "HEAD:web"]),
     }
@@ -251,11 +293,7 @@ def inspect_frontend_build(project_root: Path | str, *, package_manager: str | N
     key = compute_build_key(inputs)
     dist = resolve_active_frontend_dist(project_root)
     provenance = read_active_provenance(project_root)
-    current = (
-        (dist / "index.html").is_file()
-        and int(provenance.get("schemaVersion") or 0) == BUILD_SCHEMA_VERSION
-        and str(provenance.get("buildKey") or "") == key
-    )
+    current = _is_complete_release(dist, build_key=key)
     return {
         "current": current,
         "reason": "frontend build is current" if current else "frontend build key differs from active release",
@@ -284,12 +322,19 @@ def frontend_build_lock(project_root: Path | str, *, timeout_seconds: float = 18
     path.parent.mkdir(parents=True, exist_ok=True)
     deadline = time.monotonic() + max(1.0, timeout_seconds)
     waited = False
+
+    def claim_holder() -> bool:
+        holder = {"pid": os.getpid(), "startedAt": time.time()}
+        try:
+            with (path / "holder.json").open("x", encoding="utf-8") as handle:
+                json.dump(holder, handle)
+        except FileExistsError:
+            return False
+        return True
+
     while True:
         try:
             path.mkdir()
-            holder = {"pid": os.getpid(), "startedAt": time.time()}
-            (path / "holder.json").write_text(json.dumps(holder), encoding="utf-8")
-            break
         except FileExistsError:
             waited = True
             try:
@@ -297,15 +342,32 @@ def frontend_build_lock(project_root: Path | str, *, timeout_seconds: float = 18
                 holder_pid = int(holder.get("pid") or 0) if isinstance(holder, dict) else 0
             except (OSError, ValueError, TypeError):
                 holder_pid = 0
-            if not _pid_is_alive(holder_pid):
+            if holder_pid > 0 and not _pid_is_alive(holder_pid):
                 try:
                     shutil.rmtree(path)
                 except OSError:
                     pass
                 continue
+            if holder_pid <= 0 and not (path / "holder.json").exists() and claim_holder():
+                break
+            if holder_pid <= 0:
+                try:
+                    lock_age = max(0.0, time.time() - path.stat().st_mtime)
+                except OSError:
+                    lock_age = 0.0
+                if lock_age >= LOCK_INITIALIZATION_GRACE_SECONDS:
+                    try:
+                        shutil.rmtree(path)
+                    except OSError:
+                        pass
+                    continue
             if time.monotonic() >= deadline:
                 raise TimeoutError("Timed out waiting for the frontend build lock.")
             time.sleep(0.1)
+            continue
+        if claim_holder():
+            break
+        waited = True
     try:
         yield {"waited": waited, "path": str(path)}
     finally:
@@ -324,15 +386,7 @@ def create_staging_release(project_root: Path | str) -> Path:
 
 
 def validate_staging_release(path: Path) -> None:
-    index = path / "index.html"
-    if not index.is_file() or index.stat().st_size <= 0:
-        raise RuntimeError("Frontend staging build did not produce a usable index.html.")
-    content = index.read_text(encoding="utf-8", errors="replace")
-    assets = re.findall(r"(?:src|href)=[\"']/assets/([^\"']+)[\"']", content)
-    for asset in assets:
-        candidate = path / "assets" / asset
-        if not candidate.is_file():
-            raise RuntimeError("Frontend staging build references a missing asset.")
+    _validate_release_assets(path)
 
 
 def publish_staging_release(project_root: Path | str, staging: Path, *, build_key: str, build_inputs_value: dict[str, Any]) -> dict[str, Any]:
@@ -350,6 +404,11 @@ def publish_staging_release(project_root: Path | str, staging: Path, *, build_ke
         "publishedAt": time.time(),
     }
     (staging / ".vibelution-build.json").write_text(json.dumps(provenance, ensure_ascii=False, indent=2), encoding="utf-8")
+    if release.exists() and not _is_complete_release(release, build_key=build_key):
+        # Preserve the damaged immutable entry for running readers; publish the
+        # repaired bytes under a distinct release name before switching active.
+        release_name = f"release-{build_key}-{uuid.uuid4().hex}"
+        release = frontend_releases_dir(root) / release_name
     if release.exists():
         shutil.rmtree(staging)
     else:
@@ -448,7 +507,11 @@ def ensure_frontend_build(
 
         if manager == "bun":
             bun = shutil.which("bun") or "bun"
-            if not (web_dir / "node_modules").is_dir():
+            if (
+                not (web_dir / "node_modules").is_dir()
+                or not (web_dir / "node_modules" / ".bin" / "tsc").exists()
+                or not (web_dir / "node_modules" / ".bin" / "vite").exists()
+            ):
                 _run_checked([bun, "install"], cwd=web_dir, label="bun install")
             stage = create_staging_release(root)
             commands = [
@@ -457,7 +520,11 @@ def ensure_frontend_build(
             ]
         else:
             node = _node_command()
-            if not (web_dir / "node_modules").is_dir():
+            if (
+                not (web_dir / "node_modules").is_dir()
+                or not (web_dir / "node_modules" / "typescript" / "bin" / "tsc").is_file()
+                or not (web_dir / "node_modules" / "vite" / "bin" / "vite.js").is_file()
+            ):
                 _run_checked([node, _npm_cli(node), "ci"], cwd=web_dir, label="node npm-cli.js ci")
             stage = create_staging_release(root)
             commands = [

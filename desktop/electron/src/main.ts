@@ -95,6 +95,7 @@ import {
   type WorkbenchLifecycleOperation
 } from "./process/workbenchLifecycle.js";
 import {
+  ensureFrontendRelease,
   mainLineBackendIsReusable,
   spawnWorkbenchBackend
 } from "./process/workbenchBackend.js";
@@ -3337,6 +3338,13 @@ async function runIsolatedRegistryMutation(input: {
       };
     }
     if (target) {
+      input.signal?.throwIfAborted();
+      await ensureFrontendRelease({
+        workspaceRoot: target.projectRoot,
+        pythonPath: input.pythonPath,
+        signal: input.signal
+      });
+      input.signal?.throwIfAborted();
       const claimed = await prepareIsolatedStart({
         instanceId: input.instanceId,
         branchInstances: payload,
