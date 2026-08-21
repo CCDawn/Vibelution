@@ -28,7 +28,7 @@ describe("HypothesisSelectionPanel contract (HF-6)", () => {
   it("defaults the multi-selection from the server projection", () => {
     expect(listSource).toContain("context?.latestSelection?.selectedCandidateIds");
     expect(listSource).toContain("context?.defaultSelectedCandidateIds");
-    expect(listSource).toContain("HYPOTHESIS_SELECTION_MIN = 1");
+    expect(listSource).toContain("HYPOTHESIS_SELECTION_MIN = 2");
     expect(listSource).toContain("HYPOTHESIS_SELECTION_MAX = 16");
     expect(panelSource).toContain("HYPOTHESIS_SELECTION_MIN");
     expect(listSource).toContain("VCheckbox");

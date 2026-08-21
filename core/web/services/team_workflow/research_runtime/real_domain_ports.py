@@ -1441,7 +1441,19 @@ def _ledger_iteration_decision(
         "kind": "stop",
         "runId": action.run_id,
         "nodeRunId": action.node_run_id or f"nr-{action.run_id}-iteration_decision-a{action.attempt}",
-        "iterationAttempt": max(1, int(action.attempt or 1)),
+        # Iteration attempt = completed controlled_run count (same authority
+        # as the rerun budget gate), not the node retry sequence.
+        "iterationAttempt": max(
+            1,
+            len({
+                int(item.get("attempt") or 0)
+                for item in (snapshot.get("nodeRuns") or [])
+                if isinstance(item, dict)
+                and item.get("nodeId") == "controlled_run"
+                and item.get("status") == "succeeded"
+            })
+            or int(action.attempt or 1),
+        ),
         "selectedCandidateRef": selected,
         "frozenProtocolRef": frozen_ref,
         "evaluationReportRef": evaluation_ref,

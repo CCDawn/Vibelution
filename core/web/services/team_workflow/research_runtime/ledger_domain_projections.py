@@ -95,7 +95,7 @@ def project_research_ledger_from_snapshot(snapshot: ResearchWorkflowSnapshot) ->
         experiment_planning=experiment_planning,
     )
     try:
-        payload["graph"] = project_evidence_graph(record)
+        payload["graph"] = project_evidence_graph(record, claim_evidence=claim_evidence)
     except NodeCommandUnavailable:
         payload["graph"] = {"nodes": [], "edges": []}
     return payload

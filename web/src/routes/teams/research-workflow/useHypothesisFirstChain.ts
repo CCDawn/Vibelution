@@ -131,10 +131,26 @@ export function useHypothesisFirstChain(teamId: string, questionId: string): Hyp
     .map((query) => query.error)
     .find(Boolean);
 
+  // Meeting records never carry roundIndex server-side; the review-round
+  // links are the authority. Decorate review meetings here so node ids,
+  // inspectors, and next-action navigation all share one numbering.
+  const linkByMeetingId = new Map(
+    (links.data?.links ?? EMPTY_LINKS).map((link) => [String(link.meetingRoundId || ""), link]),
+  );
+  const decoratedMeetings = (meetings.data?.meetings ?? EMPTY_MEETINGS).map((meeting) => {
+    const link = linkByMeetingId.get(String(meeting.meetingRoundId || ""));
+    if (!link) return meeting;
+    return {
+      ...meeting,
+      roundIndex: meeting.roundIndex ?? (Number(link.roundIndex || 0) || undefined),
+      previousMeetingRoundId: meeting.previousMeetingRoundId
+        || (String(link.previousMeetingRoundId || "") || undefined),
+    };
+  });
   return {
     chainState: chainState.data ?? null,
     selection,
-    meetings: meetings.data?.meetings ?? EMPTY_MEETINGS,
+    meetings: decoratedMeetings,
     collectionRequests: requests.data?.requests ?? EMPTY_REQUESTS,
     reviewRoundLinks: links.data?.links ?? EMPTY_LINKS,
     loading: enabled && [chainState, selections, meetings, requests, links].some((query) => query.isPending),

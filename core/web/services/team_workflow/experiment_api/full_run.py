@@ -222,6 +222,18 @@ def execute_experiment_full_run(team_id: str, plan_id: str, payload: dict[str, A
         plan = s._find_experiment_plan(plan_store, normalized_plan_id)
         if plan is None:
             raise s.TeamWorkflowOrchestrationError("Experiment plan not found.")
+        # Gate-then-act guard: the readiness check above ran unlocked; re-check
+        # inside the lock and refuse duplicate concurrent executions.
+        current_execution = (
+            plan.get("activeFullRunExecution")
+            if isinstance(plan.get("activeFullRunExecution"), dict)
+            else {}
+        )
+        if str(current_execution.get("status") or "") == "running":
+            raise s.TeamWorkflowOrchestrationError(
+                "A formal full run is already executing for this plan."
+            )
+        s._require_formal_full_run_ready(plan)
         plan["status"] = "full_run_running"
         plan["activeFullRunExecution"] = {
             "executionId": execution_id,

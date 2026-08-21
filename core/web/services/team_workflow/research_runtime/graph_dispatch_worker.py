@@ -131,7 +131,7 @@ class GraphDispatchWorker:
             self._mark_blocked(action, dispatch, str(exc))
             return
         except Exception as exc:
-            self._requeue_or_fail(action, str(exc))
+            self._requeue_or_fail(action, dispatch, str(exc))
             return
 
         pending = result.pending_action
@@ -180,7 +180,7 @@ class GraphDispatchWorker:
                     dispatch, result, pending, readiness_hint, action=action
                 )
             except Exception as exc:
-                self._requeue_or_fail(action, f"successor_commit_failed:{exc}")
+                self._requeue_or_fail(action, dispatch, f"successor_commit_failed:{exc}")
                 raise
             return
 
@@ -279,7 +279,7 @@ class GraphDispatchWorker:
                 dispatch, result, pending, readiness_hint, action=action
             )
         except Exception as exc:
-            self._requeue_or_fail(action, f"successor_commit_failed:{exc}")
+            self._requeue_or_fail(action, dispatch, f"successor_commit_failed:{exc}")
             raise
         return True
 
@@ -1252,7 +1252,12 @@ class GraphDispatchWorker:
                 continue
             run = self._store.get_run(run_id)
             branch = branch_decision_from_run(run)
-            if branch not in {"stop", "promote_candidate", "rollback_candidate"}:
+            if branch not in {
+                "stop",
+                "promote_candidate",
+                "rollback_candidate",
+                "rerun_same_protocol",
+            }:
                 continue
             inflight = self._submit(
                 lambda uow, rid=run_id: uow.repository.execute(
@@ -1421,8 +1426,19 @@ class GraphDispatchWorker:
 
         self._submit(mutate, force_flush=True).result(timeout=30)
 
-    def _requeue_or_fail(self, action: Any, detail: str) -> None:
+    _MAX_TRANSIENT_ATTEMPTS = 5
+
+    def _requeue_or_fail(self, action: Any, dispatch: Any, detail: str) -> None:
         now_ms = self._now()
+        if int(getattr(action, "attempt_count", 0) or 0) >= self._MAX_TRANSIENT_ATTEMPTS:
+            # Deterministic failures must not retry forever; mark the dispatch
+            # blocked so the run surfaces a diagnosis instead of live-locking.
+            self._mark_blocked(
+                action,
+                dispatch,
+                f"transient_exhausted: {str(detail)[:400]}",
+            )
+            return
         outbox_api.requeue_action(
             self._store,
             action.action_id,

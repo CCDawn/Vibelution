@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,9 @@ from core.web.services.team_workflow.challenge_program import (
 )
 from core.web.services.team_workflow.challenge_question_runs import challenge_question_run_summary
 from core.web.services.team_workflow import hypothesis_progress
+
+
+_METRIC_VALUE_PREFIX = re.compile(r"^\s*[+-]?(\d+\.?\d*|\.\d+)")
 
 
 def _service():
@@ -385,7 +389,8 @@ def _canonical_formal_full_run_result_record(
     )
     aggregate = result.get("aggregate") if isinstance(result.get("aggregate"), dict) else {}
     mse_summary = aggregate.get("mseImprovement") if isinstance(aggregate.get("mseImprovement"), dict) else {}
-    metric_value = str(mse_summary.get("mean") or "")
+    mean_value = mse_summary.get("mean")
+    metric_value = "" if mean_value is None else str(mean_value)
     if not metric_value:
         metric_value = json.dumps(aggregate, ensure_ascii=False, sort_keys=True)
     baseline_selection = plan.get("baselineSelection") if isinstance(plan.get("baselineSelection"), dict) else {}
@@ -548,7 +553,7 @@ def _record_formal_full_run_execution(
         plan["fullRunExecutions"] = executions[-12:]
         plan["activeFullRunExecutionId"] = execution_id
         plan["activeFullRunExecution"] = execution_record
-        plan["status"] = "smoke_passed"
+        plan["status"] = "smoke_passed" if str(execution_record.get("status") or "") == "completed" else f"full_run_{execution_record.get('status') or 'failed'}"
         plan["updatedAt"] = finished_at
         s._refresh_experiment_plan_readiness(plan)
         plan_store["activePlanId"] = plan["planId"]
@@ -2574,6 +2579,10 @@ def _experiment_smoke_result_record(
     log_ref = s._trim_text(payload.get("logRef") or payload.get("evidenceRef"), max_length=500)
     if not metric_value:
         raise s.TeamWorkflowOrchestrationError("Smoke result metric value is required.")
+    if not _METRIC_VALUE_PREFIX.match(str(metric_value)):
+        raise s.TeamWorkflowOrchestrationError(
+            "Smoke result metric value must start with a number."
+        )
     if not result_path and not log_ref:
         raise s.TeamWorkflowOrchestrationError("Smoke result path or log reference is required.")
     now = s.utc_now_iso()
@@ -2630,6 +2639,10 @@ def _experiment_full_run_result_record(
     log_ref = s._trim_text(payload.get("logRef") or payload.get("evidenceRef"), max_length=500)
     if not metric_value:
         raise s.TeamWorkflowOrchestrationError("Full-run result metric value is required.")
+    if not _METRIC_VALUE_PREFIX.match(str(metric_value)):
+        raise s.TeamWorkflowOrchestrationError(
+            "Full-run result metric value must start with a number."
+        )
     if not result_path and not log_ref:
         raise s.TeamWorkflowOrchestrationError("Full-run result path or log reference is required.")
     baseline_selection = plan.get("baselineSelection") if isinstance(plan.get("baselineSelection"), dict) else {}

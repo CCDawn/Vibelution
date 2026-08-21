@@ -1132,7 +1132,9 @@ class SourceExtractionError(ValueError):
 
 _SMOKE_DECISION_TO_STATUS = {
     "accept": "passed",
-    "iterate": "passed",
+    # iterate = weak improvement (threshold <= delta < 2*threshold): keep it
+    # under human review instead of auto-unlocking the formal full-run gate.
+    "iterate": "needs_review",
     "reject": "failed",
     "needs_full_run": "needs_review",
 }

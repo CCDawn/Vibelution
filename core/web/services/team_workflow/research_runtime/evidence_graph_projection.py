@@ -124,7 +124,9 @@ def _project_from_loop_records(records: list[dict[str, Any]]) -> dict[str, Any]:
     return {"nodes": nodes, "edges": edges}
 
 
-def project_evidence_graph(record: dict[str, Any]) -> dict[str, Any]:
+def project_evidence_graph(
+    record: dict[str, Any], claim_evidence: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
     """Return the evidence graph DTO for a run (raise when no facts exist)."""
     artifacts = _artifact_refs(record)
     raw = artifacts.get("evidence_relation_graph")
@@ -139,6 +141,25 @@ def project_evidence_graph(record: dict[str, Any]) -> dict[str, Any]:
 
     records = _loop_evidence_for_project(record)
     if not records:
+        # Last resort: project the same-page claim evidence list so the graph
+        # never shows its canned empty state next to a non-empty evidence list.
+        projected_nodes = [
+            {
+                "id": str(item.get("evidenceId") or item.get("id") or f"evidence-{index}"),
+                "label": str(item.get("claim") or item.get("title") or item.get("evidenceId") or ""),
+                "type": "evidence",
+                "source": str(item.get("source") or item.get("sourceType") or ""),
+            }
+            for index, item in enumerate(claim_evidence or [])
+            if isinstance(item, dict)
+        ]
+        if projected_nodes:
+            return {
+                "runId": str(record.get("runId") or ""),
+                "nodes": projected_nodes[:200],
+                "edges": [],
+                "source": "claim_evidence",
+            }
         raise NodeCommandUnavailable(
             "尚无证据关系数据：先完成证据卡与关系图产出",
             code="no_evidence_graph_data",

@@ -844,12 +844,17 @@ type SmokeAdapterPlanLike = {
   } | null;
 };
 
+/** Formal-only adapter ids are not V1 CPU smoke adapters (mirrors backend). */
+const FORMAL_ONLY_SMOKE_ADAPTER_IDS = new Set([
+  "fashion_mnist_predictive_coding_multi_seed",
+]);
+
 export function experimentDeclaredSmokeAdapterId(plan: SmokeAdapterPlanLike | null | undefined) {
   const selection = plan?.experimentContract?.adapterSelection;
   const contractAdapter = String(
     selection?.requestedAdapterId || selection?.resolvedAdapterId || "",
   ).trim();
-  if (contractAdapter) {
+  if (contractAdapter && !FORMAL_ONLY_SMOKE_ADAPTER_IDS.has(contractAdapter)) {
     return contractAdapter;
   }
   const smokePlan = plan?.experimentPlan?.smokePlan;
@@ -926,6 +931,10 @@ export function researchDiagnosticStatusLabel(status: string, lang: "zh" | "en")
     smoke_passed: { zh: "Smoke 已通过", en: "smoke passed" },
     smoke_partial: { zh: "Smoke 部分通过", en: "smoke partially passed" },
     smoke_needs_review: { zh: "Smoke 待复核", en: "smoke needs review" },
+    smoke_failed: { zh: "Smoke 未通过", en: "smoke failed" },
+    full_run_execution_failed: { zh: "正式实验执行失败", en: "formal run failed" },
+    full_run_execution_completed: { zh: "正式实验执行完成", en: "formal run completed" },
+    full_run_execution_partial: { zh: "正式实验部分完成", en: "formal run partially completed" },
     ready_for_full_run: { zh: "可执行正式实验", en: "ready for formal run" },
     full_run_running: { zh: "正式实验执行中", en: "formal run in progress" },
     full_run_passed: { zh: "正式实验已通过", en: "formal run passed" },

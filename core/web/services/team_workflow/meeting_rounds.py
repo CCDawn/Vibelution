@@ -589,9 +589,15 @@ def extract_discussion_markers(messages: Sequence[Mapping[str, Any]]) -> dict[st
                 # CANDIDATE: <id> | <statement> | <rationale> — one proposed
                 # hypothesis per line from a candidate-generation discussion.
                 parts = [part.strip() for part in value.split("|")]
-                if len(parts) >= 2:
+                if len(parts) >= 3:
+                    # The rationale is the last field; the statement may itself
+                    # contain '|' characters, so keep everything in between.
+                    candidate_id = parts[0]
+                    rationale = parts[-1]
+                    statement = "|".join(parts[1:-1])
+                elif len(parts) == 2:
                     candidate_id, statement = parts[0], parts[1]
-                    rationale = parts[2] if len(parts) >= 3 else ""
+                    rationale = ""
                 else:
                     candidate_id, statement, rationale = "", parts[0], ""
                 extracted["proposedCandidates"].append(

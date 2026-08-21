@@ -315,6 +315,18 @@ export function closeHypothesisReviewMeeting(
   );
 }
 
+export function closeReviewMeeting(
+  teamId: string,
+  meetingRoundId: string,
+  body: { closedBy: string; decisions: Array<Record<string, unknown>> },
+): Promise<CloseReviewMeetingResponse> {
+  return writeJson<CloseReviewMeetingResponse>(
+    `${teamPrefix(teamId)}/hypothesis-first/chain/review-meetings/${encodeURIComponent(meetingRoundId)}/close`,
+    "POST",
+    body,
+  );
+}
+
 export function reopenHypothesisReviewMeeting(
   teamId: string,
   meetingRoundId: string,

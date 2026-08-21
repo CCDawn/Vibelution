@@ -21,7 +21,7 @@ import {
 import { invalidateHypothesisFirstQueries } from "../research-workflow/useHypothesisFirstChain";
 import css from "./HypothesisSelectionList.styles";
 
-export const HYPOTHESIS_SELECTION_MIN = 1;
+export const HYPOTHESIS_SELECTION_MIN = 2;
 export const HYPOTHESIS_SELECTION_MAX = 16;
 
 export type HypothesisSelectionListProps = {
@@ -61,9 +61,10 @@ export function HypothesisSelectionList({
     [context],
   );
   const [selectedIds, setSelectedIds] = useState<string[]>(serverBaseline);
+  const baselineKey = serverBaseline.join("");
   useEffect(() => {
-    setSelectedIds(serverBaseline);
-  }, [serverBaseline]);
+    setSelectedIds(baselineKey.split("").filter(Boolean));
+  }, [baselineKey]);
 
   const recordMutation = useMutation({
     mutationFn: (input: HypothesisSelectionRecordPayload) =>
