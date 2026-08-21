@@ -69,7 +69,9 @@ function pickReview(
   const reviews = meetings.filter((item) => item.meetingType === "hypothesis_review");
   if (nodeId.startsWith("hf_meeting_")) {
     const roundIndex = Number(nodeId.slice("hf_meeting_".length));
-    return reviews.find((item) => (item.roundIndex ?? 0) === roundIndex) ?? reviews.at(-1) ?? null;
+    // No fallback to the latest round: a future round card must show its
+    // "not yet opened" empty state instead of another round's operations.
+    return reviews.find((item) => (item.roundIndex ?? 0) === roundIndex) ?? null;
   }
   return reviews.at(-1) ?? null;
 }

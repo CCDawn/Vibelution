@@ -539,11 +539,44 @@ def _persist_knowledge_ingestion_work_run(
         snapshot["error"] = s._trim_text(error, max_length=500)
     if error_type:
         snapshot["errorType"] = s._trim_text(error_type, max_length=120)
-    return s._knowledge_ingestion_work_run_store().persist_snapshot(
+    persisted = s._knowledge_ingestion_work_run_store().persist_snapshot(
         s.KNOWLEDGE_INGESTION_WORK_RUN_KIND,
         snapshot,
         active_run_id=run_id if active else "",
     )
+    if not active:
+        _restore_foreign_active_ingestion_run(run_id)
+    return persisted
+
+
+def _restore_foreign_active_ingestion_run(finished_run_id: str) -> None:
+    """Keep another team's still-active run indexed when this team's run ends.
+
+    The ingestion work-run index is global per run kind; without this guard a
+    finish would blank the shared active pointer while another team is still
+    running, allowing duplicate concurrent ingestion. (Full per-team
+    partitioning of the index is a larger follow-up.)
+    """
+    s = _service()
+    store = s._knowledge_ingestion_work_run_store()
+    index = store.load_run_index(s.KNOWLEDGE_INGESTION_WORK_RUN_KIND)
+    active_run_id = str(index.get("activeRunId") or "").strip()
+    if not active_run_id or active_run_id == finished_run_id:
+        return
+    active_snapshot = store.load_snapshot(s.KNOWLEDGE_INGESTION_WORK_RUN_KIND, active_run_id)
+    if not isinstance(active_snapshot, dict):
+        return
+    active_team_id = s._trim_text(active_snapshot.get("teamId"), max_length=160)
+    if active_team_id and _knowledge_ingestion_snapshot_is_active(active_snapshot, active_team_id):
+        store.save_run_index(
+            s.KNOWLEDGE_INGESTION_WORK_RUN_KIND,
+            active_run_id=active_run_id,
+            latest_run_id=finished_run_id,
+            emit_event=False,
+        )
+
+
+_KNOWLEDGE_INGESTION_STALE_ACTIVE_AFTER_S = 15 * 60
 
 
 def _knowledge_ingestion_snapshot_is_active(snapshot: dict[str, Any] | None, team_id: str) -> bool:
@@ -554,7 +587,23 @@ def _knowledge_ingestion_snapshot_is_active(snapshot: dict[str, Any] | None, tea
         return False
     status = s._trim_text(snapshot.get("status"), max_length=80).lower()
     current_phase = s._trim_text(snapshot.get("currentPhase"), max_length=80).lower()
-    return status in {"queued", "running"} or current_phase in {"queued", "running"}
+    if status not in {"queued", "running"} and current_phase not in {"queued", "running"}:
+        return False
+    # Orphan recovery: ingestion runs on a daemon thread; if the process died
+    # the on-disk snapshot stays "running" forever. Treat a silent snapshot as
+    # inactive so new runs can start and the UI polling can stop.
+    updated_at = s._trim_text(snapshot.get("updatedAt"), max_length=64)
+    if updated_at:
+        try:
+            from datetime import datetime, timezone
+
+            updated_dt = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+            age_s = (datetime.now(timezone.utc) - updated_dt).total_seconds()
+            if age_s > _KNOWLEDGE_INGESTION_STALE_ACTIVE_AFTER_S:
+                return False
+        except ValueError:
+            pass
+    return True
 
 
 def _decorate_knowledge_ingestion_work_run_snapshot(snapshot: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -1103,11 +1152,25 @@ def _run_knowledge_collection_ingestion_background(team_id: str, run_id: str, pa
     result_summary = result.get("summary") if isinstance(result.get("summary"), dict) else {}
     formal_count = s._source_collection_count(result_summary.get("formalKnowledgeItemCount"))
     terminal_status = s._trim_text(result.get("status"), max_length=80) or "completed"
+    final_status = "completed" if formal_count > 0 else terminal_status
+    # Standalone ingestion runs never execute search/extraction; without these
+    # explicit steps the generic derivation marks every stage "skipped" and the
+    # flow visualization contradicts the run's final status.
+    ingestion_steps = [
+        s._knowledge_collection_completion_step("remaining_search", "skipped"),
+        s._knowledge_collection_completion_step("candidate_extraction", "skipped"),
+        s._knowledge_collection_completion_step(
+            "knowledge_ingestion",
+            final_status,
+            output_count=formal_count,
+            artifact_id=s._trim_text(result_summary.get("knowledgeBaseId"), max_length=160),
+        ),
+    ]
     s._persist_knowledge_ingestion_work_run(
         team_id,
         run_id,
-        status="completed" if formal_count > 0 else terminal_status,
-        current_phase="completed" if formal_count > 0 else terminal_status,
+        status=final_status,
+        current_phase=final_status,
         summary=(
             f"资料入库完成：正式 KnowledgeItem {formal_count} 条。"
             if formal_count > 0
@@ -1115,6 +1178,12 @@ def _run_knowledge_collection_ingestion_background(team_id: str, run_id: str, pa
         ),
         active=False,
         result=result,
+        completion_steps=ingestion_steps,
+        flow_visualization=s._knowledge_collection_completion_flow_visualization(
+            final_status,
+            steps=ingestion_steps,
+            result=result,
+        ),
     )
     s._record_workflow_event(
         "knowledge_collection.ingestion_background_completed",

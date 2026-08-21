@@ -124,6 +124,23 @@ describe("stageModulesModel", () => {
     expect(picked?.actionLabel).toBe("Agent 整理关系");
   });
 
+  it("lets ingestion run with a poor graph once relations is done (backend has no such gate)", () => {
+    const finding: SourceCollectionStageModule = { ...module, id: "finding", state: "done" };
+    const extraction: SourceCollectionStageModule = { ...module, id: "extraction", state: "done" };
+    const relations: SourceCollectionStageModule = {
+      ...module,
+      id: "relations",
+      state: "done",
+      nextLabel: "进入资料入库",
+    };
+    const ingestion: SourceCollectionStageModule = { ...module, id: "ingestion", state: "pending" };
+    const picked = pickSourceCollectionPipelineModule(
+      [finding, extraction, relations, ingestion],
+      { nodeCount: 19, edgeCount: 0, missingLinkCount: 60 },
+    );
+    expect(picked?.id).toBe("ingestion");
+  });
+
   it("falls back completion flow nodes from stage modules", () => {
     const nodes = buildSourceCollectionCompletionFlowNodes({
       selectedTeamKnowledgeCollectionWorkRun: null,

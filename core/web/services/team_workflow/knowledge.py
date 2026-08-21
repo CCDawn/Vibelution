@@ -20,6 +20,10 @@ from typing import Any
 
 from .source_collection_common import project_source_version_families
 
+# Dedup memory for the high-frequency status_viewed workflow event (the UI
+# polls the status endpoint every ~2s; only status changes should be logged).
+_WORKFLOW_EVENT_STATUS_VIEW_MEMORY: dict[str, str] = {}
+
 
 def _service():
     from core.web.services import team_workflow_orchestration_service
@@ -1596,24 +1600,28 @@ def get_knowledge_ingestion_status(team_id: str) -> dict[str, Any]:
         "latestWorkRun": ingestion_latest_snapshot,
         "updatedAt": s.utc_now_iso(),
     }
-    s._record_workflow_event(
-        "knowledge_ingestion.status_viewed",
-        normalized_team_id,
-        fields={
-            "workflowId": workflow["workflowId"],
-            "status": overall_status,
-            "candidateCount": summary["candidateCount"],
-            "pendingProposalCount": summary["pendingProposalCount"],
-            "formalKnowledgeItemCount": summary["formalKnowledgeItemCount"],
-            "actionItemCount": summary["actionItemCount"],
-            "candidateBreakdown": s._candidate_breakdown(candidates),
-            "pendingSourceReviewCandidateIds": s._workflow_log_sample_values(pending_source_review_candidates, "candidateId"),
-            "pendingKnowledgeReviewCandidateIds": s._workflow_log_sample_values(pending_knowledge_review_candidates, "candidateId"),
-            "stewardCandidateIds": s._workflow_log_sample_values(steward_candidates, "candidateId"),
-            "invalidCandidateIds": s._workflow_log_sample_values(invalid_candidate_reports, "candidateId"),
-            "actionItemCodes": s._workflow_log_sample_values(action_items, "code"),
-        },
-    )
+    _view_key = f"knowledge_ingestion.status_viewed:{normalized_team_id}:{workflow['workflowId']}"
+    _view_value = f"{overall_status}:{summary['candidateCount']}:{summary['formalKnowledgeItemCount']}"
+    if _WORKFLOW_EVENT_STATUS_VIEW_MEMORY.get(_view_key) != _view_value:
+        _WORKFLOW_EVENT_STATUS_VIEW_MEMORY[_view_key] = _view_value
+        s._record_workflow_event(
+            "knowledge_ingestion.status_viewed",
+            normalized_team_id,
+            fields={
+                "workflowId": workflow["workflowId"],
+                "status": overall_status,
+                "candidateCount": summary["candidateCount"],
+                "pendingProposalCount": summary["pendingProposalCount"],
+                "formalKnowledgeItemCount": summary["formalKnowledgeItemCount"],
+                "actionItemCount": summary["actionItemCount"],
+                "candidateBreakdown": s._candidate_breakdown(candidates),
+                "pendingSourceReviewCandidateIds": s._workflow_log_sample_values(pending_source_review_candidates, "candidateId"),
+                "pendingKnowledgeReviewCandidateIds": s._workflow_log_sample_values(pending_knowledge_review_candidates, "candidateId"),
+                "stewardCandidateIds": s._workflow_log_sample_values(steward_candidates, "candidateId"),
+                "invalidCandidateIds": s._workflow_log_sample_values(invalid_candidate_reports, "candidateId"),
+                "actionItemCodes": s._workflow_log_sample_values(action_items, "code"),
+            },
+        )
     return payload
 
 
