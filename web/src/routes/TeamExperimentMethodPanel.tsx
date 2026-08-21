@@ -685,10 +685,13 @@ export function TeamExperimentMethodPanel({
 
       {errorMessage ? <div className={styles.error}>{errorMessage}</div> : null}
       <div className={styles.actions}>
-        <span>{locked && /running/i.test(activePlanStatus) ? (isZh ? "实验运行中，方法切换已锁定。" : "Method switching is locked while a run is active.") : complete ? (isZh ? "配置字段已齐，可以保存计划。" : "The setup is complete and can be saved.") : (isZh ? "补齐方法字段、判断标准和主指标后保存。" : "Complete the method fields, decision criteria, and primary metric.")}</span>
+        <span>{locked && /running/i.test(activePlanStatus) ? (isZh ? "实验运行中，方法切换已锁定。" : "Method switching is locked while a run is active.") : !canCreatePlan ? (isZh ? "实验阶段轮次尚未启动：先在科研流程总览启动实验阶段，才能保存计划。" : "The experiment stage round has not started yet. Launch the experiment stage from the research workflow overview first.") : complete ? (isZh ? "配置字段已齐，可以保存计划。" : "The setup is complete and can be saved.") : (isZh ? "补齐方法字段、判断标准和主指标后保存。" : "Complete the method fields, decision criteria, and primary metric.")}</span>
         <VNativeButton
           className={styles.primaryAction}
           disabled={locked || !canCreatePlan || !complete}
+          title={!canCreatePlan && !(locked && /running/i.test(activePlanStatus))
+            ? (isZh ? "实验阶段轮次尚未启动，暂时无法保存计划" : "Experiment stage round not started yet")
+            : undefined}
           onClick={() => selectedMethod && onSubmit(buildExperimentPlanMethodRequest(draft, selectedMethod, activeContract))}
         >
           <Save size={14} />

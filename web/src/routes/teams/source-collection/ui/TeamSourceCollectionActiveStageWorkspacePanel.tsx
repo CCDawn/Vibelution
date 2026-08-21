@@ -46,6 +46,8 @@ export type TeamSourceCollectionActiveStageWorkspacePanelProps = {
   sourceCollectionStagePrimaryAgentBinding: SourceCollectionStageAgentHelpers["sourceCollectionStagePrimaryAgentBinding"];
   stageChatLabels: Record<string, { zh: string; en: string }>;
   openSourceCollectionStageAgentChat: (stageId: SourceCollectionStageModuleId) => void;
+  /** Last "open Agent chat" failure; rendered inline so the CTA never fails silently. */
+  agentChatSeedError?: Error | null;
   /** Current-stage Agent cards stay visible beside the operational CTA. */
   agentConfiguration?: ReactNode;
   startSourceCollectionStageSessionTask?: (
@@ -88,6 +90,7 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
     sourceCollectionStagePrimaryAgentBinding,
     stageChatLabels,
     openSourceCollectionStageAgentChat,
+    agentChatSeedError = null,
     agentConfiguration,
     startSourceCollectionStageSessionTask,
     sourceCollectionRunAvailable,
@@ -553,6 +556,17 @@ export function TeamSourceCollectionActiveStageWorkspacePanel(props: TeamSourceC
           ) : null}
           {selectedTeamStartSourceCollectionStageTaskError ? (
             <div className={styles.messageError}>{selectedTeamStartSourceCollectionStageTaskError.message}</div>
+          ) : null}
+          {agentChatSeedError ? (
+            <div
+              className={styles.messageError}
+              role="alert"
+              data-testid="agent-chat-seed-error"
+            >
+              {lang === "zh"
+                ? `打开 Agent 私聊失败：${agentChatSeedError.message}`
+                : `Failed to open the Agent chat: ${agentChatSeedError.message}`}
+            </div>
           ) : null}
           {extractionRecovery?.sourceCollectionQualityBatchFeedback ? (
             <div className={styles.messageResult} role="status">

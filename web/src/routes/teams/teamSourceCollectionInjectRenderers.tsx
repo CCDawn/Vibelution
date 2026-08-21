@@ -188,6 +188,7 @@ export function createSourceCollectionInjectRenderers(ctx: SourceCollectionInjec
     sourceCollectionPrecheckCandidateCount,
     sourceCollectionStageAgentChatState,
     repairChallengeCupTeamAgentsMutation,
+    seedSourceCollectionAgentSessionContextMutation,
     sourceCollectionStagePrimaryAgentBinding,
     openSourceCollectionStageAgentChat,
     startSourceCollectionStageSessionTask,
@@ -638,6 +639,11 @@ export function createSourceCollectionInjectRenderers(ctx: SourceCollectionInjec
         selectedSourceCollectionStageId={selectedSourceCollectionStageId}
         sourceCollectionStageAgentChatState={sourceCollectionStageAgentChatState}
         repairChallengeCupTeamAgentsMutation={repairChallengeCupTeamAgentsMutation}
+        agentChatSeedError={
+          seedSourceCollectionAgentSessionContextMutation?.error instanceof Error
+            ? seedSourceCollectionAgentSessionContextMutation.error
+            : null
+        }
         sourceCollectionActionDisabledTitle={sourceCollectionActionDisabledTitle}
         sourceCollectionStageActionReadinessFor={sourceCollectionStageActionReadinessFor}
         sourceCollectionStagePrimaryAgentBinding={sourceCollectionStagePrimaryAgentBinding}

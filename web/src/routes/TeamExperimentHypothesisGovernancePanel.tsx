@@ -215,7 +215,7 @@ export function TeamExperimentHypothesisGovernancePanel(
       ) : null}
 
       <div className={styles.candidateGrid}>
-        {hypotheses.slice(0, 8).map((candidate) => {
+        {hypotheses.map((candidate) => {
           const complete = (
             candidate.valid
             && candidate.missingExperimentPlanFields.length === 0

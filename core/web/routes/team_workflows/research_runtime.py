@@ -9,7 +9,11 @@ from fastapi import Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 
-from core.research.workflow.contracts import ActorRef, CommandRequest, WorkflowCommandKind
+from core.research.workflow.contracts import (
+    ActorRef,
+    CommandRequest,
+    WorkflowCommandKind,
+)
 from core.research.workflow.ledger.errors import (
     CommandNotAllowedError,
     IdempotencyConflictError,
@@ -17,10 +21,19 @@ from core.research.workflow.ledger.errors import (
 )
 from core.web.services.team_workflow.research_runtime.command_service import (
     CommandForbiddenError,
+    HumanTaskNotFoundError,
+    InvalidHumanTaskStateError,
     NodeNotReadyError,
-    RunNotFoundError as CommandRunNotFoundError,
-    TeamScopeMismatchError as CommandTeamScopeMismatchError,
     WorkflowCommandError,
+)
+from core.web.services.team_workflow.research_runtime.command_service import (
+    RunNotFoundError as CommandRunNotFoundError,
+)
+from core.web.services.team_workflow.research_runtime.command_service import (
+    TeamScopeMismatchError as CommandTeamScopeMismatchError,
+)
+from core.web.services.team_workflow.research_runtime.event_stream_service import (
+    InvalidLastEventIdError,
 )
 from core.web.services.team_workflow.research_runtime.formal_read_runtime import (
     FormalReadRuntimeUnavailable,
@@ -34,10 +47,6 @@ from core.web.services.team_workflow.research_runtime.formal_write_runtime impor
     get_command_service,
 )
 from core.web.services.team_workflow.research_runtime.ids import new_id
-from core.web.services.team_workflow.research_runtime.operator_authorization import (
-    current_server_operator,
-    server_operator_scope_from_http,
-)
 from core.web.services.team_workflow.research_runtime.ledger_domain_projections import (
     HandoffQueryError,
     project_budget_from_snapshot,
@@ -48,16 +57,23 @@ from core.web.services.team_workflow.research_runtime.ledger_domain_projections 
     project_hypotheses_from_snapshot,
     project_research_ledger_from_snapshot,
 )
+from core.web.services.team_workflow.research_runtime.operator_authorization import (
+    current_server_operator,
+    server_operator_scope_from_http,
+)
 from core.web.services.team_workflow.research_runtime.query_service import (
     RunNotFoundError as QueryRunNotFoundError,
+)
+from core.web.services.team_workflow.research_runtime.query_service import (
     TeamScopeMismatchError as QueryTeamScopeMismatchError,
+)
+from core.web.services.team_workflow.research_runtime.query_service import (
     WorkflowLedgerUnavailable,
     WorkflowQueryError,
 )
-from core.web.services.team_workflow.research_runtime.event_stream_service import (
-    InvalidLastEventIdError,
+from core.web.services.team_workflow.research_runtime.run_creation import (
+    create_question_run,
 )
-from core.web.services.team_workflow.research_runtime.run_creation import create_question_run
 from core.web.services.team_workflow.research_runtime.service import (
     ResearchWorkflowError,
     get_research_workflow_runtime_service,
@@ -665,6 +681,16 @@ def research_workflow_command(
         raise HTTPException(
             status_code=412,
             detail={"code": "node_not_ready", "message": str(exc)},
+        ) from exc
+    except InvalidHumanTaskStateError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "invalid_human_task_state", "message": str(exc)},
+        ) from exc
+    except HumanTaskNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "task_not_found", "message": str(exc)},
         ) from exc
     except WorkflowCommandError as exc:
         raise HTTPException(

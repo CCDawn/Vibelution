@@ -32,6 +32,7 @@ const EVENT_LABELS: Record<string, string> = {
   execution_anchor_bound: "执行锚点已绑定",
   artifact_verified: "产物已核验",
   run_forked: "运行已分叉",
+  revision_forked: "修订分支已创建",
   run_blocked: "运行已阻塞",
   run_succeeded: "运行已完成",
   reconciliation_required: "需要对账",

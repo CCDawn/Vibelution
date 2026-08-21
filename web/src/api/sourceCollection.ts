@@ -71,7 +71,7 @@ export function startSourceCollectionRun(
   );
 }
 
-export function seedSourceCollectionAgentSessionContext(
+export async function seedSourceCollectionAgentSessionContext(
   teamId: string,
   runId: string,
   body: {
@@ -80,11 +80,16 @@ export function seedSourceCollectionAgentSessionContext(
     agentRole: string;
   },
 ): Promise<TeamWorkflowSourceCollectionAgentSessionContextPayload> {
-  return writeJson<TeamWorkflowSourceCollectionAgentSessionContextPayload>(
+  const payload = await writeJson<TeamWorkflowSourceCollectionAgentSessionContextPayload>(
     `/api/teams/${encodeURIComponent(teamId)}/workflow-orchestration/source-collection-runs/${encodeURIComponent(runId)}/agent-session-context`,
     "POST",
     body,
   );
+  if (!payload?.chatRoute) {
+    // Surface an unusable seed response as a mutation failure instead of a silent no-op click.
+    throw new Error("agent session context returned no chat route");
+  }
+  return payload;
 }
 
 export function startSourceCollectionStageSessionTask(

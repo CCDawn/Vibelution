@@ -26,6 +26,7 @@ class WorkflowEventType(str, Enum):
     EXECUTION_ANCHOR_BOUND = "execution_anchor_bound"
     ARTIFACT_VERIFIED = "artifact_verified"
     RUN_FORKED = "run_forked"
+    REVISION_FORKED = "revision_forked"
     RUN_BLOCKED = "run_blocked"
     RUN_SUCCEEDED = "run_succeeded"
     RECONCILIATION_REQUIRED = "reconciliation_required"
@@ -43,7 +44,9 @@ class WorkflowEventEnvelope:
     workflow_version_id: str
     run_id: str
     run_version: int
-    event_type: WorkflowEventType
+    # Replay of ledger history may carry event types unknown to this build;
+    # the raw string is preserved so the stream stays readable.
+    event_type: WorkflowEventType | str
     actor: Mapping[str, str]
     correlation_id: str
     causation_id: str | None
@@ -59,7 +62,7 @@ class WorkflowEventEnvelope:
             "workflowVersionId": self.workflow_version_id,
             "runId": self.run_id,
             "runVersion": self.run_version,
-            "type": self.event_type.value,
+            "type": getattr(self.event_type, "value", self.event_type),
             "actor": dict(self.actor),
             "correlationId": self.correlation_id,
             "occurredAtMs": self.occurred_at_ms,
