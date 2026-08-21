@@ -13,6 +13,9 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse, Response
 
 CONTROL_TOKEN_HEADER = "X-Vibelution-Control-Token"
+# GET endpoints that must stay reachable without a token: the health probe
+# and the token bootstrap itself (requiring a token there deadlocks).
+_TOKEN_EXEMPT_GET_PATHS = {"/api/health", "/api/control-token"}
 CONTROL_TOKEN_ENV = "VIBELUTION_WEB_CONTROL_TOKEN"
 TRUSTED_WEB_HOSTS_ENV = "VIBELUTION_TRUSTED_WEB_HOSTS"
 
@@ -93,7 +96,12 @@ class WebControlGuardMiddleware(BaseHTTPMiddleware):
         if not _is_guarded_path(request.url.path) or request.method.upper() == "OPTIONS":
             return await call_next(request)
 
-        if request.method.upper() in _MUTATING_METHODS:
+        method = request.method.upper()
+        requires_token = method in _MUTATING_METHODS or (
+            method == "GET"
+            and request.url.path.rstrip("/") not in _TOKEN_EXEMPT_GET_PATHS
+        )
+        if requires_token:
             error = validate_control_request(request)
             if error is not None:
                 return JSONResponse({"detail": error.detail}, status_code=error.status_code)

@@ -604,6 +604,14 @@ def extract_discussion_markers(messages: Sequence[Mapping[str, Any]]) -> dict[st
                 )
             elif marker == "EVIDENCE_REQUEST":
                 try:
+                    if len(value) > _EVIDENCE_REQUEST_MARKER_MAX_CHARS:
+                        extracted["evidenceRequestErrors"].append(
+                            {
+                                "code": "evidence_request_too_large",
+                                "message": "EVIDENCE_REQUEST marker exceeds 65536 chars",
+                            }
+                        )
+                        continue
                     parsed = json.loads(value)
                 except json.JSONDecodeError:
                     extracted["evidenceRequestErrors"].append(
@@ -637,6 +645,7 @@ _STRUCTURED_MARKER_KEYS = (
     "proposedCandidates",
     "evidenceRequests",
 )
+_EVIDENCE_REQUEST_MARKER_MAX_CHARS = 65536
 _DIGEST_CAPTURE_KEYS = (
     "agreements",
     "disagreements",

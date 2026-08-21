@@ -504,6 +504,24 @@ def _question_generation_meetings(team_id: str, question_id: str) -> list[dict[s
     ]
 
 
+_TRAIL_CACHE: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
+_TRAIL_CACHE_MAX_ENTRIES = 32
+
+
+def _trail_source_stamp(team_id: str) -> float:
+    """Newest mtime across the stores the trail reads."""
+    root = developer_sandbox.seeded_sandbox_workspace_path(
+        _project_root(), "teams", _safe_team_id(team_id)
+    ) / "research_workflow"
+    stamp = 0.0
+    for name in ("meeting_rounds.jsonl", "hypothesis_first_chain.jsonl"):
+        try:
+            stamp = max(stamp, (root / name).stat().st_mtime)
+        except OSError:
+            continue
+    return stamp
+
+
 def candidate_evidence_trail(
     team_id: str,
     question_id: str,
@@ -526,6 +544,12 @@ def candidate_evidence_trail(
     normalized_question_id = str(question_id or "").strip().upper()
     if not normalized_question_id:
         raise ContractValidationError("questionId is required")
+
+    cache_key = (normalized_team_id, normalized_question_id)
+    source_stamp = _trail_source_stamp(normalized_team_id)
+    cached = _TRAIL_CACHE.get(cache_key)
+    if cached is not None and cached[0] == source_stamp:
+        return cached[1]
 
     candidates = [
         record
@@ -583,7 +607,7 @@ def candidate_evidence_trail(
     for entries in trail.values():
         entries.sort(key=lambda item: str(item.get("createdAt") or ""))
 
-    return {
+    result = {
         "schemaVersion": SCHEMA_VERSION,
         "teamId": normalized_team_id,
         "questionId": normalized_question_id,
@@ -593,6 +617,10 @@ def candidate_evidence_trail(
         ],
         "storagePath": str(_storage_path(normalized_team_id)),
     }
+    if len(_TRAIL_CACHE) >= _TRAIL_CACHE_MAX_ENTRIES:
+        _TRAIL_CACHE.clear()
+    _TRAIL_CACHE[cache_key] = (source_stamp, result)
+    return result
 
 
 def list_hypothesis_candidates(team_id: str, *, question_id: str = "") -> dict[str, Any]:

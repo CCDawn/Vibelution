@@ -89,10 +89,15 @@ describe("team experiment API", () => {
   });
 
   it("fetches the DEV control snapshot with team segment encoded", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ schemaVersion: 1, teamId: "team a/b" }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    }));
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ header: "X-Vibelution-Control-Token", controlToken: "t" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }))
+      .mockResolvedValue(new Response(JSON.stringify({ schemaVersion: 1, teamId: "team a/b" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
     vi.stubGlobal("fetch", fetchMock);
 
     await fetchChallengeCupDevControlSnapshot("team a/b");
@@ -105,10 +110,15 @@ describe("team experiment API", () => {
   });
 
   it("fetches the catalog overview with team segment encoded", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ schemaVersion: 1, teamId: "team a/b", questions: [] }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    }));
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ header: "X-Vibelution-Control-Token", controlToken: "t" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }))
+      .mockResolvedValue(new Response(JSON.stringify({ schemaVersion: 1, teamId: "team a/b", questions: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
     vi.stubGlobal("fetch", fetchMock);
 
     await fetchChallengeCupCatalogOverview("team a/b");

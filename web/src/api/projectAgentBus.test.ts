@@ -38,10 +38,15 @@ describe("projectAgentBus api helpers", () => {
 
   it("forwards cancellation to the shared timeline request", async () => {
     const controller = new AbortController();
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ events: [] }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    }));
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ header: "X-Vibelution-Control-Token", controlToken: "t" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }))
+      .mockResolvedValue(new Response(JSON.stringify({ events: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
     vi.stubGlobal("fetch", fetchMock);
 
     await listProjectAgentBusTimeline(120, { signal: controller.signal });

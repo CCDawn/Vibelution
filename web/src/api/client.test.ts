@@ -46,18 +46,24 @@ describe("fetchJson control token", () => {
     expect(requestInit.credentials).toBe("same-origin");
   });
 
-  it("does not request a control token for read-only requests", async () => {
-    const fetchMock = vi.fn().mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ status: "ok" }),
-    });
+  it("attaches the control token to read-only API requests too", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ header: "X-Vibelution-Control-Token", controlToken: "t" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ status: "ok" }),
+      });
     vi.stubGlobal("fetch", fetchMock);
 
     const payload = await fetchJson<{ status: string }>("/api/health");
 
     expect(payload.status).toBe("ok");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/health");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/control-token");
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/health");
   });
 
   it("does not attach the local control token to external writes", async () => {
@@ -113,13 +119,21 @@ describe("fetchJson control token", () => {
   it("reports same-origin API http failures", async () => {
     const reports: unknown[] = [];
     setFetchJsonFailureReporter((report) => reports.push(report));
-    const fetchMock = vi.fn().mockResolvedValueOnce({
-      ok: false,
-      status: 409,
-      headers: new Headers({ "content-type": "application/json" }),
-      json: async () => ({ detail: "run is active" }),
-      text: async () => "",
-    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ "content-type": "application/json" }),
+        json: async () => ({ header: "X-Vibelution-Control-Token", controlToken: "t" }),
+        text: async () => "",
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 409,
+        headers: new Headers({ "content-type": "application/json" }),
+        json: async () => ({ detail: "run is active" }),
+        text: async () => "",
+      });
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchJson("/api/evolution/runs")).rejects.toThrow("run is active");
@@ -216,7 +230,12 @@ describe("fetchJson control token", () => {
   it("reports same-origin API network failures", async () => {
     const reports: unknown[] = [];
     setFetchJsonFailureReporter((report) => reports.push(report));
-    const fetchMock = vi.fn().mockRejectedValueOnce(new Error("connection lost"));
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ header: "X-Vibelution-Control-Token", controlToken: "t" }),
+      })
+      .mockRejectedValueOnce(new Error("connection lost"));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchJson("/api/runtime/summary")).rejects.toThrow("connection lost");
