@@ -91,6 +91,45 @@ describe("RuntimeSceneBridge", () => {
     expect(bodies.filter((body) => body.eventCode === "event-1")).toHaveLength(1);
     expect(bodies.filter((body) => body.eventCode === "event-2")).toHaveLength(2);
   });
+
+  it("hands off the flush owner when a record arrives at the final-post settle boundary", async () => {
+    let releaseFinalPost: (() => void) | null = null;
+    let boundaryRecord: Promise<void> | null = null;
+    let postCount = 0;
+    const fetchImpl = vi.fn(() => {
+      postCount += 1;
+      if (postCount === 1) {
+        return new Promise<Response>((resolve) => {
+          releaseFinalPost = () => {
+            resolve(new Response("{}", { status: 202 }));
+            queueMicrotask(() => {
+              boundaryRecord = bridge.record({ eventCode: "event-after-settle", message: "message", fields: {} });
+            });
+          };
+        });
+      }
+      return Promise.resolve(new Response("{}", { status: 202 }));
+    });
+    const bridge = new RuntimeSceneBridge({
+      launcherOrigin: "http://127.0.0.1:8765",
+      controlToken: "token",
+      maxBufferedEvents: 5,
+      fetchImpl
+    });
+
+    const first = bridge.record({ eventCode: "event-final", message: "message", fields: {} });
+    await Promise.resolve();
+    expect(postCount).toBe(1);
+    releaseFinalPost?.();
+    await first;
+    await Promise.resolve();
+    await boundaryRecord;
+
+    expect(postCount).toBe(2);
+    expect(bridge.bufferedCount()).toBe(0);
+    const bodies = fetchImpl.mock.calls.map((call) => JSON.parse(String(call[1]?.body)));
+    expect(bodies.map((body) => body.eventCode)).toEqual(["event-final", "event-after-settle"]);
+  });
 });
 
 describe("electronEventPayload", () => {

@@ -45,7 +45,12 @@ export class RuntimeSceneBridge {
     if (this.flushPromise !== null) {
       return this.flushPromise;
     }
-    const flushPromise = this.flushQueue();
+    // Start the owner in a microtask after publishing its promise. This lets
+    // flushQueue release the exact owner before its promise resolves, so a
+    // record arriving in the settle boundary can acquire a fresh owner
+    // instead of observing an already-completed promise forever.
+    let flushPromise!: Promise<void>;
+    flushPromise = Promise.resolve().then(() => this.flushQueue(flushPromise));
     this.flushPromise = flushPromise;
     try {
       await flushPromise;
@@ -60,24 +65,33 @@ export class RuntimeSceneBridge {
     return this.queue.length;
   }
 
-  private async flushQueue(): Promise<void> {
-    while (this.queue.length > 0) {
-      const next = this.queue[0];
-      this.inFlight = next;
-      try {
-        await this.post(next);
-      } finally {
-        this.inFlight = null;
-      }
-      // Only the flush that owns this head may remove it. Other records can
-      // append concurrently, but they cannot shift the in-flight event.
-      if (this.queue[0] === next) {
-        this.queue.shift();
-      } else {
-        const index = this.queue.indexOf(next);
-        if (index >= 0) {
-          this.queue.splice(index, 1);
+  private async flushQueue(ownerPromise: Promise<void>): Promise<void> {
+    try {
+      while (this.queue.length > 0) {
+        const next = this.queue[0];
+        this.inFlight = next;
+        try {
+          await this.post(next);
+        } finally {
+          this.inFlight = null;
         }
+        // Only the flush that owns this head may remove it. Other records can
+        // append concurrently, but they cannot shift the in-flight event.
+        if (this.queue[0] === next) {
+          this.queue.shift();
+        } else {
+          const index = this.queue.indexOf(next);
+          if (index >= 0) {
+            this.queue.splice(index, 1);
+          }
+        }
+      }
+    } finally {
+      // Release before resolving ownerPromise. A new record that arrives in
+      // the promise-settlement microtask therefore gets a new owner and drains
+      // without requiring a third external flush call.
+      if (this.flushPromise === ownerPromise) {
+        this.flushPromise = null;
       }
     }
   }
