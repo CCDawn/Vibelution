@@ -82,6 +82,11 @@ export function HypothesisSelectionPanel({ teamId, questionId, lang = "zh" }: Hy
   }
 
   const candidates = context.candidates;
+  const selectedCount = (
+    context.latestSelection?.selectedCandidateIds ??
+    context.defaultSelectedCandidateIds ??
+    []
+  ).length;
   const reviewMeeting = context.reviewMeeting ?? null;
   const reviewMeetingId = reviewMeeting?.meetingRoundId ?? "";
   const generationMeeting = context.generationMeeting ?? null;
@@ -102,8 +107,12 @@ export function HypothesisSelectionPanel({ teamId, questionId, lang = "zh" }: Hy
           <h3>{isZh ? "假说选择（假说先行）" : "Hypothesis selection (hypothesis-first)"}</h3>
           <p>
             {isZh
-              ? `已选候选 ${candidates.length} 条（${HYPOTHESIS_SELECTION_MIN}–${HYPOTHESIS_SELECTION_MAX}）`
-              : `${candidates.length} candidates (${HYPOTHESIS_SELECTION_MIN}–${HYPOTHESIS_SELECTION_MAX})`}
+              ? reviewMeeting?.status === "closed"
+                ? `候选总数 ${candidates.length} 条 · 最终采用 ${selectedCount} 条`
+                : `候选总数 ${candidates.length} 条 · 需选择 ${HYPOTHESIS_SELECTION_MIN}–${HYPOTHESIS_SELECTION_MAX} 条`
+              : reviewMeeting?.status === "closed"
+                ? `${candidates.length} candidates · ${selectedCount} selected`
+                : `${candidates.length} candidates · select ${HYPOTHESIS_SELECTION_MIN}–${HYPOTHESIS_SELECTION_MAX}`}
           </p>
         </div>
         <div className={css.headingActions}>

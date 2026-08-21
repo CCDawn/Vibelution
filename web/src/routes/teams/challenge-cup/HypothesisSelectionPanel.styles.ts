@@ -11,11 +11,16 @@ const styles: Record<string, string> = {
     "grid gap-2 rounded-[var(--vui-radius-panel-soft)] border border-[var(--vui-border-subtle)] bg-[var(--vui-surface-card)] p-3 data-[selected=true]:border-[var(--accent-cool)]",
   candidateTopline: "flex items-start justify-between gap-2.5",
   candidateLabel:
-    "flex min-w-0 items-start gap-2 [&>span]:grid [&>span]:min-w-0 [&>span]:gap-[3px] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:leading-[1.4] [&_small]:[font-size:var(--vui-font-2xs)] [&_small]:text-[var(--fg-secondary)]",
+    "grid min-w-0 flex-1 gap-[3px] [&_strong]:[font-size:var(--vui-font-xs)] [&_strong]:leading-[1.4] [&_small]:[font-size:var(--vui-font-2xs)] [&_small]:text-[var(--fg-secondary)]",
+  candidateDisclosure: "shrink-0 self-start",
+  candidateDetail:
+    "grid gap-2 pl-0 [&>p]:m-0 [&>p]:[font-size:var(--vui-font-2xs)] [&>p]:leading-[1.45] [&>p]:text-[var(--fg-secondary)]",
   candidateMeta:
     "flex flex-wrap items-center gap-x-3 gap-y-1 [font-size:var(--vui-font-2xs)] text-[var(--fg-secondary)]",
   summary:
     "grid gap-1.5 rounded-[var(--vui-radius-control)] bg-[var(--vui-surface-inset)] p-2.5 [&>span]:[font-size:var(--vui-font-2xs)] [&>span]:font-[650] [&>span]:tracking-[0.02em] [&>span]:text-[var(--fg-secondary)] [&_p]:[font-size:var(--vui-font-2xs)]",
+  selectionToolbar:
+    "flex min-h-8 flex-wrap items-center justify-between gap-2 rounded-[var(--vui-radius-control)] bg-[var(--vui-surface-inset)] px-2.5 py-1.5 [font-size:var(--vui-font-2xs)] text-[var(--fg-secondary)] [&_strong]:text-[var(--fg-primary)]",
   actions: "flex flex-wrap items-center gap-2",
   generationState:
     "grid justify-items-start gap-2 [&_p]:[font-size:var(--vui-font-2xs)] [&_p]:text-[var(--fg-secondary)]",

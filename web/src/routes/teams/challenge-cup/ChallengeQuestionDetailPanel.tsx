@@ -9,6 +9,7 @@ import type { ChallengeQuestionRunDetailPayload } from "../../../api/types";
 import {
   VButton,
   VEmptyState,
+  VErrorSummary,
   VStateSurface,
   VStatusChip,
   VStringSelect,
@@ -16,7 +17,6 @@ import {
 } from "../../../components/vui";
 import { TeamHypothesisRoundTimeline } from "../TeamHypothesisRoundTimeline";
 import { TeamMeetingRoundPanel } from "../TeamMeetingRoundPanel";
-import { researchWorkflowErrorInlineText } from "../researchWorkflowErrorModel";
 import { useShellI18n } from "../../../i18n/useShellI18n";
 import { ChallengeQuestionAnalysisSection } from "./ChallengeQuestionAnalysisSection";
 import { ChallengeQuestionEvidenceSection } from "./ChallengeQuestionEvidenceSection";
@@ -111,23 +111,43 @@ export function ChallengeQuestionDetailPanel({
   }
   if (errorMessage || !detail) {
     const operableTeamId = detail?.teamId || teamId;
+    const canContinueReview = Boolean(operableTeamId && requestedQuestionId);
     return (
       <VSurface className={css.state} tone="workspace">
-        <VEmptyState
-          title={isZh
-            ? `${requestedQuestionId || "该题"} 的审核工件不可用`
-            : `Review artifacts unavailable for ${requestedQuestionId || "this question"}`}
-        />
-        {errorMessage ? (
+        {canContinueReview ? (
+          <VErrorSummary
+            data-testid="question-detail-fail-soft-warning"
+            tone="warning"
+            label={
+              requestedQuestionId
+                ? `${requestedQuestionId} · ${isZh ? "验收档案" : "Acceptance artifacts"}`
+                : (isZh ? "验收档案" : "Acceptance artifacts")
+            }
+            summary={
+              isZh
+                ? "验收档案暂不可用，假说评审仍可继续"
+                : "Acceptance artifacts are temporarily unavailable; hypothesis review can continue."
+            }
+            details={errorMessage ? <code>{errorMessage}</code> : undefined}
+            openLabel={isZh ? "技术细节" : "Technical details"}
+            closeLabel={isZh ? "收起" : "Hide details"}
+          />
+        ) : (
           <>
-            <p>{researchWorkflowErrorInlineText(errorMessage)}</p>
-            <details className={css.techDetails}>
-              <summary>{isZh ? "技术细节" : "Technical details"}</summary>
-              <code>{errorMessage}</code>
-            </details>
+            <VEmptyState
+              title={isZh
+                ? `${requestedQuestionId || "该题"} 的验收档案暂不可用`
+                : `Acceptance artifacts unavailable for ${requestedQuestionId || "this question"}`}
+            />
+            {errorMessage ? (
+              <details className={css.techDetails}>
+                <summary>{isZh ? "技术细节" : "Technical details"}</summary>
+                <code>{errorMessage}</code>
+              </details>
+            ) : null}
           </>
-        ) : null}
-        {operableTeamId && requestedQuestionId ? (
+        )}
+        {canContinueReview ? (
           <div className={css.section} data-testid="question-detail-fail-soft-ops">
             <HypothesisSelectionPanel teamId={operableTeamId} questionId={requestedQuestionId} lang={lang} />
             <TeamMeetingRoundPanel teamId={operableTeamId} questionId={requestedQuestionId} />

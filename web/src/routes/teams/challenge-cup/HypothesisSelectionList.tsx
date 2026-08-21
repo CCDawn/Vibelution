@@ -42,6 +42,7 @@ export function HypothesisSelectionList({
   teamId,
   questionId,
   lang = "zh",
+  compact = false,
   hideSubmit = false,
 }: HypothesisSelectionListProps) {
   const isZh = lang === "zh";
@@ -76,11 +77,35 @@ export function HypothesisSelectionList({
     },
   });
 
-  const [expandedCandidateId, setExpandedCandidateId] = useState<string | null>(null);
+  const candidates = context?.candidates ?? [];
+  const reviewClosed = context?.reviewMeeting?.status === "closed";
+  const effectiveSelectedIds =
+    context?.latestSelection?.selectedCandidateIds ??
+    context?.defaultSelectedCandidateIds ??
+    [];
+  const effectiveSelectedIdSet = new Set(effectiveSelectedIds);
+  const visibleCandidates = reviewClosed
+    ? candidates.filter((candidate) => effectiveSelectedIdSet.has(candidate.hypothesis_id))
+    : candidates;
+  const visibleCandidateIds = visibleCandidates.map((candidate) => candidate.hypothesis_id);
+  const preferredCandidateId =
+    effectiveSelectedIds.find((candidateId) => visibleCandidateIds.includes(candidateId)) ??
+    visibleCandidateIds[0] ??
+    null;
+  const visibleCandidateKey = JSON.stringify(visibleCandidateIds);
+  const [focusedCandidateId, setFocusedCandidateId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!compact) return;
+    setFocusedCandidateId((current) =>
+      current && visibleCandidateIds.includes(current) ? current : preferredCandidateId,
+    );
+  }, [compact, preferredCandidateId, visibleCandidateKey]);
+
+  const [expandedTrailCandidateId, setExpandedTrailCandidateId] = useState<string | null>(null);
   const trailQuery = useQuery({
     queryKey: ["hypothesis-first", "candidate-evidence-trail", teamId, questionId],
     queryFn: ({ signal }) => fetchCandidateEvidenceTrail(teamId, questionId, { signal }),
-    enabled: Boolean(teamId && questionId && expandedCandidateId),
+    enabled: Boolean(teamId && questionId && candidates.length > 0),
     staleTime: 30_000,
   });
   const trailByCandidate = new Map(
@@ -98,7 +123,6 @@ export function HypothesisSelectionList({
     );
   }
 
-  const candidates = context.candidates;
   const latestSelection = context.latestSelection;
   const dirty = !sameIdSet(selectedIds, serverBaseline);
   const withinBounds =
@@ -131,20 +155,23 @@ export function HypothesisSelectionList({
 
   return (
     <div data-testid="hypothesis-selection-list">
-      {latestSelection ? (
-        <div className={css.summary}>
-          <span>{isZh ? "当前生效选择" : "Current effective selection"}</span>
-          <p>
+      {reviewClosed ? (
+        <div className={css.selectionToolbar} data-testid="hypothesis-selection-archive-summary">
+          <span>{isZh ? "最终采用" : "Final selection"}</span>
+          <strong>
             {isZh
-              ? `已选 ${latestSelection.selectedCandidateIds.length} 条假说`
-              : `${latestSelection.selectedCandidateIds.length} hypotheses selected`}
-          </p>
+              ? `${visibleCandidates.length} 条`
+              : `${visibleCandidates.length} selected`}
+          </strong>
         </div>
-      ) : null}
-      {candidates.length > 0 ? (
-        <div className={css.summary}>
-          <span>{isZh ? "快捷操作" : "Quick actions"}</span>
-          <p>
+      ) : candidates.length > 0 ? (
+        <div className={css.selectionToolbar}>
+          <span>
+            {isZh
+              ? `已选 ${selectedIds.length}/${candidates.length}`
+              : `${selectedIds.length}/${candidates.length} selected`}
+          </span>
+          {candidates.length > selectedIds.length ? (
             <VButton
               density="compact"
               variant="ghost"
@@ -165,15 +192,24 @@ export function HypothesisSelectionList({
             >
               {isZh ? `全选送审（${Math.min(candidates.length, HYPOTHESIS_SELECTION_MAX)} 条）` : "Select all"}
             </VButton>
-          </p>
+          ) : null}
         </div>
       ) : null}
       <div className={css.candidateList}>
-        {candidates.length === 0 ? (
-          <VEmptyState title={isZh ? "尚无候选假说" : "No candidate hypotheses yet"} />
+        {visibleCandidates.length === 0 ? (
+          <VEmptyState
+            title={
+              reviewClosed
+                ? (isZh ? "没有可归档的最终选择" : "No final selection to archive")
+                : (isZh ? "尚无候选假说" : "No candidate hypotheses yet")
+            }
+          />
         ) : null}
-        {candidates.map((candidate) => {
+        {visibleCandidates.map((candidate) => {
           const checked = selectedIds.includes(candidate.hypothesis_id);
+          const candidateExpanded = !compact || focusedCandidateId === candidate.hypothesis_id;
+          const trailEntries = trailByCandidate.get(candidate.hypothesis_id) ?? [];
+          const hasTrail = trailEntries.length > 0;
           const checkDisabled =
             recordMutation.isPending ||
             (checked && selectedIds.length <= HYPOTHESIS_SELECTION_MIN) ||
@@ -181,58 +217,76 @@ export function HypothesisSelectionList({
           return (
             <article
               className={css.candidateCard}
+              data-expanded={candidateExpanded ? "true" : "false"}
               data-selected={checked ? "true" : "false"}
               key={candidate.hypothesis_id}
             >
               <div className={css.candidateTopline}>
-                <VCheckbox
-                  aria-label={isZh ? `选择假说 ${candidate.hypothesis_id}` : `Select hypothesis ${candidate.hypothesis_id}`}
-                  className={css.candidateLabel}
-                  isDisabled={checkDisabled}
-                  isSelected={checked}
-                  onChange={(next) => toggleCandidate(candidate.hypothesis_id, next)}
-                >
-                  <span>
-                    <strong>{candidate.statement}</strong>
-                    {candidate.mechanism ? <small>{candidate.mechanism}</small> : null}
-                  </span>
-                </VCheckbox>
-              </div>
-              <div className={css.candidateMeta}>
-                  <span>{isZh ? `预测 ${candidate.predictions.length} 条` : `${candidate.predictions.length} predictions`}</span>
-                  <VButton
-                    density="compact"
-                    variant="ghost"
-                    className={css.trailToggle}
-                    aria-expanded={expandedCandidateId === candidate.hypothesis_id}
-                    onPress={() =>
-                      setExpandedCandidateId((current) =>
-                        current === candidate.hypothesis_id ? null : candidate.hypothesis_id,
-                      )
-                    }
-                  >
-                    {expandedCandidateId === candidate.hypothesis_id
-                      ? (isZh ? "收起证据轨迹" : "Hide evidence trail")
-                      : (isZh ? "查看证据轨迹" : "View evidence trail")}
-                  </VButton>
+                {reviewClosed ? null : (
+                  <VCheckbox
+                    aria-label={isZh ? `选择假说 ${candidate.hypothesis_id}` : `Select hypothesis ${candidate.hypothesis_id}`}
+                    isDisabled={checkDisabled}
+                    isSelected={checked}
+                    onChange={(next) => toggleCandidate(candidate.hypothesis_id, next)}
+                  />
+                )}
+                <div className={css.candidateLabel}>
+                  <strong>{candidate.statement}</strong>
+                  {!compact && candidate.mechanism ? <small>{candidate.mechanism}</small> : null}
                 </div>
-                {expandedCandidateId === candidate.hypothesis_id ? (
-                  <div className={css.evidenceTrail} data-testid="candidate-evidence-trail">
-                    {trailQuery.isPending ? (
-                      <p className={css.trailHint}>{isZh ? "正在读取证据轨迹…" : "Loading evidence trail…"}</p>
-                    ) : trailQuery.isError ? (
-                      <p className={css.trailHint}>
-                        {isZh ? "证据轨迹暂不可用" : "Evidence trail unavailable"}
-                      </p>
-                    ) : (trailByCandidate.get(candidate.hypothesis_id)?.length ?? 0) === 0 ? (
-                      <p className={css.trailHint}>
-                        {isZh
-                          ? "尚无讨论发言引用该候选；证据锚点会在评审讨论后出现在这里。"
-                          : "No discussion speech cites this candidate yet."}
-                      </p>
-                    ) : (
+                {compact ? (
+                  <VButton
+                    aria-expanded={candidateExpanded}
+                    aria-label={
+                      candidateExpanded
+                        ? (isZh ? `收起候选 ${candidate.hypothesis_id}` : `Collapse candidate ${candidate.hypothesis_id}`)
+                        : (isZh ? `展开候选 ${candidate.hypothesis_id}` : `Expand candidate ${candidate.hypothesis_id}`)
+                    }
+                    className={css.candidateDisclosure}
+                    density="compact"
+                    onPress={() => {
+                      setFocusedCandidateId((current) =>
+                        current === candidate.hypothesis_id ? null : candidate.hypothesis_id,
+                      );
+                      setExpandedTrailCandidateId(null);
+                    }}
+                    variant="ghost"
+                  >
+                    {candidateExpanded
+                      ? (isZh ? "收起" : "Collapse")
+                      : (isZh ? "展开" : "Expand")}
+                  </VButton>
+                ) : null}
+              </div>
+              {candidateExpanded ? (
+                <div className={css.candidateDetail}>
+                  {compact && candidate.mechanism ? <p>{candidate.mechanism}</p> : null}
+                  <div className={css.candidateMeta}>
+                    {candidate.predictions.length > 0 ? (
+                      <span>{isZh ? `预测 ${candidate.predictions.length} 条` : `${candidate.predictions.length} predictions`}</span>
+                    ) : null}
+                    {hasTrail ? (
+                      <VButton
+                        density="compact"
+                        variant="ghost"
+                        className={css.trailToggle}
+                        aria-expanded={expandedTrailCandidateId === candidate.hypothesis_id}
+                        onPress={() =>
+                          setExpandedTrailCandidateId((current) =>
+                            current === candidate.hypothesis_id ? null : candidate.hypothesis_id,
+                          )
+                        }
+                      >
+                        {expandedTrailCandidateId === candidate.hypothesis_id
+                          ? (isZh ? "收起证据轨迹" : "Hide evidence trail")
+                          : (isZh ? "查看证据轨迹" : "View evidence trail")}
+                      </VButton>
+                    ) : null}
+                  </div>
+                  {expandedTrailCandidateId === candidate.hypothesis_id && hasTrail ? (
+                    <div className={css.evidenceTrail} data-testid="candidate-evidence-trail">
                       <ul className={css.trailList}>
-                        {(trailByCandidate.get(candidate.hypothesis_id) ?? []).map((entry) => (
+                        {trailEntries.map((entry) => (
                           <li key={`${entry.meetingRoundId}:${entry.messageId}`}>
                             <span className={css.trailSource}>
                               {entry.meetingLabel} · {entry.speaker}
@@ -241,9 +295,10 @@ export function HypothesisSelectionList({
                           </li>
                         ))}
                       </ul>
-                    )}
-                  </div>
-                ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </article>
           );
         })}
@@ -258,7 +313,7 @@ export function HypothesisSelectionList({
           }
         />
       ) : null}
-      {hideSubmit ? null : (
+      {hideSubmit || reviewClosed ? null : (
         <div className={css.actions}>
           <VButton
             density="compact"

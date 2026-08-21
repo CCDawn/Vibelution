@@ -116,6 +116,9 @@ describe("candidate evidence trail expansion", () => {
       await vi.waitFor(() =>
         expect(container.textContent).toContain("素数是整数乘法的原子单元"),
       );
+      await vi.waitFor(() =>
+        expect(container.textContent).toContain("查看证据轨迹"),
+      );
     });
     expect(container.textContent).not.toContain("Hardy & Wright");
 
@@ -198,5 +201,138 @@ describe("candidate evidence trail expansion", () => {
 
     expect(container.querySelectorAll('article[data-selected="true"]')).toHaveLength(3);
     expect(thirdChoice.checked).toBe(true);
+  });
+
+  it("keeps compact candidates scan-friendly with only one detail open", async () => {
+    const base = candidateContext() as any;
+    mockedContext.mockResolvedValue({
+      ...base,
+      candidates: [
+        { ...base.candidates[0], hypothesis_id: "candidate-a", statement: "候选 A", mechanism: "机制 A" },
+        { ...base.candidates[0], hypothesis_id: "candidate-b", statement: "候选 B", mechanism: "机制 B" },
+        { ...base.candidates[0], hypothesis_id: "candidate-c", statement: "候选 C", mechanism: "机制 C" },
+      ],
+      defaultSelectedCandidateIds: ["candidate-a", "candidate-b"],
+      reviewMeeting: { meetingRoundId: "review-1", status: "open" },
+    } as never);
+    mockedTrail.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      questionId: "SCI-001",
+      trails: [],
+    } as never);
+
+    act(() => {
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <HypothesisSelectionList compact teamId="team-1" questionId="SCI-001" />
+        </QueryClientProvider>,
+      );
+    });
+    await act(async () => {
+      await vi.waitFor(() =>
+        expect(container.querySelector('article[data-expanded="true"]')?.textContent).toContain("候选 A"),
+      );
+    });
+
+    expect(container.querySelectorAll('article[data-expanded="true"]')).toHaveLength(1);
+    expect(container.textContent).toContain("机制 A");
+    expect(container.textContent).not.toContain("机制 B");
+
+    const expandSecond = container.querySelector('button[aria-label="展开候选 candidate-b"]');
+    await act(async () => {
+      expandSecond?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(container.querySelectorAll('article[data-expanded="true"]')).toHaveLength(1);
+    expect(container.querySelector('article[data-expanded="true"]')?.textContent).toContain("候选 B");
+    expect(container.textContent).not.toContain("机制 A");
+    expect(container.textContent).toContain("机制 B");
+  });
+
+  it("turns a closed review into a read-only final-selection archive", async () => {
+    const base = candidateContext() as any;
+    mockedContext.mockResolvedValue({
+      ...base,
+      candidates: [
+        { ...base.candidates[0], hypothesis_id: "candidate-a", statement: "候选 A" },
+        { ...base.candidates[0], hypothesis_id: "candidate-b", statement: "候选 B" },
+        { ...base.candidates[0], hypothesis_id: "candidate-c", statement: "候选 C" },
+      ],
+      defaultSelectedCandidateIds: [],
+      latestSelection: {
+        selectionId: "selection-1",
+        selectedCandidateIds: ["candidate-a", "candidate-c"],
+      },
+      reviewMeeting: { meetingRoundId: "review-1", status: "closed" },
+    } as never);
+    mockedTrail.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      questionId: "SCI-001",
+      trails: [],
+    } as never);
+
+    act(() => {
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <HypothesisSelectionList compact teamId="team-1" questionId="SCI-001" />
+        </QueryClientProvider>,
+      );
+    });
+    await act(async () => {
+      await vi.waitFor(() => expect(container.textContent).toContain("候选 C"));
+    });
+
+    expect(container.textContent).toContain("最终采用");
+    expect(container.textContent).toContain("2 条");
+    expect(container.textContent).not.toContain("候选 B");
+    expect(container.querySelectorAll('input[type="checkbox"]')).toHaveLength(0);
+    expect(container.textContent).not.toContain("全选送审");
+    expect(container.textContent).not.toContain("记录选择并开启评审");
+  });
+
+  it("omits zero predictions and empty evidence controls", async () => {
+    const base = candidateContext() as any;
+    mockedContext.mockResolvedValue({
+      ...base,
+      candidates: [
+        { ...base.candidates[0], hypothesis_id: "candidate-a", statement: "候选 A" },
+        { ...base.candidates[0], hypothesis_id: "candidate-b", statement: "候选 B" },
+      ],
+      defaultSelectedCandidateIds: ["candidate-a", "candidate-b"],
+    } as never);
+    mockedTrail.mockResolvedValue({
+      schemaVersion: 1,
+      teamId: "team-1",
+      questionId: "SCI-001",
+      trails: [{
+        candidateId: "candidate-b",
+        entries: [{
+          meetingRoundId: "mr-2",
+          meetingLabel: "评审 r2",
+          messageId: "m-2",
+          speaker: "A017",
+          excerpt: "候选 B 的证据锚点",
+          createdAt: "2026-08-20T02:00:00Z",
+        }],
+      }],
+    } as never);
+
+    act(() => {
+      root.render(
+        <QueryClientProvider client={queryClient}>
+          <HypothesisSelectionList teamId="team-1" questionId="SCI-001" />
+        </QueryClientProvider>,
+      );
+    });
+    await act(async () => {
+      await vi.waitFor(() => expect(container.textContent).toContain("查看证据轨迹"));
+    });
+
+    expect(container.textContent).not.toContain("预测 0 条");
+    expect(container.textContent).not.toContain("尚无讨论发言引用该候选");
+    expect([...container.querySelectorAll("button")]
+      .filter((button) => button.textContent?.includes("查看证据轨迹"))).toHaveLength(1);
   });
 });

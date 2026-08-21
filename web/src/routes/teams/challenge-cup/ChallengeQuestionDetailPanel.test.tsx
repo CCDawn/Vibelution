@@ -257,7 +257,7 @@ describe("ChallengeQuestionDetailPanel", () => {
     expect(approvedMarkup).not.toContain("登记修订产出");
   });
 
-  it("fails closed on artifacts but still mounts selection and meeting ops", () => {
+  it("keeps review operations usable behind a local acceptance-archive warning", () => {
     const markup = renderPanel(
       <ChallengeQuestionDetailPanel
         requestedQuestionId="SCI-999"
@@ -269,11 +269,17 @@ describe("ChallengeQuestionDetailPanel", () => {
     );
 
     expect(markup).toContain("SCI-999");
-    expect(markup).toContain("审核工件不可用");
+    expect(markup).toContain('data-testid="question-detail-fail-soft-warning"');
+    expect(markup).toContain('data-vui="error-summary"');
+    expect(markup).toContain('data-tone="warning"');
+    expect(markup).toContain('role="status"');
+    expect(markup).toContain("验收档案暂不可用，假说评审仍可继续");
     expect(markup).toContain("返回题目列表");
     expect(markup).toContain("question-detail-fail-soft-ops");
     expect(markup).toContain("正在读取假说选择上下文");
     expect(markup).toContain("正在解析讨论入口");
+    expect(markup).not.toContain("审核工件不可用");
+    expect(markup).not.toContain("操作未完成");
     expect(markup).not.toContain("当前研究项目或其他题目的资料");
   });
 
@@ -289,10 +295,12 @@ describe("ChallengeQuestionDetailPanel", () => {
 
     // Productized copy leads; the raw backend message only survives inside
     // the collapsed technical-details block.
-    expect(markup).toContain("操作未完成");
+    expect(markup).toContain("SCI-999 的验收档案暂不可用");
     expect(markup).toContain("技术细节");
     expect(markup).toContain("<details");
     expect(markup).toContain("challenge_question_run_not_found");
+    expect(markup).not.toContain("question-detail-fail-soft-ops");
+    expect(markup).not.toContain("假说评审仍可继续");
   });
 
   it("maps the record status enum to Chinese labels", () => {

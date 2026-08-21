@@ -11,6 +11,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+const selectionListProps = vi.hoisted(() => vi.fn());
 
 vi.mock("../../../api/chat", () => ({
   fetchChatRoomDetail: vi.fn().mockResolvedValue({ rounds: [] }),
@@ -38,7 +39,10 @@ vi.mock("./HypothesisFirstMeetingOps", () => ({
 }));
 
 vi.mock("../challenge-cup/HypothesisSelectionList", () => ({
-  HypothesisSelectionList: () => <div data-testid="selection-list">记录选择并开启评审</div>,
+  HypothesisSelectionList: (props: { compact?: boolean }) => {
+    selectionListProps(props);
+    return <div data-testid="selection-list">记录选择并开启评审</div>;
+  },
 }));
 
 import { HypothesisFirstNodeInspector } from "./HypothesisFirstNodeInspector";
@@ -300,6 +304,7 @@ describe("HypothesisFirstNodeInspector", () => {
     );
     expect(container.textContent).toContain("假说选择");
     expect(container.querySelector('[data-testid="selection-list"]')?.textContent).toContain("记录选择并开启评审");
+    expect(selectionListProps.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ compact: true }));
     expect(container.textContent).toContain("打开赛题详情");
   });
 
