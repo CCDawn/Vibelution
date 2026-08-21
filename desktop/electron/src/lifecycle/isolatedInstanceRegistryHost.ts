@@ -12,6 +12,7 @@ export type BranchInstanceOperation =
 import {
   claimStart,
   claimStop,
+  completeStop,
   isolatedStartDeadlineAt,
   instancesRegistryPath,
   observeError,
@@ -155,6 +156,22 @@ export async function claimIsolatedStop(input: {
     {
       instanceId: input.instanceId,
       projectRoot: input.projectRoot || target?.projectRoot || ""
+    },
+    input.storeOptions
+  );
+}
+
+export async function completeIsolatedStop(input: {
+  instanceId: string;
+  expectedGeneration?: number;
+  registryPath?: string;
+  storeOptions?: RegistryStoreOptions;
+}): Promise<ObserveResult> {
+  return completeStop(
+    input.registryPath || instancesRegistryPath(),
+    {
+      instanceId: input.instanceId,
+      expectedGeneration: input.expectedGeneration
     },
     input.storeOptions
   );

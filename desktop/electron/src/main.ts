@@ -25,6 +25,7 @@ import {
   type LauncherLifecycleOperation as SupervisedLifecycleOperation
 } from "./lifecycle/launcherLifecycleSupervisor.js";
 import {
+  isForceLifecycleAuthorizationDenied,
   authorizeForceLifecycleOperation,
   type ForceLifecycleAuthorization,
   type PreconfirmedForceLifecycleAuthorization
@@ -104,6 +105,7 @@ import {
   type BranchInstanceOperation,
   claimIsolatedStart,
   claimIsolatedStop,
+  completeIsolatedStop,
   observeIsolatedError,
   observeIsolatedReady,
   renewIsolatedOwnerLease,
@@ -1114,6 +1116,11 @@ async function requestTransactionalWorkbenchClose(
     if (transaction.phase === "confirmation_required") {
       const confirmed = await confirmWorkbenchForceClose(provider, transaction.activeWorkState);
       if (!confirmed) {
+        mainWorkbenchCloseStore.fail(
+          transaction.closeId,
+          "user_cancelled",
+          "Workbench close was cancelled while active work was present."
+        );
         await recordElectronSupervisorEvent(bootstrap, {
           eventCode: "electron.workbench_close.cancelled_active_work",
           message: "Workbench close was cancelled while active work was present.",
@@ -2041,6 +2048,9 @@ async function stopAllManagedRuntimeTrees(): Promise<void> {
     await orchestrateLauncherLifecycle("force-stop", { schemaVersion: 1, path: "force-stop" });
     await new Promise((resolve) => setTimeout(resolve, 1500));
   } catch (error: unknown) {
+    if (isForceLifecycleAuthorizationDenied(error)) {
+      throw error;
+    }
     const detail = error instanceof Error ? error.message : String(error);
     notifyDesktopTray("Vibelution", `停止托管运行时失败，仍将重启 Launcher：${detail.slice(0, 220)}`, "warning");
   }
@@ -2139,6 +2149,13 @@ async function runTrayRestartLauncher(): Promise<void> {
     notifyDesktopTray("Vibelution", "正在全部停止并启动最新 Launcher…");
     await stopAllManagedRuntimeTrees();
     await exitAndRelaunchLauncherShell({ forceShellRefresh: true });
+  } catch (error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error);
+    if (isForceLifecycleAuthorizationDenied(error)) {
+      notifyDesktopTray("Vibelution", "已取消全部停止，当前窗口、运行时和任务均保留。", "info");
+      return;
+    }
+    notifyDesktopTray("Vibelution", `全部停止并启动最新 Launcher 失败：${detail.slice(0, 220)}`, "warning");
   } finally {
     trayRestartLauncherInFlight = false;
   }
@@ -2277,7 +2294,18 @@ async function runTrayRestartAll(): Promise<void> {
       shellRefreshScheduled: false
     });
     notifyDesktopTray("Vibelution", "正在全部重启…");
-    await stopAllManagedRuntimeTrees();
+    try {
+      await stopAllManagedRuntimeTrees();
+    } catch (error: unknown) {
+      const detail = error instanceof Error ? error.message : String(error);
+      clearTrayRestartAllPending(paths.workspaceRoot);
+      if (isForceLifecycleAuthorizationDenied(error)) {
+        notifyDesktopTray("Vibelution", "已取消全部重启，当前窗口、运行时和任务均保留。", "info");
+      } else {
+        notifyDesktopTray("Vibelution", `全部重启未完成：${detail.slice(0, 220)}`, "warning");
+      }
+      return;
+    }
     if (app.isPackaged && stale) {
       shellRefreshInFlight = true;
       writeTrayRestartAllPending(paths.workspaceRoot, {
@@ -2327,6 +2355,10 @@ async function requestForcedDesktopShellExit(
         await orchestrateLauncherLifecycle("force-stop", { schemaVersion: 1, path: "force-stop" });
         await new Promise((resolve) => setTimeout(resolve, 1500));
       } catch (error: unknown) {
+        if (isForceLifecycleAuthorizationDenied(error)) {
+          notifyDesktopTray("Vibelution", "已取消退出，当前窗口、运行时和任务均保留。", "info");
+          return;
+        }
         if (shouldNotifyForceStopControlFailure(error)) {
           const detail = error instanceof Error ? error.message : String(error);
           notifyDesktopTray("Vibelution", `停止托管运行时失败：${detail.slice(0, 220)}`, "warning");
@@ -3001,6 +3033,13 @@ async function runIsolatedRegistryMutation(input: {
       port: Number(claimed.entry.port || target?.preferredBackend || 0),
       signal: input.signal
     });
+    const completed = await completeIsolatedStop({
+      instanceId: input.instanceId,
+      expectedGeneration: Number(claimed.entry.generation || 0)
+    });
+    if (!completed.applied) {
+      throw new Error(`isolated instance stop completion lost its generation for ${input.instanceId}`);
+    }
     return {
       schemaVersion: 1,
       accepted: true,

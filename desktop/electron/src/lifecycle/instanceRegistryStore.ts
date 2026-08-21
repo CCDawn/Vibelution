@@ -488,6 +488,42 @@ export function applyClaimStop(
   return { ok: true, entry: { ...entry } };
 }
 
+/**
+ * Commit a successful stop after the registered process handles have been
+ * retired. The generation check keeps an older stop from closing a newer
+ * start that raced with the retirement path.
+ */
+export function applyCompleteStop(
+  payload: RegistryPayload,
+  input: { instanceId: string; expectedGeneration?: number }
+): ObserveResult {
+  const instanceId = String(input.instanceId || "").trim();
+  const entry = payload.instances[instanceId];
+  if (!entry) {
+    return { applied: false, entry: {} };
+  }
+  const expected = positiveInt(input.expectedGeneration);
+  const generation = positiveInt(entry.generation);
+  if (expected > 0 && generation !== expected) {
+    return { applied: false, entry: { ...entry } };
+  }
+  if (
+    statusOf(entry) !== "stopping"
+    || String(entry.desiredState || "").trim().toLowerCase() !== "closed"
+  ) {
+    return { applied: false, entry: { ...entry } };
+  }
+  entry.status = "closed";
+  entry.phase = "steady";
+  entry.desiredState = "closed";
+  entry.failureMessage = "";
+  entry.spawnPid = 0;
+  entry.windowPid = 0;
+  entry.portLeaseStatus = "reclaimable";
+  delete entry.ownerLease;
+  return { applied: true, entry: { ...entry } };
+}
+
 export function applyObserve(
   payload: RegistryPayload,
   input: {
@@ -696,6 +732,14 @@ export async function claimStop(
   options: RegistryStoreOptions = {}
 ): Promise<{ ok: true; entry: RegistryEntry }> {
   return mutateRegistry(registryPath, (payload) => applyClaimStop(payload, input), options);
+}
+
+export async function completeStop(
+  registryPath: string,
+  input: { instanceId: string; expectedGeneration?: number },
+  options: RegistryStoreOptions = {}
+): Promise<ObserveResult> {
+  return mutateRegistry(registryPath, (payload) => applyCompleteStop(payload, input), options);
 }
 
 export async function observeReady(

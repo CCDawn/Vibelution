@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   applyClaimStart,
   applyClaimStop,
+  applyCompleteStop,
   applyObserve,
   applyRecordSpawnPid,
   applyReclaimStaleInFlightStart,
@@ -251,5 +252,53 @@ describe("instanceRegistryStore shared fixture", () => {
     expect(stale.applied).toBe(false);
     expect(stale.entry.spawnPid).toBe(4242);
     expect(stale.entry.status).toBe("stopping");
+  });
+
+  it("settles a successful stop to closed and releases its port lease", () => {
+    const payload = cloneRegistry({
+      schemaVersion: 2,
+      instances: {
+        "worktree:task": {
+          status: "starting",
+          phase: "starting",
+          desiredState: "open",
+          generation: 4,
+          spawnPid: 4242,
+          windowPid: 4343,
+          port: 8010,
+          controlPort: 8770,
+          portLeaseStatus: "held"
+        }
+      }
+    });
+    const claimed = applyClaimStop(payload, { instanceId: "worktree:task" });
+    const completed = applyCompleteStop(payload, {
+      instanceId: "worktree:task",
+      expectedGeneration: claimed.entry.generation
+    });
+    expect(completed.applied).toBe(true);
+    expect(completed.entry).toMatchObject({
+      status: "closed",
+      phase: "steady",
+      desiredState: "closed",
+      spawnPid: 0,
+      windowPid: 0,
+      portLeaseStatus: "reclaimable"
+    });
+  });
+
+  it("does not complete a stale stop over a newer generation", () => {
+    const payload = cloneRegistry({
+      schemaVersion: 2,
+      instances: {
+        "worktree:task": { status: "stopping", desiredState: "closed", generation: 8 }
+      }
+    });
+    const result = applyCompleteStop(payload, {
+      instanceId: "worktree:task",
+      expectedGeneration: 7
+    });
+    expect(result.applied).toBe(false);
+    expect(result.entry.status).toBe("stopping");
   });
 });

@@ -78,4 +78,17 @@ describe("MainWorkbenchCloseTransactionStore", () => {
     });
     expect(next.phase).toBe("backend_closing");
   });
+
+  it("closes the transaction when the user chooses to keep running", () => {
+    const store = new MainWorkbenchCloseTransactionStore();
+    const submitted = store.submit({ mode: "normal", reason: "close", activeWorkState: "active" });
+    const cancelled = store.fail(
+      submitted.closeId,
+      "user_cancelled",
+      "Workbench close was cancelled while active work was present."
+    );
+    expect(cancelled.phase).toBe("failed");
+    expect(cancelled.failureCode).toBe("user_cancelled");
+    expect(() => store.submit({ mode: "normal", reason: "close", activeWorkState: "idle" })).not.toThrow();
+  });
 });

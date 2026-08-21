@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { authorizeForceLifecycleOperation } from "../src/lifecycle/forceLifecycleAuthorization.js";
+import {
+  authorizeForceLifecycleOperation,
+  ForceLifecycleAuthorizationDeniedError
+} from "../src/lifecycle/forceLifecycleAuthorization.js";
 
 describe("authorizeForceLifecycleOperation", () => {
   it("does not probe or confirm ordinary lifecycle operations", async () => {
@@ -51,7 +54,7 @@ describe("authorizeForceLifecycleOperation", () => {
       confirm: async () => false,
       record,
       requestIdFactory: () => "request-3"
-    })).rejects.toThrow("not confirmed");
+    })).rejects.toBeInstanceOf(ForceLifecycleAuthorizationDeniedError);
     expect(record).not.toHaveBeenCalled();
   });
 

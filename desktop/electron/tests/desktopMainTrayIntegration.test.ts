@@ -88,4 +88,23 @@ describe("Electron main tray integration", () => {
     expect(forcedSource).toContain("executeApprovedDesktopShellShutdown");
     expect(forcedSource).toContain('orchestrateLauncherLifecycle("force-stop"');
   });
+
+  it("stops the tray force flows when the operator cancels authorization", () => {
+    expect(mainSource).toContain("isForceLifecycleAuthorizationDenied");
+    const restartLauncherStart = mainSource.indexOf("async function runTrayRestartLauncher");
+    const restartLauncherEnd = mainSource.indexOf("\nasync function ", restartLauncherStart + 1);
+    expect(mainSource.slice(restartLauncherStart, restartLauncherEnd)).toContain(
+      "已取消全部停止，当前窗口、运行时和任务均保留。"
+    );
+    const restartAllStart = mainSource.indexOf("async function runTrayRestartAll");
+    const restartAllEnd = mainSource.indexOf("\nasync function ", restartAllStart + 1);
+    expect(mainSource.slice(restartAllStart, restartAllEnd)).toContain(
+      "已取消全部重启，当前窗口、运行时和任务均保留。"
+    );
+    const forcedStart = mainSource.indexOf("async function requestForcedDesktopShellExit");
+    const forcedEnd = mainSource.indexOf("\nasync function ", forcedStart + 1);
+    expect(mainSource.slice(forcedStart, forcedEnd)).toContain(
+      "已取消退出，当前窗口、运行时和任务均保留。"
+    );
+  });
 });

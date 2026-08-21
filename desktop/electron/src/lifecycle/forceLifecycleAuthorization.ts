@@ -17,6 +17,28 @@ export type PreconfirmedForceLifecycleAuthorization = {
   probeMessage?: string;
 };
 
+export class ForceLifecycleAuthorizationDeniedError extends Error {
+  readonly code = "force_lifecycle_not_confirmed";
+  readonly requestId: string;
+
+  constructor(requestId: string) {
+    super(`force lifecycle request ${requestId} was not confirmed`);
+    this.name = "ForceLifecycleAuthorizationDeniedError";
+    this.requestId = requestId;
+  }
+}
+
+export function isForceLifecycleAuthorizationDenied(
+  error: unknown
+): error is ForceLifecycleAuthorizationDeniedError {
+  return error instanceof ForceLifecycleAuthorizationDeniedError
+    || (
+      error instanceof Error
+      && error.message.includes("force lifecycle request")
+      && error.message.includes("was not confirmed")
+    );
+}
+
 function errorMessage(error: unknown): string {
   return (error instanceof Error ? error.message : String(error)).trim() || "active-work probe failed";
 }
@@ -69,7 +91,7 @@ export async function authorizeForceLifecycleOperation(input: {
     probeMessage: status.message
   };
   if (!input.preconfirmed && !(await input.confirm(authorization))) {
-    throw new Error(`force lifecycle request ${requestId} was not confirmed`);
+    throw new ForceLifecycleAuthorizationDeniedError(requestId);
   }
   await input.record(authorization);
   return authorization;
