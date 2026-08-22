@@ -1775,7 +1775,10 @@ def _event_replay_identity(event: Any) -> tuple[Any, ...]:
         event.event_type,
         _canonical_json_text(event.actor_json),
         event.correlation_id,
-        event.causation_id or "",
+        # Historical writers may have persisted an explicit empty string.
+        # Keep those rows readable, but never equate that value with None,
+        # which records that no causation identity was supplied.
+        event.causation_id,
         _canonical_json_text(event.payload_json),
     )
 

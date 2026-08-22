@@ -14,6 +14,7 @@ from core.research.workflow.ledger.reconciliation import (
     run_ledger_reconciliation,
     run_readonly_reconciliation,
 )
+from core.web.services.team_workflow.research_runtime import graph_dispatch_worker
 from core.web.services.team_workflow.research_runtime.graph_dispatch_worker import (
     GraphDispatchWorker,
 )
@@ -230,5 +231,89 @@ def test_created_run_reconciliation_accepts_exact_semantic_event_replay(
             event_id,
         ]
         assert worker.run_once() == 0
+    finally:
+        harness.close()
+
+
+@pytest.mark.parametrize(
+    ("existing_causation_id", "expected_causation_id"),
+    [
+        pytest.param("", None, id="legacy-empty-existing-vs-current-none"),
+        pytest.param(None, "", id="current-none-existing-vs-legacy-empty"),
+    ],
+)
+def test_created_run_reconciliation_rejects_causation_presence_conflict_without_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    existing_causation_id: str | None,
+    expected_causation_id: str | None,
+) -> None:
+    harness = CommandHarness(tmp_path / "ledger.sqlite3")
+    run_id = "run-created-causation-conflict"
+    event_id = f"evt-dispatch-never-started-{run_id}"
+    original_event_record_for = graph_dispatch_worker._event_record_for
+
+    def expected_event_record_for(**kwargs):
+        return replace(
+            original_event_record_for(**kwargs),
+            causation_id=expected_causation_id,
+        )
+
+    monkeypatch.setattr(
+        graph_dispatch_worker,
+        "_event_record_for",
+        expected_event_record_for,
+    )
+    try:
+        def seed(uow) -> None:
+            uow.repository.insert_run(
+                build_run_record(
+                    run_id=run_id,
+                    status="created",
+                    last_event_sequence=2,
+                    created_at_ms=FIXED_NOW_MS,
+                )
+            )
+            uow.repository.insert_event(
+                build_event_record(
+                    1,
+                    run_id=run_id,
+                    event_id=f"evt-created-{run_id}",
+                    event_type="run_created",
+                )
+            )
+            replay = build_event_record(
+                2,
+                run_id=run_id,
+                event_id=event_id,
+                event_type="run_failed",
+                correlation_id=run_id,
+            )
+            uow.repository.insert_event(
+                replace(
+                    replay,
+                    causation_id=existing_causation_id,
+                    actor_json=json.dumps(
+                        {"actorId": "graph-worker", "actorType": "system"}
+                    ),
+                    payload_json=json.dumps(
+                        _created_run_reconciliation_payload(),
+                        ensure_ascii=False,
+                    ),
+                )
+            )
+
+        harness.store.submit(seed, force_flush=True).result(timeout=10)
+        before_run = harness.store.get_run(run_id)
+        before_events = harness.store.list_events(run_id)
+        before_attempts = harness.store.list_attempts(run_id)
+
+        with pytest.raises(RuntimeError, match="event ID conflict"):
+            _created_run_worker(harness, tmp_path).run_once()
+
+        assert harness.store.get_run(run_id) == before_run
+        assert harness.store.list_events(run_id) == before_events
+        assert harness.store.list_attempts(run_id) == before_attempts
+        assert harness.store.latest_event_sequence(run_id) == 2
     finally:
         harness.close()
