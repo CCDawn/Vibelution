@@ -1004,6 +1004,72 @@ def test_launcher_status_projects_active_desktop_session_window(tmp_path, monkey
     assert payload["projectBundle"]["statusLine"] == "工作台正在运行。"
 
 
+@pytest.mark.parametrize("has_active_close_transaction", [False, True])
+def test_workbench_payload_reconciles_stale_closed_state_against_active_electron_session(
+    has_active_close_transaction, monkeypatch
+):
+    from core.launcher import lifecycle_intent_store
+
+    desktop_session_id = "desktop-reconcile-1"
+    if has_active_close_transaction:
+        lifecycle_intent_store.submit_workbench_close_transaction(
+            {
+                "desktopSessionId": desktop_session_id,
+                "idempotencyKey": "desktop-reconcile-1:close:1",
+                "mode": "normal",
+            },
+            desktop_session={
+                "desktopSessionId": desktop_session_id,
+                "status": "active",
+                "revision": 1,
+                "capabilities": ["workbench_close.transaction.v1"],
+            },
+            active_work_runs=[],
+        )
+    monkeypatch.setattr(
+        launcher_service,
+        "_desktop_session_workbench_projection",
+        lambda: {
+            "observedState": "open",
+            "browserWindowAlive": True,
+            "browserManaged": False,
+            "windowProvider": "electron",
+            "windowManaged": True,
+            "desktopSessionId": desktop_session_id,
+        },
+    )
+    monkeypatch.setattr(launcher_service, "_desktop_session_window_provider_projection", dict)
+
+    payload = launcher_service._workbench_payload(
+        runtime_state={
+            "daemonRunning": False,
+            "command": {"activeCommandId": "", "activeType": ""},
+            "workbench": {
+                "desiredState": "closed",
+                "observedState": "closed",
+                "phase": "steady",
+            },
+        },
+        observed_workbench={
+            "backendObserved": True,
+            "backendAlive": True,
+            "backendHealthy": True,
+            "backendPortListening": True,
+            "lifecycleConsistency": "consistent",
+        },
+    )
+
+    assert payload["observedState"] == "open"
+    if has_active_close_transaction:
+        assert payload["desiredState"] == "closed"
+        assert payload["phase"] == "closing"
+        assert payload["statusLine"] == "正在关闭工作台。"
+    else:
+        assert payload["desiredState"] == "open"
+        assert payload["phase"] == "steady"
+        assert payload["statusLine"] == "工作台正在运行。"
+
+
 def test_standalone_launcher_app_exposes_desktop_session_routes(monkeypatch):
     calls = []
     monkeypatch.setattr(

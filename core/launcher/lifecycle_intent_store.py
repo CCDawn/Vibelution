@@ -637,6 +637,26 @@ def get_workbench_close_transaction(close_id: str) -> dict[str, Any]:
     return _public_workbench_close_transaction(_row_to_dict(row))
 
 
+def latest_active_workbench_close_transaction_for_session(desktop_session_id: str) -> dict[str, Any]:
+    """Return the newest nonterminal close request for one Electron session."""
+
+    normalized_session_id = _safe_text(desktop_session_id, max_length=160)
+    if not normalized_session_id:
+        return {}
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM workbench_close_transactions
+            WHERE desktop_session_id = ?
+              AND phase NOT IN ('succeeded', 'failed')
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (normalized_session_id,),
+        ).fetchone()
+    return _public_workbench_close_transaction(_row_to_dict(row))
+
+
 def record_workbench_close_dispatch(close_id: str, *, command_id: str) -> dict[str, Any]:
     normalized_close_id = _safe_text(close_id, max_length=160)
     normalized_command_id = _safe_text(command_id, max_length=160)

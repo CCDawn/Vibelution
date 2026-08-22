@@ -1904,6 +1904,11 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
         or external_window_owner == "electron"
         or desktop_session_id
     )
+    active_close_transaction = (
+        lifecycle_intent_store.latest_active_workbench_close_transaction_for_session(desktop_session_id)
+        if desktop_session_id
+        else {}
+    )
     project_backend_present = bool(
         backend_observed
         or backend_alive
@@ -1925,6 +1930,17 @@ def _workbench_payload(*, runtime_state: dict[str, Any], observed_workbench: dic
                 desired_state = "open"
         elif desired_state == "open" and phase not in {"opening", "failed"}:
             desired_state = "closed"
+    if (
+        project_window_alive
+        and window_managed
+        and electron_window_expected
+        and desired_state == "closed"
+        and not active_close_transaction
+    ):
+        # Electron's live workbench window is the current lifecycle truth.
+        # A stopped Runtime Manager can leave an older desiredState=closed
+        # snapshot behind; do not turn that stale state into a closing overlay.
+        desired_state = "open"
     if electron_window_expected and project_backend_present and not project_window_alive and not window_managed:
         observed_state = "partial"
     manager_running = bool(runtime_state.get("daemonRunning"))
