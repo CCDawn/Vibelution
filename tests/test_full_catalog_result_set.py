@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import json
+
 import pytest
 
 from core.research.competition.result_set import (
@@ -16,6 +19,7 @@ from core.research.competition.result_set import (
     is_official_question_id,
     official_question_ids,
 )
+from tests.test_catalog_execution_state_machine import _package
 
 
 def _scope() -> CatalogScope:
@@ -34,6 +38,18 @@ def _make_result(scope: CatalogScope, question_id: str, *, eligible: bool = True
 
 def _is_hex_upper_64(value: str) -> bool:
     return len(value) == 64 and all(char in "0123456789ABCDEF" for char in value)
+
+
+def _rehash_checkpoint(payload: dict) -> None:
+    body = {key: value for key, value in payload.items() if key != "checkpoint_sha256"}
+    encoded = json.dumps(
+        body,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    payload["checkpoint_sha256"] = hashlib.sha256(encoded).hexdigest().upper()
 
 
 def test_scope_hash_is_stable_and_binds_catalog_identity() -> None:
@@ -60,7 +76,7 @@ def test_official_question_ids_are_unique_and_ordered() -> None:
     assert not is_official_question_id("001")
 
 
-def test_full_result_set_sorts_sci001_through_sci125_and_binds_identity() -> None:
+def test_legacy_full_result_set_sorts_and_binds_identity_but_is_not_formal_ready() -> None:
     scope = _scope()
     result_set = FullCatalogResultSet(scope=scope)
     for question_id in official_question_ids():
@@ -79,13 +95,13 @@ def test_full_result_set_sorts_sci001_through_sci125_and_binds_identity() -> Non
         assert result.template_version == DEFAULT_TEMPLATE_VERSION
         assert result.submission_eligible is True
 
-    assert result_set.is_submission_ready()
-    assert result_set.assert_submission_ready()["submission_ready"] is True
+    assert result_set.is_submission_ready() is False
+    assert result_set.submission_state()["package_backed_count"] == 0
     counts = result_set.export_counts()
     assert counts["present_count"] == CATALOG_QUESTION_COUNT
     assert counts["missing_count"] == 0
     assert counts["submission_eligible_count"] == CATALOG_QUESTION_COUNT
-    assert counts["submission_ready"] is True
+    assert counts["submission_ready"] is False
 
 
 def test_124_results_are_not_submission_ready() -> None:
@@ -120,6 +136,7 @@ def test_126th_result_is_rejected_and_checkpoint_duplicate_is_rejected() -> None
 
     payload = result_set.to_checkpoint()
     payload["results"].append(payload["results"][0])
+    _rehash_checkpoint(payload)
     with pytest.raises(ResultSetContractError, match="Duplicate result"):
         FullCatalogResultSet.from_checkpoint(payload)
 
@@ -199,7 +216,7 @@ def test_result_set_checkpoint_round_trip() -> None:
     assert restored.present_count() == CATALOG_QUESTION_COUNT
     assert [result.question_id for result in restored.results()] == list(official_question_ids())
     assert restored.scope_hash == scope.scope_hash
-    assert restored.is_submission_ready()
+    assert restored.is_submission_ready() is False
     assert restored.export_counts() == result_set.export_counts()
 
     partial = FullCatalogResultSet(scope=scope)
@@ -207,3 +224,94 @@ def test_result_set_checkpoint_round_trip() -> None:
     restored_partial = FullCatalogResultSet.from_checkpoint(partial.to_checkpoint())
     assert restored_partial.present_count() == 1
     assert restored_partial.is_submission_ready() is False
+
+
+def test_submission_requires_package_backed_quality_and_human_gate_evidence() -> None:
+    scope = _scope()
+    result_set = FullCatalogResultSet(scope=scope)
+    for question_id in official_question_ids():
+        result_set.add_result(QuestionResult.from_package(_package(scope, question_id)))
+
+    state = result_set.assert_submission_ready()
+    manifest = result_set.manifest()
+
+    assert state["package_backed_count"] == CATALOG_QUESTION_COUNT
+    assert state["human_gate_approved_count"] == CATALOG_QUESTION_COUNT
+    assert state["receipt_complete_count"] == CATALOG_QUESTION_COUNT
+    assert len(manifest["entries"]) == CATALOG_QUESTION_COUNT
+    assert len(manifest["manifest_sha256"]) == 64
+    assert manifest == result_set.manifest()
+    assert set(manifest["entries"][0]["receipts"]) == {
+        "generation",
+        "review",
+        "revision",
+    }
+    assert "package" not in manifest["entries"][0]
+    changed = FullCatalogResultSet(scope=scope)
+    changed.add_result(
+        QuestionResult.from_package(
+            _package(
+                scope,
+                "SCI-001",
+                input_snapshot_sha256="b" * 64,
+            )
+        )
+    )
+    baseline = FullCatalogResultSet(scope=scope)
+    baseline.add_result(QuestionResult.from_package(_package(scope, "SCI-001")))
+    assert changed.manifest()["manifest_sha256"] != baseline.manifest()[
+        "manifest_sha256"
+    ]
+
+
+def test_legacy_or_pending_gate_results_cannot_be_submission_ready() -> None:
+    scope = _scope()
+    legacy = FullCatalogResultSet(scope=scope)
+    pending = FullCatalogResultSet(scope=scope)
+    for question_id in official_question_ids():
+        legacy.add_result(_make_result(scope, question_id))
+        pending.add_result(
+            QuestionResult.from_package(
+                _package(scope, question_id, gate_decision="pending")
+            )
+        )
+
+    assert legacy.is_submission_ready() is False
+    assert "package_backed_count_0_required_125" in legacy.submission_state()["reasons"]
+    assert pending.is_submission_ready() is False
+    assert pending.submission_state()["human_gate_approved_count"] == 0
+
+
+def test_package_result_set_checkpoint_requires_policy_and_detects_tampering() -> None:
+    scope = _scope()
+    package = _package(scope, "SCI-001")
+    result_set = FullCatalogResultSet(scope=scope)
+    result_set.add_result(QuestionResult.from_package(package))
+    checkpoint = result_set.to_checkpoint()
+
+    assert checkpoint["schema_version"] == 2
+    with pytest.raises(ResultSetContractError, match="authorized model policy"):
+        FullCatalogResultSet.from_checkpoint(checkpoint)
+    restored = FullCatalogResultSet.from_checkpoint(
+        checkpoint,
+        expected_model_policy_sha256=package.model_policy["policySha256"],
+    )
+    assert restored.get_result("SCI-001").package_snapshot == package.to_dict()
+    checkpoint["results"][0]["package"]["competition_result_view"]["rationale"] = (
+        "tampered"
+    )
+    with pytest.raises(ResultSetContractError, match="checkpoint hash"):
+        FullCatalogResultSet.from_checkpoint(
+            checkpoint,
+            expected_model_policy_sha256=package.model_policy["policySha256"],
+        )
+    layered_tamper = result_set.to_checkpoint()
+    layered_tamper["results"][0]["package"]["competition_result_view"][
+        "rationale"
+    ] = "tampered and outer hash recomputed"
+    _rehash_checkpoint(layered_tamper)
+    with pytest.raises(ResultSetContractError, match="canonical validation"):
+        FullCatalogResultSet.from_checkpoint(
+            layered_tamper,
+            expected_model_policy_sha256=package.model_policy["policySha256"],
+        )

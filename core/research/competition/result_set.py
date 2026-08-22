@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass
 from functools import lru_cache
-from typing import Any, Iterable
+from typing import TYPE_CHECKING, Any
 
 from .resources import (
     CATALOG_ID,
@@ -21,10 +22,57 @@ from .resources import (
 
 CATALOG_VERSION = "1"
 DEFAULT_TEMPLATE_VERSION = "challenge-question-v2"
+RESULT_SET_CHECKPOINT_SCHEMA_VERSION = 2
+RESULT_MANIFEST_SCHEMA_VERSION = 1
+REQUIRED_PACKAGE_RECEIPT_STAGES = ("generation", "review", "revision")
+
+if TYPE_CHECKING:
+    from .question_result_package import QuestionResultPackage
 
 
 class ResultSetContractError(ValueError):
     """A FullCatalogResultSet invariant was violated."""
+
+
+def _canonical_json(payload: Mapping[str, Any]) -> str:
+    try:
+        return json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ResultSetContractError(
+            "Catalog result payload must be canonical JSON."
+        ) from exc
+
+
+def _canonical_sha256(payload: Mapping[str, Any]) -> str:
+    return hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest().upper()
+
+
+def _checkpoint_body(payload: Mapping[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in payload.items() if key != "checkpoint_sha256"}
+
+
+def _validate_checkpoint_envelope(payload: Mapping[str, Any], *, label: str) -> bool:
+    """Validate schema-v2 integrity while retaining unversioned legacy reads."""
+
+    schema_version = payload.get("schema_version")
+    if schema_version is None:
+        return False
+    if schema_version != RESULT_SET_CHECKPOINT_SCHEMA_VERSION:
+        raise ResultSetContractError(
+            f"{label} checkpoint schema version is unsupported."
+        )
+    supplied_hash = str(payload.get("checkpoint_sha256") or "").strip().upper()
+    if not supplied_hash:
+        raise ResultSetContractError(f"{label} checkpoint hash is required.")
+    if supplied_hash != _canonical_sha256(_checkpoint_body(payload)):
+        raise ResultSetContractError(f"{label} checkpoint hash does not match its content.")
+    return True
 
 
 def compute_scope_hash(
@@ -151,6 +199,7 @@ class QuestionResult:
     template_version: str
     status: str = "submission_eligible"
     submission_eligible: bool = True
+    _package_snapshot_json: str | None = None
 
     @classmethod
     def create(
@@ -175,6 +224,34 @@ class QuestionResult:
             submission_eligible=bool(submission_eligible),
         )
 
+    @classmethod
+    def from_package(cls, package: QuestionResultPackage) -> QuestionResult:
+        """Project a validated package without creating another content authority."""
+
+        from .question_result_package import QuestionResultPackage
+
+        if not isinstance(package, QuestionResultPackage):
+            raise ResultSetContractError(
+                "QuestionResult.from_package requires a validated QuestionResultPackage."
+            )
+        snapshot = package.to_dict()
+        gate_decisions = (
+            str(package.selection["human_gate"]["decision"]),
+            str(package.research_plan["human_gate"]["decision"]),
+        )
+        quality_status = str(package.result_classification["status"])
+        human_gate_approved = all(decision == "approved" for decision in gate_decisions)
+        package_locator = f"question-result-package://{package.package_id}"
+        return cls(
+            locator=package.scope.locator_for(package.question_id),
+            model_receipt_locator=f"{package_locator}#model-invocation-receipts",
+            knowledge_locator=package_locator,
+            template_version=DEFAULT_TEMPLATE_VERSION,
+            status=quality_status,
+            submission_eligible=quality_status == "approved" and human_gate_approved,
+            _package_snapshot_json=_canonical_json(snapshot),
+        )
+
     @property
     def question_id(self) -> str:
         return self.locator.question_id
@@ -191,7 +268,108 @@ class QuestionResult:
     def catalog_version(self) -> str:
         return self.locator.catalog_version
 
+    @property
+    def package_snapshot(self) -> dict[str, Any] | None:
+        if self._package_snapshot_json is None:
+            return None
+        value = json.loads(self._package_snapshot_json)
+        if not isinstance(value, dict):
+            raise ResultSetContractError("QuestionResult package snapshot is malformed.")
+        return value
+
+    @property
+    def is_package_backed(self) -> bool:
+        return self._package_snapshot_json is not None
+
+    @property
+    def quality_status(self) -> str:
+        snapshot = self.package_snapshot
+        if snapshot is None:
+            return "legacy"
+        classification = snapshot.get("result_classification")
+        return (
+            str(classification.get("status") or "")
+            if isinstance(classification, dict)
+            else ""
+        )
+
+    @property
+    def human_gate_decisions(self) -> tuple[str, ...]:
+        snapshot = self.package_snapshot
+        if snapshot is None:
+            return ()
+        decisions: list[str] = []
+        for section_name in ("selection", "research_plan"):
+            section = snapshot.get(section_name)
+            gate = section.get("human_gate") if isinstance(section, dict) else None
+            decisions.append(
+                str(gate.get("decision") or "") if isinstance(gate, dict) else ""
+            )
+        return (decisions[0], decisions[1])
+
+    @property
+    def human_gate_status(self) -> str:
+        decisions = self.human_gate_decisions
+        if not decisions:
+            return "legacy"
+        if all(decision == "approved" for decision in decisions):
+            return "approved"
+        if any(decision in {"rejected", "revision_requested"} for decision in decisions):
+            return "blocked"
+        return "pending"
+
+    @property
+    def receipt_complete(self) -> bool:
+        snapshot = self.package_snapshot
+        receipts = snapshot.get("model_invocation_receipts") if snapshot else None
+        return isinstance(receipts, dict) and set(receipts) == set(
+            REQUIRED_PACKAGE_RECEIPT_STAGES
+        )
+
+    def manifest_entry(self) -> dict[str, Any]:
+        snapshot = self.package_snapshot
+        if snapshot is None:
+            raise ResultSetContractError(
+                f"Question result {self.question_id} has no QuestionResultPackage."
+            )
+        receipts = snapshot.get("model_invocation_receipts")
+        if not isinstance(receipts, dict):
+            raise ResultSetContractError(
+                f"Question result {self.question_id} has malformed package receipts."
+            )
+        receipt_identities: dict[str, dict[str, Any]] = {}
+        for stage in REQUIRED_PACKAGE_RECEIPT_STAGES:
+            receipt = receipts.get(stage)
+            if not isinstance(receipt, dict):
+                raise ResultSetContractError(
+                    f"Question result {self.question_id} is missing package receipt {stage}."
+                )
+            receipt_identities[stage] = {
+                "receipt_id": str(receipt.get("receiptId") or ""),
+                "node_run_id": str(receipt.get("nodeRunId") or ""),
+                "evidence_locator": receipt.get("evidenceLocator")
+                if isinstance(receipt.get("evidenceLocator"), dict)
+                else {},
+            }
+        gate_decisions = self.human_gate_decisions
+        return {
+            "question_id": self.question_id,
+            "package_id": str(snapshot.get("package_id") or ""),
+            "run_id": str(snapshot.get("run_id") or ""),
+            "canonical_sha256": str(snapshot.get("canonical_sha256") or ""),
+            "idempotency_key": str(snapshot.get("idempotency_key") or ""),
+            "quality_status": self.quality_status,
+            "human_gate_decisions": {
+                "selection": gate_decisions[0],
+                "research_plan": gate_decisions[1],
+            },
+            "receipts": receipt_identities,
+        }
+
     def to_dict(self) -> dict[str, Any]:
+        snapshot = self.package_snapshot
+        if snapshot is not None:
+            return {"package": snapshot}
         return {
             "question_id": self.question_id,
             "catalog_id": self.catalog_id,
@@ -205,7 +383,36 @@ class QuestionResult:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "QuestionResult":
+    def from_dict(
+        cls,
+        data: dict[str, Any],
+        *,
+        expected_model_policy_sha256: str | None = None,
+    ) -> QuestionResult:
+        raw_package = data.get("package")
+        if raw_package is not None:
+            if set(data) != {"package"}:
+                raise ResultSetContractError(
+                    "Package-backed QuestionResult cannot duplicate package content."
+                )
+            if not expected_model_policy_sha256:
+                raise ResultSetContractError(
+                    "Package checkpoint restore requires an externally authorized model policy hash."
+                )
+            if not isinstance(raw_package, dict):
+                raise ResultSetContractError("QuestionResult package checkpoint is malformed.")
+            try:
+                from .question_result_package import QuestionResultPackage
+
+                package = QuestionResultPackage.from_dict(
+                    raw_package,
+                    expected_model_policy_sha256=expected_model_policy_sha256,
+                )
+            except (TypeError, ValueError, KeyError) as exc:
+                raise ResultSetContractError(
+                    "QuestionResult package checkpoint failed canonical validation."
+                ) from exc
+            return cls.from_package(package)
         try:
             question_id = str(data["question_id"])
             scope_hash = str(data["scope_hash"])
@@ -263,6 +470,10 @@ class FullCatalogResultSet:
             raise ResultSetContractError(
                 f"Result catalog id does not match the result set: {result.question_id}."
             )
+        if result.locator.catalog_version != self._scope.catalog_version:
+            raise ResultSetContractError(
+                f"Result catalog version does not match the result set: {result.question_id}."
+            )
 
     def add_result(self, result: QuestionResult) -> None:
         self._validate_binding(result)
@@ -317,6 +528,24 @@ class FullCatalogResultSet:
         present = self.present_count()
         eligible = self.eligible_count()
         missing = self.missing_question_ids()
+        package_backed = sum(
+            1 for result in self._results.values() if result.is_package_backed
+        )
+        quality_approved = sum(
+            1
+            for result in self._results.values()
+            if result.is_package_backed and result.quality_status == "approved"
+        )
+        human_gate_approved = sum(
+            1
+            for result in self._results.values()
+            if result.is_package_backed and result.human_gate_status == "approved"
+        )
+        receipt_complete = sum(
+            1
+            for result in self._results.values()
+            if result.is_package_backed and result.receipt_complete
+        )
         reasons: list[str] = []
         if present != CATALOG_QUESTION_COUNT:
             reasons.append(f"present_count_{present}_required_{CATALOG_QUESTION_COUNT}")
@@ -324,6 +553,23 @@ class FullCatalogResultSet:
             reasons.append(f"missing_official_questions_{len(missing)}")
         if eligible != CATALOG_QUESTION_COUNT:
             reasons.append(f"submission_eligible_count_{eligible}_required_{CATALOG_QUESTION_COUNT}")
+        if package_backed != CATALOG_QUESTION_COUNT:
+            reasons.append(
+                f"package_backed_count_{package_backed}_required_{CATALOG_QUESTION_COUNT}"
+            )
+        if quality_approved != CATALOG_QUESTION_COUNT:
+            reasons.append(
+                f"quality_approved_count_{quality_approved}_required_{CATALOG_QUESTION_COUNT}"
+            )
+        if human_gate_approved != CATALOG_QUESTION_COUNT:
+            reasons.append(
+                "human_gate_approved_count_"
+                f"{human_gate_approved}_required_{CATALOG_QUESTION_COUNT}"
+            )
+        if receipt_complete != CATALOG_QUESTION_COUNT:
+            reasons.append(
+                f"receipt_complete_count_{receipt_complete}_required_{CATALOG_QUESTION_COUNT}"
+            )
         if self._duplicate_attempts:
             reasons.append(f"duplicate_attempts_{self.duplicate_count()}")
         return {
@@ -332,6 +578,10 @@ class FullCatalogResultSet:
             "present_count": present,
             "missing_count": len(missing),
             "submission_eligible_count": eligible,
+            "package_backed_count": package_backed,
+            "quality_approved_count": quality_approved,
+            "human_gate_approved_count": human_gate_approved,
+            "receipt_complete_count": receipt_complete,
             "required_question_count": CATALOG_QUESTION_COUNT,
             "duplicate_count": self.duplicate_count(),
         }
@@ -348,6 +598,7 @@ class FullCatalogResultSet:
         return state
 
     def export_counts(self) -> dict[str, Any]:
+        state = self.submission_state()
         return {
             "catalog_id": self._scope.catalog_id,
             "catalog_version": self._scope.catalog_version,
@@ -356,19 +607,46 @@ class FullCatalogResultSet:
             "present_count": self.present_count(),
             "missing_count": self.missing_count(),
             "duplicate_count": self.duplicate_count(),
-            "submission_eligible_count": self.eligible_count(),
-            "submission_ready": self.is_submission_ready(),
+            "submission_eligible_count": state["submission_eligible_count"],
+            "package_backed_count": state["package_backed_count"],
+            "quality_approved_count": state["quality_approved_count"],
+            "human_gate_approved_count": state["human_gate_approved_count"],
+            "receipt_complete_count": state["receipt_complete_count"],
+            "submission_ready": state["submission_ready"],
         }
 
+    def manifest(self) -> dict[str, Any]:
+        """Return a stable identity-only manifest; packages remain the content SSOT."""
+
+        body = {
+            "schema_version": RESULT_MANIFEST_SCHEMA_VERSION,
+            "scope": self._scope.to_dict(),
+            "required_question_count": CATALOG_QUESTION_COUNT,
+            "entries": [
+                result.manifest_entry()
+                for result in self.results()
+                if result.is_package_backed
+            ],
+        }
+        return {**body, "manifest_sha256": _canonical_sha256(body)}
+
     def to_checkpoint(self) -> dict[str, Any]:
-        return {
+        body = {
+            "schema_version": RESULT_SET_CHECKPOINT_SCHEMA_VERSION,
             "scope": self._scope.to_dict(),
             "results": [result.to_dict() for result in self.results()],
             "duplicate_attempts": list(self._duplicate_attempts),
         }
+        return {**body, "checkpoint_sha256": _canonical_sha256(body)}
 
     @classmethod
-    def from_checkpoint(cls, data: dict[str, Any]) -> "FullCatalogResultSet":
+    def from_checkpoint(
+        cls,
+        data: dict[str, Any],
+        *,
+        expected_model_policy_sha256: str | None = None,
+    ) -> FullCatalogResultSet:
+        _validate_checkpoint_envelope(data, label="FullCatalogResultSet")
         try:
             scope = CatalogScope.from_dict(data["scope"])
         except (KeyError, TypeError) as exc:
@@ -380,7 +658,12 @@ class FullCatalogResultSet:
         for raw in raw_results:
             if not isinstance(raw, dict):
                 raise ResultSetContractError("FullCatalogResultSet checkpoint result is malformed.")
-            result_set.add_result(QuestionResult.from_dict(raw))
+            result_set.add_result(
+                QuestionResult.from_dict(
+                    raw,
+                    expected_model_policy_sha256=expected_model_policy_sha256,
+                )
+            )
         duplicates = data.get("duplicate_attempts")
         if isinstance(duplicates, list):
             result_set._duplicate_attempts = [str(item) for item in duplicates]

@@ -5,11 +5,13 @@ Pure contract layer: no routes, runtime managers, models, or network access.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import hashlib
+import json
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import Enum
 from functools import lru_cache
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .resources import load_full_catalog_execution_core, load_science_question_catalog
 from .result_set import (
@@ -19,6 +21,12 @@ from .result_set import (
     official_question_ids,
 )
 
+if TYPE_CHECKING:
+    from .question_result_package import QuestionResultPackage
+
+
+CATALOG_EXECUTION_CHECKPOINT_SCHEMA_VERSION = 2
+
 
 class CatalogExecutionError(ValueError):
     """A catalog execution contract was violated."""
@@ -26,6 +34,41 @@ class CatalogExecutionError(ValueError):
 
 class QuestionBlockedError(CatalogExecutionError):
     """A single question is blocked and must not re-run automatically."""
+
+
+def _canonical_sha256(payload: Mapping[str, Any]) -> str:
+    try:
+        encoded = json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise CatalogExecutionError(
+            "Catalog execution checkpoint must be canonical JSON."
+        ) from exc
+    return hashlib.sha256(encoded).hexdigest().upper()
+
+
+def _validate_checkpoint_envelope(data: Mapping[str, Any]) -> bool:
+    schema_version = data.get("schema_version")
+    if schema_version is None:
+        return False
+    if schema_version != CATALOG_EXECUTION_CHECKPOINT_SCHEMA_VERSION:
+        raise CatalogExecutionError(
+            "CatalogExecutionState checkpoint schema version is unsupported."
+        )
+    supplied_hash = str(data.get("checkpoint_sha256") or "").strip().upper()
+    if not supplied_hash:
+        raise CatalogExecutionError("CatalogExecutionState checkpoint hash is required.")
+    body = {key: value for key, value in data.items() if key != "checkpoint_sha256"}
+    if supplied_hash != _canonical_sha256(body):
+        raise CatalogExecutionError(
+            "CatalogExecutionState checkpoint hash does not match its content."
+        )
+    return True
 
 
 class QuestionStatus(str, Enum):
@@ -133,7 +176,12 @@ class QuestionRunRecord:
         }
 
     @classmethod
-    def from_checkpoint(cls, data: dict[str, Any]) -> QuestionRunRecord:
+    def from_checkpoint(
+        cls,
+        data: dict[str, Any],
+        *,
+        expected_model_policy_sha256: str | None = None,
+    ) -> QuestionRunRecord:
         try:
             record = cls(
                 question_id=str(data["question_id"]),
@@ -146,7 +194,15 @@ class QuestionRunRecord:
             raise CatalogExecutionError("QuestionRunRecord checkpoint is malformed.") from exc
         raw_result = data.get("result")
         if raw_result is not None:
-            record.result = QuestionResult.from_dict(raw_result)
+            try:
+                record.result = QuestionResult.from_dict(
+                    raw_result,
+                    expected_model_policy_sha256=expected_model_policy_sha256,
+                )
+            except (TypeError, ValueError, KeyError) as exc:
+                raise CatalogExecutionError(
+                    "QuestionRunRecord package checkpoint requires an authorized model policy and valid canonical content."
+                ) from exc
         return record
 
 
@@ -225,17 +281,78 @@ class CatalogExecutionState:
         record.last_error = None
         record.result = result
 
-    def record_failure(self, question_id: str, reason: str) -> None:
+    def record_failure(
+        self,
+        question_id: str,
+        reason: str,
+        *,
+        result: QuestionResult | None = None,
+    ) -> None:
         self._require_in_plan(question_id)
         record = self._records[question_id]
         record.status = QuestionStatus.FAILED
         record.last_error = str(reason)
+        if result is not None:
+            record.result = result
 
-    def record_blocked(self, question_id: str, reason: str) -> None:
+    def record_blocked(
+        self,
+        question_id: str,
+        reason: str,
+        *,
+        result: QuestionResult | None = None,
+    ) -> None:
         self._require_in_plan(question_id)
         record = self._records[question_id]
         record.status = QuestionStatus.BLOCKED
         record.last_error = str(reason)
+        if result is not None:
+            record.result = result
+
+    def record_package(self, package: QuestionResultPackage) -> None:
+        """Map package quality and human decisions onto the existing state machine."""
+
+        result = QuestionResult.from_package(package)
+        question_id = result.question_id
+        self._require_in_plan(question_id)
+        if result.locator.identity_key() != self.identity_key(question_id):
+            raise CatalogExecutionError(
+                f"Package locator does not match question and scope: {question_id}."
+            )
+        record = self._records[question_id]
+        if record.status is QuestionStatus.PENDING:
+            self.mark_running(question_id)
+            record = self._records[question_id]
+        quality_status = result.quality_status
+        human_gate_status = result.human_gate_status
+        if quality_status == "failed":
+            package_snapshot = result.package_snapshot
+            failure = package_snapshot.get("failure") if package_snapshot else None
+            reason = (
+                str(failure.get("message") or "package failed")
+                if isinstance(failure, dict)
+                else "package failed"
+            )
+            self.record_failure(question_id, reason, result=result)
+            return
+        if quality_status == "blocked" or human_gate_status == "blocked":
+            self.record_blocked(
+                question_id,
+                "package blocked by quality or human review",
+                result=result,
+            )
+            return
+        if quality_status != "approved":
+            raise CatalogExecutionError(
+                f"Package has unsupported quality status: {quality_status}."
+            )
+        if human_gate_status == "approved":
+            self.record_success(question_id, result)
+            return
+        record.status = QuestionStatus.RUNNING
+        record.invalidated = False
+        record.last_error = None
+        record.result = result
 
     def invalidate(self, question_id: str, reason: str) -> None:
         self._require_in_plan(question_id)
@@ -266,8 +383,28 @@ class CatalogExecutionState:
             "question_count": len(self._records),
         }
 
+    def package_quality_summary(self) -> dict[str, int]:
+        summary = {
+            "approved": 0,
+            "blocked": 0,
+            "failed": 0,
+            "pendingHumanGate": 0,
+            "packageBacked": 0,
+        }
+        for record in self._records.values():
+            result = record.result
+            if result is None or not result.is_package_backed:
+                continue
+            summary["packageBacked"] += 1
+            if result.quality_status in {"approved", "blocked", "failed"}:
+                summary[result.quality_status] += 1
+            if result.quality_status == "approved" and result.human_gate_status == "pending":
+                summary["pendingHumanGate"] += 1
+        return summary
+
     def to_checkpoint(self) -> dict[str, Any]:
-        return {
+        body = {
+            "schema_version": CATALOG_EXECUTION_CHECKPOINT_SCHEMA_VERSION,
             "plan": {
                 "plan_id": self._plan.plan_id,
                 "gate_id": self._plan.gate_id,
@@ -276,9 +413,16 @@ class CatalogExecutionState:
             "scope": self._scope.to_dict(),
             "records": [record.to_checkpoint() for record in self._records.values()],
         }
+        return {**body, "checkpoint_sha256": _canonical_sha256(body)}
 
     @classmethod
-    def from_checkpoint(cls, data: dict[str, Any]) -> CatalogExecutionState:
+    def from_checkpoint(
+        cls,
+        data: dict[str, Any],
+        *,
+        expected_model_policy_sha256: str | None = None,
+    ) -> CatalogExecutionState:
+        is_v2 = _validate_checkpoint_envelope(data)
         try:
             plan_data = data["plan"]
             plan = CatalogExecutionPlan(
@@ -293,10 +437,19 @@ class CatalogExecutionState:
         raw_records = data.get("records")
         if not isinstance(raw_records, list):
             raise CatalogExecutionError("CatalogExecutionState checkpoint records must be an array.")
+        seen_question_ids: set[str] = set()
         for raw in raw_records:
             if not isinstance(raw, dict):
                 raise CatalogExecutionError("CatalogExecutionState checkpoint record is malformed.")
-            record = QuestionRunRecord.from_checkpoint(raw)
+            record = QuestionRunRecord.from_checkpoint(
+                raw,
+                expected_model_policy_sha256=expected_model_policy_sha256,
+            )
+            if record.question_id in seen_question_ids:
+                raise CatalogExecutionError(
+                    f"CatalogExecutionState checkpoint repeats record: {record.question_id}."
+                )
+            seen_question_ids.add(record.question_id)
             if record.question_id not in state._records:
                 raise CatalogExecutionError(
                     f"Checkpoint record is not part of the plan: {record.question_id}."
@@ -310,7 +463,27 @@ class CatalogExecutionState:
                     raise CatalogExecutionError(
                         "Checkpoint result question id does not match its record."
                     )
+                if record.result.is_package_backed:
+                    if record.result.quality_status == "failed":
+                        expected_status = QuestionStatus.FAILED
+                    elif (
+                        record.result.quality_status == "blocked"
+                        or record.result.human_gate_status == "blocked"
+                    ):
+                        expected_status = QuestionStatus.BLOCKED
+                    elif record.result.human_gate_status == "approved":
+                        expected_status = QuestionStatus.SUCCEEDED
+                    else:
+                        expected_status = QuestionStatus.RUNNING
+                    if record.status is not expected_status:
+                        raise CatalogExecutionError(
+                            "Checkpoint package quality and human gate state do not match its record status."
+                        )
             state._records[record.question_id] = record
+        if is_v2 and seen_question_ids != set(state._records):
+            raise CatalogExecutionError(
+                "CatalogExecutionState checkpoint must contain exactly one record per plan question."
+            )
         return state
 
 

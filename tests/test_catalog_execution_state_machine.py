@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import hashlib
+import json
+from copy import deepcopy
+
 import pytest
 
 from core.research.competition.catalog_execution import (
     CatalogExecutionError,
-    CatalogExecutionPlan,
     CatalogExecutionState,
     QuestionBlockedError,
     QuestionStatus,
@@ -13,6 +16,7 @@ from core.research.competition.catalog_execution import (
     dev_plans,
     run_pending_batch,
 )
+from core.research.competition.question_result_package import QuestionResultPackage
 from core.research.competition.result_set import (
     CATALOG_ID,
     CATALOG_QUESTION_COUNT,
@@ -21,6 +25,7 @@ from core.research.competition.result_set import (
     ResultSetContractError,
     official_question_ids,
 )
+from tests.test_challenge_question_result_package import _valid_payload
 
 
 def _scope() -> CatalogScope:
@@ -34,6 +39,75 @@ def _result(scope: CatalogScope, question_id: str) -> QuestionResult:
         model_receipt_locator=f"model-receipt://{question_id}",
         knowledge_locator=f"knowledge://{question_id}",
     )
+
+
+def _rehash_checkpoint(payload: dict) -> None:
+    body = {key: value for key, value in payload.items() if key != "checkpoint_sha256"}
+    encoded = json.dumps(
+        body,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    payload["checkpoint_sha256"] = hashlib.sha256(encoded).hexdigest().upper()
+
+
+def _package(
+    scope: CatalogScope,
+    question_id: str,
+    *,
+    gate_decision: str = "approved",
+    quality_status: str = "approved",
+    input_snapshot_sha256: str = "a" * 64,
+) -> QuestionResultPackage:
+    payload = deepcopy(_valid_payload())
+    run_id = f"run-{question_id.lower()}-r1"
+    payload.update(
+        {
+            "package_id": f"pkg-{question_id.lower()}-r1",
+            "question_id": question_id,
+            "run_id": run_id,
+            "scope": scope.to_dict(),
+            "input_snapshot_sha256": input_snapshot_sha256,
+        }
+    )
+    for section in ("selection", "research_plan"):
+        gate = payload[section]["human_gate"]
+        gate["decision"] = gate_decision
+        if gate_decision == "pending":
+            gate.pop("reviewer", None)
+            gate.pop("decided_at", None)
+        else:
+            gate["reviewer"] = "reviewer-1"
+            gate["decided_at"] = "2026-08-23T10:00:00Z"
+    classification = payload["result_classification"]
+    classification["status"] = quality_status
+    if quality_status in {"blocked", "failed"}:
+        classification["classification"] = quality_status
+        payload["failure"] = {
+            "stage": "revision",
+            "code": f"package_{quality_status}",
+            "message": f"Package closed as {quality_status}.",
+            "retryable": True,
+        }
+    else:
+        payload.pop("failure", None)
+    for stage, receipt in payload["model_invocation_receipts"].items():
+        receipt["receiptId"] = f"receipt-{question_id.lower()}-{stage}"
+        receipt["nodeRunId"] = f"node-{question_id.lower()}-{stage}"
+        receipt["runId"] = run_id
+        receipt["scope"].update(
+            {
+                "questionId": question_id,
+                "runId": run_id,
+                "catalogId": scope.catalog_id,
+                "catalogVersion": scope.catalog_version,
+                "catalogSha256": scope.catalog_sha256,
+                "scopeHash": scope.scope_hash,
+            }
+        )
+    return QuestionResultPackage.create(payload)
 
 
 def test_dev_plans_cover_0_1_5_12_125() -> None:
@@ -182,11 +256,13 @@ def test_checkpoint_identity_requires_question_id_and_full_scope_hash() -> None:
 
     payload = state.to_checkpoint()
     payload["records"][0]["result"]["scope_hash"] = "E" * 64
+    _rehash_checkpoint(payload)
     with pytest.raises(CatalogExecutionError, match="scope hash"):
         CatalogExecutionState.from_checkpoint(payload)
 
     payload = state.to_checkpoint()
     payload["records"][0]["result"]["question_id"] = "SCI-096"
+    _rehash_checkpoint(payload)
     with pytest.raises(CatalogExecutionError, match="question id"):
         CatalogExecutionState.from_checkpoint(payload)
 
@@ -209,7 +285,10 @@ def test_full_dev_125_state_builds_submission_ready_result_set() -> None:
     scope = _scope()
     plan = dev_plan("dev-125")
     state = CatalogExecutionState(plan=plan, scope=scope)
-    run_pending_batch(state, lambda question_id: _result(scope, question_id))
+    run_pending_batch(
+        state,
+        lambda question_id: QuestionResult.from_package(_package(scope, question_id)),
+    )
     result_set = build_result_set(state)
     assert result_set.present_count() == CATALOG_QUESTION_COUNT
     assert [result.question_id for result in result_set.results()] == list(official_question_ids())
@@ -234,3 +313,84 @@ def test_124_of_125_succeeded_is_not_submission_ready() -> None:
     assert result_set.is_submission_ready() is False
     with pytest.raises(ResultSetContractError, match="not submission-ready"):
         result_set.assert_submission_ready()
+
+
+@pytest.mark.parametrize(
+    ("gate_decision", "quality_status", "expected_status"),
+    [
+        ("pending", "approved", QuestionStatus.RUNNING),
+        ("approved", "approved", QuestionStatus.SUCCEEDED),
+        ("rejected", "approved", QuestionStatus.BLOCKED),
+        ("revision_requested", "approved", QuestionStatus.BLOCKED),
+        ("approved", "blocked", QuestionStatus.BLOCKED),
+        ("approved", "failed", QuestionStatus.FAILED),
+    ],
+)
+def test_package_quality_and_human_gates_map_to_existing_states(
+    gate_decision: str,
+    quality_status: str,
+    expected_status: QuestionStatus,
+) -> None:
+    scope = _scope()
+    state = CatalogExecutionState(plan=dev_plan("dev-1"), scope=scope)
+    package = _package(
+        scope,
+        "SCI-091",
+        gate_decision=gate_decision,
+        quality_status=quality_status,
+    )
+
+    state.record_package(package)
+
+    assert state.status("SCI-091") is expected_status
+    assert state.result_for("SCI-091") is not None
+    assert state.result_for("SCI-091").package_snapshot == package.to_dict()
+
+
+def test_package_checkpoint_requires_hash_and_external_policy_authority() -> None:
+    scope = _scope()
+    state = CatalogExecutionState(plan=dev_plan("dev-1"), scope=scope)
+    package = _package(scope, "SCI-091")
+    state.record_package(package)
+
+    checkpoint = state.to_checkpoint()
+
+    assert checkpoint["schema_version"] == 2
+    assert len(checkpoint["checkpoint_sha256"]) == 64
+    with pytest.raises(CatalogExecutionError, match="authorized model policy"):
+        CatalogExecutionState.from_checkpoint(checkpoint)
+    with pytest.raises(CatalogExecutionError, match="authorized model policy"):
+        CatalogExecutionState.from_checkpoint(
+            checkpoint,
+            expected_model_policy_sha256="0" * 64,
+        )
+    restored = CatalogExecutionState.from_checkpoint(
+        checkpoint,
+        expected_model_policy_sha256=package.model_policy["policySha256"],
+    )
+    assert restored.status("SCI-091") is QuestionStatus.SUCCEEDED
+    tampered = deepcopy(checkpoint)
+    tampered["records"][0]["result"]["package"]["package_id"] = "pkg-tampered"
+    with pytest.raises(CatalogExecutionError, match="checkpoint hash"):
+        CatalogExecutionState.from_checkpoint(
+            tampered,
+            expected_model_policy_sha256=package.model_policy["policySha256"],
+        )
+
+
+def test_failed_package_checkpoint_preserves_explicit_invalidation_recovery() -> None:
+    scope = _scope()
+    state = CatalogExecutionState(plan=dev_plan("dev-1"), scope=scope)
+    package = _package(scope, "SCI-091", quality_status="failed")
+    state.record_package(package)
+
+    restored = CatalogExecutionState.from_checkpoint(
+        state.to_checkpoint(),
+        expected_model_policy_sha256=package.model_policy["policySha256"],
+    )
+
+    assert restored.status("SCI-091") is QuestionStatus.FAILED
+    assert restored.pending_question_ids() == ()
+    assert restored.result_for("SCI-091").package_snapshot["failure"]["retryable"] is True
+    restored.invalidate("SCI-091", "retry after fixing the failed stage")
+    assert restored.pending_question_ids() == ("SCI-091",)
