@@ -91,9 +91,12 @@ export function DigestDraftView({
       {proposed.length ? (
         <article className={css.digestCard} data-testid="meeting-proposed-candidates">
           <span>{isZh ? `候选清单（${proposed.length}）` : `Candidate list (${proposed.length})`}</span>
-          <ul className={css.digestList}>
+          <ul className={compact ? css.proposedCandidateList : css.digestList}>
             {proposed.map((item, index) => (
-              <li key={item.candidateId || `proposed-${index}`}>
+              <li
+                key={item.candidateId || `proposed-${index}`}
+                className={compact ? css.proposedCandidate : undefined}
+              >
                 {formatProposedCandidate(item, lang)}
               </li>
             ))}
@@ -385,7 +388,7 @@ export function MeetingRoundDisplay({
   });
   const showDiscussionProgress = status === "open" || status === "summarizing";
   return (
-    <div data-testid="meeting-round-display">
+    <div className="grid min-w-0 gap-3" data-testid="meeting-round-display">
       <div className={css.heading}>
         <div>
           <h3>{round.meetingType === "hypothesis_candidate_generation" ? (isZh ? "候选生成讨论" : "Candidate generation discussion") : (isZh ? "评审讨论" : "Review discussion")}</h3>
@@ -422,7 +425,7 @@ export function MeetingRoundDisplay({
           {digest}
           {decisions}
           {closedHint}
-          {actions}
+          {actions ? <div className={css.actionFooter}>{actions}</div> : null}
           {messageList}
         </>
       ) : (

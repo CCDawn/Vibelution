@@ -160,6 +160,23 @@ describe("ResearchWorkflowToolbar", () => {
     expect(active).not.toContain("选择题目开始研究");
   });
 
+  it("disables current-task navigation when its callback is not ready", () => {
+    const blocked = renderToolbar({
+      ...BASE_PROPS,
+      runId: "",
+      workflowActive: true,
+      atCurrentTask: false,
+      navigationLabel: "前往团队评审",
+      onSelectExperiment: vi.fn(),
+      onOpenPanel: vi.fn(),
+    } as React.ComponentProps<typeof ResearchWorkflowToolbar>);
+
+    expect(blocked).toContain("前往团队评审");
+    expect(blocked).toContain("disabled");
+    expect(blocked).toContain("aria-disabled=\"true\"");
+    expect(blocked).toContain("当前任务导航尚未准备好，请稍后重试");
+  });
+
   it("keeps the question archive as its own read-only inspector view", () => {
     const archive = renderToolbar({
       ...BASE_PROPS,

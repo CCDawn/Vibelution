@@ -228,7 +228,13 @@ export function ResearchWorkflowToolbar(props: {
             density="compact"
             variant="primary"
             className={styles.primary}
-            onClick={() => props.onNavigateCurrent?.()}
+            isDisabled={!props.onNavigateCurrent}
+            disabledReason={
+              !props.onNavigateCurrent
+                ? (isZh ? "当前任务导航尚未准备好，请稍后重试" : "Current-task navigation is not ready; try again shortly")
+                : undefined
+            }
+            onClick={props.onNavigateCurrent}
           >
             {(props.navigationLabel || (isZh ? "前往当前任务" : "Go to current task"))}
           </VButton>

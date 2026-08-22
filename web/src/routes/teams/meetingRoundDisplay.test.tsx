@@ -15,9 +15,9 @@ import { DigestDraftView, MeetingRoundDisplay } from "./meetingRoundDisplay";
 let container: HTMLDivElement;
 let root: Root;
 
-function renderDraft(draft: MeetingDigestDraft): HTMLDivElement {
+function renderDraft(draft: MeetingDigestDraft, compact = false): HTMLDivElement {
   act(() => {
-    root.render(<DigestDraftView draft={draft} />);
+    root.render(<DigestDraftView draft={draft} compact={compact} />);
   });
   return container;
 }
@@ -67,6 +67,8 @@ describe("DigestDraftView validation errors", () => {
   });
 
   it("keeps technical ids behind run details in compact task mode", () => {
+    const longMeetingId = `meeting-${"x".repeat(96)}`;
+    const longRoomId = `room-${"y".repeat(96)}`;
     act(() => {
       root.render(
         <MeetingRoundDisplay
@@ -81,23 +83,26 @@ describe("DigestDraftView validation errors", () => {
             workflow: "w",
             agentId: "a",
             schemaVersion: 1,
-            meetingRoundId: "meeting-1",
+            meetingRoundId: longMeetingId,
             meetingType: "hypothesis_candidate_generation",
             mode: "generation",
             scopeHash: "scope",
             participants: ["agent-1"],
             status: "closed",
             startedAt: "2026-08-19T01:00:00Z",
-            linkedChatRoomId: "room-1",
+            linkedChatRoomId: longRoomId,
           }}
         />,
       );
     });
     const headingCopy = container.querySelector("h3")?.parentElement?.textContent;
     expect(headingCopy).toContain("参与者 1 人");
-    expect(headingCopy).not.toContain("meeting-1");
-    expect(headingCopy).not.toContain("room-1");
+    expect(headingCopy).not.toContain(longMeetingId);
+    expect(headingCopy).not.toContain(longRoomId);
     expect(container.querySelector("details")?.textContent).toContain("运行详情");
+    expect(container.querySelector("details p")?.textContent).toContain(longMeetingId);
+    expect(container.querySelector("details p")?.textContent).toContain(longRoomId);
+    expect(container.querySelector("details p")?.className).toContain("[overflow-wrap:anywhere]");
     expect(container.textContent).toContain("已结束");
     expect(container.textContent).not.toContain("已关门");
   });
@@ -297,6 +302,9 @@ describe("MeetingRoundDisplay compact inspector chrome", () => {
     expect(digestAt).toBeGreaterThan(-1);
     expect(actionsAt).toBeGreaterThan(digestAt);
     expect(speechesAt).toBeGreaterThan(actionsAt);
+    const actionFooter = rootEl?.querySelector("div.sticky");
+    expect(actionFooter?.className).toContain("bottom-0");
+    expect(actionFooter?.className).toContain("border-t");
     expect(container.querySelector('[data-testid="meeting-source-messages"]')?.getAttribute("open")).toBeNull();
     expect(container.textContent).not.toContain("更早的");
     expect(container.textContent).not.toContain("agent-20260722-220514-082385");
@@ -305,6 +313,34 @@ describe("MeetingRoundDisplay compact inspector chrome", () => {
     expect(container.textContent).not.toContain("**分布/密度组**");
     expect(html).toContain("line-clamp-2");
     expect(container.textContent).toContain("全文");
+  });
+
+  it("caps compact candidate lists, wraps long statements, and keeps the full list in non-compact mode", () => {
+    const longStatement = `机制-${"x".repeat(180)}`;
+    const draft = {
+      summary: "候选生成结果",
+      proposedCandidates: [
+        { candidateId: "candidate-1", statement: longStatement },
+        { candidateId: "candidate-2", statement: "第二个候选" },
+      ],
+    };
+
+    renderDraft({ ...draft }, true);
+    const compactCard = container.querySelector('[data-testid="meeting-proposed-candidates"]');
+    const compactList = compactCard?.querySelector("ul");
+    const compactItem = compactList?.querySelector("li");
+    expect(compactList?.className).toContain("max-h-[min(48dvh,360px)]");
+    expect(compactList?.className).toContain("overflow-y-auto");
+    expect(compactList?.className).toContain("overscroll-contain");
+    expect(compactItem?.className).toContain("[overflow-wrap:anywhere]");
+    expect(compactItem?.textContent).toContain(longStatement);
+    expect(compactList?.querySelectorAll("li")).toHaveLength(2);
+
+    renderDraft({ ...draft });
+    const fullList = container.querySelector('[data-testid="meeting-proposed-candidates"] ul');
+    expect(fullList?.className).not.toContain("overflow-y-auto");
+    expect(fullList?.className).toContain("pl-[18px]");
+    expect(fullList?.querySelectorAll("li")).toHaveLength(2);
   });
 
   it("renders English meeting chrome without Chinese labels", () => {
