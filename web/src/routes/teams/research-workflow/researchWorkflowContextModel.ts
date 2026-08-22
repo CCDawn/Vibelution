@@ -35,7 +35,17 @@ export type ResearchWorkflowTaskStatus =
   | "waiting_user"
   | "recoverable_error"
   | "blocked"
+  | "never_started"
+  | "failed_to_dispatch"
   | "completed";
+
+export type ResearchWorkflowDispatchStatus = "never_started" | "failed_to_dispatch";
+
+type ResearchWorkflowNodeAttemptProjection = {
+  nodeRunId?: string | null;
+  attempt?: number | null;
+  status?: string | null;
+};
 
 export type ResearchWorkflowCommandAction = {
   command: HypothesisFirstCommand;
@@ -62,6 +72,7 @@ export type ResearchWorkflowCurrentTask = {
   progress?: { current: number; total: number; label: string };
   navigationAction: ResearchWorkflowNavigationAction | null;
   commandAction: ResearchWorkflowCommandAction | null;
+  retryAction?: { label: string; detail?: string };
   blocker?: { code: string; message: string; retryable: boolean };
   authority: "hypothesis_first" | "formal_runtime" | "route";
 };
@@ -106,6 +117,11 @@ export type BuildResearchWorkflowContextInput = {
   dataRunVersion?: number | null;
   /** Once true, every requested identity must be present and equal. */
   dataScopeReady?: boolean;
+  /** Server-owned run state used to distinguish a dispatch failure from a normal task. */
+  runStatus?: string | null;
+  runTerminalReason?: string | null;
+  /** Canvas projection of node attempts; pending binding placeholders are not attempts. */
+  nodeRuns?: Readonly<Record<string, ResearchWorkflowNodeAttemptProjection>> | null;
   scopeMismatch?: boolean;
   loading?: boolean;
   refreshing?: boolean;
@@ -130,6 +146,34 @@ function normalized(value: string | null | undefined): string {
 
 function normalizedQuestion(value: string | null | undefined): string {
   return normalized(value).toUpperCase();
+}
+
+function hasNodeAttempt(nodeRun: ResearchWorkflowNodeAttemptProjection): boolean {
+  if (normalized(nodeRun.nodeRunId)) return true;
+  if (Number(nodeRun.attempt ?? 0) > 0) return true;
+  const status = normalized(nodeRun.status).toLowerCase();
+  return Boolean(status && status !== "pending");
+}
+
+/**
+ * Dispatch state is derived only from server run facts. Binding placeholders
+ * in the canvas projection have status=pending and no nodeRunId, so they do
+ * not make a created run look started.
+ */
+export function researchWorkflowDispatchStatus(input: {
+  runStatus?: string | null;
+  runTerminalReason?: string | null;
+  nodeRuns?: Readonly<Record<string, ResearchWorkflowNodeAttemptProjection>> | null;
+}): ResearchWorkflowDispatchStatus | null {
+  const status = normalized(input.runStatus).toLowerCase();
+  const terminalReason = normalized(input.runTerminalReason).toLowerCase();
+  if (status === "failed" && terminalReason === "dispatch_never_started") {
+    return "failed_to_dispatch";
+  }
+  if (status === "created" && !Object.values(input.nodeRuns ?? {}).some(hasNodeAttempt)) {
+    return "never_started";
+  }
+  return null;
 }
 
 export function buildResearchWorkflowScopeKey(input: {
@@ -184,6 +228,27 @@ type TaskPresentation = Pick<
   ResearchWorkflowCurrentTask,
   "stage" | "step" | "status" | "title" | "detail" | "authority"
 >;
+
+function dispatchPresentation(status: ResearchWorkflowDispatchStatus): TaskPresentation {
+  if (status === "failed_to_dispatch") {
+    return {
+      stage: "hypothesis_first",
+      step: "launch",
+      status,
+      title: "运行启动失败",
+      detail: "运行在派发节点尝试前失败（dispatch_never_started），可以重试启动。",
+      authority: "route",
+    };
+  }
+  return {
+    stage: "hypothesis_first",
+    step: "launch",
+    status,
+    title: "运行从未启动",
+    detail: "运行已创建，但还没有任何节点尝试，可能在派发前中断。可以重试启动。",
+    authority: "route",
+  };
+}
 
 function reviewTitle(action: HypothesisFirstNextAction, suffix: string): string {
   const round = action.meetingRoundId ? "本轮" : "评审";
@@ -398,46 +463,64 @@ export function buildResearchWorkflowContext(
             ? "ready"
             : "idle";
 
+  const dispatchStatus = researchWorkflowDispatchStatus({
+    runStatus: input.runStatus,
+    runTerminalReason: input.runTerminalReason,
+    nodeRuns: input.nodeRuns,
+  });
   let currentTask: ResearchWorkflowCurrentTask | null = null;
-  if (!mismatch && !input.loading && input.nextAction) {
+  if (!mismatch && !input.loading && (input.nextAction || dispatchStatus)) {
     const action = input.nextAction;
-    const presentation = presentationFor(action);
-    const command = action.command || action.recovery?.command;
-    const commandLabel = action.commandLabel || action.recovery?.label;
+    const presentation = dispatchStatus ? dispatchPresentation(dispatchStatus) : presentationFor(action!);
+    const command = action?.command || action?.recovery?.command;
+    const commandLabel = action?.commandLabel || action?.recovery?.label;
     currentTask = {
       key: [
         scope.key,
-        action.stage,
-        action.meetingRoundId || action.collectionRequestId || action.targetNodeId || "task",
+        dispatchStatus ? "dispatch" : action!.stage,
+        dispatchStatus
+          || action?.meetingRoundId
+          || action?.collectionRequestId
+          || action?.targetNodeId
+          || "task",
       ].join("::"),
       ...presentation,
-      targetNodeId: action.targetNodeId,
-      meetingRoundId: action.meetingRoundId,
-      collectionRequestId: action.collectionRequestId,
+      targetNodeId: action?.targetNodeId ?? null,
+      meetingRoundId: action?.meetingRoundId,
+      collectionRequestId: action?.collectionRequestId,
       progress: input.roundProgress
         ? {
             ...input.roundProgress,
             label: `第 ${input.roundProgress.current} 轮，共 ${input.roundProgress.total} 轮`,
           }
         : undefined,
-      navigationAction: action.targetNodeId
+      navigationAction: action?.targetNodeId
         ? { targetNodeId: action.targetNodeId, label: action.navigationLabel }
         : null,
-      commandAction: command && commandLabel
+      commandAction: !dispatchStatus && command && commandLabel
         ? {
             command,
             label: commandLabel,
-            detail: action.commandDetail,
-            disabledReason: action.disabledReason,
+            detail: action?.commandDetail,
+            disabledReason: action?.disabledReason,
           }
         : null,
-      blocker: action.disabledReason
-        ? {
-            code: action.stage === "blocked" ? "workflow_blocked" : "command_blocked",
-            message: action.disabledReason,
-            retryable: Boolean(action.recovery),
-          }
+      retryAction: dispatchStatus
+        ? { label: "重试启动", detail: presentation.detail }
         : undefined,
+      blocker: dispatchStatus
+        ? {
+            code: dispatchStatus,
+            message: presentation.detail,
+            retryable: true,
+          }
+        : action?.disabledReason
+          ? {
+              code: action.stage === "blocked" ? "workflow_blocked" : "command_blocked",
+              message: action.disabledReason,
+              retryable: Boolean(action.recovery),
+            }
+          : undefined,
     };
   }
 
