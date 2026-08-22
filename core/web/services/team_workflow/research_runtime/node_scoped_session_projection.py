@@ -557,6 +557,23 @@ def _ledger_anchor_payload(anchor: tuple[Any, ...] | None) -> dict[str, Any]:
     return dict(payload) if isinstance(payload, Mapping) else {}
 
 
+def _ledger_anchor_scalar(
+    anchor: tuple[Any, ...] | None,
+    payload: Mapping[str, Any],
+    index: int,
+    *keys: str,
+) -> Any:
+    if anchor is not None and len(anchor) > index:
+        value = anchor[index]
+        if value is not None and str(value).strip():
+            return value
+    for key in keys:
+        value = payload.get(key)
+        if value is not None and str(value).strip():
+            return value
+    return None
+
+
 def _ledger_root_session(
     raw: Mapping[str, Any],
     *,
@@ -578,6 +595,8 @@ def _ledger_root_session(
     parent_session_id = _optional_text(
         (detail or {}).get("parentSessionId")
         or (detail or {}).get("parent_session_id")
+        or raw.get("parentSessionId")
+        or raw.get("parent_session_id")
     )
     canonical_root = _canonical_root_detail_matches(
         detail,
@@ -612,7 +631,9 @@ def _ledger_root_session(
         ),
         "status": _optional_text(raw.get("status")) or node_status,
         "parentSessionId": parent_session_id,
-        "rootSessionId": canonical_root_id or (session_id if canonical_root else None),
+        "rootSessionId": canonical_root_id
+        or _optional_text(raw.get("rootSessionId") or raw.get("root_session_id"))
+        or (session_id if canonical_root else None),
         "chatDeepLink": link,
         "chatRoute": link,
         "fragmentRef": _optional_text(raw.get("fragmentRef")),
@@ -643,10 +664,14 @@ def _ledger_candidate_session(
     parent_session_id = _optional_text(
         (detail or {}).get("parentSessionId")
         or (detail or {}).get("parent_session_id")
+        or raw.get("parentSessionId")
+        or raw.get("parent_session_id")
     )
     canonical_root_id = _optional_text(
         (detail or {}).get("rootSessionId")
         or (detail or {}).get("root_session_id")
+        or raw.get("rootSessionId")
+        or raw.get("root_session_id")
     )
     binding_scope = _mapping(detail.get("experimentBinding")) if detail else {}
     scope = binding_scope.get("scope")
@@ -737,8 +762,37 @@ def project_ledger_scoped_sessions(
     raw_scoped = payload.get("scopedSessions")
     formal_projection = "rootSession" in payload or "scopedSessions" in payload
     if not formal_projection:
+        legacy_root = _ledger_root_session(
+            {
+                "sessionId": _ledger_anchor_scalar(
+                    anchor, payload, 5, "sessionId", "session_id"
+                ),
+                "sessionAttempt": _ledger_anchor_scalar(
+                    anchor, payload, 6, "sessionAttempt", "session_attempt"
+                ),
+                "taskId": _ledger_anchor_scalar(
+                    anchor, payload, 7, "taskId", "task_id"
+                ),
+                "turnId": _ledger_anchor_scalar(
+                    anchor, payload, 8, "turnId", "turn_id"
+                ),
+                "status": _ledger_anchor_scalar(anchor, payload, 12, "status"),
+                "parentSessionId": payload.get("parentSessionId")
+                or payload.get("parent_session_id"),
+                "rootSessionId": payload.get("rootSessionId")
+                or payload.get("root_session_id"),
+                "fragmentRef": payload.get("fragmentRef"),
+                "fragmentRefs": payload.get("fragmentRefs"),
+            },
+            team_id=team_id,
+            run_id=run_id,
+            node_id=node_id,
+            node_run_id=node_run_id,
+            node_status=node_status,
+            reader=session_detail_reader or _default_session_detail_reader,
+        )
         return {
-            "rootSession": None,
+            "rootSession": legacy_root,
             "scopedSessions": [],
             "_formalProjection": False,
         }

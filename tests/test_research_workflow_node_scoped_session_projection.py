@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from core.web.services.team_workflow.research_runtime.node_scoped_session_projection import (
+    project_ledger_scoped_sessions,
     project_node_scoped_sessions,
 )
 
@@ -232,6 +234,104 @@ def test_projection_fail_closes_all_children_when_root_anchor_is_degraded() -> N
         and item["sessionAnchorDegradedReason"] == "root_session_degraded"
         for item in projected["scopedSessions"]
     )
+
+
+def test_ledger_projection_keeps_legacy_scalar_anchor_root_only() -> None:
+    anchor = (
+        "anchor-legacy",
+        "node-run-legacy",
+        "agent",
+        "agent-hypothesis",
+        "hypothesis_designer",
+        "root-legacy",
+        2,
+        "task-legacy",
+        "turn-legacy",
+        None,
+        None,
+        None,
+        "succeeded",
+        "{}",
+        1,
+        1,
+    )
+
+    projected = project_ledger_scoped_sessions(
+        anchor,
+        team_id="team-1",
+        run_id="run-1",
+        node_id="hypothesis_design",
+        node_run_id="node-run-legacy",
+        node_status="succeeded",
+        session_detail_reader=lambda session_id: {
+            "id": session_id,
+            "rootSessionId": session_id,
+        },
+    )
+
+    assert projected["_formalProjection"] is False
+    assert projected["rootSession"]["sessionId"] == "root-legacy"
+    assert projected["rootSession"]["taskId"] == "task-legacy"
+    assert projected["rootSession"]["turnId"] == "turn-legacy"
+    assert projected["scopedSessions"] == []
+
+
+def test_ledger_projection_preserves_raw_lineage_when_session_read_degrades() -> None:
+    payload = {
+        "schemaVersion": 3,
+        "rootSession": {
+            "sessionId": "root-session",
+            "rootSessionId": "root-session",
+        },
+        "scopedSessions": [
+            {
+                "selectionId": "selection-1",
+                "candidateId": "H2",
+                "sessionId": "child-H2",
+                "taskId": "task-H2",
+                "turnId": "turn-H2",
+                "parentSessionId": "root-session",
+                "rootSessionId": "root-session",
+                "fragmentRefs": ["hypothesis_fragment:h2"],
+            }
+        ],
+    }
+    anchor = (
+        "anchor-formal",
+        "node-run-formal",
+        "agent",
+        "agent-hypothesis",
+        "hypothesis_designer",
+        "child-H2",
+        1,
+        "task-H2",
+        "turn-H2",
+        None,
+        None,
+        None,
+        "running",
+        json.dumps(payload),
+        1,
+        1,
+    )
+
+    projected = project_ledger_scoped_sessions(
+        anchor,
+        team_id="team-1",
+        run_id="run-1",
+        node_id="hypothesis_design",
+        node_run_id="node-run-formal",
+        node_status="running",
+        session_detail_reader=lambda _session_id: None,
+    )
+
+    assert projected["_formalProjection"] is True
+    assert projected["rootSession"]["rootSessionId"] == "root-session"
+    child = projected["scopedSessions"][0]
+    assert child["parentSessionId"] == "root-session"
+    assert child["rootSessionId"] == "root-session"
+    assert child["fragmentRefs"] == ["hypothesis_fragment:h2"]
+    assert child["sessionAnchorDegraded"] is True
 
 
 def test_projection_requires_hidden_child_kind_and_exact_scope_binding() -> None:

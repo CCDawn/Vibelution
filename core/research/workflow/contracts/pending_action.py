@@ -29,15 +29,35 @@ class PendingAction:
     candidate_id: str | None = None
 
     def __post_init__(self) -> None:
-        if bool(self.selection_id) != bool(self.candidate_id):
+        selection_id = str(self.selection_id or "").strip() or None
+        candidate_id = str(self.candidate_id or "").strip() or None
+        if bool(selection_id) != bool(candidate_id):
             raise ValueError(
                 "candidate-scoped PendingAction requires selectionId and candidateId"
             )
         scope_kind = str((self.scope or {}).get("kind") or "").strip()
-        if scope_kind == "workflow_candidate" and not self.candidate_id:
+        if scope_kind == "workflow_node_root" and (selection_id or candidate_id):
             raise ValueError(
-                "workflow_candidate PendingAction requires candidate identity"
+                "workflow_node_root PendingAction must not carry candidate identity"
             )
+        if scope_kind == "workflow_candidate":
+            if not selection_id or not candidate_id:
+                raise ValueError(
+                    "workflow_candidate PendingAction requires candidate identity"
+                )
+            scoped_selection_id = (
+                str((self.scope or {}).get("selectionId") or "").strip() or None
+            )
+            scoped_candidate_id = (
+                str((self.scope or {}).get("candidateId") or "").strip() or None
+            )
+            if (scoped_selection_id, scoped_candidate_id) != (
+                selection_id,
+                candidate_id,
+            ):
+                raise ValueError(
+                    "PendingAction candidate identity does not match its scope"
+                )
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {

@@ -88,7 +88,13 @@ _HYPOTHESIS_SELECTION_MISSING = (
 def _binding_session_scope(
     snapshot: Mapping[str, Any], action: PendingAction, agent_id: str
 ) -> dict[str, Any] | None:
-    """Build the full v3 session identity once the frozen Agent is known."""
+    """Build the full v3 session identity once the frozen Agent is known.
+
+    A PendingAction may represent either the node root or one candidate.  Keep
+    that distinction in the binding metadata so the downstream session/task
+    authority receives the same identity that was frozen at the graph
+    interrupt; never silently project a candidate action back to the root.
+    """
 
     team_id = str(snapshot.get("teamId") or "").strip()
     project_id = str(snapshot.get("projectId") or "").strip()
@@ -101,6 +107,12 @@ def _binding_session_scope(
         "workflowRunId": action.run_id,
         "workflowNodeId": action.node_id,
     }
+    if action.selection_id and action.candidate_id:
+        return WorkflowSessionScopeV3.candidate(
+            **common,
+            selectionId=action.selection_id,
+            candidateId=action.candidate_id,
+        ).to_dict()
     return WorkflowSessionScopeV3.root(**common).to_dict()
 
 
@@ -259,13 +271,32 @@ class RealDomainPorts:
             raise _HypothesisAuthorityUnavailable(
                 "hypothesis selection anchor authority returned an invalid payload"
             )
+        selection_id = str(payload.get("selectionId") or "").strip()
+        selected_candidate_ids = [
+            str(item).strip()
+            for item in list(payload.get("selectedCandidateIds") or [])
+            if str(item).strip()
+        ]
+        if len(set(selected_candidate_ids)) != len(selected_candidate_ids):
+            raise RuntimeError("candidate scope contains duplicate candidates")
+        # A candidate-scoped action is already frozen by the graph interrupt.
+        # It is the authoritative minimum when a draft anchor has not yet
+        # been published (for example after a crash between dispatch steps).
+        if action.selection_id:
+            if selection_id and selection_id != action.selection_id:
+                raise RuntimeError("candidate action selection does not match anchor")
+            selection_id = selection_id or action.selection_id
+        if action.candidate_id:
+            if (
+                selected_candidate_ids
+                and action.candidate_id not in selected_candidate_ids
+            ):
+                raise RuntimeError("candidate action is outside the selected candidates")
+            if not selected_candidate_ids:
+                selected_candidate_ids.append(action.candidate_id)
         return {
-            "selectionId": str(payload.get("selectionId") or "").strip(),
-            "selectedCandidateIds": [
-                str(item).strip()
-                for item in list(payload.get("selectedCandidateIds") or [])
-                if str(item).strip()
-            ],
+            "selectionId": selection_id,
+            "selectedCandidateIds": selected_candidate_ids,
         }
 
     def _bound_hypothesis_selection_id(self, action: PendingAction) -> str:
@@ -421,6 +452,24 @@ class RealDomainPorts:
             action.node_run_id.encode()
         ).hexdigest()[:16]
         terminal = {"succeeded", "failed", "blocked", "cancelled"}
+        selected_ids = [str(item).strip() for item in selected_candidate_ids]
+        if not selection_id or not selected_ids or any(not item for item in selected_ids):
+            raise RuntimeError("candidate scope requires a non-empty selection")
+        if len(set(selected_ids)) != len(selected_ids):
+            raise RuntimeError("candidate scope contains duplicate candidates")
+        for handle in handles:
+            if handle.selection_id != selection_id:
+                raise RuntimeError("candidate handle selection does not match anchor")
+            if handle.candidate_id not in selected_ids:
+                raise RuntimeError("candidate handle is outside the selected candidates")
+            if handle.session_id and (
+                handle.parent_session_id != root_session_id
+                or handle.root_session_id != root_session_id
+            ):
+                raise RuntimeError("candidate handle lineage does not match anchor root")
+        for candidate_id in (candidate_statuses or {}):
+            if str(candidate_id).strip() not in selected_ids:
+                raise RuntimeError("candidate status is outside the selected candidates")
 
         def merge_status(current: Any, desired: Any) -> str:
             current_text = str(current or "").strip().lower()
@@ -454,10 +503,14 @@ class RealDomainPorts:
                     "actionId": action.action_id,
                     "sessionId": root_session_id,
                     "sessionAttempt": root_session_attempt,
-                    "taskId": payload.get("taskId"),
-                    "turnId": payload.get("turnId"),
+                    # The root is a session-only container for candidate
+                    # fan-out.  Legacy scalar task/turn values may point at a
+                    # child; retaining them would mislabel the root and make
+                    # the compatibility projection unsafe.
+                    "taskId": None,
+                    "turnId": None,
                     "selectionId": selection_id,
-                    "selectedCandidateIds": list(selected_candidate_ids),
+                    "selectedCandidateIds": list(selected_ids),
                 }
             )
             previous_root = (
@@ -470,8 +523,8 @@ class RealDomainPorts:
                 "scopeKind": "workflow_node_root",
                 "sessionId": root_session_id,
                 "sessionAttempt": root_session_attempt,
-                "taskId": payload.get("taskId"),
-                "turnId": payload.get("turnId"),
+                "taskId": None,
+                "turnId": None,
                 "status": merge_status(previous_root.get("status"), root_status),
             }
 
@@ -479,6 +532,7 @@ class RealDomainPorts:
                 dict(item)
                 for item in list(payload.get("scopedSessions") or [])
                 if isinstance(item, Mapping)
+                and str(item.get("selectionId") or "").strip() == selection_id
                 and str(item.get("candidateId") or "").strip()
             ]
             by_key = {
@@ -490,7 +544,7 @@ class RealDomainPorts:
             }
             handle_by_candidate = {item.candidate_id: item for item in handles}
             statuses = dict(candidate_statuses or {})
-            for candidate_id in selected_candidate_ids:
+            for candidate_id in selected_ids:
                 key = (selection_id, candidate_id)
                 item = by_key.get(key) or {
                     "scopeKind": "workflow_candidate",
@@ -1533,6 +1587,22 @@ def _create_real_agent_task(
             store=store,
             run_id=action.run_id,
         )
+        scoped_payload: dict[str, Any] = {}
+        if action.selection_id and action.candidate_id:
+            raw_selected = (action.scope or {}).get("selectedCandidateIds")
+            selected = (
+                [str(item).strip() for item in raw_selected if str(item).strip()]
+                if isinstance(raw_selected, (list, tuple))
+                else []
+            )
+            if action.candidate_id not in selected:
+                selected.append(action.candidate_id)
+            scoped_payload = {
+                "selectionId": action.selection_id,
+                "candidateId": action.candidate_id,
+                "selectedCandidateIds": selected,
+                "scope": dict(action.scope or {}),
+            }
         started = start_research_project_agent_task(
             team_id,
             project_id,
@@ -1546,6 +1616,7 @@ def _create_real_agent_task(
                 "sourceCollectionRunId": str(
                     input_snapshot.get("sourceCollectionRunId") or ""
                 ),
+                **scoped_payload,
             },
         )
     return _agent_handle_from_started(started)

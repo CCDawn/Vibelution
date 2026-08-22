@@ -51,6 +51,62 @@ def _action(*, attempt: int = 1, node_run_id: str = "node-1") -> PendingAction:
     )
 
 
+def test_pending_action_rejects_candidate_identity_outside_its_scope() -> None:
+    with pytest.raises(ValueError, match="does not match"):
+        replace(
+            _action(),
+            selection_id="selection-1",
+            candidate_id="H1",
+            scope={
+                "kind": "workflow_candidate",
+                "selectionId": "selection-1",
+                "candidateId": "H2",
+            },
+        )
+
+
+def test_pending_action_rejects_candidate_identity_on_root_scope() -> None:
+    with pytest.raises(ValueError, match="must not carry candidate identity"):
+        replace(
+            _action(),
+            selection_id="selection-1",
+            candidate_id="H1",
+            scope={"kind": "workflow_node_root"},
+        )
+
+
+def test_candidate_action_cannot_join_a_different_frozen_selection() -> None:
+    payload = json.dumps(
+        {
+            "selectionId": "selection-1",
+            "selectedCandidateIds": ["H2"],
+        }
+    )
+    anchor = (None,) * 13 + (payload,)
+
+    class _Repository:
+        def get_anchor_by_node_run(self, _node_run_id: str):
+            return anchor
+
+    class _Store:
+        def read(self, callback):
+            return callback(_Repository())
+
+    action = replace(
+        _action(),
+        selection_id="selection-1",
+        candidate_id="H1",
+        scope={
+            "kind": "workflow_candidate",
+            "selectionId": "selection-1",
+            "candidateId": "H1",
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="outside the selected candidates"):
+        RealDomainPorts(_Store())._bound_hypothesis_selection(action)
+
+
 def test_formal_selection_prefers_frozen_snapshot_without_legacy_authority(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

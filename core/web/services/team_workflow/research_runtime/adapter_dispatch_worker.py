@@ -107,6 +107,24 @@ def _canonical_anchor_payload(
         str(item.get("selectionId") or "") != action.selection_id for item in scoped
     ):
         raise RuntimeError("candidate anchor selection does not match PendingAction")
+    if action.candidate_id:
+        matching_candidates = [
+            str(item.get("candidateId") or "").strip()
+            for item in scoped
+            if str(item.get("candidateId") or "").strip() == action.candidate_id
+        ]
+        if len(scoped) != 1 or not matching_candidates:
+            raise RuntimeError("candidate anchor does not match PendingAction")
+    raw_selected = (action.scope or {}).get("selectedCandidateIds")
+    if isinstance(raw_selected, (list, tuple)):
+        selected = {
+            str(item).strip() for item in raw_selected if str(item).strip()
+        }
+        if selected and any(
+            str(item.get("candidateId") or "").strip() not in selected
+            for item in scoped
+        ):
+            raise RuntimeError("candidate anchor is outside PendingAction selection")
     root = {
         **root,
         "scopeKind": "workflow_node_root",
