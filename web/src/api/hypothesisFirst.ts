@@ -386,3 +386,13 @@ export function recordCollectionHandoff(
     body,
   );
 }
+
+export function recoverCollectionRequest(
+  teamId: string,
+  requestId: string,
+): Promise<CollectionHandoffResponse> {
+  return writeJson<CollectionHandoffResponse>(
+    `${teamPrefix(teamId)}/hypothesis-first/chain/collection-requests/${encodeURIComponent(requestId)}/recover`,
+    "POST",
+  );
+}

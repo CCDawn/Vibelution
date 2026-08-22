@@ -22,7 +22,8 @@ from __future__ import annotations
 import json
 
 from core.infrastructure import developer_sandbox
-from concurrent.futures import Future
+from concurrent.futures import Future, ThreadPoolExecutor
+import time
 from pathlib import Path
 
 import pytest
@@ -31,6 +32,7 @@ from core.research.workflow.contracts import (
     ActorRef,
     CommandRequest,
     WorkflowCommandKind,
+    scope_hash_for,
 )
 from core.web.services import (
     agent_directory_service,
@@ -375,6 +377,114 @@ def test_collection_decision_marks_request_failed_when_background_start_rejects(
         "code": "search_start_failed",
         "message": "source collection worker unavailable",
     }
+
+
+def test_collection_facade_accepts_nested_start_response(monkeypatch) -> None:
+    scope_fields = _scope_fields("agent-nested")
+    scope_hash = scope_hash_for(
+        **{field: scope_fields[field] for field in chain._SCOPE_FIELDS},
+        agent_id=scope_fields["agentId"],
+        mode=scope_fields["mode"],
+    )
+    scope = {
+        **scope_fields,
+        "scopeHash": scope_hash,
+        "artifactLocator": f"research-artifact://test/{scope_hash}",
+        "ledgerRoot": f"research-ledger://test/{scope_hash}",
+        "cacheKey": f"scope:{scope_hash}:main:agent-nested",
+    }
+    monkeypatch.setattr(facade, "_find_existing_run", lambda *_args: None)
+    monkeypatch.setattr(
+        facade,
+        "_create_collection_run",
+        lambda *_args: {"run": {"runId": "nested-child-1"}},
+    )
+    monkeypatch.setattr(
+        facade,
+        "_load_distilled_summary",
+        lambda _team_id, run_id: {"status": "queued", "runId": run_id},
+    )
+
+    result = facade.research_knowledge_collection_facade(
+        action="ensure",
+        scope=scope,
+        searchEnvelope={"keywords": ["nested response"]},
+        team_id="team-nested",
+    )
+
+    assert result["created"] is True
+    assert result["locator"]["runId"] == "nested-child-1"
+
+
+def test_collection_request_recovery_reuses_child_run_without_resetting_chain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    team_id, agents = _hf_env(tmp_path, monkeypatch)
+    scope_fields = _scope_fields(agents["coordinator"])
+    scope_hash = scope_hash_for(
+        **{field: scope_fields[field] for field in chain._SCOPE_FIELDS},
+        agent_id=scope_fields["agentId"],
+        mode=scope_fields["mode"],
+    )
+    request_id = "hfcr-orphan-recovery"
+    chain._append_jsonl(
+        chain._storage_path(team_id),
+        {
+            "schemaVersion": 1,
+            "recordKind": chain.COLLECTION_REQUEST_KIND,
+            "requestId": request_id,
+            "requestHash": "request-hash",
+            "status": "failed",
+            "meetingRoundId": "meeting-recovery",
+            "decisionId": "decision-recovery",
+            "questionId": _QUESTION_ID,
+            **scope_fields,
+            "scopeHash": scope_hash,
+            "searchEnvelope": {"keywords": ["recovery evidence"]},
+            "requirements": {"completeness": "bounded"},
+            "writebackPolicy": {"networkExecution": False},
+            "collectionRunId": "",
+            "collectionRunStatus": "failed",
+            "startError": {"code": "collection_run_missing"},
+            "createdAt": "2026-08-22T00:00:00Z",
+        },
+    )
+    facade_calls: list[dict] = []
+    child_runs: set[str] = set()
+    started: list[str] = []
+
+    def fake_ensure(**kwargs):
+        facade_calls.append(kwargs)
+        child_runs.add("child-recovered")
+        return {"locator": {"runId": "child-recovered"}, "created": False}
+
+    monkeypatch.setattr(facade, "research_knowledge_collection_facade", fake_ensure)
+    def fake_background(_team_id, run_id, _payload=None):
+        started.append(run_id)
+        time.sleep(0.02)
+        return {"runId": run_id, "status": "running"}
+
+    monkeypatch.setattr(collection_runs, "start_source_collection_search_background", fake_background)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(chain.recover_collection_request, team_id, request_id)
+            for _ in range(2)
+        ]
+        first, second = (future.result() for future in futures)
+
+    assert first["request"]["collectionRunId"] == "child-recovered"
+    assert second["request"]["collectionRunId"] == "child-recovered"
+    assert first["status"] == "recovered"
+    assert second["status"] == "reused"
+    assert child_runs == {"child-recovered"}
+    assert started == ["child-recovered"]
+    assert [call["searchEnvelope"]["keywords"] for call in facade_calls] == [["recovery evidence"]]
+    third = chain.recover_collection_request(team_id, request_id)
+    assert third["status"] == "reused"
+    assert started == ["child-recovered"]
+    records = chain._collection_requests(chain._records(team_id))
+    assert len([record for record in records if record["requestId"] == request_id]) == 1
 
 
 def _seed_question_reset_artifacts(team_id: str, question_id: str) -> dict[str, str]:

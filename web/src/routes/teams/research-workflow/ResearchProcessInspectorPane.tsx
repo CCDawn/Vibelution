@@ -77,12 +77,25 @@ export function ResearchProcessInspectorPane(props: {
     submitOffer: (offer: import("../../../api/types/research-workflow/commands").CommandOffer) => Promise<void>;
   };
   nextAction?: HypothesisFirstNextAction;
-  retryCollectionOffer?: CommandOffer | null;
+  onRecoverCollection?: (requestId: string) => Promise<void>;
+  collectionRecoveryBusy?: boolean;
+  collectionRecoveryError?: string | null;
 }) {
-  const { scope, state, actions, nextAction, retryCollectionOffer = null } = props;
+  const {
+    scope,
+    state,
+    actions,
+    nextAction,
+    onRecoverCollection,
+    collectionRecoveryBusy = false,
+    collectionRecoveryError = null,
+  } = props;
   const { lang: shellLang } = useShellI18n();
   const lang = props.lang ?? shellLang;
   const isZh = lang === "zh";
+  const collectionChildStatus = nextAction?.collectionRequestId
+    ? null
+    : (state.projection?.run.nodeRuns.source_finding?.status ?? null);
   const [selectedQuestionRunId, setSelectedQuestionRunId] = useState("");
   const questionDetail = useQuery({
     queryKey: queryKeys.challengeQuestionRunDetail(scope.teamId, scope.questionId),
@@ -162,10 +175,14 @@ export function ResearchProcessInspectorPane(props: {
         questionId={scope.questionId || state.run?.questionId || ""}
         nodeId={scope.selectedNodeId}
         runId={scope.runId}
-        collectionChildStatus={state.projection?.run.nodeRuns.source_finding?.status ?? null}
+        collectionChildStatus={collectionChildStatus}
         onOpenQuestion={(questionId) => actions.replaceParams({ panel: "question", questionId })}
         onNavigateToNode={(nodeId) => actions.replaceParams({ node: nodeId, panel: "node" })}
-        onRetryCollection={retryCollectionOffer ? () => actions.submitOffer(retryCollectionOffer) : undefined}
+        onRetryCollection={
+          onRecoverCollection && nextAction?.collectionRequestId
+            ? () => onRecoverCollection(nextAction.collectionRequestId || "")
+            : undefined
+        }
       />
     );
   }
@@ -218,6 +235,20 @@ export function ResearchProcessInspectorPane(props: {
           ? () => actions.replaceParams({ node: nextAction.targetNodeId, panel: "node" })
           : undefined
       }
+      collectionRecoveryRequestId={
+        scope.selectedNodeId === "source_finding"
+          && (nextAction?.command === "retry_collection" || nextAction?.command === "continue_collection")
+          ? nextAction.collectionRequestId
+          : undefined
+      }
+      collectionRecoveryLabel={
+        nextAction?.command === "continue_collection"
+          ? (isZh ? "继续搜集" : "Continue collection")
+          : (isZh ? "重试搜集" : "Retry collection")
+      }
+      onRecoverCollection={onRecoverCollection}
+      collectionRecoveryBusy={collectionRecoveryBusy}
+      collectionRecoveryError={collectionRecoveryError}
     />
   );
 }

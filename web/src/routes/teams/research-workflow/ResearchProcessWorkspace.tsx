@@ -196,6 +196,11 @@ export function ResearchProcessWorkspace({
     || hypothesisFirstChain.collectionRequests.length > 0,
   );
   const hypothesisFirstReady = !hypothesisFirstChain.loading && !hypothesisFirstChain.scopeMismatch;
+  // A hypothesis-first collection request owns its child-run status. Do not
+  // let a formal pipeline node status mask an orphaned request recovery.
+  const collectionChildStatus = hypothesisFirstChain.collectionRequests.length > 0
+    ? null
+    : (runState.projection?.run.nodeRuns.source_finding?.status ?? null);
 
   const nextAction = useMemo(() => resolveHypothesisFirstNextAction({
     run: runState.run
@@ -211,7 +216,7 @@ export function ResearchProcessWorkspace({
     reviewRoundLinks: hypothesisFirstChain.reviewRoundLinks,
     selection: hypothesisFirstChain.selection,
     collectionRequests: hypothesisFirstChain.collectionRequests,
-    collectionChildStatus: runState.projection?.run.nodeRuns.source_finding?.status ?? null,
+    collectionChildStatus,
     selectedNodeId: location.selectedNodeId,
   }), [
     hypothesisFirstChain.chainState,
@@ -222,7 +227,7 @@ export function ResearchProcessWorkspace({
     chainQuestionId,
     location.selectedNodeId,
     formalRuntimeCurrentNodeIds,
-    runState.projection?.run.nodeRuns.source_finding?.status,
+    collectionChildStatus,
     runState.run,
     workflowActive,
   ]);
@@ -237,10 +242,6 @@ export function ResearchProcessWorkspace({
       recovery: null,
     };
   }, [hypothesisFirstChain.scopeMismatch, nextAction]);
-  const retryCollectionOffer = (runState.commandOffers ?? []).find((offer) => (
-    offer.command === "retry_node" && (offer.nodeId === "source_finding" || !offer.nodeId)
-  )) ?? null;
-
   const displayError =
     commands.error
     || formalCommand.commandError
@@ -328,7 +329,9 @@ export function ResearchProcessWorkspace({
         submitOffer: commands.submitOffer,
       }}
       nextAction={safeNextAction}
-      retryCollectionOffer={retryCollectionOffer}
+      onRecoverCollection={hypothesisFirstChain.recoverCollection}
+      collectionRecoveryBusy={hypothesisFirstChain.recoveryBusy}
+      collectionRecoveryError={hypothesisFirstChain.recoveryError}
     />
   ) : null;
   const archiveOpen = location.panel === "question";

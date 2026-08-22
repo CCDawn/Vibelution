@@ -340,6 +340,10 @@ def _expected_routes() -> set[tuple[str, str]]:
             "POST",
             f"{prefix}/hypothesis-first/chain/collection-requests/{{request_id}}/handoff",
         ),
+        (
+            "POST",
+            f"{prefix}/hypothesis-first/chain/collection-requests/{{request_id}}/recover",
+        ),
     }
 
 
@@ -1348,3 +1352,30 @@ def test_next_review_round_route_passes_payload_and_maps_domain_error(monkeypatc
         json={"budget": 2},
     )
     assert blocked.status_code == 422
+
+
+def test_collection_recovery_route_calls_idempotent_service(monkeypatch) -> None:
+    calls: list[tuple[str, str]] = []
+
+    def fake_recover(team_id: str, request_id: str) -> dict:
+        calls.append((team_id, request_id))
+        return {
+            "schemaVersion": 1,
+            "teamId": team_id,
+            "status": "recovered",
+            "request": {
+                "requestId": request_id,
+                "collectionRunId": "child-1",
+                "status": "pending",
+            },
+            "reused": False,
+        }
+
+    monkeypatch.setattr(hypothesis_first_chain, "recover_collection_request", fake_recover)
+    client = _client()
+    response = client.post(
+        "/api/teams/team-1/workflow-orchestration/hypothesis-first/chain/collection-requests/req-1/recover",
+    )
+    assert response.status_code == 200, response.text
+    assert calls == [("team-1", "req-1")]
+    assert response.json()["request"]["collectionRunId"] == "child-1"

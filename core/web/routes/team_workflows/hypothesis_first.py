@@ -800,3 +800,19 @@ def team_workflow_hypothesis_first_collection_handoff(
         )
     except _DOMAIN_ERRORS as exc:
         _map_domain_error("hypothesis_first.chain.collection_handoff", team_id, exc)
+
+
+@router.post(
+    "/teams/{team_id}/workflow-orchestration/hypothesis-first/chain/collection-requests/{request_id}/recover",
+    response_model=CollectionHandoffResponse,
+    response_model_exclude_unset=True,
+)
+def team_workflow_hypothesis_first_collection_recover(
+    team_id: str,
+    request_id: str,
+) -> dict:
+    """Bind/reuse the child run and restart an orphaned collection request."""
+    try:
+        return hypothesis_first_chain.recover_collection_request(team_id, request_id)
+    except _DOMAIN_ERRORS as exc:
+        _map_domain_error("hypothesis_first.chain.collection_recover", team_id, exc)

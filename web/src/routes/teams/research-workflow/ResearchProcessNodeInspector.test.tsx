@@ -70,6 +70,9 @@ function renderInspector(detail: ResearchWorkflowNodeDetail | null, extras: {
   isCurrentTask?: boolean;
   hideStartOffer?: boolean;
   statusBanner?: string | null;
+  collectionRecoveryRequestId?: string;
+  collectionRecoveryBusy?: boolean;
+  collectionRecoveryError?: string | null;
 } = {}) {
   return renderToStaticMarkup(
     <ResearchProcessNodeInspector
@@ -86,6 +89,11 @@ function renderInspector(detail: ResearchWorkflowNodeDetail | null, extras: {
       onOffer={vi.fn()}
       hideStartOffer={extras.hideStartOffer}
       statusBanner={extras.statusBanner}
+      collectionRecoveryRequestId={extras.collectionRecoveryRequestId}
+      collectionRecoveryLabel="恢复资料搜集"
+      onRecoverCollection={extras.collectionRecoveryRequestId ? vi.fn(async () => undefined) : undefined}
+      collectionRecoveryBusy={extras.collectionRecoveryBusy}
+      collectionRecoveryError={extras.collectionRecoveryError}
     />,
   );
 }
@@ -270,5 +278,30 @@ describe("ResearchProcessNodeInspector command rendering", () => {
     }));
     expect(markup).toContain("前往闭环首轮假说讨论");
     expect(markup).not.toContain("hypothesis_first_meeting_open");
+  });
+
+  it("renders hypothesis collection recovery beside source finding", () => {
+    const markup = renderInspector(makeDetail({
+      commandOffers: [],
+    }), {
+      hideStartOffer: true,
+      statusBanner: "资料搜集启动失败，请重试。",
+      collectionRecoveryRequestId: "hfcr-1",
+      collectionRecoveryError: "worker unavailable",
+    });
+    expect(markup).toContain("恢复资料搜集");
+    expect(markup).toContain("worker unavailable");
+    expect(markup).toContain('data-testid="source-finding-collection-recovery"');
+  });
+
+  it("disables collection recovery while recovery is in progress", () => {
+    const markup = renderInspector(makeDetail({ commandOffers: [] }), {
+      hideStartOffer: true,
+      collectionRecoveryRequestId: "hfcr-1",
+      collectionRecoveryBusy: true,
+    });
+    expect(markup).toContain('data-testid="source-finding-collection-recovery"');
+    expect(markup).toContain("disabled");
+    expect(markup).toContain("正在恢复搜集");
   });
 });

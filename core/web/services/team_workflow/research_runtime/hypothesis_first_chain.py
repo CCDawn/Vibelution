@@ -64,6 +64,7 @@ _ACTIVE_COLLECTION_STATUSES = frozenset(
 
 PROJECT_ROOT = Path(__file__).resolve().parents[5]
 _LOCK = threading.RLock()
+_RECOVERY_LOCKS: dict[str, threading.Lock] = {}
 
 
 class HypothesisFirstChainError(RuntimeError):
@@ -1826,6 +1827,211 @@ def _update_collection_request(
         updated = {**latest, **fields}
         _append_jsonl(_storage_path(team_id), updated)
         return updated
+
+
+def _scope_envelope_for_collection_request(
+    request: Mapping[str, Any],
+) -> dict[str, str]:
+    """Rebuild the validated facade scope from the immutable request fields."""
+    identity = {
+        field: str(request.get(field) or "").strip() for field in _SCOPE_FIELDS
+    }
+    agent_id = str(request.get("agentId") or "").strip()
+    mode = str(request.get("mode") or "").strip().lower()
+    if not all(identity.values()) or not agent_id or not mode:
+        raise HypothesisFirstChainError(
+            "collection request scope is incomplete and cannot be recovered"
+        )
+    expected_hash = scope_hash_for(
+        **identity,
+        agent_id=agent_id,
+        mode=mode,
+    )
+    stored_hash = str(request.get("scopeHash") or "").strip()
+    if stored_hash and stored_hash != expected_hash:
+        raise HypothesisFirstChainError(
+            "collection request scopeHash does not match its scope identity"
+        )
+    # Older requests did not persist derived locators. They are pure functions
+    # of the request identity, so deriving them here preserves the original
+    # scope without introducing a second source of truth.
+    return {
+        **identity,
+        "agentId": agent_id,
+        "mode": mode,
+        "scopeHash": stored_hash or expected_hash,
+        "artifactLocator": (
+            f"research-artifact://{identity['program']}/{identity['theme']}/"
+            f"{identity['campaign']}/{identity['branch']}/{identity['question']}/"
+            f"{stored_hash or expected_hash}"
+        ),
+        "ledgerRoot": (
+            f"research-ledger://{identity['program']}/{identity['theme']}/"
+            f"{identity['campaign']}/{stored_hash or expected_hash}"
+        ),
+        "cacheKey": f"scope:{stored_hash or expected_hash}:{identity['branch']}:{agent_id}",
+    }
+
+
+def _recover_collection_request_locked(
+    team_id: str,
+    request_id: str,
+) -> dict[str, Any]:
+    """Idempotently bind and restart one orphaned hypothesis collection request.
+
+    The request is the durable idempotency key. Existing candidates, selections,
+    meetings and review records are never rewritten; only the request's child
+    run binding and collection status are appended.
+    """
+    from core.web.services import team_service
+    from core.web.services.team_workflow.source_collection import facade
+    from core.web.services.team_workflow.source_collection import runs as source_collection_runs
+
+    normalized_team_id = team_service.assert_team_exists(team_id)
+    normalized_request_id = str(request_id or "").strip()
+    if not normalized_request_id:
+        raise HypothesisFirstChainError("Collection request id is required.")
+    request = _latest_by_id(
+        [
+            item
+            for item in _records(normalized_team_id)
+            if item.get("recordKind") == COLLECTION_REQUEST_KIND
+        ],
+        "requestId",
+        normalized_request_id,
+    )
+    if request is None:
+        raise HypothesisFirstChainNotFoundError(
+            f"Collection request {normalized_request_id} not found."
+        )
+    if str(request.get("status") or "").strip().lower() == "handed_off":
+        return {
+            "schemaVersion": SCHEMA_VERSION,
+            "teamId": normalized_team_id,
+            "status": "reused",
+            "request": request,
+            "reused": True,
+        }
+    existing_run_id = str(request.get("collectionRunId") or "").strip()
+    if (
+        str(request.get("status") or "").strip().lower() == "pending"
+        and existing_run_id
+        and str(request.get("collectionRunStatus") or "").strip().lower()
+        in {"starting", "running"}
+    ):
+        return {
+            "schemaVersion": SCHEMA_VERSION,
+            "teamId": normalized_team_id,
+            "status": "reused",
+            "request": request,
+            "reused": True,
+        }
+
+    scope = _scope_envelope_for_collection_request(request)
+    search_envelope = request.get("searchEnvelope") if isinstance(request.get("searchEnvelope"), Mapping) else {}
+    requirements = request.get("requirements") if isinstance(request.get("requirements"), Mapping) else {}
+    writeback_policy = request.get("writebackPolicy") if isinstance(request.get("writebackPolicy"), Mapping) else {}
+    ensured = facade.research_knowledge_collection_facade(
+        action="ensure",
+        scope=scope,
+        searchEnvelope=search_envelope,
+        requirements=requirements,
+        writebackPolicy=writeback_policy,
+        team_id=normalized_team_id,
+    )
+    locator = ensured.get("locator") if isinstance(ensured.get("locator"), Mapping) else {}
+    run_id = str(locator.get("runId") or "").strip()
+    if not run_id:
+        updated = _update_collection_request(
+            normalized_team_id,
+            normalized_request_id,
+            status="failed",
+            collectionRunStatus="failed",
+            startError={
+                "code": "collection_run_missing",
+                "message": "资料搜集子运行未创建，无法启动搜索。",
+            },
+        )
+        return {
+            "schemaVersion": SCHEMA_VERSION,
+            "teamId": normalized_team_id,
+            "status": "collection_recovery",
+            "request": updated,
+            "reused": False,
+        }
+
+    previous_run_id = str(request.get("collectionRunId") or "").strip()
+    _update_collection_request(
+        normalized_team_id,
+        normalized_request_id,
+        status="pending",
+        collectionRunId=run_id,
+        collectionRunStatus="starting",
+        startError={},
+    )
+    try:
+        source_collection_runs.start_source_collection_search_background(
+            normalized_team_id,
+            run_id,
+            {"backgroundExecution": True},
+        )
+    except Exception as exc:  # noqa: BLE001 - request remains visibly retryable
+        failed = _update_collection_request(
+            normalized_team_id,
+            normalized_request_id,
+            status="failed",
+            collectionRunStatus="failed",
+            startError={
+                "code": "search_start_failed",
+                "message": str(exc) or type(exc).__name__,
+            },
+        )
+        return {
+            "schemaVersion": SCHEMA_VERSION,
+            "teamId": normalized_team_id,
+            "status": "collection_recovery",
+            "request": failed,
+            "reused": bool(previous_run_id == run_id),
+            "error": str(exc),
+        }
+    updated = _update_collection_request(
+        normalized_team_id,
+        normalized_request_id,
+        status="pending",
+        collectionRunStatus="running",
+        startError={},
+    )
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "teamId": normalized_team_id,
+        "status": "reused" if previous_run_id == run_id else "recovered",
+        "request": updated,
+        "reused": bool(previous_run_id == run_id),
+    }
+
+
+def _collection_recovery_lock(team_id: str, request_id: str) -> threading.Lock:
+    key = f"{team_id}\x00{request_id}"
+    with _LOCK:
+        return _RECOVERY_LOCKS.setdefault(key, threading.Lock())
+
+
+def recover_collection_request(
+    team_id: str,
+    request_id: str,
+) -> dict[str, Any]:
+    """Serialize recovery for one durable request without holding the ledger lock."""
+    from core.web.services import team_service
+
+    normalized_team_id = team_service.assert_team_exists(team_id)
+    normalized_request_id = str(request_id or "").strip()
+    if not normalized_request_id:
+        raise HypothesisFirstChainError("Collection request id is required.")
+    with _collection_recovery_lock(normalized_team_id, normalized_request_id):
+        return _recover_collection_request_locked(
+            normalized_team_id,
+            normalized_request_id,
+        )
 
 
 def _requests_for_collection_run(

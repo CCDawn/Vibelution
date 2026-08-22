@@ -459,6 +459,15 @@ def _create_collection_run(
     return response if isinstance(response, dict) else {}
 
 
+def _run_id_from_start_response(response: Mapping[str, Any] | None) -> str:
+    """Read both the legacy flat and the current nested start response."""
+    payload = _object(response)
+    nested_run = payload.get("run")
+    return _text(payload.get("runId") or (
+        nested_run.get("runId") if isinstance(nested_run, Mapping) else ""
+    ))
+
+
 def research_knowledge_collection_facade(
     *,
     action: str = "inspect",
@@ -539,7 +548,7 @@ def research_knowledge_collection_facade(
         requirements,
         writeback_policy,
     )
-    run_id = _text(created_run.get("runId"))
+    run_id = _run_id_from_start_response(created_run)
     return {
         **base,
         "action": "ensure",

@@ -34,6 +34,11 @@ export type ResearchProcessNodeInspectorProps = {
   statusBanner?: string | null;
   hypothesisNavLabel?: string | null;
   onNavigateHypothesis?: () => void;
+  collectionRecoveryRequestId?: string;
+  collectionRecoveryLabel?: string;
+  onRecoverCollection?: (requestId: string) => Promise<void>;
+  collectionRecoveryBusy?: boolean;
+  collectionRecoveryError?: string | null;
 };
 
 export function ResearchProcessNodeInspector(props: ResearchProcessNodeInspectorProps) {
@@ -116,6 +121,33 @@ export function ResearchProcessNodeInspector(props: ResearchProcessNodeInspector
           >
             {props.hypothesisNavLabel || (isZh ? "前往闭环首轮假说讨论" : "Go to the first hypothesis discussion")}
           </VButton>
+        </div>
+      ) : null}
+      {props.nodeId === "source_finding"
+        && props.collectionRecoveryRequestId
+        && props.onRecoverCollection ? (
+        <div className={styles.nav} data-testid="source-finding-collection-recovery">
+          <VButton
+            type="button"
+            variant="secondary"
+            density="compact"
+            isDisabled={props.collectionRecoveryBusy}
+            onPress={() => props.onRecoverCollection?.(props.collectionRecoveryRequestId || "")}
+          >
+            {props.collectionRecoveryBusy
+              ? (isZh ? "正在恢复搜集…" : "Recovering collection…")
+              : (props.collectionRecoveryLabel || (isZh ? "恢复搜集" : "Recover collection"))}
+          </VButton>
+          {props.collectionRecoveryBusy ? (
+            <div role="status" className={styles.status}>
+              {isZh ? "正在绑定资料搜集子运行并启动搜索" : "Binding the collection run and starting search"}
+            </div>
+          ) : null}
+          {props.collectionRecoveryError ? (
+            <div role="alert" className={styles.status}>
+              {isZh ? "恢复搜集失败：" : "Collection recovery failed: "}{props.collectionRecoveryError}
+            </div>
+          ) : null}
         </div>
       ) : null}
       <NodeHandoffSection

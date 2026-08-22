@@ -41,6 +41,9 @@ describe("hypothesis-first API", () => {
     expect(apiSource).toContain("export function fetchReviewRoundLinks");
     expect(apiSource).toContain("export function closeHypothesisReviewMeeting");
     expect(apiSource).toContain("export function recordCollectionHandoff");
+    expect(apiSource).toContain("export function recoverCollectionRequest");
+    expect(apiSource).toContain("/collection-requests/");
+    expect(apiSource).toContain("/recover");
     expect(apiSource).toContain("/hypothesis-rounds");
     expect(apiSource).toContain("/hypothesis-first/chain/state");
   });

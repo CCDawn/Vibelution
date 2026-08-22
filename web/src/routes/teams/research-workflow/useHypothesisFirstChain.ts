@@ -7,7 +7,7 @@
  * SSE progress into these queries so cross-panel chain actions (selection,
  * meeting closure, handoff) refresh the canvas region.
  */
-import { useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
@@ -15,6 +15,7 @@ import {
   fetchHypothesisFirstChainState,
   fetchHypothesisSelections,
   fetchMeetingRounds,
+  recoverCollectionRequest,
   fetchReviewRoundLinks,
 } from "../../../api/hypothesisFirst";
 import { queryKeys } from "../../../api/queryKeys";
@@ -55,6 +56,9 @@ export type HypothesisFirstChainData = {
   reviewRoundLinks: ReviewRoundLinkRecord[];
   loading: boolean;
   error: string | null;
+  recoveryBusy: boolean;
+  recoveryError: string | null;
+  recoverCollection: (requestId: string) => Promise<void>;
 };
 
 export function invalidateHypothesisFirstQueries(
@@ -113,6 +117,9 @@ export function useHypothesisFirstChain(teamId: string, questionId: string): Hyp
   const requestedQuestionId = normalizedQuestion(questionId);
   const enabled = Boolean(teamId.trim() && requestedQuestionId);
   const pageVisible = usePageVisibility();
+  const queryClient = useQueryClient();
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const chainState = useQuery({
     queryKey: queryKeys.hypothesisFirstChainState(teamId, questionId),
     queryFn: ({ signal }) => fetchHypothesisFirstChainState(teamId, questionId, { signal }),
@@ -171,6 +178,21 @@ export function useHypothesisFirstChain(teamId: string, questionId: string): Hyp
     .map((query) => query.error)
     .find(Boolean);
 
+  const recoverCollection = useCallback(async (requestId: string) => {
+    const normalizedRequestId = requestId.trim();
+    if (!normalizedRequestId || recoveryBusy) return;
+    setRecoveryBusy(true);
+    setRecoveryError(null);
+    try {
+      await recoverCollectionRequest(teamId, normalizedRequestId);
+      invalidateHypothesisFirstQueries(queryClient, teamId, questionId);
+    } catch (error) {
+      setRecoveryError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRecoveryBusy(false);
+    }
+  }, [questionId, queryClient, recoveryBusy, teamId]);
+
   // Meeting records never carry roundIndex server-side; the review-round
   // links are the authority. Decorate review meetings here so node ids,
   // inspectors, and next-action navigation all share one numbering.
@@ -212,6 +234,9 @@ export function useHypothesisFirstChain(teamId: string, questionId: string): Hyp
     reviewRoundLinks: scopedLinks,
     loading: enabled && [chainState, selections, meetings, requests, links].some((query) => query.isPending),
     error: firstError instanceof Error ? firstError.message : firstError ? String(firstError) : null,
+    recoveryBusy,
+    recoveryError,
+    recoverCollection,
   };
 }
 
