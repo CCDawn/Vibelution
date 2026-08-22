@@ -8,18 +8,19 @@ breaker counters). The pure planning contracts live in
 dispatch, run status reads and approved-output reads are injectable callables
 so tests never touch the formal runtime.
 
-Authorization is fail-closed: the persisted DEV control snapshot must have
-reached ``RESEARCH_AUTHORIZATION_REQUIRED``, the operator must confirm, and
-each progressive gate (G5/G12/G125) requires the previous gate's batch to be
-fully succeeded before it may start.
+Authorization is fail-closed: a current readiness boundary, explicit client
+confirmation, and a durable ``CatalogRunAuthorization`` for the exact plan
+scope/report hash are all required. Each progressive gate (G5/G12/G125) also
+requires the previous gate's batch to be fully succeeded before it may start.
 """
 
 from __future__ import annotations
 
 import json
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +52,16 @@ from core.web.services.team_workflow.challenge_cup_dev_controls import (
     get_challenge_cup_dev_control_snapshot,
 )
 from core.web.services.team_workflow.research_projects import team_workspace_root
+from core.web.services.team_workflow.research_runtime.catalog_run_authorization import (
+    CatalogRunAuthorizationError,
+    authorization_to_dict,
+    find_catalog_run_authorization,
+    readiness_report_sha256,
+    require_readiness_report_sha256,
+)
+from core.web.services.team_workflow.research_runtime.catalog_run_authorization import (
+    record_catalog_run_authorization as _record_catalog_run_authorization,
+)
 
 CONTROLS_DIRNAME = "challenge_cup_real_batch"
 BATCHES_DIRNAME = "batches"
@@ -119,6 +130,8 @@ def _default_question_run_launcher(
     team_id: str,
     question_id: str,
     idempotency_key: str,
+    *,
+    authorization: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Create one real question workflow run (ledger only; no dispatch here)."""
     from core.web.services.team_workflow.research_runtime.run_creation import (
@@ -131,6 +144,7 @@ def _default_question_run_launcher(
         question_id=question_id,
         safety_limits=_default_safety_limits(),
         idempotency_key=idempotency_key,
+        catalog_run_authorization=authorization,
     )
 
 
@@ -290,7 +304,14 @@ def _seed_from_previous_gates(team_id: str, state: CatalogExecutionState) -> int
     return seeded
 
 
-def _new_envelope(team_id: str, plan_id: str, *, concurrency: int, failure_budget: int) -> dict[str, Any]:
+def _new_envelope(
+    team_id: str,
+    plan_id: str,
+    *,
+    concurrency: int,
+    failure_budget: int,
+    authorization: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     state = new_real_batch_state(plan_id)
     _seed_from_previous_gates(team_id, state)
     return {
@@ -306,6 +327,7 @@ def _new_envelope(team_id: str, plan_id: str, *, concurrency: int, failure_budge
         "failureBudget": failure_budget,
         "consecutiveFailures": 0,
         "cancelled": False,
+        "catalogRunAuthorization": dict(authorization or {}),
         "createdAt": _utc_now(),
         "updatedAt": _utc_now(),
     }
@@ -349,7 +371,59 @@ def _state_of(envelope: dict[str, Any]) -> CatalogExecutionState:
         ) from exc
 
 
-def _require_authorization(team_id: str) -> None:
+def _platform_snapshot_allows_real_batch(snapshot: Mapping[str, Any]) -> bool:
+    """Recognize the current readiness boundary without owning its schema.
+
+    The legacy DEV control surface projects ``RESEARCH_AUTHORIZATION_REQUIRED``.
+    Catalog readiness will expose its own report/action later, so the real-batch
+    service accepts any explicit authorization-required action or a READY report
+    that says research authorization is required.  The durable approval record
+    below remains mandatory in every case.
+    """
+
+    action = str(snapshot.get("nextLegalAction") or "").strip().upper()
+    if action.endswith("AUTHORIZATION_REQUIRED"):
+        return True
+    report = snapshot.get("report")
+    if not isinstance(report, Mapping):
+        report = snapshot.get("readinessReport")
+    return (
+        isinstance(report, Mapping)
+        and str(report.get("status") or "").strip().upper() == "READY"
+        and report.get("researchAuthorizationRequired") is True
+    )
+
+
+def _readiness_evidence_from_snapshot(snapshot: Mapping[str, Any]) -> str:
+    """Resolve the exact current readiness hash used by authorization lookup."""
+
+    for key in (
+        "readinessReportSha256",
+        "readinessReportHash",
+        "catalogReadinessReportSha256",
+    ):
+        value = str(snapshot.get(key) or "").strip()
+        if value:
+            return require_readiness_report_sha256(value)
+    for key in ("readinessReport", "report"):
+        value = snapshot.get(key)
+        if isinstance(value, (Mapping, list)):
+            return readiness_report_sha256(value)
+    raise CatalogRunAuthorizationError(
+        "The readiness snapshot has no canonical report/hash."
+    )
+
+
+def _batch_scope(plan_id: str) -> dict[str, Any]:
+    plan = real_plan(plan_id)
+    return {
+        "planId": str(plan_id),
+        "gateId": str(plan.gate_id),
+        "questionIds": [str(question_id) for question_id in plan.question_ids],
+    }
+
+
+def _require_authorization(team_id: str) -> dict[str, Any]:
     try:
         snapshot = get_challenge_cup_dev_control_snapshot(team_id)
     except Exception as exc:
@@ -357,11 +431,86 @@ def _require_authorization(team_id: str) -> None:
             "The DEV control snapshot is unavailable; real batches stay closed.",
             code="platform_not_authorized",
         ) from exc
-    if str(snapshot.get("nextLegalAction") or "") != "RESEARCH_AUTHORIZATION_REQUIRED":
+    if not isinstance(snapshot, Mapping) or not _platform_snapshot_allows_real_batch(
+        snapshot
+    ):
         raise ChallengeCupRealBatchError(
-            "Platform flow is not at RESEARCH_AUTHORIZATION_REQUIRED; real batches stay closed.",
+            "Platform flow is not at RESEARCH_AUTHORIZATION_REQUIRED or another explicit research-authorization boundary; real batches stay closed.",
             code="platform_not_authorized",
         )
+    return dict(snapshot)
+
+
+def _require_catalog_run_authorization(
+    team_id: str,
+    plan_id: str,
+    snapshot: Mapping[str, Any],
+):
+    try:
+        scope = _batch_scope(plan_id)
+        report_hash = _readiness_evidence_from_snapshot(snapshot)
+        authorization = find_catalog_run_authorization(
+            team_id,
+            plan_id=plan_id,
+            batch_scope=scope,
+            readiness_report_sha256_value=report_hash,
+        )
+    except Exception as exc:
+        raise ChallengeCupRealBatchError(
+            "A durable CatalogRunAuthorization record is required before a real batch can start.",
+            code="catalog_run_authorization_required",
+        ) from exc
+    if authorization is None:
+        raise ChallengeCupRealBatchError(
+            "A durable CatalogRunAuthorization record is required before a real batch can start.",
+            code="catalog_run_authorization_required",
+        )
+    return authorization
+
+
+def record_catalog_run_authorization(
+    team_id: str,
+    *,
+    plan_id: str,
+    approved_by: str,
+    readiness_evidence: Mapping[str, Any] | list[Any] | str | None = None,
+    readiness_report_sha256_value: str | None = None,
+    readiness_report_hash: str | None = None,
+    approved_at_ms: int | None = None,
+    authorization_id: str | None = None,
+):
+    """Persist operator approval for one exact real-batch scope.
+
+    This is a service API for a later governed approval control.  It does not
+    infer approval from ``confirmed`` and does not require the legacy DEV action
+    string; callers may provide a Catalog readiness report/hash directly.
+    """
+
+    normalized_plan = validate_real_batch_plan(plan_id)
+    scope = _batch_scope(normalized_plan)
+    if (
+        readiness_evidence is None
+        and readiness_report_sha256_value is None
+        and readiness_report_hash is None
+    ):
+        snapshot = _require_authorization(_resolve_team_id(team_id))
+        readiness_evidence = snapshot.get("readinessReport") or snapshot.get("report")
+    try:
+        return _record_catalog_run_authorization(
+            _resolve_team_id(team_id),
+            plan_id=normalized_plan,
+            batch_scope=scope,
+            approved_by=approved_by,
+            readiness_evidence=readiness_evidence,
+            readiness_report_sha256_value=readiness_report_sha256_value,
+            readiness_report_hash=readiness_report_hash,
+            approved_at_ms=approved_at_ms,
+            authorization_id=authorization_id,
+        )
+    except CatalogRunAuthorizationError as exc:
+        raise ChallengeCupRealBatchError(
+            str(exc), code="catalog_run_authorization_invalid"
+        ) from exc
 
 
 def _gate_complete(team_id: str, gate_id: str) -> bool:
@@ -532,14 +681,19 @@ def start_real_batch(
     """Start or resume one real gate batch under fail-closed authorization."""
     normalized_team = _resolve_team_id(team_id)
     normalized_plan = validate_real_batch_plan(plan_id)
-    if not confirmed:
-        raise ChallengeCupRealBatchError(
-            "Real batch start requires explicit operator confirmation.",
-            code="confirmation_required",
-        )
-    _require_authorization(normalized_team)
+    # ``confirmed`` remains in the request contract for client compatibility,
+    # but it is not an authorization fact.  Only the server-owned readiness
+    # boundary and the durable CatalogRunAuthorization below can authorize a
+    # real batch start.
+    _ = confirmed
+    readiness_snapshot = _require_authorization(normalized_team)
     plan = real_plan(normalized_plan)
     _require_gate_progression(normalized_team, plan.gate_id)
+    authorization = _require_catalog_run_authorization(
+        normalized_team,
+        normalized_plan,
+        readiness_snapshot,
+    )
     above_default_allowed = (
         plan.gate_id == "G125"
         and _gate_complete(normalized_team, "G12")
@@ -566,6 +720,7 @@ def start_real_batch(
                 normalized_plan,
                 concurrency=resolved_concurrency,
                 failure_budget=resolved_budget,
+                authorization=authorization_to_dict(authorization),
             )
             _save_envelope(normalized_team, envelope)
         if envelope.get("cancelled"):
@@ -575,13 +730,18 @@ def start_real_batch(
             )
         envelope["concurrency"] = resolved_concurrency
         envelope["failureBudget"] = resolved_budget
+        envelope["catalogRunAuthorization"] = authorization_to_dict(authorization)
         state = _state_of(envelope)
+        resolved_launcher = launcher or partial(
+            _default_question_run_launcher,
+            authorization=authorization_to_dict(authorization),
+        )
         launched = _launch_pending(
             normalized_team,
             envelope,
             state,
             max_items=max_items,
-            launcher=launcher or _default_question_run_launcher,
+            launcher=resolved_launcher,
             start_dispatcher=start_dispatcher or _default_start_dispatcher,
         )
         envelope["checkpoint"] = state.to_checkpoint()
@@ -680,12 +840,30 @@ def poll_real_batch(
                     harvested.append({"questionId": question_id, "outcome": "approved"})
         envelope["checkpoint"] = state.to_checkpoint()
         _save_envelope(normalized_team, envelope)
+        authorization = envelope.get("catalogRunAuthorization")
+        resolved_refill_launcher = resolved_launcher
+        needs_refill = any(
+            state.status(question_id) is QuestionStatus.PENDING
+            for question_id in state.plan.question_ids
+        )
+        if launcher is None and needs_refill:
+            if not isinstance(authorization, Mapping) or not authorization.get(
+                "authorizationId"
+            ):
+                raise ChallengeCupRealBatchError(
+                    "The real batch has no durable CatalogRunAuthorization binding.",
+                    code="catalog_run_authorization_required",
+                )
+            resolved_refill_launcher = partial(
+                _default_question_run_launcher,
+                authorization=dict(authorization),
+            )
         refill = _launch_pending(
             normalized_team,
             envelope,
             state,
             max_items=None,
-            launcher=resolved_launcher,
+            launcher=resolved_refill_launcher,
             start_dispatcher=resolved_dispatcher,
         )
         envelope["checkpoint"] = state.to_checkpoint()

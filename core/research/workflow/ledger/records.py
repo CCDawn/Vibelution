@@ -103,3 +103,31 @@ class OutboxRecord:
     last_problem_json: str | None
     created_at_ms: int
     updated_at_ms: int
+
+
+@dataclass(frozen=True)
+class CatalogRunAuthorization:
+    """Immutable approval evidence for a real catalog batch.
+
+    ``batch_scope_json`` and ``readiness_report_sha256`` are the exact facts
+    approved by the operator.  ``record_hash`` covers the canonical record
+    (excluding itself), allowing exports and run events to verify the approval
+    without trusting a mutable readiness marker.
+    """
+
+    authorization_id: str
+    team_id: str
+    plan_id: str
+    batch_scope_json: str
+    scope_hash: str
+    approved_by: str
+    approved_at_ms: int
+    readiness_report_sha256: str
+    record_hash: str
+    created_at_ms: int
+
+    @property
+    def readiness_report_hash(self) -> str:
+        """Compatibility spelling for callers that use the shorter name."""
+
+        return self.readiness_report_sha256

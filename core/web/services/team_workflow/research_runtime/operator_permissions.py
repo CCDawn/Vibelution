@@ -17,6 +17,7 @@ HIGH_IMPACT_COMMANDS: frozenset[str] = frozenset(
     {
         "cancel_node",
         "cancel_run",
+        "authorize_catalog_run",
         "resolve_human_task",
         "extend_budget",
         "rebind_node",

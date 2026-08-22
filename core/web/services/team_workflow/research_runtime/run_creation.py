@@ -84,6 +84,7 @@ def create_question_run(
     question_id: str,
     safety_limits: Mapping[str, Any],
     idempotency_key: str,
+    catalog_run_authorization: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     if workflow_id != CHALLENGE_CUP_WORKFLOW_ID:
         raise ResearchWorkflowError(f"Unknown workflowId: {workflow_id}", code="unknown_workflow")
@@ -96,7 +97,12 @@ def create_question_run(
         )
     except QuestionLaunchError as exc:
         raise ResearchWorkflowError(str(exc), code=exc.code) from exc
-    created = create_run(workflow_id, run_input=run_input, idempotency_key=idempotency_key)
+    created = create_run(
+        workflow_id,
+        run_input=run_input,
+        idempotency_key=idempotency_key,
+        catalog_run_authorization=catalog_run_authorization,
+    )
     generation = _auto_open_candidate_generation(run_input)
     if generation is not None:
         created = {**created, "candidateGeneration": generation}
@@ -139,6 +145,7 @@ def create_run(
     run_input: Mapping[str, Any],
     idempotency_key: str,
     binding_layers: AgentBindingLayers | None = None,
+    catalog_run_authorization: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     store = get_write_store()
     definition = build_challenge_cup_workflow_definition()
@@ -192,6 +199,38 @@ def create_run(
     binding_set_id = str(
         (binding_payloads[0] if binding_payloads else {}).get("snapshotId") or f"binding-{run_id}"
     )
+    authorization_record = None
+    if catalog_run_authorization is not None:
+        from .catalog_run_authorization import validate_catalog_run_authorization
+
+        authorization_id = str(
+            catalog_run_authorization.get("authorizationId") or ""
+        ).strip()
+        authorization_record = store.get_catalog_run_authorization(authorization_id)
+        if authorization_record is None or not validate_catalog_run_authorization(
+            authorization_record,
+            team_id=input_snapshot.teamId,
+            plan_id=str(catalog_run_authorization.get("planId") or ""),
+            scope_hash=str(catalog_run_authorization.get("scopeHash") or ""),
+            readiness_sha256=str(
+                catalog_run_authorization.get("readinessReportSha256") or ""
+            ),
+        ):
+            raise ResearchWorkflowError(
+                "catalog run authorization is missing or invalid",
+                code="catalog_run_authorization_invalid",
+            )
+    auth_payload = None
+    if authorization_record is not None:
+        auth_payload = {
+            "authorizationId": authorization_record.authorization_id,
+            "planId": authorization_record.plan_id,
+            "scopeHash": authorization_record.scope_hash,
+            "readinessReportSha256": authorization_record.readiness_report_sha256,
+            "recordHash": authorization_record.record_hash,
+            "approvedBy": authorization_record.approved_by,
+            "approvedAtMs": authorization_record.approved_at_ms,
+        }
     record = RunRecord(
         run_id=run_id,
         team_id=input_snapshot.teamId,
@@ -202,7 +241,7 @@ def create_run(
         question_id=input_snapshot.questionId,
         status="created",
         run_version=1,
-        last_event_sequence=1,
+        last_event_sequence=2 if auth_payload is not None else 1,
         input_snapshot_json=json.dumps(snapshot_dict, ensure_ascii=False),
         input_snapshot_hash=input_snapshot.snapshotHash,
         safety_limits_json=json.dumps(dict(run_input.get("safetyLimits") or {}), ensure_ascii=False),
@@ -226,8 +265,35 @@ def create_run(
         actor_json=json.dumps({"actorType": "system", "actorId": "create_run"}),
         correlation_id=idempotency_key or run_id,
         causation_id=None,
-        payload_json=json.dumps({"inputSnapshotHash": input_snapshot.snapshotHash}),
+        payload_json=json.dumps(
+            {
+                "inputSnapshotHash": input_snapshot.snapshotHash,
+                **(
+                    {"catalogRunAuthorization": auth_payload}
+                    if auth_payload is not None
+                    else {}
+                ),
+            }
+        ),
         occurred_at_ms=now_ms,
+    )
+    authorization_event = (
+        EventRecord(
+            run_id=run_id,
+            sequence=2,
+            event_id=f"evt-catalog-run-authorized-{run_id}",
+            run_version=1,
+            event_type="catalog_run_authorized",
+            actor_json=json.dumps(
+                {"actorType": "system", "actorId": "catalog-run-authorization"}
+            ),
+            correlation_id=idempotency_key or run_id,
+            causation_id=event.event_id,
+            payload_json=json.dumps(auth_payload, ensure_ascii=False),
+            occurred_at_ms=now_ms,
+        )
+        if auth_payload is not None
+        else None
     )
 
     def mutate(uow) -> None:
@@ -238,6 +304,8 @@ def create_run(
             return
         uow.repository.insert_run(record)
         uow.repository.insert_event(event)
+        if authorization_event is not None:
+            uow.repository.insert_event(authorization_event)
 
     store.submit(mutate, force_flush=True).result(timeout=15)
     created = store.get_run(run_id)

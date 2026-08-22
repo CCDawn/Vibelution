@@ -193,20 +193,70 @@ def _is_campaign_active(team_id: str, record: Mapping[str, Any]) -> bool:
 
 
 def _dev_authorization_ready(team_id: str) -> bool:
-    """DEV fixtures must be complete so the next legal action is authorization.
+    """Return whether a current durable catalog approval is available.
 
-    A DEV fixture result never counts as formal approval; reaching this marker
-    only unlocks the ability to activate the real campaign.
+    The readiness marker alone is only a platform boundary.  Campaign/run
+    launch also requires an immutable ``CatalogRunAuthorization`` for the
+    first real gate and the exact current readiness report hash; a rerun of
+    readiness therefore invalidates the old approval until it is re-recorded.
     """
     try:
+        from core.research.competition.real_control_batch import real_plan
         from core.web.services.team_workflow.challenge_cup_dev_controls import (
             get_challenge_cup_dev_control_snapshot,
+        )
+
+        from .catalog_run_authorization import (
+            find_catalog_run_authorization,
+            readiness_report_sha256,
+            require_readiness_report_sha256,
         )
 
         snapshot = get_challenge_cup_dev_control_snapshot(team_id)
     except Exception:
         return False
-    return _text(snapshot.get("nextLegalAction")) == "RESEARCH_AUTHORIZATION_REQUIRED"
+    if not isinstance(snapshot, Mapping):
+        return False
+    action = _text(snapshot.get("nextLegalAction")).upper()
+    report = snapshot.get("report")
+    if not isinstance(report, Mapping):
+        report = snapshot.get("readinessReport")
+    platform_ready = action.endswith("AUTHORIZATION_REQUIRED") or (
+        isinstance(report, Mapping)
+        and _text(report.get("status")).upper() == "READY"
+        and report.get("researchAuthorizationRequired") is True
+    )
+    if not platform_ready:
+        return False
+    report_hash = ""
+    for key in (
+        "readinessReportSha256",
+        "readinessReportHash",
+        "catalogReadinessReportSha256",
+    ):
+        if _text(snapshot.get(key)):
+            report_hash = require_readiness_report_sha256(_text(snapshot.get(key)))
+            break
+    if not report_hash and isinstance(report, (Mapping, list)):
+        report_hash = readiness_report_sha256(report)
+    if not report_hash:
+        return False
+    scope_plan = real_plan("real-1")
+    scope = {
+        "planId": "real-1",
+        "gateId": str(scope_plan.gate_id),
+        "questionIds": [str(question_id) for question_id in scope_plan.question_ids],
+    }
+    try:
+        authorization = find_catalog_run_authorization(
+            _text(snapshot.get("teamId")) or _text(team_id),
+            plan_id="real-1",
+            batch_scope=scope,
+            readiness_report_sha256_value=report_hash,
+        )
+    except Exception:
+        return False
+    return authorization is not None
 
 
 def list_experiment_launch_options(team_id: str) -> dict[str, Any]:

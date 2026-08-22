@@ -9,7 +9,13 @@ from typing import Any
 
 from .database import WorkflowLedgerDatabase
 from .errors import WorkflowLedgerClosedError
-from .records import EventRecord, NodeAttemptRecord, OutboxRecord, RunRecord
+from .records import (
+    CatalogRunAuthorization,
+    EventRecord,
+    NodeAttemptRecord,
+    OutboxRecord,
+    RunRecord,
+)
 from .writer import WorkflowLedgerWriter
 
 _read_tls = threading.local()
@@ -75,6 +81,37 @@ class WorkflowLedgerStore:
 
     def list_runs_for_team(self, team_id: str, workflow_id: str) -> list[RunRecord]:
         return self.read(lambda repo: repo.list_runs_for_team(team_id, workflow_id))
+
+    def get_catalog_run_authorization(
+        self, authorization_id: str
+    ) -> CatalogRunAuthorization | None:
+        return self.read(
+            lambda repo: repo.get_catalog_run_authorization(authorization_id)
+        )
+
+    def find_catalog_run_authorization(
+        self,
+        *,
+        team_id: str,
+        plan_id: str,
+        scope_hash: str,
+        readiness_report_sha256: str,
+    ) -> CatalogRunAuthorization | None:
+        return self.read(
+            lambda repo: repo.find_catalog_run_authorization(
+                team_id=team_id,
+                plan_id=plan_id,
+                scope_hash=scope_hash,
+                readiness_report_sha256=readiness_report_sha256,
+            )
+        )
+
+    def list_catalog_run_authorizations(
+        self, team_id: str, plan_id: str | None = None
+    ) -> list[CatalogRunAuthorization]:
+        return self.read(
+            lambda repo: repo.list_catalog_run_authorizations(team_id, plan_id)
+        )
 
     def get_command_by_idempotency(self, run_id: str, idempotency_key: str):
         return self.read(

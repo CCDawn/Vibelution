@@ -44,6 +44,12 @@ from .blocked_reason import format_blocked_reason, problem_from_graph_error
 from .ids import new_id
 from .iteration_route import branch_decision_from_run, routed_successors
 
+# A run is created before START_NODE is accepted so the request can be made
+# idempotent.  That window must nevertheless be bounded: after this deadline
+# a run with no attempt and no accepted dispatch is a failed dispatch, not an
+# indefinitely pending job.
+DEFAULT_START_DEADLINE_MS = 60_000
+
 
 def _log_repair_skip(run_id: str, stage: str, exc: BaseException) -> None:
     debug.warning(
@@ -63,6 +69,8 @@ class GraphDispatchWorker:
         coordinator: ChallengeCupGraphCoordinator,
         owner_id: str = "graph-worker",
         lease_ms: int = 30_000,
+        start_deadline_ms: int = DEFAULT_START_DEADLINE_MS,
+        created_start_deadline_ms: int | None = None,
         now_provider: Callable[[], int] | None = None,
         readiness_service: Any | None = None,
         readiness_context: Callable[[], Any] | None = None,
@@ -72,6 +80,15 @@ class GraphDispatchWorker:
         self._coordinator = coordinator
         self._owner = owner_id
         self._lease_ms = lease_ms
+        # ``created_start_deadline_ms`` is an explicit compatibility alias for
+        # callers that name the state being reconciled.  Both values are kept
+        # local to the worker; no path or global clock is assumed.
+        deadline = (
+            created_start_deadline_ms
+            if created_start_deadline_ms is not None
+            else start_deadline_ms
+        )
+        self._start_deadline_ms = max(0, int(deadline))
         self._now = now_provider or (lambda: int(time.time() * 1000))
         self._readiness = readiness_service
         self._readiness_context = readiness_context
@@ -100,9 +117,135 @@ class GraphDispatchWorker:
             self._handle(action)
         repaired = self._repair_dispatching_without_adapter()
         repaired += self._repair_starting_without_progress()
+        repaired += self._repair_created_without_start()
         repaired += self._repair_stranded_iteration_route()
         repaired += self._repair_stranded_terminal_package()
         return len(leased) + repaired
+
+    def _repair_created_without_start(self) -> int:
+        """Fail runs that were created but never accepted by START_NODE.
+
+        ``run_created`` is intentionally committed before command acceptance,
+        so a process crash can leave a perfectly valid ``created`` row.  The
+        reconciliation is conservative: an attempt, an accepted START_NODE,
+        or a live graph-dispatch outbox action means that the run is still
+        claimable and must not be failed.  Everything else past the deadline
+        is closed atomically with a deterministic ``run_failed`` event.
+        """
+        now_ms = self._now()
+        cutoff_ms = now_ms - self._start_deadline_ms
+
+        def mutate(uow):
+            rows = uow.repository.execute(
+                """
+                SELECT run_id, team_id, run_version
+                FROM workflow_runs
+                WHERE status = 'created' AND created_at_ms <= ?
+                ORDER BY created_at_ms ASC, run_id ASC
+                """,
+                (cutoff_ms,),
+            ).fetchall()
+            repaired = 0
+            for row in rows:
+                run_id = str(row[0] or "")
+                team_id = str(row[1] or "")
+                if not run_id or not team_id:
+                    continue
+                # A START_NODE command and its attempt are normally created in
+                # one writer transaction.  Check both facts because this
+                # reconciler must remain safe for older/partially restored DBs.
+                attempt = uow.repository.execute(
+                    "SELECT 1 FROM node_attempts WHERE run_id = ? LIMIT 1",
+                    (run_id,),
+                ).fetchone()
+                if attempt is not None:
+                    continue
+                command = uow.repository.execute(
+                    """
+                    SELECT 1 FROM workflow_commands
+                    WHERE run_id = ?
+                      AND command_kind = 'start_node'
+                      AND status IN ('accepted', 'completed')
+                    LIMIT 1
+                    """,
+                    (run_id,),
+                ).fetchone()
+                if command is not None:
+                    continue
+                live_dispatch = uow.repository.execute(
+                    """
+                    SELECT 1 FROM outbox_actions
+                    WHERE run_id = ?
+                      AND action_kind = 'graph_dispatch'
+                      AND status IN ('pending', 'leased')
+                    LIMIT 1
+                    """,
+                    (run_id,),
+                ).fetchone()
+                if live_dispatch is not None:
+                    continue
+                run = uow.repository.get_run(run_id)
+                if run is None or run.status != "created":
+                    continue
+                event_id = f"evt-dispatch-never-started-{run_id}"
+                # A prior attempt may have committed the deterministic event
+                # before a process stopped.  Reconcile the row without
+                # advancing its sequence a second time; otherwise an old
+                # partial repair would create a sequence hole.
+                existing_event = uow.repository.get_event_by_id(event_id)
+                if existing_event is not None and existing_event.run_id == run_id:
+                    if not uow.repository.update_run_status(
+                        run_id,
+                        team_id,
+                        "failed",
+                        now_ms,
+                        active_node_id="",
+                        completion_kind=None,
+                        terminal_reason="dispatch_never_started",
+                        blocked_problem_json=None,
+                    ):
+                        continue
+                    repaired += 1
+                    continue
+                if not uow.repository.update_run_status(
+                    run_id,
+                    team_id,
+                    "failed",
+                    now_ms,
+                    active_node_id="",
+                    completion_kind=None,
+                    terminal_reason="dispatch_never_started",
+                    blocked_problem_json=None,
+                ):
+                    continue
+                sequence = uow.repository.advance_last_sequence(run_id, 1, now_ms)
+                if sequence is None:
+                    raise RuntimeError(
+                        f"created-run reconciliation lost run {run_id} while advancing the event sequence"
+                    )
+                # The status transition and event are one transaction.  A
+                # duplicate event is allowed to raise and roll back the whole
+                # mutation rather than committing a status/sequence mismatch.
+                uow.repository.insert_event(
+                    _event_record_for(
+                        run_id=run_id,
+                        sequence=sequence,
+                        run_version=int(row[2] or 1),
+                        event_id=event_id,
+                        event_type="run_failed",
+                        correlation_id=run_id,
+                        payload={
+                            "terminalReason": "dispatch_never_started",
+                            "reason": "created run exceeded START_NODE deadline without an attempt",
+                            "reconciliation": "created_without_start",
+                        },
+                        now_ms=now_ms,
+                    )
+                )
+                repaired += 1
+            return repaired
+
+        return int(self._submit(mutate, force_flush=True).result(timeout=30) or 0)
 
     def _handle(self, action: Any) -> None:
         payload = json.loads(action.payload_json)

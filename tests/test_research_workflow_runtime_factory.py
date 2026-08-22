@@ -9,6 +9,7 @@ returning fakes.
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -59,7 +60,14 @@ def _seed_with_snapshot(store, *, run_id: str = "run-test") -> None:
         "createdAt": "2026-08-12T00:00:00Z",
         "snapshotHash": "c" * 64,
     }
-    record = build_run_record(run_id=run_id, last_event_sequence=1)
+    # The run is intentionally fresh for production-worker coverage.  The P0
+    # reconciliation must still reap genuinely stale ``created`` runs, so do
+    # not seed this fixture with the historical fixed timestamp.
+    record = build_run_record(
+        run_id=run_id,
+        last_event_sequence=1,
+        created_at_ms=int(time.time() * 1000),
+    )
     record = record.__class__(
         run_id=record.run_id,
         team_id=record.team_id,
