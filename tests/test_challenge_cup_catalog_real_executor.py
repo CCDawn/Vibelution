@@ -33,6 +33,12 @@ from core.research.competition.real_control_batch import (
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.services.team_workflow import challenge_cup_real_batch as svc
+from core.web.services.team_workflow.research_runtime import catalog_run_authorization
+from core.web.services.team_workflow.research_runtime.operator_authorization import (
+    CONTROL_OPERATOR_ID_ENV,
+    CONTROL_OPERATOR_ROLES_ENV,
+)
+from tests._support.workflow_ledger_helpers import FIXED_NOW_MS, open_ledger_store
 
 TEAM_ID = "team-real-batch-test"
 REAL_BATCH_BASE = (
@@ -44,6 +50,17 @@ class _Harness:
     """Injectable fakes plus isolated team storage for one test."""
 
     def __init__(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        self.ledger = open_ledger_store(tmp_path / "workflow-ledger.sqlite3")
+        monkeypatch.setattr(
+            catalog_run_authorization,
+            "get_write_store",
+            lambda: self.ledger,
+        )
+        self.readiness_report = {
+            "status": "READY",
+            "researchAuthorizationRequired": True,
+            "reportId": "real-batch-test-readiness-v1",
+        }
         self.runs: dict[str, dict] = {}
         self.approved: dict[str, dict] = {}
         self.launch_log: list[str] = []
@@ -62,7 +79,19 @@ class _Harness:
         monkeypatch.setattr(
             svc,
             "get_challenge_cup_dev_control_snapshot",
-            lambda team_id: {"nextLegalAction": "RESEARCH_AUTHORIZATION_REQUIRED"},
+            lambda team_id: {
+                "nextLegalAction": "RESEARCH_AUTHORIZATION_REQUIRED",
+                "readinessReport": self.readiness_report,
+            },
+        )
+
+    def authorize(self, plan_id: str) -> None:
+        svc.record_catalog_run_authorization(
+            TEAM_ID,
+            plan_id=plan_id,
+            approved_by="test-operator",
+            readiness_evidence=self.readiness_report,
+            approved_at_ms=FIXED_NOW_MS,
         )
 
     def launcher(self, team_id: str, question_id: str, idempotency_key: str) -> dict:
@@ -106,10 +135,15 @@ class _Harness:
 
 @pytest.fixture()
 def harness(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> _Harness:
-    return _Harness(monkeypatch, tmp_path)
+    value = _Harness(monkeypatch, tmp_path)
+    try:
+        yield value
+    finally:
+        value.ledger.close()
 
 
 def _start(harness: _Harness, plan_id: str, **overrides) -> dict:
+    harness.authorize(plan_id)
     return svc.start_real_batch(
         TEAM_ID,
         plan_id=plan_id,
@@ -198,11 +232,25 @@ def test_projection_reports_gate_and_breaker_state() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_start_requires_confirmation_and_platform_authorization(
+def test_start_requires_durable_authorization_and_platform_authorization(
     harness: _Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    with pytest.raises(svc.ChallengeCupRealBatchError, match="confirmation"):
+    with pytest.raises(
+        svc.ChallengeCupRealBatchError,
+        match="durable CatalogRunAuthorization",
+    ):
         svc.start_real_batch(TEAM_ID, plan_id="real-1", confirmed=False)
+    with pytest.raises(
+        svc.ChallengeCupRealBatchError,
+        match="durable CatalogRunAuthorization",
+    ):
+        svc.start_real_batch(
+            TEAM_ID,
+            plan_id="real-1",
+            confirmed=True,
+            launcher=harness.launcher,
+            start_dispatcher=harness.start_dispatcher,
+        )
     monkeypatch.setattr(
         svc,
         "get_challenge_cup_dev_control_snapshot",
@@ -210,6 +258,47 @@ def test_start_requires_confirmation_and_platform_authorization(
     )
     with pytest.raises(svc.ChallengeCupRealBatchError, match="not at RESEARCH_AUTHORIZATION_REQUIRED"):
         _start(harness, "real-1")
+
+    monkeypatch.setattr(
+        svc,
+        "get_challenge_cup_dev_control_snapshot",
+        lambda team_id: {
+            "nextLegalAction": "RESEARCH_AUTHORIZATION_REQUIRED",
+            "readinessReport": harness.readiness_report,
+        },
+    )
+    harness.authorize("real-1")
+    started = svc.start_real_batch(
+        TEAM_ID,
+        plan_id="real-1",
+        confirmed=False,
+        launcher=harness.launcher,
+        start_dispatcher=harness.start_dispatcher,
+    )
+    assert started["launched"]
+
+    monkeypatch.setattr(
+        svc,
+        "get_challenge_cup_dev_control_snapshot",
+        lambda team_id: {
+            "nextLegalAction": "RESEARCH_AUTHORIZATION_REQUIRED",
+            "readinessReport": {
+                **harness.readiness_report,
+                "reportId": "changed-readiness-report",
+            },
+        },
+    )
+    with pytest.raises(
+        svc.ChallengeCupRealBatchError,
+        match="durable CatalogRunAuthorization",
+    ):
+        svc.start_real_batch(
+            TEAM_ID,
+            plan_id="real-1",
+            confirmed=True,
+            launcher=harness.launcher,
+            start_dispatcher=harness.start_dispatcher,
+        )
 
 
 def test_gate_progression_requires_previous_gate_complete(harness: _Harness) -> None:
@@ -361,8 +450,8 @@ def test_real_batch_routes_authorization_mapping(
         assert response.json()["exists"] is False
 
         response = client.post(f"{REAL_BATCH_BASE}/real-1/start", json={"confirmed": False})
-        assert response.status_code == 428
-        assert "confirmation" in response.json()["detail"]
+        assert response.status_code == 422
+        assert "durable CatalogRunAuthorization" in response.json()["detail"]
 
         response = client.post(f"{REAL_BATCH_BASE}/real-1/poll")
         assert response.status_code == 404
@@ -372,3 +461,40 @@ def test_real_batch_routes_authorization_mapping(
             f"{REAL_BATCH_BASE}/real-9/start", json={"confirmed": True}
         )
         assert response.status_code == 422
+
+
+def test_real_batch_authorization_route_is_server_principal_bound(
+    harness: _Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    authorization_url = f"{REAL_BATCH_BASE}/real-1/authorize"
+
+    with TestClient(create_app()) as client:
+        missing_token = client.post(authorization_url, json={})
+        assert missing_token.status_code == 403
+
+    monkeypatch.setenv(CONTROL_OPERATOR_ID_ENV, "server-operator-42")
+    monkeypatch.setenv(CONTROL_OPERATOR_ROLES_ENV, "viewer")
+    with _client() as client:
+        denied = client.post(authorization_url, json={})
+        assert denied.status_code == 403
+        assert denied.json()["detail"]["code"] == "command_forbidden"
+
+    monkeypatch.setenv(CONTROL_OPERATOR_ROLES_ENV, "operator")
+    with _client() as client:
+        forged_body = client.post(
+            authorization_url,
+            json={"approvedBy": "client-forged", "readinessReportSha256": "f" * 64},
+        )
+        assert forged_body.status_code == 422
+
+        approved = client.post(authorization_url, json={})
+        assert approved.status_code == 200, approved.text
+        body = approved.json()
+        assert body["approvedBy"] == "server-operator-42"
+        assert body["planId"] == "real-1"
+        assert body["readinessReportSha256"]
+        assert body["recordHash"]
+        assert harness.ledger.get_catalog_run_authorization(body["authorizationId"]) is not None
+
+    started = _start(harness, "real-1")
+    assert started["launched"]

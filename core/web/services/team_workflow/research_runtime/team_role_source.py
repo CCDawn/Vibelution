@@ -88,7 +88,9 @@ def heal_agent_binding_for_node(
     agent_id = str(roles.get(primary) or roles.get(node.primaryRoleKey) or "").strip()
     if not agent_id:
         try:
-            from core.web.services.team.team_constants import RESEARCH_TEAM_MEMBER_ROLE_KEYS
+            from core.web.services.team.team_constants import (
+                RESEARCH_TEAM_MEMBER_ROLE_KEYS,
+            )
         except Exception:
             RESEARCH_TEAM_MEMBER_ROLE_KEYS = {}
         mapped = RESEARCH_TEAM_MEMBER_ROLE_KEYS.get(node.primaryRoleKey) or RESEARCH_TEAM_MEMBER_ROLE_KEYS.get(primary)
@@ -121,7 +123,6 @@ def heal_agent_binding_from_sibling_freeze(
     if node is None or node.actorKind != ActorKind.AGENT:
         return None
     preferred = normalize_role_key(node.primaryRoleKey)
-    fallback: dict[str, str] | None = None
     for binding in (snapshot or {}).get("agentBindingSnapshot") or []:
         if not isinstance(binding, Mapping):
             continue
@@ -137,9 +138,12 @@ def heal_agent_binding_from_sibling_freeze(
         }
         if normalize_role_key(str(binding.get("roleKey") or "")) == preferred:
             return item
-        if fallback is None:
-            fallback = item
-    return fallback
+    # A frozen binding for a different role is not evidence that this node can
+    # use that agent.  Returning it here silently crosses the role boundary
+    # (for example, a search agent can become an iteration-planning agent).
+    # ``None`` is the explicit unbound state and lets the caller/UI surface the
+    # missing same-role binding for a deliberate repair.
+    return None
 
 
 def effective_binding_layers(

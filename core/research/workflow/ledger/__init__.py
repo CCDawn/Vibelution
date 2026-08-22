@@ -15,6 +15,7 @@ from .errors import (
     WorkflowLedgerUnavailableError,
 )
 from .records import (
+    CatalogRunAuthorization,
     CommandRecord,
     EventRecord,
     NodeAttemptRecord,
@@ -25,6 +26,7 @@ from .store import WorkflowLedgerStore
 from .unit_of_work import WorkflowLedgerUnitOfWork
 
 __all__ = [
+    "CatalogRunAuthorization",
     "CommandNotAllowedError",
     "CommandRecord",
     "EventRecord",
