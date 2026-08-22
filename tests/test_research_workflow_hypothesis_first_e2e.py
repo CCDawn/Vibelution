@@ -295,6 +295,14 @@ def _stateful_collection_fakes(
             "stageCards": [],
         }
 
+    def fake_background_start(team_id, run_id, payload=None):
+        return {
+            "teamId": team_id,
+            "runId": run_id,
+            "status": "running",
+            "payload": dict(payload or {}),
+        }
+
     real_facade = facade.research_knowledge_collection_facade
 
     def recording_facade(**kwargs):
@@ -303,6 +311,9 @@ def _stateful_collection_fakes(
         return result
 
     monkeypatch.setattr(collection_runs, "start_source_collection_run", fake_start)
+    monkeypatch.setattr(
+        collection_runs, "start_source_collection_search_background", fake_background_start
+    )
     monkeypatch.setattr(collection_runs, "get_source_collection_summary", fake_summary)
     monkeypatch.setattr(data_processing_service, "list_processing_runs", fake_list_runs)
     monkeypatch.setattr(

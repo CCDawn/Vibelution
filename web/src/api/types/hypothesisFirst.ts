@@ -386,6 +386,11 @@ export type CollectionRequestRecord = HypothesisFirstScope & {
   requirements: Record<string, unknown>;
   writebackPolicy: Record<string, unknown>;
   collectionRunId: string;
+  collectionRunStatus?: string;
+  startError?: {
+    code: string;
+    message: string;
+  };
   createdAt: string;
   handedOffAt?: string;
   handoffRef?: string;

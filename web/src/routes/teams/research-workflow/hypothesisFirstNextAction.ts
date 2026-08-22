@@ -466,6 +466,9 @@ export function resolveHypothesisFirstNextAction(
     const status = childStatus(request, input.collectionChildStatus);
     const collectionRunId = String(request.collectionRunId || "").trim() || undefined;
     if (RECOVERY_CHILD.has(status)) {
+      const recoveryReason = request.status === "failed"
+        ? "资料搜集启动失败，请重试。"
+        : "资料搜集未完成";
       return action({
         stage: "collection_recovery",
         targetNodeId: "source_finding",
@@ -475,7 +478,7 @@ export function resolveHypothesisFirstNextAction(
         recovery: {
           command: status === "needs_continue" ? "continue_collection" : "retry_collection",
           label: status === "needs_continue" ? "继续搜集" : "重试搜集",
-          reason: "资料搜集未完成",
+          reason: recoveryReason,
         },
         collectionRequestId: request.requestId,
         collectionRunId,

@@ -330,6 +330,7 @@ describe("resolveHypothesisFirstNextAction", () => {
     expect(failed.stage).toBe("collection_recovery");
     expect(failed.command).toBe("retry_collection");
     expect(failed.commandLabel).toBe("重试搜集");
+    expect(failed.recovery?.reason).toBe("资料搜集启动失败，请重试。");
 
     const cont = resolveHypothesisFirstNextAction({
       run: { runId: "run-1" },

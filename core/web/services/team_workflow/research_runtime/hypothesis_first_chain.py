@@ -6,9 +6,10 @@ Owns the append-only chain ledger that wires the hypothesis-first event chain:
   room ``roundId`` <-> ``meetingRoundId`` two-way binding produced by
   ``meeting_runtime.open_hypothesis_review_meeting``;
 - meeting closure -> ``request_new_evidence`` decisions carrying a valid
-  ``searchEnvelope`` trigger stage-1 collection through the existing
-  ``research_knowledge_collection_facade`` (idempotent per decision; the facade
-  itself stays idempotent by scopeHash and no graph recursion happens here);
+  ``searchEnvelope`` create stage-1 collection through the existing
+  ``research_knowledge_collection_facade`` and dispatch its existing background
+  search runner (idempotent per child run; the facade itself stays idempotent
+  by scopeHash and no graph recursion happens here);
 - child collection handoff -> parent run ``hypothesis_design`` readiness
   re-check (always outside any writer transaction) plus the next review
   meeting auto-open with a continuous lineage chain;
@@ -1529,6 +1530,9 @@ def _process_collection_decisions(
     request: Mapping[str, Any],
 ) -> dict[str, Any]:
     from core.web.services.team_workflow.source_collection import facade
+    from core.web.services.team_workflow.source_collection import (
+        runs as source_collection_runs,
+    )
 
     persisted_ids = {
         str(item.get("decisionId") or "")
@@ -1537,6 +1541,7 @@ def _process_collection_decisions(
     }
     requests_out: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
+    start_candidates: dict[str, list[dict[str, Any]]] = {}
     raw_decisions = [
         item for item in list(request.get("decisions") or []) if isinstance(item, Mapping)
     ]
@@ -1559,7 +1564,7 @@ def _process_collection_decisions(
             envelope = facade._normalize_search_envelope(
                 raw.get("searchEnvelope"), require_keywords=True
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - closure stays visible and retryable
             reason = (
                 "search_envelope_missing"
                 if getattr(exc, "code", "") == "search_keywords_required"
@@ -1603,6 +1608,48 @@ def _process_collection_decisions(
             str(locator.get("runId") or ""),
         )
         requests_out.append(record)
+        collection_run_id = str(record.get("collectionRunId") or "").strip()
+        if not collection_run_id:
+            failed = _update_collection_request(
+                team_id,
+                str(record.get("requestId") or ""),
+                status="failed",
+                collectionRunStatus="failed",
+                startError={
+                    "code": "collection_run_missing",
+                    "message": "资料搜集子运行未创建，无法启动搜索。",
+                },
+            )
+            requests_out[-1] = failed
+            continue
+        start_candidates.setdefault(collection_run_id, []).append(record)
+
+    for collection_run_id, records in start_candidates.items():
+        try:
+            source_collection_runs.start_source_collection_search_background(
+                team_id,
+                collection_run_id,
+                {"backgroundExecution": True},
+            )
+        except Exception as exc:
+            start_error = {
+                "code": "search_start_failed",
+                "message": str(exc) or type(exc).__name__,
+            }
+            failed_by_request_id = {
+                str(record.get("requestId") or ""): _update_collection_request(
+                    team_id,
+                    str(record.get("requestId") or ""),
+                    status="failed",
+                    collectionRunStatus="failed",
+                    startError=start_error,
+                )
+                for record in records
+            }
+            requests_out = [
+                failed_by_request_id.get(str(record.get("requestId") or ""), record)
+                for record in requests_out
+            ]
     return {"requests": requests_out, "skipped": skipped}
 
 

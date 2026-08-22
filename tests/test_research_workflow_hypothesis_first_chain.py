@@ -57,6 +57,7 @@ from core.web.services.team_workflow.research_runtime.operator_authorization imp
 from core.web.services.team_workflow.research_runtime.runtime_factory import (
     build_workflow_runtime,
 )
+from core.web.services.team_workflow.source_collection import facade
 from core.web.services.team_workflow.source_collection import (
     runs as collection_runs,
 )
@@ -234,8 +235,146 @@ def _fake_collection_runs(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
         calls.append({"teamId": team_id, "payload": dict(payload or {})})
         return {"runId": f"dprun-hf4-{len(calls)}", "status": "accepted"}
 
+    def fake_background_start(team_id, run_id, payload=None):
+        return {
+            "teamId": team_id,
+            "runId": run_id,
+            "status": "running",
+            "payload": dict(payload or {}),
+        }
+
     monkeypatch.setattr(collection_runs, "start_source_collection_run", fake_start)
+    monkeypatch.setattr(
+        collection_runs, "start_source_collection_search_background", fake_background_start
+    )
     return calls
+
+
+def _collection_decision(
+    candidate_ref: str,
+    evidence_ref: str,
+) -> dict[str, object]:
+    return {
+        "decision": chain.REQUEST_EVIDENCE_DECISION,
+        "candidateRefs": [candidate_ref],
+        "evidenceRefs": [evidence_ref],
+        "searchEnvelope": {"keywords": ["predictive coding"]},
+    }
+
+
+def _process_collection_decisions_fixture(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    decisions: list[dict[str, object]],
+):
+    meeting = {
+        "meetingRoundId": "meeting-hf-start",
+        "scopeHash": "scope-hf-start",
+        "question": _QUESTION_ID,
+    }
+    monkeypatch.setattr(chain, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        chain,
+        "_scope_envelope_for_meeting",
+        lambda _meeting: {"scopeHash": "scope-hf-start"},
+    )
+    monkeypatch.setattr(
+        facade,
+        "_normalize_search_envelope",
+        lambda envelope, *, require_keywords: dict(envelope or {}),
+    )
+    monkeypatch.setattr(facade, "_normalize_requirements", lambda value: dict(value or {}))
+    monkeypatch.setattr(
+        facade,
+        "_normalize_writeback_policy",
+        lambda value: dict(value or {}),
+    )
+    monkeypatch.setattr(
+        facade,
+        "research_knowledge_collection_facade",
+        lambda **_kwargs: {"locator": {"runId": "dprun-hf-start"}},
+    )
+    close_result = {
+        "decisions": [
+            {"decisionId": chain._decision_id_for(meeting, decision)}
+            for decision in decisions
+        ]
+    }
+    return meeting, close_result
+
+
+def test_collection_decisions_start_one_background_search_per_reused_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    decisions = [
+        _collection_decision("hyp-a", "message-a"),
+        _collection_decision("hyp-b", "message-b"),
+    ]
+    meeting, close_result = _process_collection_decisions_fixture(
+        tmp_path, monkeypatch, decisions=decisions
+    )
+    started: list[dict[str, object]] = []
+
+    def fake_start(team_id: str, run_id: str, payload=None) -> dict[str, object]:
+        started.append(
+            {"teamId": team_id, "runId": run_id, "payload": dict(payload or {})}
+        )
+        return {"runId": run_id, "status": "running"}
+
+    monkeypatch.setattr(
+        collection_runs, "start_source_collection_search_background", fake_start
+    )
+
+    result = chain._process_collection_decisions(
+        "team-hf-start",
+        meeting,
+        close_result,
+        {"decisions": decisions},
+    )
+
+    assert len(result["requests"]) == 2
+    assert {request["collectionRunId"] for request in result["requests"]} == {
+        "dprun-hf-start"
+    }
+    assert started == [
+        {
+            "teamId": "team-hf-start",
+            "runId": "dprun-hf-start",
+            "payload": {"backgroundExecution": True},
+        }
+    ]
+
+
+def test_collection_decision_marks_request_failed_when_background_start_rejects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    decisions = [_collection_decision("hyp-a", "message-a")]
+    meeting, close_result = _process_collection_decisions_fixture(
+        tmp_path, monkeypatch, decisions=decisions
+    )
+
+    def fail_start(_team_id: str, _run_id: str, _payload=None) -> dict[str, object]:
+        raise RuntimeError("source collection worker unavailable")
+
+    monkeypatch.setattr(
+        collection_runs, "start_source_collection_search_background", fail_start
+    )
+
+    result = chain._process_collection_decisions(
+        "team-hf-start",
+        meeting,
+        close_result,
+        {"decisions": decisions},
+    )
+
+    request = result["requests"][0]
+    assert request["status"] == "failed"
+    assert request["collectionRunStatus"] == "failed"
+    assert request["startError"] == {
+        "code": "search_start_failed",
+        "message": "source collection worker unavailable",
+    }
 
 
 def _seed_question_reset_artifacts(team_id: str, question_id: str) -> dict[str, str]:
