@@ -75,6 +75,15 @@ DEFAULT_TOOL_CALLS = 600
 DEFAULT_WALL_CLOCK_SECONDS = 4 * 60 * 60
 DEFAULT_MAX_RETRIES = 3
 
+_AUTHORIZATION_BINDING_FIELDS = (
+    "authorizationId",
+    "teamId",
+    "planId",
+    "scopeHash",
+    "readinessReportSha256",
+    "recordHash",
+)
+
 _store_lock = threading.Lock()
 
 QuestionRunLauncher = Callable[[str, str, str], dict[str, Any]]
@@ -468,6 +477,44 @@ def _require_catalog_run_authorization(
     return authorization
 
 
+def _current_catalog_run_authorization(
+    team_id: str,
+    plan_id: str,
+) -> dict[str, Any]:
+    """Resolve the durable authorization for the current readiness boundary."""
+
+    snapshot = _require_authorization(team_id)
+    authorization = _require_catalog_run_authorization(team_id, plan_id, snapshot)
+    return authorization_to_dict(authorization)
+
+
+def _require_envelope_catalog_run_authorization(
+    envelope: Mapping[str, Any],
+    current_authorization: Mapping[str, Any],
+) -> None:
+    """Fence a persisted batch to the readiness authorization that created it."""
+
+    bound = envelope.get("catalogRunAuthorization")
+    if not isinstance(bound, Mapping) or any(
+        not str(bound.get(field) or "").strip()
+        for field in _AUTHORIZATION_BINDING_FIELDS
+    ):
+        raise ChallengeCupRealBatchError(
+            "The real batch has no complete durable CatalogRunAuthorization binding.",
+            code="catalog_run_authorization_required",
+        )
+    if any(
+        str(bound.get(field) or "").strip()
+        != str(current_authorization.get(field) or "").strip()
+        for field in _AUTHORIZATION_BINDING_FIELDS
+    ):
+        raise ChallengeCupRealBatchError(
+            "The real batch readiness authorization has changed; "
+            "start a new batch envelope for the current readiness report.",
+            code="catalog_run_authorization_stale",
+        )
+
+
 def record_catalog_run_authorization(
     team_id: str,
     *,
@@ -681,18 +728,15 @@ def start_real_batch(
     """Start or resume one real gate batch under fail-closed authorization."""
     normalized_team = _resolve_team_id(team_id)
     normalized_plan = validate_real_batch_plan(plan_id)
-    # ``confirmed`` remains in the request contract for client compatibility,
-    # but it is not an authorization fact.  Only the server-owned readiness
-    # boundary and the durable CatalogRunAuthorization below can authorize a
-    # real batch start.
-    _ = confirmed
-    readiness_snapshot = _require_authorization(normalized_team)
+    if not confirmed:
+        raise ChallengeCupRealBatchError(
+            "Real batch start requires explicit operator confirmation.",
+            code="confirmation_required",
+        )
     plan = real_plan(normalized_plan)
     _require_gate_progression(normalized_team, plan.gate_id)
-    authorization = _require_catalog_run_authorization(
-        normalized_team,
-        normalized_plan,
-        readiness_snapshot,
+    authorization = _current_catalog_run_authorization(
+        normalized_team, normalized_plan
     )
     above_default_allowed = (
         plan.gate_id == "G125"
@@ -720,9 +764,11 @@ def start_real_batch(
                 normalized_plan,
                 concurrency=resolved_concurrency,
                 failure_budget=resolved_budget,
-                authorization=authorization_to_dict(authorization),
+                authorization=authorization,
             )
             _save_envelope(normalized_team, envelope)
+        else:
+            _require_envelope_catalog_run_authorization(envelope, authorization)
         if envelope.get("cancelled"):
             raise ChallengeCupRealBatchError(
                 "This real batch was cancelled and cannot be resumed.",
@@ -730,11 +776,10 @@ def start_real_batch(
             )
         envelope["concurrency"] = resolved_concurrency
         envelope["failureBudget"] = resolved_budget
-        envelope["catalogRunAuthorization"] = authorization_to_dict(authorization)
         state = _state_of(envelope)
         resolved_launcher = launcher or partial(
             _default_question_run_launcher,
-            authorization=authorization_to_dict(authorization),
+            authorization=authorization,
         )
         launched = _launch_pending(
             normalized_team,
@@ -783,6 +828,12 @@ def poll_real_batch(
             )
         state = _state_of(envelope)
         runs = reader(normalized_team)
+        current_authorization = _current_catalog_run_authorization(
+            normalized_team, normalized_plan
+        )
+        _require_envelope_catalog_run_authorization(
+            envelope, current_authorization
+        )
         harvested: list[dict[str, Any]] = []
         for question_id in state.plan.question_ids:
             if state.status(question_id) is not QuestionStatus.RUNNING:
@@ -840,23 +891,22 @@ def poll_real_batch(
                     harvested.append({"questionId": question_id, "outcome": "approved"})
         envelope["checkpoint"] = state.to_checkpoint()
         _save_envelope(normalized_team, envelope)
-        authorization = envelope.get("catalogRunAuthorization")
         resolved_refill_launcher = resolved_launcher
         needs_refill = any(
             state.status(question_id) is QuestionStatus.PENDING
             for question_id in state.plan.question_ids
         )
+        if needs_refill:
+            current_authorization = _current_catalog_run_authorization(
+                normalized_team, normalized_plan
+            )
+            _require_envelope_catalog_run_authorization(
+                envelope, current_authorization
+            )
         if launcher is None and needs_refill:
-            if not isinstance(authorization, Mapping) or not authorization.get(
-                "authorizationId"
-            ):
-                raise ChallengeCupRealBatchError(
-                    "The real batch has no durable CatalogRunAuthorization binding.",
-                    code="catalog_run_authorization_required",
-                )
             resolved_refill_launcher = partial(
                 _default_question_run_launcher,
-                authorization=dict(authorization),
+                authorization=current_authorization,
             )
         refill = _launch_pending(
             normalized_team,

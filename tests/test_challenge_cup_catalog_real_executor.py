@@ -237,7 +237,7 @@ def test_start_requires_durable_authorization_and_platform_authorization(
 ) -> None:
     with pytest.raises(
         svc.ChallengeCupRealBatchError,
-        match="durable CatalogRunAuthorization",
+        match="explicit operator confirmation",
     ):
         svc.start_real_batch(TEAM_ID, plan_id="real-1", confirmed=False)
     with pytest.raises(
@@ -268,10 +268,21 @@ def test_start_requires_durable_authorization_and_platform_authorization(
         },
     )
     harness.authorize("real-1")
+    with pytest.raises(
+        svc.ChallengeCupRealBatchError,
+        match="explicit operator confirmation",
+    ):
+        svc.start_real_batch(
+            TEAM_ID,
+            plan_id="real-1",
+            confirmed=False,
+            launcher=harness.launcher,
+            start_dispatcher=harness.start_dispatcher,
+        )
     started = svc.start_real_batch(
         TEAM_ID,
         plan_id="real-1",
-        confirmed=False,
+        confirmed=True,
         launcher=harness.launcher,
         start_dispatcher=harness.start_dispatcher,
     )
@@ -299,6 +310,83 @@ def test_start_requires_durable_authorization_and_platform_authorization(
             launcher=harness.launcher,
             start_dispatcher=harness.start_dispatcher,
         )
+
+
+@pytest.mark.parametrize("operation", ["start", "poll"])
+def test_old_envelope_cannot_cross_readiness_authorization_change(
+    harness: _Harness,
+    operation: str,
+) -> None:
+    harness.authorize("real-1")
+    svc.start_real_batch(
+        TEAM_ID,
+        plan_id="real-1",
+        confirmed=True,
+        max_items=0,
+        launcher=harness.launcher,
+        start_dispatcher=harness.start_dispatcher,
+    )
+    harness.readiness_report = {
+        **harness.readiness_report,
+        "reportId": "real-batch-test-readiness-v2",
+    }
+    harness.authorize("real-1")
+
+    with pytest.raises(
+        svc.ChallengeCupRealBatchError,
+        match="readiness authorization has changed",
+    ):
+        if operation == "start":
+            svc.start_real_batch(
+                TEAM_ID,
+                plan_id="real-1",
+                confirmed=True,
+                launcher=harness.launcher,
+                start_dispatcher=harness.start_dispatcher,
+            )
+        else:
+            _poll(harness, "real-1")
+    assert harness.launch_log == []
+    assert harness.start_log == []
+
+
+def test_poll_revalidates_readiness_immediately_before_refill(
+    harness: _Harness,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness.authorize("real-1")
+    svc.start_real_batch(
+        TEAM_ID,
+        plan_id="real-1",
+        confirmed=True,
+        max_items=0,
+        launcher=harness.launcher,
+        start_dispatcher=harness.start_dispatcher,
+    )
+    original_save = svc._save_envelope
+    readiness_rotated = False
+
+    def save_then_rotate_readiness(team_id: str, envelope: dict) -> None:
+        nonlocal readiness_rotated
+        original_save(team_id, envelope)
+        if readiness_rotated:
+            return
+        readiness_rotated = True
+        harness.readiness_report = {
+            **harness.readiness_report,
+            "reportId": "real-batch-test-readiness-before-refill",
+        }
+        harness.authorize("real-1")
+
+    monkeypatch.setattr(svc, "_save_envelope", save_then_rotate_readiness)
+    with pytest.raises(
+        svc.ChallengeCupRealBatchError,
+        match="readiness authorization has changed",
+    ):
+        _poll(harness, "real-1")
+    assert readiness_rotated is True
+    assert harness.launch_log == []
+    assert harness.start_log == []
 
 
 def test_gate_progression_requires_previous_gate_complete(harness: _Harness) -> None:
@@ -450,8 +538,8 @@ def test_real_batch_routes_authorization_mapping(
         assert response.json()["exists"] is False
 
         response = client.post(f"{REAL_BATCH_BASE}/real-1/start", json={"confirmed": False})
-        assert response.status_code == 422
-        assert "durable CatalogRunAuthorization" in response.json()["detail"]
+        assert response.status_code == 428
+        assert "explicit operator confirmation" in response.json()["detail"]
 
         response = client.post(f"{REAL_BATCH_BASE}/real-1/poll")
         assert response.status_code == 404
@@ -461,6 +549,53 @@ def test_real_batch_routes_authorization_mapping(
             f"{REAL_BATCH_BASE}/real-9/start", json={"confirmed": True}
         )
         assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("suffix", "payload"),
+    [
+        ("start", {"confirmed": True}),
+        ("poll", None),
+        ("cancel", {"confirmed": True}),
+    ],
+)
+def test_real_batch_mutating_routes_require_control_token(
+    harness: _Harness,
+    suffix: str,
+    payload: dict | None,
+) -> None:
+    harness.authorize("real-1")
+    with TestClient(create_app()) as client:
+        response = client.post(
+            f"{REAL_BATCH_BASE}/real-1/{suffix}",
+            json=payload,
+        )
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize(
+    ("suffix", "payload"),
+    [
+        ("start", {"confirmed": True}),
+        ("poll", None),
+        ("cancel", {"confirmed": True}),
+    ],
+)
+def test_real_batch_mutating_routes_require_privileged_operator(
+    harness: _Harness,
+    monkeypatch: pytest.MonkeyPatch,
+    suffix: str,
+    payload: dict | None,
+) -> None:
+    harness.authorize("real-1")
+    monkeypatch.setenv(CONTROL_OPERATOR_ROLES_ENV, "viewer")
+    with _client() as client:
+        response = client.post(
+            f"{REAL_BATCH_BASE}/real-1/{suffix}",
+            json=payload,
+        )
+    assert response.status_code == 403
+    assert response.json()["detail"]["code"] == "command_forbidden"
 
 
 def test_real_batch_authorization_route_is_server_principal_bound(

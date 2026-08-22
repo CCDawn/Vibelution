@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-# Roles that may cancel/fork/rebind/extend budget/resolve human gates.
+# Roles that may control catalog runs, cancel/fork/rebind, extend budgets, or
+# resolve human gates.
 OPERATOR_PRIVILEGED_ROLES: frozenset[str] = frozenset(
     {
         "operator",
@@ -18,6 +19,9 @@ HIGH_IMPACT_COMMANDS: frozenset[str] = frozenset(
         "cancel_node",
         "cancel_run",
         "authorize_catalog_run",
+        "start_catalog_run",
+        "poll_catalog_run",
+        "cancel_catalog_run",
         "resolve_human_task",
         "extend_budget",
         "rebind_node",

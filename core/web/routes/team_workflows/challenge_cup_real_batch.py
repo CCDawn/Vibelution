@@ -51,11 +51,23 @@ _REAL_BATCH_CONTRACT_ERRORS = (
 _REAL_BATCH_ERROR_STATUS = {
     "confirmation_required": 428,
     "platform_not_authorized": 409,
+    "catalog_run_authorization_required": 409,
+    "catalog_run_authorization_stale": 409,
     "previous_gate_incomplete": 409,
     "batch_cancelled": 409,
     "batch_not_found": 404,
     "invalid_max_items": 422,
 }
+
+
+def _raise_command_forbidden(exc: PermissionError) -> None:
+    raise HTTPException(
+        status_code=403,
+        detail={
+            "code": "command_forbidden",
+            "message": str(exc) or "command_forbidden",
+        },
+    ) from exc
 
 
 def _raise_real_batch_route_error(operation: str, team_id: str, exc: Exception) -> None:
@@ -93,10 +105,7 @@ def challenge_cup_real_batch_authorize(
             )
             return authorization_to_dict(authorization)
     except PermissionError as exc:
-        raise HTTPException(
-            status_code=403,
-            detail={"code": "command_forbidden", "message": str(exc) or "command_forbidden"},
-        ) from exc
+        _raise_command_forbidden(exc)
     except TeamNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RealBatchStorageError as exc:
@@ -131,17 +140,22 @@ def challenge_cup_real_batch_status(team_id: str, plan_id: str) -> dict:
 def challenge_cup_real_batch_start(
     team_id: str,
     plan_id: str,
+    request: Request,
     payload: ChallengeCupRealBatchStartRequest,
 ) -> dict:
     try:
-        return start_real_batch(
-            team_id,
-            plan_id=plan_id,
-            confirmed=payload.confirmed,
-            concurrency=payload.concurrency,
-            max_items=payload.maxItems,
-            failure_budget=payload.failureBudget,
-        )
+        with server_operator_scope_from_http(request):
+            require_privileged_server_operator(command="start_catalog_run")
+            return start_real_batch(
+                team_id,
+                plan_id=plan_id,
+                confirmed=payload.confirmed,
+                concurrency=payload.concurrency,
+                max_items=payload.maxItems,
+                failure_budget=payload.failureBudget,
+            )
+    except PermissionError as exc:
+        _raise_command_forbidden(exc)
     except TeamNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RealBatchStorageError as exc:
@@ -155,9 +169,17 @@ def challenge_cup_real_batch_start(
     response_model=ChallengeCupRealBatchPollResponse,
     response_model_exclude_unset=True,
 )
-def challenge_cup_real_batch_poll(team_id: str, plan_id: str) -> dict:
+def challenge_cup_real_batch_poll(
+    team_id: str,
+    plan_id: str,
+    request: Request,
+) -> dict:
     try:
-        return poll_real_batch(team_id, plan_id=plan_id)
+        with server_operator_scope_from_http(request):
+            require_privileged_server_operator(command="poll_catalog_run")
+            return poll_real_batch(team_id, plan_id=plan_id)
+    except PermissionError as exc:
+        _raise_command_forbidden(exc)
     except TeamNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RealBatchStorageError as exc:
@@ -174,10 +196,19 @@ def challenge_cup_real_batch_poll(team_id: str, plan_id: str) -> dict:
 def challenge_cup_real_batch_cancel(
     team_id: str,
     plan_id: str,
+    request: Request,
     payload: ChallengeCupRealBatchCancelRequest,
 ) -> dict:
     try:
-        return cancel_real_batch(team_id, plan_id=plan_id, confirmed=payload.confirmed)
+        with server_operator_scope_from_http(request):
+            require_privileged_server_operator(command="cancel_catalog_run")
+            return cancel_real_batch(
+                team_id,
+                plan_id=plan_id,
+                confirmed=payload.confirmed,
+            )
+    except PermissionError as exc:
+        _raise_command_forbidden(exc)
     except TeamNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RealBatchStorageError as exc:
