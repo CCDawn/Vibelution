@@ -11,7 +11,7 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
 
 
-def test_challenge_cup_repair_detects_orphan_active_team_private_agents(tmp_path, monkeypatch):
+def test_challenge_cup_repair_preserves_orphan_identity_as_legacy(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
     stale = agent_directory_service.create_agent_instance(
@@ -42,15 +42,19 @@ def test_challenge_cup_repair_detects_orphan_active_team_private_agents(tmp_path
 
     repaired = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
 
-    assert stale["agentId"] in repaired["purgedAgentIds"]
-    assert agent_directory_service.get_agent(stale["agentId"], include_archived=True) is None
+    assert repaired["purgedAgentIds"] == []
+    preserved = agent_directory_service.get_agent(stale["agentId"], include_archived=True)
+    assert preserved is not None
+    assert preserved["directSessionId"] == "session-old-discovery"
+    assert preserved["metadata"]["challengeCupTeamActiveBinding"] is False
+    assert preserved["metadata"]["challengeCupTeamBindingStatus"] == "legacy"
+    assert preserved["metadata"]["challengeCupTeamAliasResolution"] == {
+        "sourceRole": "data_discovery",
+        "ownerType": "unmapped_legacy",
+        "ownerId": "",
+        "aliasPriority": -1,
+    }
     assert team_service.challenge_cup_research_team_agents_need_repair() is False
-    ordinary_session_ids = {session.get("id") for session in session_service.list_sessions(include_hidden_internal=False)}
-    hidden_session_ids = {session.get("id") for session in session_service.list_sessions(include_hidden_internal=True)}
-    assert "session-old-discovery" not in ordinary_session_ids
-    assert "session-old-discovery" in hidden_session_ids
-
-
 def test_knowledge_expansion_repair_detects_orphan_active_team_private_agents(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team_service.ensure_knowledge_expansion_team_agents(purge_stale=True)

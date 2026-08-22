@@ -631,17 +631,43 @@ def _default_edges_for_team(team: dict[str, Any], nodes: list[dict[str, Any]]) -
         return s._edges_from_role_links(
             nodes_by_role,
             [
-                ("research_coordination", "source_finder", "分配资料寻找任务", "reports_to"),
-                ("source_finder", "source_extractor", "交接可读资料", "reports_to"),
-                ("source_extractor", "source_relation_mapper", "交接保留资料", "reports_to"),
-                ("source_relation_mapper", "source_ingestor", "提交入库审核", "reports_to"),
-                ("research_coordination", "experiment_planner", "分配实验规划", "reports_to"),
-                ("experiment_planner", "experiment_ledger", "登记实验计划与结果", "reports_to"),
-                ("experiment_ledger", "iteration_planner", "交接实验证据", "reports_to"),
-                ("iteration_planner", "iteration_versioning", "交接版本决策", "reports_to"),
-                ("source_extractor", "source_finder", "退回补读与补资料", "communication"),
-                ("source_relation_mapper", "source_extractor", "反馈关系缺口", "communication"),
-                ("source_ingestor", "source_relation_mapper", "反馈入库前关系补全", "communication"),
+                ("challenge_cup_search", "challenge_cup_extractor", "交接可追溯资料", "reports_to"),
+                (
+                    "challenge_cup_extractor",
+                    "challenge_cup_knowledge_manager",
+                    "交接证据与限制",
+                    "reports_to",
+                ),
+                (
+                    "challenge_cup_knowledge_manager",
+                    "challenge_cup_experiment_revision",
+                    "提供证据关系与缺口",
+                    "reports_to",
+                ),
+                (
+                    "challenge_cup_experiment_revision",
+                    "challenge_cup_execution_steward",
+                    "提交冻结协议",
+                    "reports_to",
+                ),
+                (
+                    "challenge_cup_execution_steward",
+                    "challenge_cup_evaluator",
+                    "交付不可变运行工件",
+                    "reports_to",
+                ),
+                (
+                    "challenge_cup_evaluator",
+                    "challenge_cup_experiment_revision",
+                    "反馈评估与主张边界",
+                    "communication",
+                ),
+                (
+                    "challenge_cup_knowledge_manager",
+                    "challenge_cup_search",
+                    "反馈知识缺口",
+                    "communication",
+                ),
             ],
         )
     return []

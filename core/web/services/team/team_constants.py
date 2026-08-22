@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from core.research.workflow.contracts import CURRENT_RESEARCH_TEAM_ROLE_CONTRACT
+
 from .kind_helpers import (
     AI_SEARCH_TEAM_ID,
     KNOWLEDGE_EXPANSION_TEAM_ID,
@@ -53,7 +55,7 @@ EVOLUTION_SYSTEM_TEAM_SPECS = (
         "chatRoomPurpose": "supervised_evolution",
     },
 )
-RESEARCH_TEAM_MEMBER_ROLE_KEYS = {
+_LEGACY_RESEARCH_TEAM_MEMBER_ROLE_KEYS = {
     "research_coordination": "challenge_cup_coordinator",
     "source_finder": "source_finder",
     "source_extractor": "source_extractor",
@@ -64,73 +66,69 @@ RESEARCH_TEAM_MEMBER_ROLE_KEYS = {
     "iteration_planner": "challenge_cup_iteration_planner",
     "iteration_versioning": "challenge_cup_versioning",
 }
+RESEARCH_TEAM_MEMBER_ROLE_KEYS = {
+    **_LEGACY_RESEARCH_TEAM_MEMBER_ROLE_KEYS,
+    **{
+        role.product_role_id: role.product_role_id
+        for role in CURRENT_RESEARCH_TEAM_ROLE_CONTRACT.product_agents
+    },
+}
 CHALLENGE_CUP_RESEARCH_TEAM_ID = "research-team"
 CHALLENGE_CUP_RESEARCH_TEAM_AGENT_CREATED_BY = "challenge_cup_team"
-CHALLENGE_CUP_RESEARCH_TEAM_ROLES: tuple[dict[str, Any], ...] = (
-    {
-        "role": "research_coordination",
-        "roleKey": "challenge_cup_coordinator",
-        "label": "科研协调",
-        "purpose": "阶段调度与分工",
-        "responsibilities": ["判断当前阶段", "组织返工转移", "把任务交接给功能 Agent"],
-    },
-    {
-        "role": "source_finder",
-        "roleKey": "source_finder",
-        "label": "资料寻找",
-        "purpose": "搜索、获取并登记可追溯资料",
-        "responsibilities": ["生成检索问题", "搜索和下载有效资料", "登记无效来源用于后续去重排除"],
-    },
-    {
-        "role": "source_extractor",
-        "roleKey": "source_extractor",
-        "label": "资料提炼",
-        "purpose": "提炼价值、复核质量并决定保留/排除",
-        "responsibilities": ["逐条提炼候选资料", "保留有价值但不完整的资料并说明限制", "排除无有效内容来源"],
-    },
-    {
-        "role": "source_relation_mapper",
-        "roleKey": "source_relation_mapper",
-        "label": "资料关系整理",
-        "purpose": "整理候选资料之间的主题和证据关系",
-        "responsibilities": ["生成候选关系", "标注断链缺口", "预览入库前关系边界"],
-    },
-    {
-        "role": "source_ingestor",
-        "roleKey": "source_ingestor",
-        "label": "资料入库",
-        "purpose": "最终审核并写入正式 Team Knowledge",
-        "responsibilities": ["复核可入库资料", "执行正式知识库入库", "拒绝低置信或缺证据资料"],
-    },
-    {
-        "role": "experiment_planner",
-        "roleKey": "challenge_cup_experiment_planner",
-        "label": "实验规划",
-        "purpose": "实验计划账本",
-        "responsibilities": ["生成实验计划草稿", "对齐 dataset/metric/baseline", "标注 smoke gate 和人工门禁"],
-    },
-    {
-        "role": "experiment_ledger",
-        "roleKey": "challenge_cup_experiment_ledger",
-        "label": "实验证据",
-        "purpose": "实验结果证据登记",
-        "responsibilities": ["登记 baseline 工件", "登记 smoke/full-run 结果", "整理实验结果入库申请"],
-    },
-    {
-        "role": "iteration_planner",
-        "roleKey": "challenge_cup_iteration_planner",
-        "label": "迭代决策",
-        "purpose": "Research Loop 决策账本",
-        "responsibilities": ["创建 Research Loop", "登记迭代证据", "生成下一轮修复/接受/归档决策"],
-    },
-    {
-        "role": "iteration_versioning",
-        "roleKey": "challenge_cup_versioning",
-        "label": "版本治理",
-        "purpose": "候选版本与拒绝归档",
-        "responsibilities": ["维护 versionHistory", "记录 supersedes/derived_from", "归档 rejectionArchive"],
-    },
+CHALLENGE_CUP_RESEARCH_TEAM_ROLE_CONTRACT = (
+    CURRENT_RESEARCH_TEAM_ROLE_CONTRACT.to_dict()
 )
+CHALLENGE_CUP_RESEARCH_TEAM_ROLE_CONTRACT_VERSION = int(
+    CHALLENGE_CUP_RESEARCH_TEAM_ROLE_CONTRACT["teamRoleContractVersion"]
+)
+CHALLENGE_CUP_RESEARCH_TEAM_ROLE_CONTRACT_FINGERPRINT = str(
+    CHALLENGE_CUP_RESEARCH_TEAM_ROLE_CONTRACT["roleContractFingerprint"]
+)
+CHALLENGE_CUP_RESEARCH_TEAM_PARTICIPANT_POLICY_VERSION = int(
+    CHALLENGE_CUP_RESEARCH_TEAM_ROLE_CONTRACT["participantPolicyVersion"]
+)
+CHALLENGE_CUP_RESEARCH_TEAM_LEGACY_READ_MODE = str(
+    CHALLENGE_CUP_RESEARCH_TEAM_ROLE_CONTRACT["legacyReadMode"]
+)
+
+_CHALLENGE_CUP_ROLE_RESPONSIBILITIES: dict[str, list[str]] = {
+    "challenge_cup_search": ["把知识缺口转为检索问题", "登记有效与无效来源", "保持来源可追溯"],
+    "challenge_cup_extractor": ["提取证据与反证", "标注引用和限制", "拒绝不可定位内容"],
+    "challenge_cup_knowledge_manager": ["治理证据关系与作用域", "维护 lineage", "控制知识候选提升边界"],
+    "challenge_cup_execution_steward": ["提交冻结协议", "观察受控运行", "登记不可变 artifact locator"],
+    "challenge_cup_experiment_revision": ["生成和修订假说", "修订实验协议", "提出迭代与停止建议"],
+    "challenge_cup_evaluator": ["独立审查指标与稳健性", "登记负结果", "约束主张边界"],
+}
+
+CHALLENGE_CUP_RESEARCH_TEAM_ROLES: tuple[dict[str, Any], ...] = tuple(
+    {
+        "role": role.product_role_id,
+        "roleKey": role.product_role_id,
+        "label": role.label,
+        "purpose": role.purpose,
+        "responsibilities": list(
+            _CHALLENGE_CUP_ROLE_RESPONSIBILITIES.get(role.product_role_id, ())
+        ),
+        "legacyRoleAliases": list(role.legacy_role_aliases),
+    }
+    for role in CURRENT_RESEARCH_TEAM_ROLE_CONTRACT.product_agents
+)
+
+CHALLENGE_CUP_RESEARCH_TEAM_LEGACY_ROLE_OWNERS: dict[str, dict[str, Any]] = {}
+for product_role in CURRENT_RESEARCH_TEAM_ROLE_CONTRACT.product_agents:
+    for alias_priority, alias in enumerate(product_role.legacy_role_aliases):
+        CHALLENGE_CUP_RESEARCH_TEAM_LEGACY_ROLE_OWNERS[alias] = {
+            "ownerType": "product_agent",
+            "ownerId": product_role.product_role_id,
+            "aliasPriority": alias_priority,
+        }
+for system_capability in CURRENT_RESEARCH_TEAM_ROLE_CONTRACT.system_capabilities:
+    for alias_priority, alias in enumerate(system_capability.legacy_role_aliases):
+        CHALLENGE_CUP_RESEARCH_TEAM_LEGACY_ROLE_OWNERS[alias] = {
+            "ownerType": "system_capability",
+            "ownerId": system_capability.capability_id,
+            "aliasPriority": alias_priority,
+        }
 KNOWLEDGE_EXPANSION_TEAM_AGENT_CREATED_BY = "knowledge_expansion_team"
 KNOWLEDGE_EXPANSION_TEAM_ROLES: tuple[dict[str, Any], ...] = (
     {

@@ -276,28 +276,33 @@ def test_research_team_repair_applies_challenge_cup_agent_tool_profiles(tmp_path
     assert agent["toolPolicy"]["writeScopes"] == expected_policy["writeScopes"]
 
 
-def test_challenge_cup_research_team_uses_source_ingestor_for_governed_ingestion(tmp_path, monkeypatch):
+def test_challenge_cup_research_team_uses_canonical_knowledge_manager_binding(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
 
     result = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
     team = result["team"]
-    ingestor_member = next(member for member in team["members"] if member["role"] == "source_ingestor")
-    ingestor_agent = agent_directory_service.get_agent(ingestor_member["agentId"])
-    policy = agent_directory_service.resolve_tool_policy_for_agent(ingestor_member["agentId"])
+    manager_member = next(
+        member
+        for member in team["members"]
+        if member["role"] == "challenge_cup_knowledge_manager"
+    )
+    manager_agent = agent_directory_service.get_agent(manager_member["agentId"])
 
-    assert ingestor_agent["roleKey"] == "source_ingestor"
-    assert ingestor_agent["metadata"]["challengeCupTeamRole"] == "source_ingestor"
-    assert "knowledge_ingestion_tool" in policy["allowedTools"]
-    assert "knowledge_proposal_tool" in policy["allowedTools"]
-    assert "batch_web_search_tool" not in policy["allowedTools"]
-    assert "cli_tool" not in policy["allowedTools"]
+    assert manager_agent["roleKey"] == "challenge_cup_knowledge_manager"
+    assert manager_agent["metadata"]["challengeCupTeamRole"] == "challenge_cup_knowledge_manager"
+    assert manager_agent["metadata"]["challengeCupTeamActiveBinding"] is True
+    assert team["activeBinding"]["productRoleAgentIds"]["challenge_cup_knowledge_manager"] == manager_agent["agentId"]
 
 
 def test_challenge_cup_managed_agents_default_to_full_access_without_changing_personal_default(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
 
     initial = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
-    finder_member = next(member for member in initial["team"]["members"] if member["role"] == "source_finder")
+    finder_member = next(
+        member
+        for member in initial["team"]["members"]
+        if member["role"] == "challenge_cup_search"
+    )
     agent_directory_service.update_agent_instance(
         finder_member["agentId"],
         permission_preset="request_approval",
@@ -408,11 +413,25 @@ def test_challenge_cup_research_team_default_canvas_has_stage_relationships(tmp_
     }
 
     assert canvas["validation"]["valid"] is True
-    assert ("research_coordination", "source_finder", "reports_to") in edge_pairs
-    assert ("source_relation_mapper", "source_extractor", "communication") in edge_pairs
-    assert ("source_relation_mapper", "source_ingestor", "reports_to") in edge_pairs
-    assert len([edge for edge in canvas["edges"] if edge["type"] != "communication"]) >= 8
-    assert len([edge for edge in canvas["edges"] if edge["type"] == "communication"]) >= 3
+    assert {node["role"] for node in canvas["nodes"]} == {
+        "challenge_cup_search",
+        "challenge_cup_extractor",
+        "challenge_cup_knowledge_manager",
+        "challenge_cup_execution_steward",
+        "challenge_cup_experiment_revision",
+        "challenge_cup_evaluator",
+    }
+    assert ("challenge_cup_search", "challenge_cup_extractor", "reports_to") in edge_pairs
+    assert (
+        "challenge_cup_knowledge_manager",
+        "challenge_cup_experiment_revision",
+        "reports_to",
+    ) in edge_pairs
+    assert (
+        "challenge_cup_evaluator",
+        "challenge_cup_experiment_revision",
+        "communication",
+    ) in edge_pairs
 
 
 def test_challenge_cup_research_team_canvas_self_repairs_missing_default_edges(tmp_path, monkeypatch):
@@ -430,17 +449,73 @@ def test_challenge_cup_research_team_canvas_self_repairs_missing_default_edges(t
     assert json.loads(canvas_path.read_text(encoding="utf-8"))["edges"] == repaired["edges"]
 
 
-def test_challenge_cup_research_team_agent_repair_purges_stale_and_rebuilds_complete_team(tmp_path, monkeypatch):
+def test_challenge_cup_research_team_agent_repair_migrates_v1_without_deleting_history(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    stale_agent = agent_directory_service.create_agent_instance(
-        display_name="旧资料发现",
-        direct_session_id="session-old-discovery",
-        metadata={"challengeCupTeamId": "research-team", "challengeCupTeamRole": "unsupported_source_role"},
+    legacy_role_specs = (
+        ("research_coordination", "challenge_cup_coordinator"),
+        ("source_finder", "source_finder"),
+        ("source_extractor", "source_extractor"),
+        ("source_ingestor", "source_ingestor"),
+        ("source_relation_mapper", "source_relation_mapper"),
+        ("iteration_planner", "challenge_cup_iteration_planner"),
+        ("experiment_planner", "challenge_cup_experiment_planner"),
+        ("experiment_ledger", "challenge_cup_experiment_ledger"),
+        ("iteration_versioning", "challenge_cup_versioning"),
     )
-    missing_agent_id = "agent-missing-challenge-cup"
-    orphan_workspace = developer_sandbox.seeded_sandbox_workspace_path(tmp_path, "agents", missing_agent_id)
-    orphan_workspace.mkdir(parents=True)
-    (orphan_workspace / "note.txt").write_text("stale", encoding="utf-8")
+    legacy_agents_by_role = {}
+    for index, (role, role_key) in enumerate(legacy_role_specs, start=1):
+        legacy_agents_by_role[role] = agent_directory_service.create_agent_instance(
+            display_name=f"旧角色 {role}",
+            direct_session_id=f"session-legacy-{index:02d}-{role}",
+            primary_mode="research",
+            role_key=role_key,
+            created_by=team_service.CHALLENGE_CUP_RESEARCH_TEAM_AGENT_CREATED_BY,
+            metadata={
+                "fixedRole": True,
+                "challengeCupTeamId": "research-team",
+                "challengeCupTeamManagedVersion": 1,
+                "challengeCupTeamRole": role,
+                "challengeCupTeamRoleKey": role_key,
+                "researchTeamRole": role,
+                "researchTeamRoleKey": role_key,
+                "researchAgentKey": role_key,
+                "conversationIndexKind": agent_directory_service.CONVERSATION_INDEX_KIND_TEAM_AGENT,
+                "conversationIndexVisibility": agent_directory_service.CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE,
+                "showInSessionIndex": False,
+                "directSessionVisibility": "active_session",
+            },
+        )
+    legacy_agent_ids = {
+        role: str(agent["agentId"])
+        for role, agent in legacy_agents_by_role.items()
+    }
+    legacy_session_ids = {
+        role: str(agent["directSessionId"])
+        for role, agent in legacy_agents_by_role.items()
+    }
+    historical_room = chat_room_service.create_chat_room(
+        room_id="room-research-team-history",
+        title="旧挑战杯团队会议",
+        participant_agent_ids=list(legacy_agent_ids.values()),
+        purpose="research",
+        config={"source": "team", "teamId": "research-team"},
+    )
+    room_store = chat_room_service._store()
+    room_state = room_store.load()
+    stored_room = next(
+        room
+        for room in room_state["rooms"]
+        if room["roomId"] == historical_room["roomId"]
+    )
+    stored_room["rounds"] = [
+        {
+            "roundId": "round-legacy-001",
+            "status": "completed",
+            "topic": "旧九角色会议历史",
+            "messages": [],
+        }
+    ]
+    room_store.save(room_state)
     teams_root = developer_sandbox.seeded_sandbox_workspace_path(tmp_path, "teams")
     teams_root.mkdir(parents=True)
     now = "2026-06-22T00:00:00+00:00"
@@ -458,19 +533,14 @@ def test_challenge_cup_research_team_agent_repair_purges_stale_and_rebuilds_comp
                         "status": "active",
                         "members": [
                             {
-                                "memberId": "old-discovery",
-                                "agentId": stale_agent["agentId"],
-                                "agentName": "旧资料发现",
-                                "role": "unsupported_source_role",
-                            },
-                            {
-                                "memberId": "missing",
-                                "agentId": missing_agent_id,
-                                "agentName": "缺失 Agent",
-                                "role": "unsupported_source_role",
-                            },
+                                "memberId": f"legacy-{index:02d}-{role}",
+                                "agentId": legacy_agent_ids[role],
+                                "agentName": f"旧角色 {role}",
+                                "role": role,
+                            }
+                            for index, (role, _role_key) in enumerate(legacy_role_specs, start=1)
                         ],
-                        "linkedChatRoomId": "",
+                        "linkedChatRoomId": historical_room["roomId"],
                         "canvasPath": "workspace/teams/research-team/canvas.json",
                         "createdAt": now,
                         "updatedAt": now,
@@ -498,8 +568,13 @@ def test_challenge_cup_research_team_agent_repair_purges_stale_and_rebuilds_comp
                 "path": "workspace/teams/research-team/canvas.json",
                 "viewport": {"x": 0, "y": 0, "zoom": 1},
                 "nodes": [
-                    {"id": stale_agent["agentId"], "agentId": stale_agent["agentId"], "label": "旧资料发现", "role": "unsupported_source_role"},
-                    {"id": missing_agent_id, "agentId": missing_agent_id, "label": "缺失 Agent", "role": "unsupported_source_role"},
+                    {
+                        "id": f"legacy-node-{index:02d}",
+                        "agentId": legacy_agent_ids[role],
+                        "label": f"旧角色 {role}",
+                        "role": role,
+                    }
+                    for index, (role, _role_key) in enumerate(legacy_role_specs, start=1)
                 ],
                 "edges": [],
             },
@@ -514,77 +589,476 @@ def test_challenge_cup_research_team_agent_repair_purges_stale_and_rebuilds_comp
     result = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
     team = result["team"]
 
-    assert result["memberCount"] == len(team_service.CHALLENGE_CUP_RESEARCH_TEAM_ROLES)
-    assert result["directSessionCount"] == len(team_service.CHALLENGE_CUP_RESEARCH_TEAM_ROLES)
-    assert stale_agent["agentId"] in result["purgedAgentIds"]
-    assert not orphan_workspace.exists()
-    assert agent_directory_service.get_agent(stale_agent["agentId"], include_archived=True) is None
+    assert result["memberCount"] == 6
+    assert result["directSessionCount"] == 6
+    assert result["purgedAgentIds"] == []
     assert [member["role"] for member in team["members"]] == [
-        "research_coordination",
-        "source_finder",
-        "source_extractor",
-        "source_relation_mapper",
-        "source_ingestor",
-        "experiment_planner",
-        "experiment_ledger",
-        "iteration_planner",
-        "iteration_versioning",
+        "challenge_cup_search",
+        "challenge_cup_extractor",
+        "challenge_cup_knowledge_manager",
+        "challenge_cup_execution_steward",
+        "challenge_cup_experiment_revision",
+        "challenge_cup_evaluator",
     ]
-    active_agents_by_id = {
-        agent["agentId"]: agent
-        for agent in agent_directory_service.list_agents(include_archived=False)
+    expected_selected_legacy_ids = {
+        "challenge_cup_search": legacy_agent_ids["source_finder"],
+        "challenge_cup_extractor": legacy_agent_ids["source_extractor"],
+        "challenge_cup_knowledge_manager": legacy_agent_ids["source_relation_mapper"],
+        "challenge_cup_experiment_revision": legacy_agent_ids["experiment_planner"],
+        "challenge_cup_evaluator": legacy_agent_ids["experiment_ledger"],
     }
     for member in team["members"]:
-        agent = active_agents_by_id[member["agentId"]]
-        assert agent["directSessionId"]
-        assert session_service.get_session_detail(agent["directSessionId"])
-        assert agent["metadata"]["challengeCupTeamId"] == "research-team"
-        assert agent["metadata"]["challengeCupTeamRole"] == member["role"]
-        assert agent["metadata"]["showInSessionIndex"] is False
-        assert agent["metadata"]["conversationIndexVisibility"] == (
-            agent_directory_service.CONVERSATION_INDEX_VISIBILITY_TEAM_PRIVATE
+        agent = agent_directory_service.get_agent(member["agentId"])
+        metadata = agent["metadata"]
+        assert metadata["challengeCupTeamRole"] == member["role"]
+        assert metadata["challengeCupTeamContractVersion"] == 2
+        assert metadata["challengeCupTeamRoleContractFingerprint"] == team["roleContractFingerprint"]
+        assert metadata["challengeCupTeamActiveBinding"] is True
+        assert metadata["challengeCupTeamBindingStatus"] == "active"
+        if member["role"] in expected_selected_legacy_ids:
+            assert member["agentId"] == expected_selected_legacy_ids[member["role"]]
+
+    unselected_legacy_roles = {
+        "research_coordination": ("system_capability", "coordinator"),
+        "source_ingestor": ("product_agent", "challenge_cup_knowledge_manager"),
+        "iteration_planner": ("product_agent", "challenge_cup_experiment_revision"),
+        "iteration_versioning": ("system_capability", "versioning_service"),
+    }
+    for legacy_role, (owner_type, owner_id) in unselected_legacy_roles.items():
+        legacy_agent = agent_directory_service.get_agent(
+            legacy_agent_ids[legacy_role],
+            include_archived=True,
         )
-        if member["role"] in {
-            "source_finder",
-            "source_extractor",
-            "source_relation_mapper",
-            "source_ingestor",
-            "experiment_planner",
-            "experiment_ledger",
-            "iteration_planner",
-            "iteration_versioning",
-        }:
-            policy = agent_directory_service.resolve_tool_policy_for_agent(agent["agentId"])
-            if member["role"] in {"experiment_planner", "experiment_ledger"}:
-                assert "challenge_cup_experiment_context_tool" in policy["allowedTools"]
-                assert "challenge_cup_experiment_writeback_tool" in policy["allowedTools"]
-                assert "web_search_tool" not in policy["allowedTools"]
-                assert "cli_tool" not in policy["allowedTools"]
-            elif member["role"] == "iteration_planner":
-                assert "challenge_cup_iteration_context_tool" in policy["allowedTools"]
-                assert "challenge_cup_iteration_writeback_tool" in policy["allowedTools"]
-                assert "web_search_tool" not in policy["allowedTools"]
-                assert "cli_tool" not in policy["allowedTools"]
-            elif member["role"] == "iteration_versioning":
-                assert "challenge_cup_versioning_context_tool" in policy["allowedTools"]
-                assert "challenge_cup_versioning_writeback_tool" in policy["allowedTools"]
-                assert "knowledge_ingestion_tool" not in policy["allowedTools"]
-                assert "cli_tool" not in policy["allowedTools"]
-            else:
-                assert "source_collection_context_tool" in policy["allowedTools"]
-                assert "source_collection_stage_writeback_tool" in policy["allowedTools"]
-                role_key = team_service.RESEARCH_TEAM_MEMBER_ROLE_KEYS[member["role"]]
-                expected_policy = agent_role_tool_profile_service.resolve_role_tool_policy(
-                    role_key=role_key,
-                    primary_mode="research",
-                    policy_id=str(policy["policyId"]),
-                )
-                assert expected_policy is not None
-                assert policy["preferredTools"] == expected_policy["preferredTools"]
+        assert legacy_agent is not None
+        assert legacy_agent["directSessionId"] == legacy_session_ids[legacy_role]
+        resolution = legacy_agent["metadata"]["challengeCupTeamAliasResolution"]
+        assert resolution["ownerType"] == owner_type
+        assert resolution["ownerId"] == owner_id
+        assert legacy_agent["metadata"]["challengeCupTeamActiveBinding"] is False
+        assert legacy_agent["metadata"]["challengeCupTeamBindingStatus"] == "legacy"
+
+    for legacy_role, legacy_agent_id in legacy_agent_ids.items():
+        preserved = agent_directory_service.get_agent(legacy_agent_id, include_archived=True)
+        assert preserved is not None
+        assert preserved["directSessionId"] == legacy_session_ids[legacy_role]
+
+    assert team["roleContractVersion"] == 2
+    assert len(team["roleContractFingerprint"]) == 64
+    assert team["activeBinding"]["status"] == "active"
+    assert team["activeBinding"]["productRoleAgentIds"] == {
+        member["role"]: member["agentId"] for member in team["members"]
+    }
+    assert {item["status"] for item in team["legacyBindings"]} == {"legacy"}
+
     canvas = team_service.get_team_canvas("research-team")
     assert {node["agentId"] for node in canvas["nodes"]} == {member["agentId"] for member in team["members"]}
-    assert stale_agent["agentId"] not in {node["agentId"] for node in canvas["nodes"]}
+    assert not set(legacy_agent_ids.values()).difference(expected_selected_legacy_ids.values()) & {
+        node["agentId"] for node in canvas["nodes"]
+    }
+    room = chat_room_service.get_chat_room_detail(team["linkedChatRoomId"])
+    assert team["linkedChatRoomId"] == historical_room["roomId"]
+    assert [item["roundId"] for item in room["rounds"]] == ["round-legacy-001"]
+    assert {item["agentId"] for item in room["participants"]} == {
+        member["agentId"] for member in team["members"]
+    }
+
+    first_binding = dict(team["activeBinding"]["productRoleAgentIds"])
+    agent_ids_after_first = {
+        agent["agentId"] for agent in agent_directory_service.list_agents(include_archived=True)
+    }
+    second = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
+    assert second["team"]["activeBinding"]["productRoleAgentIds"] == first_binding
+    assert {
+        agent["agentId"] for agent in agent_directory_service.list_agents(include_archived=True)
+    } == agent_ids_after_first
+    assert second["purgedAgentIds"] == []
     assert team_service.challenge_cup_research_team_agents_need_repair() is False
+
+
+def test_challenge_cup_research_team_repair_ignores_forged_user_alias_agent(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    forged = agent_directory_service.create_agent_instance(
+        display_name="用户自建关系映射 Agent",
+        direct_session_id="session-user-forged-relation-mapper",
+        primary_mode="research",
+        role_key="source_relation_mapper",
+        created_by="user",
+        metadata={
+            "challengeCupTeamId": team_service.CHALLENGE_CUP_RESEARCH_TEAM_ID,
+            "challengeCupTeamManagedVersion": 1,
+            "challengeCupTeamRole": "source_relation_mapper",
+        },
+    )
+    forged_before = agent_directory_service.get_agent(forged["agentId"])
+
+    result = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
+
+    member_ids = {str(item.get("agentId") or "") for item in result["team"]["members"]}
+    legacy_ids = {str(item.get("agentId") or "") for item in result["team"]["legacyBindings"]}
+    forged_after = agent_directory_service.get_agent(forged["agentId"])
+    assert forged["agentId"] not in member_ids
+    assert forged["agentId"] not in legacy_ids
+    assert forged_after["metadata"] == forged_before["metadata"]
+    assert forged_after["configRevision"] == forged_before["configRevision"]
+    assert forged_after["updatedAt"] == forged_before["updatedAt"]
+
+
+def test_challenge_cup_research_team_repair_detects_exact_projection_and_room_drift(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    result = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
+    team = result["team"]
+    teams_index = developer_sandbox.seeded_sandbox_workspace_path(tmp_path, "teams") / "teams.json"
+
+    teams_payload = json.loads(teams_index.read_text(encoding="utf-8"))
+    stored_team = next(item for item in teams_payload["teams"] if item["teamId"] == team["teamId"])
+    stored_team["members"].append(dict(stored_team["members"][0]))
+    teams_index.write_text(json.dumps(teams_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    assert team_service.challenge_cup_research_team_agents_need_repair() is True
+    team = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)["team"]
+
+    canvas_path = team_service._team_canvas_path(team["teamId"])
+    canvas = json.loads(canvas_path.read_text(encoding="utf-8"))
+    duplicate_node = dict(canvas["nodes"][0])
+    duplicate_node["id"] = f'{duplicate_node["id"]}-duplicate'
+    canvas["nodes"].append(duplicate_node)
+    canvas_path.write_text(json.dumps(canvas, ensure_ascii=False, indent=2), encoding="utf-8")
+    assert team_service.challenge_cup_research_team_agents_need_repair() is True
+    team = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)["team"]
+
+    room = chat_room_service.get_chat_room_detail(team["linkedChatRoomId"])
+    participant_session_ids = [item["sessionId"] for item in room["participants"]]
+    chat_room_service.update_chat_room(
+        team["linkedChatRoomId"],
+        participant_session_ids=participant_session_ids[:5],
+    )
+    assert team_service.challenge_cup_research_team_agents_need_repair() is True
+    team = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)["team"]
+
+    extra = agent_directory_service.create_agent_instance(
+        display_name="无关第七人",
+        direct_session_id="session-unrelated-seventh-participant",
+        created_by="user",
+    )
+    room = chat_room_service.get_chat_room_detail(team["linkedChatRoomId"])
+    participant_session_ids = [item["sessionId"] for item in room["participants"]]
+    chat_room_service.update_chat_room(
+        team["linkedChatRoomId"],
+        participant_session_ids=[*participant_session_ids, extra["directSessionId"]],
+    )
+    assert team_service.challenge_cup_research_team_agents_need_repair() is True
+
+
+def test_challenge_cup_research_team_repair_marker_recovers_after_agent_failure(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    original_update = agent_directory_service.update_agent_instance
+
+    def fail_update(*args, **kwargs):
+        raise RuntimeError("simulated challenge cup migration failure")
+
+    monkeypatch.setattr(agent_directory_service, "update_agent_instance", fail_update)
+    with pytest.raises(RuntimeError, match="simulated challenge cup migration failure"):
+        team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
+
+    teams_index = developer_sandbox.seeded_sandbox_workspace_path(tmp_path, "teams") / "teams.json"
+    failed_payload = json.loads(teams_index.read_text(encoding="utf-8"))
+    failed_team = next(item for item in failed_payload["teams"] if item["teamId"] == "research-team")
+    assert failed_team["roleMigration"]["phase"] == "failed"
+    assert failed_team["roleMigration"]["attempt"] == 1
+    assert failed_team["roleMigration"]["targetContractVersion"] == 2
+    assert failed_team["roleMigration"]["targetFingerprint"] == team_service.CHALLENGE_CUP_RESEARCH_TEAM_ROLE_CONTRACT_FINGERPRINT
+    assert "simulated challenge cup migration failure" in failed_team["roleMigration"]["error"]
+    assert team_service.challenge_cup_research_team_agents_need_repair() is True
+
+    monkeypatch.setattr(agent_directory_service, "update_agent_instance", original_update)
+    repaired = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
+    assert repaired["team"]["roleMigration"] == {
+        "targetContractVersion": 2,
+        "targetFingerprint": team_service.CHALLENGE_CUP_RESEARCH_TEAM_ROLE_CONTRACT_FINGERPRINT,
+        "phase": "completed",
+        "attempt": 2,
+        "error": "",
+    }
+    assert team_service.challenge_cup_research_team_agents_need_repair() is False
+
+
+def test_challenge_cup_research_team_reuses_provisional_agent_after_final_update_failure(
+    tmp_path,
+    monkeypatch,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    baseline_agent_ids = {
+        str(agent.get("agentId") or "").strip()
+        for agent in agent_directory_service.list_agents(include_archived=True, detail="summary")
+        if str(agent.get("agentId") or "").strip()
+    }
+    original_update = agent_directory_service.update_agent_instance
+    failed_final_update = False
+
+    def fail_first_final_update(agent_id, *args, **kwargs):
+        nonlocal failed_final_update
+        metadata = kwargs.get("metadata") if isinstance(kwargs.get("metadata"), dict) else {}
+        if (
+            not failed_final_update
+            and metadata.get("challengeCupTeamBindingStatus") == "active"
+            and kwargs.get("permission_preset") == "full_access"
+        ):
+            failed_final_update = True
+            raise RuntimeError("simulated final challenge cup Agent update failure")
+        return original_update(agent_id, *args, **kwargs)
+
+    monkeypatch.setattr(
+        agent_directory_service,
+        "update_agent_instance",
+        fail_first_final_update,
+    )
+    with pytest.raises(RuntimeError, match="simulated final challenge cup Agent update failure"):
+        team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
+
+    failed_agents = [
+        agent
+        for agent in agent_directory_service.list_agents(include_archived=True, detail="summary")
+        if str(agent.get("createdBy") or "").strip()
+        == team_service.CHALLENGE_CUP_RESEARCH_TEAM_AGENT_CREATED_BY
+        and str((agent.get("metadata") or {}).get("challengeCupTeamId") or "").strip()
+        == team_service.CHALLENGE_CUP_RESEARCH_TEAM_ID
+    ]
+    assert len(failed_agents) == 1
+    provisional_agent = failed_agents[0]
+    assert provisional_agent["metadata"]["challengeCupTeamBindingStatus"] == "provisional"
+    assert provisional_agent["metadata"]["challengeCupTeamActiveBinding"] is False
+    assert provisional_agent["directSessionId"]
+    assert {
+        str(agent.get("agentId") or "").strip()
+        for agent in agent_directory_service.list_agents(include_archived=True, detail="summary")
+        if str(agent.get("agentId") or "").strip()
+    } == baseline_agent_ids | {provisional_agent["agentId"]}
+    assert set(session_service.list_session_runtime_ids(tmp_path)) == {
+        provisional_agent["directSessionId"]
+    }
+
+    monkeypatch.setattr(agent_directory_service, "update_agent_instance", original_update)
+    repaired = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
+    managed_agents = [
+        agent
+        for agent in agent_directory_service.list_agents(include_archived=True, detail="summary")
+        if str(agent.get("createdBy") or "").strip()
+        == team_service.CHALLENGE_CUP_RESEARCH_TEAM_AGENT_CREATED_BY
+        and str((agent.get("metadata") or {}).get("challengeCupTeamId") or "").strip()
+        == team_service.CHALLENGE_CUP_RESEARCH_TEAM_ID
+    ]
+    active_binding = repaired["team"]["activeBinding"]["productRoleAgentIds"]
+    direct_session_ids = {
+        str(agent.get("directSessionId") or "").strip()
+        for agent in managed_agents
+        if str(agent.get("directSessionId") or "").strip()
+    }
+
+    assert failed_final_update is True
+    assert len(managed_agents) == 6
+    assert provisional_agent["agentId"] in set(active_binding.values())
+    assert len(set(active_binding.values())) == 6
+    assert {
+        str(agent.get("agentId") or "").strip()
+        for agent in agent_directory_service.list_agents(include_archived=True, detail="summary")
+        if str(agent.get("agentId") or "").strip()
+    } == baseline_agent_ids | {str(agent["agentId"]) for agent in managed_agents}
+    assert len(direct_session_ids) == 6
+    assert set(session_service.list_session_runtime_ids(tmp_path)) == direct_session_ids
+    assert all(
+        agent["metadata"]["challengeCupTeamBindingStatus"] == "active"
+        and agent["metadata"]["challengeCupTeamActiveBinding"] is True
+        for agent in managed_agents
+    )
+    assert repaired["team"]["legacyBindings"] == []
+    assert team_service.challenge_cup_research_team_agents_need_repair() is False
+
+
+def test_challenge_cup_research_team_concurrent_ensure_serializes_full_migration(
+    tmp_path,
+    monkeypatch,
+):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    baseline_agent_ids = {
+        str(agent.get("agentId") or "").strip()
+        for agent in agent_directory_service.list_agents(include_archived=True, detail="summary")
+        if str(agent.get("agentId") or "").strip()
+    }
+    first_role = str(team_service.CHALLENGE_CUP_RESEARCH_TEAM_ROLES[0]["role"])
+    find_barrier = threading.Barrier(2, timeout=0.25)
+    start_barrier = threading.Barrier(3, timeout=2)
+    original_find = team_service._find_challenge_cup_research_team_agent
+
+    def find_with_concurrency_barrier(role):
+        found = original_find(role)
+        normalized_role = str(role.get("role") if isinstance(role, dict) else role or "").strip()
+        if found is None and normalized_role == first_role:
+            try:
+                find_barrier.wait()
+            except threading.BrokenBarrierError:
+                pass
+        return found
+
+    monkeypatch.setattr(
+        team_service,
+        "_find_challenge_cup_research_team_agent",
+        find_with_concurrency_barrier,
+    )
+    results = []
+    errors = []
+
+    def run_ensure():
+        try:
+            start_barrier.wait()
+            results.append(
+                team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
+            )
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=run_ensure) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    start_barrier.wait()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert all(not thread.is_alive() for thread in threads)
+    assert errors == []
+    assert len(results) == 2
+    bindings = [result["team"]["activeBinding"]["productRoleAgentIds"] for result in results]
+    assert bindings[0] == bindings[1]
+    assert len(set(bindings[0].values())) == 6
+
+    managed_agents = [
+        agent
+        for agent in agent_directory_service.list_agents(include_archived=True, detail="summary")
+        if str(agent.get("createdBy") or "").strip()
+        == team_service.CHALLENGE_CUP_RESEARCH_TEAM_AGENT_CREATED_BY
+        and str((agent.get("metadata") or {}).get("challengeCupTeamId") or "").strip()
+        == team_service.CHALLENGE_CUP_RESEARCH_TEAM_ID
+    ]
+    direct_session_ids = {
+        str(agent.get("directSessionId") or "").strip()
+        for agent in managed_agents
+        if str(agent.get("directSessionId") or "").strip()
+    }
+    final_team = team_service.get_team(team_service.CHALLENGE_CUP_RESEARCH_TEAM_ID)
+
+    assert len(managed_agents) == 6
+    assert {
+        str(agent.get("agentId") or "").strip()
+        for agent in agent_directory_service.list_agents(include_archived=True, detail="summary")
+        if str(agent.get("agentId") or "").strip()
+    } == baseline_agent_ids | {str(agent["agentId"]) for agent in managed_agents}
+    assert all(
+        agent["status"] == "active"
+        and agent["metadata"]["challengeCupTeamBindingStatus"] == "active"
+        and agent["metadata"]["challengeCupTeamActiveBinding"] is True
+        for agent in managed_agents
+    )
+    assert len(direct_session_ids) == 6
+    assert set(session_service.list_session_runtime_ids(tmp_path)) == direct_session_ids
+    assert final_team["legacyBindings"] == []
+    assert final_team["roleMigration"]["phase"] == "completed"
+    assert team_service.challenge_cup_research_team_agents_need_repair() is False
+
+
+def test_challenge_cup_research_team_second_ensure_is_byte_stable_and_preserves_canvas_positions(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    first = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
+    team = first["team"]
+    teams_index = developer_sandbox.seeded_sandbox_workspace_path(tmp_path, "teams") / "teams.json"
+    canvas_path = team_service._team_canvas_path(team["teamId"])
+    room_path = chat_room_service._store().state_path
+    canvas = json.loads(canvas_path.read_text(encoding="utf-8"))
+    canvas["nodes"][0]["x"] = 431
+    canvas["nodes"][0]["y"] = 287
+    canvas_path.write_text(json.dumps(canvas, ensure_ascii=False, indent=2), encoding="utf-8")
+    before_bytes = {
+        "team": teams_index.read_bytes(),
+        "canvas": canvas_path.read_bytes(),
+        "room": room_path.read_bytes(),
+    }
+    before_agent_revisions = {
+        member["agentId"]: (
+            agent_directory_service.get_agent(member["agentId"])["configRevision"],
+            agent_directory_service.get_agent(member["agentId"])["updatedAt"],
+        )
+        for member in team["members"]
+    }
+    update_agent_calls = 0
+    update_room_calls = 0
+    original_update_agent = agent_directory_service.update_agent_instance
+    original_update_room = chat_room_service.update_chat_room
+
+    def track_update_agent(*args, **kwargs):
+        nonlocal update_agent_calls
+        update_agent_calls += 1
+        return original_update_agent(*args, **kwargs)
+
+    def track_update_room(*args, **kwargs):
+        nonlocal update_room_calls
+        update_room_calls += 1
+        return original_update_room(*args, **kwargs)
+
+    monkeypatch.setattr(agent_directory_service, "update_agent_instance", track_update_agent)
+    monkeypatch.setattr(chat_room_service, "update_chat_room", track_update_room)
+    second = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
+
+    assert update_agent_calls == 0
+    assert update_room_calls == 0
+    assert teams_index.read_bytes() == before_bytes["team"]
+    assert canvas_path.read_bytes() == before_bytes["canvas"]
+    assert room_path.read_bytes() == before_bytes["room"]
+    assert (second["team"]["canvas"]["nodes"][0]["x"], second["team"]["canvas"]["nodes"][0]["y"]) == (431, 287)
+    assert {
+        member["agentId"]: (
+            agent_directory_service.get_agent(member["agentId"])["configRevision"],
+            agent_directory_service.get_agent(member["agentId"])["updatedAt"],
+        )
+        for member in second["team"]["members"]
+    } == before_agent_revisions
+
+
+def test_challenge_cup_research_team_repair_detects_legacy_binding_tampering(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    legacy = agent_directory_service.create_agent_instance(
+        display_name="旧科研协调 Agent",
+        direct_session_id="session-legacy-coordination",
+        primary_mode="research",
+        role_key="challenge_cup_coordinator",
+        created_by=team_service.CHALLENGE_CUP_RESEARCH_TEAM_AGENT_CREATED_BY,
+        metadata={
+            "challengeCupTeamId": team_service.CHALLENGE_CUP_RESEARCH_TEAM_ID,
+            "challengeCupTeamManagedVersion": 1,
+            "challengeCupTeamRole": "research_coordination",
+        },
+    )
+    result = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
+    assert legacy["agentId"] in {item["agentId"] for item in result["team"]["legacyBindings"]}
+
+    agent_directory_service.update_agent_instance(
+        legacy["agentId"],
+        metadata={
+            "challengeCupTeamAliasResolution": {
+                "sourceRole": "research_coordination",
+                "ownerType": "system_capability",
+                "ownerId": "tampered-owner",
+                "aliasPriority": 0,
+            }
+        },
+    )
+    assert team_service.challenge_cup_research_team_agents_need_repair() is True
+    team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
+    assert team_service.challenge_cup_research_team_agents_need_repair() is False
+
+    teams_index = developer_sandbox.seeded_sandbox_workspace_path(tmp_path, "teams") / "teams.json"
+    teams_payload = json.loads(teams_index.read_text(encoding="utf-8"))
+    stored_team = next(item for item in teams_payload["teams"] if item["teamId"] == "research-team")
+    binding = next(item for item in stored_team["legacyBindings"] if item["agentId"] == legacy["agentId"])
+    binding["ownerType"] = "tampered_owner_type"
+    teams_index.write_text(json.dumps(teams_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    assert team_service.challenge_cup_research_team_agents_need_repair() is True
 
 
 def test_challenge_cup_research_team_agent_repair_detects_missing_team(tmp_path, monkeypatch):
@@ -597,7 +1071,7 @@ def test_challenge_cup_research_team_agent_repair_detects_missing_roles_and_dire
     _use_tmp_project_root(tmp_path, monkeypatch)
     result = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
     team = result["team"]
-    finder = next(member for member in team["members"] if member["role"] == "source_finder")
+    finder = next(member for member in team["members"] if member["role"] == "challenge_cup_search")
     agent = agent_directory_service.get_agent(finder["agentId"])
     state = agent_directory_service.load_state()
     for item in state["agents"]:
@@ -611,7 +1085,7 @@ def test_challenge_cup_research_team_agent_repair_detects_missing_roles_and_dire
     repaired = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
 
     assert team_service.challenge_cup_research_team_agents_need_repair() is False
-    repaired_finder = next(member for member in repaired["team"]["members"] if member["role"] == "source_finder")
+    repaired_finder = next(member for member in repaired["team"]["members"] if member["role"] == "challenge_cup_search")
     repaired_agent = agent_directory_service.get_agent(repaired_finder["agentId"])
     assert session_service.get_session_detail(repaired_agent["directSessionId"])
 
@@ -620,7 +1094,7 @@ def test_challenge_cup_research_team_agent_repair_detects_missing_roles_and_dire
     teams_payload = json.loads(teams_index.read_text(encoding="utf-8"))
     teams_payload["teams"][0]["members"] = [
         member for member in teams_payload["teams"][0]["members"]
-        if member.get("role") != "source_ingestor"
+        if member.get("role") != "challenge_cup_knowledge_manager"
     ]
     teams_index.write_text(json.dumps(teams_payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -630,7 +1104,7 @@ def test_challenge_cup_research_team_agent_repair_detects_missing_roles_and_dire
 def test_challenge_cup_research_team_agents_stay_out_of_ordinary_session_index(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     result = team_service.ensure_challenge_cup_research_team_agents(purge_stale=True)
-    finder = next(member for member in result["team"]["members"] if member["role"] == "source_finder")
+    finder = next(member for member in result["team"]["members"] if member["role"] == "challenge_cup_search")
     agent = agent_directory_service.get_agent(finder["agentId"])
 
     assert agent_directory_service.agent_conversation_index_visibility(

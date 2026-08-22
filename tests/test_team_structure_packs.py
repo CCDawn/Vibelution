@@ -258,6 +258,31 @@ def test_facade_reexports_system_teams_materialize() -> None:
     assert facade._system_members_from_agents is system_teams._system_members_from_agents
 
 
+def test_challenge_cup_team_constants_project_the_v2_role_contract() -> None:
+    expected_roles = tuple(
+        item["productRoleId"]
+        for item in facade.CHALLENGE_CUP_RESEARCH_TEAM_ROLE_CONTRACT["productAgents"]
+    )
+
+    assert expected_roles == tuple(
+        item["role"] for item in facade.CHALLENGE_CUP_RESEARCH_TEAM_ROLES
+    )
+    assert len(expected_roles) == 6
+    assert facade.CHALLENGE_CUP_RESEARCH_TEAM_ROLE_CONTRACT_VERSION == 2
+    assert facade.CHALLENGE_CUP_RESEARCH_TEAM_ROLE_CONTRACT_FINGERPRINT == (
+        facade.CHALLENGE_CUP_RESEARCH_TEAM_ROLE_CONTRACT[
+            "roleContractFingerprint"
+        ]
+    )
+    assert facade.CHALLENGE_CUP_RESEARCH_TEAM_LEGACY_ROLE_OWNERS[
+        "source_relation_mapper"
+    ] == {
+        "ownerType": "product_agent",
+        "ownerId": "challenge_cup_knowledge_manager",
+        "aliasPriority": 0,
+    }
+
+
 def test_system_bootstrap_required_steps_orders_missing_checks(monkeypatch) -> None:
     calls: list[str] = []
 
