@@ -3,7 +3,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from core.research.workflow.checkpoint_store import default_checkpoint_path
 from core.web.services.team_workflow.research_runtime import paths, store
+from core.web.services.team_workflow.research_runtime.binding_config import (
+    WorkflowBindingConfigStore,
+)
+from core.web.services.team_workflow.research_runtime.service import (
+    ResearchWorkflowRuntimeService,
+)
 from scripts import audit_research_workflow_runtime as audit
 from vibelution_storage import (
     PROJECTS_HOME_ENV,
@@ -66,10 +73,38 @@ def test_research_workflow_explicit_environment_overrides_remain_authoritative(m
     monkeypatch.setenv("VIBELUTION_RESEARCH_WORKFLOW_DATA_ROOT", str(data_root))
     monkeypatch.setenv("VIBELUTION_RESEARCH_WORKFLOW_LEDGER_PATH", str(ledger_path))
     monkeypatch.setenv("VIBELUTION_RESEARCH_WORKFLOW_RUN_STORE", str(run_store))
+    checkpoint_path = tmp_path / "custom-checkpoint.sqlite"
+    monkeypatch.setenv("VIBELUTION_RESEARCH_WORKFLOW_CHECKPOINT_PATH", str(checkpoint_path))
 
     assert paths.research_workflow_data_root() == data_root
     assert paths.workflow_ledger_path() == ledger_path
     assert store.default_run_store_dir() == run_store
+    assert WorkflowBindingConfigStore().root == run_store / "binding_config"
+    assert default_checkpoint_path() == checkpoint_path
+    assert ResearchWorkflowRuntimeService()._checkpoint_path == str(checkpoint_path)
+
+
+def test_direct_backend_defaults_use_canonical_project_storage(monkeypatch, tmp_path):
+    project_root = Path(__file__).resolve().parents[1]
+    projects_home = tmp_path / "local-app-data" / "projects"
+    monkeypatch.setenv(PROJECTS_HOME_ENV, str(projects_home))
+    monkeypatch.delenv("VIBELUTION_DATA_HOME", raising=False)
+    monkeypatch.setenv("VIBELUTION_CONFIG_PATH", str(tmp_path / "missing-config.toml"))
+    for name in (
+        "VIBELUTION_RESEARCH_WORKFLOW_DATA_ROOT",
+        "VIBELUTION_RESEARCH_WORKFLOW_RUN_STORE",
+        "VIBELUTION_RESEARCH_WORKFLOW_CHECKPOINT_PATH",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    canonical_data = _write_completed_storage_marker(project_root, projects_home)
+    expected_data = canonical_data / "research_workflows"
+
+    assert default_checkpoint_path() == expected_data / "checkpoints.sqlite"
+    assert WorkflowBindingConfigStore().root == expected_data / "runs" / "binding_config"
+    runtime = ResearchWorkflowRuntimeService()
+    assert Path(runtime._checkpoint_path) == expected_data / "checkpoints.sqlite"
+    assert Path(runtime._store.root) == expected_data / "runs"
 
 
 def test_audit_default_data_root_follows_custom_project_root_after_parse(monkeypatch, tmp_path):

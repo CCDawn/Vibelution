@@ -20,6 +20,7 @@ from core.research.workflow.definition import build_challenge_cup_workflow_defin
 from core.research.workflow.models import ActorKind, AgentBindingLayers
 
 from .atomic_fs import atomic_write_text
+from .store import default_run_store_dir
 
 
 def _utc_now() -> str:
@@ -39,23 +40,7 @@ class WorkflowBindingConfigStore:
     """
 
     def __init__(self, root: Path | None = None):
-        self.root = Path(root) if root else Path(
-            __import__("os").environ.get(
-                "VIBELUTION_RESEARCH_WORKFLOW_RUN_STORE",
-                str(
-                    Path(
-                        __import__("os").environ.get("USERPROFILE")
-                        or __import__("os").environ.get("HOME")
-                        or "."
-                    )
-                    / "Documents"
-                    / "Vibelution"
-                    / "data"
-                    / "research_workflows"
-                    / "runs"
-                ),
-            )
-        ) / "binding_config"
+        self.root = (Path(root) if root else default_run_store_dir()) / "binding_config"
         self.root.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
 
@@ -103,7 +88,6 @@ class WorkflowBindingConfigStore:
         agent_nodes = [n for n in definition.nodes if n.actorKind is ActorKind.AGENT]
         role_keys = {n.primaryRoleKey for n in agent_nodes}
         stage_ids = {s.stageId.value for s in definition.stages}
-        node_ids = {n.nodeId for n in agent_nodes}
 
         for role, agent_id in (payload.get("workflowDefaults") or {}).items():
             if str(role) not in role_keys:

@@ -68,6 +68,7 @@ from .node_execution_support import NodeExecutionError, latest_node_run
 from .node_operational_projection import project_node_operations
 from .node_recovery import reconcile_expired_execution, retry_node_execution
 from .node_scoped_session_projection import project_node_scoped_sessions
+from .paths import research_workflow_data_root
 from .question_launch import (
     QuestionLaunchError,
     activate_experiment_campaign,
@@ -152,7 +153,7 @@ def _agent_display_name_map() -> dict[str, str]:
         from core.web.services.team_service import lookup_agent_display_name_map
 
         return lookup_agent_display_name_map()
-    except Exception:
+    except Exception:  # noqa: BLE001 - display-name lookup must not break runtime startup
         return {}
 
 
@@ -180,14 +181,7 @@ class ResearchWorkflowRuntimeService:
         self._store = run_store or WorkflowRunStore()
         self._checkpoint_path = checkpoint_path or os.environ.get(
             "VIBELUTION_RESEARCH_WORKFLOW_CHECKPOINT_PATH",
-            str(
-                Path(os.environ.get("USERPROFILE") or os.environ.get("HOME") or ".")
-                / "Documents"
-                / "Vibelution"
-                / "data"
-                / "research_workflows"
-                / "checkpoints.sqlite"
-            ),
+            str(research_workflow_data_root() / "checkpoints.sqlite"),
         )
         index_root = Path(self._store.root) / "_index"
         self._index = durable_index or DurableWorkflowIndex(index_root)

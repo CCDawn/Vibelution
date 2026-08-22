@@ -1,7 +1,4 @@
-"""Persistent SQLite checkpointer for research workflow runs.
-
-v1 default path lives under operator Documents data dir (not repo / not localStorage).
-"""
+"""Persistent SQLite checkpointer for research workflow runs."""
 
 from __future__ import annotations
 
@@ -11,16 +8,16 @@ from typing import Any
 
 from langgraph.checkpoint.sqlite import SqliteSaver
 
-# Operator workspace (desktop v1). Overridable for tests.
-DEFAULT_CHECKPOINT_REL = Path("Vibelution") / "data" / "research_workflows" / "checkpoints.sqlite"
+from vibelution_storage import resolve_project_data_home
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 def default_checkpoint_path() -> Path:
     override = os.environ.get("VIBELUTION_RESEARCH_WORKFLOW_CHECKPOINT_PATH", "").strip()
     if override:
         return Path(override)
-    home = Path(os.environ.get("USERPROFILE") or os.environ.get("HOME") or ".")
-    return home / "Documents" / DEFAULT_CHECKPOINT_REL
+    return resolve_project_data_home(PROJECT_ROOT) / "research_workflows" / "checkpoints.sqlite"
 
 
 def ensure_checkpoint_parent(path: Path) -> Path:
