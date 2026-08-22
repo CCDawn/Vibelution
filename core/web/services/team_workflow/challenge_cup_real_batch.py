@@ -30,6 +30,10 @@ from core.research.competition.catalog_execution import (
     CatalogExecutionState,
     QuestionStatus,
 )
+from core.research.competition.question_result_package import (
+    QuestionResultPackage,
+    QuestionResultPackageError,
+)
 from core.research.competition.real_control_batch import (
     DEFAULT_REAL_FAILURE_BUDGET,
     MAX_REAL_START_ATTEMPTS,
@@ -284,13 +288,89 @@ def _question_result_from_approved(
     )
 
 
+def _validated_seed_package(
+    state: CatalogExecutionState,
+    result: QuestionResult,
+) -> QuestionResultPackage:
+    """Restore one already-trusted in-memory package before any target mutation."""
+
+    snapshot = result.package_snapshot
+    if snapshot is None:
+        raise CatalogExecutionError(
+            f"Previous gate package result has no snapshot: {result.question_id}."
+        )
+    try:
+        package = QuestionResultPackage.create(snapshot)
+    except QuestionResultPackageError as exc:
+        raise CatalogExecutionError(
+            f"Previous gate package is not canonical: {result.question_id}: {exc}"
+        ) from exc
+
+    canonical = package.to_dict()
+    expected_scope = state.scope.to_dict()
+    if package.question_id != result.question_id:
+        raise CatalogExecutionError(
+            "Previous gate package question does not match its result locator."
+        )
+    if package.scope.to_dict() != expected_scope:
+        raise CatalogExecutionError(
+            f"Previous gate package scope does not match the target catalog: "
+            f"{result.question_id}."
+        )
+    if result.locator != state.scope.locator_for(result.question_id):
+        raise CatalogExecutionError(
+            f"Previous gate result locator does not match the full target catalog "
+            f"scope: {result.question_id}."
+        )
+    if snapshot != canonical or QuestionResult.from_package(package) != result:
+        raise CatalogExecutionError(
+            f"Previous gate package projection changed canonical content: "
+            f"{result.question_id}."
+        )
+    if (
+        package.result_classification.get("status") != "approved"
+        or package.selection.get("human_gate", {}).get("decision") != "approved"
+        or package.research_plan.get("human_gate", {}).get("decision") != "approved"
+        or result.submission_eligible is not True
+        or result.receipt_complete is not True
+    ):
+        raise CatalogExecutionError(
+            f"Previous gate package is not submission-approved: {result.question_id}."
+        )
+    return package
+
+
+def _same_seed_result(
+    existing: QuestionResult | None,
+    incoming: QuestionResult,
+    incoming_package: QuestionResultPackage | None,
+) -> bool:
+    if existing is None:
+        return False
+    if incoming_package is None:
+        return (
+            not existing.is_package_backed
+            and existing.to_dict() == incoming.to_dict()
+        )
+    existing_snapshot = existing.package_snapshot
+    return (
+        existing_snapshot is not None
+        and existing_snapshot == incoming_package.to_dict()
+        and existing_snapshot.get("canonical_sha256")
+        == incoming_package.canonical_sha256
+    )
+
+
 def _seed_from_previous_gates(team_id: str, state: CatalogExecutionState) -> int:
     """Seed already-approved results from earlier gate batches.
 
     Progressive gates are cumulative (G5 includes G1's questions); an approved
     result from an earlier gate carries forward instead of being re-run.
     """
-    seeded = 0
+    candidates: dict[
+        str,
+        tuple[QuestionResult, QuestionResultPackage | None],
+    ] = {}
     gate_id = state.plan.gate_id
     chain: list[str] = []
     while gate_id in PREVIOUS_GATE:
@@ -304,12 +384,59 @@ def _seed_from_previous_gates(team_id: str, state: CatalogExecutionState) -> int
         prior_state = _state_of(envelope)
         for result in prior_state.succeeded_results():
             try:
-                pending = state.status(result.question_id) is QuestionStatus.PENDING
-            except CatalogExecutionError:
+                target_status = state.status(result.question_id)
+            except CatalogExecutionError as exc:
+                raise CatalogExecutionError(
+                    f"Previous gate result is outside the cumulative target plan: "
+                    f"{result.question_id}."
+                ) from exc
+
+            package = (
+                _validated_seed_package(state, result)
+                if result.is_package_backed
+                else None
+            )
+            if package is None and result.locator != state.scope.locator_for(
+                result.question_id
+            ):
+                raise CatalogExecutionError(
+                    f"Previous gate legacy result does not match the full target "
+                    f"catalog scope: {result.question_id}."
+                )
+
+            if target_status is not QuestionStatus.PENDING:
+                if target_status is QuestionStatus.SUCCEEDED and not _same_seed_result(
+                    state.result_for(result.question_id),
+                    result,
+                    package,
+                ):
+                    raise CatalogExecutionError(
+                        f"Target already succeeded with a different canonical package: "
+                        f"{result.question_id}."
+                    )
                 continue
-            if pending:
-                state.record_success(result.question_id, result)
-                seeded += 1
+
+            existing_candidate = candidates.get(result.question_id)
+            if existing_candidate is not None:
+                if not _same_seed_result(
+                    existing_candidate[0],
+                    result,
+                    package,
+                ):
+                    raise CatalogExecutionError(
+                        f"Previous gates contain different canonical packages for "
+                        f"{result.question_id}."
+                    )
+                continue
+            candidates[result.question_id] = (result, package)
+
+    seeded = 0
+    for result, package in candidates.values():
+        if package is not None:
+            state.record_package(package)
+        else:
+            state.record_success(result.question_id, result)
+        seeded += 1
     return seeded
 
 

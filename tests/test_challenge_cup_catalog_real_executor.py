@@ -10,16 +10,20 @@ fakes; no real run, Qwen call, network or formal submission is ever invoked.
 
 from __future__ import annotations
 
+import json
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 from core.research.competition.catalog_execution import (
+    CatalogExecutionError,
     CatalogExecutionState,
     QuestionStatus,
     dev_plan,
 )
+from core.research.competition.question_result_package import QuestionResultPackage
 from core.research.competition.real_control_batch import (
     RealBatchError,
     circuit_breaker_tripped,
@@ -30,6 +34,7 @@ from core.research.competition.real_control_batch import (
     validate_real_batch_plan,
     validate_real_concurrency,
 )
+from core.research.competition.result_set import QuestionResult
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.services.team_workflow import challenge_cup_real_batch as svc
@@ -39,6 +44,7 @@ from core.web.services.team_workflow.research_runtime.operator_authorization imp
     CONTROL_OPERATOR_ROLES_ENV,
 )
 from tests._support.workflow_ledger_helpers import FIXED_NOW_MS, open_ledger_store
+from tests.test_challenge_question_result_package import _valid_payload
 
 TEAM_ID = "team-real-batch-test"
 REAL_BATCH_BASE = (
@@ -163,6 +169,67 @@ def _poll(harness: _Harness, plan_id: str) -> dict:
         run_status_reader=harness.reader,
         approved_output_reader=harness.approved_reader,
     )
+
+
+def _approved_package(
+    state: CatalogExecutionState,
+    question_id: str,
+    *,
+    package_id: str | None = None,
+) -> QuestionResultPackage:
+    payload = deepcopy(_valid_payload())
+    run_id = f"run-{question_id.lower()}-seed"
+    payload.update(
+        {
+            "package_id": package_id or f"pkg-{question_id.lower()}-seed",
+            "scope": state.scope.to_dict(),
+            "question_id": question_id,
+            "run_id": run_id,
+            "input_snapshot_sha256": "a" * 64,
+        }
+    )
+    for section_name in ("selection", "research_plan"):
+        human_gate = payload[section_name]["human_gate"]
+        human_gate.update(
+            {
+                "decision": "approved",
+                "reviewer": "reviewer-seed",
+                "decided_at": "2026-08-23T10:00:00Z",
+            }
+        )
+    payload["result_classification"]["status"] = "approved"
+    payload.pop("failure", None)
+    for stage, receipt in payload["model_invocation_receipts"].items():
+        receipt["receiptId"] = f"receipt-{question_id.lower()}-{stage}"
+        receipt["nodeRunId"] = f"node-{question_id.lower()}-{stage}"
+        receipt["runId"] = run_id
+        receipt["scope"].update(
+            {
+                "questionId": question_id,
+                "runId": run_id,
+                "catalogId": state.scope.catalog_id,
+                "catalogVersion": state.scope.catalog_version,
+                "catalogSha256": state.scope.catalog_sha256,
+                "scopeHash": state.scope.scope_hash,
+            }
+        )
+    return QuestionResultPackage.create(payload)
+
+
+class _SeedState:
+    def __init__(self, *results: QuestionResult) -> None:
+        self._results = results
+
+    def succeeded_results(self) -> tuple[QuestionResult, ...]:
+        return self._results
+
+
+def _seed_state(
+    monkeypatch: pytest.MonkeyPatch,
+    *results: QuestionResult,
+) -> None:
+    monkeypatch.setattr(svc, "_load_envelope", lambda team_id, plan_id: {"planId": plan_id})
+    monkeypatch.setattr(svc, "_state_of", lambda envelope: _SeedState(*results))
 
 
 # ---------------------------------------------------------------------------
@@ -394,6 +461,98 @@ def test_gate_progression_requires_previous_gate_complete(harness: _Harness) -> 
         _start(harness, "real-5")
     with pytest.raises(svc.ChallengeCupRealBatchError, match="real-5 batch"):
         _start(harness, "real-12")
+
+
+def test_cross_gate_seed_preserves_canonical_package_and_is_idempotent(
+    harness: _Harness,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = new_real_batch_state("real-5")
+    package = _approved_package(target, "SCI-091")
+    result = QuestionResult.from_package(package)
+    _seed_state(monkeypatch, result, result)
+
+    assert svc._seed_from_previous_gates(TEAM_ID, target) == 1
+
+    seeded = target.result_for("SCI-091")
+    assert seeded is not None
+    assert target.status("SCI-091") is QuestionStatus.SUCCEEDED
+    assert target.attempts("SCI-091") == 1
+    assert seeded.submission_eligible is True
+    assert seeded.catalog_id == target.scope.catalog_id
+    assert seeded.catalog_version == target.scope.catalog_version
+    assert seeded.scope_hash == target.scope.scope_hash
+    assert seeded.package_snapshot == package.to_dict()
+    assert seeded.package_snapshot["canonical_sha256"] == package.canonical_sha256
+    assert seeded.package_snapshot["idempotency_key"] == package.idempotency_key
+    assert (
+        seeded.package_snapshot["model_invocation_receipts"]
+        == package.to_dict()["model_invocation_receipts"]
+    )
+
+
+def test_cross_gate_seed_validates_every_package_before_mutating_target(
+    harness: _Harness,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = new_real_batch_state("real-5")
+    valid = QuestionResult.from_package(_approved_package(target, "SCI-091"))
+    corrupt = QuestionResult.from_package(_approved_package(target, "SCI-096"))
+    corrupt_snapshot = corrupt.package_snapshot
+    assert corrupt_snapshot is not None
+    corrupt_snapshot["canonical_sha256"] = "0" * 64
+    corrupt = QuestionResult(
+        locator=corrupt.locator,
+        model_receipt_locator=corrupt.model_receipt_locator,
+        knowledge_locator=corrupt.knowledge_locator,
+        template_version=corrupt.template_version,
+        status=corrupt.status,
+        submission_eligible=corrupt.submission_eligible,
+        _package_snapshot_json=json.dumps(
+            corrupt_snapshot,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+    )
+    _seed_state(monkeypatch, valid, corrupt)
+    before = target.to_checkpoint()
+    target_envelope = svc._envelope_path(TEAM_ID, "real-5")
+    target_envelope.parent.mkdir(parents=True, exist_ok=True)
+    target_envelope.write_text('{"sentinel":true}\n', encoding="utf-8")
+    envelope_before = target_envelope.read_bytes()
+
+    with pytest.raises(ValueError, match="canonical hash"):
+        svc._seed_from_previous_gates(TEAM_ID, target)
+
+    assert target.to_checkpoint() == before
+    assert target.attempts("SCI-091") == 0
+    assert target.result_for("SCI-091") is None
+    assert target.attempts("SCI-096") == 0
+    assert target.result_for("SCI-096") is None
+    assert target_envelope.read_bytes() == envelope_before
+
+
+def test_cross_gate_seed_rejects_conflicting_package_hashes_before_mutation(
+    harness: _Harness,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = new_real_batch_state("real-5")
+    first = QuestionResult.from_package(
+        _approved_package(target, "SCI-091", package_id="pkg-sci-091-seed-a")
+    )
+    second = QuestionResult.from_package(
+        _approved_package(target, "SCI-091", package_id="pkg-sci-091-seed-b")
+    )
+    _seed_state(monkeypatch, first, second)
+    before = target.to_checkpoint()
+
+    with pytest.raises(CatalogExecutionError, match="different canonical packages"):
+        svc._seed_from_previous_gates(TEAM_ID, target)
+
+    assert target.to_checkpoint() == before
+    assert target.attempts("SCI-091") == 0
+    assert target.result_for("SCI-091") is None
 
 
 # ---------------------------------------------------------------------------
